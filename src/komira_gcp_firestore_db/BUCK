@@ -40,7 +40,15 @@ mojo_library(
     test_srcs = [
         "tests/test_firestore_conditional_update_multirow.mojo",
         "tests/test_firestore_database_standalone.mojo",
+        "tests/test_firestore_db_batch_cap_delete.mojo",
+        "tests/test_firestore_db_batch_cap_update.mojo",
+        "tests/test_firestore_db_claim.mojo",
+        "tests/test_firestore_db_encoding.mojo",
+        "tests/test_firestore_db_query.mojo",
+        "tests/test_firestore_db_tx.mojo",
         "tests/test_firestore_index_guard.mojo",
+        "tests/test_firestore_index_guard_shapes.mojo",
+        "tests/test_mock_firestore.mojo",
     ],
     visibility = ["PUBLIC"],
 )

@@ -186,8 +186,8 @@ def rsa_sha256_sign_ffi(
             "komira_awslc_EVP_PKEY_free",
             NoneType,
             _FfiHandle,
-        ](pkey)
-        raise Error("rsa_sha256_sign_ffi: EVP_MD_CTX_new returned NULL (OOM)")
+        ](pkey)  # cov: unreachable an allocation failure
+        raise Error("rsa_sha256_sign_ffi: EVP_MD_CTX_new returned NULL (OOM)")  # cov: unreachable see the line above
 
     # SAFETY: EVP_DigestSignInit configures ctx for RSA-SHA256 signing.
     # pctx (out arg for EVP_PKEY_CTX*) = NULL (we don't need it).
@@ -249,13 +249,13 @@ def rsa_sha256_sign_ffi(
             "komira_awslc_EVP_MD_CTX_free",
             NoneType,
             _FfiHandle,
-        ](ctx)
+        ](ctx)  # cov: unreachable a NULL-buffer EVP_DigestSign only reports the maximum signature size; it fails for no key EVP_DigestSignInit accepted
         external_call[
             "komira_awslc_EVP_PKEY_free",
             NoneType,
             _FfiHandle,
-        ](pkey)
-        raise Error("rsa_sha256_sign_ffi: EVP_DigestSign size-query failed")
+        ](pkey)  # cov: unreachable see the line above
+        raise Error("rsa_sha256_sign_ffi: EVP_DigestSign size-query failed")  # cov: unreachable see the line above
 
     # Allocate signature buffer + emit.
     var sig_buf = List[UInt8](capacity=Int(sig_len))

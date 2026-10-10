@@ -1022,8 +1022,11 @@ the check run `coverage`: the line coverage of the `mojo_library` targets the
 change touches, and the branch coverage of those whose coverage gate reads
 branch records (`COVERAGE_BRANCH_GATE`), as covcheck's summary and
 annotations on the lines of the "Files changed" view. It is **informational**: not a required check, its
-conclusion is `neutral` in the policy's census mode, and it cannot make
-`pr / check` red. Job `measure` (the same farm connection and permissions as
+conclusion is `neutral` in the policy's census mode, except that a touched
+package measured under its floor of `tools/build/coverage/ratchet.tsv` (a
+`Regression`, which fails in every mode) makes it `failure`; it cannot make
+`pr / check` red, so that failure shows on the pull request without
+blocking it. Job `measure` (the same farm connection and permissions as
 `pr / check`) builds the touched libraries' `[coverage][tests]`, and
 `[coverage][branch_info]` of those whose gate reads branch records, with
 `-c komira.coverage=true` on the farm, in one call, and runs `covcheck
