@@ -1,52 +1,74 @@
-# Query semantics: rulings and code status
+# Query semantics: rulings, parity gaps and code status
 
-This file belongs to [query semantics](query_semantics.md), whose conventions, oracle settings and counts apply. It holds the table of items that need a ruling and the list of code that does not yet follow a settled rule. The items themselves are in the main document, [result types](query_semantics_types.md), [further items](query_semantics_more.md) and [scans](query_semantics_scans.md).
+This file belongs to [query semantics](query_semantics.md), whose governing rule, conventions, oracle settings and counts apply. It records how each item that was open or departed before the rule is settled, lists the parity gaps with their issues, and lists the code that does not yet follow a settled rule. The items themselves are in the main document, [result types](query_semantics_types.md), [further items](query_semantics_more.md) and [scans](query_semantics_scans.md).
 
-## Rulings needed
+## Rulings
 
-Every DEPARTS and UNDECIDED item, with the recommendation. A ruling either accepts the recommendation or names another option; the item's mark then changes to MATCHES or DEPARTS and the ruling is recorded beside it.
+The governing rule, same SQL, same result as DuckDB, was ruled by the maintainers on 2026-10-09. It settles every item below: an open question resolves to DuckDB's answer, a departure stays only where Arrow cannot hold DuckDB's type, and something komira does not support yet is a parity gap. Items already marked MATCHES were not changed. The oracle stays pinned at DuckDB v1.5.6, with the division-by-zero setting the main document states for 2.0 and later.
 
-| Item | Topic | Mark | Recommendation |
+| Item | Topic | Mark | Ruling |
 |---|---|---|---|
-| §1.6 | `IS [NOT] DISTINCT FROM` | UNDECIDED | Frontends desugar it to `IS NULL` / `=` combinations now; add plan operators only when a null-safe join key needs one. |
-| §2.8 | MEDIAN and quantiles over NaN | UNDECIDED | Match DuckDB: NaN is a value and takes part (it sorts above +inf); an all-NaN group answers NaN, not NULL. |
-| §3.7 | ASOF `NEAREST`, ties to the earlier row | DEPARTS | Accept: DuckDB has no NEAREST; keep it as a komira extension with hand-derived expectations citing this item. |
-| §3.8 | ASOF tolerance; no strict `<` / `>` ASOF | DEPARTS | Accept: the tolerance is a komira extension (the oracle checks it with a LEFT ASOF join and NULLing); strict forms are refused by name. |
-| §3.14 | Join output name collisions | DEPARTS | Accept: a right column colliding with a left one becomes `<name>_right`; a second collision is refused by name; oracle queries alias every column. |
-| §3.16 | EXISTS outside a filter conjunct | DEPARTS | Accept for now: frontends refuse it by name until the plan has a MARK join; then EXISTS as a value is a non-nullable BOOLEAN. |
-| §3.19 | Two right rows tied on the ASOF key in one group | UNDECIDED | Measure DuckDB; until then oracle cases keep ASOF keys unique within each equality group. |
-| §4.5 | NaN in comparison predicates | UNDECIDED | Match DuckDB: `NaN = NaN` is TRUE, `NaN > x` is TRUE for every non-NaN `x`; one float model for comparisons, sorting and grouping. |
-| §4.9 | A sort leaves its values unchanged | DEPARTS | Accept: a sort never rewrites a value; the oracle sorts on `f + CAST(0.0 AS DOUBLE)` so DuckDB's `-0.0` normalization does not reach the expected output. |
-| §5.1 | `BIN_DIV` on two integers truncates and keeps the integer type | DEPARTS | Accept: the plan has one division operator, and it is DuckDB's `//`; a frontend's true division (`/`) casts an operand to DOUBLE first. |
-| §6.6 | String-to-integer grammar | UNDECIDED | (a): accept all of DuckDB's extensions (`'1.5'` is 2, `'1e2'` is 100, `'1_000'` is 1000, `'0x1F'`, `'0b101'`), each measured by the oracle. |
-| §6.7 | String-to-double out of range | UNDECIDED | Match DuckDB (likely a Conversion Error, to be measured); the code saturates to ±inf today. |
-| §6.8 | Casts between timestamp units | UNDECIDED | Match DuckDB: widening is exact, narrowing follows DuckDB's measured rounding before the Unix epoch, out of range is an error. |
-| §6.9 | Time zones and the session zone | UNDECIDED | Fix the session time zone to UTC; field extraction over a zoned timestamp happens in UTC until a session-zone setting exists. |
-| §6.10 | CAST_TO_VARCHAR rendering | UNDECIDED | Match DuckDB's `CAST(x AS VARCHAR)` per type, written out as a table in this item; pyarrow's float rendering (`1` for 1.0) is not followed. |
-| §6.11 | Zoned with unzoned timestamps | DEPARTS | Accept: refused by name; a frontend casts one side. |
-| §7.5 | CONCAT takes only string arguments | DEPARTS | Accept: a non-string argument is refused by name; never a different value. |
-| §7.7 | No LIKE `ESCAPE`, no ILIKE in the plan | DEPARTS | Accept for now: both are refused by name; add when a frontend needs them. |
-| §7.13 | Readers: empty field vs NULL | UNDECIDED | Match DuckDB's `read_csv` defaults (empty unquoted field NULL, `""` is `''`), measured, and state it in the formats doc. |
-| §7.15 | Invalid UTF-8 in a string column | UNDECIDED | The reader raises by name; string kernels may then assume valid UTF-8. |
-| §7.16 | SUBSTRING with a negative start or length | UNDECIDED | (a) DuckDB's meaning (negative start counts from the end, negative length goes backwards), with the two-argument form encoded without the `length < 0` sentinel. |
-| §8.1 | SUM of a signed integer or BOOLEAN is INT64 and refuses overflow | DEPARTS | Accept: Arrow has no 128-bit integer; a total outside INT64 is an error naming the column, never a wrapped value. |
-| §8.2 | SUM of an unsigned integer is UINT64 | DEPARTS | Accept, with the same overflow error as §8.1. |
-| §8.9 | Result type of integer and mixed arithmetic | UNDECIDED | Adopt the narrowest-common-type table in §8.9 (DuckDB's rule); retire "left operand wins". |
-| §8.11 | Decimal addition and subtraction | DEPARTS | Accept: DECIMAL(min(max(p1 - s1, p2 - s2) + max(s1, s2) + 1, 38), max(s1, s2)) without DuckDB's 18-digit case, for §8.12's reason. |
-| §8.12 | Decimal multiplication | DEPARTS | Accept: DECIMAL(min(p1 + p2, 38), s1 + s2) without DuckDB's 18-digit case; the code drops its `+ 1`. |
-| §8.14 | Result type of CASE and COALESCE over mixed types | UNDECIDED | The common type by §8.9's table; mixes with none are refused by name. |
-| §8.17 | MEDIAN of FLOAT32, DECIMAL, DATE | UNDECIDED | Match DuckDB for FLOAT32 (FLOAT) and DECIMAL (same DECIMAL); refuse DATE by name. |
-| §8.18 | `uint64` with a signed integer | DEPARTS | Accept: refused by name (DuckDB's HUGEINT has no Arrow type). |
-| §9.5 | No `IGNORE NULLS` for LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE | DEPARTS | Accept for now: refused by name. |
-| §9.6 | Window ORDER BY cannot state its NULL placement | DEPARTS | Accept for now: the window key uses §4.1's default; a frontend refuses an explicit `NULLS FIRST` inside `OVER`. |
-| §9.8 | RANGE frames with offsets | UNDECIDED | INT64 offsets only (fractional offsets refused); measure DuckDB's NULL and NaN frames first. |
-| §11.3 | INTERSECT and EXCEPT | UNDECIDED | Frontends refuse them by name until a null-safe join key exists; a SEMI/ANTI join on `=` is not a lowering. |
-| §11.4 | Set-operation inputs must have identical types and names | DEPARTS | Accept: the frontend inserts the casts DuckDB inserts implicitly. |
-| §12.3 | No infinite dates or timestamps | DEPARTS | Accept: Arrow cannot represent them; refused by name. |
-| §13.5 | Avro logical and complex types | UNDECIDED | DuckDB's default: `timestamp-*` and `local-timestamp-*` unzoned, `enum` as STRING; refuse `uuid`, `duration`, `timestamp-nanos`, multi-type unions and nested types by name. Reading `timestamp-*` as zoned would depart from DuckDB. |
-| §13.7 | JSON value of another type than its column | UNDECIDED | Cast a numeric string through §6.6's string cast, as DuckDB does; refuse the other mismatches by name unless the oracle shows DuckDB converts them. |
-| §13.9 | A repeated JSON key the schema reads | UNDECIDED | Match `read_json`'s default once measured: first occurrence wins if `error_duplicate_key` is off, an error if it is on. |
-| §13.10 | Non-nullable declared column over a file holding NULL | DEPARTS | Accept: the reader raises naming the column and row; DuckDB has no declared nullability. |
+| §1.6 | `IS [NOT] DISTINCT FROM` | PARITY GAP | DuckDB's null-safe equality, as a value and as a join key; refused by name until the plan has it ([komira#1218](https://github.com/komira-ai/komira/issues/1218)). |
+| §2.8 | MEDIAN and quantiles over NaN | MATCHES | NaN takes part (it sorts above +inf); an all-NaN group answers NaN. |
+| §3.7 | ASOF `NEAREST` | EXTENSION | No DuckDB SQL reaches it; expectations are hand-derived from the item. |
+| §3.8 | ASOF tolerance; strict `<` / `>` ASOF | PARITY GAP | The strict forms answer as DuckDB's and are refused by name until built ([komira#1219](https://github.com/komira-ai/komira/issues/1219)); the tolerance is an extension. |
+| §3.14 | Join output name collisions | MATCHES | The SQL frontend aliases so a query's names are DuckDB's; `_right` stays inside the plan and the dataframe surfaces. |
+| §3.16 | EXISTS outside a filter conjunct | PARITY GAP | A non-nullable BOOLEAN, as DuckDB's MARK join gives; refused by name until the plan has one ([komira#1220](https://github.com/komira-ai/komira/issues/1220)). |
+| §3.19 | Two right rows tied on the ASOF key in one group | MATCHES | The row DuckDB returns, measured; any tied row if DuckDB's choice depends on input order. |
+| §4.5 | NaN in comparison predicates | MATCHES | `NaN = NaN` is TRUE and `NaN > x` is TRUE for every non-NaN `x`: one float model for comparisons, sorting and grouping. |
+| §4.9 | Zeros and NaNs in a sorted column | MATCHES | A float sort key comes back with `-0.0` as `0.0`, as DuckDB returns it; other values unchanged. |
+| §5.1 | `BIN_DIV` on two integers | MATCHES | At the SQL surface: the plan's operator is DuckDB's `//`, and the frontend lowers `/` to a DOUBLE division. |
+| §6.6 | String-to-integer grammar | MATCHES | DuckDB's grammar with all its extensions, each measured. |
+| §6.7 | String-to-double out of range | MATCHES | DuckDB's answer, measured (expected: an error). |
+| §6.8 | Casts between timestamp units | MATCHES | DuckDB's rounding, measured before the Unix epoch; out of range is an error. |
+| §6.9 | Time zones and the session zone | MATCHES | DuckDB with `TimeZone = 'UTC'`, the oracle's setting. |
+| §6.10 | CAST_TO_VARCHAR rendering | MATCHES | DuckDB's `CAST(x AS VARCHAR)` per type, measured row by row. |
+| §6.11 | Zoned with unzoned timestamps | PARITY GAP | DuckDB's implicit conversion through the session zone; refused by name until built ([komira#1221](https://github.com/komira-ai/komira/issues/1221)). |
+| §7.5 | CONCAT with non-string arguments | PARITY GAP | DuckDB's rendering of each argument; refused by name until built ([komira#1223](https://github.com/komira-ai/komira/issues/1223)). |
+| §7.7 | LIKE `ESCAPE` and ILIKE | PARITY GAP | DuckDB's meaning; refused by name until the plan carries them ([komira#1224](https://github.com/komira-ai/komira/issues/1224)). |
+| §7.13 | Readers: empty field vs NULL | MATCHES | DuckDB's `read_csv` defaults, measured. |
+| §7.15 | Invalid UTF-8 in a string column | MATCHES | The reader raises by name, as DuckDB does, measured per reader. |
+| §7.16 | SUBSTRING with a negative start or length | MATCHES | DuckDB's meaning; the two-argument form gets its own encoding. |
+| §8.1 | SUM of a signed integer or BOOLEAN | REPRESENTATION DEPARTURE | INT64 in place of HUGEINT; a total outside INT64 is an error naming the column. |
+| §8.2 | SUM of an unsigned integer | REPRESENTATION DEPARTURE | UINT64 in place of HUGEINT, with §8.1's overflow error. |
+| §8.9 | Result type of integer and mixed arithmetic | MATCHES | DuckDB's narrowest common type; "left operand wins" is retired. |
+| §8.11 | Decimal addition and subtraction | MATCHES | DuckDB's precision and scale, including its 18-digit case and its overflow error. |
+| §8.12 | Decimal multiplication | MATCHES | DuckDB's precision and scale, including its 18-digit case; the code's `+ 1` goes. |
+| §8.14 | Result type of CASE and COALESCE | MATCHES | DuckDB's combination type; mixes DuckDB refuses are refused by name. |
+| §8.17 | MEDIAN of FLOAT32, DECIMAL, DATE | MATCHES | FLOAT32, the same DECIMAL, TIMESTAMP, as DuckDB. |
+| §8.18 | `uint64` with a signed integer | REPRESENTATION DEPARTURE | Refused by name: DuckDB's HUGEINT has no Arrow type. |
+| §9.5 | `IGNORE NULLS` | PARITY GAP | DuckDB's meaning; refused by name until the plan carries it ([komira#1226](https://github.com/komira-ai/komira/issues/1226)). |
+| §9.6 | Explicit NULL placement in a window's ORDER BY | PARITY GAP | DuckDB's meaning; `NULLS FIRST` in `OVER` refused by name until built ([komira#1227](https://github.com/komira-ai/komira/issues/1227)). |
+| §9.8 | RANGE frames with offsets | MATCHES | DuckDB's frames, NULL and NaN keys measured; non-integer offsets refused by name until built ([komira#1228](https://github.com/komira-ai/komira/issues/1228)). |
+| §11.3 | INTERSECT and EXCEPT | PARITY GAP | DuckDB's set and bag forms, NULLs equal; refused by name until the plan has them ([komira#1229](https://github.com/komira-ai/komira/issues/1229)). |
+| §11.4 | Set-operation inputs: types and names | MATCHES | At the SQL surface: the frontend inserts DuckDB's implicit casts and takes the first query's names. |
+| §12.3 | Infinite dates and timestamps | REPRESENTATION DEPARTURE | Arrow cannot represent them; refused by name. |
+| §13.5 | Avro logical and complex types | MATCHES | DuckDB's default mapping; the types komira cannot read yet are refused by name ([komira#1230](https://github.com/komira-ai/komira/issues/1230)). |
+| §13.7 | JSON value of another type than its column | PARITY GAP | DuckDB's `read_json` conversions, measured; refused by name until built ([komira#1231](https://github.com/komira-ai/komira/issues/1231)). |
+| §13.9 | A repeated JSON key the schema reads | PARITY GAP | `read_json`'s default, measured; komira refuses today ([komira#1232](https://github.com/komira-ai/komira/issues/1232)). |
+| §13.10 | Non-nullable declared column over a file holding NULL | EXTENSION | The reader raises naming the column and row; no DuckDB SQL reaches it. |
+
+## Parity gaps
+
+Each gap is refused by name today and must answer as DuckDB does once built; its issue tracks the work, and the item's mark becomes MATCHES when it lands. Rows for §7.1, §8.15, §9.8 and §13.5 are refused cases inside items whose rule otherwise holds. "Blocks" names the TPC-H, TPC-DS and ClickBench queries known to use the feature, from their published texts; "none known" is the absence of a known use, not a survey of every query.
+
+| Item | Gap | Issue | Blocks |
+|---|---|---|---|
+| §1.6, §3.17 | `IS [NOT] DISTINCT FROM`, and null-safe equi-join and ASOF keys | [komira#1218](https://github.com/komira-ai/komira/issues/1218) | none known |
+| §3.8 | Strict ASOF inequalities `<` and `>` | [komira#1219](https://github.com/komira-ai/komira/issues/1219) | none known |
+| §3.16 | EXISTS and NOT EXISTS as values (MARK join) | [komira#1220](https://github.com/komira-ai/komira/issues/1220) | TPC-DS q10, q35 (EXISTS under OR) |
+| §6.11 | Comparing and combining TIMESTAMP with TIMESTAMPTZ | [komira#1221](https://github.com/komira-ai/komira/issues/1221) | none known |
+| §7.1 | Grapheme-cluster functions: `length_grapheme`, `left_grapheme`, `right_grapheme`, `substring_grapheme` | [komira#1222](https://github.com/komira-ai/komira/issues/1222) | none known |
+| §7.5 | CONCAT and CONCAT_WS over non-string arguments | [komira#1223](https://github.com/komira-ai/komira/issues/1223) | none known |
+| §7.7 | ILIKE and `LIKE ... ESCAPE` | [komira#1224](https://github.com/komira-ai/komira/issues/1224) | none known |
+| §8.15 | EXTRACT and `date_part` of `epoch` and `julian` (DOUBLE) | [komira#1225](https://github.com/komira-ai/komira/issues/1225) | none known |
+| §9.5 | `IGNORE NULLS` for LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE | [komira#1226](https://github.com/komira-ai/komira/issues/1226) | none known |
+| §9.6 | `NULLS FIRST` / `NULLS LAST` inside a window's ORDER BY | [komira#1227](https://github.com/komira-ai/komira/issues/1227) | none known |
+| §9.8 | RANGE frames with fractional and interval offsets | [komira#1228](https://github.com/komira-ai/komira/issues/1228) | none known |
+| §11.3 | INTERSECT and EXCEPT, with and without ALL | [komira#1229](https://github.com/komira-ai/komira/issues/1229) | TPC-DS q8, q14, q38 (INTERSECT); q87 (EXCEPT) |
+| §13.5 | Avro `enum`, `uuid`, `duration`, `timestamp-nanos`, unions, records, arrays, maps | [komira#1230](https://github.com/komira-ai/komira/issues/1230) | none known |
+| §13.7 | JSON values of another type than the column, converted as `read_json` does | [komira#1231](https://github.com/komira-ai/komira/issues/1231) | none known |
+| §13.9 | A repeated JSON key, read as `read_json`'s default | [komira#1232](https://github.com/komira-ai/komira/issues/1232) | none known |
 
 ## Code that does not follow a MATCHES rule today
 
@@ -70,3 +92,13 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 13. **Window function nullability and SUM types (§8.25 to §8.27).** `partition_expr_output_field` (`src/komira_plan_expr/partition_expr.mojo:404-505`) declares windowed SUM and AVG non-nullable (`:471-488`) whatever the input's nullability and the frame, though a frame holding only NULLs, or no rows, gives NULL (§8.26 allows non-nullable only for a non-nullable input over a frame that always contains the current row); types a windowed SUM of DECIMAL or of an unsigned integer as FLOAT64 (`:471-480`), where §8.2 and §8.4 give UINT64 and DECIMAL(38, s); and gives windowed MIN/MAX and FIRST_VALUE/LAST_VALUE the input's nullability (`:463`, `:489-496`), which is sound only for frames that always contain the current row (§8.25, §8.26); over a frame that can be empty the result must be nullable.
 14. **UNION refuses branches that differ only in nullability (§11.7).** The wire's check compares name, type and nullability (`src/komira_plan_wire/plan_wire_codec.mojo:3540-3556`), and `LogicalPlan.union` requires every child to advertise the output schema exactly.
 15. **A scan drops a projected name its schema lacks (§13.2).** `LogicalPlan.scan_from_source` and the positional `scan` factory skip it silently (`src/komira_plan_ir/logical_plan.mojo:925-930`, `:775-780`); only the wire's value gate refuses it.
+16. **MEDIAN excludes NaN (§2.8).** `src/komira_op_agg_state/columnar_acc_agg.mojo:79-82` drops NaN rows and answers NULL for an all-NaN group; the rule keeps NaN and answers NaN.
+17. **IEEE comparisons over NaN (§4.5).** The comparison kernels answer FALSE for every ordered comparison with a NaN and TRUE for `NaN <> x` (`src/komira_column_kernels/comparison.mojo:316-325`); the rule is DuckDB's, where `NaN = NaN` is TRUE.
+18. **The strict string-to-integer grammar (§6.6).** `src/komira_kernels/cast_to_varchar_kernels.mojo:40-50` rejects DuckDB's fractional, exponent, underscore, hexadecimal and binary forms.
+19. **String-to-double saturates (§6.7).** `src/komira_kernels/cast_to_varchar_kernels.mojo:48` gives ±inf for an out-of-range value, unless the oracle shows DuckDB does the same.
+20. **SUBSTRING with a negative start or length (§7.16).** The IR defines the standard-SQL meaning (`src/komira_plan_expr/expr.mojo:1821-1838`), so `substring('hello', -1, 3)` is `'h'` where the rule gives `'o'`, and a negative `length` is the two-argument sentinel.
+21. **"Left operand wins" in arithmetic result types (§8.9).** `src/komira_plan_expr/expr_walk.mojo:968-975` and `src/komira_plan_expr/typed_schema.mojo:1296-1325`.
+22. **Decimal addition, subtraction and multiplication types (§8.11, §8.12).** `src/komira_scalar_arithmetic/decimal_arith.mojo:150-183` has no 18-digit case, and multiplication adds 1 to the precision.
+23. **CASE and COALESCE take the first branch's type (§8.14).** `src/komira_plan_expr/expr_walk.mojo:1146-1159`.
+24. **MEDIAN is typed FLOAT64 for every input (§8.17).** `src/komira_plan_expr/typed_schema.mojo:1173-1180`, with a Float64 accumulator (`src/komira_op_agg_state/columnar_acc_agg.mojo:60-80`).
+25. **Avro timestamps with the adjust-to-UTC flag read unzoned (§13.5).** `src/komira_avro/avro_schema.mojo:1009-1020`; DuckDB reads them zoned, once the oracle confirms it.

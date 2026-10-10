@@ -1,10 +1,10 @@
 # Query semantics: further items
 
-These items belong to [query semantics](query_semantics.md) and keep its numbering: §7.16 and §7.17 extend section 7 (strings) and §11.7 extends section 11 (set operations). The conventions, the oracle settings, and the counts are in the main document; "Rulings needed" and "Code that does not follow" are in [rulings and code status](query_semantics_rulings.md). They live here only to keep each file under 1000 lines.
+These items belong to [query semantics](query_semantics.md) and keep its numbering: §7.16 and §7.17 extend section 7 (strings) and §11.7 extends section 11 (set operations). The conventions, the oracle settings, and the counts are in the main document; the rulings, the parity gaps and "Code that does not follow" are in [rulings, parity gaps and code status](query_semantics_rulings.md). They live here only to keep each file under 1000 lines.
 
 ### 7.16 SUBSTRING
 
-- **Rule (proposed).** `substring(s, start, length)` counts Unicode code points, and `start = 1` is the first character. A NULL `s` gives NULL; `start` and `length` are constants in the plan (`SubstringData`), so they are never NULL. For the remaining cases the proposal is DuckDB's:
+- **Rule.** DuckDB's. `substring(s, start, length)` counts Unicode code points, and `start = 1` is the first character. A NULL `s` gives NULL; `start` and `length` are constants in the plan (`SubstringData`), so they are never NULL. For the remaining cases:
   - a positive `start` past the end gives `''`;
   - a negative `start` counts from the end: `substring('hello', -2, 2)` is `'lo'`;
   - `start = 0` begins one position before the first character, so `substring('hello', 0, 2)` is `'h'`, and `start = 0` with a negative `length` is `''`;
@@ -13,10 +13,8 @@ These items belong to [query semantics](query_semantics.md) and keep its numberi
 
   The two-argument form `substring(s, start)` runs to the end of the string. A `start` or `length` below -2^32 or above 2^32 - 1 is an error, as DuckDB's OutOfRange (its bounds are asymmetric).
 - **DuckDB.** `SubstringStartEnd` (`src/function/scalar/string/substring.cpp:51-82` at v1.5.6) implements the cases above, and `AssertInSupportedRange` raises OutOfRange beyond the bounds set at `:15-16` (±`uint32` maximum). `substring` uses the code-point path (`SubstringUnicode`, `:97`); grapheme clusters are the separate `substring_grapheme`.
-- **Current behaviour.** The IR defines the standard-SQL meaning instead (`src/komira_plan_expr/expr.mojo:1821-1838`). A `start <= 0` clamps to the first character but still consumes `length` from `start`, so `substring('hello', -1, 3)` is `'h'`, where DuckDB answers `'o'`. A negative `length` is the sentinel for the two-argument form, so it cannot mean "backwards". No SUBSTRING kernel is in this repository.
-- **Options.** (a) DuckDB's meaning, as proposed. The two-argument form then needs its own encoding (a flag, or a missing length on the wire) instead of the `length < 0` sentinel. (b) Keep the standard-SQL meaning and record a departure for negative `start` and negative `length`.
-- **Recommendation.** (a): a SQL frontend that answers like DuckDB needs it, and the sentinel is the only obstacle. Until it is ruled, oracle cases use `start >= 1` and `length >= 0`, where the two meanings agree.
-- **Mark.** UNDECIDED.
+- **Current behaviour.** The IR defines the standard-SQL meaning instead (`src/komira_plan_expr/expr.mojo:1821-1838`). A `start <= 0` clamps to the first character but still consumes `length` from `start`, so `substring('hello', -1, 3)` is `'h'`, where DuckDB answers `'o'`. A negative `length` is the sentinel for the two-argument form, so it cannot mean "backwards"; the two-argument form needs its own encoding (a flag, or a missing length on the wire) in its place. No SUBSTRING kernel is in this repository ("Code that does not follow", item 20). Until the IR follows the rule, oracle cases use `start >= 1` and `length >= 0`, where the two meanings agree.
+- **Mark.** MATCHES.
 
 ### 7.17 JSON and columnar formats: NULL and the empty string
 
