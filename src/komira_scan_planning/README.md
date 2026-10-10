@@ -12,7 +12,9 @@ nothing; import from its modules:
   (`==`, `!=`, `<`, `<=`, `>`, `>=`) becomes a constraint, and so does an `OR`
   chain of equalities on one partition column (as an `IN` list). A term on a
   partition column that cannot be listed this way (an `OR` across columns, a
-  column compared with a column) becomes an opaque constraint that keeps every
+  column compared with a column, a literal other than a string, an integer
+  that fits Int64 or a bool, such as NULL, a float, a DATE32 or TIMESTAMP
+  value, binary or decimal) becomes an opaque constraint that keeps every
   file and also stays in the residual. Every other term goes to the residual
   unchanged; the residual is `None` when nothing is left.
   `should_use_pruned_discovery` is true when the split found at least one
