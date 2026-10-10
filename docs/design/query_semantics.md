@@ -4,14 +4,13 @@ Status: **ruled.** The governing rule below was ruled by the maintainers on 2026
 
 ## The governing rule: same SQL, same result as DuckDB
 
-The benchmarks run the same SQL on DuckDB and on komira, so komira's answer to a query is DuckDB's answer: the same rows, values, column types and column names. komira may differ in exactly two ways, and neither is a different answer:
+The benchmarks run the same SQL on DuckDB and on komira, so komira's answer to a query is DuckDB's answer: the same rows, values, column types and column names. komira may differ in exactly three ways, and none is a different answer:
 
 - **REPRESENTATION DEPARTURE.** Arrow has no type for DuckDB's result: no 128-bit integer (DuckDB's HUGEINT), no infinite DATE or TIMESTAMP, nothing to hold `uint64` mixed with a signed integer. komira uses the nearest Arrow type and fails by name where that type cannot hold DuckDB's value; an INT64 total that overflows is an error naming the column, never a wrapped number. This is the only reason a rule may depart from DuckDB; preferring another answer is not one.
 - **PARITY GAP.** Something komira does not support yet (an operator, a clause, a function, a conversion) is refused by name until it is built, and once built it answers as DuckDB does. A gap is tracked as an issue, not recorded as a semantic choice.
+- **EXTENSION.** A plan feature with no DuckDB SQL equivalent, so no query DuckDB accepts can reach it and there is no DuckDB answer to differ from. A SQL frontend gives it no spelling. There are two: §3.7's ASOF NEAREST and §13.10's declared non-nullable scan columns (a SQL frontend declares every scanned column nullable); §3.8's ASOF tolerance is one more, inside a PARITY GAP item. An extension's expectations are hand-derived from its item, and it is counted apart. A feature DuckDB's SQL can express is never an extension: komira either answers as DuckDB does or refuses it as a parity gap.
 
-Everything else MATCHES: what komira answers is what DuckDB v1.5.6 answers, measured with the pinned oracle where an item says to measure. Where a plan operator differs from the SQL spelling of the same name (§5.1's division, §3.14's join output names, §11.4's implicit casts), the SQL frontend lowers or aliases so that the SQL result is DuckDB's, and the item says how.
-
-Two plan features have no DuckDB SQL at all: §3.7's ASOF NEAREST and §13.10's declared non-nullable scan columns (and §3.8's ASOF tolerance, inside a PARITY GAP item). No query DuckDB accepts reaches them, because a SQL frontend gives them no spelling and declares every scanned column nullable. They are marked **EXTENSION**, their expectations are hand-derived from the item, and they are counted apart.
+Everything else MATCHES: what komira answers is what DuckDB v1.5.6 answers, measured with the pinned oracle where an item says to measure. Where a plan operator or type differs from the SQL spelling (§5.1's division, §3.14's join output names, §11.4's implicit casts, §8.19's literal types), the SQL frontend lowers, aliases or types so that the SQL result is DuckDB's, and the item says how. In particular a SQL frontend types every literal as DuckDB does (§8.19): `2.5` is DECIMAL(2,1), not DOUBLE.
 
 ## What is it for, and what is out of scope?
 
@@ -35,7 +34,7 @@ Each item has four parts:
   - **MATCHES**: the rule is DuckDB's;
   - **REPRESENTATION DEPARTURE**: Arrow cannot hold DuckDB's type; the rule names the error komira raises in place of a different value;
   - **PARITY GAP**: komira refuses it by name today; once built, the rule is DuckDB's. The tracking issue is linked;
-  - **EXTENSION**: a plan feature no DuckDB SQL reaches (the governing rule above).
+  - **EXTENSION**: a plan feature with no DuckDB SQL equivalent (the governing rule above).
 
 Scope is the plan: the logical-plan IR (`src/komira_plan_ir`, `src/komira_plan_expr`) and its wire form (`src/komira_plan_wire`). A frontend (SQL, a dataframe API) maps its own surface onto these rules; where a frontend's spelling differs from the plan operator of the same name (SQL `/` against the plan's `BIN_DIV`), the item says so. Out of scope: collations other than binary, intervals, nested types (struct, list, map), JSON functions, the temporal field extracts beyond time zones and §8.15, and UDF null modes. Each of those needs its own section before a hand expectation may depend on it.
 
@@ -215,9 +214,9 @@ The rulings that settled each item once open or departing, the table of parity g
 
 ### 2.14 MEDIAN at an even count
 
-- **Rule.** MEDIAN is `quantile_cont(x, 0.5)` over the non-NULL values: with an odd count it is the middle value; with an even count it is the mean of the two middle values, even for an integer input, whose MEDIAN is FLOAT64 (§8.16), so `MEDIAN(1, 2)` is 1.5 and `MEDIAN(1, 2, 3, 4)` is 2.5. NaN takes part per §2.8. A float answer is compared with §2.10's tolerance, since the interpolation's last bit can differ. The two formulas also disagree outright at the extremes: DuckDB's generic interpolation is `lo + d * (hi - lo)` and komira's is `lo * (1 - d) + hi * d`, so a middle pair (+inf, +inf) gives NaN against inf, and (-DBL_MAX, DBL_MAX) gives inf against 0; oracle cases avoid an infinite or near-overflow middle pair until the oracle has measured DuckDB there.
+- **Rule.** MEDIAN is `quantile_cont(x, 0.5)` over the non-NULL values: with an odd count it is the middle value; with an even count it is the mean of the two middle values, even for an integer input, whose MEDIAN is FLOAT64 (§8.16), so `MEDIAN(1, 2)` is 1.5 and `MEDIAN(1, 2, 3, 4)` is 2.5. NaN takes part per §2.8. Between the two values `lo` and `hi` around the index, at fraction `d`, the answer is DuckDB's interpolation `lo + d * (hi - lo)`, computed in that order, so the extremes are DuckDB's too: a middle pair (+inf, +inf) gives NaN (`inf - inf`), and (-DBL_MAX, DBL_MAX) gives +inf (`hi - lo` overflows). A float answer is compared with §2.10's tolerance.
 - **DuckDB.** "For even value counts, quantitative values are averaged and ordinal values return the lower value"; `quantile_cont` interpolates "between the adjacent values if the index is not an integer" (DuckDB documentation, "aggregate functions").
-- **Current behaviour.** The IR defines MEDIAN as DuckDB's `quantile_cont(x, 0.5)` (`src/komira_plan_expr/agg_expr.mojo:38-40`); the accumulator interpolates `lower * (1 - frac) + upper * frac` at index `q * (n - 1)` (`src/komira_op_agg_state/columnar_acc_agg.mojo:63-71`).
+- **Current behaviour.** The IR defines MEDIAN as DuckDB's `quantile_cont(x, 0.5)` (`src/komira_plan_expr/agg_expr.mojo:38-40`); the accumulator interpolates `lower * (1 - frac) + upper * frac` at index `q * (n - 1)` (`src/komira_op_agg_state/columnar_acc_agg.mojo:63-71`, `:255`), not DuckDB's formula, so the extremes above answer inf and 0 ("Code that does not follow", item 26).
 - **Mark.** MATCHES.
 
 ## 3. NULLs in joins
@@ -521,9 +520,9 @@ The rulings that settled each item once open or departing, the table of parity g
 
 ### 6.3 Float to integer
 
-- **Rule.** A FLOAT or DOUBLE casts to an integer in two steps. First the **unrounded** value must lie in `DuckDB documentation, "MIN, MAX + 1)` of the target type, otherwise the cast is an error; NaN and ±inf are errors. Then it rounds **half to even** (2.5 to 2, 3.5 to 4, -2.5 to -2). So `CAST(-2147483648.4 AS INTEGER)` is an error although it would round to INT32_MIN, and `CAST(-0.4 AS UTINYINT)` is an error although it would round to 0.
-- **DuckDB.** "Casting from FLOAT and DOUBLE to integers of any size: round to the nearest integer, with ties (halfs) rounded to the nearest even number" ([numeric types"). `TryCastWithOverflowCheckFloat` checks `value >= min && value < max` on the unrounded value and then calls `nearbyint` (`src/include/duckdb/common/operator/numeric_cast.hpp:75-85` at v1.5.6). A bare literal such as `2.5` is a DECIMAL in DuckDB and follows §6.4, so oracle SQL casts it to DOUBLE first (§8.19). **pyarrow.** A safe cast refuses a non-integral float; it is not the oracle.
-- **Oracle cases exclude one band.** A value in `DuckDB documentation, "MAX + 0.5, MAX + 1)` passes the check and rounds to `MAX + 1`, which DuckDB's `static_cast` leaves undefined (its answer differs by platform). Cases do not use that band. The lower edge is defined: values below MIN are errors in both engines.
+- **Rule.** A FLOAT or DOUBLE casts to an integer in two steps. First the **unrounded** value must lie in `[MIN, MAX + 1)` of the target type, otherwise the cast is an error; NaN and ±inf are errors. Then it rounds **half to even** (2.5 to 2, 3.5 to 4, -2.5 to -2). So `CAST(-2147483648.4 AS INTEGER)` is an error although it would round to INT32_MIN, and `CAST(-0.4 AS UTINYINT)` is an error although it would round to 0.
+- **DuckDB.** "Casting from FLOAT and DOUBLE to integers of any size: round to the nearest integer, with ties (halfs) rounded to the nearest even number" (DuckDB documentation, "numeric types"). `TryCastWithOverflowCheckFloat` checks `value >= min && value < max` on the unrounded value and then calls `nearbyint` (`src/include/duckdb/common/operator/numeric_cast.hpp:75-85` at v1.5.6). A bare literal such as `2.5` is a DECIMAL in DuckDB and follows §6.4, so oracle SQL casts it to DOUBLE first (§8.19). **pyarrow.** A safe cast refuses a non-integral float; it is not the oracle.
+- **Oracle cases exclude one band.** A value in `[MAX + 0.5, MAX + 1)` passes the check and rounds to `MAX + 1`, which DuckDB's `static_cast` leaves undefined (its answer differs by platform). Cases do not use that band. The lower edge is defined: values below MIN are errors in both engines.
 - **Current behaviour.** `src/komira_column_kernels/cast_null.mojo:217-290` checks the unrounded value against the same window before rounding, as DuckDB does, for signed targets (its window for an unsigned target is empty; see "Code that does not follow"), and clamps the undefined band to MAX (`:257-270`). One other path truncates ("Code that does not follow", item 3).
 - **Mark.** MATCHES.
 
@@ -564,7 +563,7 @@ The rulings that settled each item once open or departing, the table of parity g
 ### 6.8 Timestamp units
 
 - **Rule.** The plan carries Arrow's four timestamp units (seconds, milliseconds, microseconds, nanoseconds), and DATE32 as days. Casting to a finer unit is exact or an error if out of range. Casting to a coarser unit rounds as DuckDB does, measured by the oracle on an instant before the Unix epoch with a sub-unit part (truncation toward zero, or toward negative infinity: the measurement decides).
-- **DuckDB.** `TIMESTAMP` is microseconds; `TIMESTAMP_S`, `TIMESTAMP_MS` and `TIMESTAMP_NS` are the other units ([timestamp types"). The direction of rounding before the Unix epoch is not documented.
+- **DuckDB.** `TIMESTAMP` is microseconds; `TIMESTAMP_S`, `TIMESTAMP_MS` and `TIMESTAMP_NS` are the other units (DuckDB documentation, "timestamp types"). The direction of rounding before the Unix epoch is not documented.
 - **Current behaviour.** The field extracts accept all four units (`src/komira_kernels/temporal_extract.mojo:6-8`, `:1152`). No unit-changing timestamp cast kernel is in this repository.
 - **Mark.** MATCHES.
 
@@ -875,14 +874,14 @@ Excel semantics are not part of the plan; they belong to the Excel surface, whic
 
 ### 12.4 Out-of-range dates and timestamps
 
-- **Rule.** Arithmetic or a cast whose result lies outside the target type's range (DATE32 days, or the timestamp unit's INT64 ticks) is an error, never a wrapped value.
-- **DuckDB.** Raises an out-of-range error (the oracle measures the exact boundary, which for DuckDB's DATE is narrower than Arrow's `date32`).
-- **Current behaviour.** No DATE arithmetic kernel here; the oracle cases stay inside DuckDB's range.
+- **Rule.** The range of a DATE or TIMESTAMP result is DuckDB's range for that type, not Arrow's. Arithmetic, a function or a cast whose result lies outside DuckDB's range is an error, raised as DuckDB raises it (the oracle measures the error class), never a value and never a wrapped value. DuckDB's DATE range is narrower than Arrow's `date32`, so a day `date32` can hold but DuckDB's DATE cannot is an error too; the same holds for each timestamp unit against DuckDB's TIMESTAMP_S, TIMESTAMP_MS, TIMESTAMP and TIMESTAMP_NS. The oracle measures both boundaries of each type, and cases test a value just inside and just outside each.
+- **DuckDB.** Raises an out-of-range error. Its DATE is a 32-bit day count whose extreme values are reserved for `infinity` and `-infinity` (§12.3), which is why its range is narrower than `date32`'s (inferred from DuckDB's source; the oracle measures the boundary).
+- **Current behaviour.** No DATE arithmetic kernel and no unit-changing timestamp cast here (§12.1, §6.8). The DATE `date_trunc` kernel converts its result with `Int32(trunc_days)` and no range check (`src/komira_kernels/temporal_extract.mojo:986`), so a truncation below the first representable day wraps where the rule is DuckDB's error ("Code that does not follow", item 27). Whether each reader checks DATE days and timestamp ticks against DuckDB's range is not yet recorded.
 - **Mark.** MATCHES.
 
 ## Counts
 
-MATCHES 133, REPRESENTATION DEPARTURE 4, PARITY GAP 11, EXTENSION 2: 150 marks, across this file, [the result-type table](query_semantics_types.md), [further items](query_semantics_more.md) and [scans](query_semantics_scans.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 39 rows of "Rulings" ([rulings, parity gaps and code status](query_semantics_rulings.md)) are the items settled under the governing rule: 22 now MATCHES, 4 REPRESENTATION DEPARTURE, 11 PARITY GAP and 2 EXTENSION. The parity-gap table there has 15 rows: the 11 PARITY GAP items and 4 refused cases inside items that otherwise MATCH (§7.1, §8.15, §9.8, §13.5).
+MATCHES 133, REPRESENTATION DEPARTURE 4, PARITY GAP 11, EXTENSION 2: 150 marks, across this file, [the result-type table](query_semantics_types.md), [further items](query_semantics_more.md) and [scans](query_semantics_scans.md). Each numbered item counts once: every subsection that carries a **Mark** line, plus each row of the §8 table that has no subsection of its own (§8.10 repeats §5.1 and is not counted). The 42 rows of "Rulings" ([rulings, parity gaps and code status](query_semantics_rulings.md)) are the items settled under the governing rule: 25 MATCHES, 4 REPRESENTATION DEPARTURE, 11 PARITY GAP and 2 EXTENSION. The parity-gap table there has 15 rows: the 11 PARITY GAP items and 4 refused cases inside items that otherwise MATCH (§7.1, §8.15, §9.8, §13.5).
 
 ## What are its limits and open questions?
 

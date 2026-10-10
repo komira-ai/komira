@@ -4,12 +4,13 @@ This file belongs to [query semantics](query_semantics.md), whose governing rule
 
 ## Rulings
 
-The governing rule, same SQL, same result as DuckDB, was ruled by the maintainers on 2026-10-09. It settles every item below: an open question resolves to DuckDB's answer, a departure stays only where Arrow cannot hold DuckDB's type, and something komira does not support yet is a parity gap. Items already marked MATCHES were not changed. The oracle stays pinned at DuckDB v1.5.6, with the division-by-zero setting the main document states for 2.0 and later.
+The governing rule, same SQL, same result as DuckDB, was ruled by the maintainers on 2026-10-09. It settles every item below: an open question resolves to DuckDB's answer, a departure stays only where Arrow cannot hold DuckDB's type, something komira does not support yet is a parity gap, and a plan feature with no DuckDB SQL equivalent is an extension. Items already marked MATCHES kept their mark; three of them (§2.14, §8.19, §12.4) had their rule brought to DuckDB's answer and are listed below. The oracle stays pinned at DuckDB v1.5.6, with the division-by-zero setting the main document states for 2.0 and later.
 
 | Item | Topic | Mark | Ruling |
 |---|---|---|---|
 | §1.6 | `IS [NOT] DISTINCT FROM` | PARITY GAP | DuckDB's null-safe equality, as a value and as a join key; refused by name until the plan has it ([komira#1218](https://github.com/komira-ai/komira/issues/1218)). |
 | §2.8 | MEDIAN and quantiles over NaN | MATCHES | NaN takes part (it sorts above +inf); an all-NaN group answers NaN. |
+| §2.14 | MEDIAN interpolation | MATCHES | DuckDB's formula `lo + d * (hi - lo)`, including its answers at infinite and near-overflow pairs. |
 | §3.7 | ASOF `NEAREST` | EXTENSION | No DuckDB SQL reaches it; expectations are hand-derived from the item. |
 | §3.8 | ASOF tolerance; strict `<` / `>` ASOF | PARITY GAP | The strict forms answer as DuckDB's and are refused by name until built ([komira#1219](https://github.com/komira-ai/komira/issues/1219)); the tolerance is an extension. |
 | §3.14 | Join output name collisions | MATCHES | The SQL frontend aliases so a query's names are DuckDB's; `_right` stays inside the plan and the dataframe surfaces. |
@@ -37,12 +38,14 @@ The governing rule, same SQL, same result as DuckDB, was ruled by the maintainer
 | §8.14 | Result type of CASE and COALESCE | MATCHES | DuckDB's combination type; mixes DuckDB refuses are refused by name. |
 | §8.17 | MEDIAN of FLOAT32, DECIMAL, DATE | MATCHES | FLOAT32, the same DECIMAL, TIMESTAMP, as DuckDB. |
 | §8.18 | `uint64` with a signed integer | REPRESENTATION DEPARTURE | Refused by name: DuckDB's HUGEINT has no Arrow type. |
+| §8.19 | Type of a SQL literal | MATCHES | DuckDB's type for the literal's spelling: `2.5` is DECIMAL(2,1). |
 | §9.5 | `IGNORE NULLS` | PARITY GAP | DuckDB's meaning; refused by name until the plan carries it ([komira#1226](https://github.com/komira-ai/komira/issues/1226)). |
 | §9.6 | Explicit NULL placement in a window's ORDER BY | PARITY GAP | DuckDB's meaning; `NULLS FIRST` in `OVER` refused by name until built ([komira#1227](https://github.com/komira-ai/komira/issues/1227)). |
 | §9.8 | RANGE frames with offsets | MATCHES | DuckDB's frames, NULL and NaN keys measured; non-integer offsets refused by name until built ([komira#1228](https://github.com/komira-ai/komira/issues/1228)). |
 | §11.3 | INTERSECT and EXCEPT | PARITY GAP | DuckDB's set and bag forms, NULLs equal; refused by name until the plan has them ([komira#1229](https://github.com/komira-ai/komira/issues/1229)). |
 | §11.4 | Set-operation inputs: types and names | MATCHES | At the SQL surface: the frontend inserts DuckDB's implicit casts and takes the first query's names. |
 | §12.3 | Infinite dates and timestamps | REPRESENTATION DEPARTURE | Arrow cannot represent them; refused by name. |
+| §12.4 | Out-of-range dates and timestamps | MATCHES | DuckDB's range for each type and DuckDB's error outside it, not Arrow's wider range. |
 | §13.5 | Avro logical and complex types | MATCHES | DuckDB's default mapping; the types komira cannot read yet are refused by name ([komira#1230](https://github.com/komira-ai/komira/issues/1230)). |
 | §13.7 | JSON value of another type than its column | PARITY GAP | DuckDB's `read_json` conversions, measured; refused by name until built ([komira#1231](https://github.com/komira-ai/komira/issues/1231)). |
 | §13.9 | A repeated JSON key the schema reads | PARITY GAP | `read_json`'s default, measured; komira refuses today ([komira#1232](https://github.com/komira-ai/komira/issues/1232)). |
@@ -102,3 +105,7 @@ These are places where the rule is settled (it matches DuckDB) and some code pat
 23. **CASE and COALESCE take the first branch's type (§8.14).** `src/komira_plan_expr/expr_walk.mojo:1146-1159`.
 24. **MEDIAN is typed FLOAT64 for every input (§8.17).** `src/komira_plan_expr/typed_schema.mojo:1173-1180`, with a Float64 accumulator (`src/komira_op_agg_state/columnar_acc_agg.mojo:60-80`).
 25. **Avro timestamps with the adjust-to-UTC flag read unzoned (§13.5).** `src/komira_avro/avro_schema.mojo:1009-1020`; DuckDB reads them zoned, once the oracle confirms it.
+26. **MEDIAN interpolates with another formula (§2.14).** `src/komira_op_agg_state/columnar_acc_agg.mojo:255` returns `lower * (1 - frac) + upper * frac`; the rule is DuckDB's `lo + d * (hi - lo)`. They differ at the extremes: a middle pair (+inf, +inf) answers inf where the rule gives NaN, and (-DBL_MAX, DBL_MAX) answers 0 where the rule gives +inf.
+27. **A DATE result outside DuckDB's range is not an error (§12.4).** The DATE `date_trunc` kernel converts with `Int32(trunc_days)` and no range check (`src/komira_kernels/temporal_extract.mojo:986`), so a truncation below the first `date32` day wraps; nothing checks a result against DuckDB's narrower DATE range. The rule is DuckDB's range and DuckDB's error.
+28. **The SQL parser reads a decimal literal as a Float64 (§8.19).** `src/komira_sql/sql_parser.mojo:2322-2325` builds `SqlExpr.float_lit` from the token's `float_val`, so `2.5` loses its digits before binding; the rule types it as DuckDB does, DECIMAL(2,1).
+29. **Avro `uuid`, `timestamp-nanos` and reader-schema `enum` read as values instead of being refused (§13.5).** `uuid` reads as STRING or BINARY (`src/komira_avro/avro_schema.mojo:1024-1033`, `src/komira_avro/action_table.mojo:400-408`); `timestamp-nanos` falls through to INT64 (`src/komira_avro/avro_schema.mojo:1034`); an `enum` read through a reader schema returns a STRING column (`src/komira_avro/action_table.mojo:2320-2340`). DuckDB reads them as UUID, TIMESTAMP_NS and ENUM; until komira does, the rule refuses each by name ([komira#1230](https://github.com/komira-ai/komira/issues/1230)).

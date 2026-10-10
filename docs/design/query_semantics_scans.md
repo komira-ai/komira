@@ -56,8 +56,11 @@ This is section 13 of [query semantics](query_semantics.md): what a SCAN node re
 - **DuckDB.** The duckdb-avro extension maps `timestamp-millis` / `timestamp-micros` to TIMESTAMP, and to TIMESTAMP_TZ only when the adjust-to-UTC flag is set; `local-timestamp-*` to TIMESTAMP; `timestamp-nanos` to TIMESTAMP_NS; `time-*` to TIME; `enum` to ENUM; `uuid` to UUID; a multi-type union to UNION; record to STRUCT, array to LIST, map to MAP (read from the extension's source by the reviewer; the oracle confirms).
 - **Current behaviour.**
   - Both `timestamp-*` and `local-timestamp-*` map to an unzoned timestamp (`src/komira_avro/avro_schema.mojo:1009-1020`), which agrees with DuckDB's default; with the adjust-to-UTC flag set DuckDB reads a zoned one ("Code that does not follow", item 25, once the oracle confirms).
-  - `enum` maps to DICTIONARY (`:1054`) and `uuid` to BINARY (`:1024-1028`).
-  - The decoder raises on other unions, records, arrays, maps and enums (the [formats doc](text_and_row_formats.md), "Decoding takes one of two paths").
+  - `uuid` is not refused: the schema maps it to BINARY (`src/komira_avro/avro_schema.mojo:1024-1033`), and the decoder reads a `string` uuid as a STRING column (`src/komira_avro/action_table.mojo:400-408`) and a `fixed(16)` uuid as BINARY. Either way it returns a value where the rule refuses by name ("Code that does not follow", item 29).
+  - `enum` maps to DICTIONARY in the schema (`src/komira_avro/avro_schema.mojo:1054`), but the decoder reads it as a STRING column (`src/komira_avro/action_table.mojo:409-415`). A read with no separate reader schema raises `AvroDecodeError.UNSUPPORTED_FIELD_KIND` when a block decodes, which is the rule's named refusal; a read with a reader schema remaps each symbol and returns the STRING column (`:2320-2340`), which is not refused (item 29).
+  - `timestamp-nanos` is not a logical type the mapper knows, so it falls through to its physical `long` and reads as INT64 (`src/komira_avro/avro_schema.mojo:1034`), not refused (item 29).
+  - `duration` maps to INTERVAL_MONTH_DAY_NANO (`src/komira_avro/avro_schema.mojo:1021-1023`), which has no accumulator, so the decoder raises `AvroDecodeError.UNSUPPORTED_COLUMN_TYPE`: refused by name.
+  - The decoder raises on other unions, records, arrays and maps (the [formats doc](text_and_row_formats.md), "Decoding takes one of two paths").
 - **Mark.** MATCHES (its refused types are a parity gap).
 
 ### 13.6 JSON values into a column of the matching type
