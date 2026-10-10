@@ -49,6 +49,11 @@
 //!   modelled), so a ``` line indented four or more spaces outside a list
 //!   item, which CommonMark reads as indented code or paragraph text, opens
 //!   a block here and hides the links up to its close or the end.
+//! - A fence opened inside a comment block runs past the `-->` that closes
+//!   the comment, so a fence still open when the comment closes hides the
+//!   links after it, up to its close or the end. CommonMark reads the fence
+//!   line as part of the HTML block, so `<!-- a\n```\n-->\n[x](x.md)\n`
+//!   has the link there and none here.
 //! - An empty target, `[e]()` or `[r]: <>`, is no link (CommonMark: a link
 //!   to the empty destination).
 //! - The unmodelled forms listed last.

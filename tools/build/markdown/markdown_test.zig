@@ -262,6 +262,12 @@ test "a lone carriage return ends a line; a final one ends the last line" {
     try eq(@as(usize, 2), lines("a\r\nb").len);
 }
 
+test "a final \\r\\n ends the last line rather than starting an empty one" {
+    // Catches a "\r\n" pair read as two endings when it closes the text.
+    try eq(@as(usize, 1), lines("x\r\n").len);
+    try eq(@as(usize, 2), lines("a\r\nb\r\n").len);
+}
+
 // ---- review cases ------------------------------------------------------------
 
 test "whitespace after a title, before the closing parenthesis" {
