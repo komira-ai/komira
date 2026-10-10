@@ -886,28 +886,16 @@ def test_a_member_without_a_readme_is_refused_by_name() raises:
 # ---- 4 program ---------------------------------------------------------------------------
 
 
-def _program_line_of(program: String, readme_line: Int) -> Int:
-    """The program line copied from README line `readme_line`."""
-    var lines = program.split(String("\n"))
-    for i in range(len(lines)):
-        if String(lines[i]).endswith(String("# README.md:") + String(readme_line)):
-            return i + 1
-    return 0
-
-
 def test_a_failing_example_names_the_readme_line() raises:
     var fx = Fixture(String("case3"))
     var runner = ScriptedRunner()
     _expect_install(runner, fx, Install(fx))
     # the second example (fence on README line 12) fails; the assertion
-    # names the generated program's line (README line 13), which kci maps
-    # back to the README, as a real `mojo run` prints it
-    var p = readme_program_of(String(README), String("komira_alpha"), String("src/komira_alpha/README.md"))
-    var at = _program_line_of(p.text, 13)
-    assert_true(at > 0, p.text)
+    # names its program's line 13, which is README line 13 and which kci
+    # rewrites to the README, as a real `mojo run` prints it
     var said = (
-        String("src/komira_alpha/README.md:12: FAILED: At ") + fx.work() + String("/readme_komira_alpha.mojo:")
-        + String(at) + String(":17: AssertionError: `left == right` comparison failed\n")
+        String("src/komira_alpha/README.md:12: FAILED: At ") + fx.work() + String("/readme_komira_alpha_12.mojo:")
+        + String("13:17: AssertionError: `left == right` comparison failed\n")
         + String("readme_komira_alpha validation: 1 of 2 checks passed\n")
     )
     _expect_run(runner, fx, said, String("played\n"), Int32(1))
@@ -929,23 +917,26 @@ def test_a_failing_example_names_the_readme_line() raises:
 def test_a_compile_error_is_mapped_to_the_readme_line() raises:
     var fx = Fixture(String("compile"))
     # README line 13 is `assert_equal(alpha(2), 4)`; the played compiler
-    # names the program line it was copied to
+    # names line 13 of the second example's program, where it was copied
     var p = readme_program_of(String(README), String("komira_alpha"), String("src/komira_alpha/README.md"))
-    var at = _program_line_of(p.text, 13)
-    assert_true(at > 0, p.text)
+    assert_equal(len(p.modules), 2)
+    assert_equal(p.modules[1].name, String("readme_komira_alpha_12.mojo"))
+    assert_equal(String(p.modules[1].text.split(String("\n"))[12]), String("    assert_equal(alpha(2), 4)"))
     var runner = ScriptedRunner()
     _expect_install(runner, fx, Install(fx))
     _expect_run(
         runner, fx, String(""),
-        fx.work() + String("/readme_komira_alpha.mojo:") + String(at) + String(":5: error: use of unknown declaration 'alpha'\n"),
+        fx.work() + String("/readme_komira_alpha_12.mojo:13:5: error: use of unknown declaration 'alpha'\n"),
         Int32(1),
     )
     var t = _good_channel(fx)
     var sl = NoWaitSleeper()
     var row = _run(runner, t, sl, fx)
     _assert_fails_with(row, String("src/komira_alpha/README.md:13:5: error: use of unknown declaration 'alpha'"))
-    # the program kci ran is the one it reports against
+    # the programs kci ran are the ones it reports against
     assert_equal(open(fx.work() + String("/") + String(PROGRAM), "r").read(), p.text)
+    for m in range(len(p.modules)):
+        assert_equal(open(fx.work() + String("/") + p.modules[m].name, "r").read(), p.modules[m].text)
 
 
 def test_a_vacuous_count_is_a_fail() raises:

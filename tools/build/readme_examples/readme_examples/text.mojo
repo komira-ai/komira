@@ -62,23 +62,6 @@ def lower_ascii(s: String) -> String:
     return String(from_utf8_lossy=out)
 
 
-def count_of(s: String, needle: String) -> Int:
-    """Non-overlapping occurrences of `needle` in `s`."""
-    var k = needle.byte_length()
-    if k == 0:
-        return 0
-    var n = 0
-    var i = 0
-    var limit = s.byte_length() - k
-    while i <= limit:
-        if substr(s, i, i + k) == needle:
-            n += 1
-            i += k
-        else:
-            i += 1
-    return n
-
-
 def split_lines(text: String) -> List[String]:
     """Lines without their newline (and without a CR before it)."""
     var out = List[String]()

@@ -5,19 +5,20 @@
 #   TMPDIR inside the scratch work dir, LANG; nothing of this process), the
 #   exact `pixi install` and `pixi run --as-is` argv, the manifest (every
 #   install pinned to version AND build on the step's channel), and the
-#   installed README's program: byte-equal to the program SOURCE mode
+#   installed README's programs: byte-equal to the programs SOURCE mode
 #   generates for the welded `[tests][readme]` test of the same README
 #   (tools/build/mojo/defs.bzl `_readme_gate`: display `<package dir>/
-#   README.md`, the import name, relative links refused), and named
-#   `readme_<import>.mojo`, never `<import>.mojo`. A change to any of them is
-#   a visible edit of this file.
+#   README.md`, the import name, relative links refused), the runner named
+#   `readme_<import>.mojo`, never `<import>.mojo`, and each example's
+#   `readme_<import>_<line>.mojo`. A change to any of them is a visible
+#   edit of this file.
 # =============================================================================
 
 from std.os import setenv
 from std.testing import TestSuite, assert_equal, assert_true
 
 from readme_examples.examples import extract_examples
-from readme_examples.program import generate_program
+from readme_examples.program import generate_programs
 
 from kci_release_machine import StageValidation
 from kci_validate import (
@@ -166,13 +167,21 @@ def test_installed_program_is_byte_equal_to_source_mode() raises:
     # //src/komira_encoding:komira_encoding: display = <package>/README.md,
     # --package = the import name, --links refuse (the README ships)
     var display = String("src/komira_encoding/README.md")
-    var source = generate_program(extract_examples(String(README), display, True), String("komira_encoding"), display)
+    var source = generate_programs(extract_examples(String(README), display, True), String("komira_encoding"), display)
     # INSTALLED mode: the display comes from the package's build label, the
     # package from its import name
     var dir = package_dir_of(String("komira//src/komira_encoding:komira_encoding_conda"))
     assert_equal(dir, String("src/komira_encoding"))
     var installed = readme_program_of(String(README), String("komira_encoding"), dir + String("/README.md"))
-    assert_equal(installed.text, source)
+    assert_equal(len(source), 3)
+    assert_equal(installed.text, source[2].text)
+    assert_equal(installed.file, source[2].name)
+    assert_equal(len(installed.modules), 2)
+    for i in range(2):
+        assert_equal(installed.modules[i].name, source[i].name)
+        assert_equal(installed.modules[i].text, source[i].text)
+    assert_equal(installed.modules[0].name, String("readme_komira_encoding_5.mojo"))
+    assert_equal(installed.modules[1].name, String("readme_komira_encoding_15.mojo"))
     assert_equal(installed.examples, 2)
     # never `<import>.mojo`: a file beside the program named like the
     # package is an import root that would shadow the installed package

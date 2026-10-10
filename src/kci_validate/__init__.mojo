@@ -14,15 +14,15 @@
 #                             this machine with no container (a pinned pixi,
 #                             a scratch directory outside the checkout, a
 #                             cleared environment), and each installed
-#                             library's README examples as the program. No
+#                             library's README examples as the programs. No
 #                             network at all is INDETERMINATE with a
 #                             skip_reason (exit 5), never a pass
 #   env.mojo                  the ENV scratch layout, the child's whole
 #                             environment, the exact pixi command lines, the
 #                             checkout and system-config refusals
 #   network.mojo              whether any declared host answers at all
-#   readme_installed.mojo     an installed README as the program it runs,
-#                             byte-equal to the welded SOURCE-mode program
+#   readme_installed.mojo     an installed README as the programs it runs,
+#                             byte-equal to the welded SOURCE-mode programs
 #   request.mojo              `ValidateRequest`, `ContainerHost`; the release
 #                             and the pins, read the PUBLISH step's way; a
 #                             metapackage's members from its own depends
@@ -38,7 +38,7 @@
 # Which validations a step has is the machine file's (kci_release_machine); the
 # result rows are kci_api's; processes start through kci_build's
 # ProcessRunner seam and the channel is read through kci_pkg_upload's
-# PkgTransport. The README examples become a program through
+# PkgTransport. The README examples become programs through
 # //tools/build/readme_examples, the library the welded `[tests][readme]`
 # test is generated with. The command line is the kci binary's (`kci run`).
 # =============================================================================

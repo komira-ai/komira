@@ -44,13 +44,32 @@ def test_an_indented_fence_is_dedented_by_its_indent() raises:
 
 
 def test_a_word_after_mojo_is_refused() raises:
-    # The vocabulary after `mojo` is closed and empty: no skip word.
+    # The vocabulary after `mojo` is closed and holds `module` alone: no skip word.
     assert_equal(
         _refusal("a\n```mojo skip\nx\n```\n"),
-        "R.md:2: `mojo skip`: an example's info string is exactly `mojo`; nothing may follow it"
+        "R.md:2: `mojo skip`: an example's info string is `mojo` or `mojo module`; nothing else may follow `mojo`"
         + " (there is no skip word: fence a sketch that cannot run as ```text)",
     )
     assert_true(_refusal("```mojo ignore\n```\n").startswith("R.md:1: `mojo ignore`"))
+    for info in ["mojo module skip", "mojo Module", "mojo modules", "mojo main"]:
+        assert_true(_refusal("```" + info + "\n```\n").startswith("R.md:1: `" + info + "`"), info)
+
+
+def test_the_fence_tag_is_the_mode() raises:
+    # `mojo module` is an example in module mode; `mojo` is not, whatever
+    # its code declares. Hidden lines attach to either.
+    var exs = extract_examples(
+        "```mojo\nstruct T:\n    pass\n```\n<!-- mojo-hidden x = 1 -->\n```mojo module\ndef main():\n    pass\n```\n"
+        + "~~~mojo  module\n~~~\n",
+        "R.md",
+        False,
+    )
+    assert_equal(len(exs), 3)
+    assert_false(exs[0].module)
+    assert_true(exs[1].module)
+    assert_equal(_join(exs[1]), "5|x = 1\n7|def main():\n8|    pass\n")
+    assert_true(exs[2].module)
+    assert_equal(info_refusal("mojo module"), "")
 
 
 def test_near_misses_are_refused() raises:
@@ -135,6 +154,7 @@ def main() raises:
     test_no_example_is_an_empty_list()
     test_an_indented_fence_is_dedented_by_its_indent()
     test_a_word_after_mojo_is_refused()
+    test_the_fence_tag_is_the_mode()
     test_near_misses_are_refused()
     test_every_refusal_is_reported_in_line_order()
     test_an_unclosed_example_is_refused()

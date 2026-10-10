@@ -1,11 +1,14 @@
 """The examples of a README. Pure: no I/O.
 
-A fenced block whose info string is exactly `mojo` is an EXAMPLE, and every
-example runs: there is no skip word. A sketch that cannot run is fenced
-```text. The vocabulary after `mojo` is closed and empty, so `mojo skip`
-(or any other word after `mojo`) is refused, and so is a near miss of the
-language word (`Mojo`, `mojo,`, `.mojo`, `🔥`): a typo can never turn an
-example into prose that silently does not run.
+A fenced block whose info string is `mojo` or `mojo module` is an EXAMPLE,
+and every example runs: there is no skip word. A sketch that cannot run is
+fenced ```text. The info string is the example's mode, and nothing else is:
+`mojo` (statements, pasted into a `main`) or `mojo module` (a whole program
+with its own `main`; program.mojo). The vocabulary after `mojo` is closed
+and holds `module` alone, so `mojo skip` (or any other word after `mojo`)
+is refused, and so is a near miss of the language word (`Mojo`, `mojo,`,
+`.mojo`, `🔥`): a typo can never turn an example into prose that silently
+does not run.
 
 Hidden lines: an HTML comment `<!-- mojo-hidden ... -->` that ends on the
 line just before an example's opening fence is prepended to it; one that
@@ -29,6 +32,8 @@ from .text import byte_at, indent_of, is_blank, lower_ascii, split_lines, strip,
 struct Example(Copyable, Movable):
     # 1-based README line of the opening fence.
     var line: Int
+    # The fence says `mojo module`: a whole program, copied as it is.
+    var module: Bool
     # The code: hidden lines before, the block's lines, hidden lines after.
     var code: List[String]
     # 1-based README line of each entry of `code`.
@@ -56,16 +61,26 @@ def _first_word(info: String) -> String:
     return substr(info, 0, k)
 
 
+comptime MODULE_WORD = "module"
+
+
+def _after_mojo(info: String) -> String:
+    """What follows the leading `mojo` of `info`, without surrounding space."""
+    return strip(suffix(info, 4))
+
+
 def info_refusal(info: String) -> String:
     """Why `info` may not open a fence of a README, or "" when it may. An
-    exactly-`mojo` info string is an example; any other word is prose."""
+    info string of `mojo` or `mojo module` is an example; any other word is
+    prose."""
     var word = _first_word(info)
     if word == "mojo":
-        if strip(info) != "mojo":
+        var rest = _after_mojo(info)
+        if rest.byte_length() > 0 and rest != MODULE_WORD:
             return (
                 "`"
                 + info
-                + "`: an example's info string is exactly `mojo`; nothing may follow it"
+                + "`: an example's info string is `mojo` or `mojo module`; nothing else may follow `mojo`"
                 + " (there is no skip word: fence a sketch that cannot run as ```text)"
             )
         return ""
@@ -185,12 +200,12 @@ def extract_examples(text: String, display: String, refuse_relative_links: Bool)
         if why.byte_length() > 0:
             refusals.append(where + why)
             continue
-        if f.info != "mojo":
+        if _first_word(f.info) != "mojo":
             continue
         if f.close_line < 0:
             refusals.append(where + "the ```mojo example is never closed")
             continue
-        var ex = Example(f.open_line + 1, List[String](), List[Int]())
+        var ex = Example(f.open_line + 1, _after_mojo(f.info) == MODULE_WORD, List[String](), List[Int]())
         for h in range(len(hidden)):
             if hidden[h].last == f.open_line - 1:
                 used[h] = True

@@ -5,7 +5,8 @@ The validations a kci stage runs on its steps. Two kinds:
 - **CONDA_INSTALL_ENV** (`run_install_env`) installs the release with a
   pinned pixi into a scratch directory outside the checkout, under a
   cleared environment, and runs each installed library's README examples
-  against the installed package. The program is made from the installed
+  against the installed package. The programs (one per example, and a
+  runner that runs them all) are made from the installed
   `share/doc/<name>/README.md` by the same generator as the build's
   `[tests][readme]` test, so the two are byte-equal for the same README. A
   library that ships no README, a README with other bytes than its
@@ -30,7 +31,7 @@ Processes, the channel and waits go through seams (`ProcessRunner`,
 
 ## Examples
 
-An installed README becomes the same program the build runs:
+An installed README becomes the same programs the build runs, and the runner:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo
@@ -50,6 +51,8 @@ var program = readme_program_of(readme, "komira_encoding", dir + "/README.md")
 assert_equal(program.examples, 1)
 assert_equal(program.file, "readme_komira_encoding.mojo")  # never komira_encoding.mojo
 assert_true("readme_komira_encoding validation: " in program.text)
+assert_equal(program.modules[0].name, "readme_komira_encoding_5.mojo")  # the example at line 5
+assert_true("import readme_komira_encoding_5" in program.text)
 
 var refused = String()
 try:

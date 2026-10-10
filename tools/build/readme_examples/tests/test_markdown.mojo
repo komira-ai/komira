@@ -79,6 +79,22 @@ def test_relative_links_skip_code_and_urls() raises:
     assert_equal(links[3].line, 7)
 
 
+def test_relative_links_skip_html_comments() raises:
+    # An HTML block that opens with `<!--` is raw HTML up to the line holding
+    # `-->` (CommonMark), never Markdown: a README's mojo-hidden code such as
+    # `Span[UInt8](bytes)` is no link. A link after the comment still counts.
+    var text = String(
+        "<!-- mojo-hidden\nvar s = Span[UInt8](bytes)\n-->\n"
+        + "<!-- one line [x](gone.md) -->\n"
+        + "  <!-- indented [y](gone2.md)\n -->\n"
+        + "after [z](kept.md)\n"
+    )
+    var links = relative_links(split_lines(text))
+    assert_equal(len(links), 1)
+    assert_equal(links[0].target, "kept.md")
+    assert_equal(links[0].line, 6)
+
+
 def main() raises:
     test_a_fence_closes_only_on_its_own_character()
     test_a_closing_fence_is_at_least_as_long()
@@ -88,4 +104,5 @@ def main() raises:
     test_an_open_fence_runs_to_the_end()
     test_fence_fields()
     test_relative_links_skip_code_and_urls()
+    test_relative_links_skip_html_comments()
     print("test_markdown: OK")

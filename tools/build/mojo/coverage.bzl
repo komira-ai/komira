@@ -80,12 +80,11 @@ gate is in COVERAGE_SHARED_LIB_MODE and nothing waits for it).
 - A README's examples (the program `[tests][readme]` runs) have a coverage
   binary and run like a test, `[coverage][bin][readme]` and
   `[coverage][tests][readme]` (coverage_readme): they test the library's
-  public API, so they measure its lines. Whether the README holds an example
-  is known only when the build reads it, so the coverage build compiles the
-  program when it has one and otherwise a stub that runs nothing (category
-  `mojo_cov_readme_source` chooses). The program is no repository file: its
-  report names it under `buck-out/readme/`, which covcheck counts outside the
-  repository.
+  public API, so they measure its lines. The coverage build compiles the
+  generated runner, which runs every example's program in one process (with
+  no example it runs nothing). The programs are no repository files: the
+  report names them under `buck-out/readme/`, which covcheck counts outside
+  the repository.
 - A `mojo_test` covers the libraries that name it in `coverage_tests`, none
   or several. The library cannot depend on its test (the test depends on the
   library), so such a library's gate is the target `<name>_cov_gate`, as for
@@ -368,13 +367,15 @@ def _run_facts(ctx, src_dir, import_name, root):
         src_repo = src_repo,
     )
 
-def _cov_run(actions, tc, facts, label, where, t, name, stem, cov_bin, test_repo, data, env_args, solib = None):
+def _cov_run(actions, tc, facts, label, where, t, name, stem, cov_bin, test_repo, data, env_args, solib = None, stage = None):
     """Declares the `mojo_cov_run` action of the coverage binary `cov_bin`
     of test source `t` (staged at `name`, the path its line tables name it
     by, with its `data`), run under kcov by cov_run.sh of `facts.dir`
     against the library sources of `facts` (_run_facts), through the
     release gate's runner with `env_args`, as `label`. `test_repo` is the
-    path the report names `t` by; `solib` as coverage_run's. Returns
+    path the report names `t` by; `solib` as coverage_run's; `stage`, when
+    set, is staged in place of `t` ({path: artifact}: a directory holding
+    `name`). Returns
     (report, marker):
     `cov/tests/<stem>.xml`, the Cobertura report in repository paths, and
     `cov/tests/<stem>.passed`."""
@@ -383,7 +384,7 @@ def _cov_run(actions, tc, facts, label, where, t, name, stem, cov_bin, test_repo
             fail("{}: the test's data destination {} collides with its source, which a coverage run stages at {}".format(where, repr(dest), repr(name)))
         if dest == "buck-out" or dest.startswith("buck-out/"):
             fail("{}: the data destination {} is under buck-out/, where a coverage run stages the library's sources".format(where, repr(dest)))
-    share = actions.copied_dir("cov/tests/{}/share".format(stem), dict(data) | {name: t})
+    share = actions.copied_dir("cov/tests/{}/share".format(stem), dict(data) | (stage or {name: t}))
     gen = []
     for rel in facts.gen:
         gen += ["--gen", rel]
@@ -436,46 +437,28 @@ def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, en
     label = "{}:{} [coverage]".format(ctx.label.raw_target(), t.short_path)
     return _cov_run(ctx.actions, tc, facts, label, where, t, t.short_path, stem, cov_bin, _dir_prefix(facts.pkg_dir) + t.short_path, data, env_args, solib)
 
-# The program a README with no example gives the coverage build: the
-# README's own program is then a comment (readme_examples), which does not
-# compile, and whether it is one is known only when the build reads it.
-_README_STUB = "def main():\n    print(\"NO EXAMPLE: this README holds no example\")\n"
-
 def coverage_readme(ctx, tc, build, readme, closure, link_tail, src_dir, import_name, root, env_args, bins, runs):
     """With coverage, the README's examples as a test (`readme`, the
-    (marker, program, count) of defs.bzl's _readme_gate): the program, or
-    _README_STUB when the README holds no example (a
-    `mojo_cov_readme_source` action reads the count), built at -O0 with
-    line tables against `closure` (the ungated package, as the README's
-    gated run is) through `build` (defs.bzl's _build_executable, its link
-    `link_tail` as the gated run's), and run under kcov with the library's
-    `env_args`. Adds them to `bins` and `runs` as `readme`. Its report names
-    the program `buck-out/readme/<package>/readme_<import>.mojo`: no
-    repository file, which covcheck counts outside the repository, so only
-    the library's lines it reached count."""
-    program, count = readme[1], readme[2]
-    src = ctx.actions.declare_output("cov/tests/readme/" + program.basename)
-    ctx.actions.run(
-        cmd_args(
-            tc.busybox,
-            "sh",
-            "-c",
-            'if [ "$("$1" cat "$2")" = 0 ]; then printf "%s" "$4" >"$5"; else "$1" cp "$3" "$5"; fi',
-            "cov_readme_source",
-            tc.busybox,
-            count,
-            program,
-            _README_STUB,
-            src.as_output(),
-        ),
-        category = "mojo_cov_readme_source",
-    )
-    stem = program.basename[:-len(".mojo")]
-    bins["readme"] = build(ctx, tc, "cov/tests/readme/" + stem, [src], src, [closure], "0", "mojo_build_cov_test", "readme", None, link_extra = link_tail, debug_link = coverage_link_dir(ctx))
+    (marker, generated directory, examples) of defs.bzl's _readme_gate): the
+    directory's runner, `readme_<import>.mojo`, which imports each example's
+    program beside it and runs them all (with no example it prints that it
+    ran nothing), built at -O0 with line tables against `closure` (the
+    ungated package, as the README's gated runs are) through `build`
+    (defs.bzl's _build_executable, its link `link_tail` as the gated runs'),
+    and run under kcov with the library's `env_args`. Adds them to `bins`
+    and `runs` as `readme`. Its report names the programs
+    `buck-out/readme/<package>/readme_<import>[_<line>].mojo`: no repository
+    file, which covcheck counts outside the repository, so only the
+    library's lines they reached count."""
+    gen = readme[1]
+    runner = "readme_{}.mojo".format(import_name)
+    main = gen.project(runner)
+    bins["readme"] = build(ctx, tc, "cov/tests/readme/readme_" + import_name, [gen], main, [closure], "0", "mojo_build_cov_test", "readme", None, link_extra = link_tail, debug_link = coverage_link_dir(ctx))
     facts = _run_facts(ctx, src_dir, import_name, root)
     where = "{}: coverage run of README.md".format(ctx.label.raw_target())
     label = "{}:README.md [coverage]".format(ctx.label.raw_target())
-    runs["readme"] = _cov_run(ctx.actions, tc, facts, label, where, src, src.short_path, "readme", bins["readme"], "buck-out/readme/" + _dir_prefix(facts.pkg_dir) + program.basename, {}, env_args)
+    name = gen.short_path + "/" + runner
+    runs["readme"] = _cov_run(ctx.actions, tc, facts, label, where, main, name, "readme", bins["readme"], "buck-out/readme/" + _dir_prefix(facts.pkg_dir) + runner, {}, env_args, stage = {gen.short_path: gen})
 
 def coverage_test_kwargs(rule):
     """mojo_test's macro around `rule`: sets `coverage_debug` when coverage
