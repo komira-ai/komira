@@ -917,7 +917,7 @@ struct FastFieldReader(Movable, Deinitable):
             var nl_t = _read_uleb128_span(region, pos, rlen)
             var name_len = nl_t[0]
             pos = nl_t[1]
-            if name_len < 0 or pos + name_len > rlen:
+            if name_len < 0 or name_len > rlen - pos:  # no wrapping sum
                 raise Error("FastFieldReader: field name out of bounds (corrupt)")
             var name_buf = List[UInt8](capacity=name_len)
             for k in range(name_len):
@@ -940,7 +940,8 @@ struct FastFieldReader(Movable, Deinitable):
             var sl_t = _read_uleb128_span(region, pos, rlen)
             var sub_len = sl_t[0]
             pos = sl_t[1]
-            if rel_sub_off < 0 or sub_len < 0 or rel_sub_off + sub_len > rlen:
+            # A difference of non-negatives, not offset + len: the sum can wrap.
+            if rel_sub_off < 0 or sub_len < 0 or sub_len > rlen - rel_sub_off:
                 raise Error(
                     "FastFieldReader: sub-region [" + String(rel_sub_off) + ", "
                     + String(rel_sub_off + sub_len) + ") out of region (corrupt)"
@@ -1306,7 +1307,7 @@ struct FastFieldReader(Movable, Deinitable):
             var tl_t = _read_uleb128_span(region, off, end)
             var term_len = tl_t[0]
             off = tl_t[1]  # off now points at the term BYTES start
-            if term_len < 0 or off + term_len > end:
+            if term_len < 0 or term_len > end - off:  # no wrapping sum
                 raise Error("FastFieldReader: dict term out of bounds (corrupt)")
             term_bounds.append(off)  # start of term bytes
             off += term_len

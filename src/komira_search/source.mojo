@@ -804,20 +804,19 @@ def _docstore_blob_extent[
     # uncompressed-lens, then the blob area.
     var off_table_start = 9
     var n_offsets = num_docs + 1
-    var unc_table_start = off_table_start + n_offsets * 8
-    var blob_area_start = unc_table_start + num_docs * 8
-    # The full fixed-size prefix (header + both tables) must be present before we
-    # read any offset (validate the whole index area first).
-    if blob_area_start > len(region):
+    # The full fixed-size prefix (header + both tables, 9 + 16 * num_docs + 8
+    # bytes) must be present before we read any offset (validate the whole index
+    # area first). Bound the count, not that size: the product can wrap Int.
+    if num_docs > (len(region) - off_table_start - 8) // 16:
         raise Error(
-            "_docstore_blob_extent: index area ["
-            + String(off_table_start)
-            + ", "
-            + String(blob_area_start)
-            + ") exceeds region length "
+            "_docstore_blob_extent: index area for num_docs "
+            + String(num_docs)
+            + " exceeds region length "
             + String(len(region))
             + " (corrupt)"
         )
+    var unc_table_start = off_table_start + n_offsets * 8
+    var blob_area_start = unc_table_start + num_docs * 8
 
     var start = _read_u64_le_at(region, off_table_start + slot * 8)
     var end = _read_u64_le_at(region, off_table_start + (slot + 1) * 8)
@@ -833,7 +832,8 @@ def _docstore_blob_extent[
         )
     var blob_len = end - start
     var blob_off = blob_area_start + start
-    if blob_off + blob_len > len(region):
+    # Not blob_off + blob_len > len: start can be near Int max and that wraps.
+    if blob_len > len(region) - blob_area_start - start:
         raise Error(
             "_docstore_blob_extent: blob ["
             + String(blob_off)
@@ -1936,7 +1936,7 @@ def _bmw_read_doc_count(
     Returns (doc_count, post_doc_count_rel) where post_doc_count_rel is the byte
     offset, RELATIVE to `poff`, of the first byte AFTER the doc_count ULEB — the
     base the BLOCKMAX `block_byte_offset` entries are relative to."""
-    if poff < 0 or plen < 0 or poff + plen > len(region):
+    if poff < 0 or plen < 0 or plen > len(region) - poff:  # no wrapping sum
         raise Error("_bmw_read_doc_count: posting region out of bounds")
     var end = poff + plen
     var dc_res = _read_uleb128_span(region, poff, end)

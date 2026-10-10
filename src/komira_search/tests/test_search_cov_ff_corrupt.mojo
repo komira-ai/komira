@@ -26,6 +26,15 @@
 #      slot past its doc count, and reads a null cell as 0.
 #   6. An entry whose sub-region no longer lies in the region (a parsed entry
 #      changed after parse) is refused by every decoder.
+#   7. A length of 2^63 - 1 (Int.MAX), whose sum with an in-range offset wraps
+#      Int negative, is refused by its own check: a sub-region in the
+#      directory, a dictionary term in a KEYWORD sub-region, a field name
+#      (komira-ai/komira#1203). A sub-region one byte past the region end is
+#      refused by the same check.
+#   8. Each bound pinned at its exact edge: a field name one byte longer than
+#      the bytes left in the region, and a KEYWORD dictionary term one byte
+#      longer than the bytes left in its sub-region, are refused by their own
+#      checks (a bound off by one, or one that drops the offset, reads past).
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_raises
@@ -325,6 +334,56 @@ def test_06_entry_outside_region_refused() raises:
         _ = r.float_resolver(v, String("g"))
     with assert_raises(contains="FastFieldReader: keyword sub-region out of bounds"):
         _ = r.fast_field_keyword(v, String("k"), 0)
+
+
+def _uleb_int_max(mut out: List[UInt8]):
+    """Int.MAX (2^63 - 1) as a ULEB128: nine 0xFF bytes, then 0x00."""
+    for _ in range(9):
+        out.append(0xFF)
+    out.append(0x00)
+
+
+def test_07_wrapping_lengths_refused() raises:
+    # Directory entry: sub-offset 1, sub-length Int.MAX (1 + len wraps).
+    var sub: List[UInt8] = [0x54, 0x48, 0x46, 0x46, 1, 1, 1, 0x61, 0, 5, 1, 1]
+    _uleb_int_max(sub)
+    with assert_raises(contains="FastFieldReader: sub-region [1, "):
+        _ = FastFieldReader(_split(sub^))
+    # The same check one byte past the end: a 13-byte region, [12, 14).
+    var one: List[UInt8] = [0x54, 0x48, 0x46, 0x46, 1, 1, 1, 0x61, 0, 5, 1, 12, 2]
+    with assert_raises(contains="sub-region [12, 14) out of region"):
+        _ = FastFieldReader(_split(one^))
+    # KEYWORD dictionary: 3 docs, 1 term of length Int.MAX.
+    var kw: List[UInt8] = [3, 1]
+    _uleb_int_max(kw)
+    kw.append(0x61)
+    var k = String("k")
+    var v = _one(_kw(k, kw^))
+    with assert_raises(contains="FastFieldReader: dict term out of bounds"):
+        _ = FastFieldReader(v).fast_field_keyword(v, k, 0)
+    # Field name of length Int.MAX at directory position 6.
+    var name: List[UInt8] = [0x54, 0x48, 0x46, 0x46, 1, 1]
+    _uleb_int_max(name)
+    name.append(0x61)
+    with assert_raises(contains="FastFieldReader: field name out of bounds"):
+        _ = FastFieldReader(_split(name^))
+
+
+
+def test_08_one_byte_past_end_refused() raises:
+    # Field name: the 8-byte region has 1 byte after the name length at
+    # position 7, and the name claims 2. A bound of `name_len > rlen` or
+    # `name_len > rlen - pos + 1` would read region[8].
+    var name: List[UInt8] = [0x54, 0x48, 0x46, 0x46, 1, 1, 2, 0x61]
+    with assert_raises(contains="FastFieldReader: field name out of bounds"):
+        _ = FastFieldReader(_split(name^))
+    # KEYWORD dictionary: 3 docs, 1 term of length 2 with 1 byte left in the
+    # 4-byte sub-region. A bound off by one walks the term past the
+    # sub-region end and is refused later, by a different check.
+    var k = String("k")
+    var v = _one(_kw(k, [3, 1, 2, 0x61]))
+    with assert_raises(contains="FastFieldReader: dict term out of bounds"):
+        _ = FastFieldReader(v).fast_field_keyword(v, k, 0)
 
 
 def main() raises:

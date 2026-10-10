@@ -790,15 +790,17 @@ struct TermDictionary(Movable, Deinitable):
         var stage_a_len = Int(cur.read_u64_le())
         var stage_b_offset = Int(cur.read_u64_le())
         var stage_b_len = Int(cur.read_u64_le())
-        # B2: validate offsets/lengths are non-negative and in-range.
+        # B2: validate offsets/lengths are non-negative and in-range. Each
+        # bound is len > total - offset, never offset + len > total: the u64
+        # fields can sum past Int max and wrap.
         var total = cur.length()
         if (
             stage_a_offset < 0
             or stage_a_len < 0
-            or stage_a_offset + stage_a_len > total
+            or stage_a_len > total - stage_a_offset
             or stage_b_offset < 0
             or stage_b_len < 0
-            or stage_b_offset + stage_b_len > total
+            or stage_b_len > total - stage_b_offset
         ):
             raise Error(
                 "TermDictionary.deserialize: stage offsets/lengths out of"
