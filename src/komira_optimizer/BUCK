@@ -52,6 +52,8 @@ mojo_library(
         "tests/test_optimizer_dpccp_q5_untyped_reopen.mojo",
         "tests/test_optimizer_dpccp_reorder_arms.mojo",
         "tests/test_optimizer_dpccp_row_count_fallback.mojo",
+        "tests/test_optimizer_driver.mojo",
+        "tests/test_optimizer_driver_corpus.mojo",
         "tests/test_optimizer_eager_agg.mojo",
         "tests/test_optimizer_eager_agg_paths.mojo",
         "tests/test_optimizer_expr_agg_join_sites.mojo",

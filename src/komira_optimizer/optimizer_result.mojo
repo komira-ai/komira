@@ -21,10 +21,9 @@
 # =============================================================================
 #
 # `OptimizeResult` is the value a NON-RAISING optimizer entry point returns: a
-# `LogicalPlan`, or a status code and the raiser's message. komira_optimizer
-# has no driver that orders its passes, and no function in this tree returns
-# an `OptimizeResult`; this module is the contract such an entry point is
-# designed to use (the type, its status codes and `_classify`).
+# `LogicalPlan`, or a status code and the raiser's message.
+# `optimizer_driver.optimize_status` is the entry point that returns one; this
+# module holds the type, its status codes and `_classify`.
 #
 # The design: each non-raising entry point is a `try` / `except` around the
 # raising function it wraps, with NO `raises` of its own. The raising function
@@ -113,8 +112,9 @@ comptime OPTIMIZE_ERR_UNRESOLVED_DEPS: Int32 = -2
 """The plan's scalar dependencies did not reach a fixpoint.
 
 The protocol in `optimizer_scalar_deps.mojo` runs the passes, resolves the
-requests they emitted, and re-plans with them bound, under a round cap
-(komira_optimizer has no driver that runs it). Exceeding the cap means a pass
+requests they emitted, and re-plans with them bound, under a round cap. That
+loop belongs to a caller that executes plans; `optimizer_driver.optimize` is
+one round of it and never returns this code. Exceeding the cap means a pass
 is emitting a request nobody consumes, or the query nests deeper than the cap.
 Returning a plan anyway would ship an unfolded subquery site that fails much
 later, at eval, far from this cause."""
@@ -130,7 +130,7 @@ comptime OPTIMIZE_REFUSAL_UNRESOLVED_DEPS: StaticString = (
 )
 """The named token for the round-cap refusal of the dependency protocol.
 
-⚠ THE RAISE SITE (the round-capped loop, not in this tree) MUST IMPORT THIS,
+⚠ THE RAISE SITE (the caller's round-capped loop) MUST IMPORT THIS,
 NOT RE-SPELL IT. It is the only reason
 `_classify` can tell that refusal apart from any other pass refusal, and a
 second spelling makes the two silently stop matching. Same idiom, and the same

@@ -52,8 +52,8 @@
 # trailing identity `Project` restoring the original output columns — the
 # `__scalar_subq_N` columns never escape past the node that introduced them.
 #
-# Pass order: komira_optimizer has no driver that orders its passes. This
-# pass is designed to run BEFORE `resolve_scalar_subqueries_rewrite` (so it
+# Pass order: `optimizer_driver.optimize` runs this pass BEFORE
+# `resolve_scalar_subqueries_rewrite` (so it
 # claims the decorrelatable sites first; whatever's left goes to
 # materialize-and-substitute), BEFORE `flatten_dependent_joins` (which only
 # handles CORRELATED subqueries — outer_refs >= 1) and BEFORE plan-CSE (which
