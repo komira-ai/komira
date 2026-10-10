@@ -356,6 +356,100 @@ def test_affected_by() raises:
     _stage_refused(_pr("--log-dir", "/l"), String("build"), String("kci run needs --work-dir"))
 
 
+comptime _PRE: String = "registry.example.invalid/busybox@sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+comptime _UNPINNED: String = "unpinned.invalid/busybox@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+comptime _PROBE_IMAGE: String = "registry.example.invalid/probe@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+
+def test_preflight_image_values() raises:
+    assert_equal(parse_kci_args(_run("--preflight-image", _PRE)).preflight_image, String(_PRE))
+    _refused(
+        _run("--preflight-image", "busybox:1.37"),
+        String("--preflight-image 'busybox:1.37' is not pinned by digest, <reference>@sha256:<64 lowercase hex> (a tag is refused)"),
+    )
+    _refused(_run("--preflight-image", "busybox@sha256:abc"), String("is not pinned by digest"))
+    _refused(_run("--preflight-image", ""), String("--preflight-image is EMPTY"))
+    _refused(_run("--preflight-image", _PRE, "--preflight-image", _PRE), String("--preflight-image is given twice"))
+    # the table's placeholder is well-formed: refused only where a probe would run
+    assert_equal(parse_kci_args(_run("--preflight-image", _UNPINNED)).preflight_image, String(_UNPINNED))
+
+
+def _probe_block(name: String) -> String:
+    return (
+        String(" validation { name: \"") + name + String("\" kind: DEPLOY_PROBE image: \"") + String(_PROBE_IMAGE)
+        + String("\" timeout_seconds: 60 expect: \"health\" }")
+    )
+
+
+def _probe_machine() -> String:
+    """A DEPLOY step with two probes, and a stage with an ENV validation."""
+    return (
+        String("schema_version: 1\nname: \"shop\"\n")
+        + String("stage { name: \"staging\" step { name: \"deploy\" kind: DEPLOY cells: \"c\" cell: \"staging\"")
+        + String(" resources: \"r\"") + _probe_block(String("p1")) + _probe_block(String("p2")) + String(" } }\n")
+        + String("stage { name: \"gamma\" step { name: \"p\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d\"")
+        + String(" channels: \"c\" channel: \"komira\" validation { name: \"env\" kind: CONDA_INSTALL_ENV")
+        + String(" install: \"komira\" compiler_channel: \"https://conda.example.invalid/max\" } } }\n")
+    )
+
+
+def _probe_flags(stage: String, *extra: String) raises:
+    """`require_stage_flags` of a validation-only run of `stage`."""
+    var g = parse_machine_file(_probe_machine(), String("m"))
+    var l = _args("run", "--stage", stage, "--revision-id", _REV, "--run-id", "gh-1", "--attempt", "1", "--release-dir", "/r")
+    for s in extra:
+        l.append(String(s))
+    var c = parse_kci_args(l)
+    require_stage_flags(c, g.stage(stage), resolve_selection(g.stage(stage), selectors_of(c)))
+
+
+def _probe_refused(stage: String, needle: String, *extra: String) raises:
+    var g = parse_machine_file(_probe_machine(), String("m"))
+    var l = _args("run", "--stage", stage, "--revision-id", _REV, "--run-id", "gh-1", "--attempt", "1", "--release-dir", "/r")
+    for s in extra:
+        l.append(String(s))
+    var c = parse_kci_args(l)
+    try:
+        require_stage_flags(c, g.stage(stage), resolve_selection(g.stage(stage), selectors_of(c)))
+    except e:
+        if String(e).find(needle) < 0:
+            raise Error(String("expected '") + needle + String("' in: ") + String(e))
+        return
+    raise Error(String("not refused, expected: ") + needle)
+
+
+def test_a_selected_probe_needs_a_pinned_preflight_image() raises:
+    _probe_flags(String("staging"), "--only", "validation:p1", "--scratch-dir", "/s", "--preflight-image", _PRE)
+    # the SECOND probe alone selected: still needs it
+    _probe_refused(
+        String("staging"),
+        String("--only in stage 'staging' selects the DEPLOY_PROBE validation 'p2': kci run needs --preflight-image"),
+        "--only", "validation:p2", "--scratch-dir", "/s",
+    )
+    _probe_refused(
+        String("staging"), String("selects the DEPLOY_PROBE validation 'p1': kci run needs --preflight-image"),
+        "--scratch-dir", "/s",
+    )
+    # the table's placeholder fails closed at start
+    _probe_refused(
+        String("staging"),
+        String("selects the DEPLOY_PROBE validation 'p2': --preflight-image '") + String(_UNPINNED)
+        + String("' is the platform table's placeholder"),
+        "--only", "validation:p2", "--scratch-dir", "/s", "--preflight-image", _UNPINNED,
+    )
+    # any validation takes it (kci.yml passes it beside --pixi), placeholder or not
+    _probe_flags(
+        String("gamma"), "--only", "validation:env", "--scratch-dir", "/s", "--pixi", "/t/pixi",
+        "--pixi-sha256", "807eabf195b13d6393b832ecccf93bf59bf784425674a60c7b50b1b84a58367f", "--preflight-image", _UNPINNED,
+    )
+    # a run that selects no validation refuses it
+    _probe_refused(
+        String("gamma"),
+        String("--preflight-image is a validation's flag, and --only in stage 'gamma' selects no validation"),
+        "--only", "step:p", "--release-version", "rv", "--preflight-image", _PRE,
+    )
+
+
 def test_build_budget_is_the_per_change_check_s() raises:
     var g = parse_machine_file(String(_MACHINE), String("m"))
     var c = parse_kci_args(_pr("--work-dir", "/w", "--log-dir", "/l", "--build-budget-s", "6900"))

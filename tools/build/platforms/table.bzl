@@ -36,6 +36,27 @@ def none(reason):
 def pending(reason):
     return {"pending": reason}
 
+# `image(reference)`: a container image pinned by its digest,
+# `<repository>@sha256:<64 lowercase hex>`, pulled by that digest and never by
+# a tag. Used by `preflight_image`.
+def image(reference):
+    return {"image": reference}
+
+# `placeholder(reason)`: an image pin that is NOT recorded yet in a row that is
+# registered. Allowed only for `preflight_image`, whose value no build action
+# reads: it reaches kci as a flag (--preflight-image), and `preflight_image()`
+# hands on `UNPINNED_IMAGE` for it, which kci refuses wherever a DEPLOY_PROBE
+# would run. So a placeholder fails closed: no probe runs until the real
+# digest replaces it.
+def placeholder(reason):
+    return {"placeholder": reason}
+
+# The image `preflight_image()` hands on for a placeholder or `none(...)`: a
+# well-formed digest reference whose digest is all zeros, on a reserved host
+# (RFC 2606), so it is never pulled. kci_validate's PREFLIGHT_UNPINNED_DIGEST
+# is that digest.
+UNPINNED_IMAGE = "unpinned.invalid/busybox@sha256:" + "0" * 64
+
 # `pin(name, url, sha256, size = <bytes>)`: one sha256-pinned download. `name`
 # is the target name of the `pinned_file` that fetches it (an asset name:
 # outputs of that target live under it, so renaming one re-keys every action
@@ -110,6 +131,7 @@ ROW_FIELDS = [
     "oci_base",  # the container base (kwargs of `oci_base`), or `none(...)`
     "os",  # constraint name of the os: `linux`, `macos`
     "os_floor",  # the oldest operating system a built binary runs on
+    "preflight_image",  # the DEPLOY_PROBE pre-flight's helper image, busybox's linux/amd64 manifest by digest (`image(...)`); `none(...)` on a platform with no container validation; `placeholder(...)` until recorded
     "page_bytes",  # the smallest virtual-memory page of this platform's default kernel
     "pool",  # the `[komira_re]` property that selects the worker pool serving this row, as a client sets it (`pool=<name>`)
     "re_key",  # `[komira_re]` key of the property set of this platform's execution platform
@@ -363,6 +385,13 @@ PLATFORMS = {
         "os_floor": "glibc-2.34",
         "page_bytes": 4096,
         "pool": "pool=mojo-sized",
+        # The DEPLOY_PROBE pre-flight's helper image (kci_validate
+        # deploy_probe.mojo): busybox, whose `nc -z` checks that the link-local
+        # metadata address does not answer from a container. Docker Hub
+        # library/busybox tag 1.37.0: the linux/amd64 image manifest's digest,
+        # not the multi-arch index's (the index lists every platform; this
+        # pins the one image a linux-x86_64 runner pulls).
+        "preflight_image": image("docker.io/library/busybox@sha256:66a6306db78bf2dbf3487f293aa8d6990d8e506fdffab9cc43fe422becf886e4"),
         "re_key": "linux_x86_64_properties",
         "registered": True,
         "remote_required": True,
@@ -475,6 +504,7 @@ PLATFORMS = {
         "os_floor": "macos-11.0",
         "page_bytes": 16384,
         "pool": "pool=darwin-sized",
+        "preflight_image": none("container validations run on Linux runners"),
         "re_key": "darwin_arm64_properties",
         "registered": True,
         "remote_required": False,
@@ -597,6 +627,7 @@ PLATFORMS = {
         "os_floor": "glibc-2.34",
         "page_bytes": 4096,
         "pool": "pool=linux-arm64-sized",
+        "preflight_image": pending("busybox's linux/arm64 image manifest digest is recorded when the platform is brought up"),
         "re_key": "linux_arm64_properties",
         "registered": False,  # komira-limit:linux-arm64-unregistered
         "remote_required": False,
@@ -648,6 +679,31 @@ def _pin_refusal(row_name, role, a, registered):
         return "row {}: pin `{}`: url names no release (`/download/v<version>/`): `{}`".format(row_name, role, a["url"])
     if type(a.get("size")) != "int" or a["size"] <= 0:
         return "row {}: pin `{}` has no positive `size`: {}".format(row_name, role, repr(a.get("size")))
+    return None
+
+def _is_digest_reference(ref):
+    # `<repository>@sha256:<64 lowercase hex>`: one `@`, a repository before it.
+    if type(ref) != "string" or ref.count("@") != 1:
+        return False
+    repo, digest = ref.split("@")
+    if not repo or [c for c in repo.elems() if c in " \t\"'\\"]:
+        return False
+    return digest.startswith("sha256:") and len(digest) == 71 and not [c for c in digest[7:].elems() if c not in _HEX]
+
+def _preflight_image_refusal(name, v, registered):
+    if type(v) != "dict" or len(v) != 1:
+        return "row {}: `preflight_image` is not `image(...)`, `placeholder(...)`, `none(...)` or `pending(...)`: {}".format(name, repr(v))
+    kind = v.keys()[0]
+    if kind == "image":
+        if not _is_digest_reference(v["image"]):
+            return "row {}: `preflight_image` is not pinned by digest, <repository>@sha256:<64 lowercase hex>: {}".format(name, repr(v["image"]))
+        if v["image"] == UNPINNED_IMAGE:
+            return "row {}: `preflight_image` is the placeholder image; write `placeholder(reason)`".format(name)
+        return None
+    if kind not in ("placeholder", "none", "pending") or not v[kind]:
+        return "row {}: `preflight_image` is `{}` with no reason, or not a kind the table knows".format(name, kind)
+    if kind == "pending" and registered:
+        return "row {}: `preflight_image` is pending, but the row is registered: use `placeholder(...)` until the digest is recorded".format(name)
     return None
 
 def _release_version(url):
@@ -772,6 +828,9 @@ def table_refusals(table):
             sizes = [oci.get("config_size")] + (oci.get("layer_sizes") or [])
             if [z for z in sizes if type(z) != "int" or z <= 0] or len(oci.get("layer_sizes") or []) != len(oci.get("layers") or []):
                 out.append("row {}: pin `oci_base`: `config_size` and each of `layer_sizes` must be a positive size, one per layer".format(name))
+        r = _preflight_image_refusal(name, row["preflight_image"], row["registered"])
+        if r:
+            out.append(r)
         for role in ASSET_ROLES:
             if role not in row["assets"]:
                 out.append("row {}: missing pin `{}`".format(name, role))
@@ -843,6 +902,12 @@ def asset(name, role):
     if "name" not in a:
         fail("platform {} has no `{}` download: {}".format(name, role, a.get("none") or a.get("pending")))
     return a
+
+def preflight_image(name):
+    """The pre-flight helper image of row `name`, for --preflight-image: its digest reference, or
+    `UNPINNED_IMAGE` (which kci refuses wherever a DEPLOY_PROBE would run) for a placeholder, `none` or `pending`."""
+    v = row(name)["preflight_image"]
+    return v.get("image") or UNPINNED_IMAGE
 
 def pinned_kwargs(name, role, **extra):
     """kwargs for `pinned_file` that fetch `role` of row `name`; `extra` (visibility, ...) is added."""

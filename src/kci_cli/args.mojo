@@ -12,6 +12,7 @@
 #           [--secret-store <none|env>] [--scratch-dir <dir>]
 #           [--release-set-hash <64 hex>]
 #           [--pixi <file> --pixi-sha256 <hex>] [--channel file:///<dir>]
+#           [--preflight-image <reference>@sha256:<hex>]
 #   kci --help
 #
 # kci has exactly ONE command: `kci run --stage S` runs every step of stage S
@@ -85,9 +86,22 @@
 #                            pixi it installs with, and --pixi-sha256, its
 #                            pin (64 lowercase hex): the validation runs
 #                            pixi only when the bytes have that sha256
+#   a selected DEPLOY_PROBE validation
+#                            needs --preflight-image, the helper image of
+#                            the probe's pre-flight (kci_validate
+#                            deploy_probe.mojo), pinned by digest: the
+#                            platform table's pin (a tag is refused when the
+#                            command line is read). The table's placeholder
+#                            for a pin not recorded yet (its digest all
+#                            zeros) is refused here, so no probe runs
+#                            without a real pin. It is a validation's flag:
+#                            a run that selects any validation takes it
+#                            (kci.yml passes it beside --pixi), and one that
+#                            selects none refuses it
 #   no selected step of that kind   its flags are refused (and
-#                            --scratch-dir when no validation is selected,
-#                            --pixi and --pixi-sha256 when no ENV one is)
+#                            --scratch-dir and --preflight-image when no
+#                            validation is selected, --pixi and
+#                            --pixi-sha256 when no ENV one is)
 #
 # `--channel file:///<absolute directory>` (optional) is the PRE-PUBLISH
 # local mode: the selected validations read and install from that directory
@@ -126,6 +140,7 @@ from kci_api import (
     STEP_KIND_BUILD,
     STEP_KIND_PUBLISH,
     VALIDATION_KIND_CONDA_INSTALL_ENV,
+    VALIDATION_KIND_DEPLOY_PROBE,
     ContextEntry,
     RunIdentity,
     Selector,
@@ -135,8 +150,8 @@ from kci_api import (
     require_full_commit_id,
 )
 from kci_build import MAX_BUILD_BUDGET_S
-from kci_release_machine import Selection, Stage
-from kci_validate import ChannelUrl
+from kci_release_machine import Selection, Stage, is_digest_pinned_image
+from kci_validate import ChannelUrl, preflight_image_refusal
 
 comptime CLI_VERB_RUN: String = "run"
 comptime CLI_VERB_HELP: String = "help"
@@ -152,6 +167,7 @@ comptime KCI_USAGE: String = (
     "          --scratch-dir <dir>                                          (a selected validation)\n"
     "          [--release-set-hash <64 hex>]                  (a selected PUBLISH step or validation)\n"
     "          --pixi <file> --pixi-sha256 <hex>                  (a selected CONDA_INSTALL_ENV validation)\n"
+    "          --preflight-image <ref>@sha256:<hex>         (a selected DEPLOY_PROBE; any validation takes it)\n"
     "          [--channel file:///<dir>]       (validations only: install from this local channel, not the step's)\n"
     "  kci --help\n"
     "kci has one command: kci run --stage S runs every step of stage S of the machine file, in order.\n"
@@ -221,6 +237,7 @@ struct KciCommand(Copyable, Movable):
     var scratch_dir: String
     var pixi: String
     var pixi_sha256: String
+    var preflight_image: String
     var channel: String
     var only: List[String]
     var affected_by: String
@@ -251,6 +268,7 @@ struct KciCommand(Copyable, Movable):
         self.scratch_dir = String("")
         self.pixi = String("")
         self.pixi_sha256 = String("")
+        self.preflight_image = String("")
         self.channel = String("")
         self.only = List[String]()
         self.affected_by = String("")
@@ -306,6 +324,7 @@ def publish_flags() -> List[String]:
 def validation_flags() -> List[String]:
     var l = List[String]()
     l.append(String("--scratch-dir"))
+    l.append(String("--preflight-image"))
     return l^
 
 
@@ -455,6 +474,13 @@ def _set(mut cmd: KciCommand, flag: String, value: String) raises:
         if not _is_sha256_hex(value):
             raise usage_error(String("--pixi-sha256 '") + value + String("' is not 64 lowercase hex characters"))
         cmd.pixi_sha256 = value.copy()
+    elif flag == String("--preflight-image"):
+        if not is_digest_pinned_image(value):
+            raise usage_error(
+                String("--preflight-image '") + value
+                + String("' is not pinned by digest, <reference>@sha256:<64 lowercase hex> (a tag is refused)")
+            )
+        cmd.preflight_image = value.copy()
     elif flag == String("--channel"):
         var why = String("")
         try:
@@ -660,8 +686,20 @@ def require_stage_flags(cmd: KciCommand, stage: Stage, sel: Selection) raises:
     if len(sel.validations) > 0:
         if not cmd.given(String("--scratch-dir")):
             raise usage_error(vwhich + String(" selects a validation: kci run needs --scratch-dir"))
-    elif cmd.given(String("--scratch-dir")):
-        raise usage_error(String("--scratch-dir is a validation's flag, and ") + vwhich + String(" selects no validation"))
+    else:
+        for f in ["--scratch-dir", "--preflight-image"]:
+            if cmd.given(String(f)):
+                raise usage_error(String(f) + String(" is a validation's flag, and ") + vwhich + String(" selects no validation"))
+    var probe_name = _selected_kind_validation(stage, sel, String(VALIDATION_KIND_DEPLOY_PROBE))
+    if probe_name.byte_length() > 0:
+        if not cmd.given(String("--preflight-image")):
+            raise usage_error(
+                vwhich + String(" selects the DEPLOY_PROBE validation '") + probe_name
+                + String("': kci run needs --preflight-image, the pre-flight's helper image")
+            )
+        var why = preflight_image_refusal(cmd.preflight_image)
+        if why.byte_length() > 0:
+            raise usage_error(vwhich + String(" selects the DEPLOY_PROBE validation '") + probe_name + String("': ") + why)
     var env_name = _selected_env_validation(stage, sel)
     var ef = env_validation_flags()
     if env_name.byte_length() > 0:
@@ -706,10 +744,15 @@ def _require_validation_only(cmd: KciCommand, stage: Stage, sel: Selection, has_
 
 def _selected_env_validation(stage: Stage, sel: Selection) -> String:
     """The first selected CONDA_INSTALL_ENV validation's name, "" for none."""
+    return _selected_kind_validation(stage, sel, String(VALIDATION_KIND_CONDA_INSTALL_ENV))
+
+
+def _selected_kind_validation(stage: Stage, sel: Selection, kind: String) -> String:
+    """The first selected validation of `kind`, by name; "" for none."""
     for n in range(len(sel.validations)):
         for k in range(len(stage.steps)):
             for m in range(len(stage.steps[k].validations)):
                 ref v = stage.steps[k].validations[m]
-                if v.name == sel.validations[n] and v.kind == VALIDATION_KIND_CONDA_INSTALL_ENV:
+                if v.name == sel.validations[n] and v.kind == kind:
                     return v.name.copy()
     return String("")

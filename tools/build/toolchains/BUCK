@@ -1,9 +1,10 @@
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load("@komira//tools/build/platforms:table.bzl", "by_target_os", "pinned_kwargs", "release_version", "row", "zig_strip_prefix")
+load("@komira//tools/build/platforms:table.bzl", "by_target_os", "pinned_kwargs", "preflight_image", "release_version", "row", "zig_strip_prefix")
 load("@komira//tools/build/package:defs.bzl", "oci_base")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime", "zig_dist", "zig_exe")
 load(":pixi.bzl", "pixi_pin_record", "pixi_version_check")
+load(":preflight.bzl", "preflight_image_record")
 
 # ---- Pinned inputs (linux x86_64 execution platform) -----------------------
 # Each is a row pin of the platform table (tools/build/platforms/table.bzl):
@@ -51,6 +52,17 @@ pixi_pin_record(
     name = "pixi_pin_linux_x86_64",
     sha256 = pinned_kwargs("linux-x86_64", "pixi")["sha256"],
     url = pinned_kwargs("linux-x86_64", "pixi")["url"],
+    visibility = ["PUBLIC"],
+)
+
+# The DEPLOY_PROBE pre-flight's helper image of the linux-x86_64 row, as
+# kci.yml's validate job passes it (--preflight-image); src/kci_workflow_check's
+# test_repo_kci_yml holds the job to this record. A row whose image is a
+# `placeholder(...)` hands on the table's UNPINNED_IMAGE, which kci refuses
+# for any probe.
+preflight_image_record(
+    name = "preflight_image_linux_x86_64",
+    image = preflight_image("linux-x86_64"),
     visibility = ["PUBLIC"],
 )
 

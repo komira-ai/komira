@@ -3,13 +3,17 @@
 load(
     "@komira//tools/build/platforms:table.bzl",
     "PLATFORMS",
+    "UNPINNED_IMAGE",
     "by_target_os",
     "constraints",
     "host_refusal",
     "host_row",
+    "image",
     "none",
     "pending",
     "pin",
+    "placeholder",
+    "preflight_image",
     "registered_names",
     "release_version",
     "reserved_names",
@@ -109,6 +113,14 @@ _TABLE_CASES = [
     ("a container base with a config size of 0", _edit("linux-x86_64", field = "oci_base", value = _oci_with_config_size(0)), "row linux-x86_64: pin `oci_base` has no `config_size`"),
     ("a container base with a negative config size", _edit("linux-x86_64", field = "oci_base", value = _oci_with_config_size(-1)), "row linux-x86_64: pin `oci_base`: `config_size` and each of `layer_sizes` must be a positive size, one per layer"),
     ("a container base with a config size that is not an int", _edit("linux-x86_64", field = "oci_base", value = _oci_with_config_size("1024")), "row linux-x86_64: pin `oci_base`: `config_size` and each of `layer_sizes` must be a positive size, one per layer"),
+    ("a pre-flight image pinned by digest", _edit("linux-x86_64", field = "preflight_image", value = image("docker.io/library/busybox@sha256:" + _GOOD_SHA)), None),
+    ("a pre-flight image by tag", _edit("linux-x86_64", field = "preflight_image", value = image("docker.io/library/busybox:1.37")), "row linux-x86_64: `preflight_image` is not pinned by digest"),
+    ("a pre-flight image with a tag and a short digest", _edit("linux-x86_64", field = "preflight_image", value = image("busybox@sha256:abc")), "row linux-x86_64: `preflight_image` is not pinned by digest"),
+    ("the placeholder image written as a pin", _edit("linux-x86_64", field = "preflight_image", value = image(UNPINNED_IMAGE)), "row linux-x86_64: `preflight_image` is the placeholder image"),
+    ("a registered row with a pending pre-flight image", _edit("linux-x86_64", field = "preflight_image", value = pending("later")), "row linux-x86_64: `preflight_image` is pending, but the row is registered"),
+    ("a placeholder with no reason", _edit("linux-x86_64", field = "preflight_image", value = placeholder("")), "row linux-x86_64: `preflight_image` is `placeholder` with no reason"),
+    ("a pre-flight image that is a bare string", _edit("darwin-arm64", field = "preflight_image", value = "busybox"), "row darwin-arm64: `preflight_image` is not `image(...)`"),
+    ("the pre-flight image missing", _edit("linux-x86_64", drop_field = "preflight_image"), "row linux-x86_64: missing field `preflight_image`"),
     ("a row named for another platform", _edit("linux-arm64", field = "cpu", value = "x86_64"), "row linux-arm64: named for neither its os nor its cpu"),
 ]
 
@@ -136,6 +148,10 @@ def platform_table_cases():
         refusal = host_refusal(h)
         if (refusal == None) != (why == None) or (why != None and why not in refusal):
             fail("platform table: host {} {}: refusal is {}, expected {}".format(os, arch, refusal, why))
+    # what --preflight-image is given: the row's digest reference, or the unpinned placeholder
+    want = PLATFORMS["linux-x86_64"]["preflight_image"].get("image") or UNPINNED_IMAGE
+    if preflight_image("linux-x86_64") != want or preflight_image("darwin-arm64") != UNPINNED_IMAGE:
+        fail("platform table: preflight_image() hands on {} and {}".format(preflight_image("linux-x86_64"), preflight_image("darwin-arm64")))
     if registered_names() != ["linux-x86_64", "darwin-arm64"]:
         fail("platform table: registered rows are {}, expected linux-x86_64 then darwin-arm64 (the first match of an action that states no os is linux)".format(registered_names()))
     if reserved_names() != ["linux-arm64"]:

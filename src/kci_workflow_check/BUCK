@@ -73,7 +73,8 @@ mojo_library(
     ],
     # The repository's own release workflow, machine file and channels file
     # (the root BUCK and release/BUCK), the pixi pin its validate job
-    # downloads (the platform table's, written by //tools/build/toolchains),
+    # downloads and the pre-flight image it passes (the platform table's,
+    # written by //tools/build/toolchains),
     # and the validation targets' record (release/validations/BUCK).
     test_data = {
         "tests/test_ci_auto_promotion.mojo": {
@@ -88,6 +89,7 @@ mojo_library(
             "machine.textproto": "//release:machine.textproto",
             "release_version.sh": "//tools/build/package:release_version.sh",
             "pixi_pin.txt": "//tools/build/toolchains:pixi_pin_linux_x86_64",
+            "preflight_image.txt": "//tools/build/toolchains:preflight_image_linux_x86_64",
             "validations.txt": "//release/validations:names",
         },
     },

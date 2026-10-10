@@ -501,6 +501,11 @@ jobs:
       # test_repo_kci_yml holds them to it).
       PIXI_URL: https://github.com/prefix-dev/pixi/releases/download/v0.67.2/pixi-x86_64-unknown-linux-musl
       PIXI_SHA256: 807eabf195b13d6393b832ecccf93bf59bf784425674a60c7b50b1b84a58367f
+      # The DEPLOY_PROBE pre-flight's helper image: the linux-x86_64 row's
+      # `preflight_image` of the same table, exactly (test_repo_kci_yml holds
+      # it to the table's record): busybox 1.37.0's linux/amd64 image
+      # manifest, by digest.
+      PREFLIGHT_IMAGE: docker.io/library/busybox@sha256:66a6306db78bf2dbf3487f293aa8d6990d8e506fdffab9cc43fe422becf886e4
     steps:
       # The machine file at the release revision; the full history kci's
       # read of this workflow at its commit needs. The README examples the
@@ -550,6 +555,7 @@ jobs:
           "$RUNNER_TEMP/kci/kci" run --stage gamma \
             --only validation:install-komira-encoding --only validation:install-set \
             --pixi "$RUNNER_TEMP/pixi/pixi" --pixi-sha256 "$PIXI_SHA256" \
+            --preflight-image "$PREFLIGHT_IMAGE" \
             --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
             --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \

@@ -8,6 +8,7 @@ runs exactly
         --machine <abs path of release/machine.textproto>
         --pixi <the pinned pixi of the target platform's row>
         --pixi-sha256 <that row's pixi sha256>
+        --preflight-image <that row's pre-flight helper image>
         <the arguments after `--`>
 
 with kci and pixi built by this repository, from the repository's root (the
@@ -26,7 +27,7 @@ equal to the machine file's validations both ways.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
-load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs", "registered_names", "row")
+load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs", "preflight_image", "registered_names", "row")
 
 # Placeholders of the `:names` record for the arguments that differ by the
 # machine that runs the target: paths, and the pin of its platform's row.
@@ -34,6 +35,7 @@ _KCI = "<kci>"
 _MACHINE = "<machine>"
 _PIXI = "<pixi>"
 _PIXI_SHA256 = "<pixi-sha256>"  # the target platform row's pin: a Mac's differs
+_PREFLIGHT_IMAGE = "<preflight-image>"  # the target platform row's helper image (a DEPLOY_PROBE's pre-flight)
 
 # From the repository's root ($1): a scratch directory, a run id and an
 # attempt when the caller gave none, then the kci command.
@@ -55,7 +57,7 @@ done
 exec "$@"
 """
 
-def _argv(stage, name, sha256):
+def _argv(stage, name, sha256, preflight):
     return [
         "run",
         "--stage",
@@ -68,10 +70,12 @@ def _argv(stage, name, sha256):
         _PIXI,
         "--pixi-sha256",
         sha256,
+        "--preflight-image",
+        preflight,
     ]
 
 def _validation_impl(ctx):
-    argv = _argv(ctx.attrs.stage, ctx.label.name, ctx.attrs.pixi_sha256)
+    argv = _argv(ctx.attrs.stage, ctx.label.name, ctx.attrs.pixi_sha256, ctx.attrs.preflight_image)
     paths = {
         _MACHINE: ctx.attrs.machine,
         _PIXI: ctx.attrs.pixi[DefaultInfo].default_outputs[0],
@@ -97,6 +101,7 @@ _kci_validation = rule(
         "machine": attrs.source(),
         "pixi": attrs.dep(),
         "pixi_sha256": attrs.string(),
+        "preflight_image": attrs.string(),
         # A source file of this package, and how many directories up from it
         # the repository's root is (a path on the machine `buck2 run` runs on).
         "root_file": attrs.source(),
@@ -111,7 +116,7 @@ _kci_validation = rule(
 def _names_impl(ctx):
     lines = []
     for name, stage in ctx.attrs.validations.items():
-        lines.append(" ".join([name, stage, _KCI] + _argv(stage, name, _PIXI_SHA256)))
+        lines.append(" ".join([name, stage, _KCI] + _argv(stage, name, _PIXI_SHA256, _PREFLIGHT_IMAGE)))
     out = ctx.actions.write(ctx.label.name + ".txt", "".join([l + "\n" for l in sorted(lines)]))
     return [DefaultInfo(default_output = out)]
 
@@ -127,6 +132,13 @@ def _pixi_sha256_by_target_os():
         out["prelude//os/constraints:" + row(n)["os"]] = pinned_kwargs(n, "pixi")["sha256"]
     return select(out)
 
+def _preflight_image_by_target_os():
+    # The table's UNPINNED_IMAGE for a row with no recorded image: kci refuses it for any DEPLOY_PROBE.
+    out = {}
+    for n in registered_names():
+        out["prelude//os/constraints:" + row(n)["os"]] = preflight_image(n)
+    return select(out)
+
 def _kci_validations(validations, visibility = None):
     """One runnable target per entry of `validations` ({name: stage}), and `:names`."""
     for name, stage in validations.items():
@@ -137,6 +149,7 @@ def _kci_validations(validations, visibility = None):
             machine = "komira//release:machine.textproto",
             pixi = "komira//tools/build/toolchains:pixi",
             pixi_sha256 = _pixi_sha256_by_target_os(),
+            preflight_image = _preflight_image_by_target_os(),
             root_file = "BUCK",
             root_parents = len(package_name().split("/")) + 1,
             visibility = visibility,

@@ -782,6 +782,41 @@ HEAD:refs/heads/MAIN`); it must be refused.
   (`kci_release_machine`'s welded test), and the `validate` job's `kci run`
   passes what they pass (`test_repo_kci_yml`), so a developer and the
   workflow run the same thing.
+- **A runner that runs a `DEPLOY_PROBE`: the link-local precondition.** A
+  probe (design: [deploy_step.md](design/deploy_step.md)) runs the
+  operator's image on `--network=bridge` against a freshly deployed
+  service. On a runner hosted in a cloud, that network reaches the IPv4
+  link-local range (RFC 3927), where the VM's metadata server hands out the
+  runner VM's own credentials. kci changes nothing on the host, so the
+  operator sets standing host rules once, before any probe runs there, so
+  that no container on the host reaches:
+  - the IPv4 link-local range: for example `iptables -I DOCKER-USER -d
+    <the link-local range> -j REJECT` (REJECT rather than DROP, so a probe of
+    it fails at once);
+  - the documented IPv6 metadata address `fd00:ec2::254`: an `ip6tables`
+    rule, or IPv6 off on the docker bridge;
+  - on Azure, the WireServer `168.63.129.16`, on tcp ports 80 and 32526
+    only: docker forwards container DNS to its port 53, so that stays open.
+
+  Before every probe kci runs a **pre-flight**: a throwaway container
+  (`--rm`, the probe's hardening flags, the same `--network=bridge`) of the
+  digest-pinned helper image, busybox, given as `--preflight-image` from the
+  platform table's `preflight_image` (`tools/build/platforms/table.bzl`),
+  whose command is `nc -z -w 3` to the instance-metadata address of the
+  link-local range, port 80. Only exit 1 (nothing answered) lets the probe
+  run; exit 0, any other exit, a failed pull or kci's timeout around it is
+  `INDETERMINATE`, exit 5, and the probe never runs. Only that one address
+  and port are checked: the pre-flight catches the rule being absent, not a
+  rule with holes, and the other rules above are documented, not verified.
+  kci never inserts or removes a rule and needs no privilege at run time.
+  `nc`'s exit contract is a farm test
+  (`//src/kci_validate:preflight_exit_contract`). The helper image is
+  Docker Hub's `library/busybox` 1.37.0, pinned by its linux/amd64 image
+  manifest digest (not the multi-arch index's). A row whose
+  `preflight_image` is a `placeholder(...)` passes an all-zero digest
+  instead, and kci refuses every run that selects a `DEPLOY_PROBE` at
+  start. `CONDA_INSTALL_SMOKE` has the same exposure today and takes the
+  same pre-flight in a follow-up.
 - **The channels.** prefix.dev channels `komira-ai/gamma` and
   `komira-ai/prod` ([release/channels.textproto](../release/channels.textproto)),
   both public. Uploads go to `https://prefix.dev/api/v1/upload/komira-ai/<channel>`

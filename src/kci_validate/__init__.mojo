@@ -34,6 +34,18 @@
 #   container.mojo            the scratch layout, pixi.toml, the script and
 #                             the exact `docker` command lines
 #   readback.mojo             checks 2 to 4: records, payloads, the count
+#   deploy_probe.mojo         `run_deploy_probe`: a DEPLOY_PROBE validation
+#                             of a DEPLOY step. A pre-flight that the
+#                             link-local metadata address does not answer,
+#                             then the operator's digest-pinned image; kci
+#                             decides the verdict from what it wrote
+#   probe_container.mojo      the probe's validation run id and the exact
+#                             `docker` command lines of the pre-flight, the
+#                             probe, the removal by name and the sweep
+#   probe_results.mojo        results.jsonl read back into one check per case
+#   probe_sweep.mojo          `sweep_expired_probes`: remove only the probe
+#                             containers past their own labelled maximum,
+#                             aged by the docker daemon's clock
 #
 # Which validations a step has is the machine file's (kci_release_machine); the
 # result rows are kci_api's; processes start through kci_build's
@@ -99,3 +111,42 @@ from kci_validate.request import (
     readme_doc_path,
     with_members,
 )
+from kci_validate.deploy_probe import (
+    CHECK_CONTAINER,
+    CHECK_IMAGE,
+    CHECK_PREFLIGHT,
+    CHECK_SCRATCH,
+    PREFLIGHT_UNPINNED_DIGEST,
+    ProbeRequest,
+    is_unpinned_preflight_image,
+    preflight_image_refusal,
+    run_deploy_probe,
+)
+from kci_validate.probe_container import (
+    PREFLIGHT_ADDRESS,
+    PREFLIGHT_CONNECT_WAIT_S,
+    PREFLIGHT_PORT,
+    PREFLIGHT_TIMEOUT_S,
+    PROBE_LABEL_GRACE_S,
+    PROBE_MAX_SECONDS_LABEL,
+    daemon_time_argv,
+    preflight_container_name,
+    preflight_run_argv,
+    probe_container_name,
+    probe_run_argv,
+    probe_run_id,
+    remove_argv,
+    sweep_inspect_argv,
+    sweep_list_argv,
+)
+from kci_validate.probe_results import (
+    CASE_PASS,
+    CHECK_RESULTS,
+    RESULTS_FILE,
+    ProbeRow,
+    ProbeRows,
+    parse_probe_line,
+    probe_case_checks,
+    read_probe_rows,
+)
+from kci_validate.probe_sweep import SweepReport, instant_seconds, sweep_expired_probes

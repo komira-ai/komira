@@ -27,10 +27,12 @@
 # it), `machine.textproto` and `channels.textproto` (release/BUCK),
 # release_version.sh (tools/build/package/BUCK), `pixi_pin.txt`, the
 # platform table's linux-x86_64 pixi pin
-# (//tools/build/toolchains:pixi_pin_linux_x86_64), and `validations.txt`,
+# (//tools/build/toolchains:pixi_pin_linux_x86_64), `preflight_image.txt`,
+# the same row's DEPLOY_PROBE pre-flight helper image
+# (//tools/build/toolchains:preflight_image_linux_x86_64), and `validations.txt`,
 # the validation targets' record (//release/validations:names, one line per
-# target: `<name> <stage> <kci> <argv...>`, paths and the platform's pixi
-# sha256 as `<placeholders>`). gamma's validations run each installed
+# target: `<name> <stage> <kci> <argv...>`, paths, the platform's pixi
+# sha256 and its pre-flight image as `<placeholders>`). gamma's validations run each installed
 # library's README, so they name no program.
 # =============================================================================
 
@@ -514,7 +516,7 @@ def test_the_validate_job_runs_what_the_validation_targets_run() raises:
                 len(theirs) > 0,
                 where + String(" passes ") + flag + String(", which the validate job's kci run does not"),
             )
-            if value == String("<pixi>") or value == String("<pixi-sha256>"):
+            if value == String("<pixi>") or value == String("<pixi-sha256>") or value == String("<preflight-image>"):
                 assert_equal(len(theirs), 1, flag)
                 continue
             assert_true(
@@ -535,6 +537,52 @@ def test_the_validate_job_runs_what_the_validation_targets_run() raises:
             _in(target_flags, flag) or _in(_supplied_flags(), flag),
             String("the validate job passes ") + flag + String(", which no validation target passes and no caller supplies"),
         )
+
+
+def _preflight_image_findings(text: String, record: String) raises -> List[String]:
+    """What keeps the workflow `text` from passing the platform table's
+    pre-flight helper image, `record` (`image <reference>`): the validate
+    job's PREFLIGHT_IMAGE is exactly the record's, and its one `kci run`
+    passes it as --preflight-image."""
+    var out = List[String]()
+    var doc = read_workflow(text)
+    var validate = doc.child(doc.child(0, String("jobs")), String("validate"))
+    if validate < 0:
+        out.append(String("kci.yml has no job validate"))
+        return out^
+    var venv = doc.child(validate, String("env"))
+    var n = doc.child(venv, String("PREFLIGHT_IMAGE")) if venv >= 0 else -1
+    var got = String("")
+    if n < 0 or doc.kind(n) != NODE_SCALAR:
+        out.append(String("the validate job sets no env PREFLIGHT_IMAGE"))
+    else:
+        got = doc.text(n)
+    if String("image ") + got + String("\n") != record:
+        out.append(String("the validate job's PREFLIGHT_IMAGE is not the table's: image ") + got + String(" != ") + record)
+    var vrun = String("")
+    var vsteps = doc.items(doc.child(validate, String("steps")))
+    for i in range(len(vsteps)):
+        var r = doc.child(vsteps[i], String("run"))
+        if r >= 0 and doc.kind(r) == NODE_SCALAR and len(kci_run_calls(doc.text(r))) > 0:
+            vrun = doc.text(r)
+    if vrun.find(String("--preflight-image \"$PREFLIGHT_IMAGE\"")) < 0:
+        out.append(String("the validate job passes no --preflight-image"))
+    return out^
+
+
+def test_the_validate_job_passes_the_tables_preflight_image() raises:
+    var text = Path(String("kci.yml")).read_text()
+    var record = Path(String("preflight_image.txt")).read_text()
+    var found = _preflight_image_findings(text, record)
+    assert_equal(len(found), 0, _joined(found))
+    # a drift from the table, and a job that stops passing it, are each refused
+    var line = String("      PREFLIGHT_IMAGE: ") + String(String(record[byte = String("image ").byte_length() :]).strip()) + String("\n")
+    assert_true(text.find(line) >= 0, String("kci.yml has no PREFLIGHT_IMAGE line to mutate"))
+    var other = String("      PREFLIGHT_IMAGE: docker.io/library/busybox@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n")
+    assert_true(len(_preflight_image_findings(text.replace(line, other), record)) > 0, String("a drifted PREFLIGHT_IMAGE is not refused"))
+    var flag = String("--preflight-image \"$PREFLIGHT_IMAGE\" ")
+    assert_true(text.find(flag) >= 0, String("kci.yml has no --preflight-image to mutate"))
+    assert_true(len(_preflight_image_findings(text.replace(flag, String("")), record)) > 0, String("a job without --preflight-image is not refused"))
 
 
 def test_kci_yml_names_no_removed_input_and_no_other_channel() raises:
