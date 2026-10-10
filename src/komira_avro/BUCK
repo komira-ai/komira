@@ -64,6 +64,7 @@ mojo_library(
         "tests/test_avro_schema_parse.mojo",
         "tests/test_avro_snappy_codec_decode.mojo",
         "tests/test_avro_write_parallel_block_compress.mojo",
+        "tests/test_avro_write_binary_columns.mojo",
         "tests/test_avro_write_roundtrip.mojo",
         "tests/test_block_boundary_scan.mojo",
         "tests/test_ocf_header_decode.mojo",

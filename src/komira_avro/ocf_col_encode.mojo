@@ -10,6 +10,8 @@
 # =============================================================================
 
 from komira_arrow.arrow_types import ArrowType
+from komira_arrow.binary_array import BinaryArray
+from komira_arrow.large_binary_array import LargeBinaryArray
 from komira_arrow.record_batch import RecordBatch
 from komira_arrow.schema import Schema
 from komira_arrow.primitive_array import PrimitiveArray
@@ -58,7 +60,7 @@ comptime _WA_FLOAT32: Int = 7
 comptime _WA_FLOAT64: Int = 8
 comptime _WA_BOOL: Int = 9
 comptime _WA_STRING: Int = 10  # STRING (int32 offsets, zero-copy span)
-comptime _WA_BINARY: Int = 11  # BINARY / LARGE_BINARY (zero-copy span)
+comptime _WA_BINARY: Int = 11  # BINARY (int32 offsets, zero-copy span)
 # ⚠ LARGE_STRING NEEDS ITS OWN TAG. `column_as_string` returns an int32-offset
 # array by definition, so resolving a PROMOTED column through it raises
 # `Column.as_string: arrow_type is large_string`.
@@ -67,6 +69,9 @@ comptime _WA_BINARY: Int = 11  # BINARY / LARGE_BINARY (zero-copy span)
 # FIND the payload differs, which is why this is a separate tag and not a
 # separate encoder.
 comptime _WA_LARGE_STRING: Int = 12  # LARGE_STRING (int64 offsets, zero-copy span)
+# BINARY and LARGE_BINARY are fetched through their own accessors: the string
+# accessors refuse a column whose Arrow type is not STRING / LARGE_STRING.
+comptime _WA_LARGE_BINARY: Int = 13  # LARGE_BINARY (int64 offsets, zero-copy span)
 
 
 struct _ColEncoder(Movable):
@@ -92,6 +97,8 @@ struct _ColEncoder(Movable):
     var b: Optional[BooleanArray]
     var s: Optional[StringArray[HeapRegion]]
     var ls: Optional[LargeStringArray[HeapRegion]]
+    var bin: Optional[BinaryArray[HeapRegion]]
+    var lbin: Optional[LargeBinaryArray[HeapRegion]]
 
     def __init__(out self, tag: Int, nullable: Bool):
         self.tag = tag
@@ -108,6 +115,8 @@ struct _ColEncoder(Movable):
         self.b = None
         self.s = None
         self.ls = None
+        self.bin = None
+        self.lbin = None
 
 
 def _resolve_write_tag(at: ArrowType) -> Int:
@@ -146,8 +155,10 @@ def _resolve_write_tag(at: ArrowType) -> Int:
         return _WA_STRING
     elif at == ArrowType.LARGE_STRING:
         return _WA_LARGE_STRING
-    elif at == ArrowType.BINARY or at == ArrowType.LARGE_BINARY:
+    elif at == ArrowType.BINARY:
         return _WA_BINARY
+    elif at == ArrowType.LARGE_BINARY:
+        return _WA_LARGE_BINARY
     return -1
 
 
@@ -205,7 +216,11 @@ def _build_col_encoders(
             # is refused above the int32 ceiling — i.e. it refuses exactly the
             # column whose size caused the promotion.
             enc.ls = batch.column_as_large_string(c)
-        else:  # _WA_STRING / _WA_BINARY both use the string accessor.
+        elif tag == _WA_BINARY:
+            enc.bin = batch.column_as_binary(c)
+        elif tag == _WA_LARGE_BINARY:
+            enc.lbin = batch.column_at(c).as_large_binary()
+        else:  # _WA_STRING
             enc.s = batch.column_as_string(c)
         encoders.append(enc^)
     _ = strict_mode
@@ -291,10 +306,21 @@ def _encode_one_cell(
         # Same `encode_bytes`, same wire bytes.
         encode_bytes(arr.get_span(row), out)
     elif tag == _WA_BINARY:
-        ref arr = enc.s.value()
+        ref arr = enc.bin.value()
         if _emit_null_tag(enc.nullable, arr.is_null(row), out):
             return
-        encode_bytes(arr.get_span(row), out)
+        # Zero-copy span over data[offsets[row]..offsets[row+1]] (the binary
+        # arrays have no `get_span`; this is StringArray.get_span's body).
+        var start = Int(arr.offsets.get_typed[Int32](row))
+        var end = Int(arr.offsets.get_typed[Int32](row + 1))
+        encode_bytes(arr.data.view_range_ro(start, end - start).into_span(), out)
+    elif tag == _WA_LARGE_BINARY:
+        ref arr = enc.lbin.value()
+        if _emit_null_tag(enc.nullable, arr.is_null(row), out):
+            return
+        var start = Int(arr.offsets.get_typed[Int64](row))
+        var end = Int(arr.offsets.get_typed[Int64](row + 1))
+        encode_bytes(arr.data.view_range_ro(start, end - start).into_span(), out)
     elif tag == _WA_BOOL:
         ref arr = enc.b.value()
         if _emit_null_tag(enc.nullable, arr.is_null(row), out):

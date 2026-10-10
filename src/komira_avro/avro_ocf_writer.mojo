@@ -19,7 +19,8 @@
 # The per-column write plan and per-cell encode live in ocf_col_encode.mojo.
 #
 # Column coverage (correctness-first): flat root-record of
-#   BOOL / INT32 / INT64 / FLOAT32 / FLOAT64 / STRING / BINARY, plus the
+#   BOOL / INT32 / INT64 / FLOAT32 / FLOAT64 / STRING / LARGE_STRING / BINARY /
+#   LARGE_BINARY, plus the
 #   int-backed (INT8/INT16/UINT8/UINT16/TIME32_S) and long-backed
 #   (UINT32/DATE64/TIMESTAMP_S/TIMESTAMP_NS/TIME64_NS/DURATION_*) lossy arrow.*
 #   types. FIXED-backed lossy write (UINT64 -> fixed(8), FLOAT16 -> fixed(2)),
