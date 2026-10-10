@@ -198,17 +198,27 @@ def test_project_carries_only_the_columns_the_aggregate_reads() raises:
 
 def test_project_passes_every_column_when_it_cannot_narrow() raises:
     """Each of these keeps every child column in the Project: a retained
-    column-index slot; a group key that is not a column reference; a group
-    key naming a column the child lacks.
+    column-index slot (slot 0, 1, 2 or 3); a group key that is not a column
+    reference; a group key naming a column the child lacks.
 
-    Catches: narrowing past a column index (it would read a different
-    column); narrowing with an unresolvable key; narrowing to a name the
-    child does not have."""
-    var a1 = AggExprArray()
-    a1.append(_sum(_mul("a", "b"), "s"))
-    a1.append(AggExpr(AGG_MAX, Optional(Expr.col_idx(2)), Optional(String("m"))))
-    var o1 = materialize_agg_input(LogicalPlan.aggregate(ExprArray(), a1^, _scan()))
-    assert_equal(_out_names(_child(o1)), String("a,b,c,__agg_in_0"))
+    Catches: narrowing past a column index in any slot (it would read a
+    different column); narrowing with an unresolvable key; narrowing to a
+    name the child does not have."""
+    for slot in range(4):
+        var a1 = AggExprArray()
+        a1.append(_sum(_mul("a", "b"), "s"))
+        var held = AggExpr(AGG_MAX, Optional(Expr.col_ref("c")), Optional(String("m")))
+        if slot == 0:
+            held.child = Optional(Expr.col_idx(2))
+        elif slot == 1:
+            held.child1 = Optional(Expr.col_idx(2))
+        elif slot == 2:
+            held.child2 = Optional(Expr.col_idx(2))
+        else:
+            held.child3 = Optional(Expr.col_idx(2))
+        a1.append(held^)
+        var o1 = materialize_agg_input(LogicalPlan.aggregate(ExprArray(), a1^, _scan()))
+        assert_equal(_out_names(_child(o1)), String("a,b,c,__agg_in_0"), "slot " + String(slot))
 
     var gb = ExprArray()
     gb.append(Expr.binary(BIN_ADD, Expr.col_ref("c"), _lit(1)))
