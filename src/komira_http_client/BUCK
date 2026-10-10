@@ -126,6 +126,7 @@ mojo_library(
         "tests/test_scripted_fault_vocabulary.mojo",
         "tests/test_scripted_under_tls_connector.mojo",
         "tests/test_session_cache.mojo",
+        "tests/test_shared_scripted_transport_recorders.mojo",
         "tests/test_slow_dial_phase_breadcrumb.mojo",
         "tests/test_state_machine.mojo",
         "tests/test_streaming_body.mojo",
