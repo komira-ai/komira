@@ -130,7 +130,7 @@ def _check_private_key_info(der: Span[UInt8, _]) raises:
         "not a PKCS#8 PrivateKeyInfo: no version INTEGER",
     )
     if version.end_pos > outer.end_pos:
-        raise _refuse("not a PKCS#8 PrivateKeyInfo: no version INTEGER")
+        raise _refuse("not a PKCS#8 PrivateKeyInfo: no version INTEGER")  # cov: unreachable outer.end_pos is len(der), checked above, and the TLV parse refuses anything past len(der)
     if version.value_len != 1 or der[version.value_pos] != UInt8(0):
         raise _refuse(
             "PrivateKeyInfo version is not 0 (v1); RFC 5958 v2 keys are not"
@@ -145,8 +145,8 @@ def _check_private_key_info(der: Span[UInt8, _]) raises:
         "not a PKCS#8 PrivateKeyInfo: no privateKeyAlgorithm SEQUENCE",
     )
     if algorithm.end_pos > outer.end_pos:
-        raise _refuse(
-            "not a PKCS#8 PrivateKeyInfo: no privateKeyAlgorithm SEQUENCE"
+        raise _refuse(  # cov: unreachable algorithm.end_pos cannot pass outer.end_pos, for the reason at the version check
+            "not a PKCS#8 PrivateKeyInfo: no privateKeyAlgorithm SEQUENCE"  # cov: unreachable see the line above
         )
     var oid = _expect(
         der,

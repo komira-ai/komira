@@ -71,6 +71,9 @@ and the findings: the one computation both `covcheck report` and
    that no test calls it: an inlined or comptime-gated function a test
    calls can have no record of its own. A file with branch records and no
    line record lists none: no line record says which lines held code.
+10. The conclusion (stats.conclusion_of), over `findings` after step 8:
+    `failure` with any `Regression` in every mode, so a floor holds even
+    in census mode; otherwise by mode.
 
 The line reports must all be lcov or all Cobertura: the two formats
 identify a line's branches differently, so one file in both would count its
@@ -103,6 +106,7 @@ from covcheck.stats import (
     DECLARATION_ONLY_FILE,
     NOT_MEASURED,
     EXEMPTION_WITHOUT_REASON,
+    REGRESSION,
     MODE_NEUTRAL,
     MUTANT_SURVIVED,
     STALE_EXEMPTION,
@@ -754,5 +758,11 @@ def analyze(
         if not is_info_package(a.packages[i].package, opts.info_packages):
             floored.append(a.packages[i].copy())
     a.proposal = propose(ratchet, floored, repo)
-    a.conclusion = conclusion_of(opts.mode, len(a.findings))
+    # Step 10: a test-only package's Regression is in info_findings, so it
+    # fails nothing.
+    var regressions = 0
+    for i in range(len(a.findings)):
+        if a.findings[i].kind == String(REGRESSION):
+            regressions += 1
+    a.conclusion = conclusion_of(opts.mode, len(a.findings), regressions)
     return a^

@@ -11,8 +11,8 @@ projection pushdown, project merge, identity-project elimination and late
 materialization; materializing derived aggregate inputs; subquery
 decorrelation and scalar-subquery resolution through a `ScalarDepTable`
 of engine-supplied bindings; join-predicate decomposition,
-transitive edges and greedy join reordering with TDOM-based cardinality and
-per-column NDV providers; aggregate rewrites (functionally dependent group keys,
+transitive edges, greedy and DPccp join reordering with TDOM-based
+cardinality and per-column NDV providers; aggregate rewrites (functionally dependent group keys,
 eager and partial aggregation below joins, the SUM-of-offset rewrite,
 duplicate aggregate folding and common-aggregate dedup); join payload
 narrowing; limit and TopN rules, partition TopN fusion and window rewrites;
@@ -24,8 +24,8 @@ none executes anything. komira_optimizer has no driver that orders its passes.
 
 It depends on `komira_plan_ir`, `komira_plan_expr`, `komira_plan_stats`,
 `komira_arrow`, `komira_kernels`, `komira_collections`, `komira_exec_types`,
-`komira_scan_source`, `komira_scan_planning`, `komira_counters` and
-`komira_libc`.
+`komira_scan_source`, `komira_scan_planning`, `komira_counters`, `komira_libc`
+and `komira_async` (the join-reorder fire counter).
 
 Public API: import directly from sub-modules. No facade.
 """

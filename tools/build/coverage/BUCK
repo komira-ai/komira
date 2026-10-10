@@ -14,6 +14,19 @@ export_file(
     visibility = ["PUBLIC"],
 )
 
+# The coverage census (census.md): census.sh renders
+# docs/coverage_census.md and the rows of ratchet.tsv from census.tsv, and
+# the root BUCK's :coverage_census holds the three to each other.
+export_file(
+    name = "census.tsv",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "census.sh",
+    visibility = ["PUBLIC"],
+)
+
 # The policy, as data for the coverage workflow's cases (the root BUCK's
 # coverage_ci_cases), which parse it the way .github/ci/coverage_measure.sh does.
 export_file(
@@ -156,5 +169,8 @@ export_file(
 
 shell_lint(
     name = "shell_lint",
-    srcs = ["cov_gate.sh"],
+    srcs = [
+        "census.sh",
+        "cov_gate.sh",
+    ],
 )

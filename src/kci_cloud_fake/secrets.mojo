@@ -25,7 +25,8 @@
 
 from kci_reconciler import InputRef
 from kci_cloud import FIELD_SECRET, LoweredNode, Setting
-from kci_resource_proto.resource import Resource, SecretRef
+from kci_resource_proto.refs import SecretRef
+from kci_resource_proto.resource import Resource
 
 from kci_cloud_fake.shapes import ProviderShape, ROLE_SECRET
 

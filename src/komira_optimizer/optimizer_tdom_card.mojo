@@ -51,10 +51,9 @@
 # joint set.
 #
 # Cache lifetime: the caller owns the Dict[UInt64, Int] and clears it
-# between join-order passes. Nothing in this tree calls this function
-# outside its tests; the caller it is designed for is a DPccp join
-# enumerator (`optimizer_dpccp`, not in this tree) that threads the
-# cache through as a mut ref. DuckDB's `relation_set_2_cardinality`
+# between join-order passes. Its caller is the DPccp join enumerator
+# (`optimizer_dpccp._cost_for_pair`), which threads the cache through as a
+# mut ref and starts a fresh one per enumeration pass. DuckDB's `relation_set_2_cardinality`
 # lives on the `CardinalityEstimator` and is rebuilt per join-order
 # optimization pass; this cache is the equivalent.
 #

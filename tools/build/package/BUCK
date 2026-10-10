@@ -5,6 +5,7 @@ load(":conda.bzl", "conda_manifest_kci")
 load(":defs.bzl", "launcher_level_test")
 load(":kcov_guard.bzl", "kcov_guard_cases", "kcov_guard_tool")
 load(":release_set.bzl", "conda_release_set_check", "release_order_test")
+load(":system_libs_record.bzl", "system_libs_record")
 
 # The launcher's CPU level function against made-up CPUs (tools/build/package/launcher).
 launcher_level_test(
@@ -161,6 +162,9 @@ conda_release_set_check(
         "//src/komira_snapshotter:komira_snapshotter",
         "//src/komira_mail_message:komira_mail_message",
         "//src/komira_vcard:komira_vcard",
+        "//src/komira_trace:komira_trace",
+        "//src/komira_calendar:komira_calendar",
+        "//src/komira_calendar_ics:komira_calendar_ics",
     ],
     release_set = "release_set.txt",
     order_tests = [
@@ -229,6 +233,14 @@ export_file(
     name = "release_set.txt",
     src = "release_set.txt",
     visibility = ["//src/kci_artifact:"],
+)
+
+# system_libs.bzl's table as `<soname> <requirement>` lines: kci_release_set's
+# welded test holds kci's compiled copy (the conda-forge requirements its
+# closure checks accept) equal to it, so the two cannot drift.
+system_libs_record(
+    name = "system_libs",
+    visibility = ["//src/kci_release_set:"],
 )
 
 # The stamped metapackage above, read with kci's own manifest parser

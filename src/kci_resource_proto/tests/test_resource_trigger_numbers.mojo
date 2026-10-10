@@ -31,7 +31,8 @@
 from std.testing import assert_equal, assert_true
 
 from komira_proto_codec import decode_json, decode_proto, encode_json, encode_proto
-from kci_resource_proto.resource import EventTrigger, Resource, Schedule, SourceEvent
+from kci_resource_proto.resource import Resource
+from kci_resource_proto.triggers import EventTrigger, Schedule, SourceEvent
 
 
 # ---- a hand-written wire stream (as in test_resource_field_numbers) -------------

@@ -2,9 +2,10 @@
 # TDOM cost computation — estimate_with_tdom + bridging-edge enumeration
 # =============================================================================
 #
-# The cost function a DP join enumerator (DPccp; `optimizer_dpccp`, not in
-# this tree) is designed to call for EVERY (left_set, right_set) cost lookup;
-# in this tree only tests call it. The `TdomGraph`
+# A two-card cost function for a DP join enumerator's (left_set, right_set)
+# cost lookups. In this tree only tests call `estimate_with_tdom`: DPccp
+# (`optimizer_dpccp._cost_for_pair`) uses the one-set
+# `optimizer_tdom_card.estimate_cardinality_with_set` instead. The `TdomGraph`
 # data structure + `build_tdom_graph` live in sibling file `optimizer_tdom.mojo`.
 # This module closes the loop: given a `TdomGraph` + the candidate joining pair,
 # compute the denominator product across bridging edges, DEDUPED by
@@ -22,7 +23,7 @@
 #   * `JoinChain` (from `optimizer_reorder.mojo`) — relations + edges (the
 #     edge geometry the chain extractor emitted).
 #   * `left_set`, `right_set` (`RelationSet`) — the candidate joining pair
-#     from the DP enumerator (not in this tree).
+#     from a DP enumerator.
 #   * `left_card`, `right_card` (`Int`) — cumulative cardinalities for each
 #     side, supplied by the DP table entries.
 #   * `provider` (`P: ColumnStatsProvider`) — required for the leftover-
@@ -33,9 +34,9 @@
 #
 # Outputs:
 #   * `Int` — the estimated join cardinality. Identical units as the legacy
-#     `estimate_join_cardinality_with_ndv`; a DPccp enumerator (not in this
-#     tree) is designed to add this to the cumulative
-#     `pair_cost = join_card + left_cost + right_cost`.
+#     `estimate_join_cardinality_with_ndv`. Only tests call it: DPccp's
+#     `_cost_for_pair` takes join_card from `estimate_cardinality_with_set`
+#     and sums `pair_cost = join_card + left_cost + right_cost` itself.
 #
 # Tie-break determinism:
 #   Within the primary TDOM-decreasing sort, ties resolve by

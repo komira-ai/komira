@@ -14,7 +14,12 @@
 #       requirement; every build ran; no release.json;
 #   (2) a library requiring the metapackage, and (3) one requiring itself:
 #       REFUSED the same way (neither is ANOTHER library of the set);
-#   (4) two open requirements in two libraries: both named, in member order.
+#   (4) two open requirements in two libraries: both named, in member order;
+#   (5) komira_hash requires `zstd >=1.5.2,<2`, the conda-forge requirement
+#       tools/build/package/system_libs.bzl names for libzstd.so.1: BUILT,
+#       release.json written; at `>=1.0`, with no range, behind
+#       `conda-forge::`, as `ZSTD`, or `notalib >=1`: REFUSED naming the
+#       library and the requirement.
 #
 # Every file a build would have left is written by the scripted step under
 # TEST_TMPDIR (the fixture of test_build_flow.mojo, with each member's
@@ -277,6 +282,7 @@ def _open(artifact: String, requirement: String) -> String:
     return (
         String("artifact '") + artifact + String("' requires '") + requirement + String("', and '")
         + name + String("' is not another library of this release set")
+        + String(" (nor a system library requirement of tools/build/package/system_libs.bzl)")
     )
 
 
@@ -318,6 +324,28 @@ def test_every_open_requirement_is_named() raises:
     lines.append(_open(String("komira_hash"), a))
     lines.append(_open(String("komira_name_registry"), b))
     _refused(r, lines)
+
+
+def test_a_system_library_requirement_builds() raises:
+    var r = _build(String("syslib"), _base(String("zstd >=1.5.2,<2")), _base(_pin(String("komira_hash"))))
+    assert_equal(r.code, EXIT_OK, r.message)
+    assert_true(r.release_json)
+
+
+def test_a_system_library_at_another_shape_is_refused() raises:
+    var n = 0
+    for bad in [
+        String("zstd >=1.0"),
+        String("zstd"),
+        String("conda-forge::zstd >=1.5.2,<2"),
+        String("ZSTD >=1.5.2,<2"),
+        String("notalib >=1"),
+    ]:
+        var r = _build(String("syslib_bad_") + String(n), _base(bad), _base(_pin(String("komira_hash"))))
+        var lines = List[String]()
+        lines.append(_open(String("komira_hash"), bad))
+        _refused(r, lines)
+        n += 1
 
 
 def main() raises:
