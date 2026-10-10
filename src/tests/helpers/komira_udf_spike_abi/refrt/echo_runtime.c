@@ -119,7 +119,13 @@ enum fixture_id {
   F_RAISE_ROW_UNSET,
   F_RAISE_AGAIN,
   F_RAISE_ON_SECOND_CALL,
-  F_TWO_TYPES
+  F_TWO_TYPES,
+  F_CHILD_MOVED_OUT,
+  F_SUM_WIDE,
+  F_CALL_ID,
+  F_FLAGS_PROBE,
+  F_NEAR,
+  F_YIELD_FIRST
 };
 
 /* The variant of a fixture that keeps an input (F_ARGS_KEPT, F_FRAME_IN_KEPT,
@@ -133,6 +139,23 @@ enum fixture_id {
 
 /* The variant of sum_gids_kept that moves group_ids and never releases them. */
 #define GIDS_LEAKED 3
+
+/* release_schema's variants: which borrowed schema load releases. */
+#define RS_RESULT 1
+#define RS_STATE 2
+
+/* sum whose agg_open refuses a second group set on one instance. */
+#define ONE_GROUP_SET_PER_INSTANCE 4
+
+/* child_moved_out's variant that never releases the child it moved out. */
+#define CHILD_LEAKED 1
+
+/* echo_variants.inc's runtimes that refuse an entry (komira_udf_rt.variant;
+ * the numbers stay clear of the variant enum's). */
+#define RT_CONTEXT_REFUSED 101
+#define RT_INSTANCE_REFUSED 102
+#define RT_AGG_OPEN_REFUSED_FIRST 103
+#define RT_AGG_OPEN_REFUSED_SECOND 104
 
 /* F_RAISE_ROW: the row its ERR_RAISED names, for an n-row batch. -1 is
  * legal ("not known"); n and -2 are outside the batch, a runtime bug. */
@@ -181,7 +204,8 @@ enum table_shape {
   TS_OUT_ON_ERROR, /* frame_next returns ERR_RAISED with the table still in `out` */
   TS_DICTIONARY,   /* a dictionary on the struct, whose type has none */
   TS_NULL_COUNT_ZERO,   /* rows 1 and 10 null in the bitmap, null_count 0 */
-  TS_NULL_COUNT_UNKNOWN /* a bitmap with no null row, null_count -1: legal */
+  TS_NULL_COUNT_UNKNOWN, /* a bitmap with no null row, null_count -1: legal */
+  TS_NULL_COUNT_BELOW    /* null_count -2 */
 };
 
 /* args: one format per argument ('*' for ROW: any number of int64 fields,
@@ -281,6 +305,7 @@ static const struct fixture FIXTURES[] = {
     /* each input batch's column as an int64 column and, times ten, an int32
      * column */
     {"table_two_types", F_TWO_TYPES, MF, "l", "tli", "", 0},
+    {"table_null_count_below", F_TABLE, MF, "l", "tl", "", TS_NULL_COUNT_BELOW},
     /* sum, with a state column one row too long; with a result one row
      * short; with agg_update not moving group_ids; with agg_merge not moving
      * the states. */
@@ -325,6 +350,27 @@ static const struct fixture FIXTURES[] = {
     {"raise_on_second_call", F_RAISE_ON_SECOND_CALL, MC, "l", "l", "", 0},
     /* sum whose agg_update moves group_ids and never releases them */
     {"sum_gids_leaked", F_SUM_GIDS_KEPT, AM, "l", "l", "l", GIDS_LEAKED},
+    /* release_schema, releasing the borrowed result or state schema */
+    {"release_result_schema", F_RELEASE_SCHEMA, MC, "l", "l", "", RS_RESULT},
+    {"release_state_schema", F_RELEASE_SCHEMA, AM, "l", "l", "l", RS_STATE},
+    /* identity that moves its argument's child out and releases it on its
+     * own before the struct (Arrow C Data allows it) */
+    {"child_moved_out", F_CHILD_MOVED_OUT, MC, "l", "l", "", 0},
+    {"child_moved_out_leaked", F_CHILD_MOVED_OUT, MC, "l", "l", "", CHILD_LEAKED},
+    /* the sum of twelve int64 arguments, null where any is null */
+    {"sum12", F_SUM_WIDE, SC, "llllllllllll", "l", "", 0},
+    {"sum64", F_SUM_WIDE, SC, "llllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll", "l", "", 0},
+    /* each row: the call's call_id */
+    {"call_id", F_CALL_ID, MC, "l", "l", "", 0},
+    /* rows 0, 1, 2: the flags of the argument struct's schema, of its first
+     * field, of the result schema, as load saw them */
+    {"flags_probe", F_FLAGS_PROBE, MC, "l", "l", "", 0},
+    /* x * (1 + 5e-10): within the runner's 1e-9 relative tolerance */
+    {"near", F_NEAR, MC, "g", "g", "", 0},
+    /* a one-row table [0] before pulling anything, then running_sum */
+    {"yield_first", F_YIELD_FIRST, MF, "l", "tl", "", 0},
+    /* sum whose agg_open refuses a second group set on one instance */
+    {"sum_one_group_set_per_instance", F_SUM, AM, "l", "l", "l", ONE_GROUP_SET_PER_INSTANCE},
 };
 
 #define N_FIXTURES (sizeof(FIXTURES) / sizeof(FIXTURES[0]))
@@ -335,6 +381,7 @@ struct komira_udf_rt {
   const komira_udf_host* host;
   uint32_t global_lock;
   int variant; /* echo_variants.inc; 0 in every other init */
+  int64_t agg_opens;
 };
 #define ROW_FIELDS_MAX 8
 
@@ -345,6 +392,7 @@ struct komira_udf_udf {
   const komira_udf_host* host;
   int64_t n_fields;
   char* fields[ROW_FIELDS_MAX];
+  int64_t flags[3]; /* flags_probe */
 };
 struct komira_udf_context {
   struct komira_udf_rt* rt;
@@ -355,6 +403,7 @@ struct komira_udf_instance {
   const struct komira_udf_udf* udf;
   const struct fixture* fx;
   int64_t calls; /* BROKEN (6) reads it */
+  int64_t group_sets;
 };
 struct komira_udf_groups {
   const struct fixture* fx;
@@ -370,6 +419,7 @@ struct komira_udf_frame {
   int64_t running; /* running_sum */
   int64_t group;   /* group_max: current ordinal, -1 before the first row */
   int64_t max;
+  int yielded; /* yield_first */
 };
 
 static const komira_udf_host* host_of(const komira_udf_instance* i) { return i->ctx->rt->host; }
@@ -714,15 +764,20 @@ static int32_t echo_load(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf
   if (rc != KOMIRA_UDF_OK) return rc;
   /* the bug: a schema the host only lends, released (and a host release
    * that leaves its slot set refused) */
-  if (fx->id == F_RELEASE_SCHEMA && s->args->release != NULL) {
-    s->args->release((struct ArrowSchema*)s->args);
-    if (s->args->release != NULL)
+  if (fx->id == F_RELEASE_SCHEMA) {
+    struct ArrowSchema* lent =
+        (struct ArrowSchema*)(fx->variant == RS_RESULT ? s->result : fx->variant == RS_STATE ? s->state : s->args);
+    lent->release(lent);
+    if (lent->release != NULL)
       return fail(rt->host, e, KOMIRA_UDF_ERR_INTERNAL, "release_schema: the schema's release left its slot set", -1);
   }
   komira_udf_udf* u = calloc(1, sizeof(*u));
   if (u == NULL) return fail(rt->host, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "load: out of memory", -1);
   u->fx = fx;
   u->host = rt->host;
+  u->flags[0] = s->args->flags;
+  u->flags[1] = s->args->n_children > 0 ? s->args->children[0]->flags : -1;
+  u->flags[2] = s->result->flags;
   if (fx->shape == KOMIRA_UDF_SHAPE_ROW) {
     for (int64_t i = 0; i < s->args->n_children; i++) {
       u->fields[i] = dup(s->args->children[i]->name);
@@ -743,6 +798,8 @@ static void echo_unload(komira_udf_udf* u) {
 
 static int32_t echo_open_context(komira_udf_rt* rt, uint32_t slot, komira_udf_context** out,
                                  komira_udf_error* e) {
+  if (rt->variant == RT_CONTEXT_REFUSED)
+    return fail(rt->host, e, KOMIRA_UDF_ERR_INTERNAL, "context_refused: open_context refused", -1);
   komira_udf_context* c = malloc(sizeof(*c));
   if (c == NULL) return fail(rt->host, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "open_context: out of memory", -1);
   c->rt = rt;
@@ -759,12 +816,15 @@ static void echo_close_context(komira_udf_context* c) {
 
 static int32_t echo_open_instance(komira_udf_context* c, komira_udf_udf* u, komira_udf_instance** out,
                                   komira_udf_error* e) {
+  if (c->rt->variant == RT_INSTANCE_REFUSED)
+    return fail(c->rt->host, e, KOMIRA_UDF_ERR_INTERNAL, "instance_refused: open_instance refused", -1);
   komira_udf_instance* i = malloc(sizeof(*i));
   if (i == NULL) return fail(c->rt->host, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "open_instance: out of memory", -1);
   i->ctx = c;
   i->udf = u;
   i->fx = u->fx;
   i->calls = 0;
+  i->group_sets = 0;
   hold(c->rt->host, sizeof(*i));
   *out = i;
   return KOMIRA_UDF_OK;

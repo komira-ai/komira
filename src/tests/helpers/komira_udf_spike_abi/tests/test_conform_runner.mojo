@@ -20,12 +20,12 @@
 # that: a weakened check passes every good runtime). Each mutant is listed
 # with this file in the pull request's sweep table.
 
-from std.testing import assert_equal, assert_true
+from std.testing import assert_equal, assert_false, assert_true
 
 from komira_udf_spike_abi.conform import load_cases, run_suite
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases_runner"
-comptime CASE_COUNT = 29
+comptime CASE_COUNT = 35
 """The JSON files under cases_runner/: an empty or partial staging cannot
 pass."""
 
@@ -48,6 +48,10 @@ def main() raises:
             c.runner_fails_with in r.reason,
             c.name + " failed for another reason: '" + r.reason + "', wanted '" + c.runner_fails_with + "'",
         )
+        # A ledger failure added to another failure ("; and ...") only where
+        # the case asks for one: otherwise the case failed for a second reason.
+        if "; and " not in c.runner_fails_with:
+            assert_false("; and " in r.reason, c.name + " also failed its ledger: " + r.reason)
     assert_equal(report.count("FAIL"), CASE_COUNT - 1)
     assert_equal(report.count("SKIP"), 1)
     print("test_conform_runner: ok")

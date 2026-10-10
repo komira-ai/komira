@@ -63,6 +63,10 @@ static const struct {
     {"feature_without_entry", V_FEATURE_WITHOUT_ENTRY},
     {"entry_without_feature", V_ENTRY_WITHOUT_FEATURE},
     {"error_on_ok_init", V_ERROR_ON_OK_INIT},
+    {"context_refused", (enum variant_id)RT_CONTEXT_REFUSED},
+    {"instance_refused", (enum variant_id)RT_INSTANCE_REFUSED},
+    {"agg_open_refused_first", (enum variant_id)RT_AGG_OPEN_REFUSED_FIRST},
+    {"agg_open_refused_second", (enum variant_id)RT_AGG_OPEN_REFUSED_SECOND},
 };
 
 static const komira_udf_runtime TABLE_MAJOR_2 = {

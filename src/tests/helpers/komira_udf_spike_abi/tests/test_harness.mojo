@@ -44,8 +44,9 @@ from std.testing import assert_equal, assert_false, assert_true
 from komira_udf_spike_abi.cases import Case, parse_case
 from komira_udf_spike_abi.conform import CaseResult, Report, load_cases, run_case, run_suite, runtime_id_ok
 from komira_udf_spike_abi.contract import *
-from komira_udf_spike_abi.runtime import CallOptions, Outcome, UdfRuntime
-from komira_udf_spike_abi.values import Batch, Column, TYPE_INT32
+from komira_udf_spike_abi.runtime import CallOptions, Outcome, UdfRuntime, UdfSpec
+from komira_udf_spike_abi.runtime import Handle
+from komira_udf_spike_abi.values import Batch, Column, ColumnType, TYPE_INT32
 
 comptime VARIANT = "./echo_variant.so"
 comptime MALFORMED = "src/tests/helpers/komira_udf_spike_abi/tests/data/malformed"
@@ -175,6 +176,101 @@ def _value_text() raises:
     r.results.append(CaseResult("a", "PASS", ""))
     r.results.append(CaseResult("b", "FAIL", "why"))
     assert_equal(String(r), "runtime x/y: 1 pass, 1 fail, 0 skip\n  PASS a\n  FAIL b: why\n")
+
+
+def _bound(mut rt: UdfRuntime, c: Case) raises -> List[Handle]:
+    """[udf, ctx, inst] for case `c` on `rt`."""
+    var udf = rt.load(c.spec)
+    assert_true(udf.outcome.is_ok(), String(udf.outcome))
+    var ctx = rt.open_context(0)
+    var inst = rt.open_instance(ctx.handle, udf.handle)
+    assert_true(inst.outcome.is_ok(), String(inst.outcome))
+    return [udf.handle.copy(), ctx.handle.copy(), inst.handle.copy()]
+
+
+def _unbound(mut rt: UdfRuntime, h: List[Handle]) raises:
+    rt.close_instance(h[2])
+    rt.close_context(h[1])
+    rt.unload(h[0])
+
+
+def _call_case(entry: String, shape: String, rows: Int) raises -> Case:
+    var vals = String("1")
+    for i in range(1, rows):
+        vals += ", " + String(i + 1)
+    return parse_case(
+        '{"name": "n", "defect": "d", "run": "call_batch", "entry": "' + entry + '", "shape": "' + shape + '",'
+        + ' "args": [{"type": "int64"}], "result": [{"type": "int64"}],'
+        + ' "input": {"length": ' + String(rows) + ', "columns": [{"type": "int64", "values": [' + vals + "]}]},"
+        + ' "expect": {}}'
+    )
+
+
+def _host_values() raises:
+    """Values the host hands a runtime or a caller, each pinned: the spec's
+    defaults, call ids, an unset error's group, a frame with no output."""
+    var spec = UdfSpec(SHAPE_SCALAR, "e", List[ColumnType](), List[ColumnType]())
+    assert_equal(spec.descriptor_version, 0)
+    assert_false(spec.result_is_table)
+    var rt = UdfRuntime.open("./echo.so")
+    # call ids: 1 on the runtime's first call, one more on each call
+    var c = _call_case("call_id", "MAP_BATCHES_COLUMN", 2)
+    var h = _bound(rt, c)
+    var first = rt.call_batch(h[2], c.spec, c.input, c.options)
+    var second = rt.call_batch(h[2], c.spec, c.input, c.options)
+    assert_equal(first.column.bits[0], 1, "the first call's id")
+    assert_equal(second.column.bits[1], 2, "the second call's id")
+    _unbound(rt, h)
+    # an error whose runtime set neither row nor group: both stay -1
+    c = _call_case("raise_row_unset", "MAP_BATCHES_COLUMN", 2)
+    h = _bound(rt, c)
+    var res = rt.call_batch(h[2], c.spec, c.input, c.options)
+    assert_equal(res.outcome.status, ERR_RAISED)
+    assert_equal(res.outcome.row, -1)
+    assert_equal(res.outcome.group, -1)
+    _unbound(rt, h)
+    # a frame with no input and no output: no first output, -1
+    var f = parse_case(
+        '{"name": "n", "defect": "d", "run": "frame", "entry": "running_sum", "shape": "MAP_BATCHES_FRAME",'
+        + ' "args": [{"type": "int64"}], "result": [{"type": "int64"}], "result_is_table": true, "expect": {}}'
+    )
+    h = _bound(rt, f)
+    var fr = rt.run_frame(h[2], f.spec, List[Batch](), f.options)
+    assert_true(fr.outcome.is_ok(), String(fr.outcome))
+    assert_equal(len(fr.outputs), 0)
+    assert_equal(fr.pulls_before_first_output, -1, "a frame with no output")
+    _unbound(rt, h)
+    rt.shutdown()
+
+
+def _refusing_variants() raises:
+    """The runner on a runtime that refuses open_context, open_instance, or
+    its first or second agg_open: each case fails for that refusal, and the
+    failure path leaks nothing (the ledger is checked on a failed case too)."""
+    var call = _call_case("identity", "MAP_BATCHES_COLUMN", 2)
+    var agg = parse_case(
+        '{"name": "agg", "defect": "d", "run": "agg_split", "entry": "sum", "shape": "AGG_MERGEABLE",'
+        + ' "args": [{"type": "int64"}], "result": [{"type": "int64"}], "state": [{"type": "int64"}],'
+        + ' "partials": [{"input": {"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]},'
+        + ' "group_ids": [0, 0], "n_groups": 1}], "n_groups": 1,'
+        + ' "expect": {"status": "OK", "column": {"type": "int64", "values": [3]}}}'
+    )
+    # name|case|a fragment of the reason
+    var want: List[String] = [
+        "context_refused|call|open_context: ERR_INTERNAL",
+        "instance_refused|call|open_instance: ERR_INTERNAL",
+        "agg_open_refused_first|agg|status ERR_INTERNAL 'agg_open_refused: agg_open refused'",
+        "agg_open_refused_second|agg|status ERR_INTERNAL 'agg_open_refused: agg_open refused'",
+    ]
+    for k in range(len(want)):
+        var parts = want[k].split("|")
+        _ = setenv("KOMIRA_UDF_ECHO_VARIANT", String(parts[0]))
+        var cases = List[Case]()
+        cases.append(call.copy() if String(parts[1]) == "call" else agg.copy())
+        var r = run_suite(VARIANT, cases).result(cases[0].name)
+        assert_equal(r.verdict, "FAIL", String(parts[0]))
+        assert_true(String(parts[2]) in r.reason, String(parts[0]) + ": " + r.reason)
+        assert_false("; and " in r.reason, String(parts[0]) + " leaked on its failure path: " + r.reason)
 
 
 def _ok_drops_error_text() raises:
@@ -449,4 +545,6 @@ def main() raises:
     _variants()
     _value_text()
     _ok_drops_error_text()
+    _host_values()
+    _refusing_variants()
     print("test_harness: ok")
