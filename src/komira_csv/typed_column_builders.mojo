@@ -471,7 +471,7 @@ def _build_timestamp_s_column(
             continue
         var parsed = _try_parse_timestamp_s(cell)
         if parsed:
-            arr.set(r, parsed.value())
+            arr.set(r, parsed.value())  # cov: unreachable the SIMD fast path above accepts every cell this parser accepts (issue 899)
         else:
             arr.validity.value().clear(r)
             null_count += 1
@@ -515,7 +515,7 @@ def _build_timestamp_ms_column(
             continue
         var parsed = _try_parse_timestamp_ms(cell)
         if parsed:
-            arr.set(r, parsed.value())
+            arr.set(r, parsed.value())  # cov: unreachable the SIMD fast path above accepts every cell this parser accepts (issue 899)
         else:
             arr.validity.value().clear(r)
             null_count += 1
@@ -559,7 +559,7 @@ def _build_timestamp_us_column(
             continue
         var parsed = _try_parse_timestamp_us(cell)
         if parsed:
-            arr.set(r, parsed.value())
+            arr.set(r, parsed.value())  # cov: unreachable the SIMD fast path above accepts every cell this parser accepts (issue 899)
         else:
             arr.validity.value().clear(r)
             null_count += 1
@@ -603,7 +603,7 @@ def _build_timestamp_ns_column(
             continue
         var parsed = _try_parse_timestamp_ns(cell)
         if parsed:
-            arr.set(r, parsed.value())
+            arr.set(r, parsed.value())  # cov: unreachable the SIMD fast path above accepts every cell this parser accepts (issue 899)
         else:
             arr.validity.value().clear(r)
             null_count += 1
@@ -653,7 +653,7 @@ def _build_time32_s_column(
             continue
         var parsed = _try_parse_time_s(cell)
         if parsed:
-            arr.set(r, parsed.value())
+            arr.set(r, parsed.value())  # cov: unreachable the SIMD fast path above accepts every cell this parser accepts (issue 899)
         else:
             arr.validity.value().clear(r)
             null_count += 1
@@ -697,7 +697,7 @@ def _build_time32_ms_column(
             continue
         var parsed = _try_parse_time_ms(cell)
         if parsed:
-            arr.set(r, parsed.value())
+            arr.set(r, parsed.value())  # cov: unreachable the SIMD fast path above accepts every cell this parser accepts (issue 899)
         else:
             arr.validity.value().clear(r)
             null_count += 1
@@ -741,7 +741,7 @@ def _build_time64_us_column(
             continue
         var parsed = _try_parse_time_us(cell)
         if parsed:
-            arr.set(r, parsed.value())
+            arr.set(r, parsed.value())  # cov: unreachable the SIMD fast path above accepts every cell this parser accepts (issue 899)
         else:
             arr.validity.value().clear(r)
             null_count += 1
@@ -785,7 +785,7 @@ def _build_time64_ns_column(
             continue
         var parsed = _try_parse_time_ns(cell)
         if parsed:
-            arr.set(r, parsed.value())
+            arr.set(r, parsed.value())  # cov: unreachable the SIMD fast path above accepts every cell this parser accepts (issue 899)
         else:
             arr.validity.value().clear(r)
             null_count += 1

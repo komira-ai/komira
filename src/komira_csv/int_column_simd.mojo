@@ -345,7 +345,7 @@ def build_date32_column_simd(
             continue
         var parsed = _try_parse_date32(cell_slow)
         if parsed:
-            arr.data.set_typed[Int32](r, parsed.value())
+            arr.data.set_typed[Int32](r, parsed.value())  # cov: unreachable the SIMD date fast path accepts every cell _try_parse_date32 accepts
         else:
             null_positions.append(r)
         r = r + 1

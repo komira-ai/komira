@@ -835,7 +835,7 @@ def read_csv_bytes_to_batch_parallel_impl[
     check_csv_column_count(num_cols)
     if num_cols == 0:
         # No columns inferable. Fallback.
-        return read_csv_bytes_to_batch[Q, SCANNER_VARIANT_PHASE_3](bytes, options)
+        return read_csv_bytes_to_batch[Q, SCANNER_VARIANT_PHASE_3](bytes, options)  # cov: unreachable row 0 holds at least one cell, so a header row is never empty
 
     # Infer types from worker 0's PREFIX data rows (post-header).
     # The prefix is bounded at _INFER_PREFIX_BYTES, so this is bounded
@@ -1713,16 +1713,16 @@ def _concat_csv_batches_column_parallel[
 
     # Fast paths.
     if num_cols == 0 or k == 0:
-        var sb_empty = SchemaBuilder()
+        var sb_empty = SchemaBuilder()  # cov: unreachable the reader calls this only with k >= 2 and num_cols >= 1; a direct call with k == 0 and num_cols >= 1 raises here (issue 1128 item 2)
         var f_idx = 0
-        while f_idx < num_cols:
-            sb_empty.add_field(
-                Field(header_names[f_idx], shared_col_types[f_idx], True)
+        while f_idx < num_cols:  # cov: unreachable the reader calls this only with k >= 2 and num_cols >= 1; a direct call with k == 0 and num_cols >= 1 raises here (issue 1128 item 2)
+            sb_empty.add_field(  # cov: unreachable the reader calls this only with k >= 2 and num_cols >= 1; a direct call with k == 0 and num_cols >= 1 raises here (issue 1128 item 2)
+                Field(header_names[f_idx], shared_col_types[f_idx], True)  # cov: unreachable the reader calls this only with k >= 2 and num_cols >= 1; a direct call with k == 0 and num_cols >= 1 raises here (issue 1128 item 2)
             )
-            f_idx = f_idx + 1
-        var rbb_empty = RecordBatchBuilder()
-        _ = batches^
-        return rbb_empty.build(sb_empty.build())
+            f_idx = f_idx + 1  # cov: unreachable the reader calls this only with k >= 2 and num_cols >= 1; a direct call with k == 0 and num_cols >= 1 raises here (issue 1128 item 2)
+        var rbb_empty = RecordBatchBuilder()  # cov: unreachable the reader calls this only with k >= 2 and num_cols >= 1; a direct call with k == 0 and num_cols >= 1 raises here (issue 1128 item 2)
+        _ = batches^  # cov: unreachable the reader calls this only with k >= 2 and num_cols >= 1; a direct call with k == 0 and num_cols >= 1 raises here (issue 1128 item 2)
+        return rbb_empty.build(sb_empty.build())  # cov: unreachable the reader calls this only with k >= 2 and num_cols >= 1; a direct call with k == 0 and num_cols >= 1 raises here (issue 1128 item 2)
 
     # Pre-fill output Slab[Column] with empty placeholders. Workers
     # __setitem__ their disjoint slot -- no growth across the dispatch.

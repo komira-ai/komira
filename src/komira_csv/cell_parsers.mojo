@@ -174,7 +174,7 @@ def _try_parse_float64(
                 saw_exp_digit = True
                 i = i + 1
             if not saw_exp_digit:
-                return None
+                return None  # cov: unreachable past the i >= n check the loop refuses a byte or sees a digit
             # Apply exp: multiply or divide by 10^exp_val.
             var k = 0
             if exp_neg:

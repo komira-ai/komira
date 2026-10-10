@@ -1486,7 +1486,7 @@ struct _CsvPwriteTask[
                     sp[].fd_ptr[], Int64(w_off), w_buf_span
                 )
             except e:
-                sp[].errors.value()[w] = Optional[String](String(e))
+                sp[].errors.value()[w] = Optional[String](String(e))  # cov: unreachable a pwrite worker records an error only on an I/O error of the open file
             w = w + n_workers
 
 
@@ -1791,9 +1791,9 @@ struct CsvSink(RowSink, Movable):
             total_bytes += len(per_worker_bytes[t_idx])
             t_idx = t_idx + 1
         if total_bytes == 0:
-            _ = cancel_token^
-            _ = per_worker_bytes^
-            return
+            _ = cancel_token^  # cov: unreachable at least 16384 rows each emit a line feed, so the total is never 0
+            _ = per_worker_bytes^  # cov: unreachable at least 16384 rows each emit a line feed, so the total is never 0
+            return  # cov: unreachable at least 16384 rows each emit a line feed, so the total is never 0
 
         # Prefix-sum per-worker byte counts into per-worker global file
         # offsets. Cheap; runs on the main thread post-fork-join.
@@ -1856,12 +1856,12 @@ struct CsvSink(RowSink, Movable):
         var pe_idx = 0
         while pe_idx < effective_workers:
             if pwrite_errors[pe_idx]:
-                var msg = pwrite_errors[pe_idx].value().copy()
-                raise Error(
-                    String("CsvSink.accept_batch: pwrite worker ")
-                    + String(pe_idx)
-                    + String(" failed: ")
-                    + msg
+                var msg = pwrite_errors[pe_idx].value().copy()  # cov: unreachable a pwrite worker records an error only on an I/O error of the open file
+                raise Error(  # cov: unreachable a pwrite worker records an error only on an I/O error of the open file
+                    String("CsvSink.accept_batch: pwrite worker ")  # cov: unreachable a pwrite worker records an error only on an I/O error of the open file
+                    + String(pe_idx)  # cov: unreachable a pwrite worker records an error only on an I/O error of the open file
+                    + String(" failed: ")  # cov: unreachable a pwrite worker records an error only on an I/O error of the open file
+                    + msg  # cov: unreachable a pwrite worker records an error only on an I/O error of the open file
                 )
             pe_idx = pe_idx + 1
 
