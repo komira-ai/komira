@@ -1,0 +1,58 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The source a URL names, by its prefix: source_scheme_for_url maps file://
+# or a bare path, s3:// (s3a://), gs:// (gcs://), az://, abfs[s]:// and an
+# <account>.blob.core.windows.net https:// host (no user information or
+# port, as komira_azure_blob's parse_azure_url reads it) to
+# komira_plan_expr's FS_SCHEME_* code and refuses
+# every other prefix, every other https:// host and every http:// URL;
+# check_source_scheme holds a code a plan carries to the same four. A
+# surface (komira_sql, komira_sdk, and each surface still to come) calls it
+# before it builds the logical plan, which then names the one source a
+# compiled physical plan reads. A physical-plan package must not depend on
+# it. The per-source syntax after the prefix is the owning package's
+# (komira_azure_blob's parse_azure_url, komira_objectstore's URI parser).
+#
+# The tests are hermetic, no socket: test_source_url (each prefix and its
+# letter case, bare paths, text before "://" that is not scheme-shaped taken
+# as a bare path, and every refusal by exact message, none echoing a path, a
+# query or user information), test_source_azure_agrees (every Azure-shaped
+# URL row the mapping sends to Azure is one parse_azure_url reads, and the
+# reverse, an emulator's http:// URL the one intended difference),
+# test_source_scheme (a descriptor's code held
+# to the four, an unknown code refused naming the descriptor),
+# test_source_scheme_agrees (the code the mapping returns for each prefix is
+# the SCHEME its file system advertises: komira_fs's LocalFs,
+# komira_objectstore_s3's S3Fs, komira_objectstore_gcs's GcsFs and
+# komira_azure_blob's AzureFs, over a production and a scripted connector)
+# and test_no_env_reads (the package's sources read no environment).
+#
+# The four file-system packages are `test_deps`: they reach
+# test_source_scheme_agrees and test_source_azure_agrees only, never this library, its package or its
+# closure (tools/build/mojo/test_deps.bzl), so a surface that depends on this
+# package does not take on a cloud client.
+mojo_library(
+    name = "komira_source_url",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = ["//src/komira_plan_expr:komira_plan_expr"],
+    test_deps = [
+        "//src/komira_azure_blob:komira_azure_blob",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_objectstore_gcs:komira_objectstore_gcs",
+        "//src/komira_objectstore_s3:komira_objectstore_s3",
+    ],
+    test_data = {
+        "tests/test_no_env_reads.mojo": {
+            "src/" + f: f
+            for f in glob(["*.mojo"])
+        },
+    },
+    test_srcs = [
+        "tests/test_no_env_reads.mojo",
+        "tests/test_source_azure_agrees.mojo",
+        "tests/test_source_scheme.mojo",
+        "tests/test_source_scheme_agrees.mojo",
+        "tests/test_source_url.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

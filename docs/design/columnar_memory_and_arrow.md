@@ -214,7 +214,7 @@ Some of the core packages' tests and what they cover:
 | Test | Covers |
 |---|---|
 | `test_arrow_ipc_pyarrow_parity` | Decoding IPC bytes that pyarrow wrote, from `src/komira_arrow_ipc/tests/fixtures/arrow_ipc/` |
-| `test_arrow_ipc_type_census` | Which of the 51 type ids the encoder writes, refuses or has no arm for |
+| `test_arrow_ipc_type_census` | Which of the 50 type ids the encoder writes, refuses or has no arm for |
 | `test_arrow_ipc_flatbuf_wire_canonical` | Lengths and offsets above 4 GiB in IPC metadata |
 | `test_lz4_raw_conformer_roundtrip` | The `Lz4Raw` codec |
 | `test_bitmap`, `test_bitmap_ops` | Validity bitmaps |

@@ -1,0 +1,113 @@
+# git 2.56.0 built from source with the pinned zig (README.md): the oracle of
+# komira_git's conformance tests, with the pinned git-lfs
+# (//third_party/git-lfs). linux-x86_64 only
+# (limits.tsv `git-oracle-linux-x86-64`).
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:table.bzl", "row")
+load(":defs.bzl", "git_build", "git_check", "git_tool")
+
+_TRIPLE = row("linux-x86_64")["zig_triple"]
+
+# What `git --version` and `git-lfs version` must print.
+_VERSION = "2.56.0"
+_LFS_VERSION = "3.8.0"
+
+# ---- Pinned inputs -------------------------------------------------------------
+
+# The release archive, GPL-2.0-only (COPYING in the archive). kernel.org's
+# sha256sums.asc lists this sha256 for it.
+pinned_file(
+    name = "git-2.56.0.tar.gz",
+    url = "https://www.kernel.org/pub/software/scm/git/git-2.56.0.tar.gz",
+    sha256 = "826817fd3671b8565586d6d49f688298de8354ab11db829c02720e5c74b9b39f",
+    size_bytes = 12765691,
+)
+
+# curl 8.22.0, the curl licence (COPYING in the archive). The release publishes
+# signatures, not checksums; the sha256 is of the archive as downloaded from
+# curl.se.
+pinned_file(
+    name = "curl-8.22.0.tar.gz",
+    url = "https://curl.se/download/curl-8.22.0.tar.gz",
+    sha256 = "d54dd598bf05927a726deb38df31c6a255ba83ff1de57c5d1464dac3ed8f44a1",
+    size_bytes = 4408679,
+)
+
+# GNU make 4.4.1, GPL-3.0-or-later: the build tool of curl and git, built
+# here (its build.sh needs no make). Nothing of it is in the distribution.
+pinned_file(
+    name = "make-4.4.1.tar.gz",
+    url = "https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz",
+    sha256 = "dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3",
+    size_bytes = 2348200,
+)
+
+# ---- Built by remote actions ---------------------------------------------------
+
+# GNU make, zlib (//third_party/zlib's pinned release) and an HTTP-only static
+# libcurl.
+git_build(
+    name = "deps",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:git-oracle-linux-x86-64
+    inputs = {
+        "curl": ":curl-8.22.0.tar.gz",
+        "make": ":make-4.4.1.tar.gz",
+        "zlib": "//third_party/zlib:zlib-1.3.1.tar.gz",
+    },
+    mode = "deps",
+    script = "git_build.sh",
+    zig_triple = _TRIPLE,
+)
+
+# The distribution: bin/git, libexec/git-core/, share/.
+git_build(
+    name = "git_dist",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:git-oracle-linux-x86-64
+    inputs = {
+        "deps": ":deps",
+        "git": ":git-2.56.0.tar.gz",
+    },
+    mode = "git",
+    script = "git_build.sh",
+    zig_triple = _TRIPLE,
+)
+
+# ---- Checks: build actions; :git exists only when they pass --------------------
+
+git_check(
+    name = "git_check",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:git-oracle-linux-x86-64
+    git = ":git_dist",
+    git_lfs = "//third_party/git-lfs:git-lfs[git-lfs]",
+    glibc_floor_minor = _TRIPLE.split(".")[-1],
+    lfs_version = _LFS_VERSION,
+    script = "git_check.sh",
+    version = _VERSION,
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = [
+        "git_build.sh",
+        "git_check.sh",
+    ],
+)
+
+# ---- What other targets use ----------------------------------------------------
+
+git_tool(
+    name = "git",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:git-oracle-linux-x86-64
+    checks = [
+        ":git_check",
+        ":shell_lint",
+    ],
+    dist = ":git_dist",
+    visibility = ["//src/tests/conformance/..."],
+)

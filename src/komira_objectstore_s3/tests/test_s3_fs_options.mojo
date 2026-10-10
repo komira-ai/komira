@@ -4,10 +4,9 @@
 # s3_fs.mojo with the rest of the package). The settings are read through
 # accessors, so a value the constructor refuses cannot be set afterwards.
 #
-# The two in-flight bounds are recorded, not yet enforced (the send blocks
-# its thread, so requests go one at a time); what these rows pin is what is
-# recorded and what is refused. The part size is enforced, and test_s3_fs
-# counts the parts it makes.
+# What these rows pin is what each setting holds and what is refused;
+# test_s3_fs_inflight observes the two in-flight bounds kept, and test_s3_fs
+# counts the parts the part size makes.
 #
 # Rows: the defaults, and `standard()` agreeing with them; the in-flight
 # window handed to the store for a call of N ranges: N with no bound, the

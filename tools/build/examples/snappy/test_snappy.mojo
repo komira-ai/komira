@@ -15,12 +15,12 @@ def main() raises:
     for i in range(n):
         input.append(UInt8(i % 7))
 
-    var max_len = external_call["snappy_max_compressed_length", UInt64](UInt64(n))
+    var max_len = external_call["komira_snappy_max_compressed_length", UInt64](UInt64(n))
     expect(Int(max_len) == 32 + n + n // 6, "snappy_max_compressed_length(4096) = " + String(max_len))
 
     var compressed = List[UInt8](length=Int(max_len), fill=0)
     var compressed_len = List[UInt64](length=1, fill=max_len)
-    var rc = external_call["snappy_compress", Int32](
+    var rc = external_call["komira_snappy_compress", Int32](
         input.unsafe_ptr(), UInt64(n), compressed.unsafe_ptr(), compressed_len.unsafe_ptr()
     )
     expect(rc == SNAPPY_OK, "snappy_compress returned " + String(rc))
@@ -28,7 +28,7 @@ def main() raises:
 
     var output = List[UInt8](length=n, fill=0)
     var output_len = List[UInt64](length=1, fill=UInt64(n))
-    rc = external_call["snappy_uncompress", Int32](
+    rc = external_call["komira_snappy_uncompress", Int32](
         compressed.unsafe_ptr(), compressed_len[0], output.unsafe_ptr(), output_len.unsafe_ptr()
     )
     expect(rc == SNAPPY_OK, "snappy_uncompress returned " + String(rc))

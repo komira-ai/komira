@@ -31,26 +31,50 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the same account at the wall clock. Both parse the account with komira_json
 # and load its PEM key with komira_crypto, declared below for those tests
 # alone (the library itself imports neither).
+#
+# test_gcs_grpc_trust runs a real komira_http_server HttpServer with a
+# komira_connect ConnectService stub of GetObject over TLS + h2 on 127.0.0.1
+# (komira_http_core's exported fixture leaf), server and client on two
+# komira_fork_join threads: the default connector (`build_gcs_tls_connector`)
+# refuses the fixture root, `build_gcs_tls_connector_trusting(root_ca.pem,
+# "localhost")` completes the handshake and one GetObject, and the same root
+# under a name the leaf does not carry is refused. komira_atomic_alias, komira_connect, komira_fork_join and
+# komira_http_server are declared below for that test alone (the library
+# imports none of them).
 # test_env_source_only scans the package's own sources, staged as its data,
 # for any environment read; nothing here is exempt.
+_TLS_FIXTURES = {
+    "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+    "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+    "src/komira_http_core/tests/fixtures/tls/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
+}
+
 mojo_library(
     name = "komira_objectstore_gcs",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_async:komira_async",
+        # For test_gcs_grpc_trust only: its two-thread server/client harness.
+        "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_clock:komira_clock",
         # For the tests only: mojo_library has no test-only deps, and they
         # load the dummy account's PEM key with komira_crypto's
         # `rsa_pkcs8_der_from_pem`.
         "//src/komira_collections:komira_collections",
+        # For test_gcs_grpc_trust only: the in-process gRPC server.
+        "//src/komira_connect:komira_connect",
         "//src/komira_crypto:komira_crypto",
+        # For test_gcs_grpc_trust only (see komira_atomic_alias).
+        "//src/komira_fork_join:komira_fork_join",
         "//src/komira_fs:komira_fs",
         "//src/komira_gcp_core:komira_gcp_core",
         "//src/komira_gcp_storage:komira_gcp_storage",
         "//src/komira_grpc:komira_grpc",
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
+        # For test_gcs_grpc_trust only (see komira_connect).
+        "//src/komira_http_server:komira_http_server",
         # For the tests only: they parse the conformance JSON with it.
         "//src/komira_json:komira_json",
         "//src/komira_objectstore:komira_objectstore",
@@ -67,8 +91,10 @@ mojo_library(
         "tests/test_gcs_grpc_backend.mojo",
         "tests/test_gcs_grpc_token_refresh.mojo",
         "tests/test_gcs_grpc_unit_budget.mojo",
+        "tests/test_gcs_grpc_trust.mojo",
     ],
     test_data = {
+        "tests/test_gcs_grpc_trust.mojo": _TLS_FIXTURES,
         "tests/test_env_source_only.mojo": glob(["*.mojo"]),
         "tests/test_gcs_presign_portability.mojo": {
             "conformance": "//third_party/googleapis_conformance_tests:files",

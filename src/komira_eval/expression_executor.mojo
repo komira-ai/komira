@@ -1446,8 +1446,20 @@ struct ExpressionExecutor(Movable, Deinitable):
                     + String(n_sel)
                     + ")"
                 )
+            # The F64 walker reads a NULL cell's stored value; a row whose
+            # either operand is NULL is UNKNOWN and is not emitted.
+            var null_at = List[Bool](length=n_sel, fill=False)
+            self._mark_value_nulls_from_view[bo](
+                batch, node.left, input_sel, null_at
+            )
+            self._mark_value_nulls_from_view[bo](
+                batch, node.right, input_sel, null_at
+            )
             var k = 0
             while k < n_sel:
+                if null_at[k]:
+                    k = k + 1
+                    continue
                 # Extract raw Float64 values from the Scalar[F64] wrappers
                 # to guarantee a primitive Bool comparison result (avoid
                 # the SIMD[bool, 1] mask path).
@@ -1470,11 +1482,11 @@ struct ExpressionExecutor(Movable, Deinitable):
             return output_sel.len()
 
         # Bool column primitives. EXPR_COL_BOOL is a leaf that reads a
-        # BooleanArray directly + emits the bit-true rows of `input_sel`
-        # into `output_sel`. EXPR_NOT_BOOL recurses on `node.left` and
-        # then computes the set-complement (rows in `input_sel` not in
-        # the child's true_sel). EXPR_LIT_BOOL at root passes all rows
-        # (if True) or none (if False).
+        # BooleanArray directly + emits the rows of `input_sel` whose cell is
+        # present and true into `output_sel` (a NULL cell is UNKNOWN, whatever
+        # bit it stores). EXPR_NOT_BOOL keeps the rows where its child is
+        # FALSE under three-valued logic (`_eval_kleene_from_view`).
+        # EXPR_LIT_BOOL at root passes all rows (if True) or none (if False).
         if kind == EXPR_COL_BOOL:
             var col_name = self.column_names[node.col_idx]
             var runtime_idx = batch.column_by_name(col_name)
@@ -1484,7 +1496,7 @@ struct ExpressionExecutor(Movable, Deinitable):
             var k = 0
             while k < n_sel:
                 var row = Int(input_sel.get(k))
-                if bool_arr.get(row):
+                if not bool_arr.is_null(row) and bool_arr.get(row):
                     output_sel.append(UInt32(row))
                 k = k + 1
             return output_sel.len()
@@ -1502,32 +1514,21 @@ struct ExpressionExecutor(Movable, Deinitable):
             return output_sel.len()
 
         if kind == EXPR_NOT_BOOL:
-            # Recursive: evaluate child → child_true; complement within
-            # input_sel = rows in input_sel NOT in child_true.
-            # Stack-local scratch for the child's true sel.
+            # SQL NOT keeps a row only where its child is FALSE: a row where
+            # the child is UNKNOWN (a NULL operand) stays out under the
+            # negation too. The child's three-valued value is computed per
+            # `input_sel` position, so the selection's order does not matter.
             var n_sel = input_sel.len()
-            var child_true = RowSelectionVector(n_sel if n_sel > 0 else 1)
-            _ = self._eval_bool_from_view[bo](
-                batch, node.left, input_sel, child_true, temp_false
+            var child = List[UInt8](capacity=n_sel)
+            self._eval_kleene_from_view[bo](
+                batch, node.left, input_sel, child, temp_false
             )
-            # Set-complement: input_sel \ child_true. Walk input_sel,
-            # emit rows NOT present in child_true. Both sels are sorted
-            # ascending (the kernels preserve input order), so a
-            # two-pointer merge runs in O(n).
             output_sel.set_len(0)
-            var i_in = 0
-            var i_ct = 0
-            var n_ct = child_true.len()
-            while i_in < n_sel:
-                var row_in = input_sel.get(i_in)
-                while i_ct < n_ct and child_true.get(i_ct) < row_in:
-                    i_ct = i_ct + 1
-                if i_ct < n_ct and child_true.get(i_ct) == row_in:
-                    # Row is in child_true → exclude.
-                    i_ct = i_ct + 1
-                else:
-                    output_sel.append(row_in)
-                i_in = i_in + 1
+            var k = 0
+            while k < n_sel:
+                if child[k] == _KLEENE_FALSE:
+                    output_sel.append(input_sel.get(k))
+                k = k + 1
             return output_sel.len()
 
         # String EQ / NEQ filter arms. Both children resolve to
@@ -1954,6 +1955,10 @@ struct ExpressionExecutor(Movable, Deinitable):
                 var k = 0
                 while k < n_sel:
                     var row = Int(input_sel.get(k))
+                    # 3VL: a NULL operand makes the row UNKNOWN.
+                    if l_arr.is_null(row) or r_arr.is_null(row):
+                        k = k + 1
+                        continue
                     var lv = l_arr.get_i128(row)
                     var rv = r_arr.get_i128(row)
                     var matched = _compare_decimal128(
@@ -1974,6 +1979,10 @@ struct ExpressionExecutor(Movable, Deinitable):
                 var k = 0
                 while k < n_sel:
                     var row = Int(input_sel.get(k))
+                    # 3VL: a NULL column cell makes the row UNKNOWN.
+                    if l_arr.is_null(row):
+                        k = k + 1
+                        continue
                     var lv = l_arr.get_i128(row)
                     var matched = _compare_decimal128(
                         lv, l_scale, rv_lit, r_scale, kind
@@ -1993,6 +2002,10 @@ struct ExpressionExecutor(Movable, Deinitable):
                 var k = 0
                 while k < n_sel:
                     var row = Int(input_sel.get(k))
+                    # 3VL: a NULL column cell makes the row UNKNOWN.
+                    if r_arr.is_null(row):
+                        k = k + 1
+                        continue
                     var rv = r_arr.get_i128(row)
                     var matched = _compare_decimal128(
                         lv_lit, l_scale, rv, r_scale, kind
@@ -2095,14 +2108,72 @@ struct ExpressionExecutor(Movable, Deinitable):
         mut output_sel: RowSelectionVector,
         mut temp_false: RowSelectionVector,
     ) raises -> Int:
-        """BatchView-borrow sibling of `_dispatch_comparison`.
+        """Numeric column comparison over `input_sel`, NULL operands dropped.
 
-        Mirrors `_dispatch_comparison` verbatim; the only delta is the
-        `batch` parameter type (`ref [bo] RecordBatch` instead of
-        `mut batch: RecordBatch`). Every batch method called here
-        (`column_by_name`, `column_as_primitive_*`) is read-self per
-        record_batch.mojo's def-method definitions, so the read-only
-        borrow suffices.
+        The sel kernels compare stored values and do not read validity, so
+        when an operand column holds a NULL the rows whose operand is NULL
+        (UNKNOWN under SQL) are removed from the selection before the
+        comparison runs. A column with `null_count() == 0` skips that pass,
+        leaving the kernels' identity fast path in place.
+        """
+        var left = self.expression_pool[node.left]
+        var right = self.expression_pool[node.right]
+        var may_be_null = False
+        if left.kind == EXPR_COL:
+            may_be_null = self._column_has_nulls_from_view[bo](
+                batch, left.col_idx
+            )
+        if right.kind == EXPR_COL and not may_be_null:
+            may_be_null = self._column_has_nulls_from_view[bo](
+                batch, right.col_idx
+            )
+        if not may_be_null:
+            return self._compare_present_from_view[bo, T, op](
+                batch, node, idx, input_sel, output_sel, temp_false
+            )
+        var n_sel = input_sel.len()
+        var null_at = List[Bool](length=n_sel, fill=False)
+        self._mark_value_nulls_from_view[bo](
+            batch, node.left, input_sel, null_at
+        )
+        self._mark_value_nulls_from_view[bo](
+            batch, node.right, input_sel, null_at
+        )
+        var present = RowSelectionVector(n_sel if n_sel > 0 else 1)
+        for k in range(n_sel):
+            if not null_at[k]:
+                present.append(input_sel.get(k))
+        return self._compare_present_from_view[bo, T, op](
+            batch, node, idx, present, output_sel, temp_false
+        )
+
+    def _column_has_nulls_from_view[
+        bo: Origin[mut=False],
+    ](imm self, ref [bo] batch: RecordBatch, col_idx: Int) raises -> Bool:
+        """True iff the batch column named by `column_names[col_idx]` holds
+        at least one NULL."""
+        var runtime_idx = batch.column_by_name(self.column_names[col_idx])
+        return batch.column_at(runtime_idx).null_count() > 0
+
+    def _compare_present_from_view[
+        bo: Origin[mut=False], T: DType, op: UInt8
+    ](
+        imm self,
+        ref [bo] batch: RecordBatch,
+        node: RuntimeExpr,
+        idx: Int,
+        ref input_sel: RowSelectionVector,
+        mut output_sel: RowSelectionVector,
+        mut temp_false: RowSelectionVector,
+    ) raises -> Int:
+        """BatchView-borrow sibling of `_dispatch_comparison`: runs the
+        sel kernel for `T` / `op`. Reads stored values only; the caller
+        (`_dispatch_comparison_from_view`) has removed NULL-operand rows.
+
+        Every batch method called here (`column_by_name`,
+        `column_as_primitive_*`) is read-self, so the read-only borrow
+        suffices. `T` is int64 or float64: the walker instantiates no
+        other.
         """
         var left = self.expression_pool[node.left]
         var right = self.expression_pool[node.right]
@@ -2183,7 +2254,10 @@ struct ExpressionExecutor(Movable, Deinitable):
                 Scalar[DType.int64](right.i64),
                 input_sel, output_sel, temp_false,
             )
-        elif T == DType.float64:
+        else:
+            comptime assert T == DType.float64, (
+                "_compare_present_from_view: T is int64 or float64"
+            )
             var left_col = batch.column_as_primitive_float64(left_runtime_idx)
             if right.kind == EXPR_COL:
                 var right_name = self.column_names[right.col_idx]
@@ -2200,29 +2274,249 @@ struct ExpressionExecutor(Movable, Deinitable):
                 Scalar[DType.float64](right.f64),
                 input_sel, output_sel, temp_false,
             )
-        elif T == DType.int32:
-            var left_col = batch.column_as_primitive_int32(left_runtime_idx)
-            if right.kind == EXPR_COL:
-                var right_name = self.column_names[right.col_idx]
-                var right_runtime_idx = batch.column_by_name(right_name)
-                var right_col = batch.column_as_primitive_int32(
-                    right_runtime_idx
-                )
-                return binary_select_col_col[DType.int32, op](
-                    left_col, right_col, input_sel,
-                    output_sel, temp_false,
-                )
-            return binary_select_col_lit[DType.int32, op](
-                left_col,
-                Scalar[DType.int32](Int32(right.i64)),
-                input_sel, output_sel, temp_false,
+
+    # =========================================================================
+    # SQL three-valued logic over a selection.
+    # =========================================================================
+    #
+    # `_eval_bool_from_view` emits the rows where a predicate is TRUE, which is
+    # all a WHERE needs except under NOT: there a FALSE row is kept and an
+    # UNKNOWN row is not, so the walker needs to tell the two apart.
+    # `_eval_kleene_from_view` gives one Kleene value per selection position;
+    # the NULL masks below say which positions have a NULL operand.
+    # =========================================================================
+
+    def _eval_kleene_from_view[
+        bo: Origin[mut=False],
+    ](
+        imm self,
+        ref [bo] batch: RecordBatch,
+        idx: Int,
+        ref sel: RowSelectionVector,
+        mut out: List[UInt8],
+        mut temp_false: RowSelectionVector,
+    ) raises:
+        """Append, for each position of `sel`, the SQL three-valued value of
+        the Bool sub-tree at `idx` (`_KLEENE_FALSE` / `_KLEENE_TRUE` /
+        `_KLEENE_NULL`).
+
+        AND / OR / NOT combine their children's values by Kleene's tables. A
+        leaf is TRUE where `_eval_bool_from_view` emits its row, else UNKNOWN
+        where `_mark_bool_leaf_nulls_from_view` finds a NULL operand, else
+        FALSE. Membership is looked up by row number, so `sel` need not be
+        ascending.
+        """
+        var node = self.expression_pool[idx]
+        var kind = node.kind
+        var n_sel = sel.len()
+
+        if kind == EXPR_AND or kind == EXPR_OR:
+            var l = List[UInt8](capacity=n_sel)
+            var r = List[UInt8](capacity=n_sel)
+            self._eval_kleene_from_view[bo](batch, node.left, sel, l, temp_false)
+            self._eval_kleene_from_view[bo](
+                batch, node.right, sel, r, temp_false
             )
-        else:
-            raise Error(
-                "ExpressionExecutor._dispatch_comparison_from_view:"
-                " unsupported DType (supports int64 / float64 / int32;"
-                " Float32 lands when EXPR_*_F32 tags ship)"
+            for k in range(n_sel):
+                if kind == EXPR_AND:
+                    out.append(_kleene_and(l[k], r[k]))
+                else:
+                    out.append(_kleene_or(l[k], r[k]))
+            return
+        if kind == EXPR_NOT_BOOL:
+            var c = List[UInt8](capacity=n_sel)
+            self._eval_kleene_from_view[bo](batch, node.left, sel, c, temp_false)
+            for k in range(n_sel):
+                out.append(_kleene_not(c[k]))
+            return
+
+        var n_rows = batch.num_rows()
+        var cap = n_rows if n_rows > n_sel else n_sel
+        var true_sel = RowSelectionVector(cap if cap > 0 else 1)
+        _ = self._eval_bool_from_view[bo](batch, idx, sel, true_sel, temp_false)
+        var is_true = List[Bool](length=n_rows, fill=False)
+        for j in range(true_sel.len()):
+            is_true[Int(true_sel.get(j))] = True
+        var null_at = List[Bool](length=n_sel, fill=False)
+        self._mark_bool_leaf_nulls_from_view[bo](batch, node, idx, sel, null_at)
+        for k in range(n_sel):
+            if is_true[Int(sel.get(k))]:
+                out.append(_KLEENE_TRUE)
+            elif null_at[k]:
+                out.append(_KLEENE_NULL)
+            else:
+                out.append(_KLEENE_FALSE)
+
+    def _mark_bool_leaf_nulls_from_view[
+        bo: Origin[mut=False],
+    ](
+        imm self,
+        ref [bo] batch: RecordBatch,
+        node: RuntimeExpr,
+        idx: Int,
+        ref sel: RowSelectionVector,
+        mut null_at: List[Bool],
+    ) raises:
+        """Set `null_at[k]` where the Bool leaf `node` (pool slot `idx`) is
+        UNKNOWN unless it is TRUE: a comparison or LIKE with a NULL operand,
+        a NULL Bool cell, or an IN-list whose probe value is NULL or whose
+        list holds a NULL (`x IN (1, NULL)` is UNKNOWN for x = 2).
+        IS NULL / IS NOT NULL and Bool literals are never UNKNOWN."""
+        var kind = node.kind
+        if _is_binary_bool_leaf(kind):
+            self._mark_value_nulls_from_view[bo](batch, node.left, sel, null_at)
+            self._mark_value_nulls_from_view[bo](
+                batch, node.right, sel, null_at
             )
+            return
+        if kind == EXPR_COL_BOOL:
+            self._mark_value_nulls_from_view[bo](batch, idx, sel, null_at)
+            return
+        if (
+            kind == EXPR_LIT_BOOL
+            or kind == EXPR_IS_NULL_STRING
+            or kind == EXPR_IS_NOT_NULL_STRING
+        ):
+            return
+        if kind == EXPR_IN_LIST:
+            self._mark_value_nulls_from_view[bo](batch, node.left, sel, null_at)
+            ref values = self.in_list_pool[node.col_idx]
+            for i in range(len(values)):
+                if values[i].is_null():
+                    for k in range(sel.len()):
+                        null_at[k] = True
+                    return
+            return
+        raise Error(
+            "ExpressionExecutor._mark_bool_leaf_nulls_from_view: unsupported"
+            " node kind "
+            + String(kind)
+            + " at pool slot "
+            + String(idx)
+        )
+
+    def _mark_value_nulls_from_view[
+        bo: Origin[mut=False],
+    ](
+        imm self,
+        ref [bo] batch: RecordBatch,
+        idx: Int,
+        ref sel: RowSelectionVector,
+        mut null_at: List[Bool],
+    ) raises:
+        """Set `null_at[k]` (sized `sel.len()`) where the value sub-tree at
+        `idx` is SQL NULL for row `sel[k]`; other positions are left as they
+        are.
+
+        A column leaf is NULL where its cell is; EXPR_NULL everywhere; a
+        literal nowhere. Arithmetic, casts and the math functions are NULL
+        where an operand is. A CASE is NULL where the branch it takes is,
+        chosen as `eval_to_list_{i64,f64}_from_view` choose it. Any other kind
+        raises (the value walkers do not serve it either).
+        """
+        var node = self.expression_pool[idx]
+        var kind = node.kind
+        var n_sel = sel.len()
+        if (
+            kind == EXPR_COL
+            or kind == EXPR_COL_STRING
+            or kind == EXPR_COL_DECIMAL128
+            or kind == EXPR_COL_BOOL
+        ):
+            var runtime_idx = batch.column_by_name(
+                self.column_names[node.col_idx]
+            )
+            ref col = batch.column_at(runtime_idx)
+            if col.null_count() == 0:
+                return
+            for k in range(n_sel):
+                if col.is_null_at(Int(sel.get(k))):
+                    null_at[k] = True
+            return
+        if kind == EXPR_NULL:
+            for k in range(n_sel):
+                null_at[k] = True
+            return
+        if (
+            kind == EXPR_LIT_I64
+            or kind == EXPR_LIT_F64
+            or kind == EXPR_LIT_I32
+            or kind == EXPR_LIT_STRING
+            or kind == EXPR_LIT_DECIMAL128
+            or kind == EXPR_LIT_BOOL
+        ):
+            return
+        if (
+            kind == EXPR_ADD_I64
+            or kind == EXPR_SUB_I64
+            or kind == EXPR_MUL_I64
+            or kind == EXPR_DIV_I64
+            or kind == EXPR_ADD_F64
+            or kind == EXPR_SUB_F64
+            or kind == EXPR_MUL_F64
+            or kind == EXPR_DIV_F64
+            or kind == EXPR_ADD_I32
+            or kind == EXPR_SUB_I32
+            or kind == EXPR_MUL_I32
+            or kind == EXPR_DIV_I32
+            or kind == EXPR_ATAN2_F64
+            or kind == EXPR_POW_F64
+        ):
+            self._mark_value_nulls_from_view[bo](batch, node.left, sel, null_at)
+            self._mark_value_nulls_from_view[bo](
+                batch, node.right, sel, null_at
+            )
+            return
+        if (
+            kind == EXPR_F64_TO_I64
+            or kind == EXPR_I64_TO_F64
+            or kind == EXPR_SQRT_F64
+            or kind == EXPR_SIN_F64
+            or kind == EXPR_COS_F64
+            or kind == EXPR_ASIN_F64
+            or kind == EXPR_RADIANS_F64
+            or kind == EXPR_MATH_UNARY_F64
+        ):
+            self._mark_value_nulls_from_view[bo](batch, node.left, sel, null_at)
+            return
+        if kind == EXPR_CASE_I64 or kind == EXPR_CASE_F64:
+            ref slots = self.when_pool[node.col_idx]
+            var n_pairs = (len(slots) - 1) // 2
+            var n_rows = batch.num_rows()
+            # `taken[k]` = the WHEN index whose condition first holds, or
+            # `n_pairs` for the ELSE.
+            var taken = List[Int](length=n_sel, fill=n_pairs)
+            for c in range(n_pairs):
+                var cond_mask = List[Scalar[DType.bool]](capacity=n_rows)
+                for _r in range(n_rows):
+                    cond_mask.append(Scalar[DType.bool](False))
+                self._eval_case_cond_mask_from_view[bo](
+                    batch, slots[2 * c], sel, cond_mask
+                )
+                for k in range(n_sel):
+                    if taken[k] == n_pairs and Bool(
+                        cond_mask[Int(sel.get(k))]
+                    ):
+                        taken[k] = c
+            for b in range(n_pairs + 1):
+                var slot = slots[2 * b + 1] if b < n_pairs else slots[
+                    len(slots) - 1
+                ]
+                var branch_null = List[Bool](length=n_sel, fill=False)
+                self._mark_value_nulls_from_view[bo](
+                    batch, slot, sel, branch_null
+                )
+                for k in range(n_sel):
+                    if taken[k] == b and branch_null[k]:
+                        null_at[k] = True
+            return
+        raise Error(
+            "ExpressionExecutor._mark_value_nulls_from_view: unsupported"
+            " node kind "
+            + String(kind)
+            + " at pool slot "
+            + String(idx)
+        )
 
     # =========================================================================
     # EXPR_IN_LIST per-row membership probe.
@@ -2670,8 +2964,8 @@ struct ExpressionExecutor(Movable, Deinitable):
         # Arithmetic arms use
         # BATCHED recursive evaluation, NOT per-row scalar recursion.
         #
-        # Bug history: the prior implementation called
-        # `_eval_scalar_i64_from_view[bo](batch_view, node.left, row)` PER ROW
+        # Bug history: the prior implementation called a per-row scalar
+        # walker (`_eval_scalar_i64_from_view`, since removed) PER ROW
         # in a `while k < n_sel` loop. The EXPR_COL leaf of that scalar walker
         # calls `batch.column_as_primitive_int64(idx)` which COPIES THE ENTIRE
         # COLUMN via `OwnedAlignedBuffer` allocation + `memcpy` (see
@@ -2754,8 +3048,10 @@ struct ExpressionExecutor(Movable, Deinitable):
                         " EXPR_DIV_I64 division by zero at sel index "
                         + String(k)
                     )
-                # Truncated integer division (Mojo `a // b` on Int64 truncates
-                # toward zero).
+                # Mojo `//` on Int64 FLOORS (-7 // 2 = -4), where SQL
+                # integer division truncates toward zero (-3); see
+                # `_ee_div_floor`. The two agree when the operands share a
+                # sign or the division is exact.
                 out.append(lhs_vals[k] // rhs_vals[k])
                 k = k + 1
             return
@@ -3264,237 +3560,6 @@ struct ExpressionExecutor(Movable, Deinitable):
             " + EXPR_CASE_F64)"
         )
 
-    # -------------------------------------------------------------------------
-    # per-row scalar
-    # recursive helpers for the arithmetic arms above. NOT public surface —
-    # used only by `eval_to_list_{i64,f64}_from_view` to descend into sub-Expr
-    # operands of EXPR_{ADD,SUB,MUL,DIV}_{I64,F64} nodes.
-    #
-    # Design: per-row recursive descent over `kind`. Real-world projection
-    # trees are shallow (CB Q22 worst case ~3 levels); no iterative pattern
-    # or depth-limit needed at this slot.
-    # -------------------------------------------------------------------------
-
-    def _eval_scalar_i64_from_view[
-        bo: Origin[mut=False],
-    ](
-        imm self,
-        batch_view: BatchView[bo],
-        expr_idx: Int,
-        row: Int,
-    ) raises -> Scalar[DType.int64]:
-        """Single-row Int64 scalar evaluator for arithmetic sub-Exprs.
-
-        Mirrors the `eval_to_list_i64_from_view` dispatch table but produces
-        ONE scalar per call (no `sel`, no `out`). Routes EXPR_COL through
-        the typed column accessor; EXPR_LIT_I64 returns the carried literal;
-        arithmetic arms recurse.
-
-        Args:
-            batch_view: Read-only typed borrow over the source RecordBatch.
-            expr_idx: Pool slot of the sub-Expr node to evaluate.
-            row: Row index (resolved from `sel.get(k)` by the caller).
-
-        Returns:
-            One Int64 scalar.
-
-        Raises:
-            Error on unsupported kind (supported: EXPR_COL +
-            EXPR_LIT_I64 + EXPR_{ADD,SUB,MUL,DIV}_I64).
-            Error on EXPR_DIV_I64 division by zero.
-        """
-        ref batch = batch_view._batch[]
-        var node = self.expression_pool[expr_idx]
-        var kind = node.kind
-
-        if kind == EXPR_COL:
-            var col_name = self.column_names[node.col_idx]
-            var runtime_idx = batch.column_by_name(col_name)
-            var col = batch.column_as_primitive_int64(runtime_idx)
-            return col.load[1](row)[0]
-
-        if kind == EXPR_LIT_I64:
-            return Scalar[DType.int64](node.i64)
-
-        if kind == EXPR_ADD_I64:
-            var lhs = self._eval_scalar_i64_from_view[bo](
-                batch_view, node.left, row
-            )
-            var rhs = self._eval_scalar_i64_from_view[bo](
-                batch_view, node.right, row
-            )
-            return checked_add[DType.int64](lhs, rhs)
-
-        if kind == EXPR_SUB_I64:
-            var lhs = self._eval_scalar_i64_from_view[bo](
-                batch_view, node.left, row
-            )
-            var rhs = self._eval_scalar_i64_from_view[bo](
-                batch_view, node.right, row
-            )
-            return checked_sub[DType.int64](lhs, rhs)
-
-        if kind == EXPR_MUL_I64:
-            var lhs = self._eval_scalar_i64_from_view[bo](
-                batch_view, node.left, row
-            )
-            var rhs = self._eval_scalar_i64_from_view[bo](
-                batch_view, node.right, row
-            )
-            return checked_mul[DType.int64](lhs, rhs)
-
-        if kind == EXPR_DIV_I64:
-            var lhs = self._eval_scalar_i64_from_view[bo](
-                batch_view, node.left, row
-            )
-            var rhs = self._eval_scalar_i64_from_view[bo](
-                batch_view, node.right, row
-            )
-            if rhs == Int64(0):
-                raise Error(
-                    "ExpressionExecutor._eval_scalar_i64_from_view:"
-                    " EXPR_DIV_I64 division by zero at row "
-                    + String(row)
-                )
-            return lhs // rhs
-
-        raise Error(
-            "ExpressionExecutor._eval_scalar_i64_from_view: unsupported"
-            " node kind "
-            + String(kind)
-            + " at pool slot "
-            + String(expr_idx)
-        )
-
-    def _eval_scalar_f64_from_view[
-        bo: Origin[mut=False],
-    ](
-        imm self,
-        batch_view: BatchView[bo],
-        expr_idx: Int,
-        row: Int,
-    ) raises -> Scalar[DType.float64]:
-        """Single-row Float64 scalar evaluator for arithmetic sub-Exprs.
-
-        Mirror of `_eval_scalar_i64_from_view` with Float64 output.
-        Div-by-zero does NOT raise (IEEE-754 produces ±Inf or NaN).
-
-        Raises:
-            Error on unsupported kind.
-        """
-        ref batch = batch_view._batch[]
-        var node = self.expression_pool[expr_idx]
-        var kind = node.kind
-
-        if kind == EXPR_COL:
-            var col_name = self.column_names[node.col_idx]
-            var runtime_idx = batch.column_by_name(col_name)
-            # Widen an integer source column to
-            # float64 instead of bit-reinterpreting via `as_primitive[f64]`.
-            # See the matching note in `eval_to_list_f64_from_view`'s EXPR_COL
-            # arm — the F64-channel agg val-expr can reference an INT64 / INT32
-            # source column (`count(int_col)`, `min(int64_col)`).
-            var src_at = batch.column_arrow_type(runtime_idx)
-            if src_at == ArrowType.INT64:
-                var col = batch.column_as_primitive_int64(runtime_idx)
-                return Scalar[DType.float64](col.load[1](row)[0])
-            if src_at == ArrowType.INT32:
-                var col = batch.column_as_primitive_int32(runtime_idx)
-                return Scalar[DType.float64](col.load[1](row)[0])
-            var col = batch.column_as_primitive_float64(runtime_idx)
-            return col.load[1](row)[0]
-
-        if kind == EXPR_LIT_F64:
-            return Scalar[DType.float64](node.f64)
-
-        if kind == EXPR_ADD_F64:
-            var lhs = self._eval_scalar_f64_from_view[bo](
-                batch_view, node.left, row
-            )
-            var rhs = self._eval_scalar_f64_from_view[bo](
-                batch_view, node.right, row
-            )
-            return lhs + rhs
-
-        if kind == EXPR_SUB_F64:
-            var lhs = self._eval_scalar_f64_from_view[bo](
-                batch_view, node.left, row
-            )
-            var rhs = self._eval_scalar_f64_from_view[bo](
-                batch_view, node.right, row
-            )
-            return lhs - rhs
-
-        if kind == EXPR_MUL_F64:
-            var lhs = self._eval_scalar_f64_from_view[bo](
-                batch_view, node.left, row
-            )
-            var rhs = self._eval_scalar_f64_from_view[bo](
-                batch_view, node.right, row
-            )
-            return lhs * rhs
-
-        if kind == EXPR_DIV_F64:
-            var lhs = self._eval_scalar_f64_from_view[bo](
-                batch_view, node.left, row
-            )
-            var rhs = self._eval_scalar_f64_from_view[bo](
-                batch_view, node.right, row
-            )
-            # IEEE-754 — no raise on div-by-zero.
-            return lhs / rhs
-
-        # Mirror of the column-walker arm above. Recurses on the single
-        # child (`node.left`) and returns `math.sqrt` of the row scalar.
-        # IEEE-754 default — sqrt(<0)=NaN, sqrt(NaN)=NaN, sqrt(+Inf)=+Inf.
-        # No raise on any input.
-        if kind == EXPR_SQRT_F64:
-            var v = self._eval_scalar_f64_from_view[bo](
-                batch_view, node.left, row
-            )
-            return sqrt(v)
-
-        # Single-row scalar
-        # evaluation of the unary F64 math ops (mirror of EXPR_SQRT_F64).
-        if kind == EXPR_SIN_F64:
-            return sin(self._eval_scalar_f64_from_view[bo](batch_view, node.left, row))
-        if kind == EXPR_COS_F64:
-            return cos(self._eval_scalar_f64_from_view[bo](batch_view, node.left, row))
-        if kind == EXPR_ASIN_F64:
-            return asin(self._eval_scalar_f64_from_view[bo](batch_view, node.left, row))
-        if kind == EXPR_RADIANS_F64:
-            var rv = self._eval_scalar_f64_from_view[bo](batch_view, node.left, row)
-            return rv * Scalar[DType.float64](pi / 180.0)
-        if kind == EXPR_ATAN2_F64:
-            var yv = self._eval_scalar_f64_from_view[bo](batch_view, node.left, row)
-            var xv = self._eval_scalar_f64_from_view[bo](batch_view, node.right, row)
-            return atan2(yv, xv)
-        if kind == EXPR_POW_F64:
-            var bv = self._eval_scalar_f64_from_view[bo](batch_view, node.left, row)
-            var ev = self._eval_scalar_f64_from_view[bo](batch_view, node.right, row)
-            return libm_pow(bv, ev)
-        if kind == EXPR_MATH_UNARY_F64:
-            # Per-row mirror of the
-            # generic column arm. `col_idx` is the KMATH_* op code.
-            return Scalar[DType.float64](
-                _apply_unary(
-                    UInt8(node.col_idx),
-                    Float64(
-                        self._eval_scalar_f64_from_view[bo](
-                            batch_view, node.left, row
-                        )
-                    ),
-                )
-            )
-
-        raise Error(
-            "ExpressionExecutor._eval_scalar_f64_from_view: unsupported"
-            " node kind "
-            + String(kind)
-            + " at pool slot "
-            + String(expr_idx)
-        )
-
     # =========================================================================
     # Int32 + String walkers. Per-DType project walker entry points for
     # the remaining DTypes.
@@ -3648,8 +3713,9 @@ struct ExpressionExecutor(Movable, Deinitable):
                         " EXPR_DIV_I32 division by zero at row "
                         + String(row)
                     )
-                # Truncated integer division (Mojo `a // b` on Int32
-                # truncates toward zero).
+                # Mojo `//` on Int32 FLOORS (-7 // 2 = -4), where SQL
+                # integer division truncates toward zero (-3); see
+                # `_ee_div_floor`.
                 out.append(lhs // rhs)
                 k = k + 1
             return
@@ -3793,8 +3859,7 @@ struct ExpressionExecutor(Movable, Deinitable):
     ) raises -> Scalar[DType.int32]:
         """Single-row Int32 scalar evaluator for arithmetic sub-Exprs.
 
-        Mirror of `_eval_scalar_i64_from_view` with Int32 output. Routes
-        EXPR_COL through the typed column accessor; EXPR_LIT_I32 returns
+        Routes EXPR_COL through the typed column accessor; EXPR_LIT_I32 returns
         the carried literal narrowed to Int32; arithmetic arms recurse.
 
         Args:
@@ -4751,11 +4816,12 @@ struct ExpressionExecutor(Movable, Deinitable):
     #
     # Per-EXPR_* tag logic is shared between the two orientations through
     # `CS`: ColumnCellSource proves the abstraction is orientation-uniform;
-    # RowCellSource is what the row path binds. The supported tag subset is: EXPR_COL, EXPR_LIT_{I64,F64,I32},
-    # comparisons GT/GE/LT/LE/EQ over the I64/F64/I32 numeric families, and
-    # the EXPR_AND / EXPR_OR Bool combinators. String / Decimal / IN-list /
-    # NULL-mask arms are NOT in the per-cell walker (the column hot path keeps
-    # them; the row path does not serve them per cell).
+    # RowCellSource is what the row path binds. The Bool tags served per cell
+    # are the comparisons over the I64 / U64 / F64 / mixed / DECIMAL128 /
+    # STRING families, LIKE, REGEXP, IS [NOT] NULL, AND, OR and NOT; IN-list
+    # is column-path only. On a nullable source `_eval_kleene_from_source`
+    # applies SQL three-valued logic; `_eval_bool_present_from_source` is the
+    # two-valued walker for rows whose operands are present.
     #
     # Encapsulation: NO UnsafePointer / wildcard in any signature; the `CS`
     # trait bound carries the orientation. The walker only calls `CS.read_*`
@@ -4768,44 +4834,37 @@ struct ExpressionExecutor(Movable, Deinitable):
         """Evaluate the root Bool predicate per-row over `src`.
 
         Returns a RowSelectionVector of the row indices (0-based within
-        `src`) for which the root expression evaluates True. This is the
+        `src`) for which the root expression evaluates TRUE. This is the
         per-cell analog of `select_expression` — the row-streaming stage's filter
         step calls it.
 
         The root expression must evaluate to Bool (a comparison or AND/OR
         combinator); a non-Bool root raises.
 
-        The per-cell comparison arms read a cell's
-        stored value and compare it DIRECTLY (no per-operand null check) — for a
-        NULL cell that reads garbage / a default (e.g. 0). SQL 3VL requires
-        `NULL <op> X = UNKNOWN`, and a WHERE EXCLUDES an UNKNOWN predicate, so a
-        NULL operand must DROP the row regardless of what the stored value
-        compares to. This is the row-native analog of the column path's
-        validity-bitmap null-collapse (and generalizes the residual-LOCAL guard
-        at the join seam). The guard runs ONLY when the source
-        carries a validity region (`src.has_validity()`); a non-nullable layout
-        skips it entirely and is byte-identical to the pre-3VL hot path (no
-        per-row `_bool_node_is_null_from_source` call). `_bool_node_is_null_from_source`
-        covers exactly the bool catalog the per-cell walker serves (comparisons /
-        LIKE / REGEXP / AND / OR / NOT / IS NULL), so every admitted predicate
-        shape is handled — a value-operand leaf reading a NULL cell makes the
-        predicate SQL-NULL and drops the row.
+        SQL three-valued logic: a WHERE keeps a row only when its predicate is
+        TRUE, never when it is UNKNOWN. On a source that carries a validity
+        region (`src.has_validity()`) each row goes through
+        `_eval_kleene_from_source`, which reads a predicate whose value operand
+        is NULL as UNKNOWN and combines AND / OR / NOT by Kleene's tables. A
+        non-nullable layout has no NULL cell, so it runs the two-valued
+        `_eval_bool_present_from_source` and never consults validity.
         """
         var n = src.num_rows()
         var out = RowSelectionVector(n if n > 0 else 1)
         var nullable = src.has_validity()
         var row = 0
         while row < n:
-            if self._eval_bool_from_source[CS](src, self.root_idx, row):
-                # 3VL null-skip: a kept row whose predicate is SQL-NULL (a value
-                # operand read a NULL cell) is UNKNOWN and must be excluded. Only
-                # consulted on a nullable source; the comparison kernels above
-                # stay byte-identical.
-                if nullable and self._bool_node_is_null_from_source[CS](
+            var keep: Bool
+            if nullable:
+                keep = (
+                    self._eval_kleene_from_source[CS](src, self.root_idx, row)
+                    == _KLEENE_TRUE
+                )
+            else:
+                keep = self._eval_bool_present_from_source[CS](
                     src, self.root_idx, row
-                ):
-                    row += 1
-                    continue
+                )
+            if keep:
                 out.append(UInt32(row))
             row += 1
         return out^
@@ -4813,21 +4872,42 @@ struct ExpressionExecutor(Movable, Deinitable):
     def _eval_bool_from_source[
         CS: CellSource
     ](imm self, src: CS, idx: Int, row: Int) raises -> Bool:
-        """Per-cell Bool walker. Mirrors `_eval_bool_from_view`'s tag
-        dispatch, but reads ONE cell per leaf via `CS.read_*` and returns a
-        scalar Bool for `row` (no selection vectors)."""
+        """True iff the Bool sub-tree at `idx` is TRUE for `row` under SQL
+        three-valued logic (FALSE and UNKNOWN both answer False). The CASE
+        arms of the value walkers use it for their WHEN conditions.
+
+        On a nullable source this is `_eval_kleene_from_source == TRUE`; on a
+        non-nullable one every cell is present and the two-valued
+        `_eval_bool_present_from_source` answers directly."""
+        if src.has_validity():
+            return (
+                self._eval_kleene_from_source[CS](src, idx, row) == _KLEENE_TRUE
+            )
+        return self._eval_bool_present_from_source[CS](src, idx, row)
+
+    def _eval_bool_present_from_source[
+        CS: CellSource
+    ](imm self, src: CS, idx: Int, row: Int) raises -> Bool:
+        """Two-valued per-cell Bool walker: reads every operand cell as
+        present. Mirrors `_eval_bool_from_view`'s tag dispatch, but reads ONE
+        cell per leaf via `CS.read_*` and returns a scalar Bool for `row` (no
+        selection vectors).
+
+        Callers guarantee no operand it reads is NULL: either the source has
+        no validity region, or `_eval_kleene_from_source` has checked the
+        leaf's operands before asking for its value."""
         var node = self.expression_pool[idx]
         var kind = node.kind
 
         if kind == EXPR_AND:
-            return self._eval_bool_from_source[CS](
+            return self._eval_bool_present_from_source[CS](
                 src, node.left, row
-            ) and self._eval_bool_from_source[CS](src, node.right, row)
+            ) and self._eval_bool_present_from_source[CS](src, node.right, row)
 
         if kind == EXPR_OR:
-            return self._eval_bool_from_source[CS](
+            return self._eval_bool_present_from_source[CS](
                 src, node.left, row
-            ) or self._eval_bool_from_source[CS](src, node.right, row)
+            ) or self._eval_bool_present_from_source[CS](src, node.right, row)
 
         # Integer comparison family (I64 logical; ColumnCellSource /
         # RowCellSource widen i32 storage to i64 in read_i64).
@@ -4922,8 +5002,8 @@ struct ExpressionExecutor(Movable, Deinitable):
         # passed to `_compare_decimal128`, which rescales the smaller-scale side
         # UP via an i256 intermediate (matching the column path it now replaces).
         # Same-scale comparisons read equal scales and hit the fast
-        # path. The walker does not 3VL null-skip (matching the numeric arm); the
-        # row filter path treats a row's cells as present.
+        # path. Like every arm of this two-valued walker it reads its operand
+        # cells as present; `_eval_kleene_from_source` handles a NULL operand.
         if (
             kind == EXPR_EQ_DECIMAL128
             or kind == EXPR_NEQ_DECIMAL128
@@ -4942,9 +5022,8 @@ struct ExpressionExecutor(Movable, Deinitable):
         # ==, != (EQ/NEQ) + lexicographic <, >, <=, >= over STRING operands.
         # Each side resolves to EXPR_COL_STRING (read via CS.read_string) or
         # EXPR_LIT_STRING (read from string_pool). Byte-wise lexicographic
-        # `_str_compare` mirrors the column `_*_from_view` arm exactly. The
-        # per-cell walker does not do 3VL null-skip (matching the numeric arm);
-        # the row filter path treats a row's cells as present.
+        # `_str_compare` mirrors the column `_*_from_view` arm exactly. Operand
+        # cells are read as present; `_eval_kleene_from_source` handles NULL.
         if (
             kind == EXPR_EQ_STRING
             or kind == EXPR_NEQ_STRING
@@ -4974,9 +5053,8 @@ struct ExpressionExecutor(Movable, Deinitable):
         # `node.right` resolves to EXPR_LIT_STRING (the pattern from
         # string_pool). Reuses the field-tested `_string_like_match` (`%` =
         # zero-or-more bytes, `_` = exactly one byte). Mirrors the column-path
-        # EXPR_LIKE_STRING arm in `_eval_bool_from_view`; the per-cell row
-        # walker treats a row's cells as present (no 3VL null-skip, matching
-        # the numeric / string-comparison arms above).
+        # EXPR_LIKE_STRING arm in `_eval_bool_from_view`. Operand cells are
+        # read as present; `_eval_kleene_from_source` handles NULL.
         if kind == EXPR_LIKE_STRING:
             var lv = self._eval_string_from_source[CS](src, node.left, row)
             var pattern = self._eval_string_from_source[CS](
@@ -4991,10 +5069,9 @@ struct ExpressionExecutor(Movable, Deinitable):
         # `regex_pool` side-table (the program is COMPILED ONCE at segment setup,
         # NOT per row). Reuses the column oracle's `regexp_like_scalar(text, prog)`
         # — the SAME Thompson-NFA / Pike-VM leaf the column path runs — so the
-        # row path is value-identical to `eval_regexp_like`, NOT a reimpl. Like
-        # the LIKE / string-comparison arms, the per-cell walker treats a row's
-        # cells as present (no 3VL null-skip here); the filter-context wrapper
-        # applies the standard null-collapse so NULL value rows never survive.
+        # row path is value-identical to `eval_regexp_like`, NOT a reimpl. The
+        # value cell is read as present; `_eval_kleene_from_source` reads a
+        # NULL value as UNKNOWN.
         if kind == EXPR_REGEXP:
             var rv = self._eval_string_from_source[CS](src, node.left, row)
             return regexp_like_scalar(rv, self.regex_pool[node.col_idx])
@@ -5011,90 +5088,142 @@ struct ExpressionExecutor(Movable, Deinitable):
             return not src.is_null(row, node.col_idx)
 
         # ── NOT (unary boolean negation) ─────────────────────────────────
-        # EXPR_NOT_BOOL carries the child bool sub-expr in `node.left`. 3VL:
-        # `NOT NULL = NULL`, and a NULL predicate result is EXCLUDED from a WHERE
-        # — so when the child's result is SQL-NULL (a comparison/LIKE operand
-        # reads a NULL cell) the NOT returns False (the row drops). Otherwise it
-        # negates the child's scalar Bool. This also serves NOT LIKE for free:
-        # `col NOT LIKE 'pat'` lowers to NOT(EXPR_LIKE_STRING). The IS NULL /
-        # IS NOT NULL unary tests are themselves never NULL (they read validity
-        # directly), so NOT over them is the plain 2VL negation.
+        # EXPR_NOT_BOOL carries the child bool sub-expr in `node.left`. With
+        # every operand present the child is TRUE or FALSE, so NOT is the
+        # two-valued negation. This also serves NOT LIKE: `col NOT LIKE 'pat'`
+        # lowers to NOT(EXPR_LIKE_STRING).
         if kind == EXPR_NOT_BOOL:
-            if self._bool_node_is_null_from_source[CS](src, node.left, row):
-                return False  # NOT NULL = NULL -> excluded
-            return not self._eval_bool_from_source[CS](src, node.left, row)
+            return not self._eval_bool_present_from_source[CS](
+                src, node.left, row
+            )
 
         raise Error(
-            "ExpressionExecutor._eval_bool_from_source: unsupported node kind "
+            "ExpressionExecutor._eval_bool_present_from_source: unsupported"
+            " node kind "
             + String(kind)
             + " at pool slot "
             + String(idx)
             + " (the row-major per-cell walker supports the numeric"
             " comparison + AND/OR subset + STRING ==/!=/<,>,<=,>= + LIKE +"
-            " REGEXP + NOT; decimal / in-list arms are column-path only)"
+            " REGEXP + NOT + DECIMAL128 comparisons; in-list arms are"
+            " column-path only)"
         )
 
-    def _bool_node_is_null_from_source[
+    def _eval_kleene_from_source[
         CS: CellSource
-    ](imm self, src: CS, idx: Int, row: Int) raises -> Bool:
-        """3VL helper for NOT: returns True iff the Bool sub-expr at `idx`
-        evaluates to SQL-NULL for `row`.
+    ](imm self, src: CS, idx: Int, row: Int) raises -> UInt8:
+        """SQL three-valued value of the Bool sub-tree at `idx` for `row`:
+        `_KLEENE_FALSE`, `_KLEENE_TRUE` or `_KLEENE_NULL` (UNKNOWN).
 
-        A comparison / LIKE is NULL iff any of its VALUE operand leaves
-        (EXPR_COL / EXPR_COL_STRING — never literals) reads a NULL cell. AND/OR
-        propagate NULL conservatively (NULL if any child is NULL). The unary
-        IS NULL / IS NOT NULL tests are NEVER NULL (they read validity and yield
-        a definite Bool). This mirrors the per-cell walker's served bool catalog;
-        any kind not enumerated here is treated as non-NULL (its `_eval_bool`
-        arm raises on truly-unsupported kinds, so the NOT child is always a
-        served shape)."""
+        AND / OR / NOT follow Kleene's tables (`FALSE AND UNKNOWN = FALSE`,
+        `TRUE OR UNKNOWN = TRUE`, `NOT UNKNOWN = UNKNOWN`). AND stops at a
+        FALSE left side and OR at a TRUE one, since the right side cannot
+        change the answer. IS NULL / IS NOT NULL are never UNKNOWN. A
+        comparison, LIKE or REGEXP leaf is UNKNOWN when one of its value
+        operands is NULL (`_value_is_null_from_source`); otherwise its operands
+        are present and `_eval_bool_present_from_source` gives its value. A
+        leaf with a NULL operand is not evaluated, so arithmetic over a NULL
+        cell's stored bytes (a zero divisor, say) never runs."""
         var node = self.expression_pool[idx]
         var kind = node.kind
 
-        # AND / OR — recurse on both children (NULL if either is NULL).
-        if kind == EXPR_AND or kind == EXPR_OR:
-            return self._bool_node_is_null_from_source[CS](
-                src, node.left, row
-            ) or self._bool_node_is_null_from_source[CS](src, node.right, row)
-
-        # IS NULL / IS NOT NULL: definite Bool, never NULL.
-        if kind == EXPR_IS_NULL_CELL or kind == EXPR_IS_NOT_NULL_CELL:
-            return False
-
-        # Nested NOT: NULL iff its own child is NULL (NOT NULL = NULL).
+        if kind == EXPR_AND:
+            var l = self._eval_kleene_from_source[CS](src, node.left, row)
+            if l == _KLEENE_FALSE:
+                return _KLEENE_FALSE
+            return _kleene_and(
+                l, self._eval_kleene_from_source[CS](src, node.right, row)
+            )
+        if kind == EXPR_OR:
+            var l = self._eval_kleene_from_source[CS](src, node.left, row)
+            if l == _KLEENE_TRUE:
+                return _KLEENE_TRUE
+            return _kleene_or(
+                l, self._eval_kleene_from_source[CS](src, node.right, row)
+            )
         if kind == EXPR_NOT_BOOL:
-            return self._bool_node_is_null_from_source[CS](
-                src, node.left, row
+            return _kleene_not(
+                self._eval_kleene_from_source[CS](src, node.left, row)
             )
 
-        # A regex predicate is NULL iff its single VALUE
-        # operand (the column in `node.left`) reads a NULL cell. `node.right` is
-        # 0 (unused — the compiled program lives in the regex_pool side-table),
-        # so do NOT consult it (the generic fallback below would mis-read slot 0).
-        # This makes `col NOT REGEXP 'pat'` (NOT over EXPR_REGEXP) 3VL-correct,
-        # mirroring the NOT-over-LIKE precedent.
         if kind == EXPR_REGEXP:
-            return self._value_leaf_is_null_from_source[CS](
+            # The single value operand is `node.left`; `node.col_idx` indexes
+            # the regex_pool and `node.right` is unused.
+            if self._value_is_null_from_source[CS](src, node.left, row):
+                return _KLEENE_NULL
+        elif _is_binary_bool_leaf(kind):
+            if self._value_is_null_from_source[CS](
                 src, node.left, row
-            )
+            ) or self._value_is_null_from_source[CS](src, node.right, row):
+                return _KLEENE_NULL
+        # IS NULL / IS NOT NULL read validity and are never UNKNOWN; any other
+        # kind reaches `_eval_bool_present_from_source`, which raises on a kind
+        # it does not serve.
+        if self._eval_bool_present_from_source[CS](src, idx, row):
+            return _KLEENE_TRUE
+        return _KLEENE_FALSE
 
-        # Comparison + LIKE families: NULL iff a value operand leaf is a NULL
-        # column cell. `node.left` / `node.right` point to value leaves.
-        return self._value_leaf_is_null_from_source[CS](
-            src, node.left, row
-        ) or self._value_leaf_is_null_from_source[CS](src, node.right, row)
-
-    def _value_leaf_is_null_from_source[
+    def _value_is_null_from_source[
         CS: CellSource
     ](imm self, src: CS, idx: Int, row: Int) raises -> Bool:
-        """True iff the value leaf at `idx` reads a NULL cell. Only column-ref
-        leaves (EXPR_COL numeric / EXPR_COL_STRING) can be NULL; literals and
-        computed/arith leaves are present (an arith operand is rejected by the
-        row comparison walker, so it never reaches here)."""
+        """True iff the value sub-tree at `idx` is SQL NULL for `row`.
+
+        A column leaf (EXPR_COL / EXPR_COL_STRING / EXPR_COL_DECIMAL128) is
+        NULL when its cell is; EXPR_NULL always is; a literal never is.
+        Arithmetic, casts, EXTRACT, date_trunc and the math functions are NULL
+        when an operand is. A CASE is NULL when the branch it takes is: the
+        first WHEN that is TRUE (`_eval_bool_from_source`), else the ELSE.
+        Kinds outside this list answer False; the value walkers raise on
+        them."""
         var node = self.expression_pool[idx]
         var kind = node.kind
-        if kind == EXPR_COL or kind == EXPR_COL_STRING:
+        if (
+            kind == EXPR_COL
+            or kind == EXPR_COL_STRING
+            or kind == EXPR_COL_DECIMAL128
+        ):
             return src.is_null(row, node.col_idx)
+        if kind == EXPR_NULL:
+            return True
+        if (
+            kind == EXPR_ADD_I64
+            or kind == EXPR_SUB_I64
+            or kind == EXPR_MUL_I64
+            or kind == EXPR_DIV_I64
+            or kind == EXPR_ADD_F64
+            or kind == EXPR_SUB_F64
+            or kind == EXPR_MUL_F64
+            or kind == EXPR_DIV_F64
+            or kind == EXPR_ATAN2_F64
+            or kind == EXPR_POW_F64
+        ):
+            return self._value_is_null_from_source[CS](
+                src, node.left, row
+            ) or self._value_is_null_from_source[CS](src, node.right, row)
+        if (
+            kind == EXPR_F64_TO_I64
+            or kind == EXPR_I64_TO_F64
+            or kind == EXPR_EXTRACT_I64
+            or kind == EXPR_DATE_TRUNC_I64
+            or kind == EXPR_SQRT_F64
+            or kind == EXPR_SIN_F64
+            or kind == EXPR_COS_F64
+            or kind == EXPR_ASIN_F64
+            or kind == EXPR_RADIANS_F64
+            or kind == EXPR_MATH_UNARY_F64
+        ):
+            return self._value_is_null_from_source[CS](src, node.left, row)
+        if kind == EXPR_CASE_I64 or kind == EXPR_CASE_F64:
+            ref slots = self.when_pool[node.col_idx]
+            var n_pairs = (len(slots) - 1) // 2
+            for c in range(n_pairs):
+                if self._eval_bool_from_source[CS](src, slots[2 * c], row):
+                    return self._value_is_null_from_source[CS](
+                        src, slots[2 * c + 1], row
+                    )
+            return self._value_is_null_from_source[CS](
+                src, slots[len(slots) - 1], row
+            )
         return False
 
     def _eval_string_from_source[
@@ -5500,7 +5629,7 @@ struct ExpressionExecutor(Movable, Deinitable):
             ) * self._eval_f64_from_source[CS](src, node.right, row)
         if kind == EXPR_DIV_F64:
             # IEEE-754: div-by-zero yields +/-Inf or NaN, not a raise
-            # (mirrors `_eval_scalar_f64_from_view`).
+            # (mirrors the EXPR_DIV_F64 arm of `eval_to_list_f64_from_view`).
             return self._eval_f64_from_source[CS](
                 src, node.left, row
             ) / self._eval_f64_from_source[CS](src, node.right, row)
@@ -5508,7 +5637,7 @@ struct ExpressionExecutor(Movable, Deinitable):
         # Math functions: the row
         # PROJECT walker per-cell mirror of the EXPR_MATH_FN(2) column arm
         # (`compiler_eval_column` -> `eval_math_unary/binary`). These EXPR_*_F64
-        # nodes already had a per-cell `_eval_scalar_f64_from_view` arm (the
+        # nodes already had an arm in `eval_to_list_f64_from_view` (the
         # batch-view path); the `_from_source` (RowCellSource) path used by
         # `_apply_project_walker` was missing them, so a `col.sqrt()` projection
         # over a ROW source raised "unsupported node kind" deep in lowering.
@@ -5590,6 +5719,92 @@ struct ExpressionExecutor(Movable, Deinitable):
 
 
 # -----------------------------------------------------------------------------
+# SQL three-valued logic (Kleene) values and tables.
+# -----------------------------------------------------------------------------
+#
+# `_eval_kleene_from_source` and `_eval_kleene_from_view` return one of these
+# per row. A WHERE keeps a row only when its predicate is `_KLEENE_TRUE`.
+
+comptime _KLEENE_FALSE: UInt8 = 0
+comptime _KLEENE_TRUE: UInt8 = 1
+comptime _KLEENE_NULL: UInt8 = 2
+
+
+@always_inline
+def _kleene_and(a: UInt8, b: UInt8) -> UInt8:
+    """FALSE if either side is FALSE, TRUE if both are TRUE, else UNKNOWN."""
+    if a == _KLEENE_FALSE or b == _KLEENE_FALSE:
+        return _KLEENE_FALSE
+    if a == _KLEENE_TRUE and b == _KLEENE_TRUE:
+        return _KLEENE_TRUE
+    return _KLEENE_NULL
+
+
+@always_inline
+def _kleene_or(a: UInt8, b: UInt8) -> UInt8:
+    """TRUE if either side is TRUE, FALSE if both are FALSE, else UNKNOWN."""
+    if a == _KLEENE_TRUE or b == _KLEENE_TRUE:
+        return _KLEENE_TRUE
+    if a == _KLEENE_FALSE and b == _KLEENE_FALSE:
+        return _KLEENE_FALSE
+    return _KLEENE_NULL
+
+
+@always_inline
+def _kleene_not(a: UInt8) -> UInt8:
+    """Swaps TRUE and FALSE; UNKNOWN stays UNKNOWN."""
+    if a == _KLEENE_TRUE:
+        return _KLEENE_FALSE
+    if a == _KLEENE_FALSE:
+        return _KLEENE_TRUE
+    return _KLEENE_NULL
+
+
+def _is_binary_bool_leaf(kind: Int) -> Bool:
+    """True for the Bool leaves whose two value operands sit in `left` and
+    `right`: the numeric, unsigned, mixed, DECIMAL128 and STRING comparisons
+    and LIKE. Such a leaf is UNKNOWN when either operand is NULL."""
+    return (
+        kind == EXPR_GT_I64
+        or kind == EXPR_GE_I64
+        or kind == EXPR_LT_I64
+        or kind == EXPR_LE_I64
+        or kind == EXPR_EQ_I64
+        or kind == EXPR_NE_I64
+        or kind == EXPR_GT_U64
+        or kind == EXPR_GE_U64
+        or kind == EXPR_LT_U64
+        or kind == EXPR_LE_U64
+        or kind == EXPR_EQ_U64
+        or kind == EXPR_NE_U64
+        or kind == EXPR_GT_F64
+        or kind == EXPR_GE_F64
+        or kind == EXPR_LT_F64
+        or kind == EXPR_LE_F64
+        or kind == EXPR_EQ_F64
+        or kind == EXPR_NE_F64
+        or kind == EXPR_LT_F64_MIXED
+        or kind == EXPR_LE_F64_MIXED
+        or kind == EXPR_GT_F64_MIXED
+        or kind == EXPR_GE_F64_MIXED
+        or kind == EXPR_EQ_F64_MIXED
+        or kind == EXPR_EQ_DECIMAL128
+        or kind == EXPR_NEQ_DECIMAL128
+        or kind == EXPR_GT_DECIMAL128
+        or kind == EXPR_LT_DECIMAL128
+        or kind == EXPR_GE_DECIMAL128
+        or kind == EXPR_LE_DECIMAL128
+        or kind == EXPR_EQ_STRING
+        or kind == EXPR_NEQ_STRING
+        or kind == EXPR_GT_STRING
+        or kind == EXPR_LT_STRING
+        or kind == EXPR_GE_STRING
+        or kind == EXPR_LE_STRING
+        or kind == EXPR_LIKE_STRING
+    )
+
+
+# -----------------------------------------------------------------------------
 # Literal-payload validator — comptime-DType dispatch over the RuntimeExpr
 # `kind` field.
 # -----------------------------------------------------------------------------
@@ -5597,7 +5812,7 @@ struct ExpressionExecutor(Movable, Deinitable):
 # `RuntimeExpr` carries a union-style payload — `i64` is meaningful when
 # `kind == EXPR_LIT_I64`, `f64` when `kind == EXPR_LIT_F64`, etc. This
 # helper validates that the LITERAL node's kind matches `T`. Reading the
-# payload is done inline in `_dispatch_comparison` (per-DType branch);
+# payload is done inline in `_compare_present_from_view` (per-DType branch);
 # this helper centralizes the kind-check + error reporting so the
 # walker body stays readable.
 
@@ -5607,11 +5822,10 @@ def _validate_lit_dtype[
 ](lit_node: RuntimeExpr, idx: Int) raises:
     """Raise if `lit_node.kind` does not match `T`.
 
-    Convention for Int32: there is no `EXPR_LIT_I32` tag
-    (no comptime factory either — Int32 literals share the i64
-    payload via narrowing at construction time). So Int32 comparisons
-    accept `EXPR_LIT_I64` as their literal kind and narrow the payload
-    at read time.
+    `T` is int64 or float64 (the only instantiations). An Int64 comparison
+    whose left column is stored as INT32 / DATE32 still carries an
+    EXPR_LIT_I64 literal; `_compare_present_from_view` narrows it at read
+    time.
 
     Args:
         lit_node: The literal-side RuntimeExpr.
@@ -5620,7 +5834,7 @@ def _validate_lit_dtype[
     Raises:
         Error on kind / T mismatch.
     """
-    comptime if T == DType.int64 or T == DType.int32:
+    comptime if T == DType.int64:
         if lit_node.kind != EXPR_LIT_I64:
             raise Error(
                 "ExpressionExecutor: comparison at pool slot "
@@ -5629,7 +5843,10 @@ def _validate_lit_dtype[
                 " for an Int64/Int32 comparison; got kind "
                 + String(lit_node.kind)
             )
-    elif T == DType.float64:
+    else:
+        comptime assert T == DType.float64, (
+            "_validate_lit_dtype: T is int64 or float64"
+        )
         if lit_node.kind != EXPR_LIT_F64:
             raise Error(
                 "ExpressionExecutor: comparison at pool slot "
@@ -5638,11 +5855,6 @@ def _validate_lit_dtype[
                 " for a Float64 comparison; got kind "
                 + String(lit_node.kind)
             )
-    else:
-        raise Error(
-            "ExpressionExecutor._validate_lit_dtype: unsupported DType"
-            " (supports int64 / float64 / int32)"
-        )
 
 
 # -----------------------------------------------------------------------------

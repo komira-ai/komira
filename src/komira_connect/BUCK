@@ -11,6 +11,7 @@ mojo_library(
     name = "komira_connect",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        "//src/komira_clock:komira_clock",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_http_server:komira_http_server",
     ],
@@ -30,6 +31,7 @@ mojo_library(
         "tests/test_e2e_server_streaming.mojo",
         "tests/test_e2e_unary.mojo",
         "tests/test_grpc_timeout_conformance.mojo",
+        "tests/test_grpc_timeout_enforced.mojo",
         "tests/test_grpc_web_error_trailer.mojo",
         "tests/test_h2_serve_nonascii_content_type.mojo",
         "tests/test_header_nonascii.mojo",

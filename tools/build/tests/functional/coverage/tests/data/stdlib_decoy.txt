@@ -1,0 +1,1 @@
+covenv decoy: a data file staged where the test binary names a standard library source (test 43)

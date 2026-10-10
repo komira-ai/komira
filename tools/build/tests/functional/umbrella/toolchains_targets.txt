@@ -1,4 +1,5 @@
 toolchains//:cxx
+toolchains//:cxx_no_default_deps
 toolchains//:mojo
 toolchains//:mojo_linux_x86_64
 toolchains//:mojo_proto

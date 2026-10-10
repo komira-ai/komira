@@ -5,6 +5,14 @@
 # `./buck2 build //...` runs them.
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 
+# This cell's configuration, for the public boundary lint (komira//:public_boundary),
+# which reads every committed file: a glob skips a dotfile.
+export_file(
+    name = "buckconfig",
+    src = ".buckconfig",
+    visibility = ["komira//:public_boundary"],
+)
+
 shell_lint(
     name = "shell_lint",
     srcs = glob([
@@ -18,3 +26,17 @@ shell_lint(
     },
     visibility = ["komira//:tests_lints"],
 )
+
+# The conda scripts, for tests//functional/install_gate:cases, which runs
+# their argument check.
+[
+    export_file(
+        name = name,
+        src = "functional/" + name,
+        visibility = ["//functional/install_gate:"],
+    )
+    for name in [
+        "conda.sh",
+        "conda_set.sh",
+    ]
+]

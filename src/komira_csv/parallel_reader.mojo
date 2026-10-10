@@ -38,7 +38,7 @@
 #     `n_workers <= 1` -> fall back to single-thread via
 #     `read_csv_bytes_to_batch[Q, SCANNER_VARIANT_PHASE_3]`.
 #
-# PARALLELIZE-BOUNDARY:
+# Parallel region:
 #   * Disjointness: worker `w` is the unique writer to
 #     `worker_batches[w]`. All other captured state (`bytes`,
 #     `worker_ranges`, `shared_schema`, `header_names`, `options`) is

@@ -1,0 +1,45 @@
+# proto-message: kci.resource.v1.ResourceList
+resource {
+  id: "core"
+  retention: KEEP
+  network {
+    ipv4_cidr: "10.20.0.0/16"
+  }
+}
+resource {
+  id: "edge"
+  subnet {
+    network {
+      resource: "core"
+    }
+    ipv4_cidr: "10.20.4.0/24"
+    zone: 2
+  }
+}
+resource {
+  id: "ingress-ip"
+  ip_address {
+  }
+}
+resource {
+  id: "api"
+  service {
+    image {
+      digest: "sha256:7a3c9e10"
+    }
+    env {
+      key: "PUBLIC_IP"
+      value {
+        ref {
+          resource: "ingress-ip"
+          standard: ADDRESS
+        }
+      }
+    }
+    internal {
+    }
+    network {
+      resource: "edge"
+    }
+  }
+}

@@ -4,7 +4,7 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # mojo_aws_client targets that must fail, over the pinned botocore CloudWatch Logs
 # model and the stub runtime of ../../functional/mojo_aws_client. Each refusal is
 # in its own target, so this package loads and every target fails on its
-# own. run_tests.sh (test 35) builds each as an expect_red, requiring the
+# own. run_tests.sh (test 36) builds each as an expect_red, requiring the
 # text quoted above the target.
 
 _LOGS = botocore_model("logs")
@@ -161,5 +161,315 @@ mojo_aws_client(
     model = "not_botocore_layout.json",
     model_sha256 = _LOGS.sha256,
     operations = ["GetLogEvents"],
+    deps = _RUNTIME,
+)
+
+# "env_reader.mojo names getenv; a mojo_aws_client package takes every input
+# as a parameter", in the build: the package compiles, and its generated
+# environment scan (_no_env_reads) reads every file of it, the hand-written
+# module that reads HOME included, and fails.
+mojo_aws_client(
+    name = "env_read_hand",
+    hand_srcs = ["hand/env_reader.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_reader.json",
+    deps = _RUNTIME,
+)
+
+# "env_home.mojo imports std.pathlib, which is not on the environment scan's
+# import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build: the
+# hand-written module reads HOME through Path.home and names nothing the scan
+# bans, so the import allow-list is what refuses it.
+mojo_aws_client(
+    name = "env_read_home",
+    hand_srcs = ["hand/env_home.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_home.json",
+    deps = _RUNTIME,
+)
+
+# "env_std_os.mojo names expanduser; a mojo_aws_client package takes every
+# input as a parameter", in the build: `from std import os` does not contain
+# the banned dotted module name, and os.path.expanduser reads HOME.
+mojo_aws_client(
+    name = "env_read_std_os",
+    hand_srcs = ["hand/env_std_os.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_std_os.json",
+    deps = _RUNTIME,
+)
+
+# "env_semicolon.mojo imports std.pathlib, which is not on the environment
+# scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# the import is the second statement of a line, after `;`.
+mojo_aws_client(
+    name = "env_read_semicolon",
+    hand_srcs = ["hand/env_semicolon.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_semicolon.json",
+    deps = _RUNTIME,
+)
+
+# "env_import_as.mojo imports std.pathlib, which is not on the environment
+# scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# a plain `import`, std.pathlib the second name of its list, renamed.
+mojo_aws_client(
+    name = "env_read_import_as",
+    hand_srcs = ["hand/env_import_as.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_import_as.json",
+    deps = _RUNTIME,
+)
+
+# "env_indented.mojo imports std.pathlib, which is not on the environment
+# scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# the import is inside a function body, at an indent.
+mojo_aws_client(
+    name = "env_read_indented",
+    hand_srcs = ["hand/env_indented.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_indented.json",
+    deps = _RUNTIME,
+)
+
+# "env_compound.mojo imports std.pathlib, which is not on the environment
+# scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# the import is the body of a one-line function, after its `:`.
+mojo_aws_client(
+    name = "env_read_compound",
+    hand_srcs = ["hand/env_compound.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_compound.json",
+    deps = _RUNTIME,
+)
+
+# "env_backtick_quote.mojo imports std.pathlib, which is not on the environment scan's
+# import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# a backtick identifier holds a `'`, which is part of the name, then
+# the import follows after `;`.
+mojo_aws_client(
+    name = "env_read_backtick_quote",
+    hand_srcs = ["hand/env_backtick_quote.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_backtick_quote.json",
+    deps = _RUNTIME,
+)
+
+# "env_backtick_hash.mojo imports std.pathlib, which is not on the environment scan's
+# import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# a backtick identifier holds a `#`, which is part of the name, then
+# the import follows after `;`.
+mojo_aws_client(
+    name = "env_read_backtick_hash",
+    hand_srcs = ["hand/env_backtick_hash.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_backtick_hash.json",
+    deps = _RUNTIME,
+)
+
+# "env_backtick_triple.mojo imports std.pathlib, which is not on the environment scan's
+# import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# the import is a line of its own between two backtick identifiers
+# that each hold `'''`, which would read as one string round it.
+mojo_aws_client(
+    name = "env_read_backtick_triple",
+    hand_srcs = ["hand/env_backtick_triple.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_backtick_triple.json",
+    deps = _RUNTIME,
+)
+
+# "env_escaped_quote.mojo imports std.pathlib, which is not on the environment scan's
+# import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# a string holds an escaped `\"`, then the import follows after `;`;
+# read as the string's end, the next quote would hide the import.
+mojo_aws_client(
+    name = "env_read_escaped_quote",
+    hand_srcs = ["hand/env_escaped_quote.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_escaped_quote.json",
+    deps = _RUNTIME,
+)
+
+# "env_raw_quote.mojo imports std.pathlib, which is not on the environment scan's
+# import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# a raw string holds `\"`, which Mojo reads as a pair (it refuses
+# `r"\"` as unterminated), then the import follows after `;`.
+mojo_aws_client(
+    name = "env_read_raw_quote",
+    hand_srcs = ["hand/env_raw_quote.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_raw_quote.json",
+    deps = _RUNTIME,
+)
+
+# "env_continuation.mojo imports std.pathlib, which is not on the environment scan's
+# import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# the import is split after `from` by a backslash at the end of the
+# line.
+mojo_aws_client(
+    name = "env_read_continuation",
+    hand_srcs = ["hand/env_continuation.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_continuation.json",
+    deps = _RUNTIME,
+)
+
+# "env_t_string.mojo has a t-string, which the environment scan does not
+# read", in the build: the braces of a t-string hold code with strings of
+# their own, so the scan cannot say where the t-string ends.
+mojo_aws_client(
+    name = "env_read_t_string",
+    hand_srcs = ["hand/env_t_string.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_t_string.json",
+    deps = _RUNTIME,
+)
+
+# "env_t_upper.mojo has a t-string, which the environment scan does not read", in
+# the build: a t-string of prefix `T` holds a quote in its braces, then the
+# import follows after `;`; read as a plain string, it would hide the import (the
+# prefix is read in any case).
+mojo_aws_client(
+    name = "env_read_t_upper",
+    hand_srcs = ["hand/env_t_upper.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_t_upper.json",
+    deps = _RUNTIME,
+)
+
+# "env_t_tr.mojo has a t-string, which the environment scan does not read", in
+# the build: a t-string of prefix `tr` holds a quote in its braces, then the
+# import follows after `;`; read as a plain string, it would hide the import (`tr`
+# is a t-string prefix as `rt` is).
+mojo_aws_client(
+    name = "env_read_t_tr",
+    hand_srcs = ["hand/env_t_tr.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_t_tr.json",
+    deps = _RUNTIME,
+)
+
+# "env_t_rt.mojo has a t-string, which the environment scan does not read", in
+# the build: a t-string of prefix `Rt` holds a quote in its braces, then the
+# import follows after `;`; read as a plain string, it would hide the import (the
+# prefix is read in any case, `rt` included).
+mojo_aws_client(
+    name = "env_read_t_rt",
+    hand_srcs = ["hand/env_t_rt.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_t_rt.json",
+    deps = _RUNTIME,
+)
+
+# "env_triple_escape.mojo imports std.pathlib, which is not on the environment scan's
+# import allow-list (mojo_aws_client's _ENV_IMPORTS)", in the build:
+# a triple-quoted string ends in an escaped `\"`, then the import follows
+# after `;`; read without the escape, the string would close one quote
+# early and the quote left over would hide the import.
+mojo_aws_client(
+    name = "env_read_triple_escape",
+    hand_srcs = ["hand/env_triple_escape.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_triple_escape.json",
+    deps = _RUNTIME,
+)
+
+# "env_cr.mojo has the control byte 0x0D (carriage return), which the
+# environment scan does not read", in the build: the import follows a lone carriage return, which Mojo
+# reads as a line end.
+mojo_aws_client(
+    name = "env_read_cr",
+    hand_srcs = ["hand/env_cr.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_cr.json",
+    deps = _RUNTIME,
+)
+
+# "env_crlf_continuation.mojo has the control byte 0x0D (carriage return),
+# which the environment scan does not read", in the build: the import is split after `from` by a
+# backslash before a carriage return and line feed, which Mojo joins.
+mojo_aws_client(
+    name = "env_read_crlf_continuation",
+    hand_srcs = ["hand/env_crlf_continuation.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_crlf_continuation.json",
+    deps = _RUNTIME,
+)
+
+# "env_ff.mojo has the control byte 0x0C (form feed), which the environment
+# scan does not read", in the build: the import follows a form feed on the line
+# of another import, which Mojo reads as a line end.
+mojo_aws_client(
+    name = "env_read_ff",
+    hand_srcs = ["hand/env_ff.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_ff.json",
+    deps = _RUNTIME,
+)
+
+# "env_vt.mojo has the control byte 0x0B (vertical tab), which the environment
+# scan does not read", in the build: the import follows a vertical tab on the line
+# of another import, which Mojo reads as a line end.
+mojo_aws_client(
+    name = "env_read_vt",
+    hand_srcs = ["hand/env_vt.mojo"],
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/env_vt.json",
+    deps = _RUNTIME,
+)
+
+# "`test_data` has an entry for `tests/_no_env_reads.mojo`", at analysis:
+# the scan's data is the package, staged by the rule.
+mojo_aws_client(
+    name = "env_scan_data_given",
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    test_data = {"tests/_no_env_reads.mojo": ["hand/notes.txt"]},
     deps = _RUNTIME,
 )

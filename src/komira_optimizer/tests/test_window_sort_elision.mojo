@@ -15,6 +15,7 @@
 # Negative cases:
 #   - Sort key NOT a prefix of (P ++ O): preserved.
 #   - Direction mismatch: preserved.
+#   - NULL placement other than the sink's derived one: preserved.
 #   - Sort longer than (P ++ O): preserved.
 #   - Sort directly above PartitionBy with empty pkeys/okeys: preserved
 #     (the engine skips its internal sort in that case, so output order
@@ -270,6 +271,65 @@ def test_sort_over_partition_by_with_empty_keys_preserved() raises:
     var rewritten = optimize_window_rewrite(plan^)
     assert_equal(_count_sort(rewritten), 1)
     assert_equal(Int(rewritten.tag), Int(PLAN_SORT))
+
+
+def test_sort_nulls_first_on_partition_key_preserved() raises:
+    """Sort by (user_id ASC NULLS FIRST, ts ASC NULLS FIRST) over
+    PartitionBy(pkeys=[user_id], okeys=[ts]). Keys and directions are a
+    prefix of (P ++ O), but the sink places NULLs where
+    `derived_nulls_first` says (NULLS LAST), so the Sort is not redundant
+    and must survive with its explicit placement."""
+    var schema = _three_col_schema()
+    var child = _scan_plan(schema^)
+    var pb = _build_running_total_pb(child^)
+
+    var sort_keys: List[String] = ["user_id", "ts"]
+    var sort_desc: List[Bool] = [False, False]
+    var nf: List[Bool] = [True, True]
+    var plan = LogicalPlan.sort(sort_keys^, sort_desc^, pb^, Optional(nf^))
+
+    var rewritten = optimize_window_rewrite(plan^)
+    assert_equal(_count_sort(rewritten), 1)
+    assert_equal(Int(rewritten.tag), Int(PLAN_SORT))
+    ref sd = rewritten.sort_data_ref()
+    assert_equal(len(sd.nulls_first), 2)
+    assert_true(sd.nulls_first[0])
+    assert_true(sd.nulls_first[1])
+
+
+def test_sort_nulls_first_on_order_key_only_preserved() raises:
+    """Sort by (user_id ASC NULLS LAST, ts ASC NULLS FIRST) over
+    PartitionBy(pkeys=[user_id], okeys=[ts]). Only the order key's NULL
+    placement differs from the sink's; that one mismatch keeps the Sort."""
+    var schema = _three_col_schema()
+    var child = _scan_plan(schema^)
+    var pb = _build_running_total_pb(child^)
+
+    var sort_keys: List[String] = ["user_id", "ts"]
+    var sort_desc: List[Bool] = [False, False]
+    var nf: List[Bool] = [False, True]
+    var plan = LogicalPlan.sort(sort_keys^, sort_desc^, pb^, Optional(nf^))
+
+    var rewritten = optimize_window_rewrite(plan^)
+    assert_equal(_count_sort(rewritten), 1)
+    assert_equal(Int(rewritten.tag), Int(PLAN_SORT))
+
+
+def test_sort_explicit_nulls_last_matching_sink_elides() raises:
+    """Sort by (user_id, ts) ASC with explicit NULLS LAST, which is the
+    sink's own placement: the Sort is redundant and is dropped."""
+    var schema = _three_col_schema()
+    var child = _scan_plan(schema^)
+    var pb = _build_running_total_pb(child^)
+
+    var sort_keys: List[String] = ["user_id", "ts"]
+    var sort_desc: List[Bool] = [False, False]
+    var nf: List[Bool] = [False, False]
+    var plan = LogicalPlan.sort(sort_keys^, sort_desc^, pb^, Optional(nf^))
+
+    var rewritten = optimize_window_rewrite(plan^)
+    assert_equal(_count_sort(rewritten), 0)
+    assert_equal(Int(rewritten.tag), Int(PLAN_PARTITION_BY))
 
 
 # =============================================================================

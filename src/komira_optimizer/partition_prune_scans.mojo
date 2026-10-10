@@ -3,10 +3,9 @@
 # Hive-partition pruning of partitioned scans
 # =============================================================================
 #
-# Pass-1 INDEP rule (independent of statistics — runs in the first
-# optimizer pass, ORDERED BEFORE `precompute_scan_stats` / statistics
-# propagation: pruning the path list shrinks the
-# stats we then compute). Mirrors DuckDB's hive-partition filter pushdown
+# A statistics-independent rule, designed to run BEFORE scan-statistics
+# precompute and statistics propagation: pruning the path list shrinks the
+# stats computed afterwards. Mirrors DuckDB's hive-partition filter pushdown
 # and DataFusion's `ListingTable` partition pruning.
 #
 # Pattern:
@@ -32,8 +31,9 @@
 # → byte-lexicographic; DATE32 → byte-lexicographic over the canonical
 # `YYYY-MM-DD` text (order-preserving for ISO dates). A path is KEPT iff
 # the conjunct holds for it; a path whose value fails to parse for the
-# column type is KEPT conservatively (we never drop a row we're unsure
-# about — correctness over completeness).
+# column type, or whose comparison the literal's kind does not allow, is
+# KEPT conservatively, and that conjunct then stays on the Filter (we never
+# drop a row we're unsure about — correctness over completeness).
 #
 # References — implementations studied before coding:
 #   * DuckDB `src/optimizer/filter_pushdown.cpp` +
@@ -52,8 +52,9 @@
 #     (one literal per file) rather than spinning up a mini execution, but
 #     the prune semantics are identical.
 #
-# Wiring: invoked from `optimizer.optimize()` as a pass-1 INDEP
-# rule, BEFORE `propagate_statistics` / `precompute_scan_stats`.
+# Pass order: komira_optimizer has no driver that orders its passes. This
+# pass is designed to run BEFORE `propagate_statistics` and scan-statistics
+# precompute (`precompute_scan_stats`, not in this tree).
 #
 # Mojo discipline: no UnsafePointer crosses a module boundary; the in-place
 # rewrite mutates through `Optional[OwnedPointer[...]]` ref-mutation (the
@@ -182,11 +183,12 @@ def _maybe_prune_filter_over_scan(mut plan: LogicalPlan) raises:
     if len(psrc.paths) == 0:
         return
     # SKIP the lazy dir-scanning Hive shape. Its
-    # partition filter is owned by the `attach_hive_predicate` pass (which
-    # attaches the Tier-1 POD for the engine ctor's `open_pruned` to prune at
-    # the LIST prefix); a post-listing prune here would be redundant (and there
-    # is no enumerated path list to prune — `paths == [base_dir]`,
-    # `partition_values` empty). The two passes are mutually exclusive per scan.
+    # partition filter is owned by the `attach_hive_predicate` pass (not in
+    # this tree), which attaches the Tier-1 POD that `open_pruned`
+    # (`komira_fs`) prunes with at the LIST prefix; a post-listing prune here
+    # would be redundant (and there is no enumerated path list to prune —
+    # `paths == [base_dir]`, `partition_values` empty). The two passes are
+    # mutually exclusive per scan.
     if psrc.is_dir_scan_hive():
         return
 
@@ -203,7 +205,8 @@ def _maybe_prune_filter_over_scan(mut plan: LogicalPlan) raises:
     var prunable_col_idx = List[Int]()         # per prunable conjunct: partition col idx
     var prunable_op = List[UInt8]()            # cmp op (already oriented col-on-left)
     var prunable_lit = List[ScalarValue]()     # literal value
-    var residual = ExprArray()                 # conjuncts we keep on the Filter (Expr is Movable-only)
+    var prunable_ci = List[Int]()              # per prunable conjunct: its index in `conjuncts`
+    var is_prunable = List[Bool]()             # per conjunct
 
     for ci in range(len(conjuncts)):
         ref c = conjuncts[ci]
@@ -214,24 +217,46 @@ def _maybe_prune_filter_over_scan(mut plan: LogicalPlan) raises:
             prunable_col_idx.append(col_idx)
             prunable_op.append(op)
             prunable_lit.append(lit^)
+            prunable_ci.append(ci)
+            is_prunable.append(True)
         else:
-            residual.append(c.copy())
+            is_prunable.append(False)
 
     if len(prunable_col_idx) == 0:
         return  # nothing to prune; leave the plan as-is.
 
-    # Determine which paths survive ALL prunable conjuncts.
+    # Determine which paths survive ALL prunable conjuncts. A conjunct that
+    # could not be decided for some path (literal kind does not match the
+    # column type, value does not parse, unhandled type) keeps that path
+    # and stays on the Filter: dropping it would return that path's rows
+    # unfiltered.
     var keep = List[Bool]()
     for _ in range(len(psrc.paths)):
         keep.append(True)
+    var undecided = List[Bool]()
+    for _ in range(len(prunable_col_idx)):
+        undecided.append(False)
     for pi in range(len(psrc.paths)):
         for k in range(len(prunable_col_idx)):
             var col = prunable_col_idx[k]
             var raw = String(psrc.partition_values[pi][col])
             var t = part_types[col]
-            if not _value_satisfies(raw, prunable_op[k], prunable_lit[k], t):
+            var verdict = _decide(raw, prunable_op[k], prunable_lit[k], t)
+            if not verdict:
+                undecided[k] = True
+            elif not verdict.value():
                 keep[pi] = False
                 break
+
+    # The Filter keeps every conjunct that is not prunable or that some
+    # path left undecided, in the original order.
+    for k in range(len(prunable_ci)):
+        if undecided[k]:
+            is_prunable[prunable_ci[k]] = False
+    var residual = ExprArray()                 # conjuncts we keep on the Filter (Expr is Movable-only)
+    for ci in range(len(conjuncts)):
+        if not is_prunable[ci]:
+            residual.append(conjuncts[ci].copy())
 
     var n_kept = 0
     for pi in range(len(psrc.paths)):
@@ -239,7 +264,7 @@ def _maybe_prune_filter_over_scan(mut plan: LogicalPlan) raises:
             n_kept += 1
 
     # Build the pruned path list + matching partition_values. (If nothing
-    # was actually pruned, we still drop the redundant partition conjuncts
+    # was actually pruned, we still drop the decided partition conjuncts
     # below — they are always true for the surviving paths.)
     var all_pruned = n_kept == 0
     var new_paths = List[String]()
@@ -313,7 +338,7 @@ def _maybe_prune_filter_over_scan(mut plan: LogicalPlan) raises:
         if all_pruned:
             # No residual + every path pruned → the result is empty. Replace
             # the Filter's predicate with a literal FALSE (keeps the Filter
-            # node so downstream ops see a zero-row stream from a valid scan).
+            # node, so the plan stays an always-false Filter over a valid scan).
             plan._filter.value()[].predicate = Expr.literal(ScalarValue.from_bool(False))
         else:
             # No residual + some paths kept → the Filter is now a no-op
@@ -413,34 +438,45 @@ def _value_satisfies(
     raw: String, op: UInt8, lit: ScalarValue, arrow_type: ArrowType
 ) -> Bool:
     """Does the partition value `raw` (parsed to `arrow_type`) satisfy
-    `<value> <op> <lit>`?  Returns True conservatively when `raw` fails to
-    parse for `arrow_type` or `lit` is not the matching kind (we never
-    prune a path we're unsure about — correctness over completeness)."""
+    `<value> <op> <lit>`?  Returns True conservatively when `_decide`
+    cannot judge the comparison (we never prune a path we're unsure
+    about — correctness over completeness)."""
+    var verdict = _decide(raw, op, lit, arrow_type)
+    if verdict:
+        return verdict.value()
+    return True
+
+
+def _decide(
+    raw: String, op: UInt8, lit: ScalarValue, arrow_type: ArrowType
+) -> Optional[Bool]:
+    """The value of `<raw parsed to arrow_type> <op> <lit>`, or None when it
+    cannot be judged: `raw` fails to parse for `arrow_type`, `lit` is not
+    the matching kind, or `arrow_type` is not handled."""
     if arrow_type == ArrowType.INT64:
         if not lit.is_int():
-            return True  # type mismatch — keep the path.
+            return None  # type mismatch.
         var rv: Int64
         try:
             rv = _parse_int64(raw)
         except:
-            return True  # unparseable — keep.
+            return None  # unparseable.
         var lv = lit.int_val
         return _cmp_i64(rv, op, lv)
     elif arrow_type == ArrowType.DATE32:
-        # DATE32 partition values are the canonical `YYYY-MM-DD` text; the
-        # literal side of a date predicate, in practice, is also a string
-        # literal of the same shape (the SDK emits date predicates as
-        # string comparisons on the partition col before any date cast).
+        # DATE32 partition values are the canonical `YYYY-MM-DD` text; only
+        # a string literal of the same shape is compared (any other literal
+        # kind is undecided and keeps the path).
         # Byte-lexicographic comparison is order-preserving for ISO dates.
         if not lit.is_string():
-            return True
+            return None
         return _cmp_str(raw, op, lit.string_val)
     elif arrow_type == ArrowType.STRING:
         if not lit.is_string():
-            return True
+            return None
         return _cmp_str(raw, op, lit.string_val)
-    # Other partition types (none today) — keep conservatively.
-    return True
+    # Other partition types (none today).
+    return None
 
 
 def _parse_int64(s: String) raises -> Int64:

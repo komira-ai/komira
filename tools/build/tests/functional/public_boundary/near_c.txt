@@ -1,0 +1,5 @@
+/* Near misses in C: code is not prose. */
+static const char *pin = PIN(9f8e7d6c5b);
+int x = 0x1a2b3c4d; // hex literal after 0x
+const char *u = "https://x.invalid/a"; // a reserved host
+const char *v = "a // 1a2b3c4d5e"; /* a // in a string is no comment */

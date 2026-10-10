@@ -6,7 +6,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # identity, through the Azure Instance Metadata Service) and
 # ServicePrincipalProvider (the Entra client-credentials grant). Both token
 # providers send through any komira_http_client HttpService on a komira_async
-# reactor, and keep their token's expiry on komira_clock's wall clock. The
+# reactor, and keep their token's expiry on an injected komira_retry
+# MonotonicClock (SystemClock unless the caller swaps it). The
 # service principal's login endpoint and tenant are checked before anything
 # is dialed. Every setting is a parameter: nothing here reads the
 # environment. Shared Key signing is Storage-specific and lives in
@@ -17,19 +18,26 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # test_azure_token_providers (each provider's request on the wire through a
 # capturing HttpService, its cached token and expiry, the refusals that
 # cache nothing, the login endpoint and tenant refusals, and the refresh
-# margin) and test_no_env_reads (the package's sources read no
-# environment).
+# margin), test_azure_token_clock (each provider's expiry and refresh margin
+# on a ManualClock: expiry is the clock's reading plus expires_in exactly,
+# not due one ms before the margin, due at it and past expiry, and the
+# providers' sources read no wall clock) and test_no_env_reads (the
+# package's sources read no environment).
 mojo_library(
     name = "komira_azure_core",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_async:komira_async",
-        "//src/komira_clock:komira_clock",
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_json:komira_json",
+        "//src/komira_retry:komira_retry",
     ],
     test_data = {
+        "tests/test_azure_token_clock.mojo": {
+            "src/" + f: f
+            for f in glob(["creds_*.mojo"])
+        },
         "tests/test_no_env_reads.mojo": {
             "src/" + f: f
             for f in glob(["*.mojo"])
@@ -37,6 +45,7 @@ mojo_library(
     },
     test_srcs = [
         "tests/test_azure_credentials.mojo",
+        "tests/test_azure_token_clock.mojo",
         "tests/test_azure_token_providers.mojo",
         "tests/test_no_env_reads.mojo",
     ],

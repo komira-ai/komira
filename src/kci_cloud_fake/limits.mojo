@@ -4,20 +4,26 @@
 #
 # ⚠ These are the FAKE clouds' own limits, chosen to be exercisable; they cite
 # this package, not any real cloud.
-#   * a request timeout above 3600 s, a job timeout above 86400 s, and a
-#     service whose scale max is below its min (every fake cloud);
+#   * a request timeout above 3600 s, a container job's timeout above
+#     86400 s, and a service whose scale max is below its min (every fake
+#     cloud);
 #   * on a shape that folds a cell edge into the identity it is for, a cell
 #     edge of another resource's identity (`fold_limits`);
 #   * on a shape whose table indexes are objects named `ix-<h>`, two index
 #     names whose roles collide (`index_limits`).
+# The shape's compute limits (a GPU, a service scaling to zero) are
+# workloads.mojo's.
 # =============================================================================
 
 from kci_cloud import (
     EDGE_TARGET_CELL,
+    FIELD_CONTAINER_JOB,
+    FIELD_SERVICE,
     FIELD_TABLE,
     FINDING_LIMIT,
     Finding,
     GrantEdge,
+    body_is,
     edges_of,
     index_role,
     index_role_collisions,
@@ -89,7 +95,7 @@ def index_limits(r: Resource, shape: ProviderShape, cloud: String, mut out: List
 
 
 def common_limits(r: Resource, mut out: List[Finding]):
-    if r._oneof0_case == 1:
+    if body_is(r, FIELD_SERVICE):
         ref svc = r.service.value()
         if Bool(svc.request_timeout) and Int(svc.request_timeout.value().seconds) > REQUEST_TIMEOUT_MAX_SECONDS:
             out.append(
@@ -117,14 +123,14 @@ def common_limits(r: Resource, mut out: List[Finding]):
                     String(FAKE_CITATION),
                 )
             )
-    elif r._oneof0_case == 2:
-        ref job = r.job.value()
+    elif body_is(r, FIELD_CONTAINER_JOB):
+        ref job = r.container_job.value()
         if Bool(job.timeout) and Int(job.timeout.value().seconds) > JOB_TIMEOUT_MAX_SECONDS:
             out.append(
                 Finding(
                     FINDING_LIMIT,
                     r.id,
-                    String("job.timeout"),
+                    String("container_job.timeout"),
                     String("above this cloud's job limit of ")
                     + String(JOB_TIMEOUT_MAX_SECONDS)
                     + String("s"),

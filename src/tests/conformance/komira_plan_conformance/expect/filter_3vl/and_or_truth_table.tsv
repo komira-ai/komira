@@ -1,0 +1,18 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §1.1 Kleene AND/OR over every pair of TRUE, FALSE, NULL
+# (bool_pairs). AND is FALSE when either side is FALSE, NULL when neither is
+# FALSE and one is NULL; OR is TRUE when either side is TRUE, NULL when
+# neither is TRUE and one is NULL. Types: §8.8 (BOOLEAN, nullable); id, a, b
+# are the scanned columns.
+id:int64	a:bool?	b:bool?	a_and_b:bool?	a_or_b:bool?
+1	true	true	true	true
+2	true	false	false	true
+3	true	\N	\N	true
+4	false	true	false	true
+5	false	false	false	false
+6	false	\N	false	\N
+7	\N	true	\N	true
+8	\N	false	false	\N
+9	\N	\N	\N	\N

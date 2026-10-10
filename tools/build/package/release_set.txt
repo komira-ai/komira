@@ -7,7 +7,8 @@
 #     its --member-manifest libraries in order, and its --license, --summary
 #     and --home are the lines here;
 #   release_set_check's stamp check: its `libs`, its metapackage and the
-#     --license, --summary and --home it gives conda-meta are the lines here.
+#     --license, --summary and --home it gives conda-meta are the lines here,
+#     and no member's package requires a member listed after it.
 # A library added to the release set is added here too, or both are red.
 metapackage komira_all
 member komira_encoding
@@ -46,6 +47,28 @@ member komira_simd
 member komira_validation_run
 member komira_test_run_id
 member komira_test_verdict
+member komira_kafka_server
+member komira_collections
+member komira_broker_proto
+member komira_supervisor_proto
+member komira_plan_proto
+member komira_rowcell
+member komira_mail_address
+member komira_content_line
+member komira_spsc_ring
+member komira_sync
+member kci_cell
+member komira_mcp_server
+member komira_chat_proto
+member komira_contacts_proto
+member komira_managed_mail_proto
+member komira_calendar_proto
+member komira_snapshotter
+member komira_mail_message
+member komira_vcard
+member komira_trace
+member komira_calendar
+member komira_calendar_ics
 license Apache-2.0
 summary Every komira library of one release.
 home https://github.com/komira-ai/komira

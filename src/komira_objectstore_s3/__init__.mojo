@@ -18,9 +18,17 @@ komira_objectstore store, built on the generated `komira_aws_s3` client.
 - `conditional_store.mojo`: `S3ConditionalStore[C, T, K]`, one bucket as a
   `CloneableConditionalWriteStore` and `RangeFetchStore`.
 - `s3_fs.mojo`: `S3Fs[C, T, K]`, one bucket as komira_fs's `FileSystem`
-  (listing, shallow listing, ranged reads with one object version per
-  prefetched fetch, one-request footers, multipart writes, delete), with
-  `S3FsOptions`, `S3FileHandle` and `S3WriteFile`.
+  (listing, shallow listing, ranged reads of one object version per file
+  handle, one-request footers, multipart writes, delete, and up to the
+  in-flight bounds of requests at once), with `S3FileHandle` and
+  `S3WriteFile`; `s3_fs_options.mojo`: `S3FsOptions`; `s3_fs_jobs.mojo`
+  (not re-exported): the concurrent requests S3Fs runs.
+- `inflight.mojo`: `run_bounded_inflight`, N jobs on at most K threads
+  (komira_fork_join), each over a store of its own, and `inflight_workers`.
+- `s3_endpoint.mojo`: `s3_endpoint_is_plaintext`, `s3_connector_factory`
+  and `s3_prod_fs`, which pick the plaintext connector only for an
+  `http://` endpoint and TLS otherwise, over komira_http_client's
+  `KernelSchemeConnector`.
 - `presign.mojo`: `S3PresignSigner[T, K]`, presigned GET and PUT URLs as an
   `ObjectUrlSigner`, over komira_aws_core's `sigv4_presign`, signing only
   `host`.
@@ -52,6 +60,8 @@ from .ranges import (
 )
 from .store import (
     S3ListPage,
+    S3RangePlan,
+    S3RangeRead,
     S3Store,
     S3SuffixRead,
     S3UploadedPart,
@@ -60,11 +70,11 @@ from .store import (
 )
 from .conditional_store import S3ConditionalStore
 from .presign import S3PresignSigner, S3_UNSIGNED_PAYLOAD
-from .s3_fs import (
-    S3FileHandle,
-    S3Fs,
+from .inflight import InflightJobs, inflight_workers, run_bounded_inflight
+from .s3_fs import S3FileHandle, S3Fs, S3WriteFile
+from .s3_endpoint import s3_connector_factory, s3_endpoint_is_plaintext, s3_prod_fs
+from .s3_fs_options import (
     S3FsOptions,
-    S3WriteFile,
     S3_FS_ALL_RANGES,
     S3_FS_DEFAULT_PART_BYTES,
     S3_FS_DEFAULT_UPLOAD_MAX_INFLIGHT,

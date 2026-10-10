@@ -1,0 +1,10 @@
+# The scripts of the hermetic Python rules (defs.bzl): the runner every
+# `py_test` action runs, the runner every `python_oracle` action runs, and the
+# installer every `python_wheel` action runs.
+# What the rules run is in README.md.
+
+export_file(name = "pyrun.py", visibility = ["PUBLIC"])
+
+export_file(name = "wheel_install.py", visibility = ["PUBLIC"])
+
+export_file(name = "oracle_run.py", visibility = ["PUBLIC"])

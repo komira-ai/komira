@@ -293,21 +293,21 @@ file, and raises nothing. That is
 `PLAN_ENDPOINT_PRODUCER_SQL_WRITE_STATEMENT_DROPPED(36)` reproduced one layer
 down, by the mechanism that was supposed to make 36 unnecessary.
 
-Bumping the WRITER to `format_version = 3` on write-carrying envelopes is what
+Bumping the WRITER to `format_version = 5` on write-carrying envelopes is what
 lets an old reader refuse them. But a writer bump is a claim about bytes WE
 wrote, and this format's whole contract is that the bytes come from somewhere
 else. So the READER enforces the other half:
 
-    field 3 present  AND  declared version < 3   ->  REFUSED, by this name.
+    field 3 present  AND  declared version < 5   ->  REFUSED, by this name.
 
-That converts "a conformant producer declares 3" from a convention a frontend
+That converts "a conformant producer declares 5" from a convention a frontend
 author may forget into a rule the wire enforces on the first message. Without
-it, a Python or Excel frontend that sets `write_target` and leaves
-`format_version = 2` produces bytes that THIS build executes correctly and that
+it, a Python or TypeScript frontend that sets `write_target` and leaves
+`format_version = 4` produces bytes that THIS build executes correctly and that
 every older reader executes WRONG — and the difference is invisible from either
 side.
 
-⚠ IT IS NOT SYMMETRIC, DELIBERATELY. An OVERSTATED version (3 declared, no
+⚠ IT IS NOT SYMMETRIC, DELIBERATELY. An OVERSTATED version (5 declared, no
 write target) is ACCEPTED. The version is a MINIMUM READER CAPABILITY, so
 declaring a floor higher than you need is conservative: it can only cause an
 older reader to refuse bytes it would in fact have handled, which is a lost
@@ -328,9 +328,9 @@ struct PlanWireVersionSet(Copyable, Movable, Deinitable):
     `expected_version: UInt32` and compares with `!=`. Widening that to a set
     the obvious way — pass a bitmask `UInt32` — would leave every call site
     type-identical to the single-version one, so a caller that kept passing
-    `PLAN_WIRE_FORMAT_VERSION` (the number 3) would compile, and mask 3 is bits
-    0 and 1, i.e. the set {0, 1}: a reader that accepts NO version it speaks and
-    accepts two that do not exist. A distinct type makes that call a compile
+    `PLAN_WIRE_FORMAT_VERSION` (the number 4) would compile, and mask 4 is bit
+    2, i.e. the set {2}: a reader that accepts NO version it speaks and accepts
+    one this build refuses. A distinct type makes that call a compile
     error instead of a silent inversion of the gate.
 
     ⚠ SET MEMBERSHIP, NOT `>=`. The version is a MINIMUM READER CAPABILITY, and
@@ -338,8 +338,7 @@ struct PlanWireVersionSet(Copyable, Movable, Deinitable):
     version is readable by any reader that speaks a lower one. The whole reason
     this field exists (see `PLAN_WIRE_FORMAT_VERSION`'s docstring) is the CHANGE
     A MEANING case, and a version that changed a meaning must be able to LEAVE
-    the set. `{2, 3}` today; a hypothetical 4 that re-meant `WirePlan.plan` would
-    make it `{4}`.
+    the set. `{4, 5}` today, and 2 and 3 are outside it.
 
     Versions must be < 32 (one bit each). That is checked rather than assumed:
     at 32 the shift is undefined and the set would silently gain or lose a
@@ -379,7 +378,7 @@ struct PlanWireVersionSet(Copyable, Movable, Deinitable):
         return (self._mask & (UInt32(1) << v)) != 0
 
     def render(self) -> String:
-        """`{2, 3}` — for the refusal message. A reader that says only "wrong
+        """`{4, 5}` — for the refusal message. A reader that says only "wrong
         version" tells a frontend author nothing about what to write."""
         var out = String("{")
         var first = True
@@ -654,7 +653,7 @@ def plan_wire_apparent_depth(bytes: List[UInt8]) -> Int:
     return d
 
 
-comptime PLAN_WIRE_WRITE_TARGET_MIN_VERSION: UInt32 = 3
+comptime PLAN_WIRE_WRITE_TARGET_MIN_VERSION: UInt32 = 5
 """The `format_version` floor a `write_target`-carrying envelope must declare.
 
 ⚠ IT LIVES HERE, NOT IN THE CODEC, FOR THE SAME REASON THE VERSION TOKEN DOES.

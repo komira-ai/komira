@@ -10,9 +10,16 @@
 #   * test_exponent_saturates -- an exponent of 2^64 (1e18446744073709551616)
 #     reads as +Inf and -1e-18446744073709551616 as -0.0. Catches an
 #     exponent accumulated in a wrapping Int (2^64 wraps to 0 and the value
-#     reads as 1.0). 1e30800 -> +Inf and 1(19 zeros)e-3300 -> +0.0 pin the
-#     constant margin of the cap: a margin under about 325 holds those
-#     exponents inside the double range and reads a finite value.
+#     reads as 1.0). 1e30800 -> +Inf, 1(19 zeros)e-3300 -> +0.0 and
+#     9e-3240 -> +0.0 pin the constant margin of the cap (the exponent
+#     stops accumulating at the first prefix of its digits that reaches
+#     the input length plus the margin). 1e30800 catches a margin
+#     of 301 or less, 1(19 zeros)e-3300 one of 304 or less, and 9e-3240
+#     one of 317 or less (it is held at 9e-324 for a margin from 26 to
+#     317 and at 9e-32 below that, nonzero either way). A
+#     margin of 318 is the smallest correct one: the shortest input that
+#     needs the cap, 9e-<digits>, reads as zero only when input length
+#     plus margin is at least 325.
 #   * test_huge_exponent_bounded -- 1e999999999, -1e999999999 and
 #     1e-999999999 read as +Inf, -Inf and +0.0. The scale comes from a
 #     table lookup, not from one multiplication per unit of exponent, so
@@ -32,13 +39,19 @@
 #     multiplications (DBL_MAX read as 0x7FEFFFFFFFFFFFFD, 5e-324 as 0.0).
 #   * test_ties_to_even -- 2^53+1 and 2^53+3 (both exact midpoints) round
 #     to the even neighbour; 1e23, 0.1 and 0.30000000000000004 are exact.
-#     Catches an Eisel-Lemire port without the round-to-even step.
+#     The same tie written with a fraction, 9007199254740993.0 (q = -1)
+#     and 9007199254740993.000 (q = -3), and 562949953421312.0625
+#     (625 * (2^53+1) * 10^-4, q = -4, the lower edge of the range where
+#     an exact tie can occur) also round to even. Catches an Eisel-Lemire
+#     port without the round-to-even step, or with that step limited to
+#     q >= 0.
 #   * test_long_mantissas -- more than 19 significant digits, where the
 #     truncated mantissa cannot decide the rounding: the exact midpoints
 #     1 + 2^-53 and (2^54-1) * 2^970 (309 digits) tie to even; one unit
 #     more or less in the last digit moves the result; 2^-1075 (752
 #     digits) ties to 0.0 and goes to the smallest subnormal with a
-#     trailing 1, also when that 1 is past the 800th significant digit;
+#     trailing 1, also when that 1 is past the 800th significant digit
+#     (in the integer part, and in the fraction part);
 #     trailing zeros past it do not; the 768-digit midpoint between the
 #     largest subnormal and DBL_MIN ties to DBL_MIN, and one unit lower in
 #     its last digit reads the largest subnormal. Catches a parser that
@@ -114,14 +127,19 @@ def test_exponent_saturates() raises:
     # Leading zeros in the exponent are not magnitude: 1e(99 zeros)1 is 10.
     _check("1e" + _zeros(99) + "1", 0x4024000000000000)
     _check("1e-" + _zeros(99) + "1", 0x3FB999999999999A)
-    # The constant part of the cap: the exponent is held at the input
-    # length plus a margin, and that margin must carry the value past
-    # +-1000 (beyond DBL_MAX and below half the smallest subnormal). With
-    # a margin of 300 both exponents are held inside the double range and
-    # read as finite values (1e30800 as 1e308, 1(19 zeros)e-3300 as a
-    # subnormal); they must read as +Inf and +0.0.
+    # The constant part of the cap: the exponent stops accumulating at the
+    # first prefix of its digits that reaches the input length plus a
+    # margin, and that margin must carry the value past +-1000 (beyond
+    # DBL_MAX and below half the smallest subnormal). With a margin of 300
+    # the first two exponents are held inside the double range and read as
+    # finite values (1e30800 as 1e308, 1(19 zeros)e-3300 as a subnormal);
+    # they must read as +Inf and +0.0. With any margin from 305 to 317 both
+    # of those still read correctly, but 9e-3240 (7 bytes) is held at
+    # 9e-324 (the prefix 324) for every margin from 26 to 317 (at 9e-32,
+    # the prefix 32, below that), a nonzero value; it must read as +0.0.
     _check("1e30800", POS_INF)
     _check("1" + _zeros(19) + "e-3300", POS_ZERO)
+    _check("9e-3240", POS_ZERO)
 
 
 def test_huge_exponent_bounded() raises:
@@ -176,6 +194,10 @@ def test_ties_to_even() raises:
     print("test_ties_to_even")
     _check("9007199254740993", 0x4340000000000000)
     _check("9007199254740995", 0x4340000000000002)
+    # Exact ties with a negative decimal exponent q (w * 10^q, q in [-4, -1]).
+    _check("9007199254740993.0", 0x4340000000000000)
+    _check("9007199254740993.000", 0x4340000000000000)
+    _check("562949953421312.0625", 0x4300000000000000)
     _check("1.8014398509481988e+16", 0x4350000000000001)
     _check("1.801439850948199e+16", 0x4350000000000002)
     _check("1e23", 0x44B52D02C7E14AF6)
@@ -248,6 +270,7 @@ def test_long_mantissas() raises:
     _check("0." + _zeros(323) + h + "1", 0x0000000000000001)
     # The 1 past the 800th significant digit still counts ...
     _check(h + _zeros(100) + "1e-1176", 0x0000000000000001)
+    _check("0." + _zeros(323) + h + _zeros(100) + "1", 0x0000000000000001)
     # ... and zeros past it do not.
     _check(h + _zeros(100) + "e-1175", POS_ZERO)
     _check("0." + _zeros(323) + h + _zeros(200), POS_ZERO)

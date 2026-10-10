@@ -1,21 +1,37 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The public half of an offline-verify token stack: the deterministic Ed25519
-# key id (`kid_for_pubkey`), the RFC 7517 / RFC 8037 JWK Set renderer
-# (`render_jwks_json`), the publish-only seed -> JWKS derivation
-# (`jwks_json_from_seed`, which never constructs a minting keyring), and the
-# well-known identity JWKS path. It depends on `komira_crypto` for SHA-256
-# and the Ed25519 public-key derivation, on `komira_encoding` for base64url, and
-# on `komira_secret_store`
-# for the zeroizing move-only `SecretValue` the seed arrives in. It must not
-# depend on any token-minting or authorization package.
+# JSON Web Keys (RFC 7517) for signature verification: the public OKP
+# (Ed25519, RFC 8037), EC (P-256) and RSA key, a strict JWK and JWK Set parser
+# and a canonical renderer (public members only), the deterministic Ed25519
+# key id (`kid_for_pubkey`), the Ed25519 JWK Set renderer (`render_jwks_json`)
+# and the publish-only seed -> JWKS derivation (`jwks_json_from_seed`, which
+# never constructs a minting keyring). It depends on `komira_crypto` for
+# SHA-256 and the Ed25519 public-key derivation, on `komira_encoding` for
+# base64url, on `komira_json` for the parser and string escaping, and on
+# `komira_secret_store` for the zeroizing move-only `SecretValue` the seed
+# arrives in. It must not depend on any token-minting or authorization package.
+# tests/test_no_product_vocabulary.mojo keeps product concepts and dates out.
 mojo_library(
     name = "komira_jwks",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
-    test_srcs = ["tests/test_jwks.mojo"],
+    test_srcs = [
+        "tests/test_jwk_rfc_vectors.mojo",
+        "tests/test_jwk_set_strict.mojo",
+        "tests/test_jwks.mojo",
+        "tests/test_no_product_vocabulary.mojo",
+    ],
+    test_data = {
+        # The vocabulary test reads the library's own sources, staged at their
+        # repository paths.
+        "tests/test_no_product_vocabulary.mojo": glob(
+            ["**/*.mojo"],
+            exclude = ["tests/**/*.mojo"],
+        ),
+    },
     deps = [
         "//src/komira_crypto:komira_crypto",
         "//src/komira_encoding:komira_encoding",
+        "//src/komira_json:komira_json",
         "//src/komira_secret_store:komira_secret_store",
     ],
     visibility = ["PUBLIC"],

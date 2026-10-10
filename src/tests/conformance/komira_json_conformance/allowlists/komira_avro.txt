@@ -1,0 +1,43 @@
+# komira_avro: the JSONTestSuite y_ and n_ files the Avro reader's schema JSON through decode_ocf_header (komira_avro)
+# gets wrong, the verdict it gives every i_ file (ACCEPTS:, REJECTS:,
+# BOUNDARY:, MISREADS:), and the files that abort it (ABORTS:), one per
+# line with the reason (format and gate: gate.mojo). DEFECT in a reason marks
+# a verdict to be fixed in the product, not a choice. Shrink-only: a fix
+# makes its line STALE (or its i_ record CHANGED) and the test red until the
+# line is edited.
+
+i_number_double_huge_neg_exp.json ACCEPTS: _parse_number takes the literal; the value is then read as a schema
+i_number_huge_exp.json ACCEPTS: _parse_number takes the literal; the value is then read as a schema
+i_number_neg_int_huge_exp.json ACCEPTS: _parse_number takes the literal; the value is then read as a schema
+i_number_pos_double_huge_exp.json ACCEPTS: _parse_number takes the literal; the value is then read as a schema
+i_number_real_neg_overflow.json ACCEPTS: _parse_number takes the literal; the value is then read as a schema
+i_number_real_pos_overflow.json ACCEPTS: _parse_number takes the literal; the value is then read as a schema
+i_number_real_underflow.json ACCEPTS: _parse_number takes the literal; the value is then read as a schema
+i_number_too_big_neg_int.json REJECTS: AvroSchemaError.MALFORMED_JSON: integer literal has 30 digits, which cannot be represented (max 19)
+i_number_too_big_pos_int.json REJECTS: AvroSchemaError.MALFORMED_JSON: integer literal has 21 digits, which cannot be represented (max 19)
+i_number_very_big_negative_int.json REJECTS: AvroSchemaError.MALFORMED_JSON: integer literal has 48 digits, which cannot be represented (max 19)
+i_object_key_lone_2nd_surrogate.json REJECTS: AvroSchemaError.MALFORMED_JSON: \u escape is a low surrogate with no high surrogate before it
+i_string_1st_surrogate_but_2nd_missing.json REJECTS: AvroSchemaError.MALFORMED_JSON: \u escape is a high surrogate not followed by a \u low surrogate
+i_string_1st_valid_surrogate_2nd_invalid.json REJECTS: AvroSchemaError.MALFORMED_JSON: \u escape is a high surrogate not followed by a \u low surrogate
+i_string_UTF-16LE_with_BOM.json REJECTS: AvroSchemaError.MALFORMED_JSON: unexpected character
+i_string_UTF-8_invalid_sequence.json REJECTS: AvroSchemaError.MALFORMED_JSON: avro.schema: not valid UTF-8
+i_string_UTF8_surrogate_U+D800.json REJECTS: AvroSchemaError.MALFORMED_JSON: avro.schema: not valid UTF-8
+i_string_incomplete_surrogate_and_escape_valid.json REJECTS: AvroSchemaError.MALFORMED_JSON: \u escape is a high surrogate not followed by a \u low surrogate
+i_string_incomplete_surrogate_pair.json REJECTS: AvroSchemaError.MALFORMED_JSON: \u escape is a low surrogate with no high surrogate before it
+i_string_incomplete_surrogates_escape_valid.json REJECTS: AvroSchemaError.MALFORMED_JSON: \u escape is a high surrogate not followed by a \u low surrogate
+i_string_invalid_lonely_surrogate.json REJECTS: AvroSchemaError.MALFORMED_JSON: \u escape is a high surrogate not followed by a \u low surrogate
+i_string_invalid_surrogate.json REJECTS: AvroSchemaError.MALFORMED_JSON: \u escape is a high surrogate not followed by a \u low surrogate
+i_string_invalid_utf-8.json REJECTS: AvroSchemaError.MALFORMED_JSON: avro.schema: not valid UTF-8
+i_string_inverted_surrogates_U+1D11E.json REJECTS: AvroSchemaError.MALFORMED_JSON: \u escape is a low surrogate with no high surrogate before it
+i_string_iso_latin_1.json REJECTS: AvroSchemaError.MALFORMED_JSON: avro.schema: not valid UTF-8
+i_string_lone_second_surrogate.json REJECTS: AvroSchemaError.MALFORMED_JSON: \u escape is a low surrogate with no high surrogate before it
+i_string_lone_utf8_continuation_byte.json REJECTS: AvroSchemaError.MALFORMED_JSON: avro.schema: not valid UTF-8
+i_string_not_in_unicode_range.json REJECTS: AvroSchemaError.MALFORMED_JSON: avro.schema: not valid UTF-8
+i_string_overlong_sequence_2_bytes.json REJECTS: AvroSchemaError.MALFORMED_JSON: avro.schema: not valid UTF-8
+i_string_overlong_sequence_6_bytes.json REJECTS: AvroSchemaError.MALFORMED_JSON: avro.schema: not valid UTF-8
+i_string_overlong_sequence_6_bytes_null.json REJECTS: AvroSchemaError.MALFORMED_JSON: avro.schema: not valid UTF-8
+i_string_truncated-utf-8.json REJECTS: AvroSchemaError.MALFORMED_JSON: avro.schema: not valid UTF-8
+i_string_utf16BE_no_BOM.json REJECTS: AvroSchemaError.MALFORMED_JSON: unexpected character
+i_string_utf16LE_no_BOM.json REJECTS: AvroSchemaError.MALFORMED_JSON: unexpected character
+i_structure_500_nested_arrays.json REJECTS: AvroSchemaError.SCHEMA_TOO_DEEP: JSON nesting exceeds 256 levels
+i_structure_UTF-8_BOM_empty_object.json REJECTS: AvroSchemaError.MALFORMED_JSON: unexpected character

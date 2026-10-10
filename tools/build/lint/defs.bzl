@@ -139,13 +139,34 @@ def _mojo_deps_impl(ctx):
     if not ctx.attrs.srcs:
         fail("mojo_deps {}: srcs is empty, so it would check nothing".format(ctx.label))
     staged, copy = _stage(ctx, [ctx.attrs.buck] + ctx.attrs.srcs)
-    return _lint(ctx, "mojo_deps", [], [copy[ctx.attrs.buck.short_path]] + [copy[s.short_path] for s in ctx.attrs.srcs], staged)
+    for m in ctx.attrs.refused_imports:
+        if not _dotted_komira_module(m):
+            fail("mojo_deps {}: refused_imports entry `{}` is not a dotted module name komira_<x>.<y>[.<z>...] of letters, digits and _".format(ctx.label, m))
+    refused = ",".join(ctx.attrs.refused_imports) or "-"
+    return _lint(ctx, "mojo_deps", [ctx.attrs._reader], [copy[ctx.attrs.buck.short_path], refused] + [copy[s.short_path] for s in ctx.attrs.srcs], staged)
+
+_WORD = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+
+def _dotted_komira_module(m):
+    """Whether m matches komira_[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+."""
+    parts = m.split(".")
+    if len(parts) < 2 or not parts[0].startswith("komira_") or len(parts[0]) == len("komira_"):
+        return False
+    for p in parts:
+        if not p:
+            return False
+        for i in range(len(p)):
+            if p[i] not in _WORD:
+                return False
+    return True
 
 mojo_deps_rule = rule(
     impl = _mojo_deps_impl,
-    doc = "The `deps` of the package's mojo_library (the BUCK file in `buck`) name every `komira_*` module that the Mojo files in `srcs` import, library files and tests alike. A missing dep fails the build of the package; this finds it from the text, so a dependency list is checked in review as well as at build time. Extra deps are allowed.",
+    doc = "The `deps` of the package's mojo_library (the BUCK file in `buck`) name every `komira_*` module that the Mojo files in `srcs` import, library files and tests alike. A missing dep fails the build of the package; this finds it from the text, so a dependency list is checked in review as well as at build time. Extra deps are allowed. `refused_imports` names dotted modules (`komira_x.y`) that no file in `srcs` may import, nor any module under them, nor name by their dotted path outside an import: a layering rule finer than a target's deps.",
     attrs = _COMMON | {
         "buck": attrs.source(),
+        "refused_imports": attrs.list(attrs.string(), default = []),
+        "_reader": attrs.source(default = "komira//tools/build/lint:refused_imports.awk"),
         "srcs": attrs.list(attrs.source()),
     },
 )
@@ -165,6 +186,23 @@ retired_names_rule = rule(
         "names": attrs.list(attrs.string()),
         "srcs": attrs.list(attrs.source(), default = []),
         "tree": attrs.dep(providers = [DocTreeInfo]),
+    },
+)
+
+def _src_layout_impl(ctx):
+    staged, copy = _stage(ctx, [ctx.attrs.map] if ctx.attrs.map else [])
+    args = [ctx.attrs.root, ",".join(ctx.attrs.shipped) or "-", ctx.label.cell + "//"]
+    args.append(copy[ctx.attrs.map.short_path] if ctx.attrs.map else "-")
+    return _lint(ctx, "src_layout", [], args + ctx.attrs.packages, staged)
+
+src_layout_rule = rule(
+    impl = _src_layout_impl,
+    doc = "`root` (src) holds what komira ships: each of `packages` (package paths in the cell) is `<root>/<name>`, or a test-only package `<root>/tests/<kind>/<name>`, kind `e2e` (named `*_e2e` or `*_loopback`), `conformance` (`*_conformance`) or `helpers` (neither). A `komira_test_*` package directly under `root` must be one `shipped` names. With `map` (a Markdown file: the module map, docs/architecture.md), each package under `root` has exactly one table row `| [`<name>`](<link>) |` whose link, less its leading `../`s and trailing `/`, is the package's path and whose `<name>` is its last component, and no such row links a path under `root` that is not one of `packages`. The `src_layout` macro fills `packages` from the build graph.",
+    attrs = _COMMON | {
+        "map": attrs.option(attrs.source(), default = None),
+        "packages": attrs.list(attrs.string()),
+        "root": attrs.string(default = "src"),
+        "shipped": attrs.list(attrs.string(), default = []),
     },
 )
 
@@ -193,6 +231,42 @@ pointer_lint_rule = rule(
         "public_root": attrs.string(default = "src"),
         "tree": attrs.option(attrs.dep(providers = [DocTreeInfo]), default = None),
         "_reader": attrs.source(default = "komira//tools/build/lint:pointer_lint.awk"),
+    },
+)
+
+def _public_boundary_impl(ctx):
+    if (ctx.attrs.tree == None) == (not ctx.attrs.files):
+        fail("public_boundary {}: name the files in exactly one of `tree` and `files`".format(ctx.label))
+    files = dict(ctx.attrs.tree[DocTreeInfo].files) if ctx.attrs.tree != None else dict(ctx.attrs.files)
+    files.update(collect_docs(ctx.label.package + "/" if ctx.label.package else "", ctx.attrs.srcs, []))
+    for prefix, tree in ctx.attrs.cells.items():
+        for path, f in tree[DocTreeInfo].files.items():
+            files[prefix + "/" + path] = f
+    files.update(ctx.attrs.paths)
+    staged = ctx.actions.copied_dir("tree", files)
+    package = "{}//{}".format(ctx.label.cell, ctx.label.package + "/" if ctx.label.package else "")
+    args = []
+    for ledger in [ctx.attrs.holds, ctx.attrs.hosts]:
+        args += [ledger, str(ledger.owner.raw_target()) if ledger.owner != None else package + ledger.short_path]
+    args.append(ctx.attrs.deny if ctx.attrs.deny != None else "-")
+    args += [str(ctx.attrs.window_from), ctx.attrs.public_from]
+    return _lint(ctx, "public_boundary", [ctx.attrs._reader], args, staged)
+
+public_boundary_rule = rule(
+    impl = _public_boundary_impl,
+    doc = "What a public repository may not hold, over every file of `tree` (a doc_tree target: the root one holds every file of the cell) or, for a fixture, of `files` ({path in the tree: source}), never both, plus `srcs` (the dotfiles a glob skips), the doc_tree of each other cell in `cells` (at its path), and `paths` ({path in the tree: source}, a file another cell exports, such as its dotfiles): no date from the year `window_from` up to `public_from` (the first day of the public history, YYYY-MM-01), home directory naming a person, private or written-out network address, URL host outside the reserved example names and the domains of `hosts`, email address outside the reserved example domains, or commit id in prose; binary data is not read (its path is), and the path of every file is read for dates, home directories and deny-list words. `holds` holds the findings a file must keep, per rule and file at an exact count, and only shrinks. `deny`, absent by default, is a list of words kept outside the repository (a private consumer's), one per line: a finding no row can hold. lint.sh (kind public_boundary) says the formats; public_boundary.awk, the reader, says what each rule matches.",
+    attrs = _COMMON | {
+        "cells": attrs.dict(attrs.string(), attrs.dep(providers = [DocTreeInfo]), default = {}),
+        "deny": attrs.option(attrs.source(), default = None),
+        "files": attrs.dict(attrs.string(), attrs.source(), default = {}),
+        "holds": attrs.source(),
+        "hosts": attrs.source(),
+        "srcs": attrs.list(attrs.source(), default = []),
+        "paths": attrs.dict(attrs.string(), attrs.source(), default = {}),
+        "public_from": attrs.string(),
+        "tree": attrs.option(attrs.dep(providers = [DocTreeInfo]), default = None),
+        "window_from": attrs.int(),
+        "_reader": attrs.source(default = "komira//tools/build/lint:public_boundary.awk"),
     },
 )
 
@@ -287,11 +361,32 @@ def mojo_deps(**kwargs):
 def pointer_lint(**kwargs):
     pointer_lint_rule(**_linux(kwargs))
 
+def public_boundary(**kwargs):
+    public_boundary_rule(**_linux(kwargs))
+
 def retired_names(**kwargs):
     retired_names_rule(**_linux(kwargs))
 
 def tar_member(**kwargs):
     tar_member_rule(**_linux(kwargs))
+
+# The layout of src/: see src_layout_rule. Without `packages`, in the cell's
+# root package only, they are every package under `root`, as Buck2 lists the
+# root package's subpackages: a directory holding a BUCK file, the nearest
+# below the root (src/ and src/tests/ hold none, so src/<name> and
+# src/tests/<kind>/<name> are listed, and so is any other package a missing
+# BUCK file leaves nearest). That call must name `map`, the module map, so
+# the map check cannot be dropped by deleting one line. A fixture names
+# `packages` instead, and `map` only when it tests the map.
+def src_layout(**kwargs):
+    if "packages" not in kwargs:
+        if package_name():
+            fail("src_layout {}: without `packages` it lists the root package's subpackages, so it belongs in the cell's root BUCK".format(kwargs.get("name", "")))
+        if not kwargs.get("map"):
+            fail("src_layout {}: the cell's src_layout must name `map`, the module map (docs/architecture.md), which must list every package under src/".format(kwargs.get("name", "")))
+        root = kwargs.get("root", "src")
+        kwargs["packages"] = sorted([p for p in __internal__.sub_packages() if p.startswith(root + "/")])
+    src_layout_rule(**_linux(kwargs))
 
 # Markdown: see markdown_docs_rule. The root BUCK applies it to the
 # repository's documentation (//:docs).
@@ -306,8 +401,10 @@ markdown_docs = declares_docs(markdown_docs)
 mojo_deps = declares_docs(mojo_deps)
 no_endpoint = declares_docs(no_endpoint)
 pointer_lint = declares_docs(pointer_lint)
+public_boundary = declares_docs(public_boundary)
 push_verdicts = declares_docs(push_verdicts)
 retired_names = declares_docs(retired_names)
 shell_lint = declares_docs(shell_lint)
+src_layout = declares_docs(src_layout)
 tar_member = declares_docs(tar_member)
 workflow_lint = declares_docs(workflow_lint)

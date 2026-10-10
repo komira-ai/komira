@@ -130,6 +130,7 @@ from komira_async.reactor.reactor import Reactor
 # {the core packages and the small leaf packages} only — never reaches back into komira_objectstore.
 from komira_metrics.metrics_set import MetricsSet, new_owned_metrics_set
 
+from komira_objectstore.cas_backoff_probe import record_cas_backoff
 from komira_objectstore.path import Path
 
 # Reclamation never touches a live chunk (at or above `_LOG_START`):
@@ -657,6 +658,14 @@ struct _LocalHeadCache(Copyable, Movable, Deinitable):
 # -----------------------------------------------------------------------------
 
 
+comptime CAS_LIST_ESCALATE_AFTER: Int = 3
+"""Consecutive 412s after which `CasManifestStore.append` re-anchors on the
+bucket's authoritative tail (the LIST escalation) instead of probing one slot
+forward. Public so a test can state what its bound relies on: a call whose
+budget (`max_retries + 1` attempts) exceeds this many attempts makes at least
+one attempt past a re-anchor."""
+
+
 @fieldwise_init
 struct RetryPolicy(
     Copyable, ImplicitlyCopyable, Movable, Deinitable
@@ -761,24 +770,32 @@ def _xorshift64(var x: UInt64) -> UInt64:
 
 
 @always_inline
-def _jittered_sleep_us(upper_us: Int64, salt: UInt64) raises:
+def _jittered_sleep_us(upper_us: Int64, attempt: Int):
     """Sleep a uniform-random duration in [0, upper_us] microseconds.
 
     Full jitter. Seeds an xorshift from the high-resolution
-    clock XORed with a per-call `salt` (the attempt count) so two threads
+    clock XORed with a per-call salt (the attempt count) so two threads
     entering backoff at nearly the same instant still draw different waits.
+    Every backoff is counted (`cas_backoff_probe`), a zero bound included:
+    the attempt, its bound, the draw and the time the sleep took, so a test
+    can hold them to the policy.
     """
     if upper_us <= Int64(0):
+        record_cas_backoff(attempt, upper_us, Int64(0), Int64(0))
         return
+    var salt = UInt64(attempt)
     var seed = UInt64(perf_counter_ns()) ^ (salt * UInt64(0x9E3779B97F4A7C15))
     var r = _xorshift64(seed | UInt64(1))
     var draw_us = r % UInt64(upper_us + 1)
+    var t0 = perf_counter_ns()
     # Use `usleep` (microsecond, distinct symbol) instead of stdlib
     # `time.sleep` → `nanosleep`: an AOT binary that links komira_async (whose
     # reactor declares its OWN `external_call["nanosleep", ...]`) hits a
     # "conflicting nanosleep signature" legalization failure. Same fix as
     # komira_job_supervisor._sleep_secs / komira_supervisor._sleep_ms.
     _ = external_call["usleep", Int32](UInt32(draw_us))
+    var slept_us = Int64((perf_counter_ns() - t0) // 1000)
+    record_cas_backoff(attempt, upper_us, Int64(draw_us), slept_us)
 
 
 # =============================================================================
@@ -2544,7 +2561,7 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         # `candidate_seq` from a stale-low _HEAD instead computes a fresh seq
         # beyond ALL taken slots. We re-escalate every N 412s so a writer that
         # is still losing keeps re-anchoring on the true tail.
-        comptime LIST_ESCALATE_AFTER = 3
+        comptime LIST_ESCALATE_AFTER = CAS_LIST_ESCALATE_AFTER
         var consecutive_412 = 0
         while True:
             attempt += 1
@@ -2619,7 +2636,7 @@ struct CasManifestStore[Store: ConditionalWriteStore](
                     + self._prefix
                 )
             var upper = self._retry.backoff_us_for_attempt(attempt)
-            _jittered_sleep_us(upper, UInt64(attempt))
+            _jittered_sleep_us(upper, attempt)
             # FORWARD-PROBE re-anchor: the slot we just tried
             # (`head.chunk_seq + 1`) is TAKEN — read THAT chunk directly (one GET
             # of a known key, NOT a LIST, NOT the lagging cached `_HEAD`) to learn
@@ -2691,7 +2708,7 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         # is recoverable by LIST). On return the deferred counter is reset; if the
         # persist failed transiently it simply tries again on the next cadence.
         if not self._head_cache.present:
-            return
+            return  # cov: unreachable the only caller checks _head_cache.present first
         var seq = self._head_cache.chunk_seq
         var next_off = self._head_cache.next_offset
         # `_try_advance_head` with empty `expected_head_etag` takes the monotone
@@ -3125,11 +3142,11 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             var new_encoded = encode_chunk(new_body, old_rc)
             var check_rc = decode_chunk_record_count(new_encoded)
             if check_rc != old_rc:
-                _cas_gate_unlock()
-                raise Error(
-                    "CasManifestStore.rewrite_chunk_body: record_count guard"
+                _cas_gate_unlock()  # cov: unreachable encode_chunk(body, old_rc) always decodes back to old_rc
+                raise Error(  # cov: unreachable see the line above
+                    "CasManifestStore.rewrite_chunk_body: record_count guard"  # cov: unreachable see the line above
                     " — refusing to renumber chunk "
-                    + String(chunk_seq)
+                    + String(chunk_seq)  # cov: unreachable see the line above
                 )
             try:
                 _ = self._store.conditional_put(

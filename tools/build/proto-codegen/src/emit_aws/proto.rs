@@ -165,16 +165,22 @@ pub(super) struct SelectedProtocol {
     pub json_version: String,
 }
 
-/// The protocol `meta` declares, if this emitter implements it, and its
-/// signing scheme is one the generated client can sign. Anything else is
-/// refused by name.
+/// The protocol `meta` is generated for (`AwsServiceMeta.protocol`, which
+/// the front-end chose from the model's `protocols` list), if this emitter
+/// implements it, and its signing scheme is one the generated client can
+/// sign. Anything else is refused by name, with the list the model offers.
 pub(super) fn select_protocol(meta: &AwsServiceMeta) -> Result<SelectedProtocol, String> {
-    let declared = AwsProtocol::from_botocore(&meta.protocol);
-    let protocol = match declared {
+    let chosen = AwsProtocol::from_botocore(&meta.protocol);
+    let protocol = match chosen {
         Some(p) if SUPPORTED_PROTOCOLS.contains(&p.botocore_name()) => p,
         _ => {
+            let listed = if meta.protocols.is_empty() {
+                String::new()
+            } else {
+                format!(" and lists protocols {:?}", meta.protocols)
+            };
             return Err(format!(
-                "emit_aws: service `{}` declares protocol `{}`, and this emitter \
+                "emit_aws: service `{}` declares protocol `{}`{listed}, and this emitter \
                  implements only {:?} (ec2Query, awsJson1_0 / awsJson1_1, awsQuery, restJson1, \
                  restXml). It is REFUSED by name \
                  rather than emitted half-right: a `{}` client emitted by a `json` \
@@ -182,7 +188,7 @@ pub(super) fn select_protocol(meta: &AwsServiceMeta) -> Result<SelectedProtocol,
                  semantically wrong, which is the failure mode a conformance corpus \
                  catches late and a service catches never.",
                 meta.service, meta.protocol, SUPPORTED_PROTOCOLS, meta.protocol
-            ))
+            ));
         }
     };
     let selected = match protocol {
@@ -419,5 +425,98 @@ mod tests {
     fn select_protocol_applies_the_signature_check() {
         let e = select_protocol(&meta("json", Some("1.1"), "v2", &[])).err().expect("refused");
         assert!(e.contains("signatureVersion `v2`"), "{e}");
+    }
+
+    /// A one-operation model declaring `protocol` and listing `protocols`
+    /// (a JSON array's text, or empty for no list), lowered and emitted as
+    /// a pure module with its header.
+    fn emit_listing(protocol: &str, protocols: &str) -> Result<(String, String), String> {
+        let listed = if protocols.is_empty() {
+            String::new()
+        } else {
+            format!(r#", "protocols": {protocols}"#)
+        };
+        let model = crate::json::parse(&format!(
+            r#"{{"version": "2.0",
+                "metadata": {{"apiVersion": "2026-10-06", "endpointPrefix": "tiny",
+                    "jsonVersion": "1.0", "protocol": "{protocol}"{listed},
+                    "serviceFullName": "Tiny", "serviceId": "Tiny",
+                    "signatureVersion": "v4", "targetPrefix": "Tiny",
+                    "uid": "tiny-2026-10-06"}},
+                "operations": {{"Op": {{"name": "Op",
+                    "http": {{"method": "POST", "requestUri": "/"}},
+                    "input": {{"shape": "In"}}}}}},
+                "shapes": {{"In": {{"type": "structure", "members": {{}}}}}}}}"#
+        ))
+        .unwrap();
+        let lowering = crate::aws_in::lower_aws_service(
+            &model,
+            "tiny",
+            &["Op".to_string()],
+            "tiny.json",
+            "aws.tiny",
+        )?;
+        let options = crate::emit_aws::AwsEmitOptions {
+            pure_only: true,
+            ..crate::emit_aws::AwsEmitOptions::default()
+        };
+        let prov = crate::emit_aws::AwsProvenance { model_key: "tiny/2026-10-06", model_sha256: "m" };
+        let src = crate::emit_aws::emit_aws_module(
+            &lowering,
+            &crate::overrides::AwsOverrides::empty(),
+            "tiny",
+            options,
+            Some(prov),
+        )?
+        .source;
+        Ok((lowering.service.protocol, src))
+    }
+
+    #[test]
+    fn the_first_supported_protocol_of_the_list_is_chosen() {
+        // CloudWatch's pinned model: smithy-rpc-v2-cbor first, then json.
+        let (chosen, src) =
+            emit_listing("smithy-rpc-v2-cbor", r#"["smithy-rpc-v2-cbor", "json", "query"]"#)
+                .unwrap();
+        assert_eq!(chosen, "json");
+        let header = "#   protocol     : json 1.0 (targetPrefix `Tiny`)\n\
+                      #                  (the model declares `smithy-rpc-v2-cbor`; the first of \
+                      its protocols [\"smithy-rpc-v2-cbor\", \"json\", \"query\"]\n\
+                      #                  that this generator implements)\n";
+        assert!(src.contains(header), "{src}");
+        assert!(src.contains("application/x-amz-json-1.0"), "{src}");
+        // The list's order decides, not the generator's.
+        let (chosen, src) = emit_listing("json", r#"["query", "json"]"#).unwrap();
+        assert_eq!(chosen, "query");
+        assert!(src.contains("#   protocol     : query (awsQuery)\n"), "{src}");
+        // A model whose list starts with its declared protocol reads as before.
+        let (chosen, src) = emit_listing("json", r#"["json"]"#).unwrap();
+        assert_eq!(chosen, "json");
+        assert!(!src.contains("(the model declares"), "{src}");
+    }
+
+    #[test]
+    fn a_list_with_no_supported_protocol_is_refused_naming_it() {
+        let e = emit_listing("smithy-rpc-v2-cbor", r#"["smithy-rpc-v2-cbor"]"#).unwrap_err();
+        assert_eq!(
+            e,
+            "emit_aws: service `tiny` declares protocol `smithy-rpc-v2-cbor` and lists \
+             protocols [\"smithy-rpc-v2-cbor\"], and this emitter implements only \
+             [\"ec2\", \"json\", \"query\", \"rest-json\", \"rest-xml\"] (ec2Query, \
+             awsJson1_0 / awsJson1_1, awsQuery, restJson1, restXml). It is REFUSED by name \
+             rather than emitted half-right: a `smithy-rpc-v2-cbor` client emitted by a \
+             `json` serializer produces requests that are syntactically valid and \
+             semantically wrong, which is the failure mode a conformance corpus catches late \
+             and a service catches never."
+        );
+        // With no list, the message is the one it always was.
+        let e = emit_listing("smithy-rpc-v2-cbor", "").unwrap_err();
+        assert!(
+            e.starts_with(
+                "emit_aws: service `tiny` declares protocol `smithy-rpc-v2-cbor`, and this \
+                 emitter implements only"
+            ),
+            "{e}"
+        );
     }
 }

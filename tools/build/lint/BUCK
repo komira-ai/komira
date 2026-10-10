@@ -10,10 +10,18 @@ export_file(name = "retired_names.sh", visibility = ["PUBLIC"])
 
 export_file(name = "readme_api_coverage.sh", visibility = ["PUBLIC"])
 
+export_file(name = "surface_capability_matrix.sh", visibility = ["PUBLIC"])
+
 export_file(name = "test_weld.sh", visibility = ["PUBLIC"])
 
 # The reader of lint kind pointer_lint (lint.sh; the rule is pointer_lint in defs.bzl).
 export_file(name = "pointer_lint.awk", visibility = ["PUBLIC"])
+
+# The reader of the refused imports of lint kind mojo_deps (lint.sh; the rule is mojo_deps in defs.bzl).
+export_file(name = "refused_imports.awk", visibility = ["PUBLIC"])
+
+# The reader of lint kind public_boundary (lint.sh; the rule is public_boundary in defs.bzl).
+export_file(name = "public_boundary.awk", visibility = ["PUBLIC"])
 
 pinned_file(**pinned_kwargs("linux-x86_64", "shellcheck"))
 
@@ -36,6 +44,6 @@ tar_member(
 # The lint actions' own scripts.
 shell_lint(
     name = "shell_lint",
-    srcs = ["lint.sh", "readme_api_coverage.sh", "retired_names.sh", "test_weld.sh"],
+    srcs = ["lint.sh", "readme_api_coverage.sh", "retired_names.sh", "surface_capability_matrix.sh", "test_weld.sh"],
     visibility = ["PUBLIC"],
 )

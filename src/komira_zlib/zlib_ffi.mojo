@@ -28,6 +28,7 @@
 #
 #   def zlib_deflate_into(dst, src, level: Int32, window_bits: Int32) -> Int
 #   def zlib_inflate_into(dst, src, window_bits=ZLIB_WINDOW_BITS_AUTO) -> Int
+#   def zlib_inflate_once(dst, src, window_bits) -> ZlibInflateOutcome
 #   def zlib_compress_bound(src_len: Int, window_bits: Int32) -> Int
 #   def zlib_skip_stream(src, window_bits=ZLIB_WINDOW_BITS_AUTO) -> Int
 #
@@ -53,7 +54,8 @@
 # # Encapsulation discipline
 #
 # Public API: the Span entries at the bottom of the file (`zlib_inflate_into`,
-# `zlib_deflate_into`, `zlib_compress_bound`, `zlib_skip_stream`). No public
+# `zlib_inflate_once`, `zlib_deflate_into`, `zlib_compress_bound`,
+# `zlib_skip_stream`). No public
 # signature holds a raw pointer.
 # Internal FFI (underscore-prefixed: private to this module by convention; the
 # compiler does not enforce it):
@@ -441,7 +443,7 @@ def _z_stream_avail_out(z: UnsafePointer[UInt8, MutUntrackedOrigin]) -> Int:
 
 
 @fieldwise_init
-struct _InflateOutcome(Copyable, Movable):
+struct ZlibInflateOutcome(Copyable, Movable):
     """What one `inflate(Z_NO_FLUSH)` call left behind: libz's return code, the
     bytes it wrote, the input it left unread and the output space it left
     unwritten."""
@@ -460,7 +462,7 @@ def _zlib_inflate_once[
     src: UnsafePointer[UInt8, sori],
     src_size: Int,
     window_bits: Int32,
-) raises -> _InflateOutcome:
+) raises -> ZlibInflateOutcome:
     """One `inflateInit2_` / `inflate(Z_NO_FLUSH)` / `inflateEnd` round, with
     the `inflate` return code handed back rather than judged. Raises only when
     `inflateInit2_` fails.
@@ -508,7 +510,7 @@ def _zlib_inflate_once[
     var unwritten = _z_stream_avail_out(strm)
     var _end_rc = handle_ptr[].call["inflateEnd", Int32](strm)
     strm.free()
-    return _InflateOutcome(rc, written, unread, unwritten)
+    return ZlibInflateOutcome(rc, written, unread, unwritten)
 
 
 # -----------------------------------------------------------------------------
@@ -746,7 +748,7 @@ def zlib_inflate_into[
             + " bytes exceeds libz's 32-bit length"
         )
     var cap = min(len(dst), _UINT_MAX)
-    var outcome: _InflateOutcome
+    var outcome: ZlibInflateOutcome
     if cap == 0:
         # libz refuses a null `next_out` even with `avail_out == 0`, and an
         # empty Span may carry one: offer a real one-byte buffer, capacity 0.
@@ -798,6 +800,60 @@ def zlib_inflate_into[
         "zlib_inflate_into: corrupt stream (libz inflate rc="
         + String(Int(outcome.rc)) + ", window_bits="
         + String(Int(window_bits)) + ")"
+    )
+
+
+def zlib_inflate_once[
+    dori: MutOrigin
+](
+    dst: Span[UInt8, dori], src: Span[UInt8, _], window_bits: Int32
+) raises -> ZlibInflateOutcome:
+    """One `inflate(Z_NO_FLUSH)` call over all of `src` into `dst`, with what
+    libz left behind handed back unjudged: its return code (`rc`, zlib.h:
+    0 Z_OK, 1 Z_STREAM_END, -3 Z_DATA_ERROR, -5 Z_BUF_ERROR, ...), the bytes
+    written, the input left unread and the output space left unwritten. For a
+    caller whose policy on a full destination or a short source differs from
+    `zlib_inflate_into`'s (a grow-and-retry loop). libz writes no byte past
+    `len(dst)`; a destination past 4 GiB is offered as 4 GiB - 1 bytes (libz
+    counts in 32 bits). Raises when `inflateInit2_` fails or `src` is past
+    4 GiB.
+    """
+    var n = len(src)
+    if n > _UINT_MAX:
+        raise Error(
+            "zlib_inflate_once: source of " + String(n)
+            + " bytes exceeds libz's 32-bit length"
+        )
+    var cap = min(len(dst), _UINT_MAX)
+    var src_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var dst_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    if n == 0 and cap == 0:
+        # SAFETY: both locals are alive across this synchronous call; libz
+        # reads 0 bytes and writes 0 bytes.
+        return _zlib_inflate_once(
+            dst_scratch.unsafe_ptr(), 0, src_scratch.unsafe_ptr(), 0,
+            window_bits,
+        )
+    if n == 0:
+        # SAFETY: `dst` holds `cap` writable bytes (its Span origin keeps them
+        # alive) and the local `src_scratch` stands in for the empty source;
+        # libz reads 0 bytes and writes at most `cap`.
+        return _zlib_inflate_once(
+            dst.unsafe_ptr(), cap, src_scratch.unsafe_ptr(), 0, window_bits
+        )
+    if cap == 0:
+        # SAFETY: libz refuses a null `next_out` even with `avail_out == 0`,
+        # and an empty Span may carry one: the local `dst_scratch` stands in,
+        # with capacity 0. `src` holds `n` readable bytes.
+        return _zlib_inflate_once(
+            dst_scratch.unsafe_ptr(), 0, src.unsafe_ptr(), n, window_bits
+        )
+    # SAFETY: `dst` holds `cap` writable bytes and `src` `n` readable bytes,
+    # both kept alive by their Span origins for this synchronous call; libz
+    # writes at most `cap`, reads at most `n`, and keeps neither pointer past
+    # `inflateEnd`.
+    return _zlib_inflate_once(
+        dst.unsafe_ptr(), cap, src.unsafe_ptr(), n, window_bits
     )
 
 

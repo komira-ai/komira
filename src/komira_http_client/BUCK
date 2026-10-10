@@ -3,7 +3,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The pooled HTTP/1.1 and HTTP/2 client over the komira_async reactor: HttpClient
 # and H2Client, the pools, the retry, redirect and timeout layers, the TLS
-# connector, and an object-store HTTP adapter. It depends on komira_http_core
+# connector, SchemeConnector (plaintext or TLS, fixed when it is made; its
+# branches are proven by komira_objectstore_s3's test_s3_endpoint_scheme and
+# komira_azure_blob's test_azure_fs_scheme_read, which read through it), and
+# an object-store HTTP adapter. It depends on komira_http_core
 # and not on komira_http_server.
 #
 # The TLS tests read the certificates of komira_http_core (exported there); the
@@ -22,6 +25,7 @@ mojo_library(
         "//src/komira_net:komira_net",
     ],
     test_srcs = [
+        "tests/test_L1_tls13_only_server.mojo",
         "tests/test_L1_tls_client_hostname_verify.mojo",
         "tests/test_L1_tls_config_lifetime_uaf.mojo",
         "tests/test_L1_tls_connector_move_no_stray_write.mojo",
@@ -49,6 +53,7 @@ mojo_library(
         "tests/test_L2_response_framing_precedence.mojo",
         "tests/test_L2_special_status_framing.mojo",
         "tests/test_L2_tls_connector_construction.mojo",
+        "tests/test_L2_tls_starttls_upgrade.mojo",
         "tests/test_body.mojo",
         "tests/test_body_drain_deadline.mojo",
         "tests/test_body_drain_deadline_survives_byte_dribble.mojo",
@@ -130,6 +135,11 @@ mojo_library(
         "tests/test_url.mojo",
     ],
     test_data = {
+        "tests/test_L1_tls13_only_server.mojo": {
+            "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+            "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+            "src/komira_http_core/tests/fixtures/tls/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
+        },
         "tests/test_L1_tls_client_hostname_verify.mojo": {
             "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
             "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
@@ -182,6 +192,10 @@ mojo_library(
             "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
             "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
             "src/komira_http_core/tests/fixtures/tls/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
+        },
+        "tests/test_L2_tls_starttls_upgrade.mojo": {
+            "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+            "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
         },
         "tests/test_dial_resolve_is_lazy.mojo": [
             "client.mojo",

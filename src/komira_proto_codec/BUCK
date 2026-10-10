@@ -16,11 +16,24 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_proto_codec_json_float32.mojo",
+        "tests/test_proto_codec_json_float64.mojo",
         "tests/test_proto_codec_json_nonascii_roundtrip.mojo",
         "tests/test_proto_codec_proto3_json_conformance.mojo",
         "tests/test_proto_codec_proto3_json_strictness.mojo",
         "tests/test_proto_codec_null_value.mojo",
         "tests/test_proto_codec_roundtrip.mojo",
+        "tests/test_proto_codec_binary_refusals.mojo",
+        "tests/test_proto_codec_json_decoder_edges.mojo",
+        "tests/test_proto_codec_json_float_edges.mojo",
+        # The float32 sweep (S1 of test_proto_codec_json_float32), split
+        # over disjoint index ranges so that each shard finishes within a
+        # coverage build's time limit; they run as parallel actions.
+        "tests/test_proto_codec_json_float32_sweep_0.mojo",
+        "tests/test_proto_codec_json_float32_sweep_1.mojo",
+        "tests/test_proto_codec_json_float32_sweep_2.mojo",
+        "tests/test_proto_codec_json_float32_sweep_3.mojo",
+        "tests/test_proto_codec_json_float32_sweep_4.mojo",
+        "tests/test_proto_codec_json_float32_sweep_5.mojo",
     ],
     visibility = ["PUBLIC"],
 )

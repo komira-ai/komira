@@ -1,0 +1,72 @@
+# The proto3 canonical JSON of one value of every komira.chat.v1 message, one
+# message per line: the message name, one space, the JSON. Every field of
+# every message has a key here: each is set to a value other than its default,
+# except the `optional` fields `topic` and `archived` of UpdateChannelRequest,
+# which are present at their defaults to show that a present field is written.
+# The values exercise the codec and need not be ones a server would send
+# together. The lines are in the order chat.proto declares the messages. The
+# same values, written as protoc text, are tests/fixtures/corpus.txtpb (one
+# field of ChatCorpus per message, in the order of this file).
+# tests/test_chat_goldens.mojo reads both.
+Subject {"iss":"https://issuer.example.com","sub":"user-0001"}
+User {"userId":"u-ada","subject":{"iss":"https://issuer.example.com","sub":"user-0001"},"displayName":"Ada","email":"ada@example.com"}
+Channel {"channelId":"c-general","kind":"CHANNEL_KIND_PUBLIC","name":"general","topic":"Everything else","archived":true,"headSeq":"43","createdAtMs":"1790000000000","createdByUserId":"u-ada","dmUserIds":["u-ada","u-bob"]}
+Member {"channelId":"c-general","userId":"u-bob","joinedAtMs":"1790000000500"}
+Message {"channelId":"c-general","seq":"43","kind":"EVENT_KIND_MESSAGE","senderUserId":"u-ada","body":"hi @bob, see the file","threadRootSeq":"40","targetSeq":"41","clientMsgId":"m-7f3a","mentionUserIds":["u-bob"],"mentionsChannel":true,"fileIds":["f-0001"],"createdAtMs":"1790000001000","edited":true,"deleted":true}
+FileInfo {"fileId":"f-0001","channelId":"c-general","name":"plan.pdf","contentType":"application/pdf","sizeBytes":"20480","state":"FILE_STATE_COMPLETE","uploaderUserId":"u-ada","createdAtMs":"1790000000900"}
+ReadState {"channelId":"c-general","readSeq":"40","unreadCount":3,"mentionCount":1}
+HttpHeader {"name":"x-ms-blob-type","value":"BlockBlob"}
+ApiError {"code":"invalid_argument","message":"body is required","field":"body"}
+GetMeRequest {}
+GetMeResponse {"user":{"userId":"u-ada","subject":{"iss":"https://issuer.example.com","sub":"user-0001"},"displayName":"Ada","email":"ada@example.com"}}
+GetUserRequest {"userId":"u-bob"}
+GetUserResponse {"user":{"userId":"u-ada","subject":{"iss":"https://issuer.example.com","sub":"user-0001"},"displayName":"Ada","email":"ada@example.com"}}
+ListUsersRequest {"pageSize":50,"pageToken":"t-users-2"}
+ListUsersResponse {"users":[{"userId":"u-ada","subject":{"iss":"https://issuer.example.com","sub":"user-0001"},"displayName":"Ada","email":"ada@example.com"}],"nextPageToken":"t-users-3"}
+CreateChannelRequest {"name":"design","topic":"Design reviews","kind":"CHANNEL_KIND_PRIVATE","memberUserIds":["u-bob","u-cy"]}
+CreateChannelResponse {"channel":{"channelId":"c-general","kind":"CHANNEL_KIND_PUBLIC","name":"general","topic":"Everything else","archived":true,"headSeq":"43","createdAtMs":"1790000000000","createdByUserId":"u-ada","dmUserIds":["u-ada","u-bob"]}}
+GetChannelRequest {"channelId":"c-general"}
+GetChannelResponse {"channel":{"channelId":"c-general","kind":"CHANNEL_KIND_PUBLIC","name":"general","topic":"Everything else","archived":true,"headSeq":"43","createdAtMs":"1790000000000","createdByUserId":"u-ada","dmUserIds":["u-ada","u-bob"]}}
+ListChannelsRequest {"browse":true,"includeArchived":true,"pageSize":20,"pageToken":"t-ch-2"}
+ListChannelsResponse {"channels":[{"channelId":"c-general","kind":"CHANNEL_KIND_PUBLIC","name":"general","topic":"Everything else","archived":true,"headSeq":"43","createdAtMs":"1790000000000","createdByUserId":"u-ada","dmUserIds":["u-ada","u-bob"]}],"nextPageToken":"t-ch-3"}
+UpdateChannelRequest {"channelId":"c-general","name":"general-chat","topic":"","archived":false}
+UpdateChannelResponse {"channel":{"channelId":"c-general","kind":"CHANNEL_KIND_PUBLIC","name":"general","topic":"Everything else","archived":true,"headSeq":"43","createdAtMs":"1790000000000","createdByUserId":"u-ada","dmUserIds":["u-ada","u-bob"]}}
+JoinChannelRequest {"channelId":"c-general"}
+JoinChannelResponse {"channel":{"channelId":"c-general","kind":"CHANNEL_KIND_PUBLIC","name":"general","topic":"Everything else","archived":true,"headSeq":"43","createdAtMs":"1790000000000","createdByUserId":"u-ada","dmUserIds":["u-ada","u-bob"]}}
+LeaveChannelRequest {"channelId":"c-general"}
+LeaveChannelResponse {}
+AddMembersRequest {"channelId":"c-design","userIds":["u-bob","u-cy"]}
+AddMembersResponse {"members":[{"channelId":"c-general","userId":"u-bob","joinedAtMs":"1790000000500"}]}
+RemoveMemberRequest {"channelId":"c-design","userId":"u-cy"}
+RemoveMemberResponse {}
+ListMembersRequest {"channelId":"c-general","pageSize":100,"pageToken":"t-m-2"}
+ListMembersResponse {"members":[{"channelId":"c-general","userId":"u-bob","joinedAtMs":"1790000000500"}],"nextPageToken":"t-m-3"}
+OpenDmRequest {"userIds":["u-bob"]}
+OpenDmResponse {"channel":{"channelId":"c-general","kind":"CHANNEL_KIND_PUBLIC","name":"general","topic":"Everything else","archived":true,"headSeq":"43","createdAtMs":"1790000000000","createdByUserId":"u-ada","dmUserIds":["u-ada","u-bob"]}}
+SendMessageRequest {"channelId":"c-general","body":"hi @bob, see the file","threadRootSeq":"40","clientMsgId":"m-7f3a","fileIds":["f-0001"]}
+SendMessageResponse {"message":{"channelId":"c-general","seq":"43","kind":"EVENT_KIND_MESSAGE","senderUserId":"u-ada","body":"hi @bob, see the file","threadRootSeq":"40","targetSeq":"41","clientMsgId":"m-7f3a","mentionUserIds":["u-bob"],"mentionsChannel":true,"fileIds":["f-0001"],"createdAtMs":"1790000001000","edited":true,"deleted":true}}
+EditMessageRequest {"channelId":"c-general","seq":"43","body":"hi @bob, see the new file"}
+EditMessageResponse {"message":{"channelId":"c-general","seq":"43","kind":"EVENT_KIND_MESSAGE","senderUserId":"u-ada","body":"hi @bob, see the file","threadRootSeq":"40","targetSeq":"41","clientMsgId":"m-7f3a","mentionUserIds":["u-bob"],"mentionsChannel":true,"fileIds":["f-0001"],"createdAtMs":"1790000001000","edited":true,"deleted":true}}
+DeleteMessageRequest {"channelId":"c-general","seq":"43"}
+DeleteMessageResponse {"message":{"channelId":"c-general","seq":"43","kind":"EVENT_KIND_MESSAGE","senderUserId":"u-ada","body":"hi @bob, see the file","threadRootSeq":"40","targetSeq":"41","clientMsgId":"m-7f3a","mentionUserIds":["u-bob"],"mentionsChannel":true,"fileIds":["f-0001"],"createdAtMs":"1790000001000","edited":true,"deleted":true}}
+ListMessagesRequest {"channelId":"c-general","sinceSeq":"30","beforeSeq":"44","limit":50}
+ListMessagesResponse {"messages":[{"channelId":"c-general","seq":"43","kind":"EVENT_KIND_MESSAGE","senderUserId":"u-ada","body":"hi @bob, see the file","threadRootSeq":"40","targetSeq":"41","clientMsgId":"m-7f3a","mentionUserIds":["u-bob"],"mentionsChannel":true,"fileIds":["f-0001"],"createdAtMs":"1790000001000","edited":true,"deleted":true}],"headSeq":"43","hasMore":true}
+ListThreadRequest {"channelId":"c-general","threadRootSeq":"40","sinceSeq":"41","limit":50}
+ListThreadResponse {"root":{"channelId":"c-general","seq":"43","kind":"EVENT_KIND_MESSAGE","senderUserId":"u-ada","body":"hi @bob, see the file","threadRootSeq":"40","targetSeq":"41","clientMsgId":"m-7f3a","mentionUserIds":["u-bob"],"mentionsChannel":true,"fileIds":["f-0001"],"createdAtMs":"1790000001000","edited":true,"deleted":true},"replies":[{"channelId":"c-general","seq":"43","kind":"EVENT_KIND_MESSAGE","senderUserId":"u-ada","body":"hi @bob, see the file","threadRootSeq":"40","targetSeq":"41","clientMsgId":"m-7f3a","mentionUserIds":["u-bob"],"mentionsChannel":true,"fileIds":["f-0001"],"createdAtMs":"1790000001000","edited":true,"deleted":true}],"hasMore":true}
+ListMentionsRequest {"pageSize":20,"pageToken":"t-men-2"}
+ListMentionsResponse {"messages":[{"channelId":"c-general","seq":"43","kind":"EVENT_KIND_MESSAGE","senderUserId":"u-ada","body":"hi @bob, see the file","threadRootSeq":"40","targetSeq":"41","clientMsgId":"m-7f3a","mentionUserIds":["u-bob"],"mentionsChannel":true,"fileIds":["f-0001"],"createdAtMs":"1790000001000","edited":true,"deleted":true}],"nextPageToken":"t-men-3"}
+MarkReadRequest {"channelId":"c-general","readSeq":"43"}
+MarkReadResponse {"readState":{"channelId":"c-general","readSeq":"40","unreadCount":3,"mentionCount":1}}
+SyncRequest {"since":"s-0007","waitSeconds":25}
+ChannelSync {"channel":{"channelId":"c-general","kind":"CHANNEL_KIND_PUBLIC","name":"general","topic":"Everything else","archived":true,"headSeq":"43","createdAtMs":"1790000000000","createdByUserId":"u-ada","dmUserIds":["u-ada","u-bob"]},"readState":{"channelId":"c-general","readSeq":"40","unreadCount":3,"mentionCount":1},"removed":true}
+SyncResponse {"channels":[{"channel":{"channelId":"c-general","kind":"CHANNEL_KIND_PUBLIC","name":"general","topic":"Everything else","archived":true,"headSeq":"43","createdAtMs":"1790000000000","createdByUserId":"u-ada","dmUserIds":["u-ada","u-bob"]},"readState":{"channelId":"c-general","readSeq":"40","unreadCount":3,"mentionCount":1},"removed":true}],"nextSince":"s-0008"}
+CreateUploadRequest {"channelId":"c-general","name":"plan.pdf","contentType":"application/pdf","sizeBytes":"20480"}
+CreateUploadResponse {"file":{"fileId":"f-0001","channelId":"c-general","name":"plan.pdf","contentType":"application/pdf","sizeBytes":"20480","state":"FILE_STATE_COMPLETE","uploaderUserId":"u-ada","createdAtMs":"1790000000900"},"uploadUrl":"https://blobs.example.com/staging/f-0001?sig=abc","uploadHeaders":[{"name":"x-ms-blob-type","value":"BlockBlob"}],"expiresAtMs":"1790000300000"}
+CompleteUploadRequest {"fileId":"f-0001"}
+CompleteUploadResponse {"file":{"fileId":"f-0001","channelId":"c-general","name":"plan.pdf","contentType":"application/pdf","sizeBytes":"20480","state":"FILE_STATE_COMPLETE","uploaderUserId":"u-ada","createdAtMs":"1790000000900"}}
+GetDownloadUrlRequest {"fileId":"f-0001"}
+GetDownloadUrlResponse {"downloadUrl":"https://blobs.example.com/files/f-0001?sig=def","expiresAtMs":"1790000300000"}
+SearchMessagesRequest {"query":"plan","channelId":"c-general","pageSize":20,"pageToken":"t-s-2"}
+SearchMessagesResponse {"messages":[{"channelId":"c-general","seq":"43","kind":"EVENT_KIND_MESSAGE","senderUserId":"u-ada","body":"hi @bob, see the file","threadRootSeq":"40","targetSeq":"41","clientMsgId":"m-7f3a","mentionUserIds":["u-bob"],"mentionsChannel":true,"fileIds":["f-0001"],"createdAtMs":"1790000001000","edited":true,"deleted":true}],"nextPageToken":"t-s-3"}
+EraseSubjectRequest {"subject":{"iss":"https://issuer.example.com","sub":"user-0001"}}
+EraseSubjectResponse {"rowsErased":"12","bodiesRedacted":"7","blobsDeleted":"2","searchSplitsRebuilt":"3"}

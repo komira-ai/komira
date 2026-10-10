@@ -43,14 +43,15 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # result decoded, and the error forms read through komira_aws_core and the
 # modeled error shapes), test_secretsmanager_endpoints (botocore's endpoint
 # cases for secretsmanager through every operation's resolver, and the
-# regional, FIPS, dual-stack and custom endpoints), test_no_env_reads (the
-# generated module reads no environment) and test_secretsmanager_client
-# (the generated client over a scripted connector: a value read, a missing
-# secret raised under its code, and a request as it reached the wire,
-# through komira_aws_core's AwsEchoConnector; and over a transport that
-# records each attempt, a CreateSecret's filled token, the same on its
-# retry, and a token the caller set) and test_secretsmanager_delete (the
-# hand-written DeleteSecret's refusals and sends, and the held name).
+# regional, FIPS, dual-stack and custom endpoints), _no_env_reads (written
+# by mojo_aws_client: the package reads no environment) and
+# test_secretsmanager_client (the generated client over a scripted
+# connector: a value read, a missing secret raised under its code, and a
+# request as it reached the wire, through komira_aws_core's
+# AwsEchoConnector; and over a transport that records each attempt, a
+# CreateSecret's filled token, the same on its retry, and a token the caller
+# set) and test_secretsmanager_delete (the hand-written DeleteSecret's
+# refusals and sends, and the held name).
 #
 # No test here talks to the service.
 
@@ -76,21 +77,11 @@ mojo_aws_client(
     overrides = "secretsmanager_overrides.json",
     partitions = _SECRETSMANAGER.partitions,
     test_data = {
-        "tests/test_no_env_reads.mojo": {
-            "gen/" + f: ":komira_aws_secretsmanager_gen[{}]".format(f)
-            for f in [
-                "__init__.mojo",
-                "_layout_probe.mojo",
-                "komira_aws_secretsmanager.mojo",
-                "secretsmanager_overrides.mojo",
-            ]
-        },
         "tests/test_secretsmanager_endpoints.mojo": {
             _ENDPOINT_TESTS: botocore_endpoint_file(_ENDPOINT_TESTS),
         },
     },
     test_srcs = [
-        "tests/test_no_env_reads.mojo",
         "tests/test_secretsmanager_client.mojo",
         "tests/test_secretsmanager_delete.mojo",
         "tests/test_secretsmanager_endpoints.mojo",

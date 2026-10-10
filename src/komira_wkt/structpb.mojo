@@ -61,6 +61,7 @@ from komira_proto_codec import (
     Proto3JsonWkt,
     WireEncoder,
     WireDecoder,
+    read_proto3_json_f64,
 )
 from komira_json import JsonValue, parse_json_value
 from komira_json import write_json_string, write_i64_dec, write_f64_dtoa
@@ -106,9 +107,11 @@ struct NullValue(ProtoNullValueEnum, Copyable, Movable, ImplicitlyCopyable):
         return self.value
 
     def json_name(self) -> String:
+        """`NULL_VALUE` for 0; any other number's decimal text, as a
+        generated enum gives for an undeclared value."""
         if self.value == 0:
             return String("NULL_VALUE")
-        return String("")
+        return String(self.value)
 
     @staticmethod
     def from_number(n: Int) -> Self:
@@ -384,18 +387,30 @@ struct Struct(Proto3JsonWkt, Copyable, Movable):
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
         """Decode the `map<string, Value>` field. A key that repeats on the
         wire replaces the earlier entry (last write wins), as `put` and the
-        JSON reader do and as protobuf map semantics require."""
+        JSON reader do and as protobuf map semantics require.
+
+        On the binary wire each `fields` occurrence is one entry message.
+        In the proto3-JSON message form the one `fields` key holds the
+        whole map as a JSON object (member name = map key, member value =
+        a `Value` in its canonical JSON form), read in document order."""
         var out = Self.new()
         while True:
             var key = dec.next_field()
             if key.end:
                 break
-            if key.field_no == 1 or key.json_name == "fields":
+            if key.field_no == 1:
                 var entry = dec.read_message[_StructEntry]()
                 # Copy both fields out — a partial-move (`entry.key^`) of a
                 # field from the middle of a struct with a synthesized
                 # destructor is not allowed.
                 out.put(entry.key, entry.value.copy())
+            elif key.json_name == "fields":
+                # `Dict` iterates in insertion order, and a repeated member
+                # keeps its first position with the last value, as `put`.
+                var members = Dict[String, Value]()
+                dec.read_into_string_message_map[Value](members)
+                for item in members.items():
+                    out.put(item.key, item.value.copy())
             else:
                 dec.skip()
         return out^
@@ -477,14 +492,17 @@ struct ListValue(Proto3JsonWkt, Copyable, Movable):
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
-        """Decode the `repeated Value values` field."""
+        """Decode the `repeated Value values` field: one element per
+        occurrence on the binary wire, the whole JSON array under the one
+        `values` key in the proto3-JSON message form (each element a
+        `Value` in its canonical JSON form)."""
         var values = List[Value]()
         while True:
             var key = dec.next_field()
             if key.end:
                 break
             if key.field_no == 1 or key.json_name == "values":
-                values.append(dec.read_message[Value]())
+                dec.read_into_repeated_message[Value](values)
             else:
                 dec.skip()
         return Self(values^)
@@ -585,7 +603,10 @@ def _value_from_json(jv: JsonValue) raises -> Value:
     elif kind == JSON_BOOL:
         return Value.boolean(jv.as_bool())
     elif kind == JSON_NUMBER:
-        return Value.number(jv.as_float64())
+        # Correctly rounded at any length; a number past the double range
+        # is refused here, so a decoded Value never holds an infinity that
+        # `_write_number` would refuse to write.
+        return Value.number(read_proto3_json_f64(jv))
     elif kind == JSON_STRING:
         return Value.string(jv.as_string())
     elif kind == JSON_OBJECT:

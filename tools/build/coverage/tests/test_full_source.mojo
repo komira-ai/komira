@@ -65,6 +65,15 @@ def _report() -> List[Input]:
     return l^
 
 
+def _report_with_branches() -> List[Input]:
+    # a.mojo fully covered, lines and the two branches of line 2.
+    var l = List[Input]()
+    l.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String(
+        "SF:src/p/a.mojo\nDA:1,1\nDA:2,3\nBRDA:2,0,0,1\nBRDA:2,0,1,2\nend_of_record\n"
+    )))
+    return l^
+
+
 def _kinds(a: Analysis) -> String:
     var s = String("")
     for i in range(len(a.findings)):
@@ -91,21 +100,22 @@ def test_absent_file_fails_the_target() raises:
     # a.mojo 2 found 2 hit; z.mojo lines 4, 6, 7, 8 found, none hit.
     assert_equal(a.packages[k].line_found, 6, _kinds(a))
     assert_equal(a.packages[k].line_hit, 2)
-    assert_equal(_kinds(a), "BelowTarget Regression UnmeasuredFile@src/p/z.mojo")
+    assert_equal(_kinds(a), "BelowTarget BranchNotMeasured Regression UnmeasuredFile@src/p/z.mojo")
     assert_equal(a.conclusion, "failure")
     # src/q has no record: it is not measured, so q.mojo is not read in.
     assert_equal(a.package_index(String("src/q")), -1)
 
 
 def test_init_of_reexports_raises_nothing() raises:
-    # A package of a.mojo (covered) and an __init__.mojo of a docstring and
-    # imports: 100%, no finding, the __init__ not counted as a file.
+    # A package of a.mojo (covered, its branches too) and an __init__.mojo
+    # of a docstring and imports: 100%, no finding, the __init__ not counted
+    # as a file.
     var l = List[String]()
     l.append("src/p/BUCK")
     l.append("src/p/__init__.mojo")
     l.append("src/p/a.mojo")
-    var rat = parse_ratchet(String("src/p\t10000\t-\n"), String("r.tsv"))
-    var a = analyze(_report(), List[Input](), repo_files_of(l), rat, _sources(), _enforce())
+    var rat = parse_ratchet(String("src/p\t10000\t10000\n"), String("r.tsv"))
+    var a = analyze(_report_with_branches(), List[Input](), repo_files_of(l), rat, _sources(), _enforce())
     assert_equal(_kinds(a), "")
     assert_equal(a.conclusion, "success")
     assert_equal(a.packages[0].files, 1)
@@ -128,7 +138,7 @@ def test_markers_apply_to_a_file_no_test_compiled() raises:
     assert_equal(a.exemptions[0].line, 7)
     assert_equal(a.exemptions[0].status, "exempt")
     assert_equal(a.exemptions[1].status, "no reason")
-    assert_equal(_kinds(a), "BelowTarget Regression UnmeasuredFile@src/p/z.mojo ExemptionWithoutReason@src/p/z.mojo")
+    assert_equal(_kinds(a), "BelowTarget BranchNotMeasured Regression UnmeasuredFile@src/p/z.mojo ExemptionWithoutReason@src/p/z.mojo")
     for i in range(len(a.findings)):
         if a.findings[i].kind == String("UnmeasuredFile"):
             assert_equal(a.findings[i].count, 3)
@@ -147,11 +157,11 @@ def test_test_sources_and_helpers() raises:
     var s = _sources()
     s.texts[String("src/p/testing_helpers.mojo")] = String("def fake() -> Int:\n    return 0\n")
     var a = analyze(_report(), List[Input](), repo_files_of(l), Ratchet(), s, Options())
-    assert_equal(_kinds(a), "BelowTarget MissingRow UnmeasuredFile@src/p/testing_helpers.mojo")
+    assert_equal(_kinds(a), "BelowTarget BranchNotMeasured MissingRow UnmeasuredFile@src/p/testing_helpers.mojo")
     var o = Options()
     o.include_tests = True
     var b = analyze(_report(), List[Input](), repo_files_of(l), Ratchet(), s, o)
-    assert_equal(_kinds(b), "BelowTarget MissingRow UnmeasuredFile@src/p/testing_helpers.mojo UnmeasuredFile@src/p/tests/test_a.mojo")
+    assert_equal(_kinds(b), "BelowTarget BranchNotMeasured MissingRow UnmeasuredFile@src/p/testing_helpers.mojo UnmeasuredFile@src/p/tests/test_a.mojo")
     assert_equal(b.packages[0].line_found, 6)
 
 
@@ -164,8 +174,10 @@ def test_gate_equals_report_with_unmeasured_files() raises:
     assert_equal(package_json(gate.packages[0]), package_json(full.packages[full.package_index(String("src/p"))]))
     assert_equal(_kinds(gate), _kinds(full))
     assert_true(package_json(gate.packages[0]).find("\"unmeasured_files\":1") >= 0, package_json(gate.packages[0]))
-    # Neutral mode: the same finding, no failure.
-    assert_equal(full.conclusion, "neutral")
+    # Neutral mode: the same findings; the line under its floor of 90.00%
+    # is a Regression, which fails in every mode.
+    assert_true(_kinds(full).find("Regression") >= 0, _kinds(full))
+    assert_equal(full.conclusion, "failure")
 
 
 def test_annotations_of_a_file_no_test_compiled() raises:
@@ -201,7 +213,7 @@ def test_a_report_entry_with_no_record_counts_as_unmeasured() raises:
     assert_equal(a.packages[k].line_hit, 2)
     assert_equal(a.packages[k].files, 2)
     assert_equal(a.packages[k].unmeasured_files, 1)
-    assert_equal(_kinds(a), "BelowTarget Regression UnmeasuredFile@src/p/z.mojo")
+    assert_equal(_kinds(a), "BelowTarget BranchNotMeasured Regression UnmeasuredFile@src/p/z.mojo")
     assert_equal(a.conclusion, "failure")
     # The package's only report entry has no record: it is still measured
     # (NotMeasured), and the lines of z.mojo and a.mojo (now named by no
@@ -225,7 +237,8 @@ def test_unmeasured_files_counts_only_files_with_a_finding() raises:
     s.texts[String("src/p/__init__.mojo")] = String("# cov: unreachable r\n")
     var a = analyze(_report(), List[Input](), _repo(), parse_ratchet(String("src/p\t10000\t-\n"), String("r.tsv")), s, _enforce())
     var k = a.package_index(String("src/p"))
-    assert_equal(_kinds(a), "")
+    # The report has no branch record: that, and no file finding.
+    assert_equal(_kinds(a), "BranchNotMeasured")
     assert_equal(len(a.exemptions), 2)
     assert_equal(a.packages[k].exempt_lines, 1)
     assert_equal(a.packages[k].line_found, 2)
@@ -247,7 +260,7 @@ def test_measured_means_a_report_recorded_a_line() raises:
     var a = analyze(r, List[Input](), repo_files_of(l), Ratchet(), s, _enforce())
     assert_equal(a.packages[0].exempt_lines, 1)
     assert_equal(a.packages[0].line_found, 0)
-    assert_true(_kinds(a).find("NotMeasured") < 0, _kinds(a))
+    assert_true((String(" ") + _kinds(a)).find(" NotMeasured") < 0, _kinds(a))
     # The report names only z.mojo, with no record, and z.mojo's line 7 is
     # exempt: an exemption in a file no test compiled does not make the
     # package measured, so NotMeasured stays.
@@ -260,7 +273,7 @@ def test_measured_means_a_report_recorded_a_line() raises:
     var b = analyze(only, List[Input](), _repo(), Ratchet(), z, _enforce())
     var k = b.package_index(String("src/p"))
     assert_equal(b.packages[k].exempt_lines, 1)
-    assert_true(_kinds(b).find("NotMeasured") >= 0, _kinds(b))
+    assert_true((String(" ") + _kinds(b)).find(" NotMeasured") >= 0, _kinds(b))
 
 
 def main() raises:

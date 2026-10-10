@@ -213,7 +213,7 @@ def _ec_key_new() -> _FfiHandle:
     # Caller owns the pointer until EC_KEY_free is called.
     """
     return external_call[
-        "EC_KEY_new_by_curve_name",
+        "komira_awslc_EC_KEY_new_by_curve_name",
         _FfiHandle,
         Int32,  # nid
     ](Int32(NID_P256))
@@ -228,7 +228,7 @@ def _ec_key_free(ptr: _FfiHandle):
     """
     if Int(ptr) != 0:
         external_call[
-            "EC_KEY_free", NoneType,
+            "komira_awslc_EC_KEY_free", NoneType,
             _FfiHandle,
         ](ptr)
 
@@ -241,7 +241,7 @@ def _bn_free(ptr: _FfiHandle):
     """
     if Int(ptr) != 0:
         external_call[
-            "BN_free", NoneType,
+            "komira_awslc_BN_free", NoneType,
             _FfiHandle,
         ](ptr)
 
@@ -264,7 +264,7 @@ def _bn_bin2bn_from_span(
     # (canonical pattern).
     var ret_null = _ffi_null()
     return external_call[
-        "BN_bin2bn",
+        "komira_awslc_BN_bin2bn",
         _FfiHandle,
         _FfiByte,   # in
         UInt,                                       # len
@@ -286,7 +286,7 @@ def _bn_bn2binpad_to_inline(
     """
     var out_ptr = _inline32_ptr_mut(out)
     return external_call[
-        "BN_bn2binpad", Int32,
+        "komira_awslc_BN_bn2binpad", Int32,
         _FfiHandle,  # bn
         _FfiByte,     # out
         Int32,                                        # len
@@ -303,7 +303,7 @@ def _ec_key_get0_group(
     # lifetime. MUST NOT be freed by caller.
     """
     return external_call[
-        "EC_KEY_get0_group",
+        "komira_awslc_EC_KEY_get0_group",
         _FfiHandle,
         _FfiHandle,
     ](eckey)
@@ -372,17 +372,17 @@ def p256_sign_with_nonce(
     # it does not apply to a try/FINALLY.)
     try:
         if Int(eckey) == 0:
-            raise Error("p256_sign: EC_KEY_new_by_curve_name OOM")
+            raise Error("p256_sign: EC_KEY_new_by_curve_name OOM")  # cov: unreachable an allocation failure
 
         priv_bn = _bn_bin2bn_from_span(priv_be)
         if Int(priv_bn) == 0:
-            raise Error("p256_sign: BN_bin2bn(priv) OOM")
+            raise Error("p256_sign: BN_bin2bn(priv) OOM")  # cov: unreachable an allocation failure
 
         # SAFETY: EC_KEY_set_private_key copies priv_bn into eckey;
         # priv_bn ownership stays with caller (must free after).
         # Returns 1 on success, 0 on invalid (e.g., out-of-range).
         var rc1 = external_call[
-            "EC_KEY_set_private_key", Int32,
+            "komira_awslc_EC_KEY_set_private_key", Int32,
             _FfiHandle,  # eckey
             _FfiHandle,  # priv (const BN*)
         ](eckey, priv_bn)
@@ -396,7 +396,7 @@ def p256_sign_with_nonce(
         var digest_ptr = _span_ptr_mut(digest)
         var nonce_ptr = _span_ptr_mut(nonce_be)
         sig = external_call[
-            "ECDSA_sign_with_nonce_and_leak_private_key_for_testing",
+            "komira_awslc_ECDSA_sign_with_nonce_and_leak_private_key_for_testing",
             _FfiHandle,
             _FfiByte,     # digest
             UInt,                                         # digest_len
@@ -411,19 +411,19 @@ def p256_sign_with_nonce(
         # ECDSA_SIG_get0_r/s return borrowed const BIGNUM*; sig owns them.
         # SAFETY: r_bn / s_bn are valid for sig's lifetime; MUST NOT be freed.
         var r_bn = external_call[
-            "ECDSA_SIG_get0_r",
+            "komira_awslc_ECDSA_SIG_get0_r",
             _FfiHandle,
             _FfiHandle,
         ](sig)
         var s_bn = external_call[
-            "ECDSA_SIG_get0_s",
+            "komira_awslc_ECDSA_SIG_get0_s",
             _FfiHandle,
             _FfiHandle,
         ](sig)
         var pad_r = _bn_bn2binpad_to_inline(r_bn, r_out)
         var pad_s = _bn_bn2binpad_to_inline(s_bn, s_out)
         if pad_r != Int32(32) or pad_s != Int32(32):
-            raise Error("p256_sign: BN_bn2binpad encoding failed")
+            raise Error("p256_sign: BN_bn2binpad encoding failed")  # cov: unreachable r and s are below n, so both always pad to the field width
     finally:
         # Cleanup all owned heap handles (in reverse alloc order).
         # SAFETY: ECDSA_SIG_free frees the sig + its internal r,s BIGNUMs
@@ -431,7 +431,7 @@ def p256_sign_with_nonce(
         # EC_KEY_free are no-ops on NULL.
         if Int(sig) != 0:
             external_call[
-                "ECDSA_SIG_free", NoneType,
+                "komira_awslc_ECDSA_SIG_free", NoneType,
                 _FfiHandle,
             ](sig)
         _bn_free(priv_bn)
@@ -476,20 +476,20 @@ def p256_verify(
     var sig_owns_rs = False  # ECDSA_SIG_set0 transferred ownership of r/s
     try:
         if Int(eckey) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
 
         # Decode pubkey x + y from BE bytes.
         x_bn = _bn_bin2bn_from_span(pub_xy_be[0:32])
         y_bn = _bn_bin2bn_from_span(pub_xy_be[32:64])
         if Int(x_bn) == 0 or Int(y_bn) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
 
         # Set public key via affine coordinates (avoids EC_POINT alloc).
         # SAFETY: EC_KEY_set_public_key_affine_coordinates internally
         # builds an EC_POINT from (x, y), validates on-curve, stores in
         # eckey. Returns 0 if (x, y) is off-curve.
         var rc_pk = external_call[
-            "EC_KEY_set_public_key_affine_coordinates", Int32,
+            "komira_awslc_EC_KEY_set_public_key_affine_coordinates", Int32,
             _FfiHandle,  # eckey
             _FfiHandle,  # x
             _FfiHandle,  # y
@@ -499,29 +499,29 @@ def p256_verify(
 
         # Build ECDSA_SIG from r + s.
         sig = external_call[
-            "ECDSA_SIG_new",
+            "komira_awslc_ECDSA_SIG_new",
             _FfiHandle,
         ]()
         if Int(sig) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
         r_bn = _bn_bin2bn_from_span(r_be)
         s_bn = _bn_bin2bn_from_span(s_be)
         if Int(r_bn) == 0 or Int(s_bn) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
 
         # SAFETY: ECDSA_SIG_set0 TAKES OWNERSHIP of r_bn + s_bn — they
         # are now owned by sig and will be freed when sig is freed.
         # MUST NOT free them separately. We flip sig_owns_rs to skip
         # freeing them in the finally block.
         var rc_set = external_call[
-            "ECDSA_SIG_set0", Int32,
+            "komira_awslc_ECDSA_SIG_set0", Int32,
             _FfiHandle,  # sig
             _FfiHandle,  # r
             _FfiHandle,  # s
         ](sig, r_bn, s_bn)
         if rc_set != 1:
             # set0 failed — r_bn / s_bn ownership stays with us.
-            return False
+            return False  # cov: unreachable ECDSA_SIG_set0 fails only on a NULL r or s, refused above
         sig_owns_rs = True
 
         # SAFETY: ECDSA_do_verify reads 32 bytes from digest_ptr, performs
@@ -529,7 +529,7 @@ def p256_verify(
         # Returns 1 on valid, 0 on invalid, -1 on internal error.
         var digest_ptr = _span_ptr_mut(digest)
         var rc_v = external_call[
-            "ECDSA_do_verify", Int32,
+            "komira_awslc_ECDSA_do_verify", Int32,
             _FfiByte,     # digest
             UInt,                                         # digest_len
             _FfiHandle,  # sig
@@ -541,7 +541,7 @@ def p256_verify(
         # If set0 succeeded, sig owns r_bn + s_bn so we skip BN_free for them.
         if Int(sig) != 0:
             external_call[
-                "ECDSA_SIG_free", NoneType,
+                "komira_awslc_ECDSA_SIG_free", NoneType,
                 _FfiHandle,
             ](sig)
         if not sig_owns_rs:
@@ -593,24 +593,24 @@ def p256_pubkey_from_priv(
     # it does not apply to a try/FINALLY.)
     try:
         if Int(eckey) == 0:
-            raise Error("p256_pubkey: EC_KEY_new_by_curve_name OOM")
+            raise Error("p256_pubkey: EC_KEY_new_by_curve_name OOM")  # cov: unreachable an allocation failure
 
         # Borrowed group ptr; do NOT free.
         var group = _ec_key_get0_group(eckey)
         if Int(group) == 0:
-            raise Error("p256_pubkey: EC_KEY_get0_group returned NULL")
+            raise Error("p256_pubkey: EC_KEY_get0_group returned NULL")  # cov: unreachable an EC_KEY made for this curve always has its group
 
         priv_bn = _bn_bin2bn_from_span(priv_be)
         if Int(priv_bn) == 0:
-            raise Error("p256_pubkey: BN_bin2bn(priv) OOM")
+            raise Error("p256_pubkey: BN_bin2bn(priv) OOM")  # cov: unreachable an allocation failure
 
         pub_pt = external_call[
-            "EC_POINT_new",
+            "komira_awslc_EC_POINT_new",
             _FfiHandle,
             _FfiHandle,  # group
         ](group)
         if Int(pub_pt) == 0:
-            raise Error("p256_pubkey: EC_POINT_new OOM")
+            raise Error("p256_pubkey: EC_POINT_new OOM")  # cov: unreachable an allocation failure
 
         # SAFETY: EC_POINT_mul(group, r, n, q, m, ctx):
         #   r = n*G + m*q where G is the group's generator.
@@ -618,7 +618,7 @@ def p256_pubkey_from_priv(
         # an internal BN_CTX. Returns 1 on success.
         var null_ptr = _ffi_null()
         var rc_mul = external_call[
-            "EC_POINT_mul", Int32,
+            "komira_awslc_EC_POINT_mul", Int32,
             _FfiHandle,  # group
             _FfiHandle,  # r (out point)
             _FfiHandle,  # n (scalar)
@@ -627,7 +627,7 @@ def p256_pubkey_from_priv(
             _FfiHandle,  # ctx (NULL)
         ](group, pub_pt, priv_bn, null_ptr, null_ptr, null_ptr)
         if rc_mul != 1:
-            raise Error("p256_pubkey: EC_POINT_mul failed")
+            raise Error("p256_pubkey: EC_POINT_mul failed")  # cov: unreachable EC_POINT_mul reduces any scalar mod n and fails only on an allocation failure
 
         # SAFETY: EC_POINT_point2oct writes the uncompressed point
         # (1 format byte + 32 x bytes + 32 y bytes = 65 bytes) into buf
@@ -636,7 +636,7 @@ def p256_pubkey_from_priv(
         var raw65 = Array[UInt8, 65](fill=UInt8(0))
         var raw_ptr = _inline65_ptr_mut(raw65)
         var n_written = external_call[
-            "EC_POINT_point2oct", UInt,
+            "komira_awslc_EC_POINT_point2oct", UInt,
             _FfiHandle,  # group
             _FfiHandle,  # point
             Int32,                                        # form
@@ -651,7 +651,7 @@ def p256_pubkey_from_priv(
         if n_written != UInt(65):
             raise Error("p256_pubkey: EC_POINT_point2oct failed")
         if raw65[0] != UInt8(0x04):
-            raise Error("p256_pubkey: unexpected point format byte")
+            raise Error("p256_pubkey: unexpected point format byte")  # cov: unreachable POINT_CONVERSION_UNCOMPRESSED always writes 0x04 first
 
         # Strip leading 0x04, copy x||y into pub_xy_out.
         for i in range(64):
@@ -661,7 +661,7 @@ def p256_pubkey_from_priv(
         # EC_KEY_free is no-op on NULL.
         if Int(pub_pt) != 0:
             external_call[
-                "EC_POINT_free", NoneType,
+                "komira_awslc_EC_POINT_free", NoneType,
                 _FfiHandle,
             ](pub_pt)
         _bn_free(priv_bn)

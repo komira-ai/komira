@@ -1,0 +1,11 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §2.1, §2.2: MIN and MAX skip NULLs; k = 1 sees only 10, the
+# NULL-k group 5 and 7 (§2.4), and k = 2 nothing, so both are NULL there.
+# Types: the input's type (§8.7), nullable because a group with no
+# non-NULL input answers NULL (§2.2).
+k:int64?	lo:int64?	hi:int64?
+1	10	10
+\N	5	7
+2	\N	\N

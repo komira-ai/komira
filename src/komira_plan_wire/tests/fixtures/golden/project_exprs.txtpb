@@ -1,5 +1,5 @@
 # proto-message: komira.plan.v1.WirePlanEnvelope
-format_version: 2
+format_version: 4
 plan {
   output_schema {
     fields {
@@ -89,21 +89,18 @@ plan {
           int_val: 11
           kind: SCALAR_KIND_DTYPE
           time_unit: SCALAR_TIME_UNIT_MICRO
-          error_code: XL_ERR_NONE
         }
         values {
           dtype_code: _DT_INT64
           int_val: 22
           kind: SCALAR_KIND_DTYPE
           time_unit: SCALAR_TIME_UNIT_MICRO
-          error_code: XL_ERR_NONE
         }
         values {
           dtype_code: _DT_INT64
           int_val: 33
           kind: SCALAR_KIND_DTYPE
           time_unit: SCALAR_TIME_UNIT_MICRO
-          error_code: XL_ERR_NONE
         }
       }
     }
@@ -149,7 +146,6 @@ plan {
                   int_val: 100
                   kind: SCALAR_KIND_DTYPE
                   time_unit: SCALAR_TIME_UNIT_MICRO
-                  error_code: XL_ERR_NONE
                 }
               }
             }
@@ -160,7 +156,6 @@ plan {
               int_val: 1
               kind: SCALAR_KIND_DTYPE
               time_unit: SCALAR_TIME_UNIT_MICRO
-              error_code: XL_ERR_NONE
             }
           }
         }
@@ -179,7 +174,6 @@ plan {
                   dtype_code: _DT_INT64
                   kind: SCALAR_KIND_DTYPE
                   time_unit: SCALAR_TIME_UNIT_MICRO
-                  error_code: XL_ERR_NONE
                 }
               }
             }
@@ -190,7 +184,6 @@ plan {
               int_val: 2
               kind: SCALAR_KIND_DTYPE
               time_unit: SCALAR_TIME_UNIT_MICRO
-              error_code: XL_ERR_NONE
             }
           }
         }
@@ -200,7 +193,6 @@ plan {
             int_val: -1
             kind: SCALAR_KIND_DTYPE
             time_unit: SCALAR_TIME_UNIT_MICRO
-            error_code: XL_ERR_NONE
           }
         }
       }

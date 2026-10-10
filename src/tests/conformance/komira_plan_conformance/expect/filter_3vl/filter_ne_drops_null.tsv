@@ -1,0 +1,8 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §1.2: x <> 2 is TRUE for x = 1 and x = 5, FALSE for x = 2 and
+# NULL for the NULL x of id 3; only the TRUE rows are kept.
+id:int64	x:int64?
+1	1
+4	5

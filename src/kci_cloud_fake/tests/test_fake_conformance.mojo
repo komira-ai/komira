@@ -8,7 +8,7 @@
 #    reference, foreign refusal and adoption, two interleaved applies, the
 #    validation-run tag under the kit's own run id and under none) on a
 #    graph with every v1 shape: a public service, an internal service reading
-#    the first one's URL and HOST, a scheduled job, and two `Uses` grants;
+#    the first one's URL and HOST, a container job, and two `Uses` grants;
 #    the roles turned off are api's public ingress and web's grant.
 # 2. RENAME INVARIANCE: the same kit passes with fake registered under a
 #    random id, so nothing above the cloud adapter keyed on the spelling "fake".
@@ -17,8 +17,9 @@
 #    consumer as known after apply; after apply the consumer was created over
 #    the producer's real URL and HOST, and a changed producer port is an
 #    update for the producer only (its URL does not depend on the port).
-# 5. EVERY MODELLED FIELD IS IN THE DIGEST: a job's `env` and `secret_env`
-#    (a reference: store, name, version) are updates when they change;
+# 5. EVERY MODELLED FIELD IS IN THE DIGEST: a container job's `env` and
+#    `secret_env` (a reference: store, name, version) are updates when they
+#    change;
 #    writing the default image platform out is not a change.
 # 6. THE FAULTY VARIANT, failure at call k: a cloud call refused mid-apply
 #    leaves a PARTIAL outcome (what landed, what is pending); the next apply
@@ -26,8 +27,9 @@
 #    a no-op. (Read lag and a pre-existing foreign object:
 #    test_fake_faulty_variant.)
 # 7. LOWERING IS DATA: the golden JSON of a small lowering, every modelled
-#    field with its default filled in, the turned-off schedule role, each
-#    private identity, and each identity's implicit cell LOGS WRITE grant.
+#    field with its default filled in, each private identity, and each
+#    identity's implicit cell LOGS WRITE grant (a container job lowers no
+#    trigger).
 # 8. A DEFAULT WRITTEN OUT IS NOT A CHANGE (port 8080, scale 0..10).
 # =============================================================================
 
@@ -103,8 +105,7 @@ def _full(api_port: String, roles_on: Bool = True) -> String:
         + exposure
         + String(',"requestTimeout":"30s","scale":{"min":0,"max":3}},')
         + String('"uses":[{"target":{"resource":"nightly"},"access":"CALL"}]},')
-        + String('{"id":"nightly","job":{"image":{"digest":"sha256:b2"},"maxRetries":1,')
-        + String('"schedule":{"cron":"0 3 * * *","timezone":"UTC"}}}')
+        + String('{"id":"nightly","containerJob":{"image":{"digest":"sha256:b2"},"maxRetries":1}}')
         + String("]}")
     )
 
@@ -206,13 +207,13 @@ def _job(env_mode: String, secret_version: String, platform: String) -> String:
         img += String(',"platform":"') + platform + String('"')
     img += String("}")
     return (
-        String('{"resource":[{"id":"nightly","job":{')
+        String('{"resource":[{"id":"nightly","containerJob":{')
         + img
         + String(',"env":{"MODE":{"literal":"')
         + env_mode
         + String('"}},"secretEnv":{"TOKEN":{"name":"tok","version":"')
         + secret_version
-        + String('"}},"onDemand":{}}}]}')
+        + String('"}}}}]}')
     )
 
 
@@ -232,8 +233,8 @@ def test_job_env_and_secrets_are_modelled() raises:
     _ = _done(apply_resources(reg, fake, _ctx(), _list(_job("a", "1", "")), creds, store))
     var i = fake.store[].find(String("nightly/run"))
     var d = fake.store[].digests[i].copy()
-    assert_true(_has(d, "|job.env.MODE=a"), d)
-    assert_true(_has(d, "|job.secret_env.TOKEN=tok@1"), d)
+    assert_true(_has(d, "|container_job.env.MODE=a"), d)
+    assert_true(_has(d, "|container_job.secret_env.TOKEN=tok@1"), d)
     assert_true(_has(d, "@linux/amd64"), d)
 
     var same = _done(
@@ -290,7 +291,7 @@ def test_lowering_is_data_golden() raises:
     var json = String(
         '{"resource":['
         '{"id":"api","service":{"image":{"digest":"sha256:a1"},"public":{}}},'
-        '{"id":"nightly","job":{"image":{"digest":"sha256:b2"},"onDemand":{}}}'
+        '{"id":"nightly","containerJob":{"image":{"digest":"sha256:b2"}}}'
         "]}"
     )
     var got = lowering_json(lower_data(fake, _list(json)))
@@ -310,8 +311,6 @@ def test_lowering_is_data_golden() raises:
         + String('  {"id":"nightly/run","owner":"nightly","kind":"run","wanted":true,"retention":"delete","depends_on":["nightly/identity"],"inputs":[],')
         + String('"desired":{"img":"sha256:b2@linux/amd64","size":"1000m/512MB","retries":"0",')
         + String('"timeout":"600s0n","serves":"false"}},\n')
-        + String('  {"id":"nightly/schedule","owner":"nightly","kind":"schedule","wanted":false,')
-        + String('"retention":"delete","depends_on":["nightly/run"],"inputs":[],"desired":{}},\n')
         + String('  {"id":"nightly/u-g2ewtg","owner":"nightly","kind":"grant","wanted":true,"retention":"delete",')
         + String('"depends_on":["nightly/identity"],"inputs":[],"desired":{"principal":"nightly","cell":"LOGS","access":"WRITE"}}\n')
         + String("]")

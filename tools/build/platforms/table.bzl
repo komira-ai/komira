@@ -61,6 +61,12 @@ ASSET_ROLES = [
     "libgcc",
     "libstdcxx",
     "libzlib",
+    "llvm_branch_libiconv",
+    "llvm_branch_libllvm",
+    "llvm_branch_libxml2",
+    "llvm_branch_rt",
+    "llvm_branch_tools",
+    "llvm_branch_zstd",
     "mojo_compiler",
     "pixi",
     "protoc",
@@ -73,7 +79,11 @@ ASSET_ROLES = [
 # source archive and the conda-forge packages holding the static libraries it
 # links. Coverage runs on linux-x86_64 only; every other row states `none`.
 _KCOV_ROLES = ["kcov_bzip2", "kcov_elfutils", "kcov_lzma", "kcov_src", "kcov_zlib", "kcov_zstd"]
-_NONE_ALLOWED = ["busybox", "libgcc", "libstdcxx", "libzlib"] + _KCOV_ROLES
+# The LLVM pieces of branch coverage (tools/build/toolchains/llvm_branch/README.md):
+# llvm-profdata 23 with the libraries it loads, and the compiler-rt 23 profile
+# runtime. linux-x86_64 only, like kcov; every other row states `none`.
+_LLVM_BRANCH_ROLES = ["llvm_branch_libiconv", "llvm_branch_libllvm", "llvm_branch_libxml2", "llvm_branch_rt", "llvm_branch_tools", "llvm_branch_zstd"]
+_NONE_ALLOWED = ["busybox", "libgcc", "libstdcxx", "libzlib"] + _KCOV_ROLES + _LLVM_BRANCH_ROLES
 
 # Roles whose pin is the executable itself, downloaded with its mode bit set
 # and never unpacked: a real pin of one of these must say `executable = True`.
@@ -124,6 +134,9 @@ FEATURES = ["epoll", "erms", "futex", "kqueue", "neon", "thp", "ulock", "x86_sim
 
 # Why a row pins no kcov (tools/build/toolchains/kcov/README.md).
 _KCOV_NONE = "line coverage is measured on linux-x86_64 only (limits.tsv `coverage-linux-x86-64`)"
+
+# Why a row pins no LLVM branch-coverage pieces (tools/build/toolchains/llvm_branch/README.md).
+_LLVM_BRANCH_NONE = "branch coverage is measured on linux-x86_64 only (limits.tsv `coverage-linux-x86-64`)"
 
 PLATFORMS = {
     "linux-x86_64": {
@@ -199,6 +212,46 @@ PLATFORMS = {
                 "https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.3.1-hb9d3cd8_2.conda",
                 "d4bfe88d7cb447768e31650f06257995601f89076080e76df55e3112d4e47dc4",
                 size = 60963,
+            ),
+            # The LLVM pieces of branch coverage
+            # (tools/build/toolchains/llvm_branch/README.md, licences there):
+            # llvm-profdata 23.1.3, libLLVM and the libraries it loads, and the
+            # compiler-rt 23.1.3 profile runtime, from conda-forge.
+            "llvm_branch_libiconv": pin(
+                "libiconv_1.18_linux-64.conda",
+                "https://conda.anaconda.org/conda-forge/linux-64/libiconv-1.18-h0cb94f2_3.conda",
+                "f943117edb9cd4d9c61cc972eee5a34291dc55ea7a6e9e38da104995841cbcb6",
+                size = 789471,
+            ),
+            "llvm_branch_libllvm": pin(
+                "libllvm23_23.1.3_linux-64.conda",
+                "https://conda.anaconda.org/conda-forge/linux-64/libllvm23-23.1.3-h474f4eb_0.conda",
+                "7ce347e2da1502442d4df406101cfaf429927b7a9410badadd3f147d3cbf2d00",
+                size = 45082185,
+            ),
+            "llvm_branch_libxml2": pin(
+                "libxml2-16_2.15.4_linux-64.conda",
+                "https://conda.anaconda.org/conda-forge/linux-64/libxml2-16-2.15.4-hbdfff7e_0.conda",
+                "b6f96287c408269f5067bb4f7a61693ff5c856152902362964d9807152b9c146",
+                size = 565717,
+            ),
+            "llvm_branch_rt": pin(
+                "compiler-rt23_linux-64_23.1.3_noarch.conda",
+                "https://conda.anaconda.org/conda-forge/noarch/compiler-rt23_linux-64-23.1.3-h0e38de2_0.conda",
+                "7a044f184a5ed44fb905882c25ba950ec7a5b53c8f46ad40cba5c1a079d8d6a3",
+                size = 46990831,
+            ),
+            "llvm_branch_tools": pin(
+                "llvm-tools-23_23.1.3_linux-64.conda",
+                "https://conda.anaconda.org/conda-forge/linux-64/llvm-tools-23-23.1.3-h7399f5f_0.conda",
+                "2d948bde496207d44846b580ab683157305860edadf3dec1a6860073bfd1b837",
+                size = 25434792,
+            ),
+            "llvm_branch_zstd": pin(
+                "zstd_1.5.7_linux-64.conda",
+                "https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_7.conda",
+                "47d682b9f6d6ec9eb1a6e6c3e75ea6273e899e78fb7fc59f81d39745009fbc60",
+                size = 601301,
             ),
             "mojo_compiler": pin(
                 "mojo_compiler_1.0.0_linux-64.conda",
@@ -353,6 +406,12 @@ PLATFORMS = {
             "libgcc": none("the osx-arm64 compiler links only the operating system (every load command names @rpath/, /usr/lib or /System)"),
             "libstdcxx": none("the osx-arm64 compiler links only the operating system (every load command names @rpath/, /usr/lib or /System)"),
             "libzlib": none("the osx-arm64 closure takes no conda library: rustc for aarch64-apple-darwin links and runs without one"),
+            "llvm_branch_libiconv": none(_LLVM_BRANCH_NONE),  # komira-limit:coverage-linux-x86-64
+            "llvm_branch_libllvm": none(_LLVM_BRANCH_NONE),  # komira-limit:coverage-linux-x86-64
+            "llvm_branch_libxml2": none(_LLVM_BRANCH_NONE),  # komira-limit:coverage-linux-x86-64
+            "llvm_branch_rt": none(_LLVM_BRANCH_NONE),  # komira-limit:coverage-linux-x86-64
+            "llvm_branch_tools": none(_LLVM_BRANCH_NONE),  # komira-limit:coverage-linux-x86-64
+            "llvm_branch_zstd": none(_LLVM_BRANCH_NONE),  # komira-limit:coverage-linux-x86-64
             "mojo_compiler": pin(
                 "mojo_compiler_1.0.0_osx-arm64.conda",
                 "https://conda.modular.com/max-nightly/osx-arm64/mojo-compiler-1.0.0-release.conda",
@@ -478,6 +537,12 @@ PLATFORMS = {
                 "5a2c1eeef69342e88a98d1d95bff1603727ab1ff4ee0e421522acd8813439b84",
                 size = 66657,
             ),
+            "llvm_branch_libiconv": none(_LLVM_BRANCH_NONE),  # komira-limit:coverage-linux-x86-64
+            "llvm_branch_libllvm": none(_LLVM_BRANCH_NONE),  # komira-limit:coverage-linux-x86-64
+            "llvm_branch_libxml2": none(_LLVM_BRANCH_NONE),  # komira-limit:coverage-linux-x86-64
+            "llvm_branch_rt": none(_LLVM_BRANCH_NONE),  # komira-limit:coverage-linux-x86-64
+            "llvm_branch_tools": none(_LLVM_BRANCH_NONE),  # komira-limit:coverage-linux-x86-64
+            "llvm_branch_zstd": none(_LLVM_BRANCH_NONE),  # komira-limit:coverage-linux-x86-64
             "mojo_compiler": pin(
                 "mojo_compiler_1.0.0_linux-aarch64.conda",
                 "https://conda.modular.com/max-nightly/linux-aarch64/mojo-compiler-1.0.0-release.conda",

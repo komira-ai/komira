@@ -5,7 +5,7 @@
 # Covers:
 #   - partition-prune: a Filter on a partition column prunes the scan's
 #     path list to the matching partitions; the conjunct is dropped.
-# We assert the PRUNED PATH COUNT (not wall time — that's flaky in CI).
+# We assert the PRUNED PATH COUNT.
 #
 # Cases: ==, <, >=, !=, AND of two partition predicates, a mixed
 # predicate (one partition conjunct + one residual conjunct), all-pruned
@@ -201,7 +201,8 @@ def test_prune_literal_on_left() raises:
 
 
 def test_prune_and_two_partition_cols() raises:
-    """`year == 2024 AND month == 01` over (year,month) partitions → 1 file."""
+    """`year == 2024 AND month == "01"` (a string literal over the INT64
+    `month`) over (year,month) partitions → 2 files."""
     var scan = _make_year_month_scan()
     var p1 = Expr.binary(BIN_EQ, Expr.col_ref(String("year")), Expr.literal(ScalarValue.from_int(2024)))
     var p2 = Expr.binary(BIN_EQ, Expr.col_ref(String("month")), Expr.literal(ScalarValue.from_string(String("01"))))
@@ -299,6 +300,53 @@ def test_idempotent() raises:
     assert_equal(_pruned_path_count(twice), 1)
 
 
+def test_undecidable_conjunct_stays_on_the_filter() raises:
+    """`year == '2032'` (a STRING literal) over an INT64 `year` partition
+    with paths 2031 and 2032. The pass cannot compare the literal with the
+    values, so it keeps both paths; the conjunct must then stay on the
+    Filter, or the 2031 rows reach the output unfiltered.
+
+    Catches: a conjunct dropped from the residual although no path's
+    comparison was decided (wrong results, no error)."""
+    var paths = List[String]()
+    paths.append(String("d/year=2031/a.parquet"))
+    paths.append(String("d/year=2032/b.parquet"))
+    var pvals = List[List[String]]()
+    var v0 = List[String](); v0.append(String("2031")); pvals.append(v0^)
+    var v1 = List[String](); v1.append(String("2032")); pvals.append(v1^)
+    var pcols = _year_col()
+    var full = _full_schema(pcols.copy())
+    var src = ParquetSource.partitioned(
+        paths^, _data_schema(), pcols^, pvals^, None, 0
+    )
+    var scan = LogicalPlan.scan_from_source(SourceVariant(src^), full^)
+    var pred = Expr.binary(
+        BIN_EQ, Expr.col_ref(String("year")), Expr.literal(ScalarValue.from_string(String("2032")))
+    )
+    var out = partition_prune_scans(LogicalPlan.filter(pred^, scan^))
+    assert_true(out.tag == PLAN_FILTER)
+    assert_equal(_pruned_path_count(out), 2)
+    ref kept = out._filter.value()[].predicate
+    assert_true(kept.binary_op() == BIN_EQ)
+    assert_equal(kept.binary_left_ref().col_ref_name(), String("year"))
+    assert_true(kept.binary_right_ref().literal_value().is_string())
+
+    # With a decidable conjunct beside it: the INT64 conjunct prunes 2031
+    # and leaves the Filter; the undecidable one stays.
+    var scan2 = _make_year_scan()
+    var mixed = Expr.binary(
+        BIN_AND,
+        _eq_year(2024),
+        Expr.binary(BIN_EQ, Expr.col_ref(String("year")), Expr.literal(ScalarValue.from_string(String("2024")))),
+    )
+    var out2 = partition_prune_scans(LogicalPlan.filter(mixed^, scan2^))
+    assert_true(out2.tag == PLAN_FILTER)
+    assert_equal(_pruned_path_count(out2), 1)
+    ref kept2 = out2._filter.value()[].predicate
+    assert_true(kept2.binary_op() == BIN_EQ)
+    assert_true(kept2.binary_right_ref().literal_value().is_string())
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_prune_eq_keeps_one]()
@@ -314,4 +362,5 @@ def main() raises:
     suite.test[test_no_prunable_conjunct_unchanged]()
     suite.test[test_non_partitioned_scan_unchanged]()
     suite.test[test_idempotent]()
+    suite.test[test_undecidable_conjunct_stays_on_the_filter]()
     suite^.run()

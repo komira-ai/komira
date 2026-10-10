@@ -12,7 +12,7 @@
 #     (the claims it signs), and it belongs to whoever issues tokens.
 #   * the PUBLISH half — derive the PUBLIC key and render the JWK Set a verifier
 #     fetches. That is Ed25519 + RFC 7517 + RFC 8037 and nothing else. It knows
-#     no tenant, no organisation, no grant, no claim shape.
+#     no claim shape and no authorization vocabulary of any application.
 #
 # A DEPLOY TOOL NEEDS ONLY THE SECOND. Obtaining it by constructing a minting
 # keyring from the seed and asking that keyring for its public keys would hand

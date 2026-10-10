@@ -1,0 +1,58 @@
+# proto-message: kci.resource.v1.ResourceList
+resource {
+  id: "nightly"
+  container_job {
+    image {
+      digest: "sha256:0b7e5a11"
+      platform: "linux/amd64"
+    }
+  }
+}
+resource {
+  id: "thumbs"
+  service {
+    image {
+      digest: "sha256:9c41d2e8"
+    }
+    port: 8080
+    internal {
+    }
+  }
+}
+resource {
+  id: "uploads"
+  bucket {
+    versioning: true
+  }
+}
+resource {
+  id: "nightly-at-2"
+  schedule {
+    cron: "30 2 * * 1-5"
+    timezone: "Europe/Paris"
+    target {
+      resource: "nightly"
+    }
+  }
+}
+resource {
+  id: "warm-thumbs"
+  schedule {
+    cron: "*/15 * * * *"
+    target {
+      resource: "thumbs"
+    }
+  }
+}
+resource {
+  id: "on-upload"
+  event_trigger {
+    source {
+      resource: "uploads"
+    }
+    event: OBJECT_CREATED
+    target {
+      resource: "thumbs"
+    }
+  }
+}

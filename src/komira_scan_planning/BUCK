@@ -19,7 +19,11 @@ mojo_library(
         "//src/komira_plan_expr:komira_plan_expr",
     ],
     test_srcs = [
+        "tests/test_partition_pred_bridge_fields.mojo",
+        "tests/test_partition_pred_bridge_roundtrip.mojo",
         "tests/test_partition_predicate_split.mojo",
+        "tests/test_partition_predicate_split_ops.mojo",
+        "tests/test_partition_predicate_split_shapes.mojo",
     ],
     visibility = ["PUBLIC"],
 )

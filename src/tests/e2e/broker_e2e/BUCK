@@ -1,0 +1,35 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
+
+# The broker lifecycle end to end over a real on-disk store: the coordinator
+# spreads the partitions over three nodes through heartbeats and persists the
+# assignment, the owners produce under their leases, every data-plane handle
+# is dropped and the log is replayed from disk (the coordinator and node states
+# stay up), a node goes stale and its partitions move, a late append is
+# refused when the caller supplies the live lease (and, pinned as documented
+# best-effort behaviour, is not refused when the stale node uses its own view),
+# and retention plus offline log compaction run over the reassigned partition.
+# Every phase opens fresh `LocalFsConditionalStore` handles on one root under
+# $TEST_TMPDIR, so data reaches a later phase only through the files.
+#
+# A test of its own, not a `test_srcs` entry, because it spans komira_broker
+# and komira_broker_coordinator: welding it into the coordinator would make
+# every coordinator build wait on a data-plane lifecycle, and welding it into
+# the broker is impossible (the coordinator depends on the broker). It is a
+# `mojo_test`, so `./buck2 test //...` runs it and no library's build waits on
+# it.
+mojo_test(
+    name = "test_broker_lifecycle_e2e",
+    srcs = ["tests/test_broker_lifecycle_e2e.mojo"],
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_broker:komira_broker",
+        "//src/komira_broker_coordinator:komira_broker_coordinator",
+        "//src/komira_broker_proto:komira_broker_proto",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_supervisor_proto:komira_supervisor_proto",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+)

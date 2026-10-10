@@ -6,8 +6,11 @@
 #
 # <mojo> lists the .mojo files of the tree, one path in the cell per line;
 # <welded> the welded test files, likewise (test_weld.bxl writes both). Reads
-# the packages under <root> (each directory directly under <root> is one
-# package) and requires two things:
+# the packages under <root> and requires two things. Each directory directly
+# under <root> is one package, except <root>/tests, which is not a package but
+# holds them by kind: each directory <root>/tests/<kind>/<name> is one (the
+# test-only packages, docs/architecture.md#end-to-end-tests). A .mojo file
+# directly in <root>/tests or in <root>/tests/<kind> is in no package.
 #
 #   1. Every test file is welded. A test file is a `test_*.mojo` under a
 #      `tests/` directory of the package, at any depth. It is welded when its
@@ -24,8 +27,8 @@
 # finding.
 #
 # Ledger lines are `<path><TAB><reason>`, the path being `<root>/<package>`
-# or a test file's path; blank lines and lines starting with `#`
-# are comments.
+# (`<root>/tests/<kind>/<name>` for a test-only one) or a test file's path;
+# blank lines and lines starting with `#` are comments.
 #
 # Writes <result.json> (status "success") when it finds nothing. A finding
 # fails the action instead, printing the findings on stderr (which is how
@@ -65,6 +68,12 @@ awk -v root="$ROOT" -v named="$T/named" '
         rest = substr($0, length(root) + 2)
         pkg = rest; sub(/\/.*/, "", pkg)
         if (pkg == rest) next
+        if (pkg == "tests") {
+            # <root>/tests holds packages by kind: the package is tests/<kind>/<name>.
+            n = split(rest, part, "/")
+            if (n < 4) next
+            pkg = part[1] "/" part[2] "/" part[3]
+        }
         inpkg = substr(rest, length(pkg) + 2)
         intests = ("/" inpkg) ~ /\/tests\//
         base = $0; sub(/.*\//, "", base)
@@ -105,7 +114,7 @@ awk -v root="$ROOT" -v prefix="$PREFIX" -v lname="$LEDGER_NAME" \
                     print at ": the test is welded now; delete the row (the ledger only shrinks)"
             } else {
                 p = substr(path, length(root) + 2)
-                if (index(p, "/") || !(p in src) || src[p] == 0)
+                if (!(p in src) || src[p] == 0)
                     print at ": names neither a test file nor a package with a .mojo source; delete the row"
                 else if (welded[p] > 0)
                     print at ": the package welds " welded[p] " test(s) now; delete the row (the ledger only shrinks)"

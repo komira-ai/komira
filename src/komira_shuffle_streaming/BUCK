@@ -1,0 +1,26 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The object-store shuffle as a streaming segment cut: `ShuffleWriteSink` (a
+# `komira_morsel` StreamingMorselSink that writes and seals one epoch per step
+# through `komira_shuffle`) and `ShuffleReadSource` (a StreamingMorselSource
+# that polls a reducer's partition of each sealed epoch, Idle while unsealed),
+# with the Int64 key/value codec both sides share. komira_runtime_paths is
+# declared because the tests take their scratch directory from `test_tmpdir()`.
+
+mojo_library(
+    name = "komira_shuffle_streaming",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_morsel:komira_morsel",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_shuffle:komira_shuffle",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_shuffle_streaming_conformers.mojo",
+        "tests/test_shuffle_streaming_direct.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

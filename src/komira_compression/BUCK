@@ -16,6 +16,8 @@ mojo_library(
         },
     },
     test_srcs = [
+        "tests/test_codec_block_api.mojo",
+        "tests/test_codec_libraries.mojo",
         "tests/test_gzip_lz4_frame_conformers.mojo",
         "tests/test_lz4_raw_conformer_roundtrip.mojo",
     ],

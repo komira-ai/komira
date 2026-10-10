@@ -1,0 +1,78 @@
+# A made-up library source for cov_branch_classify's cases (README.md), staged as d.mojo.
+def strings(var s: String, flag: Bool, d: Dict[String, Int], k: String) raises -> Int:
+    if flag:
+        return 1
+    if s == "x":
+        s += "y"
+    var t = s^
+    var n = d[k] + len(t + "z")
+    var m = g[Int](n) + gn[Int](n)
+    var q = h(n)
+    var v = n
+    v //= 10
+    v %= 10
+    if (w.c & (1 << 62)) != 0:
+        v += 1
+    if keep:
+        v += 1
+    return v + m + q
+def loops(xs: List[Int], d: Dict[String, Int], n: Int) raises -> Int:
+    var v = 0
+    for x in xs:
+        v += x
+    for y in self.items:
+        v += y
+    for z in [a, b]:
+        v += z
+    for (kk, vv) in d.items():
+        v += vv
+    for i in reversed(range(n)):
+        v += i
+    for e in xs[0]:
+        v += e
+    return v
+def ands(st: State, count: Int, started: Bool, word: String) -> Int:
+    var v = 0
+    if st.ready and count == 0:
+        v += 1
+    if started and word == String("exit"):
+        v += 1
+    if not st.glass and not (has_main and has_push):
+        v += 1
+    return v
+def at(index: Int, length: Int) -> Int:
+    if index < 0 or index >= length:
+        return 1
+    elif index == 7:
+        return 2
+    return 0
+@always_inline("nodebug")
+def gn[T: AnyType](n: Int) -> Int:
+    return n
+def more(p: P, calls: List[Call], flag: Bool) raises -> Int:
+    var v = 0
+    for k in [
+        1,
+        2,
+    ]:
+        v += k
+    for c in "ab".as_bytes():
+        v += 1
+    for k in p.data().keys:
+        v += k
+    v += p.run[
+        Int,
+    ](v)
+    v += gn[
+        Int,
+    ](v)
+    if overflows(v):
+        v += 1
+    var q = parse(p) + read(p)
+    if p.a or p.b(v):
+        v += 1
+    if p.c and p.d(v):
+        v += 1
+    if calls[0].has_only and v == 0:
+        v += 1
+    return v + q

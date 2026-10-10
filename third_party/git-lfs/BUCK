@@ -1,0 +1,59 @@
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# git-lfs (github.com/git-lfs/git-lfs), MIT licensed (LICENSE below), at its
+# release v3.8.0: the linux amd64 binary archive the release publishes. The
+# sha256 below is the one the release notes list for that archive, and the
+# archive downloaded from the release URL hashes to it. Nothing of it is
+# committed here, and nothing ships it: it is the git-lfs half of the git
+# oracle (//third_party/git, README.md), test input of komira_git's
+# conformance tests, run there as a child process of the pinned git. No
+# library or binary depends on it.
+#
+# The binary is a statically linked Go program. The archive holds amd64 code
+# only, so the oracle is limited to linux-x86_64
+# (komira-limit:git-oracle-linux-x86-64, on //third_party/git's targets).
+# `exec_compatible_with` below places only the unpacking.
+#
+# A newer pin is `_VERSION`, `_COMMIT` (the commit the tag names), `_SHA256`,
+# `_SIZE`, `_LICENSE_SHA256` and `_LICENSE_SIZE` here, and `_LFS_VERSION` in
+# //third_party/git/BUCK, which its check holds `git-lfs version` to.
+_VERSION = "v3.8.0"
+_COMMIT = "aece9221f8c09221a14395d964806b956289bc07"
+_SHA256 = "e455e00f15d9b95661b8d53498ffb0c3367962cf1ec73c31ab7369516cd6ab8d"
+_SIZE = 5909255
+_LICENSE_SHA256 = "4fae9062ab5cdd5fb15486b728534d8aded8b4ae9d84b6d66a956f5162c366b6"
+_LICENSE_SIZE = 2818
+
+pinned_file(
+    name = "git-lfs-linux-amd64.tar.gz",
+    url = "https://github.com/git-lfs/git-lfs/releases/download/{v}/git-lfs-linux-amd64-{v}.tar.gz".format(v = _VERSION),
+    sha256 = _SHA256,
+    size_bytes = _SIZE,
+)
+
+# The archive holds git-lfs-3.8.0/git-lfs (mode 0755), its manual pages and
+# an install script; only the binary is taken.
+archive_files(
+    name = "git-lfs",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":git-lfs-linux-amd64.tar.gz",
+    files = ["git-lfs"],
+    strip_prefix = "git-lfs-" + _VERSION[1:],
+    visibility = [
+        "//src/tests/conformance/...",
+        "//third_party/git/...",
+    ],
+)
+
+# The release archive carries no licence text; this is the LICENSE.md of the
+# repository at the tag's commit, pinned by commit as third_party/h2spec pins
+# its LICENSE, so a moved tag cannot change it.
+pinned_file(
+    name = "LICENSE",
+    url = "https://raw.githubusercontent.com/git-lfs/git-lfs/{}/LICENSE.md".format(_COMMIT),
+    sha256 = _LICENSE_SHA256,
+    size_bytes = _LICENSE_SIZE,
+    visibility = ["PUBLIC"],
+)

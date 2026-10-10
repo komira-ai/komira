@@ -9,9 +9,9 @@
 # passes.
 #
 # Scope: the methods in BUCK's `methods`. The services' other methods
-# (IAM policy, executions listing and deletion, revisions read, instances,
-# tasks, builds, worker pools, operations listing, deletion and
-# cancellation) are not in the generated code.
+# (TestIamPermissions, a worker pool's IAM policy, executions listing and
+# deletion, revisions read, instances, tasks, builds, operations listing,
+# deletion and cancellation) are not in the generated code.
 from std.os import listdir
 from std.testing import assert_equal, assert_true
 
@@ -24,14 +24,14 @@ def _files() raises -> List[String]:
     make each scan below pass over nothing."""
     var names = listdir(String(_DIR))
     var has_service = False
-    var has_mixin = False
+    var has_operations = False
     for i in range(len(names)):
         if names[i] == "service.mojo":
             has_service = True
-        if names[i] == "operations_mixin.mojo":
-            has_mixin = True
+        if names[i] == "operations.mojo":
+            has_operations = True
     assert_true(len(names) > 0, "nothing is staged under gen/")
-    assert_true(has_service and has_mixin, "gen/ is not the generated package")
+    assert_true(has_service and has_operations, "gen/ is not the generated package")
     return names^
 
 
@@ -89,24 +89,51 @@ def test_only_the_used_methods_are_generated() raises:
     var total = 0
     total += _methods_of(
         "service.mojo",
-        ["create_service", "get_service", "list_services", "update_service", "delete_service"],
+        [
+            "create_service",
+            "get_service",
+            "list_services",
+            "update_service",
+            "delete_service",
+            "get_iam_policy",
+            "set_iam_policy",
+        ],
     )
     total += _methods_of("revision.mojo", ["list_revisions", "delete_revision"])
     total += _methods_of(
         "job.mojo",
-        ["create_job", "get_job", "list_jobs", "update_job", "delete_job", "run_job"],
+        [
+            "create_job",
+            "get_job",
+            "list_jobs",
+            "update_job",
+            "delete_job",
+            "run_job",
+            "get_iam_policy",
+            "set_iam_policy",
+        ],
+    )
+    total += _methods_of(
+        "worker_pool.mojo",
+        [
+            "create_worker_pool",
+            "get_worker_pool",
+            "list_worker_pools",
+            "update_worker_pool",
+            "delete_worker_pool",
+        ],
     )
     total += _methods_of("execution.mojo", ["get_execution", "cancel_execution"])
-    total += _methods_of("operations_mixin.mojo", ["get_operation", "wait_operation"])
-    assert_equal(total, 17)
+    total += _methods_of("operations.mojo", ["get_operation", "wait_operation"])
+    assert_equal(total, 26)
     var files = _files()
     var methods = 0
     for i in range(len(files)):
         methods += _count(_read(files[i]), "[RT: Runtime](")
     assert_equal(methods, total, "a method outside the list was generated")
-    # google.longrunning's own service is not generated: the operations
-    # client is Run's binding (operations_mixin.mojo).
-    assert_equal(_count(_read("operations.mojo"), "Client["), 0)
+    # One operations client: google.longrunning.Operations, generated into
+    # operations.mojo with run_v2.yaml's bindings.
+    assert_equal(_count(_read("operations.mojo"), "struct OperationsClient["), 1)
 
 
 def main() raises:

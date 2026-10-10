@@ -1,0 +1,25 @@
+# Near misses: nothing on these lines is a finding.
+
+The window of this tree is from 2030 up to 2031-09-01 (fixture.bzl).
+Dates at or after the public history: 2031-09-01, 2031-12-31, 20310901, Sep 1, 2031,
+1 Oct 2031, September 2031, 9/15/2031, 15.10.2031, 15-10-2031, 2031.1.5 (a version), 2032-01-01, 2031_09_30.
+Dates before the window are data: 2029-12-31, 20280229, Dec 31 2029.
+A year alone is no date: the 2030 edition; a longer number: build 120310131, 2031081500.
+Home directories with placeholders: /home/user/src, /home/runner/work, /Users/me/src,
+C:\Users\<name>\AppData, /home/$USER/x, /home/, /Users/Shared/x.
+Addresses: 127.0.0.1:8080, 0.0.0.0:80, 192.0.2.10:443, 198.51.100.7, 203.0.113.9:22,
+http://169.254.169.254/latest, 169.254.170.2, the OID 2.5.4.3, section 8.1.2.6,
+version 1.2.3.4.5, the range 35.191.0.0/16, 255.255.255.255.
+Hosts: https://example.com/x, https://api.example/x, http://localhost:9000,
+https://bucket.localhost/k, https://svc.test, https://x.invalid/p, https://www.example.org,
+https://s3.us-west-2.amazonaws.com/b, http://[::1]:8080/, http://[fd00:ec2::254]/token,
+https://{host}/x, https://$HOST/p, https://<host>/p, s3://bucket/key, gs://b/o,
+file:///home/user/x, https://…, the pattern https://[^"]+, https://u:p@example.com:8443/x.
+Addresses of mail: noreply@tools.zz, no-reply@tools.zz, alice@example.com,
+ops@team.example, x@y.test, user@host.invalid, a decorator @always_inline.
+The user of a URL is no address: abfss://lake@acct.dfs.core.windows.net/p,
+az://lake@acct.blob.core.windows.net/p.
+Hex in prose that is no commit: ba7816bf... and cf83e135…, 0b00001101, 86400e9,
+ed25519, 0190ab1c-3d4e-7f80-8a1b-2c3d4e5f6071, "1a2b3c4d", deadbeef, x1a2b3c4d,
+1a2b3c4d5e6f7a8b9c, /commit/1a2b3c4d5e, actions/checkout@1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b,
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.

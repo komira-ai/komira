@@ -999,6 +999,7 @@ impl Lowerer {
             // Filled after lowering from the recovered service options
             // (`service_options.rs`), on the paths that recover them.
             default_host: None,
+            host_from_service_config: false,
         }
     }
 

@@ -1,0 +1,87 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+
+# Test-only: komira_connect against the Connect conformance suite
+# (connectrpc/conformance, pinned in //third_party/connect-conformance). The
+# suite supplies every case and its own reference clients; this package
+# supplies the server-under-test the suite's protocol asks for and gates the
+# run on the runner's verdict.
+#
+#   conformance_server   the server-under-test (server/): reads the runner's
+#                        ServerCompatRequest on stdin, serves the suite's
+#                        ConformanceService on a komira_connect
+#                        ConnectService behind a komira_http_server
+#                        HttpServer on 127.0.0.1 (HTTP/2 over TLS), answers
+#                        with a ServerCompatResponse on stdout.
+#   komira_connect_conformance
+#                        the library: reading the runner's report and the
+#                        reason rule of known_failing.txt. Its welded test
+#                        test_connect_conformance runs `connectconformance
+#                        --mode server` with conformance.yaml (the subset
+#                        komira_connect serves: HTTP/2, TLS; Connect, gRPC
+#                        and gRPC-Web; proto codec, identity compression;
+#                        unary, client- and server-streaming) and the
+#                        runner's own `--known-failing @known_failing.txt`,
+#                        which is shrink-only: a listed case that passes, or
+#                        a pattern that matches nothing, fails the run.
+#
+# The server is a binary of its own, not part of the library, because the
+# library's test runs it: a library cannot be built from a test of itself.
+# The tests are welded (test_srcs): the suite's verdict is a build action the
+# cache keeps for exactly these inputs (komira_connect's closure, the pinned
+# runner, the config and the list). Nothing depends on this package.
+mojo_library(
+    name = "komira_connect_conformance",
+    srcs = glob(["**/*.mojo"], exclude = [
+        "server/**/*.mojo",
+        "tests/**/*.mojo",
+    ]),
+    deps = [
+        "//src/komira_supervisor:komira_supervisor",
+        "//src/tests/conformance/komira_http_conformance:komira_http_conformance",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    # The pinned runner is the Linux x86_64 release archive, and the welded
+    # test runs it as a child process.
+    target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],  # komira-limit:connect-conformance-linux-x86-64
+    test_srcs = [
+        "tests/test_report_and_reasons.mojo",
+        "tests/test_connect_conformance.mojo",
+    ],
+    test_data = {
+        "tests/test_connect_conformance.mojo": {
+            "conformance.yaml": "conformance.yaml",
+            "connectconformance": "//third_party/connect-conformance:connectconformance[connectconformance]",
+            "known_failing.txt": "known_failing.txt",
+            "server": ":conformance_server[runnable]",
+        },
+    },
+    visibility = ["PUBLIC"],
+)
+
+mojo_binary(
+    name = "conformance_server",
+    srcs = [
+        "server/conformance_server.mojo",
+        "server/service.mojo",
+        "server/wire.mojo",
+    ],
+    main = "server/conformance_server.mojo",
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_connect:komira_connect",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_http_server:komira_http_server",
+        "//src/komira_protobuf:komira_protobuf",
+    ],
+)
+
+# The deps above name every komira_* module the library, its tests and the
+# server import (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)

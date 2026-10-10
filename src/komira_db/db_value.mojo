@@ -307,7 +307,8 @@ def _parse_array_literal(lit: String) -> List[String]:
 
 
 def _owned_utf8(b: List[UInt8]) -> String:
-    var s = String()
-    for i in range(len(b)):
-        s += String(chr(Int(b[i])))
-    return s^
+    # Verbatim bytes -> owned String (copies). NOT chr()-per-byte: chr maps a
+    # byte >= 0x80 to a two-byte codepoint, so a non-ASCII element came back
+    # double-encoded (`Zürich` as `ZÃ¼rich`). The bytes are slices of a valid
+    # UTF-8 `_text` cut at ASCII ',' / '}', so they are valid UTF-8 themselves.
+    return String(StringSlice(unsafe_from_utf8=Span(b)))

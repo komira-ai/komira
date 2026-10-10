@@ -56,7 +56,8 @@ def test_leaf_counts() raises:
         assert_equal(_count(ArrowType.LARGE_BINARY, z), 3)
         # Unsupported here: the arm raises before reading a buffer.
         assert_equal(_count(ArrowType.DICTIONARY, z), 0)
-        assert_equal(_count(ArrowType.ERROR, z), 0)
+        # An id past the declared space reaches the catch-all.
+        assert_equal(_count(ArrowType(50), z), 0)
     # BOOL: validity + bit-packed values when copied; the zero-copy arm
     # refuses BOOL before reading.
     assert_equal(_count(ArrowType.BOOL, COPY), 2)
@@ -67,10 +68,15 @@ def test_fixed_size_counts() raises:
     for zc in range(2):
         var z = zc == 1
         assert_equal(_count(ArrowType.FIXED_SIZE_BINARY, z, inner_size=4), 2)
+        assert_equal(_count(ArrowType.FIXED_SIZE_BINARY, z, inner_size=1), 2)
         assert_equal(_count(ArrowType.FIXED_SIZE_BINARY, z, inner_size=0), 0)
         assert_equal(_count(ArrowType.FIXED_SIZE_BINARY, z, inner_size=-1), 0)
         assert_equal(
             _count(ArrowType.FIXED_SIZE_LIST, z, n_children=1, inner_size=3),
+            1,
+        )
+        assert_equal(
+            _count(ArrowType.FIXED_SIZE_LIST, z, n_children=1, inner_size=1),
             1,
         )
         assert_equal(

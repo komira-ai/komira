@@ -1,0 +1,13 @@
+# The planted plan constants of test 53 (fixture.bzl says what each line is for).
+comptime PLAN_SCAN: UInt8 = 0
+comptime PLAN_FILTER: UInt8 = 1
+comptime PLAN_JOIN: UInt8 = 2
+comptime PLAN_CSE_REF: UInt8 = 3
+comptime PLAN_TAG_COUNT: Int = 4
+comptime SOURCE_CSV: UInt8 = 1
+comptime JOIN_INNER: UInt8 = 0
+comptime JOIN_LEFT: UInt8 = 1
+comptime JOIN_ALGO_HASH: UInt8 = 0
+# comptime PLAN_RETIRED: UInt8 = 9
+    comptime PLAN_NESTED: UInt8 = 7
+comptime PLAN_UNTYPED = UInt8(16)

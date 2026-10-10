@@ -38,6 +38,8 @@
 #   - s2n_shutdown
 #   - s2n_get_server_name
 #   - s2n_strerror
+#   - s2n_connection_request_key_update / s2n_connection_get_key_update_counts
+#     / s2n_connection_get_actual_protocol_version (TLS 1.3 key update)
 #
 # CALLBACK API DELIBERATELY EXCLUDED (no trampolines):
 # s2n_connection_set_send_cb / s2n_connection_set_recv_cb
@@ -125,7 +127,7 @@ def s2n_init() -> Int32:
     """
     # SAFETY: void-arg, int-return. Pure library-lifecycle init. No
     # pointer crosses any boundary. Resolves via the static-link path.
-    return external_call["s2n_init", Int32]()
+    return external_call["komira_s2n_init", Int32]()
 
 
 def s2n_cleanup() -> Int32:
@@ -135,7 +137,7 @@ def s2n_cleanup() -> Int32:
     """
     # SAFETY: void-arg, int-return. Per-thread cleanup; no pointer
     # crosses any boundary.
-    return external_call["s2n_cleanup", Int32]()
+    return external_call["komira_s2n_cleanup", Int32]()
 
 
 # =============================================================================
@@ -154,7 +156,7 @@ def s2n_config_new() -> S2nOpaquePtr:
     # CONCRETE `_S2N_FFI_ORIGIN` (StaticConstantOrigin) opaque-handle origin
     # replaces the banned `MutExternalOrigin` wildcard (stale-pointer fix).
     return external_call[
-        "s2n_config_new", S2nOpaquePtr
+        "komira_s2n_config_new", S2nOpaquePtr
     ]()
 
 
@@ -166,7 +168,7 @@ def s2n_config_free(config: S2nOpaquePtr) -> Int32:
     # SAFETY: caller (s2n_shim's _S2nConfigHandle.__del__) ensures
     # exactly-one call per config pointer (null-sentinel guard prevents
     # double-free on moved-from handles).
-    return external_call["s2n_config_free", Int32](config)
+    return external_call["komira_s2n_config_free", Int32](config)
 
 
 # =============================================================================
@@ -180,11 +182,12 @@ def s2n_cert_chain_and_key_new() -> S2nOpaquePtr:
     Maps to s2n.h:658 `struct s2n_cert_chain_and_key *
         s2n_cert_chain_and_key_new(void)`.
     """
-    # SAFETY: void-arg returning an opaque pointer. Caller owns lifetime
-    # via TlsConfig.load_cert which calls s2n_cert_chain_and_key_free on
-    # the cleanup path.
+    # SAFETY: void-arg returning an opaque pointer. The caller owns it and
+    # frees it with s2n_cert_chain_and_key_free: TlsConfig.load_cert frees it
+    # when the PEM load fails, and otherwise hands it to the config handle,
+    # which frees it after s2n_config_free.
     return external_call[
-        "s2n_cert_chain_and_key_new",
+        "komira_s2n_cert_chain_and_key_new",
         S2nOpaquePtr,
     ]()
 
@@ -196,15 +199,16 @@ def s2n_cert_chain_and_key_free(
 
     Maps to s2n.h:713 `int s2n_cert_chain_and_key_free(...)`.
 
-    Note: per s2n docs, once a cert-chain-and-key has been added to a
-    config via s2n_config_add_cert_chain_and_key_to_store, the config
-    takes ownership and the chain is freed when the config is freed.
-    Caller MUST NOT free a chain that has been added to a config.
+    A chain added with s2n_config_add_cert_chain_and_key_to_store stays
+    owned by the caller (s2n marks the config's chains application-owned,
+    and s2n_config_free then frees none of them, tls/s2n_config.c
+    `s2n_config_free_cert_chain_and_key`). The caller frees it with this
+    call, and must not free it while a config still uses it.
     """
-    # SAFETY: caller is responsible for the "not-added-to-config-yet"
-    # contract. The TlsConfig.load_cert path always adds-then-leaves-ref
-    # so this free is only used on the OOM/error rollback path.
-    return external_call["s2n_cert_chain_and_key_free", Int32](cert_and_key)
+    # SAFETY: the caller passes a chain no live config uses: one whose load
+    # failed (TlsConfig.load_cert) or one whose config was already freed
+    # (_S2nConfigHandle.__deinit__).
+    return external_call["komira_s2n_cert_chain_and_key_free", Int32](cert_and_key)
 
 
 def s2n_cert_chain_and_key_load_pem_bytes(
@@ -225,7 +229,7 @@ def s2n_cert_chain_and_key_load_pem_bytes(
     # private_key_pem) MUST remain valid for the duration of this call.
     # s2n COPIES the parsed cert + key into its own arena, so the PEM
     # buffers can be released after this returns.
-    return external_call["s2n_cert_chain_and_key_load_pem_bytes", Int32](
+    return external_call["komira_s2n_cert_chain_and_key_load_pem_bytes", Int32](
         chain_and_key, chain_pem, chain_pem_len,
         private_key_pem, private_key_pem_len,
     )
@@ -235,17 +239,20 @@ def s2n_config_add_cert_chain_and_key_to_store(
     config: S2nOpaquePtr,
     cert_key_pair: S2nOpaquePtr,
 ) -> Int32:
-    """Attach a cert-chain-and-key to a config. The config takes
-    ownership of the chain; do NOT free the chain after this returns
-    successfully — it is freed when the config is freed.
+    """Attach a cert-chain-and-key to a config. The config borrows the
+    chain and does NOT take ownership: s2n marks the config's chains
+    application-owned, and s2n_config_free does not free them. The caller
+    frees the chain with s2n_cert_chain_and_key_free after it frees the
+    config.
 
     Maps to s2n.h:819 `int s2n_config_add_cert_chain_and_key_to_store(...)`.
     """
-    # SAFETY: synchronous call. On S2N_SUCCESS, ownership of cert_key_pair
-    # transfers to config. On S2N_FAILURE, caller retains ownership and
-    # must free the chain.
+    # SAFETY: synchronous call. The caller keeps ownership of cert_key_pair
+    # whatever the result; on S2N_FAILURE the config may already hold the
+    # pointer (s2n builds its SNI map before its last check), so the chain
+    # must outlive the config either way.
     return external_call[
-        "s2n_config_add_cert_chain_and_key_to_store", Int32,
+        "komira_s2n_config_add_cert_chain_and_key_to_store", Int32,
     ](config, cert_key_pair)
 
 
@@ -272,7 +279,7 @@ def s2n_config_append_protocol_preference(
     # SAFETY: synchronous call. `protocol` byte buffer held in scope
     # by the caller's wrapper across the external_call. s2n copies the
     # bytes into its own config arena.
-    return external_call["s2n_config_append_protocol_preference", Int32](
+    return external_call["komira_s2n_config_append_protocol_preference", Int32](
         config, protocol, protocol_len
     )
 
@@ -296,7 +303,7 @@ def s2n_config_set_protocol_preferences(
     # SAFETY: synchronous call. s2n copies the protocol strings into its
     # config arena; caller's argv array + the strings it points at can be
     # released after this returns.
-    return external_call["s2n_config_set_protocol_preferences", Int32](
+    return external_call["komira_s2n_config_set_protocol_preferences", Int32](
         config, protocols, protocol_count
     )
 
@@ -318,7 +325,7 @@ def s2n_connection_new(
     # _S2nConnectionHandle.__init__) owns the returned pointer; __del__
     # calls s2n_connection_free.
     return external_call[
-        "s2n_connection_new", S2nOpaquePtr
+        "komira_s2n_connection_new", S2nOpaquePtr
     ](mode)
 
 
@@ -333,7 +340,7 @@ def s2n_connection_free(
     # SAFETY: caller (s2n_shim's _S2nConnectionHandle.__del__) ensures
     # exactly-one call per connection pointer (null-sentinel guard
     # prevents double-free on moved-from handles).
-    return external_call["s2n_connection_free", Int32](conn)
+    return external_call["komira_s2n_connection_free", Int32](conn)
 
 
 def s2n_connection_set_config(
@@ -351,7 +358,7 @@ def s2n_connection_set_config(
     # discipline: the borrow checker rejects code that destroys the
     # TlsConfig while a TlsConnection still references it (the
     # ref-origin tracking).
-    return external_call["s2n_connection_set_config", Int32](conn, config)
+    return external_call["komira_s2n_connection_set_config", Int32](conn, config)
 
 
 def s2n_connection_set_fd(
@@ -369,7 +376,7 @@ def s2n_connection_set_fd(
     # the fd MUST remain valid (not close()'d) for the lifetime of the
     # connection. The s2n_connection_free path does NOT close the fd;
     # that's the caller's responsibility.
-    return external_call["s2n_connection_set_fd", Int32](conn, fd)
+    return external_call["komira_s2n_connection_set_fd", Int32](conn, fd)
 
 
 # =============================================================================
@@ -392,7 +399,7 @@ def s2n_negotiate(
     # SAFETY: synchronous call. `blocked` is a 4-byte stack out-parameter
     # owned by the caller (TlsConnection.handshake). The s2n library
     # writes to *blocked but does not retain the pointer past the return.
-    return external_call["s2n_negotiate", Int32](conn, blocked)
+    return external_call["komira_s2n_negotiate", Int32](conn, blocked)
 
 
 def s2n_send(
@@ -415,7 +422,7 @@ def s2n_send(
     # TlsConnection.send wrapper takes a Span[UInt8, _] and holds it
     # in scope across the external_call. `blocked` is a stack
     # out-parameter (same shape as s2n_negotiate).
-    return external_call["s2n_send", Int64](conn, buf, size, blocked)
+    return external_call["komira_s2n_send", Int64](conn, buf, size, blocked)
 
 
 def s2n_recv(
@@ -433,7 +440,7 @@ def s2n_recv(
     """
     # SAFETY: synchronous call. `buf` MUST outlive the call (typically
     # a pre-allocated List[UInt8]). `blocked` is a stack out-parameter.
-    return external_call["s2n_recv", Int64](conn, buf, size, blocked)
+    return external_call["komira_s2n_recv", Int64](conn, buf, size, blocked)
 
 
 def s2n_peek(
@@ -465,7 +472,7 @@ def s2n_peek(
     # this call). s2n_peek does not retain the pointer past the return,
     # does not allocate, and does not mutate connection state — it returns
     # the count of buffered plaintext bytes. No pointer escapes.
-    return external_call["s2n_peek", UInt32](conn)
+    return external_call["komira_s2n_peek", UInt32](conn)
 
 
 def s2n_connection_get_wire_bytes_in(
@@ -498,7 +505,7 @@ def s2n_connection_get_wire_bytes_in(
     # handle (owned by the caller's TlsConnection, alive for this call). The
     # callee reads one `uint64_t` field and returns it by value; the pointer is
     # not retained past the return. No pointer escapes.
-    return external_call["s2n_connection_get_wire_bytes_in", UInt64](conn)
+    return external_call["komira_s2n_connection_get_wire_bytes_in", UInt64](conn)
 
 
 def s2n_connection_get_wire_bytes_out(
@@ -539,7 +546,7 @@ def s2n_connection_get_wire_bytes_out(
     PURE getter. Same contract as `s2n_connection_get_wire_bytes_in`.
     """
     # SAFETY: synchronous, read-only FFI. See the sibling above.
-    return external_call["s2n_connection_get_wire_bytes_out", UInt64](conn)
+    return external_call["komira_s2n_connection_get_wire_bytes_out", UInt64](conn)
 
 
 def s2n_shutdown(
@@ -554,7 +561,7 @@ def s2n_shutdown(
         s2n_blocked_status *blocked)`.
     """
     # SAFETY: synchronous call. `blocked` is a stack out-parameter.
-    return external_call["s2n_shutdown", Int32](conn, blocked)
+    return external_call["komira_s2n_shutdown", Int32](conn, blocked)
 
 
 # =============================================================================
@@ -582,7 +589,7 @@ def s2n_get_server_name(
     # before returning, so the unsafe pointer never escapes the FFI
     # layer.
     return external_call[
-        "s2n_get_server_name", S2nBytePtr
+        "komira_s2n_get_server_name", S2nBytePtr
     ](conn)
 
 
@@ -615,7 +622,7 @@ def s2n_get_application_protocol(
     # String before returning, so the unsafe pointer never escapes the
     # FFI layer.
     return external_call[
-        "s2n_get_application_protocol",
+        "komira_s2n_get_application_protocol",
         S2nBytePtr,
     ](conn)
 
@@ -639,7 +646,7 @@ def s2n_strerror(
     # never freed by caller. Wrapper code in s2n_shim copies into a
     # Mojo String for error-formatting paths.
     return external_call[
-        "s2n_strerror", S2nBytePtr
+        "komira_s2n_strerror", S2nBytePtr
     ](error, lang)
 
 
@@ -672,7 +679,7 @@ def s2n_error_get_type(error: Int32) -> Int32:
     """
     # SAFETY: pure integer -> integer classification call into libs2n. No
     # pointer crosses; no connection state is touched.
-    return external_call["s2n_error_get_type", Int32](error)
+    return external_call["komira_s2n_error_get_type", Int32](error)
 
 
 def s2n_errno_location() -> S2nInt32Ptr:
@@ -685,7 +692,7 @@ def s2n_errno_location() -> S2nInt32Ptr:
     # Pointer is valid for the lifetime of the thread. Wrapper code
     # dereferences once and copies the Int32 out.
     return external_call[
-        "s2n_errno_location", S2nInt32Ptr
+        "komira_s2n_errno_location", S2nInt32Ptr
     ]()
 
 
@@ -721,7 +728,7 @@ def s2n_config_disable_x509_verification(
     # SAFETY: synchronous config mutation. The config pointer is opaque
     # and the caller (TlsConfig.disable_verify) owns its lifetime via
     # the OwnedPointer-of-handle pattern. No pointer escapes.
-    return external_call["s2n_config_disable_x509_verification", Int32](config)
+    return external_call["komira_s2n_config_disable_x509_verification", Int32](config)
 
 
 def s2n_config_set_verify_host_callback(
@@ -753,7 +760,7 @@ def s2n_config_set_verify_host_callback(
     # binding is currently unused on the safe surface — no public method
     # threads a callback through. If/when added, the safe wrapper MUST
     # accept a function-pointer + a lifetime-bound data type.
-    return external_call["s2n_config_set_verify_host_callback", Int32](
+    return external_call["komira_s2n_config_set_verify_host_callback", Int32](
         config, callback, data
     )
 
@@ -783,7 +790,7 @@ def s2n_config_add_pem_to_trust_store(
     # after this returns. The caller (TlsConfig.add_trust_pem) MUST
     # ensure the buffer is NUL-terminated and holds the borrow alive
     # across the external_call.
-    return external_call["s2n_config_add_pem_to_trust_store", Int32](
+    return external_call["komira_s2n_config_add_pem_to_trust_store", Int32](
         config, pem
     )
 
@@ -805,7 +812,7 @@ def s2n_config_wipe_trust_store(
     """
     # SAFETY: synchronous config mutation. No pointer crosses any
     # boundary other than the opaque config handle.
-    return external_call["s2n_config_wipe_trust_store", Int32](config)
+    return external_call["komira_s2n_config_wipe_trust_store", Int32](config)
 
 
 def s2n_config_set_cipher_preferences(
@@ -845,7 +852,7 @@ def s2n_config_set_cipher_preferences(
     # during the table scan). The caller (TlsConfig.set_cipher_preferences)
     # holds the String borrow alive across this synchronous call. No
     # pointer escapes the FFI boundary.
-    return external_call["s2n_config_set_cipher_preferences", Int32](
+    return external_call["komira_s2n_config_set_cipher_preferences", Int32](
         config, version
     )
 
@@ -878,7 +885,7 @@ def s2n_set_server_name(
     # (TlsConnection.set_server_name) can free the buffer immediately
     # after. The buffer MUST be alive throughout the synchronous call —
     # the caller holds the String borrow across the external_call.
-    return external_call["s2n_set_server_name", Int32](conn, server_name)
+    return external_call["komira_s2n_set_server_name", Int32](conn, server_name)
 
 
 # =============================================================================
@@ -920,7 +927,7 @@ def s2n_config_set_session_tickets_onoff(
     """
     # SAFETY: synchronous config mutation. No pointer escapes; `config`
     # is the opaque handle whose lifetime the caller (TlsConfig) owns.
-    return external_call["s2n_config_set_session_tickets_onoff", Int32](
+    return external_call["komira_s2n_config_set_session_tickets_onoff", Int32](
         config, enabled
     )
 
@@ -943,7 +950,7 @@ def s2n_config_set_session_state_lifetime(
     Returns S2N_SUCCESS / FAILURE.
     """
     # SAFETY: synchronous config mutation. POD args; no pointer escapes.
-    return external_call["s2n_config_set_session_state_lifetime", Int32](
+    return external_call["komira_s2n_config_set_session_state_lifetime", Int32](
         config, lifetime_in_secs
     )
 
@@ -976,7 +983,7 @@ def s2n_connection_set_session(
     # by the caller (TlsConnection.set_session wraps a List/Span borrow
     # across the external_call). s2n's session-state arena is per-
     # connection; bytes are copied in before return.
-    return external_call["s2n_connection_set_session", Int32](
+    return external_call["komira_s2n_connection_set_session", Int32](
         conn, session, length
     )
 
@@ -995,7 +1002,7 @@ def s2n_connection_get_session_length(
     not issue a ticket).
     """
     # SAFETY: synchronous accessor; no pointer escapes.
-    return external_call["s2n_connection_get_session_length", Int32](conn)
+    return external_call["komira_s2n_connection_get_session_length", Int32](conn)
 
 
 def s2n_connection_get_session(
@@ -1024,7 +1031,7 @@ def s2n_connection_get_session(
     # the caller (TlsConnection.get_session pre-allocates a List[UInt8]
     # of size `max_length`). s2n writes up to `max_length` bytes into
     # the buffer + returns the count.
-    return external_call["s2n_connection_get_session", Int32](
+    return external_call["komira_s2n_connection_get_session", Int32](
         conn, session, max_length
     )
 
@@ -1044,7 +1051,37 @@ def s2n_connection_is_session_resumed(
     on a same-PoolKey reconnect was resumption.
     """
     # SAFETY: synchronous accessor; no pointer escapes.
-    return external_call["s2n_connection_is_session_resumed", Int32](conn)
+    return external_call["komira_s2n_connection_is_session_resumed", Int32](conn)
+
+
+def s2n_connection_get_actual_protocol_version(
+    conn: S2nOpaquePtr,
+) -> Int32:
+    """The TLS version the handshake negotiated, as s2n's protocol-version
+    number (S2N_TLS12 = 33, S2N_TLS13 = 34), or -1 on failure.
+
+    Maps to s2n.h `int s2n_connection_get_actual_protocol_version(
+        struct s2n_connection *conn)`.
+    """
+    # SAFETY: synchronous accessor; no pointer escapes.
+    return external_call["komira_s2n_connection_get_actual_protocol_version", Int32](
+        conn
+    )
+
+
+def s2n_connection_get_cipher(conn: S2nOpaquePtr) -> S2nBytePtr:
+    """The negotiated cipher suite's name in s2n's OpenSSL-style spelling
+    ("TLS_AES_128_GCM_SHA256", "ECDHE-RSA-AES128-GCM-SHA256"): a pointer to a
+    NUL-terminated string in s2n's static cipher-suite table, or NULL on
+    failure.
+
+    Maps to s2n.h `const char *s2n_connection_get_cipher(
+        struct s2n_connection *conn)`.
+    """
+    # SAFETY: the returned pointer is non-owning (static storage, never
+    # freed). TlsConnection.negotiated_cipher copies it into a String, so it
+    # never escapes the FFI layer.
+    return external_call["komira_s2n_connection_get_cipher", S2nBytePtr](conn)
 
 
 # =============================================================================
@@ -1079,7 +1116,7 @@ def s2n_connection_get_last_message_name(
     # handshake-message-name table — never freed by caller. The string is
     # valid for the process lifetime (static storage in libs2n.a).
     return external_call[
-        "s2n_connection_get_last_message_name",
+        "komira_s2n_connection_get_last_message_name",
         S2nBytePtr,
     ](conn)
 
@@ -1102,6 +1139,48 @@ def s2n_strerror_debug(
     # SAFETY: synchronous accessor. Returns a pointer into s2n's static
     # error-debug-string table — never freed by caller.
     return external_call[
-        "s2n_strerror_debug",
+        "komira_s2n_strerror_debug",
         S2nBytePtr,
     ](error, lang)
+
+
+# =============================================================================
+# TLS 1.3 key update (safe surface: key_update.mojo, TlsConnection)
+# =============================================================================
+
+# s2n_peer_key_update (s2n.h): whether the KeyUpdate message also asks the
+# peer to update its sending key. s2n 1.5.6 accepts only NOT_REQUESTED.
+comptime S2N_KEY_UPDATE_NOT_REQUESTED: Int32 = 0
+comptime S2N_KEY_UPDATE_REQUESTED: Int32 = 1
+
+# S2N_TLS13 (s2n.h): the actual_protocol_version value of TLS 1.3.
+comptime S2N_TLS13: Int32 = 34
+
+
+def s2n_connection_request_key_update(
+    conn: S2nOpaquePtr, peer_request: Int32
+) -> Int32:
+    """s2n.h `int s2n_connection_request_key_update(struct s2n_connection
+    *conn, s2n_peer_key_update peer_request)`. Only marks the update
+    pending: the KeyUpdate goes out (and the sending key changes) on the next
+    `s2n_send`. Fails with S2N_ERR_INVALID_ARGUMENT for any `peer_request`
+    but NOT_REQUESTED; it does not check the handshake or the version."""
+    # SAFETY: synchronous call; `conn` is a live handle owned by the caller's
+    # TlsConnection; the enum is passed by value (C int ABI).
+    return external_call["komira_s2n_connection_request_key_update", Int32](
+        conn, peer_request
+    )
+
+
+def s2n_connection_get_key_update_counts(
+    conn: S2nOpaquePtr, send_key_updates: S2nBytePtr, recv_key_updates: S2nBytePtr
+) -> Int32:
+    """api/unstable/ktls.h `int s2n_connection_get_key_update_counts(struct
+    s2n_connection *conn, uint8_t *send_key_updates, uint8_t
+    *recv_key_updates)`. Saturates at 255."""
+    # SAFETY: synchronous call. Both out-pointers address caller-owned stack
+    # bytes alive across the call; s2n writes one uint8_t through each and
+    # keeps neither.
+    return external_call["komira_s2n_connection_get_key_update_counts", Int32](
+        conn, send_key_updates, recv_key_updates
+    )

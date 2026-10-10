@@ -1,0 +1,45 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A run-scoped prefix in any S3-compatible store that cleans up after itself:
+# a `TestBucket` (lease first, delete everything, re-list, verdict), the leak
+# check, and the test's flags: which store to run against (an external
+# S3-compatible store, all four --test-s3-* flags; or an embedded MinIO the
+# test starts, --test-minio-binary) and opening a bucket from them. With no
+# flags a test SKIPS (exit 77): nothing here assumes an endpoint exists.
+#
+# No deployment fact lives here and there is no configuration file: an
+# endpoint, a bucket and a credentials-file PATH come from flags, and no
+# message carries one. The object store is a seam with an in-memory fake; a
+# real client implements it in an adapter package, so this library depends
+# on no cloud client.
+#
+# Deps: komira_test_verdict (the verdict and the SKIP / CANNOT_TELL exits),
+# komira_test_run_id (the run id and the clock), komira_test_minio (the
+# embedded server a bucket can own; it never depends on this package),
+# komira_validation_run (the run-id rule) and komira_libc (`_read_env`,
+# for the welded tests' TEST_TMPDIR only).
+#
+# The welded tests are hermetic: in-memory fakes, a scripted process runner,
+# and the test's own TEST_TMPDIR; no network and no process is started.
+mojo_library(
+    name = "komira_test_bucket",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_libc:komira_libc",
+        "//src/tests/helpers/komira_test_minio:komira_test_minio",
+        "//src/komira_test_run_id:komira_test_run_id",
+        "//src/komira_test_verdict:komira_test_verdict",
+        "//src/komira_validation_run:komira_validation_run",
+    ],
+    test_srcs = [
+        "tests/test_bucket_embedded.mojo",
+        "tests/test_bucket_failures.mojo",
+        "tests/test_bucket_lifecycle.mojo",
+        "tests/test_flags.mojo",
+        "tests/test_leak_check.mojo",
+        "tests/test_no_endpoint_in_messages.mojo",
+        "tests/test_store_choice.mojo",
+        "tests/test_unclosed.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

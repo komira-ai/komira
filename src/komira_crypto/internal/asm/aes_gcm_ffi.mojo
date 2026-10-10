@@ -182,7 +182,7 @@ def _evp_aead_aes_128_gcm() -> _FfiHandle:
     # EVP_AEAD_CTX_new. MutExternalOrigin is the FFI-POD carve-out
     # shape for a static library-owned handle.
     return external_call[
-        "EVP_aead_aes_128_gcm", _FfiHandle
+        "komira_awslc_EVP_aead_aes_128_gcm", _FfiHandle
     ]()
 
 
@@ -191,7 +191,7 @@ def _evp_aead_aes_256_gcm() -> _FfiHandle:
     """Return AWS-LC's AES-256-GCM method singleton."""
     # SAFETY: Same as _evp_aead_aes_128_gcm above.
     return external_call[
-        "EVP_aead_aes_256_gcm", _FfiHandle
+        "komira_awslc_EVP_aead_aes_256_gcm", _FfiHandle
     ]()
 
 
@@ -269,7 +269,7 @@ struct AesGcmCtx[KEY_SIZE: Int](Movable, Deinitable):
         # (canonical FFI-boundary shape).
         var key_ptr = _span_ptr_mut(key)
         self._ctx = external_call[
-            "EVP_AEAD_CTX_new",
+            "komira_awslc_EVP_AEAD_CTX_new",
             _FfiHandle,
             _FfiHandle,  # method
             _FfiByte,     # key
@@ -351,7 +351,7 @@ struct AesGcmCtx[KEY_SIZE: Int](Movable, Deinitable):
         # coercion via _span_ptr_mut suppresses Mojo's noalias inference
         # so the in==out alias is accepted.
         var rc = external_call[
-            "EVP_AEAD_CTX_seal",
+            "komira_awslc_EVP_AEAD_CTX_seal",
             Int,
             _FfiHandle,  # ctx
             _FfiByte,     # out
@@ -376,7 +376,7 @@ struct AesGcmCtx[KEY_SIZE: Int](Movable, Deinitable):
             UInt(len(aad)),
         )
         if rc != 1:
-            raise Error("AesGcm.seal_in_place: EVP_AEAD_CTX_seal failed")
+            raise Error("AesGcm.seal_in_place: EVP_AEAD_CTX_seal failed")  # cov: unreachable seal fails only on arguments fixed here (key, nonce, tag sizes) or a plaintext of tens of GiB
 
     @always_inline
     def open_in_place[o: Origin[mut=True]](
@@ -435,7 +435,7 @@ struct AesGcmCtx[KEY_SIZE: Int](Movable, Deinitable):
         # All buffers caller-owned; AWS-LC retains no pointer past the
         # call. MutExternalOrigin coercion suppresses noalias inference.
         var rc = external_call[
-            "EVP_AEAD_CTX_open",
+            "komira_awslc_EVP_AEAD_CTX_open",
             Int,
             _FfiHandle,
             _FfiByte,
@@ -477,7 +477,7 @@ struct AesGcmCtx[KEY_SIZE: Int](Movable, Deinitable):
         # Null-check uses `Int(ptr) == 0`.
         if Int(self._ctx) != 0:
             external_call[
-                "EVP_AEAD_CTX_free",
+                "komira_awslc_EVP_AEAD_CTX_free",
                 NoneType,
                 _FfiHandle,
             ](self._ctx)

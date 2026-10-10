@@ -1,0 +1,48 @@
+# proto-message: kci.resource.v1.ResourceList
+resource {
+  id: "images"
+  retention: KEEP
+  registry {
+    format: OCI
+  }
+}
+resource {
+  id: "builder"
+  uses {
+    target {
+      resource: "images"
+    }
+    access: WRITE
+  }
+  container_job {
+    image {
+      digest: "sha256:5e1f0a22"
+    }
+    env {
+      key: "REGISTRY"
+      value {
+        ref {
+          resource: "images"
+          standard: ADDRESS
+        }
+      }
+    }
+  }
+}
+resource {
+  id: "puller"
+  service_account {
+  }
+}
+resource {
+  id: "pull-images"
+  grant {
+    principal {
+      resource: "puller"
+    }
+    target {
+      resource: "images"
+    }
+    access: READ
+  }
+}

@@ -156,6 +156,25 @@ def test_unknown_name_raises_view_not_found() raises:
         raised = msg.find("ViewNotFound: 'typo'") >= 0
     assert_true(raised)
 
+def test_registered_name_with_an_empty_slot_raises() raises:
+    """A name mapped to a registry slot that holds no plan (the registry's
+    own invariant broken) raises `ViewNotFound` with the name; the process
+    keeps running.
+
+    Catches: the empty slot read with `Optional.value()`, which aborts the
+    process instead of raising a catchable Error."""
+    var reg = _Registry()
+    reg.add("v", _scan("v.parquet"))
+    reg.idx["gone"] = len(reg.slab)
+    reg.slab.append(Optional[LogicalPlan](None))
+    var raised = False
+    try:
+        _ = view_resolution_pass(_ref("gone"), reg.slab, reg.idx)
+    except e:
+        raised = String(e).find("ViewNotFound: 'gone'") >= 0
+    assert_true(raised)
+
+
 
 # =============================================================================
 # Chains, the depth limit, cycles
@@ -242,7 +261,7 @@ def test_same_view_twice_in_one_plan_is_not_a_cycle() raises:
 
 
 def _wrap(kind: Int, var child: LogicalPlan) raises -> LogicalPlan:
-    """`child` under one node of the kind numbered `kind` (0..10); kinds 9
+    """`child` under one node of the kind numbered `kind` (0..11); kinds 9
     and 10 put `child` on the right of a two-input node with a scan on the
     left, and kind 11 puts it second in a Union."""
     var desc = List[Bool]()
@@ -381,6 +400,7 @@ def main() raises:
     test_registry_view_is_inlined()
     test_cte_binding_shadows_a_registered_view()
     test_unknown_name_raises_view_not_found()
+    test_registered_name_with_an_empty_slot_raises()
     test_chain_of_sixteen_resolves_and_seventeen_raises()
     test_cycle_raises_before_the_depth_limit()
     test_same_view_twice_in_one_plan_is_not_a_cycle()

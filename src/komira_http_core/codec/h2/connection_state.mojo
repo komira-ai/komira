@@ -99,6 +99,11 @@ struct H2PendingRequest(Movable, Deinitable):
     # GrpcDispatch seam without re-scanning the headers list.
     var body: List[UInt8]
     var content_type: String
+    # The `GrpcDispatch.grpc_now_ns` reading taken when the HEADERS block
+    # completed (0 for a non-gRPC request). The END_STREAM dispatch computes
+    # the call's grpc-timeout deadline from it and the saved `headers`, so
+    # the time the body took to arrive counts against the deadline.
+    var arrival_ns: UInt64
 
 
 # =============================================================================
@@ -223,6 +228,9 @@ struct H2ConnectionState(Movable, Deinitable):
     var recv_fc: RecvFlowController
     var recv_buf: List[UInt8]
     var pending_out: List[UInt8]
+    # Leading bytes of `pending_out` that `prepend_out_bytes` must not
+    # overtake (see `pin_out_bytes`).
+    var out_pinned: Int
     var max_frame_size_peer: Int
     var max_frame_size_local: Int
     var max_concurrent_streams_peer: UInt32
@@ -246,6 +254,7 @@ struct H2ConnectionState(Movable, Deinitable):
         self.recv_fc = RecvFlowController()
         self.recv_buf = List[UInt8]()
         self.pending_out = List[UInt8]()
+        self.out_pinned = 0
         self.max_frame_size_peer = MAX_FRAME_PAYLOAD_DEFAULT
         self.max_frame_size_local = MAX_FRAME_PAYLOAD_DEFAULT
         self.max_concurrent_streams_peer = UInt32(100)
@@ -378,28 +387,36 @@ struct H2ConnectionState(Movable, Deinitable):
         Use prepend_out_bytes(...) ONLY for session-terminating frames
         (GOAWAY) and stream-refusing frames (RST_STREAM(REFUSED_STREAM))
         that the protocol semantics permit to bypass FIFO.
+
+        The bytes go in after the pinned prefix (`pin_out_bytes`), not at
+        offset 0: the server's connection preface (its first SETTINGS,
+        RFC 9113 §3.4) and the unwritten tail of a partial write are never
+        overtaken.
         """
-        var m = len(bytes)
+        var at = self.out_pinned
         var n = len(self.pending_out)
-        var new_buf = List[UInt8]()
-        # Reserve approximate capacity to avoid repeated grow.
-        # (List doesn't have reserve in 1.0.0b1; repeated append is OK
-        # at this size budget.)
-        var i = 0
-        while i < m:
-            new_buf.append(bytes[i])
-            i = i + 1
-        var j = 0
-        while j < n:
-            new_buf.append(self.pending_out[j])
-            j = j + 1
+        var new_buf = List[UInt8](capacity=n + len(bytes))
+        new_buf.extend(Span(self.pending_out)[0:at])
+        new_buf.extend(Span(bytes))
+        new_buf.extend(Span(self.pending_out)[at:n])
         swap(self.pending_out, new_buf)
 
+    def pin_out_bytes(mut self):
+        """Pin every byte now queued: a later `prepend_out_bytes` goes in
+        behind them. Two callers need this. The server preface (its first
+        SETTINGS frame) must be the first frame on the wire (RFC 9113
+        §3.4). And the unwritten tail of a partial write may begin in the
+        middle of a frame, which the TLS layer also expects to be offered
+        again unchanged; a frame put in front of it would corrupt the
+        framing. `take_out_bytes` clears the pin."""
+        self.out_pinned = len(self.pending_out)
+
     def take_out_bytes(mut self) -> List[UInt8]:
-        """Move-out the outbound staging buffer. Caller writes the bytes
-        to the TLS stream then drops the returned List."""
+        """Move-out the outbound staging buffer and clear the pin. Caller
+        writes the bytes to the TLS stream then drops the returned List."""
         var out = List[UInt8]()
         swap(out, self.pending_out)
+        self.out_pinned = 0
         return out^
 
     def find_stream_idx(self, stream_id: UInt32) -> Int:
@@ -608,6 +625,7 @@ struct H2ConnectionState(Movable, Deinitable):
         var method_str: String,
         var path_str: String,
         var content_type: String = String(""),
+        arrival_ns: UInt64 = UInt64(0),
     ):
         """Stage a deferred request on the pending-requests side table.
         Caller must also set `streams[idx].has_pending_request = True`.
@@ -624,6 +642,7 @@ struct H2ConnectionState(Movable, Deinitable):
                 path_str=path_str^,
                 body=List[UInt8](),
                 content_type=content_type^,
+                arrival_ns=arrival_ns,
             )
         )
 
@@ -662,6 +681,7 @@ struct H2ConnectionState(Movable, Deinitable):
                 path_str=String(""),
                 body=List[UInt8](),
                 content_type=String(""),
+                arrival_ns=UInt64(0),
             )
         var out = self.pending_requests.swap_remove(idx)
         return out^

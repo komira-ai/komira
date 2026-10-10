@@ -4,6 +4,7 @@ from covcheck.analyze import FORMAT_COBERTURA, FORMAT_LCOV, Analysis, Input, Opt
 from covcheck.paths import RepoFiles, repo_files_of
 from covcheck.ratchet import Ratchet, parse_ratchet
 from covcheck.result import package_json
+from covcheck.stats import is_info_package
 from covcheck.text import render_bp
 
 # The one computation behind `report` and `gate`: merging reports, test
@@ -97,6 +98,40 @@ def test_test_sources_left_out_by_default() raises:
     assert_equal(b.packages[0].line_hit, 1)
 
 
+def test_named_test_sources_left_out() raises:
+    # A welded test outside <package>/tests/ (the gate's --test-source) is
+    # left out like one under it: counted as a test source, not measured,
+    # and not a file no test compiled. Without the option it is source.
+    var l = List[String]()
+    l.append("src/alpha/BUCK")
+    l.append("src/alpha/a.mojo")
+    l.append("src/alpha/wire/tests/test_w.mojo")
+    l.append("src/alpha/test_top.mojo")
+    var repo = repo_files_of(l)
+    var s = _sources()
+    s.texts[String("src/alpha/wire/tests/test_w.mojo")] = String("a\nb\n")
+    s.texts[String("src/alpha/test_top.mojo")] = String("a\nb\nc\n")
+    var r = _lcov(String(
+        "SF:src/alpha/a.mojo\nDA:1,1\nend_of_record\nSF:src/alpha/wire/tests/test_w.mojo\nDA:1,1\nDA:2,0\nend_of_record\n"
+    ))
+    var o = Options()
+    o.only_package = String("src/alpha")
+    o.target_bp = 0
+    var plain = analyze(r, _none(), repo, Ratchet(), s, o)
+    assert_equal(plain.excluded_test_files, 0)
+    assert_equal(plain.packages[0].line_found, 6)
+    assert_equal(plain.packages[0].unmeasured_files, 1)
+    o.test_sources[String("src/alpha/wire/tests/test_w.mojo")] = True
+    o.test_sources[String("src/alpha/test_top.mojo")] = True
+    var named = analyze(r, _none(), repo, Ratchet(), s, o)
+    assert_equal(named.excluded_test_files, 1)
+    assert_equal(named.packages[0].line_found, 1)
+    assert_equal(named.packages[0].line_hit, 1)
+    assert_equal(named.packages[0].unmeasured_files, 0)
+    o.include_tests = True
+    assert_equal(analyze(r, _none(), repo, Ratchet(), s, o).packages[0].line_found, 6)
+
+
 def test_basis_points_round_down() raises:
     var a = _run(_lcov(String("SF:src/alpha/a.mojo\nDA:1,1\nDA:2,1\nDA:3,0\nend_of_record\n")), _none(), _sources(), Options())
     assert_equal(a.packages[0].line_bp(), 6666)
@@ -144,9 +179,9 @@ def test_mutants_score_and_survivors() raises:
     assert_equal(p.error, 1)
     assert_equal(p.mutation_bp(), 2500)
     assert_equal(a.ignored_mutants, 1)
-    assert_equal(_kinds(a), "MissingRow:line MutantSurvived")
-    assert_equal(a.findings[1].path, "src/alpha/a.mojo")
-    assert_equal(a.findings[1].line, 2)
+    assert_equal(_kinds(a), "BranchNotMeasured:branch MissingRow:line MutantSurvived")
+    assert_equal(a.findings[2].path, "src/alpha/a.mojo")
+    assert_equal(a.findings[2].line, 2)
 
 
 def test_target_and_branch_na() raises:
@@ -155,10 +190,11 @@ def test_target_and_branch_na() raises:
     o.target_bp = 5000
     var a = _run(_lcov(t), _none(), _sources(), o)
     assert_equal(a.packages[0].branch_bp(), -1)
-    assert_equal(_kinds(a), "MissingRow:line")
+    # No branch record: n/a, and not measured, which no target accepts.
+    assert_equal(_kinds(a), "BranchNotMeasured:branch MissingRow:line")
     o.target_bp = 5001
     var b = _run(_lcov(t), _none(), _sources(), o)
-    assert_equal(_kinds(b), "BelowTarget:line MissingRow:line")
+    assert_equal(_kinds(b), "BelowTarget:line BranchNotMeasured:branch MissingRow:line")
 
 
 def test_conclusion_per_mode() raises:
@@ -170,11 +206,54 @@ def test_conclusion_per_mode() raises:
     assert_equal(_run(t, _none(), _sources(), o).conclusion, "neutral")
     o.mode = String("enforce")
     assert_equal(_run(t, _none(), _sources(), o).conclusion, "failure")
-    var clean = _lcov(String("SF:src/alpha/a.mojo\nDA:1,1\nend_of_record\n"))
-    var r = parse_ratchet(String("src/alpha\t10000\t-\n"), String("r.tsv"))
+    var clean = _lcov(String("SF:src/alpha/a.mojo\nDA:1,1\nBRDA:1,0,0,1\nBRDA:1,0,1,1\nend_of_record\n"))
+    var r = parse_ratchet(String("src/alpha\t10000\t10000\n"), String("r.tsv"))
     var ok = analyze(clean, _none(), _repo(), r, _sources(), o)
     assert_equal(len(ok.findings), 0)
     assert_equal(ok.conclusion, "success")
+
+
+def test_branch_not_measured() raises:
+    # Every line covered, a ratchet row, no branch record (kcov's Cobertura
+    # has none): the one finding is BranchNotMeasured, so enforce fails and
+    # census lists it; branch is n/a, never read as meeting the target.
+    var t = _lcov(String("SF:src/alpha/a.mojo\nDA:1,1\nDA:2,1\nend_of_record\n"))
+    var r = parse_ratchet(String("src/alpha\t10000\t-\n"), String("r.tsv"))
+    var o = Options()
+    o.mode = String("enforce")
+    var a = analyze(t, _none(), _repo(), r, _sources(), o)
+    assert_equal(_kinds(a), "BranchNotMeasured:branch")
+    assert_equal(a.packages[0].line_bp(), 10000)
+    assert_equal(a.packages[0].branch_bp(), -1)
+    assert_equal(a.findings[0].bound, 10000)
+    assert_equal(a.findings[0].measured, -1)
+    assert_equal(a.conclusion, "failure")
+    o.mode = String("census")
+    var c = analyze(t, _none(), _repo(), r, _sources(), o)
+    assert_equal(_kinds(c), "BranchNotMeasured:branch")
+    assert_equal(c.conclusion, "neutral")
+    # The gate's findings are the report's.
+    o.only_package = String("src/alpha")
+    assert_equal(_kinds(analyze(t, _none(), _repo(), r, _sources(), o)), "BranchNotMeasured:branch")
+    # A branch record makes it measured, even when a marker then takes the
+    # branch out of the count (branch n/a, but measured and exempted).
+    var s = _sources()
+    s.texts[String("src/alpha/a.mojo")] = String("a\nb  # cov: unreachable only on a corrupt heap\nc\nd\n")
+    var e = _lcov(String("SF:src/alpha/a.mojo\nDA:1,1\nDA:2,1\nBRDA:2,0,0,0\nBRDA:2,0,1,1\nend_of_record\n"))
+    var x = analyze(e, _none(), _repo(), parse_ratchet(String("src/alpha\t10000\t-\n"), String("r.tsv")), s, Options())
+    assert_equal(x.packages[0].branch_found, 0)
+    assert_true(_kinds(x).find("BranchNotMeasured") < 0, _kinds(x))
+    # With no target there is nothing to fall short of; a package with no
+    # line record is NotMeasured, not BranchNotMeasured as well.
+    var z = Options()
+    z.target_bp = 0
+    assert_equal(_kinds(analyze(t, _none(), _repo(), r, _sources(), z)), "")
+    # Any target above 0 asks for branches: 1 basis point is enough.
+    z.target_bp = 1
+    assert_equal(_kinds(analyze(t, _none(), _repo(), r, _sources(), z)), "BranchNotMeasured:branch")
+    var g = Options()
+    g.only_package = String("src/beta")
+    assert_equal(_kinds(analyze(t, _none(), _repo(), r, _sources(), g)), "BelowTarget:line MissingRow:line NotMeasured:line UnmeasuredFile")
 
 
 def test_gate_numbers_equal_the_report() raises:
@@ -239,7 +318,7 @@ def test_gate_on_a_package_with_no_data_fails() raises:
     var m = List[Input]()
     m.append(Input(String("mutants"), String(""), String("m.tsv"), String("src/beta/c.mojo\t1\tkilled\top\td\n")))
     var b = _run(_lcov(String("SF:src/alpha/a.mojo\nDA:1,1\nend_of_record\n")), m, _sources(), Options())
-    assert_equal(_kinds(b), "MissingRow:line NotMeasured:line")
+    assert_equal(_kinds(b), "BranchNotMeasured:branch MissingRow:line NotMeasured:line")
     # With no target there is nothing to fall short of.
     var o0 = Options()
     o0.target_bp = 0
@@ -295,9 +374,10 @@ def test_missing_source_is_an_error() raises:
 
 
 def test_enforce_fails_on_a_single_finding() raises:
-    # Fully covered but no ratchet row: exactly one finding, and one finding
-    # is enough for `failure` in enforce mode (neutral stays neutral).
-    var t = _lcov(String("SF:src/alpha/a.mojo\nDA:1,1\nend_of_record\n"))
+    # Fully covered, its branch too, but no ratchet row: exactly one
+    # finding, and one finding is enough for `failure` in enforce mode
+    # (neutral stays neutral).
+    var t = _lcov(String("SF:src/alpha/a.mojo\nDA:1,1\nBRDA:1,0,0,1\nend_of_record\n"))
     var o = Options()
     o.mode = String("enforce")
     var a = _run(t, _none(), _sources(), o)
@@ -323,14 +403,122 @@ def test_unmapped_mutant_path_is_an_error() raises:
     assert_true(raised)
 
 
+def test_a_floor_holds_in_every_mode() raises:
+    # A ratchet floor is the one finding that fails in census and neutral
+    # mode too (ratchet.mojo; README.md, "The ratchet"): line 50.00% under a
+    # floor of 50.01% is a Regression and the conclusion is failure in every
+    # mode; at its floor, or above it, census stays neutral. A branch floor
+    # holds the same way, and so does a floor whose package measured nothing.
+    var t = _lcov(String("SF:src/alpha/a.mojo\nDA:1,1\nDA:2,0\nBRDA:1,0,0,1\nBRDA:1,0,1,0\nend_of_record\n"))
+    var o = Options()
+    o.target_bp = 0
+    var modes = List[String]()
+    modes.append(String("census"))
+    modes.append(String("neutral"))
+    modes.append(String("enforce"))
+    for i in range(len(modes)):
+        o.mode = modes[i]
+        var below = analyze(t, _none(), _repo(), parse_ratchet(String("src/alpha\t5001\t5000\n"), String("r.tsv")), _sources(), o)
+        assert_equal(_kinds(below), "Regression:line", modes[i])
+        assert_equal(below.conclusion, "failure", modes[i])
+        var branch = analyze(t, _none(), _repo(), parse_ratchet(String("src/alpha\t5000\t5001\n"), String("r.tsv")), _sources(), o)
+        assert_equal(_kinds(branch), "Regression:branch", modes[i])
+        assert_equal(branch.conclusion, "failure", modes[i])
+    for i in range(2):
+        o.mode = modes[i]
+        for floor in [String("5000"), String("4999")]:
+            var at = analyze(t, _none(), _repo(), parse_ratchet(String("src/alpha\t") + floor + String("\t5000\n"), String("r.tsv")), _sources(), o)
+            assert_equal(len(at.findings), 0, modes[i] + floor)
+            assert_equal(at.conclusion, "neutral", modes[i] + floor)
+    # No data for a package whose row has a floor: failure in census too.
+    o.mode = String("census")
+    o.only_package = String("src/alpha")
+    var gone = analyze(_lcov(String("SF:src/beta/c.mojo\nDA:1,1\nend_of_record\n")), _none(), _repo(), parse_ratchet(String("src/alpha\t9000\t-\n"), String("r.tsv")), _sources(), o)
+    assert_true(_kinds(gone).find("Regression:line") >= 0, _kinds(gone))
+    assert_equal(gone.conclusion, "failure")
+
+
+def test_info_packages() raises:
+    # A test-only package's findings are information (step 8): out of
+    # `findings`, so out of the conclusion; a directory covers itself and
+    # what is under it, at a segment boundary.
+    var dirs = List[String]()
+    dirs.append("src/tests")
+    assert_true(is_info_package(String("src/tests"), dirs))
+    assert_true(is_info_package(String("src/tests/e2e/komira_x_e2e"), dirs))
+    assert_true(not is_info_package(String("src/testsuite"), dirs))
+    assert_true(not is_info_package(String("src/komira_x"), dirs))
+    assert_true(not is_info_package(String("(root)"), dirs))
+    var t = _lcov(String("SF:src/alpha/a.mojo\nDA:1,0\nend_of_record\nSF:src/beta/c.mojo\nDA:1,0\nend_of_record\n"))
+    var o = Options()
+    o.mode = String("enforce")
+    o.info_packages.append("src/beta")
+    var a = _run(t, _none(), _sources(), o)
+    assert_equal(_kinds(a), "BelowTarget:line BranchNotMeasured:branch MissingRow:line")
+    assert_equal(len(a.info_findings), 3)
+    for i in range(len(a.findings)):
+        assert_equal(a.findings[i].package, "src/alpha")
+    for i in range(len(a.info_findings)):
+        assert_equal(a.info_findings[i].package, "src/beta")
+    assert_equal(len(a.info_packages), 1)
+    assert_equal(a.info_packages[0], "src/beta")
+    assert_equal(len(a.packages), 2)
+    assert_equal(a.conclusion, "failure")
+    o.info_packages.append("src/alpha")
+    var b = _run(t, _none(), _sources(), o)
+    assert_equal(len(b.findings), 0)
+    assert_equal(len(b.info_findings), 6)
+    assert_equal(b.conclusion, "success")
+    # A row a test-only package has: its Regression is information too,
+    # and the proposal raises no floor and adds no row for it.
+    var r = parse_ratchet(String("src/beta\t9000\t-\n"), String("r.tsv"))
+    var o2 = Options()
+    o2.mode = String("enforce")
+    o2.info_packages.append("src/beta")
+    var c = analyze(t, _none(), _repo(), r, _sources(), o2)
+    var info = String("")
+    for i in range(len(c.info_findings)):
+        info += c.info_findings[i].kind + String(" ")
+    assert_true(info.find("Regression") >= 0, info)
+    for i in range(len(c.findings)):
+        assert_true(c.findings[i].package != "src/beta")
+    # alpha gets its proposed row; beta keeps its row as it was, not
+    # lowered to the 0% measured nor raised.
+    assert_equal(len(c.proposal.rows), 2)
+    assert_equal(c.proposal.rows[0].package, "src/alpha")
+    assert_equal(c.proposal.rows[1].package, "src/beta")
+    assert_equal(c.proposal.rows[1].line_floor, 9000)
+    # With no row: a test-only package gets none proposed.
+    var e = analyze(t, _none(), _repo(), Ratchet(), _sources(), o2)
+    assert_equal(len(e.proposal.rows), 1)
+    assert_equal(e.proposal.rows[0].package, "src/alpha")
+    o2.info_packages = List[String]()
+    var d = analyze(t, _none(), _repo(), r, _sources(), o2)
+    var kinds = String("")
+    for i in range(len(d.findings)):
+        kinds += d.findings[i].package + String(":") + d.findings[i].kind + String(" ")
+    assert_true(kinds.find("src/beta:Regression") >= 0, kinds)
+    # In census mode a Regression fails the conclusion (step 10), but not
+    # a test-only package's: it is out of `findings`.
+    var o3 = Options()
+    o3.mode = String("census")
+    o3.info_packages.append("src/beta")
+    assert_equal(analyze(t, _none(), _repo(), r, _sources(), o3).conclusion, "neutral")
+    o3.info_packages = List[String]()
+    assert_equal(analyze(t, _none(), _repo(), r, _sources(), o3).conclusion, "failure")
+
+
 def main() raises:
     test_two_cobertura_inputs_sum_per_line()
     test_test_sources_left_out_by_default()
+    test_named_test_sources_left_out()
     test_basis_points_round_down()
     test_exemptions_change_the_counts_and_find_stale_and_reasonless()
     test_mutants_score_and_survivors()
     test_target_and_branch_na()
     test_conclusion_per_mode()
+    test_a_floor_holds_in_every_mode()
+    test_branch_not_measured()
     test_enforce_fails_on_a_single_finding()
     test_gate_numbers_equal_the_report()
     test_gate_on_a_package_with_no_data_fails()
@@ -339,4 +527,5 @@ def main() raises:
     test_unmapped_mutant_path_is_an_error()
     test_outside_files_are_counted_once()
     test_missing_source_is_an_error()
+    test_info_packages()
     print("test_analyze: PASS")

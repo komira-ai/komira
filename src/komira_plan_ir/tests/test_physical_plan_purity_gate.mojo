@@ -6,7 +6,7 @@
 # The physical plan must not carry a logical one: that is the precondition for
 # shipping the optimizer and the engine as separate binaries.
 # `SegmentDescPod` can reach a whole `LogicalPlan` through
-# `Expr._corr_subq -> CorrelatedSubqueryData.inner_plan`. Without this gate the
+# `Expr._corr_subq -> CorrelatedSubqueryData._plan`. Without this gate the
 # property rests on a dynamic invariant (`flatten_dependent_joins` leaves zero
 # `EXPR_CORRELATED_SUBQUERY` nodes) that an unchecked `@extern` seam cannot
 # carry.
@@ -14,7 +14,7 @@
 # ⛔ WHAT GOES RED WITHOUT THE GATE. Every refusal case here calls the door and
 # requires it to RAISE; against no gate at all the module does not exist and
 # this file does not compile, and against a gate that walks only the tags the
-# fail-open walker walks, the ELEVEN container cases in
+# fail-open walker walks, the TWELVE non-WHEN container cases in
 # `test_gate_finds_a_subquery_under_every_container_a_fail_open_walk_skips`
 # return False and this file fails.
 #
@@ -29,11 +29,12 @@
 # `test_walker_has_an_arm_for_every_expr_tag` instantiates EVERY tag id in
 # `[0, EXPR_TAG_COUNT)` and requires the walk to answer rather than raise, and
 # `test_walker_raises_on_a_tag_it_does_not_model` proves that raise arm is live
-# rather than unreachable. Adding `EXPR_TAG_COUNT = 25` without an arm here
-# turns the first one red.
+# rather than unreachable. Raising `EXPR_TAG_COUNT` for a new tag without an
+# arm here turns the first one red.
 #
-# What this file does NOT prove: that `segment_cutter.cut_and_admit` still CALLS
-# the door. That is asserted end-to-end by `komira_engine_dispatch`'s tests.
+# What this file does NOT prove: that anything CALLS the door. Its intended
+# caller, `segment_cutter.cut_and_admit`, is not in this tree, and nothing in
+# this tree calls the door except this file.
 # =============================================================================
 
 from std.memory import OwnedPointer
@@ -51,6 +52,9 @@ from komira_plan_expr.expr import (
     EXPR_TAG_COUNT,
     EXTRACT_YEAR,
     MATH2_POW,
+    MATH_SQRT,
+    STRFN_UPPER,
+    STRFNN_CONCAT,
     STR_LIKE,
 )
 from komira_plan_expr.scalar_value import ScalarValue
@@ -186,7 +190,8 @@ def test_walker_has_an_arm_for_every_expr_tag() raises:
     the whole point — a hole in a safety check must be loud — and this test is
     what makes it loud AT DEVELOPMENT TIME instead of on a customer's plan.
 
-    Goes red the moment tag 24 is added to `expr.mojo` without an arm here."""
+    Goes red the moment `EXPR_TAG_COUNT` grows past 27 for a new tag in
+    `expr.mojo` that has no arm here."""
     for t in range(EXPR_TAG_COUNT):
         var e = Expr(UInt8(t))
         var got = _walk(e)
@@ -220,15 +225,17 @@ def test_walker_raises_on_a_tag_it_does_not_model() raises:
 
 
 # ===========================================================================
-# THE EXPRESSION WALKER — the containers a fail-open walk skips.
+# THE EXPRESSION WALKER — a subquery hidden under each container.
 # ===========================================================================
 
 
 def test_gate_finds_a_subquery_under_every_container_a_fail_open_walk_skips() raises:
-    """`flatten_dependent_joins._expr_contains_correlated_subquery` models 8 of
-    the 24 tags and returns False for the rest. Each case below hides the SAME
-    `EXISTS (subquery)` under one of the containers it does not descend; every
-    one of them is False under that walk and must be True here.
+    """`flatten_dependent_joins._expr_contains_correlated_subquery` models 9 of
+    the 27 tags and returns False for the rest. Each case below hides the SAME
+    `EXISTS (subquery)` under a container. The three `EXPR_WHEN` cases (the
+    condition, the result, the default) are ones that walk also descends;
+    every other case is under a container it does not descend, is False under
+    that walk, and must be True here.
 
     This is the test that would have to be deleted, not merely adjusted, to
     reuse the fail-open walker as the gate."""
@@ -257,8 +264,8 @@ def test_gate_finds_a_subquery_under_every_container_a_fail_open_walk_skips() ra
         "WHEN *default* must be descended",
     )
 
-    # EXPR_SUBSTRING / EXPR_REGEXP / EXPR_EXTRACT / EXPR_MATH_FN — one-child
-    # containers the fail-open walk has no arm for at all.
+    # EXPR_SUBSTRING / EXPR_REGEXP / EXPR_EXTRACT — one-child containers the
+    # fail-open walk has no arm for at all.
     assert_equal(
         _walk(Expr.substring(_corr(), 1, 2)), String("T"), "SUBSTRING child"
     )
@@ -296,6 +303,41 @@ def test_gate_finds_a_subquery_under_every_container_a_fail_open_walk_skips() ra
     assert_equal(
         _walk(Expr.json_extract_json(_corr(), String("$.a"))), String("T"),
         "JSON_EXTRACT parent",
+    )
+
+    # EXPR_MATH_FN / EXPR_STRING_FN — the one-child scalar function families.
+    assert_equal(
+        _walk(Expr.math_fn(MATH_SQRT, _corr())), String("T"), "MATH_FN child"
+    )
+    assert_equal(
+        _walk(Expr.string_fn(STRFN_UPPER, _corr())), String("T"),
+        "STRING_FN child",
+    )
+
+    # EXPR_STRING_FN_N — hidden in the THIRD argument, which is what catches an
+    # arm that reads a fixed number of arguments instead of looping over all.
+    var concat_args = List[Expr]()
+    concat_args.append(Expr.col_ref(String("a")))
+    concat_args.append(Expr.col_ref(String("b")))
+    concat_args.append(_corr())
+    assert_equal(
+        _walk(Expr.string_fn_n(STRFNN_CONCAT, concat_args^)), String("T"),
+        "STRING_FN_N third argument",
+    )
+
+    # EXPR_UDF_CALL — the UDF's one argument. `affine((SELECT ...))`.
+    assert_equal(
+        _walk(
+            Expr.udf_call(
+                String("affine"),
+                Optional[Int](7),
+                ArrowType.INT64,
+                ArrowType.INT64,
+                _corr(),
+            )
+        ),
+        String("T"),
+        "UDF_CALL child",
     )
 
     # And one the fail-open walker DOES model, so the fixture is not selecting
@@ -389,9 +431,9 @@ def test_door_refuses_a_subquery_on_the_pushed_parquet_filter() raises:
 
 
 def test_door_refuses_a_subquery_on_a_filter_op() raises:
-    """SITE 2 of 4: `ops[i].filter_predicate` — the site the cutter's PLAN_FILTER
-    arm writes verbatim from `FilterData.predicate`, i.e. the one a real
-    undecorrelated plan lands on."""
+    """SITE 2 of 4: `ops[i].filter_predicate`, which `MorselOp.filter` sets —
+    the field a filter predicate is held in, so the one an undecorrelated
+    `WHERE EXISTS (...)` would occupy."""
     var ops = Slab[MorselOp]()
     ops.append(MorselOp.filter(_corr()))
     var segs = List[SegmentDescPod]()
@@ -438,8 +480,8 @@ def test_door_refuses_a_subquery_in_a_project_expr_array() raises:
 
 
 def test_door_refuses_a_subquery_in_a_probe_residual() raises:
-    """SITE 4 of 4: `ops[i].probe_residual` — the non-equi join residual the
-    cutter carries onto the probe op."""
+    """SITE 4 of 4: `ops[i].probe_residual` — the non-equi join residual that
+    `MorselOp.join_probe_with_residual` sets on the probe op."""
     var ops = Slab[MorselOp]()
     ops.append(
         MorselOp.join_probe_with_residual(

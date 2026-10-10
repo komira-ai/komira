@@ -1,0 +1,18 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Must FAIL (test 38): ../../../functional/readme_examples/owner without
+# `readme = False`. README.md imports `unowned`, which :unowned_base does not
+# reach, so the README attached to :unowned_base by default fails its
+# `[tests][readme]` compile, naming the README line.
+mojo_library(
+    name = "unowned_base",
+    srcs = ["base/__init__.mojo"],
+    conda = False,
+)
+
+mojo_library(
+    name = "unowned",
+    srcs = ["top/__init__.mojo"],
+    conda = False,
+    deps = [":unowned_base"],
+)

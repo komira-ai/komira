@@ -255,13 +255,13 @@ def _spray_quic_configs() raises -> List[Int]:
     var i = 0
     while i < _SPRAY_CONFIGS:
         var cfg = external_call[
-            "s2n_config_new", UnsafePointer[NoneType, MutUntrackedOrigin]
+            "komira_s2n_config_new", UnsafePointer[NoneType, MutUntrackedOrigin]
         ]()
         if Int(cfg) != 0:
             # Enable QUIC on the new config -> its `quic_enabled` byte becomes 1.
             # If this config was handed the freed caller-config's page, the
             # dangling conn->config now reads quic_enabled == 1.
-            var _rc = external_call["s2n_config_enable_quic", Int32](cfg)
+            var _rc = external_call["komira_s2n_config_enable_quic", Int32](cfg)
             ptrs.append(Int(cfg))
         i = i + 1
     return ptrs^
@@ -276,7 +276,7 @@ def _free_sprayed_configs(ptrs: List[Int]):
             var raw = UnsafePointer[NoneType, MutUntrackedOrigin](
                 unsafe_from_address=p
             )
-            var _rc = external_call["s2n_config_free", Int32](raw)
+            var _rc = external_call["komira_s2n_config_free", Int32](raw)
         i = i + 1
 
 

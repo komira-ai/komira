@@ -85,15 +85,17 @@ CXX_TOOLCHAIN_ATTRS = dict(
 )
 
 def komira_cxx_toolchains(**overrides):
-    """Declare `:cxx` and `:python_bootstrap` in the calling package.
+    """Declare `:cxx`, `:cxx_no_default_deps` and `:python_bootstrap` in the calling package.
 
     The prelude's `cxx_library` looks its toolchain up as `toolchains//:cxx`,
     and configures a tool that needs `toolchains//:python_bootstrap`. This
     declares both: a C/C++ toolchain on zig's clang, and a Python bootstrap
     toolchain that refuses when run (workers have no Python; nothing komira
-    builds runs it). A repository that already has its own `:cxx` does not
-    call this. Each keyword in `overrides` replaces the `zig_cxx_toolchain`
-    attribute of that name (see CXX_TOOLCHAIN_ATTRS).
+    builds runs it), plus `:cxx_no_default_deps`, an alias of `:cxx` that
+    unconfigured queries need (see below). A repository that already has its
+    own `:cxx` does not call this, and declares its own `:cxx_no_default_deps`.
+    Each keyword in `overrides` replaces the `zig_cxx_toolchain` attribute of
+    that name (see CXX_TOOLCHAIN_ATTRS).
     """
     attrs = dict(CXX_TOOLCHAIN_ATTRS)
     attrs.update(overrides)
@@ -104,6 +106,20 @@ def komira_cxx_toolchains(**overrides):
         exec_compatible_with = _LINUX_X86_64,
         visibility = ["PUBLIC"],
         **attrs
+    )
+    # The prelude's C/C++ rules take their toolchain from a select whose
+    # other branch, never taken in a configured graph, is
+    # `toolchains//:cxx_no_default_deps` (prelude/decls/toolchains_common.bzl,
+    # `_cxx_toolchain`): the C/C++ toolchain without the default deps a
+    # repository's macros may add to every target. An unconfigured query
+    # (`buck2 uquery deps(...)`, `rdeps(...)`) follows every branch and fails
+    # on a label no package declares. `:cxx` adds no default deps, so the
+    # variant is `:cxx` itself; an alias adds no action, and configured builds
+    # never reach it, so no action digest changes.
+    native.toolchain_alias(
+        name = "cxx_no_default_deps",
+        actual = ":cxx",
+        visibility = ["PUBLIC"],
     )
     no_python_bootstrap_toolchain(
         name = "python_bootstrap",
@@ -146,12 +162,13 @@ PROTO_TOOLCHAIN_ATTRS = dict(
     db_plugin = "komira//tools/build/proto-codegen:protoc-gen-mojo-db",
     plugin = "komira//tools/build/proto-codegen:protoc-gen-mojo",
     protoc = "komira//tools/build/toolchains/proto:protoc",
+    routes_plugin = "komira//tools/build/proto-codegen:protoc-gen-mojo-routes",
 )
 
 def komira_proto_toolchains(**overrides):
     """Declare `:mojo_proto`, the toolchain of mojo_proto_library, in the calling package.
 
-    protoc 29.1, protoc-gen-mojo and protoc-gen-mojo-db, built from source with `:rust`. It
+    protoc 29.1, protoc-gen-mojo, protoc-gen-mojo-db and protoc-gen-mojo-routes, built from source with `:rust`. It
     states no execution constraint: a mojo_proto_library also precompiles the
     generated package, and one target has one execution platform, so code
     generation runs where the Mojo toolchain puts that target (the linux
@@ -186,8 +203,9 @@ def komira_toolchains(mojo = None, cxx = None, rust = None, proto = None, omit =
     or `mojo = {"darwin": ...}` for komira_mojo_toolchains, `cxx = {...}` for
     komira_cxx_toolchains, `rust = {...}`, `proto = {...}`. `omit` names the
     families the repository declares itself, e.g. `omit = ["cxx"]` to keep
-    its own `:cxx` and `:python_bootstrap`. `proto` builds its plugin with
-    `:rust`, so omitting `rust` needs a `:rust` of the repository's own.
+    its own `:cxx`, `:cxx_no_default_deps` and `:python_bootstrap`. `proto`
+    builds its plugin with `:rust`, so omitting `rust` needs a `:rust` of the
+    repository's own.
     Calling it with no arguments gives the same action digests as a
     standalone checkout.
     """

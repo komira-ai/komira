@@ -7,8 +7,9 @@
 # resolves through. A `IcebergRestTransport` trait — `get(request) ->
 # IcebergRestResponse` — so the whole REST resolve path is driveable with:
 #   * `HttpIcebergRestTransport[C]` — production: a real GET over the shipped
-#     `komira_http` `HttpClient[C]` (C = TlsConnector in prod), exactly the
-#     synchronous-per-call shape other komira HTTP transports use.
+#     `komira_http` `HttpClient[C]` (C = TlsConnector in prod; `http` over a
+#     plaintext connector), exactly the synchronous-per-call shape other
+#     komira HTTP transports use.
 #   * `ScriptedIcebergRestTransport` — test: returns SCRIPTED JSON responses in
 #     FIFO call order + records the request path AND the request's
 #     Authorization header of each call — so the loadTable falsifier can assert
@@ -46,14 +47,14 @@ from komira_http_core.transport.io_stream import Connector
 
 
 struct IcebergRestRequest(Movable, Deinitable):
-    """A ready-to-send Iceberg REST GET: the host, the https port, the absolute
+    """A ready-to-send Iceberg REST GET: the host, the port, the absolute
     request path (already percent-encoded), and the outgoing header set (which
     carries `Authorization: Bearer <token>` when a credential provider yielded
     one).
 
     Field layout:
       var host: String                 — the catalog host (e.g. `catalog.example.com`)
-      var port: UInt16                  — the https port (443)
+      var port: UInt16                  — the catalog port (443 by default)
       var path: String                  — the absolute request path
                                           (`/v1/config`, `/v1/{prefix}/namespaces/
                                           {ns}/tables/{tbl}`)
@@ -232,9 +233,11 @@ struct ScriptedIcebergRestTransport(
 # =============================================================================
 #
 # A real GET over the `HttpClient[C]` + a fresh `BlockingRuntime` per
-# call, the synchronous per-call shape (a
-# fresh connector, a synchronous `send_buffered`). C = a public-CA
-# `TlsConnector[KernelTcpConnector]` in prod.
+# call, the synchronous per-call shape (a fresh connector, a synchronous
+# `send_buffered`). C = a public-CA `TlsConnector[KernelTcpConnector]` in
+# prod. The URL's scheme follows the connector: `https` over a TLS connector,
+# `http` over a plaintext one (the HttpClient refuses any other pairing, so
+# the connector is the only source of the scheme that can be right).
 
 
 struct HttpIcebergRestTransport[C: Connector](
@@ -245,16 +248,28 @@ struct HttpIcebergRestTransport[C: Connector](
     HTTP connector `C` (TLS in prod). Reuses the HTTP spine entirely — reinvents
     nothing.
 
-    the connector factory is a `def () thin -> C` FFI-POD fn-ptr field
+    `mk_connector` makes the connector for each call; it may raise (building a
+    `TlsConnector` loads its `TlsConfig`, which raises). `request_timeout_us`
+    bounds each request between send-start and the parsed response head; 0
+    selects the HttpClient's default (`HttpClientConfig.defaults()`).
+
+    the connector factory is a `def () raises thin -> C` fn-ptr field
     (a code pointer: no heap, no wildcard origin). No owning pointer
     field."""
 
-    # The connector factory — a `thin` (non-raising, non-capturing) fn-ptr, the
+    # The connector factory — a `thin` (non-capturing) fn-ptr, the
     # plain-old-data fn-ptr field (a code pointer, no heap).
-    var _mk_connector: def () thin -> Self.C
+    var _mk_connector: def () raises thin -> Self.C
+    var _request_timeout_us: Int
 
-    def __init__(out self, mk_connector: def () thin -> Self.C):
+    def __init__(
+        out self,
+        mk_connector: def () raises thin -> Self.C,
+        *,
+        request_timeout_us: Int = 0,
+    ):
         self._mk_connector = mk_connector
+        self._request_timeout_us = request_timeout_us
 
     def get(
         mut self, request: IcebergRestRequest
@@ -266,19 +281,29 @@ struct HttpIcebergRestTransport[C: Connector](
                 String(request.header_names[i]),
                 String(request.header_values[i]),
             )
-        var url = Url.https(
-            String(request.host), request.port, String(request.path)
-        )
+        # Dial a fresh connector + drive one synchronous GET (one
+        # connector per call).
+        var connector = self._mk_connector()
+        # The scheme follows the connector. A plaintext connector sends the
+        # bearer token in cleartext: it is for loopback tests only.
+        var url: Url
+        if connector.is_tls():
+            url = Url.https(
+                String(request.host), request.port, String(request.path)
+            )
+        else:
+            url = Url.http(
+                String(request.host), request.port, String(request.path)
+            )
         var req = build_request_with_body[EmptyBody](
             HttpMethod(code=HTTP_METHOD_GET),
             url^,
             headers^,
             EmptyBody.new(),
         )
-        # Dial a fresh connector + drive one synchronous GET (one
-        # connector per call).
-        var connector = self._mk_connector()
-        var client = HttpClient[Self.C].with_defaults(connector^)
+        var client = HttpClient[Self.C].with_request_timeout_us(
+            connector^, self._request_timeout_us
+        )
         var rt = BlockingRuntime[NoopSink].new(NoopSink(_placeholder=UInt8(0)))
         ref reactor = rt.reactor()
         var cr = client.send_buffered[BlockingRuntime[NoopSink], EmptyBody](

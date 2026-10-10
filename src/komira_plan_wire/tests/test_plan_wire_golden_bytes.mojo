@@ -1049,7 +1049,7 @@ def _assert_frozen(name: String, var plan: LogicalPlan) raises:
     print("GOLDEN-END " + name)
 
     # --- LEG C: non-trivial -------------------------------------------------
-    # `WirePlanEnvelope{format_version:2}` alone is 2 bytes. A corpus of empty
+    # `WirePlanEnvelope{format_version:4}` alone is 2 bytes. A corpus of empty
     # plans would satisfy LEG A and LEG B and prove nothing.
     assert_true(
         len(bytes) > 16,
@@ -1130,7 +1130,7 @@ def _assert_frozen(name: String, var plan: LogicalPlan) raises:
     #
     # THE DIRECTION THE FORMAT RESTS ON. Legs A-C, and every round-trip test,
     # ask whether Mojo can read what Mojo wrote. But frontends in other
-    # languages — Excel, SQL, Python — are PRODUCERS. If the Mojo decoder can
+    # languages — TypeScript, SQL, Python — are PRODUCERS. If the Mojo decoder can
     # only read the Mojo encoder's dialect, "one language-agnostic
     # serializable plan" is false in the direction that matters most, and no
     # Mojo->Mojo test can see it.
@@ -1138,14 +1138,13 @@ def _assert_frozen(name: String, var plan: LogicalPlan) raises:
     # `<name>.canonical.hex` is protoc's OWN serialization of the structure
     # protoc decoded out of `<name>.hex`. It is not a re-spelling by us: it is
     # what the reference implementation emits, which is what a `protobuf`
-    # Python client, a `prost` Rust client or a `protobuf-net` Excel add-in
-    # would emit.
+    # Python client or a `prost` Rust client would emit.
     #
     # ⚠ AND IT IS NOT THE SAME BYTES. Over the whole corpus, the Mojo encoding
-    # is 44-58% LARGER than protoc's:
+    # is 40-76% LARGER than protoc's:
     #
-    #     scan 434/300 (+45%)   filter_over_scan 672/426 (+58%)
-    #     join 1063/736 (+44%)  aggregate        535/371 (+44%)
+    #     scan 430/296 (+45%)   filter_over_scan 660/414 (+59%)
+    #     join 1053/726 (+45%)  aggregate        529/365 (+45%)
     #
     # proto3 says a default-valued scalar MAY be omitted; protoc omits them and
     # this encoder writes them explicitly (`nullable: false`,
@@ -1169,8 +1168,8 @@ def _assert_frozen(name: String, var plan: LogicalPlan) raises:
         name
         + ": ★ LEG D — the Mojo DECODER cannot reconstruct this plan from the"
         + " bytes the REFERENCE protobuf implementation produces for it. A"
-        + " Python or Excel frontend that writes a plan writes THOSE bytes, not"
-        + " ours. This is the sentence 'Excel, SQL, Python and Mojo share one"
+        + " Python or TypeScript frontend that writes a plan writes THOSE bytes,"
+        + " not ours. This is the sentence 'TypeScript, SQL, Python and Mojo share one"
         + " plan' being false in the producer direction, and no Mojo->Mojo"
         + " round trip can see it.",
     )

@@ -26,19 +26,21 @@ Two layers produce a shipped artifact, and this document is about the first:
    the release machine.
 2. **The release machine** runs the build, then stages and publishes what it
    made, deploys it where it is a service, and validates the outcome in the
-   cell it deployed to. Its driver is `komira_ci`.
+   cell it deployed to. Its driver is `kci` (`kci run --stage <S>`, the
+   `src/kci_*` libraries). Today it builds and publishes; a DEPLOY step is
+   refused, and its design is [the DEPLOY step](deploy_step.md).
 
-Held, because the libraries that implement them are not part of this
-repository yet, and described here only so the build outputs below make
-sense:
+Conda packages of Mojo libraries ([releases](../releases.md)) and release
+channels (`src/kci_release_channel`: a channel is a publish destination and
+nothing else, with a name, a visibility, one repository per artifact type,
+and the one identity allowed to push to each) exist. Held, and described
+here only so the build outputs below make sense:
 
-- Conda packages and Python wheels of Mojo libraries, derived from the
-  libraries' build dependencies.
-- Release channels: a channel is a publish destination and nothing else, with
-  a name, a visibility, one repository per artifact type, and the one
-  identity allowed to push to each.
+- Python wheels of Mojo libraries: the artifact manifest reads a `PYTHON`
+  type, but no rule builds a wheel.
 - Copying an image between registries by digest, so that the bytes a later
-  channel serves are the bytes an earlier one validated.
+  channel serves are the bytes an earlier one validated: the library exists
+  (`komira_oci`), and no kci step calls it yet.
 - A version shared by every artifact of a release, and the steps of cutting
   it. See [releases](../releases.md) for what a version of komira is today.
 

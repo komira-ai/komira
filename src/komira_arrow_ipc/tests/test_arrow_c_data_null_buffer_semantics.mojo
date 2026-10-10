@@ -237,7 +237,7 @@ def _install_schema_release(mut s: CArrowSchema):
 # --- stream callbacks -------------------------------------------------------
 
 
-def _p_get_schema(stream: _OpaquePtr, out_schema: _CSchemaPtr) raises -> Int32:
+def _p_get_schema(stream: _OpaquePtr, out_schema: _CSchemaPtr) abi("C") -> Int32:
     """Hand back the prebuilt root schema by value.
 
     The struct is copied field-by-field rather than moved so the fixture keeps
@@ -260,7 +260,7 @@ def _p_get_schema(stream: _OpaquePtr, out_schema: _CSchemaPtr) raises -> Int32:
     return Int32(0)
 
 
-def _p_get_next(stream: _OpaquePtr, out_array: _CArrayPtr) raises -> Int32:
+def _p_get_next(stream: _OpaquePtr, out_array: _CArrayPtr) abi("C") -> Int32:
     """Deliver exactly one chunk, then the end-of-stream sentinel.
 
     ⚠ THE SENTINEL IS A RELEASED STRUCT, NOT AN EMPTY ONE. Per the C Stream
@@ -292,7 +292,7 @@ def _p_get_next(stream: _OpaquePtr, out_array: _CArrayPtr) raises -> Int32:
     return Int32(0)
 
 
-def _p_get_last_error(stream: _OpaquePtr) -> UnsafePointer[Int8, MutUntrackedOrigin]:
+def _p_get_last_error(stream: _OpaquePtr) abi("C") -> UnsafePointer[Int8, MutUntrackedOrigin]:
     _ = stream
     return _null_ptr[Int8, MutUntrackedOrigin]()
 

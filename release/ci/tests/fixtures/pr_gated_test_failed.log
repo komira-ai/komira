@@ -1,0 +1,57 @@
+2026-10-05T22:38:08.9121459Z sed [re_execute]
+2026-10-05T22:38:08.9122850Z [2026-10-05T22:37:58.929+00:00] Waiting on komira//src/kci_resource_proto:kci_resource_proto (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) -- mojo_build_test test_held_numbers_are_unused [re_execute]
+2026-10-05T22:38:08.9125219Z [2026-10-05T22:38:06.029+00:00] Waiting on komira//src/kci_resource_proto:kci_resource_proto (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) -- mojo_gated_test test_held_numbers_are_unused [re_upload]
+2026-10-05T22:38:08.9126771Z [2026-10-05T22:38:08.903+00:00] Action failed: komira//src/kci_resource_proto:kci_resource_proto (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (mojo_gated_test test_held_numbers_are_unused)
+2026-10-05T22:38:08.9128113Z [2026-10-05T22:38:08.903+00:00] Remote command returned non-zero exit code 1
+2026-10-05T22:38:08.9129067Z [2026-10-05T22:38:08.903+00:00] Remote action digest: '49ed415868235cd1a4a678df1d0e91f578fc67476cf1bdefe766bebdd42e0312:141'
+2026-10-05T22:38:08.9129957Z [2026-10-05T22:38:08.903+00:00] Stdout: <empty>
+2026-10-05T22:38:08.9130456Z [2026-10-05T22:38:08.903+00:00] Stderr:
+2026-10-05T22:38:08.9130933Z ==================================================================
+2026-10-05T22:38:08.9131877Z GATED TEST FAILED: komira//src/kci_resource_proto:kci_resource_proto:tests/test_held_numbers_are_unused.mojo (exit 1)
+2026-10-05T22:38:08.9132987Z The library's package is not produced until this test passes.
+2026-10-05T22:38:08.9133709Z ------------------------------------------------------------------ output
+2026-10-05T22:38:08.9134449Z test_held_numbers_are_unused: the held numbers, derived from resource.proto
+2026-10-05T22:38:08.9135107Z stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`
+2026-10-05T22:38:08.9135983Z Unhandled exception caught during execution: At tests/test_held_numbers_are_unused.mojo:238:17: AssertionError: `left == right` comparison failed:
+2026-10-05T22:38:08.9136569Z    left: 2
+2026-10-05T22:38:08.9136849Z   right: 0
+2026-10-05T22:38:08.9137363Z   reason: Resource uses held number 3
+2026-10-05T22:38:08.9137836Z Resource uses held number 14
+2026-10-05T22:38:08.9138060Z 
+2026-10-05T22:38:08.9138223Z ==================================================================
+2026-10-05T22:38:08.9138701Z [2026-10-05T22:38:08.903+00:00] Info:
+2026-10-05T22:38:08.9140149Z 
+2026-10-05T22:38:08.9140266Z [2026-10-05T22:38:08.905+00:00] Cache hits: 96%
+2026-10-05T22:38:08.9140633Z [2026-10-05T22:38:08.905+00:00] Commands: 49 (cached: 47, remote: 2, local: 0)
+2026-10-05T22:38:08.9141117Z [2026-10-05T22:38:08.905+00:00] Network: up 1.0MiB  down 71KiB  session GRPC-SESSION-ID
+2026-10-05T22:38:08.9141502Z [2026-10-05T22:38:08.906+00:00]
+2026-10-05T22:38:08.9141929Z [2026-10-05T22:38:08.906+00:00] BUILD ERRORS (1)
+2026-10-05T22:38:08.9142359Z [2026-10-05T22:38:08.906+00:00] The following actions failed during the execution of this command:
+2026-10-05T22:38:08.9143270Z [2026-10-05T22:38:08.906+00:00] Action failed: komira//src/kci_resource_proto:kci_resource_proto (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (mojo_gated_test test_held_numbers_are_unused)
+2026-10-05T22:38:08.9144093Z [2026-10-05T22:38:08.906+00:00] Remote command returned non-zero exit code 1
+2026-10-05T22:38:08.9144691Z [2026-10-05T22:38:08.906+00:00] Remote action digest: '49ed415868235cd1a4a678df1d0e91f578fc67476cf1bdefe766bebdd42e0312:141'
+2026-10-05T22:38:08.9145207Z [2026-10-05T22:38:08.906+00:00] Stdout: <empty>
+2026-10-05T22:38:08.9145485Z [2026-10-05T22:38:08.906+00:00] Stderr:
+2026-10-05T22:38:08.9145765Z ==================================================================
+2026-10-05T22:38:08.9146375Z GATED TEST FAILED: komira//src/kci_resource_proto:kci_resource_proto:tests/test_held_numbers_are_unused.mojo (exit 1)
+2026-10-05T22:38:08.9146949Z The library's package is not produced until this test passes.
+2026-10-05T22:38:08.9147636Z ------------------------------------------------------------------ output
+2026-10-05T22:38:08.9148255Z test_held_numbers_are_unused: the held numbers, derived from resource.proto
+2026-10-05T22:38:08.9148881Z stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`
+2026-10-05T22:38:08.9149731Z Unhandled exception caught during execution: At tests/test_held_numbers_are_unused.mojo:238:17: AssertionError: `left == right` comparison failed:
+2026-10-05T22:38:08.9150317Z    left: 2
+2026-10-05T22:38:08.9150504Z   right: 0
+2026-10-05T22:38:08.9150716Z   reason: Resource uses held number 3
+2026-10-05T22:38:08.9150995Z Resource uses held number 14
+2026-10-05T22:38:08.9151160Z 
+2026-10-05T22:38:08.9151301Z ==================================================================
+2026-10-05T22:38:08.9151603Z [2026-10-05T22:38:08.906+00:00] Info:
+2026-10-05T22:38:08.9152898Z 
+2026-10-05T22:38:08.9152991Z [2026-10-05T22:38:08.906+00:00]
+2026-10-05T22:38:08.9153220Z BUILD FAILED
+2026-10-05T22:38:08.9153696Z Failed to build 'komira//src/kci_resource_proto:kci_resource_proto (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)'
+2026-10-05T22:38:08.9154140Z 
+2026-10-05T22:38:08.9154255Z kci: FAILED (exit 4) stage pr
+2026-10-05T22:38:08.9154715Z kci: SELECTIVE run of stage pr (affected-by 3187a197e036e829cc559ab2ff95d09d16585081): FAILED -- not a full run
+2026-10-05T22:38:08.9166079Z ##[error]Process completed with exit code 4.
+2026-10-05T22:38:08.9234956Z ##[group]Run for f in "$RUNNER_TEMP"/kci-logs/*; do

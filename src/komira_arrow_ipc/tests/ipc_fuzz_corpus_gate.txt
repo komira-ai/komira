@@ -1,0 +1,31 @@
+# The reviewed verdicts of tests/test_ipc_fuzz_corpus.mojo on the pinned
+# arrow-testing IPC fuzz corpus (third_party/arrow-testing). One entry per
+# line; `#` lines and blank lines are ignored. File paths are under
+# arrow-testing's data/.
+#
+# ACCEPTED <mode> <file>: <reason>
+#   The (mode, file) decodes without an error, and the reason says why that
+#   is right. Shrink-only: a listed pair that now raises fails the test as
+#   STALE, and an unlisted pair that decodes fails it as ACCEPTED.
+#
+# NAMED <mode> <file>|<text>
+#   The file declares a buffer or metadata length of 1 GiB or more. The
+#   (mode, file) must raise with an error containing <text>, the check that
+#   compares the declared length with the bytes present and names it. This
+#   shows that check raised first, not that nothing was allocated before it.
+
+ACCEPTED nested arrow-ipc-file/clusterfuzz-testcase-minimized-arrow-ipc-file-fuzz-5707423356813312: a well-formed Footer that lists no RecordBatch (List<Decimal128(32, 8192)>, List<List<Int32>>, LargeList<Int32>); the damage is in the leading magic and the stream bytes, which a Footer reader (this one, like Arrow C++) does not read
+ACCEPTED nested arrow-ipc-file/clusterfuzz-testcase-minimized-arrow-ipc-file-fuzz-6088759971217408: a valid file (apache/arrow GH-49448): its Footer Schema names a child f3 where the leading Schema message says f2, which tripped Arrow C++'s differential fuzzer, not its reader; the one ZSTD RecordBatch is in range, its list offsets monotonic and bounded, its null counts equal to its bitmaps (checked by hand)
+
+NAMED flat arrow-ipc-file/clusterfuzz-testcase-arrow-ipc-file-fuzz-5390465250951168|decode_record_batch_message: Buffer[0] range (offset=0, length=36028797018963970)
+NAMED mmap arrow-ipc-file/clusterfuzz-testcase-arrow-ipc-file-fuzz-5390465250951168|decode_record_batch_message_mmap: Buffer[0] range (offset=0, length=36028797018963970)
+NAMED nested arrow-ipc-stream/clusterfuzz-testcase-arrow-ipc-stream-fuzz-6321882936901632|decode_record_batch_message_nested: Buffer[15] range (offset=152, length=1610612736)
+NAMED nested arrow-ipc-stream/clusterfuzz-testcase-minimized-arrow-ipc-stream-fuzz-4961281405222912|decode_record_batch_message_nested: Buffer[0] range (offset=2314885530818453536, length=2314885530818453536)
+# In the dicts mode the next three refusals are of DictionaryBatches: the
+# test re-frames a DictionaryBatch's data as a RecordBatch and decodes it
+# with decode_record_batch_message_nested, so the refusal is that decoder's.
+# The fourth is parse_ipc_message framing a message after the Schema.
+NAMED dicts arrow-ipc-stream/clusterfuzz-testcase-minimized-arrow-ipc-stream-fuzz-6440533038989312|decode_record_batch_message_nested: Buffer[0] range (offset=2314885530818453536, length=2314885530818453536)
+NAMED dicts arrow-ipc-stream/clusterfuzz-testcase-minimized-arrow-ipc-stream-fuzz-4757582821064704|decode_record_batch_message_nested: Buffer[0] range (offset=0, length=60129542144)
+NAMED dicts arrow-ipc-stream/clusterfuzz-testcase-minimized-arrow-ipc-stream-fuzz-4964779626856448|decode_record_batch_message_nested: Buffer[1] range (offset=0, length=605590388752)
+NAMED dicts arrow-ipc-stream/crash-09f72ba2a52b80366ab676364abec850fc668168|IPC frame: invalid metadata_size 4294967295

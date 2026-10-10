@@ -78,6 +78,7 @@ tests_check(
     name = "komira_aws_logs_client_tests",
     expect = [
         "_layout_probe",
+        "_no_env_reads",
         "test_logs_client_send",
     ],
     markers = ":komira_aws_logs_client[tests]",

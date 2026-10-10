@@ -1,0 +1,140 @@
+syntax = "proto3";
+package komira.calendar.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// The resources of a simple calendar service's JSON API: a calendar, an event
+// with an optional structured recurrence rule, a one-occurrence edit, and the
+// error envelope every refusal is written in. The API is the proto3 JSON
+// mapping of these messages. The model is not iCalendar: a recurrence is the
+// structured subset below, never RRULE text, and an event has no attendees.
+// Generated into the Mojo package `komira_calendar_proto` as
+// `komira_calendar_proto.calendar`; `komira_calendar` validates them.
+//
+// Text forms used below:
+//   local date       `YYYY-MM-DD`
+//   local date-time  `YYYY-MM-DDTHH:MM:SS`, a wall-clock time read in a time
+//                    zone named beside it (no offset, no `Z`)
+//   time zone        an IANA time zone name, for example `Europe/London`
+
+// An event's state. An event written without one is confirmed.
+enum EventStatus {
+  CONFIRMED = 0;
+  CANCELLED = 1;
+}
+
+// How often a recurring event repeats.
+enum Frequency {
+  FREQUENCY_UNSPECIFIED = 0;
+  DAILY = 1;
+  WEEKLY = 2;
+  MONTHLY = 3;
+  YEARLY = 4;
+}
+
+// A day of the week, ISO 8601 numbering (Monday is 1).
+enum Weekday {
+  WEEKDAY_UNSPECIFIED = 0;
+  MONDAY = 1;
+  TUESDAY = 2;
+  WEDNESDAY = 3;
+  THURSDAY = 4;
+  FRIDAY = 5;
+  SATURDAY = 6;
+  SUNDAY = 7;
+}
+
+// A calendar. `id`, `owner`, `version` and the two times are written by the
+// service; a client sets `name`, `color` and `time_zone`.
+message Calendar {
+  string id = 1;                              // a UUID
+  string owner = 2;                           // the owner's authenticated subject
+  string name = 3;                            // required, one line
+  string color = 4;                           // empty, or `#rrggbb`
+  string time_zone = 5;                       // the default zone of new events
+  uint64 version = 6;                         // the ETag; a conditional write names it
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+// An event: either all-day (`show_without_time`, `start_date`, `days`) or
+// timed (`start`, `time_zone`, `duration_seconds`). The fields of the other
+// form stay empty. `id`, `calendar_id`, `version` and the two times are
+// written by the service.
+message Event {
+  string id = 1;                              // a UUID
+  string calendar_id = 2;
+  string uid = 3;                             // stable per calendar; kept for `.ics` exchange
+  string title = 4;                           // one line
+  string description = 5;                     // plain text
+  string location = 6;                        // one line
+  bool show_without_time = 7;                 // true: an all-day event
+  string start_date = 8;                      // all-day: the first day, a local date
+  uint32 days = 9;                            // all-day: how many days it covers
+  string start = 10;                          // timed: a local date-time in `time_zone`
+  string time_zone = 11;                      // timed: required; there are no floating times
+  uint32 duration_seconds = 12;               // timed: at least 1
+  EventStatus status = 13;
+  Recurrence recurrence = 14;                 // absent: a single event
+  repeated string exdates = 15;               // removed occurrences, by their original local start
+  repeated Reminder reminders = 16;           // at most 5
+  uint64 version = 17;                        // the ETag
+  google.protobuf.Timestamp created_at = 18;
+  google.protobuf.Timestamp updated_at = 19;
+}
+
+// A structured recurrence rule. The rule is expanded in the event's own time
+// zone, so a weekly 09:00 event stays at 09:00 local time across a daylight
+// saving change.
+//   WEEKLY may name `weekdays`; empty means the start's weekday.
+//   MONTHLY names one day of the month (`month_day`), or one ordinal weekday
+//   (`ordinal` 1 to 4, or -1 for the last, with `ordinal_weekday`).
+//   The series ends after `count` occurrences, on `until` (inclusive), or never.
+message Recurrence {
+  Frequency freq = 1;
+  uint32 interval = 2;                        // 1 to 999
+  repeated Weekday weekdays = 3;              // WEEKLY only
+  uint32 month_day = 4;                       // MONTHLY only: 1 to 31
+  int32 ordinal = 5;                          // MONTHLY only: 1 to 4, or -1
+  Weekday ordinal_weekday = 6;                // MONTHLY only, with `ordinal`
+  uint32 count = 7;                           // 0: no count
+  string until = 8;                           // empty: no end date; else a local date
+}
+
+// A reminder that notifies the calendar's owner before an occurrence starts.
+message Reminder {
+  uint32 minutes_before = 1;
+}
+
+// A one-occurrence edit of a recurring event, keyed by the event and the
+// occurrence's original local start. It either cancels that occurrence or
+// replaces some of its fields; an unset replacement keeps the event's value.
+// `start` is in the event's form: a local date for an all-day event, a local
+// date-time otherwise; `days` applies to an all-day event and
+// `duration_seconds` to a timed one.
+message OccurrenceOverride {
+  string event_id = 1;
+  string original_start = 2;
+  bool cancelled = 3;
+  optional string title = 4;
+  optional string start = 5;
+  optional uint32 duration_seconds = 6;
+  optional string location = 7;
+  optional string description = 8;
+  optional uint32 days = 9;
+  uint64 version = 10;                        // the ETag
+}
+
+// A refusal: `code` is a stable name a client may branch on, `field` the JSON
+// path of the offending field (empty when none applies), `message` a sentence
+// for a person.
+message ApiError {
+  string code = 1;
+  string message = 2;
+  string field = 3;
+}
+
+// The body of every error response: `{"error":{"code":...,"message":...}}`.
+message ErrorResponse {
+  ApiError error = 1;
+}

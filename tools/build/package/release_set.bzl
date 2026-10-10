@@ -45,20 +45,28 @@ build actions:
       - the metapackage's metadata.json requires each member by name at that
         version and build string (conda-check checks the same requirements,
         but reports a missing one as a count, not by name);
+  * a release order check: no member's metadata.json `depends` holds
+    `"<name> ==<version> TEST_BUILD"` for a member `release_set` lists after
+    it (a requirement at another version or build string is not one of this
+    set's). The native package komira_native, which libraries require and
+    which is listed after every library, is the one exception. The target's
+    `order_tests` (release_order_test: this check over fixture
+    metadata.json files) must pass first;
   * after the stamp check, `komira_pack conda-check --kind metapackage
     --require-stamped true` over the metapackage, with every member's manifest and the compiler pin: the
     `members` rows, the requirements, and that index, metadata and members
     agree.
 
 The default output is the metapackage's directory (its `.conda`, manifest.json
-and metadata.json), copied only after both checks passed. Nothing is uploaded,
+and metadata.json), copied only after the three checks passed. Nothing is uploaded,
 and no action uses the network.
 
 A member's `[release]` exists only after its own `[release_check]` passed, so
 that check runs too. What this does NOT cover: the macro conda_package's reading
-of `-c komira.package_*` (these packages are given the test stamp); and, while
-the release set has one library with no dependencies, the lockstep pin of one
-member on another and agreement across members.
+of `-c komira.package_*` (these packages are given the test stamp); that a
+member's requirement on another member is at the set's version and build string
+(komira_pack writes it so; the order check reads only requirements that are);
+and agreement across members beyond the stamp.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -147,6 +155,49 @@ printf 'stamped %s %s:%s\\n' "$V" "$B" "$names" > "$OUT"
 rm -rf "$T"
 """
 
+# Release order (the module documentation): no member requires a member listed
+# after it. A release builds the members in this order, each after the members
+# it requires. Arguments: the busybox, the output, the release set file (named
+# in the message only), the version, the build string, then `<name>
+# <metadata.json>` per member in order. A requirement is `"<name> ==<V> <B>"`
+# in metadata.json's `depends` (komira_pack). The one exception is the native
+# package komira_native: libraries require it and it is listed after every
+# library. release_order_test runs this script over fixtures.
+_ORDER_CHECK = """
+BB="$1"; OUT="$2"; SET="$3"; V="$4"; B="$5"; shift 5
+case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
+case "${BUCK_SCRATCH_PATH:-}" in
+    "") T="$PWD/.komira_action" ;;
+    /*) T="$BUCK_SCRATCH_PATH/komira" ;;
+    *) T="$PWD/$BUCK_SCRATCH_PATH/komira" ;;
+esac
+"$BB" mkdir -p "$T/bin"
+"$BB" --install -s "$T/bin"
+PATH="$T/bin"; export PATH
+unset LD_LIBRARY_PATH LD_PRELOAD || true
+no() { echo "conda_release_set_check: $*" >&2; exit 1; }
+names=""; metas=""
+while [ "$#" -gt 0 ]; do
+    names="$names $1"
+    metas="$metas $2"
+    shift 2
+done
+later="$names"
+set -- $metas
+for m in $names; do
+    f="$1"; shift
+    later="${later# $m}"
+    for r in $later; do
+        [ "$r" != komira_native ] || continue
+        if grep -qF "\\"$r ==$V $B\\"" "$f"; then
+            no "member $m requires $r, which $SET lists after it: list each member after the members it requires (here, in release/artifacts.textproto and in libs)"
+        fi
+    done
+done
+printf 'in order:%s\\n' "$names" > "$OUT"
+rm -rf "$T"
+"""
+
 _COPY_DIR = '"$1" mkdir -p "$3"; "$1" cp -R "$2"/. "$3"/'
 
 def _impl(ctx):
@@ -211,6 +262,21 @@ def _impl(ctx):
         identifier = meta,
     )
 
+    in_order = ctx.actions.declare_output(ctx.label.name + ".in_order")
+    ctx.actions.run(
+        busybox_sh(
+            bb,
+            _ORDER_CHECK,
+            in_order.as_output(),
+            ctx.attrs.release_set,
+            MOJO_COMPILER_VERSION,
+            TEST_BUILD,
+            [cmd_args(n, cmd_args(d, format = "{}/metadata.json")) for n, d in members],
+        ),
+        category = "conda_release_order_check",
+        identifier = meta,
+    )
+
     checked = ctx.actions.declare_output(ctx.label.name + ".checked")
     ctx.actions.run(
         cmd_args(
@@ -241,7 +307,7 @@ def _impl(ctx):
 
     out = ctx.actions.declare_output(meta, dir = True)
     ctx.actions.run(
-        cmd_args(bb, "sh", "-euc", _COPY_DIR, "sh", bb, raw, out.as_output(), hidden = [stamp_ok, checked]),
+        cmd_args(bb, "sh", "-euc", _COPY_DIR, "sh", bb, raw, out.as_output(), hidden = [stamp_ok, in_order, checked] + [t[DefaultInfo].default_outputs[0] for t in ctx.attrs.order_tests]),
         category = "conda_release_set_join",
         identifier = meta,
     )
@@ -252,6 +318,7 @@ _conda_release_set_check = rule(
     attrs = {
         "libs": attrs.list(attrs.dep(providers = [MojoInfo])),
         "metapackage": attrs.string(),
+        "order_tests": attrs.list(attrs.dep(), default = []),
         "packages": attrs.list(attrs.dep()),
         "release_set": attrs.source(),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
@@ -282,3 +349,67 @@ def _release_set_check(name, metapackage, libs, release_set, **kwargs):
     )
 
 conda_release_set_check = declares_docs(_release_set_check)
+
+_ORDER_TEST = """
+BB="$1"; OUT="$2"; S="$3"; WANT="$4"; shift 4
+case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
+# Not the order check's own scratch directory, which it removes.
+case "${BUCK_SCRATCH_PATH:-}" in
+    "") T="$PWD/.komira_order_test" ;;
+    /*) T="$BUCK_SCRATCH_PATH/komira_order_test" ;;
+    *) T="$PWD/$BUCK_SCRATCH_PATH/komira_order_test" ;;
+esac
+"$BB" mkdir -p "$T/bin"
+"$BB" --install -s "$T/bin"
+PATH="$T/bin"; export PATH
+no() { echo "release_order_test: $*" >&2; exit 1; }
+if "$BB" sh -euc "$S" sh "$BB" "$T/out" "$@" 2> "$T/err"; then
+    [ -z "$WANT" ] || no "the order check passed, expected a refusal containing '$WANT'"
+    [ ! -s "$T/err" ] || no "the order check passed with stderr: $(cat "$T/err")"
+else
+    [ -n "$WANT" ] || no "the order check refused, expected it to pass: $(cat "$T/err")"
+    [ "$(wc -l < "$T/err")" -eq 1 ] || no "the order check refused with more than one line of stderr: $(cat "$T/err")"
+    grep -qF "$WANT" "$T/err" || no "the order check refused without '$WANT': $(cat "$T/err")"
+fi
+echo ok > "$OUT"
+rm -rf "$T"
+"""
+
+def _release_order_test_impl(ctx):
+    if len(ctx.attrs.members) != len(ctx.attrs.metadata_files) or not ctx.attrs.members:
+        fail("{}: members and metadata_files are one list, and not empty".format(ctx.label))
+    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
+    out = ctx.actions.declare_output(ctx.label.name + ".ok")
+    ctx.actions.run(
+        busybox_sh(
+            bb,
+            _ORDER_TEST,
+            out.as_output(),
+            _ORDER_CHECK,
+            ctx.attrs.refuses,
+            "release_set",
+            ctx.attrs.version,
+            ctx.attrs.build,
+            [cmd_args(n, m) for n, m in zip(ctx.attrs.members, ctx.attrs.metadata_files)],
+        ),
+        category = "release_order_test",
+    )
+    return [DefaultInfo(default_output = out)]
+
+_release_order_test = rule(
+    impl = _release_order_test_impl,
+    doc = "The release order check run over fixture metadata.json files (`metadata_files`, one per name in `members`, in order) at `version` and `build`: red unless it refuses with one line of stderr containing `refuses`, or, when `refuses` is empty, passes with no stderr.",
+    attrs = {
+        "build": attrs.string(),
+        "members": attrs.list(attrs.string()),
+        "metadata_files": attrs.list(attrs.source()),
+        "refuses": attrs.string(default = ""),
+        "version": attrs.string(),
+        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+    },
+)
+
+def _release_order_test_macro(**kwargs):
+    _release_order_test(exec_compatible_with = LINUX_X86_64, **kwargs)
+
+release_order_test = declares_docs(_release_order_test_macro)

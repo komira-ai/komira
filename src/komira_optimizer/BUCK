@@ -1,6 +1,9 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Logical-plan rewrite rules: each takes a LogicalPlan and returns the rewritten plan.
+# komira_runtime_paths is declared because two tests take their scratch
+# directory from `test_tmpdir()`.
 mojo_library(
     name = "komira_optimizer",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -15,14 +18,18 @@ mojo_library(
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_plan_ir:komira_plan_ir",
         "//src/komira_plan_stats:komira_plan_stats",
+        "//src/komira_scan_planning:komira_scan_planning",
         "//src/komira_scan_source:komira_scan_source",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
+        "tests/test_attach_hive_predicate.mojo",
         "tests/test_correlated_subquery_lowerings.mojo",
         "tests/test_cse_fingerprint_no_collapse.mojo",
         "tests/test_expr_kernel_template_coverage.mojo",
         "tests/test_flatten_dependent_joins.mojo",
         "tests/test_flatten_dependent_joins_branches.mojo",
+        "tests/test_flatten_dependent_joins_nested_exprs.mojo",
         "tests/test_join_predicate_decompose.mojo",
         "tests/test_optimizer_absorb_into_aggregate_substitutes.mojo",
         "tests/test_optimizer_agg_cse.mojo",
@@ -33,6 +40,9 @@ mojo_library(
         "tests/test_optimizer_column_stats_provider.mojo",
         "tests/test_optimizer_column_stats_provider_branches.mojo",
         "tests/test_optimizer_config.mojo",
+        "tests/test_optimizer_coverage_agg_group_fd.mojo",
+        "tests/test_optimizer_coverage_filter.mojo",
+        "tests/test_optimizer_coverage_misc.mojo",
         "tests/test_optimizer_cross_join_and_walker.mojo",
         "tests/test_optimizer_cse_axes.mojo",
         "tests/test_optimizer_dpccp.mojo",
@@ -44,6 +54,7 @@ mojo_library(
         "tests/test_optimizer_dpccp_row_count_fallback.mojo",
         "tests/test_optimizer_eager_agg.mojo",
         "tests/test_optimizer_eager_agg_paths.mojo",
+        "tests/test_optimizer_expr_agg_join_sites.mojo",
         "tests/test_optimizer_expr_cse_branches.mojo",
         "tests/test_optimizer_expr_rules.mojo",
         "tests/test_optimizer_filter_pushdown_arms.mojo",
@@ -54,15 +65,20 @@ mojo_library(
         "tests/test_optimizer_join_residual_to_side.mojo",
         "tests/test_optimizer_join_semi_conversion_arms.mojo",
         "tests/test_optimizer_join_semi_pushdown_arms.mojo",
+        "tests/test_optimizer_materialize_agg_input.mojo",
         "tests/test_optimizer_misc_rules.mojo",
         "tests/test_optimizer_or_factoring.mojo",
         "tests/test_optimizer_or_factoring_shapes.mojo",
         "tests/test_optimizer_partial_agg_paths.mojo",
         "tests/test_optimizer_partition_topn.mojo",
+        "tests/test_optimizer_partition_topn_ancestor_refs.mojo",
         "tests/test_optimizer_partition_topn_arms.mojo",
         "tests/test_optimizer_partition_topn_rank.mojo",
         "tests/test_optimizer_payload_narrow.mojo",
+        "tests/test_optimizer_payload_narrow_parity.mojo",
         "tests/test_optimizer_payload_narrow_shapes.mojo",
+        "tests/test_optimizer_projection_merge_identity.mojo",
+        "tests/test_optimizer_projection_pushdown.mojo",
         "tests/test_optimizer_reorder_bk7_decompose_d2_equivalence.mojo",
         "tests/test_optimizer_reorder_multi_key.mojo",
         "tests/test_optimizer_reorder_multi_key_fallback.mojo",
@@ -107,10 +123,28 @@ mojo_library(
         "tests/test_q5_plan_shape.mojo",
         "tests/test_resolve_scalar_subqueries.mojo",
         "tests/test_scalar_subquery_decorrelate.mojo",
+        "tests/test_shared_relation_fingerprint_identity.mojo",
         "tests/test_sort_null_placement_survives_rebuild.mojo",
         "tests/test_topn_tiebreak_policy.mojo",
         "tests/test_view_resolution_pass.mojo",
         "tests/test_window_sort_elision.mojo",
     ],
     visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps). The optimizer emits an optimized LogicalPlan
+# and imports no physical-plan IR: lowering a plan to physical IR, and the
+# doors on a physical plan, belong to the packages that build one. The
+# physical-plan modules sit in komira_plan_ir beside the logical ones, so the
+# rule is on the imported module, not on the dep.
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    refused_imports = [
+        "komira_plan_ir.physical_plan",
+        "komira_plan_ir.physical_plan_purity_gate",
+    ],
+    visibility = ["komira//:tests_lints"],
 )

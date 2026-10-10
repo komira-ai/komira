@@ -1,5 +1,6 @@
 # =============================================================================
-# proto3_json_float.mojo — the proto3-JSON form of a `float` (float32) value.
+# proto3_json_float.mojo — the proto3-JSON form of a `float` (float32) value,
+# and of a `double` (float64) one (the last section).
 # =============================================================================
 #
 # One writer and one reader, used by every float32 path in the codec (the
@@ -77,7 +78,13 @@
 from std.math import isinf, isnan
 from std.memory import bitcast
 
-from komira_json import JsonValue, JSON_NUMBER, JSON_STRING, write_json_string
+from komira_json import (
+    JsonValue,
+    JSON_NUMBER,
+    JSON_STRING,
+    write_f64_dtoa,
+    write_json_string,
+)
 
 from .float32_bignum import (
     big_add,
@@ -89,6 +96,7 @@ from .float32_bignum import (
     big_sub,
 )
 from .float32_parse import parse_decimal_f32
+from .float64_parse import parse_decimal_f64
 
 
 # =============================================================================
@@ -195,10 +203,10 @@ def _shortest_digits(
         big_mul_small(mp10, UInt32(10))
         if _high_reached(r10, mp10, s, closed):
             break
-        r = r10^
-        m_plus = mp10^
-        big_mul_small(m_minus, UInt32(10))
-        k -= 1
+        r = r10^  # cov: unreachable k never overestimates for float32: floor(e2*1233/4096) == floor(e2*log10 2) on e2 in [-149, 127], so 10^(k-1) <= v < high
+        m_plus = mp10^  # cov: unreachable see the line above
+        big_mul_small(m_minus, UInt32(10))  # cov: unreachable see the line above
+        k -= 1  # cov: unreachable see the line above
     # Generate digits.
     var n = 0
     while n < 20:
@@ -230,14 +238,14 @@ def _shortest_digits(
     # carry anyway rather than ever write a non-digit byte.
     var i = n - 1
     while i > 0 and digits[i] > UInt8(9):
-        digits[i] = UInt8(0)
-        digits[i - 1] += UInt8(1)
+        digits[i] = UInt8(0)  # cov: unreachable a digit rounded up is at most 9: d = 9 with high_ok would have met high_ok one digit earlier
+        digits[i - 1] += UInt8(1)  # cov: unreachable see the line above
         i -= 1
     if digits[0] > UInt8(9):
-        digits[0] = UInt8(1)
-        k += 1
+        digits[0] = UInt8(1)  # cov: unreachable see line 241
+        k += 1  # cov: unreachable see line 241
     while n > 1 and digits[n - 1] == UInt8(0):
-        n -= 1
+        n -= 1  # cov: unreachable from the float32 writer: a float32 (24-bit mantissa) ends within 9 digits on a nonzero digit (low_ok after a 0 would have held one digit earlier); only a direct call with a wider mantissa can hit the 20-digit cap on a 0, and that truncated output is not a value to pin
     return n
 
 
@@ -313,7 +321,7 @@ def read_proto3_json_f32(v: JsonValue) raises -> Float32:
     elif v.kind != JSON_NUMBER:
         # A bool, null, object or array: the float64 reader's refusal.
         _ = v.as_float64()
-        raise Error("JsonError: not a proto3 float")
+        raise Error("JsonError: not a proto3 float")  # cov: unreachable as_float64() raises for every kind but a number or a string
     return parse_decimal_f32(v.text)
 
 
@@ -323,3 +331,56 @@ def _f32_inf() -> Float32:
 
 def _f32_nan() -> Float32:
     return bitcast[DType.float32](UInt32(0x7FC00000))
+
+
+# =============================================================================
+# The `double` (float64) form: the same rules as float32's, at float64's
+# width. WRITE: a finite value is the shortest round-trip JSON number
+# (`write_f64_dtoa`); NaN / +Inf / -Inf are the strings "NaN" / "Infinity" /
+# "-Infinity" (`write_f64_dtoa` alone would write `null`, which reads back as
+# an absent field). READ: the three spec strings, or a JSON number or numeric
+# string of any length rounded to the nearest double (`parse_decimal_f64`);
+# a value past the double range is refused, so every value the reader
+# returns is one the writer writes and reads back as itself.
+# =============================================================================
+
+
+def write_proto3_json_f64(mut buf: List[UInt8], v: Float64):
+    """Append the proto3-JSON text of a double: a JSON number, or one of the
+    strings "NaN" / "Infinity" / "-Infinity"."""
+    if isnan(v):
+        write_json_string(buf, String("NaN"))
+    elif isinf(v):
+        if v > 0:
+            write_json_string(buf, String("Infinity"))
+        else:
+            write_json_string(buf, String("-Infinity"))
+    else:
+        write_f64_dtoa(buf, v)
+
+
+def read_proto3_json_f64(v: JsonValue) raises -> Float64:
+    """Read a double from a proto3-JSON value (a number, or a string holding
+    a number or one of the three non-finite spellings), correctly rounded.
+    Refuses a value that rounds past the largest double and any other
+    non-finite spelling."""
+    if v.kind == JSON_STRING:
+        if v.text == "NaN":
+            return _f64_nan()
+        if v.text == "Infinity":
+            return _f64_inf()
+        if v.text == "-Infinity":
+            return -_f64_inf()
+    elif v.kind != JSON_NUMBER:
+        # A bool, null, object or array: the JSON value's own refusal.
+        _ = v.as_float64()
+        raise Error("JsonError: not a proto3 double")  # cov: unreachable as_float64() raises for every kind but a number or a string
+    return parse_decimal_f64(v.text)
+
+
+def _f64_inf() -> Float64:
+    return bitcast[DType.float64](UInt64(0x7FF0000000000000))
+
+
+def _f64_nan() -> Float64:
+    return bitcast[DType.float64](UInt64(0x7FF8000000000000))

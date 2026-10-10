@@ -37,20 +37,46 @@
 #       group and cancels it for a newer one, so a group shared by pushes
 #       loses the middle push's run. Checks nothing, so fails, when no
 #       workflow is push-triggered.
-#   kind "mojo_deps", args <BUCK file> <.mojo file>...
+#   kind "mojo_deps", tools <refused_imports.awk>, args <BUCK file> <refused> <.mojo file>...
 #       The `deps` of the package's mojo_library name every `komira_*` module
 #       the .mojo files import, by target name (`:komira_x`): the deps are a
 #       superset of the imports. A library built from the .mojo files of one
 #       package compiles only against the packages on its `-I` closure, so a
 #       missing dep is a failure at build time, found here in review. The
 #       library's own name is not an import to declare. Extra deps are not a
-#       finding (a dep may be there for a macro or a link).
+#       finding (a dep may be there for a macro or a link). Targets named in
+#       `test_deps` count too, since the .mojo files include the welded tests;
+#       a library source importing a test_deps package passes here and fails
+#       its compile. <refused> is `-` or a comma-separated list of dotted
+#       module names (`komira_x.y`) that no .mojo file may import, nor any
+#       module under one, nor name by its dotted path outside an import;
+#       refused_imports.awk, the reader, says which forms it reads and what
+#       it misreads. A module of a dep can be refused while the dep itself
+#       stays declared.
 #   kind "retired_names", args <tree> <prefix of tree> <name>... -- <file>...
 #       No file under <tree> (the cell's doc_tree, findings named <prefix of
 #       tree><path>) and no <file> holds a <name> (a fixed string) on a line
 #       that carries no YYYY-MM-DD date: a retired name survives only in a
 #       dated history note. Checks nothing, so fails, when the tree holds no
 #       file.
+#   kind "src_layout", args <root> <shipped> <cell prefix> <map> <package>...
+#       <root> (src) holds what komira ships: each <package> (a package path in
+#       the cell, as Buck2 lists the root package's subpackages) is
+#       <root>/<name>, or a test-only package <root>/tests/<kind>/<name> with
+#       <kind> e2e (a <name> ending _e2e or _loopback), conformance (ending
+#       _conformance) or helpers (neither). So a *_e2e, *_loopback or
+#       *_conformance package anywhere else under <root> is a finding, and
+#       so is a komira_test_* package directly under <root> that <shipped>
+#       (`-` or a comma-separated list of names) does not name: a test
+#       harness komira does not ship is under <root>/tests/helpers. A
+#       <shipped> name that is no package directly under <root> is a finding
+#       too. Findings name a package <cell prefix><package>. Checks nothing,
+#       so fails, when no <package> is under <root>. <map> is `-` or the
+#       module map, a Markdown file: a row is a line starting
+#       "| [`<name>`](<link>) |", and a row whose <link>, less its leading
+#       `../`s and trailing `/`, is a path under <root> names that path. Each
+#       <package> under <root> has exactly one row; no row names a path that
+#       is not a <package>; a row's <name> is its path's last component.
 #   kind "doc_links", tools <inspect runnable dir>, args <tree> <unchecked> [<path> <tree>]...
 #       Every relative link and #anchor in every .md file under <tree> resolves
 #       to a file, directory or heading under <tree>, with each further tree
@@ -76,6 +102,27 @@
 #       a bad count or an empty reason is a finding, in either ledger. The
 #       <name>s are what findings call the ledgers. File names hold no
 #       whitespace.
+#   kind "public_boundary", tools <public_boundary.awk>, args <holds> <holds name> <hosts> <hosts name> <deny> <from> <public>
+#       What a public repository may not hold, read from every file under
+#       <stage> but binary data (by suffix: .arrow, .orc, .parquet, .avro,
+#       .tensor, .frame, .request, .whl, .conda and archive, image and object
+#       formats), and from the path of every file, binary data included.
+#       Nothing is skipped as upstream bytes: upstream sources are pinned
+#       downloads, never committed, and what third_party/ and the
+#       third_party_srcs test trees commit was written here. No date from the
+#       year <from> up to <public>, the first day of the public history
+#       (date), home directory naming a person (home_path),
+#       private or written-out network address (ip), URL host outside the
+#       reserved example names and <hosts> (host), email address outside the
+#       reserved example domains (email), commit id in prose (commit_sha), or
+#       word of <deny> (deny). public_boundary.awk, the reader, says what each
+#       rule matches. <holds>, rows `<rule> <file> <count> <reason>`, holds
+#       the findings a file must keep (fixtures, test vectors), at an exact
+#       count, so it only shrinks; <hosts>, rows `<domain> <reason>`, the
+#       domains whose hosts a URL may name, each used by the tree; `#` lines
+#       and blank lines are comments in both. <deny> is `-` or a list of
+#       words kept outside the repository (one per line), which no row may
+#       hold. The <name>s are what findings call the ledgers.
 set -eu
 
 BB=$1 RESULT=$2 KIND=$3 STAGE=$4 PREFIX=$5
@@ -180,13 +227,14 @@ push_verdicts)
     done
     ;;
 mojo_deps)
+    AWK=$(abs "$1"); shift
     [ "$1" = -- ] && shift
-    buck=$1
-    shift
+    buck=$1 refused=$2
+    shift 2
     checked=$#
     self=$(sed -n 's/^[[:space:]]*name[[:space:]]*=[[:space:]]*"\([A-Za-z0-9_]*\)",.*/\1/p' "$buck" | head -1)
-    # The target names inside `deps = [ ... ]`.
-    awk '/^[[:space:]]*deps[[:space:]]*=[[:space:]]*\[/ { on = 1 }
+    # The target names inside `deps = [ ... ]` and `test_deps = [ ... ]`.
+    awk '/^[[:space:]]*(test_)?deps[[:space:]]*=[[:space:]]*\[/ { on = 1 }
          on { while (match($0, /:[A-Za-z0-9_]+"/)) { print substr($0, RSTART + 1, RLENGTH - 2); $0 = substr($0, RSTART + RLENGTH) } }
          on && /\]/ { on = 0 }' "$buck" | sort -u > "$T/declared"
     [ -n "$self" ] || echo "$buck: no mojo_library name found" >> "$REPORT"
@@ -198,6 +246,7 @@ mojo_deps)
                 grep -qx "$mod" "$T/declared" ||
                     echo "$f:$line: imports $mod, which the deps of $buck do not name (:$mod)" >> "$REPORT"
             done
+        [ "$refused" = - ] || awk -v F="$f" -v R="$refused" -f "$AWK" "$f" >> "$REPORT"
     done
     ;;
 retired_names)
@@ -218,6 +267,67 @@ retired_names)
     done
     grep -vE '[0-9]{4}-[0-9]{2}-[0-9]{2}' "$T/rn.txt" |
         sed 's#$# -- a retired name; only a dated history note may keep it#' >> "$REPORT" || true
+    ;;
+src_layout)
+    [ "$1" = -- ] && shift
+    root=$1 shipped=$2 cell=$3 map=$4
+    shift 4
+    printf '%s\n' "$@" > "$T/sl_packages"
+    awk -v root="$root" -v pre="$cell" -v shipped_list="$shipped" -v out="$T/sl_checked" '
+        function kind(name) {
+            if (name ~ /_(e2e|loopback)$/) return "e2e"
+            if (name ~ /_conformance$/) return "conformance"
+            return "helpers"
+        }
+        BEGIN { split(shipped_list, a, ","); for (i in a) if (a[i] != "-") ship[a[i]] = 1 }
+        index($0, root "/") != 1 { next }
+        {
+            checked++
+            at = pre $0
+            n = split(substr($0, length(root) + 2), p, "/")
+            if (p[1] == "tests") {
+                if (n != 3 || (p[2] != "e2e" && p[2] != "conformance" && p[2] != "helpers"))
+                    print at ": " root "/tests holds packages only at " root "/tests/<kind>/<name>, <kind> e2e, conformance or helpers"
+                else if (kind(p[3]) != p[2])
+                    print at ": a package under " root "/tests/" p[2] " is " (p[2] == "e2e" ? "named *_e2e or *_loopback" : p[2] == "conformance" ? "named *_conformance" : "a harness, not named *_e2e, *_loopback or *_conformance") "; this one belongs in " root "/tests/" kind(p[3]) "/" p[3]
+                next
+            }
+            if (n != 1) {
+                print at ": a package is " root "/<name> (what komira ships) or " root "/tests/<kind>/<name> (test-only)"
+                next
+            }
+            top[p[1]] = 1
+            if (kind(p[1]) != "helpers")
+                print at ": a test-only package directly under " root "/, which holds what komira ships; move it to " root "/tests/" kind(p[1]) "/" p[1]
+            else if (p[1] ~ /^komira_test_/ && !(p[1] in ship))
+                print at ": a test library directly under " root "/ that `shipped` does not name; a harness komira does not ship is " root "/tests/helpers/" p[1]
+        }
+        END {
+            for (s in ship) if (!(s in top)) print "shipped names " s ", which is no package directly under " root "/; delete it"
+            print checked + 0 > out
+        }' "$T/sl_packages" >> "$REPORT"
+    checked=$(cat "$T/sl_checked")
+    # The module map: one row per package, and no row for a path that is none.
+    [ "$map" = - ] || awk -v root="$root" -v pre="$cell" -v map="$map" '
+        FILENAME != map { if (index($0, root "/") == 1) pkg[$0] = 1; next }
+        /^[|] [[]`[^`]+`[]][(][^)]*[)] [|]/ {
+            name = $0; sub(/^[|] [[]`/, "", name); sub(/`.*/, "", name)
+            path = $0; sub(/^[^(]*[(]/, "", path); sub(/[)].*/, "", path)
+            while (substr(path, 1, 3) == "../") path = substr(path, 4)
+            sub(/\/$/, "", path)
+            if (index(path, root "/") != 1) next
+            if (path in row) {
+                print map ":" FNR ": a second row for " path " (the first is line " row[path] "); a package has one row"
+                next
+            }
+            row[path] = FNR
+            n = split(path, p, "/")
+            if (p[n] != name) print map ":" FNR ": the row names " name " but links " path "; name it " p[n]
+            if (!(path in pkg)) print map ":" FNR ": a row for " path ", which is no package; delete the row or fix its link"
+        }
+        END {
+            for (k in pkg) if (!(k in row)) print pre k ": no row in " map "; add one to the section it belongs in"
+        }' "$T/sl_packages" "$map" | sort >> "$REPORT"
     ;;
 doc_links)
     INSPECT=$(abs "$1"); shift
@@ -320,6 +430,21 @@ pointer_lint)
             for (f in ffi)
                 if (!(f in fsites)) print FN ":" ffi[f] ": " f " names no wildcard origin; delete the row"
         }' "$T/files" "$T/marked" "$ffi" "$holds" "$T/sites" | sort >> "$REPORT"
+    ;;
+public_boundary)
+    AWK=$(abs "$1"); shift
+    [ "$1" = -- ] && shift
+    holds=$(abs "$1") holds_name=$2 hosts=$(abs "$3") hosts_name=$4 deny=$5 from=$6 public=$7
+    if [ "$deny" = - ]; then deny=/dev/null; else deny=$(abs "$deny"); fi
+    # Every path; every file but binary data (see the kind's note).
+    (cd "$STAGE" && find . \( -type f -o -type l \) | sed 's#^\./##') | sort > "$T/paths"
+    grep -vE '\.(arrow|orc|parquet|avro|tensor|frame|request|whl|conda|gz|tgz|xz|zst|bz2|tar|zip|jar|png|jpg|jpeg|gif|ico|pdf|der|so|a|o|dylib|wasm|mojoc|mojopkg)$' "$T/paths" > "$T/files" || true
+    checked=$(wc -l < "$T/files" | tr -d ' ')
+    # A reader that fails is a finding, never a pass.
+    if ! (cd "$STAGE" && awk -F '\t' -v P="$STAGE/" -v HN="$holds_name" -v AN="$hosts_name" -v FROM="$from" -v PUBLIC="$public" -f "$AWK" "$T/files" "$T/paths" "$hosts" "$deny" "$holds") > "$T/pb.txt" 2> "$T/pb.err"; then
+        echo "public_boundary: the reader failed: $(head -3 "$T/pb.err")" >> "$REPORT"
+    fi
+    sort "$T/pb.txt" >> "$REPORT"
     ;;
 *)
     echo "lint.sh: unknown kind $KIND" >&2

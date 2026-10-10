@@ -8,11 +8,12 @@
 #   - Snappy : raw snappy block, NO Avro-style BE4 CRC32 trailer
 #   - Lz4    : LZ4 block format, LZ4_decompress_safe
 #
-# Each fixture is compressed IN-TEST via the SAME C lib (no external ORC
-# tool needed), wrapped in ORC's 3-byte chunk header (compressed_length << 1 |
-# isOriginal), then round-tripped through `decompress_stream`. This exercises
-# the real FFI in both directions and self-validates against the same lib
-# (zlib / lz4 / zstd from the host, snappy statically linked).
+# Each fixture is compressed IN-TEST via the SAME C lib, through
+# komira_compression's codec API (no external ORC tool needed), wrapped in
+# ORC's 3-byte chunk header (compressed_length << 1 | isOriginal), then
+# round-tripped through `decompress_stream`. This exercises the real library
+# in both directions and self-validates against it (zlib / lz4 / zstd from
+# the host, snappy statically linked).
 #
 # ⚠ THE LZO ARM DOES NOT LIVE HERE, and cannot: that self-validating shape
 # requires an encoder, and there is deliberately no LZO encoder in this tree
@@ -31,9 +32,14 @@
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
-from std.memory import alloc
-from std.ffi import OwnedDLHandle, external_call
-from std.sys.info import CompilationTarget
+
+from komira_compression.lz4 import lz4_compress_bound, lz4_compress_into
+from komira_compression.snappy_block import (
+    snappy_compress_into,
+    snappy_max_compressed_length,
+)
+from komira_compression.zlib import zlib_compress_bound, zlib_deflate_into
+from komira_compression.zstd_frame import zstd_compress_bound, zstd_compress_into
 
 from komira_orc import (
     decompress_stream,
@@ -47,27 +53,9 @@ from komira_orc import (
 
 
 # =============================================================================
-# In-test compression helpers (FFI to the same host libs the reader uses).
+# In-test compression helpers (the same host libs the reader uses, through
+# komira_compression).
 # =============================================================================
-
-comptime _LIBZ: StaticString = (
-    "libz.dylib" if CompilationTarget.is_macos() else "libz.so.1"
-)
-comptime _LIBLZ4: StaticString = (
-    "liblz4.dylib" if CompilationTarget.is_macos() else "liblz4.so.1"
-)
-comptime _LIBZSTD: StaticString = (
-    "libzstd.dylib" if CompilationTarget.is_macos() else "libzstd.so.1"
-)
-
-comptime _Z_STREAM_SIZE: Int = 112
-comptime _Z_OK: Int = 0
-comptime _Z_STREAM_END: Int = 1
-comptime _Z_FINISH: Int = 4
-comptime _Z_DEFAULT_LEVEL: Int32 = 6
-comptime _Z_DEFLATED: Int32 = 8
-comptime _Z_DEFAULT_STRATEGY: Int32 = 0
-comptime _Z_MEM_LEVEL: Int32 = 8
 
 
 def _str_bytes(s: String) -> List[UInt8]:
@@ -105,154 +93,46 @@ def _frame_one_chunk(frame: List[UInt8]) -> List[UInt8]:
 # --- zlib RAW deflate compress (windowBits = -15) -----------------------------
 
 
+def _cut(var buf: List[UInt8], n: Int) -> List[UInt8]:
+    buf.resize(unsafe_uninit_length=n)
+    return buf^
+
+
 def _deflate_raw_compress(src: List[UInt8], window_bits: Int32) raises -> List[
     UInt8
 ]:
-    """Compress `src` to RAW deflate (window_bits=-15) or zlib-wrapped (15)."""
-    var handle = OwnedDLHandle(_LIBZ)
-    var version = handle.call[
-        "zlibVersion", UnsafePointer[UInt8, MutUntrackedOrigin]
-    ]()
-
-    var in_buf = alloc[UInt8](len(src) if len(src) > 0 else 1)
-    for i in range(len(src)):
-        in_buf[i] = src[i]
-    var out_cap = len(src) + len(src) // 2 + 128
-    var out_buf = alloc[UInt8](out_cap)
-
-    var strm = alloc[UInt8](_Z_STREAM_SIZE)
-    for i in range(_Z_STREAM_SIZE):
-        strm[i] = 0
-    (strm.bitcast[UInt64]() + 0)[] = UInt64(Int(in_buf))
-    (strm.bitcast[UInt32]() + 2)[] = UInt32(len(src))
-    (strm.bitcast[UInt64]() + 3)[] = UInt64(Int(out_buf))
-    (strm.bitcast[UInt32]() + 8)[] = UInt32(out_cap)
-
-    # deflateInit2_(strm, level, method, windowBits, memLevel, strategy,
-    #               version, stream_size)
-    var init_rc = handle.call["deflateInit2_", Int32](
-        strm,
-        _Z_DEFAULT_LEVEL,
-        _Z_DEFLATED,
-        window_bits,
-        _Z_MEM_LEVEL,
-        _Z_DEFAULT_STRATEGY,
-        version,
-        Int32(_Z_STREAM_SIZE),
-    )
-    if Int(init_rc) != _Z_OK:
-        strm.free()
-        in_buf.free()
-        out_buf.free()
-        raise Error("deflateInit2_ failed rc=" + String(Int(init_rc)))
-    var rc = handle.call["deflate", Int32](strm, Int32(_Z_FINISH))
-    var total_out = Int((strm.bitcast[UInt64]() + 5)[])
-    _ = handle.call["deflateEnd", Int32](strm)
-    strm.free()
-    if Int(rc) != _Z_STREAM_END:
-        in_buf.free()
-        out_buf.free()
-        raise Error("deflate did not finish rc=" + String(Int(rc)))
-    var out = List[UInt8]()
-    for i in range(total_out):
-        out.append(out_buf[i])
-    in_buf.free()
-    out_buf.free()
-    return out^
+    """Compress `src` to RAW deflate (window_bits=-15) or zlib-wrapped (15),
+    at level 6."""
+    var out = List[UInt8](length=zlib_compress_bound(len(src), window_bits), fill=0)
+    var n = zlib_deflate_into(Span(out), Span(src), Int32(6), window_bits)
+    return _cut(out^, n)
 
 
 # --- snappy compress ----------------------------------------------------------
 
 
 def _snappy_compress(src: List[UInt8]) raises -> List[UInt8]:
-    # snappy is statically linked (through the core packages), not dlopened.
-    var in_buf = alloc[UInt8](len(src) if len(src) > 0 else 1)
-    for i in range(len(src)):
-        in_buf[i] = src[i]
-    var out_cap = 32 + len(src) + len(src) // 6
-    var out_buf = alloc[UInt8](out_cap)
-    var size_buf = alloc[Int64](1)
-    size_buf[0] = Int64(out_cap)
-    var status = external_call["snappy_compress", Int32](
-        in_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-        Int64(len(src)),
-        out_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-        size_buf,
-    )
-    var written = Int(size_buf[0])
-    size_buf.free()
-    if Int(status) != 0:
-        in_buf.free()
-        out_buf.free()
-        raise Error("snappy_compress failed status=" + String(Int(status)))
-    var out = List[UInt8]()
-    for i in range(written):
-        out.append(out_buf[i])
-    in_buf.free()
-    out_buf.free()
-    return out^
+    var out = List[UInt8](length=snappy_max_compressed_length(len(src)), fill=0)
+    var n = snappy_compress_into(Span(out), Span(src))
+    return _cut(out^, n)
 
 
 # --- lz4 block compress -------------------------------------------------------
 
 
 def _lz4_compress(src: List[UInt8]) raises -> List[UInt8]:
-    var handle = OwnedDLHandle(_LIBLZ4)
-    var in_buf = alloc[UInt8](len(src) if len(src) > 0 else 1)
-    for i in range(len(src)):
-        in_buf[i] = src[i]
-    var out_cap = Int(handle.call["LZ4_compressBound", Int32](Int32(len(src))))
-    if out_cap <= 0:
-        out_cap = len(src) + len(src) // 2 + 64
-    var out_buf = alloc[UInt8](out_cap)
-    var written = Int(
-        handle.call["LZ4_compress_default", Int32](
-            in_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-            out_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-            Int32(len(src)),
-            Int32(out_cap),
-        )
-    )
-    if written <= 0:
-        in_buf.free()
-        out_buf.free()
-        raise Error("LZ4_compress_default failed result=" + String(written))
-    var out = List[UInt8]()
-    for i in range(written):
-        out.append(out_buf[i])
-    in_buf.free()
-    out_buf.free()
-    return out^
+    var out = List[UInt8](length=lz4_compress_bound(len(src)), fill=0)
+    var n = lz4_compress_into(Span(out), Span(src))
+    return _cut(out^, n)
 
 
 # --- zstd compress (regression-confirm None/Zstd still GREEN) ------------------
 
 
 def _zstd_compress(src: List[UInt8]) raises -> List[UInt8]:
-    var handle = OwnedDLHandle(_LIBZSTD)
-    var in_buf = alloc[UInt8](len(src) if len(src) > 0 else 1)
-    for i in range(len(src)):
-        in_buf[i] = src[i]
-    var out_cap = Int(handle.call["ZSTD_compressBound", Int](len(src)))
-    var out_buf = alloc[UInt8](out_cap)
-    var written = handle.call["ZSTD_compress", Int](
-        out_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-        out_cap,
-        in_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-        len(src),
-        Int32(1),
-    )
-    var is_err = handle.call["ZSTD_isError", Int](written)
-    if is_err != 0:
-        in_buf.free()
-        out_buf.free()
-        raise Error("ZSTD_compress failed")
-    var out = List[UInt8]()
-    for i in range(written):
-        out.append(out_buf[i])
-    in_buf.free()
-    out_buf.free()
-    return out^
+    var out = List[UInt8](length=zstd_compress_bound(len(src)), fill=0)
+    var n = zstd_compress_into(Span(out), Span(src), Int32(1))
+    return _cut(out^, n)
 
 
 def _sample() -> List[UInt8]:

@@ -4,7 +4,7 @@ in release/artifacts.textproto.
   python3 release/ci/derive_checks.py <units file>   # what kci runs
   python3 release/ci/derive_checks.py --from release/artifacts.textproto
                                                      # the same answer, for a reader
-  python3 release/ci/derive_checks.py --selftest     # the naming table (SELFTEST)
+  python3 release/ci/derive_checks.py --selftest     # the naming and pattern tables (SELFTEST, PATTERN_SELFTEST)
 
 The per-change check (`kci run --stage pr --affected-by <base>`) builds units:
 the artifacts and checks release/artifacts.textproto declares, and the checks
@@ -18,6 +18,16 @@ header):
                              graph (kci refuses it for an artifact and reports
                              it as a notice for a check)
   DERIVED <n>                last: the number of derived checks
+  BROKEN <reason>            alone, instead of the above: the universe query
+                             failed, for any reason (a target with an
+                             unknown or invisible dependency, a transport
+                             error); the reason is one line holding buck2's
+                             error (its stderr whole up to 8 KiB, else the
+                             first and last 4 KiB). kci FAILS the check
+                             (KCI-E-BUILD-FAILED): a graph the tool cannot
+                             query is never a widening. The target buck2
+                             names, when it names one, leads the reason; it
+                             decides nothing.
 
 THE UNIVERSE is `//...` and `tests//functional/...` (what `./buck2 build //...`
 and `./buck2 build tests//functional/...` build), configured for the default
@@ -29,7 +39,9 @@ THE DERIVATION. Every target of the universe that no declared target names
 (an exact label) or matches (a pattern `<cell>//<path>/...` or
 `<cell>//<path>:`) is put in its path group, and each group with such a target
 is a derived check naming the group's pattern: one check per library package
-`//src/<p>/...` (named `<p>`), `repo_root` (`//:`), `tools_<t>` for each
+`//src/<p>/...` (named `<p>`) and per test-only package
+`//src/tests/<kind>/<p>/...` (named `<p>`: src/tests is not a package but
+holds them by kind), `repo_root` (`//:`), `tools_<t>` for each
 `//tools/<t>/...`, `<d>` for any other top directory `//<d>/...`, and
 `functional_tests` (`tests//functional/...`). A name is one kci accepts,
 `[a-z][a-z0-9_]*`, whatever the directory is called: upper case becomes lower,
@@ -71,12 +83,57 @@ def _label(configured):
     return lab
 
 
+STDERR_KEPT_WHOLE = 8192
+STDERR_KEPT_EACH_END = 4096
+
+
+class QueryFailed(Exception):
+    """A buck2 query that failed; the text is buck2's error."""
+
+
+def kept_stderr(text):
+    """buck2's stderr as a failure carries it: whole up to 8 KiB, else the
+    first and last 4 KiB around a line saying how many bytes were cut."""
+    raw = text.encode("utf-8", "replace")
+    if len(raw) <= STDERR_KEPT_WHOLE:
+        return text
+    head = raw[:STDERR_KEPT_EACH_END].decode("utf-8", "replace")
+    tail = raw[-STDERR_KEPT_EACH_END:].decode("utf-8", "replace")
+    return "%s\n[... %d bytes of buck2's stderr cut ...]\n%s" % (head, len(raw) - 2 * STDERR_KEPT_EACH_END, tail)
+
+
+_LOOKUP = re.compile(r"Error looking up configured node\s+(\S+)")
+_CHAIN = re.compile(r"dependency chain follows[^\n]*?\):\s+(\S+)")
+
+
+def named_target(error):
+    """For the message only, never for a decision: the target buck2's
+    error names as one it could not configure (`Error looking up configured
+    node <label>`, or the first label of a `dependency chain follows`), or
+    ""."""
+    m = _LOOKUP.search(error) or _CHAIN.search(error)
+    return m.group(1) if m else ""
+
+
+def broken_line(error):
+    """The answer when the universe query failed: one `BROKEN` line."""
+    reason = "the universe query failed"
+    named = named_target(error)
+    if named:
+        reason += ", naming " + named
+    reason += ": " + error
+    return "BROKEN " + " ".join(reason.split()) + "\n"
+
+
 def _buck2(args):
     exe = os.environ.get("BUCK2", "buck2")
-    out = subprocess.run([exe] + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        out = subprocess.run([exe] + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except OSError as e:
+        raise QueryFailed("buck2 %s could not be started: %s" % (" ".join(args), e))
     if out.returncode != 0:
         sys.stderr.write(out.stderr)
-        raise SystemExit("derive_checks.py: buck2 %s failed (exit %d)" % (" ".join(args), out.returncode))
+        raise QueryFailed("buck2 %s failed (exit %d): %s" % (" ".join(args), out.returncode, kept_stderr(out.stderr)))
     return out.stdout
 
 
@@ -125,7 +182,9 @@ def check_name(label, taken=frozenset()):
     parts = pkg.split("/")
     if parts == [""]:
         return "repo_root"
-    if parts[0] == "src" and len(parts) > 1:
+    if parts[:2] == ["src", "tests"] and len(parts) > 3:
+        name = parts[3]
+    elif parts[0] == "src" and len(parts) > 1:
         name = parts[1]
     elif parts[0] == "tools" and len(parts) > 1:
         name = "tools_" + parts[1]
@@ -150,6 +209,11 @@ def group_pattern(label):
     parts = pkg.split("/")
     if parts == [""]:
         return "//:"
+    if parts[:2] == ["src", "tests"]:
+        # src/tests holds the test-only packages by kind: one group each.
+        if len(parts) > 3:
+            return "//src/tests/%s/%s/..." % (parts[2], parts[3])
+        return "//%s:" % "/".join(parts)
     if parts[0] in ("src", "tools"):
         if len(parts) == 1:
             return "//%s:" % parts[0]
@@ -241,6 +305,10 @@ SELFTEST = [
     ("//tools/Foo:t", [], "tools_foo"),
     ("//tools/9z:t", [], "tools_9z"),
     ("//src:t", [], "src"),
+    ("//src/tests/e2e/komira_x_e2e:t", [], "komira_x_e2e"),
+    ("//src/tests/helpers/komira_y/sub:t", [], "komira_y"),
+    ("//src/tests/e2e:t", [], "tests"),
+    ("//src/tests:t", [], "tests"),
     ("//:t", [], "repo_root"),
     ("tests//functional/x:t", [], "functional_tests"),
     ("//src/Komira_Up:t", ["komira_up"], "komira_up_package"),
@@ -248,9 +316,28 @@ SELFTEST = [
 ]
 
 
+# THE PATTERN SELF-TEST: (label, the pattern of the derived check it lands
+# in). A check's pattern is what kci builds for it, so a test-only package
+# must keep a pattern of its own, not one shared by all of src/tests.
+PATTERN_SELFTEST = [
+    ("//src/komira_clock:komira_clock", "//src/komira_clock/..."),
+    ("//src/tests/e2e/komira_x_e2e:t", "//src/tests/e2e/komira_x_e2e/..."),
+    ("//src/tests/conformance/komira_c_conformance:t", "//src/tests/conformance/komira_c_conformance/..."),
+    ("//src/tests/helpers/komira_y/sub:t", "//src/tests/helpers/komira_y/..."),
+    ("//src/tests/e2e:t", "//src/tests/e2e:"),
+]
+
+
 def selftest():
-    """The failures of SELFTEST (each a line of text); none is green."""
+    """The failures of SELFTEST and PATTERN_SELFTEST (each a line of text); none is green."""
     failures = []
+    for label, want in PATTERN_SELFTEST:
+        got = group_pattern(label)
+        if got != want:
+            failures.append("group_pattern(%s): %r, want %r" % (label, got, want))
+        checks, _ = derive([], [label])
+        if checks != [(check_name(label), [want])]:
+            failures.append("derive() over %s: %r, want the one check %r with [%r]" % (label, checks, check_name(label), want))
     for label, taken, want in SELFTEST:
         got = check_name(label, frozenset(taken))
         if got != want or not VALID_NAME.match(got):
@@ -267,7 +354,7 @@ def main(argv):
         failures = selftest()
         for f in failures:
             sys.stderr.write("derive_checks.py selftest: RED: %s\n" % f)
-        sys.stderr.write("derive_checks.py selftest: %s (%d cases)\n" % ("RED" if failures else "GREEN", len(SELFTEST)))
+        sys.stderr.write("derive_checks.py selftest: %s (%d cases)\n" % ("RED" if failures else "GREEN", len(SELFTEST) + len(PATTERN_SELFTEST)))
         return 1 if failures else 0
     # The naming is held on every run: a name kci refuses would turn the
     # check red for a change that only added a package.
@@ -282,7 +369,13 @@ def main(argv):
     else:
         sys.stderr.write(__doc__)
         return 2
-    labels = universe()
+    try:
+        labels = universe()
+    except QueryFailed as e:
+        # Any failure of the query, whatever buck2 printed: the check fails.
+        sys.stdout.write(broken_line(str(e)))
+        sys.stderr.write("derive_checks.py: BROKEN: the universe query failed\n")
+        return 0
     text, n, u = answer(declared, labels)
     sys.stdout.write(text)
     sys.stderr.write(

@@ -55,6 +55,8 @@ from komira_azure_blob.azure import (
     build_azure_listing_url,
 )
 from komira_azure_blob.azure_client import AzureClient
+from komira_azure_blob.azure_client_spec import AzureClientSpec, AzureCredential
+from komira_azure_core import AzureSharedKey
 from komira_azure_blob.azure_fs import (
     AZURE_LIST_MAX_PAGES,
     AzureFs,
@@ -584,6 +586,29 @@ def _make_configured_azure_client() raises -> AzureClient[ScriptedConnector]:
     )
 
 
+def _make_connector_raising() raises -> ScriptedConnector:
+    return _make_connector()
+
+
+def _test_credential() raises -> AzureCredential:
+    return AzureCredential.shared_key(
+        AzureSharedKey(
+            String("devstoreaccount1"),
+            String(
+                "VGhpcyBpcyBhIGZha2Uga2V5IGZvciB0ZXN0aW5nIDEyMzQ1Njc4OTAxMjMK"
+            ),
+        )
+    )
+
+
+def _scripted_spec() raises -> AzureClientSpec[ScriptedConnector]:
+    """The spec a clone's client is built from: the account and key of
+    `_make_configured_azure_client`, over an empty scripted connection."""
+    return AzureClientSpec[ScriptedConnector](
+        _azurite_config(), _test_credential(), _make_connector_raising
+    )
+
+
 def test_azurefs_construct_and_container() raises:
     """AzureFs[C] constructs from an owned AzureClient[C]; container()
     surfaces the name."""
@@ -591,7 +616,7 @@ def test_azurefs_construct_and_container() raises:
     var fs = AzureFs[ScriptedConnector](
         container=String("my-container"),
         client=client^,
-        mk_client=_make_configured_azure_client,
+        spec=_scripted_spec(),
         )
     assert_equal(fs.container(), String("my-container"))
 
@@ -602,7 +627,7 @@ def test_azurefs_open_returns_handle() raises:
     var fs = AzureFs[ScriptedConnector](
         container=String("c"),
         client=client^,
-        mk_client=_make_configured_azure_client,
+        spec=_scripted_spec(),
         )
     var h = fs.open(String("path/to/obj.parquet"))
     assert_equal(h.key(), String("path/to/obj.parquet"))
@@ -616,7 +641,7 @@ def test_azurefs_read_at_on_sentinel_raises() raises:
     var fs = AzureFs[ScriptedConnector](
         container=String("c"),
         client=sentinel^,
-        mk_client=_make_configured_azure_client,
+        spec=_scripted_spec(),
     )
     var h = fs.open(String("k.bin"))
     with assert_raises(contains="sentinel"):
@@ -628,7 +653,7 @@ def test_azurefs_capability_queries() raises:
     var fs = AzureFs[ScriptedConnector](
         container=String("c"),
         client=client^,
-        mk_client=_make_configured_azure_client,
+        spec=_scripted_spec(),
         )
     assert_equal(fs.prefetch_depth(), 64)
     assert_true(fs.supports_random_read())
@@ -678,7 +703,7 @@ def _azure_fs_serving(var response: List[UInt8]) raises -> AzureFs[
     return AzureFs[ScriptedConnector](
         container=String("c"),
         client=client^,
-        mk_client=_make_configured_azure_client,
+        spec=_scripted_spec(),
     )
 
 
@@ -826,25 +851,21 @@ struct PagedScriptedConnector(Connector, Movable, Deinitable):
         _ = host^
 
 
-def _paged_client_no_pages() raises -> AzureClient[PagedScriptedConnector]:
-    """`mk_client` factory for the paged fixtures. NOT exercised by these
-    tests — the fixture SEEDS slot 0 with a configured client and
-    `AzureFs._build_client_if_absent` only mints when the slot is empty. It
+def _paged_connector_no_pages() raises -> PagedScriptedConnector:
+    """The connector factory of the paged fixtures' spec. NOT exercised by
+    these tests — the fixture SEEDS slot 0 with a configured client and
+    `AzureFs._build_client_if_absent` only builds when the slot is empty. It
     arms ZERO pages deliberately: if a future refactor ever did route through
     it, the first request would raise the loud "0 page(s) scripted" error
     rather than silently replaying another test's script."""
-    return AzureClient[PagedScriptedConnector](
-        account=String("devstoreaccount1"),
-        key_b64=String(
-            "VGhpcyBpcyBhIGZha2Uga2V5IGZvciB0ZXN0aW5nIDEyMzQ1Njc4OTAxMjMK"
-        ),
-        connector=PagedScriptedConnector(
-            List[List[UInt8]](), ArcPointer[List[UInt8]](List[UInt8]())
-        ),
-        call_connector=PagedScriptedConnector(
-            List[List[UInt8]](), ArcPointer[List[UInt8]](List[UInt8]())
-        ),
-        config=_azurite_config(),
+    return PagedScriptedConnector(
+        List[List[UInt8]](), ArcPointer[List[UInt8]](List[UInt8]())
+    )
+
+
+def _paged_spec_no_pages() raises -> AzureClientSpec[PagedScriptedConnector]:
+    return AzureClientSpec[PagedScriptedConnector](
+        _azurite_config(), _test_credential(), _paged_connector_no_pages
     )
 
 
@@ -868,7 +889,7 @@ def _azure_fs_paged(
     return AzureFs[PagedScriptedConnector](
         container=String("c"),
         client=client^,
-        mk_client=_paged_client_no_pages,
+        spec=_paged_spec_no_pages(),
     )
 
 
@@ -1159,7 +1180,7 @@ def _transport_error_of_read_verb(which: Int) raises -> String:
     var fs = AzureFs[ScriptedConnector](
         container=String("c"),
         client=client^,
-        mk_client=_make_configured_azure_client,
+        spec=_scripted_spec(),
     )
     try:
         if which == 0:
@@ -1198,7 +1219,7 @@ def test_azurefs_write_verbs_refused_read_only() raises:
     var fs = AzureFs[ScriptedConnector](
         container=String("c"),
         client=client^,
-        mk_client=_make_configured_azure_client,
+        spec=_scripted_spec(),
     )
     with assert_raises(contains="AzureFs.open_write: AzureFs is read-only"):
         var _w = fs.open_write(String("w/obj"), WriteMode.create_truncate())
@@ -1220,7 +1241,7 @@ def test_azurefs_delete_is_the_trait_default() raises:
     var fs = AzureFs[ScriptedConnector](
         container=String("c"),
         client=client^,
-        mk_client=_make_configured_azure_client,
+        spec=_scripted_spec(),
     )
     with assert_raises(contains="FileSystem.delete: unimplemented"):
         fs.delete(String("k.parquet"))
@@ -1288,18 +1309,16 @@ struct LoopingListConnector(Connector, Movable, Deinitable):
         _ = host^
 
 
-def _looping_client_unused() raises -> AzureClient[LoopingListConnector]:
-    """`mk_client` for the looping fixture; never called (slot 0 is seeded).
-    Its connector answers nothing usable: `end_at` 1 ends at once."""
-    var calls = ArcPointer[Int](0)
-    return AzureClient[LoopingListConnector](
-        account=String("devstoreaccount1"),
-        key_b64=String(
-            "VGhpcyBpcyBhIGZha2Uga2V5IGZvciB0ZXN0aW5nIDEyMzQ1Njc4OTAxMjMK"
-        ),
-        connector=LoopingListConnector(calls, 1, String("")),
-        call_connector=LoopingListConnector(calls, 1, String("")),
-        config=_azurite_config(),
+def _looping_connector_unused() raises -> LoopingListConnector:
+    """The connector factory of the looping fixture's spec; never called
+    (slot 0 is seeded). Its connector answers nothing usable: `end_at` 1
+    ends at once."""
+    return LoopingListConnector(ArcPointer[Int](0), 1, String(""))
+
+
+def _looping_spec_unused() raises -> AzureClientSpec[LoopingListConnector]:
+    return AzureClientSpec[LoopingListConnector](
+        _azurite_config(), _test_credential(), _looping_connector_unused
     )
 
 
@@ -1322,7 +1341,7 @@ def _azure_fs_looping(
     return AzureFs[LoopingListConnector](
         container=String("c"),
         client=client^,
-        mk_client=_looping_client_unused,
+        spec=_looping_spec_unused(),
     )
 
 

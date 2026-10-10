@@ -103,9 +103,9 @@ struct PercentileAccumulator(Movable, Copyable):
     def result(self) raises -> Float64:
         """NEAREST-RANK percentile under DuckDB's NaN-last TOTAL order.
 
-        ⛔ THIS IS A `quantile_disc`, NOT Excel PERCENTILE.INC AND NOT DuckDB
-        `quantile_cont`. `idx = ceil(p*n) - 1` with no interpolation, so
-        `percentile(0.5)` of [1,2,3,4] is 2.0 where both graded surfaces say
+        ⛔ THIS IS A `quantile_disc`, NOT AN INTERPOLATED PERCENTILE AND NOT
+        DuckDB `quantile_cont`. `idx = ceil(p*n) - 1` with no interpolation, so
+        `percentile(0.5)` of [1,2,3,4] is 2.0 where DuckDB's `median` says
         2.5. That is a DELIBERATE, ASSERTED contract
         (`komira_sdk/tests/test_display_stats.mojo`: "P25 with nearest-rank:
         ceil(0.25 * 8) = 2, so index 1 -> value 2"), left alone here on

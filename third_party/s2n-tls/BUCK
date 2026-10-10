@@ -1,6 +1,7 @@
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/native:defs.bzl", "checked_cxx_library", "prefix_header", "prefixed_archive_check")
 load("@komira//tools/build/third_party_srcs:defs.bzl", "third_party_srcs")
 load(":features.bzl", "S2N_FEATURES")
 load(":srcs.bzl", "PRIVATE_HEADERS", "PROBES", "PUBLIC_HEADERS", "SRCS")
@@ -10,7 +11,8 @@ load(":srcs.bzl", "PRIVATE_HEADERS", "PROBES", "PUBLIC_HEADERS", "SRCS")
 # libs2n, built the way s2n-tls's CMake build builds it with
 #   BUILD_TESTING=OFF BUILD_SHARED_LIBS=OFF S2N_INTERN_LIBCRYPTO=OFF
 #   CMAKE_BUILD_TYPE=Release
-# against //third_party/aws-lc:crypto, without CMake: the source lists are
+# against //third_party/aws-lc:crypto (komira_awslc_*), with its own names
+# renamed komira_s2n_* (:s2n, below), without CMake: the source lists are
 # srcs.bzl (generated from the archive by :srcs_gen and held to it by the
 # test :srcs_drift), and the results of its feature probes are features.bzl
 # (held to a compile of every probe by tools/build/tests/c_libs_tests.sh).
@@ -61,8 +63,8 @@ _DEFINES = [
     ["-DS2N_STACKTRACE"] if "S2N_EXECINFO_AVAILABLE" in S2N_FEATURES else []
 )
 
-cxx_library(
-    name = "s2n",
+# Every argument of the libs2n compile but the prefix (below).
+_S2N = dict(
     srcs = [":src[{}]".format(f) for f in SRCS],
     # s2n-tls includes its headers by their path from the repository root
     # ("tls/s2n_tls.h", "api/s2n.h"), found in the header tree, and some by
@@ -79,7 +81,60 @@ cxx_library(
         for h in PUBLIC_HEADERS
     },
     header_namespace = "",
+    # Built on the prefixed aws-lc: its calls into libcrypto are to
+    # komira_awslc_* names.
     exported_deps = ["//third_party/aws-lc:crypto"],
     target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],  # komira-limit:s2n-tls-x86-64-linux
+)
+
+# libs2n with s2n-tls's own symbol names. Nothing links it: its archive's
+# symbol table is the list of names :prefix_symbols renames.
+cxx_library(
+    name = "s2n_unprefixed",
+    **_S2N
+)
+
+# s2n-tls's names renamed komira_s2n_*: s2n_X becomes komira_s2n_X, any
+# other global X komira_s2n__X. Force-included into every compile of
+# :s2n_prefixed and of its users.
+prefix_header(
+    name = "prefix_symbols",
+    archive = ":s2n_unprefixed[static-pic]",
+    exec_compatible_with = LINUX_X86_64,
+    header = "s2n_prefix_symbols.h",
+    min_symbols = 100,
+    prefix = "komira_s2n_",
+    strip = "s2n_",
+    style = "strip",
+)
+
+cxx_library(
+    name = "s2n_prefixed",
+    exported_preprocessor_flags = ["-include", "$(location :prefix_symbols)"],
+    **_S2N
+)
+
+# Every symbol :s2n_prefixed defines, and every weak hook it references, is
+# komira_s2n_*, and it references none of s2n-tls's or aws-lc's unprefixed
+# names (so its libcrypto calls bind to the prefixed aws-lc).
+prefixed_archive_check(
+    name = "s2n_symbols",
+    archive = ":s2n_prefixed[static-pic]",
+    exec_compatible_with = LINUX_X86_64,
+    min_defined = 100,
+    original_names = [
+        ":prefix_symbols[symbols]",
+        "//third_party/aws-lc:prefix_symbols[symbols]",
+    ],
+    prefix = "komira_s2n_",
+)
+
+# libs2n as its users take it: every global symbol is komira_s2n_* (C
+# callers that include <s2n.h> get the renamed names), on top of :crypto's
+# komira_awslc_*, and :s2n_symbols gates every build holding it.
+checked_cxx_library(
+    name = "s2n",
+    checks = [":s2n_symbols"],
+    lib = ":s2n_prefixed",
     visibility = ["PUBLIC"],
 )

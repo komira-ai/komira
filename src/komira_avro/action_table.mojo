@@ -49,6 +49,7 @@ from .avro_schema import (
     AvroNode,
     AvroDefault,
     avro_node_to_arrow,
+    avro_kind_name,
     AVRO_DEFAULT_NONE,
     AVRO_DEFAULT_NULL,
     AVRO_DEFAULT_BOOL,
@@ -992,16 +993,16 @@ struct _StringAcc(Copyable, Movable):
         # been written into the List by this point but no StringArray has been
         # constructed from them, so nothing downstream can observe them.
         if total_bytes > _INT32_OFFSET_MAX:
-            raise Error(
-                String(
+            raise Error(  # cov: unreachable needs a decoded string column over 2 GiB
+                String(  # cov: unreachable needs a decoded string column over 2 GiB
                     "AvroDecodeError.STRING_COLUMN_TOO_LARGE: decoded string"
                     " column holds "
                 )
-                + String(total_bytes)
-                + " bytes, which overflows Arrow's 32-bit offset encoding"
-                + " (limit "
-                + String(_INT32_OFFSET_MAX)
-                + "); this column needs LARGE_STRING"
+                + String(total_bytes)  # cov: unreachable needs a decoded string column over 2 GiB
+                + " bytes, which overflows Arrow's 32-bit offset encoding"  # cov: unreachable needs a decoded string column over 2 GiB
+                + " (limit "  # cov: unreachable needs a decoded string column over 2 GiB
+                + String(_INT32_OFFSET_MAX)  # cov: unreachable needs a decoded string column over 2 GiB
+                + "); this column needs LARGE_STRING"  # cov: unreachable needs a decoded string column over 2 GiB
             )
 
         var offsets_buf = OwnedAlignedBuffer((num_strings + 1) * int32_size)
@@ -1856,7 +1857,7 @@ struct ActionTableInterpreter(Movable):
             elif self.accs[oi].tag == ACC_F64:
                 self.accs[oi].push_f64(Float64(Int(sd.default.int_val)))
             else:
-                self.accs[oi].push_i64(sd.default.int_val)
+                self.accs[oi].push_i64(sd.default.int_val)  # cov: unreachable _check_default_fits admits an int default only for i32/i64/f32/f64
         elif dk == AVRO_DEFAULT_DOUBLE:
             if self.accs[oi].tag == ACC_F32:
                 self.accs[oi].push_f32(Float32(sd.default.double_val))
@@ -1865,11 +1866,7 @@ struct ActionTableInterpreter(Movable):
         elif dk == AVRO_DEFAULT_STRING:
             self.accs[oi].push_string(sd.default.str_val)
         elif dk == AVRO_DEFAULT_BYTES:
-            var b = List[UInt8]()
-            var sb = sd.default.str_val.as_bytes()
-            for i in range(len(sb)):
-                b.append(sb[i])
-            self.accs[oi].push_binary(b^)
+            self.accs[oi].push_binary(sd.default.bytes_val.copy())
         else:
             raise Error(
                 "AvroResolutionError.NO_DEFAULT_FOR_MISSING_FIELD: field '"
@@ -2159,6 +2156,69 @@ def _named_types_match(writer: AvroNode, reader: AvroNode) -> Bool:
     return False
 
 
+def _default_kind_name(dk: Int) -> String:
+    """`a <kind>` / `an <kind>` for an AVRO_DEFAULT_* (diagnostics only)."""
+    if dk == AVRO_DEFAULT_NULL:
+        return String("a null")
+    if dk == AVRO_DEFAULT_BOOL:
+        return String("a boolean")
+    if dk == AVRO_DEFAULT_INT:
+        return String("an int")
+    if dk == AVRO_DEFAULT_DOUBLE:
+        return String("a double")
+    if dk == AVRO_DEFAULT_STRING:
+        return String("a string")
+    if dk == AVRO_DEFAULT_BYTES:
+        return String("a bytes")
+    return String("a kind#") + String(dk)
+
+
+def _check_default_fits(
+    fname: String, dk: Int, rfd: ReadFieldData
+) raises:
+    """Refuse a reader default that `_synthesize_default` cannot push into
+    the column accumulator `rfd` selects: null needs a nullable column; a
+    boolean needs a boolean column; an int needs an int/long/float/double
+    column; a double needs a float/double column; a string needs a string
+    column; bytes need a binary column."""
+    var fits: Bool
+    if dk == AVRO_DEFAULT_NULL:
+        fits = rfd.nullability != NULL_NONE
+    else:
+        var tag = ColumnAccVariant.create(rfd).tag
+        if dk == AVRO_DEFAULT_BOOL:
+            fits = tag == ACC_BOOL
+        elif dk == AVRO_DEFAULT_INT:
+            fits = (
+                tag == ACC_I32
+                or tag == ACC_I64
+                or tag == ACC_F32
+                or tag == ACC_F64
+            )
+        elif dk == AVRO_DEFAULT_DOUBLE:
+            fits = tag == ACC_F32 or tag == ACC_F64
+        elif dk == AVRO_DEFAULT_STRING:
+            fits = tag == ACC_STRING
+        elif dk == AVRO_DEFAULT_BYTES:
+            fits = tag == ACC_BINARY
+        else:
+            fits = False
+    if fits:
+        return
+    var ty = String("Avro ") + avro_kind_name(rfd.avro_kind)
+    if rfd.logical_type.byte_length() > 0:
+        ty += ", logical " + rfd.logical_type
+    raise Error(
+        "AvroResolutionError.INVALID_DEFAULT: reader field '"
+        + fname
+        + "' has "
+        + _default_kind_name(dk)
+        + " default that does not fit its type ("
+        + ty
+        + ")"
+    )
+
+
 def _resolve_schemas(
     writer: AvroSchema, reader: AvroSchema
 ) raises -> ResolutionTable:
@@ -2332,6 +2392,7 @@ def _resolve_schemas(
                 " declared default"
             )
         var rfd = out_specs[ri].copy()
+        _check_default_fits(rname, rdefault.kind, rfd)
         actions.append(
             FieldAction.synth_default(
                 rname,

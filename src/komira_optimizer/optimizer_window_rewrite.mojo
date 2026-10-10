@@ -106,6 +106,7 @@ from komira_plan_expr.expr import (
     WindowFnData,
 )
 from komira_plan_expr.agg_expr import AggExpr
+from komira_plan_expr.null_order_policy import derived_nulls_first
 from komira_plan_ir.logical_plan import (
     LogicalPlan,
     ExprArray,
@@ -575,8 +576,9 @@ def _fuse_adjacent_partition_bys(var plan: LogicalPlan) raises -> LogicalPlan:
 # directions `([False]*|P| ++ D)`.
 #
 # A subsequent `Sort(K, A)` is a no-op when K is a PREFIX of (P ++ O)
-# AND A matches the corresponding prefix of the implied direction list.
-# In that case the Sort can be dropped entirely.
+# AND A matches the corresponding prefix of the implied direction list
+# AND each key's NULL placement is the sink's derived one
+# (`derived_nulls_first` of the key's direction). In that case the Sort can be dropped entirely.
 #
 # Conservative gate -- when this rule does NOT fire:
 #   * Sort node is NOT directly above PartitionBy (intermediate Project
@@ -585,6 +587,8 @@ def _fuse_adjacent_partition_bys(var plan: LogicalPlan) raises -> LogicalPlan:
 #   * K is not a prefix of (P ++ O), e.g. K reorders P or includes a
 #     column not in (P ++ O).
 #   * Direction mismatch on any key in K.
+#   * NULL placement mismatch on any key in K (an explicit NULLS FIRST /
+#     NULLS LAST the sink's derived placement does not produce).
 #   * P or O is empty (degenerate cases; the partition-by sort path
 #     skips the sort when `len(sort_keys) == 0`, so the post-window
 #     order isn't guaranteed).
@@ -609,24 +613,28 @@ def _sort_over_partition_by(plan_ref: LogicalPlan) -> Bool:
 def _sort_keys_redundant_after_partition_by(
     sort_keys: List[String],
     sort_desc: List[Bool],
+    sort_nulls_first: List[Bool],
     partition_keys: List[String],
     order_keys: List[String],
     pb_desc: List[Bool],
 ) -> Bool:
-    """True iff `(sort_keys, sort_desc)` is a prefix of the row order
-    implied by `_execute_partition_by_sink`'s internal sort:
+    """True iff `(sort_keys, sort_desc, sort_nulls_first)` is a prefix of
+    the row order implied by `_execute_partition_by_sink`'s internal sort:
     `(partition_keys ++ order_keys)` with directions
-    `([False]*|partition_keys| ++ pb_desc)`.
+    `([False]*|partition_keys| ++ pb_desc)` and, per key, the NULL placement
+    `derived_nulls_first(direction)` (a PartitionBy carries no explicit NULL
+    placement, so its sink derives it).
 
     Returns False on:
       * `PARTITION_BY_SINK_EMITS_GLOBAL_KEY_ORDER` being False — the sink
         drivers do not promise that order, so there is no order to be
         redundant WITH. See below.
-      * sort_keys/sort_desc length mismatch (defensive).
+      * sort_keys/sort_desc/sort_nulls_first length mismatch (defensive).
       * Empty partition_keys AND order_keys (no internal sort run).
       * sort_keys longer than (partition_keys ++ order_keys).
       * Any sort_keys[i] != implied_keys[i].
       * Any sort_desc[i] != implied_desc[i].
+      * Any sort_nulls_first[i] != derived_nulls_first(implied_desc[i]).
     """
     # ⛔ THE PREMISE, READ FROM THE OPERATORS PACKAGE RATHER THAN ASSUMED.
     # This rule is only sound because every PartitionBy sink driver emits
@@ -642,7 +650,7 @@ def _sort_keys_redundant_after_partition_by(
         return False
 
     var n_sort = len(sort_keys)
-    if n_sort != len(sort_desc):
+    if n_sort != len(sort_desc) or n_sort != len(sort_nulls_first):
         return False
     if n_sort == 0:
         # An empty Sort is a degenerate shape -- defer; the recursive
@@ -677,6 +685,8 @@ def _sort_keys_redundant_after_partition_by(
             return False
         if sort_desc[i] != implied_dir:
             return False
+        if sort_nulls_first[i] != derived_nulls_first(implied_dir):
+            return False
     return True
 
 
@@ -691,7 +701,7 @@ def _elide_sort_over_partition_by(var plan: LogicalPlan) raises -> LogicalPlan:
     ref pb = sd.child[].partition_by_data_ref()
 
     if _sort_keys_redundant_after_partition_by(
-        sd.keys, sd.descending,
+        sd.keys, sd.descending, sd.nulls_first,
         pb.partition_keys, pb.order_keys, pb.descending,
     ):
         # Drop the Sort. Re-run the rule on the resulting PartitionBy
@@ -728,8 +738,8 @@ def _elide_sort_over_partition_by(var plan: LogicalPlan) raises -> LogicalPlan:
 #                                          (the rewrite path itself
 #                                          handles the recursion).
 #   * Sort(PartitionBy)                 -> Pattern C check; elide if Sort
-#                                          keys+desc are a prefix of the
-#                                          PartitionBy's implied order.
+#                                          keys+desc+nulls are a prefix of
+#                                          the PartitionBy's implied order.
 #   * Other shapes                       -> recurse into children, rebuild.
 #
 # Non-parametric, recursive, NO FileHandle reach -- safe to be a single
@@ -745,8 +755,8 @@ def optimize_window_rewrite(var plan: LogicalPlan) raises -> LogicalPlan:
       A. Project containing 1+ EXPR_WINDOW_FN exprs (incl. via Alias).
       B. Adjacent PartitionBy nodes with matching (partition_keys,
          order_keys, descending) triple.
-      C. Sort(PartitionBy(...)) where Sort keys+desc are a prefix of
-         the PartitionBy's implied output order.
+      C. Sort(PartitionBy(...)) where Sort keys+desc+nulls are a prefix
+         of the PartitionBy's implied output order.
 
     Returns a (possibly) rewritten plan. No-ops when the plan contains
     none of these patterns. Safe to call on any plan; recurses into

@@ -7,7 +7,7 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 # archive the release publishes. The release publishes no checksum file, so
 # the sha256 below is of the archive as downloaded, twice, from the release
 # URL. Nothing of it is committed here, and nothing ships it: it is test data
-# of //src/komira_http_conformance only, run there as a child process against
+# of //src/tests/conformance/komira_http_conformance only, run there as a child process against
 # a komira_http_server HttpServer on 127.0.0.1. No library or binary depends
 # on it.
 #
@@ -26,7 +26,7 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 # A newer pin is `_VERSION`, `_COMMIT` (the commit the tag names), `_SHA256`,
 # `_SIZE`, `_LICENSE_SHA256` and `_LICENSE_SIZE` here; the conformance test's case count
 # (`_H2SPEC_CASES`) and its allowlist then have to be re-read against the new
-# suite (src/komira_http_conformance/h2spec_allowlist.txt).
+# suite (src/tests/conformance/komira_http_conformance/h2spec_allowlist.txt).
 _VERSION = "v2.6.0"
 _COMMIT = "70ac2294010887f48b18e2d64f5cccd48421fad1"
 _SHA256 = "157ee0de702e01ad40e752dbf074b366027e550c8e7504f9450da2809e279318"
@@ -47,7 +47,7 @@ archive_files(
     exec_compatible_with = LINUX_X86_64,
     archive = ":h2spec_linux_amd64.tar.gz",
     files = ["h2spec"],
-    visibility = ["//src/komira_http_conformance/..."],
+    visibility = ["//src/tests/conformance/komira_http_conformance/..."],
 )
 
 # The release archive carries no license text; this is the LICENSE of the

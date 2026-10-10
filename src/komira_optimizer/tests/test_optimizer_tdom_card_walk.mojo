@@ -2,7 +2,7 @@
 # Direct tests for optimizer_tdom_card: the one-set cardinality estimate
 # =============================================================================
 #
-# The welded tests (test_optimizer_tdom_card_b6_xprod) drive
+# The other welded test (test_optimizer_tdom_card_b6_xprod) drives
 # estimate_cardinality_with_set through a TPC-H Q9 fixture. These tests pin
 # the branches that fixture does not reach: the subgraph-merge walk (extend
 # on either side, merge in either order, same-subgraph skip, the
@@ -440,14 +440,15 @@ def test_estimate_cross_product_clamp() raises:
     edge inside {0,1,2}. TDOM 10: 1e9 / 10 = 1e8, cut to the largest
     base card 1000 by the cross-product clamp (no FK-PK signal: unknown
     NDVs are 1). TDOM 1e7: 100 is under 1000 and stays. The traced
-    sibling does not apply the cross-product clamp: it reports 1e8.
+    sibling applies the same clamp: its final card equals the estimate
+    (1000 and 100) while its raw card keeps the unclamped 1e8.
     The connected pair {0,1} with TDOM 10 estimates 1e6 / 10 = 1e5,
     above its largest base card 1000, and keeps it.
 
     Catches: the cross-product clamp removed (1e8), applied without
     its `est > bound` test (the second case would give 1000), or
     applied without its cross-product-shape test (the connected pair
-    would give 1000).
+    would give 1000), in either the estimate or the traced sibling.
     """
     var cards: List[Int] = [1000, 1000, 1000]
     var chain = _chain(cards)
@@ -460,17 +461,23 @@ def test_estimate_cross_product_clamp() raises:
     assert_equal(estimate_cardinality_with_set(tdom1, chain, s, p, cache1), 1000)
     var t1 = estimate_cardinality_with_set_traced(tdom1, chain, s, p)
     assert_false(t1.clamp_fired)
-    assert_equal(t1.final_card, 100_000_000)
+    assert_equal(t1.raw_card, 100_000_000)
+    assert_equal(t1.final_card, 1000)
 
     var tdom2 = _one_class(_no_hll(10_000_000))
     var cache2 = Dict[UInt64, Int]()
     assert_equal(estimate_cardinality_with_set(tdom2, chain, s, p, cache2), 100)
+    var t2 = estimate_cardinality_with_set_traced(tdom2, chain, s, p)
+    assert_equal(t2.final_card, 100)
 
     var cache3 = Dict[UInt64, Int]()
+    var pair = _bits([0, 1])
     assert_equal(
-        estimate_cardinality_with_set(tdom1, chain, _bits([0, 1]), p, cache3),
+        estimate_cardinality_with_set(tdom1, chain, pair, p, cache3),
         100_000,
     )
+    var t3 = estimate_cardinality_with_set_traced(tdom1, chain, pair, p)
+    assert_equal(t3.final_card, 100_000)
 
 
 # =============================================================================

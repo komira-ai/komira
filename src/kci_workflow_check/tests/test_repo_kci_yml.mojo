@@ -16,7 +16,7 @@
 #   (`ci check`, a claim, an expected set hash) and no channel but the machine
 #   file's. The validate job's `kci run` is the one each validation target
 #   (`./buck2 run //release/validations:<name>`) runs, but for paths and what
-#   a caller supplies. Continuous auto-promotion: build and gamma are
+#   a caller supplies; no other job handles pixi. Continuous auto-promotion: build and gamma are
 #   break_glass, prod is not; a break-glass publish to gamma goes through the
 #   environment gamma-breakglass, which the gamma channel trusts as its
 #   second publisher, and prod has none; the push trigger's documentation
@@ -279,6 +279,33 @@ def test_pr_yml_agrees_with_the_machine_file() raises:
     assert_equal(runs, 1)
     assert_equal(farm, 1)
     assert_true(doc.child(doc.items(jobs)[0], String("environment")) < 0)
+    # the build budget: the FIRST step takes the job's deadline, 5 of its
+    # 120 minutes before GitHub would cancel it, and the one `kci run` gets
+    # the seconds left of it as --build-budget-s (kci_build THE BUDGET)
+    assert_equal(doc.text(doc.child(doc.items(jobs)[0], String("timeout-minutes"))), String("120"))
+    var first = doc.child(steps[0], String("run"))
+    assert_true(first >= 0, String("pr.yml's first step runs nothing"))
+    assert_equal(
+        doc.text(first), String('echo "$(( $(date +%s) + 115 * 60 ))" > "$RUNNER_TEMP/job_deadline_s"\n')
+    )
+    var budgeted = 0
+    for i in range(len(steps)):
+        var r = doc.child(steps[i], String("run"))
+        if r >= 0 and doc.kind(r) == NODE_SCALAR and len(kci_run_calls(doc.text(r))) > 0:
+            var t = doc.text(r)
+            # a missing deadline file stops the step before the arithmetic
+            # (which would read it as 0: a huge negative budget)
+            assert_true(
+                t.startswith(
+                    String('[ -s "$RUNNER_TEMP/job_deadline_s" ] || { echo "::error::no job deadline in ')
+                    + String("\\$RUNNER_TEMP/job_deadline_s: the job's first step did not write it\"; exit 1; }\n")
+                    + String('budget_s=$(( $(cat "$RUNNER_TEMP/job_deadline_s") - $(date +%s) ))\n')
+                ),
+                t,
+            )
+            assert_true(t.find(String(' --build-budget-s "$budget_s" ')) >= 0, t)
+            budgeted += 1
+    assert_equal(budgeted, 1)
 
 
 def test_each_real_workflow_is_refused_when_read_as_the_other() raises:
@@ -566,6 +593,53 @@ def test_an_empty_pixi_sha_is_refused_before_run_time() raises:
     var shipped = text.replace(tar, String("kci release kci-result-build.json pixi\n"))
     var found = _pixi_pin_findings(shipped, pin)
     assert_true(len(found) > 0, String("a build job writing a pixi sha is not refused"))
+
+
+def _in_job(text: String, job: String, anchor: String, added: String) raises -> String:
+    """`text` with `added` written right after the first `anchor` that
+    follows the job `job`'s header line; the step is then read back to
+    prove the edit landed in that job's `run:`."""
+    var head = text.find(String("\n  ") + job + String(":\n"))
+    assert_true(head >= 0, String("kci.yml has no job ") + job)
+    var at = text.find(anchor, head)
+    assert_true(at >= 0, String("kci.yml's job ") + job + String(" has no line to mutate: ") + anchor)
+    var end = at + anchor.byte_length()
+    var out = String(text[byte = 0:end]) + added + String(text[byte = end:])
+    var doc = read_workflow(out)
+    var steps = doc.items(doc.child(doc.child(doc.child(0, String("jobs")), job), String("steps")))
+    var landed = False
+    for i in range(len(steps)):
+        var r = doc.child(steps[i], String("run"))
+        if r >= 0 and doc.kind(r) == NODE_SCALAR and doc.text(r).find(added) >= 0:
+            landed = True
+    assert_true(landed, String("the mutation did not land in job ") + job)
+    return out^
+
+
+def test_only_the_validate_job_handles_pixi() raises:
+    # The rule "a job other than validate handles pixi", alone: each of
+    # build, gamma and prod given one more word `pixi` in a `run:` (the
+    # pin, the downloads and the release tar line untouched) is refused
+    # with exactly that finding; the same word in validate itself is not.
+    var text = Path(String("kci.yml")).read_text()
+    var pin = Path(String("pixi_pin.txt")).read_text()
+    var base = _pixi_pin_findings(text, pin)
+    assert_equal(len(base), 0, _joined(base))
+    var added = String(" && echo pixi")
+    var version = String("run: tools/build/package/release_version.sh \"$REVISION\" | tee \"$RUNNER_TEMP/release_version.txt\"")
+    var build_kci = String("run: ./buck2 build '//bin/kci:kci[runnable]' --out \"$RUNNER_TEMP/kci\"")
+    var unpack = String("run: tar -C \"$RUNNER_TEMP\" -xf \"$RUNNER_TEMP/in/kci-release.tar\"")
+    var cases = List[Tuple[String, String]]()
+    cases.append((String("build"), build_kci.copy()))
+    cases.append((String("gamma"), version.copy()))
+    cases.append((String("prod"), version.copy()))
+    for c in cases:
+        var job = c[0].copy()
+        var found = _pixi_pin_findings(_in_job(text, job, c[1], added), pin)
+        assert_equal(len(found), 1, String("job ") + job + String(" handling pixi:") + _joined(found))
+        assert_equal(found[0], String("a job other than validate handles pixi"))
+    var own = _pixi_pin_findings(_in_job(text, String("validate"), unpack, added), pin)
+    assert_equal(len(own), 0, String("the validate job handling pixi is refused:") + _joined(own))
 
 
 def main() raises:

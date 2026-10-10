@@ -167,7 +167,7 @@ def _rsa_new() -> _FfiHandle:
     # Returns NULL on OOM (caller MUST check via `Int(ptr) != 0`).
     """
     return external_call[
-        "RSA_new",
+        "komira_awslc_RSA_new",
         _FfiHandle,
     ]()
 
@@ -182,7 +182,7 @@ def _rsa_free(rsa: _FfiHandle):
     """
     if Int(rsa) != 0:
         external_call[
-            "RSA_free", NoneType,
+            "komira_awslc_RSA_free", NoneType,
             _FfiHandle,
         ](rsa)
 
@@ -193,11 +193,11 @@ def _bn_free(bn: _FfiHandle):
 
     # SAFETY: bn must be a valid BIGNUM pointer or NULL.
     """
-    if Int(bn) != 0:
+    if Int(bn) != 0:  # cov: unreachable called only when RSA_set0_key did not take n and e, which happens only after an allocation failure
         external_call[
-            "BN_free", NoneType,
+            "komira_awslc_BN_free", NoneType,
             _FfiHandle,
-        ](bn)
+        ](bn)  # cov: unreachable see the line above
 
 
 @always_inline
@@ -218,7 +218,7 @@ def _bn_bin2bn_from_span(
     # (canonical pattern; same shape as p256_ffi.mojo).
     var ret_null = _ffi_null()
     return external_call[
-        "BN_bin2bn",
+        "komira_awslc_BN_bin2bn",
         _FfiHandle,
         _FfiByte,   # in
         UInt,                                       # len
@@ -261,20 +261,20 @@ def _evp_md_for_kind(
     """
     if md_kind == MD_SHA256:
         return external_call[
-            "EVP_sha256",
+            "komira_awslc_EVP_sha256",
             _FfiHandle,
         ]()
     if md_kind == MD_SHA384:
         return external_call[
-            "EVP_sha384",
+            "komira_awslc_EVP_sha384",
             _FfiHandle,
         ]()
     if md_kind == MD_SHA512:
         return external_call[
-            "EVP_sha512",
+            "komira_awslc_EVP_sha512",
             _FfiHandle,
         ]()
-    return _ffi_null()
+    return _ffi_null()  # cov: unreachable the only caller, rsa_pss_verify_ffi, checks md_kind at entry
 
 
 # -----------------------------------------------------------------------------
@@ -338,35 +338,35 @@ def rsa_pss_verify_ffi(
     var rsa_owns_ne = False  # set true once RSA_set0_key takes ownership
     try:
         if Int(rsa) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
 
         bn_n = _bn_bin2bn_from_span(n_be)
         if Int(bn_n) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
         bn_e = _bn_new_from_u64(e_value)
         if Int(bn_e) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
 
         # SAFETY: RSA_set0_key(rsa, n, e, d) TAKES OWNERSHIP of n + e
         # on success (returns 1). On failure (returns 0) ownership stays
         # with the caller. d = NULL (no private key for verify path).
         var d_null = _ffi_null()
         var rc_set = external_call[
-            "RSA_set0_key", Int32,
+            "komira_awslc_RSA_set0_key", Int32,
             _FfiHandle,  # rsa
             _FfiHandle,  # n
             _FfiHandle,  # e
             _FfiHandle,  # d (NULL)
         ](rsa, bn_n, bn_e, d_null)
         if rc_set != 1:
-            return False
+            return False  # cov: unreachable RSA_set0_key fails only on a NULL n or e, refused above
         rsa_owns_ne = True
 
         # SAFETY: EVP_sha{256,384,512}() return const singleton EVP_MD*
         # pointers. MUST NOT be freed.
         var md_ptr = _evp_md_for_kind(md_kind)
         if Int(md_ptr) == 0:
-            return False
+            return False  # cov: unreachable md_kind was checked at entry, so the digest is never NULL
         # mgf1_md = NULL means "use the same hash as md" — universal
         # cert-chain convention. Our existing in-tree code matches this
         # (MGF1 instantiated with the same H: Hash trait param).
@@ -382,7 +382,7 @@ def rsa_pss_verify_ffi(
         var digest_ptr = _span_ptr_mut(digest)
         var sig_ptr = _span_ptr_mut(sig)
         var rc_v = external_call[
-            "RSA_verify_pss_mgf1", Int32,
+            "komira_awslc_RSA_verify_pss_mgf1", Int32,
             _FfiHandle,  # rsa
             _FfiByte,     # hash (digest)
             UInt,                                         # hash_len
@@ -403,8 +403,8 @@ def rsa_pss_verify_ffi(
         # _rsa_free and _bn_free are no-ops on NULL.
         _rsa_free(rsa)
         if not rsa_owns_ne:
-            _bn_free(bn_e)
-            _bn_free(bn_n)
+            _bn_free(bn_e)  # cov: unreachable n and e are unowned only after an allocation failure
+            _bn_free(bn_n)  # cov: unreachable see the line above
     return ok
 
 
@@ -489,28 +489,28 @@ def rsa_pkcs1_sha256_verify_ffi(
     var rsa_owns_ne = False  # set true once RSA_set0_key takes ownership
     try:
         if Int(rsa) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
 
         bn_n = _bn_bin2bn_from_span(n_be)
         if Int(bn_n) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
         bn_e = _bn_new_from_u64(e_value)
         if Int(bn_e) == 0:
-            return False
+            return False  # cov: unreachable an allocation failure
 
         # SAFETY: RSA_set0_key(rsa, n, e, d) TAKES OWNERSHIP of n + e on
         # success (returns 1). On failure (returns 0) ownership stays with the
         # caller. d = NULL (no private key on the verify path).
         var d_null = _ffi_null()
         var rc_set = external_call[
-            "RSA_set0_key", Int32,
+            "komira_awslc_RSA_set0_key", Int32,
             _FfiHandle,  # rsa
             _FfiHandle,  # n
             _FfiHandle,  # e
             _FfiHandle,  # d (NULL)
         ](rsa, bn_n, bn_e, d_null)
         if rc_set != 1:
-            return False
+            return False  # cov: unreachable RSA_set0_key fails only on a NULL n or e, refused above
         rsa_owns_ne = True
 
         # SAFETY: RSA_verify reads len(digest) bytes from digest_ptr and
@@ -520,7 +520,7 @@ def rsa_pkcs1_sha256_verify_ffi(
         var digest_ptr = _span_ptr_mut(digest)
         var sig_ptr = _span_ptr_mut(sig)
         var rc_v = external_call[
-            "RSA_verify", Int32,
+            "komira_awslc_RSA_verify", Int32,
             Int32,      # hash_nid
             _FfiByte,   # digest
             UInt,       # digest_len
@@ -538,6 +538,6 @@ def rsa_pkcs1_sha256_verify_ffi(
         # stayed with us — free them ourselves. Both frees are NULL-safe.
         _rsa_free(rsa)
         if not rsa_owns_ne:
-            _bn_free(bn_e)
-            _bn_free(bn_n)
+            _bn_free(bn_e)  # cov: unreachable n and e are unowned only after an allocation failure
+            _bn_free(bn_n)  # cov: unreachable see the line above
     return ok

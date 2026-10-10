@@ -187,20 +187,19 @@ struct ParquetSource(SourceLike, Movable, Copyable, Deinitable):
     un-filtered degenerate Hive read (surfaces partition cols, prunes nothing).
     `None` until the pass runs (or for non-dir-scan sources). Only meaningful
     when `hive_dir_scan` is True."""
-    # --- Unified FS registry — defaulted to FsDescriptorPod.local() so every
-    #     local ctor / factory is a no-op (scheme=FILE, node_id=-1 -> local
-    #     resolver). The cloud `read_parquet[FS]` seam sets this to
+    # --- The source's FS identity — defaulted to FsDescriptorPod.local() so
+    #     every local ctor / factory is a no-op (scheme=FILE, node_id=-1, the
+    #     local default). A cloud read sets it to
     #     `FsDescriptorPod.cloud(scheme, bucket, node_id)` with a query-unique
-    #     node_id; `_build_morsel_source_from_scan` propagates it into the
-    #     physical `ParquetSourceData` so the engine's `_resolve_source` looks
-    #     up the live `FsHandle` (in the DataFrame's `FsRegistry`) by node_id.
+    #     node_id, the scheme being the code komira_source_url maps the
+    #     source URL's prefix to; it propagates into the physical
+    #     `ParquetSourceData`, which names the one file system that reads it.
     #     Core names NO FS type here — only the identity POD. ---
     var fs_descriptor: FsDescriptorPod
     """Per-source FS identity (scheme + bucket + node_id). Local default
-    (node_id=-1) for on-disk reads; a registered node_id for cloud reads, paired
-    to a live `FsHandle` in the per-execution `FsRegistry`. NOT folded into the
-    cache fingerprint (FS identity is a materialize-time binding, not a plan-shape
-    discriminant)."""
+    (node_id=-1) for on-disk reads; a bound node_id for cloud reads. NOT folded
+    into the cache fingerprint (FS identity is a materialize-time binding, not
+    a plan-shape discriminant)."""
 
     def __init__(
         out self,
@@ -428,11 +427,10 @@ struct ParquetSource(SourceLike, Movable, Copyable, Deinitable):
 
     def with_fs_descriptor(self, fs_descriptor: FsDescriptorPod) -> Self:
         """Return a copy of this source with `fs_descriptor` set (the
-        per-source FS identity POD carrying the registered node_id). Used by the
-        cloud `read_parquet[FS]` seam to bind the scan node's node_id to the live
-        `FsHandle` registered in the DataFrame's `FsRegistry`. Works for ANY
-        source shape (single file / partitioned / dir-scan-Hive) — unlike
-        `with_hive_predicate`, FS identity attaches to every cloud read."""
+        per-source FS identity POD naming the source's scheme, bucket and
+        node_id). Works for ANY source shape (single file / partitioned /
+        dir-scan-Hive) — unlike `with_hive_predicate`, FS identity attaches to
+        every cloud read."""
         var out = self.copy()
         out.fs_descriptor = fs_descriptor.copy()
         return out^

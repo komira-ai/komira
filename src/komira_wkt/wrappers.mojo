@@ -39,15 +39,15 @@ from komira_proto_codec import (
     WireEncoder,
     WireDecoder,
     read_proto3_json_f32,
+    read_proto3_json_f64,
     write_proto3_json_f32,
+    write_proto3_json_f64,
 )
 from komira_json import (
     JsonValue,
-    JSON_NUMBER,
     JSON_STRING,
     write_json_string,
     write_i64_dec,
-    write_f64_dtoa,
     parse_json_value,
 )
 from komira_encoding import base64_encode, base64_decode
@@ -83,11 +83,11 @@ struct DoubleValue(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
     # -- `Proto3JsonWkt`: the bare scalar, through the codec arms ------
 
     def write_proto3_json(self, mut buf: List[UInt8]) raises:
-        _write_f64_json(buf, self.value)
+        write_proto3_json_f64(buf, self.value)
 
     @staticmethod
     def read_proto3_json(v: JsonValue) raises -> Self:
-        return Self(_read_f64_json(v))
+        return Self(read_proto3_json_f64(v))
 
     def to_proto3_json(self) -> String:
         return _f64_json_text(self.value)
@@ -521,55 +521,14 @@ def _f64_json_text(v: Float64) -> String:
     "-Infinity" (which is why the float wrappers' `is_json_string()` is
     False: their text is already a complete JSON value)."""
     var buf = List[UInt8]()
-    _write_f64_json(buf, v)
+    write_proto3_json_f64(buf, v)
     return String(unsafe_from_utf8=Span(buf))
 
 
-def _parse_f64(text: String) raises -> Float64:
-    """Parse a JSON number into a Float64."""
-    try:
-        return atof(text)
-    except:
-        raise Error("WktError: bad floating-point text: " + text)
-
-
-# =============================================================================
-# The proto3-JSON double form, used by DoubleValue. (FloatValue uses the
-# codec's float32 form, `write_proto3_json_f32` / `read_proto3_json_f32`.)
-#
-# A finite value is a JSON number, written by the same formatter a plain
-# `double` field uses. The three non-finite values are the spec's STRINGS
-# "NaN" / "Infinity" / "-Infinity" — a JSON number cannot carry them, and
-# writing `null` would turn a present wrapper into an absent one.
-# =============================================================================
-
-
-def _write_f64_json(mut buf: List[UInt8], v: Float64):
-    if v != v:
-        write_json_string(buf, String("NaN"))
-    elif v > Float64(1.7976931348623157e308):
-        write_json_string(buf, String("Infinity"))
-    elif v < Float64(-1.7976931348623157e308):
-        write_json_string(buf, String("-Infinity"))
-    else:
-        write_f64_dtoa(buf, v)
-
-
-def _read_f64_json(v: JsonValue) raises -> Float64:
-    """A JSON number, or a string holding a number or one of the spec's
-    three non-finite spellings."""
-    if v.kind == JSON_STRING:
-        var inf = Float64(1.0e308) * Float64(10.0)
-        if v.text == "NaN":
-            return inf - inf
-        if v.text == "Infinity":
-            return inf
-        if v.text == "-Infinity":
-            return -inf
-        return _parse_f64(v.text)
-    if v.kind != JSON_NUMBER:
-        raise Error("WktError: expected a JSON number for a double wrapper")
-    return _parse_f64(v.text)
+# The proto3-JSON double form, used by DoubleValue, is the codec's
+# (`write_proto3_json_f64` / `read_proto3_json_f64`), the one a plain
+# `double` field uses; FloatValue uses the codec's float32 form
+# (`write_proto3_json_f32` / `read_proto3_json_f32`).
 
 
 def _append_ascii(mut buf: List[UInt8], s: String):

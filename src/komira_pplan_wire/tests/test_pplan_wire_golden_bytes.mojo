@@ -95,7 +95,6 @@ from komira_plan_expr.scalar_value import (
     SCALAR_KIND_TIMESTAMP,
     SCALAR_TIME_UNIT_NANO,
 )
-from komira_plan_expr.excel_error_code import XL_ERR_NA
 
 from komira_pplan_wire import pplan_fields_equal, pplan_from_bytes, pplan_to_bytes
 
@@ -275,7 +274,7 @@ def _project_op() -> MorselOp:
 
 
 def _scalar_every_field() -> ScalarValue:
-    """All 20 fields away from their defaults. Not a coherent value of any one
+    """All 19 fields away from their defaults. Not a coherent value of any one
     kind: the codec carries every field unconditionally, so the fixture pins
     every field's offset and width."""
     var s = ScalarValue()
@@ -299,7 +298,6 @@ def _scalar_every_field() -> ScalarValue:
     s.time_unit = SCALAR_TIME_UNIT_NANO
     s.dec256_high_lo = Int64(-6)
     s.dec256_high_hi = Int64(7)
-    s.error_code = XL_ERR_NA
     return s^
 
 

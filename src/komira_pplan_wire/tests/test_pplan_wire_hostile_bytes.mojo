@@ -27,17 +27,18 @@
 #                length or op count over a short buffer, and a PROJECT whose
 #                name count differs from its expression count.
 #   UNKNOWN      op tags, expr tags, dtype codes, column sides, binary/unary
-#                operator codes, fs schemes, scalar kind / time unit / error
-#                code, a bool byte that is neither 0 nor 1, a negative LIMIT or
+#                operator codes, fs schemes, scalar kind / time unit, a bool
+#                byte that is neither 0 nor 1, a negative LIMIT or
 #                row window, a non-UTF-8 identifier, an Int32 scalar field
 #                (date32, interval months/days) outside Int32.
-#   VERSION GATE version 0 and 2 refused; and refused BEFORE the body is read
-#                (`version_2_truncated_body` names the version, not the
-#                truncation behind it).
+#   VERSION GATE versions 0, 1 and 3 refused; and refused BEFORE the body is
+#                read (`version_1` is `scan_full` in the version-1 layout and
+#                `version_3_truncated_body` is truncated: each names the
+#                version, not the misparse or truncation behind it).
 #   ENCODER      the encoder refuses a non-UTF-8 path or column name and a
 #                PROJECT count mismatch with the decoder's own message, so no
 #                plan encodes to bytes the decoder refuses.
-#   CONTROLS     the version-2 fixture with its version byte set back to 1 is
+#   CONTROLS     the version-3 fixture with its version byte set back to 2 is
 #                byte-identical to the `scan_full` golden and decodes; a
 #                64-deep expression decodes and a 65-deep one is refused; a
 #                BINARY literal's non-UTF-8 bytes are carried, not refused.
@@ -180,14 +181,9 @@ def test_hostile_fixtures_are_refused_by_exact_message() raises:
     _check("binary_op_gap", "PPLAN_WIRE_BAD_ENUM: binary op 5", f)
     _check("unary_op_unknown", "PPLAN_WIRE_BAD_ENUM: unary op 9", f)
     _check("fs_scheme_unknown", "PPLAN_WIRE_BAD_ENUM: fs scheme 4", f)
-    _check("scalar_kind_unknown", "PPLAN_WIRE_BAD_ENUM: scalar kind 11", f)
+    _check("scalar_kind_unknown", "PPLAN_WIRE_BAD_ENUM: scalar kind 10", f)
     _check(
         "scalar_time_unit_unknown", "PPLAN_WIRE_BAD_ENUM: scalar time unit 4", f
-    )
-    _check(
-        "scalar_error_code_unknown",
-        "PPLAN_WIRE_BAD_ENUM: scalar error code 11",
-        f,
     )
     # Int32 fields travel as Int64: a value outside Int32 would narrow to the
     # same plan as 2^32 other spellings, and would not re-encode to itself.
@@ -224,10 +220,14 @@ def test_hostile_fixtures_are_refused_by_exact_message() raises:
     _check("bad_magic", "PPLAN_WIRE_BAD_MAGIC", f)
     _check("trailing_byte", "PPLAN_WIRE_TRAILING_BYTES: 1 unread", f)
     _check("version_0", "PPLAN_WIRE_BAD_VERSION: 0", f)
-    _check("version_2", "PPLAN_WIRE_BAD_VERSION: 2", f)
+    # `scan_full` as version 1 encoded it, whose scalar layout carried one
+    # more byte. Read under the current layout it would misparse; the version
+    # gate refuses it first.
+    _check("version_1", "PPLAN_WIRE_BAD_VERSION: 1", f)
+    _check("version_3", "PPLAN_WIRE_BAD_VERSION: 3", f)
     # The body after this version is TRUNCATED. A gate that ran after (or
     # instead of) the parse would name the truncation; the version must win.
-    _check("version_2_truncated_body", "PPLAN_WIRE_BAD_VERSION: 2", f)
+    _check("version_3_truncated_body", "PPLAN_WIRE_BAD_VERSION: 3", f)
     # ---- memory safety: LAST, because before the bound was overflow-safe this
     # fixture read past the buffer, and a crash here must not hide the
     # verdicts above.
@@ -243,14 +243,14 @@ def test_hostile_fixtures_are_refused_by_exact_message() raises:
         raise Error(msg)
 
 
-def test_version_2_is_scan_full_with_one_byte_changed() raises:
-    """The version-gate control. Setting the version byte of `version_2` back
-    to 1 yields the `scan_full` golden EXACTLY, and that decodes: so the
-    version, and nothing else, is what `version_2` is refused for."""
-    var hostile = _hostile(String("version_2"))
+def test_version_3_is_scan_full_with_one_byte_changed() raises:
+    """The version-gate control. Setting the version byte of `version_3` back
+    to 2 yields the `scan_full` golden EXACTLY, and that decodes: so the
+    version, and nothing else, is what `version_3` is refused for."""
+    var hostile = _hostile(String("version_3"))
     var golden = _read_hex(_GOLDEN_DIR + "scan_full.hex")
-    assert_equal(hostile[4], UInt8(2))
-    hostile[4] = UInt8(1)
+    assert_equal(hostile[4], UInt8(3))
+    hostile[4] = UInt8(2)
     assert_equal(len(hostile), len(golden))
     for i in range(len(golden)):
         assert_equal(hostile[i], golden[i], "byte " + String(i))
@@ -355,7 +355,7 @@ def test_encoder_refuses_a_project_name_count_mismatch() raises:
 
 
 def main() raises:
-    test_version_2_is_scan_full_with_one_byte_changed()
+    test_version_3_is_scan_full_with_one_byte_changed()
     test_bool_byte_two_is_scan_bare_with_one_byte_changed()
     test_expression_depth_bound_is_exact()
     test_binary_literal_bytes_are_carried_not_refused()

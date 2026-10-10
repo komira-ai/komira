@@ -1,0 +1,5 @@
+# A made-up generated source for cov_branch_classify's cases (README.md), staged as gen.mojo.
+def g(n: Int) -> Int:
+    if n == 0:
+        return 1
+    return 2

@@ -196,7 +196,7 @@ def _foreign_stream_release(stream_ptr: _CStreamPtr) -> None:
     st.release = _null_ptr[NoneType, MutUntrackedOrigin]()
 
 
-def _foreign_get_schema(stream: _OpaquePtr, out_schema: _CSchemaPtr) raises -> Int32:
+def _foreign_get_schema(stream: _OpaquePtr, out_schema: _CSchemaPtr) abi("C") -> Int32:
     """Delegate to the inner stream so the schema is a real, importable one."""
     var sp = stream.bitcast[CArrowArrayStream]()
     var fp = sp[].private_data.bitcast[Int]()
@@ -204,7 +204,7 @@ def _foreign_get_schema(stream: _OpaquePtr, out_schema: _CSchemaPtr) raises -> I
     return inner[].get_schema(inner.bitcast[NoneType](), out_schema)
 
 
-def _foreign_get_next(stream: _OpaquePtr, out_array: _CArrayPtr) raises -> Int32:
+def _foreign_get_next(stream: _OpaquePtr, out_array: _CArrayPtr) abi("C") -> Int32:
     """Delegate to the inner stream, then MAKE THE DELIVERED CHUNK FOREIGN.
 
     The buffers, children and lengths stay exactly as the inner export built them — the
@@ -231,7 +231,7 @@ def _foreign_get_next(stream: _OpaquePtr, out_array: _CArrayPtr) raises -> Int32
     return rc
 
 
-def _foreign_get_last_error(stream: _OpaquePtr) -> UnsafePointer[Int8, MutUntrackedOrigin]:
+def _foreign_get_last_error(stream: _OpaquePtr) abi("C") -> UnsafePointer[Int8, MutUntrackedOrigin]:
     _ = stream
     return _null_ptr[Int8, MutUntrackedOrigin]()
 

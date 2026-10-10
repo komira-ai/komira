@@ -1,0 +1,24 @@
+<?xml version="1.0" ?>
+<coverage timestamp="0">
+	<sources>
+		<source>.</source>
+	</sources>
+	<packages>
+		<package name="">
+			<classes>
+				<class name="tools/build/tests/functional/coverage/covgen/plain.mojo" filename="tools/build/tests/functional/coverage/covgen/plain.mojo">
+					<lines>
+						<line number="2" hits="1"/>
+					</lines>
+				</class>
+				<class name="tools/build/tests/functional/coverage/tests/test_gen.mojo" filename="tools/build/tests/functional/coverage/tests/test_gen.mojo">
+					<lines>
+						<line number="8" hits="1"/>
+						<line number="9" hits="1"/>
+						<line number="10" hits="1"/>
+					</lines>
+				</class>
+			</classes>
+		</package>
+	</packages>
+</coverage>

@@ -445,10 +445,13 @@ def test_malformed_timeout_is_indistinguishable_from_no_deadline() raises:
     own decoder accepts everything our own encoder emits. THE COLLISION ITSELF
     IS UNCHANGED and
     the three assertions above still state it — `parse_grpc_timeout` still
-    returns one sentinel for absent / malformed / already-expired, and closing
-    THAT needs a signature change (`Optional[Int]` or a raise) across every
-    caller in `komira_connect` and `komira_grpc`. It is open work, not
-    silently narrowed here.
+    returns one sentinel for absent / malformed / already-expired.
+
+    The h2 serve loop does not read this sentinel: it enforces grpc-timeout
+    through `komira_http_core`'s three-state `parse_grpc_timeout_value`
+    (absent / set, zero included / malformed), which `parse_grpc_timeout`
+    wraps. komira_http_core/tests/test_grpc_timeout_parse.mojo and
+    test_grpc_timeout_enforced.mojo pin that side.
     """
     # (b) and (a) are the same bytes.
     assert_equal(

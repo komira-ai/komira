@@ -5,7 +5,7 @@
 # and gives their manifests to `komira_pack conda-meta`, which makes the metapackage. This
 # script plays that tool, on the packages the repository really builds.
 #
-# usage: tools/build/tests/functional/conda_set.sh [--no-uncached] [--no-install]   (from anywhere; BUCK2 overrides;
+# usage: tools/build/tests/functional/conda_set.sh [--no-uncached] [--no-install | --require-install]   (from anywhere; BUCK2 overrides;
 #        KOMIRA_TEST_KEEP=1 keeps the scratch directory, with every log, after a pass)
 #
 #   enumerate  tools/build/package/list_conda_targets.sh prints a package target for every library
@@ -42,7 +42,8 @@
 #              version): only the pinned build is installed (the solver would take the newer one
 #              if the build string in the requirement were ignored), and a requirement naming a
 #              build the channel does not have makes the install fail. Needs pixi, jq and
-#              network; otherwise SKIP.
+#              network; otherwise SKIP, or FAIL with --require-install
+#              (install_gate/install_gate.sh).
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
@@ -52,13 +53,25 @@ if [ -z "${BUCK2:-}" ]; then
 fi
 uncached=1
 install=1
+require_install=0
 for a in "$@"; do
     case "$a" in
         --no-uncached) uncached=0 ;;
         --no-install) install=0 ;;
+        --require-install) require_install=1 ;;
         *) echo "conda_set.sh: unknown argument $a" >&2; exit 2 ;;
     esac
 done
+if [ "$install" = 0 ] && [ "$require_install" = 1 ]; then
+    echo "conda_set.sh: --require-install and --no-install contradict each other" >&2
+    exit 2
+fi
+. "$ROOT/tools/build/tests/functional/install_gate/install_gate.sh"
+# The install case's gate runs before any build: its SKIP line is printed here,
+# and with --require-install a case that cannot run ends the script here (exit 1).
+install_gate conda_set "$install" "$require_install" https://conda.modular.com/max/linux-64/repodata.json
+gate=$?
+[ "$gate" != 2 ] || exit 1
 W=$(mktemp -d "${TMPDIR:-/tmp}/komira_conda_set.XXXXXX")
 fails=0
 pass() { echo "PASS  conda_set $1"; }
@@ -331,8 +344,8 @@ else
     echo "SKIP  conda_set uncached (--no-uncached)"
 fi
 
-# ---- install ------------------------------------------------------------------
-if [ "$install" = 1 ] && command -v pixi > /dev/null && curl -fsSL -o /dev/null -I https://conda.modular.com/max/linux-64/repodata.json 2> /dev/null; then
+# ---- install (its gate ran above, before any build) ---------------------
+if [ "$gate" = 0 ]; then
     C="$W/channel"
     mkdir -p "$C/linux-64" "$C/noarch" "$W/with" "$W/without" "$W/unpinned" "$W/badpin"
     problems=""
@@ -422,8 +435,6 @@ EOM
     if [ -n "$problems" ]; then fail "install:$problems (see $W)"; else
         pass "install: pixi installs only '$META ==$VERSION' from a file:// channel of the set (which also holds a newer build $BUILD8 of komira_encoding: the requirement name ==$VERSION $BUILD installs build $BUILD and not $BUILD8, while an unpinned requirement takes $BUILD8, and a requirement on a build the channel lacks fails to solve), the solver brings all ${#OK[@]} libraries (each .mojoc installed as built) and mojo-compiler ==$pin, and a program importing komira_encoding and komira_hash prints deadbeef and 12638187200555641996; the same project without the metapackage cannot import"
     fi
-else
-    echo "SKIP  conda_set install ($([ "$install" = 1 ] || echo '--no-install'; command -v pixi > /dev/null || echo 'no pixi'))"
 fi
 
 if [ "$fails" = 0 ] && [ -z "${KOMIRA_TEST_KEEP:-}" ]; then rm -r -f "$W"; else echo "logs: $W"; fi

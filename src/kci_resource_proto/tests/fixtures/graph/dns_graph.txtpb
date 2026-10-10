@@ -1,0 +1,64 @@
+# proto-message: kci.resource.v1.ResourceList
+resource {
+  id: "site"
+  retention: KEEP
+  dns_zone {
+    name: "example.com"
+  }
+}
+resource {
+  id: "api"
+  service {
+    image {
+      digest: "sha256:d0e5"
+    }
+    internal {
+    }
+  }
+}
+resource {
+  id: "www"
+  dns_record {
+    name: "www.example.com"
+    zone {
+      resource: "site"
+    }
+    type: CNAME
+    values {
+      ref {
+        resource: "api"
+        standard: HOST
+      }
+    }
+    ttl {
+      seconds: 600
+    }
+  }
+}
+resource {
+  id: "mx"
+  dns_record {
+    name: "example.com"
+    zone {
+      resource: "site"
+    }
+    type: MX
+    values {
+      literal: "10 mail.example.com"
+    }
+    values {
+      literal: "20 backup.example.com"
+    }
+  }
+}
+resource {
+  id: "tls"
+  retention: DELETE
+  certificate {
+    domains: "example.com"
+    domains: "*.example.com"
+    zone {
+      resource: "site"
+    }
+  }
+}

@@ -35,6 +35,9 @@ _REFUSED = {
     "hex_odd": (_METERS, "hex_odd: FIXTURE: hex_odd.hex holds an odd number of hex digits (3)"),
     # `id` written twice (1, then 150): the decode shows only 150.
     "leg0_duplicate": (_SAMPLE, "leg0_duplicate: LEG 0: leg0_duplicate.hex writes a singular field of example.fixture.v1.Sample more than once"),
+    # `name` written twice ("abc", then "def"): a length-delimited field, so
+    # the top-level walk must step over each value's bytes to see the second.
+    "leg0_duplicate_message": (_SAMPLE, "leg0_duplicate_message: LEG 0: leg0_duplicate_message.hex writes a singular field of example.fixture.v1.Sample more than once"),
     # A producer's bytes that are protoc's own: no producer is checked.
     "leg0_identical": (_SAMPLE, "leg0_identical: LEG 0: leg0_identical.hex is byte for byte leg0_identical.canonical.hex"),
     # The bytes hold `id: 150` and the .txtpb says 151; the .canonical.hex is

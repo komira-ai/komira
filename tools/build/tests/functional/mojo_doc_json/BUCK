@@ -1,0 +1,34 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:doc.bzl", "mojo_doc_json")
+
+# A package importing another (hellopkg), with a subpackage, a trait, an
+# alias and a struct whose parametric header spans lines.
+mojo_library(
+    name = "docpkg",
+    srcs = [
+        "docpkg/__init__.mojo",
+        "docpkg/shapes.mojo",
+        "docpkg/sub/__init__.mojo",
+        "docpkg/sub/leaf.mojo",
+    ],
+    conda = False,
+    deps = ["komira//tools/build/examples:hellopkg"],
+    visibility = ["//negative/mojo_doc_json:"],
+)
+
+# Test 52: `mojo doc` resolves the import through `deps` on -I, and the JSON
+# declares one path of each kind the symbol check walks.
+mojo_doc_json(
+    name = "docpkg_doc",
+    lib = ":docpkg",
+    symbols = [
+        "__init__.shout",
+        "shapes.SIDES",
+        "shapes.Shaped",
+        "shapes.Shaped.area",
+        "shapes.Grid",
+        "shapes.Grid.__init__",
+        "shapes.Grid.area",
+        "sub.leaf.leaf_value",
+    ],
+)

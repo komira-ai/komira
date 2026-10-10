@@ -27,8 +27,11 @@ from komira_gcp_run.job import (
     RunJobRequest,
     UpdateJobRequest,
 )
-from komira_gcp_run.operations import GetOperationRequest, WaitOperationRequest
-from komira_gcp_run.operations_mixin import OperationsClient
+from komira_gcp_run.operations import (
+    GetOperationRequest,
+    OperationsClient,
+    WaitOperationRequest,
+)
 from komira_gcp_run.revision import (
     DeleteRevisionRequest,
     ListRevisionsRequest,

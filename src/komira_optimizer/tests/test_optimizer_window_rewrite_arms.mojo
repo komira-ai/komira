@@ -226,7 +226,7 @@ def test_sort_redundancy_predicate_each_return() raises:
     unordered PartitionBy treated as ordered, a missing `pb_desc` length
     guard, a Sort longer than (P ++ O) accepted, partition keys taken as
     anything but ASC, a key or direction compared on the wrong side of the
-    P/O boundary."""
+    P/O boundary, a NULL placement left out of the comparison."""
     var e: List[String] = []
     var eb: List[Bool] = []
     var a: List[String] = ["a"]
@@ -238,29 +238,36 @@ def test_sort_redundancy_predicate_each_return() raises:
     var t: List[Bool] = [True]
     var ff: List[Bool] = [False, False]
     var ft: List[Bool] = [False, True]
+    var tf: List[Bool] = [True, False]
     var fff: List[Bool] = [False, False, False]
     # Lengths of keys and directions differ.
-    assert_false(_sort_keys_redundant_after_partition_by(a, eb, a, b, f))
+    assert_false(_sort_keys_redundant_after_partition_by(a, eb, f, a, b, f))
     # Empty Sort.
-    assert_false(_sort_keys_redundant_after_partition_by(e, eb, a, b, f))
+    assert_false(_sort_keys_redundant_after_partition_by(e, eb, eb, a, b, f))
     # No partition and no order keys: the sink does not sort.
-    assert_false(_sort_keys_redundant_after_partition_by(a, f, e, e, eb))
+    assert_false(_sort_keys_redundant_after_partition_by(a, f, f, e, e, eb))
     # Order keys and their directions differ in length.
-    assert_false(_sort_keys_redundant_after_partition_by(a, f, a, b, eb))
+    assert_false(_sort_keys_redundant_after_partition_by(a, f, f, a, b, eb))
     # Sort longer than (P ++ O).
-    assert_false(_sort_keys_redundant_after_partition_by(abc, fff, a, b, f))
+    assert_false(_sort_keys_redundant_after_partition_by(abc, fff, fff, a, b, f))
     # A partition key sorted DESC: the sink sorts it ASC.
-    assert_false(_sort_keys_redundant_after_partition_by(a, t, a, b, f))
+    assert_false(_sort_keys_redundant_after_partition_by(a, t, f, a, b, f))
     # A partition key that is not the first partition key.
-    assert_false(_sort_keys_redundant_after_partition_by(b, f, a, b, f))
+    assert_false(_sort_keys_redundant_after_partition_by(b, f, f, a, b, f))
     # Exact (P ++ O) with the order key's direction.
-    assert_true(_sort_keys_redundant_after_partition_by(ab, ft, a, b, t))
+    assert_true(_sort_keys_redundant_after_partition_by(ab, ft, ff, a, b, t))
     # The order key differs.
-    assert_false(_sort_keys_redundant_after_partition_by(ac, ft, a, b, t))
+    assert_false(_sort_keys_redundant_after_partition_by(ac, ft, ff, a, b, t))
     # The order key's direction differs.
-    assert_false(_sort_keys_redundant_after_partition_by(ab, ff, a, b, t))
+    assert_false(_sort_keys_redundant_after_partition_by(ab, ff, ff, a, b, t))
     # No partition keys: the first Sort key is checked against order key 0.
-    assert_true(_sort_keys_redundant_after_partition_by(b, t, e, b, t))
+    assert_true(_sort_keys_redundant_after_partition_by(b, t, f, e, b, t))
+    # Keys and NULL placements differ in length.
+    assert_false(_sort_keys_redundant_after_partition_by(ab, ft, f, a, b, t))
+    # A partition key's NULL placement is not the sink's derived one.
+    assert_false(_sort_keys_redundant_after_partition_by(ab, ft, tf, a, b, t))
+    # The order key's NULL placement is not the sink's derived one.
+    assert_false(_sort_keys_redundant_after_partition_by(ab, ft, ft, a, b, t))
 
 
 # =============================================================================

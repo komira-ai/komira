@@ -1,0 +1,32 @@
+# A service configuration of a fixture API that serves the mixin.v1.Operations
+# mixin (corpus/mixin/v1/operations.proto) at its own paths and host. Shaped
+# as googleapis writes one; like google/cloud/apigateway/v1/apigateway_v1.yaml,
+# its `apis` does not list the mixin its `http.rules` bind.
+type: google.api.Service
+config_version: 3
+name: fixture.googleapis.com
+title: Fixture API
+
+apis:
+- name: fixture.v1.Things
+
+documentation:
+  summary: |-
+    Not read by the generator: a block scalar outside `http`.
+
+http:
+  rules:
+  - selector: mixin.v1.Operations.GetOperation
+    get: '/v9/{name=projects/*/operations/*}'
+    additional_bindings:
+    - get: '/v9/{name=folders/*/operations/*}'
+  - selector: mixin.v1.Operations.WaitOperation
+    post: '/v9/{name=projects/*/operations/*}:wait'
+    body: '*'
+  - selector: mixin.v1.Operations.CancelOperation
+    post: '/v9/{name=projects/*/operations/*}:cancel'
+    body: spec
+  - selector: mixin.v1.Operations.ListOperations
+    get: '/v9/{name=projects/*}/operations'
+  - selector: mixin.v1.Operations.DeleteOperation
+    delete: '/v9/{name=projects/*/operations/*}'

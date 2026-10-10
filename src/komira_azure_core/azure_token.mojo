@@ -48,11 +48,12 @@ struct AzureBearerToken(
 
     Field layout:
       var token: String              — the access_token string
-      var expiry_unix_ms: Int64      — Unix epoch ms; -1 if unknown
+      var expiry_ms: Int64           — ms on the issuing provider's
+                                       MonotonicClock; -1 if unknown
     """
 
     var token: String
-    var expiry_unix_ms: Int64
+    var expiry_ms: Int64
 
     @always_inline
     def is_empty(self) -> Bool:

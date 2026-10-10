@@ -1,0 +1,31 @@
+# The check of the list of libraries whose coverage gate reads their tests'
+# branch records (policy.bzl, COVERAGE_BRANCH_GATE):
+#
+#   buck2 bxl //tools/build/coverage/branch_gate.bxl:check
+#
+# mojo_library reads the list by its own label (coverage.bzl), so a row
+# whose label names no library (a package moved, renamed or deleted) is
+# read by nothing: the library it meant has no branch gate and nothing
+# fails. This check fails on such a row: every label of the list must be a
+# mojo_library of komira's src/ (the unconfigured graph, so a library
+# visible to no one here is found as well).
+
+load("@komira//tools/build/coverage:policy.bzl", "COVERAGE_BRANCH_GATE")
+
+_LIBRARIES = "kind('^mojo_library_rule$', komira//src/...)"
+
+def _check_impl(ctx):
+    have = {str(t.label): True for t in ctx.uquery().eval(_LIBRARIES)}
+    want = sorted(COVERAGE_BRANCH_GATE.keys())
+    stale = [w for w in want if w not in have]
+    if stale:
+        fail("branch_gate: these rows of COVERAGE_BRANCH_GATE (tools/build/coverage/policy.bzl) name no mojo_library of komira//src/... ({} of them are): {}. Fix the label of a library that moved, or delete the row".format(
+            len(have),
+            ", ".join(stale),
+        ))
+    ctx.output.print("branch_gate: the {} rows of COVERAGE_BRANCH_GATE each name a mojo_library of komira//src/...".format(len(want)))
+
+check = bxl_main(
+    impl = _check_impl,
+    cli_args = {},
+)

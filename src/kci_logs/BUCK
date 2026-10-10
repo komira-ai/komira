@@ -16,8 +16,13 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     test_srcs = [
         "tests/test_cloud_log_source.mojo",
+        "tests/test_cloud_query_refusals.mojo",
         "tests/test_empty_stream_speaks_its_own_stream.mojo",
+        "tests/test_json_scan_refusals.mojo",
+        "tests/test_json_scan_utf8.mojo",
+        "tests/test_run_log_bounds.mojo",
         "tests/test_run_log_reader.mojo",
+        "tests/test_run_log_scan_refusals.mojo",
     ],
     visibility = ["PUBLIC"],
 )

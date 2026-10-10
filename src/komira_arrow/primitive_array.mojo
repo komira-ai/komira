@@ -104,7 +104,7 @@ struct PrimitiveArray[dtype: DType, K: MemoryRegion = HeapRegion](Movable):
         assertion will reliably notice.
 
         ⚠ USE THIS ONLY WHERE THE FILL IS UNCONDITIONAL AND TOTAL. The shape it
-        exists for is the sub-RG decode kernels, where a main loop writes
+        exists for is the sub-row-group decode kernels, where a main loop writes
         `[0, rows_val)` and a tail loop writes `[rows_val, length)` with no
         branch between them that can skip either — so `allocate`'s `buf.zero()`
         is a DEAD STORE over a buffer that is about to be written in full, i.e.

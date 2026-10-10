@@ -6,8 +6,8 @@
 # catalog type to that shape's own fixed roles and provider kinds.
 #
 # 1. THE TABLE: every row names a catalog field the fake implements; every
-#    compute field (service, job) has an `identity` and a `run` row on every
-#    shape, a service account an `identity` row, the bucket exactly one row,
+#    workload field (service, container job, worker) has an `identity` and a
+#    `run` row on every shape, a service account an `identity` row, the bucket exactly one row,
 #    `bucket`, and no identity; every role name is at most 8 bytes (the role
 #    vocabulary's bound, which the label budget counts on); every shape has
 #    a grant row for every type a grant may target (onprem folds a cell
@@ -17,14 +17,15 @@
 # 2. THE KIT ON EVERY SHAPE: the kci_cloud conformance kit (all twelve steps)
 #    passes on the aws, gcp, azure and onprem shapes, each registered under a random
 #    id, on the graph of test_fake_conformance (a public service, an internal
-#    service reading its URL and HOST, a scheduled job, two grants).
-# 3. A GOLDEN LOWERING PER SHAPE of one public service and one scheduled job
+#    service reading its URL and HOST, a container job, two grants; every
+#    service keeps one instance, which onprem requires until Q21).
+# 3. A GOLDEN LOWERING PER SHAPE of one public service and one container job
 #    with one `uses` line: per node, its role and provider kind, in order;
 #    the private identity the run depends on and the grants hang off (the
-#    `uses` line, and each identity's implicit cell LOGS WRITE); on
-#    azure, the public ingress and the schedule folded into the run node; on
-#    onprem, the service's in-cluster endpoint the public ingress fronts, and
-#    the schedule folded into the job's CronJob.
+#    `uses` line, and each identity's implicit cell LOGS WRITE); on azure,
+#    the public ingress folded into the run node; on onprem, the service's
+#    in-cluster endpoint the public ingress fronts. No shape lowers a
+#    trigger for the job (the worker's goldens are in test_fake_compute).
 # 4. A FOLDED ROLE IS AN UPDATE: on azure, making a public service internal
 #    updates its run node and deletes nothing; on aws and onprem it deletes
 #    the public role's object, and onprem keeps the endpoint.
@@ -33,7 +34,8 @@
 #    a name that is not a built-in cloud (a near-miss spelling, the generic
 #    fake's own shape) is refused naming the built-in list.
 # 6. IDENTITY PER SHAPE: a golden of a service account, a service that runs
-#    as it and reads a bucket, a job with its own identity, and a grant
+#    as it and reads a bucket, a container job with its own identity, and a
+#    grant
 #    resource: per node its kind, wanted and dependencies. The grant kind
 #    follows the TARGET'S TYPE (on aws a CALL on a service is the function's
 #    resource policy; on onprem a Kubernetes target is a RoleBinding with
@@ -64,10 +66,11 @@ from kci_cloud import (
     EDGE_TARGET_CELL,
     FIELD_BUCKET,
     FIELD_GRANT,
-    FIELD_JOB,
+    FIELD_CONTAINER_JOB,
     FIELD_SERVICE,
     FIELD_SERVICE_ACCOUNT,
     FIELD_TABLE,
+    FIELD_WORKER,
     LoweredNode,
     ApplyOutcome,
     Catalog,
@@ -121,17 +124,17 @@ def test_the_shape_table() raises:
             assert_true(known, shape.name + ": row field " + String(row.field) + " is implemented")
             assert_true(row.role.byte_length() <= 8, shape.name + ": role " + row.role + " is over 8 bytes")
             assert_true(row.kind.byte_length() > 0, shape.name + ": role " + row.role + " has a kind")
-        for f in [FIELD_SERVICE, FIELD_JOB]:
+        for f in [FIELD_SERVICE, FIELD_CONTAINER_JOB, FIELD_WORKER]:
             assert_true(shape.has(f, String("identity")), shape.name + ": compute has an identity row")
             assert_true(shape.has(f, String("run")), shape.name + ": compute has a run row")
         assert_equal(len(shape.roles_of(FIELD_BUCKET)), 1, shape.name + ": one bucket row")
         assert_true(shape.has(FIELD_BUCKET, String("bucket")), shape.name + ": the bucket row")
         assert_true(shape.has(FIELD_SERVICE_ACCOUNT, String("identity")), shape.name + ": an account row")
         assert_equal(len(shape.roles_of(FIELD_GRANT)), 0, shape.name + ": a grant's roles are its edge's")
-        # Every type a grant may target has a row (a service, a job, a
-        # bucket, a service account); a cell resource too, except where it
+        # Every type a grant may target has a row (a service, a container
+        # job, a bucket, a service account; a worker accepts no verb); a cell resource too, except where it
         # folds (onprem).
-        for f in [FIELD_SERVICE, FIELD_JOB, FIELD_BUCKET, FIELD_SERVICE_ACCOUNT]:
+        for f in [FIELD_SERVICE, FIELD_CONTAINER_JOB, FIELD_BUCKET, FIELD_SERVICE_ACCOUNT]:
             assert_true(Bool(shape.grant_row(f)), shape.name + ": a grant row for field " + String(f))
         assert_equal(
             Bool(shape.grant_row(EDGE_TARGET_CELL)),
@@ -140,7 +143,10 @@ def test_the_shape_table() raises:
         )
     var g = ProviderShape.generic()
     assert_equal(
-        len(g.rows), 9, "generic: identity, run, public; identity, run, schedule; table; bucket; identity"
+        len(g.rows),
+        25,
+        "generic: identity, run, public; identity, run; identity, run; table; bucket; identity; queue; topic; sub;"
+        + " secret; zone; record; cert; identity, schedule; identity, trigger; network; subnet; address; registry",
     )
     # The table: one `table` row where it is hosted (gcp adds its index and
     # TTL objects), a grant row to it, and NOT_YET on onprem.
@@ -149,7 +155,12 @@ def test_the_shape_table() raises:
         if shape.name == "onprem":
             assert_equal(len(shape.roles_of(FIELD_TABLE)), 0, "onprem: no table row")
             assert_true(not shape.hosts(FIELD_TABLE), "onprem: a table is NOT_YET")
-            assert_equal(len(shape.not_yet), 1)
+            assert_equal(
+                len(shape.not_yet),
+                12,
+                "onprem: table, queue, topic, subscription, dns_zone, dns_record, certificate, event_trigger,"
+                + " network, subnet, ip_address, registry",
+            )
             assert_true(shape.not_yet[0].reason.find("Q17") >= 0, shape.not_yet[0].reason)
             continue
         assert_true(shape.hosts(FIELD_TABLE), shape.name + ": hosts a table")
@@ -165,12 +176,12 @@ def test_the_shape_table() raises:
     assert_equal(g.grant_row(FIELD_BUCKET).value().kind, "grant")
     # One grant row per target type on onprem, by the target's backing.
     var o = ProviderShape.onprem()
-    for f in [FIELD_SERVICE, FIELD_JOB, FIELD_SERVICE_ACCOUNT]:
+    for f in [FIELD_SERVICE, FIELD_CONTAINER_JOB, FIELD_SERVICE_ACCOUNT]:
         assert_equal(o.grant_row(f).value().kind, "rbac.authorization.k8s.io/v1/RoleBinding")
         assert_equal(o.grant_row(f).value().helper, "rbac.authorization.k8s.io/v1/Role")
     assert_equal(o.grant_row(FIELD_BUCKET).value().kind, "minio:policy")
     assert_equal(o.grant_row(FIELD_BUCKET).value().helper, "", "a MinIO policy has no helper")
-    for f in [FIELD_SERVICE, FIELD_JOB, FIELD_SERVICE_ACCOUNT]:
+    for f in [FIELD_SERVICE, FIELD_CONTAINER_JOB, FIELD_WORKER, FIELD_SERVICE_ACCOUNT]:
         assert_equal(o.kind_of(f, String("vault")), "vault:auth/kubernetes/role", "the vault helper")
     var a = ProviderShape.aws()
     assert_equal(a.grant_row(FIELD_SERVICE).value().kind, "AWS::Lambda::Permission")
@@ -186,7 +197,8 @@ def test_the_shape_table() raises:
 def _full(api_port: String, roles_on: Bool = True) -> String:
     """The graph of test_fake_conformance, plus identity: the job runs as a
     service account, and a grant lets web DESCRIBE that account. `roles_on`
-    False makes api internal and removes web's grant on api."""
+    False makes api internal and removes web's grant on api. Each service
+    keeps one instance (a scale from 1), so the graph is legal on onprem."""
     var web_uses = String('"uses":[{"target":{"resource":"api"},"access":"CALL"}]},')
     var exposure = String('"public":{}')
     if not roles_on:
@@ -195,6 +207,7 @@ def _full(api_port: String, roles_on: Bool = True) -> String:
     return (
         String('{"resource":[')
         + String('{"id":"web","service":{"image":{"digest":"sha256:c3"},"port":8080,"internal":{},')
+        + String('"scale":{"min":1,"max":2},')
         + String('"env":{"API_URL":{"ref":{"resource":"api","standard":"URL"}},')
         + String('"API_HOST":{"ref":{"resource":"api","standard":"HOST"}},')
         + String('"MODE":{"literal":"fast"}}},')
@@ -203,10 +216,10 @@ def _full(api_port: String, roles_on: Bool = True) -> String:
         + api_port
         + String(",")
         + exposure
-        + String(',"requestTimeout":"30s","scale":{"min":0,"max":3}},')
+        + String(',"requestTimeout":"30s","scale":{"min":1,"max":3}},')
         + String('"uses":[{"target":{"resource":"nightly"},"access":"CALL"}]},')
-        + String('{"id":"nightly","job":{"image":{"digest":"sha256:b2"},"maxRetries":1,')
-        + String('"schedule":{"cron":"0 3 * * *","timezone":"UTC"},"runAs":{"resource":"runner"}}},')
+        + String('{"id":"nightly","containerJob":{"image":{"digest":"sha256:b2"},"maxRetries":1,')
+        + String('"runAs":{"resource":"runner"}}},')
         + String('{"id":"runner","serviceAccount":{}},')
         + String('{"id":"see","grant":{"principal":{"resource":"web"},')
         + String('"target":{"resource":"runner"},"access":"DESCRIBE"}}')
@@ -243,7 +256,7 @@ def _golden_graph() -> String:
     return String(
         '{"resource":['
         '{"id":"api","service":{"image":{"digest":"sha256:a1"},"public":{}}},'
-        '{"id":"nightly","job":{"image":{"digest":"sha256:b2"},"schedule":{"cron":"0 3 * * *"}},'
+        '{"id":"nightly","containerJob":{"image":{"digest":"sha256:b2"}},'
         '"uses":[{"target":{"resource":"api"},"access":"CALL"}]}'
         "]}"
     )
@@ -287,11 +300,11 @@ comptime _CALL_API = '"principal":"nightly","target":"api","access":"CALL"'
 
 
 def _golden_with_roles(
-    identity: String, service: String, public: String, job: String, schedule: String,
+    identity: String, service: String, public: String, job: String,
     call_grant: String, grant: String,
 ) -> String:
-    """The lowering of `_golden_graph` on a shape with an identity, a public
-    role and a schedule role (aws, gcp), given each role's provider kind:
+    """The lowering of `_golden_graph` on a shape with an identity and a
+    public role (aws, gcp), given each role's provider kind:
     `call_grant` for nightly's CALL on the api service, `grant` for the
     implicit cell LOGS grants."""
     var l = List[String]()
@@ -306,9 +319,6 @@ def _golden_with_roles(
         _node(
             String("nightly/run"), job, String('"nightly/identity"'), String(_JOB_FIELDS) + String(',"serves":"false"')
         )
-    )
-    l.append(
-        _node(String("nightly/schedule"), schedule, String('"nightly/run"'), String('"cron":"0 3 * * *","tz":"UTC"'))
     )
     l.append(
         _node(String("nightly/u-e4f3tk"), call_grant, String('"nightly/identity","api/run"'), String(_CALL_API))
@@ -330,7 +340,6 @@ def test_golden_lowering_aws() raises:
         String("AWS::Lambda::Function"),
         String("AWS::Lambda::Url"),
         String("AWS::ECS::TaskDefinition"),
-        String("AWS::Scheduler::Schedule"),
         String("AWS::Lambda::Permission"),
         String("AWS::IAM::RolePolicy"),
     )
@@ -344,7 +353,6 @@ def test_golden_lowering_gcp() raises:
         String("run.googleapis.com/Service"),
         String("setIamPolicy"),
         String("run.googleapis.com/Job"),
-        String("cloudscheduler.googleapis.com/Job"),
         String("setIamPolicy"),
         String("setIamPolicy"),
     )
@@ -368,8 +376,7 @@ def test_golden_lowering_azure() raises:
     l.append(
         _node(
             String("nightly/run"), String("Microsoft.App/jobs"), String('"nightly/identity"'),
-            String(_JOB_FIELDS)
-            + String(',"trigger":"schedule","trigger.cron":"0 3 * * *","trigger.tz":"UTC","serves":"false"'),
+            String(_JOB_FIELDS) + String(',"serves":"false"'),
         )
     )
     l.append(_node(String("nightly/u-e4f3tk"), ra, String('"nightly/identity","api/run"'), String(_CALL_API)))
@@ -403,8 +410,7 @@ def test_golden_lowering_onprem() raises:
     l.append(
         _node(
             String("nightly/run"), String("batch/v1/CronJob"), String('"nightly/identity"'),
-            String(_JOB_FIELDS)
-            + String(',"trigger":"schedule","trigger.cron":"0 3 * * *","trigger.tz":"UTC","serves":"false"'),
+            String(_JOB_FIELDS) + String(',"serves":"false"'),
         )
     )
     # A Kubernetes target: the Role helper, then the RoleBinding that binds it.
@@ -429,7 +435,7 @@ def test_golden_lowering_onprem() raises:
 
 def _one(exposure: String) -> String:
     return (
-        String('{"resource":[{"id":"api","service":{"image":{"digest":"sha256:a1"},')
+        String('{"resource":[{"id":"api","service":{"image":{"digest":"sha256:a1"},"scale":{"min":1,"max":2},')
         + exposure
         + String("}}]}")
     )
@@ -530,9 +536,10 @@ def _identity_graph() -> String:
         '{"resource":['
         '{"id":"runner","serviceAccount":{}},'
         '{"id":"store","bucket":{}},'
-        '{"id":"api","service":{"image":{"digest":"sha256:a1"},"internal":{},"runAs":{"resource":"runner"}},'
+        '{"id":"api","service":{"image":{"digest":"sha256:a1"},"internal":{},"scale":{"min":1,"max":2},'
+        '"runAs":{"resource":"runner"}},'
         '"uses":[{"target":{"resource":"store"},"access":"READ"}]},'
-        '{"id":"nightly","job":{"image":{"digest":"sha256:b2"},"onDemand":{}}},'
+        '{"id":"nightly","containerJob":{"image":{"digest":"sha256:b2"}}},'
         '{"id":"see","grant":{"principal":{"resource":"nightly"},'
         '"target":{"resource":"runner"},"access":"DESCRIBE"}}'
         "]}"
@@ -556,7 +563,7 @@ def _summary(nodes: List[LoweredNode]) -> String:
 
 
 def _want_identity(
-    sa: String, run: String, public: String, job: String, schedule: String, grant: String,
+    sa: String, run: String, public: String, job: String, grant: String,
 ) -> String:
     """The identity golden on aws, gcp (and generic): every node, `grant` the
     kind of every grant here (none targets a service)."""
@@ -570,7 +577,6 @@ def _want_identity(
         + String("api/u-2wfpfg ") + grant + String(" + <runner/identity,store/bucket\n")
         + String("nightly/identity ") + sa + String(" +\n")
         + String("nightly/run ") + job + String(" + <nightly/identity\n")
-        + String("nightly/schedule ") + schedule + String(" - <nightly/run\n")
         + String("nightly/u-g2ewtg ") + grant + String(" + <nightly/identity\n")
         + String("see/grant ") + grant + String(" + <nightly/identity,runner/identity\n")
     )
@@ -586,16 +592,16 @@ def _identity_lowered(shape: ProviderShape) raises -> String:
 def test_identity_lowering_per_shape() raises:
     var aws = _want_identity(
         String("AWS::IAM::Role"), String("AWS::Lambda::Function"), String("AWS::Lambda::Url"),
-        String("AWS::ECS::TaskDefinition"), String("AWS::Scheduler::Schedule"), String("AWS::IAM::RolePolicy"),
+        String("AWS::ECS::TaskDefinition"), String("AWS::IAM::RolePolicy"),
     ).replace("BUCKET", "AWS::S3::Bucket")
     assert_equal(_identity_lowered(ProviderShape.aws()), aws, "aws")
     var gcp = _want_identity(
         String("iam.googleapis.com/ServiceAccount"), String("run.googleapis.com/Service"), String("setIamPolicy"),
-        String("run.googleapis.com/Job"), String("cloudscheduler.googleapis.com/Job"), String("setIamPolicy"),
+        String("run.googleapis.com/Job"), String("setIamPolicy"),
     ).replace("BUCKET", "storage.googleapis.com/Bucket")
     assert_equal(_identity_lowered(ProviderShape.gcp()), gcp, "gcp")
     var generic = _want_identity(
-        String("identity"), String("run"), String("public"), String("run"), String("schedule"), String("grant")
+        String("identity"), String("run"), String("public"), String("run"), String("grant")
     ).replace("BUCKET", "bucket")
     assert_equal(_identity_lowered(ProviderShape.generic()), generic, "generic")
 
@@ -664,11 +670,12 @@ def test_the_identity_graph_applies_and_settles_on_every_shape() raises:
 def test_run_as_turns_the_private_identity_off() raises:
     var own = String(
         '{"resource":[{"id":"runner","serviceAccount":{}},'
-        '{"id":"api","service":{"image":{"digest":"sha256:a1"},"internal":{}}}]}'
+        '{"id":"api","service":{"image":{"digest":"sha256:a1"},"internal":{},"scale":{"min":1,"max":2}}}]}'
     )
     var moved = String(
         '{"resource":[{"id":"runner","serviceAccount":{}},'
-        '{"id":"api","service":{"image":{"digest":"sha256:a1"},"internal":{},"runAs":{"resource":"runner"}}}]}'
+        '{"id":"api","service":{"image":{"digest":"sha256:a1"},"internal":{},"scale":{"min":1,"max":2},'
+        '"runAs":{"resource":"runner"}}}]}'
     )
     var shapes = _shapes()
     for s in range(len(shapes)):
@@ -700,7 +707,7 @@ def test_run_as_turns_the_private_identity_off() raises:
 def test_onprem_refuses_a_cell_grant_it_cannot_fold() raises:
     var json = String(
         '{"resource":[{"id":"runner","serviceAccount":{}},'
-        '{"id":"nightly","job":{"image":{"digest":"sha256:b2"},"onDemand":{},"runAs":{"resource":"runner"}},'
+        '{"id":"nightly","containerJob":{"image":{"digest":"sha256:b2"},"runAs":{"resource":"runner"}},'
         '"uses":[{"cell":"METRICS","access":"WRITE"}]}]}'
     )
     var reg = Clouds(Catalog.v1())

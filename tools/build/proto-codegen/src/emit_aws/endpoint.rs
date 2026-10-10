@@ -1102,7 +1102,7 @@ mod tests {
             "        var endpoint_config: TinyEndpointConfig = TinyEndpointConfig(),\n    ) raises:\n",
             "        var rules = tiny_endpoint_rules()\n",
             "    def send(mut self, var req: AwsRequest, target: AwsSigningTarget) raises -> HttpResult:\n",
-            "            target.signing_region.copy(),\n            target.signing_name.copy(),\n            target.endpoint.copy(),\n",
+            "            target.signing_region.copy(),\n            target.signing_name.copy(),\n            target.endpoint.with_host_prefix(req.host_prefix),\n",
         ] {
             assert!(src.contains(want), "`{want}` missing");
         }

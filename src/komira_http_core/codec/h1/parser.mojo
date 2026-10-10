@@ -50,6 +50,11 @@ from komira_http_core.codec.h1.limits import (
     ParseError,
     ParseLimits,
 )
+from komira_http_core.codec.h1.status_text import (
+    _write_reason_phrase,
+    _write_static_error_body,
+)
+from komira_http_core.codec.h1.utf8 import utf8_error_offset
 
 
 # =============================================================================
@@ -71,10 +76,13 @@ struct HeadersParseOutcome(Movable, Deinitable):
         header was found.
       * `is_chunked` = True iff Transfer-Encoding contains `chunked` (and
         no Content-Length present — conflict is rejected before here).
-      * `expects_continue` = True iff Expect: 100-continue was present.
+      * `expects_continue` = True iff Expect: 100-continue was present on
+        an HTTP/1.1 request (RFC 9110 §10.1.1: a server MUST ignore it in
+        an HTTP/1.0 request).
       * `connection_close` = True iff Connection: close was present (or
         HTTP/1.0 default without Connection: keep-alive).
-      * `http_version_minor` = 0 for HTTP/1.0, 1 for HTTP/1.1.
+      * `http_version_minor` = 0 for HTTP/1.0, 1 for HTTP/1.1 and for any
+        higher HTTP/1 minor (RFC 9110 §6.2).
 
     On need-more (`err.is_need_more()`):
       * The buffer doesn't yet contain a complete headers block.
@@ -284,13 +292,14 @@ def _parse_request_line(
     """Parse the request line `buf[start:crlf_off]` (excluding CRLF).
 
     Shape: METHOD SP request-target SP HTTP-VERSION
-    where HTTP-VERSION = "HTTP/1.0" | "HTTP/1.1".
+    where HTTP-VERSION = "HTTP/" DIGIT "." DIGIT.
 
     Handles:
-      * Bad method (unknown / lowercase) → method error
+      * Bad method (unknown / lowercase) → method error (501)
       * Missing one of the two spaces → REQUEST_LINE_MALFORMED
       * HTTP/0.9 (no version on the line) → HTTP_09_REJECTED
-      * HTTP/2.0+ → HTTP_VERSION_UNSUPPORTED
+      * A major version other than 1 → HTTP_VERSION_UNSUPPORTED
+      * HTTP/1.2 to HTTP/1.9 → treated as HTTP/1.1 (RFC 9110 §6.2)
       * Whitespace inside request-target → URI_WHITESPACE
     """
     var out = _RequestLineParse()
@@ -331,15 +340,11 @@ def _parse_request_line(
         if _is_lower_alpha(buf[k]):
             saw_lower = True
         k = k + 1
-    if saw_lower:
-        out.err = ParseError.make(PARSE_ERR_METHOD_LOWERCASE, start)
-        return out^
-
+    # The method's verdict waits until the rest of the line has parsed: 501
+    # is for a well-formed request whose method is not implemented (RFC 9110
+    # §9.1); a malformed line is 400 whatever its method.
     var method_str = _slice_to_string(buf, start, sp1)
     var method = HttpMethod.parse(method_str)
-    if method.is_unknown():
-        out.err = ParseError.make(PARSE_ERR_METHOD_UNKNOWN, start)
-        return out^
 
     # Find the next space (between request-target and HTTP-VERSION).
     # The request-target itself MUST NOT contain whitespace per RFC 7230.
@@ -379,8 +384,8 @@ def _parse_request_line(
         out.path = _slice_to_string(buf, sp1 + 1, qmark)
         out.query_string = _slice_to_string(buf, qmark + 1, sp2)
 
-    # HTTP-VERSION = buf[sp2+1:crlf_off]. Must be exactly 8 bytes
-    # "HTTP/1.0" or "HTTP/1.1". Anything else is bad.
+    # HTTP-VERSION = buf[sp2+1:crlf_off]. Must be exactly 8 bytes,
+    # "HTTP/" DIGIT "." DIGIT. Anything else is bad.
     var ver_start = sp2 + 1
     var ver_len = crlf_off - ver_start
     if ver_len != 8:
@@ -415,12 +420,17 @@ def _parse_request_line(
             PARSE_ERR_HTTP_VERSION_UNSUPPORTED, ver_start + 5,
         )
         return out^
-    if minor != 0 and minor != 1:
-        out.err = ParseError.make(
-            PARSE_ERR_HTTP_VERSION_UNSUPPORTED, ver_start + 7,
-        )
-        return out^
+    if minor > 1:
+        # RFC 9110 §6.2: a higher minor version of a major version the
+        # recipient implements is treated as the highest minor it implements.
+        minor = 1
 
+    if saw_lower:
+        out.err = ParseError.make(PARSE_ERR_METHOD_LOWERCASE, start)
+        return out^
+    if method.is_unknown():
+        out.err = ParseError.make(PARSE_ERR_METHOD_UNKNOWN, start)
+        return out^
     out.method = method
     out.http_version_minor = Int8(minor)
     return out^
@@ -510,7 +520,15 @@ def _parse_header_line(
             )
             return out^
         k = k + 1
-    out.value = _slice_to_string(buf, vs, ve)
+    # RFC 9110 §5.5: obs-text is opaque data. The header map holds `String`s,
+    # which must be well-formed UTF-8, so a value that is well-formed UTF-8 is
+    # kept as the octets sent. A value that is not (a lone 0xFF, Latin-1 0xE9)
+    # is still served: each octet becomes the code point of the same number,
+    # as the HPACK decoder does, so the value is re-encoded, never refused.
+    if utf8_error_offset(buf, vs, ve) >= 0:
+        out.value = _slice_to_string(buf, vs, ve)
+        return out^
+    out.value = String(unsafe_from_utf8=buf[vs:ve])
     return out^
 
 
@@ -538,7 +556,7 @@ def _parse_decimal(s: String) -> Int:
     wrap is two's-complement, so the wrapped value can land small and
     POSITIVE and sail through the test. At ASSERT=none
     `Content-Length: 18446744073709551621` (2^64 + 5) would parse to **5** and
-    be accepted by `_parse_request_headers` as the framing length. The
+    be accepted by `parse_request_head` as the framing length. The
     `content_length_invalid` rejection at the call site only catches a
     NEGATIVE result, so it does not cover this. That is request smuggling, and
     it is live in every assert mode — nothing on this path was ever a bounds
@@ -653,11 +671,22 @@ def parse_request_head(
         out.err = ParseError.need_more(0)
         return out^
 
+    # RFC 9112 §2.2: a server SHOULD ignore at least one empty line (CRLF)
+    # received before the request-line. Every leading CRLF is skipped; the
+    # skipped bytes still count against the headers-scan window below.
+    var start = 0
+    while (
+        start + 1 < n
+        and buf[start] == UInt8(0x0D)
+        and buf[start + 1] == UInt8(0x0A)
+    ):
+        start = start + 2
+
     # Find CRLFCRLF terminator within the headers-scan window.
     var scan_lim = limits.max_total_header_bytes
     # The scan limit also caps the request-line length implicitly, but
     # we re-check below after we know where it ends.
-    var headers_end = _find_crlfcrlf(buf, 0, scan_lim + 4)
+    var headers_end = _find_crlfcrlf(buf, start, scan_lim + 4)
     if headers_end < 0:
         if n >= scan_lim:
             # We've read scan_lim bytes without finding the terminator.
@@ -669,17 +698,17 @@ def parse_request_head(
         return out^
 
     # The first CRLF inside the block is the request-line terminator.
-    var line_end = _find_crlf(buf, 0)
+    var line_end = _find_crlf(buf, start)
     if line_end < 0:
         # Shouldn't happen (we already saw CRLFCRLF), but be defensive.
         out.err = ParseError.make(PARSE_ERR_REQUEST_LINE_MALFORMED, 0)
         return out^
 
-    if line_end > limits.max_request_line_bytes:
+    if line_end - start > limits.max_request_line_bytes:
         out.err = ParseError.make(PARSE_ERR_URI_TOO_LONG, line_end)
         return out^
 
-    var rl = _parse_request_line(buf, 0, line_end)
+    var rl = _parse_request_line(buf, start, line_end)
     if not rl.err.is_ok():
         out.err = rl.err
         return out^
@@ -830,7 +859,10 @@ def parse_request_head(
     # Expect: handle "100-continue" specifically; reject other expects.
     if len(expect_value.as_bytes()) > 0:
         if _str_eq_ci(expect_value, String("100-continue")):
-            out.expects_continue = True
+            # RFC 9110 §10.1.1: a server MUST ignore a 100-continue
+            # expectation in an HTTP/1.0 request (and §15.2: it MUST NOT
+            # send a 1xx response to an HTTP/1.0 client).
+            out.expects_continue = rl_version_minor != Int8(0)
         else:
             out.err = ParseError.make(
                 PARSE_ERR_EXPECT_UNSUPPORTED, line_end,
@@ -906,84 +938,10 @@ def build_100_continue_bytes(mut out: List[UInt8]):
         i = i + 1
 
 
-def _write_reason_phrase[W: Writer](mut writer: W, status: UInt16):
-    """WRITE what `_reason_phrase` returns. ⚠ THIS WRITES; IT DOES NOT RETURN.
-
-    The arms live here so no string constant is ever SELECTED and
-    returned. A literal-returning ladder lowers to two parallel
-    (pointer, length) constant arrays whose two call-site references
-    an `--emit shared-lib` link binds INDEPENDENTLY, and a pair bound
-    CROSSED takes the process down with it."""
-    var s = Int(status)
-    if s == 100:
-        writer.write("Continue")
-        return
-    if s == 200:
-        writer.write("OK")
-        return
-    if s == 400:
-        writer.write("Bad Request")
-        return
-    if s == 413:
-        writer.write("Payload Too Large")
-        return
-    if s == 414:
-        writer.write("URI Too Long")
-        return
-    if s == 417:
-        writer.write("Expectation Failed")
-        return
-    if s == 431:
-        writer.write("Request Header Fields Too Large")
-        return
-    if s == 500:
-        writer.write("Internal Server Error")
-        return
-    if s == 505:
-        writer.write("HTTP Version Not Supported")
-        return
-    writer.write("Error")
-    return
-
-
 def _reason_phrase(status: UInt16) -> String:
     var out = String()
     _write_reason_phrase(out, status)
     return out^
-
-
-def _write_static_error_body[W: Writer](mut writer: W, status: UInt16):
-    """WRITE what `_static_error_body` returns. ⚠ THIS WRITES; IT DOES NOT RETURN.
-
-    The arms live here so no string constant is ever SELECTED and
-    returned. A literal-returning ladder lowers to two parallel
-    (pointer, length) constant arrays whose two call-site references
-    an `--emit shared-lib` link binds INDEPENDENTLY, and a pair bound
-    CROSSED takes the process down with it."""
-    var s = Int(status)
-    if s == 400:
-        writer.write("Bad Request\n")
-        return
-    if s == 413:
-        writer.write("Payload Too Large\n")
-        return
-    if s == 414:
-        writer.write("URI Too Long\n")
-        return
-    if s == 417:
-        writer.write("Expectation Failed\n")
-        return
-    if s == 431:
-        writer.write("Request Header Fields Too Large\n")
-        return
-    if s == 500:
-        writer.write("Internal Server Error\n")
-        return
-    if s == 505:
-        writer.write("HTTP Version Not Supported\n")
-        return
-    writer.write("Error\n")
-    return
 
 
 def _static_error_body(status: UInt16) -> String:

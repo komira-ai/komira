@@ -4,10 +4,11 @@
 #
 # THE HELD FIELD NUMBERS, DERIVED FROM THE PROTO ITSELF.
 #
-# resource.proto declares its held numbers once, in `held-numbers:` lines of
-# its header (a message name, then numbers and `a-b` ranges), and its retired
-# numbers in `reserved` statements. This test reads the proto text, parses
-# every message's fields, and refuses:
+# Every `.proto` of the package declares its held numbers once, in
+# `held-numbers:` lines of its header (a message name, then numbers and `a-b`
+# ranges), and its retired numbers in `reserved` statements. This test reads
+# the files' text (one after the other, in `_protos()` order: no message is
+# declared in two), parses every message's fields, and refuses:
 #   * a field whose number is held for its message (so `string x = 101;` in
 #     `Resource` fails the build, not only the first number of each range);
 #   * a field that reuses a number its own message reserved;
@@ -94,8 +95,9 @@ def _field_number(code: String) raises -> Int:
     when the line is not a field."""
     if not code.endswith(";"):
         return -1
+    # Whole words only: `optional string x = 6;` is a field, not an option.
     for p in ["option", "syntax", "package", "import", "reserved", "extensions"]:
-        if code.startswith(p):
+        if code.startswith(p + String(" ")) or code.startswith(p + String("(")) or code.startswith(p + String("=")):
             return -1
     var eq = code.rfind("=")
     if eq < 0:
@@ -206,8 +208,33 @@ def held_violations(text: String) raises -> List[String]:
     return out^
 
 
+def _protos() -> List[String]:
+    """Every `.proto` of the package (BUCK's `_PROTOS`), in its order."""
+    var l = List[String]()
+    for name in [
+        String("resource.proto"),
+        String("refs.proto"),
+        String("compute.proto"),
+        String("data.proto"),
+        String("identity.proto"),
+        String("messaging.proto"),
+        String("secrets.proto"),
+        String("names.proto"),
+        String("triggers.proto"),
+        String("networks.proto"),
+        String("artifacts.proto"),
+        String("composite.proto"),
+    ]:
+        l.append(name)
+    return l^
+
+
 def _real() raises -> String:
-    return Path(String("resource.proto")).read_text()
+    var text = String("")
+    var names = _protos()
+    for i in range(len(names)):
+        text += Path(names[i]).read_text() + String("\n")
+    return text^
 
 
 def _insert_after(text: String, anchor: String, line: String) raises -> String:
@@ -239,6 +266,12 @@ def test_the_proto_uses_no_held_or_reserved_number() raises:
     # The parser read the declarations: a parser that found none would pass
     # the line above vacuously.
     assert_true(_held_total(_real()) > 600, "the held lines expand to the documented ranges")
+    # composite.proto's own line is read too: a number it holds is refused.
+    var c = held_violations(
+        _insert_after(_real(), String("  repeated Resource component = 4;"), String("  string variant = 8;"))
+    )
+    assert_equal(len(c), 1, _joined(c))
+    assert_true(c[0].find("CompositeDefinition uses held number 8") >= 0, c[0])
     print("  test_the_proto_uses_no_held_or_reserved_number: PASS")
 
 
@@ -251,7 +284,10 @@ def test_a_held_number_or_a_reserved_number_is_refused() raises:
     assert_true(v[0].find("Resource uses held number 101") >= 0, v[0])
     # the last number of a range, and a single held number
     assert_equal(len(held_violations(_insert_after(t, anchor, String("  string x = 699;")))), 1)
-    assert_equal(len(held_violations(_insert_after(t, anchor, String("  string x = 6;")))), 1)
+    assert_equal(len(held_violations(_insert_after(t, anchor, String("  string x = 5;")))), 1)
+    # a proto3 `optional` field is a field (its line starts with "option")
+    var o = held_violations(_insert_after(t, anchor, String("  optional string x = 5;")))
+    assert_equal(len(o), 1, String("an optional field at a held number: ") + _joined(o))
     # a number the message reserved
     var r = held_violations(_insert_after(t, anchor, String("  string x = 4;")))
     assert_equal(len(r), 1, _joined(r))
@@ -260,7 +296,7 @@ def test_a_held_number_or_a_reserved_number_is_refused() raises:
     var j = held_violations(_insert_after(t, String("  Image image = 1;\n  repeated string args = 2;"), String("  string x = 51;")))
     assert_equal(len(j), 1, _joined(j))
     # a free number is fine, and so is the same number in another message
-    assert_equal(len(held_violations(_insert_after(t, anchor, String("  string x = 7;")))), 0)
+    assert_equal(len(held_violations(_insert_after(t, anchor, String("  string x = 9;")))), 0)
     assert_equal(len(held_violations(_insert_after(t, anchor, String("  string x = 37;")))), 0)
     # a held line for a message the file does not declare
     var d = held_violations(t + String("\n// held-numbers: NoSuchMessage 1-3\n"))
@@ -269,7 +305,7 @@ def test_a_held_number_or_a_reserved_number_is_refused() raises:
 
 
 def main() raises:
-    print("test_held_numbers_are_unused: the held numbers, derived from resource.proto")
+    print("test_held_numbers_are_unused: the held numbers, derived from every .proto of the package")
     test_the_proto_uses_no_held_or_reserved_number()
     test_a_held_number_or_a_reserved_number_is_refused()
     print("ALL HELD-NUMBER TESTS PASSED")

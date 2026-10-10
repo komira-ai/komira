@@ -1,0 +1,151 @@
+# The holds of the public boundary lint (//:public_boundary, tools/build/lint/defs.bzl,
+# public_boundary; what each rule matches: tools/build/lint/public_boundary.awk): the
+# findings a file must keep. One row per rule and file, tab-separated:
+# <rule> <file> <count> <reason>. The file must have exactly <count> findings of the
+# rule: one more fails the build naming it; one fewer fails too, asking for the count
+# to be lowered or the row deleted. So this file only shrinks. The rule `deny` (a
+# private consumer's words) cannot be held.
+commit_sha	docs/ci.md	2	a public commit of this repository: the commit the run table's runs started from
+commit_sha	src/komira_column_kernels/digest_functions.mojo	1	a SHA-1 test vector (RFC 3174)
+commit_sha	src/komira_crypto/tests/test_aes_gcm_smoke.mojo	1	words of the FIPS 197 test vector
+commit_sha	src/komira_crypto/tests/test_wycheproof_hkdf_sha256.mojo	1	the public upstream commit the vectors are taken from
+commit_sha	src/komira_crypto/tests/test_wycheproof_hkdf_sha384.mojo	1	the public upstream commit the vectors are taken from
+commit_sha	src/komira_crypto/tests/test_wycheproof_hkdf_sha512.mojo	1	the public upstream commit the vectors are taken from
+commit_sha	src/komira_csv/byte_span_numeric.mojo	2	digit groups of a worked example, not a commit
+commit_sha	src/komira_udf/tests/test_typed_udf_raises_variance.mojo	1	the public Mojo compiler build the reproduction names
+commit_sha	third_party/aws_c_auth/BUCK	1	the public upstream commit the archive pin names
+commit_sha	tools/build/package/README.md	1	the made-up source commit of the test stamp
+commit_sha	tools/build/tests/functional/public_boundary/held_c.txt	3	a planted finding of test 44 (the public boundary lint)
+commit_sha	tools/build/tests/functional/public_boundary/held_mojo.txt	5	a planted finding of test 44 (the public boundary lint)
+commit_sha	tools/build/tests/functional/public_boundary/near_c.txt	2	a planted finding of test 44 (the public boundary lint)
+commit_sha	tools/build/tests/functional/public_boundary/near_mojo.txt	4	a planted finding of test 44 (the public boundary lint)
+commit_sha	tools/build/tests/negative/public_boundary/held_plus.txt	5	a planted finding of test 44 (the public boundary lint)
+commit_sha	tools/build/tests/negative/public_boundary/plant_sha_c.txt	1	a planted finding of test 44 (the public boundary lint)
+commit_sha	tools/build/tests/negative/public_boundary/plant_sha_c_after_string.txt	1	a planted finding of test 44 (the public boundary lint)
+commit_sha	tools/build/tests/negative/public_boundary/plant_sha_comment.txt	1	a planted finding of test 44 (the public boundary lint)
+commit_sha	tools/build/tests/negative/public_boundary/plant_sha_docstring.txt	1	a planted finding of test 44 (the public boundary lint)
+commit_sha	tools/build/tests/negative/public_boundary/plant_sha_md.txt	1	a planted finding of test 44 (the public boundary lint)
+date	src/komira_aws_core/tests/test_aws_codec.mojo	1	an impossible calendar day the timestamp reader must refuse (test input)
+date	src/komira_aws_core/tests/test_credential_wire.mojo	2	x-amz-date values on either side of a year boundary (test data)
+date	src/tests/e2e/komira_azure_blob_e2e/tests/test_shared_key_oracle.mojo	2	the Azure Storage API version the signing test sends (x-ms-version), not a history date
+date	src/komira_crypto/tests/test_asn1_primitives.mojo	1	a published certificate's notAfter (test data)
+date	src/komira_crypto/tests/test_chain_validator.mojo	1	the fixed verification time of the certificate tests (test data)
+date	src/komira_crypto/tests/test_chain_validator_ed25519.mojo	1	the fixed verification time of the certificate tests (test data)
+date	src/komira_crypto/tests/test_chain_validator_p384.mojo	1	the fixed verification time of the certificate tests (test data)
+date	src/komira_crypto/tests/test_x509_letsencrypt_r3.mojo	2	the published certificate's validity (test data)
+date	src/komira_csv/tests/test_csv_cell_parsers_wire_to_builders.mojo	1	a timestamp cell (test data)
+date	src/komira_eval/tests/test_row_projection_math_extract_kerneldirect.mojo	5	a calendar day the ISO-week extraction test pins (test data)
+date	src/komira_http_client/tests/test_objectstore_http.mojo	2	a Last-Modified header value (test data)
+date	src/komira_mcp_server/protocol.mojo	2	the MCP protocol revision identifiers this server speaks, not history dates
+date	src/komira_mcp_server/tests/test_mcp_spec_examples.mojo	3	the MCP specification examples: a revision identifier and an example tool error text (test data)
+date	src/komira_plan_ir/tests/test_scan_binding_substrate.mojo	1	a partition key literal (test data)
+date	tools/build/tests/functional/darwin/check.sh	1	the build line a stubbed linker prints (test data)
+email	src/komira_crypto/tests/test_rs256_jwks_verify.mojo	1	a made-up service account or address (test data)
+email	src/komira_gcp_apigateway/tests/test_apigateway_requests.mojo	2	a made-up service account or address (test data)
+email	src/komira_gcp_cloudresourcemanager/tests/test_crm_projects.mojo	1	a made-up service account or address (test data)
+email	src/komira_gcp_cloudscheduler/tests/test_cloudscheduler_methods.mojo	3	a made-up service account or address (test data)
+email	src/komira_gcp_core/tests/test_v4_sign_conformance.mojo	2	a made-up service account or address (test data)
+email	src/komira_gcp_firestore/tests/test_firestore_client.mojo	5	placeholder addresses (test data)
+email	src/komira_gcp_firestore/tests/test_firestore_kv_store.mojo	10	placeholder addresses (test data)
+email	src/komira_gcp_iam/tests/test_iam_errors.mojo	1	a made-up service account or address (test data)
+email	src/komira_gcp_iam/tests/test_iam_policy.mojo	5	a made-up service account or address (test data)
+email	src/komira_gcp_iam/tests/test_iam_service_accounts.mojo	1	a made-up service account or address (test data)
+email	src/komira_gcp_run/tests/test_run_jobs.mojo	2	a made-up service account or address (test data)
+email	src/komira_gcp_run/tests/test_run_services.mojo	4	a made-up service account or address (test data)
+email	src/komira_gcp_storage/tests/test_storage_client.mojo	3	a made-up service account or address (test data)
+email	src/komira_gcp_wif/tests/test_wif_mint.mojo	1	a made-up service account or address (test data)
+email	src/komira_git/sha1dc.mojo	2	the authors' addresses in sha1collisiondetection's MIT copyright notice, which the licence requires in every copy
+email	src/komira_git/sha1dc_ubc.mojo	2	the authors' addresses in sha1collisiondetection's MIT copyright notice, which the licence requires in every copy
+email	src/komira_http_client/tests/test_url.mojo	1	userinfo of a URL (test input)
+email	src/komira_log/structured_log.mojo	1	the example address of the redaction rule's docstring
+email	src/komira_source_url/tests/test_source_url.mojo	1	a URL's user information as test input: the refusal must not repeat it
+email	tools/build/tests/functional/public_boundary/data_arrow.txt	1	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/functional/public_boundary/held_mojo.txt	3	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/negative/public_boundary/held_plus.txt	3	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/negative/public_boundary/plant_email.txt	1	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/negative/public_boundary/plant_email_after_url.txt	1	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/negative/public_boundary/plant_email_git_ssh_user.txt	1	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/negative/public_boundary/plant_email_mailto.txt	1	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/negative/public_boundary/plant_email_s3_user.txt	1	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/negative/public_boundary/plant_email_url_path.txt	1	a planted finding of test 44 (the public boundary lint)
+email	tools/build/tests/public_boundary_tests.sh	6	the findings test 44 expects, spelled out
+home_path	tools/build/tests/functional/public_boundary/data_arrow.txt	1	a planted finding of test 44 (the public boundary lint)
+home_path	tools/build/tests/functional/public_boundary/held_mojo.txt	4	a planted finding of test 44 (the public boundary lint)
+home_path	tools/build/tests/negative/public_boundary/held_plus.txt	4	a planted finding of test 44 (the public boundary lint)
+home_path	tools/build/tests/negative/public_boundary/plant_home_linux.txt	1	a planted finding of test 44 (the public boundary lint)
+home_path	tools/build/tests/negative/public_boundary/plant_home_mac.txt	1	a planted finding of test 44 (the public boundary lint)
+home_path	tools/build/tests/negative/public_boundary/plant_home_windows.txt	1	a planted finding of test 44 (the public boundary lint)
+home_path	tools/build/tests/public_boundary_tests.sh	4	the findings test 44 expects, spelled out
+host	src/kci_logs/run_log_path.mojo	1	a placeholder host in a docstring; an example name when the file is next edited
+host	src/kci_logs/tests/test_cloud_log_source.mojo	1	single-label or made-up hosts as test input
+host	src/kci_pkg_upload/http_read.mojo	1	a placeholder host in a comment; an example name when the file is next edited
+host	src/kci_reconciler/tests/test_resource_outputs.mojo	7	single-label or made-up hosts as test input
+host	src/kci_reconciler/tests/test_resource_outputs_after_mutation.mojo	3	single-label or made-up hosts as test input
+host	src/kci_validator_report/tests/test_validator_report.mojo	7	made-up Cloud Run service URLs and single-label hosts (test data)
+host	src/komira_aws_core/tests/test_aws_codec.mojo	1	single-label or made-up hosts as test input
+host	src/komira_aws_core/tests/test_aws_query.mojo	2	single-label or made-up hosts as test input
+host	src/komira_aws_core/tests/test_aws_response.mojo	1	single-label or made-up hosts as test input
+host	src/komira_aws_core/tests/test_endpoint_resolution.mojo	3	malformed, IPv6 and single-label hosts the endpoint parser must handle (test input)
+host	src/komira_aws_core/tests/test_endpoint_rules_library.mojo	8	malformed, IPv6 and single-label hosts the endpoint rules must handle (test input)
+host	src/komira_aws_lambda/tests/test_lambda_responses.mojo	3	a made-up Lambda function URL (test data)
+host	src/komira_column_kernels/tests/test_regexp_bitstate_differential.mojo	5	URLs as regular-expression test input
+host	src/komira_column_kernels/tests/test_regexp_dotstar_eos_tail.mojo	14	URLs as regular-expression test input
+host	src/komira_column_kernels/tests/test_regexp_replace_memo_duplicates.mojo	16	URLs as regular-expression test input
+host	src/komira_column_kernels/tests/test_regexp_scratch_reuse_and_span_subject.mojo	6	URLs as regular-expression test input
+host	src/komira_crypto/tests/test_rs256_jwks_verify.mojo	1	a made-up registry host (test data)
+host	src/komira_gcp_cloudscheduler/tests/test_cloudscheduler_methods.mojo	5	made-up Cloud Run service URLs and single-label hosts (test data)
+host	src/komira_gcp_core/tests/test_gcp_pagination.mojo	6	single-label or made-up hosts as test input
+host	src/komira_gcp_core/tests/test_token_wire.mojo	3	single-label or made-up hosts as test input
+host	src/komira_gcp_firestore/tests/test_firestore_conditional_store.mojo	27	made-up Cloud Run service URLs and single-label hosts (test data)
+host	src/komira_gcp_run/tests/test_run_operations.mojo	2	made-up Cloud Run service URLs and single-label hosts (test data)
+host	src/komira_gcp_run/tests/test_run_services.mojo	3	made-up Cloud Run service URLs and single-label hosts (test data)
+host	src/komira_http_client/http_transport.mojo	1	a placeholder host in a comment; an example name when the file is next edited
+host	src/komira_http_client/redirect_policy.mojo	2	a placeholder host in a comment; an example name when the file is next edited
+host	src/komira_http_client/tests/test_redirect_layer.mojo	1	a cross-site redirect target the redirect policy must refuse (test input)
+host	src/komira_http_client/tests/test_request_writer.mojo	1	single-label or made-up hosts as test input
+host	src/komira_http_client/tests/test_url.mojo	3	hosts the URL parser must handle (test input)
+host	src/komira_http_client/url.mojo	1	a placeholder host in a comment; an example name when the file is next edited
+host	src/komira_job_supervisor/tests/test_job_supervisor_config_flags.mojo	3	single-label or made-up hosts as test input
+host	src/komira_objectstore_s3/tests/test_s3_basics.mojo	1	single-label or made-up hosts as test input
+host	src/komira_objectstore_s3/tests/test_s3_endpoint_scheme.mojo	7	single-label or made-up hosts as test input
+host	src/komira_oci/oci_location.mojo	2	placeholder hosts in a comment; example names when the file is next edited
+host	tools/build/readme_examples/tests/test_markdown.mojo	1	single-label or made-up hosts as test input
+host	tools/build/tests/functional/public_boundary/data_arrow.txt	1	a planted finding of test 44 (the public boundary lint)
+host	tools/build/tests/functional/public_boundary/held_mojo.txt	7	a planted finding of test 44 (the public boundary lint)
+host	tools/build/tests/negative/public_boundary/held_plus.txt	7	a planted finding of test 44 (the public boundary lint)
+host	tools/build/tests/negative/public_boundary/plant_host_ipv6.txt	1	a planted finding of test 44 (the public boundary lint)
+host	tools/build/tests/negative/public_boundary/plant_host_private.txt	1	a planted finding of test 44 (the public boundary lint)
+host	tools/build/tests/negative/public_boundary/plant_host_single.txt	1	a planted finding of test 44 (the public boundary lint)
+host	tools/build/tests/negative/public_boundary/plant_host_unlisted.txt	1	a planted finding of test 44 (the public boundary lint)
+ip	src/kci_cloud/network.mojo	5	the private ranges the network rule accepts (RFC 1918)
+ip	src/kci_cloud/tests/test_cloud_network_rules.mojo	57	a private range as data: a network's range must be private, so documentation ranges are refused
+ip	src/kci_cloud_fake/tests/test_fake_network.mojo	9	a private range as data: a network's range must be private, so documentation ranges are refused
+ip	src/kci_cloud_fake/tests/test_fake_validation_run_tag.mojo	2	a private range as data: a network's range must be private, so documentation ranges are refused
+ip	src/kci_reconciler/tests/test_resource_outputs.mojo	2	a private address as test input
+ip	src/kci_resource_proto/README.md	2	the private range of the README's network example
+ip	src/kci_resource_proto/networks.proto	2	the private ranges the network comment names (RFC 1918)
+ip	src/kci_resource_proto/tests/fixtures/graph/network_graph.txtpb	2	a private range as data: a network's range must be private, so documentation ranges are refused
+ip	src/kci_resource_proto/tests/test_resource_graph_golden_bytes.mojo	2	a private range as data: a network's range must be private, so documentation ranges are refused
+ip	src/kci_resource_proto/tests/test_resource_network_numbers.mojo	6	a private range as data: a network's range must be private, so documentation ranges are refused
+ip	src/komira_aws_core/tests/test_credential_wire.mojo	1	an address just outside loopback that the container credential endpoint must refuse (test input)
+ip	src/komira_aws_core/tests/test_endpoint_rules_library.mojo	3	a private address as test input
+ip	src/komira_aws_ec2/tests/test_ec2_responses.mojo	5	VPC and subnet ranges in recorded API responses (test data)
+ip	src/komira_azure_core/tests/test_azure_token_providers.mojo	1	a private address as test input
+ip	src/komira_crypto/tests/test_name_matcher.mojo	2	a private address as test input
+ip	src/komira_db/tests/test_h1_keepalive_pooled_conn.mojo	7	a private address as test input
+ip	src/komira_db_postgres/wire/tests/test_dns_resolve_pg_host.mojo	1	a private address as test input
+ip	src/komira_gcp_compute/tests/test_compute_instances.mojo	2	an instance's internal address in a recorded API response (test data)
+ip	src/komira_gcp_compute/tests/test_compute_network.mojo	5	VPC subnet ranges in recorded API responses (test data)
+ip	src/komira_http_client/tests/test_http_client_h1_keepalive_reuse.mojo	1	a private address as test input
+ip	src/komira_http_client/tests/test_request_writer.mojo	2	a private address as test input
+ip	src/komira_log/tests/test_log_ring_bounded_drain_arena.mojo	1	a private address as test input
+ip	src/komira_net/tests/test_dns_addrinfo_offsets.mojo	1	a private address as test input
+ip	src/komira_net/tests/test_dns_literal.mojo	2	a private address as test input
+ip	tools/build/tests/functional/public_boundary/data_arrow.txt	1	a planted finding of test 44 (the public boundary lint)
+ip	tools/build/tests/functional/public_boundary/held_mojo.txt	8	a planted finding of test 44 (the public boundary lint)
+ip	tools/build/tests/negative/public_boundary/held_plus.txt	8	a planted finding of test 44 (the public boundary lint)
+ip	tools/build/tests/negative/public_boundary/plant_ip_link_local.txt	1	a planted finding of test 44 (the public boundary lint)
+ip	tools/build/tests/negative/public_boundary/plant_ip_port.txt	1	a planted finding of test 44 (the public boundary lint)
+ip	tools/build/tests/negative/public_boundary/plant_ip_private.txt	1	a planted finding of test 44 (the public boundary lint)
+ip	tools/build/tests/negative/public_boundary/plant_ip_shared.txt	1	a planted finding of test 44 (the public boundary lint)
+ip	tools/build/tests/public_boundary_tests.sh	3	the findings test 44 expects, spelled out

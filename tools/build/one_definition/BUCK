@@ -1,0 +1,62 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_shared_lib")
+load(":libraries.bzl", "SRC_C_LIBRARIES", "THIRD_PARTY_C_LIBRARIES")
+
+# The one-definition gate: a C-ABI shared library that links every C library
+# of SRC_C_LIBRARIES and THIRD_PARTY_C_LIBRARIES (libraries.bzl) with
+# --whole-archive, every object of every archive. A global symbol defined in
+# two of them fails the link with `duplicate symbol: <name>`, which a Mojo
+# executable's ordinary static link reports only when it pulls in both
+# definitions' objects (libraries.bzl says why).
+#
+# The library is published only if its gate passes: it is dlopened with
+# RTLD_NOW (an object whose reference nothing resolves fails there) and every
+# name in `exports` must resolve. The names are each C symbol of
+# tools/core_split/c_symbols.tsv, then one symbol per other library it links
+# that keeps default visibility (komira_log_holder's are hidden), so a library
+# that stopped being linked whole goes red as a MISSING EXPORT.
+mojo_shared_lib(
+    name = "one_definition",
+    srcs = ["gate.mojo"],
+    exports = [
+        "komira_one_definition_gate",
+        # tools/core_split/c_symbols.tsv, in its order.
+        "komira_fcntl_set_nonblock",
+        "komira_openat_creat",
+        "komira_write_bytes",
+        "komira_writev_iov",
+        "komira_pwrite",
+        "komira_ftruncate",
+        "komira_fsync",
+        "komira_lseek_end",
+        "komira_prefetch_file",
+        "komira_open_ro",
+        "komira_fstat_size",
+        "komira_mmap_ro",
+        "komira_mmap_ro_count",
+        "komira_munmap",
+        "komira_madvise_willneed",
+        "komira_madvise_willneed_bytes",
+        "komira_madvise_willneed_range",
+        "komira_stat_identity",
+        "komira_set_mtime_ns",
+        "komira_on_pool_enter",
+        "komira_on_pool_exit",
+        "komira_on_pool_depth",
+        "komira_next_inmem_source_id",
+        # One per other library.
+        "komira_install_sigterm_handler",
+        "komira_free",
+        "komira_ea_armed",
+        "komira_objstore_enoent",
+        "komira_proc_spawn",
+        "komira_crypto_sha256_block_data_order_hw",
+        "komira_awslc_CRYPTO_library_init",
+        "BrotliDecoderCreateInstance",
+        "komira_s2n_init",
+        "SHA1DCInit",
+        "komira_snappy_compress",
+        "sqlite3_open",
+    ],
+    force_load = SRC_C_LIBRARIES + THIRD_PARTY_C_LIBRARIES,
+    visibility = ["PUBLIC"],
+)

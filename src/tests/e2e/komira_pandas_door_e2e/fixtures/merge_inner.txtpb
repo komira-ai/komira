@@ -1,0 +1,202 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 4
+plan {
+  output_schema {
+    fields {
+      name: "order_id"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "cust_id"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "amount"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "city"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "cust_id_right"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "name"
+      arrow_type_id: 13
+      nullable: true
+      dict_index_type_id: 4
+    }
+  }
+  join {
+    left {
+      output_schema {
+        fields {
+          name: "order_id"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "cust_id"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "amount"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "city"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+      }
+      scan {
+        source {
+          parquet {
+            paths: "/data/orders.parquet"
+            schema {
+              fields {
+                name: "order_id"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "cust_id"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "amount"
+                arrow_type_id: 12
+                dtype_code: _DT_FLOAT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "city"
+                arrow_type_id: 13
+                nullable: true
+                dict_index_type_id: 4
+              }
+            }
+            mtime_ns: 1234567890
+            fs_is_local: true
+          }
+        }
+        has_schema: true
+        schema {
+          fields {
+            name: "order_id"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "cust_id"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "amount"
+            arrow_type_id: 12
+            dtype_code: _DT_FLOAT64
+            nullable: true
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "city"
+            arrow_type_id: 13
+            nullable: true
+            dict_index_type_id: 4
+          }
+        }
+        has_row_count: true
+        row_count: 6
+        source_kind: SOURCE_KIND_COLUMNAR
+      }
+    }
+    right {
+      output_schema {
+        fields {
+          name: "cust_id"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "name"
+          arrow_type_id: 13
+          nullable: true
+          dict_index_type_id: 4
+        }
+      }
+      scan {
+        source {
+          parquet {
+            paths: "/data/customers.parquet"
+            schema {
+              fields {
+                name: "cust_id"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "name"
+                arrow_type_id: 13
+                nullable: true
+                dict_index_type_id: 4
+              }
+            }
+            mtime_ns: 1234567890
+            fs_is_local: true
+          }
+        }
+        has_schema: true
+        schema {
+          fields {
+            name: "cust_id"
+            arrow_type_id: 5
+            dtype_code: _DT_INT64
+            dict_index_type_id: 4
+          }
+          fields {
+            name: "name"
+            arrow_type_id: 13
+            nullable: true
+            dict_index_type_id: 4
+          }
+        }
+        has_row_count: true
+        row_count: 3
+        source_kind: SOURCE_KIND_COLUMNAR
+      }
+    }
+    left_on: "cust_id"
+    right_on: "cust_id"
+    join_type: JOIN_INNER
+    algo_hint: JOIN_ALGO_AUTO
+  }
+}

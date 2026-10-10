@@ -1,0 +1,43 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Join gather and payload kernels: the unrolled and narrow-width gathers of the deferred join assembly, its row-range-major work plan, build-side payload narrowing and its widen at the leaf exit, the parallel selection flatten, the build-key extraction, and three route counters.
+mojo_library(
+    name = "komira_dispatch_join_kernels",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_join_assembly:komira_join_assembly",
+        "//src/komira_plan_expr:komira_plan_expr",
+    ],
+    test_srcs = [
+        # the build-key extraction: which arm ran, by its counters, and the values
+        "tests/test_hbs_key_extract.mojo",
+        # the deferred assembly's work items, item for item, and its two counts
+        "tests/test_join_deferred_fuse.mojo",
+        # the four gather kernels against an oracle, around every loop boundary
+        "tests/test_join_gather_kernels.mojo",
+        # the witness, copy, tile size, kernel refusals, a value below the base, an empty build batch, each fork operand
+        "tests/test_join_payload_narrow_edges.mojo",
+        # the narrow half's admission ladder, refusals and round trips (moved)
+        "tests/test_join_payload_narrow_exec.mojo",
+        # the widen and the shipped gather over a narrowed source (moved)
+        "tests/test_join_payload_widen.mojo",
+        # the widen of no chunks, of a bitmap, of a failing tile, and each fork operand
+        "tests/test_join_payload_widen_edges.mojo",
+        # the three process settings: defaults, then each set on its own
+        "tests/test_join_settings.mojo",
+        # every counter: counting, reset, a fresh slot, no sharing
+        "tests/test_route_counters.mojo",
+        # the selection egress fork failing on one worker, and not forking at a pool width of one
+        "tests/test_selection_flatten_one_worker.mojo",
+        # the selection egress against an absolute oracle (moved)
+        "tests/test_selection_flatten_parallel.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

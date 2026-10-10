@@ -157,7 +157,7 @@ def _evp_sha256() -> _FfiHandle:
     # struct (lives forever in libcrypto.a's .rodata). Never freed;
     # held only as opaque handle passed back to EVP_DigestInit_ex.
     return external_call[
-        "EVP_sha256", _FfiHandle
+        "komira_awslc_EVP_sha256", _FfiHandle
     ]()
 
 
@@ -166,7 +166,7 @@ def _evp_sha384() -> _FfiHandle:
     """Return AWS-LC's SHA-384 method singleton."""
     # SAFETY: same as _evp_sha256.
     return external_call[
-        "EVP_sha384", _FfiHandle
+        "komira_awslc_EVP_sha384", _FfiHandle
     ]()
 
 
@@ -175,7 +175,7 @@ def _evp_sha512() -> _FfiHandle:
     """Return AWS-LC's SHA-512 method singleton."""
     # SAFETY: same as _evp_sha256.
     return external_call[
-        "EVP_sha512", _FfiHandle
+        "komira_awslc_EVP_sha512", _FfiHandle
     ]()
 
 
@@ -185,7 +185,7 @@ def _evp_sha1() -> _FfiHandle:
     the file header)."""
     # SAFETY: same as _evp_sha256.
     return external_call[
-        "EVP_sha1", _FfiHandle
+        "komira_awslc_EVP_sha1", _FfiHandle
     ]()
 
 
@@ -237,7 +237,7 @@ def sha2_oneshot[OUTPUT_SIZE: Int](data: Span[UInt8, _]) -> Array[UInt8, OUTPUT_
 
     comptime if OUTPUT_SIZE == 32:
         _ = external_call[
-            "SHA256",
+            "komira_awslc_SHA256",
             _FfiByte,
             _FfiByte,
             UInt,
@@ -245,7 +245,7 @@ def sha2_oneshot[OUTPUT_SIZE: Int](data: Span[UInt8, _]) -> Array[UInt8, OUTPUT_
         ](data_ptr, UInt(len(data)), out_ptr)
     elif OUTPUT_SIZE == 48:
         _ = external_call[
-            "SHA384",
+            "komira_awslc_SHA384",
             _FfiByte,
             _FfiByte,
             UInt,
@@ -253,7 +253,7 @@ def sha2_oneshot[OUTPUT_SIZE: Int](data: Span[UInt8, _]) -> Array[UInt8, OUTPUT_
         ](data_ptr, UInt(len(data)), out_ptr)
     else:
         _ = external_call[
-            "SHA512",
+            "komira_awslc_SHA512",
             _FfiByte,
             _FfiByte,
             UInt,
@@ -283,7 +283,7 @@ def sha1_oneshot(data: Span[UInt8, _]) -> Array[UInt8, 20]:
     var out_ptr = UnsafePointer(to=out[0]).unsafe_mut_cast[False]().unsafe_origin_cast[_FFI_ORIGIN]()
     var data_ptr = _span_ptr_mut(data)
     _ = external_call[
-        "SHA1",
+        "komira_awslc_SHA1",
         _FfiByte,
         _FfiByte,
         UInt,
@@ -318,7 +318,7 @@ def blake2b_256_oneshot(data: Span[UInt8, _]) -> Array[UInt8, 32]:
     var out_ptr = UnsafePointer(to=out[0]).unsafe_mut_cast[False]().unsafe_origin_cast[_FFI_ORIGIN]()
     var data_ptr = _span_ptr_mut(data)
     external_call[
-        "BLAKE2B256",
+        "komira_awslc_BLAKE2B256",
         NoneType,
         _FfiByte,
         UInt,
@@ -379,7 +379,7 @@ struct Sha2Hasher[OUTPUT_SIZE: Int](Movable, Deinitable):
         # pointer to it. We retain that pointer in self._ctx; freed in
         # __del__ via EVP_MD_CTX_free.
         self._ctx = external_call[
-            "EVP_MD_CTX_new", _FfiHandle
+            "komira_awslc_EVP_MD_CTX_new", _FfiHandle
         ]()
         debug_assert(
             Int(self._ctx) != 0,
@@ -391,7 +391,7 @@ struct Sha2Hasher[OUTPUT_SIZE: Int](Movable, Deinitable):
         # all-zero address via `_ffi_null()`).
         var md = _evp_md_for_size[Self.OUTPUT_SIZE]()
         var rc = external_call[
-            "EVP_DigestInit_ex",
+            "komira_awslc_EVP_DigestInit_ex",
             Int,
             _FfiHandle,
             _FfiHandle,
@@ -413,7 +413,7 @@ struct Sha2Hasher[OUTPUT_SIZE: Int](Movable, Deinitable):
         # call; AWS-LC retains no pointer past the call.
         var data_ptr = _span_ptr_mut(data)
         var rc = external_call[
-            "EVP_DigestUpdate",
+            "komira_awslc_EVP_DigestUpdate",
             Int,
             _FfiHandle,
             _FfiByte,
@@ -447,14 +447,14 @@ struct Sha2Hasher[OUTPUT_SIZE: Int](Movable, Deinitable):
         # canonical AWS-LC clone-and-finalize idiom. clone_ctx is owned
         # locally; freed below before this fn returns.
         var clone_ctx = external_call[
-            "EVP_MD_CTX_new", _FfiHandle
+            "komira_awslc_EVP_MD_CTX_new", _FfiHandle
         ]()
         debug_assert(
             Int(clone_ctx) != 0,
             "Sha2Hasher.finalize_into: EVP_MD_CTX_new returned NULL",
         )
         var rc = external_call[
-            "EVP_MD_CTX_copy_ex",
+            "komira_awslc_EVP_MD_CTX_copy_ex",
             Int,
             _FfiHandle,  # dst
             _FfiHandle,  # src
@@ -468,7 +468,7 @@ struct Sha2Hasher[OUTPUT_SIZE: Int](Movable, Deinitable):
         var dst_ptr = _span_ptr_mut(dst)
         var out_len = UInt32(0)
         var rc2 = external_call[
-            "EVP_DigestFinal_ex",
+            "komira_awslc_EVP_DigestFinal_ex",
             Int,
             _FfiHandle,
             _FfiByte,
@@ -486,7 +486,7 @@ struct Sha2Hasher[OUTPUT_SIZE: Int](Movable, Deinitable):
 
         # Free the clone ctx; self._ctx stays untouched.
         external_call[
-            "EVP_MD_CTX_free",
+            "komira_awslc_EVP_MD_CTX_free",
             NoneType,
             _FfiHandle,
         ](clone_ctx)
@@ -506,14 +506,14 @@ struct Sha2Hasher[OUTPUT_SIZE: Int](Movable, Deinitable):
         # the clone's __del__. No double-free (original self._ctx is
         # separate heap allocation).
         var clone_ctx = external_call[
-            "EVP_MD_CTX_new", _FfiHandle
+            "komira_awslc_EVP_MD_CTX_new", _FfiHandle
         ]()
         debug_assert(
             Int(clone_ctx) != 0,
             "Sha2Hasher.fork: EVP_MD_CTX_new returned NULL",
         )
         var rc = external_call[
-            "EVP_MD_CTX_copy_ex",
+            "komira_awslc_EVP_MD_CTX_copy_ex",
             Int,
             _FfiHandle,
             _FfiHandle,
@@ -533,7 +533,7 @@ struct Sha2Hasher[OUTPUT_SIZE: Int](Movable, Deinitable):
         # state reset).
         var md = _evp_md_for_size[Self.OUTPUT_SIZE]()
         var rc = external_call[
-            "EVP_DigestInit_ex",
+            "komira_awslc_EVP_DigestInit_ex",
             Int,
             _FfiHandle,
             _FfiHandle,
@@ -553,7 +553,7 @@ struct Sha2Hasher[OUTPUT_SIZE: Int](Movable, Deinitable):
         # digest state before freeing.
         if Int(self._ctx) != 0:
             external_call[
-                "EVP_MD_CTX_free",
+                "komira_awslc_EVP_MD_CTX_free",
                 NoneType,
                 _FfiHandle,
             ](self._ctx)

@@ -1,0 +1,11 @@
+{
+  "service": "logs",
+  "overrides": [
+    {
+      "operation": "GetLogEvents",
+      "hand_module": "env_read_escaped_quote.env_escaped_quote",
+      "hand_symbol": "get_log_events",
+      "reason": "A fixture override: a hand-written module of the package that reads HOME through Path.home, its module named after a string holding an escaped double quote, then an import after `;`."
+    }
+  ]
+}

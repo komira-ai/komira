@@ -114,6 +114,11 @@ struct StreamState(
         was deferred awaiting body bytes (RFC 7540 §8.1.2.6 content-length
         gate); the request headers + method + path live in the
         connection's pending-request side table.
+      * `reset_sent: Bool` — True once this endpoint has sent RST_STREAM
+        on the stream through the serve loop's stream-error path. RFC 9113
+        §5.1: frames received on a closed stream after sending RST_STREAM
+        MUST be ignored, while one the peer closed is answered
+        STREAM_CLOSED; the state alone (CLOSED) cannot tell the two apart.
     """
 
     var state: UInt8
@@ -130,6 +135,7 @@ struct StreamState(
     var recv_data_bytes: Int64
     var has_deferred_response_body: Bool
     var has_pending_request: Bool
+    var reset_sent: Bool
 
     def __init__(out self, stream_id: UInt32, initial_window: Int32):
         self.state = STREAM_STATE_IDLE
@@ -143,6 +149,7 @@ struct StreamState(
         self.recv_data_bytes = Int64(0)
         self.has_deferred_response_body = False
         self.has_pending_request = False
+        self.reset_sent = False
 
     def is_terminal(self) -> Bool:
         return self.state == STREAM_STATE_CLOSED

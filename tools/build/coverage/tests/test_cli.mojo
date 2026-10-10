@@ -142,7 +142,8 @@ def test_report_end_to_end() raises:
     assert_equal(Int(result.get(String("diff")).get(String("uncovered")).as_int64()), 2)
     assert_equal(result.get(String("touched_packages")).element_at(0).as_string(), "src/alpha")
     var findings = result.get(String("findings"))
-    assert_equal(findings.array_len(), 6)
+    # src/beta: every line covered, no branch record, so BranchNotMeasured.
+    assert_equal(findings.array_len(), 7)
     var unmeasured = 0
     for i in range(findings.array_len()):
         var f = findings.element_at(i)
@@ -314,6 +315,223 @@ def test_input_errors_exit_1() raises:
     assert_equal(run(_with(nopkg^, String("--package"), String("src/nothere"))), EXIT_INPUT)
 
 
+def test_gate_with_no_report() raises:
+    # A library with no test has no report: `gate` takes none (`report`
+    # still needs one, test_usage_errors_exit_2). The gated package is
+    # measured all the same: NotMeasured, its files counted from their
+    # source, exit 3 in enforce mode and 0 in census.
+    var dir = _tmp(String("gate_none"))
+    var a = _without(_without(_without(_gate(dir, String("enforce")), String("--cobertura")), String("--cobertura")), String("--mutants"))
+    assert_equal(run(a), EXIT_GATE)
+    var result = parse_json_value(read_text(dir + "/result.json"))
+    assert_equal(result.get(String("conclusion")).as_string(), "failure")
+    var kinds = String("")
+    var findings = result.get(String("findings"))
+    for i in range(findings.array_len()):
+        kinds += findings.element_at(i).get(String("kind")).as_string() + String(" ")
+    assert_equal(kinds, "BelowTarget MissingRow NotMeasured UnmeasuredFile UnmeasuredFile ")
+    assert_true(read_text(dir + "/summary.md").find("- **NotMeasured** `src/alpha`: ") >= 0)
+    var cdir = _tmp(String("gate_none_census"))
+    var c = _without(_without(_without(_gate(cdir, String("census")), String("--cobertura")), String("--cobertura")), String("--mutants"))
+    assert_equal(run(c), EXIT_OK)
+    assert_equal(parse_json_value(read_text(cdir + "/result.json")).get(String("conclusion")).as_string(), "neutral")
+
+
+def test_gate_test_sources() raises:
+    # `gate --test-source P` sets aside a welded test outside the package's
+    # tests/ (here src/alpha/z.mojo): with no report, z.mojo is no longer a
+    # file no test compiled, so one UnmeasuredFile goes. A path that is no
+    # repository file, or a file of another package, is an input error;
+    # `report` has no such flag.
+    var dir = _tmp(String("gate_test_source"))
+    var base = _without(_without(_without(_gate(dir, String("census")), String("--cobertura")), String("--cobertura")), String("--mutants"))
+    assert_equal(run(_with(base.copy(), String("--test-source"), String("src/alpha/z.mojo"))), EXIT_OK)
+    var kinds = String("")
+    var result = parse_json_value(read_text(dir + "/result.json"))
+    var findings = result.get(String("findings"))
+    for i in range(findings.array_len()):
+        kinds += findings.element_at(i).get(String("kind")).as_string() + String(" ")
+    assert_equal(kinds, "BelowTarget MissingRow NotMeasured UnmeasuredFile ")
+    assert_equal(run(_with(base.copy(), String("--test-source"), String("src/alpha/gone.mojo"))), EXIT_INPUT)
+    assert_equal(run(_with(base.copy(), String("--test-source"), String("src/beta/c.mojo"))), EXIT_INPUT)
+    assert_equal(run(_with(_report(_tmp(String("report_test_source"))), String("--test-source"), String("src/alpha/z.mojo"))), EXIT_USAGE)
+
+
+def test_report_file_names() raises:
+    # `[PKGDIR=]FILE`: the package directory is before the first `=`; a file
+    # name holding `=` is given as `=FILE`, which is the same as no PKGDIR.
+    var a = List[String]()
+    a.append("gate")
+    a.extend(_common(_tmp(String("file_names"))))
+    a.append("--package")
+    a.append("src/alpha")
+    a.append("--mode")
+    a.append("census")
+    a.append("--cobertura")
+    a.append("=out/a=b.xml")
+    a.append("--cobertura")
+    a.append("plain.xml")
+    a.append("--cobertura")
+    a.append("src/x/=c.xml")
+    var p = parse_args(a)
+    assert_equal(len(p.reports), 5)
+    assert_equal(p.reports[0].pkgdir, "src/alpha")
+    assert_equal(p.reports[2].pkgdir, "")
+    assert_equal(p.reports[2].file, "out/a=b.xml")
+    assert_equal(p.reports[3].pkgdir, "")
+    assert_equal(p.reports[3].file, "plain.xml")
+    assert_equal(p.reports[4].pkgdir, "src/x")
+    assert_equal(p.reports[4].file, "c.xml")
+
+
+def _branches(dir: String) raises -> String:
+    """`<branch_hit>/<branch_found>` of the gate's package in `dir`."""
+    var p = parse_json_value(read_text(dir + "/result.json")).get(String("package"))
+    return p.get(String("branch_hit")).serialize() + String("/") + p.get(String("branch_found")).serialize()
+
+
+def test_branch_lcov_flag() raises:
+    # `--branch-lcov [PKGDIR=]F`, repeatable, on both commands, read with
+    # Cobertura reports (no usage error): two tests' records for z.mojo
+    # (which no line report names) add its branches to src/alpha's, summed
+    # by id. A DA in such a file, records for a.mojo (whose Cobertura
+    # report gives condition-coverage) and two files disagreeing on a
+    # location's decisions are input errors; `report` still needs a line
+    # report.
+    var dir = _tmp(String("branch_lcov"))
+    var one = dir + "/one.info"
+    var two = dir + "/two.info"
+    write_text(one, String("SF:src/alpha/z.mojo\nBRDA:5,5:br:0/1,0,-\nBRDA:5,5:br:0/1,1,3\nend_of_record\n"))
+    write_text(two, String("SF:src/alpha/z.mojo\nBRDA:5,5:br:0/1,0,-\nBRDA:5,5:br:0/1,1,-\nend_of_record\n"))
+    var plain = _tmp(String("branch_lcov_plain"))
+    assert_equal(run(_gate(plain, String("census"))), EXIT_OK)
+    assert_equal(_branches(plain), "1/2")
+    var with_b = _tmp(String("branch_lcov_gate"))
+    assert_equal(run(_with(_with(_gate(with_b, String("census")), String("--branch-lcov"), one), String("--branch-lcov"), String("src/alpha=") + two)), EXIT_OK)
+    assert_equal(_branches(with_b), "2/4")
+    var rdir = _tmp(String("branch_lcov_report"))
+    assert_equal(run(_with(_report(rdir), String("--branch-lcov"), one)), EXIT_OK)
+    var only = _with(_without(_without(_report(_tmp(String("branch_lcov_only"))), String("--cobertura")), String("--cobertura")), String("--branch-lcov"), one)
+    assert_equal(run(only), EXIT_USAGE)
+    var da = dir + "/da.info"
+    write_text(da, String("SF:src/alpha/z.mojo\nDA:5,1\nend_of_record\n"))
+    assert_equal(run(_with(_gate(_tmp(String("branch_lcov_da")), String("census")), String("--branch-lcov"), da)), EXIT_INPUT)
+    var a = dir + "/a.info"
+    write_text(a, String("SF:src/alpha/a.mojo\nBRDA:5,9:br:0/1,0,1\nBRDA:5,9:br:0/1,1,1\nend_of_record\n"))
+    assert_equal(run(_with(_gate(_tmp(String("branch_lcov_a")), String("census")), String("--branch-lcov"), a)), EXIT_INPUT)
+    var n2 = dir + "/n2.info"
+    write_text(n2, String("SF:src/alpha/z.mojo\nBRDA:5,5:br:0/2,0,1\nBRDA:5,5:br:0/2,1,1\nBRDA:5,5:br:1/2,0,1\nBRDA:5,5:br:1/2,1,1\nend_of_record\n"))
+    assert_equal(run(_with(_with(_gate(_tmp(String("branch_lcov_n")), String("census")), String("--branch-lcov"), one), String("--branch-lcov"), n2)), EXIT_INPUT)
+
+
+def test_gate_floor_fails_in_every_mode() raises:
+    # src/alpha measures line 25.00% (2/8). Under a floor of 25.01% the gate
+    # exits 3 (EXIT_GATE) in census and neutral mode, not only in enforce,
+    # and says why; at 25.00%, or under it, census exits 0. cov_gate.sh
+    # turns exit 3 into a failed gate in every mode.
+    var dir = _tmp(String("gate_floor"))
+    var above = dir + "/above.tsv"
+    var at = dir + "/at.tsv"
+    var under = dir + "/under.tsv"
+    write_text(above, String("src/alpha\t2501\t-\n"))
+    write_text(at, String("src/alpha\t2500\t-\n"))
+    write_text(under, String("src/alpha\t2499\t-\n"))
+    for mode in [String("census"), String("neutral")]:
+        var r = dir + "/" + mode + "_red"
+        makedirs(r, exist_ok=True)
+        assert_equal(run(_with(_without(_gate(r, mode), String("--ratchet")), String("--ratchet"), above)), EXIT_GATE, mode)
+        var result = parse_json_value(read_text(r + "/result.json"))
+        assert_equal(result.get(String("conclusion")).as_string(), "failure", mode)
+        var summary = read_text(r + "/summary.md")
+        assert_true(summary.find("**Regression**") >= 0 and summary.find("below its floor 25.01%") >= 0, summary)
+        for floor in [at, under]:
+            var g = dir + "/" + mode + "_green"
+            makedirs(g, exist_ok=True)
+            assert_equal(run(_with(_without(_gate(g, mode), String("--ratchet")), String("--ratchet"), floor)), EXIT_OK, mode + floor)
+            assert_equal(parse_json_value(read_text(g + "/result.json")).get(String("conclusion")).as_string(), "neutral", mode + floor)
+
+
+def _levels(dir: String, prefix: String) raises -> String:
+    """The annotation levels of the paths under `prefix` in the full
+    annotation list (`anns.json` of `dir`), each once, sorted."""
+    var anns = parse_json_value(read_text(dir + "/anns.json"))
+    var seen = List[String]()
+    for i in range(anns.array_len()):
+        var a = anns.element_at(i)
+        if not a.get(String("path")).as_string().startswith(prefix):
+            continue
+        var l = a.get(String("annotation_level")).as_string()
+        var has = False
+        for k in range(len(seen)):
+            if seen[k] == l:
+                has = True
+        if not has:
+            seen.append(l)
+    sort_strings(seen)
+    var s = String("")
+    for k in range(len(seen)):
+        s += seen[k] + String(" ")
+    return s^
+
+
+def _package_kinds(result: JsonValue, key: String) raises -> String:
+    """`<package>:<kind>` of each finding in `key` of a result JSON."""
+    var fs = result.get(key)
+    var s = String("")
+    for i in range(fs.array_len()):
+        var f = fs.element_at(i)
+        s += f.get(String("package")).as_string() + String(":") + f.get(String("kind")).as_string() + String(" ")
+    return s^
+
+
+def test_info_package() raises:
+    # A test-only package (`--info-package DIR`: DIR and every package under
+    # it) is measured and shown, its findings information: they leave
+    # `findings` (so the conclusion, the gate's exit and the annotation
+    # level) for `info_findings`, and its annotations are notices.
+    var base = _tmp(String("info_none"))
+    assert_equal(run(_with(_with(_report(base), String("--mode"), String("enforce")), String("--annotations-out"), base + "/anns.json")), EXIT_OK)
+    assert_true(_levels(base, String("src/alpha/")).find("failure") >= 0)
+    var dir = _tmp(String("info_alpha"))
+    var a = _with(_with(_report(dir), String("--mode"), String("enforce")), String("--annotations-out"), dir + "/anns.json")
+    assert_equal(run(_with(a^, String("--info-package"), String("src/alpha/"))), EXIT_OK)
+    var r = parse_json_value(read_text(dir + "/result.json"))
+    # src/beta's BranchNotMeasured and src/gone's ExtraRow still count.
+    assert_equal(r.get(String("conclusion")).as_string(), "failure")
+    assert_equal(r.get(String("info_packages")).serialize(), String('["src/alpha"]'))
+    var f = _package_kinds(r, String("findings"))
+    var i = _package_kinds(r, String("info_findings"))
+    assert_true(f.find("src/alpha:") < 0 and f.find("src/beta:BranchNotMeasured") >= 0, f)
+    assert_true(i.find("src/alpha:BelowTarget") >= 0 and i.find("src/beta:") < 0, i)
+    assert_equal(_levels(dir, String("src/alpha/")), "notice ")
+    var summary = read_text(dir + "/summary.md")
+    assert_true(summary.find("### Info: test-only packages, declaration-only files (") >= 0, summary)
+    assert_true(summary.find(" | info: BelowTarget") >= 0, summary)
+    assert_true(summary.find("except a test-only package (`src/alpha` and under)") >= 0, summary)
+    # Every package under `src`: nothing fails, no annotation is a failure,
+    # and the last body concludes success.
+    var all = _tmp(String("info_all"))
+    var b = _with(_with(_report(all), String("--mode"), String("enforce")), String("--annotations-out"), all + "/anns.json")
+    assert_equal(run(_with(b^, String("--info-package"), String("src"))), EXIT_OK)
+    var ra = parse_json_value(read_text(all + "/result.json"))
+    assert_equal(ra.get(String("conclusion")).as_string(), "success")
+    assert_equal(ra.get(String("findings")).array_len(), 0)
+    assert_equal(_levels(all, String("src/")), "notice ")
+    assert_equal(parse_json_value(read_text(all + "/checkrun/001.json")).get(String("conclusion")).as_string(), "success")
+    assert_true(read_text(all + "/checkrun/000.json").find('"annotation_level":"failure"') < 0)
+    # The gate: src/alpha below the target is exit 3 in enforce mode, and 0
+    # as a test-only package; a prefix that is not a whole segment
+    # (`src/alph`) covers nothing.
+    var g = _tmp(String("info_gate"))
+    assert_equal(run(_with(_gate(g, String("enforce")), String("--info-package"), String("src/alpha"))), EXIT_OK)
+    var rg = parse_json_value(read_text(g + "/result.json"))
+    assert_equal(rg.get(String("conclusion")).as_string(), "success")
+    assert_true(_package_kinds(rg, String("info_findings")).find("src/alpha:BelowTarget") >= 0)
+    assert_equal(run(_with(_gate(_tmp(String("info_gate_seg")), String("enforce")), String("--info-package"), String("src/alph"))), EXIT_GATE)
+    assert_equal(run(_with(_gate(_tmp(String("info_gate_abs")), String("enforce")), String("--info-package"), String("/src/alpha"))), EXIT_USAGE)
+    assert_equal(run(_with(_gate(_tmp(String("info_gate_slash")), String("enforce")), String("--info-package"), String("///"))), EXIT_USAGE)
+
+
 def main() raises:
     test_report_end_to_end()
     test_gate_entry_is_the_report_entry()
@@ -321,4 +539,10 @@ def main() raises:
     test_annotation_cap_and_full_list()
     test_usage_errors_exit_2()
     test_input_errors_exit_1()
+    test_gate_with_no_report()
+    test_gate_test_sources()
+    test_gate_floor_fails_in_every_mode()
+    test_report_file_names()
+    test_branch_lcov_flag()
+    test_info_package()
     print("test_cli: PASS")

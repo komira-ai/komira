@@ -1,0 +1,24 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# mojo_library's `test_deps` (tools/build/mojo/test_deps.bzl): a welded test
+# compiled against a test-support package the library itself does not
+# depend on. Building :tdlib runs tests/test_uses_helper.mojo, which imports
+# both tdlib and tdhelper. run_tests.sh (test 29) builds :tdlib; the
+# refusals and what test_deps does not reach are in ../../negative/test_deps.
+
+# The test-support package. Test-only: no conda package.
+mojo_library(
+    name = "tdhelper",
+    srcs = ["helper/__init__.mojo"],
+    conda = False,
+    visibility = ["//negative/test_deps:"],
+)
+
+mojo_library(
+    name = "tdlib",
+    srcs = ["lib/__init__.mojo"],
+    conda = False,
+    test_deps = [":tdhelper"],
+    test_srcs = ["lib/tests/test_uses_helper.mojo"],
+    visibility = ["//negative/test_deps:"],
+)

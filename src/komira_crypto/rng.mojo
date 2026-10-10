@@ -131,8 +131,8 @@ struct ChaCha20Drbg(Movable, Deinitable):
             # AWS-LC RAND_bytes only fails on catastrophic entropy-source
             # failure; in practice never happens. Silently zero-fill to
             # match the non-raising signature.
-            for i in range(n):
-                dst[i] = UInt8(0)
+            for i in range(n):  # cov: unreachable rand_bytes_ffi raises only when the operating system's entropy source fails
+                dst[i] = UInt8(0)  # cov: unreachable see the line above
         var blocks = UInt64((n + 63) // 64)
         self._blocks_produced = self._blocks_produced + blocks
 

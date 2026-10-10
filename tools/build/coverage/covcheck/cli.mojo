@@ -2,13 +2,14 @@
 
 Exit codes: 0 the outputs were written (whatever they conclude); 1 an input
 is malformed, a report path is unmapped, or an output cannot be written;
-2 bad usage; 3 (`gate` only) `--mode enforce` and the package has a finding.
+2 bad usage; 3 (`gate` only) `--mode enforce` and the package has a finding
+(a test-only package, `--info-package`, has information, never a finding).
 """
 
 from std.io import FileDescriptor
 from std.os import listdir, makedirs
 
-from covcheck.analyze import FORMAT_COBERTURA, FORMAT_LCOV, Analysis, Input, Options, Sources, analyze
+from covcheck.analyze import FORMAT_BRANCH_LCOV, FORMAT_COBERTURA, FORMAT_LCOV, Analysis, Input, Options, Sources, analyze
 from covcheck.annotate import (
     DEFAULT_MAX_ANNOTATIONS,
     DiffCoverage,
@@ -21,10 +22,10 @@ from covcheck.annotate import (
 )
 from covcheck.checkrun import body_name, checkrun_bodies, valid_sha
 from covcheck.diff import parse_diff
-from covcheck.paths import RepoFiles, parse_repo_files
+from covcheck.paths import RepoFiles, package_of, parse_repo_files
 from covcheck.ratchet import parse_ratchet, render_ratchet
 from covcheck.result import gate_json, report_json
-from covcheck.stats import MODE_ENFORCE, MODE_NEUTRAL, valid_mode
+from covcheck.stats import MODE_NEUTRAL, valid_mode
 from covcheck.summary import render_summary, truncate_summary
 from covcheck.text import parse_count, read_bytes, read_text, render_bp_or_na, split_on, substr, suffix, write_text
 
@@ -37,21 +38,22 @@ comptime USAGE_MARK = "usage: "
 
 comptime USAGE_REPORT = (
     "covcheck report --repo-files F --diff F --head-sha SHA --source-root DIR"
-    + " (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--mutants [PKGDIR=]F]..."
+    + " (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--branch-lcov [PKGDIR=]F]... [--mutants [PKGDIR=]F]..."
     + " [--strip-prefix P]... --ratchet F [--mode census|neutral|enforce] [--target-bp N]"
-    + " [--include-tests] [--name N] [--max-annotations N] --summary-out F --checkrun-dir D --result-out F"
+    + " [--include-tests] [--info-package DIR]... [--name N] [--max-annotations N] --summary-out F --checkrun-dir D --result-out F"
     + " [--annotations-out F] [--ratchet-out F]"
 )
 comptime USAGE_GATE = (
     "covcheck gate --package DIR --repo-files F --source-root DIR"
-    + " (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--mutants [PKGDIR=]F]..."
+    + " [--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F]... [--branch-lcov [PKGDIR=]F]... [--mutants [PKGDIR=]F]..."
     + " [--strip-prefix P]... --ratchet F --mode census|neutral|enforce [--target-bp N]"
-    + " [--include-tests] --result-out F --summary-out F"
+    + " [--include-tests] [--test-source P]... [--info-package DIR]... --result-out F --summary-out F"
 )
 
 
 struct FileArg(Copyable, Movable):
-    """`--cobertura`, `--lcov` or `--mutants` `[PKGDIR=]FILE`."""
+    """`--cobertura`, `--lcov`, `--branch-lcov` or `--mutants`
+    `[PKGDIR=]FILE`."""
 
     var format: String
     var pkgdir: String
@@ -69,6 +71,8 @@ struct Args(Copyable, Movable):
     var reports: List[FileArg]
     var mutants: List[FileArg]
     var strip_prefixes: List[String]
+    var test_sources: List[String]
+    var info_packages: List[String]
     var include_tests: Bool
 
     def __init__(out self):
@@ -77,6 +81,8 @@ struct Args(Copyable, Movable):
         self.reports = List[FileArg]()
         self.mutants = List[FileArg]()
         self.strip_prefixes = List[String]()
+        self.test_sources = List[String]()
+        self.info_packages = List[String]()
         self.include_tests = False
 
     def get(self, flag: String) -> String:
@@ -121,7 +127,12 @@ def parse_args(args: List[String]) raises -> Args:
             a.include_tests = True
             i += 1
             continue
-        var known = flag == String("--cobertura") or flag == String("--lcov") or flag == String("--mutants") or flag == String("--strip-prefix")
+        var known = (
+            flag == String("--cobertura") or flag == String("--lcov") or flag == String("--branch-lcov")
+            or flag == String("--mutants") or flag == String("--strip-prefix") or flag == String("--info-package")
+        )
+        if flag == String("--test-source") and not report:
+            known = True
         for k in range(len(single)):
             if single[k] == flag:
                 known = True
@@ -137,10 +148,23 @@ def parse_args(args: List[String]) raises -> Args:
             a.reports.append(file_arg(String(FORMAT_COBERTURA), v))
         elif flag == String("--lcov"):
             a.reports.append(file_arg(String(FORMAT_LCOV), v))
+        elif flag == String("--branch-lcov"):
+            a.reports.append(file_arg(String(FORMAT_BRANCH_LCOV), v))
         elif flag == String("--mutants"):
             a.mutants.append(file_arg(String("mutants"), v))
         elif flag == String("--strip-prefix"):
             a.strip_prefixes.append(v)
+        elif flag == String("--test-source"):
+            a.test_sources.append(v)
+        elif flag == String("--info-package"):
+            # A test-only package's directory (analyze.mojo, step 8), a
+            # repository directory as package_of names it.
+            var d = v
+            while d.endswith("/"):
+                d = substr(d, 0, d.byte_length() - 1)
+            if d.byte_length() == 0 or d.startswith("/") or d.find("//") >= 0 or d == String("."):
+                _usage(String("--info-package '") + v + String("' is not a repository directory"))
+            a.info_packages.append(d)
         else:
             if flag in a.values:
                 _usage(String("'") + flag + String("' is given twice"))
@@ -154,10 +178,18 @@ def parse_args(args: List[String]) raises -> Args:
     for k in range(len(required)):
         if required[k] not in a.values:
             _usage(a.command + String(" needs ") + required[k])
-    if len(a.reports) == 0:
+    # `gate` takes none: a library with no test has no report, and its
+    # package, always measured by the gate, is then NotMeasured. A branch
+    # record file (`--branch-lcov`) is no line report, and is read with
+    # either format.
+    var line_reports = List[FileArg]()
+    for k in range(len(a.reports)):
+        if a.reports[k].format != String(FORMAT_BRANCH_LCOV):
+            line_reports.append(a.reports[k].copy())
+    if len(line_reports) == 0 and report:
         _usage(a.command + String(" needs at least one --cobertura or --lcov report"))
-    for k in range(1, len(a.reports)):
-        if a.reports[k].format != a.reports[0].format:
+    for k in range(1, len(line_reports)):
+        if line_reports[k].format != line_reports[0].format:
             _usage(String("give --cobertura or --lcov reports, not both (their branch identities differ)"))
     var mode = a.get(String("--mode"))
     if mode.byte_length() > 0 and not valid_mode(mode):
@@ -194,6 +226,9 @@ def _options(a: Args) -> Options:
     o.strip_prefixes = a.strip_prefixes.copy()
     if a.command == String("gate"):
         o.only_package = a.get(String("--package"))
+    for i in range(len(a.test_sources)):
+        o.test_sources[a.test_sources[i]] = True
+    o.info_packages = a.info_packages.copy()
     return o^
 
 
@@ -217,7 +252,8 @@ def _title(an: Analysis) -> String:
     return (
         String("line ") + render_bp_or_na(an.total.line_bp()) + String(", branch ")
         + render_bp_or_na(an.total.branch_bp()) + String(", ") + String(len(an.findings))
-        + String(" findings (") + an.mode + String(")")
+        + String(" findings") + (String(", ") + String(len(an.info_findings)) + String(" info") if len(an.info_findings) > 0 else String(""))
+        + String(" (") + an.mode + String(")")
     )
 
 
@@ -261,10 +297,20 @@ def run_gate(a: Args) raises -> Int:
     var pkg = a.get(String("--package"))
     if not repo.has_buck(pkg):
         raise Error(String("--package ") + pkg + String(" holds no BUCK file in --repo-files"))
+    # A --test-source names a file of the gated package (a welded test
+    # outside its tests/): anything else is a mistake that would set aside
+    # nothing.
+    for i in range(len(a.test_sources)):
+        var t = a.test_sources[i]
+        if t not in repo.files:
+            raise Error(String("--test-source ") + t + String(" is not a file of --repo-files"))
+        if package_of(t, repo) != pkg:
+            raise Error(String("--test-source ") + t + String(" is in the package ") + package_of(t, repo) + String(", not --package ") + pkg)
     var an = _analysis(a, repo)
     write_text(a.get(String("--summary-out")), render_summary(an, List[String](), DiffCoverage(), False, pkg))
     write_text(a.get(String("--result-out")), gate_json(an, pkg))
-    if an.mode == String(MODE_ENFORCE) and len(an.findings) > 0:
+    # `failure`: a finding in enforce mode, or a floor not held in any mode.
+    if an.conclusion == String("failure"):
         return EXIT_GATE
     return EXIT_OK
 

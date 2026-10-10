@@ -1,4 +1,19 @@
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The exported name of aws-lc's SHA-NI block function, which aws-lc's
+# assembly declares hidden (native/komira_crypto_sha256_hw.c).
+staged_files(
+    name = "sha256_hw_files",
+    srcs = ["native/komira_crypto_sha256_hw.c"],
+)
+
+cxx_library(
+    name = "komira_crypto_sha256_hw",
+    srcs = [":sha256_hw_files[native/komira_crypto_sha256_hw.c]"],
+    deps = ["//third_party/aws-lc:crypto"],
+    visibility = ["PUBLIC"],
+)
 
 # Cryptographic primitives: SHA-1 / SHA-2 / BLAKE2b-256, HMAC, HKDF, PBKDF2,
 # AES-GCM and ChaCha20-Poly1305, X25519, Ed25519, ECDSA P-256 / P-384, RSA
@@ -11,6 +26,7 @@ mojo_library(
     name = "komira_crypto",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        ":komira_crypto_sha256_hw",
         "//src/komira_encoding:komira_encoding",
         "//third_party/aws-lc:crypto",
     ],
@@ -48,6 +64,8 @@ mojo_library(
         "tests/test_hkdf_smoke.mojo",
         "tests/test_hmac_kat.mojo",
         "tests/test_hmac_streaming_smoke.mojo",
+        "tests/test_p256_ecdh_kat.mojo",
+        "tests/test_p256_ecdh_refusals.mojo",
         "tests/test_name_matcher.mojo",
         "tests/test_rng_chacha20_drbg_smoke.mojo",
         "tests/test_rng_system_entropy_smoke.mojo",
@@ -75,6 +93,18 @@ mojo_library(
         "tests/test_x509_letsencrypt_r3.mojo",
         "tests/test_x509_smoke.mojo",
         "tests/test_zeroize_on_drop.mojo",
+        "tests/test_pbkdf2_ct_eq.mojo",
+        "tests/test_chain_policy.mojo",
+        "tests/test_chain_signatures.mojo",
+        "tests/test_rsa_sign_verify_edges.mojo",
+        "tests/test_chain_rsa_pss.mojo",
+        "tests/test_ecdsa_p256_edges.mojo",
+        "tests/test_ecdsa_p384_edges.mojo",
+        "tests/test_small_edges.mojo",
+        "tests/test_rs256_jwks_parser_edges.mojo",
+        "tests/test_name_matcher_edges.mojo",
+        "tests/test_asn1_edges.mojo",
+        "tests/test_x509_malformed.mojo",
     ],
     visibility = ["PUBLIC"],
 )

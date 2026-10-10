@@ -408,12 +408,18 @@ def _cross_card(left_card: Int, right_card: Int) raises -> Int:
 
 def test_emit_pair_cross_card_non_positive_and_saturated() raises:
     """A non-positive side takes the larger card (0,7 -> 7; 5,-1 -> 5); a
-    product past the cap saturates at 2^62 - 1. Catches: a 0 or negative
-    product recorded, either side of the larger-card choice swapped, and
-    an overflowing product wrapping."""
+    product past the cap saturates at 2^62 - 1; a product of exactly
+    2^62 - 2 (left = SAT_CAP // right) does not. Catches: a 0 or negative
+    product recorded, either side of the larger-card choice swapped, an
+    overflowing product wrapping, and the saturation test widened to
+    `>=` (the boundary row would read 2^62 - 1)."""
     assert_equal(_cross_card(0, 7), 7)
     assert_equal(_cross_card(5, -1), 5)
     assert_equal(_cross_card(1 << 40, 1 << 30), 4_611_686_018_427_387_903)
+    assert_equal(
+        _cross_card(4_611_686_018_427_387_903 // 2, 2),
+        4_611_686_018_427_387_902,
+    )
 
 
 def test_emit_pair_cross_card_goes_through_tdom_when_present() raises:

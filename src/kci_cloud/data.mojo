@@ -5,8 +5,8 @@
 # GRAPH findings, true on every cloud, that validate collects for a data
 # resource (`data_findings`):
 #   * a data resource runs as no identity, so it has no `uses` lines: it is
-#     granted to, it never grants (write the line on the service or job that
-#     reads or writes it);
+#     granted to, it never grants (write the line on the workload that reads
+#     or writes it);
 #   * a bucket's `object_expiry_days` is never an explicit 0;
 #   * a table has a KEY; every access path (the key and each index) has a
 #     partition field; every field it names has a name and a type (STRING,
@@ -33,7 +33,8 @@
 # (`index_role_collisions`) as a limit.
 # =============================================================================
 
-from kci_resource_proto.resource import Resource, Table, Table_AccessPath, Table_Field
+from kci_resource_proto.data import Table, Table_AccessPath, Table_Field
+from kci_resource_proto.resource import Resource
 
 from kci_cloud.adapter import FINDING_GRAPH, Finding, LoweredNode, OwnedRecord
 from kci_cloud.catalog import FIELD_BUCKET, FIELD_TABLE, ROLE_TABLE
@@ -225,8 +226,8 @@ def data_findings(field: Int, r: Resource) -> List[Finding]:
                 + tname
                 + String(
                     " runs as no identity, so it cannot use another"
-                    " resource; write the uses line on the service or job"
-                    " that reads or writes it"
+                    " resource; write the uses line on the workload that"
+                    " reads or writes it"
                 ),
             )
         )

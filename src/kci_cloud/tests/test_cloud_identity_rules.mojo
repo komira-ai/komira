@@ -113,8 +113,8 @@ def _good() -> String:
         + String('{"id":"api","service":{') + String(IMG)
         + String(',"public":{},"runAs":{"resource":"runner"}},')
         + String('"uses":[{"target":{"resource":"store"},"access":"READ_WRITE"}]},')
-        + String('{"id":"nightly","job":{') + String(IMG)
-        + String(',"schedule":{"cron":"0 3 * * *"}},')
+        + String('{"id":"nightly","containerJob":{') + String(IMG)
+        + String('},')
         + String('"uses":[{"target":{"resource":"api"},"access":"CALL"},')
         + String('{"cell":"METRICS","access":"WRITE"}]},')
         + String('{"id":"see","grant":{"principal":{"resource":"nightly"},')
@@ -182,10 +182,10 @@ def test_every_identity_refusal_in_one_pass() raises:
         + String('{"target":{"resource":"runner"},"access":"CALL"}]},')
         + String('{"id":"api","service":{') + String(IMG)
         + String(',"runAs":{"resource":"store"}}},')
-        + String('{"id":"lost","job":{') + String(IMG)
-        + String(',"onDemand":{},"runAs":{"resource":"nobody"}}},')
-        + String('{"id":"worker","job":{') + String(IMG)
-        + String(',"onDemand":{},"runAs":{"resource":"runner"}},')
+        + String('{"id":"lost","containerJob":{') + String(IMG)
+        + String(',"runAs":{"resource":"nobody"}}},')
+        + String('{"id":"worker","containerJob":{') + String(IMG)
+        + String(',"runAs":{"resource":"runner"}},')
         + String('"uses":[{"cell":"LOGS","access":"WRITE"}]},')
         + String('{"id":"g1","grant":{"principal":{"resource":"store"},')
         + String('"target":{"resource":"web"},"access":"CALL"}},')
@@ -210,9 +210,9 @@ def test_every_identity_refusal_in_one_pass() raises:
     var t = _all_text(f)
     for want in [
         'api|service.run_as|run_as must name a service_account; "store" is a bucket',
-        'lost|job.run_as|ref to missing resource "nobody"',
-        'g1|grant.principal|the principal must be a service_account, or a service or job'
-        + ' with no run_as; "store" is a bucket',
+        'lost|container_job.run_as|ref to missing resource "nobody"',
+        'g1|grant.principal|the principal must be a service_account, or a workload (a service, a'
+        + ' container_job or a worker) with no run_as; "store" is a bucket',
         'g2|grant.principal|"worker" runs as "runner" and has no identity of its own;'
         + ' name "runner" as the principal',
         'g3|grant|a second edge from the identity of "runner" to store; the first is'

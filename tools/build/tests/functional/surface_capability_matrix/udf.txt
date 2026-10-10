@@ -1,0 +1,3 @@
+# The planted UDF kinds of test 53: a grounding file with no family.
+comptime UDF_KIND_MAP: UInt8 = 0
+comptime UDF_KIND_SPARE: UInt8 = 1

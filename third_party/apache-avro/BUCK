@@ -1,0 +1,94 @@
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+
+# Avro Object Container Files from Apache Avro's shared interop test data
+# (share/test/data at commit 54b3321..., Apache-2.0, LICENSE.txt and
+# NOTICE.txt below). Each file is fetched at build time and checked against
+# its sha256; nothing of it is committed here. Upstream's own C++ test
+# (lang/c++/test/DataFileTests.cc, testCompatibility) reads every one of
+# these .avro files with the reader schema `test.Weather` {station: string,
+# time: long, temp: int} and checks the same five records, which
+# weather.json lists one per line.
+#
+# Who wrote them (from upstream's history, not from the bytes): weather.avro
+# came in with the Java MapReduce change AVRO-580/AVRO-581; weather-snappy.avro
+# with the Python snappy codec, AVRO-866; weather-deflate.avro and
+# weather-zstd.avro with the C++ codec-compatibility fix AVRO-4172. None was
+# written by komira_avro.
+#
+# Test data of //src/tests/e2e/komira_formats_e2e
+# (tests/test_formats_foreign_avro.mojo):
+#   weather.avro          - codec `null`;
+#   weather-deflate.avro  - codec `deflate`;
+#   weather-snappy.avro   - codec `snappy` (raw snappy + big-endian CRC32);
+#   weather-zstd.avro     - codec `zstandard`;
+#   weather.json          - the five records as JSON, upstream's statement of
+#                           the content.
+_COMMIT = "54b332161524086dcb6cde8afe097097eed7f3ee"
+
+_URL = "https://raw.githubusercontent.com/apache/avro/{}/".format(_COMMIT)
+
+# Each file's size in bytes, measured from the downloaded file whose sha256
+# is pinned below (`size_bytes` is required on every pinned_file).
+_LICENSE_SIZE = 29259
+_NOTICE_SIZE = 2552
+_WEATHER_SIZE = 358
+_WEATHER_DEFLATE_SIZE = 319
+_WEATHER_SNAPPY_SIZE = 330
+_WEATHER_ZSTD_SIZE = 333
+_WEATHER_JSON_SIZE = 291
+
+pinned_file(
+    name = "LICENSE.txt",
+    url = _URL + "LICENSE.txt",
+    sha256 = "5e223a61e0107f44782f855c54ff8df9f53d8182dced28ba511ab92ce41919f8",
+    size_bytes = _LICENSE_SIZE,
+    visibility = ["PUBLIC"],
+)
+
+pinned_file(
+    name = "NOTICE.txt",
+    url = _URL + "NOTICE.txt",
+    sha256 = "1a78544696de6cf9f06e7afaf0aa8d54c799ee8b6d9a5f796408e449a8d66373",
+    size_bytes = _NOTICE_SIZE,
+    visibility = ["PUBLIC"],
+)
+
+pinned_file(
+    name = "weather.avro",
+    url = _URL + "share/test/data/weather.avro",
+    sha256 = "9298fc50cd99571b8480af60886cd6b10c5dd1cc0aea2d91b444e1c66befd25f",
+    size_bytes = _WEATHER_SIZE,
+    visibility = ["PUBLIC"],
+)
+
+pinned_file(
+    name = "weather-deflate.avro",
+    url = _URL + "share/test/data/weather-deflate.avro",
+    sha256 = "aa0e92d1f64d86405a5ce96e52c29919832b9c79f1d5717eba4bb57f766a0a44",
+    size_bytes = _WEATHER_DEFLATE_SIZE,
+    visibility = ["PUBLIC"],
+)
+
+pinned_file(
+    name = "weather-snappy.avro",
+    url = _URL + "share/test/data/weather-snappy.avro",
+    sha256 = "7c640d43a2f61bbf7851e2d3df4cee71e9aa8c0f420cef169c23b43fcc216c3b",
+    size_bytes = _WEATHER_SNAPPY_SIZE,
+    visibility = ["PUBLIC"],
+)
+
+pinned_file(
+    name = "weather-zstd.avro",
+    url = _URL + "share/test/data/weather-zstd.avro",
+    sha256 = "46c50f7a8928b1ef576b8defae7504d14a166afc745a616e3fba6322ecf0b36c",
+    size_bytes = _WEATHER_ZSTD_SIZE,
+    visibility = ["PUBLIC"],
+)
+
+pinned_file(
+    name = "weather.json",
+    url = _URL + "share/test/data/weather.json",
+    sha256 = "bbbe8e305a664108d3bc626ab2680851c0064269868a4fd7327a23c0a1ae4ada",
+    size_bytes = _WEATHER_JSON_SIZE,
+    visibility = ["PUBLIC"],
+)

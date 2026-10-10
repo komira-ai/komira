@@ -10,7 +10,12 @@
 #   - int64 / uint64 / fixed64 / sfixed64  -> JSON STRING (JS-number-precision
 #     safety; a 2^53+ int64 loses precision as a JSON number).
 #   - int32 / uint32 / fixed32 / sfixed32  -> JSON number.
-#   - double                              -> JSON number.
+#   - double                              -> JSON number; "NaN" /
+#                                            "Infinity" / "-Infinity"
+#                                            strings; read correctly
+#                                            rounded, at any length, and
+#                                            refused past the double range
+#                                            (`proto3_json_float.mojo`).
 #   - float                               -> the shortest float32 JSON
 #                                            number; "NaN" / "Infinity" /
 #                                            "-Infinity" strings; refused on
@@ -46,11 +51,11 @@
 # the object so the generated body can walk it.
 #
 # Encode rides the direct-byte `List[UInt8]` writers in `komira_json`
-# (`write_json_string`, `write_i64_dec`, `write_u64_dec`, `write_f64_dtoa`)
-# — no intermediate `String` allocation on the value path except a double
-# on `write_f64_dtoa`'s slow path (a float32 is written straight into the
-# buffer by `proto3_json_float.mojo`); bytes >= 0x80
-# are valid JSON content and pass through verbatim. Decode rides the
+# (`write_json_string`, `write_i64_dec`, `write_u64_dec`, and `write_f64_dtoa`
+# through `write_proto3_json_f64`) — no intermediate `String` allocation on
+# the value path except a double on `write_f64_dtoa`'s slow path (a float32
+# is written straight into the buffer by `proto3_json_float.mojo`); bytes
+# >= 0x80 are valid JSON content and pass through verbatim. Decode rides the
 # `komira_json.JsonValue` tree (the proto3-JSON decode path is the
 # debuggability format, off the codec hot path).
 #
@@ -71,10 +76,14 @@ from komira_json import (
     write_json_string,
     write_i64_dec,
     write_u64_dec,
-    write_f64_dtoa,
 )
 
-from .proto3_json_float import read_proto3_json_f32, write_proto3_json_f32
+from .proto3_json_float import (
+    read_proto3_json_f32,
+    read_proto3_json_f64,
+    write_proto3_json_f32,
+    write_proto3_json_f64,
+)
 from .wire_format import (
     FieldKey,
     ProtoEnum,
@@ -256,7 +265,7 @@ struct JsonEncoder(WireEncoder):
         mut self, field_no: Int, json_name: StringSlice, v: Float64
     ) raises:
         self._begin_field(json_name)
-        write_f64_dtoa(self.buf, v)
+        write_proto3_json_f64(self.buf, v)
         self._end_field()
 
     def write_f32_field(
@@ -445,7 +454,7 @@ struct JsonEncoder(WireEncoder):
 
     def write_f64_element(mut self, field_no: Int, v: Float64) raises:
         self._list_sep()
-        write_f64_dtoa(self.buf, v)
+        write_proto3_json_f64(self.buf, v)
 
     def write_f32_element(mut self, field_no: Int, v: Float32) raises:
         self._list_sep()
@@ -765,7 +774,7 @@ struct JsonDecoder(WireDecoder):
         return UInt32(self._cur().as_uint64())
 
     def read_f64(mut self) raises -> Float64:
-        return self._cur().as_float64()
+        return read_proto3_json_f64(self._cur())
 
     def read_f32(mut self) raises -> Float32:
         return read_proto3_json_f32(self._cur())
@@ -901,7 +910,7 @@ struct JsonDecoder(WireDecoder):
     def read_into_repeated_f64(mut self, mut out: List[Float64]) raises:
         var arr = self._cur_array()
         for i in range(len(arr.children)):
-            out.append(arr.children[i].as_float64())
+            out.append(read_proto3_json_f64(arr.children[i]))
 
     def read_into_repeated_f32(mut self, mut out: List[Float32]) raises:
         var arr = self._cur_array()

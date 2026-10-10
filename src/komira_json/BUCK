@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # A small general JSON library (RFC 8259): the `JsonValue` tagged value, a
-# strict depth-limited non-recursive parser, and direct-byte writers for
+# strict depth-limited non-recursive parser, a duplicate-member check, and direct-byte writers for
 # strings, numbers, booleans and null. It has no deps, so the proto3-JSON
 # codec, the generated cloud clients, validators and kci can all import it
 # cheaply.
@@ -9,11 +9,14 @@ mojo_library(
     name = "komira_json",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     test_srcs = [
+        "tests/test_json_duplicate_keys.mojo",
         "tests/test_json_list_copy.mojo",
         "tests/test_json_nonascii_roundtrip.mojo",
         "tests/test_json_parse_rfc8259.mojo",
         "tests/test_json_parse_malformed.mojo",
+        "tests/test_json_parse_edges.mojo",
         "tests/test_json_value.mojo",
+        "tests/test_json_value_edges.mojo",
         "tests/test_json_write.mojo",
     ],
     visibility = ["PUBLIC"],

@@ -1,0 +1,96 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: every JSON parser komira ships against JSONTestSuite's
+# test_parsing corpus, an external RFC 8259 conformance suite (pinned in
+# //third_party/jsontestsuite). The suite supplies every input; nothing here
+# authors JSON. Each parser has one welded test that feeds it all 318 files
+# as raw bytes and gates its verdicts on a reviewed allowlist,
+# allowlists/<parser>.txt: every wrong verdict must be listed with a reason,
+# every i_ verdict is recorded, and every listed file must still be handled
+# as listed (gate.mojo). A file that aborts a parser is listed as ABORTS: and
+# run in a child process (komira_supervisor), which must still abort. Three
+# parsers validate nothing by contract and are crash-only. The parsers and
+# what counts as acceptance for each are in testees.mojo.
+#
+# The tests are welded (test_srcs), not standalone: a verdict is then a build
+# action the cache keeps for exactly these inputs (the parser's closure, the
+# pinned corpus and the allowlist), so it reruns only when one of them
+# changes, and nothing named komira_json_conformance exists unless every
+# parser passed. One test per parser, so an abort in one parser fails its
+# own test only and names it. test_abort_path runs the ABORTS: child path
+# with a test-only testee that aborts on one file (no parser aborts today, so
+# no allowlist runs it). Nothing depends on this package.
+
+_PARSERS = [
+    "kci_logs",
+    "komira_avro",
+    "komira_connect",
+    "komira_json",
+    "komira_json_index",
+    "komira_jsonl",
+    "komira_log_query",
+    "komira_proto_codec",
+]
+
+# The corpus as `share/jsontestsuite/` (LICENSE and test_parsing/).
+_SUITE = {"jsontestsuite": "//third_party/jsontestsuite:files"}
+
+mojo_library(
+    name = "komira_json_conformance",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_logs:kci_logs",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_avro:komira_avro",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_connect:komira_connect",
+        "//src/komira_datetime:komira_datetime",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_fork_join:komira_fork_join",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_hash:komira_hash",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_http_server:komira_http_server",
+        "//src/komira_json:komira_json",
+        "//src/komira_json_index:komira_json_index",
+        "//src/komira_jsonl:komira_jsonl",
+        "//src/komira_log:komira_log",
+        "//src/komira_log_query:komira_log_query",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_name_registry:komira_name_registry",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_protobuf:komira_protobuf",
+        "//src/komira_row_format:komira_row_format",
+        "//src/komira_spsc_ring:komira_spsc_ring",
+        "//src/komira_supervisor:komira_supervisor",
+        "//src/komira_trace:komira_trace",
+        "//src/komira_udf:komira_udf",
+        "//src/komira_uuid:komira_uuid",
+        "//src/komira_wkt:komira_wkt",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    conda = False,
+    test_srcs = [
+        "tests/test_abort_path.mojo",
+        "tests/test_gate.mojo",
+    ] + ["tests/test_{}.mojo".format(p) for p in _PARSERS],
+    test_data = {
+        "tests/test_{}.mojo".format(p): _SUITE | {
+            "src/tests/conformance/komira_json_conformance/allowlists/{}.txt".format(p): "allowlists/{}.txt".format(p),
+        }
+        for p in _PARSERS
+    } | {"tests/test_abort_path.mojo": _SUITE},
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)

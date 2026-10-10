@@ -1,0 +1,7 @@
+# A made-up library source for cov_branch_classify's cases (README.md), staged as b.mojo.
+def f(n: Int) -> Int:
+    if n == 0:
+        return 1
+    elif n == 1:
+        return 2
+    return 3

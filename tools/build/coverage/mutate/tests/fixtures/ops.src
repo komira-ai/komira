@@ -1,0 +1,42 @@
+# a comment with < and + and raise and 1
+comptime LIMIT: Int = 10
+
+
+def check(x: Int, y: Int) raises -> Int:
+    """Docstring with == and - 3."""
+    if x < 0 or not (y >= 2):
+        raise Error("bad < input: " + String(x))
+    var s = r"a + b"  # trailing 5
+    return x + y - 1
+
+
+def flag(x: Int, y: List[Int]) -> Bool:
+    """Unary minus is not swapped."""
+    return x != -1 and x == y[-2]
+
+
+def touch(mut xs: List[Int]):
+    xs[0] += 3
+    var f = 1.5e-3 * 0x1F
+    var t = __mlir_type[`!kgen.pointer<scalar<ui8>>`]
+    xs.append(f >> 1)
+
+
+def nothing():
+    pass
+
+
+def stub() -> Bool:
+    ...
+
+
+def multi(x: Int) raises:
+    if x == 0:  # mutation: equivalent cmp_negate x is never 0 here
+        raise Error(
+            "zero"
+        )
+    return
+
+
+def dead(x: Int) -> Int:
+    return x - 1  # cov: unreachable no caller

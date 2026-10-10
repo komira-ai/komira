@@ -10,15 +10,15 @@
 #      • `PercentileAcc`          — komira_op_agg_state/columnar_acc_agg.mojo:86
 #        EXCLUDES NaN at update (`if v == v:` in `update_batch`, with an
 #        explicit `# NaN EXCLUSION` block). Interpolated: `pos = q*(n-1)`,
-#        floor, linear interpolation — exactly Excel PERCENTILE.INC.
+#        floor, linear interpolation.
 #
 #      • `PercentileAccumulator`  — komira_op_agg_state/statistical_accumulators.mojo:78
 #        ⛔ DOES **NOT** EXCLUDE NaN. `insert` appends unconditionally; there is
 #        no `v == v` test anywhere in the struct. And it is NOT the same
 #        function: `result()` is NEAREST-RANK (`idx = ceil(p*n) - 1`, clamped)
-#        with NO interpolation, so it is a `quantile_disc`, not PERCENTILE.INC
-#        and not DuckDB `quantile_cont`. `percentile(0.5)` of [1,2,3,4] is
-#        2.0 here and 2.5 on both of the surfaces this campaign grades.
+#        with NO interpolation, so it is a `quantile_disc`, not an
+#        interpolated percentile and not DuckDB `quantile_cont`.
+#        `percentile(0.5)` of [1,2,3,4] is 2.0 here and 2.5 in DuckDB.
 #
 #    ⇒ THE TWO STRUCTS SHARE NEITHER THE NaN POLICY NOR THE PERCENTILE
 #      DEFINITION. They are not two copies of one kernel; do not "unify" them
@@ -227,12 +227,12 @@ def test_P5_nan_free_contracts_unchanged() raises:
     assert_true(_close(_pct_of(c, Float64(0.99)), Float64(42.0)), "single value")
 
 
-def test_P6_nearest_rank_is_not_percentile_inc() raises:
+def test_P6_nearest_rank_is_not_interpolated() raises:
     """⛔ A PIN ON THE DIVERGENCE, NOT AN ENDORSEMENT OF IT.
 
-    `PercentileAccumulator` is nearest-rank: median[1,2,3,4] == 2.0. Excel
-    PERCENTILE.INC and DuckDB `quantile_cont`/`median` both answer 2.5 (the
-    interpolated order statistic, which is what `PercentileAcc` computes).
+    `PercentileAccumulator` is nearest-rank: median[1,2,3,4] == 2.0. DuckDB
+    `quantile_cont`/`median` answers 2.5 (the interpolated order statistic,
+    which is what `PercentileAcc` computes).
     This assertion exists so that anyone who wires this struct to a
     user-facing PERCENTILE / MEDIAN name trips here first.
     """
@@ -243,7 +243,7 @@ def test_P6_nearest_rank_is_not_percentile_inc() raises:
     v.append(Float64(4.0))
     assert_true(
         _close(_pct_of(v, Float64(0.5)), Float64(2.0)),
-        "nearest-rank median[1,2,3,4] is 2.0 -- DuckDB/Excel say 2.5",
+        "nearest-rank median[1,2,3,4] is 2.0 -- DuckDB says 2.5",
     )
 
 

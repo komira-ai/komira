@@ -1,0 +1,61 @@
+# The domains a URL of this repository may name a host of, besides the names reserved
+# for examples and tests (localhost, example, test, invalid and their subdomains;
+# example.com, example.net, example.org): the public lint's allow-list
+# (//:public_boundary, tools/build/lint/public_boundary.awk, rule host). One row per
+# domain, tab-separated: <domain> <reason>. A host is allowed when it is the domain or
+# ends in `.<domain>`. Every row must be used by some URL of the tree: a row no host is
+# under fails the build, so the list names only what the tree uses. A domain here is a
+# public service or a public document's site; a host naming a deployment of one's own
+# does not belong here.
+amazonaws.com	the AWS service endpoints the AWS clients resolve and test
+amazonaws.com.cn	the AWS China partition's service endpoints
+api.aws	the AWS dual-stack service endpoints
+amazon.com	AWS documentation
+googleapis.com	the Google Cloud API endpoints the GCP clients call
+google.com	Google's OAuth and documentation hosts
+metadata.google.internal	the GCE metadata server, at a name Google publishes for every VM
+microsoftonline.com	the Azure identity endpoint
+microsoftonline.us	the Azure Government identity endpoint
+azure.com	the Azure management endpoint
+windows.net	the Azure Storage endpoints
+microsoft.com	Microsoft documentation
+apple.com	Apple developer documentation
+pkg.dev	Google Artifact Registry's regional endpoints
+localstack.cloud	the local AWS emulator's documented endpoint names
+github.com	the source of upstream projects and actions
+githubusercontent.com	raw files of upstream projects
+github.io	upstream projects' documentation
+apache.org	Apache project specifications
+w3.org	W3C specifications
+rfc-editor.org	IETF RFCs
+nist.gov	NIST standards and test vectors
+modular.com	the Mojo toolchain's distribution and documentation
+pypi.org	the Python package index
+pythonhosted.org	the Python package index's file host
+nodejs.org	the Node.js runtime's distribution (third_party/node)
+npmjs.org	the npm package registry (third_party/node)
+prefix.dev	the conda package host the toolchain pins download from
+anaconda.org	the conda package index
+crates.io	the Rust package index
+rust-lang.org	the Rust toolchain's distribution and documentation
+ziglang.org	the zig toolchain's distribution
+sqlite.org	SQLite documentation
+postgresql.org	PostgreSQL documentation
+grpc.io	gRPC specifications
+connectrpc.com	the Connect protocol specification
+flatbuffers.dev	FlatBuffers documentation
+smithy.io	the Smithy specification the AWS models use
+buck2.build	Buck2 documentation
+busybox.net	the busybox binary pin's source
+letsencrypt.org	the certificate authority whose chain a TLS test reads
+opensource.org	licence texts
+contributor-covenant.org	the code of conduct's source
+sourceforge.net	an upstream project's home
+xxhash.com	the xxHash specification
+lemire.me	a cited paper's author page
+semanticscholar.org	a cited paper
+isthe.com	the FNV hash specification
+dotslash-cli.com	the DotSlash launcher's documentation
+kernel.org	git release archives (third_party/git)
+curl.se	curl release archives (third_party/git)
+gnu.org	GNU make release archives (third_party/git)

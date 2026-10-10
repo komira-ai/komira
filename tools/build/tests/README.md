@@ -9,6 +9,7 @@ tools/build/tests/run_tests.sh                 # all tests
 tools/build/tests/run_tests.sh --no-umbrella   # skip test 7 (four scratch checkouts)
 tools/build/tests/run_tests.sh --no-run        # skip test 9 (a scratch clone)
 tools/build/tests/run_tests.sh --no-uncached   # skip the uncached half of test 15
+tools/build/tests/run_tests.sh --require-install   # 33a/33b install cases FAIL, not SKIP, without pixi or network
 ```
 
 It prints one `PASS`, `FAIL` or `SKIP` line per test, then the directory
@@ -28,7 +29,17 @@ do:
   there fails to analyse, to compile or to pass its gate, and
   `run_tests.sh` requires the failure it names (the message, not only the
   exit status); [`lint_weld.sh`](negative/lint_weld.sh) plants its defects
-  in a snapshot of the tree.
+  in a snapshot of the tree. A fixture that fails to analyse, to compile
+  or to pass its gate is fine as an ordinary package: the CI's
+  reverse-dependency query (`//tools/build/ci:affected`, a `cquery` over
+  `tests//...`) configures every target but analyses none. Only a
+  configuration failure breaks it: a target with an unknown or invisible
+  dependency makes the query fail for every change, and any failure of
+  that query answers BROKEN (with buck2's error, which names the target)
+  and fails the check, never a widening. Such a fixture must not
+  be loadable: it is a `<case>.BUCK` file that the driver copies to
+  `<case>/BUCK` for its one build and deletes, its directory gitignored, as
+  [`surface_capability_matrix/dangling.BUCK`](negative/surface_capability_matrix/dangling.BUCK) is.
 
 A test with both halves keeps one package name in each, for example
 `tests//functional/test_data` (the test runtime contract that works) and
@@ -39,7 +50,7 @@ names. At the top of this directory are the driver,
 [`tool_lib.sh`](tool_lib.sh), and the sections the driver sources
 ([`cxx_tests.sh`](cxx_tests.sh), [`rust_tests.sh`](rust_tests.sh),
 [`proto_tests.sh`](proto_tests.sh), [`c_libs_tests.sh`](c_libs_tests.sh),
-[`coverage_tests.sh`](coverage_tests.sh)).
+[`coverage_tests.sh`](coverage_tests.sh), [`coverage_run_tests.sh`](coverage_run_tests.sh), [`assert_level_tests.sh`](assert_level_tests.sh)).
 
 The tests run where the checkout builds, read from the execution platforms
 buck2 registers, and the first line of output names it:
@@ -123,10 +134,10 @@ buck2 build tests//negative/closure_refusal:hello_incomplete_toolchain
 
 ## 5. Host paths
 
-No action's argv or environment names an absolute host path, read from
-`buck2 aquery` over the examples and their run checks, the Rust example and
-the protobuf tests (rustc, protoc, the plugin, the generated packages). The
-scan first proves it detects a planted absolute path.
+No action's argv or environment names an absolute host path, read from `buck2 aquery` over the examples and their run checks, the Rust example,
+the protobuf tests (rustc, protoc, the plugin, the generated packages) and the aws-lc and s2n-tls tests. It first builds every scanned target in the same daemon (keeping going past one that fails):
+aquery cannot run a README's generate step (a local-only dynamic action) that the daemon has not built, so the check does not depend on an earlier test.
+The scan first proves it detects a planted absolute path.
 
 ## 6. Outputs
 
@@ -364,7 +375,11 @@ without it (`test_source_paths`). C compiles and archives
 and the Mojo targets using them resolve to `linux-x86_64`. The
 snappy test binary, which links C++ with zig's static libc++, carries
 libc++abi and exports no dynamic symbol, so its C++ runtime cannot interpose
-on the `libstdc++.so.6` the Mojo runtime loads.
+on the `libstdc++.so.6` the Mojo runtime loads. An unconfigured query, `buck2
+uquery 'deps(//tools/build/examples/cshim:cadd_user)'`, answers and reaches
+`toolchains//:cxx_no_default_deps`: the prelude's C/C++ toolchain select names
+that target on a branch no configured build takes, and the query fails with
+`Unknown target` if the toolchains cell does not declare it.
 
 ## 21. Location path
 
@@ -421,7 +436,8 @@ fixtures, one of them a producer's bytes that are not protoc's serialization
 cases' fixtures end to end, one defect per refusal, each a fixture one change
 away from the self-test's, and each must fail naming its leg: `leg0_identical`
 (the `.hex` is protoc's own bytes), `leg0_duplicate` (`id` written twice,
-which the decode shows once), `leg1_value` (the `.txtpb` says `id: 151` where
+which the decode shows once), `leg0_duplicate_message` (the string `name`
+written twice, so the walk must step over a length-delimited value), `leg1_value` (the `.txtpb` says `id: 151` where
 the bytes hold 150; its `.canonical.hex` is protoc's encoding of that text, so
 only leg 1 fires), `leg2_unknown`, `leg2_nested` and `leg2_group` (field 99 at
 the top level, field 9 inside `inner`, and an empty group 99, which protoc
@@ -642,8 +658,16 @@ isolation directory (skipped with `--no-uncached`); and a `pixi` project whose
 channel is the built file served from `file://` installs it, with the compiler
 from Modular's `max` channel, and `mojo run` of a program importing it prints
 the right bytes, while the same project without it cannot (skipped with
-`--no-install`, without `pixi`, or without network). See
-[packaging/conda](../../../packaging/conda/README.md).
+`--no-install`, without `pixi`, or without network; with `--require-install`,
+the nightly workflow's flag, a missing `pixi` or network is a FAIL line). The
+switch is [`install_gate.sh`](functional/install_gate/install_gate.sh), and
+`tests//functional/install_gate:cases` holds it, on PATHs it makes: no `pixi`
+gives `SKIP  conda install (no pixi)`, and with the flag
+`FAIL  conda install: --require-install, but it cannot run (no pixi)`. Each
+script calls the gate before any build, so the target also runs conda.sh and
+conda_set.sh themselves with no `pixi` and no `curl` on PATH: with the flag each
+prints its own FAIL line and exits 1, without it its first line is its SKIP
+line. See [packaging/conda](../../../packaging/conda/README.md).
 
 ## 33b. Conda package set and metapackage
 
@@ -669,7 +693,7 @@ sha256 for every file of every package and of the metapackage made from each
 run (`--no-uncached` skips); and `pixi` installs ONLY the metapackage from a
 `file://` channel of the set, the solver brings every library and the compiler,
 and a program importing two libraries prints the right bytes (`--no-install`, no
-`pixi` or no network skips). See
+`pixi` or no network skips; a FAIL with `--require-install`, as in 33a). See
 [packaging/conda](../../../packaging/conda/README.md).
 
 ## 33. Client
@@ -770,9 +794,9 @@ welded to `env_scrubbed`, must build and run (`[run_check]`); `env_scrubbed`
 must build: its test asserts the harness's environment is exactly `HOME`,
 `PATH` and `TMPDIR`. Each of these must fail, naming its cause: no tests
 (`empty`, `EMPTY GATE`), an `#[ignore]`d test (`ignored`), and a test that
-hangs (`hang`, NO VERDICT at its 3 s `test_timeout_s`, exit 142). There are
-no holds: a welded test that fails makes its artifact unbuildable until it
-passes.
+hangs (`hang`, NO VERDICT at its 3 s `test_timeout_s`, exit 142). `ext` and `ext_consumer` build (its external `test_srcs` test passes);
+`ext_red` and `ext_red_consumer` fail naming `tests/ext_fail.rs` with `1 passed; 1 failed`. Refused at analysis: `ext_no_crate` (no
+`tests/<name>.rs`), `ext_outside` (outside `tests/`), `ext_bad_name` (`tests/1bad.rs`), `ext_not_rs` (`tests/ext_data.txt`) ([`rust_tests.sh`](rust_tests.sh)).
 
 `buck2 test //tools/build/proto-codegen:komira_proto_codegen` must pass and
 print the harness's `komira_proto_codegen_unit: <n> passed`: `rust_test`
@@ -831,148 +855,20 @@ Analysis only.
 
 ## 38. README examples
 
-A library's `README.md` examples are a welded test, `[tests][readme]`
-([README examples](../mojo/README.md#readme-examples)).
-[`functional/readme_examples/ok`](functional/readme_examples/ok/BUCK) builds a
-README using every form (hidden lines before and after, a hoisted decorated
-struct, a triple-quoted string, an example in a list item, a `~~~~` fence
-quoting ```` ``` ````) and its marker is a PASS line;
-[`functional/readme_examples/none`](functional/readme_examples/none/BUCK), a
-README with no example, builds and its marker reads `NO EXAMPLE`, so nothing
-was compiled or run. [`negative/readme_examples`](negative/readme_examples/raises/BUCK)
-plants three defects, each of which must fail naming its README line: an
-example that raises (`README.md:13: FAILED`, while the other example still
-runs), one that does not compile (the compiler quotes the line, ending
-`# README.md:9`) and a `mojo skip` fence (refused at `README.md:3`).
-A README that ships (its library has a conda package, which installs it at
-`share/doc/<name>/README.md`) refuses a relative link:
-[`negative/readme_examples/relative_link`](negative/readme_examples/relative_link/BUCK)
-fails naming `README.md:11`, and
-[`functional/readme_examples/unshipped`](functional/readme_examples/unshipped/BUCK),
-the same README in a library with `conda = False`, builds.
-
-```sh
-./buck2 build tests//functional/readme_examples/...
-./buck2 build tests//negative/readme_examples/raises:raises   # must fail: README.md:13: FAILED
-./buck2 build tests//negative/readme_examples/relative_link:relative_link   # must fail: README.md:11: greet.mojo: a relative link
-```
+A library's `README.md` examples are a welded test, `[tests][readme]` ([README examples](../mojo/README.md#readme-examples)), and a BUCK file of several libraries names the one its README is about; [`run_tests.sh`](run_tests.sh) runs [these checks](readme_examples.md).
 
 ## 39. Test welding
 
-A test file that no target welds never runs, and nothing else notices.
-[`test_weld`](../lint/test_weld.bzl) is a lint over the packages under
-`src/` (each directory directly under it). It requires every `test_*.mojo`
-under a `tests/` directory to be welded, and every package with a `.mojo`
-source to weld a test. What is welded is read from the build graph, not from
-the text of a BUCK file: the `test_srcs` of every `mojo_library` and the
-`main` of every `mojo_test` under `src/` (its binary runs `main` only), as the
-rules received them. A query of the graph gives the targets; each rule gives
-its test files in a `WeldedTestsInfo` ([`providers.bzl`](../mojo/providers.bzl)),
-and Buck2 says where each file is. So a list a BUCK file computes counts entry
-by entry, an entry left in a comment does not, and an entry naming another
-package's file by label welds that file, not a same-named one.
-The exceptions are the rows of
-[`tests/known_untested.tsv`](../../../tests/known_untested.tsv), each with its
-reason, and that ledger only shrinks: a row whose test is welded, or whose
-package welds a test, is a finding, as is a row naming nothing. `//:test_weld`
-in the root [`BUCK`](../../../BUCK) holds the repository to them.
-
-[`functional/test_weld:ok`](functional/test_weld/BUCK) is a planted tree
-([`fixture.bzl`](functional/test_weld/fixture.bzl): a computed `test_srcs`
-list holding an entry in a comment, a helper under `tests/`, a nested test, a
-test welded by a target of its own, a package with no `.mojo`) whose ledger
-holds it exactly, and each target of
-[`negative/test_weld`](negative/test_weld/BUCK) plants one defect in the same
-tree and must fail naming it; `shrink_computed` is a ledger row for a test
-welded only by the computed list. That tree's welds come from a stand-in rule;
-[`negative/test_weld/real`](negative/test_weld/real/BUCK) runs the lint over a
-real `mojo_library` (a computed `test_srcs` with an entry in a comment and an
-entry naming another package's file by label) and a real `mojo_test` (a
-second `srcs` beside its `main`): `real:ok` holds the three unwelded files in
-its ledger and must pass, `real:red` has no row and must name exactly those
-three. Neither is built: the lint only analyses them.
-
-A rule cannot query the targets of `//src/...` (a query attribute takes
-labels only), so building a `test_weld` target checks nothing: it declares the
-lint, and [`test_weld.bxl`](../lint/test_weld.bxl) checks it, running the
-check as a build action whose inputs are the list of `.mojo` paths, the list
-of welded paths and the ledger. The pull request's check runs it for each
-`test_weld` target of a unit it builds
-([`build_targets.sh`](../../../release/ci/build_targets.sh)); this test runs it
-for each target above.
-
-```sh
-./buck2 bxl //tools/build/lint/test_weld.bxl:check -- --lint //:test_weld
-./buck2 bxl //tools/build/lint/test_weld.bxl:check -- --lint tests//functional/test_weld:ok
-./buck2 bxl //tools/build/lint/test_weld.bxl:check -- --lint tests//negative/test_weld:untested   # must fail: .../src/komira_b: 1 .mojo source(s) and no welded test
-```
+`test_weld`: every test file is welded, and every package with code welds a test. The test is in
+[the repository lint tests](lint_tests.md#39-test-welding).
 
 ## 40. README API coverage
 
-A package's README examples are its smoke tests (test 38), so a public name
-no example uses is a public name nothing smoke-tests.
-[`readme_api_coverage`](../lint/readme_api_coverage.bzl) is a validation
-that counts, per package under `src/`, the public API its `__init__.mojo`
-exports (and the public methods of the structs among it) and which of it the
-README's examples use, reading each README through the tool the gate runs, so
-hidden lines count and prose does not. It writes the census (`[packages]`,
-`[symbols]`, `[report]`) and is report-only today; it fails on its ledger,
-[`tests/readme_api_exceptions.tsv`](../../../tests/readme_api_exceptions.tsv),
-when a row is malformed, repeated, or names a symbol that is not exported or
-that the README now uses (the ledger only shrinks). The rules and today's
-numbers are in [`docs/readme_api_coverage.md`](../../../docs/readme_api_coverage.md).
-[`functional/readme_api_coverage:ok`](functional/readme_api_coverage/BUCK)
-builds a planted tree ([`fixture.bzl`](functional/readme_api_coverage/fixture.bzl):
-an alias, a parenthesised and a backslash-continued import, a self-qualified
-import, a module export, declarations in `__init__.mojo`, overloads, a
-docstring `def`, a struct in `tests/`, a struct header over three lines, a
-same-named struct outside the imported module, a `write_to`, hidden lines, a
-name only in a comment, a string, an import line, a README declaration, a
-`text` fence or prose, a package with no README, one with no example, one
-the readme tool refuses, a `from .x import *`, one with no `__init__.mojo`)
-whose census must equal
-[`expect_packages.tsv`](functional/readme_api_coverage/expect_packages.tsv),
-[`expect_symbols.tsv`](functional/readme_api_coverage/expect_symbols.tsv)
-and [`expect_report.txt`](functional/readme_api_coverage/expect_report.txt)
-byte for byte; each target of
-[`negative/readme_api_coverage`](negative/readme_api_coverage/BUCK) plants one
-defect in the same tree and must fail naming it, `enforce = True` included.
-
-```sh
-./buck2 build //:readme_api_coverage tests//functional/readme_api_coverage:ok
-./buck2 build tests//negative/readme_api_coverage:stale_used   # must fail: komira_a bye: src/komira_a/README.md uses it now
-```
+`readme_api_coverage`: the census of the public API each README example uses. The test is in
+[the repository lint tests](lint_tests.md#40-readme-api-coverage).
 
 ## 41. Coverage builds
-
-[Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`)
-add one -O0 binary with line tables per `test_srcs` entry and must leave
-every release action as it is. [`coverage_tests.sh`](coverage_tests.sh) runs
-these checks:
-
-| check | what it proves | the defect planted to see it go red |
-|---|---|---|
-| [`coverage_keys.sh`](functional/coverage_keys.sh) | over [`covlib`](functional/coverage/BUCK) and `//src/komira_retry`, read from `buck2 aquery` and `cquery` (analysis only) with the switch off and on: each target keeps its execution platform, and every release action keeps its command line, the actions that make its inputs (a README's gate join: its command line only, since aquery cannot traverse the README's dynamic actions) and its execution attributes (executor preference and configuration, cache upload, weight, dep files); with it off there is no coverage action; with it on every new action is one (`mojo_build_cov_test`, or an output under `cov/`), one build per test; with it unset (`-c komira.coverage=`, which clears a global value) every fact is the one of `=false`; on `darwin-arm64` with it on no target has the `coverage_debug` attribute (cquery). A README's build and run, which aquery cannot see, are compared by building `//src/komira_retry` with the switch off, then on, in one daemon: every action of it the second build runs (`buck2 log what-ran`) must have run in the first under the same digest (cache hits only). Not seen: an action's environment (aquery prints none; a planted `env` passes) and a hidden source-file input | the release test build given the debug link directory when coverage is on (command lines differ); the coverage binaries added to the gate join's inputs (inputs differ); `prefer_local` on the release test build when coverage is on (execution attributes differ; the test before them passed it); the switch's default `true` (unset differs from `=false`); the platform `select` giving every platform the link directory (the darwin cquery fails); the README's build at -O0 when coverage is on (its build and run run again under new digests) |
-| [`:aggregates`](functional/coverage/BUCK) | `covlib_forced[coverage]` and `[coverage][bin]` have exactly the binaries `[coverage][bin][<test>]` of its two tests as default outputs (checked at analysis) | either list missing its first binary |
-| [`:hermetic`](functional/coverage/BUCK) | each binary of `covlib_forced[coverage][bin]` has a `.debug_line` section and the string `value.mojo`, the library source both tests call, which only the compile's line tables put there (zig's C runtime has line tables of its own, and without `--debug-level` an -O0 binary still names the test's own file, its compile unit, but no library file), names its sources by relative directories, as the pinned Mojo writes them (whole strings `tests` and `buck-out/.../__covlib_forced__/<hash>/src/covlib`; Mojo records no compilation directory), holds a placeholder `/___...` (the compilation directory of zig's C runtime units, the only ones that record one, relocated), holds no placeholder followed by `/` and no whole string that is an absolute path other than the placeholder and the ELF interpreter (whatever the executor's directory layout), and has no compressed section (debug_relocate, which refuses one, runs over a copy) | the coverage compile without `--debug-level line-tables` (the binary still has `.debug_line` and its own file name, but not `value.mojo`); planted strings, `tests//negative/coverage:abs_relocated` (a relocated absolute Mojo path), `:abs_other` (an absolute path of another build directory) and `:no_reldir` (no `tests` directory), each fail with its message |
-| [`tests//negative/coverage:noop[coverage]`](negative/coverage/BUCK) | must fail with `contains this action's working directory`: a relocator that rewrites nothing and claims it did (`noop_relocate.zig`) gets past `cov_zig`, and mojo_wrapper.sh's exit 4 stops it, so the wrapper's check stays on for coverage builds | it is the planted defect |
-| [`:reproducible`](functional/coverage/BUCK) | `repro_a` and `repro_b` build one test (it imports only their common dependency) in two actions with different keys, so two sandboxes: the binaries have one sha256. No `--no-remote-cache` | `-Wl,--build-id=uuid` in cov_zig (the binaries differ) |
-| `-c komira.coverage=yes` | fails at load, naming the value | |
-
-The library fixtures in the tests cell may name their link directory
-(`coverage_debug`), which gives them coverage binaries whatever the switch
-says; that is how `:hermetic`, `:reproducible` and the negative build without
-`-c`.
-
-```sh
-tools/build/tests/functional/coverage_keys.sh
-./buck2 build tests//functional/coverage/...
-./buck2 build 'tests//negative/coverage:noop[coverage]'   # must fail: contains this action's working directory
-./buck2 build tests//negative/coverage:abs_relocated   # must fail: holds an absolute path under the working directory
-./buck2 build tests//negative/coverage:abs_other       # must fail: holds an absolute path (/var/build/...
-./buck2 build tests//negative/coverage:no_reldir       # must fail: no relative directory matching 'tests'
-./buck2 build tests//functional/coverage:covlib -c komira.coverage=yes   # must fail at load
-```
+[Coverage builds](../mojo/README.md#coverage-builds) (`-c komira.coverage=true`) add an -O0 binary per test and move no release action of a library, only its conda package's joins; [`coverage_tests.sh`](coverage_tests.sh) runs [these checks](coverage_runs.md#test-41-coverage-builds).
 
 ## 42. Pointer lint
 
@@ -996,8 +892,11 @@ dunder, a trait method, a return type), held at their exact counts, so a
 site the reader missed would fail the build; and whose `near.mojo` names
 every banned spelling where it is not a site (docstrings, comments, strings,
 longer identifiers, private and nested functions, whole-value moves, a
-rebound name). Each target of [`negative/pointer_lint`](negative/pointer_lint/BUCK)
-plants one site of a rule in the same tree, or one defect in a ledger (a
+rebound name); a test file is not a site, in a package's own `tests/` and in
+a test-only package's under `src/tests/<kind>/`. Each target of
+[`negative/pointer_lint`](negative/pointer_lint/BUCK)
+plants one site of a rule in the same tree (a library file of a test-only
+package included), or one defect in a ledger (a
 malformed, repeated, unknown-rule, zero-count or reasonless row, a row for
 no file, a count above the sites, a row for an FFI module's origins, an FFI
 row with no `# FFI-BOUNDARY:` comment line or no wildcard origin), or empties
@@ -1007,6 +906,81 @@ the tree, and must fail naming it.
 ./buck2 build //:pointer_lint tests//functional/pointer_lint:ok
 ./buck2 build tests//negative/pointer_lint:partial_move_two   # must fail: plant.mojo:4: partial_move
 ```
+
+## 43. Coverage runs
+Each test's coverage binary also runs under kcov ([cov_run](../coverage/kcov/README.md#cov_run)), giving its report `[coverage][tests][<test>]`; [`coverage_run_tests.sh`](coverage_run_tests.sh) runs [these checks](coverage_runs.md#test-43-coverage-runs).
+
+## 44. Public boundary
+
+[`public_boundary`](../lint/defs.bzl) is a validation over every file of the
+repository (`//:public_boundary`: the cell's files, the dotfiles a glob skips,
+and this cell's files) for what a public repository may not hold: a date
+before the public history (2026-09-01; the window read starts with 2025,
+because earlier dates in this tree are data), a home directory naming a
+person, a private, shared or link-local address or any address written with
+a port, a URL host that is neither a reserved example name nor under a domain
+of [`tests/public_boundary_hosts.tsv`](../../../tests/public_boundary_hosts.tsv),
+an email address outside the reserved example domains (the user of a URL
+right after `://` is none when its host is under a domain of the hosts ledger,
+such as `abfss://<container>@<account>.dfs.core.windows.net`; before any other
+host it is read), and a commit id in prose, in a file's contents or (dates,
+home directories, deny-list words) its path. Binary data is not read, but its
+path is; nothing committed is upstream bytes, so `third_party/` is read whole.
+Its reader is
+[`public_boundary.awk`](../lint/public_boundary.awk), which says what each rule
+matches and what it cannot see (vocabulary is no shape); its action is
+[`lint.sh`](../lint/lint.sh) (kind `public_boundary`). The findings a file must
+keep are held per rule and file at an exact count in
+[`tests/public_boundary_holds.tsv`](../../../tests/public_boundary_holds.tsv),
+which only shrinks, and every row of the hosts list must be used. A
+repository that keeps words of its own out of this one passes them as a list
+kept outside it (`-c komira_lint.public_boundary_deny=<target or path>`,
+`.public_boundary_deny` being gitignored for it): a finding no row can hold.
+
+[`functional/public_boundary:ok`](functional/public_boundary/BUCK) builds a
+planted tree ([`fixture.bzl`](functional/public_boundary/fixture.bzl)) whose
+`held.mojo` and `shim.c` hold every rule in each spelling the reader knows,
+held at exact counts, so a spelling the reader missed would fail the build;
+whose near misses (dates outside the window, placeholders, loopback and
+documentation addresses, reserved hosts, templates, digests, UUIDs, hex in
+code, a `//` in a C string) must find nothing; and whose binary file holds
+findings that must not be read. The planted tree's window is 2030 up to 2031-09-01,
+so none of its files holds a date the root target refuses. Each target of
+[`negative/public_boundary`](negative/public_boundary/BUCK) plants one finding
+(each spelling of each rule, a date in a `third_party/` BUCK file and C
+header, a date, home directory or deny-list word in a path, the path of
+binary data, a file given by `paths`, one over a hold, a deny-list word) or
+one ledger defect (malformed, repeated, unknown-rule, zero-count or
+reasonless rows, a row for a missing file or for binary data, a count above
+the findings, a row for no finding, a row holding a deny-list word, a hosts
+row that is reserved or unused), sets a window with month 13 or not ending
+on the first day of a month, or empties the tree, and must fail naming it.
+The test also pins the root target's window (2025 up to 2026-09-01) by
+querying its attributes, so narrowing it fails.
+[`public_boundary_tests.sh`](public_boundary_tests.sh) lists them.
+
+```sh
+./buck2 build //:public_boundary tests//functional/public_boundary:ok
+./buck2 build tests//negative/public_boundary:host_single   # must fail: docs/plant.md:1: host: builder
+```
+
+## 45. The layout of src/
+
+`src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`; the module map in `docs/architecture.md` has one row per package and none for a directory that is not one. The test is in [the repository lint tests](lint_tests.md#45-the-layout-of-src).
+
+## 46. Coverage gate
+With coverage, a library's conda package (what ships), not the library, waits for its runs and [its gate](../coverage/README.md#the-build-gate); [`coverage_gate_tests.sh`](coverage_gate_tests.sh) runs [these checks](coverage_runs.md#test-46-the-coverage-gate).
+## 47. Branch coverage runs
+[`coverage_branch_tests.sh`](coverage_branch_tests.sh) runs [these checks](coverage_runs.md#test-47-branch-coverage-runs).
+## 51. [Python oracles](../python/README.md#test-51-python-oracles)
+## 52. [API JSON: mojo_doc_json](../mojo/doc.md)
+## 53. [Surface capability matrix](lint_tests.md#53-the-surface-capability-matrix)
+## 54. [Hermetic Node.js: planted defects](../node/README.md#test-54-planted-defects)
+## 55. [Refused imports](lint_tests.md#55-refused-imports)
+
+## 49. Assert level, defines and memory cap
+
+[The assert level, defines and memory cap](../mojo/README.md#assert-level-defines-and-memory-cap) of a test or program: [`assert_level_tests.sh`](assert_level_tests.sh) runs [these checks](assert_level.md).
 
 ## Diagnostics
 

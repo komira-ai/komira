@@ -1,0 +1,11 @@
+{
+  "service": "logs",
+  "overrides": [
+    {
+      "operation": "GetLogEvents",
+      "hand_module": "env_read_compound.env_compound",
+      "hand_symbol": "get_log_events",
+      "reason": "A fixture override: a hand-written module of the package that reads HOME through Path.home, its module named in the body of a one-line function."
+    }
+  ]
+}

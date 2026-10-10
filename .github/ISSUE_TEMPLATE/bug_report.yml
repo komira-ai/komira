@@ -1,0 +1,34 @@
+name: Bug report
+description: Something in komira does not do what its docs say.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A security problem? Do not file it here: see SECURITY.md and report it privately.
+  - type: input
+    id: where
+    attributes:
+      label: Library or tool
+      description: The package under src/ (e.g. komira_json), or the tool or rule under tools/.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The released package version, or the commit you built.
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+      description: The smallest program or command that shows it, its output, and what the docs say should happen.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: OS and CPU (e.g. Linux x86_64), and the Mojo version if you built it yourself.

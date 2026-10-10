@@ -326,6 +326,34 @@ def canonicalize_resource(
 
 
 # -----------------------------------------------------------------------------
+# shared_key_content_length — the Content-Length slot's value
+# -----------------------------------------------------------------------------
+
+comptime SHARED_KEY_EMPTY_ZERO_LENGTH_VERSION: StaticString = "2015-02-21"
+"""The first x-ms-version at which Shared Key signs a zero Content-Length as
+the empty string ("Authorize with Shared Key": "In version 2014-02-14 and
+earlier, the content length was included even if zero")."""
+
+
+def shared_key_content_length(content_length: Int, x_ms_version: String) -> String:
+    """The Content-Length slot of the string-to-sign for a request whose body
+    is `content_length` bytes, sent at `x_ms_version`.
+
+    A non-zero length is its decimal form. A zero length is "" at version
+    2015-02-21 and later, and "0" at 2014-02-14 and earlier. Versions are
+    `YYYY-MM-DD`, so byte order is date order; an absent version reads as
+    current ("")."""
+    if content_length != 0:
+        return String(content_length)
+    if (
+        x_ms_version.byte_length() > 0
+        and x_ms_version < String(SHARED_KEY_EMPTY_ZERO_LENGTH_VERSION)
+    ):
+        return String("0")
+    return String("")
+
+
+# -----------------------------------------------------------------------------
 # build_string_to_sign — the 13-field algorithm
 # -----------------------------------------------------------------------------
 
@@ -504,6 +532,27 @@ def query_params_from(query: String) raises -> List[Header]:
     return out^
 
 
+def _body_offset(request_bytes: List[UInt8]) raises -> Int:
+    """The offset just past the head's blank line (the first CRLF CRLF) in
+    serialized request bytes: where the body starts. 0 for empty bytes (a
+    request built without a head). A head never contains CRLF CRLF before
+    its end, so the first one is the terminator."""
+    var n = len(request_bytes)
+    if n == 0:
+        return 0
+    var i = 0
+    while i + 3 < n:
+        if (
+            request_bytes[i] == UInt8(0x0D)
+            and request_bytes[i + 1] == UInt8(0x0A)
+            and request_bytes[i + 2] == UInt8(0x0D)
+            and request_bytes[i + 3] == UInt8(0x0A)
+        ):
+            return i + 4
+        i += 1
+    raise Error("azure signing: request_bytes carries no end of head (CRLF CRLF)")
+
+
 # =============================================================================
 # AzureSharedKeyProvider — the credential-source trait for the signing layer
 # =============================================================================
@@ -558,15 +607,17 @@ struct StaticSharedKeyProvider(
 #   2. Stamp the `x-ms-date` header: a pinned date if the layer has one
 #      (a test's), else the wall clock's, as an HTTP-date, at sign time.
 #      Then extract the canonical-request inputs from `req` — verb, the
-#      resource path, the query parameters (URL-decoded), the Range header
-#      (if present), and the x-ms-* headers on `req.headers` (incl. the
-#      just-stamped x-ms-date and the AzureStore-stamped `x-ms-version`).
+#      resource path, the query parameters (URL-decoded), the standard
+#      header slots, the body's length, and the x-ms-* headers on
+#      `req.headers` (incl. the just-stamped x-ms-date and the
+#      AzureStore-stamped `x-ms-version`).
 #   3. Build the 13-field StringToSign + compute the Authorization header
 #      via `azure_shared_key_sign` (pure compute, no network).
 #   4. Inject `Authorization: SharedKey <account>:<sig>` into req.headers.
-#   5. Re-serialize req.request_bytes from scratch via
+#   5. Re-serialize the head of req.request_bytes via
 #      serialize_request_head so the on-wire bytes carry the Authorization
-#      header (request_bytes is pre-serialized at builder time).
+#      header (request_bytes is pre-serialized at builder time), keeping
+#      any body bytes after it.
 #   6. Delegate to inner.call.
 #
 # Anonymous (public-container) reads: if the provider's credential has an
@@ -574,25 +625,24 @@ struct StaticSharedKeyProvider(
 # unauthenticated (Azure serves blobs with public read access without an
 # Authorization header).
 #
-# Scope: EmptyBody-shaped GET/HEAD reads (the Azure Blob read dataplane is
-# range-GET and List Blobs). The Shared Key Authorization signs only headers
-# and resource (NOT the body bytes), so no body-drain is needed; a request
-# with a body is re-serialized with content length 0, so writes are not
-# signed by this layer.
+# Bodies: the twelve standard slots come from the request. VERB, then
+# Content-Encoding, Content-Language, Content-MD5, Content-Type,
+# If-Modified-Since, If-Match, If-None-Match, If-Unmodified-Since and Range
+# are each the value of that header on `req` ("" when absent); Date is ""
+# because x-ms-date is always stamped. Content-Length is the BODY's length
+# (`req.body`'s `content_length()`, 0 when there is no body), through
+# `shared_key_content_length` (empty for 0 at version 2015-02-21 and later).
+# Shared Key signs no body bytes, so the body is never read. A body of
+# unknown length (chunked) is refused: Azure requires Content-Length on a
+# write, and its slot could not be filled. A Content-Length header on `req`
+# that disagrees with the body is refused too.
 #
-# Hard-coded empty slots: the layer signs Content-Encoding, Content-Language,
-# Content-Length, Content-MD5, Content-Type, Date, If-Modified-Since,
-# If-Match, If-None-Match and If-Unmodified-Since as EMPTY, whatever the
-# request carries; only VERB, Range, the x-ms-* headers and the resource
-# come from the request. That is correct for every request this package
-# makes: AzureStore's HEAD, range GET and List Blobs carry no body (at the
-# x-ms-version it sends, Shared Key signs a zero Content-Length as empty) and
-# set none of those headers (only x-ms-version, x-ms-date and Range), and
-# Date is empty because x-ms-date is always stamped. A caller must not
-# route through this layer a request that has a body or sets any of those
-# headers (a conditional If-Match read, a PUT with Content-Type): Azure
-# would compute a different string-to-sign and refuse it with 403, and the
-# body would go out under a content length of 0.
+# Re-serialization keeps the body: request_bytes is the old head followed by
+# the body bytes when the body was drained into it (BytesBody through
+# `build_request_with_body`), or the head alone when the body is streamed
+# (`build_streaming_request`). The layer replaces everything up to and
+# including the head's blank line with the new head (Authorization added,
+# Content-Length the body's length) and keeps the bytes after it.
 #
 # No UnsafePointer in any signature, no wildcard origin, no
 # unsafe_from_address, no take_pointee.
@@ -613,23 +663,23 @@ struct SharedKeySigningLayer[Inner: HttpService, P: AzureSharedKeyProvider](
       2. If account+key are both empty, SKIP signing (anonymous read).
       3. Otherwise stamp the `x-ms-date` header (the pinned date, else the
          wall clock's) so it participates in the signature, build the
-         StringToSign from verb / path / query / Range / x-ms-* headers on
-         req, compute the Authorization header, inject it, re-serialize
-         request_bytes, and delegate.
+         StringToSign from verb / path / query / standard headers / body
+         length / x-ms-* headers on req, compute the Authorization header,
+         inject it, re-serialize the head of request_bytes, and delegate.
 
-    Content-Encoding, Content-Language, Content-Length, Content-MD5,
-    Content-Type, Date and the four If-* conditionals are signed EMPTY,
-    whatever `req` carries: right for the body-less HEAD / range GET / List
-    Blobs requests AzureStore makes, wrong (a 403) for a request with a body
-    or any of those headers, which must not be sent through this layer.
+    The standard header slots are signed from `req`'s headers and
+    Content-Length from its body's length (see the section comment above);
+    a body of unknown length is refused.
 
-    Diagnostic field `_last_authorization` exposes the Authorization
-    header value from the most recent call (empty for anonymous)."""
+    Diagnostic fields `_last_authorization` and `_last_string_to_sign`
+    expose the Authorization header value and the string it signed from the
+    most recent call (both empty for anonymous)."""
 
     var _inner: Self.Inner
     var _provider: Self.P
     var _x_ms_date_override: String
     var _last_authorization: String
+    var _last_string_to_sign: String
 
     @staticmethod
     def wrap(
@@ -664,6 +714,7 @@ struct SharedKeySigningLayer[Inner: HttpService, P: AzureSharedKeyProvider](
         self._provider = _provider^
         self._x_ms_date_override = _x_ms_date_override^
         self._last_authorization = _last_authorization^
+        self._last_string_to_sign = String("")
 
     def layer_name(self) -> String:
         return String("azure-shared-key")
@@ -673,6 +724,11 @@ struct SharedKeySigningLayer[Inner: HttpService, P: AzureSharedKeyProvider](
         """Diagnostic: Authorization header value from the most recent
         call (empty if the credential was empty / skipped)."""
         return self._last_authorization
+
+    def last_string_to_sign(self) -> String:
+        """Diagnostic: the string-to-sign of the most recent call (empty
+        if the credential was empty / skipped)."""
+        return self._last_string_to_sign
 
     def set_clock_override(mut self, rfc1123_date: String):
         """Test-injection: pin the `x-ms-date` (an HTTP-date, e.g.
@@ -695,6 +751,7 @@ struct SharedKeySigningLayer[Inner: HttpService, P: AzureSharedKeyProvider](
         # 2. Anonymous path: empty account + empty key => no signing.
         if cred.account.byte_length() == 0 and cred.key_b64.byte_length() == 0:
             self._last_authorization = String("")
+            self._last_string_to_sign = String("")
             return self._inner.call[RT, C, B](req^, connector, reactor)
 
         # 3. Stamp the mandatory `x-ms-date` header BEFORE collecting the
@@ -713,15 +770,32 @@ struct SharedKeySigningLayer[Inner: HttpService, P: AzureSharedKeyProvider](
                 format_http_date(Int(now_unix_ms() // 1000)),
             )
 
-        # 4. Build the signing context from the request.
+        # 4. The body's length is what Content-Length signs and frames.
+        var body_len = 0
+        if req.body:
+            body_len = req.body.value().content_length()
+        if body_len < 0:
+            raise Error(
+                "azure signing: refusing a request body of unknown length:"
+                " Shared Key signs Content-Length, so a chunked body cannot be"
+                " signed"
+            )
+
+        # 5. Build the signing context from the request: the standard slots
+        # from their headers, the x-ms-* headers (incl. the just-stamped
+        # x-ms-date) for canonicalize_headers, which keeps only x-ms-*.
         var verb = String(req.method.name())
         var resource_path = String(req.url.path)
-
-        # Collect the Range header (if present) + the x-ms-* headers
-        # (incl. the just-stamped x-ms-date) on the request.
-        # canonicalize_headers filters to x-ms-* internally; we forward
-        # every header and let it filter.
+        var content_encoding = String("")
+        var content_language = String("")
+        var content_md5 = String("")
+        var content_type = String("")
+        var if_modified_since = String("")
+        var if_match = String("")
+        var if_none_match = String("")
+        var if_unmodified_since = String("")
         var range_header = String("")
+        var x_ms_version = String("")
         var x_ms_headers = List[Header]()
         var n_entries = req.headers.len()
         var hi = 0
@@ -729,15 +803,39 @@ struct SharedKeySigningLayer[Inner: HttpService, P: AzureSharedKeyProvider](
             var entry_view = req.headers.entry_at_view(hi)
             if ci_byte_eq_sab_static(entry_view.name, "range"):
                 range_header = sab_to_string(entry_view.value)
+            elif ci_byte_eq_sab_static(entry_view.name, "content-encoding"):
+                content_encoding = sab_to_string(entry_view.value)
+            elif ci_byte_eq_sab_static(entry_view.name, "content-language"):
+                content_language = sab_to_string(entry_view.value)
+            elif ci_byte_eq_sab_static(entry_view.name, "content-md5"):
+                content_md5 = sab_to_string(entry_view.value)
+            elif ci_byte_eq_sab_static(entry_view.name, "content-type"):
+                content_type = sab_to_string(entry_view.value)
+            elif ci_byte_eq_sab_static(entry_view.name, "if-modified-since"):
+                if_modified_since = sab_to_string(entry_view.value)
+            elif ci_byte_eq_sab_static(entry_view.name, "if-match"):
+                if_match = sab_to_string(entry_view.value)
+            elif ci_byte_eq_sab_static(entry_view.name, "if-none-match"):
+                if_none_match = sab_to_string(entry_view.value)
+            elif ci_byte_eq_sab_static(entry_view.name, "if-unmodified-since"):
+                if_unmodified_since = sab_to_string(entry_view.value)
+            elif ci_byte_eq_sab_static(entry_view.name, "content-length"):
+                var declared = sab_to_string(entry_view.value)
+                if declared != String(body_len):
+                    raise Error(
+                        "azure signing: the request's Content-Length header says "
+                        + declared
+                        + " but its body is "
+                        + String(body_len)
+                        + " bytes"
+                    )
             elif ci_byte_eq_sab_static(entry_view.name, "authorization"):
                 # Skip any pre-existing Authorization (idempotent on a
                 # recycled req object).
                 pass
             else:
-                # Forward all other headers (lowercased name) — only x-ms-*
-                # survive canonicalize_headers, but the resource-path query
-                # params are passed via the ctx separately. Materialize the
-                # lowercased name + value for the Header POD.
+                if ci_byte_eq_sab_static(entry_view.name, "x-ms-version"):
+                    x_ms_version = sab_to_string(entry_view.value)
                 x_ms_headers.append(
                     Header(
                         sab_to_string_lower(entry_view.name),
@@ -752,32 +850,45 @@ struct SharedKeySigningLayer[Inner: HttpService, P: AzureSharedKeyProvider](
             account=cred.account,
             resource_path=resource_path,
             query_params=query_params_from(req.url.query),
-            content_encoding=String(""),
-            content_language=String(""),
-            content_length=String(""),
-            content_md5=String(""),
-            content_type=String(""),
-            if_modified_since=String(""),
-            if_match=String(""),
-            if_none_match=String(""),
-            if_unmodified_since=String(""),
+            content_encoding=content_encoding^,
+            content_language=content_language^,
+            content_length=shared_key_content_length(body_len, x_ms_version),
+            content_md5=content_md5^,
+            content_type=content_type^,
+            if_modified_since=if_modified_since^,
+            if_match=if_match^,
+            if_none_match=if_none_match^,
+            if_unmodified_since=if_unmodified_since^,
             range_header=range_header^,
             x_ms_headers=x_ms_headers^,
         )
 
-        # 5. Compute the signature + inject the Authorization header.
+        # 6. Compute the signature + inject the Authorization header.
         var result = azure_shared_key_sign(ctx)
         req.headers.insert(String("authorization"), result.authorization)
         self._last_authorization = result.authorization
+        self._last_string_to_sign = result.string_to_sign
 
-        # 6. Re-serialize request_bytes from scratch so the on-wire bytes
-        # carry the Authorization header. The Azure read dataplane is
-        # EmptyBody-shaped (range GET), so the wire content-length is 0.
+        # 7. Re-serialize the head so the on-wire bytes carry the
+        # Authorization header, and keep the body bytes that followed the
+        # old head (none for EmptyBody or a streamed body).
         var new_bytes = List[UInt8]()
         serialize_request_head(
-            req.method, req.url, req.headers, 0, new_bytes
+            req.method, req.url, req.headers, body_len, new_bytes
         )
+        var tail_at = _body_offset(req.request_bytes)
+        var tail_len = len(req.request_bytes) - tail_at
+        if tail_len != 0 and tail_len != body_len:
+            raise Error(
+                "azure signing: request_bytes carries "
+                + String(tail_len)
+                + " body bytes but the body is "
+                + String(body_len)
+                + " bytes"
+            )
+        if tail_len > 0:
+            new_bytes.extend(Span(req.request_bytes)[tail_at:])
         req.request_bytes = new_bytes^
 
-        # 7. Delegate.
+        # 8. Delegate.
         return self._inner.call[RT, C, B](req^, connector, reactor)

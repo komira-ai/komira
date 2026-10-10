@@ -9,9 +9,10 @@
 # the host); credentials come from the GcpTokenSource a caller passes.
 #
 # Scope: CreateRepository, GetRepository, DeleteRepository,
-# ListRepositories and GetFile (BUCK `methods`). The service's other
-# methods are absent, among them the IAM policy methods, the docker image,
-# package, version, tag and file listings, and UpdateRepository.
+# ListRepositories, GetFile, GetIamPolicy and SetIamPolicy (BUCK `methods`).
+# The service's other methods are absent, among them TestIamPermissions,
+# the docker image, package, version, tag and file listings, and
+# UpdateRepository.
 from std.os import listdir
 from std.testing import assert_equal, assert_true
 
@@ -72,15 +73,17 @@ def test_no_environment_read() raises:
 
 def test_only_the_called_methods_are_generated() raises:
     var text = _read("service.mojo")
-    assert_equal(_count(text, "[RT: Runtime](mut self, req: "), 5)
+    assert_equal(_count(text, "[RT: Runtime](mut self, req: "), 7)
     assert_equal(_count(text, "    def create_repository[RT: Runtime]("), 1)
     assert_equal(_count(text, "    def get_repository[RT: Runtime]("), 1)
     assert_equal(_count(text, "    def delete_repository[RT: Runtime]("), 1)
     assert_equal(_count(text, "    def list_repositories[RT: Runtime]("), 1)
     assert_equal(_count(text, "    def get_file[RT: Runtime]("), 1)
+    assert_equal(_count(text, "    def get_iam_policy[RT: Runtime]("), 1)
+    assert_equal(_count(text, "    def set_iam_policy[RT: Runtime]("), 1)
     var absent: List[String] = [
-        "IamPolicy",
-        "iam_policy",
+        "TestIamPermissions",
+        "def test_iam_permissions",
         "DockerImage",
         "docker_image",
         "def list_files",

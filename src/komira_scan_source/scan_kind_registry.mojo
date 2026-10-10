@@ -6,7 +6,7 @@
 # PURE DATA — schema, stats and gate are values, and nothing here names
 # `ParquetSource` or a `Searcher`. That is precisely why it can live in core
 # without inverting the DAG, and it is the same reason `FsDescriptorPod` lives
-# in core while `FsHandle` cannot.
+# in core while the file systems it names (`S3Fs`, `AzureFs`, ...) cannot.
 #
 # The execution side cannot live here: a morsel-source trait would have to
 # name `LocalDispatcher`, `CancellationToken`, `ParquetMetadataCache` — all

@@ -17,13 +17,16 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 #   ListRepositories   a teardown check lists what is left in a location
 #   GetFile            a package upload reads an uploaded file's size and
 #                      hashes back
+#   GetIamPolicy       a cell's bootstrap reads its image repository's
+#                      policy, to grant the cell's runtime pull
+#   SetIamPolicy       and writes it back changed (read-modify-write, the
+#                      etag of the read sent back)
 #
-# Not generated: the service's other methods. GetIamPolicy and
-# SetIamPolicy (a repository's IAM policy, read-modify-written together)
-# have no caller yet; the generator sends GetIamPolicy's `options` message
-# as `options.requestedPolicyVersion=3`, so adding them is a `methods`
-# entry each. Docker images, packages, versions, tags, rules, settings and
-# the file listing are not generated either.
+# GetIamPolicy's binding is a GET with no body, so its `options` message
+# rides the query as `options.requestedPolicyVersion`. Not generated: the
+# service's other methods, TestIamPermissions among them. Docker images,
+# packages, versions, tags, rules, settings and the file listing are not
+# generated either.
 #
 # CreateRepository and DeleteRepository answer a google.longrunning
 # `Operation` (`done`, then `error` or `response`). Following one needs
@@ -40,8 +43,10 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # with `set_rest_host`.
 #
 # `bundle_only` is the files the methods reach, each generated into this
-# package: the service, the repository and file messages, and
-# google.longrunning's Operation with google.rpc's Status. The service and
+# package: the service, the repository and file messages,
+# google.longrunning's Operation with google.rpc's Status, and the IAM
+# policy requests (iam_policy), GetPolicyOptions (options), the Policy
+# (policy) and a binding's condition (expr). The service and
 # its request messages are in separate files, which the generator's REST
 # emitter resolves across the package.
 #
@@ -51,12 +56,14 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # ScriptedConnector pointed at `localhost` (no socket, no name lookup):
 # test_artifactregistry_requests (each method's request line and body, a
 # name outside its pattern refused before a dial, the list query, an escaped
-# file id), test_artifactregistry_responses (a repository with its configs,
+# file id), test_artifactregistry_policy (the repository's IAM policy read
+# with the version asked for in the query, and written back with the etag
+# it read), test_artifactregistry_responses (a repository with its configs,
 # a list page, the long-running operation in each state),
 # test_artifactregistry_errors (the google.rpc.Status envelope mapped to a
 # code, the body never quoted), test_artifactregistry_default_host and
 # test_no_env_reads (no generated file reads the environment; exactly the
-# five methods above are generated). Each request's bearer header is
+# seven methods above are generated). Each request's bearer header is
 # checked in test_artifactregistry_default_host; that the token source is
 # asked once per request and that no token means no dial is generator code
 # shared by every REST client, tested in komira_gcp_logging's
@@ -70,8 +77,12 @@ mojo_gcp_client(
         "google/devtools/artifactregistry/v1/service.proto",
         "google/devtools/artifactregistry/v1/repository.proto",
         "google/devtools/artifactregistry/v1/file.proto",
+        "google/iam/v1/iam_policy.proto",
+        "google/iam/v1/options.proto",
+        "google/iam/v1/policy.proto",
         "google/longrunning/operations.proto",
         "google/rpc/status.proto",
+        "google/type/expr.proto",
     ],
     bundle_proto_deps = True,
     methods = [
@@ -80,6 +91,8 @@ mojo_gcp_client(
         "ArtifactRegistry.DeleteRepository",
         "ArtifactRegistry.ListRepositories",
         "ArtifactRegistry.GetFile",
+        "ArtifactRegistry.GetIamPolicy",
+        "ArtifactRegistry.SetIamPolicy",
     ],
     proto_deps = ["//tools/vendor/googleapis:artifactregistry_v1"],
     protocol = "rest",
@@ -92,6 +105,7 @@ mojo_gcp_client(
     test_srcs = [
         "tests/test_artifactregistry_default_host.mojo",
         "tests/test_artifactregistry_errors.mojo",
+        "tests/test_artifactregistry_policy.mojo",
         "tests/test_artifactregistry_requests.mojo",
         "tests/test_artifactregistry_responses.mojo",
         "tests/test_no_env_reads.mojo",

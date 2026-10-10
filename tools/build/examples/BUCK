@@ -1,4 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
+load("@komira//tools/build/mojo:doc.bzl", "mojo_doc_json")
 load("//tools/build/package:defs.bzl", "bundle_tarball", "mojo_bundle", "oci_image")
 
 # A binary with no dependencies. `[run_check]` runs it remotely and compares
@@ -44,6 +45,15 @@ mojo_library(
         "hellopkg/greet.mojo",
     ],
     visibility = ["PUBLIC"],
+)
+
+# The package's `mojo doc` JSON (hellopkg_doc.json), checked against the
+# golden copy beside this file and for the declarations `symbols` names.
+mojo_doc_json(
+    name = "hellopkg_doc",
+    golden = "hellopkg_doc.json",
+    lib = ":hellopkg",
+    symbols = ["greet.greeting"],
 )
 
 # A binary that imports the package.

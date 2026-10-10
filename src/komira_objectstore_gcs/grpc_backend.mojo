@@ -41,8 +41,15 @@
 #
 # TRANSPORT. `GcsTlsConnector = TlsConnector[KernelTcpConnector]`, built by
 # `build_gcs_tls_connector`: system CA trust, SNI = the host, ALPN `h2`. The
-# service speaks gRPC over HTTP/2 over TLS only. A test drives the backend
-# over a scripted connector instead.
+# service speaks gRPC over HTTP/2 over TLS only, and the backend always dials
+# `https://`. That default is the only trust the production endpoint needs.
+# A peer behind a private CA (an emulator behind TLS, an in-process fake) is
+# reached over `build_gcs_tls_connector_trusting(root_pem, server_name)`,
+# which trusts `root_pem` alone and still verifies the chain and the name;
+# nothing selects it but that call. There is no
+# plaintext (h2c) route: komira_grpc routes only unary calls over h2c, so
+# WriteObject and ReadObject could not use one. A test drives the backend over
+# a scripted connector instead.
 #
 # CREDENTIALS. The bearer token comes from any `komira_gcp_core.GcpTokenSource`
 # (a `CachingTokenSource` over a token fetcher in production, or a fixed
@@ -137,11 +144,13 @@ from komira_grpc import (
     build_routing_params,
 )
 from komira_http_client.client import HttpClient, HttpClientConfig
+from komira_http_client.pool import VERIFY_PEER
 from komira_http_client.tls_connector import (
     TlsConnector,
     build_public_ca_tls_connector,
 )
 from komira_http_client.url import Url
+from komira_http_core.tls import TlsConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_proto_codec import Serializable
@@ -182,7 +191,9 @@ comptime WRITE_OBJECT_CHUNK_BYTES: Int = 2 * 1024 * 1024
 this keeps each message within the service's limit, it does not stream."""
 
 comptime GcsTlsConnector = TlsConnector[KernelTcpConnector]
-"""The production connector: TLS over kernel TCP, ALPN h2, system CA trust."""
+"""The connector type of every TLS dial: TLS over kernel TCP, ALPN h2. Its
+trust is its `TlsConfig`'s: the system CA store from `build_gcs_tls_connector`,
+the caller's root alone from `build_gcs_tls_connector_trusting`."""
 
 comptime _RT = PerCoreAsyncRuntime[NoopSink]
 
@@ -193,8 +204,55 @@ def build_gcs_tls_connector(
     host: String = String(GCS_GRPC_HOST),
 ) raises -> GcsTlsConnector:
     """A TLS connector for the gRPC endpoint `host`: the system CA trust
-    store, SNI = `host`, ALPN offering `h2` (the gRPC transport needs h2)."""
+    store, SNI = `host`, ALPN offering `h2` (the gRPC transport needs h2).
+
+    The default, and the only connector the production endpoint needs. A peer
+    whose certificate chains to no public root (an emulator, a loopback fake)
+    fails the handshake: reach one with `build_gcs_tls_connector_trusting`.
+    """
     return build_public_ca_tls_connector(host, alpn_h2=True)
+
+
+def build_gcs_tls_connector_trusting(
+    root_pem: String, server_name: String
+) raises -> GcsTlsConnector:
+    """A TLS connector for a gRPC endpoint whose certificate a private CA
+    signed (a storage emulator behind TLS, an in-process fake): the trust
+    store is exactly `root_pem` (one or more PEM certificates; the OS's
+    public roots are wiped first), SNI is pinned to `server_name`, and the
+    connector is `VERIFY_PEER`, so the handshake checks the peer's chain
+    against `root_pem` and its name against `server_name`. TLS 1.3
+    preferences and ALPN `h2`, `http/1.1`, as `build_gcs_tls_connector`
+    offers. The backend's `host` may then be an address (the SNI and the
+    name checked stay `server_name`).
+
+    It takes the root, not a `TlsConfig`: verification cannot be turned off
+    through it. Raises when `server_name` is empty (there would be no name to
+    check) and when `root_pem` holds no certificate s2n can parse."""
+    if server_name.byte_length() == 0:
+        raise Error(
+            "build_gcs_tls_connector_trusting: server_name is empty; the"
+            " peer's certificate is checked against it"
+        )
+    var config = TlsConfig()
+    config.set_cipher_preferences(String("default_tls13"))
+    config.wipe_trust()
+    config.add_trust_pem(root_pem)
+    config.enable_verify_default()
+    config.set_alpn_protocols(_gcs_alpn())
+    var connector = GcsTlsConnector(
+        config^, KernelTcpConnector.new(), VERIFY_PEER
+    )
+    connector.set_server_name_for_next_connect(server_name)
+    return connector^
+
+
+def _gcs_alpn() -> List[String]:
+    """The ALPN list every GCS connector offers: `h2` first."""
+    var alpn = List[String]()
+    alpn.append(String("h2"))
+    alpn.append(String("http/1.1"))
+    return alpn^
 
 
 @always_inline

@@ -1,0 +1,164 @@
+# The LLVM pieces of branch coverage (README.md): Mojo's own lld (LLVM 24),
+# and the profile runtime and llvm-profdata of LLVM 23 from conda-forge.
+# linux-x86_64 only (limits.tsv `coverage-linux-x86-64`).
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs", "row")
+load(":defs.bzl", "RAW_PROFILE_VERSION", "llvm_branch_check", "llvm_branch_tool", "llvm_branch_unpack")
+
+_ROW = "linux-x86_64"
+
+# ---- Pinned inputs (tools/build/platforms/table.bzl) -----------------------------
+
+# Roles llvm_branch_*: what only this package uses.
+_ROLES = [
+    "llvm_branch_libiconv",
+    "llvm_branch_libllvm",
+    "llvm_branch_libxml2",
+    "llvm_branch_rt",
+    "llvm_branch_tools",
+    "llvm_branch_zstd",
+]
+
+# The Mojo compiler package (bin/lld is in it), the C++ runtime and zlib: the
+# toolchain's own pins (same sha256, so nothing new is downloaded), fetched
+# here because those targets are private to their packages.
+_SHARED = ["libstdcxx", "libzlib", "mojo_compiler"]
+
+[pinned_file(**pinned_kwargs(_ROW, r)) for r in _ROLES + _SHARED]
+
+# role -> the label of its pinned_file above.
+_PIN = {r: ":" + pinned_kwargs(_ROW, r)["name"] for r in _ROLES + _SHARED}
+
+_LIBGCC = "komira//tools/build/toolchains:" + pinned_kwargs(_ROW, "libgcc")["name"]
+
+_CONDA_PAYLOAD = "komira//tools/build/toolchains/kcov:conda_payload"
+
+# ---- Unpacked by remote actions ----------------------------------------------------
+
+# bin/lld of the pinned Mojo package, and the C++ runtime it loads through its
+# DT_RPATH $ORIGIN/../lib.
+llvm_branch_unpack(
+    name = "lld24",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    conda_payload = _CONDA_PAYLOAD,
+    members = {
+        "bin/lld": "mojo/bin/lld",
+        "lib/libgcc_s.so.1": "libgcc/lib/libgcc_s.so.1",
+        "lib/libstdc++.so.6": "libstdcxx/lib/libstdc++.so.6",
+    },
+    packages = {
+        "libgcc": _LIBGCC,
+        "libstdcxx": _PIN["libstdcxx"],
+        "mojo": _PIN["mojo_compiler"],
+    },
+    script = "unpack.sh",
+)
+
+# llvm-profdata and llvm-nm 23.1.3 with the libraries they load (through
+# their DT_RPATH $ORIGIN/../lib), and the compiler-rt 23 profile runtime.
+llvm_branch_unpack(
+    name = "llvm23",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    conda_payload = _CONDA_PAYLOAD,
+    members = {
+        "bin/llvm-nm": "tools/bin/llvm-nm-23",
+        "bin/llvm-profdata": "tools/bin/llvm-profdata-23",
+        "lib/libLLVM.so.23.1": "libllvm/lib/libLLVM.so.23.1",
+        "lib/libgcc_s.so.1": "libgcc/lib/libgcc_s.so.1",
+        "lib/libiconv.so.2": "libiconv/lib/libiconv.so.2",
+        "lib/libstdc++.so.6": "libstdcxx/lib/libstdc++.so.6",
+        "lib/libxml2.so.16": "libxml2/lib/libxml2.so.16",
+        "lib/libz.so.1": "libzlib/lib/libz.so.1",
+        "lib/libzstd.so.1": "zstd/lib/libzstd.so.1",
+        "runtime/libclang_rt.profile-x86_64.a": "rt/lib/clang/23/lib/linux/libclang_rt.profile-x86_64.a",
+    },
+    packages = {
+        "libgcc": _LIBGCC,
+        "libiconv": _PIN["llvm_branch_libiconv"],
+        "libllvm": _PIN["llvm_branch_libllvm"],
+        "libstdcxx": _PIN["libstdcxx"],
+        "libxml2": _PIN["llvm_branch_libxml2"],
+        "libzlib": _PIN["libzlib"],
+        "rt": _PIN["llvm_branch_rt"],
+        "tools": _PIN["llvm_branch_tools"],
+        "zstd": _PIN["llvm_branch_zstd"],
+    },
+    script = "unpack.sh",
+)
+
+# ---- Checks: build actions; :llvm_branch exists only when they pass ------------------
+
+# bin/lld: its files, loader closure, and that it is LLVM 24.
+llvm_branch_check(
+    name = "lld24_check",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    lld = ":lld24",
+    mode = "lld",
+    script = "check.sh",
+    want = {"lld": "24"},
+)
+
+# llvm-profdata, llvm-nm and the runtime: files, loader closure, version, and
+# the runtime's symbols.
+llvm_branch_check(
+    name = "llvm23_check",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    mode = "tools",
+    script = "check.sh",
+    tools = ":llvm23",
+    want = {
+        "profdata": "23.1.3",
+        "symbols": "__llvm_profile_runtime,__llvm_profile_write_file",
+    },
+)
+
+# The version coupling: what LLVM 24 instruments, the LLVM 23 runtime writes
+# and llvm-profdata reads, end to end; and a profile of another raw version
+# is refused.
+llvm_branch_check(
+    name = "raw_version_check",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    fixtures = ["fixtures/profile_fixture.c"],
+    lld = ":lld24",
+    mode = "raw_version",
+    script = "check.sh",
+    tools = ":llvm23",
+    want = {
+        "counts": "classify:2,3",
+        "functions": "3",
+        "raw": str(RAW_PROFILE_VERSION),
+        "triple": row(_ROW)["zig_triple"],
+    },
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = [
+        "check.sh",
+        "unpack.sh",
+    ],
+)
+
+# ---- What other targets use --------------------------------------------------------
+
+llvm_branch_tool(
+    name = "llvm_branch",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    checks = [
+        ":lld24_check",
+        ":llvm23_check",
+        ":raw_version_check",
+        ":shell_lint",
+    ],
+    lld = ":lld24",
+    tools = ":llvm23",
+    visibility = ["PUBLIC"],
+)

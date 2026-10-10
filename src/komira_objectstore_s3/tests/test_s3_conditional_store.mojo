@@ -1,6 +1,7 @@
 # S3ConditionalStore, komira_objectstore's conformer for one S3 bucket, run
-# against a fake S3 that keeps objects in memory: `FakeS3Connector`, a
-# komira_http_core Connector whose streams parse each HTTP request the store
+# against a fake S3 that keeps objects in memory: `FakeS3Connector` of
+# komira_test_fake_s3 (this library's `test_deps`), a komira_http_core
+# Connector whose streams parse each HTTP request the store
 # sends (through the generated client, komira_aws_core's signer and
 # komira_http_client) and answer it as S3 does, honouring If-None-Match: *
 # and If-Match. Its state lives behind an Arc the connector shares with
@@ -24,21 +25,11 @@
 # conditional writes race on one key, the append reads again and retries, as
 # for a 412. A 409 classified as MALFORMED would end a compare-and-swap loop
 # that retries only a lost precondition.
-from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
-from komira_async.reactor.reactor import Reactor
-from komira_async.runtime.runtime_trait import Runtime
 from komira_aws_core import AwsCredential, FixedClock, StaticCredsSource
 from komira_buffer.byte_view import ByteView
 from komira_http_client.client import HttpClientConfig
-from komira_http_core.transport.io_stream import (
-    Connector,
-    IoStream,
-    NEGOTIATED_HTTP_1_1,
-    StreamIo,
-    TRANSPORT_KIND_KERNEL_TCP,
-)
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 from komira_objectstore.cas_manifest import CasManifestStore, RetryPolicy as CasRetry
 from komira_objectstore.path import Path
@@ -57,73 +48,15 @@ from komira_objectstore_s3 import (
     AddressingStyle,
     S3Config,
     S3ConditionalStore,
-    s3_url_decode,
     store_error_kind_from_message,
 )
 from komira_retry import Backoff, Jitter, RetryPolicy
+from komira_test_fake_s3 import FakeS3Connector, fake_s3_error_response
 
 
 # =============================================================================
-# The fake S3.
+# Byte helpers.
 # =============================================================================
-
-
-struct FakeS3State(Movable):
-    """The objects of every bucket (`<bucket>/<key>` -> body, ETag), kept
-    sorted by name, and the faults still to inject."""
-
-    var names: List[String]
-    var bodies: List[List[UInt8]]
-    var etags: List[String]
-    var next_etag: Int
-    # The next `conflicts` conditional PutObjects are answered 409
-    # ConditionalRequestConflict, writing nothing.
-    var conflicts: Int
-    # Once this many GETs and HEADs have been answered, the object the last
-    # one read is overwritten (its first byte changed, a new ETag), as by a
-    # writer racing a reader. -1 for never.
-    var overwrite_after_reads: Int
-    var reads: Int
-    var requests: Int
-
-    def __init__(out self, conflicts: Int = 0, overwrite_after_reads: Int = -1):
-        self.names = List[String]()
-        self.bodies = List[List[UInt8]]()
-        self.etags = List[String]()
-        self.next_etag = 1
-        self.conflicts = conflicts
-        self.overwrite_after_reads = overwrite_after_reads
-        self.reads = 0
-        self.requests = 0
-
-    def find(self, name: String) -> Int:
-        for i in range(len(self.names)):
-            if self.names[i] == name:
-                return i
-        return -1
-
-    def put(mut self, name: String, var body: List[UInt8]) -> String:
-        var etag = String('"etag-') + String(self.next_etag) + '"'
-        self.next_etag += 1
-        var at = self.find(name)
-        if at >= 0:
-            self.bodies[at] = body^
-            self.etags[at] = etag
-            return etag
-        var i = 0
-        while i < len(self.names) and self.names[i] < name:
-            i += 1
-        self.names.insert(i, name)
-        self.bodies.insert(i, body^)
-        self.etags.insert(i, etag)
-        return etag
-
-    def remove(mut self, name: String):
-        var at = self.find(name)
-        if at >= 0:
-            _ = self.names.pop(at)
-            _ = self.bodies.pop(at)
-            _ = self.etags.pop(at)
 
 
 def _bytes(s: String) -> List[UInt8]:
@@ -135,299 +68,6 @@ def _bytes(s: String) -> List[UInt8]:
 def _text(b: List[UInt8]) -> String:
     return String(unsafe_from_utf8=Span(b))
 
-
-def _sub(s: String, i: Int, j: Int) -> String:
-    return String(s[byte=i:j])
-
-
-def _response(status: Int, reason: String, headers: String, body: List[UInt8], head: Bool) -> List[UInt8]:
-    var out = _bytes(
-        String("HTTP/1.1 ")
-        + String(status)
-        + " "
-        + reason
-        + "\r\nContent-Length: "
-        + String(len(body))
-        + "\r\nConnection: close\r\n"
-        + headers
-        + "\r\n"
-    )
-    if not head:
-        out.extend(Span(body))
-    return out^
-
-
-def _error(status: Int, reason: String, code: String, head: Bool) -> List[UInt8]:
-    if head:
-        return _response(status, reason, "", List[UInt8](), True)
-    return _response(
-        status,
-        reason,
-        "Content-Type: application/xml\r\n",
-        _bytes(String("<Error><Code>") + code + "</Code><Message>fake</Message></Error>"),
-        False,
-    )
-
-
-def _query(query: String, name: String) raises -> String:
-    var parts = query.split("&")
-    for i in range(len(parts)):
-        var p = String(parts[i])
-        var eq = p.find("=")
-        var k = p if eq < 0 else _sub(p, 0, eq)
-        if k == name:
-            return s3_url_decode(String("") if eq < 0 else _sub(p, eq + 1, p.byte_length()))
-    return String("")
-
-
-def _xml_escape(s: String) -> String:
-    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
-
-
-def _list(mut st: FakeS3State, bucket: String, query: String) raises -> List[UInt8]:
-    var prefix = _query(query, "prefix")
-    var delimiter = _query(query, "delimiter")
-    var after = _query(query, "continuation-token")
-    var max_keys = 1000
-    var mk = _query(query, "max-keys")
-    if mk.byte_length() > 0:
-        max_keys = Int(mk)
-    var full_prefix = bucket + "/" + prefix
-    var skip = bucket.byte_length() + 1
-    var body = String('<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Name>')
-    body += bucket + "</Name><Prefix>" + _xml_escape(prefix) + "</Prefix>"
-    var count = 0
-    var truncated = False
-    var last = String("")
-    var last_prefix = String("")
-    var entries = String("")
-    for i in range(len(st.names)):
-        ref name = st.names[i]
-        if not name.startswith(full_prefix):
-            continue
-        var key = _sub(name, skip, name.byte_length())
-        if after.byte_length() > 0 and key <= after:
-            continue
-        var group = String("")
-        if delimiter.byte_length() > 0:
-            var rest = _sub(key, prefix.byte_length(), key.byte_length())
-            var d = rest.find(delimiter)
-            if d >= 0:
-                group = prefix + _sub(rest, 0, d + delimiter.byte_length())
-        if group.byte_length() > 0 and group == last_prefix:
-            last = key
-            continue
-        if count == max_keys:
-            truncated = True
-            break
-        count += 1
-        last = key
-        if group.byte_length() > 0:
-            last_prefix = group
-            entries += "<CommonPrefixes><Prefix>" + _xml_escape(group) + "</Prefix></CommonPrefixes>"
-        else:
-            entries += (
-                "<Contents><Key>"
-                + _xml_escape(key)
-                + "</Key><Size>"
-                + String(len(st.bodies[i]))
-                + "</Size><ETag>"
-                + _xml_escape(st.etags[i])
-                + "</ETag></Contents>"
-            )
-    body += "<KeyCount>" + String(count) + "</KeyCount><MaxKeys>" + String(max_keys) + "</MaxKeys>"
-    body += "<IsTruncated>" + ("true" if truncated else "false") + "</IsTruncated>"
-    body += entries
-    if truncated:
-        body += "<NextContinuationToken>" + _xml_escape(last) + "</NextContinuationToken>"
-    body += "</ListBucketResult>"
-    return _response(200, "OK", "Content-Type: application/xml\r\n", _bytes(body), False)
-
-
-def _serve(mut st: FakeS3State, written: List[UInt8]) raises -> List[UInt8]:
-    """The answer to the one request in `written`."""
-    st.requests += 1
-    var n = len(written)
-    var end = -1
-    for i in range(n - 3):
-        if written[i] == 13 and written[i + 1] == 10 and written[i + 2] == 13 and written[i + 3] == 10:
-            end = i
-            break
-    if end < 0:
-        raise Error("the fake S3 read no complete request head")
-    var head = String(unsafe_from_utf8=Span(written)[0:end])
-    var body = List[UInt8]()
-    body.extend(Span(written)[end + 4 : n])
-    var lines = head.split("\r\n")
-    var request_line = String(lines[0]).split(" ")
-    var method = String(request_line[0])
-    var target = String(request_line[1])
-    var if_match = String("")
-    var if_none_match = String("")
-    var range_ = String("")
-    for i in range(1, len(lines)):
-        var line = String(lines[i])
-        var colon = line.find(":")
-        if colon < 0:
-            continue
-        var name = _sub(line, 0, colon).lower()
-        var value = String(_sub(line, colon + 1, line.byte_length()).strip())
-        if name == "if-match":
-            if_match = value
-        elif name == "if-none-match":
-            if_none_match = value
-        elif name == "range":
-            range_ = value
-    var q = target.find("?")
-    var path = target if q < 0 else _sub(target, 0, q)
-    var query = String("") if q < 0 else _sub(target, q + 1, target.byte_length())
-    var slash = path.find("/", 1)
-    var is_head = method == "HEAD"
-    if slash < 0:
-        var bucket = _sub(path, 1, path.byte_length())
-        if method == "GET" and query.find("list-type=2") >= 0:
-            return _list(st, bucket, query)
-        return _error(400, "Bad Request", "NotImplemented", is_head)
-    var name = s3_url_decode(_sub(path, 1, path.byte_length()))
-    var at = st.find(name)
-    if method == "PUT":
-        if if_match.byte_length() > 0 or if_none_match.byte_length() > 0:
-            if st.conflicts > 0:
-                st.conflicts -= 1
-                return _error(409, "Conflict", "ConditionalRequestConflict", False)
-        if if_none_match == "*" and at >= 0:
-            return _error(412, "Precondition Failed", "PreconditionFailed", False)
-        if if_match.byte_length() > 0:
-            if at < 0:
-                return _error(404, "Not Found", "NoSuchKey", False)
-            if st.etags[at] != if_match:
-                return _error(412, "Precondition Failed", "PreconditionFailed", False)
-        var etag = st.put(name, body^)
-        return _response(200, "OK", String("ETag: ") + etag + "\r\n", List[UInt8](), False)
-    if method == "DELETE":
-        st.remove(name)
-        return _response(204, "No Content", "", List[UInt8](), False)
-    if method == "GET" or is_head:
-        if at < 0:
-            return _error(404, "Not Found", "NoSuchKey", is_head)
-        if if_match.byte_length() > 0 and st.etags[at] != if_match:
-            return _error(412, "Precondition Failed", "PreconditionFailed", is_head)
-        var answer = _read(st, at, range_, is_head)
-        st.reads += 1
-        if st.reads == st.overwrite_after_reads:
-            var changed = st.bodies[at].copy()
-            changed[0] = changed[0] ^ UInt8(0x20)
-            _ = st.put(name, changed^)
-        return answer^
-    return _error(405, "Method Not Allowed", "MethodNotAllowed", is_head)
-
-
-def _read(st: FakeS3State, at: Int, range_: String, is_head: Bool) raises -> List[UInt8]:
-    """The answer to a GET or HEAD of the object at `at`."""
-    ref obj = st.bodies[at]
-    var etag_header = String("ETag: ") + st.etags[at] + "\r\n"
-    if range_.byte_length() > 0 and not is_head:
-        # bytes=a-b only: what S3ConditionalStore.get_range sends.
-        var spec = _sub(range_, 6, range_.byte_length())
-        var dash = spec.find("-")
-        var first = Int(_sub(spec, 0, dash))
-        var last = Int(_sub(spec, dash + 1, spec.byte_length()))
-        if first >= len(obj):
-            return _error(416, "Requested Range Not Satisfiable", "InvalidRange", False)
-        last = min(last, len(obj) - 1)
-        var part = List[UInt8]()
-        part.extend(Span(obj)[first : last + 1])
-        return _response(
-            206,
-            "Partial Content",
-            etag_header
-            + "Content-Range: bytes "
-            + String(first)
-            + "-"
-            + String(last)
-            + "/"
-            + String(len(obj))
-            + "\r\n",
-            part^,
-            False,
-        )
-    var whole = obj.copy()
-    return _response(200, "OK", etag_header, whole^, is_head)
-
-
-struct FakeS3Stream(IoStream, Movable, Deinitable):
-    """Keeps what is written; answers the first read from the shared
-    state, as the echo stream of komira_aws_core does."""
-
-    var _state: ArcPointer[FakeS3State]
-    var _written: List[UInt8]
-    var _answer: ScriptedStream
-    var _answered: Bool
-
-    def __init__(out self, var state: ArcPointer[FakeS3State]):
-        self._state = state^
-        self._written = List[UInt8]()
-        self._answer = ScriptedStream()
-        self._answered = False
-
-    def try_read[
-        RT: Runtime, o: Origin[mut=True],
-    ](mut self, mut reactor: Reactor[RT.Sink], dst: Span[UInt8, o]) raises -> StreamIo:
-        if not self._answered:
-            self._answered = True
-            self._answer = ScriptedStream.from_read_script(_serve(self._state[], self._written))
-        return self._answer.try_read[RT, o](reactor, dst)
-
-    def try_write[RT: Runtime](
-        mut self, mut reactor: Reactor[RT.Sink], src: Span[UInt8, _]
-    ) raises -> StreamIo:
-        self._written.extend(src)
-        return StreamIo.ready(Int64(len(src)))
-
-    def unread(mut self, src: Span[UInt8, _]) raises:
-        self._answer.unread(src)
-
-    def close(var self):
-        pass
-
-    def negotiated_protocol(self) -> UInt8:
-        return NEGOTIATED_HTTP_1_1
-
-    def fd(self) -> Int32:
-        return Int32(-1)
-
-
-struct FakeS3Connector(Connector, Movable, Deinitable):
-    """Each dial is a stream over the one shared state."""
-
-    comptime Stream = FakeS3Stream
-
-    var _state: ArcPointer[FakeS3State]
-
-    def __init__(out self, conflicts: Int = 0, overwrite_after_reads: Int = -1):
-        self._state = ArcPointer[FakeS3State](
-            FakeS3State(conflicts, overwrite_after_reads)
-        )
-
-    def seed(mut self, name: String, var body: List[UInt8]):
-        """Stores `body` as `<bucket>/<key>` `name` before any request."""
-        _ = self._state[].put(name, body^)
-
-    def connect[RT: Runtime](
-        mut self, mut reactor: Reactor[RT.Sink], ip_be: UInt32, port: UInt16
-    ) raises -> FakeS3Stream:
-        _ = ip_be
-        _ = port
-        return FakeS3Stream(self._state.copy())
-
-    def transport_kind(self) -> UInt8:
-        return TRANSPORT_KIND_KERNEL_TCP
-
-    def is_tls(self) -> Bool:
-        return False
-
-    def set_dial_host(mut self, var host: String):
-        _ = host^
 
 
 # =============================================================================
@@ -569,19 +209,19 @@ def _alphabet(n: Int) -> List[UInt8]:
 
 def _mk_fake_overwritten_after_head() raises -> FakeS3Connector:
     var c = FakeS3Connector(overwrite_after_reads=1)
-    c.seed("lake/r/obj", _alphabet(26))
+    c.seed_bytes("r/obj", _alphabet(26))
     return c^
 
 
 def _mk_fake_big() raises -> FakeS3Connector:
     var c = FakeS3Connector()
-    c.seed("lake/r/big", _alphabet(_BIG))
+    c.seed_bytes("r/big", _alphabet(_BIG))
     return c^
 
 
 def _mk_fake_big_overwritten_after_get() raises -> FakeS3Connector:
     var c = FakeS3Connector(overwrite_after_reads=1)
-    c.seed("lake/r/big", _alphabet(_BIG))
+    c.seed_bytes("r/big", _alphabet(_BIG))
     return c^
 
 
@@ -644,12 +284,12 @@ def test_clone_builds_its_own_store() raises:
 
 
 def _mk_status[status: Int, code: StringLiteral]() raises -> ScriptedConnector:
-    var stream = ScriptedStream.from_read_script(_error(status, "Status", String(code), False))
+    var stream = ScriptedStream.from_read_script(fake_s3_error_response(status, "Status", String(code)))
     var c = ScriptedConnector.with_stream(stream^)
     # A throttle (503 SlowDown, 429) is resent even for a conditional write,
     # and gets the same answer again; a conditional 500 is not resent.
-    c.arm_next(ScriptedStream.from_read_script(_error(status, "Status", String(code), False)))
-    c.arm_next(ScriptedStream.from_read_script(_error(status, "Status", String(code), False)))
+    c.arm_next(ScriptedStream.from_read_script(fake_s3_error_response(status, "Status", String(code))))
+    c.arm_next(ScriptedStream.from_read_script(fake_s3_error_response(status, "Status", String(code))))
     return c^
 
 

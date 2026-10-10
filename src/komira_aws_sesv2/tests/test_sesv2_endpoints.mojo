@@ -46,24 +46,31 @@ from komira_aws_core import (
 from komira_aws_sesv2.komira_aws_sesv2 import (
     SESv2Body,
     SESv2Content,
+    SESv2CreateConfigurationSetEventDestinationRequest,
     SESv2CreateConfigurationSetRequest,
     SESv2CreateEmailIdentityRequest,
+    SESv2DeleteConfigurationSetRequest,
     SESv2DeleteEmailIdentityRequest,
     SESv2Destination,
     SESv2EmailContent,
     SESv2EndpointConfig,
+    SESv2EventDestinationDefinition,
     SESv2GetEmailIdentityRequest,
     SESv2Message,
     SESv2PutEmailIdentityConfigurationSetAttributesRequest,
+    SESv2PutEmailIdentityMailFromAttributesRequest,
     SESv2SendEmailRequest,
     build_get_email_identity_request,
     build_send_email_request,
     komira_aws_sesv2_endpoint_rules,
     resolve_create_configuration_set_endpoint,
+    resolve_create_configuration_set_event_destination_endpoint,
     resolve_create_email_identity_endpoint,
+    resolve_delete_configuration_set_endpoint,
     resolve_delete_email_identity_endpoint,
     resolve_get_email_identity_endpoint,
     resolve_put_email_identity_configuration_set_attributes_endpoint,
+    resolve_put_email_identity_mail_from_attributes_endpoint,
     resolve_send_email_endpoint,
 )
 from std.testing import assert_equal, assert_raises, assert_true
@@ -179,6 +186,23 @@ def _resolve_all(rules: EndpointRuleSet, config: SESv2EndpointConfig) raises -> 
         resolve_put_email_identity_configuration_set_attributes_endpoint(
             rules, config, SESv2PutEmailIdentityConfigurationSetAttributesRequest(String("d"))
         )
+    )
+    others.append(
+        resolve_put_email_identity_mail_from_attributes_endpoint(
+            rules, config, SESv2PutEmailIdentityMailFromAttributesRequest(String("d"))
+        )
+    )
+    others.append(
+        resolve_create_configuration_set_event_destination_endpoint(
+            rules,
+            config,
+            SESv2CreateConfigurationSetEventDestinationRequest(
+                String("c"), String("e"), SESv2EventDestinationDefinition()
+            ),
+        )
+    )
+    others.append(
+        resolve_delete_configuration_set_endpoint(rules, config, SESv2DeleteConfigurationSetRequest(String("c")))
     )
     for i in range(len(others)):
         if others[i].url != got.url:

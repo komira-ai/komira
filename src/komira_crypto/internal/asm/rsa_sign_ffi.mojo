@@ -159,14 +159,14 @@ def rsa_sha256_sign_ffi(
         _FFI_ORIGIN
     ]().bitcast[NoneType]()
     external_call[
-        "CBS_init",
+        "komira_awslc_CBS_init",
         NoneType,
         _FfiHandle,  # CBS*
         _FfiByte,     # const uint8_t* data
         UInt,                                         # size_t len
     ](cbs_ptr, key_data_ptr, UInt(len(pkcs8_der_key)))
     pkey = external_call[
-        "EVP_parse_private_key",
+        "komira_awslc_EVP_parse_private_key",
         _FfiHandle,
         _FfiHandle,  # CBS*
     ](cbs_ptr)
@@ -178,23 +178,23 @@ def rsa_sha256_sign_ffi(
     # Step 2: allocate EVP_MD_CTX + EVP_DigestSignInit.
     # SAFETY: EVP_MD_CTX_new allocates heap; we own + must free.
     ctx = external_call[
-        "EVP_MD_CTX_new", _FfiHandle
+        "komira_awslc_EVP_MD_CTX_new", _FfiHandle
     ]()
     if Int(ctx) == 0:
         # Free pkey before raising.
         external_call[
-            "EVP_PKEY_free",
+            "komira_awslc_EVP_PKEY_free",
             NoneType,
             _FfiHandle,
-        ](pkey)
-        raise Error("rsa_sha256_sign_ffi: EVP_MD_CTX_new returned NULL (OOM)")
+        ](pkey)  # cov: unreachable an allocation failure
+        raise Error("rsa_sha256_sign_ffi: EVP_MD_CTX_new returned NULL (OOM)")  # cov: unreachable see the line above
 
     # SAFETY: EVP_DigestSignInit configures ctx for RSA-SHA256 signing.
     # pctx (out arg for EVP_PKEY_CTX*) = NULL (we don't need it).
     # engine = NULL.
     var md = _evp_sha256()
     var rc_init = external_call[
-        "EVP_DigestSignInit",
+        "komira_awslc_EVP_DigestSignInit",
         Int,
         _FfiHandle,  # ctx
         _FfiHandle,  # pctx (out)
@@ -211,12 +211,12 @@ def rsa_sha256_sign_ffi(
     if rc_init != 1:
         # Free both before raising.
         external_call[
-            "EVP_MD_CTX_free",
+            "komira_awslc_EVP_MD_CTX_free",
             NoneType,
             _FfiHandle,
         ](ctx)
         external_call[
-            "EVP_PKEY_free",
+            "komira_awslc_EVP_PKEY_free",
             NoneType,
             _FfiHandle,
         ](pkey)
@@ -230,7 +230,7 @@ def rsa_sha256_sign_ffi(
     # SAFETY: EVP_DigestSign with sig=NULL writes the required buffer
     # size to *sig_len.
     var rc_size = external_call[
-        "EVP_DigestSign",
+        "komira_awslc_EVP_DigestSign",
         Int,
         _FfiHandle,  # ctx
         _FfiByte,     # sig (NULL → size query)
@@ -246,16 +246,16 @@ def rsa_sha256_sign_ffi(
     )
     if rc_size != 1:
         external_call[
-            "EVP_MD_CTX_free",
+            "komira_awslc_EVP_MD_CTX_free",
             NoneType,
             _FfiHandle,
-        ](ctx)
+        ](ctx)  # cov: unreachable a NULL-buffer EVP_DigestSign only reports the maximum signature size; it fails for no key EVP_DigestSignInit accepted
         external_call[
-            "EVP_PKEY_free",
+            "komira_awslc_EVP_PKEY_free",
             NoneType,
             _FfiHandle,
-        ](pkey)
-        raise Error("rsa_sha256_sign_ffi: EVP_DigestSign size-query failed")
+        ](pkey)  # cov: unreachable see the line above
+        raise Error("rsa_sha256_sign_ffi: EVP_DigestSign size-query failed")  # cov: unreachable see the line above
 
     # Allocate signature buffer + emit.
     var sig_buf = List[UInt8](capacity=Int(sig_len))
@@ -271,7 +271,7 @@ def rsa_sha256_sign_ffi(
     # shorter than the buffer (rare for RSA — sig is always == modulus
     # length).
     var rc_sign = external_call[
-        "EVP_DigestSign",
+        "komira_awslc_EVP_DigestSign",
         Int,
         _FfiHandle,
         _FfiByte,
@@ -294,12 +294,12 @@ def rsa_sha256_sign_ffi(
 
     # Cleanup (always).
     external_call[
-        "EVP_MD_CTX_free",
+        "komira_awslc_EVP_MD_CTX_free",
         NoneType,
         _FfiHandle,
     ](ctx)
     external_call[
-        "EVP_PKEY_free",
+        "komira_awslc_EVP_PKEY_free",
         NoneType,
         _FfiHandle,
     ](pkey)

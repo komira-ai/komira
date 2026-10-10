@@ -1,0 +1,63 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: the logical-plan conformance corpus. A case is a plan built with
+# komira_plan_ir's factories over a hand-written JSON Lines dataset
+# (datasets/), plus its expected answer (expect/<shard>/<case>.tsv in
+# komira_plan_harness's canonical text, or .err for a refusal). A HAND
+# expectation is derived from the query-semantics document, never from engine
+# code, and cites the items it rests on in `# derivation:` lines. The
+# registry (registry.mojo) puts each case in exactly one shard. README.md says
+# how to add a case.
+#
+# Nothing executes a plan yet, so no shard runs; the welded tests are:
+#   test_corpus         every case builds, encodes (plan_to_bytes), is
+#                       admitted (plan_wire_admit), passes
+#                       plan_wire_check_values, decodes (plan_from_bytes) with
+#                       the same structural hash and root output schema, and
+#                       its expectation's schema equals the plan's root output
+#                       schema (the expectation is the authority on types; a
+#                       mismatch names both sides), and every cell is a value
+#                       of its column's type. Every case has exactly one
+#                       expectation file and every file one case; every case
+#                       is in exactly one shard; every dataset matches its
+#                       schema. Every problem is reported, not only the first.
+#   test_corpus_checks  the checks fed planted defects (README.md lists them,
+#                       and the three wire legs only a broken codec can trip).
+#
+# expect/ and datasets/ are staged at those paths under the test's working
+# directory, by glob, so an orphan file reaches the test and is refused.
+# Nothing depends on this package.
+_DATA = {f: f for f in glob(["expect/**", "datasets/**"])}
+
+mojo_library(
+    name = "komira_plan_conformance",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_json:komira_json",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_plan_wire:komira_plan_wire",
+        "//src/komira_scan_source:komira_scan_source",
+        "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
+    ],
+    conda = False,
+    test_srcs = [
+        "tests/test_corpus.mojo",
+        "tests/test_corpus_checks.mojo",
+    ],
+    test_data = {
+        "tests/test_corpus.mojo": _DATA,
+    },
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)

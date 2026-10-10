@@ -36,10 +36,15 @@
 //! (`xml_codec`, maps included) from the element the operation's
 //! `resultWrapper` names under the root (`komira_aws_core.aws_query_result`,
 //! botocore's `QueryParser`), else from the root itself (ec2Query has no
-//! wrapper). An operation with no output reads nothing. One divergence from
-//! botocore: an empty body is read as an empty element, so a 200 with no
-//! body sets no member, where botocore's `QueryParser` and
-//! `EC2QueryParser` raise a `ResponseParserError` on it.
+//! wrapper). An operation with no output reads nothing. An empty body is
+//! read as an empty element, so a 200 with no body sets no member. That is
+//! what the awsQuery protocol tests require: `QueryEmptyInputAndEmptyOutput`
+//! and `QueryNoInputAndOutput` answer an operation with an output shape
+//! with a 200 and no body, and expect an empty result. botocore's
+//! `QueryParser` and `EC2QueryParser` raise a `ResponseParserError` on an
+//! empty body; its protocol-test harness passes those two cases only by
+//! substituting `<xml/>` for a query response that has no body
+//! (`tests/unit/test_protocols.py`).
 //!
 //! Errors: `komira_aws_core.aws_query_error`, which reads
 //! `<ErrorResponse><Error>` and ec2Query's `<Response><Errors><Error>`
@@ -484,11 +489,8 @@ impl AwsEmitter<'_> {
             facts.http_method.to_uppercase(),
             escape(&facts.path)
         ));
-        // `endpoint.hostPrefix`, with its `hostLabel` members substituted.
-        // Not reached today: the front-end refuses an operation with a host
-        // prefix (host-prefix) because the generated `send` does not apply
-        // `req.host_prefix` yet. It is kept so lifting that refusal is the
-        // only change the builder needs, as in the other bindings.
+        // `endpoint.hostPrefix`, with its `hostLabel` members substituted;
+        // the client's sends prepend it to the resolved endpoint host.
         if let Some(hp) = &facts.host_prefix {
             let expr = self.host_prefix_expr(hp, &m.input.fq_name)?;
             self.line(&format!("req.host_prefix = {expr}"));

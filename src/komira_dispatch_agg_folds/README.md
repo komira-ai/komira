@@ -1,0 +1,3 @@
+# komira_dispatch_agg_folds
+
+Aggregate folds over resident batches: the grouped and scalar COUNT(DISTINCT) folds, the grouped string MIN/MAX fold, the mixed fold that serves COUNT(DISTINCT) or a string MIN/MAX beside fixed-cell aggregates, the ordered MIN/MAX reader and emitter of the scalar fold, the resolution of an aggregate's parquet leaf, and the process-global witnesses of which aggregate driver ran.

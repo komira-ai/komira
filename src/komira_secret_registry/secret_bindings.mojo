@@ -117,7 +117,7 @@ struct SecretBindings(Copyable, Movable, Deinitable):
     # cleanly — no heap-inner-of-heap to alias.
 
     def clone(self) -> Self:
-        """Explicit deep copy (mirrors `FsRegistry.clone`) — used by the DataFrame's
+        """Explicit deep copy (mirrors `FsBindings.clone`) — used by the DataFrame's
         borrow-based copying overloads (`__getitem__`)."""
         return self.copy()
 
@@ -134,13 +134,13 @@ struct SecretBindings(Copyable, Movable, Deinitable):
 
     def merge_from(mut self, var other: Self):
         """Absorb `other`'s `node_id -> (name_handle, secret_ref)` bindings into
-        `self` — the secrets analog of `FsRegistry.merge_from`, called by the SDK
+        `self` — the secrets analog of `FsBindings.merge_from`, called by the SDK
         `.join` / `.cross_join` builders when two frames combine.
 
         A joined frame reads BOTH sides' sources, so it needs BOTH sides'
         credentials: dropping either half means one leg of `S3 ⋈ GCS` cannot
         resolve its secret at reveal time. `node_id`s are minted QUERY-UNIQUE (a
-        monotonic counter on `EngineContext`, same invariant `FsRegistry.merge_from`
+        monotonic counter on `EngineContext`, same invariant `FsBindings.merge_from`
         relies on), so entries are appended verbatim with no collision check.
 
         Consumes `other` by MOVING its entries out (no `.clone()`), so this stays

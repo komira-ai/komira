@@ -1442,7 +1442,8 @@ def _decompress_record_batch_frame_impl[
         downstream).
       - Each `BufferDescriptor` rewritten to point at the (offset,
         length) of the decompressed bytes in the fresh body.
-      - FieldNode + length fields preserved verbatim.
+      - FieldNode, length and variadicBufferCounts fields preserved
+        verbatim.
 
     The output is consumable by `decode_record_batch_message` (and
     `decode_record_batch_message_nested`) WITHOUT any further changes
@@ -1579,7 +1580,7 @@ def _decompress_record_batch_frame_impl[
     # === PASS 2: build FB metadata once with finalized new_buffers ===
     var w = FlatbufWriter(2048)
     var rb_pos = write_record_batch(
-        w, Int64(rb.length), rb.nodes, new_buffers
+        w, Int64(rb.length), rb.nodes, new_buffers, rb.variadic_buffer_counts
     )
     var msg_pos = write_message(
         w,
@@ -2130,7 +2131,7 @@ def _build_rb_context[C: ArrowIpcCompression](
 
     var w = FlatbufWriter(2048)
     var rb_pos = write_record_batch(
-        w, Int64(rb.length), rb.nodes, new_buffers
+        w, Int64(rb.length), rb.nodes, new_buffers, rb.variadic_buffer_counts
     )
     var msg_pos = write_message(
         w,
@@ -2774,7 +2775,7 @@ def _decompress_dictionary_batch_frame_impl[
     # === PASS 2: build FB metadata once ===
     var w = FlatbufWriter(2048)
     var rb_pos = write_record_batch(
-        w, Int64(rb.length), rb.nodes, new_buffers
+        w, Int64(rb.length), rb.nodes, new_buffers, rb.variadic_buffer_counts
     )
     var db_pos = write_dictionary_batch(
         w, db_desc.id, rb_pos, db_desc.is_delta

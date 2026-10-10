@@ -4,7 +4,8 @@
 #
 # One node type, `FakeNode`, realized from a `LoweredNode` (data):
 #
-#   * kind `run`       `<id>/run`: the running thing of a service or a job.
+#   * kind `run`       `<id>/run`: the running thing of a workload (a
+#                      service, a container job's definition, a worker).
 #                      Its desired digest renders every modelled field (the
 #                      lowered node's `desired` fields, defaults filled in),
 #                      then each `Ref` value as it resolved; with a reference
@@ -12,9 +13,8 @@
 #                      placeholder. A service's run node exposes URL and HOST.
 #   * kind `public`    `<id>/public`: the public ingress of a service, by the
 #                      mechanism the cell chose at validate time.
-#   * kind `schedule`  `<id>/schedule`: the trigger of a scheduled job.
-#   * kind `identity`  `<id>/identity`: the private identity of a service or
-#                      a job, or a service account; an account's exposes
+#   * kind `identity`  `<id>/identity`: the private identity of a workload,
+#                      or a service account; an account's exposes
 #                      NAME (`account`, a desired field, like `serves`).
 #   * kind `grant`     `<id>/u-<h>` or `<id>/grant`: one grant edge.
 #   * kind `bucket`    `<id>/bucket`: a bucket. It exposes NAME and ADDRESS
@@ -24,13 +24,38 @@
 #                      part of the digest, and `live_key` reads it back from
 #                      a stored digest (what `list_owned` reports as the
 #                      object's key).
+#   * kind `queue`     `<id>/queue`: a queue; kind `topic` `<id>/topic`: a
+#                      topic. Each exposes NAME and ADDRESS (`addressed`, a
+#                      desired field naming what it is, like `serves`).
+#   * kind `subscription` `<id>/sub`: one subscription.
+#   * kind `secret`    `<id>/secret`: a secret's container (no value). It
+#                      exposes NAME (`secret_named`, a desired field, like
+#                      `serves`).
+#   * kind `zone`, `record`, `certificate`: a DNS zone, a DNS record set, a
+#                      certificate. Each exposes what its `out.<OUTPUT>`
+#                      desired fields say, with the value written there
+#                      (`out.NAME`, `out.HOST`): how the node behaves, not
+#                      state, so never in its digest.
 # Those are the generic shape's kinds. On a provider shape (shapes.mojo) the
 # kind is the provider kind id (on onprem also a `<id>/vault` beside each
 # identity, a service's `<id>/endpoint`, which serves nothing, and a grant's
-# helper `<id>/r-<h>`; on gcp a table's `<id>/ix-<h>` and `<id>/ttl`); the
+# helper `<id>/r-<h>`; on gcp a table's `<id>/ix-<h>` and `<id>/ttl`; on aws
+# a worker's `<id>/task`, which serves nothing); the
 # node behaves the same: `serves`, `stores`, `account` and `named` (desired
-# fields), not the kind, decide what it exposes.
+# fields), not the kind, decide what it exposes. On aws a queue also has a
+# `<id>/policy`; on gcp a queue has its private `<id>/topic`, which
+# addresses nothing.
 # A role the file turned off is the same node with `wanted` False.
+#
+# A NAMED PRIMARY OBJECT (`physical_name`, a desired field kci writes on the
+# primary node) is part of the digest like any field, and its outputs follow
+# the name: a bucket's, a table's, a secret's, a queue's or a topic's NAME is
+# the name itself (its ADDRESS built on it), an account's NAME is
+# `<name>@identity.fake`, a service's URL and HOST are `fake://<name>` and
+# `<name>.fake`. The fake keeps every object at its node id (it does not
+# look an object up by name): the object at a named node IS the object of
+# that name. The create, or the adoption, records the name with the object
+# (`FakeStore.names`), and `list_owned` reports it; an update never renames.
 #
 # A node keeps the retention kci set on the lowered node. Its object carries
 # the retention mark `kci-retention=<retain|delete>` from its create call on,
@@ -104,6 +129,19 @@ def fake_table_name(resource_id: String) -> String:
     return resource_id + String("-table")
 
 
+def fake_secret_name(resource_id: String) -> String:
+    return resource_id + String("-secret")
+
+
+def fake_messaging_name(resource_id: String, what: String) -> String:
+    """`<id>-queue` or `<id>-topic`."""
+    return resource_id + String("-") + what
+
+
+def fake_messaging_address(resource_id: String, what: String) -> String:
+    return String("fake-") + what + String("://") + fake_messaging_name(resource_id, what)
+
+
 def live_key(digest: String) -> String:
     """The `key` field of a stored digest (`kind|name=value|...`), or empty
     when it has none."""
@@ -138,13 +176,15 @@ def _unmanaged(v: FakeView) -> String:
 
 def static_digest(node: LoweredNode) raises -> String:
     """The digest of a lowered node's own desired fields, in order (the
-    `serves`, `stores`, `account` and `named` fields are how the node
-    behaves, not state), and a KEEP node's retention (a `kci_retain` digest
-    field, not a label)."""
+    `serves`, `stores`, `account`, `named`, `addressed`, `secret_named` and
+    `out.<OUTPUT>` fields are how the node behaves, not state), and a KEEP
+    node's retention (a `kci_retain` digest field, not a label)."""
     var d = ModelledDigest(node.kind)
     for i in range(len(node.desired)):
         ref key = node.desired[i].key
-        if key == "serves" or key == "stores" or key == "account" or key == "named":
+        if key == "serves" or key == "stores" or key == "account" or key == "named" or key == "addressed":
+            continue
+        if key == "secret_named" or key.startswith("out."):
             continue
         d.field(node.desired[i].key, node.desired[i].value)
     if node.retention == RETAIN_KEEP:
@@ -162,6 +202,14 @@ struct FakeNode(EngineResource, Movable, Deinitable):
     var _stores: Bool
     var _account: Bool
     var _named: Bool
+    var _secret_named: Bool
+    var _addressed: String
+    var _outs: List[String]
+    """`out.<OUTPUT>` fields in order, two entries each: the OUTPUT name,
+    then its value."""
+    var _name: String
+    """The author's cloud name of this node's object (`physical_name`), or
+    empty."""
     var _retention: Int
     var _deps: List[String]
     var _refs: List[InputRef]
@@ -179,6 +227,15 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         self._stores = node.field(String("stores")) == "true"
         self._account = node.field(String("account")) == "true"
         self._named = node.field(String("named")) == "true"
+        self._secret_named = node.field(String("secret_named")) == "true"
+        self._addressed = node.field(String("addressed"))
+        self._outs = List[String]()
+        for i in range(len(node.desired)):
+            ref k = node.desired[i].key
+            if k.startswith("out."):
+                self._outs.append(String(k[byte = 4 : k.byte_length()]))
+                self._outs.append(node.desired[i].value.copy())
+        self._name = node.field(String("physical_name"))
         self._retention = node.retention
         self._deps = node.depends_on.copy()
         self._refs = node.inputs.copy()
@@ -194,9 +251,27 @@ struct FakeNode(EngineResource, Movable, Deinitable):
             d += String("|") + self._refs[i].field + String("=") + self._bound[i]
         return d^
 
+    def _resource(self) -> String:
+        """The id of the resource this node was lowered from: its id up to
+        the role (`store/app/files` of `store/app/files/bucket`). It is the
+        owner for a resource written at the top, and the full path for one
+        a composite expanded (whose owner is the top), so two objects under
+        one owner never share a default name."""
+        var at = self._id.rfind("/")
+        if at <= 0:
+            return self._owner.copy()
+        return String(self._id[byte=0:at])
+
+    def _base(self) -> String:
+        """What this node's outputs are built on: its object's name, else
+        its resource's id."""
+        if self._name.byte_length() > 0:
+            return self._name.copy()
+        return self._resource()
+
     def _url(self) -> String:
         if self._serves:
-            return fake_url(self._owner)
+            return fake_url(self._base())
         return String("")
 
     def logical_id(mut self) -> String:
@@ -253,6 +328,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
             self._url(),
             retain_labels(self._retention),
             String(""),
+            self._name,
         )
         return self._id.copy()
 
@@ -262,7 +338,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         var labels = create_labels(stamp, self._retention)
         var note = stamp.provenance.run_id + String("@") + stamp.provenance.revision
         self._store[].create(
-            self._id, self._kind, self._desired_digest(), self._url(), labels, note
+            self._id, self._kind, self._desired_digest(), self._url(), labels, note, self._name
         )
         return self._id.copy()
 
@@ -273,7 +349,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         # No validation-run label: this run did not create the object.
         var labels = standard_label_rule(stamp)
         labels.extend(retain_labels(self._retention))
-        self._store[].relabel(physical_id, labels, note)
+        self._store[].relabel(physical_id, labels, note, self._name)
 
     def update(mut self, creds: Creds) raises:
         var mark = retain_labels(self._retention)
@@ -299,15 +375,29 @@ struct FakeNode(EngineResource, Movable, Deinitable):
 
     def outputs(mut self, physical_id: String, creds: Creds) raises -> Outputs:
         var o = Outputs()
+        if len(self._outs) > 0:
+            for i in range(0, len(self._outs), 2):
+                o.set(self._outs[i], self._outs[i + 1])
+            return o^
+        var named = self._name.byte_length() > 0
         if self._stores:
-            o.set(String("NAME"), fake_bucket_name(self._owner))
-            o.set(String("ADDRESS"), fake_bucket_address(self._owner))
+            var n = self._name.copy() if named else fake_bucket_name(self._resource())
+            o.set(String("NAME"), n)
+            o.set(String("ADDRESS"), String("fake-bucket://") + n)
             return o^
         if self._account:
-            o.set(String("NAME"), fake_account_name(self._owner))
+            o.set(String("NAME"), fake_account_name(self._base()))
             return o^
         if self._named:
-            o.set(String("NAME"), fake_table_name(self._owner))
+            o.set(String("NAME"), self._name.copy() if named else fake_table_name(self._resource()))
+            return o^
+        if self._secret_named:
+            o.set(String("NAME"), self._name.copy() if named else fake_secret_name(self._resource()))
+            return o^
+        if self._addressed.byte_length() > 0:
+            var n = self._name.copy() if named else fake_messaging_name(self._resource(), self._addressed)
+            o.set(String("NAME"), n)
+            o.set(String("ADDRESS"), String("fake-") + self._addressed + String("://") + n)
             return o^
         if not self._serves:
             return o^
@@ -315,7 +405,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         if not v.present:
             return o^
         o.set(String("URL"), v.url)
-        o.set(String("HOST"), fake_host(self._owner))
+        o.set(String("HOST"), fake_host(self._base()))
         return o^
 
     def owner(mut self) -> String:

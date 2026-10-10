@@ -1,0 +1,97 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
+
+# Planted defects for the per-target assert level and defines (test 49;
+# tools/build/mojo/defines.bzl). Every target here must fail;
+# tools/build/tests/assert_level_tests.sh requires the failure written above
+# it. What works is in ../../functional/assert_level.
+
+_SRCS = [
+    "__init__.mojo",
+    "probes.mojo",
+]
+
+# RED (GATED TEST FAILED ... ASSERT_PROBE all_only_probe): at ASSERT=all the
+# library's assert_mode=none debug_assert is compiled in, and the test that
+# passes at the default level (functional:lib_default) fails.
+mojo_library(
+    name = "lib_all",
+    srcs = _SRCS,
+    conda = False,
+    import_name = "alevel",
+    test_assert_level = "all",
+    test_srcs = ["tests/test_quiet_by_default.mojo"],
+)
+
+# RED (GATED TEST FAILED ... ASSERT_PROBE safe_probe): the test that passes at
+# ASSERT=none (functional:lib_none), at the default level.
+mojo_library(
+    name = "lib_safe_default",
+    srcs = _SRCS,
+    conda = False,
+    import_name = "alevel",
+    test_srcs = ["tests/test_quiet_at_none.mojo"],
+)
+
+# RED under `buck2 test` (GATED TEST FAILED ... (exit 132)): functional:test_none's
+# program at the default level.
+mojo_test(
+    name = "test_default",
+    srcs = ["main_safe_assert.mojo"],
+)
+
+# RED ([run_check]): functional:bin_none's program at the default level aborts
+# before it prints.
+mojo_binary(
+    name = "bin_default",
+    srcs = ["main_safe_assert.mojo"],
+    expected_stdout = "past the assert\n",
+)
+
+# Refused at analysis, each with its own message.
+mojo_library(
+    name = "bad_level",
+    srcs = _SRCS,
+    conda = False,
+    import_name = "alevel",
+    test_assert_level = "fast",
+    test_srcs = ["tests/test_quiet_by_default.mojo"],
+)
+
+mojo_binary(
+    name = "bad_binary_level",
+    srcs = ["main_safe_assert.mojo"],
+    assert_level = "off",
+)
+
+mojo_library(
+    name = "define_assert",
+    srcs = _SRCS,
+    conda = False,
+    import_name = "alevel",
+    test_defines = ["ASSERT=none"],
+    test_srcs = ["tests/test_quiet_by_default.mojo"],
+)
+
+mojo_test(
+    name = "define_not_identifier",
+    srcs = ["main_safe_assert.mojo"],
+    defines = ["1ST=x"],
+)
+
+mojo_test(
+    name = "define_twice",
+    srcs = ["main_safe_assert.mojo"],
+    defines = [
+        "KOMIRA_X=1",
+        "KOMIRA_X=2",
+    ],
+)
+
+mojo_library(
+    name = "bad_cap",
+    srcs = _SRCS,
+    conda = False,
+    import_name = "alevel",
+    test_memory_cap_mib = -1,
+    test_srcs = ["tests/test_quiet_by_default.mojo"],
+)

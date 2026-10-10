@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Join result assembly: gather-index planning, chunked parallel gather, join-key common-subexpression.
+# Join result assembly: gather-index planning, chunked parallel gather, join-key common-subexpression, the payload-inline chain-entry gate.
 mojo_library(
     name = "komira_join_assembly",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -22,6 +22,7 @@ mojo_library(
         "tests/test_gather_narrow_widths_core.mojo",
         "tests/test_join_chunk_plan_byte_budget.mojo",
         "tests/test_join_index_window_counter.mojo",
+        "tests/test_join_payload_inline_gate.mojo",
     ],
     visibility = ["PUBLIC"],
 )

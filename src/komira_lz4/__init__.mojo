@@ -10,6 +10,7 @@
 #
 #   * frame.mojo — the LZ4 FRAME codec (`LZ4F_*`, the Arrow IPC LZ4_FRAME
 #     framing): `lz4_frame_compress_bound`, `lz4_frame_compress_into`,
-#     `lz4_frame_decompress_into` and `Lz4FrameDecoder` (a reusable
-#     decompression context). Same liblz4 handle as codec.mojo; no pointer in
+#     `lz4_frame_decompress_into`, `lz4_frames_decompress_into` (one or more
+#     concatenated frames) and `Lz4FrameDecoder` (a reusable decompression
+#     context). Same liblz4 handle as codec.mojo; no pointer in
 #     any public signature.

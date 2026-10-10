@@ -48,8 +48,12 @@ mojo_library(
     test_srcs = [
         # the one parser: verbs, flags, the stage's flags, every usage refusal
         "tests/test_kci_args.mojo",
-        # kci run over a recording fake: the steps, the workflow check, validations, NEW NAMES, the summary
+        # kci run over a recording fake: the steps, where the run stops, --only, --plan, --affected-by
         "tests/test_kci_dispatch.mojo",
+        # the same fake at start-up: the workflow check; a local --channel and its refusals, exactly
+        "tests/test_kci_dispatch_workflow.mojo",
+        # the same fake: validations, NEW NAMES, the summary
+        "tests/test_kci_dispatch_validations.mojo",
         # the start-up check accepts a pull request's check (and refuses a
         # drifted one); a dry run outside CI says its credential probe did
         # not run, next to the outcome
@@ -59,6 +63,10 @@ mojo_library(
         # continuous auto-promotion at start-up: the ref (main only, break-glass
         # with a reason), the set hash handed on, never backward, the prod line
         "tests/test_kci_ref_check.mojo",
+        # the staged pipeline's ordering (P1): never backward per run, a
+        # superseded publish ends the run green, the admission check (R24) and
+        # its git reads (main's releasable tip, the split's rev-parse)
+        "tests/test_kci_staged_ordering.mojo",
         # the real libraries through a machine file; the secret store by name
         "tests/test_kci_library_wiring.mojo",
         # no exit number is spelled outside kci_api

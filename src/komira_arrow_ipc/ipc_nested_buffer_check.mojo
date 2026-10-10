@@ -145,14 +145,23 @@ def check_struct_child_length(
     leaves struct slots with no child value. The format text does not state
     that a longer child is invalid; this decoder refuses it as well, as a
     policy: the Arrow C++ IPC writer slices each child to the struct's
-    window before writing it, and arrow-rs's IPC reader
-    (`StructArray::try_new`) refuses a child whose length differs from the
-    struct's. The policy has an interoperability cost: a writer that
-    serialises C Data Interface arrays as stored (nanoarrow's IPC encoder
-    writes each child's own length) emits a longer child for a struct
-    sliced at offset 0, Arrow C++ reads such a stream (its validation needs
-    only child length >= struct offset + length), and this decoder refuses
-    it.
+    window before writing it, so it never writes a longer child. The
+    policy has an interoperability cost: a writer that serialises C Data
+    Interface arrays as stored (nanoarrow's IPC encoder writes each child's
+    own length) emits a longer child for a struct sliced at offset 0, and
+    this decoder refuses that stream. Arrow C++ reads it (its validation
+    needs only child length >= struct offset + length). arrow-rs's IPC
+    reader builds the struct with `StructArray::try_new`, which refuses a
+    validity bitmap (present only when the STRUCT has nulls) whose length
+    differs from the children's, and children whose lengths differ from
+    each other; otherwise the struct takes the children's length. A
+    top-level STRUCT column then fails the row-count check of
+    `RecordBatch::try_new_with_options` and the batch is refused. A
+    no-null STRUCT under a parent whose validation bounds the child's
+    length only from below is read: with the children's length under
+    LIST, LARGE_LIST, MAP, LIST_VIEW, LARGE_LIST_VIEW or a dense UNION,
+    and sliced to the list's window under FIXED_SIZE_LIST. A sparse UNION
+    requires each child's length to equal its own and refuses it.
     """
     if child_length != struct_length:
         raise Error(

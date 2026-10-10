@@ -76,12 +76,20 @@
 # `x-ms-blob-type` on upload and its absence on download, and determinism under
 # a fixed clock. Weaker than 29 published vectors, and said so.
 #
+# THE CLOCK. `AzureSasSigner[C]` reads its `AzureSasClock` once per mint and
+# derives `st`, `se` and the reported `expires_unix_seconds` from that one
+# reading, as `GcsV4Signer` does with its `GcsSigningClock`. A signer kept
+# for hours mints each URL from the time it is asked, not the time it was
+# built. `SystemAzureSasClock` is the production clock (komira_clock's wall
+# clock); `FixedAzureSasClock` stops at one instant, for tests.
+#
 # ENCAPSULATION: ZERO UnsafePointer in any
 # signature, ZERO wildcard origins, ZERO unsafe_from_address, ZERO take_pointee.
 # The account key is decoded into a local `List[UInt8]`, used at the HMAC, and
 # never logged or rendered into an error.
 # =============================================================================
 
+from komira_clock import now_unix_ms
 from komira_crypto import hmac_sha256_string
 from komira_datetime import Timestamp, format_rfc3339
 from komira_encoding import base64_decode, base64_encode
@@ -309,8 +317,43 @@ def azure_blob_service_sas(
     return AzureSasResult(url^, sts^, sig.copy())
 
 
-struct AzureSasSigner(ObjectUrlSigner):
-    """`ObjectUrlSigner` over one Azure blob container.
+trait AzureSasClock(Movable, Deinitable):
+    """The wall clock an `AzureSasSigner` signs at, in whole seconds since
+    the Unix epoch (UTC). The signer reads it once per mint; `st` is that
+    instant and `se` is it plus the TTL. The signer refuses an instant of 0
+    or less (a clock that could not be read)."""
+
+    def now_unix_seconds(mut self) -> Int:
+        ...
+
+
+@fieldwise_init
+struct FixedAzureSasClock(AzureSasClock, ImplicitlyCopyable):
+    """A clock stopped at one instant: every mint signs at `unix_seconds`."""
+
+    var unix_seconds: Int
+
+    def now_unix_seconds(mut self) -> Int:
+        return self.unix_seconds
+
+
+@fieldwise_init
+struct SystemAzureSasClock(AzureSasClock, ImplicitlyCopyable):
+    """The production clock: the process wall clock (komira_clock's
+    `now_unix_ms`, `CLOCK_REALTIME`), truncated to whole seconds.
+
+    Azure checks `st`/`se` against its own clock, so a deployed signer signs
+    at this one. Two reads may go backwards if the host's time is stepped.
+    If the host clock cannot be read it reports 0, and the signer refuses to
+    mint at that instant. It reads no environment and holds no state."""
+
+    def now_unix_seconds(mut self) -> Int:
+        return Int(now_unix_ms() // 1000)
+
+
+struct AzureSasSigner[C: AzureSasClock](ObjectUrlSigner):
+    """`ObjectUrlSigner` over one Azure blob container, signing each SAS at
+    the instant its clock `C` reports when the URL is minted.
 
     ⚠ REVOCATION, stated because Azure is the cloud where a better option EXISTS
     and this conformer does not take it. An ad-hoc service SAS (what this mints)
@@ -326,50 +369,59 @@ struct AzureSasSigner(ObjectUrlSigner):
     var _container: String
     var _account_key_base64: String
     var _host_suffix: String
-    var _now_unix_seconds: Int64
+    var _clock: Self.C
 
     def __init__(
         out self,
         var account: String,
         var container: String,
         var account_key_base64: String,
-        now_unix_seconds: Int64,
+        var clock: Self.C,
         var host_suffix: String = String("blob.core.windows.net"),
     ):
-        """`now_unix_seconds` is INJECTED rather than read from a clock inside.
-
-        Azure's `st`/`se` are absolute instants, so the mint is a pure function
-        of "now" — and a signer that reads the clock itself cannot be tested for
-        determinism, which is the only property a structurally-tested (rather
-        than vector-tested) signer can offer. The caller passes
-        `komira_clock.now_unix_ms() // 1000`."""
+        """Construction reads no clock. Each `presign_*` reads `clock`
+        once; a production signer passes `SystemAzureSasClock()`."""
         self._account = account^
         self._container = container^
         self._account_key_base64 = account_key_base64^
         self._host_suffix = host_suffix^
-        self._now_unix_seconds = now_unix_seconds
+        self._clock = clock^
 
     def signer_cloud(self) -> String:
         return String("azure")
+
+    def _now(mut self) raises -> Int64:
+        """One clock reading, refused when it is not a positive instant."""
+        var now = self._clock.now_unix_seconds()
+        if now <= 0:
+            # komira_clock reports 0 when the host clock cannot be read; a
+            # SAS whose window starts at the epoch is already expired.
+            raise Error(
+                "azure sas: refusing to sign at the non-positive instant "
+                + String(now)
+                + " (a clock that cannot be read reports 0)"
+            )
+        return Int64(now)
 
     def presign_download(
         mut self, key: String, ttl_seconds: Int
     ) raises -> PresignedUrl:
         check_presign_ttl(ttl_seconds)
+        var now = self._now()
         var res = azure_blob_service_sas(
             self._account,
             self._container,
             key,
             String(AZURE_SAS_PERM_READ),
-            self._now_unix_seconds,
-            self._now_unix_seconds + Int64(ttl_seconds),
+            now,
+            now + Int64(ttl_seconds),
             self._account_key_base64,
             self._host_suffix,
         )
         return PresignedUrl(
             res.url.copy(),
             String("GET"),
-            self._now_unix_seconds + Int64(ttl_seconds),
+            now + Int64(ttl_seconds),
             List[PresignedHeader](),
         )
 
@@ -381,13 +433,14 @@ struct AzureSasSigner(ObjectUrlSigner):
         regardless of the SAS. The caller sends it with the upload (a git-LFS
         batch response carries it in the per-action `header` member)."""
         check_presign_ttl(ttl_seconds)
+        var now = self._now()
         var res = azure_blob_service_sas(
             self._account,
             self._container,
             key,
             String(AZURE_SAS_PERM_CREATE_WRITE),
-            self._now_unix_seconds,
-            self._now_unix_seconds + Int64(ttl_seconds),
+            now,
+            now + Int64(ttl_seconds),
             self._account_key_base64,
             self._host_suffix,
         )
@@ -401,6 +454,6 @@ struct AzureSasSigner(ObjectUrlSigner):
         return PresignedUrl(
             res.url.copy(),
             String("PUT"),
-            self._now_unix_seconds + Int64(ttl_seconds),
+            now + Int64(ttl_seconds),
             hdrs^,
         )

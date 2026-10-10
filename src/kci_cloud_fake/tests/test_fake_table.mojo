@@ -111,7 +111,7 @@ def _graph(
     return (
         String('{"resource":[')
         + String('{"id":"api","service":{"image":{"digest":"sha256:a1"},"port":') + port
-        + String(',"internal":{},"env":{"ORDERS":{"ref":{"resource":"orders","standard":"NAME"}}}},')
+        + String(',"internal":{},"scale":{"min":1,"max":2},"env":{"ORDERS":{"ref":{"resource":"orders","standard":"NAME"}}}},')
         + u + String("},")
         + String('{"id":"orders",') + ret + String('"table":{"key":') + key
         + String(',"indexes":') + indexes + t + String("}}")
@@ -265,7 +265,13 @@ def test_onprem_refuses_a_table_naming_q17() raises:
     var cloud = FakeCloud(String("p-onp"), shape=ProviderShape.onprem())
     assert_true(not cloud.complete(), "a cloud with a NOT_YET type is not complete")
     var absent = cloud.absences()
-    assert_equal(len(absent), 1)
+    assert_equal(
+        len(absent),
+        12,
+        "the table, the three messaging types (test_fake_messaging), the three name types (test_fake_dns), the"
+        + " event trigger (test_fake_triggers), the three network types (test_fake_network) and the registry"
+        + " (test_fake_registry)",
+    )
     assert_equal(absent[0].field, FIELD_TABLE)
     assert_equal(absent[0].kind, NOT_YET)
     var raised = False

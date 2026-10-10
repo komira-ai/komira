@@ -3,7 +3,7 @@
 # Decorrelation of correlated subqueries
 # =============================================================================
 #
-# Pass-1 INDEP rule. Lowers every `EXPR_CORRELATED_SUBQUERY` Expr node
+# A statistics-independent rule. Lowers every `EXPR_CORRELATED_SUBQUERY` Expr node
 # into existing `LogicalJoin` shapes. After this
 # rule runs, the resulting plan has ZERO `EXPR_CORRELATED_SUBQUERY` nodes
 # remaining (assertable invariant).
@@ -13,11 +13,12 @@
 #     `FlattenDependentJoins::RewriteCorrelatedExpressions` walks the
 #     correlated expression's inner plan, classifies operators into
 #     depth-0 (uncorrelated, pushable below the join) and depth>0
-#     (correlated, hoisted to the join's `on=` clause). The depth-0/>0
-#     classifier here uses `HasCTEAccessor` + `DependsOnCorrelatedWalk`.
-#     Our pass mirrors the same shape: every Filter under `inner_plan`
-#     is inspected; any predicate that references an `outer_ref` column
-#     is HOISTED into the join's keys, and the inner filter is dropped.
+#     (correlated, hoisted to the join's `on=` clause). DuckDB's depth-0/>0
+#     classifier uses `HasCTEAccessor` + `DependsOnCorrelatedWalk`.
+#     Our pass is a narrower version: only a Filter at the root of
+#     `inner_plan` is inspected; a conjunct that references an outer column
+#     is HOISTED into the join's keys (an equality) or its residual (any
+#     other comparison), and the inner Filter keeps the rest (or is dropped).
 #   - DataFusion `optimizer/src/decorrelate_predicate_subquery.rs` and
 #     `optimizer/src/scalar_subquery_to_join.rs`. The first lowers
 #     EXISTS/NOT_EXISTS to SEMI/ANTI joins; the second lowers scalar-
@@ -44,20 +45,20 @@
 #                         maps directly to JOIN_SEMI. `outer_refs` may be
 #                         empty (uncorrelated `IN` whose RHS is a subquery).
 #
-# Wiring: invoked from `optimizer.optimize()` as a pass-1 INDEP
-# rule BEFORE join structural rewrites.
+# Pass order: komira_optimizer has no driver that orders its passes. This
+# pass is designed to run BEFORE join structural rewrites.
 #
 # Design constraint:
 #   - SCALAR + parent=Filter (Q17): the agg sink shape implies the parent
-#     plan tree must absorb the post-join aggregate into a new Aggregate
-#     node BELOW the Filter, then replace the inner-scalar Expr in the
-#     Filter predicate with `col_ref(<agg-output-name>)`. To keep the
-#     pass simple and avoid an explicit "lateral" operator (and
-#     add no new engine operators), we lower SCALAR by inserting
-#     an Aggregate above the LEFT join that groups by `outer_refs` and
-#     emits a single aggregated column whose name the rewritten Expr
-#     references. This composes with existing operators (Join + Aggregate +
-#     Filter), no new physical op needed.
+#     plan tree must absorb the aggregate into a new Aggregate node BELOW
+#     the Filter, then replace the inner-scalar Expr in the Filter
+#     predicate with `col_ref(<agg-output-name>)`. To keep the pass simple
+#     and avoid an explicit "lateral" operator, we lower SCALAR to
+#     `Filter(rewritten, LEFT JOIN(outer, Aggregate(inner)))`: the
+#     Aggregate is the join's right child, groups by the inner join keys
+#     and emits a single aggregated column whose name the rewritten Expr
+#     references. This composes existing plan nodes (Join + Aggregate +
+#     Filter); no new node kind is needed.
 # =============================================================================
 
 from std.memory import OwnedPointer
@@ -84,8 +85,10 @@ from komira_plan_expr.expr import (
     COL_SIDE_NONE,
     COL_SIDE_LEFT,
     COL_SIDE_RIGHT,
+    WhenCaseData,
 )
 from komira_plan_expr.agg_expr import AggExpr, AGG_MEAN
+from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_ir.logical_plan import (
     LogicalPlan,
     ExprArray,
@@ -123,11 +126,12 @@ from komira_plan_ir.corr_subquery import corr_data_inner_plan_ref
 def flatten_dependent_joins(var plan: LogicalPlan) raises -> LogicalPlan:
     """Top-level entry: lower every `EXPR_CORRELATED_SUBQUERY` in `plan`.
 
-    Walks the plan top-down recursively. At any `Filter` or `Project` node
-    whose `Expr` tree contains a correlated subquery, replaces that
-    Filter/Project with the lowered join+predicate shape per kind. After
-    return, `plan` is guaranteed to contain zero `EXPR_CORRELATED_SUBQUERY`
-    nodes (invariant; assertable via `_plan_contains_correlated_subquery`).
+    Walks the plan recursively. At any `Filter` node whose predicate
+    contains a correlated subquery, replaces that Filter with the lowered
+    join+predicate shape per kind; a `Project` carrying one raises (not
+    supported). After return, `plan` is guaranteed to contain zero
+    `EXPR_CORRELATED_SUBQUERY` nodes (invariant; assertable via
+    `_plan_contains_correlated_subquery`).
 
     Idempotent: a plan with no correlated subqueries is returned
     structurally unchanged.
@@ -139,9 +143,7 @@ def flatten_dependent_joins(var plan: LogicalPlan) raises -> LogicalPlan:
 def flatten_dependent_joins_inplace(mut plan: LogicalPlan) raises:
     """In-place rewrite mirror of `flatten_dependent_joins`.
 
-    Recurses children first, then rewrites at this node. The recursion
-    pattern follows `materialize_agg_input_inplace` (the recent in-tree
-    precedent for an in-place Expr-walking pass on LogicalPlan).
+    Recurses children first, then rewrites at this node.
     """
     # Recurse children FIRST.
     if plan.tag == PLAN_FILTER:
@@ -167,7 +169,8 @@ def flatten_dependent_joins_inplace(mut plan: LogicalPlan) raises:
         flatten_dependent_joins_inplace(plan._partition_by.value()[].child[])
     elif plan.tag == PLAN_PARTITION_TOPN:
         flatten_dependent_joins_inplace(plan._partition_topn.value()[].child[])
-    # PLAN_SCAN, PLAN_ASOF_JOIN: no children with correlated subqueries.
+    # PLAN_SCAN has no children; PLAN_ASOF_JOIN, PLAN_UNION and the other
+    # tags are not descended.
 
 
 # =============================================================================
@@ -198,10 +201,21 @@ def _expr_contains_correlated_subquery(expr: Expr) -> Bool:
         return _expr_contains_correlated_subquery(expr._in_list.value().child[])
     if expr.tag == EXPR_AGG_FN:
         return _expr_contains_correlated_subquery(expr._agg_fn.value().child[])
-    # EXPR_COL_REF / EXPR_COL_IDX / EXPR_LITERAL / EXPR_WHEN / EXPR_WINDOW_FN:
-    # WHEN has its own arms but is rare in correlated bodies; in this pass the
-    # supported parent-Expr shapes are: bare CorrelatedSubquery (Filter root)
-    # and CorrelatedSubquery within a binary-op (e.g. `>` for SCALAR/Q17).
+    if expr.tag == EXPR_WHEN:
+        # No lowering handles a subquery under a CASE; seeing it makes the
+        # pass refuse the shape instead of leaving the node in the plan.
+        ref wd = expr._when.value()
+        for i in range(len(wd.cases)):
+            if _expr_contains_correlated_subquery(wd.cases[i].condition[]):
+                return True
+            if _expr_contains_correlated_subquery(wd.cases[i].result[]):
+                return True
+        return _expr_contains_correlated_subquery(wd.default[])
+    # EXPR_COL_REF / EXPR_COL_IDX / EXPR_LITERAL / EXPR_WINDOW_FN (its
+    # arguments are column names, not expressions) and the remaining tags
+    # are not descended. The supported parent-Expr shapes are: bare
+    # CorrelatedSubquery (Filter root) and CorrelatedSubquery within a
+    # binary-op (e.g. `>` for SCALAR/Q17).
     return False
 
 
@@ -211,8 +225,8 @@ def _expr_collect_column_names(
 ) -> None:
     """Collect every `EXPR_COL_REF` name reachable from `expr` into `acc`.
 
-    Used by the outer-ref hoist algorithm to discover which inner-plan
-    Filter predicates reference outer columns vs. inner columns.
+    Nothing in this module calls it (the hoist below matches col-ref names
+    directly); only its tests do.
     """
     if expr.tag == EXPR_COL_REF:
         acc.append(expr._col_ref.value().name)
@@ -257,9 +271,11 @@ def _schema_has_field(schema: Schema, name: String) -> Bool:
 
 
 def _plan_contains_correlated_subquery(plan: LogicalPlan) -> Bool:
-    """Invariant-check helper: True if any node in `plan` still carries an
-    `EXPR_CORRELATED_SUBQUERY`. After `flatten_dependent_joins_inplace`
-    returns, this MUST be False for any successfully lowered plan.
+    """Invariant-check helper: True if a Filter predicate or Project expr
+    still carries an `EXPR_CORRELATED_SUBQUERY`. It descends Filter,
+    Project, Join, Aggregate, Sort, Limit, Distinct and TopN only; other
+    tags answer False. After `flatten_dependent_joins_inplace` returns,
+    this MUST be False for any successfully lowered plan.
     """
     if plan.tag == PLAN_FILTER:
         if _expr_contains_correlated_subquery(plan._filter.value()[].predicate):
@@ -317,11 +333,11 @@ def _validate_outer_refs(
 # touch only inner columns stay inside the inner plan.
 #
 # This pass adopts a conservative single-level hoist:
-#   - If the inner plan is `Filter(Scan, predicate)` and `predicate` is
+#   - If the inner plan is `Filter(child, predicate)` and `predicate` is
 #     a BIN_EQ between an outer_ref column and an inner column, hoist
 #     that equality into the join's left_on/right_on lists and replace
-#     the inner Filter with its Scan child (predicate is fully consumed).
-#   - If the inner plan is `Filter(Scan, BIN_AND(p1, p2))`, recurse on the
+#     the inner Filter with its child (predicate is fully consumed).
+#   - If the inner plan is `Filter(child, BIN_AND(p1, p2))`, recurse on the
 #     conjuncts: hoist any conjunct that references an outer_ref, and
 #     leave the rest in a (possibly simpler) Filter.
 #   - Otherwise: equi-keys default to the outer_refs (i.e. assume the
@@ -357,7 +373,8 @@ def _join_conjuncts(var conjuncts: ExprArray) raises -> Optional[Expr]:
 # Non-equi outer-ref hoist (self-correlated NEQ/range predicates — Q21)
 # =============================================================================
 #
-# The SQL binder (`sql_binder._bind_corr_scalar`) marks a correlated
+# The SQL binder (`sql_binder._bind_corr_scalar`, not in this tree) is
+# designed to mark a correlated
 # subquery's OUTER references with the `COL_SIDE_LEFT` qualifier and leaves
 # the subquery's own (inner) columns as plain `COL_SIDE_NONE` col-refs. This
 # is the ONLY channel that survives a self-correlation where the outer ref
@@ -378,8 +395,8 @@ def _join_conjuncts(var conjuncts: ExprArray) raises -> Optional[Expr]:
 #     inner NONE refs are re-marked COL_SIDE_RIGHT so the downstream
 #     `join_predicate_decompose` pass rewrites them to the joined-row schema,
 #     applying the `_right` collision-rename that a self-join needs). The
-#     engine's `execute_residual_join_probe` evaluates the residual
-#     per matched pair for SEMI/ANTI/INNER/LEFT.
+#     residual is designed to be evaluated per matched pair for
+#     SEMI/ANTI/INNER/LEFT, outside komira_optimizer.
 #
 # This preserves the outer reference through the flatten — the pre-fix bug was
 # that a non-EQ outer conjunct stayed in the inner Filter where BOTH sides
@@ -470,6 +487,29 @@ def _rewrite_inner_none_to_right(expr: Expr) -> Expr:
             expr.string_op_type(),
             _rewrite_inner_none_to_right(expr.string_op_child_ref()),
             expr.string_op_pattern(),
+        )
+    elif expr.tag == EXPR_ALIAS:
+        return Expr.alias(
+            _rewrite_inner_none_to_right(expr.alias_child_ref()), expr.alias_name()
+        )
+    elif expr.tag == EXPR_WHEN:
+        ref wd = expr._when.value()
+        var cases = List[WhenCaseData]()
+        for i in range(len(wd.cases)):
+            cases.append(WhenCaseData(
+                _rewrite_inner_none_to_right(wd.cases[i].condition[]),
+                _rewrite_inner_none_to_right(wd.cases[i].result[]),
+            ))
+        return Expr.when(cases^, _rewrite_inner_none_to_right(wd.default[]))
+    elif expr.tag == EXPR_IN_LIST:
+        ref il = expr._in_list.value()
+        var vals = List[ScalarValue]()
+        for i in range(len(il.values)):
+            vals.append(il.values[i].copy())
+        return Expr.in_list_node(_rewrite_inner_none_to_right(il.child[]), vals^)
+    elif expr.tag == EXPR_AGG_FN:
+        return Expr.agg_fn(
+            expr.agg_fn_op(), _rewrite_inner_none_to_right(expr.agg_fn_child_ref())
         )
     else:
         # Literals / col-idx / other leaves: no side-qualified col-ref to
@@ -628,7 +668,7 @@ def _hoist_outer_eq_predicates(
             right_on.append(default_right_on[i])
 
     # Rebuild the inner plan: if no residual conjuncts remain, drop the
-    # Filter entirely. Otherwise wrap the Scan child with a new Filter
+    # Filter entirely. Otherwise wrap the Filter's child with a new Filter
     # carrying just the residual conjuncts.
     var grandchild_copy = f.child[].copy()
     var residual_opt = _join_conjuncts(residual^)
@@ -654,9 +694,10 @@ def _maybe_lower_filter(mut plan: LogicalPlan) raises:
       - `Filter(child, BIN_OP(other_lhs, EXPR_CORRELATED_SUBQUERY))` —
         a comparison whose RHS is a scalar correlated subquery (Q17).
       - `Filter(child, BIN_AND(p1, EXPR_CORRELATED_SUBQUERY))` — flat AND
-        of a non-correlated predicate and a correlated bare subquery.
-        Lowering: the non-correlated conjunct stays as a Filter above
-        the join; the correlated piece drives the join shape.
+        of non-correlated predicates and bare correlated subqueries.
+        Lowering (`_lower_and_chain_with_corr`): the non-correlated
+        conjuncts become a Filter directly above `child`, below the joins;
+        each correlated piece adds a join.
 
     Anything else with a nested correlated subquery raises "unsupported
     parent-shape for correlated subquery" so the missed-shape
@@ -748,7 +789,8 @@ def _lower_and_chain_with_corr(
 
     Partition the flattened conjuncts:
       - bare `EXPR_CORRELATED_SUBQUERY` conjuncts (EXISTS / NOT EXISTS / IN) →
-        each chained into its own SEMI / ANTI join, stacked on top of `child`.
+        each chained into its own SEMI / ANTI join, stacked on top of `child`
+        (a bare SCALAR conjunct becomes a LEFT join).
       - every non-correlated conjunct → a residual Filter placed DIRECTLY above
         `child` (below the correlated joins), so the optimizer's cross-join
         elimination still folds the FROM's join predicates into inner joins.
@@ -798,11 +840,10 @@ def _maybe_lower_project(mut plan: LogicalPlan) raises:
     """Inspect plan (must be PLAN_PROJECT). If any project Expr contains an
     EXPR_CORRELATED_SUBQUERY, lower it.
 
-    The only supported project-shape is a scalar correlated
-    subquery directly aliased: `Project(child, [..., alias(corr_sq, name)])`.
-    This is unusual in TPC-H corpus (Q17 puts the SCALAR under a Filter)
-    so we raise on the unsupported shapes to keep scope tight. A future
-    extension can lower projected scalar-subqueries.
+    No project-shape is supported: any correlated subquery in a Project
+    expr raises. The shape is unusual in TPC-H (Q17 puts the SCALAR under
+    a Filter), so the scope is kept tight. A future extension can lower
+    projected scalar-subqueries.
     """
     ref pj = plan._project.value()[]
     for i in range(len(pj.exprs)):
@@ -829,10 +870,10 @@ def _lower_correlated_into_join(
                      `(hoisted_corr..., in_lhs_col) = (..., in_rhs_col)`.
                      `outer_refs` may be empty (uncorrelated `IN` over a
                      subquery RHS — then the only key is the `IN` key).
-    SCALAR         → JOIN_LEFT (no agg sink — the bare-SCALAR-in-Filter
-                     shape cannot appear here; this entry point handles
-                     SEMI/ANTI/IN-SEMI only. SCALAR is routed via
-                     `_lower_scalar_correlated`).
+    SCALAR         → JOIN_LEFT with no agg sink. Reached only for a bare
+                     SCALAR predicate or AND-chain conjunct; a SCALAR
+                     under a comparison is routed to
+                     `_lower_scalar_correlated` instead.
 
     Validates outer_refs (and, for IN, `in_lhs_col`) against the
     outer_child's output_schema.
@@ -865,12 +906,11 @@ def _lower_correlated_into_join(
         join_type = JOIN_SEMI
     elif corr_data.kind == CORR_KIND_SCALAR:
         # SCALAR via this entry point is the "bare correlated as Filter
-        # predicate" case — semantically equivalent to EXISTS over a
-        # subquery that returns >=1 row. We treat as JOIN_LEFT (preserves
-        # outer rows; matches DuckDB's scalar subquery shape) and trust
-        # the caller to have validated the post-join Filter semantics.
-        # In practice this path is unused (scalar always lands under a
-        # BIN_OP via `_lower_scalar_correlated`); kept for symmetry.
+        # predicate" case. We treat it as JOIN_LEFT (preserves outer rows;
+        # matches DuckDB's scalar subquery shape) and trust the caller to
+        # have validated the post-join Filter semantics. A SCALAR under a
+        # comparison never reaches here (`_maybe_lower_filter` routes it to
+        # `_lower_scalar_correlated`).
         join_type = JOIN_LEFT
     else:
         raise Error("unknown correlated-subquery kind: " + String(Int(corr_data.kind)))
@@ -896,10 +936,10 @@ def _lower_correlated_into_join(
 
     # Non-equi outer-referencing conjuncts (Q21 `l_suppkey <> l1.l_suppkey`)
     # become a side-qualified join `residual`. `join_predicate_decompose`
-    # (which runs after this pass) rewrites the residual to the
-    # joined-row schema and the engine's `execute_residual_join_probe`
-    # evaluates it per matched pair (SEMI/ANTI single-equi-key + residual is
-    # exactly the Q21 shape). `None` when no non-equi correlation exists.
+    # (designed to run after this pass) rewrites the residual to the
+    # joined-row schema; it is evaluated per matched pair outside
+    # komira_optimizer (SEMI/ANTI single-equi-key + residual is exactly the
+    # Q21 shape). `None` when no non-equi correlation exists.
     var residual: Optional[OwnedPointer[Expr]] = None
     if len(residual_conjuncts) > 0:
         var acc = residual_conjuncts[0].copy()
@@ -915,8 +955,9 @@ def _lower_correlated_into_join(
         residual^,
     )
 
-    # If a residual non-correlated predicate was passed (e.g. Case C path),
-    # wrap the join in a Filter carrying it.
+    # If a residual non-correlated predicate was passed, wrap the join in a
+    # Filter carrying it. Every caller in this module passes None; the
+    # branch tests call this function directly with one.
     if residual_predicate:
         var resid_pred = residual_predicate.value().copy()
         return LogicalPlan.filter(resid_pred^, join_plan^)
@@ -933,21 +974,24 @@ def _lower_scalar_correlated(
     Q17 shape: the inner subquery `SELECT 0.2 * AVG(l_quantity) FROM
     lineitem WHERE l_partkey = outer.p_partkey` becomes:
 
-        Aggregate(group_by=[<right side of join_keys>],
-                  agg_exprs=[MEAN(<agg_input>) AS <agg_out_name>])
-        ⟵ LEFT JOIN outer_child ON outer_refs = inner_keys
+        LEFT JOIN(outer_child,
+                  Aggregate(group_by=[<right side of join_keys>],
+                            agg_exprs=[<agg> AS <agg_out_name>],
+                            <inner plan>),
+                  ON outer_refs = inner_keys)
 
-    The aggregate runs over the join's right side (the inner plan); the
-    LEFT join preserves every outer row, and the per-outer-group MEAN is
-    emitted in `agg_out_name`. The caller (Filter rewrite) then references
-    `agg_out_name` in the rewritten predicate.
+    The aggregate runs over the join's right side (the inner plan), one
+    group per inner join key; the LEFT join preserves every outer row, and
+    the per-key aggregate is emitted in `agg_out_name`. The caller (Filter
+    rewrite) then references `agg_out_name` in the rewritten predicate.
 
     NOTE: this lowering assumes the inner plan's "scalar" is the output
-    of an existing Aggregate node at its root. If the inner plan does
-    NOT have an Aggregate at its root, the lowering preserves the inner
-    plan structure but adds a synthetic Aggregate wrapper that emits
-    a MEAN over the first numeric column (default heuristic; the
-    canonical case is the TPC-H Q17 shape).
+    of an existing Aggregate node at its root (its one agg is re-aliased
+    and re-grouped by the join keys). If the inner plan does NOT have an
+    Aggregate at its root, the lowering preserves the inner plan structure
+    but adds a synthetic Aggregate wrapper that emits a MEAN over the
+    first output column (default heuristic; the canonical case is the
+    TPC-H Q17 shape).
     The inner plan's pre-aggregation expression is the slot-0 input.
     """
     ref corr_data = corr_expr._corr_subq.value()[]
@@ -970,8 +1014,9 @@ def _lower_scalar_correlated(
     if len(scalar_residual) > 0:
         # A non-equi correlation in a SCALAR subquery would need the residual
         # to gate the aggregate sink's grouping — not yet supported (only
-        # EXISTS / NOT EXISTS lower a residual today). Surface rather than
-        # silently drop the correlation.
+        # `_lower_correlated_into_join`, the EXISTS / NOT EXISTS / IN path,
+        # lowers a residual). Surface rather than silently drop the
+        # correlation.
         raise Error(
             "flatten: non-equi correlation in a scalar (aggregate) subquery is"
             " not yet supported -- only EXISTS / NOT EXISTS carry a residual"
@@ -980,7 +1025,7 @@ def _lower_scalar_correlated(
     # Build the inner aggregate that emits `agg_out_name`. If the inner
     # plan is already a PLAN_AGGREGATE, we trust the caller built the
     # right shape; otherwise we wrap with a default MEAN over the first
-    # numeric column.
+    # output column.
     var inner_with_agg: LogicalPlan
     if inner_after_hoist.tag == PLAN_AGGREGATE:
         # Re-alias the existing single agg's output to `agg_out_name`.
@@ -1000,7 +1045,7 @@ def _lower_scalar_correlated(
         var grandchild = existing_agg.child[].copy()
         inner_with_agg = LogicalPlan.aggregate(new_group_by^, new_aggs^, grandchild^)
     else:
-        # Wrap with default MEAN over the first numeric column.
+        # Wrap with default MEAN over the first output column.
         if inner_after_hoist.output_schema.num_columns() == 0:
             raise Error("scalar correlated inner plan has no output columns")
         var first_col_name = inner_after_hoist.output_schema.field_name(0)

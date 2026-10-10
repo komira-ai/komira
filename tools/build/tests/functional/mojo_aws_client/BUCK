@@ -134,12 +134,14 @@ gen_check(
     ],
 )
 
-# The layout probe is welded into the client, not only generated, and the
-# caller's test ran after it: the library ran exactly these, and each passed.
+# The layout probe and the environment scan are welded into the client, not
+# only generated, and the caller's test ran after them: the library ran
+# exactly these, and each passed.
 tests_check(
     name = "komira_aws_logs_tests",
     expect = [
         "_layout_probe",
+        "_no_env_reads",
         "test_logs_get_log_events",
     ],
     markers = ":komira_aws_logs[tests]",
@@ -147,7 +149,10 @@ tests_check(
 
 # hand_srcs + overrides: the manifest names logs_overrides.get_log_events as
 # the owner of GetLogEvents, the generator checks that it is defined there,
-# and the module is copied into the package next to the generated one.
+# and the module is copied into the package next to the generated one. The
+# module names std.pathlib in its docstring, a comment and strings (one with
+# an escaped quote, one raw), and holds a backtick identifier with a quote and
+# a `#` in it, where the environment scan reads no import: the client builds.
 mojo_aws_client(
     name = "komira_aws_logs_hand",
     hand_srcs = ["hand/logs_overrides.mojo"],
@@ -186,6 +191,7 @@ tests_check(
     name = "komira_aws_logs_hand_tests",
     expect = [
         "_layout_probe",
+        "_no_env_reads",
         "test_logs_hand_override",
     ],
     markers = ":komira_aws_logs_hand[tests]",

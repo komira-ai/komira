@@ -4,10 +4,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # Canonical Form and fingerprint, the Avro <-> Arrow type lattice (including
 # the arrow.* logical-type round-trip), OCF header and block decode, the block
 # codecs, the serial and block-parallel readers with full schema resolution,
-# and the OCF writer. Snappy comes statically linked through the core packages;
-# deflate, zstandard, bzip2 and xz are opened from the system libraries at
-# first use. komira_runtime_paths is declared because a test takes its scratch
-# directory from `test_tmpdir()`.
+# and the OCF writer. The block codecs are komira_compression's codec API
+# (snappy statically linked; deflate, zstandard, bzip2 and xz opened from the
+# system libraries at first use); this package declares no codec FFI, and the
+# snappy library reaches its binaries through komira_compression's deps.
+# komira_runtime_paths is declared because a test takes its scratch directory
+# from `test_tmpdir()`.
 mojo_library(
     name = "komira_avro",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -17,20 +19,33 @@ mojo_library(
         "//src/komira_async_api:komira_async_api",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
+        "//src/komira_compression:komira_compression",
         "//src/komira_fs:komira_fs",
         "//src/komira_row_format:komira_row_format",
         "//src/komira_simd:komira_simd",
-        "//third_party/snappy:snappy",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
+        "tests/test_avro_accumulator_growth.mojo",
         "tests/test_avro_all_primitive_types_decode.mojo",
         "tests/test_avro_arrow_logical_round_trip.mojo",
         "tests/test_avro_binary_builder_micro_ab.mojo",
         "tests/test_avro_block_parallel_decode.mojo",
+        "tests/test_avro_bytes_fixed_defaults.mojo",
         "tests/test_avro_codec_matrix.mojo",
+        "tests/test_avro_codec_owner_equivalence.mojo",
+        "tests/test_avro_codec_truncation.mojo",
         "tests/test_avro_comptime_shape_kind_decode.mojo",
+        "tests/test_avro_cov_comptime.mojo",
+        "tests/test_avro_cov_decode.mojo",
+        "tests/test_avro_cov_header_scan.mojo",
+        "tests/test_avro_cov_reader_codec.mojo",
+        "tests/test_avro_cov_resolve.mojo",
+        "tests/test_avro_cov_schema.mojo",
+        "tests/test_avro_cov_writer_paths.mojo",
+        "tests/test_avro_cov_writer_types.mojo",
         "tests/test_avro_data_level_decode.mojo",
+        "tests/test_avro_hostile_input_regressions.mojo",
         "tests/test_avro_json_string_branches.mojo",
         "tests/test_avro_lineitem_decode_roundtrip.mojo",
         "tests/test_avro_logical_types_decode.mojo",
@@ -43,10 +58,14 @@ mojo_library(
         "tests/test_avro_resolve_field_skip.mojo",
         "tests/test_avro_resolve_promotions.mojo",
         "tests/test_avro_resolve_union_enum.mojo",
+        "tests/test_avro_schema_default_edges.mojo",
+        "tests/test_avro_schema_json_grammar.mojo",
         "tests/test_avro_schema_json_unicode.mojo",
+        "tests/test_avro_schema_names.mojo",
         "tests/test_avro_schema_parse.mojo",
         "tests/test_avro_snappy_codec_decode.mojo",
         "tests/test_avro_write_parallel_block_compress.mojo",
+        "tests/test_avro_write_binary_columns.mojo",
         "tests/test_avro_write_roundtrip.mojo",
         "tests/test_block_boundary_scan.mojo",
         "tests/test_ocf_header_decode.mojo",

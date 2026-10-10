@@ -1,5 +1,7 @@
 # The Azure Blob response XML parser: List Blobs entries, prefixes and the
-# continuation marker, the error body, and entity decoding.
+# continuation marker, the root's ContainerName attribute (entities decoded,
+# either quote), the error body, entity decoding, and the refusal of a body
+# that is not well-formed XML.
 #
 # Entity decoding works per UTF-8 BYTE, never through `chr()`: `chr()` takes a
 # CODEPOINT and emits its UTF-8 encoding, so a byte-wise `chr(Int(c))` turns
@@ -149,12 +151,17 @@ def test_numeric_char_ref_four_byte() raises:
     assert_equal(r.blobs[0].name.byte_length(), 10)
 
 
-def test_malformed_reference_passes_through() raises:
-    """A bare '&' and unterminated refs pass through verbatim."""
-    var r = parse_azure_list_blobs_result(
-        _one_blob_body(String("a&b&#c&#12.txt"))
-    )
-    assert_equal(r.blobs[0].name, String("a&b&#c&#12.txt"))
+def test_malformed_reference_is_refused() raises:
+    """A bare '&' is not well-formed XML (Azure escapes it as `&amp;`), so
+    the body is refused with the reader's reason rather than guessed at."""
+    with assert_raises(
+        contains=(
+            "Azure XML: List Blobs body is not well-formed XML: xml: undeclared"
+            " entity or malformed reference (only &amp; &lt; &gt; &quot; &apos;"
+            " and character references exist without a DTD) at byte 147"
+        )
+    ):
+        _ = parse_azure_list_blobs_result(_one_blob_body(String("a&b&#c&#12.txt")))
 
 
 # -----------------------------------------------------------------------------
@@ -176,21 +183,70 @@ def test_empty_body_raises() raises:
         var _ = parse_azure_list_blobs_result(String(""))
 
 
-def test_container_is_never_populated_scanner_cannot_read_attributes() raises:
-    """PINS A KNOWN GAP, so the swap that closes it goes red here first.
-
-    `AzureListBlobsResult.container` is documented as "the ContainerName
-    attribute", but the hand-written scanner in azure_xml.mojo CANNOT PARSE AN
-    ATTRIBUTE — it only finds `<tag>...</tag>` text — so nothing ever assigns
-    the field and it is always empty. The body below carries
-    `ContainerName="c"` on the root and the parse still returns "".
-
-    Porting azure_xml onto komira_xml's reader, which does read attributes,
-    is not done; when it is, this assertion must flip to
-    `assert_equal(r.container, String("c"))`.
-    """
+def test_container_name_attribute_is_read() raises:
+    """`AzureListBlobsResult.container` is the root's ContainerName
+    attribute."""
     var r = parse_azure_list_blobs_result(_one_blob_body(String("a/b.parquet")))
+    assert_equal(r.container, String("c"))
+
+
+def _root_with(attrs: String) -> String:
+    return (
+        String('<?xml version="1.0" encoding="utf-8"?><EnumerationResults ')
+        + attrs
+        + String("><Blobs></Blobs><NextMarker /></EnumerationResults>")
+    )
+
+
+def test_container_attribute_entities_are_decoded() raises:
+    """The five predefined entities and character references decode in an
+    attribute value; `&amp;` is the one a container name never needs but an
+    endpoint URL with a query does."""
+    var r = parse_azure_list_blobs_result(
+        _root_with(
+            String(
+                'ServiceEndpoint="https://x.blob.core.windows.net/?a=1&amp;b=2"'
+                ' ContainerName="c&amp;d&lt;&gt;&quot;&apos;&#38;&#x41;"'
+            )
+        )
+    )
+    assert_equal(r.container, String("c&d<>\"'&A"))
+
+
+def test_container_attribute_single_quoted() raises:
+    """XML allows either quote; a double quote inside single quotes is a
+    literal character."""
+    var r = parse_azure_list_blobs_result(
+        _root_with(String("ContainerName='my\"container' ServiceEndpoint='x'"))
+    )
+    assert_equal(r.container, String('my"container'))
+
+
+def test_container_attribute_absent_is_empty() raises:
+    var r = parse_azure_list_blobs_result(_root_with(String('ServiceEndpoint="x"')))
     assert_equal(r.container, String(""))
+
+
+def test_container_attribute_is_the_roots_only() raises:
+    """A ContainerName attribute on a nested element is not the root's."""
+    var r = parse_azure_list_blobs_result(
+        String(
+            '<EnumerationResults><Blobs><Blob ContainerName="nested"><Name>n</Name>'
+            "</Blob></Blobs><NextMarker /></EnumerationResults>"
+        )
+    )
+    assert_equal(r.container, String(""))
+    assert_equal(len(r.blobs), 1)
+    assert_equal(r.blobs[0].name, String("n"))
+
+
+def test_other_root_is_refused() raises:
+    with assert_raises(
+        contains="Azure XML: missing <EnumerationResults> root (got <Error>)"
+    ):
+        _ = parse_azure_list_blobs_result(
+            String("<Error><Code>X</Code></Error>")
+        )
 
 
 def main() raises:
@@ -207,9 +263,15 @@ def main() raises:
     test_numeric_char_ref_decimal()
     test_numeric_char_ref_hex()
     test_numeric_char_ref_four_byte()
-    test_malformed_reference_passes_through()
+    test_malformed_reference_is_refused()
     # ASCII sanity.
     test_plain_blob_fields()
     test_empty_body_raises()
-    test_container_is_never_populated_scanner_cannot_read_attributes()
-    print("OK — test_azure_xml (14 tests)")
+    # The root's attributes.
+    test_container_name_attribute_is_read()
+    test_container_attribute_entities_are_decoded()
+    test_container_attribute_single_quoted()
+    test_container_attribute_absent_is_empty()
+    test_container_attribute_is_the_roots_only()
+    test_other_root_is_refused()
+    print("OK — test_azure_xml (19 tests)")

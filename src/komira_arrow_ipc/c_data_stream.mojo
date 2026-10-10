@@ -177,11 +177,29 @@ comptime _ArrayPtr = UnsafePointer[CArrowArray, MutUntrackedOrigin]
 # stream-self pointer; we type it `OpaquePtr` rather than
 # `UnsafePointer[CArrowArrayStream, ...]` to avoid the recursive struct type
 # in a stored fn-ptr field (the callbacks bitcast it back internally). `thin`
-# = non-capturing C-ABI calling convention (required for a *stored* fn-ptr
-# field; matches the in-tree precedent in `dyn_accumulator.mojo`).
-comptime _GetSchemaFn = def(OpaquePtr, _SchemaPtr) raises thin -> Int32
-comptime _GetNextFn = def(OpaquePtr, _ArrayPtr) raises thin -> Int32
-comptime _GetLastErrorFn = def(OpaquePtr) thin -> UnsafePointer[Int8, MutUntrackedOrigin]
+# = non-capturing (required for a stored fn-ptr field); `abi("C")` = the C
+# calling convention. The slots are `abi("C")` because the C Stream Interface
+# declares them as C function pointers (a foreign producer such as pyarrow,
+# arrow-rs or a C library fills them with C functions, and a foreign consumer
+# calls ours as C functions), and because the Mojo manual requires `abi("C")`
+# on a function that crosses the FFI boundary. Mojo documents no guarantee
+# that its default convention matches C. The bug these types fixed came from
+# `raises`, not from a missing `abi("C")`: a `raises thin` slot read a garbage
+# return code from a C callee (measured in the block above
+# `drain_c_abi_record_batch_stream`). Non-raising default-convention
+# `get_schema`/`get_next` slots, the two that return `Int32`, were measured
+# to interoperate with C on linux-x86_64 (that run did not call
+# `get_last_error`), so the dlopen gate of `:arrow_c_abi_probe` would not
+# catch those two losing `abi("C")`; whether the pointer-returning
+# `get_last_error` would interoperate without it was not measured. The gate
+# does catch any of the three gaining `raises`: `arrow_c_abi_driver.mojo`
+# calls `get_schema` and `get_next` in both directions, and
+# `arrow_c_abi_error_driver.mojo` calls `get_last_error` in both directions
+# after a forced failure and checks the text. No callback raises: errors are
+# a non-zero errno-style return and the text `get_last_error` returns.
+comptime _GetSchemaFn = def(OpaquePtr, _SchemaPtr) abi("C") thin -> Int32
+comptime _GetNextFn = def(OpaquePtr, _ArrayPtr) abi("C") thin -> Int32
+comptime _GetLastErrorFn = def(OpaquePtr) abi("C") thin -> UnsafePointer[Int8, MutUntrackedOrigin]
 
 
 # =============================================================================
@@ -279,20 +297,23 @@ struct CArrowArrayStream(Movable):
 
 
 # --- No-op stubs (used by the zeroed-out CArrowArrayStream). ---
+#
+# Calling a callback of a released stream is a consumer error the spec leaves
+# undefined; these return EINVAL (22) and write nothing.
 
-def _stub_get_schema(stream: OpaquePtr, out_schema: _SchemaPtr) raises -> Int32:
+def _stub_get_schema(stream: OpaquePtr, out_schema: _SchemaPtr) abi("C") -> Int32:
     _ = stream
     _ = out_schema
-    raise Error("CArrowArrayStream: get_schema called on a released stream")
+    return Int32(22)  # EINVAL
 
 
-def _stub_get_next(stream: OpaquePtr, out_array: _ArrayPtr) raises -> Int32:
+def _stub_get_next(stream: OpaquePtr, out_array: _ArrayPtr) abi("C") -> Int32:
     _ = stream
     _ = out_array
-    raise Error("CArrowArrayStream: get_next called on a released stream")
+    return Int32(22)  # EINVAL
 
 
-def _stub_get_last_error(stream: OpaquePtr) -> UnsafePointer[Int8, MutUntrackedOrigin]:
+def _stub_get_last_error(stream: OpaquePtr) abi("C") -> UnsafePointer[Int8, MutUntrackedOrigin]:
     _ = stream
     return _null_ptr[Int8, MutUntrackedOrigin]()
 
@@ -704,10 +725,9 @@ def _release_schema(sch_ptr: _SchemaPtr) -> None:
 # heap allocation) satisfies every Mojo-side test (`release` non-NULL ⇒
 # `is_released()` False) while guaranteeing that pyarrow, pandas, polars, or
 # arrow-rs jump the program counter into a heap data byte: SIGBUS, PC at an
-# unmapped heap address. Mojo spells the type `def (T) thin -> None` — this
-# file stores three such pointers in
-# `CArrowArrayStream.get_schema/get_next/get_last_error` — and the whole point
-# of the C Data Interface is foreign consumers. Arrow's own C helpers
+# unmapped heap address. Mojo spells the type `def (T) thin -> None`; the
+# `release` slot of each of the three structs holds a `thin` fn pointer of
+# that type, and the whole point of the C Data Interface is foreign consumers. Arrow's own C helpers
 # additionally `abort()` when a release callback fails to null itself out,
 # which a heap byte can never do. The release-callback-is-a-function-pointer
 # unit test guards this.
@@ -716,8 +736,21 @@ def _release_schema(sch_ptr: _SchemaPtr) -> None:
 #     void (*release)(struct ArrowSchema*);
 #     void (*release)(struct ArrowArray*);
 #     void (*release)(struct ArrowArrayStream*);
-# `thin` = non-capturing (no context word) — same convention already used for
-# the stream's three callback fields above. VERIFIED against a real C caller,
+# `thin` = non-capturing (no context word). These release slots keep the Mojo
+# default calling convention, unlike the three `abi("C")` stream slots
+# (`_GetSchemaFn`/`_GetNextFn`/`_GetLastErrorFn`). That is a deviation from
+# what the spec declares and from the Mojo manual's rule that a function
+# crossing the FFI boundary be `abi("C")`; Mojo documents no guarantee that
+# its default convention matches C. It holds today by measurement, not by
+# contract: the measured return-code skew came from the `raises` convention,
+# and these slots do not raise (non-raising default-convention `get_schema`
+# and `get_next` slots, which return `Int32`, were also measured to work with
+# C callers and callees on linux-x86_64).
+# Evidence that the release slots work across the seam: the RELEASE arm of
+# the measurement block above
+# `drain_c_abi_record_batch_stream`, and the dlopen gate of
+# `:arrow_c_abi_probe`, which releases every exported and imported struct
+# through these slots. VERIFIED against a real C caller,
 # not assumed: a `cc`-compiled C function that casts the `void*` slot to
 # `void (*)(struct*)` and calls it reaches the Mojo callback with the correct
 # argument, and observes `release == NULL` on return — i.e. exactly the
@@ -2915,7 +2948,7 @@ def _import_record_batch(
 # Exported-stream callbacks (Mojo-side; bound onto the CArrowArrayStream).
 # =============================================================================
 
-def _exported_get_schema(stream: OpaquePtr, out_schema: _SchemaPtr) raises -> Int32:
+def _exported_get_schema(stream: OpaquePtr, out_schema: _SchemaPtr) abi("C") -> Int32:
     """get_schema: fill `out_schema` with the (constant) stream schema."""
     if _is_null(stream) or _is_null(out_schema):
         return Int32(22)  # EINVAL
@@ -2964,7 +2997,7 @@ def _exported_get_schema(stream: OpaquePtr, out_schema: _SchemaPtr) raises -> In
     return Int32(0)
 
 
-def _exported_get_next(stream: OpaquePtr, out_array: _ArrayPtr) raises -> Int32:
+def _exported_get_next(stream: OpaquePtr, out_array: _ArrayPtr) abi("C") -> Int32:
     """get_next: fill `out_array` with the next chunk, or leave it released
     (`out_array.release == NULL`) on end-of-stream."""
     if _is_null(stream) or _is_null(out_array):
@@ -2990,7 +3023,7 @@ def _exported_get_next(stream: OpaquePtr, out_array: _ArrayPtr) raises -> Int32:
     return Int32(0)
 
 
-def _exported_get_last_error(stream: OpaquePtr) -> UnsafePointer[Int8, MutUntrackedOrigin]:
+def _exported_get_last_error(stream: OpaquePtr) abi("C") -> UnsafePointer[Int8, MutUntrackedOrigin]:
     if _is_null(stream):
         return _null_ptr[Int8, MutUntrackedOrigin]()
     var sp = stream.bitcast[CArrowArrayStream]()
@@ -3157,38 +3190,43 @@ def _stream_error_text(stream: UnsafePointer[CArrowArrayStream, MutUntrackedOrig
 # ⭐⭐ THE C-ABI DRAIN — the same protocol, callable by a FOREIGN C PRODUCER.
 # =============================================================================
 #
-# ⛔ WHY THIS IS A SIBLING OF `drain_record_batch_stream` AND NOT A REFACTOR OF
-# IT. `CArrowArrayStream.get_schema` / `.get_next` are typed `raises thin`
-# above, and **`raises thin` IS NOT THE C CALLING CONVENTION**. A plain C
-# function reached through that type receives its ARGUMENTS correctly and
-# returns a GARBAGE `Int32`. Four arms in one process:
+# WHAT THIS IS. `drain_record_batch_stream` reads the four callbacks out of a
+# `CArrowArrayStream`; this function takes them as four separate C function
+# pointers plus the producer's `self`, for a connector that has a cursor and
+# callbacks but no `ArrowArrayStream` struct. Both call the callbacks through
+# `abi("C")` function types.
 #
-#     POSITIVE CONTROL  a MOJO `raises thin` fn through the alias -> rc = 42 ✓
-#     SUBJECT           a plain C fn through the SAME alias       -> rc = 128385032 ✗
-#     CONTROL 2         the SAME C fn through `abi("C") thin`     -> rc = 42 ✓
-#     RELEASE           a C `void (*)(void*)` through `thin -> None` -> OK ✓
+# WHY THE TYPES ARE `abi("C")`. The C Stream Interface declares these
+# callbacks as C function pointers, and the Mojo manual requires `abi("C")` on
+# a function that crosses the FFI boundary; Mojo documents no guarantee that
+# its default convention matches C. What was MEASURED to break is the
+# `raises` convention. Four arms in one process:
 #
-# The out-params landed correctly in every arm (`out = 0x5A5A5A5A5A5A`,
-# `self = 777`), so this is a RETURN-convention skew, not an argument one.
-# ⚠ THE GARBAGE VALUE IS NOT AN INVARIANT — it is pointer-derived and differs
-# between builds; the falsifier asserts `!= 42` with both controls at 42, which
-# is the claim. ⭐ AND THE FOURTH ARM BOUNDS THE BLAST RADIUS: `raises` is the
-# discriminator, NOT `thin`, so the Arrow RELEASE-callback protocol
-# (`_ArrayReleaseFn = def (_ArrayPtr) thin -> None`) IS sound across the seam
-# and only the two rc-returning slots are not. The Mojo stdlib
-# states the same rule at `std/ffi/__init__.mojo:get_function`: *"Using a plain
-# Mojo function type causes silent ABI corruption for struct arguments and
-# return values."*
+#     POSITIVE CONTROL  a MOJO `raises thin` fn through a `raises thin` alias -> rc = 42 ✓
+#     SUBJECT           a plain C fn through the SAME alias                   -> rc = 128385032 ✗
+#     CONTROL 2         the SAME C fn through `abi("C") thin`                 -> rc = 42 ✓
+#     RELEASE           a C `void (*)(void*)` through `thin -> None`          -> OK ✓
 #
-# ⇒ THE HEADER OF THIS MODULE NAMES *"PyArrow / Pandas / Polars / Rust Arrow"*
-# AS CONSUMERS, AND IN THE **PRODUCER** DIRECTION NONE OF THEM CAN BE ONE
-# THROUGH `drain_record_batch_stream`: every one of them fills the callback
-# slots with C-ABI functions. That is a defect in `CArrowArrayStream`'s field
-# TYPES, not in this drain, and fixing it there is a change to the Mojo
-# producers' error channel (they would have to report through
-# `get_last_error`, which is what the Arrow protocol prescribes anyway).
-# ⚠ IT IS DELIBERATELY NOT FIXED HERE: this function is what a foreign
-# producer needs.
+# The out-params landed correctly in every arm, so this is a RETURN-convention
+# skew, not an argument one; the garbage value is pointer-derived and differs
+# between builds. SUBJECT and CONTROL 2 differ in two things at once (`raises`
+# and `abi("C")`), so these arms alone do not say which one matters. A
+# separate measurement on linux-x86_64 settles it for the `Int32` returns:
+# with every stream slot, stub and exported callback on the Mojo default
+# convention but non-raising, the dlopen gate of `:arrow_c_abi_probe` passed
+# in both directions. That gate called `get_schema` and `get_next`, not
+# `get_last_error` (its error-path driver came later), so the pointer return
+# was not measured without `abi("C")`. The skew is the `raises`
+# convention's. The fourth arm is why the release callbacks
+# (`_ArrayReleaseFn = def (_ArrayPtr) thin -> None`) work across the seam. The
+# Mojo stdlib states the rule at `std/ffi/__init__.mojo:get_function`: *"Using
+# a plain Mojo function type causes silent ABI corruption for struct arguments
+# and return values."* The `CArrowArrayStream` slots were once typed
+# `raises thin`, and `drain_record_batch_stream` then read a garbage return
+# code from every C producer; the dlopen gate of `:arrow_c_abi_probe`
+# (`tests/c_abi/arrow_c_abi_driver.mojo`) drains a C-convention stream through
+# it and fails if that comes back, and `tests/c_abi/arrow_c_abi_error_driver.mojo`
+# makes the C producer fail and checks that its `get_last_error` text arrives.
 #
 # ⚠ WHAT IS UNCHANGED, AND IT IS THE WHOLE POINT: the DATA still crosses as
 # plain Arrow C Data Interface `ArrowSchema` / `ArrowArray` — `_read_root_schema`
@@ -3234,9 +3272,8 @@ def drain_c_abi_record_batch_stream(
 
     Byte-for-byte the same protocol as `drain_record_batch_stream` — call
     `get_schema` once, then `get_next` until the out-array comes back released
-    — with the four callbacks taken as C-ABI function pointers instead of read
-    out of a `CArrowArrayStream` whose slots are typed `raises thin`. See the
-    measurement in the block above for why that distinction is load-bearing.
+    — with the four callbacks taken as separate C-ABI function pointers instead
+    of read out of a `CArrowArrayStream`.
 
     ⚠ BUFFERS ARE COPIED on import (`_import_record_batch`), so the returned
     `Slab` retains NO pointer into the producer's memory and stays valid after

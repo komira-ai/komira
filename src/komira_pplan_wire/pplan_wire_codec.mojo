@@ -56,7 +56,7 @@
 #   needs it says so out loud instead of losing the cast.
 #
 # --- ScalarValue: ALL fields encoded ------------------------------------------
-#   Every one of the 20 fields, unconditionally. `ScalarValue` is flat POD +
+#   Every one of the 19 fields, unconditionally. `ScalarValue` is flat POD +
 #   one String, so there is no shape to refuse — encoding all of it is both
 #   cheaper than a per-kind case analysis and total by construction.
 #
@@ -65,8 +65,8 @@
 #   by the encoder and the decoder alike, and refused as PPLAN_WIRE_BAD_ENUM:
 #   a bool byte (0 or 1), a binary operator (BIN_ADD..BIN_MOD, BIN_EQ..BIN_GE,
 #   BIN_AND, BIN_OR), a unary operator (UN_NOT..UN_BIT_COUNT), an fs scheme
-#   (FS_SCHEME_FILE..FS_SCHEME_AZURE), a scalar kind (..SCALAR_KIND_ERROR),
-#   time unit (..SCALAR_TIME_UNIT_NANO) and error code (..XL_ERR_CIRCULAR).
+#   (FS_SCHEME_FILE..FS_SCHEME_AZURE), a scalar kind (..SCALAR_KIND_BINARY)
+#   and time unit (..SCALAR_TIME_UNIT_NANO).
 #   A negative count (LIMIT, row-window offset/length, and on decode a string,
 #   list, op or project length) is PPLAN_WIRE_NEGATIVE_COUNT. A PROJECT whose
 #   name count differs from its expression count is
@@ -99,10 +99,9 @@ from komira_plan_expr.expr import (
 )
 from komira_plan_expr.scalar_value import (
     ScalarValue,
-    SCALAR_KIND_ERROR,
+    SCALAR_KIND_BINARY,
     SCALAR_TIME_UNIT_NANO,
 )
-from komira_plan_expr.excel_error_code import XL_ERR_CIRCULAR
 from komira_plan_ir.logical_plan import ExprArray
 from komira_plan_ir.physical_plan import (
     ParquetSourceData,
@@ -128,7 +127,10 @@ comptime PPLAN_WIRE_MAGIC_1: UInt8 = 0x50  # 'P'
 comptime PPLAN_WIRE_MAGIC_2: UInt8 = 0x57  # 'W'
 comptime PPLAN_WIRE_MAGIC_3: UInt8 = 0x31  # '1'
 
-comptime PPLAN_WIRE_FORMAT_VERSION: UInt32 = 1
+comptime PPLAN_WIRE_FORMAT_VERSION: UInt32 = 2
+"""The only version `pplan_from_bytes` reads; every other one is refused by
+`PPLAN_WIRE_BAD_VERSION` before the body is read. Version 1 is refused: its
+scalar carried an error-code byte that this layout does not have."""
 
 comptime PPLAN_WIRE_BAD_MAGIC: String = "PPLAN_WIRE_BAD_MAGIC"
 comptime PPLAN_WIRE_BAD_VERSION: String = "PPLAN_WIRE_BAD_VERSION"
@@ -470,11 +472,10 @@ def _check_fs_scheme(s: UInt8) raises:
 
 
 def _check_scalar_codes(v: ScalarValue) raises:
-    _check_code("scalar kind", v._kind, v._kind <= SCALAR_KIND_ERROR)
+    _check_code("scalar kind", v._kind, v._kind <= SCALAR_KIND_BINARY)
     _check_code(
         "scalar time unit", v.time_unit, v.time_unit <= SCALAR_TIME_UNIT_NANO
     )
-    _check_code("scalar error code", v.error_code, v.error_code <= XL_ERR_CIRCULAR)
 
 
 def _check_count(what: String, n: Int) raises:
@@ -517,7 +518,6 @@ def _put_scalar(mut out: List[UInt8], v: ScalarValue) raises:
     _put_u8(out, v.time_unit)
     _put_i64(out, v.dec256_high_lo)
     _put_i64(out, v.dec256_high_hi)
-    _put_u8(out, v.error_code)
 
 
 def _get_i32(mut c: _Cursor, what: String) raises -> Int32:
@@ -551,7 +551,6 @@ def _get_scalar(mut c: _Cursor) raises -> ScalarValue:
     s.time_unit = _get_u8(c)
     s.dec256_high_lo = _get_i64(c)
     s.dec256_high_hi = _get_i64(c)
-    s.error_code = _get_u8(c)
     _check_scalar_codes(s)
     return s^
 

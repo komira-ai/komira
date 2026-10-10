@@ -14,8 +14,10 @@
 #   is_dir                  -> ListObjectsV2, delimiter "/", one key
 #   file_size               -> HeadObject
 #   read_at                 -> GetObject with Range
-#   read_ranges_prefetched  -> coalesced ranged GetObjects, one version
+#   read_ranges_prefetched  -> coalesced ranged GetObjects, up to the
+#                              in-flight bound at once
 #   read_footer             -> ONE GetObject with a suffix Range
+#   read_footer_of          -> the same, on a handle (pinned, below)
 #   open_write              -> nothing (the first request waits for bytes)
 #   write_at                -> UploadPart per full part (the first one
 #                              after CreateMultipartUpload)
@@ -24,24 +26,43 @@
 #   abort_write             -> AbortMultipartUpload when a part was sent
 #   delete                  -> DeleteObject (an absent key is not an error)
 #
-# ONE VERSION PER FETCH. `read_ranges_prefetched` hands every range of a call
-# to `S3Store.get_ranges_into`: near ranges are merged into one request, and
-# every request after the first carries `If-Match` with the ETag the first
-# answered, so an object overwritten during the fetch raises PRECONDITION
-# rather than returning bytes of two versions. The guarantee is per call:
-# `read_footer`, `read_at` and separate prefetches each read whatever version
-# is current when they are sent, and a server that answers without an ETag
-# gives the later requests of a fetch nothing to send in `If-Match`.
+# ONE VERSION PER HANDLE. An `S3FileHandle` keeps the ETag its first read
+# answered (`read_at`, `read_ranges_prefetched` or `read_footer_of`), and
+# every later read on it sends `If-Match` with that ETag. An object
+# overwritten while a handle reads it is answered 412, and the read raises
+# "S3Fs: s3://<bucket>/<key> changed after this handle first read it (ETag
+# <etag>); open it again to read the new version: " followed by the store's
+# PRECONDITION error, rather than returning bytes of two versions. A new
+# handle reads the version current when its first read is sent. Two limits:
+# `read_footer` takes a path, not a handle, so it pins nothing (a caller
+# that wants its footer and its column reads to be one version reads the
+# footer with `read_footer_of`); and a server that answers without an ETag
+# gives a handle nothing to pin.
+#
+# REQUESTS IN FLIGHT. komira_aws_core's send blocks its thread, and a store
+# is one connection, so S3Fs keeps several stores (worker `w` uses store
+# `w`; store 0 is the one every other verb uses) and runs concurrent
+# requests on threads (inflight.mojo). `read_ranges_prefetched` plans its
+# coalesced requests and keeps up to `S3FsOptions.prefetch_window(ranges)`,
+# clamped to `S3Config.max_inflight`, in flight; on a handle with no ETag
+# yet, the first request is sent alone and its ETag pins the handle before
+# the rest are sent. Each request writes only its own ranges' bytes of the
+# call's buffer. A store is built the first time a worker needs it and kept
+# for the file system's later calls.
 #
 # ONE REQUEST PER FOOTER. `read_footer` asks for the object's last bytes with
 # `Range: bytes=-<window>`; the 206's Content-Range gives the object's size,
 # which a HEAD would otherwise have had to fetch first.
 #
-# WRITES are S3 multipart uploads, sent one request at a time. `write_at`
-# buffers bytes and sends each full part of `S3FsOptions.upload_part_bytes`
-# (5 MiB at least, S3's floor for every part but the last); the upload is
-# created with the first part, so an object smaller than one part is a single
-# PutObject at `close_write` and leaves no upload behind. A failed part or
+# WRITES are S3 multipart uploads. `write_at` buffers bytes in parts of
+# `S3FsOptions.upload_part_bytes` (5 MiB at least, S3's floor for every part
+# but the last). With `upload_max_inflight` K = 1 each full part is sent as
+# it fills; with K > 1 full parts are held until K are buffered, then sent
+# K at once (one per worker store), and `close_write` sends the parts still
+# held, the last one included, the same way before it completes the upload.
+# The upload is created (on store 0) before its first part is sent, so an
+# object smaller than one part is a single PutObject at `close_write` and
+# leaves no upload behind. A failed part or
 # completion aborts the upload before the error is raised, and the handle is
 # then refused; `abort_write` is the caller's error path. A handle dropped
 # without `close_write` or `abort_write` leaves the parts it sent stored (and
@@ -56,19 +77,27 @@
 # system's in `S3FsOptions`. Nothing reads the environment.
 #
 # CLONES. The trait's verbs take `self` immutably and `clone()` must be
-# infallible, so the store is built lazily, behind an
-# `ArcPointer[Optional[S3Store]]` reached mutably through the Arc, and a clone
+# infallible, so the stores are built lazily, behind an
+# `ArcPointer[List[S3Store]]` reached mutably through the Arc, and a clone
 # gets a NEW empty Arc: two file systems never share a store (its connection
 # and HTTP client are not shared between threads), and none shares a retry
 # quota. A clone copies the configuration, the caller's `HttpClientConfig`,
 # the options, the credential source and the clock; the connector factory is
 # a thin function pointer (a code address, no heap).
 #
+# CREDENTIALS THAT EXPIRE. `StaticCredsSource` is one fixed credential and
+# fits keys that do not expire. For temporary credentials (an instance or
+# container role, STS, SSO, web identity) `T` is komira_aws_core's
+# `SharedCredsSource`, whose copies share ONE refreshing chain: a clone signs
+# with the credential the chain holds now, refreshed before it expires, and
+# the chain is resolved once for every clone. `ProcessCredsSource` is that
+# source over the process's environment and files.
+#
 # No UnsafePointer in any public signature, no wildcard-origin field.
 # =============================================================================
 
 
-from std.memory import ArcPointer, unsafe_memcpy
+from std.memory import ArcPointer, Pointer, unsafe_memcpy
 
 from komira_aws_core import AwsClock, AwsCredsSource
 from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
@@ -83,143 +112,20 @@ from komira_fs.footer_region import FooterRegion, speculative_tail_start
 from komira_fs.shallow_dir_entry import ShallowDirEntry, _shallow_basename
 from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
-from komira_objectstore.store import PREFETCH_DEPTH_S3_STANDARD
-from komira_objectstore.types import GetRange, RangeSet, WritePrecondition
+from komira_buffer.byte_view import ByteView
+from komira_objectstore.types import (
+    GetRange,
+    RangeSet,
+    STORE_ERR_PRECONDITION,
+    WritePrecondition,
+)
 
 from .config import S3Config
-from .store import S3Store, S3UploadedPart
-
-
-comptime S3_FS_ALL_RANGES = 0
-"""`S3FsOptions` `prefetch_max_inflight` for "every range of one
-`read_ranges_prefetched` call"."""
-
-comptime S3_MIN_PART_BYTES = 5 * 1024 * 1024
-"""S3's smallest part, for every part of a multipart upload but the last."""
-
-comptime S3_MAX_PART_BYTES = 5 * 1024 * 1024 * 1024
-"""S3's largest part."""
-
-comptime S3_FS_DEFAULT_PART_BYTES = 8 * 1024 * 1024
-"""The part size an `S3Fs` writes unless told otherwise."""
-
-comptime S3_FS_DEFAULT_UPLOAD_MAX_INFLIGHT = 8
-"""The parts one upload may have in flight unless told otherwise."""
-
-comptime S3_FS_UPLOAD_MAX_INFLIGHT_CAP = 16
-"""The most parts one upload may have in flight: each pins a part buffer."""
-
-
-@fieldwise_init
-struct _S3FsDefaults(Copyable, Movable):
-    """Selects `S3FsOptions`'s defaults constructor."""
-
-    pass
-
-
-struct S3FsOptions(Copyable, ImplicitlyCopyable, Movable, Deinitable):
-    """What an `S3Fs` decides beyond its store's `S3Config`. Every setting is
-    a constructor argument, checked there, and read through its accessor;
-    the defaults are S3's standard.
-
-    - `prefetch_max_inflight`: the requests one `read_ranges_prefetched` call
-      may have in flight: `S3_FS_ALL_RANGES` (0) for one per range of the
-      call, or a bound K >= 1. RECORDED, NOT YET ENFORCED: komira_aws_core's
-      send blocks its thread, so the store sends a fetch's requests one after
-      another whatever the bound; it is handed to the store's plan (clamped
-      to `S3Config.max_inflight`) for the non-blocking send to honour.
-    - `prefetch_depth`: what `prefetch_depth()` reports, the depth of the
-      reader's prefetch ring (`PREFETCH_DEPTH_S3_STANDARD`, 64, by default).
-    - `upload_part_bytes`: the size of every part of a multipart upload but
-      the last, `S3_MIN_PART_BYTES` to `S3_MAX_PART_BYTES` (8 MiB by
-      default). An object smaller than one part is one PutObject.
-    - `upload_max_inflight`: the parts one upload may have in flight, 1 to
-      `S3_FS_UPLOAD_MAX_INFLIGHT_CAP` (8 by default). RECORDED, NOT YET
-      ENFORCED: parts are sent one at a time until the send is non-blocking.
-    """
-
-    var _prefetch_max_inflight: Int
-    var _prefetch_depth: Int
-    var _upload_part_bytes: Int
-    var _upload_max_inflight: Int
-
-    def __init__(
-        out self,
-        *,
-        prefetch_max_inflight: Int = S3_FS_ALL_RANGES,
-        prefetch_depth: Int = PREFETCH_DEPTH_S3_STANDARD,
-        upload_part_bytes: Int = S3_FS_DEFAULT_PART_BYTES,
-        upload_max_inflight: Int = S3_FS_DEFAULT_UPLOAD_MAX_INFLIGHT,
-    ) raises:
-        """Refuses a setting out of its range (above), naming it."""
-        if prefetch_max_inflight < 0:
-            raise Error(
-                String("S3FsOptions: prefetch_max_inflight must be >= 0 (0 for every range), got ")
-                + String(prefetch_max_inflight)
-            )
-        if prefetch_depth < 1:
-            raise Error(
-                String("S3FsOptions: prefetch_depth must be >= 1, got ")
-                + String(prefetch_depth)
-            )
-        if upload_part_bytes < S3_MIN_PART_BYTES or upload_part_bytes > S3_MAX_PART_BYTES:
-            raise Error(
-                String("S3FsOptions: upload_part_bytes must be ")
-                + String(S3_MIN_PART_BYTES)
-                + " to "
-                + String(S3_MAX_PART_BYTES)
-                + ", got "
-                + String(upload_part_bytes)
-            )
-        if upload_max_inflight < 1 or upload_max_inflight > S3_FS_UPLOAD_MAX_INFLIGHT_CAP:
-            raise Error(
-                String("S3FsOptions: upload_max_inflight must be 1 to ")
-                + String(S3_FS_UPLOAD_MAX_INFLIGHT_CAP)
-                + ", got "
-                + String(upload_max_inflight)
-            )
-        self._prefetch_max_inflight = prefetch_max_inflight
-        self._prefetch_depth = prefetch_depth
-        self._upload_part_bytes = upload_part_bytes
-        self._upload_max_inflight = upload_max_inflight
-
-    def __init__(out self, _defaults: _S3FsDefaults):
-        """The defaults, without the checks (`standard`): it takes no
-        value, so it cannot make options the checks would refuse."""
-        self._prefetch_max_inflight = S3_FS_ALL_RANGES
-        self._prefetch_depth = PREFETCH_DEPTH_S3_STANDARD
-        self._upload_part_bytes = S3_FS_DEFAULT_PART_BYTES
-        self._upload_max_inflight = S3_FS_DEFAULT_UPLOAD_MAX_INFLIGHT
-
-    @staticmethod
-    def standard() -> S3FsOptions:
-        """The defaults, as `S3FsOptions()` gives them, without `raises`."""
-        return S3FsOptions(_S3FsDefaults())
-
-    @always_inline
-    def prefetch_max_inflight(self) -> Int:
-        return self._prefetch_max_inflight
-
-    @always_inline
-    def prefetch_depth(self) -> Int:
-        return self._prefetch_depth
-
-    @always_inline
-    def upload_part_bytes(self) -> Int:
-        return self._upload_part_bytes
-
-    @always_inline
-    def upload_max_inflight(self) -> Int:
-        return self._upload_max_inflight
-
-    def prefetch_window(self, num_ranges: Int) -> Int:
-        """The in-flight bound handed to the store for a call reading
-        `num_ranges` ranges: all of them, or the bound when it is smaller.
-        1 at least. Recorded, not yet enforced (above)."""
-        var window = num_ranges
-        if self._prefetch_max_inflight != S3_FS_ALL_RANGES:
-            window = min(window, self._prefetch_max_inflight)
-        return max(1, window)
+from .s3_fs_options import S3FsOptions
+from .errors import store_error_kind_from_message
+from .inflight import inflight_workers, run_bounded_inflight
+from .s3_fs_jobs import S3PartJobs, S3SpanJobs
+from .store import S3RangeRead, S3Store, S3UploadedPart
 
 
 struct S3WriteFile(Movable, Deinitable):
@@ -230,6 +136,8 @@ struct S3WriteFile(Movable, Deinitable):
     var _key: String
     var _upload_id: String
     var _pending: List[UInt8]
+    # Full parts not yet sent (upload_max_inflight > 1), in part order.
+    var _ready: List[List[UInt8]]
     var _parts: List[S3UploadedPart]
     var _written: Int64
     var _aborted: Bool
@@ -238,6 +146,7 @@ struct S3WriteFile(Movable, Deinitable):
         self._key = key^
         self._upload_id = String("")
         self._pending = List[UInt8]()
+        self._ready = List[List[UInt8]]()
         self._parts = List[S3UploadedPart]()
         self._written = Int64(0)
         self._aborted = False
@@ -256,21 +165,43 @@ struct S3WriteFile(Movable, Deinitable):
         return len(self._parts)
 
     @always_inline
+    def parts_held(self) -> Int:
+        """Full parts buffered and not yet sent."""
+        return len(self._ready)
+
+    @always_inline
     def bytes_written(self) -> Int64:
         """Every byte `write_at` accepted, sent or buffered."""
         return self._written
 
 
-@fieldwise_init
 struct S3FileHandle(Movable, Deinitable):
     """A handle returned by `S3Fs.open(key)`: the object key the reads
-    address. The connection lives on the S3Fs's store."""
+    address and the ETag its first read answered, which every later read
+    on it sends in `If-Match` (module header). The connection lives on the
+    S3Fs's store."""
 
     var _key: String
+    var _etag: String
+
+    def __init__(out self, var key: String):
+        self._key = key^
+        self._etag = String("")
 
     @always_inline
     def key(self) -> String:
         return self._key
+
+    @always_inline
+    def etag(self) -> String:
+        """The ETag the handle reads; "" until its first read has answered
+        one."""
+        return self._etag
+
+    def _pin(mut self, etag: String):
+        """Keeps `etag` when the handle has none yet."""
+        if self._etag.byte_length() == 0:
+            self._etag = etag
 
 
 def _to_buffer(bytes: Span[UInt8, _]) -> SharedAlignedBuffer[HeapRegion]:
@@ -286,6 +217,39 @@ def _to_buffer(bytes: Span[UInt8, _]) -> SharedAlignedBuffer[HeapRegion]:
     return SharedAlignedBuffer.from_owned(buf^)
 
 
+def _changed(bucket: String, key: String, etag: String, cause: Error) -> Error:
+    """`cause`, unless it is a PRECONDITION answer to a read that sent the
+    handle's `etag` in `If-Match`: then the handle's error, which names the
+    object and the ETag and ends with `cause`."""
+    var text = String(cause)
+    if etag.byte_length() == 0 or store_error_kind_from_message(text) != STORE_ERR_PRECONDITION:
+        return Error(text^)
+    return Error(
+        "S3Fs: s3://"
+        + bucket
+        + "/"
+        + key
+        + " changed after this handle first read it (ETag "
+        + etag
+        + "); open it again to read the new version: "
+        + text
+    )
+
+
+struct _Footer(Movable):
+    """A footer region and the ETag its answer carried."""
+
+    var region: FooterRegion
+    var etag: String
+
+    def __init__(out self, var region: FooterRegion, var etag: String):
+        self.region = region^
+        self.etag = etag^
+
+    def into_region(deinit self) -> FooterRegion:
+        return self.region^
+
+
 struct S3Fs[
     C: Connector,
     T: AwsCredsSource & Copyable,
@@ -295,9 +259,9 @@ struct S3Fs[
 
         def mk() raises -> MyConnector: ...
 
-        var fs = S3Fs[MyConnector, MyCreds, MyClock](
+        var fs = S3Fs[MyConnector, ProcessCredsSource, SystemAwsClock](
             "lake", S3Config.aws("us-east-1"), mk, HttpClientConfig.defaults(),
-            my_creds, my_clock,
+            my_creds, SystemAwsClock(),
         )
         var footer = fs.read_footer("events/part-0.parquet", 64 * 1024)
 
@@ -323,7 +287,8 @@ struct S3Fs[
     var _http_config: HttpClientConfig
     var _creds: Self.T
     var _clock: Self.K
-    var _store: ArcPointer[Optional[S3Store[Self.C, Self.T, Self.K]]]
+    # Store 0 serves every verb; stores 1.. are the workers' (module header).
+    var _stores: ArcPointer[List[S3Store[Self.C, Self.T, Self.K]]]
 
     def __init__(
         out self,
@@ -356,8 +321,8 @@ struct S3Fs[
         self._http_config = http_config.copy()
         self._creds = creds^
         self._clock = clock^
-        self._store = ArcPointer[Optional[S3Store[Self.C, Self.T, Self.K]]](
-            Optional[S3Store[Self.C, Self.T, Self.K]](None)
+        self._stores = ArcPointer[List[S3Store[Self.C, Self.T, Self.K]]](
+            List[S3Store[Self.C, Self.T, Self.K]]()
         )
 
     @staticmethod
@@ -395,9 +360,14 @@ struct S3Fs[
         )
 
     def _build_if_absent(self) raises:
-        ref slot = self._store[]
-        if not slot:
-            slot = Optional[S3Store[Self.C, Self.T, Self.K]](
+        self._ensure_stores(1)
+
+    def _ensure_stores(self, n: Int) raises:
+        """Builds stores until there are `n`, each over a connector of its
+        own from the factory."""
+        ref stores = self._stores[]
+        while len(stores) < n:
+            stores.append(
                 S3Store[Self.C, Self.T, Self.K](
                     self._config.copy(),
                     self._mk_connector,
@@ -406,6 +376,17 @@ struct S3Fs[
                     self._clock.copy(),
                 )
             )
+
+    def stores_built(self) -> Int:
+        """The stores this file system has built: 0 before its first verb,
+        then 1 plus the workers its widest concurrent call used."""
+        return len(self._stores[])
+
+    def new_connector(self) raises -> Self.C:
+        """A connector from the factory this file system's stores dial with,
+        made and not connected: a caller can ask it what it is (`is_tls()`)
+        without a request being sent."""
+        return self._mk_connector()
 
     @always_inline
     def bucket(self) -> String:
@@ -422,15 +403,16 @@ struct S3Fs[
         trait carries no recursion flag, and a caller filtering by glob
         re-filters the keys itself."""
         self._build_if_absent()
-        var result = self._store[].value().list(self._bucket, prefix, String(""))
+        var result = self._stores[][0].list(self._bucket, prefix, String(""))
         var out = List[String](capacity=len(result.objects))
         for i in range(len(result.objects)):
             out.append(result.objects[i].location.copy())
         return out^
 
     def open(self, path: String) raises -> Self.File:
-        """A handle on the object key `path`. Sends no request."""
-        return S3FileHandle(_key=path)
+        """A handle on the object key `path`. Sends no request; the handle's
+        first read pins the version it reads (module header)."""
+        return S3FileHandle(path)
 
     @always_inline
     def read_at(
@@ -440,9 +422,11 @@ struct S3Fs[
         length: Int64,
     ) raises -> SharedAlignedBuffer[HeapRegion]:
         """`length` bytes from `offset` of `file`: one GetObject with
-        `Range`. A zero length reads nothing and sends nothing; a negative
-        `offset` or `length`, or fewer bytes than asked for (the object ends
-        first), raises."""
+        `Range`, and `If-Match` with the handle's ETag once it has one (the
+        first read's answer pins it). A zero length reads nothing and sends
+        nothing; a negative `offset` or `length`, fewer bytes than asked for
+        (the object ends first), or an object changed since the handle's
+        first read, raises."""
         if offset < Int64(0) or length < Int64(0):
             raise Error(
                 "S3Fs.read_at: negative offset ("
@@ -456,7 +440,15 @@ struct S3Fs[
         if length == Int64(0):
             return SharedAlignedBuffer.from_owned(OwnedAlignedBuffer(0))
         self._build_if_absent()
-        var bytes = self._store[].value().get_range(self._bucket, file._key, offset, length)
+        var read: S3RangeRead
+        try:
+            read = self._stores[][0].get_range_read(
+                self._bucket, file._key, offset, length, file._etag
+            )
+        except e:
+            raise _changed(self._bucket, file._key, file._etag, e)
+        file._pin(read.etag)
+        ref bytes = read.bytes
         if Int64(len(bytes)) != length:
             raise Error(
                 "S3Fs.read_at: short read: asked for "
@@ -474,13 +466,17 @@ struct S3Fs[
         mut file: Self.File,
         ranges: List[Tuple[Int64, Int64]],
     ) raises -> Slab[SharedAlignedBuffer[HeapRegion]]:
-        """One buffer per `(offset, length)` range, in input order, all read
-        in ONE fetch of one version of the object (module header): the
-        ranges are coalesced, and every request after the first carries
-        `If-Match`. The ranges land in one buffer, and each returned buffer
-        shares its window of it (no second copy). A zero-length range is an
-        empty buffer and is not fetched; a negative offset or length raises,
-        and so does a range the object ends before (the store refuses it)."""
+        """One buffer per `(offset, length)` range, in input order, all of
+        the handle's version of the object (module header): the ranges are
+        coalesced, and every request carries `If-Match` with the handle's
+        ETag (on a handle with none yet, the first request is sent alone and
+        its answer pins it). Up to the in-flight bound of requests are sent
+        at once (module header). The ranges land in one buffer, and each
+        returned buffer shares its window of it (no second copy). A
+        zero-length range is an empty buffer and is not fetched; a negative
+        offset or length raises, and so does a range the object ends before
+        (the store refuses it) and an object changed since the handle's
+        first read."""
         var n = len(ranges)
         var fetched = RangeSet.empty()
         var at = List[Int](capacity=n)
@@ -511,22 +507,60 @@ struct S3Fs[
         if fetched.num_ranges() > 0:
             self._build_if_absent()
             var view = joined.view_range_mut(0, total)
-            # Every range is fetched in full or the store raises (a range
-            # past the object, a short or mismatched 206), so the result
-            # holds nothing more to check.
-            _ = self._store[].value().get_ranges_into(
-                self._bucket,
-                file._key,
-                fetched,
-                view,
+            var bound = min(
                 self._options.prefetch_window(fetched.num_ranges()),
+                self._config.max_inflight,
             )
+            # Every range is fetched in full or the store raises (a range
+            # past the object, a short or mismatched 206), so there is
+            # nothing more to check.
+            try:
+                self._fetch_pinned(file, fetched, view, bound)
+            except e:
+                raise _changed(self._bucket, file._key, file._etag, e)
 
         var shared = SharedAlignedBuffer.from_owned(joined^)
         var out = Slab[SharedAlignedBuffer[HeapRegion]]()
         for i in range(n):
             out.append(shared.share_range_as[HeapRegion](at[i], Int(ranges[i][1])))
         return out^
+
+    def _fetch_pinned[
+        o: Origin[mut=True]
+    ](
+        self,
+        mut file: Self.File,
+        fetched: RangeSet,
+        view: ByteView[mut=True, o],
+        bound: Int,
+    ) raises:
+        """The coalesced requests of `fetched` into `view`, up to `bound` at
+        once, all sending the handle's ETag (the first one alone, to pin it,
+        when the handle has none)."""
+        var planned = self._stores[][0].plan_range_fetch(
+            self._bucket, file._key, fetched, bound
+        )
+        file._pin(planned.etag)
+        var n = len(planned.plan.coalesced)
+        var first = 0
+        if file._etag.byte_length() == 0:
+            var answered = self._stores[][0].fetch_span_into(
+                self._bucket, file._key, planned.plan.coalesced[0], view, String("")
+            )
+            file._pin(answered)
+            first = 1
+        var workers = inflight_workers(n - first, bound)
+        self._ensure_stores(workers)
+        var jobs = S3SpanJobs(
+            Pointer(to=self._stores[]),
+            Pointer(to=planned.plan),
+            view,
+            self._bucket,
+            file._key,
+            file._etag,
+            first,
+        )
+        run_bounded_inflight(jobs, n - first, bound)
 
     @always_inline
     def prefetch_depth(self) -> Int:
@@ -545,10 +579,29 @@ struct S3Fs[
         again with a larger window.
 
         Raises if the object is smaller than the 8-byte parquet trailer, or
-        the answer is not the tail asked for."""
+        the answer is not the tail asked for. Pins nothing: a handle's reads
+        and this footer may be two versions (`read_footer_of` is not)."""
+        return self._footer(path, window, String("")).into_region()
+
+    def read_footer_of(self, mut file: Self.File, window: Int) raises -> FooterRegion:
+        """`read_footer` of the handle's object, as a read on the handle: it
+        sends `If-Match` with the handle's ETag when it has one, and pins
+        the handle to the footer's version when it has none, so the
+        handle's column reads after it are the footer's version. An object
+        changed since the handle's first read raises (module header)."""
+        var got: _Footer
+        try:
+            got = self._footer(file._key, window, file._etag)
+        except e:
+            raise _changed(self._bucket, file._key, file._etag, e)
+        file._pin(got.etag)
+        return got^.into_region()
+
+    def _footer(self, path: String, window: Int, if_match: String) raises -> _Footer:
         var w = max(window, 8)
         self._build_if_absent()
-        var tail = self._store[].value().get_suffix(self._bucket, path, Int64(w))
+        var tail = self._stores[][0].get_suffix(self._bucket, path, Int64(w), if_match)
+        var etag = tail.etag.copy()
         var size = Int(tail.total)
         var got_offset = Int(tail.offset)
         var got_len = len(tail.bytes)
@@ -574,7 +627,7 @@ struct S3Fs[
                 + path
                 + ")"
             )
-        return FooterRegion(tail^.into_bytes(), start, size)
+        return _Footer(FooterRegion(tail^.into_bytes(), start, size), etag^)
 
     def is_dir(self, path: String) raises -> Bool:
         """True iff some key exists under `path/`. S3 has no directories; a
@@ -587,7 +640,7 @@ struct S3Fs[
         if probe.byte_length() > 0 and not probe.endswith(String("/")):
             probe = probe + String("/")
         self._build_if_absent()
-        var page = self._store[].value().list_page(
+        var page = self._stores[][0].list_page(
             self._bucket, probe, String("/"), String(""), max_keys=1
         )
         return len(page.objects) > 0 or len(page.common_prefixes) > 0
@@ -607,7 +660,7 @@ struct S3Fs[
         if probe.byte_length() > 0 and not probe.endswith(String("/")):
             probe = probe + String("/")
         self._build_if_absent()
-        var result = self._store[].value().list(self._bucket, probe, String("/"))
+        var result = self._stores[][0].list(self._bucket, probe, String("/"))
         var out = List[ShallowDirEntry]()
         for i in range(len(result.common_prefixes)):
             out.append(
@@ -630,7 +683,7 @@ struct S3Fs[
         """The size of the object at `path` (HeadObject). Raises if the object
         is absent or the answer carries no size."""
         self._build_if_absent()
-        var meta = self._store[].value().head(self._bucket, path)
+        var meta = self._stores[][0].head(self._bucket, path)
         if meta.size < Int64(0):
             raise Error(
                 "S3Fs.file_size: HeadObject returned no Content-Length for key: " + path
@@ -642,7 +695,7 @@ struct S3Fs[
         trait's contract, which a spill release deleting a chunk twice
         relies on); any other failure raises."""
         self._build_if_absent()
-        self._store[].value().delete(self._bucket, path)
+        self._stores[][0].delete(self._bucket, path)
 
     def fsync_file(self, path: String) raises -> None:
         """Nothing: an object is durable once its PutObject or
@@ -682,10 +735,11 @@ struct S3Fs[
         data: Span[UInt8, _],
     ) raises -> Int64:
         """Appends `data` to the object and returns `len(data)`. Each time
-        `upload_part_bytes` are buffered they are sent as the next part (the
-        first creating the upload). A part that fails aborts the upload
-        before the error is raised, and the handle is refused from then on.
-        Empty input is a no-op."""
+        `upload_part_bytes` are buffered they make the next part: sent now
+        when `upload_max_inflight` is 1, else held until that many are, then
+        sent at once (the upload created before the first). A part that
+        fails aborts the upload before the error is raised, and the handle
+        is refused from then on. Empty input is a no-op."""
         if file._aborted:
             raise Error(
                 "S3Fs.write_at: the upload of " + file._key + " failed and was aborted"
@@ -700,7 +754,7 @@ struct S3Fs[
                 at += take
                 file._written += Int64(take)
                 if len(file._pending) == part_bytes:
-                    self._send_part(file)
+                    self._part_full(file)
         except e:
             raise self._abort_after(file, e)
         return Int64(n)
@@ -718,23 +772,30 @@ struct S3Fs[
 
     def close_write(self, var file: Self.WriteFile) raises -> None:
         """Commits the object: one PutObject of the buffered bytes when no
-        part was sent (an empty object included), else the last part, if
-        any bytes are buffered, and CompleteMultipartUpload. A failure
-        aborts the upload before the error is raised."""
+        part was sent or held (an empty object included), else the parts
+        still held and the last part, if any bytes are buffered, then
+        CompleteMultipartUpload. A failure aborts the upload before the
+        error is raised."""
         if file._aborted:
             raise Error(
                 "S3Fs.close_write: the upload of " + file._key + " failed and was aborted"
             )
         try:
             self._build_if_absent()
-            if file._upload_id.byte_length() == 0:
-                _ = self._store[].value().conditional_put(
+            if file._upload_id.byte_length() == 0 and len(file._ready) == 0:
+                _ = self._stores[][0].conditional_put(
                     self._bucket, file._key, file._pending, WritePrecondition.none()
                 )
                 return
-            if len(file._pending) > 0:
+            if len(file._ready) > 0:
+                if len(file._pending) > 0:
+                    var last = List[UInt8]()
+                    swap(last, file._pending)
+                    file._ready.append(last^)
+                self._send_ready(file)
+            elif len(file._pending) > 0:
                 self._send_part(file)
-            _ = self._store[].value().complete_multipart_upload(
+            _ = self._stores[][0].complete_multipart_upload(
                 self._bucket, file._key, file._upload_id, file._parts
             )
         except e:
@@ -747,19 +808,62 @@ struct S3Fs[
         if file._aborted or file._upload_id.byte_length() == 0:
             return
         self._build_if_absent()
-        self._store[].value().abort_multipart_upload(
+        self._stores[][0].abort_multipart_upload(
             self._bucket, file._key, file._upload_id
         )
+
+    def _part_full(self, mut file: Self.WriteFile) raises:
+        """The buffered part is full: sent now under a bound of 1, else
+        held, and the held parts sent once there are as many as the
+        bound."""
+        var bound = self._options.upload_max_inflight()
+        if bound == 1:
+            self._send_part(file)
+            return
+        var full = List[UInt8]()
+        swap(full, file._pending)
+        file._ready.append(full^)
+        if len(file._ready) >= bound:
+            self._send_ready(file)
+
+    def _send_ready(self, mut file: Self.WriteFile) raises:
+        """Sends the held parts at once, one per worker store, numbered on
+        from the parts already sent, after creating the upload if this is
+        its first part."""
+        self._build_if_absent()
+        if file._upload_id.byte_length() == 0:
+            file._upload_id = self._stores[][0].create_multipart_upload(
+                self._bucket, file._key
+            )
+        var n = len(file._ready)
+        var bound = self._options.upload_max_inflight()
+        self._ensure_stores(inflight_workers(n, bound))
+        var out = List[Optional[S3UploadedPart]](capacity=n)
+        for _ in range(n):
+            out.append(Optional[S3UploadedPart](None))
+        var jobs = S3PartJobs(
+            Pointer(to=self._stores[]),
+            Pointer(to=file._ready),
+            Pointer(to=out),
+            self._bucket,
+            file._key,
+            file._upload_id,
+            len(file._parts) + 1,
+        )
+        run_bounded_inflight(jobs, n, bound)
+        for i in range(n):
+            file._parts.append(out[i].take())
+        file._ready.clear()
 
     def _send_part(self, mut file: Self.WriteFile) raises:
         """Sends the buffered bytes as the next part, creating the upload
         first if this is its first part."""
         self._build_if_absent()
         if file._upload_id.byte_length() == 0:
-            file._upload_id = self._store[].value().create_multipart_upload(
+            file._upload_id = self._stores[][0].create_multipart_upload(
                 self._bucket, file._key
             )
-        var part = self._store[].value().upload_part(
+        var part = self._stores[][0].upload_part(
             self._bucket, file._key, file._upload_id, len(file._parts) + 1, file._pending
         )
         file._parts.append(part^)
@@ -771,11 +875,12 @@ struct S3Fs[
         error, with the upload id, so the upload can be found."""
         file._aborted = True
         file._pending = List[UInt8]()
+        file._ready = List[List[UInt8]]()
         if file._upload_id.byte_length() == 0:
             return Error(String(cause))
         try:
             self._build_if_absent()
-            self._store[].value().abort_multipart_upload(
+            self._stores[][0].abort_multipart_upload(
                 self._bucket, file._key, file._upload_id
             )
         except abort_error:

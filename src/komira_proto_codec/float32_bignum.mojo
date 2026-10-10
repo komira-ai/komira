@@ -1,6 +1,7 @@
 # =============================================================================
 # float32_bignum.mojo — fixed-width unsigned big integers for the float32
-# JSON writer and reader (`proto3_json_float.mojo`, `float32_parse.mojo`).
+# JSON writer and reader (`proto3_json_float.mojo`, `float32_parse.mojo`)
+# and the float64 reader (`float64_parse.mojo`).
 # =============================================================================
 #
 # A value is `InlineArray[UInt32, N]`, little-endian 32-bit limbs. Every

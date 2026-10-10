@@ -17,9 +17,8 @@
 # the core packages' deps stay minimal and that is load-bearing — almost every
 # package depends on it, so anything added to its deps goes upstream of nearly
 # everything. The codec needs `komira_proto_codec` and the generated `komira_plan_proto`
-# messages, so it lives in its own package ABOVE core. Same shape as
-# `komira_fs_registry`: the package whose job is to close over a lower layer's
-# types sits on top of it, never inside it.
+# messages, so it lives in its own package ABOVE core: the package whose job
+# is to close over a lower layer's types sits on top of it, never inside it.
 #
 # ============================ THE COVERAGE LEDGER ============================
 #
@@ -78,25 +77,19 @@
 #   state is constructible, and a codec that silently encoded around it would
 #   write a plan the writer never wrote.
 #
-#   ⚠ ASOF_JOIN'S FOUR PRE-SORT HINT LISTS REACH NO RENDER AT ANY VALUE.
-#   `plan_display` prints `AsofJoin(strategy=…, on=<l>=<r>, by=[…])` plus a
-#   `tolerance=<KIND>` that is SUPPRESSED when the kind is NONE, and stops —
-#   `left_sort_keys`, `left_sort_desc`, `right_sort_keys` and `right_sort_desc`
-#   are absent whether empty or not, and the output schema (left columns +
-#   right columns forced nullable) does not read them either. So four of the
-#   twelve fields are held by the IR-equality leg ALONE. Their failure mode is
-#   asymmetric and that is what makes them worth carrying: a non-empty hint
-#   ASSERTS "this side is already sorted, skip the sort phase", so dropping one
-#   costs time while inventing one produces wrong rows.
-#
-#   ⚠ AND THE TOLERANCE RENDERS AS A KIND, NEVER AS A NUMBER. `INT64` prints
-#   the same for a tolerance of 5 and one of 5000, so LEG 1 cannot see
-#   `int_val` or `float_val` at any value — and at kind NONE it cannot see the
-#   field at all, so a corpus using `AsofTolerance.none()` would be asserting
-#   over a suppressed render. All THREE slots are carried verbatim, including
-#   the one `kind` does not select: `AsofTolerance` is `@fieldwise_init` and
-#   public, so an off-kind payload is constructible and re-deriving it would
-#   silently rewrite the struct.
+#   ⚠ ASOF_JOIN'S TOLERANCE OFF-KIND SLOT REACHES NO RENDER.
+#   `plan_display` prints `AsofJoin(strategy=…, on=<l>=<r>, by=[…])`, then
+#   `tolerance=INT64(<int_val>)` or `tolerance=FLOAT64(<float_val>)` (nothing
+#   at kind NONE), then each NON-EMPTY pre-sort hint as
+#   `left_sorted=[quoted keys]/[dirs]` / `right_sorted=…`. So LEG 1 sees the hints and
+#   the selected tolerance value, but never the slot `kind` does not select,
+#   and at kind NONE it sees no tolerance at all. All THREE slots are carried
+#   verbatim, including the one `kind` does not select: `AsofTolerance` is
+#   `@fieldwise_init` and public, so an off-kind payload is constructible and
+#   re-deriving it would silently rewrite the struct. The hint lists are
+#   carried verbatim too: a non-empty hint ASSERTS "this side is already
+#   sorted, skip the sort phase", so dropping one costs time while inventing
+#   one produces wrong rows.
 #
 #   ★ VIEW_REF AND CSE_REF EACH HOLD TWO SCHEMAS AND THE WIRE CARRIES ONE.
 #   Both payloads declare an `output_schema` BESIDE the node's, and both
@@ -246,12 +239,14 @@
 #   the same root tag apart, nor two different ref-name lists of equal length.
 #   The IR-equality leg is the only thing that compares either.
 #
-#   ⚠ CAST CARRIES SIX PARTS AND THE RENDER EMITS TWO. `Expr.write_to` prints
-#   `Cast(<child>, <target>)`; `target_arrow`, `decimal_precision`,
-#   `decimal_scale` and `try_cast` reach NO render at ANY value, so LEG 1 and
-#   `structural_hash` are blind to all four and the IR-equality leg is the only
-#   thing that can see one dropped. Each therefore gets its own wire slot —
-#   re-deriving `target_arrow` from `target` at decode would be exactly the bug
+#   ⚠ CAST CARRIES SIX PARTS AND THE RENDER EMITS THE OTHER FOUR ONLY WHEN THEY
+#   DEVIATE. `Expr.write_to` prints `Cast(<child>, <target>` then
+#   `, arrow=<type>` when `target_arrow` is not `ArrowType.from_dtype(target)`,
+#   `, p=<p>, s=<s>` when either is non-zero, and `, try` for TRY_CAST. So
+#   LEG 1 sees a dropped part only when its value deviates; at the default it
+#   prints nothing, and the IR-equality leg is the only thing that compares
+#   it. Each part therefore gets its own wire slot — re-deriving
+#   `target_arrow` from `target` at decode would be exactly the bug
 #   `Expr.cast_preserving_arrow` exists to fix, re-committed one layer down.
 #
 #   ⚠ REGEXP RENDERS FOUR OF ITS SEVEN FIELDS *CONDITIONALLY*, WHICH IS A THIRD
@@ -277,15 +272,14 @@
 #   through `Expr.json_extract_from_parts` and not through `json_extract_json` /
 #   `json_extract_string`: same reason, same shape, as `cast_from_parts`.
 #
-#   ⚠ JSON_EXTRACT'S PATH IS CARRIED AS SEGMENTS, NOT AS THE JOINED STRING. The
-#   render rebuilds `$.a.b`, and that form is AMBIGUOUS where the list is not —
-#   `["a.b"]` and `["a", "b"]` print identically. Re-parsing at decode would
-#   also be a re-derivation, and it would silently split a segment in two.
-#   `parse_json_path` does produce the first list — the quoted segment
-#   `$."a.b"` parses to `["a.b"]` — but the render joins on `.` WITHOUT
-#   re-quoting, so the joined string is ambiguous and the wrong thing to decode
-#   from. Carrying segments is what keeps a dot-bearing key intact across the
-#   wire.
+#   ⚠ JSON_EXTRACT'S PATH IS CARRIED AS SEGMENTS, NOT AS A JOINED STRING. A
+#   path joined on `.` is AMBIGUOUS where the list is not — `["a.b"]` and
+#   `["a", "b"]` both join to `$.a.b`. (The render escapes a `.` inside a
+#   segment, `$.a\.b`, so it tells them apart; that is the render's escape,
+#   not `parse_json_path`'s syntax, so it is still not a form to decode from.)
+#   Re-parsing at decode would also be a re-derivation, and it would silently
+#   split a segment in two. Carrying segments is what keeps a dot-bearing key
+#   intact across the wire.
 #
 #   ⚠ MAP_GET IS THE `MathFn2` OPERAND TRAP IN A NEW PLACE. `parent` and `key`
 #   are both `WireExpr` recursion boxes and the pair is not interchangeable, so
@@ -345,7 +339,7 @@
 #   NAME. There are three, all on `WireField` and all `uint32` -> `UInt8`:
 #   `arrow_type_id`, `dict_index_type_id`, `child_type_ids[]`. See
 #   `_arrow_type_from_wire` — the check is MEMBERSHIP in the derived ArrowType
-#   vocabulary, not a range test, because 51 narrows losslessly and is still
+#   vocabulary, not a range test, because 50 narrows losslessly and is still
 #   not a type. A narrowing that does not raise does not fail; it succeeds at
 #   naming a DIFFERENT type, and a decoded plan with a different schema is a
 #   silently wrong plan that LEG 2 would compare happily.
@@ -430,7 +424,6 @@ from komira_plan_proto.plan_vocabulary import (
     ColSide,
     CorrelatedKind,
     DTypeCode,
-    ExcelErrorCode,
     ExtractField,
     FrameBound,
     FrameUnits,
@@ -536,7 +529,6 @@ from komira_plan_wire.plan_wire_vocabulary import (
     col_side_from_wire,
     correlated_kind_to_wire,
     correlated_kind_from_wire,
-    expr_tag_to_wire,
     extract_field_to_wire,
     extract_field_from_wire,
     join_algo_to_wire,
@@ -583,8 +575,6 @@ from komira_plan_wire.plan_wire_vocabulary import (
     scalar_kind_from_wire,
     scalar_time_unit_to_wire,
     scalar_time_unit_from_wire,
-    excel_error_code_to_wire,
-    excel_error_code_from_wire,
     param_tag_to_wire,
     param_tag_from_wire,
     pushdown_gate_mode_to_wire,
@@ -654,12 +644,12 @@ from komira_scan_source.source_variant import (
 # Format version + the refusal tokens
 # =============================================================================
 
-comptime PLAN_WIRE_FORMAT_VERSION: UInt32 = 2
+comptime PLAN_WIRE_FORMAT_VERSION: UInt32 = 4
 """THE VERSION A PLAIN (non-write) ENVELOPE DECLARES.
 
 ⚠ THIS IS NO LONGER "THE" VERSION — it is the FLOOR, and reading it as the only
 one is now a bug. A write-carrying envelope declares
-`PLAN_WIRE_WRITE_TARGET_MIN_VERSION` (3) instead; see
+`PLAN_WIRE_WRITE_TARGET_MIN_VERSION` (5) instead; see
 `plan_wire_supported_versions()` for what this build READS, and
 `_envelope_version_for` for what it WRITES.
 
@@ -695,7 +685,8 @@ answers is: CAN A READER THAT DID NOT BUMP MIS-READ THESE BYTES?
 VERSION 2 carries two changes:
   * the `WirePlan.tag` / `WireExpr.tag` retirement; and
   * six vocabulary fields moving from ENGINE-VERBATIM `uint32` to the derived
-    +1-offset enums — `WireScalar.kind` / `.time_unit` / `.error_code`,
+    +1-offset enums — `WireScalar.kind` / `.time_unit` / `.error_code` (the
+    last deleted in version 4),
     `WireParam.tag`, `WirePushdownGate.mode`, `WireScanBinding.snapshot_policy`.
     Same bytes, every value shifted by one, which is the meaning change this
     rule's first line has always been about.
@@ -705,15 +696,23 @@ THE FIRST RULE ABOVE ON PURPOSE. `WirePlanEnvelope.write_target` is a field
 whose OMISSION IS THE FAILURE: "ADD a field -> NO BUMP" is sound exactly when
 proto3's skip-what-you-do-not-know loses nothing the caller needed, and here it
 loses the entire point of the message — the reader runs the query, returns rows,
-writes no file, and raises nothing. So version 3 is declared ONLY by envelopes
-that carry field 3, which makes it a MINIMUM READER CAPABILITY rather than a
-format generation: a version-2 reader refuses a write envelope by name instead
-of executing half of it.
+writes no file, and raises nothing. So the write version (3 then, 5 now) is
+declared ONLY by envelopes that carry field 3, which makes it a MINIMUM READER
+CAPABILITY rather than a format generation: a version-2 reader refuses a write
+envelope by name instead of executing half of it.
+
+VERSIONS 4 AND 5 DELETE `WireScalar.error_code` (field 20; its number and name
+are reserved). Both envelope shapes carry scalars, so both move: a plain
+envelope declares 4 and a write-carrying one declares 5, and this build reads
+only `{4, 5}`. A reader of `{2, 3}` refuses either by
+`PLAN_WIRE_VERSION_MISMATCH`, and this build refuses 2 and 3 the same way.
+5 is still a minimum reader capability over 4: a write target under 4 is
+refused as understated.
 """
 
 
 def plan_wire_supported_versions() raises -> PlanWireVersionSet:
-    """THE VERSIONS THIS BUILD READS. `{2, 3}`.
+    """THE VERSIONS THIS BUILD READS. `{4, 5}`.
 
     ⚠ A FUNCTION AND NOT A `comptime`, because `PlanWireVersionSet` construction
     is `raises` (it refuses a version >= 32 rather than shifting past the end of
@@ -723,8 +722,8 @@ def plan_wire_supported_versions() raises -> PlanWireVersionSet:
     ⚠ AND IT IS A SET, WHICH IS THE WHOLE POINT. `>=` would claim that any
     reader speaking a lower version can read a higher one, which is precisely
     false for the CHANGE-A-MEANING case this format's version field exists for.
-    A future version 4 that re-meant `WirePlan.plan` would make this `{4}`, and
-    an ordering could not express that.
+    A DELETE-a-field bump needs the same: this build reads `{4, 5}` and
+    refuses 2 and 3, which an ordering could not express.
     """
     return PlanWireVersionSet.only(PLAN_WIRE_FORMAT_VERSION).plus(
         PLAN_WIRE_WRITE_TARGET_MIN_VERSION
@@ -878,7 +877,7 @@ def _col_ref_of_side(var name: String, side: UInt8) raises -> Expr:
         return Expr.left(name^)
     if side == COL_SIDE_RIGHT:
         return Expr.right(name^)
-    raise _malformed("EXPR_COL_REF with COL_SIDE " + String(Int(side)))
+    raise _malformed("EXPR_COL_REF with COL_SIDE " + String(Int(side)))  # cov: unreachable the vocabulary's from_wire already refused an undeclared value
 
 
 # =============================================================================
@@ -894,7 +893,7 @@ def _col_ref_of_side(var name: String, side: UInt8) raises -> Expr:
 # ★ THESE NUMBERS ARE PUBLISHED, AND THEY ARE NAMED.
 # The generated plan vocabulary DERIVES the `DTypeCode` proto enum from
 # these very `comptime` lines, so `plan_vocabulary.proto` carries
-# `_DT_INT64 = 5` and a Python or Excel reader decodes `dtype_code: _DT_INT64`
+# `_DT_INT64 = 5` and a Python or TypeScript reader decodes `dtype_code: _DT_INT64`
 # instead of a bare `5` it has nowhere to look up. Adding a constant here adds
 # a member there; MOVING or reusing one is never allowed, because a published
 # number is part of the format.
@@ -1031,8 +1030,8 @@ def _dtype_from_wire(c: DTypeCode) raises -> DType:
 # ★ THE BOUND IS DERIVED, NOT WRITTEN HERE. `arrow_type_is_declared` comes out
 # of the generated plan vocabulary's ArrowType space, whose members are generated
 # from `arrow_types.mojo` itself. So this is a MEMBERSHIP check, not a range
-# check — 51 fits in a UInt8 and narrows losslessly, and is still not a type —
-# and once `comptime NEW_TYPE = ArrowType(51)` is added to the engine and the
+# check — 50 fits in a UInt8 and narrows losslessly, and is still not a type —
+# and once `comptime NEW_TYPE = ArrowType(50)` is added to the engine and the
 # vocabulary is regenerated from the engine's tag declarations, it is admitted
 # here with no edit to the codec.
 #
@@ -1222,13 +1221,13 @@ def _opt_schema_from_wire(
 
 
 def _scalar_to_wire(v: ScalarValue) raises -> WireScalar:
-    """TOTAL: 18 `var`s, 18 slots. The struct is a flat union whose live arm is
+    """TOTAL: 19 `var`s, 19 slots. The struct is a flat union whose live arm is
     (`_kind`, `dtype`); every other slot is zero, and proto3 omits zeros, so
     totality is free on the wire.
 
-    THE THREE ENUM SLOTS GO THROUGH THE DERIVED VOCABULARY, so encoding a kind
-    / unit / error code the engine does not declare RAISES here rather than
-    writing bytes no reader can name."""
+    THE ENUM SLOTS GO THROUGH THE DERIVED VOCABULARY, so encoding a kind or
+    unit the engine does not declare RAISES here rather than writing bytes no
+    reader can name."""
     return WireScalar(
         _dtype_to_wire(v.dtype),
         v.int_val,
@@ -1249,7 +1248,6 @@ def _scalar_to_wire(v: ScalarValue) raises -> WireScalar:
         ScalarTimeUnit(Int(scalar_time_unit_to_wire(v.time_unit))),
         v.dec256_high_lo,
         v.dec256_high_hi,
-        ExcelErrorCode(Int(excel_error_code_to_wire(v.error_code))),
     )
 
 
@@ -1257,10 +1255,10 @@ def _scalar_from_wire(w: WireScalar) raises -> ScalarValue:
     """⚠ `kind` IS A DISCRIMINATOR, SO IT IS NEVER ASSIGNED UNCHECKED
     (`v._kind = UInt8(Int(w.kind))` would be the bug).
 
-    `_kind` selects which of the struct's 18 payload fields is live, so an
+    `_kind` selects which of the struct's 17 payload fields is live, so an
     out-of-vocabulary kind would produce a ScalarValue that reads a field
     nothing wrote, with no arm-presence check to turn a perturbation into a
-    refusal. All three enum slots go through the derived vocabulary, which
+    refusal. Both enum slots go through the derived vocabulary, which
     validates the RANGE BEFORE the narrowing rather than after it."""
     var v = ScalarValue()
     v.dtype = _dtype_from_wire(w.dtype_code)
@@ -1282,7 +1280,6 @@ def _scalar_from_wire(w: WireScalar) raises -> ScalarValue:
     v.time_unit = scalar_time_unit_from_wire(Int32(w.time_unit.number()))
     v.dec256_high_lo = w.dec256_high_lo
     v.dec256_high_hi = w.dec256_high_hi
-    v.error_code = excel_error_code_from_wire(Int32(w.error_code.number()))
     return v^
 
 
@@ -1715,9 +1712,8 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         # indistinguishable on those factories' plans and would silently
         # truncate a typed `json_extract[Int64]`.
         #
-        # ⚠ THE PATH IS CARRIED AS SEGMENTS. The render joins them into
-        # `$.a.b`, and that form cannot represent `["a.b"]` distinctly from
-        # `["a", "b"]`.
+        # ⚠ THE PATH IS CARRIED AS SEGMENTS. A path joined on `.` cannot
+        # represent `["a.b"]` distinctly from `["a", "b"]`.
         var jk = List[WireExpr]()
         jk.append(_expr_to_wire(e.json_extract_parent_ref()))
         json_extract.append(
@@ -1839,7 +1835,7 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
     else:
         raise Error(
             PLAN_WIRE_UNSUPPORTED_EXPR_TAG + ": '"
-            + expr_tag_wire_name(expr_tag_to_wire(tag))
+            + _expr_tag_name(tag)
             + "' (engine tag " + String(Int(tag)) + ") has no message arm in"
             + " plan.proto. See the COVERAGE LEDGER at the top of"
             + " plan_wire_codec.mojo." + _missing_wire_artefact_hint(tag)
@@ -1852,6 +1848,17 @@ def _expr_to_wire(e: Expr) raises -> WireExpr:
         struct_field_idx^, map_get^, json_extract^, window_fn^,
         string_fn^, string_fn_n^, udf_call^,
     )
+
+
+def _expr_tag_name(tag: UInt8) -> String:
+    """The wire name of an engine ExprTag, for a refusal message.
+
+    Total, unlike `expr_tag_to_wire`: the tags these refusals are about
+    include EXPR_BETWEEN and EXPR_SORT_KEY, whose wire numbers
+    plan_vocabulary.proto reserves, and `expr_tag_to_wire` raises on them.
+    Raising here would replace the PLAN_WIRE_UNSUPPORTED_EXPR_TAG refusal
+    with the vocabulary's untokened one."""
+    return expr_tag_wire_name(Int32(Int(tag)) + 1)
 
 
 def _missing_wire_artefact_hint(tag: UInt8) -> String:
@@ -1958,10 +1965,10 @@ def _expr_tag_of_arm(arm: Int) raises -> UInt8:
             + " retired `tag` field used to let a message name a kind it did"
             + " not carry, and this is that state, refused."
         )
-    raise _malformed(
-        "a WireExpr whose `node` oneof case is " + String(arm) + ", which"
-        + " plan.proto does not declare. A decoder that guessed an arm here"
-        + " would build an expression nobody wrote."
+    raise _malformed(  # cov: unreachable the generated decoder only assigns declared cases
+        "a WireExpr whose `node` oneof case is " + String(arm) + ", which"  # cov: unreachable see the line above
+        + " plan.proto does not declare. A decoder that guessed an arm here"  # cov: unreachable see the line above
+        + " would build an expression nobody wrote."  # cov: unreachable see the line above
     )
 
 
@@ -1972,22 +1979,22 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
     var tag = _expr_tag_of_arm(w._oneof0_case)
     if tag == EXPR_COL_REF:
         if not w.col_ref:
-            raise _malformed("EXPR_COL_REF with no col_ref payload")
+            raise _malformed("EXPR_COL_REF with no col_ref payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var side = col_side_from_wire(Int32(w.col_ref.value().side.number()))
         return _col_ref_of_side(String(w.col_ref.value().name), side)
     if tag == EXPR_COL_IDX:
         if not w.col_idx:
-            raise _malformed("EXPR_COL_IDX with no col_idx payload")
+            raise _malformed("EXPR_COL_IDX with no col_idx payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         return Expr.col_idx(Int(w.col_idx.value().index))
     if tag == EXPR_LITERAL:
         if not w.literal:
-            raise _malformed("EXPR_LITERAL with no literal payload")
+            raise _malformed("EXPR_LITERAL with no literal payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         return Expr.literal(_scalar_from_wire(w.literal.value()))
     if tag == EXPR_BINARY_OP:
         if len(w.binary_op) != 1:
-            raise _malformed(
-                "EXPR_BINARY_OP carries " + String(len(w.binary_op))
-                + " payloads; exactly 1 is legal"
+            raise _malformed(  # cov: unreachable the generated decoder sets the oneof case with its payload
+                "EXPR_BINARY_OP carries " + String(len(w.binary_op))  # cov: unreachable see the line above
+                + " payloads; exactly 1 is legal"  # cov: unreachable see the line above
             )
         var b = w.binary_op[0].copy()
         if len(b.left) == 0 or len(b.right) == 0:
@@ -1999,7 +2006,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         )
     if tag == EXPR_UNARY_OP:
         if not w.unary_op:
-            raise _malformed("EXPR_UNARY_OP with no unary_op payload")
+            raise _malformed("EXPR_UNARY_OP with no unary_op payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var u = w.unary_op[0].copy()
         if len(u.child) != 1:
             raise _malformed(
@@ -2012,7 +2019,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         )
     if tag == EXPR_ALIAS:
         if not w.alias_:
-            raise _malformed("EXPR_ALIAS with no alias payload")
+            raise _malformed("EXPR_ALIAS with no alias payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var a = w.alias_[0].copy()
         if len(a.child) != 1:
             raise _malformed(
@@ -2022,7 +2029,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         return Expr.alias(_expr_from_wire(a.child[0]), String(a.name))
     if tag == EXPR_IN_LIST:
         if not w.in_list:
-            raise _malformed("EXPR_IN_LIST with no in_list payload")
+            raise _malformed("EXPR_IN_LIST with no in_list payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var l = w.in_list[0].copy()
         if len(l.child) != 1:
             raise _malformed(
@@ -2035,7 +2042,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         return Expr.in_list_node(_expr_from_wire(l.child[0]), vals^)
     if tag == EXPR_CAST:
         if not w.cast:
-            raise _malformed("EXPR_CAST with no cast payload")
+            raise _malformed("EXPR_CAST with no cast payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var c = w.cast[0].copy()
         if len(c.child) != 1:
             raise _malformed(
@@ -2060,8 +2067,8 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         )
     if tag == EXPR_CORRELATED_SUBQUERY:
         if not w.correlated_subquery:
-            raise _malformed(
-                "EXPR_CORRELATED_SUBQUERY with no correlated_subquery payload"
+            raise _malformed(  # cov: unreachable the generated decoder sets the oneof case with its payload
+                "EXPR_CORRELATED_SUBQUERY with no correlated_subquery payload"  # cov: unreachable see the line above
             )
         var cs = w.correlated_subquery[0].copy()
         if not cs.inner_plan:
@@ -2099,7 +2106,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         )
     if tag == EXPR_WHEN:
         if not w.when:
-            raise _malformed("EXPR_WHEN with no when payload")
+            raise _malformed("EXPR_WHEN with no when payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var wh = w.when[0].copy()
         var cases = List[WhenCaseData]()
         for i in range(len(wh.cases)):
@@ -2133,7 +2140,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         )
     if tag == EXPR_AGG_FN:
         if not w.agg_fn:
-            raise _malformed("EXPR_AGG_FN with no agg_fn payload")
+            raise _malformed("EXPR_AGG_FN with no agg_fn payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var af = w.agg_fn[0].copy()
         return Expr.agg_fn(
             agg_fn_from_wire(Int32(af.op.number())),
@@ -2141,7 +2148,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         )
     if tag == EXPR_EXTRACT:
         if not w.extract:
-            raise _malformed("EXPR_EXTRACT with no extract payload")
+            raise _malformed("EXPR_EXTRACT with no extract payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var ex = w.extract[0].copy()
         # ⚠ MEMBERSHIP, NOT RANGE — THE SAME DISTINCTION THE ARROW-TYPE
         # NARROWING TURNS ON. `extract_field_from_wire` RAISES on wire 0 (an
@@ -2156,7 +2163,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         )
     if tag == EXPR_MATH_FN:
         if not w.math_fn:
-            raise _malformed("EXPR_MATH_FN with no math_fn payload")
+            raise _malformed("EXPR_MATH_FN with no math_fn payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var mf = w.math_fn[0].copy()
         return Expr.math_fn(
             math_fn1_from_wire(Int32(mf.op.number())),
@@ -2164,7 +2171,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         )
     if tag == EXPR_MATH_FN2:
         if not w.math_fn2:
-            raise _malformed("EXPR_MATH_FN2 with no math_fn2 payload")
+            raise _malformed("EXPR_MATH_FN2 with no math_fn2 payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var m2 = w.math_fn2[0].copy()
         # BOTH BOXES, IN ORDER. `_one_expr` on each rather than one call over a
         # concatenation: the two slots are separate recursion boxes and a
@@ -2177,7 +2184,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         )
     if tag == EXPR_SUBSTRING:
         if not w.substring:
-            raise _malformed("EXPR_SUBSTRING with no substring payload")
+            raise _malformed("EXPR_SUBSTRING with no substring payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var sb = w.substring[0].copy()
         # ⚠ `Expr.substring`'s `length` PARAMETER HAS A DEFAULT OF -1 AND IT IS
         # PASSED EXPLICITLY HERE. Relying on the default would make the decoder
@@ -2191,7 +2198,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         )
     if tag == EXPR_STRING_FN:
         if not w.string_fn:
-            raise _malformed("EXPR_STRING_FN with no string_fn payload")
+            raise _malformed("EXPR_STRING_FN with no string_fn payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var sf = w.string_fn[0].copy()
         return Expr.string_fn(
             string_fn_from_wire(Int32(sf.op.number())),
@@ -2199,7 +2206,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         )
     if tag == EXPR_STRING_FN_N:
         if not w.string_fn_n:
-            raise _malformed("EXPR_STRING_FN_N with no string_fn_n payload")
+            raise _malformed("EXPR_STRING_FN_N with no string_fn_n payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var sfn = w.string_fn_n[0].copy()
         # ⛔ THE ARITY IS CHECKED HERE, AGAINST `string_fn_n_arity`, BEFORE THE
         # NODE IS BUILT. `repeated` carries no length prefix, so a truncated
@@ -2248,7 +2255,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         # for it — and a registry lookup in here would make the same bytes
         # decode differently in two processes.
         if not w.udf_call:
-            raise _malformed("EXPR_UDF_CALL with no udf_call payload")
+            raise _malformed("EXPR_UDF_CALL with no udf_call payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var uc = w.udf_call[0].copy()
         # ⚠ THE EMPTY NAME IS REFUSED ON THE WAY IN TOO, NOT ONLY ON THE WAY
         # OUT. proto3 omits an empty string, so "never wrote the field" and
@@ -2276,7 +2283,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         )
     if tag == EXPR_STRING_OP:
         if not w.string_op:
-            raise _malformed("EXPR_STRING_OP with no string_op payload")
+            raise _malformed("EXPR_STRING_OP with no string_op payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var so = w.string_op[0].copy()
         return Expr.string_op(
             string_op_from_wire(Int32(so.op.number())),
@@ -2285,7 +2292,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         )
     if tag == EXPR_REGEXP:
         if not w.regexp:
-            raise _malformed("EXPR_REGEXP with no regexp payload")
+            raise _malformed("EXPR_REGEXP with no regexp payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var rx = w.regexp[0].copy()
         # `Expr.regexp` — the TOTAL factory — and not one of the ten
         # `regexp_*` ones. Every one of those PINS some subset of the seven
@@ -2306,7 +2313,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         )
     if tag == EXPR_STRUCT_FIELD:
         if not w.struct_field:
-            raise _malformed("EXPR_STRUCT_FIELD with no struct_field payload")
+            raise _malformed("EXPR_STRUCT_FIELD with no struct_field payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var sf = w.struct_field[0].copy()
         return Expr.struct_field(
             _one_expr(sf.parent, "WireStructField.parent"),
@@ -2314,8 +2321,8 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         )
     if tag == EXPR_STRUCT_FIELD_IDX:
         if not w.struct_field_idx:
-            raise _malformed(
-                "EXPR_STRUCT_FIELD_IDX with no struct_field_idx payload"
+            raise _malformed(  # cov: unreachable the generated decoder sets the oneof case with its payload
+                "EXPR_STRUCT_FIELD_IDX with no struct_field_idx payload"  # cov: unreachable see the line above
             )
         var sfi = w.struct_field_idx[0].copy()
         return Expr.struct_field_idx(
@@ -2324,7 +2331,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         )
     if tag == EXPR_MAP_GET:
         if not w.map_get:
-            raise _malformed("EXPR_MAP_GET with no map_get payload")
+            raise _malformed("EXPR_MAP_GET with no map_get payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var mg = w.map_get[0].copy()
         # BOTH BOXES, IN ORDER, `_one_expr` on each — the `MathFn2` discipline.
         # A message that filled `parent` and left `key` empty must be refused,
@@ -2335,7 +2342,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         )
     if tag == EXPR_JSON_EXTRACT:
         if not w.json_extract:
-            raise _malformed("EXPR_JSON_EXTRACT with no json_extract payload")
+            raise _malformed("EXPR_JSON_EXTRACT with no json_extract payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var je = w.json_extract[0].copy()
         # ★ `json_extract_from_parts`, NOT `json_extract_json` /
         # `json_extract_string`. Both of those DERIVE `output_type` (pinned to
@@ -2343,9 +2350,9 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         # derivations are exactly the fail-quiet shape: no other leg reads
         # `output_type` at any value, and re-parsing the JOINED string would
         # silently split a dot-bearing segment in two. ⚠ `parse_json_path`
-        # CAN produce such a segment (`$."a.b"`), and that does NOT rescue the
-        # joined form — the render joins on `.` without re-quoting, so
-        # `["a.b"]` and `["a","b"]` print identically. The narrowing on the
+        # CAN produce such a segment (`$."a.b"`), and that does NOT rescue a
+        # joined form — joined on `.`, `["a.b"]` and `["a","b"]` are the same
+        # string. The narrowing on the
         # type id is CHECKED by membership, the same way
         # `WireCast.target_arrow_type_id` is.
         var segs = List[String]()
@@ -2362,7 +2369,7 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
         )
     if tag == EXPR_WINDOW_FN:
         if not w.window_fn:
-            raise _malformed("EXPR_WINDOW_FN with no window_fn payload")
+            raise _malformed("EXPR_WINDOW_FN with no window_fn payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var wf = w.window_fn.value().copy()
         # `Expr.window_fn(...)` then `with_window_spec(...)` — the two-step is
         # the ONLY total path. The factory takes func / arg_col / arg_offset /
@@ -2385,10 +2392,10 @@ def _expr_from_wire(w: WireExpr) raises -> Expr:
     # only the 22 tags the ladder above handles and raises on everything else,
     # so this line fires only if the two fall out of step — which is exactly
     # when a reader must hear about it rather than fall through.
-    raise Error(
-        PLAN_WIRE_UNSUPPORTED_EXPR_TAG + ": '"
-        + expr_tag_wire_name(expr_tag_to_wire(tag))
-        + "' has no decode arm"
+    raise Error(  # cov: unreachable the if-chain above handles every tag its arm map returns
+        PLAN_WIRE_UNSUPPORTED_EXPR_TAG + ": '"  # cov: unreachable see the line above
+        + _expr_tag_name(tag)  # cov: unreachable see the line above
+        + "' has no decode arm"  # cov: unreachable see the line above
     )
 
 
@@ -2525,9 +2532,9 @@ def _params_from_wire(w: List[WireParam]) raises -> ScanParams:
         elif tag == PARAM_F64:
             v = ParamValue.of_f64(e.f)
         else:
-            raise Error(
-                PLAN_WIRE_UNSUPPORTED_PARAM_TAG + ": unknown param tag "
-                + String(Int(tag))
+            raise Error(  # cov: unreachable the vocabulary's from_wire already refused an undeclared value
+                PLAN_WIRE_UNSUPPORTED_PARAM_TAG + ": unknown param tag "  # cov: unreachable see the line above
+                + String(Int(tag))  # cov: unreachable see the line above
             )
         p.put(String(e.key), v^)
     return p^
@@ -2866,11 +2873,11 @@ def _source_from_wire(w: Optional[WireScanSource]) raises -> SourceVariant:
     var s = w.value().copy()
     if s._oneof0_case == 1:
         if not s.parquet:
-            raise _malformed("WireScanSource case=parquet with no payload")
+            raise _malformed("WireScanSource case=parquet with no payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         return SourceVariant(_parquet_from_wire(s.parquet.value()))
     if s._oneof0_case == 2:
         if not s.binding:
-            raise _malformed("WireScanSource case=binding with no payload")
+            raise _malformed("WireScanSource case=binding with no payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var tag = source_variant_tag_from_wire(
             Int32(s.binding.value().variant_tag.number())
         )
@@ -3184,17 +3191,15 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
     elif tag == PLAN_ASOF_JOIN:
         # Arm ordinal, not field number — `asof_join` is field 16, arm 13.
         arm = 13
-        # ⚠ FOUR OF THE TWELVE FIELDS REACH NO RENDER AT ANY VALUE. The
-        # `*_sort_keys` / `*_sort_desc` pairs are PRE-SORT HINTS ("this side is
-        # already sorted on these; skip the sort phase") and `plan_display`
-        # emits none of them, empty or not. Neither does the output schema.
-        # LEG 3 is the only thing that compares them, and the asymmetry is why
-        # they must be carried verbatim: dropping a hint costs a sort, and
-        # inventing one on a side that is not sorted produces wrong rows.
+        # The `*_sort_keys` / `*_sort_desc` pairs are PRE-SORT HINTS ("this
+        # side is already sorted on these; skip the sort phase"); `plan_display`
+        # emits them when non-empty. They are carried verbatim: dropping a hint
+        # costs a sort, and inventing one on a side that is not sorted produces
+        # wrong rows.
         #
-        # ⚠ THE TOLERANCE RENDERS AS A KIND AND IS SUPPRESSED AT `NONE`.
-        # `tolerance=INT64` prints identically for 5 and for 5000, so neither
-        # payload number is in the text at any value.
+        # ⚠ THE TOLERANCE RENDERS ITS KIND AND THE SELECTED SLOT ONLY, AND
+        # NOTHING AT `NONE`. The off-kind slot is in the text at no value, so
+        # LEG 3 is the only comparison it has.
         ref d = p.asof_join_data_ref()
         var lk = List[WirePlan]()
         lk.append(_plan_to_wire(d.left[]))
@@ -3615,10 +3620,10 @@ def _plan_tag_of_arm(arm: Int) raises -> UInt8:
             + " retired `tag` field used to let a message name a kind it did"
             + " not carry, and this is that state, refused."
         )
-    raise _malformed(
-        "a WirePlan whose `node` oneof case is " + String(arm) + ", which"
-        + " plan.proto does not declare. A decoder that guessed an arm here"
-        + " would build a plan nobody wrote."
+    raise _malformed(  # cov: unreachable the generated decoder only assigns declared cases
+        "a WirePlan whose `node` oneof case is " + String(arm) + ", which"  # cov: unreachable see the line above
+        + " plan.proto does not declare. A decoder that guessed an arm here"  # cov: unreachable see the line above
+        + " would build a plan nobody wrote."  # cov: unreachable see the line above
     )
 
 
@@ -3630,7 +3635,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
 
     if tag == PLAN_SCAN:
         if not w.scan:
-            raise _malformed("PLAN_SCAN with no scan payload")
+            raise _malformed("PLAN_SCAN with no scan payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.scan[0].copy()
         if d.has_table_stats:
             raise Error(
@@ -3671,7 +3676,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         )
     elif tag == PLAN_FILTER:
         if not w.filter:
-            raise _malformed("PLAN_FILTER with no filter payload")
+            raise _malformed("PLAN_FILTER with no filter payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.filter[0].copy()
         if d.has_udf:
             # ⚠ THE DECODED UDF IS UNBOUND — `registered_handle_id = None`.
@@ -3693,7 +3698,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
             )
     elif tag == PLAN_PROJECT:
         if not w.project:
-            raise _malformed("PLAN_PROJECT with no project payload")
+            raise _malformed("PLAN_PROJECT with no project payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.project[0].copy()
         var exprs = ExprArray()
         for i in range(len(d.exprs)):
@@ -3718,7 +3723,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
             )
     elif tag == PLAN_AGGREGATE:
         if not w.aggregate:
-            raise _malformed("PLAN_AGGREGATE with no aggregate payload")
+            raise _malformed("PLAN_AGGREGATE with no aggregate payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.aggregate[0].copy()
         var gb = ExprArray()
         for i in range(len(d.group_by)):
@@ -3746,7 +3751,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
             raise Error(_estimated_groups_message("decoded WireAggregateNode"))
     elif tag == PLAN_JOIN:
         if not w.join:
-            raise _malformed("PLAN_JOIN with no join payload")
+            raise _malformed("PLAN_JOIN with no join payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.join[0].copy()
         var residual: Optional[OwnedPointer[Expr]] = None
         if d.has_residual:
@@ -3764,7 +3769,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         )
     elif tag == PLAN_SORT:
         if not w.sort:
-            raise _malformed("PLAN_SORT with no sort payload")
+            raise _malformed("PLAN_SORT with no sort payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.sort[0].copy()
         out = LogicalPlan.sort(
             d.keys.copy(), d.descending.copy(),
@@ -3773,14 +3778,14 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         )
     elif tag == PLAN_LIMIT:
         if not w.limit:
-            raise _malformed("PLAN_LIMIT with no limit payload")
+            raise _malformed("PLAN_LIMIT with no limit payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.limit[0].copy()
         out = LogicalPlan.limit(
             Int(d.n), _one_child(d.child, "WireLimitNode"), Int(d.offset)
         )
     elif tag == PLAN_DISTINCT:
         if not w.distinct:
-            raise _malformed("PLAN_DISTINCT with no distinct payload")
+            raise _malformed("PLAN_DISTINCT with no distinct payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.distinct[0].copy()
         var cols: Optional[List[String]] = None
         if d.has_columns:
@@ -3792,7 +3797,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
             raise Error(_estimated_groups_message("decoded WireDistinctNode"))
     elif tag == PLAN_TOPN:
         if not w.topn:
-            raise _malformed("PLAN_TOPN with no topn payload")
+            raise _malformed("PLAN_TOPN with no topn payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.topn[0].copy()
         out = LogicalPlan.topn(
             d.keys.copy(), d.descending.copy(), Int(d.n),
@@ -3801,7 +3806,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         )
     elif tag == PLAN_UNION:
         if not w.union_all:
-            raise _malformed("PLAN_UNION with no union payload")
+            raise _malformed("PLAN_UNION with no union payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.union_all[0].copy()
         # `UnionData`'s children are a `List`, and `LogicalPlan.union` takes
         # the `List`.
@@ -3824,7 +3829,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         _check_union_branches(out)
     elif tag == PLAN_PARTITION_BY:
         if not w.partition_by:
-            raise _malformed("PLAN_PARTITION_BY with no partition_by payload")
+            raise _malformed("PLAN_PARTITION_BY with no partition_by payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.partition_by[0].copy()
         var pxs = List[PartitionExpr]()
         for i in range(len(d.partition_exprs)):
@@ -3836,8 +3841,8 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         )
     elif tag == PLAN_PARTITION_TOPN:
         if not w.partition_topn:
-            raise _malformed(
-                "PLAN_PARTITION_TOPN with no partition_topn payload"
+            raise _malformed(  # cov: unreachable the generated decoder sets the oneof case with its payload
+                "PLAN_PARTITION_TOPN with no partition_topn payload"  # cov: unreachable see the line above
             )
         var d = w.partition_topn[0].copy()
         var rc: Optional[String] = None
@@ -3856,7 +3861,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         )
     elif tag == PLAN_ASOF_JOIN:
         if not w.asof_join:
-            raise _malformed("PLAN_ASOF_JOIN with no asof_join payload")
+            raise _malformed("PLAN_ASOF_JOIN with no asof_join payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.asof_join[0].copy()
         # All four pre-sort hint lists are passed EXPLICITLY. The factory
         # defaults every one of them to empty, and empty MEANS "not sorted —
@@ -3877,7 +3882,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         )
     elif tag == PLAN_VIEW_REF:
         if not w.view_ref:
-            raise _malformed("PLAN_VIEW_REF with no view_ref payload")
+            raise _malformed("PLAN_VIEW_REF with no view_ref payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.view_ref.value().copy()
         # ★ `ViewRefData.output_schema` IS DERIVED HERE, NOT CARRIED.
         # `view_ref` copies its ONE argument into both the payload slot and
@@ -3903,7 +3908,7 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         )
     elif tag == PLAN_CSE_REF:
         if not w.cse_ref:
-            raise _malformed("PLAN_CSE_REF with no cse_ref payload")
+            raise _malformed("PLAN_CSE_REF with no cse_ref payload")  # cov: unreachable the generated decoder sets the oneof case with its payload
         var d = w.cse_ref.value().copy()
         # Same shape as VIEW_REF: `cse_ref` copies one schema argument
         # into both slots, the duplicate could not be made to fail, so the
@@ -3915,8 +3920,8 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
         )
     elif tag == PLAN_CAST_TO_VARCHAR:
         if not w.cast_to_varchar:
-            raise _malformed(
-                "PLAN_CAST_TO_VARCHAR with no cast_to_varchar payload"
+            raise _malformed(  # cov: unreachable the generated decoder sets the oneof case with its payload
+                "PLAN_CAST_TO_VARCHAR with no cast_to_varchar payload"  # cov: unreachable see the line above
             )
         var d = w.cast_to_varchar[0].copy()
         out = LogicalPlan.cast_to_varchar(
@@ -3925,10 +3930,10 @@ def _plan_from_wire(w: WirePlan) raises -> LogicalPlan:
     else:
         # UNREACHABLE BY CONSTRUCTION — `_plan_tag_of_arm` returns only the 16
         # tags the ladder handles. Kept for the same reason as its expr twin.
-        raise Error(
-            PLAN_WIRE_UNSUPPORTED_PLAN_TAG + ": '"
-            + plan_tag_wire_name(plan_tag_to_wire(tag))
-            + "' has no decode arm"
+        raise Error(  # cov: unreachable the if-chain above handles every tag its arm map returns
+            PLAN_WIRE_UNSUPPORTED_PLAN_TAG + ": '"  # cov: unreachable see the line above
+            + plan_tag_wire_name(plan_tag_to_wire(tag))  # cov: unreachable see the line above
+            + "' has no decode arm"  # cov: unreachable see the line above
         )
 
     _check_output_schema(
@@ -3948,7 +3953,7 @@ def plan_to_bytes(p: LogicalPlan) raises -> List[UInt8]:
     RAISES, by name, on any shape the wire cannot carry — see the COVERAGE
     LEDGER at the top of this file. Nothing is dropped silently.
 
-    The envelope declares `format_version = 2` and carries NO `write_target`:
+    The envelope declares `format_version = 4` and carries NO `write_target`:
     a plan alone means "run this and return the rows". To ask a receiver to
     WRITE the rows somewhere, use `plan_to_bytes_with_write_target`."""
     return encode_proto[WirePlanEnvelope](
@@ -3963,7 +3968,7 @@ def plan_to_bytes_with_write_target(
 ) raises -> List[UInt8]:
     """Encode a plan AND A DESTINATION — `COPY <plan> TO <target>` on the wire.
 
-    The envelope declares `format_version = 3`, which is not decoration: it is
+    The envelope declares `format_version = 5`, which is not decoration: it is
     what makes a reader that does not know field 3 REFUSE these bytes instead of
     skipping the field, running the query, returning rows and writing nothing.
     The version is derived from the shape (`_envelope_version_for`) rather than
@@ -4037,7 +4042,7 @@ struct DecodedPlanEnvelope(Movable):
 
     ⚠ `write_target` IS `Optional` AND MUST STAY THAT WAY. Absence is the
     ordinary case and means "return the rows" — the behaviour of every
-    format-version-2 envelope. Making it non-optional with a sentinel path
+    plain envelope. Making it non-optional with a sentinel path
     would put "no destination" and "a destination named empty-string" in the
     same value, which is the proto3 confusion `_check_write_target` refuses.
 
@@ -4124,11 +4129,11 @@ def _decode_envelope(var bytes: List[UInt8]) raises -> DecodedPlanEnvelope:
         # readings of the same bytes, and if they ever disagree the scanner has
         # a bug and the gate above is not gating what it claims. Reaching this
         # raise means exactly that, so it is kept and carries the same token.
-        raise Error(
-            PLAN_WIRE_VERSION_MISMATCH + ": these bytes declare format_version="
-            + String(Int(env.format_version)) + "; this build speaks "
-            + supported.render()
-            + ". ⚠ REACHED AFTER `plan_wire_admit` ADMITTED THEM, which means"
+        raise Error(  # cov: unreachable unless the prescan and the generated decoder diverge
+            PLAN_WIRE_VERSION_MISMATCH + ": these bytes declare format_version="  # cov: unreachable see the line above
+            + String(Int(env.format_version)) + "; this build speaks "  # cov: unreachable see the line above
+            + supported.render()  # cov: unreachable see the line above
+            + ". ⚠ REACHED AFTER `plan_wire_admit` ADMITTED THEM, which means"  # cov: unreachable see the line above
             " the prescan and the decoder disagree about where the version is."
         )
     if not env.plan:
@@ -4140,11 +4145,11 @@ def _decode_envelope(var bytes: List[UInt8]) raises -> DecodedPlanEnvelope:
     # understated envelope reaching an executor — so it is checked rather than
     # assumed.
     if env.write_target and env.format_version < PLAN_WIRE_WRITE_TARGET_MIN_VERSION:
-        raise Error(
-            PLAN_WIRE_WRITE_TARGET_VERSION_UNDERSTATED
-            + ": the decoder bound a `write_target` under format_version="
-            + String(Int(env.format_version))
-            + ". ⚠ REACHED AFTER `plan_wire_admit` ADMITTED THEM, which means"
+        raise Error(  # cov: unreachable unless the prescan and the generated decoder diverge
+            PLAN_WIRE_WRITE_TARGET_VERSION_UNDERSTATED  # cov: unreachable see the line above
+            + ": the decoder bound a `write_target` under format_version="  # cov: unreachable see the line above
+            + String(Int(env.format_version))  # cov: unreachable see the line above
+            + ". ⚠ REACHED AFTER `plan_wire_admit` ADMITTED THEM, which means"  # cov: unreachable see the line above
             " the prescan and the decoder disagree about whether field 3 is"
             " present."
         )

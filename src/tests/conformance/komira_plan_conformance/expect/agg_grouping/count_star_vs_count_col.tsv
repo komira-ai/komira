@@ -1,0 +1,11 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §2.1: COUNT(*) counts rows, COUNT(v) the rows whose v is not
+# NULL. k = 1: v 10, NULL; k NULL: v 5, 7, NULL; k = 2: v NULL, NULL, so
+# COUNT(v) is 0 there (§2.2: COUNT over no non-NULL input is 0). One NULL
+# group (§2.4). Types: §8.6.
+k:int64?	n:int64	nv:int64
+1	2	1
+\N	3	2
+2	2	0

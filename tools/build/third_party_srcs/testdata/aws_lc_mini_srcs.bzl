@@ -51,6 +51,7 @@ PUBLIC_HEADERS = [
     "include/openssl/base.h",
     "include/openssl/err.h",
     "include/openssl/mem.h",
+    "include/openssl/ssl.h",
     "include/openssl/unused.h",
 ]
 
@@ -62,3 +63,24 @@ PRIVATE_HEADERS = {
     "crypto/internal.h": "crypto/internal.h",
     "s2n_bignum.h": "third_party/s2n-bignum/include/s2n_bignum.h",
 }
+
+# ssl/CMakeLists.txt: add_library(ssl), libssl (C++ but for one C file).
+SSL_SRCS = [
+    "ssl/s3_lib.cc",
+    "ssl/ssl_decrepit.c",
+]
+
+# tool/CMakeLists.txt: add_executable(bssl), the bssl tool (C++).
+TOOL_SRCS = [
+    "tool/tool.cc",
+    "tool/server.cc",
+]
+
+# The other files SSL_SRCS and TOOL_SRCS #include (the public headers aside),
+# by archive path: they include them relatively.
+SSL_TOOL_HEADERS = [
+    "crypto/internal.h",
+    "ssl/internal.h",
+    "third_party/jitterentropy/jitterentropy.h",
+    "tool/internal.h",
+]

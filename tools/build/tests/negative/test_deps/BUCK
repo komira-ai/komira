@@ -1,0 +1,49 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+
+# mojo_library's `test_deps` (tools/build/mojo/test_deps.bzl), planted
+# defects. Every target here must fail; run_tests.sh (test 29) requires the
+# text quoted above each. The use that works is in
+# ../../functional/test_deps.
+
+# "unable to locate module 'tdhelper'": a test_deps package does not reach
+# the library's own compile.
+mojo_library(
+    name = "src_imports_test_dep",
+    srcs = ["src_imports/__init__.mojo"],
+    conda = False,
+    import_name = "src_imports",
+    test_deps = ["//functional/test_deps:tdhelper"],
+)
+
+# "unable to locate module 'tdhelper'": nor a consumer of the library (it
+# is not in the library's MojoInfo closure).
+mojo_binary(
+    name = "consumer_of_test_dep",
+    srcs = ["consumer/main.mojo"],
+    deps = ["//functional/test_deps:tdlib"],
+)
+
+export_file(
+    name = "not_a_package",
+    src = "consumer/main.mojo",
+)
+
+# "test_deps entry tests//negative/test_deps:not_a_package is not a Mojo
+# package", at analysis.
+mojo_library(
+    name = "not_mojo",
+    srcs = ["src_imports/__init__.mojo"],
+    conda = False,
+    import_name = "src_imports",
+    test_deps = [":not_a_package"],
+)
+
+# "is in both deps and test_deps", at analysis.
+mojo_library(
+    name = "also_in_deps",
+    srcs = ["src_imports/__init__.mojo"],
+    conda = False,
+    import_name = "src_imports",
+    deps = ["//functional/test_deps:tdhelper"],
+    test_deps = ["//functional/test_deps:tdhelper"],
+)

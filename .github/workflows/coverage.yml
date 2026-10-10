@@ -1,0 +1,354 @@
+# The line coverage of a pull request, and the branch coverage of the
+# libraries whose coverage gate reads branch records (docs/ci.md, "coverage.yml";
+# tools/build/coverage/README.md, "The coverage workflow"), shown as the check
+# run `coverage`: a summary and annotations on the lines of the "Files
+# changed" view. INFORMATIONAL: it is not `pr / check`, it is not a required
+# check, and nothing here can make `pr / check` red. Whether it becomes a
+# required check, or coverage is switched on in `pr / check` itself, is
+# decided after the tree-wide -O0/ptrace sweep (a library whose test fails at
+# -O0 or under kcov leaves its conda package unbuilt in coverage mode), not here.
+#
+# Two jobs, so that the job holding a write token runs no code of the pull
+# request:
+#   measure  contents: read and id-token: write (the farm connection), no
+#            write token: checks out the pull request's HEAD commit and runs
+#            .github/ci/coverage_measure.sh, which builds the coverage reports
+#            of the mojo_library targets the change touches on the farm
+#            (and the branch records of those whose gate reads them) and
+#            runs `covcheck report`; uploads the check run's request bodies
+#            and the summary as an artifact. A library whose coverage build
+#            fails is listed as not measured, one whose branch records fail
+#            as branch not measured, and the job stays green.
+#   post     checks: write, nothing else: no checkout, no farm, no buck2;
+#            downloads the artifact and sends the bodies (POST, then PATCHes
+#            in file order); a run it created and did not complete (a failed
+#            PATCH, a cancelled job) is completed by its last step.
+# A head commit cut before this workflow existed (it has no
+# .github/ci/coverage_measure.sh) still runs this file, which on
+# `pull_request` is the merge commit's: `measure` checks the head's tree
+# first (the function between the `# head_measured:` markers), and for such a
+# head prints a notice to merge main, writes the summary and skips every
+# later step and the whole `post` job: `measure` is green with the notice,
+# `post` is skipped and no `coverage` check run is posted; nothing is red.
+# The check reads two paths of the checkout and runs nothing from it.
+# Like pr.yml it runs only for a pull request from a branch of this
+# repository (a fork's run gets no farm credential) whose base is main (a
+# pull request stacked on another branch gets no coverage run until it is
+# retargeted to main and then pushed to: a retarget alone is an `edited`
+# event, which neither this file nor pr.yml listens for), on a GitHub-hosted
+# runner, with every action pinned.
+# It is not held by kci_workflow_check (rule R6 holds pr.yml, which this
+# file leaves as it is).
+name: coverage
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  # One group per pull request: a newer push to it cancels the older run.
+  group: coverage-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  measure:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts
+      id-token: write
+    outputs:
+      measured: ${{ steps.head.outputs.measured }}
+    steps:
+      # The pull request's HEAD commit, not the merge commit pr / check
+      # builds: the annotations are for the lines of the "Files changed"
+      # view, which is the head against its merge base with the base branch.
+      # The full history, for that merge base.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: the head can be measured
+        id: head
+        run: |
+          # head_measured: begin
+          # head_measured --dir D --output F
+          # Appends measured=yes to F (the step's output file) when the
+          # checkout D holds what `measure` runs: .github/ci/coverage_measure.sh
+          # and tools/build/coverage/BUCK (covcheck_bin). Otherwise appends
+          # measured=no and prints a notice naming what is missing: the head
+          # predates coverage measurement, and merging main into the branch
+          # measures it. Only tests for the two files; runs nothing of D.
+          # Returns 0 either way; bad usage 2.
+          head_measured() {
+            hm_dir="" hm_out=""
+            while [ $# -gt 0 ]; do
+              [ $# -ge 2 ] || { echo "head_measured: $1 has no value" >&2; return 2; }
+              case "$1" in
+                --dir) hm_dir=$2 ;;
+                --output) hm_out=$2 ;;
+                *) echo "head_measured: unknown argument $1" >&2; return 2 ;;
+              esac
+              shift 2
+            done
+            [ -d "$hm_dir" ] || { echo "head_measured: --dir '$hm_dir' is not a directory" >&2; return 2; }
+            [ -n "$hm_out" ] || { echo "head_measured: --output is required" >&2; return 2; }
+            hm_missing=""
+            for hm_f in .github/ci/coverage_measure.sh tools/build/coverage/BUCK; do
+              [ -f "$hm_dir/$hm_f" ] || hm_missing="$hm_missing $hm_f"
+            done
+            if [ -n "$hm_missing" ]; then
+              echo "::notice title=coverage not measured::The head commit predates coverage measurement (it has no$hm_missing); merge main into the branch to measure it."
+              echo measured=no >>"$hm_out"
+            else
+              echo measured=yes >>"$hm_out"
+            fi
+          }
+          # head_measured: end
+          head_measured --dir . --output "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/farm-connect
+        if: steps.head.outputs.measured == 'yes'
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+      - name: the buckconfig names the farm
+        if: steps.head.outputs.measured == 'yes'
+        run: |
+          for key in linux_x86_64_properties; do
+            ./buck2 audit config "komira_re.$key" --style json | grep -q '": *"[^"]' ||
+              { echo "the machine buckconfig sets no [komira_re] $key: this job would build on the runner"; exit 1; }
+          done
+      # covcheck as every coverage gate runs it, built without the coverage
+      # switch (its own libraries' packages would otherwise wait for their
+      # coverage runs).
+      - name: build covcheck
+        if: steps.head.outputs.measured == 'yes'
+        run: ./buck2 build '//tools/build/coverage:covcheck_bin[runnable]' --out "$RUNNER_TEMP/covcheck"
+      - name: measure
+        if: steps.head.outputs.measured == 'yes'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          .github/ci/coverage_measure.sh --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --covcheck "$RUNNER_TEMP/covcheck/covcheck_bin" --out "$RUNNER_TEMP/coverage"
+      # Also when the measure step failed (exit 1: an input or a tool is
+      # wrong), so the run's page says where to look.
+      - name: the summary
+        if: always()
+        env:
+          MEASURED: ${{ steps.head.outputs.measured }}
+        run: |
+          if [ "$MEASURED" = no ]; then
+            echo "## coverage: not measured (the head commit predates coverage measurement; merge main into the branch)" >> "$GITHUB_STEP_SUMMARY"
+          elif [ -f "$RUNNER_TEMP/coverage/publish/summary.md" ]; then
+            cat "$RUNNER_TEMP/coverage/publish/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## coverage: not measured (the measure step did not finish; its log says why)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      # The check run's request bodies, the summary, the result and every
+      # annotation (uncapped). No build log: the logs of this public
+      # repository's jobs are masked for the farm's address, an artifact is not.
+      # One name in every attempt of the run: "Re-run failed jobs" re-runs
+      # `post` alone, which then downloads the first attempt's artifact; a
+      # re-run of `measure` replaces it (overwrite).
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.head.outputs.measured == 'yes'
+        with:
+          name: coverage-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/coverage/publish
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+      - name: Stop buck2
+        if: always() && steps.head.outputs.measured == 'yes'
+        run: ./buck2 kill || true
+
+  post:
+    needs: measure
+    # Skipped (no artifact to post) when the head cannot be measured.
+    if: github.event.pull_request.head.repo.full_name == github.repository && needs.measure.outputs.measured == 'yes'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # The only write permission of this workflow. The job checks nothing out
+    # and runs nothing from the pull request: the artifact is data (JSON
+    # bodies, only ever passed to `gh api --input`), and the poster is
+    # written in this file, not read from the tree. The poster's look at the
+    # bodies is a shape check (file names, the first bytes of each body), not
+    # a trust boundary: a body could hold more fields, but whoever writes the
+    # bodies (the pull request's code) can also edit this file, which on
+    # `pull_request` is the pull request's own copy (forks run nothing). For
+    # the same reason the poster is inline rather than a base-commit
+    # checkout of a script: that checkout would need `contents: read` here
+    # and would guard nothing. The welded cases
+    # (.github/ci/tests/coverage_ci_cases.sh, the root BUCK's
+    # `coverage_ci_cases`) run both functions as they are written here,
+    # between their marker lines.
+    permissions:
+      checks: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: coverage-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/coverage
+      - name: post the check run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # post_checkrun: begin
+          # post_checkrun --dir D --head-sha SHA --repo OWNER/NAME --name N --pause S --id-file F
+          # Sends D's bodies, NNN.json from 000 with no gap and nothing else in
+          # D: 000.json as `POST repos/OWNER/NAME/check-runs`, then every later
+          # one in order as `PATCH .../check-runs/<id>`, one at a time with S
+          # seconds between requests (GitHub's secondary rate limits). The
+          # bodies' shape is checked first, as covcheck writes them: 000.json
+          # starts {"name":"N","head_sha":"SHA","status":"in_progress","output":{,
+          # the last {"status":"completed","conclusion":", any other
+          # {"output":{. F holds the created run's id from the POST until the
+          # last PATCH has completed the run, then is emptied (the next step,
+          # complete_checkrun, completes a run F still names). A refused set,
+          # a failed POST (then no PATCH) or a failed PATCH returns 1; bad
+          # usage 2.
+          post_checkrun() {
+            pc_dir="" pc_head="" pc_repo="" pc_name="" pc_pause="" pc_idf=""
+            while [ $# -gt 0 ]; do
+              [ $# -ge 2 ] || { echo "post_checkrun: $1 has no value" >&2; return 2; }
+              case "$1" in
+                --dir) pc_dir=$2 ;;
+                --head-sha) pc_head=$2 ;;
+                --repo) pc_repo=$2 ;;
+                --name) pc_name=$2 ;;
+                --pause) pc_pause=$2 ;;
+                --id-file) pc_idf=$2 ;;
+                *) echo "post_checkrun: unknown argument $1" >&2; return 2 ;;
+              esac
+              shift 2
+            done
+            case "$pc_head" in *[!0-9a-f]*|"") echo "post_checkrun: --head-sha '$pc_head' is not a commit id" >&2; return 2 ;; esac
+            [ "${#pc_head}" -eq 40 ] || { echo "post_checkrun: --head-sha '$pc_head' is not 40 hex digits" >&2; return 2; }
+            case "$pc_repo" in */*/*|/*|*/|*[!A-Za-z0-9_./-]*|"") echo "post_checkrun: --repo '$pc_repo' is not OWNER/NAME" >&2; return 2 ;; esac
+            case "$pc_repo" in */*) ;; *) echo "post_checkrun: --repo '$pc_repo' is not OWNER/NAME" >&2; return 2 ;; esac
+            case "$pc_name" in *[!A-Za-z0-9_.-]*|"") echo "post_checkrun: --name '$pc_name' is not a plain name" >&2; return 2 ;; esac
+            case "$pc_pause" in *[!0-9]*|"") echo "post_checkrun: --pause '$pc_pause' is not a number of seconds" >&2; return 2 ;; esac
+            [ -d "$pc_dir" ] || { echo "post_checkrun: --dir '$pc_dir' is not a directory" >&2; return 2; }
+            [ -n "$pc_idf" ] || { echo "post_checkrun: --id-file is required" >&2; return 2; }
+            pc_n=0
+            for pc_f in "$pc_dir"/*; do
+              if [ "$pc_f" != "$(printf '%s/%03d.json' "$pc_dir" "$pc_n")" ]; then
+                echo "post_checkrun: refused: $pc_f is not body $pc_n of a run (000.json, 001.json, ... with no gap and nothing else)" >&2
+                return 1
+              fi
+              pc_n=$((pc_n + 1))
+            done
+            [ "$pc_n" -ge 2 ] || { echo "post_checkrun: refused: $pc_n bodies; a run is a POST and at least one PATCH" >&2; return 1; }
+            pc_i=0
+            while [ "$pc_i" -lt "$pc_n" ]; do
+              pc_f=$(printf '%s/%03d.json' "$pc_dir" "$pc_i")
+              if [ "$pc_i" -eq 0 ]; then
+                pc_want="{\"name\":\"$pc_name\",\"head_sha\":\"$pc_head\",\"status\":\"in_progress\",\"output\":{"
+              elif [ "$pc_i" -eq $((pc_n - 1)) ]; then
+                pc_want='{"status":"completed","conclusion":"'
+              else
+                pc_want='{"output":{'
+              fi
+              if [ "$(head -c "${#pc_want}" "$pc_f")" != "$pc_want" ]; then
+                echo "post_checkrun: refused: $pc_f does not start $pc_want" >&2
+                return 1
+              fi
+              pc_i=$((pc_i + 1))
+            done
+            if ! pc_id=$(gh api --method POST "repos/$pc_repo/check-runs" --input "$pc_dir/000.json" --jq .id); then
+              echo "post_checkrun: POST repos/$pc_repo/check-runs failed; nothing more is sent" >&2
+              return 1
+            fi
+            case "$pc_id" in *[!0-9]*|"") echo "post_checkrun: the POST answered '$pc_id', not a check run id" >&2; return 1 ;; esac
+            printf '%s\n' "$pc_id" >"$pc_idf"
+            echo "post_checkrun: created check run $pc_id ($pc_dir/000.json)"
+            pc_i=1
+            while [ "$pc_i" -lt "$pc_n" ]; do
+              sleep "$pc_pause"
+              pc_f=$(printf '%s/%03d.json' "$pc_dir" "$pc_i")
+              if ! gh api --method PATCH "repos/$pc_repo/check-runs/$pc_id" --input "$pc_f" --silent; then
+                echo "post_checkrun: PATCH of check run $pc_id with $pc_f failed" >&2
+                return 1
+              fi
+              echo "post_checkrun: updated check run $pc_id ($pc_f)"
+              pc_i=$((pc_i + 1))
+            done
+            : >"$pc_idf"
+            echo "post_checkrun: check run $pc_id: 1 POST and $((pc_n - 1)) PATCH(es) sent"
+          }
+          # post_checkrun: end
+          # gh's host is this server's, whatever it is.
+          GH_HOST="${GITHUB_SERVER_URL#https://}"
+          export GH_HOST
+          post_checkrun --dir "$RUNNER_TEMP/coverage/checkrun" --head-sha "$HEAD_SHA" --repo "$GITHUB_REPOSITORY" --name coverage --pause 1 --id-file "$RUNNER_TEMP/checkrun_id"
+      # A run the step above created and did not complete (a failed PATCH, a
+      # cancelled or timed-out job: a newer push cancels this run) would stay
+      # in progress on the head commit for good. This step completes it with
+      # a fixed body. A cancel that ends the job before this step can send its
+      # PATCH leaves the run in progress (tools/build/coverage/README.md).
+      - name: complete an abandoned check run
+        if: failure() || cancelled()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          # complete_checkrun: begin
+          # complete_checkrun --repo OWNER/NAME --id-file F --conclusion neutral|cancelled
+          # When F names a check run (post_checkrun's id file), PATCHes it to
+          # completed with the conclusion and a fixed title and summary, then
+          # empties F. Nothing to complete (no F, or F empty) returns 0; a
+          # failed PATCH 1; bad usage 2.
+          complete_checkrun() {
+            cc_repo="" cc_idf="" cc_c=""
+            while [ $# -gt 0 ]; do
+              [ $# -ge 2 ] || { echo "complete_checkrun: $1 has no value" >&2; return 2; }
+              case "$1" in
+                --repo) cc_repo=$2 ;;
+                --id-file) cc_idf=$2 ;;
+                --conclusion) cc_c=$2 ;;
+                *) echo "complete_checkrun: unknown argument $1" >&2; return 2 ;;
+              esac
+              shift 2
+            done
+            case "$cc_repo" in */*/*|/*|*/|*[!A-Za-z0-9_./-]*|"") echo "complete_checkrun: --repo '$cc_repo' is not OWNER/NAME" >&2; return 2 ;; esac
+            case "$cc_repo" in */*) ;; *) echo "complete_checkrun: --repo '$cc_repo' is not OWNER/NAME" >&2; return 2 ;; esac
+            [ -n "$cc_idf" ] || { echo "complete_checkrun: --id-file is required" >&2; return 2; }
+            case "$cc_c" in
+              neutral)
+                cc_title="coverage: posting failed"
+                cc_sum="Sending this check run's bodies failed part way (the log of the job coverage / post says where), so it was completed with this text. The numbers are on the summary page of the coverage workflow's run and in its artifact." ;;
+              cancelled)
+                cc_title="coverage: cancelled"
+                cc_sum="The job sending this check run was cancelled before it completed the run (a newer push to the pull request cancels the older run), so it was completed with this text." ;;
+              *) echo "complete_checkrun: --conclusion '$cc_c' is not neutral or cancelled" >&2; return 2 ;;
+            esac
+            if [ ! -s "$cc_idf" ]; then
+              echo "complete_checkrun: no check run left in progress"
+              return 0
+            fi
+            cc_id=$(cat "$cc_idf")
+            case "$cc_id" in *[!0-9]*|"") echo "complete_checkrun: $cc_idf holds '$cc_id', not a check run id" >&2; return 1 ;; esac
+            if ! printf '{"status":"completed","conclusion":"%s","output":{"title":"%s","summary":"%s"}}\n' "$cc_c" "$cc_title" "$cc_sum" |
+              gh api --method PATCH "repos/$cc_repo/check-runs/$cc_id" --input - --silent; then
+              echo "complete_checkrun: PATCH of check run $cc_id failed; it stays in progress" >&2
+              return 1
+            fi
+            : >"$cc_idf"
+            echo "complete_checkrun: check run $cc_id completed ($cc_c)"
+          }
+          # complete_checkrun: end
+          GH_HOST="${GITHUB_SERVER_URL#https://}"
+          export GH_HOST
+          case "$JOB_STATUS" in cancelled) conclusion=cancelled ;; *) conclusion=neutral ;; esac
+          complete_checkrun --repo "$GITHUB_REPOSITORY" --id-file "$RUNNER_TEMP/checkrun_id" --conclusion "$conclusion"

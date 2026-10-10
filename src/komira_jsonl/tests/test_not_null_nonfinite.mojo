@@ -20,12 +20,12 @@
 #     is refused; the row output writer numbers rows across blocks and
 #     refuses FLOAT32 too; the row output writer refuses NaN in a NOT
 #     NULL second field behind a nullable first one; the fused range
-#     writer does not refuse a NaN in a row before row_start, which it
-#     never writes. Catches a writer that emits `null` into a NOT
-#     NULL column (the defect), one path that lacks the check, a check
-#     that reads column 0's nullability for every column, and a row
-#     number taken from the block instead of the output, and a range
-#     check that scans from row 0.
+#     writer does not refuse a NaN in a row before row_start, or in a row
+#     at or after row_end, which it never writes. Catches a writer that
+#     emits `null` into a NOT NULL column (the defect), one path that
+#     lacks the check, a check that reads column 0's nullability for every
+#     column, and a row number taken from the block instead of the output,
+#     and a range check that scans from row 0 or to the end of the batch.
 #   * test_writers_nullable_unchanged -- in a nullable column NaN/+-Inf and
 #     a NULL cell are still written as `null` by every writer, and a NOT
 #     NULL column of finite values is written as before; with a NOT NULL
@@ -34,12 +34,13 @@
 #     Catches a check that refuses too much, or reads column 0's
 #     nullability for the nullable column.
 #   * test_reader_refuses_null_in_not_null -- `null` in a NOT NULL FLOAT64,
-#     INT64 or STRING field, and an object without the field's key, raise
-#     the exact message with the line (blank lines counted); with a
-#     nullable field first, null and a missing key in the NOT NULL second
-#     field are refused. Catches a reader that materializes NULL into a
-#     NOT NULL field (the defect), and one that reads the first field's
-#     nullability instead of the value's field.
+#     INT64 or STRING field, and an object without the field's key (for
+#     each of those three types), raise the exact message with the line
+#     (blank lines counted); with a nullable field first, null and a
+#     missing key in the NOT NULL second field are refused. Catches a
+#     reader that materializes NULL into a NOT NULL field (the defect), a
+#     missing-key check limited to some column types, and one that reads
+#     the first field's nullability instead of the value's field.
 #   * test_reader_nullable_unchanged -- the same inputs read into nullable
 #     fields give NULLs, and NOT NULL fields with every value present read
 #     without NULLs and stay NOT NULL; with mixed nullability, null and a
@@ -334,6 +335,13 @@ def test_writers_refuse_nonfinite_in_not_null() raises:
     assert_equal(
         _text(buf), String('{"f":1.5}\n{"f":2.5}\n'), "fused_range [1, 3) skips row 0"
     )
+    # A NaN at row_end is never written either: the scan stops at row_end,
+    # not at the end of the batch.
+    buf.clear()
+    write_batch_jsonl_fused_range(buf, _f64_batch(_l(1.5, 2.5, nan64), False), 0, 2)
+    assert_equal(
+        _text(buf), String('{"f":1.5}\n{"f":2.5}\n'), "fused_range [0, 2) skips row 2"
+    )
     # Row output.
     assert_equal(
         _row_writer_error(_row_output(_l(0.5, 0.25, -inf64), False)),
@@ -476,6 +484,15 @@ def test_reader_refuses_null_in_not_null() raises:
     assert_equal(
         _read_error('{"s":null}\n', _schema1("s", ArrowType.STRING, False)),
         String("komira_jsonl: line 1: NOT NULL field 's' holds JSON null"),
+    )
+    # The missing-key refusal holds for every column type, not only FLOAT64.
+    assert_equal(
+        _read_error('{"i":1}\n{}\n', _schema1("i", ArrowType.INT64, False)),
+        String("komira_jsonl: line 2: NOT NULL field 'i' has no key in the object"),
+    )
+    assert_equal(
+        _read_error('{"s":"x"}\n{"t":1}\n', _schema1("s", ArrowType.STRING, False)),
+        String("komira_jsonl: line 2: NOT NULL field 's' has no key in the object"),
     )
     # Two fields, nullable `a` first and NOT NULL `b` second: the check
     # reads the nullability of the field the value belongs to, not the

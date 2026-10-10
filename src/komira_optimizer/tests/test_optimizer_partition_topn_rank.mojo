@@ -51,29 +51,7 @@ from komira_optimizer.optimizer_partition_topn import (
     _ENABLE_PF_RANK_FUSE,
     _PF_RANK_TIE_EPSILON,
 )
-from komira_libc.posix import _read_env
-
-
-# ---------------------------------------------------------------------------
-# ⚠ $TEST_TMPDIR, NOT A HARD-CODED `/tmp` PATH.
-#
-# The test runner makes `TEST_TMPDIR` (equal to `TMPDIR`) a fresh directory
-# for each run, so no two executions share it; a fixed `/tmp` path would be
-# shared by every execution on a worker. The `/tmp` fallback below is reached
-# only when neither variable is set.
-#
-# ⚠ `_read_env`, NOT `std.os.getenv` — Mojo's MLIR FFI legalization allows at
-# most ONE `getenv` declaration per link unit and `komira_libc.posix` is
-# the canonical one.
-# ---------------------------------------------------------------------------
-def _scratch_dir() -> String:
-    """The directory THIS execution may write scratch files into."""
-    var d = _read_env("TEST_TMPDIR")
-    if d.byte_length() == 0:
-        d = _read_env("TMPDIR")
-    if d.byte_length() == 0:
-        return String("/tmp")
-    return d
+from komira_runtime_paths import test_tmpdir
 
 
 # =============================================================================
@@ -90,11 +68,13 @@ def _schema_3col() -> Schema:
     return builder.build()
 
 
-def _scan_node() -> LogicalPlan:
-    """Create a dummy scan node."""
+def _scan_node() raises -> LogicalPlan:
+    """Create a dummy scan node. Its path is under the runner's
+    $TEST_TMPDIR (`test_tmpdir()` raises when that is unset), never a
+    shared `/tmp`."""
     var schema = _schema_3col()
     return LogicalPlan.scan(
-        (_scratch_dir() + String("/test.parquet")),
+        (test_tmpdir() + String("/test.parquet")),
         0,  # SOURCE_PARQUET
         schema^,
         Optional[List[String]](None),

@@ -237,14 +237,6 @@ struct ArrowType(ImplicitlyCopyable, Copyable, Equatable, Writable):
     comptime LIST_VIEW = ArrowType(48)
     comptime LARGE_LIST_VIEW = ArrowType(49)
 
-    # ERROR-VALUE TYPE: the logical type
-    # marker for an Excel #VALUE!-class error value. Used for schema inference
-    # of an error literal (`IFERROR(x, #N/A)`) and as the scalar-boundary type
-    # of a columnar `status=ERROR` row. The columnar carrier is a 3-state
-    # status lane + sparse code sidecar (the plan layer's excel error code), NOT a
-    # distinct physical buffer layout — this member is the logical marker.
-    comptime ERROR = ArrowType(50)
-
     # --- Lifecycle ---
 
     def __init__(out self, type_id: UInt8):
@@ -371,8 +363,6 @@ struct ArrowType(ImplicitlyCopyable, Copyable, Equatable, Writable):
             writer.write("union[sparse]")
         elif self == ArrowType.UNION_DENSE:
             writer.write("union[dense]")
-        elif self == ArrowType.ERROR:
-            writer.write("error")
         else:
             writer.write("unknown(", String(Int(self.type_id)), ")")
 

@@ -1,12 +1,36 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":defs.bzl", "cov_gate_dir")
 
-# covcheck: coverage reports (kcov's Cobertura, lcov) to per-package numbers,
+# covcheck: coverage reports (kcov's Cobertura, lcov, and the branch records
+# of tools/build/coverage/branch) to per-package numbers,
 # findings against the policy (target, ratchet floors, surviving mutants,
 # exemptions), a GitHub check run's request bodies, and the per-package build
 # gate. See README.md. The floors are DATA, `ratchet.tsv`; a test reads the
 # shipped file so it can never be left unparseable.
 export_file(
     name = "ratchet.tsv",
+    visibility = ["PUBLIC"],
+)
+
+# The coverage census (census.md): census.sh renders
+# docs/coverage_census.md and the rows of ratchet.tsv from census.tsv, and
+# the root BUCK's :coverage_census holds the three to each other.
+export_file(
+    name = "census.tsv",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "census.sh",
+    visibility = ["PUBLIC"],
+)
+
+# The policy, as data for the coverage workflow's cases (the root BUCK's
+# coverage_ci_cases), which parse it the way .github/ci/coverage_measure.sh does.
+export_file(
+    name = "policy.bzl",
     visibility = ["PUBLIC"],
 )
 
@@ -23,9 +47,24 @@ mojo_library(
         # the Cobertura reader: kcov's real shape, no branches from rate
         # attributes, the XML it accepts, every refusal, and Cobertura == lcov
         "tests/test_cobertura.mojo",
+        # branch record files (--branch-lcov, cov_branch_classify's): the
+        # strict reader and every refusal, the sum of an arm across tests
+        # ('-' counted, not taken), a location's decisions disagreeing
+        # between tests refused, one source of branch data per file, the
+        # branch numbers next to Cobertura lines (BelowTarget, the floor, no
+        # BranchNotMeasured, a file named with no arm measured), the checks
+        # over kept files only, one report naming a path twice refused, an
+        # unmeasured file whose arms ran said so, and their annotations
+        "tests/test_branch_lcov.mojo",
         # path mapping in its documented order (strip prefix, buck-out hash,
         # PKGDIR, outside vs unmapped) and a file's package
         "tests/test_paths.mojo",
+        # a test's generated main (a client's layout probe, named at its
+        # output path in the package) set aside as a test source, and every
+        # other unmapped path still an error: a missing file in a repository
+        # directory, another file of the output directory, the test's name
+        # in a repository directory, a report that is no test's
+        "tests/test_generated_tests.mojo",
         # every diff block shape: modified, added, deleted, renames, binary,
         # mode-only, omitted and zero counts, C-quoted paths
         "tests/test_diff.mojo",
@@ -34,24 +73,41 @@ mojo_library(
         "tests/test_exempt_mutants.mojo",
         # the source lexer: markers recognised only in a real comment (not
         # in a string, a docstring or another comment's text), CRLF, and the
-        # executable-line heuristic over every kind of line
+        # executable-line heuristic over every kind of line, trait
+        # requirements (no code) left out
         "tests/test_lexer.mojo",
+        # declaration reachability (report only): the functions a source
+        # declares (methods, multi-line and generic signatures, one-line
+        # bodies, nested functions, trait requirements left out, `def` in a
+        # string or comment ignored, scanner edges), each one's class
+        # (plain, always_inline, comptime_if), which ones no report gives a
+        # line, markers leaving their count, a branch-only file listing
+        # none, and analyze listing them, split by class, in both JSON
+        # results without changing any number or finding
+        "tests/test_decls.mojo",
         # the full-source denominator: a measured package's source file no
         # report names counts uncovered and raises UnmeasuredFile
         "tests/test_full_source.mojo",
+        # declaration-only files: a fixture of bodiless trait methods,
+        # comptime values and imports no test compiled counts no line and is
+        # a DeclarationOnlyFile note; the near-miss fixture (a default
+        # method body with code) and a table of near misses still count
+        "tests/test_declaration_only.mojo",
         # the ratchet grammar, the shipped ratchet.tsv, every comparison
         # outcome, and the proposed file
         "tests/test_ratchet.mojo",
         # the shared computation: merged reports, test sources both ways,
         # exemptions, mutants, the target, conclusions per mode, rounding, and
-        # the gate's numbers equal to the report's
+        # the gate's numbers equal to the report's, test-only packages'
+        # findings as information
         "tests/test_analyze.mojo",
         # check-run batching, annotation scope/order/ranges/levels, changed-line
         # coverage, the summary's size limit, JSON escaping
         "tests/test_report.mojo",
         # the command line end to end: the summary golden, check-run files,
         # result JSON, proposed ratchet, gate == report, the annotation cap
-        # and the full annotations file, every exit code
+        # and the full annotations file, every exit code, --info-package
+        # (information, notices, a gate passing in enforce mode)
         "tests/test_cli.mojo",
     ],
     test_data = {
@@ -60,6 +116,10 @@ mojo_library(
             "tests/fixtures/equiv.info",
             "tests/fixtures/equiv.xml",
             "tests/fixtures/kcov_trimmed.xml",
+        ],
+        "tests/test_declaration_only.mojo": [
+            "tests/fixtures/decl/declaration_only.mojo",
+            "tests/fixtures/decl/near_miss.mojo",
         ],
         "tests/test_ratchet.mojo": {
             "tools/build/coverage/ratchet.tsv": ":ratchet.tsv",
@@ -88,4 +148,29 @@ mojo_binary(
         "//src/komira_json:komira_json",
     ],
     visibility = ["PUBLIC"],
+)
+
+# The directory every mojo_library's coverage gate runs from
+# (tools/build/mojo/coverage.bzl; README.md, "The build gate"): cov_gate.sh,
+# covcheck_bin and ratchet.tsv. The Mojo libraries covcheck_bin depends on
+# cannot have it as a dependency (a gate of their own): they are the ledger
+# COVERAGE_NO_GATE of policy.bzl, held equal to that closure by no_gate.bxl.
+cov_gate_dir(
+    name = "cov_gate",
+    exec_compatible_with = LINUX_X86_64,
+    visibility = ["PUBLIC"],
+)
+
+# For planted defects (the tests cell copies it with one fault: test 46).
+export_file(
+    name = "cov_gate.sh",
+    visibility = ["PUBLIC"],
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = [
+        "census.sh",
+        "cov_gate.sh",
+    ],
 )

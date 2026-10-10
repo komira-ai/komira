@@ -1,0 +1,49 @@
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":ipc_fuzz_files.bzl", "IPC_FUZZ_FILES")
+
+# apache/arrow-testing (github.com/apache/arrow-testing), the Apache Arrow
+# project's shared test data, Apache-2.0 licensed (LICENSE.txt in the
+# archive, extracted below; the repository has no NOTICE file at this
+# commit), at one pinned commit of its default branch. Only its Arrow IPC
+# fuzz regression corpus is used: data/arrow-ipc-stream/ and
+# data/arrow-ipc-file/, the streams and files (most invalid) that once
+# crashed or misled the Arrow C++ IPC reader, kept upstream as a regression
+# corpus (ipc_fuzz_files.bzl lists them). Nothing of it is committed here:
+# the archive is fetched at build time, checked against its sha256 and size,
+# and the listed files extracted from it. The sha256 and size are of the
+# archive as downloaded, twice, from the URL below; the two downloads agreed.
+#
+# Test data of //src/komira_arrow_ipc only, whose corpus test feeds every file
+# to the IPC stream or file decode path. No library or binary depends on it.
+# The integration directories beside the corpus (data/arrow-ipc-stream/
+# integration/) hold valid files and are not extracted.
+#
+# A newer pin is `_COMMIT`, `_SHA256` and `_SIZE` here, the list (names and
+# counts) in ipc_fuzz_files.bzl, the counts and the accepted-file list in
+# src/komira_arrow_ipc/tests/test_ipc_fuzz_corpus.mojo, and a re-read of
+# that test's verdicts against the new files.
+_COMMIT = "9ff285c88565f0f6abc855918c6a342e70e4909c"
+_SHA256 = "507609ccd0912a111f2ee89d108176baded8c8f22fd845c1686d7ddd462c3510"
+_SIZE = 4159134
+
+pinned_file(
+    name = "arrow-testing.tar.gz",
+    url = "https://github.com/apache/arrow-testing/archive/{}.tar.gz".format(_COMMIT),
+    sha256 = _SHA256,
+    size_bytes = _SIZE,
+)
+
+# One directory: LICENSE.txt and data/<path> for every path in
+# ipc_fuzz_files.bzl. A listed file missing from the archive fails the
+# extraction.
+archive_files(
+    name = "files",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":arrow-testing.tar.gz",
+    one_tree = True,
+    files = ["LICENSE.txt"] + ["data/" + f for f in IPC_FUZZ_FILES],
+    strip_prefix = "arrow-testing-" + _COMMIT,
+    visibility = ["//src/komira_arrow_ipc/..."],
+)

@@ -3,9 +3,10 @@
 #
 # Every verb meets one error answer and raises it under the restJson1 code
 # SES names in `X-Amzn-Errortype`, with the body's `message`: a create of
-# an identity or configuration set that already exists (400), a read,
-# binding or delete of a missing identity (404), and a send SES rejects
-# (400). None is a status or code botocore retries, so each call is one
+# an identity, a configuration set or an event destination that already
+# exists (400), a read, binding, MAIL FROM change or delete of a missing
+# identity (404), a delete of a missing configuration set (404), and a send
+# SES rejects (400). None is a status or code botocore retries, so each call is one
 # request. Two verbs are answered successfully.
 #
 # Then each verb's request as it reached the wire: the client is given
@@ -16,15 +17,20 @@
 from komira_aws_sesv2.komira_aws_sesv2 import (
     SESv2Body,
     SESv2Content,
+    SESv2CreateConfigurationSetEventDestinationRequest,
     SESv2CreateConfigurationSetRequest,
     SESv2CreateEmailIdentityRequest,
+    SESv2DeleteConfigurationSetRequest,
     SESv2DeleteEmailIdentityRequest,
     SESv2Destination,
     SESv2EmailContent,
     SESv2EndpointConfig,
+    SESv2EventDestinationDefinition,
     SESv2GetEmailIdentityRequest,
     SESv2Message,
     SESv2PutEmailIdentityConfigurationSetAttributesRequest,
+    SESv2PutEmailIdentityMailFromAttributesRequest,
+    SESv2SnsDestination,
     SESv2Client,
     SESv2SendEmailRequest,
 )
@@ -104,6 +110,17 @@ def _mk_not_found() raises -> ScriptedConnector:
     )
 
 
+def _mk_no_set() raises -> ScriptedConnector:
+    return ScriptedConnector.with_stream(
+        _answer(
+            404,
+            "Not Found",
+            '{"message":"Configuration set <mail-example-com> does not exist."}',
+            "X-Amzn-Errortype: NotFoundException:\r\n",
+        )
+    )
+
+
 def _mk_rejected() raises -> ScriptedConnector:
     return ScriptedConnector.with_stream(
         _answer(
@@ -162,6 +179,20 @@ def _bind() -> SESv2PutEmailIdentityConfigurationSetAttributesRequest:
     return input^
 
 
+def _mail_from() -> SESv2PutEmailIdentityMailFromAttributesRequest:
+    var input = SESv2PutEmailIdentityMailFromAttributesRequest(String("mail.example.com"))
+    input.set_mail_from_domain(String("bounce.mail.example.com"))
+    return input^
+
+
+def _feedback() -> SESv2CreateConfigurationSetEventDestinationRequest:
+    var dest = SESv2EventDestinationDefinition()
+    dest.set_enabled(True)
+    dest.set_matching_event_types([String("BOUNCE"), String("COMPLAINT")])
+    dest.set_sns_destination(SESv2SnsDestination(String("arn:aws:sns:us-east-1:000000000000:ses-feedback")))
+    return SESv2CreateConfigurationSetEventDestinationRequest(String("mail-example-com"), String("feedback"), dest^)
+
+
 # ---- answered ----------------------------------------------------------------
 
 
@@ -217,6 +248,39 @@ def test_put_configuration_set_attributes_not_found() raises:
         )
     ):
         _ = client.put_email_identity_configuration_set_attributes(_bind())
+
+
+def test_put_mail_from_attributes_not_found() raises:
+    var client = _client(_mk_not_found)
+    with assert_raises(
+        contains=(
+            "PutEmailIdentityMailFromAttributes failed: HTTP 404 NotFoundException"
+            " Email identity mail.example.com does not exist."
+        )
+    ):
+        _ = client.put_email_identity_mail_from_attributes(_mail_from())
+
+
+def test_create_event_destination_exists() raises:
+    var client = _client(_mk_exists)
+    with assert_raises(
+        contains=(
+            "CreateConfigurationSetEventDestination failed: HTTP 400 AlreadyExistsException"
+            " Resource already exists."
+        )
+    ):
+        _ = client.create_configuration_set_event_destination(_feedback())
+
+
+def test_delete_configuration_set_not_found() raises:
+    var client = _client(_mk_no_set)
+    with assert_raises(
+        contains=(
+            "DeleteConfigurationSet failed: HTTP 404 NotFoundException"
+            " Configuration set <mail-example-com> does not exist."
+        )
+    ):
+        _ = client.delete_configuration_set(SESv2DeleteConfigurationSetRequest(String("mail-example-com")))
 
 
 def test_send_email_rejected() raises:
@@ -298,6 +362,45 @@ def test_put_configuration_set_attributes_on_the_wire() raises:
         )
 
 
+def test_put_mail_from_attributes_on_the_wire() raises:
+    var client = _client(_mk_echo)
+    try:
+        _ = client.put_email_identity_mail_from_attributes(_mail_from())
+        raise Error("the echo answered nothing")
+    except e:
+        _check(
+            _wire_of(String(e), "PutEmailIdentityMailFromAttributes"),
+            "put /v2/email/identities/mail.example.com/mail-from",
+            True,
+        )
+
+
+def test_create_event_destination_on_the_wire() raises:
+    var client = _client(_mk_echo)
+    try:
+        _ = client.create_configuration_set_event_destination(_feedback())
+        raise Error("the echo answered nothing")
+    except e:
+        _check(
+            _wire_of(String(e), "CreateConfigurationSetEventDestination"),
+            "post /v2/email/configuration-sets/mail-example-com/event-destinations",
+            True,
+        )
+
+
+def test_delete_configuration_set_on_the_wire() raises:
+    var client = _client(_mk_echo)
+    try:
+        _ = client.delete_configuration_set(SESv2DeleteConfigurationSetRequest(String("mail-example-com")))
+        raise Error("the echo answered nothing")
+    except e:
+        _check(
+            _wire_of(String(e), "DeleteConfigurationSet"),
+            "delete /v2/email/configuration-sets/mail-example-com",
+            False,
+        )
+
+
 def test_send_email_on_the_wire() raises:
     var client = _client(_mk_echo)
     try:
@@ -335,12 +438,18 @@ def main() raises:
     test_get_email_identity_not_found()
     test_delete_email_identity_not_found()
     test_put_configuration_set_attributes_not_found()
+    test_put_mail_from_attributes_not_found()
+    test_create_event_destination_exists()
+    test_delete_configuration_set_not_found()
     test_send_email_rejected()
     test_create_email_identity_on_the_wire()
     test_get_email_identity_on_the_wire()
     test_delete_email_identity_on_the_wire()
     test_create_configuration_set_on_the_wire()
     test_put_configuration_set_attributes_on_the_wire()
+    test_put_mail_from_attributes_on_the_wire()
+    test_create_event_destination_on_the_wire()
+    test_delete_configuration_set_on_the_wire()
     test_send_email_on_the_wire()
     test_send_email_to_a_multi_region_endpoint_is_refused()
     print("OK")

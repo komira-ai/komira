@@ -1,0 +1,12 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
+
+# Test 53 (the surface capability matrix): a package whose name starts with
+# the planted pandas surface package's, which is not that package (negative
+# prefix_package). The matrix lint only analyses it; tests//functional/... builds it.
+
+mojo_test(
+    name = "test_x",
+    main = "tests/test_x.mojo",
+    srcs = ["tests/test_x.mojo"],
+    visibility = ["PUBLIC"],
+)

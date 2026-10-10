@@ -347,6 +347,34 @@ run "$TOOL" "$W/f" "$D"
 [ "$(cat "$W/out")" = "1 $D" ] || red "uncompressed, ELF32: stdout '$(cat "$W/out")', want '1 $D'"
 pass
 
+# 19. An ELF32 file with e_shnum 0: section 0's 32-bit sh_size (offset 0x14
+# of its header) holds the count (3), and the compressed section is found
+# through it, as case 17 for ELF64.
+elf32_many() {
+    _strtab_len=23
+    _data_len=$((${#D} + 1))
+    printf '\177ELF'; le 1 1; le 1 1; le 1 1; zeros 9
+    le 2 1; le 2 3; le 4 1; le 4 0; le 4 0; le 4 $((52 + _strtab_len + _data_len))
+    le 4 0; le 2 52; le 2 0; le 2 0; le 2 40; le 2 0; le 2 1
+    nul; printf '.shstrtab'; nul; printf '.debug_line'; nul
+    printf '%s' "$D"; nul
+    shdr32 0 0 0 0 3
+    shdr32 1 3 0 52 "$_strtab_len"
+    shdr32 11 1 "$1" $((52 + _strtab_len)) "$_data_len"
+}
+elf32_many 2048 >"$W/f"
+[ "$(wc -c <"$W/f")" -eq $((52 + 23 + ${#D} + 1 + 3 * 40)) ] || red "ELF32, e_shnum 0: the fixture is $(wc -c <"$W/f") bytes"
+cp "$W/f" "$W/want"
+run "$TOOL" "$W/f" "$D"
+[ "$RC" -eq 1 ] || red "compressed section, ELF32, e_shnum 0: exit $RC, want 1"
+grep -q "section 2 is compressed (SHF_COMPRESSED" "$W/err" || red "compressed section, ELF32, e_shnum 0: the message does not name section 2"
+same "$W/f" "$W/want" "compressed section, ELF32, e_shnum 0 (must be untouched)"
+elf32_many 2 >"$W/f"
+run "$TOOL" "$W/f" "$D"
+[ "$RC" -eq 0 ] || red "uncompressed, ELF32, e_shnum 0: exit $RC, want 0"
+[ "$(cat "$W/out")" = "1 $D" ] || red "uncompressed, ELF32, e_shnum 0: stdout '$(cat "$W/out")', want '1 $D'"
+pass
+
 rm -rf "$T"
 printf '{"version": 1, "data": {"status": "success", "message": "debug_relocate: %s cases passed"}}\n' "$N" >"$RESULT"
 echo "debug_relocate_cases GREEN: $N cases"

@@ -31,10 +31,10 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # test_sns_endpoints (botocore's endpoint cases for sns through every
 # operation's resolver, the regional, FIPS, dual-stack and LocalStack
 # endpoints, and two requests signed end to end against independently
-# computed signatures), test_no_env_reads (the generated module reads no
-# environment) and test_sns_client (the generated client over a scripted
-# connector, a missing topic raised under its code, and the CreateTopic
-# request as it reached the wire, through komira_aws_core's
+# computed signatures), _no_env_reads (written by mojo_aws_client: the
+# package reads no environment) and test_sns_client (the generated client
+# over a scripted connector, a missing topic raised under its code, and the
+# CreateTopic request as it reached the wire, through komira_aws_core's
 # AwsEchoConnector).
 #
 # No test here talks to the service.
@@ -62,16 +62,11 @@ mojo_aws_client(
     ],
     partitions = _SNS.partitions,
     test_data = {
-        "tests/test_no_env_reads.mojo": {
-            "gen/" + f: ":komira_aws_sns_gen[{}]".format(f)
-            for f in ["__init__.mojo", "_layout_probe.mojo", "komira_aws_sns.mojo"]
-        },
         "tests/test_sns_endpoints.mojo": {
             _ENDPOINT_TESTS: botocore_endpoint_file(_ENDPOINT_TESTS),
         },
     },
     test_srcs = [
-        "tests/test_no_env_reads.mojo",
         "tests/test_sns_client.mojo",
         "tests/test_sns_endpoints.mojo",
         "tests/test_sns_requests.mojo",

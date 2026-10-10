@@ -26,6 +26,19 @@ Every report path is mapped in this order:
    that is not there, so the report and the checkout disagree); any other
    relative path (`oss/modular/mojo/stdlib/...`, the Mojo standard library)
    is outside the repository.
+
+A test's generated main (`generated_test_main`): the build names each
+welded test's main by its output path in the package, in its report and to
+the gate (tools/build/mojo/coverage.bzl), and a generated one (the layout
+probe a mojo_aws_client or mojo_gcp_client generates under `gen/<name>/`)
+is no file of the checkout. An unmapped path is that test's main, and no
+error, when all of these hold: the report is the test's own
+(`.../cov/tests/<stem>.xml`, or its branch records `.../cov/branch/<stem>.info`),
+the path's file name is `<stem>.mojo`, a directory above it holds a BUCK
+file, and its own directory is none of the repository's (an output
+directory). The caller sets it aside as a test source; every other
+unmapped path, a missing file in a repository directory included, stays an
+error.
 """
 
 from covcheck.text import byte_at, first_segment, is_hex, split_on, substr, suffix
@@ -182,6 +195,47 @@ def map_path(raw: String, pkgdir: String, prefixes: List[String], repo: RepoFile
     if path.find("/") > 0 and repo.has_dir(first_segment(path)):
         return Mapped(UNMAPPED, path)
     return Mapped(OUTSIDE, path)
+
+
+def report_test_main(origin: String) -> String:
+    """`<stem>.mojo` when `origin` names a test's own coverage output as the
+    build writes it (`.../cov/tests/<stem>.xml`, `.../cov/branch/<stem>.info`),
+    else the empty string."""
+    var segs = split_on(origin, 47)
+    var n = len(segs)
+    if n < 3 or segs[n - 3] != String("cov"):
+        return String("")
+    var ext: String
+    if segs[n - 2] == String("tests"):
+        ext = String(".xml")
+    elif segs[n - 2] == String("branch"):
+        ext = String(".info")
+    else:
+        return String("")
+    var name = segs[n - 1]
+    var k = name.byte_length() - ext.byte_length()
+    if k <= 0 or not name.endswith(ext):
+        return String("")
+    return substr(name, 0, k) + String(".mojo")
+
+
+def generated_test_main(origin: String, path: String, repo: RepoFiles) -> Bool:
+    """Whether `path`, which `map_path` left unmapped, is the generated main
+    of the test whose report is `origin` (see the module header)."""
+    var want = report_test_main(origin)
+    var i = path.rfind("/")
+    if want.byte_length() == 0 or i <= 0 or suffix(path, i + 1) != want:
+        return False
+    var d = substr(path, 0, i)
+    if repo.has_dir(d):
+        return False
+    var j = d.rfind("/")
+    while j > 0:
+        d = substr(d, 0, j)
+        if d in repo.buck_dirs:
+            return True
+        j = d.rfind("/")
+    return False
 
 
 def package_of(path: String, repo: RepoFiles) raises -> String:

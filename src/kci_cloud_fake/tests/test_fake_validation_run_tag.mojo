@@ -14,13 +14,22 @@
 #
 # 1. CREATED UNDER A RUN: on a graph holding every catalog type the cloud
 #    hosts (checked against `implemented()`, so a type the lowering skipped
-#    is seen) with a KEEP bucket, a default-KEEP table (where hosted) and a
-#    DELETE bucket, every wanted node's live object carries exactly one
+#    is seen) with a KEEP bucket, a default-KEEP table and a queue, a topic
+#    and a subscription (where hosted), a default-KEEP secret, a zone, a
+#    CNAME and a certificate (where hosted; gcp adds the certificate's DNS
+#    authorization and its record), a schedule that starts the container
+#    job, an event trigger on the DELETE bucket (where hosted), a network, a
+#    subnet of it and an IP address (where hosted), a registry (where
+#    hosted) and a DELETE
+#    bucket, every wanted node's live object carries exactly one
 #    run-id label, with the key `validation_run_tag_key("kci")` (spelled
 #    `kci-run-id`) and the run id verbatim, and exactly one retention mark
 #    with `resource_retention_tag_key("kci")` and `retention_tag_value` of
 #    the node's retention (`retain` and `delete` both seen); every resource
-#    owns at least one checked node; `list_owned` reports the same id for
+#    owns at least one checked node (except a gcp subscription, which has no
+#    object: its one node is turned off, and a schedule an azure or onprem
+#    job holds as its own setting: its nodes are turned off and the job's
+#    run carries it); `list_owned` reports the same id for
 #    every object; the provenance run id is a different value and does not
 #    leak into the tag. Catches: the create path dropping the tag or the
 #    mark, a second spelling of a key, the provenance id written instead, a
@@ -87,6 +96,13 @@ from kci_cloud import (
     CellContext,
     Clouds,
     ConformanceTarget,
+    FIELD_QUEUE,
+    FIELD_DNS_ZONE,
+    FIELD_EVENT_TRIGGER,
+    FIELD_NETWORK,
+    FIELD_REGISTRY,
+    FIELD_SCHEDULE,
+    FIELD_SUBSCRIPTION,
     FIELD_TABLE,
     LoweredNode,
     OwnedRecord,
@@ -148,14 +164,59 @@ comptime _TABLE = (
 """A table with the default retention (KEEP), an index and a TTL field: gcp
 lowers it to `orders/table`, `orders/ix-<h>` and `orders/ttl`."""
 
+comptime _MESSAGING = (
+    '{"id":"jobs","queue":{}},{"id":"news","topic":{}},'
+    '{"id":"news-jobs","subscription":{"topic":{"resource":"news"},"queue":{"resource":"jobs"}}}'
+)
+"""A queue, a topic and the subscription between them: aws adds the
+queue's `jobs/policy`; gcp lowers the queue as `jobs/topic` (turned off:
+the queue is fed) and `jobs/queue`, and the subscription's one node turned
+off."""
+
+comptime _NAMES = (
+    '{"id":"site","dnsZone":{"name":"example.com"}},'
+    '{"id":"www","dnsRecord":{"name":"www.example.com","zone":{"resource":"site"},"type":"CNAME",'
+    '"values":[{"ref":{"resource":"api","standard":"HOST"}}]}},'
+    '{"id":"tls","certificate":{"domains":["example.com"],"zone":{"resource":"site"}}}'
+)
+"""A zone, a CNAME that follows `api`'s HOST, and a certificate: gcp adds
+`tls/dnsauth` and `tls/authrec`."""
+
+comptime _NETWORKS = (
+    '{"id":"core","network":{"ipv4Cidr":"10.20.0.0/16"}},'
+    '{"id":"edge","subnet":{"network":{"resource":"core"},"ipv4Cidr":"10.20.4.0/24","zone":1}},'
+    '{"id":"ingress-ip","ipAddress":{}}'
+)
+"""A network, a subnet of it (in a zone, which aws needs) and an IP
+address, each with the default retention (DELETE)."""
+
+comptime _REGISTRY = '{"id":"images","registry":{"format":"OCI"}}'
+"""A registry with the default retention (KEEP)."""
+
 
 def _full(
-    api_port: String, roles_on: Bool = True, kept: Bool = False, table: Bool = False
+    api_port: String,
+    roles_on: Bool = True,
+    kept: Bool = False,
+    table: Bool = False,
+    messaging: Bool = False,
+    secret: Bool = False,
+    names: Bool = False,
+    schedule: Bool = False,
+    events: Bool = False,
+    networks: Bool = False,
+    registry: Bool = False,
 ) -> String:
     """A public service with a `uses` grant, an internal service reading its
-    URL, a scheduled job running as an account, an account, a grant
-    resource and a DELETE bucket. `kept` adds a bucket with the default
-    retention (KEEP); `table` adds `_TABLE`. `roles_on` False makes api
+    URL (each keeping one instance, as onprem requires until Q21), a
+    container job running as an account, an account, a grant resource, a
+    worker with its own identity and a DELETE bucket. `kept` adds a bucket with the default
+    retention (KEEP); `table` adds `_TABLE`; `messaging` adds `_MESSAGING`;
+    `secret` adds a secret with the default retention (KEEP); `names` adds
+    `_NAMES`; `schedule` adds a schedule that starts `nightly`; `events`
+    adds an event trigger delivering `store`'s new objects to `api`;
+    `networks` adds `_NETWORKS`; `registry` adds `_REGISTRY`.
+    `roles_on` False makes api
     internal and removes web's grant on api."""
     var web_uses = String('"uses":[{"target":{"resource":"api"},"access":"CALL"}]},')
     var exposure = String('"public":{}')
@@ -165,22 +226,33 @@ def _full(
     return (
         String('{"resource":[')
         + String('{"id":"web","service":{"image":{"digest":"sha256:c3"},"port":8080,"internal":{},')
-        + String('"env":{"API_URL":{"ref":{"resource":"api","standard":"URL"}}}},')
+        + String('"scale":{"min":1,"max":2},"env":{"API_URL":{"ref":{"resource":"api","standard":"URL"}}}},')
         + web_uses
         + String('{"id":"api","service":{"image":{"digest":"sha256:a1"},"port":')
         + api_port
         + String(",")
         + exposure
-        + String("},")
+        + String(',"scale":{"min":1,"max":3}},')
         + String('"uses":[{"target":{"resource":"nightly"},"access":"CALL"}]},')
-        + String('{"id":"nightly","job":{"image":{"digest":"sha256:b2"},')
-        + String('"schedule":{"cron":"0 3 * * *","timezone":"UTC"},"runAs":{"resource":"runner"}}},')
+        + String('{"id":"nightly","containerJob":{"image":{"digest":"sha256:b2"},')
+        + String('"runAs":{"resource":"runner"}}},')
         + String('{"id":"runner","serviceAccount":{}},')
         + String('{"id":"see","grant":{"principal":{"resource":"web"},')
         + String('"target":{"resource":"runner"},"access":"DESCRIBE"}},')
+        + String('{"id":"relay","worker":{"image":{"digest":"sha256:d4"},"command":["/bin/relay"],"replicas":2}},')
         + String('{"id":"store","retention":"DELETE","bucket":{"versioning":true}}')
         + (String(',{"id":"vault","bucket":{}}') if kept else String(""))
         + ((String(",") + String(_TABLE)) if table else String(""))
+        + ((String(",") + String(_MESSAGING)) if messaging else String(""))
+        + (String(',{"id":"creds","secret":{}}') if secret else String(""))
+        + ((String(",") + String(_NAMES)) if names else String(""))
+        + (String(',{"id":"tick","schedule":{"cron":"0 3 * * *","target":{"resource":"nightly"}}}') if schedule else String(""))
+        + (
+            String(',{"id":"on-store","eventTrigger":{"source":{"resource":"store"},"event":"OBJECT_CREATED",')
+            + String('"target":{"resource":"api"}}}') if events else String("")
+        )
+        + ((String(",") + String(_NETWORKS)) if networks else String(""))
+        + ((String(",") + String(_REGISTRY)) if registry else String(""))
         + String("]}")
     )
 
@@ -189,6 +261,46 @@ def _hosts_table[S: ConformanceTarget](cloud: S) -> Bool:
     var l = cloud.implemented()
     for i in range(len(l)):
         if l[i] == FIELD_TABLE:
+            return True
+    return False
+
+
+def _hosts_messaging[S: ConformanceTarget](cloud: S) -> Bool:
+    var l = cloud.implemented()
+    for i in range(len(l)):
+        if l[i] == FIELD_QUEUE:
+            return True
+    return False
+
+
+def _hosts_events[S: ConformanceTarget](cloud: S) -> Bool:
+    var l = cloud.implemented()
+    for i in range(len(l)):
+        if l[i] == FIELD_EVENT_TRIGGER:
+            return True
+    return False
+
+
+def _hosts_networks[S: ConformanceTarget](cloud: S) -> Bool:
+    var l = cloud.implemented()
+    for i in range(len(l)):
+        if l[i] == FIELD_NETWORK:
+            return True
+    return False
+
+
+def _hosts_registry[S: ConformanceTarget](cloud: S) -> Bool:
+    var l = cloud.implemented()
+    for i in range(len(l)):
+        if l[i] == FIELD_REGISTRY:
+            return True
+    return False
+
+
+def _hosts_names[S: ConformanceTarget](cloud: S) -> Bool:
+    var l = cloud.implemented()
+    for i in range(len(l)):
+        if l[i] == FIELD_DNS_ZONE:
             return True
     return False
 
@@ -333,10 +445,20 @@ def _covers_every_hosted_type[
         if not seen:
             used.append(f)
         var owns = False
+        var off = False
         for k in range(len(nodes)):
-            if nodes[k].wanted and nodes[k].owner == resources[i].id:
-                owns = True
-        assert_true(owns, where + String(": ") + resources[i].id + String(" owns a checked node"))
+            if nodes[k].owner == resources[i].id:
+                if nodes[k].wanted:
+                    owns = True
+                else:
+                    off = True
+        # A subscription with no object of its own (gcp: it is the topic its
+        # queue's subscription is on) lowers one node, turned off; so does a
+        # schedule its job holds as a setting (azure, onprem) lower its nodes.
+        assert_true(
+            owns or ((f == FIELD_SUBSCRIPTION or f == FIELD_SCHEDULE) and off),
+            where + String(": ") + resources[i].id + String(" owns a checked node"),
+        )
     assert_equal(len(used), len(hosted), where + String(": one resource per hosted type"))
     for k in range(len(hosted)):
         var found = False
@@ -370,7 +492,18 @@ def test_every_object_created_under_a_run_carries_the_tag_on_every_cloud() raise
     for s in range(len(shapes)):
         var cloud = FakeCloud(shape=shapes[s].copy())
         var where = shapes[s].name
-        var json = _full("8080", kept=True, table=_hosts_table(cloud))
+        var json = _full(
+            "8080",
+            kept=True,
+            table=_hosts_table(cloud),
+            messaging=_hosts_messaging(cloud),
+            secret=True,
+            names=_hosts_names(cloud),
+            schedule=True,
+            events=_hosts_events(cloud),
+            networks=_hosts_networks(cloud),
+            registry=_hosts_registry(cloud),
+        )
         _ = _apply_and_check(cloud, json, _run(String(_RUN)), String(_RUN), where)
         var resources = _list(json)
         var nodes = lower_data(cloud, resources)
@@ -378,6 +511,8 @@ def test_every_object_created_under_a_run_carries_the_tag_on_every_cloud() raise
         _both_marks_seen(cloud, nodes, where)
         if _hosts_table(cloud):
             assert_equal(_mark(cloud.live_labels(String("orders/table"))), "retain", where + ": a default table")
+        if _hosts_registry(cloud):
+            assert_equal(_mark(cloud.live_labels(String("images/registry"))), "retain", where + ": a default registry")
     var limited = FakeLimitedCloud()
     var n = _apply_and_check(limited, _limited("8080"), _run(String(_RUN)), String(_RUN), String("fake-limited"))
     assert_equal(n, 3, "fake-limited: identity, run and the cell LOGS grant")
@@ -393,7 +528,14 @@ def test_outside_a_run_no_object_carries_a_tag() raises:
     var shapes = _shapes()
     for s in range(len(shapes)):
         var cloud = FakeCloud(shape=shapes[s].copy())
-        var json = _full("8080", kept=True, table=_hosts_table(cloud))
+        var json = _full(
+            "8080",
+            kept=True,
+            table=_hosts_table(cloud),
+            messaging=_hosts_messaging(cloud),
+            secret=True,
+            names=_hosts_names(cloud),
+        )
         _ = _apply_and_check(cloud, json, None, String("(none)"), shapes[s].name)
     var limited = FakeLimitedCloud()
     _ = _apply_and_check(limited, _limited("8080"), None, String("(none)"), String("fake-limited"))

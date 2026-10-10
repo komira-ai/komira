@@ -153,7 +153,10 @@ trait Database(Movable, Deinitable):
         vals: List[DbValue],
     ) raises -> UInt64:
         """Insert one row into `table` binding `vals` positionally to `cols`.
-        Returns rows_affected. (SQL: `INSERT INTO <table> (<cols>) VALUES
+        Returns rows_affected. An insert, never an upsert: a row whose primary
+        key already exists is refused (raises) and the stored row is
+        unchanged, as a plain SQL INSERT is (a document backend creates the
+        document only if absent). (SQL: `INSERT INTO <table> (<cols>) VALUES
         (<placeholders>)`)."""
         ...
 

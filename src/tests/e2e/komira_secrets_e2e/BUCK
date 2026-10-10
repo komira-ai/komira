@@ -1,0 +1,125 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: the generated secret-store clients against stateful fakes of
+# their services, over real sockets on 127.0.0.1, in one process on two
+# threads (komira_fork_join). Nothing ships, so `conda = False`; the tests
+# are the point.
+#
+# AWS Secrets Manager (komira_aws_secretsmanager), plaintext. The fake is a
+# komira_http_server RequestDispatcher speaking awsJson 1.1: it verifies
+# each request's SigV4 signature itself (komira_crypto, not
+# komira_aws_core), keeps secrets, their versions and staging labels, holds
+# a name while its secret is scheduled for deletion, honours
+# ClientRequestToken idempotency, and answers scripted 500s. The client is
+# pointed at it with canned credentials (the AWS documentation's example
+# key).
+#
+# GCP Secret Manager v1 (komira_gcp_secretmanager), over TLS. The generated
+# client speaks only https, and komira_http_server's dispatch path (the one
+# that hands a request to a RequestDispatcher) is plaintext only: it drops
+# a TLS connection, and its TLS path answers a canned response. So the GCP
+# fake, a RequestDispatcher on a plaintext server, sits behind a TLS
+# terminator built from komira_http_core's server-side TLS (tls_front.mojo)
+# holding komira_http_core's fixture leaf; the client trusts only the
+# fixture root. The fake keeps global and regional secrets and their
+# versions with CRC32C checksums, checks the bearer token and which
+# endpoint (Host) each resource arrives at, and answers google.rpc.Status
+# envelopes.
+#
+# The tests, each run as a build action:
+#   test_secret_lifecycle -- CreateSecret (token filled by the client),
+#     GetSecretValue, PutSecretValue, DescribeSecret (versions and stages),
+#     DeleteSecret with a recovery window, CreateSecret on the held name
+#     refused, RestoreSecret, GetSecretValue; the fake's request log exactly;
+#     no error text the client raised holds a secret value, although the
+#     fake's error bodies carried it (the process's stdout is not captured).
+#   test_retry_reuses_token -- a write applied then answered 500, and one
+#     answered 500 before it is applied: each resend carries the same
+#     ClientRequestToken, byte for byte, and each write is applied once;
+#     the server's stdout lines for the two 500s, rendered with its own
+#     error_response_log_line, hold no value (a check of the fake).
+#   test_signature_refusals -- the verifier against a signature computed
+#     outside komira for a request in the SigV4 suite's get-vanilla shape
+#     (accepted; a changed digit, a changed body, another service's scope and
+#     an unknown key refused), and a client with a wrong secret key refused
+#     InvalidSignatureException over the wire.
+#   test_gcp_secret_lifecycle -- the fake's CRC32C against published
+#     values; then CreateSecret, AddSecretVersion with and without a
+#     dataCrc32c, ListSecretVersions a page at a time, AccessSecretVersion
+#     (payload bytes and CRC32C) of a global secret; CreateSecret,
+#     AddSecretVersion and AccessSecretVersion of a regional one at its own
+#     host and path; ListSecrets and DeleteSecret in both; the fake's
+#     request log and every bearer token exactly; the SNI of each TLS
+#     connection.
+#   test_gcp_refusals -- 404 NOT_FOUND, 409 ALREADY_EXISTS, a checksum
+#     refused 400, 401 for an empty token and for another token, a regional
+#     name at the global host refused 400: each raised text exactly, the
+#     request log exactly, and no raised text holds a payload although the
+#     fake's error bodies carried three.
+#
+# `deps` lists the Mojo packages of the full transitive closure of what the
+# library and its tests import.
+_TLS_FIXTURES = {
+    "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+    "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+    "src/komira_http_core/tests/fixtures/tls/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
+}
+
+mojo_library(
+    name = "komira_secrets_e2e",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_aws_secretsmanager:komira_aws_secretsmanager",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_datetime:komira_datetime",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_fork_join:komira_fork_join",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_gcp_secretmanager:komira_gcp_secretmanager",
+        "//src/komira_hash:komira_hash",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_http_server:komira_http_server",
+        "//src/komira_json:komira_json",
+        "//src/komira_log:komira_log",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_name_registry:komira_name_registry",
+        "//src/komira_net:komira_net",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_protobuf:komira_protobuf",
+        "//src/komira_retry:komira_retry",
+        "//src/komira_spsc_ring:komira_spsc_ring",
+        "//src/komira_trace:komira_trace",
+        "//src/komira_uuid:komira_uuid",
+        "//src/komira_wkt:komira_wkt",
+        "//src/komira_xml:komira_xml",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_gcp_refusals.mojo",
+        "tests/test_gcp_secret_lifecycle.mojo",
+        "tests/test_retry_reuses_token.mojo",
+        "tests/test_secret_lifecycle.mojo",
+        "tests/test_signature_refusals.mojo",
+    ],
+    test_data = {
+        "tests/test_gcp_refusals.mojo": _TLS_FIXTURES,
+        "tests/test_gcp_secret_lifecycle.mojo": _TLS_FIXTURES,
+    },
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)

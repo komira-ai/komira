@@ -99,7 +99,7 @@ customer column called `__udf_0` would be reachable from query text.
 
   * ⛔ IT IS NOT COLLISION-PROOF. Column names come from the DATA FILE, not
     from query text, and any UTF-8 string is a legal Parquet field name. A
-    parquet whose column is literally `__udf:UDF:affine_int64:0:5(C:v)` would
+    parquet whose column is literally `__udf:UDF:12:affine_int64:0:5(C:1:v)` would
     shadow the pre-pass's output, because `Schema.column_index` returns the
     FIRST match — the customer's function would never be applied and rc
     would be 0. `_append_udf_columns` REFUSES that shadow by name

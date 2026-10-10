@@ -9,15 +9,17 @@
 # more relations share an equi-join column equivalence class (e.g. Q9's
 # {l_partkey, p_partkey, ps_partkey}), DuckDB emits the full O(N**2)
 # cross-product of pairwise equality comparisons, which the join-order
-# optimizer then sees as additional graph edges. Our chain extractor reads
-# edges directly from the LogicalPlan's JOIN_INNER `left_on`/`right_on`
-# lists and never derived the transitive pairs, so DPccp's neighbor
-# traversal could not form CSGs like Q9's {ps, s, n} which depends on
-# `partsupp <-> supplier` (derived from the suppkey equivalence class
-# {l_suppkey, s_suppkey, ps_suppkey}).
+# optimizer then sees as additional graph edges. The chain extractor
+# (`extract_join_chain`) reads edges directly from the LogicalPlan's
+# JOIN_INNER `left_on`/`right_on` lists and does not derive the transitive
+# pairs, so a DPccp enumerator's neighbor traversal cannot form CSGs like
+# Q9's {ps, s, n}, which depends on `partsupp <-> supplier` (derived from the
+# suppkey equivalence class {l_suppkey, s_suppkey, ps_suppkey}).
 #
-# This module ADDS the missing derivation as a side-effect-free pass
-# applied to a JoinChain AFTER extraction and BEFORE DPccp.
+# This module ADDS the missing derivation: `derive_transitive_edges` appends
+# to a JoinChain's edges in place. komira_optimizer has no driver that orders
+# its passes; `optimizer_dpccp.reorder_joins_with_dp` calls it AFTER
+# extraction and BEFORE join enumeration (DPccp).
 #
 # Algorithm (faithful to DuckDB's mechanism, adapted to Komira's
 # JoinChain representation):
@@ -44,11 +46,11 @@
 #       edges. E.g. if the chain has `l_partkey = p_partkey` AND
 #       `l_partkey = ps_partkey`, then `p_partkey = ps_partkey` follows
 #       by transitivity. The synthetic edge ADDS no constraint to the
-#       join query — it's a redundant condition that the engine can
-#       choose to enforce or not.
+#       join query — it's a redundant condition that execution may
+#       enforce or not without changing the answer.
 #
-#   (b) DPccp consumes `chain.edges` via `_build_neighbors`, which
-#       deduplicates per-pair neighbors.
+#   (b) DPccp (`optimizer_dpccp`) consumes `chain.edges` through
+#       `_build_neighbors`, which deduplicates per-pair neighbors.
 #       Synthetic edges densify the relation graph for DPccp's CSG
 #       traversal without affecting cost estimation: the cost model
 #       (`optimizer_tdom_cost.estimate_with_tdom`) keys denominator
@@ -56,8 +58,8 @@
 #       which use the SAME join-key bindings as our union-find here. The
 #       per-bucket TDOM is unchanged.
 #
-#   (c) Plan reconstruction (`reconstruct_plan_from_dp` ->
-#       `collect_connecting_keys`) walks `chain.edges` in Slab insertion
+#   (c) Plan reconstruction (`collect_connecting_keys` in optimizer_reorder,
+#       which `greedy_join_order` calls) walks `chain.edges` in Slab insertion
 #       order. Per the M1 contract in the chain extractor of
 #       optimizer_reorder, per-column edges from one composite source must be
 #       appended CONTIGUOUSLY in INDEX ORDER. Synthetic edges are
@@ -122,8 +124,8 @@ def _uf_union(mut parent: Dict[String, String], var a: String, var b: String):
     var rb = _uf_find(parent, b^)
     if ra == rb:
         return
-    # Attach rb under ra (no rank/size tracking — chains are <= 12 relations,
-    # union-find tree depth is bounded by 12 in the worst case).
+    # Attach rb under ra (no rank/size tracking — one node per (relation,
+    # join column) pair, so tree depth is bounded by that small node count).
     parent[rb] = ra^
 
 
@@ -271,12 +273,12 @@ def derive_transitive_edges(mut chain: JoinChain) -> Int:
                 var root_b = _uf_find(parent, kb)
                 var existing = class_rels.get(root_b)
                 if not existing:
-                    var rl = List[Int]()
-                    rl.append(e.right_relation)
-                    class_rels[root_b] = rl^
-                    var cl = List[String]()
-                    cl.append(e.right_keys[j])
-                    class_cols[root_b] = cl^
+                    var rl = List[Int]()  # cov: unreachable ka shares the root of kb and was recorded on this edge or an earlier one, so the class exists
+                    rl.append(e.right_relation)  # cov: unreachable see the line above
+                    class_rels[root_b] = rl^  # cov: unreachable see the line above
+                    var cl = List[String]()  # cov: unreachable see the line above
+                    cl.append(e.right_keys[j])  # cov: unreachable see the line above
+                    class_cols[root_b] = cl^  # cov: unreachable see the line above
                 else:
                     var cur_rels = existing.value().copy()
                     var cur_cols_opt = class_cols.get(root_b)
@@ -294,11 +296,11 @@ def derive_transitive_edges(mut chain: JoinChain) -> Int:
     for root in class_rels.keys():
         var rels_opt = class_rels.get(root)
         if not rels_opt:
-            continue
+            continue  # cov: unreachable root comes from class_rels.keys()
         var rels = rels_opt.value().copy()
         var cols_opt = class_cols.get(root)
         if not cols_opt:
-            continue
+            continue  # cov: unreachable class_cols gets a key whenever class_rels does
         var cols = cols_opt.value().copy()
         var sz = len(rels)
         if sz < 3:

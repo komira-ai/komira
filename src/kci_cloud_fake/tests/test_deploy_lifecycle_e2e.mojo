@@ -6,7 +6,7 @@
 # The graph is the checked-in fixture `test_data/deploy_lifecycle_graph.json`,
 # read as an author writes it (proto3 JSON, `kci.resource.v1.ResourceList`)
 # through `kci_resource_proto`: a public service `api`, a consumer `web` of
-# its URL and HOST (and a CALL on it), a scheduled job `nightly` running as
+# its URL and HOST (and a CALL on it), a container job `nightly` running as
 # the service account `runner`, a KEEP bucket `media` (`api` uses it
 # READ_WRITE), a table `orders` (retention DELETE) and a grant resource
 # `reads` (runner READ media). Every assertion below runs on the aws, gcp and
@@ -283,7 +283,7 @@ def _pins(shape: String, call_grant: String, data_grant: String, reads: String) 
     """The provider kind each primary node and grant lowers to, per shape,
     written out here (an independent oracle; not read from shapes.mojo).
     An empty kind: the shape lowers no such node (azure folds a public
-    ingress and a schedule into the run object)."""
+    ingress into the run object)."""
     var p = List[_Pin]()
     if shape == "aws":
         p.append(_Pin(String("api/identity"), String("AWS::IAM::Role")))
@@ -291,7 +291,6 @@ def _pins(shape: String, call_grant: String, data_grant: String, reads: String) 
         p.append(_Pin(String("api/public"), String("AWS::Lambda::Url")))
         p.append(_Pin(String("web/run"), String("AWS::Lambda::Function")))
         p.append(_Pin(String("nightly/run"), String("AWS::ECS::TaskDefinition")))
-        p.append(_Pin(String("nightly/schedule"), String("AWS::Scheduler::Schedule")))
         p.append(_Pin(String("runner/identity"), String("AWS::IAM::Role")))
         p.append(_Pin(String("media/bucket"), String("AWS::S3::Bucket")))
         p.append(_Pin(String("orders/table"), String("AWS::DynamoDB::Table")))
@@ -304,7 +303,6 @@ def _pins(shape: String, call_grant: String, data_grant: String, reads: String) 
         p.append(_Pin(String("api/public"), String("setIamPolicy")))
         p.append(_Pin(String("web/run"), String("run.googleapis.com/Service")))
         p.append(_Pin(String("nightly/run"), String("run.googleapis.com/Job")))
-        p.append(_Pin(String("nightly/schedule"), String("cloudscheduler.googleapis.com/Job")))
         p.append(_Pin(String("runner/identity"), String("iam.googleapis.com/ServiceAccount")))
         p.append(_Pin(String("media/bucket"), String("storage.googleapis.com/Bucket")))
         p.append(_Pin(String("orders/table"), String("firestore.googleapis.com/Index")))
@@ -317,7 +315,6 @@ def _pins(shape: String, call_grant: String, data_grant: String, reads: String) 
         p.append(_Pin(String("api/public"), String("")))
         p.append(_Pin(String("web/run"), String("Microsoft.App/containerApps")))
         p.append(_Pin(String("nightly/run"), String("Microsoft.App/jobs")))
-        p.append(_Pin(String("nightly/schedule"), String("")))
         p.append(_Pin(String("runner/identity"), String("Microsoft.ManagedIdentity/userAssignedIdentities")))
         p.append(_Pin(String("media/bucket"), String("Microsoft.Storage/storageAccounts/blobServices/containers")))
         p.append(

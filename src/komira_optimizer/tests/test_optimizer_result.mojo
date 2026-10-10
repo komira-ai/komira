@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # `OptimizeResult` carries a plan iff its status is OPTIMIZE_OK, and
-# `_classify` maps a caught error's text to one of four failure classes by
+# `_classify` maps a caught error's text to one of three failure classes by
 # the tokens the raising modules export. Each test names the defect it
 # catches.
 # =============================================================================
@@ -13,15 +13,6 @@ from std.testing import TestSuite, assert_equal, assert_true, assert_false
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, SchemaBuilder
 from komira_plan_ir.logical_plan import LogicalPlan, SOURCE_PARQUET, PLAN_SCAN
-from komira_plan_ir.physical_plan import (
-    PHYSICAL_PLAN_IR_VERSION_MISMATCH,
-    PHYSICAL_PLAN_IR_VERSION_UNCHECKABLE,
-)
-from komira_plan_ir.physical_plan_purity_gate import (
-    PHYSICAL_PLAN_CARRIES_LOGICAL_PLAN,
-    PHYSICAL_PLAN_PURITY_UNCHECKABLE,
-    PHYSICAL_PLAN_PURITY_UNMODELLED_EXPR_TAG,
-)
 from komira_scan_source.scan_resolver import (
     SCAN_BINDING_EPOCH_MISMATCH,
     SCAN_BINDING_HANDLE_NOT_BOUND,
@@ -31,7 +22,6 @@ from komira_optimizer.optimizer_result import (
     OPTIMIZE_OK,
     OPTIMIZE_ERR_SCAN_BINDING,
     OPTIMIZE_ERR_UNRESOLVED_DEPS,
-    OPTIMIZE_ERR_PHYSICAL_PLAN_REFUSED,
     OPTIMIZE_ERR_PASS_REFUSED,
     OPTIMIZE_REFUSAL_UNRESOLVED_DEPS,
     _classify,
@@ -56,11 +46,9 @@ def test_status_codes_are_zero_and_distinct_negatives() raises:
     assert_true(OPTIMIZE_ERR_SCAN_BINDING < 0)
     assert_true(OPTIMIZE_ERR_UNRESOLVED_DEPS < 0)
     assert_true(OPTIMIZE_ERR_PASS_REFUSED < 0)
-    assert_true(OPTIMIZE_ERR_PHYSICAL_PLAN_REFUSED < 0)
     assert_true(OPTIMIZE_ERR_SCAN_BINDING != OPTIMIZE_ERR_UNRESOLVED_DEPS)
     assert_true(OPTIMIZE_ERR_UNRESOLVED_DEPS != OPTIMIZE_ERR_PASS_REFUSED)
-    assert_true(OPTIMIZE_ERR_PASS_REFUSED != OPTIMIZE_ERR_PHYSICAL_PLAN_REFUSED)
-    assert_true(OPTIMIZE_ERR_SCAN_BINDING != OPTIMIZE_ERR_PHYSICAL_PLAN_REFUSED)
+    assert_true(OPTIMIZE_ERR_SCAN_BINDING != OPTIMIZE_ERR_PASS_REFUSED)
 
 
 def test_classify_scan_binding_tokens() raises:
@@ -75,31 +63,6 @@ def test_classify_unresolved_deps_token() raises:
     assert_equal(
         _classify(_wrapped(OPTIMIZE_REFUSAL_UNRESOLVED_DEPS)),
         OPTIMIZE_ERR_UNRESOLVED_DEPS,
-    )
-
-
-def test_classify_every_physical_plan_door_token() raises:
-    """Catches a door token that falls through to PASS_REFUSED: a producer
-    bug would then read as a bad query."""
-    assert_equal(
-        _classify(_wrapped(PHYSICAL_PLAN_IR_VERSION_MISMATCH)),
-        OPTIMIZE_ERR_PHYSICAL_PLAN_REFUSED,
-    )
-    assert_equal(
-        _classify(_wrapped(PHYSICAL_PLAN_IR_VERSION_UNCHECKABLE)),
-        OPTIMIZE_ERR_PHYSICAL_PLAN_REFUSED,
-    )
-    assert_equal(
-        _classify(_wrapped(PHYSICAL_PLAN_CARRIES_LOGICAL_PLAN)),
-        OPTIMIZE_ERR_PHYSICAL_PLAN_REFUSED,
-    )
-    assert_equal(
-        _classify(_wrapped(PHYSICAL_PLAN_PURITY_UNMODELLED_EXPR_TAG)),
-        OPTIMIZE_ERR_PHYSICAL_PLAN_REFUSED,
-    )
-    assert_equal(
-        _classify(_wrapped(PHYSICAL_PLAN_PURITY_UNCHECKABLE)),
-        OPTIMIZE_ERR_PHYSICAL_PLAN_REFUSED,
     )
 
 

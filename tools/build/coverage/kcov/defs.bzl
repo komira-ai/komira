@@ -13,6 +13,10 @@ both `kcov_tool` and the cases take it as an `exec_dep`: with the same
 `exec_compatible_with` on both, they resolve the same execution platform, so
 the binary the cases test and the binary `kcov_tool` hands out are one
 configured target, the same bytes.
+
+`cov_link_dir` and `cov_run_dir` are the two directories a coverage build of
+a `mojo_library` uses (tools/build/mojo/coverage.bzl): the one its test
+binaries link through, and the one each test's kcov run runs from.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -94,3 +98,38 @@ _cov_link_dir = rule(
 kcov_tool_cases = declares_docs(_kcov_tool_cases)
 kcov_tool = declares_docs(_kcov_tool)
 cov_link_dir = declares_docs(_cov_link_dir)
+
+# The bound of one coverage run, in seconds (cov_run.sh reads it from the
+# file `limit` of its directory). kcov waits for every process the test
+# started, so a test that leaves a child running would hold the run open
+# until the executor gave up. The slowest run measured took 119.6 s of
+# worker time; 450 s is over three times that, and under 600 s, buck2's
+# default timeout of a test action, so the run fails with its own message.
+COV_RUN_LIMIT_S = 450
+
+def _run_dir_impl(ctx):
+    limit = ctx.attrs.limit_s
+    if limit != COV_RUN_LIMIT_S and ctx.label.cell != "tests":
+        fail("{}: limit_s is {} s for every coverage run; only a fixture of the tests cell may set another".format(ctx.label.raw_target(), COV_RUN_LIMIT_S))
+    if limit < 1:
+        fail("{}: limit_s must be at least 1 s, not {}".format(ctx.label.raw_target(), limit))
+    out = ctx.actions.copied_dir("cov_run", {
+        "cov_normalize": ctx.attrs.normalize[DefaultInfo].default_outputs[0],
+        "cov_run.sh": ctx.attrs.script,
+        "kcov": ctx.attrs.kcov[DefaultInfo].default_outputs[0],
+        "limit": ctx.actions.write("cov_run_limit", "{}\n".format(limit)),
+    })
+    return [DefaultInfo(default_output = out)]
+
+_cov_run_dir = rule(
+    impl = _run_dir_impl,
+    doc = "The directory a coverage run of a mojo_library test runs from (tools/build/mojo/coverage.bzl): `cov_run.sh` (`script`), `kcov/` (the kcov distribution), `cov_normalize` and `limit` (`limit_s`, the seconds one run may take). The script finds the others beside itself.",
+    attrs = {
+        "kcov": attrs.exec_dep(default = "komira//tools/build/toolchains/kcov:kcov"),
+        "limit_s": attrs.int(default = COV_RUN_LIMIT_S),
+        "normalize": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/coverage/kcov:cov_normalize"),
+        "script": attrs.source(),
+    },
+)
+
+cov_run_dir = declares_docs(_cov_run_dir)

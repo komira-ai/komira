@@ -8,7 +8,8 @@
 # needs a reason that starts `product:`. Delete a row in the PR that deletes its marker. Columns are tab-separated.
 id	retired_by	reason
 aws-lc-x86-64-linux	native-pr:8a	third_party/aws-lc/BUCK: the assembly lists are x86_64 ELF; aarch64 and Mach-O lists come with the spike
-coverage-linux-x86-64	never	product: coverage is a property of the source, not of a platform: tools/build/toolchains/kcov/BUCK and the kcov_* pins of tools/build/platforms/table.bzl: line coverage of the sources is measured once, on linux-x86_64, by kcov (ptrace and ELF/DWARF); another platform's builds are not measured
+connect-conformance-linux-x86-64	native-pr:8b	src/tests/conformance/komira_connect_conformance/BUCK, third_party/connect-conformance/BUCK: runs the connectconformance release pinned for linux-x86_64 only; it reaches darwin when s2n-tls does (8b), which then pins the release's darwin and linux aarch64 archives per platform
+coverage-linux-x86-64	never	product: coverage is a property of the source, not of a platform: tools/build/toolchains/kcov/BUCK and the kcov_* pins of tools/build/platforms/table.bzl: line coverage of the sources is measured once, on linux-x86_64, by kcov (ptrace and ELF/DWARF); tools/build/toolchains/llvm_branch/BUCK and the llvm_branch_* pins: branch coverage's LLVM pieces exist on linux-x86_64 only; another platform's builds are not measured
 cxx-toolchain-x86-64	native-pr:4	tools/build/toolchains/defs.bzl: the C/C++ toolchain is the linux-x86_64 one; one per row
 darwin-gate-runner	native-pr:2b	tools/build/toolchains/darwin/BUCK: the macOS gate runner is unpacked by a linux x86_64 tool
 darwin-host-census-test	native-pr:12	tools/build/tests/functional/darwin/BUCK: tests host identity, which PR 12 deletes
@@ -17,8 +18,9 @@ darwin-link	native-pr:3	tools/build/toolchains/darwin/BUCK: the host-identity li
 darwin-mojo	native-pr:12	tools/build/toolchains/darwin/BUCK: the macOS toolchain is its own package until the toolchains are row-driven and the package is deleted
 darwin-mojo-compiler	native-pr:12	tools/build/toolchains/darwin/BUCK: as darwin-mojo
 darwin-mojo-runtime	native-pr:12	tools/build/toolchains/darwin/BUCK: as darwin-mojo
-farm-probe-linux	never	product: src/komira_test_minio/BUCK: the probe's subject is the Linux kernel features (setpriv, PR_SET_PDEATHSIG, /proc) that the server end-to-end tests of komira's Linux server products need; another OS is probed by a test of its own, not by retiring this limit
-h2spec-linux-x86-64	native-pr:8b	src/komira_http_conformance/BUCK: runs h2spec, whose release has amd64 builds only; it reaches darwin when s2n-tls does (8b), which then pins a darwin build or builds h2spec from source
+farm-probe-linux	never	product: src/tests/helpers/komira_test_minio/BUCK: the probe's subject is the Linux kernel features (setpriv, PR_SET_PDEATHSIG, /proc) that the server end-to-end tests of komira's Linux server products need; another OS is probed by a test of its own, not by retiring this limit
+git-oracle-linux-x86-64	native-pr:14	third_party/git/BUCK, src/tests/conformance/komira_git_pack_conformance/BUCK, src/tests/conformance/komira_git_protocol_conformance/BUCK: the git oracle of komira_git's conformance tests is built for linux-x86_64 first, and git-lfs is pinned as its amd64 release binary; the arm64 bring-up (14) adds the linux-arm64 build (zig cross-compiles git and curl; git-lfs publishes linux arm64)
+h2spec-linux-x86-64	native-pr:8b	src/tests/conformance/komira_http_conformance/BUCK: runs h2spec, whose release has amd64 builds only; it reaches darwin when s2n-tls does (8b), which then pins a darwin build or builds h2spec from source
 image-linux-x86-64-only	never	product: OCI images, bundles and the launcher are Linux server products (tools/build/package/defs.bzl); the table's `bundles` field says it per row
 linux-arm64-unregistered	native-pr:14	tools/build/platforms/table.bzl: the linux-arm64 row is declared and pinned but not a build key until the bring-up PR flips it
 mojo-toolchain-x86-64	native-pr:14	tools/build/toolchains/defs.bzl: no Mojo toolchain exists for a row that is not registered; arm64 gets one when it is brought up
@@ -27,3 +29,4 @@ run-tests-linux-x86-64-client	native-pr:11a	tools/build/tests/run_tests.sh: the 
 rust-toolchain-x86-64	native-pr:5	tools/build/toolchains/defs.bzl: the Rust toolchain is the linux-x86_64 one; one per row
 s2n-tls-x86-64-linux	native-pr:8b	third_party/s2n-tls/BUCK: depends on aws-lc, which is x86_64 Linux only until PR 8a
 snappy-x86-64-v3	native-pr:6	third_party/snappy/BUCK: config.h hardcodes x86_64 Linux at x86-64-v3
+surface-matrix-incompatible-fixture	never	product: tools/build/tests/functional/surface_capability_matrix/src/tests/e2e/pandas_e2e/BUCK: a planted macOS-only test that test 53 requires the surface capability matrix lint to refuse; a fixture of the check, not a platform limit

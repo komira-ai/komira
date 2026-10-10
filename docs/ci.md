@@ -10,13 +10,14 @@ Nothing is compiled on the runner.
 
 | event | runs |
 |---|---|
-| push to `main` | the release path of `kci.yml` |
-| pull request from a branch of this repository | `pr / check` |
+| push to `main` | the release path of `kci.yml`; when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert) |
+| pull request from a branch of this repository | `pr / check`; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
 | manual (`workflow_dispatch`) | the release path of `kci.yml`, on the chosen ref |
 
-There is no separate static or lint job, and no other pull request check. The
-only scheduled run is the
+There is no separate static or lint job, and no other pull request check
+that can block a merge: the `coverage` workflow only reports. The only
+scheduled run is the
 [build-system self-tests](#build-system-self-tests), which is not the gate.
 `ci.yml` and its check `ci / build` no longer exist. The whole-repository
 `//...` build they ran on every push to `main` is not run by any workflow now;
@@ -179,8 +180,8 @@ approved run as able to affect every build that uses the same service.
 
 ## What a farm test action can do
 
-`./buck2 test //src/komira_test_minio:farm_capability_probe`
-([the probe](../src/komira_test_minio/tests/farm_capability_probe.mojo)) tries,
+`./buck2 test //src/tests/helpers/komira_test_minio:farm_capability_probe`
+([the probe](../src/tests/helpers/komira_test_minio/tests/farm_capability_probe.mojo)) tries,
 inside one test action (on the farm, a Linux worker; with no farm
 configured, the client, like any other standalone test), each thing an
 end-to-end test of a real server needs, and prints one
@@ -189,7 +190,7 @@ rows are required: the test fails, naming the capability, when one is
 missing. The rest are reported and never fail it.
 
 The probe watches the workers only when it runs: the PR check runs it when
-its unit (`//src/komira_test_minio/...`) is affected, that is, when a PR
+its unit (`//src/tests/helpers/komira_test_minio/...`) is affected, that is, when a PR
 touches `komira_test_minio` or one of its dependencies. Anyone can run it on
 demand with the command above. A test result is not cached, so each run is a
 fresh probe.
@@ -232,6 +233,10 @@ gate is `pr / check`. It runs in its own workflow,
 on a nightly schedule and on demand, never on a push or a pull request, with
 the same farm connection and the same job permissions as `pr / check`. Two runs never
 overlap. It needs a Linux x86_64 client and refuses any other (exit 2).
+The workflow puts the platform table's pinned pixi on `PATH` (built as
+`//tools/build/toolchains:pixi`, so buck2 keeps it only at the pin's sha256)
+and runs the script with `--require-install`: the conda install cases (33a,
+33b) then fail, never skip, when pixi or the network is missing.
 
 Run it by hand on a branch of this repository:
 
@@ -412,6 +417,17 @@ channel answers NOOP (exit 0).
     would then be "higher" than what `prod` holds, and would publish it,
     taking the branch's changes back out. A history git cannot list (a
     shallow clone, no `RUNNER_TEMP`) is exit 5, never a pass.
+
+  The rule is the run's, not the stage's: a push to `main` holds `gamma` to
+  it too, where it counts only `gamma`'s MAIN-LINE builds (those whose
+  `h<8 hex>` is a commit on `main`'s freshly fetched history; a branch's
+  break-glass build is reported and not counted). Before refusing, kci asks
+  git whether the release revision is on the history of the commit the
+  channel's newest build names (`git rev-parse --verify`, then `git
+  merge-base --is-ancestor`): when it is, a newer release is already in the
+  channel and the run stops SUPERSEDED, exit 0, nothing uploaded and no set
+  hash handed on. A prefix git cannot resolve to one commit, or a shallow
+  clone, is exit 5.
 
   Only a late re-run of an old run reaches either, since the group
   serialises live runs. A re-run of the same release is NOOP (or finishes a
@@ -803,7 +819,8 @@ so the release files list no package:
   `release/ci/derive_checks.py`, reads `//...` and `tests//functional/...`
   from the live graph (`buck2 cquery`) and answers one check per path group
   for every target no declared unit names or matches: `<p>` for each
-  library `//src/<p>/...`, `repo_root` for `//:`, `tools_<t>` for each
+  library `//src/<p>/...` and each test-only package
+  `//src/tests/<kind>/<p>/...`, `repo_root` for `//:`, `tools_<t>` for each
   `//tools/<t>/...`, `<d>` for any other top directory, `functional_tests`
   for `tests//functional/...`; a name an artifact holds gets `_package`.
   Every name is one kci accepts (`[a-z][a-z0-9_]*`) whatever the directory
@@ -819,6 +836,11 @@ so the release files list no package:
   for an artifact, a refusal (`KCI-E-ARTIFACT`): a release must build what an
   artifact names. A derive tool that fails or answers outside its grammar is
   "cannot tell" (`KCI-E-AFFECTED`), never a pass.
+- **A universe the derive tool cannot query:** when its `buck2 cquery` fails,
+  for any reason (a target with an unknown or invisible dependency, a
+  transport error, a buck2 that does not start), `derive_checks.py` answers
+  one `BROKEN <reason>` line holding buck2's error, and kci FAILS the check
+  (`KCI-E-BUILD-FAILED`): nothing is built, and no affected command runs.
 
 **Which units a change reaches:** each build system's `affected` command,
 `buck2 run //tools/build/ci:affected` ([`tools/build/ci`](../tools/build/ci)),
@@ -828,10 +850,22 @@ package that held it at the base commit), takes their reverse dependencies, and
 answers the units whose targets (labels, or the package patterns of the derived
 checks) are among them. A file it cannot map, and a change to `.buckconfig`,
 the toolchains, `tools/build`, `prelude` or `third_party`
-([`rules.txt`](../tools/build/ci/rules.txt)), answer `WIDENED`: every unit. A
+([`rules.txt`](../tools/build/ci/rules.txt)), answer `WIDENED`: every unit.
+A widened answer is given only after `buck2 cquery` configures the whole
+universe. A failed query is never a widening: when the query mapping the
+files, the reverse-dependency query or the query configuring the universe
+fails, for any reason (a target with an unknown or invisible dependency, a
+transport error), the answer is `BROKEN`, carrying buck2's error (its
+stderr whole up to 8 KiB, else the first and last 4 KiB), and kci FAILS the
+check (`KCI-E-BUILD-FAILED`). The decision is the failure, not buck2's text:
+the target buck2 names, when it names one, only leads the message. So a
+change that plants a target buck2 cannot configure fails its own check,
+widened or not. A
 non-empty change that reaches no unit answers `AFFECTED 0`, which kci refuses
 (`KCI-E-AFFECTED-VACUOUS`): never a pass. The job's checkout has the full
-history, so the base commit is there.
+history, so the base commit is there. In `pr.yml` the base is the first parent
+of the merge commit the job builds, so the change is the pull request's alone
+however far `main` has moved since the pull request's event.
 
 **How the reached units are built:** units whose `build_targets` commands are
 identical (both build systems of `release/artifacts.textproto` share
@@ -839,8 +873,10 @@ identical (both build systems of `release/artifacts.textproto` share
 targets, so a `build_targets` command must be correct on such a union.
 `release/ci/build_targets.sh` builds with `--keep-going`, then checks the lints
 and runs the tests among all the targets (a failed build stops before the lints
-and tests). The per-run timeout (`--build-timeout-s`, default 3600 s) bounds the
-whole batch, not each unit in it. The run's output is in
+and tests). The run's timeout bounds the whole batch, not each unit in it:
+with the build budget (below), all of the budget left; without it, the
+per-run timeout (`--build-timeout-s`, default 3600 s).
+The run's output is in
 `<log dir>/_batch_<k>.stdout` and `.stderr`, and its full argv, one argument per
 line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
 `<unit>.stdout` and `.stderr`).
@@ -848,7 +884,7 @@ line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
 - **The batch passes:** every unit in it is `BUILT`. Nothing is retried.
 - **The batch fails:** kci builds its units one at a time, in order, to name
   the failing ones. Each retry re-runs `sh release/ci/build_targets.sh` over
-  that one unit's targets, with its own `--build-timeout-s`, and logs to
+  that one unit's targets, with its own timeout (as the batch's), and logs to
   `<unit>.stdout` and `.stderr`; the batch already built every target that
   does not depend on a failure, so the retries run on a warm cache. A failing
   wide change therefore costs the batch's time plus the retries, up to the
@@ -857,9 +893,12 @@ line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
   later batch that fails is noted as not attributed (a later batch that
   passes still builds its units). The step is FAILED (`KCI-E-BUILD-FAILED`);
   the summary's line is `BUILD step: F of N unit(s) failed: ...`.
-- **The batch times out (or is killed by a signal):** the batch had the whole
-  `--build-timeout-s` (default 3600 s), not a share per unit. It is not
-  retried and no unit of it is attributed: FAILED.
+- **The batch times out (or is killed by a signal):** the batch had all that
+  was left of the build budget (the note then says `timed out after N min[ S
+  s], all that was left of the build budget (--build-budget-s B)`, N min S s
+  the time it was allowed), or without a budget the whole `--build-timeout-s`
+  (default 3600 s), not a share per unit. It is not retried and no unit of
+  it is attributed: FAILED.
 - **The batch fails but every unit builds alone:** the units interfere or the
   build is flaky. That is INDETERMINATE (`KCI-E-CANNOT-TELL`), never a pass.
   FAILED outranks it: if a unit failed or a batch was not attributed anywhere
@@ -867,6 +906,43 @@ line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
 - **A run cannot be started** (a batch, a unit alone or a retry): the step
   stops at once, nothing after it is started, and the step is INDETERMINATE
   (`KCI-E-CANNOT-TELL`) even when a unit has already failed.
+
+**The build budget** (`--build-budget-s <n>`, accepted only with
+`--affected-by`, at most 604800, a week): the seconds the per-change check
+may take, counted from kci's own start on the monotonic clock
+(`CLOCK_MONOTONIC`), so everything kci does first (the workflow check, the
+git reads, the derive and affected commands) is charged to it. Every run
+(each derive and affected command, a batch, a unit alone, a retry) gets all
+the whole seconds left until the deadline, read just before it starts
+(`--build-timeout-s` is refused beside `--build-budget-s`: no fixed cap
+cuts a wide batch short of the budget); a run that passed, failed or timed out is
+charged alike. A build run (a batch, a unit alone, a retry) that times out
+is FAILED, with the `timed out after N min[ S s], ...` note above. A derive
+or affected command that times out is INDETERMINATE (`KCI-E-AFFECTED`), its
+note a plain `timed out`: it gets all the budget left too, so a hung
+affected command can use the whole budget before the step ends
+INDETERMINATE. A run with less than one second left is not started. A
+derive or affected command not started makes the step INDETERMINATE
+(`KCI-E-AFFECTED`: kci cannot tell what the change reaches). A build run not
+started lists its units, and those of every later run, as `BUILD step: U of
+N unit(s) not built: the build budget (--build-budget-s B) was spent before
+their run could start: ...`, which is FAILED (`KCI-E-BUILD-FAILED`), never
+a pass; the units earlier runs built keep their `BUILT` lines. A batch whose
+retries ran out of budget is not called interference. Without the flag,
+each run has its `--build-timeout-s` and there is no total.
+
+`pr.yml` passes the time its job has left: its first step writes the job's
+deadline, 115 of the job's 120 minutes (`timeout-minutes`), and the
+`kci run` step stops with an error if that file is missing, then passes the
+seconds left until it. The time `build kci` took is therefore not taken from
+a wide change's build, and kci reports which units it did not build about 5
+minutes before GitHub would cancel the job (kci's own last seconds of
+writing its result, and the steps after kci, which take seconds, fall in
+those 5 minutes). `build kci` itself takes from seconds (a cached kci) to most
+of an hour (a change to kci or to what it depends on), so a fixed per-batch
+number either wasted the job's time or overran it. The welded test
+`src/kci_workflow_check/tests/test_repo_kci_yml.mojo` holds `pr.yml` to these
+steps and numbers.
 
 Whatever the outcome, a `BUILT <unit>` line names exactly the units a
 successful run covered. The result document's `affected_by.units` is the set
@@ -934,10 +1010,106 @@ to the release workflow's), and the welded test
 | job | the one job `check`, only for a pull request from a branch of this repository (`github.event.pull_request.head.repo.full_name == github.repository`; a fork's run gets no tailnet credential, and a maintainer reads the change and pushes it to a branch here), written bare or as exactly `${{ <condition> }}` (a block scalar or whitespace inside quotes makes GitHub read the `if:` as a format string, which is always true) |
 | runner | `runs-on: ubuntu-24.04`, written as that plain scalar: a GitHub-hosted machine, fresh per job. A self-hosted label, label list, runner group, expression (`${{ vars.X }}`) or quoted value is refused, so a pull request's code never reaches a runner that keeps state between jobs |
 | permissions | its own `permissions:` mapping, `contents: read` and `id-token: write` (for the farm connection, [farm-connect](#how-it-reaches-the-farm), only); no environment, no secret (no value of the job, nor of the workflow-level `env:`, names `secrets` other than `secrets.GITHUB_TOKEN`), no publish step |
-| steps | the pinned full-history checkout of the merge commit, `farm-connect`, `//bin/kci:kci[runnable]`, then `kci run --stage pr --affected-by <the pull request's base commit>`: the units the change reaches, built and tested on the farm in one batch per shared build command, a failed batch retried unit by unit to name its failing units. The units are the artifacts of `release/artifacts.textproto` and the checks derived from the build graph when the job runs (see [The per-change check's units](#the-per-change-checks-units)), so a pull request that adds or deletes a package needs no edit to any release file. Nothing ships. |
+| steps | the pinned full-history checkout of the merge commit, `farm-connect`, `//bin/kci:kci[runnable]`, then `kci run --stage pr --affected-by "$change_base"`, where `change_base` is the merge commit's first parent (`git rev-parse --verify HEAD^1`, the `main` the pull request is merged into; the step stops when HEAD has no second parent). Never the event's `github.event.pull_request.base.sha`: that is `main` when the event fired, and once `main` moves every change merged to it since then would count as the pull request's own and widen the check. `src/kci_workflow_check` (R6) holds the exact line, and lets no `${{ }}` into a script (R18). It builds and tests the units the change reaches on the farm, in one batch per shared build command, a failed batch retried unit by unit to name its failing units. The units are the artifacts of `release/artifacts.textproto` and the checks derived from the build graph when the job runs (see [The per-change check's units](#the-per-change-checks-units)), so a pull request that adds or deletes a package needs no edit to any release file. Nothing ships. |
 | every `uses:` | pinned to a full commit id (the local farm-connect action excepted) |
 
 The repository's branch settings require the check **`pr / check`**.
+
+## coverage.yml: the pull request's coverage (not a gate)
+
+[`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml) posts
+the check run `coverage`: the line coverage of the `mojo_library` targets the
+change touches, and the branch coverage of those whose coverage gate reads
+branch records (`COVERAGE_BRANCH_GATE`), as covcheck's summary and
+annotations on the lines of the "Files changed" view. It is **informational**: not a required check, its
+conclusion is `neutral` in the policy's census mode, except that a touched
+package measured under its floor of `tools/build/coverage/ratchet.tsv` (a
+`Regression`, which fails in every mode) makes it `failure`; it cannot make
+`pr / check` red, so that failure shows on the pull request without
+blocking it. Job `measure` (the same farm connection and permissions as
+`pr / check`) builds the touched libraries' `[coverage][tests]`, and
+`[coverage][branch_info]` of those whose gate reads branch records, with
+`-c komira.coverage=true` on the farm, in one call, and runs `covcheck
+report` over the reports and those records (`--branch-lcov`); a library
+whose coverage build fails is listed as not measured, one whose branch
+records (or gate) fail as branch not measured, and the job stays green. Job `post` holds the only write permission
+(`checks: write`), checks nothing out and sends the bodies `measure`
+uploaded. A pull request from a fork runs neither, and nor does one whose
+base is not `main`: a stacked pull request gets no coverage run until it is
+retargeted to `main` and then pushed to (a retarget alone is an `edited`
+event, which neither workflow listens for; the pull request adding the
+workflow sees its first real run then). A pull request whose head predates the workflow (no
+`.github/ci/coverage_measure.sh`) is not measured: job `measure` is green
+with a notice to merge `main`, job `post` is skipped, and no `coverage` check
+run is posted. Making it a required check, or switching coverage on in
+`pr / check`, waits for the sweep of tests that fail at `-O0` or under kcov
+(in a coverage build one such test leaves its library's conda package
+unbuilt: a coverage run or gate blocks only the package it measures from
+shipping, never the library or its dependents) and is the CEO's decision. Details:
+[The coverage workflow](../tools/build/coverage/README.md#the-coverage-workflow).
+
+## main_red.yml: the main red alert
+
+There is no merge queue: pull requests are checked one at a time and merged
+into `main`, and the release run of `kci.yml` builds each push to `main`. Two
+changes that are each green can still break `main` together. The rule is
+**fix forward or revert within the hour**: when the release run of `main`
+fails, the author of a culprit pull request lands a fix, or reverts the
+pull request, within an hour of the alert, before anything else merges on
+top of it.
+
+[`.github/workflows/main_red.yml`](../.github/workflows/main_red.yml) is the
+alert. It runs when a run of `kci.yml` on `main` completes (`workflow_run`)
+and runs [`release/ci/main_red.py`](../release/ci/main_red.py) with
+`issues: write`, `actions: read` and `contents: read`, checking out `main`
+and running no code of any pull request. It acts only on a run started by a
+push to `main`:
+
+- **Red** (`failure`, `timed_out`, `startup_failure`): the last green
+  commit is the newest commit of a successful push run of `kci.yml` on
+  `main` that is an ancestor of the red one; the culprits are the pull
+  requests merged into `main` after it (the first-parent commits of the
+  range, newest first); the failing targets are the `Action failed:`,
+  `GATED TEST FAILED:` and ``Validation for `<target>` failed`` lines of
+  the failed jobs' logs (with none, the failed job and step). If no issue
+  labelled `main-red` is open, it opens one titled `main red: <first
+  failing target>`; otherwise it comments on the open one. A red commit
+  that a later green run already contains (a re-run of an old run) is
+  left alone.
+- **Green** (`success`): every open `main-red` issue is closed with the
+  comment `Fixed: main is green at <commit> (run <url>)`, unless it records
+  a red head the green commit does not contain (a re-run of an older
+  commit went green). The recorded heads are the `Head:` lines of the
+  issue's body and of the workflow's own comments (`github-actions[bot]`);
+  no other comment counts, and a head the API cannot place on `main`'s
+  line is skipped.
+- **Cancelled or skipped**: nothing.
+
+The issue body, and each comment on a later red run, is one `Key: value`
+line per field, in this order, for tools that read it:
+
+```
+Run: <run url>
+Head: <full commit id>
+Last green: <full commit id, or none>
+Culprits: #N, #M            (or: Culprits: unknown)
+Failing: <target>           (one line per failing target)
+Log: <key log line>         (none, one or two lines)
+```
+
+**Nothing hides a red `main`.** `kci.yml`'s push runs share one
+concurrency group with `cancel-in-progress: false` ([Queued
+runs](#continuous-auto-promotion)): a running release is never cancelled,
+and a newer push replaces only a pending run, which never started. The run
+that replaces it builds a later commit of `main`, which carries the
+replaced one's changes, and the culprits come from the whole range since
+the last green commit, so the replaced commit's pull request is still
+named. `main_red.yml` has no concurrency group, so none of its runs is
+replaced or cancelled; if two red runs race to open the issue, the newer
+issue is closed as a duplicate of the older. One delay remains: a push
+that changes only `docs/**` or `*.md` files starts no `kci.yml` run (rule
+R17), so a README example it breaks is found by the next push's run, whose
+range names it. Cases: `//release/ci/tests:test_main_red`.
 
 ## merge-from-live (not yet running)
 

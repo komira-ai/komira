@@ -11,9 +11,9 @@
 #   TxnOffsetCommit    (api_key 28) — commit consumer offsets inside the txn.
 #   EndTxn             (api_key 26) — commit OR abort the txn.
 #
-# (InitProducerId v0/v1 — the transactional-id binding — lives in
-# init_producer_id.mojo; v1 already carries `transactional_id`, which is all the
-# rebind needs. kafka-python 2.3.2 caps InitProducerId at v1.)
+# (InitProducerId v0..v5 — the transactional-id binding — lives in
+# init_producer_id.mojo; every version carries `transactional_id`, which is all
+# the rebind needs. kafka-python 2.3.2 caps InitProducerId at v1.)
 #
 # Wire format pinned against the INSTALLED kafka-python 2.3.2 schemas (the
 # authoritative source for what that client sends). We advertise the v0 of
@@ -39,7 +39,9 @@
 #     transactional_id STRING, group_id STRING, producer_id INT64,
 #     producer_epoch INT16,
 #     topics ARRAY{ topic STRING, partitions ARRAY{ partition INT32, offset INT64,
-#                                                    metadata STRING } }
+#                                                    metadata NULLABLE_STRING } }
+#   (CommittedMetadata is "nullableVersions": "0+" in TxnOffsetCommitRequest.json;
+#   v1 is the same as v0, so these bytes also decode a v1 body.)
 #   TxnOffsetCommitResponse_v0:
 #     throttle_time_ms INT32,
 #     topics ARRAY{ topic STRING, partitions ARRAY{ partition INT32, error_code INT16 } }
@@ -258,7 +260,7 @@ def encode_end_txn_response(
 struct TxnOffsetCommitPartition(Copyable, Movable, Deinitable):
     var partition: Int32
     var offset: Int64
-    var metadata: String
+    var metadata: Optional[String]  # null when the client sent none
 
 
 @fieldwise_init
@@ -308,7 +310,7 @@ def decode_txn_offset_commit_request[
         for _ in range(n_parts):
             var part = dec.get_int32()
             var offset = dec.get_int64()
-            var metadata = dec.get_string()
+            var metadata = dec.get_nullable_string()
             parts.append(TxnOffsetCommitPartition(part, offset, metadata^))
         topics.append(TxnOffsetCommitTopic(name^, parts^))
     return TxnOffsetCommitRequest(tid^, group_id^, pid, epoch, topics^)

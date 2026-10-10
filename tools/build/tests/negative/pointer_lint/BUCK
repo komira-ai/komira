@@ -25,6 +25,9 @@ load("//functional/pointer_lint:fixture.bzl", "POINTER_FFI", "POINTER_HOLDS", "P
         ("libc_open", "src/komira_a/plant.mojo", "plant_libc_open.txt"),
         ("public_pointer", "src/komira_a/plant.mojo", "plant_public_pointer.txt"),
         ("public_method", "src/komira_a/plant.mojo", "plant_public_method.txt"),
+        # A library file of a test-only package (src/tests/<kind>/<pkg>):
+        # the src/tests container is not a package's tests directory.
+        ("public_pointer_container", "src/tests/e2e/komira_c_e2e/plant.mojo", "plant_public_pointer.txt"),
         # A package's __init__.mojo is public, though its name starts with `_`.
         ("public_init", "src/komira_b/__init__.mojo", "plant_init.txt"),
         # held.mojo with a third parallelize: the row holds two.

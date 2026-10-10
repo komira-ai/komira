@@ -4,8 +4,8 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 #
 # `plan_vocabulary.proto` is the language-agnostic half of the plan wire: every
 # enumerated tag space a plan or expression node can name. It mirrors the
-# engine's own `comptime` tag declarations and the core packages'
-# `plan/plan_wire_vocabulary.mojo` (same wire numbers), and is kept in step
+# engine's own `comptime` tag declarations and
+# `komira_plan_wire/plan_wire_vocabulary.mojo` (same wire numbers), and is kept in step
 # with them by hand. `plan.proto` is the message layer: what a NODE is.
 # Building this target is what PARSES both files, so an unbalanced brace or a
 # duplicate enum value is a build error here rather than in the first non-Mojo
@@ -23,18 +23,41 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 # The generated constants exist so the `.proto` is typed for the other
 # languages that read it, which name `PlanTag` rather than a bare `uint32`.
 #
-# `test_srcs` welds the package to a census of the envelope and of a few
-# leaf messages and vocabulary numbers; the whole plan wire is exercised by
-# `komira_plan_wire`'s round trips. README.md's examples run as one more
-# welded test.
+# `test_srcs` welds the package to the field-number census: every field of
+# every message and every value of every enum, each number written by hand
+# in a ledger and held to the generated codec as wire bytes, read back by
+# name (tests/test_plan_field_numbers_*.mojo, tests/test_plan_enum_numbers_*.mojo).
+# A renumbered field or value fails them, and regenerating the golden
+# fixtures cannot turn them green. tests/test_plan_census_complete.mojo
+# holds those ledgers to every field and value protoc declares, so a field
+# added without a census row fails too; it reads the .proto files and the
+# census files as data. README.md's examples run as one more welded test.
+_CENSUS = [
+    "tests/test_plan_field_numbers_scan.mojo",
+    "tests/test_plan_field_numbers_expr.mojo",
+    "tests/test_plan_field_numbers_plan.mojo",
+    "tests/test_plan_enum_numbers_nodes.mojo",
+    "tests/test_plan_enum_numbers_functions.mojo",
+]
+
+_PROTOS = [
+    "plan.proto",
+    "plan_vocabulary.proto",
+]
+
 mojo_proto_library(
     name = "komira_plan_proto",
-    srcs = [
-        "plan.proto",
-        "plan_vocabulary.proto",
-    ],
+    srcs = _PROTOS,
     import_prefix = "komira/plan/v1",
     deps = ["//src/komira_proto_codec:komira_proto_codec"],
-    test_srcs = ["tests/test_plan_field_numbers.mojo"],
+    test_srcs = _CENSUS + ["tests/test_plan_census_complete.mojo"],
+    test_data = {
+        # Every .proto of `srcs` is staged under protos/, and the test scans
+        # every file there, so a .proto added to `srcs` cannot be skipped.
+        "tests/test_plan_census_complete.mojo": {"protos/" + p: p for p in _PROTOS} | {
+            "census/" + t.removeprefix("tests/"): t
+            for t in _CENSUS
+        },
+    },
     visibility = ["PUBLIC"],
 )

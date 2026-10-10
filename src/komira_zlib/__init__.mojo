@@ -19,6 +19,8 @@
 #
 # Public symbols (stable surface for `komira_parquet`'s compression codec):
 #   * `zlib_inflate_into(dst, src, window_bits=ZLIB_WINDOW_BITS_AUTO) -> Int`
+#   * `zlib_inflate_once(dst, src, window_bits) -> ZlibInflateOutcome` (one
+#     `inflate` call, its return code and counts handed back unjudged)
 #   * `zlib_deflate_into(dst, src, level, window_bits) -> Int`
 #   * `zlib_compress_bound(src_len, window_bits) -> Int`
 #   * `zlib_skip_stream(src, window_bits=ZLIB_WINDOW_BITS_AUTO) -> Int`
@@ -49,5 +51,7 @@ from .zlib_ffi import (
     zlib_crc32,
     zlib_deflate_into,
     zlib_inflate_into,
+    zlib_inflate_once,
     zlib_skip_stream,
+    ZlibInflateOutcome,
 )

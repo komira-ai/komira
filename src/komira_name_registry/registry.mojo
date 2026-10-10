@@ -134,7 +134,7 @@ struct NameRegistry(Deinitable):
                     # Never cut inside a multi-byte sequence: back up past
                     # continuation bytes (0b10xxxxxx) so the stored name stays
                     # valid UTF-8.
-                    while slen > 0 and (UInt8(sb[slen]) & UInt8(0xC0)) == UInt8(0x80):
+                    while slen > 0 and (UInt8(sb[slen]) & UInt8(0xC0)) == UInt8(0x80):  # cov: unreachable slen > 0 never fails: byte 0 of a UTF-8 literal is a lead byte, not 0b10xxxxxx
                         slen -= 1
                 self.entries[idx].name_len = UInt8(slen)
                 for i in range(slen):

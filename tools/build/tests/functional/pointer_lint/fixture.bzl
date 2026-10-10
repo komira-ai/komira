@@ -21,8 +21,9 @@ from or rebound before the take, a name bound in one function or method and
 taken in another, `external_call` of write, readlink and openat, a banned call in
 a trailing comment (after a string holding `#` and an escaped quote), and
 a triple quote inside a comment. A public
-pointer signature in a private module (_impl.mojo), in a test file and
-outside src/ (tools/) is not a site; ffi.mojo, which ffi.tsv lists, names
+pointer signature in a private module (_impl.mojo), in a test file (of
+komira_a, and of komira_c_e2e, a test-only package under src/tests/e2e/)
+and outside src/ (tools/) is not a site; ffi.mojo, which ffi.tsv lists, names
 two wildcard origins; ffi_clean.mojo is marked FFI-BOUNDARY and names none.
 functional/pointer_lint/BUCK exports the files, so negative/pointer_lint
 plants its defects in the same tree.
@@ -38,6 +39,7 @@ POINTER_TREE = {
     "src/komira_a/held.mojo": _DIR + "held.txt",
     "src/komira_a/near.mojo": _DIR + "near.txt",
     "src/komira_a/tests/test_a.mojo": _DIR + "test_file.txt",
+    "src/tests/e2e/komira_c_e2e/tests/test_c.mojo": _DIR + "test_file.txt",
     "tools/gen/main.mojo": _DIR + "tool.txt",
 }
 

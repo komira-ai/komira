@@ -4,7 +4,10 @@ On disk, under functional/test_weld/src (TEST_WELD_ROOT): komira_a has a
 source, two test files (one nested under tests/sub/), a test_dead.mojo, and a
 helper under tests/ that is not a test file. komira_b has a source and a
 test-free tree. komira_c has a source and, under wire/, a test file. komira_gen
-holds no .mojo, so it is no package with code. functional/test_weld/BUCK
+holds no .mojo, so it is no package with code. src/tests is no package: it
+holds packages by kind, as the repository's src/tests does; komira_d_e2e
+(under tests/e2e) has a source and a welded test, and komira_e (under
+tests/helpers) a source and no test. functional/test_weld/BUCK
 exports each file (TEST_WELD_FILES), so negative/test_weld plants its defects
 in the same tree.
 
@@ -31,6 +34,9 @@ TEST_WELD_TREE = [
     "src/komira_c/c.mojo",
     "src/komira_c/wire/tests/test_wire.mojo",
     "src/komira_gen/gen.txt",
+    "src/tests/e2e/komira_d_e2e/d.mojo",
+    "src/tests/e2e/komira_d_e2e/tests/test_d.mojo",
+    "src/tests/helpers/komira_e/e.mojo",
 ]
 
 # The `files` of every test_weld over the tree, its `root` (a path in the

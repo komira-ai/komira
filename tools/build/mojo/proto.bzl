@@ -29,6 +29,10 @@ Output layout of a target `L` with import name `I`:
     L/gen/I/...            the generated package (sub-target per file name)
     L/pkg/I.mojoc          the precompiled package
 
+`mojo_routes_proto_library` generates the HTTP route table, handler trait and
+dispatcher of each service from its `(google.api.http)` rules; see its
+section below.
+
 The generation half (`stage_proto_srcs`, `proto_closure`, `select_generated`,
 `generate_proto_dir`) is public, for rules that compile the generated files
 themselves through `mojo_library` (mojo_gcp_client, tools/build/cloud/gcp.bzl).
@@ -50,6 +54,8 @@ MojoProtoToolchainInfo = provider(fields = {
     "plugin": provider_field(typing.Any),
     # The protoc-gen-mojo-db executable (mojo_db_proto_library).
     "db_plugin": provider_field(typing.Any),
+    # The protoc-gen-mojo-routes executable (mojo_routes_proto_library).
+    "routes_plugin": provider_field(typing.Any),
 })
 
 # What a mojo_proto_library gives the libraries that import from it. Lists,
@@ -114,6 +120,7 @@ def _mojo_proto_toolchain_impl(ctx):
             protoc = ctx.attrs.protoc[DefaultInfo].default_outputs[0],
             plugin = ctx.attrs.plugin[DefaultInfo].default_outputs[0],
             db_plugin = ctx.attrs.db_plugin[DefaultInfo].default_outputs[0],
+            routes_plugin = ctx.attrs.routes_plugin[DefaultInfo].default_outputs[0],
         ),
     ]
 
@@ -125,6 +132,7 @@ mojo_proto_toolchain = rule(
         "db_plugin": attrs.exec_dep(),
         "plugin": attrs.exec_dep(),
         "protoc": attrs.exec_dep(),
+        "routes_plugin": attrs.exec_dep(),
     },
 )
 
@@ -472,7 +480,7 @@ _mojo_proto_gen = rule(
 )
 
 # Every other keyword is refused in the welded form rather than dropped.
-_WELDED_KWARGS = ["default_protocol", "default_wire", "deps", "import_name", "import_prefix", "package_name", "proto_deps", "visibility"]
+_WELDED_KWARGS = ["default_protocol", "default_wire", "deps", "import_name", "import_prefix", "package_name", "proto_deps", "readme", "visibility"]
 
 def _mojo_proto_library(
         name,
@@ -516,6 +524,8 @@ def _mojo_proto_library(
         lib["test_data"] = test_data
     if test_env != None:
         lib["test_env"] = test_env
+    if "readme" in kwargs:
+        lib["readme"] = kwargs["readme"]
     mojo_library(
         name = name,
         srcs = [":{}[__init__.mojo]".format(gen)] + [":{}[{}.mojo]".format(gen, s) for s in stems],
@@ -563,9 +573,115 @@ mojo_db_proto_library_rule = rule(
     },
 )
 
+# ---- mojo_routes_proto_library -------------------------------------------------
+#
+# `mojo_routes_proto_library(name, srcs, outs, messages, deps, ...)`: the HTTP
+# side of the services `srcs` declare, from their RPCs' `(google.api.http)`
+# rules. protoc-gen-mojo-routes (tools/build/proto-codegen/src/routes/) writes
+# `<stem>_routes.mojo` for each `.proto` of `srcs` that declares a service: per
+# service a handler trait, a komira_http_server `Router` table and a
+# `RequestDispatcher`. `outs` states those files, as mojo_db_proto_library's
+# does. The request and response messages come from `messages`, the Mojo
+# proto library generated from the same `.proto` files or from the files they
+# import: its import name is the plugin's `package_prefix`, and it is added
+# to `deps`. `proto_deps` must let protoc resolve every import (`messages`'s
+# own `.proto` files and google/api/annotations.proto included).
+#
+# Two targets, as the welded mojo_proto_library: `<name>_gen` (generation
+# only) and `<name>`, a mojo_library over the generated files, so `test_srcs`
+# gate the package exactly as a hand-written library's do.
+
+_ROUTES_SUFFIX = "_routes.mojo"
+
+def _mojo_routes_gen_impl(ctx):
+    ptc = ctx.attrs.proto_toolchain[MojoProtoToolchainInfo]
+    check_proto_import_name(ctx, ctx.attrs.import_name)
+    tree, own_paths = stage_proto_srcs(ctx)
+    trees, _dep_paths = proto_closure(ctx, tree, own_paths)
+    if not ctx.attrs.outs:
+        fail("{}: `outs` must list the `<stem>{}` files, one per .proto of `srcs` that declares a service".format(ctx.label, _ROUTES_SUFFIX))
+    stems = [proto_stem(ctx, p) for p in own_paths]
+    seen = {}
+    for o in ctx.attrs.outs:
+        if "/" in o or not o.endswith(_ROUTES_SUFFIX) or o[:-len(_ROUTES_SUFFIX)] not in stems:
+            fail("{}: `outs` entry `{}` is not `<stem>{}` for a .proto of `srcs` ({})".format(
+                ctx.label,
+                o,
+                _ROUTES_SUFFIX,
+                ", ".join([s + ".proto" for s in stems]),
+            ))
+        if o in seen:
+            fail("{}: `outs` lists `{}` twice".format(ctx.label, o))
+        seen[o] = True
+    opt = "package_prefix=" + ctx.attrs.messages[MojoInfo].import_name
+    gen_dir = generate_proto_dir(ctx, ptc.routes_plugin, "mojo_routes", opt, trees, own_paths, ctx.attrs.outs, ctx.attrs.import_name)
+    files = ["__init__.mojo"] + ctx.attrs.outs
+    return [DefaultInfo(
+        default_output = gen_dir,
+        sub_targets = {"proto": [DefaultInfo(default_output = tree)]} |
+                      {f: [DefaultInfo(default_output = gen_dir.project(f))] for f in files},
+    )]
+
+_mojo_routes_gen = rule(
+    impl = _mojo_routes_gen_impl,
+    attrs = {
+        "import_name": attrs.string(),
+        "import_prefix": attrs.string(default = ""),
+        # The Mojo proto library holding the request and response messages.
+        "messages": attrs.dep(providers = [MojoInfo]),
+        "outs": attrs.list(attrs.string()),
+        "proto_deps": attrs.list(attrs.dep(providers = [ProtoSrcsInfo]), default = []),
+        "proto_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo_proto", providers = [MojoProtoToolchainInfo]),
+        "srcs": attrs.list(attrs.source()),
+    },
+)
+
+def _mojo_routes_proto_library(
+        name,
+        srcs,
+        outs,
+        messages,
+        deps = [],
+        proto_deps = [],
+        import_name = None,
+        import_prefix = "",
+        test_srcs = [],
+        test_data = None,
+        test_env = None,
+        visibility = None):
+    if messages in deps:
+        fail("//{}:{}: `messages` is added to `deps`; do not list it there too".format(native.package_name(), name))
+    gen = name + "_gen"
+    vis = {"visibility": visibility} if visibility != None else {}
+    _mojo_routes_gen(
+        name = gen,
+        srcs = srcs,
+        outs = outs,
+        messages = messages,
+        import_name = import_name or name,
+        import_prefix = import_prefix,
+        proto_deps = proto_deps,
+        **vis
+    )
+    lib = {}
+    if test_data != None:
+        lib["test_data"] = test_data
+    if test_env != None:
+        lib["test_env"] = test_env
+    mojo_library(
+        name = name,
+        srcs = [":{}[__init__.mojo]".format(gen)] + [":{}[{}]".format(gen, o) for o in outs],
+        deps = deps + [messages],
+        gen = ":" + gen,
+        import_name = import_name,
+        test_srcs = test_srcs,
+        **(vis | lib)
+    )
+
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
 mojo_db_proto_library = declares_docs(mojo_db_proto_library_rule)
 mojo_proto_library = declares_docs(_mojo_proto_library)
+mojo_routes_proto_library = declares_docs(_mojo_routes_proto_library)
 proto_srcs = declares_docs(proto_srcs_rule)
 protoc_dist = declares_docs(protoc_dist_rule)

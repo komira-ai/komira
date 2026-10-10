@@ -2,6 +2,7 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/native:defs.bzl", "checked_cxx_library", "prefix_header", "prefixed_archive_check")
 load("@komira//tools/build/third_party_srcs:defs.bzl", "third_party_srcs")
 load(
     ":srcs.bzl",
@@ -12,18 +13,24 @@ load(
     "PRIVATE_HEADERS",
     "PUBLIC_HEADERS",
     "S2N_BIGNUM_ASM_X86_64",
+    "SSL_SRCS",
+    "SSL_TOOL_HEADERS",
+    "TOOL_SRCS",
 )
 
 # aws/aws-lc 1.39.0, Apache-2.0 OR ISC (LICENSE in the archive).
 #
 # libcrypto, built the way aws-lc's CMake build builds it with
-#   BUILD_LIBSSL=OFF BUILD_TOOL=OFF DISABLE_PERL=ON DISABLE_GO=ON
-#   CMAKE_BUILD_TYPE=Release BUILD_SHARED_LIBS=OFF (and FIPS off)
-# for linux x86_64, without CMake: the source lists are srcs.bzl, generated
+#   DISABLE_PERL=ON DISABLE_GO=ON CMAKE_BUILD_TYPE=Release
+#   BUILD_SHARED_LIBS=OFF (and FIPS off)
+# for linux x86_64, without CMake; and, at the end of this file, libssl and
+# the bssl tool (BUILD_LIBSSL and BUILD_TOOL, on by default), which only the
+# TLS interop tests use. The source lists are srcs.bzl, generated
 # from the archive's CMakeLists.txt by :srcs_gen (and held to it by the test
 # :srcs_drift, below). Without Perl and Go the build uses the assembly and
 # err_data.c the archive ships under generated-src/, so nothing is generated
-# here.
+# here. Every global symbol is renamed komira_awslc_X (:crypto, below), so
+# this copy of aws-lc can share a process with any other libcrypto.
 pinned_file(
     name = "aws-lc-1.39.0.tar.gz",
     url = "https://github.com/aws/aws-lc/archive/refs/tags/v1.39.0.tar.gz",
@@ -89,8 +96,8 @@ staged_files(
     srcs = ["umodti3.c"],
 )
 
-cxx_library(
-    name = "crypto",
+# Every argument of the libcrypto compile but the prefix (below).
+_CRYPTO = dict(
     srcs = [":src[{}]".format(f) for f in CRYPTO_SRCS + CRYPTO_ASM_X86_64 + BCM_SRCS + BCM_ASM_X86_64] +
            [(":src[{}]".format(f), _S2N_BIGNUM_FLAGS) for f in S2N_BIGNUM_ASM_X86_64] +
            [":builtins[umodti3.c]"],
@@ -108,5 +115,149 @@ cxx_library(
     header_namespace = "",
     # The assembly above is x86_64 ELF; see srcs.bzl for the aarch64 lists.
     target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],  # komira-limit:aws-lc-x86-64-linux
+)
+
+# libcrypto with aws-lc's own symbol names. Nothing links it: its archive's
+# symbol table is the list of names :prefix_symbols renames.
+cxx_library(
+    name = "crypto_unprefixed",
+    **_CRYPTO
+)
+
+# aws-lc's symbol prefix, komira_awslc_, as its own prefix build applies it
+# without Go or CMake. aws-lc ships empty
+# include/openssl/boringssl_prefix_symbols{,_asm}.h, which base.h and
+# asm_base.h include; a prefix build fills them with `#define X
+# komira_awslc_X` for every global symbol of the library. This header is that
+# fill, made from :crypto_unprefixed's symbol table (as aws-lc's
+# util/read_symbols.go makes it), and :crypto_prefixed force-includes it into
+# every C and assembly compile, its own and its users'. The four
+# OPENSSL_memory_* hooks are weak references aws-lc makes but never defines
+# (a program may define them to take over aws-lc's allocator), so the symbol
+# table does not name them: they are renamed too, so that no other object of
+# a process can take over this copy's allocator by defining them.
+prefix_header(
+    name = "prefix_symbols",
+    archive = ":crypto_unprefixed[static-pic]",
+    exec_compatible_with = LINUX_X86_64,
+    extra_symbols = [
+        "OPENSSL_memory_alloc",
+        "OPENSSL_memory_free",
+        "OPENSSL_memory_get_size",
+        "OPENSSL_memory_realloc",
+    ],
+    header = "boringssl_prefix_symbols.h",
+    min_symbols = 1000,
+    prefix = "komira_awslc",
+    style = "boringssl",
+    visibility = ["//third_party/s2n-tls:"],
+)
+
+cxx_library(
+    name = "crypto_prefixed",
+    exported_preprocessor_flags = ["-include", "$(location :prefix_symbols)"],
+    **_CRYPTO
+)
+
+# Every symbol :crypto_prefixed defines, and every weak hook it references,
+# is komira_awslc_*, and it references none of aws-lc's unprefixed names.
+# Two names stay, as aws-lc's own prefix build leaves them (read_symbols.go):
+# __umodti3, the compiler builtin :builtins adds, which the compiler calls by
+# that name; and sdallocx, jemalloc's sized free, a weak reference aws-lc
+# calls only on memory it got from malloc. jemalloc defines it only when it
+# is the process's malloc, so it pairs with the unprefixed malloc and free.
+prefixed_archive_check(
+    name = "crypto_symbols",
+    allow = [
+        "__umodti3",
+        "sdallocx",
+    ],
+    archive = ":crypto_prefixed[static-pic]",
+    exec_compatible_with = LINUX_X86_64,
+    min_defined = 1000,
+    original_names = [":prefix_symbols[symbols]"],
+    prefix = "komira_awslc_",
+)
+
+# libcrypto as its users take it: every global symbol is komira_awslc_X
+# (C callers that include its headers get the renamed names), and
+# :crypto_symbols gates every build holding it.
+checked_cxx_library(
+    name = "crypto",
+    checks = [":crypto_symbols"],
+    lib = ":crypto_prefixed",
     visibility = ["PUBLIC"],
+)
+
+# ---- libssl and bssl ---------------------------------------------------------
+#
+# `bssl`, aws-lc's command-line tool, is the external TLS peer of the interop
+# tests (src/tests/e2e/komira_tls_interop_e2e): `bssl s_server` and
+# `bssl s_client` against komira's TLS (s2n-tls). Nothing komira ships links
+# libssl. Both are C++, compiled as the CMake build compiles them: gnu++11
+# (CMake's C++11 with its default extensions) without exceptions or RTTI,
+# its Release flags, the global defines above (BORINGSSL_IMPLEMENTATION on
+# libssl's own objects only, INTERNAL_TOOL on the tool's), and CMake's
+# -I include, which both are given: the tool's
+# bssl_bm.h includes <../crypto/<dir>/internal.h> through it. Their sources,
+# the private headers they include and the public headers are one tree of
+# their own, so libcrypto's actions above do not change. libssl's one C
+# file, ssl/ssl_decrepit.c, gets libcrypto's C flags (_C_FLAGS) and, as
+# CMake adds to every C compile on Linux, -D_XOPEN_SOURCE=700. Only
+# //src/tests/e2e/komira_tls_interop_e2e may use bssl.
+archive_files(
+    name = "ssl_src",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":aws-lc-1.39.0.tar.gz",
+    files = ["LICENSE"] + SSL_SRCS + TOOL_SRCS + SSL_TOOL_HEADERS + PUBLIC_HEADERS,
+    strip_prefix = "aws-lc-1.39.0",
+    one_tree = True,
+    tree_dirs = ["include"],
+)
+
+_CXX_FLAGS = [
+    "-std=gnu++11",
+    "-O3",
+    "-fvisibility=hidden",
+    "-fno-exceptions",
+    "-fno-rtti",
+]
+
+_SSL_TOOL_DEFINES = [
+    "-I$(location :ssl_src[include])",
+    "-DNDEBUG",
+    "-DBORINGSSL_RELEASE_BUILD",
+    "-DAWS_LC_STDALIGN_AVAILABLE",
+    "-DAWS_LC_BUILTIN_SWAP_SUPPORTED",
+]
+
+cxx_library(
+    name = "ssl",
+    srcs = [
+        (":ssl_src[{}]".format(f), ["-D_XOPEN_SOURCE=700"]) if f.endswith(".c") else ":ssl_src[{}]".format(f)
+        for f in SSL_SRCS
+    ],
+    raw_headers = [":ssl_src[{}]".format(f) for f in SSL_TOOL_HEADERS],
+    compiler_flags = ["-w"],
+    lang_compiler_flags = {
+        "c_cpp_output": _C_FLAGS,
+        "cxx_cpp_output": _CXX_FLAGS,
+    },
+    preprocessor_flags = _SSL_TOOL_DEFINES + ["-DBORINGSSL_IMPLEMENTATION"],
+    exported_deps = [":crypto"],
+    target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],  # komira-limit:aws-lc-x86-64-linux
+)
+
+# The executable, statically linked against libssl, libcrypto and zig's
+# libc++ (glibc is the only shared library it loads).
+cxx_binary(
+    name = "bssl",
+    srcs = [":ssl_src[{}]".format(f) for f in TOOL_SRCS],
+    raw_headers = [":ssl_src[{}]".format(f) for f in SSL_TOOL_HEADERS],
+    compiler_flags = ["-w"],
+    lang_compiler_flags = {"cxx_cpp_output": _CXX_FLAGS},
+    preprocessor_flags = _SSL_TOOL_DEFINES + ["-DINTERNAL_TOOL"],
+    deps = [":ssl"],
+    target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],  # komira-limit:aws-lc-x86-64-linux
+    visibility = ["//src/tests/e2e/komira_tls_interop_e2e/..."],
 )

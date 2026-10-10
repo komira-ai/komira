@@ -1,0 +1,18 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# SpinMutex, a mutual-exclusion lock for plain code, over one atomic word. Its
+# test forks real threads (komira_fork_join) and checks that no two are inside
+# the critical section at once, that a held lock is not taken, and that
+# `unlock` lets a waiter in. The package is a leaf: its only first-party
+# dependencies are komira_atomic_alias, the one place `Atomic` is spelled, and
+# komira_fork_join, for that test.
+mojo_library(
+    name = "komira_sync",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_fork_join:komira_fork_join",
+    ],
+    test_srcs = ["tests/test_spin_mutex.mojo"],
+    visibility = ["PUBLIC"],
+)

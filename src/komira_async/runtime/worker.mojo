@@ -1403,6 +1403,22 @@ struct Worker[S: WakerSink & Movable & Deinitable](
                 self._iter_count = self._iter_count + UInt64(1)
                 continue
 
+            # The same hole for the shutdown flag. `signal_shutdown` stores
+            # the flag, then writes the eventfd. A signal that lands between
+            # the flag check above (before `_sleeping = 1`) and the
+            # non-blocking poll has its eventfd write eaten by that poll, so
+            # nothing would wake the blocking park below: the worker would
+            # park FOREVER with the flag set, and the runtime's shutdown /
+            # destructor would hang in pthread_join. The flag store precedes
+            # the write that the poll consumed, so it is visible here; a
+            # signal after this check lands its write on the blocking poll.
+            # Do NOT move this check above `poll_completions(0)`.
+            # (tests/test_worker_shutdown_park_race.mojo aims at the window;
+            # under a coverage run, test_epoll_cycle_regression hung here.)
+            if self.is_shutdown_signaled():
+                self._sleeping_arc[].store(Int32(0))
+                break
+
             # SCHED-TRACE: the blocking park is the idle wall. Read
             # the on-pool dispatch depth at park entry as the (a)/(b)
             # discriminator: depth==0 -> inter-segment barrier (a); depth>0 ->

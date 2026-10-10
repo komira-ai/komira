@@ -133,10 +133,7 @@ struct PercentileAcc(Accumulator):
             # ⭐ THAT STEP NOW HAS AN ANSWER, AND IT IS "DELETE THIS GUARD":
             # an internal doc
             # decides ONE policy -- NaN LAST and COUNTED -- for every order
-            # statistic on BOTH doors, on the ground that a NaN cannot occur in
-            # an Excel worksheet value at all (Excel traps non-finite results
-            # into ERROR values), so there is no Excel oracle that exclusion
-            # satisfies. ⛔ THE EDIT IS DEFERRED TO THE `AGG_PERCENTILE` SLICE
+            # statistic, DuckDB's. ⛔ THE EDIT IS DEFERRED TO THE `AGG_PERCENTILE` SLICE
             # ON PURPOSE, not forgotten: this exclusion is ASSERTED by
             # `tests/test_percentile_dispatch.mojo` T2 (twice -- the mixed-NaN
             # answer AND the all-NaN `seen[gid] == False` -> None arm), so

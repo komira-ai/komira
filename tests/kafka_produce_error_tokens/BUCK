@@ -1,0 +1,24 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
+
+# The drift check of komira_kafka_server's copies of komira_objectstore's
+# append-error tokens. `produce_error_for` matches `slot_reaped:`,
+# `log_start_unread:`, `lease_fenced` and `(retryable)` + `exhausted` by its
+# own copies, so that komira_kafka_server depends on nothing and stays a conda
+# package (komira_objectstore links native code and has none). This test holds
+# each copy equal to the store's token, and each kafka predicate in agreement
+# with the store's classifier, so a token changed on either side fails here.
+#
+# A test of its own, not a `test_srcs` entry, because it spans the two
+# packages and no library depends on both: welding it into komira_kafka_server
+# would bring back the dependency it exists to avoid, and welding it into
+# komira_broker would make the broker core depend on the Kafka front end, the
+# reverse of the layering the server is planned on (it will sit on top of the
+# broker). It is a `mojo_test`, so `./buck2 test //...` runs it.
+mojo_test(
+    name = "test_kafka_produce_error_tokens",
+    srcs = ["test_kafka_produce_error_tokens.mojo"],
+    deps = [
+        "//src/komira_kafka_server:komira_kafka_server",
+        "//src/komira_objectstore:komira_objectstore",
+    ],
+)

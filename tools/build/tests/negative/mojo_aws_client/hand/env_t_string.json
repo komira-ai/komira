@@ -1,0 +1,11 @@
+{
+  "service": "logs",
+  "overrides": [
+    {
+      "operation": "GetLogEvents",
+      "hand_module": "env_read_t_string.env_t_string",
+      "hand_symbol": "get_log_events",
+      "reason": "A fixture override: a hand-written module of the package that builds a string with a t-string."
+    }
+  ]
+}

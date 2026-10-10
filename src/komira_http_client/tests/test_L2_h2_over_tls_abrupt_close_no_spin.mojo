@@ -642,10 +642,10 @@ def test_s2n_recv_answers_abrupt_peer_close_with_blocked_on_read() raises:
             # shim uses, over the live connection this frame owns; the scratch
             # List and the stack Int32 out-param are both alive across it and
             # neither pointer escapes.
-            var rc = external_call["s2n_recv", Int64](
+            var rc = external_call["komira_s2n_recv", Int64](
                 raw, buf_ptr, Int64(4096), blocked_ptr,
             )
-            var errtype = external_call["s2n_error_get_type", Int32](
+            var errtype = external_call["komira_s2n_error_get_type", Int32](
                 last_s2n_errno()
             )
             if p == 0:

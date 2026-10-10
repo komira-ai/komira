@@ -72,7 +72,7 @@
 # `from_union`, `from_interval_mdn`, `from_decimal128` / `_256`,
 # `from_fixed_size_binary` / `_list`, `from_list` / `_struct` / `_map`. On the
 # schema side `Field(name, arrow_type, nullable)` accepts ANY `ArrowType` at
-# all, which is also why this file can probe ids 51-255.
+# all, which is also why this file can probe ids 50-255.
 #
 # ⚠ AND A REFUSAL MUST NAME THE TYPE. Both legs assert that the error carries
 # the numeric type id. "encodable OR refused-with-a-named-reason" is the claim;
@@ -80,7 +80,7 @@
 #
 # ================== ★ THE CATCH-ALL IS REACHABLE, AND THAT IS PINNED =========
 #
-# `ArrowType.__init__` VALIDATES NOTHING, so ids 51-255 are constructible and
+# `ArrowType.__init__` VALIDATES NOTHING, so ids 50-255 are constructible and
 # land in the body catch-all. The pin below keeps that catch-all from being
 # mistaken for dead code.
 #
@@ -88,28 +88,28 @@
 #
 # Because `__init__` validates nothing, an assertion such as
 #
-#     assert_equal(Int(ArrowType(ARROW_TYPE_ID_MAX + 1).type_id), 51)
+#     assert_equal(Int(ArrowType(ARROW_TYPE_ID_MAX + 1).type_id), 50)
 #
-# is `51 == 51`: `ARROW_TYPE_ID_MAX` is 50 and is declared IN THIS FILE, and
+# is `50 == 50`: `ARROW_TYPE_ID_MAX` is 49 and is declared IN THIS FILE, and
 # the constructor stores the byte and hands it straight back, so NO state of
-# the production tree could move it. The "51 ArrowType constants" claim
+# the production tree could move it. The "50 ArrowType constants" claim
 # (restated in this header and in `ipc_encoder_dispatch.mojo`'s header) needs
 # a falsifier against the set GROWING — every census below iterates
-# `range(ARROW_TYPE_COUNT)`, so a 52nd constant would otherwise be measured by
-# nothing. A fake `comptime FAKE52 = ArrowType(51)` added to
+# `range(ARROW_TYPE_COUNT)`, so a 51st constant would otherwise be measured by
+# nothing. A fake `comptime FAKE51 = ArrowType(50)` added to
 # `arrow_types.mojo`, with its `write_to` arm, leaves such a tautology GREEN.
 #
 # The id space is guarded by TWO oracles, which fail on DIFFERENT mistakes and
 # are deliberately not merged into one:
 #
-#   test_declared_arrow_type_constants_are_51_contiguous_ids
+#   test_declared_arrow_type_constants_are_50_contiguous_ids
 #       reads the SHIPPED `arrow_types.mojo` (declared test data, opened from
 #       the test's data directory) and counts the `comptime … = ArrowType(<n>)`
 #       bindings: COUNT / CEILING / COVERAGE / UNIQUENESS. Catches a constant
 #       added WITHOUT a `write_to` arm.
 #   test_every_declared_id_is_named_and_no_id_past_the_max_is
-#       every declared id must RENDER as a name, and id 51 must still render as
-#       `unknown(51)`. Needs no test data, so the id space stays guarded from
+#       every declared id must RENDER as a name, and id 50 must still render as
+#       `unknown(50)`. Needs no test data, so the id space stays guarded from
 #       one side even if the staging is ever dropped. Catches a `write_to` arm
 #       added WITHOUT a constant.
 #
@@ -144,9 +144,9 @@ from komira_buffer.heap_region import HeapRegion
 # THE STATED SETS. Everything else in this file is derived from the tree.
 # ---------------------------------------------------------------------------
 
-# `ArrowType` ids run 0 (NULL) .. 50 (ERROR), contiguous. Asserted below
+# `ArrowType` ids run 0 (NULL) .. 49 (LARGE_LIST_VIEW), contiguous. Asserted below
 # against the named constants rather than trusted.
-comptime ARROW_TYPE_ID_MAX: Int = 50
+comptime ARROW_TYPE_ID_MAX: Int = 49
 comptime ARROW_TYPE_COUNT: Int = ARROW_TYPE_ID_MAX + 1
 
 # Verdicts, shared by both legs.
@@ -208,15 +208,12 @@ def _body_view_refused_ids() -> List[Int]:
 
 
 def _body_absent_ids() -> List[Int]:
-    """The ids with NO arm in `encode_column` — the catch-all's population.
-
-    ERROR (50) is a LOGICAL marker, not a storage layout: its columnar carrier
-    is a status lane + sparse code sidecar (see `arrow_types.mojo`), so it
-    has no buffers to write and correctly has no arm.
+    """The declared ids with NO arm in `encode_column` — the catch-all's
+    population inside the named space. None today: every declared id has an
+    arm or a refusal by name, and only ids past the space reach the catch-all
+    (`test_catch_all_is_reachable_ids_50_to_255_are_constructible`).
     """
-    var out = List[Int]()
-    out.append(50)  # ERROR
-    return out^
+    return List[Int]()
 
 
 def _body_encodable_only_ids() -> List[Int]:
@@ -360,7 +357,7 @@ def _frame_contains(
 # ---------------------------------------------------------------------------
 
 
-def test_arrow_type_id_space_is_contiguous_0_to_50() raises:
+def test_arrow_type_id_space_is_contiguous_0_to_49() raises:
     """The enumeration this whole file iterates. If a constant is added
     without extending `ARROW_TYPE_ID_MAX`, every count below would silently be
     taken over a SHORT range — so the range is asserted first, against the
@@ -368,28 +365,27 @@ def test_arrow_type_id_space_is_contiguous_0_to_50() raises:
 
     ⛔ A GUARD OF THE FORM
 
-        assert_equal(Int(ArrowType(ARROW_TYPE_ID_MAX + 1).type_id), 51)
+        assert_equal(Int(ArrowType(ARROW_TYPE_ID_MAX + 1).type_id), 50)
 
-    IS A TAUTOLOGY. `ARROW_TYPE_ID_MAX` is 50 and is declared IN THIS FILE,
-    so that is `ArrowType(51).type_id == 51`. `ArrowType.__init__` validates
+    IS A TAUTOLOGY. `ARROW_TYPE_ID_MAX` is 49 and is declared IN THIS FILE,
+    so that is `ArrowType(50).type_id == 50`. `ArrowType.__init__` validates
     nothing — it stores the byte and hands it back — so the expression is
-    `51 == 51` for every possible state of the production tree. Adding a 52nd
-    constant could not move it. Neither could deleting fifty.
+    `50 == 50` for every possible state of the production tree. Adding a 51st
+    constant could not move it. Neither could deleting forty-nine.
 
-    The claim it would defend is load-bearing: "51 ArrowType constants" is
+    The claim it would defend is load-bearing: "50 ArrowType constants" is
     restated in this module's header and in `ipc_encoder_dispatch.mojo`'s
     header, and every census below iterates `range(ARROW_TYPE_COUNT)`, so a
-    52nd constant would be counted by NOTHING.
+    51st constant would be counted by NOTHING.
 
     The subject is the DECLARATION SITE — see
-    `test_declared_arrow_type_constants_are_51_contiguous_ids`, which reads the
+    `test_declared_arrow_type_constants_are_50_contiguous_ids`, which reads the
     real `arrow_types.mojo` and counts what it declares. This function keeps
     the cheap end-and-seam pins, which are not tautologies (they read named
     constants the production file must actually define)."""
     assert_equal(Int(ArrowType.NULL.type_id), 0)
-    assert_equal(Int(ArrowType.ERROR.type_id), ARROW_TYPE_ID_MAX)
     # The two ids most recently appended; a new constant lands after these.
-    assert_equal(Int(ArrowType.LARGE_LIST_VIEW.type_id), 49)
+    assert_equal(Int(ArrowType.LARGE_LIST_VIEW.type_id), ARROW_TYPE_ID_MAX)
     assert_equal(Int(ArrowType.FIXED_SIZE_LIST.type_id), 45)
 
 
@@ -441,20 +437,20 @@ comptime _ARROW_TYPES_SRC: StaticString = (
     "src/komira_arrow/arrow_types.mojo"
 )
 
-comptime _DECLARED_ARROW_TYPE_CONSTANTS: Int = 51
+comptime _DECLARED_ARROW_TYPE_CONSTANTS: Int = 50
 """★ THE HEADLINE NUMBER, and the one the documentation restates.
 
-`ipc_encoder_dispatch.mojo`'s header and this file's header say 51. This is
+`ipc_encoder_dispatch.mojo`'s header and this file's header say 50. This is
 the only place a test can contradict them.
 
 ⚠ CHANGE IT ONLY WITH THE DECLARATION. Editing this literal to buy a green is
-the failure mode — a 52nd `ArrowType` constant means `_body_absent_ids`, the
+the failure mode — a 51st `ArrowType` constant means `_body_absent_ids`, the
 schema-writable set and all four census totals in this file must be re-derived,
 and the point of this pin is to make that re-derivation MANDATORY rather than
 optional. It is not a config value; it is a claim about the tree."""
 
 
-def test_declared_arrow_type_constants_are_51_contiguous_ids() raises:
+def test_declared_arrow_type_constants_are_50_contiguous_ids() raises:
     """★ THE DECLARATION-SITE ORACLE.
 
     Reads the REAL `arrow_types.mojo` (declared test data, opened from the
@@ -469,20 +465,20 @@ def test_declared_arrow_type_constants_are_51_contiguous_ids() raises:
       COVERAGE     every id in 0..MAX is declared            -> RED (a deletion)
       UNIQUENESS   no id is declared twice                   -> RED (an alias
                    silently shadowing a real member)
-      COUNT        a 52nd constant appears anywhere          -> RED, first, with
+      COUNT        a 51st constant appears anywhere          -> RED, first, with
                    the message that says what to re-derive
 
     ⚠ COUNT IS IMPLIED BY THE OTHER THREE AND IS KEPT FOR ITS MESSAGE, NOT FOR
     ITS COVERAGE. `seen` is sized `ARROW_TYPE_COUNT` and every declared id is
     counted into it, so `sum(seen) == len(ids)` always. CEILING then confines
-    every id to `0..MAX`, and the `seen[v] == 1` loop pins each of those 51
-    slots to exactly one declaration — so `len(ids) == 51` FOLLOWS, and no state
+    every id to `0..MAX`, and the `seen[v] == 1` loop pins each of those 50
+    slots to exactly one declaration — so `len(ids) == 50` FOLLOWS, and no state
     of `arrow_types.mojo` can fail COUNT while passing the other three. Its
     value is that it fires FIRST and its message names the re-derivation the
     other three do not mention.
 
     ⚠ WHAT IS STILL TRUE, AND IS THE REASON CEILING IS A SEPARATE ASSERTION:
-    deleting one constant and adding another at id 51 keeps the count at 51
+    deleting one constant and adding another at id 50 keeps the count at 50
     while moving the space — and every `range(ARROW_TYPE_COUNT)` loop below
     would then skip the new member and iterate a hole. COUNT cannot see that
     edit at all; CEILING is what catches it, and it is the one that fires on the
@@ -563,7 +559,7 @@ def test_declared_arrow_type_constants_are_51_contiguous_ids() raises:
 def test_every_declared_id_is_named_and_no_id_past_the_max_is() raises:
     """The SECOND, independent oracle — production-side, no test data.
 
-    `ArrowType.write_to` is a 51-arm cascade ending in `unknown(<id>)`. So the
+    `ArrowType.write_to` is a 50-arm cascade ending in `unknown(<id>)`. So the
     id space has a witness the test can read without parsing anything: a
     DECLARED id renders as a name, an UNDECLARED one renders as `unknown(n)`.
 
@@ -592,8 +588,8 @@ def test_every_declared_id_is_named_and_no_id_past_the_max_is() raises:
         )
 
     # ★ RED ON GOOD NEWS, and this time it can actually fire. The first id past
-    # the space must still be anonymous. Give id 51 a `write_to` arm — which is
-    # what adding a 52nd ArrowType constant properly entails — and this is RED.
+    # the space must still be anonymous. Give id 50 a `write_to` arm — which is
+    # what adding a 51st ArrowType constant properly entails — and this is RED.
     var past = String(ArrowType(ARROW_TYPE_ID_MAX + 1))
     assert_equal(
         past,
@@ -610,10 +606,10 @@ def test_every_declared_id_is_named_and_no_id_past_the_max_is() raises:
     )
 
 
-def test_body_leg_census_46_arms_4_named_refusals_1_absent() raises:
+def test_body_leg_census_46_arms_4_named_refusals_0_absent() raises:
     """`encode_column`'s dispatch table, id by id.
 
-    46 arms / 4 refused-by-name / 1 absent. Every id is asserted individually,
+    46 arms / 4 refused-by-name / 0 absent. Every id is asserted individually,
     so a change reports WHICH type moved and in which direction — a bare count
     would report only that something did.
     """
@@ -680,12 +676,12 @@ def test_body_leg_census_46_arms_4_named_refusals_1_absent() raises:
 
     assert_equal(n_arm, 46)
     assert_equal(n_named_refusal, 4)
-    assert_equal(n_absent, 1)
+    assert_equal(n_absent, 0)
     assert_equal(n_arm + n_named_refusal + n_absent, ARROW_TYPE_COUNT)
 
 
-def test_schema_leg_census_38_writable_13_refused() raises:
-    """`encode_schema_message`'s type cascade, id by id. 38 / 13.
+def test_schema_leg_census_38_writable_12_refused() raises:
+    """`encode_schema_message`'s type cascade, id by id. 38 / 12.
 
     The two DECIMAL ids are writable: see `_probe_field` for why they are
     probed through `Field.decimal128` / `.decimal256` rather than the bare
@@ -741,7 +737,7 @@ def test_schema_leg_census_38_writable_13_refused() raises:
             n_refused += 1
 
     assert_equal(n_ok, 38)
-    assert_equal(n_refused, 13)
+    assert_equal(n_refused, 12)
     assert_equal(n_ok + n_refused, ARROW_TYPE_COUNT)
 
 
@@ -790,11 +786,11 @@ def test_stream_writable_is_the_intersection_and_it_is_38() raises:
     assert_equal(n_body_only, 8)
     assert_equal(len(expect_body_only), 8)
     assert_equal(n_both, 38)
-    # And the three add up over the whole space, with the 5 the body refuses.
+    # And the three add up over the whole space, with the 4 the body refuses.
     assert_equal(n_both + n_body_only, 46)
 
 
-def test_catch_all_is_reachable_ids_51_to_255_are_constructible() raises:
+def test_catch_all_is_reachable_ids_50_to_255_are_constructible() raises:
     """⚠ THE CATCH-ALL IS NOT DEAD CODE — an earlier measurement said it was.
 
     `ArrowType.__init__` validates nothing, so any UInt8 is an ArrowType. Ids
@@ -804,7 +800,7 @@ def test_catch_all_is_reachable_ids_51_to_255_are_constructible() raises:
     narrowed into a neighbouring type's layout.
     """
     var probes = List[Int]()
-    probes.append(51)  # one past the named space
+    probes.append(50)  # one past the named space
     probes.append(99)
     probes.append(255)  # UInt8 max
     for i in range(len(probes)):
@@ -1192,13 +1188,13 @@ def test_footer_schema_carries_the_decimal_parameters_too() raises:
 def main() raises:
     var suite = TestSuite()
 
-    suite.test[test_arrow_type_id_space_is_contiguous_0_to_50]()
-    suite.test[test_declared_arrow_type_constants_are_51_contiguous_ids]()
+    suite.test[test_arrow_type_id_space_is_contiguous_0_to_49]()
+    suite.test[test_declared_arrow_type_constants_are_50_contiguous_ids]()
     suite.test[test_every_declared_id_is_named_and_no_id_past_the_max_is]()
-    suite.test[test_body_leg_census_46_arms_4_named_refusals_1_absent]()
-    suite.test[test_schema_leg_census_38_writable_13_refused]()
+    suite.test[test_body_leg_census_46_arms_4_named_refusals_0_absent]()
+    suite.test[test_schema_leg_census_38_writable_12_refused]()
     suite.test[test_stream_writable_is_the_intersection_and_it_is_38]()
-    suite.test[test_catch_all_is_reachable_ids_51_to_255_are_constructible]()
+    suite.test[test_catch_all_is_reachable_ids_50_to_255_are_constructible]()
 
     suite.test[test_timestamp_timezone_reaches_the_schema_frame_all_five_slots]()
     suite.test[test_naive_timestamp_stays_naive_all_five_slots]()

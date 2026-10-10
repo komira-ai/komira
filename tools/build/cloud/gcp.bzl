@@ -9,6 +9,7 @@
         methods = ["LoggingServiceV2.ListLogEntries"],   # or roots = [...]
         messages_only = True,
         protocol = "rest",              # the default, or "grpc"
+        service_config = "logging_v2.yaml",   # optional, REST: "Service configuration"
         deps = ["komira//src/komira_proto_codec:komira_proto_codec", ...],
     )
 
@@ -68,6 +69,29 @@ branches on the protocol only for service code, so `messages_only = True`
 generates the same messages under both. The attribute is a string checked in
 `<name>_gen`, not an `attrs.enum`: an enum is coerced when the BUCK file is
 evaluated, so one wrong value would fail the whole package to load.
+
+Service configuration. `service_config` (a `google.api.Service` YAML, the
+`<api>_<version>.yaml` googleapis keeps beside an API's protos; a source
+path or a label) is passed to protoc-gen-mojo as `service_config`, and the
+generator reads two things from it (proto-codegen's service_config.rs):
+its `http.rules`, each binding the method its `selector` names in full
+(`google.longrunning.Operations.GetOperation`) to a verb and path, `body`
+and `additional_bindings`, in place of the method's own
+`(google.api.http)`; and its `name`, the host a service starts at when
+its `apis` lists it or a rule binds one of its generated methods (every
+rule is served at the API's host, listed or not). That is how a mixin
+(google.longrunning.Operations, google.iam.v1.IAMPolicy,
+google.cloud.location.Locations), whose protos bind it to its own generic
+paths and host, is generated at the API's paths and host: name in
+`methods` mixin methods the configuration binds, bundle the mixin's
+`.proto`, and give the API's configuration. A rule for a method the target
+does not generate is not used. Refused at generation: a generated method
+with no rule whose service moves off its own host (its proto path is the
+mixin's, which the API's host does not serve), a rule or additional
+binding with `response_body`, the `custom` verb, a wildcard selector, YAML
+outside the block subset the reader takes (proto-codegen's
+yaml_subset.rs), and a `service_config` with `protocol = "grpc"` (the
+rules bind REST methods).
 
 Bundling. The plugin writes a reference to a message of another `.proto` as
 `<name>.<stem>`, so every file the closure reaches is generated into this
@@ -218,8 +242,12 @@ def _gcp_client_gen_impl(ctx):
         opt.append("module_names=" + _LIST_SEPARATOR.join(["{}:{}".format(p, m) for p, m in sorted(module_names.items())]))
     if ctx.attrs.omit_fields:
         opt.append("omit_fields=" + _LIST_SEPARATOR.join(ctx.attrs.omit_fields))
+    if ctx.attrs.service_config:
+        # The file is an input of the generation action, named by its path
+        # in the action's working directory, where protoc runs the plugin.
+        opt.append(cmd_args("service_config=", ctx.attrs.service_config, delimiter = ""))
     expected = names + [_LAYOUT_PROBE]
-    gen_dir = generate_proto_dir(ctx, ptc.plugin, "mojo", ",".join(opt), trees, generate, expected, import_name)
+    gen_dir = generate_proto_dir(ctx, ptc.plugin, "mojo", cmd_args(opt, delimiter = ","), trees, generate, expected, import_name)
 
     files = ["__init__.mojo"] + expected
     return [
@@ -251,6 +279,8 @@ _gcp_client_gen = rule(
         # Checked at analysis rather than an attrs.enum (module docstring).
         "protocol": attrs.string(default = "rest"),
         "roots": attrs.list(attrs.string(), default = []),
+        # The API's service configuration YAML (module docstring).
+        "service_config": attrs.option(attrs.source(), default = None),
         # `len(deps)` of the library, so an empty runtime is refused at
         # analysis. A count, not the labels: the generator has no edge to the
         # runtime, and `deps` keeps every kind `mojo_library.deps` accepts.
@@ -276,10 +306,11 @@ def _gcp_client(
         import_prefix = "",
         module_names = {},
         protocol = "rest",
+        service_config = None,
         test_srcs = [],
         visibility = None,
         **kwargs):
-    """See the module docstring. `kwargs` go to the mojo_library (test_data, test_env)."""
+    """See the module docstring. `kwargs` go to the mojo_library (test_data, test_env, readme)."""
     gen = name + "_gen"
     vis = {"visibility": visibility} if visibility != None else {}
     _gcp_client_gen(
@@ -298,6 +329,7 @@ def _gcp_client(
         protocol = protocol,
         roots = roots,
         runtime_dep_count = len(deps),
+        service_config = service_config,
         **vis
     )
 

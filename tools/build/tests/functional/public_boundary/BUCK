@@ -1,0 +1,32 @@
+load("@komira//tools/build/lint:defs.bzl", "public_boundary")
+load(":fixture.bzl", "PB_HOLDS", "PB_HOSTS", "PB_TREE", "PB_WINDOW")
+
+# Test 44 (the public boundary lint), the half that must build: the planted
+# tree of fixture.bzl, every finding of held.mojo and shim.c held at its exact
+# count, nothing in the near misses found, binary data not read. negative/public_boundary plants one defect each in the same tree.
+[
+    export_file(
+        name = f,
+        visibility = ["tests//negative/public_boundary:"],
+    )
+    for f in [
+        "data_arrow.txt",
+        "held_c.txt",
+        "held_mojo.txt",
+        "holds.tsv",
+        "hosts.tsv",
+        "near_c.txt",
+        "near_md.txt",
+        "near_mojo.txt",
+        "third_party_h.txt",
+        "upstream_buck.txt",
+    ]
+]
+
+public_boundary(
+    name = "ok",
+    files = PB_TREE,
+    holds = PB_HOLDS,
+    hosts = PB_HOSTS,
+    **PB_WINDOW
+)

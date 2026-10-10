@@ -1,0 +1,59 @@
+// A mixin as google/longrunning/operations.proto declares one: bound to its
+// own generic paths (`/v1/{name=operations/**}`) at its own host. The
+// service configurations under service_config/ bind it to an API's paths
+// and host; the cases in BUCK hold the generated client to them.
+syntax = "proto3";
+
+package mixin.v1;
+
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+
+message Operation {
+  string name = 1;
+  bool done = 2;
+}
+
+message GetOperationRequest {
+  string name = 1;
+}
+
+message WaitOperationRequest {
+  string name = 1;
+  int32 timeout_seconds = 2;
+}
+
+message CancelSpec {
+  string reason = 1;
+}
+
+message CancelOperationRequest {
+  string name = 1;
+  CancelSpec spec = 2;
+}
+
+message ListOperationsRequest {
+  string name = 1;
+  string filter = 2;
+}
+
+message ListOperationsResponse {
+  repeated Operation operations = 1;
+}
+
+service Operations {
+  option (google.api.default_host) = "mixin.example.com";
+
+  rpc GetOperation(GetOperationRequest) returns (Operation) {
+    option (google.api.http) = { get: "/v1/{name=operations/**}" };
+  }
+  rpc WaitOperation(WaitOperationRequest) returns (Operation) {
+    option (google.api.http) = { post: "/v1/{name=operations/**}:wait" body: "*" };
+  }
+  rpc CancelOperation(CancelOperationRequest) returns (Operation) {
+    option (google.api.http) = { post: "/v1/{name=operations/**}:cancel" body: "*" };
+  }
+  rpc ListOperations(ListOperationsRequest) returns (ListOperationsResponse) {
+    option (google.api.http) = { get: "/v1/{name=operations}" };
+  }
+}

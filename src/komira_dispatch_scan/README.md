@@ -1,0 +1,3 @@
+# komira_dispatch_scan
+
+Scan support for the engine dispatcher: whole-file decompression of compressed CSV and JSONL text, hive partition path parsing, the CSV read options of a row scan, scalar extraction from a one-column batch, plan predicates for lowering, the row-to-column re-route policy and its scan-leaf walkers, the cross-query scan dedup cache, and the UDF routing and refusal predicates.

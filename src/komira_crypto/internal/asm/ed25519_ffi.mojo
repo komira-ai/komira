@@ -152,7 +152,7 @@ def ed25519_pubkey_from_seed(
     # `pubkey_out` (mut InlineArray) + `expanded_priv` (mut local InlineArray)
     # and the `seed` span — NOT a wildcard widening. The local pointers do
     # not escape this function body.
-    external_call["ED25519_keypair_from_seed", NoneType](
+    external_call["komira_awslc_ED25519_keypair_from_seed", NoneType](
         UnsafePointer(to=pubkey_out[0]).bitcast[UInt8](),
         UnsafePointer(to=expanded_priv[0]).bitcast[UInt8](),
         seed.unsafe_ptr().bitcast[UInt8](),
@@ -218,7 +218,7 @@ def ed25519_sign_from_seed(
 
     # SAFETY: see ed25519_pubkey_from_seed for the keypair_from_seed
     # safety argument (same FFI signature, same buffer ownership).
-    external_call["ED25519_keypair_from_seed", NoneType](
+    external_call["komira_awslc_ED25519_keypair_from_seed", NoneType](
         UnsafePointer(to=pubkey_scratch[0]).bitcast[UInt8](),
         UnsafePointer(to=expanded_priv[0]).bitcast[UInt8](),
         seed.unsafe_ptr().bitcast[UInt8](),
@@ -231,7 +231,7 @@ def ed25519_sign_from_seed(
     # call; AWS-LC retains no pointer past the call. Message length is
     # passed as `Int` (Mojo's `Int` matches the host's `size_t` ABI
     # on both LP64 macOS-arm64 and LP64 linux-x86_64).
-    var rc = external_call["ED25519_sign", Int32](
+    var rc = external_call["komira_awslc_ED25519_sign", Int32](
         UnsafePointer(to=sig_out[0]).bitcast[UInt8](),
         msg.unsafe_ptr().bitcast[UInt8](),
         Int(len(msg)),
@@ -244,13 +244,13 @@ def ed25519_sign_from_seed(
     # guard against, where a failing sign returns SUCCESS with the caller's
     # zero-filled buffer as a 64-byte all-zero "signature".
     if Int(rc) != 1:
-        raise Error(
-            String(
+        raise Error(  # cov: unreachable ED25519_sign fails only on a FIPS self-test failure, which this non-FIPS build does not run
+            String(  # cov: unreachable see the line above
                 "ed25519_sign_from_seed: AWS-LC ED25519_sign failed (returned"
                 " "
             )
-            + String(Int(rc))
-            + String(
+            + String(Int(rc))  # cov: unreachable see the line above
+            + String(  # cov: unreachable see the line above
                 "). Refusing to return the unwritten output buffer, which would"
                 " be an all-zero 64-byte signature presented as success."
             )
@@ -323,7 +323,7 @@ def ed25519_verify(
     # Origin is INFERRED from the input spans — NOT wildcard widening.
     # Message length is passed as `Int` (matches `size_t` ABI on both
     # macOS-arm64 LP64 + linux-x86_64 LP64).
-    var rc = external_call["ED25519_verify", Int32](
+    var rc = external_call["komira_awslc_ED25519_verify", Int32](
         msg.unsafe_ptr().bitcast[UInt8](),
         Int(len(msg)),
         sig.unsafe_ptr().bitcast[UInt8](),
@@ -375,7 +375,7 @@ def ed25519_keypair_generate(
     # pointer past the call. The CSPRNG side-effect is internal to
     # AWS-LC (mutation of a thread-local DRBG state); no caller-visible
     # state escapes.
-    external_call["ED25519_keypair", NoneType](
+    external_call["komira_awslc_ED25519_keypair", NoneType](
         UnsafePointer(to=pubkey_out[0]).bitcast[UInt8](),
         UnsafePointer(to=expanded_priv[0]).bitcast[UInt8](),
     )

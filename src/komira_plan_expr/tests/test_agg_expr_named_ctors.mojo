@@ -4,7 +4,7 @@ order `(y, x)` and put `x` in slot 0.
 ⛔ WHY THE SLOT ASSERTIONS ARE THE POINT. The engine's bivariate state reads
 slot 0 as its `x` — the INDEPENDENT variable (`_ExtAggPlan.src_col` ->
 `CorrelationAggregator.update_bivariate(x=cx, y=cy)`) — while SQL spells the
-family `regr_slope(y, x)`. The SQL binder and the Excel door both swap. Before
+family `regr_slope(y, x)`. The SQL binder swaps. Before
 these constructors a Mojo caller had to spell `AggExpr(AGG_REGR_SLOPE, a, b,
 None)` and do that swap by hand; putting `y` first there answers a DIFFERENT
 statistic for six of the eleven tags (slope, intercept, sxx, syy, avgx, avgy)

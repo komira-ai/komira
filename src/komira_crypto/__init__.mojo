@@ -17,6 +17,7 @@ Layout:
   - aead.mojo            AesGcm128 / AesGcm256 /
                          ChaCha20Poly1305
   - x25519.mojo          single + batched 4-way
+  - ecdh_p256.mojo       P-256 ECDH shared secret
   - ecdsa_p256.mojo      sign + verify
   - rsa.mojo             RSA-SHA256 sign (PKCS#8 DER) + RS256 verify
   - rsa_pem_key.mojo     PEM RSA `PRIVATE KEY` -> the PKCS#8 DER rsa.mojo signs
@@ -97,6 +98,11 @@ from .x25519 import x25519, x25519_base_mult
 # lane-major 32-byte packing; its output is byte-identical to 4 scalar
 # `x25519` calls.
 from .x25519_simd import x25519_4way
+
+# P-256 ECDH (SP 800-56A ECC CDH primitive; the ECDH step of RFC 8291 Web
+# Push encryption): `p256_ecdh(priv, peer_pub_uncompressed)` returns the
+# 32-byte x-coordinate of priv * peer and raises on an invalid key or point.
+from .ecdh_p256 import p256_ecdh
 
 # SHA-256 / HMAC-SHA256 / hex free functions consumed by request
 # signing (SigV4, Azure Shared Key, GCS OAuth). These are the STABLE-CONTRACT

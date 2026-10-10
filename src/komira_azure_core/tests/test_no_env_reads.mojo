@@ -77,8 +77,8 @@ def test_the_scan_saw_the_package() raises:
         assert_true(known, "src/" + staged[i] + " is staged but not scanned")
     # Not vacuous: each file is the package's, whole.
     assert_equal(_count(_read("credentials.mojo"), "\nstruct AzureSharedKey("), 1)
-    assert_equal(_count(_read("creds_managed_identity.mojo"), "\nstruct AzureImdsProvider("), 1)
-    assert_equal(_count(_read("creds_service_principal.mojo"), "\nstruct ServicePrincipalProvider("), 1)
+    assert_equal(_count(_read("creds_managed_identity.mojo"), "\nstruct AzureImdsProvider["), 1)
+    assert_equal(_count(_read("creds_service_principal.mojo"), "\nstruct ServicePrincipalProvider["), 1)
     assert_true(_read("creds_managed_identity.mojo").byte_length() > 5000)
 
 

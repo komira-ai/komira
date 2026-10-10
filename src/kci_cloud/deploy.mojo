@@ -5,9 +5,11 @@
 #
 # The three verbs every command runs through. Each one runs in a CELL
 # (`CellContext`: machine, cell, provenance, adopt, validation run id,
-# settings) and FIRST configures the adapter with the cell's settings and
-# validates: any finding (a validation run id outside komira_validation_run's
-# rule, on plan and apply only; a setting, the graph, coverage, a limit, the
+# settings) and FIRST configures the adapter with the cell's settings,
+# EXPANDS the list's composite instances with the definitions it was given
+# (compose.mojo) and validates the expanded list: any finding (a validation
+# run id outside komira_validation_run's rule, on plan and apply only; a
+# setting, an expansion finding, the graph, coverage, a limit, the
 # platform, the public mechanism) refuses the whole graph before lowering,
 # so a refused graph never reaches an adapter's `lower` and never reaches the
 # engine: nothing is created, and the adapter is never asked to.
@@ -16,7 +18,11 @@
 # them to the lowering contract on every run (not only in tests): each
 # resource lowers to at least one node, every node id is `<resource
 # id>/<role>`, every node's owner is the resource it came from, and no id
-# repeats. It then RESOLVES what is kci's to decide, not the cloud's: a
+# repeats. It then sets each node's OWNER to the first segment of its
+# resource's id: a primitive written at the top owns its nodes, and every
+# node of an expanded `top/c1/.../ck` is owned by `top`, however deep, so the
+# stamp, the store key and the closed world below keep one owner per object.
+# It then RESOLVES what is kci's to decide, not the cloud's: a
 # dependency or input the adapter wrote as another resource's bare id lands
 # on that resource's primary node (`<id>/<primary role>`, catalog.mojo), and
 # every node takes its resource's retention (`Resource.retention`, else the
@@ -32,7 +38,10 @@
 # every object of this machine and cell; one owned by a resource still in the
 # file but no longer lowered is added as a turned-off node, so it is removed;
 # one owned by a resource the file no longer names is LEFTOVER, reported and
-# never deleted here.
+# never deleted here. "Still in the file" is by OWNER: a top-level instance
+# is in the file while any of its primitives is, so a component its
+# definition dropped (at any depth) is a role of `top` no longer lowered, and
+# is removed.
 #
 # RETENTION ON THAT PATH. An object `list_owned` reports as RETAINED (its
 # `kci-retention=retain` mark) is never turned into a node to remove: it is LEFT
@@ -50,10 +59,25 @@
 # anything is realized or created. A destroy is not refused: it removes what
 # the cloud holds, whatever key the file now writes.
 #
-# THE ROLE LABEL BUDGET. After lowering and before anything else, every
-# node's role must fit the 63-byte label value (`role_budget_findings`); one
-# that does not refuses the graph with the one refusal text. The owner of a
-# node is its first segment at any depth (`owner_of_node`).
+# THE METADATA (metadata.mojo). `lower_data` writes the author's labels on
+# every node of a resource (`label.<key>` fields) and the written cloud name
+# on its primary node (`physical_name`); an adapter that writes either field
+# itself breaks the lowering contract. A plan, an apply or a destroy whose
+# primary node asks for another cloud name than the one its object was
+# created under is refused after `list_owned`, before anything is realized
+# (`metadata.name_change_findings`). Unlike a table key, a changed name
+# refuses a destroy too: where a cloud addresses an object by its name, a
+# destroy realized from the file's new name would address another object
+# and leave the first one behind. Plan and apply run with the primary
+# node of every resource that writes `adopt` in the scope's adopt list
+# (`with_adopted`); destroy does not need it (the engine ignores it there).
+#
+# THE ROLE LABEL BUDGET. Every node's role must fit the 63-byte label value;
+# validate reports a role that does not (`lowered_budget_findings`, item 4
+# of validate.mojo), so plan, apply and destroy, which validate first,
+# refuse it with the one refusal text before anything is listed, realized
+# or created. The owner of a node is its first segment at any depth
+# (`owner_of_node`).
 #
 # Every verb runs the engine's OWNED forms (the cell scope): the store keyed
 # by (machine, cell, resource), the stamp born with each object, and a
@@ -75,6 +99,7 @@ from kci_reconciler import (
     destroy_graph_owned,
     plan_graph_owned,
 )
+from kci_resource_proto.composite import CompositeDefinition
 from kci_resource_proto.resource import Resource
 
 from kci_cloud.adapter import (
@@ -93,9 +118,20 @@ from kci_cloud.catalog import (
 )
 from kci_cloud.clouds import Clouds
 from kci_cloud.data import key_change_findings
+from kci_cloud.feed import feeds_of
 from kci_cloud.grants import edges_for
+from kci_cloud.firing import firings_of
 from kci_cloud.labels import validation_run_problem
-from kci_cloud.validate import refusal_text, role_budget_findings, validate_for
+from kci_cloud.metadata import (
+    LABEL_FIELD_PREFIX,
+    PHYSICAL_NAME_FIELD,
+    adopted_nodes,
+    label_fields,
+    name_change_findings,
+)
+from kci_cloud.compose import expand
+from kci_cloud.compose_refs import owner_of_node
+from kci_cloud.validate import refusal_text, validate_expanded
 
 
 def refuse_unless_valid[
@@ -106,14 +142,32 @@ def refuse_unless_valid[
     ctx: CellContext,
     resources: List[Resource],
     check_validation_run: Bool = True,
+    definitions: List[CompositeDefinition] = List[CompositeDefinition](),
 ) raises:
-    """Configure `cloud` with the cell, then validate; any finding raises the
-    one refusal text. An unowned scope (no machine or cell) is refused:
-    kci deploys only into a cell. With `check_validation_run` (plan and
-    apply), a validation run id outside komira_validation_run's rule is a
-    FINDING_CELL finding (`validation_run_id`). Destroy passes False: it
+    """`valid_expansion`, for a caller that needs only the refusal."""
+    _ = valid_expansion(clouds, cloud, ctx, resources, check_validation_run, definitions)
+
+
+def valid_expansion[
+    S: CloudAdapter
+](
+    clouds: Clouds,
+    mut cloud: S,
+    ctx: CellContext,
+    resources: List[Resource],
+    check_validation_run: Bool = True,
+    definitions: List[CompositeDefinition] = List[CompositeDefinition](),
+) raises -> List[Resource]:
+    """Configure `cloud` with the cell, expand `resources` with
+    `definitions`, then validate the expanded list; any finding raises the
+    one refusal text, else the expanded list is returned (the list itself
+    when it holds no instance). An unowned scope (no machine or cell) is
+    refused: kci deploys only into a cell. With `check_validation_run` (plan
+    and apply), a validation run id outside komira_validation_run's rule is
+    a FINDING_CELL finding (`validation_run_id`). Destroy passes False: it
     writes no run-id label, and a cleanup must not be blocked by a mark it
-    never writes."""
+    never writes. An expansion finding is reported beside the cell's
+    findings, and the expanded graph is not judged."""
     if not ctx.scope.owned():
         raise Error(
             String("kci deploys only into a cell: the context names no")
@@ -128,11 +182,17 @@ def refuse_unless_valid[
             Finding(FINDING_CELL, String("(cell)"), String("validation_run_id"), run_problem)
         )
     findings.extend(cloud.configure(ctx))
-    var more = validate_for(clouds, cloud, resources)
+    var x = expand(clouds.catalog, definitions, resources)
+    var more: List[Finding]
+    if len(x.findings) > 0:
+        more = x.findings.copy()
+    else:
+        more = validate_expanded(clouds, cloud, x.resources, x.produced)
     for i in range(len(more)):
         findings.append(more[i].copy())
     if len(findings) > 0:
         raise Error(refusal_text(cloud.cloud_id(), findings))
+    return x.resources.copy()
 
 
 def engine_retention(retention: Int) -> Int:
@@ -144,23 +204,32 @@ def engine_retention(retention: Int) -> Int:
 
 
 def _resolve(catalog: Catalog, resources: List[Resource], producer: String) raises -> String:
-    """A bare resource id -> that resource's primary node; a node id is kept."""
-    if producer.find("/") >= 0:
-        return producer.copy()
-    return primary_node(catalog, resources, producer)
+    """A resource id -> that resource's primary node; a node id is kept. A
+    resource id may hold `/` (an expanded path), so the test is membership,
+    never the separator: no resource id is also a node id (a node id is a
+    resource id plus a role, and a primitive has no components)."""
+    for i in range(len(resources)):
+        if resources[i].id == producer:
+            return primary_node(catalog, resources, producer)
+    if producer.find("/") < 0:
+        return primary_node(catalog, resources, producer)  # raises: no such resource
+    return producer.copy()
 
 
 def lower_data[
     S: CloudAdapter
 ](cloud: S, resources: List[Resource]) raises -> List[LoweredNode]:
-    """Lower every resource to data, check the lowering contract, then
-    resolve references to resources and set each node's retention."""
+    """Lower every resource to data (each with its grant edges and the
+    list's feeds and firings), check the lowering contract, then resolve
+    references to resources and set each node's retention."""
     var catalog = Catalog.v1()
     var out = List[LoweredNode]()
+    var feeds = feeds_of(resources)
+    var firings = firings_of(resources)
     for i in range(len(resources)):
         ref r = resources[i]
         var retention = engine_retention(effective_retention(catalog, r))
-        var nodes = cloud.lower(r, edges_for(resources, r))
+        var nodes = cloud.lower(r, edges_for(resources, r), feeds, firings)
         if len(nodes) == 0:
             raise Error(
                 String("cloud \"")
@@ -170,6 +239,8 @@ def lower_data[
                 + String("\" to no nodes")
             )
         var prefix = r.id + String("/")
+        var primary = primary_node(catalog, resources, r.id)
+        var named = False
         for n in range(len(nodes)):
             ref node = nodes[n]
             if node.owner != r.id or not node.id.startswith(prefix):
@@ -195,13 +266,40 @@ def lower_data[
                         + node.id
                         + String("\" twice")
                     )
+            for k in range(len(node.desired)):
+                ref key = node.desired[k].key
+                if key == PHYSICAL_NAME_FIELD or key.startswith(LABEL_FIELD_PREFIX):
+                    raise Error(
+                        String("cloud \"")
+                        + cloud.cloud_id().text()
+                        + String("\" broke the lowering contract on \"")
+                        + node.id
+                        + String("\": it wrote the desired field \"")
+                        + key
+                        + String("\", which is kci's (the metadata)")
+                    )
             var low = node.copy()
+            low.owner = owner_of_node(r.id)
+            low.desired.extend(label_fields(r))
+            if node.id == primary and r.physical_name:
+                low.desired.append(Setting(String(PHYSICAL_NAME_FIELD), r.physical_name.value()))
+                named = True
             for k in range(len(low.depends_on)):
                 low.depends_on[k] = _resolve(catalog, resources, low.depends_on[k])
             for k in range(len(low.inputs)):
                 low.inputs[k].producer = _resolve(catalog, resources, low.inputs[k].producer)
             low.retention = retention
             out.append(low^)
+        if r.physical_name and not named:
+            raise Error(
+                String("cloud \"")
+                + cloud.cloud_id().text()
+                + String("\" lowered no primary node \"")
+                + primary
+                + String("\" to hold the cloud name of \"")
+                + r.id
+                + String("\"")
+            )
     return out^
 
 
@@ -261,28 +359,22 @@ struct Removals(Movable):
     (`left_behind`, reported only), and nodes of resources the file no
     longer names (`leftover`, reported only). And `key_changes`: a table
     whose stored key differs from the one the file asks for (refused by plan
-    and apply)."""
+    and apply). And `name_changes`: a node whose object was created under
+    another cloud name than the one the file asks for (refused by plan,
+    apply and destroy)."""
 
     var roles: List[LoweredNode]
     var left_behind: List[String]
     var leftover: List[String]
     var key_changes: List[Finding]
+    var name_changes: List[Finding]
 
     def __init__(out self):
         self.roles = List[LoweredNode]()
         self.left_behind = List[String]()
         self.leftover = List[String]()
         self.key_changes = List[Finding]()
-
-
-def owner_of_node(node_id: String) -> String:
-    """The authored resource that owns node `node_id`: its FIRST segment, at
-    any depth (`top/a/b/c/run` -> `top`). Ids cannot hold `/`, so this is
-    exact however deep a node is."""
-    var i = node_id.find("/")
-    if i < 0:
-        return node_id.copy()
-    return String(node_id[byte=0:i])
+        self.name_changes = List[Finding]()
 
 
 def removals[
@@ -298,6 +390,7 @@ def removals[
     var out = Removals()
     var owned = cloud.list_owned(creds, ctx.scope)
     out.key_changes = key_change_findings(nodes, owned)
+    out.name_changes = name_change_findings(nodes, owned)
     for i in range(len(owned)):
         var nid = owned[i].owner_node.copy()
         var lowered = False
@@ -310,7 +403,7 @@ def removals[
         var res = owner_of_node(nid)
         var in_file = False
         for k in range(len(resources)):
-            if resources[k].id == res:
+            if owner_of_node(resources[k].id) == res:
                 in_file = True
                 break
         if in_file and owned[i].retained:
@@ -356,16 +449,15 @@ def _graph_for[
     mut left_behind: List[String],
     refuse_key_change: Bool = True,
 ) raises -> ResourceGraph:
-    """Lowering + the roles `list_owned` says to remove, realized. A role
-    over the label budget refuses the graph here: after lowering (data),
-    before `list_owned`, realize or any create. A changed table key refuses
-    it after `list_owned` and before realize (unless `refuse_key_change` is
-    False: a destroy)."""
+    """Lowering + the roles `list_owned` says to remove, realized. Called
+    after validate, which has refused a role over the label budget. A
+    changed cloud name refuses the graph after `list_owned` and before
+    realize; so does a changed table key, unless `refuse_key_change` is
+    False (a destroy)."""
     var nodes = lower_data(cloud, resources)
-    var over = role_budget_findings(nodes)
-    if len(over) > 0:
-        raise Error(refusal_text(cloud.cloud_id(), over))
     var rem = removals(cloud, ctx, nodes, resources, creds)
+    if len(rem.name_changes) > 0:
+        raise Error(refusal_text(cloud.cloud_id(), rem.name_changes))
     if refuse_key_change and len(rem.key_changes) > 0:
         raise Error(refusal_text(cloud.cloud_id(), rem.key_changes))
     for i in range(len(rem.roles)):
@@ -373,6 +465,17 @@ def _graph_for[
     leftover = rem.leftover.copy()
     left_behind = rem.left_behind.copy()
     return realize_graph(cloud, nodes)
+
+
+def with_adopted(ctx: CellContext, resources: List[Resource]) raises -> CellContext:
+    """`ctx` with the primary node of every resource that writes `adopt`
+    added to its scope's adopt list (each once)."""
+    var out = ctx.copy()
+    var nodes = adopted_nodes(Catalog.v1(), resources)
+    for i in range(len(nodes)):
+        if not out.scope.adopts(nodes[i]):
+            out.scope.adopt.append(nodes[i])
+    return out^
 
 
 def lower_resources[
@@ -392,14 +495,15 @@ def plan_resources[
     resources: List[Resource],
     creds: Creds,
     mut store: St,
+    definitions: List[CompositeDefinition] = List[CompositeDefinition](),
 ) raises -> List[ChangeAction]:
-    """The dry run: configure, validate, lower, `plan_graph_owned`. Creates
-    nothing and writes nothing to the store."""
-    refuse_unless_valid(clouds, cloud, ctx, resources)
+    """The dry run: configure, expand, validate, lower, `plan_graph_owned`.
+    Creates nothing and writes nothing to the store."""
+    var expanded = valid_expansion(clouds, cloud, ctx, resources, True, definitions)
     var leftover = List[String]()
     var left_behind = List[String]()
-    var graph = _graph_for(cloud, ctx, resources, creds, leftover, left_behind)
-    return plan_graph_owned(graph, creds, ctx.scope, store)
+    var graph = _graph_for(cloud, ctx, expanded, creds, leftover, left_behind)
+    return plan_graph_owned(graph, creds, with_adopted(ctx, expanded).scope, store)
 
 
 struct ApplyOutcome(Movable, Deinitable):
@@ -472,24 +576,27 @@ def apply_resources[
     resources: List[Resource],
     creds: Creds,
     mut store: St,
+    definitions: List[CompositeDefinition] = List[CompositeDefinition](),
 ) raises -> ApplyOutcome:
-    """Configure, validate, lower, then `apply_graph_owned` in the cell.
+    """Configure, expand, validate, lower, then `apply_graph_owned` in the
+    cell.
 
     RAISES only before any effect: a refused graph (settings or validate) or
     a broken lowering contract. A failure inside the engine, an ownership
     refusal included, is NOT raised: it is returned in the outcome with what
     landed and what is pending, so the caller can report a partial apply or
     a refusal instead of a bare failure."""
-    refuse_unless_valid(clouds, cloud, ctx, resources)
+    var expanded = valid_expansion(clouds, cloud, ctx, resources, True, definitions)
     var leftover = List[String]()
     var left_behind = List[String]()
-    var graph = _graph_for(cloud, ctx, resources, creds, leftover, left_behind)
+    var graph = _graph_for(cloud, ctx, expanded, creds, leftover, left_behind)
+    var scope = with_adopted(ctx, expanded).scope.copy()
     var landed = List[AppliedNode]()
     var pending = List[String]()
     var applied = List[AppliedNode]()
     var error: Optional[String] = None
     try:
-        applied = apply_graph_owned(graph, creds, ctx.scope, store, landed, pending)
+        applied = apply_graph_owned(graph, creds, scope, store, landed, pending)
     except e:
         error = String(e)
     if error:
@@ -508,19 +615,20 @@ def destroy_resources[
     resources: List[Resource],
     creds: Creds,
     mut store: St,
+    definitions: List[CompositeDefinition] = List[CompositeDefinition](),
 ) raises -> List[UndeletableSkip]:
-    """Configure, validate, lower, `destroy_graph_owned` (reverse order,
+    """Configure, expand, validate, lower, `destroy_graph_owned` (reverse order,
     retention honoured: a KEEP node is skipped, nothing foreign deleted). The
     roles a resource in the file turned off are torn down with it; a retained
     object the file no longer lowers is not. A graph this cloud cannot host
     cannot have been applied by it, so it is refused here too rather than
     half-lowered. The scope's validation run id is not checked: destroy
     writes no run-id label, so a malformed one does not block a cleanup."""
-    refuse_unless_valid(clouds, cloud, ctx, resources, check_validation_run=False)
+    var expanded = valid_expansion(clouds, cloud, ctx, resources, False, definitions)
     var leftover = List[String]()
     var left_behind = List[String]()
     var graph = _graph_for(
-        cloud, ctx, resources, creds, leftover, left_behind, refuse_key_change=False
+        cloud, ctx, expanded, creds, leftover, left_behind, refuse_key_change=False
     )
     return destroy_graph_owned(graph, creds, ctx.scope, store)
 

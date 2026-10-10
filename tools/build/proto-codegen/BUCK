@@ -14,7 +14,7 @@ _DEPS = [
 
 _LIB_SRCS = glob(
     ["src/**/*.rs"],
-    exclude = ["src/main.rs", "src/main_*.rs"],
+    exclude = ["src/main.rs", "src/main_*.rs", "src/routes/**"],
 )
 
 # The library is published behind its inline #[test]s: it, and every
@@ -55,6 +55,31 @@ rust_binary(
     crate_root = "src/main_db.rs",
     deps = _DEPS + [":komira_proto_codegen"],
     visibility = ["PUBLIC"],
+)
+
+# The same, emitting `<stem>_routes.mojo` for each input `.proto` that
+# declares a service: per service a handler trait, a komira_http_server route
+# table from the RPCs' `(google.api.http)` rules, and a dispatcher
+# (mojo_routes_proto_library). Its emitter (src/routes/) is part of this
+# binary, not of the library, so it can change without rebuilding the other
+# plugins. It is published behind its unit tests.
+_ROUTES_SRCS = ["src/main_routes.rs"] + glob(["src/routes/*.rs"])
+
+rust_binary(
+    name = "protoc-gen-mojo-routes",
+    srcs = _ROUTES_SRCS,
+    crate_root = "src/main_routes.rs",
+    deps = _DEPS + [":komira_proto_codegen"],
+    tests = [":protoc_gen_mojo_routes_unit"],
+    visibility = ["PUBLIC"],
+)
+
+rust_test(
+    name = "protoc_gen_mojo_routes_unit",
+    srcs = _ROUTES_SRCS,
+    crate_root = "src/main_routes.rs",
+    crate_name = "protoc_gen_mojo_routes",
+    deps = _DEPS + [":komira_proto_codegen"],
 )
 
 # The `(komira.db.*)` options protoc-gen-mojo-db reads, imported as
@@ -126,11 +151,27 @@ _PROTOCOL_TESTS = "//third_party/botocore:protocol_tests[tests/unit/protocols]"
 
 _IGNORE_LIST = "//third_party/botocore:protocol_tests[tests/unit/protocols/protocol-tests-ignore-list.json]"
 
-# The conformance driver's generator (see above).
+# The conformance driver's generator (see above). It is published behind
+# :aws_conformance_gen_cli.
 rust_binary(
     name = "aws-conformance-gen",
     srcs = ["src/main_aws_conformance_gen.rs"],
     crate_root = "src/main_aws_conformance_gen.rs",
+    deps = _DEPS + [":komira_proto_codegen"],
+    tests = [":aws_conformance_gen_cli"],
+)
+
+# aws-conformance-gen's inline tests (src/main_aws_conformance_gen_test.rs):
+# its command line run through `cli` as `main` runs it, each `--protocol`
+# refusal asserted as exit status 2 with the exact reason and usage line.
+rust_test(
+    name = "aws_conformance_gen_cli",
+    srcs = [
+        "src/main_aws_conformance_gen.rs",
+        "src/main_aws_conformance_gen_test.rs",
+    ],
+    crate_root = "src/main_aws_conformance_gen.rs",
+    crate_name = "aws_conformance_gen",
     deps = _DEPS + [":komira_proto_codegen"],
 )
 
@@ -188,13 +229,15 @@ rust_binary(
 )
 
 # The rest-xml verdicts: the file a differential test of another XML
-# implementation reads (`rest_xml_verdicts.tsv`).
+# implementation reads (`rest_xml_verdicts.tsv`). Visible to the test-only
+# package that holds that test (komira_xml's), so no library can weld it
+# again and make its build depend on xml-equiv-verdicts.
 xml_equiv_verdicts(
     name = "rest_xml_verdicts",
     corpus = _PROTOCOL_TESTS,
     ignore_list = _IGNORE_LIST,
     protocols = ["rest-xml"],
-    visibility = ["PUBLIC"],
+    visibility = ["//src/tests/conformance/komira_xml_conformance/..."],
 )
 
 # Checks the rest-xml verdicts file's shape against the corpus: the body

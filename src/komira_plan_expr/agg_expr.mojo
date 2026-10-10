@@ -13,6 +13,7 @@
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_expr.expr import Expr, UN_IS_NULL
 from komira_plan_expr.col_expr import ColExpr
+from komira_plan_expr.render_text import write_quoted
 
 
 # =============================================================================
@@ -804,7 +805,9 @@ struct AggExpr(Movable, Writable):
             writer.write("*")
         writer.write(")")
         if self.alias_name:
-            writer.write(".alias(\"", self.alias_name.value(), "\")")
+            writer.write(".alias(")
+            write_quoted(writer, self.alias_name.value())
+            writer.write(")")
 
 
 # =============================================================================
@@ -1055,19 +1058,19 @@ def median(expr: ColExpr) -> AggExpr:
     its LAST 64, and the two capped bodies returning the sentinels 777777 /
     888888, every capacity cell of the cross-surface corpus went red with the
     FIRST-64 answer (above the exact median, the fixture arriving largest
-    first) at every door (sql, pandas, polars, mojo, excel) — and NOT ONE with
+    first) at every door (sql, pandas, polars, mojo) — and NOT ONE with
     a LAST-64 answer or a sentinel. (`MedianOp[dt]` is still exact and still
     unit-tested; no door in the matrix selects it.)
 
     The corpus's capacity axis — 189 to 389 values per set, LARGEST FIRST,
     ties, NULLs inside any retained prefix, five row groups, over 0-key and
     grouped median, nine numeric types — passes against the exact median at
-    the sql, pandas, polars, mojo and excel doors. The mojo-typed door cannot
+    the sql, pandas, polars and mojo doors. The mojo-typed door cannot
     spell median. `test_sql_median_nan_and_over_64_door_parity.mojo`
     mutates `_ext_median_inplace` at the SQL door.
 
-    ⛔ DO NOT STATE A CAP HERE: this is the constructor BOTH the SQL door and
-    the Excel door call through, and a repository check reads the
+    ⛔ DO NOT STATE A CAP HERE: this is the constructor the SQL door calls
+    through, and a repository check reads the
     `FIRST-<N>` / "capped at <N> values" forms in this docstring.
 
     ⚠ The two capped bodies are DEAD CODE with a live-looking name, and a
@@ -1105,12 +1108,11 @@ def largest2(expr: ColExpr) -> AggExpr:
 #
 # ⇒ THE BIVARIATE CONSTRUCTORS TAKE `(y, x)` IN SQL ORDER AND DO THE SWAP
 #   INSIDE, in ONE place (`_bivariate_y_x`), which is the swap
-#   `sql_binder._bind_agg_from_sx_call` (args[1] -> slot 0) and the Excel door
-#   (`rel_agg_build.build_bivar_agg_plan`) perform. A Mojo call then
-#   reads exactly like the SQL it answers: `regr_slope(col("v"), col("k"))` is
-#   `regr_slope(v, k)`. ⛔ Do NOT "fix" a disagreement by flipping the ENGINE's
-#   slot order — the SQL and Excel doors and every graded bivariate row depend
-#   on it. `test_agg_expr_named_ctors.mojo` pins both slots per tag.
+#   `sql_binder._bind_agg_from_sx_call` (args[1] -> slot 0) performs. A Mojo
+#   call then reads exactly like the SQL it answers: `regr_slope(col("v"),
+#   col("k"))` is `regr_slope(v, k)`. ⛔ Do NOT "fix" a disagreement by
+#   flipping the ENGINE's slot order — the SQL door and every graded
+#   bivariate row depend on it. `test_agg_expr_named_ctors.mojo` pins both slots per tag.
 #
 # `corr` keeps its `(col1, col2)` signature: Pearson r is symmetric.
 

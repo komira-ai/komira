@@ -1,0 +1,26 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A fake S3 that keeps objects in memory (fake_s3.mojo): a komira_http_core
+# Connector whose streams answer each request as S3 does, with faults a
+# test sets (a 409 conflict, a request budget, a trapped key, an overwrite
+# racing a read, failed multipart steps) and an optional record of the
+# write verbs. Test-only, so no conda package: komira_objectstore_s3 names
+# it in `test_deps`, which reaches that library's welded tests and nothing
+# it ships (tools/build/mojo/test_deps.bzl).
+#
+# The welded test, test_fake_s3_names, pins how the fake reads a URL-encoded
+# name. The rest of the fake is exercised by the tests that use it.
+#
+# Deps: komira_async (the Reactor and Runtime of the stream methods) and
+# komira_http_core (Connector, IoStream and ScriptedStream).
+mojo_library(
+    name = "komira_test_fake_s3",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_http_core:komira_http_core",
+    ],
+    test_srcs = ["tests/test_fake_s3_names.mojo"],
+    visibility = ["//src/komira_objectstore_s3:"],
+)

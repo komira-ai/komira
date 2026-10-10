@@ -3,7 +3,8 @@
 #   command, `kci run`: every usage refusal (`ci check`, `--workflow`,
 #   `--claim-new-name` and `--expect-set-hash` are gone), `--summary-file`,
 #   the `--only` grammar, `--plan` on any stage, and the flags the selected
-#   steps' kinds take (`require_stage_flags`).
+#   steps' kinds take (`require_stage_flags`), and `--build-budget-s`, the
+#   per-change check's alone.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -119,6 +120,17 @@ def test_no_other_operation_selector() raises:
     _refused(_run("--only-validations"), String("unknown flag '--only-validations'"))
     _refused(_run("--skip", "step:b"), String("unknown flag '--skip'"))
     _refused(_run("--steps", "b"), String("unknown flag '--steps'"))
+
+
+def test_a_usage_refusal_carries_no_kci_prefix() raises:
+    # The message is recorded as is and printed after the one `kci: ` the
+    # dispatcher's `_stop` writes: a prefix here would print `kci: kci: `.
+    try:
+        _ = parse_kci_args(_run("--no-such-flag"))
+    except e:
+        assert_equal(String(e), String("unknown flag '--no-such-flag' for kci run"))
+        return
+    raise Error(String("--no-such-flag is not refused"))
 
 
 def test_help() raises:
@@ -342,6 +354,36 @@ def test_affected_by() raises:
     )
     # the BUILD step's flags are still needed
     _stage_refused(_pr("--log-dir", "/l"), String("build"), String("kci run needs --work-dir"))
+
+
+def test_build_budget_is_the_per_change_check_s() raises:
+    var g = parse_machine_file(String(_MACHINE), String("m"))
+    var c = parse_kci_args(_pr("--work-dir", "/w", "--log-dir", "/l", "--build-budget-s", "6900"))
+    assert_equal(c.build_budget_s, 6900)
+    require_stage_flags(c, g.stage(String("build")), _all(g.stage(String("build"))))
+    assert_equal(parse_kci_args(_pr("--build-budget-s=60")).build_budget_s, 60)
+    # absent: no budget
+    assert_equal(parse_kci_args(_pr("--work-dir", "/w", "--log-dir", "/l")).build_budget_s, 0)
+    _refused(_pr("--build-budget-s", "0"), String("--build-budget-s '0' is not a positive decimal integer"))
+    _refused(_pr("--build-budget-s", "-12"), String("--build-budget-s '-12' is not a positive decimal integer"))
+    _refused(_pr("--build-budget-s", "60", "--build-budget-s", "61"), String("--build-budget-s is given twice"))
+    # at most a week, so the deadline arithmetic stays far inside an Int
+    assert_equal(parse_kci_args(_pr("--build-budget-s", "604800")).build_budget_s, 604800)
+    _refused(_pr("--build-budget-s", "604801"), String("--build-budget-s '604801' is more than 604800 (a week)"))
+    _refused(_pr("--build-budget-s", "999999999"), String("is more than 604800"))
+    # komira#1153: under a budget every build run may take all the budget left,
+    # so a per-run cap beside it is refused, never silently ignored; either
+    # alone is still taken
+    _refused(
+        _pr("--work-dir", "/w", "--log-dir", "/l", "--build-budget-s", "6900", "--build-timeout-s", "3600"),
+        String("--build-timeout-s is not used with --build-budget-s: every build run may take all the budget left"),
+    )
+    assert_equal(parse_kci_args(_pr("--work-dir", "/w", "--log-dir", "/l", "--build-timeout-s", "60")).build_timeout_s, 60)
+    # a release build has no budget to share: refused, never silently ignored
+    _refused(
+        _run("--work-dir", "/w", "--log-dir", "/l", "--build-budget-s", "60"),
+        String("--build-budget-s bounds the per-change check's build of the units: it is used only with --affected-by"),
+    )
 
 
 def main() raises:

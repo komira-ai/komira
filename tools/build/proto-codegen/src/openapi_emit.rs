@@ -569,6 +569,7 @@ mod tests {
         let svc = IrService {
             name: "S".into(),
             default_host: None,
+            host_from_service_config: false,
             methods: vec![IrMethod {
                 name: "M".into(),
                 input: ty.clone(),

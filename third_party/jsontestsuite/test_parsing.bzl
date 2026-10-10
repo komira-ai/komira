@@ -1,7 +1,7 @@
 # The 318 files of test_parsing/ in the pinned JSONTestSuite archive
 # (third_party/jsontestsuite/BUCK), by name, sorted bytewise: 95 y_ (must be
 # accepted), 188 n_ (must be rejected) and 35 i_ (either). This is the only
-# list of them; //src/komira_json_conformance reads the extracted directory
+# list of them; //src/tests/conformance/komira_json_conformance reads the extracted directory
 # and requires exactly these counts.
 TEST_PARSING = [
     "i_number_double_huge_neg_exp.json",

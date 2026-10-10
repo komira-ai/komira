@@ -1,0 +1,76 @@
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The Connect conformance suite (github.com/connectrpc/conformance), Apache-2.0
+# (LICENSE in the release archive, extracted below), at its release v1.0.5:
+# the `connectconformance` runner binary for Linux x86_64, and the three
+# `.proto` files of its `connectrpc.conformance.v1` protocol a server under
+# test speaks. Nothing of it is committed here and nothing ships it: it is
+# test data of //src/tests/conformance/komira_connect_conformance only. That
+# package runs the binary in a build action, in server mode, against a
+# komira_connect server it starts as a child process on 127.0.0.1; the binary
+# embeds every test case and its reference clients, and needs no network.
+#
+# The archive's sha256 is the one the release's checksums file
+# (connectconformance_1.0.5_checksums.txt) names for it, and the archive as
+# downloaded matches it. The binary is a Go program
+# linked against the host C library, which every Linux x86_64 worker has; the
+# conformance package is limited to linux-x86_64
+# (komira-limit:connect-conformance-linux-x86-64) because this pin is that
+# platform's archive only. `exec_compatible_with` below places only the
+# unpacking, not where the binary can run.
+#
+# The `.proto` files are pinned one by one by the commit the tag names, as
+# third_party/h2spec pins its LICENSE, so a moved tag cannot change them.
+#
+# A newer pin is `_VERSION`, `_COMMIT`, `_SHA256`, `_SIZE` and the `_PROTOS`
+# hashes and sizes here; then the suite's case count (`_SUITE_CASES` in the
+# conformance package's test) and its known-failing list have to be re-read
+# against the new release.
+_VERSION = "v1.0.5"
+_COMMIT = "fc1c52eb4a602c058882f6ad6ca0ffb1c39c4730"
+_SHA256 = "7d4d1f36980debf900b12514c8d51107245e9195b3c581e61fa165fd95c94284"
+_SIZE = 9685934
+
+_VISIBLE = ["//src/tests/conformance/komira_connect_conformance/..."]
+
+pinned_file(
+    name = "connectconformance.tar.gz",
+    url = "https://github.com/connectrpc/conformance/releases/download/{v}/connectconformance-{v}-Linux-x86_64.tar.gz".format(v = _VERSION),
+    sha256 = _SHA256,
+    size_bytes = _SIZE,
+)
+
+# The archive holds `connectconformance` (mode 0755) and `LICENSE`.
+archive_files(
+    name = "connectconformance",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":connectconformance.tar.gz",
+    files = [
+        "LICENSE",
+        "connectconformance",
+    ],
+    visibility = _VISIBLE,
+)
+
+# {file: (sha256, size in bytes)} of proto/connectrpc/conformance/v1/ at
+# `_COMMIT`.
+# service.proto imports config.proto and google/protobuf/any.proto;
+# server_compat.proto imports config.proto.
+_PROTOS = {
+    "config.proto": ("f17110f76f3415de3ae09cac3655b3d990100612c3503ab52867380d0964ccba", 6648),
+    "server_compat.proto": ("36e85b23c7e8ee8088bc20a31a88d97036e6d2f05344116a39a0cdb2f5126896", 4552),
+    "service.proto": ("1770afc1b9bf0bcf31d5dd2e5750563a3d474e7f5c7bbb4d480879ad2c01ca4b", 18379),
+}
+
+[
+    pinned_file(
+        name = name,
+        url = "https://raw.githubusercontent.com/connectrpc/conformance/{}/proto/connectrpc/conformance/v1/{}".format(_COMMIT, name),
+        sha256 = pin[0],
+        size_bytes = pin[1],
+        visibility = _VISIBLE,
+    )
+    for name, pin in _PROTOS.items()
+]

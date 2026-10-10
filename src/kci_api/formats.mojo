@@ -35,6 +35,9 @@ comptime KIND_PRODUCED: String = "PRODUCED"
 
 comptime FORMAT_ARTIFACTS: String = "kci.artifacts"
 """The artifacts file (textproto, written by people)."""
+comptime FORMAT_CELLS: String = "kci.cells"
+"""The cells file: the cells a DEPLOY step deploys into (textproto, written
+by people)."""
 comptime FORMAT_CHANNELS: String = "kci.channels"
 """The release channels file (textproto, written by people)."""
 comptime FORMAT_MACHINE: String = "kci.machine"
@@ -73,6 +76,7 @@ def format_table() -> List[FormatRow]:
     """Every document, authored files first."""
     var t = List[FormatRow]()
     t.append(FormatRow(String(FORMAT_ARTIFACTS), String(KIND_AUTHORED), 1, 1))
+    t.append(FormatRow(String(FORMAT_CELLS), String(KIND_AUTHORED), 1, 1))
     t.append(FormatRow(String(FORMAT_CHANNELS), String(KIND_AUTHORED), 1, 1))
     t.append(FormatRow(String(FORMAT_MACHINE), String(KIND_AUTHORED), 1, 1))
     t.append(FormatRow(String(FORMAT_ARTIFACT_MANIFEST), String(KIND_PRODUCED), 1, 1))
@@ -99,13 +103,18 @@ def current_major(name: String) raises -> Int:
     return format_row(name).current_major
 
 
+def _newer_kci(row: FormatRow, source: String, major: String) -> Error:
+    """The "needs a newer kci" refusal; `major` is the found major as written."""
+    return Error(
+        source + String(": schema_version ") + major
+        + String(" needs a newer kci (this kci reads ") + row.name
+        + String(" up to major ") + String(row.current_major) + String(")")
+    )
+
+
 def _range_refusal(row: FormatRow, source: String, found: Int) raises:
     if found > row.current_major:
-        raise Error(
-            source + String(": schema_version ") + String(found)
-            + String(" needs a newer kci (this kci reads ") + row.name
-            + String(" up to major ") + String(row.current_major) + String(")")
-        )
+        raise _newer_kci(row, source, String(found))
     if found < row.oldest_major_read:
         var span = String(row.oldest_major_read)
         if row.current_major != row.oldest_major_read:
@@ -130,6 +139,16 @@ def check_authored_version(name: String, source: String, present: Bool, found: I
             + String(" up to major ") + String(row.current_major) + String(")")
         )
     _range_refusal(row, source, found)
+
+
+def refuse_authored_major_beyond_int(name: String, source: String, digits: String) raises:
+    """Refuse an authored file whose `schema_version` is a decimal major too
+    long to read as a number (`digits`, as written): it is above every
+    `current_major`, so it gets the same "needs a newer kci" refusal."""
+    var row = format_row(name)
+    if row.kind != KIND_AUTHORED:
+        raise Error(String("format '") + name + String("' is not an authored file"))
+    raise _newer_kci(row, source, digits)
 
 
 def check_produced_version(name: String, source: String, found_format: String, found: Int) raises:

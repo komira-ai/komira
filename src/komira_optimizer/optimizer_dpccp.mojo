@@ -7,8 +7,15 @@
 # Moerkotte/Neumann dynamic-programming join enumerator: it enumerates every
 # connected subgraph (csg) of the join graph, then for each csg every
 # connected complement (cmp), and memoizes the best join tree per relation
-# subset. Complexity is O(3^n) worst case; the relation bound (more than 12
-# relations fall back to greedy) and an iteration cap keep it bounded.
+# subset. This port is not the canonical enumerator: it grows a csg or a
+# complement one neighbour at a time and excludes only that neighbour, so
+# on dense graphs the same csg-cmp pair is emitted many times (a clique of
+# n relations: 40, 236, 1,541, 11,327, 93,528, 860,736 emits for n = 4..9,
+# against the canonical (3^n - 2^(n+1) + 1) / 2 = 25..9,330). Plans stay
+# optimal (the DP table keeps the cheaper entry); the cost is time. The
+# relation bound (more than 12 relations fall back to greedy) and the
+# iteration cap keep it bounded; a 9-relation clique already exceeds the
+# cap and falls back to greedy. komira-ai/komira#1176 tracks the fix.
 #
 # Selection (no feature flag; the row-count fallback relaxes it):
 #   `should_use_dpccp(chain)` decides DPccp vs greedy based on intrinsic
@@ -144,8 +151,10 @@ from komira_plan_expr.scalar_value import ScalarValue
 # based on chain shape (see `should_use_dpccp` below).
 
 # Bailout: chains with more than this many relations always fall back to
-# greedy. 3^12 = 531,441 bounds the worst case at this size, just above
-# DPCCP_MAX_ITERATIONS, which stops the dense graphs that approach it.
+# greedy. For canonical DPccp a 12-relation clique has 261,625 csg-cmp
+# pairs, under DPCCP_MAX_ITERATIONS; this enumerator emits pairs
+# repeatedly on dense graphs (komira-ai/komira#1176), so dense graphs from
+# about 9 relations up hit the iteration cap before this bound.
 comptime DPCCP_MAX_RELATIONS: Int = 12
 
 # Lower bound: chains shorter than this go to greedy. With <= 3
@@ -156,7 +165,9 @@ comptime DPCCP_MIN_RELATIONS: Int = 4
 # Absolute iteration cap. If the enumerators burn through this many pair
 # emits (csg+cmp seeds or complement extensions) we give up and return
 # None so the caller can fall back to greedy. Protects against dense
-# graphs, whose pair count approaches the 3^n bound.
+# graphs. With this enumerator's repeated emits (komira-ai/komira#1176) a
+# 9-relation clique (860,736 emits) and most random 10-relation graphs
+# with ~30% extra edges exceed it and fall back to greedy.
 comptime DPCCP_MAX_ITERATIONS: Int = 500_000
 
 # Estimated-distinct-ratio for the row_count-only NDV fallback of
@@ -221,7 +232,8 @@ def should_use_dpccp(chain: JoinChain) -> Bool:
          relation has no `table_stats`).
 
     Returns False otherwise -- the caller should fall through to
-    `greedy_join_order`. Keeps DPccp's CPU cost (3^n worst case) bounded
+    `greedy_join_order`. Keeps DPccp's CPU cost (exponential in n, and
+    above canonical on dense graphs: komira-ai/komira#1176) bounded
     to chains where the cost model has SOME signal to work with.
 
     Row-count fallback rationale:
@@ -238,7 +250,8 @@ def should_use_dpccp(chain: JoinChain) -> Bool:
     test_optimizer_dpccp_row_count_fallback.mojo):
       * 1-rel / 2-rel / 3-rel chains: always False (below
         DPCCP_MIN_RELATIONS).
-      * Above the relation cap: always False (3^n explodes).
+      * Above the relation cap: always False (the pair count is
+        exponential in n).
       * Chain at [4, 12] with neither table_stats nor row_count: False
         (no stats signal).
       * Chain at [4, 12] with row_count only (row-count path): True.
@@ -458,7 +471,7 @@ def _relation_graph_is_connected(
         return True
     var parent = _compute_relation_components(n, neighbors)
     if len(parent) == 0:
-        return True
+        return True  # cov: unreachable _compute_relation_components returns n entries and n > 1 here
     var first = parent[0]
     for i in range(1, len(parent)):
         if parent[i] != first:
@@ -957,8 +970,11 @@ def enumerate_csg_rec(
     Literal port of v0.3's `enumerate_csg_rec`. For each non-excluded neighbor
     of `csg`, form a new larger csg, recurse to enumerate complements of
     the new csg, and recurse to grow it further. Exclusion is widened
-    on each recursion to keep the enumeration canonical (each csg
-    emitted exactly once).
+    only by the neighbour just added, so a csg can be reached through
+    several orders of adding its members: on dense graphs the same csg
+    (and its pairs) is emitted many times. Canonical DPccp grows by every
+    subset of the neighbourhood and excludes the whole neighbourhood
+    (komira-ai/komira#1176).
     """
     if counter.is_over():
         return
@@ -1330,9 +1346,10 @@ def solve_dpccp_with_cost(
     Literal port of v0.3's `solve_dpccp`. Seeds the DP table with each
     base relation (cost = 0, cardinality = leaf row count), then iterates
     i from n-1 down to 0, running `emit_csg_complements` and
-    `enumerate_csg_rec` with start = {i} and exclusion = {0..i-1}. This
-    reverse-iteration + growing-exclusion pattern is what makes DPccp
-    enumerate each (csg, cmp) pair exactly once.
+    `enumerate_csg_rec` with start = {i} and exclusion = {0..i-1}. On a
+    chain this emits each (csg, cmp) pair once; on dense graphs the
+    one-neighbour growth emits pairs repeatedly (K4: 40 emits against the
+    canonical 25; komira-ai/komira#1176). The best plan is unchanged.
 
     Cross-product fallback:
     after the first pass, if it produced no `dp[full_set]` entry (a
@@ -1449,9 +1466,9 @@ def solve_dpccp_with_cost(
                 if not first_hit:
                     take_aug = True
                 else:
-                    var aug_cost = aug_full_hit.value().cost
-                    var first_cost = first_hit.value().cost
-                    if aug_cost < first_cost:
+                    var aug_cost = aug_full_hit.value().cost  # cov: unreachable the trigger fires only when the first pass has no full-set entry, so first_hit is empty
+                    var first_cost = first_hit.value().cost  # cov: unreachable see the line above
+                    if aug_cost < first_cost:  # cov: unreachable see the line above
                         take_aug = True
                 if take_aug:
                     # Replay every dp_aug entry into dp. The reconstruction

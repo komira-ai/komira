@@ -133,7 +133,7 @@ def hkdf_extract_ffi[OUTPUT_SIZE: Int](
     var ikm_ptr = _span_ptr_mut(ikm)
     var out_len = UInt(OUTPUT_SIZE)
     var rc = external_call[
-        "HKDF_extract",
+        "komira_awslc_HKDF_extract",
         Int,
         _FfiByte,     # out_key
         UnsafePointer[UInt, _FFI_ORIGIN],      # out_len (in/out)
@@ -187,7 +187,7 @@ def hkdf_expand_ffi[OUTPUT_SIZE: Int, o: Origin[mut=True]](
     var prk_ptr = _span_ptr_mut(prk)
     var info_ptr = _span_ptr_mut(info)
     var rc = external_call[
-        "HKDF_expand",
+        "komira_awslc_HKDF_expand",
         Int,
         _FfiByte,     # out_key
         UInt,                                         # out_len

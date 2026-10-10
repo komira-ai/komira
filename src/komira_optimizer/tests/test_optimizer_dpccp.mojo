@@ -133,7 +133,8 @@ def _chain_star(n: Int, base_card: Int) -> JoinChain:
 
 def _chain_clique(n: Int, base_card: Int) -> JoinChain:
     """Build a fully-connected n-clique chain. Used to stress the iteration
-    cap -- clique graphs produce ~3^n pair emits."""
+    cap -- this enumerator emits far more pairs on a clique than canonical
+    DPccp (n = 9: 860,736 against 9,330; komira-ai/komira#1176)."""
     var chain = JoinChain()
     for i in range(n):
         var key = "k" + String(i)

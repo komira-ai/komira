@@ -1,0 +1,23 @@
+Surface capability matrix (floor 3)
+
+cells: 10; filled: 3 (30.0%); missing: 7
+
+by surface: filled/cells, percent
+  pandas              2/5      40.0%
+  polars              1/5      20.0%
+
+by capability: filled/surfaces, the surfaces filled
+  scan_csv            1/2     pandas
+  filter              2/2     pandas polars
+  join_left           0/2     -
+  udf_map             0/2     -
+  errors              0/2     -
+
+missing (surface capability):
+  pandas join_left
+  pandas udf_map
+  pandas errors
+  polars scan_csv
+  polars join_left
+  polars udf_map
+  polars errors

@@ -24,10 +24,10 @@
     },
     {
       "id": "nightly",
-      "job": {
+      "containerJob": {
         "image": {"digest": "sha256:b2"},
+        "command": ["/bin/nightly"],
         "maxRetries": 1,
-        "schedule": {"cron": "0 3 * * *", "timezone": "UTC"},
         "runAs": {"resource": "runner"}
       }
     },

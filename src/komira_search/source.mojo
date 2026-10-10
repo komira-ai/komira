@@ -111,7 +111,7 @@ from .split import (
 )
 from .term_dict import TermDictionary, TermInfo
 
-from komira_lz4.codec import lz4_decompress
+from komira_compression.lz4 import lz4_decompress
 
 
 # =============================================================================
@@ -272,6 +272,14 @@ comptime SORT_FIELD_SCORE: String = "_score"
 
 comptime SORT_FIELD_DOC: String = "_doc"
 """The reserved `_doc` sort key (doc-id order)."""
+
+comptime SEARCH_QUERY_FIELD_MISMATCH: StaticString = (
+    "SEARCH_QUERY_FIELD_MISMATCH"
+)
+"""NAMED ERROR -- `SearchCore` was asked a query whose `field_name` is not
+the text field its split indexes (`SplitView.field_name`). A split's term
+dictionary holds one field's terms, so answering would score another field's
+postings. A caller routes each query to the splits of its field."""
 
 # Heap comparison modes (the `_TopKHeap._mode` discriminant).
 comptime SORT_MODE_SCORE: UInt8 = 0
@@ -1977,18 +1985,33 @@ struct SearchCore(Movable, Deinitable):
         WAND Phase 2: if the split carries a BLOCKMAX region, deserialize it once
         here so search() has the per-block skip-list ready (parse-once, not
         per-query). An old split (has_blockmax() False) leaves _blockmax None and
-        the scorer falls back to Phase-1 term-max WAND."""
+        the scorer falls back to Phase-1 term-max WAND.
+
+        Raises if the split carries an `l0_posting` region (see `from_view`)."""
         self = SearchCore.from_view(SplitView.parse(split_bytes^))
 
     @staticmethod
     def from_view(var view: SplitView) raises -> SearchCore:
-        """Build a SearchCore from an ALREADY-PARSED SplitView (the per-split read
-        fan-out parses each split's footer ONCE to route on the L0/optimized
-        format discriminator `has_l0_posting()`, then hands the parsed view to the
-        optimized branch here — avoiding a second footer parse). Identical to the
-        bytes ctor minus the SplitView.parse. The term-dict region is COPIED into
-        an owned List before TermDictionary.deserialize; the BLOCKMAX region (if
-        present) is deserialized ONCE."""
+        """Build a SearchCore from an ALREADY-PARSED SplitView (a caller that has
+        already parsed the footer, such as komira_search_scan, hands the view in
+        here and avoids a second footer parse). Identical to the bytes ctor
+        minus the SplitView.parse. The term-dict region is COPIED into an owned
+        List before TermDictionary.deserialize; the BLOCKMAX region (if
+        present) is deserialized ONCE.
+
+        Raises if the split carries an `l0_posting` region
+        (`view.has_l0_posting()`). SearchCore reads postings only through the
+        term dictionary and the postings region; it has no reader for the
+        l0_posting region, so on such a split every query would return 0 hits.
+        It refuses the split instead of answering from the wrong region."""
+        if view.has_l0_posting():
+            raise Error(
+                "SearchCore: split carries an l0_posting region ("
+                + String(view.l0_posting_len())
+                + " bytes); SearchCore reads only the term dictionary and"
+                " postings regions and has no l0_posting reader, so it"
+                " refuses the split rather than return 0 hits"
+            )
         var td_region = view.term_dict_region()
         var td_bytes = List[UInt8](capacity=len(td_region))
         for i in range(len(td_region)):
@@ -2083,6 +2106,17 @@ struct SearchCore(Movable, Deinitable):
         a shared borrow (the MorselSourceImpl immutable-borrow contract; the
         single-shot cursor lives on the higher-package reader).
         """
+        # ---- the query must target the field this split indexes: the term
+        # dictionary below holds that field's terms only.
+        if query.field_name != self._view.field_name():
+            raise Error(
+                String(SEARCH_QUERY_FIELD_MISMATCH)
+                + String(": the query targets field '")
+                + query.field_name
+                + String("' but this split indexes field '")
+                + self._view.field_name()
+                + String("'")
+            )
         var big_n = self._view.doc_count()
         var min_id = self._view.min_doc_id()
         var params = Bm25Params()  # modern BM25, Lucene/OpenSearch default b=0.75.
@@ -2911,7 +2945,7 @@ struct SearchCore(Movable, Deinitable):
                 if fn_resolver:
                     dl = fn_resolver.value().dl_at(self._view, pivot_doc)
                 elif len(fieldnorm_dls) > 0:
-                    dl = fieldnorm_dls[slot]
+                    dl = fieldnorm_dls[slot]  # cov: unreachable dls fill only without a footer total; BLOCKMAX needs one
                 var doc_score = 0.0
                 # dedup-TERM order (the float-order pin): the outer term index `t`.
                 # A scored doc's block was decoded full (its block-entry bound >=

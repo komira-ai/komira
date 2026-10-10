@@ -1,0 +1,24 @@
+The planted module map of test 45 (src_layout): the rows of
+fixture.bzl's packages, as docs/architecture.md writes them. It is .txt so
+the Markdown link check, which would find these links dead, does not read
+it; the src_layout lint reads any file.
+
+| module | what it is |
+|---|---|
+| [`komira_a`](../src/komira_a/) | a shipped library. |
+| [`komira_e2ex_codec`](../src/komira_e2ex_codec/) | a name holding e2e without ending in it. |
+| [`komira_test_shipped`](../src/komira_test_shipped/) | a shipped test library. |
+
+| package | what it is |
+|---|---|
+| [`komira_b_conformance`](../src/tests/conformance/komira_b_conformance/) | a conformance package. |
+| [`komira_c_e2e`](src/tests/e2e/komira_c_e2e) | a link with no leading ../ and no trailing slash. |
+| [`komira_d_loopback`](../../src/tests/e2e/komira_d_loopback/) | a link with two leading ../ |
+| [`komira_test_harness`](../src/tests/helpers/komira_test_harness/) | a harness. |
+
+Not rows of the map: a row whose link is outside src/, a line that does not
+start a table row, and prose naming a package.
+
+| [`komira_tool_e2e`](../tools/komira_tool_e2e/) | outside src/. |
+| [`komira_gone`](../docs/komira_gone/) | outside src/. |
+- [`komira_absent`](../src/komira_absent/) is a list item, not a row.

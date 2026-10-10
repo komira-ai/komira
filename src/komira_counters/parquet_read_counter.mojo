@@ -167,8 +167,8 @@ def parquet_columns_decoded() raises -> Int:
 #      `decode_row_group_columns_subset`, and the public
 #      `decode_column_chunk_from_bytes` alias all bottom out here): the
 #      resident collect, the band producer, the codes feed.
-#   2. `subrg_cursor_feed._read_column_chunk_bytes` -- the sub-RG cursor /
-#      vector-decode leaf.
+#   2. `subrg_cursor_feed._read_column_chunk_bytes` -- the sub-row-group
+#      cursor / vector-decode leaf.
 #   3. `parquet_source_helpers._decode_numeric_dict_codes_one_col` -- the
 #      fused dict-count. Counted at the CALLER, not inside
 #      `decode_numeric_dict_codes_from_bytes`, so both the mmap and the

@@ -1,0 +1,36 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:doc.bzl", "mojo_doc_json")
+
+# Test 52: each target must fail, naming its one planted defect.
+
+mojo_library(
+    name = "broken",
+    srcs = ["broken/__init__.mojo"],
+    conda = False,
+)
+
+# A source that does not compile: `mojo doc` fails, and so does the target.
+mojo_doc_json(
+    name = "compile_error",
+    lib = ":broken",
+)
+
+# A golden that is hellopkg's JSON with one function renamed.
+mojo_doc_json(
+    name = "golden_differs",
+    golden = "hellopkg_doc_stale.json",
+    lib = "komira//tools/build/examples:hellopkg",
+)
+
+# Declarations the JSON does not hold: a private function (mojo doc leaves
+# out a name starting with `_`), a function named without its module, and a
+# struct field (a field is no declaration the check walks).
+mojo_doc_json(
+    name = "missing_symbol",
+    lib = "//functional/mojo_doc_json:docpkg",
+    symbols = [
+        "__init__._hidden",
+        "shout",
+        "shapes.Grid.cells",
+    ],
+)

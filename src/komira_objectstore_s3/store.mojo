@@ -16,8 +16,9 @@
 #
 # The parameters: `C` the komira_http_core connector (TCP, TLS, or a
 # scripted one in tests), `T` the credential source (komira_aws_core's
-# `AwsCredsSource`: a static one, the default chain), `K` the signing clock
-# (`AwsClock`: the system clock, a fixed one in tests). A store holds ONE
+# `AwsCredsSource`: a static one, the default chain, or the shared
+# refreshing chain a cloned client needs, `SharedCredsSource`), `K` the
+# signing clock (`AwsClock`: the system clock, a fixed one in tests). A store holds ONE
 # transport over one connector, so its requests share a kept-alive
 # connection, and it is not shared between threads: a second thread takes
 # its own store (S3ConditionalStore.clone).
@@ -41,10 +42,12 @@
 #
 # THE SENDS BLOCK THEIR THREAD. komira_aws_core's send runs the HTTP client
 # on a blocking runtime. So `get_ranges_into` issues its coalesced requests
-# one after another over the store's one connection; `S3Config.max_inflight`
-# bounds the requests one call plans, not requests in flight. A concurrent
-# fan-out, and the poll-shaped CAS verbs (komira_objectstore's
-# AsyncCasStore), need a non-blocking send in komira_aws_core first.
+# one after another over the store's one connection. Concurrency is one
+# store per thread: `plan_range_fetch` plans a fetch and `fetch_span_into`
+# sends one of its requests, which S3Fs runs on stores of its own, up to its
+# in-flight bound at once (s3_fs.mojo). The poll-shaped CAS verbs
+# (komira_objectstore's AsyncCasStore) need a non-blocking send in
+# komira_aws_core first.
 # =============================================================================
 
 from komira_aws_core import (
@@ -83,7 +86,7 @@ from komira_aws_s3.komira_aws_s3 import (
 from komira_buffer.byte_view import ByteView
 from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
-from komira_objectstore.coalesce import plan_coalesce
+from komira_objectstore.coalesce import CoalescePlan, CoalescedRange, plan_coalesce
 from komira_objectstore.types import (
     CoalescePolicy,
     ListResult,
@@ -129,20 +132,32 @@ struct S3ListPage(Movable, Deinitable):
 
 
 @fieldwise_init
-struct _RangeRead(Movable, Deinitable):
-    """The bytes of one ranged GetObject and the ETag it answered with."""
+struct S3RangeRead(Movable, Deinitable):
+    """The bytes of one ranged GetObject and the ETag it answered with ("" when
+    the answer carried none)."""
 
     var bytes: List[UInt8]
     var etag: String
 
 
 @fieldwise_init
+struct S3RangePlan(Movable, Deinitable):
+    """The coalesced requests of one range fetch and the ETag a HEAD answered
+    while planning it ("" when no HEAD was sent)."""
+
+    var plan: CoalescePlan
+    var etag: String
+
+
+@fieldwise_init
 struct S3SuffixRead(Movable, Deinitable):
-    """The last bytes of an object, where they start, and its size."""
+    """The last bytes of an object, where they start, its size, and the ETag
+    the answer carried ("" when it had none)."""
 
     var bytes: List[UInt8]
     var offset: Int64
     var total: Int64
+    var etag: String
 
     def into_bytes(deinit self) -> List[UInt8]:
         """The bytes, moved out (a footer window is not copied again)."""
@@ -204,7 +219,7 @@ def _failed(res: HttpResult) -> Bool:
 struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitable](Movable):
     """The object verbs over the generated S3 client (module header).
 
-        var store = S3Store[KernelTcpConnector, StaticCredsSource, SystemAwsClock](
+        var store = S3Store[KernelTcpConnector, ProcessCredsSource, SystemAwsClock](
             S3Config.custom_endpoint("us-east-1", "http://127.0.0.1:9000"),
             mk_connector, HttpClientConfig.defaults(), creds^, SystemAwsClock(),
         )
@@ -326,19 +341,20 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         to it. A zero length reads nothing and sends nothing. `if_match`,
         when set, is sent as `If-Match`: an object whose ETag differs is
         answered 412 and raises PRECONDITION."""
-        return self._get_range(bucket, key, start, length, if_match).bytes.copy()
+        return self.get_range_read(bucket, key, start, length, if_match).bytes.copy()
 
-    def _get_range(
+    def get_range_read(
         mut self,
         bucket: String,
         key: String,
         start: Int64,
         length: Int64,
-        if_match: String,
-    ) raises -> _RangeRead:
-        """`get_range`, with the ETag of the answer ("" when it has none)."""
+        if_match: String = "",
+    ) raises -> S3RangeRead:
+        """`get_range`, with the ETag of the answer ("" when it has none). A
+        zero length sends nothing and answers no ETag."""
         if length == 0 and start >= 0:
-            return _RangeRead(List[UInt8](), String(""))
+            return S3RangeRead(List[UInt8](), String(""))
         var r = S3ByteRange.of_length(start, length)
         var res = self._get(bucket, key, r.header(), if_match)
         var status = res.status
@@ -353,7 +369,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
                 s3_check_partial(r, s3_parse_content_range(content_range), len(body))
             except e:
                 raise s3_malformed("GetObject", bucket, key, String(e))
-            return _RangeRead(body^, etag^)
+            return S3RangeRead(body^, etag^)
         # A 200: the whole object, from which the window is cut.
         if r.start >= Int64(len(body)):
             raise s3_malformed(
@@ -368,16 +384,21 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         var end = min(Int(r.end), len(body))
         var cut = List[UInt8](capacity=end - Int(r.start))
         cut.extend(Span(body)[Int(r.start) : end])
-        return _RangeRead(cut^, etag^)
+        return S3RangeRead(cut^, etag^)
 
-    def get_suffix(mut self, bucket: String, key: String, n: Int64) raises -> S3SuffixRead:
+    def get_suffix(
+        mut self, bucket: String, key: String, n: Int64, if_match: String = ""
+    ) raises -> S3SuffixRead:
         """The last `n` bytes of an object in ONE request (`bytes=-<n>`),
         with where they start and the object's size, read from the 206's
         Content-Range: what a footer read needs without a HEAD first. An
-        `n` past the object's size reads the whole object."""
-        var res = self._get(bucket, key, s3_suffix_range_header(n))
+        `n` past the object's size reads the whole object. `if_match`, when
+        set, is sent as `If-Match`: an object whose ETag differs is answered
+        412 and raises PRECONDITION."""
+        var res = self._get(bucket, key, s3_suffix_range_header(n), if_match)
         var status = res.status
         var content_range = res.header(String("content-range"))
+        var etag = res.header(String("etag"))
         var out = parse_get_object_response(res^.into_response())
         var body = out.body.take() if out.body else List[UInt8]()
         if status == 206:
@@ -396,13 +417,13 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
                 raise s3_malformed(
                     "GetObject", bucket, key, "a suffix 206 that is not the object's tail: " + content_range
                 )
-            return S3SuffixRead(body^, cr.first, cr.total)
+            return S3SuffixRead(body^, cr.first, cr.total, etag^)
         # A 200: the whole object; its tail is the suffix.
         var total = Int64(len(body))
         var keep = min(n, total)
         var tail = List[UInt8](capacity=Int(keep))
         tail.extend(Span(body)[Int(total - keep) : Int(total)])
-        return S3SuffixRead(tail^, total - keep, total)
+        return S3SuffixRead(tail^, total - keep, total, etag^)
 
     def get_ranges_into[
         dst_origin: Origin[mut=True]
@@ -421,16 +442,41 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         is sent first when the set holds one. Every request after the HEAD,
         or after the first answer, carries `If-Match` with the ETag it gave,
         so the bytes are one version of the object: one overwritten
-        meanwhile raises PRECONDITION. The requests are sent one after
-        another (module header); `max_concurrency` and
-        `S3Config.max_inflight` bound the plan's concurrency field."""
+        meanwhile raises PRECONDITION. This store sends the requests one
+        after another over its one connection; `max_concurrency` and
+        `S3Config.max_inflight` bound the plan's concurrency field, which
+        `S3Fs.read_ranges_prefetched` spreads over stores of its own."""
         var n = ranges.num_ranges()
         var result = RangeFetchResult.with_capacity(n)
         if n == 0:
             return result^
+        var planned = self.plan_range_fetch(bucket, key, ranges, max_concurrency)
+        var etag = planned.etag.copy()
+        for c in range(len(planned.plan.coalesced)):
+            ref span = planned.plan.coalesced[c]
+            var answered = self.fetch_span_into(bucket, key, span, dst, etag)
+            if etag.byte_length() == 0:
+                etag = answered^
+            for s in range(len(span.slices)):
+                ref sl = span.slices[s]
+                result.record(sl.orig_index, RANGE_FETCH_STATUS_OK, Int64(sl.length))
+                result.total_fetched_bytes += Int64(sl.length)
+        return result^
+
+    def plan_range_fetch(
+        mut self,
+        bucket: String,
+        key: String,
+        ranges: RangeSet,
+        max_concurrency: Int,
+    ) raises -> S3RangePlan:
+        """The coalesced requests that read `ranges`, with the ETag a HEAD
+        answered when the set holds an offset or suffix range (which needs
+        the object's size), else "". The plan's concurrency field is
+        `max_concurrency` clamped to 1..`S3Config.max_inflight`."""
         var object_size = Int64(-1)
         var etag = String("")
-        for i in range(n):
+        for i in range(ranges.num_ranges()):
             if not ranges.ranges[i].is_bounded():
                 var meta = self.head(bucket, key)
                 object_size = meta.size
@@ -438,39 +484,49 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
                 break
         var policy = CoalescePolicy.default()
         policy.max_concurrency = max(1, min(max_concurrency, self._config.max_inflight))
-        var plan = plan_coalesce(ranges, policy, object_size)
-        for c in range(len(plan.coalesced)):
-            ref span = plan.coalesced[c]
-            var read = self._get_range(bucket, key, span.start, span.length(), etag)
-            if etag.byte_length() == 0:
-                etag = read.etag.copy()
-            ref bytes = read.bytes
-            for s in range(len(span.slices)):
-                ref sl = span.slices[s]
-                if sl.coalesced_offset + sl.length > len(bytes):
-                    raise s3_malformed(
-                        "GetObject",
-                        bucket,
-                        key,
-                        String("a range ends past the object: wanted ")
-                        + String(sl.length)
-                        + " bytes at "
-                        + String(span.start + Int64(sl.coalesced_offset)),
-                    )
-                if sl.dst_offset + sl.length > dst.len():
-                    raise Error(
-                        String("get_ranges_into: dst holds ")
-                        + String(dst.len())
-                        + " bytes; range "
-                        + String(sl.orig_index)
-                        + " ends at "
-                        + String(sl.dst_offset + sl.length)
-                    )
-                for b in range(sl.length):
-                    dst.write_u8_at(sl.dst_offset + b, bytes[sl.coalesced_offset + b])
-                result.record(sl.orig_index, RANGE_FETCH_STATUS_OK, Int64(sl.length))
-                result.total_fetched_bytes += Int64(sl.length)
-        return result^
+        return S3RangePlan(plan_coalesce(ranges, policy, object_size), etag^)
+
+    def fetch_span_into[
+        dst_origin: Origin[mut=True]
+    ](
+        mut self,
+        bucket: String,
+        key: String,
+        span: CoalescedRange,
+        dst: ByteView[mut=True, dst_origin],
+        if_match: String,
+    ) raises -> String:
+        """One coalesced request of a plan: GetObject of the span's bytes
+        (with `If-Match` when `if_match` is set), each of its slices written
+        into `dst` at its `dst_offset`. Returns the ETag the answer carried
+        ("" when it had none). Writes only the bytes of this span's slices,
+        so two spans of one plan may be fetched into one `dst` at once."""
+        var read = self.get_range_read(bucket, key, span.start, span.length(), if_match)
+        ref bytes = read.bytes
+        for s in range(len(span.slices)):
+            ref sl = span.slices[s]
+            if sl.coalesced_offset + sl.length > len(bytes):
+                raise s3_malformed(
+                    "GetObject",
+                    bucket,
+                    key,
+                    String("a range ends past the object: wanted ")
+                    + String(sl.length)
+                    + " bytes at "
+                    + String(span.start + Int64(sl.coalesced_offset)),
+                )
+            if sl.dst_offset + sl.length > dst.len():
+                raise Error(
+                    String("get_ranges_into: dst holds ")
+                    + String(dst.len())
+                    + " bytes; range "
+                    + String(sl.orig_index)
+                    + " ends at "
+                    + String(sl.dst_offset + sl.length)
+                )
+            for b in range(sl.length):
+                dst.write_u8_at(sl.dst_offset + b, bytes[sl.coalesced_offset + b])
+        return read.etag.copy()
 
     # ---- listing -------------------------------------------------------------
 

@@ -1,0 +1,166 @@
+## The cases of the Connect conformance run (conformance.yaml, the suite
+## pinned in third_party/connect-conformance) that komira_connect fails, as
+## the runner's `--known-failing` patterns: `*` is one name component, `**`
+## any number. The runner fails the run when a listed case passes or a
+## pattern matches no case, so the list only shrinks. Each block is one
+## reason (the `#` lines, checked by known_failing.mojo) and the patterns
+## it covers. A case name is
+##   <suite>/HTTPVersion:2[/Protocol:<p>][/Codec:..][/Compression:..]/TLS:true/<test>
+## where the Protocol, Codec and Compression components appear only for a
+## suite that applies to more than one of them.
+
+# Streaming over Connect and gRPC-Web: ConnectService.dispatch_grpc_stream
+# (komira_connect service.mojo) answers every client- and server-streaming
+# call as gRPC, Content-Type application/grpc+proto with the status in HTTP/2
+# trailers, whatever the request's protocol; the Connect and gRPC-Web
+# clients refuse that response ("invalid content-type").
+Basic/**/Protocol:PROTOCOL_CONNECT/**/client-stream/**
+Basic/**/Protocol:PROTOCOL_CONNECT/**/server-stream/**
+Basic/**/Protocol:PROTOCOL_GRPC_WEB/**/client-stream/**
+Basic/**/Protocol:PROTOCOL_GRPC_WEB/**/server-stream/**
+Connect Unexpected Requests/**/server-stream/**
+Connect Unexpected Requests/**/unexpected-compressed-message
+Connect to HTTP Code Mapping/**/client-stream/**
+Connect to HTTP Code Mapping/**/server-stream/**
+Deadline Propagation/**/Protocol:PROTOCOL_CONNECT/**/client-stream/**
+Deadline Propagation/**/Protocol:PROTOCOL_CONNECT/**/server-stream/**
+Deadline Propagation/**/Protocol:PROTOCOL_GRPC_WEB/**/client-stream/**
+Deadline Propagation/**/Protocol:PROTOCOL_GRPC_WEB/**/server-stream/**
+Duplicate Metadata/**/Protocol:PROTOCOL_CONNECT/**/client-stream/**
+Duplicate Metadata/**/Protocol:PROTOCOL_CONNECT/**/server-stream/**
+Duplicate Metadata/**/Protocol:PROTOCOL_GRPC_WEB/**/client-stream/**
+Duplicate Metadata/**/Protocol:PROTOCOL_GRPC_WEB/**/server-stream/**
+Errors/**/Protocol:PROTOCOL_CONNECT/**/client-stream/**
+Errors/**/Protocol:PROTOCOL_CONNECT/**/server-stream/**
+Errors/**/Protocol:PROTOCOL_GRPC_WEB/**/client-stream/**
+Errors/**/Protocol:PROTOCOL_GRPC_WEB/**/server-stream/**
+Server Empty Requests/**/Protocol:PROTOCOL_CONNECT/**/client-stream/**
+Server Empty Requests/**/Protocol:PROTOCOL_CONNECT/**/server-stream/**
+Server Empty Requests/**/Protocol:PROTOCOL_GRPC_WEB/**/client-stream/**
+Server Empty Requests/**/Protocol:PROTOCOL_GRPC_WEB/**/server-stream/**
+gRPC-Web Unexpected Requests/**/server-stream/**
+
+# Connect unary in the proto codec: a request with Content-Type
+# application/proto is answered Content-Type application/json, because
+# ConnectService.dispatch_grpc sets CONNECT_JSON_CONTENT_TYPE_UNARY for every
+# Connect request (komira_connect service.mojo); the client refuses the
+# response ("invalid content-type").
+Basic/**/Protocol:PROTOCOL_CONNECT/**/unary/success
+Connect Unexpected Requests/**/unexpected-compression
+Connect Unexpected Requests/**/unexpected-verb
+Deadline Propagation/**/Protocol:PROTOCOL_CONNECT/**/unary/success
+Duplicate Metadata/**/Protocol:PROTOCOL_CONNECT/**/unary/success
+Server Empty Requests/**/Protocol:PROTOCOL_CONNECT/**/unary/empty-request
+
+# No error details: a komira_connect error is a code and a message only
+# (a handler raises `[connect:N] message`); it cannot carry details (gRPC's
+# grpc-status-details-bin trailer, gRPC-Web's trailer frame, Connect's JSON
+# "details"), and every error the suite has the server define expects the
+# request echoed back as a RequestInfo detail ("actual error contain 0
+# details; expecting 1"). The codes themselves match in these cases.
+Connect to HTTP Code Mapping/**/unary/**
+Duplicate Metadata/**/Protocol:PROTOCOL_GRPC/**/client-stream/error
+Duplicate Metadata/**/Protocol:PROTOCOL_GRPC/**/server-stream/error-with-no-responses
+Duplicate Metadata/**/unary/error
+Errors/**/Protocol:PROTOCOL_GRPC/**/client-stream/**
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/aborted
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/already-exists
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/canceled
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/data-loss
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/deadline-exceeded
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/error-with-metadata
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/error-with-no-responses
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/failed-precondition
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/internal
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/invalid-argument
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/not-found
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/out-of-range
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/permission-denied
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/resource-exhausted
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/unauthenticated
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/unavailable
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/unimplemented
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/unknown
+Errors/**/unary/**
+
+# No request metadata: a ConnectService handler is given the request body
+# alone, so the server cannot echo the request headers the suite sent
+# ("actual request headers missing").
+Basic/**/Protocol:PROTOCOL_GRPC/**/client-stream/success
+Basic/**/Protocol:PROTOCOL_GRPC/**/server-stream/success
+Basic/**/Protocol:PROTOCOL_GRPC/**/unary/success
+Basic/**/Protocol:PROTOCOL_GRPC_WEB/**/unary/success
+Duplicate Metadata/**/Protocol:PROTOCOL_GRPC/**/client-stream/success
+Duplicate Metadata/**/Protocol:PROTOCOL_GRPC/**/server-stream/success
+Duplicate Metadata/**/Protocol:PROTOCOL_GRPC/**/unary/success
+Duplicate Metadata/**/Protocol:PROTOCOL_GRPC_WEB/**/unary/success
+Server Empty Requests/**/Protocol:PROTOCOL_GRPC/**/client-stream/empty-request
+Server Empty Requests/**/Protocol:PROTOCOL_GRPC/**/unary/empty-request
+Server Empty Requests/**/Protocol:PROTOCOL_GRPC_WEB/**/unary/empty-request
+
+# No request timeout: nor is a handler given the call's deadline
+# (grpc-timeout), which the suite expects echoed back ("server did not echo
+# back a timeout").
+Deadline Propagation/**/Protocol:PROTOCOL_GRPC/**/client-stream/success
+Deadline Propagation/**/Protocol:PROTOCOL_GRPC/**/server-stream/success
+Deadline Propagation/**/Protocol:PROTOCOL_GRPC/**/unary/success
+Deadline Propagation/**/Protocol:PROTOCOL_GRPC_WEB/**/unary/success
+
+# No response metadata: a handler cannot set response headers or trailers
+# ("actual response headers missing").
+Basic/**/Protocol:PROTOCOL_GRPC/**/server-stream/no-responses
+Duplicate Metadata/**/Protocol:PROTOCOL_GRPC/**/server-stream/no-response
+
+# A stream's messages are lost when it ends in an error:
+# ConnectService.dispatch_grpc_stream drops the messages a streaming handler
+# produced once it raises, so the client sees the error alone ("expecting 2
+# response messages but instead got 0").
+Duplicate Metadata/**/Protocol:PROTOCOL_GRPC/**/server-stream/error-with-responses
+Errors/**/Protocol:PROTOCOL_GRPC/**/server-stream/error-with-responses
+
+# An unknown method is NOT_FOUND, not UNIMPLEMENTED: a path no method is
+# registered under is answered NOT_FOUND ("method ... not registered",
+# komira_connect service.mojo `_make_not_found_result`); gRPC and Connect
+# require UNIMPLEMENTED.
+Basic/**/unimplemented
+Connect Unexpected Requests/**/unexpected-uri
+gRPC Unexpected Requests/**/unexpected-uri
+gRPC-Web Unexpected Requests/**/unexpected-uri
+
+# An unsupported Content-Type is answered HTTP 404: the request is not
+# routed to the service at all (the HttpServer's router has no route for
+# it), so the client reads UNIMPLEMENTED; the suite expects the request
+# refused as an unsupported media type (HTTP 415, read as UNKNOWN).
+Connect Unexpected Requests/**/unexpected-codec
+Unexpected Requests/**/unexpected-content-type
+
+# A malformed request body is always UNKNOWN: when decoding the request
+# fails, komira_connect's dispatch (dispatch.mojo, the decode `except`) and
+# its streaming path (service.mojo, dispatch_grpc_stream's decode `except`)
+# return GRPC_STATUS_UNKNOWN with the decoder's text as the message, so the
+# `[grpc:13]` / `[grpc:12]` code the gRPC decoder names is dropped (and
+# shows up in grpc-message); the gRPC-Web decoder's errors
+# (codec_grpc_web.mojo) carry no code, and an empty gRPC-Web body is
+# answered UNKNOWN directly. The suite expects UNIMPLEMENTED for a unary call
+# with no or several request messages and INTERNAL for a compressed message
+# on a call that negotiated no compression.
+gRPC Unexpected Requests/**/unary/multiple-requests
+gRPC Unexpected Requests/**/unary/no-request
+gRPC Unexpected Requests/**/unexpected-compressed-message
+gRPC-Web Unexpected Requests/**/unary/no-request
+gRPC-Web Unexpected Requests/**/unexpected-compressed-message
+
+# Requests the protocol requires refused are served: a server-streaming call
+# with no or several request messages (the handler gets whatever arrived), a
+# grpc-encoding the server does not support (the header is not read), a
+# method other than POST (not checked on the gRPC path), and a gRPC-Web unary
+# call with several request messages (the first is used, the rest ignored)
+# all succeed where the suite expects an error ("expecting an error but
+# received none").
+gRPC Unexpected Requests/**/server-stream/multiple-requests
+gRPC Unexpected Requests/**/server-stream/no-request
+gRPC Unexpected Requests/**/unexpected-compression
+gRPC Unexpected Requests/**/unexpected-verb
+gRPC-Web Unexpected Requests/**/unary/multiple-requests
+gRPC-Web Unexpected Requests/**/unexpected-compression
+gRPC-Web Unexpected Requests/**/unexpected-verb

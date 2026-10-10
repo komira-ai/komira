@@ -3,10 +3,9 @@
 # codec matrix).
 # =============================================================================
 #
-# FFI-BOUNDARY: ORC compression codecs (libzstd, libz, liblz4 via dlopen;
-# snappy statically linked through the core packages). The FFI pointers in this
-# package are confined to the dlopen-handle slots and the per-codec helpers
-# below, the same shape as the core packages' Arrow compression codecs.
+# The codecs are komira_compression's codec API (snappy_block, zstd_frame,
+# zlib, lz4): this module declares no codec FFI and takes no pointer.
+# komira_compression owns every codec soname and the snappy symbols.
 #
 # ORC compression framing: when the file codec is not
 # NONE, every stream is broken into chunks. Each chunk is prefixed with a
@@ -41,15 +40,38 @@
 #   - Lz4    : LZ4 block format (NOT frame), `LZ4_decompress_safe`.
 #
 # Encapsulation: `decompress_stream` takes a borrowed Span and returns an owned
-# `List[UInt8]`. No UnsafePointer crosses the module boundary; the FFI pointers
-# are confined to the singletons + the per-codec decompress helpers.
+# `List[UInt8]`. Each codec writes into a List this module allocates, through
+# a Span over it.
 # =============================================================================
 
-from std.memory import alloc, unsafe_memset, unsafe_memcpy
-from std.ffi import OwnedDLHandle, _Global, external_call
-from std.os import abort
-
-from std.sys.info import CompilationTarget
+from komira_compression.lz4 import (
+    lz4_compress_bound,
+    lz4_compress_into,
+    lz4_decompress_into,
+)
+from komira_compression.snappy_block import (
+    snappy_compress_into,
+    snappy_max_compressed_length,
+    snappy_uncompress_into,
+    snappy_uncompressed_length,
+)
+from komira_compression.zlib import (
+    ZLIB_LEVEL_DEFAULT,
+    ZlibInflateOutcome,
+    ZLIB_WINDOW_BITS_RAW,
+    Z_OK,
+    Z_STREAM_END,
+    zlib_compress_bound,
+    zlib_deflate_into,
+    zlib_inflate_once,
+)
+from komira_compression.zstd_frame import (
+    ZSTD_DEFAULT_LEVEL,
+    zstd_compress_bound,
+    zstd_compress_into,
+    zstd_decompress_into,
+    zstd_frame_content_size,
+)
 
 from .lzo1x_decompress import lzo1x_decompress
 from .footer import (
@@ -64,45 +86,14 @@ from .footer import (
 )
 
 
-# =============================================================================
-# FFI buffer-coercion helpers (the same shape as the core packages' Arrow
-# compression codecs).
-# =============================================================================
-#
-# A compress helper that allocates an in_buf + per-byte input copy loop and an
-# out_buf + per-byte output append loop pays hundreds of MB of byte-stores per
-# large write (256-KiB chunks × N). Instead, pass the input Span pointer
-# DIRECTLY to FFI via `_span_ptr` and write DIRECTLY into the output List's
-# reserved backing storage via `_list_ptr`.
-#
-# SAFETY: the helpers cast to an untracked origin for the FFI seam only; both
-# input and output remain alive across the synchronous codec call,
-# their backing storage is heap-owned and not reallocated for the duration.
-
-
-@always_inline
-def _span_ptr(s: Span[UInt8, _]) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
-    """Coerce a `Span[UInt8, _]` to a `MutExternalOrigin`-cast UnsafePointer
-    for FFI. FFI-BOUNDARY: synchronous C call; caller owns the buffer.
-    """
-    # SAFETY: see header. The cast does not extend lifetime; the Span ref
-    # remains in scope across the external_call below.
-    return (
-        s.unsafe_ptr()
-        .unsafe_mut_cast[True]()
-        .unsafe_origin_cast[MutUntrackedOrigin]()
-    )
-
-
-@always_inline
-def _list_ptr(
-    mut buf: List[UInt8],
-) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
-    """Coerce a `List[UInt8]`'s data pointer to FFI shape (mutable output)."""
-    # SAFETY: synchronous FFI; `buf` is not reallocated across the call
-    # because the caller pre-reserved capacity (no append happens between
-    # this call and consumption of the pointer).
-    return buf.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
+def _output_buffer(cap: Int) -> List[UInt8]:
+    """A List of `cap` bytes for a codec to write into. The bytes are not
+    initialized; the caller reads back only the ones the codec wrote."""
+    var out = List[UInt8](capacity=cap)
+    # SAFETY: `cap` bytes were reserved above; only the codec's written
+    # prefix is read (or kept) afterwards.
+    out.resize(unsafe_uninit_length=cap)
+    return out^
 
 
 # =============================================================================
@@ -158,16 +149,11 @@ def decompress_stream(
             " derived from a malformed length or offset)"
         )
     # `block_size` is PostScript.compressionBlockSize: attacker-chosen metadata
-    # that becomes each codec helper's INITIAL `alloc` size, once per chunk. The
+    # that becomes each codec helper's INITIAL buffer size, once per chunk. The
     # retry-growth path below already refuses to exceed 1 GiB
     # (`new_cap > (1 << 30)`); without the same ceiling on the initial
     # allocation, ~10 bytes of PostScript would buy an arbitrarily large
     # allocation. One ceiling covers both. ORC's spec default is 256 KiB.
-    #
-    # This also makes the `Int32(out_cap)` narrowing at the LZ4 FFI boundary
-    # provably safe: with `cap <= 1 GiB` and the chunk length field only 23 bits
-    # wide, `out_cap` can never reach 2^31 and so can never be handed to
-    # LZ4_decompress_safe as a NEGATIVE dstCapacity.
     if block_size < 0:
         raise Error(
             String("OrcCodecError.BAD_BLOCK_SIZE: compressionBlockSize is")
@@ -361,161 +347,84 @@ def compress_stream(
 
 
 # =============================================================================
-# Per-codec single-chunk COMPRESS helpers (FFI; inverse of the decompress
-# helpers). Each returns the raw compressed block (no chunk framing).
+# Per-codec single-chunk COMPRESS helpers (inverse of the decompress helpers).
+# Each returns the raw compressed block (no chunk framing); the codec writes
+# straight into the returned List, sized at its own bound.
 # =============================================================================
 
 
 def _zstd_compress_chunk(src: Span[UInt8, _]) raises -> List[UInt8]:
-    """Direct Span-in / List-out via _span_ptr + _list_ptr (no intermediate
-    alloc/copy).
-    """
-    var in_len = len(src)
-    var handle_ptr = _default_zstd_handle()
-    var out_cap = handle_ptr[].call["ZSTD_compressBound", Int](in_len)
-    if out_cap <= 0:
-        out_cap = in_len + (in_len // 2) + 64
-    var out = List[UInt8](capacity=max(out_cap, 1))
-    var written = handle_ptr[].call["ZSTD_compress", Int](
-        _list_ptr(out),
-        out_cap,
-        _span_ptr(src),
-        in_len,
-        Int32(3),
-    )
-    var is_err = handle_ptr[].call["ZSTD_isError", Int](written)
-    if is_err != 0:
-        raise Error("OrcCodecError.ZSTD_COMPRESS_FAILED")
-    out.resize(unsafe_uninit_length=Int(written))
+    """One zstd frame at level 3."""
+    var out = _output_buffer(max(zstd_compress_bound(len(src)), 1))
+    var written: Int
+    try:
+        written = zstd_compress_into(Span(out), src, ZSTD_DEFAULT_LEVEL)
+    except e:
+        raise Error("OrcCodecError.ZSTD_COMPRESS_FAILED: " + String(e))
+    out.resize(unsafe_uninit_length=written)
     return out^
 
 
 def _zlib_compress_chunk(src: Span[UInt8, _]) raises -> List[UInt8]:
-    """RAW-deflate-compress (windowBits=-15) one stream — inverse of
-    _zlib_decompress_chunk's raw RFC-1951 reader.
-
-    Direct Span-in / List-out via _span_ptr + _list_ptr (no intermediate
-    alloc/copy).
-    """
-    var in_len = len(src)
-    var out_cap = in_len + in_len // 2 + 128
-    var out = List[UInt8](capacity=max(out_cap, 1))
-    var in_ptr = _span_ptr(src)
-    var out_ptr = _list_ptr(out)
-
-    var handle_ptr = _default_z_handle()
-    var version = handle_ptr[].call[
-        "zlibVersion", UnsafePointer[UInt8, MutUntrackedOrigin]
-    ]()
-
-    # SAFETY: 112-byte scratch z_stream; freed via deflateEnd + free() below.
-    var strm = alloc[UInt8](_Z_STREAM_SIZE)
-    unsafe_memset(strm, 0, _Z_STREAM_SIZE)
-    (strm.bitcast[UInt64]() + 0)[] = UInt64(Int(in_ptr))
-    (strm.bitcast[UInt32]() + 2)[] = UInt32(in_len)
-    (strm.bitcast[UInt64]() + 3)[] = UInt64(Int(out_ptr))
-    (strm.bitcast[UInt32]() + 8)[] = UInt32(out_cap)
-
-    var init_rc = handle_ptr[].call["deflateInit2_", Int32](
-        strm,
-        Int32(6),  # Z_DEFAULT_COMPRESSION-ish level
-        Int32(8),  # Z_DEFLATED
-        _Z_WINDOWBITS_RAW,
-        Int32(8),  # memLevel
-        Int32(0),  # Z_DEFAULT_STRATEGY
-        version,
-        Int32(_Z_STREAM_SIZE),
-    )
-    if Int(init_rc) != _Z_OK:
-        strm.free()
-        raise Error("OrcCodecError.ZLIB_COMPRESS_FAILED: deflateInit2_ rc=" + String(Int(init_rc)))
-    var rc = handle_ptr[].call["deflate", Int32](strm, Int32(4))  # Z_FINISH=4
-    var total_out = Int((strm.bitcast[UInt64]() + 5)[])
-    _ = handle_ptr[].call["deflateEnd", Int32](strm)
-    strm.free()
-    if Int(rc) != _Z_STREAM_END:
-        raise Error("OrcCodecError.ZLIB_COMPRESS_FAILED: deflate rc=" + String(Int(rc)))
-    out.resize(unsafe_uninit_length=total_out)
+    """RAW-deflate-compress (level 6, windowBits -15) one chunk — inverse of
+    _zlib_decompress_chunk's raw RFC-1951 reader."""
+    var cap = zlib_compress_bound(len(src), ZLIB_WINDOW_BITS_RAW)
+    var out = _output_buffer(max(cap, 1))
+    var written: Int
+    try:
+        written = zlib_deflate_into(
+            Span(out), src, ZLIB_LEVEL_DEFAULT, ZLIB_WINDOW_BITS_RAW
+        )
+    except e:
+        raise Error("OrcCodecError.ZLIB_COMPRESS_FAILED: " + String(e))
+    out.resize(unsafe_uninit_length=written)
     return out^
 
 
 def _snappy_compress_chunk(src: Span[UInt8, _]) raises -> List[UInt8]:
-    """Direct Span-in / List-out via _span_ptr + _list_ptr (no intermediate
-    alloc/copy).
-    """
-    var in_len = len(src)
-    var out_cap = 32 + in_len + in_len // 6
-    var out = List[UInt8](capacity=max(out_cap, 1))
-    var size_buf = alloc[Int64](1)
-    size_buf[0] = Int64(out_cap)
-    # FFI-BOUNDARY: snappy is statically linked (the core packages' deps).
-    var status = external_call["snappy_compress", Int32](
-        _span_ptr(src),
-        Int64(in_len),
-        _list_ptr(out),
-        size_buf,
-    )
-    var written = Int(size_buf[0])
-    size_buf.free()
-    if Int(status) != 0:
-        raise Error("OrcCodecError.SNAPPY_COMPRESS_FAILED status=" + String(Int(status)))
+    """One raw snappy block."""
+    var out = _output_buffer(snappy_max_compressed_length(len(src)))
+    var written: Int
+    try:
+        written = snappy_compress_into(Span(out), src)
+    except e:
+        raise Error("OrcCodecError.SNAPPY_COMPRESS_FAILED: " + String(e))
     out.resize(unsafe_uninit_length=written)
     return out^
 
 
 def _lz4_compress_chunk(src: Span[UInt8, _]) raises -> List[UInt8]:
-    """Direct Span-in / List-out via _span_ptr + _list_ptr (no intermediate
-    alloc/copy).
-    """
-    var in_len = len(src)
-    var handle_ptr = _default_lz4_handle()
-    var out_cap = Int(handle_ptr[].call["LZ4_compressBound", Int32](Int32(in_len)))
-    if out_cap <= 0:
-        out_cap = in_len + in_len // 2 + 64
-    var out = List[UInt8](capacity=max(out_cap, 1))
-    var written = Int(
-        handle_ptr[].call["LZ4_compress_default", Int32](
-            _span_ptr(src),
-            _list_ptr(out),
-            Int32(in_len),
-            Int32(out_cap),
-        )
-    )
-    if written <= 0:
-        raise Error("OrcCodecError.LZ4_COMPRESS_FAILED result=" + String(written))
+    """One LZ4 raw block (`LZ4_compress_default`)."""
+    var out = _output_buffer(lz4_compress_bound(len(src)))
+    var written: Int
+    try:
+        written = lz4_compress_into(Span(out), src)
+    except e:
+        raise Error("OrcCodecError.LZ4_COMPRESS_FAILED: " + String(e))
     out.resize(unsafe_uninit_length=written)
     return out^
 
 
 # =============================================================================
-# Zstd single-chunk decompress (libzstd FFI). Appends to `out`.
+# Zstd single-chunk decompress. Appends to `out`.
 # =============================================================================
 
 
 def _zstd_decompress_chunk(
     chunk: Span[UInt8, _], cap: Int, mut out: List[UInt8]
 ) raises:
-    """Zstd-decompress one chunk into `out`. Uses `ZSTD_getFrameContentSize` to
-    size the output buffer precisely; falls back to a growable retry loop when
-    the content size is unknown (some ZSTD encoders omit the frame-content-size
-    field). `cap` is the writer-advertised compressionBlockSize hint — used as
-    the lower bound for the initial guess only."""
-    var in_buf = alloc[UInt8](len(chunk))
-    for i in range(len(chunk)):
-        in_buf[i] = chunk[i]
-
-    var handle_ptr = _default_zstd_handle()
-    # ZSTD_getFrameContentSize returns the decompressed size, or a sentinel for
-    # unknown / error frames. The sentinels are large positive integers (the C
-    # API returns unsigned long long); we treat them as "unknown" and fall back
-    # to a growable buffer.
-    var frame_size = handle_ptr[].call["ZSTD_getFrameContentSize", Int](
-        in_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-        len(chunk),
-    )
-    # ZSTD_CONTENTSIZE_UNKNOWN = (unsigned long long)-1 = -1 when cast to Int
-    # on LP64; ZSTD_CONTENTSIZE_ERROR = (unsigned long long)-2 = -2.
-    var size_known = frame_size >= 0
+    """Zstd-decompress one chunk into `out`. Uses the frame header's content
+    size to size the output buffer precisely; falls back to a growable retry
+    loop when the content size is unknown (some ZSTD encoders omit the
+    frame-content-size field). `cap` is the writer-advertised
+    compressionBlockSize hint — used as the lower bound for the initial guess
+    only."""
+    # The content size is the decompressed size, or a sentinel for unknown /
+    # error frames. The sentinels (and any size of 2^63 or more) are treated
+    # as "unknown", with a growable buffer.
+    var content = zstd_frame_content_size(chunk)
+    var size_known = content < (UInt64(1) << 63)
+    var frame_size = Int(content) if size_known else -1
     var initial_cap = frame_size if size_known else (cap if cap > 0 else (256 * 1024))
     # ⚠ `frame_size` IS ATTACKER DATA. It is a size declared INSIDE the
     # compressed frame the file supplied, so a ~10-byte zstd header can ask for
@@ -525,7 +434,6 @@ def _zstd_decompress_chunk(
     # genuinely decompresses past 1 GiB is not something this reader supports
     # anyway (the retry path refuses to grow past it).
     if initial_cap > ORC_MAX_COMPRESSION_BLOCK_SIZE:
-        in_buf.free()
         raise Error(
             String("OrcCodecError.BAD_BLOCK_SIZE: zstd frame declares a")
             + " decompressed size of "
@@ -534,74 +442,46 @@ def _zstd_decompress_chunk(
             + String(ORC_MAX_COMPRESSION_BLOCK_SIZE)
         )
     # Defense against a tiny `cap` argument when the writer's hint is missing:
-    # never start smaller than the chunk's compressed length (decompressed is
-    # at least as large) and never larger than ZSTD_DECOMPRESSBOUND.
+    # never start smaller than the chunk's compressed length.
     if initial_cap < len(chunk):
         initial_cap = len(chunk)
 
     var out_cap = initial_cap
-    var out_buf = alloc[UInt8](out_cap)
     while True:
-        var result = handle_ptr[].call["ZSTD_decompress", Int](
-            out_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-            out_cap,
-            in_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-            len(chunk),
-        )
-        var is_err = handle_ptr[].call["ZSTD_isError", Int](result)
-        if is_err == 0:
-            # SUCCESS: append `result` decompressed bytes.
-            for i in range(result):
-                out.append(out_buf[i])
-            in_buf.free()
-            out_buf.free()
+        var buf = _output_buffer(out_cap)
+        try:
+            var result = zstd_decompress_into(Span(buf), chunk)
+            out.extend(Span(buf)[0:result])
             return
-        # FAILED: if the frame size was known up front, this is a real error
-        # (not a buffer-too-small). Surface immediately.
-        if size_known:
-            in_buf.free()
-            out_buf.free()
-            raise Error(
-                "OrcCodecError.ZSTD_FAILED: ZSTD_decompress result="
-                + String(result)
-                + " (in_len=" + String(len(chunk))
-                + ", out_cap=" + String(out_cap)
-                + ", known_size=" + String(frame_size) + ")"
-            )
-        # Unknown frame size — assume buffer-too-small and retry with a doubled
-        # output buffer. Cap retries at a generous absolute size (1 GiB) to
-        # avoid runaway growth on a malformed frame.
-        out_buf.free()
-        var new_cap = out_cap * 2
-        if new_cap > (1 << 30):
-            in_buf.free()
-            raise Error(
-                "OrcCodecError.ZSTD_FAILED: ZSTD_decompress result="
-                + String(result)
-                + " (in_len=" + String(len(chunk))
-                + ", out_cap=" + String(out_cap)
-                + ", retry-cap-exceeded)"
-            )
-        out_cap = new_cap
-        out_buf = alloc[UInt8](out_cap)
+        except e:
+            # If the frame size was known up front, this is a real error
+            # (not a buffer-too-small). Surface immediately.
+            if size_known:
+                raise Error(
+                    "OrcCodecError.ZSTD_FAILED: " + String(e)
+                    + " (known_size=" + String(frame_size) + ")"
+                )
+            # Unknown frame size — assume buffer-too-small and retry with a
+            # doubled output buffer. Cap retries at a generous absolute size
+            # (1 GiB) to avoid runaway growth on a malformed frame.
+            var new_cap = out_cap * 2
+            if new_cap > (1 << 30):
+                raise Error(
+                    "OrcCodecError.ZSTD_FAILED: " + String(e)
+                    + " (retry-cap-exceeded)"
+                )
+            out_cap = new_cap
 
 
 # =============================================================================
-# Zlib single-chunk decompress (libz raw-deflate FFI). Appends to `out`.
+# Zlib single-chunk decompress (raw deflate). Appends to `out`.
 # =============================================================================
 #
 # ORC zlib is RAW RFC-1951 deflate: no 2-byte zlib header, no 4-byte ADLER32
-# trailer. We drive zlib's streaming inflate with `windowBits = -15` (negative
-# => raw deflate, no header expected). This is the SAME convention Avro deflate
-# uses (the Avro deflate codec) and DIFFERENT from parquet GZIP (windowBits = 15+32
-# auto-detect). The z_stream is the opaque 112-byte LP64 layout.
-
-comptime _Z_STREAM_SIZE: Int = 112
-comptime _Z_OK: Int = 0
-comptime _Z_STREAM_END: Int = 1
-comptime _Z_NO_FLUSH: Int = 0
-# windowBits = -15 => RAW RFC-1951 deflate (no zlib header/trailer).
-comptime _Z_WINDOWBITS_RAW: Int32 = -15
+# trailer. Each attempt is one `inflate` call with `windowBits = -15`
+# (`ZLIB_WINDOW_BITS_RAW`: negative => raw deflate, no header expected). This
+# is the SAME convention Avro deflate uses and DIFFERENT from parquet GZIP
+# (windowBits = 15+32 auto-detect).
 
 
 def _zlib_decompress_chunk(
@@ -609,71 +489,31 @@ def _zlib_decompress_chunk(
 ) raises:
     """Raw-deflate-decompress one ORC zlib chunk into `out`.
 
-    Uses `inflateInit2_(windowBits = -15)` so a zlib-WRAPPED payload (0x78
-    header + ADLER32) is rejected — ORC zlib is raw RFC-1951 only.
+    Inflates with `windowBits = -15`, so a zlib-WRAPPED payload (0x78 header
+    + ADLER32) is rejected — ORC zlib is raw RFC-1951 only.
 
-    Retries with a doubled output buffer on Z_BUF_ERROR — handles cross-tool
-    files whose chunks decompress to more than the writer-advertised
+    Retries with a doubled output buffer when libz stops short (Z_OK with the
+    output full, or any other return code) — handles cross-tool files whose
+    chunks decompress to more than the writer-advertised
     compressionBlockSize.
     """
-    var in_buf = alloc[UInt8](len(chunk))
-    for i in range(len(chunk)):
-        in_buf[i] = chunk[i]
-
-    var handle_ptr = _default_z_handle()
-    var version = handle_ptr[].call[
-        "zlibVersion", UnsafePointer[UInt8, MutUntrackedOrigin]
-    ]()
-
     var initial_cap = cap if cap > 0 else (256 * 1024)
     if initial_cap < len(chunk):
         initial_cap = len(chunk)
     var out_cap = initial_cap
     while True:
-        var out_buf = alloc[UInt8](out_cap)
-
-        # SAFETY: `strm` is a 112-byte scratch buffer for the duration of this
-        # call; freed via inflateEnd + alloc.free() before return. We only set
-        # the four I/O fields (next_in/avail_in/next_out/avail_out) — the rest
-        # stay zero.
-        var strm = alloc[UInt8](_Z_STREAM_SIZE)
-        unsafe_memset(strm, 0, _Z_STREAM_SIZE)
-        # next_in @0 (UInt64), avail_in @8 (UInt32 idx 2), next_out @24 (UInt64
-        # idx 3), avail_out @32 (UInt32 idx 8). Same LP64 layout as parquet.
-        (strm.bitcast[UInt64]() + 0)[] = UInt64(Int(in_buf))
-        (strm.bitcast[UInt32]() + 2)[] = UInt32(len(chunk))
-        (strm.bitcast[UInt64]() + 3)[] = UInt64(Int(out_buf))
-        (strm.bitcast[UInt32]() + 8)[] = UInt32(out_cap)
-
-        var init_rc = handle_ptr[].call["inflateInit2_", Int32](
-            strm, _Z_WINDOWBITS_RAW, version, Int32(_Z_STREAM_SIZE)
-        )
-        if Int(init_rc) != _Z_OK:
-            strm.free()
-            in_buf.free()
-            out_buf.free()
-            raise Error(
-                "OrcCodecError.ZLIB_FAILED: inflateInit2_(-15) rc="
-                + String(Int(init_rc))
-            )
-
-        var rc = handle_ptr[].call["inflate", Int32](strm, Int32(_Z_NO_FLUSH))
-        # total_out @40 (UInt64 idx 5).
-        var total_out = Int((strm.bitcast[UInt64]() + 5)[])
-        # avail_out @32 (UInt32 idx 8); if it is 0 AND rc != Z_STREAM_END the
-        # buffer was insufficient.
-        var avail_out_remaining = Int((strm.bitcast[UInt32]() + 8)[])
-        _ = handle_ptr[].call["inflateEnd", Int32](strm)
-        strm.free()
-
-        if Int(rc) == _Z_OK or Int(rc) == _Z_STREAM_END:
-            # If Z_OK but avail_out == 0, we filled the buffer exactly but the
-            # stream may have more bytes — grow and retry.
-            if Int(rc) == _Z_OK and avail_out_remaining == 0:
-                out_buf.free()
+        var buf = _output_buffer(out_cap)
+        var res: ZlibInflateOutcome
+        try:
+            res = zlib_inflate_once(Span(buf), chunk, ZLIB_WINDOW_BITS_RAW)
+        except e:
+            raise Error("OrcCodecError.ZLIB_FAILED: " + String(e))
+        if res.rc == Z_OK or res.rc == Z_STREAM_END:
+            # If Z_OK but no output space is left, we filled the buffer
+            # exactly but the stream may have more bytes — grow and retry.
+            if res.rc == Z_OK and res.unwritten == 0:
                 var new_cap = out_cap * 2
                 if new_cap > (1 << 30):
-                    in_buf.free()
                     raise Error(
                         "OrcCodecError.ZLIB_FAILED: retry-cap-exceeded"
                         + " (in_len=" + String(len(chunk))
@@ -681,19 +521,15 @@ def _zlib_decompress_chunk(
                     )
                 out_cap = new_cap
                 continue
-            for i in range(total_out):
-                out.append(out_buf[i])
-            in_buf.free()
-            out_buf.free()
+            out.extend(Span(buf)[0 : res.written])
             return
-        # rc == Z_BUF_ERROR (-5) — output buffer too small. Retry doubled.
-        out_buf.free()
+        # Any other return code (Z_BUF_ERROR: output buffer too small).
+        # Retry doubled.
         var new_cap = out_cap * 2
         if new_cap > (1 << 30):
-            in_buf.free()
             raise Error(
                 "OrcCodecError.ZLIB_FAILED: inflate rc="
-                + String(Int(rc))
+                + String(Int(res.rc))
                 + " (in_len=" + String(len(chunk))
                 + ", out_cap=" + String(out_cap)
                 + ", retry-cap-exceeded)"
@@ -702,121 +538,78 @@ def _zlib_decompress_chunk(
 
 
 # =============================================================================
-# Snappy single-chunk decompress (the snappy C API). Appends to `out`.
+# Snappy single-chunk decompress. Appends to `out`.
 # =============================================================================
 #
 # ORC snappy is a RAW snappy block wrapped in the 3-byte ORC chunk header. There
-# is NO Avro-style BE4 CRC32 trailer (that is the Avro snappy framing). We hand
-# the chunk payload straight to `snappy_uncompress`.
+# is NO Avro-style BE4 CRC32 trailer (that is the Avro snappy framing). The
+# chunk payload goes straight to `snappy_uncompress_into`.
 
 
 def _snappy_decompress_chunk(
     chunk: Span[UInt8, _], cap: Int, mut out: List[UInt8]
 ) raises:
     """Snappy-decompress one ORC chunk into `out`. No CRC trailer (cf. Avro).
-    Uses `snappy_uncompressed_length` to size the output buffer exactly, so
-    chunks decompressing to >cap bytes succeed regardless of the writer's
-    advertised compressionBlockSize."""
-    var in_buf = alloc[UInt8](len(chunk))
-    for i in range(len(chunk)):
-        in_buf[i] = chunk[i]
-
-    # SAFETY: 1-element scratch slot for snappy_uncompressed_length's out arg.
-    # FFI-BOUNDARY: snappy is statically linked (the core packages' deps).
-    var ulen_buf = alloc[Int64](1)
-    ulen_buf[0] = Int64(0)
-    var ul_status = external_call["snappy_uncompressed_length", Int32](
-        in_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-        Int64(len(chunk)),
-        ulen_buf,
-    )
-    var precise_size = Int(ulen_buf[0])
-    ulen_buf.free()
-    var out_cap = precise_size if Int(ul_status) == 0 and precise_size > 0 else (
+    Uses the block's declared uncompressed length to size the output buffer
+    exactly, so chunks decompressing to >cap bytes succeed regardless of the
+    writer's advertised compressionBlockSize."""
+    var precise_size = 0
+    try:
+        precise_size = snappy_uncompressed_length(chunk)
+    except:
+        # An unparseable preamble: fall back to `cap`; the decode refuses it.
+        precise_size = 0
+    var out_cap = precise_size if precise_size > 0 else (
         cap if cap > 0 else (256 * 1024)
     )
     if out_cap < len(chunk):
         out_cap = len(chunk)
 
-    var out_buf = alloc[UInt8](out_cap)
-    # SAFETY: 1-element in/out length slot (in: capacity, out: actual length).
-    var size_buf = alloc[Int64](1)
-    size_buf[0] = Int64(out_cap)
-    var status = external_call["snappy_uncompress", Int32](
-        in_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-        Int64(len(chunk)),
-        out_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-        size_buf,
-    )
-    var written = Int(size_buf[0])
-    size_buf.free()
-    if Int(status) != 0:
-        in_buf.free()
-        out_buf.free()
-        raise Error(
-            "OrcCodecError.SNAPPY_FAILED: snappy_uncompress status="
-            + String(Int(status))
-            + " (in_len=" + String(len(chunk))
-            + ", out_cap=" + String(out_cap) + ")"
-        )
-    for i in range(written):
-        out.append(out_buf[i])
-    in_buf.free()
-    out_buf.free()
+    var buf = _output_buffer(out_cap)
+    var written: Int
+    try:
+        written = snappy_uncompress_into(Span(buf), chunk)
+    except e:
+        raise Error("OrcCodecError.SNAPPY_FAILED: " + String(e))
+    out.extend(Span(buf)[0:written])
 
 
 # =============================================================================
-# Lz4 single-chunk decompress (liblz4 FFI). Appends to `out`.
+# Lz4 single-chunk decompress. Appends to `out`.
 # =============================================================================
 #
-# ORC uses the LZ4 BLOCK format (not the LZ4 frame format), so we call
-# `LZ4_decompress_safe(src, dst, compressedSize, dstCapacity)` directly. The
-# decompressed size is bounded by `cap`. Returns the byte count, or < 0 on error.
+# ORC uses the LZ4 BLOCK format (not the LZ4 frame format):
+# `lz4_decompress_into` (`LZ4_decompress_safe`). The decompressed size is
+# bounded by `cap`; a failure does not say whether the block is corrupt or the
+# buffer too small.
 
 
 def _lz4_decompress_chunk(
     chunk: Span[UInt8, _], cap: Int, mut out: List[UInt8]
 ) raises:
-    """LZ4-block-decompress one ORC chunk into `out` (LZ4_decompress_safe).
-    Retries with a doubled output buffer on size-too-small failure (LZ4 returns
-    a negative result code without distinguishing the reason)."""
-    var in_buf = alloc[UInt8](len(chunk))
-    for i in range(len(chunk)):
-        in_buf[i] = chunk[i]
-
-    var handle_ptr = _default_lz4_handle()
+    """LZ4-block-decompress one ORC chunk into `out`.
+    Retries with a doubled output buffer on any failure (LZ4 returns a
+    negative result code without distinguishing the reason)."""
     var initial_cap = cap if cap > 0 else (256 * 1024)
     if initial_cap < len(chunk):
         initial_cap = len(chunk)
     var out_cap = initial_cap
     while True:
-        var out_buf = alloc[UInt8](out_cap)
-        var result = handle_ptr[].call["LZ4_decompress_safe", Int32](
-            in_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-            out_buf.unsafe_origin_cast[MutUntrackedOrigin](),
-            Int32(len(chunk)),
-            Int32(out_cap),
-        )
-        if Int(result) >= 0:
-            for i in range(Int(result)):
-                out.append(out_buf[i])
-            in_buf.free()
-            out_buf.free()
+        var buf = _output_buffer(out_cap)
+        try:
+            var written = lz4_decompress_into(Span(buf), chunk)
+            out.extend(Span(buf)[0:written])
             return
-        # Negative result — either malformed input OR buffer-too-small. Retry
-        # with a doubled buffer up to a 1 GiB ceiling.
-        out_buf.free()
-        var new_cap = out_cap * 2
-        if new_cap > (1 << 30):
-            in_buf.free()
-            raise Error(
-                "OrcCodecError.LZ4_FAILED: LZ4_decompress_safe result="
-                + String(Int(result))
-                + " (in_len=" + String(len(chunk))
-                + ", out_cap=" + String(out_cap)
-                + ", retry-cap-exceeded)"
-            )
-        out_cap = new_cap
+        except e:
+            # Malformed input OR buffer-too-small. Retry with a doubled
+            # buffer up to a 1 GiB ceiling.
+            var new_cap = out_cap * 2
+            if new_cap > (1 << 30):
+                raise Error(
+                    "OrcCodecError.LZ4_FAILED: " + String(e)
+                    + " (retry-cap-exceeded)"
+                )
+            out_cap = new_cap
 
 
 # =============================================================================
@@ -841,86 +634,3 @@ def _lzo_decompress_chunk(
 ) raises:
     """LZO1X-decompress one ORC chunk into `out` (native; see above)."""
     lzo1x_decompress(chunk, cap, ORC_MAX_COMPRESSION_BLOCK_SIZE, out)
-
-
-# =============================================================================
-# libzstd / libz / liblz4 OwnedDLHandle singletons (process-lifetime dlopen
-# cache).
-# =============================================================================
-#
-# Per-OS soname; the first call per process pays the dlopen, subsequent calls
-# reuse the handle from its `_Global` slot. Snappy is not here: it is
-# statically linked (the core packages links //third_party/snappy) and called
-# through `external_call`.
-
-comptime _LIBZSTD: StaticString = (
-    "libzstd.dylib" if CompilationTarget.is_macos() else "libzstd.so.1"
-)
-comptime _LIBZ: StaticString = (
-    "libz.dylib" if CompilationTarget.is_macos() else "libz.so.1"
-)
-comptime _LIBLZ4: StaticString = (
-    "liblz4.dylib" if CompilationTarget.is_macos() else "liblz4.so.1"
-)
-# -----------------------------------------------------------------------------
-# Process-lifetime OwnedDLHandle singletons via the stdlib `_Global` runtime
-# slot. `_Global[name, init_fn]` is
-# a name-keyed, process-global, init-once, cross-compile-unit-coherent slot
-# managed by the KGEN runtime — no env var, no address laundering. Distinct
-# `_Global` names keep the orc handles independent of other packages'
-# singletons for the same dylibs.
-# -----------------------------------------------------------------------------
-
-
-def _init_orc_zstd_handle() -> OwnedDLHandle:
-    """`_Global` init_fn (non-raising): dlopen libzstd once per process.
-
-    SAFETY: the OwnedDLHandle ctor raises only on an unresolvable pinned dylib
-    (fatal provisioning error), so we `abort`.
-    """
-    try:
-        return OwnedDLHandle(_LIBZSTD)
-    except e:
-        abort("libzstd dlopen failed (orc codec handle init)")
-
-
-def _init_orc_z_handle() -> OwnedDLHandle:
-    """`_Global` init_fn (non-raising): dlopen libz once per process."""
-    try:
-        return OwnedDLHandle(_LIBZ)
-    except e:
-        abort("libz dlopen failed (orc codec handle init)")
-
-
-def _init_orc_lz4_handle() -> OwnedDLHandle:
-    """`_Global` init_fn (non-raising): dlopen liblz4 once per process."""
-    try:
-        return OwnedDLHandle(_LIBLZ4)
-    except e:
-        abort("liblz4 dlopen failed (orc codec handle init)")
-
-
-comptime _ZSTD_GLOBAL = _Global["komira_orc_zstd_handle", _init_orc_zstd_handle]
-comptime _Z_GLOBAL = _Global["komira_orc_z_handle", _init_orc_z_handle]
-comptime _LZ4_GLOBAL = _Global["komira_orc_lz4_handle", _init_orc_lz4_handle]
-
-
-# Per-codec accessors — process-lifetime handle slot (init-once via `_Global`).
-# SAFETY: FFI seam; `MutUntrackedOrigin` is the stdlib `_Global` return
-# type (runtime-managed static storage). No env var, no `unsafe_from_address`.
-def _default_zstd_handle() raises -> UnsafePointer[
-    OwnedDLHandle, MutUntrackedOrigin
-]:
-    return _ZSTD_GLOBAL.get_or_create_ptr()
-
-
-def _default_z_handle() raises -> UnsafePointer[
-    OwnedDLHandle, MutUntrackedOrigin
-]:
-    return _Z_GLOBAL.get_or_create_ptr()
-
-
-def _default_lz4_handle() raises -> UnsafePointer[
-    OwnedDLHandle, MutUntrackedOrigin
-]:
-    return _LZ4_GLOBAL.get_or_create_ptr()

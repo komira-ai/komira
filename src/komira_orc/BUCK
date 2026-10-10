@@ -2,8 +2,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Apache ORC v1 reader and writer: the metadata codec (PostScript / Footer /
 # Metadata / StripeFooter over komira_protobuf), the integer / byte / boolean
-# RLE families, the compression codecs (zstd / zlib / lz4 by dlopen, snappy
-# statically linked through the core packages, LZO read-only in native Mojo), the
+# RLE families, the compression codecs (zstd / zlib / lz4 / snappy through
+# komira_compression's codec API, LZO read-only in native Mojo), the
 # flat and nested column decoders, the stripe writer with per-stride
 # statistics and bloom filters, and statistics-driven stripe / stride
 # pruning. komira_async supplies the dispatcher the parallel column decode and
@@ -20,13 +20,13 @@ mojo_library(
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
         "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_compression:komira_compression",
         "//src/komira_fs:komira_fs",
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_plan_ir:komira_plan_ir",
         "//src/komira_protobuf:komira_protobuf",
         "//src/komira_scan_source:komira_scan_source",
         "//src/komira_simd:komira_simd",
-        "//third_party/snappy:snappy",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
@@ -39,7 +39,10 @@ mojo_library(
         "tests/test_orc_bloom_sext_combiner.mojo",
         "tests/test_orc_byte_boolean_rle.mojo",
         "tests/test_orc_codec_matrix.mojo",
+        "tests/test_orc_codec_owner_equivalence.mojo",
         "tests/test_orc_column_decode.mojo",
+        "tests/test_orc_column_decoder_nullable.mojo",
+        "tests/test_orc_column_decoder_refusals.mojo",
         "tests/test_orc_footer_decode.mojo",
         "tests/test_orc_large_string_write_roundtrip.mojo",
         "tests/test_orc_lineitem_decode_roundtrip.mojo",
@@ -54,6 +57,7 @@ mojo_library(
         "tests/test_orc_source_lazy_e2e.mojo",
         "tests/test_orc_stride_skip.mojo",
         "tests/test_orc_stripe_footer_decode.mojo",
+        "tests/test_orc_stripe_validity_and_width.mojo",
         "tests/test_orc_struct_decode.mojo",
         "tests/test_orc_union_decode.mojo",
         "tests/test_orc_write_int_sum_overflow.mojo",

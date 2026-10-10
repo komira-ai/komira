@@ -3,16 +3,20 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The clouds of kci's deploy side: the catalog's types as data, the
 # CloudAdapter trait every cloud built into kci implements (an internal
 # module boundary, not a plugin interface), Clouds (the closed list of
-# built-in clouds; every cloud declares every catalog type), the validate
-# phase (graph, coverage and limit findings, one pass, one refusal text),
-# plan / apply / destroy that validate before lowering, and the conformance
+# built-in clouds; every cloud declares every catalog type), the expansion
+# of composite instances into primitives, the validate phase (graph,
+# coverage and limit findings, one pass, one refusal text), plan / apply /
+# destroy that expand and validate before lowering, and the conformance
 # kit. Names no cloud; the fake clouds are kci_cloud_fake. komira_crypto is
-# the sha256 of a grant edge's role. komira_validation_run is the run-id
+# the sha256 of a grant edge's role and of a composite definition.
+# komira_validation_run is the run-id
 # and retention marks' keys, the retention mark's values, and the rule a
 # validation run id must pass before any create.
 #
-# komira_proto_codec is here for the welded tests, which read graphs in the
-# proto3 JSON form an author writes.
+# komira_proto_codec and komira_json are also the binding of a composite's
+# input into a component (compose_bind.mojo: the component's proto3 JSON,
+# patched and decoded strictly); the welded tests read graphs in the proto3
+# JSON form an author writes.
 mojo_library(
     name = "kci_cloud",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -20,6 +24,7 @@ mojo_library(
         "//src/kci_reconciler:kci_reconciler",
         "//src/kci_resource_proto:kci_resource_proto",
         "//src/komira_crypto:komira_crypto",
+        "//src/komira_json:komira_json",
         "//src/komira_proto_codec:komira_proto_codec",
         "//src/komira_validation_run:komira_validation_run",
     ],
@@ -27,7 +32,21 @@ mojo_library(
         "tests/test_cloud_catalog_and_clouds.mojo",
         "tests/test_cloud_data_rules.mojo",
         "tests/test_cloud_identity_rules.mojo",
+        "tests/test_cloud_messaging_rules.mojo",
+        "tests/test_cloud_secret_rules.mojo",
+        "tests/test_cloud_dns_rules.mojo",
+        "tests/test_cloud_compute_rules.mojo",
+        "tests/test_cloud_trigger_rules.mojo",
+        "tests/test_cloud_network_rules.mojo",
+        "tests/test_cloud_registry_rules.mojo",
+        "tests/test_cloud_metadata_rules.mojo",
         "tests/test_cloud_validate_and_deploy.mojo",
+        "tests/test_cloud_compose_expand.mojo",
+        "tests/test_cloud_compose_refusals.mojo",
+        "tests/test_cloud_compose_paths.mojo",
+        "tests/test_cloud_compose_size.mojo",
+        "tests/test_cloud_compose_bind.mojo",
+        "tests/test_cloud_compose_bind_refusals.mojo",
     ],
     visibility = ["PUBLIC"],
 )

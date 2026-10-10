@@ -39,6 +39,8 @@ zig_exe(
     target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
     src = "conda_payload.zig",
     busybox = "komira//tools/build/toolchains:busybox",
+    # llvm_branch unpacks its conda packages with it too.
+    visibility = ["komira//tools/build/toolchains/llvm_branch:"],
     zig = "komira//tools/build/toolchains:zig",
 )
 

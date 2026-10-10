@@ -25,6 +25,8 @@ string; top_level only in prose, which the ledger excepts. komira_b
 exports one name, has a `from .star import *` (a note) and no README;
 komira_c's README has no ```mojo example; the readme tool refuses
 komira_d's README (```mojo skip); komira_gen has no __init__.mojo.
+src/tests holds a test-only package (komira_f_e2e, under tests/e2e, with
+komira_b's exports), which the census skips: neither it nor `tests` is a row.
 expect_packages.tsv, expect_symbols.tsv and expect_report.txt are the
 census, exactly: 16 symbols of komira_a, 9 used (56.2%), 1 excepted, 6
 undocumented. The files are exported by functional/readme_api_coverage/BUCK,
@@ -49,6 +51,8 @@ README_API_TREE = {
     "src/komira_d/__init__.mojo": _DIR + "d_init.txt",
     "src/komira_d/dee.mojo": _DIR + "d_dee.txt",
     "src/komira_gen/BUCK": _DIR + "gen_buck.txt",
+    "src/tests/e2e/komira_f_e2e/__init__.mojo": _DIR + "b_init.txt",
+    "src/tests/e2e/komira_f_e2e/thing.mojo": _DIR + "b_thing.txt",
 }
 
 # The ledger that excepts top_level: no finding.

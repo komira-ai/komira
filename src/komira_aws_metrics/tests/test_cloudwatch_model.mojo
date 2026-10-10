@@ -3,8 +3,9 @@
 # at test time, never copied).
 #
 # From the model: the signing name and endpoint prefix, the awsJson target
-# prefix and version, the protocols (the declared one is why the client is
-# hand-written; `json` is the one it speaks), the `awsQueryCompatible` trait
+# prefix and version, the protocols list in order (the AWS generator
+# chooses its first supported entry, `json`, the protocol this package
+# speaks), the `awsQueryCompatible` trait
 # behind the query-mode header, the operation's method and path, the
 # dimension cap, the MaxDatapoints default, the accepted periods, the
 # ScanBy values, and that a point is stamped with its period's START and
@@ -93,10 +94,17 @@ def test_service_metadata() raises:
         String("application/x-amz-json-") + meta.get(String("jsonVersion")).as_string(),
         String(CLOUDWATCH_JSON_CONTENT_TYPE),
     )
-    # Why it is hand-written: the declared protocol is the one the AWS
-    # generator refuses. When this changes, generate the client instead.
+    # The declared protocol is CBOR; the AWS generator chooses the first
+    # entry of `protocols` it supports, which is `json`, the protocol this
+    # package speaks. Generating the client into this package is a
+    # follow-up. The choice depends on the list's order, so the order is
+    # pinned.
     assert_equal(meta.get(String("protocol")).as_string(), String("smithy-rpc-v2-cbor"))
-    assert_true(_has(_strings(meta.get(String("protocols"))), String("json")))
+    var protocols = _strings(meta.get(String("protocols")))
+    assert_equal(len(protocols), 3)
+    assert_equal(protocols[0], String("smithy-rpc-v2-cbor"))
+    assert_equal(protocols[1], String("json"))
+    assert_equal(protocols[2], String("query"))
     # The query-mode header the reader sends follows from this trait.
     assert_true(meta.has(String("awsQueryCompatible")))
 

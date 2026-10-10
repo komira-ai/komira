@@ -1881,7 +1881,7 @@ struct BrokerCore[Storage: ConditionalWriteStore](Movable, Deinitable):
             # passed. A manifest that carries a fence of its own makes this
             # reachable after the `.seg` PUT; that change must count it here
             # with `self._flush_fence.note_fenced_after_put(writer_lease_epoch)`.
-            return ExactlyOnceFlushResult(
+            return ExactlyOnceFlushResult(  # cov: unreachable the manifest checks only the (writer, current) pair _refused_at_entry already passed
                 EO_LEASE_FENCED, Int64(-1), Int64(-1), Int64(0), Int64(-1)
             )
         # IDEMPOTENT_RETRYABLE — in-flight winner / genuine no-commit.

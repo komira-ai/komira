@@ -21,7 +21,8 @@ as in the real core; `body_text` here refuses any non-ASCII byte rather
 than validating UTF-8.
 
 The client half (the end of this file): `AwsCredential`, `AwsCredsSource`,
-`AwsEndpoint`, `AwsRetryQuota`, `Header`, `HttpResult`, `AwsErrorInfo`,
+`AwsEndpoint` (with `with_host_prefix`), `AwsRetryQuota`, `Header`,
+`HttpResult`, `AwsErrorInfo`,
 `aws_json_error_info`, `resolve_endpoint`, `send_sigv4_signed_request`,
 `AwsClock`, `AwsHttpTransport`, `CredentialHttpRequest`,
 `aws_request_is_conditional` and `send_sigv4_signed_request_with` have the
@@ -93,6 +94,7 @@ struct AwsRequest(Copyable, Movable):
     var body: List[UInt8]
     var header_names: List[String]
     var header_values: List[String]
+    var host_prefix: String
 
     def __init__(out self, var method: String, var uri: String):
         self.method = method^
@@ -100,6 +102,7 @@ struct AwsRequest(Copyable, Movable):
         self.body = List[UInt8]()
         self.header_names = List[String]()
         self.header_values = List[String]()
+        self.host_prefix = String("")
 
     def set_body_text(mut self, text: String):
         self.body = _bytes(text)
@@ -216,6 +219,10 @@ def aws_ts_to_json(v: Float64, format: Int) raises -> JsonValue:
 
 def aws_ts_from_json(v: JsonValue) raises -> Float64:
     raise Error("stub komira_aws_core: aws_ts_from_json is not implemented")
+
+
+def aws_host_label(value: String) raises -> String:
+    raise Error("stub komira_aws_core: aws_host_label is not implemented")
 
 
 def aws_is_error_status(status: Int) -> Bool:
@@ -349,6 +356,14 @@ struct AwsEndpoint(Copyable, Movable):
     def https(host: String) raises -> AwsEndpoint:
         """`https://<host>` on port 443, the host lower-cased."""
         return AwsEndpoint(String("https"), host.lower(), 443, String(""), True)
+
+    def with_host_prefix(self, prefix: String) raises -> AwsEndpoint:
+        """This endpoint with `prefix` lower-cased ahead of its host; ""
+        returns it unchanged. The real one also checks the host it makes."""
+        var e = self.copy()
+        if prefix.byte_length() > 0:
+            e.host = prefix.lower() + self.host
+        return e^
 
 
 def resolve_endpoint(

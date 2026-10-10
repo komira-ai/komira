@@ -56,7 +56,8 @@
 # from the live graph (`buck2 cquery`) and answers one check per path group
 # for every target no declared unit names or matches: one per library
 # package `//src/<p>/...` (named `<p>`: a change to one library builds that
-# library's units, not every library's), `repo_root` (`//:`) for the
+# library's units, not every library's) and per test-only package
+# `//src/tests/<kind>/<p>/...` (named `<p>`), `repo_root` (`//:`) for the
 # repository's own lints, `bin`, `release`, `tests`, `third_party`,
 # `tools_<t>` for each `//tools/<t>/...` tree, and `functional_tests`
 # (`tests//functional/...`) for the tests cell's positive tests (built only,
@@ -99,7 +100,8 @@
 # (tools/build/ci/affected.mojo) over the change's files, with the base commit
 # for the files the change deleted: the units whose targets the change reaches
 # (UNIT lines, then AFFECTED <n>), or WIDENED, every unit, for a file it cannot
-# map (what widens is tools/build/ci/rules.txt). A change that reaches no unit
+# map (what widens is tools/build/ci/rules.txt), or BROKEN, which fails the
+# check, when a buck2 query of the graph fails (never a widening). A change that reaches no unit
 # is AFFECTED 0, which kci refuses (KCI-E-AFFECTED-VACUOUS): never a pass.
 #
 # The file format's major (kci_api's format table): kci refuses a file
@@ -489,6 +491,204 @@ artifacts {
 }
 
 artifacts {
+  name: "komira_kafka_server"
+  build_system: "buck2"
+  args: "//src/komira_kafka_server:komira_kafka_server_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_kafka_server:komira_kafka_server_conda"
+}
+
+artifacts {
+  name: "komira_collections"
+  build_system: "buck2"
+  args: "//src/komira_collections:komira_collections_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_collections:komira_collections_conda"
+}
+
+artifacts {
+  name: "komira_broker_proto"
+  build_system: "buck2"
+  args: "//src/komira_broker_proto:komira_broker_proto_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_broker_proto:komira_broker_proto_conda"
+}
+
+artifacts {
+  name: "komira_supervisor_proto"
+  build_system: "buck2"
+  args: "//src/komira_supervisor_proto:komira_supervisor_proto_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_supervisor_proto:komira_supervisor_proto_conda"
+}
+
+artifacts {
+  name: "komira_plan_proto"
+  build_system: "buck2"
+  args: "//src/komira_plan_proto:komira_plan_proto_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_plan_proto:komira_plan_proto_conda"
+}
+
+artifacts {
+  name: "komira_rowcell"
+  build_system: "buck2"
+  args: "//src/komira_rowcell:komira_rowcell_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_rowcell:komira_rowcell_conda"
+}
+
+artifacts {
+  name: "komira_mail_address"
+  build_system: "buck2"
+  args: "//src/komira_mail_address:komira_mail_address_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_mail_address:komira_mail_address_conda"
+}
+
+artifacts {
+  name: "komira_content_line"
+  build_system: "buck2"
+  args: "//src/komira_content_line:komira_content_line_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_content_line:komira_content_line_conda"
+}
+
+artifacts {
+  name: "komira_spsc_ring"
+  build_system: "buck2"
+  args: "//src/komira_spsc_ring:komira_spsc_ring_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_spsc_ring:komira_spsc_ring_conda"
+}
+
+artifacts {
+  name: "komira_sync"
+  build_system: "buck2"
+  args: "//src/komira_sync:komira_sync_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_sync:komira_sync_conda"
+}
+
+artifacts {
+  name: "kci_cell"
+  build_system: "buck2"
+  args: "//src/kci_cell:kci_cell_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/kci_cell:kci_cell_conda"
+}
+
+artifacts {
+  name: "komira_mcp_server"
+  build_system: "buck2"
+  args: "//src/komira_mcp_server:komira_mcp_server_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_mcp_server:komira_mcp_server_conda"
+}
+
+artifacts {
+  name: "komira_chat_proto"
+  build_system: "buck2"
+  args: "//src/komira_chat_proto:komira_chat_proto_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_chat_proto:komira_chat_proto_conda"
+}
+
+artifacts {
+  name: "komira_contacts_proto"
+  build_system: "buck2"
+  args: "//src/komira_contacts_proto:komira_contacts_proto_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_contacts_proto:komira_contacts_proto_conda"
+}
+
+artifacts {
+  name: "komira_managed_mail_proto"
+  build_system: "buck2"
+  args: "//src/komira_managed_mail_proto:komira_managed_mail_proto_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_managed_mail_proto:komira_managed_mail_proto_conda"
+}
+
+artifacts {
+  name: "komira_calendar_proto"
+  build_system: "buck2"
+  args: "//src/komira_calendar_proto:komira_calendar_proto_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_calendar_proto:komira_calendar_proto_conda"
+}
+
+artifacts {
+  name: "komira_snapshotter"
+  build_system: "buck2"
+  args: "//src/komira_snapshotter:komira_snapshotter_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_snapshotter:komira_snapshotter_conda"
+}
+
+artifacts {
+  name: "komira_mail_message"
+  build_system: "buck2"
+  args: "//src/komira_mail_message:komira_mail_message_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_mail_message:komira_mail_message_conda"
+}
+
+artifacts {
+  name: "komira_vcard"
+  build_system: "buck2"
+  args: "//src/komira_vcard:komira_vcard_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_vcard:komira_vcard_conda"
+}
+
+artifacts {
+  name: "komira_trace"
+  build_system: "buck2"
+  args: "//src/komira_trace:komira_trace_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_trace:komira_trace_conda"
+}
+
+artifacts {
+  name: "komira_calendar"
+  build_system: "buck2"
+  args: "//src/komira_calendar:komira_calendar_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_calendar:komira_calendar_conda"
+}
+
+artifacts {
+  name: "komira_calendar_ics"
+  build_system: "buck2"
+  args: "//src/komira_calendar_ics:komira_calendar_ics_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_calendar_ics:komira_calendar_ics_conda"
+}
+
+artifacts {
   name: "komira_all"
   build_system: "komira_pack"
   args: "conda-meta"
@@ -566,6 +766,50 @@ artifacts {
   args: "{release_dir}/komira_test_run_id/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_test_verdict/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_kafka_server/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_collections/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_broker_proto/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_supervisor_proto/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_plan_proto/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_rowcell/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_mail_address/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_content_line/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_spsc_ring/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_sync/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/kci_cell/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_mcp_server/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_chat_proto/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_contacts_proto/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_managed_mail_proto/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_calendar_proto/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_snapshotter/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_mail_message/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_vcard/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_trace/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_calendar/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_calendar_ics/manifest.json"
   args: "--license"
   args: "Apache-2.0"
   args: "--summary"

@@ -12,9 +12,9 @@
 #                         namespace and a fixed set of dimensions, signing and
 #                         sending each call through komira_aws_core.
 #
-# Hand-written, not generated: the pinned botocore CloudWatch model declares
-# the smithy-rpc-v2-cbor protocol, which the AWS generator refuses by name
-# (get_metric_data.mojo says where, and what would change it).
+# Hand-written, not generated: generating the CloudWatch client into this
+# package is a follow-up (get_metric_data.mojo says which protocol the AWS
+# generator chooses from the model, and what changes when it lands).
 #
 # It reads no environment: the region, the endpoint, the credential source
 # and the transport are the caller's.

@@ -5,21 +5,22 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # primitive types, request/response headers and framing, the v2 RecordBatch
 # with CRC-32C, and the message schemas for the handshake, data,
 # consumer-group, topic-admin, idempotent-producer and transactional APIs; and
-# `produce_error`, which maps an append error to its Produce error code using
-# komira_objectstore's error classifiers. The codec is pure bytes and imports
-# nothing outside `wire`; the server part arrives later in this package.
+# `produce_error`, which maps an append error to its Produce error code by the
+# fixed tokens of the object store's error texts. The package has no deps: the
+# codec is pure bytes, and `produce_error` matches its own copies of the
+# tokens (held equal to komira_objectstore's by the mojo_test
+# //tests/kafka_produce_error_tokens) so that this library stays a conda
+# package. The server part arrives later in this package.
 #
 # The welded tests are byte-exact against the Apache Kafka protocol spec and
 # round-trip every codec; none opens a socket. The test_kafka_golden_* tests
-# check the consumer-group, topic-admin, idempotent-producer and
+# check the handshake (ApiVersions, Metadata), data-path (Produce, Fetch,
+# ListOffsets), consumer-group, topic-admin, idempotent-producer and
 # transactional codecs against hand-written reference bytes (provenance:
 # tests/GOLDENS.md).
 mojo_library(
     name = "komira_kafka_server",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
-    deps = [
-        "//src/komira_objectstore:komira_objectstore",
-    ],
     test_srcs = [
         "tests/test_kafka_record_batch_v2.mojo",
         "tests/test_kafka_record_batch_hostile.mojo",
@@ -31,6 +32,10 @@ mojo_library(
         "tests/test_kafka_golden_init_producer_id.mojo",
         "tests/test_kafka_golden_transaction.mojo",
         "tests/test_produce_error_for.mojo",
+        "tests/test_kafka_wire_primitive_edges.mojo",
+        "tests/test_kafka_record_batch_edges.mojo",
+        "tests/test_kafka_golden_metadata.mojo",
+        "tests/test_kafka_golden_data_path.mojo",
     ],
     visibility = ["PUBLIC"],
 )

@@ -2333,6 +2333,7 @@ mod mojo_100_service_client_tests {
             services: vec![IrService {
                 name: "Thing".to_string(),
                 default_host: None,
+                host_from_service_config: false,
                 methods: vec![IrMethod {
                     name: "DoThing".to_string(),
                     input: tref("Req"),
@@ -2442,6 +2443,7 @@ mod gcp_grpc_client_tests {
             services: vec![IrService {
                 name: "Thing".to_string(),
                 default_host: None,
+                host_from_service_config: false,
                 methods: vec![
                     method("Get", false, false),
                     method("Watch", false, true),

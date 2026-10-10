@@ -1,0 +1,86 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
+
+# Per-target assert level and defines (test 49; tools/build/mojo/defines.bzl).
+# Every target here builds; tests//negative/assert_level holds the twins that
+# must go red, and tools/build/tests/assert_level_tests.sh reads the commands.
+
+_SRCS = [
+    "__init__.mojo",
+    "probes.mojo",
+]
+
+# ASSERT=none: neither of the library's debug_asserts is compiled into the
+# test, so it passes. Its twin negative:lib_safe_default (the default level)
+# fails on safe_probe's assert. Runs under the hostile-input memory cap, the
+# default of a test at ASSERT=none.
+mojo_library(
+    name = "lib_none",
+    srcs = _SRCS,
+    conda = False,
+    import_name = "alevel",
+    test_assert_level = "none",
+    test_srcs = ["tests/test_quiet_at_none.mojo"],
+)
+
+# `test_memory_cap_mib = 0`: ASSERT=none with no memory cap.
+mojo_library(
+    name = "lib_none_uncapped",
+    srcs = _SRCS,
+    conda = False,
+    import_name = "alevel",
+    test_assert_level = "none",
+    test_memory_cap_mib = 0,
+    test_srcs = ["tests/test_quiet_at_none.mojo"],
+)
+
+# The default level: all_only_probe's debug_assert is not compiled in. Its
+# twin negative:lib_all (ASSERT=all) fails on it.
+mojo_library(
+    name = "lib_default",
+    srcs = _SRCS,
+    conda = False,
+    import_name = "alevel",
+    test_srcs = ["tests/test_quiet_by_default.mojo"],
+)
+
+# A define reaches the test file and the library's package compiled into it.
+mojo_library(
+    name = "lib_defines",
+    srcs = _SRCS,
+    conda = False,
+    import_name = "alevel",
+    test_defines = ["KOMIRA_PROBE_DEFINE=on"],
+    test_srcs = ["tests/test_define_seen.mojo"],
+)
+
+# An assert level and two defines: every `-D`, in order, reaches each build
+# of the test (assert_level.sh pins the whole list), and the test passes
+# only with all three.
+mojo_library(
+    name = "lib_level_and_defines",
+    srcs = _SRCS,
+    conda = False,
+    import_name = "alevel",
+    test_assert_level = "none",
+    test_defines = [
+        "KOMIRA_PROBE_DEFINE=on",
+        "KOMIRA_PROBE_SECOND=2",
+    ],
+    test_srcs = ["tests/test_level_and_defines.mojo"],
+)
+
+# `buck2 test`: passes at ASSERT=none; its twin negative:test_default fails.
+mojo_test(
+    name = "test_none",
+    srcs = ["main_safe_assert.mojo"],
+    assert_level = "none",
+)
+
+# [run_check] prints `past the assert` at ASSERT=none; its twin
+# negative:bin_default aborts first.
+mojo_binary(
+    name = "bin_none",
+    srcs = ["main_safe_assert.mojo"],
+    assert_level = "none",
+    expected_stdout = "past the assert\n",
+)

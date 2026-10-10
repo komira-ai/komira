@@ -1,8 +1,9 @@
 from .plan_wire_codec import (
     PLAN_WIRE_FORMAT_VERSION,
-    # ★ THE VERSION IS A SET, NOT A NUMBER. A write-carrying
-    # envelope declares 3 and a plain one declares 2, so a reader that compares
-    # against `PLAN_WIRE_FORMAT_VERSION` alone refuses every write envelope.
+    # ★ THE VERSION IS A SET, NOT A NUMBER. A write-carrying envelope
+    # declares `PLAN_WIRE_WRITE_TARGET_MIN_VERSION` (5) and a plain one
+    # `PLAN_WIRE_FORMAT_VERSION` (4), so a reader that compares against
+    # `PLAN_WIRE_FORMAT_VERSION` alone refuses every write envelope.
     # `PLAN_WIRE_FORMAT_VERSION` remains exported because it is what a PLAIN
     # envelope declares and several tests author bytes by hand.
     plan_wire_supported_versions,

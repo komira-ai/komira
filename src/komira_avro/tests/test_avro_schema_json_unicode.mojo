@@ -27,7 +27,8 @@
 #   T4  BMP escapes (1-, 2- and 3-byte UTF-8 results) still decode. Catches a
 #       regression in the ordinary `\u` path.
 #   T5  raw UTF-8 (2- and 4-byte) reads back byte-exact, also mixed with
-#       escapes. Catches: raw bytes widened through `chr()`.
+#       escapes, in a default and in the refusal of a non-name enum symbol.
+#       Catches: raw bytes widened through `chr()`.
 #   T6  an OCF header whose `avro.schema` holds raw UTF-8 keeps it byte-exact
 #       through `decode_ocf_header` and `parse_schema`. Catches the header-side
 #       widening.
@@ -166,14 +167,22 @@ def test_raw_utf8_byte_exact() raises:
         _bl(0x61, 0xC3, 0xBC, 0xC3, 0xBC, 0x62, 0x22, 0xE2, 0x82, 0xAC),
         "mixed",
     )
-    # Enum symbols travel through the same decoder.
-    var s = AvroSchema.parse(
-        String('{"type":"enum","name":"E","symbols":["ü","\\u00fc"]}')
+    # Enum symbols travel through the same decoder. `ü` is not an Avro name,
+    # so the parser refuses it; the refusal quotes the decoded symbol, raw
+    # or escaped, byte-exact.
+    var want_err = String(
+        "AvroSchemaError.INVALID_NAME: enum symbol 'ü' does not match"
+        " [A-Za-z_][A-Za-z0-9_]*"
     )
-    var n = s.nodes[s.root_idx].copy()
-    assert_equal(len(n.symbols), 2)
-    assert_equal(n.symbols[0], String("ü"))
-    assert_equal(n.symbols[1], String("ü"))
+    for lit in [String('"ü"'), String('"\\u00fc"')]:
+        var got = String("<accepted>")
+        try:
+            _ = AvroSchema.parse(
+                String('{"type":"enum","name":"E","symbols":[') + lit + "]}"
+            )
+        except e:
+            got = String(e)
+        assert_equal(got, want_err)
 
 
 # -----------------------------------------------------------------------------

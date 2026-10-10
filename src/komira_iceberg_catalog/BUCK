@@ -1,4 +1,4 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
 
 # The read-only Iceberg catalog client: resolves `namespace.table` to the
 # table's current metadata location through the IcebergCatalog seam. Two
@@ -21,4 +21,25 @@ mojo_library(
         "tests/test_iceberg_rest_catalog.mojo",
     ],
     visibility = ["PUBLIC"],
+)
+
+# The production HttpIcebergRestTransport over a real socket: the catalog
+# client against a komira_http_server fake catalog on 127.0.0.1, both in this
+# one action on two threads (komira_http_tls_e2e's serve_while). It asserts
+# the paths, Authorization and Host headers the server received, the
+# metadata-location returned, and the 404 and 401 errors by exact message.
+# Standalone, not in `test_srcs`: it opens sockets, which the library gate's
+# tests do not.
+mojo_test(
+    name = "test_iceberg_rest_loopback",
+    srcs = ["tests/test_iceberg_rest_loopback.mojo"],
+    deps = [
+        ":komira_iceberg_catalog",
+        "//src/komira_async:komira_async",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_http_server:komira_http_server",
+        "//src/tests/e2e/komira_http_tls_e2e:komira_http_tls_e2e",
+        "//src/komira_json:komira_json",
+    ],
 )

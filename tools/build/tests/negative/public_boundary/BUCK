@@ -1,0 +1,197 @@
+load("@komira//tools/build/lint:defs.bzl", "public_boundary")
+load("//functional/public_boundary:fixture.bzl", "PB_HOLDS", "PB_HOSTS", "PB_TREE", "PB_WINDOW")
+
+# Test 44 (the public boundary lint), the half that must go red: one planted
+# defect per target, in the tree of functional/public_boundary (whose `ok`
+# builds). run_tests.sh (public_boundary_tests.sh) requires each to fail
+# naming its finding.
+
+# A finding of each rule in each spelling, in a file no row holds.
+[
+    public_boundary(
+        name = name,
+        files = PB_TREE | {path: "plant_{}.txt".format(name)},
+        holds = PB_HOLDS,
+        hosts = PB_HOSTS,
+        **PB_WINDOW
+    )
+    for name, path in [
+        ("date_iso", "docs/plant.md"),
+        ("date_underscore", "docs/plant.md"),
+        ("date_compact", "docs/plant.md"),
+        ("date_year_month", "docs/plant.md"),
+        ("date_month_name", "docs/plant.md"),
+        ("date_day_month", "docs/plant.md"),
+        ("date_month_year", "docs/plant.md"),
+        ("date_numeric", "docs/plant.md"),
+        ("date_unpadded", "docs/plant.md"),
+        ("date_dmy_dash", "docs/plant.md"),
+        ("home_linux", "docs/plant.md"),
+        ("home_mac", "docs/plant.md"),
+        ("home_windows", "docs/plant.md"),
+        ("ip_private", "docs/plant.md"),
+        ("ip_shared", "docs/plant.md"),
+        ("ip_link_local", "docs/plant.md"),
+        ("ip_port", "docs/plant.md"),
+        ("host_single", "docs/plant.md"),
+        ("host_unlisted", "docs/plant.md"),
+        ("host_private", "docs/plant.md"),
+        ("host_ipv6", "docs/plant.md"),
+        ("email", "docs/plant.md"),
+        ("email_mailto", "docs/plant.md"),
+        ("email_url_path", "docs/plant.md"),
+        ("email_after_url", "docs/plant.md"),
+        ("email_s3_user", "docs/plant.md"),
+        ("email_git_ssh_user", "docs/plant.md"),
+        ("sha_md", "docs/plant.md"),
+        ("sha_comment", "src/komira_a/plant.mojo"),
+        ("sha_docstring", "src/komira_a/plant.mojo"),
+        ("sha_c", "src/komira_a/plant.c"),
+        # A `//` in a string before the comment: the comment is still read.
+        ("sha_c_after_string", "src/komira_a/plant.c"),
+        # third_party/ is read whole, its BUCK files and the rest.
+        ("third_party_buck", "third_party/up/BUCK"),
+        ("third_party_c", "third_party/up/config.h"),
+    ]
+]
+
+# A date, a home directory and a deny-list word in a path, at line 0; the
+# path of binary data is read too. The file itself holds nothing.
+[
+    public_boundary(
+        name = name,
+        deny = "deny.txt",
+        files = PB_TREE | {path: "plant_clean.txt"},
+        holds = PB_HOLDS,
+        hosts = PB_HOSTS,
+        **PB_WINDOW
+    )
+    for name, path in [
+        ("path_date", "docs/notes_2031_08_31.md"),
+        ("path_home", "home/jdoe/notes.md"),
+        ("path_deny", "docs/zanzibar_notes.md"),
+        ("path_binary", "src/komira_a/tests/fixtures/2031-08-31.arrow"),
+    ]
+]
+
+# A file at a path of `paths` (a file another cell exports) is read.
+public_boundary(
+    name = "paths_attr",
+    files = PB_TREE,
+    holds = PB_HOLDS,
+    hosts = PB_HOSTS,
+    paths = {"other/.config": "plant_date_iso.txt"},
+    **PB_WINDOW
+)
+
+# held.mojo with one more date: the row holds 15.
+public_boundary(
+    name = "held_new_site",
+    files = PB_TREE | {"src/komira_a/held.mojo": "held_plus.txt"},
+    holds = PB_HOLDS,
+    hosts = PB_HOSTS,
+    **PB_WINDOW
+)
+
+# A word of a private deny list (deny.txt stands in for a list kept outside
+# the repository), and a row trying to hold one.
+public_boundary(
+    name = "deny",
+    deny = "deny.txt",
+    files = PB_TREE | {"docs/plant.md": "plant_deny.txt"},
+    holds = PB_HOLDS,
+    hosts = PB_HOSTS,
+    **PB_WINDOW
+)
+
+public_boundary(
+    name = "deny_held",
+    deny = "deny.txt",
+    files = PB_TREE | {"docs/plant.md": "plant_deny.txt"},
+    holds = "holds_deny.tsv",
+    hosts = PB_HOSTS,
+    **PB_WINDOW
+)
+
+# A defect in one ledger: the holds (holds_*.tsv) or the hosts (hosts_*.tsv),
+# each the fixture's ledger with one row changed or added.
+[
+    public_boundary(
+        name = name,
+        files = PB_TREE,
+        holds = holds or PB_HOLDS,
+        hosts = hosts or PB_HOSTS,
+        **PB_WINDOW
+    )
+    for name, holds, hosts in [
+        # A row of three fields.
+        ("holds_malformed", "holds_malformed.tsv", None),
+        ("holds_rule", "holds_rule.tsv", None),
+        # A row for a file the tree does not hold.
+        ("holds_file", "holds_file.tsv", None),
+        # A row for binary data: its contents are not read, so it holds none.
+        ("holds_binary", "holds_binary.tsv", None),
+        ("holds_count", "holds_count.tsv", None),
+        ("holds_reason", "holds_reason.tsv", None),
+        ("holds_duplicate", "holds_duplicate.tsv", None),
+        # A count above the findings (the holds only shrink).
+        ("holds_lower", "holds_lower.tsv", None),
+        # A row for a file with no finding of its rule.
+        ("holds_delete", "holds_delete.tsv", None),
+        # A row of one field.
+        ("hosts_malformed", None, "hosts_malformed.tsv"),
+        ("hosts_reason", None, "hosts_reason.tsv"),
+        # A name reserved for examples, which needs no row.
+        ("hosts_reserved", None, "hosts_reserved.tsv"),
+        ("hosts_duplicate", None, "hosts_duplicate.tsv"),
+        # A domain no URL of the tree names.
+        ("hosts_unused", None, "hosts_unused.tsv"),
+    ]
+]
+
+# Only binary data in the tree: the lint checks nothing, so it fails.
+public_boundary(
+    name = "empty",
+    files = {"src/komira_a/tests/fixtures/data.arrow": "//functional/public_boundary:data_arrow.txt"},
+    holds = PB_HOLDS,
+    hosts = PB_HOSTS,
+    **PB_WINDOW
+)
+
+# A window whose month is 13: refused by the reader.
+public_boundary(
+    name = "window_month",
+    files = PB_TREE,
+    holds = PB_HOLDS,
+    hosts = PB_HOSTS,
+    public_from = "2031-13-01",
+    window_from = 2030,
+)
+
+# A window that does not end on the first day of a month: refused by the reader.
+public_boundary(
+    name = "window_bad",
+    files = PB_TREE,
+    holds = PB_HOLDS,
+    hosts = PB_HOSTS,
+    public_from = "2031-09-15",
+    window_from = 2030,
+)
+
+# Neither `tree` nor `files`: refused at analysis.
+public_boundary(
+    name = "no_tree",
+    holds = PB_HOLDS,
+    hosts = PB_HOSTS,
+    **PB_WINDOW
+)
+
+# Both `tree` and `files`: refused at analysis.
+public_boundary(
+    name = "both_tree_and_files",
+    files = PB_TREE,
+    holds = PB_HOLDS,
+    hosts = PB_HOSTS,
+    tree = ":doc_tree",
+    **PB_WINDOW
+)

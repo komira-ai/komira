@@ -13,7 +13,9 @@
 # turns them into <result.json>.
 #
 # The census of README API coverage over the packages under <tree>/<root>
-# (each directory directly under <root> holding a file is one package). The
+# (each directory directly under <root> holding a file is one package, except
+# <root>/tests, which holds the test-only packages: they publish no API, so
+# the census skips them). The
 # rules (docs/readme_api_coverage.md says the same):
 #
 #   Public API. A package's public API is read from <root>/<package>/__init__.mojo:
@@ -261,10 +263,11 @@ END {
     }
 }'
 
-# The packages: every directory directly under the root that holds a file.
+# The packages: every directory directly under the root that holds a file,
+# except tests (the test-only packages, which publish no API).
 if [ -d "$ROOT" ]; then
     find "$ROOT" \( -type f -o -type l \) -print |
-        awk -F/ -v n="$(printf '%s' "$ROOT" | awk -F/ '{ print NF }')" 'NF > n + 1 { print $(n + 1) }' |
+        awk -F/ -v n="$(printf '%s' "$ROOT" | awk -F/ '{ print NF }')" 'NF > n + 1 && $(n + 1) != "tests" { print $(n + 1) }' |
         sort -u > "$T/packages"
 else
     : > "$T/packages"
