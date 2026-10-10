@@ -6,8 +6,10 @@
 # text (and, where two refusals share a message, the byte offset) the error
 # must carry, so a refusal for another reason does not pass:
 #   - `xml_unescape`: lower-case hex digits, two-byte UTF-8 output, a value
-#     past U+10FFFF with enough digits to overflow a 64-bit accumulator, and a
-#     reference with no digits, each passed through or decoded exactly;
+#     past U+10FFFF with enough digits to overflow a 64-bit accumulator, a
+#     surrogate (U+D800..U+DFFF, which has no UTF-8 form) and the scalar
+#     values either side of it, and a reference with no digits, each passed
+#     through or decoded exactly;
 #   - the reader: lower-case hex in a checked reference, a lone `-` in a
 #     comment, a document cut inside a UTF-8 sequence, a four-byte name
 #     character, every malformed shape of the XML declaration, an unterminated
@@ -90,6 +92,14 @@ def test_unescape_edges() raises -> Int:
         "hex reference that would wrap 64 bits",
     )
     f += _eq(xml_unescape("&#x110000;"), String("&#x110000;"), "U+110000 passed through")
+    # U+D800..U+DFFF are not Unicode scalar values and have no UTF-8 form:
+    # a reference to one is passed through like one past U+10FFFF, so the
+    # returned String stays UTF-8. The scalar values either side decode.
+    f += _eq(xml_unescape("&#xD800;"), String("&#xD800;"), "U+D800 passed through")
+    f += _eq(xml_unescape("&#57343;"), String("&#57343;"), "U+DFFF passed through")
+    f += _eq(xml_unescape("&#xdc00;x"), String("&#xdc00;x"), "low surrogate passed through")
+    f += _eq(xml_unescape("&#xD7FF;"), chr(0xD7FF), "U+D7FF decodes")
+    f += _eq(xml_unescape("&#xE000;"), chr(0xE000), "U+E000 decodes")
     # No digits, or no ';': the '&' is passed through verbatim.
     f += _eq(xml_unescape("&#x;"), String("&#x;"), "hex reference with no digits")
     f += _eq(xml_unescape("&#;x"), String("&#;x"), "decimal reference with no digits")
