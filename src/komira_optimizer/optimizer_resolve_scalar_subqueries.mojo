@@ -4,9 +4,9 @@
 #
 # The entry point of the `resolve_scalar_subqueries` pass (the pure recursive
 # walkers live in `komira_optimizer/resolve_scalar_subqueries.mojo`).
-# komira_optimizer has no driver that orders its passes; this pass is designed
-# to run before `flatten_dependent_joins`, constant folding (no such pass is
-# in this tree) and `push_predicates_down` (see `optimizer_scalar_deps.mojo`).
+# `optimizer_driver.optimize` runs this pass after `scalar_subquery_decorrelate`
+# and before `flatten_dependent_joins`, constant folding (`fold_constants`) and
+# `push_predicates_down` (see `optimizer_scalar_deps.mojo`).
 #
 # ⛔ THIS PASS EXECUTES NOTHING (the pure-optimizer rule "Optimizer's job is
 # just to convert a logical plan to a physical plan"). It does not run the
@@ -84,8 +84,8 @@ def resolve_scalar_subqueries_rewrite(
     PURE and NON-PARAMETRIC. See module-doc for the 3-phase design and for what
     this replaced. Returns the input plan unchanged when no uncorrelated SCALAR
     subquery is present (the common case) AND when one is present but not yet
-    bound -- in the latter case `deps` carries the requests for the executing
-    caller (not in this tree) to resolve before it runs the passes again.
+    bound -- in the latter case `deps` carries the requests for a caller that
+    executes plans to resolve before it runs the passes again.
 
     Args:
         plan: The (sub-)plan to rewrite. Consumed.

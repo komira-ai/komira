@@ -20,7 +20,8 @@ scan-share planning; the `OptimizerConfig` options value; and the non-raising
 `OptimizeResult`. Every rule takes a `LogicalPlan` and returns the rewritten
 plan (the duplicate-aggregate collect and find walks return hash counts and a
 subtree copy, and scan-share planning returns a `ScanSharePlan` descriptor);
-none executes anything. komira_optimizer has no driver that orders its passes.
+none executes anything. `optimizer_driver.optimize` runs the rules in their
+fixed order over one plan (`optimize_status` is its non-raising twin).
 
 It depends on `komira_plan_ir`, `komira_plan_expr`, `komira_plan_stats`,
 `komira_arrow`, `komira_kernels`, `komira_collections`, `komira_exec_types`,

@@ -58,9 +58,8 @@
 #     the `residual` shape. `nested_loop_join.rs` is the reference for the zero-equi-
 #     key (pure-range / band) fallback.
 #
-# Pass order: komira_optimizer has no driver that orders its passes. This
-# pass is designed to run AFTER `flatten_dependent_joins` and BEFORE the
-# join-reorder / rebuild rules (see the invariant above). Idempotent: a
+# Pass order: `optimizer_driver.optimize` runs this pass AFTER
+# `flatten_dependent_joins` and BEFORE the join-reorder / rebuild rules (see the invariant above). Idempotent: a
 # re-run is a no-op because after the first run the residual contains only
 # plain (COL_SIDE_NONE) col-refs, so `_residual_needs_decompose` returns False.
 # =============================================================================

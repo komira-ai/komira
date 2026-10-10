@@ -23,8 +23,8 @@
 #
 # The new AND conjuncts are single-column, pushable predicates; predicate
 # pushdown (Rule 2, `push_predicates_down`) can then push them through joins
-# independently. komira_optimizer has no driver that orders its passes; this
-# one is designed to run BEFORE push_predicates_down. The original OR is kept
+# independently. `optimizer_driver.optimize` runs this pass BEFORE
+# push_predicates_down. The original OR is kept
 # as a conjunct (above the join when it reads both sides) so semantics are
 # exactly equivalent -- it rejects any tuple not on the swap diagonal.
 #

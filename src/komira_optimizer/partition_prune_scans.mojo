@@ -52,9 +52,9 @@
 #     (one literal per file) rather than spinning up a mini execution, but
 #     the prune semantics are identical.
 #
-# Pass order: komira_optimizer has no driver that orders its passes. This
-# pass is designed to run BEFORE `propagate_statistics` and scan-statistics
-# precompute (`precompute_scan_stats`, not in this tree).
+# Pass order: `optimizer_driver.optimize` runs this pass first. It is designed
+# to run before the caller's scan-statistics precompute as well (a smaller path
+# list means less statistics work).
 #
 # Mojo discipline: no UnsafePointer crosses a module boundary; the in-place
 # rewrite mutates through `Optional[OwnedPointer[...]]` ref-mutation (the
