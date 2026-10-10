@@ -37,7 +37,8 @@
 #                   the kinds it does not walk (UNION, CAST_TO_VARCHAR). VIEW_REF
 #                   and CSE_REF are leaves, so they appear as a leaf and as a
 #                   join side;
-#   nested_*        joins under joins;
+#   nested_*        joins under joins, including an eligible join under a
+#                   refused one (join type, residual, two keys);
 #   multifile_*     stats folded by `merge_table_stats` (two files lose
 #                   min/max and do not narrow; one file passes through).
 # =============================================================================
@@ -98,7 +99,7 @@ from komira_optimizer.optimizer_payload_narrow import (
 # The table
 # =============================================================================
 
-comptime _ROWS = 77
+comptime _ROWS = 82
 
 
 def _expected_table() -> String:
@@ -139,6 +140,7 @@ refuse_right_join => scan#0: | scan#1: | scan#2: ov:2:1
 refuse_full_join => scan#0: | scan#1: | scan#2: ov:2:1
 refuse_anti_join => scan#0: | scan#1: | scan#2: ov:2:1
 refuse_cross_join => scan#0: | scan#1: | scan#2: ov:2:1
+refuse_cross_join_no_keys => scan#0: | scan#1: | scan#2: ov:2:1
 refuse_residual => scan#0: | scan#1: | scan#2: ov:2:1
 refuse_two_key => scan#0: | scan#1: | scan#2: ov:2:1
 refuse_two_left_keys => scan#0: | scan#1: | scan#2: ov:2:1
@@ -178,6 +180,10 @@ nested_left => scan#0: pv:2:1 | scan#1: bv:2:1 | scan#2: ov:2:1
 nested_right => scan#0: ov:2:1 | scan#1: pv:2:1 | scan#2: bv:2:1
 nested_both => scan#0: pv:2:1 | scan#1: bv:2:1 | scan#2: qv:1:0 | scan#3: cv:2:0
 nested_three_deep => scan#0: a:2:1 | scan#1: b:2:1 | scan#2: c:2:1 | scan#3: d:2:1
+nested_under_left_join => scan#0: pv:2:1 | scan#1: bv:2:1 | scan#2:
+nested_under_right_join => scan#0: | scan#1: pv:2:1 | scan#2: bv:2:1
+nested_under_residual_join => scan#0: pv:2:1 | scan#1: bv:2:1 | scan#2:
+nested_under_two_key_join => scan#0: | scan#1: k2:1:0,pv:2:1 | scan#2: bv:2:1
 multifile_two_merged => scan#0: | scan#1: bv:2:1
 multifile_one_passthrough => scan#0: pv:2:1 | scan#1: bv:2:1
 """
@@ -522,6 +528,9 @@ def _refusal_fixture(name: String) raises -> Optional[LogicalPlan]:
     if name == "refuse_anti_join":
         return _outer(_join(_p(), _good_right(), JOIN_ANTI))
     if name == "refuse_cross_join":
+        # One key per side, so only the join-type check refuses it.
+        return _outer(_join(_p(), _good_right(), JOIN_CROSS))
+    if name == "refuse_cross_join_no_keys":
         return _outer(
             LogicalPlan.join(
                 _p(), _good_right(), List[String](), List[String](), JOIN_CROSS
@@ -723,6 +732,31 @@ def _nested_fixture(name: String) raises -> Optional[LogicalPlan]:
         var ab = _join(_side("a.parquet", "a", 1, 999), _side("b.parquet", "b", 1, 999))
         var abc = _join(ab^, _side("c.parquet", "c", 1, 999))
         return _join(abc^, _side("d.parquet", "d", 1, 999))
+    # An eligible INNER join below a join the rule refuses: the inner join
+    # still narrows and the refused join's own sides do not.
+    if name == "nested_under_left_join":
+        return _join(_hc4p(), _side("o.parquet", "ov", 1, 999), JOIN_LEFT)
+    if name == "nested_under_right_join":
+        return _join(_side("o.parquet", "ov", 1, 999), _hc4p(), JOIN_RIGHT)
+    if name == "nested_under_residual_join":
+        var residual = Optional[OwnedPointer[Expr]](
+            OwnedPointer(Expr.binary(BIN_GT, Expr.col_ref("pv"), Expr.col_ref("ov")))
+        )
+        return LogicalPlan.join(
+            _hc4p(), _side("o.parquet", "ov", 1, 999), _keys(), _keys(), JOIN_INNER,
+            residual=residual^,
+        )
+    if name == "nested_under_two_key_join":
+        # Outer keys (key, k2); the inner join on the right joins on key
+        # alone, so its k2 and pv are payloads.
+        var ocols = _cols3(_key(), _c("k2", 0, 9), _c("ov", 1, 999))
+        var pcols = _cols3(_key(), _c("k2", 0, 9), _c("pv", 1, 999))
+        var inner = _join(_scan("p.parquet", pcols), _good_right())
+        var l = _keys()
+        l.append(String("k2"))
+        var r = _keys()
+        r.append(String("k2"))
+        return LogicalPlan.join(_scan("o.parquet", ocols), inner^, l^, r^, JOIN_INNER)
     if name == "multifile_two_merged" or name == "multifile_one_passthrough":
         var per_file = List[TableStats]()
         per_file.append(_table_stats(_cols2(_key(), _c("pv", 1, 999))))
