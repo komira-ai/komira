@@ -1,0 +1,66 @@
+// The NETWORK primitives of the kci resource catalog (`kci.resource.v1`):
+// `network`, `subnet` and `ip_address`.
+// The field numbers are what is stored, pinned as literal wire bytes by the
+// welded tests in tests/ (resource.proto says how the files are split).
+// held-numbers: Network 50-53
+// held-numbers: Subnet 50-53
+// held-numbers: IpAddress 50-53
+syntax = "proto3";
+
+package kci.resource.v1;
+
+import "kci/resource/v1/refs.proto";
+
+// ---- networks: network, subnet and IP address --------------------------------------
+//
+// A private NETWORK (an address space), the SUBNETS cut from it, and a static
+// public IP ADDRESS. None runs as an identity or accepts a verb; each takes
+// retention, DELETE by default. A network and a subnet expose their cloud
+// name (NAME), an IP address the address itself (ADDRESS). This version
+// speaks IPv4 only: another address family would be a new field of each
+// message (an addition), and whether one is added is not decided. Firewalls,
+// NAT, peering and the objects a cloud needs to attach a workload are not
+// primitives here yet.
+
+// A private network: the IPv4 range its subnets are cut from.
+message Network {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+
+  // "a.b.c.d/n": a private range (inside 10.0.0.0/8, 172.16.0.0/12 or
+  // 192.168.0.0/16, the ranges every built-in cloud takes alike), n from 16
+  // to 28, no bit set after the first n. Every subnet of the network lies
+  // inside it.
+  string ipv4_cidr = 1;
+  // 50 to 53 are held for the per-cloud extensions (resource.proto header).
+}
+
+// A range of a `network`'s addresses that the workloads placed in it take
+// their private addresses from.
+message Subnet {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+
+  // The `network` (the resource itself, no output).
+  Ref network = 1;
+  // "a.b.c.d/n": inside its network's range, n from 16 to 28, no bit set
+  // after the first n, overlapping no other subnet of the network.
+  string ipv4_cidr = 2;
+  // A zone of the cell's region, from 1 to 3 (the cloud's own zones, in its
+  // own order). Presence: an explicit 0 is refused when the graph is
+  // validated. A cloud whose subnets are each in one zone refuses an unset
+  // zone; a cloud whose subnets span the region has the subnet in every
+  // zone, the one written included.
+  optional uint32 zone = 3;
+  // 50 to 53 are held for the per-cloud extensions (resource.proto header).
+}
+
+// A static public IPv4 address, reserved in the cell's region: it stays the
+// same until the resource is deleted, and once deleted it cannot be taken
+// back. Its ADDRESS is the address. Nothing in this version serves on it (a load
+// balancer is a later primitive). No field yet; 50 to 53 are held for the
+// per-cloud extensions (resource.proto header).
+message IpAddress {
+  option (portability) = PORTABLE;
+  option (exposes) = ADDRESS;
+}

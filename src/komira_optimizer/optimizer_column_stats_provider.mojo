@@ -21,8 +21,8 @@
 # Why this lives in the optimizer (and not engine-internal): join-order
 # enumeration (DPccp, greedy) runs at plan-compile time. The provider
 # is consumed by the TDOM modules (`optimizer_tdom`, `optimizer_tdom_card`,
-# `optimizer_tdom_cost`) — optimizer rules. A DPccp enumerator
-# (`optimizer_dpccp`) is designed to consume it too; it is not in this tree.
+# `optimizer_tdom_cost`) — optimizer rules — and by the DPccp enumerator
+# (`optimizer_dpccp`) through `estimate_cardinality_with_set`.
 #
 # The trait is the load-bearing behavioral contract: `distinct_count_for`
 # ALWAYS returns a value (no Optional). Callers do not need to handle
@@ -172,7 +172,7 @@ trait ColumnStatsProvider:
     matches DuckDB's `relation_statistics_helper.cpp:110` fall-through
     exactly.
 
-    Callers (the TDOM modules; a DPccp cost model, not in this tree) consume
+    Callers (the TDOM modules, and through them DPccp's cost) consume
     the returned `ColumnStatsValue.ndv` directly. The `from_hll` /
     `source` fields are advisory (used by the cost model's confidence
     discounting).
@@ -280,8 +280,8 @@ struct DefaultColumnStatsProvider[origin: Origin[mut=False]](
             ref ts = relation.table_stats.value()
             # STATS_SOURCE_SYNTHETIC_ROW_COUNT carries a synthesized
             # distinct_count derived from row_count (the
-            # `_synth_row_count_table_stats` fallback of `optimizer_dpccp`,
-            # not in this tree). Treat that as Tier 2 — it's
+            # `_synth_row_count_table_stats` fallback of `optimizer_dpccp`).
+            # Treat that as Tier 2 — it's
             # the row-count heuristic in a different wrapper.
             if ts.source != STATS_SOURCE_SYNTHETIC_ROW_COUNT:
                 var dc = ts.column_distinct_count(column_name)
@@ -348,8 +348,8 @@ struct SyntheticColumnStatsProvider(
     behavior so test wiring + production wiring degrade identically.
 
     Design choice: test injection lives ON this provider,
-    NOT on the `cost_override` Dict of `solve_dpccp_with_cost` (DPccp, not in
-    this tree). The two mechanisms target different
+    NOT on the `cost_override` Dict of `solve_dpccp_with_cost` (DPccp,
+    `optimizer_dpccp`). The two mechanisms target different
     layers (provider = per-column NDV; cost_override = per-RelationSet
     cost); keeping them separate avoids cross-coupling test fixtures.
     """

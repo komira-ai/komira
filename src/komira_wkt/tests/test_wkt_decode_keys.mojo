@@ -13,11 +13,10 @@
 #
 #   - JSON keys: each declared field read by its JSON name lands in the
 #     right member (a misspelt name in the match would leave it at its
-#     default, or send it to the strict skip, which raises). Not for the
-#     repeated and map fields of FieldMask, ListValue and Struct: their
-#     bodies read one element per key, which is not proto3 JSON
-#     (komira-ai/komira#1018), so those name arms are left uncovered
-#     rather than pinned here;
+#     default, or send it to the strict skip, which raises). The repeated
+#     and map fields of FieldMask, ListValue and Struct read the whole
+#     proto3-JSON array or object under their one key, and a scalar or an
+#     array in the wrong place is refused (komira-ai/komira#1018);
 #   - a strict `JsonDecoder` refuses an undeclared key (the skip arm runs:
 #     dropping `dec.skip()` would accept it silently), a lenient one drops it;
 #   - binary: an undeclared length-delimited field ahead of the declared
@@ -280,6 +279,85 @@ def test_list_value_keys() raises:
 
 
 # =============================================================================
+# The repeated and map fields in their proto3-JSON message form
+# (komira-ai/komira#1018). A repeated field is one key whose value is a JSON
+# array, a map field one key whose value is a JSON object; the body must read
+# the whole of it, and give the value the binary form of the same message
+# gives. Reading one element per key raised on the FieldMask array, kept one
+# of the ListValue elements, and read the Struct map's keys as fields of a
+# map entry message.
+# =============================================================================
+
+
+def test_field_mask_paths_array() raises:
+    var d = _json('{"paths":["a_b","c"]}')
+    var m = FieldMask.decode[JsonDecoder](d)
+    assert_equal(len(m.paths), 2)
+    assert_equal(m.paths[0], String("a_b"))
+    assert_equal(m.paths[1], String("c"))
+    var e = _json('{"paths":[]}')
+    assert_equal(len(FieldMask.decode[JsonDecoder](e).paths), 0)
+    # A bare string is not the repeated field's JSON form.
+    var bad = _json('{"paths":"a_b"}')
+    with assert_raises(contains="expected a JSON array"):
+        _ = FieldMask.decode[JsonDecoder](bad)
+
+
+def test_list_value_values_array() raises:
+    var d = _json('{"values":[1,"x",null,true,[2,3],{"k":4}]}')
+    var lv = ListValue.decode[JsonDecoder](d)
+    assert_equal(len(lv.values), 6)
+    assert_equal(lv.values[0].kind, VALUE_KIND_NUMBER)
+    assert_equal(lv.values[0].number_value, Float64(1.0))
+    assert_equal(lv.values[1].kind, VALUE_KIND_STRING)
+    assert_equal(lv.values[1].string_value, String("x"))
+    assert_equal(lv.values[2].kind, VALUE_KIND_NULL)
+    assert_equal(lv.values[3].kind, VALUE_KIND_BOOL)
+    assert_equal(lv.values[4].kind, VALUE_KIND_LIST)
+    assert_equal(len(lv.values[4].list_value[0].values), 2)
+    assert_equal(lv.values[5].kind, VALUE_KIND_STRUCT)
+    assert_equal(lv.values[5].struct_value[0].keys[0], String("k"))
+    # The binary form of the same message decodes to the same JSON.
+    var b = decode_proto[ListValue](encode_proto[ListValue](lv))
+    assert_equal(b.to_proto3_json(), lv.to_proto3_json())
+    assert_equal(lv.to_proto3_json(), String('[1,"x",null,true,[2,3],{"k":4}]'))
+    var bad = _json('{"values":"x"}')
+    with assert_raises(contains="expected a JSON array"):
+        _ = ListValue.decode[JsonDecoder](bad)
+
+
+def test_struct_fields_object() raises:
+    var d = _json('{"fields":{"a":1,"b":"s","n":null,"o":{"p":[true]}}}')
+    var st = Struct.decode[JsonDecoder](d)
+    assert_equal(len(st.keys), 4)
+    assert_equal(st.keys[0], String("a"))
+    assert_equal(st.values[0].number_value, Float64(1.0))
+    assert_equal(st.keys[1], String("b"))
+    assert_equal(st.values[1].string_value, String("s"))
+    assert_equal(st.keys[2], String("n"))
+    assert_equal(st.values[2].kind, VALUE_KIND_NULL)
+    assert_equal(st.keys[3], String("o"))
+    assert_equal(st.values[3].kind, VALUE_KIND_STRUCT)
+    assert_equal(
+        st.to_proto3_json(), String('{"a":1,"b":"s","n":null,"o":{"p":[true]}}')
+    )
+    var b = decode_proto[Struct](encode_proto[Struct](st))
+    assert_equal(b.to_proto3_json(), st.to_proto3_json())
+    # An object whose keys happen to be the entry message's field names is
+    # still a map of two members, not one entry.
+    var kv = _json('{"fields":{"key":"a","value":1}}')
+    var skv = Struct.decode[JsonDecoder](kv)
+    assert_equal(len(skv.keys), 2)
+    assert_equal(skv.keys[0], String("key"))
+    assert_equal(skv.values[0].string_value, String("a"))
+    assert_equal(skv.keys[1], String("value"))
+    assert_equal(skv.values[1].number_value, Float64(1.0))
+    var bad = _json('{"fields":[1]}')
+    with assert_raises(contains="expected a JSON object"):
+        _ = Struct.decode[JsonDecoder](bad)
+
+
+# =============================================================================
 # The scalar wrappers.
 # =============================================================================
 
@@ -414,6 +492,9 @@ def main() raises:
     test_value_keys_every_arm()
     test_struct_and_entry_keys()
     test_list_value_keys()
+    test_field_mask_paths_array()
+    test_list_value_values_array()
+    test_struct_fields_object()
     test_float_wrapper_keys()
     test_int_wrapper_keys()
     test_bool_string_bytes_wrapper_keys()

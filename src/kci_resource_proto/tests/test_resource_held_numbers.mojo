@@ -34,7 +34,7 @@
 # vacuously.
 #
 # Held ENUM values (`Output` 5, `Access` 7 and 9, `CellResource` 4,
-# `SourceEvent` 3) render
+# `SourceEvent` 3, `InputType` 4, 7 and 8) render
 # as bare numbers: no name has taken them. `Access` 5 and 6 are SEND and
 # RECEIVE (messaging), declared, and pinned in test_resource_field_numbers.
 #
@@ -45,36 +45,18 @@
 from std.testing import assert_equal, assert_true
 
 from komira_proto_codec import Serializable, decode_proto, encode_proto
-from kci_resource_proto.resource import (
-    Access,
-    Bucket,
-    CellResource,
-    Certificate,
-    DnsRecord,
-    DnsZone,
-    EventTrigger,
-    Grant,
-    ContainerJob,
-    Image,
-    IpAddress,
-    Network,
-    Output,
-    Queue,
-    Registry,
-    Resource,
-    Schedule,
-    Secret,
-    Service,
-    ServiceAccount,
-    SourceEvent,
-    Subnet,
-    Subscription,
-    Table,
-    Topic,
-    Uses,
-    Value,
-    Worker,
-)
+from kci_resource_proto.composite import CompositeDefinition, InputType
+from kci_resource_proto.artifacts import Registry
+from kci_resource_proto.compute import ContainerJob, Service, Worker
+from kci_resource_proto.data import Bucket, Table
+from kci_resource_proto.identity import Grant, ServiceAccount
+from kci_resource_proto.messaging import Queue, Subscription, Topic
+from kci_resource_proto.names import Certificate, DnsRecord, DnsZone
+from kci_resource_proto.networks import IpAddress, Network, Subnet
+from kci_resource_proto.refs import Access, CellResource, Image, Output, Uses, Value
+from kci_resource_proto.resource import CompositeInstance, Resource
+from kci_resource_proto.secrets import Secret
+from kci_resource_proto.triggers import EventTrigger, Schedule, SourceEvent
 
 
 @fieldwise_init
@@ -104,7 +86,6 @@ def _held() -> List[Held]:
             "mail domain .. virtual machine (the later neutral primitives)",
         )
     )
-    l.append(Held("Resource", 80, 80, "a composite instance"))
     l.append(Held("Resource", 90, 90, "the raw escape hatch"))
     l.append(Held("Resource", 100, 299, "provider primitives, first cloud"))
     l.append(Held("Resource", 300, 499, "provider primitives, second cloud"))
@@ -114,6 +95,10 @@ def _held() -> List[Held]:
     l.append(Held("Value", 4, 4, "never a secret value"))
     l.append(Held("Image", 4, 4, "an artifact_ref source arm"))
     l.append(Held("Uses", 3, 3, "held"))
+    # Composites: the instance's image and secret inputs, and the
+    # definition's bindings, variants and optional components.
+    l.append(Held("CompositeInstance", 6, 6, "secret inputs"))
+    l.append(Held("CompositeDefinition", 8, 8, "variants chosen by capability"))
     # The primitives: per-cloud extensions 50 to 53 on each, and their own.
     l.append(Held("Service", 13, 13, "a source that may be a non-image artifact"))
     l.append(Held("Service", 50, 53, "per-cloud extensions"))
@@ -199,6 +184,16 @@ def _undeclared_in(message: String, n: Int) raises -> Bool:
         head.append(1)
         head.append(UInt8(ord("v")))
         return _undeclared[Value](head, n)
+    if message == "CompositeInstance":
+        head.append(0x0A)  # 1: definition
+        head.append(1)
+        head.append(UInt8(ord("d")))
+        return _undeclared[CompositeInstance](head, n)
+    if message == "CompositeDefinition":
+        head.append(0x0A)  # 1: name
+        head.append(1)
+        head.append(UInt8(ord("n")))
+        return _undeclared[CompositeDefinition](head, n)
     if message == "Image":
         head.append(0x12)  # 2: digest
         head.append(1)
@@ -467,6 +462,36 @@ def test_the_probe_sees_a_declared_number() raises:
     names.append("Registry")
     nums.append(1)
     what.append("format (an enum)")
+    names.append("Resource")
+    nums.append(80)
+    what.append("the composite arm (a message in a oneof)")
+    names.append("CompositeInstance")
+    nums.append(4)
+    what.append("input (a map)")
+    names.append("CompositeInstance")
+    nums.append(3)
+    what.append("digest (an optional string)")
+    names.append("CompositeDefinition")
+    nums.append(4)
+    what.append("component (a repeated message)")
+    names.append("CompositeDefinition")
+    nums.append(7)
+    what.append("export (a repeated string)")
+    names.append("CompositeDefinition")
+    nums.append(10)
+    what.append("doc (a string)")
+    names.append("CompositeInstance")
+    nums.append(5)
+    what.append("image_input (a map of messages)")
+    names.append("CompositeInstance")
+    nums.append(7)
+    what.append("map_input (a map of messages)")
+    names.append("CompositeDefinition")
+    nums.append(5)
+    what.append("bind (a repeated message)")
+    names.append("CompositeDefinition")
+    nums.append(9)
+    what.append("presence (a repeated message)")
     for i in range(len(names)):
         assert_true(
             not _undeclared_in(names[i], nums[i]),
@@ -483,7 +508,8 @@ def test_the_probe_sees_a_declared_number() raises:
 def test_held_enum_values_are_unnamed() raises:
     """`Output` 5 (REVISION), `Access` 7 (ACT_AS) and 9 (MANAGE),
     `CellResource` 4 (COMPUTE), `SourceEvent` 3 (a message published to a
-    topic): each renders as its bare number."""
+    topic), `InputType` 4 (DURATION), 7 (SECRET) and 8 (RETENTION): each
+    renders as its bare number."""
     assert_equal(Output(5).json_name(), "5", "Output 5 is held")
     var access = List[Int]()
     access.append(7)
@@ -496,6 +522,8 @@ def test_held_enum_values_are_unnamed() raises:
         )
     assert_equal(CellResource(4).json_name(), "4", "CellResource 4 is held")
     assert_equal(SourceEvent(3).json_name(), "3", "SourceEvent 3 is held")
+    for n in [4, 7, 8]:
+        assert_equal(InputType(n).json_name(), String(n), String("InputType ") + String(n) + " is held")
     print("  test_held_enum_values_are_unnamed: PASS")
 
 

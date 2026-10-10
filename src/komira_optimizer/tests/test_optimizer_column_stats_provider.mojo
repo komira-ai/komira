@@ -285,7 +285,7 @@ def test_multi_relation_independent_dispatch() raises:
 
 def test_synthetic_row_count_stats_treated_as_tier2() raises:
     """A TableStats tagged STATS_SOURCE_SYNTHETIC_ROW_COUNT is a
-    row-count fallback (its producer is not in this tree).
+    row-count fallback (`optimizer_dpccp._synth_row_count_table_stats`).
     Provider must skip Tier 1 for these — the distinct_count field
     is synthesized from row_count, NOT a real NDV signal.
 

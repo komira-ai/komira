@@ -29,7 +29,8 @@
 # FIRINGS kci hands every cloud adapter are firing.mojo's.
 # =============================================================================
 
-from kci_resource_proto.resource import Ref, Resource
+from kci_resource_proto.refs import Ref
+from kci_resource_proto.resource import Resource
 
 from kci_cloud.adapter import FINDING_GRAPH, Finding
 from kci_cloud.catalog import FIELD_BUCKET, FIELD_CONTAINER_JOB, FIELD_EVENT_TRIGGER, FIELD_SCHEDULE, FIELD_SERVICE

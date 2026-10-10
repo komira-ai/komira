@@ -59,6 +59,15 @@ mojo_library(
         "tests/test_pkg_upload_static_token_credential.mojo",
         # byte for byte what `uv publish` sends (loopback recordings)
         "tests/test_pkg_upload_uv_fidelity.mojo",
+        # byte helpers, kind names, excerpts, echo shapes, local refusals
+        "tests/test_pkg_upload_wire_edges.mojo",
+        # the GET loop's budget and refusals, index hrefs, listed-file
+        # fetches, PEP 691 content type, prefix.dev and repodata edges
+        "tests/test_pkg_upload_read_edges.mojo",
+        # trusted publishing's remaining refusals; the audience encoding
+        "tests/test_pkg_upload_oidc_edges.mojo",
+        # the production transport over a scripted connector (nothing dials)
+        "tests/test_pkg_upload_http_transport_scripted.mojo",
     ],
     test_data = {
         "tests/test_pkg_upload_uv_fidelity.mojo": glob([

@@ -1,0 +1,68 @@
+// The TRIGGER primitives of the kci resource catalog (`kci.resource.v1`):
+// `schedule` and `event_trigger`.
+// The field numbers are what is stored, pinned as literal wire bytes by the
+// welded tests in tests/ (resource.proto says how the files are split).
+// held-numbers: Schedule 50-53
+// held-numbers: EventTrigger 50-53
+syntax = "proto3";
+
+package kci.resource.v1;
+
+import "kci/resource/v1/refs.proto";
+
+// ---- triggers: schedule and event trigger ------------------------------------------
+//
+// A TRIGGER starts a run of a container job, or calls a service, when
+// something happens: a time comes (`schedule`) or a resource of the list
+// changes (`event_trigger`). Its `target` is the resource itself (its
+// `output` unset). The trigger reaches the target through an identity of its
+// own, a private helper that only the cloud's scheduling or eventing service
+// may use, holding exactly one edge: CALL on the target (resource.proto
+// header). A
+// trigger exposes nothing, accepts no verb and takes no retention: it is
+// deleted with its resource, and it is never a grant's principal.
+
+// Starts its `target` at the times `cron` names, in `timezone`.
+message Schedule {
+  option (portability) = PORTABLE;
+
+  // When: five fields separated by single spaces, minute (0-59), hour
+  // (0-23), day of the month (1-31), month (1-12) and day of the week (0-6,
+  // 0 is Sunday). Each field is `*`, a number or a range `a-b`, either with
+  // a step `/n`, or a comma-separated list of those. No names (`MON`) and no
+  // shorthands (`@daily`): the form every built-in cloud reads alike. A cron
+  // a cloud cannot express is refused when the graph is validated.
+  string cron = 1;
+  // An IANA time zone name ("Europe/Paris"). Empty: UTC.
+  string timezone = 2;
+  // A `container_job` (each time starts a run of it) or a `service` (each
+  // time is an HTTP POST, with no body, to its URL).
+  Ref target = 3;
+  // 50 to 53 are held for the per-cloud extensions (resource.proto header).
+}
+
+// What happened to a resource, as every built-in cloud delivers it with one
+// meaning. 3 is held for a message published to a topic (how a cloud
+// delivers that to a service is not decided).
+enum SourceEvent {
+  SOURCE_EVENT_UNSET = 0;
+  // An object was written to the bucket: created, or overwritten.
+  OBJECT_CREATED = 1;
+  // An object was removed from the bucket. Where a cloud also reports the
+  // replaced copy of an overwritten object as removed, an overwrite
+  // delivers this too: a receiver reads the object before it acts.
+  OBJECT_DELETED = 2;
+}
+
+// Delivers each `event` of `source` to `target`: one call per event,
+// carrying it.
+message EventTrigger {
+  option (portability) = PORTABLE;
+
+  // The `bucket` whose events are delivered.
+  Ref source = 1;
+  SourceEvent event = 2;
+  // The `service` each event is delivered to, as an HTTP POST to its URL.
+  Ref target = 3;
+  // 50 to 53 are held for the per-cloud extensions (resource.proto header).
+}

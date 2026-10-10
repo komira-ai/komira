@@ -38,6 +38,7 @@ here executes a plan.
 | `optimizer_tdom` | the TDOM equivalence-class graph and composite NDV |
 | `optimizer_tdom_cost` | join cardinality from TDOMs over the bridging edges of a (left, right) split |
 | `optimizer_tdom_card` | order-independent cardinality of a combined relation set |
+| `optimizer_dpccp` | DPccp join enumeration over a join chain (with a cross-product fallback for disconnected graphs) and `reorder_joins_with_dp`, the inner-join reorder driver that picks DPccp or greedy per chain |
 | `optimizer_agg_group_fd` | eliding GROUP BY keys that are deterministic functions of other keys and recomputing them above the aggregate |
 | `optimizer_eager_agg` | cross-side eager aggregation: a partial aggregate below an inner join, merged above it |
 | `optimizer_partial_agg` | same-side partial aggregate pushdown below an inner join (off by default, behind `ENABLE_AGG_PUSHDOWN_BELOW_JOIN`) |
@@ -51,8 +52,8 @@ here executes a plan.
 
 It depends on `komira_plan_ir`, `komira_plan_expr`, `komira_plan_stats`,
 `komira_arrow`, `komira_kernels`, `komira_collections`, `komira_exec_types`,
-`komira_scan_source`, `komira_scan_planning`, `komira_counters` and
-`komira_libc`.
+`komira_scan_source`, `komira_scan_planning`, `komira_counters`, `komira_libc`
+and `komira_async` (the join-reorder fire counter).
 
 Public API: import directly from the modules. There is no facade.
 
