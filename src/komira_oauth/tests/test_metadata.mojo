@@ -118,6 +118,9 @@ def test_url_refusals() raises:
     assert_equal(_url_refusal("https:/"), "OAuthError: the issuer is not an https URL")
     assert_equal(_url_refusal(""), "OAuthError: the issuer is not an https URL")
     assert_equal(_url_refusal("xhttps://issuer.example/a"), "OAuthError: the issuer is not an https URL")
+    # Each end of the scheme replaced, same length.
+    assert_equal(_url_refusal("zttps://issuer.example/a"), "OAuthError: the issuer is not an https URL")
+    assert_equal(_url_refusal("https:/zissuer.example/a"), "OAuthError: the issuer is not an https URL")
     assert_equal(_url_refusal("https://"), "OAuthError: the issuer has no host")
     assert_equal(_url_refusal("https:///a"), "OAuthError: the issuer has no host")
     assert_equal(_url_refusal("https://issuer.example/a?b"), "OAuthError: the issuer has a query")

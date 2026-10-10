@@ -211,6 +211,10 @@ def test_replayed_jti_refused() raises:
     var d = _assertion(CLIENT, NOW + 89)
     assert_equal(_outcome(i, _form(d)), "401 invalid_client")
     i.advance(1)
+    # Every jti whose time has come is forgotten in one step, including two
+    # in a row (jti-0001 and jti-0002 were accepted one after the other).
+    var g = _assertion(CLIENT, NOW + 90, jti="jti-0002")
+    assert_equal(_outcome(i, _form(g)), "200")
     var f = _assertion(CLIENT, NOW + 90)
     assert_equal(_outcome(i, _form(f)), "200")
     assert_equal(_outcome(i, _form(f)), "401 invalid_client")

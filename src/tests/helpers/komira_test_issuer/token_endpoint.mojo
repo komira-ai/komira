@@ -51,7 +51,7 @@ from komira_jose import (
     VerifiedAssertion,
     verify_client_assertion,
 )
-from komira_json import JSON_OBJECT, JSON_STRING, parse_json_bytes
+from komira_json import parse_json_bytes
 from komira_oauth import (
     OAUTH_ERROR_INVALID_CLIENT,
     OAUTH_ERROR_INVALID_SCOPE,
@@ -97,18 +97,19 @@ struct _Seen(Copyable, Movable):
 
 
 def _unverified_issuer(assertion: String) -> String:
-    """The `iss` string of the payload segment, or "" when there is none.
-    Used only to find a record; never trusted."""
+    """The text of the payload segment's `iss` member, or "" when there is
+    none. Used only to find a record and never trusted: the verification
+    then requires a string `iss` equal to that record's client id, so a
+    payload that is not an object, or whose `iss` is not a string, finds a
+    record it cannot pass."""
     var parts = assertion.split(".")
-    if len(parts) != 3:
+    if len(parts) < 2:
         return String("")
     try:
         var payload = base64_url_decode_nopad(String(parts[1]))
         var v = parse_json_bytes(payload, 16)
-        if v.kind != JSON_OBJECT:
-            return String("")
         for i in range(len(v.obj_keys)):
-            if v.obj_keys[i] == "iss" and v.children[i].kind == JSON_STRING:
+            if v.obj_keys[i] == "iss":
                 return v.children[i].text.copy()
     except:
         pass
