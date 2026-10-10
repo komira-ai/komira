@@ -49,10 +49,7 @@
 #     fields + owned `String`s only — no Movable-struct-in-byte-slab shape.
 # =============================================================================
 
-from komira_objectstore.cas_manifest import (
-    CasManifestStore,
-    ManifestHead,
-)
+from komira_objectstore.cas_manifest import CasManifestStore
 from komira_objectstore.store import CloneableConditionalWriteStore
 from komira_objectstore.sublineage_base_fold import (
     FoldBlockAssignment,
@@ -61,6 +58,7 @@ from komira_objectstore.sublineage_base_fold import (
     SubLineageBaseFold,
 )
 
+from .chunk_walk import restart_point_after_failed_read
 from .consume_core import SegmentRef
 from .manifest_body import ManifestBody, MARKER_NONE
 from .read_committed import ChunkTxnTag
@@ -163,13 +161,8 @@ struct SubLineageConsumeResolver[Store: CloneableConditionalWriteStore](
         and the legacy single-manifest `ConsumeCore.resolve_index`: a partition
         with no `_base` MUST take the legacy path unchanged (backward-compat)."""
         var base = self._base_manifest()
-        var head: ManifestHead
-        try:
-            head = base.read_head_authoritative()
-        except e:
-            _ = e
-            _ = base^
-            return False
+        # An absent `_base` reads as chunk_seq -1; a read error raises.
+        var head = base.read_head_authoritative()
         _ = base^
         return head.chunk_seq >= Int64(0)
 
@@ -339,7 +332,7 @@ struct SubLineageConsumeResolver[Store: CloneableConditionalWriteStore](
     def _resolve_base_index(self) raises -> List[SegmentRef]:
         """Walk the live `_base` manifest chunks and produce dense `SegmentRef`s.
         Byte-for-byte the SAME logic `ConsumeCore.resolve_index` runs (log_start-
-        aware running-base, marker-chunk skip, reaped-chunk fail-soft) — applied to
+        aware running-base, marker-chunk skip, reaped-chunk restart) — applied to
         the `_base` prefix. `_base`'s gapless manifest offset IS the dense Kafka
         offset, so no re-basing is needed for this region. An ABSENT `_base`
         (sub-lineage mode engaged but no fold has run yet) yields an EMPTY folded
@@ -362,15 +355,12 @@ struct SubLineageConsumeResolver[Store: CloneableConditionalWriteStore](
         `folded_counts` would — while eliminating the duplicate `_base` LIST + GET
         traffic of a second walk."""
         var base = self._base_manifest()
-        var head: ManifestHead
-        try:
-            head = base.read_head_authoritative()
-        except e:
-            _ = e
-            _ = base^
-            return List[SegmentRef]()  # no `_base` yet — empty folded prefix
+        # No `_base` yet reads as chunk_seq -1 (an empty folded prefix); a
+        # read error raises.
+        var head = base.read_head_authoritative()
         var n_chunks = head.chunk_seq + Int64(1)
         var ls = base.read_log_start()
+        var keys_at_entry = len(base_keys)
         var index = List[SegmentRef]()
         var running_base = ls.log_start_offset
         var seq = ls.log_start_seq
@@ -408,10 +398,14 @@ struct SubLineageConsumeResolver[Store: CloneableConditionalWriteStore](
                 running_base += rc
                 seq += Int64(1)
             except e:
-                if _is_not_found_msg(String(e)):
-                    seq += Int64(1)
-                    continue
-                raise e^
+                # Restart past a reaped chunk or raise (chunk_walk.mojo).
+                ls = restart_point_after_failed_read(
+                    base, seq, e^, "SubLineageConsumeResolver._base walk"
+                )
+                index = List[SegmentRef]()
+                _truncate(base_keys, keys_at_entry)
+                running_base = ls.log_start_offset
+                seq = ls.log_start_seq
         _ = base^
         return index^
 
@@ -466,6 +460,7 @@ struct SubLineageConsumeResolver[Store: CloneableConditionalWriteStore](
         var blk_hi = blk.source_local_base + blk.count  # exclusive
         var running = ls.log_start_offset  # source-local base of the first chunk
         var seq = ls.log_start_seq
+        var index_at_entry = len(index)
         while seq < n_chunks:
             try:
                 var body_bytes = shard.read_chunk(seq)
@@ -504,10 +499,14 @@ struct SubLineageConsumeResolver[Store: CloneableConditionalWriteStore](
                 running = chunk_hi
                 seq += Int64(1)
             except e:
-                if _is_not_found_msg(String(e)):
-                    seq += Int64(1)
-                    continue
-                raise e^
+                # Restart past a reaped chunk or raise (chunk_walk.mojo).
+                ls = restart_point_after_failed_read(
+                    shard, seq, e^, "SubLineageConsumeResolver block walk"
+                )
+                while len(index) > index_at_entry:
+                    _ = index.pop()
+                running = ls.log_start_offset
+                seq = ls.log_start_seq
         _ = shard^
 
     def _append_block_segments_cached(
@@ -590,15 +589,11 @@ struct SubLineageConsumeResolver[Store: CloneableConditionalWriteStore](
         chunk's `txn_id` + `producer_epoch` are correct here. Marker chunks are
         skipped (they carry no records)."""
         var base = self._base_manifest()
-        var head: ManifestHead
-        try:
-            head = base.read_head_authoritative()
-        except e:
-            _ = e
-            _ = base^
-            return List[SubLineageTaggedSegment]()
+        # No `_base` yet reads as chunk_seq -1; a read error raises.
+        var head = base.read_head_authoritative()
         var n_chunks = head.chunk_seq + Int64(1)
         var ls = base.read_log_start()
+        var keys_at_entry = len(base_keys)
         var index = List[SubLineageTaggedSegment]()
         var running_base = ls.log_start_offset
         var seq = ls.log_start_seq
@@ -639,10 +634,14 @@ struct SubLineageConsumeResolver[Store: CloneableConditionalWriteStore](
                 running_base += rc
                 seq += Int64(1)
             except e:
-                if _is_not_found_msg(String(e)):
-                    seq += Int64(1)
-                    continue
-                raise e^
+                # Restart past a reaped chunk or raise (chunk_walk.mojo).
+                ls = restart_point_after_failed_read(
+                    base, seq, e^, "SubLineageConsumeResolver._base walk"
+                )
+                index = List[SubLineageTaggedSegment]()
+                _truncate(base_keys, keys_at_entry)
+                running_base = ls.log_start_offset
+                seq = ls.log_start_seq
         _ = base^
         return index^
 
@@ -716,6 +715,7 @@ struct SubLineageConsumeResolver[Store: CloneableConditionalWriteStore](
         var blk_hi = blk.source_local_base + blk.count  # exclusive
         var running = ls.log_start_offset
         var seq = ls.log_start_seq
+        var index_at_entry = len(index)
         while seq < n_chunks:
             try:
                 var body_bytes = shard.read_chunk(seq)
@@ -755,10 +755,14 @@ struct SubLineageConsumeResolver[Store: CloneableConditionalWriteStore](
                 running = chunk_hi
                 seq += Int64(1)
             except e:
-                if _is_not_found_msg(String(e)):
-                    seq += Int64(1)
-                    continue
-                raise e^
+                # Restart past a reaped chunk or raise (chunk_walk.mojo).
+                ls = restart_point_after_failed_read(
+                    shard, seq, e^, "SubLineageConsumeResolver block walk"
+                )
+                while len(index) > index_at_entry:
+                    _ = index.pop()
+                running = ls.log_start_offset
+                seq = ls.log_start_seq
         _ = shard^
 
     # -------------------------------------------------------------------------
@@ -788,13 +792,7 @@ struct SubLineageConsumeResolver[Store: CloneableConditionalWriteStore](
         return self._inputs.fold_view()
 
 
-@always_inline
-def _is_not_found_msg(msg: String) -> Bool:
-    """Classify a not-found / 404 store error (the reaped-chunk race in a walk).
-    Mirrors `consume_core._is_not_found_msg`."""
-    return (
-        msg.find("not_found") >= 0
-        or msg.find("NotFound") >= 0
-        or msg.find("404") >= 0
-        or msg.find("NoSuchKey") >= 0
-    )
+def _truncate(mut xs: List[String], n: Int):
+    """Drop `xs`'s entries past the first `n` (a restarted walk's capture)."""
+    while len(xs) > n:
+        _ = xs.pop()

@@ -100,6 +100,7 @@ from komira_objectstore.sublineage_base_fold import (
     SubLineageBaseFold,
 )
 
+from .chunk_walk import is_not_found_msg
 from .manifest_body import ManifestBody, encode_manifest_body
 from .sublineage_base_inputs import SegmentBaseInputs
 
@@ -389,118 +390,117 @@ struct SegmentBaseFold[Store: CloneableConditionalWriteStore](
         var appended = 0
         var dense_cursor = block_dense_base
         while seq < n_chunks:
-            try:
-                var body_bytes = shard.read_chunk(seq)
-                var body = ManifestBody.decode(body_bytes)
-                # A chunk without a segment object (a marker, 0 records) is
-                # skipped. One that still carries records cannot be re-recorded
-                # (its key is empty) nor dropped (the dense offsets of every
-                # later chunk would shift), so the fold refuses it.
-                if not body.has_segment():
-                    if body.record_count > Int64(0):
-                        _ = shard^
-                        raise Error(
-                            "SegmentBaseFold._materialize_block: source chunk "
-                            + String(seq)
-                            + " has "
-                            + String(body.record_count)
-                            + " records but no segment object (empty"
-                            " object_key); refusing to fold it"
-                        )
-                    seq += Int64(1)
-                    continue
-                var rc = body.record_count
-                var chunk_lo = running
-                var chunk_hi = running + rc  # exclusive source-local end
-                # Does this chunk intersect the block's source-local range?
-                if chunk_hi > blk_lo and chunk_lo < blk_hi:
-                    # The in-block portion (whole chunk in the common case;
-                    # `blk_lo`/`blk_hi` fall on chunk boundaries — the clamp is the
-                    # defensive straddle guard, mirroring the consume resolver).
-                    var in_lo = chunk_lo if chunk_lo > blk_lo else blk_lo
-                    var in_hi = chunk_hi if chunk_hi < blk_hi else blk_hi
-                    var in_count = in_hi - in_lo
-                    # Re-record the SOURCE chunk's segment metadata into `_base`,
-                    # REUSING the source `.seg` object_key (NO byte copy). Copy the
-                    # heap-owning `object_key` (Mojo 1.0.0b1 rejects a single-field
-                    # `^`-move out of `body`).
-                    var key = String(body.object_key)
-                    var crc = body.crc32
-                    var seg_bytes = body.segment_bytes
-                    var created = body.creation_ts_ms
-                    # CARRY THE PRODUCER + TXN TRAILERS
-                    # into `_base`. The fold MATERIALIZES a folded source chunk by
-                    # re-recording its `ManifestBody` in dense order; it MUST
-                    # preserve the producer-sequence trailer (`producer_id` /
-                    # `producer_epoch` / `first_seq` / `last_seq`) AND the
-                    # transaction trailer (`marker_type` / `txn_id`) so that AFTER
-                    # the fold the `_base` chunk is still self-describing for:
-                    #   * read_committed — `marker_type` / `txn_id` /
-                    #     `producer_epoch` are exactly the chunk_txn_tags
-                    #     `fetch_read_committed` reads to decide a folded chunk's
-                    #     visibility + the epoch-equality fence. Dropping
-                    #     them would make every folded txn-open / aborted chunk look
-                    #     non-transactional -> read_committed would EXPOSE aborted
-                    #     rows ACROSS a fold.
-                    #   * idempotent-producer recovery — `producer_id` / `last_seq`
-                    #     are what `recover_last_committed_seq`
-                    #     scans in the folded `_base` to recover a producer's last
-                    #     committed sequence after its source tail folds away.
-                    # The clamp NEVER straddles a chunk (a block starts on a chunk
-                    # boundary — see the docstring), so `in_count == rc` and the
-                    # whole chunk's trailer applies verbatim; the defensive partial
-                    # case re-records the SAME trailer for the in-block prefix
-                    # (correct: a sub-chunk of a txn-open / idempotent chunk shares
-                    # the parent chunk's producer + txn identity).
-                    var producer_id = body.producer_id
-                    var producer_epoch = body.producer_epoch
-                    var first_seq = body.first_seq
-                    var last_seq = body.last_seq
-                    var marker_type = body.marker_type
-                    var txn_id = String(body.txn_id)
-                    var base_body = encode_manifest_body(
-                        object_key=key^,
-                        record_count=in_count,
-                        crc32=crc,
-                        segment_bytes=seg_bytes,
-                        creation_ts_ms=created,
-                        producer_id=producer_id,
-                        producer_epoch=producer_epoch,
-                        first_seq=first_seq,
-                        last_seq=last_seq,
-                        marker_type=marker_type,
-                        txn_id=txn_id^,
+            # The walk starts AT the log start and `_base` is appended as it
+            # goes, so ANY chunk read error (not_found included) is raised:
+            # skipping would re-record every later chunk at a dense offset too
+            # low by the missing count, and restarting would re-append the
+            # chunks already recorded. The next round resumes from `_base`.
+            var body_bytes = shard.read_chunk(seq)
+            var body = ManifestBody.decode(body_bytes)
+            # A chunk without a segment object (a marker, 0 records) is
+            # skipped. One that still carries records cannot be re-recorded
+            # (its key is empty) nor dropped (the dense offsets of every
+            # later chunk would shift), so the fold refuses it.
+            if not body.has_segment():
+                if body.record_count > Int64(0):
+                    _ = shard^
+                    raise Error(
+                        "SegmentBaseFold._materialize_block: source chunk "
+                        + String(seq)
+                        + " has "
+                        + String(body.record_count)
+                        + " records but no segment object (empty"
+                        " object_key); refusing to fold it"
                     )
-                    var r = base.append(base_body^, in_count)
-                    if r.base_offset != dense_cursor:
-                        _ = shard^
-                        raise Error(
-                            "SegmentBaseFold._materialize_block: `_base`"
-                            " base_offset "
-                            + String(r.base_offset)
-                            + " != fold high-water "
-                            + String(dense_cursor)
-                            + " (torn fold)"
-                        )
-                    if r.last_offset != r.base_offset + in_count - Int64(1):
-                        _ = shard^
-                        raise Error(  # cov: unreachable CasManifestStore.append returns last_offset = base_offset + record_count - 1
-                            "SegmentBaseFold._materialize_block: `_base`"  # cov: unreachable see the line above
-                            " last_offset "
-                            + String(r.last_offset)  # cov: unreachable see the line above
-                            + " != base+count-1 "  # cov: unreachable see the line above
-                            + String(r.base_offset + in_count - Int64(1))  # cov: unreachable see the line above
-                            + " (manifest non-contiguity)"  # cov: unreachable see the line above
-                        )
-                    dense_cursor += in_count
-                    appended += 1
-                running = chunk_hi
                 seq += Int64(1)
-            except e:
-                if _is_not_found_msg(String(e)):
-                    seq += Int64(1)
-                    continue  # reaped mid-walk (benign race) — skip
-                raise e^
+                continue
+            var rc = body.record_count
+            var chunk_lo = running
+            var chunk_hi = running + rc  # exclusive source-local end
+            # Does this chunk intersect the block's source-local range?
+            if chunk_hi > blk_lo and chunk_lo < blk_hi:
+                # The in-block portion (whole chunk in the common case;
+                # `blk_lo`/`blk_hi` fall on chunk boundaries — the clamp is the
+                # defensive straddle guard, mirroring the consume resolver).
+                var in_lo = chunk_lo if chunk_lo > blk_lo else blk_lo
+                var in_hi = chunk_hi if chunk_hi < blk_hi else blk_hi
+                var in_count = in_hi - in_lo
+                # Re-record the SOURCE chunk's segment metadata into `_base`,
+                # REUSING the source `.seg` object_key (NO byte copy). Copy the
+                # heap-owning `object_key` (Mojo 1.0.0b1 rejects a single-field
+                # `^`-move out of `body`).
+                var key = String(body.object_key)
+                var crc = body.crc32
+                var seg_bytes = body.segment_bytes
+                var created = body.creation_ts_ms
+                # CARRY THE PRODUCER + TXN TRAILERS
+                # into `_base`. The fold MATERIALIZES a folded source chunk by
+                # re-recording its `ManifestBody` in dense order; it MUST
+                # preserve the producer-sequence trailer (`producer_id` /
+                # `producer_epoch` / `first_seq` / `last_seq`) AND the
+                # transaction trailer (`marker_type` / `txn_id`) so that AFTER
+                # the fold the `_base` chunk is still self-describing for:
+                #   * read_committed — `marker_type` / `txn_id` /
+                #     `producer_epoch` are exactly the chunk_txn_tags
+                #     `fetch_read_committed` reads to decide a folded chunk's
+                #     visibility + the epoch-equality fence. Dropping
+                #     them would make every folded txn-open / aborted chunk look
+                #     non-transactional -> read_committed would EXPOSE aborted
+                #     rows ACROSS a fold.
+                #   * idempotent-producer recovery — `producer_id` / `last_seq`
+                #     are what `recover_last_committed_seq`
+                #     scans in the folded `_base` to recover a producer's last
+                #     committed sequence after its source tail folds away.
+                # The clamp NEVER straddles a chunk (a block starts on a chunk
+                # boundary — see the docstring), so `in_count == rc` and the
+                # whole chunk's trailer applies verbatim; the defensive partial
+                # case re-records the SAME trailer for the in-block prefix
+                # (correct: a sub-chunk of a txn-open / idempotent chunk shares
+                # the parent chunk's producer + txn identity).
+                var producer_id = body.producer_id
+                var producer_epoch = body.producer_epoch
+                var first_seq = body.first_seq
+                var last_seq = body.last_seq
+                var marker_type = body.marker_type
+                var txn_id = String(body.txn_id)
+                var base_body = encode_manifest_body(
+                    object_key=key^,
+                    record_count=in_count,
+                    crc32=crc,
+                    segment_bytes=seg_bytes,
+                    creation_ts_ms=created,
+                    producer_id=producer_id,
+                    producer_epoch=producer_epoch,
+                    first_seq=first_seq,
+                    last_seq=last_seq,
+                    marker_type=marker_type,
+                    txn_id=txn_id^,
+                )
+                var r = base.append(base_body^, in_count)
+                if r.base_offset != dense_cursor:
+                    _ = shard^
+                    raise Error(
+                        "SegmentBaseFold._materialize_block: `_base`"
+                        " base_offset "
+                        + String(r.base_offset)
+                        + " != fold high-water "
+                        + String(dense_cursor)
+                        + " (torn fold)"
+                    )
+                if r.last_offset != r.base_offset + in_count - Int64(1):
+                    _ = shard^
+                    raise Error(  # cov: unreachable CasManifestStore.append returns last_offset = base_offset + record_count - 1
+                        "SegmentBaseFold._materialize_block: `_base`"  # cov: unreachable see the line above
+                        " last_offset "
+                        + String(r.last_offset)  # cov: unreachable see the line above
+                        + " != base+count-1 "  # cov: unreachable see the line above
+                        + String(r.base_offset + in_count - Int64(1))  # cov: unreachable see the line above
+                        + " (manifest non-contiguity)"  # cov: unreachable see the line above
+                    )
+                dense_cursor += in_count
+                appended += 1
+            running = chunk_hi
+            seq += Int64(1)
         _ = shard^
         return appended
 
@@ -555,7 +555,7 @@ struct SegmentBaseFold[Store: CloneableConditionalWriteStore](
             head = s.read_head_authoritative()
         except e:
             _ = s^
-            if not _is_not_found_msg(String(e)):
+            if not is_not_found_msg(String(e)):
                 raise e^
             return 0  # the shard manifest is gone: nothing to retire
         var already_tomb = s.tombstone_seqs()
@@ -641,15 +641,13 @@ struct SegmentBaseFold[Store: CloneableConditionalWriteStore](
         rounds (the old growing-map NO-GO)."""
         # live `_base` chunks above log-start.
         var base = self._base_manifest()
-        var live_base = 0
-        try:
-            var head = base.read_head_authoritative()
-            var ls = base.read_log_start()
-            live_base = Int(head.chunk_seq + Int64(1) - ls.log_start_seq)
-            if live_base < 0:
-                live_base = 0
-        except e:
-            _ = e  # no `_base` yet -> 0 live folded chunks
+        # No `_base` yet reads as chunk_seq -1 -> 0 live folded chunks; a read
+        # error raises.
+        var head = base.read_head_authoritative()
+        var ls = base.read_log_start()
+        var live_base = Int(head.chunk_seq + Int64(1) - ls.log_start_seq)
+        if live_base < 0:
+            live_base = 0
         _ = base^
         # live source shards + those with an un-folded tail.
         var snap = self._snapshot()
@@ -690,15 +688,3 @@ def _i64_in(xs: List[Int64], v: Int64) -> Bool:
         if xs[i] == v:
             return True
     return False
-
-
-@always_inline
-def _is_not_found_msg(msg: String) -> Bool:
-    """Classify a not-found / 404 store error (the reaped-chunk race in a walk).
-    Mirrors `consume_core._is_not_found_msg` + `sublineage_consume._is_not_found_msg`."""
-    return (
-        msg.find("not_found") >= 0
-        or msg.find("NotFound") >= 0
-        or msg.find("404") >= 0
-        or msg.find("NoSuchKey") >= 0
-    )
