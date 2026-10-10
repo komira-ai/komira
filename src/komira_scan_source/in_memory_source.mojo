@@ -84,7 +84,7 @@ def _next_inmem_source_id() -> UInt64:
 
 @always_inline
 def _mix64(x: UInt64) -> UInt64:
-    """SplitMix64-style finalizer (local copy of `column_stats.mojo:_mix64` —
+    """SplitMix64-style finalizer (local copy of `column_stats_hll.mojo:_mix64` —
     source/ keeps its own hash helpers; see the FNV-1a comment below). One
     multiply + xor-shift rounds; a *bijection* on 64 bits, so a unique input
     maps to a unique output — which is exactly what we need: the monotonic

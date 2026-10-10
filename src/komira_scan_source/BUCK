@@ -31,6 +31,7 @@ mojo_library(
     test_srcs = [
         "tests/test_arrow_c_stream_table_export.mojo",
         "tests/test_column_stats.mojo",
+        "tests/test_column_stats_edges.mojo",
         "tests/test_column_stats_large_string_offsets.mojo",
         "tests/test_column_stats_scan.mojo",
         "tests/test_csv_read_csv_e2e.mojo",
