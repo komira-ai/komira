@@ -25,6 +25,7 @@ from komira_scalar_arithmetic.decimal_arith import (
     pow10_i128,
     pow10_i256,
     overflows_dec128,
+    max_dec128_i256,
     rescale_i256_half_up,
     DEC128_MAX_PRECISION,
 )
@@ -177,17 +178,18 @@ def decimal_to_string(v: I128, scale: Int) -> String:
     prefix for negatives, no trailing-zero trimming, no point at scale 0.
     """
     var neg = v < I128(0)
-    var av = v
+    # The magnitude in int256: -I128.MIN wraps in int128 (it printed "-0").
+    var av = v.cast[DType.int256]()
     if neg:
         av = -av
     # Extract decimal digits of the magnitude (least-significant first).
     var digits = List[UInt8]()
-    var ten = I128(10)
-    if av == I128(0):
+    var ten = I256(10)
+    if av == I256(0):
         digits.append(UInt8(0))
     else:
         var tmp = av
-        while tmp > I128(0):
+        while tmp > I256(0):
             var d = tmp % ten
             digits.append(UInt8(Int(d)))
             tmp = tmp / ten
@@ -217,6 +219,10 @@ def _is_ascii_ws(c: UInt8) -> Bool:
     return c == UInt8(32) or c == UInt8(9) or c == UInt8(10) or c == UInt8(13) or c == UInt8(11) or c == UInt8(12)
 
 
+def _parse_overflow(s: String, precision: Int, scale: Int) -> Error:
+    return Error("Decimal128 parse: '" + s + "' overflows DECIMAL(" + String(precision) + "," + String(scale) + ")")
+
+
 def string_to_decimal_i128(s: String, precision: Int, scale: Int) raises -> I128:
     """Parse a decimal literal (optionally with sign / fractional part /
     scientific exponent) into a D(precision, scale) value, rounding
@@ -243,18 +249,30 @@ def string_to_decimal_i128(s: String, precision: Int, scale: Int) raises -> I128
     elif bytes[i] == UInt8(ord("-")):
         neg = True
         i += 1
-    # Mantissa: digits [. digits]
-    var mantissa = I128(0)
-    var ten = I128(10)
+    # Mantissa: digits [. digits]. ⛔ At most 76 SIGNIFICANT digits are kept
+    # (10^76 - 1 fits int256); a longer literal used to wrap the mantissa.
+    # Past the cap an integer-part digit is a factor of ten (`dropped_int`)
+    # and a fractional one is discarded: a Decimal128 result keeps at most 38
+    # of the 76 kept digits, so the cut to the target scale lands inside them
+    # and HALF_UP reads only the first digit it cuts.
+    var mantissa = I256(0)
+    var ten = I256(10)
     var frac_digits = 0
+    var kept = 0
+    var dropped_int = 0
     var seen_digit = False
     var seen_dot = False
     while i < hi:
         var c = bytes[i]
         if c >= UInt8(ord("0")) and c <= UInt8(ord("9")):
-            mantissa = mantissa * ten + I128(Int(c) - Int(ord("0")))
-            if seen_dot:
-                frac_digits += 1
+            if kept < 76:
+                mantissa = mantissa * ten + I256(Int(c) - Int(ord("0")))
+                if mantissa != I256(0):
+                    kept += 1
+                if seen_dot:
+                    frac_digits += 1
+            elif not seen_dot:
+                dropped_int += 1
             seen_digit = True
             i += 1
         elif c == UInt8(ord(".")) and not seen_dot:
@@ -276,7 +294,9 @@ def string_to_decimal_i128(s: String, precision: Int, scale: Int) raises -> I128
             i += 1
         var edigits = 0
         while i < hi and bytes[i] >= UInt8(ord("0")) and bytes[i] <= UInt8(ord("9")):
-            exp = exp * 10 + (Int(bytes[i]) - Int(ord("0")))
+            # Saturate: past 10^9 any nonzero value over- or underflows alike.
+            if exp <= 100000000:
+                exp = exp * 10 + (Int(bytes[i]) - Int(ord("0")))
             edigits += 1
             i += 1
         if edigits == 0:
@@ -286,15 +306,27 @@ def string_to_decimal_i128(s: String, precision: Int, scale: Int) raises -> I128
     if i != hi:
         raise Error("Decimal128 parse: trailing garbage in '" + s + "'")
     # Source scale = frac_digits - exp (digits after the implied point).
-    var src_scale = frac_digits - exp
+    var src_scale = frac_digits - exp - dropped_int
     # Rescale mantissa from src_scale to target scale (HALF_UP on down).
     var r256: I256
-    if src_scale <= scale:
-        r256 = mantissa.cast[DType.int256]() * pow10_i256(scale - src_scale)
+    if mantissa == I256(0):
+        # Zero at any exponent ("0e100") is zero.
+        r256 = I256(0)
+    elif src_scale <= scale:
+        # Up: a nonzero mantissa times 10^39 or more is past 10^38 - 1; below
+        # that, check before multiplying (a 76-digit mantissa would wrap).
+        var up = scale - src_scale
+        if up > DEC128_MAX_PRECISION or mantissa > max_dec128_i256() / pow10_i256(up):
+            raise _parse_overflow(s, precision, scale)
+        r256 = mantissa * pow10_i256(up)
+    elif src_scale - scale > 76:
+        # Down by more than 76 digits: |mantissa| < 10^76 is below one half
+        # of a unit at the target scale, so it rounds to zero ("1e-100").
+        r256 = I256(0)
     else:
-        r256 = rescale_i256_half_up(mantissa.cast[DType.int256](), src_scale, scale)
+        r256 = rescale_i256_half_up(mantissa, src_scale, scale)
     if overflows_dec128(r256):
-        raise Error("Decimal128 parse: '" + s + "' overflows DECIMAL(" + String(precision) + "," + String(scale) + ")")
+        raise _parse_overflow(s, precision, scale)
     var r = r256.cast[DType.int128]()
     if neg:
         r = -r

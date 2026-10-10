@@ -19,11 +19,9 @@
 #            result_precision = min(max(p1-s1, p2-s2) + result_scale + 1, 38)
 #   mul:     result_scale     = s1 + s2
 #            result_precision = min(p1 + p2 + 1, 38)
-#            ... but for `result_scale > 38` we follow DuckDB's clamp+round
-#            rule (cap precision at 38, reduce scale to fit 38 total
-#            digits, rescale the value HALF_UP) — arrow-rs's behavior in
-#            that corner is murky (scale > precision); DuckDB is the
-#            oracle.
+#            A result_scale above 38 RAISES (DuckDB: "Needed scale N to
+#            accurately represent the multiplication result, but this is
+#            out of range"); see `decimal_mul_result_ps`.
 #   div:     result_scale     = min(s1 + 4, 38)        (Hive convention)
 #            mul_pow          = result_scale - s1 + s2  (>= 0 always under
 #                                                        this rule)
@@ -87,15 +85,16 @@ def max_dec128_i256() raises -> I256:
 @always_inline
 def overflows_dec128(v: I256) -> Bool:
     """True if |v| exceeds 10^38 - 1 (the Decimal128 range)."""
-    var av = v
-    if av < I256(0):
-        av = -av
     # 10^38 - 1 inline (avoid `raises` in this hot helper).
     var m = I256(10)
     for _ in range(37):
         m = m * I256(10)
     m = m - I256(1)
-    return av > m
+    # ⛔ Compare against both bounds, never `-v`: -(-2^255) wraps back to
+    # -2^255, which an `|v| > m` test reads as in range.
+    if v > m:
+        return True
+    return v < -m
 
 
 @always_inline
@@ -276,7 +275,16 @@ def decimal_div_i128(a: I128, s1: Int, b: I128, s2: Int, out_scale: Int) raises 
     if mul_pow < 0:
         # Unreachable under out_scale = min(s1+4, 38), but guard anyway.
         raise Error("Decimal128 div: negative rescale exponent (internal)")
-    var num = a.cast[DType.int256]() * pow10_i256(mul_pow)
+    # ⛔ The scaled numerator can pass 2^255 (DECIMAL(38,0) / DECIMAL(38,38)
+    # at scale 4 has mul_pow 42) and would WRAP. When it does not fit int256
+    # the quotient cannot fit Decimal128 either: |num| > 2^255 and
+    # |den| <= 2^127 put |q| above 2^128 > 10^38. |a| <= 2^127 cannot wrap
+    # in int256.
+    var a256 = a.cast[DType.int256]()
+    var scale_up = pow10_i256(mul_pow)
+    if i256_abs(a256) > I256.MAX / scale_up:
+        raise Error("Decimal128 overflow in div: result exceeds DECIMAL128(38,...) range")
+    var num = a256 * scale_up
     var den = b.cast[DType.int256]()
     var q = num / den
     # ⛔ `num - q * den`, NOT `num % den` — Mojo's integer `%` is FLOORED while
