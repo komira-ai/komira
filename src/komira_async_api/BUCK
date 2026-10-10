@@ -23,6 +23,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_spawn_drop.mojo",
+        "tests/test_token_races.mojo",
     ],
     visibility = ["PUBLIC"],
 )
