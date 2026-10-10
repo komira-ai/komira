@@ -189,9 +189,14 @@ def test_apply_updates() raises:
     )
     assert_equal(bumped_n.map_get(String("n")).as_string(), String("6"))
 
-    # An update kind with no arm is refused by name, not dropped.
+    # An update kind with no arm is refused by name, not dropped. The
+    # three-argument DbColVal constructor refuses kind 7 itself, but `kind` is
+    # a public field, so a caller can still hand this backend one: set it on a
+    # BIND term the way DbColVal.coalesce sets its own kind.
+    var odd_term = DbColVal.bind(String("s"), DbValue.text("y"))
+    odd_term.kind = UInt8(7)
     var odd = List[DbColVal]()
-    odd.append(DbColVal(String("s"), DbValue.text("y"), UInt8(7)))
+    odd.append(odd_term^)
     with assert_raises(contains="unsupported DbColVal kind 7 for column 's'"):
         _ = _apply_updates(
             _doc(), odd, False, Optional[String](), List[String](), Int64(0)
