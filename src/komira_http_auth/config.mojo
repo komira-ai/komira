@@ -9,15 +9,16 @@
 # is built for). `validate_trust_anchor` refuses anything else at startup, so
 # a misconfiguration is a startup error and never a silently weaker check.
 #
-# One verifier per trust anchor (see komira_crypto's rs256_jwks header): an
+# One verifier per trust anchor (see komira_jose's verifier.mojo header): an
 # anchor is never widened to accept a second issuer or a second `alg`.
 #
 # What this file refuses at startup:
 #   * a JWKS URL that is not `https://<host>/...` (no userinfo, no fragment);
 #   * an `alg` other than RS256;
-#   * a `typ` other than JWT. komira_crypto's RS256 verifier compares the
-#     header's `typ` to "JWT" itself, so no other value could ever verify in
-#     this slice; refusing it here makes that visible at startup;
+#   * a `typ` other than JWT. The signature check pins the header's `typ` to
+#     "JWT" (jwks_cache.mojo, `verify_signature`), so no other value could
+#     ever verify in this slice; refusing it here makes that visible at
+#     startup;
 #   * a max TTL outside 1..86400 seconds;
 #   * a clock leeway outside 0..60 seconds;
 #   * a JWKS fetch timeout outside 100 ms..60 s (the fetch stalls a serving

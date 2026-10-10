@@ -3,9 +3,10 @@
 # =============================================================================
 #
 # Everything here runs BEFORE any key is looked up or fetched and before any
-# signature work, on bytes the caller controls. The gate is stricter than
-# komira_crypto's RS256 verifier (which still runs afterwards and repeats its
-# own `alg` / `typ` / `crit` / `kid` checks over its own reader):
+# signature work, on bytes the caller controls. It is at least as strict as
+# komira_jose's header gate (which still runs afterwards, before the
+# signature, and repeats its own `alg` / `typ` / `crit` / `kid` checks), and
+# answers with this package's reason codes:
 #
 #   * three non-empty segments of the base64url alphabet, no padding
 #     (RFC 7515 section 2), the header at most 2 KiB of text;
@@ -20,9 +21,9 @@
 #     extension (RFC 7515 section 4.1.11);
 #   * `typ` must be present and equal to the anchor's typ (exact match);
 #   * `kid` must be a non-empty string of printable ASCII (it selects the
-#     key; see komira_crypto's rs256_jwks.mojo for why it is required).
-#     ASCII because komira_crypto reads a JWK's kid one byte per character,
-#     so a non-ASCII kid could never match a published key: it is refused
+#     key; a token without one would leave only "try every key", which
+#     komira_jose never does). ASCII because komira_jose's header gate
+#     refuses any other kid, so it could never verify: it is refused
 #     here as a bad kid, before it can cost a JWKS refetch. The JWKS side
 #     refuses a non-ASCII kid too (jwks_cache.mojo). Real issuers' kids are
 #     hex.

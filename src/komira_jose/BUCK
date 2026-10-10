@@ -17,6 +17,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   corpus (//third_party/wycheproof, pinned by sha256) against verifiers
 #   pinned to each of ES256, EdDSA and RS256: exactly the ten valid ES256 and
 #   RS256 vectors verify, and only under their own algorithm.
+# - test_rs256_third_party: an RS256 ID token and key set made by another
+#   implementation, and the JWK Set Google publishes (member order varies by
+#   entry): verify, tamper, wrong key under a kid, ES256 against RS256.
 # - test_header_gate: each header refusal, its order, and the compact form.
 # - test_key_selection: kid selection and the key checks (type, alg, use,
 #   key_ops, length).
@@ -40,6 +43,7 @@ mojo_library(
         "tests/test_key_selection.mojo",
         "tests/test_no_product_vocabulary.mojo",
         "tests/test_rfc_vectors.mojo",
+        "tests/test_rs256_third_party.mojo",
         "tests/test_wycheproof_jws.mojo",
     ],
     test_deps = ["//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary"],

@@ -195,8 +195,8 @@ def test_valid_token_yields_the_jwt_principal() raises:
     )
     # A non-string claim is copied as its JSON text.
     assert_equal(p.claims.get(String("email_verified")).value(), String("true"))
-    # Non-ASCII survives (komira_crypto's returned payload String would have
-    # double-encoded it; the claims are read from the re-decoded segment).
+    # Non-ASCII survives (the claims are read from the decoded segment as
+    # UTF-8, never one byte per character).
     assert_equal(p.claims.get(String("name")).value(), String("Zoë"))
     # A copy-claim the token lacks is not set; claims not asked for are not
     # copied.
