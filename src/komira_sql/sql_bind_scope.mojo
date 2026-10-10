@@ -204,11 +204,13 @@ struct _RelCols(Copyable, Movable):
     var aliases: List[String]  # lower-cased qualifiers naming this relation
     var orig: List[String]  # column names as in the relation's own schema
     var out: List[String]  # column names in the combined/join OUTPUT schema
+    var rel_idx: Int  # index of this relation in the statement's `from_tables`
 
     def __init__(out self):
         self.aliases = List[String]()
         self.orig = List[String]()
         self.out = List[String]()
+        self.rel_idx = 0
 
 
 struct BindScope(Movable):
@@ -347,6 +349,7 @@ def _build_bind_scope(
                     for c in range(len(jc.using_cols)):
                         coalesced.append(String(jc.using_cols[c]))
         var rc = _RelCols()
+        rc.rel_idx = ti
         if rel.rel_alias != "":
             rc.aliases.append(rel.rel_alias.lower())
         if rel.name != "":

@@ -35,7 +35,8 @@ from komira_sql.sql_bind_parquet import (
     path_has_glob, is_parquet_tvf_kind,
 )
 from komira_sql.sql_bind_scope import (
-    CteScope, _date_to_days, _relation_schema, _relation_scan, _schema_has_col,
+    CteScope, _build_bind_scope, _date_to_days, _relation_schema, _relation_scan,
+    _schema_has_col,
 )
 from komira_sql.sql_bind_timestamp import _timestamp_literal_micros
 from komira_sql.sql_binder import _bind_select
@@ -460,8 +461,11 @@ def _not_in_lhs_is_null_free(
         outer relation is `stmt.from_tables`, not a CTE / derived / nested body);
       * no OUTER join in that FROM (a null-extended side manufactures NULLs no
         file statistic records);
-      * exactly ONE relation there has a column named `col`, and it passes
-        `_rel_col_null_free`."""
+      * exactly ONE relation of the statement's FROM scope (`_build_bind_scope`,
+        the scope the outer WHERE binds against) has an OUTPUT column named
+        `col`, and that relation's SOURCE column (`k` for a join-renamed
+        `k_right`) passes `_rel_col_null_free`. A relation a SEMI / ANTI join
+        adds is not in that scope: its columns are not in the WHERE's input."""
     if not stmt.where_pred:
         return False
     if not _where_top_conjunct_is_subquery(stmt.where_pred.value(), idx):
@@ -471,19 +475,22 @@ def _not_in_lhs_is_null_free(
         if k == JK_LEFT or k == JK_RIGHT or k == JK_FULL:
             return False
     var owner = -1
+    var src_col = String("")
     try:
-        for i in range(len(stmt.from_tables)):
-            var sch = _relation_schema(stmt.from_tables[i], catalog, cte_scope)
-            for c in range(sch.num_columns()):
-                if sch.field_name(c).lower() == col.lower():
+        var scope = _build_bind_scope(stmt.from_tables, stmt.joins, catalog, cte_scope)
+        for ri in range(len(scope.rels)):
+            ref r = scope.rels[ri]
+            for c in range(len(r.out)):
+                if r.out[c].lower() == col.lower():
                     if owner >= 0:
                         return False
-                    owner = i
+                    owner = r.rel_idx
+                    src_col = String(r.orig[c])
     except:
         return False
     if owner < 0:
         return False
-    return _rel_col_null_free(stmt.from_tables[owner], col, catalog, cte_scope)
+    return _rel_col_null_free(stmt.from_tables[owner], src_col, catalog, cte_scope)
 
 
 def _expr_is_equi_correlation(e: Expr) -> Bool:
