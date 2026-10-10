@@ -30,10 +30,18 @@
 #                         channel to publish to
 #   release_version_file  release_version.sh's stdout for the release commit
 #   concurrency           how many members upload at once, 1..16
-#   never_backward        the stage never publishes a lower build number
-#                         than its channel lists for the same name and
-#                         version (run.mojo; kci_cli sets it for a stage
-#                         without `break_glass`)
+#   never_backward        the run never publishes a lower build number
+#                         than its channel lists, nor a build its
+#                         channel's newest one descends from (run.mojo;
+#                         kci_cli sets it for a push to main, and for a
+#                         stage without `break_glass` on any run)
+#   main_line_only        never_backward counts only the channel's
+#                         main-line builds (plan.mojo `main_line_files`;
+#                         kci_cli sets it for a `break_glass` stage, whose
+#                         channel also takes break-glass builds)
+#   revision_history      what never_backward holds the channel to: the
+#                         revision's history and main's (kci_cli reads them
+#                         with git)
 #   break_glass           the run is BREAK-GLASS (kci_cli: any run but a
 #                         push to main): an OIDC channel's
 #                         `break_glass_push_identity` is the trusted
@@ -76,6 +84,7 @@ struct PublishRequest(Copyable, Movable):
     var release_version_file: String
     var concurrency: Int
     var never_backward: Bool
+    var main_line_only: Bool
     var revision_history: RevisionHistory
     var break_glass: Bool
     var plan: Bool
@@ -94,6 +103,7 @@ struct PublishRequest(Copyable, Movable):
         self.release_version_file = String("")
         self.concurrency = DEFAULT_CONCURRENCY
         self.never_backward = False
+        self.main_line_only = False
         self.revision_history = RevisionHistory()
         self.break_glass = False
         self.plan = False

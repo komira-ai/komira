@@ -32,6 +32,8 @@ nist.gov	NIST standards and test vectors
 modular.com	the Mojo toolchain's distribution and documentation
 pypi.org	the Python package index
 pythonhosted.org	the Python package index's file host
+nodejs.org	the Node.js runtime's distribution (third_party/node)
+npmjs.org	the npm package registry (third_party/node)
 prefix.dev	the conda package host the toolchain pins download from
 anaconda.org	the conda package index
 crates.io	the Rust package index

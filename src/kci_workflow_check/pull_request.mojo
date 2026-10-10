@@ -40,9 +40,27 @@
 
 from .workflow_reader import NODE_LIST, NODE_MAP, NODE_SCALAR, WorkflowDoc
 
-comptime PULL_REQUEST_BASE_EXPRESSION: String = "github.event.pull_request.base.sha"
-"""What a PULL_REQUEST stage's `kci run --affected-by` passes, inside
-`${{ }}` (R6): the pull request's base commit, a full commit id."""
+comptime CHANGE_BASE_VARIABLE: String = "change_base"
+"""The shell variable a PULL_REQUEST stage's `kci run --affected-by` passes
+(R6), as `"$change_base"`: the merge commit's first parent, set by
+`CHANGE_BASE_LINE` earlier in the same `run:` script."""
+
+comptime CHANGE_BASE_LINE: String = (
+    "if ! git rev-parse --verify --quiet HEAD^2 > /dev/null || ! change_base=$(git rev-parse --verify HEAD^1);"
+    " then echo \"::error::the change base is the merge commit's first parent, and HEAD is not a merge commit\"; exit 1; fi"
+)
+"""The line, alone and exactly so, that sets `change_base` (R6). A pull
+request's check builds the merge commit GitHub made (`github.sha`, which kci
+holds HEAD to); its first parent is exactly the base branch the change is
+merged into, so `git diff <it>...HEAD` is the pull request's change and
+nothing else. HEAD with no second parent is not a merge commit, and the step
+stops."""
+
+comptime EVENT_BASE_EXPRESSION: String = "github.event.pull_request.base.sha"
+"""The pull request event's base commit: the base branch when the event
+fired, which is not the first parent of the merge commit once the base
+branch has moved. As `--affected-by` it widens the check to every change
+merged to the base branch since then (R6 refuses it by name)."""
 
 comptime SAME_REPOSITORY_CONDITION: String = "github.event.pull_request.head.repo.full_name == github.repository"
 """The job-level `if:` of a PULL_REQUEST stage's job (R6): a fork's pull
@@ -286,24 +304,36 @@ def check_pull_request_job(
     stage: String,
     affected_by: List[String],
     has_affected_by: List[Bool],
+    scripts: List[String],
     mut findings: List[String],
 ):
     """R6 for the job of a PULL_REQUEST stage (rules.mojo's header): the
-    base commit (each `kci run`'s `--affected-by`, given as two parallel
-    lists), the full history, the fork condition and the permissions."""
+    change base (each `kci run`'s `--affected-by`, and the `run:` script
+    holding that `kci run`, given as three parallel lists), the full
+    history, the fork condition and the permissions."""
     var where = _at(doc, job) + String("job '") + job_id + String("': R6: stage '") + stage + String("' is a PULL_REQUEST stage")
-    var want = String("${{ ") + String(PULL_REQUEST_BASE_EXPRESSION) + String(" }}")
+    var arg = String("$") + String(CHANGE_BASE_VARIABLE)
+    var want = String("--affected-by \"") + arg + String("\" after the line `") + String(CHANGE_BASE_LINE) + String("`")
     for i in range(len(affected_by)):
         if not has_affected_by[i]:
             findings.append(
-                where + String(", so its `kci run` carries --affected-by ") + want
+                where + String(", so its `kci run` carries ") + want
                 + String(" (the per-change check of the pull request)")
             )
-        elif not is_expression(affected_by[i], String(PULL_REQUEST_BASE_EXPRESSION)):
+        elif is_expression(affected_by[i], String(EVENT_BASE_EXPRESSION)):
+            findings.append(
+                where + String(": `--affected-by ") + affected_by[i]
+                + String("` is the base branch when the event fired, not the first parent of the merge commit")
+                + String(" the job builds: once the base branch moves, every change merged to it since then is")
+                + String(" counted as the pull request's own and widens the check; it passes ") + want
+            )
+        elif affected_by[i] != arg:
             findings.append(
                 where + String(": `--affected-by ") + affected_by[i] + String("`; it passes ") + want
-                + String(", written so")
+                + String(", the merge commit's first parent")
             )
+        else:
+            _check_change_base(scripts[i], where, want, findings)
     var checkouts = 0
     var steps = doc.items(doc.child(job, String("steps")))
     for i in range(len(steps)):
@@ -369,6 +399,42 @@ def check_pull_request_job(
                 where + String(", so its permissions hold only `contents: read` and, for the farm connection,")
                 + String(" `id-token: write`; it grants `") + keys[i] + String(": ") + value + String("`")
             )
+
+
+def _count(text: String, needle: String) -> Int:
+    var n = 0
+    var at = text.find(needle)
+    while at >= 0:
+        n += 1
+        at = text.find(needle, at + needle.byte_length())
+    return n
+
+
+def _check_change_base(script: String, where: String, want: String, mut findings: List[String]):
+    """R6: the `run:` script whose `kci run` passes `--affected-by
+    "$change_base"` sets it by `CHANGE_BASE_LINE`, a line of its own before
+    the `kci run`, and names `change_base` nowhere else (no second
+    assignment, `read`, `export` or `${change_base}`)."""
+    var line = String(CHANGE_BASE_LINE)
+    var at = -1
+    if script.startswith(line + String("\n")):
+        at = 0
+    else:
+        var nl = script.find(String("\n") + line + String("\n"))
+        if nl >= 0:
+            at = nl + 1
+    var use = script.find(String("$") + String(CHANGE_BASE_VARIABLE))
+    if at < 0 or use < at:
+        findings.append(
+            where + String(": its `kci run` passes --affected-by \"$") + String(CHANGE_BASE_VARIABLE)
+            + String("\" and the script does not set it before, so it passes ") + want
+        )
+    elif _count(script, String(CHANGE_BASE_VARIABLE)) != 2:
+        findings.append(
+            where + String(": the script names `") + String(CHANGE_BASE_VARIABLE) + String("` ")
+            + String(_count(script, String(CHANGE_BASE_VARIABLE)))
+            + String(" times; exactly twice, where it is set and as --affected-by, so nothing else changes it")
+        )
 
 
 # ---- what reaches a pull request's job, and the push branch ---------------------

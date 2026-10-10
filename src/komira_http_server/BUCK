@@ -25,6 +25,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_L0_accept_loop_rounds.mojo",
+        "tests/test_L0_accept_loop_sweep.mojo",
         "tests/test_L0_accept_loop_tls.mojo",
         "tests/test_L0_transport_basic.mojo",
         "tests/test_L2_codec_header_limits.mojo",
@@ -43,6 +44,7 @@ mojo_library(
         "tests/test_L3_metrics_sink.mojo",
         "tests/test_L3_short_circuit.mojo",
         "tests/test_L3_tracing.mojo",
+        "tests/test_L4_routes_compose.mojo",
         "tests/test_L4_routing_basic.mojo",
         "tests/test_chunked_request_body_dispatch.mojo",
         "tests/test_claims_principal.mojo",

@@ -1,0 +1,12 @@
+{
+ "name": "table_null_count_unknown",
+ "defect": "a table output with null_count -1 (not computed, legal Arrow) and no null row is refused",
+ "run": "frame",
+ "entry": "table_null_count_unknown",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]}],
+ "expect": {"status": "OK", "batches": [{"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]}]}
+}

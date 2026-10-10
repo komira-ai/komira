@@ -21,14 +21,17 @@
 #                 `UNMATCHED <unit> <target>`  a declared unit's target that
 #                                          matches nothing in the graph;
 #               then exactly one verdict line, LAST: `DERIVED <n>`, n the
-#               number of distinct check names (0 is allowed). One trailing
-#               newline is allowed.
+#               number of distinct check names (0 is allowed); or, alone,
+#               `BROKEN <reason>`: the tool could not query its build graph
+#               (its query failed, buck2's error in the reason), and
+#               kci_build FAILS the check. One trailing newline is allowed.
 #
 # `parse_derive_answer` refuses anything else: an unknown or empty line, a
 # CHECK with no target or a target holding a space, an UNMATCHED naming a
 # unit or a target that is not declared, a line repeated, a missing,
-# repeated or misplaced verdict, an n that is not the count. A refusal is
-# "cannot tell" for the caller (kci_build), never an empty answer.
+# repeated or misplaced verdict, an n that is not the count, a BROKEN with
+# no reason or after another line. A refusal is "cannot tell" for the caller
+# (kci_build), never an empty answer.
 #
 # `add_derived_checks` appends the derived checks to the file's value, owned
 # by the build system that derived them, and validates the result with the
@@ -53,12 +56,14 @@ from .validate import find_artifact, find_build_system, validate_artifacts
 comptime DERIVE_CHECK: String = "CHECK"
 comptime DERIVE_UNMATCHED: String = "UNMATCHED"
 comptime DERIVE_VERDICT: String = "DERIVED"
+comptime DERIVE_BROKEN: String = "BROKEN"
 
 
 struct DeriveAnswer(Copyable, Movable):
     """One build system's parsed answer: the derived checks (names, and the
     targets of each, in parallel lists) and the declared targets that match
-    nothing (units and targets, in parallel lists).
+    nothing (units and targets, in parallel lists); or `broken`, with the
+    tool's `reason`, when it could not query its graph (no check, no line).
 
     Layout: owned values only. No pointer field."""
 
@@ -66,12 +71,16 @@ struct DeriveAnswer(Copyable, Movable):
     var targets: List[List[String]]
     var unmatched_units: List[String]
     var unmatched_targets: List[String]
+    var broken: Bool
+    var reason: String
 
     def __init__(out self):
         self.names = List[String]()
         self.targets = List[List[String]]()
         self.unmatched_units = List[String]()
         self.unmatched_targets = List[String]()
+        self.broken = False
+        self.reason = String("")
 
 
 def declared_units_file_text(arts: Artifacts) -> String:
@@ -196,6 +205,14 @@ def parse_derive_answer(text: String, declared: List[Unit]) raises -> DeriveAnsw
             out.unmatched_units.append(p[0].copy())
             out.unmatched_targets.append(p[1].copy())
             continue
+        if word == DERIVE_BROKEN:
+            if n != 1:
+                raise Error(where + String(": BROKEN fails the check, so it is the only line"))
+            if rest.byte_length() == 0:
+                raise Error(where + String(": BROKEN needs a reason"))
+            out.broken = True
+            out.reason = rest^
+            return out^
         if word == DERIVE_VERDICT:
             if i != n - 1:
                 raise Error(where + String(": the verdict must be the last line, and there is one"))
@@ -208,7 +225,7 @@ def parse_derive_answer(text: String, declared: List[Unit]) raises -> DeriveAnsw
                     + String(len(out.names))
                 )
             return out^
-        raise Error(where + String(": not CHECK <name> <target>, UNMATCHED <unit> <target> or DERIVED <n>"))
+        raise Error(where + String(": not CHECK <name> <target>, UNMATCHED <unit> <target>, DERIVED <n> or BROKEN <reason>"))
     raise Error(String("no verdict line (DERIVED <n>)"))
 
 

@@ -59,7 +59,8 @@ from kci_reconciler import (
     VERB_CREATE,
     VERB_NOOP,
 )
-from kci_resource_proto.resource import Resource, ResourceList, Retention
+from kci_resource_proto.refs import Retention
+from kci_resource_proto.resource import Resource, ResourceList
 
 from kci_cloud import (
     GrantEdge,
@@ -74,6 +75,7 @@ from kci_cloud import (
     Finding,
     LoweredNode,
     OwnedRecord,
+    ExistingObject,
     Principal,
     RUN_UNKNOWN,
     Setting,
@@ -315,6 +317,12 @@ struct _Data(CloudAdapter, Movable):
 
     def list_owned(mut self, creds: Creds, scope: CellScope) raises -> List[OwnedRecord]:
         return self.owned.copy()
+
+    def read_existing(mut self, creds: Creds, node: LoweredNode) raises -> ExistingObject:
+        return ExistingObject()  # nothing stands anywhere: these tests adopt nothing
+
+    def release(mut self, creds: Creds, record: OwnedRecord) raises:
+        raise Error("stub: these tests release nothing")
 
     def whoami(mut self, creds: Creds) raises -> Principal:
         return Principal(String("deployer"), String("data-account"))
