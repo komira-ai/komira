@@ -28,7 +28,7 @@
  * inits is static, so the builds link into one process (the one-definition
  * gate links every C library whole).
  *
- * Built three ways (BUCK). With KOMIRA_UDF_ECHO_BROKEN defined it is
+ * Built four ways (BUCK). With KOMIRA_UDF_ECHO_BROKEN defined it is
  * komira-test/echo-broken, the same code with seven planted defects the
  * suite must catch (each marked BROKEN):
  *   1. it does not release `args` when a fixture raises (a leak);
@@ -46,6 +46,13 @@
  * ECHO_INIT_VARIANT defined, it defines one more init whose table and
  * describe answer break one rule of the contract, chosen when it runs
  * (echo_variants.inc).
+ *
+ * With ECHO_NATIVE defined it is a native UDF library (design section 1.2),
+ * the C fixture library the native runtime loads: the same fixtures, with
+ * describe reporting runtime_id "komira/native", udf_class NATIVE, hosting 0
+ * and CONTEXT_PER_THREAD. With ECHO_INIT_AFFINE also defined, that init is
+ * the same library reporting thread_affine 1, which the native runtime must
+ * refuse to load.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -61,6 +68,9 @@
 #ifdef KOMIRA_UDF_ECHO_BROKEN
 #define BROKEN 1
 #define ECHO_ID "komira-test/echo-broken"
+#elif defined(ECHO_NATIVE)
+#define BROKEN 0
+#define ECHO_ID "komira/native"
 #else
 #define BROKEN 0
 #define ECHO_ID "komira-test/echo"
@@ -334,7 +344,8 @@ static const struct fixture FIXTURES[] = {
 struct komira_udf_rt {
   const komira_udf_host* host;
   uint32_t global_lock;
-  int variant; /* echo_variants.inc; 0 in every other init */
+  uint32_t thread_affine; /* 1 only from ECHO_INIT_AFFINE */
+  int variant;            /* echo_variants.inc; 0 in every other init */
 };
 #define ROW_FIELDS_MAX 8
 
@@ -690,13 +701,19 @@ static int32_t echo_describe(komira_udf_rt* rt, komira_udf_capabilities* c) {
   c->shapes = KOMIRA_UDF_SHAPE_SCALAR | KOMIRA_UDF_SHAPE_ROW | KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN |
               KOMIRA_UDF_SHAPE_MAP_BATCHES_FRAME | KOMIRA_UDF_SHAPE_AGG_PLAIN | KOMIRA_UDF_SHAPE_AGG_MERGEABLE |
               KOMIRA_UDF_SHAPE_STEP;
+#ifdef ECHO_NATIVE
+  c->threading = KOMIRA_UDF_CONTEXT_PER_THREAD;
+  c->hosting = KOMIRA_UDF_HOSTING_NONE;
+  c->udf_class = KOMIRA_UDF_CLASS_NATIVE;
+#else
   c->threading = KOMIRA_UDF_THREAD_SAFE;
-  c->thread_affine = 0;
-  c->transports = KOMIRA_UDF_TRANSPORT_IN_PROCESS;
   c->hosting = KOMIRA_UDF_HOSTING_EMBEDDED;
+  c->udf_class = KOMIRA_UDF_CLASS_MANAGED;
+#endif
+  c->thread_affine = rt->thread_affine;
+  c->transports = KOMIRA_UDF_TRANSPORT_IN_PROCESS;
   c->devices = KOMIRA_UDF_DEVICE_CPU;
   c->features = KOMIRA_UDF_FEATURE_MEMORY_REPORT;
-  c->udf_class = KOMIRA_UDF_CLASS_MANAGED;
   c->global_lock = rt->global_lock;
   if (rt->variant != 0) return describe_variant(rt, c);
   return KOMIRA_UDF_OK;
@@ -844,6 +861,16 @@ const komira_udf_runtime* ECHO_INIT_GLOBAL_LOCK(const komira_udf_host* host, kom
                                                 komira_udf_error* e) {
   komira_udf_rt* r = new_rt(host, e, 1, 0);
   if (r == NULL) return NULL;
+  *rt = r;
+  return &TABLE;
+}
+#endif
+
+#ifdef ECHO_INIT_AFFINE
+const komira_udf_runtime* ECHO_INIT_AFFINE(const komira_udf_host* host, komira_udf_rt** rt, komira_udf_error* e) {
+  komira_udf_rt* r = new_rt(host, e, 0, 0);
+  if (r == NULL) return NULL;
+  r->thread_affine = 1;
   *rt = r;
   return &TABLE;
 }

@@ -38,3 +38,23 @@ src/tests/helpers/komira_udf_spike_abi/refrt/echo_broken_so.mojo	the init export
 src/tests/helpers/komira_udf_spike_abi/refrt/echo_global_lock_so.mojo	the init export of the echo_global_lock UDF runtime library, forwarded to its second C init
 src/tests/helpers/komira_udf_spike_abi/refrt/echo_so.mojo	the init export of the echo UDF runtime library, forwarded to its C init
 src/tests/helpers/komira_udf_spike_abi/refrt/echo_variant_so.mojo	the init export of the echo_variant UDF runtime library, forwarded to its variant C init
+src/tests/helpers/komira_udf_spike_native/refrt/both_symbols_so.mojo	the two init exports of the both_symbols native UDF library, forwarded to the C native library's init
+src/tests/helpers/komira_udf_spike_native/refrt/echo_as_library_so.mojo	the native library export of the echo_as_library shared library, forwarded to the echo runtime's C init
+src/tests/helpers/komira_udf_spike_native/refrt/native_c_affine_so.mojo	the init export of the native_c_affine UDF library, forwarded to its second C init
+src/tests/helpers/komira_udf_spike_native/refrt/native_c_so.mojo	the init export of the native_c UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/native_so.mojo	the init export of the native UDF runtime library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_abi2_so.mojo	the init export of the variant_abi2 native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_counted_so.mojo	the init export of the variant_counted native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_deferred_so.mojo	the init export of the variant_deferred native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_error_on_ok_so.mojo	the init export of the variant_error_on_ok native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_exact_table_so.mojo	the init export of the variant_exact_table native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_global_lock_so.mojo	the init export of the variant_global_lock native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_init_fails_so.mojo	the init export of the variant_init_fails native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_managed_so.mojo	the init export of the variant_managed native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_no_scalar_so.mojo	the init export of the variant_no_scalar native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_one_short_so.mojo	the init export of the variant_one_short native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_short_table_so.mojo	the init export of the variant_short_table native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_single_thread_so.mojo	the init export of the variant_single_thread native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_worker_only_so.mojo	the init export of the variant_worker_only native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native_mojo/_arrow.mojo	the Arrow C Data arrays a native UDF library reads and builds, and the error strings it hands the host
+src/tests/helpers/komira_udf_spike_native_mojo/_table.mojo	the UDF runtime C ABI table of the Mojo native UDF library and its handles

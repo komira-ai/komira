@@ -38,6 +38,10 @@ SRC_C_LIBRARIES = [
     "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_c",
     "//src/tests/helpers/komira_udf_spike_abi:komira_udf_echo",
     "//src/tests/helpers/komira_udf_spike_abi:komira_udf_echo_broken",
+    "//src/tests/helpers/komira_udf_spike_abi:komira_udf_echo_native",
+    "//src/tests/helpers/komira_udf_spike_native:komira_udf_native_rt",
+    "//src/tests/helpers/komira_udf_spike_native:komira_udf_native_variants",
+    "//src/tests/helpers/komira_udf_spike_native:komira_udf_spike_native_c",
 ]
 
 THIRD_PARTY_C_LIBRARIES = [

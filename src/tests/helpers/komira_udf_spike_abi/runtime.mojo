@@ -49,6 +49,7 @@ from ._table import (
     new_spec,
     open_library,
     read_caps,
+    read_words,
     required_size,
     slot_value,
     t_agg_close,
@@ -73,6 +74,9 @@ from ._table import (
     t_validate,
     table_abi,
     table_size,
+    time_calls,
+    time_calls_mt,
+    word_array,
 )
 from .contract import (
     ABI_MAJOR,
@@ -125,11 +129,35 @@ struct Capabilities(Copyable, Movable, Writable):
         )
 
 
+@fieldwise_init
+struct CodeObject(Copyable, Movable):
+    """One code object of a UdfRef: its role (a runtime-defined label) and
+    the sha256 of its bytes, which the host stores under the code root
+    named by the hex digest."""
+
+    var role: String
+    var sha256: List[UInt8]
+
+
+@fieldwise_init
+struct CodeSet(Copyable, Movable):
+    """The code root and code objects a suite gives every case's spec. An
+    empty set leaves each spec as its case wrote it."""
+
+    var root: String
+    var objects: List[CodeObject]
+
+    @staticmethod
+    def none() -> CodeSet:
+        return CodeSet("", List[CodeObject]())
+
+
 struct UdfSpec(Copyable, Movable):
     """A UdfRef as the host decoded it: what komira_udf_spec carries. `args`
     is the argument struct's fields, named by `arg_names` (`c<i>` past its
     end; for ROW, the read set); `result` the result type, one field for a
-    column, a struct's fields when `result_is_table`."""
+    column, a struct's fields when `result_is_table`; `code` the code
+    objects under `code_root`."""
 
     var shape: UInt32
     var form: Int32
@@ -143,6 +171,8 @@ struct UdfSpec(Copyable, Movable):
     var state: Optional[ColumnType]
     var null_mode: Int32
     var stability: Int32
+    var code_root: String
+    var code: List[CodeObject]
 
     def __init__(out self, shape: UInt32, entry: String, var args: List[ColumnType], var result: List[ColumnType]):
         self.shape = shape
@@ -157,6 +187,8 @@ struct UdfSpec(Copyable, Movable):
         self.state = None
         self.null_mode = NULL_MANUAL
         self.stability = IMMUTABLE
+        self.code_root = ""
+        self.code = List[CodeObject]()
 
 
 @fieldwise_init
@@ -216,6 +248,37 @@ struct FrameResult(Copyable, Movable):
     var outputs: List[Batch]
     var pulls_before_first_output: Int
     var pulls: Int
+
+
+@fieldwise_init
+struct CallTimes(Copyable, Movable):
+    """A timed loop on one thread: each call's ns, and the calls that
+    failed, the outputs that were not what the loop expected, and the input
+    arrays the runtime released (of len(samples_ns))."""
+
+    var samples_ns: List[Int64]
+    var failures: Int
+    var mismatches: Int
+    var released: Int
+
+
+@fieldwise_init
+struct ThreadTimes(Copyable, Movable):
+    """A timed loop on several threads at once: the wall time, the process's
+    CPU time (user and system) and the loop threads' own over the same span,
+    the counts of CallTimes over every thread, the process's involuntary
+    context switches, and the time inside the calls alone: summed over every
+    thread, and the largest one thread's sum."""
+
+    var wall_ns: Int64
+    var process_cpu_ns: Int64
+    var threads_cpu_ns: Int64
+    var failures: Int
+    var mismatches: Int
+    var released: Int
+    var involuntary_switches: Int64
+    var calls_ns: Int64
+    var calls_ns_max_thread: Int64
 
 
 @fieldwise_init
@@ -351,9 +414,14 @@ struct UdfRuntime(Movable):
         var state = Word.null()
         if spec.state:
             state = schema_of(self._arena, [spec.state.value().copy()], List[String](), False, hd)
+        var roles = List[String]()
+        var digests = List[List[UInt8]]()
+        for i in range(len(spec.code)):
+            roles.append(spec.code[i].role)
+            digests.append(spec.code[i].sha256.copy())
         return new_spec(
             self._arena, spec.shape, spec.form, spec.entry, spec.descriptor_version, spec.descriptor,
-            args, result, state, spec.null_mode, spec.stability,
+            args, result, state, spec.null_mode, spec.stability, spec.code_root, roles, digests,
         )
 
     def _outcome(mut self, rc: Int32, err: Word) -> Outcome:
@@ -647,9 +715,43 @@ struct UdfRuntime(Movable):
         _need(g, KIND_GROUPS)
         t_agg_close(self._table, g._w)
 
+    def time_call_batch(mut self, inst: Handle, rows: Int, is_float: Bool, a: Float64, b: Float64, iters: Int) raises -> CallTimes:
+        """`iters` calls of call_batch on `inst`, each over a fresh struct
+        batch of `rows` rows with one column (int64 i, or float64 i / 2 when
+        `is_float`), timed around the call alone (native/bench_loop.c). Every
+        output must be a * x_i + b, or the call is a mismatch."""
+        _need(inst, KIND_INSTANCE)
+        var samples = self._arena.word(8 * (iters if iters > 0 else 1))
+        var stats = self._arena.word(24)
+        if time_calls(self._table, inst._w, rows, is_float, a, b, True, iters, samples, stats) != 0:
+            raise Error("UDF_HARNESS_ALLOC: the timed loop could not allocate its input")
+        var st = read_words(stats, 3)
+        return CallTimes(read_words(samples, iters), Int(st[0]), Int(st[1]), Int(st[2]))
+
+    def time_call_batch_threads(
+        mut self, insts: List[Handle], rows: Int, is_float: Bool, a: Float64, b: Float64, iters: Int
+    ) raises -> ThreadTimes:
+        """The same loop on one thread per instance, all at once; each
+        instance must be in a context of its own."""
+        var words = List[Word]()
+        for i in range(len(insts)):
+            _need(insts[i], KIND_INSTANCE)
+            words.append(insts[i]._w)
+        var arr = word_array(self._arena, words)
+        var out = self._arena.word(72)
+        if time_calls_mt(self._table, arr, len(insts), rows, is_float, a, b, True, iters, out) != 0:
+            raise Error("UDF_HARNESS_ALLOC: the timed loop could not start its threads")
+        var w = read_words(out, 9)
+        return ThreadTimes(w[0], w[1], w[2], Int(w[3]), Int(w[4]), Int(w[5]), w[6], w[7], w[8])
+
     def ledger(self) -> Counts:
         """Arrays and streams the host exported and their release counts."""
         return counts(host_data_of(self._host))
+
+    def reserved_bytes(self) -> Int:
+        """The bytes the runtime has reserved from the host and not released
+        (the ledger's reserved_bytes)."""
+        return self.ledger().reserved_bytes
 
     def shutdown(mut self):
         """Shut the runtime down (once); no callback may run after this."""

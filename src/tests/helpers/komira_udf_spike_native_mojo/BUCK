@@ -1,0 +1,48 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
+
+# Test-only: a native UDF library written in Mojo, for the UDF runtime spike
+# of docs/design/udf_runtime_interface.md (section 1.2). It implements the
+# runtime C ABI of src/tests/helpers/komira_udf_spike_abi directly, with the
+# conformance corpus's fixtures in Mojo, and is exported as :native_mojo,
+# which the native runtime of src/tests/helpers/komira_udf_spike_native
+# loads and runs through the conformance suite. Spike code: nothing outside
+# src/tests may depend on it.
+#
+# The welded test, and the defect it catches (its header names the mutant):
+#   test_table   native_init's ABI refusal, the table's entries, describe's
+#                answer and validate's refusals, called in-process (a table
+#                entry unset; a library the native runtime would refuse).
+mojo_library(
+    name = "komira_udf_spike_native_mojo",
+    srcs = glob(["**/*.mojo"], exclude = ["so/**", "tests/**/*.mojo"]),
+    conda = False,
+    deps = [
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_abi",
+    ],
+    test_srcs = ["tests/test_table.mojo"],
+    visibility = ["PUBLIC"],
+)
+
+# The library: one export, komira_udf_native_init_v1, and nothing else.
+mojo_shared_lib(
+    name = "native_mojo",
+    srcs = ["so/native_mojo_so.mojo"],
+    exports = ["komira_udf_native_init_v1"],
+    exports_exact = True,
+    deps = [
+        ":komira_udf_spike_native_mojo",
+        "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_abi",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)
