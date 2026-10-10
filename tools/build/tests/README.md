@@ -34,8 +34,9 @@ do:
   reverse-dependency query (`//tools/build/ci:affected`, a `cquery` over
   `tests//...`) configures every target but analyses none. Only a
   configuration failure breaks it: a target with an unknown or invisible
-  dependency makes the query fail for every change (`affected` answers
-  BROKEN, naming the target, and the check fails). Such a fixture must not
+  dependency makes the query fail for every change, and any failure of
+  that query answers BROKEN (with buck2's error, which names the target)
+  and fails the check, never a widening. Such a fixture must not
   be loadable: it is a `<case>.BUCK` file that the driver copies to
   `<case>/BUCK` for its one build and deletes, its directory gitignored, as
   [`surface_capability_matrix/dangling.BUCK`](negative/surface_capability_matrix/dangling.BUCK) is.

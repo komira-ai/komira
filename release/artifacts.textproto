@@ -101,7 +101,7 @@
 # for the files the change deleted: the units whose targets the change reaches
 # (UNIT lines, then AFFECTED <n>), or WIDENED, every unit, for a file it cannot
 # map (what widens is tools/build/ci/rules.txt), or BROKEN, which fails the
-# check, when buck2 cannot configure a target of the universe. A change that reaches no unit
+# check, when a buck2 query of the graph fails (never a widening). A change that reaches no unit
 # is AFFECTED 0, which kci refuses (KCI-E-AFFECTED-VACUOUS): never a pass.
 #
 # The file format's major (kci_api's format table): kci refuses a file

@@ -4,9 +4,8 @@ reaches.
 kci writes a units file, one `<unit>\t<target>` line per target of each unit
 the build system owns, and the changed paths; the tool answers with one
 `UNIT <name>` line per affected unit and a last line, `AFFECTED <n>`,
-`WIDENED <reason>` or `BROKEN <reason>` (a target of the universe cannot be
-configured: kci fails the check). A unit is affected when any of its targets
-is.
+`WIDENED <reason>` or `BROKEN <reason>` (a query of the graph failed: kci
+fails the check). A unit is affected when any of its targets is.
 """
 
 from change_map.labels import normalize_label

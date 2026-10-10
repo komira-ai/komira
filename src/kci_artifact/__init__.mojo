@@ -97,6 +97,7 @@ from kci_artifact.affected import (
     units_of,
 )
 from kci_artifact.derive import (
+    DERIVE_BROKEN,
     DERIVE_CHECK,
     DERIVE_UNMATCHED,
     DERIVE_VERDICT,

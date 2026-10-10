@@ -15,7 +15,9 @@
 # release/ci holds the commands the per-change check runs (artifacts.textproto's
 # `build_targets` and `derive_checks`); its `affected` is the binary
 # //tools/build/ci:affected. It also holds main_red.py, the script of
-# .github/workflows/main_red.yml, tested by //release/ci/tests:test_main_red.
+# .github/workflows/main_red.yml, tested by //release/ci/tests:test_main_red;
+# derive_checks.py's answer to a failed query is tested by
+# //release/ci/tests:test_derive_checks.
 # Changes need the release approver's review (.github/CODEOWNERS).
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 
@@ -39,6 +41,12 @@ export_file(
 export_file(
     name = "main_red.py",
     src = "ci/main_red.py",
+    visibility = ["//release/ci/tests:"],
+)
+
+export_file(
+    name = "derive_checks.py",
+    src = "ci/derive_checks.py",
     visibility = ["//release/ci/tests:"],
 )
 

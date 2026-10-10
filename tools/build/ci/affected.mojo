@@ -24,9 +24,10 @@ labels as `//pkg:name`) and, on stderr, the warnings and one summary line.
 
 Exit: 0 the affected targets (or an empty change: nothing printed); 10 WIDENED,
 every target printed and the reason on stderr; 11 VACUOUS, a change whose files
-reach no target; 12 --coverage found a target no unit covers; 13 BROKEN, the
-universe holds a target buck2 cannot configure (named, with buck2's error, on
-stderr; nothing printed); 2 bad usage; 5 cannot tell (buck2 or git failed). With
+reach no target; 12 --coverage found a target no unit covers; 13 BROKEN, a
+query of the graph failed (buck2's error on stderr, after the target it names
+when it names one; nothing printed): never a widening; 2 bad usage; 5 cannot
+tell (git diff, or the listing of a widened answer's targets, failed). With
 --units-file the exit is 0 for every answer it can give: kci reads the last
 stdout line.
 """

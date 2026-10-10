@@ -8,8 +8,8 @@
 #   every unit built when an answer is WIDENED (a build file, the buckconfig,
 #   a toolchain, a tools/build file, an unmapped file), and each stop: an
 #   empty change and a change reaching nothing REFUSED, a failing or
-#   garbled tool INDETERMINATE (never a widening), a BROKEN answer (a target
-#   the build system cannot configure) FAILED, a failed batch FAILED
+#   garbled tool INDETERMINATE (never a widening), a BROKEN answer (the
+#   tool's query of its build graph failed) FAILED, a failed batch FAILED
 #   naming the failed unit (affected_batch.mojo; test_affected_batch.mojo
 #   holds every batch case), a
 #   file without what the check needs refused before anything runs; --plan
@@ -488,8 +488,8 @@ def test_a_failing_tool_is_cannot_tell_never_a_widening() raises:
 
 
 def test_a_broken_answer_fails_the_check_and_builds_nothing() raises:
-    # BROKEN: the build system cannot configure a target of its graph (an
-    # unknown or invisible dependency). The check is FAILED, naming what the
+    # BROKEN: the tool's query of its build graph failed (here on a target
+    # with an invisible dependency). The check is FAILED, naming what the
     # tool said, never a widening and never "cannot tell"; nothing is built
     # and the next build system is not asked.
     var root = _fresh(String("broken"))

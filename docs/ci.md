@@ -836,6 +836,11 @@ so the release files list no package:
   for an artifact, a refusal (`KCI-E-ARTIFACT`): a release must build what an
   artifact names. A derive tool that fails or answers outside its grammar is
   "cannot tell" (`KCI-E-AFFECTED`), never a pass.
+- **A universe the derive tool cannot query:** when its `buck2 cquery` fails,
+  for any reason (a target with an unknown or invisible dependency, a
+  transport error, a buck2 that does not start), `derive_checks.py` answers
+  one `BROKEN <reason>` line holding buck2's error, and kci FAILS the check
+  (`KCI-E-BUILD-FAILED`): nothing is built, and no affected command runs.
 
 **Which units a change reaches:** each build system's `affected` command,
 `buck2 run //tools/build/ci:affected` ([`tools/build/ci`](../tools/build/ci)),
@@ -846,11 +851,16 @@ answers the units whose targets (labels, or the package patterns of the derived
 checks) are among them. A file it cannot map, and a change to `.buckconfig`,
 the toolchains, `tools/build`, `prelude` or `third_party`
 ([`rules.txt`](../tools/build/ci/rules.txt)), answer `WIDENED`: every unit.
-A universe holding a target buck2 cannot configure (an unknown or invisible
-dependency) answers `BROKEN`, naming the target and buck2's error, and kci
-FAILS the check (`KCI-E-BUILD-FAILED`): never a widening. The universe is
-configured before any widened answer too, so a change that plants such a
-target fails its own check. A
+A widened answer is given only after `buck2 cquery` configures the whole
+universe. A failed query is never a widening: when the query mapping the
+files, the reverse-dependency query or the query configuring the universe
+fails, for any reason (a target with an unknown or invisible dependency, a
+transport error), the answer is `BROKEN`, carrying buck2's error (its
+stderr whole up to 8 KiB, else the first and last 4 KiB), and kci FAILS the
+check (`KCI-E-BUILD-FAILED`). The decision is the failure, not buck2's text:
+the target buck2 names, when it names one, only leads the message. So a
+change that plants a target buck2 cannot configure fails its own check,
+widened or not. A
 non-empty change that reaches no unit answers `AFFECTED 0`, which kci refuses
 (`KCI-E-AFFECTED-VACUOUS`): never a pass. The job's checkout has the full
 history, so the base commit is there.

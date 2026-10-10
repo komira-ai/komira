@@ -20,9 +20,9 @@
 #               verdict line, LAST: `AFFECTED <n>`, n the number of UNIT
 #               lines (0 allowed), or `WIDENED <reason>` with no UNIT line
 #               (the change reaches every declared unit), or `BROKEN
-#               <reason>` with no UNIT line (the build system cannot
-#               configure its build graph: a target with an unknown or
-#               invisible dependency; kci_build FAILS the check). One
+#               <reason>` with no UNIT line (the tool's query of its build
+#               graph failed, for any reason, such as a target with an
+#               unknown or invisible dependency; kci_build FAILS the check). One
 #               trailing newline is allowed.
 #
 # And to build the units it decided:

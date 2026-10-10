@@ -27,7 +27,9 @@
 #    timeout as in step 3), and the checks it answers are added after the
 #    declared ones under the file's rules (kci_artifact derive.mojo). A tool
 #    that is not started for want of budget, fails or answers outside the
-#    grammar is INDETERMINATE (KCI-E-AFFECTED); an UNMATCHED
+#    grammar is INDETERMINATE (KCI-E-AFFECTED); an answer BROKEN (its query
+#    of the build graph failed) is FAILED (KCI-E-BUILD-FAILED), naming the
+#    tool's reason, and nothing runs after it; an UNMATCHED
 #    artifact target, or a derived check the file's rules refuse, is
 #    REFUSED (KCI-E-ARTIFACT); an UNMATCHED check target is a NOTICE line
 #    (stderr, and the outcome's lines before WOULD_BUILD / BUILT).
@@ -43,9 +45,10 @@
 #    whose stdout breaks the answer grammar (kci_artifact
 #    `parse_affected_answer`) is INDETERMINATE (KCI-E-AFFECTED): kci cannot
 #    tell what the change reaches, and it never widens instead. An answer
-#    BROKEN (the build system cannot configure a target of its graph: an
-#    unknown or invisible dependency) is FAILED (KCI-E-BUILD-FAILED), naming
-#    the tool's reason; nothing is built and no later build system is asked.
+#    BROKEN (the tool's query of its build graph failed: a target with an
+#    unknown or invisible dependency, or any other failure of that query)
+#    is FAILED (KCI-E-BUILD-FAILED), naming the tool's reason; nothing is
+#    built and no later build system is asked.
 #    Every build system is asked, even after a WIDENED.
 # 4. The units to build, in unit order (artifacts, then checks): every
 #    declared unit when any answer is WIDENED (the result's verdict WIDENED,
@@ -218,6 +221,14 @@ def _derive[R: ProcessRunner](
             return _stop(String(OUTCOME_INDETERMINATE), String(ERROR_AFFECTED), what + why + cannot)
         try:
             var answer = parse_derive_answer(Path(spec.stdout_path).read_text(), declared)
+            if answer.broken:
+                print(String("BUILD step: derive_checks: ") + bs + String(": BROKEN ") + answer.reason, file=_STDERR)
+                return _stop(
+                    String(OUTCOME_FAILED),
+                    String(ERROR_BUILD_FAILED),
+                    String("--affected-by: ") + what + String("answered BROKEN: ") + answer.reason
+                    + String(": its query of the build graph failed, so the check fails"),
+                )
             var refused = unmatched_artifacts(arts, answer)
             if len(refused) > 0:
                 var names = String("")
@@ -317,7 +328,7 @@ def _ask[R: ProcessRunner](
                     String(OUTCOME_FAILED),
                     String(ERROR_BUILD_FAILED),
                     String("--affected-by: build system '") + bs + String("' answered BROKEN: ") + answer.reason
-                    + String(": its build graph holds a target it cannot configure, so the check fails"),
+                    + String(": its query of the build graph failed, so the check fails"),
                 )
             if answer.widened:
                 print(String("BUILD step: affected: ") + bs + String(": WIDENED ") + answer.reason, file=_STDERR)

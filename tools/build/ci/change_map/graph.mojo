@@ -7,7 +7,7 @@ tests answer it from tables, and `BuckGraph` answers it from the real tree.
 
 from std.os.path import exists
 
-from buildtools.bytes import dirname, join, substr, suffix
+from buildtools.bytes import dirname, join, slice_string, substr, suffix
 from buildtools.json import flatten_document
 
 from change_map.cells import Cells
@@ -17,6 +17,37 @@ from change_map.process import Captured, lines_of, run_captured
 comptime PACKAGE_FOUND: Int = 1
 comptime PACKAGE_NONE: Int = 0
 comptime PACKAGE_UNKNOWN: Int = 2
+
+comptime STDERR_KEPT_WHOLE: Int = 8192
+"""buck2's stderr up to this many bytes is kept whole in a failure."""
+comptime STDERR_KEPT_EACH_END: Int = 4096
+"""Of a longer stderr, the first and the last this many bytes are kept."""
+
+
+def kept_stderr(text: String) -> String:
+    """buck2's stderr as a failed query carries it: whole up to
+    STDERR_KEPT_WHOLE bytes, else its first and last STDERR_KEPT_EACH_END
+    bytes around a line saying how many were cut. The head holds buck2's
+    error (which target, which form), the tail its cause."""
+    var n = text.byte_length()
+    if n <= STDERR_KEPT_WHOLE:
+        return text.copy()
+    var raw = text.as_bytes()
+    var b = List[UInt8](capacity=n)
+    for i in range(n):
+        b.append(raw[i])
+    var cut = n - 2 * STDERR_KEPT_EACH_END
+    return (
+        slice_string(b, 0, STDERR_KEPT_EACH_END)
+        + String("\n[... ") + String(cut) + String(" bytes of buck2's stderr cut ...]\n")
+        + slice_string(b, n - STDERR_KEPT_EACH_END, n)
+    )
+
+
+def buck_failure(command: String, exit_code: Int, stderr: String) -> String:
+    """The error a failed buck2 command raises: the command, its exit code
+    and its stderr as `kept_stderr` keeps it."""
+    return String("buck2 ") + command + String(" failed (exit ") + String(exit_code) + String("): ") + kept_stderr(stderr)
 
 
 struct PackageOf(Copyable, Movable):
@@ -68,7 +99,8 @@ trait Graph:
 
     def configure_universe(mut self) raises:
         """Configure every target of the universe; raises buck2's error when
-        one cannot be (an unknown or invisible dependency)."""
+        the query fails (a target with an unknown or invisible dependency,
+        or any other failure)."""
         ...
 
     def all_targets(mut self) raises -> List[String]:
@@ -135,10 +167,7 @@ struct BuckGraph(Graph, Movable):
             argv.append(sub[i])
         var r = run_captured(self.buck2, argv)
         if not r.ok():
-            var tail = r.stderr.copy()
-            if tail.byte_length() > 600:
-                tail = suffix(tail, tail.byte_length() - 600)
-            raise Error(String("buck2 ") + sub[0] + String(" failed (exit ") + String(r.exit_code) + String("): ") + tail)
+            raise Error(buck_failure(sub[0], Int(r.exit_code), r.stderr))
         return r^
 
     def _git(self, var argv: List[String]) raises -> Captured:
