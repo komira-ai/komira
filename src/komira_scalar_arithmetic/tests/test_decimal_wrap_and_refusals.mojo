@@ -23,6 +23,7 @@ from komira_scalar_arithmetic.decimal256_arith import (
     decimal256_sub_i256,
     decimal256_mul_i256,
     decimal256_div_i256,
+    rescale_i256_half_up,
 )
 from komira_scalar_arithmetic.decimal_cast import (
     decimal_to_string,
@@ -56,6 +57,11 @@ def _rt_mul256(a: I256, b: I256) raises -> I256:
 @no_inline
 def _rt_div256(a: I256, s1: Int, b: I256, s2: Int, o: Int) raises -> I256:
     return decimal256_div_i256(a, s1, b, s2, o)
+
+
+@no_inline
+def _rt_rescale256(v: I256, f: Int, t: Int) raises -> I256:
+    return rescale_i256_half_up(v, f, t)
 
 
 @no_inline
@@ -109,6 +115,14 @@ def _mul256_message(a: I256, b: I256) -> String:
 def _div256_message(a: I256, s1: Int, b: I256, s2: Int, o: Int) -> String:
     try:
         _ = _rt_div256(a, s1, b, s2, o)
+    except e:
+        return String(e)
+    return String("")
+
+
+def _rescale256_message(v: I256, f: Int, t: Int) -> String:
+    try:
+        _ = _rt_rescale256(v, f, t)
     except e:
         return String(e)
     return String("")
@@ -210,6 +224,26 @@ def test_dec256_add_sub_valid_edges_still_answer() raises:
     assert_equal(_rt_sub256(I256(-125), 1, I256(-25), 2, 3), I256(-12250))
 
 
+def test_dec256_rescale_up_overflow_raises() raises:
+    """`decimal256_arith.rescale_i256_half_up` scaled up with an unchecked
+    multiply, the same defect: 1.2*10^74 from scale 0 to 3 is 1.2*10^77, past
+    2^255, and wrapped. Past +/-(10^76 - 1) it raises; inside it answers."""
+    var a = I256(12) * _pow10_256(73)
+    var up = _rescale256_message(a, 0, 3)
+    assert_true(up.startswith("Decimal256 overflow in rescale"), up)
+    var down = _rescale256_message(-a, 0, 3)
+    assert_true(down.startswith("Decimal256 overflow in rescale"), down)
+    # The edge: (10^74 - 1) * 100 = 10^76 - 100 fits; 10^74 * 100 = 10^76 does
+    # not, and does not wrap either (10^76 < 2^255).
+    var edge = _pow10_256(74) - I256(1)
+    assert_equal(_rt_rescale256(edge, 0, 2), MAX76 - I256(99))
+    assert_equal(_rt_rescale256(-edge, 0, 2), -(MAX76 - I256(99)))
+    var past = _rescale256_message(_pow10_256(74), 0, 2)
+    assert_true(past.startswith("Decimal256 overflow in rescale"), past)
+    var past_neg = _rescale256_message(-_pow10_256(74), 0, 2)
+    assert_true(past_neg.startswith("Decimal256 overflow in rescale"), past_neg)
+
+
 # --- 3. The parser's mantissa past 38 digits -------------------------------
 
 
@@ -255,6 +289,10 @@ def test_mul_overflows_wide_types() raises:
     assert_true(_rt_mul_overflows[DType.int128](-(I(1) << 63), (I(1) << 64) + I(1)))
     assert_false(_rt_mul_overflows[DType.uint128](U(1) << 64, (U(1) << 64) - U(1)))
     assert_true(_rt_mul_overflows[DType.uint128](U(1) << 64, U(1) << 64))
+    # The range ends themselves are not an overflow.
+    assert_false(_rt_mul_overflows[DType.int128](I.MAX, I(1)))
+    assert_false(_rt_mul_overflows[DType.int128](I.MIN, I(1)))
+    assert_false(_rt_mul_overflows[DType.uint128](U.MAX, U(1)))
     comptime J = Scalar[DType.int256]
     comptime V = Scalar[DType.uint256]
     assert_true(_rt_mul_overflows[DType.int256](J(1) << 200, J(1) << 200))
@@ -303,6 +341,13 @@ def test_dec256_div_quotients_that_fit_are_answered() raises:
     var carry = _div256_message(MAX76 * I256(2) + I256(1), 0, I256(2), 0, 0)
     assert_true(carry.startswith("Decimal256 overflow in div"), carry)
     assert_equal(_rt_div256(MAX76 * I256(2) - I256(1), 0, I256(2), 0, 0), MAX76)
+    # A fractional digit that takes the quotient past the range: MAX / 1 at
+    # scale 1 is 10^77 - 10. That fits a uint256 (< 2^256) but not an int256,
+    # so without the check before each `* 10` it is cast to a negative value.
+    var digit = _div256_message(MAX76, 0, I256(1), 0, 1)
+    assert_true(digit.startswith("Decimal256 overflow in div"), digit)
+    var digit_neg = _div256_message(-MAX76, 0, I256(1), 0, 1)
+    assert_true(digit_neg.startswith("Decimal256 overflow in div"), digit_neg)
 
 
 def test_parse_tiny_and_zero_exponents_are_answered() raises:
@@ -326,6 +371,12 @@ def test_parse_tiny_and_zero_exponents_are_answered() raises:
     var huge_exp = _parse_message("1e99999999999999999999999", 38, 0)
     assert_true("overflows" in huge_exp, huge_exp)
     assert_equal(_rt_parse("1e-99999999999999999999999", 38, 0), I128(0))
+    # Exponents chosen so a 64-bit accumulator that did not saturate would
+    # wrap to a small one: 2^64 + 10 to 10, and 2^64 - 10 to -10 (which the
+    # minus sign turns into +10). 1e10 and 1e-(-10) would both answer 10^10.
+    var wrap_up = _parse_message("1e18446744073709551626", 38, 0)
+    assert_true("overflows" in wrap_up, wrap_up)
+    assert_equal(_rt_parse("1e-18446744073709551606", 38, 0), I128(0))
 
 
 # --- 6. I128.MIN to string --------------------------------------------------
@@ -359,7 +410,8 @@ def test_dec256_min_value_is_refused() raises:
     assert_true(a1.startswith("Decimal256 overflow in add"), a1)
     var s1 = _sub256_message(I256(0), 0, MIN256, 0, 0)
     assert_true(s1.startswith("Decimal256 overflow in sub"), s1)
-    # The step-1 sum itself wraps, at equal and at mixed scales.
+    # The step-1 sum itself wraps, at equal and at mixed scales. These four
+    # wrap to values near +/-2^255, which the range check after it refuses too.
     var w1 = _add256_message(MIN256, 0, I256(-1), 0, 0)
     assert_true(w1.startswith("Decimal256 overflow in add"), w1)
     var w2 = _sub256_message(MIN256, 0, I256(1), 0, 0)
@@ -368,6 +420,13 @@ def test_dec256_min_value_is_refused() raises:
     assert_true(w3.startswith("Decimal256 overflow in add"), w3)
     var w4 = _sub256_message(MIN256, 0, I256(10), 1, 1)
     assert_true(w4.startswith("Decimal256 overflow in sub"), w4)
+    # Wraps that land small, which only the wrap check refuses:
+    # MAX256 - MIN256 is 2^256 - 1, read as -1; MIN256 + MIN256 is 2^256, read
+    # as 0.
+    var z1 = _sub256_message(I256.MAX, 0, MIN256, 0, 0)
+    assert_true(z1.startswith("Decimal256 overflow in sub"), z1)
+    var z2 = _add256_message(MIN256, 0, MIN256, 0, 0)
+    assert_true(z2.startswith("Decimal256 overflow in add"), z2)
     # Rescaled past the range only by an out_scale above both scales.
     var u1 = _add256_message(TEN75, 0, I256(0), 0, 2)
     assert_true(u1.startswith("Decimal256 overflow in add"), u1)

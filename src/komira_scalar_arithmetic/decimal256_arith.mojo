@@ -107,12 +107,21 @@ def _mag_u256(v: I256) -> U256:
 def rescale_i256_half_up(v: I256, from_scale: Int, to_scale: Int) raises -> I256:
     """Rescale `v` (an unscaled integer at `from_scale`) to `to_scale`,
     rounding HALF_UP (round half away from zero) when scaling down.
-    Used by mul (precision clamp), div, and decimal->decimal cast.
+    Scaling up raises when the result leaves +/-(10^76 - 1). No op in this
+    module calls it (Decimal128 code uses `decimal_arith.rescale_i256_half_up`).
     """
     if to_scale == from_scale:
         return v
     if to_scale > from_scale:
-        return v * pow10_i256_d(to_scale - from_scale)
+        var up = pow10_i256_d(to_scale - from_scale)
+        # ⛔ Range-check BEFORE multiplying: 1.2*10^74 * 10^3 passes 2^255 and
+        # wraps into a value that looks valid.
+        var lim = max_dec256_i256() / up
+        if v > lim or v < -lim:
+            raise Error(
+                "Decimal256 overflow in rescale: result exceeds DECIMAL256(76,...) range"
+            )
+        return v * up
     # scale down: divide + round half away from zero.
     var div = pow10_i256_d(from_scale - to_scale)
     var q = v / div
