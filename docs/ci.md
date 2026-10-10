@@ -837,7 +837,9 @@ the toolchains, `tools/build`, `prelude` or `third_party`
 ([`rules.txt`](../tools/build/ci/rules.txt)), answer `WIDENED`: every unit. A
 non-empty change that reaches no unit answers `AFFECTED 0`, which kci refuses
 (`KCI-E-AFFECTED-VACUOUS`): never a pass. The job's checkout has the full
-history, so the base commit is there.
+history, so the base commit is there. In `pr.yml` the base is the first parent
+of the merge commit the job builds, so the change is the pull request's alone
+however far `main` has moved since the pull request's event.
 
 **How the reached units are built:** units whose `build_targets` commands are
 identical (both build systems of `release/artifacts.textproto` share
@@ -982,7 +984,7 @@ to the release workflow's), and the welded test
 | job | the one job `check`, only for a pull request from a branch of this repository (`github.event.pull_request.head.repo.full_name == github.repository`; a fork's run gets no tailnet credential, and a maintainer reads the change and pushes it to a branch here), written bare or as exactly `${{ <condition> }}` (a block scalar or whitespace inside quotes makes GitHub read the `if:` as a format string, which is always true) |
 | runner | `runs-on: ubuntu-24.04`, written as that plain scalar: a GitHub-hosted machine, fresh per job. A self-hosted label, label list, runner group, expression (`${{ vars.X }}`) or quoted value is refused, so a pull request's code never reaches a runner that keeps state between jobs |
 | permissions | its own `permissions:` mapping, `contents: read` and `id-token: write` (for the farm connection, [farm-connect](#how-it-reaches-the-farm), only); no environment, no secret (no value of the job, nor of the workflow-level `env:`, names `secrets` other than `secrets.GITHUB_TOKEN`), no publish step |
-| steps | the pinned full-history checkout of the merge commit, `farm-connect`, `//bin/kci:kci[runnable]`, then `kci run --stage pr --affected-by <the pull request's base commit>`: the units the change reaches, built and tested on the farm in one batch per shared build command, a failed batch retried unit by unit to name its failing units. The units are the artifacts of `release/artifacts.textproto` and the checks derived from the build graph when the job runs (see [The per-change check's units](#the-per-change-checks-units)), so a pull request that adds or deletes a package needs no edit to any release file. Nothing ships. |
+| steps | the pinned full-history checkout of the merge commit, `farm-connect`, `//bin/kci:kci[runnable]`, then `kci run --stage pr --affected-by "$change_base"`, where `change_base` is the merge commit's first parent (`git rev-parse --verify HEAD^1`, the `main` the pull request is merged into; the step stops when HEAD has no second parent). Never the event's `github.event.pull_request.base.sha`: that is `main` when the event fired, and once `main` moves every change merged to it since then would count as the pull request's own and widen the check. `src/kci_workflow_check` (R6) holds the exact line, and lets no `${{ }}` into a script (R18). It builds and tests the units the change reaches on the farm, in one batch per shared build command, a failed batch retried unit by unit to name its failing units. The units are the artifacts of `release/artifacts.textproto` and the checks derived from the build graph when the job runs (see [The per-change check's units](#the-per-change-checks-units)), so a pull request that adds or deletes a package needs no edit to any release file. Nothing ships. |
 | every `uses:` | pinned to a full commit id (the local farm-connect action excepted) |
 
 The repository's branch settings require the check **`pr / check`**.

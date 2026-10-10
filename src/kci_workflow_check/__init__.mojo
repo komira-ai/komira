@@ -47,8 +47,10 @@ from kci_workflow_check.workflow_reader import (
     read_workflow,
 )
 from kci_workflow_check.pull_request import (
+    CHANGE_BASE_LINE,
+    CHANGE_BASE_VARIABLE,
     CHECKOUT_ACTION,
-    PULL_REQUEST_BASE_EXPRESSION,
+    EVENT_BASE_EXPRESSION,
     PULL_REQUEST_EVENT,
     PULL_REQUEST_RUNNER,
     SAME_REPOSITORY_CONDITION,
