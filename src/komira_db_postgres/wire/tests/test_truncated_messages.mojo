@@ -9,14 +9,18 @@ well-formed one to the caller.
 
   1. parse_row_description: a body under 2 bytes, a field count of 2 with one
      complete field, a field cut inside its fixed 18-byte tail, and a name
-     with no NUL terminator all raise; the same fields ending exactly at the
-     body end decode.
-  2. parse_parameter_description: a body under 2 bytes and a count of 2 with
-     one OID (plus 3 stray bytes) raise; the exact body decodes.
+     with no NUL terminator all raise (the last with its own "no
+     NUL-terminated name" text); the same fields ending exactly at the body
+     end decode, and a 2-byte body with count 0 decodes to no columns.
+  2. parse_parameter_description: an empty body, a 1-byte body, and a count
+     of 2 with one OID (plus 3 stray bytes) raise; the exact body decodes,
+     and a 2-byte body with count 0 (a statement with no parameters)
+     decodes to no OIDs.
   3. DataRow, through parse_data_row, row_from_data_message and
      binary_row_from_data_message: a body under 2 bytes, a column count of 2
      whose second length is cut, and a column declaring 5 bytes with 3
-     present all raise; a column ending exactly at the body end decodes.
+     present all raise; a column ending exactly at the body end decodes, and
+     a 2-byte body with count 0 decodes to a row with no columns.
   4. decode_text_array_binary and PgRow.get_text_array: an element declaring
      5 bytes with 3 present, and with 4 present, raises; the exact element
      decodes.
@@ -87,6 +91,12 @@ def test_row_description() raises:
     with assert_raises(contains="RowDescription truncated"):
         _ = parse_row_description(_msg(MSG_ROW_DESC, one))
 
+    # Exactly the count and nothing else: count 0 is a valid empty
+    # description. The `n < 2` guard must not refuse it.
+    var zero = List[UInt8]()
+    put_i16_be(zero, Int16(0))
+    assert_equal(len(parse_row_description(_msg(MSG_ROW_DESC, zero))), 0)
+
     # Exact: two fields ending at the body end decode.
     var exact = List[UInt8]()
     put_i16_be(exact, Int16(2))
@@ -116,7 +126,9 @@ def test_row_description() raises:
     var no_nul = List[UInt8]()
     put_i16_be(no_nul, Int16(1))
     _ascii(no_nul, String("abcdefghijklmnopqrstuvwxyz"))
-    with assert_raises(contains="RowDescription truncated"):
+    with assert_raises(
+        contains="RowDescription truncated: field 0 of 1 has no NUL-terminated"
+    ):
         _ = parse_row_description(_msg(MSG_ROW_DESC, no_nul))
     print("  [1] RowDescription: short body, count, tail, no NUL refused OK")
 
@@ -128,6 +140,19 @@ def test_parameter_description() raises:
     var empty = List[UInt8]()
     with assert_raises(contains="ParameterDescription truncated"):
         _ = parse_parameter_description(_msg(UInt8(ord("t")), empty))
+    # One byte: half of the count. Must raise, not read the count's second
+    # byte past the end.
+    var one = List[UInt8]()
+    one.append(UInt8(0))
+    with assert_raises(contains="ParameterDescription truncated"):
+        _ = parse_parameter_description(_msg(UInt8(ord("t")), one))
+
+    # Count 0 and nothing else: the reply to Describe on a statement with no
+    # parameters. The `n < 2` guard must not refuse it.
+    var zero = List[UInt8]()
+    put_i16_be(zero, Int16(0))
+    var none = parse_parameter_description(_msg(UInt8(ord("t")), zero))
+    assert_equal(len(none), 0)
 
     var exact = List[UInt8]()
     put_i16_be(exact, Int16(2))
@@ -144,7 +169,10 @@ def test_parameter_description() raises:
         short.append(UInt8(0))
     with assert_raises(contains="ParameterDescription truncated"):
         _ = parse_parameter_description(_msg(UInt8(ord("t")), short))
-    print("  [2] ParameterDescription: short body and count refused OK")
+    print(
+        "  [2] ParameterDescription: short body and count refused; count 0"
+        " decodes OK"
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -167,6 +195,21 @@ def test_data_row() raises:
     var one = List[UInt8]()
     one.append(UInt8(0))
     _check_data_row_refused(one, String("1-byte body"))
+
+    # Count 0 and nothing else decodes to a row with no columns.
+    var zero = List[UInt8]()
+    put_i16_be(zero, Int16(0))
+    assert_equal(parse_data_row(_msg(MSG_DATA_ROW, zero)).col_count(), 0)
+    var no_oids = List[UInt32]()
+    assert_equal(
+        row_from_data_message(_msg(MSG_DATA_ROW, zero), no_oids).col_count(), 0
+    )
+    assert_equal(
+        binary_row_from_data_message(
+            _msg(MSG_DATA_ROW, zero), no_oids
+        ).col_count(),
+        0,
+    )
 
     # Count 2; column 0 is "abc", column 1's length has 3 of 4 bytes.
     var cut_len = List[UInt8]()
