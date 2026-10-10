@@ -54,7 +54,6 @@ from komira_secret_store import SecretValue
 from komira_test_issuer import (
     SCENARIO_CLAIMS,
     SCENARIO_IN_FLIGHT,
-    SCENARIO_JTI_SAMPLES,
     SCENARIO_JTI_UNIQUE,
     SCENARIO_MINT_VERIFIES,
     SCENARIO_PUBLISH_BEFORE_SIGN,
@@ -98,6 +97,11 @@ comptime F_KID_SWAP = 16
 comptime F_LONG_LIFE = 17
 comptime F_LATE_REPEAT_JTI = 18
 comptime F_SHORT_JTI = 19
+
+# The sample count the scenarios header documents for jti_unique, written
+# out here: a fault built from the library's own constant would shrink with
+# it and never see a smaller count.
+comptime DOCUMENTED_JTI_SAMPLES = 32
 
 # One distinct byte per sample of jti_unique, for short_jti.
 comptime SHORT_JTIS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJ"
@@ -304,7 +308,7 @@ struct Faulty(IssuerUnderTest, Movable, Deinitable):
             jti = Optional[String](String("jti-") + String(min(self.minted, 2)))
         if self.fault == F_LATE_REPEAT_JTI:
             # jti-1 ... jti-31, then jti-31 at sample 32.
-            var k = min(self.minted, SCENARIO_JTI_SAMPLES - 1)
+            var k = min(self.minted, DOCUMENTED_JTI_SAMPLES - 1)
             jti = Optional[String](String("jti-") + String(k))
         if self.fault == F_SHORT_JTI:
             var at = self.minted - 1
@@ -454,8 +458,8 @@ def test_claim_faults() raises:
     # the third token and matches the last jti seen.
     _claims_fault(misses, F_REPEAT_JTI, None, SCENARIO_JTI_UNIQUE, "two tokens carry one jti")
     _claims_fault(misses, F_JTI, String(""), SCENARIO_JTI_UNIQUE, JTI)
-    # Only the last of the samples repeats: a run that mints fewer than
-    # SCENARIO_JTI_SAMPLES tokens never sees it.
+    # Only the last of the 32 samples repeats: a run that mints fewer
+    # never sees it.
     _claims_fault(misses, F_LATE_REPEAT_JTI, None, SCENARIO_JTI_UNIQUE, "two tokens carry one jti")
     # One-byte jtis, all distinct, are non-empty strings: both scenarios pass.
     _claims_fault(misses, F_SHORT_JTI, None, SCENARIO_CLAIMS, "")
