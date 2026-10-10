@@ -109,11 +109,56 @@ def test_pass_refusal_names_no_token_and_the_others_do() raises:
     assert_equal(counts[RefusalClass.UNRESOLVED_DEPS.code], 1)
 
 
+def _with_byte(tok: String, k: Int, b: String) -> String:
+    """`tok` with its byte at offset `k` replaced by `b`."""
+    var n = tok.byte_length()
+    return String(tok[byte=0:k]) + b + String(tok[byte = k + 1 : n])
+
+
+def _parts_and_one_byte_changes(tok: String) -> List[String]:
+    """Near misses of `tok`, each holding no whole token, in this order: `tok`
+    with its last byte dropped, with its first byte dropped, wholly
+    lowercased, with its first letter lowercased, with its last letter
+    lowercased (every token starts and ends with a capital letter), then
+    `tok` with the byte at offset k replaced by `#` (no token holds one) for
+    every k from 0 to its length - 1. All but the first three keep the
+    length, so a compare that checks the length and then skips any one
+    offset still meets a differing byte."""
+    var n = tok.byte_length()
+    var v = List[String]()
+    v.append(String(tok[byte = 0 : n - 1]))
+    v.append(String(tok[byte = 1:n]))
+    v.append(tok.lower())
+    v.append(_with_byte(tok, 0, String(tok[byte=0:1]).lower()))
+    v.append(_with_byte(tok, n - 1, String(tok[byte = n - 1 : n]).lower()))
+    for k in range(n):
+        v.append(_with_byte(tok, k, String("#")))
+    return v^
+
+
+def test_near_misses_are_not_tokens() raises:
+    """Guards the vectors below: each differs from its row, all but the first
+    three keep the row's length, one `#` change exists per offset, and none
+    contains a token, so a NONE expected for it is the right answer."""
+    var t = plan_refusal_tokens()
+    for i in range(len(t)):
+        var tok = String(t[i].token)
+        var v = _parts_and_one_byte_changes(tok)
+        assert_equal(len(v), 5 + tok.byte_length(), "variants of " + tok)
+        for k in range(len(v)):
+            assert_true(v[k] != tok, "variant " + String(k) + " of " + tok)
+            if k >= 3:
+                assert_equal(v[k].byte_length(), tok.byte_length(), "length of " + v[k])
+            for j in range(len(t)):
+                assert_true(v[k].find(String(t[j].token)) < 0, String(t[j].token) + " is inside " + v[k])
+
+
 def test_token_class_is_exact() raises:
-    """Catches an exact lookup that matches a substring, a prefix or a
-    different case, and one that compares only part of each row: every row
-    with its last byte dropped, its first byte dropped, or a byte appended
-    gets no class."""
+    """Catches an exact lookup that matches a substring, a prefix, a suffix,
+    a longer input or a different case, and one that compares only part of a
+    row: for every row, the row with its first or last byte dropped, a byte
+    appended or prepended, one byte replaced at any one offset, one letter
+    or every letter lowercased gets no class."""
     assert_false(Bool(token_class("x SCAN_BINDING_EPOCH_MISMATCH")))
     assert_false(Bool(token_class("SCAN_BINDING_EPOCH")))
     assert_false(Bool(token_class("scan_binding_epoch_mismatch")))
@@ -122,10 +167,11 @@ def test_token_class_is_exact() raises:
     var t = plan_refusal_tokens()
     for i in range(len(t)):
         var tok = String(t[i].token)
-        var n = tok.byte_length()
-        assert_equal(_name(token_class(tok[byte = 0 : n - 1])), String("NONE"), "prefix of " + tok)
-        assert_equal(_name(token_class(tok[byte = 1:n])), String("NONE"), "suffix of " + tok)
         assert_equal(_name(token_class(tok + String(" "))), String("NONE"), "longer than " + tok)
+        assert_equal(_name(token_class(String(" ") + tok)), String("NONE"), "prepended to " + tok)
+        var v = _parts_and_one_byte_changes(tok)
+        for k in range(len(v)):
+            assert_equal(_name(token_class(v[k])), String("NONE"), "variant of " + tok + ": " + v[k])
 
 
 def test_message_class_finds_a_token_anywhere() raises:
@@ -173,16 +219,14 @@ def test_message_class_of_unnamed_text_is_none() raises:
 def test_message_class_of_a_part_of_a_token_is_none() raises:
     """Catches a search by token family: one that matches a prefix of a token
     of any length (a fixed 20-byte prefix gives `PHYSICAL_PLAN_IR_VERSION_OK`
-    a class) or a suffix. Every row with its last byte dropped, and with its
-    first byte dropped, gets no class, alone or inside a longer message. No
-    token contains another, so a part of one holds no whole token."""
+    a class) or a suffix, one that compares a window with any one offset
+    skipped, and one that ignores case. For every row, the row with its
+    first or last byte dropped, one byte replaced at any one offset, one
+    letter or every letter lowercased gets no class, alone or inside a
+    longer message."""
     var t = plan_refusal_tokens()
     for i in range(len(t)):
-        var tok = String(t[i].token)
-        var n = tok.byte_length()
-        var parts = List[String]()
-        parts.append(String(tok[byte = 0 : n - 1]))
-        parts.append(String(tok[byte = 1:n]))
+        var parts = _parts_and_one_byte_changes(String(t[i].token))
         for k in range(len(parts)):
             assert_equal(_name(message_class(parts[k])), String("NONE"), "alone: " + parts[k])
             assert_equal(
