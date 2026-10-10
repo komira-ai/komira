@@ -38,7 +38,8 @@
 #                   and CSE_REF are leaves, so they appear as a leaf and as a
 #                   join side;
 #   nested_*        joins under joins, including an eligible join under a
-#                   refused one (join type, residual, two keys);
+#                   refused one (join type, residual, two keys), with the
+#                   eligible join as the left child and as the right child;
 #   multifile_*     stats folded by `merge_table_stats` (two files lose
 #                   min/max and do not narrow; one file passes through).
 # =============================================================================
@@ -99,7 +100,7 @@ from komira_optimizer.optimizer_payload_narrow import (
 # The table
 # =============================================================================
 
-comptime _ROWS = 82
+comptime _ROWS = 83
 
 
 def _expected_table() -> String:
@@ -183,6 +184,7 @@ nested_three_deep => scan#0: a:2:1 | scan#1: b:2:1 | scan#2: c:2:1 | scan#3: d:2
 nested_under_left_join => scan#0: pv:2:1 | scan#1: bv:2:1 | scan#2:
 nested_under_right_join => scan#0: | scan#1: pv:2:1 | scan#2: bv:2:1
 nested_under_residual_join => scan#0: pv:2:1 | scan#1: bv:2:1 | scan#2:
+nested_under_residual_join_right => scan#0: | scan#1: pv:2:1 | scan#2: bv:2:1
 nested_under_two_key_join => scan#0: | scan#1: k2:1:0,pv:2:1 | scan#2: bv:2:1
 multifile_two_merged => scan#0: | scan#1: bv:2:1
 multifile_one_passthrough => scan#0: pv:2:1 | scan#1: bv:2:1
@@ -744,6 +746,16 @@ def _nested_fixture(name: String) raises -> Optional[LogicalPlan]:
         )
         return LogicalPlan.join(
             _hc4p(), _side("o.parquet", "ov", 1, 999), _keys(), _keys(), JOIN_INNER,
+            residual=residual^,
+        )
+    if name == "nested_under_residual_join_right":
+        # The eligible join is the residual join's RIGHT child, so the right
+        # walk must run before the residual refusal.
+        var residual = Optional[OwnedPointer[Expr]](
+            OwnedPointer(Expr.binary(BIN_GT, Expr.col_ref("pv"), Expr.col_ref("ov")))
+        )
+        return LogicalPlan.join(
+            _side("o.parquet", "ov", 1, 999), _hc4p(), _keys(), _keys(), JOIN_INNER,
             residual=residual^,
         )
     if name == "nested_under_two_key_join":
