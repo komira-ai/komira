@@ -28,9 +28,9 @@
 #     over a NOT NULL float column holding a null row (NaN underneath)
 #     before a NaN: the null row is skipped and the NaN's own row is named.
 #
-# The records and lines are ASCII: on non-ASCII text `write_record` stops
-# the process and `split_lines` re-encodes each byte >= 0x80
-# (komira-ai/komira#1116); these tests do not pin that.
+# The records and lines here are ASCII; non-ASCII text through
+# `write_record`, `write_batch_jsonl`, `split_lines` and `parse_jsonl`
+# (komira-ai/komira#1116) is in test_jsonl_non_ascii_text.mojo.
 # =============================================================================
 
 from std.memory import bitcast

@@ -12,13 +12,13 @@
 #   * test_fast_dtoa_refuses_nan -- `_try_fast_decimal_dtoa` called with NaN
 #     returns False and writes nothing.
 #   * test_date32_year_sweeps -- `write_date32` on every day from
-#     0000-03-01 to 0001-12-31 and of 1900..1901, 1969..1970, 2000..2001 and
+#     0000-01-01 to 0001-12-31 and of 1900..1901, 1969..1970, 2000..2001 and
 #     2100..2101, against a day-by-day calendar counted here (month lengths,
 #     the 4/100/400 leap rule): year 0 (`0000`), month ends and Feb 29. Each
 #     date also reads back through `parse_date32` to the same day number.
-#     Days before 0000-03-01 take the negative-era path, which writes
-#     nearly all of them one day late (komira-ai/komira#1114): left out
-#     rather than pinned.
+#     Days before 0000-03-01 take the negative era (one day late before
+#     komira-ai/komira#1114 was fixed); negative years are swept in
+#     test_jsonl_date32_negative_era.mojo.
 #   * test_decimal128_matches_int128 -- `write_decimal128` at scale 0 against
 #     Mojo's own Int128 formatting for the Int128 extremes, values around
 #     2^64 (the carry into the low word of `_u128_div10`) and a sequence of
@@ -29,9 +29,8 @@
 #   * test_row_output_every_supported_tag -- `write_row_output_jsonl` with
 #     INT64, INT32, FLOAT64 and STRING columns and a validity byte: values,
 #     an all-null row, INT32 min and an empty string; a BOOL tag is refused
-#     naming the tag. A layout with no columns is not asserted: it writes
-#     nothing for rows that the reader would read back as `{}` records
-#     (komira-ai/komira#1139).
+#     naming the tag. A layout with no columns writes one `{}` line per row
+#     (komira-ai/komira#1139), asserted in test_jsonl_zero_column_rows.mojo.
 # =============================================================================
 
 from std.memory import bitcast
@@ -169,10 +168,9 @@ def _sweep(first_day: Int, year: Int, month: Int, n_days: Int) raises:
 
 
 def test_date32_year_sweeps() raises:
-    # From 0000-03-01 (day 0 of the algorithm's shifted epoch) through
-    # 0001. Days before it take the negative era, which writes nearly all
-    # of them one day late (komira-ai/komira#1114): not swept.
-    _sweep(-719468, 0, 3, 306 + 365)
+    # From 0000-01-01 through 0001: the days before 0000-03-01 (day 0 of
+    # the algorithm's shifted epoch) take the negative era (#1114).
+    _sweep(-719528, 0, 1, 366 + 365)
     _sweep(-25567, 1900, 1, 365 + 365)  # 1900 is not leap
     _sweep(-365, 1969, 1, 365 + 365)
     _sweep(10957, 2000, 1, 366 + 365)  # 2000 is leap
