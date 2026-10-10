@@ -44,6 +44,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # SIGTERM or SIGINT sent to it reaches the job's process group and ends
 # CANCELLED, orphans are collected, the job starts with default signal
 # dispositions, the terminal beat is retried) is test_pid1_stop_and_reap's.
+# The crash report's UTC stamp (clock_helper.mojo) gives the proleptic
+# Gregorian date before year 0 too (test_clock_helper_negative_era).
 mojo_library(
     name = "komira_job_supervisor",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "main/**/*.mojo"]),
@@ -69,6 +71,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_bearer_heartbeat_auth.mojo",
+        "tests/test_clock_helper_negative_era.mojo",
         "tests/test_entrypoint_flags.mojo",
         "tests/test_max_runtime_and_gcs_logs.mojo",
         "tests/test_job_supervisor_chatty_child.mojo",
