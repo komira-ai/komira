@@ -22,6 +22,7 @@ mojo_library(
         "tests/test_oci_copy_digest_preserved.mojo",
         "tests/test_oci_copy_index_and_mount.mojo",
         "tests/test_oci_copy_refusals.mojo",
+        "tests/test_oci_copy_untyped_manifest.mojo",
         "tests/test_oci_fake_registry.mojo",
         "tests/test_oci_grammar.mojo",
         "tests/test_oci_layout_reader.mojo",
