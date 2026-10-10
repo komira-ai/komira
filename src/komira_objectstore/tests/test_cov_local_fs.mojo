@@ -9,7 +9,8 @@
 #   * a root that cannot be created (a regular file in its path) accepted
 #     silently, so every later write lands nowhere;
 #   * a failed rename (the key's path is a directory) reported as success, or
-#     as a 412;
+#     as a 412 (checked on the store's own text only: the root in the message
+#     holds clock digits and, here, a planted "412");
 #   * a create that loses at link(2) (EEXIST: something appeared at the key
 #     after the presence probe, here a dangling symlink the probe reads as
 #     absent) raised as an I/O error instead of the precondition 412 a slot
@@ -69,6 +70,17 @@ def _scratch(tag: String) raises -> String:
     )
 
 
+def _assert_not_a_412(msg: String, root: String) raises:
+    """Assert `msg` does not report a precondition failure. Only the text the
+    store composes is searched: the caller's root is cut out first (it holds
+    clock digits), and the status is matched as the store spells it,
+    `precondition (412)`, as `(412)` and `precondition` separately. A bare
+    "412" would also match the temp file's hex suffix in a rename error."""
+    var own = msg.replace(root, String("<root>"))
+    assert_false(own.find("(412)") >= 0, msg)
+    assert_false(own.find("precondition") >= 0, msg)
+
+
 def _libc_path_call(name: StaticString, a: String, b: String) -> Int32:
     var x = a
     var y = b
@@ -102,7 +114,10 @@ def test_root_under_a_regular_file_is_refused() raises:
 
 
 def test_put_over_a_directory_fails_loud() raises:
-    var root = _scratch(String("ren"))
+    # The root holds "412" on purpose: the error names the root, so a check
+    # that read the caller's path as a status would fail on every run here,
+    # not only when the clock's digits happen to spell it.
+    var root = _scratch(String("ren_412"))
     var s = LocalFsConditionalStore(root.copy())
     # `<root>/d` is a directory (a store rooted there): an unconditional put
     # of key `d` cannot rename its temp over it.
@@ -115,8 +130,7 @@ def test_put_over_a_directory_fails_loud() raises:
         msg = String(e)
     assert_true(msg.find("atomic rename failed") >= 0, msg)
     assert_true(msg.find(root + "/d'") >= 0, msg)
-    assert_false(msg.find("412") >= 0, msg)
-    assert_false(msg.find("precondition") >= 0, msg)
+    _assert_not_a_412(msg, root)
     # The directory under the key is intact.
     assert_equal(len(inner.get(Path.parse(String("x")))), 1)
 
@@ -154,7 +168,7 @@ def test_create_with_missing_root_is_an_io_error() raises:
     assert_true(msg.find("I/O error on exclusive create") >= 0, msg)
     assert_true(msg.find("temp open failed with errno") >= 0, msg)
     assert_true(msg.find("ENOENT") >= 0, msg)
-    assert_false(msg.find("412") >= 0, msg)
+    _assert_not_a_412(msg, root)
 
 
 def test_lowercase_escape_decodes() raises:
