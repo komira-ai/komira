@@ -21,10 +21,17 @@
 #   * A connector reporting more columns than the schema declares is refused
 #     after the buffers are handed back (`release` runs on the error path) and
 #     the lock is released.
-#   * Projection is not pushed for an empty list or one wider than 256
-#     columns; a connector refusing it leaves the schema as it was; one
-#     accepting it narrows the schema to the projected columns (256 is still
-#     pushed).
+#   * Projection is not pushed for an empty list, one wider than 256
+#     columns, or one holding an index outside the schema (below 0 or at/above
+#     its width; komira-ai/komira#1012), so the connector and the schema still
+#     agree on the full column set; a connector refusing it leaves the schema
+#     as it was; one accepting it narrows the schema to the projected columns
+#     (256 is still pushed).
+#   * A worker id outside the per-worker slot table (below 0 or at/above 128)
+#     gets a morsel on a cell of its own, never worker 0's, and on an MT-safe
+#     connector that call holds the lock while in-range workers stay
+#     lock-free (komira-ai/komira#1013). The connector records the slot
+#     address it was handed and whether the lock was held during `next`.
 #
 # Deterministic: one thread, the connector plays a fixed script of statuses
 # in program order. The lock is read directly after each failure instead of
@@ -33,8 +40,15 @@
 # =============================================================================
 
 from std.memory import alloc, UnsafePointer
-from std.testing import TestSuite, assert_equal, assert_false, assert_true
+from std.testing import (
+    TestSuite,
+    assert_equal,
+    assert_false,
+    assert_not_equal,
+    assert_true,
+)
 
+from komira_atomic_alias import AtomicI8
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
 from komira_morsel.vtable_source import (
@@ -72,6 +86,10 @@ struct _Script:
     var release_calls: Int
     var data: UnsafePointer[Int64, MutUntrackedOrigin]
     var colp: UnsafePointer[CScanI64Ptr, MutUntrackedOrigin]
+    var last_slot: Int
+    var lock_watch: Bool
+    var lock_seen: Bool
+    var lock_ptr: UnsafePointer[AtomicI8, MutUntrackedOrigin]
 
 
 comptime _SPtr = UnsafePointer[_Script, MutUntrackedOrigin]
@@ -118,6 +136,9 @@ def _vsc_next(h: CScanOpaque, wid: Int32, b: CScanBatchPtr) abi("C") -> Int32:
     `report_cols` columns with value `call*10 + c*100 + r`."""
     var s = _st(h)
     s[].next_calls += 1
+    s[].last_slot = Int(b)
+    if s[].lock_watch:
+        s[].lock_seen = s[].lock_ptr[].load() != Int8(0)
     if s[].pos >= s[].n_codes:
         return KOMIRA_SCAN_EOF
     var call = s[].pos
@@ -164,6 +185,9 @@ def _make(codes: List[Int32], caps: Int64, open_rc: Int32 = KOMIRA_SCAN_OK) -> _
     s[].release_calls = 0
     s[].data = alloc[Int64](_MAX_COLS * _ROWS)
     s[].colp = alloc[CScanI64Ptr](_MAX_COLS)
+    s[].last_slot = 0
+    s[].lock_watch = False
+    s[].lock_seen = False
     return s
 
 
@@ -315,8 +339,7 @@ def test_projection_not_pushed_or_refused() raises:
     assert_equal(sch.field_at(0).name, "id")
 
     # Accepted: the schema narrows to the projected columns in the order
-    # asked for. Only in-range indices: what an out-of-range index should do
-    # is not defined yet, so this test does not pin it.
+    # asked for. (Out-of-range indices: the next test.)
     s[].proj_rc = KOMIRA_SCAN_OK
     src.set_projection([1, 0])
     assert_equal(s[].proj_calls, 2)
@@ -344,12 +367,134 @@ def test_projection_not_pushed_or_refused() raises:
     _free(s)
 
 
+def test_projection_with_an_index_outside_the_schema_is_not_pushed() raises:
+    # komira-ai/komira#1012: the connector counts every call that reaches
+    # it, accepted or refused. Before the fix [1, 5, -1, 0] reached it
+    # with n = 4 while the schema narrowed to 2 columns.
+    var s = _make([KOMIRA_SCAN_OK], KOMIRA_SCAN_CAP_PROJECTION)
+    var src = VTableMorselSource(_vt(s), _schema())
+    # First against a connector that refuses: a refused push leaves the
+    # schema alone, so a bound check dropped for one kind of bad index fails
+    # the assert after that call by name. Against an accepting connector the
+    # same defect aborts inside `set_projection` (the narrowing reads
+    # `field_at(bad)`), which kills the binary and hides other failures.
+    s[].proj_rc = KOMIRA_SCAN_ERR_UNSUPPORTED
+    src.set_projection([1, 5, -1, 0])
+    assert_equal(s[].proj_calls, 0, "refusing: mixed bad indices are not pushed")
+    src.set_projection([2])
+    assert_equal(s[].proj_calls, 0, "refusing: an index at the width is not pushed")
+    src.set_projection([0, -1])
+    assert_equal(s[].proj_calls, 0, "refusing: a negative index is not pushed")
+    # Then accepting: nothing bad is pushed and the schema is not narrowed.
+    s[].proj_rc = KOMIRA_SCAN_OK
+    src.set_projection([1, 5, -1, 0])
+    assert_equal(s[].proj_calls, 0, "mixed bad indices are not pushed")
+    src.set_projection([2])
+    assert_equal(s[].proj_calls, 0, "an index at the schema width is not pushed")
+    src.set_projection([0, -1])
+    assert_equal(s[].proj_calls, 0, "a negative index is not pushed")
+    var sch = src.output_schema()
+    assert_equal(sch.num_columns(), 2, "the schema keeps every column")
+    assert_equal(sch.field_at(0).name, "id")
+    assert_equal(sch.field_at(1).name, "v")
+    # The connector, never told to project, returns both columns and the
+    # source accepts them under the schema it kept.
+    var m = src.next_morsel(0)
+    assert_equal(m.value().num_columns(), 2)
+    assert_equal(m.value().column_at(1).as_primitive[DType.int64]().get(1), Int64(101))
+    # The last in-range index (width - 1) is still pushed.
+    src.set_projection([1])
+    assert_equal(s[].proj_calls, 1)
+    assert_equal(s[].proj_n, 1)
+    assert_equal(src.output_schema().field_at(0).name, "v")
+    _ = src^
+    _free(s)
+
+
+def _watch_lock(s: _SPtr, src: VTableMorselSource):
+    s[].lock_watch = True
+    # SAFETY: points into the source's heap counters slab, which lives until
+    # the source is dropped; the test stops calling `next` before that.
+    s[].lock_ptr = UnsafePointer(to=src._counters[].lock).unsafe_origin_cast[
+        MutUntrackedOrigin
+    ]()
+
+
+def test_worker_id_outside_the_slot_table_mt_safe_connector() raises:
+    # komira-ai/komira#1013: before the fix worker 128 was handed worker 0's
+    # slot without the lock, so the two raced on one cell.
+    var codes = List[Int32]()
+    for _ in range(5):
+        codes.append(KOMIRA_SCAN_OK)
+    codes.append(KOMIRA_SCAN_ERR)
+    var s = _make(codes, KOMIRA_SCAN_CAP_MT_SAFE)
+    var src = VTableMorselSource(_vt(s), _schema())
+    _watch_lock(s, src)
+
+    var a = src.next_morsel(0)
+    var slot0 = s[].last_slot
+    assert_false(s[].lock_seen, "an in-range worker on an MT-safe connector is lock-free")
+    assert_equal(a.value().column_at(0).as_primitive[DType.int64]().get(1), Int64(1))
+
+    var b = src.next_morsel(128)
+    var over = s[].last_slot
+    assert_not_equal(over, slot0, "worker 128 does not share worker 0's slot")
+    assert_true(s[].lock_seen, "an overflow worker holds the lock")
+    assert_false(_lock_held(src), "and releases it")
+    assert_equal(b.value().partition_id, 128)
+    assert_equal(b.value().column_at(0).as_primitive[DType.int64]().get(0), Int64(10))
+
+    var c = src.next_morsel(-1)
+    assert_equal(s[].last_slot, over, "out-of-range ids share the overflow cell")
+    assert_true(s[].lock_seen)
+    assert_equal(c.value().partition_id, -1)
+
+    var d = src.next_morsel(127)
+    var slot127 = s[].last_slot
+    assert_false(s[].lock_seen, "the last in-range worker is lock-free")
+    assert_not_equal(slot127, slot0)
+    assert_not_equal(slot127, over)
+    assert_equal(d.value().morsel_id, 3)
+
+    # The release path of an overflow call that fails also drops the lock.
+    s[].report_cols = Int64(3)
+    try:
+        _ = src.next_morsel(500)
+    except:
+        pass
+    assert_true(s[].lock_seen)
+    assert_false(_lock_held(src), "lock released on the overflow error path")
+    assert_equal(s[].release_calls, 5)
+
+    # The two other release paths of an overflow call: a non-OK status from
+    # `next`, then EOF. A leak on either would make the next overflow call
+    # spin in `_acquire` forever, so read the lock directly after each.
+    s[].lock_seen = False
+    var raised = False
+    try:
+        _ = src.next_morsel(200)
+    except:
+        raised = True
+    assert_true(raised, "the scripted error status is raised")
+    assert_true(s[].lock_seen, "the overflow call held the lock during next")
+    assert_false(_lock_held(src), "lock released on the overflow status-error path")
+
+    s[].lock_seen = False
+    var e = src.next_morsel(-5)
+    assert_false(Bool(e), "the script is exhausted: EOF")
+    assert_true(s[].lock_seen, "the overflow EOF call held the lock during next")
+    assert_false(_lock_held(src), "lock released on the overflow EOF path")
+    assert_equal(s[].next_calls, 7)
+    assert_equal(s[].release_calls, 5, "no release after a status error or EOF")
+    s[].lock_watch = False
+    _ = src^
+    _free(s)
+
+
 def test_worker_id_outside_the_slot_table() raises:
-    # Serialised connector (no MT-safe bit): calls are serialised, so a
-    # worker id below 0 or at/above the slot table size can borrow slot 0
-    # and still gets a morsel; the morsel keeps the id it was asked with.
-    # Not pinned for an MT-safe connector, where two workers would share
-    # slot 0.
+    # Serialised connector (no MT-safe bit): every call holds the lock, and a
+    # worker id below 0 or at/above the slot table size gets a morsel on the
+    # overflow cell; the morsel keeps the id it was asked with.
     var s = _make([KOMIRA_SCAN_OK, KOMIRA_SCAN_OK, KOMIRA_SCAN_OK], Int64(0))
     var src = VTableMorselSource(_vt(s), _schema())
     var a = src.next_morsel(-1)

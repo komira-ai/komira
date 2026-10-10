@@ -1004,12 +1004,12 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
                 + String(expected_dense)
             )
         if r.last_offset != r.base_offset + count - Int64(1):
-            _ = base^
-            raise Error(
-                "sublineage_base_fold: _base last_offset "
-                + String(r.last_offset)
-                + " != base+count-1 "
-                + String(r.base_offset + count - Int64(1))
+            _ = base^  # cov: unreachable CasManifestStore.append returns last = base + count - 1
+            raise Error(  # cov: unreachable see the line above
+                "sublineage_base_fold: _base last_offset "  # cov: unreachable see the line above
+                + String(r.last_offset)  # cov: unreachable see the line above
+                + " != base+count-1 "  # cov: unreachable see the line above
+                + String(r.base_offset + count - Int64(1))  # cov: unreachable see the line above
             )
         _ = base^
         self._base_chunks.append(

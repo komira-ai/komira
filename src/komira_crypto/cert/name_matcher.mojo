@@ -183,7 +183,7 @@ def _pattern_has_multiple_wildcards(pattern: String) -> Bool:
     var bs = pattern.as_bytes()
     # Already validated leftmost '*' at index 0; check remainder.
     if len(bs) < 2:
-        return False
+        return False  # cov: unreachable only called after _is_wildcard_pattern, which needs at least 2 bytes
     for i in range(1, len(bs)):
         if bs[i] == UInt8(0x2A):
             return True
@@ -217,7 +217,7 @@ def _match_dns_pattern(pattern: String, hostname: String) -> Bool:
     var h_pair = _split_first_label(h)
     # pattern left MUST be exactly "*"
     if p_pair[0] != "*":
-        return False
+        return False  # cov: unreachable _is_wildcard_pattern guarantees the pattern starts with '*.', so its first label is '*'
     # hostname left must be non-empty (no `.example.com` matching)
     if len(h_pair[0].as_bytes()) == 0:
         return False
@@ -253,7 +253,7 @@ def _parse_ipv4_literal(s: String) raises -> List[UInt8]:
             if not has_digit:
                 raise Error("ipv4: empty octet")
             if cur > UInt32(255):
-                raise Error("ipv4: octet > 255")
+                raise Error("ipv4: octet > 255")  # cov: unreachable the digit branch refuses an octet as soon as it exceeds 255
             out.append(UInt8(Int(cur)))
             cur = UInt32(0)
             has_digit = False

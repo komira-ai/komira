@@ -520,26 +520,41 @@ struct ColumnDesc(Movable, Copyable):
         self.format_code = format_code
 
 
-def parse_row_description(msg: BackendMessage) -> List[ColumnDesc]:
-    """Parse a RowDescription ('T') message into a list of ColumnDesc."""
+def parse_row_description(msg: BackendMessage) raises -> List[ColumnDesc]:
+    """Parse a RowDescription ('T') message into a list of ColumnDesc.
+    Raises when the body ends before the field count or a declared field."""
     var cols = List[ColumnDesc]()
     var b = Span[UInt8](msg.body)
     var n = len(b)
     if n < 2:
-        return cols^
+        raise Error("pgwire: RowDescription truncated: body under 2 bytes")
     var field_count = Int(read_i16_be(b, 0))
     var off = 2
-    for _f in range(field_count):
-        if off >= n:
-            break
+    for f in range(field_count):
         # name CString
         var name_bytes = List[UInt8]()
         while off < n and b[off] != UInt8(0):
             name_bytes.append(b[off])
             off += 1
+        if off >= n:
+            raise Error(
+                "pgwire: RowDescription truncated: field "
+                + String(f)
+                + " of "
+                + String(field_count)
+                + " has no NUL-terminated name"
+            )
         off += 1  # skip NUL
         if off + 18 > n:
-            break
+            raise Error(
+                "pgwire: RowDescription truncated: field "
+                + String(f)
+                + " of "
+                + String(field_count)
+                + " needs 18 bytes after its name, "
+                + String(n - off)
+                + " present"
+            )
         # table OID (4) + attnum (2)
         off += 6
         var type_oid = UInt32(read_i32_be(b, off))
@@ -555,19 +570,27 @@ def parse_row_description(msg: BackendMessage) -> List[ColumnDesc]:
 
 # ParameterDescription ('t') body: Int16 param count, then that many Int32
 # parameter type OIDs. Emitted by the server in response to Describe-statement.
-def parse_parameter_description(msg: BackendMessage) -> List[UInt32]:
+def parse_parameter_description(msg: BackendMessage) raises -> List[UInt32]:
     """Parse a ParameterDescription ('t') message into the list of parameter
-    type OIDs the server inferred / confirmed for a prepared statement."""
+    type OIDs the server inferred / confirmed for a prepared statement.
+    Raises when the body ends before the count or a declared OID."""
     var oids = List[UInt32]()
     var b = Span[UInt8](msg.body)
     var n = len(b)
     if n < 2:
-        return oids^
+        raise Error(
+            "pgwire: ParameterDescription truncated: body under 2 bytes"
+        )
     var count = Int(read_i16_be(b, 0))
     var off = 2
-    for _p in range(count):
+    for p in range(count):
         if off + 4 > n:
-            break
+            raise Error(
+                "pgwire: ParameterDescription truncated: "
+                + String(count)
+                + " OIDs declared, body ends at OID "
+                + String(p)
+            )
         oids.append(UInt32(read_i32_be(b, off)))
         off += 4
     return oids^
@@ -594,29 +617,57 @@ struct RawDataRow(Movable):
         return len(self.columns)
 
 
-def parse_data_row(msg: BackendMessage) -> RawDataRow:
-    """Parse a DataRow ('D') message into per-column raw byte payloads."""
+def data_row_truncated_error(
+    col: Int, col_count: Int, declared: Int, present: Int
+) -> Error:
+    """The protocol error for a DataRow body that ends before column `col`
+    (of `col_count`): before its 4-byte length when `declared` < 0, else
+    inside its `declared`-byte value with `present` bytes left. Shared by
+    `parse_data_row` and the PgRow builder in pg_types."""
+    var at = (
+        String("column ") + String(col) + " of " + String(col_count)
+    )
+    if declared < 0:
+        return Error(
+            "pgwire: DataRow truncated: body ends before the length of " + at
+        )
+    return Error(
+        "pgwire: DataRow truncated: "
+        + at
+        + " declares "
+        + String(declared)
+        + " bytes, "
+        + String(present)
+        + " present"
+    )
+
+
+def parse_data_row(msg: BackendMessage) raises -> RawDataRow:
+    """Parse a DataRow ('D') message into per-column raw byte payloads.
+    Raises when the body ends before the column count, a column length or a
+    column value."""
     var columns = List[List[UInt8]]()
     var nulls = List[Bool]()
     var b = Span[UInt8](msg.body)
     var n = len(b)
     if n < 2:
-        return RawDataRow(columns^, nulls^)
+        raise Error("pgwire: DataRow truncated: body under 2 bytes")
     var col_count = Int(read_i16_be(b, 0))
     var off = 2
-    for _c in range(col_count):
+    for c in range(col_count):
         if off + 4 > n:
-            break
+            raise data_row_truncated_error(c, col_count, -1, 0)
         var col_len = Int(read_i32_be(b, off))
         off += 4
         var col_bytes = List[UInt8]()
         if col_len < 0:
             nulls.append(True)
         else:
+            if col_len > n - off:
+                raise data_row_truncated_error(c, col_count, col_len, n - off)
             nulls.append(False)
             for i in range(off, off + col_len):
-                if i < n:
-                    col_bytes.append(b[i])
+                col_bytes.append(b[i])
             off += col_len
         columns.append(col_bytes^)
     return RawDataRow(columns^, nulls^)

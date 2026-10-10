@@ -1,0 +1,15 @@
+# The census of tests//negative/coverage:census_* (test 46). src/a: one library; src/b: one failed (line floor 0); src/c: the floor is the lowest library (c1, first); src/d: an old floor above the measurement survives (under floor); src/e: one library without a branch number (no branch floor); src/f: a library with no line (0/0) sets nothing; src/g: a pinned row, whose measured floors (shown) ignore its 0/0 library g2; and a test package.
+census	2026-10-08	-	-
+komira//src/a:a	src/a	library	OK	5	10	1	4	yes	release	src/a/x.mojo,src/a/y.mojo	-
+komira//src/b:b	src/b	library	OK	10	10	-	-	no	no	-	-
+komira//src/b:b2	src/b	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_x: boom
+komira//src/c:c1	src/c	library	OK	2	4	1	4	yes	no	-	-
+komira//src/c:c2	src/c	library	OK	4	4	3	4	yes	no	-	-
+komira//src/d:d	src/d	library	OK	5	10	-	-	no	conda	-	-
+komira//src/e:e1	src/e	library	OK	4	4	3	4	yes	no	-	-
+komira//src/e:e2	src/e	library	OK	2	4	-	-	no	no	-	-
+komira//src/f:f1	src/f	library	OK	3	4	1	2	yes	no	-	-
+komira//src/f:f2	src/f	library	OK	0	0	-	-	no	no	-	-
+komira//src/g:g	src/g	library	OK	9	10	1	2	yes	no	-	-
+komira//src/g:g2	src/g	library	OK	0	0	-	-	no	no	-	-
+komira//src/tests/e2e/t:t	src/tests/e2e/t	test	OK	3	4	-	-	no	no	-	-

@@ -424,6 +424,33 @@ def test_branch_lcov_flag() raises:
     assert_equal(run(_with(_with(_gate(_tmp(String("branch_lcov_n")), String("census")), String("--branch-lcov"), one), String("--branch-lcov"), n2)), EXIT_INPUT)
 
 
+def test_gate_floor_fails_in_every_mode() raises:
+    # src/alpha measures line 25.00% (2/8). Under a floor of 25.01% the gate
+    # exits 3 (EXIT_GATE) in census and neutral mode, not only in enforce,
+    # and says why; at 25.00%, or under it, census exits 0. cov_gate.sh
+    # turns exit 3 into a failed gate in every mode.
+    var dir = _tmp(String("gate_floor"))
+    var above = dir + "/above.tsv"
+    var at = dir + "/at.tsv"
+    var under = dir + "/under.tsv"
+    write_text(above, String("src/alpha\t2501\t-\n"))
+    write_text(at, String("src/alpha\t2500\t-\n"))
+    write_text(under, String("src/alpha\t2499\t-\n"))
+    for mode in [String("census"), String("neutral")]:
+        var r = dir + "/" + mode + "_red"
+        makedirs(r, exist_ok=True)
+        assert_equal(run(_with(_without(_gate(r, mode), String("--ratchet")), String("--ratchet"), above)), EXIT_GATE, mode)
+        var result = parse_json_value(read_text(r + "/result.json"))
+        assert_equal(result.get(String("conclusion")).as_string(), "failure", mode)
+        var summary = read_text(r + "/summary.md")
+        assert_true(summary.find("**Regression**") >= 0 and summary.find("below its floor 25.01%") >= 0, summary)
+        for floor in [at, under]:
+            var g = dir + "/" + mode + "_green"
+            makedirs(g, exist_ok=True)
+            assert_equal(run(_with(_without(_gate(g, mode), String("--ratchet")), String("--ratchet"), floor)), EXIT_OK, mode + floor)
+            assert_equal(parse_json_value(read_text(g + "/result.json")).get(String("conclusion")).as_string(), "neutral", mode + floor)
+
+
 def _levels(dir: String, prefix: String) raises -> String:
     """The annotation levels of the paths under `prefix` in the full
     annotation list (`anns.json` of `dir`), each once, sorted."""
@@ -514,6 +541,7 @@ def main() raises:
     test_input_errors_exit_1()
     test_gate_with_no_report()
     test_gate_test_sources()
+    test_gate_floor_fails_in_every_mode()
     test_report_file_names()
     test_branch_lcov_flag()
     test_info_package()

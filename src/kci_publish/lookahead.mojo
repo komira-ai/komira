@@ -119,8 +119,8 @@ def read_new_names[T: ChannelTransport](
     try:
         registry.credential().configure(SURFACE_PREFIX_DEV, repo_host(targets[0].coordinate.repo), String(""))
     except e:
-        out.detail = String(e)
-        return out^
+        out.detail = String(e)  # cov: unreachable prefix_dev_channel above refused every repo repo_host refuses
+        return out^  # cov: unreachable prefix_dev_channel above refused every repo repo_host refuses
     var read = read_channel(registry, targets)
     if not read.names_read:
         out.detail = String("cannot tell which names the channel holds: ") + read.names_detail

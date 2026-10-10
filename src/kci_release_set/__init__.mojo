@@ -9,6 +9,10 @@
 #                          names another library of the set (BUILD refuses
 #                          an open one; PUBLISH's closure check also pins it)
 #   conda_metadata.mojo    `CondaMetadata`, `read_conda_metadata`
+#   system_libs.mojo       `system_libs`, `is_system_lib_requirement`: the
+#                          conda-forge requirements a library may carry for
+#                          a system library it opens (tools/build/package/
+#                          system_libs.bzl), accepted by both closure checks
 #   member.mojo            `ReleaseMember`, `verify_member`: the per-artifact
 #                          checks both verbs run, so build's early refusal and
 #                          publish's re-check cannot drift apart
@@ -49,6 +53,7 @@ from kci_release_set.release_manifest import (
     release_set_hash,
     render_release_manifest,
 )
+from kci_release_set.system_libs import SystemLib, is_system_lib_requirement, system_libs
 from kci_release_set.set_hash import (
     SetHashLine,
     bytewise_less,

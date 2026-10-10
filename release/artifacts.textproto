@@ -662,6 +662,33 @@ artifacts {
 }
 
 artifacts {
+  name: "komira_trace"
+  build_system: "buck2"
+  args: "//src/komira_trace:komira_trace_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_trace:komira_trace_conda"
+}
+
+artifacts {
+  name: "komira_calendar"
+  build_system: "buck2"
+  args: "//src/komira_calendar:komira_calendar_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_calendar:komira_calendar_conda"
+}
+
+artifacts {
+  name: "komira_calendar_ics"
+  build_system: "buck2"
+  args: "//src/komira_calendar_ics:komira_calendar_ics_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_calendar_ics:komira_calendar_ics_conda"
+}
+
+artifacts {
   name: "komira_all"
   build_system: "komira_pack"
   args: "conda-meta"
@@ -777,6 +804,12 @@ artifacts {
   args: "{release_dir}/komira_mail_message/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_vcard/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_trace/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_calendar/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_calendar_ics/manifest.json"
   args: "--license"
   args: "Apache-2.0"
   args: "--summary"

@@ -2721,7 +2721,7 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         # is recoverable by LIST). On return the deferred counter is reset; if the
         # persist failed transiently it simply tries again on the next cadence.
         if not self._head_cache.present:
-            return
+            return  # cov: unreachable the only caller checks _head_cache.present first
         var seq = self._head_cache.chunk_seq
         var next_off = self._head_cache.next_offset
         # `_try_advance_head` with empty `expected_head_etag` takes the monotone
@@ -3156,10 +3156,10 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             var check_rc = decode_chunk_record_count(new_encoded)
             if check_rc != old_rc:
                 # The `except` below releases the gate (once).
-                raise Error(
-                    "CasManifestStore.rewrite_chunk_body: record_count guard"
+                raise Error(  # cov: unreachable encode_chunk(body, old_rc) always decodes back to old_rc
+                    "CasManifestStore.rewrite_chunk_body: record_count guard"  # cov: unreachable see the line above
                     " — refusing to renumber chunk "
-                    + String(chunk_seq)
+                    + String(chunk_seq)  # cov: unreachable see the line above
                 )
             try:
                 _ = self._store.conditional_put(
