@@ -42,6 +42,7 @@ mojo_library(
         "tests/test_metric_sweep.mojo",
         "tests/test_metrics_set.mojo",
         "tests/test_metrics_set_owned_factory.mojo",
+        "tests/test_metrics_set_owned_factory_dirty_slot.mojo",
         "tests/test_metrics_set_unregistered_lookup_quarantine.mojo",
         "tests/test_series_table.mojo",
     ],
