@@ -261,7 +261,7 @@ def test_same_view_twice_in_one_plan_is_not_a_cycle() raises:
 
 
 def _wrap(kind: Int, var child: LogicalPlan) raises -> LogicalPlan:
-    """`child` under one node of the kind numbered `kind` (0..10); kinds 9
+    """`child` under one node of the kind numbered `kind` (0..11); kinds 9
     and 10 put `child` on the right of a two-input node with a scan on the
     left, and kind 11 puts it second in a Union."""
     var desc = List[Bool]()

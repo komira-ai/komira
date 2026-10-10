@@ -190,6 +190,32 @@ session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.sh),
   skip itself green, whether gated or run by `buck2 test`
   ([`tests//negative/test_data:skip_77`](../tests/negative/test_data/BUCK)).
 
+### Time limits
+
+- **`buck2 test`** runs a test through buck2's test runner, which gives it
+  a timeout: the runner's `--timeout`, 600 s unless
+  `buck2 test <targets> -- --timeout <s>` sets another. (`[test]
+  timeout_default_s` does not reach these tests; it is the timeout of the
+  other kind of test provider.) A remote executor stops the action there, and
+  buck2 reports a plain `Fail` with `Timeout 0`: no word of the timeout, and
+  a `mojo_test`'s output, which its runner holds until the test exits, is
+  lost. So a `mojo_test` runs under [`test_deadline.sh`](test_deadline.sh),
+  which kills the test 60 s earlier ([`test_limit.bzl`](test_limit.bzl)),
+  lets the runner report it (`GATED TEST FAILED: <label> (exit 137)` with its
+  output), and prints `TEST TIME LIMIT: killed <label> after <n> s, under the
+  test runner's timeout of <m> s (komira.test_timeout_s)`. No rule can read
+  the runner's command line, so the root `.buckconfig` states its timeout as
+  `[komira] test_timeout_s` (komira's [`.buckconfig`](../../../.buckconfig)
+  and [`consumer.buckconfig`](../consumer.buckconfig) set 600, the
+  default): with `-- --timeout <s>`, pass `-c komira.test_timeout_s=<s>`
+  too. The `mojo_test` macro reads the key when the BUCK file loads; a value
+  that is not a whole number, or not over 60, is refused.
+- **A library's `test_srcs`** run as build actions, and buck2 gives a build
+  action no timeout: neither the runner's timeout nor the limit above
+  applies, only the executor's own default for an action that names none. A
+  gated test that hangs holds its worker until then, and fails as the
+  executor reports it.
+
 ### Outputs and the runnable directory
 
 Every compile targets the toolchain's `target_cpu` (`x86-64-v3`), not the CPU
@@ -462,14 +488,14 @@ a plugin the descriptors of the whole import closure with their custom
 options, which the plugin decodes from the raw request bytes; no
 descriptor-set flag is passed. `deps` holds the `komira_db` runtime the
 generated code imports. `proto_srcs(name, srcs, import_prefix, proto_deps)`
-names `.proto` files that others import but no Mojo is generated from.
+names `.proto` files that others import but no Mojo is generated from. `mojo_routes_proto_library` (HTTP routes from `google.api.http`): [its README](../proto-codegen/routes/README.md).
 
 The toolchain, `toolchains//:mojo_proto` (declared by
 `komira_proto_toolchains()`, see [toolchains](../toolchains/README.md)), is protoc
 29.1 (the sha256-pinned static release build, with its well-known-type
-`.proto` files) and `komira//tools/build/proto-codegen:protoc-gen-mojo` and
-`:protoc-gen-mojo-db`, built from source with the [Rust rules](../rust/README.md) against the
-crates in `third_party/rust`. The plugin crate, `komira_proto_codegen`, is
+`.proto` files) and `komira//tools/build/proto-codegen:protoc-gen-mojo`,
+`:protoc-gen-mojo-db` and `:protoc-gen-mojo-routes`, built from source with the [Rust rules](../rust/README.md) against the
+crates in `third_party/rust`. The plugins and their shared crate, `komira_proto_codegen`, are
 in [`../proto-codegen/`](../proto-codegen/);
 [`tests//functional/proto`](../tests/functional/proto/BUCK) holds the example protos and tests.
 
@@ -795,161 +821,13 @@ every build that links the library; see [`../native`](../native/README.md).
 
 ## Coverage builds
 
-`-c komira.coverage=true` (default `false`) gives every `mojo_library`, per
-`test_srcs` entry:
-
-- one more binary: the test compiled at `-O0` with
-  `--debug-level line-tables`, against the same ungated package its gated
-  test uses, for kcov to map what ran to source lines:
-  `[coverage][bin][<test>]` (`cov/tests/<test>/<test>`, action category
-  `mojo_build_cov_test`);
-- one run of that binary under kcov, with the gated test's environment and
-  data (it goes through the same `gate_runner.sh`), whose Cobertura report
-  in repository paths is `[coverage][tests][<test>]` (`cov/tests/<test>.xml`
-  and the marker `cov/tests/<test>.passed`, action category `mojo_cov_run`;
-  [cov_run](../coverage/kcov/README.md#cov_run)). What differs: the test is
-  traced without address randomization, its working directory also holds
-  its source and the library's, and the run waits for every process the
-  test started, so it is bounded: after 450 s every process of the run is
-  killed and the action fails, saying the test left processes running or
-  did not finish. komira's kcov exits with the test's status (128+N for
-  signal N), so a test that fails at `-O0` or traced fails this action,
-  whatever its gated run did;
-- its branch coverage, which the gate reads when the library's
-  `coverage_branch_gate` is set (a library of `COVERAGE_BRANCH_GATE` in
-  [`policy.bzl`](../coverage/policy.bzl), or a fixture of the tests cell
-  that does not pass `coverage_branch_gate = False`), and nothing waits
-  for otherwise: the test emitted as
-  LLVM bitcode at `-O0` with line tables (`[coverage][bc][<test>]`,
-  `mojo_emit_cov_bc`, through the same `mojo_wrapper.sh`), instrumented
-  with IR profile counters by the Mojo package's lld and linked with the
-  LLVM profile runtime (`[coverage][pgo_bin][<test>]`, `mojo_cov_pgo_link`),
-  and run through the same `gate_runner.sh` with `LLVM_PROFILE_FILE` set,
-  whose merged profile is `[coverage][branch][<test>]` (`cov/branch/<test>.profdata`,
-  `mojo_cov_branch_run`), that profile applied to the bitcode by the same
-  lld as IR text (`[coverage][branch_ir][<test>]`, `mojo_cov_branch_annotate`),
-  and its branches in the library's sources, each a source decision or a
-  known compiler-made branch, as lcov `BRDA` records
-  (`[coverage][branch_info][<test>]`, `cov/branch/<test>.info`,
-  `mojo_cov_branch_classify`; [branch coverage runs](../coverage/branch/README.md)).
-  A `test_env` setting `LLVM_PROFILE_FILE` is refused.
-
-and, per library, with tests or without:
-
-- the gate: `covcheck gate` over those reports (and, as above, the branch
-  records: `--branch-lcov`) and the library's sources (each non-generated
-  `srcs` file, recorded or not; every welded test set aside, under the
-  package's `tests/` or not: `--test-source`), in
-  the mode and against the target of
-  [`policy.bzl`](../coverage/policy.bzl) (census, 100%), whose `result.json`
-  and `summary.md` are `[coverage][gate]` (`cov/gate/`, action category
-  `mojo_cov_gate`; [The build gate](../coverage/README.md#the-build-gate)).
-
-What ships, the library's conda package (`<name>_conda`: both its joins,
-[`conda.bzl`](../package/conda.bzl)), then also waits for every coverage run
-and the gate: with the switch on, a test that fails at `-O0` or traced, or a
-gate that fails in enforce mode, leaves the conda package unbuilt. The
-library's own package (`mojo_gate_join`) does not wait for them, so the
-library builds and every dependent compiles and tests against it: a red
-coverage run or gate blocks the package it measures from shipping, and
-nothing else. A library with no test still has a gate (`NotMeasured`: it
-fails in enforce mode), which its conda package waits for, as does a
-library whose sources are all generated (a cloud SDK client). The libraries
-the gate's own tool depends on are the ledger `COVERAGE_NO_GATE` of
-`policy.bzl` (`covcheck`, `komira_json`, `readme_examples`): they have no
-gate of their own (the library would depend on the gate's tool, which
-depends on it), and their gate is `<name>_cov_gate`, which their conda
-package waits for too. `[coverage]` is the binaries, the reports and the
-gate's outputs; the branch coverage files are only its sub-targets `[bc]`,
-`[pgo_bin]`, `[branch]`, `[branch_ir]` and `[branch_info]`.
-
-```sh
-./buck2 build 'komira//src/komira_retry:komira_retry[coverage]' -c komira.coverage=true
-./buck2 build 'komira//src/komira_retry:komira_retry[coverage][gate][summary]' -c komira.coverage=true --show-full-output
-```
-
-The switch is read in the `mojo_library` macro ([`coverage.bzl`](coverage.bzl))
-and does one thing: it sets the attributes `coverage_debug` to
-`komira//tools/build/coverage/kcov:cov_link`, `coverage_run` to
-`komira//tools/build/coverage/kcov:cov_run` (cov_run.sh, kcov and
-cov_normalize), `coverage_branch` to
-`komira//tools/build/coverage/branch:cov_branch` (the branch coverage
-scripts and the LLVM pieces), `coverage_gate` to `komira//tools/build/coverage:cov_gate`
-(cov_gate.sh, covcheck and the ratchet) and `coverage_mode` to the policy's
-(for a library of the ledger: no gate). A buckconfig
-value is not part of the configuration, so no output path moves; with the
-switch off the attributes are absent and analysis is what it was without
-coverage builds. With it on, every release action of the library
-(`mojo_precompile`, `mojo_build_test`, `mojo_gated_test`, the README's,
-`mojo_gate_join`) keeps its command line and inputs, so it keeps its cache
-hits and so do its dependents; the conda package's joins keep their command
-lines and gain the coverage markers as inputs; the coverage builds, runs
-and gate are new actions ([test 41](../tests/README.md#41-coverage-builds)'s
-`coverage_keys.sh`). A value other than `true` or `false` fails at load,
-naming it.
-
-The macro reads the switch from the buckconfig of the cell whose BUCK file
-it runs in. `-c komira.coverage=true` on the command line, or a global
-buckconfig (`~/.buckconfig.d`), applies to every cell. `[komira] coverage =
-true` in a cell's own `.buckconfig` or `.buckconfig.local` applies to that
-cell only: in a repository that mounts komira as the cell `komira`, setting it
-in the root cell's file leaves komira's libraries without `[coverage]`
-("unknown subtarget").
-
-A coverage build runs the same `mojo_wrapper.sh` as every compile, byte for
-byte, with one argument changed: its link directory (`<zig_dir>`) is
-`cov_link` instead of the toolchain's zig. That directory holds the
-toolchain's zig as `real/` and, as `zig`, `cov_zig`
-([kcov README](../coverage/kcov/README.md#cov_zig)), which for a link drops
-`-Wl,--strip-debug`, asks for no build id and no compressed debug section,
-and after the link overwrites the action's directory with a placeholder of
-the same length, with `debug_relocate`. The pinned Mojo records no
-compilation directory and names its sources by relative paths (`tests/...`,
-the staged library sources under `buck-out/`, the standard library under
-`oss/modular/`); the directory overwritten is the one zig's C runtime units
-record ([names in a coverage binary](../coverage/kcov/README.md#names-in-a-coverage-binary)).
-The wrapper's own check, that no output holds the action's working directory
-(exit 4), runs on the result as on any compile; a relocation that did not
-happen fails there ([test 41](../tests/README.md#41-coverage-builds)).
-
-Scope, for now:
-
-- linux-x86_64. On another target platform the attributes are None (a
-  `select`) and the library builds as with the switch off: it has no
-  `[coverage]` sub-target, so asking for one is an "unknown subtarget" error,
-  not an empty result. Whatever collects coverage asks only on linux-x86_64,
-  as the pull request's `coverage` workflow does
-  ([The coverage workflow](../coverage/README.md#the-coverage-workflow)).
-- A library's `test_srcs` that are source files. A README's examples,
-  `mojo_test`, the drivers of `mojo_shared_lib` and generated test sources
-  (a `test_srcs` entry that is a build output) get no coverage binary, and
-  the library's generated sources are not measured.
-- A test's data may not be staged at its own source's path or under
-  `buck-out/`: a coverage run stages the sources there (analysis fails,
-  naming the destination).
-- Branch coverage only where the gate reads the branch records
-  (`coverage_branch_gate`, above): kcov gives no branch data, so for any
-  other library the gate's branch is `not measured` and never passes in
-  enforce mode (`BranchNotMeasured`).
-
-A library in the `tests` cell may pass `coverage_debug` itself (a
-`cov_link_dir`), and with it `coverage_run` (a `cov_run_dir`; the default one
-when not given) and `coverage_gate` (a `cov_gate_dir`) with `coverage_mode`
-(the policy's when not given): it then has coverage binaries and runs, and
-with `coverage_gate` the gate, whatever the switch says, which
-is how tests 41, 43, 46 and 47 build them, plant a defective relocator or run
-script, and gate in enforce mode, without `-c`. Its conda package, if it has
-one, waits for its runs and that gate. It may also pass
-`coverage_branch_gate = False`, so its gate does not read its branch
-records (test 46's `covfull_unread`). Anywhere else passing any of them is
-refused.
-
-## API JSON: mojo_doc_json
-
-`mojo_doc_json(lib, golden, symbols)` ([`doc.bzl`](doc.bzl)) writes the
-`mojo doc` JSON of a `mojo_library`, optionally checked against a golden file
-and for named declarations. [`doc.md`](doc.md) has its use, what the JSON
-holds (no source locations), its two checks and test 52.
+`-c komira.coverage=true` (default `false`) gives every `mojo_library` on
+linux-x86_64 a coverage build: each test (its `test_srcs`, its README's
+examples and the `mojo_test` targets it names in `coverage_tests`) built at
+-O0 with line tables and run under kcov, its branch coverage, and the gate
+that its conda package waits for; and every `mojo_shared_lib` its drivers'
+runs and a reported (never enforced) gate. Every release action stays as it is. The
+rules, sub-targets, scope and fixtures are in [coverage.md](coverage.md).
 
 ## Errors
 
@@ -959,6 +837,7 @@ holds (no source locations), its two checks and test 52.
 | `COVERAGE GATE FAILED (enforce): <package> (<label> [coverage gate]): covcheck gate exited 3` | [`cov_gate.sh`](../coverage/cov_gate.sh) | with coverage on, the library's coverage gate in enforce mode found something (its summary follows: below the target, not measured, a file no test compiled, branch not measured, ...); the conda package (`<name>_conda`) is not produced, while the library and its dependents still build ([The build gate](../coverage/README.md#the-build-gate)) |
 | `COVERAGE GATE ERROR: <package> (<label> [coverage gate]): covcheck exited N` | [`cov_gate.sh`](../coverage/cov_gate.sh) | covcheck refused the gate's inputs (an unmapped report path, a source it cannot read: exit 1) or its command line (exit 2), in any mode; its message is above |
 | `COVERAGE RUN FAILED: <label> [coverage]` | [`cov_run.sh`](../coverage/kcov/cov_run.sh) | a coverage run failed: the test failed under kcov (with its exit status, after its output), it left processes running or did not finish within the run's limit (450 s), kcov could not trace it or failed itself, the binary names the library's sources by another directory than the run stages, or its report was missing or refused by `cov_normalize` ([cov_run](../coverage/kcov/README.md#cov_run)) |
+| `<name>_cov_gate: coverage_tests of <lib>: <test> does not name <lib> in its deps` (or `cannot run under kcov: ...`, `is not a mojo_test with a coverage build`) | [`coverage.bzl`](coverage.bzl) | with coverage on, a library's `coverage_tests` names a test that does not depend on it, has `args` or a generated main, or is not a `mojo_test` ([Coverage builds](#coverage-builds)) |
 | `<target>: tests_known_failing was removed: every welded test must pass` | [`defs.bzl`](defs.bzl) | a `mojo_library` call names `tests_known_failing`; delete it and make the test pass |
 | `<target>: test_data[<entry>]: not a test_srcs entry` | [`defs.bzl`](defs.bzl) | a `test_data` key names no test; fix the path or delete the key |
 | `<target>: ... data destination <d> ...` | [`test_runtime.bzl`](test_runtime.bzl) | a data destination is absolute, has an empty, `.` or `..` segment, or is also the directory of another destination |
@@ -977,6 +856,8 @@ holds (no source locations), its two checks and test 52.
 | `<target>: defines entry "<e>" is not NAME or NAME=VALUE with NAME an identifier`, `... sets <NAME> twice` | [`defines.bzl`](defines.bzl) | a define the compiler would misread, or two values for one name |
 | `<target>: test_memory_cap_mib is <n>; it must be a number of MiB, or 0 for no cap` | [`defines.bzl`](defines.bzl) | a negative cap |
 | `MEMORY CAP: killed <label> at <n> MiB resident, over its cap of <cap> MiB` | [`mem_cap.sh`](mem_cap.sh) | the test's resident memory passed its memory cap and it was killed (after `GATED TEST FAILED: <label> (exit 137)`) |
+| `TEST TIME LIMIT: killed <label> after <n> s, under the test runner's timeout of <m> s (komira.test_timeout_s)` | [`test_deadline.sh`](test_deadline.sh) | `buck2 test` of a `mojo_test` ran to 60 s short of the test runner's timeout and was killed (after `GATED TEST FAILED: <label> (exit 137)`); see [Time limits](#time-limits) |
+| `[komira] test_timeout_s = <v> is not a whole number of seconds` / `must be over 60 s` | [`test_limit.bzl`](test_limit.bzl) | the root `.buckconfig` (or `-c`) states a test timeout a `mojo_test` cannot be limited under |
 | `<target>: dep <dep> provides neither MojoInfo (a Mojo package) nor MergedLinkInfo (a C/C++ library)` | [`defs.bzl`](defs.bzl) | a `deps` entry is neither a `mojo_library` nor a C/C++ library |
 | `cxx toolchain: <tool> is not provided` | [`cxx.bzl`](cxx.bzl) | a `cxx_library` reached a prelude feature that needs a host tool the toolchain does not provide |
 | `mojo_doc_json: <target>: the JSON differs from its golden <file>` | [`doc.bzl`](doc.bzl) | the library's `mojo doc` JSON changed; if on purpose, replace the golden with `[raw]` |

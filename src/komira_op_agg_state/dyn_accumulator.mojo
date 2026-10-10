@@ -180,8 +180,9 @@ def _cast_acc[T: Accumulator](
         )
     except e:
         # A box that does not hold a T is a wiring bug (the SAFETY contract
-        # above); the thunks that call this cannot raise, so it aborts.
-        abort(String("_cast_acc: ") + String(e))
+        # above): a vtable from another type passed to the public
+        # create_with_vtable lands here. The thunks cannot raise, so it aborts.
+        abort(String("_cast_acc: ") + String(e))  # cov: unreachable reached only by a vtable wired to another type (create_with_vtable is public), which aborts the process; no welded test survives it
 
 
 # =============================================================================
@@ -364,7 +365,7 @@ struct DynAccumulator(Movable):
         try:
             return UnsafePointer(to=self._value.get[T]()).unsafe_origin_cast[o]()[]
         except e:
-            abort(String("DynAccumulator.as_mut: ") + String(e))
+            abort(String("DynAccumulator.as_mut: ") + String(e))  # cov: unreachable a type mismatch is a caller bug that aborts the process, which no welded test can survive
 
     def finalize(mut self) raises -> Column[HeapRegion]:
         return self._vtable.finalize(self._value)

@@ -1,0 +1,39 @@
+# proto-message: kci.resource.v1.ResourceList
+resource {
+  id: "logs"
+  retention: KEEP
+  physical_name: "acme-logs"
+  labels {
+    key: "team"
+    value: "data"
+  }
+  labels {
+    key: "tier"
+    value: "gold"
+  }
+  adopt: true
+  bucket {
+  }
+}
+resource {
+  id: "reader"
+  physical_name: ""
+  labels {
+    key: "team"
+    value: "data"
+  }
+  service_account {
+  }
+}
+resource {
+  id: "read-logs"
+  grant {
+    principal {
+      resource: "reader"
+    }
+    target {
+      resource: "logs"
+    }
+    access: READ
+  }
+}

@@ -7,7 +7,7 @@ other). The package root exports nothing; import the submodules:
 - `komira_http_core.codec`: HTTP/1.1 as pure functions over byte spans.
   `parse_request_head` parses a request line and header block under
   `ParseLimits` and reports need-more or a typed error with the status to
-  answer (400, 413, 414, 417, 431 or 505); `ChunkedDecoder` / `decode_block`
+  answer (400, 413, 414, 417, 431, 501 or 505); `ChunkedDecoder` / `decode_block`
   decode a chunked body incrementally; `HttpRequest`, `HttpResponse` and
   `serialize_response` build the wire form.
 - `komira_http_core.codec.h2`: HTTP/2 frames, HPACK (`HpackEncoder`,
@@ -57,7 +57,7 @@ assert_true(parse_request_head(Span(partial), ParseLimits.defaults()).err.is_nee
 var bad = wire("get / HTTP/1.1\r\n\r\n")
 var refused = parse_request_head(Span(bad), ParseLimits.defaults())
 assert_equal(Int(refused.err.kind), Int(PARSE_ERR_METHOD_LOWERCASE))
-assert_equal(Int(refused.err.status), 400)
+assert_equal(Int(refused.err.status), 501)
 ```
 
 A chunked body, decoded:

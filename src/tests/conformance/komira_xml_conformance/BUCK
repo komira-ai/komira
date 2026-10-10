@@ -1,0 +1,55 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: komira_xml's canonical form against the AWS conformance
+# harness's independent XML equivalence (komira//tools/build/proto-codegen,
+# `xml_equiv`), over every XML body of botocore's rest-xml protocol corpus.
+# test_xml_canonical_differential reads the verdicts xml-equiv-verdicts
+# writes, the target //tools/build/proto-codegen:rest_xml_verdicts, and the
+# two rest-xml case files they were written from, read from the botocore
+# archive //third_party/botocore pins by sha256 and staged at their paths in
+# it; it requires komira_xml to agree with every verdict.
+#
+# The test is welded here, not to komira_aws_core: there it made the AWS
+# core's build, and so every generated client's, build the Rust tool and run
+# it over the corpus, for a check of the generator's XML equivalence rather
+# than of the AWS core. Welded (not a mojo_test), the verdict is a build
+# action the cache keeps for exactly these inputs, and nothing named
+# komira_xml_conformance exists unless it passed. Nothing depends on this
+# package.
+
+# botocore's rest-xml protocol case files, each staged at its path in the
+# botocore archive.
+_REST_XML_CORPUS = {
+    path: "//third_party/botocore:protocol_tests[{}]".format(path)
+    for path in [
+        "tests/unit/protocols/input/rest-xml.json",
+        "tests/unit/protocols/output/rest-xml.json",
+    ]
+}
+
+mojo_library(
+    name = "komira_xml_conformance",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_json:komira_json",
+        "//src/komira_xml:komira_xml",
+    ],
+    conda = False,
+    test_srcs = ["tests/test_xml_canonical_differential.mojo"],
+    test_data = {
+        "tests/test_xml_canonical_differential.mojo": {
+            "rest_xml_verdicts.tsv": "//tools/build/proto-codegen:rest_xml_verdicts",
+        } | _REST_XML_CORPUS,
+    },
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the test imports
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)
