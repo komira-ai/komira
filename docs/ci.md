@@ -845,7 +845,12 @@ package that held it at the base commit), takes their reverse dependencies, and
 answers the units whose targets (labels, or the package patterns of the derived
 checks) are among them. A file it cannot map, and a change to `.buckconfig`,
 the toolchains, `tools/build`, `prelude` or `third_party`
-([`rules.txt`](../tools/build/ci/rules.txt)), answer `WIDENED`: every unit. A
+([`rules.txt`](../tools/build/ci/rules.txt)), answer `WIDENED`: every unit.
+A universe holding a target buck2 cannot configure (an unknown or invisible
+dependency) answers `BROKEN`, naming the target and buck2's error, and kci
+FAILS the check (`KCI-E-BUILD-FAILED`): never a widening. The universe is
+configured before any widened answer too, so a change that plants such a
+target fails its own check. A
 non-empty change that reaches no unit answers `AFFECTED 0`, which kci refuses
 (`KCI-E-AFFECTED-VACUOUS`): never a pass. The job's checkout has the full
 history, so the base commit is there.

@@ -17,13 +17,16 @@ The answer is the seeds and everything that depends on one of them. It never
 under-approximates: anything the mapping cannot do widens, with the reason,
 and a change whose files reach no target is VACUOUS, never an empty pass.
 
-One failure does not widen: a reverse-dependency query that buck2 refuses
-because a target of the universe cannot be configured (a fixture that fails
-analysis by design, a visibility a change narrowed). That target breaks the
-query for every change, so widening would answer every unit on every change
-and bury the cause in a reason; dropping it from the universe would pass a
-change that broke it. `compute` raises instead, naming the target: the caller
-cannot tell, and says so (kci refuses the check, never widens on it).
+One failure is not a widening: a universe holding a target buck2 cannot
+configure (an unknown or invisible dependency, such as a visibility a change
+narrowed). Every configured query over the universe fails on it, for every
+change, so widening would answer every unit on every change and bury the
+cause in a reason; dropping it from the universe would pass a change that
+broke it. The answer is BROKEN, naming the target and buck2's error, and kci
+fails the check. A widened answer would query nothing configured, so
+`compute` configures the universe before it widens: a change that plants such
+a target under a widen rule (tools/build/**) fails its own check by name,
+instead of passing and breaking every change after it.
 """
 
 from buildtools.bytes import dirname, join, sorted_unique
@@ -35,13 +38,15 @@ comptime KIND_AFFECTED: String = "AFFECTED"
 comptime KIND_WIDENED: String = "WIDENED"
 comptime KIND_VACUOUS: String = "VACUOUS"
 comptime KIND_EMPTY: String = "EMPTY"
+comptime KIND_BROKEN: String = "BROKEN"
 
 
 struct Verdict(Copyable, Movable):
     """The answer. `targets` is sorted and unique; for WIDENED it is every
-    target of the universe, for VACUOUS and EMPTY it is empty. `reason` says
-    why for WIDENED and VACUOUS. `warnings` are events the run saw (a file no
-    target owns, inert or not)."""
+    target of the universe, for VACUOUS, EMPTY and BROKEN it is empty.
+    `reason` says why for WIDENED, VACUOUS and BROKEN. `warnings` are events
+    the run saw (a file no target owns, inert or not; a universe query that
+    failed before a widening)."""
 
     var kind: String
     var reason: String
@@ -135,17 +140,13 @@ def _collect[
     return String("")
 
 
-def _widened[G: Graph](var reason: String, files: Int, var warnings: List[String], mut graph: G) raises -> Verdict:
-    var all = sorted_unique(graph.all_targets())
-    return Verdict(String(KIND_WIDENED), reason^, all^, files, 0, warnings^)
-
-
 comptime _CONFIGURED_NODE: String = "Error looking up configured node "
 
 
 def unconfigurable_target(error: String) -> String:
     """The target buck2 named as one it could not configure in a failed
-    query's message, or "" when the message names none."""
+    query's message (the label ends at the space before its configuration,
+    or at a line break), or "" when the message names none."""
     var at = error.find(String(_CONFIGURED_NODE))
     if at < 0:
         return String("")
@@ -157,11 +158,37 @@ def unconfigurable_target(error: String) -> String:
     return String(error[byte=start:end])
 
 
+def _broken(target: String, error: String, files: Int, var warnings: List[String]) -> Verdict:
+    return Verdict(
+        String(KIND_BROKEN),
+        String("the universe holds a target buck2 cannot configure: ") + target + String(": ") + error,
+        List[String](),
+        files,
+        0,
+        warnings^,
+    )
+
+
+def _widened[G: Graph](var reason: String, files: Int, var warnings: List[String], mut graph: G) raises -> Verdict:
+    """WIDENED, unless the universe holds a target buck2 cannot configure
+    (then BROKEN, naming it). A universe query failing for another reason
+    keeps the widening, the failure a warning."""
+    try:
+        graph.configure_universe()
+    except e:
+        var broken = unconfigurable_target(String(e))
+        if broken.byte_length() > 0:
+            return _broken(broken, String(e), files, warnings^)
+        warnings.append(String("the universe query failed: ") + String(e))
+    var all = sorted_unique(graph.all_targets())
+    return Verdict(String(KIND_WIDENED), reason^, all^, files, 0, warnings^)
+
+
 def compute[G: Graph](rules: Rules, files_in: List[String], mut graph: G) raises -> Verdict:
     """The verdict for a change of `files_in` (repository-relative paths).
-    Raises when even the widened answer cannot be made (the graph cannot be
-    listed), and when the universe holds a target buck2 cannot configure (the
-    module's header says why that is not a widening)."""
+    Raises only when even the widened answer cannot be made (the graph
+    cannot be listed). A universe holding a target buck2 cannot configure is
+    BROKEN, never a widening (the module's header says why)."""
     var files = sorted_unique(files_in)
     var warnings = List[String]()
     if len(files) == 0:
@@ -194,11 +221,7 @@ def compute[G: Graph](rules: Rules, files_in: List[String], mut graph: G) raises
     except e:
         var broken = unconfigurable_target(String(e))
         if broken.byte_length() > 0:
-            raise Error(
-                String("the universe holds a target buck2 cannot configure: ") + broken
-                + String(" (a fixture that must fail analysis is a staged BUCK file, outside the universe;")
-                + String(" see tools/build/tests/README.md): ") + String(e)
-            )
+            return _broken(broken, String(e), len(files), warnings^)
         return _widened(String("the reverse-dependency query failed: ") + String(e), len(files), warnings^, graph)
     if len(reached) == 0:
         return _widened(

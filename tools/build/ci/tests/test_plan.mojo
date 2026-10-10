@@ -3,7 +3,7 @@ from std.testing import assert_equal, assert_true, assert_false
 from buildtools.bytes import bytes_less
 
 from change_map.graph import Graph, PackageOf, PACKAGE_FOUND, PACKAGE_NONE, PACKAGE_UNKNOWN
-from change_map.plan import KIND_AFFECTED, KIND_EMPTY, KIND_VACUOUS, KIND_WIDENED, Verdict, compute, uncovered
+from change_map.plan import KIND_AFFECTED, KIND_EMPTY, KIND_VACUOUS, KIND_WIDENED, Verdict, compute, uncovered, unconfigurable_target
 from change_map.report import render_units_answer
 from change_map.rules import Rules, parse_rules, read_rules
 from change_map.units import affected_units, parse_units_file
@@ -47,6 +47,8 @@ struct FakeGraph(Graph, Movable):
     var fail_owners: Bool
     var fail_rdeps: Bool
     var rdeps_error: String
+    var configure_error: String
+    var asked_configure: Int
     var empty_rdeps: Bool
     var asked_owners: Int
     var asked_paths: List[String]
@@ -81,6 +83,8 @@ struct FakeGraph(Graph, Movable):
         self.fail_owners = False
         self.fail_rdeps = False
         self.rdeps_error = String("")
+        self.configure_error = String("")
+        self.asked_configure = 0
         self.empty_rdeps = False
         self.asked_owners = 0
         self.asked_paths = List[String]()
@@ -154,6 +158,11 @@ struct FakeGraph(Graph, Movable):
                 for k in range(len(self.dependents[t])):
                     work.append(self.dependents[t][k])
         return out^
+
+    def configure_universe(mut self) raises:
+        self.asked_configure += 1
+        if self.configure_error.byte_length() > 0:
+            raise Error(self.configure_error)
 
     def all_targets(mut self) raises -> List[String]:
         return self.universe.copy()
@@ -354,28 +363,77 @@ comptime UNCONFIGURABLE: String = (
     + String("     `komira//third_party/node:node` is not visible to")
     + String(" `tests//negative/node/visibility:node_not_visible`")
 )
+comptime UNCONFIGURABLE_LABEL: String = "tests//negative/node/visibility:node_not_visible"
 
 
-def test_a_target_the_universe_cannot_configure_is_named_and_never_widens() raises:
-    # A target outside the change that buck2 cannot configure breaks the
-    # query for every change. Widening would turn it into every unit on every
-    # change (the check times out, the cause buried in a reason); the answer
-    # is "cannot tell", naming the target, so the change that planted it is
-    # refused by its own check and the next one is not silently widened.
+def test_the_named_target_ends_exactly_at_its_label() raises:
+    # buck2 prints the label, then " (" and its configuration: the label
+    # stops at the space. A scan that stopped only at a line break would
+    # answer the label with the configuration and the cause glued on.
+    assert_true(String(UNCONFIGURABLE).find(String(UNCONFIGURABLE_LABEL) + String(" (")) >= 0)
+    assert_equal(unconfigurable_target(String(UNCONFIGURABLE)), String(UNCONFIGURABLE_LABEL))
+    # and at a line break, when buck2 ends the line there
+    assert_equal(
+        unconfigurable_target(String("Error looking up configured node cell//p:t\nCaused by: x")),
+        String("cell//p:t"),
+    )
+    assert_equal(unconfigurable_target(String("buck2 cquery failed (exit 3): something else")), String(""))
+
+
+def _broken_naming_the_target(v: Verdict) raises:
+    # BROKEN: no target to build, the reason names the target and keeps
+    # buck2's cause, and kci reads one BROKEN line (it fails the check).
+    assert_equal(v.kind, String("BROKEN"), v.kind + String(": ") + v.reason)
+    assert_equal(len(v.targets), 0)
+    assert_true(
+        v.reason.startswith(
+            String("the universe holds a target buck2 cannot configure: ") + String(UNCONFIGURABLE_LABEL) + String(": ")
+        ),
+        v.reason,
+    )
+    assert_true(v.reason.find(String("is not visible to")) >= 0, v.reason)
+    var answer = render_units_answer(v, List[String]())
+    assert_true(answer.startswith(String("BROKEN the universe holds a target")), answer)
+    assert_equal(len(answer.split(String("\n"))), 2, answer)
+
+
+def test_a_target_the_universe_cannot_configure_breaks_the_check_and_never_widens() raises:
+    # A target that buck2 cannot configure breaks the query for every change.
+    # Widening would turn it into every unit on every change (the check times
+    # out, the cause buried in a reason); the answer is BROKEN, naming the
+    # target, and kci fails the check.
     var g = FakeGraph()
     g.rdeps_error = String(UNCONFIGURABLE)
-    var raised = String("")
-    try:
-        var v = _compute(_list("lib/a/a.mojo"), g)
-        raised = String("no error: ") + v.kind + String(" ") + String(len(v.targets)) + String(" target(s)")
-    except e:
-        raised = String(e)
-    assert_true(
-        raised.startswith(String("the universe holds a target buck2 cannot configure: tests//negative/node/visibility:node_not_visible")),
-        raised,
-    )
-    # buck2's cause stays in the message
-    assert_true(raised.find(String("is not visible to")) >= 0, raised)
+    var v = _compute(_list("lib/a/a.mojo"), g)
+    _broken_naming_the_target(v)
+
+
+def test_a_widening_change_still_configures_the_universe() raises:
+    # A change under a widen rule (tools/build/**) that plants a target buck2
+    # cannot configure: the widen rule decides before any reverse-dependency
+    # query, so without the universe query the change would pass its own
+    # widened check and break every change after it. It fails its own check,
+    # naming the target.
+    var g = FakeGraph()
+    g.configure_error = String(UNCONFIGURABLE)
+    var v = _compute(_list("tools/build/cells/toolchains/BUCK"), g)
+    assert_equal(g.asked_configure, 1)
+    _broken_naming_the_target(v)
+    # an unmapped file widens the same way, and is held to the same query
+    var g2 = FakeGraph()
+    g2.configure_error = String(UNCONFIGURABLE)
+    _broken_naming_the_target(_compute(_list("stray.txt"), g2))
+    # a healthy universe: the widened answer, after the one query
+    var g3 = FakeGraph()
+    _widened_everything(_compute(_list("tools/build/cells/toolchains/BUCK"), g3), g3)
+    assert_equal(g3.asked_configure, 1)
+    # a universe query failing for another reason keeps the widening, with
+    # the failure among the warnings
+    var g4 = FakeGraph()
+    g4.configure_error = String("buck2 cquery failed (exit 2): the daemon went away")
+    var w = _compute(_list("tools/build/cells/toolchains/BUCK"), g4)
+    _widened_everything(w, g4)
+    assert_true(len(w.warnings) == 1 and w.warnings[0].find(String("the daemon went away")) >= 0)
 
 
 def test_an_rdeps_answer_of_nothing_widens() raises:
@@ -488,7 +546,9 @@ def main() raises:
     test_the_same_file_twice_counts_once()
     test_a_failing_owner_query_widens_never_passes()
     test_a_failing_rdeps_query_widens()
-    test_a_target_the_universe_cannot_configure_is_named_and_never_widens()
+    test_the_named_target_ends_exactly_at_its_label()
+    test_a_target_the_universe_cannot_configure_breaks_the_check_and_never_widens()
+    test_a_widening_change_still_configures_the_universe()
     test_an_rdeps_answer_of_nothing_widens()
     test_the_targets_are_sorted_and_unique()
     test_the_answer_kci_reads_for_a_table_of_changes()

@@ -42,7 +42,11 @@
 #    budget, so a hung command can use the whole budget left first), or
 #    whose stdout breaks the answer grammar (kci_artifact
 #    `parse_affected_answer`) is INDETERMINATE (KCI-E-AFFECTED): kci cannot
-#    tell what the change reaches, and it never widens instead. Every build system is asked, even after a WIDENED.
+#    tell what the change reaches, and it never widens instead. An answer
+#    BROKEN (the build system cannot configure a target of its graph: an
+#    unknown or invisible dependency) is FAILED (KCI-E-BUILD-FAILED), naming
+#    the tool's reason; nothing is built and no later build system is asked.
+#    Every build system is asked, even after a WIDENED.
 # 4. The units to build, in unit order (artifacts, then checks): every
 #    declared unit when any answer is WIDENED (the result's verdict WIDENED,
 #    its reason `<build system>: <the tool's reason>` of the first); else
@@ -307,6 +311,14 @@ def _ask[R: ProcessRunner](
             return _tool_failed(bs, spec, String("printed nothing kci can read: ") + String(e))
         try:
             var answer = parse_affected_answer(text, owned)
+            if answer.broken:
+                print(String("BUILD step: affected: ") + bs + String(": BROKEN ") + answer.reason, file=_STDERR)
+                return _stop(
+                    String(OUTCOME_FAILED),
+                    String(ERROR_BUILD_FAILED),
+                    String("--affected-by: build system '") + bs + String("' answered BROKEN: ") + answer.reason
+                    + String(": its build graph holds a target it cannot configure, so the check fails"),
+                )
             if answer.widened:
                 print(String("BUILD step: affected: ") + bs + String(": WIDENED ") + answer.reason, file=_STDERR)
                 if not widened:

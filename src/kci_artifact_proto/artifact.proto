@@ -97,7 +97,9 @@
 //                  the number of UNIT lines; 0 is allowed) or `WIDENED
 //                  <reason>` with no UNIT line (the change reaches every
 //                  declared unit: a file it cannot map, a change to the build
-//                  system itself). Which files widen is the tool's to say:
+//                  system itself), or `BROKEN <reason>` with no UNIT line
+//                  (the build system cannot configure a target of its graph;
+//                  kci FAILS the check). Which files widen is the tool's to say:
 //                  kci names no build tool and no path.
 //   build_targets  how a unit is built for the check: <executable> <args...>
 //                  <the unit's targets...>, no placeholder, no output

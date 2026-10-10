@@ -66,6 +66,11 @@ trait Graph:
         universe that depends on one of them."""
         ...
 
+    def configure_universe(mut self) raises:
+        """Configure every target of the universe; raises buck2's error when
+        one cannot be (an unknown or invisible dependency)."""
+        ...
+
     def all_targets(mut self) raises -> List[String]:
         """Every target of the universe."""
         ...
@@ -298,6 +303,12 @@ struct BuckGraph(Graph, Movable):
         for i in range(len(lines)):
             out.append(normalize_label(lines[i], self.cells.root))
         return out^
+
+    def configure_universe(mut self) raises:
+        var sub = List[String]()
+        sub.append(String("cquery"))
+        sub.append(self._universe_union())
+        _ = self._buck(sub^)
 
     def all_targets(mut self) raises -> List[String]:
         var sub = List[String]()

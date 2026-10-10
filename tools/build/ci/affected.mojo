@@ -7,7 +7,8 @@
                                    package is read from
       --units-file <file>          answer in kci's protocol: the units of the
                                    file (`<unit>\\t<target>` lines) the change
-                                   reaches, then `AFFECTED <n>` or `WIDENED <why>`
+                                   reaches, then `AFFECTED <n>`, `WIDENED <why>`
+                                   or `BROKEN <why>`
       --coverage                   instead of a change: the targets no unit of
                                    --units-file builds or depends on (exit 12
                                    when there is one)
@@ -23,7 +24,9 @@ labels as `//pkg:name`) and, on stderr, the warnings and one summary line.
 
 Exit: 0 the affected targets (or an empty change: nothing printed); 10 WIDENED,
 every target printed and the reason on stderr; 11 VACUOUS, a change whose files
-reach no target; 12 --coverage found a target no unit covers; 2 bad usage; 5 cannot tell (buck2 or git failed). With
+reach no target; 12 --coverage found a target no unit covers; 13 BROKEN, the
+universe holds a target buck2 cannot configure (named, with buck2's error, on
+stderr; nothing printed); 2 bad usage; 5 cannot tell (buck2 or git failed). With
 --units-file the exit is 0 for every answer it can give: kci reads the last
 stdout line.
 """
@@ -37,7 +40,7 @@ from buildtools.bytes import read_file, to_string
 from change_map.cells import read_cells
 from change_map.graph import BuckGraph
 from change_map.labels import normalize_label
-from change_map.plan import KIND_AFFECTED, KIND_EMPTY, KIND_VACUOUS, KIND_WIDENED, compute, uncovered
+from change_map.plan import KIND_AFFECTED, KIND_BROKEN, KIND_EMPTY, KIND_VACUOUS, KIND_WIDENED, compute, uncovered
 from change_map.process import run_captured
 from change_map.report import render_json, render_seconds, render_summary, render_targets, render_units_answer
 from change_map.rules import read_rules
@@ -47,6 +50,7 @@ comptime _STDERR: FileDescriptor = FileDescriptor(2)
 comptime EXIT_WIDENED: Int = 10
 comptime EXIT_VACUOUS: Int = 11
 comptime EXIT_UNCOVERED: Int = 12
+comptime EXIT_BROKEN: Int = 13
 comptime EXIT_USAGE: Int = 2
 comptime EXIT_CANNOT_TELL: Int = 5
 
@@ -195,6 +199,8 @@ def _run() raises:
             print(render_targets(verdict), end="")
         if verdict.kind == String(KIND_WIDENED):
             exit(EXIT_WIDENED)
+        if verdict.kind == String(KIND_BROKEN):
+            exit(EXIT_BROKEN)
         if verdict.kind == String(KIND_VACUOUS):
             exit(EXIT_VACUOUS)
         exit(0)
