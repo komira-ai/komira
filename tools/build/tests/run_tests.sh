@@ -309,7 +309,8 @@
 #      example is a program of its own, run as its own gated test; the
 #      examples of tests//functional/readme_examples/ok run and its marker is
 #      PASS; .../per_block (two examples declaring the same names) and
-#      .../module_mode (two ```mojo module examples) mark one PASS per example;
+#      .../module_mode (three ```mojo module examples, one in a list item)
+#      mark one PASS per example;
 #      a README with no example (.../none) compiles and runs nothing,
 #      its marker NO EXAMPLE; tests//negative/readme_examples fail naming the
 #      README line of a raising example (and no other example), a compile
@@ -1244,7 +1245,7 @@ R=tests//functional/readme_examples
 for want in "ok:PASS $R/ok:ok:README.md:6" \
     "none:NO EXAMPLE $R/none:none:README.md: no " \
     "per_block:PASS $R/per_block:per_block:README.md:7|PASS $R/per_block:per_block:README.md:17|PASS $R/per_block:per_block:README.md:33|" \
-    "module_mode:PASS $R/module_mode:module_mode:README.md:7|PASS $R/module_mode:module_mode:README.md:26|"; do
+    "module_mode:PASS $R/module_mode:module_mode:README.md:7|PASS $R/module_mode:module_mode:README.md:26|PASS $R/module_mode:module_mode:README.md:39|"; do
     t=${want%%:*}
     # `a|b|`: the marker is exactly lines a and b; otherwise it starts with the text.
     line=$(printf '%s' "${want#*:}" | tr '|' '\n')

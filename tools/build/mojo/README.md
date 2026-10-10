@@ -101,9 +101,11 @@ fence reader, so the link check and the examples agree on what is code).
   import the same names and declare the same ones, and a failure names one
   example. The fence tag is the mode; nothing is inferred from the code:
   - ```` ```mojo ````: statements. The lines are pasted as they are, each
-    indented four spaces, into `def main() raises:`. Mojo allows an import
-    inside a function, so nothing is hoisted or parsed. Assertions are
-    visible `std.testing` calls.
+    indented four spaces, into `def main() raises:`. Every line is indented,
+    the continuation lines of a triple-quoted string too, so such a string's
+    content gains those four spaces. Mojo allows an import inside a
+    function, so nothing is hoisted or parsed. Assertions are visible
+    `std.testing` calls.
   - ```` ```mojo module ````: a whole program, copied as it is, with its own
     `def main()`. Fence an example that declares a `struct` or `trait` (or
     anything else that must be module-level) this way.

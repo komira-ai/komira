@@ -72,6 +72,18 @@ def test_the_fence_tag_is_the_mode() raises:
     assert_equal(info_refusal("mojo module"), "")
 
 
+def test_an_indented_module_fence_keeps_its_mode() raises:
+    # The mode comes from the tag alone, wherever the fence sits: a
+    # `mojo module` fence inside a list item is a whole program, dedented by
+    # the fence's indent like any other example.
+    var exs = extract_examples(
+        "- item\n\n  ```mojo module\n  def main():\n      pass\n  ```\n", "R.md", False
+    )
+    assert_equal(len(exs), 1)
+    assert_true(exs[0].module)
+    assert_equal(_join(exs[0]), "4|def main():\n5|    pass\n")
+
+
 def test_near_misses_are_refused() raises:
     for w in ["Mojo", "MOJO", "mojo,", ".mojo", "{.mojo}", "\U0001F525", "mojo-example"]:
         var why = info_refusal(w)
@@ -155,6 +167,7 @@ def main() raises:
     test_an_indented_fence_is_dedented_by_its_indent()
     test_a_word_after_mojo_is_refused()
     test_the_fence_tag_is_the_mode()
+    test_an_indented_module_fence_keeps_its_mode()
     test_near_misses_are_refused()
     test_every_refusal_is_reported_in_line_order()
     test_an_unclosed_example_is_refused()

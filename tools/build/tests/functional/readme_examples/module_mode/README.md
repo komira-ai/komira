@@ -32,3 +32,16 @@ struct Pair(Copyable):
 def main():
     print(Pair(2).n)
 ```
+
+- A `mojo module` fence inside a list item is a whole program too, dedented
+  by the fence's indent:
+
+  ```mojo module
+  @fieldwise_init
+  struct Pair(Copyable):
+      var n: Int
+
+
+  def main():
+      print(Pair(3).n)
+  ```

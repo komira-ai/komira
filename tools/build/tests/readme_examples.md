@@ -16,8 +16,10 @@ holds two ```` ```mojo ```` examples that import the same name and declare the
 same names (`twice`, `said`), which one shared program could not compile
 (redefinition), and
 [`functional/readme_examples/module_mode`](functional/readme_examples/module_mode/BUCK)
-two ```` ```mojo module ```` examples, each with its own `main` and both
-declaring `struct Pair`, hidden lines before the first: each marker is
+three ```` ```mojo module ```` examples, each with its own `main` and all
+declaring `struct Pair`, hidden lines before the first and the third fenced
+inside a list item (so a fence's indent cannot cost it its mode: as a plain
+example its struct would land in `main` and not compile): each marker is
 exactly one PASS line per example.
 [`functional/readme_examples/none`](functional/readme_examples/none/BUCK), a
 README with no example, builds and its marker reads `NO EXAMPLE`, so nothing

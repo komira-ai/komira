@@ -1,9 +1,10 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The README's examples are a welded test, `[tests][readme]` (test 38): two
-# ```mojo module examples, each a whole program with its own `main`, both
-# declaring `struct Pair`, hidden lines before the first. The target must
-# build.
+# The README's examples are a welded test, `[tests][readme]` (test 38): three
+# ```mojo module examples, each a whole program with its own `main`, all
+# declaring `struct Pair`, hidden lines before the first, the third fenced
+# inside a list item (its mode survives the indent: as a plain example its
+# struct would land in `main` and fail to compile). The target must build.
 mojo_library(
     name = "module_mode",
     srcs = [
