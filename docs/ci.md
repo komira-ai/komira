@@ -418,6 +418,17 @@ channel answers NOOP (exit 0).
     taking the branch's changes back out. A history git cannot list (a
     shallow clone, no `RUNNER_TEMP`) is exit 5, never a pass.
 
+  The rule is the run's, not the stage's: a push to `main` holds `gamma` to
+  it too, where it counts only `gamma`'s MAIN-LINE builds (those whose
+  `h<8 hex>` is a commit on `main`'s freshly fetched history; a branch's
+  break-glass build is reported and not counted). Before refusing, kci asks
+  git whether the release revision is on the history of the commit the
+  channel's newest build names (`git rev-parse --verify`, then `git
+  merge-base --is-ancestor`): when it is, a newer release is already in the
+  channel and the run stops SUPERSEDED, exit 0, nothing uploaded and no set
+  hash handed on. A prefix git cannot resolve to one commit, or a shallow
+  clone, is exit 5.
+
   Only a late re-run of an old run reaches either, since the group
   serialises live runs. A re-run of the same release is NOOP (or finishes a
   partial publish). Rolling back

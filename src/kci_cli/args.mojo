@@ -3,7 +3,7 @@
 # =============================================================================
 #
 #   kci run [--machine <file>] --stage <S> [--only step:<name>|validation:<name>]...
-#           [--affected-by <commit>] [--plan] --revision-id <commit>
+#           [--affected-by <commit>] [--plan] [--admission] --revision-id <commit>
 #           --run-id <id> --attempt <n> [--context <key=value>]...
 #           --release-dir <dir> [--result-file <file>] [--summary-file <file>]
 #           [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]
@@ -55,6 +55,12 @@
 #             renders and builds nothing (with --affected-by: asks the
 #             affected commands and builds nothing); a PUBLISH step checks
 #             and reads and writes nothing to the channel.
+#
+# `--admission` (any stage; no value) asks for THE ADMISSION CHECK (rule
+# R24 of the staged pipeline, dispatch.mojo's header, 4c): on a push to main,
+# a re-run, or the first attempt of the first stage, whose revision is not
+# main's releasable tip stops SUPERSEDED (exit 0) before any effect. It
+# selects nothing and checks nothing on any other run.
 #
 # Every other flag is an input, never a selector. `--summary-file <file>`
 # (any stage) names a markdown file kci APPENDS its summary to (never
@@ -137,7 +143,7 @@ comptime CLI_VERB_HELP: String = "help"
 
 comptime KCI_USAGE: String = (
     "usage:\n"
-    "  kci run [--machine <file>] --stage <S> [--only step:<name>|validation:<name>]... [--plan]\n"
+    "  kci run [--machine <file>] --stage <S> [--only step:<name>|validation:<name>]... [--plan] [--admission]\n"
     "          [--affected-by <commit>] --revision-id <commit> --run-id <id> --attempt <n>\n"
     "          [--context <key=value>]... --release-dir <dir> [--result-file <file>] [--summary-file <file>]\n"
     "          [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]         (a selected BUILD step)\n"
@@ -154,6 +160,8 @@ comptime KCI_USAGE: String = (
     "--affected-by <commit>: build only the units the change <commit>...--revision-id reaches (no --release-dir).\n"
     "A step's validations run after it in a FULL run; with --only, only the validations it names run.\n"
     "--plan: a dry run; a BUILD step builds nothing, a PUBLISH step checks and reads and writes nothing.\n"
+    "--admission: on a push to main, a re-run or the first stage's first attempt of a revision that is not\n"
+    "main's releasable tip stops SUPERSEDED (exit 0) before anything is run.\n"
     "--summary-file: a markdown file kci appends its summary to (the outcome, the steps, the NEW NAMES).\n"
     "Under GitHub Actions kci first checks the workflow it runs under against the machine file.\n"
     "--secret-store: how a channel credential's secret NAME is resolved: none (default) refuses;\n"
@@ -205,6 +213,7 @@ struct KciCommand(Copyable, Movable):
     var build_budget_s: Int
     var started_ns: Int
     var plan: Bool
+    var admission: Bool
     var summary_file: String
     var release_version: String
     var concurrency: Int
@@ -234,6 +243,7 @@ struct KciCommand(Copyable, Movable):
         self.build_budget_s = 0
         self.started_ns = 0
         self.plan = False
+        self.admission = False
         self.summary_file = String("")
         self.release_version = String("")
         self.concurrency = 0
@@ -271,7 +281,8 @@ def usage_error(why: String) -> Error:
 def _run_common_flags() -> List[String]:
     var l = List[String]()
     for f in [
-        "--machine", "--stage", "--only", "--affected-by", "--plan", "--revision-id", "--run-id", "--attempt",
+        "--machine", "--stage", "--only", "--affected-by", "--plan", "--admission", "--revision-id", "--run-id",
+        "--attempt",
         "--context", "--release-dir", "--result-file", "--summary-file", "--release-set-hash",
     ]:
         l.append(String(f))
@@ -336,7 +347,7 @@ def _repeatable(flag: String) -> Bool:
 
 
 def _boolean(flag: String) -> Bool:
-    return flag == String("--plan")
+    return flag == String("--plan") or flag == String("--admission")
 
 
 def _positive_int(flag: String, value: String) raises -> Int:
@@ -422,6 +433,8 @@ def _set(mut cmd: KciCommand, flag: String, value: String) raises:
             )
     elif flag == String("--plan"):
         cmd.plan = True
+    elif flag == String("--admission"):
+        cmd.admission = True
     elif flag == String("--summary-file"):
         cmd.summary_file = value.copy()
     elif flag == String("--release-version"):

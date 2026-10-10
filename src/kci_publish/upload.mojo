@@ -103,9 +103,11 @@ struct RunOptions(Copyable, Movable):
     `index_wait_ms` apart; step 2 runs up to `concurrency` upload workers
     (`--concurrency`, clamped to 1..16). `never_backward`: the stage never
     publishes a lower build number than its channel lists for the same name
-    and version (run.mojo, KCI-E-SUPERSEDED).
+    and version (run.mojo, KCI-E-SUPERSEDED). `main_line_only`: that rule
+    counts only the channel's main-line builds (plan.mojo
+    `main_line_files`; a channel that also takes break-glass builds).
 
-    Layout: Ints. No pointer field."""
+    Layout: Ints and Bools. No pointer field."""
 
     var read_back_attempts: Int
     var read_back_wait_ms: Int64
@@ -117,6 +119,7 @@ struct RunOptions(Copyable, Movable):
     var seed: UInt64
     var concurrency: Int
     var never_backward: Bool
+    var main_line_only: Bool
 
     def __init__(
         out self,
@@ -145,6 +148,7 @@ struct RunOptions(Copyable, Movable):
             n = MAX_CONCURRENCY
         self.concurrency = n
         self.never_backward = False
+        self.main_line_only = False
 
 
 struct PublishCredential(RegistryCredential, Movable):
