@@ -9,7 +9,9 @@
 #   * a root that cannot be created (a regular file in its path) accepted
 #     silently, so every later write lands nowhere;
 #   * a failed rename (the key's path is a directory) reported as success, or
-#     as a 412;
+#     with any text a downstream classifier reads as a 412 (checked with
+#     both quoted paths cut out: the root holds clock digits and, here, a
+#     planted "412", and the temp suffix is random hex);
 #   * a create that loses at link(2) (EEXIST: something appeared at the key
 #     after the presence probe, here a dangling symlink the probe reads as
 #     absent) raised as an I/O error instead of the precondition 412 a slot
@@ -69,6 +71,29 @@ def _scratch(tag: String) raises -> String:
     )
 
 
+def _rename_error_store_text(msg: String, final_path: String) raises -> String:
+    """The text of an atomic-rename error that the store composes, with both
+    quoted paths cut out. The message is `... ('<final>.tmp.<16 hex>' ->
+    '<final>', rc=N)`: the caller's root (clock digits, and here a planted
+    "412") and the temp's random hex suffix can each spell "412", so a status
+    check over the raw message is flaky. With the paths cut, the rest is fixed
+    text, and a bare "412" in it is a status."""
+    var tmp_open = String("('") + final_path + ".tmp."
+    var start = msg.find(tmp_open)
+    assert_true(start >= 0, msg)
+    var tmp_close = String("' -> '") + final_path + "'"
+    var end = msg.find(tmp_close, start)
+    assert_true(end >= 0, msg)
+    # The suffix between `.tmp.` and the closing quote is 16 hex digits.
+    var suffix_len = end - (start + tmp_open.byte_length())
+    assert_equal(suffix_len, 16, msg)
+    return (
+        String(msg[byte=0:start])
+        + "('<tmp>' -> '<final>'"
+        + String(msg[byte=end + tmp_close.byte_length() : msg.byte_length()])
+    )
+
+
 def _libc_path_call(name: StaticString, a: String, b: String) -> Int32:
     var x = a
     var y = b
@@ -102,7 +127,10 @@ def test_root_under_a_regular_file_is_refused() raises:
 
 
 def test_put_over_a_directory_fails_loud() raises:
-    var root = _scratch(String("ren"))
+    # The root holds "412" on purpose: the error names the root, so a check
+    # that read the caller's path as a status would fail on every run here,
+    # not only when the clock's digits happen to spell it.
+    var root = _scratch(String("ren_412"))
     var s = LocalFsConditionalStore(root.copy())
     # `<root>/d` is a directory (a store rooted there): an unconditional put
     # of key `d` cannot rename its temp over it.
@@ -115,8 +143,12 @@ def test_put_over_a_directory_fails_loud() raises:
         msg = String(e)
     assert_true(msg.find("atomic rename failed") >= 0, msg)
     assert_true(msg.find(root + "/d'") >= 0, msg)
-    assert_false(msg.find("412") >= 0, msg)
-    assert_false(msg.find("precondition") >= 0, msg)
+    # Any spelling a downstream classifier reads as a precondition failure
+    # (`cas_manifest`'s accepts a bare "412", "precondition", "Precondition"
+    # and "PreconditionFailed") must be absent from the store's own text.
+    var own = _rename_error_store_text(msg, root + "/d")
+    assert_false(own.find("412") >= 0, msg)
+    assert_false(own.find("recondition") >= 0, msg)
     # The directory under the key is intact.
     assert_equal(len(inner.get(Path.parse(String("x")))), 1)
 
@@ -154,7 +186,10 @@ def test_create_with_missing_root_is_an_io_error() raises:
     assert_true(msg.find("I/O error on exclusive create") >= 0, msg)
     assert_true(msg.find("temp open failed with errno") >= 0, msg)
     assert_true(msg.find("ENOENT") >= 0, msg)
+    # This message names the call and errno only, never a path, so a bare
+    # "412" anywhere in it is a status.
     assert_false(msg.find("412") >= 0, msg)
+    assert_false(msg.find("recondition") >= 0, msg)
 
 
 def test_lowercase_escape_decodes() raises:
