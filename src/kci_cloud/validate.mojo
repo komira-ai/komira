@@ -44,7 +44,8 @@
 #      form, a network's private, a subnet's inside its network's and
 #      overlapping no other; a subnet's zone from 1 to 3; a service's
 #      `network` a subnet. And the registry rules (registry.mojo): no `uses`
-#      on a registry; its format written, and one this kci knows.
+#      on a registry; its format written, and one this kci knows. And the
+#      metadata rules of every type (metadata.mojo): labels, cloud names, adopt.
 #      And the identity rules (grants.mojo): no `uses` on a grant; a `uses`
 #      line or a grant names exactly one of a target and a cell resource,
 #      with a verb that target accepts; a grant's principal is an identity
@@ -61,15 +62,21 @@
 #      needs for the type (`CloudAdapter.required_artifact`); or a `public {}`
 #      service in a cell whose settings choose no public mechanism
 #      (`CloudAdapter.public_mechanism`). The mechanism is chosen HERE, from
-#      the cell's settings, and never fallen back on at apply time.
+#      the cell's settings, and never fallen back on at apply time. Last, on
+#      a graph with no other finding, one cloud name per (kind, name) of the
+#      cloud's lowered primary objects (`metadata.shared_name_findings`).
 #
-#   4. The ROLE LABEL BUDGET (`role_budget_findings`), the one check that
-#      needs the lowering: every lowered node's role (the node id after its
-#      owner) must fit the 63-byte label value once encoded. It is a GRAPH
-#      finding naming the node, the byte count and every segment's length,
-#      and it runs after lowering (data, nothing realized) and before
-#      anything is created. Nesting is unbounded in the schema; this is its
-#      practical bound.
+#   4. The ROLE LABEL BUDGET (`lowered_budget_findings`), the check that
+#      needs the whole lowering: every lowered node's role (the node id
+#      after its owner) must fit the 63-byte label value once encoded. It is
+#      a GRAPH finding naming the node, the byte count and every segment's
+#      length. Like the names of 3, it runs on a graph with no other
+#      finding: validate lowers every resource on the cloud (data, nothing
+#      realized; a resource whose lowering raises is skipped, and the
+#      lowering contract refuses it at plan). So `validate` reports it, and
+#      plan, apply and destroy, which validate first, refuse it before
+#      anything is listed, realized or created. Nesting is unbounded in the
+#      schema; this is its practical bound.
 #
 # ⛔ A FINDING IS A REFUSAL OF THE WHOLE GRAPH. There is no "skip what the
 # cloud cannot do": that turns "cannot do it yet" into a silently thinner
@@ -102,6 +109,7 @@ from kci_cloud.catalog import (
     FIELD_REGISTRY,
     FIELD_SCHEDULE,
     FIELD_SECRET,
+    FIELD_SERVICE,
     FIELD_SERVICE_ACCOUNT,
     FIELD_SUBNET,
     FIELD_SUBSCRIPTION,
@@ -117,20 +125,22 @@ from kci_cloud.cloud_id import CloudId
 from kci_cloud.clouds import Clouds
 from kci_cloud.compute import V1_IMAGE_PLATFORM, image_platform, workload_findings
 from kci_cloud.data import data_findings
-from kci_cloud.feed import feeds_of
+from kci_cloud.feed import Feed, feeds_of
 from kci_cloud.messaging import messaging_findings
 from kci_cloud.secrets import secret_env_findings, secret_findings
 from kci_cloud.dns import dns_findings
-from kci_cloud.firing import firings_of
+from kci_cloud.firing import Firing, firings_of
 from kci_cloud.triggers import trigger_findings
 from kci_cloud.network import network_findings, service_network_findings
 from kci_cloud.registry import registry_findings
+from kci_cloud.metadata import metadata_findings, shared_name_findings
 from kci_cloud.workload import is_workload, workload_of
 from kci_cloud.grants import (
     GrantEdge,
     cell_accepted,
     cell_accepts,
     cell_name,
+    edges_for,
     edges_of,
     run_as_of,
 )
@@ -505,6 +515,7 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
                         + String(" is not DELETE or KEEP"),
                     )
                 )
+        out.extend(metadata_findings(catalog, resources, r))
         if field == FIELD_BUCKET or field == FIELD_TABLE:
             out.extend(data_findings(field, r))
             continue
@@ -613,8 +624,9 @@ def _check_platform[
 def validate_for[
     S: CloudAdapter
 ](clouds: Clouds, cloud: S, resources: List[Resource]) raises -> List[Finding]:
-    """Every finding of `resources` on `cloud`: graph, coverage, limits.
-    Raises only if `cloud` is not one of `clouds` (`main` built an adapter
+    """Every finding of `resources` on `cloud`: graph, coverage, limits,
+    and, on a graph with none of those, the cloud names and the role label
+    budget of `cloud`'s lowering. Raises only if `cloud` is not one of `clouds` (`main` built an adapter
     it did not list: a wiring defect, not a property of the graph); the
     message is `Clouds.resolve`'s."""
     var pid = cloud.cloud_id()
@@ -646,7 +658,7 @@ def validate_for[
             _check_platform(cloud, r, out)
             if (
                 not public_refused
-                and r._oneof0_case == 1
+                and field == FIELD_SERVICE
                 and r.service.value()._oneof0_case == 1
                 and cloud.public_mechanism().byte_length() == 0
             ):
@@ -689,6 +701,9 @@ def validate_for[
                 + listed,
             )
         )
+    if len(out) == 0:  # lower only a graph with no other finding
+        out.extend(shared_name_findings(cloud, clouds.catalog, resources, feeds, firings))
+        out.extend(lowered_budget_findings(cloud, resources, feeds, firings))
     return out^
 
 
@@ -720,6 +735,22 @@ def node_role(node: LoweredNode) -> String:
     if node.owner.byte_length() > 0 and node.id.startswith(prefix):
         return String(node.id[byte = prefix.byte_length() : node.id.byte_length()])
     return node.id.copy()
+
+
+def lowered_budget_findings[
+    S: CloudAdapter
+](cloud: S, resources: List[Resource], feeds: List[Feed], firings: List[Firing]) -> List[Finding]:
+    """`role_budget_findings` of every node `cloud` lowers `resources` to
+    (data, nothing realized). A resource whose lowering raises is skipped:
+    the lowering contract refuses it at plan."""
+    var nodes = List[LoweredNode]()
+    for i in range(len(resources)):
+        ref r = resources[i]
+        try:
+            nodes.extend(cloud.lower(r, edges_for(resources, r), feeds, firings))
+        except:
+            continue
+    return role_budget_findings(nodes)
 
 
 def role_budget_findings(nodes: List[LoweredNode]) -> List[Finding]:

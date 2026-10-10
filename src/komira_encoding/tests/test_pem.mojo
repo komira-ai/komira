@@ -231,6 +231,10 @@ def test_malformed_boundaries() raises:
     _expect(_block(" A", _BODY), " A", "InvalidBoundary", 0)
     _expect(_block("A--B", _BODY), "A--B", "InvalidBoundary", 0)
     _expect(_block("Aé", _BODY), "Aé", "InvalidBoundary", 0)
+    # A byte outside labelchar between two label characters: the interior
+    # loop's own refusal (the end checks pass for each of these).
+    _expect(_block("A\tB", _BODY), "A\tB", "InvalidBoundary", 0)
+    _expect(_block("AéB", _BODY), "AéB", "InvalidBoundary", 0)
     # Text after the boundary on its line.
     _expect(
         "-----BEGIN X----- trailing\n" + _BODY + "\n-----END X-----\n",

@@ -514,7 +514,7 @@ def _fold_latin_ext_a_into(mut out: List[UInt8], lead: UInt8, b2: UInt8) -> Bool
     if cp == 0x17F:
         out.append(UInt8(115))
         return True
-    return False  # no mapping
+    return False  # cov: unreachable the ranges above cover every cp in [0x100, 0x17F]
 
 
 # =============================================================================
@@ -796,7 +796,7 @@ def _analyze_bytes_resolved[
             # Defensive: a span folding to nothing (the fold map never erases, so
             # this cannot fire) — skip empties (no empty term is ever emitted).
             if len(term_bytes) == 0:
-                continue
+                continue  # cov: unreachable every consumed byte appends at least one byte
             # SAFETY: the cell is UTF-8 text, spans end at ASCII whitespace, and
             # the fold maps emit whole UTF-8 sequences, so `term_bytes` is too.
             term = String(StringSlice(unsafe_from_utf8=Span(term_bytes)))
