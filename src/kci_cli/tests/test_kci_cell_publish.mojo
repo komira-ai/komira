@@ -41,15 +41,17 @@
 #      was not built with that cloud".
 #   7. Without --release-set-hash: a usage error, exit 2.
 #   8. The same trust finding under `--plan`: REFUSED too.
-#   9. `registry_host_and_path` over `h/p/r`, `h` and `h/` (a trailing `/`
-#      is a bare host: no path), and a `kci run` on `_PathCloud`, a
+#   9. `registry_host_and_path` over `h/p/r` and `h`, and its refusal of
+#      every address with an empty host or an empty path segment (`""`,
+#      `/p`, `h/`, `h//p`, `h/p/`), and a `kci run` on `_PathCloud`, a
 #      wrapper of FakeCloud whose registry address has a path
 #      (`shop-blue-images/team/images`): the image goes to repository
 #      `team/images/web`, the exact PUT path `/v2/team/images/web/...`.
 #  10. A two-image set (`web`, then `web2`): `web2`'s tag already names
 #      another image, so `web2` is refused after `web` was uploaded:
 #      PARTIAL, exit 6, retry UNSAFE. With `web` already tagged with its
-#      own bytes and `web2` new: SUCCEEDED, not NOOP.
+#      own bytes and `web2` new: SUCCEEDED, not NOOP; and the reverse
+#      (`web` new, `web2` already tagged): SUCCEEDED, not NOOP.
 #
 # The token is in no record of any run and in no summary, on the success
 # path and on the failure paths (the read-back case, the partial case).
@@ -358,6 +360,7 @@ def test_a_push_to_the_cells_registry_then_a_second_push_is_noop() raises:
     var text = Path(summary).read_text()
     assert_true(text.find(String("into cell `blue`")) >= 0, text)
     assert_equal(text.find(String(_TOKEN)), -1, "the token is never in the summary")
+    _no_token(rec, summary)
     assert_equal(r.error.message.find(String(_TOKEN)), -1)
     var puts = reg.count_calls(HTTP_METHOD_PUT, String(""))
     var rec2 = CliRecorder.memory(String(""))
@@ -367,6 +370,7 @@ def test_a_push_to_the_cells_registry_then_a_second_push_is_noop() raises:
     assert_equal(r2.steps[0].outcome, String("NOOP"))
     assert_equal(r2.artifacts[0].effect, String("ALREADY_PRESENT"))
     assert_equal(cells.registry.reg[].count_calls(HTTP_METHOD_PUT, String("")), puts, "a NOOP sends no PUT")
+    _no_token(rec2, f.dir + String("/summary2.md"))
 
 
 def test_another_digest_at_read_back_is_indeterminate_exit_5() raises:
@@ -471,19 +475,32 @@ def test_the_set_hash_flag_is_required() raises:
     assert_equal(cells.registry.reg[].call_count(), 0)
 
 
+def _split_refusal(address: String) -> String:
+    """`registry_host_and_path`'s refusal of `address`, or "<accepted>"."""
+    try:
+        _ = registry_host_and_path(address)
+    except e:
+        return String(e)
+    return String("<accepted>")
+
+
 def test_registry_host_and_path() raises:
-    """Catches: the path dropped, or the host taken past the first `/`."""
+    """Catches: the path dropped, the host taken past the first `/`, an
+    empty path segment normalised away (`h/` taken as a bare host), and
+    an empty host accepted."""
     var a = registry_host_and_path(String("h/p/r"))
     assert_equal(a[0], String("h"))
     assert_equal(a[1], String("p/r"))
     var b = registry_host_and_path(String("h"))
     assert_equal(b[0], String("h"))
     assert_equal(b[1], String(""))
-    # a trailing `/` is a bare host: no path, so the repository is the
-    # artifact name alone (never `/web`)
-    var c = registry_host_and_path(String("h/"))
-    assert_equal(c[0], String("h"))
-    assert_equal(c[1], String(""))
+    assert_equal(_split_refusal(String("")), String("the cell's registry address is empty"))
+    assert_equal(_split_refusal(String("/p")), String("the cell's registry address '/p' has an empty host"))
+    for bad in ["h/", "h//p", "h/p/"]:
+        assert_equal(
+            _split_refusal(String(bad)),
+            String("the cell's registry address '") + String(bad) + String("' has an empty path segment"),
+        )
 
 
 struct _PathCloud(CloudAdapter, Movable, Deinitable):
@@ -631,8 +648,8 @@ def test_a_second_image_refused_after_the_first_landed_is_partial() raises:
 
 
 def test_one_noop_image_and_one_new_image_is_succeeded() raises:
-    """Catches: the step's NOOP decided by one image (the first, or the
-    last) rather than by every image."""
+    """`web` already tagged with its own bytes, `web2` new. Catches: the
+    step's NOOP decided by the FIRST image alone (NOOP reported)."""
     var f = _fixture(String("mixednoop"), two=True)
     var steps = Steps(f.set_hash)
     var cells = _cells(_Registry())
@@ -645,6 +662,25 @@ def test_one_noop_image_and_one_new_image_is_succeeded() raises:
     assert_equal(r.artifacts[0].effect, String("ALREADY_PRESENT"))
     assert_equal(r.artifacts[1].effect, String("UPLOADED"))
     assert_equal(cells.registry.reg[].tag_digest(String("web2"), String(_REV)), f.digest2)
+
+
+def test_one_new_image_and_one_noop_image_is_succeeded() raises:
+    """`web` new, `web2` already tagged with its own bytes. Catches: the
+    step's NOOP decided by the LAST image alone (NOOP reported)."""
+    var f = _fixture(String("noopmixed"), two=True)
+    var steps = Steps(f.set_hash)
+    var cells = _cells(_Registry())
+    _seed_tagged(cells.registry.reg[], f, String("web2"), f.digest2)
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_run(f, f.dir + String("/summary.md")), steps, cells, rec), 0)
+    var r = _last(rec)
+    assert_equal(r.outcome, String("SUCCEEDED"), r.error.message)
+    assert_equal(r.steps[0].outcome, String("SUCCEEDED"))
+    assert_equal(r.artifacts[0].name, String("web"))
+    assert_equal(r.artifacts[0].effect, String("UPLOADED"))
+    assert_equal(r.artifacts[1].name, String("web2"))
+    assert_equal(r.artifacts[1].effect, String("ALREADY_PRESENT"))
+    assert_equal(cells.registry.reg[].tag_digest(String("web"), String(_REV)), f.digest)
 
 
 def main() raises:

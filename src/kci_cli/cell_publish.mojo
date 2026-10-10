@@ -33,7 +33,10 @@
 #      computed from the cell and never written down a second time: its host
 #      is the part before the first `/`, and each image goes to repository
 #      `<the rest>/<artifact name>` (just `<artifact name>` when the address
-#      is a bare host). Without `--plan`, `registry_login(creds)` is the
+#      is a bare host). An address with an empty host or an empty path
+#      segment (`/p`, "", `h/`, `h//p`, `h/p/`) is REFUSED (KCI-E-CLOUD:
+#      the adapter's value is malformed), never normalised: komira_oci
+#      refuses an empty repository segment too. Without `--plan`, `registry_login(creds)` is the
 #      basic-auth user and secret the client presents; one that raises is
 #      FAILED (KCI-E-CLOUD), nothing sent. The secret is never printed.
 #   5. THE PUSH, image by image in artifacts-file order:
@@ -157,13 +160,27 @@ struct NoRegistryClient(OciTransport, Copyable, Movable, Deinitable):
         raise Error(String("this kci was built with no registry client"))
 
 
-def registry_host_and_path(address: String) -> Tuple[String, String]:
+def registry_host_and_path(address: String) raises -> Tuple[String, String]:
     """`image_registry(ctx)` split at its first `/` (file header, 4): the
-    host, and the path under it ("" for a bare host)."""
+    host, and the path under it ("" for a bare host). Raises on an empty
+    host or an empty path segment, naming the address."""
     var at = address.find(String("/"))
     if at < 0:
+        if address.byte_length() == 0:
+            raise Error(String("the cell's registry address is empty"))
         return (address.copy(), String(""))
-    return (String(address[byte=:at]), String(address[byte = at + 1 :]))
+    var host = String(address[byte=:at])
+    var path = String(address[byte = at + 1 :])
+    if host.byte_length() == 0:
+        raise Error(String("the cell's registry address '") + address + String("' has an empty host"))
+    if (
+        path.byte_length() == 0
+        or path.startswith(String("/"))
+        or path.endswith(String("/"))
+        or path.find(String("//")) >= 0
+    ):
+        raise Error(String("the cell's registry address '") + address + String("' has an empty path segment"))
+    return (host^, path^)
 
 
 def _repository(path: String, name: String) -> String:
@@ -312,9 +329,14 @@ def cell_publish_step[
     if len(trust) > 0:
         return _stop(row^, result, OUTCOME_REFUSED, ERROR_CLOUD, refusal_text(cloud.cloud_id(), trust))
     # 4. the registry
-    var hp = registry_host_and_path(cloud.image_registry(ctx))
-    var host = hp[0].copy()
-    var path = hp[1].copy()
+    var host: String
+    var path: String
+    try:
+        var hp = registry_host_and_path(cloud.image_registry(ctx))
+        host = hp[0].copy()
+        path = hp[1].copy()
+    except e:
+        return _stop(row^, result, OUTCOME_REFUSED, ERROR_CLOUD, String(e) + String("; nothing was sent"))
     var auth = OciAuth.basic(String(""), String(""))
     if not req.plan:
         try:
