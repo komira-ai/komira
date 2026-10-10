@@ -34,9 +34,9 @@
 #
 # Outputs:
 #   * `Int` — the estimated join cardinality. Identical units as the legacy
-#     `estimate_join_cardinality_with_ndv`; a DPccp enumerator (not in this
-#     tree) is designed to add this to the cumulative
-#     `pair_cost = join_card + left_cost + right_cost`.
+#     `estimate_join_cardinality_with_ndv`. Only tests call it: DPccp's
+#     `_cost_for_pair` takes join_card from `estimate_cardinality_with_set`
+#     and sums `pair_cost = join_card + left_cost + right_cost` itself.
 #
 # Tie-break determinism:
 #   Within the primary TDOM-decreasing sort, ties resolve by
