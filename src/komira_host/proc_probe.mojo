@@ -345,8 +345,16 @@ def detect_scan_cache_ram_basis_bytes() -> Int:
     memory-capped systemd scope) stays safe, and a
     bogus huge cgroup sentinel can't inflate the basis.
     """
-    var avail = _linux_read_meminfo_available_bytes()
-    var cg = _linux_read_cgroup_v2_mem_max_bytes()
+    return _min_of_readable(
+        _linux_read_meminfo_available_bytes(),
+        _linux_read_cgroup_v2_mem_max_bytes(),
+    )
+
+
+def _min_of_readable(avail: Int, cg: Int) -> Int:
+    """The basis rule on two readings (0 means unreadable): the smaller of
+    the readable ones, or 0 when neither is. Pure, so the rule is asserted
+    from literals rather than from this host's moving MemAvailable."""
     if avail > 0 and cg > 0:
         return avail if avail < cg else cg
     if avail > 0:

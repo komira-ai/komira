@@ -499,7 +499,7 @@ def thp_probe_count() -> Int:
         var gp = _THP_PROBE_COUNTER.get_or_create_ptr()
         return gp[][]
     except:
-        return 0
+        return 0  # cov: unreachable _Global.get_or_create_ptr raises only when given on_error_msg, and this one is not
 
 
 def _init_thp_snapshot() -> OwnedPointer[_ThpSnapshot]:
@@ -536,7 +536,7 @@ def _frozen_thp_snapshot() -> _ThpSnapshot:
         var gp = _THP_SNAPSHOT.get_or_create_ptr()
         return gp[][].copy()
     except:
-        return _ThpSnapshot.unknown()
+        return _ThpSnapshot.unknown()  # cov: unreachable _Global.get_or_create_ptr raises only when given on_error_msg, and this one is not
 
 
 # =============================================================================
