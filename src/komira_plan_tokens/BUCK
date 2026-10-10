@@ -1,10 +1,10 @@
 load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The plan refusal tokens and the class of each, shared by the optimizer and
-# the packages that build or check a physical plan. It has no deps: its
-# closure is the standard library, so any package that refuses or classifies
-# a plan can depend on it. Do not add deps; deps_lint below refuses them.
+# The plan refusal tokens and the class of each. komira_optimizer classifies
+# by it; no other package imports it yet. It has no deps: its closure is the
+# standard library, so any package that refuses or classifies a plan,
+# including one that builds or checks a physical plan, can depend on it. Do not add deps; deps_lint below refuses them.
 mojo_library(
     name = "komira_plan_tokens",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),

@@ -2,9 +2,9 @@
 
 The named tokens a plan producer or a door on a plan puts in the text of a
 refusal, and the class of each: what a caller can do about it. The optimizer's
-result type and the packages that build or check a physical plan read the same
-table, so a token has one class wherever it is caught. The package depends on
-nothing but the standard library.
+result type classifies by this table. The package depends on nothing but the
+standard library, so a package that builds or checks a physical plan can import
+it too; none does yet.
 
 | class | meaning | tokens |
 |---|---|---|

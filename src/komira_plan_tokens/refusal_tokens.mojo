@@ -4,8 +4,8 @@
 #
 # A plan producer or a door on a plan refuses by raising an `Error` whose text
 # holds a named token. A caller that sorts those refusals into classes it can
-# act on reads this table, so the optimizer's result type and a physical-plan
-# result type give each token the same class. The package imports only the
+# act on reads this table; the optimizer's result type does, and no other
+# package imports it yet. The package imports only the
 # standard library: a package that may not depend on the optimizer can import
 # it.
 #

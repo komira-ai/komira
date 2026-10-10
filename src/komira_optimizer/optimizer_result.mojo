@@ -77,8 +77,8 @@
 # ⚠ CLASSIFICATION IS BY THE SHARED TOKEN TABLE, NEVER BY A STRING SPELLED HERE.
 # `_classify` asks `komira_plan_tokens.message_class` for the class of the
 # first table token the message holds and maps the class to a status. The
-# table is the one a physical-plan result type reads too, so a token has one
-# class in both. Its strings are pinned against the raisers' constants by
+# table depends only on the standard library, so a physical-plan package can
+# read it too; none does yet. Its strings are pinned against the raisers' constants by
 # tests: `SCAN_BINDING_EPOCH_MISMATCH` / `SCAN_BINDING_HANDLE_NOT_BOUND`
 # (`komira_scan_source.scan_resolver`) and `OPTIMIZE_REFUSAL_UNRESOLVED_DEPS`
 # (below) in test_optimizer_result.
