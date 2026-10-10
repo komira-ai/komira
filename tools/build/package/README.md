@@ -271,6 +271,14 @@ after the release check (stamped, with its source commit) passed. The name, the 
 requirements, the subdir and the version are derived, a library that cannot be
 packaged keeps a target that builds as a refusal, and the bytes are reproducible.
 
+[`system_libs.bzl`](system_libs.bzl) maps each system library a package may open
+at run time (by soname) to the conda-forge requirement of the package that ships
+it. kci's closure checks accept exactly those requirements on a library; the
+target `:system_libs` ([`system_libs_record.bzl`](system_libs_record.bzl)) writes
+the table for the welded test that holds kci's compiled copy equal to it. The
+packer does not write them yet: it still refuses a library that opens a shared
+library by name.
+
 With coverage on (`-c komira.coverage=true`), both copies of a conda package
 (its default output and `[release]`) also wait for the library's coverage runs
 and its coverage gate, which the library hands over in its

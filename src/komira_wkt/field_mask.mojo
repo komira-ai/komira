@@ -50,14 +50,16 @@ struct FieldMask(Proto3JsonWkt, Copyable, Movable):
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
-        """Decode the `repeated string paths` field."""
+        """Decode the `repeated string paths` field: one element per
+        occurrence on the binary wire, the whole JSON array under the one
+        `paths` key in the proto3-JSON message form."""
         var paths = List[String]()
         while True:
             var key = dec.next_field()
             if key.end:
                 break
             if key.field_no == 1 or key.json_name == "paths":
-                paths.append(dec.read_string())
+                dec.read_into_repeated_string(paths)
             else:
                 dec.skip()
         return Self(paths^)

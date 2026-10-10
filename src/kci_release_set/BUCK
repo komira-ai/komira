@@ -33,12 +33,17 @@ mojo_library(
         "tests/test_release_manifest.mojo",
         # the set hash: a golden vector, order-free, every field counts
         "tests/test_set_hash.mojo",
-        # requirement closure by name: what is open, what is skipped, member order
+        # requirement closure by name: what is open, what is skipped, member order;
+        # a library's conda-forge system-library requirement, byte-exact only
         "tests/test_closure.mojo",
+        # the system-library copy equals tools/build/package/system_libs.bzl, both ways
+        "tests/test_system_libs.mojo",
     ],
     test_data = {
         "tests/test_conda_metadata.mojo": glob(["tests/data/*.json", "tests/data/komira/metadata.json"]),
         "tests/test_verify_member.mojo": glob(["tests/data/komira/*"]) + ["tests/data/library.metadata.json"],
+        # the table as the build evaluates it (system_libs_record.bzl)
+        "tests/test_system_libs.mojo": {"system_libs.txt": "//tools/build/package:system_libs"},
     },
     visibility = ["PUBLIC"],
 )

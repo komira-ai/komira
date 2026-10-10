@@ -33,15 +33,9 @@
 from std.testing import assert_equal, assert_true
 
 from komira_proto_codec import decode_json, decode_proto, encode_json, encode_proto
-from kci_resource_proto.resource import (
-    Certificate,
-    DnsRecord,
-    DnsZone,
-    Output,
-    RecordType,
-    Resource,
-    Retention,
-)
+from kci_resource_proto.names import Certificate, DnsRecord, DnsZone, RecordType
+from kci_resource_proto.refs import Output, Retention
+from kci_resource_proto.resource import Resource
 
 
 # ---- a hand-written wire stream (as in test_resource_field_numbers) -------------

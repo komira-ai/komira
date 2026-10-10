@@ -17,9 +17,14 @@
 #   subdir (`GUARD_BY_SUBDIR`; a subdir with no row is refused), V the set's
 #   version and B its build:
 #   * a LIBRARY's `depends` is exactly: G, `mojo-compiler ==V`, and
-#     `<n> ==V B` for set libraries `n` (each at most once, never itself).
-#     Anything else (an outside package, another version or build, a pin on
-#     the metapackage) is refused naming the entry;
+#     `<n> ==V B` for set libraries `n` (each at most once, never itself),
+#     and any of the conda-forge requirements of the system libraries a
+#     library may open (kci_release_set's `is_system_lib_requirement`, held
+#     to tools/build/package/system_libs.bzl: `zstd >=1.5.2,<2`), byte-equal,
+#     each at most once. Anything else (an outside package, another version
+#     or build, a pin on the metapackage, a system library at another range,
+#     in another case or behind a `<channel>::` prefix) is refused naming
+#     the entry;
 #   * the set holds EXACTLY ONE metapackage, and its `members` are exactly
 #     every library of the set: each row a set library at V and B whose
 #     `sha256` equals that library's manifest sha256 (the bytes being
@@ -43,6 +48,7 @@ from kci_release_channel import ARTIFACT_TYPE_CONDA
 from kci_release_set.conda_metadata import KIND_LIBRARY, KIND_METAPACKAGE
 from kci_release_set.closure import MOJO_COMPILER_PACKAGE
 from kci_release_set.member import ReleaseMember
+from kci_release_set.system_libs import is_system_lib_requirement
 
 from .inputs import LoadedRelease
 from .release_version import ReleaseVersion
@@ -187,6 +193,8 @@ def require_closure(members: List[ReleaseMember]) raises:
                 continue
             if dep == guard or dep == compiler_pin:
                 continue
+            if is_system_lib_requirement(dep):
+                continue
             var sp = dep.find(String(" =="))
             var ok = False
             if sp > 0:
@@ -203,11 +211,11 @@ def require_closure(members: List[ReleaseMember]) raises:
                     + guard
                     + String("', '")
                     + compiler_pin
-                    + String("', or another library of this set at '==")
+                    + String("', another library of this set at '==")
                     + version
                     + String(" ")
                     + build
-                    + String("'")
+                    + String("', or a system library requirement of tools/build/package/system_libs.bzl")
                 )
         if _count(c.depends, guard) != 1:
             refusals.append(who + String("does not require the platform guard '") + guard + String("'"))

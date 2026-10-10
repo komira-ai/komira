@@ -1,0 +1,171 @@
+// The FORMAT of a composite (`kci.resource.v1`): a named graph of resources
+// (primitives, or instances of other composites, to any depth) with inputs
+// and outputs, written as data. A definition is not a catalog type and not
+// an arm of `Resource.body`: kci needs no code change to accept a new one. A
+// deploy step uses one through an INSTANCE, `Resource.body` 80
+// (`CompositeInstance`, resource.proto), and kci expands every instance into
+// its primitives before validating, planning or applying.
+//
+// WHAT EXPANSION REFUSES (each before anything is validated per type,
+// lowered or created):
+//   * a definition whose name is not `<namespace>.<name>`, each part
+//     `[a-z][a-z0-9-]{0,31}`, or with no version; two definitions with one
+//     name and version but different bytes;
+//   * a CONTAINMENT CYCLE: a definition that instantiates itself, directly
+//     or through others (A -> B -> A), printed as the cycle;
+//   * a list that expands to more than 10,000 primitives (a diamond of
+//     definitions multiplies), with the count of each top-level instance;
+//   * a component id outside `[a-z][a-z0-9-]{0,11}` (no trailing or doubled
+//     `-`), repeated, or one of the reserved words `run`, `public`,
+//     `identity`, `schedule`, `uses`, `cell`, `u-*` and `ix-*`;
+//   * inside a definition, a `Ref.resource` (a definition is closed), a
+//     `local` naming no component, an `input` naming no REF input, a
+//     `Value.input` naming no STRING, INT or BOOL input; outside one, a
+//     `local` or an `input`;
+//   * a binding or a presence that names no component or no input, a
+//     binding of a REF input, a binding whose field is not one the input's
+//     type can be written to (each binding is tried on its component when
+//     the definition is loaded), two bindings of one field, and a presence
+//     that follows an input that is always set (required, or with a
+//     default);
+//   * a definition named in the `kci` namespace that is not one kci ships
+//     (its name, version and digest);
+//   * a `Ref.path` segment that is missing or not EXPORTED by its
+//     definition, a path below a primitive, and a reference that ends on a
+//     composite instance without naming one of its declared outputs;
+//   * an instance of an unknown definition or version, a digest that does not
+//     match, an undeclared, missing or ill-typed input, and `uses`,
+//     `retention` or metadata written on an instance;
+//   * a reference to a component that is absent (its presence input is not
+//     set), and a bound value a binding cannot write (a STRING written to a
+//     plain field that is not a literal; an environment key the component
+//     already writes).
+//
+// WHAT HOLDS AT EVERY DEPTH. A primitive below a top-level instance `top`
+// becomes the resource `top/c1/.../ck` (its PATH), and every engine node it
+// lowers to is `<path>/<role>`, OWNED by `top`: the stamp's resource label
+// is `top` however deep the node is, and its role label is the rest of the
+// node id. So the closed world holds at any depth (a component dropped from
+// a definition is a role of `top` the file no longer lowers, and is
+// removed), and retention holds per primitive (a KEEP component that leaves
+// the file is left behind, never deleted). Nesting is unbounded in this
+// schema; the 63-byte role label is its practical bound, checked on every
+// lowered node when the graph is validated.
+//
+// THE DEFINITIONS KCI SHIPS. The `kci` namespace holds kci's own
+// definitions: data, read by the same loader as any author's. A definition
+// named `kci.<name>` is accepted only when its name, version and digest are
+// those of one kci ships (kci_cloud's compose_kci.mojo lists them), so an
+// author's file cannot stand in for one.
+//
+// HELD, not declared (an addition when each lands): `CompositeDefinition` 8
+// variants chosen by capability; `CompositeInstance` 6 (resource.proto)
+// secret inputs; `InputType` 4 DURATION, 7 SECRET and 8 RETENTION.
+// held-numbers: CompositeDefinition 8
+syntax = "proto3";
+
+package kci.resource.v1;
+
+import "kci/resource/v1/refs.proto";
+import "kci/resource/v1/resource.proto";
+
+// One composite. `name` is `<namespace>.<name>`; `version` is the author's
+// label for this revision of it (an instance names both). `component` holds
+// the resources it is made of, each with an id LOCAL to the definition, and
+// may hold instances of other definitions. `export` names the components an
+// outsider may reach with `Ref.path` (to grant to them or read their
+// outputs); the rest are private, so the author may change them without
+// breaking a user. `output` declares the values the composite produces, each
+// read by a user as `Ref.named`. `bind` writes inputs into fields of the
+// components; `presence` makes a component optional.
+message CompositeDefinition {
+  string name = 1;
+  string version = 2;
+  repeated Input input = 3;
+  repeated Resource component = 4;
+  repeated Binding bind = 5;
+  repeated OutputDecl output = 6;
+  repeated string export = 7;
+  repeated Presence presence = 9;
+  string doc = 10;
+}
+
+// "Component `component`'s field `field` takes input `input`": how an input
+// reaches a field that is not a `Value` or a `Ref` (an image, a port, a
+// cron). `field` is a path into the component's proto3 JSON, its type's arm
+// first (`service.port`, `container_job.image`, `service.env`); a segment is
+// a field name (as in the .proto, or its JSON name) or a map key. When the
+// instance sets the input, the value is written there:
+//   * STRING: a string field, from a literal only;
+//   * INT: a number field; BOOL: a bool field, or a field whose message has
+//     no fields (`service.public`: true writes it, false leaves it unset);
+//   * IMAGE: an `Image` field;
+//   * VALUE_MAP: a map of `Value`s (an `env`), whose entries are added to
+//     those the component writes (a key both write is refused).
+// Unset (an optional input with no default that the instance does not
+// bind), the binding writes nothing, and the field keeps what the component
+// writes. A REF input is never bound: it is used where it stands, as
+// `Ref.input`. On a component that is itself an instance, a binding passes
+// an IMAGE or VALUE_MAP input down: `composite.image_input.<name>` or
+// `composite.map_input.<name>`, an input of the nested definition of the
+// same type (a STRING, INT, BOOL or REF input passes down as
+// `composite.input` with `Value.input` or `Ref.input`).
+message Binding {
+  string component = 1;
+  string field = 2;
+  string input = 3;
+}
+
+// Component `component` exists in an instance only when the instance sets
+// input `if_input` (an optional input with no default). Otherwise it is
+// ABSENT: not expanded, and a reference to it (a `local`, a `path`, a
+// declared output read from it) is refused where it is used. The closed
+// world holds: an instance that stops setting the input deletes its objects
+// (a KEEP one is left behind, as for any component a definition drops).
+message Presence {
+  string component = 1;
+  string if_input = 2;
+}
+
+// One input of a definition. `name` is `[a-z][a-z0-9_]{0,31}`, unique in the
+// definition. A `required` input has no `default`, and writing both is
+// refused. `default` is a literal of a STRING, INT or BOOL input (an
+// integer; `true` or `false`). An optional input
+// with no default that an instance leaves unbound removes whatever it stands
+// for (a `Value` or a `Ref` of a component), and validate then judges the
+// component without it.
+message Input {
+  string name = 1;
+  InputType type = 2;
+  bool required = 3;
+  Value default = 4;
+  string doc = 5;
+}
+
+// What an input carries. The values are prefixed because proto3 enum values
+// share their package's scope, and `FieldType.STRING` is already there.
+// INPUT_STRING, INPUT_INT (a decimal integer) and INPUT_BOOL (`true` or
+// `false`): a plain value, used in a component as `Value.input` or written
+// by a binding. INPUT_REF: a reference to a resource (a dependency or a
+// grant target from outside the composite), used in a component as
+// `Ref.input`. INPUT_IMAGE: an `Image`, and INPUT_VALUE_MAP: a map of plain
+// values, each written by a binding. 4, 7 and 8 are held (see the file
+// header).
+enum InputType {
+  INPUT_TYPE_UNSET = 0;
+  INPUT_STRING = 1;
+  INPUT_INT = 2;
+  INPUT_BOOL = 3;
+  INPUT_REF = 5;
+  INPUT_IMAGE = 6;
+  INPUT_VALUE_MAP = 9;
+}
+
+// One declared output: `name` (`[a-z][a-z0-9_]{0,31}`, unique in the
+// definition) is what a user writes in `Ref.named`; `from` says which value
+// it is, as a reference with `local` as its base (and `path` below it, if
+// it reaches into a nested composite) and `standard` or `named` set.
+message OutputDecl {
+  string name = 1;
+  Ref from = 2;
+}

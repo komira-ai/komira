@@ -39,10 +39,12 @@
 # with no test) the package is NotMeasured.
 #
 # Exit status: 0 when covcheck wrote its outputs and found nothing fatal in
-# the mode (census and neutral never fail on a finding): <result_out> (JSON)
-# and <summary_out> (Markdown) are covcheck's, and <marker_out> says PASS.
-# 1 when covcheck exits 3 (enforce mode and a finding: the summary is
-# printed under `COVERAGE GATE FAILED (enforce): <package>`), when covcheck
+# the mode (census and neutral fail on no finding but a Regression, a
+# ratchet floor not held): <result_out> (JSON) and <summary_out> (Markdown)
+# are covcheck's, and <marker_out> says PASS.
+# 1 when covcheck exits 3 (a finding in enforce mode, or a Regression in any
+# mode: the summary is printed under `COVERAGE GATE FAILED (<mode>):
+# <package>`), when covcheck
 # exits 1 (an input it refuses: an unmapped report path, a source it cannot
 # read) or 2 (bad usage), each with covcheck's message, in every mode; 2 for
 # a usage error of this script.
@@ -127,13 +129,10 @@ case "$rc" in
         printf 'PASS %s (%s)\n' "$LABEL" "$MODE" >"$MARKER"
         ;;
     3)
-        if [ "$MODE" != enforce ]; then
-            cat "$K/out" >&2
-            echo "cov_gate: $LABEL: covcheck exited 3 (a finding in enforce mode) in $MODE mode" >&2
-            exit 1
-        fi
+        # enforce: any finding; every mode: a Regression (a floor of
+        # ratchet.tsv not held; README.md, "The ratchet").
         echo "==================================================================" >&2
-        echo "COVERAGE GATE FAILED (enforce): $PACKAGE ($LABEL): covcheck gate exited 3" >&2
+        echo "COVERAGE GATE FAILED ($MODE): $PACKAGE ($LABEL): covcheck gate exited 3" >&2
         name=${LABEL%% *}
         name=${name##*:}
         echo "The conda package (${name}_conda) is not produced until its coverage meets the policy;" >&2
