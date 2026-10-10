@@ -246,7 +246,7 @@ def test_member_refusals() raises:
     assert_equal(_meta_refusal(algs=List[String]()), no_algs)
     assert_equal(_meta_refusal(methods=_list("client_secret_basic", "private_key_jwt"), algs=List[String]()), no_algs)
     assert_equal(_meta_refusal(methods=_list("private_key_jwt", "client_secret_basic"), algs=List[String]()), no_algs)
-    assert_equal(_meta_refusal(methods=_list("private_key_jw", "rivate_key_jwt", "private_key_jwtx"), algs=List[String]()), "accepted")
+    assert_equal(_meta_refusal(methods=_list("private_key_jw", "rivate_key_jwt", "private_key_jwtx", "xprivate_key_jwt", "PRIVATE_KEY_JWT", "zrivate_key_jwt", "private_key_jwz"), algs=List[String]()), "accepted")
     assert_equal(_meta_refusal(methods=List[String](), algs=List[String]()), "accepted")
 
 
@@ -264,6 +264,7 @@ def test_parse_refusals() raises:
     var arr = "OAuthError: member grant_types_supported is not a non-empty array of strings"
     assert_equal(_parse_refusal(DOC.replace('["client_credentials"]', '"client_credentials"')), arr)
     assert_equal(_parse_refusal(DOC.replace('["client_credentials"]', "[]")), arr)
+    assert_equal(_parse_refusal(DOC.replace('["client_credentials"]', '{"a":"client_credentials"}')), arr)
     assert_equal(_parse_refusal(DOC.replace('["client_credentials"]', '["client_credentials",1]')), arr)
     assert_equal(_parse_refusal(DOC.replace('["client_credentials"]', '[1,"client_credentials"]')), arr)
     assert_equal(

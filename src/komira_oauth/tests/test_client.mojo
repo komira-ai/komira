@@ -276,6 +276,8 @@ def test_argument_refusals() raises:
     assert_equal(_fetch_refusal(t, resource=""), "OAuthError: the resource is empty")
     assert_equal(_fetch_refusal(t, scope="a  b"), "OAuthError: the scope is not a scope")
     assert_equal(_fetch_refusal(t, scope=" a"), "OAuthError: the scope is not a scope")
+    assert_equal(_fetch_refusal(t, scope="a\x7f"), "OAuthError: the scope is not a scope")
+    assert_equal(_fetch_refusal(t, scope="a\x1f"), "OAuthError: the scope is not a scope")
     assert_equal(_fetch_refusal(t, alg="RS256"), "OAuthError: the client key must sign ES256 or EdDSA")
     assert_equal(len(t.forms), 0, "nothing was sent")
     # One-byte values and a query on the endpoint are accepted.

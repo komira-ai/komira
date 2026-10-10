@@ -70,6 +70,8 @@ def test_get() raises:
     assert_false(Bool(p.get("resources")), "an extension is not the name")
     assert_false(Bool(p.get("Resource")), "names are case-sensitive")
     assert_false(Bool(p.get("")), "the empty name")
+    assert_false(Bool(p.get("xscope")), "a name ending in a stored name")
+    assert_false(Bool(p.get("xresource")), "a name ending in a stored name")
 
 
 def test_parse_accepts() raises:
@@ -88,6 +90,7 @@ def test_parse_accepts() raises:
     # Hex digits: each end of each range, both cases.
     assert_equal(_one("v=%30%39%41%46%61%66"), "09AFaf")
     assert_equal(_one("v=%2b%2B%7e%7E"), "++~~")
+    assert_equal(_one("v=%2f%2F%3a%3A"), "//::")
     # The printable bounds, encoded.
     assert_equal(_one("v=%20"), " ")
     assert_equal(_one("v=%7E"), "~")
@@ -171,6 +174,7 @@ def test_duplicate_refusals() raises:
     assert_equal(_refusal("a=1&%61=2"), twice)
     # Near names are distinct.
     assert_equal(len(parse_form("a=1&ab=2&A=3&b=4")), 4)
+    assert_equal(len(parse_form("a=1&ba=2")), 2)
 
 
 def test_size_limit() raises:

@@ -289,6 +289,23 @@ def test_response_refusals() raises:
     assert_equal(misses, "")
     assert_equal(_response_refusal('{"access_token":"a","token_type":"MAC","expires_in":300}'), "OAuthError: member token_type is not Bearer")
     assert_equal(_response_refusal('{"access_token":"a","token_type":"Bearer"}'), "OAuthError: member expires_in is missing")
+    # A member is found by its exact name only: a near name is another member.
+    var near_names = String("")
+    for name in _near_misses("expires_in"):
+        if name == "":
+            continue
+        var body = String('{"access_token":"a","token_type":"Bearer","') + name + '":300}'
+        var got = _response_refusal(body)
+        if got != "OAuthError: member expires_in is missing":
+            near_names += name + " -> " + got + "\n"
+    for name in _near_misses("access_token"):
+        if name == "":
+            continue
+        var body = String('{"') + name + '":"a","token_type":"Bearer","expires_in":300}'
+        var got = _response_refusal(body)
+        if got != "OAuthError: member access_token is missing":
+            near_names += name + " -> " + got + "\n"
+    assert_equal(near_names, "")
     var bad_exp = "OAuthError: member expires_in is not an integer from 1 to 86400"
     for v in ["0", "-1", "86401", '"300"', "300.5", "3e2", "null", "99999999999999999999"]:
         var body = String('{"access_token":"a","token_type":"Bearer","expires_in":') + v + "}"

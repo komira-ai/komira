@@ -83,6 +83,10 @@ comptime OAUTH_MAX_TOKEN_LIFETIME_S: Int64 = 86400
 # The longest token endpoint answer `parse_token_response` reads, in bytes.
 comptime OAUTH_RESPONSE_MAX_BYTES: Int = 65536
 
+comptime _EXPIRES_IN_REFUSAL: String = (
+    "member expires_in is not an integer from 1 to 86400"
+)
+
 comptime OAUTH_ERROR_INVALID_REQUEST: String = "invalid_request"
 comptime OAUTH_ERROR_INVALID_CLIENT: String = "invalid_client"
 comptime OAUTH_ERROR_INVALID_GRANT: String = "invalid_grant"
@@ -286,16 +290,17 @@ def parse_token_response(body: String) raises -> TokenResponse:
     var at = _member(obj, "expires_in")
     if at < 0:
         _refuse("member expires_in is missing")
-    ref v = obj.children[at]
-    var expires_in = Int64(0)
-    var ok = v.kind == JSON_NUMBER and v.is_integral_number()
-    if ok:
-        try:
-            expires_in = parse_int64_text(v.text)
-        except:
-            ok = False
-    if not ok or expires_in < 1 or expires_in > OAUTH_MAX_TOKEN_LIFETIME_S:
-        _refuse("member expires_in is not an integer from 1 to 86400")
+    # parse_int64_text refuses a fraction, an exponent and a value past
+    # Int64; a JSON number is the only kind whose text it may read.
+    if obj.children[at].kind != JSON_NUMBER:
+        _refuse(_EXPIRES_IN_REFUSAL)
+    var expires_in: Int64
+    try:
+        expires_in = parse_int64_text(obj.children[at].text)
+    except:
+        raise Error(String("OAuthError: ") + _EXPIRES_IN_REFUSAL)
+    if expires_in < 1 or expires_in > OAUTH_MAX_TOKEN_LIFETIME_S:
+        _refuse(_EXPIRES_IN_REFUSAL)
     var scope = String("")
     var sc = _optional_string(obj, "scope")
     if sc:
