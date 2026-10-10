@@ -57,7 +57,9 @@ from kci_api import (
 comptime DEFAULT_BUILD_TIMEOUT_S: Int = 3600
 """Seconds each build run may take, when the command line gives no
 `--build-timeout-s`: one artifact on the release path; one unit or one
-whole batch of units in the per-change check."""
+whole batch of units in the per-change check without `--build-budget-s`
+(with one, a run may take all the budget left: affected_batch.mojo, THE
+BUDGET)."""
 
 comptime NO_BUILD_BUDGET: Int = 0
 """`BuildRequest.build_budget_s` when the command line gives no

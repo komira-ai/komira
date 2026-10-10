@@ -654,12 +654,15 @@ def _read_uleb128_span(
         var byte = Int(src[pos])
         pos += 1
         nbytes += 1
+        # The 10th byte lands at bit 63: only 0x00 or 0x01 fits in 64 bits.
+        if nbytes == 10 and byte > 0x01:
+            if byte & 0x80 != 0:
+                raise Error("_read_uleb128_span: varint exceeds 10 bytes (corrupt)")
+            raise Error("_read_uleb128_span: varint overflows 64 bits (corrupt)")
         result = result | ((byte & 0x7F) << shift)
         if byte & 0x80 == 0:
             break
         shift += 7
-        if nbytes > 10:
-            raise Error("_read_uleb128_span: varint exceeds 10 bytes (corrupt)")
     return (result, pos)
 
 
@@ -1884,7 +1887,9 @@ def _validate_region(
         raise Error(
             "SplitView.parse: region '" + name + "' offset before magic"
         )
-    if offset + length > footer_start:
+    if offset > total:
+        raise Error("SplitView.parse: region '" + name + "' offset past EOF")
+    if length > footer_start - offset:  # not offset + length: it can wrap Int
         raise Error(
             "SplitView.parse: region '"
             + name
@@ -1896,5 +1901,3 @@ def _validate_region(
             + String(footer_start)
             + ")"
         )
-    if offset > total:
-        raise Error("SplitView.parse: region '" + name + "' offset past EOF")

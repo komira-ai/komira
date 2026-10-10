@@ -1,8 +1,8 @@
 # =============================================================================
 # src/kci_cli/start_checks.mojo -- what `kci run` checks under GitHub Actions
-#   before the RUNNING record (dispatch.mojo's header, 4, 4a and 4b): the
-#   workflow it runs under, the ref it runs on, and the release set it was
-#   handed.
+#   before the RUNNING record (dispatch.mojo's header, 4, 4a, 4b and 4c):
+#   the workflow it runs under, the ref it runs on, the release set it was
+#   handed, and whether main has moved past it (the admission check).
 # =============================================================================
 #
 # Each check returns a `StartVerdict`: `outcome` "" when the run may go on,
@@ -29,7 +29,9 @@ from kci_api import (
     OUTCOME_INDETERMINATE,
     OUTCOME_REFUSED,
     OUTCOME_SUCCEEDED,
+    OUTCOME_SUPERSEDED,
     VALIDATION_VALIDATED,
+    parse_attempt,
     WORKFLOW_PATH_PREFIX,
     is_full_commit_id,
     release_platform_dir,
@@ -55,6 +57,8 @@ comptime GITHUB_REF: String = "GITHUB_REF"
 comptime GITHUB_SHA: String = "GITHUB_SHA"
 comptime GITHUB_ACTOR: String = "GITHUB_ACTOR"
 comptime GITHUB_EVENT_NAME: String = "GITHUB_EVENT_NAME"
+# The admission check's platform-set variable (file header, 4c).
+comptime GITHUB_RUN_ATTEMPT: String = "GITHUB_RUN_ATTEMPT"
 comptime PUSH_EVENT: String = "push"
 comptime MAIN_REF: String = "refs/heads/main"
 # A FULL refname: `origin/main` would resolve a TAG of that name first
@@ -214,11 +218,13 @@ def _refuse(var outcome: String, var error_id: String, var message: String) -> S
 
 
 def check_ref_at_start[S: StageSteps](
-    cmd: KciCommand, stage: Stage, mut steps: S, mut banner: String, mut break_glass: Bool
+    cmd: KciCommand, stage: Stage, mut steps: S, mut banner: String, mut break_glass: Bool, mut release: Bool
 ) -> StartVerdict:
     """File header, 4a (dispatch.mojo's header). `banner` gets a break-glass
-    run's first line and `break_glass` says the run is one."""
+    run's first line, `break_glass` says the run is one, and `release` says
+    it is a push to main that passed the check (a RELEASE run)."""
     break_glass = False
+    release = False
     if steps.platform_env(String(GITHUB_ACTIONS)) != String("true") or stage.is_pull_request():
         return StartVerdict()
     var ref_value = steps.platform_env(String(GITHUB_REF))
@@ -244,15 +250,15 @@ def check_ref_at_start[S: StageSteps](
             + String(" concurrency groups ignoring case, so such a ref would pass for main there; kci refuses it")
             + String(" for every stage, so nothing is run"),
         )
-    var release = event == String(PUSH_EVENT) and ref_value == String(MAIN_REF)
-    if not stage.break_glass and not release:
+    var push_to_main = event == String(PUSH_EVENT) and ref_value == String(MAIN_REF)
+    if not stage.break_glass and not push_to_main:
         return _refuse(
             String(OUTCOME_REFUSED), String(ERROR_NOT_ON_MAIN),
             where + String(" runs only on a push to main (the machine file gives it no break_glass), and this run")
             + String(" is a ") + event + String(" of ") + ref_value
             + String(": a manual or break-glass run stops at the last break_glass stage, so nothing is run"),
         )
-    if release:
+    if push_to_main:
         # kci on a push is built from main, so nothing a workflow edit does
         # (a GITHUB_ENV write of DRY_RUN, a shell assignment) can make a
         # release a dry run whose set prod would then publish uninstalled
@@ -283,6 +289,7 @@ def check_ref_at_start[S: StageSteps](
                 String("the revision ") + cmd.revision_id + String(" is not on main's history (") + String(MAIN_TRACKING_REF)
                 + String("): a run of main releases a merged commit only, so nothing is run"),
             )
+        release = True
         return StartVerdict()
     break_glass = True
     # a break-glass run that can publish releases the commit it started on:
@@ -324,6 +331,69 @@ def check_ref_at_start[S: StageSteps](
     banner = break_glass_line(ref_value, cmd.revision_id, steps.platform_env(String(GITHUB_ACTOR)), reason)
     _say(String("kci: ") + banner)
     return StartVerdict()
+
+
+def check_admission_at_start[S: StageSteps](
+    cmd: KciCommand, stage: Stage, release: Bool, mut steps: S
+) -> StartVerdict:
+    """File header, 4c (dispatch.mojo's header): with `--admission`, on a
+    RELEASE run, a re-run (the platform-set GITHUB_RUN_ATTEMPT above 1) at
+    any stage, or the first attempt of the FIRST stage (one with no
+    `after`: build), whose revision is not main's releasable tip stops
+    SUPERSEDED (exit 0) before any effect. A first attempt of a later stage
+    is admitted without asking: it is the newest that reached that stage,
+    and stopping it would starve the stage while pushes come faster than
+    the pipeline. Main moved past only by `docs/**` and `*.md` commits is
+    still this revision's releasable tip (`main_tip_past`). An attempt that
+    is unset or malformed, or a read git cannot answer, is INDETERMINATE
+    (KCI-E-CANNOT-TELL, exit 5), never a pass."""
+    if not cmd.admission:
+        return StartVerdict()
+    var where = String("stage '") + stage.name + String("'")
+    if not release:
+        _say(String("kci: admission: ") + where + String(": not a push to main, nothing to check"))
+        return StartVerdict()
+    var raw = steps.platform_env(String(GITHUB_RUN_ATTEMPT))
+    var attempt: Int
+    try:
+        attempt = parse_attempt(raw)
+    except e:
+        return _refuse(
+            String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL),
+            String(GITHUB_RUN_ATTEMPT) + String(" '") + raw + String("' is not a positive integer: whether this run")
+            + String(" is a re-run cannot be told, so nothing is run"),
+        )
+    var first_stage = stage.after.byte_length() == 0
+    if attempt == 1 and not first_stage:
+        _say(
+            String("kci: admission: ") + where + String(", attempt 1: the newest revision to reach this stage runs")
+            + String(" whether or not main has moved")
+        )
+        return StartVerdict()
+    var tip: String
+    try:
+        tip = steps.main_tip_past(cmd.revision_id)
+    except e:
+        return _refuse(
+            String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL),
+            String("whether ") + cmd.revision_id + String(" is main's releasable tip cannot be told (") + String(e)
+            + String("), so nothing is run"),
+        )
+    var which = (
+        String("a re-run (attempt ") + String(attempt) + String(")") if attempt > 1
+        else String("the first attempt of the first stage")
+    )
+    if tip.byte_length() == 0:
+        _say(String("kci: admission: ") + where + String(", ") + which + String(": ") + cmd.revision_id + String(" is main's releasable tip"))
+        return StartVerdict()
+    var v = StartVerdict()
+    v.outcome = String(OUTCOME_SUPERSEDED)
+    v.message = (
+        String("SUPERSEDED at ") + where + String(": main is at ") + tip + String(", past ") + cmd.revision_id
+        + String(" by a commit a push releases; ") + which + String(" of a revision that is not main's releasable")
+        + String(" tip stops here, before anything is run, and the newer commit's run carries it")
+    )
+    return v^
 
 
 def check_set_hash_at_start[S: StageSteps](
