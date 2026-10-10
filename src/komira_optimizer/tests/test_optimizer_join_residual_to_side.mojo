@@ -11,13 +11,12 @@
 # TPC-H q13: `customer LEFT JOIN orders ON c_custkey = o_custkey AND o_comment
 # NOT LIKE '%special%requests%'`. The residual references only `o_comment`
 # (orders = right/inner side), so it must lower to a FILTER on the orders scan —
-# turning the SERIAL `execute_residual_join_probe` (~74% of q13 wall) into a
-# plain LEFT equi-join over a pre-filtered orders side.
+# turning a residual join (the `NOT LIKE` evaluated per equi-candidate pair) into
+# a plain LEFT equi-join over a pre-filtered orders side.
 #
 # FAILS ON PRE-RULE CODE: without `push_join_residual_to_side`, the residual
 # stays on the JOIN node (`has_residual()` True) and the right child stays a
-# bare SCAN — the executor routes it to the serial resident residual probe. The
-# guards below assert the residual is lowered off the join AND the right child
+# bare SCAN. The guards below assert the residual is lowered off the join AND the right child
 # is a FILTER. The LEFT left-only case is the load-bearing CORRECTNESS boundary:
 # a left-only ON conjunct on a LEFT join is NOT a WHERE filter (an unmatched
 # left row still null-extends), so it MUST stay on the residual — a rule that

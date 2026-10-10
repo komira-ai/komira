@@ -8,11 +8,14 @@
 #   every unit built when an answer is WIDENED (a build file, the buckconfig,
 #   a toolchain, a tools/build file, an unmapped file), and each stop: an
 #   empty change and a change reaching nothing REFUSED, a failing or
-#   garbled tool INDETERMINATE (never a widening), a failed batch FAILED
+#   garbled tool INDETERMINATE (never a widening), a BROKEN answer (the
+#   tool's query of its build graph failed) FAILED, a failed batch FAILED
 #   naming the failed unit (affected_batch.mojo; test_affected_batch.mojo
 #   holds every batch case), a
 #   file without what the check needs refused before anything runs; --plan
-#   builds nothing; and a release build of the same file ignores the checks.
+#   builds nothing; a release build of the same file ignores the checks; and
+#   the affected commands are charged to --build-budget-s and not started
+#   when none is left.
 # =============================================================================
 #
 # The fake affected command is a ScriptedStep: kci's half of the protocol is
@@ -195,7 +198,9 @@ def _git(diff: String, diff_exit: Int32 = Int32(0), diff_stderr: String = String
     return g^
 
 
-def _ask_buck2(req: BuildRequest, answer: String, exit_code: Int32 = Int32(0), timed_out: Bool = False) -> ScriptedStep:
+def _ask_buck2(
+    req: BuildRequest, answer: String, exit_code: Int32 = Int32(0), timed_out: Bool = False, took_s: Int = 0
+) -> ScriptedStep:
     return ScriptedStep(
         _argv(
             String("--changed-files=") + req.log_dir + String("/_changed_files"),
@@ -206,16 +211,18 @@ def _ask_buck2(req: BuildRequest, answer: String, exit_code: Int32 = Int32(0), t
         exit_code=exit_code,
         stdout_text=answer,
         timed_out=timed_out,
+        elapsed_s=took_s,
     )
 
 
-def _ask_pack(req: BuildRequest, answer: String) -> ScriptedStep:
+def _ask_pack(req: BuildRequest, answer: String, took_s: Int = 0) -> ScriptedStep:
     return ScriptedStep(
         _argv(
             String("--changed-files=") + req.log_dir + String("/_changed_files"),
             String("--units-file=") + req.log_dir + String("/_units_pack.tsv"),
         ),
         stdout_text=answer,
+        elapsed_s=took_s,
     )
 
 
@@ -240,6 +247,54 @@ def _list(xs: List[String]) -> String:
     for i in range(len(xs)):
         s += String("[") + xs[i] + String("]")
     return s^
+
+
+# ---- the build budget reaches the affected commands -------------------------
+
+
+def test_the_affected_commands_are_charged_to_the_budget() raises:
+    # --build-budget-s 100 (deadline at clock 100 s): the buck2 answer gets
+    # all 100 (--build-timeout-s 77 caps nothing under a budget) and takes
+    # 30 s, so the pack command gets the 70 left and, after its 40 s, the
+    # build gets the 30 s left
+    var root = _fresh(String("budget"))
+    var req = _request(root)
+    req.build_budget_s = 100
+    req.build_deadline_ns = 100 * 1_000_000_000
+    var git = _git(_z("src/lib_a/a.mojo"))
+    var runner = ScriptedRunner()
+    runner.expect(_ask_buck2(req, String("UNIT lib_a\nAFFECTED 1\n"), took_s=30))
+    runner.expect(_ask_pack(req, String("AFFECTED 0\n"), took_s=40))
+    runner.expect(_build("//src/lib_a:lib_a_conda"))
+    var result = _fresh_result()
+    var o = _run(req, runner, git, result)
+    assert_equal(o.outcome, String(OUTCOME_SUCCEEDED), o.message)
+    assert_equal(len(runner.calls), 3)
+    assert_equal(runner.remaining(), 0)
+    assert_equal(runner.calls[0].timeout_s, 100)
+    assert_equal(runner.calls[1].timeout_s, 70)
+    assert_equal(runner.calls[2].timeout_s, 30)
+
+
+def test_an_affected_command_with_no_budget_left_is_not_started() raises:
+    # the buck2 answer spends the whole budget: the pack command is not
+    # started, and kci cannot tell what the change reaches (never a pass)
+    var root = _fresh(String("nobudget"))
+    var req = _request(root)
+    req.build_budget_s = 100
+    req.build_deadline_ns = 100 * 1_000_000_000
+    var git = _git(_z("src/lib_a/a.mojo"))
+    var runner = ScriptedRunner()
+    runner.expect(_ask_buck2(req, String("UNIT lib_a\nAFFECTED 1\n"), took_s=100))
+    var result = _fresh_result()
+    var o = _run(req, runner, git, result)
+    assert_equal(o.outcome, String(OUTCOME_INDETERMINATE), o.message)
+    assert_equal(o.error_id, String(ERROR_AFFECTED))
+    assert_equal(len(runner.calls), 1)
+    assert_equal(runner.remaining(), 0)
+    assert_true(
+        o.message.find(String("was not started: the build budget (--build-budget-s 100) was spent")) >= 0, o.message
+    )
 
 
 # ---- exactly the reached units ----------------------------------------------
@@ -430,6 +485,28 @@ def test_a_failing_tool_is_cannot_tell_never_a_widening() raises:
     _cannot_tell_case(
         String("foreign"), String("UNIT meta\nAFFECTED 1\n"), String("'meta' is not a unit this build system owns")
     )
+
+
+def test_a_broken_answer_fails_the_check_and_builds_nothing() raises:
+    # BROKEN: the tool's query of its build graph failed (here on a target
+    # with an invisible dependency). The check is FAILED, naming what the
+    # tool said, never a widening and never "cannot tell"; nothing is built
+    # and the next build system is not asked.
+    var root = _fresh(String("broken"))
+    var req = _request(root)
+    var git = _git(_z("src/lib_a/a.mojo"))
+    var runner = ScriptedRunner()
+    var why = String("the universe holds a target buck2 cannot configure: tests//p:t: `x` is not visible to `tests//p:t`")
+    runner.expect(_ask_buck2(req, String("BROKEN ") + why + String("\n")))
+    var result = _fresh_result()
+    var o = _run(req, runner, git, result)
+    assert_equal(o.outcome, String(OUTCOME_FAILED), o.message)
+    assert_equal(o.error_id, String(ERROR_BUILD_FAILED), o.message)
+    assert_equal(o.exit_code(), EXIT_FAILED, o.message)
+    assert_equal(len(runner.calls), 1)
+    assert_equal(runner.remaining(), 0)
+    assert_equal(result.affected_verdict, String(""))
+    assert_true(o.message.find(String("build system 'buck2' answered BROKEN: ") + why) >= 0, o.message)
 
 
 def test_a_failed_batch_names_the_failed_unit() raises:

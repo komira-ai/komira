@@ -2,7 +2,7 @@
 
 A search index read as a scan: the `komira.search.index` scan kind. A scan over
 `{index, field, query, analyzer_fp}` returns one row per matching document of
-every split live at the resolved generation, in the hit schema of
+every split of that field live at the resolved generation, in the hit schema of
 `komira_search` (`_score` Float64, `_id` Int64, `_source` string); filtering,
 sorting, paging and aggregation are ordinary plan operators above it.
 
@@ -11,13 +11,15 @@ sorting, paging and aggregation are ordinary plan operators above it.
   generation is resolved again at every execution. With one, the scan is pinned
   to it. An empty query reads every document, each scored 0.0.
 - `SearchIndexCatalog` is what the kind asks of a store: the current
-  generation, the analyzer of a field, and the splits live at a generation.
+  generation, the analyzer of a field, the splits live at a generation, and
+  the field each split indexes (`split_field_at`).
   `InMemorySearchIndexCatalog` implements it in memory: `create_index`,
-  `add_field`, and `publish`, which appends a split and returns the new
+  `add_field`, and `publish`, which appends a split, records its field (one of
+  the index's, `SEARCH_INDEX_UNKNOWN` otherwise) and returns the new
   generation.
 - `SearchScanResolver[C]`, and `search_scan_resolver(catalog^)` which erases it
   for registration, implement the `komira_scan_resolver` contract: one split per
-  live split object, keyed `search_split_key(index, ordinal)`, read by
+  live split object that indexes the binding's field, keyed `search_split_key(index, ordinal)`, read by
   `SearchSplitReader`. A binding whose analyzer fingerprint
   (`analyzer_config_fingerprint`) differs from the catalog's is refused with
   `SEARCH_ANALYZER_MISMATCH`, an unknown index with `SEARCH_INDEX_UNKNOWN`, and

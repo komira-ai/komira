@@ -4,7 +4,8 @@
 #   files byte for byte, every exit status comes back as itself (each bit of
 #   the 0..255 range, so a decode that drops or clamps bits fails), the cwd
 #   is applied, a run past its timeout is stopped and reported as timed out,
-#   and an explicit environment is exactly what the child sees (None
+#   its clock (`now_ns`) is the monotonic one and moves with a run, and an
+#   explicit environment is exactly what the child sees (None
 #   inherits).
 # =============================================================================
 
@@ -134,6 +135,22 @@ def test_a_run_past_its_timeout_is_stopped() raises:
     assert_false(r.ok())
     assert_equal(r.describe(), String("timed out"))
     assert_true(waited_ms < 10000)
+
+
+def test_its_clock_is_the_monotonic_clock() raises:
+    # now_ns is what the per-change check's budget is read against: it is
+    # perf_counter_ns (CLOCK_MONOTONIC), so a run that sleeps 1 s moves it
+    # by at least 1 s and by no more than the wall time around the call
+    var d = _dir(String("clock"))
+    var runner = SupervisorRunner()
+    var t0 = Int(perf_counter_ns())
+    var before = runner.now_ns()
+    var r = runner.run(_sh(d, String("sleep 1")))
+    var after = runner.now_ns()
+    var t1 = Int(perf_counter_ns())
+    assert_true(r.ok())
+    assert_true(before >= t0 and after <= t1, String(t0) + String(" ") + String(before) + String(" ") + String(after) + String(" ") + String(t1))
+    assert_true(after - before >= 1_000_000_000, String(after - before))
 
 
 def test_a_missing_binary_raises() raises:
