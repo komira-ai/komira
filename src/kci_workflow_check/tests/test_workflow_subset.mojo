@@ -51,8 +51,10 @@ comptime _PR_WF: String = (
     "          ts-client-id: ${{ vars.TS_CLIENT_ID }}\n"
     "      - name: kci\n"
     "        run: |\n"
+    "          if ! git rev-parse --verify --quiet HEAD^2 > /dev/null || ! change_base=$(git rev-parse --verify HEAD^1);"
+    " then echo \"::error::the change base is the merge commit's first parent, and HEAD is not a merge commit\"; exit 1; fi\n"
     "          \"$RUNNER_TEMP/kci/kci\" run --stage pr \\\n"
-    "            --affected-by ${{ github.event.pull_request.base.sha }} \\\n"
+    "            --affected-by \"$change_base\" \\\n"
     "            --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
 )
 
