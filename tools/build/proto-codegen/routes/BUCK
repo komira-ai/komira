@@ -11,7 +11,8 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library", "mojo_routes_p
 #   `:komira_routes_fixture_gen[library_service_routes.mojo]` and copy it.
 # - test_routes_dispatch: the generated dispatchers driven with requests and
 #   fake handlers: every RPC reached through each of its bindings, 405 for a
-#   known path under another method, an unknown JSON field or query parameter
+#   known path under another method with its methods in Allow, both services
+#   behind one ComposedRoutes, an unknown JSON field or query parameter
 #   refused with 400, path and query values bound by type, a handler raise
 #   mapped by the handler.
 

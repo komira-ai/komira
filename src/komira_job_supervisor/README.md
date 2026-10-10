@@ -42,9 +42,26 @@ looked up on `PATH`). Everything after the first bare `--` is the job's
 arguments, verbatim. It exits 0 when the job COMPLETED, 1 when it FAILED or
 was CANCELLED, and 2 when the start was refused.
 
-Process handling (pipes, pids, signals) is komira_supervisor's. A job is
-stopped by signalling its pid, not its process group, so a child the job
-spawns itself is not signalled.
+Process handling (pipes, pids, signals) is komira_supervisor's. The
+supervisor is built to be a container's PID 1:
+
+- the job leads its own process group, so every stop (a cancel reply, the
+  maximum runtime, a stop signal) sends SIGTERM to the job and every
+  descendant still in that group, waits up to 5 s for the group to empty,
+  then sends SIGKILL to what is left;
+- a SIGTERM or SIGINT sent to the supervisor (a platform stopping the
+  container) is caught, forwarded to the job's group as the same signal, and
+  the job is reported CANCELLED; one that arrives before the job is started
+  (during the fetch or the first heartbeat) cancels it without starting it;
+- descendants orphaned by the job are re-parented to the supervisor (PID 1
+  receives them; elsewhere on Linux it becomes a child subreaper) and
+  collected, so none stays a zombie. The supervisor assumes it owns every
+  child of its process;
+- the job starts with every signal at its default action, not with the
+  ignored SIGPIPE the supervisor's TLS connections leave behind;
+- the terminal heartbeat is sent again after a failure that may pass (no
+  reply, 408, 429, 5xx, an unreadable credential), with a growing delay,
+  for at most 8 sends within 15 s; a 4xx is not repeated.
 
 ## Examples
 

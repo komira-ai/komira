@@ -209,6 +209,15 @@ Each path (`covcheck/paths.mojo`), in this order:
    (`src/...`) is **unmapped**, an error (exit 1) naming every such path; any
    other relative path (`oss/modular/mojo/stdlib/...`, the Mojo standard
    library) is outside. Outside files are ignored and counted in the summary.
+6. One exception to unmapped: a welded test's generated main (the layout
+   probe a `mojo_aws_client` or `mojo_gcp_client` generates) is named by its
+   output path in the package (`src/m/gen/<name>/_layout_probe.mojo`), which
+   the gate stages and the checkout lacks. In a test's own report
+   (`.../cov/tests/<stem>.xml`, or `.../cov/branch/<stem>.info`), a path
+   named `<stem>.mojo`, in a package, whose directory is none of the
+   repository's, is that test: counted as a test source and left out (with
+   `--include-tests` too: it has no source). Any other unmapped path stays
+   an error.
 
 A file's package is the nearest directory above it holding a `BUCK` file
 (`src/m/x/y.mojo` is in `src/m`); `(root)` when only the top directory holds
@@ -261,7 +270,15 @@ A UTF-8 byte-order mark at the start of the file and a carriage return at
 the end of a line (CRLF) are not part of the line.
 
 Everything else counts, declarations included (`def`, `struct`,
-`comptime`, a decorator, a lone `)`).
+`comptime`, a decorator, a lone `)`), except a trait's header and its
+requirements, which emit no code: a requirement is a `def` inside a
+`trait` block whose body is only `...` (after an optional docstring), or a
+`def` line ending in `: ...`, and its decorators, signature lines and `...`
+line are not executable. A trait method with a default body counts. A
+`trait` block runs from its header (with the lines its open brackets
+carry) to the next line holding code at the header's indent or less. So a
+file of traits only, such as a package's interface declarations, has no
+executable line.
 
 Except in a **declaration-only** file (`declaration_only` in
 `covcheck/decls.mojo`, whose declaration reader is the one authority on

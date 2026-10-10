@@ -46,6 +46,7 @@ from kci_cloud import (
     Finding,
     LoweredNode,
     Setting,
+    body_is,
     service_subnet,
 )
 from kci_resource_proto.resource import Resource
@@ -129,7 +130,7 @@ def network_input(r: Resource, mut refs: List[InputRef]):
 def network_limits(r: Resource, shape: ProviderShape, cloud: String, mut out: List[Finding]):
     """The shape's network limits (file header) on `r`; nothing for a type
     they do not concern."""
-    if Bool(r.subnet) and shape.subnet_zone_limit.byte_length() > 0 and not Bool(r.subnet.value().zone):
+    if body_is(r, FIELD_SUBNET) and shape.subnet_zone_limit.byte_length() > 0 and not Bool(r.subnet.value().zone):
         out.append(
             Finding(
                 FINDING_LIMIT,

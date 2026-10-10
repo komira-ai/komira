@@ -1,16 +1,14 @@
 # =============================================================================
 # `push_predicates_down` may push a FILTER below a PROJECT only when the
-# predicate means the same thing on both sides. It checked BY NAME
-# (`_predicate_refs_in_schema(pred, <the Project's CHILD schema>)`), and a
-# Project that REPLACES a name its child also has passes that check: the pushed
-# predicate then reads the ORIGINAL column. MEASURED (on
-# LOCAL darwin, a 6-row parquet):
-#   @sql  SELECT k, v FROM (SELECT k, g, v*2 AS v FROM t) q WHERE v > 8
-#         -> k 3        (DuckDB 1.5.3: k 1, 3)
-#   @mojo with_columns((col("v") * 2).alias("v")).filter(col("v") > 8) -> k 3
-#   @mojo with_columns(col("x").max().over("g").alias("x")).filter(x > 3)
-#         -> k 3, 5     (DuckDB: k 3, 4, 5, 6)
-# The by-name check dates from an earlier change.
+# predicate means the same thing on both sides. A check BY NAME alone
+# (`_predicate_refs_in_schema(pred, <the Project's CHILD schema>)`) is not
+# enough: a Project that REPLACES a name its child also has passes it, and the
+# pushed predicate then reads the ORIGINAL column. In
+#   SELECT k, v FROM (SELECT k, g, v*2 AS v FROM t) q WHERE v > 8
+# the filter must test v*2, not t.v; a window that replaces a column
+# (`max(x) OVER (PARTITION BY g) AS x`) must not be pushed at all. Each test
+# below pins one shape: kept ABOVE the Project, or pushed with the Project's
+# expression substituted (`predicate_below_project`).
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -110,7 +108,7 @@ def test_a_predicate_under_a_node_the_substitution_returns_AS_BUILT_stays_above(
     # [k, w AS v]: v is row-local (a rename), but `regexp_like` is returned AS
     # BUILT by `substitute_project_refs`, so a substituted push would leave it
     # reading the scan's OWN v. `expr_substitutes_safely` must keep it above
-    # (mutating it to `return True` left the five tests above green).
+    # (no other test in this file needs that check to answer False).
     var pe = ExprArray()
     pe.append(Expr.col_ref("k"))
     pe.append(Expr.alias(Expr.col_ref("w"), "v"))
@@ -123,8 +121,8 @@ def test_a_predicate_under_a_node_the_substitution_returns_AS_BUILT_stays_above(
 def test_a_predicate_on_a_column_a_RAISING_function_computes_stays_above() raises:
     # [k, sqrt(v) AS v]: pushed with sqrt substituted, the predicate would be
     # pushed on past any guard FILTER under the Project and raise on the rows
-    # it excluded (MEASURED at @sql: "cannot take square root of a negative
-    # number" for `... sqrt(x) AS x ... WHERE x >= 0) q WHERE x > 1`).
+    # it excluded (`sqrt` of a negative x in
+    # `... sqrt(x) AS x ... WHERE x >= 0) q WHERE x > 1`).
     var pe = ExprArray()
     pe.append(Expr.col_ref("k"))
     pe.append(Expr.alias(Expr.sqrt(Expr.col_ref("v")), "v"))
@@ -138,7 +136,8 @@ def test_a_predicate_on_a_PASS_THROUGH_column_is_pushed_the_control() raises:
 
 
 def test_an_aliased_pass_through_is_pushed_the_skins_spelling() raises:
-    # The python skins author Alias(ColRef(k), "k") for every kept column.
+    # A front end may author Alias(ColRef(k), "k") for every kept column (the
+    # python skins, which are not in this tree, do).
     var pe = ExprArray()
     pe.append(Expr.alias(Expr.col_ref("k"), "k"))
     pe.append(Expr.col_ref("v"))

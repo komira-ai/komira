@@ -418,6 +418,17 @@ channel answers NOOP (exit 0).
     taking the branch's changes back out. A history git cannot list (a
     shallow clone, no `RUNNER_TEMP`) is exit 5, never a pass.
 
+  The rule is the run's, not the stage's: a push to `main` holds `gamma` to
+  it too, where it counts only `gamma`'s MAIN-LINE builds (those whose
+  `h<8 hex>` is a commit on `main`'s freshly fetched history; a branch's
+  break-glass build is reported and not counted). Before refusing, kci asks
+  git whether the release revision is on the history of the commit the
+  channel's newest build names (`git rev-parse --verify`, then `git
+  merge-base --is-ancestor`): when it is, a newer release is already in the
+  channel and the run stops SUPERSEDED, exit 0, nothing uploaded and no set
+  hash handed on. A prefix git cannot resolve to one commit, or a shallow
+  clone, is exit 5.
+
   Only a late re-run of an old run reaches either, since the group
   serialises live runs. A re-run of the same release is NOOP (or finishes a
   partial publish). Rolling back
@@ -845,8 +856,9 @@ identical (both build systems of `release/artifacts.textproto` share
 targets, so a `build_targets` command must be correct on such a union.
 `release/ci/build_targets.sh` builds with `--keep-going`, then checks the lints
 and runs the tests among all the targets (a failed build stops before the lints
-and tests). The per-run timeout (`--build-timeout-s`, default 3600 s) bounds the
-whole batch, not each unit in it, and the build budget (below) can shorten it.
+and tests). The run's timeout bounds the whole batch, not each unit in it:
+with the build budget (below), all of the budget left; without it, the
+per-run timeout (`--build-timeout-s`, default 3600 s).
 The run's output is in
 `<log dir>/_batch_<k>.stdout` and `.stderr`, and its full argv, one argument per
 line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
@@ -855,7 +867,7 @@ line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
 - **The batch passes:** every unit in it is `BUILT`. Nothing is retried.
 - **The batch fails:** kci builds its units one at a time, in order, to name
   the failing ones. Each retry re-runs `sh release/ci/build_targets.sh` over
-  that one unit's targets, with its own `--build-timeout-s`, and logs to
+  that one unit's targets, with its own timeout (as the batch's), and logs to
   `<unit>.stdout` and `.stderr`; the batch already built every target that
   does not depend on a failure, so the retries run on a warm cache. A failing
   wide change therefore costs the batch's time plus the retries, up to the
@@ -864,11 +876,12 @@ line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
   later batch that fails is noted as not attributed (a later batch that
   passes still builds its units). The step is FAILED (`KCI-E-BUILD-FAILED`);
   the summary's line is `BUILD step: F of N unit(s) failed: ...`.
-- **The batch times out (or is killed by a signal):** the batch had the whole
-  `--build-timeout-s` (default 3600 s), or what was left of the build budget
-  when that was less (the note then says `timed out after N s, what was left
-  of the build budget`), not a share per unit. It is not retried and no unit
-  of it is attributed: FAILED.
+- **The batch times out (or is killed by a signal):** the batch had all that
+  was left of the build budget (the note then says `timed out after N min[ S
+  s], all that was left of the build budget (--build-budget-s B)`, N min S s
+  the time it was allowed), or without a budget the whole `--build-timeout-s`
+  (default 3600 s), not a share per unit. It is not retried and no unit of
+  it is attributed: FAILED.
 - **The batch fails but every unit builds alone:** the units interfere or the
   build is flaky. That is INDETERMINATE (`KCI-E-CANNOT-TELL`), never a pass.
   FAILED outranks it: if a unit failed or a batch was not attributed anywhere
@@ -882,10 +895,16 @@ line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
 may take, counted from kci's own start on the monotonic clock
 (`CLOCK_MONOTONIC`), so everything kci does first (the workflow check, the
 git reads, the derive and affected commands) is charged to it. Every run
-(each derive and affected command, a batch, a unit alone, a retry) gets the
-smaller of `--build-timeout-s` and the whole seconds left until the deadline,
-read just before it starts; a run that passed, failed or timed out is
-charged alike. A run with less than one second left is not started. A
+(each derive and affected command, a batch, a unit alone, a retry) gets all
+the whole seconds left until the deadline, read just before it starts
+(`--build-timeout-s` is refused beside `--build-budget-s`: no fixed cap
+cuts a wide batch short of the budget); a run that passed, failed or timed out is
+charged alike. A build run (a batch, a unit alone, a retry) that times out
+is FAILED, with the `timed out after N min[ S s], ...` note above. A derive
+or affected command that times out is INDETERMINATE (`KCI-E-AFFECTED`), its
+note a plain `timed out`: it gets all the budget left too, so a hung
+affected command can use the whole budget before the step ends
+INDETERMINATE. A run with less than one second left is not started. A
 derive or affected command not started makes the step INDETERMINATE
 (`KCI-E-AFFECTED`: kci cannot tell what the change reaches). A build run not
 started lists its units, and those of every later run, as `BUILD step: U of

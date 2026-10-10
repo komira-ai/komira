@@ -4,8 +4,9 @@
 #
 # TPC-H q11 compares a grouped SUM against an ungrouped SUM over the same
 # relation. After scalar-subquery decorrelation both aggregates sit under one
-# JOIN_CROSS, and column pruning leaves the two scans of `t` with different
-# projections. `detect_shared_cross_canonical` must recognise the two scans as
+# JOIN_CROSS, and column pruning (not in this tree) leaves the two scans of
+# `t` with different projections. `detect_shared_cross_canonical` must
+# recognise the two scans as
 # one relation (projection-insensitive fingerprint) and return the WIDER one,
 # whose columns cover both aggregates.
 #
