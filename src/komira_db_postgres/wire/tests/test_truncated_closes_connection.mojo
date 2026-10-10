@@ -105,12 +105,10 @@ def _leaf_key() raises -> String:
 def _socketpair() raises -> Tuple[Int32, Int32]:
     var sv = Array[Int32, 2](fill=Int32(-1))
     # SAFETY: `sv` is a live local array of two Int32 for the whole call;
-    # socketpair writes exactly two Int32 into it and keeps no pointer.
-    var sv_ptr = UnsafePointer(to=sv).unsafe_origin_cast[
-        MutUntrackedOrigin
-    ]().bitcast[Int32]()
+    # socketpair writes exactly two Int32 into it and keeps no pointer. The
+    # pointer carries `sv`'s own origin, so `sv` stays live across the call.
     var rc = external_call["socketpair", Int32](
-        _AF_UNIX, _SOCK_STREAM, Int32(0), sv_ptr,
+        _AF_UNIX, _SOCK_STREAM, Int32(0), sv.unsafe_ptr()
     )
     if rc != Int32(0):
         raise Error("socketpair() returned " + String(Int(rc)))
