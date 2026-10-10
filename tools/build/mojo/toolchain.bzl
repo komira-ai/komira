@@ -58,6 +58,57 @@ zig_dist_rule = rule(
     },
 )
 
+# A Zig source file other Zig targets import by name: `@import("<name>")`
+# in a `zig_exe` or `zig_test` that lists the target in `deps`. Zig refuses
+# a relative `@import` of a file outside the importing file's directory, so a
+# file shared by tools in two packages is passed to the compiler as a module
+# of its own (`-M<name>=<root>`). A module imports no other module (it has
+# no `deps` of its own); that is added when a module first needs one.
+ZigModuleInfo = provider(fields = {
+    # The import name: the target's name.
+    "name": provider_field(str),
+    # The module's root source file.
+    "root": provider_field(typing.Any),
+    # What a compile importing the module takes as inputs: the files `root`
+    # imports by a relative name, and the `.passed` output of each of the
+    # module's `unit_tests`, so nothing imports the module unless its tests
+    # passed.
+    "inputs": provider_field(list),
+})
+
+def _zig_module_impl(ctx):
+    passed = [t[DefaultInfo].default_outputs[0] for t in ctx.attrs.unit_tests]
+    return [
+        DefaultInfo(default_output = ctx.attrs.src, other_outputs = passed),
+        ZigModuleInfo(name = ctx.label.name, root = ctx.attrs.src, inputs = ctx.attrs.imports + passed),
+    ]
+
+zig_module_rule = rule(
+    impl = _zig_module_impl,
+    attrs = {
+        # Files `src` imports by a relative name (beside it).
+        "imports": attrs.list(attrs.source(), default = []),
+        "src": attrs.source(),
+        # `zig_test` targets of the module; every importer waits for them.
+        "unit_tests": attrs.list(attrs.dep(), default = []),
+    },
+)
+
+def _zig_root(ctx):
+    """What the compile is given as its root: `src`; with `deps`, an argument
+    file naming `src` as the root module and each dep as a module it may
+    import (`@file` is zig's own argument file, read in place of the
+    argument). Without `deps` the command line is the one it always was, so
+    no existing action changes its key."""
+    if not ctx.attrs.deps:
+        return ctx.attrs.src
+    mods = [d[ZigModuleInfo] for d in ctx.attrs.deps]
+    args = [cmd_args("--dep", m.name) for m in mods]
+    args.append(cmd_args(ctx.attrs.src, format = "-Mroot={}"))
+    args += [cmd_args(m.root, format = "-M" + m.name + "={}") for m in mods]
+    argfile, _ = ctx.actions.write(ctx.label.name + ".zig_modules", cmd_args(args), allow_args = True)
+    return cmd_args(argfile, format = "@{}", hidden = [ctx.attrs.src] + [m.root for m in mods] + [i for m in mods for i in m.inputs])
+
 def _zig_exe_impl(ctx):
     bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
     zig = ctx.attrs.zig[DefaultInfo].default_outputs[0]
@@ -68,7 +119,7 @@ export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME
 "$1/zig" build-exe -OReleaseSafe -target x86_64-linux-musl -fstrip "$2" "-femit-bin=$3"
 rm -rf "$T"
 """
-    cmd = busybox_sh(bb, script, zig, ctx.attrs.src, out.as_output())
+    cmd = busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output())
     if ctx.attrs.imports:
         # Files `src` imports by a relative name: inputs at their paths, so
         # beside it, and not on the command line.
@@ -87,6 +138,8 @@ zig_exe_rule = rule(
     impl = _zig_exe_impl,
     attrs = {
         "busybox": attrs.dep(),
+        # `zig_module` targets `src` imports by name.
+        "deps": attrs.list(attrs.dep(providers = [ZigModuleInfo]), default = []),
         "imports": attrs.list(attrs.source(), default = []),
         "src": attrs.source(),
         # `zig_test` targets the executable waits for.
@@ -110,7 +163,7 @@ echo passed > "$3"
 rm -rf "$T"
 """
     ctx.actions.run(
-        cmd_args(busybox_sh(bb, script, zig, ctx.attrs.src, out.as_output()), hidden = ctx.attrs.imports),
+        cmd_args(busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output()), hidden = ctx.attrs.imports),
         category = "zig_test",
     )
     return [DefaultInfo(default_output = out)]
@@ -122,6 +175,8 @@ zig_test_rule = rule(
     impl = _zig_test_impl,
     attrs = {
         "busybox": attrs.dep(),
+        # `zig_module` targets `src` imports by name.
+        "deps": attrs.list(attrs.dep(providers = [ZigModuleInfo]), default = []),
         "imports": attrs.list(attrs.source(), default = []),
         "src": attrs.source(),
         "zig": attrs.dep(),
@@ -282,3 +337,4 @@ mojo_toolchain = declares_docs(mojo_toolchain_rule)
 zig_dist = declares_docs(zig_dist_rule)
 zig_exe = declares_docs(zig_exe_rule)
 zig_test = declares_docs(zig_test_rule)
+zig_module = declares_docs(zig_module_rule)
