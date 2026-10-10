@@ -1,6 +1,6 @@
 # =============================================================================
 # test_L0_accept_loop_sweep.mojo: the accept loop's stale-mapping sweep on
-# tables where two slots hold one descriptor
+# corrupted tables (two slots holding one descriptor, a mapping past the end)
 # =============================================================================
 #
 # `accept_one_and_register` sweeps the table's mapping for the number
@@ -10,7 +10,9 @@
 # which two slots hold one live descriptor, the one shape where a slot
 # whose own descriptor is mapped is still not live (the mapping reaches the
 # other slot), and where removing the orphan's slot could close a
-# descriptor a live connection still uses.
+# descriptor a live connection still uses. The last test hands it a stale
+# mapping one past the last slot, which the sweep must drop without reading
+# a slot.
 #
 # The live descriptor is one end of an AF_UNIX socketpair, so whether the
 # sweep closed it shows as end of stream on the other end. Every read is
@@ -19,7 +21,10 @@
 #
 # Defects each test would catch:
 #   - a slot kept because its descriptor has some mapping, not one that
-#     reaches that slot (the table keeps an unreachable slot);
+#     reaches that slot (the table keeps an unreachable slot), whether that
+#     mapping reaches a higher slot or a lower one;
+#   - a stale mapping one past the last slot taken as in range (the sweep
+#     reads and removes a slot that does not exist);
 #   - the orphan slot's drop closing its descriptor, which the live slot
 #     holding the same number still uses;
 #   - the moved tail's mapping rewritten when it reached another slot, so
@@ -209,6 +214,79 @@ def test_sweep_leaves_a_moved_tail_mapping_that_reached_another_slot() raises:
     assert_false(_peer_sees_eof(c))
     # The copy must not close L a second time when the table drops.
     conns[0].forget_fd()
+    _ = conns^
+    _close(live[1])
+    _close(c)
+    _ = r^
+    _ = l^
+
+
+def test_sweep_removes_a_duplicate_slot_whose_fd_reaches_a_lower_slot() raises:
+    """The mirror of the first test: slots 0 and 1 both hold the live
+    descriptor L, whose mapping reaches slot 0; the reused number's stale
+    mapping reaches slot 1. Slot 1 is not live (L's mapping reaches a lower
+    slot, not it), so the sweep removes it without closing L, which slot 0
+    still uses. Slot 1 was the tail, so nothing moves; the new connection
+    takes slot 1."""
+    var l = TcpListener.bind_reuseport(inet_loopback_be(), UInt16(0), Int32(8))
+    var r = Reactor[NoopSink](NoopSink(_placeholder=UInt8(0)), BACKEND_MOCK)
+    var conns = Slab[ConnEntry]()
+    var fd_to_idx = Dict[Int, Int]()
+    var live = _socketpair()
+    var cn = _reused_number(l.local_port())
+    var c = cn[0]
+    var next = cn[1]
+    _wait_readable(l.fd())
+    conns.append(_entry(live[0]))
+    conns.append(_entry(live[0]))
+    fd_to_idx[Int(live[0])] = 0
+    fd_to_idx[Int(next)] = 1
+    assert_equal(accept_one_and_register(l, r, conns, fd_to_idx), 1)
+    # The duplicate slot no mapping reached is gone: one slot per mapping.
+    assert_equal(conns.len(), 2)
+    assert_equal(len(fd_to_idx), 2)
+    # The live descriptor is open: removing the duplicate closed nothing.
+    assert_false(_peer_sees_eof(live[1]))
+    # The live slot stays at slot 0, still reached by its mapping.
+    assert_equal(conns[0].fd(), live[0])
+    assert_equal(fd_to_idx[Int(live[0])], 0)
+    # The new connection sits at slot 1, mapped and open.
+    assert_equal(conns[1].fd(), next)
+    assert_equal(fd_to_idx[Int(next)], 1)
+    assert_false(_peer_sees_eof(c))
+    _ = conns^
+    _close(live[1])
+    _close(c)
+    _ = r^
+    _ = l^
+
+
+def test_sweep_ignores_a_stale_mapping_one_past_the_last_slot() raises:
+    """One live slot, L at slot 0 with its mapping reaching it; the reused
+    number's stale mapping reaches slot 1, one past the last slot. The sweep
+    drops that mapping and touches no slot: L stays at slot 0, mapped and
+    open, and the new connection takes slot 1."""
+    var l = TcpListener.bind_reuseport(inet_loopback_be(), UInt16(0), Int32(8))
+    var r = Reactor[NoopSink](NoopSink(_placeholder=UInt8(0)), BACKEND_MOCK)
+    var conns = Slab[ConnEntry]()
+    var fd_to_idx = Dict[Int, Int]()
+    var live = _socketpair()
+    var cn = _reused_number(l.local_port())
+    var c = cn[0]
+    var next = cn[1]
+    _wait_readable(l.fd())
+    conns.append(_entry(live[0]))
+    fd_to_idx[Int(live[0])] = 0
+    fd_to_idx[Int(next)] = 1
+    assert_equal(accept_one_and_register(l, r, conns, fd_to_idx), 1)
+    assert_equal(conns.len(), 2)
+    assert_equal(len(fd_to_idx), 2)
+    assert_equal(conns[0].fd(), live[0])
+    assert_equal(fd_to_idx[Int(live[0])], 0)
+    assert_false(_peer_sees_eof(live[1]))
+    assert_equal(conns[1].fd(), next)
+    assert_equal(fd_to_idx[Int(next)], 1)
+    assert_false(_peer_sees_eof(c))
     _ = conns^
     _close(live[1])
     _close(c)
