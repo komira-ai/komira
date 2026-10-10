@@ -250,7 +250,7 @@ def test_redaction_of_emails_with_digits_capitals_and_a_full_stop() raises:
     """Digits and capitals belong to the address; the sentence's full stop
     does not."""
     assert_equal(
-        redact_log_text(String("mail Ann9@Example1.COM.")),
+        redact_log_text(String("mail Ann9@Mail1.Example.COM.")),
         String("mail ") + String(REDACTED_EMAIL) + String("."),
     )
 
