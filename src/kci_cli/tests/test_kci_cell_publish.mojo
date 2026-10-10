@@ -43,7 +43,9 @@
 #   8. The same trust finding under `--plan`: REFUSED too.
 #   9. `registry_host_and_path` over `h/p/r` and `h`, and its refusal of
 #      every address with an empty host or an empty path segment (`""`,
-#      `/p`, `h/`, `h//p`, `h/p/`), and a `kci run` on `_PathCloud`, a
+#      `/p`, `h/`, `h//p`, `h/p/`, `h/a//b`), the step's refusal of such an
+#      address through `kci run` (REFUSED, exit 3, KCI-E-CLOUD, no login,
+#      no request), and a `kci run` on `_PathCloud`, a
 #      wrapper of FakeCloud whose registry address has a path
 #      (`shop-blue-images/team/images`): the image goes to repository
 #      `team/images/web`, the exact PUT path `/v2/team/images/web/...`.
@@ -496,7 +498,7 @@ def test_registry_host_and_path() raises:
     assert_equal(b[1], String(""))
     assert_equal(_split_refusal(String("")), String("the cell's registry address is empty"))
     assert_equal(_split_refusal(String("/p")), String("the cell's registry address '/p' has an empty host"))
-    for bad in ["h/", "h//p", "h/p/"]:
+    for bad in ["h/", "h//p", "h/p/", "h/a//b"]:
         assert_equal(
             _split_refusal(String(bad)),
             String("the cell's registry address '") + String(bad) + String("' has an empty path segment"),
@@ -504,14 +506,20 @@ def test_registry_host_and_path() raises:
 
 
 struct _PathCloud(CloudAdapter, Movable, Deinitable):
-    """FakeCloud, except that its registry address has a path:
-    `<FakeCloud's>/team/images` (the shape of a hosted registry that names
-    a project and a repository)."""
+    """FakeCloud, except for its registry address: `<FakeCloud's>/team/images`
+    (the shape of a hosted registry that names a project and a
+    repository), or `address` verbatim when one is given (a malformed
+    one, to drive the step's refusal). `logins` counts `registry_login`
+    calls."""
 
     var inner: FakeCloud
+    var address: String
+    var logins: Int
 
-    def __init__(out self):
+    def __init__(out self, address: String = String("")):
         self.inner = FakeCloud()
+        self.address = address.copy()
+        self.logins = 0
 
     def cloud_id(self) -> CloudId:
         return self.inner.cloud_id()
@@ -573,9 +581,12 @@ struct _PathCloud(CloudAdapter, Movable, Deinitable):
         return self.inner.trust_check(creds, scope)
 
     def image_registry(self, ctx: CellContext) -> String:
+        if self.address.byte_length() > 0:
+            return self.address.copy()
         return self.inner.image_registry(ctx) + String("/team/images")
 
     def registry_login(mut self, creds: Creds) raises -> RegistryLogin:
+        self.logins += 1
         return self.inner.registry_login(creds)
 
 
@@ -616,6 +627,30 @@ def _seed_tagged(mut reg: FakeOciRegistry, f: _Fixture, name: String, digest: St
     var seeded = reg.seed_manifest(name, String(_MANIFEST_TYPE), Path(blob).read_bytes())
     assert_equal(seeded, digest, "the seeded manifest is the layout's")
     reg.seed_tag(name, String(_REV), digest)
+
+
+def test_a_malformed_registry_address_is_refused_by_the_step() raises:
+    """An adapter whose registry address has an empty path segment (`h/`)
+    or an empty host (`/p`). Catches: the step continuing past the
+    address error with a bare host (requests sent), and the refusal
+    reported as FAILED rather than REFUSED."""
+    for bad in ["shop-blue-images/", "/p"]:
+        var f = _fixture(String("badaddr") + String(String(bad).byte_length()))
+        var steps = Steps(f.set_hash)
+        var cells = CloudDeploys[_PathCloud, InMemoryStateStore, _Registry](
+            _PathCloud(String(bad)), InMemoryStateStore(), Creds(String(_TOKEN)), _Registry(), 0
+        )
+        var rec = CliRecorder.memory(String(""))
+        var summary = f.dir + String("/summary.md")
+        assert_equal(kci_main_with(_run(f, summary), steps, cells, rec), 3, String(bad))
+        var r = _last(rec)
+        assert_equal(r.outcome, String("REFUSED"), r.error.message)
+        assert_equal(r.steps[0].outcome, String("REFUSED"))
+        assert_equal(r.error.id, String("KCI-E-CLOUD"))
+        assert_true(r.error.message.find(String("the cell's registry address '") + String(bad)) >= 0, r.error.message)
+        assert_equal(cells.registry.reg[].call_count(), 0, "no request")
+        assert_equal(cells.cloud.logins, 0, "no registry_login")
+        _no_token(rec, summary)
 
 
 def test_a_second_image_refused_after_the_first_landed_is_partial() raises:
