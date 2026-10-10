@@ -9,29 +9,28 @@ check moves to the cheapest place that can still fail. This doc lists every chec
 which planted defect proves it can go red. The conversion then lands in slices (the last section).
 
 Status: design, nothing converted yet. Today the script runs nightly
-([ci.md](../ci.md#build-system-self-tests)) and is not the gate.
+([ci.md](../ci.md#build-system-self-tests)) and is not the gate. When the conversion is done, every
+check runs in `pr / check`, and nothing runs on a schedule.
 
 ## The three buckets
 
 1. **A target.** A "this should build" check is an ordinary target in a unit that `pr / check`
    builds. When a check only reads built artifacts (an ELF, a report, a marker), it becomes an action
    that takes them as inputs. Then it runs on the farm and sits in the gate.
-2. **A Zig unit test next to the tool.** A check of the form "our tool must refuse this input" feeds the
-   tool a bad input and asserts the exit code and the message. It lives next to the tool's source. This
-   design uses the repo's existing welded form, `zig_test` (`tools/build/mojo/toolchain.bzl`): `zig test`
-   runs as a build action that the tool's `zig_exe` consumes through `unit_tests`, so the tool cannot be
-   built unless its tests pass. A plain `buck2 test` target next to the tool would also run in
-   `pr / check`, because every `zig_exe` is in the komira cell and `build_targets.sh` runs `buck2 test`
-   over a unit's komira-cell targets. The choice between the two is a preference with a real trade-off,
-   and the CEO rules on it (see "Open decisions"). A tool that is Rust (the proto-codegen plugin) or Mojo
-   (covcheck) keeps its tests in its own language, next to it.
+2. **A welded Zig unit test next to the tool.** A check of the form "our tool must refuse this input"
+   feeds the tool a bad input and asserts the exit code and the message. It lives next to the tool's
+   source as a `zig_test` (`tools/build/mojo/toolchain.bzl`), welded into the tool: `zig test` runs as a
+   build action that the tool's `zig_exe` consumes through `unit_tests`, so the tool cannot be built
+   unless its tests pass, and a cache hit is a pass on identical inputs. This form is decided (see
+   "Decisions"). A tool that is Rust (the proto-codegen plugin) or Mojo (covcheck) keeps its tests in its
+   own language, next to it.
 3. **A scenario.** This covers only what must drive buck2 from outside: what ran and where (local: 0),
    two-build determinism, consumer-cell clones, analysis-time and load-time refusals, builds that must
    go red, and client queries (`aquery`, `cquery`, `audit`, `log what-ran`). Each scenario is **one Zig
    test target**, named, runnable alone, under `//tools/build/selftest/`. They share one small helper
-   library. Scenarios are kept out of `pr / check` by a platform constraint, and one target,
-   `//tools/build/selftest:scenarios`, runs them all on the farm-attached CI runner (see "Keeping
-   scenarios out of the gate" and "How a scenario runs").
+   library. Scenarios run in `pr / check`, like every other test, whenever a pull request touches
+   `tools/build/**`: their package is one declared check, and such a change widens the check to every
+   unit (see "Scenarios run in pr / check" and "How a scenario runs").
 
 This follows the build-architecture ruling:
 - the rules are Starlark;
@@ -40,11 +39,13 @@ This follows the build-architecture ruling:
 - rules invoke only Zig-built tools;
 - there is no host shell outside an allowlisted set of thin wrappers.
 
-Every action this design adds runs a Zig-built tool, and every CI step it adds is one `./buck2` command
-on one target. It adds no shell. Existing rule scripts that the rows below lean on (`run_check.sh`, the
+Every action this design adds runs a Zig-built tool, and every check it adds is a Buck2 target. It adds
+no CI step, no workflow logic and no shell: a scenario is a `buck2 test` target that `pr / check`
+already runs through its existing commands (`derive_checks.py`, `build_targets.sh`), and this design
+changes neither of them. Existing rule scripts that the rows below lean on (`run_check.sh`, the
 `cases.sh` actions) keep running until their own Zig port. Rows 28, 29 and 49 schedule the ports of the
-case scripts. The rest belong to the port of rule scripts under the build-architecture ruling, not to
-this design.
+case scripts. The rest, and the port of `derive_checks.py` and `build_targets.sh`, belong to the
+build-architecture ruling's own work, not to this design.
 
 A fourth outcome is **delete**: the check repeats what `pr / check` already builds. Every converted check
 has a planted mutant that turns it red, and each slice deletes its shell part in the same pull request.
@@ -85,7 +86,7 @@ Bucket: `1` target, `2` Zig (or tool-language) unit test, `3` scenario, `del` de
 ruling. Numbers are the test numbers in `run_tests.sh`. Scenario names are under `//tools/build/selftest:`.
 **Slice** is the one pull request that deletes the row's shell lines (see "Slice plan"). A mixed row
 (`3 + 2`) is deleted in the slice of its last part. Its earlier parts land in earlier slices, and the
-shell lines stay until then. Each of the 187 rows names exactly one slice. A fixture under `negative/`
+shell lines stay until then. Each of the 188 rows names exactly one slice. A fixture under `negative/`
 goes with the last row that uses it.
 
 ### run_tests.sh, its own tests
@@ -94,7 +95,7 @@ goes with the last row that uses it.
 |---|---|---|---|---|---|
 | 1 examples | the example targets build | del | already in their units | a compile error in hello.mojo reds the unit | 2 |
 | 1 run_checks | hello, hello_pkg_user, cadd_user print their expected_stdout | 1 | `[run_check]` as a validation | change hello's expected_stdout | 2 |
-| 1 check_executor | every action of the run ran remotely or was a cache hit | 3 | `local_zero` (one what-ran scenario for every former `check_executor` call, with one `buck2 test` leg) | a hybrid executor that prefers local on one platform, so the action really runs locally; a run that executes nothing must fail too, not SKIP | 5 |
+| 1 check_executor | every action of the run ran remotely or was a cache hit | 3 | the helper runner's what-ran check after every inner build (local: 0 in every scenario); `local_zero` proves that check can go red, with one `buck2 test` leg | a hybrid executor that prefers local on one platform, so the action really runs locally; a run that executes nothing must fail too, not SKIP | 5 |
 | 2 gate_red | a library whose welded test fails does not build: GATED TEST FAILED | 3 + 2 | `gate_wiring` case "library default output red"; gate runner unit test (exit, message) | `default_output = ungated` with MojoInfo still gated (scenario); runner exits 0 on a failing test (unit) | 7 |
 | 2 gate_ungated_green, sharedlib_*_ungated | the `[ungated]` fixtures compile, so the red comes from the test | 3 | precondition inside `gate_wiring` / `shared_lib_gate` (could also be a functional target depending on the sub-target) | a compile error in the fixture fails the precondition | 4 |
 | 2 gate_consumer_red | a binary on a red library fails | 3 | `gate_wiring` | the published .mojoc stops taking the PASS markers as inputs | 4 |
@@ -112,13 +113,13 @@ goes with the last row that uses it.
 | 9 buck2_run | `buck2 run` from a fresh clone: greeting, downloads, relocatable | 3 | `buck2_run_fresh_clone` | RunInfo points outside run_dir | 9 |
 | 10 exec_platforms | Mojo, toolchain and C targets resolve to linux-x86_64 | 3 | `exec_platforms` (one table with 20's C rows) | register a second platform first | 3 |
 | 11 | retired; a comment | del | nothing | n/a | 2 |
-| 12 action_platforms | an uncached build runs 7 categories with the farm property set | open | `action_properties` | an empty property set for one category | 10 |
+| 12 action_platforms | a build runs 7 categories with the farm property set | 3 | `action_properties`, under its own isolation dir (see "Why a scenario's builds are fresh") | an empty property set for one category | 10 |
 | 13 bundle_parity | functional parity target builds | del | already in the gate | n/a | 2 |
 | 14 launcher_levels | level_test; launcher level equals glibc's on the host | del + 1 | level_test stays; `level_vs_glibc`, a Zig check action on a worker that compares the launcher's level for the worker's CPU with the worker's glibc loader | launcher level one too high without AVX2 | 8 |
-| 15 bundle | layout, run paths, SHA256SUMS, a relocated and a symlinked run, the below-v3 refusal; two-build determinism | 1 + open | the layout and run legs as Zig check actions over `hello`'s bundle (functional targets); `bundle_determinism` | a timestamp in the tarball; an absolute run path in the bundle | 10 |
-| 16 formats | tarball/OCI content and its determinism rules, pinned base layers; `docker load` and `docker run` | 1 + 3 | Zig check actions over the tarball and image; `docker_run` on the CI runner | drop mtime normalization in `oci/src/tar.zig` | 9 |
+| 15 bundle | layout, run paths, SHA256SUMS, a relocated and a symlinked run, the below-v3 refusal; two-build determinism | 1 + 3 | the layout and run legs as Zig check actions over `hello`'s bundle (functional targets); `bundle_determinism` (two isolation dirs) | a timestamp in the tarball; an absolute run path in the bundle | 10 |
+| 16 formats | tarball/OCI content and its determinism rules, pinned base layers; `docker load` and `docker run` | 1 + 3 | Zig check actions over the tarball and image; `docker_run` (`docker load` and `docker run` on `pr / check`'s runner) | drop mtime normalization in `oci/src/tar.zig` | 9 |
 | 17 docs green | `//:docs`, doc_links:ok | del | already in the gate | n/a | 2 |
-| 17 doc_links_dead | the link checker names missing file, bad anchor, escape, count | 2 | unit tests of doc_links (Mojo today; Zig if ported) | accept any `#fragment` | 6 |
+| 17 doc_links_dead | the link checker names missing file, bad anchor, escape, count | 2 | unit tests of the link checker in the one Zig README tool (slice 6) | accept any `#fragment` | 6 |
 | 17 doc_pkgs | every package is in `deps(//:docs)` | open | `docs_package_coverage`, or a BXL check in the gate | a rule that does not call declares_docs | 5 |
 | 17 tc_md | `tools/build/cells` holds no Markdown | 1 | doc lint over the committed files, with the toolchains-cell file list | commit a NOTES.md there | 6 |
 | 17 named_doc_tree | no BUCK file calls doc_tree/package_docs itself | 1 | Zig lint over committed BUCK files | add `doc_tree(name = "x")` | 6 |
@@ -128,8 +129,9 @@ goes with the last row that uses it.
 | 21 location_path | `location_path:main[run_check]` | 1 | `[run_check]` as a validation | remove the staging-dir prefix map | 2 |
 | 24 darwin platform | macOS registration only when configured, resolution, compile command lines, linux actions unchanged | 3 | `darwin_platform` (cquery/aquery with `--target-platforms` darwin-arm64, one aquery diff of the linux actions) | register the macOS platform with no configuration | 11 |
 | 24 darwin Mach-O, stand-ins | the osx-arm64 closure's Mach-O load commands; the macOS scripts against stand-ins, the compile watchdog included | 1 + 2 | a Zig Mach-O check action over the unpacked closure (with the ELF tool); unit tests of each macOS script's Zig port | an absolute load path in the closure; the watchdog never fires | 11 |
-| 24 darwin build_run | build and run check of `hello` on macOS workers, only when they are configured | open | a `darwin_build_run` scenario once macOS workers are in CI; until then the leg is dropped, not skipped (a scenario never SKIPs) | n/a | 11 |
-| 25 local_default | a clone without farm config is local-only and refuses forced remote | 3 | `fresh_clone_local_default` (CI runner only: it builds locally by design) | pick a remote executor when the farm config is absent | 9 |
+| 24 darwin build_run | build and run check of `hello` and the shared-lib gates on macOS workers | 3 | `darwin_build_run`, planned in slice 11; its test target lands when the macOS build hosts are connected to CI (see "darwin_build_run") | an absolute load path in `hello`; the darwin property set dropped from the platform | 11 |
+| 25 local_default config | a clone without farm config registers one local platform and refuses forced remote (legs 1-3: configuration only, nothing executes) | 3 | `fresh_clone_local_default` (scratch clone, `HOME` in the scratch dir, no user or system buckconfig) | pick a remote executor when the farm config is absent | 9 |
+| 25 local_default builds | that clone builds toolchain actions, `hello` and the proto_check cases on the client (legs 4-6) | open | the local legs of `fresh_clone_local_default`, or deleted (see "Decisions") | local actions share scratch space | 9 |
 | 28 watchdog | cases build, no BAD, at least 15 ok | 1 | floor inside the action; later Zig supervisor tests | delete a case | 2 |
 | 29 td_declared, test_deps, args_action | plain builds | del | already in the gate | n/a | 2 |
 | 29 td_mojo_test(_args) | `buck2 test` of two mojo_tests passes | 1 | tested by the gate (move to the komira cell, or extend `build_targets.sh`) | drop test_env/data from the test info | 2 |
@@ -145,7 +147,7 @@ goes with the last row that uses it.
 | 31 lint_weld (lists) | the toolchains' lint lists are complete | 3 | `lint_weld` derives the scripts the rules run from the graph, independent of the lists (a shared constant cannot catch a drop) | drop `rust:shell_lint` from the Rust list | 9 |
 | 32 bootstrap | `./buck2` installs only the pinned release, refuses wrong sha/size | 3 (2 if ported) | `bootstrap_pin`: a made-up pin and release in a scratch dir, no network, `./buck2` run as the program under test; unit tests instead if the bootstrap becomes Zig | skip the sha256 check | 9 |
 | 33a install_gate | builds | del | already in the gate | n/a | 2 |
-| 33a/b conda, conda_set | determinism, manifests, pixi install | 1 + 3 + open | manifest checks as targets; `conda_determinism`; install on CI | n/a | 10 |
+| 33a/b conda, conda_set | determinism, manifests, pixi install | 1 + 3 | manifest checks as targets; `conda_determinism` (two isolation dirs), which also runs the pixi install | a build timestamp in the package | 10 |
 | 33 client | the runner refuses a non Linux x86_64 client | 2 | helper lib client guard unit test | accept Darwin arm64 | 11 |
 | 34 aws_codegen | green build; harness reds (golden, accepted, must_contain) | del + 2 | Zig checker replacing aws_codegen.sh, unit-tested on text | match must_contain as a substring | 8 |
 | 35 rust_test_unit | marker reads `N passed`, N >= 1 | 2 | Rust test runner (Zig port) unit test | PASS on `0 passed` | 7 |
@@ -160,14 +162,14 @@ goes with the last row that uses it.
 | 36 analysis refusals | 11 mojo_aws_client `fail()`s | 3 | `analysis_refusals_aws_client` | delete the duplicate-operation check | 3 |
 | 36 unknown_operation | the generator refuses an unknown operation | 2 (Rust) | Rust unit test in `aws_in.rs`, if absent | skip unknown operations | 2 |
 | 36 caller_test_red | a failing caller test reds the client | 3 | `gate_wiring` | leave caller tests out of the gate | 4 |
-| 36 env scan reds | getenv, pathlib spellings, t-strings, control bytes | 2 (open) | unit tests of the env scanner once extracted from aws.bzl into a tool | stop joining continuation lines | 6 |
+| 36 env scan reds | getenv, pathlib spellings, t-strings, control bytes | 2 | unit tests of the env scanner, extracted from aws.bzl into a Zig tool | stop joining continuation lines | 6 |
 | 37 platform_table | load-time table cases; a platform per registered row and none for the reserved one; `host` is the client's platform; the reserved row's key refused; the default platform's own key decides remote (legs 1-5) | 3 | `analysis_refusals_platform_table`; the key legs in `exec_platforms` | accept a pending pin; read another platform's key | 3 |
 | 37 limits | limits.tsv: the real tree passes; a limit with no marker, a marker with no row, a row with no marker, a merged row with its marker are refused (leg 6) | 2 | unit tests of the limits checker's Zig port over fixture trees (the real tree stays a target) | accept a row with no marker | 6 |
 | 37 table_vs_tree | each registered row's golden_config_hash is buck2's hash for the platform; the macOS row's applets (leg 7) | 3 | `config_hash_pin` (one scenario with 18) | a stale golden_config_hash | 5 |
 | 38 readme_examples green | builds | del | already in the gate | n/a | 2 |
-| 38 readme_marker | ok says PASS, none says NO EXAMPLE | 1 | a Zig check action over the two sub-target outputs | PASS without an example | 6 |
-| 38 raises, skip_word, shipped_relative_link | readme tool findings | 2 | readme_examples tool unit tests | accept a `mojo skip` fence | 6 |
-| 38 compile_error, unowned | README compile errors name `README.md:9` | 3 + 2 | `compile_isolation`; extractor unit test for the line marker | drop the line trailer; ignore `readme=False` | 6 |
+| 38 readme_marker | ok says one PASS line per example, none says NO EXAMPLE | 1 | a Zig check action over the sub-target outputs | PASS without an example | 6 |
+| 38 raises, skip_word, shipped_relative_link | readme tool findings | 2 | unit tests of the one Zig README tool | accept a `mojo skip` fence | 6 |
+| 38 compile_error, unowned | a README compile error names the README's own line | 3 + 2 | `compile_isolation`; Zig README tool unit test that line n of an example's program is README line n | shift a copied line off its README line; ignore `readme=False` | 6 |
 | 38 owner_base_no_readme, readme_keyword | load refusals | 3 | `analysis_refusals_readme` | remove the bool check | 3 |
 | 39 test_weld greens | the bxl passes | del + 1 | two already in the gate; move `real:ok` to functional | count a commented test_srcs | 2 |
 | 39 test_weld planted reds | the checker names each ledger and weld defect | 2 | test_weld checker (Zig port) unit tests | let a row for a welded test pass | 6 |
@@ -268,7 +270,7 @@ goes with the last row that uses it.
 | 23 absence/tests_check_can_fail | the checkers can go red | 2 | gen/tests checker (Zig port) | compare as a subset | 8 |
 | 23 proto_codegen, proto_fixture greens | build | del | already in functional | n/a | 2 |
 | 23 proto_fixture planted defects | 11 legs refused | del | `refuses_*` twins in proto_fixture_testdata | n/a | 2 |
-| 23 determinism | two builds give identical plugins, sources, package | 1 + open | in-action double run of each plugin; `determinism_proto` for compile bytes | HashMap-ordered output | 10 |
+| 23 determinism | two builds give identical plugins, sources, package | 1 + 3 | in-action double run of each plugin; `determinism_proto` for compile bytes (two isolation dirs) | HashMap-ordered output | 10 |
 | 44 public_boundary greens | lint and ok tree | del | already in the gate | n/a | 2 |
 | 44 dates, home, ip, host, email, sha, file classes | each planted spelling is a finding | 2 | public_boundary (Zig port) table tests | drop the compact date matcher | 6 |
 | 44 paths_attr | a file given through `paths` is read | 1 | a held finding in a `paths`-only file of ok | stop staging `paths` | 6 |
@@ -287,7 +289,7 @@ goes with the last row that uses it.
 | golden tree, actions | hand tools, no caller | del | nothing | n/a | 5 |
 | golden shell_lint | shellcheck of golden.sh | del | removed with golden.sh | n/a | 5 |
 | tool_lib.sh | inspect, cfg_value, props_norm, whatran_actions | 3 | helper lib, each with a fixture unit test | take the first ` (` when cutting the identity | 11 |
-| negative/spsc_ring_* | element refusal; race falsifier; no caller | open | a scenario, or delete as one-off proofs | n/a | 11 |
+| negative/spsc_ring_* | element refusal; race falsifier; no caller | del | nothing: the scripts and their fixtures are deleted | n/a | 2 |
 | negative/ fixtures | planted inputs | per row | become Zig test data or scenario fixtures with their rows | n/a | with its last row |
 
 ## Bucket-3 scenarios
@@ -296,7 +298,7 @@ All under `//tools/build/selftest/`, one Zig test target each:
 
 - Executors and platforms: `local_zero`, `action_properties`, `exec_platforms`, `uquery_select_branches`,
   `darwin_platform`.
-- Graph queries (or BXL checks in the gate, see "Open decisions"): `aquery_host_paths`,
+- Graph queries (or BXL checks in the gate, see "Decisions"): `aquery_host_paths`,
   `config_hash_pin`, `docs_package_coverage`, `test_weld_real_graph`, `golden_linux_x86_64`.
 - Analysis and load refusals (tables of target, `-c` overrides, exact message):
   `analysis_refusals_mojo`, `_aws_client`, `_gcp_client`, `_proto`, `_readme`, `_lint`,
@@ -307,53 +309,99 @@ All under `//tools/build/selftest/`, one Zig test target each:
   `coverage_analysis`, `coverage_switch`.
 - Scratch trees and clones: `consumer_cell_cache`, `buck2_run_fresh_clone`, `fresh_clone_local_default`,
   `lint_weld`, `bootstrap_pin`, `docker_run`.
-- Determinism (blocked on the forced-execution ruling): `bundle_determinism`, `conda_determinism`,
+- Determinism, each as two builds under two isolation dirs: `bundle_determinism`, `conda_determinism`,
   `determinism_proto`.
-- Not before macOS workers are in CI: `darwin_build_run`.
+- Planned now, its test target added when the macOS build hosts are connected to CI:
+  `darwin_build_run` (see "darwin_build_run").
 
-## Keeping scenarios out of the gate
+## Scenarios run in pr / check
 
-Every scenario test target carries `target_compatible_with` a constraint value,
-`//tools/build/selftest:on_runner`. Its setting, `//tools/build/selftest:runner_setting`, has no value in
-any platform of `tools/build/platforms` and no default. One platform holds it:
-`//tools/build/selftest:runner`, which is `linux-x86_64`'s constraints plus `on_runner`. This keeps the
-scenarios out of `pr / check` at both steps:
+The scenarios run in `pr / check` whenever a pull request touches `tools/build/**`. They are selected
+by the derivation that already exists. Nothing in `pr.yml`, `derive_checks.py` or `build_targets.sh`
+changes, and nothing filters them.
 
-- **derive_checks.py.** Its universe is `buck2 cquery //... + tests//functional/...` for the default
-  target platform, and its own docstring says that a target incompatible with that platform is not in
-  the universe. So no scenario target is in `tools_build` or in any other derived check.
-- **build_targets.sh.** It runs `buck2 build` and then `buck2 test` on the unit's patterns
-  (`//tools/build/...` for `tools_build`). When buck2 expands a pattern, it skips incompatible targets,
-  so neither command reaches a scenario. A unit that named a scenario label exactly would fail, because
-  an incompatible target named on the command line is an error. No declared unit may do that.
-- **What still runs in the gate.** The scenario binaries (`zig_exe`) and `//tools/build/selftest:lib`
-  stay compatible with the default platform, with their welded unit tests. So a scenario that no longer
-  compiles, or a helper unit test that fails, turns `pr / check` red. Only the test targets that drive
-  buck2 are kept out.
-- **Defense in depth.** The rule passes `--on-runner` only through
-  `select({":on_runner": [...], "DEFAULT": []})`, and the helper library refuses to run without it. The
-  planted mutant for this section is to delete `target_compatible_with` from one scenario. Then
-  `pr / check` on a `tools/build` change runs that scenario, and it goes red on the missing flag instead
-  of driving buck2 on the gate. Slice 3 shows this red.
+- **They are in the universe.** A scenario test target is compatible with the default target
+  platform, so the `cquery` of `//...` in `derive_checks.py` sees it like any other target.
+- **They are one declared check.** `release/artifacts.textproto` declares one check, `build_selftests`,
+  with the `buck2` build system and the one target pattern `//tools/build/selftest/...`. A target a
+  declared unit matches is not derived again, so the package leaves the derived check `tools_build`.
+  It has to leave it. `tools_build` is reached through reverse dependencies by changes far outside
+  `tools/build`: targets under `tools/build` depend on libraries under `src/` (`tools/build/coverage`
+  on `komira_json`, `tools/build/examples/shared_lib_mid` on seven libraries; `git grep '"//src/'
+  -- 'tools/build/**/BUCK'` lists them). In `tools_build`, a change to one of those libraries would run
+  every scenario.
+- **Only a widened change reaches `build_selftests`.** `//tools/build/ci:affected` maps each changed
+  file to the targets that own it and takes their reverse dependencies. A scenario target depends
+  only on its Zig binary, the helper library, the pinned buck2 and tools from `tools/build` and the
+  toolchains cell. It names every target its inner builds build as a string argument, never as a
+  dependency or as `data`. So no file outside those reaches it. A change to `tools/build/**` answers
+  `WIDENED` ([`rules.txt`](../../tools/build/ci/rules.txt)): every unit, `build_selftests` included,
+  and the scenarios' own code is under `tools/build`, so changing a scenario runs the scenarios. The
+  same rules widen on `.buckconfig`, the buck2 pin and wrapper, `prelude/**` and `third_party/**`, so
+  those changes run the scenarios too.
+- **`build_targets.sh` runs them.** For a reached unit it runs `buck2 build`, then `buck2 test` over
+  the unit's patterns, so `buck2 test //tools/build/selftest/...` runs every scenario, each one test.
+  A widened change builds all units in one batch over the union of their targets, so the scenarios run
+  in the same `buck2 test` as every other unit's tests. When a batch fails, kci retries unit by unit,
+  and `build_selftests` is one of those units.
+- **The proof of the selection.** Slice 3 shows `kci run --stage pr --affected-by <base> --plan`
+  listing `build_selftests` for a change to a file under `tools/build/`, and not listing it for a
+  change to one library under `src/`. The planted mutant makes that library a dependency of one
+  scenario target. The `src/` change then lists `build_selftests`.
+- **The cost.** The scenarios run inside the job's budget: `pr / check` gives kci what is left of 115
+  minutes, while the scheduled self-test job has 300 today. Each slice reports the wall time its
+  scenarios add to a widened check, and slice 3 measures how many inner daemons the runner holds at
+  once (see "How a scenario runs").
+
+### The farm connection
+
+`pr / check` runs on a GitHub-hosted runner. Its `farm-connect` step writes the farm's machine
+buckconfig (`$HOME/.buckconfig.d/farm.buckconfig`: the `[buck2_re_client]` addresses and
+`[komira_re] linux_x86_64_properties`), and the step after it fails the job when that key is empty.
+Every buck2 daemon on the runner reads that file, whatever its project root or isolation dir. So a
+scenario's inner daemon, in the checkout under its own isolation dir or in a scratch tree under
+`$TMPDIR`, executes on the same farm as the outer build. The scenario needs no flag, variable or
+secret of its own for that. On a developer's machine the farm configuration is the root's
+`.buckconfig.local`, which the scratch-tree snapshot copies.
+
+The all-remote rule (inner builds run on the farm) is checked, not assumed:
+- The guard refuses to start when the inner daemon registers an execution platform that is not
+  remote (`audit config`, `audit providers`).
+- After every inner command that executes actions, the runner reads `buck2 log what-ran` and fails on
+  any local action. So local: 0 is checked for every inner build of every scenario, not only in
+  `local_zero`. `local_zero` is the scenario that shows this check can go red (row 1 check_executor).
+
+Three things run on the runner itself, none of them a build action: each scenario's test process (a
+buck2 client, below), the `docker load` and `docker run` of `docker_run`, and the local legs of
+`fresh_clone_local_default`, which are still a proposal (see "Decisions").
+
+### The recursion guard
+
+`target_compatible_with` does not keep the scenarios out of the gate. It only keeps them out of their
+own inner builds.
+
+- Every inner command the runner issues passes `-c komira_selftest.inner=true`.
+- A `config_setting` on that key, `//tools/build/selftest:inner`, selects a constraint that no platform
+  satisfies into every scenario's `target_compatible_with`. So an inner command whose pattern covers
+  `//tools/build/selftest/` (`//...`, `//tools/build/...`) skips every scenario as incompatible
+  instead of running it a level deeper. The key is meant to change no target's configuration, and
+  `config_hash_pin` checks that: it would go red if the key moved a configuration hash.
+- **Defense in depth.** The rule passes `--nested` to the scenario binary only through
+  `select({":inner": ["--nested"], "DEFAULT": []})`, and the helper library refuses to run with it.
+  The planted mutant is to delete `target_compatible_with` from one scenario and run
+  `buck2 test //tools/build/selftest/...` as an inner command. The nested scenario then fails on
+  `--nested` instead of driving buck2. Slice 3 shows this red.
 
 Rejected options:
-- A cell of its own. It is outside the universe, so the scenario code would not even be compiled in the
-  gate until the scheduled run. Putting the scenarios in the tests cell outside `tests//functional` has
-  the same problem.
-- A label that `build_targets.sh` excludes. That is filter logic in a shell script, which the
-  build-architecture ruling refuses, and `derive_checks.py` would still list the targets.
+- A scheduled or nightly workflow, or a separate farm-attached runner. The scenarios check the build
+  system, so they gate the changes to it.
+- Leaving the scenarios in the derived check `tools_build`, which changes under `src/` reach (above).
+- A label that `build_targets.sh` excludes, or any selection in YAML or in a shell script. That is
+  filter logic outside a Buck2 target, which the build-architecture ruling refuses.
+- A cell of its own. It is outside the universe, so no check would build it.
 
-**The CI entrypoint is one target.** `//tools/build/selftest:scenarios` is a `selftest_suite` whose
-`tests` attribute names every scenario. It carries the same constraint, so it is out of the gate too.
-The scheduled workflow's step is
-
-```sh
-./buck2 test --target-platforms //tools/build/selftest:runner //tools/build/selftest:scenarios
-```
-
-The step has no logic in YAML. The one flag selects the platform that the scenarios are compatible
-with, and that flag is the opt-in. A single scenario runs the same way, with its own label. A
-developer's `./buck2 test //...` skips every scenario as incompatible.
+A single scenario runs with its own label, `./buck2 test //tools/build/selftest:<scenario>`, and all of
+them with `./buck2 test //tools/build/selftest/...`.
 
 ## How a scenario runs
 
@@ -366,27 +414,25 @@ A scenario is a `buck2 test` target that runs buck2. Four things make that work.
    - The pinned buck2 release, also an `exec_dep`: a `pinned_file` of the asset `tools/buck2` names,
      unpacked by a Zig tool. The `./buck2` script is used only by the `bootstrap_pin` scenario, as the
      program under test.
-   - The fixtures, as `data`.
-   - `--on-runner`.
+   - Fixtures as source files only, never as targets (see "Only a widened change reaches
+     `build_selftests`").
+   - `--nested`, only through the recursion guard's `select`.
 
    The rule sets `run_from_project_root = True` and a `default_executor` that is local-only.
-2. **Local execution, on the runner only.** A scenario is a client of buck2. It needs the checkout,
-   which is what it tests, and a daemon. A remote worker has neither, so the test process runs on the
-   client. This is the one local execution in the design. It is a test execution, not a build action:
-   the scenario binary and every action that an inner build runs execute on the farm. The constraint
-   above means the client is the farm-attached CI runner. Reading the checkout outside declared inputs
-   is what a scenario is for, and the rule says so by running from the project root. A build action
-   never does this.
+2. **A local test process, inner builds on the farm.** A scenario is a client of buck2. It needs the
+   checkout, which is what it tests, and a daemon. A remote worker has neither, so the test process
+   runs on the client: in `pr / check` that is the job's runner. This is the one local execution in
+   the design. It is a test execution, not a build action: the scenario binary and every action that
+   an inner build runs execute on the farm. Reading the checkout outside declared inputs is what a
+   scenario is for, and the rule says so by running from the project root. A build action never does
+   this.
 3. **No recursion into the outer daemon.** The outer `buck2 test` holds its daemon until every test
    has finished. An inner command in the same project root, under the default isolation dir, would
    reach that same busy daemon. So every inner command the runner issues in the checkout passes
    `--isolation-dir selftest_<scenario>`. That is one daemon per scenario, so scenarios that
    `buck2 test` runs in parallel share none. The helper library stops that daemon
    (`buck2 --isolation-dir selftest_<scenario> kill`) on every exit path, including failures. An
-   inner command never runs a scenario: the library refuses any `--target-platforms` naming the runner
-   platform, so every scenario target stays incompatible inside.
-   - A separate isolation dir changes output paths, so the inner builds do not hit the gate's cache
-     entries. That costs remote execution, not correctness.
+   inner command never runs a scenario (see "The recursion guard").
    - A scenario whose expectation depends on paths (`golden_linux_x86_64`, `consumer_cell_cache`, the
      clone scenarios) runs in a scratch tree instead. A scratch tree is its own project root, so it has
      its own daemon under the default isolation dir.
@@ -396,23 +442,56 @@ A scenario is a `buck2 test` target that runs buck2. Four things make that work.
    client must be Linux x86_64, and every execution platform the inner daemon registers must be remote
    (`audit config`, `audit providers`). Local execution of the outer test process does not conflict
    with this: a test executor is not a registered execution platform, and the test process runs no
-   build action. `local_zero` measures the inner builds, and what-ran for those builds must say local: 0.
-   The one exception is `fresh_clone_local_default`. Its rule attribute sets `expect = "local"`, and it
-   builds a scratch clone with no farm configuration on the runner, by design. That clone's daemon is
-   the only one that executes locally, and it exists only on the runner.
+   build action. The runner checks what-ran after every inner build (local: 0, see "The farm
+   connection"). The one exception is `fresh_clone_local_default`. Its rule attribute sets
+   `expect = "local"`, and it reads the configuration of a scratch clone with no farm configuration,
+   `HOME` in the scratch dir and no user or system buckconfig, so that clone registers only a local
+   platform by design.
+
+## Why a scenario's builds are fresh
+
+No scenario passes `--no-remote-cache`, and no rule takes a salt. A scenario's inner builds are fresh
+because each one runs under the scenario's own isolation dir, or in a scratch tree that is its own
+project root:
+
+- **Its own daemon and `buck-out`.** Nothing is reused from the outer build's daemon state or from
+  outputs the outer build materialized.
+- **Its own action keys.** Under an isolation dir every output path is under
+  `buck-out/<isolation dir>`. Output paths are part of every action's key, so no inner action has a key
+  the gate's builds computed, and none is a hit on the gate's cache entries.
+- **A hit on its own earlier run is proof.** A later run of the same scenario on identical inputs hits
+  the entries its earlier run wrote. The key covers the inputs, the command and, for a remote action,
+  the platform property set, so that hit is a pass on identical inputs, the same proof `pr / check`
+  relies on everywhere. A change the scenario is meant to see changes the keys it reaches, so those
+  actions execute.
+
+What that means for the rows that used `--no-remote-cache` before (12, 15, 33a/b, 23 determinism):
+- **`action_properties` (12)** reads the property set recorded for each action of its build. The
+  property set is part of the key, so an executed action and a hit prove the same thing. Its mutant, an
+  empty property set for one category, changes that category's keys and recorded properties, and the
+  scenario goes red.
+- **The determinism scenarios** build twice, under `selftest_<scenario>_a` and `selftest_<scenario>_b`.
+  The two builds' keys differ in their output paths, so each output tree comes from its own execution,
+  and the digest diff compares two independent executions. An output that differs only by the
+  isolation dir's path is a relocatability defect, which the scenario reports.
+- **Scratch trees** use the default isolation dir under their own root. Their unchanged actions have
+  the checkout's keys and hit the gate's entries, which is what `consumer_cell_cache` asserts. What a
+  scratch tree plants changes the keys of the actions it reaches, so those execute.
 
 ## The helper library
 
 `//tools/build/selftest:lib`, a Zig library with its own unit tests on captured fixtures (welded, so
 they run in `pr / check`). Files stay under 1000 lines. It offers only what the scenarios above use:
 
-- **Guard.** As above: `--on-runner`, a Linux x86_64 client, and every registered execution platform
+- **Guard.** As above: no `--nested`, a Linux x86_64 client, and every registered execution platform
   remote (or local for the one `expect = "local"` scenario). A refusal is a failure, never a pass.
 - **Runner.** The buck2 binary comes from the rule's `--buck2`. The runner takes argv, a cwd (the
   project root or a scratch tree), `-c` pairs, `--target-platforms` and a timeout. It always adds the
-  scenario's `--isolation-dir` in the checkout. It captures exit, stdout and stderr into a per-scenario
-  log directory under the test's `$TMPDIR`. Every failure names its log file. Every daemon it started
-  is stopped with `buck2 kill` under the same isolation dir.
+  scenario's `--isolation-dir` in the checkout, and `-c komira_selftest.inner=true` everywhere. After
+  every command that executes actions it reads what-ran and fails on a local action (local: 0). It
+  captures exit, stdout and stderr into a per-scenario log directory under the test's `$TMPDIR`. Every
+  failure names its log file. Every daemon it started is stopped with `buck2 kill` under the same
+  isolation dir.
 - **Expectations.**
   - `expectBuildOk(targets)`.
   - `expectBuildFails(target, text)`. "Built but must fail" and "failed without the text" are distinct
@@ -439,14 +518,14 @@ they run in `pr / check`). Files stay under 1000 lines. It offers only what the 
 
 ## How CI runs it
 
-Bucket 1 and bucket 2 run inside `pr / check` like any other target. They are the gate.
+All three buckets run in `pr / check`. Bucket 1 and bucket 2 run in whichever unit holds their target.
+Bucket 3 runs in the declared check `build_selftests`, which every change to `tools/build/**` reaches
+(see "Scenarios run in pr / check"). Slice 3 declares that check. No workflow gains a step.
 
-Bucket 3 runs only in the scheduled build-system self-test workflow, which is farm-attached and today
-runs `run_tests.sh`. Slice 3 adds the step above before the `run_tests.sh` step. Until slice 11, the
-workflow keeps calling `run_tests.sh` for the rows that are not converted yet. Slice 10 removes the
-pixi step, because the conda install scenario takes `//tools/build/toolchains:pixi` as a dep. Slice 11
-removes the `run_tests.sh` step, so the workflow is checkout, farm-connect, the one `./buck2 test`
-step and `./buck2 kill`.
+The scheduled build-system self-test workflow keeps calling `run_tests.sh` for the rows that are not
+converted yet. Slice 10 removes its pixi step, because the conda install scenario takes
+`//tools/build/toolchains:pixi` as a dep. Slice 11 deletes `run_tests.sh`, the workflow file and its
+section of `docs/ci.md`. After that, nothing runs on a schedule.
 
 ## Slice plan
 
@@ -471,46 +550,105 @@ after the slice of its last callee. Slice 11 deletes `run_tests.sh` last.
    - Move the report floors into the case actions.
    - Add the s2n probe `fail()` and the `branch_gate_rows` target.
    - Add the two Rust unit tests (`omit_pruned_field`, `unknown_operation`) and the window-pin check.
+   - Delete the spsc_ring falsifier scripts and their fixtures: `negative/spsc_ring_element.sh`,
+     `negative/spsc_ring_prefix_layout.sh` and `negative/spsc_ring_prefix_layout/` (two `.mojo`
+     files). Nothing calls them. The regression tests they falsified stay in `komira_spsc_ring`
+     (`test_consumer_polling_before_the_slot_store_exists`, `test_layout_guards`). What goes is the
+     script that showed the first one can fail, by a race seen in at least one of 30 runs.
 3. **Helper lib, the scenario rule and the analysis-only scenarios.**
    - `//tools/build/selftest:lib` with its unit tests.
-   - `selftest_scenario`, `selftest_suite`, the constraint and the runner platform, with the
+   - `selftest_scenario` and the recursion guard (`:inner`, `--nested`), with the
      `target_compatible_with` mutant red.
+   - The declared check `build_selftests` in `release/artifacts.textproto`, with the `--plan` proof and
+     its mutant (see "Scenarios run in pr / check").
    - `exec_platforms`, `uquery_select_branches`, and the `analysis_refusals_*` and `config_refusals`
      tables.
-   - The workflow step.
+   - The wall time these scenarios add to a widened check, and the peak number of inner daemons.
 4. **Red builds.** `gate_wiring`, `shared_lib_gate`, `compile_isolation`, `planted_red_builds`,
    `assert_level_reds`, `test_limits`, `coverage_gate_reds`.
 5. **aquery, what-ran and graph queries.**
    - `local_zero`, `assert_level_commands`, `aquery_opt_levels`, and the `coverage_*` aquery scenarios.
-   - `config_hash_pin` and the other graph-query rows, as BXL or as scenarios per the ruling.
+   - `config_hash_pin` and the other graph-query rows, as BXL or as scenarios, as "Decisions" settles it.
    - `golden_linux_x86_64`.
 6. **Lints and checkers, with unit tests.**
    - The Zig ports: test_weld, pointer_lint, src_layout, refused_imports, readme_api_coverage,
      surface_capability_matrix, public_boundary, the shared lint runner and the limits checker.
-   - The unit tests of the Mojo tools: doc_links, readme_examples and the doc JSON checker.
+   - The one Zig README tool (below), and the unit tests of the doc JSON checker.
    - The new file lints (17, 19) with the toolchains-cell file list, the readme marker check, and the
-     aws env scanner.
+     aws env scanner as a Zig tool.
+   - **The one Zig README tool.** One Zig tool, `//tools/build/readme_examples`, replaces two Mojo
+     tools: the README examples generator and the Markdown link checker `doc_links`
+     (`tools/build/inspect/buildtools/doc_links.mojo`). They share one CommonMark reader today, so the
+     two agree on what is code, and the port keeps that: one reader, one tool, with `generate`, `map`
+     and `links` commands.
+     - It ports the per-block design (one program per example, line n of a program is README line n,
+       the `mojo module` fence; #1273), not the older generator that merged every block into one
+       module. The slice lands after that change and is coordinated with it, so there is one Zig tool
+       and no second port.
+     - Its welded unit tests carry the cases of the Mojo tests (`test_examples`, `test_markdown`,
+       `test_program`, the link cases of `test_buildtools`), each with the planted defect it names.
+     - Its consumers move in the same pull request: the README gate of `mojo_library`
+       (`tools/build/mojo/defs.bzl`), the coverage build's runner (`tools/build/mojo/coverage.bzl`),
+       and the `doc_links` lint (`tools/build/lint/defs.bzl`, which runs `inspect doc-links` today).
+       `kci_validate` imports the Mojo library (`readme_installed.mojo`, `conda_install_env.mojo`) to
+       write the installed-README runner, so it runs the Zig tool's binary instead, and no Mojo copy of
+       the generator is kept. The rest of `tools/build/inspect` is not part of this slice.
 7. **Runners to Zig.**
    - The gate runner, the compile wrapper (with its watchdog cases), the Rust test runner and the
      bounded-run tool (mem_cap and test_deadline cases).
    - cov_run, the gate step, the census tool, cov_branch and the link-line comparer.
    - Each with the unit tests its rows list.
 8. **Inspection tools and generators.**
-   - The ELF and Mach-O check tool (if the proposal below is accepted), the glibc level check, and the
-     bundle and format content checks.
+   - The ELF and Mach-O check tool (if the ELF proposal in "Decisions" is accepted), the glibc level
+     check, and the bundle and format content checks.
    - The node tools.
    - The proto and aws generation wrapper, the gen/tests checker and the aws_codegen checker.
 9. **Clones and scratch trees.** `consumer_cell_cache`, `buck2_run_fresh_clone`,
    `fresh_clone_local_default`, `lint_weld`, `bootstrap_pin`, `docker_run`.
-10. **Forced execution and determinism**, once ruled on: `action_properties`, `bundle_determinism`,
+10. **Execution properties and determinism.** `action_properties`, `bundle_determinism`,
     `conda_determinism` with the conda manifest checks and the pixi install, and `determinism_proto`
-    with the in-action double run.
+    with the in-action double run. Each determinism scenario builds twice under two isolation dirs (see
+    "Why a scenario's builds are fresh").
 11. **The rest, then the harness.**
-    - Darwin (24): `darwin_platform`, and the Mach-O and stand-in checks on the slice 8 tools.
-    - The spsc_ring ruling.
-    - Then delete `run_tests.sh`, `tool_lib.sh` and the shell_lint target.
+    - Darwin (24): `darwin_platform`, the Mach-O and stand-in checks on the slice 8 tools, and
+      `darwin_build_run` as planned below.
+    - Then delete `run_tests.sh`, `tool_lib.sh`, the shell_lint target, the scheduled self-test
+      workflow and its section of `docs/ci.md`.
     - Replace `tools/build/tests/README.md` with a short page: what the tests cell holds (fixtures for
       targets and scenarios), how to run a scenario, and a link to this inventory.
+
+### darwin_build_run
+
+Row 24's build and run leg on macOS. It is planned now and lands in slice 11. Its test target is added
+once the macOS build hosts are connected to CI.
+
+What is known now (`functional/darwin/check.sh` section 7, `.buckconfig.local.example`):
+- The darwin-arm64 execution platform is registered only when `[komira_re] darwin_arm64_properties`
+  and `[komira_re] darwin_macos_hosts` are both set. `darwin_platform` covers the unset case and a
+  placeholder set in `pr / check`, with no macOS worker.
+- What the scenario asserts, in the checkout under its isolation dir, with `--target-platforms`
+  darwin-arm64:
+  - every host identity the workers report (`tests//functional/darwin:host_census`) is listed in
+    `darwin_macos_hosts`;
+  - `//tools/build/examples:hello` and its run check build and pass on the macOS workers, with the
+    configured property set in what-ran and local: 0;
+  - the binary is an arm64 Mach-O for macOS 11.0 whose only run path is `@loader_path/lib` and which
+    loads only the runtime library and the system (read by the slice 8 Mach-O tool);
+  - the `mojo_shared_lib` examples, their gates and `libgate_ok`'s welded test pass there;
+  - a compile whose host list names no worker is refused on the worker (exit 2).
+- Mutants: an absolute load path in `hello`; the property set dropped from the darwin platform; a host
+  list that leaves out a worker that reports itself.
+- What lands in slice 11: the scenario binary, its expectations, and their welded unit tests over
+  what-ran, aquery and Mach-O output captured from a run on the macOS build hosts. The binary builds,
+  and its unit tests run, in every widened `pr / check`.
+
+What waits for the macOS build hosts in CI:
+- `farm-connect` writes only `linux_x86_64_properties` today. It gains the darwin property set and the
+  host list as inputs, and the `pr / check` step that refuses a runner without the farm checks them too.
+- The scenario's test target lands in the same pull request as that change. A scenario never SKIPs,
+  so the target is not added before the hosts can serve it.
+- Until then, section 7 of `darwin/check.sh` is the only runner of this leg, and it SKIPs wherever the
+  darwin keys are unset. The scheduled workflow does not set them.
 
 ### Shell files and the slice that deletes them
 
@@ -533,7 +671,7 @@ Sourced sections:
 | `node_tests.sh` | 8 |
 | `golden/golden.sh` | 5 (with its call in `platform_table/check.sh`) |
 | `negative/lint_weld.sh` | 9 |
-| `negative/spsc_ring_element.sh`, `negative/spsc_ring_prefix_layout.sh` | 11 |
+| `negative/spsc_ring_element.sh`, `negative/spsc_ring_prefix_layout.sh` (with `negative/spsc_ring_prefix_layout/`) | 2 |
 
 The 16 `functional/` drivers the harness calls:
 
@@ -582,32 +720,37 @@ The Markdown of the tests cell:
 and no slice changes it. Its action runs a busybox shell script, so it falls under the rule-script work
 of the build-architecture ruling: a Zig probe, or an allowlisted entry.
 
-## Open decisions
+## Decisions
 
-- **Bucket 2 form.** The direction says plain `buck2 test` targets next to the tool. Both forms run in
-  `pr / check`. The trade-off:
-  - **Welded `zig_test`** (the repo's precedent, and this design's preference). The tool cannot be
-    built unless its tests pass, so every build that uses the tool runs them or reuses them from the
-    cache. A cache hit is proof of a pass on identical inputs. The cost is that a red test blocks every
-    build that uses the tool, unrelated work included, and the failure is reported as a build failure,
-    not as a test result.
-  - **A plain `buck2 test` target.** It reports per test through `buck2 test`, and a red test does not
-    stop other builds. But it runs only when a change reaches the tool's derived check, and a consumer
-    can be built on a tool whose tests are red. Whether a passing test result is reused across runs
-    depends on the test executor. A welded build action is always cached by its digest.
-- **Forcing execution with the cache on.** Rows 12, 15, 33a/b and proto determinism use
-  `--no-remote-cache` and `--isolation-dir` today. The proposal is a salt (`-c selftest.salt=<nonce>`)
-  that every rule folds into its action keys. Until that is ruled on, slice 10 cannot land as written.
+Decided (2026-10-10):
+- **Scenarios run in `pr / check`** whenever a pull request touches `tools/build/**`, which already
+  widens the check. Not on a schedule, and not on a separate runner (see "Scenarios run in pr / check").
+- **Bucket 2 is a welded `zig_test`.** The tool cannot be built unless its tests pass, so every build
+  that uses the tool runs them or reuses them from the cache, and a cache hit is a pass on identical
+  inputs. The accepted cost: a red test blocks every build that uses the tool, unrelated work included,
+  and is reported as a build failure, not as a test result.
+- **No salt and no `--no-remote-cache`.** Each scenario's inner builds run under its own isolation dir
+  or in a scratch tree, so they execute fresh (see "Why a scenario's builds are fresh").
+- **doc_links and readme_examples move to Zig** as one tool, coordinated with the per-block README
+  examples change (slice 6).
+- **`darwin_build_run` is planned now** (slice 11, "darwin_build_run"). It is not dropped; its test
+  target is added when the macOS build hosts are connected to CI.
+- **The spsc_ring falsifier scripts and their fixtures are deleted** (slice 2).
+- **The build-architecture ruling:** every CI entrypoint is a Buck2 target, the rules invoke Zig tools
+  only, and there is no shell. So the aws env scanner, once extracted from aws.bzl, is a Zig tool.
+
+Still proposals:
 - **ELF inspection as bucket 1.** The direction lists ELF inspection under scenarios. Rows 6, 8
   runtime_run_paths, 26 exports, 20 C++ runtime and 22 host floor read only built artifacts. An in-build
-  Zig ELF check puts them in the gate and drops the host `readelf`. This is a proposed deviation.
+  Zig ELF check puts them in the gate and drops the host `readelf`.
 - **Graph queries as BXL in the gate.** Rows 5, 17 doc_pkgs, 18 and 39 real_red could run as BXL checks,
   following the test_weld precedent in `build_targets.sh`, instead of as scenarios.
-- **Scope of the Zig port.** doc_links and readme_examples are Mojo tools today. The aws env scanner is
-  Mojo text generated in aws.bzl. The Rust plugin's tests stay in Rust.
-- **darwin build and run (24).** The leg runs only when macOS workers are configured, which CI does not
-  have today. It is dropped, not skipped, until they are, and then it returns as `darwin_build_run`.
+- **The local legs of `fresh_clone_local_default` (row 25, legs 4-6).** They build on the client by
+  design: toolchain actions, `hello` and the proto_check cases, in a clone with no farm configuration.
+  In `pr / check` that client is the job's runner, and the all-remote rule holds the inner builds to
+  the farm. The proposal is to keep them as the one declared exception (`expect = "local"`), run only
+  where the platform-set CI marker says the client is a CI runner, and failing, never skipping,
+  anywhere else.
+  The alternative is to delete them and keep legs 1-3, which execute nothing.
 - **lint_weld after the port.** Once the rules run no shell, the scenario re-aims at whatever lint stays
   welded, or goes away.
-- **The spsc_ring scripts.** Nothing runs them. Keep them as scenarios or delete them as one-off proofs
-  (slice 11 either way).
