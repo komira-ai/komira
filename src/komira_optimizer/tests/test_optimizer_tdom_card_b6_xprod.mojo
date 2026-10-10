@@ -12,8 +12,8 @@
 # under-estimates the join multiplier for disconnected pieces, and the
 # numerator's full base-card product over-counts the disconnected
 # relations' rows. Q9's `{ps,s,n}` cardinality overshoots DuckDB's ~898K to
-# a Cartesian-scale estimate, which would make a DPccp enumerator (not in
-# this tree) pick a degenerate partition over partition A.
+# a Cartesian-scale estimate, which would make DPccp (`optimizer_dpccp`)
+# pick a degenerate partition over partition A.
 #
 # This test file pins:
 #   1. The `_is_cross_product_shaped_subset` helper detection (unit).

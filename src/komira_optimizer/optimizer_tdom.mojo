@@ -30,8 +30,8 @@
 # Outputs:
 #   * `TdomGraph` — per-equivalence-class TDOMs + `edge_to_class` mapping.
 #     Read by `estimate_with_tdom` (`optimizer_tdom_cost.mojo`) for each
-#     cost-of-pair lookup; the DP join enumerator that would issue those
-#     lookups is not in this tree.
+#     cost-of-pair lookup, and by `estimate_cardinality_with_set`
+#     (`optimizer_tdom_card.mojo`), which DPccp (`optimizer_dpccp`) calls.
 #
 # Worked Q5 example:
 #   6 per-column edges produce 5 equivalence classes:
