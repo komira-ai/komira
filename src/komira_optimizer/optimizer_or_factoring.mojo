@@ -26,11 +26,13 @@
 #   (P AND Q1) OR (P AND Q2) OR (P AND Q3)  is logically equivalent to
 #   P AND (Q1 OR Q2 OR Q3)
 #
-# Conservative on non-pure expressions: any branch with EXPR_AGG_FN /
-# EXPR_WINDOW_FN / EXPR_WHEN halts the rewrite for that OR (sub-branches
-# still get a chance via the recursive descent).
+# Conservative on non-pure expressions: a branch with EXPR_AGG_FN /
+# EXPR_WINDOW_FN / EXPR_WHEN at its root or under binary operators halts the
+# rewrite for that OR (sub-branches still get a chance via the recursive
+# descent).
 #
-# Slot in the pipeline: BEFORE `push_predicates_down` so the newly
+# Pass order: komira_optimizer has no driver that orders its passes. This
+# pass is designed to run BEFORE `push_predicates_down` so the newly
 # hoisted conjuncts become predicate-pushdown candidates. Same shape as
 # `decompose_symmetric_or` -- see `optimizer_symmetric_or.mojo`.
 #
@@ -349,13 +351,12 @@ def _collect_and_conjuncts_into(var expr: Expr, mut out: ExprArray):
 def _expr_has_non_pure(expr: Expr) -> Bool:
     """True if the tree contains an aggregate-fn / window-fn / when expr.
 
-    Conservative on subqueries: if any branch contains
-    a non-pure expression (subquery, UDF, etc.), bail out. Komira has
-    no UDFs at this layer; the non-pure shapes that actually appear
-    are EXPR_AGG_FN (scalar broadcast), EXPR_WINDOW_FN (window functions),
-    and EXPR_WHEN (CASE/WHEN). All three SHOULD have been rewritten by
-    earlier optimizer phases, but defensively we bail out if we still
-    see one.
+    The walk descends through binary operators only: one of the three
+    under any other node (unary, cast, alias, string op, ...) is not
+    seen. The tags checked are EXPR_AGG_FN (scalar broadcast),
+    EXPR_WINDOW_FN (window functions) and EXPR_WHEN (CASE/WHEN). Other
+    shapes that may not be pure (EXPR_UDF_CALL, EXPR_CORRELATED_SUBQUERY)
+    are not checked: a branch holding one is factored like any other.
     """
     if expr.tag == EXPR_AGG_FN:
         return True
@@ -365,7 +366,7 @@ def _expr_has_non_pure(expr: Expr) -> Bool:
         return True
     if expr.tag == EXPR_BINARY_OP:
         return _expr_has_non_pure(expr.binary_left_ref()) or _expr_has_non_pure(expr.binary_right_ref())
-    # Unary / cast / alias / col_ref / literal / string_op: pure.
+    # Any other tag answers False without descending into it.
     return False
 
 
