@@ -138,13 +138,23 @@ def _parts_and_one_byte_changes(tok: String) -> List[String]:
 
 def test_near_misses_are_not_tokens() raises:
     """Guards the vectors below: each differs from its row, all but the first
-    three keep the row's length, one `#` change exists per offset, and none
-    contains a token, so a NONE expected for it is the right answer."""
+    three keep the row's length, vector 5 + k is the row with only its byte
+    at offset k replaced by `#` (checked against slices of the row, not
+    against the helper that built it), and none contains a token, so a NONE
+    expected for it is the right answer."""
     var t = plan_refusal_tokens()
     for i in range(len(t)):
         var tok = String(t[i].token)
+        var n = tok.byte_length()
         var v = _parts_and_one_byte_changes(tok)
-        assert_equal(len(v), 5 + tok.byte_length(), "variants of " + tok)
+        assert_equal(len(v), 5 + n, "variants of " + tok)
+        for k in range(n):
+            var w = v[5 + k]
+            var at = "offset " + String(k) + " of " + tok + ": " + w
+            assert_equal(w.byte_length(), n, "length at " + at)
+            assert_equal(String(w[byte = k : k + 1]), String("#"), "no # at " + at)
+            assert_equal(String(w[byte=0:k]), String(tok[byte=0:k]), "prefix at " + at)
+            assert_equal(String(w[byte = k + 1 : n]), String(tok[byte = k + 1 : n]), "suffix at " + at)
         for k in range(len(v)):
             assert_true(v[k] != tok, "variant " + String(k) + " of " + tok)
             if k >= 3:
