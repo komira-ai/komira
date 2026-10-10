@@ -2307,7 +2307,7 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         # Returns the committed `AppendResult{chunk_seq, base_offset, last_offset}`
         # (etag/attempts unused by the caller) when found, else None.
         #
-        # This is UNLOCKED (the gate is held by `append_idempotent`'s wrlock).
+        # This takes no gate (`append_idempotent` runs lock-free).
         # We decode the manifest body via this module's chunk codec, then read
         # the broker's producer trailer directly off the consumer body bytes
         # (the trailer offsets are stable; see the broker manifest body's wire layout).
@@ -2336,15 +2336,28 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             try:
                 c = self._store.get(ck)
             except e:
-                if _is_not_found(String(e)):
-                    # A hole at/above log_start is a torn lineage; but here we
-                    # are only probing for the batch identity — treat a missing
-                    # chunk as "not this one" and continue (the authoritative
-                    # `_recover_head_by_list` already fail-louds on a real torn
-                    # tail before we get here).
-                    seq += Int64(1)
-                    continue
-                raise e^
+                # Skipping an unreadable chunk would number every later chunk
+                # (and the ack) too low. A 404 here is a chunk reaped after the
+                # `_LOG_START` read (it moved past `seq`: restart from it, seq
+                # strictly forward) or a torn lineage (refuse, as
+                # `_recover_head_by_list` does).
+                if not _is_not_found(String(e)):
+                    raise e^
+                var now = self._read_log_start_inner()
+                if now.log_start_seq <= seq:
+                    raise Error(
+                        "CasManifestStore: batch scan found a MISSING committed"
+                        " chunk at seq "
+                        + String(seq)
+                        + " (>= log_start_seq "
+                        + String(now.log_start_seq)
+                        + ") — torn manifest lineage, refusing to renumber."
+                        " prefix="
+                        + self._prefix
+                    )
+                next_off = now.log_start_offset
+                seq = now.log_start_seq
+                continue
             var rc = decode_chunk_record_count(c)
             var consumer_body = decode_chunk_body(c)
             var hit = _body_matches_producer_batch(
@@ -3142,7 +3155,7 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             var new_encoded = encode_chunk(new_body, old_rc)
             var check_rc = decode_chunk_record_count(new_encoded)
             if check_rc != old_rc:
-                _cas_gate_unlock()
+                # The `except` below releases the gate (once).
                 raise Error(
                     "CasManifestStore.rewrite_chunk_body: record_count guard"
                     " — refusing to renumber chunk "
@@ -3502,25 +3515,16 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         `LogStart.zero()` (offset 0, seq 0, empty etag) if the partition has
         never been truncated (the object is absent). The empty etag signals
         the next advance must CREATE (If-None-Match), not CAS."""
-        # READ verb -> SHARED (read) lock.
+        # READ verb -> SHARED lock, released exactly once on every path (a
+        # second release wedges every later write-locked verb in the process).
         _cas_gate_rdlock()
         try:
-            var lk = log_start_key(self._prefix)
-            try:
-                var raw = self._store.get(lk)
-                var meta = self._store.head(lk)
-                var ls = decode_log_start(raw, meta.etag)
-                _cas_gate_unlock()
-                return ls^
-            except e:
-                if _is_not_found(String(e)):
-                    _cas_gate_unlock()
-                    return LogStart.zero()
-                _cas_gate_unlock()
-                raise e^
-        except e2:
+            var ls = self._read_log_start_inner()
             _cas_gate_unlock()
-            raise e2^
+            return ls^
+        except e:
+            _cas_gate_unlock()
+            raise e^
 
     def advance_log_start(
         mut self,
@@ -3585,25 +3589,20 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         `cas_catalog_sidecar` then CREATEs it via If-None-Match. The blob is
         the OPAQUE consumer payload (the table store's serialized TableCatalog); the
         CAS substrate round-trips it verbatim. READ verb -> SHARED (read)
-        lock; exception-safe unlock (no `finally` in 1.0.0b1)."""
+        lock, released exactly once on every path (no `finally` in 1.0.0b1)."""
         _cas_gate_rdlock()
         try:
             var ck = catalog_key(self._prefix)
-            try:
-                var raw = self._store.get(ck)
-                var meta = self._store.head(ck)
-                var sc = CatalogSidecar(True, raw^, String(meta.etag))
-                _cas_gate_unlock()
-                return sc^
-            except e:
-                if _is_not_found(String(e)):
-                    _cas_gate_unlock()
-                    return CatalogSidecar.absent()
-                _cas_gate_unlock()
-                raise e^
-        except e2:
+            var raw = self._store.get(ck)
+            var meta = self._store.head(ck)
+            var sc = CatalogSidecar(True, raw^, String(meta.etag))
             _cas_gate_unlock()
-            raise e2^
+            return sc^
+        except e:
+            _cas_gate_unlock()
+            if _is_not_found(String(e)):
+                return CatalogSidecar.absent()
+            raise e^
 
     def cas_catalog_sidecar(
         self, blob: List[UInt8], expected_etag: String
