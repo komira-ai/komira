@@ -1,0 +1,23 @@
+load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
+
+# The notify wire (`komira/notify/v1/notify.proto`, package `komira.notify.v1`):
+# a wake request for a principal (`NotifyRequest`, answered by `NotifyResult`),
+# a device registration on a user's behalf (`RegisterDevice`, answered by
+# `Device`), and the error envelope. The routes and statuses are
+# docs/design/notify_wire.md; komira_push holds the caller side.
+#
+#   from komira_notify_proto.notify import NotifyRequest, NotifyResult, ...
+#
+# It imports no other `.proto`. The welded test pins every message's proto3
+# JSON text and the request's field numbers by exact bytes, and that the strict
+# decoder refuses a `source` key, which the wire leaves to the notify service.
+mojo_proto_library(
+    name = "komira_notify_proto",
+    srcs = ["notify.proto"],
+    import_prefix = "komira/notify/v1",
+    deps = ["//src/komira_proto_codec:komira_proto_codec"],
+    test_srcs = [
+        "tests/test_notify_wire.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
