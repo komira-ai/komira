@@ -22,11 +22,28 @@
 #       in an OCI index; a body with a `manifests` array is an index.
 #   (4) test_untyped_manifest_without_media_type_field — a body with neither
 #       `mediaType` nor `manifests` keeps the OCI image manifest default.
+#   (5) test_untyped_index_with_empty_media_type — `"mediaType": ""` names
+#       no type; the `manifests` array still makes the body an index. A copier
+#       that returns the empty string drops every child and PUTs with an empty
+#       content-type.
+#   (6) test_untyped_index_with_non_string_media_type — `"mediaType": 5` is
+#       not a type either; the body is still an index and the copy succeeds.
+#   (7) test_untyped_manifest_with_non_array_manifests — `"manifests": null`
+#       or `{}` beside `config` and `layers` is an image manifest: its blobs
+#       are checked and the PUT declares an OCI image manifest, not an index.
+#   (8) test_typed_manifest_header_wins_over_body — the body is consulted
+#       ONLY when the header is absent: a Docker image manifest served WITH its
+#       Content-Type and a body that carries no `mediaType` is PUT declared as
+#       the Docker type the header names.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
 
-from komira_http_core.codec.types import HTTP_METHOD_GET, HTTP_METHOD_PUT
+from komira_http_core.codec.types import (
+    HTTP_METHOD_GET,
+    HTTP_METHOD_HEAD,
+    HTTP_METHOD_PUT,
+)
 
 from komira_oci.oci_copy import OciCopier
 from komira_oci.oci_digest import digest_of_bytes
@@ -147,7 +164,7 @@ def _assert_put(
     assert_equal(
         log.call_content_type(i),
         media,
-        "the PUT declares the type the manifest's own body names",
+        "the PUT declares the source header's type, else the body's own",
     )
 
 
@@ -281,9 +298,127 @@ def test_untyped_manifest_without_media_type_field() raises:
     print("  test_untyped_manifest_without_media_type_field: PASS")
 
 
+def _untyped_index_with_media_value(media_json: String, seed: String) raises:
+    """An untyped index whose `mediaType` is the raw JSON `media_json` (a value
+    that names no media type) and whose `manifests` array has one child."""
+    var cfg = String("sha256:") + (seed + "1") * 32
+    var lay = String("sha256:") + (seed + "2") * 32
+    var child = _bytes(
+        _manifest_body(_media_field(MEDIA_TYPE_OCI_MANIFEST), cfg, lay)
+    )
+    var child_digest = digest_of_bytes(Span(child))
+    var kids = List[String]()
+    kids.append(child_digest.copy())
+    var index = _bytes(
+        _index_body(String('"mediaType":') + media_json + String(","), kids)
+    )
+    var index_digest = digest_of_bytes(Span(index))
+
+    var t = ScriptedOciTransport()
+    t.queue(_untyped(index.copy(), index_digest.copy()))
+    t.queue(_typed(child.copy(), child_digest.copy(), MEDIA_TYPE_OCI_MANIFEST))
+    t.queue(_present())
+    t.queue(_present())
+    t.queue(_created(child_digest.copy()))
+    t.queue(_created(index_digest.copy()))
+
+    var copier = _copy(t^, index_digest)
+    ref log = copier.transport()
+    assert_equal(
+        log.call_count(),
+        6,
+        "a mediaType that names no type does not hide the manifests array:"
+        " GET index + GET child + 2 blob HEADs + 2 PUTs",
+    )
+    assert_true(_fetched(log, child_digest), "the index's child was fetched")
+    _assert_put(log, 4, child_digest, MEDIA_TYPE_OCI_MANIFEST)
+    _assert_put(log, 5, index_digest, MEDIA_TYPE_OCI_INDEX)
+
+
+def test_untyped_index_with_empty_media_type() raises:
+    _untyped_index_with_media_value(String('""'), String("f"))
+    print("  test_untyped_index_with_empty_media_type: PASS")
+
+
+def test_untyped_index_with_non_string_media_type() raises:
+    _untyped_index_with_media_value(String("5"), String("9"))
+    print("  test_untyped_index_with_non_string_media_type: PASS")
+
+
+def _untyped_manifest_with_manifests_value(
+    manifests_json: String, seed: String
+) raises:
+    """An untyped image manifest (config + layers, no `mediaType`) that also
+    carries `"manifests": <manifests_json>`, a value that is not an array."""
+    var cfg = String("sha256:") + (seed + "1") * 32
+    var lay = String("sha256:") + (seed + "2") * 32
+    var body = _bytes(
+        _manifest_body(
+            String('"manifests":') + manifests_json + String(","), cfg, lay
+        )
+    )
+    var digest = digest_of_bytes(Span(body))
+
+    var t = ScriptedOciTransport()
+    t.queue(_untyped(body.copy(), digest.copy()))
+    t.queue(_present())
+    t.queue(_present())
+    t.queue(_created(digest.copy()))
+
+    var copier = _copy(t^, digest)
+    ref log = copier.transport()
+    assert_equal(
+        log.call_count(),
+        4,
+        "a manifests field that is not an array does not make an index:"
+        " GET manifest + 2 blob HEADs + PUT",
+    )
+    assert_equal(
+        log.call_method(1), HTTP_METHOD_HEAD, "the config blob is checked"
+    )
+    assert_true(
+        log.call_path(1).find(String("/blobs/") + cfg) >= 0,
+        "the first HEAD is the config blob",
+    )
+    assert_true(
+        log.call_path(2).find(String("/blobs/") + lay) >= 0,
+        "the second HEAD is the layer blob",
+    )
+    _assert_put(log, 3, digest, MEDIA_TYPE_OCI_MANIFEST)
+
+
+def test_untyped_manifest_with_non_array_manifests() raises:
+    _untyped_manifest_with_manifests_value(String("null"), String("7"))
+    _untyped_manifest_with_manifests_value(String("{}"), String("8"))
+    print("  test_untyped_manifest_with_non_array_manifests: PASS")
+
+
+def test_typed_manifest_header_wins_over_body() raises:
+    var cfg = String("sha256:") + "61" * 32
+    var lay = String("sha256:") + "62" * 32
+    var body = _bytes(_manifest_body(String(""), cfg, lay))
+    var digest = digest_of_bytes(Span(body))
+
+    var t = ScriptedOciTransport()
+    t.queue(_typed(body.copy(), digest.copy(), MEDIA_TYPE_DOCKER_MANIFEST))
+    t.queue(_present())
+    t.queue(_present())
+    t.queue(_created(digest.copy()))
+
+    var copier = _copy(t^, digest)
+    ref log = copier.transport()
+    assert_equal(log.call_count(), 4, "GET manifest + 2 blob HEADs + PUT")
+    _assert_put(log, 3, digest, MEDIA_TYPE_DOCKER_MANIFEST)
+    print("  test_typed_manifest_header_wins_over_body: PASS")
+
+
 def main() raises:
     test_untyped_oci_index_copies_every_child()
     test_untyped_docker_manifest_list_is_walked()
     test_untyped_index_without_media_type_field()
     test_untyped_manifest_without_media_type_field()
+    test_untyped_index_with_empty_media_type()
+    test_untyped_index_with_non_string_media_type()
+    test_untyped_manifest_with_non_array_manifests()
+    test_typed_manifest_header_wins_over_body()
     print("test_oci_copy_untyped_manifest: ALL PASS")
