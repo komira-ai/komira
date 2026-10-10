@@ -66,8 +66,10 @@ comptime _WF: String = (
     "          ts-client-id: ${{ vars.TS_CLIENT_ID }}\n"
     "      - name: kci\n"
     "        run: |\n"
+    "          if ! git rev-parse --verify --quiet HEAD^2 > /dev/null || ! change_base=$(git rev-parse --verify HEAD^1);"
+    " then echo \"::error::the change base is the merge commit's first parent, and HEAD is not a merge commit\"; exit 1; fi\n"
     "          \"$RUNNER_TEMP/kci/kci\" run --stage pr \\\n"
-    "            --affected-by ${{ github.event.pull_request.base.sha }} \\\n"
+    "            --affected-by \"$change_base\" \\\n"
     "            --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
 )
 
@@ -123,9 +125,9 @@ def test_the_one_workflow_agrees() raises:
 
 
 def test_the_affected_by_spellings_kci_accepts() raises:
-    # quoted, `=`, and the spacing inside ${{ }} aside
-    _agrees(String(_MACHINE), _wf(String("--affected-by ${{ github.event.pull_request.base.sha }}"), String("--affected-by \"${{ github.event.pull_request.base.sha }}\"")))
-    _agrees(String(_MACHINE), _wf(String("--affected-by ${{ github.event.pull_request.base.sha }}"), String("--affected-by=${{github.event.pull_request.base.sha}}")))
+    # unquoted, and `=`
+    _agrees(String(_MACHINE), _wf(String("--affected-by \"$change_base\""), String("--affected-by $change_base")))
+    _agrees(String(_MACHINE), _wf(String("--affected-by \"$change_base\""), String("--affected-by=$change_base")))
     # the fork condition inside ${{ }}
     _agrees(
         String(_MACHINE),
@@ -492,18 +494,11 @@ def test_a_pull_request_job_holds_minimal_permissions() raises:
     )
 
 
-def test_a_pull_request_job_passes_the_base_commit() raises:
+def test_a_pull_request_job_passes_the_change_base() raises:
+    # every other branch of the change base: test_ci_pr_change_base.mojo
     _reports(
-        _wf(String("            --affected-by ${{ github.event.pull_request.base.sha }} \\\n"), String("")),
-        String("job 'check': R6: stage 'pr' is a PULL_REQUEST stage, so its `kci run` carries --affected-by ${{ github.event.pull_request.base.sha }}"),
-    )
-    _reports(
-        _wf(String("${{ github.event.pull_request.base.sha }}"), String("origin/main")),
-        String("R6: stage 'pr' is a PULL_REQUEST stage: `--affected-by origin/main`; it passes ${{ github.event.pull_request.base.sha }}"),
-    )
-    _reports(
-        _wf(String("github.event.pull_request.base.sha"), String("github.event.pull_request.head.sha")),
-        String("`--affected-by ${{ github.event.pull_request.head.sha }}`; it passes"),
+        _wf(String("            --affected-by \"$change_base\" \\\n"), String("")),
+        String("job 'check': R6: stage 'pr' is a PULL_REQUEST stage, so its `kci run` carries --affected-by \"$change_base\" after the line `if ! git rev-parse"),
     )
 
 
@@ -830,7 +825,7 @@ def test_check_running_workflow_accepts_the_workflow() raises:
     if len(f) != 0:
         raise Error(String("unexpected findings: ") + _all(f))
     var drift = check_running_workflow(
-        g, files, _wf(String("${{ github.event.pull_request.base.sha }}"), String("HEAD~1")), String("release/machine.textproto"), True
+        g, files, _wf(String("\"$change_base\""), String("HEAD~1")), String("release/machine.textproto"), True
     )
     assert_equal(len(drift), 1)
 
