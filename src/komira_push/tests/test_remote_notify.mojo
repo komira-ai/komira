@@ -390,7 +390,7 @@ def test_the_base_url_rules() raises:
     assert_equal(_url_err(String("http://notify.example")), loopback)
     assert_equal(_url_err(String("http://127.0.0.1.example:80")), loopback)
     assert_equal(
-        _url_err(String("http://[::1:9")),
+        _url_err(String("http://[localhost")),
         String("komira_push: the notify URL host is malformed"),
     )
     assert_equal(
