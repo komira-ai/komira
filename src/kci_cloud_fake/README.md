@@ -20,7 +20,9 @@ Both deploy into a `FakeStore` that keeps every object's state, labels as
 written and a call log. Every object is stamped by the standard label rule
 and carries the `kci-retention` mark. Constructor arguments give a faulty
 variant: the k-th mutating call refused once, reads that lag, objects made
-outside kci before it ran. Nothing here talks to a real cloud.
+outside kci before it ran; and, on `FakeCloud`, a `trust_check` that raises,
+live reads of chosen nodes that raise, a lowering that hands a node to
+another resource, and a `realize` that raises. Nothing here talks to a real cloud.
 
 ## Examples
 

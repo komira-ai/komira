@@ -4,10 +4,12 @@ The OCI image arm of a kci PUBLISH step. `publish_layout` pushes one built
 OCI image layout to `registry/repository`, tagged with the full revision id,
 through a `komira_oci` `LayoutPusher` over any `OciTransport`. Before any
 registry request it checks that the revision is a full commit id, that the
-platform is one kci releases, that the layout on disk reads and verifies, and
-that the layout's own `os/arch` is the step's platform in OCI spelling; any
-failure is `REFUSED` with nothing sent. With `plan` set it stops after these
-checks and sends nothing.
+platform is one kci releases, that the layout on disk reads and verifies,
+that its image manifest digest is the expected one (the digest the release
+set names for the member: a layout that changed after the set was verified is
+refused with `KCI-E-MEMBER`), and that the layout's own `os/arch` is the
+step's platform in OCI spelling; any failure is `REFUSED` with nothing sent.
+With `plan` set it makes the same checks and sends nothing.
 
 The push's end state maps onto `kci_api`'s outcome words, error ids and exit
 numbers: uploaded or tag added is `SUCCEEDED`; a tag that already names the
@@ -18,7 +20,8 @@ result document. The arm never raises, and an error message carries the
 pusher's detail, which holds no credential.
 
 The push protocol itself (blobs, manifest by digest, tag, read back,
-retries) is `komira_oci`'s. This package is not wired into `kci run`.
+retries) is `komira_oci`'s. `kci run` calls `publish_layout` for a PUBLISH
+step into a cell (`kci_cli`), once per image of the release set.
 
 ## Examples
 
@@ -51,22 +54,22 @@ var rev = "3f2a9c1d8b7e6f5a4c3b2a1908f7e6d5c4b3a291"
 var pusher = LayoutPusher[FakeOciRegistry](
     FakeOciRegistry("registry.example.test"), OciAuth.basic("publisher", "not-a-real-secret"), False, 0
 )
-var first = publish_layout(pusher, dir, "registry.example.test", "team/app", rev, "linux-x86_64", False)
+var first = publish_layout(pusher, dir, digest, "registry.example.test", "team/app", rev, "linux-x86_64", False)
 assert_equal(first.outcome, "SUCCEEDED")
 assert_equal(first.exit_code(), 0)
 assert_equal(first.artifact.artifact_type, ARTIFACT_TYPE_OCI)
 assert_equal(first.artifact.file, "registry.example.test/team/app@" + digest)
 assert_equal(pusher.transport().tag_digest("team/app", rev), digest)
 
-var again = publish_layout(pusher, dir, "registry.example.test", "team/app", rev, "linux-x86_64", False)
+var again = publish_layout(pusher, dir, digest, "registry.example.test", "team/app", rev, "linux-x86_64", False)
 assert_equal(again.outcome, "NOOP")
 assert_equal(again.exit_code(), 0)
 assert_true(again.ok())
 ```
 
-An abbreviated revision, a platform kci does not release, or a layout built
-for another CPU is refused before any request; `plan` checks the layout and
-sends nothing:
+An abbreviated revision, a platform kci does not release, a layout that is
+not the expected digest, or a layout built for another CPU is refused before
+any request; `plan` checks the layout and sends nothing:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo
@@ -80,25 +83,29 @@ from kci_publish_oci import publish_layout
 var root = mkdtemp()
 var layers = List[List[UInt8]]()
 layers.append(bytes_of("one layer"))
-_ = write_test_layout(root + "/amd64", layers, "linux", "amd64")
-_ = write_test_layout(root + "/arm64", layers, "linux", "arm64")
+var amd64 = write_test_layout(root + "/amd64", layers, "linux", "amd64")
+var arm64 = write_test_layout(root + "/arm64", layers, "linux", "arm64")
 
 var rev = "3f2a9c1d8b7e6f5a4c3b2a1908f7e6d5c4b3a291"
 var pusher = LayoutPusher[FakeOciRegistry](FakeOciRegistry("registry.example.test"), OciAuth.none(), False, 0)
 
-var short = publish_layout(pusher, root + "/amd64", "registry.example.test", "team/app", "3f2a9c1", "linux-x86_64", False)
+var short = publish_layout(pusher, root + "/amd64", amd64, "registry.example.test", "team/app", "3f2a9c1", "linux-x86_64", False)
 assert_equal(short.outcome, "REFUSED")
 assert_equal(short.exit_code(), 3)
 assert_equal(short.error_id, "KCI-E-REVISION")
 
-var reserved = publish_layout(pusher, root + "/amd64", "registry.example.test", "team/app", rev, "darwin-arm64", False)
+var reserved = publish_layout(pusher, root + "/amd64", amd64, "registry.example.test", "team/app", rev, "darwin-arm64", False)
 assert_equal(reserved.error_id, "KCI-E-PLATFORM")
 
-var wrong_cpu = publish_layout(pusher, root + "/arm64", "registry.example.test", "team/app", rev, "linux-x86_64", False)
+var swapped = publish_layout(pusher, root + "/amd64", arm64, "registry.example.test", "team/app", rev, "linux-x86_64", False)
+assert_equal(swapped.outcome, "REFUSED")
+assert_equal(swapped.error_id, "KCI-E-MEMBER")
+
+var wrong_cpu = publish_layout(pusher, root + "/arm64", arm64, "registry.example.test", "team/app", rev, "linux-x86_64", False)
 assert_equal(wrong_cpu.error_id, "KCI-E-IMAGE-PLATFORM")
 assert_true("is for linux/arm64; this step publishes linux-x86_64 (linux/amd64)" in wrong_cpu.message)
 
-var plan = publish_layout(pusher, root + "/amd64", "registry.example.test", "team/app", rev, "linux-x86_64", True)
+var plan = publish_layout(pusher, root + "/amd64", amd64, "registry.example.test", "team/app", rev, "linux-x86_64", True)
 assert_equal(plan.outcome, "SUCCEEDED")
 assert_equal(plan.artifact.effect, "WOULD_UPLOAD")
 assert_equal(pusher.transport().call_count(), 0)  # nothing was sent

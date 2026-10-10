@@ -41,7 +41,8 @@
 # Row order, two known limits of the multiset compare (compare.mojo): under
 # a tolerance or bare NaN two rows that both match one expected row may pair
 # the wrong way in the sorted walk; the rows left unpaired are then matched
-# by a search, which is greedy (first fit), not a maximum matching. And
+# by a search, which is greedy (first fit), not a maximum matching (and is
+# skipped without a tolerance or a bare NaN, where the walk is exact). And
 # `order: keys=` compares the key projection positionally, so one missing
 # row reports a key mismatch at every later row (it does not resynchronise).
 # =============================================================================

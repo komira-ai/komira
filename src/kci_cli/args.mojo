@@ -58,8 +58,12 @@
 #
 #   a selected BUILD step    needs --work-dir and --log-dir; --build-timeout-s
 #                            optional
-#   a selected PUBLISH step  needs --release-version; --concurrency,
-#                            --secret-store optional
+#   a selected PUBLISH step  to a channel needs --release-version;
+#                            --concurrency, --secret-store optional
+#   a selected DEPLOY step, or PUBLISH step into a cell,
+#                            needs --release-set-hash (deploy_step.mojo,
+#                            cell_publish.mojo: the release it writes into
+#                            the cell is held to it)
 #   a selected validation    needs --scratch-dir, an ABSOLUTE path (the
 #                            container mounts a directory under it; an ENV
 #                            validation refuses one inside the checkout)
@@ -88,13 +92,14 @@
 # `--only`; `--only step:<s>` selects no validation). Which names
 # a release publishes is its artifacts file's: there is no per-run claim.
 #
-# `--release-set-hash <64 lowercase hex>` (a selected PUBLISH step or
-# validation): the set hash of the release the run was handed (kci.yml: the
-# build job's, or the validate job's for prod). kci recomputes the release
-# directory's set and refuses another (KCI-E-SET-HASH, exit 3) before any
-# effect; under GitHub Actions a run that publishes or validates without it
-# is a usage error (dispatch.mojo). It is refused with --affected-by and on a
-# stage whose selection publishes and validates nothing.
+# `--release-set-hash <64 lowercase hex>` (a selected PUBLISH step,
+# validation or DEPLOY step): the set hash of the release the run was handed
+# (kci.yml: the build job's, or the validate job's for prod). kci recomputes
+# the release directory's set and refuses another (KCI-E-SET-HASH, exit 3)
+# before any effect; under GitHub Actions a run that publishes or validates
+# without it is a usage error (dispatch.mojo), and a run that deploys
+# without it always is. It is refused with --affected-by and on a stage
+# whose selection publishes, validates and deploys nothing.
 #
 # Every refusal here is a usage error (kci_api's KCI-E-USAGE, exit 2;
 # a malformed `--only` is KCI-E-SELECTOR, also exit 2).
@@ -107,6 +112,7 @@
 from kci_api import (
     DEFAULT_MACHINE_FILE,
     STEP_KIND_BUILD,
+    STEP_KIND_DEPLOY,
     STEP_KIND_PUBLISH,
     VALIDATION_KIND_CONDA_INSTALL_ENV,
     ContextEntry,
@@ -129,9 +135,9 @@ comptime KCI_USAGE: String = (
     "          [--affected-by <commit>] --revision-id <commit> --run-id <id> --attempt <n>\n"
     "          [--context <key=value>]... --release-dir <dir> [--result-file <file>] [--summary-file <file>]\n"
     "          [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]         (a selected BUILD step)\n"
-    "          --release-version <file> [--concurrency <n>] [--secret-store <none|env>]  (a selected PUBLISH step)\n"
+    "          --release-version <file> [--concurrency <n>] [--secret-store <none|env>]  (a selected PUBLISH step to a channel)\n"
     "          --scratch-dir <dir>                                          (a selected validation)\n"
-    "          [--release-set-hash <64 hex>]                  (a selected PUBLISH step or validation)\n"
+    "          [--release-set-hash <64 hex>]   (a selected PUBLISH step or validation; required by a DEPLOY step or a PUBLISH into a cell)\n"
     "          --pixi <file> --pixi-sha256 <hex>                  (a selected CONDA_INSTALL_ENV validation)\n"
     "          [--channel file:///<dir>]       (validations only: install from this local channel, not the step's)\n"
     "  kci --help\n"
@@ -557,6 +563,15 @@ def _selected_kind(stage: Stage, sel: Selection, kind: String) -> Bool:
     return False
 
 
+def _selected_publish(stage: Stage, sel: Selection, into_cell: Bool) -> Bool:
+    """Whether a selected PUBLISH step publishes into a cell (`into_cell`)
+    or to a channel."""
+    for i in range(len(stage.steps)):
+        if sel.steps[i] and stage.steps[i].is_publish() and stage.steps[i].names_cell() == into_cell:
+            return True
+    return False
+
+
 def require_stage_flags(cmd: KciCommand, stage: Stage, sel: Selection) raises:
     """The flags of the step kinds the SELECTED steps of `stage` hold, and
     only those (file header). Raises a usage error."""
@@ -575,6 +590,7 @@ def require_stage_flags(cmd: KciCommand, stage: Stage, sel: Selection) raises:
             )
     var has_build = _selected_kind(stage, sel, String(STEP_KIND_BUILD))
     var has_publish = _selected_kind(stage, sel, String(STEP_KIND_PUBLISH))
+    var has_deploy = _selected_kind(stage, sel, String(STEP_KIND_DEPLOY))
     var which = String("stage '") + stage.name + String("'")
     var has = String(" has")
     var holds_no = String(" has no")
@@ -594,17 +610,25 @@ def require_stage_flags(cmd: KciCommand, stage: Stage, sel: Selection) raises:
             if cmd.given(bf[i]):
                 raise usage_error(bf[i] + String(" is a BUILD step's flag, and ") + which + holds_no + String(" BUILD step"))
     if has_publish:
-        for f in ["--release-version"]:
-            if not cmd.given(String(f)):
-                raise usage_error(which + has + String(" a PUBLISH step: kci run needs ") + String(f))
+        if _selected_publish(stage, sel, False) and not cmd.given(String("--release-version")):
+            raise usage_error(which + has + String(" a PUBLISH step: kci run needs --release-version"))
     else:
         for i in range(len(pf)):
             if cmd.given(pf[i]):
                 raise usage_error(pf[i] + String(" is a PUBLISH step's flag, and ") + which + holds_no + String(" PUBLISH step"))
-    if cmd.given(String("--release-set-hash")) and not has_publish and len(sel.validations) == 0:
+    if has_deploy and not cmd.given(String("--release-set-hash")):
         raise usage_error(
-            String("--release-set-hash holds a PUBLISH step or a validation to the set it was handed, and ") + which
-            + holds_no + String(" PUBLISH step and no validation is selected")
+            which + has + String(" a DEPLOY step: kci run needs --release-set-hash (the release it deploys is held to it)")
+        )
+    if _selected_publish(stage, sel, True) and not cmd.given(String("--release-set-hash")):
+        raise usage_error(
+            which + has + String(" a PUBLISH step into a cell: kci run needs --release-set-hash (the release it")
+            + String(" pushes is held to it)")
+        )
+    if cmd.given(String("--release-set-hash")) and not has_publish and not has_deploy and len(sel.validations) == 0:
+        raise usage_error(
+            String("--release-set-hash holds a PUBLISH step, a DEPLOY step or a validation to the set it was handed, and ")
+            + which + holds_no + String(" PUBLISH or DEPLOY step and no validation is selected")
         )
     var vwhich = String("stage '") + stage.name + String("'")
     if len(cmd.only) > 0:

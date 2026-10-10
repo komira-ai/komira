@@ -33,6 +33,8 @@ def test_no_exit_number_outside_kci_api() raises:
     var all = List[String]()
     for f in [
         "kci_cli_args.mojo",
+        "kci_cli_cell_publish.mojo",
+        "kci_cli_deploy_step.mojo",
         "kci_cli_dispatch.mojo",
         "kci_cli_library_verbs.mojo",
         "kci_cli_recorder.mojo",

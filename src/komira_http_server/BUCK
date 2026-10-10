@@ -57,9 +57,11 @@ mojo_library(
         "tests/test_gcp_cloud_run_serve_stack.mojo",
         "tests/test_middleware_in_dispatch_path.mojo",
         "tests/test_no_product_vocabulary.mojo",
+        "tests/test_presented_credential.mojo",
         "tests/test_route_pack.mojo",
         "tests/test_serverless_entry.mojo",
     ],
+    test_deps = ["//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary"],
     test_data = {
         "tests/test_L0_accept_loop_tls.mojo": {
             "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",

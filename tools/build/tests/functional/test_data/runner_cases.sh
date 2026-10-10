@@ -3,16 +3,24 @@
 # case to <report> ("ok <case>" or "BAD <case>: <why>"); exits 1 if any case is
 # BAD.
 #
-# usage: busybox sh runner_cases.sh <busybox> <gate_runner.sh> <report>
+# usage: busybox sh runner_cases.sh <busybox> <gate_runner.sh> <report> <dyld_prelude.sh>
 #
 # Two gated tests in two actions cannot show that their TEST_TMPDIRs differ:
 # on remote execution each runs in its own action directory and is then
 # cached, so a runner that used one fixed directory for every run would pass
 # them. Here both runs share one action directory, one after the other.
+#
+# The darwin case runs the runner as the macOS toolchain builds it
+# (dyld_prelude.sh, then gate_runner.sh) with a stand-in busybox that drops
+# every DYLD_* variable before each applet, as dyld does for the protected
+# /bin and /usr/bin binaries the macOS busybox (busybox.sh) runs. The
+# test must still see DYLD_LIBRARY_PATH: nothing between the runner and the
+# test may be an applet.
 set -eu
 case "$1" in /*) BB=$1 ;; *) BB=$PWD/$1 ;; esac
 case "$2" in /*) RUNNER=$2 ;; *) RUNNER=$PWD/$2 ;; esac
 REPORT=$3
+case "$4" in /*) PRELUDE=$4 ;; *) PRELUDE=$PWD/$4 ;; esac
 D=$PWD/.komira_runner_cases
 "$BB" rm -rf "$D"
 "$BB" mkdir -p "$D/root/bin"
@@ -43,6 +51,10 @@ case "\${PROBE_MODE:-}" in
         [ "\$3" = "SEEN_ARG=1" ] || { echo "probe: third argument '\$3'"; exit 21; }
         [ -z "\${SEEN_ARG:-}" ] || { echo "probe: an argument was exported"; exit 22; }
         exit 0 ;;
+    loader)
+        [ "\${DYLD_LIBRARY_PATH-}" = "\$EXPECT_LIB" ] || { echo "probe: DYLD_LIBRARY_PATH='\${DYLD_LIBRARY_PATH-}', not '\$EXPECT_LIB'"; exit 23; }
+        [ "\${LD_LIBRARY_PATH-}" = "\$EXPECT_LIB" ] || { echo "probe: LD_LIBRARY_PATH='\${LD_LIBRARY_PATH-}', not '\$EXPECT_LIB'"; exit 24; }
+        exit 0 ;;
     skip) exit 77 ;;
     *) echo "probe: PROBE_MODE='\${PROBE_MODE:-}'"; exit 15 ;;
 esac
@@ -54,14 +66,17 @@ bad=0
 ok() { echo "ok $1" >> "$REPORT"; }
 bad() { echo "BAD $1: $2" | "$BB" tee -a "$REPORT" >&2; bad=1; }
 
-# run <case> <marker> <runner options...>: runs the runner from this action's
-# directory; sets rc and leaves its output in $D/<case>.log.
+# run <case> <marker> <runner options...>: runs the runner ($RUN_SCRIPT, given
+# $RUN_BB as its busybox) from this action's directory; sets rc and leaves its
+# output in $D/<case>.log.
+RUN_SCRIPT=$RUNNER
+RUN_BB=$BB
 run() {
     name=$1 marker=$2
     shift 2
     rc=0
     "$BB" rm -f "$marker"
-    "$BB" timeout 60 "$BB" sh "$RUNNER" "$BB" "$D/tc" "//x:$name" "$D/root/bin/probe" "$marker" "$@" > "$D/$name.log" 2>&1 || rc=$?
+    "$BB" timeout 60 "$BB" sh "$RUN_SCRIPT" "$RUN_BB" "$D/tc" "//x:$name" "$D/root/bin/probe" "$marker" "$@" > "$D/$name.log" 2>&1 || rc=$?
 }
 
 # TEST_TMPDIR: two runs, one action directory.
@@ -130,6 +145,24 @@ if [ "$rc" = 2 ] && [ ! -e "$D/m9" ]; then ok args_order; else bad args_order "-
 # Exit 77, "skipped" to automake and some harnesses, is red here like any other status.
 run skip "$D/m10" --env PROBE_MODE=skip
 if [ "$rc" = 77 ] && [ ! -e "$D/m10" ]; then ok skip; else bad skip "rc $rc, marker '$("$BB" cat "$D/m10" 2> /dev/null)'"; fi
+
+# macOS: the runner with dyld_prelude.sh prepended, and a busybox whose every
+# applet loses DYLD_* (what dyld does to a protected binary). The test sees
+# both loader variables at the toolchain's lib/: DYLD_LIBRARY_PATH from the
+# prelude, LD_LIBRARY_PATH from the runner.
+"$BB" cat "$PRELUDE" "$RUNNER" > "$D/darwin_gate_runner.sh"
+cat > "$D/sip_busybox" <<SIPBB
+#!$BB sh
+unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_INSERT_LIBRARIES
+exec "$BB" "\$@"
+SIPBB
+"$BB" chmod +x "$D/sip_busybox"
+RUN_SCRIPT=$D/darwin_gate_runner.sh
+RUN_BB=$D/sip_busybox
+run darwin_loader "$D/m11" --env PROBE_MODE=loader --env "EXPECT_LIB=$D/tc/lib"
+if [ "$rc" = 0 ] && [ "$("$BB" cat "$D/m11" 2> /dev/null)" = "PASS //x:darwin_loader" ]; then ok darwin_loader; else bad darwin_loader "rc $rc: $("$BB" tail -n 3 "$D/darwin_loader.log" | "$BB" tr '\n' ' ')"; fi
+RUN_SCRIPT=$RUNNER
+RUN_BB=$BB
 
 "$BB" rm -rf "$D"
 exit "$bad"

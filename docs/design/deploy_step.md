@@ -44,7 +44,7 @@ Checked against `main` and the stack head.
 | `kci_api/result.mojo` | `landed[] pending[] failed outputs[] plan_hash security_relevant_changes[]` are reserved as top-level names and never emitted. |
 | `kci_api/exit_codes.mojo` | 3 REFUSED, 4 FAILED (SAFE), 5 INDETERMINATE, 6 PARTIAL (UNSAFE), 7 VALIDATION_FAILED, 8 LEFT_BEHIND (reserved, has no outcome). |
 | `kci_workflow_check` | R16: one workflow-level `concurrency:` (a push to main in `kci-release-main`, never cancelled in progress; a manual run in a group per ref), and **no job has a `concurrency:` of its own**. R4: `id-token: write` only on a job whose stage publishes to an OIDC channel or is farm-connected; no other job carries it. R15: a stage that is not `break_glass` runs only on a push to main. |
-| `komira_oci`, `kci_publish_oci` | `LayoutPusher` and `OciCopier.copy_by_digest` exist. `publish_layout` is not wired; it says "an image step needs a cell". |
+| `komira_oci`, `kci_publish_oci` | `LayoutPusher` and `OciCopier.copy_by_digest` exist. `publish_layout` takes the release set's digest and is called by `kci run` for a PUBLISH step into a cell (I3). |
 | `oci_image` | Writes a layout plus `[digest]` and `[docker_archive]`. It has **no `[release]`** sub-target, and the release set reads only `[release]`. |
 | `kci_validate` | Two kinds: `CONDA_INSTALL_SMOKE` (a hardened `docker run`, anonymous pull by digest) and `CONDA_INSTALL_ENV`. A validation may attach only to a PUBLISH step. `validations[].environment` is `ENV` or `CONTAINER`. |
 | `komira_gcp_core` ADC | Reads `service_account` and `authorized_user`. It **refuses `external_account`** by name, which is the file a CI's OIDC-to-GCP exchange produces. |

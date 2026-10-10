@@ -106,13 +106,24 @@ def _graph(
     replicas: String = String("3"),
     sweeper_uses: Bool = True,
     relay_cmd: String = String('"/bin/relay","--drain"'),
+    derived: Bool = False,
 ) -> String:
+    """`derived`: the graph a shape whose grants are DERIVED reads: the
+    grant `reads` (runner READ on media) written as the `uses` line it is
+    equivalent to, on its principal `runner` (such a shape refuses a grant
+    resource)."""
+    var runner = String('{"id":"runner","serviceAccount":{}},')
+    var reads = String('{"id":"reads","grant":{"principal":{"resource":"runner"},"target":{"resource":"media"},')
+    reads += String('"access":"READ"}}')
+    if derived:
+        runner = String('{"id":"runner","serviceAccount":{},"uses":[{"target":{"resource":"media"},"access":"READ"}]},')
+        reads = String("")
     var uses = String(',"uses":[{"target":{"resource":"media"},"access":"READ_WRITE"}]') if sweeper_uses else String(
         ""
     )
     return (
         String('{"resource":[')
-        + String('{"id":"runner","serviceAccount":{}},')
+        + runner
         + String('{"id":"media","retention":"DELETE","bucket":{}},')
         + String('{"id":"relay","worker":{"image":{"digest":"sha256:77"},"command":[') + relay_cmd + String("],")
         + String('"args":["--batch=10"],')
@@ -124,9 +135,8 @@ def _graph(
         + String('"maxRetries":2}},')
         + String('{"id":"api","service":{"image":{"digest":"sha256:a1"},"internal":{},')
         + String('"scale":{"min":1,"max":3},"command":["/opt/serve"]},')
-        + String('"uses":[{"target":{"resource":"nightly"},"access":"CALL"}]},')
-        + String('{"id":"reads","grant":{"principal":{"resource":"runner"},"target":{"resource":"media"},')
-        + String('"access":"READ"}}')
+        + String('"uses":[{"target":{"resource":"nightly"},"access":"CALL"}]}')
+        + (String(",") + reads if reads.byte_length() > 0 else String(""))
         + String("]}")
     )
 
@@ -353,14 +363,15 @@ def test_the_kit_on_every_shape() raises:
         var reg = Clouds(Catalog.v1())
         reg.add(describe(FakeCloud(ids[s], shape=shapes[s].copy())))
         var cloud = FakeCloud(ids[s], shape=shapes[s].copy())
+        var derived = shapes[s].grants_derived()
         try:
             run_conformance(
                 reg,
                 cloud,
                 _ctx(),
-                _list(_graph()),
-                _list(_graph(String("4"))),
-                _list(_graph(String("4"), sweeper_uses=False)),
+                _list(_graph(derived=derived)),
+                _list(_graph(String("4"), derived=derived)),
+                _list(_graph(String("4"), sweeper_uses=False, derived=derived)),
                 String("relay/run"),
             )
         except e:

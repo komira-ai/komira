@@ -1,12 +1,14 @@
 // The plan wire's enumerated tag vocabulary. It mirrors the engine's
 // `comptime` tag declarations in the core packages (each enum below names the
-// file it is derived from) and the core packages'
-// `plan/plan_wire_vocabulary.mojo`, which holds the same wire numbers.
-// There is no generator in this repository: a tag added to the engine must
-// be added here by hand, with the same wire number as in
-// `plan_wire_vocabulary.mojo`. src/komira_plan_wire/tests/test_plan_wire_vocabulary.mojo
-// checks that the Mojo vocabulary is complete against the engine's own tag
-// counts; nothing yet compares this file to it mechanically.
+// file it is derived from) and src/komira_plan_wire/plan_wire_vocabulary.mojo,
+// which holds the same wire numbers. There is no generator in this
+// repository: a tag added to the engine must be added here by hand, with the
+// same wire number as in `plan_wire_vocabulary.mojo`.
+// src/komira_plan_wire/tests/test_plan_wire_vocabulary.mojo checks that the
+// Mojo vocabulary is complete against the engine's own tag counts, and
+// src/komira_plan_wire/tests/test_plan_wire_vocabulary_names.mojo compares it
+// to this file as protoc reads it: every name, which numbers decode, and that
+// both directions refuse the numbers reserved below.
 
 syntax = "proto3";
 

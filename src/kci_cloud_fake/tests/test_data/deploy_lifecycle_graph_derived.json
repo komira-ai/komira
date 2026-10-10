@@ -1,0 +1,50 @@
+{
+  "resource": [
+    {
+      "id": "api",
+      "service": {
+        "image": {"digest": "sha256:a1"},
+        "port": 8080,
+        "public": {}
+      },
+      "uses": [{"target": {"resource": "media"}, "access": "READ_WRITE"}]
+    },
+    {
+      "id": "web",
+      "service": {
+        "image": {"digest": "sha256:c3"},
+        "internal": {},
+        "env": {
+          "API_URL": {"ref": {"resource": "api", "standard": "URL"}},
+          "API_HOST": {"ref": {"resource": "api", "standard": "HOST"}},
+          "MODE": {"literal": "fast"}
+        }
+      },
+      "uses": [{"target": {"resource": "api"}, "access": "CALL"}]
+    },
+    {
+      "id": "nightly",
+      "containerJob": {
+        "image": {"digest": "sha256:b2"},
+        "command": ["/bin/nightly"],
+        "maxRetries": 1,
+        "runAs": {"resource": "runner"}
+      }
+    },
+    {
+      "id": "runner",
+      "serviceAccount": {},
+      "uses": [{"target": {"resource": "media"}, "access": "READ"}]
+    },
+    {
+      "id": "orders",
+      "retention": "DELETE",
+      "table": {"key": {"name": "pk", "partition": {"name": "customer", "type": "STRING"}}}
+    },
+    {
+      "id": "media",
+      "retention": "KEEP",
+      "bucket": {"versioning": true}
+    }
+  ]
+}

@@ -5,8 +5,11 @@ stages, in order, and the steps of each. `parse_machine_file` reads the text
 it is given (it opens no file) into a `ReleaseMachine`: each `Stage` has a
 name, the GitHub environment its job runs in (its name by default), the one
 earlier stage it runs `after`, whether it is farm-connected, its trigger
-(`PUSH` or `PULL_REQUEST`) and its `StageStep`s (`BUILD` or `PUBLISH`;
-`DEPLOY` is reserved and refused), and a `PUBLISH` step's `StageValidation`s.
+(`PUSH` or `PULL_REQUEST`) and its `StageStep`s (`BUILD`, `PUBLISH` to a
+channel or into a cell, and `DEPLOY` into a cell), and a `PUBLISH` step's
+`StageValidation`s. A machine that writes into a cell has a `name`; a cell is
+picked from a cells file, and `require_cells_declared` checks the pick against
+the names that file declares (this package opens no file).
 Every malformed or inconsistent file is refused with an error naming the
 source and line. `resolve_selection` resolves `kci run --only ...` selectors
 against one stage into the steps and validations that run.

@@ -33,6 +33,7 @@ from kci_reconciler import (
     Provenance,
 )
 from kci_cloud import (
+    RegistryLogin,
     Absence,
     ArtifactNeed,
     BootstrapItem,
@@ -138,6 +139,12 @@ struct _Deep(CloudAdapter, Movable):
 
     def trust_check(mut self, creds: Creds, scope: CellScope) raises -> List[Finding]:
         return self.inner.trust_check(creds, scope)
+
+    def image_registry(self, ctx: CellContext) -> String:
+        return self.inner.image_registry(ctx)
+
+    def registry_login(mut self, creds: Creds) raises -> RegistryLogin:
+        return self.inner.registry_login(creds)
 
 
 comptime GRAPH = '{"resource":[{"id":"a","bucket":{}},{"id":"b","bucket":{}}]}'

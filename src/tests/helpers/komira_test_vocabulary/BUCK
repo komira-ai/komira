@@ -1,0 +1,22 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The source scan a generic package's welded test runs over its own sources:
+# product vocabulary (case-insensitive substrings) and early year-months (2024
+# or 2025 with any month, or 2026 with month 01 to 08; earlier years are not
+# matched; vocabulary.mojo says which spellings). Test-only, so no conda package:
+# a library names it in `test_deps`, which reaches that library's welded tests
+# and nothing it ships (tools/build/mojo/test_deps.bzl).
+#
+# The welded test, test_vocabulary_scan, pins what the scan flags and what it
+# lets through. No deps beyond the standard library.
+mojo_library(
+    name = "komira_test_vocabulary",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    deps = [],
+    test_srcs = ["tests/test_vocabulary_scan.mojo"],
+    visibility = [
+        "//src/komira_authz_api:",
+        "//src/komira_http_server:",
+    ],
+)

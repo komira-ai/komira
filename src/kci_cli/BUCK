@@ -18,6 +18,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # (temp-and-rename, RUNNING before the first effect, FINISHED on every exit
 # path) and exits with kci_api's numbers. bin/kci is its `main`.
 #
+# A DEPLOY step (deploy_step.mojo) plans or applies a resource list into a
+# cell (kci_cell) through kci_cloud, generic over the cloud adapter and the
+# state store; kci_composites is the definitions kci ships. A PUBLISH step
+# into a cell (cell_publish.mojo) pushes the release set's images to the
+# cell's registry through kci_publish_oci and komira_oci. The binary is
+# built with no cloud adapter, so it refuses both. The welded tests drive
+# kci_cloud_fake's FakeCloud, a test dependency only (`test_deps`), never
+# shipped in the binary.
+#
 # The welded tests: the one parser and every usage refusal; the stage run over
 # a recording fake (order, stop at the first failure, worst outcome, PARTIAL
 # after a publish, the result records, the workflow check, validations after
@@ -31,20 +40,32 @@ mojo_library(
     deps = [
         "//src/kci_artifact:kci_artifact",
         "//src/kci_build:kci_build_lib",
+        "//src/kci_cell:kci_cell",
+        "//src/kci_cloud:kci_cloud",
+        "//src/kci_composites:kci_composites",
+        "//src/kci_reconciler:kci_reconciler",
+        "//src/kci_resource_proto:kci_resource_proto",
         "//src/kci_workflow_check:kci_workflow_check",
         "//src/kci_api:kci_api",
         "//src/kci_pkg_upload:kci_pkg_upload",
         "//src/kci_publish:kci_publish_lib",
+        "//src/kci_publish_oci:kci_publish_oci",
         "//src/kci_release_set:kci_release_set",
         "//src/kci_release_machine:kci_release_machine",
         "//src/kci_validate:kci_validate",
         "//src/komira_clock:komira_clock",
+        "//src/komira_crypto:komira_crypto",
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
+        "//src/komira_json:komira_json",
         "//src/komira_libc:komira_libc",
+        "//src/komira_oci:komira_oci",
+        "//src/komira_proto_codec:komira_proto_codec",
         "//src/komira_secret_env:komira_secret_env",
         "//src/komira_secret_store:komira_secret_store",
     ],
+    # the working fake cloud the deploy tests run on; never in the binary
+    test_deps = ["//src/kci_cloud_fake:kci_cloud_fake"],
     test_srcs = [
         # the one parser: verbs, flags, the stage's flags, every usage refusal
         "tests/test_kci_args.mojo",
@@ -67,6 +88,17 @@ mojo_library(
         "tests/test_kci_library_wiring.mojo",
         # no exit number is spelled outside kci_api
         "tests/test_exit_numbers_in_one_place.mojo",
+        # a DEPLOY step end to end on FakeCloud + InMemoryStateStore: --plan,
+        # apply then NOOP, the scope's machine, foreign, partial, first-node
+        # partial, kci.app's plan, the set hash, the binary's refusal, trust
+        "tests/test_kci_deploy_step.mojo",
+        # the same on a faulty FakeCloud: trust_check, a presence read,
+        # a broken lowering contract and realize, each raising
+        "tests/test_kci_deploy_faults.mojo",
+        # a PUBLISH step into a cell end to end: a push to the fake cell's
+        # registry then NOOP, a read-back mismatch INDETERMINATE, --plan sends
+        # nothing, the step holds the set, trust, the binary's refusal, the flag
+        "tests/test_kci_cell_publish.mojo",
     ],
     test_env = {
         # resolved by name through --secret-store=env's store
@@ -75,6 +107,8 @@ mojo_library(
     test_data = {
         "tests/test_exit_numbers_in_one_place.mojo": {
             "kci_cli_args.mojo": "//src/kci_cli:args.mojo",
+            "kci_cli_cell_publish.mojo": "//src/kci_cli:cell_publish.mojo",
+            "kci_cli_deploy_step.mojo": "//src/kci_cli:deploy_step.mojo",
             "kci_cli_dispatch.mojo": "//src/kci_cli:dispatch.mojo",
             "kci_cli_library_verbs.mojo": "//src/kci_cli:library_verbs.mojo",
             "kci_cli_recorder.mojo": "//src/kci_cli:recorder.mojo",
@@ -83,11 +117,23 @@ mojo_library(
             "kci_cli_summary.mojo": "//src/kci_cli:summary.mojo",
             "bin_kci_main.mojo": "//bin/kci:main.mojo",
         },
+        # the definitions kci ships, at the resource names kci_composites
+        # reads them by
+        "tests/test_kci_deploy_step.mojo": {
+            "src/kci_composites/definitions/{}.json".format(d): "//src/kci_composites:{}.json".format(d)
+            for d in ["kci.app", "kci.job"]
+        },
+        "tests/test_kci_deploy_faults.mojo": {
+            "src/kci_composites/definitions/{}.json".format(d): "//src/kci_composites:{}.json".format(d)
+            for d in ["kci.app", "kci.job"]
+        },
     },
     visibility = ["PUBLIC"],
 )
 
 export_file(name = "args.mojo", visibility = ["//src/kci_cli:"])
+export_file(name = "cell_publish.mojo", visibility = ["//src/kci_cli:"])
+export_file(name = "deploy_step.mojo", visibility = ["//src/kci_cli:"])
 export_file(name = "dispatch.mojo", visibility = ["//src/kci_cli:"])
 export_file(name = "library_verbs.mojo", visibility = ["//src/kci_cli:"])
 export_file(name = "recorder.mojo", visibility = ["//src/kci_cli:"])

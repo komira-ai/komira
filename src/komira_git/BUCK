@@ -3,17 +3,18 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # git's object model and wire primitives in pure Mojo: object formats (SHA-1,
 # SHA-256) and ids, SHA-1 with collision detection (sha1dc, a port of
 # sha1collisiondetection), blob/tree/commit/tag parse and serialize, loose
-# objects, pkt-line framing and side-band, the check-ref-format rules, and
-# sans-I/O state machines for protocol v2 fetch and receive-pack push. No
-# I/O. Deps are the hashes (komira_crypto) and zlib framing for loose objects
-# (komira_zlib).
+# objects, pkt-line framing and side-band, the check-ref-format rules, the
+# pack reader (packs, deltas, index v2), and sans-I/O state machines for
+# protocol v2 fetch and receive-pack push. No I/O. Deps are the hashes
+# (komira_crypto) and zlib for loose objects and pack entries (komira_zlib).
 #
 # The welded tests check against fixed vectors from git's own test suite,
 # from git's output and from sha1collisiondetection's test files (each file
-# names where its vectors come from); see README.md for what each test
-# proves. //src/tests/conformance/komira_git_conformance checks sha1dc
-# against the C library itself and the protocol state machines against the
-# pinned git.
+# names where its vectors come from), and the pack tests against packs built
+# entry by entry; see README.md for what each test proves.
+# //src/tests/conformance/komira_git_conformance checks sha1dc against the C
+# library itself, the pack reader against packs git itself writes, and the
+# protocol state machines against the pinned git.
 mojo_library(
     name = "komira_git",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -28,6 +29,10 @@ mojo_library(
         "tests/test_fetch_negotiation.mojo",
         "tests/test_loose_objects.mojo",
         "tests/test_object_ids.mojo",
+        "tests/test_pack_delta.mojo",
+        "tests/test_pack_index.mojo",
+        "tests/test_pack_reader.mojo",
+        "tests/test_pack_refusals.mojo",
         "tests/test_pkt_line.mojo",
         "tests/test_pkt_stream.mojo",
         "tests/test_receive_pack.mojo",

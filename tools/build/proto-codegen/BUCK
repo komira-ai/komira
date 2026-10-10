@@ -204,13 +204,15 @@ rust_binary(
 )
 
 # The rest-xml verdicts: the file a differential test of another XML
-# implementation reads (`rest_xml_verdicts.tsv`).
+# implementation reads (`rest_xml_verdicts.tsv`). Visible to the test-only
+# package that holds that test (komira_xml's), so no library can weld it
+# again and make its build depend on xml-equiv-verdicts.
 xml_equiv_verdicts(
     name = "rest_xml_verdicts",
     corpus = _PROTOCOL_TESTS,
     ignore_list = _IGNORE_LIST,
     protocols = ["rest-xml"],
-    visibility = ["PUBLIC"],
+    visibility = ["//src/tests/conformance/komira_xml_conformance/..."],
 )
 
 # Checks the rest-xml verdicts file's shape against the corpus: the body

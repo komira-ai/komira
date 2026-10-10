@@ -1,9 +1,9 @@
 # komira_git
 
-Git's object model, wire primitives and protocol state machines in pure
-Mojo, with no I/O: every function maps bytes to values or values to bytes.
-It is the base the pack and storage layers and the transports (smart HTTP)
-of a git server or client build on.
+Git's object model, wire primitives, pack reader and protocol state
+machines in pure Mojo, with no I/O: every function maps bytes to values or
+values to bytes. It is the base the storage layers and the transports
+(smart HTTP) of a git server or client build on.
 
 - **Object formats and ids.** `ObjectFormat.sha1()` and
   `ObjectFormat.sha256()` (`from_name`, `raw_size`, `hex_size`, `name`).
@@ -48,6 +48,25 @@ of a git server or client build on.
   (and `check_ref_name` over bytes), `is_valid_ref_name` and
   `normalize_ref_name`: the rules of `git check-ref-format`, checked in
   git's order, each refusal naming its rule.
+- **Packs.** `index_pack(format, pack, limits)` does what `git index-pack`
+  does: it checks the header and the trailer, walks every entry, resolves
+  OFS_DELTA and REF_DELTA entries (a REF_DELTA base may be anywhere in the
+  pack) and returns an `IndexedPack`: the `PackIndex` and, per entry in pack
+  order, a `PackEntryInfo` (`id`, `kind`, `type_code`, `offset`,
+  `packed_size`, `crc32`, `depth`, `base_id`, as `git verify-pack -v` lists
+  them). `index_thin_pack` also takes `ExternalBases`, the objects a thin
+  pack's deltas may name outside it. `read_pack_object(pack, index, id,
+  limits)` (and `read_thin_pack_object`) reads one object as a
+  `PackObject` (`kind`, `payload`) and refuses one that does not hash to
+  `id`. `PackIndex` (`count`, `id_at`, `offset_at`, `crc32_at`, `find`,
+  `pack_checksum`) is written as an index v2 file by `serialize` (byte-equal
+  to `git index-pack`'s; offsets over a threshold, 0x7fffffff by default, in
+  the eight-byte table) and read by `parse_pack_index`. `apply_delta(base,
+  delta, max_size)` and `read_delta_header` are git's delta format.
+  `PackLimits` bounds the object count, each object's size, the delta chain
+  depth (4095 by default, the deepest `git pack-objects` writes) and the
+  bytes one index or read call may inflate (`max_inflate_ratio` times the
+  pack size plus one object), each checked before the work it bounds.
 - **Input in pieces and side-band.** `PktReader` (`feed`, `read`, `mark`,
   `rewind`, `buffered`, `take_buffered`) buffers what arrives and hands
   out pkt-lines; `append_sideband(out, band, data)` frames data on band
@@ -308,6 +327,21 @@ try:
     assert_true(False)
 except e:
     assert_equal(String(e), "komira_git: bad ref name: contains '..'")
+```
+
+Apply a delta (a copy of the base's first five bytes, then an insert):
+
+```mojo
+from komira_git import apply_delta
+
+var base = List[UInt8](String("hello, world").as_bytes())
+var delta = List[UInt8]()
+for b in [12, 8, 0x90, 5, 3, 33, 33, 33]:
+    delta.append(UInt8(b))
+var out = apply_delta(Span(base), Span(delta), 1 << 20)
+assert_equal(len(out), 8)  # "hello!!!"
+assert_equal(Int(out[4]), 111)
+assert_equal(Int(out[5]), 33)
 ```
 
 A protocol v2 ls-refs exchange, client and server in one process (the

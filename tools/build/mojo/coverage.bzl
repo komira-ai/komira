@@ -66,17 +66,23 @@ package's joins (`conda_join`, `conda_release_join`), whose inputs gain the
 coverage markers (for a library of the ledger, the marker of its
 `<name>_cov_gate` too), without changing their command or their bytes. On a
 target platform other than linux-x86_64 the attributes are None (the
-`select` below), so the library builds as with the switch off.
+`select` below), so the library builds as with the switch off: coverage is
+measured on linux-x86_64 only, never on another platform
+(tools/build/platforms/limits.tsv, `coverage-linux-x86-64`).
 
-Scope: a library's `test_srcs`. A README's examples, `mojo_test`,
-`mojo_shared_lib` drivers and generated test sources get no coverage binary,
-and generated library sources are not measured (nor staged for the gate): a
+Scope: a library's `test_srcs`, written or generated (a generated test is
+named by its output path in the package, in its report and to the gate), and
+a mojo_shared_lib's drivers (`gate_srcs`), which measure the shared library's
+own sources (coverage_shared_lib, below; its gate is in
+COVERAGE_SHARED_LIB_MODE and nothing waits for it). A README's examples and
+`mojo_test` get no coverage binary, and generated library sources are not
+measured (nor staged for the gate): a
 library every source of which is generated (a mojo_aws_client or
 mojo_gcp_client, whose hand-written sources pass through its generator too)
 is NotMeasured in its gate.
 """
 
-load("@komira//tools/build/coverage:policy.bzl", "COVERAGE_BRANCH_GATE", "COVERAGE_INFO_ONLY_DIRS", "COVERAGE_MODE", "COVERAGE_NO_GATE", "COVERAGE_TARGET_BP")
+load("@komira//tools/build/coverage:policy.bzl", "COVERAGE_BRANCH_GATE", "COVERAGE_INFO_ONLY_DIRS", "COVERAGE_MODE", "COVERAGE_NO_GATE", "COVERAGE_SHARED_LIB_MODE", "COVERAGE_TARGET_BP")
 load(":coverage_branch.bzl", "coverage_branch", "coverage_branch_sub_targets")
 load(":providers.bzl", "MojoToolchainInfo")
 
@@ -273,13 +279,18 @@ def coverage_branch_of(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, dat
     src_repo, gen = coverage_sources(ctx, root)
     return {stem: coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, env_args, src_dir, src_repo, gen, defines)}
 
-def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, env_args):
+def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, env_args, solib = None):
     """Declares the `mojo_cov_run` action of test source `t`: its coverage
     binary `cov_bin` run under kcov by cov_run.sh, through the release gate's
     runner with the gate's environment (`env_args`) and data (`data`, staged
     as the gate stages it). `src_dir` is the library's [src] (it ends in
     `src/<import_name>`) and `root` the package directory it stages
-    (_package_root). Returns (report, marker):
+    (_package_root). `solib`, for a shared library's driver
+    (coverage_shared_lib): (the library's file in `data`, which the driver
+    loads, and its sources, also in `data` at their paths in the package,
+    `main` first), cov_run.sh's `--solib` and `--solib-src`: kcov measures
+    the libraries the driver loads, and the report must hold `main`.
+    Returns (report, marker):
     `cov/tests/<stem>.xml`, the test's Cobertura report in repository paths,
     and `cov/tests/<stem>.passed`."""
     where = "{}: coverage run of {}".format(ctx.label.raw_target(), t.short_path)
@@ -316,6 +327,7 @@ def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, en
             name,
             _dir_prefix(pkg_dir) + name,
             import_name,
+            ["--solib", solib[0]] + [a for p in solib[1] for a in ("--solib-src", p)] if solib else [],
             gen,
             env_args,
             hidden = run,
@@ -367,26 +379,29 @@ def _branch_gated(ctx):
     `coverage_branch_gate` (coverage_kwargs sets it)."""
     return ctx.attrs.coverage_branch_gate
 
-def _gate_inputs(ctx, runs, branch, markers):
+def _gate_inputs(ctx, runs, branch, markers, srcs = None, tests_srcs = None):
     """The MojoCoverageGateInfo of this library: its non-generated sources
     and its test sources at their repository paths, a BUCK file at its
     package, the list of its test sources, its tests' reports (`runs`
     {stem: (report, marker)}), when it reads them (_branch_gated) their
     branch records (`branch` {stem: coverage_branch's struct}), and
-    `markers`."""
+    `markers`. `srcs` and `tests_srcs` replace the library's `srcs` and
+    `test_srcs` (a shared library's sources and drivers)."""
     where = "{}: coverage gate".format(ctx.label.raw_target())
     pkg = _pkg_dir(ctx.label)
     files = {}
-    for s in ctx.attrs.srcs:
+    for s in ctx.attrs.srcs if srcs == None else srcs:
         if s.is_source:
             files[_dir_prefix(pkg) + s.short_path] = s
     # Every welded test is named to covcheck (`--test-source`), which sets
     # it aside wherever it is in the package: a test outside tests/
-    # (`wire/tests/`, the package's top) is not the library's source.
+    # (`wire/tests/`, the package's top) is not the library's source. A
+    # generated test is named by its output path in the package, as its
+    # report names it (coverage_run).
     tests = []
-    for t in ctx.attrs.test_srcs:
-        if not t.is_source:
-            continue
+    for t in ctx.attrs.test_srcs if tests_srcs == None else tests_srcs:
+        if _dir_prefix(pkg) + t.short_path in files:
+            fail("{}: the test {} has the path of a source of the library".format(where, t.short_path))
         files[_dir_prefix(pkg) + t.short_path] = t
         tests.append(_dir_prefix(pkg) + t.short_path)
     for path in files:
@@ -397,7 +412,7 @@ def _gate_inputs(ctx, runs, branch, markers):
         "# The package of {}, for covcheck's nearest-BUCK rule (a coverage gate's staged sources).\n".format(ctx.label.raw_target()),
     )
     return MojoCoverageGateInfo(
-        branch_infos = [branch[k].info for k in sorted(branch)] if _branch_gated(ctx) else [],
+        branch_infos = [branch[k].info for k in sorted(branch)] if branch and _branch_gated(ctx) else [],
         label = ctx.label.raw_target(),
         markers = markers,
         package = pkg or "(root)",
@@ -543,3 +558,120 @@ _mojo_cov_gate = rule(
         "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
     },
 )
+
+# ---- mojo_shared_lib --------------------------------------------------------
+
+# The coverage attributes of mojo_shared_lib: a library's, but those of
+# branch coverage (a shared library's drivers have no branch coverage run).
+COVERAGE_SHARED_LIB_ATTRS = {k: COVERAGE_ATTRS[k] for k in ("coverage_debug", "coverage_run", "coverage_gate", "coverage_mode")}
+
+def _not_enforced(where, mode):
+    if mode == "enforce":
+        fail("{}: a mojo_shared_lib's coverage gate is reported, never enforced (COVERAGE_SHARED_LIB_MODE, tools/build/coverage/policy.bzl): mode `enforce` is refused".format(where))
+
+def _coverage_shared_lib_kwargs(kwargs):
+    """Sets the coverage attributes in a mojo_shared_lib's `kwargs` when
+    coverage is on: komira's link, run and gate directories, and the mode
+    COVERAGE_SHARED_LIB_MODE (policy.bzl). A fixture of the tests cell may
+    pass `coverage_debug`, and with it `coverage_run`, `coverage_gate` and
+    `coverage_mode`, as a library's may (coverage_kwargs); anywhere else
+    passing them is refused. Mode `enforce` is refused in analysis
+    (_check_shared_tools), for every shared library."""
+    name = kwargs.get("name", "mojo_shared_lib")
+    link = kwargs.get("coverage_debug")
+    run = kwargs.get("coverage_run")
+    gate = kwargs.get("coverage_gate")
+    mode = kwargs.get("coverage_mode")
+    if link != None or run != None or gate != None or mode != None:
+        if get_cell_name() != "tests":
+            fail("{}: `coverage_debug`, `coverage_run`, `coverage_gate` and `coverage_mode` are set by mojo_shared_lib from `[komira] coverage` and tools/build/coverage/policy.bzl; do not pass them".format(name))
+        if link == None:
+            fail("{}: `coverage_run` and `coverage_gate` need `coverage_debug`: a run measures the coverage build, and the gate reads the runs".format(name))
+        if mode != None and gate == None:
+            fail("{}: `coverage_mode` needs `coverage_gate`".format(name))
+        run = run or _COVERAGE_RUN
+        mode = mode or COVERAGE_SHARED_LIB_MODE
+    elif coverage_on():
+        link, run, gate, mode = _COVERAGE_LINK, _COVERAGE_RUN, _COVERAGE_GATE, COVERAGE_SHARED_LIB_MODE
+    else:
+        return
+    kwargs["coverage_debug"] = _linux(link)
+    kwargs["coverage_run"] = _linux(run)
+    if gate != None:
+        kwargs["coverage_gate"] = _linux(gate)
+        kwargs["coverage_mode"] = mode
+
+def coverage_shared_lib_macro(rule):
+    """mojo_shared_lib: `rule`, its coverage attributes set by the switch
+    (_coverage_shared_lib_kwargs)."""
+    def macro(**kwargs):
+        _coverage_shared_lib_kwargs(kwargs)
+        rule(**kwargs)
+    return macro
+
+def _check_shared_tools(ctx):
+    """A shared library's gate is never in enforce mode; outside the tests
+    cell its coverage attributes are what the macro sets (komira's link, run
+    and gate directories, COVERAGE_SHARED_LIB_MODE), so a BUCK file calling
+    the rule itself cannot give it others."""
+    where = ctx.label.raw_target()
+    _not_enforced(where, ctx.attrs.coverage_mode)
+    if ctx.label.cell == "tests":
+        return
+    for attr, want in (("coverage_debug", _COVERAGE_LINK), ("coverage_run", _COVERAGE_RUN), ("coverage_gate", _COVERAGE_GATE)):
+        d = getattr(ctx.attrs, attr)
+        if d == None or str(d.label.raw_target()) != want:
+            fail("{}: {} is {}, not {}: only a fixture of the tests cell may name another (tools/build/mojo/coverage.bzl)".format(where, attr, d.label.raw_target() if d else None, want))
+    if ctx.attrs.coverage_mode != COVERAGE_SHARED_LIB_MODE:
+        fail("{}: coverage_mode is {}, but the policy's for a shared library is {} (COVERAGE_SHARED_LIB_MODE, tools/build/coverage/policy.bzl)".format(where, ctx.attrs.coverage_mode, COVERAGE_SHARED_LIB_MODE))
+
+def coverage_shared_lib(ctx, tc, build, srcs, main, closure, c_link, link_extra, so_file):
+    """The `coverage` sub-target of a mojo_shared_lib with coverage builds
+    (`coverage_debug` set), as {"coverage": ...}; {} without. `build` is
+    defs.bzl's _build_executable, and the rest what the release build of
+    the library is given: its sources, `main`, the closure of its Mojo
+    dependencies, its C libraries, its extra link arguments and its file
+    name.
+
+    - The library built again at -O0 with line tables through the coverage
+      link directory (its sources named by their paths in the package, as
+      a test's): `[coverage][bin][<file>]` (category
+      `mojo_build_cov_shared_lib`).
+    - Each driver of `gate_srcs`, written or generated, at -O0 with line
+      tables: `[coverage][bin][<driver>]` (`mojo_build_cov_driver`), run
+      under kcov through the release gate's runner with that build as its
+      data, where the release gate stages the library, and the library's
+      sources at their paths in the package, and kcov measuring the
+      libraries the driver loads (cov_run.sh `--solib`):
+      `[coverage][tests][<driver>]` (`mojo_cov_run`). The generated exports
+      driver is not run: it only loads the library and looks its symbols up.
+    - The gate, `covcheck gate` over those reports, the library's
+      non-generated sources and each driver set aside (`--test-source`),
+      in COVERAGE_SHARED_LIB_MODE: `[coverage][gate]` (`mojo_cov_gate`).
+
+    A driver's report counts the library's own sources (`srcs` and `main`),
+    none of its Mojo dependencies compiled into it: a library's gate reads
+    its own tests' reports only, so its numbers do not depend on which
+    shared library links it. Nothing waits for any of it: the published
+    file and the release gate are what they are with coverage off."""
+    link = coverage_link_dir(ctx)
+    if link == None:
+        return {}
+    _check_shared_tools(ctx)
+    # cov_run.sh's [src] (it names nothing the library's build names: that
+    # names its sources by their paths in the package, given as data).
+    out_name = so_file[:so_file.rfind(".")]
+    src_dir = ctx.actions.copied_dir("cov/src/" + out_name, {s.short_path: s for s in srcs})
+    so = build(ctx, tc, "cov/" + so_file, srcs, main, closure, "0", "mojo_build_cov_shared_lib", None, c_link, abi_lib = True, link_extra = link_extra, debug_link = link)
+    data = {so_file: so} | {s.short_path: s for s in srcs}
+    names = [s.short_path for s in [main] + sorted([s for s in srcs if s != main], key = lambda s: s.short_path) if s.is_source]
+    bins, runs = {so_file: so}, {}
+    for g in ctx.attrs.gate_srcs:
+        stem = g.basename.removesuffix(".mojo")
+        bins[stem] = build(ctx, tc, "cov/drivers/{}/{}".format(stem, stem), [g], g, [], "0", "mojo_build_cov_driver", stem, None, debug_link = link)
+        runs[stem] = coverage_run(ctx, tc, g, stem, bins[stem], src_dir, out_name, "", data, [], solib = (so_file, names))
+    gate = None
+    if ctx.attrs.coverage_gate != None:
+        info = _gate_inputs(ctx, runs, {}, [], srcs, ctx.attrs.gate_srcs)
+        gate = _gate_action(ctx.actions, tc.busybox, ctx.attrs.coverage_gate, ctx.attrs.coverage_mode, info, "cov/gate/")
+    return coverage_sub_targets(bins, runs, gate, {})

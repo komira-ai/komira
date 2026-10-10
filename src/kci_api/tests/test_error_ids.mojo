@@ -67,6 +67,16 @@ def test_auto_promotion_ids() raises:
         assert_true(exit_code_of(String(OUTCOME_REFUSED), String(id)) == 3)
 
 
+def test_deploy_ids() raises:
+    # a DEPLOY step's ids pick no number of their own: the outcome does
+    # (REFUSED 3, FAILED 4, PARTIAL 6)
+    for id in ["KCI-E-CLOUD", "KCI-E-DEPLOY"]:
+        assert_true(is_error_id(String(id)))
+        assert_true(exit_code_of(String(OUTCOME_REFUSED), String(id)) == 3)
+        assert_true(exit_code_of(String("FAILED"), String(id)) == 4)
+        assert_true(exit_code_of(String("PARTIAL"), String(id)) == 6)
+
+
 def test_unknown_id_refused() raises:
     assert_true(is_error_id(String("KCI-E-STAGE-UNKNOWN")))
     var refused = False
