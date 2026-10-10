@@ -5,8 +5,8 @@
 #   * rsa_sha256_sign with a real RSA-2048 PKCS#8 key: its signature equals
 #     the one Python's `cryptography` made for the same key and message
 #     (PKCS#1 v1.5 is deterministic) and verifies under rsa_pkcs1_sha256_verify;
-#   * rsa_sha256_sign refusing an Ed25519 and a P-256 PKCS#8 key (the parsed
-#     key is not RSA) and a 488-bit RSA key (61 bytes cannot
+#   * rsa_sha256_sign refusing an Ed25519, a P-256 and an RSA-PSS PKCS#8 key
+#     (the parsed key is not EVP_PKEY_RSA) and a 488-bit RSA key (61 bytes cannot
 #     hold the 62-byte SHA-256 DigestInfo encoding, so the final sign fails
 #     after the size query);
 #   * rsa_pss_verify over SHA-384 and SHA-512 (the MD_SHA384 / MD_SHA512
@@ -192,6 +192,19 @@ def _p256_pkcs8_hex() -> String:
     )
 
 
+# The 488-bit key above with its AlgorithmIdentifier changed to id-RSASSA-PSS
+# (1.2.840.113549.1.1.10) and no parameters, which AWS-LC parses as an
+# EVP_PKEY_RSA_PSS key: the RSA key bytes are the same, so only the key-type
+# check refuses it before the sign step (whose error would say "final emit").
+comptime _RSA488_HEAD = "30820147020100300d06092a864886f70d0101010500"
+
+
+def _rsa488_pss_pkcs8_hex() -> String:
+    return "30820145020100300b06092a864886f70d01010a" + String(
+        _rsa488_pkcs8_hex()[byte=_RSA488_HEAD.byte_length():]
+    )
+
+
 def test_sign_refuses_keys_it_cannot_use() raises:
     var ed = _hex(
         "302e020100300506032b657004220420000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
@@ -202,6 +215,9 @@ def test_sign_refuses_keys_it_cannot_use() raises:
     assert_true(e.find("the key is not an RSA key") >= 0, "Ed25519 key: " + e)
     e = _sign_err(_hex(_rsa488_pkcs8_hex()))
     assert_true(e.find("EVP_DigestSign final emit failed") >= 0, "488-bit key: " + e)
+    assert_true(_rsa488_pkcs8_hex().startswith(_RSA488_HEAD), "rsaEncryption head")
+    e = _sign_err(_hex(_rsa488_pss_pkcs8_hex()))
+    assert_true(e.find("the key is not an RSA key") >= 0, "RSA-PSS key: " + e)
 
 
 # -----------------------------------------------------------------------------

@@ -112,14 +112,16 @@ def rsa_sha256_sign_ffi(
     the output signature is appended as base64url to form the final JWT.
 
     Internally:
-      1. Parse PKCS#8 DER -> EVP_PKEY via d2i_PrivateKey.
+      1. Parse PKCS#8 DER -> EVP_PKEY via EVP_parse_private_key, then
+         refuse the key unless EVP_PKEY_id says it is EVP_PKEY_RSA.
       2. EVP_DigestSignInit with EVP_sha256() and the parsed EVP_PKEY
          (defaults to PKCS#1 v1.5 padding for RSA, which matches GCP's
          RS256 algorithm per RFC 7518 §3.3).
       3. EVP_DigestSign (one-shot) to produce the signature.
       4. Free EVP_MD_CTX + EVP_PKEY.
 
-    Raises on parse failure, sign failure, or OOM.
+    Raises on parse failure, on a key that is not RSA (EC, Ed25519,
+    RSA-PSS), on sign failure, or on OOM.
     """
     var pkey: _FfiHandle
     var ctx: _FfiHandle

@@ -12,11 +12,14 @@
 #
 # sha256_compress_blocks_portable forces the body a CPU without the
 # extensions runs, so the vectors check it on any host.
-# sha256_compress_uses_hw must agree with the kernel's view of the CPU (the
-# sha_ni flag in /proc/cpuinfo): a dispatch that picked the hardware body on
-# a CPU without the extensions, or never picked it, fails here.
+# On Linux x86-64 sha256_compress_uses_hw must agree with the kernel's view of
+# the CPU (the sha_ni flag in /proc/cpuinfo): a dispatch that picked the
+# hardware body on a CPU without the extensions, or never picked it, fails
+# here. Off x86-64 it must say False, since only the portable body exists
+# there; /proc/cpuinfo is not read.
 # =============================================================================
 
+from std.sys.info import CompilationTarget
 from std.testing import assert_equal
 
 from komira_crypto.internal.asm.sha256_compress import (
@@ -100,6 +103,7 @@ def test_empty_input_leaves_state() raises:
 
 
 def _cpu_flags_have_sha_ni() raises -> Bool:
+    # Linux x86-64 only: /proc/cpuinfo has a "flags" line there.
     var info: String
     with open("/proc/cpuinfo", "r") as f:
         info = f.read()
@@ -111,10 +115,21 @@ def _cpu_flags_have_sha_ni() raises -> Bool:
 
 
 def test_dispatch_matches_the_cpu() raises:
-    var has = _cpu_flags_have_sha_ni()
-    assert_equal(sha256_compress_uses_hw(), has, "dispatch vs sha_ni")
-    # The answer is cached after the first read; a second call agrees.
-    assert_equal(sha256_compress_uses_hw(), has, "cached answer")
+    comptime if not CompilationTarget.is_x86():
+        # Off x86-64 the C entry has no hardware body to pick: it always runs
+        # the portable one (darwin-arm64 has no /proc/cpuinfo, and an arm64
+        # Linux cpuinfo lists "Features", not "flags").
+        assert_equal(sha256_compress_uses_hw(), False, "portable off x86-64")
+        assert_equal(sha256_compress_uses_hw(), False, "cached answer")
+    elif CompilationTarget.is_linux():
+        var has = _cpu_flags_have_sha_ni()
+        assert_equal(sha256_compress_uses_hw(), has, "dispatch vs sha_ni")
+        # The answer is cached after the first read; a second call agrees.
+        assert_equal(sha256_compress_uses_hw(), has, "cached answer")
+    else:
+        # x86-64 off Linux is no registered platform: the dispatch reads
+        # CPUID there too, and this test has no oracle for it yet.
+        raise Error("test_dispatch_matches_the_cpu: no CPU-feature oracle for this OS")
 
 
 def main() raises:
