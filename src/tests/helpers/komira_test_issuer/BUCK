@@ -7,13 +7,18 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # key rotation that publishes a key before it signs and keeps a former key
 # published until the max token lifetime plus the leeway have passed. Beside
 # it, the scenario table every issuer in the design must pass, and a runner
-# that drives any issuer through the `IssuerUnderTest` trait. Test-only, so
+# that drives any issuer through the `IssuerUnderTest` trait. It also serves
+# the RFC 8414 metadata document and a token endpoint for OAuth clients
+# authenticating with a signed assertion (komira_oauth's wire), with a client
+# registry, `jti` replay refusal and an in-process transport for
+# komira_oauth's `ClientCredentialSource`. Test-only, so
 # no conda package: a library names it in `test_deps`, which reaches that
 # library's welded tests and nothing it ships (tools/build/mojo/test_deps.bzl).
 #
 # Deps: komira_jose (the keyring, the signer and the verify half the
-# scenarios check with) and its closure: komira_crypto, komira_encoding,
-# komira_json, komira_jwks, komira_secret_store.
+# scenarios check with), komira_oauth (the token endpoint's wire and the
+# client registration record) and their closure: komira_crypto,
+# komira_encoding, komira_json, komira_jwks, komira_secret_store.
 #
 # The welded tests:
 # - test_user_token: the exact claims bytes and every refusal at its
@@ -26,6 +31,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_scenarios: the scenario table passes on ES256 and EdDSA issuers.
 # - test_runner: the runner on scripted faulty issuers, each failing the
 #   scenario that names its fault.
+# - test_token_endpoint: the token endpoint: a token for the resource that
+#   verifies under the issuer's key set, a replayed jti refused until the
+#   assertion's exp plus the leeway, every assertion and request refusal with
+#   its error code, the metadata document.
+# - test_client_roundtrip: komira_oauth's ClientCredentialSource against the
+#   endpoint: verifiable tokens refreshed 60 s before they expire across a key
+#   rotation, a failed refresh that serves nothing, a removed client.
 # - test_no_product_vocabulary: the sources name no product concept and hold
 #   no early date (komira_test_vocabulary).
 mojo_library(
@@ -38,13 +50,16 @@ mojo_library(
         "//src/komira_jose:komira_jose",
         "//src/komira_json:komira_json",
         "//src/komira_jwks:komira_jwks",
+        "//src/komira_oauth:komira_oauth",
         "//src/komira_secret_store:komira_secret_store",
     ],
     test_srcs = [
+        "tests/test_client_roundtrip.mojo",
         "tests/test_issuer.mojo",
         "tests/test_no_product_vocabulary.mojo",
         "tests/test_runner.mojo",
         "tests/test_scenarios.mojo",
+        "tests/test_token_endpoint.mojo",
         "tests/test_user_token.mojo",
     ],
     test_deps = ["//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary"],

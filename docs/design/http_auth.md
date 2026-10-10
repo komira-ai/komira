@@ -38,7 +38,7 @@ code with PKCE), token exchange (RFC 8693), DPoP (RFC 9449), mTLS-bound tokens (
 | ES256, EdDSA and RS256 verify, one pinned algorithm per verifier, the strict JOSE header gate and the claims policy (`ClaimPolicy`) | `komira_jose` | built. `komira_crypto/rs256_jwks.mojo` stays until `komira_http_auth` calls `komira_jose` instead. |
 | signing, a key ring | `komira_jose` | target |
 | several trust anchors per process, chosen by exact `iss` | `komira_http_auth` | target, after `komira_jose` |
-| `client_credentials` client, RFC 8414 metadata and RFC 7591 registration codecs | `komira_oauth` | target |
+| `client_credentials` client, RFC 8414 metadata and RFC 7591 registration codecs | `komira_oauth` | built: `ClientCredentialSource` over a transport trait; the registration record pins the assertion algorithm (`token_endpoint_auth_signing_alg`). No transport over `komira_http_client` yet. |
 | `RemoteAuthzPort` on AuthZEN, with the decision cache and batch `check_many` | `komira_authz_client` | target |
 | route catalog and deny-by-default gate | `komira_resource_gate` | target |
 | an in-process issuer and an in-process AuthZEN PDP for tests | `src/tests/helpers/komira_test_issuer`, `komira_test_pdp` | target. They are the executable spec of this document: any issuer or PDP that claims this contract passes their scenario tables. |
@@ -192,7 +192,7 @@ Target flags for authorization (`komira_authz_client`, `komira_oauth`): `--authz
 PDP's evaluation URL), `--authz-token-url`, `--authz-client-id` and `--authz-client-key` (a secret-store reference,
 never the key itself); or `--authz=allow-authenticated`. With no `--authz`, every governed route is denied.
 
-### Client credentials (target: `komira_oauth`)
+### Client credentials (`komira_oauth`)
 
 A service that calls the PDP, or another service, is an OAuth client. It gets a short-lived token for one audience
 from the issuer's token endpoint and presents it as a bearer token:
@@ -212,8 +212,9 @@ from the issuer's token endpoint and presents it as a bearer token:
   (client, resource), and on failure raises: it never serves a token past its `exp`.
 
 The registration record type and its JSON codec (RFC 7591: `client_id`, `client_name`, `jwks` or `jwks_uri`,
-`token_endpoint_auth_method: "private_key_jwt"`, `grant_types: ["client_credentials"]`, `scope`, and one extension
-member `resource_types`) are in `komira_oauth`. The registry is the issuer's. A client never registers itself; the
+`token_endpoint_auth_method: "private_key_jwt"`, `grant_types: ["client_credentials"]`, `scope`,
+`token_endpoint_auth_signing_alg` (the OpenID Connect registration member: ES256 or EdDSA, the one algorithm the issuer
+verifies the client's assertions with), and one extension member `resource_types`) are in `komira_oauth`. The registry is the issuer's. A client never registers itself; the
 private key stays in the client's secret store and only the public key enters the record.
 
 ### The decision point (target: `komira_authz_client`)
