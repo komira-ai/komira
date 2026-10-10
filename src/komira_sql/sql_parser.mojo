@@ -231,7 +231,7 @@ struct _Parser(Movable):
             # ⚠ APPENDED **AFTER** THE BRANCH IS PARSED, so a nested subquery
             # inside the branch takes a LOWER index than the branch itself —
             # the same inner-before-outer ordering every other producer here
-            # maintains, which is what lets `bind_sql` pre-bind by index.
+            # maintains, which is what lets `_bind_query` pre-bind by index.
             var idx = len(self.subqueries)
             self.subqueries.append(SubqueryDef(rhs^, SUBQ_UNION_ALL, String(""), String("")))
             if last < 0:
@@ -1318,7 +1318,7 @@ struct _Parser(Movable):
         the re-entrant `_parse_select_stmt` (so it gets the entire grammar). It is
         parked in the subquery side-table with kind `SUBQ_DERIVED`, its (REQUIRED)
         alias, and any column-list rename; the parser emits a `named(alias)`
-        relation, and `bind_sql` binds the body into the CTE scope under `alias`
+        relation, and `_bind_query` binds the body into the CTE scope under `alias`
         (applying the column-list rename to its output columns) so it resolves
         through the named-derived-relation path a CTE uses."""
         self._advance()  # '('
@@ -1907,7 +1907,7 @@ struct _Parser(Movable):
                     raise Error("SQL not supported: `IN (subquery)` requires a column on the left")
                 var in_kind = SUBQ_NOT_IN if negate else SUBQ_IN
                 var idx = len(self.subqueries)
-                self.subqueries.append(SubqueryDef(sq_body^, in_kind, String(left.text), String("")))
+                self.subqueries.append(SubqueryDef(sq_body^, in_kind, String(left.text), String(""), in_lhs_qualifier=String(left.qualifier)))
                 return SqlExpr.subquery(idx)
             # IN -> OR-of-EQ ; NOT IN -> AND-of-NE. `left` is reused per element
             # via `.copy()`; the original is dropped when this scope ends.
@@ -2573,7 +2573,7 @@ struct _Parser(Movable):
                 # reach one (`avg` and `mean` are both SXAGG_AVG), so the
                 # unaliased output-column name cannot be re-derived from `op`
                 # without answering `avg(v)` for a query that says `mean(v)`.
-                # See `SqlExpr.agg` and `sql_binder._duckdb_agg_text`.
+                # See `SqlExpr.agg` and `sql_bind_names._duckdb_agg_text`.
                 return SqlExpr.agg(UInt8(agg), arg^, is_distinct, name)
             # ranking window function `RANK() / ROW_NUMBER() / DENSE_RANK()` — these
             # are NOT aggregates (no `_agg_code` entry) and are only valid with an

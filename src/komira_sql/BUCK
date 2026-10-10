@@ -55,6 +55,7 @@ mojo_library(
         "tests/test_sql_bind_cast.mojo",
         "tests/test_sql_bind_fn.mojo",
         "tests/test_sql_bind_group_by.mojo",
+        "tests/test_sql_bind_in_lhs.mojo",
         "tests/test_sql_bind_internals_direct.mojo",
         "tests/test_sql_bind_join.mojo",
         "tests/test_sql_bind_names.mojo",

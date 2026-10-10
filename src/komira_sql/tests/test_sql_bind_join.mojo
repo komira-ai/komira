@@ -259,11 +259,11 @@ def test_outer_join_refusals() raises:
     )
     _check(
         "SELECT * FROM kk RIGHT JOIN mm ON kk.k = mm.k AND mm.b > 3",
-        "ERR: SQL not supported: a RIGHT OUTER JOIN whose ON carries a non-equi residual — the equi-keys are served but the residual is not (this binder carries a join residual on INNER / LEFT / SEMI / ANTI joins only). The equi-only form of this join (`ON <equi conjuncts>` with the residual moved to a WHERE) is served, but note that a WHERE does NOT preserve the outer rows a residual ON would."
+        "ERR: SQL not supported: a RIGHT OUTER JOIN whose ON carries a non-equi residual — the equi-keys are served but the residual is not (this binder carries a non-equi ON residual on a LEFT join only). The equi-only form of this join (`ON <equi conjuncts>` with the residual moved to a WHERE) is served, but note that a WHERE does NOT preserve the outer rows a residual ON would."
     )
     _check(
         "SELECT * FROM kk FULL JOIN mm ON kk.k = mm.k AND kk.a > 1",
-        "ERR: SQL not supported: a FULL OUTER JOIN whose ON carries a non-equi residual — the equi-keys are served but the residual is not (this binder carries a join residual on INNER / LEFT / SEMI / ANTI joins only). The equi-only form of this join (`ON <equi conjuncts>` with the residual moved to a WHERE) is served, but note that a WHERE does NOT preserve the outer rows a residual ON would."
+        "ERR: SQL not supported: a FULL OUTER JOIN whose ON carries a non-equi residual — the equi-keys are served but the residual is not (this binder carries a non-equi ON residual on a LEFT join only). The equi-only form of this join (`ON <equi conjuncts>` with the residual moved to a WHERE) is served, but note that a WHERE does NOT preserve the outer rows a residual ON would."
     )
     _check(
         "SELECT * FROM kk RIGHT JOIN mm ON kk.a > mm.b",

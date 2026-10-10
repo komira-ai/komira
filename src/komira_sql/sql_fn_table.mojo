@@ -468,7 +468,7 @@ Error on DuckDB v1.5.3), and the name `position` is not taken from a UDF.
 
 ⭐ A NAME OF ITS OWN RATHER THAN `strpos`, BECAUSE THE RESULT COLUMN IS NAMED
 AFTER IT. DuckDB prints `main."position"(s, 'b')` for `POSITION('b' IN s)`
-(MEASURED v1.5.3); the renderer (`sql_binder._duckdb_expr_text`) keys on this
+(MEASURED v1.5.3); the renderer (`sql_bind_names._duckdb_expr_text`) keys on this
 name to print the same, where a desugar to `strpos` would print `strpos(...)`."""
 
 comptime FN_ARITY_OWN: Int = -1
@@ -4415,7 +4415,7 @@ def sql_date_part_desugar(name: String) -> Optional[UInt8]:
     `EXPR_WHEN` root runs and an `EXPR_EXTRACT` under arithmetic does not.
     `era` is `EXPR_WHEN`-rooted; so are `century`/`millennium` (DuckDB's
     century numbering skips zero, so the BC arm needs a branch —
-    `sql_binder._year_derived_over`), and `decade` is a bare `BIN_DIV` and
+    `sql_bind_fn_args._year_derived_over`), and `decade` is a bare `BIN_DIV` and
     bind-level there. Over a PARQUET scan all four run. This route neither
     creates nor widens that limit.
 

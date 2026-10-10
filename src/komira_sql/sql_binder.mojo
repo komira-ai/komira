@@ -31,7 +31,7 @@ from komira_sql.sql_bind_scope import (
 )
 from komira_sql.sql_bind_subquery import (
     _bind_scalar_subquery_body, _inner_alias_set, _bind_correlated_subquery_body,
-    _not_in_lhs_is_null_free,
+    _not_in_lhs_is_null_free, _in_lhs_output_name,
 )
 from komira_sql.sql_bind_window_order import (
     _has_window, _bind_window_projection, _order_key_name, _OK_COLUMN, _OK_OUTPUT,
@@ -212,13 +212,15 @@ def _bind_query(
             var sq = _bind_scalar_subquery_body(sd.body, catalog, cte_scope, prebound)
             prebound.append(sq^)
         else:
+            # `in_lhs` is "" for EXISTS / NOT EXISTS (no left column).
+            var in_lhs = _in_lhs_output_name(stmt, i, catalog, cte_scope)
             var lhs_null_free = False
             if sd.kind == SUBQ_NOT_IN:
                 lhs_null_free = _not_in_lhs_is_null_free(
-                    stmt, i, sd.in_lhs_col, catalog, cte_scope
+                    stmt, i, in_lhs, catalog, cte_scope
                 )
             var pred = _bind_correlated_subquery_body(
-                sd.body, sd.kind, sd.in_lhs_col, catalog, cte_scope, prebound,
+                sd.body, sd.kind, in_lhs, catalog, cte_scope, prebound,
                 lhs_null_free,
             )
             prebound.append(pred^)

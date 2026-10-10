@@ -12,7 +12,8 @@
 #      user-written OR. (catches: the mark descending into a user OR)
 #   3. [NOT] IN lists desugar to OR-of-EQ / AND-of-NE carrying the `in` /
 #      `not in` mark; [NOT] IN (SELECT ...) and [NOT] EXISTS park the body
-#      in the subquery table. (catches: NOT IN desugared with OR)
+#      in the subquery table with the left column's name and qualifier.
+#      (catches: NOT IN desugared with OR; the qualifier dropped)
 #   4. [NOT] BETWEEN, [NOT] LIKE / ILIKE, [NOT] SIMILAR TO, the `~~` family,
 #      `~` / `!~`, and every postfix NULL test (also after a comparison and
 #      after a pattern test). (catches: ILIKE built with the LIKE flavour;
@@ -253,7 +254,7 @@ def test_subquery_predicates() raises:
     var st = _parse(
         "SELECT (SELECT 1) FROM t WHERE EXISTS (SELECT 1 FROM u)"
         " AND NOT EXISTS (SELECT 2 FROM v) AND a IN (SELECT b FROM w)"
-        " AND c NOT IN (SELECT d FROM x)"
+        " AND z.c NOT IN (SELECT d FROM x)"
     )
     assert_equal(len(st.query.subqueries), 5)
     assert_equal(Int(st.query.subqueries[0].kind), Int(SUBQ_SCALAR))
@@ -261,8 +262,10 @@ def test_subquery_predicates() raises:
     assert_equal(Int(st.query.subqueries[2].kind), Int(SUBQ_NOT_EXISTS))
     assert_equal(Int(st.query.subqueries[3].kind), Int(SUBQ_IN))
     assert_equal(st.query.subqueries[3].in_lhs_col, "a")
+    assert_equal(st.query.subqueries[3].in_lhs_qualifier, "")
     assert_equal(Int(st.query.subqueries[4].kind), Int(SUBQ_NOT_IN))
     assert_equal(st.query.subqueries[4].in_lhs_col, "c")
+    assert_equal(st.query.subqueries[4].in_lhs_qualifier, "z")
     assert_equal(st.query.select_items[0].expr.subquery_index(), 0)
     assert_equal(Int(st.query.select_items[0].expr.tag), Int(SX_SUBQUERY))
     _refuses("1 IN (SELECT b FROM u)", "`IN (subquery)` requires a column on the left")

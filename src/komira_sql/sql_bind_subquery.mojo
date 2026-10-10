@@ -346,8 +346,8 @@ def _bind_correlated_subquery_body(
 # When the facts are known before binding (`_rel_col_null_free`: the parquet
 # null counts say y, or x, holds no NULL), the matching check is left out.
 #
-# `x` is the LHS column's bare name (`SubqueryDef.in_lhs_col`; the parser
-# keeps no qualifier), as the membership equi uses it.
+# `x` is the name `_in_lhs_output_name` gives the LHS column, the same name
+# the membership equi uses.
 
 
 def _not_in_inner_plan(
@@ -449,6 +449,60 @@ def _where_top_conjunct_is_subquery(e: SqlExpr, idx: Int) -> Bool:
             e._binary.value().left[], idx
         ) or _where_top_conjunct_is_subquery(e._binary.value().right[], idx)
     return False
+
+
+def _sx_contains_subquery(e: SqlExpr, idx: Int) -> Bool:
+    """`e` holds `SX_SUBQUERY(idx)` under its SX_BINARY (AND / OR / comparison)
+    and SX_UNARY (NOT / IS NULL) nodes. Other node kinds are not searched."""
+    if e.tag == SX_SUBQUERY:
+        return e.subquery_index() == idx
+    if e.tag == SX_BINARY:
+        return _sx_contains_subquery(
+            e._binary.value().left[], idx
+        ) or _sx_contains_subquery(e._binary.value().right[], idx)
+    if e.tag == SX_UNARY:
+        return _sx_contains_subquery(e._agg.value().arg[], idx)
+    return False
+
+
+def _where_holds_subquery(s: SelectStmt, idx: Int) -> Bool:
+    """`s` has a WHERE and `_sx_contains_subquery` finds subquery `idx` in it."""
+    if not s.where_pred:
+        return False
+    return _sx_contains_subquery(s.where_pred.value(), idx)
+
+
+def _in_lhs_output_name(
+    stmt: SelectStmt, idx: Int, catalog: SqlCatalog, cte_scope: CteScope
+) raises -> String:
+    """The name the membership equi of `[NOT] IN (subquery)` `idx` binds its
+    left column by (and the name `_not_in_lhs_is_null_free` proves).
+
+    An unqualified `x` keeps its bare name, as the rest of a WHERE binds it.
+    A qualified `q.x` resolves (`BindScope.resolve_qualified`) in the FROM
+    scope of the statement whose WHERE holds the subquery: the top statement
+    or another subquery's body (a derived table, a UNION ALL branch, a
+    subquery predicate). Over `FROM t, u`, `u.k` is the output column
+    `k_right`. (A CTE body is bound before this runs and refuses a subquery
+    it holds.) A qualified left column found in no WHERE that way (one in
+    a HAVING, a select item or an outer join's ON, or under a CASE or a
+    function call) is refused."""
+    ref sd = stmt.subqueries[idx]
+    if sd.in_lhs_qualifier == "":
+        return String(sd.in_lhs_col)
+    if _where_holds_subquery(stmt, idx):
+        var scope = _build_bind_scope(stmt.from_tables, stmt.joins, catalog, cte_scope)
+        return scope.resolve_qualified(sd.in_lhs_qualifier, sd.in_lhs_col)
+    for j in range(len(stmt.subqueries)):
+        ref b = stmt.subqueries[j].body
+        if _where_holds_subquery(b, idx):
+            var scope = _build_bind_scope(b.from_tables, b.joins, catalog, cte_scope)
+            return scope.resolve_qualified(sd.in_lhs_qualifier, sd.in_lhs_col)
+    raise Error(
+        "SQL not supported: a qualified left column `" + sd.in_lhs_qualifier
+        + "." + sd.in_lhs_col + "` of `IN (subquery)` that is not an AND / OR /"
+        + " NOT / comparison operand of a WHERE clause"
+    )
 
 
 def _not_in_lhs_is_null_free(

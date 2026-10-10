@@ -73,8 +73,11 @@ def _sql_cast_target_arrow(ty: String) raises -> ArrowType:
             " VARCHAR operand -- an integer-to-text CAST cannot fail, so for"
             " one TRY_CAST is the same answer. A FLOAT or DECIMAL operand can"
             " be cast to BIGINT first, which ROUNDS its fraction away (a"
-            " different text), and so can a narrower or unsigned integer or a"
-            " BOOLEAN operand. A DATE or a TIMESTAMP operand has no remedy at"
+            " different text). No remedy is named for a narrower or unsigned"
+            " integer or a BOOLEAN operand: no cast kernel in"
+            " komira_column_kernels takes a bit-packed BOOLEAN column, and"
+            " `eval_cast` there wraps a UINT64 past BIGINT's range where"
+            " DuckDB raises. A DATE or a TIMESTAMP operand has no remedy at"
             " this door: DuckDB refuses CAST(<date> AS BIGINT), and so does"
             " this binder."
         )
