@@ -21,10 +21,22 @@
 # Test 3 is the control: with nothing missing the retry acknowledges the
 # committed offsets, so a scan that refused every retry fails too.
 #
+# Tests 4 to 6 pin the edges of that rule:
+#   * 4: the reaper lags the pointer: `_LOG_START` jumps to chunk 3 while
+#     chunk 2 (below it) still exists. The scan must restart AT the new
+#     pointer; stepping one chunk past the 404 would count chunk 2 again and
+#     ack batch 3 at offset 4.
+#   * 5: a chunk GET that fails with a 503 is a store error, not a missing
+#     chunk: it must reach the caller unchanged, not become a refusal.
+#   * 6: the chunk missing is the one `_LOG_START` names. Restarting there
+#     would read the same 404 forever, so the scan must refuse. The watchdog
+#     `alarm` turns that loop into a failed test instead of a hung build.
+#
 # Each batch is one record from producer 1, so batch `k` commits at chunk
 # `k`, offset `k`.
 # =============================================================================
 
+from std.ffi import external_call
 from std.testing import assert_equal, assert_true
 
 from komira_objectstore.cas_manifest import (
@@ -50,6 +62,10 @@ from komira_objectstore.types import (
 )
 
 comptime _PID = Int64(1)
+comptime _ERR_503 = "StoreError[UNAVAILABLE] status=503 injected"
+# Seconds before the watchdog kills a scan that never returns. A scan here
+# takes microseconds; the margin covers coverage builds.
+comptime _WATCHDOG_S = 60
 
 
 def _put_i64(mut out: List[UInt8], v: Int64):
@@ -80,24 +96,38 @@ def _batch_body(first_seq: Int64) -> List[UInt8]:
 
 
 struct _ReapOnRead(ConditionalWriteStore, ObjectStore, Movable, Deinitable):
-    """The first GET of `race_key` (while `<flag>` is absent) plays a
+    """The first GET of chunk `race_seq` (while `<flag>` is absent) plays a
     retention pass that lands between the scan's `_LOG_START` read and its
-    chunk read: `_LOG_START` moves to (seq 2, offset 2), chunks 0 and 1 are
-    deleted, and the GET then 404s, as it would on a real store. Every other
-    call goes to the shared inner store."""
+    chunk read: `_LOG_START` moves to (`start_seq`, `start_seq`), chunks
+    `0 .. reap_below - 1` are deleted, and the GET then 404s, as it would on a
+    real store. With `fail_msg` set, every GET of chunk `race_seq` raises it
+    instead and nothing moves. Every other call goes to the shared inner
+    store."""
 
     var inner: SharedInMemoryConditionalStore
     var prefix: String
     var race_key: String
     var flag: String
+    var start_seq: Int64
+    var reap_below: Int64
+    var fail_msg: String
 
     def __init__(
-        out self, var inner: SharedInMemoryConditionalStore, var prefix: String
+        out self,
+        var inner: SharedInMemoryConditionalStore,
+        var prefix: String,
+        race_seq: Int64 = Int64(1),
+        start_seq: Int64 = Int64(2),
+        reap_below: Int64 = Int64(2),
+        var fail_msg: String = String(""),
     ) raises:
         self.inner = inner^
-        self.race_key = chunk_key(prefix, Int64(1)).raw()
+        self.race_key = chunk_key(prefix, race_seq).raw()
         self.flag = prefix + "/test-race-armed"
         self.prefix = prefix^
+        self.start_seq = start_seq
+        self.reap_below = reap_below
+        self.fail_msg = fail_msg^
 
     def head(self, path: Path) raises -> ObjectMeta:
         return self.inner.head(path)
@@ -127,14 +157,18 @@ struct _ReapOnRead(ConditionalWriteStore, ObjectStore, Movable, Deinitable):
         return self.inner.get_range(path, start, length)
 
     def get(self, path: Path) raises -> List[UInt8]:
+        if path.raw() == self.race_key and self.fail_msg.byte_length() > 0:
+            raise Error(self.fail_msg)
         if path.raw() == self.race_key and self._armed():
             _ = self.inner.put(Path.parse(self.flag), List[UInt8]())
             _ = self.inner.put(
                 log_start_key(self.prefix),
-                encode_log_start(LogStart(Int64(2), Int64(2), String(""))),
+                encode_log_start(
+                    LogStart(self.start_seq, self.start_seq, String(""))
+                ),
             )
-            self.inner.delete(chunk_key(self.prefix, Int64(0)))
-            self.inner.delete(chunk_key(self.prefix, Int64(1)))
+            for k in range(Int(self.reap_below)):
+                self.inner.delete(chunk_key(self.prefix, Int64(k)))
         return self.inner.get(path)
 
     def _armed(self) -> Bool:
@@ -151,8 +185,8 @@ struct _ReapOnRead(ConditionalWriteStore, ObjectStore, Movable, Deinitable):
 
 def _append3[
     S: ConditionalWriteStore
-](mut m: CasManifestStore[S]) raises:
-    for k in range(3):
+](mut m: CasManifestStore[S], n: Int = 3) raises:
+    for k in range(n):
         var r = m.append_idempotent(
             _batch_body(Int64(k)), Int64(1), _PID, Int64(1), Int64(k),
             Int64(k), Int64(1),
@@ -240,6 +274,92 @@ def test_intact_lineage_acks_committed_offsets() raises:
     print("  PASS")
 
 
+def _retry[
+    S: ConditionalWriteStore
+](mut m: CasManifestStore[S], k: Int64) raises -> String:
+    """Retries batch `k`; describes the ack, or returns the error text."""
+    try:
+        var d = m.append_idempotent(
+            _batch_body(k), Int64(1), _PID, Int64(1), k, k, Int64(1)
+        )
+        return "acked " + _describe(d.outcome, d.chunk_seq, d.base_offset)
+    except e:
+        return String(e)
+
+
+def test_lagging_reaper_restarts_at_the_new_start() raises:
+    print("[scan] _LOG_START jumps to 3, chunk 2 still there -> restart at 3")
+    var shared = SharedInMemoryConditionalStore()
+    var p = String("eo/lag")
+    var plain = CasManifestStore[SharedInMemoryConditionalStore](
+        store=shared.clone(), prefix=p, retry=RetryPolicy.fast_test()
+    )
+    _append3(plain, 4)
+    var m = CasManifestStore[_ReapOnRead](
+        store=_ReapOnRead(
+            shared.clone(), p, race_seq=Int64(1), start_seq=Int64(3),
+            reap_below=Int64(2),
+        ),
+        prefix=p,
+        retry=RetryPolicy.fast_test(),
+    )
+    var d = m.append_idempotent(
+        _batch_body(Int64(3)), Int64(1), _PID, Int64(1), Int64(3), Int64(3),
+        Int64(1),
+    )
+    var got = _describe(d.outcome, d.chunk_seq, d.base_offset)
+    assert_equal(d.outcome, IDEMPOTENT_DUPLICATE, got)
+    assert_equal(d.chunk_seq, Int64(3), got)
+    assert_equal(d.base_offset, Int64(3), "committed at offset 3: " + got)
+    assert_equal(d.last_offset, Int64(3), got)
+    # The race ran, and it left chunk 2 below the new start (the lag).
+    assert_equal(m.read_log_start().log_start_seq, Int64(3))
+    _ = shared.get(chunk_key(p, Int64(2)))
+    print("  PASS")
+
+
+def test_chunk_read_store_error_propagates() raises:
+    print("[scan] a 503 on a chunk GET reaches the caller unchanged")
+    var shared = SharedInMemoryConditionalStore()
+    var p = String("eo/unavailable")
+    var plain = CasManifestStore[SharedInMemoryConditionalStore](
+        store=shared.clone(), prefix=p, retry=RetryPolicy.fast_test()
+    )
+    _append3(plain)
+    var m = CasManifestStore[_ReapOnRead](
+        store=_ReapOnRead(
+            shared.clone(), p, race_seq=Int64(1), fail_msg=String(_ERR_503)
+        ),
+        prefix=p,
+        retry=RetryPolicy.fast_test(),
+    )
+    var msg = _retry(m, Int64(2))
+    assert_equal(msg, String(_ERR_503))
+    print("  PASS")
+
+
+def test_missing_chunk_at_log_start_is_refused() raises:
+    print("[scan] the chunk _LOG_START names is missing -> refuse, no loop")
+    var shared = SharedInMemoryConditionalStore()
+    var p = String("eo/torn-start")
+    var m = CasManifestStore[SharedInMemoryConditionalStore](
+        store=shared.clone(), prefix=p, retry=RetryPolicy.fast_test()
+    )
+    _append3(m)
+    shared.delete(chunk_key(p, Int64(0)))
+    # SIGALRM's default action ends the process: a scan that restarts at the
+    # same missing chunk forever fails here instead of hanging the build.
+    _ = external_call["alarm", UInt32](UInt32(_WATCHDOG_S))
+    var msg = _retry(m, Int64(2))
+    _ = external_call["alarm", UInt32](UInt32(0))
+    assert_true(
+        msg.find("MISSING committed chunk at seq 0") >= 0
+        and msg.find("torn manifest lineage") >= 0,
+        "expected a torn-lineage refusal naming chunk 0, got: " + msg,
+    )
+    print("  PASS")
+
+
 def main() raises:
     var failed = 0
     try:
@@ -257,6 +377,24 @@ def main() raises:
     except e:
         failed += 1
         print("[FAIL] test_intact_lineage_acks_committed_offsets: " + String(e))
+    try:
+        test_lagging_reaper_restarts_at_the_new_start()
+    except e:
+        failed += 1
+        print(
+            "[FAIL] test_lagging_reaper_restarts_at_the_new_start: "
+            + String(e)
+        )
+    try:
+        test_chunk_read_store_error_propagates()
+    except e:
+        failed += 1
+        print("[FAIL] test_chunk_read_store_error_propagates: " + String(e))
+    try:
+        test_missing_chunk_at_log_start_is_refused()
+    except e:
+        failed += 1
+        print("[FAIL] test_missing_chunk_at_log_start_is_refused: " + String(e))
     if failed > 0:
         raise Error(String(failed) + " test(s) failed")
     print("ALL idempotent scan tests PASSED")

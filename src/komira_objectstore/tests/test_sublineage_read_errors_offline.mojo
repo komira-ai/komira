@@ -277,9 +277,9 @@ def main() raises:
             "[FAIL] test_no_fault_reads_the_shard_and_empty_reads_empty: "
             + String(e)
         )
-    # Last: before komira-ai/komira#1087 was fixed, a failed `_LOG_START`
-    # read released the process-wide CAS gate twice, and any later gated
-    # write in this process (a fold's `advance_log_start`) then blocked.
+    # Last: if a failed `_LOG_START` read ever released the process-wide CAS
+    # gate twice again (komira-ai/komira#1087), later gated writes in this
+    # process would block; running this leg last lets the others report first.
     try:
         test_reload_log_start_error_raises()
     except e:

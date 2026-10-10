@@ -1937,8 +1937,8 @@ struct CasManifestStore[Store: ConditionalWriteStore](
     def _read_dedup_sentinel_inner(
         self, producer_id: Int64, first_seq: Int64
     ) raises -> Optional[DedupSentinel]:
-        # UNLOCKED sentinel read (the gate is held by the caller — the public
-        # `read_dedup_sentinel` rdlock, or `append_idempotent`'s wrlock).
+        # UNLOCKED sentinel read: the public `read_dedup_sentinel` holds the
+        # gate's rdlock; `append_idempotent` calls this without the gate.
         var key = dedup_sentinel_key(self._prefix, producer_id, first_seq)
         try:
             var raw = self._store.get(key)
@@ -2294,15 +2294,13 @@ struct CasManifestStore[Store: ConditionalWriteStore](
     def _scan_tail_for_batch(
         self, producer_id: Int64, first_seq: Int64
     ) raises -> Optional[AppendResult]:
-        # EXACT phantom-detect: walk the authoritative tail DOWNWARD from the
-        # bucket's true head and stop at the first chunk whose body carries
-        # `(producer_id, first_seq)` (the broker's producer trailer is in
-        # every chunk body). A chunk with that
+        # EXACT phantom-detect: walk the live chunks FORWARD from `_LOG_START`
+        # up to the bucket's true top and stop at the first chunk whose body
+        # carries `(producer_id, first_seq)` (the broker's producer trailer is
+        # in every chunk body). A chunk with that
         # identity exists IFF the append committed — no false positive (the
         # identity is exact), no false negative (the log-start-aware
-        # authoritative tail sees every live committed chunk). Bounded: the
-        # latest batch of an idempotent producer is near the tail (early-exit),
-        # reusing `recover_last_committed_seq`'s top-down early-exit walk.
+        # authoritative tail sees every live committed chunk).
         #
         # Returns the committed `AppendResult{chunk_seq, base_offset, last_offset}`
         # (etag/attempts unused by the caller) when found, else None.
