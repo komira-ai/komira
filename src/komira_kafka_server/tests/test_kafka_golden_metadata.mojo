@@ -248,6 +248,28 @@ def test_metadata_request_v9_null_name_refused() raises:
     )
 
 
+def test_metadata_request_v9_null_later_name_refused() raises:
+    # The rule holds for every entry, not just the first: a decoder that
+    # refused a null only at index 0 would accept this body as ["a"].
+    var b = _hex(
+        "03"  # topics: 2
+        " 02 61 | 00"  # name: "a", no tags
+        " 00 | 00"  # name: null (varint 0), no tags
+        " 00 00 00"  # three booleans
+        " 00"  # tags
+    )
+    var dec = KafkaDecoder(Span(b))
+    var reason = String("")
+    try:
+        _ = decode_metadata_request_body_v9(dec)
+    except e:
+        reason = String(e)
+    assert_true(
+        "null length for non-nullable COMPACT_STRING" in reason,
+        "null second v9 topic name accepted; reason: '" + reason + "'",
+    )
+
+
 # -----------------------------------------------------------------------------
 # ApiVersions below v3: the request body is empty; the response gains
 # throttle_time_ms at v1.
@@ -307,6 +329,7 @@ def main() raises:
     test_metadata_request_v9_named()
     test_metadata_request_v9_all_topics()
     test_metadata_request_v9_null_name_refused()
+    test_metadata_request_v9_null_later_name_refused()
     test_api_versions_request_below_v3_reads_nothing()
     test_api_versions_response_v1_v2()
     test_framed_negative_size()
