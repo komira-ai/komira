@@ -49,7 +49,7 @@ mojo_shared_lib(
         "komira_ea_armed",
         "komira_objstore_enoent",
         "komira_proc_spawn",
-        "komira_crypto_sha256_block_data_order_hw",
+        "komira_crypto_sha256_block_data_order",
         "komira_awslc_CRYPTO_library_init",
         "BrotliDecoderCreateInstance",
         "komira_s2n_init",
