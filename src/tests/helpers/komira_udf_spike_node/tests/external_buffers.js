@@ -43,7 +43,7 @@
 //
 // Mutants planted (rt_arrow.c): count_nulls reading its bits from 0, not the
 // offset: red on the null count of the 1000-row and 3-row slices; `nc = -1` for
-// `nc = count_nulls(...)`: red on the wrap count of the no-null run; the
+// `nc = count_nulls(...)`: red on the wrap count of the all-valid-bitmap run; the
 // runtime-file variable left set: red on its assertion. Also: rt_columns_to_js wrapping per child, not per address
 // (rt_wrap_buffer without the wrap set): red on the wrap count;
 // rt_unwrap_all not detaching: red on the kept view; adapter.js's getter() reading
@@ -167,6 +167,10 @@ h.watchdog(`external buffers ${variant}`);
     const none = await run({ entry: 'fixtures.js#double', offset: 13, nullEvery: 0, nullCountUnknown: 1, check: CHECK.AFFINE, a: 2, b: 0 });
     assert.equal(t0(none.r, T.BAD_VALUES), 0);
     assert.equal(none.d.externalWraps, none.calls, 'an unknown null count over no null is counted as none: the values cross, no bitmap');
+    // the same with a validity bitmap present (all rows valid): the runtime counts it, finds none, and sends no bitmap
+    const allValid = await run({ entry: 'fixtures.js#double', offset: 13, nullEvery: 0, validBitmap: 1, nullCountUnknown: 1, check: CHECK.AFFINE, a: 2, b: 0 });
+    assert.equal(t0(allValid.r, T.BAD_VALUES), 0);
+    assert.equal(allValid.d.externalWraps, allValid.calls, 'an unknown null count over an all-valid bitmap is counted as none: no bitmap crosses');
     // The exact count the function sees (it reads the vector's nullCount): of 1000 rows
     // sliced at bit 13 with every 7th null, 143 (a count from bit 0 gives 141); of 3 rows,
     // 1 (a count from bit 0 over bits 0 to 2 gives 0 and the null is lost).

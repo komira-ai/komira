@@ -120,6 +120,7 @@ static void read_opts(napi_env env, napi_value o, struct job* j) {
   r->offset = (int64_t)num_opt(env, o, "offset", 0);
   r->null_every = (int32_t)num_opt(env, o, "nullEvery", 0);
   r->null_count_unknown = (int32_t)num_opt(env, o, "nullCountUnknown", 0);
+  r->valid_bitmap = (int32_t)num_opt(env, o, "validBitmap", 0);
   r->form = (int32_t)num_opt(env, o, "form", 2);
   r->descriptor_version = (int32_t)num_opt(env, o, "descriptorVersion", 0);
   r->descriptor_len = (int32_t)num_opt(env, o, "descriptorLen", 0);

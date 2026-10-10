@@ -266,12 +266,12 @@ static int make_inputs(const struct run_opts* o, struct inputs* in) {
     if (in->values[k] == NULL) return 0;
     fill_values(o, in->values[k], k);
   }
-  if (o->null_every > 0) {
+  if (o->null_every > 0 || o->valid_bitmap) {
     size_t vb = (size_t)((o->offset + o->rows + 7) >> 3) + 1;
     in->valid = malloc(vb);
     if (in->valid == NULL) return 0;
     memset(in->valid, 0xFF, vb);
-    for (int64_t r = 0; r < o->rows; r += o->null_every) {
+    for (int64_t r = 0; o->null_every > 0 && r < o->rows; r += o->null_every) {
       int64_t at = o->offset + r;
       in->valid[at >> 3] &= (uint8_t)~(1u << (at & 7));
       in->nulls++;
