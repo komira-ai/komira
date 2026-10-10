@@ -62,7 +62,11 @@ from komira_plan_ir.logical_plan import (
     SOURCE_IN_MEMORY,
     JOIN_INNER,
     JOIN_LEFT,
+    JOIN_RIGHT,
+    JOIN_FULL,
     JOIN_SEMI,
+    JOIN_ANTI,
+    JOIN_CROSS,
     PLAN_SCAN,
     PLAN_FILTER,
     PLAN_PROJECT,
@@ -94,7 +98,7 @@ from komira_optimizer.optimizer_payload_narrow import (
 # The table
 # =============================================================================
 
-comptime _ROWS = 70
+comptime _ROWS = 77
 
 
 def _expected_table() -> String:
@@ -131,8 +135,15 @@ refuse_no_table_stats => scan#0: | scan#1: bv:2:1
 refuse_non_parquet_side => scan#0: | scan#1: bv:2:1
 refuse_left_join => scan#0: | scan#1: | scan#2: ov:2:1
 refuse_semi_join => scan#0: | scan#1: | scan#2: ov:2:1
+refuse_right_join => scan#0: | scan#1: | scan#2: ov:2:1
+refuse_full_join => scan#0: | scan#1: | scan#2: ov:2:1
+refuse_anti_join => scan#0: | scan#1: | scan#2: ov:2:1
+refuse_cross_join => scan#0: | scan#1: | scan#2: ov:2:1
 refuse_residual => scan#0: | scan#1: | scan#2: ov:2:1
 refuse_two_key => scan#0: | scan#1: | scan#2: ov:2:1
+refuse_two_left_keys => scan#0: | scan#1: | scan#2: ov:2:1
+refuse_two_right_keys => scan#0: | scan#1: | scan#2: ov:2:1
+refuse_no_keys => scan#0: | scan#1: | scan#2: ov:2:1
 side_filter => scan#0: pv:2:1 | scan#1: bv:2:1
 side_pure_project => scan#0: pv:2:1 | scan#1: bv:2:1
 side_alias_same_name => scan#0: pv:2:1 | scan#1: bv:2:1
@@ -504,6 +515,18 @@ def _refusal_fixture(name: String) raises -> Optional[LogicalPlan]:
         return _outer(_join(_p(), _good_right(), JOIN_LEFT))
     if name == "refuse_semi_join":
         return _outer(_join(_p(), _good_right(), JOIN_SEMI))
+    if name == "refuse_right_join":
+        return _outer(_join(_p(), _good_right(), JOIN_RIGHT))
+    if name == "refuse_full_join":
+        return _outer(_join(_p(), _good_right(), JOIN_FULL))
+    if name == "refuse_anti_join":
+        return _outer(_join(_p(), _good_right(), JOIN_ANTI))
+    if name == "refuse_cross_join":
+        return _outer(
+            LogicalPlan.join(
+                _p(), _good_right(), List[String](), List[String](), JOIN_CROSS
+            )
+        )
     if name == "refuse_residual":
         var residual = Optional[OwnedPointer[Expr]](
             OwnedPointer(Expr.binary(BIN_GT, Expr.col_ref("pv"), Expr.col_ref("bv")))
@@ -524,6 +547,29 @@ def _refusal_fixture(name: String) raises -> Optional[LogicalPlan]:
         return _outer(
             LogicalPlan.join(
                 _scan("l.parquet", lcols), _scan("r.parquet", rcols), l^, r^, JOIN_INNER
+            )
+        )
+    if name == "refuse_two_left_keys":
+        # (key, k2) on the left, one key on the right.
+        var lcols = _cols3(_key(), _c("k2", 0, 9), _c("pv", 1, 999))
+        var l = _keys()
+        l.append(String("k2"))
+        return _outer(
+            LogicalPlan.join(_scan("l.parquet", lcols), _good_right(), l^, _keys(), JOIN_INNER)
+        )
+    if name == "refuse_two_right_keys":
+        # One key on the left, (key, k2) on the right.
+        var rcols = _cols3(_key(), _c("k2", 0, 9), _c("bv", 1, 9999))
+        var r = _keys()
+        r.append(String("k2"))
+        return _outer(
+            LogicalPlan.join(_p(), _scan("r.parquet", rcols), _keys(), r^, JOIN_INNER)
+        )
+    if name == "refuse_no_keys":
+        # An INNER join with no equi-keys (a predicate join's shape).
+        return _outer(
+            LogicalPlan.join(
+                _p(), _good_right(), List[String](), List[String](), JOIN_INNER
             )
         )
     return None
