@@ -76,7 +76,7 @@ from komira_column_kernels.compiler_helpers import (
     field_for_expr,
 )
 from komira_plan_ir.logical_plan import ExprArray, LogicalPlan, PLAN_PROJECT
-from komira_plan_ir.physical_plan import MorselOp
+from komira_physical_plan.physical_plan import MorselOp
 
 
 # =============================================================================

@@ -7,7 +7,7 @@
 #   `PartitionPredicate` / `PartitionConstraint` live in
 #   `komira_async.fs.pruned_hive_discovery`. The physical-plan node that
 #   reaches the materialize site — `ParquetSourceData`
-#   (`komira_plan_ir.physical_plan`) — carries the predicate by value
+#   (`komira_physical_plan.physical_plan`) — carries the predicate by value
 #   (the dir-scan-Hive discriminant). But `komira_async` DEPENDS ON
 #   the core packages, so `ParquetSourceData` CANNOT carry a `komira_async` type
 #   (that would invert / cycle the dep graph). We therefore need a

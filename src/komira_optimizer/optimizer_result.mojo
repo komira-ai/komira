@@ -32,8 +32,8 @@
 #
 # The optimizer's output is an optimized `LogicalPlan`, and that is what an
 # `OptimizeResult` carries. komira_optimizer imports no physical-plan IR
-# (`deps_lint` in its BUCK refuses `komira_plan_ir.physical_plan` and
-# `komira_plan_ir.physical_plan_purity_gate`): lowering to a physical plan,
+# (komira_physical_plan is not in the closure of its deps, so such an import
+# does not resolve): lowering to a physical plan,
 # and the doors that check one, belong to the packages that build it, so no
 # refusal of theirs is classified here.
 #

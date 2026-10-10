@@ -1,0 +1,1 @@
+"""The PhysicalPlan IR (segment descriptors: a source, a chain of morsel operators and a sink, as inert data), its IR version door, and the purity gate that refuses a physical plan still holding a LogicalPlan."""

@@ -160,7 +160,8 @@ COVERAGE_BRANCH_GATE = {
     # call's compiler-made branch before, refused in a `try:` body by it.
     "komira//src/komira_parquet_api:komira_parquet_api": "its four tests' branches all classify (124 arms of 2 files)",
     "komira//src/komira_parquet_codec:komira_parquet_codec": "its 16 tests' branches all classify (416 arms of 8 files, 14 of them `try` arms)",
-    "komira//src/komira_plan_ir:komira_plan_ir": "its 19 tests' branches all classify (1130 arms of 9 files)",
+    "komira//src/komira_physical_plan:komira_physical_plan": "its two tests' branches all classify (148 arms of 2 files)",
+    "komira//src/komira_plan_ir:komira_plan_ir": "its 25 tests' branches all classify (1514 arms of 10 files)",
     "komira//src/komira_plan_stats:komira_plan_stats": "its test's branches all classify (116 arms of 2 files)",
     "komira//src/komira_protobuf:komira_protobuf": "its two tests' branches all classify (106 arms of 2 files)",
     "komira//src/komira_resources:komira_resources": "its test's branches all classify (2 arms of 1 file)",

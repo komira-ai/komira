@@ -326,8 +326,8 @@ Packages:
   `komira_orc`, `komira_csv`, `komira_json_index`, `komira_jsonl`,
   `komira_compression`, `komira_lz4`, `komira_zlib` (`komira_json`, a JSON
   reader and writer, is released and listed with the core utilities below);
-- the engine: `komira_plan_expr`, `komira_plan_ir`, `komira_plan_proto`,
-  `komira_plan_stats`, `komira_plan_wire`, `komira_pplan_wire`, `komira_sql`,
+- the engine: `komira_plan_expr`, `komira_plan_ir`, `komira_physical_plan`,
+  `komira_plan_proto`, `komira_plan_stats`, `komira_plan_wire`, `komira_pplan_wire`, `komira_sql`,
   `komira_optimizer`, `komira_eval`, `komira_expr`, `komira_agg`,
   `komira_agg_api`, `komira_op_agg_row_api`, `komira_op_agg_state`,
   `komira_kernels`, `komira_column_kernels`, `komira_column_format`,
