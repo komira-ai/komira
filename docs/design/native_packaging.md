@@ -18,9 +18,10 @@ into it). They stay on hold until this plan is approved and are then closed; wha
 "What happens to each open PR".
 
 **Stages**, as the glossary of [staged_pipeline.md](staged_pipeline.md) names them (its follow-up
-#1184, open, writes the glossary): **beta** builds once, publishes the packages to the `beta` conda
-channel, installs from it and runs the README examples and the package test tiers; **gamma** is only
-real resources in the gamma cloud accounts (deploys and real-cloud validations) and names no conda
+#1184, merged, holds the [glossary](staged_pipeline.md#glossary)): **beta** builds once, publishes
+the packages to the `beta` conda channel, installs from it and runs the README examples and the
+package test tiers; **gamma** is only real resources in the gamma cloud accounts (deploys and
+real-cloud validations) and names no conda
 channel; **prod** promotes the same bytes to the prod channel. Every check of an installed native
 package below is therefore beta's, in its install job: `beta_install`, the name staged_pipeline.md
 on `main` uses; continuous_publish.md already calls it `beta_validate`, the name #1184 gives it.
@@ -318,8 +319,8 @@ no exception:
 
 - **Where they are built.** Each `.so` is a build action of `<lib>_conda[release]`, so the `build`
   job (on the farm, with the release stamp) links it, runs checks 1 to 7 on it, and packs it into the
-  library's `.conda`. No later job compiles or links anything: `beta`, `beta_install`, `gamma`,
-  `validate` and `prod` download the run's `kci-release-<revision>` artifact.
+  library's `.conda`. No later job compiles or links anything: `beta`, `beta_validate`, `gamma`
+  and `prod` download the run's `kci-release-<revision>` artifact.
 - **How the set hash covers them.** The set hash has one line per artifact with the sha256 of its
   `.conda` (**EXISTS:** `set_hash.mojo`), and the `.so` is inside that file, so any change to a `.so`
   changes the hash and every later stage refuses the set before any effect (`KCI-E-SET-HASH`, exit 3).

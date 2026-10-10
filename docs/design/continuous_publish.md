@@ -17,8 +17,7 @@ and on [ci.md](../ci.md), the authority for the workflows. Where this document a
 **Vocabulary.** The words *beta*, *gamma*, *prod*, *beta channel*, *gamma accounts*, the *tiers*
 (fake, emulator, fixture, e2e, real-cloud), *validated hash*, *single flight*, *never backward*,
 *break-glass* and *main red* mean exactly what the glossary of the staged pipeline says
-(`docs/design/staged_pipeline.md`, section "Glossary"; a path, not a link, until #1184 lands: that
-section exists only from #1184 on, and the doc links lint refuses a link to a missing heading).
+([staged_pipeline.md, section "Glossary"](staged_pipeline.md#glossary)).
 This document does not define them again. In short: **beta** builds once, runs this document's
 tiers, publishes to the **beta channel** and installs from it; **gamma** holds only real
 cloud resources and names no channel; **prod** promotes the same bytes. Until the staged pipeline's
