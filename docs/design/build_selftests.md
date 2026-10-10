@@ -369,6 +369,19 @@ goes with the last row that uses it.
 | negative/spsc_ring_* | element refusal; race falsifier; no caller | del | nothing: the scripts and their fixtures are deleted | n/a | 2 |
 | negative/ fixtures | planted inputs | per row | become Zig test data or scenario fixtures with their rows | n/a | with its last row |
 
+### New checks with no shell lines: zig_module (#1295)
+
+The shared Zig markdown module adds a `zig_module` rule and a `deps` attribute on `zig_exe` and
+`zig_test` (`tools/build/mojo/toolchain.bzl`). Its refusals and its weld have no `run_tests.sh` lines
+to delete, so these rows add cases to existing scenarios. They land in the named slice, or after
+#1295 merges if that is later. They are not counted among the 188 rows above.
+
+| id | what | bucket | lands in | mutant | slice |
+|---|---|---|---|---|---|
+| zig_module reserved name | a `zig_module` named `root`, `std` or `builtin` fails analysis, naming zig's own module names | 3 | `analysis_refusals_zig` | delete the reserved-name `fail()` | 3 |
+| zig_module duplicate import | two `deps` imported under one name fail analysis, naming the name | 3 | `analysis_refusals_zig` | delete the duplicate-name `fail()` (zig's own "duplicate module" error would then be the only signal) | 3 |
+| zig_module weld | an importer does not build when its module's welded unit tests fail | 3 | `gate_wiring` case "zig module red" (scratch tree, a failing case planted in the module's test) | drop the `.passed` outputs from `ZigModuleInfo.inputs` | 4 |
+
 ## Bucket-3 scenarios
 
 All under `//tools/build/selftest/`, one Zig test target each:
@@ -377,7 +390,7 @@ All under `//tools/build/selftest/`, one Zig test target each:
   `darwin_platform`.
 - Analysis and load refusals (tables of target, `-c` overrides, exact message):
   `analysis_refusals_mojo`, `_aws_client`, `_gcp_client`, `_proto`, `_readme`, `_lint`,
-  `_python_oracle`, `_node`, `_rust`, `_coverage`, `_platform_table`, and `config_refusals`.
+  `_python_oracle`, `_node`, `_rust`, `_coverage`, `_platform_table`, `_zig`, and `config_refusals`.
 - Builds that must go red: `gate_wiring`, `shared_lib_gate`, `compile_isolation`, `planted_red_builds`,
   `assert_level_reds`, `test_limits`, `coverage_gate_reds`.
 - aquery diffs: `assert_level_commands`, `aquery_opt_levels`, `coverage_platforms`, `coverage_keys`,
