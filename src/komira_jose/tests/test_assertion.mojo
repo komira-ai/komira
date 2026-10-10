@@ -192,6 +192,34 @@ def test_jti_is_random() raises:
     assert_equal(len(base64_url_decode_nopad(new_jti())), JOSE_JTI_BYTES)
 
 
+def test_jti_bits() raises:
+    # Catches: a jti with fewer than 128 random bits, e.g. one byte of the
+    # 16 never filled (left 0) or filled with a constant. 32 minted jtis;
+    # every byte position must take at least two values. A position of a
+    # truly random jti stays constant over 32 draws with probability
+    # 256^-31 (no false red in practice).
+    var s = _signer("EdDSA")
+    var v = _verifier(s)
+    var draws = List[List[UInt8]]()
+    for _ in range(32):
+        var t = mint_client_assertion(
+            s, client_id=CLIENT, audience=ENDPOINT, now=NOW, ttl_s=60
+        )
+        var j = verify_client_assertion(t, v, _policy()).jti
+        var b = base64_url_decode_nopad(j)
+        assert_equal(len(b), JOSE_JTI_BYTES)
+        draws.append(b^)
+    var fixed = String("")
+    for i in range(JOSE_JTI_BYTES):
+        var varies = False
+        for k in range(1, len(draws)):
+            if draws[k][i] != draws[0][i]:
+                varies = True
+        if not varies:
+            fixed += String(i) + " "
+    assert_equal(fixed, "", "jti byte positions that never varied")
+
+
 def test_mint_bounds() raises:
     # Catches: an empty claim minted, a negative time, or the lifetime
     # bound moved by one.
@@ -206,6 +234,17 @@ def test_mint_bounds() raises:
     assert_equal(_mint_err(ttl=1), "")
     assert_equal(_mint_err(ttl=JOSE_ASSERTION_MAX_TTL_S), "")
     assert_equal(_mint_err(ttl=JOSE_ASSERTION_MAX_TTL_S + 1), TTL)
+    # The bound is the literal 300 the refusal text and RFC 7523 profile
+    # name, not whatever the constant holds.
+    assert_equal(JOSE_ASSERTION_MAX_TTL_S, Int64(300))
+    assert_equal(_mint_err(ttl=300), "")
+    assert_equal(_mint_err(ttl=301), TTL)
+    # exp = now + ttl must fit an Int64: at the largest time the sum would
+    # wrap to a negative exp.
+    comptime LATE = "JoseError: the assertion expiry is past the largest time"
+    assert_equal(_mint_err(now=Int64.MAX - 300, ttl=300), "")
+    assert_equal(_mint_err(now=Int64.MAX - 299, ttl=300), LATE)
+    assert_equal(_mint_err(now=Int64.MAX, ttl=1), LATE)
     var got = String("")
     try:
         _ = assertion_claims(
@@ -312,6 +351,10 @@ def main() raises:
         test_jti_is_random()
     except e:
         failures += String("test_jti_is_random: ") + String(e) + "\n"
+    try:
+        test_jti_bits()
+    except e:
+        failures += String("test_jti_bits: ") + String(e) + "\n"
     try:
         test_mint_bounds()
     except e:

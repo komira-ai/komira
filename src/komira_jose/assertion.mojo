@@ -13,8 +13,9 @@
 #
 # in that order. `jti` is 16 bytes (128 bits) from AWS-LC's random source,
 # base64url without padding: a caller cannot choose or omit it. `iss`, `sub`
-# and `aud` must be non-empty, `now` non-negative, and `ttl_s` 1 to
-# `JOSE_ASSERTION_MAX_TTL_S` (300) seconds.
+# and `aud` must be non-empty, `now` non-negative, `ttl_s` 1 to
+# `JOSE_ASSERTION_MAX_TTL_S` (300) seconds, and `now + ttl_s` no larger than
+# the largest Int64 (so `exp` cannot wrap negative).
 #
 # Verify (`verify_assertion`): `verify_jwt` with the policy (its one issuer,
 # audience, `typ`, time, leeway and max TTL; RFC 7523 section 3 items 1 to
@@ -89,6 +90,8 @@ def assertion_claims(
         _refuse("the assertion time is negative")
     if ttl_s < 1 or ttl_s > JOSE_ASSERTION_MAX_TTL_S:
         _refuse("the assertion lifetime must be 1 to 300 seconds")
+    if now > Int64.MAX - ttl_s:
+        _refuse("the assertion expiry is past the largest time")
     if jti.byte_length() == 0:
         _refuse("the assertion jti is empty")
     var buf = List[UInt8]()
@@ -119,8 +122,8 @@ def mint_assertion(
 ) raises -> String:
     """An RFC 7523 assertion signed by `signer`, with a fresh random `jti`
     (see the file header). Raises `JoseError: ...` for an empty issuer,
-    subject or audience, a negative time, or a lifetime outside 1 to 300
-    seconds."""
+    subject or audience, a negative time, a lifetime outside 1 to 300
+    seconds, or an expiry past the largest Int64."""
     var claims = assertion_claims(
         issuer=issuer,
         subject=subject,

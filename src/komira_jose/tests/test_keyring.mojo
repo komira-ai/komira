@@ -203,6 +203,15 @@ def test_bounds() raises:
     assert_equal(_ring_err(lead=0), "")
     assert_equal(_ring_err(lead=JOSE_MAX_PUBLISH_LEAD_S), "")
     assert_equal(_ring_err(lead=JOSE_MAX_PUBLISH_LEAD_S + 1), LD)
+    # The bounds are the literals the refusal texts name, not whatever the
+    # constants hold.
+    assert_equal(JOSE_MAX_PUBLISH_LEAD_S, Int64(86400))
+    assert_equal(_ring_err(lead=86400), "")
+    assert_equal(_ring_err(lead=86401), LD)
+    assert_equal(_ring_err(ttl=86400), "")
+    assert_equal(_ring_err(ttl=86401), TTL_E)
+    assert_equal(_ring_err(leeway=60), "")
+    assert_equal(_ring_err(leeway=61), LW)
     assert_equal(_ring_err(now=-1), "JoseError: the keyring time is negative")
     assert_equal(_ring_err(now=0), "")
     assert_equal(_ring_err(alg="ES256"), "")
@@ -350,6 +359,35 @@ def test_rotation_and_retirement() raises:
     assert_equal(_retire_err(r, _kid(3), q), "")
     assert_true(not r.staged_kid())
     assert_equal(_kids(r.render_jwks(q)), _kid(2))
+
+
+def test_document_order() raises:
+    # Catches: a rendered set that is not the signing key, then the staged
+    # key, then the retiring keys oldest first (the order the keyring
+    # header documents): the staged key after the retiring keys, or the
+    # retiring keys newest first. One set holds all three roles and two
+    # retiring keys.
+    var r = _active_ring(1)
+    var t = T0 + LEAD
+    r.rotate(_key(2), t)
+    _ = r.render_jwks(t)
+    t += LEAD
+    r.promote(_kid(2), t)
+    r.rotate(_key(3), t)
+    _ = r.render_jwks(t)
+    t += LEAD
+    r.promote(_kid(3), t)
+    r.rotate(_key(4), t)
+    assert_equal(r.signing_kid().value(), _kid(3))
+    assert_equal(r.staged_kid().value(), _kid(4))
+    var kids = r.retiring_kids()
+    assert_equal(len(kids), 2)
+    assert_equal(kids[0], _kid(1))
+    assert_equal(kids[1], _kid(2))
+    assert_equal(
+        _kids(r.render_jwks(t)),
+        _kid(3) + " " + _kid(4) + " " + _kid(1) + " " + _kid(2),
+    )
 
 
 def test_retire_names_one_key() raises:
@@ -538,6 +576,10 @@ def main() raises:
         test_rotation_and_retirement()
     except e:
         failures += String("test_rotation_and_retirement: ") + String(e) + "\n"
+    try:
+        test_document_order()
+    except e:
+        failures += String("test_document_order: ") + String(e) + "\n"
     try:
         test_retire_names_one_key()
     except e:
