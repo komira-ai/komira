@@ -25,6 +25,8 @@ expect/<shard>/<id>.err   expected refusal
 |---|---|---|
 | `filter_3vl` | the AND/OR/NOT truth table over two nullable BOOLEAN columns, as values and as filters; comparisons with a NULL literal and a NULL value | query semantics §1.1, §1.2, §8.8 |
 | `agg_grouping` | NULL grouping keys form one group; COUNT(*) against COUNT(col); SUM, MIN and MAX of an all-NULL group are NULL; empty input with and without keys | §2.1 to §2.4, §8.1, §8.6, §8.7 |
+| `join_residual_nullkeys` | NULL keys match nothing in INNER, LEFT, RIGHT, FULL and SEMI joins, on the AUTO and SORT_MERGE kernels; outer joins pad with NULL; ANTI returns NULL-key rows and ignores right NULLs; duplicate keys multiply; a NULL residual is no match; -0.0 and 0.0 match as float keys; a CROSS, LEFT and ANTI join with an empty right side | §1.2, §3.1, §3.2, §3.4, §3.5, §3.9 to §3.13, §11.6 |
+| `sort_topn_limit` | explicit NULLS FIRST and NULLS LAST in both directions; the default (NULLS LAST in both); two keys of mixed direction and placement; -0.0 tying with 0.0; TOPN; LIMIT 0, above the row count, and over a sort. No NaN or infinity: JSON cannot spell them | §4.1, §4.2, §4.4, §4.7, §4.8 |
 
 ## Adding a case
 

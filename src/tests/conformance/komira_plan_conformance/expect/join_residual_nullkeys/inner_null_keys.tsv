@@ -1,0 +1,16 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §3.1: a row whose key is NULL matches nothing, so lid 4 (lk
+# NULL) and rid 3 (rk NULL) pair with no row, not with each other. lk = 1
+# (lid 1) meets rk = 1 (rid 5); the two lk = 2 rows (lid 2, 3) each meet
+# both rk = 2 rows (rid 1, 2), 2 x 2 = 4 pairs (§3.10); lk = 3 and rk = 4
+# have no partner. 5 rows.
+# Types: the left columns then the right, as scanned (§3.13); every input
+# column is nullable.
+lid:int64?	lk:int64?	lv:int64?	rid:int64?	rk:int64?	rw:int64?
+1	1	10	5	1	5
+2	2	20	1	2	15
+2	2	20	2	2	25
+3	2	\N	1	2	15
+3	2	\N	2	2	25

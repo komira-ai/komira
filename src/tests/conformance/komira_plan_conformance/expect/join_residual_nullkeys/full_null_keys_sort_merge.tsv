@@ -1,0 +1,19 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §3.1: HASH and SORT_MERGE give the same result, so these are
+# the rows of full_null_keys: the 5 matched pairs (§3.10), lid 4 and 5
+# padded with NULL right columns, rid 3 and 4 padded with NULL left columns
+# (§3.4); the NULL keys of lid 4 and rid 3 match nothing (§3.1). 9 rows.
+# Types: the left columns then the right (§3.13); a padded side is nullable
+# (§3.13), and every input column is nullable already.
+lid:int64?	lk:int64?	lv:int64?	rid:int64?	rk:int64?	rw:int64?
+1	1	10	5	1	5
+2	2	20	1	2	15
+2	2	20	2	2	25
+3	2	\N	1	2	15
+3	2	\N	2	2	25
+4	\N	40	\N	\N	\N
+5	3	50	\N	\N	\N
+\N	\N	\N	3	\N	300
+\N	\N	\N	4	4	400

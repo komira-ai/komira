@@ -1,0 +1,14 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: the right input is empty (rid < 0 keeps no row, §1.2).
+# §11.6: a LEFT join with an empty right side returns every left row, padded
+# (§3.4): all five, every right column NULL.
+# Types: the left columns then the right (§3.13); a padded side is
+# nullable (§3.13), and every input column is nullable already.
+lid:int64?	lk:int64?	lv:int64?	rid:int64?	rk:int64?	rw:int64?
+1	1	10	\N	\N	\N
+2	2	20	\N	\N	\N
+3	2	\N	\N	\N	\N
+4	\N	40	\N	\N	\N
+5	3	50	\N	\N	\N

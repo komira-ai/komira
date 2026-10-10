@@ -1,0 +1,11 @@
+#! komira-plan-conformance v1
+#  order: total
+#  float: ulps=0
+# derivation: TOPN 2 BY a DESC, id DESC, no placement stated, NULLs last
+# (§4.1). The a = 3 group (id 1, 4, 7) comes first; id descending orders it
+# 7, 4, 1, so the first two rows are id 7 then id 4. (a, id) is total, so
+# the order is (§4.7, §4.8).
+# Types: a TOPN keeps its input columns, as scanned.
+id:int64	a:int64?	b:int64?	f:float64?
+7	3	1	0.5
+4	3	\N	-2.5

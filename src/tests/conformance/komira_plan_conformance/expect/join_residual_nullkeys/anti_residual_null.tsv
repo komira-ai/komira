@@ -1,0 +1,14 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: a right row matches when lk = rk and lv < rw is TRUE (§3.5:
+# NULL and FALSE are no match). Of the key pairs (§3.1) only lid 2 / rid 2
+# (20 < 25) is TRUE. lid 1 (10 < 5 FALSE) and lid 3 (NULL < 15, NULL < 25:
+# NULL, §1.2) have no match, nor do lid 4 (NULL key) and lid 5 (no rk = 3);
+# §3.2 and §3.12 return each of the four once. Types: the left columns
+# only (§3.12).
+lid:int64?	lk:int64?	lv:int64?
+1	1	10
+3	2	\N
+4	\N	40
+5	3	50

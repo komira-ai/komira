@@ -477,11 +477,18 @@ def check_expectation(c: Case, text: String, plan: LogicalPlan) -> List[String]:
 # -----------------------------------------------------------------------------
 
 
-def _value_fits(t: ArrowType, v_is_int: Bool, v_is_bool: Bool, v_is_string: Bool) raises -> Bool:
+def _value_fits(
+    t: ArrowType, v_is_int: Bool, v_is_finite_number: Bool, v_is_bool: Bool, v_is_string: Bool
+) raises -> Bool:
     if t == ArrowType.BOOL:
         return v_is_bool
     if t == ArrowType.INT64:
         return v_is_int
+    if t == ArrowType.FLOAT64:
+        # A JSON number whose value is a finite float64. JSON cannot spell
+        # NaN or infinity, but `1e400` is valid JSON and reads as +inf, so a
+        # number is refused unless its value is finite.
+        return v_is_finite_number
     if t == ArrowType.STRING:
         return v_is_string
     raise Error("no JSON check for column type " + arrow_type_name(t))
@@ -525,10 +532,22 @@ def check_dataset(ds: Dataset, text: String) -> List[String]:
                         problems.append(at + "'" + name + "' is null in a non-nullable column")
                     continue
                 var t = ds.schema.field_arrow_type(i)
-                if not _value_fits(t, v.is_integral_number(), v.is_bool(), v.is_string()):
+                var finite = False
+                if v.is_number():
+                    try:
+                        var x = v.as_float64()
+                        finite = (x - x) == 0.0  # NaN for inf and NaN
+                    except:
+                        finite = False
+                if not _value_fits(
+                    t, v.is_integral_number(), finite, v.is_bool(), v.is_string()
+                ):
+                    var why = String(", not a ")
+                    if t == ArrowType.FLOAT64 and v.is_number():
+                        why = String(", not a finite ")
                     problems.append(
-                        at + "'" + name + "' is " + v.serialize()
-                        + ", not a " + arrow_type_name(t)
+                        at + "'" + name + "' is " + v.serialize() + why
+                        + arrow_type_name(t)
                     )
         except e:
             problems.append(at + String(e))

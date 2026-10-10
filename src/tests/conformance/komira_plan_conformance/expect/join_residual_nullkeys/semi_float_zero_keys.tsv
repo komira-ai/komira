@@ -1,0 +1,12 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: the right side is sort_rows where id = 3 (§1.2), one row,
+# f = -0.0. §3.9: as join keys -0.0 equals +0.0, so the left rows with
+# f = 0.0 (id 2, 6) and -0.0 (id 3) match; 1.5, -2.5 and 0.5 do not, and
+# id 5's NULL f matches nothing (§3.1). A SEMI join keeps each matching left
+# row at most once, left columns only, as scanned (§3.11).
+id:int64	a:int64?	b:int64?	f:float64?
+2	\N	2	0.0
+3	1	2	-0.0
+6	2	1	0.0

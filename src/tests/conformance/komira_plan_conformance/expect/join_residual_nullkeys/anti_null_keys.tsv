@@ -1,0 +1,12 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §3.2, §3.12: ANTI returns each left row with no match, once.
+# lid 4's key is NULL, matches nothing and is returned; rid 3's NULL key
+# matches nothing and has no effect (ANTI is NOT EXISTS, not NOT IN, so it
+# does not empty the result). lid 5 (lk = 3) has no rk = 3 and is returned;
+# lid 1, 2, 3 have matches (§3.1) and are not. Types: the left columns only
+# (§3.12).
+lid:int64?	lk:int64?	lv:int64?
+4	\N	40
+5	3	50

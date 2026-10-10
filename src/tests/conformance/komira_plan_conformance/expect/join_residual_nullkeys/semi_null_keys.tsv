@@ -1,0 +1,12 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §3.11: a SEMI join returns each left row that has a match at
+# most once, however many right rows it matches. lid 1 (lk = 1) matches rid
+# 5; lid 2 and 3 (lk = 2) match rid 1 and 2 but appear once each; lid 4's
+# NULL key matches nothing (§3.1), not even rid 3's NULL; lid 5 (lk = 3) has
+# no match. Types: the left columns only (§3.11), as scanned.
+lid:int64?	lk:int64?	lv:int64?
+1	1	10
+2	2	20
+3	2	\N

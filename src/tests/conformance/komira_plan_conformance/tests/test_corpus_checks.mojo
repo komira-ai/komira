@@ -19,7 +19,8 @@
 #     `1.0` and out-of-range values in integer columns);
 #   .err files: the accepted form and each refusal;
 #   datasets: a wrong member, a wrong kind, a null in a non-nullable column,
-#     a missing and an orphan dataset file.
+#     a string, a bool and an out-of-range number (1e400, -1e400) in a
+#     float64 column, a missing and an orphan dataset file.
 #
 # NOT planted here, because each needs a broken codec rather than a broken
 # case: plan_to_bytes refusing a plan, plan_wire_check_values refusing one,
@@ -47,7 +48,7 @@ from komira_plan_conformance import (
     check_wire,
     parse_err,
 )
-from komira_plan_conformance.datasets import bool_pairs, ints_nullable, scan
+from komira_plan_conformance.datasets import bool_pairs, ints_nullable, scan, sort_rows
 
 
 def _ints() raises -> LogicalPlan:
@@ -323,10 +324,32 @@ def test_dataset_defects() raises:
     assert_true(_any_contains(p, ":5: not a JSON object"))
 
 
+def test_dataset_float_column() raises:
+    # A float64 column takes a JSON number with a finite value, -0.0
+    # included; a string, a bool and 1e400 (+inf once read) are refused.
+    assert_equal(
+        len(check_dataset(sort_rows(), '{"id": 1, "a": 1, "b": null, "f": -0.0}\n')), 0
+    )
+    var p = check_dataset(
+        sort_rows(),
+        '{"id": 1, "a": 1, "b": 2, "f": "1.5"}\n{"id": 2, "a": 1, "b": 2, "f": true}\n'
+        + '{"id": 3, "a": 1, "b": 2, "f": 1e400}\n{"id": 4, "a": 1, "b": 2, "f": -1e400}\n',
+    )
+    assert_true(_any_contains(p, ":1: 'f' is \"1.5\", not a float64"))
+    assert_true(_any_contains(p, ":2: 'f' is true, not a float64"))
+    assert_true(_any_contains(p, ":3: 'f' is 1e400, not a finite float64"))
+    assert_true(_any_contains(p, ":4: 'f' is -1e400, not a finite float64"))
+    assert_equal(len(p), 4)
+
+
 def test_dataset_files() raises:
     var p = check_dataset_files(
         all_datasets(),
-        [String("bool_pairs.jsonl"), String("groups.jsonl"), String("extra.csv")],
+        [
+            String("bool_pairs.jsonl"), String("groups.jsonl"),
+            String("join_left.jsonl"), String("join_right.jsonl"),
+            String("sort_rows.jsonl"), String("extra.csv"),
+        ],
     )
     assert_true(_any_contains(p, "datasets/ints_nullable.jsonl is missing"))
     assert_true(_any_contains(p, "datasets/extra.csv is an orphan"))

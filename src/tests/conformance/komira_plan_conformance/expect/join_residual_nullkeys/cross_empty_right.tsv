@@ -1,0 +1,9 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: the right input is join_right filtered by rid < 0; rids are
+# 1 to 5, so no row passes (§1.2). §11.6: a CROSS join with an empty side
+# has zero rows, and an empty result carries its full schema.
+# Types: the left columns then the right, as scanned (§3.13); every input
+# column is nullable.
+lid:int64?	lk:int64?	lv:int64?	rid:int64?	rk:int64?	rw:int64?
