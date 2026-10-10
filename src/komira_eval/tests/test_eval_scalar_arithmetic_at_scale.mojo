@@ -4,9 +4,9 @@
 #
 # # The hazard
 #
-# `ExpressionExecutor._eval_scalar_{i64,f64}_from_view` is invoked per row
-# from `eval_to_list_{i64,f64}_from_view`'s arithmetic arms (EXPR_{ADD,
-# SUB,MUL,DIV}_{I64,F64}). If an EXPR_COL leaf in that per-row descent called
+# `eval_to_list_{i64,f64}_from_view`'s arithmetic arms (EXPR_{ADD,SUB,MUL,
+# DIV}_{I64,F64}) once descended per row through a scalar walker (since
+# removed). If an EXPR_COL leaf in a per-row descent called
 # `batch.column_as_primitive_{int64,float64}(idx)`, it would DEEP-COPY the
 # ENTIRE source column into a fresh `OwnedAlignedBuffer` (see
 # `komira_arrow.column as_primitive[dtype]`, which allocates
@@ -40,7 +40,7 @@
 # # Cross-refs
 #
 # - Production code: komira_eval.expression_executor
-#   (`_eval_scalar_f64_from_view`, `_eval_scalar_i64_from_view`)
+#   (`eval_to_list_f64_from_view`, `eval_to_list_i64_from_view`)
 # - Per-row column accessor: komira_arrow.column
 #   `as_primitive[dtype]()`
 # - Zero-copy primitive: komira_arrow.batch_view
@@ -184,10 +184,9 @@ def test_f64_nested_arithmetic_at_scale_8k_rows() raises:
     """`project(col(c0) * (lit(1.0) + col(c1)))` over 8192 rows.
 
     Mirrors Q19's `l_extendedprice * (1 - l_discount)` arithmetic shape.
-    With nested arithmetic, the inner `_eval_scalar_f64_from_view` is
-    called twice per row (once for col(c0) load, once for the inner ADD
-    recursion which itself recurses to col(c1)). That's 3 EXPR_COL leaf
-    evaluations per row pre-fix → 24576 full-column copies per batch.
+    A per-row descent over nested arithmetic reads 3 EXPR_COL leaves per
+    row (col(c0), and col(c1) under the inner ADD) → 24576 full-column
+    copies per batch if each leaf copied its column.
 
     Asserts:
       - All 8192 outputs are correct (out[i] == i * (1 + i)).

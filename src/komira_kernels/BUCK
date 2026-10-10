@@ -30,10 +30,12 @@ mojo_library(
         "tests/test_expr_kernel_templates_cmp_cast.mojo",
         "tests/test_kleene_comparison_properties.mojo",
         "tests/test_kleene_helpers.mojo",
+        "tests/test_match_offset_validity.mojo",
         "tests/test_sel_kernels.mojo",
         "tests/test_simd_of.mojo",
         "tests/test_temporal_extract_fields.mojo",
         "tests/test_temporal_extract_trunc.mojo",
+        "tests/test_temporal_offset_and_units.mojo",
     ],
     visibility = ["PUBLIC"],
 )

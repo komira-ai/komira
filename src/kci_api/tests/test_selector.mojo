@@ -117,6 +117,22 @@ def test_scope_and_evidence_line() raises:
     assert_equal(refused, 3)
 
 
+def test_evidence_line_joins_every_selector_and_the_base() raises:
+    var two = List[String]()
+    two.append(String("step:build"))
+    two.append(String("validation:smoke"))
+    var base = String("0123456789abcdef0123456789abcdef01234567")
+    assert_equal(
+        run_evidence_line(String(SCOPE_SELECTIVE), String("release"), two, String("SUCCEEDED")),
+        String("kci: SELECTIVE run of stage release (step:build validation:smoke): SUCCEEDED -- not a full run"),
+    )
+    assert_equal(
+        run_evidence_line(String(SCOPE_SELECTIVE), String("release"), two, String("SUCCEEDED"), base),
+        String("kci: SELECTIVE run of stage release (step:build validation:smoke affected-by ")
+        + base + String("): SUCCEEDED -- not a full run"),
+    )
+
+
 def test_affected_by_evidence_line() raises:
     var none = List[String]()
     var base = String("0123456789abcdef0123456789abcdef01234567")

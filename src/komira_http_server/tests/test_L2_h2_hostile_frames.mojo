@@ -53,10 +53,8 @@ from komira_http_core.codec.h2.frame import (
 )
 from komira_http_core.transport.grpc_emit import NoopGrpcDispatch
 from komira_http_server.routing import Router
-from komira_http_server.serve_h2 import (
-    _handle_headers_or_continuation,
-    _parse_int_safe,
-)
+from komira_http_server.serve_h2 import _handle_headers_or_continuation
+from komira_http_server.serve_h2_headers import _parse_int_safe
 
 
 def _zeros(n: Int) -> List[UInt8]:
