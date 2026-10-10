@@ -110,7 +110,7 @@ def test_b5_subone_product_clamps_to_one() raises:
 
     Both floor and ceil hit the clamp-to-1 (no rows would survive an
     NDV-100 eq on a 5-row table in reality, but the cost model needs at
-    least one row to keep DPccp non-degenerate). This pins the
+    least one row to keep join-order costing non-degenerate). This pins the
     clamp-to-1 contract under the ceil path.
     """
     var pred = Expr.binary(

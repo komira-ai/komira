@@ -5,7 +5,9 @@ Status: plan, not built. Each item is marked **EXISTS** (with the path on `main`
 linux-64 (ELF) only; Mach-O (osx-arm64: install names, `@rpath`, exported-symbol lists, the two-level
 namespace) is a later design. Related: [the staged pipeline](staged_pipeline.md) (build once, then
 beta, gamma and prod), [gamma validation](gamma_validation.md) (its `komira_native` rows are
-superseded by this doc), [release machines](release_machine.md),
+superseded by this doc), [continuous publish](continuous_publish.md) (its slice S12 also plans an
+installed `.so` check in beta's install job; slice 11 below wires this doc's install checks into
+that job, so the two land as one set of rows), [release machines](release_machine.md),
 the conda packaging README ([packaging/conda/README.md](../../packaging/conda/README.md)), symbol
 prefixing ([tools/build/native/README.md](../../tools/build/native/README.md)).
 
@@ -20,7 +22,8 @@ into it). They stay on hold until this plan is approved and are then closed; wha
 channel, installs from it and runs the README examples and the package test tiers; **gamma** is only
 real resources in the gamma cloud accounts (deploys and real-cloud validations) and names no conda
 channel; **prod** promotes the same bytes to the prod channel. Every check of an installed native
-package below is therefore beta's, in its install job (`beta_install`).
+package below is therefore beta's, in its install job: `beta_install`, the name staged_pipeline.md
+on `main` uses; continuous_publish.md already calls it `beta_validate`, the name #1184 gives it.
 
 ## Why: what `main` refuses today
 
@@ -38,9 +41,9 @@ package below is therefore beta's, in its install job (`beta_install`).
   (OwnedDLHandle); its conda package must depend on the package shipping that library, which this
   tool does not derive yet"). `komira_compression` opens zstd, bz2 and lzma the same way
   (`src/komira_compression/codec_libraries.mojo`) and also links snappy, so it is in both lists.
-- The released set today is 41 member libraries plus the metapackage `komira_all`
+- The released set today is its member libraries plus the metapackage `komira_all`
   (`release/artifacts.textproto`, held equal to `tools/build/package/release_set.txt`), none with
-  native code.
+  native code (no member's directory holds a C or C++ source or opens a library at run time).
 
 ## Decision summary
 
@@ -428,7 +431,7 @@ channel, a new package name, or a change to what a release publishes.
 | 10 | **README link commands and every owner called** (question 5a): the packer writes the `sh` block; the readme tool parses it; the install validation uses it or refuses a difference; the build refuses an owner whose README program references none of its exports; komira_metrics's and komira_scan_source's READMEs gain an example reaching their C | planted: a README without an owner's `-l` (install validation red); komira_metrics's README without its new example (build red) | none |
 | 11 | **beta wiring**: install checks 3 to 7 run in `beta_install` for every package (install check 5 is already there for slice 4's `dlopen` packages; this slice runs the rows slice 9 adds; needs the staged pipeline's P4, which creates the job) | nothing on `main` can be red (the job does not exist); shown by mutants on the new job: a `.so` changed after `build` is refused by step 4b (mutant: skip step 4b in `beta_install`), and a planted `.so` with an unresolved symbol makes row 4 red | **Go**: it changes the release (inherits P4's go) |
 | 12 | **the release set**: declare the first native batch (the owners and their dependents up to the cloud SDKs, question 9) in `release/artifacts.textproto` and `release_set.txt` | `release_set_check` red on a batch member listed before an owner it requires | **Go**: new package names on the channel, a change to what beta and prod publish |
-| 13 | **gamma_validation.md** rewritten: its `komira_native` rows are replaced by a pointer to this doc's beta install checks, and `gamma_validation_decisions.md` likewise; its stage and channel text (gamma publishing to and installing from a `gamma` conda channel, which is today's `kci.yml`) is rewritten to #1184's glossary, since #1184 does not edit this file | `komira_native` joins the root `retired_names` lint (root `BUCK`), which refuses a retired name outside a dated history note: red while either doc still carries it (the doc links lint cannot go red on a content rewrite); every mention left in this doc moves onto a dated history line | none |
+| 13 | **gamma_validation.md** rewritten: its `komira_native` rows are replaced by a pointer to this doc's beta install checks, and `gamma_validation_decisions.md` likewise; its stage and channel text (gamma publishing to and installing from a `gamma` conda channel, which is today's `kci.yml`) is rewritten to #1184's glossary, replacing its "Vocabulary" note, since #1184 does not edit this file | `komira_native` joins the root `retired_names` lint (root `BUCK`), which refuses a retired name outside a dated history note: red while either doc still carries it (the doc links lint cannot go red on a content rewrite); every mention left in this doc moves onto a dated history line | none |
 
 Slices 1, 2 and 3 are independent; 4 needs 1, 3 and P4; 5 to 10 are a chain (5 needs nothing
 earlier); 11 needs 9, 10 and P4; 12 needs 11; 13 needs 2. **No library with native code or a
