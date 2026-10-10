@@ -508,7 +508,7 @@ def test_integer_cast_unwrap_declines() raises:
     )
     _check(
         "SELECT k FROM t WHERE CAST(s AS INTEGER) > 0",
-        "ERR: SQL not supported: CAST from a STRING to INTEGER. What is refused is the ROUNDING: DuckDB v1.5.3 answers 4 for CAST('3.5' AS BIGINT) and 3 for CAST('2.5' AS BIGINT), rounding half AWAY FROM ZERO — a third model, different again from the half-to-even it uses for CAST(<double> AS BIGINT) — and this engine has no string parse with that rounding, so serving this would raise or answer differently where DuckDB answers a number. Convert in your application, or cast a numeric column instead."
+        "ERR: SQL not supported: CAST from a STRING to INTEGER. What is refused is the ROUNDING: DuckDB v1.5.3 answers 4 for CAST('3.5' AS BIGINT) and 3 for CAST('2.5' AS BIGINT), rounding half AWAY FROM ZERO — a third model, different again from the half-to-even it uses for CAST(<double> AS BIGINT) — and `cast_string_to_int64` in komira_kernels parses an integer spelling only, so serving this would raise where DuckDB answers a number. Convert in your application, or cast a numeric column instead."
     )
     _check(
         "SELECT k FROM t WHERE CAST(k AS INTEGER) * 2 > 0",

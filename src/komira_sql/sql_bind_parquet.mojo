@@ -4,10 +4,11 @@
 #   before binding starts.
 # =============================================================================
 #
-# The binder opens no file. Two of its answers depend on parquet footers: the
-# schema of a `read_parquet('path')` relation, and whether a column of a
-# parquet relation holds no NULL (which lets a NOT IN subquery drop its
-# run-time NULL checks). `collect_parquet_facts` walks a parsed statement
+# The binder opens no parquet file (a `read_csv`, `read_json` or `read_avro`
+# relation still reads its file through `sql_tvf_bind` while binding). Two of
+# its answers depend on parquet footers: the schema of a
+# `read_parquet('path')` relation, and whether a column of a parquet relation
+# holds no NULL (which lets a NOT IN subquery drop its run-time NULL checks). `collect_parquet_facts` walks a parsed statement
 # once, asks the caller's `SqlParquetFooters` for exactly those facts, and
 # returns them as a `ParquetFacts` value the binder reads while it binds.
 #

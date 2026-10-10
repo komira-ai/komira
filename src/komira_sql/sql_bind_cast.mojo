@@ -333,9 +333,10 @@ def _bind_cast(sx: SqlExpr, is_try: Bool, schema: Schema, scope: BindScope, cata
             " the cast fails, so a gap in the underlying cast becomes an"
             " INVISIBLE wrong answer rather than an error. Two known ones:"
             " TRY_CAST('3.5' AS BIGINT) is 4 in DuckDB v1.5.3 and would be NULL"
-            " here (no string parse takes a fractional spelling), and"
-            " TRY_CAST(<INT64_MIN> AS INTEGER) is NULL there and would not be"
-            " here (no null-on-overflow arm for a numeric narrowing). Use"
+            " here (`cast_string_to_int64` in komira_kernels parses an integer"
+            " spelling only), and TRY_CAST(<INT64_MIN> AS INTEGER) is NULL"
+            " there and would not be here (`eval_cast`, the integer cast in"
+            " komira_column_kernels, has no null-on-overflow arm). Use"
             " CAST(x AS " + ty.upper() + "), which refuses loudly instead."
         )
     if from_string:
@@ -344,10 +345,10 @@ def _bind_cast(sx: SqlExpr, is_try: Bool, schema: Schema, scope: BindScope, cata
             " What is refused is the ROUNDING: DuckDB v1.5.3 answers 4 for"
             " CAST('3.5' AS BIGINT) and 3 for CAST('2.5' AS BIGINT), rounding"
             " half AWAY FROM ZERO — a third model, different again from the"
-            " half-to-even it uses for CAST(<double> AS BIGINT) — and this"
-            " engine has no string parse with that rounding, so serving this"
-            " would raise or answer differently where DuckDB answers a"
-            " number. Convert in your application, or cast a numeric column"
+            " half-to-even it uses for CAST(<double> AS BIGINT) — and"
+            " `cast_string_to_int64` in komira_kernels parses an integer"
+            " spelling only, so serving this would raise where DuckDB answers"
+            " a number. Convert in your application, or cast a numeric column"
             " instead."
         )
     # A DATE / TIME / TIMESTAMP / INTERVAL operand to a number is refused by

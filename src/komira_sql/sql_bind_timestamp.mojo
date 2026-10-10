@@ -73,10 +73,10 @@ def _sql_cast_target_arrow(ty: String) raises -> ArrowType:
             " VARCHAR operand -- an integer-to-text CAST cannot fail, so for"
             " one TRY_CAST is the same answer. A FLOAT or DECIMAL operand can"
             " be cast to BIGINT first, which ROUNDS its fraction away (a"
-            " different text). A narrower or unsigned integer, a BOOLEAN, a"
-            " DATE or a TIMESTAMP operand has no remedy at this door: DuckDB"
-            " refuses CAST(<date> AS BIGINT), and this engine's casts do not"
-            " reach BIGINT from the others."
+            " different text), and so can a narrower or unsigned integer or a"
+            " BOOLEAN operand. A DATE or a TIMESTAMP operand has no remedy at"
+            " this door: DuckDB refuses CAST(<date> AS BIGINT), and so does"
+            " this binder."
         )
     # DECIMAL / NUMERIC does not reach this raise from the CAST arm:
     # `_bind_cast` intercepts a decimal target before calling this function

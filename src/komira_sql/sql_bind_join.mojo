@@ -224,9 +224,8 @@ def _bind_outer_join(
         raise Error(
             "SQL not supported: a " + _outer_join_kw(jkind) + " OUTER JOIN whose"
             + " ON carries a non-equi residual — the equi-keys are served but the"
-            + " residual is not (a residual is served on INNER / LEFT / SEMI /"
-            + " ANTI joins only; a RIGHT / FULL residual has no null-producing"
-            + " join). The equi-only form of this join"
+            + " residual is not (this binder carries a join residual on INNER /"
+            + " LEFT / SEMI / ANTI joins only). The equi-only form of this join"
             + " (`ON <equi conjuncts>` with the residual moved to a WHERE) is"
             + " served, but note that a WHERE does NOT preserve the outer rows a"
             + " residual ON would."

@@ -4,8 +4,9 @@
 # null-freedom check)
 # =============================================================================
 #
-# The binder reads no file: `bind_statement` asks the `SqlParquetFooters`
-# its caller passes. These tests pass `_Footers`, a reader with fixed
+# The binder opens no parquet file: `bind_statement` asks the
+# `SqlParquetFooters` its caller passes (a `read_csv`, `read_json` or
+# `read_avro` relation still reads its file through `sql_tvf_bind`). These tests pass `_Footers`, a reader with fixed
 # answers, or `NoParquetFooters`. What each test proves, and the defect
 # (mutant) it would catch:
 #   1. `ParquetFacts` records a schema and a null count once per key, answers

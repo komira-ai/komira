@@ -451,7 +451,7 @@ def test_json_struct_map() raises:
     )
     _check(
         "SELECT json_extract(j, '$') FROM t",
-        "ERR: SQL not supported: json_extract('$') — the whole-document extract. DuckDB v1.5.3 MINIFIES it (json_extract('  {\"a\" :  1 }  ', '$') = {\"a\":1}), and this engine's JSON extract returns a zero-segment path's payload bytes VERBATIM, whitespace included; with no JSON canonicaliser to re-emit a parsed document, this refuses rather than answering a different string"
+        "ERR: SQL not supported: json_extract('$') — the whole-document extract. DuckDB v1.5.3 MINIFIES it (json_extract('  {\"a\" :  1 }  ', '$') = {\"a\":1}), and the engine's JSON extract (`extract_column` in komira_json_index) returns a zero-segment path's payload bytes VERBATIM, whitespace included, so this refuses rather than answering a different string"
     )
     _check(
         "SELECT json_extract(j, '$.e[0]') FROM t",
@@ -551,7 +551,7 @@ def test_even_fdiv_nullif_days_in_month() raises:
     )
     _check(
         "SELECT nullif(s, 'a') FROM t",
-        "ERR: SQL not supported: nullif() over a STRING operand. Its THEN arm is a typed NULL and this IR has no string-typed NULL literal (the plan's typed NULL literals are float64 and int64 only), so there is no value to return for the matching rows. The numeric form is served."
+        "ERR: SQL not supported: nullif() over a STRING operand. Its THEN arm is a typed NULL and this IR has no string-typed NULL literal (`ScalarValue.null` takes a DType, and the engine's scalar broadcast, `broadcast_scalar` in komira_column_kernels, builds an all-NULL column for float64 and int64 only), so there is no value to return for the matching rows. The numeric form is served."
     )
     _check(
         "SELECT nullif(k) FROM t",
