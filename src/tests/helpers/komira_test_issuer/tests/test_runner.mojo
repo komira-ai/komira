@@ -20,12 +20,17 @@
 #   no_switch       -> publish_before_sign (the old key still signs);
 #   kid_not_thumbprint -> mint_verifies (signed by a key whose kid is a
 #                      near miss of its RFC 7638 thumbprint);
+#   kid_swap        -> mint_verifies (the kid is another served key's
+#                      thumbprint, that key served under another kid);
 #   wrong_typ       -> mint_verifies (the issuer inside mints `JWT`);
 #   sub, client_id, scope -> claims, for every near miss of the value asked
 #                      for and, for client_id and scope, the member left out;
 #   iat one second early or late -> claims;
+#   client_id or jti as a JSON number (whose text equals the client_id
+#                      asked for) -> claims, and jti_unique for the jti;
 #   jti left out or empty -> claims and jti_unique;
-#   repeat_jti      -> jti_unique;
+#   repeat_jti      -> jti_unique (jti-1, jti-2, jti-2: the repeat is of the
+#                      last jti seen);
 #   empty_subject_ok -> subject_required.
 #
 # main runs every test and reports every failure.
@@ -78,6 +83,7 @@ comptime F_IAT = 12
 comptime F_JTI = 13
 comptime F_REPEAT_JTI = 14
 comptime F_EMPTY_SUBJECT_OK = 15
+comptime F_KID_SWAP = 16
 
 
 def _profile() -> IssuerProfile:
@@ -137,6 +143,14 @@ def _odd_signer(kid: String) raises -> JwsSigner:
     )
 
 
+def _member(name: String, value: String) -> String:
+    """`,"name":value`, with `value` quoted unless it starts with `#` (then
+    the rest is written as raw JSON)."""
+    if value.startswith("#"):
+        return String(',"') + name + '":' + String(value[byte = 1 : value.byte_length()])
+    return String(',"') + name + '":"' + value + '"'
+
+
 def _claims(
     sub: String,
     iat: Int64,
@@ -150,11 +164,11 @@ def _claims(
         + '","iat":' + String(iat) + ',"exp":' + String(exp)
     )
     if jti:
-        out += String(',"jti":"') + jti.value() + '"'
+        out += _member("jti", jti.value())
     if client_id:
-        out += String(',"client_id":"') + client_id.value() + '"'
+        out += _member("client_id", client_id.value())
     if scope:
-        out += String(',"scope":"') + scope.value() + '"'
+        out += _member("scope", scope.value())
     return out + "}"
 
 
@@ -212,6 +226,20 @@ struct Faulty(IssuerUnderTest, Movable, Deinitable):
             return _with(_without(doc, drop), other)
         if self.fault == F_KID_NOT_THUMBPRINT:
             return _with(doc, _odd_signer(self.alt.value()).public_jwk())
+        if self.fault == F_KID_SWAP:
+            # Key 0 published under another kid, and the odd key under key
+            # 0's thumbprint: the kid a token names is some key's thumbprint,
+            # but not the thumbprint of the key it names.
+            var drop = List[String]()
+            drop.append(self.alt.value())
+            var a = derived_key("ES256", "seed-a", 0).public_jwk()
+            var x = a.x()
+            var y = a.y()
+            var renamed = Jwk.ec_p256(
+                Span(x), Span(y), kid=String("swapped-a"), alg=String("ES256"), key_use=String("sig")
+            )
+            var swapped = _with(_without(doc, drop), renamed)
+            return _with(swapped, _odd_signer(self.alt.value()).public_jwk())
         return doc
 
     def mint_user_token(
@@ -230,7 +258,7 @@ struct Faulty(IssuerUnderTest, Movable, Deinitable):
         var sub = subject if subject != "" else String("anonymous")
         self.minted += 1
         var jti = Optional[String](String("jti-") + String(self.minted))
-        if self.fault == F_KID_NOT_THUMBPRINT:
+        if self.fault == F_KID_NOT_THUMBPRINT or self.fault == F_KID_SWAP:
             var c = _claims(sub, now, now + TTL, jti, client_id, scope)
             return _odd_signer(self.alt.value()).sign(c.as_bytes(), typ)
         if self.fault == F_SUB:
@@ -247,7 +275,8 @@ struct Faulty(IssuerUnderTest, Movable, Deinitable):
         if self.fault == F_JTI:
             jti = self.alt
         if self.fault == F_REPEAT_JTI:
-            jti = Optional[String]("jti-fixed")
+            # jti-1, jti-2, jti-2, ...: the repeat matches the LAST jti seen.
+            jti = Optional[String](String("jti-") + String(min(self.minted, 2)))
         var exp = now + TTL - 1
         return self.inner.sign_claims(_claims(sub, iat, exp, jti, cid, sc), typ)
 
@@ -343,10 +372,17 @@ def _near_misses(s: String) -> List[String]:
 
 
 def _claims_fault(
-    mut misses: String, fault: Int, alt: Optional[String], scenario: String, reason: String
+    mut misses: String,
+    fault: Int,
+    alt: Optional[String],
+    scenario: String,
+    reason: String,
+    client_id: String = CLIENT,
 ) raises:
     var f = Faulty(fault, alt)
-    var got = run_issuer_scenario(f, _profile(), scenario)
+    var p = _profile()
+    p.client_id = client_id
+    var got = run_issuer_scenario(f, p, scenario)
     if got != reason:
         var shown = alt.value() if alt else String("<absent>")
         misses += String("fault ") + String(fault) + " " + shown + ": " + got + "\n"
@@ -375,6 +411,11 @@ def test_claim_faults() raises:
     _claims_fault(misses, F_JTI, None, SCENARIO_CLAIMS, JTI)
     _claims_fault(misses, F_JTI, String(""), SCENARIO_CLAIMS, JTI)
     _claims_fault(misses, F_JTI, None, SCENARIO_JTI_UNIQUE, JTI)
+    # A member that is not a string, even one whose JSON text equals the
+    # expected value, is refused.
+    _claims_fault(misses, F_CLIENT_ID, String("#12345"), SCENARIO_CLAIMS, CID, "12345")
+    _claims_fault(misses, F_JTI, String("#5"), SCENARIO_CLAIMS, JTI)
+    _claims_fault(misses, F_JTI, String("#5"), SCENARIO_JTI_UNIQUE, JTI)
     _claims_fault(misses, F_JTI, String(""), SCENARIO_JTI_UNIQUE, JTI)
     assert_equal(misses, "")
 
@@ -388,6 +429,9 @@ def test_kid_not_thumbprint() raises:
     comptime WHY = "the token's kid is not the RFC 7638 thumbprint of its key"
     for i in range(len(near) - 1):
         _claims_fault(misses, F_KID_NOT_THUMBPRINT, near[i], SCENARIO_MINT_VERIFIES, WHY)
+    # Key 0's thumbprint named by the odd key, key 0 under another kid.
+    var a = derived_key("ES256", "seed-a", 0).kid()
+    _claims_fault(misses, F_KID_SWAP, a, SCENARIO_MINT_VERIFIES, WHY)
     # With its real thumbprint as kid the same key passes.
     _claims_fault(misses, F_KID_NOT_THUMBPRINT, real, SCENARIO_MINT_VERIFIES, "")
     assert_equal(misses, "")
