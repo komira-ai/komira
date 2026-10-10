@@ -115,5 +115,38 @@ def test_context_unique_and_bounded() raises:
     assert_true(refused)
 
 
+def test_same_as_compares_id_attempt_and_every_context_entry() raises:
+    var a = RunIdentity(String("gh-1"), 2)
+    a.add_context(ContextEntry(String("event"), String("push")))
+    a.add_context(ContextEntry(String("actor"), String("7")))
+    var b = RunIdentity(String("gh-1"), 2)
+    b.add_context(ContextEntry(String("event"), String("push")))
+    b.add_context(ContextEntry(String("actor"), String("7")))
+    assert_true(a.same_as(b))
+    assert_true(b.same_as(a))
+    assert_true(not a.same_as(RunIdentity(String("gh-2"), 2)))
+    var other_id = RunIdentity(String("gh-2"), 2)
+    other_id.add_context(ContextEntry(String("event"), String("push")))
+    other_id.add_context(ContextEntry(String("actor"), String("7")))
+    assert_true(not a.same_as(other_id))
+    var other_attempt = RunIdentity(String("gh-1"), 3)
+    other_attempt.add_context(ContextEntry(String("event"), String("push")))
+    other_attempt.add_context(ContextEntry(String("actor"), String("7")))
+    assert_true(not a.same_as(other_attempt))
+    var shorter = RunIdentity(String("gh-1"), 2)
+    shorter.add_context(ContextEntry(String("event"), String("push")))
+    assert_true(not a.same_as(shorter))
+    assert_true(not shorter.same_as(a))
+    # the last entry differs, by value and then by key
+    var last_value = RunIdentity(String("gh-1"), 2)
+    last_value.add_context(ContextEntry(String("event"), String("push")))
+    last_value.add_context(ContextEntry(String("actor"), String("8")))
+    assert_true(not a.same_as(last_value))
+    var last_key = RunIdentity(String("gh-1"), 2)
+    last_key.add_context(ContextEntry(String("event"), String("push")))
+    last_key.add_context(ContextEntry(String("actors"), String("7")))
+    assert_true(not a.same_as(last_key))
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

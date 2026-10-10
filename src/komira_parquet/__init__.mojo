@@ -18,7 +18,9 @@ It also reads a file's footer and metadata: the file reader over any
 the footer parsers (`metadata_parser`, `footer_header`), the page header
 parser (`page_header_parser`), bloom filters and the row-group bloom pruner
 (`bloom_reader`, `bloom_pruner`), a row-count cache (`num_rows_cache`) and
-the partition-predicate mapping (`partition_pred_bridge`).
+the partition-predicate mapping (`partition_pred_bridge`). The column
+chunk page walk in front of the selection gathers (`gather`) reads the
+selected rows of a chunk.
 """
 
 from .byte_stream_split import (
@@ -86,6 +88,7 @@ from .footer_header import (
     parse_metadata_num_rows_only,
 )
 from .page_header_parser import PageHeaderResult
+from .gather import decode_column_with_selection
 from .bloom_reader import BloomFilterHeaderInfo, load_bloom_filter, parse_bloom_filter_header
 from .bloom_pruner import can_prune_row_group_by_bloom
 from .num_rows_cache import ParquetNumRowsCache

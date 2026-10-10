@@ -484,13 +484,13 @@ struct SegmentBaseFold[Store: CloneableConditionalWriteStore](
                         )
                     if r.last_offset != r.base_offset + in_count - Int64(1):
                         _ = shard^
-                        raise Error(
-                            "SegmentBaseFold._materialize_block: `_base`"
+                        raise Error(  # cov: unreachable CasManifestStore.append returns last_offset = base_offset + record_count - 1
+                            "SegmentBaseFold._materialize_block: `_base`"  # cov: unreachable see the line above
                             " last_offset "
-                            + String(r.last_offset)
-                            + " != base+count-1 "
-                            + String(r.base_offset + in_count - Int64(1))
-                            + " (manifest non-contiguity)"
+                            + String(r.last_offset)  # cov: unreachable see the line above
+                            + " != base+count-1 "  # cov: unreachable see the line above
+                            + String(r.base_offset + in_count - Int64(1))  # cov: unreachable see the line above
+                            + " (manifest non-contiguity)"  # cov: unreachable see the line above
                         )
                     dense_cursor += in_count
                     appended += 1

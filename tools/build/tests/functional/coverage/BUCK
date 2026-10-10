@@ -1,6 +1,5 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
-load("@komira//tools/build/package:conda.bzl", "conda_package")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "mojo_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "cov_branch_check", "cov_conda_gate_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_set_check")
 
@@ -84,22 +83,11 @@ mojo_library(
     test_srcs = ["tests/test_value.mojo"],
 )
 
-# The package of a library of the ledger COVERAGE_NO_GATE
-# (tools/build/coverage/policy.bzl) is given its `<name>_cov_gate` as
-# `coverage_gate`; this one is given the gate summary of covconda, an output
-# that is none of its markers.
-conda_package(
-    name = "covconda_ledger_conda",
-    coverage_gate = ":covconda[coverage][gate][summary]",
-    lib = ":covconda",
-    summary = "A fixture of tests//functional/coverage:conda_gate_ledger.",
-)
-
 # Both joins of covconda_conda (what [default] and [release] are copies of)
-# wait for covconda's two coverage markers, and those of
-# covconda_ledger_conda for its coverage_gate too: checked at analysis
-# (CondaJoinInfo, tools/build/package/conda.bzl), so `pr / check`, which
-# builds tests//functional/... without the switch, fails when conda.bzl stops
+# wait for covconda's two coverage markers, and those of covmt_conda for
+# covmt's gate: checked at analysis (CondaJoinInfo,
+# tools/build/package/conda.bzl), so `pr / check`, which builds
+# tests//functional/... without the switch, fails when conda.bzl stops
 # passing `gate` to either copy.
 cov_conda_gate_check(
     name = "conda_gate",
@@ -108,12 +96,19 @@ cov_conda_gate_check(
     markers = 2,
 )
 
+# The package of a library whose gate is the target `<name>_cov_gate` (one of
+# the ledger COVERAGE_NO_GATE, tools/build/coverage/policy.bzl, or one naming
+# `coverage_tests`) is given that target as `coverage_gate`, and conda.bzl
+# refuses any other: covmt_conda, which mojo_library declares with
+# `coverage_gate = ":covmt_cov_gate"`. Its joins wait for covmt's one
+# coverage marker and for the outputs of covmt_cov_gate (its gate's marker
+# and the runs of the three tests covmt names), none of which is covmt's.
 cov_conda_gate_check(
     name = "conda_gate_ledger",
-    conda = ":covconda_ledger_conda",
-    coverage_gate = ":covconda[coverage][gate][summary]",
-    lib = ":covconda",
-    markers = 2,
+    conda = ":covmt_conda",
+    coverage_gate = ":covmt_cov_gate",
+    lib = ":covmt",
+    markers = 1,
 )
 
 # Each coverage binary has line tables naming the library source its test
@@ -382,6 +377,99 @@ cov_report_check(
     mode = "census",
     package = "tools/build/tests/functional/coverage",
     reports = _REPORTS,
+    script = "report.sh",
+)
+
+# Tests 43 and 46: a library whose only tests are standalone mojo_test
+# targets, which it names in `coverage_tests`: test_covmt in this package
+# calls half, test_covmt_far in //functional/coverage/covmt_far (another
+# package, as an end-to-end test under src/tests/ is) calls quarter. Its gate
+# is the target covmt_cov_gate (the library cannot depend on its tests),
+# which runs each test's coverage binary under kcov against covmt's sources
+# and gates over both reports: every line of half.mojo is covered, by one
+# test or the other. The test in this package is set aside (--test-source),
+# and the other one's source is staged with a BUCK file at its package, so
+# the gate does not measure it as covmt's.
+mojo_library(
+    name = "covmt",
+    srcs = [
+        "covmt/__init__.mojo",
+        "covmt/half.mojo",
+    ],
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_gate = "komira//tools/build/coverage:cov_gate",
+    coverage_mode = "census",
+    coverage_tests = [
+        ":test_covmt",
+        ":test_covmt_top",
+        "//functional/coverage/covmt_far:test_covmt_far",
+    ],
+    visibility = ["//functional/coverage/covmt_far:"],
+)
+
+mojo_test(
+    name = "test_covmt",
+    srcs = ["tests/test_covmt.mojo"],
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    deps = [":covmt"],
+)
+
+# A test of covmt's package at the package's top, outside tests/: covcheck
+# sets aside only <package>/tests/ by itself, so the gate must name this one
+# (--test-source), or its lines count as covmt's source.
+mojo_test(
+    name = "test_covmt_top",
+    srcs = ["test_covmt_top.mojo"],
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    deps = [":covmt"],
+)
+
+# Test 46: what covmt's gate (covmt_cov_gate) found: both functions of
+# half.mojo, each compiled into one test's binary and run (a dropped test
+# leaves its function uncompiled: line_found 1); the two test sources of
+# covmt's package set aside (test_covmt_top.mojo, outside tests/, only by
+# --test-source), the other another package's.
+cov_report_check(
+    name = "covmt_result",
+    expect = [
+        '"conclusion":"neutral","mode":"census",',
+        '"package":{"package":"tools/build/tests/functional/coverage","files":1,"unmeasured_files":0,"line_hit":2,"line_found":2,"line_bp":10000,',
+        '"ignored_files":0,"excluded_test_files":2,',
+    ],
+    mode = "result",
+    reports = [":covmt_cov_gate[gate][result]"],
+    script = "report.sh",
+)
+
+# Test 46: the gate of a library whose only test is its README's example
+# (//functional/coverage/covreadme): twice.mojo's two lines covered by the
+# example's run, the README's program counted outside the repository (its
+# report names it under buck-out/readme/). Without the README's run the
+# package is NotMeasured. And of one whose README holds no example
+# (covreadme_none): the run of a program that runs nothing, thrice.mojo
+# measured and not covered.
+cov_report_check(
+    name = "covreadme_result",
+    expect = [
+        '"conclusion":"neutral","mode":"census",',
+        '"package":{"package":"tools/build/tests/functional/coverage/covreadme","files":1,"unmeasured_files":0,"line_hit":2,"line_found":2,"line_bp":10000,',
+        '"ignored_files":1,"excluded_test_files":0,',
+    ],
+    mode = "result",
+    reports = ["//functional/coverage/covreadme:covreadme[coverage][gate][result]"],
+    script = "report.sh",
+)
+
+cov_report_check(
+    name = "covreadme_none_result",
+    expect = [
+        '"conclusion":"neutral","mode":"census",',
+        '"package":{"package":"tools/build/tests/functional/coverage/covreadme_none","files":1,"unmeasured_files":1,"line_hit":0,"line_found":2,"line_bp":0,',
+        '"kind":"NotMeasured",',
+        '"ignored_files":1,"excluded_test_files":0,',
+    ],
+    mode = "result",
+    reports = ["//functional/coverage/covreadme_none:covreadme_none[coverage][gate][result]"],
     script = "report.sh",
 )
 

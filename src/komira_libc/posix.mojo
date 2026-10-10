@@ -1,6 +1,6 @@
 # =============================================================================
-# komira_libc.posix — the one `getenv(3)` declaration, `access(2)` path
-# probes, and the calling thread's identity.
+# komira_libc.posix — the one `getenv(3)` and `unsetenv(3)` declarations,
+# `access(2)` path probes, and the calling thread's identity.
 # =============================================================================
 #
 # # Why the getenv declaration lives here
@@ -34,6 +34,9 @@
 #     container and instance metadata variables, HOME for ~/.aws), read only
 #     by komira_aws_core's `ProcessEnv` (komira_aws_core/sources.mojo), each
 #     citing the AWS SDKs and Tools Reference Guide page that defines it;
+#   * `PATH`, read only to look up an executable by bare name the way
+#     execvp(3) and a shell do (exec-path lookup: komira_job_supervisor's
+#     entrypoint resolves its `--job-binary` on it before the job starts);
 #
 # and for the test runner's own variables (`TEST_TMPDIR`, `HOME`), which a
 # test reads through one small test-harness helper, never ad hoc. Any other
@@ -45,6 +48,12 @@
 # world-readable in /proc/<pid>/cmdline), so the environment is one of its
 # channels. That reader copies into a caller-owned byte buffer, never a
 # `String`, so the caller can wipe it.
+#
+# `_unset_env` is the one `unsetenv(3)` declaration, for the same SECRET
+# channel: a process that has read a secret out of a variable removes the
+# variable, so a child it spawns afterwards (which inherits the environment)
+# never sees it. It removes; it never sets. (The kernel's copy of the initial
+# environment, /proc/<pid>/environ, is not rewritten by unsetenv.)
 #
 # Encapsulation: the `UnsafePointer[UInt8, MutUntrackedOrigin]` result of
 # `getenv` IS the FFI boundary. It never leaves this file; `_read_env`
@@ -165,6 +174,31 @@ def _read_env_into[N: Int](name: String, mut buf: Array[UInt8, N]) raises -> Int
     for i in range(n):
         buf[i] = env_ptr[i]
     return n
+
+
+def _unset_env(name: String) raises:
+    """Remove environment variable `name` from this process (unsetenv(3)).
+
+    The secret channel only (module header): called after the secret has
+    been read, so a child spawned later does not inherit it. Removing a
+    variable that is not set succeeds. Raises, naming the variable, when libc
+    refuses the name (empty, or holding `=`).
+
+    FFI-BOUNDARY: libc `unsetenv` reads the NUL-terminated name, which the
+    local `n` owns for the duration of the synchronous call; libc keeps no
+    pointer to it. Nothing is allocated across the boundary and nothing needs
+    freeing.
+    """
+    var n = name
+    # SAFETY: `n` owns the NUL-terminated buffer and outlives the synchronous
+    # call; unsetenv keeps no pointer to it and the pointer does not escape.
+    var rc = external_call["unsetenv", Int32](n.as_c_string_slice().unsafe_ptr())
+    if Int(rc) != 0:
+        raise Error(
+            String("unsetenv: cannot remove ")
+            + name
+            + String(" from the environment")
+        )
 
 
 # -----------------------------------------------------------------------------
