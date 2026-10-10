@@ -15,6 +15,7 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 | Continuous integration: the one job, the runner on the farm, approving a fork's run, farm access | [ci.md](ci.md) |
 | The knowledge graph: not here yet, and what replaces it until then | [knowledge_graph.md](knowledge_graph.md) |
 | Columnar memory: Arrow buffers, columns, batches, IPC and the C Data Interface | [design/columnar_memory_and_arrow.md](design/columnar_memory_and_arrow.md) |
+| Query semantics: what a logical plan must return (NULLs in logic, aggregates, joins and sorts; arithmetic edges; casts; strings; result types; window functions), governed by one rule, same SQL, same result as DuckDB, with every item marked MATCHES, REPRESENTATION DEPARTURE, PARITY GAP or EXTENSION | [design/query_semantics.md](design/query_semantics.md), [result types](design/query_semantics_types.md), [further items](design/query_semantics_more.md), [scans](design/query_semantics_scans.md), [rulings, parity gaps and code status](design/query_semantics_rulings.md) |
 | Mojo safety: pointers, origins and the Mojo 1.0 spellings | [design/mojo_safety_and_idioms.md](design/mojo_safety_and_idioms.md) |
 | The cryptographic primitives over AWS-LC, and certificate chain validation | [design/crypto_and_tls.md](design/crypto_and_tls.md) |
 | The async runtime: the reactor, per-worker event loops and wakes, fork-join dispatch, spawned tasks and join handles, waiting on I/O as explicit state machines, cooperative cancellation, and the Runtime trait and its conformers | [design/async_runtime.md](design/async_runtime.md) |
@@ -52,7 +53,7 @@ and its limits. A family's doc lands together with the libraries it describes;
 | connectors | [crypto](design/crypto_and_tls.md), [databases](design/databases.md), [HTTP](design/http.md), [HTTP authentication and authorization](design/http_auth.md), [object stores](design/object_store.md), [protobuf, gRPC and code generation](design/protobuf_grpc_and_codegen.md); file-system discovery: no design doc yet |
 | storage | [text and row formats](design/text_and_row_formats.md) (CSV, Avro, ORC, XML); compression codecs, Parquet, Iceberg, an MVCC table store: no design doc yet; CDC: coming with its library |
 | execution and operators | [shuffle through an object store](design/shuffle.md); pipelines and morsel dispatch, aggregation, joins, top-N and the kernels: no design doc yet; sort and window: coming with the engine libraries |
-| plan and optimizer | logical plans and expressions, physical planning, the plan wire format: no design doc yet; the query optimizer: coming with `komira_optimizer` |
+| plan and optimizer | [query semantics](design/query_semantics.md); logical plans and expressions, physical planning, the plan wire format: no design doc yet; the query optimizer: coming with `komira_optimizer` |
 | SDK and SQL | UDFs, the SQL lexer and syntax tree (`komira_sql`): no design doc yet; the plan-carrier surface, the Python package: coming with `komira_sdk`; the SQL parser and binder: coming with `komira_sql` |
 | runtime | [the async runtime](design/async_runtime.md); the job supervisor and its job report wire: no design doc yet |
 | observability | [logging and telemetry](design/logging_and_telemetry.md) |
