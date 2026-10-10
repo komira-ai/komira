@@ -273,8 +273,9 @@ def decode_timestamptz_binary(b: Span[UInt8, _]) raises -> Int64:
 
 def decode_text_array_binary(b: Span[UInt8, _]) raises -> List[String]:
     """Pg binary array_recv for a 1-D text[]. Returns the element strings.
-    A NULL element raises (the closed-set contract is non-null text[]). An
-    empty array (ndim 0) returns an empty list."""
+    A NULL element raises (the closed-set contract is non-null text[]), and
+    so does a body that ends before a declared element. An empty array
+    (ndim 0) returns an empty list."""
     var out = List[String]()
     var n = len(b)
     if n < 12:
@@ -292,17 +293,26 @@ def decode_text_array_binary(b: Span[UInt8, _]) raises -> List[String]:
         raise Error("pg_binary: text[] truncated dimension header")
     var dim_len = Int(read_i32_be(b, off))
     off += 8  # skip dim length (4) + lower bound (4)
-    for _e in range(dim_len):
+    for e in range(dim_len):
         if off + 4 > n:
             raise Error("pg_binary: text[] truncated element length")
         var elen = Int(read_i32_be(b, off))
         off += 4
         if elen < 0:
             raise Error("pg_binary: text[] contains a NULL element")
+        if elen > n - off:
+            raise Error(
+                "pg_binary: text[] truncated element "
+                + String(e)
+                + ": declares "
+                + String(elen)
+                + " bytes, "
+                + String(n - off)
+                + " present"
+            )
         var eb = List[UInt8]()
         for i in range(off, off + elen):
-            if i < n:
-                eb.append(b[i])
+            eb.append(b[i])
         off += elen
         out.append(owned_utf8_string(eb))
     return out^

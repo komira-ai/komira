@@ -25,6 +25,7 @@ from kci_workflow_check import (
     kci_run_calls,
     read_workflow,
 )
+from kci_workflow_check.pull_request import check_no_secret, check_release_only
 from kci_release_machine import parse_machine_file
 
 
@@ -65,8 +66,10 @@ comptime _WF: String = (
     "          ts-client-id: ${{ vars.TS_CLIENT_ID }}\n"
     "      - name: kci\n"
     "        run: |\n"
+    "          if ! git rev-parse --verify --quiet HEAD^2 > /dev/null || ! change_base=$(git rev-parse --verify HEAD^1);"
+    " then echo \"::error::the change base is the merge commit's first parent, and HEAD is not a merge commit\"; exit 1; fi\n"
     "          \"$RUNNER_TEMP/kci/kci\" run --stage pr \\\n"
-    "            --affected-by ${{ github.event.pull_request.base.sha }} \\\n"
+    "            --affected-by \"$change_base\" \\\n"
     "            --summary-file \"$GITHUB_STEP_SUMMARY\"\n"
 )
 
@@ -122,9 +125,9 @@ def test_the_one_workflow_agrees() raises:
 
 
 def test_the_affected_by_spellings_kci_accepts() raises:
-    # quoted, `=`, and the spacing inside ${{ }} aside
-    _agrees(String(_MACHINE), _wf(String("--affected-by ${{ github.event.pull_request.base.sha }}"), String("--affected-by \"${{ github.event.pull_request.base.sha }}\"")))
-    _agrees(String(_MACHINE), _wf(String("--affected-by ${{ github.event.pull_request.base.sha }}"), String("--affected-by=${{github.event.pull_request.base.sha}}")))
+    # unquoted, and `=`
+    _agrees(String(_MACHINE), _wf(String("--affected-by \"$change_base\""), String("--affected-by $change_base")))
+    _agrees(String(_MACHINE), _wf(String("--affected-by \"$change_base\""), String("--affected-by=$change_base")))
     # the fork condition inside ${{ }}
     _agrees(
         String(_MACHINE),
@@ -491,18 +494,11 @@ def test_a_pull_request_job_holds_minimal_permissions() raises:
     )
 
 
-def test_a_pull_request_job_passes_the_base_commit() raises:
+def test_a_pull_request_job_passes_the_change_base() raises:
+    # every other branch of the change base: test_ci_pr_change_base.mojo
     _reports(
-        _wf(String("            --affected-by ${{ github.event.pull_request.base.sha }} \\\n"), String("")),
-        String("job 'check': R6: stage 'pr' is a PULL_REQUEST stage, so its `kci run` carries --affected-by ${{ github.event.pull_request.base.sha }}"),
-    )
-    _reports(
-        _wf(String("${{ github.event.pull_request.base.sha }}"), String("origin/main")),
-        String("R6: stage 'pr' is a PULL_REQUEST stage: `--affected-by origin/main`; it passes ${{ github.event.pull_request.base.sha }}"),
-    )
-    _reports(
-        _wf(String("github.event.pull_request.base.sha"), String("github.event.pull_request.head.sha")),
-        String("`--affected-by ${{ github.event.pull_request.head.sha }}`; it passes"),
+        _wf(String("            --affected-by \"$change_base\" \\\n"), String("")),
+        String("job 'check': R6: stage 'pr' is a PULL_REQUEST stage, so its `kci run` carries --affected-by \"$change_base\" after the line `if ! git rev-parse"),
     )
 
 
@@ -829,9 +825,81 @@ def test_check_running_workflow_accepts_the_workflow() raises:
     if len(f) != 0:
         raise Error(String("unexpected findings: ") + _all(f))
     var drift = check_running_workflow(
-        g, files, _wf(String("${{ github.event.pull_request.base.sha }}"), String("HEAD~1")), String("release/machine.textproto"), True
+        g, files, _wf(String("\"$change_base\""), String("HEAD~1")), String("release/machine.textproto"), True
     )
     assert_equal(len(drift), 1)
+
+
+# ---- edges: no trigger, no jobs, a machine the parser would refuse, the helpers ------
+
+
+def test_pr_yml_without_on_or_jobs() raises:
+    _reports(_wf(String("on:\n  pull_request:\n    branches: [main]\n"), String("")), String("R6: the workflow has no `on:` triggers"))
+    var no_jobs = String(_WF)[byte = 0 : String(_WF).find(String("jobs:\n"))]
+    _reports(String(no_jobs), String("R1: the workflow has no `jobs:` mapping"))
+
+
+def test_a_pull_request_stage_with_an_after_is_r3() raises:
+    # parse_machine_file refuses it; a graph built or edited in code is held too
+    var g = parse_machine_file(String(_MACHINE), String("machine file"))
+    g.stages[2].after = String("build")
+    var f = check_workflow(String(_WF), g, _tokens(), String("release/machine.textproto"), True)
+    assert_true(
+        _has(f, String("R3: the PULL_REQUEST stage 'pr' runs after 'build', and pr.yml's one job waits for nothing")),
+        _all(f),
+    )
+
+
+def test_a_conjunction_with_a_comparison_and_an_unterminated_literal() raises:
+    # `<` and `>` alone are operators of a top-level conjunction
+    assert_true(excludes_pull_request(String("github.run_attempt < 2 && github.event_name != 'pull_request'")))
+    assert_true(excludes_pull_request(String("github.run_attempt > 0 && github.event_name == 'push'")))
+    # `}}` in a literal of a bare condition: GitHub reads a format string
+    assert_false(excludes_pull_request(String("github.event_name != 'pull_request' && github.head_ref != '}}'")))
+    # a literal that never closes is not read, whatever term came before it
+    assert_false(excludes_pull_request(String("github.event_name != 'pull_request' && github.ref == 'refs/heads/main")))
+
+
+def test_check_no_secret_reads_the_word_secrets_only() raises:
+    var doc = read_workflow(
+        String("env:\n  A: mysecrets\n  B: secrets_x\n  C: secrets.GITHUB_TOKENX\n  D: ${{ secrets.GITHUB_TOKEN }}\n")
+    )
+    var f = List[String]()
+    check_no_secret(doc, doc.child(0, String("env")), String("env"), String("workflow: "), f)
+    # a longer name holding the word (before or after it) is no secret; a
+    # longer name after GITHUB_TOKEN is another secret
+    assert_equal(len(f), 1, _all(f))
+    assert_true(f[0].find(String("line 4: workflow: R6: the value of `C` names the `secrets` context")) >= 0, f[0])
+    # a workflow with no `env:` holds none, whatever its other values say
+    var bare = read_workflow(String("jobs:\n  a: secrets.X\n"))
+    var none = List[String]()
+    check_no_secret(bare, bare.child(0, String("env")), String("env"), String("workflow: "), none)
+    assert_equal(len(none), 0, _all(none))
+
+
+def test_check_release_only() raises:
+    var doc = read_workflow(
+        String("jobs:\n  a:\n    if: github.event_name == 'push'\n  b:\n    runs-on: x\n  c:\n    if: always()\n")
+    )
+    var jobs = doc.child(0, String("jobs"))
+    var f = List[String]()
+    check_release_only(doc, String("a"), doc.child(jobs, String("a")), String("gamma"), f)
+    assert_equal(len(f), 0, _all(f))
+    check_release_only(doc, String("b"), doc.child(jobs, String("b")), String("gamma"), f)
+    check_release_only(doc, String("c"), doc.child(jobs, String("c")), String("gamma"), f)
+    assert_equal(len(f), 2, _all(f))
+    assert_true(f[0].startswith(String("line 5: job 'b': R6: runs stage 'gamma', a release stage")), f[0])
+    assert_true(f[1].startswith(String("line 7: job 'c': R6: runs stage 'gamma'")), f[1])
+
+
+def test_check_release_only_without_a_job_node() raises:
+    # A caller that holds no node for the job (-1) still gets the R6 finding,
+    # with no `line N:` prefix: the document has no line to name.
+    var doc = read_workflow(String("jobs:\n  a:\n    runs-on: x\n"))
+    var f = List[String]()
+    check_release_only(doc, String("x"), -1, String("gamma"), f)
+    assert_equal(len(f), 1, _all(f))
+    assert_true(f[0].startswith(String("job 'x': R6: runs stage 'gamma', a release stage")), f[0])
 
 
 def main() raises:

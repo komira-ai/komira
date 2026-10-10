@@ -133,6 +133,19 @@ comptime HEARTBEAT_STATUS_AUTH_UNAVAILABLE: Int = -1
 comptime HEARTBEAT_STATUS_AUTH_REFUSED: Int = -2
 
 
+def terminal_beat_retryable(status: Int) -> Bool:
+    """Whether a failed beat with this `HeartbeatOutcome.status` may succeed
+    if sent again: no reply at all (0), a credential that could not be read
+    this time (HEARTBEAT_STATUS_AUTH_UNAVAILABLE; the file form re-reads it),
+    408, 429 and every 5xx. Not a credential refused over plaintext, and not
+    any other status: a 4xx says the request itself is refused."""
+    if status == 0 or status == HEARTBEAT_STATUS_AUTH_UNAVAILABLE:
+        return True
+    if status == 408 or status == 429:
+        return True
+    return status >= 500 and status <= 599
+
+
 struct HeartbeatOutcome(Copyable, Movable, ImplicitlyCopyable):
     """The result of one heartbeat.
 

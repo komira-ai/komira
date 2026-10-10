@@ -7,7 +7,7 @@
 # Every template is driven as an engine drives it: an eleven-row column cut
 # into chunks of W lanes (`eval[W]`), the rest through the scalar oracle
 # (`eval_row`), with W over 1, 4, 8 and 16 (16: every row scalar); when is
-# driven at 4, 8 and 16 and is_null at 1 only (see their sections). Each lane
+# driven at 4, 8 and 16 (see its section). Each lane
 # is checked against a written-out answer; floats bit for bit.
 #
 # Float rows follow IEEE 754: a NaN row is FALSE for every ordered operator
@@ -16,10 +16,11 @@
 # under review in pull request 770, proposes NaN = NaN and NaN > x; it is
 # undecided.)
 #
+# The NaN row of template 30 (`<>`) is pinned TRUE on both paths: eval[W]
+# used `.ne()`, an ordered compare that answered FALSE where eval_row
+# answered TRUE (#937).
+#
 # Not pinned here (#937), because today's answer is believed wrong:
-#   - eval[W] of template 30 (`<>`) answers the NaN row FALSE (`.ne()` is an
-#     ordered compare) where eval_row and IEEE answer TRUE; only eval_row is
-#     checked on that row;
 #   - I64 -> I32 of an out-of-range value keeps its low 32 bits (section 6.2
 #     says error); only in-range values are cast.
 # Float -> I64 casts are driven inside the I64 range only: the templates
@@ -135,10 +136,7 @@ def _run_cmp_f64[W: Int]() raises:
     var le: List[Bool] = [T, T, F, T, F, F, T, F, T, T, T]
     var eq: List[Bool] = [F, T, F, F, F, F, F, F, F, F, F]
     var ne: List[Bool] = [T, F, T, T, T, T, T, T, T, T, T]
-    # Row 5 (NaN) of `<>` is checked on eval_row only: eval[W]'s `.ne()` is an
-    # ordered compare and answers FALSE, which is believed wrong (#937), so
-    # that one lane is not pinned.
-    comptime NAN_ROW = 5
+    # Row 5 (NaN) of `<>` is TRUE on eval[W] as on eval_row (#937).
     var n = len(a)
     var i = 0
     while i + W <= n:
@@ -148,10 +146,7 @@ def _run_cmp_f64[W: Int]() raises:
         _blanes(GenBinaryCmpLt_F64_ColLit.eval[W](s, lit).get_bool[0](), lt, i, "lt f64")
         _blanes(GenBinaryCmpLe_F64_ColLit.eval[W](s, lit).get_bool[0](), le, i, "le f64")
         _blanes(GenBinaryCmpEq_F64_ColLit.eval[W](s, lit).get_bool[0](), eq, i, "eq f64")
-        var ne_got = GenBinaryCmpNe_F64_ColLit.eval[W](s, lit).get_bool[0]()
-        for l in range(W):
-            if i + l != NAN_ROW:
-                assert_equal(Bool(ne_got[l]), ne[i + l], "ne f64 row " + String(i + l))
+        _blanes(GenBinaryCmpNe_F64_ColLit.eval[W](s, lit).get_bool[0](), ne, i, "ne f64")
         i += W
     while i < n:
         var r = F64Row(a=a[i])
@@ -351,42 +346,53 @@ def _run_when[W: Int]() raises:
 # reads validity. Every row answers is_null FALSE and is_not_null TRUE,
 # whatever its value (NaN included).
 #
-# Only W = 1 is driven: each `eval[W]` body splats with
-# `SIMD[DType.bool, W](<Bool>)`, which the compiler refuses for every W > 1
-# ("must be a scalar; use the `fill` keyword"), so no wider instantiation of
-# these eight templates compiles (#937). The scalar path and the one-lane
-# chunk answer every row.
+# Driven at W = 1, 4 and 8, with the rows past the last whole chunk through
+# eval_row. Each `eval[W]` body used to splat with `SIMD[DType.bool, W](<Bool>)`,
+# which the compiler refuses for every W > 1 ("must be a scalar; use the
+# `fill` keyword"), so W = 4 and 8 here did not compile (#937).
 # -----------------------------------------------------------------------------
 
 
-def _run_nulls() raises:
+def _run_nulls[W: Int]() raises:
     var nan = Float64(0.0) / Float64(0.0)
     var f: List[Float64] = [0.0, -0.0, nan, 1.0, -1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
-    for i in range(len(f)):
+    var f32 = List[Float32]()
+    var i64 = List[Int64]()
+    var i32 = List[Int32]()
+    for k in range(len(f)):
+        f32.append(Float32(f[k]))
+        i64.append(Int64(k))
+        i32.append(Int32(-k))
+    var n = len(f)
+    var i = 0
+    while i + W <= n:
+        var t = " lanes from row " + String(i)
+        var s64 = _Load[W].f64(f, i)
+        var s32 = _Load[W].f32(f32, i)
+        var sl = _Load[W].i64(i64, i)
+        var si = _Load[W].i32(i32, i)
+        for l in range(W):
+            var r = t + " lane " + String(l)
+            assert_equal(Bool(GenIsNull_F64.eval[W](s64).get_bool[0]()[l]), F, "is_null f64" + r)
+            assert_equal(Bool(GenIsNotNull_F64.eval[W](s64).get_bool[0]()[l]), T, "is_not_null f64" + r)
+            assert_equal(Bool(GenIsNull_F32.eval[W](s32).get_bool[0]()[l]), F, "is_null f32" + r)
+            assert_equal(Bool(GenIsNotNull_F32.eval[W](s32).get_bool[0]()[l]), T, "is_not_null f32" + r)
+            assert_equal(Bool(GenIsNull_I64.eval[W](sl).get_bool[0]()[l]), F, "is_null i64" + r)
+            assert_equal(Bool(GenIsNotNull_I64.eval[W](sl).get_bool[0]()[l]), T, "is_not_null i64" + r)
+            assert_equal(Bool(GenIsNull_I32.eval[W](si).get_bool[0]()[l]), F, "is_null i32" + r)
+            assert_equal(Bool(GenIsNotNull_I32.eval[W](si).get_bool[0]()[l]), T, "is_not_null i32" + r)
+        i += W
+    while i < n:
         var t = " row " + String(i)
-        var s64 = _Load[1].f64(f, i)
-        var s32 = SimdOf[F32Row, 1].zero()
-        s32.set_f32[0](Float32(f[i]))
-        var i64 = SimdOf[I64Row, 1].zero()
-        i64.set_i64[0](Int64(i))
-        var i32 = SimdOf[I32Row, 1].zero()
-        i32.set_i32[0](Int32(-i))
-        assert_equal(Bool(GenIsNull_F64.eval[1](s64).get_bool[0]()), F, "is_null f64 lane" + t)
-        assert_equal(Bool(GenIsNotNull_F64.eval[1](s64).get_bool[0]()), T, "is_not_null f64 lane" + t)
-        assert_equal(Bool(GenIsNull_F32.eval[1](s32).get_bool[0]()), F, "is_null f32 lane" + t)
-        assert_equal(Bool(GenIsNotNull_F32.eval[1](s32).get_bool[0]()), T, "is_not_null f32 lane" + t)
-        assert_equal(Bool(GenIsNull_I64.eval[1](i64).get_bool[0]()), F, "is_null i64 lane" + t)
-        assert_equal(Bool(GenIsNotNull_I64.eval[1](i64).get_bool[0]()), T, "is_not_null i64 lane" + t)
-        assert_equal(Bool(GenIsNull_I32.eval[1](i32).get_bool[0]()), F, "is_null i32 lane" + t)
-        assert_equal(Bool(GenIsNotNull_I32.eval[1](i32).get_bool[0]()), T, "is_not_null i32 lane" + t)
         assert_equal(GenIsNull_F64.eval_row(F64Row(a=f[i])).a, F, "is_null f64" + t)
         assert_equal(GenIsNotNull_F64.eval_row(F64Row(a=f[i])).a, T, "is_not_null f64" + t)
-        assert_equal(GenIsNull_F32.eval_row(F32Row(a=Float32(f[i]))).a, F, "is_null f32" + t)
-        assert_equal(GenIsNotNull_F32.eval_row(F32Row(a=Float32(f[i]))).a, T, "is_not_null f32" + t)
-        assert_equal(GenIsNull_I64.eval_row(I64Row(a=Int64(i))).a, F, "is_null i64" + t)
-        assert_equal(GenIsNotNull_I64.eval_row(I64Row(a=Int64(i))).a, T, "is_not_null i64" + t)
-        assert_equal(GenIsNull_I32.eval_row(I32Row(a=Int32(-i))).a, F, "is_null i32" + t)
-        assert_equal(GenIsNotNull_I32.eval_row(I32Row(a=Int32(-i))).a, T, "is_not_null i32" + t)
+        assert_equal(GenIsNull_F32.eval_row(F32Row(a=f32[i])).a, F, "is_null f32" + t)
+        assert_equal(GenIsNotNull_F32.eval_row(F32Row(a=f32[i])).a, T, "is_not_null f32" + t)
+        assert_equal(GenIsNull_I64.eval_row(I64Row(a=i64[i])).a, F, "is_null i64" + t)
+        assert_equal(GenIsNotNull_I64.eval_row(I64Row(a=i64[i])).a, T, "is_not_null i64" + t)
+        assert_equal(GenIsNull_I32.eval_row(I32Row(a=i32[i])).a, F, "is_null i32" + t)
+        assert_equal(GenIsNotNull_I32.eval_row(I32Row(a=i32[i])).a, T, "is_not_null i32" + t)
+        i += 1
 
 
 # -----------------------------------------------------------------------------
@@ -447,8 +453,11 @@ def test_when() raises:
 
 
 def test_is_null_placeholders() raises:
-    """IDs 49..56: is_null all FALSE, is_not_null all TRUE, any value (W = 1)."""
-    _run_nulls()
+    """IDs 49..56: is_null all FALSE, is_not_null all TRUE, any value, at
+    W = 1, 4 and 8."""
+    _run_nulls[1]()
+    _run_nulls[4]()
+    _run_nulls[8]()
 
 
 def test_template_ids_are_stable() raises:

@@ -376,6 +376,13 @@
 #  47. Branch coverage runs: tools/build/tests/coverage_branch_tests.sh (sourced by 43's).
 #  49. Assert level, defines and memory cap: see
 #      tools/build/tests/assert_level_tests.sh.
+#  51. Python oracles (tools/build/python/defs.bzl, python_oracle): each
+#      target of tests//negative/python_oracle fails analysis naming the
+#      input an action built outside third_party/ (a komira library's
+#      package as data, a komira binary in srcs or as src, a wheel installed
+#      outside third_party/ as a dep or as the tzdata wheel, an interpreter
+#      unpacked outside third_party/).
+#      What works is in src/tests/helpers/komira_test_python.
 #  53. The surface capability matrix (tools/build/lint/surface_capability_matrix.bzl;
 #      docs/surface_capability_matrix.md): //:surface_capability_matrix (every
 #      surface and capability of the plan, against tests/surface_capability_matrix.bzl)
@@ -393,6 +400,28 @@
 #      a repeated capability, fewer filled cells than the floor, no surface,
 #      and (built by package pattern) a test incompatible with the lint's
 #      platform.
+#  54. The hermetic Node.js rules (tools/build/node/defs.bzl): each target of
+#      tests//negative/node and below fails with its planted defect: a failing
+#      script, a wrong expected error or an unexpected pass, a path or package
+#      staged twice, an unresolved import, an empty expect_error or exe, a pin
+#      that differs, a C warning, the test-only runtime named where it is not
+#      visible. See tools/build/tests/node_tests.sh.
+#  55. Refused imports (tools/build/lint/defs.bzl, mojo_deps refused_imports;
+#      tools/build/lint/refused_imports.awk): tests//functional/refused_imports:ok
+#      (each refused module spelt where it is no import of it: comments,
+#      docstrings, string literals, longer module names, a name imported
+#      from another module) builds; each target of
+#      tests//negative/refused_imports fails naming exactly its one finding
+#      (from M, from M.sub, from P import N, parentheses over lines with a
+#      parenthesis in a comment, import M, M as p, M.sub, an import list,
+#      `;` statements, a `\` continuation, an indented import, an import
+#      after a docstring, after a docstring holding the other triple quote,
+#      after a triple quote inside a one-line string, `from`/`import` with
+#      spaces around the dot, a dotted reference with no import of the module
+#      (plain, spaced, continued by `\`, over lines inside parentheses,
+#      through an `as` alias of its parent, through a name a from-import
+#      bound)), and an entry that is not a dotted komira_* module name is
+#      refused at analysis.
 set -uo pipefail
 
 umbrella=1
@@ -1382,6 +1411,16 @@ done
 # 49
 # shellcheck source=tools/build/tests/assert_level_tests.sh
 . "$ROOT/tools/build/tests/assert_level_tests.sh"
+# 51
+N=tests//negative/python_oracle
+F="which is not under third_party/; an oracle reads checked-in files and third_party/ outputs only"
+expect_red python_oracle_komira_data "the oracle's data \"encoding.mojoc\" is built by komira//src/komira_encoding:komira_encoding, $F" "$N:komira_data"
+expect_red python_oracle_komira_srcs "the oracle's srcs entry \"hello\" is built by komira//tools/build/examples:hello, $F" "$N:komira_srcs"
+expect_red python_oracle_local_wheel "the oracle's wheel local is built by tests//negative/python_oracle:local_wheel, $F" "$N:local_wheel_dep"
+expect_red python_oracle_local_tzdata "the oracle's wheel local is built by tests//negative/python_oracle:local_wheel, $F" "$N:local_tzdata"
+expect_red python_oracle_komira_src "the oracle's src is built by komira//tools/build/examples:hello, $F" "$N:komira_src"
+expect_red python_oracle_local_python "the oracle's python is built by tests//negative/python_oracle:stand_in_python, $F" "$N:local_python"
+
 # 52
 expect_green mojo_doc_json tests//functional/mojo_doc_json:docpkg_doc
 N=tests//negative/mojo_doc_json
@@ -1436,6 +1475,48 @@ done
 # A row naming a test incompatible with the lint's platform fails the build
 # even under a package pattern, so the lint never drops out of //... silently.
 scm_planted incompatible "because its transitive dep $E/pandas_e2e:test_mac" "$N/incompatible:"
+
+# 54
+# shellcheck source=tools/build/tests/node_tests.sh
+. "$ROOT/tools/build/tests/node_tests.sh"
+
+# 55
+expect_green refused_imports tests//functional/refused_imports:ok
+N=tests//negative/refused_imports
+P=komira_plan_ir.physical_plan
+G=komira_plan_ir.physical_plan_purity_gate
+for want in \
+    "after_docstring|5: imports $P, a module this package refuses ($P)" \
+    "alias_from|4: names $P.segment, a module this package refuses ($P.segment)" \
+    "alias_parent|4: names $P, a module this package refuses ($P)" \
+    "continuation|2: imports $P, a module this package refuses ($P)" \
+    "from_module|2: imports $P, a module this package refuses ($P)" \
+    "from_parent|2: imports $G, a module this package refuses ($G)" \
+    "from_spaced|2: imports $P, a module this package refuses ($P)" \
+    "from_submodule|2: imports $P.sub, a module this package refuses ($P)" \
+    "import_as|2: imports $P, a module this package refuses ($P)" \
+    "import_list|2: imports $P, a module this package refuses ($P)" \
+    "import_module|2: imports $P, a module this package refuses ($P)" \
+    "import_spaced|2: imports $P, a module this package refuses ($P)" \
+    "import_sub|2: imports $P.sub, a module this package refuses ($P)" \
+    "indented|3: imports $P, a module this package refuses ($P)" \
+    "paren_comment_close|4: imports $P, a module this package refuses ($P)" \
+    "paren_comment_open|3: imports $P, a module this package refuses ($P)" \
+    "mixed_triple_quotes|5: imports $P, a module this package refuses ($P)" \
+    "parenthesised|4: imports $P, a module this package refuses ($P)" \
+    "qualified|4: names $P, a module this package refuses ($P)" \
+    "qualified_continued|4: names $P, a module this package refuses ($P)" \
+    "qualified_in_parens|4: names $P, a module this package refuses ($P)" \
+    "qualified_spaced|4: names $P, a module this package refuses ($P)" \
+    "semicolon|2: imports $P, a module this package refuses ($P)" \
+    "semicolon_imports|2: imports $G, a module this package refuses ($G)" \
+    "triple_quote_in_string|3: imports $P, a module this package refuses ($P)"; do
+    t=${want%%|*}
+    expect_red "refused_imports_$t" "$N/$t.mojo:${want#*|}" "$N:$t"
+    n=$(grep -o "mojo_deps: [0-9]* finding line(s)" "$LOG/refused_imports_$t.log" | head -1)
+    if [ "$n" = "mojo_deps: 1 finding line(s)" ]; then pass "refused_imports_${t}_alone"; else fail "refused_imports_${t}_alone: '$n', want 1 finding (see $LOG/refused_imports_$t.log)"; fi
+done
+expect_red refused_imports_bad_entry "refused_imports entry \`komira_plan_ir\` is not a dotted module name" "$N:bad_entry"
 
 # 37
 pt_rc=0

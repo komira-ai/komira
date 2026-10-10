@@ -323,6 +323,14 @@ pub const Fn = struct {
         return isCall(cb, ty) and (self.dbgOf(c) orelse return false) == dbg;
     }
 
+    /// Whether `v` is field 0 of the `{ i1, ... }` a call returns, both at
+    /// one location: a raising call's error flag (an and/or's raising right
+    /// operand's, wherever the call is).
+    pub fn ownFlag(self: *const Fn, v: []const u8) bool {
+        const d = self.dbgOf(v) orelse return false;
+        return self.raisingFlag(v, d, false);
+    }
+
     /// Whether `cond`, tested by a br at `dbg`, is true exactly when a
     /// raising call at `dbg` raised (README.md, "try"): the call's own flag
     /// (raisingFlag), or a `phi i1` whose incoming values are `true`,

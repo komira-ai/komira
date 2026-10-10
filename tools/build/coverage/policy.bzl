@@ -22,12 +22,34 @@ branch) and a decision for generated libraries (README.md, "The build
 gate").
 """
 
-# census: findings are listed, never fatal; neutral: the same; enforce: a
-# package with any finding fails its build (covcheck gate exits 3).
+# census: findings are listed, never fatal, except a Regression (a package
+# under its floor of ratchet.tsv), which fails the gate in every mode;
+# neutral: the same; enforce: a package with any finding fails its build
+# (covcheck gate exits 3).
 COVERAGE_MODE = "census"
 
 # Basis points of line (and branch) coverage per package: 10000 is 100%.
 COVERAGE_TARGET_BP = 10000
+
+# The mode of every mojo_shared_lib's coverage gate (tools/build/mojo/coverage.bzl,
+# coverage_shared_lib): a shared library's drivers are measured and their
+# reports and the gate's result are its `[coverage]`, but it has no coverage
+# target. Decided: a shared library is the C ABI of code whose own
+# libraries are measured and gated by their tests (a library's gate reads its
+# own tests' reports only), and one loaded by a program's end-to-end tests
+# exists for those tests, so its line coverage is reported, never enforced.
+# This is its own constant, not COVERAGE_MODE: moving the libraries to enforce
+# moves no shared library. coverage.bzl refuses `enforce` here, and for any
+# mojo_shared_lib, a tests-cell fixture included (in analysis); and nothing
+# waits for a shared library's coverage runs or gate (it ships no conda
+# package), so its published file builds whatever they find. Reported means
+# its `[coverage]` (`[coverage][gate][summary]`) when built by name: the pull
+# request's coverage workflow (.github/ci/coverage_measure.sh) selects
+# mojo_library targets only, so no workflow reports a shared library's gate
+# yet. Its report counts the shared library's own sources (its C ABI), not
+# the code compiled into it from its Mojo dependencies, which their own
+# tests measure.
+COVERAGE_SHARED_LIB_MODE = "census"
 
 # The directories of test-only packages, relative to a cell's root (the
 # layout of src/: test-only packages are under src/tests/<kind>/). A
@@ -117,7 +139,7 @@ COVERAGE_BRANCH_GATE = {
     "komira//src/komira_clock:komira_clock": "its test's branches all classify (2 arms of 1 file)",
     "komira//src/komira_column_format:komira_column_format": "its two tests' branches all classify (170 arms of 1 file)",
     "komira//src/komira_compression:komira_compression": "its four tests' branches all classify (100 arms of 6 files, 36 of them `try` arms)",
-    "komira//src/komira_counters:komira_counters": "its five tests' branches all classify (80 arms of 3 files, 2 of them `try` arms)",
+    "komira//src/komira_counters:komira_counters": "its six tests' branches all classify (80 arms of 3 files, 2 of them `try` arms)",
     "komira//src/komira_dynamic_filter:komira_dynamic_filter": "its six tests' branches all classify (52 arms of 4 files)",
     "komira//src/komira_exec_types:komira_exec_types": "its test's branches all classify (58 arms of 1 file)",
     "komira//src/komira_fork_join:komira_fork_join": "its test's branches all classify (26 arms of 1 file, 2 of them `try` arms)",
@@ -154,7 +176,7 @@ COVERAGE_BRANCH_GATE = {
     "komira//src/komira_trace:komira_trace": "its eight tests' branches all classify (102 arms of 2 files)",
     "komira//src/komira_udf:komira_udf": "its four tests' branches all classify (36 arms of 1 file)",
     "komira//src/komira_uuid:komira_uuid": "its test's branches all classify (84 arms of 2 files)",
-    "komira//src/komira_wkt:komira_wkt": "its six tests' branches all classify (550 arms of 6 files, 2 of them `try` arms)",
+    "komira//src/komira_wkt:komira_wkt": "its eight tests' branches all classify (556 arms of 6 files, 2 of them `try` arms)",
     "komira//src/komira_zlib:komira_zlib": "its test's branches all classify (76 arms of 1 file, 2 of them `try` arms)",
     "komira//src/tests/e2e/komira_udf_e2e:komira_udf_e2e": "its four tests' branches all classify (16 arms of 1 file)",
     "komira//src/tests/helpers/komira_test_minio:komira_test_minio": "its two tests' branches all classify (110 arms of 4 files, 42 of them `try` arms)",

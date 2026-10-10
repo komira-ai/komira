@@ -30,20 +30,27 @@
 # Do NOT add new wildcard sites to this file.
 # =============================================================================
 
-from std.memory import alloc, unsafe_memcpy, unsafe_memset
 from std.sys import size_of, simd_width_of
 
 from komira_arrow.arrow_types import ArrowType
-from komira_arrow.bitmap import Bitmap
+from komira_arrow.bitmap import Bitmap, copy_bits_aligned_buffer
 from komira_arrow.column import Column
 from komira_arrow.arrow_types import arrow_fixed_byte_width, layouts_conflict
 from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 from komira_arrow.offset_overflow import ARROW_INT64_OFFSET_MAX, check_int32_offsets
-from komira_arrow.dict_interner import DictInterner, dict_merge_probe_add
+from komira_arrow.concat_dict import (
+    _concat_dict_columns,
+    _carry_dict_payload,
+    _copy_dict_codes,
+    _copy_dict_offsets,
+    _dicts_identical,
+    _refuse_dict_layout_disagreement,
+)
 from komira_arrow.varlen_width_guard import check_fixed_width_dispatch
 from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
 from komira_collections.slab import Slab
 from komira_buffer.heap_region import HeapRegion
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
 
 
 # =============================================================================
@@ -61,8 +68,8 @@ def _merge_validity[
 ) raises -> Optional[Bitmap[HeapRegion]]:
     """Merge the validity bitmaps of two Columns into one covering a ++ b.
 
-    Returns None (the all-valid encoding) iff BOTH inputs are fully valid
-    (no validity bitmap AND zero null_count). Otherwise builds an
+    Returns None (the all-valid encoding) iff BOTH inputs report a zero
+    null_count. Otherwise builds an
     all-valid bitmap of length `len_a + len_b` and clears the null
     positions contributed by each side:
       * if a side has a validity bitmap, its cleared bits are mirrored;
@@ -81,39 +88,108 @@ def _merge_validity[
     merge happened to feed only all-valid columns, hiding it). Block-parallel
     Avro decode concatenates per-worker nullable batches and exposed it.
     """
-    var a_nulls = a._null_count
-    var b_nulls = b._null_count
-    if a_nulls == 0 and b_nulls == 0:
+    if a._null_count == 0 and b._null_count == 0:
         return Optional[Bitmap[HeapRegion]](None)
 
-    var total = len_a + len_b
-    var bm = Bitmap.create_all_valid(total)
-
-    # Mirror a's nulls into [0, len_a).
-    if a._validity:
-        ref av = a._validity.value()
-        for i in range(len_a):
-            if not av.test(i):
-                bm.clear(i)
-    elif a_nulls > 0:
-        # Degenerate: bitmap-less column with a positive null_count. Clear
-        # the leading `a_nulls` positions so count + bitmap stay consistent.
-        var n = a_nulls if a_nulls <= len_a else len_a
-        for i in range(n):
-            bm.clear(i)
-
-    # Mirror b's nulls into [len_a, total).
-    if b._validity:
-        ref bv = b._validity.value()
-        for i in range(len_b):
-            if not bv.test(i):
-                bm.clear(len_a + i)
-    elif b_nulls > 0:
-        var n2 = b_nulls if b_nulls <= len_b else len_b
-        for i in range(n2):
-            bm.clear(len_a + i)
-
+    var bm = Bitmap.create_all_valid(len_a + len_b)
+    _copy_validity_window(bm, 0, a)
+    _copy_validity_window(bm, len_a, b)
     return Optional[Bitmap[HeapRegion]](bm^)
+
+
+def _copy_validity_window(
+    mut bm: Bitmap[HeapRegion], dst_row: Int, col: Column[HeapRegion]
+) raises:
+    """Write `col`'s validity for its rows [0, _length) into `bm` at
+    `dst_row`. `bm` arrives all-valid over that range.
+
+    ★ ROW `i` OF A COLUMN IS VALIDITY BIT `_offset + i`. `Column.slice` shares
+    the whole-column bitmap and moves `_offset`, so reading from bit 0 pairs
+    each row with the null bit of the row `_offset` places earlier. The
+    `Bitmap.copy_bits_into` primitive copies from any source bit (memcpy when
+    both ends are byte-aligned, a bit walk otherwise).
+
+    A bitmap-less column with a positive null_count is a degenerate "N nulls,
+    positions unknown" column (only a buggy prior concat produced one; new
+    code always carries a bitmap when nulls exist). Its LEADING `null_count`
+    rows are cleared so the result's null_count and bitmap agree.
+    """
+    var n = col._length
+    if n == 0:
+        return
+    if col._validity:
+        Bitmap.copy_bits_into(bm, dst_row, col._validity.value(), col._offset, n)
+    elif col._null_count > 0:
+        var k = col._null_count if col._null_count <= n else n
+        for i in range(k):
+            bm.clear(dst_row + i)
+
+
+@always_inline
+def _var_len_window[dt: DType](col: Column[HeapRegion]) -> Tuple[Int, Int]:
+    """The data-buffer byte window `[start, end)` holding `col`'s rows: offsets
+    entries `_offset` and `_offset + _length`. Arrow does not require the first
+    entry to be 0 nor the data buffer to end at the last one, so neither the
+    buffer's start nor its length is the window. No offsets buffer (every row
+    empty, a komira convention) or no rows is the empty window."""
+    if col._length == 0 or not col._offsets:
+        return (0, 0)
+    ref offs = col._offsets.value()
+    return (
+        Int(offs.get_typed[Scalar[dt]](col._offset)),
+        Int(offs.get_typed[Scalar[dt]](col._offset + col._length)),
+    )
+
+
+@always_inline
+def _rebase_offsets[
+    dt: DType
+](
+    mut dst: OwnedAlignedBuffer,
+    dst_elem: Int,
+    src: SharedAlignedBuffer[HeapRegion],
+    src_elem: Int,
+    count: Int,
+    delta: Scalar[dt],
+):
+    """`dst[dst_elem + i] = src[src_elem + i] + delta` for `i` in `[0, count)`.
+    The wrap-around add is exact: every result is a valid offset."""
+    # PERF-CRITICAL: SIMD offset rewrite — load + add constant + store.
+    # 3-4x speedup on int32 addition; loads/stores are unaligned (alignment=1),
+    # byte-offset addressed through load_simd / store_simd.
+    comptime sz = size_of[Scalar[dt]]()
+    comptime W = simd_width_of[dt]()
+    var delta_vec = SIMD[dt, W](delta)
+    var simd_end = (count // W) * W
+    var i = 0
+    while i < simd_end:
+        var v = src.load_simd[dt, W]((src_elem + i) * sz)
+        dst.store_simd[dt, W]((dst_elem + i) * sz, v + delta_vec)
+        i += W
+    while i < count:
+        dst.set_typed[Scalar[dt]](
+            dst_elem + i, src.get_typed[Scalar[dt]](src_elem + i) + delta
+        )
+        i += 1
+
+
+@always_inline
+def _fill_offsets[
+    dt: DType
+](mut dst: OwnedAlignedBuffer, dst_elem: Int, count: Int, val: Scalar[dt]):
+    """`dst[dst_elem + i] = val` for `i` in `[0, count)` (rows that are all
+    empty, from an input with no offsets buffer)."""
+    comptime sz = size_of[Scalar[dt]]()
+    comptime W = simd_width_of[dt]()
+    var v = SIMD[dt, W](val)
+    var simd_end = (count // W) * W
+    var i = 0
+    while i < simd_end:
+        dst.store_simd[dt, W]((dst_elem + i) * sz, v)
+        i += W
+    while i < count:
+        dst.set_typed[Scalar[dt]](dst_elem + i, val)
+        i += 1
 
 
 # =============================================================================
@@ -244,8 +320,16 @@ def _concat_columns[
         # offsets onto `set_typed[Int32]` / `get_typed[Int32]` +
         # `load_simd[DType.int32, W]` / `store_simd` for the PERF-CRITICAL
         # SIMD offset rewrite path.
-        var data_len_a = a._data.len()
-        var data_len_b = b._data.len()
+        #
+        # ★ EACH INPUT CONTRIBUTES ITS WINDOW, NOT ITS BUFFER. Row i of a
+        # column is offsets entry `_offset + i`; the first entry need not be 0
+        # and the data buffer may run past the last one (both legal Arrow).
+        var win_a = _var_len_window[DType.int32](a)
+        var win_b = _var_len_window[DType.int32](b)
+        var data_start_a = win_a[0]
+        var data_start_b = win_b[0]
+        var data_len_a = win_a[1] - win_a[0]
+        var data_len_b = win_b[1] - win_b[0]
 
         # ★ THE INT32-OFFSET CEILING, WHICH THIS ARM DID NOT HAVE.
         #
@@ -274,76 +358,51 @@ def _concat_columns[
         var new_data = OwnedAlignedBuffer(data_len_a + data_len_b)
         if data_len_a > 0:
             new_data.view_range_mut(0, data_len_a).copy_from_view_at(
-                0, a._data.view_range_ro(0, data_len_a)
+                0, a._data.view_range_ro(data_start_a, data_len_a)
             )
         if data_len_b > 0:
             new_data.view_range_mut(data_len_a, data_len_b).copy_from_view_at(
-                0, b._data.view_range_ro(0, data_len_b)
+                0, b._data.view_range_ro(data_start_b, data_len_b)
             )
         new_data.set_length(Int64(data_len_a + data_len_b))
-
 
         # Build merged offsets: a's offsets + b's offsets shifted by a's data length.
         comptime int32_size = size_of[Int32]()
         var offsets_bytes = (total + 1) * int32_size
         var new_offsets = OwnedAlignedBuffer(offsets_bytes)
-
-        # Copy a's offsets (len_a + 1 entries).
-        if a._offsets:
-            for i in range(len_a + 1):
-                new_offsets.set_typed[Int32](
-                    i, a._offsets.value().get_typed[Int32](i)
-                )
-        else:
-            for i in range(len_a + 1):
-                new_offsets.set_typed[Int32](i, Int32(0))
-
-        # PERF-CRITICAL: SIMD offset rewrite — load + add constant + store.
-        # 3-4x speedup on aligned int32 addition. Migrated onto
-        # MmapAlignedBuffer.load_simd / store_simd (byte-offset addressed).
-        var base_offset = Int32(data_len_a)
-        # byte offset into new_offsets where b's remapped offsets start:
-        #   (len_a + 1) * 4 bytes. Each step writes W Int32s = W*4 bytes.
-        var dst_byte_start = (len_a + 1) * int32_size
-        if b._offsets:
-            comptime W = simd_width_of[DType.int32]()
-            var base_vec = SIMD[DType.int32, W](base_offset)
-            # b's offsets start at index 1 (skip its first entry, which
-            # is 0). In bytes: skip `int32_size` from base.
-            var simd_end = (len_b // W) * W
-            var i = 0
-            while i < simd_end:
-                var v = b._offsets.value().load_simd[DType.int32, W](
-                    (1 + i) * int32_size
-                )
-                new_offsets.store_simd[DType.int32, W](
-                    dst_byte_start + i * int32_size, v + base_vec
-                )
-                i += W
-            while i < len_b:
-                var v = b._offsets.value().get_typed[Int32](1 + i)
-                new_offsets.set_typed[Int32](
-                    len_a + 1 + i, v + base_offset
-                )
-                i += 1
-        else:
-            comptime W2 = simd_width_of[DType.int32]()
-            var base_vec2 = SIMD[DType.int32, W2](base_offset)
-            var simd_end2 = (len_b // W2) * W2
-            var i2 = 0
-            while i2 < simd_end2:
-                new_offsets.store_simd[DType.int32, W2](
-                    dst_byte_start + i2 * int32_size, base_vec2
-                )
-                i2 += W2
-            while i2 < len_b:
-                new_offsets.set_typed[Int32](
-                    len_a + 1 + i2, base_offset
-                )
-                i2 += 1
-
         new_offsets.set_length(Int64(offsets_bytes))
 
+        # a's offsets entries [_offset, _offset + len_a], rebased to start at 0.
+        if a._offsets and len_a > 0:
+            _rebase_offsets[DType.int32](
+                new_offsets,
+                0,
+                a._offsets.value(),
+                a._offset,
+                len_a + 1,
+                Int32(-data_start_a),
+            )
+        else:
+            # No offsets buffer or no rows: all zeros. An absent offsets
+            # buffer meaning "every row empty" is a komira convention, not
+            # Arrow's (Arrow carries length + 1 offsets for any non-empty array).
+            _fill_offsets[DType.int32](new_offsets, 0, len_a + 1, Int32(0))
+
+        # b's entries (_offset, _offset + len_b], rebased to follow a's bytes.
+        # PERF-CRITICAL: SIMD rewrite in `_rebase_offsets`.
+        if b._offsets and len_b > 0:
+            _rebase_offsets[DType.int32](
+                new_offsets,
+                len_a + 1,
+                b._offsets.value(),
+                b._offset + 1,
+                len_b,
+                Int32(data_len_a - data_start_b),
+            )
+        else:
+            _fill_offsets[DType.int32](
+                new_offsets, len_a + 1, len_b, Int32(data_len_a)
+            )
 
         return Column[HeapRegion](
             arrow_type=at,
@@ -375,8 +434,13 @@ def _concat_columns[
         # depend on the DATA rather than on the inputs, which is exactly the
         # per-chunk type instability `result_ipc.write_result_ipc_chunked_stream`
         # refuses as OUTPUT_SCHEMA_DIVERGED.
-        var wdata_len_a = a._data.len()
-        var wdata_len_b = b._data.len()
+        # Each input contributes its offsets WINDOW (see the narrow arm).
+        var wwin_a = _var_len_window[DType.int64](a)
+        var wwin_b = _var_len_window[DType.int64](b)
+        var wdata_start_a = wwin_a[0]
+        var wdata_start_b = wwin_b[0]
+        var wdata_len_a = wwin_a[1] - wwin_a[0]
+        var wdata_len_b = wwin_b[1] - wwin_b[0]
 
         # ★ THE WIDE ARM'S OWN CEILING, STATED RATHER THAN SKIPPED.
         #
@@ -407,58 +471,52 @@ def _concat_columns[
         var wnew_data = OwnedAlignedBuffer(wdata_len_a + wdata_len_b)
         if wdata_len_a > 0:
             wnew_data.view_range_mut(0, wdata_len_a).copy_from_view_at(
-                0, a._data.view_range_ro(0, wdata_len_a)
+                0, a._data.view_range_ro(wdata_start_a, wdata_len_a)
             )
         if wdata_len_b > 0:
             wnew_data.view_range_mut(
                 wdata_len_a, wdata_len_b
-            ).copy_from_view_at(0, b._data.view_range_ro(0, wdata_len_b))
+            ).copy_from_view_at(
+                0, b._data.view_range_ro(wdata_start_b, wdata_len_b)
+            )
         wnew_data.set_length(Int64(wdata_len_a + wdata_len_b))
 
         comptime int64_size = size_of[Int64]()
         var woffsets_bytes = (total + 1) * int64_size
         var wnew_offsets = OwnedAlignedBuffer(woffsets_bytes)
-
-        # a's offsets pass through unchanged (its base is already 0).
-        if a._offsets:
-            for i in range(len_a + 1):
-                wnew_offsets.set_typed[Int64](
-                    i, a._offsets.value().get_typed[Int64](i)
-                )
-        else:
-            for i in range(len_a + 1):
-                wnew_offsets.set_typed[Int64](i, Int64(0))
-
-        # b's offsets are rebased by a's data length, SIMD-staged exactly like
-        # the narrow arm (same shape, 8-byte lanes).
-        var wbase_offset = Int64(wdata_len_a)
-        var wdst_byte_start = (len_a + 1) * int64_size
-        if b._offsets:
-            comptime WW = simd_width_of[DType.int64]()
-            var wbase_vec = SIMD[DType.int64, WW](wbase_offset)
-            var wsimd_end = (len_b // WW) * WW
-            var wi = 0
-            while wi < wsimd_end:
-                var wv = b._offsets.value().load_simd[DType.int64, WW](
-                    (1 + wi) * int64_size
-                )
-                wnew_offsets.store_simd[DType.int64, WW](
-                    wdst_byte_start + wi * int64_size, wv + wbase_vec
-                )
-                wi += WW
-            while wi < len_b:
-                var wv2 = b._offsets.value().get_typed[Int64](1 + wi)
-                wnew_offsets.set_typed[Int64](
-                    len_a + 1 + wi, wv2 + wbase_offset
-                )
-                wi += 1
-        else:
-            # No offsets buffer on b: every one of its rows is empty, so each
-            # offset is the running base.
-            for wi3 in range(len_b):
-                wnew_offsets.set_typed[Int64](len_a + 1 + wi3, wbase_offset)
-
         wnew_offsets.set_length(Int64(woffsets_bytes))
+
+        # a's offsets window, rebased to start at 0.
+        if a._offsets and len_a > 0:
+            _rebase_offsets[DType.int64](
+                wnew_offsets,
+                0,
+                a._offsets.value(),
+                a._offset,
+                len_a + 1,
+                Int64(-wdata_start_a),
+            )
+        else:
+            # No offsets buffer (every row empty: komira convention, see the
+            # narrow arm) or no rows: all zeros.
+            _fill_offsets[DType.int64](wnew_offsets, 0, len_a + 1, Int64(0))
+
+        # b's offsets are rebased to follow a's bytes, SIMD-staged exactly
+        # like the narrow arm (same helper, 8-byte lanes). No offsets buffer on
+        # b (komira convention): every row is empty, each offset the running base.
+        if b._offsets and len_b > 0:
+            _rebase_offsets[DType.int64](
+                wnew_offsets,
+                len_a + 1,
+                b._offsets.value(),
+                b._offset + 1,
+                len_b,
+                Int64(wdata_len_a - wdata_start_b),
+            )
+        else:
+            _fill_offsets[DType.int64](
+                wnew_offsets, len_a + 1, len_b, Int64(wdata_len_a)
+            )
 
         return Column[HeapRegion](
             arrow_type=at,
@@ -475,39 +533,18 @@ def _concat_columns[
         # Migrated memset/memcpy/deref onto MmapAlignedBuffer typed API
         # (`zero()` is full-buffer, `view_range_mut(off, N).fill(0)` per-
         # range, `read_u8_at` / `write_u8_at`).
-        var bm_bytes_a = (len_a + 7) >> 3
+        #
+        # ★ ROW i IS VALUE BIT `_offset + i` on both sides, so neither input
+        # can be copied as whole bytes from bit 0. `copy_bits_aligned_buffer`
+        # memcpys when the source and destination bit positions are both
+        # byte-aligned and walks bits otherwise.
         var bm_bytes_total = (total + 7) >> 3
-        var new_data = OwnedAlignedBuffer(bm_bytes_total)
-        # Zero-fill first, then copy a's bits as whole bytes, then set
-        # b's bits one-by-one (bit offset may not be byte-aligned).
-        new_data.view_range_mut(0, bm_bytes_total).fill(0)
-        if bm_bytes_a > 0:
-            new_data.view_range_mut(0, bm_bytes_a).copy_from_view_at(
-                0, a._data.view_range_ro(0, bm_bytes_a)
-            )
-        # Clear any trailing garbage bits in the last byte of a's data
-        # to prevent them from interfering with b's bits via OR.
-        var tail_bits = len_a & 7
-        if tail_bits != 0 and bm_bytes_a > 0:
-            var mask = UInt8((1 << tail_bits) - 1)
-            var cur = new_data.read_u8_at(bm_bytes_a - 1)
-            new_data.write_u8_at(bm_bytes_a - 1, cur & mask)
-        # Append b's bits starting at bit position len_a.
-        for i in range(len_b):
-            # Read bit i from b.
-            var src_byte = i >> 3
-            var src_bit = i & 7
-            var is_set = (
-                b._data.read_u8_at(src_byte) >> UInt8(src_bit)
-            ) & UInt8(1) != UInt8(0)
-            if is_set:
-                var dst_idx = len_a + i
-                var dst_byte = dst_idx >> 3
-                var dst_bit = dst_idx & 7
-                var cur = new_data.read_u8_at(dst_byte)
-                new_data.write_u8_at(
-                    dst_byte, cur | (UInt8(1) << UInt8(dst_bit))
-                )
+        var new_data = OwnedAlignedBuffer(max(bm_bytes_total, 1))
+        new_data.set_length(Int64(bm_bytes_total))
+        if bm_bytes_total > 0:
+            new_data.view_range_mut(0, bm_bytes_total).fill(0)
+        copy_bits_aligned_buffer(new_data, 0, a._data, a._offset, len_a)
+        copy_bits_aligned_buffer(new_data, len_a, b._data, b._offset, len_b)
         new_data.set_length(Int64(bm_bytes_total))
 
 
@@ -522,193 +559,10 @@ def _concat_columns[
         )
 
     if at == ArrowType.DICTIONARY:
-        # Dictionary: concat int32 index buffers with cross-row-group remap.
-        #
-        # When different row groups have different dictionary orderings (e.g.,
-        # RG0 dict=["A","B","C"] vs RG1 dict=["C","A","B"]), raw index
-        # concatenation produces wrong results. We build a remap table that
-        # translates b's dictionary indices to a's dictionary space.
-        #
-        # Fast path: if dictionaries have identical size and byte content,
-        # skip remapping (most common case for DuckDB-written files).
-        comptime int32_size = size_of[Int32]()
-
-        # Determine if dictionaries differ.
-        var needs_remap = False
-        var dict_size_a = a._dict_size
-        var dict_size_b = b._dict_size
-
-        if dict_size_a != dict_size_b:
-            needs_remap = True
-        elif a._dict_data:
-            if b._dict_data:
-                # Same dict size -- compare dict data bytes for equality.
-                var data_len_a = a._dict_data.value().len()
-                var data_len_b = b._dict_data.value().len()
-                if data_len_a != data_len_b:
-                    needs_remap = True
-                elif data_len_a > 0:
-                    # Byte-by-byte comparison (could use memcmp if available).
-                    # Migrated pointer indexing onto `read_u8_at`.
-                    for i in range(data_len_a):
-                        if (
-                            a._dict_data.value().read_u8_at(i)
-                            != b._dict_data.value().read_u8_at(i)
-                        ):
-                            needs_remap = True
-                            break
-
-        if not needs_remap:
-            # Fast path: identical dictionaries. Just concat index buffers.
-            # Migrated memcpy-via-ptr onto view-based copy.
-            var idx_bytes_a = len_a * int32_size
-            var idx_bytes_b = len_b * int32_size
-            var new_data = OwnedAlignedBuffer(idx_bytes_a + idx_bytes_b)
-            if idx_bytes_a > 0:
-                new_data.view_range_mut(0, idx_bytes_a).copy_from_view_at(
-                    0, a._data.view_range_ro(0, idx_bytes_a)
-                )
-            if idx_bytes_b > 0:
-                new_data.view_range_mut(
-                    idx_bytes_a, idx_bytes_b
-                ).copy_from_view_at(
-                    0, b._data.view_range_ro(0, idx_bytes_b)
-                )
-            new_data.set_length(Int64(idx_bytes_a + idx_bytes_b))
-
-
-            var dict_offsets = Optional[OwnedAlignedBuffer](None)
-            if a._offsets:
-                var off_len = a._offsets.value().len()
-                var off_buf = OwnedAlignedBuffer(off_len)
-                if off_len > 0:
-                    off_buf.copy_from_view(
-                        a._offsets.value().view_range_ro(0, off_len)
-                    )
-                off_buf.set_length(Int64(off_len))
-
-                dict_offsets = off_buf^
-
-            var col = Column[HeapRegion](
-                arrow_type=ArrowType.DICTIONARY,
-                data=new_data^,
-                offsets=dict_offsets^,
-                validity=None,
-                length=total,
-                null_count=a._null_count + b._null_count,
-                offset=0,
-            )
-            if a._dict_data:
-                var dict_len = a._dict_data.value().len()
-                var dict_buf = OwnedAlignedBuffer(dict_len)
-                if dict_len > 0:
-                    dict_buf.copy_from_view(
-                        a._dict_data.value().view_range_ro(0, dict_len)
-                    )
-                dict_buf.set_length(Int64(dict_len))
-
-                col._set_dict_data_from_oab(dict_buf^)
-            col._dict_size = a._dict_size
-            return col^
-
-        # Slow path: different dictionaries. Build remap table b_idx -> merged_idx.
-        # Strategy: start with a's dictionary as the "canonical" dictionary.
-        # For each entry in b's dictionary, find matching entry in a or append.
-        #
-        # ⛔ NOT A LINEAR SCAN OVER A `List[String]`, and NOT a rare case:
-        # common writers emit a dictionary PER ROW GROUP, so such a parquet
-        # file lands here on column 0. A free-text column can intern millions
-        # of distinct values over dozens of row groups, and a linear scan makes
-        # the fold Σ k·d² comparisons — a merge that never finishes.
-        #
-        # `DictInterner` is an append-only bytes arena + Int32 offsets + an
-        # open-addressing index, so a merge is O(Σ dict_size) probes and ZERO
-        # per-entry `String` allocations. It preserves FIRST-SEEN insertion
-        # order, which this repo's byte-equivalence oracles depend on, and
-        # `seed_append` preserves DUPLICATES in a's dictionary — a's index
-        # buffer is copied through unchanged below, so entry i must stay at
-        # ordinal i even when a's dictionary is not distinct.
-        var interner = DictInterner(
-            expected_entries=dict_size_a + dict_size_b
-        )
-        for i in range(dict_size_a):
-            var s = Int(a._offsets.value().get_typed[Int32](i))
-            var e = Int(a._offsets.value().get_typed[Int32](i + 1))
-            _ = interner.seed_append(
-                a._dict_data.value().view_ro().sub(s, e - s)
-            )
-
-        # Build remap: for each b entry, find in merged or append.
-        # SAFETY: remap is heap-allocated for dict_size_b entries. Freed after use.
-        # Remap is a local scratch `alloc[Int32]` not backed
-        # by an MmapAlignedBuffer — migrating this to an MmapAlignedBuffer (so we
-        # can use typed R/W on it) changes the allocation pattern. Keep
-        # raw alloc for now (this is internal-only pointer arithmetic,
-        # not an escape across module boundary).
-        var remap = alloc[Int32](max(dict_size_b, 1))
-        for i in range(dict_size_b):
-            var bs = Int(b._offsets.value().get_typed[Int32](i))
-            var be = Int(b._offsets.value().get_typed[Int32](i + 1))
-            (remap + i)[] = interner.find_or_insert(
-                b._dict_data.value().view_ro().sub(bs, be - bs)
-            )
-
-        dict_merge_probe_add(interner.probes())
-
-        var merged_size = interner.size()
-
-        # Rebuild merged dictionary offsets and data. Both are one bulk memcpy
-        # out of the interner's arena — the old form rebuilt them by walking a
-        # `List[String]` that had itself been rebuilt at every fold step.
-        var merged_offs_bytes = (merged_size + 1) * int32_size
-        var merged_offs_buf = OwnedAlignedBuffer(merged_offs_bytes)
-        merged_offs_buf.copy_from_int32_list(interner.offsets())
-        merged_offs_buf.set_length(Int64(merged_offs_bytes))
-
-        var total_data_len = interner.total_bytes()
-
-        # Int32-offset ceiling on the MERGED dictionary values buffer.
-        check_int32_offsets(
-            "concat(dictionary values)", total_data_len, merged_size
-        )
-
-        var merged_data_buf = OwnedAlignedBuffer(max(total_data_len, 1))
-        merged_data_buf.copy_from_bytes_list(interner.bytes())
-        merged_data_buf.set_length(Int64(total_data_len))
-
-
-        # Build merged index buffer: a's indices unchanged, b's remapped.
-        var idx_bytes_a = len_a * int32_size
-        var idx_bytes_b = len_b * int32_size
-        var new_data = OwnedAlignedBuffer(idx_bytes_a + idx_bytes_b)
-        if idx_bytes_a > 0:
-            new_data.view_range_mut(0, idx_bytes_a).copy_from_view_at(
-                0, a._data.view_range_ro(0, idx_bytes_a)
-            )
-        # Remap b's indices via typed R/W.
-        for i in range(len_b):
-            var b_raw = Int(b._data.get_typed[Int32](i))
-            # Write at dst element-index (len_a + i), i.e. byte
-            # idx_bytes_a + i * int32_size.
-            new_data.set_typed[Int32](len_a + i, (remap + b_raw)[])
-        new_data.set_length(Int64(idx_bytes_a + idx_bytes_b))
-
-
-        remap.free()
-
-        var col = Column[HeapRegion](
-            arrow_type=ArrowType.DICTIONARY,
-            data=new_data^,
-            offsets=merged_offs_buf^,
-            validity=_merge_validity(a, b, len_a, len_b),
-            length=total,
-            null_count=a._null_count + b._null_count,
-            offset=0,
-        )
-        col._set_dict_data_from_oab(merged_data_buf^)
-        col._dict_size = merged_size
-
-        return col^
+        # Dictionary: concat code buffers, remapping b's codes into a merged
+        # dictionary when the two dictionaries differ (common writers emit a
+        # dictionary PER ROW GROUP). See `concat_dict._concat_dict_columns`.
+        return _concat_dict_columns(a, b, _merge_validity(a, b, len_a, len_b))
 
     # Fixed-width primitives: just concat data buffers.
     # Migrated onto view_range_mut(...).copy_from_view_at(...).
@@ -729,13 +583,14 @@ def _concat_columns[
     var bytes_a = len_a * byte_width
     var bytes_b = len_b * byte_width
     var new_data = OwnedAlignedBuffer(bytes_a + bytes_b)
+    # Row i of each input is element `_offset + i`.
     if bytes_a > 0:
         new_data.view_range_mut(0, bytes_a).copy_from_view_at(
-            0, a._data.view_range_ro(0, bytes_a)
+            0, a._data.view_range_ro(a._offset * byte_width, bytes_a)
         )
     if bytes_b > 0:
         new_data.view_range_mut(bytes_a, bytes_b).copy_from_view_at(
-            0, b._data.view_range_ro(0, bytes_b)
+            0, b._data.view_range_ro(b._offset * byte_width, bytes_b)
         )
     new_data.set_length(Int64(bytes_a + bytes_b))
 
@@ -850,8 +705,9 @@ def _concat_columns_nway_fixed_width[
         ref bcol = batches[b_idx].column_at(col_idx)
         var nb = bcol._length * byte_width
         if nb > 0:
+            # Row i of an input is element `_offset + i`.
             new_data.view_range_mut(write_off, nb).copy_from_view_at(
-                0, bcol._data.view_range_ro(0, nb)
+                0, bcol._data.view_range_ro(bcol._offset * byte_width, nb)
             )
         write_off += nb
     new_data.set_length(Int64(total_data_bytes))
@@ -900,7 +756,6 @@ def _concat_columns_nway_var_len[
     that catches such a mix only when the summed total happens to cross 2 GiB.
     """
     comptime int32_size = size_of[Int32]()
-    comptime W = simd_width_of[DType.int32]()
 
     # Pass 1.
     var total_len = 0
@@ -910,13 +765,16 @@ def _concat_columns_nway_var_len[
     for b_idx in range(n_batches):
         ref bcol = batches[b_idx].column_at(col_idx)
         total_len += bcol._length
-        total_data_bytes += bcol._data.len()
+        # The input's offsets WINDOW, not its whole data buffer: the first
+        # entry need not be 0 and the buffer may run past the last one.
+        var win = _var_len_window[DType.int32](bcol)
+        total_data_bytes += win[1] - win[0]
         total_nulls += bcol._null_count
         if bcol._validity:
             any_validity = True
 
-    # Int32-offset ceiling. Pass 1 sums in 64-bit `Int`, but pass 2 rebases
-    # every offset through an `Int32` `cumulative_data` accumulator. N-way
+    # Int32-offset ceiling. Pass 1 sums in 64-bit `Int`, but pass 2 writes
+    # every rebased offset as an `Int32`. N-way
     # concat is the classic way to cross 2 GiB: each input batch is well under
     # the limit and only the SUM overflows.
     var _cc_name = String()
@@ -931,10 +789,11 @@ def _concat_columns_nway_var_len[
     var data_write_off = 0
     for b_idx in range(n_batches):
         ref bcol = batches[b_idx].column_at(col_idx)
-        var nb = bcol._data.len()
+        var dwin = _var_len_window[DType.int32](bcol)
+        var nb = dwin[1] - dwin[0]
         if nb > 0:
             new_data.view_range_mut(data_write_off, nb).copy_from_view_at(
-                0, bcol._data.view_range_ro(0, nb)
+                0, bcol._data.view_range_ro(dwin[0], nb)
             )
         data_write_off += nb
     new_data.set_length(Int64(total_data_bytes))
@@ -943,53 +802,39 @@ def _concat_columns_nway_var_len[
     # Offsets buffer: (total_len + 1) * 4 bytes. Always emit a leading 0.
     var offsets_bytes = (total_len + 1) * int32_size
     var new_offsets = OwnedAlignedBuffer(offsets_bytes)
+    new_offsets.set_length(Int64(offsets_bytes))
     new_offsets.set_typed[Int32](0, Int32(0))
 
-    # Walk N batches; for each, append (per-row-offset[1..len] + cumulative)
-    # via SIMD load+add+store, then bump the cumulative data offset.
-    var cumulative_data = Int32(0)
+    # Walk N batches; for each, append its offsets entries
+    # (_offset, _offset + len] rebased from the window start onto the
+    # cumulative output byte count (`_rebase_offsets`, the PERF-CRITICAL
+    # SIMD load+add+store), then bump the cumulative data offset.
+    var cumulative_data = 0
     var dst_elem = 0  # element index where next batch's offsets begin
     for b_idx in range(n_batches):
         ref bcol = batches[b_idx].column_at(col_idx)
         var blen = bcol._length
-        var base_vec = SIMD[DType.int32, W](cumulative_data)
-
-        if bcol._offsets:
-            # SIMD-stage: read input offsets[1..blen], add cumulative, store.
-            var simd_end = (blen // W) * W
-            var i = 0
-            # +1: the leading 0 is at dst_elem=0 for the first input; for
-            # subsequent inputs, the value at dst_elem was already written
-            # by the prior iteration's offsets[blen-1] write. We start at
-            # dst_elem+1 in every iteration.
-            var dst_byte_start = (dst_elem + 1) * int32_size
-            while i < simd_end:
-                var v = bcol._offsets.value().load_simd[DType.int32, W](
-                    (1 + i) * int32_size
-                )
-                new_offsets.store_simd[DType.int32, W](
-                    dst_byte_start + i * int32_size, v + base_vec
-                )
-                i += W
-            while i < blen:
-                var v = bcol._offsets.value().get_typed[Int32](1 + i)
-                new_offsets.set_typed[Int32](
-                    dst_elem + 1 + i, v + cumulative_data
-                )
-                i += 1
+        var win = _var_len_window[DType.int32](bcol)
+        # +1: the leading 0 is at dst_elem=0 for the first input; for
+        # subsequent inputs, the value at dst_elem was already written by the
+        # prior iteration's last entry. We start at dst_elem+1 every time.
+        if bcol._offsets and blen > 0:
+            _rebase_offsets[DType.int32](
+                new_offsets,
+                dst_elem + 1,
+                bcol._offsets.value(),
+                bcol._offset + 1,
+                blen,
+                Int32(cumulative_data - win[0]),
+            )
         else:
             # No offsets buffer: all rows are empty. Fill cumulative_data.
-            var i = 0
-            while i < blen:
-                new_offsets.set_typed[Int32](
-                    dst_elem + 1 + i, cumulative_data
-                )
-                i += 1
+            _fill_offsets[DType.int32](
+                new_offsets, dst_elem + 1, blen, Int32(cumulative_data)
+            )
 
-        cumulative_data += Int32(bcol._data.len())
+        cumulative_data += win[1] - win[0]
         dst_elem += blen
-    new_offsets.set_length(Int64(offsets_bytes))
-
 
     var validity = _merge_validity_nway(
         batches, col_idx, n_batches, total_len, any_validity
@@ -1033,7 +878,6 @@ def _concat_columns_nway_var_len_wide[
     OUTPUT_SCHEMA_DIVERGED.
     """
     comptime int64_size = size_of[Int64]()
-    comptime W = simd_width_of[DType.int64]()
 
     # Pass 1.
     var total_len = 0
@@ -1043,7 +887,8 @@ def _concat_columns_nway_var_len_wide[
     for b_idx in range(n_batches):
         ref bcol = batches[b_idx].column_at(col_idx)
         total_len += bcol._length
-        var nb_len = bcol._data.len()
+        var wwin = _var_len_window[DType.int64](bcol)
+        var nb_len = wwin[1] - wwin[0]
         # Overflow-safe accumulate against the Int64 offsets ceiling. See
         # `ARROW_INT64_OFFSET_MAX`'s docstring for why this can never fire on
         # resident buffers and is written anyway.
@@ -1063,10 +908,11 @@ def _concat_columns_nway_var_len_wide[
     var data_write_off = 0
     for b_idx in range(n_batches):
         ref bcol = batches[b_idx].column_at(col_idx)
-        var nb = bcol._data.len()
+        var dwin = _var_len_window[DType.int64](bcol)
+        var nb = dwin[1] - dwin[0]
         if nb > 0:
             new_data.view_range_mut(data_write_off, nb).copy_from_view_at(
-                0, bcol._data.view_range_ro(0, nb)
+                0, bcol._data.view_range_ro(dwin[0], nb)
             )
         data_write_off += nb
     new_data.set_length(Int64(total_data_bytes))
@@ -1074,43 +920,32 @@ def _concat_columns_nway_var_len_wide[
     # Offsets buffer: (total_len + 1) * 8 bytes. Always emit a leading 0.
     var offsets_bytes = (total_len + 1) * int64_size
     var new_offsets = OwnedAlignedBuffer(offsets_bytes)
+    new_offsets.set_length(Int64(offsets_bytes))
     new_offsets.set_typed[Int64](0, Int64(0))
 
-    var cumulative_data = Int64(0)
+    var cumulative_data = 0
     var dst_elem = 0
     for b_idx in range(n_batches):
         ref bcol = batches[b_idx].column_at(col_idx)
         var blen = bcol._length
-        var base_vec = SIMD[DType.int64, W](cumulative_data)
-
-        if bcol._offsets:
-            var simd_end = (blen // W) * W
-            var i = 0
-            var dst_byte_start = (dst_elem + 1) * int64_size
-            while i < simd_end:
-                var v = bcol._offsets.value().load_simd[DType.int64, W](
-                    (1 + i) * int64_size
-                )
-                new_offsets.store_simd[DType.int64, W](
-                    dst_byte_start + i * int64_size, v + base_vec
-                )
-                i += W
-            while i < blen:
-                var v2 = bcol._offsets.value().get_typed[Int64](1 + i)
-                new_offsets.set_typed[Int64](
-                    dst_elem + 1 + i, v2 + cumulative_data
-                )
-                i += 1
+        var wwin = _var_len_window[DType.int64](bcol)
+        if bcol._offsets and blen > 0:
+            _rebase_offsets[DType.int64](
+                new_offsets,
+                dst_elem + 1,
+                bcol._offsets.value(),
+                bcol._offset + 1,
+                blen,
+                Int64(cumulative_data - wwin[0]),
+            )
         else:
             # No offsets buffer: all rows are empty. Fill cumulative_data.
-            for i2 in range(blen):
-                new_offsets.set_typed[Int64](
-                    dst_elem + 1 + i2, cumulative_data
-                )
+            _fill_offsets[DType.int64](
+                new_offsets, dst_elem + 1, blen, Int64(cumulative_data)
+            )
 
-        cumulative_data += Int64(bcol._data.len())
+        cumulative_data += wwin[1] - wwin[0]
         dst_elem += blen
-    new_offsets.set_length(Int64(offsets_bytes))
 
     var validity = _merge_validity_nway(
         batches, col_idx, n_batches, total_len, any_validity
@@ -1179,19 +1014,15 @@ def _merge_validity_nway[
     for b_idx in range(n_batches):
         ref bcol = batches[b_idx].column_at(col_idx)
         var blen = bcol._length
-        if bcol._validity:
-            # Byte-aligned hot path: `Bitmap.copy_bits_into` overwrites
-            # `bm[row_off..row_off+blen]` with the validity slice, which
-            # is semantically equivalent here because `bm` was initialized
-            # all-valid by `Bitmap.create_all_valid(total_len)`. The
-            # primitive handles both byte-aligned (memcpy bulk) and
-            # bit-unaligned (scalar bit-walk) cases.
-            ref bv = bcol._validity.value()
-            Bitmap.copy_bits_into(bm, row_off, bv, 0, blen)
-        elif bcol._null_count > 0:
-            var n = bcol._null_count if bcol._null_count <= blen else blen
-            for i in range(n):
-                bm.clear(row_off + i)
+        # Byte-aligned hot path: `Bitmap.copy_bits_into` (inside
+        # `_copy_validity_window`) overwrites `bm[row_off..row_off+blen]`
+        # with the input's validity bits [_offset, _offset + blen), which is
+        # semantically equivalent here because `bm` was initialized
+        # all-valid by `Bitmap.create_all_valid(total_len)`. The primitive
+        # handles both byte-aligned (memcpy bulk) and bit-unaligned (scalar
+        # bit-walk) cases; a sliced input with `_offset % 8 != 0` takes the
+        # walk.
+        _copy_validity_window(bm, row_off, bcol)
         row_off += blen
 
     return Optional[Bitmap[HeapRegion]](bm^)
@@ -1202,34 +1033,15 @@ def _all_dicts_byte_identical[
 ](
     ref [o] batches: Slab[RecordBatch], col_idx: Int, n_batches: Int
 ) -> Bool:
-    """Return True iff all N batches' DICTIONARY column @col_idx share
-    byte-identical dict bytes + dict size. v1 fast-path predicate.
+    """Return True iff all N batches' DICTIONARY column @col_idx carry the
+    same dictionary as batch 0 (`concat_dict._dicts_identical`: size, value
+    dtype, value bytes AND, for a string dictionary, offsets). v1 fast-path
+    predicate.
     """
     ref c0 = batches[0].column_at(col_idx)
-    var dsz0 = c0._dict_size
-    if not c0._dict_data:
-        # All-empty dict; check rest match.
-        for b in range(1, n_batches):
-            ref cb = batches[b].column_at(col_idx)
-            if cb._dict_data or cb._dict_size != dsz0:
-                return False
-        return True
-    var dlen0 = c0._dict_data.value().len()
     for b in range(1, n_batches):
-        ref cb = batches[b].column_at(col_idx)
-        if cb._dict_size != dsz0:
+        if not _dicts_identical(c0, batches[b].column_at(col_idx)):
             return False
-        if not cb._dict_data:
-            return False
-        var dlenb = cb._dict_data.value().len()
-        if dlenb != dlen0:
-            return False
-        for i in range(dlen0):
-            if (
-                c0._dict_data.value().read_u8_at(i)
-                != cb._dict_data.value().read_u8_at(i)
-            ):
-                return False
     return True
 
 
@@ -1238,12 +1050,14 @@ def _concat_columns_nway_dict_identical[
 ](
     ref [o] batches: Slab[RecordBatch], col_idx: Int, n_batches: Int
 ) raises -> Column[HeapRegion]:
-    """N-way concat of DICTIONARY columns whose dicts are byte-identical.
+    """N-way concat of DICTIONARY columns whose dicts are identical.
 
-    Fast path: reuse first batch's dict + concat all batches' Int32
-    index buffers via single-alloc + N memcpys.
+    Fast path: reuse first batch's dict + concat every batch's code window
+    (elements [_offset, _offset + _length), at the shared code width the
+    caller has checked) via single-alloc + N memcpys.
     """
-    comptime int32_size = size_of[Int32]()
+    ref c0 = batches[0].column_at(col_idx)
+    var w = c0._dict_index_byte_width
 
     var total_len = 0
     var total_nulls = 0
@@ -1255,32 +1069,14 @@ def _concat_columns_nway_dict_identical[
         if bcol._validity:
             any_validity = True
 
-    var idx_bytes_total = total_len * int32_size
+    var idx_bytes_total = total_len * w
     var new_data = OwnedAlignedBuffer(max(idx_bytes_total, 1))
-    var write_off = 0
+    new_data.set_length(Int64(idx_bytes_total))
+    var write_row = 0
     for b_idx in range(n_batches):
         ref bcol = batches[b_idx].column_at(col_idx)
-        var nb = bcol._length * int32_size
-        if nb > 0:
-            new_data.view_range_mut(write_off, nb).copy_from_view_at(
-                0, bcol._data.view_range_ro(0, nb)
-            )
-        write_off += nb
-    new_data.set_length(Int64(idx_bytes_total))
-
-
-    ref c0 = batches[0].column_at(col_idx)
-    var dict_offsets = Optional[OwnedAlignedBuffer](None)
-    if c0._offsets:
-        var off_len = c0._offsets.value().len()
-        var off_buf = OwnedAlignedBuffer(max(off_len, 1))
-        if off_len > 0:
-            off_buf.copy_from_view(
-                c0._offsets.value().view_range_ro(0, off_len)
-            )
-        off_buf.set_length(Int64(off_len))
-
-        dict_offsets = off_buf^
+        _copy_dict_codes(new_data, write_row, bcol, w)
+        write_row += bcol._length
 
     var validity = _merge_validity_nway(
         batches, col_idx, n_batches, total_len, any_validity
@@ -1289,21 +1085,13 @@ def _concat_columns_nway_dict_identical[
     var col = Column[HeapRegion](
         arrow_type=ArrowType.DICTIONARY,
         data=new_data^,
-        offsets=dict_offsets^,
+        offsets=_copy_dict_offsets(c0),
         validity=validity^,
         length=total_len,
         null_count=total_nulls,
         offset=0,
     )
-    if c0._dict_data:
-        var dlen = c0._dict_data.value().len()
-        var dbuf = OwnedAlignedBuffer(max(dlen, 1))
-        if dlen > 0:
-            dbuf.copy_from_view(c0._dict_data.value().view_range_ro(0, dlen))
-        dbuf.set_length(Int64(dlen))
-
-        col._set_dict_data_from_oab(dbuf^)
-    col._dict_size = c0._dict_size
+    _carry_dict_payload(col, c0, w)
     return col^
 
 
@@ -1364,8 +1152,17 @@ def _concat_one_column_nway[
             batches, col_idx, n_batches, at
         )
 
-    # DICTIONARY: fast path iff all dicts are byte-identical.
+    # DICTIONARY: fast path iff all dicts are identical.
     if at == ArrowType.DICTIONARY:
+        # Every input's codes are read at batch 0's code width and decoded
+        # through one kind of dictionary; refuse inputs that disagree.
+        for _b in range(1, n_batches):
+            _refuse_dict_layout_disagreement(
+                "_concat_one_column_nway(dictionary)",
+                _b,
+                c0,
+                batches[_b].column_at(col_idx),
+            )
         if _all_dicts_byte_identical(batches, col_idx, n_batches):
             return _concat_columns_nway_dict_identical(
                 batches, col_idx, n_batches

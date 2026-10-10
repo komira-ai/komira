@@ -14,8 +14,10 @@ reviewer's approval (it does not check approval itself), and writes:
   ([The build gate](#the-build-gate)).
 
 Both commands run the same computation (`covcheck/analyze.mojo`),
-so the PR check and the build gate cannot disagree; a welded test holds the
-gate's JSON entry for a package equal to the report's.
+so the PR check and the build gate cannot disagree on the same reports; a
+welded test holds the gate's JSON entry for a package equal to the
+report's. The PR check reads the same reports, a library's `coverage_tests`
+runs included ([The coverage workflow](#the-coverage-workflow), step 4).
 
 | target | what it is |
 |---|---|
@@ -23,6 +25,7 @@ gate's JSON entry for a package equal to the report's.
 | `:covcheck_bin` | the command line (`main.mojo`, dispatching to `covcheck/cli.mojo`) |
 | `:ratchet.tsv` | the floors (`ratchet.tsv`) |
 | `:cov_gate` | the directory every mojo_library's coverage gate runs from: `cov_gate.sh`, `covcheck_bin`, `ratchet.tsv` ([The build gate](#the-build-gate)) |
+| `:census.tsv`, `:census.sh`, `census.bzl` | the census: every library's numbers, the script that measures them and renders `docs/coverage_census.md` and the floors, and the rule of the root's `:coverage_census` check ([The census](#the-census)) |
 | `policy.bzl` | the gate's mode and target, and the ledger of libraries that cannot have a gate of their own |
 | `no_gate.bxl` | the check that holds that ledger equal to the libraries the gate depends on |
 | `branch_gate.bxl` | the check that every row of `COVERAGE_BRANCH_GATE` (`policy.bzl`) names a library: a row naming none is read by nothing (test 46) |
@@ -37,11 +40,12 @@ counts too, uncovered (see "Files no test compiled"), so a file nobody
 tests cannot leave a package reading 100%.
 
 What is still missing: inside a file some test compiled, a function no test
-reaches may emit no lines at all (a generic that is never instantiated is
-never compiled), so it is absent from the report rather than uncovered.
-These numbers are upper bounds until declaration reachability lands; it
-will also replace the executable-line heuristic below with what the
-compiler emits.
+reaches emits no lines at all (Mojo compiles a function only when something
+the test reaches calls it, a generic once per instantiation), so it is
+absent from the report rather than uncovered. covcheck lists the functions
+none of whose lines has a record (see "Functions with no recorded line"),
+which holds those and some a test does call, and counts none of them yet,
+so these numbers are upper bounds.
 
 ## Command line
 
@@ -93,15 +97,16 @@ Every input is a flag; nothing is read from the environment.
 
 `report` exits 0 whenever it wrote its outputs, whatever they conclude: in
 enforce mode a failing package fails the PR through the check run's
-`conclusion: "failure"`, never through the exit code. `gate` exits 3 in
-enforce mode when the package has a finding, so the build fails.
+`conclusion: "failure"`, never through the exit code. `gate` exits 3 when
+its conclusion is `failure` (in enforce mode a finding; in every mode a
+`Regression`), so the build fails.
 
 | code | meaning |
 |---|---|
 | 0 | the outputs were written, whatever they conclude (`report` never carries the conclusion in its exit code) |
 | 1 | an input is malformed (each reader names the file and line, or the byte's line), branch record files disagree on a location's decisions, a file has branch data from both a line report and a branch record file, a report path is unmapped, a source cannot be read, `--checkrun-dir` is not empty, `--package` holds no BUCK file, or an output cannot be written |
 | 2 | bad usage: no or unknown command, an unknown flag, a flag without its value or given twice, a required flag missing, no report (`report`), both `--cobertura` and `--lcov` reports, a malformed `--mode`, `--target-bp` or `--head-sha`, a `--max-annotations` that is not a number of 1 or more |
-| 3 | `gate` only: `--mode enforce` and the package has at least one finding |
+| 3 | `gate` only: `--mode enforce` and the package has at least one finding, or a `Regression` in any mode (a floor not held) |
 
 ## Reading the reports
 
@@ -204,6 +209,15 @@ Each path (`covcheck/paths.mojo`), in this order:
    (`src/...`) is **unmapped**, an error (exit 1) naming every such path; any
    other relative path (`oss/modular/mojo/stdlib/...`, the Mojo standard
    library) is outside. Outside files are ignored and counted in the summary.
+6. One exception to unmapped: a welded test's generated main (the layout
+   probe a `mojo_aws_client` or `mojo_gcp_client` generates) is named by its
+   output path in the package (`src/m/gen/<name>/_layout_probe.mojo`), which
+   the gate stages and the checkout lacks. In a test's own report
+   (`.../cov/tests/<stem>.xml`, or `.../cov/branch/<stem>.info`), a path
+   named `<stem>.mojo`, in a package, whose directory is none of the
+   repository's, is that test: counted as a test source and left out (with
+   `--include-tests` too: it has no source). Any other unmapped path stays
+   an error.
 
 A file's package is the nearest directory above it holding a `BUCK` file
 (`src/m/x/y.mojo` is in `src/m`); `(root)` when only the top directory holds
@@ -237,7 +251,8 @@ executable line is exempted) raises no `UnmeasuredFile` and is not in
 `unmeasured_files`; its markers are listed like any other.
 
 The executable lines are a heuristic over a lexed source
-(`covcheck/lexer.mojo`); declaration reachability will refine it. A line
+(`covcheck/lexer.mojo`): no test binary holds any code of such a file,
+so nothing the compiler wrote can say which lines would have code. A line
 is executable unless it is:
 
 - blank (spaces, tabs, form feeds);
@@ -255,7 +270,96 @@ A UTF-8 byte-order mark at the start of the file and a carriage return at
 the end of a line (CRLF) are not part of the line.
 
 Everything else counts, declarations included (`def`, `struct`,
-`comptime`, a decorator, a lone `)`).
+`comptime`, a decorator, a lone `)`), except a trait's header and its
+requirements, which emit no code: a requirement is a `def` inside a
+`trait` block whose body is only `...` (after an optional docstring), or a
+`def` line ending in `: ...`, and its decorators, signature lines and `...`
+line are not executable. A trait method with a default body counts. A
+`trait` block runs from its header (with the lines its open brackets
+carry) to the next line holding code at the header's indent or less. So a
+file of traits only, such as a package's interface declarations, has no
+executable line.
+
+Except in a **declaration-only** file (`declaration_only` in
+`covcheck/decls.mojo`, whose declaration reader is the one authority on
+which declarations are functions and which are requirements, with a body of
+`...` alone): one in which that reader finds no function, every declaration
+it finds is a requirement inside a trait's block, and every other statement
+outside the
+imports is, at the top level, a `trait` header or a `comptime`
+declaration, and in a trait's block a `comptime` declaration, a decorator
+or `...`. Such a file, if it has no exemption marker and no branch record,
+counts no line and is not counted as a file; it raises
+`DeclarationOnlyFile`, information in every package (`info_findings`, its
+`count` the lines it would have counted), never a failure. The test is
+conservative: a free function, a struct, a default method body with code
+(even `pass`), a statement, a `;` outside an import, a tab in the
+indentation, a statement still open at the end of the file, a file the
+lexer ends inside a string, a carriage return not followed by a line feed
+all keep the file counted. It assumes (and does not check) that a
+`comptime` initialiser and a requirement's default-argument expressions
+are computed at compile time and emit no code to run. A known limit: the
+lexer reads a backslash before a quote as an escape in a raw string too, so
+contrived text that puts it out of step with the compiler and back in step
+before the end of the file can hide a line of code from the heuristic and
+from this test alike.
+
+## Functions with no recorded line
+
+Report only: these lists change no number and raise no finding.
+
+A report holds the lines the compiler emitted code for in a test binary:
+kcov lists exactly the DWARF line rows of the measured sources. A function
+no test reaches has no row, so in a file some test compiled it is not
+uncovered but absent. For each kept file with a line record, covcheck reads
+the functions the source declares (`covcheck/decls.mojo`) and lists every
+function none of whose lines has a record in any report: package, path,
+`def` line, name, `class`, and `lines`, its executable lines (the heuristic
+above) that carry no exemption marker with a reason. A function whose every
+line is so marked is not listed. A file with branch records and no line
+record lists none.
+
+No record is not the same as no test calling it. Each function has a class,
+and the result JSON splits them:
+
+| class | when | JSON | trust |
+|---|---|---|---|
+| `plain` | neither below | `unrecorded_functions` | evidence no test reaches it; the class a census counts |
+| `always_inline` | a decorator line right above it starts with `@always_inline` | `unrecorded_functions_unreliable` | none: the body is inlined into its callers and what is left may be attributed to the caller's lines or folded away |
+| `comptime_if` | its body (a nested function's lines included) holds a `comptime if` or `@parameter` line, wherever: one such line moves the whole function, and a closure holding one moves the function around it | `unrecorded_functions_unreliable` | none: a body folded to a constant, or wholly in an arm dropped on this platform or build, emits no line though tests call it |
+
+Known false positives, all seen on real reports: an `@always_inline` body
+whose code the compiler attributed to the caller (a test calls it, its
+caller's lines are hit, its own `return` line has no record); a
+comptime-branched constant folded at the call site; a body that is
+entirely a dropped `comptime if` arm (an instrument compiled in only with a
+build flag); and, in the `plain` class too, a function only another
+operating system compiles (a macOS-only kqueue backend's functions read as
+unrecorded on linux) and a function reached only through such a dropped
+arm (its only caller is never compiled here). So the `plain` list of a
+library with platform-gated code is not yet a list of untested functions.
+
+- A declaration is a `def` or `fn` line (code, not in a string). The
+  signature runs until its `(` `)` and `[` `]` close; code after its `:` on
+  that line is a one-line body; otherwise the body runs until the first
+  code line indented no deeper than the `def` (a docstring line further
+  left, or a line that starts inside a string, does not end it).
+- A body of only `...` (a trait's requirement), or none, is no function;
+  `pass` is.
+- A nested function owns its lines, and is recorded or not on its own: a
+  recorded closure does not make the function around it recorded.
+- A file no test compiled lists no function: its lines are already counted
+  ("Files no test compiled").
+
+It cannot see a `comptime if` arm the compiler dropped inside a recorded
+function (the unit is the whole function), nor a function the compiler
+emits without line rows (a `nodebug` function may be one; not measured).
+Why the line records and not the DWARF subprograms: in a coverage test
+binary the library's functions (compiled from its precompiled package)
+have no named `DW_TAG_subprogram` at all, only a compile unit named
+`<unknown>` with a line table, and a line-tables-only subprogram carries no
+`decl_file` or `decl_line` anyway; the line rows are the one place a
+library function shows up.
 
 ## Exemptions
 
@@ -333,11 +437,14 @@ hits > 0), branch (only when the package has a branch record), mutants.
 | `BranchFloorMissing` | branches were measured and the row's branch floor is `-` |
 | `MutantSurvived` | a surviving mutant |
 | `UnmeasuredFile` | a source file of a measured package that no report names still has lines counted (see Files no test compiled) |
+| `DeclarationOnlyFile` | information, never counted: a file no report names is declaration-only and counts no line (see Files no test compiled) |
 | `BranchUnmeasuredFile` | a file with a line record, in a package one of whose kept files a branch record file names, that no branch record file names and whose line report gives no branch record of its own: cov_branch_classify names every measured file its test holds code of (a decision-free one with no `BRDA`), so this file's branches were not read, and counting them as none would lift the package's branch number. A failure in enforce mode, listed in census mode, as `UnmeasuredFile` is |
 | `ExemptionWithoutReason`, `StaleExemption` | see Exemptions |
 
-Conclusion: `neutral` in census and neutral mode whatever was found; in
-enforce mode `failure` with any finding, else `success`.
+Conclusion: `failure` with any `Regression`, in every mode (a floor holds
+whatever the mode: [The ratchet](#the-ratchet)); otherwise `neutral` in
+census and neutral mode whatever was found, and in enforce mode `failure`
+with any finding, else `success`.
 
 ### Test-only packages
 
@@ -354,7 +461,8 @@ gate never fails on a finding, in any mode. An input covcheck refuses
 test-only package (a row it has is kept as it was), so test-only packages
 have no floor. The summary's status
 column says `info` (with the kinds, `info: BelowTarget, MissingRow`), its
-findings are listed under `### Info: test-only packages (N)`, the target
+findings are listed under `### Info: test-only packages, declaration-only
+files (N)` (with every `DeclarationOnlyFile`), the target
 line names the directories, the title counts them (`N info`), and the
 annotations of its files are `notice` in every mode. The policy names the
 directories (`COVERAGE_INFO_ONLY_DIRS`, The build gate).
@@ -370,8 +478,9 @@ action per library, `mojo_cov_gate` (`cov_gate.sh`, run from
 
 1. The library's sources are staged at their repository paths: every
    `srcs` file that is a source (a generated one is not measured), every
-   test source, and a BUCK file at the package's directory, so covcheck's
-   nearest-BUCK rule names the package. A tests-cell package is under
+   test source (a generated one at its output path in the package), and a
+   BUCK file at the package's directory, so covcheck's nearest-BUCK rule
+   names the package. A tests-cell package is under
    `tools/build/tests/`. Each test source is also named to covcheck
    (`--test-source`), so a welded test outside the package's `tests/`
    (`wire/tests/test_x.mojo`, a test at the package's top) is set aside as
@@ -393,14 +502,35 @@ action per library, `mojo_cov_gate` (`cov_gate.sh`, run from
    `summary.md` are the library's `[coverage][gate]`
    (`[coverage][gate][result]`, `[coverage][gate][summary]`).
 
-Exit 0 writes the gate's marker. Exit 3 (enforce mode, a finding) fails the
-action with `COVERAGE GATE FAILED (enforce): <package> (<label> [coverage
-gate]): covcheck gate exited 3`, `The conda package (<name>_conda) is not
+**The README's examples and the `mojo_test` targets a library names** are
+its tests too (`tools/build/mojo/README.md`, "Coverage builds"; line
+coverage only). The README's run is one more report, `[coverage][tests][readme]`,
+which names the program it ran under `buck-out/readme/`: not a repository
+file, so covcheck counts it outside the repository and only the library's
+lines it reached count. A library naming `coverage_tests` cannot depend on
+those tests (they depend on it), so its gate is the target
+`<name>_cov_gate` (as a library of the ledger's, below): it runs each
+named test's -O0 binary under kcov against the library's sources
+(`<name>_cov_gate[tests][<test>]`, through the same `cov_run.sh`) and runs
+the same gate over the library's reports and those
+(`<name>_cov_gate[gate]`). A named test's source is staged at its
+repository path: in the library's package it is a `--test-source`; in
+another package it is staged with a BUCK file at that package, so its
+lines are another package's, which the gate does not measure. The
+library's conda package waits for that gate and those runs. A named test
+must depend on the library directly and have a source main and no `args`
+(a coverage run passes none), or `<name>_cov_gate` fails at analysis
+(test 46's `covmt_stray_cov_gate`, `covmt_args_cov_gate`).
+
+Exit 0 writes the gate's marker. Exit 3 (enforce mode and a finding, or a
+`Regression` in any mode) fails the action with `COVERAGE GATE FAILED
+(<mode>): <package> (<label> [coverage gate]): covcheck gate exited 3`, `The conda package (<name>_conda) is not
 produced until its coverage meets the policy; the library and its
 dependents still build.` and the summary; exits 1 and 2 (an input
 covcheck refuses, bad usage) fail it in every mode with `COVERAGE GATE ERROR`
 and covcheck's message: a malformed ratchet fails a census gate too (test
-46). Census and neutral mode never fail on a finding.
+46). Census and neutral mode fail on no finding but a `Regression`: a
+package measured under its floor of `ratchet.tsv` (test 46's covfloor).
 
 **What the gate blocks: the shipped package, nothing else.** The library's
 conda package (`<name>_conda`, `tools/build/package/conda.bzl`: both its
@@ -424,6 +554,33 @@ against `covlow`, whose gate is red). With the switch off nothing waits for
 them. Bundles and OCI images (`tools/build/package/defs.bzl`) do not wait
 for the gates of the libraries their program is built from: a program's
 libraries are not packages it ships.
+
+**Platforms.** Coverage is measured on linux-x86_64 and never on another
+platform (decided: `coverage-linux-x86-64` in
+`tools/build/platforms/limits.tsv`; kcov and the LLVM pieces of
+branch coverage are pinned for linux-x86_64 only). On another target
+platform `-c komira.coverage=true` is a no-op, not an error: the coverage
+attributes are None (a `select` in `tools/build/mojo/coverage.bzl`), so a
+library and a shared library have the actions they have with the switch
+off, and no `[coverage]` (test 41's `coverage_platforms.sh`, on
+darwin-arm64).
+
+**Shared libraries.** A `mojo_shared_lib` has a gate too, over its
+drivers' reports (each driver run under kcov measuring the library it
+loads; `tools/build/mojo/README.md`, "Coverage builds") and its own
+sources, in `COVERAGE_SHARED_LIB_MODE` (`policy.bzl`), census: its line
+coverage is reported, never enforced. That is its own constant, so moving
+`COVERAGE_MODE` to enforce moves no shared library; `enforce` there, or as
+any `mojo_shared_lib`'s `coverage_mode` (a fixture of the tests cell
+included), is refused in analysis (test 46). Nothing waits for
+a shared library's coverage runs or gate: it ships no conda package, and
+its published file waits for its release gate alone. Its gate is reported
+when its `[coverage]` is built by name: the coverage workflow
+(`.github/ci/coverage_measure.sh`) selects `mojo_library` targets only, so
+no workflow reports a shared library's gate yet. A shared library's report
+counts its own sources (its C ABI layer), not the code compiled into it
+from its Mojo dependencies (an engine's), which their own tests measure in
+their own gates.
 
 **Policy** (`policy.bzl`): `COVERAGE_MODE = "census"` and
 `COVERAGE_TARGET_BP = 10000`, and `COVERAGE_INFO_ONLY_DIRS = ["src/tests"]`:
@@ -472,6 +629,14 @@ is not a one-line change today:
   too) stages no source, so its gate is `NotMeasured` and fails in enforce
   mode; its hand-written code is never measured. It needs measuring (by
   its repository path) or a documented exemption.
+- **Open decision: files only a README or a `coverage_tests` run reaches,
+  in a library whose gate reads branch records.** Those runs give line
+  coverage only, so such a file has line records and no branch record:
+  `BranchUnmeasuredFile` (listed in census mode, failing in enforce mode).
+  `komira_scalar_arithmetic` has four such files (its README reaches them,
+  its one test does not). Before enforce, decide between branch records for
+  those runs, a test that reaches the files, or accepting the finding; the
+  gate does not change this today.
 
 **The ledger** (`COVERAGE_NO_GATE` in `policy.bzl`): the gate
 runs `covcheck_bin`, so the Mojo libraries `covcheck_bin` depends on
@@ -534,10 +699,16 @@ failed to build: then it lists the library as branch not measured).
 
 `ratchet.tsv`: comment lines start with `#`; a row is
 `<package>\t<line floor>\t<branch floor>`, floors in basis points, the branch
-floor `-` when there is none, rows sorted by package in byte order, each
-package once; anything else is refused naming the line. The shipped file
-has no rows: the floors arrive with the first coverage runs, as the file
-`--ratchet-out` proposes: every floor raised to what was measured
+floor `-` when there is none, or a pinned row with a fourth field, its
+reason (kept as written by `--ratchet-out` and by the census, [The
+census](#the-census)), rows sorted by package in byte order, each
+package once; anything else is refused naming the line. A floor holds in
+every mode: a package measured under it is a `Regression`, whose
+conclusion is `failure` in census and neutral mode too, so its gate fails
+and its conda package is not built (the library and its dependents still
+build). Coverage can only go up. The shipped rows are the census's ([The
+census](#the-census)); `--ratchet-out` proposes the same rule for the
+packages of one report: every floor raised to what was measured
 (`max(floor, measured)`), a row added for each measured package without one,
 the rows of directories without a BUCK file dropped, the comment lines kept
 first. A value above its floor is never a finding; copying the proposal in is
@@ -545,6 +716,11 @@ how a floor rises. Every package in the reports and every row is compared,
 not only the packages a change touches: `report` expects the reports of
 every package, and a row whose package has no data is a `Regression`, so a
 floor cannot be escaped by dropping a package's tests or report.
+
+## The census
+
+The census of every library under `src/`, the floors it sets and how to
+refresh them are in `tools/build/coverage/census.md` in the repository.
 
 ## Outputs of `report`
 
@@ -616,7 +792,9 @@ run at 20 requests (1 POST and 19 PATCHes).
 
 **Result** (`covcheck/result.mojo`): `conclusion`,
 `mode`, `target_bp`, `total`, `diff`, `touched_packages`, `packages`,
-`findings`, `exemptions` and the set-aside counts; `gate` writes `package`
+`findings`, `exemptions`, `unrecorded_functions` and
+`unrecorded_functions_unreliable` (report only: see "Functions with no
+recorded line") and the set-aside counts; `gate` writes `package`
 in place of `total`, `diff`, `touched_packages` and `packages`. A percentage
 or floor that does not apply is `null`. A package's `files` counts every
 file in its numbers and `unmeasured_files` those that raised
@@ -632,7 +810,9 @@ gate reads branch records, as the check run `coverage`: covcheck's summary and
 its annotations on the lines of the "Files changed" view. It is
 informational. It is not `pr / check`, it is not a required check, and its
 result cannot make `pr / check` red; its conclusion is `neutral` in census
-mode (the policy's today). Making it required, or switching coverage on in
+mode (the policy's today), and `failure` when a measured package is under
+its floor (a `Regression` fails in every mode; the check run is not
+required, so the failure is a signal on the pull request, not a block). Making it required, or switching coverage on in
 `pr / check` itself, waits for the tree-wide sweep of tests that fail at
 `-O0` or under kcov: today such a library's conda package is unbuilt in a
 coverage build (its dependents build). Like `pr / check` it runs only for a
@@ -685,8 +865,15 @@ runs `.github/ci/coverage_measure.sh` (its header has the details):
    for coverage, only its conda package does), so a library is measured
    whatever its dependencies' coverage. A measured library whose records are
    read gives its entry's `cov/branch/*.info` paths when the entry is
-   `SUCCESS` (one per report; another count fails the job, as a tool
-   error). When its branch coverage actions failed, or its gate did (which
+   `SUCCESS` (one per report of a test, the README's `cov/tests/readme.xml`
+   left out: its run has no branch records; another count fails the job,
+   as a tool error). The README's report is read like a test's. For a
+   library naming `coverage_tests` (a second query,
+   `attrregexfilter(coverage_tests, '.', ...)`), the same build also asks
+   for `<name>_cov_gate[tests]`, the runs of those tests: that entry must
+   be `SUCCESS` (else the library is not measured) and its
+   `cov/tests/*.xml` are the library's reports too, so the check run reads
+   what its gate reads. When its branch coverage actions failed, or its gate did (which
    reads the same records with covcheck, so `report` could refuse them
    too), none of its records is read and it is listed as `branch not
    measured`, with the reason, in both summaries; the job stays green;
@@ -772,138 +959,9 @@ assert_equal(render_bp(basis_points(2, 3)), "66.66%")
 
 ## Mutation score
 
-The branch-strength measure where branch coverage is not enforced: a
-mutant is the package with one small fault planted, and a test suite that
-cannot tell the two apart (every welded test still passes) leaves a
-decision untested. Report-only: nothing runs it by default, and no build
-action passes its mutants file to covcheck.
-
-```sh
-./buck2 build -c komira.mutation=true '//src/komira_retry:komira_retry[mutation]'
-```
-
-`-c komira.mutation=true` gives every `mojo_library` on linux-x86_64 the
-sub-target `[mutation]` (`tools/build/mojo/mutation.bzl`), whose outputs
-are `mut/mutants.tsv`, the mutants file above (paths from the repository
-root, `col <c>: <change>; <why>` as the description), and `mut/summary.md`:
-the score, every survivor as `<file>:<line>:<col> <operator>: <change>`,
-timeouts and errors with their reason, the compiler's last lines for each
-`error`, and the mutants a marker suppressed. Nothing
-depends on it, so only building it by name runs anything. With the switch
-off the `mutation_*` attributes are unset (their defaults) and no action
-changes; with it on, no other action of the library changes either.
-
-| setting (`-c komira.<name>=`) | default | what |
-|---|---|---|
-| `mutation` | `false` | the switch |
-| `mutation_sample` | `30` | mutants built per library; `0` is every one |
-| `mutation_seed` | `0` | which ones (below) |
-| `mutation_compile_timeout_secs` | `900` | the limit of each compile of a mutant (its library, each test) |
-| `mutation_run_timeout_secs` | `120` | the limit of each test run of a mutant |
-
-### The mutants
-
-`mutate` (`mutate/`, a `mojo_library` with its tests welded, and
-`:mutate_bin`) lexes each hand-written source of the library (`srcs` that
-are source files; generated ones are compiled, not mutated): identifiers,
-numbers, strings (`"..."`, `'...'`, triple-quoted, prefixed such as
-`r"..."`, and backtick-quoted MLIR text), comments, operators by longest
-match, and logical line ends (none inside brackets or after a backslash).
-Only tokens outside strings and comments are mutated, one change per
-mutant, named `<file>:<line>:<col>:<operator>` (line and column, in bytes,
-of the changed text):
-
-| operator | change |
-|---|---|
-| `cmp_negate` | `==` `!=` `<` `<=` `>` `>=` to its negation: `!=` `==` `>=` `>` `<=` `<` |
-| `arith_swap` | a binary `+` to `-` and back (the token before it is an operand: a name that is not a keyword, a number, a string, a closing bracket), `+=` to `-=` and back |
-| `bool_swap` | `and` to `or` and back |
-| `not_delete` | `not` deleted |
-| `const_inc`, `const_dec` | a decimal integer literal of at most 18 digits (no `_`, `.`, exponent or base prefix) plus one; minus one (not for `0`) |
-| `raise_delete` | a `raise` statement, to its end (over lines while brackets are open, or to a `;`), replaced by `pass` |
-| `return_early` | `return` inserted before the first statement (after a docstring) of a `def` returning nothing (no `->`, or `-> None`) |
-| `return_true`, `return_false` | `return True`; `return False` inserted likewise in a `def` returning `Bool` |
-
-No early return is made for a `def` taking `out` (a constructor), one with
-a one-line body, or one whose first statement is `pass`, `...` or already
-the inserted statement: those mutants are equivalent or cannot compile.
-Shifts, `->`, a unary sign, floats, exponents and hex literals are left
-alone.
-
-**Equivalent mutants.** A mutant no test can kill because it does not
-change behaviour is suppressed in the source by an end-of-line comment on
-the line it is reported at: `# mutation: equivalent <operator>[,<operator>...] <reason>`
-suppresses those operators on that line, and `# cov: unreachable <reason>`
-(see Exemptions) every mutant of the line. Any other comment starting
-`# mutation:` (a bare `# mutation: equivalent`, a misspelt kind), a marker
-with no reason, or one naming an unknown operator, fails the list, naming
-`<file>:<line>`. Suppressed mutants are listed
-in the list file and in the summary under "Suppressed by a marker (need
-approval)", as exemptions are. A mutant that does not compile is not
-equivalent: it is `error`, outside the score's numerator.
-
-**The sample.** Of the library's mutants, the `mutation_sample` whose
-FNV-1a 64 hash of `<seed>` LF `<id>` is smallest are built, in source
-order. A mutant's place in the sample depends on its id, the seed and the
-others' hashes only, so an edit elsewhere moves few mutants in or out, and
-a larger sample with the same seed holds the smaller one. A nightly run
-varies the seed (the date, say) to cover a package over time.
-
-### One mutant's build
-
-For each sampled mutant, under
-`mut/m/<file>/<line>_<col>_<operator>/` (a path named by the id, so a
-mutant's actions are the same actions whatever else was sampled, and
-the cache keeps them while the library's sources, deps and tests are
-unchanged):
-
-1. `mutation_apply`: `mutate apply` writes the file with the change;
-2. `mutation_precompile`: the library's sources with that file in place,
-   precompiled against its deps;
-3. per `test_srcs` entry, `mutation_build_test`: the test built against
-   that package exactly as its gated build is (optimization level,
-   defines, test deps, link), and `mutation_run_test`: its run through the
-   gate's runner exactly as the gate runs it: the test's data, environment
-   and memory cap (none when the gate's run has none).
-
-**The baseline.** The library unchanged goes through the same steps under
-`mut/baseline/` (a no-op `mutate apply` of its first source, the
-precompile, every test's build and run). `mutate score` refuses (the build
-fails, naming the step and its output) unless every baseline step is
-`ok`: a harness that fails every test, such as a wrong runner argument or
-environment, would otherwise count every mutant killed and score 100%.
-
-Each step runs through `mutate/mut_step.sh`, in a session of its own. It
-records `ok`, `fail <status>`, `timeout <secs>` (the step was still running
-at its limit; its whole process group was killed) or `skipped` (a step it
-waits for was not `ok`), then the last lines of the output, and exits 0:
-that is the mutant's result, cached as any action's output. One exception:
-a compile that exits with a status of the compile wrapper's own
-(`mojo_wrapper.sh`: 2, 3 and 4, its refusals; 124, the watchdog; 129, 130
-and 143, a signal) fails the action. That is the machine failing, not the
-mutant, so it is never cached as a result: the build fails and a rerun
-retries it. A file the step writes that is no output (the runner's PASS
-marker, the log) goes to buck2's scratch directory for the action.
-`mut_step_cases` (`mut_step_cases.sh`) holds each of these outcomes. A README's examples are not run against
-a mutant. `mutation_score` (`mutate score`) reads every status and decides,
-first rule that holds:
-
-| status | when |
-|---|---|
-| `error` | the precompile is not `ok`: the mutated library does not compile |
-| `killed` | a test run fails (an assertion, a crash, the memory cap) |
-| `timeout` | a test run timed out |
-| `error` | a test does not compile against it (or its compile timed out) |
-| `survived` | every test compiled and passed |
-
-A test that does not compile is not a kill: `mojo precompile` does not
-instantiate generic code, so a mutant the compiler rejects is often first
-rejected when a test is built against it, and that is the compiler's
-verdict on a stillborn mutant, not a test's.
-
-The score is covcheck's: `killed * 10000 / total` basis points over every
-sampled mutant; the summary also gives the detected share
-(killed or timeout) and the score over the mutants that compiled.
+The branch-strength measure where branch coverage is not enforced
+(report-only): what a mutant is, how they are sampled and built, and the
+score are in `tools/build/coverage/mutation.md` in the repository.
 
 ## Tests
 
