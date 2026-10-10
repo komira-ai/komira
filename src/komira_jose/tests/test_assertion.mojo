@@ -239,12 +239,18 @@ def test_mint_bounds() raises:
     assert_equal(JOSE_ASSERTION_MAX_TTL_S, Int64(300))
     assert_equal(_mint_err(ttl=300), "")
     assert_equal(_mint_err(ttl=301), TTL)
+    # A negative lifetime is refused as a lifetime before any arithmetic on
+    # it: Int64.MAX - ttl would overflow for ttl < 0.
+    assert_equal(_mint_err(ttl=-1), TTL)
     # exp = now + ttl must fit an Int64: at the largest time the sum would
     # wrap to a negative exp.
     comptime LATE = "JoseError: the assertion expiry is past the largest time"
     assert_equal(_mint_err(now=Int64.MAX - 300, ttl=300), "")
     assert_equal(_mint_err(now=Int64.MAX - 299, ttl=300), LATE)
     assert_equal(_mint_err(now=Int64.MAX, ttl=1), LATE)
+    # The bound follows this call's ttl, not the largest allowed ttl.
+    assert_equal(_mint_err(now=Int64.MAX - 1, ttl=1), "")
+    assert_equal(_mint_err(now=Int64.MAX - 1, ttl=2), LATE)
     var got = String("")
     try:
         _ = assertion_claims(
