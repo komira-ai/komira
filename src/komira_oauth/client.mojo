@@ -31,8 +31,8 @@
 #     while `now < expires_at - OAUTH_REFRESH_SKEW_S` (60 s), where
 #     `expires_at` is the time of the request plus the answer's `expires_in`;
 #     from `expires_at - 60` on it fetches again;
-#   * the held token is dropped before every fetch, so when a fetch fails the
-#     call raises and the source holds nothing: a failed refresh never serves
+#   * the source stops holding its token before every fetch, so when a fetch
+#     fails the call raises and the source holds nothing: a failed refresh never serves
 #     the former token, though it may not have expired yet, and a token past
 #     its `exp` is never served. The next call fetches again;
 #   * `access_token` takes `mut self`, so one source has at most one fetch in
@@ -220,7 +220,6 @@ struct ClientCredentialSource[T: TokenEndpointTransport](Movable):
         if self._held and now < self._expires_at - OAUTH_REFRESH_SKEW_S:
             return self._token.copy()
         self._held = False
-        self._token = String("")
         var r = fetch_client_credentials_token(
             self._transport,
             self._signer,

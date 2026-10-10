@@ -42,7 +42,7 @@
 # ENCAPSULATION: owned values in and out. No pointer crosses this file's API.
 # =============================================================================
 
-from komira_json import JSON_OBJECT, write_json_string
+from komira_json import write_json_string
 from komira_jwks import JwkSet, parse_jwk_set
 
 from komira_oauth._text import (
@@ -239,8 +239,6 @@ def parse_client_metadata(doc: String) raises -> ClientMetadata:
     if jwks_at >= 0 and uri:
         _refuse("the record holds both jwks and jwks_uri")
     if jwks_at >= 0:
-        if obj.children[jwks_at].kind != JSON_OBJECT:
-            _refuse("member jwks is not a JWK Set")
         var keys: JwkSet
         try:
             keys = parse_jwk_set(obj.children[jwks_at].serialize())

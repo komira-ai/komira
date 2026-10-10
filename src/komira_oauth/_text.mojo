@@ -71,8 +71,7 @@ def _is_scope_byte(c: UInt8) -> Bool:
 
 def _scope_refusal(scope: String) -> String:
     var b = scope.as_bytes()
-    if len(b) == 0:
-        return String("is empty")
+    # The empty string ends "after a space" too, so it is refused below.
     var after_space = True
     for i in range(len(b)):
         if b[i] == 0x20:

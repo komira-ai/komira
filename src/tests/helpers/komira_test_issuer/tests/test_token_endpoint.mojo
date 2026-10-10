@@ -360,6 +360,11 @@ def test_register_refusals() raises:
     assert_equal(_register_refusal(i, "c3", _resources(RESOURCE, "")), "TestIssuerError: a resource is empty")
     assert_equal(_register_refusal(i, "c3", _resources("a", "b", "a")), "TestIssuerError: a resource is named twice")
     assert_equal(_register_refusal(i, "c3", _resources("a", "b")), "accepted")
+    # Ids near a registered one are other clients.
+    assert_equal(_register_refusal(i, "client-", _resources("a")), "accepted")
+    assert_equal(_register_refusal(i, "client-10", _resources("a")), "accepted")
+    assert_equal(_register_refusal(i, "lient-1", _resources("a")), "accepted")
+    assert_equal(_register_refusal(i, "xclient-1", _resources("a")), "accepted")
     var msg = String("")
     try:
         i.remove_client("client-9")

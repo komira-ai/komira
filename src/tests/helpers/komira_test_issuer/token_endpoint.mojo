@@ -22,8 +22,8 @@
 #      verifier pinned to the record's signing algorithm over the record's
 #      keys, read on every request, and a policy pinning `iss` to the client,
 #      `typ` `JWT`, the issuer's time and leeway and a lifetime of at most
-#      300 s; the audience is the issuer identifier, or else the token
-#      endpoint URL (RFC 7523 section 3 allows either); `sub == iss`; a `jti`
+#      300 s; the audience is the issuer identifier, or the token endpoint
+#      URL (RFC 7523 section 3 allows either); `sub == iss`; a `jti`
 #      is required                                             invalid_client
 #   4. the `jti`: refused when this client's assertion with the same `jti`
 #      was accepted and its `exp` plus the leeway has not passed (until
@@ -59,9 +59,6 @@ from komira_oauth import (
     ClientCredentialsRequest,
     ClientMetadata,
 )
-
-
-comptime _AUD_REFUSAL: String = "JoseError: claim aud does not name the audience"
 
 
 def _refuse(reason: String) raises:
@@ -235,14 +232,15 @@ struct ClientRegistry(Movable):
         except:
             return _deny(OAUTH_ERROR_INVALID_CLIENT)
         var verified = Optional[VerifiedAssertion]()
-        var first_refusal = String("")
         try:
             verified = Optional[VerifiedAssertion](
                 _verify(request.client_assertion, verifier, client_id, issuer, now, leeway_s)
             )
-        except e:
-            first_refusal = String(e)
-        if not verified and first_refusal == _AUD_REFUSAL:
+        except:
+            pass
+        # The two policies differ only in the audience, so an assertion the
+        # first refused for anything else fails the second too.
+        if not verified:
             try:
                 verified = Optional[VerifiedAssertion](
                     _verify(
