@@ -30,7 +30,7 @@ comptime SX_STAR: UInt8 = 6  # '*' (only valid as COUNT(*) arg or SELECT *)
 comptime SX_DATE: UInt8 = 7  # date literal `date 'YYYY-MM-DD'` (raw string in `text`)
 comptime SX_LIKE: UInt8 = 8  # `child [NOT] LIKE 'pat'` (child in _agg; pat in text; negate in like_negate)
 comptime SX_CALL: UInt8 = 9  # scalar fn call `name(args...)` (name in `text`; args in _call)
-comptime SX_SUBQUERY: UInt8 = 10  # subquery reference by index (int_val -> SelectStmt.subqueries): the GENERIC subquery-operand node. Scalar `(SELECT ...)` AND the predicate subqueries — `[NOT] EXISTS (...)`, `x [NOT] IN (...)` — all use this node. The referenced `SubqueryDef.kind` (scalar / exists / not-exists / in / not-in) drives how `bind_sql` pre-binds it; the outer binder just looks up `prebound[idx]` regardless of kind (a scalar Expr for SCALAR, a boolean predicate Expr for EXISTS/IN).
+comptime SX_SUBQUERY: UInt8 = 10  # subquery reference by index (int_val -> SelectStmt.subqueries): the GENERIC subquery-operand node. Scalar `(SELECT ...)` AND the predicate subqueries — `[NOT] EXISTS (...)`, `x [NOT] IN (...)` — all use this node. The referenced `SubqueryDef.kind` (scalar / exists / not-exists / in / not-in) drives how `_bind_query` pre-binds it; the outer binder just looks up `prebound[idx]` regardless of kind (a scalar Expr for SCALAR, a boolean predicate Expr for EXISTS/IN).
 comptime SX_CASE: UInt8 = 11  # `CASE [operand] WHEN cond THEN res ... [ELSE default] END`. Children in `_case`: parallel WHEN-condition / THEN-result Slabs + a 0/1-entry ELSE Slab. A SIMPLE case (`CASE x WHEN v THEN ...`) is DESUGARED at parse time into a searched CASE (each condition becomes `x = v`), so the binder + AST only ever see the searched form. Binds to an `EXPR_WHEN` IR node (`_bind_case`); an omitted ELSE binds to a NULL literal (SQL default). The q8 market-share `sum(CASE WHEN ... THEN ... ELSE 0 END)` routes its CASE through the aggregate-argument binder (`_bind_agg_from_sx` -> `_bind_scalar`).
 comptime SX_WINDOW: UInt8 = 12  # `f(...) OVER (PARTITION BY ... ORDER BY ... [ROWS/RANGE frame])` window function. Metadata in `_window` (a `SqlWindowData`): the SXWIN_* function, the aggregate ARG column (empty for ranking fns), the partition/order column lists + descending flags, and the frame bounds. `SqlWindowData` holds NO nested `SqlExpr` (arg + partition/order are plain column NAMES, per the corpus), so the AST stays ACYCLIC through this node (no new recursion cycle / no AOT-wedge risk). Binds to a `LogicalPlan.partition_by` (PLAN_PARTITION_BY) node — the existing engine window operator, no new executor.
 comptime SX_UNARY: UInt8 = 13  # `NOT child` / `child IS [NOT] NULL` — a UNARY predicate. The SXUN_* code is in `op`; the child lives in the `_agg` slot, exactly as SX_LIKE's does. ⚠ THE `_agg` REUSE IS DELIBERATE, NOT A SHORTCUT: a new `Optional[SqlAggData]`-shaped FIELD would add another self-referential storage path for Mojo's AOT whole-program synthesis to walk, and this frontend has already paid for one of those (see SX_SUBQUERY's note on the `_bind_scalar <-> _bind_select` cycle that deadlocks the compiler). One-child nodes share one slot.
@@ -113,8 +113,8 @@ comptime SUBQ_SCALAR: UInt8 = 0  # `(SELECT ...)` scalar operand
 comptime SUBQ_EXISTS: UInt8 = 1  # `EXISTS (SELECT ...)` -> CORR_KIND_EXISTS (SEMI)
 comptime SUBQ_NOT_EXISTS: UInt8 = 2  # `NOT EXISTS (SELECT ...)` -> CORR_KIND_NOT_EXISTS (ANTI)
 comptime SUBQ_IN: UInt8 = 3  # `x IN (SELECT ...)` -> EXISTS with the synthesized `inner_col = x` equi (SEMI)
-comptime SUBQ_NOT_IN: UInt8 = 4  # `x NOT IN (SELECT ...)` -> NULL-AWARE: the synthesized-equi ANTI join AND "no NULL y" AND "x IS NOT NULL or S empty" (`sql_binder._bind_null_aware_not_in`, 2026-09-25). It was the bare ANTI join, which answered rows DuckDB does not whenever a NULL was involved.
-comptime SUBQ_DERIVED: UInt8 = 5  # `FROM (SELECT ...) alias` derived table (bound to a subplan, inlined via the CTE scope under `alias`)
+comptime SUBQ_NOT_IN: UInt8 = 4  # `x NOT IN (SELECT ...)` -> NULL-AWARE: the synthesized-equi ANTI join AND "no NULL y" AND "x IS NOT NULL or S empty" (`sql_bind_subquery._bind_null_aware_not_in`, 2026-09-25). It was the bare ANTI join, which answered rows DuckDB does not whenever a NULL was involved.
+comptime SUBQ_DERIVED: UInt8 = 5  # `FROM (SELECT ...) alias` derived table (bound to a subplan, inlined via the CTE scope under `alias#<index>`)
 # ★ UNION ALL (2026-09-21). The RIGHT-HAND BRANCH of `<select> UNION ALL
 # <select>`, parked in the SAME flat side-table every other nested SELECT uses.
 #
@@ -175,7 +175,7 @@ comptime SXOP_MOD: UInt8 = 13  # `%`  — DuckDB's modulo = `mod()`
 # names an operation a SQL FUNCTION already serves; the operator is a second
 # SPELLING, kept as its own code (not rewritten to the call at parse time) so
 # the unaliased result column is named the way DuckDB names it — `(a ^ 2)`,
-# not `pow(a, 2)` (`sql_binder._sxop_text`).
+# not `pow(a, 2)` (`sql_bind_names._sxop_text`).
 comptime SXOP_POW: UInt8 = 14  # `^`  — power = `pow()`: DOUBLE, left-assoc, tighter than `*`
 comptime SXOP_CONCAT: UInt8 = 15  # `||` — NULL-PROPAGATING concatenation (NOT `concat()`, which SKIPS a NULL)
 comptime SXOP_STARTS_WITH: UInt8 = 16  # `^@` — `starts_with()`
@@ -431,7 +431,7 @@ def sql_agg_code(name: String) -> Int:
       * `{-0.0, +0.0}` — both `+0.0`, asserted through `1.0/x` (`-0.0 == 0.0`
         is TRUE, so the equality itself cannot see the sign).
 
-    ⛔ AND IT IS NOT A ONE-LINE CHANGE, WHICH `sql_binder._sxagg_text` SAID IN
+    ⛔ AND IT IS NOT A ONE-LINE CHANGE, WHICH `sql_bind_names._sxagg_text` SAID IN
     ADVANCE: DuckDB names an unaliased aggregate column after the token you
     WROTE (`mean(v)` -> `mean(v)`, `avg(v)` -> `avg(v)`), so the source token
     is now carried on the `SX_AGG` node's `text` field by `SqlExpr.agg` instead
@@ -491,7 +491,7 @@ def sql_win_ranking_code(name: String) -> Int:
     ⚠ NO OUTPUT-NAME WORK IS OWED HERE, and that is a MEASURED asymmetry with
     `sql_agg_code`'s `mean`, not an oversight. DuckDB names an unaliased window
     item after the token you wrote (`rank_dense() OVER (PARTITION BY p ORDER BY
-    v)`); `_bind_window_projection` (`sql_binder.mojo`) names an UNALIASED
+    v)`); `_bind_window_projection` (`sql_bind_window_order.mojo`) names an UNALIASED
     window item `_w<n>` whatever the function — an `AS` alias is used verbatim
     when present — so `rank_dense` inherits `dense_rank`'s naming exactly and
     adds no divergence that was not already there for all eight window
@@ -815,7 +815,7 @@ struct SqlWindowData(Copyable, Movable):
     # (PARTITION BY Q.k)` answered 1,1,1,1 where DuckDB v1.5.3 answers
     # 3,3,3,1, silently. The binder resolves a qualified name through its
     # `BindScope` exactly as an ordinary column reference does
-    # (`sql_binder._resolve_col`). Still plain `String`s — the AST stays
+    # (`sql_bind_scope._resolve_col`). Still plain `String`s — the AST stays
     # acyclic through the window node.
     var arg_qual: String
     var partition_qual: List[String]  # parallel to `partition_by`
@@ -888,7 +888,7 @@ struct SqlExpr(Movable):
     var tag: UInt8
     var op: UInt8
     var text: String
-    var qualifier: String  # SX_COLUMN only: the table qualifier of `t.col` ("" if unqualified). LOAD-BEARING for correlated-subquery binding (`_bind_corr_scalar` uses it to split inner vs outer columns); IGNORED by the ordinary `_bind_scalar` (which resolves by bare `text`).
+    var qualifier: String  # SX_COLUMN only: the table qualifier of `t.col` ("" if unqualified). `_bind_corr_scalar` uses it to split inner vs outer columns; `_resolve_col` resolves a qualified column through the FROM scope to its output name.
     var int_val: Int64
     var float_val: Float64
     var agg_distinct: Bool  # SX_AGG only: True for COUNT(DISTINCT col)
@@ -986,7 +986,7 @@ struct SqlExpr(Movable):
         NAMES can map to one — `avg` and `mean` both reach `SXAGG_AVG`. DuckDB
         names an unaliased aggregate output column after the token the user
         WROTE (MEASURED v1.5.3: `avg(v)` -> `avg(v)`, `mean(v)` -> `mean(v)`,
-        `MEAN(v)` -> `mean(v)`), and `sql_binder._unaliased_agg_out_name`
+        `MEAN(v)` -> `mean(v)`), and `sql_bind_names._unaliased_agg_out_name`
         implements that convention. Re-deriving the name from `op` would answer
         `avg(v)` for a query that says `mean(v)` — a WRONG COLUMN NAME, which
         on this surface is a wrong ANSWER, because a caller reads a result by
@@ -1301,15 +1301,16 @@ struct FromRelation(Copyable, Movable):
 
     A `FROM (SELECT ...) d` derived table is parked in the enclosing
     statement's `subqueries` side-table (kind `SUBQ_DERIVED`); the parser emits a
-    `named(d)` relation for it, and `bind_sql` pre-binds the derived body into the
-    per-query CTE scope under the alias `d` — so a derived table resolves through
-    the SAME named-derived-relation path a CTE does.
+    `named("d#<subquery index>", "d")` relation for it, and `_bind_query`
+    pre-binds the derived body into the per-query CTE scope under that key — so a
+    derived table resolves through the SAME named-derived-relation path a CTE
+    does, and only through the FROM entry that declares it.
 
-    `alias` is the AS alias (`t AS a` / `t a`), or `""`. It is LOAD-BEARING only
-    for correlated-subquery binding: the alias (and the base `name`) of a
-    correlated subquery's own FROM relation form the INNER-alias set that
-    `_bind_corr_scalar` uses to classify a `t.col` reference as inner vs outer.
-    The ordinary (non-correlated) binder ignores it (unqualified resolution)."""
+    `rel_alias` is the AS alias (`t AS a` / `t a`), or `""` (a derived table
+    always has one: its alias or `unnamed_subquery[N]`). A qualified `q.col`
+    resolves against it and the base `name` (`BindScope`'s qualifiers, a join
+    side's `_inner_alias_set`, a correlated subquery's inner-alias set that
+    classifies `t.col` as inner vs outer)."""
 
     var name: String  # catalog/CTE/derived table name; "" when a pure TVF
     var tvf_path: Optional[String]  # Some(path) => a read_* TVF
@@ -1517,7 +1518,7 @@ struct SubqueryDef(Movable):
     """One parked subquery body (scalar + predicate/derived) in the
     top-level `SelectStmt.subqueries` side-table. Move-only.
 
-    `kind` (SUBQ_*) tells `bind_sql`'s pre-bind loop HOW to lower the body:
+    `kind` (SUBQ_*) tells `_bind_query`'s pre-bind loop HOW to lower the body:
       - SUBQ_SCALAR      -> an `EXPR_CORRELATED_SUBQUERY` of kind CORR_KIND_SCALAR
                             (uncorrelated, empty outer refs) -> broadcast cross-join.
       - SUBQ_EXISTS       / SUBQ_NOT_EXISTS -> a correlated subquery Expr of kind
@@ -1527,9 +1528,10 @@ struct SubqueryDef(Movable):
                             conjunct folded into the inner WHERE (so `x IN (subq)`
                             == `EXISTS (subq WHERE proj = x)`). ⛔ `x NOT IN`
                             is NOT just `NOT EXISTS (...)`: it is NULL-aware and
-                            `sql_binder._bind_null_aware_not_in` ANDs two more
+                            `sql_bind_subquery._bind_null_aware_not_in` ANDs two more
                             facts onto that ANTI join. `in_lhs_col` carries the
-                            outer LHS column base name.
+                            outer LHS column base name and `in_lhs_qualifier`
+                            its table qualifier ("" when unqualified).
       - SUBQ_DERIVED     -> the body is bound to a subplan and registered in the
                             per-query CTE scope under `alias` (a named derived
                             relation); no `prebound` Expr is referenced for it.
@@ -1543,17 +1545,19 @@ struct SubqueryDef(Movable):
     var body: SelectStmt
     var kind: UInt8  # SUBQ_* code
     var in_lhs_col: String  # SUBQ_IN / SUBQ_NOT_IN: the outer LHS column base name
-    var derived_alias: String  # SUBQ_DERIVED: the derived table's alias
+    var in_lhs_qualifier: String  # SUBQ_IN / SUBQ_NOT_IN: the LHS's `q` in `q.x` ("" if unqualified)
+    var derived_alias: String  # SUBQ_DERIVED: its relation key `<alias>#<subquery index>`
     # SUBQ_DERIVED: the optional column-list rename `(SELECT ...) d (c1, c2, ...)`.
     # Empty means no rename (the derived body's own output column names are kept);
     # when non-empty its length MUST equal the body's output column count and the
     # binder positionally renames the derived relation's output columns to these.
     var col_names: List[String]
 
-    def __init__(out self, var body: SelectStmt, kind: UInt8, in_lhs_col: String = String(""), derived_alias: String = String("")):
+    def __init__(out self, var body: SelectStmt, kind: UInt8, in_lhs_col: String = String(""), derived_alias: String = String(""), in_lhs_qualifier: String = String("")):
         self.body = body^
         self.kind = kind
         self.in_lhs_col = in_lhs_col
+        self.in_lhs_qualifier = in_lhs_qualifier
         self.derived_alias = derived_alias
         self.col_names = List[String]()
 
@@ -1561,6 +1565,7 @@ struct SubqueryDef(Movable):
         self.body = body^
         self.kind = kind
         self.in_lhs_col = in_lhs_col
+        self.in_lhs_qualifier = String("")
         self.derived_alias = derived_alias
         self.col_names = col_names^
 
@@ -1635,7 +1640,7 @@ struct SqlStatement(Movable):
                         `SELECT * FROM <table>` for a bare-table COPY); for
                         STMT_CREATE_TABLE_AS it is the `AS <select>` body. The
                         parser attaches the flat subquery side-table to
-                        `query.subqueries`, so `bind_sql(query, …)` threads
+                        `query.subqueries`, so `_bind_query(query, …)` threads
                         it as it does for a top-level SELECT.
         dest_path     — STMT_COPY: the `TO '<path>'` file path ("" otherwise).
         target_table  — STMT_CREATE_TABLE_AS: the table name to register ("" otherwise).

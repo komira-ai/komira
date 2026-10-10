@@ -57,6 +57,27 @@ that finds no column raises an `Error` naming the file. `tvf_relation_scan`
 returns a lazy row-oriented scan whose source carries the dialect and the
 file's mtime, so two dialects of one file are two different sources.
 
+`komira_sql.sql_binder` turns a parsed statement into a plan:
+`bind_statement(stmt, catalog, footers)` returns a `BoundStatement` whose
+`take_plan()` is the `LogicalPlan` of the query (or of a COPY or CREATE TABLE
+AS source), with the statement kind and a COPY's destination or a CTAS's
+table name. It resolves names case-insensitively against the catalog, the
+`WITH` definitions and derived tables; binds scalar and aggregate
+expressions, GROUP BY and HAVING, joins (inner, outer, NATURAL / USING, semi,
+anti), subqueries (scalar, `[NOT] EXISTS`, `[NOT] IN`, the last NULL-aware),
+window functions, ORDER BY, LIMIT / OFFSET, DISTINCT and UNION ALL; and
+raises an `Error` starting `SQL bind error` or `SQL not supported`, naming
+the construct, for what it does not bind. The parquet facts a binding needs
+(the schema of a `read_parquet('path')` relation, and per-column null counts
+that let a NOT IN drop its run-time NULL checks) come from the
+`SqlParquetFooters` the caller passes (`komira_sql.sql_bind_parquet`), so no
+parquet file is opened while binding; `NoParquetFooters` serves a statement
+with no `read_parquet` relation. A `read_csv`, `read_json` or `read_avro`
+relation gets its schema from `sql_tvf_bind`, which reads the file. The
+binder's code is split over the `sql_bind_*` modules (the FROM scope,
+operators, functions, casts and timestamps, subqueries, aggregates and
+GROUP BY, output names, windows and ORDER BY, joins, parquet facts).
+
 ## Examples
 
 Lexing a statement:
@@ -139,4 +160,31 @@ assert_false(cat.has(String("items")))
 var scan = cat.build_scan(String("orders"))
 assert_equal(scan.output_schema.field_name(0), "k")
 assert_equal(cat.udfs.num_declared(), 0)
+```
+
+Binding a query to a plan:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Field, SchemaBuilder
+from komira_sql.sql_token import tokenize
+from komira_sql.sql_parser import parse_sql
+from komira_sql.sql_catalog import SqlCatalog
+from komira_sql.sql_bind_parquet import NoParquetFooters
+from komira_sql.sql_binder import bind_statement
+
+var tsb = SchemaBuilder()
+tsb.add_field(Field(String("k"), ArrowType.INT64, False))
+tsb.add_field(Field(String("v"), ArrowType.FLOAT64, True))
+var tcat = SqlCatalog()
+tcat.add_parquet(String("t"), String("t.parquet"), tsb.build())
+var bound = bind_statement(
+    parse_sql(tokenize("SELECT k, sum(v) AS total FROM t GROUP BY k")),
+    tcat,
+    NoParquetFooters(),
+)
+var plan = bound.take_plan()
+assert_equal(plan.output_schema.field_name(0), "k")
+assert_equal(plan.output_schema.field_name(1), "total")
 ```

@@ -31,7 +31,7 @@
 #   7. `_is_structural_kw` is True for the identifier `from` and False for a
 #      string literal whose text is `from`.
 #      (mutant caught: the non-identifier early return is removed)
-#   8. `_refuse_ambiguous_unnamed_subquery` skips a synthetic relation (a
+#   8. `_refuse_ambiguous_derived_qualifier` skips a derived relation (a
 #      `#` in its name) that has no alias, and refuses one whose alias is
 #      also another relation's name. (mutant caught: the skip tests only the
 #      `#`, so the empty alias is compared and matches the other relation's
@@ -45,7 +45,7 @@ from komira_sql.sql_ast import (
     SXWIN_SUM, SXWIN_COUNT, SXWIN_MIN, SXWIN_MAX, SXWIN_AVG,
     TVF_AVRO, TVF_CSV, FromRelation,
 )
-from komira_sql.sql_parser import _Parser, _refuse_ambiguous_unnamed_subquery
+from komira_sql.sql_parser import _Parser, _refuse_ambiguous_derived_qualifier
 
 
 def _without_eof(sql: String) raises -> List[Token]:
@@ -155,23 +155,23 @@ def test_structural_kw_ignores_a_string_literal() raises:
     assert_true(ident._is_structural_kw())
 
 
-def test_unnamed_subquery_check_skips_a_synthetic_relation_without_alias() raises:
+def test_derived_qualifier_check_skips_a_derived_relation_without_alias() raises:
     var rels = List[FromRelation]()
     rels.append(FromRelation.named(String("#derived0")))
     rels.append(FromRelation.named(String("unnamed_subquery")))
-    _refuse_ambiguous_unnamed_subquery(rels)  # must not raise
+    _refuse_ambiguous_derived_qualifier(rels)  # must not raise
     # Control: the same synthetic relation named `unnamed_subquery` collides.
     var clash = List[FromRelation]()
     clash.append(FromRelation.named(String("#derived0"), String("unnamed_subquery")))
     clash.append(FromRelation.named(String("unnamed_subquery")))
     var msg = String("")
     try:
-        _refuse_ambiguous_unnamed_subquery(clash)
+        _refuse_ambiguous_derived_qualifier(clash)
     except e:
         msg = String(e)
     assert_true(
         msg.startswith(
-            "SQL not supported: an unaliased derived table `(SELECT ...)` is"
+            "SQL not supported: a derived table `(SELECT ...)` is"
             " named `unnamed_subquery`"
         ),
         msg,
