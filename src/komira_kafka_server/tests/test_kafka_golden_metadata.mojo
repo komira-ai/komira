@@ -176,8 +176,7 @@ def test_metadata_copies() raises:
 # -----------------------------------------------------------------------------
 # The v9 request: topics COMPACT_ARRAY of {name, tags}, three booleans, tags.
 # At v9 a topic name is not nullable (MetadataRequest.json: Name
-# "nullableVersions": "10+"); the decoder accepts and skips a null name
-# (komira-ai/komira#1033), so no input here carries one.
+# "nullableVersions": "10+"), so a null name is refused.
 # -----------------------------------------------------------------------------
 def test_metadata_request_v9_named() raises:
     var b = _hex(
@@ -225,6 +224,28 @@ def test_metadata_request_v9_all_topics() raises:
         except:
             refused = True
         assert_true(refused, "prefix " + String(cut) + " accepted")
+
+
+def test_metadata_request_v9_null_name_refused() raises:
+    # Kafka's generated reader refuses this body ("non-nullable field name
+    # was serialized as null"); a decoder that skips the null would return an
+    # empty named-topic list instead.
+    var b = _hex(
+        "02"  # topics: 1
+        " 00 | 00"  # name: null (varint 0), no tags
+        " 00 00 00"  # three booleans
+        " 00"  # tags
+    )
+    var dec = KafkaDecoder(Span(b))
+    var reason = String("")
+    try:
+        _ = decode_metadata_request_body_v9(dec)
+    except e:
+        reason = String(e)
+    assert_true(
+        "null length for non-nullable COMPACT_STRING" in reason,
+        "null v9 topic name accepted; reason: '" + reason + "'",
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -285,6 +306,7 @@ def main() raises:
     test_metadata_copies()
     test_metadata_request_v9_named()
     test_metadata_request_v9_all_topics()
+    test_metadata_request_v9_null_name_refused()
     test_api_versions_request_below_v3_reads_nothing()
     test_api_versions_response_v1_v2()
     test_framed_negative_size()
