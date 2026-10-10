@@ -52,6 +52,20 @@ member komira_collections
 member komira_broker_proto
 member komira_supervisor_proto
 member komira_plan_proto
+member komira_rowcell
+member komira_mail_address
+member komira_content_line
+member komira_spsc_ring
+member komira_sync
+member kci_cell
+member komira_mcp_server
+member komira_chat_proto
+member komira_contacts_proto
+member komira_managed_mail_proto
+member komira_calendar_proto
+member komira_snapshotter
+member komira_mail_message
+member komira_vcard
 license Apache-2.0
 summary Every komira library of one release.
 home https://github.com/komira-ai/komira

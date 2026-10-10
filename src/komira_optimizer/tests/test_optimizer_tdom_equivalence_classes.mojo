@@ -423,10 +423,9 @@ comptime SF1_REGION: Int = 5
 
 def _build_q5_chain_tier2_only() -> JoinChain:
     """Construct the Q5 chain WITHOUT writer-NDV stats. Provider falls
-    through Tier-2 row-count on every column. This is the dominant
-    production case for customer parquet (Spark / pandas / etc.) and the
-    exact state of the SF1
-    fixtures."""
+    through Tier-2 row-count on every column: the case for parquet written
+    without NDV statistics. The relations carry the SF1 row counts above
+    and no TableStats."""
     var chain = JoinChain()
     var ns: Optional[TableStats] = None
     chain.relations.append(_make_relation(R_LINEITEM, "l_orderkey", SF1_LINEITEM, ns^))
@@ -561,9 +560,9 @@ def test_tier2_only_uses_no_hll_path() raises:
     no_hll_ndv carries the MIN-across-class. tdom() returns the
     no_hll_ndv value.
 
-    This pins the Q5-production-case behavior: SF1 fixtures have no
-    writer-NDV, so every binding is Tier-2, and the cost model rides
-    entirely on the row-count heuristic.
+    This pins the all-Tier-2 case (no writer NDV, as in the Q5 chain
+    above): every binding is Tier-2, and the cost model rides entirely on
+    the row-count heuristic.
     """
     var chain = JoinChain()
     var ns: Optional[TableStats] = None
@@ -589,7 +588,8 @@ def test_synthetic_provider_drives_build() raises:
     the cost-model-unit-test injection mechanism end-to-end.
 
     Pin: inject custkey NDVs via the synthetic provider; verify the
-    class's TDOM matches the injected MIN. Cardinalities on the
+    class's TDOM is the MAX of the injected Tier-1 NDVs (the hll_ndv
+    merge takes the MAX). Cardinalities on the
     JoinRelations are deliberately set to LARGE values to prove the
     synthetic injection takes priority over relation.cardinality (the
     synthetic provider has no awareness of JoinRelation; it returns
@@ -604,14 +604,15 @@ def test_synthetic_provider_drives_build() raises:
     chain.edges.append(_mk_edge(0, 1, "c_custkey", "o_custkey"))
 
     var p = SyntheticColumnStatsProvider()
-    # Inject custkey NDVs — both Tier-1 flagged, MIN = 150K.
+    # Inject custkey NDVs — both Tier-1 flagged; the merged hll_ndv is
+    # their MAX (1.5M), not the MIN (150K).
     p.inject(0, "c_custkey", 150_000, True, TIER_PARQUET_METADATA)
     p.inject(1, "o_custkey", 1_500_000, True, TIER_PARQUET_METADATA)
 
     var tdom = build_tdom_graph(chain, p)
     assert_equal(tdom.num_classes(), 1)
     ref c = tdom.classes[0]
-    # Tier-1 path: hll_ndv = MAX(150K, 1.5M) = 1.5M (cross-class MAX is
+    # Tier-1 path: hll_ndv = MAX(150K, 1.5M) = 1.5M (MAX across the class is
     # the conservative HLL-merge upper bound — see optimizer_tdom.mojo
     # `_ingest_provider_value` AUDIT comment).
     assert_true(Bool(c.hll_ndv))

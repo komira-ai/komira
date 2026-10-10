@@ -10,6 +10,7 @@
 #     cell: "staging"
 #     resources: "deploy/app.json"
 #     definitions: "deploy/defs/queue_worker.json"
+#     validation { name: "probe" kind: DEPLOY_PROBE ... }   (probe.mojo)
 #   }
 #
 # A DEPLOY step:
@@ -22,8 +23,9 @@
 #   platform, artifacts, channels, channel
 #                   refused: a platform is an OS plus a CPU and never names a
 #                   cloud, and a DEPLOY's images come from the release set
-#   validation      refused for now by graph.mojo's rule that a validation
-#                   belongs to a PUBLISH step
+#   validation      repeated, optional: DEPLOY_PROBE only (graph.mojo refuses
+#                   any other kind on a DEPLOY step, and a DEPLOY_PROBE on
+#                   any other step); its fields are probe.mojo's
 #
 # A PUBLISH step names exactly ONE destination: `channels` and `channel`, or
 # `cells` and `cell`. Any field of one beside any field of the other is
@@ -39,9 +41,10 @@
 #   * in a `farm_connected` stage (the job holding a farm network credential
 #     must not also hold a cell's deploy identity; a PUBLISH there is already
 #     graph.mojo's refusal);
-#   * in a stage that another stage names in `after`: its set hash would be
-#     handed on with nothing having checked the cell. The refusal says
-#     PROMOTED_DEPLOY_REFUSAL;
+#   * in a stage that another stage names in `after`, when it carries no
+#     DEPLOY_PROBE validation: its set hash would be handed on with nothing
+#     having checked the cell (kci hands a set hash on unconditionally when
+#     a run selects no validation). The refusal says PROMOTED_DEPLOY_REFUSAL;
 #   * when an earlier DEPLOY step, in any stage, names the same cell: the
 #     scope is `(machine, cell)`, so a second step would see the first one's
 #     objects as leftovers.
@@ -60,8 +63,11 @@
 from kci_api import STEP_KIND_DEPLOY
 
 from .graph import ReleaseMachine, Stage, StageStep, joined_names
+from .probe import check_probe, has_probe
 
-comptime PROMOTED_DEPLOY_REFUSAL: String = "a promoted DEPLOY needs a DEPLOY_PROBE; probes land in V1"
+comptime PROMOTED_DEPLOY_REFUSAL: String = (
+    "a promoted DEPLOY needs a DEPLOY_PROBE validation, so the set hash it hands on is one a probe checked"
+)
 """The refusal of a DEPLOY step in a stage another stage runs after (file
 header)."""
 
@@ -193,9 +199,10 @@ def _check_writes_cell(source: String, g: ReleaseMachine, i: Int, k: Int) raises
             where + String(" in a farm-connected stage: the job that holds a farm network credential must not")
             + String(" also hold a cell's deploy identity")
         )
-    if _is_promoted(g, stage):
+    if _is_promoted(g, stage) and not has_probe(step):
         raise Error(
-            where + String(" in a stage another stage runs after: ") + String(PROMOTED_DEPLOY_REFUSAL)
+            where + String(" in a stage another stage runs after, with no DEPLOY_PROBE: ")
+            + String(PROMOTED_DEPLOY_REFUSAL)
         )
     for a in range(i + 1):
         ref earlier = g.stages[a]
@@ -217,6 +224,10 @@ def validate_cell_steps(g: ReleaseMachine, source: String) raises:
         ref stage = g.stages[i]
         for k in range(len(stage.steps)):
             _check_kind_fields(source, stage, stage.steps[k])
+            if stage.steps[k].is_deploy():
+                # graph.mojo let only DEPLOY_PROBE validations through on a DEPLOY step
+                for m in range(len(stage.steps[k].validations)):
+                    check_probe(source, stage, stage.steps[k], stage.steps[k].validations[m])
             if stage.steps[k].writes_cell():
                 _check_writes_cell(source, g, i, k)
 
