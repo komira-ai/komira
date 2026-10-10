@@ -457,6 +457,10 @@ def test_result_rename_placement() raises:
         "ERR: SQL not supported: SELECT DISTINCT over two items both named `k`. The distinct resolves its columns by NAME, so the second would be answered with the first's values. Give the two items distinct aliases."
     )
     _check(
+        "SELECT *, k FROM t",
+        "ERR: SQL not supported: '*' mixed with other SELECT items"
+    )
+    _check(
         "SELECT kk.k AS k, mm.k AS k FROM kk LEFT JOIN mm ON kk.k = mm.k ORDER BY a",
         "ERR: SQL not supported: two SELECT items are both named `k` and ORDER BY sorts by a column the SELECT list does not produce. The sort's extra column is pruned by NAME, which cannot tell the two apart, so the second would be answered with the first's values. Give the two items distinct aliases, or ORDER BY a selected column."
     )

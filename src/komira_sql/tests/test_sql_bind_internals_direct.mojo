@@ -88,7 +88,7 @@ from komira_sql.sql_bind_subquery import (
 )
 from komira_sql.sql_bind_join import _outer_join_type
 from komira_sql.sql_bind_window_order import _map_win_func, _win_value_default
-from komira_sql.sql_bind_names import _duckdb_const_text, _sxagg_text
+from komira_sql.sql_bind_names import _duckdb_const_text, _duckdb_expr_text, _sxagg_text
 
 
 def _schema() -> Schema:
@@ -293,6 +293,7 @@ def test_type_predicates_see_through_an_alias() raises:
     assert_false(
         _bound_expr_is_string(Expr.unary(UInt8(0), Expr.col_ref("s")), sch)
     )
+    assert_false(_bound_expr_is_string(Expr.col_ref("zz"), sch))
 
 
 def _scope_over_t(cat: SqlCatalog, cte: CteScope) raises -> BindScope:
@@ -410,6 +411,8 @@ def test_deparse_constants_and_aggregate_codes() raises:
     assert_equal(String(_duckdb_const_text(UInt8(4))), "?column?")
     assert_equal(String(_duckdb_const_text(UInt8(3))), "(SELECT ...)")
     assert_equal(String(_duckdb_const_text(UInt8(0))), "*")
+    # An aggregate node built with no source spelling is named by its code.
+    assert_equal(_duckdb_expr_text(SqlExpr.agg(SXAGG_AVG, SqlExpr.column("v"))), "avg(v)")
 
 
 def main() raises:

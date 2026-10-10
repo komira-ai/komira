@@ -330,6 +330,10 @@ def test_grouped_select_list_refusals() raises:
         "ERR: SQL bind error: GROUP BY clause cannot contain aggregates"
     )
     _check(
+        "SELECT *, count(*) FROM t GROUP BY 1",
+        "ERR: SQL bind error: GROUP BY term names a '*' SELECT item"
+    )
+    _check(
         "SELECT k, count(*) FROM t GROUP BY sum(v)",
         "ERR: SQL bind error: GROUP BY clause cannot contain aggregates"
     )

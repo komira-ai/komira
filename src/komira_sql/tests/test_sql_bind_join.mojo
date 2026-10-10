@@ -532,6 +532,10 @@ def test_semi_and_anti_join_refusals() raises:
         "ERR: SQL bind error: column 'k' in the SEMI JOIN's ON condition is ambiguous or names neither side of the join — qualify it with the table name or alias of the side it belongs to"
     )
     _check(
+        "SELECT * FROM kk SEMI JOIN mm ON kk.k = mm.k AND k > 1",
+        "ERR: SQL not supported: a SEMI JOIN ON conjunct is ambiguous — an unqualified column it reads exists on BOTH sides. Qualify it with the table name or alias of the side it belongs to."
+    )
+    _check(
         "SELECT * FROM kk SEMI JOIN mm ON a = b",
         "Join(type=SEMI, on=[a=b])\n"
         "  Scan(path=\"kk.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
