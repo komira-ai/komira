@@ -127,9 +127,9 @@ def test_the_page_ceiling_stops_and_says_where() raises:
 
 def test_path_helper_edges() raises:
     assert_equal(join_url(String(""), String("/runs/x")), String("/runs/x"))
-    assert_equal(join_url(String("https://a//"), String("")), String("https://a"))
+    assert_equal(join_url(String("https://a.test//"), String("")), String("https://a.test"))
     assert_equal(
-        join_url(String("https://a"), String("runs/x")), String("https://a/runs/x")
+        join_url(String("https://a.test"), String("runs/x")), String("https://a.test/runs/x")
     )
     assert_equal(build_run_status_path(String(""), String("id")), String("/runs/id"))
     assert_equal(build_run_status_path(String("/r"), String("id")), String("/r/id"))
