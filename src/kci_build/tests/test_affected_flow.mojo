@@ -8,7 +8,8 @@
 #   every unit built when an answer is WIDENED (a build file, the buckconfig,
 #   a toolchain, a tools/build file, an unmapped file), and each stop: an
 #   empty change and a change reaching nothing REFUSED, a failing or
-#   garbled tool INDETERMINATE (never a widening), a failed batch FAILED
+#   garbled tool INDETERMINATE (never a widening), a BROKEN answer (the
+#   tool's query of its build graph failed) FAILED, a failed batch FAILED
 #   naming the failed unit (affected_batch.mojo; test_affected_batch.mojo
 #   holds every batch case), a
 #   file without what the check needs refused before anything runs; --plan
@@ -252,8 +253,9 @@ def _list(xs: List[String]) -> String:
 
 
 def test_the_affected_commands_are_charged_to_the_budget() raises:
-    # --build-budget-s 100 (deadline at clock 100 s): the buck2 answer takes
-    # 30 s, so the pack command gets min(77, 70) and, after its 40 s, the
+    # --build-budget-s 100 (deadline at clock 100 s): the buck2 answer gets
+    # all 100 (--build-timeout-s 77 caps nothing under a budget) and takes
+    # 30 s, so the pack command gets the 70 left and, after its 40 s, the
     # build gets the 30 s left
     var root = _fresh(String("budget"))
     var req = _request(root)
@@ -269,7 +271,7 @@ def test_the_affected_commands_are_charged_to_the_budget() raises:
     assert_equal(o.outcome, String(OUTCOME_SUCCEEDED), o.message)
     assert_equal(len(runner.calls), 3)
     assert_equal(runner.remaining(), 0)
-    assert_equal(runner.calls[0].timeout_s, 77)
+    assert_equal(runner.calls[0].timeout_s, 100)
     assert_equal(runner.calls[1].timeout_s, 70)
     assert_equal(runner.calls[2].timeout_s, 30)
 
@@ -483,6 +485,28 @@ def test_a_failing_tool_is_cannot_tell_never_a_widening() raises:
     _cannot_tell_case(
         String("foreign"), String("UNIT meta\nAFFECTED 1\n"), String("'meta' is not a unit this build system owns")
     )
+
+
+def test_a_broken_answer_fails_the_check_and_builds_nothing() raises:
+    # BROKEN: the tool's query of its build graph failed (here on a target
+    # with an invisible dependency). The check is FAILED, naming what the
+    # tool said, never a widening and never "cannot tell"; nothing is built
+    # and the next build system is not asked.
+    var root = _fresh(String("broken"))
+    var req = _request(root)
+    var git = _git(_z("src/lib_a/a.mojo"))
+    var runner = ScriptedRunner()
+    var why = String("the universe holds a target buck2 cannot configure: tests//p:t: `x` is not visible to `tests//p:t`")
+    runner.expect(_ask_buck2(req, String("BROKEN ") + why + String("\n")))
+    var result = _fresh_result()
+    var o = _run(req, runner, git, result)
+    assert_equal(o.outcome, String(OUTCOME_FAILED), o.message)
+    assert_equal(o.error_id, String(ERROR_BUILD_FAILED), o.message)
+    assert_equal(o.exit_code(), EXIT_FAILED, o.message)
+    assert_equal(len(runner.calls), 1)
+    assert_equal(runner.remaining(), 0)
+    assert_equal(result.affected_verdict, String(""))
+    assert_true(o.message.find(String("build system 'buck2' answered BROKEN: ") + why) >= 0, o.message)
 
 
 def test_a_failed_batch_names_the_failed_unit() raises:

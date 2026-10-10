@@ -340,14 +340,13 @@ def test_data_padded_empty_payload() raises:
     The input is exactly the 9-byte header and nothing after it, so a
     decoder that reads a Pad Length anyway reads one byte past the input:
     the `length == 0` check is what refuses this frame (with it disabled,
-    the read aborts out of bounds). Refused as a connection PROTOCOL_ERROR.
-    RFC 9113 §4.2 names FRAME_SIZE_ERROR for a frame "too small to contain
-    mandatory frame data"; this pins today's code, a departure tracked in
-    #866, so the fix for #866 flips this test on purpose."""
+    the read aborts out of bounds). RFC 9113 §4.2: a frame "too small to
+    contain mandatory frame data" is a FRAME_SIZE_ERROR, refused here as a
+    connection error (#866 item 2; PROTOCOL_ERROR before the fix)."""
     var wire = List[UInt8]()
     encode_frame_header(UInt32(0), FRAME_DATA, FLAG_PADDED, UInt32(1), wire)
     assert_equal(len(wire), 9)
-    _assert_conn_error(_decode(wire), H2_ERR_PROTOCOL_ERROR)
+    _assert_conn_error(_decode(wire), H2_ERR_FRAME_SIZE_ERROR)
 
 
 def test_data_unpadded_keeps_pad_like_bytes() raises:
@@ -410,12 +409,12 @@ def test_headers_padded_empty_payload() raises:
     """§6.2: PADDED with no room for Pad Length; as DATA (see
     test_data_padded_empty_payload), the input ends at the 9-byte header so
     only the `length == 0` check stands between the decoder and a read past
-    the input. Refused as PROTOCOL_ERROR today; §4.2 says FRAME_SIZE_ERROR,
-    the departure tracked in #866."""
+    the input. §4.2: a connection FRAME_SIZE_ERROR (a frame carrying a field
+    block is always a connection error), as for DATA (#866 item 2)."""
     var wire = List[UInt8]()
     encode_frame_header(UInt32(0), FRAME_HEADERS, FLAG_PADDED, UInt32(1), wire)
     assert_equal(len(wire), 9)
-    _assert_conn_error(_decode(wire), H2_ERR_PROTOCOL_ERROR)
+    _assert_conn_error(_decode(wire), H2_ERR_FRAME_SIZE_ERROR)
 
 
 def test_headers_padded() raises:
@@ -783,7 +782,7 @@ def test_window_update_only_reserved_bit_is_zero_increment() raises:
 
     `consumed` is the whole frame (13), not the 0 every other connection
     error returns (`_assert_conn_error`) and FrameDecodeResult's doc
-    promises: the WINDOW_UPDATE arms set `consumed = total` for both
+    promises: the zero-increment arm sets `consumed = total` for both
     scopes. Pinned as today's value so a change to it is deliberate."""
     var wire = List[UInt8]()
     encode_frame_header(UInt32(4), FRAME_WINDOW_UPDATE, UInt8(0), UInt32(0), wire)
@@ -813,19 +812,27 @@ def test_window_update_zero_on_stream_resyncs_h2spec_6_9_2() raises:
 
 def test_window_update_wrong_length_h2spec_6_9_3() raises:
     """§6.9: a length other than 4 is a connection FRAME_SIZE_ERROR
-    (h2spec http2/6.9/3 bytes: length 3, stream 0).
-
-    As in test_window_update_only_reserved_bit_is_zero_increment, this
-    connection arm sets `consumed` to the whole frame (12), unlike the
-    other connection arms, which consume 0. Pinned as today's value."""
+    (h2spec http2/6.9/3 bytes: length 3, stream 0). It now has the shape of
+    every other connection error: nothing consumed, no stream (it consumed
+    the whole frame, 12, before the fix for #866)."""
     var wire = _b(0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00)
     _push(wire, 0x00, 0x00, 0x01)
-    var dec = _decode(wire)
-    assert_equal(Int(dec.status), Int(FRAME_DECODE_ERROR))
-    assert_equal(Int(dec.error_code), Int(H2_ERR_FRAME_SIZE_ERROR))
-    assert_true(dec.is_connection_error)
-    assert_equal(Int(dec.error_stream_id), 0)
-    assert_equal(dec.consumed, 12)
+    _assert_conn_error(_decode(wire), H2_ERR_FRAME_SIZE_ERROR)
+
+
+def test_window_update_wrong_length_on_a_stream_is_connection_error() raises:
+    """§6.9: "A WINDOW_UPDATE frame with a length other than 4 octets MUST
+    be treated as a connection error of type FRAME_SIZE_ERROR", whatever the
+    stream. Lengths 3 and 5 on stream 1 (h2spec http2/6.9/3 sends stream 0
+    only). Before the fix for #866 item 1 this was a stream error naming
+    stream 1."""
+    var short = _b(0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x00, 0x00, 0x01)
+    _push(short, 0x00, 0x00, 0x01)
+    _assert_conn_error(_decode(short), H2_ERR_FRAME_SIZE_ERROR)
+    var long = List[UInt8]()
+    encode_frame_header(UInt32(5), FRAME_WINDOW_UPDATE, UInt8(0), UInt32(1), long)
+    _push(long, 0x00, 0x00, 0x00, 0x01, 0x00)
+    _assert_conn_error(_decode(long), H2_ERR_FRAME_SIZE_ERROR)
 
 
 # =============================================================================
