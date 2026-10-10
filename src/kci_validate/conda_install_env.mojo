@@ -35,8 +35,9 @@
 #                must be <w>/.pixi/envs/default itself (not a link
 #                elsewhere), and every conda-meta record is read back
 #   -  readme    for each LIBRARY pin: its installed README, its sha256
-#                against metadata.json `doc_files`, made into
-#                <w>/readme_<import>.mojo; refused when there is none, when
+#                against metadata.json `doc_files`, made into the runner
+#                <w>/readme_<import>.mojo and one program per example beside
+#                it, <w>/readme_<import>_<line>.mojo; refused when there is none, when
 #                the bytes differ, or when it holds no example. No library
 #                among the pins is refused too (a README that runs nothing
 #                is not a pass)
@@ -46,9 +47,10 @@
 #   4  program   `pixi run --as-is mojo run <w>/readme_<import>.mojo` (cwd
 #                <w>) for each README; its exit in out/readme_<import>.exit,
 #                its stdout in .out and its stderr in .err, each with every
-#                `readme_<import>.mojo:<L>` naming a copied line rewritten to
-#                the README line (an assertion reports its place on stdout, a
-#                compile error on stderr); then readback.mojo's count check
+#                `readme_<import>_<line>.mojo:<n>` (an example's program,
+#                whose line n is README line n) rewritten to the README line
+#                (an assertion reports its place on stdout, a compile error
+#                on stderr); then readback.mojo's count check
 #
 # FAIL CLOSED: every failure is VALIDATION_FAILED with a named row, apart
 # from no network (above). Under `--plan` nothing runs and the row says
@@ -404,6 +406,8 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
         try:
             var p = installed_readme(pin, env_dir)
             _write(join_path(work, p.file), p.text)
+            for m in range(len(p.modules)):
+                _write(join_path(work, p.modules[m].name), p.modules[m].text)
             checks.append(
                 _row(
                     String(CHECK_README), expected_readme^,
@@ -462,15 +466,15 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
             started = False
             _write(join_path(out_dir, record + String(".err")), String("not started: ") + String(e) + String("\n"))
         if started:
-            # an assertion reports `At <w>/readme_<import>.mojo:L:C` on stdout,
-            # a compile error on stderr: both name the README line
+            # an assertion reports `At <w>/readme_<import>_<line>.mojo:L:C` on
+            # stdout, a compile error on stderr: both name the README line
             _write(
                 join_path(out_dir, record + String(".out")),
-                map_report(read_or_empty(raw_out), p.text, p.package, p.display),
+                map_report(read_or_empty(raw_out), p.package, p.display),
             )
             _write(
                 join_path(out_dir, record + String(".err")),
-                map_report(read_or_empty(raw_err), p.text, p.package, p.display),
+                map_report(read_or_empty(raw_err), p.package, p.display),
             )
         if not check_program(out_dir, p.file, checks, record):
             checks[len(checks) - 1].got += (

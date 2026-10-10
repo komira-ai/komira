@@ -94,6 +94,7 @@ assert_equal(fcm_adc_options().scopes[0], FCM_SCOPE)
 Reading the answer. The caller acts on the kind: keep the token, drop it, or
 retry after `retry_after_ms`. The detail never repeats the body's text:
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
 ```mojo
 from komira_gcp_fcm import FCM_DEAD, FCM_ERROR_TYPE, classify_fcm_response, fcm_error_code, fcm_outcome_name
 
@@ -135,6 +136,7 @@ A send that got no answer is TRANSIENT, except a URL the connector cannot
 dial (every send would fail the same way), which raises. A token source's
 error is cut down to its HTTP status:
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo
 from komira_gcp_fcm import send_failure_outcome, token_mint_error
 
@@ -160,6 +162,15 @@ A whole send through `FcmClient`, over komira_http_core's scripted connector
 (which answers from a script and records what was written, so nothing
 leaves the process) and a fixed token:
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+from komira_gcp_fcm import FcmWake
+
+def body_of(text: String) -> List[UInt8]:
+    var out = List[UInt8]()
+    out.extend(Span(text.as_bytes()))
+    return out^
+-->
 ```mojo
 from std.memory import ArcPointer
 from komira_gcp_core import StaticTokenSource

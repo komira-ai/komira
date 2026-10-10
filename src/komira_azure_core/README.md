@@ -69,6 +69,7 @@ A service principal. Built with the defaults it asks
 that could send the client secret somewhere else is refused when the
 provider is built:
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_raises -->
 ```mojo
 from komira_azure_core import ServicePrincipalProvider
 
@@ -98,7 +99,11 @@ is a form POST to `/<directory>/oauth2/v2.0/token`, every value
 percent-encoded; the token is cached with its expiry read on the injected
 clock, and comes due for refresh 300 s before it:
 
-```mojo
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+from komira_azure_core import ServicePrincipalProvider
+-->
+```mojo module
 from std.sys.info import CompilationTarget
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_EPOLL, BACKEND_KQUEUE, Reactor
@@ -148,28 +153,29 @@ def new_reactor() raises -> Reactor[NoopSink]:
     return Reactor[NoopSink](NoopSink(_placeholder=UInt8(0)), BACKEND_KQUEUE)
 
 
-var provider = ServicePrincipalProvider.make(
-    String("contoso.example"), String("app id"), String("s3cr&t")
-).with_clock(ManualClock(Int64(9_000)))
-var service = CannedTokenService(
-    String('{"token_type":"Bearer","expires_in":3599,"access_token":"sp-token"}')
-)
-var connector = ScriptedConnector.with_stream(ScriptedStream.empty())
-var reactor = new_reactor()
-provider.refresh_with_service[CannedTokenService, PerCoreAsyncRuntime[NoopSink], ScriptedConnector](
-    service, connector, reactor
-)
+def main() raises:
+    var provider = ServicePrincipalProvider.make(
+        String("contoso.example"), String("app id"), String("s3cr&t")
+    ).with_clock(ManualClock(Int64(9_000)))
+    var service = CannedTokenService(
+        String('{"token_type":"Bearer","expires_in":3599,"access_token":"sp-token"}')
+    )
+    var connector = ScriptedConnector.with_stream(ScriptedStream.empty())
+    var reactor = new_reactor()
+    provider.refresh_with_service[CannedTokenService, PerCoreAsyncRuntime[NoopSink], ScriptedConnector](
+        service, connector, reactor
+    )
 
-assert_true(service.sent.startswith("POST "))
-assert_true("/contoso.example/oauth2/v2.0/token" in service.sent)
-assert_true(service.sent.endswith(
-    "\r\n\r\ngrant_type=client_credentials&client_id=app%20id&client_secret=s3cr%26t"
-    + "&scope=https%3A%2F%2Fstorage.azure.com%2F.default"
-))
-assert_equal(provider.credential().token, "sp-token")
-assert_equal(provider.cached_expiry_ms(), Int64(9_000 + 3_599_000))
+    assert_true(service.sent.startswith("POST "))
+    assert_true("/contoso.example/oauth2/v2.0/token" in service.sent)
+    assert_true(service.sent.endswith(
+        "\r\n\r\ngrant_type=client_credentials&client_id=app%20id&client_secret=s3cr%26t"
+        + "&scope=https%3A%2F%2Fstorage.azure.com%2F.default"
+    ))
+    assert_equal(provider.credential().token, "sp-token")
+    assert_equal(provider.cached_expiry_ms(), Int64(9_000 + 3_599_000))
 
-assert_false(provider.is_expired_or_near_expiry())
-provider.clock().now = Int64(9_000 + 3_599_000 - 300_000)  # the margin
-assert_true(provider.is_expired_or_near_expiry())
+    assert_false(provider.is_expired_or_near_expiry())
+    provider.clock().now = Int64(9_000 + 3_599_000 - 300_000)  # the margin
+    assert_true(provider.is_expired_or_near_expiry())
 ```

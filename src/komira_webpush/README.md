@@ -89,6 +89,12 @@ The largest message fills the 4096-byte body a push service must accept
 (RFC 8030 section 7.2); one byte more is refused before anything is
 encrypted:
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+from komira_crypto import hex_lower, p256_ecdh
+from komira_encoding import base64_url_decode_nopad
+from komira_webpush import AUTH_SECRET_SIZE, MAX_PLAINTEXT_SIZE, PUBLIC_KEY_SIZE, RECORD_SIZE, WebPushRandomness, aes128gcm_decrypt, aes128gcm_encrypt, aes128gcm_keys, aes128gcm_parse_header, p256_public_key, webpush_decrypt, webpush_encrypt, webpush_encrypt_with, webpush_ikm
+-->
 ```mojo
 var ua_private = base64_url_decode_nopad("q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94")
 var ua_public = p256_public_key(Span[UInt8](ua_private))
@@ -111,7 +117,19 @@ With a fixed salt and sender key (a `WebPushRandomness` that replays them;
 only a test may do this), the body is RFC 8291 section 5's example byte for
 byte, and the intermediate values are those of its appendix A:
 
-```mojo
+<!-- mojo-hidden
+from std.testing import assert_equal
+from komira_crypto import hex_lower, p256_ecdh
+from komira_encoding import base64_url_decode_nopad
+from komira_webpush import AUTH_SECRET_SIZE, MAX_PLAINTEXT_SIZE, PUBLIC_KEY_SIZE, RECORD_SIZE, WebPushRandomness, aes128gcm_decrypt, aes128gcm_encrypt, aes128gcm_keys, aes128gcm_parse_header, p256_public_key, webpush_decrypt, webpush_encrypt, webpush_encrypt_with, webpush_ikm
+
+
+def text_of(bytes: List[UInt8]) raises -> String:
+    return String(StringSlice(from_utf8=Span[UInt8](bytes)))
+
+
+-->
+```mojo module
 struct ReplayRandomness(WebPushRandomness):
     var _salt: List[UInt8]
     var _key: List[UInt8]
@@ -132,47 +150,63 @@ struct ReplayRandomness(WebPushRandomness):
             out[i] = self._key[i]
         return out^
 
+
 def hex_of_b64(s: String) raises -> String:
     var bytes = base64_url_decode_nopad(s)
     return hex_lower(Span[UInt8](bytes))
 
-var as_private = base64_url_decode_nopad("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw")
-var ua_public = base64_url_decode_nopad(
-    "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4"
-)
-var auth = base64_url_decode_nopad("BTBZMqHH6r4Tts7J_aSIgg")
-var salt = base64_url_decode_nopad("DGv6ra1nlYgDCS1FRnbzlw")
 
-var as_public = p256_public_key(Span[UInt8](as_private))
-var ecdh = p256_ecdh(Span[UInt8](as_private), Span[UInt8](ua_public))
-var ikm = webpush_ikm(Span[UInt8](ecdh), Span[UInt8](auth), Span[UInt8](ua_public), Span[UInt8](as_public))
-assert_equal(hex_lower(Span[UInt8](ikm)), hex_of_b64("S4lYMb_L0FxCeq0WhDx813KgSYqU26kOyzWUdsXYyrg"))
-var keys = aes128gcm_keys(Span[UInt8](ikm), Span[UInt8](salt))
-assert_equal(hex_lower(Span[UInt8](keys.cek)), hex_of_b64("oIhVW04MRdy2XN9CiKLxTg"))
-assert_equal(hex_lower(Span[UInt8](keys.nonce)), hex_of_b64("4h_95klXJ5E_qnoN"))
+def main() raises:
+    var as_private = base64_url_decode_nopad("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw")
+    var ua_public = base64_url_decode_nopad(
+        "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4"
+    )
+    var auth = base64_url_decode_nopad("BTBZMqHH6r4Tts7J_aSIgg")
+    var salt = base64_url_decode_nopad("DGv6ra1nlYgDCS1FRnbzlw")
 
-var randomness = ReplayRandomness("DGv6ra1nlYgDCS1FRnbzlw", "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw")
-var plaintext = base64_url_decode_nopad("V2hlbiBJIGdyb3cgdXAsIEkgd2FudCB0byBiZSBhIHdhdGVybWVsb24")
-var body = webpush_encrypt_with(randomness, Span[UInt8](ua_public), Span[UInt8](auth), Span[UInt8](plaintext))
-assert_equal(
-    hex_lower(Span[UInt8](body)),
-    hex_of_b64(
-        "DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27ml"
-        + "mlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPT"
-        + "pK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN"
-    ),
-)
+    var as_public = p256_public_key(Span[UInt8](as_private))
+    var ecdh = p256_ecdh(Span[UInt8](as_private), Span[UInt8](ua_public))
+    var ikm = webpush_ikm(Span[UInt8](ecdh), Span[UInt8](auth), Span[UInt8](ua_public), Span[UInt8](as_public))
+    assert_equal(hex_lower(Span[UInt8](ikm)), hex_of_b64("S4lYMb_L0FxCeq0WhDx813KgSYqU26kOyzWUdsXYyrg"))
+    var keys = aes128gcm_keys(Span[UInt8](ikm), Span[UInt8](salt))
+    assert_equal(hex_lower(Span[UInt8](keys.cek)), hex_of_b64("oIhVW04MRdy2XN9CiKLxTg"))
+    assert_equal(hex_lower(Span[UInt8](keys.nonce)), hex_of_b64("4h_95klXJ5E_qnoN"))
 
-# The user agent reads it with its own private key.
-var ua_private = base64_url_decode_nopad("q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94")
-var opened = webpush_decrypt(Span[UInt8](ua_private), Span[UInt8](ua_public), Span[UInt8](auth), Span[UInt8](body))
-assert_equal(text_of(opened), "When I grow up, I want to be a watermelon")
+    var randomness = ReplayRandomness("DGv6ra1nlYgDCS1FRnbzlw", "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw")
+    var plaintext = base64_url_decode_nopad("V2hlbiBJIGdyb3cgdXAsIEkgd2FudCB0byBiZSBhIHdhdGVybWVsb24")
+    var body = webpush_encrypt_with(randomness, Span[UInt8](ua_public), Span[UInt8](auth), Span[UInt8](plaintext))
+    assert_equal(
+        hex_lower(Span[UInt8](body)),
+        hex_of_b64(
+            "DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27ml"
+            + "mlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPT"
+            + "pK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN"
+        ),
+    )
+
+    # The user agent reads it with its own private key.
+    var ua_private = base64_url_decode_nopad("q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94")
+    var opened = webpush_decrypt(Span[UInt8](ua_private), Span[UInt8](ua_public), Span[UInt8](auth), Span[UInt8](body))
+    assert_equal(text_of(opened), "When I grow up, I want to be a watermelon")
 ```
 
 The `aes128gcm` content coding on its own, on RFC 8188's examples: section
 3.1 encrypts byte for byte with an empty key id, and section 3.2's body of two
 25-byte records (key id `a1`) decrypts to the same text:
 
+<!-- mojo-hidden
+from std.testing import assert_equal
+from komira_crypto import hex_lower, p256_ecdh
+from komira_encoding import base64_url_decode_nopad
+from komira_webpush import AUTH_SECRET_SIZE, MAX_PLAINTEXT_SIZE, PUBLIC_KEY_SIZE, RECORD_SIZE, WebPushRandomness, aes128gcm_decrypt, aes128gcm_encrypt, aes128gcm_keys, aes128gcm_parse_header, p256_public_key, webpush_decrypt, webpush_encrypt, webpush_encrypt_with, webpush_ikm
+
+def text_of(bytes: List[UInt8]) raises -> String:
+    return String(StringSlice(from_utf8=Span[UInt8](bytes)))
+
+def hex_of_b64(s: String) raises -> String:
+    var bytes = base64_url_decode_nopad(s)
+    return hex_lower(Span[UInt8](bytes))
+-->
 ```mojo
 var ikm = base64_url_decode_nopad("yqdlZ-tYemfogSmv7Ws5PQ")
 var salt = base64_url_decode_nopad("I1BsxtFttlv3u_Oo94xnmw")

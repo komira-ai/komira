@@ -78,8 +78,9 @@ environment, the real home directory or the network; a program passes
 `ProcessEnv`, `ProcessFiles` and a real transport instead.
 
 <!-- mojo-hidden from std.testing import assert_equal -->
-```mojo
+```mojo module
 from komira_aws_core import AwsCredentialParams, CredentialHttpRequest, CredentialHttpResponse, CredentialTransport, FixedClock, MapEnv, MapFiles, resolve_aws_credentials, resolve_aws_region
+
 
 struct NoNetwork(CredentialTransport, Movable):
     """A transport for a chain that must not reach the network."""
@@ -90,24 +91,26 @@ struct NoNetwork(CredentialTransport, Movable):
     def send(mut self, req: CredentialHttpRequest) raises -> CredentialHttpResponse:
         raise Error("this example opens no connection")
 
-var env = MapEnv()
-env.set("HOME", "/home/example")
-env.set("AWS_PROFILE", "deploy")
-var files = MapFiles()
-files.put("/home/example/.aws/config", "[profile deploy]\nregion = eu-west-1\n")
-files.put(
-    "/home/example/.aws/credentials",
-    "[deploy]\naws_access_key_id = AKIAIOSFODNN7EXAMPLE\n"
-    + "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n",
-)
-var params = AwsCredentialParams()
-var transport = NoNetwork()
-var clock = FixedClock(1790812800)
 
-var resolved = resolve_aws_credentials(params, env, files, transport, clock)
-assert_equal(resolved.source, "profile deploy")
-assert_equal(resolved.credential.access_key_id, "AKIAIOSFODNN7EXAMPLE")
-assert_equal(resolve_aws_region(params, env, files), "eu-west-1")
+def main() raises:
+    var env = MapEnv()
+    env.set("HOME", "/home/example")
+    env.set("AWS_PROFILE", "deploy")
+    var files = MapFiles()
+    files.put("/home/example/.aws/config", "[profile deploy]\nregion = eu-west-1\n")
+    files.put(
+        "/home/example/.aws/credentials",
+        "[deploy]\naws_access_key_id = AKIAIOSFODNN7EXAMPLE\n"
+        + "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n",
+    )
+    var params = AwsCredentialParams()
+    var transport = NoNetwork()
+    var clock = FixedClock(1790812800)
+
+    var resolved = resolve_aws_credentials(params, env, files, transport, clock)
+    assert_equal(resolved.source, "profile deploy")
+    assert_equal(resolved.credential.access_key_id, "AKIAIOSFODNN7EXAMPLE")
+    assert_equal(resolve_aws_region(params, env, files), "eu-west-1")
 ```
 
 Reading a failed answer: an awsJson error (the code from `__type`, cut to

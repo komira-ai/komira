@@ -61,6 +61,7 @@ the name `localhost`. A trust root that is not a PEM certificate, and an empty
 server name, are refused when the connector is built, before anything is
 dialed:
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_objectstore_gcs import build_gcs_tls_connector_trusting
 

@@ -488,22 +488,26 @@ def _library_impl(ctx):
 # The macro passes the README (declaring is gating: a README is declared by
 # existing; a library of a several-library package can refuse it with
 # `readme = False`, readme.bzl) and the tool, //tools/build/readme_examples:tool, whose
-# `generate` writes `readme_<import name>.mojo` and the number of examples.
-# The convention (what an example is, hidden lines, the refusals) is in that
-# package and in README.md here.
+# `generate` writes one program per example, `readme_<import name>_<line>.mojo`
+# (and the runner of them all, which coverage builds), into a directory, and
+# the README line of each example to `examples`. The convention (what an
+# example is, its two modes, hidden lines, the refusals) is in that package
+# and in README.md here.
 #
 # Whether a README holds an example is in its bytes, which analysis cannot
-# read, so a dynamic action reads the count: with one or more examples it
-# compiles the program against the UNGATED package and runs it through
-# gate_runner.sh exactly as a `test_srcs` entry; with none it compiles and
-# runs nothing, and the marker records that no example exists (never a
-# PASS line). A refused README (an info string such as `mojo skip`, a stray
-# hidden-lines comment) fails `generate`, naming README.md:<line>.
+# read, so a dynamic action reads `examples`: for each example it compiles
+# that example's program alone against the UNGATED package and runs it
+# through gate_runner.sh exactly as a `test_srcs` entry, labelled
+# `<target>:README.md:<line>`, and the marker joins their markers; with none
+# it compiles and runs nothing, and the marker records that no example
+# exists (never a PASS line). A refused README (an info string such as
+# `mojo skip`, a stray hidden-lines comment) fails `generate`, naming
+# README.md:<line>.
 
 def _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args, ships):
-    """(marker, generated program, count) of the README's examples, or None
-    without a README. `ships`: the library's conda package installs the
-    README, so a relative link in it is refused."""
+    """(marker, generated directory, examples file) of the README's
+    examples, or None without a README. `ships`: the library's conda
+    package installs the README, so a relative link in it is refused."""
     readme = ctx.attrs.readme
     if readme == None:
         if ctx.attrs.readme_tool != None:
@@ -511,9 +515,8 @@ def _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args, ships):
         return None
     if ctx.attrs.readme_tool == None:
         fail("{}: readme is set and readme_tool is not; the mojo_library macro sets both".format(ctx.label))
-    display = _join(ctx.label.package, readme.short_path)
-    program = ctx.actions.declare_output("tests/readme/readme_{}.mojo".format(import_name))
-    count = ctx.actions.declare_output("tests/readme/examples")
+    src = ctx.actions.declare_output("tests/readme/src", dir = True)
+    examples = ctx.actions.declare_output("tests/readme/examples")
     ctx.actions.run(
         cmd_args(
             ctx.attrs.readme_tool[RunInfo],
@@ -521,15 +524,15 @@ def _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args, ships):
             "--readme",
             readme,
             "--display",
-            display,
+            _join(ctx.label.package, readme.short_path),
             "--package",
             import_name,
             "--links",
             "refuse" if ships else "allow",
-            "--out",
-            program.as_output(),
-            "--count",
-            count.as_output(),
+            "--out-dir",
+            src.as_output(),
+            "--examples",
+            examples.as_output(),
         ),
         category = "mojo_readme_generate",
     )
@@ -537,8 +540,9 @@ def _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args, ships):
     ctx.actions.dynamic_output_new(_readme_test(
         label = ctx.label,
         gate_label = "{}:{}".format(ctx.label.raw_target(), readme.short_path),
-        count = count,
-        program = program,
+        examples = examples,
+        package = import_name,
+        src = src,
         marker = marker.as_output(),
         tc = tc,
         closure = ungated_tset,
@@ -546,32 +550,30 @@ def _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args, ships):
         link_tail = _link_tail(c_link),
         env_args = env_args,
     ))
-    return marker, program, count
+    return marker, src, examples
 
-def _readme_test_impl(actions, label, gate_label, count, program, marker, tc, closure, opt_level, link_tail, env_args):
-    n = int(count.read_string().strip())
-    if n == 0:
+def _readme_test_impl(actions, label, gate_label, examples, package, src, marker, tc, closure, opt_level, link_tail, env_args):
+    lines = [x.strip() for x in examples.read_string().split("\n") if x.strip()]
+    if not lines:
         actions.write(marker, "NO EXAMPLE {}: no ```mojo example, so nothing was compiled or run\n".format(gate_label))
         return []
     shim = struct(actions = actions, label = label)
-    stem = program.basename[:-len(".mojo")]
-    exe = _build_executable(shim, tc, "tests/readme/bin/" + stem, [program], program, [closure], opt_level, "mojo_build_test", "readme", None, link_extra = link_tail)
-    root, staged = _test_root(shim, "tests/readme/root", exe, {})
+    markers = []
+    for line in lines:
+        stem = "readme_{}_{}".format(package, line)
+        program = src.project(stem + ".mojo")
+        exe = _build_executable(shim, tc, "tests/readme/bin/" + stem, [program], program, [closure], opt_level, "mojo_build_test", "readme_" + line, None, link_extra = link_tail)
+        root, staged = _test_root(shim, "tests/readme/root/" + line, exe, {})
+        m = actions.declare_output("tests/readme/{}.passed".format(line))
+        actions.run(
+            cmd_args(tc.busybox, "sh", tc.gate_runner, tc.busybox, tc.compiler, "{}:{}".format(gate_label, line), staged, m.as_output(), env_args, hidden = root),
+            category = "mojo_gated_test",
+            identifier = "readme_" + line,
+        )
+        markers.append(m)
     actions.run(
-        cmd_args(
-            tc.busybox,
-            "sh",
-            tc.gate_runner,
-            tc.busybox,
-            tc.compiler,
-            gate_label,
-            staged,
-            marker,
-            env_args,
-            hidden = root,
-        ),
-        category = "mojo_gated_test",
-        identifier = "readme",
+        cmd_args(tc.busybox, "sh", "-c", 'b=$1; shift; "$b" cat "$@" >"$0"', marker, tc.busybox, markers),
+        category = "mojo_readme_join",
     )
     return []
 
@@ -579,14 +581,15 @@ _readme_test = dynamic_actions(
     impl = _readme_test_impl,
     attrs = {
         "closure": dynattrs.value(typing.Any),
-        "count": dynattrs.artifact_value(),
         "env_args": dynattrs.value(list[str]),
+        "examples": dynattrs.artifact_value(),
         "gate_label": dynattrs.value(str),
         "label": dynattrs.value(Label),
         "link_tail": dynattrs.value(typing.Any),
         "marker": dynattrs.output(),
         "opt_level": dynattrs.value(str),
-        "program": dynattrs.value(Artifact),
+        "package": dynattrs.value(str),
+        "src": dynattrs.value(Artifact),
         "tc": dynattrs.value(typing.Any),
     },
 )

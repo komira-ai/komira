@@ -53,6 +53,7 @@ assert_equal(
 
 A map member is numbered entries, in the caller's insertion order:
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_aws_sns.komira_aws_sns import SNSCreateTopicInput, build_create_topic_request
 
@@ -70,6 +71,7 @@ assert_equal(
 Decode a CreateTopic answer, and read an `<ErrorResponse>` with
 komira_aws_core's `aws_query_error`:
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_aws_core import AwsResponse, aws_query_error
 from komira_aws_sns.komira_aws_sns import parse_create_topic_response
@@ -105,6 +107,10 @@ assert_equal(e.message, "Topic does not exist")
 
 Resolve the endpoint a call goes to:
 
+<!-- mojo-hidden
+from std.testing import assert_equal
+from komira_aws_sns.komira_aws_sns import SNSCreateTopicInput
+-->
 ```mojo
 from komira_aws_sns.komira_aws_sns import SNSEndpointConfig, komira_aws_sns_endpoint_rules
 from komira_aws_sns.komira_aws_sns import resolve_create_topic_endpoint

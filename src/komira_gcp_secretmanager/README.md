@@ -102,6 +102,39 @@ A name that is not a secret version (here a secret, with no
 `/versions/<v>`) matches none of the method's paths: it is refused, and
 nothing is sent:
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+from std.memory import ArcPointer
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_gcp_core import StaticTokenSource
+from komira_gcp_secretmanager.service import AccessSecretVersionRequest, SecretManagerServiceClient
+from komira_http_client.client import HttpClient
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+from komira_proto_codec.codec import decode_json
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+def secrets_answering(body: String, sent: ArcPointer[List[UInt8]]) raises -> SecretManagerServiceClient[ScriptedConnector, StaticTokenSource]:
+    """A client whose one request is answered 200 with `body`."""
+    var text = (
+        String("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n")
+        + "Content-Length: " + String(body.byte_length())
+        + "\r\nConnection: close\r\n\r\n" + body
+    )
+    var reply = List[UInt8]()
+    reply.extend(Span(text.as_bytes()))
+    var client = SecretManagerServiceClient[ScriptedConnector, StaticTokenSource](
+        HttpClient[ScriptedConnector].with_defaults(
+            ScriptedConnector.with_stream_tls(
+                ScriptedStream.from_read_script_with_capture(reply^, sent)
+            )
+        ),
+        StaticTokenSource(String("a-token")),
+    )
+    client.set_rest_host(String("localhost"))
+    return client^
+-->
 ```mojo
 var nothing_sent = ArcPointer[List[UInt8]](List[UInt8]())
 var refusing = secrets_answering("{}", nothing_sent)

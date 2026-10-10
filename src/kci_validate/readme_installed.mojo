@@ -9,8 +9,10 @@
 # examples against the INSTALLED package: what a user reads works on what
 # they installed.
 #
-# The program is the one SOURCE mode builds for the welded `[tests][readme]`
-# test (tools/build/mojo/defs.bzl `_readme_gate`), from the same library
+# The programs are the ones SOURCE mode generates for the welded
+# `[tests][readme]` test (tools/build/mojo/defs.bzl `_readme_gate`): one per
+# example, `readme_<import name>_<line>.mojo`, and the runner that imports
+# and runs them all, `readme_<import name>.mojo`, from the same library
 # (//tools/build/readme_examples) with the same arguments, so the two are
 # byte-equal for the same README:
 #
@@ -21,9 +23,10 @@
 #   package   the library's import name
 #   links     refused: a README that ships may not link a relative path
 #
-# The program is named `readme_<import name>.mojo` (readme_examples
-# `program_name`), never `<import name>.mojo`: a file beside the program named
-# like the package would be an import root shadowing the installed package.
+# The runner is named `readme_<import name>.mojo` (readme_examples
+# `program_name`), never `<import name>.mojo`: a file beside the programs
+# named like the package would be an import root shadowing the installed
+# package. kci runs the runner, once.
 #
 # REFUSED, each naming its reason (one failed `readme` row):
 #   * the package records no README (`doc_files` absent, or no row for
@@ -42,25 +45,27 @@ from std.os.path import isfile
 
 from kci_release_set.member import file_sha256_hex
 from readme_examples.examples import extract_examples
-from readme_examples.program import generate_program, program_name
+from readme_examples.program import Program, generate_programs
 
 from .container import join_path
 from .request import InstallPin, readme_doc_path
 
 
 struct ReadmeProgram(Copyable, Movable):
-    """One installed README, made into a program: `display` (the README's
+    """One installed README, made into programs: `display` (the README's
     path in the repository), `installed` (its path in the environment),
-    `package` (the library's import name), `file` (the program's file name),
-    `text` (the program) and `examples` (how many it runs, > 0).
+    `package` (the library's import name), `file` (the runner's file name),
+    `text` (the runner), `modules` (each example's program, which the runner
+    imports from beside it) and `examples` (how many it runs, > 0).
 
-    Layout: owned Strings and an Int. No pointer field."""
+    Layout: owned Strings, a List of owned Programs and an Int. No pointer field."""
 
     var display: String
     var installed: String
     var package: String
     var file: String
     var text: String
+    var modules: List[Program]
     var examples: Int
 
     def __init__(out self):
@@ -69,6 +74,7 @@ struct ReadmeProgram(Copyable, Movable):
         self.package = String("")
         self.file = String("")
         self.text = String("")
+        self.modules = List[Program]()
         self.examples = 0
 
 
@@ -108,11 +114,14 @@ def readme_program_of(text: String, import_name: String, display: String) raises
         raise Error(
             display + String(" holds no ```mojo example, so the validation would run nothing; add one")
         )
+    var programs = generate_programs(examples, import_name, display)
+    var runner = programs.pop()
     var p = ReadmeProgram()
     p.display = display.copy()
     p.package = import_name.copy()
-    p.file = program_name(import_name)
-    p.text = generate_program(examples, import_name, display)
+    p.file = runner.name.copy()
+    p.text = runner.text.copy()
+    p.modules = programs^
     p.examples = len(examples)
     return p^
 

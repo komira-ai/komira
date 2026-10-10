@@ -93,6 +93,14 @@ answer read into an access token expiring `expires_in` seconds after the
 time it was received. A refusal names its OAuth error code only when the
 code is a standard one, and never its description:
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+
+comptime AUDIENCE = (
+    "//iam.googleapis.com/projects/1234567890/locations/global/"
+    + "workloadIdentityPools/example-pool/providers/example-aws"
+    )
+-->
 ```mojo
 from komira_gcp_wif import AWS_SUBJECT_TOKEN_TYPE, oauth_error_code, parse_sts_token_response, sts_exchange_form
 
@@ -127,6 +135,7 @@ The `signJwt` call: its path, the claims (`iss` and `sub` the account, a
 10-minute lifetime), the body that carries them as a JSON string, and the
 answer read:
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_raises, assert_true -->
 ```mojo
 from komira_gcp_wif import parse_sign_jwt_response, sign_jwt_claims, sign_jwt_path, sign_jwt_request_body
 
@@ -153,6 +162,14 @@ with assert_raises(contains="outside [A-Za-z0-9@._-]"):
 An `external_account` file read, and the impersonation request it leads to.
 A missing field is refused by its name, never with a value from the file:
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_raises, assert_true
+
+comptime AUDIENCE = (
+    "//iam.googleapis.com/projects/1234567890/locations/global/"
+    + "workloadIdentityPools/example-pool/providers/example-aws"
+    )
+-->
 ```mojo
 from komira_gcp_wif import generate_access_token_body, parse_external_account
 

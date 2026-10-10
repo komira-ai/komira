@@ -9,10 +9,11 @@ from ok import greet
 assert_equal(greet("komira"), "hello, komira")
 ```
 
-A declaration is hoisted out of the example; a triple-quoted string is copied
-as it is:
+A declaration is module-level, so its example is fenced `mojo module` and
+has its own `main`; a triple-quoted string is copied as it is:
 
-```mojo
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo module
 from ok import greet
 
 
@@ -27,13 +28,13 @@ struct Pair(Copyable):
 
 comptime NOTE = """two
   lines"""
-var p = Pair("a", "b")
-print(p.both())
-print(NOTE)
+
+
+def main() raises:
+    var p = Pair("a", "b")
+    assert_equal(p.both(), "hello, a; hello, b")
+    print(NOTE)
 ```
-<!-- mojo-hidden
-assert_equal(Pair("x", "y").both(), "hello, x; hello, y")
--->
 
 - In a list item:
 

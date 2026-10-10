@@ -69,6 +69,11 @@ default, so "keep none" (`keepLastN: 0`) survives a round trip and stays
 distinct from "not said". Decoding and encoding again reproduces the binary
 bytes exactly, and the JSON round trip gives the same binary:
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+from kci_deploy_model_proto.deploy_model import DeploymentSpec
+from komira_proto_codec import decode_json, decode_proto, encode_json, encode_proto
+-->
 ```mojo
 var spec = decode_json[DeploymentSpec]('{"name":"api","keepLastN":0}')
 assert_true(Bool(spec.keep_last_n))
@@ -89,6 +94,10 @@ Enum numbers and names map both ways. An unknown name reads as the zero value
 owns renders as its decimal text. `DatastoreNeed` 3 is reserved (it was
 `DATASTORE_NEED_OBJECTSTORE`), so it has no name:
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+from kci_deploy_model_proto.deploy_model import DatastoreNeed
+-->
 ```mojo
 var dedicated = DatastoreNeed.from_json_name("DATASTORE_NEED_DEDICATED")
 assert_equal(dedicated.number(), DatastoreNeed.DATASTORE_NEED_DEDICATED)

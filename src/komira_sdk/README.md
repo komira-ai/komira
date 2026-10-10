@@ -28,40 +28,46 @@ that strings them into verbs, the sinks, and the package facade come later, so
 
 A row struct's fields, in declared order, become non-nullable columns:
 
-```mojo
+```mojo module
 from std.testing import assert_equal
 from komira_sdk.auto_schema import derive_schema
 from komira_plan_expr.typed_schema import TYPE_INT64, TYPE_FLOAT64
+
 
 @fieldwise_init
 struct Trade(Copyable, Movable):
     var id: Int64
     var price: Float64
 
-var schema = derive_schema[Trade]()
-assert_equal(schema.num_cols(), 2)
-assert_equal(schema.cols[0].name, String("id"))
-assert_equal(schema.cols[0].dtype, TYPE_INT64)
-assert_equal(schema.cols[1].dtype, TYPE_FLOAT64)
+
+def main() raises:
+    var schema = derive_schema[Trade]()
+    assert_equal(schema.num_cols(), 2)
+    assert_equal(schema.cols[0].name, String("id"))
+    assert_equal(schema.cols[0].dtype, TYPE_INT64)
+    assert_equal(schema.cols[1].dtype, TYPE_FLOAT64)
 ```
 
 A struct that conforms to `DerivedSchemaRow` gets the same descriptor from its
 `schema()`, with no body of its own:
 
-```mojo
+```mojo module
 from std.testing import assert_equal
 from komira_sdk.auto_schema import DerivedSchemaRow
 from komira_plan_expr.typed_schema import TYPE_STRING
+
 
 @fieldwise_init
 struct Order(DerivedSchemaRow):
     var qty: Int32
     var note: String
 
-var order_schema = Order.schema()
-assert_equal(order_schema.num_cols(), 2)
-assert_equal(order_schema.cols[1].name, String("note"))
-assert_equal(order_schema.cols[1].dtype, TYPE_STRING)
+
+def main() raises:
+    var order_schema = Order.schema()
+    assert_equal(order_schema.num_cols(), 2)
+    assert_equal(order_schema.cols[1].name, String("note"))
+    assert_equal(order_schema.cols[1].dtype, TYPE_STRING)
 ```
 
 ## Naming an unaliased aggregate

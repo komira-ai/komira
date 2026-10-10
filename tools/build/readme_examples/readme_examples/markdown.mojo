@@ -294,13 +294,35 @@ struct Link(Copyable, Movable):
     var target: String
 
 
+def _html_comment_mask(lines: List[String], code: List[Bool]) -> List[Bool]:
+    """For each line: True when it is in an HTML block that opens with
+    `<!--` (CommonMark type 2), from that line to the first holding `-->`.
+    Such a block is raw HTML, never Markdown: it holds no link."""
+    var mask = List[Bool](length=len(lines), fill=False)
+    var i = 0
+    while i < len(lines):
+        if code[i] or not strip(lines[i]).startswith("<!--"):
+            i += 1
+            continue
+        var j = i
+        while j < len(lines) and suffix(lines[j], 0 if j > i else lines[j].find("<!--") + 4).find("-->") < 0:
+            mask[j] = True
+            j += 1
+        if j < len(lines):
+            mask[j] = True
+        i = j + 1
+    return mask^
+
+
 def relative_links(lines: List[String]) -> List[Link]:
-    """Every link outside code (fenced blocks and code spans) whose target
-    has no scheme: a path, a path with a `#fragment`, or a bare `#fragment`."""
+    """Every link outside code (fenced blocks and code spans) and outside an
+    HTML comment block (a README's mojo-hidden lines) whose target has no
+    scheme: a path, a path with a `#fragment`, or a bare `#fragment`."""
     var out = List[Link]()
     var mask = code_mask(lines)
+    var comments = _html_comment_mask(lines, mask)
     for li in range(len(lines)):
-        if mask[li]:
+        if mask[li] or comments[li]:
             continue
         var line = mask_code_spans(lines[li])
         var targets = inline_targets(line)

@@ -63,17 +63,19 @@ import ...`), exports nothing here; the report lists those packages.
 
 **Used.** The README is read through the tool the gate runs
 (`//tools/build/readme_examples:tool generate`), so exactly the code the
-`[tests][readme]` test compiles is read: every `mojo` fence, hidden lines
-(`<!-- mojo-hidden ... -->`) included, and no prose, `text` fence or other
-fence. The generated harness (its header, the `def _example_<n>() raises:`
-lines and `main`) is dropped, and comments and string literals are blanked.
+`[tests][readme]` test compiles is read: every `mojo` and `mojo module`
+fence, hidden lines (`<!-- mojo-hidden ... -->`) included, and no prose,
+`text` fence or other fence. Each example's program is read; the generated
+lines (the header comment and a `mojo` example's `def main() raises:`) are
+dropped, the runner is not read, and comments and string literals are
+blanked.
 One difference from the gate: the lint passes `--links allow`, where the gate
 of a shipped library passes `refuse`, so a shipped README with a relative
 link is counted here while its gate refuses it; the tokens read are the
 same.
 
 Not uses: `from`/`import` lines (a name an example only imports is not
-exercised by it, so the hoisted import list does not count), and the name
+exercised by it, so an import alone does not count), and the name
 a `def`, `fn`, `struct`, `trait`, `comptime`, `alias` or `var` in the
 README declares (a README that implements a trait with its own
 `def encode` has not called anyone's `encode`). A name is used when its

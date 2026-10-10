@@ -14,7 +14,7 @@ by package: percent used/exported, names, methods, readme
 
 notes:
   komira_b: `from .star import *` at src/komira_b/__init__.mojo:2: its names cannot be listed, so none is counted
-  komira_d: the readme tool refused src/komira_d/README.md (exit 1): src/komira_d/README.md:5: `mojo skip`: an example's info string is exactly `mojo`; nothing may follow it (there is no skip word: fence a sketch that cannot run as ```text)
+  komira_d: the readme tool refused src/komira_d/README.md (exit 1): src/komira_d/README.md:5: `mojo skip`: an example's info string is `mojo` or `mojo module`; nothing else may follow `mojo` (there is no skip word: fence a sketch that cannot run as ```text)
 
 undocumented (package, symbol, where):
   komira_a	Greeter.make	src/komira_a/greet.mojo:20

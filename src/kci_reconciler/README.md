@@ -32,10 +32,11 @@ A conformer implements the verbs over its own notion of live state. This one
 keeps its "live" state in the node itself, so the whole cycle runs in memory:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
-```mojo
+```mojo module
 from kci_reconciler import ChangeAction, Creds, ErasedResource, InMemoryStateStore, Resource, ResourceGraph
 from kci_reconciler import ResourceStatus, CONVERGE_IN_PLACE, RES_ABSENT, RETAIN_DELETE, VERB_CREATE
 from kci_reconciler import VERB_NOOP, apply_graph, destroy_graph, plan_graph
+
 
 struct MemoryNode(Resource, Movable, Deinitable):
     var id: String
@@ -78,28 +79,30 @@ struct MemoryNode(Resource, Movable, Deinitable):
     def converge_mode(mut self, live: ResourceStatus) raises -> Int:
         return CONVERGE_IN_PLACE
 
-var graph = ResourceGraph()
-graph.add(ErasedResource.erase(MemoryNode("app", ["bucket"])))  # added first, applied second
-graph.add(ErasedResource.erase(MemoryNode("bucket", List[String]())))
 
-var first = plan_graph(graph, Creds.none())
-assert_equal(len(first), 2)
-assert_equal(first[0].logical_id, "bucket")  # dependency order
-assert_equal(first[0].verb_name(), "create")
+def main() raises:
+    var graph = ResourceGraph()
+    graph.add(ErasedResource.erase(MemoryNode("app", ["bucket"])))  # added first, applied second
+    graph.add(ErasedResource.erase(MemoryNode("bucket", List[String]())))
 
-var store = InMemoryStateStore()
-var applied = apply_graph(graph, Creds.none(), store)
-assert_equal(applied[0].logical_id, "bucket")
-assert_equal(applied[1].physical_id, "mem-app")
-assert_equal(store.count_confirmed("app"), 1)
+    var first = plan_graph(graph, Creds.none())
+    assert_equal(len(first), 2)
+    assert_equal(first[0].logical_id, "bucket")  # dependency order
+    assert_equal(first[0].verb_name(), "create")
 
-var again = plan_graph(graph, Creds.none())
-assert_true(again[0].is_noop() and again[1].is_noop())
+    var store = InMemoryStateStore()
+    var applied = apply_graph(graph, Creds.none(), store)
+    assert_equal(applied[0].logical_id, "bucket")
+    assert_equal(applied[1].physical_id, "mem-app")
+    assert_equal(store.count_confirmed("app"), 1)
 
-var survivors = destroy_graph(graph, Creds.none(), store)
-assert_equal(len(survivors), 0)
-assert_equal(store.count_reaped("bucket"), 1)
-assert_equal(store.count_reaped("app"), 1)
+    var again = plan_graph(graph, Creds.none())
+    assert_true(again[0].is_noop() and again[1].is_noop())
+
+    var survivors = destroy_graph(graph, Creds.none(), store)
+    assert_equal(len(survivors), 0)
+    assert_equal(store.count_reaped("bucket"), 1)
+    assert_equal(store.count_reaped("app"), 1)
 ```
 
 A raise site states whose fault a failure is, and marks a fault it has

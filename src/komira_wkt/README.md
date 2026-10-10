@@ -95,7 +95,7 @@ assert_equal(back.seconds, Int64(-12))
 A message with a `Timestamp` field writes it with the ordinary message arm;
 on the JSON backend the codec gives the field its RFC 3339 form.
 
-```mojo
+```mojo module
 from komira_proto_codec import Serializable, WireDecoder, WireEncoder, decode_json, encode_json
 from komira_wkt import Timestamp
 from std.testing import assert_equal
@@ -130,8 +130,9 @@ struct Event(Serializable, Copyable, Movable):
         return Self(name^, at^)
 
 
-var e = Event("deploy", Timestamp(Int64(1790812800), Int32(0)))
-var doc = encode_json[Event](e)
-assert_equal(doc, '{"name":"deploy","at":"2026-10-01T00:00:00Z"}')
-assert_equal(decode_json[Event](doc).at.value().seconds, Int64(1790812800))
+def main() raises:
+    var e = Event("deploy", Timestamp(Int64(1790812800), Int32(0)))
+    var doc = encode_json[Event](e)
+    assert_equal(doc, '{"name":"deploy","at":"2026-10-01T00:00:00Z"}')
+    assert_equal(decode_json[Event](doc).at.value().seconds, Int64(1790812800))
 ```
