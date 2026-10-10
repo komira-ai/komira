@@ -3,8 +3,10 @@
 //! The README examples tool and the doc link check read Markdown through
 //! this module, so they agree on what is code and what is a link.
 //!
-//! Lines. A document is split on "\n"; a "\r" before it is dropped. Line
-//! numbers are 0-based indexes into those lines.
+//! Lines. A document is split on its line endings, as CommonMark's: "\n",
+//! "\r\n" or a lone "\r". A final line ending ends the last line rather
+//! than starting an empty one. Line numbers are 0-based indexes into those
+//! lines.
 //!
 //! Fences follow CommonMark: a run of three or more backticks or tildes opens
 //! a fenced block, and only a run of the SAME character, at least as long,
@@ -21,14 +23,39 @@
 //! such partner is literal text. A span never crosses a line here.
 //!
 //! Links: the target of every inline link or image `[text](target)`, with an
-//! optional `<...>` around the target and an optional "title", and of every
-//! reference definition `[id]: target` (up to three spaces before it). Links
+//! optional `<...>` around the target and an optional title ("...", '...' or
+//! (...)) after whitespace, and of every reference definition `[id]: target`
+//! (up to three spaces before it, `<...>` around the target optional). Links
 //! are not read in fenced blocks, in code spans, or in an HTML block that
 //! opens with `<!--` (CommonMark type 2: from that line to the first line
-//! holding `-->`), which is raw HTML, never Markdown.
+//! holding `-->`, the opening line included, so `<!-->` is a whole block),
+//! which is raw HTML, never Markdown.
 //!
-//! Whitespace is Python's ASCII whitespace for str.split(): space, 9..13 and
-//! 28..31.
+//! Whitespace is CommonMark's: space, tab, line feed, line tabulation, form
+//! feed, carriage return (bytes 32 and 9..13).
+//!
+//! Where this differs from CommonMark, it reports a link CommonMark would
+//! not, never the reverse, except for empty and unmodelled targets below
+//! (a link checker that over-reports asks for a fix; one that under-reports
+//! lets a broken link through):
+//! - A reference definition is read on any line, also one that would
+//!   continue a paragraph (CommonMark: a definition cannot interrupt a
+//!   paragraph, so `x\n[r]: r.md` is one paragraph there).
+//! - Indented code blocks and container blocks (lists, block quotes) are not
+//!   modelled: a line indented four spaces is prose here.
+//! - An HTML comment opener that is not first on its line, and every other
+//!   kind of raw HTML, hides nothing.
+//! - What follows a reference definition's target on its line is not
+//!   checked (CommonMark: only a title may follow, or the line is no
+//!   definition).
+//! - An empty target, `[e]()` or `[r]: <>`, is no link (CommonMark: a link
+//!   to the empty destination).
+//! Not modelled, so not read as CommonMark reads them: brackets nested more
+//! than one level in link text; parentheses in a target (`[a](f(x).md)`
+//! reads `f(x`); a `<...>` target holding whitespace (`<a b.md>`, no link
+//! here); backslash escapes and entity references (a target is the bytes
+//! as written); links, titles and definitions spanning lines; reference
+//! links `[text][id]` themselves (their definition is read instead).
 //!
 //! Every slice a function returns either points into its input or was
 //! allocated with the allocator it was given; callers pass an arena.
@@ -39,7 +66,7 @@ const Allocator = std.mem.Allocator;
 // ---- text ------------------------------------------------------------------
 
 pub fn isSpace(c: u8) bool {
-    return c == ' ' or (c >= 9 and c <= 13) or (c >= 28 and c <= 31);
+    return c == ' ' or (c >= 9 and c <= 13);
 }
 
 /// The number of leading whitespace bytes.
@@ -58,21 +85,20 @@ pub fn strip(s: []const u8) []const u8 {
     return s[a..z];
 }
 
-/// Lines without their "\n" (and without a "\r" before it). A final "\n"
-/// ends the last line rather than starting an empty one.
+/// Lines without their line endings ("\n", "\r\n" or a lone "\r"). A
+/// final line ending ends the last line rather than starting an empty one.
 pub fn splitLines(alloc: Allocator, text: []const u8) Allocator.Error![]const []const u8 {
     var out = std.ArrayList([]const u8).init(alloc);
     var start: usize = 0;
     var i: usize = 0;
-    while (i <= text.len) : (i += 1) {
-        if (i == text.len or text[i] == '\n') {
-            if (i == text.len and start == text.len) break;
-            var end = i;
-            if (end > start and text[end - 1] == '\r') end -= 1;
-            try out.append(text[start..end]);
-            start = i + 1;
-        }
+    while (i < text.len) : (i += 1) {
+        const c = text[i];
+        if (c != '\n' and c != '\r') continue;
+        try out.append(text[start..i]);
+        if (c == '\r' and i + 1 < text.len and text[i + 1] == '\n') i += 1;
+        start = i + 1;
     }
+    if (start < text.len) try out.append(text[start..]);
     return out.toOwnedSlice();
 }
 
@@ -166,13 +192,20 @@ pub fn codeMask(alloc: Allocator, lines: []const []const u8) Allocator.Error![]b
     return mask;
 }
 
-/// For each line: true when it is in an HTML block that opens with `<!--`
-/// (after any whitespace) on a line that is not code, from that line to the
-/// first line holding `-->` after the `<!--`, or to the end. Such a block is
-/// raw HTML, never Markdown: it holds no link.
-pub fn htmlCommentMask(alloc: Allocator, lines: []const []const u8, code: []const bool) Allocator.Error![]bool {
-    const mask = try alloc.alloc(bool, lines.len);
-    @memset(mask, false);
+pub const Comment = struct {
+    /// The line whose first non-whitespace bytes are `<!--`.
+    open_line: usize,
+    /// The first line from `open_line` on holding `-->` (`open_line` itself
+    /// when it holds one); null when the document ends first.
+    close_line: ?usize,
+};
+
+/// Every HTML block that opens with `<!--` (after any whitespace) on a line
+/// that is not code, in document order: CommonMark's type 2, from that line
+/// to the first line holding `-->`, or to the end. Two blocks on adjacent
+/// lines are two entries.
+pub fn htmlComments(alloc: Allocator, lines: []const []const u8, code: []const bool) Allocator.Error![]Comment {
+    var out = std.ArrayList(Comment).init(alloc);
     var i: usize = 0;
     while (i < lines.len) {
         if (code[i] or !std.mem.startsWith(u8, strip(lines[i]), "<!--")) {
@@ -180,12 +213,21 @@ pub fn htmlCommentMask(alloc: Allocator, lines: []const []const u8, code: []cons
             continue;
         }
         var j = i;
-        while (j < lines.len) : (j += 1) {
-            mask[j] = true;
-            const from = if (j == i) std.mem.indexOf(u8, lines[j], "<!--").? + 4 else 0;
-            if (std.mem.indexOf(u8, lines[j][from..], "-->") != null) break;
-        }
+        while (j < lines.len and std.mem.indexOf(u8, lines[j], "-->") == null) j += 1;
+        try out.append(.{ .open_line = i, .close_line = if (j < lines.len) j else null });
         i = j + 1;
+    }
+    return out.toOwnedSlice();
+}
+
+/// For each line: true when it is in one of `htmlComments`. Such a block is
+/// raw HTML, never Markdown: it holds no link.
+pub fn htmlCommentMask(alloc: Allocator, lines: []const []const u8, code: []const bool) Allocator.Error![]bool {
+    const mask = try alloc.alloc(bool, lines.len);
+    @memset(mask, false);
+    for (try htmlComments(alloc, lines, code)) |c| {
+        const last = c.close_line orelse lines.len - 1;
+        @memset(mask[c.open_line .. last + 1], true);
     }
     return mask;
 }
@@ -229,7 +271,7 @@ pub fn maskCodeSpans(alloc: Allocator, line: []const u8) Allocator.Error![]const
 
 const Match = struct { end: usize, target: []const u8 };
 
-/// `!?[text](<?target>? "title"?)` at `p`.
+/// `!?[text](target title?)` at `p`.
 fn inlineAt(line: []const u8, p: usize) ?Match {
     if (p < line.len and line[p] == '!') return inlineAt(line, p + 1);
     if (p >= line.len or line[p] != '[') return null;
@@ -252,35 +294,54 @@ fn inlineAt(line: []const u8, p: usize) ?Match {
     if (i >= line.len or line[i] != '(') return null;
     i += 1;
     while (i < line.len and isSpace(line[i])) i += 1;
-    if (i < line.len and line[i] == '<') {
-        if (inlineRest(line, i + 1)) |m| return m;
-    }
     return inlineRest(line, i);
 }
 
-/// The target from `p`, then an optional title, then `)`.
+/// The end of a link title at `p` ("...", '...' or (...); a (...) title
+/// holds no `(`), or null when `p` opens none.
+fn titleEnd(line: []const u8, p: usize) ?usize {
+    if (p >= line.len) return null;
+    const close: u8 = switch (line[p]) {
+        '"' => '"',
+        '\'' => '\'',
+        '(' => ')',
+        else => return null,
+    };
+    var k = p + 1;
+    while (k < line.len and line[k] != close) : (k += 1) {
+        if (close == ')' and line[k] == '(') return null;
+    }
+    return if (k < line.len) k + 1 else null;
+}
+
+/// The target from `p` (`<target>`, or bytes up to whitespace or `)` that
+/// do not start with `<`), then an optional title after whitespace, then
+/// `)`.
 fn inlineRest(line: []const u8, p: usize) ?Match {
     var i = p;
-    while (i < line.len) {
-        const c = line[i];
-        if (c == ')' or c == '>' or isSpace(c)) break;
+    var t: []const u8 = undefined;
+    if (i < line.len and line[i] == '<') {
         i += 1;
+        while (i < line.len and line[i] != '>' and line[i] != '<' and !isSpace(line[i])) i += 1;
+        if (i >= line.len or line[i] != '>') return null;
+        t = line[p + 1 .. i];
+        i += 1;
+    } else {
+        while (i < line.len and line[i] != ')' and !isSpace(line[i])) i += 1;
+        t = line[p..i];
     }
-    if (i == p) return null;
-    const t = line[p..i];
-    if (i < line.len and line[i] == '>') i += 1;
-    // An optional title: whitespace, then "...".
+    if (t.len == 0) return null;
+    // An optional title, after whitespace.
     var j = i;
     while (j < line.len and isSpace(line[j])) j += 1;
-    if (j > i and j < line.len and line[j] == '"') {
-        if (std.mem.indexOfScalarPos(u8, line, j + 1, '"')) |k| {
-            var m = k + 1;
+    if (j > i) {
+        if (titleEnd(line, j)) |k| {
+            var m = k;
             while (m < line.len and isSpace(line[m])) m += 1;
             if (m < line.len and line[m] == ')') return .{ .end = m + 1, .target = t };
         }
     }
-    while (i < line.len and isSpace(line[i])) i += 1;
-    if (i < line.len and line[i] == ')') return .{ .end = i + 1, .target = t };
+    if (j < line.len and line[j] == ')') return .{ .end = j + 1, .target = t };
     return null;
 }
 
@@ -301,8 +362,9 @@ pub fn inlineTargets(alloc: Allocator, line: []const u8) Allocator.Error![]const
 }
 
 /// The target of a reference definition `[id]: target` at the start of
-/// `line` (up to three whitespace bytes before it), without `<` `>` around
-/// it; a slice of `line`.
+/// `line` (up to three whitespace bytes before it): `<target>` without its
+/// `<` `>`, or the bytes up to whitespace when they do not start with `<`;
+/// a slice of `line`. An empty target is none.
 pub fn refdefTarget(line: []const u8) ?[]const u8 {
     var i: usize = 0;
     while (i < 3 and i < line.len and isSpace(line[i])) i += 1;
@@ -313,10 +375,15 @@ pub fn refdefTarget(line: []const u8) ?[]const u8 {
     while (k < line.len and isSpace(line[k])) k += 1;
     const start = k;
     while (k < line.len and !isSpace(line[k])) k += 1;
-    if (k == start) return null;
-    var t = line[start..k];
-    if (t.len > 1 and t[0] == '<') t = t[1..];
-    if (t.len > 1 and t[t.len - 1] == '>') t = t[0 .. t.len - 1];
+    const t = line[start..k];
+    if (t.len > 0 and t[0] == '<') {
+        // `<` ... `>` with no `<` inside.
+        if (t.len < 3 or t[t.len - 1] != '>') return null;
+        const inner = t[1 .. t.len - 1];
+        if (std.mem.indexOfAny(u8, inner, "<>") != null) return null;
+        return inner;
+    }
+    if (t.len == 0) return null;
     return t;
 }
 
