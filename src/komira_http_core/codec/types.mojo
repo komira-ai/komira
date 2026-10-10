@@ -401,10 +401,41 @@ struct HttpResponse(Movable, Deinitable):
 
     @staticmethod
     def method_not_allowed() -> HttpResponse:
-        """405 Method Not Allowed with empty body."""
+        """405 Method Not Allowed with empty body and no `Allow` header. RFC
+        9110 §15.5.6 requires `Allow` on a 405: prefer the overload taking
+        the allowed methods."""
         var r = HttpResponse(status=Int32(405))
         r.headers[String("content-type")] = String("text/plain")
         r.headers[String("content-length")] = String("0")
+        return r^
+
+    @staticmethod
+    def method_not_allowed(allowed: List[HttpMethod]) -> HttpResponse:
+        """405 Method Not Allowed with empty body and an `Allow` header
+        (RFC 9110 §10.2.1) naming `allowed`: each method once, sorted by name,
+        separated by ", ". An empty list gives an empty `Allow` (the resource
+        allows no method)."""
+        var names = List[String]()
+        for i in range(len(allowed)):
+            var name = allowed[i].name()
+            var at = len(names)
+            var duplicate = False
+            for j in range(len(names)):
+                if names[j] == name:
+                    duplicate = True
+                    break
+                if name < names[j]:
+                    at = j
+                    break
+            if not duplicate:
+                names.insert(at, name^)
+        var allow = String("")
+        for i in range(len(names)):
+            if i > 0:
+                allow += ", "
+            allow += names[i]
+        var r = HttpResponse.method_not_allowed()
+        r.headers[String("allow")] = allow^
         return r^
 
     @staticmethod

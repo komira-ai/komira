@@ -20,7 +20,8 @@
 # when they differ. A multiset compare sorts both sides into one total order
 # and walks them together, so one missing row is one report, not a cascade;
 # rows the walk leaves unpaired are then paired by a first-fit search (a
-# tolerance or a bare NaN can defeat the sort order). `keys=` compares the
+# tolerance or a bare NaN can defeat the sort order), which is skipped when
+# neither is present (the walk is exact then). `keys=` compares the
 # key projection positionally and does not resynchronise after a missing
 # row (canon_text.mojo states both limits).
 # =============================================================================
@@ -70,12 +71,16 @@ struct Mismatch(Copyable, Movable, Writable):
 
 
 struct CompareReport(Copyable, Movable, Writable):
-    """Every mismatch found; empty when the results agree."""
+    """Every mismatch found; empty when the results agree.
+    `first_fit_probes` counts the row pairs the first-fit search after a
+    multiset walk tried (0 when the walk was exact and the search skipped)."""
 
     var mismatches: List[Mismatch]
+    var first_fit_probes: Int
 
     def __init__(out self):
         self.mismatches = List[Mismatch]()
+        self.first_fit_probes = 0
 
     def ok(self) -> Bool:
         return len(self.mismatches) == 0
@@ -215,6 +220,27 @@ def _sort_rows(t: CanonText, var idx: List[Int], cols: _Cols) raises -> List[Int
     return src^
 
 
+def _has_bare_nan(t: CanonText, rows: List[Int], cols: _Cols) -> Bool:
+    for r in rows:
+        for c in range(len(cols.widths)):
+            if cols.widths[c] > 0 and t.rows[r][c] == "NaN":
+                return True
+    return False
+
+
+def _walk_is_exact(
+    e: CanonText, missing: List[Int], a: CanonText, extra: List[Int], cols: _Cols
+) -> Bool:
+    """True when no compared float column has a tolerance (`ulps=0`) and no
+    row the walk left unpaired holds a bare NaN in one: then two rows match
+    exactly when _row_order calls them equal, and the walk pairs every
+    matching pair it can."""
+    for c in range(len(cols.widths)):
+        if cols.widths[c] > 0 and (cols.tols[c].is_rel or cols.tols[c].ulps != 0):
+            return False
+    return not (_has_bare_nan(e, missing, cols) or _has_bare_nan(a, extra, cols))
+
+
 def _multiset_diff(
     e: CanonText,
     a: CanonText,
@@ -249,14 +275,25 @@ def _multiset_diff(
         j += 1
     # The sorted walk pairs rows by exact sort order; under a tolerance or a
     # bare NaN, a row it left unpaired may still match one on the other side.
-    # Pair those by search (first fit) before reporting.
+    # Pair those by search (first fit) before reporting. Without either, two
+    # rows match exactly when they sort equal, so the walk is exact and the
+    # O(missing x extra) search is skipped.
+    if len(missing) > 0 and len(extra) > 0 and _walk_is_exact(e, missing, a, extra, cols):
+        for mi in missing:
+            report.add(Mismatch("missing_row", mi, -1, "", e.row_text(mi), ""))
+        for xi in extra:
+            report.add(Mismatch("extra_row", -1, xi, "", "", a.row_text(xi)))
+        return
     var used = List[Bool](capacity=len(extra))
     for _ in range(len(extra)):
         used.append(False)
     for mi in range(len(missing)):
         var found = False
         for xi in range(len(extra)):
-            if not used[xi] and _rows_match(e, missing[mi], a, extra[xi], cols):
+            if used[xi]:
+                continue
+            report.first_fit_probes += 1
+            if _rows_match(e, missing[mi], a, extra[xi], cols):
                 used[xi] = True
                 found = True
                 break

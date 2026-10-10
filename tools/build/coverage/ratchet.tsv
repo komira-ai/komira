@@ -3,12 +3,222 @@
 # A row is: <package>	<line floor>	<branch floor>, separated by one tab.
 # <package> is a directory holding a BUCK file (src/<module>); the floors are
 # basis points (1/100 of a percent, 0 to 10000, so 8734 is 87.34%); the
-# branch floor is '-' when the package has none. Rows are sorted by package
+# branch floor is '-' when the package has none. A pinned row has a fourth
+# field, its reason (never empty): floors set by hand under what was measured,
+# for lines covered only on some runs; they are kept as written. Rows are sorted by package
 # in byte order, each package once. A floor may only rise: covcheck reports a
 # package measured below its floor, or a floor above 0 with nothing measured
 # for it (Regression), a measured package with no row (MissingRow), a row whose directory has no BUCK file (ExtraRow) and a
 # measured branch value whose row has '-' (BranchFloorMissing), and writes the
 # file with every floor raised to what it measured (--ratchet-out) to copy in.
+# A Regression fails the gate in every mode, census included, so the package's
+# conda package is not built: coverage can only go up.
 #
-# This file has no rows yet: the floors arrive with the first coverage run of
-# the packages, as the file covcheck proposes.
+# The rows are the census's: census.sh render writes them from census.tsv,
+# raising a floor to what was measured and never lowering one, and the build
+# (//:coverage_census) holds them to it. A floor that must stay under the
+# measurement is a pinned row here (census.md).
+src/kci_api	10000	-
+src/kci_artifact	9732	-
+src/kci_artifact_manifest	10000	-
+src/kci_artifact_proto	0	-
+src/kci_build	9392	-
+src/kci_cell	10000	-
+src/kci_cli	8988	-
+src/kci_cloud	8538	-
+src/kci_cloud_fake	9710	9101
+src/kci_deploy_model_proto	0	-
+src/kci_logs	8395	-
+src/kci_manifest_proto	0	-
+src/kci_params	10000	-
+src/kci_pkg_upload	8905	-
+src/kci_publish	9215	-
+src/kci_publish_oci	9775	-
+src/kci_reconciler	8798	-
+src/kci_release_channel	10000	-
+src/kci_release_machine	9979	-
+src/kci_release_set	9892	-
+src/kci_resource_proto	0	-
+src/kci_secret_writer	9384	8125
+src/kci_validate	9123	-
+src/kci_validator_report	10000	-
+src/kci_validator_rows	10000	10000
+src/kci_workflow_check	10000	-
+src/komira_agg	9236	9826
+src/komira_agg_api	2873	-
+src/komira_anomaly	10000	-
+src/komira_arrow	6776	-
+src/komira_arrow_ipc	8609	-
+src/komira_async	8618	-	async_mutex.mojo:197-198 and semaphore.mojo:213-218 (the contended slow paths) run only when the unsynchronised two-thread smoke tests contend; 8618 is 86.18% without those 6 lines
+src/komira_async_api	8431	5000
+src/komira_atomic_alias	0	-
+src/komira_authz_api	10000	-
+src/komira_avro	9929	-
+src/komira_aws_apigatewayv2	0	-
+src/komira_aws_core	9324	-
+src/komira_aws_dynamodb	0	-
+src/komira_aws_dynamodbstreams	0	-
+src/komira_aws_ec2	0	-
+src/komira_aws_ecr	0	-
+src/komira_aws_ecs	0	-
+src/komira_aws_iam	0	-
+src/komira_aws_lambda	0	-
+src/komira_aws_lambda_http	9400	-
+src/komira_aws_logs	0	-
+src/komira_aws_metrics	9651	-
+src/komira_aws_route53	0	-
+src/komira_aws_s3	0	-
+src/komira_aws_scheduler	0	-
+src/komira_aws_secretsmanager	0	-
+src/komira_aws_ses	0	-
+src/komira_aws_sesv2	0	-
+src/komira_aws_sns	0	-
+src/komira_aws_sqs	0	-
+src/komira_azure_blob	0	-
+src/komira_azure_core	9878	-
+src/komira_broker	9890	-
+src/komira_broker_coordinator	8396	-
+src/komira_broker_proto	0	-
+src/komira_buffer	9560	8636
+src/komira_calendar	10000	-
+src/komira_calendar_ics	10000	-
+src/komira_calendar_proto	0	-
+src/komira_calendar_store	10000	-
+src/komira_chat_proto	0	-
+src/komira_chat_store	10000	-
+src/komira_clock	10000	10000
+src/komira_collections	9783	-
+src/komira_column_format	7758	5117
+src/komira_column_kernels	6695	-
+src/komira_compression	8632	7000
+src/komira_connect	8795	-
+src/komira_contacts	10000	-
+src/komira_contacts_proto	0	-
+src/komira_content_line	9859	-
+src/komira_counters	8338	9750
+src/komira_crypto	8356	-
+src/komira_csv	0	-
+src/komira_datetime	10000	-
+src/komira_db	8241	-
+src/komira_db_postgres	9929	-
+src/komira_db_sqlite	9402	-
+src/komira_dispatch_agg_exec	9902	-
+src/komira_dispatch_agg_folds	10000	-
+src/komira_dispatch_join_kernels	10000	-
+src/komira_dispatch_scan	10000	-
+src/komira_dynamic_filter	9406	8076
+src/komira_encoding	10000	-
+src/komira_eval	9915	-
+src/komira_exec_types	4729	6206
+src/komira_expr	10000	-
+src/komira_fork_join	10000	10000
+src/komira_fs	9877	-
+src/komira_gcp_apigateway	0	-
+src/komira_gcp_artifactregistry	0	-
+src/komira_gcp_cloudresourcemanager	0	-
+src/komira_gcp_cloudscheduler	0	-
+src/komira_gcp_compute	0	-
+src/komira_gcp_core	9604	-
+src/komira_gcp_fcm	9385	-
+src/komira_gcp_firestore	9379	-
+src/komira_gcp_firestore_db	7650	-
+src/komira_gcp_iam	0	-
+src/komira_gcp_logging	0	-
+src/komira_gcp_monitoring	9837	-
+src/komira_gcp_monitoring_client	0	-
+src/komira_gcp_run	0	-
+src/komira_gcp_secretmanager	0	-
+src/komira_gcp_serviceusage	0	-
+src/komira_gcp_storage	0	-
+src/komira_gcp_wif	9239	-
+src/komira_git	9960	-
+src/komira_grpc	9217	-
+src/komira_hash	10000	10000
+src/komira_host	6041	-
+src/komira_http_auth	9571	-
+src/komira_http_client	8140	-
+src/komira_http_core	9188	-
+src/komira_http_server	8494	-
+src/komira_iceberg_catalog	8717	-
+src/komira_job_report_proto	0	-
+src/komira_job_supervisor	8687	-
+src/komira_join_assembly	6474	-
+src/komira_json	10000	10000
+src/komira_json_index	8477	-
+src/komira_jsonl	9959	-
+src/komira_jwks	9917	9184
+src/komira_kafka_server	10000	-
+src/komira_kernels	5270	-
+src/komira_kg_code	10000	-
+src/komira_kg_code/tests/fixtures/repo	10000	-
+src/komira_libc	7992	7916
+src/komira_log	9089	-
+src/komira_log_query	9531	-
+src/komira_lz4	8026	7631
+src/komira_mail_address	9655	-
+src/komira_mail_message	10000	-
+src/komira_managed_mail_proto	0	-
+src/komira_mcp_server	9626	-
+src/komira_metrics	9718	-
+src/komira_metrics_reader	9727	-
+src/komira_morsel	9619	-
+src/komira_name_registry	8412	7500
+src/komira_net	8521	-
+src/komira_objectstore	8364	-
+src/komira_objectstore_gcs	9405	-
+src/komira_objectstore_s3	9530	-
+src/komira_oci	10000	-
+src/komira_op_agg_row_api	7454	-
+src/komira_op_agg_state	9994	-
+src/komira_optimizer	9995	-
+src/komira_orc	8337	-
+src/komira_parquet	9986	-
+src/komira_parquet_api	10000	10000
+src/komira_parquet_codec	9603	9278
+src/komira_plan_expr	5440	-
+src/komira_plan_ir	8950	8146
+src/komira_plan_proto	0	-
+src/komira_plan_stats	5759	7844
+src/komira_plan_wire	9971	-
+src/komira_pplan_wire	8741	-
+src/komira_proto_codec	9528	-
+src/komira_protobuf	10000	10000
+src/komira_resources	10000	10000
+src/komira_retry	10000	10000
+src/komira_row_format	9627	9624
+src/komira_rowcell	10000	-
+src/komira_scalar_arithmetic	9972	9965
+src/komira_scan_planning	7521	-
+src/komira_scan_resolver	9596	-
+src/komira_scan_source	6318	-
+src/komira_sdk	9904	-
+src/komira_search	10000	-
+src/komira_search_catalog	8359	-
+src/komira_search_scan	8728	-
+src/komira_secret_env	9722	-
+src/komira_secret_registry	9846	8125
+src/komira_secret_store	10000	9000
+src/komira_shuffle	8576	-
+src/komira_shuffle_streaming	10000	-
+src/komira_simd	8337	-
+src/komira_snapshotter	8823	7857
+src/komira_source_url	9807	-
+src/komira_spsc_ring	8623	7800
+src/komira_sql	9987	-
+src/komira_supervisor	7878	-
+src/komira_supervisor_proto	0	-
+src/komira_sync	10000	10000
+src/komira_table_store	8524	-
+src/komira_test_run_id	10000	10000
+src/komira_test_verdict	10000	-
+src/komira_textproto	10000	-
+src/komira_trace	7780	8725
+src/komira_udf	1750	10000
+src/komira_uuid	9534	8928
+src/komira_validation_run	10000	-
+src/komira_vcard	9500	-
+src/komira_viewport	8831	-
+src/komira_webpush	10000	-
+src/komira_wkt	9987	9910
+src/komira_xml	9575	-
+src/komira_zlib	7500	6973

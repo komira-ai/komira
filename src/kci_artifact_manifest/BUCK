@@ -6,8 +6,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # it next to the package; the PUBLISH step reads it to decide what to upload.
 # One format, parsed and written here, so the two steps cannot drift apart.
 #
-# The welded test parses and renders synthetic manifests in memory and
-# asserts each refusal by its message: no file system, no network.
+# The welded tests parse and render synthetic manifests in memory and assert
+# each refusal by its message; test_read_artifact_manifest also reads files
+# it writes under the run's TEST_TMPDIR. No network.
 mojo_library(
     name = "kci_artifact_manifest",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -18,6 +19,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_artifact_manifest.mojo",
+        "tests/test_read_artifact_manifest.mojo",
     ],
     visibility = ["PUBLIC"],
 )

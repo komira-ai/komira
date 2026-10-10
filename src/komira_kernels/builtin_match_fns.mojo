@@ -126,7 +126,12 @@ def _cmp_eq[T: DType, W: Int](lhs: SIMD[T, W], rhs: SIMD[T, W]) -> SIMD[DType.bo
 
 @always_inline
 def _cmp_ne[T: DType, W: Int](lhs: SIMD[T, W], rhs: SIMD[T, W]) -> SIMD[DType.bool, W]:
-    return lhs.ne(rhs)
+    # IEEE UNORDERED not-equal, the same answer as the scalar `!=` of the
+    # ragged-tail loop: a NaN row is TRUE. SIMD `.ne()` is an ORDERED compare
+    # (NaN -> FALSE), so a NaN row's answer would depend on whether it sat in
+    # a full SIMD chunk or in the tail. `~eq` is identical to `.ne()` for
+    # every non-NaN input and for integers. See `sel_kernels._cmp_ne`.
+    return ~lhs.eq(rhs)
 
 
 # =============================================================================
@@ -458,8 +463,9 @@ def _apply_validity[
     """Comptime-fanned validity AND. When both LHS_VALID and RHS_VALID
     are False, the body is comptime-deleted — returns cmp_bits unchanged.
 
-    When either is True, reads the corresponding validity bitmap byte at
-    `start_idx`, casts the W-lane validity mask to UInt8, and ANDs into
+    When either is True, reads the corresponding validity bitmap bits at
+    `offset + start_idx` (a sliced array's bitmap is indexed absolutely),
+    casts the W-lane validity mask to UInt8, and ANDs into
     `cmp_bits` lane-by-lane (W lanes, scalar fallback for correctness on
     the validity-bit-extract; the compiler vectorizes the AND step).
     """
@@ -479,10 +485,10 @@ def _apply_validity[
             var ok: Bool = True
 
             comptime if LHS_VALID:
-                if not lhs.validity.value().test(start_idx + lane):
+                if not lhs.validity.value().test(lhs.offset + start_idx + lane):
                     ok = False
             comptime if RHS_VALID:
-                if not rhs.validity.value().test(start_idx + lane):
+                if not rhs.validity.value().test(rhs.offset + start_idx + lane):
                     ok = False
             if not ok:
                 out_bits[lane] = UInt8(0)
@@ -507,10 +513,10 @@ def _apply_validity_scalar[
             return False
 
         comptime if LHS_VALID:
-            if not lhs.validity.value().test(idx):
+            if not lhs.validity.value().test(lhs.offset + idx):
                 return False
         comptime if RHS_VALID:
-            if not rhs.validity.value().test(idx):
+            if not rhs.validity.value().test(rhs.offset + idx):
                 return False
         return True
 
@@ -925,45 +931,35 @@ def _unary_pack_impl[T: DType, INPUT_VALID: Bool, NEGATE: Bool](
                 bm_view.write_u8_at(num_bytes - 1, mask)
             return length
 
-    # INPUT_VALID == True path.
+    # INPUT_VALID == True path. A sliced array's bitmap is indexed
+    # ABSOLUTELY: logical row i is bit `input.offset + i`. Each output byte is
+    # assembled from the (up to) two source bytes the window straddles.
     ref vbm = input.validity.value()
     var v_view = vbm.buffer.view_ro()
+    var src_bytes = bytes_for_bits(vbm.length)
+    var first_byte = input.offset >> 3
+    var shift = input.offset & 7
+    var trailing = length & 7
     for i in range(num_bytes):
-        var v = v_view.read_u8_at(i)
+        var v = v_view.read_u8_at(first_byte + i)
+        if shift != 0:
+            v = v >> UInt8(shift)
+            if first_byte + i + 1 < src_bytes:
+                v = v | (v_view.read_u8_at(first_byte + i + 1) << UInt8(8 - shift))
 
         comptime if NEGATE:
             v = ~v
+        # Bits past `length` in the last byte are padding (Arrow does not
+        # require them to be zero) and, after a negate, spurious ones: clear
+        # them BEFORE counting so the count equals the bits written.
+        if trailing > 0 and i == num_bytes - 1:
+            v = v & UInt8((1 << trailing) - 1)
         bm_view.write_u8_at(i, v)
         # popcount
         var bv = v
         while bv != 0:
             match_count += 1
             bv = bv & (bv - 1)
-
-    # Mask trailing bits in the final byte past length.
-    var trailing = length & 7
-    if trailing > 0 and num_bytes > 0:
-        var last = bm_view.read_u8_at(num_bytes - 1)
-        var mask = UInt8((1 << trailing) - 1)
-        var truncated = last & mask
-        bm_view.write_u8_at(num_bytes - 1, truncated)
-
-        comptime if NEGATE:
-            # Recount: bits outside the valid range were spurious 1s
-            # after the negate; subtract them from the count and
-            # re-add the truncated count.
-            # popcount(last) - popcount(truncated)
-            var spurious = last
-            var truncated_pop = truncated
-            var spurious_count = 0
-            while spurious != 0:
-                spurious_count += 1
-                spurious = spurious & (spurious - 1)
-            var trunc_pop = 0
-            while truncated_pop != 0:
-                trunc_pop += 1
-                truncated_pop = truncated_pop & (truncated_pop - 1)
-            match_count = match_count - spurious_count + trunc_pop
     return match_count
 
 

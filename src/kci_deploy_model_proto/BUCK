@@ -11,12 +11,14 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 # that imports it names this target in `proto_deps`. It imports no other
 # proto, so the generated code's only runtime is `komira_proto_codec`.
 #
-# A generated package has no tests of its own: it is gated through the tests
-# of the libraries that depend on it.
+# `test_srcs` welds the package to its wire test: every field of every
+# message written out as bytes, and every value of every enum by name and
+# number (tests/test_deploy_model_wire.mojo).
 mojo_proto_library(
     name = "kci_deploy_model_proto",
     srcs = ["deploy_model.proto"],
     import_prefix = "kci/deploy/v1",
     deps = ["//src/komira_proto_codec:komira_proto_codec"],
+    test_srcs = ["tests/test_deploy_model_wire.mojo"],
     visibility = ["PUBLIC"],
 )

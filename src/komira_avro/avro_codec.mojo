@@ -285,7 +285,10 @@ def _decompress_deflate_avro(
 
     One `inflate` pass per attempt (`zlib_inflate_once`); grows the output
     buffer when libz stops with Z_BUF_ERROR or Z_OK short of the stream's
-    end (Avro blocks carry no inline uncompressed length).
+    end having filled it (Avro blocks carry no inline uncompressed length).
+    A stop short of the end with output space left means libz ran out of
+    input: the block is truncated (DEFLATE_TRUNCATED), and a larger buffer
+    would not change that.
     """
     var cap = _initial_output_guess(len(payload), hint)
     while True:
@@ -298,8 +301,13 @@ def _decompress_deflate_avro(
                 String("AvroCodecError.DEFLATE_FAILED: inflate rc ")
                 + String(Int(res.rc))
             )
+        if res.unwritten > 0:
+            raise Error(
+                "AvroCodecError.DEFLATE_TRUNCATED: the deflate stream ends"
+                " before its final block does"
+            )
         if cap >= _MAX_OUTPUT_CAP:
-            raise Error("AvroCodecError.DEFLATE_OUTPUT_OVERFLOW")
+            raise Error("AvroCodecError.DEFLATE_OUTPUT_OVERFLOW")  # cov: unreachable needs a deflate block that decodes to over 2 GiB
         cap *= 4
 
 
@@ -381,7 +389,7 @@ def _decompress_bzip2_avro(
         if got:
             return _trimmed(out^, got.value())
         if cap >= _MAX_OUTPUT_CAP:
-            raise Error("AvroCodecError.BZIP2_OUTPUT_OVERFLOW")
+            raise Error("AvroCodecError.BZIP2_OUTPUT_OVERFLOW")  # cov: unreachable needs a bzip2 block that decodes to over 2 GiB
         cap *= 4
 
 
@@ -397,8 +405,21 @@ def _decompress_xz_avro(
     (`XZ_DEFAULT_MEMLIMIT`, so large dictionaries decode).
 
     Grows the output buffer on LZMA_BUF_ERROR (which `xz_decompress_into`
-    answers with None).
+    answers with None). liblzma before xz 5.8.4 answers a truncated stream
+    with LZMA_BUF_ERROR too, and on an error it reports neither the input it
+    consumed nor the output it wrote, so the grow loop cannot tell the two
+    apart. A block that starts like an .xz stream but does not end with a
+    valid stream footer (after any Stream Padding) is therefore refused up
+    front (XZ_TRUNCATED), with every liblzma version. XZ_TRUNCATED also
+    names a block whose footer is damaged (bad magic or CRC32) or that has
+    bytes other than Stream Padding after its footer: from the last bytes
+    alone those cannot be told apart from a cut stream.
     """
+    if _xz_lacks_stream_footer(payload):
+        raise Error(
+            "AvroCodecError.XZ_TRUNCATED: the block does not end with an xz"
+            " stream footer"
+        )
     var cap = _initial_output_guess(len(payload), hint)
     while True:
         var out = _output_buffer(cap)
@@ -410,8 +431,64 @@ def _decompress_xz_avro(
         if got:
             return _trimmed(out^, got.value())
         if cap >= _MAX_OUTPUT_CAP:
-            raise Error("AvroCodecError.XZ_OUTPUT_OVERFLOW")
+            raise Error("AvroCodecError.XZ_OUTPUT_OVERFLOW")  # cov: unreachable needs an xz block that decodes to over 2 GiB
         cap *= 4
+
+
+# The .xz container (xz file format 1.2.1, section 2.1): a stream starts with
+# the 6-byte header magic FD 37 7A 58 5A 00 and ends with a 12-byte footer:
+# CRC32 (little-endian, over the next 6 bytes) | Backward Size (4) | Stream
+# Flags (2) | magic "YZ". A stream may be followed by Stream Padding: null
+# bytes, a multiple of 4 in number (section 2.2). `lzma_stream_buffer_decode`
+# (flags 0) decodes the first stream and ignores whatever follows it, padding
+# or not. This reader accepts a block that is one stream plus Stream Padding
+# and refuses any other trailing bytes: an Avro writer puts exactly the
+# compressed data in a block, and without a footer at the end (padding
+# aside) a whole stream followed by other bytes looks the same as a cut one.
+comptime _XZ_HEADER_MAGIC_LEN: Int = 6
+comptime _XZ_STREAM_HEADER_LEN: Int = 12
+comptime _XZ_STREAM_FOOTER_LEN: Int = 12
+
+
+def _xz_lacks_stream_footer(payload: Span[UInt8, _]) -> Bool:
+    """True when `payload` is non-empty and starts like an .xz stream (its
+    first bytes are the header magic, or a prefix of it) but, once trailing
+    Stream Padding (whole groups of 4 zero bytes) is set aside, does not end
+    with a valid stream footer (magic "YZ" and a matching CRC32): a
+    truncated stream, a damaged footer, or other bytes after the footer. A
+    payload that does not start like an .xz stream is left to liblzma,
+    which names what is wrong with it."""
+    var magic: InlineArray[UInt8, _XZ_HEADER_MAGIC_LEN] = [
+        0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00
+    ]
+    var n = len(payload)
+    if n == 0:
+        return False
+    for i in range(min(n, _XZ_HEADER_MAGIC_LEN)):
+        if payload[i] != magic[i]:
+            return False
+    # Set Stream Padding aside. A footer ends in "YZ", so this never eats
+    # into one.
+    while (
+        n >= 4
+        and payload[n - 1] == 0
+        and payload[n - 2] == 0
+        and payload[n - 3] == 0
+        and payload[n - 4] == 0
+    ):
+        n -= 4
+    if n < _XZ_STREAM_HEADER_LEN + _XZ_STREAM_FOOTER_LEN:
+        return True
+    var f = n - _XZ_STREAM_FOOTER_LEN
+    if payload[n - 2] != UInt8(ord("Y")) or payload[n - 1] != UInt8(ord("Z")):
+        return True
+    var stored = (
+        UInt32(payload[f])
+        | (UInt32(payload[f + 1]) << 8)
+        | (UInt32(payload[f + 2]) << 16)
+        | (UInt32(payload[f + 3]) << 24)
+    )
+    return crc32_ieee(payload[f + 4 : n - 2]) != stored
 
 
 # =============================================================================
@@ -532,7 +609,7 @@ def _compress_deflate_avro(payload: Span[UInt8, _]) raises -> List[UInt8]:
             Span(out), payload, ZLIB_LEVEL_DEFAULT, ZLIB_WINDOW_BITS_RAW
         )
     except e:
-        raise Error("AvroCodecError.DEFLATE_COMPRESS_FAILED: " + String(e))
+        raise Error("AvroCodecError.DEFLATE_COMPRESS_FAILED: " + String(e))  # cov: unreachable output sized to the codec's bound; only a library failure raises
     out.resize(unsafe_uninit_length=written)
     return out^
 
@@ -557,7 +634,7 @@ def _compress_snappy_avro(payload: Span[UInt8, _]) raises -> List[UInt8]:
     try:
         written = snappy_compress_into(Span(out)[0:out_cap], payload)
     except e:
-        raise Error("AvroCodecError.SNAPPY_COMPRESS_FAILED: " + String(e))
+        raise Error("AvroCodecError.SNAPPY_COMPRESS_FAILED: " + String(e))  # cov: unreachable output sized to the codec's bound; only a library failure raises
     # BE4 CRC32 of the UNCOMPRESSED payload (the Avro snappy trailer).
     var crc = crc32_ieee(payload)
     out[written + 0] = UInt8((crc >> 24) & UInt32(0xFF))
@@ -581,7 +658,7 @@ def _compress_zstandard_avro(payload: Span[UInt8, _]) raises -> List[UInt8]:
     try:
         written = zstd_compress_into(Span(out), payload, ZSTD_DEFAULT_LEVEL)
     except e:
-        raise Error("AvroCodecError.ZSTD_COMPRESS_FAILED: " + String(e))
+        raise Error("AvroCodecError.ZSTD_COMPRESS_FAILED: " + String(e))  # cov: unreachable output sized to the codec's bound; only a library failure raises
     out.resize(unsafe_uninit_length=written)
     return out^
 
@@ -606,7 +683,7 @@ def _compress_bzip2_avro(payload: Span[UInt8, _]) raises -> List[UInt8]:
             BZIP2_DEFAULT_WORK_FACTOR,
         )
     except e:
-        raise Error("AvroCodecError.BZIP2_COMPRESS_FAILED: " + String(e))
+        raise Error("AvroCodecError.BZIP2_COMPRESS_FAILED: " + String(e))  # cov: unreachable output sized to the libbz2 documented worst case plus headroom; only a library failure raises
     out.resize(unsafe_uninit_length=written)
     return out^
 
@@ -628,6 +705,6 @@ def _compress_xz_avro(payload: Span[UInt8, _]) raises -> List[UInt8]:
             Span(out), payload, XZ_PRESET_DEFAULT, XZ_CHECK_CRC64
         )
     except e:
-        raise Error("AvroCodecError.XZ_COMPRESS_FAILED: " + String(e))
+        raise Error("AvroCodecError.XZ_COMPRESS_FAILED: " + String(e))  # cov: unreachable output sized at input + 1/3 + 1024, above the xz worst-case expansion; only a library failure raises
     out.resize(unsafe_uninit_length=written)
     return out^

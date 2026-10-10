@@ -217,7 +217,7 @@ def _rfc6979_generate_k_bytes_384(
 
     # Step (h): loop until candidate k is in [1, n-1].
     # For P-384, qlen=hlen=384 bits → exactly one HMAC output suffices.
-    while True:
+    while True:  # cov: unreachable the loop's back edge, taken only after the retry below
         # T = HMAC_K(V); since qlen == hlen, one HMAC produces 48 bytes.
         var t_hmac = Hmac[Sha384](Span[UInt8, origin_of(k)](k))
         t_hmac.update(Span[UInt8, origin_of(v)](v))
@@ -226,16 +226,16 @@ def _rfc6979_generate_k_bytes_384(
         if _is_in_range_1_to_n_minus_1_384(v):
             return v^
         # Retry: K = HMAC_K(V || 0x00); V = HMAC_K(V)
-        var msg_retry = Array[UInt8, 49](fill=UInt8(0))
-        for i in range(48):
-            msg_retry[i] = v[i]
-        msg_retry[48] = UInt8(0x00)
-        var k_hmac_r = Hmac[Sha384](Span[UInt8, origin_of(k)](k))
-        k_hmac_r.update(Span[UInt8, origin_of(msg_retry)](msg_retry))
-        k_hmac_r.finalize_into(k)
-        var v_hmac_r = Hmac[Sha384](Span[UInt8, origin_of(k)](k))
-        v_hmac_r.update(Span[UInt8, origin_of(v)](v))
-        v_hmac_r.finalize_into(v)
+        var msg_retry = Array[UInt8, 49](fill=UInt8(0))  # cov: unreachable a candidate k of 0 or >= n has probability below 2^-190 for P-384; no input is known to give one
+        for i in range(48):  # cov: unreachable see the line above
+            msg_retry[i] = v[i]  # cov: unreachable see the line above
+        msg_retry[48] = UInt8(0x00)  # cov: unreachable see the line above
+        var k_hmac_r = Hmac[Sha384](Span[UInt8, origin_of(k)](k))  # cov: unreachable see the line above
+        k_hmac_r.update(Span[UInt8, origin_of(msg_retry)](msg_retry))  # cov: unreachable see the line above
+        k_hmac_r.finalize_into(k)  # cov: unreachable see the line above
+        var v_hmac_r = Hmac[Sha384](Span[UInt8, origin_of(k)](k))  # cov: unreachable see the line above
+        v_hmac_r.update(Span[UInt8, origin_of(v)](v))  # cov: unreachable see the line above
+        v_hmac_r.finalize_into(v)  # cov: unreachable see the line above
 
 
 # -----------------------------------------------------------------------------

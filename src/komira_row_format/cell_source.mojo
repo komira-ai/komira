@@ -511,8 +511,18 @@ struct RowCellSource[mo: Origin[mut=False]](CellSource):
             return Float64(self.block[].read_fixed[DType.int32](row, off))
         if dt == CELL_DT_F32:
             return Float64(self.block[].read_fixed[DType.float32](row, off))
-        if dt == CELL_DT_BOOL:
+        if dt == CELL_DT_BOOL or dt == CELL_DT_U8:
             return Float64(self.block[].read_fixed[DType.uint8](row, off))
+        if dt == CELL_DT_I16:
+            return Float64(self.block[].read_fixed[DType.int16](row, off))
+        if dt == CELL_DT_I8:
+            return Float64(self.block[].read_fixed[DType.int8](row, off))
+        if dt == CELL_DT_U16:
+            return Float64(self.block[].read_fixed[DType.uint16](row, off))
+        if dt == CELL_DT_U32:
+            return Float64(self.block[].read_fixed[DType.uint32](row, off))
+        if dt == CELL_DT_U64:
+            return Float64(self.block[].read_fixed[DType.uint64](row, off))
         return self.block[].read_fixed[DType.float64](row, off)
 
     @always_inline

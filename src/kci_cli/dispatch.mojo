@@ -17,7 +17,9 @@
 #      that names no file is a usage error (KCI-E-USAGE, exit 2); a file
 #      whose schema_version this kci does not read is REFUSED
 #      (KCI-E-FORMAT-VERSION); any other refusal of the file is REFUSED
-#      (KCI-E-FORMAT);
+#      (KCI-E-FORMAT), and so is a file holding a step that writes into a
+#      cell (a DEPLOY step, or a PUBLISH step into a cell), which this kci
+#      parses and does not run;
 #   2. resolve S: an unknown stage is REFUSED (KCI-E-STAGE-UNKNOWN, the
 #      message lists the stages); then the selection (kci_release_machine
 #      `resolve_selection`): a selector that matches nothing in S is
@@ -76,17 +78,34 @@
 #      is recomputed (`steps.release_set_hash`) and another hash, or one
 #      that cannot be recomputed, is REFUSED (KCI-E-SET-HASH, exit 3); the
 #      result's `set_hash` is then the recomputed one, but NOT on a `--plan`
-#      run, and, for a run that selects validations, only when every one of
+#      run, NOT on a run that ended SUPERSEDED, and, for a run that selects validations, only when every one of
 #      them VALIDATED and SUCCEEDED (checked at the run's end): kci.yml hands
 #      the validate job's on to prod, and prod refuses an empty one. Under
 #      GitHub Actions the flag is required (KCI-E-USAGE, exit 2);
+#   4c. THE ADMISSION CHECK (rule R24 of the staged pipeline), right after
+#      4a and before 4b, with `--admission`, on a RELEASE run (4a): a re-run
+#      (the platform-set `GITHUB_RUN_ATTEMPT` above 1) at any stage, or the
+#      first attempt of the first stage (no `after`), whose revision is not
+#      main's releasable tip (`main_tip_past`: main fetched, then a
+#      first-parent commit after the revision touching anything but
+#      `docs/**` and `*.md`) stops SUPERSEDED, exit 0, before anything is
+#      run, its summary saying `superseded: ...`. A first attempt of a
+#      later stage proceeds. An attempt or a read that cannot be had is
+#      INDETERMINATE (KCI-E-CANNOT-TELL, exit 5) (start_checks.mojo);
 #   5. the RUNNING record (`recorder.begin`) BEFORE the first effect. A
 #      record that cannot be written stops the run FAILED
 #      (KCI-E-RESULT-FILE), nothing done;
 #   6. every SELECTED step of S, in file order: a BUILD step through
 #      `steps.build`, a PUBLISH step through `steps.publish`, each given its
 #      name, the stage and its GitHub environment, the revision, the
-#      platform, the run identity, `--plan` and its own inputs. Each step adds
+#      platform, the run identity, `--plan` and its own inputs. NEVER
+#      BACKWARD is a property of the RUN: a PUBLISH step never goes
+#      backward on a RELEASE run (4a), and on any run of a stage without
+#      `break_glass`; a `break_glass` stage's channel also takes break-glass
+#      builds, so there the rule counts main-line builds only (kci_publish
+#      run.mojo). A PUBLISH step that ends SUPERSEDED (its channel's newest
+#      build descends from this revision) stops the run SUPERSEDED, exit 0,
+#      its validations NOT_REACHED. Each step adds
 #      its row, artifacts, new names and first error to the result; a step
 #      `--only` did not select gets a row with `selected: false` and no
 #      outcome. Right after a step's row come its SELECTED validations
@@ -116,8 +135,9 @@
 #      version (plan-only or validation-only run)`, not an error about an
 #      empty path;
 #   8. the run's outcome is its worst step's (kci_api's `worst_outcome`),
-#      and PARTIAL when a step fails after an earlier PUBLISH step changed
-#      the channel; the FINISHED record, then the exit number
+#      and PARTIAL when a step ends FAILED, REFUSED or SUPERSEDED after an
+#      earlier PUBLISH step changed the channel (a superseded run is exit 0
+#      only when nothing of it landed); the FINISHED record, then the exit number
 #      (kci_api's exit table), which is the return value;
 #   9. `--summary-file`: a markdown block APPENDED to that file on every exit
 #      path after the command line parsed (summary.mojo; a break-glass run's
@@ -159,6 +179,8 @@
 from std.os.path import isfile
 from std.pathlib import Path
 
+from std.time import perf_counter_ns
+
 from komira_clock import now_unix_ms
 
 from kci_build import BuildRequest
@@ -191,6 +213,7 @@ from kci_api import (
     OUTCOME_PARTIAL,
     OUTCOME_REFUSED,
     OUTCOME_SUCCEEDED,
+    OUTCOME_SUPERSEDED,
     VERB_RUN,
     SCOPE_SELECTIVE,
     WORKFLOW_PATH_PREFIX,
@@ -241,13 +264,14 @@ from .start_checks import (
     GITHUB_WORKFLOW_SHA,
     NOT_UNDER_GITHUB_ACTIONS,
     StartVerdict,
+    check_admission_at_start,
     check_ref_at_start,
     check_set_hash_at_start,
     check_workflow_at_start,
     keep_set_hash_only_if_validated,
     workflow_path_of,
 )
-from .summary import append_summary, promotion_line, run_summary_markdown
+from .summary import append_summary, promotion_line, run_summary_markdown, superseded_line
 
 comptime _STDERR: FileDescriptor = FileDescriptor(2)
 
@@ -318,6 +342,16 @@ def _load_graph(cmd: KciCommand, mut result: KciRunResult) raises -> ReleaseMach
         g = parse_machine_file(text, cmd.machine)
     except e:
         raise Error(String(ERROR_FORMAT) + String("\n") + String(e))
+    for i in range(len(g.stages)):
+        for k in range(len(g.stages[i].steps)):
+            ref step = g.stages[i].steps[k]
+            if step.writes_cell():
+                raise Error(
+                    String(ERROR_FORMAT) + String("\n") + cmd.machine + String(": line ") + String(step.line)
+                    + String(": step '") + step.name + String("' of stage '") + g.stages[i].name
+                    + String("' writes into cell '") + step.cell
+                    + String("': that needs a newer kci (this kci runs BUILD steps and PUBLISH steps to a channel)")
+                )
     result.machine_path = cmd.machine.copy()
     result.machine_sha256 = file_sha256_hex(cmd.machine)
     return g^
@@ -371,11 +405,18 @@ def _build_request(cmd: KciCommand, step: StageStep) raises -> BuildRequest:
     req.platform = step.platform.copy()
     if cmd.build_timeout_s > 0:
         req.build_timeout_s = cmd.build_timeout_s
+    req.build_budget_s = cmd.build_budget_s
+    if cmd.build_budget_s > 0:
+        # the budget counts from kci's start (`kci_main_with`), on the
+        # monotonic clock the BUILD step's runner reads (ProcessRunner.now_ns)
+        req.build_deadline_ns = cmd.started_ns + cmd.build_budget_s * 1_000_000_000
     req.affected_by = cmd.affected_by.copy()
     return req^
 
 
-def _publish_request(cmd: KciCommand, stage: Stage, step: StageStep, break_glass: Bool) raises -> PublishRequest:
+def _publish_request(
+    cmd: KciCommand, stage: Stage, step: StageStep, break_glass: Bool, release: Bool
+) raises -> PublishRequest:
     var req = PublishRequest(cmd.run_identity())
     req.step_name = step.name.copy()
     req.artifacts_file = step.artifacts.copy()
@@ -394,9 +435,12 @@ def _publish_request(cmd: KciCommand, stage: Stage, step: StageStep, break_glass
     req.release_version_file = cmd.release_version.copy()
     if cmd.concurrency > 0:
         req.concurrency = cmd.concurrency
-    # a main-only stage never publishes a lower build number than its
-    # channel lists (kci_publish run.mojo, KCI-E-SUPERSEDED)
-    req.never_backward = not stage.break_glass
+    # never backward is the run's (file header, 6): a push to main never
+    # publishes older than its channel's newest (main-line) build, and a
+    # main-only stage never does on any run (kci_publish run.mojo:
+    # SUPERSEDED, or KCI-E-SUPERSEDED)
+    req.never_backward = release or not stage.break_glass
+    req.main_line_only = stage.break_glass
     req.plan = cmd.plan
     return req^
 
@@ -465,7 +509,7 @@ def _lookahead[S: StageSteps](
                 out.append(r^)
                 continue
             try:
-                r = steps.lookahead(_publish_request(cmd, later, step, False))
+                r = steps.lookahead(_publish_request(cmd, later, step, False, False))
             except e:
                 r = NewNamesReport(later.name.copy(), step.name.copy(), step.channel.copy())
                 r.detail = String("not read: ") + String(e)
@@ -487,16 +531,18 @@ def _run_step[S: StageSteps](
     mut result: KciRunResult,
     mut step_blocks: List[String],
     break_glass: Bool,
+    release: Bool,
 ) -> StepEnd:
     """One selected step (file header, 6): run it, print its lines, keep its
-    summary block. `break_glass`: the run is break-glass (4a)."""
+    summary block. `break_glass`: the run is break-glass; `release`: it is a
+    push to main (4a)."""
     _say(String("kci: stage ") + stage.name + String(", step ") + step.name + String(" (") + step.kind + String(")"))
     var end: StepEnd
     try:
         if step.is_build():
             end = steps.build(_build_request(cmd, step), result, recorder)
         else:
-            end = steps.publish(_publish_request(cmd, stage, step, break_glass), result, recorder, cmd.store)
+            end = steps.publish(_publish_request(cmd, stage, step, break_glass, release), result, recorder, cmd.store)
             # the run's dry-run flag is the command line's: a step refused
             # before it read its request records `plan` false
             result.plan = cmd.plan
@@ -520,10 +566,12 @@ def _run_stage[S: StageSteps](
     mut ahead: List[NewNamesReport],
     mut banner: String,
     mut main_only: Bool,
+    mut superseded_why: String,
 ) -> Int:
     """File header, 0 to 8 and 10. Returns the exit number. `banner` gets a
     break-glass run's first line; `main_only` says the stage has no
-    `break_glass`."""
+    `break_glass`; `superseded_why` says why a run that ended SUPERSEDED
+    stopped."""
     try:
         result.set_run(cmd.run_identity())
     except e:
@@ -580,9 +628,18 @@ def _run_stage[S: StageSteps](
         return _stop_run(result, recorder, verdict.outcome, verdict.error_id, verdict.message)
     # 4a. the ref this run is on; 4b. the set it was handed
     var break_glass = False
-    var ref_verdict = check_ref_at_start(cmd, stage, steps, banner, break_glass)
+    var release = False
+    var ref_verdict = check_ref_at_start(cmd, stage, steps, banner, break_glass, release)
     if ref_verdict.outcome.byte_length() > 0:
         return _stop_run(result, recorder, ref_verdict.outcome, ref_verdict.error_id, ref_verdict.message)
+    # 4c. the admission check: main moved past this revision
+    var admit = check_admission_at_start(cmd, stage, release, steps)
+    if admit.outcome == OUTCOME_SUPERSEDED:
+        _say(String("kci: ") + admit.message)
+        superseded_why = admit.message.copy()
+        return _end_run(result, recorder, String(OUTCOME_SUPERSEDED))
+    if admit.outcome.byte_length() > 0:
+        return _stop_run(result, recorder, admit.outcome, admit.error_id, admit.message)
     var hash_verdict = check_set_hash_at_start(cmd, stage, sel, steps, result)
     if hash_verdict.outcome.byte_length() > 0:
         return _stop_run(result, recorder, hash_verdict.outcome, hash_verdict.error_id, hash_verdict.message)
@@ -616,7 +673,12 @@ def _run_stage[S: StageSteps](
             _say(String("kci: stage ") + stage.name + String(", step ") + step.name + String(": not selected (--only)"))
             result.steps.append(ResultStep.unselected(step.name.copy(), step.kind.copy(), step.platform.copy()))
         else:
-            var end = _run_step(cmd, stage, step, steps, recorder, result, step_blocks, break_glass)
+            var end = _run_step(cmd, stage, step, steps, recorder, result, step_blocks, break_glass, release)
+            if end.outcome == OUTCOME_SUPERSEDED:
+                superseded_why = (
+                    String("step '") + step.name + String("': the channel's newest build descends from this")
+                    + String(" revision, so nothing was uploaded")
+                )
             try:
                 outcome = worst_outcome(outcome, end.outcome)
             except e:
@@ -624,7 +686,12 @@ def _run_stage[S: StageSteps](
             if end.retry.byte_length() > 0:
                 retry = end.retry.copy()
             if not end.ok():
-                if changed_outside and (end.outcome == OUTCOME_REFUSED or end.outcome == OUTCOME_FAILED):
+                # SUPERSEDED too: an upload an earlier step landed stands,
+                # so the stage did part of its work (PARTIAL, exit 6)
+                if changed_outside and (
+                    end.outcome == OUTCOME_REFUSED or end.outcome == OUTCOME_FAILED
+                    or end.outcome == OUTCOME_SUPERSEDED
+                ):
                     outcome = String(OUTCOME_PARTIAL)
                     retry = String("")
                 stopped = True
@@ -663,6 +730,9 @@ def _run_stage[S: StageSteps](
             result.validations.append(row^)
     # 4b, at the end: only a validated set is handed on
     keep_set_hash_only_if_validated(sel, result)
+    # a superseded run hands nothing on (file header, 4b)
+    if outcome == OUTCOME_SUPERSEDED:
+        result.set_hash = String("")
     # 7. the stages after this one: their new names, before their approval
     if outcome == OUTCOME_SUCCEEDED or outcome == OUTCOME_NOOP:
         ahead = _lookahead(cmd, g, stage, steps, result)
@@ -690,7 +760,8 @@ def run_stage_with[S: StageSteps](cmd: KciCommand, mut steps: S, mut recorder: C
     var ahead = List[NewNamesReport]()
     var banner = String("")
     var main_only = False
-    var rc = _run_stage(cmd, steps, recorder, result, step_blocks, ahead, banner, main_only)
+    var superseded_why = String("")
+    var rc = _run_stage(cmd, steps, recorder, result, step_blocks, ahead, banner, main_only, superseded_why)
     var text = String("")
     if banner.byte_length() > 0:
         text += String("### ") + banner + String("\n\n")
@@ -699,6 +770,10 @@ def run_stage_with[S: StageSteps](cmd: KciCommand, mut steps: S, mut recorder: C
     if line.byte_length() > 0:
         text += String("### ") + line + String("\n\n")
         _say(line)
+    var stopped = superseded_line(result, cmd.stage, superseded_why)
+    if stopped.byte_length() > 0:
+        text += String("### ") + stopped + String("\n\n")
+        _say(stopped)
     append_summary(cmd.summary_file, text)
     return rc
 
@@ -707,7 +782,9 @@ def kci_main_with[S: StageSteps](args: List[String], mut steps: S, mut recorder:
     """`kci <args>`: parse; print the usage; or `kci run`. A refused command
     line is exit 2, recorded in the file `--result-file` names and summarized
     in the file `--summary-file` names, when it names them. Returns the exit
-    number."""
+    number. Its first act reads the monotonic clock: kci's start, from which
+    `--build-budget-s` counts."""
+    var started_ns = Int(perf_counter_ns())
     var cmd: KciCommand
     try:
         cmd = parse_kci_args(args)
@@ -728,6 +805,7 @@ def kci_main_with[S: StageSteps](args: List[String], mut steps: S, mut recorder:
     if cmd.verb == String(CLI_VERB_HELP):
         _say(String(KCI_USAGE))
         return EXIT_OK
+    cmd.started_ns = started_ns
     return run_stage_with(cmd, steps, recorder)
 
 
