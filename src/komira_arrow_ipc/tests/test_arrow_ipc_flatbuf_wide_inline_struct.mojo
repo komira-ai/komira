@@ -64,6 +64,9 @@ def _check_wide_struct(n: Int) raises:
     assert_true(f0 + 4 <= f1 or f1 + n <= f0)
     assert_true(f2 + 4 <= f1 or f1 + n <= f2)
     assert_true(f0 + 4 <= inline_size and f2 + 4 <= inline_size)
+    assert_true(f0 + 4 <= f2 or f2 + 4 <= f0)
+    # No field overlaps the table's leading 4-byte soffset.
+    assert_true(f0 >= 4 and f1 >= 4 and f2 >= 4)
 
 
 def test_inline_struct_over_255_bytes_round_trips() raises:
