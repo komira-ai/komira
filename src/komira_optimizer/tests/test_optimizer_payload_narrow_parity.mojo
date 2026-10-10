@@ -492,9 +492,12 @@ def _refusal_fixture(name: String) raises -> Optional[LogicalPlan]:
         )
         return _refused(Col("rv", ArrowType.INT64, False, Optional[ColumnStats](cs^)))
     if name == "refuse_mixed_bounds_float_max":
+        # The int min is below 0: a float's int_val is 0, so a rule that
+        # skipped the max's integer check would read [-3, 0] and narrow it
+        # (with a min above 0 it would read max < min and refuse anyway).
         var cs = ColumnStats(
             None,
-            Optional[ScalarValue](ScalarValue.from_int64(1)),
+            Optional[ScalarValue](ScalarValue.from_int64(-3)),
             Optional[ScalarValue](ScalarValue.from_float(9.0)),
             Optional[Int](0),
         )
