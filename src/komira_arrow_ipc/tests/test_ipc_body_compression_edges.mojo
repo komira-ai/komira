@@ -20,6 +20,12 @@
 # buffer, through the serial path and through a dispatcher (InlineDispatch
 # runs the tasks on the calling thread), so a worker's error is never
 # dropped and a short decompress is never served.
+#
+# FFI-BOUNDARY: `Planted` conforms to the codec trait, whose create_dctx /
+# free_dctx / decompress_into_with_dctx spell the codec's opaque
+# decompression context with MutUntrackedOrigin, so a conformer must too
+# (tests/pointer_lint_ffi.tsv lists this file). Ownership: the context is
+# LZ4's; Planted forwards it to Lz4Frame, which creates and frees it.
 # =============================================================================
 
 from std.memory import Pointer

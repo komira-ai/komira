@@ -15,6 +15,15 @@
 #
 # decode_metadata refuses a negative or implausibly large key count, key
 # length and value length; each refusal is driven by a hand-packed buffer.
+#
+# FFI-BOUNDARY: the Arrow C Data Interface structs (and the children arrays
+# of struct pointers) this file builds by hand as a stand-in foreign
+# producer, and the metadata buffers it packs for decode_metadata, are
+# spelled with MutUntrackedOrigin, as release_c_schema / release_c_array
+# take them (tests/pointer_lint_ffi.tsv lists this file). Ownership: each
+# test frees its root struct and its packed metadata buffer with `.free()`;
+# the children arrays, child and dictionary structs it hangs off a root are
+# handed to the struct and freed (and NULLed) by its release callback.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false

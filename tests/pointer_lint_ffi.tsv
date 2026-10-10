@@ -10,9 +10,13 @@ src/komira_arrow_ipc/c_data_stream.mojo	the Arrow C Stream Interface (ArrowArray
 src/komira_arrow_ipc/tests/c_abi/arrow_c_abi_driver.mojo	the Arrow C structs it reads and writes as pointer slots across a dlopen of arrow_c_abi_probe
 src/komira_arrow_ipc/tests/c_abi/arrow_c_abi_error_driver.mojo	the Arrow C structs it reads and writes as pointer slots across a dlopen of arrow_c_abi_probe, on the error paths
 src/komira_arrow_ipc/tests/c_abi/arrow_c_abi_probe.mojo	the C ABI (ArrowArrayStream pointers) of the arrow_c_abi_probe shared library
+src/komira_arrow_ipc/tests/test_arrow_c_stream_c_abi_drain.mojo	the Arrow C Stream Interface as a stand-in foreign producer: the abi("C") callbacks and the CArrowArrayStream struct it allocates and frees
 src/komira_arrow_ipc/tests/test_arrow_c_stream_export_arms.mojo	the Arrow C Stream Interface structs it allocates and releases as the consumer (and a stand-in producer) of the library's exports
 src/komira_arrow_ipc/tests/test_arrow_c_stream_import_refusals.mojo	the Arrow C Data Interface structs it builds by hand as a stand-in foreign producer
 src/komira_arrow_ipc/tests/test_arrow_c_stream_nested_round_trip.mojo	the Arrow C Stream Interface structs it allocates as the consumer of the library's exports
+src/komira_arrow_ipc/tests/test_c_data_interface_release_nested.mojo	the Arrow C Data Interface structs, children arrays and metadata buffers it builds by hand as a stand-in foreign producer, and frees
+src/komira_arrow_ipc/tests/test_ipc_body_compression_edges.mojo	the codec trait's opaque decompression-context ABI, as a stand-in conformer forwarding LZ4's context to Lz4Frame
+src/komira_arrow_ipc/tests/test_ipc_unreached_helpers.mojo	the Arrow C Data Interface release callback (release_c_schema), on the two schemas it builds
 src/komira_buffer/mmap_region.mojo	mmap and the komira_open_ro C shim
 src/komira_compression/bzip2_buffer.mojo	libbz2's buffer-to-buffer calls
 src/komira_compression/codec_libraries.mojo	the process-lifetime handles of libzstd, libbz2 and liblzma

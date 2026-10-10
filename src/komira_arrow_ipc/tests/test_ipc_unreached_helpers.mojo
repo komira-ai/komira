@@ -15,6 +15,12 @@
 #     the four field-less type tables read back with no field;
 #   * c_data_stream's _build_column_schema, _parse_small_uint and
 #     _arrow_type_to_dtype.
+#
+# FFI-BOUNDARY: release_c_schema takes the C Data Interface struct pointer
+# with MutUntrackedOrigin, so the pointers to the two schemas built here are
+# cast to it (tests/pointer_lint_ffi.tsv lists this file). Ownership: the
+# test owns both CArrowSchema values (stack locals); the release frees what
+# they point to and NULLs it, never the structs.
 # =============================================================================
 
 from std.memory import Pointer

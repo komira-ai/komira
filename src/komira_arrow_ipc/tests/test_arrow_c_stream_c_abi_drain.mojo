@@ -13,6 +13,14 @@
 # root schema the import refuses, get_next failing, a chunk the import
 # refuses), observed as the stream being in the released state afterwards.
 # Each failure names the step and carries the producer's error text.
+#
+# FFI-BOUNDARY: this file stands in for a foreign producer of the Arrow C
+# Stream Interface: its abi("C") callbacks and the CArrowArrayStream pointers
+# they are handed are spelled with MutUntrackedOrigin, as the C ABI and
+# drain_c_abi_record_batch_stream spell them (tests/pointer_lint_ffi.tsv
+# lists this file). Ownership: each test allocates its stream struct in
+# `_export` and frees it with `sp.free()`; the drain borrows it and calls
+# `_release_cb`, which releases what the stream holds, never the struct.
 # =============================================================================
 
 from std.memory import alloc
