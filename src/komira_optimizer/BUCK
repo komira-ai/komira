@@ -66,6 +66,7 @@ mojo_library(
         "tests/test_optimizer_partition_topn_arms.mojo",
         "tests/test_optimizer_partition_topn_rank.mojo",
         "tests/test_optimizer_payload_narrow.mojo",
+        "tests/test_optimizer_payload_narrow_parity.mojo",
         "tests/test_optimizer_payload_narrow_shapes.mojo",
         "tests/test_optimizer_projection_merge_identity.mojo",
         "tests/test_optimizer_projection_pushdown.mojo",
