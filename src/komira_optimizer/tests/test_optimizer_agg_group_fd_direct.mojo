@@ -583,7 +583,8 @@ def test_determinism_guard() raises:
 
 
 def _inner_keys(imm plan: LogicalPlan) raises -> Int:
-    """Key count of a q35 subtree found one wrapper below `plan`."""
+    """Key count of the q35 subtree rooted at `plan`, or -1 if `plan` is not
+    a Project."""
     if plan.tag == PLAN_PROJECT:
         return _keys(plan)
     return -1

@@ -93,6 +93,15 @@ trait StageSteps:
         know."""
         ...
 
+    def main_tip_past(mut self, revision: String) raises -> String:
+        """THE ADMISSION CHECK's read (dispatch.mojo's header, 4c): fetch
+        main, then main's tip when main holds a commit after `revision`
+        that a push would release (one touching anything but `docs/**` and
+        `*.md`, first-parent, as the prod line counts), else "" (`revision`
+        is main's releasable tip). Raises when git cannot tell: a shallow
+        clone, a fetch that fails, a revision git does not know."""
+        ...
+
     def release_set_hash(mut self, artifacts_file: String, platform_dir: String) raises -> String:
         """The set hash the release directory `platform_dir` recomputes to
         under `artifacts_file` (file header, 4b). Raises when the directory
