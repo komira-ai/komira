@@ -8,17 +8,40 @@
 # LIFECYCLE (`run_job_supervisor`):
 #   0. with --binary-key: fetch the binary from the binary store (boot.mojo).
 #   1. an initial RUNNING heartbeat.
-#   2. spawn the job (komira_supervisor's Supervisor + ChildSpec).
+#   2. spawn the job (komira_supervisor's Supervisor + ChildSpec), unless a
+#      stop signal arrived during 0 or 1: then the job is CANCELLED without
+#      being started, and the run goes to 4.
 #   3. loop, every --heartbeat-interval-secs:
 #        a. drain stdout/stderr without blocking (stderr into the forensics
 #           ring, stdout into the logs.txt capture and the live stream);
 #        b. poll the child for exit; if it exited, go to 4;
 #        c. a RUNNING heartbeat; if the reply asks to cancel, terminate the
 #           child (SIGTERM, a 5 s grace, SIGKILL) and go to 4.
-#   4. classify the exit (exit 0 -> COMPLETED; a cancel -> CANCELLED;
-#      anything else -> FAILED with a FailureReport), send the terminal
-#      heartbeat, and with a log store write logs.txt (and crash_report.json
-#      on FAILED).
+#      With --max-runtime-secs, every pass of the loop (once a second) also
+#      checks the time since the spawn, on the monotonic clock; past the
+#      limit the child is terminated the same way as on a cancel, and the
+#      job is FAILED with a message naming the limit.
+#      Every pass also takes the stop latch: a SIGTERM or SIGINT sent to the
+#      supervisor (a platform stopping the container whose PID 1 it is) is
+#      forwarded to the job's process group, with the same grace and
+#      SIGKILL, and the job is CANCELLED.
+#   4. classify the exit (exit 0 -> COMPLETED; a cancel or a stop signal ->
+#      CANCELLED; past the maximum runtime -> FAILED with the timeout
+#      message; anything else -> FAILED with a FailureReport), send the
+#      terminal heartbeat (retried within a budget: finalize_heartbeat), and
+#      with a log store write logs.txt (and crash_report.json on FAILED).
+#
+# PID 1 (`run_job_supervisor`, before anything else): the SIGTERM/SIGINT
+# handler is installed (komira_supervisor.pid1; without one the kernel drops
+# both for a namespace's init), and the supervisor makes itself the reaper of
+# orphans (PID 1 is already; otherwise a Linux child subreaper). The job is
+# spawned leading its own process group with every signal at its default
+# action, so every stop (a CANCEL reply, the maximum runtime, a stop signal)
+# reaches the job's descendants too, and the job does not inherit a signal the
+# supervisor ignores. Each pass of the loop collects exited orphans
+# (`Supervisor.reap_orphans`), so a descendant the job left behind does not
+# stay a zombie. The supervisor therefore assumes it owns every child of its
+# process.
 #
 # WHAT THE EMBEDDING BINARY SUPPLIES: the configuration (flags), a
 # `HeartbeatReporter` R (`HttpHeartbeatReporter[A]` ships, with
@@ -36,11 +59,18 @@
 
 from std.ffi import external_call
 
+from komira_clock import now_ns
 from komira_supervisor.supervisor import (
     Supervisor,
     ChildSpec,
     ExitInfo,
 )
+from komira_supervisor.pid1 import (
+    adopt_orphans,
+    install_stop_signal_handler,
+    take_stop_signal,
+)
+from komira_supervisor.proc_ffi import SIGINT, SIGTERM
 
 
 # =============================================================================
@@ -49,10 +79,30 @@ from komira_supervisor.supervisor import (
 # signature fails to legalize.
 # =============================================================================
 def _sleep_secs(secs: Int):
-    """Sleep `secs` whole seconds via usleep (microsecond granularity)."""
+    """Sleep `secs` whole seconds via usleep (microsecond granularity). A
+    caught stop signal ends the sleep early (the handler has no SA_RESTART)."""
     if secs <= 0:
         return
     _ = external_call["usleep", Int32](UInt32(secs * 1_000_000))
+
+
+def _sleep_ms(ms: Int):
+    """Sleep `ms` milliseconds via usleep."""
+    if ms <= 0:
+        return
+    _ = external_call["usleep", Int32](UInt32(ms * 1000))
+
+
+# The terminal beat's retry budget (finalize_heartbeat). A platform that stops
+# the container gives PID 1 a fixed window after its SIGTERM before SIGKILL,
+# and the job's own grace (5 s) comes out of that window first. Grace plus
+# budget is 20 s: on a platform whose window is shorter, the later retries are
+# cut off by the platform's SIGKILL (the first send comes right after the
+# grace).
+comptime TERMINAL_BEAT_BUDGET_MS: Int = 15_000
+comptime TERMINAL_BEAT_FIRST_DELAY_MS: Int = 250
+comptime TERMINAL_BEAT_MAX_DELAY_MS: Int = 2_000
+comptime TERMINAL_BEAT_MAX_ATTEMPTS: Int = 8
 
 from komira_objectstore.store import ConditionalWriteStore
 
@@ -67,6 +117,7 @@ from komira_job_supervisor.heartbeat_client import (
     SupervisorHeartbeat,
     HeartbeatOutcome,
     HeartbeatReporter,
+    terminal_beat_retryable,
 )
 from komira_job_supervisor.upload import upload_crash_report, upload_logs
 from komira_job_supervisor.log_streamer import LogStreamSink
@@ -145,6 +196,9 @@ struct JobSupervisor[
     var spawned: Bool
     var child_exited: Bool
     var exit_info: ExitInfo
+    # The monotonic instant (komira_clock.now_ns) of the spawn; the maximum
+    # runtime counts from here.
+    var spawned_at_ns: UInt64
 
     # Non-blocking reads arrive in chunks that do not align on lines, so each
     # stream keeps a partial-line accumulator. The stdout byte budget bounds
@@ -182,6 +236,7 @@ struct JobSupervisor[
         self.spawned = False
         self.child_exited = False
         self.exit_info = ExitInfo(Int32(-1), Int32(-1), Int32(-1))
+        self.spawned_at_ns = UInt64(0)
         self.stdout_partial = String("")
         self.stderr_partial = String("")
         self.stdout_bytes = 0
@@ -221,8 +276,11 @@ struct JobSupervisor[
         self.spawn_child_spec(spec^)
 
     def spawn_child_spec(mut self, var spec: ChildSpec) raises:
-        """Spawn an explicit ChildSpec (a test can pass ChildSpec.shell).
-        Raises if the spawn fails."""
+        """Spawn an explicit ChildSpec (a test can pass ChildSpec.shell),
+        leading its own process group with every signal at its default action
+        (module header). Raises if the spawn fails."""
+        spec.set_own_process_group()
+        spec.set_default_signals()
         var pid = self.supervisor.spawn(spec)
         if pid <= Int32(0):
             raise Error(
@@ -233,6 +291,7 @@ struct JobSupervisor[
                 + String(")")
             )
         self.spawned = True
+        self.spawned_at_ns = now_ns()
         # Non-blocking capture pipes, so every loop iteration can drain what
         # is ready without parking the loop. Without this a chatty child fills
         # the ~64 KiB pipe buffer, blocks on write() and never exits.
@@ -281,9 +340,94 @@ struct JobSupervisor[
             return
         if self.child_exited:
             return
-        self.exit_info = self.supervisor.terminate(grace_ms)
+        self.exit_info = self.supervisor.terminate_with(SIGTERM, grace_ms, True)
         self.child_exited = True
         self.state.phase = JobSupervisorPhase.cancelled()
+
+    # ---- step: act on a stop signal sent to the supervisor ----
+
+    def act_on_stop_signal(mut self, grace_ms: Int) -> Bool:
+        """Take the stop latch (komira_supervisor.pid1). With a SIGTERM or
+        SIGINT caught: forward THAT signal to the job's process group, then
+        `grace_ms` and SIGKILL as on a cancel, and the job is CANCELLED with a
+        message naming the signal. Returns True iff a stop signal was taken.
+        A signal taken before the spawn (during the fetch or the first beat)
+        makes the job CANCELLED without starting it; the caller must not
+        spawn it then. A signal taken after the child already exited leaves
+        its result as it is (the job finished first) and still returns True,
+        so the loop ends."""
+        var sig = take_stop_signal()
+        if sig == Int32(0):
+            return False
+        var name = String("SIGTERM")
+        if sig == SIGINT:
+            name = String("SIGINT")
+        log.info["job supervisor: {} received; stopping job {}", "komira_job_supervisor"](
+            ArgStr(name), ArgStr(self.config.job_name)
+        )
+        if not self.spawned:
+            self.state.phase = JobSupervisorPhase.cancelled()
+            self.state.message = Optional[String](
+                String("the supervisor received ")
+                + name
+                + String("; the job was not started")
+            )
+            return True
+        if self.child_exited:
+            return True
+        self._incremental_drain()
+        self.exit_info = self.supervisor.terminate_with(sig, grace_ms, True)
+        self.child_exited = True
+        self._flush_stream_to_eof()
+        self.state.phase = JobSupervisorPhase.cancelled()
+        self.state.message = Optional[String](
+            String("the supervisor received ")
+            + name
+            + String("; the job was stopped")
+        )
+        return True
+
+    # ---- step: collect exited orphans ----
+
+    def reap_orphans(mut self) -> Int:
+        """Collect every exited child of this process except the job itself
+        (module header: PID 1). Returns how many."""
+        if not self.spawned:
+            return 0
+        return self.supervisor.reap_orphans()
+
+    # ---- step: enforce the maximum runtime ----
+
+    def enforce_max_runtime(mut self, now: UInt64, grace_ms: Int) -> Bool:
+        """Stop the job if it has run `max_runtime_secs` or longer at the
+        monotonic instant `now` (komira_clock.now_ns; a parameter so a test
+        can step past the limit without waiting). Past the limit: SIGTERM ->
+        `grace_ms` -> SIGKILL, as on a cancel, then FAILED with a message
+        naming the limit and the FailureReport of the stopped child. Returns
+        True iff it stopped the job. A no-op with no limit, before the spawn
+        and after the child exited."""
+        var limit = self.config.max_runtime_secs
+        if limit <= 0 or not self.spawned or self.child_exited:
+            return False
+        if now < self.spawned_at_ns:
+            return False
+        var ran_ns = now - self.spawned_at_ns
+        if ran_ns < UInt64(limit) * UInt64(1_000_000_000):
+            return False
+        # What is ready now is kept; no blocking drain after the stop, as on
+        # a cancel (a process the job left behind may hold the pipes open).
+        self._incremental_drain()
+        self.exit_info = self.supervisor.terminate_with(SIGTERM, grace_ms, True)
+        self.child_exited = True
+        self._flush_stream_to_eof()
+        self.state.timed_out = True
+        self.state.message = Optional[String](
+            String("max runtime of ")
+            + String(limit)
+            + String(" s exceeded; the job was stopped")
+        )
+        self._record_failure()
+        return True
 
     # ---- step: incremental drain + poll the child for exit ----
 
@@ -296,7 +440,11 @@ struct JobSupervisor[
         Order matters: drain FIRST (relieve any pipe pressure so a blocked
         write() can complete and the child can reach exit), THEN try_wait. On
         observed exit, do a FINAL drain to EOF to capture the tail the child
-        wrote between the last poll and exit. Sets child_exited + exit_info."""
+        wrote between the last poll and exit. Sets child_exited + exit_info.
+
+        Every call, the job's exit or not, also collects exited orphans
+        (`reap_orphans`)."""
+        _ = self.reap_orphans()
         if self.child_exited:
             return
         # 1. Relieve pipe pressure now (non-blocking — never parks the loop).
@@ -304,6 +452,9 @@ struct JobSupervisor[
         # 2. Poll for exit.
         var r = self.supervisor.try_wait()
         if r.collected:
+            # waitid names one exited child at a time and stops at the job's
+            # own; with the job collected, the zombies behind it are next.
+            _ = self.reap_orphans()
             self.child_exited = True
             self.exit_info = ExitInfo.from_reap(r)
             # 3. FINAL drain to EOF: the write ends are closed now, so capture
@@ -436,13 +587,19 @@ struct JobSupervisor[
         if self.state.phase == JobSupervisorPhase.cancelled():
             # act_on_cancel already finalized the phase.
             return
+        if self.state.timed_out:
+            # enforce_max_runtime already finalized the phase and report.
+            return
         if (
             self.exit_info.exit_code == Int32(0)
             and self.exit_info.signal == Int32(-1)
         ):
             self.state.phase = JobSupervisorPhase.completed()
             return
-        # Failed — build the forensic report.
+        self._record_failure()
+
+    def _record_failure(mut self):
+        """Phase FAILED, with the forensic report of the reaped child."""
         self.state.phase = JobSupervisorPhase.failed()
         var exit_code = Optional[Int32]()
         if self.exit_info.exit_code >= Int32(0):
@@ -459,10 +616,49 @@ struct JobSupervisor[
         )
 
     def finalize_heartbeat(mut self) -> HeartbeatOutcome:
-        """Report the TERMINAL heartbeat (COMPLETED / FAILED / CANCELLED).
-        Best-effort."""
+        """Report the TERMINAL heartbeat (COMPLETED / FAILED / CANCELLED),
+        retried within the default budget (`finalize_heartbeat_within`)."""
+        return self.finalize_heartbeat_within(
+            TERMINAL_BEAT_BUDGET_MS,
+            TERMINAL_BEAT_FIRST_DELAY_MS,
+            TERMINAL_BEAT_MAX_ATTEMPTS,
+        )
+
+    def finalize_heartbeat_within(
+        mut self, budget_ms: Int, first_delay_ms: Int, max_attempts: Int
+    ) -> HeartbeatOutcome:
+        """Report the terminal heartbeat; while the outcome is a retryable
+        failure (`terminal_beat_retryable`: no reply, 408, 429, 5xx, or a
+        credential that could not be read), send it again after
+        `first_delay_ms`, doubling up to TERMINAL_BEAT_MAX_DELAY_MS, for at
+        most `max_attempts` sends and only while the next send would start
+        within `budget_ms` of the first. Returns the last outcome. A refusal
+        that repeating cannot change (a 4xx, a credential refused in the
+        clear) is returned after one send.
+
+        The terminal beat is the one that says how the job ended; a RUNNING
+        beat is not retried, because the next one follows within an
+        interval."""
         var hb = self._make_heartbeat(self.state.phase)
-        return self.reporter.report(hb)
+        var start = now_ns()
+        var delay = first_delay_ms
+        var attempt = 1
+        while True:
+            var outcome = self.reporter.report(hb)
+            if outcome.ok or not terminal_beat_retryable(outcome.status):
+                return outcome
+            if attempt >= max_attempts:
+                return outcome
+            var elapsed_ms = Int((now_ns() - start) // UInt64(1_000_000))
+            if elapsed_ms + delay > budget_ms:
+                return outcome
+            log.warn[
+                "job supervisor: terminal heartbeat failed (status {}); retry {}",
+                "komira_job_supervisor",
+            ](ArgStr(String(outcome.status)), ArgStr(String(attempt)))
+            _sleep_ms(delay)
+            delay = min(delay * 2, TERMINAL_BEAT_MAX_DELAY_MS)
+            attempt += 1
 
     def log_lines(self) -> List[String]:
         """The logs.txt content: the captured stdout lines, then the stderr
@@ -510,6 +706,14 @@ def run_job_supervisor[
     store, a failed fetch, a failed spawn); after that every failure is
     reported, not raised."""
     comptime GRACE_MS = 5000
+    # PID 1 (module header): before anything else, so a stop that arrives
+    # during the fetch or the first beat is latched, not fatal.
+    install_stop_signal_handler()
+    if not adopt_orphans():
+        log.warn[
+            "job supervisor: cannot become the reaper of orphans here; {}",
+            "komira_job_supervisor",
+        ](ArgStr(String("init collects them instead")))
     if config.uses_binary_store():
         if not binary_store:
             raise Error(
@@ -524,14 +728,21 @@ def run_job_supervisor[
     # 1. initial RUNNING heartbeat.
     _ = job_supervisor.do_heartbeat()
 
-    # 2. spawn the job.
-    job_supervisor.spawn_child()
+    # 2. spawn the job, unless a stop arrived during the fetch or the first
+    # beat: then it is CANCELLED without being started.
+    var stopped_before_spawn = job_supervisor.act_on_stop_signal(GRACE_MS)
+    if not stopped_before_spawn:
+        job_supervisor.spawn_child()
 
     # 3. poll-then-heartbeat loop.
     var hb_interval = job_supervisor.config.heartbeat_interval_secs
-    while True:
+    while not stopped_before_spawn:
         job_supervisor.poll_and_drain()
         if job_supervisor.child_exited:
+            break
+        if job_supervisor.act_on_stop_signal(GRACE_MS):
+            break
+        if job_supervisor.enforce_max_runtime(now_ns(), GRACE_MS):
             break
         var outcome = job_supervisor.do_heartbeat()
         if outcome.ok and outcome.cancel:
@@ -546,11 +757,16 @@ def run_job_supervisor[
             job_supervisor.poll_and_drain()
             if job_supervisor.child_exited:
                 break
+            if job_supervisor.act_on_stop_signal(GRACE_MS):
+                break
+            if job_supervisor.enforce_max_runtime(now_ns(), GRACE_MS):
+                break
             job_supervisor._tick_stream_timer()
         if job_supervisor.child_exited:
             break
 
     # 4. classify, report the terminal phase, write the record.
+    _ = job_supervisor.reap_orphans()
     job_supervisor.analyze_exit()
     _ = job_supervisor.finalize_heartbeat()
     job_supervisor.upload_terminal_artifacts()

@@ -100,13 +100,15 @@ struct ParseLimits(Copyable, ImplicitlyCopyable, Movable, Deinitable):
 #   414 URI Too Long     — request-target exceeds max_request_line_bytes
 #   417 Expectation Failed — Expect: <non-100-continue token>
 #   431 Request Header Fields Too Large — header count/bytes overflow
-#   505 HTTP Version Not Supported — version other than HTTP/1.0 or /1.1
+#   501 Not Implemented  — a method this parser does not recognize
+#                          (RFC 9110 §9.1), lowercase spellings included
+#   505 HTTP Version Not Supported — a major version other than HTTP/1
 
 comptime PARSE_ERR_NONE: UInt8 = 0
-# Request-line errors → 400 Bad Request (some specific 414/505 carve-outs).
+# Request-line errors → 400 Bad Request (some specific 414/501/505 carve-outs).
 comptime PARSE_ERR_REQUEST_LINE_MALFORMED: UInt8 = 1
-comptime PARSE_ERR_METHOD_UNKNOWN: UInt8 = 2
-comptime PARSE_ERR_METHOD_LOWERCASE: UInt8 = 3
+comptime PARSE_ERR_METHOD_UNKNOWN: UInt8 = 2       # → 501
+comptime PARSE_ERR_METHOD_LOWERCASE: UInt8 = 3     # → 501
 comptime PARSE_ERR_URI_WHITESPACE: UInt8 = 4
 comptime PARSE_ERR_URI_TOO_LONG: UInt8 = 5         # → 414
 comptime PARSE_ERR_HTTP_VERSION_BAD: UInt8 = 6
@@ -185,6 +187,12 @@ def _kind_to_status(kind: UInt8) -> UInt16:
     # 414 URI Too Long
     if kind == PARSE_ERR_URI_TOO_LONG:
         return UInt16(414)
+    # 501 Not Implemented: RFC 9110 §9.1, an unrecognized method. Methods
+    # are case-sensitive, so a lowercase spelling is an unrecognized method.
+    if kind == PARSE_ERR_METHOD_UNKNOWN:
+        return UInt16(501)
+    if kind == PARSE_ERR_METHOD_LOWERCASE:
+        return UInt16(501)
     # 505 HTTP Version Not Supported
     if kind == PARSE_ERR_HTTP_VERSION_UNSUPPORTED:
         return UInt16(505)

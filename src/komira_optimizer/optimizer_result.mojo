@@ -2,67 +2,50 @@
 # optimizer_result -- the NON-RAISING return channel for the optimizer boundary
 # =============================================================================
 #
-# THE RULE THIS REALISES. The optimizer-engine contract, "THE THREE ABI
-# RESTRICTIONS":
+# THE RULE THIS REALISES. The optimizer-executor contract (a design
+# document, not in this tree), "THE THREE ABI RESTRICTIONS":
 #
 #     "No `raises`. `abi("C")` rejects it outright ... Result struct + status
 #      code."
 #
-# RE-DERIVED, NOT QUOTED (Mojo 1.0.0, osx-arm64). The doc's own
-# culture is to re-measure, so this restriction was re-measured before the file
-# was written. `@export def f(...) abi("C") raises -> T` does not compile:
+# On Mojo 1.0.0, `@export def f(...) abi("C") raises -> T` does not compile:
 #
 #     error: 'abi("C")' function may not be marked 'raises';
 #            remove 'raises' or use 'abi("Mojo")'
 #
-# — a PARSE refusal, not a runtime hazard, on this compiler. (The doc also
-# records a measured "segfaults on mac, SILENTLY WRONG on linux"; that is a
-# statement about an older compiler and/or `abi("Mojo")`, and it is not what
-# 1.0.0 does with `abi("C")`. Both are worth knowing: the parse refusal is what
-# you will actually hit, and the silent-wrongness is why nobody should reach for
-# `abi("Mojo")` to route around it.)
+# — a PARSE refusal on this compiler. So a C-ABI optimizer entry point returns
+# a result struct and a status code instead of raising.
 #
 # =============================================================================
 # WHAT THIS IS, AND WHY IT IS NOT A SECOND API
 # =============================================================================
 #
-# `OptimizeResult` is the ONE value the optimizer's LOGICAL-STAGE functions
-# return. Two of them exist, and they are the two the contract doc names:
+# `OptimizeResult` is the value a NON-RAISING optimizer entry point returns: a
+# `LogicalPlan`, or a status code and the raiser's message. komira_optimizer
+# has no driver that orders its passes, and no function in this tree returns
+# an `OptimizeResult`; this module is the contract such an entry point is
+# designed to use (the type, its status codes and `_classify`).
 #
-#     optimizer.optimize_pipeline_core_status(...)   -- the PURE core
-#     EngineContext.optimize_full_status(...)        -- the DRIVER entry point
+# The design: each non-raising entry point is a `try` / `except` around the
+# raising function it wraps, with NO `raises` of its own. The raising function
+# stays, for in-process callers; `unwrap_or_raise` adapts back to it.
 #
-# ⛔ NEITHER IS THE `@extern` BOUNDARY. Both return an `Optional[LogicalPlan]`, and contract clause #1 is
-# that the optimizer's OUTPUT is a PHYSICAL plan -- so a boundary handing back a
-# logical one is the wrong output, not merely an under-specified one. The
-# boundary value is `PhysicalPlanResult` (`optimizer_physical_result.mojo`) and
-# its function is `optimizer_boundary.optimize_to_physical_plan`, which is
-# `_optimize_pipeline_core` COMPOSED WITH `cut_and_admit`.
-#
-# ⚠ THAT IS A COMPOSITION, NOT A SECOND API. `optimize_to_physical_plan` calls
-# `_optimize_pipeline_core` -- the same one function these two wrap -- so there
-# is still exactly one pass pipeline and no second copy of anything that could
-# drift. What these two now are is the LOGICAL STAGE of it, which is a real
-# intermediate an in-process caller legitimately wants (the whole `komira_sdk`
-# execution path consumes an optimized `LogicalPlan`, never a `CutResult`).
-# `_classify` is SHARED by both result types, so the two cannot disagree about
+# ⛔ THE `@extern` BOUNDARY IS DESIGNED TO RETURN A PHYSICAL PLAN, not a
+# `LogicalPlan`: contract clause #1 is that the optimizer's OUTPUT is a
+# PHYSICAL plan. That boundary's result type is not in this tree; it is
+# designed to share `_classify`, so the two result types cannot disagree about
 # what a scan-binding refusal is.
-#
-# Each is `def ... -> OptimizeResult` with NO `raises`, and each is a
-# `try` / `except` around the raising function it wraps. The raising functions
-# STAY: they are what ~30 in-tree call sites use, they are convenient, and
-# converting them would be a 281-raise-statement sweep this file explicitly
-# is not.
 #
 # ⛔ THIS IS NOT AN ADDITIVE `_v2` API, and the distinction is load-bearing.
 # A `_v2` is a second implementation that can drift from the first. These
-# wrappers have NO BODY OF THEIR OWN — each one's entire content is a
-# `try: return ok(<the existing call>) except e: return err(...)`. There is one
-# pipeline, and a divergence between the two spellings is not expressible.
+# wrappers are designed to have NO BODY OF THEIR OWN — each one's entire
+# content is a `try: return ok(<the existing call>) except e: return err(...)`.
+# There is one implementation, and a divergence between the two spellings is
+# not expressible.
 #
-# ★ THE PRECEDENT, COPIED NOT INVENTED: `komira_pyffi/komira_c_api.mojo`. It
-# exports 13 `abi("C")` symbols, zero of them `raises`, every one of them a
-# `try` / `except e:` that lowers the engine's own `Error` text out of band and
+# ★ THE PRECEDENT, COPIED NOT INVENTED: a C-API module
+# (`komira_pyffi/komira_c_api.mojo`, not in this tree) whose `abi("C")` exports
+# are each a `try` / `except e:` that lowers the `Error` text out of band and
 # returns a NEGATIVE `Int32`. Three of its rules are carried here verbatim:
 #
 #   1. 0 is OK; every failure is NEGATIVE and DISTINGUISHABLE.
@@ -70,7 +53,7 @@
 #      "NEVER partially fills `out`, and NEVER returns an empty result to mean
 #      error"; here that is `_plan` being `None` on every non-OK status, and
 #      `take_plan()` returning `None` rather than aborting.
-#   3. The engine's own message survives verbatim. A status code that discards
+#   3. The raiser's own message survives verbatim. A status code that discards
 #      the text turns a diagnosable refusal into a number.
 #
 # =============================================================================
@@ -94,8 +77,8 @@
 #                    CALLER'S, and the whole reason it is not folded into
 #                    PASS_REFUSED: across an `@extern` seam these two doors are
 #                    what stand between a layout skew / a smuggled LogicalPlan
-#                    and tcmalloc corruption with no diagnostic. A consumer that
-#                    reads this code knows the OPTIMIZER `.so` and this binary
+#                    and memory corruption with no diagnostic. A consumer that
+#                    reads this code knows the optimizer's build and its own
 #                    disagree about the physical-plan contract, which is fixed by
 #                    rebuilding both -- never by editing the query.
 #   PASS_REFUSED     a pass refused. The catch-all.
@@ -104,8 +87,7 @@
 # `SCAN_BINDING_EPOCH_MISMATCH` / `SCAN_BINDING_HANDLE_NOT_BOUND` are imported
 # from the module that RAISES them (`komira_scan_source.scan_resolver`), so a
 # rename moves both sides at once. Re-spelling either literal in this file would
-# create the second source of truth that `lint_boundary_struct_single_
-# declaration.py` exists to prevent, one layer down.
+# create a second source of truth for the same token.
 #
 # ⚠ AND CLASSIFICATION CANNOT MANUFACTURE AN OK. `_classify` is only ever
 # reached from an `except` arm, and its most general answer is a FAILURE code,
@@ -140,17 +122,19 @@ comptime OPTIMIZE_OK: Int32 = 0
 comptime OPTIMIZE_ERR_SCAN_BINDING: Int32 = -1
 """The submitted plan carries a scan handle this optimizer cannot resolve.
 
-Raised by the UNCONDITIONAL entry-time epoch gate (`check_scan_bindings_at_
-entry`), which is a MEMORY-SAFETY check, not a diagnostic: a handle minted by a
-dead or foreign `ScanRegistry` is what turns into a tcmalloc crash several
-frames later if it is laundered instead of refused. Caller-actionable."""
+Classified from the `SCAN_BINDING_EPOCH_MISMATCH` /
+`SCAN_BINDING_HANDLE_NOT_BOUND` tokens of `komira_scan_source.scan_resolver`.
+The check behind them is a MEMORY-SAFETY check, not a diagnostic: a handle
+minted by a dead or foreign `ScanRegistry` must be refused rather than
+laundered. Caller-actionable."""
 
 comptime OPTIMIZE_ERR_UNRESOLVED_DEPS: Int32 = -2
 """The plan's scalar dependencies did not reach a fixpoint.
 
-`_optimize_pure_with_deps` runs the pure pipeline, resolves the requests it
-emitted, and re-plans with them bound. Exceeding the round cap means a pass is
-emitting a request nobody consumes, or the query nests deeper than the cap.
+The protocol in `optimizer_scalar_deps.mojo` runs the passes, resolves the
+requests they emitted, and re-plans with them bound, under a round cap
+(komira_optimizer has no driver that runs it). Exceeding the cap means a pass
+is emitting a request nobody consumes, or the query nests deeper than the cap.
 Returning a plan anyway would ship an unfolded subquery site that fails much
 later, at eval, far from this cause."""
 
@@ -158,7 +142,7 @@ comptime OPTIMIZE_ERR_PHYSICAL_PLAN_REFUSED: Int32 = -4
 """A door on the EMITTED PHYSICAL PLAN refused. The producer's bug, not the
 caller's.
 
-Two doors raise into this class, both at `segment_cutter.cut_and_admit`:
+Two doors raise into this class, both from `komira_plan_ir`:
 `assert_physical_plan_ir_version_compatible` (the two sides of an
 `@extern` seam disagree about `SegmentDescPod`'s layout) and
 `assert_physical_plan_carries_no_logical_plan` (the purity gate -- the
@@ -181,12 +165,13 @@ Its message is the pass's own `Error` text, unmodified."""
 comptime OPTIMIZE_REFUSAL_UNRESOLVED_DEPS: StaticString = (
     "OPTIMIZER_UNRESOLVED_SCALAR_DEPS"
 )
-"""The named token `_optimize_pure_with_deps` puts in its round-cap refusal.
+"""The named token for the round-cap refusal of the dependency protocol.
 
-⚠ THE RAISE SITE MUST IMPORT THIS, NOT RE-SPELL IT. It is the only reason
+⚠ THE RAISE SITE (the round-capped loop, not in this tree) MUST IMPORT THIS,
+NOT RE-SPELL IT. It is the only reason
 `_classify` can tell that refusal apart from any other pass refusal, and a
 second spelling makes the two silently stop matching. Same idiom, and the same
-reason, as `SCAN_BINDING_EPOCH_MISMATCH` and the 13 `PLAN_WIRE_*` tokens."""
+reason, as `SCAN_BINDING_EPOCH_MISMATCH` and the `PLAN_WIRE_*` tokens."""
 
 
 def _classify(message: String) -> Int32:
@@ -205,9 +190,9 @@ def _classify(message: String) -> Int32:
         return OPTIMIZE_ERR_UNRESOLVED_DEPS
     # ⚠ THE FIVE PHYSICAL-PLAN DOOR TOKENS ARE ALL IMPORTED, NOT SPELLED HERE.
     # Two come from `physical_plan.mojo` (the IR version door) and three from
-    # `physical_plan_purity_gate.mojo`. Both doors run inside
-    # `cut_and_admit`, i.e. INSIDE the boundary function's `try`, so without
-    # these arms a layout skew across an `@extern` seam would reach the caller
+    # `physical_plan_purity_gate.mojo`. Both doors are designed to run INSIDE
+    # the boundary function's `try`, so without these arms a layout skew
+    # across an `@extern` seam would reach the caller
     # as PASS_REFUSED -- indistinguishable from "your query has an unsupported
     # shape", which is the one reading that sends the caller to fix the wrong
     # thing.
@@ -283,8 +268,8 @@ struct OptimizeResult(Movable):
         """Failure, with the class DERIVED from the raiser's text.
 
         The shape every `except e:` arm wants: `return OptimizeResult
-        .from_error(String(e))`. Classification lives in one place so the two
-        boundary functions cannot disagree about what a scan-binding refusal is.
+        .from_error(String(e))`. Classification lives in one place so no two
+        entry points can disagree about what a scan-binding refusal is.
         """
         var status = _classify(message)
         return OptimizeResult.err(status, message^)
@@ -314,7 +299,7 @@ struct OptimizeResult(Movable):
         """Move the plan out. Returns `None` on failure OR on a second call.
 
         ⛔ THE GUARD IS NOT DEFENSIVE PROGRAMMING. `Optional.take()` ABORTS THE
-        PROCESS on an empty `Optional` -- measured, not assumed:
+        PROCESS on an empty `Optional`:
 
             ABORT: .../std/collections/optional.mojo:664:18: `Optional.take()`
                    called on empty `Optional`.
@@ -331,10 +316,10 @@ struct OptimizeResult(Movable):
     def unwrap_or_raise(mut self) raises -> LogicalPlan:
         """Adapter back to the raising world, for in-process callers.
 
-        This is what lets the raising `optimize_full` / `_optimize_pipeline_core`
-        keep their ~30 call sites unchanged while the non-raising twin is the
-        one the boundary exports. It raises the ORIGINAL message so a caller that
-        never learns about status codes sees exactly the error it saw before.
+        This lets an in-process caller keep calling a raising function while a
+        non-raising twin is the one a boundary exports. It raises the ORIGINAL
+        message so a caller that never learns about status codes sees exactly
+        the error the raising function raised.
         """
         var maybe = self.take_plan()
         if maybe:

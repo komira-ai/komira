@@ -6,20 +6,20 @@
 # `getenv` declaration and the only env read the libraries keep (platform
 # handshake values and test-runner variables).
 #
-# Tests use libc `setenv(3)` / `unsetenv(3)` directly (via
-# `external_call`). These are NOT routed through the komira_libc.posix
-# surface because setenv is only called from test setup like this file. If
-# setenv ever conflicts, the same consolidation pattern can extend posix.mojo.
+# Tests set variables with libc `setenv(3)` directly (via `external_call`):
+# setenv is only called from test setup like this file. Removal goes through
+# komira_libc.posix's `_unset_env`, the one `unsetenv` declaration, so this
+# binary never links a second one.
 # =============================================================================
 
 from std.ffi import external_call
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_libc.posix import _read_env, _read_env_into
+from komira_libc.posix import _read_env, _read_env_into, _unset_env
 
 
 # -----------------------------------------------------------------------------
-# Test helpers — libc setenv/unsetenv wrappers (NOT consolidated; tests only).
+# Test helpers — libc setenv (tests only) and the library's unset.
 # -----------------------------------------------------------------------------
 
 
@@ -33,12 +33,9 @@ def _setenv(name: String, value: String):
     var _rc = external_call["setenv", Int32](name_ptr, value_ptr, Int32(1))
 
 
-def _unsetenv(name: String):
-    """Unset env var `name` via libc `unsetenv(3)`."""
-    var name_str = name
-    # SAFETY: `name_str` outlives the unsetenv(3) call, which keeps no pointer.
-    var name_ptr = name_str.as_c_string_slice().unsafe_ptr()
-    var _rc = external_call["unsetenv", Int32](name_ptr)
+def _unsetenv(name: String) raises:
+    """Unset env var `name` through komira_libc's `_unset_env`."""
+    _unset_env(name)
 
 
 # -----------------------------------------------------------------------------
