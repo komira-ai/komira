@@ -111,12 +111,21 @@ def test_pass_refusal_names_no_token_and_the_others_do() raises:
 
 def test_token_class_is_exact() raises:
     """Catches an exact lookup that matches a substring, a prefix or a
-    different case."""
+    different case, and one that compares only part of each row: every row
+    with its last byte dropped, its first byte dropped, or a byte appended
+    gets no class."""
     assert_false(Bool(token_class("x SCAN_BINDING_EPOCH_MISMATCH")))
     assert_false(Bool(token_class("SCAN_BINDING_EPOCH")))
     assert_false(Bool(token_class("scan_binding_epoch_mismatch")))
     assert_false(Bool(token_class("")))
     assert_equal(_name(token_class(String("OPTIMIZER_UNRESOLVED_SCALAR_DEPS"))), String("UNRESOLVED_DEPS"))
+    var t = plan_refusal_tokens()
+    for i in range(len(t)):
+        var tok = String(t[i].token)
+        var n = tok.byte_length()
+        assert_equal(_name(token_class(tok[byte = 0 : n - 1])), String("NONE"), "prefix of " + tok)
+        assert_equal(_name(token_class(tok[byte = 1:n])), String("NONE"), "suffix of " + tok)
+        assert_equal(_name(token_class(tok + String(" "))), String("NONE"), "longer than " + tok)
 
 
 def test_message_class_finds_a_token_anywhere() raises:
@@ -159,6 +168,28 @@ def test_message_class_of_unnamed_text_is_none() raises:
     assert_false(Bool(message_class("pass x refused")))
     assert_false(Bool(message_class("")))
     assert_false(Bool(message_class("scan_binding_epoch_mismatch")))
+
+
+def test_message_class_of_a_part_of_a_token_is_none() raises:
+    """Catches a search by token family: one that matches a prefix of a token
+    of any length (a fixed 20-byte prefix gives `PHYSICAL_PLAN_IR_VERSION_OK`
+    a class) or a suffix. Every row with its last byte dropped, and with its
+    first byte dropped, gets no class, alone or inside a longer message. No
+    token contains another, so a part of one holds no whole token."""
+    var t = plan_refusal_tokens()
+    for i in range(len(t)):
+        var tok = String(t[i].token)
+        var n = tok.byte_length()
+        var parts = List[String]()
+        parts.append(String(tok[byte = 0 : n - 1]))
+        parts.append(String(tok[byte = 1:n]))
+        for k in range(len(parts)):
+            assert_equal(_name(message_class(parts[k])), String("NONE"), "alone: " + parts[k])
+            assert_equal(
+                _name(message_class(String("refused: ") + parts[k] + String(" (node 2)"))),
+                String("NONE"),
+                "inside a message: " + parts[k],
+            )
 
 
 def test_message_class_of_two_tokens_is_the_earlier_row() raises:
