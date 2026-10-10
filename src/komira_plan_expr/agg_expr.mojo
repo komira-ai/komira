@@ -13,6 +13,7 @@
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_expr.expr import Expr, UN_IS_NULL
 from komira_plan_expr.col_expr import ColExpr
+from komira_plan_expr.render_text import write_quoted
 
 
 # =============================================================================
@@ -804,7 +805,9 @@ struct AggExpr(Movable, Writable):
             writer.write("*")
         writer.write(")")
         if self.alias_name:
-            writer.write(".alias(\"", self.alias_name.value(), "\")")
+            writer.write(".alias(")
+            write_quoted(writer, self.alias_name.value())
+            writer.write(")")
 
 
 # =============================================================================

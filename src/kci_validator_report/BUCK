@@ -20,6 +20,10 @@ mojo_library(
     name = "kci_validator_report",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = ["//src/kci_validator_rows:kci_validator_rows"],
-    test_srcs = ["tests/test_validator_report.mojo"],
+    test_srcs = [
+        "tests/test_validator_report.mojo",
+        "tests/test_validator_report_document.mojo",
+        "tests/test_validator_report_outcome.mojo",
+    ],
     visibility = ["PUBLIC"],
 )

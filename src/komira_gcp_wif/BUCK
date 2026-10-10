@@ -12,6 +12,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                 CachingTokenSource it is a GcpTokenSource.
 #   sign_jwt    - WifTokenMinter: signJwt with the bearer from any
 #                 GcpTokenSource. Never dialed when the source raises.
+#   external_account - an `external_account` credentials file (given as its
+#                 text): the subject token from the file or URL it names,
+#                 exchanged at its token_url, then impersonated through IAM
+#                 Credentials generateAccessToken when it names a service
+#                 account; an AccessTokenFetcher like sts's.
 #
 # Both legs send through komira_http_client over the komira_http_core
 # Connector the caller binds, and report a non-2xx answer through
@@ -28,7 +33,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # socket, AWS's documentation key pair): the exact header sets and bodies on
 # the wire, the twice-encoded subject token, the token cache, signJwt never
 # dialed after a refused or tokenless leg 1, and failure messages holding no
-# token and no body byte. test_env_source_only scans the package's own
+# token and no body byte. test_external_account runs the external_account
+# flow over ScriptedConnector: a file-sourced and a URL-sourced subject, each
+# with and without impersonation, the whole STS and generateAccessToken bodies
+# against hand-written text, the file's own token_url and impersonation URL
+# on the wire (IP-literal hosts and a non-default path, so no DNS), and each
+# refused file naming its field.
+# test_env_source_only scans the package's own
 # sources, staged as its data, for any environment read.
 mojo_library(
     name = "komira_gcp_wif",
@@ -38,6 +49,7 @@ mojo_library(
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_datetime:komira_datetime",
         "//src/komira_gcp_core:komira_gcp_core",
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
@@ -47,6 +59,7 @@ mojo_library(
     test_srcs = [
         "tests/test_aws_subject.mojo",
         "tests/test_wif_mint.mojo",
+        "tests/test_external_account.mojo",
         "tests/test_env_source_only.mojo",
     ],
     test_data = {

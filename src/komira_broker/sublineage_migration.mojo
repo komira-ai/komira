@@ -533,12 +533,12 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
                 if r.last_offset != r.base_offset + rc - Int64(1):
                     _ = base^
                     _ = legacy^
-                    raise Error(
-                        "SubLineageMigration.migrate_partition: `_base` last_offset "
-                        + String(r.last_offset)
-                        + " != base+count-1 "
-                        + String(r.base_offset + rc - Int64(1))
-                        + " (manifest non-contiguity)"
+                    raise Error(  # cov: unreachable CasManifestStore.append returns last_offset = base_offset + record_count - 1
+                        "SubLineageMigration.migrate_partition: `_base` last_offset "  # cov: unreachable see the line above
+                        + String(r.last_offset)  # cov: unreachable see the line above
+                        + " != base+count-1 "  # cov: unreachable see the line above
+                        + String(r.base_offset + rc - Int64(1))  # cov: unreachable see the line above
+                        + " (manifest non-contiguity)"  # cov: unreachable see the line above
                     )
                 expected_dense += rc
                 records_migrated += rc

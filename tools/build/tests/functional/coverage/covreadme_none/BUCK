@@ -1,0 +1,14 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Tests 43 and 46 (tools/build/tests/coverage_runs.md): coverage builds and
+# the gate (census) whatever the switch says, as a fixture of the tests cell
+# may pass them; see README.md.
+mojo_library(
+    name = "covreadme_none",
+    srcs = glob(["*.mojo"]),
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_gate = "komira//tools/build/coverage:cov_gate",
+    coverage_mode = "census",
+    visibility = ["//functional/coverage:"],
+)
