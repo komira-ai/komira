@@ -78,28 +78,13 @@ from .optimizer_project_merge_guard import (
 
 
 def _strip_right_suffix_nr(name: String) -> String:
-    """Strip a trailing `_right` from `name` (byte loop; the same result as
-    `komira_column_kernels.compiler_helpers.strip_right_suffix`)."""
+    """Strip a trailing `_right` from `name`. The kept prefix is copied as a
+    byte slice, so multi-byte UTF-8 characters in it are unchanged; a name
+    of 6 bytes or fewer is returned as is."""
     var n = name.byte_length()
-    if n <= 6:
+    if n <= 6 or not name.endswith("_right"):
         return name
-    var ptr = name.unsafe_ptr()
-    # SAFETY: `n > 6` was checked above, so `ptr[n - 6]` .. `ptr[n - 1]` and
-    # `ptr[0]` .. `ptr[n - 7]` are in-bounds byte reads of `name`'s storage,
-    # which outlives `ptr` (no use after this function returns).
-    if not (
-        ptr[n - 6] == UInt8(ord("_"))
-        and ptr[n - 5] == UInt8(ord("r"))
-        and ptr[n - 4] == UInt8(ord("i"))
-        and ptr[n - 3] == UInt8(ord("g"))
-        and ptr[n - 2] == UInt8(ord("h"))
-        and ptr[n - 1] == UInt8(ord("t"))
-    ):
-        return name
-    var result = String("")
-    for i in range(n - 6):
-        result += chr(Int(ptr[i]))
-    return result^
+    return String(name[byte=0 : n - 6])
 
 
 def _collect_join_residual_side_columns(
