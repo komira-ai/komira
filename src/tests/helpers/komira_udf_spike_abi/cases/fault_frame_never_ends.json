@@ -1,0 +1,12 @@
+{
+ "name": "fault_frame_never_ends",
+ "defect": "a frame whose frame_next never reports the end is accepted once the host stops pulling",
+ "run": "frame",
+ "entry": "endless",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}],
+ "expect": {"status": "OK", "run_error": "UDF_RUNTIME_FAULT", "fault": "frame_next did not end after 1001 outputs"}
+}

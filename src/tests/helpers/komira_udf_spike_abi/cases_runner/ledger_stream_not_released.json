@@ -1,0 +1,13 @@
+{
+ "name": "ledger_stream_not_released",
+ "defect": "an ownership bug in the fixture: the runner's release ledger must fail this case",
+ "run": "frame",
+ "entry": "stream_kept",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}],
+ "expect": {"status": "OK", "batches": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}]},
+ "runner_fails_with": "input stream was not released"
+}

@@ -1,0 +1,12 @@
+{
+ "name": "fault_table_out_on_error",
+ "defect": "a table left in `out` by a failing frame_next is ignored (leaked) or read",
+ "run": "frame",
+ "entry": "table_out_on_error",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]}],
+ "expect": {"status": "ERR_RAISED", "run_error": "UDF_RUNTIME_FAULT", "message": "nonempty"}
+}

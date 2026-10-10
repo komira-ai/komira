@@ -1,0 +1,11 @@
+{
+ "name": "column_long_by_one",
+ "defect": "a column-form output one row long is accepted (the length post-condition checks only for too few rows)",
+ "run": "call_batch",
+ "entry": "long_by_one",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 3, "columns": [{"type": "int64", "values": [1, 2, 3]}]},
+ "expect": {"status": "OK", "run_error": "UDF_BATCH_LENGTH_MISMATCH"}
+}

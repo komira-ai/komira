@@ -1,0 +1,11 @@
+{
+ "name": "validate_non_canonical_descriptor",
+ "defect": "validate accepts descriptor bytes that are not canonical",
+ "run": "validate",
+ "entry": "double",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "descriptor": [1],
+ "expect": {"status": "ERR_DESCRIPTOR", "run_error": "OPTIMIZED_UDF_DESCRIPTOR_INVALID"}
+}

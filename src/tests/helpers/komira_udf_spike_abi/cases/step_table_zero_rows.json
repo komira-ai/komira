@@ -1,0 +1,13 @@
+{
+ "name": "step_table_zero_rows",
+ "defect": "a table output of zero rows is refused (a step may emit nothing)",
+ "run": "frame",
+ "entry": "empty_table",
+ "shape": "STEP",
+ "stability": "VOLATILE",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [],
+ "result_is_table": true,
+ "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [0]}]}],
+ "expect": {"status": "OK", "batches": [{"length": 0, "columns": []}]}
+}

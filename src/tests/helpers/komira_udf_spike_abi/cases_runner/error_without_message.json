@@ -1,0 +1,12 @@
+{
+ "name": "error_without_message",
+ "defect": "a deliberate mismatch: the runner must fail this case",
+ "run": "call_batch",
+ "entry": "raise_no_message",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 1, "columns": [{"type": "int64", "values": [1]}]},
+ "expect": {"status": "ERR_RAISED"},
+ "runner_fails_with": "without a message"
+}

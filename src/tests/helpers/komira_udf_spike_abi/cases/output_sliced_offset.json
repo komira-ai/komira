@@ -1,0 +1,11 @@
+{
+ "name": "output_sliced_offset",
+ "defect": "the host ignores an output's offset (11: not a multiple of 8), in the values or the validity bitmap (design 3.4 rule 4: Arrow arrays may have a non-zero offset)",
+ "run": "call_batch",
+ "entry": "leaf_sliced",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 6, "columns": [{"type": "int64", "values": [5, null, 7, 8, null, 10]}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [5, null, 7, 8, null, 10]}}
+}

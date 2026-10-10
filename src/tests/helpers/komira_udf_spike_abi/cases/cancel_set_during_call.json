@@ -1,0 +1,12 @@
+{
+ "name": "cancel_set_during_call",
+ "defect": "the cancel flag is read only before the call, or not at all (the host sets it inside the call, at the runtime's first read of the host's clock, after row 0)",
+ "run": "call_batch",
+ "entry": "slow_loop",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "options": {"cancel_during_call": true},
+ "input": {"length": 5, "columns": [{"type": "int64", "values": [0], "repeat": 5}]},
+ "expect": {"status": "ERR_CANCELLED", "run_error": "UDF_CANCELLED", "row": 1}
+}

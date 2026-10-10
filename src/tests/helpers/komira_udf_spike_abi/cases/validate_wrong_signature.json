@@ -1,0 +1,10 @@
+{
+ "name": "validate_wrong_signature",
+ "defect": "validate accepts declared types the function cannot take",
+ "run": "validate",
+ "entry": "double",
+ "shape": "SCALAR",
+ "args": [{"type": "float64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "expect": {"status": "ERR_UNSUPPORTED", "run_error": "OPTIMIZED_UDF_KIND_UNSUPPORTED"}
+}

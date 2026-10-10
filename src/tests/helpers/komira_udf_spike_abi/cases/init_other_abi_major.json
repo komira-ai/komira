@@ -1,0 +1,6 @@
+{
+ "name": "init_other_abi_major",
+ "defect": "init accepts a host of another ABI major",
+ "run": "init_abi",
+ "expect": {"status": "ERR_ABI"}
+}

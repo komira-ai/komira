@@ -1,0 +1,13 @@
+{
+ "name": "step_table_without_columns",
+ "defect": "a step's table with no columns is taken for an error, or its row count is lost",
+ "run": "frame",
+ "entry": "empty_table",
+ "shape": "STEP",
+ "stability": "VOLATILE",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [],
+ "result_is_table": true,
+ "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [3]}]}],
+ "expect": {"status": "OK", "batches": [{"length": 3, "columns": []}]}
+}

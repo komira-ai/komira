@@ -1,0 +1,12 @@
+{
+ "name": "split_mixed_types",
+ "defect": "a batch split in two keeps only its first column's type, values or validity in each half (design 3.4 rule 3: the result does not depend on where batches were split)",
+ "run": "split",
+ "entry": "add_mixed",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}, {"type": "int32", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 6, "columns": [{"type": "int64", "values": [1, 2, 3, 4, 5, 6]}, {"type": "int32", "values": [10, 20, 30, null, 50, null]}]},
+ "split_at": 2,
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [11, 22, 33, null, 55, null]}}
+}

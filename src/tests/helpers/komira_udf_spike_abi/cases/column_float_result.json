@@ -1,0 +1,11 @@
+{
+ "name": "column_float_result",
+ "defect": "a float64 result whose bits are int64 values is accepted",
+ "run": "call_batch",
+ "entry": "fahrenheit",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "float64", "nullable": true}],
+ "result": [{"type": "float64", "nullable": true}],
+ "input": {"length": 3, "columns": [{"type": "float64", "values": [0.0, 100.0, -40.0]}]},
+ "expect": {"status": "OK", "column": {"type": "float64", "values": [32.0, 212.0, -40.0]}}
+}

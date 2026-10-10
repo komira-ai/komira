@@ -1,0 +1,12 @@
+{
+ "name": "scalar_nulls_propagate_runtime_null",
+ "defect": "under PROPAGATE the scatter drops a null the runtime returned for a row whose arguments were all valid (design 3.4 rule 2: the host scatters the runtime's result back)",
+ "run": "call_batch",
+ "entry": "null_on_zero",
+ "shape": "SCALAR",
+ "null_mode": "PROPAGATE",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 4, "columns": [{"type": "int64", "values": [0, null, 3, 4]}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [null, null, 6, 8]}}
+}

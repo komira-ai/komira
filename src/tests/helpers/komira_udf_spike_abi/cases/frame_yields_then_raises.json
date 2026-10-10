@@ -1,0 +1,12 @@
+{
+ "name": "frame_yields_then_raises",
+ "defect": "an error after some outputs is lost, or the input the frame left unread is leaked",
+ "run": "frame",
+ "entry": "yield_two_then_raise",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}, {"length": 1, "columns": [{"type": "int64", "values": [2]}]}, {"length": 1, "columns": [{"type": "int64", "values": [3]}]}],
+ "expect": {"status": "ERR_RAISED", "run_error": "UDF_RAISED", "message": "nonempty"}
+}

@@ -1,0 +1,11 @@
+{
+ "name": "row_declared_fields",
+ "defect": "a ROW function with a correct read set fails, or reads a field from the wrong child",
+ "run": "call_batch",
+ "entry": "pick",
+ "shape": "ROW",
+ "args": [{"type": "int64", "nullable": true, "name": "flag"}, {"type": "int64", "nullable": true, "name": "a"}, {"type": "int64", "nullable": true, "name": "b"}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 5, "columns": [{"type": "int64", "values": [1, 1, 1, 0, 1]}, {"type": "int64", "values": [10, 20, 30, 40, 50]}, {"type": "int64", "values": [100, 200, 300, 400, 500]}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [10, 20, 30, 400, 50]}}
+}

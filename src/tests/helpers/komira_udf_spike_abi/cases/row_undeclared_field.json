@@ -1,0 +1,11 @@
+{
+ "name": "row_undeclared_field",
+ "defect": "a ROW read outside the read set returns null or a value instead of failing by name",
+ "run": "call_batch",
+ "entry": "pick",
+ "shape": "ROW",
+ "args": [{"type": "int64", "nullable": true, "name": "flag"}, {"type": "int64", "nullable": true, "name": "a"}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 5, "columns": [{"type": "int64", "values": [1, 1, 1, 0, 1]}, {"type": "int64", "values": [10, 20, 30, 40, 50]}]},
+ "expect": {"status": "ERR_FIELD_NOT_DECLARED", "run_error": "UDF_FIELD_NOT_DECLARED", "row": 3, "message": "nonempty"}
+}

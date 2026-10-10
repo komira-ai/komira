@@ -1,0 +1,12 @@
+{
+ "name": "fault_error_row_past_batch_propagate",
+ "defect": "under PROPAGATE an error row past the compacted batch is passed through as a plausible caller row, or checked against the caller's batch instead of the batch the runtime saw (design 4.3, 3.4 rule 2)",
+ "run": "call_batch",
+ "entry": "raise_row_past_batch",
+ "shape": "MAP_BATCHES_COLUMN",
+ "null_mode": "PROPAGATE",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 4, "columns": [{"type": "int64", "values": [null, 1, 2, 3]}]},
+ "expect": {"status": "ERR_RAISED", "run_error": "UDF_RUNTIME_FAULT", "fault": "error row 3 is outside the batch of 3 rows", "row": 3, "message": "nonempty"}
+}

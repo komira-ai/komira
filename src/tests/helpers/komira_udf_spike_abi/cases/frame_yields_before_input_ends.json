@@ -1,0 +1,12 @@
+{
+ "name": "frame_yields_before_input_ends",
+ "defect": "a frame drains all its input before its first output, or loses a batch",
+ "run": "frame",
+ "entry": "running_sum",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]}, {"length": 1, "columns": [{"type": "int64", "values": [3]}]}, {"length": 2, "columns": [{"type": "int64", "values": [4, 5]}]}],
+ "expect": {"status": "OK", "max_pulls_before_first_output": 1, "batches": [{"length": 2, "columns": [{"type": "int64", "values": [1, 3]}]}, {"length": 1, "columns": [{"type": "int64", "values": [6]}]}, {"length": 2, "columns": [{"type": "int64", "values": [10, 15]}]}]}
+}
