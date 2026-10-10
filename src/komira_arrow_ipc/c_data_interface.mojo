@@ -617,7 +617,8 @@ def _i32_to_bytes(value: Int32, mut out: UnsafePointer[Int8, MutUntrackedOrigin]
         buf as i32  ->  1.0.0: 1234567    1.1.0: 0
 
     ⚠ The opposite direction (a local as the memcpy DESTINATION, then reading
-    the local) is FINE on both — which is why `_bytes_to_i32` below is unchanged.
+    the local) is FINE on both; `_bytes_to_i32` below reads byte-wise
+    only so that the pair agrees on endianness (see its docstring).
     There is no diagnostic on either compiler; the only witness is a test,
     where it presents as `decode_metadata: implausible key count ...`.
 
