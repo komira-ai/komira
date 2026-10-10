@@ -377,8 +377,11 @@ def decode_frame(
         var pe = payload_end
         if (flags & FLAG_PADDED) != UInt8(0):
             if length == UInt32(0):
+                # No room for the Pad Length octet. RFC 9113 §4.2: a frame
+                # "too small to contain mandatory frame data" is a
+                # FRAME_SIZE_ERROR; answered as a connection error.
                 out.status = FRAME_DECODE_ERROR
-                out.error_code = H2_ERR_PROTOCOL_ERROR
+                out.error_code = H2_ERR_FRAME_SIZE_ERROR
                 out.is_connection_error = True
                 return out^
             var pad_len = Int(buf[po])
@@ -404,8 +407,11 @@ def decode_frame(
         var pe = payload_end
         if (flags & FLAG_PADDED) != UInt8(0):
             if length == UInt32(0):
+                # No room for the Pad Length octet. RFC 9113 §4.2: a frame
+                # "too small to contain mandatory frame data" is a
+                # FRAME_SIZE_ERROR; answered as a connection error.
                 out.status = FRAME_DECODE_ERROR
-                out.error_code = H2_ERR_PROTOCOL_ERROR
+                out.error_code = H2_ERR_FRAME_SIZE_ERROR
                 out.is_connection_error = True
                 return out^
             var pad_len = Int(buf[po])
@@ -550,14 +556,13 @@ def decode_frame(
             k = k + 1
     elif kind == FRAME_WINDOW_UPDATE:
         if length != UInt32(4):
+            # RFC 9113 §6.9: "A WINDOW_UPDATE frame with a length other
+            # than 4 octets MUST be treated as a connection error of type
+            # FRAME_SIZE_ERROR", on any stream, so no stream and nothing
+            # consumed (the connection-error contract above).
             out.status = FRAME_DECODE_ERROR
             out.error_code = H2_ERR_FRAME_SIZE_ERROR
-            out.is_connection_error = (stream_id == UInt32(0))
-            out.error_stream_id = stream_id
-            # Resynchronisation point for the stream-scoped arm -- see the
-            # PRIORITY branch above. Harmless on the stream-0 (connection)
-            # arm, which the caller answers with GOAWAY and never resumes.
-            out.consumed = total
+            out.is_connection_error = True
             return out^
         var inc_raw = _read_u32_be(buf, payload_off)
         var inc = inc_raw & UInt32(0x7fffffff)
