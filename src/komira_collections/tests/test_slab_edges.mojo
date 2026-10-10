@@ -161,11 +161,14 @@ def test_capacity_factories() raises:
 
 
 def test_from_raw_parts() raises:
+    # SAFETY: each buffer comes from `alloc`, whose origin is the one
+    # `from_raw_parts` names, so it is passed as is (no origin cast); the Slab
+    # adopts and frees it.
     var data = alloc[Item](4)
     for i in range(3):
         (data + i).init_pointee_move(Item(i + 1))
     var s = Slab[Item].from_raw_parts[Item](
-        data.unsafe_origin_cast[MutUntrackedOrigin](), 3, 4
+        data, 3, 4
     )
     assert_equal(s.capacity(), 4)
     _assert_tags(s, 1, 3)
@@ -177,14 +180,14 @@ def test_from_raw_parts() raises:
     var one = alloc[Item](2)
     one.init_pointee_move(Item(9))
     var t = Slab[Item].from_raw_parts[Item](
-        one.unsafe_origin_cast[MutUntrackedOrigin](), 1, 2
+        one, 1, 2
     )
     assert_equal(t.capacity(), 2)
     _assert_tags(t, 9, 1)
 
     var none = alloc[Item](2)
     var u = Slab[Item].from_raw_parts[Item](
-        none.unsafe_origin_cast[MutUntrackedOrigin](), 0, 2
+        none, 0, 2
     )
     assert_equal(u.len(), 0)
     assert_equal(u.capacity(), 2)

@@ -30,7 +30,7 @@
 # failed to compile with each assert's message.
 # =============================================================================
 
-from std.memory import Pointer
+from std.memory import Pointer, alloc
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 from komira_collections.dyn_value import DynValue, _noop_destroy
@@ -270,10 +270,17 @@ def test_empty_is_refused() raises:
 
 def test_noop_destroy_touches_nothing() raises:
     """T8: _noop_destroy leaves every byte of its argument as it was."""
-    var bytes = List[UInt8](length=16, fill=UInt8(0xAB))
-    _noop_destroy(
-        bytes.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
-    )
+    # SAFETY: a 16-byte heap buffer this test owns and frees below. `alloc`
+    # already returns the origin the destructor slot's signature names, so
+    # the pointer reaches `_noop_destroy` with no origin cast.
+    var buf = alloc[UInt8](16)
+    for i in range(16):
+        (buf + i).init_pointee_copy(UInt8(0xAB))
+    _noop_destroy(buf)
+    var bytes = List[UInt8](capacity=16)
+    for i in range(16):
+        bytes.append(buf[i])
+    buf.free()
     for i in range(16):
         assert_equal(bytes[i], UInt8(0xAB))
     print("    PASS test_noop_destroy_touches_nothing")
