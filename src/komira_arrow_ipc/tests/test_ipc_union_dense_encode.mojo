@@ -14,6 +14,10 @@
 # offsets BufferDescriptor's length on the wire, then every buffer the two
 # decoders rebuild, and an INT64 column after the union, whose values land
 # only if the encoder and the decoder agree on every buffer of the union.
+# The `_long_offsets` cases give the same column a 16-byte offsets buffer
+# (one spare Int32 after the three slots): the encoder must still write
+# exactly 12 bytes, so an encoder that writes `length + 1` offsets whenever
+# the buffer is big enough fails there and not on the exact-size column.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -79,13 +83,32 @@ def _dense_union_column() raises -> Column[HeapRegion]:
     ).to_column()
 
 
-def _encode() raises -> SharedAlignedBuffer[HeapRegion]:
+def _long_offsets_union_column() raises -> Column[HeapRegion]:
+    """The `_dense_union_column` rows with a 16-byte offsets buffer: offsets
+    0, 0, 1 and then a spare Int32 (77) that is not part of the column."""
+    var col = _dense_union_column()
+    var off = SharedAlignedBuffer[HeapRegion].heap_owned(16)
+    off.write_i32_le_at(0, Int32(0))
+    off.write_i32_le_at(4, Int32(0))
+    off.write_i32_le_at(8, Int32(1))
+    off.write_i32_le_at(12, Int32(77))
+    off.set_length(16)
+    col._offsets = off^
+    return col^
+
+
+def _encode(long_offsets: Bool = False) raises -> SharedAlignedBuffer[
+    HeapRegion
+]:
     var trailer = List[Int64]()
     trailer.append(-7)
     trailer.append(-8)
     trailer.append(-9)
     var cols = Slab[Column[HeapRegion]]()
-    cols.append(_dense_union_column())
+    if long_offsets:
+        cols.append(_long_offsets_union_column())
+    else:
+        cols.append(_dense_union_column())
     cols.append(_i64(trailer^))
     return encode_record_batch_message(cols^)
 
@@ -163,6 +186,24 @@ def test_dense_union_round_trips_copy_on_read() raises:
 
 def test_dense_union_round_trips_zero_copy() raises:
     var frame = _encode()
+    var cols = decode_record_batch_message_nested_zerocopy(frame, _specs())
+    _check(cols)
+
+
+def test_dense_union_long_offsets_buffer_writes_length_entries() raises:
+    """A 16-byte offsets buffer for 3 rows: the descriptor still says 12
+    bytes; the spare Int32 never reaches the wire."""
+    var frame = _encode(long_offsets=True)
+    var off = _rb_of(frame).buffers[1].length
+    assert_equal(off, Int64(12))
+
+
+def test_dense_union_long_offsets_round_trips_copy_on_read() raises:
+    _check(decode_record_batch_message_nested(_encode(True), _specs()))
+
+
+def test_dense_union_long_offsets_round_trips_zero_copy() raises:
+    var frame = _encode(True)
     var cols = decode_record_batch_message_nested_zerocopy(frame, _specs())
     _check(cols)
 
