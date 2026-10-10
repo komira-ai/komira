@@ -23,19 +23,35 @@
 #   - the numpy batch function cannot load here: numpy does not import in a
 #     sub-interpreter, so this mode reports it FAIL with numpy's error.
 #
+#   - two arguments at different offsets (3 and 13, both orders), each read
+#     at its own; int32 arguments and results (4 bytes per value) in the
+#     per-row path, and 2^31 refused as an int32 result;
+#   - a cancel landing while a batch function runs is ERR_CANCELLED with
+#     row -1 (a row at the batch's length is a host fault).
+#
 # Mutants planted: komira_udf_pyrt.py's _rows writing a float into an int64
 # column through int() instead of refusing it: red (float_into_int); its
 # fast path reading x0[i] instead of x0[off0 + i]: red (the sliced case
 # without nulls); its general path reading row p = i instead of
-# offs[j] + i: red (the sliced case with a null).
+# offs[j] + i: red (the sliced case with a null); and p = offs[0] + i:
+# red (two arguments at offsets 3 and 13). The column cancel's row n (the
+# code before this case): red (row 3, a host fault).
 
 from std.testing import assert_equal, assert_true
 
 from komira_udf_spike_abi.conform import same_column
 from komira_udf_spike_abi.contract import *
-from komira_udf_spike_abi.runtime import UdfRuntime, UdfSpec
-from komira_udf_spike_abi.values import Column, TYPE_FLOAT64, TYPE_INT64
-from komira_udf_spike_python.calls import call_once, floats, ints, open_instance_outcome, spec1
+from komira_udf_spike_abi.runtime import CallOptions, UdfRuntime, UdfSpec
+from komira_udf_spike_abi.values import Batch, Column, ColumnType, TYPE_FLOAT64, TYPE_INT32, TYPE_INT64
+from komira_udf_spike_python.calls import (
+    call_once,
+    call_once_with,
+    floats,
+    int_column,
+    ints,
+    open_instance_outcome,
+    spec1,
+)
 
 
 def _refused(mut rt: UdfRuntime, spec: UdfSpec, want: Int32, text: String) raises:
@@ -123,6 +139,65 @@ def _calls(mut rt: UdfRuntime) raises:
     assert_true("float 0.5 is not int64" in r.outcome.message, String(r.outcome))
 
 
+def _ints_want(values: List[Int64]) -> Column:
+    var c = Column(TYPE_INT64)
+    for v in values:
+        c.append_int(v)
+    return c^
+
+
+def _two_args_and_int32(mut rt: UdfRuntime) raises:
+    # Two arguments at different Arrow offsets, 3 and 13, no nulls: the
+    # per-row general path (more than one argument) reads each argument at
+    # its own offset. Reading every argument at the first one's offset reads
+    # b's padding (komira_udf_pyrt.py _rows, p = offs[j] + i).
+    var two = UdfSpec(
+        SHAPE_SCALAR, "udf_fixtures:add_mixed", [ColumnType(TYPE_INT64, True), ColumnType(TYPE_INT64, True)],
+        [ColumnType(TYPE_INT64, True)],
+    )
+    var args = Batch(3)
+    args.columns.append(int_column([1, 2, 3], offset=3))
+    args.columns.append(int_column([10, 20, 30], offset=13))
+    var r = call_once(rt, two, args)
+    assert_true(r.outcome.is_ok(), String(r.outcome))
+    assert_equal(same_column(r.column, _ints_want([11, 22, 33])), "", "two arguments at offsets 3 and 13")
+    # And the reverse order of offsets: reading at the last one's offset
+    # instead reads a's padding.
+    var rev = Batch(3)
+    rev.columns.append(int_column([1, 2, 3], offset=13))
+    rev.columns.append(int_column([10, 20, 30], offset=3))
+    r = call_once(rt, two, rev)
+    assert_true(r.outcome.is_ok(), String(r.outcome))
+    assert_equal(same_column(r.column, _ints_want([11, 22, 33])), "", "two arguments at offsets 13 and 3")
+
+    # int32 in and out of a per-row function (`int` reads either width): the
+    # values view is 4 bytes per row at the argument's offset (5, so not
+    # 8-aligned in bytes), the result column 4 bytes per row. A width of 8
+    # reads two values as one; a result value past int32 is refused.
+    var d32 = spec1(SHAPE_SCALAR, "udf_fixtures:double", TYPE_INT32, TYPE_INT32)
+    r = call_once(rt, d32, ints([-5, 6, 7, 1073741823], null_at=1, offset=5, type_id=TYPE_INT32))
+    assert_true(r.outcome.is_ok(), String(r.outcome))
+    var want32 = Column(TYPE_INT32)
+    want32.append_int(-10)
+    want32.append_null()
+    want32.append_int(14)
+    want32.append_int(2147483646)
+    assert_equal(same_column(r.column, want32), "", "int32 per row")
+    r = call_once(rt, d32, ints([1073741824], type_id=TYPE_INT32))
+    assert_equal(status_name(r.outcome.status), "ERR_RETURN_TYPE", "2^31 into int32: " + String(r.outcome))
+    assert_equal(r.outcome.row, 0)
+
+    # A cancel that lands while a MAP_BATCHES_COLUMN function runs (the
+    # function reads the host clock, where this host sets the flag) is
+    # ERR_CANCELLED for the whole batch: row -1, not a row past the batch
+    # (which the host reports as a runtime fault).
+    var clock = spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_fixtures:reads_clock", TYPE_INT64, TYPE_INT64)
+    r = call_once_with(rt, clock, ints([1, 2, 3]), CallOptions(False, True, False))
+    assert_equal(status_name(r.outcome.status), "ERR_CANCELLED", String(r.outcome))
+    assert_equal(r.outcome.row, -1, String(r.outcome))
+    assert_equal(r.outcome.fault, "", String(r.outcome))
+
+
 def _numpy_fails_here(mut rt: UdfRuntime) raises:
     var np = spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_np:fahrenheit_np", TYPE_FLOAT64, TYPE_FLOAT64)
     assert_equal(rt.validate(np).status, OK, "validate reads the source; numpy is never imported")
@@ -137,6 +212,7 @@ def main() raises:
     _describe(rt)
     _validate(rt)
     _calls(rt)
+    _two_args_and_int32(rt)
     _numpy_fails_here(rt)
     rt.shutdown()
     print("test_python_subinterp: ok")

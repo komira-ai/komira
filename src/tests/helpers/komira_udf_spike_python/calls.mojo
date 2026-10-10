@@ -16,18 +16,23 @@ def spec1(shape: UInt32, entry: String, arg: Int, result: Int, nullable: Bool = 
     return UdfSpec(shape, entry, [ColumnType(arg, True)], [ColumnType(result, nullable)])
 
 
-def ints(values: List[Int64], null_at: Int = -1, offset: Int = 0) -> Batch:
-    """An int64 column; row `null_at` (if any) is null; exported at Arrow
-    offset `offset` (the rows before it are padding)."""
-    var c = Column(TYPE_INT64)
+def int_column(values: List[Int64], null_at: Int = -1, offset: Int = 0, type_id: Int = TYPE_INT64) -> Column:
+    """An int64 (or `type_id`) column; row `null_at` (if any) is null;
+    exported at Arrow offset `offset` (the rows before it are padding)."""
+    var c = Column(type_id)
     c.offset = offset
     for i in range(len(values)):
         if i == null_at:
             c.append_null()
         else:
             c.append_int(values[i])
+    return c^
+
+
+def ints(values: List[Int64], null_at: Int = -1, offset: Int = 0, type_id: Int = TYPE_INT64) -> Batch:
+    """A batch of one int_column."""
     var b = Batch(len(values))
-    b.columns.append(c^)
+    b.columns.append(int_column(values, null_at, offset, type_id))
     return b^
 
 
@@ -47,8 +52,13 @@ def floats(values: List[Float64], null_at: Int = -1, offset: Int = 0) -> Batch:
 
 
 def call_once(mut rt: UdfRuntime, spec: UdfSpec, args: Batch) raises -> CallResult:
-    """load, open a context and an instance, one call_batch, close all.
+    """load, open a context and an instance, one plain call_batch, close all.
     Raises if load, open_context or open_instance fails."""
+    return call_once_with(rt, spec, args, CallOptions.plain())
+
+
+def call_once_with(mut rt: UdfRuntime, spec: UdfSpec, args: Batch, opts: CallOptions) raises -> CallResult:
+    """call_once with the call's options (cancel, deadline)."""
     var u = rt.load(spec)
     if not u.outcome.is_ok():
         raise Error("load " + spec.entry + ": " + String(u.outcome))
@@ -60,7 +70,7 @@ def call_once(mut rt: UdfRuntime, spec: UdfSpec, args: Batch) raises -> CallResu
         rt.close_context(c.handle)
         rt.unload(u.handle)
         raise Error("open_instance " + spec.entry + ": " + String(i.outcome))
-    var r = rt.call_batch(i.handle, spec, args, CallOptions.plain())
+    var r = rt.call_batch(i.handle, spec, args, opts)
     rt.close_instance(i.handle)
     rt.close_context(c.handle)
     rt.unload(u.handle)
