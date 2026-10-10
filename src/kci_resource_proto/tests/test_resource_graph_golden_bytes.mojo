@@ -8,7 +8,7 @@
 # that did not come from this repository. This file freezes the bytes this
 # package's encoder writes for ten composed graphs, as `.hex` fixtures; the
 # `resource_graph_fixtures` check in BUCK has protoc (which learned the format
-# from `resource.proto` alone) decode those bytes to the committed `.txtpb`,
+# from the package's `.proto` files alone) decode those bytes to the committed `.txtpb`,
 # and encode that text to the committed `.canonical.hex`. A symmetric defect,
 # one this encoder and this decoder share, round-trips here and is caught
 # there.
@@ -16,7 +16,7 @@
 # THE CORPUS. Each graph is authored as proto3 JSON, the form an author
 # writes and the one kci reads (`decode_json[ResourceList]`), then encoded
 # with `encode_proto`. Between them the ten graphs set every field of every
-# message of `resource.proto` at least once, to a value other than its
+# message of the catalog at least once, to a value other than its
 # default (a field at its default is not on protoc's side of the wire, so it
 # would check nothing), and every `Resource.body` arm:
 #
@@ -68,10 +68,11 @@
 #                   (WRITE) and reads its ADDRESS, and an identity that
 #                   pulls from it (READ) through a grant.
 #   metadata_graph  a bucket kept on delete under a cloud name of the
-#                   author's, adopted, with two labels (every metadata field
-#                   of `Resource`), an identity with one label and a
-#                   written-empty cloud name (presence: protoc must print
-#                   it), and a grant that lets it READ the bucket.
+#                   author's, adopted (`Adoption.ADOPT`), with two labels
+#                   (every metadata field of `Resource`), an identity with
+#                   one label and a written-empty cloud name (presence:
+#                   protoc must print it), and a grant that lets it READ
+#                   the bucket.
 #
 # Map keys are authored in sorted order. protoc prints and re-encodes a map
 # sorted by key, and this encoder writes a map in insertion order, so a
@@ -344,7 +345,7 @@ comptime _METADATA_GRAPH = (
     '{"resource":['
     # Every metadata field of Resource, on a bucket kept on delete.
     + '{"id":"logs","retention":"KEEP","physicalName":"acme-logs",'
-    + '"labels":{"team":"data","tier":"gold"},"adopt":true,"bucket":{}},'
+    + '"labels":{"team":"data","tier":"gold"},"adopt":"ADOPT","bucket":{}},'
     # A written-empty cloud name (presence) and one label.
     + '{"id":"reader","physicalName":"","labels":{"team":"data"},"serviceAccount":{}},'
     + '{"id":"read-logs","grant":{"principal":{"resource":"reader"},'

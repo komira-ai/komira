@@ -660,17 +660,20 @@ def decode_metadata_request_body_v9[
     """Decode a Metadata v9 (FLEXIBLE) request body.
 
     v9 request body (apache/kafka MetadataRequest.json):
-      topics COMPACT_ARRAY of {topic_id UUID(16 bytes, v10+ only — NOT v9),
-        name COMPACT_NULLABLE_STRING, TAG_BUFFER}   (a null array == all topics)
+      topics COMPACT_ARRAY of {name COMPACT_STRING, TAG_BUFFER}
+        (a null array == all topics)
       allow_auto_topic_creation BOOLEAN
       include_cluster_authorized_operations BOOLEAN
       include_topic_authorized_operations BOOLEAN
       TAG_BUFFER
 
-    At v9 the topic entry is just {name COMPACT_STRING, TAG_BUFFER} (the
-    topic_id UUID arrives at v10). We read the topic names (a null array =>
-    all topics) and skip the trailing booleans + tag buffers — the response is
-    the single-node placement regardless of the auth-operations flags."""
+    The topic_id UUID arrives at v10, and the name becomes nullable only at
+    v10 (Name "nullableVersions": "10+"), so a null name at v9 is refused.
+    We read the topic names (a null array => all topics) and skip the
+    trailing booleans + tag buffers — the response is the single-node
+    placement regardless of the auth-operations flags.
+
+    Raises: a truncated body, or a null topic name."""
     var n = dec.get_compact_array_len()
     if n < 0:
         # Null array == all topics. Skip the trailing fields + tag buffer.
@@ -681,10 +684,8 @@ def decode_metadata_request_body_v9[
         return MetadataRequest(Optional[List[String]]())
     var names = List[String]()
     for _ in range(n):
-        # v9 topic entry: name COMPACT_NULLABLE_STRING + TAG_BUFFER.
-        var nm = dec.get_compact_nullable_string()
-        if nm:
-            names.append(nm.value())
+        # v9 topic entry: name COMPACT_STRING (null refused) + TAG_BUFFER.
+        names.append(dec.get_compact_string())
         dec.skip_tag_buffer()  # per-topic tag buffer
     _ = dec.get_bool()  # allow_auto_topic_creation
     _ = dec.get_bool()  # include_cluster_authorized_operations

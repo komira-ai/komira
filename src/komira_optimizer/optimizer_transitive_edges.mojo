@@ -17,10 +17,9 @@
 # suppkey equivalence class {l_suppkey, s_suppkey, ps_suppkey}).
 #
 # This module ADDS the missing derivation: `derive_transitive_edges` appends
-# to a JoinChain's edges in place. komira_optimizer has no driver that orders
-# its passes, and nothing in this tree calls it outside its tests; it is
-# designed to run AFTER extraction and BEFORE join enumeration (DPccp,
-# `optimizer_dpccp`, not in this tree).
+# to a JoinChain's edges in place. It is not a pass of its own:
+# `optimizer_dpccp.reorder_joins_with_dp` calls it AFTER
+# extraction and BEFORE join enumeration (DPccp).
 #
 # Algorithm (faithful to DuckDB's mechanism, adapted to Komira's
 # JoinChain representation):
@@ -50,9 +49,8 @@
 #       join query — it's a redundant condition that execution may
 #       enforce or not without changing the answer.
 #
-#   (b) A DPccp enumerator (not in this tree) is designed to consume
-#       `chain.edges` through a neighbor builder that deduplicates
-#       per-pair neighbors.
+#   (b) DPccp (`optimizer_dpccp`) consumes `chain.edges` through
+#       `_build_neighbors`, which deduplicates per-pair neighbors.
 #       Synthetic edges densify the relation graph for DPccp's CSG
 #       traversal without affecting cost estimation: the cost model
 #       (`optimizer_tdom_cost.estimate_with_tdom`) keys denominator

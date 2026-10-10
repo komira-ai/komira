@@ -371,7 +371,7 @@ def example_channel_path(name: String) raises -> String:
     var location = example_channel(name).repository_for(String("CONDA")).location
     var prefix = String("https://") + String(EXAMPLE_HOST) + String("/")
     if not location.startswith(prefix):
-        raise Error(String("example channel '") + name + String("' is not on ") + String(EXAMPLE_HOST))
+        raise Error(String("example channel '") + name + String("' is not on ") + String(EXAMPLE_HOST))  # cov: unreachable every EXAMPLE_CHANNELS location is on EXAMPLE_HOST
     return String(location[byte = prefix.byte_length() :])
 
 

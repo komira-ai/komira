@@ -134,6 +134,7 @@ from kci_cloud import (
     ConformanceTarget,
     Finding,
     CloudId,
+    ExistingObject,
     LoweredNode,
     OwnedRecord,
     Principal,
@@ -171,6 +172,7 @@ from kci_cloud import (
     holds_own_identity,
     run_as_of,
     decode_label_value,
+    adopted_by,
     retained_by,
     standard_identity_of,
     standard_label_rule,
@@ -180,6 +182,7 @@ from kci_resource_proto.resource import Resource
 
 from kci_cloud_fake.data import lower_bucket, lower_table
 from kci_cloud_fake.dns import dns_limits, lower_certificate, lower_record, lower_zone
+from kci_cloud_fake.existing import planted_like, read_existing as _read_existing, release as _release
 from kci_cloud_fake.fake_store import FakeStore
 from kci_cloud_fake.messaging import lower_queue, lower_subscription, lower_topic, messaging_limits
 from kci_cloud_fake.limits import (
@@ -403,6 +406,7 @@ def _owned(store: ArcPointer[FakeStore], scope: CellScope) raises -> List[OwnedR
                 live_key(s.digests[i]),
                 validation_run_of(labels),
                 s.names[i].copy(),
+                adopted_by(labels),
             )
         )
     return out^
@@ -574,6 +578,12 @@ struct FakeCloud(ConformanceTarget, Movable):
     def list_owned(mut self, creds: Creds, scope: CellScope) raises -> List[OwnedRecord]:
         return _owned(self.store, scope)
 
+    def read_existing(mut self, creds: Creds, node: LoweredNode) raises -> ExistingObject:
+        return _read_existing(self.store, node)
+
+    def release(mut self, creds: Creds, record: OwnedRecord) raises:
+        _release(self.store, record)
+
     def whoami(mut self, creds: Creds) raises -> Principal:
         var who = creds.token.copy()
         if who.byte_length() == 0:
@@ -627,6 +637,11 @@ struct FakeCloud(ConformanceTarget, Movable):
 
     def plant_foreign(mut self, logical_id: String) raises:
         self.store[].plant(logical_id, String("foreign"))
+
+    def plant_like(mut self, node: LoweredNode) raises:
+        """Plant, unstamped, the object `node` declares (what an adoption
+        expects to find; existing.mojo)."""
+        planted_like(self.store, node)
 
     def race_next_create(mut self):
         self.store[].race_next()
@@ -764,6 +779,12 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
     def list_owned(mut self, creds: Creds, scope: CellScope) raises -> List[OwnedRecord]:
         return _owned(self.store, scope)
 
+    def read_existing(mut self, creds: Creds, node: LoweredNode) raises -> ExistingObject:
+        return _read_existing(self.store, node)
+
+    def release(mut self, creds: Creds, record: OwnedRecord) raises:
+        _release(self.store, record)
+
     def whoami(mut self, creds: Creds) raises -> Principal:
         var who = creds.token.copy()
         if who.byte_length() == 0:
@@ -817,6 +838,11 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
 
     def plant_foreign(mut self, logical_id: String) raises:
         self.store[].plant(logical_id, String("foreign"))
+
+    def plant_like(mut self, node: LoweredNode) raises:
+        """Plant, unstamped, the object `node` declares (what an adoption
+        expects to find; existing.mojo)."""
+        planted_like(self.store, node)
 
     def race_next_create(mut self):
         self.store[].race_next()

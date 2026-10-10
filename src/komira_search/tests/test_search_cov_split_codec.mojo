@@ -8,8 +8,8 @@
 #   2. ULEB128: a read past the region end is refused, and so is a varint
 #      whose first eleven bytes all carry the continuation bit (the input is
 #      twelve bytes); a 10-byte varint with the top bit set reads as a
-#      negative Int. An 11-byte varint that ends at its 11th byte is accepted
-#      today (komira-ai/komira#1085), so no test pins that case.
+#      negative Int. An 11-byte varint that ends at its 11th byte, and a 10th
+#      byte that sets bit 64, are refused (komira-ai/komira#1085).
 #   3. Posting-list encode (plain and with block metadata): length mismatch,
 #      a negative doc-id, a non-ascending doc-id, a negative tf are refused.
 #   4. Posting-list decode: a region past the source, a negative doc_count, a
@@ -24,6 +24,10 @@
 #      length in its state (uncompressed and LZ4 forms).
 #   8. serialize_split refuses a negative doc_count/min/max and an L0 posting
 #      region without the footer token total.
+#   9. The three posting decoders refuse a term region whose length is 2^63 - 1
+#      (Int.MAX), whose sum with an in-range offset wraps Int negative, by
+#      their own region check (komira-ai/komira#1203); the region ending one
+#      byte past the source is refused by the same check.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_raises
@@ -112,6 +116,34 @@ def test_02_uleb128_edges() raises:
     var r = _read_uleb128_span(Span(neg), 0, len(neg))
     assert_equal(r[0], -1, "2: all 64 bits set reads as -1")
     assert_equal(r[1], 10, "2: ten bytes consumed")
+
+
+def test_02b_uleb128_eleven_bytes_and_bit_64() raises:
+    # komira-ai/komira#1085: ten continuation bytes then a terminator is an
+    # 11-byte varint, refused at the 10th byte.
+    var eleven = List[UInt8]()
+    for _ in range(10):
+        eleven.append(0x80)
+    eleven.append(0x00)
+    with assert_raises(contains="varint exceeds 10 bytes"):
+        _ = _read_uleb128_span(Span(eleven), 0, len(eleven))
+    # A 10th byte of 0x02 sets bit 64, which an Int cannot hold: refused, not
+    # dropped (it read as 2^63 - 1 before).
+    var wide = List[UInt8]()
+    for _ in range(9):
+        wide.append(0xFF)
+    wide.append(0x02)
+    with assert_raises(contains="varint overflows 64 bits"):
+        _ = _read_uleb128_span(Span(wide), 0, len(wide))
+    # The largest legal 10th byte is 0x01 (test_02 reads it as -1); 0x00 is a
+    # padded zero and reads as 0.
+    var pad = List[UInt8]()
+    for _ in range(9):
+        pad.append(0x80)
+    pad.append(0x00)
+    var r = _read_uleb128_span(Span(pad), 0, len(pad))
+    assert_equal(r[0], 0, "2b: a padded zero reads as 0")
+    assert_equal(r[1], 10, "2b: ten bytes consumed")
 
 
 def test_03_posting_encode_refusals() raises:
@@ -345,6 +377,25 @@ def test_08_serialize_split_refusals() raises:
         l0_posting_region=l0b^,
     )
     assert_true(len(ok) > 0, "8: accepted with the total")
+
+
+def test_09_wrapping_term_region_refused() raises:
+    var ids = List[Int]()
+    var tfs = List[Int]()
+    var three: List[UInt8] = [1, 2, 3]
+    with assert_raises(contains="_decode_posting_list: region [1, "):
+        _decode_posting_list(Span(three), 1, Int.MAX, ids, tfs)
+    with assert_raises(contains="_decode_posting_list: region [1, 4) out of bounds [0, 3)"):
+        _decode_posting_list(Span(three), 1, 3, ids, tfs)
+    with assert_raises(contains="_decode_posting_block: term region out of bounds"):
+        _decode_posting_block(Span(three), 1, Int.MAX, 0, 0, 1, ids, tfs)
+    with assert_raises(contains="_decode_posting_block: term region out of bounds"):
+        _decode_posting_block(Span(three), 1, 3, 0, 0, 1, ids, tfs)
+    var only = List[Int]()
+    with assert_raises(contains="_dids_only: term region out of bounds"):
+        _decode_posting_block_dids_only(Span(three), 1, Int.MAX, 0, 0, 1, only)
+    with assert_raises(contains="_dids_only: term region out of bounds"):
+        _decode_posting_block_dids_only(Span(three), 1, 3, 0, 0, 1, only)
 
 
 def main() raises:

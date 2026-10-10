@@ -9,25 +9,21 @@
 #
 # # Symbols used
 #
-#   * d2i_PrivateKey(type, out, pp, length) -> EVP_PKEY*
+#   * CBS_init / EVP_parse_private_key(cbs) -> EVP_PKEY* (any PKCS#8 type)
+#   * EVP_PKEY_id(pkey) -> int (refuses a key that is not EVP_PKEY_RSA)
 #   * EVP_PKEY_free(pkey)
 #   * EVP_MD_CTX_new / EVP_MD_CTX_free (reused from sha256_ffi shape)
 #   * EVP_DigestSignInit(ctx, pctx, type, engine, pkey) -> int
 #   * EVP_DigestSign(ctx, sig, &sig_len, data, data_len) -> int (one-shot)
 #   * EVP_sha256 (reused from sha256_ffi)
 #
-# Note: d2i_PrivateKey ADVANCES the `pp` pointer past the consumed DER
-# bytes — this is the OpenSSL/AWS-LC convention. We use a local
-# UnsafePointer variable for `pp` (taking its address) and ignore the
-# advanced value since we only need the parsed EVP_PKEY.
-#
 # # PKCS#8 DER input
 #
 # GCS service-account private keys are PKCS#8 DER (typically PEM-encoded
 # in the JSON service-account file; the caller is expected to PEM-decode
-# before passing to this function). d2i_PrivateKey with EVP_PKEY_RSA
-# correctly parses PKCS#8 DER (it auto-detects PKCS#1 vs PKCS#8 vs
-# other wrappers).
+# before passing to this function). EVP_parse_private_key parses a PKCS#8
+# PrivateKeyInfo of any key type, so the key type is checked after the
+# parse: a key that is not RSA is refused.
 #
 # # Encapsulation discipline
 #
@@ -116,14 +112,16 @@ def rsa_sha256_sign_ffi(
     the output signature is appended as base64url to form the final JWT.
 
     Internally:
-      1. Parse PKCS#8 DER -> EVP_PKEY via d2i_PrivateKey.
+      1. Parse PKCS#8 DER -> EVP_PKEY via EVP_parse_private_key, then
+         refuse the key unless EVP_PKEY_id says it is EVP_PKEY_RSA.
       2. EVP_DigestSignInit with EVP_sha256() and the parsed EVP_PKEY
          (defaults to PKCS#1 v1.5 padding for RSA, which matches GCP's
          RS256 algorithm per RFC 7518 §3.3).
       3. EVP_DigestSign (one-shot) to produce the signature.
       4. Free EVP_MD_CTX + EVP_PKEY.
 
-    Raises on parse failure, sign failure, or OOM.
+    Raises on parse failure, on a key that is not RSA (EC, Ed25519,
+    RSA-PSS), on sign failure, or on OOM.
     """
     var pkey: _FfiHandle
     var ctx: _FfiHandle
@@ -174,6 +172,20 @@ def rsa_sha256_sign_ffi(
         raise Error(
             "rsa_sha256_sign_ffi: EVP_parse_private_key failed (bad DER key)"
         )
+    # EVP_parse_private_key accepts any PKCS#8 key type; EVP_DigestSign would
+    # then make an ECDSA signature with an EC key. Refuse anything not RSA.
+    # SAFETY: EVP_PKEY_id reads the type of the EVP_PKEY parsed above, which
+    # we own until the EVP_PKEY_free below; it retains nothing.
+    var key_type = external_call[
+        "komira_awslc_EVP_PKEY_id", Int32, _FfiHandle
+    ](pkey)
+    if Int(key_type) != EVP_PKEY_RSA:
+        external_call[
+            "komira_awslc_EVP_PKEY_free",
+            NoneType,
+            _FfiHandle,
+        ](pkey)
+        raise Error("rsa_sha256_sign_ffi: the key is not an RSA key")
 
     # Step 2: allocate EVP_MD_CTX + EVP_DigestSignInit.
     # SAFETY: EVP_MD_CTX_new allocates heap; we own + must free.
@@ -186,8 +198,8 @@ def rsa_sha256_sign_ffi(
             "komira_awslc_EVP_PKEY_free",
             NoneType,
             _FfiHandle,
-        ](pkey)
-        raise Error("rsa_sha256_sign_ffi: EVP_MD_CTX_new returned NULL (OOM)")
+        ](pkey)  # cov: unreachable an allocation failure
+        raise Error("rsa_sha256_sign_ffi: EVP_MD_CTX_new returned NULL (OOM)")  # cov: unreachable see the line above
 
     # SAFETY: EVP_DigestSignInit configures ctx for RSA-SHA256 signing.
     # pctx (out arg for EVP_PKEY_CTX*) = NULL (we don't need it).
@@ -214,13 +226,13 @@ def rsa_sha256_sign_ffi(
             "komira_awslc_EVP_MD_CTX_free",
             NoneType,
             _FfiHandle,
-        ](ctx)
+        ](ctx)  # cov: unreachable an allocation failure: the key is RSA (checked above) and SHA-256 is an RSA digest
         external_call[
             "komira_awslc_EVP_PKEY_free",
             NoneType,
             _FfiHandle,
-        ](pkey)
-        raise Error("rsa_sha256_sign_ffi: EVP_DigestSignInit failed")
+        ](pkey)  # cov: unreachable see the line above
+        raise Error("rsa_sha256_sign_ffi: EVP_DigestSignInit failed")  # cov: unreachable see the line above
 
     # Step 3: one-shot EVP_DigestSign.
     # First call with sig=NULL: returns required sig buffer size.
@@ -249,13 +261,13 @@ def rsa_sha256_sign_ffi(
             "komira_awslc_EVP_MD_CTX_free",
             NoneType,
             _FfiHandle,
-        ](ctx)
+        ](ctx)  # cov: unreachable a NULL-buffer EVP_DigestSign only reports the maximum signature size; it fails for no key EVP_DigestSignInit accepted
         external_call[
             "komira_awslc_EVP_PKEY_free",
             NoneType,
             _FfiHandle,
-        ](pkey)
-        raise Error("rsa_sha256_sign_ffi: EVP_DigestSign size-query failed")
+        ](pkey)  # cov: unreachable see the line above
+        raise Error("rsa_sha256_sign_ffi: EVP_DigestSign size-query failed")  # cov: unreachable see the line above
 
     # Allocate signature buffer + emit.
     var sig_buf = List[UInt8](capacity=Int(sig_len))

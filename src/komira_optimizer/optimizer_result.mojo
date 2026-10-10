@@ -21,20 +21,20 @@
 # =============================================================================
 #
 # `OptimizeResult` is the value a NON-RAISING optimizer entry point returns: a
-# `LogicalPlan`, or a status code and the raiser's message. komira_optimizer
-# has no driver that orders its passes, and no function in this tree returns
-# an `OptimizeResult`; this module is the contract such an entry point is
-# designed to use (the type, its status codes and `_classify`).
+# `LogicalPlan`, or a status code and the raiser's message.
+# `optimizer_driver.optimize_status` is the entry point that returns one; this
+# module holds the type, its status codes and `_classify`.
 #
 # The design: each non-raising entry point is a `try` / `except` around the
 # raising function it wraps, with NO `raises` of its own. The raising function
 # stays, for in-process callers; `unwrap_or_raise` adapts back to it.
 #
-# ⛔ THE `@extern` BOUNDARY IS DESIGNED TO RETURN A PHYSICAL PLAN, not a
-# `LogicalPlan`: contract clause #1 is that the optimizer's OUTPUT is a
-# PHYSICAL plan. That boundary's result type is not in this tree; it is
-# designed to share `_classify`, so the two result types cannot disagree about
-# what a scan-binding refusal is.
+# The optimizer's output is an optimized `LogicalPlan`, and that is what an
+# `OptimizeResult` carries. komira_optimizer imports no physical-plan IR
+# (komira_physical_plan is not in the closure of its deps, so such an import
+# does not resolve): lowering to a physical plan,
+# and the doors that check one, belong to the packages that build it, so no
+# refusal of theirs is classified here.
 #
 # ⛔ THIS IS NOT AN ADDITIVE `_v2` API, and the distinction is load-bearing.
 # A `_v2` is a second implementation that can drift from the first. These
@@ -57,12 +57,12 @@
 #      the text turns a diagnosable refusal into a number.
 #
 # =============================================================================
-# WHY THE STATUS SET IS FIVE AND NOT TWO
+# WHY THE STATUS SET IS FOUR AND NOT TWO
 # =============================================================================
 #
 # A boolean ok/fail would be honest but useless to the caller across an ABI: an
-# `.so` consumer cannot re-read our source to decide what to do. The four
-# failure codes are the four classes a caller can act on DIFFERENTLY:
+# `.so` consumer cannot re-read our source to decide what to do. The three
+# failure codes are the three classes a caller can act on DIFFERENTLY:
 #
 #   SCAN_BINDING     the caller handed us a plan carrying a scan handle this
 #                    optimizer's registry cannot resolve. The caller's bug, and
@@ -70,17 +70,6 @@
 #   UNRESOLVED_DEPS  the plan's scalar dependencies did not reach a fixpoint.
 #                    Not the caller's bug and not fixable by resubmitting the
 #                    same plan.
-#   PHYSICAL_PLAN_REFUSED
-#                    one of the two doors on the emitted PHYSICAL plan refused
-#                    (the IR version door, or the purity gate).
-#                    ★ THE ONE CLASS THAT IS THE PRODUCER'S BUG, NOT THE
-#                    CALLER'S, and the whole reason it is not folded into
-#                    PASS_REFUSED: across an `@extern` seam these two doors are
-#                    what stand between a layout skew / a smuggled LogicalPlan
-#                    and memory corruption with no diagnostic. A consumer that
-#                    reads this code knows the optimizer's build and its own
-#                    disagree about the physical-plan contract, which is fixed by
-#                    rebuilding both -- never by editing the query.
 #   PASS_REFUSED     a pass refused. The catch-all.
 #
 # ⚠ CLASSIFICATION IS BY IMPORTED TOKEN, NEVER BY A STRING SPELLED HERE.
@@ -97,15 +86,6 @@
 # =============================================================================
 
 from komira_plan_ir.logical_plan import LogicalPlan
-from komira_plan_ir.physical_plan import (
-    PHYSICAL_PLAN_IR_VERSION_MISMATCH,
-    PHYSICAL_PLAN_IR_VERSION_UNCHECKABLE,
-)
-from komira_plan_ir.physical_plan_purity_gate import (
-    PHYSICAL_PLAN_CARRIES_LOGICAL_PLAN,
-    PHYSICAL_PLAN_PURITY_UNCHECKABLE,
-    PHYSICAL_PLAN_PURITY_UNMODELLED_EXPR_TAG,
-)
 from komira_scan_source.scan_resolver import (
     SCAN_BINDING_EPOCH_MISMATCH,
     SCAN_BINDING_HANDLE_NOT_BOUND,
@@ -132,29 +112,12 @@ comptime OPTIMIZE_ERR_UNRESOLVED_DEPS: Int32 = -2
 """The plan's scalar dependencies did not reach a fixpoint.
 
 The protocol in `optimizer_scalar_deps.mojo` runs the passes, resolves the
-requests they emitted, and re-plans with them bound, under a round cap
-(komira_optimizer has no driver that runs it). Exceeding the cap means a pass
+requests they emitted, and re-plans with them bound, under a round cap. That
+loop belongs to a caller that executes plans; `optimizer_driver.optimize` is
+one round of it and never returns this code. Exceeding the cap means a pass
 is emitting a request nobody consumes, or the query nests deeper than the cap.
 Returning a plan anyway would ship an unfolded subquery site that fails much
 later, at eval, far from this cause."""
-
-comptime OPTIMIZE_ERR_PHYSICAL_PLAN_REFUSED: Int32 = -4
-"""A door on the EMITTED PHYSICAL PLAN refused. The producer's bug, not the
-caller's.
-
-Two doors raise into this class, both from `komira_plan_ir`:
-`assert_physical_plan_ir_version_compatible` (the two sides of an
-`@extern` seam disagree about `SegmentDescPod`'s layout) and
-`assert_physical_plan_carries_no_logical_plan` (the purity gate -- the
-emitted plan carries a `LogicalPlan` through `Expr._corr_subq`, which contract
-clause #2 forbids).
-
-⚠ IT IS NOT `PASS_REFUSED`, AND THE DIFFERENCE IS THE ACTION. A pass refusal is
-about the plan the caller submitted. A door refusal is about the plan THIS
-optimizer emitted: the caller can neither cause it nor fix it by resubmitting,
-and the only remedy is rebuilding both sides at one revision. Collapsing the two
-would hand an `.so` consumer a code that says "your query is bad" for a
-condition the query had nothing to do with."""
 
 comptime OPTIMIZE_ERR_PASS_REFUSED: Int32 = -3
 """A pass refused, and the class is not one of the above. The catch-all.
@@ -167,7 +130,7 @@ comptime OPTIMIZE_REFUSAL_UNRESOLVED_DEPS: StaticString = (
 )
 """The named token for the round-cap refusal of the dependency protocol.
 
-⚠ THE RAISE SITE (the round-capped loop, not in this tree) MUST IMPORT THIS,
+⚠ THE RAISE SITE (the caller's round-capped loop) MUST IMPORT THIS,
 NOT RE-SPELL IT. It is the only reason
 `_classify` can tell that refusal apart from any other pass refusal, and a
 second spelling makes the two silently stop matching. Same idiom, and the same
@@ -188,24 +151,6 @@ def _classify(message: String) -> Int32:
         return OPTIMIZE_ERR_SCAN_BINDING
     if message.find(String(OPTIMIZE_REFUSAL_UNRESOLVED_DEPS)) >= 0:
         return OPTIMIZE_ERR_UNRESOLVED_DEPS
-    # ⚠ THE FIVE PHYSICAL-PLAN DOOR TOKENS ARE ALL IMPORTED, NOT SPELLED HERE.
-    # Two come from `physical_plan.mojo` (the IR version door) and three from
-    # `physical_plan_purity_gate.mojo`. Both doors are designed to run INSIDE
-    # the boundary function's `try`, so without these arms a layout skew
-    # across an `@extern` seam would reach the caller
-    # as PASS_REFUSED -- indistinguishable from "your query has an unsupported
-    # shape", which is the one reading that sends the caller to fix the wrong
-    # thing.
-    if message.find(String(PHYSICAL_PLAN_IR_VERSION_MISMATCH)) >= 0:
-        return OPTIMIZE_ERR_PHYSICAL_PLAN_REFUSED
-    if message.find(String(PHYSICAL_PLAN_IR_VERSION_UNCHECKABLE)) >= 0:
-        return OPTIMIZE_ERR_PHYSICAL_PLAN_REFUSED
-    if message.find(String(PHYSICAL_PLAN_CARRIES_LOGICAL_PLAN)) >= 0:
-        return OPTIMIZE_ERR_PHYSICAL_PLAN_REFUSED
-    if message.find(String(PHYSICAL_PLAN_PURITY_UNMODELLED_EXPR_TAG)) >= 0:
-        return OPTIMIZE_ERR_PHYSICAL_PLAN_REFUSED
-    if message.find(String(PHYSICAL_PLAN_PURITY_UNCHECKABLE)) >= 0:
-        return OPTIMIZE_ERR_PHYSICAL_PLAN_REFUSED
     return OPTIMIZE_ERR_PASS_REFUSED
 
 

@@ -227,7 +227,5 @@ def _last_path_segment(resource_name: String) -> String:
             last_slash = i
     if last_slash < 0:
         return String(resource_name)
-    var out = String("")
-    for i in range(last_slash + 1, len(sb)):
-        out += chr(Int(sb[i]))
-    return out^
+    # `/` is ASCII, so the cut is a char boundary: the id's UTF-8 bytes as they are.
+    return String(resource_name[byte=last_slash + 1 : len(sb)])

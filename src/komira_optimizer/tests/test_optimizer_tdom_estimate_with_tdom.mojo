@@ -448,8 +448,8 @@ def test_fkpk_clamp_fires_with_tier1_pk_signal_mirrors_q9() raises:
     Bound = max(|L|, |R|) = 6_000_000. Clamped est = min(24M, 6M) = 6M.
 
     This is the Q9 fix: the clamp restores the true FK-PK cardinality
-    (6M) over the cost-model's over-estimate (24M), so a DPccp plan-shape
-    selector (not in this tree) can value the LEFT-DEEP-composite-leading
+    (6M) over the cost-model's over-estimate (24M), so a DP enumerator
+    can value the LEFT-DEEP-composite-leading
     plan over the BUSHY alternative.
     """
     var chain = JoinChain()
@@ -892,7 +892,7 @@ def test_q5_customer_supplier_fanout_cost_pair() raises:
 
     This is the catastrophic fan-out pair. The TDOM cost model
     correctly assigns it 60M cost — much higher than the
-    lineitem-supplier-early pair's 6M. A DP enumerator (not in this tree)
+    lineitem-supplier-early pair's 6M. A DP enumerator
     prefers the smaller-cost candidate.
     """
     var chain = _build_q5_chain_tier2_only()
@@ -915,7 +915,7 @@ def test_q5_customer_supplier_fanout_cost_pair() raises:
 def test_q5_lineitem_supplier_cheaper_than_customer_supplier() raises:
     """The plan-shape correctness check: the lineitem-supplier pair is
     SUBSTANTIALLY cheaper than the customer-supplier fan-out, so a DP
-    enumerator (not in this tree) prefers the lineitem-early path.
+    enumerator prefers the lineitem-early path.
 
     Cost ratio: 60M / 6M = 10× — the lineitem-supplier-early plan is
     an order of magnitude cheaper for the leading pair. This is the
@@ -1014,9 +1014,8 @@ def test_q5_nation_dedup_in_extended_pair() raises:
 def test_has_classes_for_returns_false_with_no_bridging() raises:
     """When NO edge bridges the candidate pair, `has_classes_for` returns
     False. A cost caller then falls through to the legacy
-    estimate_join_cardinality_with_ndv (DPccp's `_cost_for_pair`, not in
-    this tree, does; DPccp never enumerates a disconnected pair, so the
-    fall-through is defensive).
+    estimate_join_cardinality_with_ndv (DPccp's `_cost_for_pair` does so
+    only when no TDOM graph is set, and does not call `has_classes_for`).
     """
     var chain = JoinChain()
     var ns: Optional[TableStats] = None

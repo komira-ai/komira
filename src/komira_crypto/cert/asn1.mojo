@@ -231,7 +231,7 @@ def der_parse_tag(buf: Span[UInt8, _], pos: Int) raises -> _TagParseResult:
         # Each continuation byte contributes 7 bits.
         # Overflow check: tag_num << 7 must fit in UInt32.
         if (tag_num >> UInt32(25)) != UInt32(0):
-            raise Error("der_parse_tag: tag-number overflow (>2^32)")
+            raise Error("der_parse_tag: tag-number overflow (>2^32)")  # cov: unreachable at most four 7-bit groups are read, so tag_num has at most 21 bits before the last shift
         tag_num = (tag_num << UInt32(7)) | UInt32(Int(bb & UInt8(0x7F)))
         off += 1
         if (bb & UInt8(0x80)) == UInt8(0):
@@ -272,7 +272,7 @@ def der_parse_length(buf: Span[UInt8, _], pos: Int) raises -> _LengthParseResult
     if length < 0:
         # UInt32 -> Int conversion shouldn't go negative on a 64-bit Int
         # but defensive-check anyway.
-        raise Error("der_parse_length: length overflow")
+        raise Error("der_parse_length: length overflow")  # cov: unreachable at most four length bytes: the length is below 2^32 and fits a 64-bit Int
     return _LengthParseResult(length, pos + 1 + nbytes)
 
 
@@ -293,7 +293,7 @@ def der_parse_tlv(buf: Span[UInt8, _], pos: Int) raises -> DerTlv:
     if end_pos < value_pos:
         # Defensive: cannot happen with bounded length on 64-bit Int but
         # cover the overflow edge.
-        raise Error("der_parse_tlv: length-pos overflow")
+        raise Error("der_parse_tlv: length-pos overflow")  # cov: unreachable value_len is at least 0, so end_pos is never below value_pos
     return DerTlv(tag_res.tag, value_pos, value_len, end_pos)
 
 

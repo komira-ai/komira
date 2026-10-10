@@ -28,6 +28,7 @@ mojo_library(
         "tests/test_expr_kernel_templates_arith.mojo",
         "tests/test_expr_kernel_templates_bool.mojo",
         "tests/test_expr_kernel_templates_cmp_cast.mojo",
+        "tests/test_hash_offset_validity.mojo",
         "tests/test_kleene_comparison_properties.mojo",
         "tests/test_kleene_helpers.mojo",
         "tests/test_match_offset_validity.mojo",

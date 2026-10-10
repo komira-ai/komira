@@ -20,7 +20,7 @@ from komira_optimizer.optimizer_config import (
 def test_defaults_are_the_unset_behaviour() raises:
     """Catches a changed default: the agg-CSE gate and cheap-key pre-grouping
     ON, both scan-dedup disables OFF, the two row thresholds at 2,000,000 and
-    4,000,000, and the SEMI/ANTI reducer pushdown ON."""
+    4,000,000, the SEMI/ANTI reducer pushdown ON and eager aggregation ON."""
     var c = OptimizerConfig()
     assert_true(c.agg_cse_gate)
     assert_true(c.agg_cse_cheapkey)
@@ -33,6 +33,7 @@ def test_defaults_are_the_unset_behaviour() raises:
     assert_equal(c.fact_stream_protect_threshold(), 2_000_000)
     assert_equal(c.agg_inmem_ceiling_rows(), 4_000_000)
     assert_true(c.semi_pushdown)
+    assert_true(c.eager_agg)
 
 
 def test_agg_inmem_ceiling_positive_value_is_used() raises:

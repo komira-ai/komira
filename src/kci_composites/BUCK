@@ -1,0 +1,36 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The composite definitions kci ships, as DATA: `definitions/kci.job.json`
+# and `definitions/kci.app.json`, each a `kci.resource.v1.CompositeDefinition`
+# in proto3 JSON (composite.proto). `read_kci_definitions` reads them through
+# `komira_resources` and decodes them strictly, the way any author's file is
+# read; nothing in kci_cloud branches on them. A program that ships them puts
+# each file in its bundle's `data` under the path it has here; a test names
+# them in `test_data` (the welded test below, kci_cloud_fake's goldens).
+#
+# kci_cloud is here for the welded test, which holds each file to the row
+# kci_cloud's `shipped_definitions` pins for it and loads it through
+# `expand`.
+mojo_library(
+    name = "kci_composites",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_cloud:kci_cloud",
+        "//src/kci_resource_proto:kci_resource_proto",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_resources:komira_resources",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = ["tests/test_kci_composites.mojo"],
+    test_data = {
+        "tests/test_kci_composites.mojo": [
+            "definitions/kci.app.json",
+            "definitions/kci.job.json",
+        ],
+    },
+    visibility = ["PUBLIC"],
+)
+
+export_file(name = "kci.app.json", src = "definitions/kci.app.json", visibility = ["PUBLIC"])
+
+export_file(name = "kci.job.json", src = "definitions/kci.job.json", visibility = ["PUBLIC"])

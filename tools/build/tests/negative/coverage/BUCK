@@ -1,3 +1,4 @@
+load("@komira//tools/build/coverage:census.bzl", "coverage_census")
 load("@komira//tools/build/coverage:defs.bzl", "cov_gate_dir")
 load("@komira//tools/build/coverage/branch:defs.bzl", "cov_branch_dir")
 load("@komira//tools/build/coverage/kcov:defs.bzl", "cov_link_dir", "cov_run_dir")
@@ -625,6 +626,63 @@ mojo_library(
     import_name = "covfull",
     test_srcs = ["tests/test_full.mojo"],
 )
+
+# Test 46. A floor holds in census mode: covlow's sources and test (line
+# 50.00%, branch 25.00%) under a ratchet row one basis point above its line
+# (covfloor_ratchet.tsv) is a Regression, which fails the gate in every
+# mode, so its conda package is not produced; the library builds. At its
+# floors (covfloor_held_ratchet.tsv) the census gate is green.
+# RED: tests//negative/coverage:covfloor[coverage][gate], :covfloor_conda.
+# GREEN: :covfloor, :covfloor_held[coverage][gate].
+[
+    cov_gate_dir(
+        name = name + "_gate",
+        exec_compatible_with = LINUX_X86_64,
+        ratchet = name + "_ratchet.tsv",
+    )
+    for name in ("covfloor", "covfloor_held")
+]
+
+[
+    mojo_library(
+        name = name,
+        srcs = [
+            "covlow/__init__.mojo",
+            "covlow/word.mojo",
+        ],
+        conda = name == "covfloor",
+        coverage_debug = _LINK,
+        coverage_gate = ":" + name + "_gate",
+        coverage_mode = "census",
+        import_name = "covlow",
+        test_srcs = ["tests/test_word.mojo"],
+    )
+    for name in ("covfloor", "covfloor_held")
+]
+
+# Test 46. The census check (tools/build/coverage/census.bzl): a doc and
+# floors exactly as census.sh renders them from census/census.tsv are GREEN
+# (:census_ok: a package floor is its lowest library, an old floor above the
+# measurement survives, a 0/0 library sets nothing, a pinned row is kept as
+# written); a doc edited by hand (doc_edited.txt: one percentage changed), a
+# floor lowered under what the census measured (ratchet_lowered.tsv) and a
+# pinned row with no reason (ratchet_pin_no_reason.tsv) are RED
+# (:census_doc_edited, :census_floor_lowered, :census_pin_no_reason). The docs are .txt so
+# the Markdown checks of this cell do not read their links.
+[
+    coverage_census(
+        name = name,
+        census = "census/census.tsv",
+        doc = "census/" + doc,
+        ratchet = "census/" + ratchet,
+    )
+    for name, doc, ratchet in (
+        ("census_ok", "doc.txt", "ratchet.tsv"),
+        ("census_doc_edited", "doc_edited.txt", "ratchet.tsv"),
+        ("census_floor_lowered", "doc.txt", "ratchet_lowered.tsv"),
+        ("census_pin_no_reason", "doc.txt", "ratchet_pin_no_reason.tsv"),
+    )
+]
 
 # Test 46. A test that passes in the release gate and fails under kcov (the
 # tracer test above), in a library with no coverage attribute of its own.
