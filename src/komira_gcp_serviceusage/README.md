@@ -88,6 +88,41 @@ assert_false(Bool(operation.error))
 Read whether it is on. The answer's `config` is skipped; the name, parent
 and state are read:
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+from std.memory import ArcPointer
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_gcp_core import StaticTokenSource
+from komira_gcp_serviceusage.resources import State
+from komira_gcp_serviceusage.serviceusage import GetServiceRequest, ServiceUsageClient
+from komira_http_client.client import HttpClient
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+comptime RUN_API = "projects/demo-project/services/run.googleapis.com"
+
+def usage_answering(body: String, sent: ArcPointer[List[UInt8]]) raises -> ServiceUsageClient[ScriptedConnector, StaticTokenSource]:
+    """A client whose one request is answered 200 with `body`."""
+    var text = (
+        String("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n")
+        + "Content-Length: " + String(body.byte_length())
+        + "\r\nConnection: close\r\n\r\n" + body
+    )
+    var reply = List[UInt8]()
+    reply.extend(Span(text.as_bytes()))
+    var client = ServiceUsageClient[ScriptedConnector, StaticTokenSource](
+        HttpClient[ScriptedConnector].with_defaults(
+            ScriptedConnector.with_stream_tls(
+                ScriptedStream.from_read_script_with_capture(reply^, sent)
+            )
+        ),
+        StaticTokenSource(String("a-token")),
+    )
+    client.set_rest_host(String("localhost"))
+    return client^
+-->
 ```mojo
 var get_sent = ArcPointer[List[UInt8]](List[UInt8]())
 var reader = usage_answering(

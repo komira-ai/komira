@@ -66,6 +66,7 @@ assert_equal(
 GetSchedule is a GET naming the schedule; a name the model's bounds refuse
 never becomes a request:
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_raises -->
 ```mojo
 from komira_aws_scheduler.komira_aws_scheduler import SchedulerGetScheduleInput
 from komira_aws_scheduler.komira_aws_scheduler import build_get_schedule_request
@@ -82,6 +83,7 @@ with assert_raises(contains="Name"):
 Decode a GetSchedule answer, and read a restJson1 error (the code from the
 `X-Amzn-Errortype` header, cut at its first `:`):
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_aws_core import AwsResponse, aws_rest_json_error
 from komira_aws_scheduler.komira_aws_scheduler import SchedulerResourceNotFoundException
@@ -114,6 +116,10 @@ assert_equal(err.message, "Schedule nightly-reap does not exist.")
 
 Resolve the endpoint a call goes to:
 
+<!-- mojo-hidden
+from std.testing import assert_equal
+from komira_aws_scheduler.komira_aws_scheduler import SchedulerGetScheduleInput
+-->
 ```mojo
 from komira_aws_scheduler.komira_aws_scheduler import SchedulerEndpointConfig
 from komira_aws_scheduler.komira_aws_scheduler import komira_aws_scheduler_endpoint_rules

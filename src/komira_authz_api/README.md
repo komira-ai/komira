@@ -61,13 +61,14 @@ _ = rt^
 The value types, and a host's own conformer that allows only `read`:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
-```mojo
+```mojo module
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_MOCK, Reactor
 from komira_async.runtime.blocking_runtime import BlockingRuntime, block_on
 from komira_async.runtime.runtime_trait import Runtime
 from komira_authz_api import AuthzAction, AuthzPort, AuthzResource
 from komira_http_server.middleware import Principal
+
 
 struct ReadOnlyAuthz(AuthzPort):
     def __init__(out self):
@@ -82,6 +83,7 @@ struct ReadOnlyAuthz(AuthzPort):
     ) raises -> Bool:
         return principal.subject.byte_length() > 0 and action == AuthzAction.read()
 
+
 def read_only_decisions(mut reactor: Reactor[NoopSink]) raises -> Int64:
     var authz = ReadOnlyAuthz()
     var doc = AuthzResource(kind=String("document"), id=String("doc-1"))
@@ -92,16 +94,18 @@ def read_only_decisions(mut reactor: Reactor[NoopSink]) raises -> Int64:
         bits |= 2
     return bits
 
-var doc = AuthzResource(kind=String("document"), id=String("doc-1"))
-assert_equal(doc.kind, "document")
-assert_equal(doc.id, "doc-1")
-var tagged = doc.copy().with_attribute(String("label"), String("draft"))
-assert_equal(tagged.attributes.get(String("label")).value(), "draft")
-assert_equal(doc.attributes.len(), 0)  # the original is unchanged
-assert_equal(AuthzAction.admin().name, "admin")
-assert_true(AuthzAction(String("read")) == AuthzAction.read())
 
-var rt = BlockingRuntime[NoopSink](NoopSink(_placeholder=UInt8(0)), BACKEND_MOCK)
-assert_equal(Int(block_on[NoopSink, Int64](rt, read_only_decisions)), 1)
-_ = rt^
+def main() raises:
+    var doc = AuthzResource(kind=String("document"), id=String("doc-1"))
+    assert_equal(doc.kind, "document")
+    assert_equal(doc.id, "doc-1")
+    var tagged = doc.copy().with_attribute(String("label"), String("draft"))
+    assert_equal(tagged.attributes.get(String("label")).value(), "draft")
+    assert_equal(doc.attributes.len(), 0)  # the original is unchanged
+    assert_equal(AuthzAction.admin().name, "admin")
+    assert_true(AuthzAction(String("read")) == AuthzAction.read())
+
+    var rt = BlockingRuntime[NoopSink](NoopSink(_placeholder=UInt8(0)), BACKEND_MOCK)
+    assert_equal(Int(block_on[NoopSink, Int64](rt, read_only_decisions)), 1)
+    _ = rt^
 ```

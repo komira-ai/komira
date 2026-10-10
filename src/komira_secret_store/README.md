@@ -50,8 +50,9 @@ A consumer binds its own store by conforming to the trait, and code generic
 over `[S: SecretStore]` accepts it:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_raises -->
-```mojo
+```mojo module
 from komira_secret_store import MAX_SECRET_LEN, SecretMeta, SecretStore, SecretValue
+
 
 struct OneSecret(SecretStore, Movable):
     var name: String
@@ -66,19 +67,22 @@ struct OneSecret(SecretStore, Movable):
             raise Error("unknown ref " + secret_ref)
         return SecretValue.from_string(self.value)
 
+
 def secret_length[S: SecretStore](mut store: S, name: String) raises -> Int:
     return store.resolve(name).len()
 
-var mine = OneSecret("api/token", "abc123")
-assert_equal(secret_length(mine, "api/token"), 6)
 
-var too_long = List[UInt8](length=MAX_SECRET_LEN + 1, fill=0x41)
-with assert_raises(contains="exceeds MAX_SECRET_LEN"):
-    _ = SecretValue(Span(too_long))
+def main() raises:
+    var mine = OneSecret("api/token", "abc123")
+    assert_equal(secret_length(mine, "api/token"), 6)
 
-var meta = SecretMeta("api/token", 1, 0)
-assert_equal(
-    String(meta),
-    "SecretMeta(name_handle='api/token', provider_kind=1, reachability=0)",
-)
+    var too_long = List[UInt8](length=MAX_SECRET_LEN + 1, fill=0x41)
+    with assert_raises(contains="exceeds MAX_SECRET_LEN"):
+        _ = SecretValue(Span(too_long))
+
+    var meta = SecretMeta("api/token", 1, 0)
+    assert_equal(
+        String(meta),
+        "SecretMeta(name_handle='api/token', provider_kind=1, reachability=0)",
+    )
 ```

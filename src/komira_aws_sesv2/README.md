@@ -59,6 +59,7 @@ assert_equal(
 
 An identity in the path is percent-encoded:
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_aws_sesv2.komira_aws_sesv2 import SESv2GetEmailIdentityRequest
 from komira_aws_sesv2.komira_aws_sesv2 import build_get_email_identity_request
@@ -72,6 +73,7 @@ assert_equal(len(get.body), 0)
 Decode a GetEmailIdentity answer (an identity whose DNS records are not found
 yet), and read a restJson1 error:
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_false -->
 ```mojo
 from komira_aws_core import AwsResponse, aws_rest_json_error
 from komira_aws_sesv2.komira_aws_sesv2 import parse_get_email_identity_response
@@ -101,6 +103,10 @@ assert_equal(info.message, "Email identity mail.example.com does not exist.")
 
 Resolve the endpoint a call goes to:
 
+<!-- mojo-hidden
+from std.testing import assert_equal
+from komira_aws_sesv2.komira_aws_sesv2 import SESv2GetEmailIdentityRequest
+-->
 ```mojo
 from komira_aws_sesv2.komira_aws_sesv2 import SESv2EndpointConfig, komira_aws_sesv2_endpoint_rules
 from komira_aws_sesv2.komira_aws_sesv2 import resolve_get_email_identity_endpoint

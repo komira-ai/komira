@@ -106,7 +106,39 @@ assert_equal(created.email, "runner@example.com")
 
 The account's email is one path segment, so its `@` is escaped:
 
-<!-- mojo-hidden from std.testing import assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_true
+from std.memory import ArcPointer
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_gcp_core import StaticTokenSource
+from komira_gcp_iam.iam import GetServiceAccountRequest, IAMClient
+from komira_http_client.client import HttpClient
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+comptime Client = IAMClient[ScriptedConnector, StaticTokenSource]
+
+def http_answer(status: String, body: String) -> List[UInt8]:
+    var text = (
+        String("HTTP/1.1 ") + status + "\r\nContent-Type: application/json\r\n"
+        + "Content-Length: " + String(body.byte_length())
+        + "\r\nConnection: close\r\n\r\n" + body
+    )
+    var out = List[UInt8]()
+    out.extend(Span(text.as_bytes()))
+    return out^
+
+def scripted_client(answer: List[UInt8], sent: ArcPointer[List[UInt8]]) raises -> Client:
+    var stream = ScriptedStream.from_read_script_with_capture(answer.copy(), sent)
+    var c = Client(
+        HttpClient[ScriptedConnector].with_defaults(ScriptedConnector.with_stream_tls(stream^)),
+        StaticTokenSource(String("test-access-token")),
+    )
+    c.set_rest_host(String("localhost"))
+    return c^
+-->
 ```mojo
 var sent = ArcPointer[List[UInt8]](List[UInt8]())
 var c = scripted_client(http_answer("200 OK", '{"email":"runner@example.com"}'), sent)
@@ -127,7 +159,39 @@ role go to different paths, and a predefined role cannot be deleted (no
 DeleteRole binding takes it), so that request is refused before anything is
 written:
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+from std.memory import ArcPointer
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_gcp_core import StaticTokenSource
+from komira_gcp_iam.iam import DeleteRoleRequest, GetRoleRequest, IAMClient
+from komira_http_client.client import HttpClient
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+comptime Client = IAMClient[ScriptedConnector, StaticTokenSource]
+
+def http_answer(status: String, body: String) -> List[UInt8]:
+    var text = (
+        String("HTTP/1.1 ") + status + "\r\nContent-Type: application/json\r\n"
+        + "Content-Length: " + String(body.byte_length())
+        + "\r\nConnection: close\r\n\r\n" + body
+    )
+    var out = List[UInt8]()
+    out.extend(Span(text.as_bytes()))
+    return out^
+
+def scripted_client(answer: List[UInt8], sent: ArcPointer[List[UInt8]]) raises -> Client:
+    var stream = ScriptedStream.from_read_script_with_capture(answer.copy(), sent)
+    var c = Client(
+        HttpClient[ScriptedConnector].with_defaults(ScriptedConnector.with_stream_tls(stream^)),
+        StaticTokenSource(String("test-access-token")),
+    )
+    c.set_rest_host(String("localhost"))
+    return c^
+-->
 ```mojo
 var rt = Runtime.new(NoopSink(_placeholder=UInt8(0)))
 ref reactor = rt.reactor()
@@ -163,7 +227,39 @@ A non-2xx answer raises. The error names the verb, the method, the HTTP
 status and the canonical code from the `google.rpc.Status` envelope, and
 quotes no byte of the body; `gcp_status_error_code` reads the code back:
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+from std.memory import ArcPointer
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_gcp_core import CODE_NOT_FOUND, StaticTokenSource, gcp_status_error_code
+from komira_gcp_iam.iam import GetServiceAccountRequest, IAMClient
+from komira_http_client.client import HttpClient
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+comptime Client = IAMClient[ScriptedConnector, StaticTokenSource]
+
+def http_answer(status: String, body: String) -> List[UInt8]:
+    var text = (
+        String("HTTP/1.1 ") + status + "\r\nContent-Type: application/json\r\n"
+        + "Content-Length: " + String(body.byte_length())
+        + "\r\nConnection: close\r\n\r\n" + body
+    )
+    var out = List[UInt8]()
+    out.extend(Span(text.as_bytes()))
+    return out^
+
+def scripted_client(answer: List[UInt8], sent: ArcPointer[List[UInt8]]) raises -> Client:
+    var stream = ScriptedStream.from_read_script_with_capture(answer.copy(), sent)
+    var c = Client(
+        HttpClient[ScriptedConnector].with_defaults(ScriptedConnector.with_stream_tls(stream^)),
+        StaticTokenSource(String("test-access-token")),
+    )
+    c.set_rest_host(String("localhost"))
+    return c^
+-->
 ```mojo
 var sent = ArcPointer[List[UInt8]](List[UInt8]())
 var c = scripted_client(

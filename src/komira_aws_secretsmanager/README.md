@@ -60,6 +60,7 @@ assert_equal(
 
 DeleteSecret's arguments, checked before anything is sent:
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_raises, assert_true -->
 ```mojo
 from komira_aws_secretsmanager.komira_aws_secretsmanager import SecretsManagerDeleteSecretRequest
 from komira_aws_secretsmanager.komira_aws_secretsmanager import build_delete_secret_request
@@ -97,6 +98,7 @@ assert_false(secret_name_is_scheduled_for_deletion(String("ResourceExistsExcepti
 Decode a GetSecretValue answer, and read an error with komira_aws_core's
 `aws_json_error_info` and the modeled error shape:
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_false -->
 ```mojo
 from komira_aws_core import AwsResponse, aws_json_error_info
 from komira_aws_secretsmanager.komira_aws_secretsmanager import SecretsManagerResourceNotFoundException
@@ -130,6 +132,7 @@ assert_equal(err.message.value(), "Secrets Manager can't find the specified secr
 
 Resolve the endpoint a call goes to:
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_aws_secretsmanager.komira_aws_secretsmanager import SecretsManagerEndpointConfig
 from komira_aws_secretsmanager.komira_aws_secretsmanager import SecretsManagerGetSecretValueRequest

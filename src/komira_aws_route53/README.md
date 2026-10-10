@@ -67,6 +67,7 @@ assert_equal(
 
 A lookup is a GET with its parameters in the query:
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_aws_route53.komira_aws_route53 import Route53ListHostedZonesByNameRequest
 from komira_aws_route53.komira_aws_route53 import build_list_hosted_zones_by_name_request
@@ -83,6 +84,7 @@ assert_equal(len(req.body), 0)
 Decode a change's answer, and read an `<ErrorResponse>` with komira_aws_core's
 `aws_rest_xml_error`:
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_aws_core import AwsResponse, aws_rest_xml_error
 from komira_aws_route53.komira_aws_route53 import ROUTE53_CHANGE_STATUS_PENDING
@@ -120,6 +122,10 @@ assert_equal(e.request_id, "c9a5a1c0-0000-4000-8000-0123456789ab")
 Resolve the endpoint: a client configured in eu-west-1 reaches the global
 endpoint and signs in us-east-1:
 
+<!-- mojo-hidden
+from std.testing import assert_equal
+from komira_aws_route53.komira_aws_route53 import Route53ListHostedZonesByNameRequest
+-->
 ```mojo
 from komira_aws_core import aws_signing_target
 from komira_aws_route53.komira_aws_route53 import Route53EndpointConfig

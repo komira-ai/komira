@@ -54,6 +54,7 @@ assert_equal(req.body_text(), '{"v":1}')
 
 A ranged GetObject, and the headers of its 206 answer:
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_aws_core import AwsResponse
 from komira_aws_s3.komira_aws_s3 import S3GetObjectRequest, build_get_object_request
@@ -83,6 +84,10 @@ assert_equal(len(full.body.value()), 10)
 Decode a ListObjectsV2 page, and read an error with komira_aws_core's
 `aws_rest_xml_error`:
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+from komira_aws_core import AwsResponse
+-->
 ```mojo
 from komira_aws_core import aws_rest_xml_error
 from komira_aws_s3.komira_aws_s3 import parse_list_objects_v2_response
@@ -122,6 +127,10 @@ assert_equal(info.code, "NoSuchKey")
 Resolve where a request goes: virtual-host addressing by default, path style
 when asked for:
 
+<!-- mojo-hidden
+from std.testing import assert_equal
+from komira_aws_s3.komira_aws_s3 import S3GetObjectRequest, build_get_object_request
+-->
 ```mojo
 from komira_aws_core import aws_signing_target
 from komira_aws_s3.komira_aws_s3 import S3EndpointConfig, komira_aws_s3_endpoint_rules

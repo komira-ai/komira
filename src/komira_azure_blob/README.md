@@ -60,6 +60,7 @@ A Shared Key signature for `GET /container/blob.txt`, with the string that
 was signed (the empty fields are the Content-*, Date, If-* and Range slots
 this request leaves unset):
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_azure_core import AzureSharedKey
 from komira_azure_blob import AzureSharedKeySigningContext, azure_shared_key_sign
@@ -93,6 +94,7 @@ assert_equal(
 
 A List Blobs page and an error body, read:
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_azure_blob import parse_azure_error, parse_azure_list_blobs_result
 
@@ -123,6 +125,7 @@ A presigned download and upload, signed at a fixed instant
 (2026-10-01T12:00:00Z) for five minutes. The upload URL comes with the one
 header Put Blob requires of a block-blob write:
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo
 from komira_azure_blob import AzureSasSigner, FixedAzureSasClock
 

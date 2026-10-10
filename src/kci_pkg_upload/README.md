@@ -68,7 +68,26 @@ assert_true(req.path.find("force") < 0)
 
 A name nobody approved is refused before any request is made:
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+from kci_pkg_upload import PackageCoordinate, PackageFile, RegistrySet, SUBSTRATE_PREFIX_DEV_CONDA, SURFACE_PREFIX_DEV, ScriptedCredential, ScriptedPkgTransport
+
+def probe_file(content: String) -> PackageFile:
+    var c = PackageCoordinate(
+        SUBSTRATE_PREFIX_DEV_CONDA, "prefix.dev/example-channel", "komira-probe", "1.2.3", "linux-64",
+        "komira-probe-1.2.3-h0123abc_0.conda",
+    )
+    var bytes = List[UInt8]()
+    var src = content.as_bytes()
+    for i in range(len(src)):
+        bytes.append(src[i])
+    return PackageFile(c^, bytes^, "")
+
+def probe_registry(var t: ScriptedPkgTransport) -> RegistrySet[ScriptedPkgTransport, ScriptedCredential]:
+    var cred = ScriptedCredential()
+    cred.serve(SURFACE_PREFIX_DEV, "Bearer example-token")
+    return RegistrySet[ScriptedPkgTransport, ScriptedCredential](t^, cred^)
+-->
 ```mojo
 from kci_pkg_upload import ApprovedNames, PkgResponse, ScriptedPkgTransport
 
@@ -87,7 +106,26 @@ assert_equal(reg.transport().call_count(), 0)
 A 409 says the file name is taken; reading the channel's listing back
 settles whether it holds our bytes or someone else's:
 
-<!-- mojo-hidden from std.testing import assert_equal -->
+<!-- mojo-hidden
+from std.testing import assert_equal
+from kci_pkg_upload import PackageCoordinate, PackageFile, RegistrySet, SUBSTRATE_PREFIX_DEV_CONDA, SURFACE_PREFIX_DEV, ScriptedCredential, ScriptedPkgTransport
+
+def probe_file(content: String) -> PackageFile:
+    var c = PackageCoordinate(
+        SUBSTRATE_PREFIX_DEV_CONDA, "prefix.dev/example-channel", "komira-probe", "1.2.3", "linux-64",
+        "komira-probe-1.2.3-h0123abc_0.conda",
+    )
+    var bytes = List[UInt8]()
+    var src = content.as_bytes()
+    for i in range(len(src)):
+        bytes.append(src[i])
+    return PackageFile(c^, bytes^, "")
+
+def probe_registry(var t: ScriptedPkgTransport) -> RegistrySet[ScriptedPkgTransport, ScriptedCredential]:
+    var cred = ScriptedCredential()
+    cred.serve(SURFACE_PREFIX_DEV, "Bearer example-token")
+    return RegistrySet[ScriptedPkgTransport, ScriptedCredential](t^, cred^)
+-->
 ```mojo
 from kci_pkg_upload import ApprovedNames, PkgResponse, ScriptedPkgTransport, PRESENCE_PRESENT_DIFFERENT
 from kci_pkg_upload import PRESENCE_PRESENT_IDENTICAL, UPLOAD_DUPLICATE_REFUSED

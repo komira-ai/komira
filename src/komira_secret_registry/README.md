@@ -26,9 +26,10 @@ Register a node, reveal its secret into a consumer, rotate it, and see an
 unbound node refused:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_raises, assert_true -->
-```mojo
+```mojo module
 from komira_secret_registry import CredentialConsumer, SecretRegistry
 from komira_secret_store import StaticSecretStore
+
 
 struct LengthConsumer(CredentialConsumer, Movable):
     """Records only how many bytes it was handed and the first one."""
@@ -43,28 +44,30 @@ struct LengthConsumer(CredentialConsumer, Movable):
         self.length = len(secret)
         self.first = secret[0]
 
-var store = StaticSecretStore()
-store.put("ref-pg", "s3cr3t")
-var probe = store.share()  # a second handle onto the same scripted store
 
-var reg = SecretRegistry[StaticSecretStore](store^)
-reg.register(7, "prod-pg", "ref-pg")
-assert_true(reg.has_binding(7))
-assert_false(reg.has_binding(8))
+def main() raises:
+    var store = StaticSecretStore()
+    store.put("ref-pg", "s3cr3t")
+    var probe = store.share()  # a second handle onto the same scripted store
 
-var seen = LengthConsumer()
-reg.reveal_for(7, seen)
-assert_equal(seen.length, 6)
-assert_equal(seen.first, UInt8(ord("s")))
+    var reg = SecretRegistry[StaticSecretStore](store^)
+    reg.register(7, "prod-pg", "ref-pg")
+    assert_true(reg.has_binding(7))
+    assert_false(reg.has_binding(8))
 
-probe.put("ref-pg", "rotated-secret")  # nothing is cached: the next reveal sees it
-reg.reveal_for(7, seen)
-assert_equal(seen.length, 14)
-assert_equal(probe.resolve_count(), 2)
+    var seen = LengthConsumer()
+    reg.reveal_for(7, seen)
+    assert_equal(seen.length, 6)
+    assert_equal(seen.first, UInt8(ord("s")))
 
-with assert_raises(contains="no secret binding for node_id 8"):
-    reg.reveal_for(8, seen)
-assert_equal(probe.resolve_count(), 2)  # refused before the store was asked
+    probe.put("ref-pg", "rotated-secret")  # nothing is cached: the next reveal sees it
+    reg.reveal_for(7, seen)
+    assert_equal(seen.length, 14)
+    assert_equal(probe.resolve_count(), 2)
+
+    with assert_raises(contains="no secret binding for node_id 8"):
+        reg.reveal_for(8, seen)
+    assert_equal(probe.resolve_count(), 2)  # refused before the store was asked
 ```
 
 A plan carries store-less `SecretBindings`; two plans merge, and the engine

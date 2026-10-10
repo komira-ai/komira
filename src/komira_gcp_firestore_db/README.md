@@ -75,7 +75,30 @@ A conditional update applies only while its guard still matches, and bumps
 the version column; the same guard issued again is stale and affects no
 row, which a caller reports as a concurrent change:
 
-<!-- mojo-hidden from std.testing import assert_equal -->
+<!-- mojo-hidden
+from std.testing import assert_equal
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_db import DbColVal, DbValue, Filter, Pred
+from komira_gcp_firestore.firestore_client import FirestoreClient
+from komira_gcp_firestore_db import DeclaredIndexSet, FirestoreDatabase, MockFirestore, MockFirestoreConnector
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+comptime Db = FirestoreDatabase[MockFirestoreConnector]
+
+def mock_db(var declared: DeclaredIndexSet) -> Db:
+    var client = FirestoreClient[MockFirestoreConnector](
+        MockFirestore().connector(), String("demo"), String("(default)"), String("test-bearer")
+    )
+    return Db(client^, declared^)
+
+def columns() -> List[String]:
+    return [String("id"), String("owner"), String("phase"), String("version")]
+
+def row(id: String, owner: String, phase: String) -> List[DbValue]:
+    return [DbValue.text(id), DbValue.text(owner), DbValue.text(phase), DbValue.int8(Int64(1))]
+-->
 ```mojo
 var rt = Runtime.new(NoopSink(_placeholder=UInt8(0)))
 ref reactor = rt.reactor()
@@ -108,7 +131,30 @@ back. An equality filter with an ORDER BY on another field needs a composite
 index, so without a declaration it is refused before it is sent, naming the
 collection and the fields; once declared, it runs:
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_db import DbValue, Filter, Order, Pred
+from komira_gcp_firestore.firestore_client import FirestoreClient
+from komira_gcp_firestore_db import DeclaredIndexSet, FirestoreDatabase, MockFirestore, MockFirestoreConnector
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+comptime Db = FirestoreDatabase[MockFirestoreConnector]
+
+def mock_db(var declared: DeclaredIndexSet) -> Db:
+    var client = FirestoreClient[MockFirestoreConnector](
+        MockFirestore().connector(), String("demo"), String("(default)"), String("test-bearer")
+    )
+    return Db(client^, declared^)
+
+def columns() -> List[String]:
+    return [String("id"), String("owner"), String("phase"), String("version")]
+
+def row(id: String, owner: String, phase: String) -> List[DbValue]:
+    return [DbValue.text(id), DbValue.text(owner), DbValue.text(phase), DbValue.int8(Int64(1))]
+-->
 ```mojo
 var rt = Runtime.new(NoopSink(_placeholder=UInt8(0)))
 ref reactor = rt.reactor()

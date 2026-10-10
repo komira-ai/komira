@@ -77,7 +77,24 @@ assert_equal(reg.transport().write_count(), writes)  # nothing written the secon
 A channel that already holds one of our file names with other bytes stops
 the step before anything is uploaded:
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+from komira_secret_store import StaticSecretStore
+from kci_api import MemoryRecorder, RunResult
+from kci_pkg_upload import RegistrySet, ScriptedPkgTransport
+from kci_publish import ActionsOidcEnv, NoWaitSleeper, PublishCredential, PublishReport, PublishRequest, RunOptions, ScriptedChannel, publish_flow
+from kci_publish.release_fixture import EXAMPLE_TOKEN_SECRET
+
+def publish_once(req: PublishRequest, mut reg: RegistrySet[ScriptedChannel, PublishCredential], mut result: RunResult) raises -> PublishReport:
+    var store = StaticSecretStore()
+    store.put(EXAMPLE_TOKEN_SECRET, "example-token-not-a-secret")
+    var recorder = MemoryRecorder()
+    var sleeper = NoWaitSleeper()
+    var opts = RunOptions(2, 0, 2, 0, 0, 2, 0)
+    return publish_flow(
+        req, result, recorder, reg, ScriptedPkgTransport(), ActionsOidcEnv.absent(), store, opts, sleeper
+    )
+-->
 ```mojo
 from std.tempfile import mkdtemp
 from kci_api import RunResult
@@ -103,7 +120,24 @@ assert_equal(reg.transport().write_count(), 0)
 A dry run reads the channel and reports what it would upload, writing
 nothing:
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+from komira_secret_store import StaticSecretStore
+from kci_api import MemoryRecorder, RunResult
+from kci_pkg_upload import RegistrySet, ScriptedPkgTransport
+from kci_publish import ActionsOidcEnv, NoWaitSleeper, PublishCredential, PublishReport, PublishRequest, RunOptions, ScriptedChannel, publish_flow
+from kci_publish.release_fixture import EXAMPLE_TOKEN_SECRET
+
+def publish_once(req: PublishRequest, mut reg: RegistrySet[ScriptedChannel, PublishCredential], mut result: RunResult) raises -> PublishReport:
+    var store = StaticSecretStore()
+    store.put(EXAMPLE_TOKEN_SECRET, "example-token-not-a-secret")
+    var recorder = MemoryRecorder()
+    var sleeper = NoWaitSleeper()
+    var opts = RunOptions(2, 0, 2, 0, 0, 2, 0)
+    return publish_flow(
+        req, result, recorder, reg, ScriptedPkgTransport(), ActionsOidcEnv.absent(), store, opts, sleeper
+    )
+-->
 ```mojo
 from std.tempfile import mkdtemp
 from kci_api import RunResult

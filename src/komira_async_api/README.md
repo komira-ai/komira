@@ -59,11 +59,12 @@ inline on the calling thread; a pooled dispatcher (one implementing
 dispatch the pool depth is zero:
 
 <!-- mojo-hidden from std.testing import assert_equal -->
-```mojo
+```mojo module
 from komira_async_api.fork_join_shared import fork_join_pool_depth, fork_join_shared
 from komira_async_api.parallel_dispatch import NoDispatch
 from komira_async_api.shared_chunk_work import SharedChunkWork
 from komira_async_api.token import CancellationToken
+
 
 @fieldwise_init
 struct SquareChunk(SharedChunkWork):
@@ -77,6 +78,7 @@ struct SquareChunk(SharedChunkWork):
         ref dst = rebind[List[Int]](payload)
         for i in range(chunk_id * self.chunk_len, (chunk_id + 1) * self.chunk_len):
             dst[i] = src[i] * src[i]
+
 
 def squares(imm values: List[Int], chunk_len: Int) raises -> List[Int]:
     var serial = NoDispatch()
@@ -95,6 +97,8 @@ def squares(imm values: List[Int], chunk_len: Int) raises -> List[Int]:
         UInt32(0),  # sched-trace site id
     )
 
-assert_equal(squares([1, 2, 3, 4, 5, 6], 2), [1, 4, 9, 16, 25, 36])
-assert_equal(fork_join_pool_depth(), Int64(0))
+
+def main() raises:
+    assert_equal(squares([1, 2, 3, 4, 5, 6], 2), [1, 4, 9, 16, 25, 36])
+    assert_equal(fork_join_pool_depth(), Int64(0))
 ```

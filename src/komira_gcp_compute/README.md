@@ -101,7 +101,38 @@ assert_true(op.status.value() == Operation_Status(Operation_Status.RUNNING))
 Setting `requestId` (here with `sourceInstanceTemplate`) puts it in the
 query; nothing fills one in for the caller:
 
-<!-- mojo-hidden from std.testing import assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_true
+from std.memory import ArcPointer
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_gcp_compute.compute import InsertInstanceRequest, Instance, InstancesClient
+from komira_gcp_core import StaticTokenSource
+from komira_http_client.client import HttpClient
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+from komira_proto_codec.codec import decode_json_lenient
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+comptime Http = HttpClient[ScriptedConnector]
+
+def http_answer(status: String, body: String) -> List[UInt8]:
+    var text = (
+        String("HTTP/1.1 ") + status + "\r\nContent-Type: application/json\r\n"
+        + "Content-Length: " + String(body.byte_length())
+        + "\r\nConnection: close\r\n\r\n" + body
+    )
+    var out = List[UInt8]()
+    out.extend(Span(text.as_bytes()))
+    return out^
+
+def scripted_http(answer: List[UInt8], sent: ArcPointer[List[UInt8]]) raises -> Http:
+    var stream = ScriptedStream.from_read_script_with_capture(answer.copy(), sent)
+    return Http.with_defaults(ScriptedConnector.with_stream_tls(stream^))
+
+def token() raises -> StaticTokenSource:
+    return StaticTokenSource(String("test-access-token"))
+-->
 ```mojo
 var sent = ArcPointer[List[UInt8]](List[UInt8]())
 var c = InstancesClient[ScriptedConnector, StaticTokenSource](
@@ -133,7 +164,37 @@ assert_true(wire.startswith(
 Waiting on an operation: a write that failed comes back as a 200 whose
 operation is DONE with `error` set, so the caller reads `error` after DONE:
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+from std.memory import ArcPointer
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_gcp_compute.compute import Operation_Status, WaitZoneOperationRequest, ZoneOperationsClient
+from komira_gcp_core import StaticTokenSource
+from komira_http_client.client import HttpClient
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+comptime Http = HttpClient[ScriptedConnector]
+
+def http_answer(status: String, body: String) -> List[UInt8]:
+    var text = (
+        String("HTTP/1.1 ") + status + "\r\nContent-Type: application/json\r\n"
+        + "Content-Length: " + String(body.byte_length())
+        + "\r\nConnection: close\r\n\r\n" + body
+    )
+    var out = List[UInt8]()
+    out.extend(Span(text.as_bytes()))
+    return out^
+
+def scripted_http(answer: List[UInt8], sent: ArcPointer[List[UInt8]]) raises -> Http:
+    var stream = ScriptedStream.from_read_script_with_capture(answer.copy(), sent)
+    return Http.with_defaults(ScriptedConnector.with_stream_tls(stream^))
+
+def token() raises -> StaticTokenSource:
+    return StaticTokenSource(String("test-access-token"))
+-->
 ```mojo
 var sent = ArcPointer[List[UInt8]](List[UInt8]())
 var ops = ZoneOperationsClient[ScriptedConnector, StaticTokenSource](
@@ -168,7 +229,38 @@ A non-2xx answer raises. Compute's older envelope names no status, so the
 code comes from the HTTP status (409 is ABORTED) and the envelope's
 `reason` tells "already exists" apart; no byte of the message is quoted:
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+from std.memory import ArcPointer
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_gcp_compute.compute import InsertInstanceRequest, Instance, InstancesClient
+from komira_gcp_core import CODE_ABORTED, StaticTokenSource, gcp_status_error_code
+from komira_http_client.client import HttpClient
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+from komira_proto_codec.codec import decode_json_lenient
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+comptime Http = HttpClient[ScriptedConnector]
+
+def http_answer(status: String, body: String) -> List[UInt8]:
+    var text = (
+        String("HTTP/1.1 ") + status + "\r\nContent-Type: application/json\r\n"
+        + "Content-Length: " + String(body.byte_length())
+        + "\r\nConnection: close\r\n\r\n" + body
+    )
+    var out = List[UInt8]()
+    out.extend(Span(text.as_bytes()))
+    return out^
+
+def scripted_http(answer: List[UInt8], sent: ArcPointer[List[UInt8]]) raises -> Http:
+    var stream = ScriptedStream.from_read_script_with_capture(answer.copy(), sent)
+    return Http.with_defaults(ScriptedConnector.with_stream_tls(stream^))
+
+def token() raises -> StaticTokenSource:
+    return StaticTokenSource(String("test-access-token"))
+-->
 ```mojo
 var sent = ArcPointer[List[UInt8]](List[UInt8]())
 var c = InstancesClient[ScriptedConnector, StaticTokenSource](

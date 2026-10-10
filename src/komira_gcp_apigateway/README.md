@@ -88,7 +88,41 @@ assert_equal(gw.default_hostname, "orders-gw.example")
 Creating an Api sends the message as JSON with the id in the query, and
 answers the long-running `Operation`, here not yet done:
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+from std.memory import ArcPointer
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_gcp_apigateway.apigateway import Api, CreateApiRequest
+from komira_gcp_apigateway.apigateway_service import ApiGatewayServiceClient
+from komira_gcp_core import StaticTokenSource
+from komira_http_client.client import HttpClient
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+from komira_proto_codec.codec import decode_json_lenient
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+comptime Client = ApiGatewayServiceClient[ScriptedConnector, StaticTokenSource]
+
+def http_answer(status: String, body: String) -> List[UInt8]:
+    var text = (
+        String("HTTP/1.1 ") + status + "\r\nContent-Type: application/json\r\n"
+        + "Content-Length: " + String(body.byte_length())
+        + "\r\nConnection: close\r\n\r\n" + body
+    )
+    var out = List[UInt8]()
+    out.extend(Span(text.as_bytes()))
+    return out^
+
+def scripted_client(answer: List[UInt8], sent: ArcPointer[List[UInt8]]) raises -> Client:
+    var stream = ScriptedStream.from_read_script_with_capture(answer.copy(), sent)
+    var c = Client(
+        HttpClient[ScriptedConnector].with_defaults(ScriptedConnector.with_stream_tls(stream^)),
+        StaticTokenSource(String("test-access-token")),
+    )
+    c.set_rest_host(String("localhost"))
+    return c^
+-->
 ```mojo
 var sent = ArcPointer[List[UInt8]](List[UInt8]())
 var c = scripted_client(
@@ -118,7 +152,40 @@ A non-2xx answer raises. The error names the verb, the method, the HTTP
 status and the canonical code from the `google.rpc.Status` envelope, and
 quotes no byte of the body; `gcp_status_error_code` reads the code back:
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+from std.memory import ArcPointer
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_gcp_apigateway.apigateway import GetGatewayRequest
+from komira_gcp_apigateway.apigateway_service import ApiGatewayServiceClient
+from komira_gcp_core import CODE_NOT_FOUND, StaticTokenSource, gcp_status_error_code
+from komira_http_client.client import HttpClient
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+comptime Client = ApiGatewayServiceClient[ScriptedConnector, StaticTokenSource]
+
+def http_answer(status: String, body: String) -> List[UInt8]:
+    var text = (
+        String("HTTP/1.1 ") + status + "\r\nContent-Type: application/json\r\n"
+        + "Content-Length: " + String(body.byte_length())
+        + "\r\nConnection: close\r\n\r\n" + body
+    )
+    var out = List[UInt8]()
+    out.extend(Span(text.as_bytes()))
+    return out^
+
+def scripted_client(answer: List[UInt8], sent: ArcPointer[List[UInt8]]) raises -> Client:
+    var stream = ScriptedStream.from_read_script_with_capture(answer.copy(), sent)
+    var c = Client(
+        HttpClient[ScriptedConnector].with_defaults(ScriptedConnector.with_stream_tls(stream^)),
+        StaticTokenSource(String("test-access-token")),
+    )
+    c.set_rest_host(String("localhost"))
+    return c^
+-->
 ```mojo
 var sent = ArcPointer[List[UInt8]](List[UInt8]())
 var c = scripted_client(

@@ -104,6 +104,10 @@ A user is found by the subject key of their token's issuer and subject. The
 issuer's length leads the key, so two different pairs never share one, even
 when their concatenations are the same text:
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+from komira_chat_store import subject_key
+-->
 ```mojo
 assert_equal(subject_key(String("a"), String("bc")), "1:abc")
 assert_equal(subject_key(String("ab"), String("c")), "2:abc")
@@ -114,6 +118,10 @@ One set of users has one DM: its id is `dm-` and the sorted users joined by
 `.`, whatever the order or repeats it was asked with. A DM holds 2 to 9
 distinct valid users:
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false
+from komira_chat_store import dm_channel_id, is_valid_id
+-->
 ```mojo
 def raised_by(ids: List[String]) -> String:
     try:
@@ -134,6 +142,7 @@ The SQL schema is an ordered chain of steps numbered from 1, each with its
 own ledger name (the ledger records names, so a re-run applies nothing). The
 document-store declarations name only the store's tables:
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo
 from komira_chat_store import CHAT_DOCUMENT_INDEXES, CHAT_DOCUMENT_KEYS, T_CHANNELS, T_CURSORS, T_EVENTS, T_FILES, T_MEMBERS, T_MENTIONS, T_SUBJECTS, T_USERS, chat_migrations
 
