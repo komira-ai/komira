@@ -23,7 +23,13 @@
 #     (a lone 0xFF, a truncated 2-byte sequence) is refused naming the
 #     line's first byte, rather than turned into a String that is not
 #     UTF-8. Before the fix each byte became a code point and nothing was
-#     refused.
+#     refused. `split_lines` reaches the check from three places, and each
+#     has a case: the scalar tail (`61 FF 0A`, 3 bytes), the last line with
+#     no LF (`61 0A C3`), and the 16-byte chunk loop (a bad line whose LF
+#     lies inside a full first chunk, at byte 0 and after a good line at
+#     byte 3). The chunk-loop cases need at least 16 bytes with the LF in
+#     the first 16; a longer line whose LF falls past them is split in the
+#     tail loop instead.
 # =============================================================================
 
 from std.testing import assert_equal
@@ -175,6 +181,32 @@ def test_split_lines_refuses_invalid_utf8() raises:
     cut.append(0xC3)
     assert_equal(
         _refusal(cut^), "split_lines: the line at byte 2 is not UTF-8"
+    )
+    # 16 bytes, LF at byte 2: the chunk loop splits off `61 FF`.
+    var in_chunk = List[UInt8]()
+    in_chunk.append(0x61)
+    in_chunk.append(0xFF)
+    in_chunk.append(0x0A)
+    for _ in range(13):
+        in_chunk.append(0x62)
+    assert_equal(len(in_chunk), 16)
+    assert_equal(
+        _refusal(in_chunk^), "split_lines: the line at byte 0 is not UTF-8"
+    )
+    # 16 bytes: a good line `ok`, then `61 FF` ending at the LF at byte 5,
+    # both inside the first chunk; the refusal names byte 3.
+    var after_good = List[UInt8]()
+    after_good.append(0x6F)
+    after_good.append(0x6B)
+    after_good.append(0x0A)
+    after_good.append(0x61)
+    after_good.append(0xFF)
+    after_good.append(0x0A)
+    for _ in range(10):
+        after_good.append(0x62)
+    assert_equal(len(after_good), 16)
+    assert_equal(
+        _refusal(after_good^), "split_lines: the line at byte 3 is not UTF-8"
     )
 
 
