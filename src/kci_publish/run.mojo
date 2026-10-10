@@ -17,7 +17,19 @@
 #      `backward_files`) stops it REFUSED, KCI-E-SUPERSEDED, with NO write
 #      request (a dry run too). When the channel lists a numbered build and
 #      `history` was not read (empty), it stops CANNOT_TELL (exit 5), never a
-#      pass;
+#      pass. With `RunOptions.main_line_only` (a channel that also takes
+#      break-glass builds: gamma) every rule here reads only the channel's
+#      MAIN-LINE builds (`plan.mojo` `main_line_files`); the others are
+#      reported (`OFF MAIN`) and never counted, and a main history that was
+#      not read stops it CANNOT_TELL. THE SPLIT: a run the rules would refuse
+#      asks git (`reader`, history.mojo) whether the release revision is on
+#      the history of the commit each newest (main-line) build names:
+#      every one descends from it -> SUPERSEDED (exit 0, nothing uploaded:
+#      a newer release is already in this channel); any one unrelated, or
+#      a newest build whose build string names no commit -> REFUSED,
+#      KCI-E-SUPERSEDED (exit 3), as before; otherwise (a prefix git
+#      cannot resolve to one commit, a shallow clone) CANNOT_TELL (exit 5),
+#      never SUPERSEDED;
 #   --plan stops here too, printing what steps 2 to 4 would do: no write
 #      request, and `source` is never asked for a write value (a dry run's
 #      credential probe is the flow's, before this);
@@ -51,6 +63,7 @@ from kci_pkg_upload import (
 from kci_pkg_upload.coordinate import repo_host
 
 from .channel_state import read_channel, read_file_state
+from .history import HistoryReader, UnreadHistory
 from .index import is_indexed
 from .plan import (
     STATE_ABSENT,
@@ -68,7 +81,10 @@ from .plan import (
     previous_build_number,
     RevisionHistory,
     backward_files,
+    main_line_files,
+    newest_build_prefixes,
     newest_listed_build_number,
+    off_main_files,
     superseding_files,
 )
 from kci_api import ERROR_CREDENTIAL, ERROR_SUPERSEDED
@@ -82,6 +98,7 @@ from .report import (
     REASON_READ_BACK_MISMATCH,
     REASON_REFUSED,
     REASON_STOP_DIFFERENT_BYTES,
+    REASON_SUPERSEDED,
     FileRow,
     PublishReport,
 )
@@ -156,6 +173,75 @@ def _record(mut r: PublishReport, i: Int, o: FileOutcome):
     r.lines.append(o.line.copy())
 
 
+comptime _SPLIT_DESCENDS: Int = 0
+comptime _SPLIT_UNRELATED: Int = 1
+comptime _SPLIT_CANNOT_TELL: Int = 2
+
+
+def _split_by_history[H: HistoryReader](
+    listed: List[String], revision: String, mut reader: H, mut lines: List[String]
+) -> Int:
+    """THE SPLIT (file header): whether the release revision is on the
+    history of every commit the newest of `listed` names. One line per
+    newest build into `lines`."""
+    var prefixes = newest_build_prefixes(listed)
+    if len(prefixes) == 0 or revision.byte_length() == 0:
+        lines.append(
+            String("CANNOT TELL whether the channel's newest build descends from this release: no newest build or no")
+            + String(" release revision to ask git about")
+        )
+        return _SPLIT_CANNOT_TELL
+    var unrelated = False
+    var cannot = False
+    for i in range(len(prefixes)):
+        ref p = prefixes[i]
+        if p.byte_length() == 0:
+            # a newest build whose name holds no commit cannot be shown to
+            # descend: REFUSED, never SUPERSEDED
+            unrelated = True
+            lines.append(
+                String("UNRELATED: a newest build of the channel names no commit, so it cannot be shown to descend")
+                + String(" from this release's revision ") + revision
+            )
+            continue
+        var commit: String
+        try:
+            commit = reader.commit_of(p)
+        except e:
+            cannot = True
+            lines.append(
+                String("CANNOT TELL whether the channel's newest build (commit ") + p
+                + String(") descends from this release: ") + String(e)
+            )
+            continue
+        var descends: Bool
+        try:
+            descends = reader.is_ancestor(revision, commit)
+        except e:
+            cannot = True
+            lines.append(
+                String("CANNOT TELL whether ") + commit + String(", the channel's newest build, descends from ")
+                + revision + String(": ") + String(e)
+            )
+            continue
+        if descends:
+            lines.append(
+                String("DESCENDS: the channel's newest build was built from ") + commit
+                + String(", whose history holds this release's revision ") + revision
+            )
+        else:
+            unrelated = True
+            lines.append(
+                String("UNRELATED: the channel's newest build was built from ") + commit
+                + String(", whose history does not hold this release's revision ") + revision
+            )
+    if unrelated:
+        return _SPLIT_UNRELATED
+    if cannot:
+        return _SPLIT_CANNOT_TELL
+    return _SPLIT_DESCENDS
+
+
 def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
     targets: List[PublishTarget],
     mut registry: RegistrySet[T, PublishCredential],
@@ -166,9 +252,27 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
     var r: PublishReport,
     history: RevisionHistory = RevisionHistory(),
 ) -> PublishReport:
+    """`run_publish_reading` with no history reader: a never-backward run
+    the rules would refuse cannot tell (exit 5) instead of splitting."""
+    var reader = UnreadHistory()
+    return run_publish_reading(targets, registry, source, plan, opts, sleeper, r^, history, reader)
+
+
+def run_publish_reading[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper, H: HistoryReader](
+    targets: List[PublishTarget],
+    mut registry: RegistrySet[T, PublishCredential],
+    mut source: S,
+    plan: Bool,
+    opts: RunOptions,
+    mut sleeper: W,
+    var r: PublishReport,
+    history: RevisionHistory,
+    mut reader: H,
+) -> PublishReport:
     """Steps 1 to 6 (see the file header). `source` is asked ONCE for the
     write value, and only when the registry's credential is not armed yet
-    and something is to be uploaded. Never raises."""
+    and something is to be uploaded; `reader` only for THE SPLIT. Never
+    raises."""
     r.plan = plan
     r.files = List[FileRow]()
     for i in range(len(targets)):
@@ -194,8 +298,22 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
         r.end(_reason_of_verdict(verdict))
         return r^
     if opts.never_backward:
-        var later = superseding_files(targets, channel_read.listed_files)
-        var newest = newest_listed_build_number(channel_read.listed_files)
+        var listed = channel_read.listed_files.copy()
+        if opts.main_line_only:
+            if newest_listed_build_number(listed) >= 0 and len(history.main_line) == 0:
+                r.lines.append(
+                    String("CANNOT TELL which of the channel's builds are main's: main's history was not read (")
+                    + history.main_unread + String("), and this run never goes backward, so nothing is uploaded")
+                )
+                r.end(String(REASON_CANNOT_TELL))
+                return r^
+            var off = off_main_files(listed, history.main_line)
+            var would = superseding_files(targets, off)
+            for k in range(len(would)):
+                r.lines.append(String("OFF MAIN, not counted (a break-glass build of a branch): ") + would[k])
+            listed = main_line_files(listed, history.main_line)
+        var later = superseding_files(targets, listed)
+        var newest = newest_listed_build_number(listed)
         if len(later) == 0 and newest >= 0 and len(history.commits) == 0:
             r.lines.append(
                 String("CANNOT TELL whether this release descends from the channel's newest build (build number ")
@@ -204,8 +322,28 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
             )
             r.end(String(REASON_CANNOT_TELL))
             return r^
-        later.extend(backward_files(targets, channel_read.listed_files, history.commits))
+        later.extend(backward_files(targets, listed, history.commits))
         if len(later) > 0:
+            var why = List[String]()
+            var split = _split_by_history(listed, history.revision, reader, why)
+            if split == _SPLIT_DESCENDS:
+                r.lines.extend(later^)
+                r.lines.extend(why^)
+                r.lines.append(
+                    String("SUPERSEDED -- the channel's newest build descends from this release: a newer release")
+                    + String(" already reached this channel, so this run uploads nothing and stops (exit 0)")
+                )
+                r.end(String(REASON_SUPERSEDED))
+                return r^
+            if split == _SPLIT_CANNOT_TELL:
+                r.lines.extend(later^)
+                r.lines.extend(why^)
+                r.lines.append(
+                    String("CANNOT TELL whether this release is superseded or refused, so nothing is uploaded")
+                )
+                r.end(String(REASON_CANNOT_TELL))
+                return r^
+            later.extend(why^)
             later.append(
                 String("REFUSED -- the channel already lists a higher (or an equal, other) build number of any name or")
                 + String(" version, or a build this revision does not descend from, and this stage never goes")
@@ -216,7 +354,7 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
         # what this release carries (plan.mojo `previous_build_number`)
         if len(targets) > 0:
             r.build_number = build_number_of(targets[0])
-        r.previous_build = previous_build_number(targets, channel_read.listed_files)
+        r.previous_build = previous_build_number(targets, listed)
     var to_upload = 0
     for i in range(len(targets)):
         var word = String("WOULD UPLOAD ") if channel_read.states[i].kind == STATE_ABSENT else String("PRESENT ")

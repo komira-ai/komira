@@ -7,9 +7,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # SIGTERM -> grace -> SIGKILL. It depends on komira_async for the reactor's
 # kqueue / epoll subsystems.
 
-# The C side: posix_spawnp with two pipes, the environment reader, the
-# waitpid decode, the non-reaping waitid child probe and the per-platform
-# exit-wait primitives.
+# The C side: posix_spawnp with two pipes (optionally a new process group and
+# default signal dispositions), the environment reader, the waitpid decode,
+# the non-reaping waitid child probe, the process-group signal, the
+# SIGTERM/SIGINT stop latch, orphan adoption and reaping, and the
+# per-platform exit-wait primitives.
 staged_files(
     name = "proc_shim_files",
     srcs = ["_proc_shim.c"],
@@ -31,6 +33,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_child_probe.mojo",
+        "tests/test_process_group.mojo",
         "tests/test_supervisor_scenarios.mojo",
     ],
     visibility = ["PUBLIC"],

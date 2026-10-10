@@ -65,6 +65,12 @@ mojo_library(
         # 1: a stage that never goes backward refuses a lower build number than
         # its channel lists for the same name and version (KCI-E-SUPERSEDED)
         "tests/test_publish_never_backward.mojo",
+        # 1, the split (staged pipeline P1): a channel AHEAD of the release whose
+        # newest build descends from it is SUPERSEDED (exit 0, no upload), an
+        # unrelated one REFUSED, one git cannot resolve exit 5; the main-line
+        # filter: a branch's break-glass build is not counted, an ambiguous
+        # prefix is
+        "tests/test_publish_never_backward_split.mojo",
         # 2: no request of any scenario says force
         "tests/test_publish_never_force.mojo",
         # 6: the result document's rows, new_names[], the probe, no secret, one outcome

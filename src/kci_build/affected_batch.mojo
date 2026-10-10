@@ -54,14 +54,18 @@
 # (`ProcessRunner.now_ns`), so all of kci's work before this step (the
 # workflow check, the git reads, the derive and affected commands of
 # affected.mojo) is charged to it. Each run's timeout is `run_timeout_s`,
-# read just before the run: the smaller of --build-timeout-s and the whole
-# seconds left until the deadline. A run with less than one second left is
-# NOT STARTED: its units are "not built: the build budget was spent", which is
-# FAILED (KCI-E-BUILD-FAILED) like an unattributed batch, never a pass, and
-# every later run is not started either, so the message lists every unit
-# left. A run the budget cut short and that timed out says so, with the
-# seconds it had. A batch whose units were cut off by the budget during
-# their one-at-a-time retries is not interference.
+# read just before the run: the whole seconds left until the deadline, all
+# of them (--build-timeout-s caps nothing here; kci_cli refuses it beside
+# --build-budget-s), so the one batch of a file whose units share a
+# command has the whole budget left, however wide the change. A run with
+# less than one second left is NOT STARTED: its units are "not built: the
+# build budget was spent", which is FAILED (KCI-E-BUILD-FAILED) like an
+# unattributed batch, never a pass, and every later run is not started
+# either, so the message lists every unit left. A run that timed out under
+# a budget is FAILED and says `timed out after N min` (N the minutes it was
+# allowed, then ` S s` when not whole minutes), `all that was left of the
+# build budget (--build-budget-s B)`. A batch whose units were cut off by
+# the budget during their one-at-a-time retries is not interference.
 #
 # Raises only when an argv cannot be rendered or the argv file cannot be
 # written; the caller maps that to FAILED (KCI-E-BUILD-FAILED).
@@ -90,14 +94,15 @@ comptime _STDERR: FileDescriptor = FileDescriptor(2)
 def run_timeout_s(build_timeout_s: Int, build_budget_s: Int, deadline_ns: Int, now_ns: Int) -> Int:
     """The timeout of a run starting at `now_ns` (file header, THE BUDGET):
     `build_timeout_s` without a budget (`build_budget_s` <= 0); else the
-    smaller of it and the whole seconds left until `deadline_ns`. Less than
-    1 means the run is not started."""
+    whole seconds left until `deadline_ns`, all of them (`build_timeout_s`
+    does not cap a run under a budget). Less than 1 means the run is not
+    started."""
     if build_budget_s <= 0:
         return build_timeout_s
     var left_ns = deadline_ns - now_ns
     if left_ns <= 0:
         return 0
-    return min(build_timeout_s, left_ns // 1_000_000_000)
+    return left_ns // 1_000_000_000
 
 
 def budget_timeout_s[R: ProcessRunner](req: BuildRequest, runner: R) -> Int:
@@ -199,13 +204,22 @@ def _shown(argv: List[String], command_len: Int) -> String:
     return s^
 
 
+def _minutes_text(seconds: Int) -> String:
+    """`N min`, or `N min S s` when `seconds` is not whole minutes."""
+    var text = String(seconds // 60) + String(" min")
+    if seconds % 60 != 0:
+        text += String(" ") + String(seconds % 60) + String(" s")
+    return text^
+
+
 def _budget_clause(req: BuildRequest, timeout_s: Int, r: RunResult) -> String:
-    """For a run that timed out with less than --build-timeout-s because
-    the budget had no more: what it had (file header, THE BUDGET)."""
-    if not r.timed_out or timeout_s >= req.build_timeout_s:
+    """For a run that timed out under a budget: how long it was allowed,
+    which was all the budget had left (file header, THE BUDGET)."""
+    if not r.timed_out or req.build_budget_s <= 0:
         return String("")
     return (
-        String(" after ") + String(timeout_s) + String(" s, what was left of the build budget (--build-budget-s ")
+        String(" after ") + _minutes_text(timeout_s)
+        + String(", all that was left of the build budget (--build-budget-s ")
         + String(req.build_budget_s) + String(")")
     )
 
