@@ -196,11 +196,13 @@ def _ffd(count: Int) -> String:
 
 
 def test_utf8_lead_and_continuation_byte_edges() raises:
-    # RFC 3629 section 4: every edge of the lead-byte table and of the
-    # continuation-byte range of each lead byte and each byte position, as a
-    # well-formed sequence and its code point on the inside, and on the
-    # outside one U+FFFD per octet that does not start a well-formed
-    # sequence.
+    # RFC 3629 section 4: every edge of the lead-byte table, every edge of
+    # the second-byte range of the first and last lead byte of each
+    # lead-byte range (C2..DF, E0, E1..EC, ED, EE..EF, F0, F1..F3, F4) and
+    # of F2, and every edge of the continuation-byte range at each later
+    # byte position, as a well-formed sequence and its code point on the
+    # inside, and on the outside one U+FFFD per octet that does not start a
+    # well-formed sequence.
     _check_lossy("7F", chr(0x7F))
     _check_lossy("80", _ffd(1))
     _check_lossy("C1 BF", _ffd(2))
@@ -243,6 +245,29 @@ def test_utf8_lead_and_continuation_byte_edges() raises:
     _check_lossy("EF C0 80", _ffd(3))
     _check_lossy("F1 7F 80 80", _ffd(1) + chr(0x7F) + _ffd(2))
     _check_lossy("F3 C0 80 80", _ffd(4))
+    # The edges of 80..BF not yet pinned at each end of each lead-byte
+    # range that uses it, and at F2, the one lead byte strictly inside
+    # F1..F3.
+    _check_lossy("C2 BF", chr(0xBF))
+    _check_lossy("C2 C0", _ffd(2))
+    _check_lossy("DF 7F", _ffd(1) + chr(0x7F))
+    _check_lossy("DF 80", chr(0x7C0))
+    _check_lossy("E1 BF BF", chr(0x1FFF))
+    _check_lossy("E1 C0 80", _ffd(3))
+    _check_lossy("EC 7F 80", _ffd(1) + chr(0x7F) + _ffd(1))
+    _check_lossy("EC 80 80", chr(0xC000))
+    _check_lossy("EE BF BF", chr(0xEFFF))
+    _check_lossy("EE C0 80", _ffd(3))
+    _check_lossy("EF 7F 80", _ffd(1) + chr(0x7F) + _ffd(1))
+    _check_lossy("EF 80 80", chr(0xF000))
+    _check_lossy("F1 BF BF BF", chr(0x7FFFF))
+    _check_lossy("F1 C0 80 80", _ffd(4))
+    _check_lossy("F2 7F 80 80", _ffd(1) + chr(0x7F) + _ffd(2))
+    _check_lossy("F2 80 80 80", chr(0x80000))
+    _check_lossy("F2 BF BF BF", chr(0xBFFFF))
+    _check_lossy("F2 C0 80 80", _ffd(4))
+    _check_lossy("F3 7F 80 80", _ffd(1) + chr(0x7F) + _ffd(2))
+    _check_lossy("F3 80 80 80", chr(0xC0000))
     # The default continuation range 80..BF, second byte.
     _check_lossy("C2 7F", _ffd(1) + chr(0x7F))
     _check_lossy("DF C0", _ffd(2))

@@ -267,7 +267,7 @@ def _encode_posting_list(
             + ")"
         )
     if n < 0:
-        raise Error("_encode_posting_list: negative doc_count")
+        raise Error("_encode_posting_list: negative doc_count")  # cov: unreachable n is a len()
     write_uleb128(n, out)
     var pos = 0
     while pos < n:
@@ -373,7 +373,7 @@ def _encode_posting_list_with_blockmeta(
             + ")"
         )
     if n < 0:
-        raise Error("_encode_posting_list_with_blockmeta: negative doc_count")
+        raise Error("_encode_posting_list_with_blockmeta: negative doc_count")  # cov: unreachable n is a len()
     write_uleb128(n, out)
     # Block byte offsets are RELATIVE to the start of the per-block run (the byte
     # just AFTER the doc_count ULEB), matching how the BMW cursor seeks: it reads
@@ -654,12 +654,15 @@ def _read_uleb128_span(
         var byte = Int(src[pos])
         pos += 1
         nbytes += 1
+        # The 10th byte lands at bit 63: only 0x00 or 0x01 fits in 64 bits.
+        if nbytes == 10 and byte > 0x01:
+            if byte & 0x80 != 0:
+                raise Error("_read_uleb128_span: varint exceeds 10 bytes (corrupt)")
+            raise Error("_read_uleb128_span: varint overflows 64 bits (corrupt)")
         result = result | ((byte & 0x7F) << shift)
         if byte & 0x80 == 0:
             break
         shift += 7
-        if nbytes > 10:
-            raise Error("_read_uleb128_span: varint exceeds 10 bytes (corrupt)")
     return (result, pos)
 
 
@@ -728,7 +731,7 @@ struct DocStoreBuilder(Movable, Deinitable):
         enabled) is deferred to serialize."""
         var ln = len(source_bytes)
         if ln < 0:
-            raise Error("DocStoreBuilder.append: negative source length")
+            raise Error("DocStoreBuilder.append: negative source length")  # cov: unreachable ln is a len()
         for i in range(ln):
             self._blob_area.append(source_bytes[i])
         self._blob_offset.append(len(self._blob_area))
@@ -936,7 +939,7 @@ def serialize_split(
         var len_rel = len(postings_region) - off_rel
         # Recorded (off_rel, len_rel) are non-negative by construction.
         if off_rel < 0 or len_rel < 0:
-            raise Error("serialize_split: negative posting (offset, len)")
+            raise Error("serialize_split: negative posting (offset, len)")  # cov: unreachable both are len() differences of a growing list
         term_dict.set_posting_location(o, off_rel, len_rel)
 
     # ---- Step 2: serialize the term-dict region EXACTLY ONCE ----
@@ -1021,12 +1024,11 @@ def serialize_split(
         blockmax_offset = 0  # canonical "absent" sentinel.
 
     # (e4) L0-POSTING region (LSM logger L0 — laid AFTER blockmax, BEFORE footer).
-    #      The CHEAP unsorted-posting blob (term-hash -> ascending doc-id deltas +
-    #      per-doc TF). PRESENT on an L0 (cheap drain) split, ABSENT (empty) on an
+    #      The writer copies the caller's bytes verbatim. PRESENT on an L0 (cheap drain) split, ABSENT (empty) on an
     #      optimized split — the FORMAT DISCRIMINATOR is the presence of this
-    #      region's footer slot. The region's byte layout is owned by
-    #      the producer (komira_log_index's serialize_l0_posting_region);
-    #      split.mojo treats it as an opaque blob (offset/len only).
+    #      region's footer slot. split.mojo treats it as an opaque blob
+    #      (offset/len only) and specifies no byte layout for it. No reader in
+    #      this package decodes it: SearchCore refuses a split that carries it.
     var l0_posting_offset = len(out)
     var l0_posting_len = len(l0_posting_region)
     for i in range(l0_posting_len):
@@ -1074,7 +1076,7 @@ def serialize_split(
     # "total + 8 trailing bytes" otherwise). `want_blockmax` already requires
     # total_token_count >= 0, so this is naturally satisfied; asserted here.
     if want_blockmax and total_token_count < 0:
-        raise Error(
+        raise Error(  # cov: unreachable want_blockmax already requires total_token_count >= 0
             "serialize_split: BLOCKMAX present but total_token_count absent"
             " (additive-chain hole)"
         )
@@ -1104,7 +1106,8 @@ def serialize_split(
         _append_u64_le(out, UInt64(blockmax_len))  # blockmax_len
     # L0-POSTING footer slot pair (LSM logger L0 — ADDITIVE, after blockmax). This
     # is the FORMAT DISCRIMINATOR: present (len > 0) => an L0 cheap-posting split;
-    # absent => an optimized split (the read fan-out routes per-split on it).
+    # absent => an optimized split. SearchCore construction raises on a split
+    # that carries it (SearchCore has no l0_posting reader).
     # A new reader detects it via the footer_len-bounded remaining-
     # bytes check (>= 16 after the blockmax pair). 0/0 is NEVER written here — the
     # slot is emitted ONLY when the region is genuinely present.
@@ -1602,7 +1605,7 @@ struct SplitView(Movable, Deinitable):
         # l0_posting slot is ONLY ever written after the blockmax pair, which is
         # written 0/0 when absent to keep the chain hole-free — so this read is
         # unambiguous). Present (len > 0) => the FORMAT DISCRIMINATOR: an L0
-        # cheap-posting split (the read fan-out routes per-split on it).
+        # cheap-posting split (SearchCore construction refuses it).
         # 0/0 / absent => an optimized split.
         var l0_posting_offset = 0
         var l0_posting_len = 0
@@ -1680,7 +1683,7 @@ struct SplitView(Movable, Deinitable):
                 )
             prev_end = l0_posting_offset + l0_posting_len
         if prev_end > footer_start:
-            raise Error("SplitView.parse: regions overlap / out of order")
+            raise Error("SplitView.parse: regions overlap / out of order")  # cov: unreachable each present region was validated to end by footer_start
 
         return SplitView(
             bytes=bytes^,
@@ -1810,9 +1813,10 @@ struct SplitView(Movable, Deinitable):
         """True iff this split carries an LSM logger L0 cheap-posting region
         (len > 0). This is the FORMAT DISCRIMINATOR: an L0 (cheap drain)
         split returns True (empty term-dict + non-empty l0_posting); an optimized
-        split returns False (populated term-dict + no l0_posting). The read
-        fan-out routes PER-SPLIT on this (L-READ phase): True -> the simple L0
-        posting probe; False -> the full SearchCore BM25 path."""
+        split returns False (populated term-dict + no l0_posting). No reader in
+        this package decodes the l0_posting region: SearchCore construction
+        (`SearchCore(bytes)` and `SearchCore.from_view`) raises when this is
+        True."""
         return self._l0_posting_len > 0
 
     @always_inline
@@ -1861,10 +1865,10 @@ struct SplitView(Movable, Deinitable):
     def l0_posting_region(
         self,
     ) -> Span[UInt8, origin_of(self._bytes)]:
-        """The LSM logger L0 cheap-posting region bytes (term-hash -> ascending
-        doc-id deltas + per-doc TF; the format owned by komira_log_index).
-        Span tied to the INNER _bytes field origin. An EMPTY span
-        when absent (has_l0_posting() False — an optimized split)."""
+        """The LSM logger L0 cheap-posting region bytes, an opaque blob whose
+        layout this package does not specify or decode. Span tied to the INNER
+        _bytes field origin. An EMPTY span when absent (has_l0_posting()
+        False — an optimized split)."""
         return Span(self._bytes)[self._l0_posting_offset : self._l0_posting_offset + self._l0_posting_len]
 
 
@@ -1883,7 +1887,9 @@ def _validate_region(
         raise Error(
             "SplitView.parse: region '" + name + "' offset before magic"
         )
-    if offset + length > footer_start:
+    if offset > total:
+        raise Error("SplitView.parse: region '" + name + "' offset past EOF")
+    if length > footer_start - offset:  # not offset + length: it can wrap Int
         raise Error(
             "SplitView.parse: region '"
             + name
@@ -1895,5 +1901,3 @@ def _validate_region(
             + String(footer_start)
             + ")"
         )
-    if offset > total:
-        raise Error("SplitView.parse: region '" + name + "' offset past EOF")

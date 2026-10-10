@@ -7,7 +7,8 @@
 # (header, entries, SHA-1 trailer); entry headers, OFS_DELTA distances and
 # REF_DELTA ids are encoded as git's pack-objects encodes them
 # (`_entry_header`, `_ofs` follow write_no_reuse_object). Packs git itself
-# writes are read by src/tests/conformance/komira_git_conformance.
+# writes are read by
+# src/tests/conformance/komira_git_pack_conformance.
 #
 # WHAT EACH TEST CATCHES:
 #   * test_index_and_read: one pack holding a 300-byte and a 5000-byte blob

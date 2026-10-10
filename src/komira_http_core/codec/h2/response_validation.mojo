@@ -32,6 +32,7 @@ Spec index — every rule below names the clause it encodes:
   §8.2.2   connection-specific fields are forbidden; `te` only as "trailers"
   §8.3     pseudo-headers come first, appear once, and must be defined
   §8.3.2   `:status` is exactly three ASCII DIGITs, and it is REQUIRED
+  RFC 9110 §15     a status code is in 100..599
   RFC 9110 §8.6    content-length is 1*DIGIT
   RFC 9110 §15.2   a 1xx is a separate, interim message
 """
@@ -72,6 +73,7 @@ def h2_malformed_reason_text(code: UInt16) -> String:
     if code == H2_MALFORMED_BAD_STATUS:
         return String(
             ":status is not exactly three ASCII digits (RFC 9113 §8.3.2)"
+            " or not in 100..599 (RFC 9110 §15)"
         )
     if code == H2_MALFORMED_UNDEFINED_PSEUDO:
         return String(
@@ -316,8 +318,9 @@ def h2_is_connection_specific_field(ref name: String) -> Bool:
 
 
 def h2_status_code_of(ref value: String) -> Int:
-    """RFC 9113 §8.3.2 — `:status` is exactly 3 DIGIT. Returns -1 for
-    anything else.
+    """RFC 9113 §8.3.2 — `:status` is exactly 3 DIGIT, and RFC 9110 §15
+    defines status codes in 100..599. Returns -1 for anything else (000..099
+    and 600..999 included).
 
     ⛔ THE -1 IS THE WHOLE POINT. The loop this replaces broke on the first
     non-digit and KEPT the partial accumulator, so "2oo" became 2 and "0200"
@@ -335,6 +338,8 @@ def h2_status_code_of(ref value: String) -> Int:
             return -1
         v = v * 10 + (c - Int(ord("0")))
         i = i + 1
+    if v < 100 or v > 599:
+        return -1
     return v
 
 
@@ -460,8 +465,9 @@ def h2_validate_response_trailers(
     Two differences from a head block, and only two: NO pseudo-header may
     appear at all (not even `:status` — the rule that let a trailer rewrite an
     already-delivered status), and there is no `:status` to require. §8.2.1's
-    field-name / field-value rules and §8.2.2's connection-specific ban apply
-    unchanged; the RFC grants trailers no relaxation of either.
+    field-name / field-value rules and §8.2.2's connection-specific ban and
+    `te` value rule apply unchanged; the RFC grants trailers no relaxation
+    of any of them.
     """
     var n = len(headers)
     var i = 0
@@ -476,5 +482,7 @@ def h2_validate_response_trailers(
             return _verdict_malformed(H2_MALFORMED_BAD_FIELD_NAME)
         if h2_is_connection_specific_field(name):
             return _verdict_malformed(H2_MALFORMED_CONNECTION_SPECIFIC)
+        if name == String("te") and not h2_te_value_is_trailers(value):
+            return _verdict_malformed(H2_MALFORMED_BAD_TE)
         i = i + 1
     return H2BlockVerdict()

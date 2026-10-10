@@ -8,6 +8,8 @@ mojo_library(
     name = "komira_protobuf",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     test_srcs = [
+        "tests/test_protobuf_cursor_guards.mojo",
+        "tests/test_protobuf_malformed.mojo",
         "tests/test_protobuf_prost_crosscheck.mojo",
         "tests/test_protobuf_roundtrip.mojo",
     ],

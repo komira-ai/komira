@@ -8,11 +8,15 @@
 # set is the point: `Content-Type`, plus `Authorization` only when the caller
 # names one. The client adds `Host` (from the URL), `Content-Length` and
 # `User-Agent`; nothing else is sent.
+#
+# `get` is the one GET: an external-account file's `credential_source.url`,
+# with exactly the headers the file names (external_account.mojo checked
+# them), over http or https as the URL says.
 # =============================================================================
 
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_http_client.body import BytesBody
+from komira_http_client.body import BytesBody, EmptyBody
 from komira_http_client.client import HttpClient, build_request_with_body
 from komira_http_client.header_map import HeaderMap
 from komira_http_client.url import Url
@@ -86,6 +90,29 @@ def post[
     )
     ref reactor = rt.reactor()
     var resp = client.send_buffered[BlockingRuntime[NoopSink], BytesBody](
+        req^, reactor
+    )
+    return PostReply(Int(resp.status), resp.body.take_bytes())
+
+
+def get[
+    C: Connector
+](
+    mut client: HttpClient[C],
+    mut rt: BlockingRuntime[NoopSink],
+    var url: Url,
+    header_names: List[String],
+    header_values: List[String],
+) raises -> PostReply:
+    """GET `url` with exactly the headers given (name `i` with value `i`)."""
+    var headers = HeaderMap()
+    for i in range(len(header_names)):
+        headers.append(header_names[i].copy(), header_values[i].copy())
+    var req = build_request_with_body[EmptyBody](
+        HttpMethod.get(), url^, headers^, EmptyBody.new()
+    )
+    ref reactor = rt.reactor()
+    var resp = client.send_buffered[BlockingRuntime[NoopSink], EmptyBody](
         req^, reactor
     )
     return PostReply(Int(resp.status), resp.body.take_bytes())

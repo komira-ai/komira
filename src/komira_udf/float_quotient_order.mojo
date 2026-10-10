@@ -65,6 +65,10 @@
 #         `DistinctKeyColumn_Typed`'s float key: canonical-bits hash +
 #         quotient equality (the typed door's GROUP BY / typed DISTINCT key;
 #         without it every NaN row opens its own group).
+#   * `komira_expr.composite_key` `_hash_column_value` / `_eq_column_value`
+#         (the Float64 component of the multi-column GROUP BY key behind
+#         `komira_op_agg_state.composite_hash_table`): canonical-bits hash +
+#         quotient equality.
 #   * ⭐ THE ORDER BY / TOP-N / WINDOW FAMILY: `sort.sort_indices_float64` (+ its heap sibling),
 #     `sort_topn_sink._row_is_better`, `parallel_column_sort._f64_order_key`,
 #     `partition_topn_sink` (order-key image + partition boundary),
@@ -74,8 +78,8 @@
 #     and `row_format/arrow_row.encode_f64/f32_to_bytes`.
 #
 # ⚠ AND WHAT DOES **NOT**, DELIBERATELY: the SQL comparison operators
-# (`=`, `<>`, `<`, `>`, `<=`, `>=`), join-key equality,
-# `composite_key.KeyColF64` and `PercentileAcc` are all still on plain IEEE and
+# (`=`, `<>`, `<`, `>`, `<=`, `>=`), join-key equality
+# and `PercentileAcc` are all still on plain IEEE and
 # are a STAGED MIGRATION — welded tests pin the IEEE model for the
 # comparison operators, so flipping them without updating those tests fails
 # the build. Importing
@@ -83,7 +87,7 @@
 # ⚠ Also still IEEE, and reachable from NO door (no production caller): the
 # typed-stage `SortKeyColumn_Typed.compare_at`
 # (`stage_primitives.sort_buffer`), `partition_topn_hash_state._order_heap_key`
-# and `komira_eval.expr_sortable_key._cmp_float64`.
+# and `komira_expr.expr_sortable_key._cmp_float64`.
 #
 # Mojo discipline: no UnsafePointer in any signature, no wildcard origins,
 # file < 1000 LOC.
