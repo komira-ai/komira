@@ -19,7 +19,9 @@ fields), and answers queries over one split.
   a `match` over one text field: every query term (deduplicated) adds its BM25
   contribution, and the top `top_k` hits come back as a record batch of
   `_score` (Float64), `_id` (Int64, the split-local document id) and `_source`
-  (string). `QueryIR` also carries fast-field filters, sorts, paging and
+  (string). A split indexes one text field (`SplitView.field_name`); a query
+  whose `field_name` differs is refused as `SEARCH_QUERY_FIELD_MISMATCH`.
+  `QueryIR` also carries fast-field filters, sorts, paging and
   aggregations (`AggSpec`), and `match_all` for a scan without a query.
 - Scoring: `bm25_idf`, `bm25_tf_component` and `bm25_score_contribution` with
   `Bm25Params` (default `k1 = 1.2`, `b = 0.75`, the modern form without the

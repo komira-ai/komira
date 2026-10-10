@@ -92,7 +92,9 @@ mojo_test_command_case(
 # run; --env BIN / rc / MARKER cannot turn a red test green; a test killed
 # by a signal is red with its own status; --arg values arrive in order,
 # unexported, with @KOMIRA_ACTION_DIR@ replaced; an --env after an --arg is
-# refused; exit 77 is red like any other status.
+# refused; exit 77 is red like any other status; the macOS runner
+# (dyld_prelude.sh + gate_runner.sh) hands the test DYLD_LIBRARY_PATH although
+# every busybox applet drops DYLD_*, as macOS does for its protected binaries.
 mojo_gate_runner_cases(
     name = "runner_cases",
     script = "runner_cases.sh",

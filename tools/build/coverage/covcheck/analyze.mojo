@@ -3,8 +3,10 @@ and the findings: the one computation both `covcheck report` and
 `covcheck gate` run, so the PR check and the build gate cannot disagree.
 
 1. Each report is read (lcov or Cobertura) and each of its paths mapped
-   (paths.mojo): a path outside the repository is counted and set aside, an
-   unmapped path is an error naming every one.
+   (paths.mojo): a path outside the repository is counted and set aside, a
+   test's generated main (paths.generated_test_main) is counted as a test
+   source and set aside, any other unmapped path is an error naming every
+   one.
 2. The files are merged by repository path (hits summed per line, so a line
    any test binary reached is covered).
 3. Each file's package is the nearest directory with a BUCK file. With
@@ -23,7 +25,11 @@ and the findings: the one computation both `covcheck report` and
    file. Such a file with a line left raises `UnmeasuredFile` and is counted
    in `unmeasured_files`; one with no line left (an `__init__.mojo` of
    imports, every line exempted) raises nothing and is listed only for its
-   markers, if it has any.
+   markers, if it has any. A declaration-only file (decls.mojo: traits
+   whose methods have no body, `comptime` declarations, imports) with no
+   marker and no branch record counts no line either: it emits no code.
+   It is not counted as a file, and raises `DeclarationOnlyFile`, which is
+   information (`info_findings`), never counted.
 5. The mutants are read and mapped the same way.
 6. Per package: lines, branches, exemptions, mutants; the ratchet row.
 7. Findings: `BelowTarget` (line, and branch when measured, below
@@ -55,6 +61,16 @@ and the findings: the one computation both `covcheck report` and
    exit and the annotation level read `findings` alone): a `Regression`
    below a row it has included. The proposed ratchet gives it no row, so
    a test-only package has no floor.
+9. Report only (no number or finding depends on it yet):
+   each kept file with a line record is read for the functions it declares
+   (decls.mojo), and every function with a body none of whose lines has a
+   record is listed in `unrecorded_functions` with its class (decls.mojo:
+   `plain`, `always_inline`, `comptime_if`) and the count of its executable
+   lines that carry no exemption marker with a reason. The line numbers
+   above cannot see such a function, but only a `plain` one is evidence
+   that no test calls it: an inlined or comptime-gated function a test
+   calls can have no record of its own. A file with branch records and no
+   line record lists none: no line record says which lines held code.
 
 The line reports must all be lcov or all Cobertura: the two formats
 identify a line's branches differently, so one file in both would count its
@@ -72,17 +88,19 @@ the files kept in step 3 only: a file left out counts nowhere.
 
 from covcheck.branch_lcov import DecisionShapes, parse_branch_lcov
 from covcheck.cobertura import parse_cobertura
+from covcheck.decls import declaration_only, unrecorded_functions
 from covcheck.exempt import STATUS_NO_REASON, STATUS_STALE, Exemption, apply_exemptions, scan_markers
 from covcheck.lcov import parse_lcov
 from covcheck.lexer import executable_lines
 from covcheck.model import FileCov, merge_by_path
 from covcheck.mutants import KILLED, SURVIVED, TIMEOUT, Mutant, parse_mutants
-from covcheck.paths import MAPPED, OUTSIDE, RepoFiles, is_test_source, map_path, package_of
+from covcheck.paths import MAPPED, OUTSIDE, RepoFiles, generated_test_main, is_test_source, map_path, package_of
 from covcheck.ratchet import Ratchet, compare, propose
 from covcheck.stats import (
     BELOW_TARGET,
     BRANCH_NOT_MEASURED,
     BRANCH_UNMEASURED_FILE,
+    DECLARATION_ONLY_FILE,
     NOT_MEASURED,
     EXEMPTION_WITHOUT_REASON,
     MODE_NEUTRAL,
@@ -162,15 +180,39 @@ struct Sources(Copyable, Movable):
             raise Error(String("cannot read the source ") + path + String(" under --source-root ") + self.root + String(": ") + String(e))
 
 
+struct UnrecordedFunction(Copyable, Movable):
+    """A function of a measured file none of whose lines has a record
+    (step 9): its package, file, `def` line, name, `kind` (decls.mojo's
+    class) and `lines`, its executable lines that carry no exemption marker
+    with a reason."""
+
+    var package: String
+    var path: String
+    var line: Int
+    var name: String
+    var kind: String
+    var lines: Int
+
+    def __init__(out self, package: String, path: String, line: Int, name: String, kind: String, lines: Int):
+        self.package = package
+        self.path = path
+        self.line = line
+        self.name = name
+        self.kind = kind
+        self.lines = lines
+
+
 struct Analysis(Copyable, Movable):
     """What one run measured and found. `files` holds the kept files (with
     exemptions applied), `file_packages` the package of each, `unmeasured`
     whether each is a file no report named (counted from its source);
     `packages`
-    is sorted by package; `exemptions` and `mutants` by path then line.
+    is sorted by package; `exemptions`, `mutants` and
+    `unrecorded_functions` by path then line.
     `info_dirs` are the options' `info_packages`, `info_packages` the
     measured packages they cover (in `packages` order) and `info_findings`
-    those packages' findings, which `findings` does not hold (step 8)."""
+    those packages' findings, which `findings` does not hold (step 8),
+    then every package's `DeclarationOnlyFile` (step 4)."""
 
     var mode: String
     var target_bp: Int
@@ -182,6 +224,7 @@ struct Analysis(Copyable, Movable):
     var mutants: List[Mutant]
     var mutant_packages: List[String]
     var findings: List[Finding]
+    var unrecorded_functions: List[UnrecordedFunction]
     var info_dirs: List[String]
     var info_packages: List[String]
     var info_findings: List[Finding]
@@ -204,6 +247,7 @@ struct Analysis(Copyable, Movable):
         self.mutants = List[Mutant]()
         self.mutant_packages = List[String]()
         self.findings = List[Finding]()
+        self.unrecorded_functions = List[UnrecordedFunction]()
         self.info_dirs = List[String]()
         self.info_packages = List[String]()
         self.info_findings = List[Finding]()
@@ -275,11 +319,13 @@ def _unmeasured_files(
     repo: RepoFiles,
     sources: Sources,
     opts: Options,
+    mut notes: List[Finding],
 ) raises -> List[Finding]:
     """Step 4's full source: counts every file of a `measured` package that
     is not `named` (no line report gives it a record), with the branches
     `pending` holds for it (branch record files'); returns their
-    `UnmeasuredFile` findings."""
+    `UnmeasuredFile` findings, and adds a `DeclarationOnlyFile` to `notes`
+    for each declaration-only file it counts nothing of."""
     var paths = List[String]()
     for e in repo.files.items():
         var path = e.key
@@ -296,12 +342,20 @@ def _unmeasured_files(
         var text = sources.read(paths[i])
         var f = FileCov(paths[i])
         var exe = executable_lines(text)
+        var markers = scan_markers(paths[i], text)
+        if len(exe) > 0 and len(markers) == 0 and paths[i] not in pending and declaration_only(text):
+            notes.append(Finding(
+                String(DECLARATION_ONLY_FILE), pkg, String(""), -1, -1, paths[i], 0,
+                String("UnmeasuredFile (declaration-only): no test binary compiled this file, and it declares only traits whose methods have no body, comptime values and imports, which emit no code: its ")
+                + String(len(exe)) + String(" executable lines by the heuristic are not counted"),
+                len(exe),
+            ))
+            continue
         for k in range(len(exe)):
             f.add_line(exe[k], 0)
         if paths[i] in pending:
             f.absorb(pending[paths[i]])
         var branches = f.branch_found()
-        var markers = scan_markers(paths[i], text)
         var removed = apply_exemptions(f, markers)
         for e in range(len(markers)):
             exemptions.append(markers[e].copy())
@@ -374,6 +428,7 @@ def analyze(
     # A repository path's first line report with a branch record for it.
     var line_branches = Dict[String, String]()
     var outside = Dict[String, Bool]()
+    var generated = Dict[String, Bool]()
     for r in range(len(reports)):
         var fs = _parse_report(reports[r])
         var branch_file = reports[r].format == String(FORMAT_BRANCH_LCOV)
@@ -400,9 +455,17 @@ def analyze(
                 mapped.append(f^)
             elif m.kind == OUTSIDE:
                 outside[fs[i].path] = True
+            elif generated_test_main(reports[r].origin, m.path, repo):
+                generated[m.path] = True
             else:
                 errors.append(_unmapped(reports[r].origin, fs[i].path, m.path))
     a.ignored_files = len(outside)
+    # A test's generated main has no source to measure, with or without
+    # `include_tests`: a test source left out of its package's numbers.
+    for e in generated.items():
+        var p = e.key
+        if _keep(_package_or_empty(p, repo), p, opts) != 1:
+            a.excluded_test_files += 1
 
     # 5 (read first, so every unmapped path of every input is named at once).
     var muts = List[Mutant]()
@@ -462,6 +525,7 @@ def analyze(
     var named = Dict[String, Bool]()
     var pending = Dict[String, FileCov]()
     var branch_unmeasured = List[Finding]()
+    var unrecorded = List[UnrecordedFunction]()
     for i in range(len(merged)):
         var pkg = package_of(merged[i].path, repo)
         var keep = _keep(pkg, merged[i].path, opts)
@@ -501,7 +565,19 @@ def analyze(
         var f = merged[i].copy()
         if path in branch_of:
             f.absorb(bmerged[branch_of[path]])
-        var markers = scan_markers(f.path, sources.read(f.path))
+        var text = sources.read(f.path)
+        var markers = scan_markers(f.path, text)
+        # 9: before the exemptions take any record away; only with line
+        # records (branch records alone say nothing about lines).
+        if f.line_found() > 0:
+            var marked = Dict[Int, Bool]()
+            for e in range(len(markers)):
+                # A marker without a reason exempts nothing (exempt.mojo).
+                if markers[e].reason.byte_length() > 0:
+                    marked[markers[e].line] = True
+            var fns = unrecorded_functions(text, f.hits, marked)
+            for k in range(len(fns)):
+                unrecorded.append(UnrecordedFunction(pkg, path, fns[k].line, fns[k].name, fns[k].kind, len(fns[k].lines)))
         var branches = f.branch_found()
         var removed = apply_exemptions(f, markers)
         var k = _stats_at(a, at, pkg)
@@ -523,7 +599,8 @@ def analyze(
         a.files.append(f^)
         a.file_packages.append(pkg)
         a.unmeasured.append(False)
-    var unmeasured_findings = _unmeasured_files(a, at, exemptions, measured, named, pending, repo, sources, opts)
+    var decl_notes = List[Finding]()
+    var unmeasured_findings = _unmeasured_files(a, at, exemptions, measured, named, pending, repo, sources, opts, decl_notes)
     var mut_pkgs = List[String]()
     var kept_muts = List[Mutant]()
     for i in range(len(muts)):
@@ -576,6 +653,12 @@ def analyze(
     for i in range(len(morder)):
         a.mutants.append(kept_muts[morder[i]].copy())
         a.mutant_packages.append(mut_pkgs[morder[i]])
+    var ukeys = List[String]()
+    for i in range(len(unrecorded)):
+        ukeys.append(line_key(unrecorded[i].path, unrecorded[i].line))
+    var uorder = sort_by_keys(ukeys)
+    for i in range(len(uorder)):
+        a.unrecorded_functions.append(unrecorded[uorder[i]].copy())
 
     # 7: findings.
     var findings = List[Finding]()
@@ -645,6 +728,9 @@ def analyze(
             a.info_findings.append(findings[forder[i]].copy())
         else:
             a.findings.append(findings[forder[i]].copy())
+    # Declaration-only files are information in every package.
+    for i in range(len(decl_notes)):
+        a.info_findings.append(decl_notes[i].copy())
     for i in range(len(a.packages)):
         if is_info_package(a.packages[i].package, opts.info_packages):
             a.info_packages.append(a.packages[i].package)

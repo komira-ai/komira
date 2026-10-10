@@ -2,9 +2,9 @@
 # Regression tests for EXPR_WHEN handling in optimizer helpers (the Q8 fix).
 # =============================================================================
 #
-# Root bug: `_collect_expr_columns`, `_expr_fingerprint`, and
-# `_substitute_col_refs` in `optimizer_helpers` did NOT have
-# EXPR_WHEN arms — the projection-pushdown optimizer would silently prune
+# Root bug: `_collect_expr_columns`, `_expr_fingerprint` (both now in
+# `komira_plan_ir.plan_helpers`) and `_substitute_col_refs` did NOT have
+# EXPR_WHEN arms — a projection-pushdown pass would silently prune
 # any column referenced ONLY inside a `when_then_else(...)` expression, and
 # Rule 13 (absorb-expr-into-agg) would silently leave un-substituted
 # col_refs inside CASE/WHEN children. This regression test pins the fix.
@@ -12,7 +12,7 @@
 # Surfaced by the TPC-H Q8 plan shape:
 #   `with_column(when_then_else(col("n_name") == "BRAZIL", l_disc_price, 0))`
 #   over a 7-way-join chain caused projection-pushdown to drop `n_name`
-#   from the upstream join chain, then plan compilation failed at
+#   from the upstream join chain, and a later lookup of `n_name` failed at
 #   `Schema.column_index: no field named 'n_name'`.
 #
 # Each helper has a paired test:
@@ -28,9 +28,9 @@
 #   5. test_substitute_col_refs_when_then_else
 #       — substitution reaches into condition and both branches.
 #   6. test_projection_pushdown_preserves_when_columns_e2e
-#       — end-to-end: a Project([when_then_else(...)]) over a Filter does
-#         not lose columns referenced only inside the WHEN. This is the
-#         exact shape that broke TPC-H Q8.
+#       — `_collect_expr_columns` over a Project's expression list keeps a
+#         column referenced only inside the WHEN. This is the expression
+#         shape that broke TPC-H Q8.
 # =============================================================================
 
 from std.collections import Set
@@ -200,7 +200,7 @@ def test_expr_fingerprint_when_distinguishes_branches() raises:
 # =============================================================================
 
 def test_substitute_col_refs_when_then_else() raises:
-    """Rule 13 substitutes col_refs by name. Pre-fix the WHEN arm was
+    """Rule 13's substitution replaces col_refs by name. Pre-fix the WHEN arm was
     missing, so the substitution (then `_substitute_col_refs`, now
     `substitute_project_refs`) returned the input unchanged when
     the col_ref to substitute was inside a WHEN expression — silently
@@ -231,9 +231,9 @@ def test_substitute_col_refs_when_then_else() raises:
 def test_projection_pushdown_preserves_when_columns_e2e() raises:
     """Q8-shape regression: a Project node containing a `when_then_else`
     over a Scan must NOT cause `n_name` to be pruned from the upstream
-    scan. Pre-fix `_collect_expr_columns` skipped EXPR_WHEN, the
-    projection-pushdown optimizer concluded that `n_name` was unused,
-    pruned it, and downstream plan compilation failed with
+    scan. Pre-fix `_collect_expr_columns` skipped EXPR_WHEN, projection
+    pushdown concluded that `n_name` was unused, pruned it, and a later
+    lookup of `n_name` failed with
     `Schema.column_index: no field named 'n_name'`.
 
     This test exercises the helper directly on a Q8-shape Project's
@@ -258,8 +258,9 @@ def test_projection_pushdown_preserves_when_columns_e2e() raises:
     project_exprs.append(Expr.col_ref("volume"))
     project_exprs.append(Expr.col_ref("order_year"))
     # Walk the projection's expressions and collect required columns —
-    # this is exactly what `optimizer_projection.mojo` does to compute
-    # the upstream column requirement set.
+    # this is the walk a projection-pushdown pass (`optimizer_projection`,
+    # not in this tree) is designed to use for the upstream column
+    # requirement set.
     var required = Set[String]()
     for i in range(len(project_exprs)):
         _collect_expr_columns(project_exprs[i], required)

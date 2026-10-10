@@ -73,6 +73,8 @@ from komira_http_server.serve_h2 import (
     _build_and_dispatch_request,
     _dispatch_h2_frames,
     _handle_headers_or_continuation,
+)
+from komira_http_server.serve_h2_headers import (
     _is_connection_specific_header,
     _is_lowercase_or_pseudo,
     _parse_int_safe,

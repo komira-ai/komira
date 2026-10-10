@@ -14,6 +14,17 @@ Google access token, with no Google key. Two legs:
    `signJwt` to mint a JWT self-signed by a service account. It is never
    dialed when the token source raises.
 
+A third flow reads an `external_account` credentials file, the one a CI's
+OIDC token is federated with. `parse_external_account` checks the file's
+text (the caller reads the file; this package reads no environment), and
+`ExternalAccountFetcher` takes the subject token from the file or URL the
+file's `credential_source` names, exchanges it at the file's `token_url`
+with the file's `audience` and `subject_token_type`, and, when the file
+names a `service_account_impersonation_url`, trades the federated token for
+the service account's through IAM Credentials `generateAccessToken`. An AWS
+source, an `executable` source and a workforce pool's file are refused by
+name.
+
 Both legs send through komira_http_client over the komira_http_core
 `Connector` the caller binds, and report a non-2xx answer through
 komira_gcp_core's `parse_gcp_status`, which never echoes a body; a refused
@@ -83,9 +94,11 @@ time it was received. A refusal names its OAuth error code only when the
 code is a standard one, and never its description:
 
 ```mojo
-from komira_gcp_wif import oauth_error_code, parse_sts_token_response, sts_exchange_form
+from komira_gcp_wif import AWS_SUBJECT_TOKEN_TYPE, oauth_error_code, parse_sts_token_response, sts_exchange_form
 
-var form = sts_exchange_form(String(AUDIENCE), String("scope-a"), String("tok"))
+var form = sts_exchange_form(
+    String(AUDIENCE), String("scope-a"), String("tok"), String(AWS_SUBJECT_TOKEN_TYPE)
+)
 assert_true(form.startswith(
     "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&audience="
 ))
@@ -135,4 +148,33 @@ signed_answer.extend(Span(String('{"keyId":"k1","signedJwt":"aaa.bbb.ccc"}').as_
 assert_equal(parse_sign_jwt_response(signed_answer), "aaa.bbb.ccc")
 with assert_raises(contains="outside [A-Za-z0-9@._-]"):
     _ = sign_jwt_path(String("a/b"))
+```
+
+An `external_account` file read, and the impersonation request it leads to.
+A missing field is refused by its name, never with a value from the file:
+
+```mojo
+from komira_gcp_wif import generate_access_token_body, parse_external_account
+
+var config = parse_external_account(
+    String('{"type":"external_account","audience":"') + AUDIENCE + '",'
+    + '"subject_token_type":"urn:ietf:params:oauth:token-type:jwt",'
+    + '"token_url":"https://sts.googleapis.com/v1/token",'
+    + '"service_account_impersonation_url":"https://iamcredentials.googleapis.com'
+    + '/v1/projects/-/serviceAccounts/deployer@demo-project.example:generateAccessToken",'
+    + '"credential_source":{"file":"/var/run/ci/oidc-token"}}'
+)
+assert_equal(config.token_host, "sts.googleapis.com")
+assert_true(config.impersonates())
+assert_equal(config.source_file, "/var/run/ci/oidc-token")
+assert_equal(
+    generate_access_token_body(String("scope-a"), 3600),
+    '{"scope":["scope-a"],"lifetime":"3600s"}',
+)
+with assert_raises(contains='has no "audience"'):
+    _ = parse_external_account(String(
+        '{"type":"external_account","subject_token_type":"t",'
+        + '"token_url":"https://sts.googleapis.com/v1/token",'
+        + '"credential_source":{"file":"/f"}}'
+    ))
 ```
