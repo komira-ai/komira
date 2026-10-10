@@ -2,8 +2,9 @@
 # komira_crypto/tests/test_name_matcher_edges.mojo
 #
 # Hostname-matching edges test_name_matcher does not reach:
-#   * _match_dns_pattern with an empty pattern, and a hostname whose first
-#     label is empty against a wildcard;
+#   * _match_dns_pattern with an empty pattern (against a name and against an
+#     empty hostname), an empty hostname, and a hostname whose first label is
+#     empty against a wildcard; _is_wildcard_pattern on an empty pattern;
 #   * _parse_ipv4_literal: an empty octet, a fifth octet, a value above 255
 #     (refused as the digits are read), a trailing dot, fewer than four
 #     octets (not IPv4: empty result), and the 0 / 255 edges;
@@ -16,6 +17,7 @@ from komira_crypto.cert.x509 import x509_parse_certificate
 from komira_crypto.cert.name_matcher import (
     match_hostname,
     _match_dns_pattern,
+    _is_wildcard_pattern,
     _parse_ipv4_literal,
 )
 
@@ -31,6 +33,10 @@ def _ip_err(s: String) -> String:
 def test_dns_pattern_edges() raises:
     assert_false(_match_dns_pattern(String(""), String("example.com")), "empty pattern")
     assert_false(_match_dns_pattern(String("*.example.com"), String(".example.com")), "empty first label")
+    assert_false(_match_dns_pattern(String(""), String("")), "empty pattern, empty hostname")
+    assert_false(_match_dns_pattern(String("example.com"), String("")), "empty hostname")
+    # _match_dns_pattern returns before this helper sees an empty pattern.
+    assert_false(_is_wildcard_pattern(String("")), "empty pattern is no wildcard")
     assert_true(_match_dns_pattern(String("*.example.com"), String("a.example.com")), "one label")
 
 
