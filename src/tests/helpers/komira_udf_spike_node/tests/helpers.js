@@ -73,10 +73,10 @@ function median(xs) {
 // A test that hangs is a failure with a name, not a build action that never
 // ends: after `ms` the process exits 2 and says which script it was. The
 // message does not say why: a call that never returns, a context that never
-// closes and a process that will not exit all end here.
+// closes and a process that finishes its work but will not exit all end here.
 function watchdog(what, ms = 240000) {
   setTimeout(() => {
-    console.error(`${what}: no answer after ${ms} ms (a call, a close or the exit did not finish)`);
+    console.error(`${what}: no answer after ${ms} ms (a call did not return, a close did not finish, or the work ended and the process did not exit)`);
     process.exit(2);
   }, ms).unref();
 }

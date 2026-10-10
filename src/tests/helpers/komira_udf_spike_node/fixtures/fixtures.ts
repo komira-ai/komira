@@ -28,8 +28,14 @@ export function add_strict(a: bigint | null, b: bigint | null): bigint {
   return a + b;
 }
 
+// Raises on the fourth row it is called for. A per-row function is not told
+// its row, so it counts: the corpus opens a fresh context (a fresh evaluation
+// of this bundle, so a fresh count) for each case, and every case that uses
+// this fixture is one call over one batch. Under PROPAGATE the rows it sees
+// are the compacted batch's, which is what the case's expected row relies on.
+let rowsSeen = 0;
 export function raise_on_row_3(x: bigint): bigint {
-  if (x === 3n) throw new Error("raise_on_row_3: row 3");
+  if (rowsSeen++ === 3) throw new Error("raise_on_row_3: row 3");
   return x;
 }
 
@@ -51,7 +57,38 @@ export function slow_loop(x: bigint): bigint {
   return x;
 }
 
+// int64 plus int32, an int64: the compacted batch and the argument schema
+// must keep each column's own type.
+export function add_mixed(a: bigint | null, b: number | null): bigint | null {
+  return a === null || b === null ? null : a + BigInt(b);
+}
+
+// Null for 0, else twice the value: a null the function returns for a row
+// whose arguments were all valid.
+export function null_on_zero(x: bigint): bigint | null {
+  return x === 0n ? null : x * 2n;
+}
+
 // ---- MAP_BATCHES_COLUMN: one call per batch, over Arrow vectors ---------------
+
+// An int64 column as an int32 one, nulls kept.
+export function narrow(x: Vector<Int64>): Array<number | null> {
+  const out: Array<number | null> = [];
+  for (let i = 0; i < x.length; i++) {
+    const v = x.get(i);
+    out.push(v === null ? null : Number(v));
+  }
+  return out;
+}
+
+// Raises without naming a row: a batch function fails as a whole.
+export function raise_no_row(_x: Vector<Int64>): Vector<Int64> {
+  throw new Error("raise_no_row: the batch failed");
+}
+
+// The corpus runs the identity over a zero-row batch under this name; for
+// this runtime it is the ordinary identity.
+export const leaf_empty_data_null = identity;
 
 export function fahrenheit(c: Vector<Float64>): Float64Array {
   const out = new Float64Array(c.length);
@@ -65,6 +102,12 @@ export function identity(x: Vector<Int64>): Vector<Int64> {
 
 export function short_by_one(x: Vector<Int64>): Vector<Int64> {
   return x.slice(0, x.length - 1);
+}
+
+// The null count the runtime handed the vector, in every row: the exact
+// count of an argument that declared null_count -1 (unknown).
+export function null_count_of(x: Vector<Int64>): BigInt64Array {
+  return new BigInt64Array(x.length).fill(BigInt(x.nullCount));
 }
 
 export function long_by_one(x: Vector<Int64>): BigInt64Array {
@@ -134,6 +177,21 @@ export function* yield_two_then_raise(input: Iterable<Batch>): Iterable<Batch> {
   for (const b of input) {
     yield b;
     if (++n === 2) throw new Error("yield_two_then_raise: raised after two outputs");
+  }
+}
+
+// Each input batch's column x as a two-column table: x as int64 and
+// 10 * x as int32, nulls kept.
+export function* table_two_types(input: Iterable<Batch>): Iterable<Array<Array<bigint | number | null>>> {
+  for (const [x] of input) {
+    const a: Array<bigint | null> = [];
+    const b: Array<number | null> = [];
+    for (let i = 0; i < x.length; i++) {
+      const v = x.get(i);
+      a.push(v);
+      b.push(v === null ? null : Number(v) * 10);
+    }
+    yield [a, b];
   }
 }
 

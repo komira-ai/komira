@@ -1,8 +1,8 @@
 # The cases the Node runtime runs (node_cases.mojo) against the corpus of
 # komira_udf_spike_abi.
 #
-# What it proves: the corpus has 38 cases and the Node runtime runs 30, each
-# of them with its entry rewritten to `fixtures.js#<name>`; the eight it
+# What it proves: the corpus has 107 cases and the Node runtime runs 48, each
+# of them with its entry rewritten to `fixtures.js#<name>`; the 59 it
 # leaves out are the ones named, and `select_cases` raises UDF_CASES_CHANGED
 # when a name it is told to leave out is not in the corpus.
 #
@@ -20,8 +20,8 @@ from komira_udf_spike_abi.conform import load_cases
 from komira_udf_spike_node.node_cases import left_out_cases, node_cases, select_cases
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
-comptime CORPUS = 38
-comptime RUN = 30
+comptime CORPUS = 107
+comptime RUN = 48
 
 
 def main() raises:

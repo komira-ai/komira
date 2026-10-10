@@ -41,7 +41,10 @@
 // wrapped past its length; a sliced reader ignoring the offset; an engine
 // array held until the finalizer.
 //
-// Mutants planted: rt_columns_to_js wrapping per child, not per address
+// Mutants planted (rt_arrow.c): count_nulls reading its bits from 0, not the
+// offset: red on the null count of the 1000-row and 3-row slices; `nc = -1` for
+// `nc = count_nulls(...)`: red on the wrap count of the no-null run; the
+// runtime-file variable left set: red on its assertion. Also: rt_columns_to_js wrapping per child, not per address
 // (rt_wrap_buffer without the wrap set): red on the wrap count;
 // rt_unwrap_all not detaching: red on the kept view; adapter.js's getter() reading
 // a validity bit at the row, not at the offset plus the row: red on the sliced
@@ -163,6 +166,18 @@ h.watchdog(`external buffers ${variant}`);
     // null_count -1 and no null at all: counted as none, so no bitmap crosses
     const none = await run({ entry: 'fixtures.js#double', offset: 13, nullEvery: 0, nullCountUnknown: 1, check: CHECK.AFFINE, a: 2, b: 0 });
     assert.equal(t0(none.r, T.BAD_VALUES), 0);
+    assert.equal(none.d.externalWraps, none.calls, 'an unknown null count over no null is counted as none: the values cross, no bitmap');
+    // The exact count the function sees (it reads the vector's nullCount): of 1000 rows
+    // sliced at bit 13 with every 7th null, 143 (a count from bit 0 gives 141); of 3 rows,
+    // 1 (a count from bit 0 over bits 0 to 2 gives 0 and the null is lost).
+    const colRun = (o) => run({ entry: 'fixtures.js#null_count_of', shape: SHAPE.COLUMN, argFmt: 'l', resultFmt: 'l', offset: 13, nullEvery: 7, nullCountUnknown: 1, check: CHECK.RECORD, batches: 3, ...o });
+    const long = await colRun({ rows: 1000 });
+    assert.equal(t0(long.r, T.LAST_VALUE), 143, 'the runtime counts the unknown nulls of a 1000-row slice from its offset');
+    const short = await colRun({ rows: 3 });
+    assert.equal(t0(short.r, T.LAST_VALUE), 1, 'the runtime counts the unknown nulls of a 3-row slice from its offset');
+    // and a known count is passed through as it is
+    const known = await colRun({ rows: 1000, nullCountUnknown: 0 });
+    assert.equal(t0(known.r, T.LAST_VALUE), 143, 'a declared null count is passed through');
   }
   // a view the user kept
   {
@@ -184,6 +199,7 @@ h.watchdog(`external buffers ${variant}`);
   addon.setCopyMode(false);
   // the copy mode switched in the middle of a call: the wraps already made are still detached
   {
+    const prior = process.env.KOMIRA_TEST_RUNTIME_FILE;
     process.env.KOMIRA_TEST_RUNTIME_FILE = file;
     try {
       const { r, d } = await run({ entry: 'fixtures.js#switch_to_copy_path', batches: 3 });
@@ -193,7 +209,10 @@ h.watchdog(`external buffers ${variant}`);
       assert.equal(d.detachFailures, 0);
     } finally {
       addon.setCopyMode(false);
+      if (prior === undefined) delete process.env.KOMIRA_TEST_RUNTIME_FILE;
+      else process.env.KOMIRA_TEST_RUNTIME_FILE = prior;
     }
+    assert.equal(process.env.KOMIRA_TEST_RUNTIME_FILE, prior, 'the test-only runtime-file variable does not outlive the run that needs it');
   }
   // the result is one copy out
   {

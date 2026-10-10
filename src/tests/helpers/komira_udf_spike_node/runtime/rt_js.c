@@ -135,18 +135,20 @@ static struct request* current_request(napi_env env) {
 }
 
 /* interrupted(): 0, or the status the call must end with: ERR_CANCELLED when
- * the cancel flag is set, ERR_DEADLINE when the deadline passed. It always
- * reads the host's clock once, as the echo runtime's checks do. */
+ * the cancel flag is set, ERR_DEADLINE when the deadline passed. The flag is
+ * tested first and the host's clock read after it (the deadline needs the
+ * clock), so a flag the host sets from inside its clock callback is seen at
+ * the next check, the next row, as the echo runtime sees it: the conformance
+ * case cancel_set_during_call pins row 1. */
 napi_value rt_native_interrupted(napi_env env, napi_callback_info info) {
   (void)info;
   struct request* r = current_request(env);
   int32_t st = 0;
-  int64_t now = g_host != NULL ? g_host->now_ns(g_host->host_data) : 0;
-  if (r != NULL && r->call != NULL) {
-    if (r->call->cancel != NULL && __atomic_load_n(r->call->cancel, __ATOMIC_ACQUIRE) != 0)
-      st = KOMIRA_UDF_ERR_CANCELLED;
-    else if (r->call->deadline_ns != 0 && now > r->call->deadline_ns)
-      st = KOMIRA_UDF_ERR_DEADLINE;
+  if (r != NULL && r->call != NULL && r->call->cancel != NULL && __atomic_load_n(r->call->cancel, __ATOMIC_ACQUIRE) != 0) {
+    st = KOMIRA_UDF_ERR_CANCELLED;
+  } else {
+    int64_t now = g_host != NULL ? g_host->now_ns(g_host->host_data) : 0;
+    if (r != NULL && r->call != NULL && r->call->deadline_ns != 0 && now > r->call->deadline_ns) st = KOMIRA_UDF_ERR_DEADLINE;
   }
   napi_value out;
   napi_create_int32(env, st, &out);
