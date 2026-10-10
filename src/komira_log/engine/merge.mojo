@@ -118,7 +118,7 @@ def merge_segment_lines(segments: List[List[String]]) -> List[String]:
                 best = s
                 best_key = key^
         if best == -1:
-            break
+            break  # cov: unreachable the loop runs once per input line and each pass takes one, so some cursor always has a line left
         out.append(segments[best][cursors[best]])
         cursors[best] = cursors[best] + 1
 
