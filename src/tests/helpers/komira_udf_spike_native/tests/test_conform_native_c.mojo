@@ -2,7 +2,9 @@
 # native UDF library (:native_c), through the C ABI only.
 #
 # What it proves: every case of the corpus passes on a native C library
-# behind the native runtime, none skipped, and the native runtime's describe
+# behind the native runtime, none skipped and none left out (the C library is
+# echo_runtime.c built as a native library, so it has every fixture, the
+# ABI-breaking ones included), and the native runtime's describe
 # passes the capability checks: the runtime verifies the library's digest,
 # loads it, and forwards every entry without changing what a case sees.
 #
@@ -24,7 +26,7 @@ from komira_udf_spike_abi.conform import load_cases, run_suite
 from komira_udf_spike_native.code import code_set
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
-comptime CASE_COUNT = 38
+comptime CASE_COUNT = 107
 
 
 def main() raises:

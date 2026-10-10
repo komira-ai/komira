@@ -17,12 +17,19 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # (create_labels); the welded run-tag test also imports it directly.
 #
 # komira_proto_codec is here for the welded tests, which read graphs in the
-# proto3 JSON form an author writes.
+# proto3 JSON form an author writes, and kci_composites for the goldens of
+# the definitions kci ships (test_fake_kci_job, test_fake_kci_app).
+_KCI_DEFINITIONS = {
+    "src/kci_composites/definitions/{}.json".format(d): "//src/kci_composites:{}.json".format(d)
+    for d in ["kci.app", "kci.job"]
+}
+
 mojo_library(
     name = "kci_cloud_fake",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/kci_cloud:kci_cloud",
+        "//src/kci_composites:kci_composites",
         "//src/kci_reconciler:kci_reconciler",
         "//src/kci_resource_proto:kci_resource_proto",
         "//src/komira_proto_codec:komira_proto_codec",
@@ -30,9 +37,11 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_deploy_lifecycle_e2e.mojo",
+        "tests/test_fake_body_arm.mojo",
         "tests/test_fake_bucket_retention.mojo",
         "tests/test_fake_conformance.mojo",
         "tests/test_fake_faulty_variant.mojo",
+        "tests/test_fake_label_budget.mojo",
         "tests/test_fake_limited_refuses_offline.mojo",
         "tests/test_fake_messaging.mojo",
         "tests/test_fake_provider_shapes.mojo",
@@ -43,12 +52,21 @@ mojo_library(
         "tests/test_fake_network.mojo",
         "tests/test_fake_registry.mojo",
         "tests/test_fake_metadata.mojo",
+        "tests/test_fake_adoption.mojo",
+        "tests/test_fake_adoption_release.mojo",
         "tests/test_fake_table.mojo",
         "tests/test_fake_validation_run_tag.mojo",
+        "tests/test_fake_composite.mojo",
+        "tests/test_fake_kci_job.mojo",
+        "tests/test_fake_kci_app.mojo",
     ],
     test_data = {
         # The authored graph the lifecycle test reads, as an author writes it.
         "tests/test_deploy_lifecycle_e2e.mojo": ["tests/test_data/deploy_lifecycle_graph.json"],
+        # The definitions kci ships, at the resource names kci_composites
+        # reads them by.
+        "tests/test_fake_kci_app.mojo": _KCI_DEFINITIONS,
+        "tests/test_fake_kci_job.mojo": _KCI_DEFINITIONS,
     },
     visibility = ["PUBLIC"],
 )

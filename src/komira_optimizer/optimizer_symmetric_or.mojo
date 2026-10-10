@@ -22,10 +22,11 @@
 # where IN {x, y} is expressed as `(col == x) OR (col == y)`.
 #
 # The new AND conjuncts are single-column, pushable predicates; predicate
-# pushdown (Rule 2) can subsequently push them through joins independently.
-# The original OR is preserved as a post-join residual so semantics are
-# exactly equivalent -- residual rejects any tuple not on the swap
-# diagonal.
+# pushdown (Rule 2, `push_predicates_down`) can then push them through joins
+# independently. `optimizer_driver.optimize` runs this pass BEFORE
+# push_predicates_down. The original OR is kept
+# as a conjunct (above the join when it reads both sides) so semantics are
+# exactly equivalent -- it rejects any tuple not on the swap diagonal.
 #
 # Restriction (per v0.3 literal): operands of each `==` MUST be a
 # `ColRef`/`Literal` pair. Any UDF, arithmetic, cast, or computed
@@ -214,7 +215,7 @@ def _try_decompose_symmetric_swap(left: Expr, right: Expr) -> Optional[Expr]:
     # Reject self-symmetric same-column predicates: the swap only makes
     # sense when the two conjunct columns differ. Without this guard,
     # `(A==x AND A==y) OR (A==y AND A==x)` would match form 1 trivially
-    # but the rewrite would emit a tautology; v0.3 is quietly protected
+    # but the rewrite would emit a redundant conjunct; v0.3 is quietly protected
     # by its downstream pushdown refusing same-col AND, but we bail
     # early for clarity.
     if a_col == b_col:

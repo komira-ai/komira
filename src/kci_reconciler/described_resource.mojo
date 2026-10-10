@@ -328,7 +328,7 @@ trait ResourceDescriptor(Movable, Deinitable):
         physical_id: String,
         token: String,
     ) raises:
-        """Stamp the existing object `physical_id` (the explicit `--adopt`).
+        """Stamp the existing object `physical_id` (a resource's explicit `adopt`).
         DEFAULT: refuse."""
         raise Error(String("this descriptor cannot adopt an existing object"))
 

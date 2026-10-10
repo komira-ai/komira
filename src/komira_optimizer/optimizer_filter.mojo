@@ -11,11 +11,10 @@
 
 from komira_arrow.schema import Schema
 from komira_arrow.arrow_types import ArrowType
-# ⭐ THE ONE TABLE. This fold gate and the executor's two route gates answer
-# the SAME question, and until 2026-09-21 they were four hand-written ladders
-# that had DIVERGED on INT32 — with this one on the losing side, where a miss
-# is not a refusal but an N*M Cartesian materialisation. See
-# `join_key_envelope.mojo`'s header.
+# ⭐ THE ONE TABLE. This fold gate reads the same join-key table every key gate
+# is designed to read (the executor's route gates are not in this tree). A key
+# this gate misses is not a refusal: the plan keeps `Filter(equi, CROSS)`, an
+# N*M Cartesian product. See `join_key_envelope.mojo`'s header.
 from komira_kernels.join_key_envelope import JoinKeyType, join_key_admitted
 from komira_plan_expr.expr import (
     Expr,
@@ -243,8 +242,9 @@ def push_predicates_down(var plan: LogicalPlan) raises -> LogicalPlan:
     paths use in-place walks via push_predicates_down_inplace_walk so
     operators above a Filter no longer rebuild on every pass.
     """
-    # ★★ A UDF-CARRYING NODE IS OPAQUE TO THIS PASS. Restored 2026-09-01 after
-    # `test_optimizer_udf_node_opacity.mojo` measured BOTH halves failing.
+    # ★★ A UDF-CARRYING NODE IS OPAQUE TO THIS PASS. Pinned by
+    # `test_optimizer_udf_node_opacity.mojo`, which fails on BOTH halves
+    # without it.
     #
     # This node's `predicate` is a PLACEHOLDER — the UDF path stamps `lit(true)`
     # because the customer's predicate IS the UDF — and `lit(true)` is the most
@@ -255,11 +255,11 @@ def push_predicates_down(var plan: LogicalPlan) raises -> LogicalPlan:
     # ⚠ A FULL STOP, NOT A RECURSE-INTO-THE-CHILD. Recursing would mean taking
     # the child out and rebuilding this node — and rebuilding is exactly how the
     # Project arm below lost its UDF for fifteen months, because every rebuild
-    # site reaches for the NON-UDF factory. Costing nothing today (a UDF plan is
-    # refused above the optimizer, by plan materialization), a full stop
-    # cannot drop a payload. If a UDF ever sits above a subtree worth
-    # optimising, add the recursion WITH a `filter_with_udf` rebuild and a test
-    # that counts UDFs across the whole tree.
+    # site reaches for the NON-UDF factory. Costing nothing today
+    # (`komira_dispatch_scan.udf_execution_refusal` is designed to refuse a UDF
+    # plan before the optimizer runs), a full stop cannot drop a payload. If a
+    # UDF ever sits above a subtree worth optimising, add the recursion WITH a
+    # `filter_with_udf` rebuild and a test that counts UDFs across the whole tree.
     if plan.has_udf():
         return plan^
 
@@ -299,7 +299,7 @@ def push_predicates_down(var plan: LogicalPlan) raises -> LogicalPlan:
             # is illegal for non-stateless UDFs") outlived the guard by fifteen
             # months: a change removed it on day one because `ProjectData`
             # had lost its `udf` field, and a later change PUT THE FIELD BACK ON
-            # day two. Measured 2026-09-01: without this, a Filter pushed
+            # day two. Without this, a Filter pushed
             # through a UDF-Project rebuilds it via `LogicalPlan.project(...)`
             # — the NON-UDF factory — and the customer's function is simply
             # GONE, leaving the placeholder col-refs to execute in its place.
@@ -316,9 +316,9 @@ def push_predicates_down(var plan: LogicalPlan) raises -> LogicalPlan:
             var proj_exprs_copy = _copy_expr_array(child._project.value()[].exprs)
             # ⛔ BY NAME IS NOT ENOUGH: a Project may REPLACE a name its child
             # also has (`SELECT k, v*2 AS v`), and a predicate pushed raw then
-            # reads the ORIGINAL column -- a silent wrong answer at @sql and
-            # @mojo (see `optimizer_project_merge_guard`'s
-            # header). Push only what means the same below the Project.
+            # reads the ORIGINAL column -- a silent wrong answer (see
+            # `optimizer_project_merge_guard`'s header). Push only what means
+            # the same below the Project.
             var proj_names = List[String]()
             for c in range(child.output_schema.num_columns()):
                 proj_names.append(child.output_schema.field_name(c))
@@ -373,9 +373,9 @@ def push_predicates_down(var plan: LogicalPlan) raises -> LogicalPlan:
             # — over them `pushable` would come back empty and the rebuilt node
             # would be identical. What is NOT established is that nothing puts
             # SOURCE_KIND_ROW over a source that ACCEPTS a predicate; the
-            # legacy CSV factory threaded exactly that over a ParquetSource for
-            # eleven weeks (logical_plan.mojo, "★ CSV, ON THE ARM IT ALREADY
-            # HAD"). Removing the branch is a PLAN-SHAPE change and needs a
+            # legacy CSV factory once threaded exactly that over a ParquetSource
+            # (logical_plan.mojo, "★ CSV BUILDS A `CsvSource`, NOT A
+            # `ParquetSource`"). Removing the branch is a PLAN-SHAPE change and needs a
             # differential test against the column oracle, not an edit.
             if child._scan.value()[].source_kind == SOURCE_KIND_ROW:
                 return LogicalPlan.filter(pred^, child^)
@@ -428,21 +428,17 @@ def push_predicates_down(var plan: LogicalPlan) raises -> LogicalPlan:
             # `scan_from_source` to preserve the SourceVariant's inline
             # batch payload (for SOURCE_IN_MEMORY scans built from
             # an in-memory record batch or by the scalar-broadcast rewrite).
-            # Earlier, this path called `LogicalPlan.scan(source_path,
-            # source_type, ...)` which builds an EMPTY InMemorySource
-            # Slab (the inline_batch param was retired); for
-            # registry-backed legacy scans the engine then resolved via
-            # `registry.lookup(name)`, but a later change removed the producer-
-            # side registry write so this path must preserve the inline
+            # `LogicalPlan.scan(source_path, source_type, ...)` would build
+            # an EMPTY InMemorySource Slab, and nothing resolves an
+            # in-memory scan by name, so this path must preserve the inline
             # batch. `SourceVariant.copy()` is a refcount-bump on the
             # ArcPointer[Slab[RecordBatch]] payload (no buffer byte-copy).
             var src_copy = child._scan.value()[].source.copy()
             # Preserve the
             # original scan's `source_kind` across this filter-into-scan
-            # rebuild. A SOURCE_KIND_ROW CSV scan rides the (transitional)
-            # ParquetSource arm; without threading the kind, `scan_from_source`
-            # would reset it to COLUMNAR and the Path-4 row-streaming routing
-            # predicate would miss the rewritten scan.
+            # rebuild. Without threading the kind, `scan_from_source` would
+            # reset it to its default, `SOURCE_KIND_UNSET`, and the rewritten
+            # scan would lose its source-decode annotation.
             var src_kind = child._scan.value()[].source_kind
             var new_scan = LogicalPlan.scan_from_source(
                 src_copy^,
@@ -524,8 +520,8 @@ def push_predicates_down(var plan: LogicalPlan) raises -> LogicalPlan:
             return push_predicates_down(LogicalPlan.filter(pred^, new_child^))
 
         # Push through Inner OR Cross Join: if predicate references only one
-        # side, push into that side. TPC-H Q3/Q5/Q7 depend heavily on this —
-        # their post-join date filters cut the probe-side row count by ~50%.
+        # side, push into that side. TPC-H Q3/Q5/Q7 depend on this: their date
+        # filters belong on one side of the join, below it.
         #
         # Also descend JOIN_CROSS. The SQL binder
         # lowers a comma-list FROM (`FROM a, b, c WHERE a.k=b.k AND ...`) into a
@@ -536,7 +532,7 @@ def push_predicates_down(var plan: LogicalPlan) raises -> LogicalPlan:
         # DOWN to sit above the appropriate cross-join level. Before this fix
         # pushdown stopped at the topmost cross join (it matched only
         # JOIN_INNER), leaving every NESTED cross join a cartesian product
-        # (customer×orders×… → OOM / exit 137 on q3/q5/q7/q9/q10). Pushing a
+        # (customer×orders×… in q3/q5/q7/q9/q10). Pushing a
         # single-side filter into one side of a CROSS join is trivially
         # semantics-preserving: a cross join has no join condition, so a filter
         # on one input's columns commutes with the product. The rebuild
@@ -682,10 +678,10 @@ def _predicate_refs_in_schema(expr: Expr, schema: Schema) -> Bool:
         # (q9's part-only `p_name LIKE '%green%'`) evaluated as
         # `refs_left == refs_right == True` in the Filter-through-Join arm
         # -> "spans both sides" -> PARKED above the top join instead of
-        # descending to sit above its owning (part) scan. The 6-way join
-        # then processed all ~800K partsupp / 6M lineitem and filtered to
-        # the ~5% green parts LAST. The sibling column-need walker
-        # (`_collect_expr_columns`) grew this exact arm earlier for
+        # descending to sit above its owning (part) scan, so the plan joined
+        # all of partsupp and lineitem before filtering to the green parts.
+        # The sibling column-need walk (today
+        # `expr_walk.walk_expr_column_refs`) grew this exact arm earlier for
         # projection pushdown (q2/q9/q13/q16/q20 string-only predicates);
         # this filter-pushdown walker was the missed twin.
         return _predicate_refs_in_schema(expr.string_op_child_ref(), schema)
@@ -693,8 +689,8 @@ def _predicate_refs_in_schema(expr: Expr, schema: Schema) -> Bool:
     elif expr.tag == EXPR_REGEXP:
         # Stranded regexp filter fix. The EXACT twin of the
         # EXPR_STRING_OP arm above, and it was missed when that one landed on
-        # an earlier day — the sibling column-need walker
-        # (`optimizer_helpers._collect_expr_columns`) grew BOTH arms together on
+        # an earlier day — the sibling column-need walk
+        # (today `expr_walk.walk_expr_column_refs`) grew BOTH arms together on
         # an earlier day, so the asymmetry is between the two WALKERS, not between
         # the two tags. Like a string op, an `EXPR_REGEXP` carries its column
         # refs ONLY in the child; pattern / replacement / flags / group /
@@ -730,7 +726,7 @@ def _predicate_refs_in_schema(expr: Expr, schema: Schema) -> Bool:
         # Added on 2026-09-03. ⚠ THE FOLD IS `and` OVER EVERY
         # ARGUMENT, and the EMPTY case answers True. A node with zero
         # arguments is malformed (`string_fn_n_arity` gives every member a
-        # floor of at least 1) and the evaluator refuses it by name; answering
+        # floor of at least 1) and the plan wire decoder refuses it; answering
         # True here means "this carries no reference that stops the push",
         # which is the same answer a literal gives and never a claim that the
         # node is valid.
@@ -752,24 +748,21 @@ def _predicate_refs_in_schema(expr: Expr, schema: Schema) -> Bool:
     #
     # ⚠ THIS FALLBACK IS OPEN, AND THAT IS WHY THIS BUG HAS NOW HAPPENED TWICE.
     # It is correctness-SAFE (claiming "refs every schema" only ever PREVENTS a
-    # pushdown) and performance-PESSIMAL. Measured when this landed, this walker has
-    # arms for 8 tags while its complete sibling
-    # (`optimizer_helpers._collect_expr_columns`) has 15. EXPR_REGEXP was one
-    # of the eight missing and this commit closes it; SEVEN are still missing.
-    # A predicate built from any of those still never descends.
+    # pushdown) and performance-PESSIMAL. This walker has fewer arms than the
+    # complete column-reference walk (`komira_plan_expr.expr_walk.
+    # walk_expr_column_refs`, which `plan_helpers._collect_expr_columns`
+    # wraps). A predicate built from any missing tag never descends.
     #
-    # ⚠ THIS PARAGRAPH WAS HAND-COUNTED AND WAS WRONG ON BOTH NUMBERS THE DAY
-    # IT LANDED: it said the sibling had 14 arms and named SIX
-    # missing tags. The sibling has 15 `elif expr.tag ==` arms and SEVEN are
-    # missing — `EXPR_MATH_FN2` has its own arm there and was dropped by the
-    # hand count, so the one tag the list omitted is the one nobody would think
-    # to re-check. Every figure below was DERIVED by counting the arms:
+    # ⚠ EARLIER HAND COUNTS OF THIS GAP WERE WRONG. Every figure below was
+    # DERIVED by counting each ladder's `if`/`elif expr.tag ==` tags:
     #
-    # walker arms: 10
-    # sibling arms: 17
-    # missing: EXPR_AGG_FN EXPR_CORRELATED_SUBQUERY EXPR_MATH_FN EXPR_MATH_FN2 EXPR_SUBSTRING EXPR_WHEN EXPR_WINDOW_FN
-    # None has a measured cost in the 119-query corpus today, which is why they
-    # are named here rather than fixed blind.
+    # walker tags: 11
+    # sibling tags: 23
+    # missing: EXPR_AGG_FN EXPR_CORRELATED_SUBQUERY EXPR_EXTRACT
+    #   EXPR_JSON_EXTRACT EXPR_MAP_GET EXPR_MATH_FN EXPR_MATH_FN2
+    #   EXPR_STRUCT_FIELD EXPR_STRUCT_FIELD_IDX EXPR_SUBSTRING EXPR_WHEN
+    #   EXPR_WINDOW_FN
+    # They are named here rather than fixed blind.
     return True
 
 
@@ -790,8 +783,8 @@ def _and_combine(var conjuncts: ExprArray) -> Expr:
 def push_join_residual_to_side(var plan: LogicalPlan) raises -> LogicalPlan:
     """Push a JOIN's single-side ON-clause residual conjuncts down as a `FILTER`
     on the owning child, so a residual-carrying equi-join becomes a plain
-    equi-join above a child filter (which downstream predicate/projection
-    pushdown then narrow).
+    equi-join above a child filter (which predicate pushdown, and a projection
+    pushdown pass that is not in this tree, then narrow).
 
     This is the standard outer-join predicate-pushdown rule (DuckDB
     `pushdown_left_join` / `pushdown_inner_join`): for a JOIN whose ON clause
@@ -819,10 +812,10 @@ def push_join_residual_to_side(var plan: LogicalPlan) raises -> LogicalPlan:
     TPC-H q13: `customer LEFT JOIN orders ON c_custkey = o_custkey AND o_comment
     NOT LIKE '%special%requests%'`. The residual references only `o_comment`
     (orders = right/inner), so it lowers to a FILTER on the orders scan. This
-    turns the SERIAL `execute_residual_join_probe` (~74% of q13 wall — it gathers
-    `o_comment` strings and re-evaluates the `NOT LIKE` per equi-candidate pair)
-    into a plain LEFT equi-join over a once-filtered orders side, and lets
-    projection pushdown drop `o_comment` from the join output.
+    turns a residual join (the `NOT LIKE` evaluated once per equi-candidate
+    pair) into a plain LEFT equi-join over a once-filtered orders side, and lets
+    a projection pushdown pass (not in this tree) drop `o_comment` from the join
+    output.
 
     Only the DECOMPOSED equi-join form (`left_on`/`right_on` non-empty) is
     rewritten: a residual that survived decompose with NO equi-key is a pure-NLJ
@@ -985,30 +978,21 @@ def eliminate_cross_join_inplace(mut plan: LogicalPlan) raises:
             # CROSS -> INNER key extraction over the composite-kernel key
             # envelope. ⭐ THE ENVELOPE IS NOT TRANSCRIBED HERE — it is
             # `komira_kernels.join_key_envelope`'s ONE table, read by
-            # `_column_is_supported_key` below and by both of the executor's
-            # route gates. This comment used to transcribe it as
-            # "{INT64, FLOAT64, STRING, DICTIONARY}" and to name
+            # `_column_is_supported_key` below. This comment used to transcribe
+            # it as "{INT64, FLOAT64, STRING, DICTIONARY}" and to name
             # "INT32/DATE/DECIMAL/BOOL" as the keys that still decline; the
-            # INT32 half had been FALSE since that day, when INT32 was
-            # admitted to all three executor-side ladders and this file was
-            # not moved with them.
+            # INT32 half went FALSE when INT32 became a servable key and this
+            # file was not moved with it.
             #
             # ⛔ AND THE COST OF THAT MISS WAS NOT A REFUSAL. Without the fold
-            # the equi-conjunct stays `Filter(equi, CROSS)` and the walker
-            # materializes the full N*M Cartesian product first — a single
-            # mis-sized allocation that returns null (a 2M x 2M varchar
-            # join). So for the 26 days of the divergence an
-            # int32 equi-join written as a comma-join was a Cartesian
-            # materialisation, not the clean refusal the comment described.
+            # the equi-conjunct stays `Filter(equi, CROSS)`: the plan asks for
+            # the full N*M Cartesian product, not the clean refusal the comment
+            # described.
             #
             # HISTORICAL: this call once used strict INT64-only defaults
             # because a single non-INT64 key routed through an
-            # INT64-hardcoded single-key probe that crashed. That path is GONE
-            # — an earlier deletion removed the legacy single-key leaf
-            # (in the morsel executor), and a
-            # later change added the non-INT64 single-key redirect in
-            # `join_node_exec._try_run_join`, so a single FLOAT64/STRING/DICT
-            # equi-key now routes to the composite leaf.
+            # INT64-hardcoded single-key probe that crashed. That probe is not
+            # in this tree.
             var remaining_pred = _extract_equi_keys(
                 fd.predicate,
                 jd.left[].output_schema,
@@ -1040,8 +1024,8 @@ def eliminate_cross_join_inplace(mut plan: LogicalPlan) raises:
             # Equi-filter-into-INNER-join folding (bench-shape feature 1B).
             # If the Filter sits above an INNER join and contributes
             # additional bridging equi-conjuncts (l_col = r_col), append
-            # them to the existing left_on/right_on lists so the executor
-            # produces a multi-key composite hash-join probe. Conjuncts
+            # them to the existing left_on/right_on lists so the join carries
+            # a multi-key equi-key list (a composite hash-join probe). Conjuncts
             # that don't bridge stay in the Filter; if every conjunct
             # gets folded, the Filter node is eliminated.
             #
@@ -1050,14 +1034,14 @@ def eliminate_cross_join_inplace(mut plan: LogicalPlan) raises:
             # allow_dict=True` — as did every other call site, which is what
             # made the three flags dead configuration. They are deleted;
             # `_column_is_supported_key` reads
-            # `komira_kernels.join_key_envelope`'s ONE table, the same one both
-            # executor route gates and the composite kernel read.
+            # `komira_kernels.join_key_envelope`'s ONE table, the table every
+            # join-key gate is designed to read.
             #
             # THE INVARIANT THIS SITE STILL RELIES ON (unchanged by that): the
             # existing INNER join arrived with N >= 1 keys, so folding any
             # further conjunct yields N >= 2 and the multi-key composite path
-            # (`MultiKeyHashJoinBuilder`) by construction — never a single-key
-            # probe. The shapes it unblocks are the natural compound joins:
+            # by construction — never a single-key probe. The shapes it
+            # unblocks are the natural compound joins:
             # `(country, currency)`, `(first_name, last_name)`,
             # `(region, currency)` over dict-encoded low-cardinality columns,
             # and q2's `(partkey, ps_supplycost)` with its FLOAT64 leg.
@@ -1098,8 +1082,9 @@ def eliminate_cross_join_inplace(mut plan: LogicalPlan) raises:
             and plan._filter.value()[].child[]._project.value()[].child[].tag == PLAN_JOIN
             and plan._filter.value()[].child[]._project.value()[].child[]._join.value()[].join_type == JOIN_CROSS
         ):
-            # Filter -> CSE-Project -> CROSS Join (TPC-H q19). The earlier
-            # `eliminate_common_subexpressions` pass materializes a common OR-factor
+            # Filter -> CSE-Project -> CROSS Join (TPC-H q19). A CSE pass designed
+            # to run earlier (`eliminate_common_subexpressions`, not in this
+            # tree) materializes a common OR-factor
             # (q19: `l_shipmode IN ('AIR','AIR REG')`, shared across the 3-branch
             # OR) into a synthetic `_cse_*` column via a passthrough Project
             # inserted DIRECTLY above the Join. That Project is a predicate-
@@ -1107,9 +1092,8 @@ def eliminate_cross_join_inplace(mut plan: LogicalPlan) raises:
             # `push_predicates_down` parks the bridging equi-conjunct
             # (`l_partkey = p_partkey`) above it and it never reaches a
             # `Filter -> Join` adjacency. Without folding THROUGH the Project the
-            # join stays CROSS and the walker materializes the full N*M Cartesian
-            # (lineitem 6M x part 200k -> a null-returning mis-sized alloc, the
-            # `alloc failed` SIGILL at ~711MB RSS in 0.36s — NOT a gradual OOM).
+            # join stays CROSS: the plan asks for the full N*M Cartesian product
+            # of lineitem and part.
             #
             # A CSE Project is a pure passthrough of EVERY original column plus
             # the synthetic `_cse_*` columns, so the equi-key columns (matched
@@ -1185,26 +1169,23 @@ def _extract_equi_keys(
     is left is returned as the residual predicate (None if nothing is left).
 
     ⭐ THE ENVELOPE IS ONE TABLE AND IT IS NOT A PARAMETER OF THIS FUNCTION.
-    `_column_is_supported_key` reads `komira_kernels.join_key_envelope`, the same
-    table `join_node_exec`'s two route gates and
-    `extract_join_key_columns_typed` read. ⚠ THIS USED TO TAKE THREE MODE
+    `_column_is_supported_key` reads `komira_kernels.join_key_envelope`, the
+    table every join-key gate is designed to read. ⚠ THIS USED TO TAKE THREE MODE
     FLAGS — `allow_float64` / `allow_string` / `allow_dict`, defaulting to an
     "INT64 only" mode. All three call sites passed `True` for all three and
     the INT64-only mode had no caller: it was written for the era when a
     single non-INT64 key routed through an INT64-hardcoded single-key probe
-    and crashed, and that path went away with an earlier deletion (a
-    later change then added the non-INT64 single-key redirect in
-    `join_node_exec._try_run_join`). The flags are deleted — a per-type flag
+    and crashed, and that probe is not in this tree. The flags are deleted —
+    a per-type flag
     whose every caller passes the same value is a partial restatement of the
     table wearing a different shape, and this file's copy of that restatement
     is the one that went stale on INT32.
 
     ⛔ FOLDING IS NOT OPTIONAL FOR CORRECTNESS-AT-SCALE. Without the fold a
-    STRING / FLOAT64 / DICT equi-join stays `Filter(equi, CROSS)` and the
-    walker materializes the full N*M Cartesian product — a null-returning
-    mis-sized alloc (a 2M x 2M varchar join). That is
-    why a key type this gate refuses but the executor SERVES is a regression,
-    not a missing feature; see `_column_is_supported_key`.
+    STRING / FLOAT64 / DICT equi-join stays `Filter(equi, CROSS)`: the plan
+    asks for the full N*M Cartesian product. That is why a key type this gate
+    refuses but the join-key table ADMITS is a regression, not a missing
+    feature; see `_column_is_supported_key`.
 
     HISTORICAL, kept because it names the defect that created the gate: q2's
     `ps_supplycost == min_cost` conjunct is FLOAT64, and before the multi-key
@@ -1233,7 +1214,7 @@ def _extract_equi_keys(
                 # right key over a colliding join to the renamed name), so it is
                 # mapped back to the right child's own-schema name via
                 # `_right_child_orig` before being emitted as a join key
-                # (`left_on`/`right_on` are matched PRE-rename by the executor).
+                # (`left_on`/`right_on` name each child's PRE-rename column).
                 var l_is_left = _name_in_schema(lname, left_schema)
                 var r_right_orig = _right_key_orig(rname, left_schema, right_schema)
                 if l_is_left and r_right_orig:
@@ -1289,8 +1270,8 @@ def _right_child_orig(
 
     `LogicalPlan.join` renames a right column whose name COLLIDES with any LEFT
     output name to `name_right` in the OUTPUT schema, but stores `left_on` /
-    `right_on` PRE-rename (the executor matches keys against each child's own
-    schema — logical_plan.mojo `join()`). This replays that exact single-suffix
+    `right_on` PRE-rename, naming columns of each child's own schema
+    (logical_plan.mojo `join()`). This replays that exact single-suffix
     rename over `right_schema` (colliding against `left_schema`) and returns the
     right child's own-schema name when its output name equals `out_name`.
 
@@ -1299,10 +1280,9 @@ def _right_child_orig(
     `_right`-renamed OUTPUT name. So an INNER/CROSS join whose ON folded into a
     WHERE equi-conjunct presents its right key as `key_right`. Without this
     reverse map the CROSS->INNER fold cannot match `key_right` against the right
-    child schema (which holds `key`), leaves the join a CROSS, and the walker
-    materializes the full N*M Cartesian product -> OOM. Every colliding-key INNER
-    join hit this: h2o j1-j5 (`id1=id1`), sdk c1/d2/e1/e2 (`key=key`), hc4, and
-    c5/c5hc (`skey=skey`)."""
+    child schema (which holds `key`) and leaves the join a CROSS: the plan asks
+    for the full N*M Cartesian product. Every colliding-key INNER join (`id1 =
+    id1`, `key = key`) has this shape."""
     for i in range(right_schema.num_columns()):
         var c = String(right_schema.field_name(i))
         var collides = False
@@ -1346,9 +1326,7 @@ def _right_key_orig(
 #
 # It was a SIXTH statement of a join-key admission rule — "INT64 only",
 # written for the era when every single-key hash-join probe hardcoded
-# `as_primitive[DType.int64]` — and it had ZERO callers. Measured 2026-09-21:
-# `grep -rn _column_is_int64 src/ tests/` found its own definition and two
-# test COMMENTS naming it as history, nothing else. The path it guarded went
+# `as_primitive[DType.int64]` — and it had ZERO callers. The path it guarded went
 # away with an earlier deletion. A dead rule that disagrees with the live
 # one is the thing this unification exists to remove, so it goes rather than
 # being re-pointed at the table.
@@ -1357,21 +1335,18 @@ def _right_key_orig(
 def _column_is_supported_key(name: String, schema: Schema) -> Bool:
     """True iff the named column may be folded into an equi-join KEY.
 
-    ⭐ READS THE ONE TABLE — `komira_kernels.join_key_envelope` — which is the
-    same table the executor's two route gates and the composite-key kernel
-    read. THIS GATE AND THE EXECUTOR MUST AGREE, and the direction of a
-    disagreement is not symmetric:
+    ⭐ READS THE ONE TABLE — `komira_kernels.join_key_envelope` — the table
+    every join-key gate, including an executor's, is designed to read (the
+    executor is not in this tree). THIS GATE AND THE EXECUTOR MUST AGREE, and
+    the direction of a disagreement is not symmetric:
 
       * this gate REFUSING a key the executor serves is the expensive one. The
-        equi-conjunct then stays `Filter(equi, CROSS)` and the walker
-        materializes the full N*M Cartesian product first — a single
-        mis-sized allocation that returns null (a 2M x 2M varchar join,
-        as measured). That is strictly worse than the refusal it stands in
-        for, and it is exactly what happened between an earlier day and
-        2026-09-21, when INT32 was admitted to all three executor-side ladders
-        and this one was never moved.
+        equi-conjunct then stays `Filter(equi, CROSS)` and the plan asks for
+        the full N*M Cartesian product. That is strictly worse than the
+        refusal it stands in for, and it is exactly what happened when INT32
+        became a servable key and this gate was never moved.
       * this gate ADMITTING a key the executor refuses turns a Cartesian into
-        a loud decline, which is now a raise.
+        a loud decline.
 
     ⛔ THE PAIRING RULE IS DELIBERATELY NOT ENFORCED HERE. `join_key_envelope`
     also answers "may these two key types be joined to each other", and this
@@ -1379,9 +1354,9 @@ def _column_is_supported_key(name: String, schema: Schema) -> Bool:
     not an oversight: a MISMATCHED pair (i64 ⋈ i32) declined HERE stays a
     Cartesian product, while the same pair folded and then declined at the
     EXECUTOR fails loud. The repo's standing decision is that a
-    mismatched-DType equi-join fails loud, so the enforcement belongs where a
-    decline is audible, not where it is an allocation.
-    `join_node_exec._composite_key_pairs_compatible` is that enforcement.
+    mismatched-DType equi-join fails loud, so the enforcement belongs to the
+    executing caller (not in this tree), where a decline is audible, not here,
+    where it is an allocation.
 
     ⚠ THE `allow_float64` / `allow_string` / `allow_dict` KWARGS ARE GONE.
     All call sites passed `True` for all three; the INT64-only mode the

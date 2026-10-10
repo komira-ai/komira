@@ -1,0 +1,11 @@
+{
+ "name": "output_null_count_unknown",
+ "defect": "an output with null_count -1 (not computed, legal Arrow) refused, or its nulls not read from the bitmap",
+ "run": "call_batch",
+ "entry": "leaf_null_count_unknown",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 3, "columns": [{"type": "int64", "values": [1, null, 3]}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [1, null, 3]}}
+}

@@ -34,9 +34,10 @@
 # can exist without a relabel step (the precondition in adapter.mojo).
 #
 # THE BUDGET. The `role` label is the longest value: one segment per level
-# plus a separator each. `role_budget_findings` (validate.mojo) checks every
-# lowered node against `LABEL_VALUE_MAX` before anything is realized, so a
-# role over the budget refuses the graph instead of failing at create time.
+# plus a separator each. Validate checks every lowered node against
+# `LABEL_VALUE_MAX` (`lowered_budget_findings`, validate.mojo), so a role
+# over the budget is reported by `validate` and refuses a plan, an apply or
+# a destroy before anything is created, instead of failing at create time.
 #
 # RETENTION IS ONE MORE LABEL, OUTSIDE THE IDENTITY, ON EVERY OBJECT. Every
 # object kci creates or adopts carries komira_validation_run's retention mark
@@ -73,6 +74,18 @@
 # `validation_run_of` reads the label back for `list_owned`. No kci verb sets
 # the scope's validation run id yet (kci_cli and kci_api have no flag for
 # it), so today only callers that build a `CellScope` themselves stamp it.
+#
+# AN ADOPTION IS ONE MORE LABEL, OUTSIDE THE IDENTITY, WRITTEN ONLY BY THE
+# ADOPTION. An object kci takes over for a resource that writes `adopt`
+# (`LoweredNode.adopted`) carries `kci_adopted=true` (`adoption_labels`)
+# beside its identity and retention mark: kci did not create it, and the
+# mark is how that is still known once nothing in the file says so (the
+# resource left the list). An update never writes or drops it.
+# `adopted_by` reads it back for `list_owned`. An adopted object carries no
+# run-id label, so it holds at most the six identity labels, the retention
+# mark and this one: `KCI_LABELS_MAX` (metadata.mojo) still bounds it. A
+# RELEASE drops every label `is_kci_label_key` names (`kci_*`, `kci-*`) and
+# no other.
 #
 # A cloud object that cannot carry labels (a scheduler job, an IAM binding)
 # carries the identity as the first line of its description instead
@@ -304,3 +317,35 @@ def label_problems(labels: List[Label]) raises -> List[String]:
                 )
                 break
     return out^
+
+
+comptime ADOPTED_LABEL_KEY = "kci_adopted"
+"""The adoption mark's key: `[a-z_]`, so the standard rule takes it as it
+takes the identity keys; it is not one of them."""
+comptime ADOPTED_LABEL_VALUE = "true"
+"""The adoption mark's one value."""
+
+
+def adoption_labels(adopted: Bool) -> List[Label]:
+    """The adoption mark of an object kci takes over for a resource that
+    writes `adopt` (`kci_adopted=true`), or nothing when `adopted` is
+    False."""
+    var out = List[Label]()
+    if adopted:
+        out.append(Label(String(ADOPTED_LABEL_KEY), String(ADOPTED_LABEL_VALUE)))
+    return out^
+
+
+def adopted_by(labels: List[Label]) -> Bool:
+    """True iff `labels` carry `kci_adopted=true`. Any other value is not
+    proven adopted."""
+    for i in range(len(labels)):
+        if labels[i].key == ADOPTED_LABEL_KEY and labels[i].value == ADOPTED_LABEL_VALUE:
+            return True
+    return False
+
+
+def is_kci_label_key(key: String) -> Bool:
+    """True iff `key` is in kci's own label space (`kci_*`, `kci-*`): the
+    identity, the marks. A release drops exactly these."""
+    return key.startswith("kci_") or key.startswith("kci-")

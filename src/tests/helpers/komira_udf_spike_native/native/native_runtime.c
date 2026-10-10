@@ -29,7 +29,8 @@
  * dlclosed, and its memory file is never closed (open_bytes says why). It
  * must export komira_udf_native_init_v1 and must not export
  * komira_udf_runtime_init_v1, so a runtime and a user library are never
- * confused. Its init gets this runtime's host struct; its table must be ABI
+ * confused. Its init gets this runtime's host struct, and the error it fills
+ * is released whether or not it returned a table; its table must be ABI
  * major 1 and cover every required entry (a table refused for either is
  * never called again, not even its shutdown); its describe must report
  * runtime_id "komira/native", udf_class NATIVE, threading CONTEXT_PER_THREAD
@@ -384,6 +385,9 @@ static int32_t open_library(komira_udf_rt* rt, const char* root, const uint8_t s
     refuse(l, KOMIRA_UDF_ERR_LOAD, msg);
     return KOMIRA_UDF_OK;
   }
+  /* The host releases a filled error whatever the status (design 4.4): an
+   * init that filled it and still returned a table is no exception. */
+  if (e.release != NULL) e.release(&e);
   const char* bad_table = NULL;
   if (l->t->abi_major != KOMIRA_UDF_ABI_MAJOR)
     bad_table = "the library's table is not ABI major 1";

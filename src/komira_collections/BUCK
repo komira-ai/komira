@@ -13,6 +13,8 @@ mojo_library(
         "tests/test_hyperloglog.mojo",
         "tests/test_owned_slab.mojo",
         "tests/test_slab.mojo",
+        "tests/test_slab_edges.mojo",
+        "tests/test_variadic_pack.mojo",
     ],
     visibility = ["PUBLIC"],
 )

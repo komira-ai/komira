@@ -203,10 +203,10 @@ def _shortest_digits(
         big_mul_small(mp10, UInt32(10))
         if _high_reached(r10, mp10, s, closed):
             break
-        r = r10^
-        m_plus = mp10^
-        big_mul_small(m_minus, UInt32(10))
-        k -= 1
+        r = r10^  # cov: unreachable k never overestimates for float32: floor(e2*1233/4096) == floor(e2*log10 2) on e2 in [-149, 127], so 10^(k-1) <= v < high
+        m_plus = mp10^  # cov: unreachable see the line above
+        big_mul_small(m_minus, UInt32(10))  # cov: unreachable see the line above
+        k -= 1  # cov: unreachable see the line above
     # Generate digits.
     var n = 0
     while n < 20:
@@ -238,14 +238,14 @@ def _shortest_digits(
     # carry anyway rather than ever write a non-digit byte.
     var i = n - 1
     while i > 0 and digits[i] > UInt8(9):
-        digits[i] = UInt8(0)
-        digits[i - 1] += UInt8(1)
+        digits[i] = UInt8(0)  # cov: unreachable a digit rounded up is at most 9: d = 9 with high_ok would have met high_ok one digit earlier
+        digits[i - 1] += UInt8(1)  # cov: unreachable see the line above
         i -= 1
     if digits[0] > UInt8(9):
-        digits[0] = UInt8(1)
-        k += 1
+        digits[0] = UInt8(1)  # cov: unreachable see line 241
+        k += 1  # cov: unreachable see line 241
     while n > 1 and digits[n - 1] == UInt8(0):
-        n -= 1
+        n -= 1  # cov: unreachable from the float32 writer: a float32 (24-bit mantissa) ends within 9 digits on a nonzero digit (low_ok after a 0 would have held one digit earlier); only a direct call with a wider mantissa can hit the 20-digit cap on a 0, and that truncated output is not a value to pin
     return n
 
 
@@ -321,7 +321,7 @@ def read_proto3_json_f32(v: JsonValue) raises -> Float32:
     elif v.kind != JSON_NUMBER:
         # A bool, null, object or array: the float64 reader's refusal.
         _ = v.as_float64()
-        raise Error("JsonError: not a proto3 float")
+        raise Error("JsonError: not a proto3 float")  # cov: unreachable as_float64() raises for every kind but a number or a string
     return parse_decimal_f32(v.text)
 
 
@@ -374,7 +374,7 @@ def read_proto3_json_f64(v: JsonValue) raises -> Float64:
     elif v.kind != JSON_NUMBER:
         # A bool, null, object or array: the JSON value's own refusal.
         _ = v.as_float64()
-        raise Error("JsonError: not a proto3 double")
+        raise Error("JsonError: not a proto3 double")  # cov: unreachable as_float64() raises for every kind but a number or a string
     return parse_decimal_f64(v.text)
 
 

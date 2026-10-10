@@ -28,6 +28,7 @@ from komira_udf_spike_abi._cabi import (
     CUdfRuntime,
     CUdfSpec,
     CUdfWireHeader,
+    c_layout_edges,
     c_layout_rows,
     free_zeroed,
     zeroed,
@@ -285,6 +286,13 @@ def _index(names: List[String], name: String) -> Int:
 
 
 def main() raises:
+    # The probe answers NULL and -1 just outside its rows (layout_probe.c's
+    # bounds checks).
+    var edges = c_layout_edges()
+    assert_equal(edges[0], 1, "name(-1) is not NULL")
+    assert_equal(edges[1], 1, "name(count) is not NULL")
+    assert_equal(edges[2], -1, "value(-1)")
+    assert_equal(edges[3], -1, "value(count)")
     var c = c_layout_rows()
     var m = Rows()
     _schema_rows(m)

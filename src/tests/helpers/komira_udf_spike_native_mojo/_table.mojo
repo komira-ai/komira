@@ -77,6 +77,7 @@ from ._arrow import (
     i64_at,
     is_valid,
     length,
+    PAD_VALUE,
     make_col,
     make_struct,
     move_array,
@@ -84,17 +85,28 @@ from ._arrow import (
     release_array,
     set_cpu,
     set_null,
+    slice_col,
+    struct_validity,
 )
 from ._fixtures import (
     F_ARGS_KEPT,
     F_DEVICE_NOT_CPU,
     F_ENDLESS,
     F_GROUP_MAX,
+    F_LEAF_EMPTY_DATA_NULL,
+    F_LEAF_NULL_COUNT_UNKNOWN,
+    F_LEAF_SLICED,
     F_NULL_COUNT_LIES,
     F_OK_WITHOUT_OUTPUT,
     F_OUT_SET_ON_ERROR,
+    F_RAISE_NO_ROW,
     F_RUNNING_SUM,
     F_SUM_ARGS_KEPT,
+    F_SUM_FINISH_SHORT,
+    F_SUM_STATE_LONG,
+    F_TABLE_NULL_COUNT_UNKNOWN,
+    F_TABLE_SLICED,
+    F_TWO_TYPES,
     F_YIELD_TWO_THEN_RAISE,
     Fixture,
     check_spec,
@@ -109,6 +121,13 @@ comptime _DEVICE_ARRAY = 128
 """Bytes of a struct ArrowDeviceArray."""
 comptime _STREAM = 48
 """Bytes of a struct ArrowDeviceArrayStream."""
+comptime _SLICE_AT = 11
+"""leaf_sliced: the column's offset (not a multiple of 8, so the bitmap's
+bits are shifted too)."""
+comptime _TABLE_AT = 2
+"""table_sliced: the struct's offset."""
+comptime _CHILD_AT = 3
+"""table_sliced: its child's own offset."""
 
 
 @fieldwise_init
@@ -309,6 +328,19 @@ def _call_batch(i: Void, call: Void, args: Void, out_p: Void, e: Void) abi("C") 
             out_p.bitcast[CArrowDeviceArray]()[].device_type = 2  # ARROW_DEVICE_CUDA
         elif fx == F_NULL_COUNT_LIES:
             arr(out_p)[].null_count += 1
+        # A batch function raising naming no row (legal: row -1).
+        elif fx == F_RAISE_NO_ROW:
+            release_array(out_p)
+            rc = fail(e, ERR_RAISED, "raise_no_row: raised naming no row")
+        # Legal output layouts the host must read.
+        elif fx == F_LEAF_SLICED:
+            slice_col(out_p, _SLICE_AT)
+        elif fx == F_LEAF_NULL_COUNT_UNKNOWN:
+            arr(out_p)[].null_count = -1
+        elif fx == F_LEAF_EMPTY_DATA_NULL and length(out_p) == 0:
+            # SAFETY: make_col's two-entry buffer list; the block stays
+            # private_data, which the release frees.
+            arr(out_p)[].buffers.bitcast[Void]()[1] = null_void()
     release_array(mine)
     return rc
 
@@ -373,32 +405,33 @@ def _agg_merge(g: Void, call: Void, states: Void, gids: Void, n: UInt32, e: Void
     return _fold(g, call, states, gids, n, e, True)
 
 
-def _emit(g: Void, n: UInt32, out_p: Void, e: Void) -> Int32:
+def _emit(g: Void, n: UInt32, extra: Int, out_p: Void, e: Void) -> Int32:
     """The first `n` groups' sums, forgotten afterwards: the later groups
-    move down by `n`, as the reference runtime's do."""
+    move down by `n`, as the reference runtime's do. The column has n +
+    `extra` rows (a fixture's bug when not 0): the sums, then zeros."""
     arr(out_p)[].release = null_void()
     var gr = g.bitcast[_Groups]()
     var k = Int(n)
     if k > len(gr[].st):
         return fail(e, ERR_INTERNAL, "emit_first_n is above the group count")
-    var d = make_col(out_p, k)
+    var rows = k + extra if k + extra > 0 else 0
+    var d = make_col(out_p, rows)
+    for i in range(rows):
+        d.bitcast[Int64]()[i] = gr[].st[i] if i < k else 0
     var rest = List[Int64]()
-    for i in range(len(gr[].st)):
-        if i < k:
-            d.bitcast[Int64]()[i] = gr[].st[i]
-        else:
-            rest.append(gr[].st[i])
+    for i in range(k, len(gr[].st)):
+        rest.append(gr[].st[i])
     gr[].st = rest^
     set_cpu(out_p)
     return OK
 
 
 def _agg_state(g: Void, n: UInt32, out_p: Void, e: Void) abi("C") -> Int32:
-    return _emit(g, n, out_p, e)
+    return _emit(g, n, 1 if g.bitcast[_Groups]()[].fx == F_SUM_STATE_LONG else 0, out_p, e)
 
 
 def _agg_finish(g: Void, n: UInt32, out_p: Void, e: Void) abi("C") -> Int32:
-    return _emit(g, n, out_p, e)
+    return _emit(g, n, -1 if g.bitcast[_Groups]()[].fx == F_SUM_FINISH_SHORT else 0, out_p, e)
 
 
 def _agg_close(g: Void) abi("C"):
@@ -560,6 +593,96 @@ def _next_yield_two(fr: Void, out_p: Void, e: Void) -> Int32:
     return OK
 
 
+def _next_table(fr: Void, out_p: Void, e: Void, sliced: Bool) -> Int32:
+    """Each input batch's first column as a one-column table, with a validity
+    bitmap. table_sliced (`sliced`) places the n rows at struct offset
+    _TABLE_AT over a child of _TABLE_AT + n rows at offset _CHILD_AT, the
+    rows before them PAD_VALUE with null bits, in the child and in the
+    struct's bitmap; table_null_count_unknown reports null_count -1. Both
+    legal (n <= 62 here)."""
+    var f = fr.bitcast[_Frame]()
+    var host = f[].host
+    var b = _scratch(host, _DEVICE_ARRAY)
+    if _pull(fr, b) != 0:
+        _free_scratch(host, b, _DEVICE_ARRAY)
+        return fail(e, ERR_INTERNAL, "the input stream failed")
+    if is_null(arr(b)[].release):
+        f[].done = True
+        _free_scratch(host, b, _DEVICE_ARRAY)
+        return OK
+    var n = length(b)
+    if n_children(b) < 1:
+        release_array(b)
+        _free_scratch(host, b, _DEVICE_ARRAY)
+        return fail(e, ERR_INTERNAL, "table: no input column")
+    var x = child(b, 0)
+    var pad = _CHILD_AT + _TABLE_AT if sliced else 0
+    make_struct(out_p, pad + n, 1)
+    var col = child(out_p, 0)
+    var d = make_col(col, pad + n)
+    for r in range(pad + n):
+        if r < pad or not is_valid(x, r - pad):
+            d.bitcast[Int64]()[r] = PAD_VALUE if r < pad else 0
+            set_null(col, r)
+        else:
+            d.bitcast[Int64]()[r] = i64_at(x, r - pad)
+    release_array(b)
+    _free_scratch(host, b, _DEVICE_ARRAY)
+    set_cpu(out_p)
+    var v = struct_validity(out_p)
+    if sliced:
+        arr(col)[].offset = Int64(_CHILD_AT)
+        arr(col)[].length = Int64(_TABLE_AT + n)
+        arr(col)[].null_count -= Int64(_CHILD_AT)  # the pad rows before the child's offset are not its rows
+        arr(out_p)[].offset = Int64(_TABLE_AT)
+        arr(out_p)[].length = Int64(n)
+        for r in range(_TABLE_AT):
+            # SAFETY: struct_validity's 8 bytes; r < 8.
+            v.bitcast[UInt8]()[0] = v.bitcast[UInt8]()[0] & ~(UInt8(1) << UInt8(r))
+    else:
+        arr(out_p)[].null_count = -1
+    return OK
+
+
+def _next_two_types(fr: Void, out_p: Void, e: Void) -> Int32:
+    """Each input batch's column x as a table (x int64, 10 * x int32), nulls
+    where x is null."""
+    var f = fr.bitcast[_Frame]()
+    var host = f[].host
+    var b = _scratch(host, _DEVICE_ARRAY)
+    if _pull(fr, b) != 0:
+        _free_scratch(host, b, _DEVICE_ARRAY)
+        return fail(e, ERR_INTERNAL, "the input stream failed")
+    if is_null(arr(b)[].release):
+        f[].done = True
+        _free_scratch(host, b, _DEVICE_ARRAY)
+        return OK
+    var n = length(b)
+    if n_children(b) < 1:
+        release_array(b)
+        _free_scratch(host, b, _DEVICE_ARRAY)
+        return fail(e, ERR_INTERNAL, "table_two_types: no input column")
+    var x = child(b, 0)
+    make_struct(out_p, n, 2)
+    var c0 = child(out_p, 0)
+    var c1 = child(out_p, 1)
+    var d0 = make_col(c0, n)
+    var d1 = make_col(c1, n)
+    for r in range(n):
+        # SAFETY: make_col's values blocks of n rows (8 bytes each, int32 in
+        # the first 4 * n of c1's).
+        if is_valid(x, r):
+            d0.bitcast[Int64]()[r] = i64_at(x, r)
+            d1.bitcast[Int32]()[r] = Int32(10 * i64_at(x, r))
+        else:
+            set_null(c0, r)
+            set_null(c1, r)
+    release_array(b)
+    _free_scratch(host, b, _DEVICE_ARRAY)
+    set_cpu(out_p)
+    return OK
+
+
 def _next_endless(out_p: Void) -> Int32:
     make_struct(out_p, 1, 1)
     var d = make_col(child(out_p, 0), 1)
@@ -583,6 +706,10 @@ def _frame_next(fr: Void, call: Void, out_p: Void, e: Void) abi("C") -> Int32:
         return _next_yield_two(fr, out_p, e)
     if f[].fx == F_ENDLESS:
         return _next_endless(out_p)
+    if f[].fx == F_TABLE_SLICED or f[].fx == F_TABLE_NULL_COUNT_UNKNOWN:
+        return _next_table(fr, out_p, e, f[].fx == F_TABLE_SLICED)
+    if f[].fx == F_TWO_TYPES:
+        return _next_two_types(fr, out_p, e)
     return _next_step(fr, out_p, e)
 
 

@@ -1,0 +1,11 @@
+{
+ "name": "column_int32_result",
+ "defect": "an int32 output read with the wrong width or sign",
+ "run": "call_batch",
+ "entry": "narrow",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int32", "nullable": true}],
+ "input": {"length": 3, "columns": [{"type": "int64", "values": [-5, null, 7]}]},
+ "expect": {"status": "OK", "column": {"type": "int32", "values": [-5, null, 7]}}
+}

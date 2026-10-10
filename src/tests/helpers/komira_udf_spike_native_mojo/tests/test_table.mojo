@@ -27,7 +27,7 @@ from std.sys import size_of
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_udf_spike_abi._cabi import CUdfRuntime, Word
-from komira_udf_spike_abi._host import _Arena, host_data_of, make_host, new_error, schema_of, take_error
+from komira_udf_spike_abi._host import _Arena, counts, host_data_of, make_host, new_error, new_host_data, schema_of, take_error
 from komira_udf_spike_abi._table import (
     memory_report_present,
     new_caps,
@@ -72,7 +72,7 @@ def _validate_args(
 def main() raises:
     var arena = _Arena()
 
-    var other = make_host(arena, ABI_MAJOR + 1)
+    var other = make_host(arena, ABI_MAJOR + 1, new_host_data(arena))
     var slot = arena.word(8)
     var err = new_error(arena)
     var refused = Word(native_init(other.p, slot.p, err.p))
@@ -82,7 +82,7 @@ def main() raises:
     assert_true(e.message != "")
     assert_true(slot_value(slot).is_null(), "a refused init wrote a handle")
 
-    var host = make_host(arena, ABI_MAJOR)
+    var host = make_host(arena, ABI_MAJOR, new_host_data(arena))
     var t = Word(native_init(host.p, slot.p, new_error(arena).p))
     assert_false(t.is_null())
     var rt = slot_value(slot)
@@ -128,5 +128,8 @@ def main() raises:
     )
 
     t_shutdown(t, rt)
+    # Every block the library reserved (its table, its runtime handle, the
+    # strings describe reports) is returned by shutdown.
+    assert_equal(counts(host_data_of(host)).reserved_bytes, 0, "shutdown kept host-reserved bytes")
     arena.free_all()
     print("test_table: ok")

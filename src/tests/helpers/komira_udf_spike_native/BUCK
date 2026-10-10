@@ -35,7 +35,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "m
 #                       (native/variant_lib.c): single_thread, worker_only,
 #                       global_lock, managed, no_scalar, abi2, short_table,
 #                       one_short and init_fails refused; exact_table,
-#                       counted and deferred accepted
+#                       counted, deferred and error_on_ok accepted
 #
 # The welded tests, and the defect each one catches (each file's header
 # names what it proves):
@@ -125,6 +125,7 @@ mojo_library(
             "variant_abi2.so": ":variant_abi2",
             "variant_counted.so": ":variant_counted",
             "variant_deferred.so": ":variant_deferred",
+            "variant_error_on_ok.so": ":variant_error_on_ok",
             "variant_exact_table.so": ":variant_exact_table",
             "variant_global_lock.so": ":variant_global_lock",
             "variant_init_fails.so": ":variant_init_fails",
@@ -357,6 +358,15 @@ mojo_shared_lib(
 mojo_shared_lib(
     name = "variant_init_fails",
     srcs = ["refrt/variant_init_fails_so.mojo"],
+    exports = ["komira_udf_native_init_v1"],
+    exports_exact = True,
+    deps = [":komira_udf_native_variants"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_shared_lib(
+    name = "variant_error_on_ok",
+    srcs = ["refrt/variant_error_on_ok_so.mojo"],
     exports = ["komira_udf_native_init_v1"],
     exports_exact = True,
     deps = [":komira_udf_native_variants"],

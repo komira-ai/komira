@@ -1,0 +1,11 @@
+{
+ "name": "non_nullable_result_without_nulls",
+ "defect": "a non-nullable result with no null in it is refused (design 4.6: only a null in a non-nullable result breaks the type)",
+ "run": "call_batch",
+ "entry": "identity",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": false}],
+ "input": {"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [1, 2]}}
+}

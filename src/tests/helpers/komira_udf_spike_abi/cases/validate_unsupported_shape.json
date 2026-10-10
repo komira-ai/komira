@@ -1,0 +1,10 @@
+{
+ "name": "validate_unsupported_shape",
+ "defect": "a validate case of a shape the runtime does not report is skipped instead of run (validate answers for any shape: design 4.2, OPTIMIZED_UDF_KIND_UNSUPPORTED)",
+ "run": "validate",
+ "entry": "identity",
+ "shape": "MAP_BATCHES_FRAME_GROUPED",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "expect": {"status": "ERR_UNSUPPORTED", "run_error": "OPTIMIZED_UDF_KIND_UNSUPPORTED"}
+}

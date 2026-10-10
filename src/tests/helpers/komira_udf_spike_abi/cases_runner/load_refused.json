@@ -1,0 +1,12 @@
+{
+ "name": "load_refused",
+ "defect": "a deliberate mismatch: the runner must fail this case",
+ "run": "call_batch",
+ "entry": "no_such_entry",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 1, "columns": [{"type": "int64", "values": [1]}]},
+ "expect": {"status": "OK"},
+ "runner_fails_with": "load: ERR_DESCRIPTOR"
+}

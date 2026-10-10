@@ -38,6 +38,10 @@
  *   init_fails     init returns NULL with an error whose message holds
  *                  INIT_FAIL_BYTES reserved from the host until the error's
  *                  release: a loader that drops the error leaks them.
+ *   error_on_ok    accepted: init fills the error the same way, then
+ *                  returns its table. The host releases a filled error
+ *                  whatever the status (design section 4.4), so a loader
+ *                  that releases it only on a refusal leaks the bytes.
  *
  * Every init that succeeds reserves INIT_BYTES from the host, released by
  * the library's shutdown: the host sees a library the runtime refused after
@@ -219,6 +223,21 @@ const komira_udf_runtime* komira_udf_variant_init_fails_init_v1(const komira_udf
   }
   e->release = init_fail_release;
   return NULL;
+}
+
+/* ---- error_on_ok: the error filled, then the table returned ---------------- */
+
+const komira_udf_runtime* komira_udf_variant_error_on_ok_init_v1(const komira_udf_host* host, komira_udf_rt** rt,
+                                                                 komira_udf_error* e) {
+  if (copy_inner(host, rt, e) == NULL) return NULL;
+  if (host->mem_reserve(host->host_data, INIT_FAIL_BYTES) != KOMIRA_UDF_OK) return &table;
+  variant_fail(e, KOMIRA_UDF_ERR_INTERNAL, "error_on_ok: filled, then the table returned");
+  if (e->release == NULL) {
+    host->mem_release(host->host_data, INIT_FAIL_BYTES);
+    return &table;
+  }
+  e->release = init_fail_release;
+  return &table;
 }
 
 /* ---- counted: library contexts tagged and reserved from the host ----------- */

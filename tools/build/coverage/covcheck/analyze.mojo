@@ -3,8 +3,10 @@ and the findings: the one computation both `covcheck report` and
 `covcheck gate` run, so the PR check and the build gate cannot disagree.
 
 1. Each report is read (lcov or Cobertura) and each of its paths mapped
-   (paths.mojo): a path outside the repository is counted and set aside, an
-   unmapped path is an error naming every one.
+   (paths.mojo): a path outside the repository is counted and set aside, a
+   test's generated main (paths.generated_test_main) is counted as a test
+   source and set aside, any other unmapped path is an error naming every
+   one.
 2. The files are merged by repository path (hits summed per line, so a line
    any test binary reached is covered).
 3. Each file's package is the nearest directory with a BUCK file. With
@@ -69,6 +71,9 @@ and the findings: the one computation both `covcheck report` and
    that no test calls it: an inlined or comptime-gated function a test
    calls can have no record of its own. A file with branch records and no
    line record lists none: no line record says which lines held code.
+10. The conclusion (stats.conclusion_of), over `findings` after step 8:
+    `failure` with any `Regression` in every mode, so a floor holds even
+    in census mode; otherwise by mode.
 
 The line reports must all be lcov or all Cobertura: the two formats
 identify a line's branches differently, so one file in both would count its
@@ -92,7 +97,7 @@ from covcheck.lcov import parse_lcov
 from covcheck.lexer import executable_lines
 from covcheck.model import FileCov, merge_by_path
 from covcheck.mutants import KILLED, SURVIVED, TIMEOUT, Mutant, parse_mutants
-from covcheck.paths import MAPPED, OUTSIDE, RepoFiles, is_test_source, map_path, package_of
+from covcheck.paths import MAPPED, OUTSIDE, RepoFiles, generated_test_main, is_test_source, map_path, package_of
 from covcheck.ratchet import Ratchet, compare, propose
 from covcheck.stats import (
     BELOW_TARGET,
@@ -101,6 +106,7 @@ from covcheck.stats import (
     DECLARATION_ONLY_FILE,
     NOT_MEASURED,
     EXEMPTION_WITHOUT_REASON,
+    REGRESSION,
     MODE_NEUTRAL,
     MUTANT_SURVIVED,
     STALE_EXEMPTION,
@@ -426,6 +432,7 @@ def analyze(
     # A repository path's first line report with a branch record for it.
     var line_branches = Dict[String, String]()
     var outside = Dict[String, Bool]()
+    var generated = Dict[String, Bool]()
     for r in range(len(reports)):
         var fs = _parse_report(reports[r])
         var branch_file = reports[r].format == String(FORMAT_BRANCH_LCOV)
@@ -452,9 +459,17 @@ def analyze(
                 mapped.append(f^)
             elif m.kind == OUTSIDE:
                 outside[fs[i].path] = True
+            elif generated_test_main(reports[r].origin, m.path, repo):
+                generated[m.path] = True
             else:
                 errors.append(_unmapped(reports[r].origin, fs[i].path, m.path))
     a.ignored_files = len(outside)
+    # A test's generated main has no source to measure, with or without
+    # `include_tests`: a test source left out of its package's numbers.
+    for e in generated.items():
+        var p = e.key
+        if _keep(_package_or_empty(p, repo), p, opts) != 1:
+            a.excluded_test_files += 1
 
     # 5 (read first, so every unmapped path of every input is named at once).
     var muts = List[Mutant]()
@@ -743,5 +758,11 @@ def analyze(
         if not is_info_package(a.packages[i].package, opts.info_packages):
             floored.append(a.packages[i].copy())
     a.proposal = propose(ratchet, floored, repo)
-    a.conclusion = conclusion_of(opts.mode, len(a.findings))
+    # Step 10: a test-only package's Regression is in info_findings, so it
+    # fails nothing.
+    var regressions = 0
+    for i in range(len(a.findings)):
+        if a.findings[i].kind == String(REGRESSION):
+            regressions += 1
+    a.conclusion = conclusion_of(opts.mode, len(a.findings), regressions)
     return a^

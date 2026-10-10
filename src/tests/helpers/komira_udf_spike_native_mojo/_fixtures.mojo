@@ -48,6 +48,7 @@ from ._arrow import (
     child,
     f64_at,
     fail,
+    i32_at,
     i64_at,
     is_valid,
     length,
@@ -87,6 +88,18 @@ comptime F_ADD_STRICT = 23
 comptime F_LONG_BY_ONE = 24
 comptime F_SUM_ARGS_KEPT = 25
 comptime F_ENDLESS = 26
+comptime F_NULL_ON_ZERO = 27
+comptime F_NARROW = 28
+comptime F_ADD_MIXED = 29
+comptime F_RAISE_NO_ROW = 30
+comptime F_SUM_STATE_LONG = 31
+comptime F_SUM_FINISH_SHORT = 32
+comptime F_TWO_TYPES = 33
+comptime F_LEAF_SLICED = 34
+comptime F_LEAF_NULL_COUNT_UNKNOWN = 35
+comptime F_LEAF_EMPTY_DATA_NULL = 36
+comptime F_TABLE_SLICED = 37
+comptime F_TABLE_NULL_COUNT_UNKNOWN = 38
 
 comptime ROW_FIELDS_MAX = 8
 comptime SLOW_ROW_NS: Int64 = 100_000_000
@@ -159,6 +172,40 @@ def find_fixture(entry: String) -> Optional[Fixture]:
         return Fixture(F_SUM_ARGS_KEPT, SHAPE_AGG_MERGEABLE, "l", "l", "l")
     if entry == "endless":
         return Fixture(F_ENDLESS, SHAPE_MAP_BATCHES_FRAME, "l", "tl", "")
+    # 2x, and a null for 0: a null the function returns for valid inputs.
+    if entry == "null_on_zero":
+        return Fixture(F_NULL_ON_ZERO, SHAPE_SCALAR, "l", "l", "")
+    # int64 in, the same values as int32 out.
+    if entry == "narrow":
+        return Fixture(F_NARROW, SHAPE_MAP_BATCHES_COLUMN, "l", "i", "")
+    # a (int64) + b (int32), null where either is null.
+    if entry == "add_mixed":
+        return Fixture(F_ADD_MIXED, SHAPE_SCALAR, "li", "l", "")
+    # A batch function that raises naming no row (row -1, legal).
+    if entry == "raise_no_row":
+        return Fixture(F_RAISE_NO_ROW, SHAPE_MAP_BATCHES_COLUMN, "l", "l", "")
+    # sum with a state one row too long; with a result one row short.
+    if entry == "sum_state_long":
+        return Fixture(F_SUM_STATE_LONG, SHAPE_AGG_MERGEABLE, "l", "l", "l")
+    if entry == "sum_finish_short":
+        return Fixture(F_SUM_FINISH_SHORT, SHAPE_AGG_MERGEABLE, "l", "l", "l")
+    # Each input batch's column x as a table (x int64, 10 * x int32).
+    if entry == "table_two_types":
+        return Fixture(F_TWO_TYPES, SHAPE_MAP_BATCHES_FRAME, "l", "tli", "")
+    # Legal Arrow the host must read: identity's column at offset 11 over
+    # padding with null bits; with null_count -1; with no data buffer when
+    # empty. A frame of identity tables at struct offset 2 over a child at
+    # offset 3; with a validity bitmap and null_count -1.
+    if entry == "leaf_sliced":
+        return Fixture(F_LEAF_SLICED, SHAPE_MAP_BATCHES_COLUMN, "l", "l", "")
+    if entry == "leaf_null_count_unknown":
+        return Fixture(F_LEAF_NULL_COUNT_UNKNOWN, SHAPE_MAP_BATCHES_COLUMN, "l", "l", "")
+    if entry == "leaf_empty_data_null":
+        return Fixture(F_LEAF_EMPTY_DATA_NULL, SHAPE_MAP_BATCHES_COLUMN, "l", "l", "")
+    if entry == "table_sliced":
+        return Fixture(F_TABLE_SLICED, SHAPE_MAP_BATCHES_FRAME, "l", "tl", "")
+    if entry == "table_null_count_unknown":
+        return Fixture(F_TABLE_NULL_COUNT_UNKNOWN, SHAPE_MAP_BATCHES_FRAME, "l", "tl", "")
     return None
 
 
@@ -281,14 +328,23 @@ def _value(fx: Int, x: Void, y: Void, r: Int, o: Void, d: Void) raises:
     var strict = fx == F_DOUBLE_STRICT or fx == F_ADD_STRICT
     if strict and (not is_valid(x, r) or (fx == F_ADD_STRICT and not is_valid(y, r))):
         raise Error("a strict fixture got a null argument")
-    if fx == F_NULL_OUT or not is_valid(x, r):
+    if (
+        fx == F_NULL_OUT
+        or not is_valid(x, r)
+        or (fx == F_NULL_ON_ZERO and i64_at(x, r) == 0)
+        or (fx == F_ADD_MIXED and not is_valid(y, r))
+    ):
         set_null(o, r)
         return
     # SAFETY: `d` is make_col's values block of at least r + 1 rows.
     if fx == F_FAHRENHEIT:
         d.bitcast[Float64]()[r] = f64_at(x, r) * 1.8 + 32.0
-    elif fx == F_DOUBLE or fx == F_DOUBLE_STRICT:
+    elif fx == F_DOUBLE or fx == F_DOUBLE_STRICT or fx == F_NULL_ON_ZERO:
         d.bitcast[Int64]()[r] = 2 * i64_at(x, r)
+    elif fx == F_ADD_MIXED:
+        d.bitcast[Int64]()[r] = i64_at(x, r) + Int64(i32_at(y, r))
+    elif fx == F_NARROW:
+        d.bitcast[Int32]()[r] = Int32(i64_at(x, r))
     elif fx == F_ADD_STRICT:
         d.bitcast[Int64]()[r] = i64_at(x, r) + i64_at(y, r)
     else:
@@ -322,7 +378,10 @@ def scalar(fx: Int, host: Void, call: Void, a: Void, o: Void, e: Void) -> Int32:
                 var until = now_ns(host) + SLOW_ROW_NS
                 while now_ns(host) < until and not cancelled(call):
                     pass
-            d.bitcast[Int64]()[r] = 0
+            if fx == F_NARROW:
+                d.bitcast[Int32]()[r] = 0
+            else:
+                d.bitcast[Int64]()[r] = 0
             if r >= n:
                 continue
             if fx == F_CONST7:

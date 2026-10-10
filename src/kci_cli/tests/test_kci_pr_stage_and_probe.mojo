@@ -24,6 +24,7 @@ from kci_cli import CliRecorder, SecretStoreChoice, StageSteps, StepEnd, evidenc
 from kci_api import OUTCOME_SUCCEEDED, ResultStep, ResultValidation, parse_result
 from kci_api import RunResult as KciRunResult
 from kci_publish import NewNamesReport, PublishRequest
+from kci_workflow_check import CHANGE_BASE_LINE
 from kci_validate import ValidateRequest
 
 comptime _REV: String = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
@@ -93,6 +94,10 @@ struct Fake(StageSteps, Movable):
         self.calls.append(String("is-ancestor ") + commit + String(" ") + of)
         return True
 
+    def main_tip_past(mut self, revision: String) raises -> String:
+        # no run here passes --admission (test_kci_staged_ordering.mojo does)
+        raise Error(String("main_tip_past is not asked in this test"))
+
     def release_set_hash(mut self, artifacts_file: String, platform_dir: String) raises -> String:
         raise Error(String("no release is read here"))
 
@@ -144,8 +149,9 @@ def _pr_workflow(machine: String) -> String:
         + String("      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n")
         + String("        with:\n          fetch-depth: 0\n")
         + String("      - uses: ./.github/actions/farm-connect\n")
-        + String("      - run: kci run --machine ") + machine
-        + String(" --stage pr --affected-by ${{ github.event.pull_request.base.sha }} --summary-file \"$GITHUB_STEP_SUMMARY\"\n")
+        + String("      - run: |\n          ") + String(CHANGE_BASE_LINE) + String("\n")
+        + String("          kci run --machine ") + machine
+        + String(" --stage pr --affected-by \"$change_base\" --summary-file \"$GITHUB_STEP_SUMMARY\"\n")
     )
 
 
@@ -193,7 +199,7 @@ def test_under_actions_a_drifted_pull_request_workflow_is_exit_3() raises:
     var m = _pr_machine(_root(String("pr_drift")))
     # the base passed is not the pull request's base commit
     var f = Fake()
-    _under_pull_request(f, _pr_workflow(m).replace(String("${{ github.event.pull_request.base.sha }}"), String("origin/main")))
+    _under_pull_request(f, _pr_workflow(m).replace(String("\"$change_base\""), String("origin/main")))
     var rec = CliRecorder.memory(String(""))
     assert_equal(kci_main_with(_pr_run(m), f, rec), 3)
     assert_equal(len(f.calls), 1)

@@ -127,7 +127,7 @@ def test_every_metadata_refusal_in_one_pass() raises:
         + String('{"id":"zone","dnsZone":{"name":"example.com"}},')
         + String('{"id":"www","physicalName":"www-rec","dnsRecord":{"zone":{"resource":"zone"},"name":"www.example.com",')
         + String('"type":"A","values":[{"literal":"192.0.2.1"}]}},')
-        + String('{"id":"orphan","adopt":true,"bucket":{}}')
+        + String('{"id":"orphan","adopt":"ADOPT","bucket":{}}')
         + String("]}")
     )
     var l = _lines(graph_findings(Catalog.v1(), g))
@@ -167,7 +167,7 @@ def test_a_good_metadata_graph_is_clean() raises:
     var k63 = _bytes(63)
     var g = _list(
         String('{"resource":[')
-        + String('{"id":"logs","physicalName":"acme-logs","adopt":true,')
+        + String('{"id":"logs","physicalName":"acme-logs","adopt":"ADOPT",')
         + String('"labels":{"kci":"","team_a":"x-1","b":"z","') + k63 + String('":"') + k63 + String('"},"bucket":{}},')
         + String('{"id":"rows","physicalName":"acme-logs","table":{"key":{"partition":{"name":"id","type":"STRING"}}}},')
         + String('{"id":"tiny","physicalName":"a","bucket":{}},')
@@ -265,9 +265,9 @@ def test_adopt_names_the_primary_node() raises:
     added twice or the scope's own adopt list dropped."""
     var l = _list(
         String('{"resource":[')
-        + String('{"id":"logs","physicalName":"acme-logs","adopt":true,"bucket":{}},')
-        + String('{"id":"api","physicalName":"api-1","adopt":true,"service":{"image":{"digest":"sha256:0011"},"internal":{}}},')
-        + String('{"id":"who","physicalName":"who-1","adopt":true,"serviceAccount":{}},')
+        + String('{"id":"logs","physicalName":"acme-logs","adopt":"ADOPT","bucket":{}},')
+        + String('{"id":"api","physicalName":"api-1","adopt":"ADOPT","service":{"image":{"digest":"sha256:0011"},"internal":{}}},')
+        + String('{"id":"who","physicalName":"who-1","adopt":"ADOPT","serviceAccount":{}},')
         + String('{"id":"plain","physicalName":"plain-1","bucket":{}}')
         + String("]}")
     )

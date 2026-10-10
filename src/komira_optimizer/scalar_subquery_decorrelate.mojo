@@ -9,20 +9,21 @@
 #
 # Motivation (design goal — "multiple reads/writes go through the same
 # compiler so we can optimize and just read once"):
-#   The existing `resolve_scalar_subqueries` does
-#   MATERIALIZE-AND-SUBSTITUTE: it executes the inner plan DURING optimize()
-#   and inlines a literal. So `df.filter(col("c_acctbal") > scalar_subquery(
-#   <agg over customer>))` scans `customer` TWICE — once for the agg during
-#   optimize, once for the outer query during materialize — two physical
-#   plans, plan-CSE can't span them.
+#   The `resolve_scalar_subqueries` pass does MATERIALIZE-AND-SUBSTITUTE:
+#   the inner plan is executed on its own by the executing caller (a
+#   `ScalarDepTable` request; the caller is not in this tree) and its value
+#   inlined as a literal. So `df.filter(col("c_acctbal") >
+#   scalar_subquery(<agg over customer>))` scans `customer` TWICE — once for
+#   the agg, once for the outer query — two physical plans, and a plan-CSE
+#   cannot span them.
 #
 #   When the inner plan is provably single-row, we can instead lower it to a
 #   broadcast CROSS join: the plan node that USES the subquery gets its child
 #   replaced by `Join(CROSS, left=old_child, right=inner_aliased)`, and the
-#   subquery Expr becomes `col_ref("__scalar_subq_N")`. Then plan-CSE
-#   (already ON — `_ENABLE_CSE_REWRITE`) dedups the base scan shared between
-#   the inner-agg branch and the outer branch → ONE physical plan, ONE
-#   execution, `customer` (Q22) / the germany-join (Q11) read ONCE.
+#   subquery Expr becomes `col_ref("__scalar_subq_N")`. Then a plan-CSE
+#   (not in this tree) can dedup the base scan shared between the inner-agg
+#   branch and the outer branch → ONE physical plan, in which `customer`
+#   (Q22) / the germany-join (Q11) is read ONCE.
 #
 # "PROVABLY <= 1 row" predicate (conservative — fall through to
 # materialize-and-substitute otherwise):
@@ -45,17 +46,18 @@
 # Schema bookkeeping: the CROSS join's output schema = `left.schema ++
 # [the aliased 1-col field]` (the `LogicalPlan.join` factory does this for
 # non-SEMI/ANTI joins). To keep the OWNING node's output schema STABLE
-# (downstream `_compile_node` / optimizer rules / typed-schema mirror all
-# key on the post-decorrelate schema), the rewritten node is wrapped in a
+# (optimizer rules, the typed-schema mirror and a plan compiler that is not in
+# this tree all key on the post-decorrelate schema), the rewritten node is
+# wrapped in a
 # trailing identity `Project` restoring the original output columns — the
 # `__scalar_subq_N` columns never escape past the node that introduced them.
 #
-# Wiring: invoked from `komira_optimizer.optimizer.optimize()` BEFORE
-# `resolve_scalar_subqueries_rewrite` (so it claims the decorrelatable
-# sites first; whatever's left goes to materialize-and-substitute) and
-# BEFORE `flatten_dependent_joins` (which only handles CORRELATED subqueries
-# — outer_refs >= 1) and BEFORE plan-CSE (run by `pipeline_compiler` after
-# `optimize()` returns, so any in-`optimize()` ordering is "before CSE").
+# Pass order: `optimizer_driver.optimize` runs this pass BEFORE
+# `resolve_scalar_subqueries_rewrite` (so it
+# claims the decorrelatable sites first; whatever's left goes to
+# materialize-and-substitute), BEFORE `flatten_dependent_joins` (which only
+# handles CORRELATED subqueries — outer_refs >= 1) and BEFORE plan-CSE (which
+# is designed to run after every optimizer pass).
 #
 # DuckDB reference (`src/planner/subquery/flatten_dependent_join.cpp` +
 # `plan_subquery.cpp:77-153`): an uncorrelated scalar subquery is
@@ -67,7 +69,7 @@
 # flattening only; the uncorrelated CROSS-decorrelate is a v0.4 addition.
 #
 # This module is PURE + NON-PARAMETRIC (no FileHandle reach, no
-# `EngineContext`) — it lives entirely in `komira_optimizer`. No 3-phase
+# execution context) — it lives entirely in `komira_optimizer`. No 3-phase
 # split needed (the monomorphizer trap requires a parametric +
 # recursive + FileHandle-reaching function; this has none).
 # =============================================================================
@@ -350,8 +352,8 @@ def _build_cross_chain(var left: LogicalPlan, mut sites: Slab[_DecorrSite]) rais
     """Left-deep chain of `JOIN_CROSS` nodes:
         left' = CROSS( ... CROSS( CROSS(left, inner_0), inner_1) ..., inner_{N-1})
     Each `inner_i` is `inner_plan_i` aliased to `__scalar_subq_<i>`. Empty
-    `left_on` / `right_on` (the CROSS contract — `plan_compiler` never
-    consults them for a CROSS join). Consumes each site's `inner_plan`
+    `left_on` / `right_on` (the CROSS contract — a CROSS join has no join
+    keys). Consumes each site's `inner_plan`
     Optional via `.take()` (leaves the List slot destructor-safe)."""
     var acc = left^
     for i in range(len(sites)):
@@ -379,8 +381,8 @@ def _restore_schema(var node: LogicalPlan, original_schema: Schema) raises -> Lo
     `__scalar_subq_N` columns), wrap in an identity Project restoring the
     original columns. If the schemas already match (e.g. a Project node
     whose rebuilt exprs never referenced an extra column), return `node`
-    unchanged — `eliminate_identity_projects` would only have to remove
-    a redundant Project otherwise."""
+    unchanged — an identity-Project elimination pass (not in this tree)
+    would only have to remove a redundant Project otherwise."""
     if node.output_schema.num_columns() == original_schema.num_columns():
         # Same width — assume same columns (the Project / Filter rebuild
         # preserved them). No wrapper needed.

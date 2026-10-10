@@ -6,9 +6,10 @@
 # Every call returns an Outcome: the runtime's status, message, trace, row
 # and group, and `fault`, a post-condition the host found broken (a layout
 # that fails import validation, a wrong length, a null in a non-nullable
-# result, an input not moved (then released here, once), `out` set on
-# failure, a frame that does not end). run_error() maps either to the run's
-# named error through one table (contract.run_error).
+# result, an input not moved whatever the status (then released here,
+# once), `out` set on failure, an error row outside the batch, a frame that
+# does not end). run_error() maps either to the run's named error through
+# one table (contract.run_error).
 #
 # Handles are opaque: a Handle holds the runtime's pointer as a Word, which
 # this file cannot read through, and its kind; it is passed back only to the
@@ -18,28 +19,30 @@ from ._cabi import Word
 from ._host import (
     Counts,
     _Arena,
+    arm_cancel_on_clock,
     array_released,
-    clock_reads_of,
     counts,
     device_column,
     device_stream,
     device_struct,
+    disarm_cancel_on_clock,
     host_data_of,
     import_column,
     import_struct,
     make_host,
     new_error,
+    new_host_data,
     pulls_of,
     release_out,
-    reserved_of,
+    release_stream,
     schema_of,
     stream_moved,
     stream_record,
     take_error,
 )
 from ._table import (
+    cancel_flag_of,
     init_runtime,
-    join_cancel_timer,
     memory_report_present,
     new_call,
     new_caps,
@@ -49,7 +52,6 @@ from ._table import (
     read_words,
     required_size,
     slot_value,
-    start_cancel_timer,
     t_agg_close,
     t_agg_finish,
     t_agg_merge,
@@ -282,9 +284,11 @@ struct ThreadTimes(Copyable, Movable):
 @fieldwise_init
 struct CallOptions(Copyable, Movable):
     """`cancel`: the cancel flag is set before the call. `cancel_during_call`:
-    a C thread sets the flag while the call runs, once the runtime has read
-    the host's clock inside it (native/cancel_timer.c), so the call has
-    started; no wall-clock delay decides when. `deadline_passed`: the deadline is one nanosecond after the host
+    the host's now_ns callback sets the flag (a release store,
+    native/cancel_flag.c) each time the runtime reads the host's clock during
+    the call, so the flag goes up inside the call at the runtime's first
+    clock read, never before the call starts, and no clock or thread decides
+    when. `deadline_passed`: the deadline is one nanosecond after the host
     clock's zero, long past."""
 
     var cancel: Bool
@@ -302,15 +306,15 @@ def _need(h: Handle, kind: Int) raises:
 
 
 struct _Call(Copyable, Movable):
-    """One komira_udf_call and, when the options ask for one, the timer that
-    cancels it while it runs."""
+    """One komira_udf_call, and whether its cancel flag is armed on the
+    host's clock."""
 
     var call: Word
-    var timer: Word
+    var armed: Bool
 
-    def __init__(out self, call: Word, timer: Word):
+    def __init__(out self, call: Word, armed: Bool):
         self.call = call
-        self.timer = timer
+        self.armed = armed
 
 
 struct UdfRuntime(Movable):
@@ -346,12 +350,12 @@ struct UdfRuntime(Movable):
         runtime with a global lock may not declare that mode)."""
         var arena = _Arena()
         var lib = open_library(path)
-        var host = make_host(arena, abi_major)
+        var host = make_host(arena, abi_major, new_host_data(arena))
         var slot = arena.word(8)
         var err = new_error(arena)
         var t = init_runtime(lib, host, slot, err)
+        var e = take_error(err)  # released whatever init returned (design 4.4)
         if t.is_null():
-            var e = take_error(err)
             arena.free_all()
             raise Error("UDF_RUNTIME_INIT: " + path + ": " + status_name(e.code) + " " + e.message)
         if table_abi(t) != ABI_MAJOR or table_size(t) < required_size():
@@ -373,15 +377,17 @@ struct UdfRuntime(Movable):
 
     def init_refusal(mut self, abi_major: UInt32) -> Outcome:
         """Call init again with a host claiming `abi_major`: a runtime of
-        another major must return NULL with ERR_ABI and create nothing."""
-        var host = make_host(self._arena, abi_major)
+        another major must return NULL with ERR_ABI and create nothing. The
+        second host counts into this runtime's ledger, so what that init
+        reserves (an error's strings) shows in ledger()."""
+        var host = make_host(self._arena, abi_major, host_data_of(self._host))
         var slot = self._arena.word(8)
         var err = new_error(self._arena)
         var t = init_runtime(self._lib, host, slot, err)
+        var e = take_error(err)  # released whatever init returned (design 4.4)
         if not t.is_null():
             t_shutdown(t, slot_value(slot))
             return Outcome(OK, "", "", -1, -1, "UDF_RUNTIME_FAULT: init accepted ABI major " + String(abi_major))
-        var e = take_error(err)
         return Outcome(e.code, e.message, e.trace, e.row, e.group, "")
 
     def describe(mut self) raises -> Capabilities:
@@ -419,9 +425,13 @@ struct UdfRuntime(Movable):
         )
 
     def _outcome(mut self, rc: Int32, err: Word) -> Outcome:
+        """The call's outcome. The error is released whatever the status
+        (design section 4.4, the error row: the host calls `release` once
+        when it is non-NULL), so an error a runtime filled and then returned
+        OK on is released too; its text is dropped."""
+        var e = take_error(err)
         if rc == OK:
             return Outcome.of(OK)
-        var e = take_error(err)
         return Outcome(rc, e.message, e.trace, e.row, e.group, "")
 
     def _opened(mut self, rc: Int32, err: Word, slot: Word, kind: Int) -> Opened:
@@ -473,18 +483,20 @@ struct UdfRuntime(Movable):
     def _begin(mut self, opts: CallOptions) -> _Call:
         self._calls += 1
         var call = new_call(self._arena, Int64(1) if opts.deadline_passed else Int64(0), self._calls, opts.cancel)
-        var timer = Word.null()
         if opts.cancel_during_call:
-            timer = start_cancel_timer(call, clock_reads_of(host_data_of(self._host)))
-        return _Call(call, timer)
+            arm_cancel_on_clock(host_data_of(self._host), cancel_flag_of(call))
+        return _Call(call, opts.cancel_during_call)
 
     def _end(mut self, c: _Call):
-        join_cancel_timer(c.timer)
+        if c.armed:
+            disarm_cancel_on_clock(host_data_of(self._host))
 
     def call_batch(mut self, inst: Handle, spec: UdfSpec, args: Batch, opts: CallOptions) raises -> CallResult:
         """One call_batch. Under PROPAGATE the host drops every row with a null
         argument before the call and scatters nulls back after it (design
-        section 3.4 rule 2)."""
+        section 3.4 rule 2); an error's row, a row of the compacted batch the
+        runtime saw, is mapped back to the caller's row. A row outside that
+        batch is a fault (_call_batch) and is not mapped."""
         _need(inst, KIND_INSTANCE)
         if spec.null_mode != NULL_PROPAGATE:
             return self._call_batch(inst, spec, args, opts)
@@ -505,6 +517,8 @@ struct UdfRuntime(Movable):
             compact.columns.append(col^)
         var res = self._call_batch(inst, spec, compact, opts)
         if not res.outcome.is_ok():
+            if res.outcome.row >= 0 and Int(res.outcome.row) < len(keep):
+                res.outcome.row = Int64(keep[Int(res.outcome.row)])
             return res^
         var out = Column(res.column.type_id)
         var k = 0
@@ -526,8 +540,19 @@ struct UdfRuntime(Movable):
         var rc = t_call_batch(self._table, inst._w, c.call, d_args, d_out, err)
         self._end(c)
         var res = self._finish_column(rc, err, d_out, spec.result[0], args.length)
+        var row = res.outcome.row
+        if row < -1 or row >= Int64(args.length):
+            # The error's row is "row in the batch when known; -1 otherwise"
+            # (design 4.3, komira_udf_error): any other value is a runtime
+            # bug, never a row of user code to report (4.5, ERR_INTERNAL).
+            res.outcome.fault = (
+                "UDF_RUNTIME_FAULT: error row " + String(row) + " is outside the batch of "
+                + String(args.length) + " rows"
+            )
         if not array_released(d_args):
-            # Not moved, so still the host's: released here, once.
+            # Not moved, so still the host's: released here, once, and a
+            # fault whatever the status (design section 4.4: moved on entry,
+            # whatever status the runtime returns).
             _ = release_out(d_args)
             if res.outcome.fault == "":
                 res.outcome.fault = "UDF_RUNTIME_FAULT: args not moved by call_batch"
@@ -535,15 +560,13 @@ struct UdfRuntime(Movable):
 
     def _finish_column(mut self, rc: Int32, err: Word, d_out: Word, want: ColumnType, rows: Int) -> CallResult:
         """Import a column a runtime returned, with the post-conditions: the
-        layout, `rows` rows (-1: any), no null in a non-nullable type."""
+        layout (an OK with no output is a released array, which import
+        refuses), `rows` rows, no null in a non-nullable type."""
         var out = self._outcome(rc, err)
         if rc != OK:
             if not array_released(d_out):
                 _ = release_out(d_out)
                 out.fault = "UDF_RUNTIME_FAULT: out set on failure"
-            return CallResult(out^, Column(want.type_id))
-        if array_released(d_out):
-            out.fault = "UDF_RUNTIME_FAULT: OK without an output"
             return CallResult(out^, Column(want.type_id))
         var col = Column(want.type_id)
         try:
@@ -552,7 +575,7 @@ struct UdfRuntime(Movable):
             out.fault = String(e)
         if not release_out(d_out) and out.fault == "":
             out.fault = "UDF_RUNTIME_FAULT: release left its slot set"
-        if out.fault == "" and rows >= 0 and len(col) != rows:
+        if out.fault == "" and len(col) != rows:
             out.fault = "UDF_BATCH_LENGTH_MISMATCH: " + String(len(col)) + " rows for " + String(rows)
         if out.fault == "" and not want.nullable and col.null_count() > 0:
             out.fault = "UDF_RETURN_TYPE_MISMATCH: a null in a non-nullable result"
@@ -571,50 +594,55 @@ struct UdfRuntime(Movable):
         var c = self._begin(opts)
         var rc = t_frame_open(self._table, inst._w, c.call, s, slot, err)
         var out = self._outcome(rc, err)
-        if not stream_moved(s) and out.fault == "":
-            out.fault = "UDF_RUNTIME_FAULT: the input stream was not moved by frame_open"
+        # A stream frame_open did not move is still the host's. The runtime
+        # may read it in place until frame_close, so it is released after
+        # that, once, and the call is a fault, whatever frame_open returned.
+        var kept = not stream_moved(s)
         var outputs = List[Batch]()
         var first = -1
-        if rc != OK:
-            self._end(c)
-            return FrameResult(out^, outputs^, first, pulls_of(rec))
-        var frame = slot_value(slot)
-        var ended = False
-        for _ in range(_MAX_FRAME_OUTPUTS + 1):
-            var d_out = self._arena.word(128)
-            var e2 = new_error(self._arena)
-            var rc2 = t_frame_next(self._table, frame, c.call, d_out, e2)
-            if rc2 != OK:
-                ended = True
-                out = self._outcome(rc2, e2)
-                if not array_released(d_out):
-                    _ = release_out(d_out)
-                    out.fault = "UDF_RUNTIME_FAULT: out set on failure"
-                break
-            if array_released(d_out):
-                ended = True
-                break
-            if first < 0:
-                first = pulls_of(rec)
-            try:
-                if spec.result_is_table:
-                    outputs.append(import_struct(d_out, spec.result))
-                else:
-                    var col = import_column(d_out, spec.result[0])
-                    var b = Batch(len(col))
-                    b.columns.append(col^)
-                    outputs.append(b^)
-            except e:
-                out.fault = String(e)
-            _ = release_out(d_out)
-            if out.fault != "":
-                ended = True
-                break
-        if not ended:
-            out.fault = (
-                "UDF_RUNTIME_FAULT: frame_next did not end after " + String(len(outputs)) + " outputs"
-            )
-        t_frame_close(self._table, frame)
+        if rc == OK:
+            var frame = slot_value(slot)
+            var ended = False
+            for _ in range(_MAX_FRAME_OUTPUTS + 1):
+                var d_out = self._arena.word(128)
+                var e2 = new_error(self._arena)
+                var rc2 = t_frame_next(self._table, frame, c.call, d_out, e2)
+                var got = self._outcome(rc2, e2)
+                if rc2 != OK:
+                    ended = True
+                    out = got^
+                    if not array_released(d_out):
+                        _ = release_out(d_out)
+                        out.fault = "UDF_RUNTIME_FAULT: out set on failure"
+                    break
+                if array_released(d_out):
+                    ended = True
+                    break
+                if first < 0:
+                    first = pulls_of(rec)
+                try:
+                    if spec.result_is_table:
+                        outputs.append(import_struct(d_out, spec.result))
+                    else:
+                        var col = import_column(d_out, spec.result[0])
+                        var b = Batch(len(col))
+                        b.columns.append(col^)
+                        outputs.append(b^)
+                except e:
+                    out.fault = String(e)
+                _ = release_out(d_out)
+                if out.fault != "":
+                    ended = True
+                    break
+            if not ended:
+                out.fault = (
+                    "UDF_RUNTIME_FAULT: frame_next did not end after " + String(len(outputs)) + " outputs"
+                )
+            t_frame_close(self._table, frame)
+        if kept:
+            release_stream(s)
+            if out.fault == "":
+                out.fault = "UDF_RUNTIME_FAULT: the input stream was not moved by frame_open"
         self._end(c)
         return FrameResult(out^, outputs^, first, pulls_of(rec))
 
@@ -633,7 +661,7 @@ struct UdfRuntime(Movable):
 
     def _moved_check(self, mut got: Outcome, a: Word, b: Word, entry: String):
         """An input the runtime did not move is still the host's: released
-        here, once, and a fault."""
+        here, once, and a fault, whatever status the entry returned."""
         var kept = False
         if not array_released(a):
             _ = release_out(a)
@@ -721,8 +749,9 @@ struct UdfRuntime(Movable):
         return counts(host_data_of(self._host))
 
     def reserved_bytes(self) -> Int:
-        """The bytes the runtime has reserved from the host and not released."""
-        return reserved_of(host_data_of(self._host))
+        """The bytes the runtime has reserved from the host and not released
+        (the ledger's reserved_bytes)."""
+        return self.ledger().reserved_bytes
 
     def shutdown(mut self):
         """Shut the runtime down (once); no callback may run after this."""

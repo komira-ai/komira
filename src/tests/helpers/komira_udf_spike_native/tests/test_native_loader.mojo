@@ -29,7 +29,9 @@
 #     naming the runtime symbol (a runtime and a user library confused); a
 #     library without the native symbol, and one whose init fails, each by
 #     its whole message, the failed init's error released (its message
-#     holds host bytes).
+#     holds host bytes); and one whose init fills the error and succeeds,
+#     loaded with that error released too (a loader that releases init's
+#     error only on a refusal).
 #   - capabilities: libraries that each differ from the C library in one
 #     describe field (native/variant_lib.c and native_c_affine) are refused
 #     with ERR_LOAD naming that field: thread_affine 1, threading
@@ -258,6 +260,13 @@ def _symbols(tmp: String) raises:
     assert_equal(rt.reserved_bytes(), reserved, "the error of a failed library init was not released")
     _refused(rt.load(fails).outcome, ERR_LOAD, "init_fails refuses every host", "a library whose init failed, again")
     rt.shutdown()
+    # A library whose init fills the error and returns its table loads, and
+    # the error is released all the same (its message holds host bytes): a
+    # fresh runtime, so every byte must be back after its shutdown.
+    var ok_rt = UdfRuntime.open("./native.so")
+    _double(ok_rt, _spec(root, [stage("./variant_error_on_ok.so", root, host_role())]))
+    ok_rt.shutdown()
+    assert_equal(ok_rt.reserved_bytes(), 0, "the error a library's init filled before it succeeded was not released")
 
 
 def _capabilities(tmp: String) raises:
@@ -290,19 +299,22 @@ def _table(tmp: String) raises:
     var rt = UdfRuntime.open("./native.so")
     var root = tmp + "/table"
     # A refused table is never called again, its shutdown included: each
-    # variant's init reserved INIT_BYTES, which only its shutdown returns.
+    # variant's init reserved INIT_BYTES, and the C library under it its
+    # runtime handle, which only its shutdown returns. So each refused init
+    # holds the same `held` bytes, at least INIT_BYTES.
     var reserved = rt.reserved_bytes()
     var abi2 = _spec(root, [stage("./variant_abi2.so", root, host_role())])
     _refused(rt.load(abi2).outcome, ERR_ABI, "ABI major 1", "a library table of ABI major 2")
-    assert_equal(rt.reserved_bytes() - reserved, INIT_BYTES, "the shutdown of a table of ABI major 2 was called")
+    var held = rt.reserved_bytes() - reserved
+    assert_true(held >= INIT_BYTES, "the shutdown of a table of ABI major 2 was called")
     var short = _spec(root, [stage("./variant_short_table.so", root, host_role())])
     _refused(rt.validate(short), ERR_ABI, "struct_size", "a library table ending before a required entry")
-    assert_equal(rt.reserved_bytes() - reserved, 2 * INIT_BYTES, "the shutdown of a short table was called")
+    assert_equal(rt.reserved_bytes() - reserved, 2 * held, "the shutdown of a short table was called")
     # The bound itself: one entry short (no shutdown) is refused, and a table
     # ending exactly at shutdown (no optional memory_report) is accepted.
     var one_short = _spec(root, [stage("./variant_one_short.so", root, host_role())])
     _refused(rt.load(one_short).outcome, ERR_ABI, "struct_size", "a library table one entry short")
-    assert_equal(rt.reserved_bytes() - reserved, 3 * INIT_BYTES, "a table without shutdown was shut down")
+    assert_equal(rt.reserved_bytes() - reserved, 3 * held, "a table without shutdown was shut down")
     _double(rt, _spec(root, [stage("./variant_exact_table.so", root, host_role())]))
     rt.shutdown()
 
@@ -483,14 +495,22 @@ def _library_contexts(tmp: String) raises:
         udfs.append(u.handle.copy())
     var ctx = rt.open_context(5)
     var insts = List[Handle]()
+    # What each first instance reserved: its library context's bytes (the
+    # counted library's record) and the instance's own (the C library under
+    # it reserves every handle). A second instance reserves its own only.
+    var first_cost = List[Int]()
     for i in range(len(udfs)):
+        var before = rt.reserved_bytes()
         var inst = rt.open_instance(ctx.handle, udfs[i])
         assert_true(inst.outcome.is_ok(), paths[i] + " in a shared context: " + String(inst.outcome))
+        first_cost.append(rt.reserved_bytes() - before)
         insts.append(inst.handle.copy())
     var reserved = rt.reserved_bytes()
     var again = rt.open_instance(ctx.handle, udfs[2])
     assert_true(again.outcome.is_ok(), "a second counted instance in its context: " + String(again.outcome))
-    assert_equal(rt.reserved_bytes(), reserved, "a second instance of a library opened a second library context")
+    assert_true(
+        rt.reserved_bytes() - reserved < first_cost[2], "a second instance of a library opened a second library context"
+    )
     insts.append(again.handle.copy())
     for i in range(len(insts)):
         var k = i if i < len(specs) else 2
@@ -501,11 +521,12 @@ def _library_contexts(tmp: String) raises:
     rt.close_context(ctx.handle)
     # The library first in its context is found again too.
     var first = rt.open_context(6)
+    var k0 = rt.reserved_bytes()
     var k1 = rt.open_instance(first.handle, udfs[2])
     var at = rt.reserved_bytes()
     var k2 = rt.open_instance(first.handle, udfs[2])
     assert_true(k1.outcome.is_ok() and k2.outcome.is_ok(), String(k1.outcome) + " / " + String(k2.outcome))
-    assert_equal(rt.reserved_bytes(), at, "the first library of a context opened a second library context")
+    assert_true(rt.reserved_bytes() - at < at - k0, "the first library of a context opened a second library context")
     rt.close_instance(k1.handle)
     rt.close_instance(k2.handle)
     rt.close_context(first.handle)

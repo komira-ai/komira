@@ -34,7 +34,8 @@
 # kci resolves to `<id>/secret`), so the run is created after the secret.
 # =============================================================================
 
-from kci_resource_proto.resource import Resource, SecretRef
+from kci_resource_proto.refs import SecretRef
+from kci_resource_proto.resource import Resource
 
 from kci_cloud.adapter import FINDING_GRAPH, Finding
 from kci_cloud.catalog import (

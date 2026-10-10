@@ -10,9 +10,11 @@
 #     it releases once through the array's own `release`.
 #   - an output column: one `zeroed` block holding its two-entry buffer list,
 #     its validity bitmap and its values; `_release_col` frees the block.
-#   - an output struct: one block holding its buffer list (NULL validity) and
-#     its child pointers, and one 80-byte block per child; `_release_struct`
-#     releases each child still set, frees the child blocks, then its own.
+#   - an output struct: one block holding its buffer list (NULL validity
+#     unless a fixture points it at the block's own 8-byte bitmap, after the
+#     child pointers) and its child pointers, and one 80-byte block per
+#     child; `_release_struct` releases each child still set, frees the
+#     child blocks, then its own.
 #   - an error's strings: `zeroed` blocks of this library, freed by
 #     `_free_error`, which the host calls once.
 # Every pointer here is untracked (the _cabi mirror's `Void`): its memory is
@@ -163,6 +165,34 @@ def set_null(a: Void, r: Int):
     arr(a)[].null_count += 1
 
 
+comptime PAD_VALUE: Int64 = 0x5EAD5EAD
+"""The rows before a sliced output's offset."""
+
+
+def slice_col(a: Void, at: Int):
+    """Rebuild column `a` (int64, from make_col) at offset `at`: the `at` rows
+    before it hold PAD_VALUE with null bits, so a reader that ignores the
+    offset reads nulls and padding. Legal Arrow (C Data `offset`)."""
+    var n = length(a)
+    var s = zeroed(size_of[CArrowArray]())
+    var d = make_col(s, at + n)
+    for r in range(at + n):
+        var pad = r < at
+        # SAFETY: make_col's values block of at + n rows.
+        d.bitcast[Int64]()[r] = PAD_VALUE if pad else i64_at(a, r - at)
+        if pad or not is_valid(a, r - at):
+            set_null(s, r)
+    arr(s)[].null_count -= Int64(at)  # the pad rows are not the column's rows
+    arr(s)[].offset = Int64(at)
+    arr(s)[].length = Int64(n)
+    release_array(a)
+    # SAFETY: both are struct ArrowArray (80 bytes, 10 words); `a`'s is
+    # released, `s`'s block moves to it, and the empty `s` is freed.
+    for w in range(10):
+        a.bitcast[Int64]()[w] = s.bitcast[Int64]()[w]
+    free_zeroed(s)
+
+
 def _release_struct(a: Void) abi("C"):
     var p = arr(a)
     for i in range(Int(p[].n_children)):
@@ -176,9 +206,9 @@ def _release_struct(a: Void) abi("C"):
 def make_struct(a: Void, n: Int, k: Int):
     """Make `a` a struct array of `n` rows with `k` children for the caller
     to fill (each an empty 80-byte array struct)."""
-    var block = zeroed(8 + 8 * k)
-    # SAFETY: the block is the one-entry buffer list (NULL: no validity) and
-    # k child pointers after it.
+    var block = zeroed(8 + 8 * k + 8)
+    # SAFETY: the block is the one-entry buffer list (NULL: no validity), k
+    # child pointers after it, then 8 bytes for struct_validity.
     var kids = (block.bitcast[Void]() + 1)
     for i in range(k):
         kids[i] = zeroed(size_of[CArrowArray]())
@@ -193,6 +223,19 @@ def make_struct(a: Void, n: Int, k: Int):
     p[].dictionary = null_void()
     p[].release = release_word(_release_struct)
     p[].private_data = block
+
+
+def struct_validity(a: Void) -> Void:
+    """The 8-byte bitmap of struct `a` (from make_struct): rows 0 to 63, all
+    valid, made its validity buffer."""
+    var p = arr(a)
+    # SAFETY: make_struct's block: 8 bytes of buffer list, n_children child
+    # pointers, then the 8 bitmap bytes.
+    var v = (p[].private_data.bitcast[UInt8]() + 8 + 8 * Int(p[].n_children)).bitcast[NoneType]()
+    for i in range(8):
+        v.bitcast[UInt8]()[i] = 0xFF
+    p[].buffers.bitcast[Void]()[0] = v
+    return v
 
 
 # --- schemas -------------------------------------------------------------------------

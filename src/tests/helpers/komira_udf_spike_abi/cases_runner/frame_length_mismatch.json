@@ -1,0 +1,13 @@
+{
+ "name": "frame_length_mismatch",
+ "defect": "a deliberate mismatch: the runner must fail this case",
+ "run": "frame",
+ "entry": "running_sum",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]}],
+ "expect": {"status": "OK", "batches": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}]},
+ "runner_fails_with": "batch 0 {2 rows"
+}

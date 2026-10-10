@@ -18,7 +18,9 @@
 #     in the same call and leaves every other label as it was;
 #   * an object's NAME (the author's cloud name, `names`; empty when the
 #     cloud chose it) is written by the create, or by the adoption that takes
-#     it over, and by nothing else: an update or a tamper never renames.
+#     it over, and by nothing else: an update or a tamper never renames;
+#   * a RELEASE drops every kci label of an object (`kci_*`, `kci-*`) and
+#     changes nothing else: the object stays, with its kind, state and name.
 #
 # THE FAULTY VARIANT (constructor arguments, each independent):
 #   * `fail_at_call = k` (1-based, 0 = never): the k-th mutating call raises
@@ -28,16 +30,26 @@
 #     next n reads of that name still see it ABSENT; after a delete, the next
 #     n reads still see the old object. Lists (`list_owned`) see the truth.
 #   * `foreign = [names]`: objects that exist before kci ever ran, carrying
-#     no kci stamp (made by hand, or by another tool).
+#     no kci stamp (made by hand, or by another tool). `plant_object` makes
+#     one of a given kind, state (digest) and name: what an adoption reads.
+#   * `fail_reads_of(id)`: from then on every live read of the node `id`
+#     (`read_status`, `read_presence`) raises, as when a cloud API refuses
+#     a read. Lists and the adoption read (`read_existing`) are not
+#     affected.
 #   * `race_next()`: the next create meets an object a second apply of the
 #     same cell created a moment earlier (same name, same labels): that
 #     create is served for the other writer and logged, and this one is
 #     refused as ALREADY_EXISTS.
 # `fail(id)` puts a present node into the failed state (a new version that
-# never became ready); the next update clears it.
+# never became ready); the next update clears it. `replace_only(id)` is the
+# fake's model of a field the cloud cannot change in place: from then on, a
+# drifted object at `id` is planned as a replace (nodes.mojo), never an
+# update.
 # =============================================================================
 
 from kci_reconciler import Label
+
+from kci_cloud import is_kci_label_key
 
 
 struct FakeView(Copyable, Movable, Deinitable):
@@ -51,8 +63,10 @@ struct FakeView(Copyable, Movable, Deinitable):
     var labels: List[Label]
     var annotation: String
     var extra: String
+    var name: String
 
     def __init__(out self):
+        self.name = String("")
         self.present = False
         self.kind = String("")
         self.digest = String("")
@@ -71,6 +85,7 @@ struct FakeView(Copyable, Movable, Deinitable):
         self.labels = copy.labels.copy()
         self.annotation = copy.annotation.copy()
         self.extra = copy.extra.copy()
+        self.name = copy.name.copy()
 
 
 struct FakeStore(Movable):
@@ -96,6 +111,8 @@ struct FakeStore(Movable):
     var _ghosts: List[String]
     var _ghost_views: List[FakeView]
     var _ghost_left: List[Int]
+    var replaces: List[String]
+    var read_faults: List[String]
 
     def __init__(
         out self,
@@ -125,6 +142,8 @@ struct FakeStore(Movable):
         self._ghosts = List[String]()
         self._ghost_views = List[FakeView]()
         self._ghost_left = List[Int]()
+        self.replaces = List[String]()
+        self.read_faults = List[String]()
         for i in range(len(foreign)):
             self.plant(foreign[i], String("foreign"))
 
@@ -145,6 +164,7 @@ struct FakeStore(Movable):
         v.labels = self.labels[i].copy()
         v.annotation = self.annotations[i].copy()
         v.extra = self.extras[i].copy()
+        v.name = self.names[i].copy()
         return v^
 
     def read(mut self, id: String) -> FakeView:
@@ -207,17 +227,43 @@ struct FakeStore(Movable):
 
     def plant(mut self, id: String, kind: String):
         """An object made outside kci: no stamp, a digest kci never writes."""
+        self.plant_object(id, kind, String("made-outside-kci"), String(""))
+
+    def plant_object(mut self, id: String, kind: String, digest: String, name: String):
+        """An object made outside kci, of `kind`, in the state `digest`
+        renders, under the cloud name `name`: no stamp. Not a served call."""
         self._seq += 1
         self.ids.append(id)
         self.kinds.append(kind)
-        self.digests.append(String("made-outside-kci"))
+        self.digests.append(digest)
         self.urls.append(String(""))
         self.failed.append(False)
         self.labels.append(List[Label]())
         self.annotations.append(String(""))
         self.extras.append(String(""))
-        self.names.append(String(""))
+        self.names.append(name)
         self.created.append(self._seq)
+
+    def replace_only(mut self, id: String):
+        """A drifted object at `id` can only be replaced (the file header)."""
+        self.replaces.append(id)
+
+    def replaced_only(self, id: String) -> Bool:
+        for i in range(len(self.replaces)):
+            if self.replaces[i] == id:
+                return True
+        return False
+
+    def fail_reads_of(mut self, id: String):
+        """Every live read of the node `id` raises from now on (the file
+        header)."""
+        self.read_faults.append(id)
+
+    def read_fault(self, id: String) raises:
+        """Raise if a live read of `id` is refused (`fail_reads_of`)."""
+        for i in range(len(self.read_faults)):
+            if self.read_faults[i] == id:
+                raise Error(String("fake: injected read fault (") + id + String(")"))
 
     def race_next(mut self):
         self._race_next = True
@@ -272,6 +318,20 @@ struct FakeStore(Movable):
         self.labels[i] = labels.copy()
         self.annotations[i] = annotation
         self.names[i] = name
+
+    def release(mut self, id: String) raises:
+        """Drop every kci label of `id` and nothing else (the object, its
+        state and its name stay). A served call."""
+        self._admit(String("release"), id)
+        var i = self.find(id)
+        if i < 0:
+            raise Error(String("fake: NOT_FOUND: ") + id)
+        self.calls.append(String("release ") + id)
+        var kept = List[Label]()
+        for k in range(len(self.labels[i])):
+            if not is_kci_label_key(self.labels[i][k].key):
+                kept.append(self.labels[i][k].copy())
+        self.labels[i] = kept^
 
     def remove(mut self, id: String) raises:
         """Idempotent: removing what is not there is a no-op, but still a

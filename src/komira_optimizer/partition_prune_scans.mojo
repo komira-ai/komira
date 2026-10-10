@@ -3,10 +3,9 @@
 # Hive-partition pruning of partitioned scans
 # =============================================================================
 #
-# Pass-1 INDEP rule (independent of statistics — runs in the first
-# optimizer pass, ORDERED BEFORE `precompute_scan_stats` / statistics
-# propagation: pruning the path list shrinks the
-# stats we then compute). Mirrors DuckDB's hive-partition filter pushdown
+# A statistics-independent rule, designed to run BEFORE scan-statistics
+# precompute and statistics propagation: pruning the path list shrinks the
+# stats computed afterwards. Mirrors DuckDB's hive-partition filter pushdown
 # and DataFusion's `ListingTable` partition pruning.
 #
 # Pattern:
@@ -53,8 +52,9 @@
 #     (one literal per file) rather than spinning up a mini execution, but
 #     the prune semantics are identical.
 #
-# Wiring: invoked from `optimizer.optimize()` as a pass-1 INDEP
-# rule, BEFORE `propagate_statistics` / `precompute_scan_stats`.
+# Pass order: `optimizer_driver.optimize` runs this pass first. It is designed
+# to run before the caller's scan-statistics precompute as well (a smaller path
+# list means less statistics work).
 #
 # Mojo discipline: no UnsafePointer crosses a module boundary; the in-place
 # rewrite mutates through `Optional[OwnedPointer[...]]` ref-mutation (the
@@ -183,11 +183,12 @@ def _maybe_prune_filter_over_scan(mut plan: LogicalPlan) raises:
     if len(psrc.paths) == 0:
         return
     # SKIP the lazy dir-scanning Hive shape. Its
-    # partition filter is owned by the `attach_hive_predicate` pass (which
-    # attaches the Tier-1 POD for the engine ctor's `open_pruned` to prune at
-    # the LIST prefix); a post-listing prune here would be redundant (and there
-    # is no enumerated path list to prune — `paths == [base_dir]`,
-    # `partition_values` empty). The two passes are mutually exclusive per scan.
+    # partition filter is owned by the `attach_hive_predicate` pass (not in
+    # this tree), which attaches the Tier-1 POD that `open_pruned`
+    # (`komira_fs`) prunes with at the LIST prefix; a post-listing prune here
+    # would be redundant (and there is no enumerated path list to prune —
+    # `paths == [base_dir]`, `partition_values` empty). The two passes are
+    # mutually exclusive per scan.
     if psrc.is_dir_scan_hive():
         return
 
@@ -337,7 +338,7 @@ def _maybe_prune_filter_over_scan(mut plan: LogicalPlan) raises:
         if all_pruned:
             # No residual + every path pruned → the result is empty. Replace
             # the Filter's predicate with a literal FALSE (keeps the Filter
-            # node so downstream ops see a zero-row stream from a valid scan).
+            # node, so the plan stays an always-false Filter over a valid scan).
             plan._filter.value()[].predicate = Expr.literal(ScalarValue.from_bool(False))
         else:
             # No residual + some paths kept → the Filter is now a no-op
@@ -463,10 +464,9 @@ def _decide(
         var lv = lit.int_val
         return _cmp_i64(rv, op, lv)
     elif arrow_type == ArrowType.DATE32:
-        # DATE32 partition values are the canonical `YYYY-MM-DD` text; the
-        # literal side of a date predicate, in practice, is also a string
-        # literal of the same shape (the SDK emits date predicates as
-        # string comparisons on the partition col before any date cast).
+        # DATE32 partition values are the canonical `YYYY-MM-DD` text; only
+        # a string literal of the same shape is compared (any other literal
+        # kind is undecided and keeps the path).
         # Byte-lexicographic comparison is order-preserving for ISO dates.
         if not lit.is_string():
             return None

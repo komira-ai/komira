@@ -13,10 +13,10 @@
 #   * The tie-break determinism contract
 #     — (left_relation, right_relation, edge_index) ascending after the
 #       primary TDOM-descending sort.
-#   * The leftover-composite fallback (M2) — composite edges
+#   * The leftover-composite fallback — composite edges
 #     contribute `_max_ndv_across_keys_for_edge` instead of a class TDOM.
-#   * The saturation policy — the existing clamp in
-#     `estimate_join_cardinality_with_ndv` catches overflow after the divide.
+#   * The saturation policy — no saturation; the divide-after-multiply is
+#     exact while the product fits Int64.
 #
 # Q5 worked-example test (case 8) is the LOAD-BEARING end-to-end validation:
 # it constructs the 6-relation Q5 chain + 6 per-column edges + Tier-2
@@ -448,8 +448,8 @@ def test_fkpk_clamp_fires_with_tier1_pk_signal_mirrors_q9() raises:
     Bound = max(|L|, |R|) = 6_000_000. Clamped est = min(24M, 6M) = 6M.
 
     This is the Q9 fix: the clamp restores the true FK-PK cardinality
-    (6M) over the cost-model's over-estimate (24M), so DPccp's plan-
-    shape selector can correctly value the LEFT-DEEP-composite-leading
+    (6M) over the cost-model's over-estimate (24M), so a DP enumerator
+    can value the LEFT-DEEP-composite-leading
     plan over the BUSHY alternative.
     """
     var chain = JoinChain()
@@ -641,7 +641,7 @@ def test_edge_bridges_neither_endpoint_returns_false() raises:
 
 
 def test_tie_break_determinism_same_tdom_edges() raises:
-    """Three bridging edges, all with SAME TDOM, MUST sort in deterministic
+    """Three SAME-TDOM edges (two of them bridge) MUST sort in deterministic
     order per the (left_relation, right_relation, edge_index) ascending
     tie-break contract. The result of `estimate_with_tdom` is the same
     regardless of insertion order — but we lock the determinism via repeated
@@ -690,7 +690,7 @@ def test_tie_break_determinism_same_tdom_edges() raises:
 
 
 # =============================================================================
-# 6. Leftover composite fallback (M2)
+# 6. Leftover composite fallback
 # =============================================================================
 
 
@@ -750,8 +750,8 @@ def test_leftover_composite_edge_uses_max_ndv_fallback() raises:
 
 
 def test_near_overflow_numerator_uses_floor_div() raises:
-    """Stress the saturation contract: numerator can be large (Int64 holds
-    1e18 = 9.22e18 max), but `estimate_with_tdom` itself does NOT apply
+    """Stress the saturation contract: numerator can be large (1e18; the
+    Int64 max is ~9.22e18), but `estimate_with_tdom` itself does NOT apply
     saturating multiplication — the divide-after-multiply produces a
     correct result as long as the unsaturated product fits Int64.
 
@@ -761,9 +761,8 @@ def test_near_overflow_numerator_uses_floor_div() raises:
 
     This case validates that the divide saves us even when the numerator
     is near the Int64 ceiling. Larger inputs (1e10 * 1e10 = 1e20) WOULD
-    overflow; the contract relies on the consumer's clamp in
-    `estimate_join_cardinality_with_ndv` to catch that. This test does NOT trigger the consumer chain
-    in this test — we test estimate_with_tdom standalone.
+    overflow, and nothing saturates them (see the optimizer_tdom_cost.mojo
+    header). This test calls estimate_with_tdom standalone.
     """
     var chain = JoinChain()
     var ns: Optional[TableStats] = None
@@ -891,10 +890,10 @@ def test_q5_customer_supplier_fanout_cost_pair() raises:
     Class for e2: {c_nationkey, s_nationkey, n_nationkey}, TDOM = MIN(150K, 10K, 25) = 25.
     Pair cost = (150_000 * 10_000) / 25 = 60_000_000.
 
-    This is the catastrophic fan-out the legacy cost model picks. The TDOM cost model
+    This is the catastrophic fan-out pair. The TDOM cost model
     correctly assigns it 60M cost — much higher than the
-    lineitem-supplier-early pair's 6M. DP enumeration will prefer the
-    smaller-cost candidate.
+    lineitem-supplier-early pair's 6M. A DP enumerator
+    prefers the smaller-cost candidate.
     """
     var chain = _build_q5_chain_tier2_only()
     var provider = DefaultColumnStatsProvider(chain.relations)
@@ -915,8 +914,8 @@ def test_q5_customer_supplier_fanout_cost_pair() raises:
 
 def test_q5_lineitem_supplier_cheaper_than_customer_supplier() raises:
     """The plan-shape correctness check: the lineitem-supplier pair is
-    SUBSTANTIALLY cheaper than the customer-supplier fan-out, so DP
-    prefers the lineitem-early path.
+    SUBSTANTIALLY cheaper than the customer-supplier fan-out, so a DP
+    enumerator prefers the lineitem-early path.
 
     Cost ratio: 60M / 6M = 10× — the lineitem-supplier-early plan is
     an order of magnitude cheaper for the leading pair. This is the
@@ -1014,10 +1013,9 @@ def test_q5_nation_dedup_in_extended_pair() raises:
 
 def test_has_classes_for_returns_false_with_no_bridging() raises:
     """When NO edge bridges the candidate pair, `has_classes_for` returns
-    False. The legacy fall-through path handles this case in
-    `_cost_for_pair` (estimate_join_cardinality_with_ndv for disconnected
-    pairs which DPccp should never enumerate, but the fall-through is
-    defensive).
+    False. A cost caller then falls through to the legacy
+    estimate_join_cardinality_with_ndv (DPccp's `_cost_for_pair` does so
+    only when no TDOM graph is set, and does not call `has_classes_for`).
     """
     var chain = JoinChain()
     var ns: Optional[TableStats] = None

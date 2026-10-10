@@ -20,6 +20,10 @@
 #      past the region, and a negative uncompressed length.
 #   7. _bmw_read_doc_count refuses a region past the postings and a negative
 #      count.
+#   7b. A length or offset of 2^63 - 1 (Int.MAX), or a doc count whose index
+#      area size wraps Int, is refused by its own check rather than wrapping
+#      past it: the doc-store blob extent (end offset, start offset), the
+#      doc-store index area, the BMW posting region (komira-ai/komira#1203).
 #   8. AggResult.avg of no cell is 0.0; QueryIR.rewrite_agg_field renames one
 #      agg's field and refuses an index out of range; replace_filter installs a
 #      filter; take_sort_keys moves the keys out.
@@ -278,7 +282,7 @@ def test_06_docstore_refusals() raises:
     assert_equal(_docstore_flag(Span(flag)), 7, "6: the flag byte read raw")
     # Two docs need 3 offsets + 2 lengths (40 bytes); 16 are present.
     var idx = _ds(2, 0, [0, 1], List[UInt64](), 0)
-    with assert_raises(contains="_docstore_blob_extent: index area [9, 49) exceeds region length 25"):
+    with assert_raises(contains="_docstore_blob_extent: index area for num_docs 2 exceeds region length 25"):
         _ = _docstore_blob_extent(Span(idx), 0)
     var dec = _ds(1, 0, [5, 3], [2], 5)
     with assert_raises(contains="bad blob offsets [start 5, end 3) for slot 0"):
@@ -310,6 +314,40 @@ def test_07_bmw_doc_count_refusals() raises:
     var r = _bmw_read_doc_count(Span(region), 0, 3)
     assert_equal(r[0], 3, "7: doc count")
     assert_equal(r[1], 1, "7: base past the count")
+
+
+def test_07b_wrapping_extents_refused() raises:
+    comptime MAX = UInt64(0x7FFF_FFFF_FFFF_FFFF)
+    # Blob [1, Int.MAX): its length (Int.MAX - 1) plus its offset (34) wraps.
+    var end_max = _ds(1, 0, [1, MAX], [1], 1)
+    with assert_raises(contains="for slot 0 exceeds region length 34"):
+        _ = _docstore_blob_extent(Span(end_max), 0)
+    # Blob [Int.MAX, Int.MAX): empty, but its start (33 + Int.MAX) wraps.
+    var start_max = _ds(1, 0, [MAX, MAX], [0], 1)
+    with assert_raises(contains="for slot 0 exceeds region length 34"):
+        _ = _docstore_blob_extent(Span(start_max), 0)
+    # One byte past the blob area: blob [0, 2) over a 1-byte area.
+    var one = _ds(1, 0, [0, 2], [2], 1)
+    with assert_raises(contains="blob [33, 35) for slot 0 exceeds region length 34"):
+        _ = _docstore_blob_extent(Span(one), 0)
+    # 2^60 docs: 9 + 16 * 2^60 + 8 wraps to 17, inside this 25-byte region.
+    var many = _ds(UInt64(1) << 60, 0, [0, 0], List[UInt64](), 0)
+    with assert_raises(contains="index area for num_docs 1152921504606846976 exceeds region length 25"):
+        _ = _docstore_blob_extent(Span(many), 0)
+    # One doc whose 33-byte index area is one byte longer than the region.
+    var short_idx = _ds(1, 0, [0, 0], List[UInt64](), 0)
+    short_idx.append(0)
+    short_idx.append(0)
+    short_idx.append(0)
+    short_idx.append(0)
+    short_idx.append(0)
+    short_idx.append(0)
+    short_idx.append(0)
+    with assert_raises(contains="index area for num_docs 1 exceeds region length 32"):
+        _ = _docstore_blob_extent(Span(short_idx), 0)
+    var region: List[UInt8] = [3, 0, 0]
+    with assert_raises(contains="_bmw_read_doc_count: posting region out of bounds"):
+        _ = _bmw_read_doc_count(Span(region), 1, Int.MAX)
 
 
 def test_08_agg_and_query_mutators() raises:
