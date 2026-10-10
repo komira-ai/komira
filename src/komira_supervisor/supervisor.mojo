@@ -16,6 +16,10 @@
 #     wait_exit() -> ExitInfo        block for exit (reactor-event in prod), reap once
 #     drain_pipe(fd) -> String       drain one capture pipe to EOF (deadlock-free)
 #     terminate(grace_ms) -> ExitInfo  SIGTERM -> grace -> SIGKILL, exactly-once
+#     terminate_with(sig, grace_ms, reap_orphans) -> ExitInfo
+#                                    the same ladder from `sig`; to the child's
+#                                    process group when it leads one
+#     reap_orphans() -> Int          collect exited children other than ours
 #     signal(sig)                    raw kill(pid, sig)
 #     close()                        close pipe fds, dereg
 #
@@ -51,7 +55,11 @@ from .proc_ffi import (
     proc_set_nonblocking,
     proc_close,
     proc_kill,
+    proc_kill_group,
     proc_reap,
+    proc_reap_orphans,
+    SPAWN_OWN_PGROUP,
+    SPAWN_DEFAULT_SIGNALS,
 )
 
 
@@ -346,6 +354,8 @@ struct ChildSpec(Movable):
     var has_cwd: Bool
     var cwd: String           # used only when has_cwd
     var rlimits: List[RLimit] # opt-in; accepted but not applied yet
+    var own_process_group: Bool  # see set_own_process_group
+    var default_signals: Bool    # see set_default_signals
 
     def __init__(out self, path: String):
         self.path = path
@@ -355,6 +365,8 @@ struct ChildSpec(Movable):
         self.has_cwd = False
         self.cwd = String("")
         self.rlimits = List[RLimit]()
+        self.own_process_group = False
+        self.default_signals = False
 
     @staticmethod
     def shell(cmd: String) -> ChildSpec:
@@ -396,6 +408,29 @@ struct ChildSpec(Movable):
     def set_cwd(mut self, dir: String):
         self.has_cwd = True
         self.cwd = dir
+
+    def set_own_process_group(mut self):
+        """The child leads a new process group (its id is the child's pid), and
+        `Supervisor.terminate` / `terminate_with` signal that GROUP: the child
+        and every descendant that did not leave it. Without this the child
+        shares this process's group and only its pid is signalled."""
+        self.own_process_group = True
+
+    def set_default_signals(mut self):
+        """Every signal starts at its default action in the child, and none is
+        blocked. exec resets caught signals by itself but keeps ignored ones
+        and the mask, so without this a child inherits, for example, the
+        SIGPIPE this process ignores once it has made a TLS connection."""
+        self.default_signals = True
+
+    def spawn_flags(self) -> Int32:
+        """The shim's spawn flags for this spec."""
+        var f = Int32(0)
+        if self.own_process_group:
+            f |= SPAWN_OWN_PGROUP
+        if self.default_signals:
+            f |= SPAWN_DEFAULT_SIGNALS
+        return f
 
 
 # -----------------------------------------------------------------------------
@@ -461,6 +496,7 @@ struct ReadChunk(Movable):
 # -----------------------------------------------------------------------------
 struct Supervisor(Movable):
     var _pid: Int32
+    var _pgid: Int32           # the child's own process group, or -1
     var _stdout_fd: Int32
     var _stderr_fd: Int32
     var _exited: Bool          # cached terminal state (idempotency)
@@ -468,6 +504,7 @@ struct Supervisor(Movable):
 
     def __init__(out self):
         self._pid = Int32(-1)
+        self._pgid = Int32(-1)
         self._stdout_fd = Int32(-1)
         self._stderr_fd = Int32(-1)
         self._exited = False
@@ -507,17 +544,26 @@ struct Supervisor(Movable):
             argv_blob, argc,
             env_blob, envc,
             spec.cwd, spec.has_cwd,
+            spec.spawn_flags(),
             sout, serr, pid,
         )
         if rc != Int32(0):
             return rc  # -errno
         self._pid = pid
+        # POSIX_SPAWN_SETPGROUP with pgroup 0: the group's id is the pid, set
+        # in the child before exec, so it exists by the time spawn returns.
+        self._pgid = pid if spec.own_process_group else Int32(-1)
         self._stdout_fd = sout
         self._stderr_fd = serr
         return pid
 
     def pid(self) -> Int32:
         return self._pid
+
+    def process_group(self) -> Int32:
+        """The child's own process group id (its pid) when the spec asked for
+        one, else -1."""
+        return self._pgid
 
     def stdout_fd(self) -> Int32:
         return self._stdout_fd
@@ -754,34 +800,96 @@ struct Supervisor(Movable):
         grace_ms for the child to exit, escalate to SIGKILL (uncatchable) if it
         is still alive. Exactly-once / idempotent: a call after the child has
         already exited returns the cached ExitInfo without re-signaling.
+        `terminate_with(SIGTERM, grace_ms, False)`; see there for a child that
+        leads its own process group.
 
         Production drives the grace wait off the reactor exit completion with a
         deadline (no busy-poll). This package-level form polls try_wait at a
         10ms tick; the reactor variant is a drop-in for a caller that awaits
         watch_process_exit's completion with a deadline.
         """
+        return self.terminate_with(SIGTERM, grace_ms, False)
+
+    def terminate_with(
+        mut self, sig: Int32, grace_ms: Int, reap_orphans: Bool
+    ) -> ExitInfo:
+        """The ladder from `sig` (SIGTERM, or a forwarded SIGINT): send it,
+        wait up to `grace_ms`, then SIGKILL. Cached and not re-sent once the
+        child has been reaped.
+
+        For a child spawned with `set_own_process_group`, every signal goes to
+        the GROUP, and the grace wait lasts until the child is reaped AND the
+        group is empty (or the grace runs out), so a grandchild that is still
+        shutting down is not cut short, and one that ignored `sig` is
+        SIGKILLed with the rest. With `reap_orphans`, each tick also collects
+        exited orphans (`reap_orphans()`): a descendant re-parented to this
+        process stays in the group as a zombie until collected. Pass it only
+        when this process owns every child it has (see `reap_orphans`).
+        Without an own group: the child's pid only, as `terminate` always did."""
         if self._exited:
             return self._cached_exit
 
-        _ = proc_kill(self._pid, SIGTERM)
-        # Grace window: poll for a clean SIGTERM exit.
+        _ = self._signal_child(sig)
         var waited = 0
         while waited < grace_ms:
             var r = self.try_wait()
-            if r.collected:
-                return self._cached_exit  # exited on SIGTERM
+            if reap_orphans:
+                _ = self.reap_orphans()
+            if r.collected and not self._group_alive():
+                return self._cached_exit
             _sleep_ms(10)  # 10ms tick
             waited += 10
 
         # Still alive after grace -> escalate. SIGKILL cannot be trapped.
-        _ = proc_kill(self._pid, SIGKILL)
-        # Blocking reap — SIGKILL is delivered promptly.
-        var r2 = proc_reap(self._pid, nohang=False)
-        var info = ExitInfo.from_reap(r2)
-        if r2.collected:
-            self._exited = True
-            self._cached_exit = info
+        _ = self._signal_child(SIGKILL)
+        var info = self._cached_exit
+        if not self._exited:
+            # Blocking reap — SIGKILL is delivered promptly.
+            var r2 = proc_reap(self._pid, nohang=False)
+            info = ExitInfo.from_reap(r2)
+            if r2.collected:
+                self._exited = True
+                self._cached_exit = info
+        if reap_orphans:
+            # The SIGKILLed rest of the group become zombies of this process
+            # (the re-parented ones) a moment later; collect them, bounded.
+            var settle = 0
+            while settle < 1000:
+                _ = self.reap_orphans()
+                if not self._group_alive():
+                    break
+                _sleep_ms(10)
+                settle += 10
         return info
+
+    def _signal_child(self, sig: Int32) -> Int32:
+        """`sig` to the child's own group when it leads one, else its pid."""
+        if self._pgid > Int32(1):
+            return proc_kill_group(self._pgid, sig)
+        return proc_kill(self._pid, sig)
+
+    def _group_alive(self) -> Bool:
+        """Whether any process (a zombie included) is still in the child's own
+        group. False without an own group."""
+        if self._pgid <= Int32(1):
+            return False
+        return proc_kill_group(self._pgid, Int32(0)) == Int32(0)
+
+    def reap_orphans(self) -> Int:
+        """Collect, without blocking, every exited child of this process except
+        this Supervisor's own (whose status `wait_exit` / `try_wait` keep).
+        Returns how many (0 on failure). This is how a PID 1 or a child
+        subreaper (komira_supervisor.pid1) clears the zombies of the orphans
+        re-parented to it.
+
+        ONLY for a process that owns every child it has: in a process running
+        several Supervisors it would collect a sibling's child, whose
+        `wait_exit` would then fail."""
+        comptime MAX_PER_CALL = 256
+        var n = proc_reap_orphans(self._pid, Int32(MAX_PER_CALL))
+        if n < Int32(0):
+            return 0
+        return Int(n)
 
     def signal(self, sig: Int32) -> Int32:
         """Raw kill(pid, sig). Returns 0 / -errno."""

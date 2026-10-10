@@ -10,8 +10,12 @@ HTTP/2 and TLS. The pieces:
   type-erased variants) and writing its `HttpResponse`.
 - `komira_http_server.routing`: `Router` maps a method and a path pattern
   (`/users/:id` binds `id`; a trailing `/*` matches any suffix) to a handler
-  id, and tells a wrong method (405) from an unknown path (404); it refuses
-  a duplicate or malformed pattern when the route is added.
+  id, tells a wrong method (405, with the path's methods for its `Allow`
+  header) from an unknown path (404), and refuses a duplicate or malformed
+  pattern when the route is added. `ComposedRoutes[*Services]` serves several
+  `RoutedDispatcher`s (a dispatcher that can say which routes it has, such as
+  a generated `<Service>Routes`) from one server: the first with a route for
+  the request dispatches it, else 405 when any has the path, else 404.
 - `komira_http_server.middleware`: the `Middleware` trait (`before` may answer
   early, `after` sees every response), a `MiddlewareChain`, and built-ins for
   CORS, error mapping, request logging, tracing headers and metrics, plus
@@ -57,6 +61,7 @@ assert_equal(router.match_route(HttpMethod.get(), "/static/css/site.css", params
 assert_false(router.match_route(HttpMethod.delete(), "/orders/42", params).__bool__())
 assert_true(router.has_path_match("/orders/42"))
 assert_false(router.has_path_match("/invoices/1"))  # -> 404
+assert_equal(len(router.allowed_methods("/orders/42")), 1)  # Allow: GET
 
 with assert_raises():
     router.add(HttpMethod.get(), "/orders/:id", 9)  # already registered
