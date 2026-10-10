@@ -133,8 +133,51 @@ def _assert_only_build_side_changed(
     a child in any way the render can see."""
     assert_equal(Int(out.tag), Int(PLAN_JOIN))
     assert_equal(_side(out), Int(want_side))
+    _assert_every_join_decided(out, "rule output")
     _clear_build_sides(out)
     assert_equal(out.structural_hash(), before)
+
+
+def _count_undecided_joins(p: LogicalPlan) raises -> Int:
+    """How many PLAN_JOIN nodes in `p` still carry `JOIN_BUILD_SIDE_UNSET`.
+    Walks every node kind these fixtures build and RAISES on any other, so a
+    fixture that grows a new node kind cannot hide a join from the check."""
+    if p.tag == PLAN_JOIN:
+        var n = 0
+        if p._join.value()[].build_side == JOIN_BUILD_SIDE_UNSET:
+            n = 1
+        return (
+            n
+            + _count_undecided_joins(p._join.value()[].left[])
+            + _count_undecided_joins(p._join.value()[].right[])
+        )
+    if p.tag == PLAN_SCAN:
+        return 0
+    if p.tag == PLAN_FILTER:
+        return _count_undecided_joins(p._filter.value()[].child[])
+    if p.tag == PLAN_PROJECT:
+        return _count_undecided_joins(p._project.value()[].child[])
+    if p.tag == PLAN_AGGREGATE:
+        return _count_undecided_joins(p._aggregate.value()[].child[])
+    if p.tag == PLAN_SORT:
+        return _count_undecided_joins(p._sort.value()[].child[])
+    if p.tag == PLAN_LIMIT:
+        return _count_undecided_joins(p._limit.value()[].child[])
+    if p.tag == PLAN_DISTINCT:
+        return _count_undecided_joins(p._distinct.value()[].child[])
+    if p.tag == PLAN_TOPN:
+        return _count_undecided_joins(p._topn.value()[].child[])
+    raise Error("_count_undecided_joins: no arm for plan tag " + String(Int(p.tag)))
+
+
+def _assert_every_join_decided(p: LogicalPlan, what: String) raises:
+    """EVERY JOIN HAS A BUILD SIDE AFTER RULE 17. UNSET is acceptable only in
+    a RAW plan; OPTIMIZED admission refuses it
+    (`OPTIMIZED_JOIN_BUILD_SIDE_MISSING`). This is the fixture-level form of
+    that check; the post-optimize check over the whole corpus comes with the
+    optimizer driver, which must run rule 17 last."""
+    var n = _count_undecided_joins(p)
+    assert_equal(n, 0, what + ": " + String(n) + " join(s) left UNSET")
 
 
 def _clear_build_sides(mut p: LogicalPlan):
@@ -406,6 +449,7 @@ def test_every_wrapper_reaches_a_join_below_it() raises:
     a recursion arm dropped."""
     var f = select_join_build_side(LogicalPlan.filter(Expr.col_ref("a"), _small_left_inner()))
     assert_equal(_side(f._filter.value()[].child[]), Int(JOIN_BUILD_SIDE_LEFT))
+    _assert_every_join_decided(f, "filter")
 
     var pe = ExprArray()
     pe.append(Expr.col_ref("a"))
@@ -432,6 +476,12 @@ def test_every_wrapper_reaches_a_join_below_it() raises:
     var td: List[Bool] = [False]
     var t = select_join_build_side(LogicalPlan.topn(tk^, td^, 2, _small_left_inner()))
     assert_equal(_side(t._topn.value()[].child[]), Int(JOIN_BUILD_SIDE_LEFT))
+    _assert_every_join_decided(p, "project")
+    _assert_every_join_decided(a, "aggregate")
+    _assert_every_join_decided(s, "sort")
+    _assert_every_join_decided(l, "limit")
+    _assert_every_join_decided(d, "distinct")
+    _assert_every_join_decided(t, "topn")
 
 
 def test_join_children_are_decided_as_well_as_the_parent() raises:
@@ -450,6 +500,20 @@ def test_join_children_are_decided_as_well_as_the_parent() raises:
     assert_equal(_side(out._join.value()[].left[]), Int(JOIN_BUILD_SIDE_LEFT))
     assert_equal(_side(out._join.value()[].right[]), Int(JOIN_BUILD_SIDE_LEFT))
     _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_RIGHT)
+
+
+def test_the_decided_check_can_fail() raises:
+    """The check is not vacuous: before the rule, a two-level join tree has
+    three UNSET joins and the count says so; after it, none. Catches a
+    `_count_undecided_joins` that stops at the root or never counts."""
+    var lo: List[String] = ["a"]
+    var ro: List[String] = ["a"]
+    var j = LogicalPlan.join(
+        _small_left_inner(), _small_left_inner(), lo^, ro^, JOIN_INNER
+    )
+    assert_equal(_count_undecided_joins(j), 3)
+    var out = select_join_build_side(j^)
+    assert_equal(_count_undecided_joins(out), 0)
 
 
 def test_a_scan_root_is_returned_unchanged() raises:
