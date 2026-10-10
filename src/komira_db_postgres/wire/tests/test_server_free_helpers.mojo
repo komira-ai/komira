@@ -144,7 +144,7 @@ def test_body_accessors() raises:
 
 
 # -----------------------------------------------------------------------------
-# 3. parse_data_row (well-formed only: truncated bodies are komira#1086)
+# 3. parse_data_row (well-formed; truncated bodies: test_truncated_messages)
 # -----------------------------------------------------------------------------
 def test_parse_data_row() raises:
     var body = List[UInt8]()

@@ -27,8 +27,9 @@
 #        * `feed(bytes)`             — append a chunk of plaintext.
 #        * `drain_complete()`        — fold every fully-buffered message into the
 #                                      accumulators; set READY on ReadyForQuery /
-#                                      ERR on ErrorResponse. Returns True at a
-#                                      terminal. NEVER holds a Span of `_rbuf`
+#                                      ERR on ErrorResponse or a truncated
+#                                      DataRow/RowDescription. Returns True at
+#                                      a terminal. NEVER holds a Span of `_rbuf`
 #                                      across the boundary (each message parsed +
 #                                      copied out in a tight scope).
 #      This is recv-source-AGNOSTIC: it never touches a socket / s2n / reactor,
@@ -229,18 +230,14 @@ struct PgReadFrame(Movable, Deinitable):
                 return False  # no more complete messages buffered
             var m = maybe.take()
             var t = m.msg_type
-            if t == MSG_DATA_ROW:
-                self._rows.append(
-                    binary_row_from_data_message(m, self._col_oids)
-                )
-            elif t == MSG_ROW_DESC:
-                var cols = parse_row_description(m)
-                if len(cols) > 0:
-                    self._col_names = List[String]()
-                    self._col_oids = List[UInt32]()
-                    for c in cols:
-                        self._col_names.append(c.name)
-                        self._col_oids.append(c.type_oid)
+            if t == MSG_DATA_ROW or t == MSG_ROW_DESC:
+                # A body shorter than its declared counts is a protocol
+                # fault: land ERR with the decoder's text (as for EOF).
+                try:
+                    self._fold_row_message(m)
+                except e:
+                    self.mark_error(String(e))
+                    return True
             elif t == MSG_CMD_COMPLETE:
                 pass  # rows_affected available via the tag if needed
             elif t == MSG_BIND_COMPLETE:
@@ -260,9 +257,24 @@ struct PgReadFrame(Movable, Deinitable):
             guard += 1
         return False
 
+    def _fold_row_message(mut self, m: BackendMessage) raises:
+        """Fold a DataRow into `_rows` or a RowDescription into the column
+        metadata. Raises when the message body is truncated."""
+        if m.msg_type == MSG_DATA_ROW:
+            self._rows.append(binary_row_from_data_message(m, self._col_oids))
+            return
+        var cols = parse_row_description(m)
+        if len(cols) > 0:
+            self._col_names = List[String]()
+            self._col_oids = List[UInt32]()
+            for c in cols:
+                self._col_names.append(c.name)
+                self._col_oids.append(c.type_oid)
+
     def mark_error(mut self, msg: String):
         """Set the frame to the ERR terminal with `msg` (transport-level errors
-        the op detects: EOF mid-result, etc.)."""
+        the op detects: EOF mid-result, a truncated DataRow/RowDescription
+        body, etc.)."""
         self._state = PG_OP_ERR
         self._err_text = msg
 
