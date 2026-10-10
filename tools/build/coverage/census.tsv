@@ -1,10 +1,10 @@
 # The coverage census: the data docs/coverage_census.md is rendered from (census.sh; census.md).
-census	2026-10-10	aa153e7902a8fbdfa714b15071eaf10b615916c1	-
+census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
 komira//src/kci_api:kci_api	src/kci_api	library	OK	1560	1560	-	-	no	release	-	-
-komira//src/kci_artifact:kci_artifact	src/kci_artifact	library	OK	893	918	-	-	no	conda	-	-
+komira//src/kci_artifact:kci_artifact	src/kci_artifact	library	OK	910	935	-	-	no	conda	-	-
 komira//src/kci_artifact_manifest:kci_artifact_manifest	src/kci_artifact_manifest	library	OK	170	170	-	-	no	release	-	-
 komira//src/kci_artifact_proto:kci_artifact_proto	src/kci_artifact_proto	library	OK	0	0	-	-	no	conda	-	-
-komira//src/kci_build:kci_build_lib	src/kci_build	library	OK	1115	1188	-	-	no	conda	-	-
+komira//src/kci_build:kci_build_lib	src/kci_build	library	OK	1129	1202	-	-	no	conda	-	-
 komira//src/kci_cell:kci_cell	src/kci_cell	library	OK	246	246	-	-	no	release	-	-
 komira//src/kci_cli:kci_cli	src/kci_cli	library	OK	1360	1513	-	-	no	conda	-	-
 komira//src/kci_cloud:kci_cloud	src/kci_cloud	library	OK	2758	3230	-	-	no	conda	src/kci_cloud/conformance.mojo	-
@@ -25,7 +25,7 @@ komira//src/kci_secret_writer:kci_secret_writer	src/kci_secret_writer	library	OK
 komira//src/kci_validate:kci_validate	src/kci_validate	library	OK	1229	1347	-	-	no	conda	-	-
 komira//src/kci_validator_report:kci_validator_report	src/kci_validator_report	library	OK	746	746	-	-	no	release	-	-
 komira//src/kci_validator_rows:kci_validator_rows	src/kci_validator_rows	library	OK	117	117	40	40	yes	release	-	-
-komira//src/kci_workflow_check:kci_workflow_check	src/kci_workflow_check	library	OK	1845	1845	-	-	no	release	-	-
+komira//src/kci_workflow_check:kci_workflow_check	src/kci_workflow_check	library	OK	1876	1876	-	-	no	release	-	-
 komira//src/komira_agg:komira_agg	src/komira_agg	library	OK	1185	1283	566	576	yes	conda	src/komira_agg/builtin_agg_fns_states.mojo	-
 komira//src/komira_agg_api:komira_agg_api	src/komira_agg_api	library	OK	154	536	-	-	no	conda	src/komira_agg_api/agg_column_ptrs.mojo,src/komira_agg_api/cd_distinct_key.mojo	-
 komira//src/komira_anomaly:komira_anomaly	src/komira_anomaly	library	OK	869	869	-	-	no	release	-	-

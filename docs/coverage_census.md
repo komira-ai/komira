@@ -24,7 +24,7 @@ target: they are listed for information at the end, with no floor.
 | Libraries (under `src/`, not `src/tests/`) | 208 |
 | Measured | 205 |
 | Not measured (a run or the gate failed; floor 0) | 3 |
-| Line coverage, all measured libraries | 89.86% (179409/199652) |
+| Line coverage, all measured libraries | 89.86% (179471/199714) |
 | Median line coverage (lower middle) | 96.19% |
 | At 100% / 90% to 100% / 50% to 90% / under 50% / no line | 44 / 63 / 49 / 3 / 46 |
 | Branch coverage of the libraries with branch records (39) | 89.78% (6847/7626) |
@@ -103,8 +103,8 @@ branch, `-` for none, *pinned* when set by hand ([Pinned floors](#pinned-floors)
 | 60 | `src/komira_aws_core:komira_aws_core` | 93.24% (4939/5297) | 358 | not gated | 1 | conda | 93.24% / - |
 | 61 | `src/komira_gcp_firestore:komira_gcp_firestore` | 93.79% (1829/1950) | 121 | not gated | 0 | conda | 93.79% / - |
 | 62 | `src/kci_secret_writer:kci_secret_writer` | 93.84% (61/65) | 4 | 81.25% (13/16) | 0 | conda | 93.84% / 81.25% |
-| 63 | `src/kci_build:kci_build_lib` | 93.85% (1115/1188) | 73 | not gated | 0 | conda | 93.85% / - |
-| 64 | `src/komira_gcp_fcm:komira_gcp_fcm` | 93.85% (214/228) | 14 | not gated | 0 | conda | 93.85% / - |
+| 63 | `src/komira_gcp_fcm:komira_gcp_fcm` | 93.85% (214/228) | 14 | not gated | 0 | conda | 93.85% / - |
+| 64 | `src/kci_build:kci_build_lib` | 93.92% (1129/1202) | 73 | not gated | 0 | conda | 93.92% / - |
 | 65 | `src/komira_aws_lambda_http:komira_aws_lambda_http` | 94.00% (565/601) | 36 | not gated | 0 | conda | 94.00% / - |
 | 66 | `src/komira_db_sqlite:komira_db_sqlite` | 94.02% (315/335) | 20 | not gated | 0 | conda | 94.02% / - |
 | 67 | `src/komira_objectstore_gcs:komira_objectstore_gcs` | 94.05% (901/958) | 57 | not gated | 1 | conda | 94.05% / - |
@@ -128,8 +128,8 @@ branch, `-` for none, *pinned* when set by hand ([Pinned floors](#pinned-floors)
 | 85 | `src/kci_cloud_fake:kci_cloud_fake` | 97.10% (1979/2038) | 59 | 91.01% (699/768) | 0 | conda | 97.10% / 91.01% |
 | 86 | `src/komira_metrics:komira_metrics` | 97.18% (896/922) | 26 | not gated | 0 | conda | 97.18% / - |
 | 87 | `src/komira_secret_env:komira_secret_env` | 97.22% (105/108) | 3 | not gated | 0 | conda | 97.22% / - |
-| 88 | `src/kci_artifact:kci_artifact` | 97.27% (893/918) | 25 | not gated | 0 | conda | 97.27% / - |
-| 89 | `src/komira_metrics_reader:komira_metrics_reader` | 97.27% (572/588) | 16 | not gated | 0 | conda | 97.27% / - |
+| 88 | `src/komira_metrics_reader:komira_metrics_reader` | 97.27% (572/588) | 16 | not gated | 0 | conda | 97.27% / - |
+| 89 | `src/kci_artifact:kci_artifact` | 97.32% (910/935) | 25 | not gated | 0 | conda | 97.32% / - |
 | 90 | `src/kci_publish_oci:kci_publish_oci` | 97.75% (87/89) | 2 | not gated | 0 | conda | 97.75% / - |
 | 91 | `src/komira_collections:komira_collections` | 97.83% (316/323) | 7 | not gated | 0 | release | 97.83% / - |
 | 92 | `src/komira_source_url:komira_source_url` | 98.07% (102/104) | 2 | not gated | 0 | conda | 98.07% / - |
@@ -163,7 +163,7 @@ branch, `-` for none, *pinned* when set by hand ([Pinned floors](#pinned-floors)
 | 120 | `src/kci_release_channel:kci_release_channel` | 100.00% (460/460) | 0 | not gated | 0 | release | 100.00% / - |
 | 121 | `src/kci_validator_report:kci_validator_report` | 100.00% (746/746) | 0 | not gated | 0 | release | 100.00% / - |
 | 122 | `src/kci_validator_rows:kci_validator_rows` | 100.00% (117/117) | 0 | 100.00% (40/40) | 0 | release | 100.00% / 100.00% |
-| 123 | `src/kci_workflow_check:kci_workflow_check` | 100.00% (1845/1845) | 0 | not gated | 0 | release | 100.00% / - |
+| 123 | `src/kci_workflow_check:kci_workflow_check` | 100.00% (1876/1876) | 0 | not gated | 0 | release | 100.00% / - |
 | 124 | `src/komira_anomaly:komira_anomaly` | 100.00% (869/869) | 0 | not gated | 0 | release | 100.00% / - |
 | 125 | `src/komira_authz_api:komira_authz_api` | 100.00% (27/27) | 0 | not gated | 0 | conda | 100.00% / - |
 | 126 | `src/komira_calendar:komira_calendar` | 100.00% (630/630) | 0 | not gated | 0 | conda | 100.00% / - |

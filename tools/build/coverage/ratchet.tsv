@@ -19,10 +19,10 @@
 # (//:coverage_census) holds them to it. A floor that must stay under the
 # measurement is a pinned row here (census.md).
 src/kci_api	10000	-
-src/kci_artifact	9727	-
+src/kci_artifact	9732	-
 src/kci_artifact_manifest	10000	-
 src/kci_artifact_proto	0	-
-src/kci_build	9385	-
+src/kci_build	9392	-
 src/kci_cell	10000	-
 src/kci_cli	8988	-
 src/kci_cloud	8538	-
