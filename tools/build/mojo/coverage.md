@@ -80,7 +80,7 @@ nothing else. A library with no test still has a gate (`NotMeasured`: it
 fails in enforce mode), which its conda package waits for, as does a
 library whose sources are all generated (a cloud SDK client). The libraries
 the gate's own tool depends on are the ledger `COVERAGE_NO_GATE` of
-`policy.bzl` (`covcheck`, `komira_json`, `readme_examples`): they have no
+`policy.bzl` (`covcheck`, `komira_json`): they have no
 gate of their own (the library would depend on the gate's tool, which
 depends on it), and their gate is `<name>_cov_gate`, which their conda
 package waits for too. `[coverage]` is the binaries, the reports and the

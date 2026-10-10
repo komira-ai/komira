@@ -19,8 +19,9 @@ ships in each of their packages, so a package of several libraries gives
 This module loads nothing, so defs.bzl can load it.
 """
 
-_README_TOOL_PACKAGE = "tools/build/readme_examples"
-_README_TOOL = "komira//" + _README_TOOL_PACKAGE + ":tool"
+# The README examples tool, a Zig executable: no Mojo library, so any
+# package, its own included, may hold a README.
+_README_TOOL = "komira//tools/build/readme_examples:tool"
 
 def readme_kwargs(kwargs):
     """Replaces the macro's `readme` keyword in `kwargs` by the rule's
@@ -39,7 +40,5 @@ def readme_kwargs(kwargs):
         if want == True:
             fail("{}: `readme = True` and //{} holds no README.md".format(name, package_name()))
         return
-    if package_name() == _README_TOOL_PACKAGE:
-        fail("{}: {} may hold no README.md: every library with a README runs {} on it, so the tool would depend on itself".format(name, _README_TOOL_PACKAGE, _README_TOOL))
     kwargs["readme"] = found[0]
     kwargs["readme_tool"] = _README_TOOL

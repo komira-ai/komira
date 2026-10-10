@@ -12,9 +12,11 @@
 # The programs are the ones SOURCE mode generates for the welded
 # `[tests][readme]` test (tools/build/mojo/defs.bzl `_readme_gate`): one per
 # example, `readme_<import name>_<line>.mojo`, and the runner that imports
-# and runs them all, `readme_<import name>.mojo`, from the same library
-# (//tools/build/readme_examples) with the same arguments, so the two are
-# byte-equal for the same README:
+# and runs them all, `readme_<import name>.mojo`. SOURCE mode runs the Zig
+# tool //tools/build/readme_examples:tool; this runs the Mojo library of the
+# same package, `readme_examples`, which makes the same bytes for the same
+# README and arguments (the two are held equal by review: no build action
+# compares them):
 #
 #   display   `<package dir>/README.md`, the package dir read from the
 #             package's build label (`komira//src/<pkg>:<pkg>_conda` gives

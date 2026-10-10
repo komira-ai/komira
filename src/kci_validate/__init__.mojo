@@ -38,9 +38,10 @@
 # Which validations a step has is the machine file's (kci_release_machine); the
 # result rows are kci_api's; processes start through kci_build's
 # ProcessRunner seam and the channel is read through kci_pkg_upload's
-# PkgTransport. The README examples become programs through
-# //tools/build/readme_examples, the library the welded `[tests][readme]`
-# test is generated with. The command line is the kci binary's (`kci run`).
+# PkgTransport. The README examples become programs through the Mojo
+# library of //tools/build/readme_examples, which makes the bytes the
+# package's Zig tool makes for the welded `[tests][readme]` test. The command
+# line is the kci binary's (`kci run`).
 # =============================================================================
 
 from kci_validate.channel_index import (

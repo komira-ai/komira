@@ -202,8 +202,8 @@ else
 fi
 # What waits, as actions (no_gate.bxl reads only the targets' deps), for a
 # library outside the ledger whose coverage comes from the switch
-# (tracer_shipped, its gate an action of its own) and one in it
-# (readme_examples, its gate `<name>_cov_gate`), neither with a README
+# (tracer_shipped, its gate an action of its own) and readme_examples (the
+# same since its tool is Zig; each ledger library has a README), neither with a README
 # (aquery cannot read a join's input through a README's dynamic action): the package's
 # join waits for no coverage run and no gate; the conda package's
 # conda_join and conda_release_join each wait for every coverage run and

@@ -6,7 +6,13 @@ The checks of [test 38](README.md#38-readme-examples), run by
 A library's `README.md` examples are a welded test, `[tests][readme]`
 ([README examples](../mojo/README.md#readme-examples)): each example is a
 program of its own, compiled and run as its own gated test, and the marker
-holds one `PASS <target>:README.md:<line>` per example.
+holds one `PASS <target>:README.md:<line>` per example. The programs are
+written by the Zig tool
+[`//tools/build/readme_examples:tool`](../readme_examples/BUCK), whose
+welded unit tests (`:readme_examples_unit`: what an example is, the two
+modes, hidden lines, every refusal, line n of a program on README line n,
+the runner, the line map and the command line) pass before any README is
+read; the targets below check the whole path, the compile and run included.
 [`functional/readme_examples/ok`](functional/readme_examples/ok/BUCK) builds a
 README using every form (hidden lines, a `mojo module` example declaring a
 decorated struct and a triple-quoted string, an example in a list item, a

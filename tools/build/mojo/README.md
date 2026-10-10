@@ -83,10 +83,15 @@ L/tests/readme/...  the README's generated program, binary and marker
 
 A library whose package holds a `README.md` runs the README's examples as one
 more welded test, `[tests][readme]`, so the documentation cannot rot. Nothing
-declares it: the README is declared by existing. The reader and the program
-generator are [`//tools/build/readme_examples`](../readme_examples/BUCK)
-(pure Mojo; `buildtools.doc_links` reads code through the same CommonMark
-fence reader, so the link check and the examples agree on what is code).
+declares it: the README is declared by existing. The program generator is
+the Zig tool [`//tools/build/readme_examples:tool`](../readme_examples/BUCK)
+(`generate`, and `map` for a report's lines; its unit tests are welded). It
+reads Markdown through the shared Zig module
+[`//tools/build/markdown`](../markdown/BUCK) (CommonMark fences, code spans,
+links). Two Mojo programs read Markdown in process through the Mojo library
+of the same package, `readme_examples`, until they move to the Zig tool and
+module: `buildtools.doc_links` (the link check) and `kci_validate`, which
+makes an installed README into the programs `generate` makes for it.
 
 - **An example** is a fenced block whose info string is `mojo` or
   `mojo module` (```` ``` ```` or `~~~`; a closing fence is the same
@@ -129,8 +134,6 @@ fence reader, so the link check and the examples agree on what is code).
   cannot read, so a dynamic action reads the examples' lines. With none, nothing is
   compiled or run and the marker reads `NO EXAMPLE <label>`, never `PASS`. A
   README's examples do not count as the tests a conda package needs.
-- The tool's own package, `tools/build/readme_examples`, may hold no README:
-  the tool would depend on itself.
 - **Which library**: a BUCK file of one library says nothing. Every library
   of a BUCK file takes the directory's `README.md` unless it says otherwise,
   so a BUCK file of several libraries names the one the README is about with

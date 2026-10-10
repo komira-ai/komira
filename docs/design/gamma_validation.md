@@ -79,7 +79,7 @@ Three properties of this check shape everything below:
 
 1. **A README example cannot reach a service.** Every ` ```mojo ` block runs;
    there is no skip word, and a sketch that cannot run must be fenced
-   ` ```text ` (`tools/build/readme_examples/readme_examples/examples.mojo`).
+   ` ```text ` (`tools/build/readme_examples/examples.zig`).
    The same examples are also a welded test of the library in source mode
    (`tools/build/mojo/defs.bzl`, the README gate), so they run inside a build
    action too. An example that needed a live service could not pass the

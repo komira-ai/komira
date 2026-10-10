@@ -1,14 +1,51 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
-# A README's ```mojo examples as a program that runs them (README.md of
-# tools/build/mojo, "README examples"). The library is pure (text in, text
-# out): the CommonMark fence and link reader that buildtools.doc_links also
-# reads code through, the examples with their refusals, and the generated
-# program with its line map. Its unit tests are welded.
-#
-# This package has no README.md and must not get one: every mojo_library
-# whose package holds a README runs `:tool` on it, so a README here would
-# make the tool depend on itself.
+# The README examples tool (README.md of tools/build/mojo, "README
+# examples"): `generate` makes a README's ```mojo examples into programs, one
+# per example, `readme_<import name>_<line>.mojo`, line n of each being README
+# line n, plus the runner of them all; `map` rewrites a report's program
+# lines to README lines (cli.zig). mojo_library runs it on its package's
+# README.md as an action, and so do the coverage build and the README API
+# census. Zig, as every build tool under tools/build is; what is code, a
+# fence and a link is the shared Markdown reader's
+# (//tools/build/markdown:markdown).
+
+_SRCS = glob(["*.zig"])
+
+# The unit tests (examples_test.zig, program_test.zig, cli_test.zig): `zig
+# test` of main.zig, run as a build action.
+zig_test(
+    name = "readme_examples_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "main.zig",
+    deps = ["//tools/build/markdown:markdown"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# Welded: no README is made into programs unless `:readme_examples_unit`
+# passed.
+zig_exe(
+    name = "tool",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "main.zig",
+    deps = ["//tools/build/markdown:markdown"],
+    unit_tests = [":readme_examples_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
+# The same reading in Mojo, as a library, for the two Mojo programs that
+# read Markdown in process: kci_validate makes an installed README into the
+# programs `generate` makes for it (byte-equal; src/kci_validate), and
+# buildtools.doc_links reads what is code and what is a link through its
+# `markdown` (tools/build/inspect). Its unit tests are welded. It goes when
+# both read through the Zig tool and module.
 mojo_library(
     name = "readme_examples",
     srcs = [
@@ -23,13 +60,5 @@ mojo_library(
         "tests/test_markdown.mojo",
         "tests/test_program.mojo",
     ],
-    visibility = ["PUBLIC"],
-)
-
-# `generate` and `map` (main.mojo). mojo_library runs it as an action.
-mojo_binary(
-    name = "tool",
-    srcs = ["main.mojo"],
-    deps = [":readme_examples"],
     visibility = ["PUBLIC"],
 )

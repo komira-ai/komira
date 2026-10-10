@@ -640,8 +640,8 @@ is not a one-line change today:
 
 **The ledger** (`COVERAGE_NO_GATE` in `policy.bzl`): the gate
 runs `covcheck_bin`, so the Mojo libraries `covcheck_bin` depends on
-(`covcheck`, `komira_json`, and `readme_examples`, whose tool runs the
-examples of their README) cannot have the gate as an action of their own:
+(`covcheck` and `komira_json`; the tool that runs the examples of their
+README is Zig) cannot have the gate as an action of their own:
 the library would depend on the gate's directory, which depends on
 `covcheck_bin`, which depends on the library. That is a cycle of configured
 targets (a dependency of the rule, whatever waits for the gate's output),
