@@ -35,6 +35,12 @@
 #   repeat_jti      -> jti_unique, run alone on a fresh issuer (jti-1,
 #                      jti-2, jti-2: the third token repeats the last jti
 #                      seen);
+#   late_repeat_jti -> jti_unique, run alone on a fresh issuer (jti-1 ...
+#                      jti-31, then jti-31 again: only the last of the 32
+#                      samples repeats, so sampling fewer passes);
+#   short_jti       -> passes claims and jti_unique: 32 distinct one-byte
+#                      jtis are non-empty strings, so a check stricter than
+#                      "non-empty" would wrongly fail a conforming issuer;
 #   empty_subject_ok -> subject_required.
 #
 # main runs every test and reports every failure.
@@ -48,6 +54,7 @@ from komira_secret_store import SecretValue
 from komira_test_issuer import (
     SCENARIO_CLAIMS,
     SCENARIO_IN_FLIGHT,
+    SCENARIO_JTI_SAMPLES,
     SCENARIO_JTI_UNIQUE,
     SCENARIO_MINT_VERIFIES,
     SCENARIO_PUBLISH_BEFORE_SIGN,
@@ -89,6 +96,11 @@ comptime F_REPEAT_JTI = 14
 comptime F_EMPTY_SUBJECT_OK = 15
 comptime F_KID_SWAP = 16
 comptime F_LONG_LIFE = 17
+comptime F_LATE_REPEAT_JTI = 18
+comptime F_SHORT_JTI = 19
+
+# One distinct byte per sample of jti_unique, for short_jti.
+comptime SHORT_JTIS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJ"
 
 
 def _profile() -> IssuerProfile:
@@ -290,6 +302,14 @@ struct Faulty(IssuerUnderTest, Movable, Deinitable):
         if self.fault == F_REPEAT_JTI:
             # jti-1, jti-2, jti-2, ...: the repeat matches the LAST jti seen.
             jti = Optional[String](String("jti-") + String(min(self.minted, 2)))
+        if self.fault == F_LATE_REPEAT_JTI:
+            # jti-1 ... jti-31, then jti-31 at sample 32.
+            var k = min(self.minted, SCENARIO_JTI_SAMPLES - 1)
+            jti = Optional[String](String("jti-") + String(k))
+        if self.fault == F_SHORT_JTI:
+            var at = self.minted - 1
+            var all = String(SHORT_JTIS)
+            jti = Optional[String](String(all[byte = at : at + 1]))
         var exp = now + TTL - 1
         return self.inner.sign_claims(_claims(sub, iat, exp, jti, cid, sc), typ)
 
@@ -434,6 +454,12 @@ def test_claim_faults() raises:
     # the third token and matches the last jti seen.
     _claims_fault(misses, F_REPEAT_JTI, None, SCENARIO_JTI_UNIQUE, "two tokens carry one jti")
     _claims_fault(misses, F_JTI, String(""), SCENARIO_JTI_UNIQUE, JTI)
+    # Only the last of the samples repeats: a run that mints fewer than
+    # SCENARIO_JTI_SAMPLES tokens never sees it.
+    _claims_fault(misses, F_LATE_REPEAT_JTI, None, SCENARIO_JTI_UNIQUE, "two tokens carry one jti")
+    # One-byte jtis, all distinct, are non-empty strings: both scenarios pass.
+    _claims_fault(misses, F_SHORT_JTI, None, SCENARIO_CLAIMS, "")
+    _claims_fault(misses, F_SHORT_JTI, None, SCENARIO_JTI_UNIQUE, "")
     assert_equal(misses, "")
 
 
