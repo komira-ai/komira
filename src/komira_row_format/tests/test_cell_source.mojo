@@ -250,6 +250,36 @@ def test_row_read_u64_zero_extends_unsigned_cells() raises:
     assert_equal(src.read_u64(2, 10), 0)
 
 
+def test_row_read_u64_reads_signed_cells_at_their_width() raises:
+    """read_u64 on I32/I16/I8 cells reads the cell's own 4/2/1 bytes and
+    sign-extends: the result is the 64-bit two's-complement bit pattern of
+    the value, the same bits `ColumnCellSource.read_u64` gives (it reinterprets
+    the i64 value) and the walker's EXPR_LIT_I64 literal arm gives a negative
+    comparand. Every one of these cells is followed by non-zero bytes in rows 0
+    and 1 (the i32 at 8 by the i16/i8/u8 at 12..15), so an 8-byte load picks
+    them up as high bytes; row 0's set top bits tell sign-extension from
+    zero-extension."""
+    var rb = _row_block()
+    var src = RowCellSource(rb, _offsets(), _dtypes())
+    # Row 0: -2 (i32), -32767 (i16), -127 (i8).
+    assert_equal(src.read_u64(0, 1), UInt64(0xFFFFFFFFFFFFFFFE))
+    assert_equal(src.read_u64(0, 2), UInt64(0xFFFFFFFFFFFF8001))
+    assert_equal(src.read_u64(0, 3), UInt64(0xFFFFFFFFFFFFFF81))
+    # Row 1: positive values read as themselves.
+    assert_equal(src.read_u64(1, 1), 16909060)
+    assert_equal(src.read_u64(1, 2), 258)
+    assert_equal(src.read_u64(1, 3), 127)
+    for c in [1, 2, 3]:
+        assert_equal(src.read_u64(2, c), 0)
+        # The same bits as the signed read, reinterpreted.
+        for r in range(3):
+            assert_equal(
+                src.read_u64(r, c),
+                src.read_i64(r, c).cast[DType.uint64](),
+                "row " + String(r) + " col " + String(c),
+            )
+
+
 def test_row_read_f64_widens_ints_and_f32() raises:
     """read_f64 per tag: I64/I32/BOOL convert the integer value, F32 widens
     the float, F64 reads the 8 IEEE bytes at an odd offset."""
@@ -597,6 +627,7 @@ def main() raises:
     var s = TestSuite()
     s.test[test_row_read_i64_widens_each_storage_width]()
     s.test[test_row_read_u64_zero_extends_unsigned_cells]()
+    s.test[test_row_read_u64_reads_signed_cells_at_their_width]()
     s.test[test_row_read_f64_widens_ints_and_f32]()
     s.test[test_row_read_f64_widens_narrow_and_unsigned_ints]()
     s.test[test_row_read_i32_and_f32_read_their_width]()
