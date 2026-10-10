@@ -17,14 +17,15 @@
 #   * SQL keeps the file's rows -> the fold must keep the file;
 #   * SQL rejects them -> the fold prunes the file or the conjunct stays on
 #     the residual (the row filter still rejects the rows).
-# The cases cover the comparison shape, the `EXPR_IN_LIST` node and the
-# OR-of-EQ chain `Expr.in_list` folds to, since all three render literals.
+# The cases cover the comparison shape (literal on either side), the
+# `EXPR_IN_LIST` node and the OR-of-EQ chain `Expr.in_list` folds to, since
+# all three render literals.
 # =============================================================================
 
 from std.testing import TestSuite, assert_true
 
 from komira_arrow.arrow_types import ArrowType
-from komira_plan_expr.expr import Expr, BIN_EQ, BIN_LT
+from komira_plan_expr.expr import Expr, BIN_EQ, BIN_GT, BIN_LT
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_fs.pruned_hive_discovery import _file_matches_predicate
 from komira_scan_planning.partition_predicate_split import (
@@ -88,6 +89,22 @@ def test_date32_range_keeps_earlier_date_file() raises:
         String("2021-06-01"),
         True,
         String("date32 range"),
+    )
+
+
+def test_date32_literal_on_the_left_keeps_earlier_date_file() raises:
+    # 2022-01-08 > dt holds for 2021-06-01.
+    _check(
+        Expr.binary(
+            BIN_GT,
+            Expr.literal(ScalarValue.date32(Int32(19000))),
+            Expr.col_ref(String("dt")),
+        ),
+        String("dt"),
+        ArrowType.DATE32,
+        String("2021-06-01"),
+        True,
+        String("date32 on the left"),
     )
 
 
@@ -206,6 +223,7 @@ def main() raises:
     var suite = TestSuite()
     suite.test[test_date32_literal_keeps_matching_date_file]()
     suite.test[test_date32_range_keeps_earlier_date_file]()
+    suite.test[test_date32_literal_on_the_left_keeps_earlier_date_file]()
     suite.test[test_timestamp_literal_keeps_matching_file]()
     suite.test[test_eq_null_rejects_the_null_partition]()
     suite.test[test_float_literal_keeps_equal_int_file]()
