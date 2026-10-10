@@ -192,6 +192,10 @@ struct Fake(StageSteps, Movable):
             raise Error(String("the checkout is shallow (or not a git repository): its history cannot tell"))
         return self.ancestor
 
+    def main_tip_past(mut self, revision: String) raises -> String:
+        # no run here passes --admission (test_kci_staged_ordering.mojo does)
+        raise Error(String("main_tip_past is not asked in this test"))
+
     def release_set_hash(mut self, artifacts_file: String, platform_dir: String) raises -> String:
         if self.release_refused:
             raise Error(String("PUBLISH step: the release directory is refused: no release.json"))
