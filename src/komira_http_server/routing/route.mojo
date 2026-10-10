@@ -204,10 +204,11 @@ struct AppRouter[*Routes: Route](Movable, RequestDispatcher):
         # PASS 1 — resolve the pack index (borrow; fills req.path_params).
         var hid = self._table.match_route(req.method, req.path, req.path_params)
         if not hid:
-            # No (method, path) match. Path matched but verb didn't -> 405;
-            # otherwise no such path -> 404.
-            if self._table.has_path_match(req.path):
-                return HttpResponse.method_not_allowed()
+            # No (method, path) match. Path matched but verb didn't -> 405
+            # with the path's methods in `Allow`; otherwise no such path -> 404.
+            var allowed = self._table.allowed_methods(req.path)
+            if len(allowed) != 0:
+                return HttpResponse.method_not_allowed(allowed)
             return HttpResponse.not_found()
 
         # PASS 2 — run exactly the matched route's handle[RT]. Stash req in an

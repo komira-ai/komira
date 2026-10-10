@@ -131,7 +131,8 @@ def test_the_integer_probe() raises:
 
 
 def test_the_date_probe() raises:
-    """Exactly `YYYY-MM-DD` with month 01-12 and day 01-31.
+    """Exactly `YYYY-MM-DD` with month 01-12 and day 01-31 (the month-length
+    bound is the next test).
     MUTANT: `mm > 13` admits month 13."""
     assert_true(_value_parses_as_date32(String("2031-01-31")))
     assert_true(_value_parses_as_date32(String("2031-12-01")))
@@ -152,6 +153,30 @@ def _vals(a: String, b: String = "") -> List[String]:
     if b.byte_length() > 0:
         out.append(b)
     return out^
+
+
+def test_the_date_probe_rejects_a_day_past_month_end() raises:
+    """A day past its month's last day is not a date: 29 February outside a
+    leap year (the century rule included), 30 February, 31 in a 30-day
+    month (komira-ai/komira#1110). A column of such values is STRING.
+    MUTANT: dropping the month-length check admits all of these; treating
+    every year divisible by 4 as leap admits 2100-02-29."""
+    var leap = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    var common = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    for m in range(12):
+        var mm = String(m + 1) if m + 1 >= 10 else "0" + String(m + 1)
+        assert_true(_value_parses_as_date32("2028-" + mm + "-" + String(leap[m])))
+        assert_true(_value_parses_as_date32("2027-" + mm + "-" + String(common[m])))
+        if leap[m] < 31:
+            var ld = "2028-" + mm + "-" + String(leap[m] + 1)
+            assert_false(_value_parses_as_date32(ld), ld)
+        if common[m] < 31:
+            var cd = "2027-" + mm + "-" + String(common[m] + 1)
+            assert_false(_value_parses_as_date32(cd), cd)
+    assert_true(_value_parses_as_date32(String("2000-02-29")), "2000 is leap")
+    assert_false(_value_parses_as_date32(String("1900-02-29")), "1900")
+    assert_false(_value_parses_as_date32(String("2100-02-29")), "2100")
+    assert_true(_infer_arrow_type(_vals("2028-02-28", "2028-02-30")) == ArrowType.STRING)
 
 
 def test_type_inference_order_is_integer_then_date_then_string() raises:

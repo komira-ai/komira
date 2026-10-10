@@ -1,0 +1,28 @@
+{
+  "name": "kci.job",
+  "version": "1",
+  "doc": "A container that runs to completion, as its own identity, started on a schedule or by whatever is granted CALL on it. `job` (a container_job) runs as `account` (a service_account); `timer` (a schedule that starts `job`) exists only when `cron` is set. Both are exported: grant to `account` to let the job reach a resource, and grant CALL on `job` to let another identity start a run.",
+  "input": [
+    {"name": "image", "type": "INPUT_IMAGE", "required": true, "doc": "What the job runs: a build step's output or a digest."},
+    {"name": "cron", "type": "INPUT_STRING", "doc": "When a run starts (Schedule.cron). Unset: no schedule; a run starts only when an identity granted CALL on `job` starts one."},
+    {"name": "timezone", "type": "INPUT_STRING", "doc": "The time zone `cron` is read in (Schedule.timezone). Unset: UTC. Read only when `cron` is set."},
+    {"name": "max_retries", "type": "INPUT_INT", "doc": "How many times a failed run is retried (ContainerJob.max_retries). Unset: the versioned default."},
+    {"name": "env", "type": "INPUT_VALUE_MAP", "doc": "The job's environment: plain values, each a literal, a parameter or another resource's output."}
+  ],
+  "component": [
+    {"id": "account", "serviceAccount": {}},
+    {"id": "job", "containerJob": {"runAs": {"local": "account"}}},
+    {"id": "timer", "schedule": {"target": {"local": "job"}}}
+  ],
+  "bind": [
+    {"component": "job", "field": "container_job.image", "input": "image"},
+    {"component": "job", "field": "container_job.max_retries", "input": "max_retries"},
+    {"component": "job", "field": "container_job.env", "input": "env"},
+    {"component": "timer", "field": "schedule.cron", "input": "cron"},
+    {"component": "timer", "field": "schedule.timezone", "input": "timezone"}
+  ],
+  "presence": [
+    {"component": "timer", "ifInput": "cron"}
+  ],
+  "export": ["account", "job"]
+}

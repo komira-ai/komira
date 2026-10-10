@@ -135,6 +135,9 @@ trait StateStore(Movable, Deinitable):
         ...
 
     def mark_reaped(mut self, key: ResourceKey) raises:
+        """Retire the live record for `key`. Idempotent: retiring a key with
+        no live record is a no-op, which a release that is retried relies
+        on."""
         ...
 
     def physical_id_for(mut self, key: ResourceKey) raises -> String:

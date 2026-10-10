@@ -16,7 +16,7 @@
 # branch here); a GitHub-hosted runner (the literal `ubuntu-24.04`); no
 # environment and no secret; `contents: read` and the `id-token: write` the farm
 # connection exchanges, nothing else; every action pinned; no publish step.
-# `kci run --stage pr --affected-by <the pull request's base commit>` builds the
+# `kci run --stage pr --affected-by <the merge commit's first parent>` builds the
 # units the change reaches (the artifacts of release/artifacts.textproto and the
 # checks derived from the build graph when it runs) and ships nothing.
 name: pr
@@ -95,8 +95,13 @@ jobs:
       # builds the units the change reaches: the artifacts of
       # release/artifacts.textproto and the checks its buck2 build system
       # derives from the live graph (release/ci/derive_checks.py), so every
-      # target of the graph is in some unit. The base is the pull request's
-      # base commit, a full commit id GitHub sets. The build budget is the
+      # target of the graph is in some unit. The change base is the first
+      # parent of the merge commit checked out (kci holds HEAD to
+      # $REVISION): exactly the main the pull request is merged into, so the
+      # change kci diffs is the pull request's alone. Never the event's
+      # base.sha: that is main when the event fired, and once main moves
+      # every change merged since then would count as this pull request's
+      # (src/kci_workflow_check, rule R6, holds this line). The build budget is the
       # seconds left until the job's deadline (kci refuses a value under 1);
       # kci counts it from its own start, so its work before the build is
       # charged too. A missing deadline file stops the step here.
@@ -104,7 +109,8 @@ jobs:
         run: |
           [ -s "$RUNNER_TEMP/job_deadline_s" ] || { echo "::error::no job deadline in \$RUNNER_TEMP/job_deadline_s: the job's first step did not write it"; exit 1; }
           budget_s=$(( $(cat "$RUNNER_TEMP/job_deadline_s") - $(date +%s) ))
-          "$RUNNER_TEMP/kci/kci" run --stage pr --affected-by ${{ github.event.pull_request.base.sha }} \
+          if ! git rev-parse --verify --quiet HEAD^2 > /dev/null || ! change_base=$(git rev-parse --verify HEAD^1); then echo "::error::the change base is the merge commit's first parent, and HEAD is not a merge commit"; exit 1; fi
+          "$RUNNER_TEMP/kci/kci" run --stage pr --affected-by "$change_base" \
             --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
             --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \

@@ -292,9 +292,10 @@ def simd_unpack_bits[
     full `count` was written), False if the width is not covered here (caller
     should fall back to its scalar bit-cursor).
 
-    Covers: 1, 2, and all byte-aligned widths (8/16/24/32/40/48/56/64). Widths
-    4/8/16/32 also work but ORC has dedicated callers for those; this is the
-    shared path for the byte-multiple widths the references leave scalar.
+    Covers: 0, 1, 2, and all byte-aligned widths (8/16/24/32/40/48/56/64).
+    Width 4 is not covered (returns False; ORC has a dedicated caller for it).
+    ORC also has dedicated callers for 8/16/32; this is the shared path for
+    the byte-multiple widths the references leave scalar.
 
     Encapsulation: `src`/`dst` are borrowed/mutable Span views; the internal
     concrete-origin pointers below are used for SIMD load/store only and never

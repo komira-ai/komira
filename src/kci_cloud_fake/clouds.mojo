@@ -100,6 +100,13 @@
 # catch any code that keyed on the spelling. `fail_at_call`, `read_lag` and
 # `foreign` build the faulty variant (see `FakeStore`).
 #
+# A RESOURCE'S TYPE IS ITS SET ARM, read through the catalog table
+# (`body_field`, `body_is`) in every lowering and every limit of this
+# package, never through an arm's `Optional` or its position in the oneof:
+# a message merged from two bodies keeps the earlier arm's `Optional`
+# populated, and an arm's position is the generated code's, not the
+# catalog's.
+#
 # ⚠ The limits below are the FAKE clouds' own, chosen to be
 # exercisable; they cite this package, not any real cloud.
 # =============================================================================
@@ -127,6 +134,7 @@ from kci_cloud import (
     ConformanceTarget,
     Finding,
     CloudId,
+    ExistingObject,
     LoweredNode,
     OwnedRecord,
     Principal,
@@ -160,9 +168,11 @@ from kci_cloud import (
     Firing,
     GrantEdge,
     body_field,
+    body_is,
     holds_own_identity,
     run_as_of,
     decode_label_value,
+    adopted_by,
     retained_by,
     standard_identity_of,
     standard_label_rule,
@@ -172,6 +182,7 @@ from kci_resource_proto.resource import Resource
 
 from kci_cloud_fake.data import lower_bucket, lower_table
 from kci_cloud_fake.dns import dns_limits, lower_certificate, lower_record, lower_zone
+from kci_cloud_fake.existing import planted_like, read_existing as _read_existing, release as _release
 from kci_cloud_fake.fake_store import FakeStore
 from kci_cloud_fake.messaging import lower_queue, lower_subscription, lower_topic, messaging_limits
 from kci_cloud_fake.limits import (
@@ -395,6 +406,7 @@ def _owned(store: ArcPointer[FakeStore], scope: CellScope) raises -> List[OwnedR
                 live_key(s.digests[i]),
                 validation_run_of(labels),
                 s.names[i].copy(),
+                adopted_by(labels),
             )
         )
     return out^
@@ -566,6 +578,12 @@ struct FakeCloud(ConformanceTarget, Movable):
     def list_owned(mut self, creds: Creds, scope: CellScope) raises -> List[OwnedRecord]:
         return _owned(self.store, scope)
 
+    def read_existing(mut self, creds: Creds, node: LoweredNode) raises -> ExistingObject:
+        return _read_existing(self.store, node)
+
+    def release(mut self, creds: Creds, record: OwnedRecord) raises:
+        _release(self.store, record)
+
     def whoami(mut self, creds: Creds) raises -> Principal:
         var who = creds.token.copy()
         if who.byte_length() == 0:
@@ -619,6 +637,11 @@ struct FakeCloud(ConformanceTarget, Movable):
 
     def plant_foreign(mut self, logical_id: String) raises:
         self.store[].plant(logical_id, String("foreign"))
+
+    def plant_like(mut self, node: LoweredNode) raises:
+        """Plant, unstamped, the object `node` declares (what an adoption
+        expects to find; existing.mojo)."""
+        planted_like(self.store, node)
 
     def race_next_create(mut self):
         self.store[].race_next()
@@ -721,7 +744,7 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
     def check(self, r: Resource, feeds: List[Feed], firings: List[Firing]) -> List[Finding]:
         var out = List[Finding]()
         common_limits(r, out)
-        if r._oneof0_case == 1 and r.service.value()._oneof0_case == 1:
+        if body_is(r, FIELD_SERVICE) and r.service.value()._oneof0_case == 1:
             out.append(
                 Finding(
                     FINDING_LIMIT,
@@ -755,6 +778,12 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
 
     def list_owned(mut self, creds: Creds, scope: CellScope) raises -> List[OwnedRecord]:
         return _owned(self.store, scope)
+
+    def read_existing(mut self, creds: Creds, node: LoweredNode) raises -> ExistingObject:
+        return _read_existing(self.store, node)
+
+    def release(mut self, creds: Creds, record: OwnedRecord) raises:
+        _release(self.store, record)
 
     def whoami(mut self, creds: Creds) raises -> Principal:
         var who = creds.token.copy()
@@ -809,6 +838,11 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
 
     def plant_foreign(mut self, logical_id: String) raises:
         self.store[].plant(logical_id, String("foreign"))
+
+    def plant_like(mut self, node: LoweredNode) raises:
+        """Plant, unstamped, the object `node` declares (what an adoption
+        expects to find; existing.mojo)."""
+        planted_like(self.store, node)
 
     def race_next_create(mut self):
         self.store[].race_next()

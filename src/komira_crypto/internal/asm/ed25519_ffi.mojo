@@ -244,13 +244,13 @@ def ed25519_sign_from_seed(
     # guard against, where a failing sign returns SUCCESS with the caller's
     # zero-filled buffer as a 64-byte all-zero "signature".
     if Int(rc) != 1:
-        raise Error(
-            String(
+        raise Error(  # cov: unreachable ED25519_sign fails only on a FIPS self-test failure, which this non-FIPS build does not run
+            String(  # cov: unreachable see the line above
                 "ed25519_sign_from_seed: AWS-LC ED25519_sign failed (returned"
                 " "
             )
-            + String(Int(rc))
-            + String(
+            + String(Int(rc))  # cov: unreachable see the line above
+            + String(  # cov: unreachable see the line above
                 "). Refusing to return the unwritten output buffer, which would"
                 " be an all-zero 64-byte signature presented as success."
             )

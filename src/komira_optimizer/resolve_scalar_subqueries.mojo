@@ -5,8 +5,8 @@
 # Compile-time pass that resolves every UNCORRELATED scalar subquery
 # (`EXPR_CORRELATED_SUBQUERY` whose `kind == CORR_KIND_SCALAR` AND has NO
 # `outer_refs`) to an `EXPR_LITERAL` holding its single-row single-column
-# ScalarValue. The engine executes the inner plan once and binds the value in
-# a `ScalarDepTable`; the optimizer itself executes nothing.
+# ScalarValue. The inner plan is executed once, outside komira_optimizer, and
+# its value bound in a `ScalarDepTable`; the optimizer itself executes nothing.
 #
 # Algorithm ("execute-once + literal-inline"):
 #   1. Walk the LogicalPlan. At every Expr-bearing node (Filter, Project,
@@ -18,10 +18,11 @@
 #        b. If the `ScalarDepTable` binds that key, use the bound
 #           ScalarValue (one binding serves every occurrence).
 #        c. Otherwise record a request for the inner plan and leave the
-#           plan unchanged. The engine executes the request, checks the
-#           result is 1 column and at most 1 row (`ScalarSubqueryMultipleRows`
-#           if > 1 row; 0 rows -> typed NULL, as SQL `x = (SELECT ... WHERE
-#           false)` -> `x = NULL`), binds the value and re-runs the optimizer.
+#           plan unchanged. The caller this is designed for (not in this
+#           tree) executes the request, checks the result is 1 column and at
+#           most 1 row (`ScalarSubqueryMultipleRows` if > 1 row; 0 rows ->
+#           typed NULL, as SQL `x = (SELECT ... WHERE false)` -> `x = NULL`),
+#           binds the value and runs the passes again.
 #   3. Re-walk the plan and SPLICE `Expr.literal(scalars[i])` in place of
 #      the i-th collected subquery (lockstep with the Phase-1 enumeration
 #      order). Correlated scalar subqueries (`len(outer_refs) > 0`) are
@@ -32,8 +33,8 @@
 # Module layering: execution stays outside the optimizer
 # =============================================================================
 #
-# Executing the inner plan needs the engine, and the engine depends on the
-# optimizer, so the optimizer cannot call it (a reverse import is a layering
+# Executing the inner plan needs an executor, and an executor sits above the
+# optimizer, so the optimizer cannot call one (a reverse import is a layering
 # inversion). The optimizer therefore executes nothing. It has the same
 # 3-phase split as `optimizer_scalar_broadcast`: the two RECURSIVE walkers
 # (collect, rewrite) are PURE + NON-PARAMETRIC and live HERE in
@@ -103,9 +104,9 @@ from komira_plan_ir.corr_subquery import corr_data_inner_plan_ref
 from komira_plan_expr.scalar_value import ScalarValue
 
 
-# Public error-name prefix for the >1-row HALT-condition. The engine
-# raises `Error(SCALAR_SUBQUERY_MULTIPLE_ROWS + ": ...")`; tests assert on
-# the prefix.
+# Public error-name prefix for the >1-row HALT-condition. The caller that
+# executes the request is designed to raise
+# `Error(SCALAR_SUBQUERY_MULTIPLE_ROWS + ": ...")`; tests assert on the prefix.
 comptime SCALAR_SUBQUERY_MULTIPLE_ROWS: String = "ScalarSubqueryMultipleRows"
 
 
@@ -183,7 +184,7 @@ def _count_uncorrelated_scalar_in_plan(plan: LogicalPlan) raises -> Int:
         n += _count_uncorrelated_scalar_in_plan(plan.topn_data_ref().child[])
     # Aggregate / Join / PartitionBy / PartitionTopN / Scan / Union /
     # ViewRef: leaf for this pass (a subquery deeper inside one of those
-    # is not resolved here -- see "Coverage" note on the public fn).
+    # is neither counted nor resolved here).
     return n
 
 
@@ -208,12 +209,12 @@ def resolve_scalar_subqueries(var plan: LogicalPlan) raises -> LogicalPlan:
     The ACTIVE pass -- which inlines the literal for each uncorrelated
     inner plan -- is the non-parametric driver
     `komira_optimizer.optimizer_resolve_scalar_subqueries.resolve_scalar_subqueries_rewrite`.
-    It takes the `ScalarDepTable` the engine fills, folds each site whose
-    value is bound and requests the rest. Downstream
-    `flatten_dependent_joins` would choke on a still-present
-    uncorrelated SCALAR (its hoist algorithm needs >= 1 outer_ref) -- so
-    a plan must pass through that driver, with every site bound, before
-    flatten runs.
+    It takes the `ScalarDepTable` the executing caller fills, folds each site whose
+    value is bound and requests the rest. `flatten_dependent_joins` has no
+    uncorrelated arm: with no outer_refs its hoist derives no join keys,
+    so a still-present uncorrelated SCALAR would become a keyless LEFT
+    join over an ungrouped Aggregate -- so a plan is designed to pass
+    through that driver, with every site bound, before flatten runs.
     """
     return plan^
 
@@ -224,8 +225,8 @@ def resolve_scalar_subqueries(var plan: LogicalPlan) raises -> LogicalPlan:
 
 
 struct ScalarSubquerySite(Movable):
-    """One uncorrelated SCALAR subquery occurrence whose inner plan the
-    engine executes once and whose Expr node the rewrite walker will
+    """One uncorrelated SCALAR subquery occurrence whose inner plan is
+    executed once (outside komira_optimizer) and whose Expr node the rewrite walker will
     replace with `Expr.literal(...)`.
 
     Lifetime bounded by one `resolve_scalar_subqueries_rewrite` call: the
@@ -338,8 +339,8 @@ def _rewrite_scalar_subquery_in_expr(
     """Rebuild the Expr tree, replacing each uncorrelated SCALAR subquery
     with `Expr.literal(scalars[next_idx])` and advancing `next_idx` --
     visited in the SAME pre-order as `_collect_scalar_subquery_sites_in_expr`.
-    NON-PARAMETRIC. Mojo 0.26.3 has no in-place single-node swap, so the
-    rebuild form is standard (matches `_substitute_agg_fn`).
+    NON-PARAMETRIC. The tree is rebuilt rather than swapped in place, as
+    `optimizer_scalar_broadcast._substitute_agg_fn` does.
     """
     if expr.tag == EXPR_CORRELATED_SUBQUERY:
         if _is_uncorrelated_scalar_subquery(expr):

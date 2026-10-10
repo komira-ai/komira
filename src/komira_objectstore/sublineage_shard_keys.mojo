@@ -160,14 +160,14 @@ def make_shard_id(
         + String(worker_idx)
     )
     if is_reserved_shard_id(sid):
-        raise Error(
-            "make_shard_id: produced the COMPACTOR-RESERVED shard_id '"
-            + _LINEAGE_BASE_SHARD
-            + "' (node_id='"
-            + node_id
-            + "', worker_idx="
-            + String(worker_idx)
-            + ") — a writer must never write the _base fold-target lineage"
+        raise Error(  # cov: unreachable a minted id holds '-<pid>-', so it never equals _base
+            "make_shard_id: produced the COMPACTOR-RESERVED shard_id '"  # cov: unreachable see the line above
+            + _LINEAGE_BASE_SHARD  # cov: unreachable see the line above
+            + "' (node_id='"  # cov: unreachable see the line above
+            + node_id  # cov: unreachable see the line above
+            + "', worker_idx="  # cov: unreachable see the line above
+            + String(worker_idx)  # cov: unreachable see the line above
+            + ") — a writer must never write the _base fold-target lineage"  # cov: unreachable see the line above
         )
     return sid^
 
