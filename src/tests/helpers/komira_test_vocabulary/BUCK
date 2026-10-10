@@ -19,5 +19,6 @@ mojo_library(
         "//src/komira_authz_api:",
         "//src/komira_http_auth:",
         "//src/komira_http_server:",
+        "//src/komira_jose:",
     ],
 )

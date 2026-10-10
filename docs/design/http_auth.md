@@ -35,7 +35,8 @@ code with PKCE), token exchange (RFC 8693), DPoP (RFC 9449), mTLS-bound tokens (
 | `komira_json.refuse_duplicate_keys` | `komira_json` | on `main` |
 | RS256 JWS verify against a JWK Set | `komira_crypto/rs256_jwks.mojo` | on `main` |
 | `BearerJwtMiddleware[V]`, `Rs256JwksVerifier`, the JWKS cache, the flags | `komira_http_auth` | #810: one RS256 trust anchor per process |
-| ES256 and EdDSA verify, a strict JOSE header and claims policy shared by every algorithm, signing, a key ring | `komira_jose` | target, not written. The RS256 verifier moves here from `komira_crypto`. |
+| ES256, EdDSA and RS256 verify, one pinned algorithm per verifier, the strict JOSE header gate and the claims policy (`ClaimPolicy`) | `komira_jose` | built. `komira_crypto/rs256_jwks.mojo` stays until `komira_http_auth` calls `komira_jose` instead. |
+| signing, a key ring | `komira_jose` | target |
 | several trust anchors per process, chosen by exact `iss` | `komira_http_auth` | target, after `komira_jose` |
 | `client_credentials` client, RFC 8414 metadata and RFC 7591 registration codecs | `komira_oauth` | target |
 | `RemoteAuthzPort` on AuthZEN, with the decision cache and batch `check_many` | `komira_authz_client` | target |
@@ -92,8 +93,8 @@ Header, before any key work or signature check:
 - `kid` is present and printable ASCII.
 
 Key and signature: the key whose `kid` matches, from the anchor's key set. An unknown `kid` triggers at most one
-refetch per refetch window (see the key set, below) and is then refused. Today the RS256 signature is checked by
-`komira_crypto`'s `verify_rs256_jws`; target, every algorithm through `komira_jose`.
+refetch per refetch window (see the key set, below) and is then refused. Today the middleware checks the RS256 signature
+with `komira_crypto`'s `verify_rs256_jws`; target, every algorithm through `komira_jose`, which verifies all three.
 
 Claims, only after the signature verifies (the payload is decoded again from its signed segment, with no repeated
 member name, RFC 7519 section 4):
@@ -330,9 +331,9 @@ one JSON error envelope, `{"error": {"code", "message"}}`, for every service.
 ## Where the code is
 
 `src/komira_http_server/middleware/middleware.mojo` (`Principal`), `src/komira_authz_api`, `src/komira_jwks`,
-`src/komira_crypto/rs256_jwks.mojo`; in review, `src/komira_http_auth` (`middleware.mojo`, `verifier.mojo`,
+`src/komira_crypto/rs256_jwks.mojo`, `src/komira_jose`; in review, `src/komira_http_auth` (`middleware.mojo`, `verifier.mojo`,
 `claims.mojo`, `jwks_cache.mojo`, `jwks_fetch.mojo`, `flags.mojo`, `config.mojo`, `reasons.mojo`). Targets:
-`src/komira_jose`, `src/komira_oauth`, `src/komira_authz_client`, `src/komira_resource_gate`,
+`src/komira_oauth`, `src/komira_authz_client`, `src/komira_resource_gate`,
 `src/tests/helpers/komira_test_issuer`, `src/tests/helpers/komira_test_pdp`, `src/tests/conformance/jose_rfc_vectors`,
 `src/tests/e2e/http_auth_roundtrip`.
 

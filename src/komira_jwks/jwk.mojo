@@ -18,9 +18,10 @@
 # private material; the parser (jwk_set.mojo) refuses a document that has
 # any of them.
 #
-# `kid`, `alg` and `use` are optional and kept verbatim (`alg` and `use` are
-# not interpreted here: a verifier matches them against its own pinned
-# algorithm and purpose). A present `kid` is non-empty.
+# `kid`, `alg`, `use` and `key_ops` are optional and kept verbatim (`alg`,
+# `use` and `key_ops` are not interpreted here: a verifier matches them
+# against its own pinned algorithm and purpose). A present `kid` is
+# non-empty; a present `key_ops` names no value twice.
 #
 # The three constructors and the parser run the same checks (`_check_*`
 # below); `render_jwks_json` builds its keys through `Jwk.ed25519`. The fields
@@ -29,9 +30,10 @@
 # imports `_JwkParts` can build a `Jwk` without the checks, so a verifier must
 # not treat these checks as a security property.
 #
-# Rendering is canonical: members in the order kty, crv, alg, use, kid, then
-# x, y (OKP, EC) or n, e (RSA); optional members only when present; string
-# values escaped per RFC 8259; key members as base64url without padding.
+# Rendering is canonical: members in the order kty, crv, alg, use, key_ops,
+# kid, then x, y (OKP, EC) or n, e (RSA); optional members only when present;
+# string values escaped per RFC 8259; key members as base64url without
+# padding.
 #
 # ENCAPSULATION: `Span[UInt8, _]` and `String` in, owned `String` and
 # `List[UInt8]` out. No pointer crosses this file's API.
@@ -125,6 +127,19 @@ def _check_kid(kid: Optional[String]) raises:
             raise Error("member \"kid\" is empty")
 
 
+def _check_key_ops(key_ops: Optional[List[String]]) raises:
+    """RFC 7517 section 4.3: a key operation value appears at most once."""
+    if not key_ops:
+        return
+    ref ops = key_ops.value()
+    for i in range(len(ops)):
+        for j in range(i + 1, len(ops)):
+            if ops[i] == ops[j]:
+                raise Error(
+                    String("member \"key_ops\" names ") + _q(ops[i]) + " twice"
+                )
+
+
 def _bytes(s: Span[UInt8, _]) -> List[UInt8]:
     var out = List[UInt8](capacity=len(s))
     out.extend(s)
@@ -138,6 +153,19 @@ def _bytes_eq(a: List[UInt8], b: List[UInt8]) -> Bool:
         if a[i] != b[i]:
             return False
     return True
+
+
+def _ops_eq(a: Optional[List[String]], b: Optional[List[String]]) -> Bool:
+    if Bool(a) and Bool(b):
+        ref x = a.value()
+        ref y = b.value()
+        if len(x) != len(y):
+            return False
+        for i in range(len(x)):
+            if x[i] != y[i]:
+                return False
+        return True
+    return not Bool(a) and not Bool(b)
 
 
 def _opt_eq(a: Optional[String], b: Optional[String]) -> Bool:
@@ -163,6 +191,7 @@ struct _JwkParts(Copyable, Movable):
     var kid: Optional[String]
     var alg: Optional[String]
     var key_use: Optional[String]
+    var key_ops: Optional[List[String]]
 
 
 struct Jwk(Copyable, Movable):
@@ -184,6 +213,7 @@ struct Jwk(Copyable, Movable):
         kid: Optional[String] = None,
         alg: Optional[String] = None,
         key_use: Optional[String] = None,
+        key_ops: Optional[List[String]] = None,
     ) raises -> Jwk:
         """An OKP Ed25519 key (RFC 8037 section 2) from its 32-byte public key.
         Raises `JwksError: ...` if `x` is not 32 bytes or `kid` is empty."""
@@ -191,6 +221,7 @@ struct Jwk(Copyable, Movable):
         try:
             _check_okp(JWK_CRV_ED25519, xb)
             _check_kid(kid)
+            _check_key_ops(key_ops)
         except err:
             raise Error(String("JwksError: ") + String(err))
         return Jwk(
@@ -204,6 +235,7 @@ struct Jwk(Copyable, Movable):
                 kid=kid.copy(),
                 alg=alg.copy(),
                 key_use=key_use.copy(),
+                key_ops=key_ops.copy(),
             )
         )
 
@@ -214,6 +246,7 @@ struct Jwk(Copyable, Movable):
         kid: Optional[String] = None,
         alg: Optional[String] = None,
         key_use: Optional[String] = None,
+        key_ops: Optional[List[String]] = None,
     ) raises -> Jwk:
         """An EC P-256 key (RFC 7518 section 6.2) from its two 32-byte affine
         coordinates. Raises `JwksError: ...` if either is not 32 bytes or
@@ -224,6 +257,7 @@ struct Jwk(Copyable, Movable):
         try:
             _check_ec(JWK_CRV_P256, xb, yb)
             _check_kid(kid)
+            _check_key_ops(key_ops)
         except err:
             raise Error(String("JwksError: ") + String(err))
         return Jwk(
@@ -237,6 +271,7 @@ struct Jwk(Copyable, Movable):
                 kid=kid.copy(),
                 alg=alg.copy(),
                 key_use=key_use.copy(),
+                key_ops=key_ops.copy(),
             )
         )
 
@@ -247,6 +282,7 @@ struct Jwk(Copyable, Movable):
         kid: Optional[String] = None,
         alg: Optional[String] = None,
         key_use: Optional[String] = None,
+        key_ops: Optional[List[String]] = None,
     ) raises -> Jwk:
         """An RSA public key (RFC 7518 section 6.3) from its big-endian
         modulus and exponent, each without a leading zero byte. Raises
@@ -257,6 +293,7 @@ struct Jwk(Copyable, Movable):
         try:
             _check_rsa(nb, eb)
             _check_kid(kid)
+            _check_key_ops(key_ops)
         except err:
             raise Error(String("JwksError: ") + String(err))
         return Jwk(
@@ -270,6 +307,7 @@ struct Jwk(Copyable, Movable):
                 kid=kid.copy(),
                 alg=alg.copy(),
                 key_use=key_use.copy(),
+                key_ops=key_ops.copy(),
             )
         )
 
@@ -309,6 +347,10 @@ struct Jwk(Copyable, Movable):
         """The `use` member, if present, verbatim."""
         return self._p.key_use.copy()
 
+    def key_ops(self) -> Optional[List[String]]:
+        """The `key_ops` member, if present, verbatim and in order."""
+        return self._p.key_ops.copy()
+
     def __eq__(self, other: Self) -> Bool:
         """True iff every member is equal."""
         return (
@@ -321,6 +363,7 @@ struct Jwk(Copyable, Movable):
             and _opt_eq(self._p.kid, other._p.kid)
             and _opt_eq(self._p.alg, other._p.alg)
             and _opt_eq(self._p.key_use, other._p.key_use)
+            and _ops_eq(self._p.key_ops, other._p.key_ops)
         )
 
     def __ne__(self, other: Self) -> Bool:
@@ -340,6 +383,14 @@ struct Jwk(Copyable, Movable):
         if self._p.key_use:
             _lit(buf, ',"use":')
             write_json_string(buf, self._p.key_use.value())
+        if self._p.key_ops:
+            _lit(buf, ',"key_ops":[')
+            ref ops = self._p.key_ops.value()
+            for i in range(len(ops)):
+                if i > 0:
+                    buf.append(0x2C)  # ','
+                write_json_string(buf, ops[i])
+            buf.append(0x5D)  # ']'
         if self._p.kid:
             _lit(buf, ',"kid":')
             write_json_string(buf, self._p.kid.value())

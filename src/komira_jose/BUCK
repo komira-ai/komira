@@ -1,0 +1,67 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# JSON Web Signature and JSON Web Token verification (RFC 7515, 7519) with
+# one pinned algorithm per verifier: ES256, EdDSA (Ed25519) or RS256. The
+# header gate refuses `none`, `HS*`, any other algorithm, `jwk`, `jku`,
+# `x5u`, `x5c` and `crit` before any key work; keys come from a
+# komira_jwks JWK Set and are selected by `kid`; `ClaimPolicy` pins one
+# issuer, one audience, one `typ`, the leeway and the longest lifetime.
+#
+# The welded tests:
+# - test_rfc_vectors: RFC 7515 appendix A.2 (RS256) and A.3 (ES256), RFC 8037
+#   appendix A.4 (EdDSA) and RFC 7520 section 4.1 (RS256 with a kid) verify
+#   byte for byte; RFC 7515 A.1 (HS256), A.4 (ES512) and A.5 (none) are
+#   refused with their exact reasons.
+# - test_wycheproof_jws: every vector of Wycheproof's JSON Web Signature
+#   corpus (//third_party/wycheproof, pinned by sha256) against verifiers
+#   pinned to each of ES256, EdDSA and RS256: exactly the ten valid ES256 and
+#   RS256 vectors verify, and only under their own algorithm.
+# - test_header_gate: each header refusal, its order, and the compact form.
+# - test_key_selection: kid selection and the key checks (type, alg, use,
+#   key_ops, length).
+# - test_claims: the policy's own checks and every claim refusal at its
+#   boundaries.
+# - test_no_product_vocabulary: the sources name no product concept and hold
+#   no early date (komira_test_vocabulary).
+mojo_library(
+    name = "komira_jose",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_json:komira_json",
+        "//src/komira_jwks:komira_jwks",
+        "//src/komira_secret_store:komira_secret_store",
+    ],
+    test_srcs = [
+        "tests/test_claims.mojo",
+        "tests/test_header_gate.mojo",
+        "tests/test_key_selection.mojo",
+        "tests/test_no_product_vocabulary.mojo",
+        "tests/test_rfc_vectors.mojo",
+        "tests/test_wycheproof_jws.mojo",
+    ],
+    test_deps = ["//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary"],
+    test_data = {
+        # The vocabulary test reads the library's own sources, staged at their
+        # repository paths.
+        "tests/test_no_product_vocabulary.mojo": glob(
+            ["**/*.mojo"],
+            exclude = ["tests/**/*.mojo"],
+        ),
+        "tests/test_wycheproof_jws.mojo": {
+            "wycheproof/json_web_signature_test.json": "//third_party/wycheproof:json_web_signature_test.json",
+        },
+    },
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)
