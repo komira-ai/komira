@@ -7,7 +7,7 @@
 #   (1) `from_actions_env` with both handshake variables SET builds a
 #       credential whose ID-token request goes to the variable's URL and
 #       carries the variable's token as a Bearer;
-#   (2) a request URL with no path (`https://host`) or no host
+#   (2) a request URL with no path (`https://host.test`) or no host
 #       (`https:///path`) is refused at construction;
 #   (3) the audience is percent-encoded into the ID-token query: RFC 3986
 #       unreserved bytes as is, every other byte (space, `/`, `:`, each byte
