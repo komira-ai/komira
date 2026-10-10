@@ -146,17 +146,20 @@
 // an author chooses, so it has no value here.
 //
 // METADATA (`Resource.physical_name` 6, `labels` 7, `adopt` 8) means the
-// same on every type that takes it. `physical_name` is the cloud name of
-// the resource's primary object; a `grant` (an edge: its objects are
-// bindings) and a `dns_record` (named by the DNS name and type it writes)
-// have no name of their own, so writing one there is refused. `adopt` takes
-// over the existing object of that name instead of refusing it as foreign.
-// `labels` are the author's, written beside kci's own; a key in kci's own
-// label space (`kci_*`, `kci-*`) is refused. A name or a label a cloud
-// refuses (a name too long or too short, a kind with no name of its own
-// there, one name on two objects of one kind there, more labels than an
-// object carries there) is refused as a limit
-// of that cloud when the graph is validated, before anything is created.
+// same on every type that takes it.
+// `physical_name` is the cloud name of the resource's primary object; a
+// `grant` (an edge: its objects are bindings) and a `dns_record` (named by
+// the DNS name and type it writes) have no name of their own, so writing one
+// there is refused. `adopt` (an `Adoption`) takes over the existing object of
+// that name instead of refusing it as foreign, once kci has read it and
+// found what the resource declares; kci never replaces an adopted object,
+// never deletes one unless `adopt` is ADOPT_DELETABLE, and releases it when
+// the resource leaves the list. `labels` are the author's, written beside kci's own; a key in
+// kci's own label space (`kci_*`, `kci-*`) is refused. A name or a label a
+// cloud refuses (a name too long or too short, a kind with no name of its
+// own there, one name on two objects of one kind there, more labels than an
+// object carries there) is refused as a limit of that cloud when the graph
+// is validated, before anything is created.
 //
 // RESERVED NOW, BUILT LATER (held numbers, not declared; each is an addition
 // when it lands): `Resource` 5 a typed per-cloud settings map, `Image` 4 an
@@ -195,6 +198,21 @@ import "kci/resource/v1/artifacts.proto";
 
 // ---- one entry of a deploy step's list ----------------------------------------
 
+// `Resource.adopt`: whether kci takes over an existing object, and whether
+// it may delete it. Any other value is refused when the graph is validated.
+enum Adoption {
+  // kci creates the object, and refuses an unstamped one of its name.
+  ADOPTION_UNSET = 0;
+  // Take over the object; never delete it (a destroy, or the resource no
+  // longer lowering it while it stays in the list, is refused before any
+  // change).
+  ADOPT = 1;
+  // Take over the object, and let kci delete it as it deletes its own
+  // (never replace it: a replace of an adopted object is refused at plan
+  // time at either value).
+  ADOPT_DELETABLE = 2;
+}
+
 message Resource {
   // Author-chosen and stable: the identity key for state.
   string id = 1;
@@ -227,13 +245,23 @@ message Resource {
   // starts with `kci_` or `kci-` (kci's identity labels and marks) is
   // refused.
   map<string, string> labels = 7;
-  // Take over the existing object named `physical_name` (which must be
-  // written): an object of that name that carries no kci stamp is stamped
-  // and recorded instead of being refused as foreign, and is then the
-  // resource's like any object kci created (the closed world and the
-  // resource's retention apply to it). With no such object, it is created.
-  // Without `adopt`, an unstamped object of that name refuses the apply.
-  bool adopt = 8;
+  // Whether kci takes over the existing object named `physical_name`
+  // (which must be written), and what it may do to it (`Adoption`). Before
+  // anything is planned, the object must exist and be what the resource
+  // declares (its kind, its name and every field of its shape the cloud can
+  // read); a missing or different object refuses the plan. The object is
+  // then stamped and recorded instead of being refused as foreign, and kci
+  // keeps it in step with the file like any of its own, by updates in place
+  // only: a plan that would replace it is refused before any change, at
+  // either value. kci did not create it, so when the resource leaves the
+  // list, kci RELEASES the object (drops its stamp and its record) and
+  // leaves it standing. Unset: an unstamped object of that name refuses the
+  // apply. Like every plain field it is written at its default (`40 00`);
+  // ADOPT is `40 01` and ADOPT_DELETABLE `40 02`.
+  Adoption adopt = 8;
+  // An earlier draft's deletable flag, which ADOPT_DELETABLE replaces.
+  reserved 9;
+  reserved "adopt_deletable";
 
   // Typed and closed. Held, not declared (see the file header): 17, 19
   // and 32 to 36 the later neutral primitives, 90 the escape hatch,
@@ -268,8 +296,8 @@ message Resource {
 // in a list or as a component of another definition. kci EXPANDS it into
 // its primitives (ids `<top>/<component>/...`, all OWNED by the top-level
 // resource) before validating; the engine never sees one. It has no object,
-// so `uses`, `retention`, `physical_name`, `labels` and `adopt` are refused
-// on it. `definition` and `version` name a given definition; `digest`, when
+// so `uses`, `retention`, `physical_name`, `labels` and `adopt` (the
+// `Adoption`) are refused on it. `definition` and `version` name a given definition; `digest`, when
 // written, must be `sha256:<hex>` of its bytes as this kci encodes them.
 // Each input is bound by name, in the map of its type: `input` a STRING,
 // INT or BOOL input (a `Value`: a literal of the type, or inside a definition

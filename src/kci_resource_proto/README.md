@@ -7,7 +7,8 @@ Mojo structs generated from them: what an author writes in a deploy step.
 A `ResourceList` holds `Resource` entries; each has an author-chosen `id`,
 the other resources it `uses` (a `Ref` plus an `Access`), a `retention`, its
 metadata (`physical_name`, the cloud name of its primary object; `labels`,
-the author's own; `adopt`, take over an existing object of that name), and
+the author's own; `adopt`, an `Adoption`: take over an existing object of
+that name (`ADOPT`), and let kci delete it too (`ADOPT_DELETABLE`)), and
 one `body` arm. Version 1 declares twenty primitives as body arms:
 `service` (10), `container_job` (11), `worker` (12), `table` (13), `bucket`
 (14), `queue` (15), `secret` (16), `dns_zone` (18), `service_account` (20),
@@ -44,7 +45,7 @@ and `SourceEvent` in `tests/test_resource_trigger_numbers.mojo`, the network,
 the subnet, the IP address and `Service.network` in
 `tests/test_resource_network_numbers.mojo`, the registry and
 `ArtifactFormat` in `tests/test_resource_registry_numbers.mojo`,
-`Resource.physical_name`, `labels` and `adopt` in
+`Resource.physical_name`, `labels`, `adopt`, `Adoption` and the reserved 9 in
 `tests/test_resource_metadata_numbers.mojo`, and the bases of `Ref`,
 `Value.input`, `CompositeInstance` and the messages of `composite.proto` in
 `tests/test_resource_composite_numbers.mojo`, and `Binding`, `Presence`,
@@ -197,22 +198,24 @@ assert_equal(back.registry.value().format.value, ArtifactFormat.OCI)
 ```
 
 Every resource may carry metadata: the cloud name of its primary object
-(`physical_name`, with presence), the author's labels (a map), and `adopt`
-(take over an existing object of that name):
+(`physical_name`, with presence), the author's labels (a map) and `adopt`
+(an `Adoption`: `ADOPT` takes over an existing object of that name,
+`ADOPT_DELETABLE` also lets kci delete it; kci never replaces an adopted
+object):
 
 ```mojo
-from kci_resource_proto.resource import Resource
+from kci_resource_proto.resource import Adoption, Resource
 from komira_proto_codec import decode_json, decode_proto, encode_proto
-from std.testing import assert_equal, assert_true
+from std.testing import assert_equal
 
 var r = decode_json[Resource](
     String('{"id":"logs","physicalName":"acme-logs","labels":{"team":"data"},')
-    + '"adopt":true,"bucket":{}}'
+    + '"adopt":"ADOPT_DELETABLE","bucket":{}}'
 )
 var back = decode_proto[Resource](encode_proto(r))
 assert_equal(back.physical_name.value(), "acme-logs")
 assert_equal(back.labels["team"], "data")
-assert_true(back.adopt)
+assert_equal(back.adopt.value, Adoption.ADOPT_DELETABLE)
 ```
 
 A composite definition is data. Its components are resources with ids local

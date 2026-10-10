@@ -567,7 +567,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
     def adopt_owned(
         mut self, stamp: OwnerStamp, physical_id: String, creds: Creds
     ) raises:
-        """FORWARDED to the concrete R (the explicit `--adopt` takeover).
+        """FORWARDED to the concrete R (the explicit `adopt` takeover).
         SAFETY: see `read_status`."""
         var p = self._erased_home()
         self._vtable.adopt_owned_fn(p, stamp, physical_id, creds)

@@ -30,10 +30,12 @@
 #    cloud name, and a name written on an object created without one, are
 #    refused by plan, apply and destroy before any change, and the original
 #    name still destroys.
-# 5. ADOPT: an unstamped object at the bucket's node refuses the apply
-#    without `adopt` (nothing changes); with `adopt` the apply stamps it (an
-#    update, never a create), `list_owned` then reports it as kci's, and a
-#    re-apply is a no-op; a destroy of the adopted bucket (written DELETE)
+# 5. ADOPT: an unstamped object at the bucket's node (the bucket the file
+#    declares, test_fake_adoption.mojo says why it must be) refuses the
+#    apply without `adopt` (nothing changes); with `adopt` the apply stamps
+#    it (an update, never a create), `list_owned` then reports it as kci's,
+#    and a re-apply is a no-op; a destroy of the adopted bucket (written
+#    DELETE) is refused unless the bucket writes `adopt` ADOPT_DELETABLE, and then
 #    deletes it like any object of the resource. A destroy never adopts: an
 #    unstamped object refuses it, `adopt` or not.
 # 6. EACH SHAPE'S METADATA LIMITS, as data: the label cap (aws 50 tags, kci
@@ -90,6 +92,7 @@ from kci_cloud import (
     GrantEdge,
     LoweredNode,
     OwnedRecord,
+    ExistingObject,
     Principal,
     Setting,
     apply_resources,
@@ -130,18 +133,22 @@ def _graph(
     reads: Bool = True,
     arg: String = String("--all"),
     adopt: Bool = False,
+    deletable: Bool = False,
 ) -> String:
     """The graph of the file header. `retention` is the bucket's written
     retention (empty: unset); `name` its cloud name (empty: unset); `tier`
     its second label; `team` the job's label; `reads` keeps the job's READ
-    line; `arg` is its one arg; `adopt` takes the bucket over."""
+    line; `arg` is its one arg; `adopt` takes the bucket over (ADOPT), and
+    `deletable` lets kci delete it too (ADOPT_DELETABLE)."""
     var head = String('{"id":"logs",')
     if retention.byte_length() > 0:
         head += String('"retention":"') + retention + String('",')
     if name.byte_length() > 0:
         head += String('"physicalName":"') + name + String('",')
-    if adopt:
-        head += String('"adopt":true,')
+    if deletable:
+        head += String('"adopt":"ADOPT_DELETABLE",')
+    elif adopt:
+        head += String('"adopt":"ADOPT",')
     var uses = String('"uses":[{"target":{"resource":"logs"},"access":"READ"}],') if reads else String("")
     return (
         String('{"resource":[')
@@ -449,12 +456,16 @@ def test_adopt_takes_over_the_named_object() raises:
     refused as foreign), `adopt` not reaching the engine (the apply is
     refused anyway), an adopted object re-created instead of stamped, an
     adopted object not listed as kci's afterwards, a re-apply that is not a
-    no-op, an adopted object a destroy does not delete at its written
-    retention, and a destroy that adopts (it would delete an object kci
+    no-op, an adopted object a destroy deletes without ADOPT_DELETABLE or
+    does not delete at its written retention with it, and a destroy that
+    adopts (it would delete an object kci
     never took over)."""
     var reg = _reg()
     var cloud = FakeCloud()
-    cloud.plant_foreign(String("logs/bucket"))
+    var declared = lower_data(cloud, _list(_graph(retention=String("DELETE"), adopt=True)))
+    for i in range(len(declared)):
+        if declared[i].id == "logs/bucket":
+            cloud.plant_like(declared[i])
     var st = InMemoryStateStore()
     var before = cloud.mutations()
     var refused = apply_resources(reg, cloud, _ctx(), _list(_graph(retention=String("DELETE"))), Creds.none(), st)
@@ -487,8 +498,17 @@ def test_adopt_takes_over_the_named_object() raises:
     )
     for i in range(len(again)):
         assert_equal(again[i].verb, VERB_NOOP, again[i].logical_id + String(": a re-apply is a no-op"))
-    _ = destroy_resources(reg, cloud, _ctx(), _list(_graph(retention=String("DELETE"), adopt=True)), Creds.none(), st)
-    assert_equal(cloud.live_count(), 0, "the adopted bucket is the resource's: destroy deletes it at DELETE")
+    var kept = False
+    try:
+        _ = destroy_resources(reg, cloud, _ctx(), _list(_graph(retention=String("DELETE"), adopt=True)), Creds.none(), st)
+    except e:
+        kept = String(e).find("ADOPT_DELETABLE") >= 0
+    assert_true(kept, "kci did not create the bucket: a destroy without ADOPT_DELETABLE is refused")
+    assert_true(cloud.store[].find(String("logs/bucket")) >= 0, "the adopted bucket is still there")
+    _ = destroy_resources(
+        reg, cloud, _ctx(), _list(_graph(retention=String("DELETE"), adopt=True, deletable=True)), Creds.none(), st
+    )
+    assert_equal(cloud.live_count(), 0, "with ADOPT_DELETABLE, destroy deletes the adopted bucket at DELETE")
     print("  test_adopt_takes_over_the_named_object: PASS")
 
 
@@ -690,6 +710,12 @@ struct _Cheat(CloudAdapter, Movable):
 
     def list_owned(mut self, creds: Creds, scope: CellScope) raises -> List[OwnedRecord]:
         return self.inner.list_owned(creds, scope)
+
+    def read_existing(mut self, creds: Creds, node: LoweredNode) raises -> ExistingObject:
+        return self.inner.read_existing(creds, node)
+
+    def release(mut self, creds: Creds, record: OwnedRecord) raises:
+        self.inner.release(creds, record)
 
     def whoami(mut self, creds: Creds) raises -> Principal:
         return self.inner.whoami(creds)

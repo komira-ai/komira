@@ -304,7 +304,7 @@ struct Loader(Movable):
             self.add(where, prefix + String("uses"), String("an instance has no identity of its own: a component of its definition uses"))
         if c.retention.value != 0:
             self.add(where, prefix + String("retention"), String("an instance has no object of its own: each component of its definition sets its retention"))
-        if c.physical_name or len(c.labels) > 0 or c.adopt:
+        if c.physical_name or len(c.labels) > 0 or c.adopt.value != 0:
             self.add(where, prefix + String("composite"), String("an instance has no object of its own: physical_name, labels and adopt are written on the components of its definition"))
         var d = self.find_def(ci.definition, ci.version)
         if d < 0:

@@ -73,7 +73,7 @@
 #     destroy never deletes one;
 #   * the write-ahead intent carries the identity, and a create is
 #     `create_owned(stamp)`: the object is born stamped, in the same call;
-#   * `--adopt <id>` (`CellScope.adopt`) stamps an unstamped object of a wanted
+#   * a resource's `adopt` (in `CellScope.adopt`) stamps an unstamped object of a wanted
 #     name and records it, instead of refusing it.
 # In either scope, a node the file no longer wants (`Resource.wanted` False, the
 # closed world) is deleted when the store recorded it (and, owned,

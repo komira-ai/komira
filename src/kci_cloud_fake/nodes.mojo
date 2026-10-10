@@ -45,7 +45,10 @@
 # fields), not the kind, decide what it exposes. On aws a queue also has a
 # `<id>/policy`; on gcp a queue has its private `<id>/topic`, which
 # addresses nothing.
-# A role the file turned off is the same node with `wanted` False.
+# A role the file turned off is the same node with `wanted` False. A node
+# whose object the store marks replace-only (`FakeStore.replace_only`) plans
+# a drift as a replace and converges by replacing (which the engine refuses
+# in v1), never by an update.
 #
 # A NAMED PRIMARY OBJECT (`physical_name`, a desired field kci writes on the
 # primary node) is part of the digest like any field, and its outputs follow
@@ -67,7 +70,9 @@
 # standard label rule's labels, the `kci-run-id` label when the scope has a
 # validation run, the retention mark; and the provenance annotation, in the
 # one create call). An adoption writes the identity and retention labels, and
-# never a validation run: the run did not create the object. A node reads its
+# never a validation run: the run did not create the object; on a node kci
+# marked `adopted` (the primary node of a resource that writes `adopt`) it
+# also writes the adoption mark `kci_adopted=true`. A node reads its
 # stamp back from the labels, reports an out-of-band value on an unmodelled
 # field as an unmanaged difference, and never puts provenance in its digest.
 # =============================================================================
@@ -86,16 +91,19 @@ from kci_reconciler import (
     ResolvedInputs,
     ResourceStatus,
     CONVERGE_IN_PLACE,
+    CONVERGE_REPLACE,
     RES_ABSENT,
     RES_FAILED,
     RETAIN_KEEP,
     VERB_CREATE,
     VERB_NOOP,
+    VERB_REPLACE,
     VERB_UPDATE,
     unbound_error,
 )
 from kci_cloud import (
     LoweredNode,
+    adoption_labels,
     create_labels,
     retain_labels,
     standard_identity_of,
@@ -216,6 +224,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
     var _bound: List[String]
     var _is_bound: Bool
     var _wanted: Bool
+    var _adopted: Bool
 
     def __init__(out self, store: ArcPointer[FakeStore], node: LoweredNode) raises:
         self._store = store.copy()
@@ -242,6 +251,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         self._bound = List[String]()
         self._is_bound = len(self._refs) == 0
         self._wanted = node.wanted
+        self._adopted = node.adopted
 
     def _desired_digest(self) raises -> String:
         if not self._is_bound:
@@ -284,6 +294,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         return self._retention
 
     def read_status(mut self, creds: Creds) raises -> ResourceStatus:
+        self._store[].read_fault(self._id)
         var v = self._store[].read(self._id)
         if not v.present:
             return ResourceStatus.absent()
@@ -310,6 +321,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         return ResourceStatus.drifted(self._id, v.digest, v.url, String(""), stamp, extra)
 
     def read_presence(mut self, creds: Creds) raises -> ResourceStatus:
+        self._store[].read_fault(self._id)
         var v = self._store[].read(self._id)
         if not v.present:
             return ResourceStatus.absent()
@@ -318,7 +330,11 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         )
 
     def plan(mut self, live: ResourceStatus) raises -> ChangeAction:
-        return _plan(self._id, live, self._retention)
+        var action = _plan(self._id, live, self._retention)
+        if action.verb == VERB_UPDATE and self._store[].replaced_only(self._id):
+            action.verb = VERB_REPLACE
+            action.reason = String("drifted on a field the cloud cannot change in place -> replace")
+        return action^
 
     def create(mut self, creds: Creds) raises -> String:
         self._store[].create(
@@ -349,6 +365,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         # No validation-run label: this run did not create the object.
         var labels = standard_label_rule(stamp)
         labels.extend(retain_labels(self._retention))
+        labels.extend(adoption_labels(self._adopted))
         self._store[].relabel(physical_id, labels, note, self._name)
 
     def update(mut self, creds: Creds) raises:
@@ -359,6 +376,8 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         self._store[].remove(physical_id)
 
     def converge_mode(mut self, live: ResourceStatus) raises -> Int:
+        if self._store[].replaced_only(self._id):
+            return CONVERGE_REPLACE
         return CONVERGE_IN_PLACE
 
     def input_refs(mut self) -> List[InputRef]:

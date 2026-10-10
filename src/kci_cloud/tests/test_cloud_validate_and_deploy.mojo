@@ -32,11 +32,8 @@
 # 11. THE REST OF THE ADAPTER INTERFACE: bootstrap resources, whoami, the
 #    trust pair, the artifact a resource needs, list_owned, and the standard
 #    label rule (encoded exactly, refused rather than rewritten).
-# 12. THE LABEL RULE WRITES `/` AS `_`: one byte per separator, decoded
-#    exactly; a value holding `_` is refused (it would decode as a `/`); the
-#    63/64-byte boundary.
-# 13. DEPTH-N IDS: a node `top/a/b/c/run` is owned by `top` and stamped with
-#    role `a/b/c/run`, written `a_b_c_run`, and the stamp round-trips.
+# 12. and 13. (the label rule's `/` and depth-N ids) are in
+#    test_cloud_label_role_encoding.mojo.
 # 14. THE ROLE LABEL BUDGET IS CHECKED BEFORE APPLY: a lowered node whose
 #    encoded role is over 63 bytes refuses the whole graph with a GRAPH
 #    finding naming the node, its byte count and its segment lengths, before
@@ -79,6 +76,7 @@ from kci_cloud import (
     Finding,
     LoweredNode,
     OwnedRecord,
+    ExistingObject,
     Principal,
     RUN_UNKNOWN,
     Setting,
@@ -88,7 +86,6 @@ from kci_cloud import (
     label_problems,
     lower_data,
     lowering_json,
-    owner_of_node,
     role_budget_findings,
     standard_identity_of,
     standard_label_rule,
@@ -406,6 +403,12 @@ struct _Stub(CloudAdapter, Movable):
                 )
             )
         return l^
+
+    def read_existing(mut self, creds: Creds, node: LoweredNode) raises -> ExistingObject:
+        return ExistingObject()  # nothing stands anywhere: these tests adopt nothing
+
+    def release(mut self, creds: Creds, record: OwnedRecord) raises:
+        raise Error("stub: these tests release nothing")
 
     def whoami(mut self, creds: Creds) raises -> Principal:
         return Principal(creds.token.copy(), String("stub-account"))
@@ -855,7 +858,7 @@ def test_the_adapter_interface_and_the_label_rule() raises:
     print("  test_the_adapter_interface_and_the_label_rule: PASS")
 
 
-# ---- 12. the label rule writes `/` as `_` -------------------------------------------
+# ---- 14. the role label budget, before apply ------------------------------------------
 
 
 def _repeat(c: String, n: Int) -> String:
@@ -863,78 +866,6 @@ def _repeat(c: String, n: Int) -> String:
     for _ in range(n):
         s += c
     return s^
-
-
-def _raises_encoding(v: String, why: String) raises -> String:
-    try:
-        _ = encode_label_value(v)
-    except e:
-        return String(e)
-    raise Error(String("not refused: ") + why)
-
-
-def test_the_label_rule_writes_slash_as_underscore() raises:
-    assert_equal(encode_label_value(String("a/b/c/run")), "a_b_c_run")
-    assert_equal(decode_label_value(String("a_b_c_run")), "a/b/c/run")
-    assert_equal(encode_label_value(String("run")), "run", "no separator, unchanged")
-    assert_equal(encode_label_value(String("a-b/c-d")), "a-b_c-d", "a single '-' is kept")
-    # A raw `_` would decode as a `/`: two different roles would read as one.
-    var e = _raises_encoding(String("a_b"), "a value holding '_'")
-    assert_true(_has(e, "'_'"), e)
-    _ = _raises_encoding(String("x/a_b"), "a segment holding '_'")
-    # The boundary: 63 bytes encoded is written, 64 is refused (never cut).
-    var r63 = _repeat(String("a"), 31) + String("/") + _repeat(String("b"), 31)
-    assert_equal(encode_label_value(r63).byte_length(), 63)
-    var r64 = r63 + String("c")
-    var e64 = _raises_encoding(r64, "a 64-byte value")
-    assert_true(_has(e64, "64 bytes encoded; at most 63"), e64)
-    print("  test_the_label_rule_writes_slash_as_underscore: PASS")
-
-
-# ---- 13. depth-N ids -------------------------------------------------------------
-
-
-def _label_value(labels: List[Label], key: String) -> String:
-    for i in range(len(labels)):
-        if labels[i].key == key:
-            return labels[i].value.copy()
-    return String("")
-
-
-def test_depth_n_ids_round_trip_the_owner_and_the_stamp() raises:
-    var scope = _ctx().scope.copy()
-    var stamp = scope.stamp(String("top"), String("top/a/b/c/run"))
-    assert_equal(stamp.resource, "top", "the owner is the first segment")
-    assert_equal(stamp.role, "a/b/c/run", "the role is the rest of the node id")
-    var labels = standard_label_rule(stamp)
-    assert_equal(_label_value(labels, String("kci_resource")), "top")
-    assert_equal(_label_value(labels, String("kci_role")), "a_b_c_run")
-    assert_equal(len(label_problems(labels)), 0)
-    assert_equal(standard_identity_of(labels), stamp.identity(), "the stamp round-trips")
-    assert_equal(owner_of_node(String("top/a/b/c/run")), "top", "the owner at depth 3")
-    assert_equal(owner_of_node(String("top/run")), "top", "the owner at depth 0")
-    print("  test_depth_n_ids_round_trip_the_owner_and_the_stamp: PASS")
-
-
-def test_a_double_dash_role_label_is_never_an_owner() raises:
-    """`--` was once the separator written for `/`. It was never deployed, so
-    there is no compatibility: a role value written that way is an ordinary
-    value that holds `--`, and no node's identity."""
-    var scope = _ctx().scope.copy()
-    var want = scope.stamp(String("uses"), String("uses/jobs"))
-    var labels = standard_label_rule(want)
-    for i in range(len(labels)):
-        if labels[i].key == "kci_role":
-            labels[i] = Label(String("kci_role"), String("jobs--run"))
-    assert_equal(decode_label_value(String("uses--jobs")), "uses--jobs", "no '/' is made of '--'")
-    var got = standard_identity_of(labels)
-    assert_true(got.byte_length() > 0, "a complete stamp still reads")
-    assert_true(got != want.identity(), "it is not the node it resembles")
-    assert_true(not _has(got, "jobs/run"), "its role is never split into segments")
-    print("  test_a_double_dash_role_label_is_never_an_owner: PASS")
-
-
-# ---- 14. the role label budget, before apply ------------------------------------------
 
 
 def _one_service() -> String:
@@ -1002,8 +933,5 @@ def main() raises:
     test_lowering_is_data_and_golden()
     test_the_cell_is_configured_and_validated_first()
     test_the_adapter_interface_and_the_label_rule()
-    test_the_label_rule_writes_slash_as_underscore()
-    test_depth_n_ids_round_trip_the_owner_and_the_stamp()
-    test_a_double_dash_role_label_is_never_an_owner()
     test_a_role_over_the_label_budget_is_refused_before_apply()
     print("ALL kci_cloud VALIDATE AND DEPLOY TESTS PASSED")

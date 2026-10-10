@@ -52,6 +52,8 @@ mojo_library(
         "tests/test_fake_network.mojo",
         "tests/test_fake_registry.mojo",
         "tests/test_fake_metadata.mojo",
+        "tests/test_fake_adoption.mojo",
+        "tests/test_fake_adoption_release.mojo",
         "tests/test_fake_table.mojo",
         "tests/test_fake_validation_run_tag.mojo",
         "tests/test_fake_composite.mojo",
