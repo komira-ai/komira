@@ -112,6 +112,15 @@ interface. This package names no cloud:
                        findings, collected in one pass; on a graph with
                        no other finding, the role label budget over the
                        cloud's lowering; the refusal text.
+  * cycles.mojo      — the graph finding for a reference cycle between
+                       resources (two services each reading the other's
+                       URL), which no order can create.
+  * refusal.mojo     — the typed refusal (`Refusal`): a refused run as a
+                       value carrying its findings, so a caller tells a
+                       refusal from a failed read without reading text.
+  * outcome.mojo     — `ApplyOutcome`: what an apply did, whether or not
+                       it finished, with the engine's refusal and a failed
+                       release typed apart from an engine error.
   * deploy.mojo      — plan / apply / destroy in a cell: configure and
                        validate first, lower to data with the lowering
                        contract checked (`lowering_json` for golden tests),
@@ -244,6 +253,7 @@ from kci_cloud.adapter import (
     FINDING_LIMIT,
     FINDING_CELL,
     FINDING_ADOPTION,
+    FINDING_OWNERSHIP,
     absence_word,
 )
 from kci_cloud.data import (
@@ -389,8 +399,10 @@ from kci_cloud.validate import (
     lowered_budget_findings,
     role_budget_findings,
 )
+from kci_cloud.cycles import reference_cycle_findings
+from kci_cloud.refusal import Refusal, engine_refusal, graph_refusal
+from kci_cloud.outcome import ApplyOutcome
 from kci_cloud.deploy import (
-    ApplyOutcome,
     Removals,
     engine_retention,
     refuse_unless_valid,
