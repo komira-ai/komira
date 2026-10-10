@@ -30,7 +30,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 # names the mutant planted to see it go red):
 #   test_layout      every size, offset and constant of both headers equals
 #                    the Mojo mirror's (a field or number changed on one
-#                    side; a table entry appended without a probe row).
+#                    side; a table entry appended without a probe row), and
+#                    the probe answers NULL and -1 just outside its rows.
 #   test_wire        header round trip and refusals; every table entry has
 #                    exactly one request op and the reverse (an op or entry
 #                    added on one side only).
@@ -80,6 +81,7 @@ mojo_library(
         "tests/test_conform_echo.mojo": _CASES | {"echo.so": ":echo"},
         "tests/test_conform_runner.mojo": _RUNNER_CASES | {"echo.so": ":echo"},
         "tests/test_harness.mojo": {
+            "src/tests/helpers/komira_udf_spike_abi/tests/data/malformed/bad.json": "tests/data/malformed/bad.json",
             "echo.so": ":echo",
             "echo_global_lock.so": ":echo_global_lock",
             "echo_variant.so": ":echo_variant",

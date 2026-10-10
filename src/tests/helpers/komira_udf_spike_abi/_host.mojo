@@ -12,7 +12,7 @@
 #     after shutdown returns, never by a release callback. So a runtime that
 #     releases late, twice, or after close is counted, not a use after free.
 #   - _HostData: one zeroed block per UdfRuntime (host.host_data), freed with
-#     the arena. Every release callback reaches it through its record and
+#     the arena; init_refusal's second host shares it. Every release callback reaches it through its record and
 #     counts there (single-threaded: the harness calls from one thread).
 #   - exported arrays (`args`, `states`, `group_ids`, stream batches): moved
 #     to the runtime, which calls `release` once; _release_array counts the
@@ -75,7 +75,6 @@ struct _HostData:
     var streams_exported: Int
     var streams_released: Int
     var reserved_bytes: Int
-    var log_lines: Int
     var cancel_on_clock: Void
     """The cancel flag of the call in flight when it was started with
     cancel_during_call, else NULL: now_ns sets it (arm_cancel_on_clock)."""
@@ -175,16 +174,26 @@ def _host_now_ns(host_data: Void) abi("C") -> Int64:
 
 
 def _host_log(host_data: Void, level: Int32, utf8: Void) abi("C"):
-    _hd(host_data)[].log_lines += 1
+    # A runtime's log line: the spike has no log to write it to, and no check
+    # reads it.
+    return
 
 
-def make_host(mut arena: _Arena, abi_major: UInt32) -> Word:
-    """A komira_udf_host claiming `abi_major`, with a fresh _HostData.
+def new_host_data(mut arena: _Arena) -> Word:
+    """A fresh, zeroed _HostData: the counts one ledger keeps."""
+    return Word(arena.bytes(size_of[_HostData]()))
 
-    # SAFETY: both blocks are zeroed arena blocks of their struct's size; the
-    # fields are plain words written in place.
+
+def make_host(mut arena: _Arena, abi_major: UInt32, hd_w: Word) -> Word:
+    """A komira_udf_host claiming `abi_major`, counting into `hd_w` (from
+    new_host_data, or another host's host_data_of: two hosts sharing one
+    ledger).
+
+    # SAFETY: the host block is a zeroed arena block of its struct's size, and
+    # `hd_w` a _HostData block of the same arena; the fields are plain words
+    # written in place.
     """
-    var hd = arena.bytes(size_of[_HostData]())
+    var hd = hd_w.p
     var h = arena.bytes(size_of[CUdfHost]()).bitcast[CUdfHost]()
     h[].struct_size = size_of[CUdfHost]()
     h[].abi_major = abi_major

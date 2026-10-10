@@ -26,14 +26,17 @@
 # the PROPAGATE scatter's validity forced, the agg_state and agg_finish
 # lengths not checked, each import and ownership check weakened) are listed
 # with the case each one turned red in the pull request's sweep table; each
-# case's "defect" names what it catches.
+# case's "defect" names what it catches. A scripted sweep of every
+# single-point mutant of runtime.mojo, _host.mojo, conform.mojo and the
+# native C helpers supersedes that table as evidence: its scorecard and every
+# survivor, with the reason no test can kill it, are in the pull request.
 
 from std.testing import assert_equal
 
 from komira_udf_spike_abi.conform import load_cases, run_suite
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
-comptime CASE_COUNT = 85
+comptime CASE_COUNT = 107
 """The JSON files under cases/: an empty or partial staging cannot pass."""
 
 

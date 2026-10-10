@@ -34,7 +34,8 @@ enum variant_id {
   V_CLASS_3,
   V_BAD_ID,                 /* a runtime id with upper case */
   V_FEATURE_WITHOUT_ENTRY,  /* MEMORY_REPORT set, memory_report NULL */
-  V_ENTRY_WITHOUT_FEATURE   /* memory_report set, MEMORY_REPORT clear */
+  V_ENTRY_WITHOUT_FEATURE,  /* memory_report set, MEMORY_REPORT clear */
+  V_ERROR_ON_OK_INIT        /* init fills the error, then returns its table, for a host of any major */
 };
 
 static const struct {
@@ -61,6 +62,7 @@ static const struct {
     {"bad_id", V_BAD_ID},
     {"feature_without_entry", V_FEATURE_WITHOUT_ENTRY},
     {"entry_without_feature", V_ENTRY_WITHOUT_FEATURE},
+    {"error_on_ok_init", V_ERROR_ON_OK_INIT},
 };
 
 static const komira_udf_runtime TABLE_MAJOR_2 = {
@@ -144,9 +146,11 @@ const komira_udf_runtime* ECHO_INIT_VARIANT(const komira_udf_host* host, komira_
     fail(host, e, KOMIRA_UDF_ERR_INTERNAL, "KOMIRA_UDF_ECHO_VARIANT names no variant", -1);
     return NULL;
   }
-  komira_udf_rt* r = new_rt(host, e, 0, id == V_ANY_MAJOR);
+  komira_udf_rt* r = new_rt(host, e, 0, id == V_ANY_MAJOR || id == V_ERROR_ON_OK_INIT);
   if (r == NULL) return NULL;
   r->variant = id;
+  if (id == V_ERROR_ON_OK_INIT) /* the host releases an error filled on success too */
+    fail(host, e, KOMIRA_UDF_ERR_INTERNAL, "error_on_ok_init: filled, then the table returned", -1);
   *rt = r;
   switch (id) {
     case V_TABLE_MAJOR_2:

@@ -1,0 +1,11 @@
+{
+ "name": "fault_output_data_null_one_row",
+ "defect": "a one-row output with no data buffer is read (design 4.4: n_buffers per format; a row needs its buffer)",
+ "run": "call_batch",
+ "entry": "leaf_data_null",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 1, "columns": [{"type": "int64", "values": [1]}]},
+ "expect": {"status": "OK", "run_error": "UDF_RUNTIME_FAULT", "fault": "data buffer is NULL"}
+}

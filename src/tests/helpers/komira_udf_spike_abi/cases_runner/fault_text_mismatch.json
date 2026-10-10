@@ -1,6 +1,6 @@
 {
- "name": "fault_table_dictionary",
- "defect": "a table output carrying a dictionary its struct type does not have is read (design 4.4: a dictionary exactly where the type has one)",
+ "name": "fault_text_mismatch",
+ "defect": "a deliberate mismatch: the runner must fail this case",
  "run": "frame",
  "entry": "table_dictionary",
  "shape": "MAP_BATCHES_FRAME",
@@ -8,5 +8,6 @@
  "result": [{"type": "int64", "nullable": true}],
  "result_is_table": true,
  "inputs": [{"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]}],
- "expect": {"status": "OK", "run_error": "UDF_RUNTIME_FAULT", "fault": "struct layout: a dictionary"}
+ "expect": {"status": "OK", "run_error": "UDF_RUNTIME_FAULT", "fault": "struct layout: n_buffers"},
+ "runner_fails_with": "does not contain the expected 'struct layout: n_buffers'"
 }

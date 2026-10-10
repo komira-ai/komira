@@ -7,8 +7,9 @@
 # and group, and `fault`, a post-condition the host found broken (a layout
 # that fails import validation, a wrong length, a null in a non-nullable
 # result, an input not moved whatever the status (then released here,
-# once), `out` set on failure, a frame that does not end). run_error() maps
-# either to the run's named error through one table (contract.run_error).
+# once), `out` set on failure, an error row outside the batch, a frame that
+# does not end). run_error() maps either to the run's named error through
+# one table (contract.run_error).
 #
 # Handles are opaque: a Handle holds the runtime's pointer as a Word, which
 # this file cannot read through, and its kind; it is passed back only to the
@@ -30,6 +31,7 @@ from ._host import (
     import_struct,
     make_host,
     new_error,
+    new_host_data,
     pulls_of,
     release_out,
     release_stream,
@@ -285,7 +287,7 @@ struct UdfRuntime(Movable):
         runtime with a global lock may not declare that mode)."""
         var arena = _Arena()
         var lib = open_library(path)
-        var host = make_host(arena, abi_major)
+        var host = make_host(arena, abi_major, new_host_data(arena))
         var slot = arena.word(8)
         var err = new_error(arena)
         var t = init_runtime(lib, host, slot, err)
@@ -312,8 +314,10 @@ struct UdfRuntime(Movable):
 
     def init_refusal(mut self, abi_major: UInt32) -> Outcome:
         """Call init again with a host claiming `abi_major`: a runtime of
-        another major must return NULL with ERR_ABI and create nothing."""
-        var host = make_host(self._arena, abi_major)
+        another major must return NULL with ERR_ABI and create nothing. The
+        second host counts into this runtime's ledger, so what that init
+        reserves (an error's strings) shows in ledger()."""
+        var host = make_host(self._arena, abi_major, host_data_of(self._host))
         var slot = self._arena.word(8)
         var err = new_error(self._arena)
         var t = init_runtime(self._lib, host, slot, err)
@@ -423,7 +427,8 @@ struct UdfRuntime(Movable):
         """One call_batch. Under PROPAGATE the host drops every row with a null
         argument before the call and scatters nulls back after it (design
         section 3.4 rule 2); an error's row, a row of the compacted batch the
-        runtime saw, is mapped back to the caller's row."""
+        runtime saw, is mapped back to the caller's row. A row outside that
+        batch is a fault (_call_batch) and is not mapped."""
         _need(inst, KIND_INSTANCE)
         if spec.null_mode != NULL_PROPAGATE:
             return self._call_batch(inst, spec, args, opts)
@@ -467,6 +472,15 @@ struct UdfRuntime(Movable):
         var rc = t_call_batch(self._table, inst._w, c.call, d_args, d_out, err)
         self._end(c)
         var res = self._finish_column(rc, err, d_out, spec.result[0], args.length)
+        var row = res.outcome.row
+        if row < -1 or row >= Int64(args.length):
+            # The error's row is "row in the batch when known; -1 otherwise"
+            # (design 4.3, komira_udf_error): any other value is a runtime
+            # bug, never a row of user code to report (4.5, ERR_INTERNAL).
+            res.outcome.fault = (
+                "UDF_RUNTIME_FAULT: error row " + String(row) + " is outside the batch of "
+                + String(args.length) + " rows"
+            )
         if not array_released(d_args):
             # Not moved, so still the host's: released here, once, and a
             # fault whatever the status (design section 4.4: moved on entry,

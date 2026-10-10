@@ -1,0 +1,12 @@
+{
+ "name": "scalar_nulls_propagate_mixed_types",
+ "defect": "under PROPAGATE the compacted batch gives every column the first column's type, or the argument schema gives every field the first field's type (design 3.4 rule 2; 4.4: the arrays match the bound schema)",
+ "run": "call_batch",
+ "entry": "add_mixed",
+ "shape": "SCALAR",
+ "null_mode": "PROPAGATE",
+ "args": [{"type": "int64", "nullable": true}, {"type": "int32", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 4, "columns": [{"type": "int64", "values": [1, 2, null, 4]}, {"type": "int32", "values": [10, null, 30, 40]}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [11, null, null, 44]}}
+}

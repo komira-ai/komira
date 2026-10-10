@@ -130,6 +130,8 @@ def _check(got: Outcome, e: Expect, at_call: Bool = True) -> String:
         return "run error " + got.run_error(at_call) + " (" + String(got) + "), expected " + e.run_error
     if e.run_error == "" and got.fault != "":
         return "host fault: " + got.fault
+    if e.fault not in got.fault:
+        return "fault '" + got.fault + "' does not contain the expected '" + e.fault + "'"
     if e.row != -2 and got.row != e.row:
         return "error row " + String(got.row) + ", expected " + String(e.row)
     if e.row_at_least != -2 and got.row < e.row_at_least:

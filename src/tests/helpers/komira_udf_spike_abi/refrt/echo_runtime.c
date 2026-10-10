@@ -11,11 +11,15 @@
  * interpreter would, and has none, so of the two hosting values it reports
  * EMBEDDED (it needs nothing from the process that loads it).
  *
- * Memory accounting (design section 4.8): every output array and every
- * error's strings are reserved through host->mem_reserve when built and
- * returned through host->mem_release when released. So a host that never
- * releases an output or an error leaves its reservation count above zero,
- * which the conformance runner's ledger reports.
+ * Memory accounting (design section 4.8): every output array, every
+ * error's strings and every handle (runtime, UDF, context, instance, groups,
+ * frame) are reserved through host->mem_reserve when built and returned
+ * through host->mem_release when released or closed. So a host that never
+ * releases an output or an error, or never closes a handle, leaves its
+ * reservation count above zero, which the conformance runner's ledger
+ * reports. A host that breaks a rule echo can see only after the call
+ * returns (a release that leaves its slot set) is charged one byte that is
+ * never returned, which the ledger reports too.
  *
  * One translation unit in four files: this one (fixtures, handles, errors,
  * inputs and outputs, validate and load, the table and the inits) includes
@@ -109,13 +113,34 @@ enum fixture_id {
   F_RELEASE_SCHEMA,
   F_LEAK_RESERVATION,
   F_RAISE_NO_MESSAGE,
-  F_ERROR_ON_OK
+  F_ERROR_ON_OK,
+  F_RAISE_ROW, /* raises with the error row `variant` names (enum raise_row) */
+  F_ADD_MIXED,
+  F_RAISE_ROW_UNSET,
+  F_RAISE_AGAIN,
+  F_RAISE_ON_SECOND_CALL,
+  F_TWO_TYPES
 };
 
 /* The variant of a fixture that keeps an input (F_ARGS_KEPT, F_FRAME_IN_KEPT,
  * F_SUM_*_KEPT): the entry then fails. Design 4.4 moves inputs "whatever
  * status it returns", so the host's check must not depend on an OK. */
 #define KEPT_THEN_RAISE 1
+
+/* The variant of running_sum whose frame_next fills the error on every call
+ * that returns OK (an output or the end): the host still releases it. */
+#define FILL_ERROR_ON_OK 2
+
+/* The variant of sum_gids_kept that moves group_ids and never releases them. */
+#define GIDS_LEAKED 3
+
+/* F_RAISE_ROW: the row its ERR_RAISED names, for an n-row batch. -1 is
+ * legal ("not known"); n and -2 are outside the batch, a runtime bug. */
+enum raise_row {
+  RR_NONE = 1, /* -1 */
+  RR_PAST,     /* n */
+  RR_BELOW     /* -2 */
+};
 
 /* F_LEAF: what is done to the identity's output column. The first three are
  * legal Arrow the host must read; the rest break one rule each. */
@@ -133,7 +158,8 @@ enum leaf_shape {
   LS_DATA_NULL,
   LS_RELEASE_KEEPS_SLOT,  /* its release frees the column but leaves `release` set */
   LS_DEVICE_ID,           /* device CPU with device_id 0 */
-  LS_SYNC_EVENT           /* device CPU with a sync event */
+  LS_SYNC_EVENT,          /* device CPU with a sync event */
+  LS_NULL_COUNT_ZERO      /* null_count 0 over a bitmap with a null */
 };
 
 /* F_TABLE: what is done to each output table. */
@@ -146,14 +172,16 @@ enum table_shape {
   TS_NEGATIVE_LENGTH,
   TS_NEGATIVE_OFFSET,
   TS_BUFFERS_NULL,
-  TS_NULL_ROWS,       /* a validity bitmap with row 0 null, null_count 1 */
+  TS_NULL_ROWS,       /* a validity bitmap with row 9 null, null_count 1 */
   TS_NULL_COUNT_LIES, /* null_count 1 with no validity bitmap */
   TS_CHILD_NULL,
   TS_CHILD_RELEASED,
   TS_CHILD_SHORT,  /* the child has one row fewer than the struct */
   TS_DEVICE,
   TS_OUT_ON_ERROR, /* frame_next returns ERR_RAISED with the table still in `out` */
-  TS_DICTIONARY    /* a dictionary on the struct, whose type has none */
+  TS_DICTIONARY,   /* a dictionary on the struct, whose type has none */
+  TS_NULL_COUNT_ZERO,   /* rows 1 and 10 null in the bitmap, null_count 0 */
+  TS_NULL_COUNT_UNKNOWN /* a bitmap with no null row, null_count -1: legal */
 };
 
 /* args: one format per argument ('*' for ROW: any number of int64 fields,
@@ -231,6 +259,7 @@ static const struct fixture FIXTURES[] = {
     {"leaf_release_keeps_slot", F_LEAF, MC, "l", "l", "", LS_RELEASE_KEEPS_SLOT},
     {"leaf_device_id", F_LEAF, MC, "l", "l", "", LS_DEVICE_ID},
     {"leaf_sync_event", F_LEAF, MC, "l", "l", "", LS_SYNC_EVENT},
+    {"leaf_null_count_zero", F_LEAF, MC, "l", "l", "", LS_NULL_COUNT_ZERO},
     {"table_sliced", F_TABLE, MF, "l", "tl", "", TS_SLICED},
     {"table_n_buffers_0", F_TABLE, MF, "l", "tl", "", TS_N_BUFFERS_0},
     {"table_n_buffers_2", F_TABLE, MF, "l", "tl", "", TS_N_BUFFERS_2},
@@ -247,6 +276,11 @@ static const struct fixture FIXTURES[] = {
     {"table_device", F_TABLE, MF, "l", "tl", "", TS_DEVICE},
     {"table_out_on_error", F_TABLE, MF, "l", "tl", "", TS_OUT_ON_ERROR},
     {"table_dictionary", F_TABLE, MF, "l", "tl", "", TS_DICTIONARY},
+    {"table_null_count_zero", F_TABLE, MF, "l", "tl", "", TS_NULL_COUNT_ZERO},
+    {"table_null_count_unknown", F_TABLE, MF, "l", "tl", "", TS_NULL_COUNT_UNKNOWN},
+    /* each input batch's column as an int64 column and, times ten, an int32
+     * column */
+    {"table_two_types", F_TWO_TYPES, MF, "l", "tli", "", 0},
     /* sum, with a state column one row too long; with a result one row
      * short; with agg_update not moving group_ids; with agg_merge not moving
      * the states. */
@@ -271,6 +305,26 @@ static const struct fixture FIXTURES[] = {
     {"leak_reservation", F_LEAK_RESERVATION, MC, "l", "l", "", 0},
     {"raise_no_message", F_RAISE_NO_MESSAGE, MC, "l", "l", "", 0},
     {"error_on_ok", F_ERROR_ON_OK, MC, "l", "l", "", 0},
+    /* running_sum, filling the error on every frame_next that returns OK. */
+    {"running_sum_error_on_ok", F_RUNNING_SUM, MF, "l", "tl", "", FILL_ERROR_ON_OK},
+    /* A batch function that raises naming no row (legal), then two runtime
+     * bugs: a row one past the batch, and a row below -1. */
+    {"raise_no_row", F_RAISE_ROW, MC, "l", "l", "", RR_NONE},
+    {"raise_row_past_batch", F_RAISE_ROW, MC, "l", "l", "", RR_PAST},
+    {"raise_row_below_minus_one", F_RAISE_ROW, MC, "l", "l", "", RR_BELOW},
+    /* a (int64) + b (int32), null where either is null */
+    {"add_mixed", F_ADD_MIXED, SC, "li", "l", "", 0},
+    /* an error with its code and message set and its row left as the host
+     * set it */
+    {"raise_row_unset", F_RAISE_ROW_UNSET, MC, "l", "l", "", 0},
+    /* a frame whose frame_next raises, then answers ERR_INTERNAL to every
+     * later frame_next (the host must not pull after an error) */
+    {"raise_again", F_RAISE_AGAIN, MF, "l", "tl", "", 0},
+    /* identity on an instance's first call, ERR_RAISED on its second (a
+     * runtime bug: a result that depends on earlier calls, design 3.4 rule 3) */
+    {"raise_on_second_call", F_RAISE_ON_SECOND_CALL, MC, "l", "l", "", 0},
+    /* sum whose agg_update moves group_ids and never releases them */
+    {"sum_gids_leaked", F_SUM_GIDS_KEPT, AM, "l", "l", "l", GIDS_LEAKED},
 };
 
 #define N_FIXTURES (sizeof(FIXTURES) / sizeof(FIXTURES[0]))
@@ -288,6 +342,7 @@ struct komira_udf_rt {
  * spec->args: the only names a row view resolves. */
 struct komira_udf_udf {
   const struct fixture* fx;
+  const komira_udf_host* host;
   int64_t n_fields;
   char* fields[ROW_FIELDS_MAX];
 };
@@ -318,6 +373,24 @@ struct komira_udf_frame {
 };
 
 static const komira_udf_host* host_of(const komira_udf_instance* i) { return i->ctx->rt->host; }
+
+/* ---- the host's ledger ---------------------------------------------------- */
+
+/* A handle's struct, reserved while it is open. */
+static void hold(const komira_udf_host* h, size_t n) { h->mem_reserve(h->host_data, (int64_t)n); }
+static void drop(const komira_udf_host* h, size_t n) { h->mem_release(h->host_data, (int64_t)n); }
+
+/* A rule the host broke that echo can only see after the fact: one byte
+ * reserved and never returned, so the case's ledger fails. */
+static void charge_host(const komira_udf_host* h) { h->mem_reserve(h->host_data, 1); }
+
+/* Release an array the host moved in. The C Data rule: release sets the
+ * slot to NULL; a host release that does not is charged. */
+static void release_host(const komira_udf_host* h, struct ArrowArray* a) {
+  if (a->release == NULL) return;
+  a->release(a);
+  if (a->release != NULL) charge_host(h);
+}
 
 /* ---- errors -------------------------------------------------------------- */
 
@@ -421,6 +494,11 @@ static void release_array(struct ArrowArray* a) {
 static int cancelled(const komira_udf_call* c) {
   if (BROKEN) return 0; /* BROKEN (3) */
   return c != NULL && c->cancel != NULL && __atomic_load_n(c->cancel, __ATOMIC_ACQUIRE) != 0;
+}
+
+/* An input on the device of design 4.4: CPU, device_id -1, no sync event. */
+static int on_cpu(const struct ArrowDeviceArray* d) {
+  return d->device_type == ARROW_DEVICE_CPU && d->device_id == -1 && d->sync_event == NULL;
 }
 
 static int past_deadline(const komira_udf_rt* rt, const komira_udf_call* c) {
@@ -553,11 +631,12 @@ static const struct fixture* find(const char* entry) {
 }
 
 static int leaf_is(const struct ArrowSchema* s, char f) {
-  return s != NULL && s->format != NULL && s->format[0] == f && s->format[1] == 0 && s->n_children == 0;
+  return s != NULL && s->release != NULL && s->format != NULL && s->format[0] == f && s->format[1] == 0 &&
+         s->n_children == 0;
 }
 
 static int struct_is(const struct ArrowSchema* s, const char* fmts) {
-  if (s == NULL || s->format == NULL || strcmp(s->format, "+s") != 0) return 0;
+  if (s == NULL || s->release == NULL || s->format == NULL || strcmp(s->format, "+s") != 0) return 0;
   if (s->n_children != (int64_t)strlen(fmts)) return 0;
   for (int64_t i = 0; i < s->n_children; i++)
     if (!leaf_is(s->children[i], fmts[i])) return 0;
@@ -633,9 +712,17 @@ static int32_t echo_load(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf
   const struct fixture* fx = NULL;
   int32_t rc = check_spec(rt->host, s, e, &fx);
   if (rc != KOMIRA_UDF_OK) return rc;
+  /* the bug: a schema the host only lends, released (and a host release
+   * that leaves its slot set refused) */
+  if (fx->id == F_RELEASE_SCHEMA && s->args->release != NULL) {
+    s->args->release((struct ArrowSchema*)s->args);
+    if (s->args->release != NULL)
+      return fail(rt->host, e, KOMIRA_UDF_ERR_INTERNAL, "release_schema: the schema's release left its slot set", -1);
+  }
   komira_udf_udf* u = calloc(1, sizeof(*u));
   if (u == NULL) return fail(rt->host, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "load: out of memory", -1);
   u->fx = fx;
+  u->host = rt->host;
   if (fx->shape == KOMIRA_UDF_SHAPE_ROW) {
     for (int64_t i = 0; i < s->args->n_children; i++) {
       u->fields[i] = dup(s->args->children[i]->name);
@@ -643,14 +730,14 @@ static int32_t echo_load(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf
       if (u->fields[i] == NULL) break;
     }
   }
-  /* the bug: a schema the host only lends, released */
-  if (fx->id == F_RELEASE_SCHEMA && s->args->release != NULL) s->args->release((struct ArrowSchema*)s->args);
+  hold(u->host, sizeof(*u));
   *out = u;
   return KOMIRA_UDF_OK;
 }
 
 static void echo_unload(komira_udf_udf* u) {
   for (int64_t i = 0; i < u->n_fields; i++) free(u->fields[i]);
+  drop(u->host, sizeof(*u));
   free(u);
 }
 
@@ -660,11 +747,15 @@ static int32_t echo_open_context(komira_udf_rt* rt, uint32_t slot, komira_udf_co
   if (c == NULL) return fail(rt->host, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "open_context: out of memory", -1);
   c->rt = rt;
   c->slot = slot;
+  hold(rt->host, sizeof(*c));
   *out = c;
   return KOMIRA_UDF_OK;
 }
 
-static void echo_close_context(komira_udf_context* c) { free(c); }
+static void echo_close_context(komira_udf_context* c) {
+  drop(c->rt->host, sizeof(*c));
+  free(c);
+}
 
 static int32_t echo_open_instance(komira_udf_context* c, komira_udf_udf* u, komira_udf_instance** out,
                                   komira_udf_error* e) {
@@ -674,18 +765,25 @@ static int32_t echo_open_instance(komira_udf_context* c, komira_udf_udf* u, komi
   i->udf = u;
   i->fx = u->fx;
   i->calls = 0;
+  hold(c->rt->host, sizeof(*i));
   *out = i;
   return KOMIRA_UDF_OK;
 }
 
-static void echo_close_instance(komira_udf_instance* i) { free(i); }
+static void echo_close_instance(komira_udf_instance* i) {
+  drop(host_of(i), sizeof(*i));
+  free(i);
+}
 
 static int64_t echo_memory_report(komira_udf_context* c) {
   (void)c;
   return 0;
 }
 
-static void echo_shutdown(komira_udf_rt* rt) { free(rt); }
+static void echo_shutdown(komira_udf_rt* rt) {
+  drop(rt->host, sizeof(*rt));
+  free(rt);
+}
 
 static int32_t start_call(const komira_udf_rt* rt, const komira_udf_call* c, komira_udf_error* e) {
   if (c == NULL || c->struct_size < sizeof(komira_udf_call))
@@ -729,6 +827,8 @@ static komira_udf_rt* new_rt(const komira_udf_host* host, komira_udf_error* e, u
   }
   r->host = host;
   r->global_lock = global_lock;
+  hold(host, sizeof(*r));
+  host->log(host->host_data, 0, "komira-test: a runtime is up");
   return r;
 }
 

@@ -1,0 +1,11 @@
+{
+ "name": "sliced_input_offset_first_null",
+ "defect": "the host's export marks the first row after an argument's offset valid whatever its value (design 3.4 rule 4: validity bits are read at the offset too)",
+ "run": "call_batch",
+ "entry": "identity",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 3, "columns": [{"type": "int64", "values": [null, 6, 7], "offset": 5}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [null, 6, 7]}}
+}

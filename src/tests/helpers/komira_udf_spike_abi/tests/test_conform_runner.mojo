@@ -5,7 +5,7 @@
 #
 # What it proves: each comparison the runner makes against a case's
 # expectation (status, message present, run error, an unexpected host fault,
-# error row exact and at least, column values, nulls, length and float
+# the expected fault's text, error row exact and at least, column values, nulls, length and float
 # tolerance, the split run, frame batch count, values, length and first
 # output, the aggregate's result and an expected fault that never came,
 # validate's status) and each release-ledger rule (an array released twice,
@@ -25,7 +25,7 @@ from std.testing import assert_equal, assert_true
 from komira_udf_spike_abi.conform import load_cases, run_suite
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases_runner"
-comptime CASE_COUNT = 23
+comptime CASE_COUNT = 29
 """The JSON files under cases_runner/: an empty or partial staging cannot
 pass."""
 

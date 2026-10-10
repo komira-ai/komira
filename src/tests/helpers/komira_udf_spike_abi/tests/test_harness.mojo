@@ -26,7 +26,9 @@
 #     runtime the variant library cannot name; it opens a table that stops
 #     before the optional entry (and reads that entry as absent) and a
 #     CONTEXT_PER_THREAD runtime with global_lock 1; init_refusal reports an
-#     init that accepts another major; and the capability check fails each
+#     init that accepts another major; both release an error init filled on
+#     success (error_on_ok_init: the reserved bytes return to 0, a release
+#     skipped on success caught); and the capability check fails each
 #     describe answer that breaks one of its rules, for that rule, and passes
 #     each legal edge (SINGLE_THREAD, NATIVE with hosting 0,
 #     HOST_INTERPRETER, no MEMORY_REPORT with no entry).
@@ -40,12 +42,14 @@ from std.os import setenv
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_udf_spike_abi.cases import Case, parse_case
-from komira_udf_spike_abi.conform import run_case, run_suite, runtime_id_ok
+from komira_udf_spike_abi.conform import CaseResult, Report, load_cases, run_case, run_suite, runtime_id_ok
 from komira_udf_spike_abi.contract import *
-from komira_udf_spike_abi.runtime import CallOptions, UdfRuntime
+from komira_udf_spike_abi.runtime import CallOptions, Outcome, UdfRuntime
 from komira_udf_spike_abi.values import Batch, Column, TYPE_INT32
 
 comptime VARIANT = "./echo_variant.so"
+comptime MALFORMED = "src/tests/helpers/komira_udf_spike_abi/tests/data/malformed"
+"""A directory holding one case file that is not JSON."""
 
 
 def _raises_with(text: String, name: String) raises:
@@ -104,6 +108,7 @@ def _runtime_ids() raises:
     assert_true(runtime_id_ok("komira-test/echo"))
     assert_true(runtime_id_ok("example.org/a_b-c.d"))
     assert_true(runtime_id_ok("0/9"))
+    assert_true(runtime_id_ok("z/z"), "the last letter")
     var long_ok = String("a")
     for _ in range(62):
         long_ok += "b"
@@ -141,6 +146,57 @@ def _case_refusals() raises:
         + ' [{"type": "int64", "values": [], "repeat": 0}]}, "expect": {}}',
         "UDF_CASE_MALFORMED",
     )
+    var msg = String()
+    try:
+        _ = load_cases(MALFORMED)
+    except e:
+        msg = String(e)
+    assert_true(msg.startswith("UDF_CASE_MALFORMED") and "bad.json" in msg, "a file that is not a case: " + msg)
+
+
+def _value_text() raises:
+    """The values the harness reports, and their text (a report's lines are
+    what a reader of a failed suite sees)."""
+    var ok = Outcome.of(OK)
+    assert_equal(ok.row, -1)
+    assert_equal(ok.group, -1)
+    assert_equal(String(ok), "OK")
+    assert_equal(String(Outcome(ERR_RAISED, "", "", -1, -1, "")), "ERR_RAISED")
+    assert_equal(
+        String(Outcome(ERR_RAISED, "m", "", 0, -1, "UDF_RUNTIME_FAULT: x")),
+        "ERR_RAISED 'm' row=0 fault=UDF_RUNTIME_FAULT: x",
+    )
+    var p = CallOptions.plain()
+    assert_false(p.cancel or p.cancel_during_call or p.deadline_passed, "plain options set something")
+    assert_equal(String(CaseResult("a", "PASS", "")), "PASS a")
+    assert_equal(String(CaseResult("b", "FAIL", "why")), "FAIL b: why")
+    var r = Report()
+    r.runtime_id = "x/y"
+    r.results.append(CaseResult("a", "PASS", ""))
+    r.results.append(CaseResult("b", "FAIL", "why"))
+    assert_equal(String(r), "runtime x/y: 1 pass, 1 fail, 0 skip\n  PASS a\n  FAIL b: why\n")
+
+
+def _ok_drops_error_text() raises:
+    """An error a runtime filled and then returned OK on is released, and
+    the OK outcome carries none of it (UdfRuntime._outcome)."""
+    var rt = UdfRuntime.open("./echo.so")
+    var c = parse_case(
+        '{"name": "n", "defect": "d", "run": "call_batch", "entry": "error_on_ok", "shape": "MAP_BATCHES_COLUMN",'
+        + ' "args": [{"type": "int64"}], "result": [{"type": "int64"}],'
+        + ' "input": {"length": 1, "columns": [{"type": "int64", "values": [4]}]}, "expect": {}}'
+    )
+    var udf = rt.load(c.spec)
+    var ctx = rt.open_context(0)
+    var inst = rt.open_instance(ctx.handle, udf.handle)
+    var res = rt.call_batch(inst.handle, c.spec, c.input, c.options)
+    assert_true(res.outcome.is_ok(), String(res.outcome))
+    assert_equal(res.outcome.message, "", "an OK outcome kept the error's message")
+    assert_equal(res.outcome.row, -1)
+    rt.close_instance(inst.handle)
+    rt.close_context(ctx.handle)
+    rt.unload(udf.handle)
+    rt.shutdown()
 
 
 def _open_refusals() raises:
@@ -196,8 +252,13 @@ def _handles_and_runs() raises:
     except e:
         msg = String(e)
     assert_true(msg.startswith("UDF_CASE_MALFORMED"), msg)
+    # Echo reserves its runtime struct through the host while it is up and
+    # returns it at shutdown: shutdown reached the runtime, once.
+    assert_true(rt.ledger().reserved_bytes > 0, "echo holds its runtime while it is up")
     rt.shutdown()
+    assert_equal(rt.ledger().reserved_bytes, 0, "shutdown did not reach the runtime")
     rt.shutdown()
+    assert_equal(rt.ledger().reserved_bytes, 0, "a second shutdown reached the runtime")
 
 
 def _kind(e: Error) -> Int:
@@ -324,6 +385,22 @@ def _variants() raises:
     rt = _open_variant("any_major")
     var o = rt.init_refusal(ABI_MAJOR + 1)
     assert_true(o.fault.startswith("UDF_RUNTIME_FAULT: init accepted ABI major"), String(o))
+    assert_equal(o.row, -1)
+    assert_equal(o.group, -1)
+    # init fills the error and returns its table: UdfRuntime.open and
+    # init_refusal still release it (design 4.4: once when non-NULL). The
+    # variant reserves the error's strings through the host, and
+    # init_refusal's host counts into the runtime's ledger, so a release
+    # skipped on success leaves reserved bytes.
+    var held = rt.ledger().reserved_bytes  # any_major: echo's runtime struct, held while it is up
+    rt.shutdown()
+    rt = _open_variant("error_on_ok_init")
+    assert_equal(rt.ledger().reserved_bytes, held, "UdfRuntime.open kept the error init filled on success")
+    o = rt.init_refusal(ABI_MAJOR + 1)
+    assert_true(o.fault.startswith("UDF_RUNTIME_FAULT: init accepted ABI major"), String(o))
+    # the runtime init_refusal's init created is shut down, and the error
+    # released: the shared ledger is back where it was
+    assert_equal(rt.ledger().reserved_bytes, held, "init_refusal kept the error init filled, or its runtime")
     rt.shutdown()
     var echo = UdfRuntime.open("./echo.so")
     o = echo.init_refusal(ABI_MAJOR + 1)
@@ -370,4 +447,6 @@ def main() raises:
     _handles_and_runs()
     _handle_kinds()
     _variants()
+    _value_text()
+    _ok_drops_error_text()
     print("test_harness: ok")

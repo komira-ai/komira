@@ -82,6 +82,8 @@ static int32_t scalar(komira_udf_instance* inst, const komira_udf_call* call, co
       if (!is_valid(x, r) || (y != NULL && !is_valid(y, r)))
         return fail(h, e, KOMIRA_UDF_ERR_RAISED, "a strict fixture got a null argument", r);
   if (fx->id == F_RAISE_ON_ROW_3 && n > 3) return fail(h, e, KOMIRA_UDF_ERR_RAISED, "raise_on_row_3: row 3", 3);
+  if (fx->id == F_RAISE_ON_SECOND_CALL && inst->calls == 1)
+    return fail(h, e, KOMIRA_UDF_ERR_RAISED, "raise_on_second_call: this instance's second call", -1);
   uint8_t* v;
   void* d;
   if (!make_col(h, o, rows, &v, &d)) return fail(h, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "call_batch: out of memory", -1);
@@ -108,7 +110,8 @@ static int32_t scalar(komira_udf_instance* inst, const komira_udf_call* call, co
       di[r] = 7;
       continue;
     }
-    if (fx->id == F_NULL_OUT || !is_valid(x, r) || (fx->id == F_NULL_ON_ZERO && i64_at(x, r) == 0)) {
+    if (fx->id == F_NULL_OUT || !is_valid(x, r) || (fx->id == F_NULL_ON_ZERO && i64_at(x, r) == 0) ||
+        (fx->id == F_ADD_MIXED && !is_valid(y, r))) {
       set_null(o, v, r);
       continue;
     }
@@ -130,6 +133,9 @@ static int32_t scalar(komira_udf_instance* inst, const komira_udf_call* call, co
         break;
       case F_ADD_STRICT:
         di[r] = i64_at(x, r) + i64_at(y, r);
+        break;
+      case F_ADD_MIXED:
+        di[r] = i64_at(x, r) + i32_at(y, r);
         break;
       case F_NARROW:
         ((int32_t*)d)[r] = (int32_t)i64_at(x, r);
@@ -228,6 +234,9 @@ static int32_t reshape_leaf(const komira_udf_host* h, int shape, struct ArrowDev
     case LS_SYNC_EVENT:
       out->sync_event = &NOT_A_DICTIONARY;
       break;
+    case LS_NULL_COUNT_ZERO:
+      o->null_count = 0;
+      break;
     default:
       break;
   }
@@ -252,7 +261,7 @@ static int32_t echo_call_batch(komira_udf_instance* inst, const komira_udf_call*
   out->array.release = NULL;
   int32_t rc = start_call(inst->ctx->rt, call, e);
   if (rc == KOMIRA_UDF_OK) rc = check_args(h, &mine.array, e);
-  if (rc == KOMIRA_UDF_OK && mine.device_type != ARROW_DEVICE_CPU)
+  if (rc == KOMIRA_UDF_OK && !on_cpu(&mine))
     rc = fail(h, e, KOMIRA_UDF_ERR_UNSUPPORTED, "only CPU arrays are read here", -1);
   if (rc == KOMIRA_UDF_OK &&
       (inst->fx->shape & (KOMIRA_UDF_SHAPE_SCALAR | KOMIRA_UDF_SHAPE_ROW | KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN)) == 0)
@@ -285,6 +294,19 @@ static int32_t echo_call_batch(komira_udf_instance* inst, const komira_udf_call*
       case F_ERROR_ON_OK: /* an error filled, then OK returned: the host still releases it */
         fail(h, e, KOMIRA_UDF_ERR_RAISED, "error_on_ok: filled, then OK returned", -1);
         break;
+      case F_RAISE_ROW: {
+        int v = inst->fx->variant;
+        int64_t row = v == RR_PAST ? mine.array.length : v == RR_BELOW ? -2 : -1;
+        release_array(&out->array);
+        rc = fail(h, e, KOMIRA_UDF_ERR_RAISED, "raise_row: raised naming the row the fixture says", row);
+        break;
+      }
+      case F_RAISE_ROW_UNSET: /* code and message set, row left as the host set it */
+        release_array(&out->array);
+        e->code = KOMIRA_UDF_ERR_RAISED;
+        e->message = "raise_row_unset: no row given";
+        rc = KOMIRA_UDF_ERR_RAISED;
+        break;
       case F_RAISE_NO_MESSAGE: /* an error code with no message and nothing to release */
         release_array(&out->array);
         e->code = KOMIRA_UDF_ERR_RAISED;
@@ -299,6 +321,6 @@ static int32_t echo_call_batch(komira_udf_instance* inst, const komira_udf_call*
     rel(&mine.array);
     rel(&mine.array); /* the bug */
   }
-  if (!(BROKEN && rc == KOMIRA_UDF_ERR_RAISED)) release_array(&mine.array); /* BROKEN (1) */
+  if (!(BROKEN && rc == KOMIRA_UDF_ERR_RAISED)) release_host(h, &mine.array); /* BROKEN (1) */
   return rc;
 }

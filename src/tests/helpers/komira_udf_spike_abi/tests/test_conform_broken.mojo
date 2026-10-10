@@ -6,7 +6,9 @@
 #
 # What it proves: the suite can fail. Each planted defect is caught by a case:
 #   1. args not released when the fixture raises      raise_on_row_3, fault_out_set_on_error,
-#                                                      scalar_propagate_error_row (the release ledger)
+#                                                      scalar_propagate_error_row,
+#                                                      column_propagate_error_no_row and the three
+#                                                      fault_error_row_* cases (the release ledger)
 #   2. int64 bits in a float64 result                  column_float_result
 #   3. the cancel flag never read                      cancel_set_before_call, cancel_set_during_call,
 #                                                      frame_cancelled_at_open
@@ -32,22 +34,31 @@ def _expected() -> List[String]:
     order run_suite reports them)."""
     return [
         "agg_mergeable_sum|row 0",
+        "agg_partials_differ_in_groups|row 0",
         "cancel_set_before_call|expected ERR_CANCELLED",
         "cancel_set_during_call|expected ERR_CANCELLED",
         "column_float_result|row 0",
+        "column_float_rounding|row 0",
+        "column_propagate_error_no_row|released",
+        "error_row_at_least_edge|released",
+        "error_row_left_unset|released",
+        "fault_error_row_below_minus_one|released",
+        "fault_error_row_past_batch|released",
+        "fault_error_row_past_batch_propagate|released",
         "fault_out_set_on_error|released",
         "frame_cancelled_at_open|expected ERR_CANCELLED",
         "raise_on_row_3|released",
         "row_caught_violation|expected ERR_FIELD_NOT_DECLARED",
         "scalar_propagate_error_row|released",
         "sliced_input_offset|row 0",
+        "sliced_input_offset_first_null|row 0",
         "split_across_contexts|two batches on a second instance",
     ]
 
 
 def main() raises:
     var cases = load_cases(CASES)
-    assert_equal(len(cases), 85, "cases loaded from " + CASES)
+    assert_equal(len(cases), 107, "cases loaded from " + CASES)
     var report = run_suite("./echo_broken.so", cases)
     print(report)
     assert_equal(report.runtime_id, "komira-test/echo-broken")

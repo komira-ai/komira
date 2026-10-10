@@ -1,0 +1,11 @@
+{
+ "name": "column_float_rounding",
+ "defect": "float64 results are compared bit for bit, or within an absolute 1e-9 for large values: 283878287.1 * 1.8 + 32 in float64 is one unit in the last place above 510980948.78",
+ "run": "call_batch",
+ "entry": "fahrenheit",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "float64", "nullable": true}],
+ "result": [{"type": "float64", "nullable": true}],
+ "input": {"length": 2, "columns": [{"type": "float64", "values": [283878287.1, 0.0]}]},
+ "expect": {"status": "OK", "column": {"type": "float64", "values": [510980948.78, 32.0]}}
+}
