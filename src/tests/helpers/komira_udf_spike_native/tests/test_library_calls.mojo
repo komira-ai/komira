@@ -11,9 +11,11 @@
 #     null summed, a running total reset, a completed group written to the
 #     wrong row, an output lost or added before an error).
 #   - frame refusals: a step given no literal batch or a literal of two rows,
-#     a running_sum batch without its column, a group_max batch without its
-#     value column, each refused by name with every input array released
-#     (an error path that reads past the batch, or leaks it).
+#     a running_sum, table_sliced or table_two_types batch without its
+#     column, a group_max batch without its value column, each refused by
+#     name with every input array released (an error path that reads past
+#     the batch, or leaks it); table_null_count_unknown over a null after a
+#     valid row, whole (a null row's value written over another row).
 #   - mergeable aggregate: sums over three groups emitted in two steps
 #     (emit_first_n), a group id equal to n_groups and one below zero,
 #     values and group ids of different lengths, an argument batch without
@@ -45,7 +47,7 @@ from std.testing import assert_equal, assert_true
 
 from komira_udf_spike_abi.contract import *
 from komira_udf_spike_abi.runtime import CallOptions, CodeSet, FrameResult, Handle, Outcome, UdfRuntime, UdfSpec
-from komira_udf_spike_abi.values import Batch, Column, ColumnType, TYPE_INT64
+from komira_udf_spike_abi.values import Batch, Column, ColumnType, TYPE_INT32, TYPE_INT64
 
 from komira_udf_spike_native.code import code_set
 
@@ -192,6 +194,21 @@ def _frames(mut lib: _Lib) raises:
     assert_true(len(er.outputs) > 0, n + ": endless: no output: " + String(er.outcome))
     assert_equal(String(er.outputs[0]), "{1 rows; int64[0]}", n + ": endless's first output")
 
+    # A table with null_count -1 over a null after a valid row: the null row
+    # is the child's, the valid row's value kept.
+    var tu = _spec(SHAPE_MAP_BATCHES_FRAME, "table_null_count_unknown", lib.code, True)
+    var i_tu = lib.instance(tu)
+    var ur = lib.frame(i_tu, tu, [_batch([_col([5, 0], [1])], 2)], CallOptions.plain())
+    assert_true(ur.outcome.is_ok(), n + ": table_null_count_unknown: " + String(ur.outcome))
+    assert_equal(_outputs(ur.outputs), "{2 rows; int64[5, null]}", n + ": table_null_count_unknown")
+    var ts = _spec(SHAPE_MAP_BATCHES_FRAME, "table_sliced", lib.code, True)
+    var i_ts = lib.instance(ts)
+    var tt = UdfSpec(SHAPE_MAP_BATCHES_FRAME, "table_two_types", _i64(), [ColumnType(TYPE_INT64, True), ColumnType(TYPE_INT32, True)])
+    tt.result_is_table = True
+    tt.code_root = lib.code.root
+    tt.code = lib.code.objects.copy()
+    var i_tt = lib.instance(tt)
+
     # Batches without the columns a fixture reads: refused, every input released.
     var before = lib.rt.ledger()
     _status(
@@ -210,6 +227,18 @@ def _frames(mut lib: _Lib) raises:
             "without its group and value columns",
             n + ": group_max, a batch of " + String(rows) + " rows without its value column",
         )
+    _status(
+        lib.frame(i_ts, ts, [Batch(2)], CallOptions.plain()).outcome,
+        ERR_INTERNAL,
+        "table: no input column",
+        n + ": table_sliced, a batch without columns",
+    )
+    _status(
+        lib.frame(i_tt, tt, [Batch(2)], CallOptions.plain()).outcome,
+        ERR_INTERNAL,
+        "table_two_types: no input column",
+        n + ": table_two_types, a batch without columns",
+    )
     var after = lib.rt.ledger()
     assert_equal(after.released - before.released, after.exported - before.exported, n + ": an input array not released")
 
