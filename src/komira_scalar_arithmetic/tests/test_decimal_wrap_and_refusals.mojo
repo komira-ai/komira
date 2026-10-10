@@ -293,6 +293,7 @@ def test_mul_overflows_wide_types() raises:
     assert_false(_rt_mul_overflows[DType.int128](I.MAX, I(1)))
     assert_false(_rt_mul_overflows[DType.int128](I.MIN, I(1)))
     assert_false(_rt_mul_overflows[DType.uint128](U.MAX, U(1)))
+    assert_false(_rt_mul_overflows[DType.uint128](U.MIN, U(1)))
     comptime J = Scalar[DType.int256]
     comptime V = Scalar[DType.uint256]
     assert_true(_rt_mul_overflows[DType.int256](J(1) << 200, J(1) << 200))
