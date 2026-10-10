@@ -1,6 +1,7 @@
 # Lints of the files at the top of the repository. Each is a validation
 # (tools/build/lint/defs.bzl), so `./buck2 build //...` fails when one finds
 # anything.
+load("@komira//tools/build/coverage:census.bzl", "coverage_census")
 load("@komira//tools/build/coverage:defs.bzl", "coverage_ci_cases")
 load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "public_boundary", "retired_names", "shell_lint", "src_layout", "workflow_lint")
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
@@ -265,6 +266,15 @@ _TESTS_LINTS = [
     rows = MATRIX,
     surfaces = SURFACES,
     tree = ":doc_tree",
+) for _ in _TESTS_LINTS[:1]]
+
+# The coverage census (tools/build/coverage/census.md):
+# docs/coverage_census.md and the floors of tools/build/coverage/ratchet.tsv
+# are exactly what tools/build/coverage/census.sh renders from census.tsv, so
+# the doc is never edited by hand and no floor is under what was measured.
+[coverage_census(
+    name = "coverage_census",
+    doc = "docs/coverage_census.md",
 ) for _ in _TESTS_LINTS[:1]]
 
 # The Mojo pointer rules (docs/design/mojo_safety_and_idioms.md, "What must
