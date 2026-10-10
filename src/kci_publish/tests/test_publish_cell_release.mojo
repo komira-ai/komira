@@ -16,6 +16,8 @@
 #   2. A set of CONDA members only: KCI-E-MEMBER, no image.
 #   3. `release.json` naming another revision: KCI-E-REVISION-MISMATCH.
 #   4. A handed set hash the members do not recompute to: KCI-E-SET-HASH.
+#      And a step platform other than `release.json`'s:
+#      KCI-E-PLATFORM-MISMATCH.
 #   5. One flipped byte in the image's layer: KCI-E-MEMBER (`verify_member`
 #      hashes every blob at load).
 # =============================================================================
@@ -106,10 +108,12 @@ def _write(tag: String, with_image: Bool) raises -> _Set:
     return _Set(artifacts^, dir^, r.set_hash(dir), digest^)
 
 
-def _load(s: _Set, revision: String = String(""), hash: String = String("")) -> CellRelease:
+def _load(
+    s: _Set, revision: String = String(""), hash: String = String(""), platform: String = String("linux-x86_64")
+) -> CellRelease:
     var rev = ExampleRelease().revision.copy() if revision.byte_length() == 0 else revision.copy()
     var h = s.set_hash.copy() if hash.byte_length() == 0 else hash.copy()
-    return load_cell_release(s.artifacts, s.dir, rev, String("linux-x86_64"), h)
+    return load_cell_release(s.artifacts, s.dir, rev, platform, h)
 
 
 def test_the_images_of_the_set_with_the_sets_digest() raises:
@@ -145,6 +149,15 @@ def test_another_revision_is_refused() raises:
     """Catches: an image built from another commit tagged with this one."""
     var c = _load(_write(String("rev"), True), revision=String("ffffffffffffffffffffffffffffffffffffffff"))
     assert_equal(c.error_id, String("KCI-E-REVISION-MISMATCH"))
+    assert_equal(len(c.images), 0)
+
+
+def test_another_platform_is_refused() raises:
+    """Catches: `release.json`'s platform not held to the step's (its
+    release.json names linux-x86_64, the step publishes linux-aarch64)."""
+    var c = _load(_write(String("platform"), True), platform=String("linux-aarch64"))
+    assert_equal(c.error_id, String("KCI-E-PLATFORM-MISMATCH"))
+    assert_true(c.message.find(String("is for platform linux-x86_64")) >= 0, c.message)
     assert_equal(len(c.images), 0)
 
 

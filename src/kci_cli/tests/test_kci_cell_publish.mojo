@@ -40,6 +40,19 @@
 #   6. The kci binary's cells (`NoCloudBuilt`): REFUSED, exit 3, "this kci
 #      was not built with that cloud".
 #   7. Without --release-set-hash: a usage error, exit 2.
+#   8. The same trust finding under `--plan`: REFUSED too.
+#   9. `registry_host_and_path` over `h/p/r`, `h` and `h/` (a trailing `/`
+#      is a bare host: no path), and a `kci run` on `_PathCloud`, a
+#      wrapper of FakeCloud whose registry address has a path
+#      (`shop-blue-images/team/images`): the image goes to repository
+#      `team/images/web`, the exact PUT path `/v2/team/images/web/...`.
+#  10. A two-image set (`web`, then `web2`): `web2`'s tag already names
+#      another image, so `web2` is refused after `web` was uploaded:
+#      PARTIAL, exit 6, retry UNSAFE. With `web` already tagged with its
+#      own bytes and `web2` new: SUCCEEDED, not NOOP.
+#
+# The token is in no record of any run and in no summary, on the success
+# path and on the failure paths (the read-back case, the partial case).
 # =============================================================================
 
 from std.ffi import external_call
@@ -54,7 +67,25 @@ from komira_oci.oci_layout_fixture import write_test_layout
 from komira_oci.oci_transport import OciRequest, OciResponse, OciTransport
 
 from kci_build import BuildRequest
-from kci_reconciler import Creds, InMemoryStateStore
+from kci_reconciler import CellScope, Creds, ErasedResource, InMemoryStateStore, Label, OwnerStamp
+from kci_resource_proto.resource import Resource
+from kci_cloud import (
+    Absence,
+    ArtifactNeed,
+    BootstrapItem,
+    CellContext,
+    CloudAdapter,
+    CloudId,
+    ExistingObject,
+    Feed,
+    Finding,
+    Firing,
+    GrantEdge,
+    LoweredNode,
+    OwnedRecord,
+    Principal,
+    RegistryLogin,
+)
 from kci_cloud_fake import FakeCloud
 from kci_cli import (
     NOT_BUILT_WITH,
@@ -64,6 +95,7 @@ from kci_cli import (
     StageSteps,
     StepEnd,
     kci_main_with,
+    registry_host_and_path,
     write_whole_file,
 )
 from kci_api import ResultValidation, parse_result
@@ -77,6 +109,7 @@ comptime _HOST: String = "shop-blue-images"
 comptime _TOKEN: String = "tok-secret-do-not-print"
 comptime _OTHER_HASH: String = "0000000000000000000000000000000000000000000000000000000000000000"
 comptime _OTHER_DIGEST: String = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+comptime _MANIFEST_TYPE: String = "application/vnd.oci.image.manifest.v1+json"
 
 
 struct Steps(StageSteps, Movable):
@@ -167,15 +200,42 @@ struct _Fixture(Movable):
     var machine: String
     var set_hash: String
     var digest: String
+    var digest2: String
 
-    def __init__(out self, var dir: String, var machine: String, var set_hash: String, var digest: String):
+    def __init__(
+        out self, var dir: String, var machine: String, var set_hash: String, var digest: String, var digest2: String
+    ):
         self.dir = dir^
         self.machine = machine^
         self.set_hash = set_hash^
         self.digest = digest^
+        self.digest2 = digest2^
 
 
-def _fixture(tag: String, settings: String = String("")) raises -> _Fixture:
+def _artifact(name: String) -> String:
+    return (
+        String("artifacts {\n  name: \"") + name + String("\"\n  build_system: \"buck2\"\n  args: \"//src/")
+        + name + String(":release\"\n  args: \"--out\"\n  args: \"{out_dir}\"\n}\n")
+    )
+
+
+def _image(d: String, name: String, tag: String) raises -> String:
+    """The OCI member `name` (a layout and its artifact manifest) in the
+    release directory under `d`; its digest."""
+    var member = d + String("/rel/linux-x86_64/") + name
+    var layers = List[List[UInt8]]()
+    layers.append(_bytes(name + String("-layer-one-") + tag))
+    var digest = write_test_layout(member + String("/") + name + String(".oci"), layers, String("linux"), String("amd64"))
+    write_whole_file(
+        member + String("/manifest.json"),
+        String('{"format":"kci.artifact_manifest","schema_version":1,"artifact_type":"OCI",')
+        + String('"name":"') + name + String('","version":"0.1.0","platform":"linux-x86_64",')
+        + String('"file":"') + name + String('.oci","sha256":"') + String(digest[byte=7:]) + String('"}\n'),
+    )
+    return digest^
+
+
+def _fixture(tag: String, settings: String = String(""), two: Bool = False) raises -> _Fixture:
     """The machine file, cells file, artifacts file and release directory
     (file header) in a fresh directory, made the working directory."""
     var base = getenv("TEST_TMPDIR")
@@ -193,21 +253,15 @@ def _fixture(tag: String, settings: String = String("")) raises -> _Fixture:
     write_whole_file(
         d + String("/a.textproto"),
         String("schema_version: 1\nbuild_systems {\n  name: \"buck2\"\n  executable: \"buck2\"\n  args: \"build\"\n}\n")
-        + String("artifacts {\n  name: \"web\"\n  build_system: \"buck2\"\n  args: \"//src/web:release\"\n")
-        + String("  args: \"--out\"\n  args: \"{out_dir}\"\n}\n"),
+        + _artifact(String("web")) + (_artifact(String("web2")) if two else String("")),
     )
-    var member = d + String("/rel/linux-x86_64/web")
-    var layers = List[List[UInt8]]()
-    layers.append(_bytes(String("web-layer-one-") + tag))
-    var digest = write_test_layout(member + String("/web.oci"), layers, String("linux"), String("amd64"))
-    write_whole_file(
-        member + String("/manifest.json"),
-        String('{"format":"kci.artifact_manifest","schema_version":1,"artifact_type":"OCI",')
-        + String('"name":"web","version":"0.1.0","platform":"linux-x86_64",')
-        + String('"file":"web.oci","sha256":"') + String(digest[byte=7:]) + String('"}\n'),
-    )
+    var digest = _image(d, String("web"), tag)
     var members = List[ReleaseMember]()
-    members.append(verify_member(String("web"), member))
+    members.append(verify_member(String("web"), d + String("/rel/linux-x86_64/web")))
+    var digest2 = String("")
+    if two:
+        digest2 = _image(d, String("web2"), tag)
+        members.append(verify_member(String("web2"), d + String("/rel/linux-x86_64/web2")))
     var manifest = release_manifest_of(members, ReleaseIdentity(String(_REV), String("linux-x86_64"), String("gh-1"), 1))
     write_whole_file(d + String("/rel/linux-x86_64/release.json"), render_release_manifest(manifest))
     var m = d + String("/machine.textproto")
@@ -217,7 +271,7 @@ def _fixture(tag: String, settings: String = String("")) raises -> _Fixture:
         + String("stage { name: \"cell\" step { name: \"push\" kind: PUBLISH platform: \"linux-x86_64\" ")
         + String("artifacts: \"a.textproto\" cells: \"cells.textproto\" cell: \"blue\" } }\n"),
     )
-    return _Fixture(d^, m^, manifest.set_hash.copy(), digest^)
+    return _Fixture(d^, m^, manifest.set_hash.copy(), digest^, digest2^)
 
 
 def _run(f: _Fixture, summary: String, plan: Bool = False, hash: String = String("-")) -> List[String]:
@@ -244,6 +298,15 @@ def _run(f: _Fixture, summary: String, plan: Bool = False, hash: String = String
 
 def _last(rec: CliRecorder) raises -> KciRunResult:
     return parse_result(rec.records[len(rec.records) - 1], String("record"))
+
+
+def _no_token(rec: CliRecorder, summary: String) raises:
+    """The token is in no record the run wrote (RUNNING and FINISHED) and
+    not in its summary."""
+    assert_true(len(rec.records) > 0)
+    for i in range(len(rec.records)):
+        assert_equal(rec.records[i].find(String(_TOKEN)), -1, "the token is in no record")
+    assert_equal(Path(summary).read_text().find(String(_TOKEN)), -1, "the token is not in the summary")
 
 
 def _cells(var registry: _Registry) raises -> CloudDeploys[FakeCloud, InMemoryStateStore, _Registry]:
@@ -319,6 +382,7 @@ def test_another_digest_at_read_back_is_indeterminate_exit_5() raises:
     assert_equal(r.steps[0].outcome, String("INDETERMINATE"))
     assert_equal(r.error.id, String("KCI-E-IMAGE-PUSH"))
     assert_true(r.error.message.find(String("read-back")) >= 0, r.error.message)
+    _no_token(rec, f.dir + String("/summary.md"))
 
 
 def test_plan_sends_nothing_to_the_registry() raises:
@@ -366,6 +430,21 @@ def test_a_trust_finding_is_refused_before_any_request() raises:
     assert_equal(cells.registry.reg[].call_count(), 0)
 
 
+def test_a_trust_finding_is_refused_under_plan_too() raises:
+    """Catches: a trust finding ignored under `--plan` (a dry run would
+    report SUCCEEDED for a cell the credential may not write)."""
+    var f = _fixture(String("trustplan"), String("setting { key: \"principal\" value: \"deployer\" }"))
+    var steps = Steps(f.set_hash)
+    var cells = _cells(_Registry())
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_run(f, f.dir + String("/summary.md"), plan=True), steps, cells, rec), 3)
+    var r = _last(rec)
+    assert_equal(r.outcome, String("REFUSED"))
+    assert_equal(r.error.id, String("KCI-E-CLOUD"))
+    assert_true(r.error.message.find(String("deployer")) >= 0, r.error.message)
+    assert_equal(cells.registry.reg[].call_count(), 0)
+
+
 def test_the_kci_binary_refuses_every_publish_into_a_cell() raises:
     """Catches: the binary's cells (no cloud built in) pushing, or refusing
     for another reason."""
@@ -390,6 +469,182 @@ def test_the_set_hash_flag_is_required() raises:
     assert_equal(_last(rec).error.id, String("KCI-E-USAGE"))
     assert_true(_last(rec).error.message.find(String("--release-set-hash")) >= 0)
     assert_equal(cells.registry.reg[].call_count(), 0)
+
+
+def test_registry_host_and_path() raises:
+    """Catches: the path dropped, or the host taken past the first `/`."""
+    var a = registry_host_and_path(String("h/p/r"))
+    assert_equal(a[0], String("h"))
+    assert_equal(a[1], String("p/r"))
+    var b = registry_host_and_path(String("h"))
+    assert_equal(b[0], String("h"))
+    assert_equal(b[1], String(""))
+    # a trailing `/` is a bare host: no path, so the repository is the
+    # artifact name alone (never `/web`)
+    var c = registry_host_and_path(String("h/"))
+    assert_equal(c[0], String("h"))
+    assert_equal(c[1], String(""))
+
+
+struct _PathCloud(CloudAdapter, Movable, Deinitable):
+    """FakeCloud, except that its registry address has a path:
+    `<FakeCloud's>/team/images` (the shape of a hosted registry that names
+    a project and a repository)."""
+
+    var inner: FakeCloud
+
+    def __init__(out self):
+        self.inner = FakeCloud()
+
+    def cloud_id(self) -> CloudId:
+        return self.inner.cloud_id()
+
+    def complete(self) -> Bool:
+        return self.inner.complete()
+
+    def implemented(self) -> List[Int]:
+        return self.inner.implemented()
+
+    def absences(self) -> List[Absence]:
+        return self.inner.absences()
+
+    def configure(mut self, ctx: CellContext) -> List[Finding]:
+        return self.inner.configure(ctx)
+
+    def public_mechanism(self) -> String:
+        return self.inner.public_mechanism()
+
+    def check(self, r: Resource, feeds: List[Feed], firings: List[Firing]) -> List[Finding]:
+        return self.inner.check(r, feeds, firings)
+
+    def required_artifact(self, r: Resource) -> ArtifactNeed:
+        return self.inner.required_artifact(r)
+
+    def lower(
+        self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]
+    ) raises -> List[LoweredNode]:
+        return self.inner.lower(r, edges, feeds, firings)
+
+    def realize(mut self, node: LoweredNode) raises -> ErasedResource:
+        return self.inner.realize(node)
+
+    def bootstrap_resources(self, machine: String, cell: String) -> List[BootstrapItem]:
+        return self.inner.bootstrap_resources(machine, cell)
+
+    def label_rule(self, stamp: OwnerStamp) raises -> List[Label]:
+        return self.inner.label_rule(stamp)
+
+    def identity_of(self, labels: List[Label]) -> String:
+        return self.inner.identity_of(labels)
+
+    def list_owned(mut self, creds: Creds, scope: CellScope) raises -> List[OwnedRecord]:
+        return self.inner.list_owned(creds, scope)
+
+    def read_existing(mut self, creds: Creds, node: LoweredNode) raises -> ExistingObject:
+        return self.inner.read_existing(creds, node)
+
+    def release(mut self, creds: Creds, record: OwnedRecord) raises:
+        self.inner.release(creds, record)
+
+    def whoami(mut self, creds: Creds) raises -> Principal:
+        return self.inner.whoami(creds)
+
+    def trust_render(self, scope: CellScope) -> String:
+        return self.inner.trust_render(scope)
+
+    def trust_check(mut self, creds: Creds, scope: CellScope) raises -> List[Finding]:
+        return self.inner.trust_check(creds, scope)
+
+    def image_registry(self, ctx: CellContext) -> String:
+        return self.inner.image_registry(ctx) + String("/team/images")
+
+    def registry_login(mut self, creds: Creds) raises -> RegistryLogin:
+        return self.inner.registry_login(creds)
+
+
+def test_a_registry_address_with_a_path() raises:
+    """Catches: the address's path dropped (`registry_host_and_path`), and
+    the artifact name dropped from the repository (`_repository`)."""
+    var f = _fixture(String("path"))
+    var steps = Steps(f.set_hash)
+    var cells = CloudDeploys[_PathCloud, InMemoryStateStore, _Registry](
+        _PathCloud(), InMemoryStateStore(), Creds(String(_TOKEN)), _Registry(), 0
+    )
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_run(f, f.dir + String("/summary.md")), steps, cells, rec), 0)
+    var r = _last(rec)
+    assert_equal(r.outcome, String("SUCCEEDED"), r.error.message)
+    ref reg = cells.registry.reg[]
+    assert_equal(reg.calls_to_other_hosts(), 0)
+    assert_equal(reg.tag_digest(String("team/images/web"), String(_REV)), f.digest)
+    assert_equal(
+        reg.count_calls(HTTP_METHOD_PUT, String("/v2/team/images/web/manifests/") + String(_REV)), 1,
+        "the tag PUT names the exact repository",
+    )
+    var off = 0
+    for i in range(reg.call_count()):
+        if not reg.call_path(i).startswith(String("/v2/team/images/web/")):
+            off += 1
+    assert_equal(off, 0, "every request is under /v2/team/images/web/")
+    assert_equal(r.artifacts[0].file, String(_HOST) + String("/team/images/web@") + f.digest)
+
+
+def _seed_tagged(mut reg: FakeOciRegistry, f: _Fixture, name: String, digest: String) raises:
+    """`name`'s manifest (the bytes in its layout) in the registry, tagged
+    with the revision: the image is already there."""
+    var blob = (
+        f.dir + String("/rel/linux-x86_64/") + name + String("/") + name + String(".oci/blobs/sha256/")
+        + String(digest[byte=7:])
+    )
+    var seeded = reg.seed_manifest(name, String(_MANIFEST_TYPE), Path(blob).read_bytes())
+    assert_equal(seeded, digest, "the seeded manifest is the layout's")
+    reg.seed_tag(name, String(_REV), digest)
+
+
+def test_a_second_image_refused_after_the_first_landed_is_partial() raises:
+    """Catches: the PARTIAL conversion dropped (a refusal after an upload
+    reported REFUSED, exit 3, which promises nothing landed)."""
+    var f = _fixture(String("partial"), two=True)
+    var steps = Steps(f.set_hash)
+    var cells = _cells(_Registry())
+    # web2's tag already names another image: its push is refused
+    var other = cells.registry.reg[].seed_manifest(
+        String("web2"), String(_MANIFEST_TYPE), _bytes(String('{"schemaVersion": 2, "other": true}'))
+    )
+    cells.registry.reg[].seed_tag(String("web2"), String(_REV), other)
+    var rec = CliRecorder.memory(String(""))
+    var summary = f.dir + String("/summary.md")
+    assert_equal(kci_main_with(_run(f, summary), steps, cells, rec), 6)
+    var r = _last(rec)
+    assert_equal(r.outcome, String("PARTIAL"), r.error.message)
+    assert_equal(r.steps[0].outcome, String("PARTIAL"))
+    assert_equal(r.retry, String("UNSAFE"))
+    assert_equal(r.error.id, String("KCI-E-IMAGE-PUSH"))
+    assert_equal(len(r.artifacts), 2)
+    assert_equal(r.artifacts[0].name, String("web"))
+    assert_equal(r.artifacts[0].effect, String("UPLOADED"))
+    assert_equal(r.artifacts[1].name, String("web2"))
+    assert_equal(r.artifacts[1].effect, String("NOT_REACHED"))
+    assert_equal(cells.registry.reg[].tag_digest(String("web"), String(_REV)), f.digest, "web landed")
+    assert_equal(cells.registry.reg[].tag_digest(String("web2"), String(_REV)), other, "web2's tag is untouched")
+    _no_token(rec, summary)
+
+
+def test_one_noop_image_and_one_new_image_is_succeeded() raises:
+    """Catches: the step's NOOP decided by one image (the first, or the
+    last) rather than by every image."""
+    var f = _fixture(String("mixednoop"), two=True)
+    var steps = Steps(f.set_hash)
+    var cells = _cells(_Registry())
+    _seed_tagged(cells.registry.reg[], f, String("web"), f.digest)
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_run(f, f.dir + String("/summary.md")), steps, cells, rec), 0)
+    var r = _last(rec)
+    assert_equal(r.outcome, String("SUCCEEDED"), r.error.message)
+    assert_equal(r.steps[0].outcome, String("SUCCEEDED"))
+    assert_equal(r.artifacts[0].effect, String("ALREADY_PRESENT"))
+    assert_equal(r.artifacts[1].effect, String("UPLOADED"))
+    assert_equal(cells.registry.reg[].tag_digest(String("web2"), String(_REV)), f.digest2)
 
 
 def main() raises:
