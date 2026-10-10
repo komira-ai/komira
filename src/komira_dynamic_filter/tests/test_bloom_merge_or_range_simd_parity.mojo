@@ -85,7 +85,7 @@ def _bf_from_pattern(num_bytes: Int, seed: UInt64) -> BloomFilter:
         # LCG params from Numerical Recipes (Knuth).
         state = state * UInt64(6364136223846793005) + UInt64(1442695040888963407)
         raw.append(UInt8((state >> 32) & 0xFF))
-    var bf = BloomFilter.from_bytes(raw.unsafe_ptr(), num_bytes)
+    var bf = BloomFilter.from_bytes(Span(raw))
     _ = raw^  # keepalive
     return bf^
 
@@ -293,7 +293,7 @@ def test_order_independence() raises:
     var zeros = List[UInt8](capacity=num_bytes)
     for _ in range(num_bytes):
         zeros.append(UInt8(0))
-    var p1 = BloomFilter.from_bytes(zeros.unsafe_ptr(), num_bytes)
+    var p1 = BloomFilter.from_bytes(Span(zeros))
     _ = zeros^
 
     var a = _bf_from_pattern(num_bytes, UInt64(0xAAAA))
@@ -308,7 +308,7 @@ def test_order_independence() raises:
     var zeros2 = List[UInt8](capacity=num_bytes)
     for _ in range(num_bytes):
         zeros2.append(UInt8(0))
-    var p2 = BloomFilter.from_bytes(zeros2.unsafe_ptr(), num_bytes)
+    var p2 = BloomFilter.from_bytes(Span(zeros2))
     _ = zeros2^
 
     p2.merge_or_range(c, 0, num_bytes)
@@ -334,7 +334,7 @@ def test_zero_src_is_identity() raises:
     var zeros = List[UInt8](capacity=num_bytes)
     for _ in range(num_bytes):
         zeros.append(UInt8(0))
-    var zero_src = BloomFilter.from_bytes(zeros.unsafe_ptr(), num_bytes)
+    var zero_src = BloomFilter.from_bytes(Span(zeros))
     _ = zeros^
 
     dst.merge_or_range(zero_src, 0, num_bytes)
@@ -354,7 +354,7 @@ def test_ones_src_yields_ones() raises:
     var ones = List[UInt8](capacity=num_bytes)
     for _ in range(num_bytes):
         ones.append(UInt8(0xFF))
-    var ones_src = BloomFilter.from_bytes(ones.unsafe_ptr(), num_bytes)
+    var ones_src = BloomFilter.from_bytes(Span(ones))
 
     dst.merge_or_range(ones_src, 0, num_bytes)
     var actual = _bf_data_to_list(dst)

@@ -42,7 +42,6 @@ public_pointer	src/komira_collections/slab.mojo	1	predates the lint
 public_pointer	src/komira_compression/compression.mojo	5	predates the lint
 public_pointer	src/komira_compression/compression_codecs.mojo	15	predates the lint
 public_pointer	src/komira_db_sqlite/ffi.mojo	2	predates the lint
-public_pointer	src/komira_dynamic_filter/bloom_filter.mojo	5	predates the lint
 public_pointer	src/komira_http_core/tls/ffi.mojo	1	predates the lint
 public_pointer	src/komira_morsel/morsel_source.mojo	3	predates the lint
 public_pointer	src/komira_morsel/source_hooks.mojo	3	predates the lint

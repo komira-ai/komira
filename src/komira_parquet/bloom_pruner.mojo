@@ -158,22 +158,14 @@ def _bloom_can_match_eq[fs_o: FileSystem](
         var le = List[UInt8](capacity=4)
         for i in range(4):
             le.append(UInt8((v >> Int64(8 * i)) & 0xFF))
-        return bf.might_contain_bytes(le.unsafe_ptr(), 4)
+        return bf.might_contain_bytes(Span(le))
 
     # BYTE_ARRAY (UTF-8 strings): hash the byte sequence directly.
     if physical == ParquetType.BYTE_ARRAY:
         if not value.is_string():
             return True
-        # Build a List[UInt8] view of the literal's bytes. The String is
-        # borrowed from `value`; we only use the bytes while `value` is
-        # alive (for the duration of this function).
-        var s = value.string_val
-        var s_len = s.byte_length()
-        if s_len == 0:
-            return bf.might_contain_bytes(
-                s.unsafe_ptr(), 0,
-            )
-        return bf.might_contain_bytes(s.unsafe_ptr(), s_len)
+        # The literal's UTF-8 bytes, borrowed from `value` for this call.
+        return bf.might_contain_bytes(value.string_val.as_bytes())
 
     # FLOAT / DOUBLE / FLBA / INT96 / BOOLEAN: not supported.
     # parquet-format BloomFilter.md notes that floating-point types

@@ -9,6 +9,7 @@ mojo_library(
         "//src/komira_buffer:komira_buffer",
     ],
     test_srcs = [
+        "tests/test_bloom_byte_api.mojo",
         "tests/test_bloom_filter_simd_parity.mojo",
         "tests/test_bloom_filter_unit.mojo",
         "tests/test_bloom_in_list_filter.mojo",

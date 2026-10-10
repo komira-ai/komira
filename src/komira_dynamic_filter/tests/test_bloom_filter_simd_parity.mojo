@@ -102,7 +102,7 @@ def _probe_oracle_vs_simd(words: List[UInt32], hash_lo: UInt32) raises:
         raw.append(UInt8((w >> 8) & 0xFF))
         raw.append(UInt8((w >> 16) & 0xFF))
         raw.append(UInt8((w >> 24) & 0xFF))
-    var bf2 = BloomFilter.from_bytes(raw.unsafe_ptr(), 32)
+    var bf2 = BloomFilter.from_bytes(Span(raw))
     # Probe: SIMD path is `check_hash` (which calls `_block_check`).
     # Synthesize a 64-bit hash where the upper 32 bits are 0 (block 0)
     # and the lower 32 bits are `hash_lo`.
