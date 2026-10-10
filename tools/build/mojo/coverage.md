@@ -57,10 +57,10 @@ and, per library, with tests or without:
 and, as its tests for coverage (line coverage only: no branch coverage action):
 
 - its README's examples (`[tests][readme]`), built and run as a test:
-  `[coverage][bin][readme]`, `[coverage][tests][readme]`. A README with no
-  example gives a program that runs nothing (`mojo_cov_readme_source`
-  chooses). The report names the program under `buck-out/readme/`, which
-  covcheck counts outside the repository;
+  `[coverage][bin][readme]`, `[coverage][tests][readme]`: the generated
+  runner, which runs every example's program in one process (with no
+  example it runs nothing). The report names the programs under
+  `buck-out/readme/`, which covcheck counts outside the repository;
 - the `mojo_test` targets it names in `coverage_tests` (none by default; one
   test may be named by several libraries), each depending on it, with a
   source main and no `args`. It cannot depend on them, so its gate is the

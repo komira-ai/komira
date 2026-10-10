@@ -88,31 +88,43 @@ generator are [`//tools/build/readme_examples`](../readme_examples/BUCK)
 (pure Mojo; `buildtools.doc_links` reads code through the same CommonMark
 fence reader, so the link check and the examples agree on what is code).
 
-- **An example** is a fenced block whose info string is exactly `mojo`
-  (```` ``` ```` or `~~~`; a closing fence is the same character, at least as
-  long, so a ```` ```` ```` fence may quote ```` ``` ````). Every example
-  runs: there is no skip word. A sketch that cannot run is fenced ```` ```text ````.
-  Any word after `mojo` (`mojo skip`) and any near miss (`Mojo`, `mojo,`,
-  `.mojo`) is refused, naming `README.md:<line>`.
-- **A fragment**, as a Rust doctest: its column-0 `from`/`import` lines are
-  hoisted (deduplicated) and so are its column-0 declarations (`def`,
-  `struct`, `trait`, `comptime`, a decorator); the rest becomes
-  `def _example_<line>() raises:`. Assertions are visible `std.testing`
-  calls. Examples share one module, so two declaring the same name collide.
+- **An example** is a fenced block whose info string is `mojo` or
+  `mojo module` (```` ``` ```` or `~~~`; a closing fence is the same
+  character, at least as long, so a ```` ```` ```` fence may quote
+  ```` ``` ````). Every example runs: there is no skip word. A sketch that
+  cannot run is fenced ```` ```text ````. Any other word after `mojo`
+  (`mojo skip`) and any near miss (`Mojo`, `mojo,`, `.mojo`) is refused,
+  naming `README.md:<line>`.
+- **One program per example**, `readme_<I>_<line>.mojo` (`<line>`: its
+  opening fence's README line), compiled and run on its own as a gated test
+  labelled `<target>:README.md:<line>`. Examples share nothing: two may
+  import the same names and declare the same ones, and a failure names one
+  example. The fence tag is the mode; nothing is inferred from the code:
+  - ```` ```mojo ````: statements. The lines are pasted as they are, each
+    indented four spaces, into `def main() raises:`. Mojo allows an import
+    inside a function, so nothing is hoisted or parsed. Assertions are
+    visible `std.testing` calls.
+  - ```` ```mojo module ````: a whole program, copied as it is, with its own
+    `def main()`. Fence an example that declares a `struct` or `trait` (or
+    anything else that must be module-level) this way.
 - **Hidden lines**: an HTML comment `<!-- mojo-hidden ... -->` ending on the
   line just before an example's fence is prepended to it, and one starting on
   the line just after is appended (one line, or `<!-- mojo-hidden`, the code,
   then `-->`). GitHub's page does not render it; every raw view, and the
   installed copy, shows it. A `mojo-hidden` comment next to no example, or a
   misspelled marker, is refused.
-- **The program** is `readme_<I>.mojo` (never `<I>.mojo`: a file named like the
-  package beside the program would shadow it). It runs every example inside
-  `try`, prints `<package>/README.md:<line>: FAILED: <error>` for each that
-  raises, then `readme_<I> validation: P of E checks passed`, and fails if any
-  failed. Each line copied from the README ends with `# README.md:<n>`, so a
-  compile error, which quotes the line, names the README line too.
+- **Lines**: line n of an example's program is README line n (the lines
+  around the copied ones are blank, but for a header comment and the
+  `def main() raises:` of a ```` ```mojo ```` example), so a compile error
+  or an assertion at `readme_<I>_<line>.mojo:<n>` names README line n. The
+  generator also writes `readme_<I>.mojo` (never `<I>.mojo`: a file named
+  like the package beside the programs would shadow it), a runner that
+  imports every example's program and runs each inside `try`, printing
+  `<package>/README.md:<line>: FAILED: <error>` for each that raises, then
+  `readme_<I> validation: P of E checks passed`: what a coverage build and
+  an installed README's validation run, in one process.
 - **No example**: whether a README holds one is in its bytes, which analysis
-  cannot read, so a dynamic action reads the count. With none, nothing is
+  cannot read, so a dynamic action reads the examples' lines. With none, nothing is
   compiled or run and the marker reads `NO EXAMPLE <label>`, never `PASS`. A
   README's examples do not count as the tests a conda package needs.
 - The tool's own package, `tools/build/readme_examples`, may hold no README:
@@ -134,8 +146,10 @@ fence reader, so the link check and the examples agree on what is code).
   installed copy has no neighbours. Link an absolute URL or an `#anchor`.
 
 Test 38 ([`tests/README.md`](../tests/README.md#38-readme-examples)) builds
-a README that uses every form, and requires a raising example, a compile
-error and a `mojo skip` fence each to fail naming its README line; it also
+a README that uses every form and two whose examples declare the same names,
+and requires a raising example (and no other), a compile error, a struct in
+a plain ```` ```mojo ```` example and a `mojo skip` fence each to fail
+naming its README line; it also
 builds a two-library package whose README is one library's, and requires
 the same package without `readme = False` to fail.
 
