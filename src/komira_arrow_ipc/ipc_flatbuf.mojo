@@ -787,8 +787,8 @@ struct FlatbufReader[bo: Origin[mut=False]](Copyable, Movable):
         the u32 length prefix; NOT going through an offset slot)."""
         var length = Int(self.read_u32_le(length_pos))
         if length < 0:
-            raise Error(
-                "FlatbufReader.read_string: negative length " + String(length)
+            raise Error(  # cov: unreachable the length is a u32 widened to Int
+                "FlatbufReader.read_string: negative length " + String(length)  # cov: unreachable the length is a u32 widened to Int
             )
         var data_pos = length_pos + 4
         self._check_bounds(data_pos, length)
@@ -1262,8 +1262,8 @@ def end_table(mut writer: FlatbufWriter, var tb: _TableBuilder) raises -> Int:
             topmost_end = end
     var tail_pad = inline_size_data - topmost_end
     if tail_pad > 0:
-        writer.write_padding(tail_pad)
-        current_inline_pos -= tail_pad
+        writer.write_padding(tail_pad)  # cov: unreachable inline_size_data is the end of the last field, which no field passes
+        current_inline_pos -= tail_pad  # cov: unreachable inline_size_data is the end of the last field, which no field passes
 
     for k in range(n_present):
         var id = sorted_ids[k]
@@ -3748,7 +3748,7 @@ def parse_ipc_message[
     # Otherwise legacy: the first u32 IS the metadata_size.
 
     if total < pos + 4:
-        raise Error("IPC frame: too short for metadata_size header")
+        raise Error("IPC frame: too short for metadata_size header")  # cov: unreachable total >= 8 and pos <= 4 here
 
     var metadata_size = Int(frame.read_u32_le_at(pos))
     pos += 4

@@ -547,12 +547,12 @@ def _decode_record_batch_message_impl[
     # 3. Decode Message + assert RECORD_BATCH header.
     var msg = read_message(reader, reader.read_root_offset())
     if msg.header_tag != MESSAGE_HEADER_RECORD_BATCH:
-        raise Error(
-            "decode_record_batch_message: expected RECORD_BATCH header "
+        raise Error(  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
+            "decode_record_batch_message: expected RECORD_BATCH header "  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
             "(tag "
-            + String(Int(MESSAGE_HEADER_RECORD_BATCH))
-            + "), got "
-            + String(Int(msg.header_tag))
+            + String(Int(MESSAGE_HEADER_RECORD_BATCH))  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
+            + "), got "  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
+            + String(Int(msg.header_tag))  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
         )
 
     # 4. Decode RecordBatch table (length + nodes + buffers).
@@ -1273,12 +1273,12 @@ def _decode_record_batch_message_with_dicts_impl[
 
     var msg = read_message(reader, reader.read_root_offset())
     if msg.header_tag != MESSAGE_HEADER_RECORD_BATCH:
-        raise Error(
-            "decode_record_batch_message_with_dicts: expected "
+        raise Error(  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
+            "decode_record_batch_message_with_dicts: expected "  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
             "RECORD_BATCH header (tag "
-            + String(Int(MESSAGE_HEADER_RECORD_BATCH))
-            + "), got "
-            + String(Int(msg.header_tag))
+            + String(Int(MESSAGE_HEADER_RECORD_BATCH))  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
+            + "), got "  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
+            + String(Int(msg.header_tag))  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
         )
 
     var rb = read_record_batch(reader, msg.header_table_pos)
@@ -2221,12 +2221,12 @@ def _decode_record_batch_message_nested_impl[
 
     var msg = read_message(reader, reader.read_root_offset())
     if msg.header_tag != MESSAGE_HEADER_RECORD_BATCH:
-        raise Error(
-            "decode_record_batch_message_nested: expected RECORD_BATCH "
+        raise Error(  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
+            "decode_record_batch_message_nested: expected RECORD_BATCH "  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
             "header (tag "
-            + String(Int(MESSAGE_HEADER_RECORD_BATCH))
-            + "), got "
-            + String(Int(msg.header_tag))
+            + String(Int(MESSAGE_HEADER_RECORD_BATCH))  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
+            + "), got "  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
+            + String(Int(msg.header_tag))  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
         )
 
     var rb = read_record_batch(reader, msg.header_table_pos)
@@ -3355,12 +3355,12 @@ def decode_record_batch_message_nested_zerocopy[
 
     var msg = read_message(reader, reader.read_root_offset())
     if msg.header_tag != MESSAGE_HEADER_RECORD_BATCH:
-        raise Error(
-            "decode_record_batch_message_nested_zerocopy: expected "
+        raise Error(  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
+            "decode_record_batch_message_nested_zerocopy: expected "  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
             "RECORD_BATCH header (tag "
-            + String(Int(MESSAGE_HEADER_RECORD_BATCH))
-            + "), got "
-            + String(Int(msg.header_tag))
+            + String(Int(MESSAGE_HEADER_RECORD_BATCH))  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
+            + "), got "  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
+            + String(Int(msg.header_tag))  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
         )
 
     var rb = read_record_batch(reader, msg.header_table_pos)
@@ -4155,12 +4155,12 @@ def decode_record_batch_message_mmap(
 
     var msg = read_message(reader, reader.read_root_offset())
     if msg.header_tag != MESSAGE_HEADER_RECORD_BATCH:
-        raise Error(
-            "decode_record_batch_message_mmap: expected RECORD_BATCH"
+        raise Error(  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
+            "decode_record_batch_message_mmap: expected RECORD_BATCH"  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
             " header (tag "
-            + String(Int(MESSAGE_HEADER_RECORD_BATCH))
-            + "), got "
-            + String(Int(msg.header_tag))
+            + String(Int(MESSAGE_HEADER_RECORD_BATCH))  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
+            + "), got "  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
+            + String(Int(msg.header_tag))  # cov: unreachable peek_record_batch_codec_from_frame refused a non-RecordBatch frame first
         )
 
     var rb = read_record_batch(reader, msg.header_table_pos)

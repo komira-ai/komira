@@ -1349,9 +1349,9 @@ def _encode_record_batch_message_compressed_impl[
     # is 8-aligned and rejects unpadded inputs.
     var comp_body_pad = (8 - (compressed_cursor % 8)) % 8
     if comp_body_pad > 0:
-        for _ in range(comp_body_pad):
-            compressed_body.write_u8_at(compressed_cursor, UInt8(0))
-            compressed_cursor += 1
+        for _ in range(comp_body_pad):  # cov: unreachable every compressed buffer is padded to 8, so the cursor is 8-aligned
+            compressed_body.write_u8_at(compressed_cursor, UInt8(0))  # cov: unreachable every compressed buffer is padded to 8, so the cursor is 8-aligned
+            compressed_cursor += 1  # cov: unreachable every compressed buffer is padded to 8, so the cursor is 8-aligned
     compressed_body.set_length(Int64(compressed_cursor))
 
     _ = raw_body^
@@ -1608,8 +1608,8 @@ def _decompress_record_batch_frame_impl[
         out.copy_from_aligned_buffer_at(pos, fb_payload, 0, fb_size)
     pos += fb_size
     if pad_after_fb > 0:
-        for i in range(pad_after_fb):
-            out.write_u8_at(pos + i, UInt8(0))
+        for i in range(pad_after_fb):  # cov: unreachable a Message payload holds an i64 field, so finalize pads it to 8
+            out.write_u8_at(pos + i, UInt8(0))  # cov: unreachable a Message payload holds an i64 field, so finalize pads it to 8
         pos += pad_after_fb
     _ = fb_payload^
 
@@ -1937,8 +1937,8 @@ struct _CoalescedTask[C: ArrowIpcCompression](Segment):
             # wins; the driver re-raises the lowest-index error after
             # dispatch.
             if sp[].errors.value()[ri]:
-                ri = ri + n_workers
-                continue
+                ri = ri + n_workers  # cov: unreachable errors[ri] is written only by the task that processes frame ri, and ParallelDispatch.run_with_state runs each task id once
+                continue  # cov: unreachable errors[ri] is written only by the task that processes frame ri, and ParallelDispatch.run_with_state runs each task id once
             # Bind a mutable ref to the RB context. Slab's __getitem__
             # returns a ref into the slab's internal storage; touching
             # different ri values from different workers is safe per
@@ -2158,8 +2158,8 @@ def _build_rb_context[C: ArrowIpcCompression](
         out.copy_from_aligned_buffer_at(pos, fb_payload, 0, fb_size)
     pos += fb_size
     if pad_after_fb > 0:
-        for i in range(pad_after_fb):
-            out.write_u8_at(pos + i, UInt8(0))
+        for i in range(pad_after_fb):  # cov: unreachable a Message payload holds an i64 field, so finalize pads it to 8
+            out.write_u8_at(pos + i, UInt8(0))  # cov: unreachable a Message payload holds an i64 field, so finalize pads it to 8
         pos += pad_after_fb
     _ = fb_payload^
 
@@ -2569,9 +2569,9 @@ def _encode_dictionary_batch_message_from_string_column_compressed_impl[
 
     var comp_body_pad = (8 - (compressed_cursor % 8)) % 8
     if comp_body_pad > 0:
-        for _ in range(comp_body_pad):
-            compressed_body.write_u8_at(compressed_cursor, UInt8(0))
-            compressed_cursor += 1
+        for _ in range(comp_body_pad):  # cov: unreachable every compressed buffer is padded to 8, so the cursor is 8-aligned
+            compressed_body.write_u8_at(compressed_cursor, UInt8(0))  # cov: unreachable every compressed buffer is padded to 8, so the cursor is 8-aligned
+            compressed_cursor += 1  # cov: unreachable every compressed buffer is padded to 8, so the cursor is 8-aligned
     compressed_body.set_length(Int64(compressed_cursor))
 
     _ = raw_body^
@@ -2806,8 +2806,8 @@ def _decompress_dictionary_batch_frame_impl[
         out.copy_from_aligned_buffer_at(pos, fb_payload, 0, fb_size)
     pos += fb_size
     if pad_after_fb > 0:
-        for i in range(pad_after_fb):
-            out.write_u8_at(pos + i, UInt8(0))
+        for i in range(pad_after_fb):  # cov: unreachable a Message payload holds an i64 field, so finalize pads it to 8
+            out.write_u8_at(pos + i, UInt8(0))  # cov: unreachable a Message payload holds an i64 field, so finalize pads it to 8
         pos += pad_after_fb
     _ = fb_payload^
 
