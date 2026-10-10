@@ -19,7 +19,11 @@
 #     in full, before anything is lowered or created.
 #
 # Both deploy into a `FakeStore` and lower, to DATA, with the COMPLETE fixed
-# set of roles of each type (the closed world). On the generic shape:
+# set of roles of each type (the closed world), through THE shared shape
+# lowering, `kci_cloud.shape.lower_shape` (and refuse through its
+# `shape_limits`): a built-in adapter lowers through the same function, so it
+# lowers as its fake does. The files named below are kci_cloud/shape/'s. On
+# the generic shape:
 #   service -> `<id>/identity` (wanted iff no `run_as`), `<id>/run`,
 #              `<id>/public` (wanted iff `public {}`), and one grant per edge
 #   container job, worker -> `<id>/identity`, `<id>/run`, and the same
@@ -63,7 +67,7 @@
 # node (`run`, `bucket`, `identity`), so this lowering never reads another
 # resource. A workload with `run_as` turns its private identity off, its run
 # depends on the account, and its run has the field `run_as`.
-# `FakeCloud` built with a provider shape (`shapes.mojo`: `aws`, `gcp`,
+# `FakeCloud` built with a provider shape (kci_cloud/shape/shapes.mojo: `aws`, `gcp`,
 # `azure`, `onprem`) lowers to THAT shape's fixed roles and provider kinds
 # instead: on the azure shape a public ingress folded into the run node; on
 # the aws shape a worker's `<id>/task`; on the onprem shape a `<id>/vault`
@@ -89,6 +93,19 @@
 # table's key, indexes and TTL (`none` when unset).
 # Provenance is never a field, and neither is retention: kci sets it on the
 # lowered node, and the node carries it as the `kci-retention` mark.
+#
+# GRANTS ON A DERIVED SHAPE (gcp): every grant node, and the public role's,
+# is a member binding stored with no label; its stamp is derived from its
+# member and its target by kci_cloud's attribution, through the fakes' role
+# table (roles.mojo, fake_store.mojo, nodes.mojo).
+#
+# THE IMAGE REGISTRY (`image_registry`) is the bootstrap `registry` item's
+# name, `<machine>-<cell>-images`; `registry_login` presents the access-token
+# user and the token.
+#
+# THE KIT'S HOOKS of steps 14 and 15 (`plant_foreign_member`,
+# `member_present`, `fail_after_create_of`, `failed_after_create`) work in
+# memory (fake_store.mojo).
 #
 # THE CELL'S SETTINGS (`configure`): `public_mechanism` (`invoker` or
 # `gateway`, default `invoker`; `none` chooses none, and validate then
@@ -137,6 +154,8 @@ from kci_cloud import (
     ExistingObject,
     LoweredNode,
     OwnedRecord,
+    ProviderShape,
+    RegistryLogin,
     Principal,
     RUN_UNKNOWN,
     Setting,
@@ -165,6 +184,8 @@ from kci_cloud import (
     NOT_YET,
     V1_IMAGE_PLATFORM,
     Feed,
+    lower_shape,
+    shape_limits,
     Firing,
     GrantEdge,
     body_field,
@@ -180,190 +201,11 @@ from kci_cloud import (
 )
 from kci_resource_proto.resource import Resource
 
-from kci_cloud_fake.data import lower_bucket, lower_table
-from kci_cloud_fake.dns import dns_limits, lower_certificate, lower_record, lower_zone
 from kci_cloud_fake.existing import planted_like, read_existing as _read_existing, release as _release
 from kci_cloud_fake.fake_store import FakeStore
-from kci_cloud_fake.messaging import lower_queue, lower_subscription, lower_topic, messaging_limits
-from kci_cloud_fake.limits import (
-    FAKE_CITATION,
-    common_limits,
-    fold_limits,
-    index_limits,
-)
-from kci_cloud_fake.network import lower_address, lower_network, lower_subnet, network_limits
-from kci_cloud_fake.metadata import metadata_limits
 from kci_cloud_fake.nodes import FakeNode, live_key
-from kci_cloud_fake.registry import lower_registry
-from kci_cloud_fake.secrets import lower_secret
-from kci_cloud_fake.shapes import (
-    ProviderShape,
-    ROLE_IDENTITY,
-    ROLE_VAULT,
-    helper_role,
-)
-from kci_cloud_fake.triggers import folds, lower_trigger, trigger_limits
-from kci_cloud_fake.workloads import lower_run, workload_limits
-
-
-def _identity(r: Resource, field: Int, shape: ProviderShape, own: Bool) raises -> List[LoweredNode]:
-    """`<id>/identity` (wanted iff the resource holds its own identity) and,
-    where the shape has one, its `<id>/vault` helper. A service account's
-    identity exposes NAME (`account`, how the node behaves, not state)."""
-    var out = List[LoweredNode]()
-    var ident = r.id + String("/") + String(ROLE_IDENTITY)
-    var fields = List[Setting]()
-    if field == FIELD_SERVICE_ACCOUNT:
-        fields.append(Setting(String("account"), String("true")))
-    out.append(
-        LoweredNode(
-            ident.copy(),
-            r.id,
-            shape.kind_of(field, String(ROLE_IDENTITY)),
-            List[String](),
-            List[InputRef](),
-            fields^,
-            own,
-        )
-    )
-    if shape.has(field, String(ROLE_VAULT)):
-        var deps = List[String]()
-        deps.append(ident^)
-        out.append(
-            LoweredNode(
-                r.id + String("/") + String(ROLE_VAULT),
-                r.id,
-                shape.kind_of(field, String(ROLE_VAULT)),
-                deps^,
-                List[InputRef](),
-                List[Setting](),
-                own,
-            )
-        )
-    return out^
-
-
-def _edge_fields(e: GrantEdge, with_principal: Bool) -> List[Setting]:
-    var g = List[Setting]()
-    if with_principal:
-        g.append(Setting(String("principal"), e.principal.copy()))
-    if e.on_cell():
-        g.append(Setting(String("cell"), e.cell.copy()))
-    else:
-        g.append(Setting(String("target"), e.target.copy()))
-    g.append(Setting(String("access"), e.access.copy()))
-    return g^
-
-
-def _lower_edges(
-    r: Resource, edges: List[GrantEdge], shape: ProviderShape, mut out: List[LoweredNode], wanted: Bool = True
-) raises:
-    """One grant per edge, by the shape's row for the target's type: the
-    binding (and its helper, where the row names one), or FOLDED into the
-    identity it is for when the shape has no row. `wanted` False lowers
-    every edge turned off (a schedule folded into its job)."""
-    for i in range(len(edges)):
-        ref e = edges[i]
-        var row = shape.grant_row(e.target_field)
-        if not row:
-            var ident = r.id + String("/") + String(ROLE_IDENTITY)
-            var at = -1
-            for k in range(len(out)):
-                if out[k].id == ident:
-                    at = k
-            if not e.on_cell() or e.principal != r.id or at < 0:
-                raise Error(
-                    String("fake: shape \"")
-                    + shape.name
-                    + String("\" folds this edge of \"")
-                    + r.id
-                    + String("\" into an identity it does not hold; validate refuses it")
-                )
-            out[at].desired.append(Setting(String("cell.") + e.cell, e.access.copy()))
-            continue
-        var deps = List[String]()
-        deps.append(e.principal_node())
-        if not e.on_cell():
-            # The target by its resource id: kci resolves its primary node.
-            deps.append(e.target.copy())
-        if row.value().helper.byte_length() > 0:
-            var hid = r.id + String("/") + helper_role(e.role)
-            var hdeps = List[String]()
-            if not e.on_cell():
-                hdeps.append(e.target.copy())
-            out.append(
-                LoweredNode(
-                    hid.copy(), r.id, row.value().helper.copy(), hdeps^, List[InputRef](), _edge_fields(e, False), wanted
-                )
-            )
-            deps.append(hid^)
-        out.append(
-            LoweredNode(
-                r.id + String("/") + e.role,
-                r.id,
-                row.value().kind.copy(),
-                deps^,
-                List[InputRef](),
-                _edge_fields(e, True),
-                wanted,
-            )
-        )
-
-
-def _lower(
-    r: Resource,
-    edges: List[GrantEdge],
-    feeds: List[Feed],
-    firings: List[Firing],
-    mechanism: String,
-    shape: ProviderShape,
-) raises -> List[LoweredNode]:
-    """The complete fixed set of roles of `r` on `shape`, as data."""
-    var field = body_field(r)
-    if field == FIELD_BUCKET:
-        return lower_bucket(r, shape)
-    if field == FIELD_TABLE:
-        return lower_table(r, shape)
-    if field == FIELD_QUEUE:
-        return lower_queue(r, feeds, shape)
-    if field == FIELD_TOPIC:
-        return lower_topic(r, shape)
-    if field == FIELD_SUBSCRIPTION:
-        return lower_subscription(r, shape)
-    if field == FIELD_SECRET:
-        return lower_secret(r, shape)
-    if field == FIELD_DNS_ZONE:
-        return lower_zone(r, shape)
-    if field == FIELD_DNS_RECORD:
-        return lower_record(r, shape)
-    if field == FIELD_CERTIFICATE:
-        return lower_certificate(r, shape)
-    if field == FIELD_NETWORK:
-        return lower_network(r, shape)
-    if field == FIELD_SUBNET:
-        return lower_subnet(r, shape)
-    if field == FIELD_IP_ADDRESS:
-        return lower_address(r, shape)
-    if field == FIELD_REGISTRY:
-        return lower_registry(r, shape)
-    var out = List[LoweredNode]()
-    if field == FIELD_GRANT:
-        _lower_edges(r, edges, shape, out)
-        return out^
-    if field == FIELD_SCHEDULE or field == FIELD_EVENT_TRIGGER:
-        var on = not folds(r, edges, shape)
-        out.extend(_identity(r, field, shape, on))
-        out.extend(lower_trigger(r, edges, shape, on))
-        _lower_edges(r, edges, shape, out, on)
-        return out^
-    var own = holds_own_identity(r)
-    out.extend(_identity(r, field, shape, own))
-    if field == FIELD_SERVICE_ACCOUNT:
-        _lower_edges(r, edges, shape, out)
-        return out^
-    out.extend(lower_run(r, own, mechanism, shape, firings))
-    _lower_edges(r, edges, shape, out)
-    return out^
+from kci_cloud_fake.roles import fake_role_table
+from kci_cloud.shape.limits import FAKE_CITATION, common_limits
 
 
 def _label(labels: List[Label], key: String) -> String:
@@ -379,7 +221,7 @@ def _owned(store: ArcPointer[FakeStore], scope: CellScope) raises -> List[OwnedR
     var out = List[OwnedRecord]()
     ref s = store[]
     for i in range(len(s.ids)):
-        ref labels = s.labels[i]
+        var labels = s.labels_of(i)
         if standard_identity_of(labels).byte_length() == 0:
             continue
         if _label(labels, String(LABEL_MACHINE)) != scope.machine:
@@ -412,6 +254,21 @@ def _owned(store: ArcPointer[FakeStore], scope: CellScope) raises -> List[OwnedR
     return out^
 
 
+def _registry_name(machine: String, cell: String) -> String:
+    """The cell's bootstrap image registry: `<machine>-<cell>-images`."""
+    return machine + String("-") + cell + String("-images")
+
+
+def _registry_login(creds: Creds) -> RegistryLogin:
+    """The fakes' registry login: the access-token user and the token."""
+    return RegistryLogin(String(FAKE_REGISTRY_USER), creds.token.copy())
+
+
+comptime FAKE_REGISTRY_USER = "oauth2accesstoken"
+"""The user a registry client presents with an access token as its
+password (the access-token convention)."""
+
+
 def _bootstrap(machine: String, cell: String) -> List[BootstrapItem]:
     var l = List[BootstrapItem]()
     l.append(
@@ -424,7 +281,7 @@ def _bootstrap(machine: String, cell: String) -> List[BootstrapItem]:
     l.append(
         BootstrapItem(
             String("registry"),
-            machine + String("-") + cell + String("-images"),
+            _registry_name(machine, cell),
             String("where the cell pulls images by digest"),
         )
     )
@@ -477,6 +334,8 @@ struct FakeCloud(ConformanceTarget, Movable):
         self._mechanism = String("invoker")
         self._principal = String("")
         self.store = ArcPointer[FakeStore](FakeStore(fail_at_call, read_lag, foreign))
+        if shape.grants_derived():
+            self.store[].roles = fake_role_table(shape)
 
     def cloud_id(self) -> CloudId:
         return CloudId(self._id)
@@ -544,15 +403,7 @@ struct FakeCloud(ConformanceTarget, Movable):
 
     def check(self, r: Resource, feeds: List[Feed], firings: List[Firing]) -> List[Finding]:
         var out = List[Finding]()
-        common_limits(r, out)
-        fold_limits(r, self._shape, self._id, out)
-        index_limits(r, self._shape, self._id, out)
-        messaging_limits(r, feeds, self._shape, self._id, out)
-        dns_limits(r, self._shape, self._id, out)
-        workload_limits(r, self._shape, self._id, out)
-        trigger_limits(r, firings, self._shape, self._id, out)
-        network_limits(r, self._shape, self._id, out)
-        metadata_limits(r, firings, self._shape.metadata, self._shape.schedule_folds, self._id, out)
+        shape_limits(r, feeds, firings, self._shape, self._id, out)
         return out^
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
@@ -561,10 +412,10 @@ struct FakeCloud(ConformanceTarget, Movable):
     def lower(
         self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]
     ) raises -> List[LoweredNode]:
-        return _lower(r, edges, feeds, firings, self._mechanism, self._shape)
+        return lower_shape(r, edges, feeds, firings, self._mechanism, self._shape)
 
     def realize(mut self, node: LoweredNode) raises -> ErasedResource:
-        return ErasedResource.erase(FakeNode(self.store, node))
+        return ErasedResource.erase(FakeNode(self.store, node, self._shape.is_binding(node.kind)))
 
     def bootstrap_resources(self, machine: String, cell: String) -> List[BootstrapItem]:
         return _bootstrap(machine, cell)
@@ -633,7 +484,7 @@ struct FakeCloud(ConformanceTarget, Movable):
         var i = self.store[].find(logical_id)
         if i < 0:
             return List[Label]()
-        return self.store[].labels[i].copy()
+        return self.store[].labels_of(i)
 
     def plant_foreign(mut self, logical_id: String) raises:
         self.store[].plant(logical_id, String("foreign"))
@@ -651,6 +502,24 @@ struct FakeCloud(ConformanceTarget, Movable):
 
     def creates_of(self, logical_id: String) -> Int:
         return self.store[].creates_of(logical_id)
+
+    def plant_foreign_member(mut self, node: String, member: String, role: String) raises:
+        self.store[].plant_member(node, member, role)
+
+    def member_present(self, node: String, member: String, role: String) -> Bool:
+        return self.store[].member_present(node, member, role)
+
+    def fail_after_create_of(mut self, node: String):
+        self.store[].fail_after_create_of(node)
+
+    def failed_after_create(self) -> String:
+        return self.store[].failed_after.copy()
+
+    def image_registry(self, ctx: CellContext) -> String:
+        return _registry_name(ctx.scope.machine, ctx.scope.cell)
+
+    def registry_login(mut self, creds: Creds) raises -> RegistryLogin:
+        return _registry_login(creds)
 
 
 struct FakeLimitedCloud(ConformanceTarget, Movable):
@@ -762,7 +631,7 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
     def lower(
         self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]
     ) raises -> List[LoweredNode]:
-        return _lower(r, edges, feeds, firings, String(""), ProviderShape.generic())
+        return lower_shape(r, edges, feeds, firings, String(""), ProviderShape.generic())
 
     def realize(mut self, node: LoweredNode) raises -> ErasedResource:
         return ErasedResource.erase(FakeNode(self.store, node))
@@ -834,7 +703,7 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
         var i = self.store[].find(logical_id)
         if i < 0:
             return List[Label]()
-        return self.store[].labels[i].copy()
+        return self.store[].labels_of(i)
 
     def plant_foreign(mut self, logical_id: String) raises:
         self.store[].plant(logical_id, String("foreign"))
@@ -852,3 +721,21 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
 
     def creates_of(self, logical_id: String) -> Int:
         return self.store[].creates_of(logical_id)
+
+    def plant_foreign_member(mut self, node: String, member: String, role: String) raises:
+        self.store[].plant_member(node, member, role)
+
+    def member_present(self, node: String, member: String, role: String) -> Bool:
+        return self.store[].member_present(node, member, role)
+
+    def fail_after_create_of(mut self, node: String):
+        self.store[].fail_after_create_of(node)
+
+    def failed_after_create(self) -> String:
+        return self.store[].failed_after.copy()
+
+    def image_registry(self, ctx: CellContext) -> String:
+        return _registry_name(ctx.scope.machine, ctx.scope.cell)
+
+    def registry_login(mut self, creds: Creds) raises -> RegistryLogin:
+        return _registry_login(creds)

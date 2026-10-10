@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_cloud_fake/network.mojo: how the fake clouds lower the NETWORK types
+# kci_cloud/shape/network.mojo: how the shared shapes lower the NETWORK types
 # (network, subnet, IP address) and a service's `network`, and the limits a
 # shape puts on them.
 # =============================================================================
@@ -38,22 +38,24 @@
 # =============================================================================
 
 from kci_reconciler import InputRef
-from kci_cloud import (
-    FIELD_IP_ADDRESS,
-    FIELD_NETWORK,
-    FIELD_SUBNET,
+from kci_cloud.adapter import (
     FINDING_LIMIT,
     Finding,
     LoweredNode,
     Setting,
-    body_is,
-    service_subnet,
 )
+from kci_cloud.catalog import (
+    FIELD_IP_ADDRESS,
+    FIELD_NETWORK,
+    FIELD_SUBNET,
+    body_is,
+)
+from kci_cloud.network import service_subnet
 from kci_resource_proto.resource import Resource
 
-from kci_cloud_fake.limits import FAKE_CITATION
-from kci_cloud_fake.metadata import fake_physical_name
-from kci_cloud_fake.shapes import ProviderShape, ROLE_ADDRESS, ROLE_NETWORK, ROLE_SUBNET
+from kci_cloud.shape.limits import FAKE_CITATION
+from kci_cloud.shape.metadata import fake_physical_name
+from kci_cloud.shape.shapes import ProviderShape, ROLE_ADDRESS, ROLE_NETWORK, ROLE_SUBNET
 
 
 def fake_network_name(resource_id: String) -> String:

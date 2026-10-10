@@ -16,7 +16,10 @@
 #                 carries exactly one retention mark, the node's
 #                 (`kci-retention=retain|delete`); and it carries the scope's
 #                 validation run id under the run-id key exactly, or no
-#                 run-id label when the scope has none;
+#                 run-id label when the scope has none. A node whose object
+#                 is a member binding with a DERIVED stamp (derived.mojo)
+#                 carries no labels: `live_labels` returns what attribution
+#                 derives for it, and steps 3, 12 and 15 check those;
 #   4. re-apply   an IDEMPOTENT RE-APPLY under a NEW provenance (another run
 #                 id and revision) is NOOP everywhere and mutates nothing:
 #                 provenance is never part of a digest;
@@ -70,6 +73,31 @@
 #                 it carries no kci label, and `list_owned` no longer
 #                 reports it. The kit then destroys the rest; the released
 #                 object stays.
+#  14. member     FOREIGN MEMBER, on a fresh apply of `base`: on the first
+#                 wanted grant node whose target is an owned object, and on
+#                 the first whose target is a cell resource (a cell-scope
+#                 binding; on GCP the project's policy), the kit plants out
+#                 of band (`plant_foreign_member`) a member this cell does not
+#                 stamp holding a role the adapter maps to a verb
+#                 (`MEMBER_FOREIGN`, `ROLE_MAPPED`), then the node's own
+#                 principal holding a role it does not map (`MEMBER_CELL`,
+#                 `ROLE_UNMAPPED`). After each, a plan must keep the node a
+#                 NOOP and report the new member as an unmanaged difference
+#                 (the node's report changes); an apply must change nothing,
+#                 and `member_present` must stay true. Where `base` lowers no
+#                 grant node of a kind (a shape that folds cell edges into the
+#                 identity), that half has nothing to plant on.
+#  15. born       BORN STAMPED, for every wanted node of `base`'s lowering,
+#                 from the emptied cloud each time: the kit arms
+#                 `fail_after_create_of(node)` (the create stores the object
+#                 as the request carried it, then reports an error) and
+#                 applies `base`, which must stop with an error, at that node
+#                 (`failed_after_create`). The node must then pass step 3's
+#                 label check as it stands, from the create request alone. A
+#                 re-apply under a new provenance must finish with no foreign
+#                 refusal, and must not create that node a second time. An
+#                 adapter that creates an object and stamps it in a second
+#                 call leaves an unstamped object behind and fails here.
 # Every apply that should finish must: one that stops part-way fails the kit
 # with what landed and what is pending.
 #
@@ -154,7 +182,9 @@ trait ConformanceTarget(CloudAdapter):
         ...
 
     def live_labels(self, logical_id: String) -> List[Label]:
-        """The labels the live object of node `logical_id` carries."""
+        """The labels the live object of node `logical_id` carries; for a
+        member binding whose stamp is DERIVED, the labels its attribution
+        derives (derived.mojo)."""
         ...
 
     def plant_foreign(mut self, logical_id: String) raises:
@@ -180,6 +210,30 @@ trait ConformanceTarget(CloudAdapter):
         """Create, out of band and unstamped, the object `node` declares
         (its kind, its cloud name and its state): what an adoption of it
         expects to find."""
+        ...
+
+    def plant_foreign_member(mut self, node: String, member: String, role: String) raises:
+        """Add, out of band, `member` holding `role` to the binding behind
+        lowered grant node `node` (its target's policy, or the cell scope's
+        for a cell edge). `member` is `MEMBER_FOREIGN` (an identity this cell
+        does not stamp) or `MEMBER_CELL` (the node's own principal); `role`
+        is `ROLE_MAPPED` (a role the adapter's table maps to a verb) or
+        `ROLE_UNMAPPED`. The adapter turns each word into its own value."""
+        ...
+
+    def member_present(self, node: String, member: String, role: String) -> Bool:
+        """Whether `member` holds `role` (the kit's words, as for
+        `plant_foreign_member`) on the binding behind node `node` now."""
+        ...
+
+    def fail_after_create_of(mut self, node: String):
+        """Make the next create of lowered node `node` store the object
+        exactly as the request carried it, then report an error to the
+        caller (the wait timed out)."""
+        ...
+
+    def failed_after_create(self) -> String:
+        """The node `fail_after_create_of` hit (empty if none yet)."""
         ...
 
 
@@ -297,6 +351,46 @@ def _check_labels[
                 lowered[k].id + String(" carries validation run \"") + _shown(run)
                 + String("\", not \"") + _shown(want_run) + String("\""),
             )
+
+
+comptime MEMBER_FOREIGN = "FOREIGN"
+"""Step 14's word for an identity this cell does not stamp."""
+comptime MEMBER_CELL = "CELL"
+"""Step 14's word for the planted node's own principal."""
+comptime ROLE_MAPPED = "MAPPED"
+"""Step 14's word for a role the adapter's table maps to a verb."""
+comptime ROLE_UNMAPPED = "UNMAPPED"
+"""Step 14's word for a role the adapter's table does not map."""
+
+
+def _is_grant_node(n: LoweredNode) -> Bool:
+    """A wanted node of one grant edge: it names its principal, its access,
+    and a target or a cell resource (the shared lowering's edge fields)."""
+    if not n.wanted or n.field(String("principal")).byte_length() == 0:
+        return False
+    if n.field(String("access")).byte_length() == 0:
+        return False
+    return n.field(String("target")).byte_length() > 0 or n.field(String("cell")).byte_length() > 0
+
+
+def _grant_picks(lowered: List[LoweredNode]) -> List[String]:
+    """Step 14's nodes: the first grant node with an owned target, then the
+    first with a cell target (each where one exists)."""
+    var out = List[String]()
+    for want_cell in range(2):
+        for k in range(len(lowered)):
+            var on_cell = lowered[k].field(String("cell")).byte_length() > 0
+            if _is_grant_node(lowered[k]) and on_cell == (want_cell == 1):
+                out.append(lowered[k].id.copy())
+                break
+    return out^
+
+
+def _unmanaged_of(actions: List[ChangeAction], lid: String) -> String:
+    var act = _action_of(actions, lid)
+    if not act:
+        return String("")
+    return act.value().unmanaged.copy()
 
 
 comptime KIT_ADOPTED = "kitadopt"
@@ -676,3 +770,60 @@ def run_conformance[
         if owned[i].owner_node == pid:
             raise _fail("release", pid + String(" is still listed as kci's"))
     _ = destroy_resources(clouds, cloud, ctx, rest, creds, store13)
+
+    # 14. foreign member, on the grant nodes of a fresh apply
+    var live14 = cloud.live_count()
+    var store14 = InMemoryStateStore()
+    _ = _applied("member", apply_resources(clouds, cloud, ctx, base, creds, store14))
+    var picks = _grant_picks(lowered)
+    for p in range(len(picks)):
+        ref node = picks[p]
+        for w in range(2):
+            var member = String(MEMBER_FOREIGN) if w == 0 else String(MEMBER_CELL)
+            var role = String(ROLE_MAPPED) if w == 0 else String(ROLE_UNMAPPED)
+            var what = node + String(": ") + member + String(" holding ") + role
+            var before = _unmanaged_of(plan_resources(clouds, cloud, ctx, base, creds, store14), node)
+            cloud.plant_foreign_member(node, member, role)
+            if not cloud.member_present(node, member, role):
+                raise _fail("member", what + String(" was planted but is not present"))
+            var act14 = _action_of(plan_resources(clouds, cloud, ctx, base, creds, store14), node)
+            if not act14 or act14.value().verb != VERB_NOOP:
+                raise _fail("member", what + String(" was planted and the node planned a change"))
+            ref now = act14.value().unmanaged
+            if now.byte_length() == 0 or now == before:
+                raise _fail("member", what + String(" was planted and not reported as an unmanaged difference"))
+            var m14 = cloud.mutations()
+            _all_noop("member", _applied("member", apply_resources(clouds, cloud, ctx, base, creds, store14)))
+            if cloud.mutations() != m14 or not cloud.member_present(node, member, role):
+                raise _fail("member", what + String(" was touched by an apply; it is not this cell's"))
+    _ = destroy_resources(clouds, cloud, ctx, base, creds, store14)
+    if cloud.live_count() != live14:
+        raise _fail("member", String("nodes left after the member destroy"))
+
+    # 15. born stamped: every created node, its create failing after it landed
+    var live15 = cloud.live_count()
+    for k in range(len(lowered)):
+        if not lowered[k].wanted:
+            continue
+        ref lid = lowered[k].id
+        var store15 = InMemoryStateStore()
+        cloud.fail_after_create_of(lid)
+        var o15 = apply_resources(clouds, cloud, ctx, base, creds, store15)
+        if not o15.error:
+            raise _fail("born", lid + String(": an apply whose create failed after landing did not stop"))
+        var hit15 = cloud.failed_after_create()
+        if hit15 != lid:
+            raise _fail("born", lid + String(" was armed, but the failed create was \"") + hit15 + String("\""))
+        var one = List[LoweredNode]()
+        one.append(lowered[k].copy())
+        _check_labels("born", cloud, ctx, one)
+        var c15 = cloud.creates_of(lid)
+        var again15 = _with_run(ctx, String("conformance-born"))
+        var r15 = apply_resources(clouds, cloud, again15, base, creds, store15)
+        if r15.error:
+            raise _fail("born", lid + String(": the re-apply after its failed create stopped: ") + r15.error.value())
+        if cloud.creates_of(lid) != c15:
+            raise _fail("born", lid + String(" was created again by the re-apply; it was not recognised as ours"))
+        _ = destroy_resources(clouds, cloud, ctx, base, creds, store15)
+        if cloud.live_count() != live15:
+            raise _fail("born", String("nodes left after the destroy that followed ") + lid)
