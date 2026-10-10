@@ -6,7 +6,11 @@
 # What each test proves:
 #   - order: the path before the method, the method before the bearer, the
 #     bearer before the body (a request failing several checks is answered
-#     by the first), and the body size before the shape;
+#     by the first: an oversized body with each kind of bad bearer is
+#     answered by the bearer), the bearer's `aud` before its `client_id`,
+#     the body size before the shape, and the safety conditions in the
+#     order of pdp.mojo's header (each adjacent pair failing together is
+#     answered by the earlier one, which pins the whole order);
 #   - the path and the method are exact (near misses are 404 / 405);
 #   - replies: the status, `Cache-Control: no-store` on every reply, the
 #     challenge of each 401 and 400, an error body that names only the
@@ -23,21 +27,29 @@
 #     and a repeat; `set_max_age_s` refuses below -1;
 #   - what is kept: one `DecisionRecord` per decided resource with the
 #     action as asked, no token anywhere in it; `request_count` counts
-#     every call, refused ones included.
+#     every call, refused ones included; `last_reason` is the reason of
+#     the latest reply, refused or decided, whatever came before it.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_test_pdp import (
     MAX_BODY_BYTES,
+    REASON_AUDIENCE_MISMATCH,
+    REASON_BEARER_AUDIENCE,
+    REASON_BEARER_INVALID,
     REASON_BEARER_MALFORMED,
     REASON_BEARER_MISSING,
+    REASON_BEARER_NO_CLIENT_ID,
     REASON_BODY_NOT_JSON,
     REASON_BODY_TOO_LARGE,
+    REASON_CLIENT_MISMATCH,
     REASON_DECIDED,
     REASON_METHOD,
     REASON_NOT_FOUND,
     REASON_SUBJECT_INVALID,
+    REASON_SUBJECT_MISMATCH,
+    REASON_SUBJECT_TYPE_MISMATCH,
     SUBJECT_TYPE_CLIENT,
     SUBJECT_TYPE_USER,
     PdpReply,
@@ -121,6 +133,96 @@ def test_order_of_checks() raises:
     r = pdp.handle("POST", "/access/v1/evaluation", String("Bearer bearer"), big)
     assert_equal(r.reason, REASON_BODY_TOO_LARGE)
     assert_equal(r.status, 413)
+
+
+def _order_pdp() raises -> TestPdp[TokenTable]:
+    """`_pdp()`'s policy, with bearers that fail one or two bearer checks
+    and subject tokens that fail two adjacent safety conditions at once."""
+    var t = TokenTable()
+    t.add("bearer", VerifiedToken(SUBJECT_TYPE_CLIENT, "notes", "pdp", "notes", EXP))
+    t.add("subject", VerifiedToken(SUBJECT_TYPE_USER, "alice", "notes", "web", EXP))
+    # Bearers: wrong aud; no client_id; both.
+    t.add("wrongaud", VerifiedToken(SUBJECT_TYPE_CLIENT, "notes", "pdx", "notes", EXP))
+    t.add("noclient", VerifiedToken(SUBJECT_TYPE_CLIENT, "notes", "pdp", "", EXP))
+    t.add("wrongaudnoclient", VerifiedToken(SUBJECT_TYPE_CLIENT, "notes", "pdx", "", EXP))
+    # Subject tokens, asked about as user alice with audience "notes":
+    # type and id both wrong; id and aud both wrong; aud right but the
+    # audience asked for is neither it nor the bearer's client_id.
+    t.add("typeid", VerifiedToken(SUBJECT_TYPE_CLIENT, "bob", "notes", "web", EXP))
+    t.add("idaud", VerifiedToken(SUBJECT_TYPE_USER, "bob", "other", "web", EXP))
+    t.add("audclient", VerifiedToken(SUBJECT_TYPE_USER, "alice", "other", "web", EXP))
+    var pdp = TestPdp(t^, "pdp", NOW)
+    pdp.declare_kind("note")
+    pdp.allow(PolicyRule(SUBJECT_TYPE_USER, "alice", "read", "note", "n1"))
+    return pdp^
+
+
+def _ask_order(
+    mut pdp: TestPdp[TokenTable], token: String, audience: String
+) -> PdpReply:
+    var body = evaluation_json(
+        SUBJECT_TYPE_USER, "alice", "S", "read", "note", "n1", audience
+    ).replace("<<S>>", token)
+    return _post(pdp, body)
+
+
+def test_order_of_bearer_and_body_checks() raises:
+    var pdp = _order_pdp()
+    # The fixture's good request is an allow, so each refusal below comes
+    # from the defect planted in it.
+    assert_equal(_ask_order(pdp, "subject", "notes").body, String(ALLOW))
+    # An oversized body never reaches the size check while the bearer is
+    # bad, whichever bearer check refuses it.
+    var big = List[UInt8]()
+    for _ in range(MAX_BODY_BYTES + 1):
+        big.append(0x7B)
+    var path = String("/access/v1/evaluation")
+    var r = pdp.handle("POST", path, None, big)
+    assert_equal(r.reason, REASON_BEARER_MISSING)
+    assert_equal(r.status, 401)
+    r = pdp.handle("POST", path, String("Bearer a b"), big)
+    assert_equal(r.reason, REASON_BEARER_MALFORMED)
+    r = pdp.handle("POST", path, String("Bearer unknown"), big)
+    assert_equal(r.reason, REASON_BEARER_INVALID)
+    r = pdp.handle("POST", path, String("Bearer wrongaud"), big)
+    assert_equal(r.reason, REASON_BEARER_AUDIENCE)
+    r = pdp.handle("POST", path, String("Bearer noclient"), big)
+    assert_equal(r.reason, REASON_BEARER_NO_CLIENT_ID)
+    # The batch path keeps the same order.
+    r = pdp.handle("POST", "/access/v1/evaluations", None, big)
+    assert_equal(r.reason, REASON_BEARER_MISSING)
+    # A bearer with the wrong aud and no client_id: the aud answers.
+    var junk = _bytes("{")
+    r = pdp.handle("POST", path, String("Bearer wrongaudnoclient"), junk)
+    assert_equal(r.reason, REASON_BEARER_AUDIENCE)
+    # Each alone, with a broken body: the bearer answers.
+    r = pdp.handle("POST", path, String("Bearer noclient"), junk)
+    assert_equal(r.reason, REASON_BEARER_NO_CLIENT_ID)
+
+
+def test_order_of_safety_checks() raises:
+    var pdp = _order_pdp()
+    # subject.type and subject.id both wrong: the type answers.
+    var r = _ask_order(pdp, "typeid", "notes")
+    assert_equal(r.reason, REASON_SUBJECT_TYPE_MISMATCH)
+    # subject.id and the token's aud both wrong: the id answers.
+    r = _ask_order(pdp, "idaud", "notes")
+    assert_equal(r.reason, REASON_SUBJECT_MISMATCH)
+    # The token's aud ("other") is not the audience asked for ("elsewhere"),
+    # which is not the bearer's client_id ("notes"): the token's aud
+    # answers.
+    r = _ask_order(pdp, "audclient", "elsewhere")
+    assert_equal(r.reason, REASON_AUDIENCE_MISMATCH)
+    # Each second condition alone is refused by its own code, so the three
+    # answers above are the order and not a check that never runs.
+    r = _ask_order(pdp, "subject", "notes")
+    assert_equal(r.reason, REASON_DECIDED)
+    r = _post(pdp, evaluation_json(SUBJECT_TYPE_USER, "bob", "S", "read", "note", "n1", "notes").replace("<<S>>", "subject"))
+    assert_equal(r.reason, REASON_SUBJECT_MISMATCH)
+    r = _ask_order(pdp, "audclient", "notes")
+    assert_equal(r.reason, REASON_AUDIENCE_MISMATCH)
+    r = _ask_order(pdp, "audclient", "other")
+    assert_equal(r.reason, REASON_CLIENT_MISMATCH)
 
 
 def test_paths_and_method_are_exact() raises:
@@ -437,8 +539,60 @@ def test_what_is_kept() raises:
     assert_equal(pdp.last_reason(), String(REASON_DECIDED))
 
 
+def _expect_last(
+    pdp: TestPdp[TokenTable], r: PdpReply, want: String
+) -> String:
+    """Empty when both the reply and `last_reason()` carry `want`, else
+    one line saying what they carried."""
+    if r.reason == want and pdp.last_reason() == want:
+        return String("")
+    return (
+        String("want ") + want + ": reply " + r.reason + ", last_reason "
+        + pdp.last_reason() + "\n"
+    )
+
+
+def test_last_reason_follows_every_reply() raises:
+    # Every kind of reply, each right after a different one, a decided one
+    # first and last: `last_reason()` is always the latest reply's.
+    var pdp = _pdp()
+    assert_equal(pdp.last_reason(), String(""))
+    var misses = String("")
+    var path = String("/access/v1/evaluation")
+    var ok = _body("read", "note", "n1")
+    var big = List[UInt8]()
+    for _ in range(MAX_BODY_BYTES + 1):
+        big.append(0x20)
+    var r = _post(pdp, ok)
+    misses += _expect_last(pdp, r, REASON_DECIDED)
+    r = pdp.handle("GET", "/x", None, _bytes("{}"))
+    misses += _expect_last(pdp, r, REASON_NOT_FOUND)
+    r = pdp.handle("GET", path, None, _bytes("{}"))
+    misses += _expect_last(pdp, r, REASON_METHOD)
+    r = pdp.handle("POST", path, None, _bytes("{}"))
+    misses += _expect_last(pdp, r, REASON_BEARER_MISSING)
+    r = pdp.handle("POST", path, String("Bearer a b"), _bytes("{}"))
+    misses += _expect_last(pdp, r, REASON_BEARER_MALFORMED)
+    r = pdp.handle("POST", path, String("Bearer unknown"), _bytes("{}"))
+    misses += _expect_last(pdp, r, REASON_BEARER_INVALID)
+    r = pdp.handle("POST", path, String("Bearer bearer"), big)
+    misses += _expect_last(pdp, r, REASON_BODY_TOO_LARGE)
+    r = _post(pdp, "{")
+    misses += _expect_last(pdp, r, REASON_BODY_NOT_JSON)
+    r = _post(pdp, ok.replace('"id":"alice"', '"id":"bob"'))
+    misses += _expect_last(pdp, r, REASON_SUBJECT_MISMATCH)
+    r = _post(pdp, ok)
+    misses += _expect_last(pdp, r, REASON_DECIDED)
+    # A refusal right after a decision.
+    r = pdp.handle("GET", "/x", None, _bytes("{}"))
+    misses += _expect_last(pdp, r, REASON_NOT_FOUND)
+    assert_equal(misses, String(""), misses)
+
+
 def main() raises:
     test_order_of_checks()
+    test_order_of_bearer_and_body_checks()
+    test_order_of_safety_checks()
     test_paths_and_method_are_exact()
     test_replies()
     test_body_bound()
@@ -448,4 +602,5 @@ def main() raises:
     test_unknown_action_is_admin()
     test_policy_verbs()
     test_what_is_kept()
+    test_last_reason_follows_every_reply()
     print("PASS komira_test_pdp test_endpoint")
