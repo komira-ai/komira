@@ -383,11 +383,11 @@ struct OrcRawType(Copyable, Movable):
                 subtypes.append(Int(v.value))
                 pos = v.new_pos
             elif tag.field_number == 2 and tag.wire_type == PB_WIRE_LEN:
-                # subtypes as a packed repeated varint block.
+                # packed subtypes; each varint is bounded by the block end.
                 var f = pb_read_len_field(bytes, pos)
                 var ip = f.payload_start
                 while ip < f.payload_end:
-                    var iv = pb_read_varint(bytes, ip)
+                    var iv = pb_read_varint(bytes[: f.payload_end], ip)
                     subtypes.append(Int(iv.value))
                     ip = iv.new_pos
                 pos = f.new_pos
@@ -872,11 +872,11 @@ struct OrcRowIndexEntry(Copyable, Movable):
             var tag = pb_read_tag(bytes, pos)
             pos = tag.new_pos
             if tag.field_number == 1 and tag.wire_type == PB_WIRE_LEN:
-                # packed repeated uint64 positions
+                # packed positions; each varint is bounded by the block end.
                 var f = pb_read_len_field(bytes, pos)
                 var pp = f.payload_start
                 while pp < f.payload_end:
-                    var pv = pb_read_varint(bytes, pp)
+                    var pv = pb_read_varint(bytes[: f.payload_end], pp)
                     e.positions.append(Int(pv.value))
                     pp = pv.new_pos
                 pos = f.new_pos
