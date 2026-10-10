@@ -10,7 +10,8 @@ interface. This package names no cloud:
 
   * catalog.mojo     — the catalog's types as data (arm number, portability,
                        exposed outputs, accepted access, retention default,
-                       primary role).
+                       primary role) and a resource's type, read from its
+                       set arm (`body_field`, `body_is`).
   * cloud_id.mojo    — the opaque `CloudId` (equality and printing only).
   * adapter.mojo     — the `CloudAdapter` trait every built-in cloud
                        implements (an internal module boundary, not frozen):
@@ -69,12 +70,17 @@ interface. This package names no cloud:
                        label of an object created in a scope with a
                        validation run id (no kci verb sets one yet);
                        `create_labels` is every label a create writes.
+  * metadata.mojo    — the rules of every resource's metadata (`labels`,
+                       `physical_name`, `adopt`): their graph findings, the
+                       label fields kci lowers, the adopted primary nodes,
+                       and the refusal of a changed cloud name.
   * clouds.mojo      — `Clouds`, the closed list of built-in clouds:
                        `resolve` (with a typo suggestion), and the rule that
                        every cloud declares every catalog type.
   * validate.mojo    — the validate phase: graph, coverage and limit
-                       findings, collected in one pass; the role label
-                       budget over a lowering; the refusal text.
+                       findings, collected in one pass; on a graph with
+                       no other finding, the role label budget over the
+                       cloud's lowering; the refusal text.
   * deploy.mojo      — plan / apply / destroy in a cell: configure and
                        validate first, lower to data with the lowering
                        contract checked (`lowering_json` for golden tests),
@@ -152,6 +158,7 @@ from kci_cloud.catalog import (
     BodyArm,
     body_arms,
     body_field,
+    body_is,
     effective_retention,
     portability_word,
     primary_node,
@@ -301,6 +308,7 @@ from kci_cloud.validate import (
     refusal_text,
     id_problem,
     node_role,
+    lowered_budget_findings,
     role_budget_findings,
     ID_MAX_BYTES,
 )
@@ -319,5 +327,22 @@ from kci_cloud.deploy import (
     apply_resources,
     destroy_resources,
     group_plan,
+    with_adopted,
+)
+from kci_cloud.metadata import (
+    KCI_LABELS_MAX,
+    LABEL_FIELD_PREFIX,
+    LABEL_MAX_BYTES,
+    NAME_MAX_BYTES,
+    PHYSICAL_NAME_FIELD,
+    adopted_nodes,
+    label_fields,
+    label_key_problem,
+    label_value_problem,
+    metadata_findings,
+    name_change_findings,
+    physical_name_problem,
+    shared_name_findings,
+    sorted_label_keys,
 )
 from kci_cloud.conformance import ConformanceTarget, run_conformance

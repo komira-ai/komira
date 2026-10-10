@@ -8,7 +8,7 @@
 #
 # No global state and no environment reads: build it with `OptimizerConfig()`
 # and assign the fields you change. Every default is the behaviour the optimizer
-# has when nothing is set. There is no fieldwise constructor on purpose: six
+# has when nothing is set. There is no fieldwise constructor on purpose: seven
 # positional Bool/Int arguments are easy to transpose without a compile error.
 # =============================================================================
 
@@ -47,6 +47,10 @@ struct OptimizerConfig(Copyable, Movable):
         agg_inmem_max_rows: The in-memory aggregate row ceiling (default
             4,000,000). A singleton scan feeding only an Aggregate above it
             stays a Parquet source. Read through `agg_inmem_ceiling_rows()`.
+        semi_pushdown: Rule 11b, the SEMI/ANTI reducer pushdown
+            (`optimizer_join.push_semi_reducers_down`, default True). False is
+            the OFF arm: the rule returns its input plan
+            unchanged.
     """
 
     var agg_cse_gate: Bool
@@ -55,6 +59,7 @@ struct OptimizerConfig(Copyable, Movable):
     var disable_scan_dedup_for_agg: Bool
     var fact_stream_protect_rows: Int
     var agg_inmem_max_rows: Int
+    var semi_pushdown: Bool
 
     def __init__(out self):
         """Every option at its default."""
@@ -64,6 +69,7 @@ struct OptimizerConfig(Copyable, Movable):
         self.disable_scan_dedup_for_agg = False
         self.fact_stream_protect_rows = FACT_STREAM_PROTECT_ROWS_DEFAULT
         self.agg_inmem_max_rows = AGG_INMEM_MAX_ROWS_DEFAULT
+        self.semi_pushdown = True
 
     def agg_inmem_ceiling_rows(self) -> Int:
         """The in-memory aggregate row ceiling. A non-positive value means the

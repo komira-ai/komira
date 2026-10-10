@@ -278,7 +278,7 @@ def _is_full_sha(s: String) -> Bool:
 
 def _collect_uses(doc: WorkflowDoc, node: Int, mut findings: List[String]):
     if node < 0:
-        return
+        return  # cov: unreachable every caller passes the root or a child the document holds
     ref n = doc.nodes[node]
     if n.kind == NODE_MAP:
         for k in range(len(n.keys)):
@@ -574,7 +574,7 @@ def _check_job(
         check_no_secret(doc, job, job_id, String("job '") + job_id + String("': "), findings)
     else:
         if pr_trigger:
-            check_release_only(doc, job_id, job, st.name, findings)
+            check_release_only(doc, job_id, job, st.name, findings)  # cov: unreachable pr_trigger is the constant False (check_workflow_doc sets it once and never assigns it)
         for i in range(len(calls)):
             if calls[i].has_affected_by:
                 findings.append(
@@ -640,7 +640,7 @@ def _check_part_job(
             break
     # R6: a part of a release stage is release-only too
     if pr_trigger:
-        check_release_only(doc, job_id, job, st.name, findings)
+        check_release_only(doc, job_id, job, st.name, findings)  # cov: unreachable pr_trigger is the constant False (check_workflow_doc sets it once and never assigns it)
     var calls = _job_calls(doc, job)
     _check_calls_common(doc, job_id, job, calls, machine_path, findings)
 
@@ -743,7 +743,7 @@ def _stage_index(g: ReleaseMachine, name: String) -> Int:
     for i in range(len(g.stages)):
         if g.stages[i].name == name:
             return i
-    return -1
+    return -1  # cov: unreachable every caller names a stage of g (has_stage checked, or taken from g.stages)
 
 
 comptime PULL_REQUEST_WORKFLOW_NAME: String = "pr"

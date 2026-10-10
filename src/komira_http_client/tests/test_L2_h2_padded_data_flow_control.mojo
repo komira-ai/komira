@@ -57,6 +57,7 @@ from komira_http_core.codec.h2.frame import (
     FRAME_WINDOW_UPDATE,
     H2_ERR_CANCEL,
     H2_ERR_FLOW_CONTROL_ERROR,
+    H2_ERR_FRAME_SIZE_ERROR,
     H2_ERR_PROTOCOL_ERROR,
     SETTINGS_INITIAL_WINDOW_SIZE,
     SettingsEntry,
@@ -540,28 +541,30 @@ def test_padded_data_after_rst_still_credits_connection_window() raises:
 
 
 # =============================================================================
-# CASES 5 + 6 — the two padding PROTOCOL_ERRORs, pinned at the wire level.
+# CASES 5 + 6 — the two padding refusals, pinned at the wire level.
 # =============================================================================
 
 
-def test_padded_data_with_zero_length_is_protocol_error() raises:
+def test_padded_data_with_zero_length_is_frame_size_error() raises:
     """RFC 9113 §6.1: a DATA frame with FLAG_PADDED must carry at least the
-    Pad Length field, so LENGTH == 0 with FLAG_PADDED set is a connection
-    PROTOCOL_ERROR. Pinning `frame.mojo`'s `if length == UInt32(0)` arm —
-    without a test, a refactor of the padding block deletes it silently."""
-    print("  test_padded_data_with_zero_length_is_protocol_error...")
+    Pad Length field, so LENGTH == 0 with FLAG_PADDED set is too small to
+    contain mandatory frame data: a FRAME_SIZE_ERROR (RFC 9113 §4.2),
+    answered as a connection error. Pinning `frame.mojo`'s
+    `if length == UInt32(0)` arm — without a test, a refactor of the
+    padding block deletes it silently."""
+    print("  test_padded_data_with_zero_length_is_frame_size_error...")
 
     var bytes = List[UInt8]()
     encode_frame_header(UInt32(0), FRAME_DATA, FLAG_PADDED, UInt32(3), bytes)
     var res = decode_frame(Span(bytes), 16384)
     if res.is_ok():
         raise Error(
-            "FLAG_PADDED DATA with LENGTH=0 must be a PROTOCOL_ERROR"
-            " (RFC 9113 §6.1) — there is not even a Pad Length byte to read"
+            "FLAG_PADDED DATA with LENGTH=0 must be a FRAME_SIZE_ERROR"
+            " (RFC 9113 §4.2) — there is not even a Pad Length byte to read"
         )
-    if res.error_code != H2_ERR_PROTOCOL_ERROR:
+    if res.error_code != H2_ERR_FRAME_SIZE_ERROR:
         raise Error(
-            "expected PROTOCOL_ERROR; got error_code="
+            "expected FRAME_SIZE_ERROR; got error_code="
             + String(Int(res.error_code))
         )
     if not res.is_connection_error:
@@ -896,7 +899,7 @@ def main() raises:
     test_padded_data_cumulative_credit_equals_sum_of_length_fields()
     test_padded_body_larger_than_the_window_completes_in_bounded_rounds()
     test_padded_data_after_rst_still_credits_connection_window()
-    test_padded_data_with_zero_length_is_protocol_error()
+    test_padded_data_with_zero_length_is_frame_size_error()
     test_pad_length_not_less_than_frame_length_is_protocol_error()
     test_recv_replenishment_never_credits_more_than_was_debited()
     test_stream_window_violation_does_not_kill_other_streams()

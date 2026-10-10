@@ -299,6 +299,27 @@ def test_file_name_reads_file_path_when_file_is_unset() raises:
     assert_equal(bare.file_name(), String("example_pkg-1.2.3-py3-none-any.whl"))
 
 
+def test_a_bare_source_resolves_against_the_current_directory() raises:
+    # A manifest named with no directory ("m.json") has no directory to
+    # resolve against: `file` and `metadata` stay as written, not re-rooted
+    # under "/" or "./".
+    var m = parse_artifact_manifest(_conda(), String("m.json"))
+    assert_equal(m.file_path, String("linux-64/example-pkg-1.2.3-h0_0.conda"))
+    assert_equal(m.metadata_path, String("metadata.json"))
+    var p = parse_artifact_manifest(_python(), String("m.json"))
+    assert_equal(p.file_path, String("example_pkg-1.2.3-py3-none-any.whl"))
+    assert_equal(p.metadata_path, String("METADATA"))
+
+
+def test_python_metadata_is_required() raises:
+    # Refused by its own check, naming the artifact type, not by the generic
+    # "'metadata' is not a string" a missing key would otherwise give.
+    assert_equal(
+        _refusal(_python().replace(String(',"metadata":"METADATA"'), String(""))),
+        String("artifact manifest 'out/m.json': a PYTHON artifact needs 'metadata'"),
+    )
+
+
 def test_is_sha256_hex() raises:
     assert_true(is_sha256_hex(String(_HASH)))
     assert_false(is_sha256_hex(String(String(_HASH)[byte = 1 :])))
