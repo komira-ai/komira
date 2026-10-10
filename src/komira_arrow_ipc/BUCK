@@ -14,6 +14,9 @@ mojo_library(
         "//src/komira_libc:komira_libc",
     ],
     test_srcs = [
+        "tests/test_arrow_c_data_dictionary_indices.mojo",
+        "tests/test_arrow_c_data_export_unwind.mojo",
+        "tests/test_arrow_c_data_format_params.mojo",
         "tests/test_arrow_c_data_null_buffer_semantics.mojo",
         "tests/test_arrow_c_data_phase_c.mojo",
         "tests/test_arrow_c_data_phase_e.mojo",
