@@ -1,0 +1,89 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps", "shell_lint")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":defs.bzl", "git_transcripts")
+
+# Test-only: komira_git's protocol state machines against the pinned git
+# (//third_party/git). Nothing depends on this package.
+#
+# capture.sh (the :transcripts target below) runs real git on both ends of
+# fetches (protocol v2) and pushes (receive-pack) over file:// and records
+# the bytes each way, with the server repository's state (capture.sh lists
+# the scenarios). checks.mojo, graph.mojo and transcript.mojo hold what
+# these tests share (loading a scenario, the scenario's repository as a
+# CommitGraph, pack and push-verdict checks):
+#   test_upload_pack_server   komira_git's v2 server answers git's client
+#                             byte for byte as git's server did
+#   test_fetch_client         komira_git's v2 client writes git's requests
+#                             byte for byte and reads git's responses
+#   test_receive_pack_server  komira_git's receive-pack answers git's pushes
+#                             byte for byte as git's receive-pack did
+#   test_send_pack_client     komira_git's push client writes git's commands
+#                             byte for byte and reads git's reports
+#   test_capability_truth     every capability komira_git advertises is one
+#                             git's client used in a transcript
+#   test_harness              the library's own refusals and graph walk,
+#                             on fixtures/ (hand-written scenarios), not
+#                             transcripts
+#
+# The pinned git is built for linux-x86_64 only, so this package builds on
+# that platform only.
+
+_TESTS = [
+    "tests/test_capability_truth.mojo",
+    "tests/test_fetch_client.mojo",
+    "tests/test_receive_pack_server.mojo",
+    "tests/test_send_pack_client.mojo",
+    "tests/test_upload_pack_server.mojo",
+]
+
+mojo_library(
+    name = "komira_git_protocol_conformance",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_git:komira_git",
+        "//src/komira_zlib:komira_zlib",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    conda = False,
+    # The transcripts come from the pinned git, built for linux-x86_64 only.
+    target_compatible_with = LINUX_X86_64,  # komira-limit:git-oracle-linux-x86-64
+    test_srcs = _TESTS + ["tests/test_harness.mojo"],
+    # git's transcripts at transcripts/; test_harness reads fixtures/ there
+    # instead.
+    test_data = {
+        t: {"transcripts": ":transcripts"}
+        for t in _TESTS
+    } | {
+        "tests/test_harness.mojo": {
+            "transcripts/" + f.removeprefix("fixtures/"): f
+            for f in glob(["fixtures/**"])
+        },
+    },
+    visibility = ["PUBLIC"],
+)
+
+git_transcripts(
+    name = "transcripts",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:git-oracle-linux-x86-64
+    checks = [":shell_lint"],
+    git = "//third_party/git:git",
+    script = "capture.sh",
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = ["capture.sh"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)

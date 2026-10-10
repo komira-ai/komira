@@ -7,7 +7,8 @@
 #   units' in the one batch run);
 #   a declared check target matching nothing is a NOTICE, never a stop; an
 #   artifact target matching nothing, and a derived name a declared unit
-#   has, are REFUSED; a failing or garbled tool is INDETERMINATE.
+#   has, are REFUSED; a failing or garbled tool is INDETERMINATE; a tool
+#   answering BROKEN (its query of the build graph failed) FAILS the check.
 # =============================================================================
 
 from std.ffi import external_call
@@ -20,6 +21,8 @@ from std.testing import TestSuite, assert_equal, assert_true
 from kci_api import (
     ERROR_AFFECTED,
     ERROR_ARTIFACT,
+    ERROR_BUILD_FAILED,
+    OUTCOME_FAILED,
     OUTCOME_INDETERMINATE,
     OUTCOME_REFUSED,
     OUTCOME_SUCCEEDED,
@@ -253,6 +256,56 @@ def test_a_failing_or_garbled_derive_tool_is_cannot_tell() raises:
         assert_equal(o.error_id, String(ERROR_AFFECTED))
         assert_true(o.message.find(String("kci cannot tell which checks the build graph holds")) >= 0, o.message)
         assert_equal(len(runner.calls), 1)
+
+
+def test_a_broken_derive_answer_fails_the_check() raises:
+    # release/ci/derive_checks.py answers BROKEN when its universe query
+    # fails (a target with an unknown dependency, here buck2's own text):
+    # the check is FAILED naming the reason, not "cannot tell" and never a
+    # widening; no affected command runs and nothing is built. A kci that
+    # read BROKEN as outside the grammar would answer INDETERMINATE.
+    var root = _fresh(String("broken"))
+    var req = _request(root)
+    var runner = ScriptedRunner()
+    var why = String("the universe query `buck2 cquery //... + tests//functional/...` failed, naming ")
+    why += String("komira//tools/build/ci:planted_unknown: Unknown target `no_such_target_here`")
+    runner.expect(_derive(req, String("BROKEN ") + why + String("\n")))
+    var result = KciRunResult(String("run"), String("run"))
+    var o = _run(req, runner, result)
+    assert_equal(o.outcome, String(OUTCOME_FAILED), o.message)
+    assert_equal(o.error_id, String(ERROR_BUILD_FAILED), o.message)
+    assert_equal(len(runner.calls), 1)
+    assert_true(o.message.find(String("answered BROKEN: ") + why) >= 0, o.message)
+
+
+def test_the_derive_command_is_held_to_the_build_budget() raises:
+    # with 40 s left of --build-budget-s the derive command gets 40, not its
+    # --build-timeout-s; with none left it is not started (cannot tell)
+    var root = _fresh(String("budget"))
+    var req = _request(root)
+    req.build_budget_s = 100
+    req.build_deadline_ns = 40 * 1_000_000_000
+    var runner = ScriptedRunner()
+    runner.expect(_derive(req, String(""), exit_code=Int32(3)))
+    var result = KciRunResult(String("run"), String("run"))
+    var o = _run(req, runner, result)
+    assert_equal(len(runner.calls), 1)
+    assert_equal(runner.calls[0].timeout_s, 40)
+    assert_equal(o.error_id, String(ERROR_AFFECTED))
+    var root2 = _fresh(String("nobudget"))
+    var req2 = _request(root2)
+    req2.build_budget_s = 100
+    req2.build_deadline_ns = 0
+    var none = ScriptedRunner()
+    var result2 = KciRunResult(String("run"), String("run"))
+    var o2 = _run(req2, none, result2)
+    assert_equal(o2.outcome, String(OUTCOME_INDETERMINATE), o2.message)
+    assert_equal(o2.error_id, String(ERROR_AFFECTED))
+    assert_equal(len(none.calls), 0)
+    assert_true(
+        o2.message.find(String("was not started: the build budget (--build-budget-s 100) was spent")) >= 0, o2.message
+    )
+    assert_true(o2.message.find(String("kci cannot tell which checks the build graph holds")) >= 0, o2.message)
 
 
 def main() raises:

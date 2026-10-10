@@ -5,7 +5,8 @@
 #
 # Goal: verify the SIMD ISO-8601 temporal parsers
 # (cell_parsers_simd.mojo:fast_parse_iso_*) produce byte-identical
-# results to the scalar baseline parsers (cell_parsers.mojo:_try_parse_*)
+# results to the scalar baseline parsers (temporal_parsers.mojo and, for
+# Date32, cell_parsers.mojo: _try_parse_*)
 # on every applicable canonical-form input AND correctly reject
 # inapplicable inputs (returns None -> caller falls back to scalar).
 #
@@ -21,6 +22,8 @@ from std.testing import assert_equal, assert_true, assert_false
 
 from komira_csv.cell_parsers import (
     _try_parse_date32,
+)
+from komira_csv.temporal_parsers import (
     _try_parse_date64,
     _try_parse_timestamp_s,
     _try_parse_timestamp_ms,

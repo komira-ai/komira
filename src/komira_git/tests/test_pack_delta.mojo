@@ -4,8 +4,8 @@
 #
 # The deltas here are written by hand in the instruction encoding of
 # gitformat-pack ("Deltified representation"); the conformance package
-# (src/tests/conformance/komira_git_conformance) applies the deltas git
-# itself writes.
+# (src/tests/conformance/komira_git_pack_conformance) applies the deltas
+# git itself writes.
 #
 # WHAT EACH TEST CATCHES:
 #   * test_copy_and_insert: a copy instruction whose offset or size bytes

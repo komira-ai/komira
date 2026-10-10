@@ -17,6 +17,8 @@
 #   - Router struct
 #   - Router.add(method, pattern, handler_id) raises
 #   - Router.match_route(method, path, path_params) -> Optional[Int]
+#   - Router.has_path_match(path) -> Bool, Router.allowed_methods(path)
+#     -> List[HttpMethod] (the 404 vs 405 disposition and a 405's Allow)
 #   - HANDLER_NOT_FOUND alias (-1) sentinel
 #   - RouterBuildError struct for typed registration errors
 #
@@ -325,6 +327,27 @@ struct Router(Movable, Deinitable):
                 return True
             i = i + 1
         return False
+
+    def allowed_methods(self, path: String) -> List[HttpMethod]:
+        """The methods of every route matching `path`, each once, in
+        registration order: what a 405 for `path` names in its `Allow` header
+        (`HttpResponse.method_not_allowed(allowed)` sorts them). Empty iff
+        `has_path_match(path)` is False."""
+        var path_segs = _split_path(path)
+        var out = List[HttpMethod]()
+        for i in range(len(self._routes)):
+            ref r = self._routes[i]
+            var sink = Dict[String, String]()
+            if not _try_match(r, path_segs, sink):
+                continue
+            var seen = False
+            for j in range(len(out)):
+                if out[j] == r.method:
+                    seen = True
+                    break
+            if not seen:
+                out.append(r.method)
+        return out^
 
     def len(self) -> Int:
         """Number of registered routes."""

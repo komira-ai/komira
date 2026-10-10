@@ -58,6 +58,7 @@ from kci_cloud import (
     V1_IMAGE_PLATFORM,
     Workload,
     body_field,
+    body_is,
     worker_replicas,
     workload_of,
 )
@@ -327,7 +328,7 @@ def workload_limits(r: Resource, shape: ProviderShape, cloud: String, mut out: L
                 String(FAKE_CITATION),
             )
         )
-    if Bool(r.service) and shape.scale_to_zero_limit.byte_length() > 0 and _service_min(r) == 0:
+    if body_is(r, FIELD_SERVICE) and shape.scale_to_zero_limit.byte_length() > 0 and _service_min(r) == 0:
         out.append(
             Finding(
                 FINDING_LIMIT,
