@@ -207,7 +207,7 @@ def test_filters_it_cannot_prune_are_unchanged() raises:
     the Parquet guard an in-memory source is read as Parquet; without the empty
     path guard `paths[0]` is read past the end; without the Hive guard the
     base directory is "pruned" and the predicate dropped although the
-    attach_hive_predicate pass owns it."""
+    attach_hive_predicate pass (not in this tree) is designed to own it."""
     var exprs = ExprArray()
     exprs.append(Expr.col_ref("year"))
     var over_project = LogicalPlan.filter(

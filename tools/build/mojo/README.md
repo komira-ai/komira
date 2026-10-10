@@ -488,14 +488,14 @@ a plugin the descriptors of the whole import closure with their custom
 options, which the plugin decodes from the raw request bytes; no
 descriptor-set flag is passed. `deps` holds the `komira_db` runtime the
 generated code imports. `proto_srcs(name, srcs, import_prefix, proto_deps)`
-names `.proto` files that others import but no Mojo is generated from.
+names `.proto` files that others import but no Mojo is generated from. `mojo_routes_proto_library` (HTTP routes from `google.api.http`): [its README](../proto-codegen/routes/README.md).
 
 The toolchain, `toolchains//:mojo_proto` (declared by
 `komira_proto_toolchains()`, see [toolchains](../toolchains/README.md)), is protoc
 29.1 (the sha256-pinned static release build, with its well-known-type
-`.proto` files) and `komira//tools/build/proto-codegen:protoc-gen-mojo` and
-`:protoc-gen-mojo-db`, built from source with the [Rust rules](../rust/README.md) against the
-crates in `third_party/rust`. The plugin crate, `komira_proto_codegen`, is
+`.proto` files) and `komira//tools/build/proto-codegen:protoc-gen-mojo`,
+`:protoc-gen-mojo-db` and `:protoc-gen-mojo-routes`, built from source with the [Rust rules](../rust/README.md) against the
+crates in `third_party/rust`. The plugins and their shared crate, `komira_proto_codegen`, are
 in [`../proto-codegen/`](../proto-codegen/);
 [`tests//functional/proto`](../tests/functional/proto/BUCK) holds the example protos and tests.
 

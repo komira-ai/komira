@@ -50,6 +50,22 @@
 #                     be on it. Git that cannot answer, or no RUNNER_TEMP,
 #                     leaves it unread, and kci_publish then cannot tell
 #                     (exit 5) whenever the channel lists a numbered build.
+#                     With the main-line filter (`main_line_only`), main is
+#                     fetched and `git rev-list refs/remotes/origin/main`
+#                     (`git_main_line`) is handed on the same way.
+#   publish's split -> `GitHistory`, kci_publish's `HistoryReader`:
+#                     `git rev-parse --verify --quiet <prefix>^{commit}`
+#                     (`git_commit_of`: exit 0 and one full commit id, else
+#                     it raises: unknown or ambiguous) and `git_is_ancestor`,
+#                     each after the shallow check.
+#   main_tip_past  -> `git_main_tip_past`: the shallow check, `git fetch
+#                     --quiet --no-tags origin
+#                     +refs/heads/main:refs/remotes/origin/main` (the
+#                     checkout's anonymous remote), main's tip, then `git
+#                     rev-list --first-parent --max-count=1 <revision>..<tip>
+#                     -- . :(exclude)docs :(exclude)*.md` (the prod line's
+#                     count): empty means the revision is main's releasable
+#                     tip ("").
 #   publish's carried commits -> for a never-backward publish, `git rev-list
 #                     --first-parent --reverse <revision>` (`git_first_parent`)
 #                     feeds summary.mojo's `carried_markdown`; git that
@@ -100,6 +116,7 @@ from kci_build import GIT_PROGRAM, BuildRequest, ProcessRunner, RunSpec, Supervi
 from kci_build import RunResult as ProcessResult
 from kci_api import RunResult as KciRunResult
 from kci_publish import (
+    HistoryReader,
     NewNamesReport,
     PublishRequest,
     RevisionHistory,
@@ -114,6 +131,7 @@ from .args import SecretStoreChoice
 from .dispatch import kci_main_with, recorder_for
 from .seam import StageSteps, StepEnd
 from .recorder import CliRecorder
+from .start_checks import MAIN_TRACKING_REF
 from .summary import carried_markdown
 
 
@@ -235,17 +253,108 @@ def git_first_parent[R: ProcessRunner](mut runner: R, tmp: String, revision: Str
     return out^
 
 
+def _shallow_raises[R: ProcessRunner](mut runner: R, tmp: String) raises:
+    """A checkout that is shallow (or not a repository) raises: its history
+    cannot tell."""
+    var argv = List[String]()
+    argv.append(String("rev-parse"))
+    argv.append(String("--is-shallow-repository"))
+    var shallow = _git(runner, tmp, argv^)
+    if shallow[0] != 0 or String(shallow[1].strip()) != String("false"):
+        raise Error(String("the checkout is shallow (or not a git repository): its history cannot tell"))
+
+
+def _git_fetch_main[R: ProcessRunner](mut runner: R, tmp: String) raises:
+    """`git fetch --quiet --no-tags origin +refs/heads/main:refs/remotes/origin/main`
+    (the file header): raises unless it exits 0."""
+    var argv = List[String]()
+    argv.append(String("fetch"))
+    argv.append(String("--quiet"))
+    argv.append(String("--no-tags"))
+    argv.append(String("origin"))
+    argv.append(String("+refs/heads/main:") + String(MAIN_TRACKING_REF))
+    var r = _git(runner, tmp, argv^)
+    if r[0] != 0:
+        raise Error(String("`git fetch origin main` exited ") + String(r[0]))
+
+
+def git_commit_of[R: ProcessRunner](mut runner: R, tmp: String, prefix: String) raises -> String:
+    """The ONE commit `prefix` names: after the shallow check, `git
+    rev-parse --verify --quiet <prefix>^{commit}`. Raises when git exits
+    non-zero (a prefix that names no commit, or more than one) or prints
+    anything but one full commit id."""
+    _shallow_raises(runner, tmp)
+    var argv = List[String]()
+    argv.append(String("rev-parse"))
+    argv.append(String("--verify"))
+    argv.append(String("--quiet"))
+    argv.append(prefix + String("^{commit}"))
+    var r = _git(runner, tmp, argv^)
+    if r[0] != 0:
+        raise Error(
+            String("`git rev-parse --verify ") + prefix + String("^{commit}` exited ") + String(r[0])
+            + String(": the prefix names no commit of this checkout, or more than one")
+        )
+    var id = String(r[1].strip())
+    if not is_full_commit_id(id):
+        raise Error(String("`git rev-parse --verify` printed '") + id + String("', not one full commit id"))
+    return id^
+
+
+def git_main_line[R: ProcessRunner](mut runner: R, tmp: String) raises -> List[String]:
+    """Every commit on main's history, freshly fetched: the shallow check,
+    the fetch of main, then `git rev-list refs/remotes/origin/main`. Raises
+    as `git_history` does."""
+    _shallow_raises(runner, tmp)
+    _git_fetch_main(runner, tmp)
+    return _rev_list(runner, tmp, String(MAIN_TRACKING_REF))
+
+
+def git_main_tip_past[R: ProcessRunner](mut runner: R, tmp: String, revision: String) raises -> String:
+    """The seam's `main_tip_past` (file header): main's tip when a commit a
+    push would release lies after `revision`, else "". Raises when git
+    cannot tell."""
+    _shallow_raises(runner, tmp)
+    _git_fetch_main(runner, tmp)
+    var tip_argv = List[String]()
+    tip_argv.append(String("rev-parse"))
+    tip_argv.append(String("--verify"))
+    tip_argv.append(String("--quiet"))
+    tip_argv.append(String(MAIN_TRACKING_REF) + String("^{commit}"))
+    var t = _git(runner, tmp, tip_argv^)
+    var tip = String(t[1].strip())
+    if t[0] != 0 or not is_full_commit_id(tip):
+        raise Error(String("main's tip (") + String(MAIN_TRACKING_REF) + String(") cannot be read after the fetch"))
+    if tip == revision:
+        return String("")
+    var argv = List[String]()
+    argv.append(String("rev-list"))
+    argv.append(String("--first-parent"))
+    argv.append(String("--max-count=1"))
+    argv.append(revision + String("..") + tip)
+    argv.append(String("--"))
+    argv.append(String("."))
+    argv.append(String(":(exclude)docs"))
+    argv.append(String(":(exclude)*.md"))
+    var r = _git(runner, tmp, argv^)
+    if r[0] != 0:
+        raise Error(String("`git rev-list ") + revision + String("..") + tip + String("` exited ") + String(r[0]))
+    if String(r[1].strip()).byte_length() == 0:
+        return String("")
+    return tip^
+
+
 def git_history[R: ProcessRunner](mut runner: R, tmp: String, revision: String) raises -> List[String]:
     """`git rev-list <revision>`: every commit on `revision`'s history,
     newest first. A shallow checkout (or not a repository) raises: it lists
     part of the history, which would read as "not on it". Raises when git
     exits non-zero or a line is not a full commit id."""
-    var shallow_argv = List[String]()
-    shallow_argv.append(String("rev-parse"))
-    shallow_argv.append(String("--is-shallow-repository"))
-    var shallow = _git(runner, tmp, shallow_argv^)
-    if shallow[0] != 0 or String(shallow[1].strip()) != String("false"):
-        raise Error(String("the checkout is shallow (or not a git repository): its history cannot tell"))
+    _shallow_raises(runner, tmp)
+    return _rev_list(runner, tmp, revision)
+
+
+def _rev_list[R: ProcessRunner](mut runner: R, tmp: String, revision: String) raises -> List[String]:
+    """`git rev-list <revision>`, every line a full commit id."""
     var argv = List[String]()
     argv.append(String("rev-list"))
     argv.append(revision.copy())
@@ -274,6 +383,29 @@ def _failed_row(req: ValidateRequest, why: String) -> ResultValidation:
     return row^
 
 
+struct GitHistory(HistoryReader, Movable):
+    """The `HistoryReader` of kci_publish over git in the directory kci runs in
+    (file header, publish's split); git's output goes under `tmp`.
+    Layout: one owned String."""
+
+    var tmp: String
+
+    def __init__(out self, var tmp: String):
+        self.tmp = tmp^
+
+    def commit_of(mut self, prefix: String) raises -> String:
+        if self.tmp.byte_length() == 0:
+            raise Error(String("RUNNER_TEMP is not set, so there is nowhere to put git's output"))
+        var runner = SupervisorRunner()
+        return git_commit_of(runner, self.tmp, prefix)
+
+    def is_ancestor(mut self, commit: String, of: String) raises -> Bool:
+        if self.tmp.byte_length() == 0:
+            raise Error(String("RUNNER_TEMP is not set, so there is nowhere to put git's output"))
+        var runner = SupervisorRunner()
+        return git_is_ancestor(runner, self.tmp, commit, of)
+
+
 struct LibrarySteps(StageSteps, Movable):
     """The steps as the kci binary runs them. Layout: no fields."""
 
@@ -294,8 +426,9 @@ struct LibrarySteps(StageSteps, Movable):
         var composed = ComposedSecretStore(store)
         var held = req.copy()
         if req.never_backward:
-            held.revision_history = self._history(req.revision_id)
-        var r = publish_release_with_store(held, result, recorder, composed)
+            held.revision_history = self._history(req.revision_id, req.main_line_only)
+        var reader = GitHistory(self.platform_env(String("RUNNER_TEMP")))
+        var r = publish_release_with_store(held, result, recorder, composed, reader)
         var end = StepEnd(r.outcome(), r.error_id.copy(), String(""))
         end.lines = r.lines.copy()
         end.retry = r.retry()
@@ -305,21 +438,29 @@ struct LibrarySteps(StageSteps, Movable):
             end.summary += self._carried(req, r.previous_build, r.build_number)
         return end^
 
-    def _history(mut self, revision: String) -> RevisionHistory:
+    def _history(mut self, revision: String, main_line_only: Bool) -> RevisionHistory:
         """What a never-backward publish holds the channel's newest build
-        against: `git_history` of the revision, or why it was not read
-        (kci_publish then cannot tell, exit 5, when the channel lists a
-        numbered build)."""
+        against: `git_history` of the revision and, with the main-line
+        filter, `git_main_line`, or why each was not read (kci_publish then
+        cannot tell, exit 5, when the channel lists a numbered build)."""
         var h = RevisionHistory()
+        h.revision = revision.copy()
         var tmp = self.platform_env(String("RUNNER_TEMP"))
         if tmp.byte_length() == 0:
             h.unread = String("RUNNER_TEMP is not set, so there is nowhere to put git's output")
+            h.main_unread = h.unread.copy()
             return h^
         var runner = SupervisorRunner()
         try:
             h.commits = git_history(runner, tmp, revision)
         except e:
             h.unread = String(e)
+        if main_line_only:
+            var main_runner = SupervisorRunner()
+            try:
+                h.main_line = git_main_line(main_runner, tmp)
+            except e:
+                h.main_unread = String(e)
         return h^
 
     def _carried(mut self, req: PublishRequest, previous: Int, ours: Int) -> String:
@@ -386,6 +527,13 @@ struct LibrarySteps(StageSteps, Movable):
             raise Error(String("RUNNER_TEMP is not set, so there is nowhere to put git's output"))
         var runner = SupervisorRunner()
         return git_is_ancestor(runner, tmp, commit, of)
+
+    def main_tip_past(mut self, revision: String) raises -> String:
+        var tmp = self.platform_env(String("RUNNER_TEMP"))
+        if tmp.byte_length() == 0:
+            raise Error(String("RUNNER_TEMP is not set, so there is nowhere to put git's output"))
+        var runner = SupervisorRunner()
+        return git_main_tip_past(runner, tmp, revision)
 
     def release_set_hash(mut self, artifacts_file: String, platform_dir: String) raises -> String:
         var arts = read_artifacts(artifacts_file)

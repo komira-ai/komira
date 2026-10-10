@@ -56,8 +56,8 @@
 #   PUBLISH   platform, artifacts, and ONE destination: kci_publish: the release
 #             channels + channel, or cells + cell       set to one channel, or
 #                                                       (not run yet) one cell
-#   DEPLOY    cells, cell, resources, definitions    parsed; this kci does
-#                                                       not run it yet
+#   DEPLOY    cells, cell, resources, definitions,   parsed; this kci does
+#             DEPLOY_PROBE validations                  not run it yet
 #
 # A stage may hold steps of different kinds. The kind words are
 # kci_api's (verbs.mojo), and so is the name grammar (selection.mojo).
@@ -71,9 +71,15 @@
 # through. Whether the cell is in the file is `require_cells_declared`'s, run
 # by whoever reads the cells file (this package opens no file).
 #
-# VALIDATIONS. A PUBLISH step may carry `validation { ... }` blocks that check
-# what it published. A validation name is unique in its stage (the grammar of
-# a step name). Two kinds (kci_api): CONDA_INSTALL_SMOKE installs the
+# VALIDATIONS. A step may carry `validation { ... }` blocks. A validation
+# name is unique in its stage (the grammar of a step name). The kind says
+# which step it belongs to: CONDA_INSTALL_SMOKE and CONDA_INSTALL_ENV check
+# what a PUBLISH step published; DEPLOY_PROBE checks the cell a DEPLOY step
+# deployed into (any other pairing is refused here). Every rule of a
+# DEPLOY_PROBE past its name and kind is probe.mojo's (run by deploy.mojo's
+# `validate_cell_steps`); a CONDA_* validation that writes a probe's field
+# (`args`, `target`, `timeout_seconds`, `expect`) is refused here. The two
+# CONDA kinds (kci_api): CONDA_INSTALL_SMOKE installs the
 # published packages inside a container and runs a program against them;
 # CONDA_INSTALL_ENV installs them on the machine that runs kci, with no
 # container (a pinned pixi, a scratch directory, a cleared environment), and
@@ -139,6 +145,7 @@ from kci_api import (
     is_step_name,
     require_release_platform,
     VALIDATION_KIND_CONDA_INSTALL_ENV,
+    VALIDATION_KIND_DEPLOY_PROBE,
     require_validation_kind,
 )
 
@@ -170,9 +177,11 @@ GitHub environment name (kci_api states the number)."""
 
 
 struct StageValidation(Copyable, Movable):
-    """One validation of a step (file header). `installs` and
-    `extra_channels` are in file order; `line` is the line its block opens
-    on.
+    """One validation of a step (file header). `installs`,
+    `extra_channels`, `args` and `expects` are in file order; `written`
+    names each field the block wrote, once, in file order (so a rule can
+    tell a field left at its default from one written with that value);
+    `line` is the line its block opens on.
 
     Layout: owned Strings, Lists of Strings and Ints. No pointer field."""
 
@@ -185,6 +194,12 @@ struct StageValidation(Copyable, Movable):
     var program: String
     var smoke: String
     var wait_for_index_seconds: Int
+    var args: List[String]
+    var target_resource: String
+    var target_output: String
+    var timeout_seconds: Int
+    var expects: List[String]
+    var written: List[String]
     var line: Int
 
     def __init__(out self, line: Int):
@@ -197,7 +212,20 @@ struct StageValidation(Copyable, Movable):
         self.program = String("")
         self.smoke = String("")
         self.wait_for_index_seconds = VALIDATION_WAIT_DEFAULT_SECONDS
+        self.args = List[String]()
+        self.target_resource = String("")
+        self.target_output = String("")
+        self.timeout_seconds = 0
+        self.expects = List[String]()
+        self.written = List[String]()
         self.line = line
+
+    def wrote(self, field: String) -> Bool:
+        """Whether the block wrote `field` (a default never counts)."""
+        for i in range(len(self.written)):
+            if self.written[i] == field:
+                return True
+        return False
 
 
 struct StageStep(Copyable, Movable):
@@ -456,6 +484,16 @@ def _is_package_name(name: String) -> Bool:
     return True
 
 
+def probe_only_fields() -> List[String]:
+    """The validation fields only a DEPLOY_PROBE may write (file header)."""
+    var out = List[String]()
+    out.append(String("args"))
+    out.append(String("target"))
+    out.append(String("timeout_seconds"))
+    out.append(String("expect"))
+    return out^
+
+
 def _check_validation(source: String, stage: Stage, step: StageStep, v: StageValidation) raises:
     var of_step = String(" of step '") + step.name + String("' of stage '") + stage.name + String("'")
     if v.name.byte_length() == 0:
@@ -467,17 +505,34 @@ def _check_validation(source: String, stage: Stage, step: StageStep, v: StageVal
             + String(" bytes, not ending in '-'")
         )
     var where = String("validation '") + v.name + String("'") + of_step
-    if step.kind != STEP_KIND_PUBLISH:
+    if v.kind.byte_length() == 0:
         raise Error(
             _at(source, v.line) + where
-            + String(": a validation belongs to a PUBLISH step (it checks what the step published)")
+            + String(" has no kind (CONDA_INSTALL_SMOKE, CONDA_INSTALL_ENV or DEPLOY_PROBE)")
         )
-    if v.kind.byte_length() == 0:
-        raise Error(_at(source, v.line) + where + String(" has no kind (CONDA_INSTALL_SMOKE or CONDA_INSTALL_ENV)"))
     try:
         require_validation_kind(v.kind)
     except e:
         raise Error(_at(source, v.line) + where + String(": ") + String(e))
+    if v.kind == VALIDATION_KIND_DEPLOY_PROBE:
+        if step.kind != STEP_KIND_DEPLOY:
+            raise Error(
+                _at(source, v.line) + where + String(": a DEPLOY_PROBE validation belongs to a DEPLOY step")
+                + String(" (it checks the cell the step deployed into)")
+            )
+        return  # every other rule of a probe is probe.mojo's (file header, VALIDATIONS)
+    if step.kind != STEP_KIND_PUBLISH:
+        raise Error(
+            _at(source, v.line) + where + String(": a ") + v.kind
+            + String(" validation belongs to a PUBLISH step (it checks what the step published)")
+        )
+    var probe_only = probe_only_fields()
+    for i in range(len(probe_only)):
+        if v.wrote(probe_only[i]):
+            raise Error(
+                _at(source, v.line) + where + String(" is a ") + v.kind + String(" validation and has ")
+                + probe_only[i] + String(": it belongs to a DEPLOY_PROBE validation")
+            )
     var on_this_machine = v.kind == VALIDATION_KIND_CONDA_INSTALL_ENV
     if on_this_machine:
         if v.image.byte_length() > 0:

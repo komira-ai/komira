@@ -94,8 +94,9 @@ def _field_number(code: String) raises -> Int:
     when the line is not a field."""
     if not code.endswith(";"):
         return -1
+    # Whole words only: `optional string x = 6;` is a field, not an option.
     for p in ["option", "syntax", "package", "import", "reserved", "extensions"]:
-        if code.startswith(p):
+        if code.startswith(p + String(" ")) or code.startswith(p + String("(")) or code.startswith(p + String("=")):
             return -1
     var eq = code.rfind("=")
     if eq < 0:
@@ -251,7 +252,10 @@ def test_a_held_number_or_a_reserved_number_is_refused() raises:
     assert_true(v[0].find("Resource uses held number 101") >= 0, v[0])
     # the last number of a range, and a single held number
     assert_equal(len(held_violations(_insert_after(t, anchor, String("  string x = 699;")))), 1)
-    assert_equal(len(held_violations(_insert_after(t, anchor, String("  string x = 6;")))), 1)
+    assert_equal(len(held_violations(_insert_after(t, anchor, String("  string x = 5;")))), 1)
+    # a proto3 `optional` field is a field (its line starts with "option")
+    var o = held_violations(_insert_after(t, anchor, String("  optional string x = 5;")))
+    assert_equal(len(o), 1, String("an optional field at a held number: ") + _joined(o))
     # a number the message reserved
     var r = held_violations(_insert_after(t, anchor, String("  string x = 4;")))
     assert_equal(len(r), 1, _joined(r))
@@ -260,7 +264,7 @@ def test_a_held_number_or_a_reserved_number_is_refused() raises:
     var j = held_violations(_insert_after(t, String("  Image image = 1;\n  repeated string args = 2;"), String("  string x = 51;")))
     assert_equal(len(j), 1, _joined(j))
     # a free number is fine, and so is the same number in another message
-    assert_equal(len(held_violations(_insert_after(t, anchor, String("  string x = 7;")))), 0)
+    assert_equal(len(held_violations(_insert_after(t, anchor, String("  string x = 9;")))), 0)
     assert_equal(len(held_violations(_insert_after(t, anchor, String("  string x = 37;")))), 0)
     # a held line for a message the file does not declare
     var d = held_violations(t + String("\n// held-numbers: NoSuchMessage 1-3\n"))

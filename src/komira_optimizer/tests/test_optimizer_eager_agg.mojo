@@ -2,15 +2,18 @@
 # Tests for cross-side eager aggregation pushdown (optimizer_eager_agg)
 # =============================================================================
 #
-# SLICE 1 (INNER only). Covers:
+# SLICE 1 (INNER) and SLICE 2 (LEFT join, push onto the right side). Covers:
 #   1. The cross-side rewrite FIRES on the star-schema shape (group by the
 #      dimension attribute, aggregate the fact measure) and produces
 #      Aggregate(Join(Aggregate(fact), dim)) with the partial agg pushed
 #      onto the fact side.
 #   2. Push-to-right symmetry.
-#   3. Decline paths: LEFT join (slice-1 scope), agg input spanning both
-#      sides, non-whitelisted aggregate (MEAN), and the cost gate (small
-#      fact side).
+#   3. Decline paths: LEFT join with the agg input on the preserved (left)
+#      side, agg input spanning both sides, non-whitelisted aggregate
+#      (MEAN), and the cost gate (small fact side).
+#   4. SLICE 2: the q13-shape LEFT-join COUNT pushed right, the preserved-
+#      side decline, a peeled narrowing Project, and a large fact side that
+#      passes the cost gate.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -176,7 +179,8 @@ def test_cross_side_inner_fires_push_right() raises:
 
 
 def test_left_join_declines_slice1() raises:
-    """LEFT join is out of SLICE-1 scope (needs the count coalesce merge)."""
+    """A LEFT join whose agg input is on the LEFT (preserved) side declines:
+    on a LEFT join the pass pushes onto the right (null-producing) side only."""
     var join = LogicalPlan.join(
         _scan_fact(),
         _scan_dim(),
@@ -314,8 +318,8 @@ def test_left_join_push_left_declines() raises:
 
 def test_project_peel_inner_fires() raises:
     """A pure column-narrowing Project between the Aggregate and the Join is
-    peeled so the transform still fires (column pruning inserts this Project
-    below the aggregate on real plans)."""
+    peeled so the transform still fires (a column-pruning pass, not in this
+    tree, is designed to insert this Project below the aggregate)."""
     var join = LogicalPlan.join(
         _scan_fact(Optional[Int](1_500_000)),
         _scan_dim(Optional[Int](150_000)),
