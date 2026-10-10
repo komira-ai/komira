@@ -25,6 +25,7 @@ mojo_library(
         "//src/komira_net:komira_net",
     ],
     test_srcs = [
+        "tests/test_L1_default_client_tls_config.mojo",
         "tests/test_L1_tls13_only_server.mojo",
         "tests/test_L1_tls_client_hostname_verify.mojo",
         "tests/test_L1_tls_config_lifetime_uaf.mojo",
@@ -135,6 +136,11 @@ mojo_library(
         "tests/test_url.mojo",
     ],
     test_data = {
+        "tests/test_L1_default_client_tls_config.mojo": {
+            "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+            "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+            "src/komira_http_core/tests/fixtures/tls/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
+        },
         "tests/test_L1_tls13_only_server.mojo": {
             "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
             "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
