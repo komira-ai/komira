@@ -261,6 +261,9 @@ def test_row_read_u64_reads_signed_cells_at_their_width() raises:
     zero-extension."""
     var rb = _row_block()
     var src = RowCellSource(rb, _offsets(), _dtypes())
+    # I64 reads all 8 bytes: -2 and a value with every byte distinct.
+    assert_equal(src.read_u64(0, 0), UInt64(0xFFFFFFFFFFFFFFFE))
+    assert_equal(src.read_u64(1, 0), UInt64(0x0102030405060708))
     # Row 0: -2 (i32), -32767 (i16), -127 (i8).
     assert_equal(src.read_u64(0, 1), UInt64(0xFFFFFFFFFFFFFFFE))
     assert_equal(src.read_u64(0, 2), UInt64(0xFFFFFFFFFFFF8001))
@@ -269,7 +272,7 @@ def test_row_read_u64_reads_signed_cells_at_their_width() raises:
     assert_equal(src.read_u64(1, 1), 16909060)
     assert_equal(src.read_u64(1, 2), 258)
     assert_equal(src.read_u64(1, 3), 127)
-    for c in [1, 2, 3]:
+    for c in [0, 1, 2, 3]:
         assert_equal(src.read_u64(2, c), 0)
         # The same bits as the signed read, reinterpreted.
         for r in range(3):
@@ -277,6 +280,41 @@ def test_row_read_u64_reads_signed_cells_at_their_width() raises:
                 src.read_u64(r, c),
                 src.read_i64(r, c).cast[DType.uint64](),
                 "row " + String(r) + " col " + String(c),
+            )
+
+
+def test_row_read_u64_refuses_non_integer_cells() raises:
+    """read_u64 on an F32, F64, DECIMAL128 or STRING cell, or on a tag no
+    CELL_DT names, raises and names the tag and column, in every row. The F32
+    at offset 23 is followed by the F64 at 27, so an 8-byte load there would
+    return bytes of the next cell instead of refusing."""
+    var rb = _row_block()
+    var dts = _dtypes()
+    dts.append(UInt8(99))
+    var offs = _offsets()
+    offs.append(0)
+    var src = RowCellSource(rb, offs^, dts^)
+    var cols: List[Int] = [8, 9, 11, _STR, _N_COLS]
+    var tags: List[Int] = [3, 1, 12, 4, 99]
+    for i in range(len(cols)):
+        var c = cols[i]
+        for r in range(3):
+            var msg = String("")
+            try:
+                var v = src.read_u64(r, c)
+                msg = "returned " + String(v)
+            except e:
+                msg = String(e)
+            var want = (
+                "RowCellSource.read_u64: cell tag "
+                + String(tags[i])
+                + " is not an integer or BOOL cell (col_idx="
+                + String(c)
+                + ")"
+            )
+            assert_true(
+                want in msg,
+                "row " + String(r) + " col " + String(c) + ": " + msg,
             )
 
 
@@ -628,6 +666,7 @@ def main() raises:
     s.test[test_row_read_i64_widens_each_storage_width]()
     s.test[test_row_read_u64_zero_extends_unsigned_cells]()
     s.test[test_row_read_u64_reads_signed_cells_at_their_width]()
+    s.test[test_row_read_u64_refuses_non_integer_cells]()
     s.test[test_row_read_f64_widens_ints_and_f32]()
     s.test[test_row_read_f64_widens_narrow_and_unsigned_ints]()
     s.test[test_row_read_i32_and_f32_read_their_width]()

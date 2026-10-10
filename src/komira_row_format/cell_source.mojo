@@ -147,11 +147,13 @@ trait CellSource:
     def read_u64(self, row: Int, col_idx: Int) raises -> UInt64:
         """Read a logical-UINT64 cell. Used by the per-cell
         walker's UNSIGNED comparison arm for a U64 column, where a signed
-        Int64 compare would be incorrect for values above Int64.MAX. Every
-        cell is read at its own width. Narrower unsigned storage (U8/U16/U32)
-        zero-extends; signed storage (I8/I16/I32/I64) sign-extends to Int64 and
-        is returned as that value's 64-bit two's-complement bit pattern (-1 of
-        any width reads as 2^64 - 1)."""
+        Int64 compare would be incorrect for values above Int64.MAX. Integer
+        and BOOL cells are read at their own width. Narrower unsigned storage
+        (U8/U16/U32, BOOL) zero-extends; signed storage (I8/I16/I32/I64)
+        sign-extends to Int64 and is returned as that value's 64-bit
+        two's-complement bit pattern (-1 of any width reads as 2^64 - 1).
+        `RowCellSource` raises for a tag it does not serve (F32, F64, STRING,
+        DECIMAL128, or an unknown tag)."""
         ...
 
     def read_i128(self, row: Int, col_idx: Int) raises -> SIMD[DType.int128, 1]:
@@ -471,7 +473,14 @@ struct RowCellSource[mo: Origin[mut=False]](CellSource):
         # zero-extends; narrower signed storage sign-extends to Int64 and is
         # reinterpreted as its 64-bit bit pattern (the bits ColumnCellSource
         # and the walker's EXPR_LIT_I64 arm give). A U64 / I64 cell reads at
-        # full width.
+        # full width. Any other tag (F32, F64, STRING, DECIMAL128, unknown)
+        # raises rather than loading 8 bytes that may run into the next cell.
+        if dt == CELL_DT_U64:
+            return self.block[].read_fixed[DType.uint64](row, off)
+        if dt == CELL_DT_I64:
+            return self.block[].read_fixed[DType.int64](row, off).cast[
+                DType.uint64
+            ]()
         if dt == CELL_DT_U8 or dt == CELL_DT_BOOL:
             return UInt64(self.block[].read_fixed[DType.uint8](row, off))
         if dt == CELL_DT_U16:
@@ -490,7 +499,13 @@ struct RowCellSource[mo: Origin[mut=False]](CellSource):
             return Int64(self.block[].read_fixed[DType.int8](row, off)).cast[
                 DType.uint64
             ]()
-        return self.block[].read_fixed[DType.uint64](row, off)
+        raise Error(
+            "RowCellSource.read_u64: cell tag "
+            + String(dt)
+            + " is not an integer or BOOL cell (col_idx="
+            + String(col_idx)
+            + ")"
+        )
 
     @always_inline
     def read_i128(self, row: Int, col_idx: Int) raises -> SIMD[DType.int128, 1]:
