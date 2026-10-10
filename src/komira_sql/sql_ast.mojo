@@ -114,7 +114,7 @@ comptime SUBQ_EXISTS: UInt8 = 1  # `EXISTS (SELECT ...)` -> CORR_KIND_EXISTS (SE
 comptime SUBQ_NOT_EXISTS: UInt8 = 2  # `NOT EXISTS (SELECT ...)` -> CORR_KIND_NOT_EXISTS (ANTI)
 comptime SUBQ_IN: UInt8 = 3  # `x IN (SELECT ...)` -> EXISTS with the synthesized `inner_col = x` equi (SEMI)
 comptime SUBQ_NOT_IN: UInt8 = 4  # `x NOT IN (SELECT ...)` -> NULL-AWARE: the synthesized-equi ANTI join AND "no NULL y" AND "x IS NOT NULL or S empty" (`sql_bind_subquery._bind_null_aware_not_in`, 2026-09-25). It was the bare ANTI join, which answered rows DuckDB does not whenever a NULL was involved.
-comptime SUBQ_DERIVED: UInt8 = 5  # `FROM (SELECT ...) alias` derived table (bound to a subplan, inlined via the CTE scope under `alias`)
+comptime SUBQ_DERIVED: UInt8 = 5  # `FROM (SELECT ...) alias` derived table (bound to a subplan, inlined via the CTE scope under `alias#<index>`)
 # ★ UNION ALL (2026-09-21). The RIGHT-HAND BRANCH of `<select> UNION ALL
 # <select>`, parked in the SAME flat side-table every other nested SELECT uses.
 #
@@ -1301,15 +1301,16 @@ struct FromRelation(Copyable, Movable):
 
     A `FROM (SELECT ...) d` derived table is parked in the enclosing
     statement's `subqueries` side-table (kind `SUBQ_DERIVED`); the parser emits a
-    `named(d)` relation for it, and `_bind_query` pre-binds the derived body into the
-    per-query CTE scope under the alias `d` — so a derived table resolves through
-    the SAME named-derived-relation path a CTE does.
+    `named("d#<subquery index>", "d")` relation for it, and `_bind_query`
+    pre-binds the derived body into the per-query CTE scope under that key — so a
+    derived table resolves through the SAME named-derived-relation path a CTE
+    does, and only through the FROM entry that declares it.
 
-    `alias` is the AS alias (`t AS a` / `t a`), or `""`. It is LOAD-BEARING only
-    for correlated-subquery binding: the alias (and the base `name`) of a
-    correlated subquery's own FROM relation form the INNER-alias set that
-    `_bind_corr_scalar` uses to classify a `t.col` reference as inner vs outer.
-    The ordinary (non-correlated) binder ignores it (unqualified resolution)."""
+    `rel_alias` is the AS alias (`t AS a` / `t a`), or `""` (a derived table
+    always has one: its alias or `unnamed_subquery[N]`). A qualified `q.col`
+    resolves against it and the base `name` (`BindScope`'s qualifiers, a join
+    side's `_inner_alias_set`, a correlated subquery's inner-alias set that
+    classifies `t.col` as inner vs outer)."""
 
     var name: String  # catalog/CTE/derived table name; "" when a pure TVF
     var tvf_path: Optional[String]  # Some(path) => a read_* TVF
@@ -1545,7 +1546,7 @@ struct SubqueryDef(Movable):
     var kind: UInt8  # SUBQ_* code
     var in_lhs_col: String  # SUBQ_IN / SUBQ_NOT_IN: the outer LHS column base name
     var in_lhs_qualifier: String  # SUBQ_IN / SUBQ_NOT_IN: the LHS's `q` in `q.x` ("" if unqualified)
-    var derived_alias: String  # SUBQ_DERIVED: the derived table's alias
+    var derived_alias: String  # SUBQ_DERIVED: its relation key `<alias>#<subquery index>`
     # SUBQ_DERIVED: the optional column-list rename `(SELECT ...) d (c1, c2, ...)`.
     # Empty means no rename (the derived body's own output column names are kept);
     # when non-empty its length MUST equal the body's output column count and the

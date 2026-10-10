@@ -13,11 +13,12 @@
 #      outer reference and the run-time `x IS NOT NULL` check (u.k holds 5
 #      NULLs, t.k none); for IN the outer reference. The IN is found on
 #      either side of AND and under NOT, and in a derived table's or a
-#      UNION ALL branch's WHERE.
+#      UNION ALL branch's WHERE, including one whose FROM has its own SEMI
+#      and inner JOINs.
 #      (defect: the parser drops the qualifier and `u.k` binds as t.k;
 #      mutants: each side of the AND search dropped, the NOT arm dropped,
 #      the index compare made always-true, the body search's WHERE test
-#      dropped)
+#      dropped, the body's scope built with the top statement's joins)
 #   2. A qualified left column that names no scope column is refused by
 #      name (an unknown column, a SEMI-joined relation, an outer relation
 #      from inside a correlated body); one outside a WHERE's AND / OR / NOT /
@@ -37,7 +38,9 @@ from komira_arrow.schema import Field, Schema, SchemaBuilder
 from komira_plan_expr.expr import (
     EXPR_BINARY_OP, EXPR_CORRELATED_SUBQUERY, EXPR_UNARY_OP, Expr,
 )
-from komira_plan_ir.logical_plan import LogicalPlan, PLAN_FILTER, PLAN_PROJECT
+from komira_plan_ir.logical_plan import (
+    LogicalPlan, PLAN_FILTER, PLAN_PROJECT, PLAN_UNION,
+)
 
 from komira_sql.sql_token import tokenize
 from komira_sql.sql_parser import parse_sql
@@ -312,6 +315,35 @@ def test_not_in_proof_owner_past_a_semi_join() raises:
         "SELECT a FROM kk SEMI JOIN mm ON kk.k = mm.k JOIN u ON u.k = kk.k WHERE u.k NOT IN (SELECT b FROM mm)",
         _SEMI_PLAN,
     )
+
+
+def test_qualified_lhs_in_a_body_with_its_own_joins() raises:
+    # The owning body's FROM has an explicit SEMI and inner JOIN: its scope
+    # is kk, u (mm is SEMI-joined), so `u.k` is `k_right`. (mutant: the
+    # body's scope built with the top statement's join list, which has no
+    # joins, makes kk, mm, u a cross join and `u.k` `k_right_2`)
+    _check(
+        "SELECT a FROM (SELECT a FROM kk SEMI JOIN mm ON kk.k = mm.k JOIN u ON u.k = kk.k WHERE u.k NOT IN (SELECT b FROM mm)) AS d",
+        "Project(exprs=[ColRef(a)])\n"
+        "  Project(exprs=[ColRef(a)])\n"
+        "    Filter(predicate=BinaryOp(AND, BinaryOp(EQ, ColRef(k_right), ColRef(k)), BinaryOp(AND, CorrelatedSubquery(kind=1, outer_refs=#1, inner_tag=1), BinaryOp(OR, UnaryOp(IS_NOT_NULL, ColRef(k_right)), BinaryOp(EQ, CorrelatedSubquery(kind=2, outer_refs=#0, inner_tag=3), Literal(ScalarValue(int64, 0)))))))\n"
+        "      Join(type=CROSS, on=[])\n"
+        "        Join(type=SEMI, on=[k=k])\n"
+        "          Scan(path=\"kk.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+        "          Scan(path=\"mm.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+        "        Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR)\n",
+    )
+    assert_equal(
+        _refs("SELECT a FROM (SELECT a FROM kk SEMI JOIN mm ON kk.k = mm.k JOIN u ON u.k = kk.k WHERE u.k IN (SELECT b FROM mm)) AS d"),
+        "k_right",
+    )
+    # The same in a UNION ALL branch (the head's plan has no Filter, so
+    # `_refs` reads the branch through `Union`'s second child below).
+    var p = _plan(
+        "SELECT a FROM kk UNION ALL SELECT a FROM kk SEMI JOIN mm ON kk.k = mm.k JOIN u ON u.k = kk.k WHERE u.k IN (SELECT b FROM mm)"
+    )
+    assert_equal(Int(p.tag), Int(PLAN_UNION))
+    assert_equal(_plan_refs(p.union_data_ref().children[1][]), "k_right")
 
 
 def test_not_in_proof_no_owner() raises:

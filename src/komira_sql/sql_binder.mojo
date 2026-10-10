@@ -170,22 +170,22 @@ def _bind_query(
     for i in range(len(stmt.subqueries)):
         ref sd = stmt.subqueries[i]
         if sd.kind == SUBQ_DERIVED:
-            if cte_scope.has(sd.derived_alias):
-                raise Error(
-                    "SQL bind error: derived-table alias '" + sd.derived_alias
-                    + "' collides with a CTE or earlier derived table"
-                )
+            # `derived_alias` is the relation key `<alias>#<index>`
+            # (`_Parser._parse_derived_table`): unique per derived table and
+            # never a CTE or catalog name, so registering it hides nothing.
             var dplan = _bind_select(sd.body, catalog, cte_scope, prebound)
             # Column-list rename `(SELECT ...) d (c1, c2, ...)` (TPC-H q13 shape):
             # positionally rename the derived body's output columns to the given
             # names via a projection of `col_ref(orig) AS new`. The list length
             # MUST equal the body's output column count (standard SQL). Registered
-            # under the alias so downstream FROM references resolve the new names.
+            # under the key so downstream FROM references resolve the new names.
             if len(sd.col_names) > 0:
                 var ncols = dplan.output_schema.num_columns()
                 if len(sd.col_names) != ncols:
+                    var hash_at = sd.derived_alias.find("#")
                     raise Error(
-                        "SQL bind error: derived-table '" + sd.derived_alias
+                        "SQL bind error: derived-table '"
+                        + String(sd.derived_alias[byte=0:hash_at])
                         + "' column list has " + String(len(sd.col_names))
                         + " names but its SELECT produces " + String(ncols)
                         + " columns"

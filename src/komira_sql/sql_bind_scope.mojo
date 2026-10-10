@@ -117,6 +117,20 @@ def _date_to_days(s: String) raises -> Int32:
     return Int32(days)
 
 
+def _catalog_name(rel: FromRelation) raises -> String:
+    """`rel.name` for a catalog lookup, after the CTE / derived-relation scope
+    has no entry for it. A derived relation's key (`<alias>#<index>`) is
+    missing from that scope only when the derived table sits in a CTE body:
+    CTE bodies bind before any derived table is registered. Refused by its
+    alias rather than reported as an unknown table under the internal key."""
+    if rel.name.find("#") >= 0:
+        raise Error(
+            "SQL not supported: a derived table `(SELECT ...) AS "
+            + rel.rel_alias + "` inside a CTE body"
+        )
+    return rel.name
+
+
 def _relation_schema(rel: FromRelation, catalog: SqlCatalog, cte_scope: CteScope) raises -> Schema:
     """The schema of one FROM relation: a `read_parquet('path')` TVF's footer
     schema (read before binding, `cte_scope.parquet`), a `read_csv` /
@@ -132,7 +146,7 @@ def _relation_schema(rel: FromRelation, catalog: SqlCatalog, cte_scope: CteScope
     var cte_idx = cte_scope.find(rel.name)
     if cte_idx >= 0:
         return cte_scope.schema_copy(cte_idx)
-    return catalog.schema_of(rel.name)
+    return catalog.schema_of(_catalog_name(rel))
 
 
 def _relation_scan(rel: FromRelation, catalog: SqlCatalog, cte_scope: CteScope) raises -> LogicalPlan:
@@ -155,7 +169,7 @@ def _relation_scan(rel: FromRelation, catalog: SqlCatalog, cte_scope: CteScope) 
     var cte_idx = cte_scope.find(rel.name)
     if cte_idx >= 0:
         return cte_scope.plan_copy(cte_idx)
-    return catalog.build_scan(rel.name)
+    return catalog.build_scan(_catalog_name(rel))
 
 
 @always_inline

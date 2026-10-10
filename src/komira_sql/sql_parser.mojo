@@ -842,7 +842,7 @@ struct _Parser(Movable):
         # here rather than reported as "unexpected trailing tokens" (or as a
         # missing ')' one level up, in a nested SELECT).
         self._refuse_unsupported_clause()
-        _refuse_ambiguous_unnamed_subquery(stmt.from_tables)
+        _refuse_ambiguous_derived_qualifier(stmt.from_tables)
         self.unnamed_derived = outer_unnamed
         # A nested SELECT body ends at ')' (CTE) or the top-level trailing
         # ';'/EOF — the caller (parse / _parse_with_clause) consumes those.
@@ -1316,11 +1316,12 @@ struct _Parser(Movable):
         """Parse `(SELECT ...) alias [(c1, c2, ...)]` — a derived table (+the
         optional column-list rename). The body is a full nested SELECT parsed by
         the re-entrant `_parse_select_stmt` (so it gets the entire grammar). It is
-        parked in the subquery side-table with kind `SUBQ_DERIVED`, its (REQUIRED)
-        alias, and any column-list rename; the parser emits a `named(alias)`
-        relation, and `_bind_query` binds the body into the CTE scope under `alias`
-        (applying the column-list rename to its output columns) so it resolves
-        through the named-derived-relation path a CTE uses."""
+        parked in the subquery side-table with kind `SUBQ_DERIVED`, its relation
+        key (`<alias>#<subquery index>`, below), and any column-list rename; the
+        parser emits a `named(key, alias)` relation, and `_bind_query` binds the
+        body into the CTE scope under the key (applying the column-list rename to
+        its output columns) so it resolves through the named-derived-relation
+        path a CTE uses."""
         self._advance()  # '('
         if not self._is_kw("select"):
             raise Error("SQL syntax error: expected SELECT in a derived table")
@@ -1336,24 +1337,25 @@ struct _Parser(Movable):
         # `unnamed_subquery`; `SELECT unnamed_subquery.a FROM (SELECT * FROM
         # (SELECT 1 AS a))` is 1).
         #
-        # ⚠ TWO NAMES, ON PURPOSE. The QUALIFIER is DuckDB's (`rel_alias`); the
+        # ⚠ TWO NAMES, ON PURPOSE, for EVERY derived table. The QUALIFIER is
+        # the user's alias or DuckDB's synthetic name (`rel_alias`); the
         # RELATION NAME — the key the binder registers the body under in the
         # statement-wide derived-relation scope — is that plus `#<subquery
-        # index>`. The scope is ONE per statement while DuckDB's names repeat
-        # per SELECT level (two nested unaliased tables are BOTH
-        # `unnamed_subquery`), and `#` cannot occur in a lower-folded
-        # identifier, so the key can neither collide with its twin at another
-        # level nor SHADOW a real table a user named `unnamed_subquery`.
-        # A same-FROM relation that answers to the synthetic qualifier is
-        # refused by `_refuse_ambiguous_unnamed_subquery`.
-        var rel_name = d_alias
+        # index>`. The scope is ONE per statement while aliases are scoped to
+        # their own SELECT level (two nested unaliased tables are BOTH
+        # `unnamed_subquery`; a derived `t` inside an IN body is not the `t`
+        # of the top FROM), and `#` cannot occur in a lower-folded identifier,
+        # so the key can neither collide with a twin at another level nor
+        # SHADOW a catalog table or CTE outside the FROM entry that declares
+        # it. A same-FROM relation that answers to the same qualifier is
+        # refused by `_refuse_ambiguous_derived_qualifier`.
         var synthetic = d_alias == ""
         if synthetic:
             self.unnamed_derived += 1
             d_alias = String("unnamed_subquery")
             if self.unnamed_derived > 1:
                 d_alias += String(self.unnamed_derived)
-            rel_name = d_alias + "#" + String(len(self.subqueries))
+        var rel_name = d_alias + "#" + String(len(self.subqueries))
         # Optional column-list rename `(c1, c2, ...)` right after the alias
         # (`(SELECT ...) c_orders (c_custkey, c_count)`, TPC-H q13 shape). It is
         # distinguished from a fresh derived-table `(SELECT ...)` by the parser
@@ -3202,21 +3204,24 @@ struct _Parser(Movable):
         )
 
 
-def _refuse_ambiguous_unnamed_subquery(from_tables: List[FromRelation]) raises:
-    """⛔ Refuse an UNALIASED derived table whose synthetic qualifier
-    (`unnamed_subquery[N]`, see `_Parser._parse_derived_table`) is ALSO the
-    name or alias of another relation in the same FROM clause.
+def _refuse_ambiguous_derived_qualifier(from_tables: List[FromRelation]) raises:
+    """⛔ Refuse a derived table whose qualifier (its alias, or the synthetic
+    `unnamed_subquery[N]` of an unaliased one, see
+    `_Parser._parse_derived_table`) is ALSO the name or alias of another
+    relation in the same FROM clause (`FROM t, (SELECT ...) AS t`,
+    `FROM (SELECT ...) AS d, u AS d`, `FROM (SELECT 1 AS a), unnamed_subquery`).
 
-    DuckDB v1.5.3 accepts that and resolves each qualified column by name —
-    with a table that is itself called `unnamed_subquery`,
-    `unnamed_subquery.z` reaches the TABLE and `unnamed_subquery.a` the
-    SUBQUERY (measured). This binder's qualifier resolution takes the first
-    relation that answers to a qualifier, so it could pick the other one and
-    answer from the wrong relation under a plausible column. Refused, naming
-    the collision and the remedy; aliasing the derived table resolves it.
+    This binder's qualifier resolution takes the first relation that answers
+    to a qualifier, so it could pick the other one and answer from the wrong
+    relation under a plausible column. (For the synthetic name DuckDB v1.5.3
+    accepts it and resolves each qualified column by name — with a table that
+    is itself called `unnamed_subquery`, `unnamed_subquery.z` reaches the
+    TABLE and `unnamed_subquery.a` the SUBQUERY, measured.) Refused, naming the
+    collision and the remedy.
 
-    A synthetic relation is recognised by the `#` in its relation NAME, which no
-    lower-folded identifier can contain."""
+    A derived relation is recognised by the `#` in its relation NAME, which no
+    lower-folded identifier can contain. One with no `rel_alias` (a shape the
+    parser never builds) is skipped: an empty qualifier names nothing."""
     for i in range(len(from_tables)):
         ref s = from_tables[i]
         if s.name.find("#") < 0 or s.rel_alias == "":
@@ -3228,12 +3233,12 @@ def _refuse_ambiguous_unnamed_subquery(from_tables: List[FromRelation]) raises:
             ref o = from_tables[j]
             if o.name.lower() == q or o.rel_alias.lower() == q:
                 raise Error(
-                    "SQL not supported: an unaliased derived table `(SELECT"
-                    + " ...)` is named `" + q + "` (DuckDB's name for it), and"
-                    + " another relation in the same FROM clause also answers"
-                    + " to `" + q + "`, so a column qualified by that name is"
-                    + " ambiguous. Give the derived table an alias:"
-                    + " `(SELECT ...) AS d`."
+                    "SQL not supported: a derived table `(SELECT ...)` is"
+                    + " named `" + q + "`, and another relation in the same"
+                    + " FROM clause also answers to `" + q + "`, so a column"
+                    + " qualified by that name is ambiguous. Give the"
+                    + " relations distinct aliases (an unaliased derived table"
+                    + " is named `unnamed_subquery`, `unnamed_subquery2`, ...)."
                 )
 
 

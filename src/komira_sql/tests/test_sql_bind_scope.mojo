@@ -16,8 +16,14 @@
 #   3. CTEs bind in order, may reference earlier CTEs, shadow a catalog
 #      table, and a duplicate name is refused; a derived table binds through
 #      the same scope, its column list renames positionally (a count mismatch
-#      is refused), and its alias may not collide with a CTE.
-#      (mutant: `CteScope.find` compares without lower-casing)
+#      is refused), and an alias equal to a CTE's name reads the derived
+#      body. A derived alias is visible only through the FROM entry that
+#      declares it: a derived `t` in an IN body or a UNION ALL branch leaves
+#      the top FROM's catalog t in place, and a derived table in a CTE body
+#      is refused by its alias.
+#      (mutant: `CteScope.find` compares without lower-casing; defect: a
+#      derived table keyed by its bare alias; mutant: the `#` test in
+#      `_catalog_name` made always-true)
 #   4. UNION ALL builds one node over every branch with the first branch's
 #      schema; a branch with a different width or column type is refused.
 #      (mutant: the type comparison dropped from `_union_branch_schema_check`)
@@ -253,9 +259,45 @@ def test_derived_tables_bind_through_the_scope() raises:
         "SELECT * FROM (SELECT k, v FROM t) d (a)",
         "ERR: SQL bind error: derived-table 'd' column list has 1 names but its SELECT produces 2 columns"
     )
+    # A derived table aliased like a CTE is that FROM entry's relation: it
+    # reads u, the CTE (over t) is unused.
     _check(
         "WITH d AS (SELECT k FROM t) SELECT * FROM (SELECT k FROM u) d",
-        "ERR: SQL bind error: derived-table alias 'd' collides with a CTE or earlier derived table"
+        "Project(exprs=[ColRef(k)])\n"
+        "  Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
+def test_derived_alias_is_scoped_to_its_own_from_entry() raises:
+    # A derived table aliased `t` inside an IN body or a UNION ALL branch is
+    # not the `t` of the top FROM: the top still scans the catalog's
+    # t.parquet, so each query binds to the same plan as its spelling with
+    # the derived table aliased `d`. (defect: the derived table registered
+    # under its bare alias hid catalog t in every FROM of the statement)
+    var in_t = _got("SELECT k FROM t WHERE k IN (SELECT k FROM (SELECT b AS k FROM mm) AS t)")
+    assert_equal(in_t, _got("SELECT k FROM t WHERE k IN (SELECT k FROM (SELECT b AS k FROM mm) AS d)"))
+    assert_equal(
+        in_t,
+        "Project(exprs=[ColRef(k)])\n"
+        "  Filter(predicate=CorrelatedSubquery(kind=0, outer_refs=#1, inner_tag=1))\n"
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n",
+    )
+    var union_t = _got("SELECT k FROM t UNION ALL SELECT k FROM (SELECT b AS k FROM mm) AS t")
+    assert_equal(union_t, _got("SELECT k FROM t UNION ALL SELECT k FROM (SELECT b AS k FROM mm) AS d"))
+    assert_true(
+        union_t.startswith(
+            "Union(branches=2)\n"
+            "  Project(exprs=[ColRef(k)])\n"
+            "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+        ),
+        union_t,
+    )
+    # A derived table in a CTE body is refused by its alias: CTE bodies bind
+    # before any derived table is registered. (defect: the bare-alias lookup
+    # bound catalog t.parquet for the derived `t` here)
+    _check(
+        "WITH c AS (SELECT k FROM (SELECT b AS k FROM mm) AS t) SELECT k FROM c",
+        "ERR: SQL not supported: a derived table `(SELECT ...) AS t` inside a CTE body",
     )
 
 

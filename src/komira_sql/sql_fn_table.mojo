@@ -17,9 +17,9 @@
 #   written ONCE per lowering rather than once per name.
 #
 # The table is DATA ONLY — it names no `Expr`, calls no binder, and imports
-# nothing from `sql_binder` or `sql_ast`. That is what lets a contributor add a
-# function without opening the 2,600-line binder at all, and it is what keeps
-# the dependency edge acyclic (`sql_binder` -> `sql_fn_table`, never back).
+# nothing from `sql_binder`, the `sql_bind_*` modules or `sql_ast`. That lets a
+# contributor add a function without opening the binder at all, and it keeps
+# the dependency edge acyclic (`sql_bind_*` -> `sql_fn_table`, never back).
 #
 # ⚠⚠ THERE ARE THREE NAME SPACES HERE AND THEY ARE NOT THE SAME SET
 # -----------------------------------------------------------------
@@ -64,12 +64,14 @@
 # HOW TO ADD A FUNCTION
 # ---------------------
 #   * it lowers to a node this binder already builds -> ONE LINE here, and
-#     NOTHING in `sql_binder.mojo`.
+#     NOTHING in the `sql_bind_*` modules.
 #   * it is a pure binder DESUGAR (the route most functions not yet served
 #     will take) -> ONE LINE here naming a new `DSG_*`, plus one new `_bind_*`
-#     helper function APPENDED to `sql_binder.mojo` and one line in that file's
-#     desugar switch. Two changes adding two desugars append two DIFFERENT
-#     functions and two DIFFERENT rows; they do not collide.
+#     helper function APPENDED to `sql_bind_fn_args.mojo` or
+#     `sql_bind_fn_nested.mojo` (the modules that hold the desugar helpers)
+#     and one line in the `FNK_DESUGAR` switch of `sql_bind_call.mojo`'s
+#     `_bind_scalar_call`. Two changes adding two desugars append two
+#     DIFFERENT functions and two DIFFERENT rows; they do not collide.
 #   * it is a real DuckDB function this engine deliberately does NOT serve, or
 #     one it CANNOT serve yet -> ONE LINE here with `FNK_REFUSED` and the
 #     measured reason. A refusal whose reason lives only in a docstring is a
@@ -434,7 +436,7 @@ asked for, reachable by anyone who guessed it and impossible to withdraw later
 without breaking whoever did.
 
 ⚠ IT IS DECLARED HERE, NOT IN THE PARSER, so the producer (`sql_parser`) and
-the consumer (`sql_scalar_fn_spec` + `sql_binder`) read ONE token. A desugar
+the consumer (`sql_scalar_fn_spec` + `sql_bind_call`) read ONE token. A desugar
 name written down twice is a desugar that silently stops resolving the day one
 copy is edited — and its failure mode is the generic unknown-function refusal,
 which reads exactly like the feature never having existed.
@@ -1197,7 +1199,7 @@ comptime _R_TSMINT: String = (
     "— `make_date(y, m, d)` needs month lengths and leap years, and no "
     "`EXPR_*` tag or binder desugar computes it. (2) A ZONE-AWARE TEMPORAL "
     "VALUE — `make_timestamptz` and `to_timestamp` both return TIMESTAMP WITH "
-    "TIME ZONE, which nothing in `sql_binder.mojo` produces or consumes (the "
+    "TIME ZONE, which nothing in the `sql_bind_*` modules produces or consumes (the "
     "same wall `_R_TZFN` measures). "
     "⛔ THE RELABEL IS NOT A SERVING ROUTE FOR EITHER HALF, AND THAT IS WHY "
     "THEY STAY REFUSED WHILE THEIR EPOCH SIBLINGS ARE SERVED: `CAST(<an "
@@ -1259,7 +1261,7 @@ comptime _R_TZFN: String = (
     "read or apply a TIME-ZONE DATABASE. MEASURED v1.5.3: `timezone` has two "
     "overloads (`TIMESTAMP WITH TIME ZONE` and `BIGINT`) and the other two "
     "return BIGINT offsets. THE MISSING PRIMITIVE IS A ZONE-AWARE TEMPORAL "
-    "VALUE THE SQL DOOR CAN REACH: nothing in `sql_binder.mojo` produces or "
+    "VALUE THE SQL DOOR CAN REACH: nothing in the `sql_bind_*` modules produces or "
     "consumes a TIMESTAMP WITH TIME ZONE, and `expr_walk.walk_expr_field`'s "
     "only interaction with a timestamp's tz is to CARRY the child's field "
     "through `date_trunc` — a fix recorded there precisely because the bare "
@@ -1291,7 +1293,7 @@ comptime _R_INTERVALCTOR: String = (
     "(INTERVAL_YEAR_MONTH, INTERVAL_DAY_TIME, INTERVAL_MONTH_DAY_NANO) and "
     "`expr_walk` has an INTERVAL_MDN arm for interval +/- interval, so this "
     "is NOT a columnar gap — it is that no `EXPR_*` tag MINTS one from a "
-    "number, and `sql_binder.mojo` has no INTERVAL literal, so the SQL door "
+    "number, and the `sql_bind_*` modules have no INTERVAL literal, so the SQL door "
     "cannot reach the arms that exist. VERIFIED: "
     "`Column` builds an INTERVAL_MDN column (the (int32 months, int32 days, "
     "int64 nanos) triple), "
@@ -2006,7 +2008,7 @@ comptime _R_LISTCTOR: String = (
     "`plan_wire_codec`/`plan_wire_values` (serialization), "
     "`compiler_eval_column` (the evaluator), `expr_walk` (the output Field — "
     "this is where `Field.list_of` gets its caller) and "
-    "`sql_binder`/`sql_fn_table`; the other ten are one-arm walkers. "
+    "`sql_bind_call`/`sql_fn_table`; the other ten are one-arm walkers. "
     "⛔ AND DO NOT FORGET THE ASYMMETRY THAT IS EASIEST TO MISS: a new "
     "tag ALSO needs an `_is_*_output` arm in "
     "`komira_dispatch_project/compute_project`, or it executes over PARQUET "
