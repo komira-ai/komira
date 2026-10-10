@@ -594,6 +594,7 @@ def test_blocked_interim_parks_the_response_behind_it() raises:
         assert_equal(len(rig.read().data), filler)
         assert_true(resume_pending_write(rig.entry, rig.sent))
         assert_equal(_text(rig.read().data), String(CONTINUE) + rig.ok())
+        assert_equal(rig.sent, Int64((String(CONTINUE) + rig.ok()).byte_length()))
 
 
 def test_expect_continue_then_pipelined_request() raises:

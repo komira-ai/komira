@@ -168,7 +168,10 @@ def _sweep_stale_mapping(
         can address it, so it goes too, without closing a number the table
         cannot show it still owns (komira-ai/komira#947).
 
-    Afterwards every slot left is reached by its own fd's mapping.
+    A slot moved into the removed one has its mapping patched only when
+    that mapping reached the moved slot. Afterwards every slot left is
+    reached by its own fd's mapping, unless two slots left hold one fd:
+    the mapping then keeps reaching the slot it reached.
     """
     var idx = fd_to_idx.pop(Int(fd), -1)
     var n = conns.len()
