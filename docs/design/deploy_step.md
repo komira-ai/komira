@@ -574,7 +574,7 @@ it. A probe's row reports environment `CONTAINER` too.
 |---|---|
 | `name`, `kind: DEPLOY_PROBE` | As for the existing kinds. |
 | `image` | **v1 accepts a digest only** (`<repo>@sha256:<hex>`), pulled anonymously with `kci_validate`'s existing empty `DOCKER_CONFIG`. A tag is refused. A `StepOutput` image is question Q5. |
-| `args` | Repeated. kci appends `--validation-run-id=<id>`, and `--target-url=<value>` when `target` is set. Configuration goes in flags, never in the environment. |
+| `args` | Repeated. kci appends `--validation-run-id=<id>`, and `--target-url=<value>` when `target` is set, so an entry that is either flag (bare or `=value`) is refused: the image would read two values. Configuration goes in flags, never in the environment. |
 | `target` | Optional `{resource, output}`. It must name a declared output of this step's resource list (URL or ADDRESS). It is read from this run's recorded outputs only, never from the cloud. A run that selects the probe without also selecting its DEPLOY step (`--only validation:<name>` alone) is REFUSED at start: the job that runs a probe alone holds no cell credential (kci.yml's validation jobs carry no identity token), and the probe would otherwise need one. Under `--plan` the probe is WOULD_VALIDATE. |
 | `timeout_seconds` | Required, from 1 to 3600. |
 | `expect` | Repeated case ids, `[a-z0-9_-]+`, at least one, no repeats. |

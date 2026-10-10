@@ -15,7 +15,10 @@
 #   * an update of a name that does not exist is REFUSED (`NOT_FOUND`);
 #   * labels are kept exactly as written and read back exactly; an update
 #     rewrites the retention mark (`kci-retention`, the label it is handed)
-#     in the same call and leaves every other label as it was.
+#     in the same call and leaves every other label as it was;
+#   * an object's NAME (the author's cloud name, `names`; empty when the
+#     cloud chose it) is written by the create, or by the adoption that takes
+#     it over, and by nothing else: an update or a tamper never renames.
 #
 # THE FAULTY VARIANT (constructor arguments, each independent):
 #   * `fail_at_call = k` (1-based, 0 = never): the k-th mutating call raises
@@ -79,6 +82,7 @@ struct FakeStore(Movable):
     var labels: List[List[Label]]
     var annotations: List[String]
     var extras: List[String]
+    var names: List[String]
     var created: List[Int]
     var calls: List[String]
     var fail_at_call: Int
@@ -107,6 +111,7 @@ struct FakeStore(Movable):
         self.labels = List[List[Label]]()
         self.annotations = List[String]()
         self.extras = List[String]()
+        self.names = List[String]()
         self.created = List[Int]()
         self.calls = List[String]()
         self.fail_at_call = fail_at_call
@@ -180,6 +185,7 @@ struct FakeStore(Movable):
         url: String,
         labels: List[Label],
         annotation: String,
+        name: String = String(""),
     ):
         self._seq += 1
         self.ids.append(id)
@@ -190,6 +196,7 @@ struct FakeStore(Movable):
         self.labels.append(labels.copy())
         self.annotations.append(annotation)
         self.extras.append(String(""))
+        self.names.append(name)
         self.created.append(self._seq)
         for g in range(len(self._ghosts)):
             if self._ghosts[g] == id:
@@ -209,6 +216,7 @@ struct FakeStore(Movable):
         self.labels.append(List[Label]())
         self.annotations.append(String(""))
         self.extras.append(String(""))
+        self.names.append(String(""))
         self.created.append(self._seq)
 
     def race_next(mut self):
@@ -222,6 +230,7 @@ struct FakeStore(Movable):
         url: String,
         labels: List[Label],
         annotation: String,
+        name: String = String(""),
     ) raises:
         self._admit(String("create"), id)
         if self._race_next:
@@ -229,11 +238,11 @@ struct FakeStore(Movable):
             self._race_next = False
             self.raced_id = id
             if self.find(id) < 0:
-                self._insert(id, kind, digest, url, labels, annotation)
+                self._insert(id, kind, digest, url, labels, annotation, name)
                 self.calls.append(String("create ") + id)
         if self.find(id) >= 0:
             raise Error(String("fake: ALREADY_EXISTS: ") + id)
-        self._insert(id, kind, digest, url, labels, annotation)
+        self._insert(id, kind, digest, url, labels, annotation, name)
         self.calls.append(String("create ") + id)
 
     def update(mut self, id: String, digest: String, url: String, retention: Label) raises:
@@ -252,7 +261,9 @@ struct FakeStore(Movable):
         kept.append(retention.copy())
         self.labels[i] = kept^
 
-    def relabel(mut self, id: String, labels: List[Label], annotation: String) raises:
+    def relabel(mut self, id: String, labels: List[Label], annotation: String, name: String = String("")) raises:
+        """Stamp an object (an adoption): its labels, its annotation, and
+        the name the adopting node knows it by."""
         self._admit(String("relabel"), id)
         var i = self.find(id)
         if i < 0:
@@ -260,6 +271,7 @@ struct FakeStore(Movable):
         self.calls.append(String("relabel ") + id)
         self.labels[i] = labels.copy()
         self.annotations[i] = annotation
+        self.names[i] = name
 
     def remove(mut self, id: String) raises:
         """Idempotent: removing what is not there is a no-op, but still a
@@ -284,6 +296,7 @@ struct FakeStore(Movable):
         _ = self.labels.pop(i)
         _ = self.annotations.pop(i)
         _ = self.extras.pop(i)
+        _ = self.names.pop(i)
         _ = self.created.pop(i)
 
     def tamper(mut self, id: String) raises:

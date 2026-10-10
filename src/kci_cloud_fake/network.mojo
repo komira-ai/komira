@@ -23,6 +23,9 @@
 #                   = `<id>-subnet`.
 #   * IP address -> `<id>/address`: the field `version` (`IPV4`), and
 #                   `out.ADDRESS` = `<id>.ip.fake`.
+#   A network or a subnet with the author's cloud name (`physical_name`)
+#   exposes that name as its NAME, and an IP address's ADDRESS is built on
+#   it (`<name>.ip.fake`).
 #   * a service's `network` -> an INPUT of the service's run node on the
 #                   subnet's NAME (`network`), so the run is created after
 #                   the subnet and follows it (`network_input`).
@@ -43,11 +46,13 @@ from kci_cloud import (
     Finding,
     LoweredNode,
     Setting,
+    body_is,
     service_subnet,
 )
 from kci_resource_proto.resource import Resource
 
 from kci_cloud_fake.limits import FAKE_CITATION
+from kci_cloud_fake.metadata import fake_physical_name
 from kci_cloud_fake.shapes import ProviderShape, ROLE_ADDRESS, ROLE_NETWORK, ROLE_SUBNET
 
 
@@ -82,7 +87,8 @@ def lower_network(r: Resource, shape: ProviderShape) raises -> List[LoweredNode]
         fields.append(Setting(String("ipv4_cidr"), r.network.value().ipv4_cidr.copy()))
     else:
         fields.append(Setting(String("subnets"), String("custom")))
-    fields.append(Setting(String("out.NAME"), fake_network_name(r.id)))
+    var named = fake_physical_name(r)
+    fields.append(Setting(String("out.NAME"), named if named.byte_length() > 0 else fake_network_name(r.id)))
     return _one(r, String(ROLE_NETWORK), shape.kind_of(FIELD_NETWORK, String(ROLE_NETWORK)), List[InputRef](), fields^)
 
 
@@ -97,7 +103,8 @@ def lower_subnet(r: Resource, shape: ProviderShape) raises -> List[LoweredNode]:
     fields.append(Setting(String("ipv4_cidr"), s.ipv4_cidr.copy()))
     if shape.subnet_zone_limit.byte_length() > 0 and Bool(s.zone):
         fields.append(Setting(String("zone"), String(Int(s.zone.value()))))
-    fields.append(Setting(String("out.NAME"), fake_subnet_name(r.id)))
+    var named = fake_physical_name(r)
+    fields.append(Setting(String("out.NAME"), named if named.byte_length() > 0 else fake_subnet_name(r.id)))
     return _one(r, String(ROLE_SUBNET), shape.kind_of(FIELD_SUBNET, String(ROLE_SUBNET)), refs^, fields^)
 
 
@@ -106,7 +113,8 @@ def lower_address(r: Resource, shape: ProviderShape) raises -> List[LoweredNode]
     _no_uses(r, String("ip_address"))
     var fields = List[Setting]()
     fields.append(Setting(String("version"), String("IPV4")))
-    fields.append(Setting(String("out.ADDRESS"), fake_ip_address(r.id)))
+    var base = fake_physical_name(r)
+    fields.append(Setting(String("out.ADDRESS"), fake_ip_address(base if base.byte_length() > 0 else r.id)))
     return _one(r, String(ROLE_ADDRESS), shape.kind_of(FIELD_IP_ADDRESS, String(ROLE_ADDRESS)), List[InputRef](), fields^)
 
 
@@ -122,7 +130,7 @@ def network_input(r: Resource, mut refs: List[InputRef]):
 def network_limits(r: Resource, shape: ProviderShape, cloud: String, mut out: List[Finding]):
     """The shape's network limits (file header) on `r`; nothing for a type
     they do not concern."""
-    if Bool(r.subnet) and shape.subnet_zone_limit.byte_length() > 0 and not Bool(r.subnet.value().zone):
+    if body_is(r, FIELD_SUBNET) and shape.subnet_zone_limit.byte_length() > 0 and not Bool(r.subnet.value().zone):
         out.append(
             Finding(
                 FINDING_LIMIT,

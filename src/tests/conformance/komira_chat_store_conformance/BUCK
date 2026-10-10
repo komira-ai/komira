@@ -1,0 +1,39 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: komira_chat_store's behaviour, written once, generic over the
+# backend (a `ChatTarget`: a fresh chat database and a second connection to
+# it), and run against each backend a build action can run:
+#
+#   tests/test_sqlite.mojo              SqliteDatabase, a new database file
+#                                       per check in WAL mode, two
+#                                       connections to it.
+#   tests/test_firestore_mock.mojo      FirestoreDatabase over MockFirestore,
+#                                       with only the keys and indexes the
+#                                       store declares.
+#   tests/test_sqlite_erasure_bytes.mojo  after an erasure, the erased text is
+#                                       in neither the SQLite file nor its
+#                                       write-ahead log.
+#
+# Postgres is not run: a build action has no server. Nothing depends on this
+# package.
+mojo_library(
+    name = "komira_chat_store_conformance",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_chat_store:komira_chat_store",
+        "//src/komira_db:komira_db",
+    ],
+    conda = False,
+    test_deps = [
+        "//src/komira_db_sqlite:komira_db_sqlite",
+        "//src/komira_gcp_firestore:komira_gcp_firestore",
+        "//src/komira_gcp_firestore_db:komira_gcp_firestore_db",
+    ],
+    test_srcs = [
+        "tests/test_firestore_mock.mojo",
+        "tests/test_sqlite.mojo",
+        "tests/test_sqlite_erasure_bytes.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
