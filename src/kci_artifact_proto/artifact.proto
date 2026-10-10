@@ -97,7 +97,9 @@
 //                  the number of UNIT lines; 0 is allowed) or `WIDENED
 //                  <reason>` with no UNIT line (the change reaches every
 //                  declared unit: a file it cannot map, a change to the build
-//                  system itself). Which files widen is the tool's to say:
+//                  system itself), or `BROKEN <reason>` with no UNIT line
+//                  (the tool's query of its build graph failed, such as on a
+//                  target it cannot configure; kci FAILS the check). Which files widen is the tool's to say:
 //                  kci names no build tool and no path.
 //   build_targets  how a unit is built for the check: <executable> <args...>
 //                  <the unit's targets...>, no placeholder, no output
@@ -118,7 +120,10 @@
 //                  derived check, `UNMATCHED <unit> <target>` per declared
 //                  target that matches nothing in the graph, and exactly one
 //                  verdict line, LAST: `DERIVED <n>` (n the number of
-//                  derived checks; 0 is allowed). The derived checks are
+//                  derived checks; 0 is allowed); or, as its only line,
+//                  `BROKEN <reason>` when it could not query the graph (its
+//                  query failed): kci FAILS the check (KCI-E-BUILD-FAILED),
+//                  never a widening. The derived checks are
 //                  added after the declared ones, owned by that build
 //                  system, under the file's rules (a name a declared unit
 //                  has is refused). An UNMATCHED artifact target is refused

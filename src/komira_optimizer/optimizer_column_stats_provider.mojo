@@ -20,8 +20,9 @@
 #
 # Why this lives in the optimizer (and not engine-internal): join-order
 # enumeration (DPccp, greedy) runs at plan-compile time. The provider
-# is consumed by `optimizer_dpccp` and the upcoming TDOM module
-# — both optimizer rules.
+# is consumed by the TDOM modules (`optimizer_tdom`, `optimizer_tdom_card`,
+# `optimizer_tdom_cost`) — optimizer rules. A DPccp enumerator
+# (`optimizer_dpccp`) is designed to consume it too; it is not in this tree.
 #
 # The trait is the load-bearing behavioral contract: `distinct_count_for`
 # ALWAYS returns a value (no Optional). Callers do not need to handle
@@ -171,8 +172,8 @@ trait ColumnStatsProvider:
     matches DuckDB's `relation_statistics_helper.cpp:110` fall-through
     exactly.
 
-    Callers (DPccp cost-model, upcoming TDOM module) consume the
-    returned `ColumnStatsValue.ndv` directly. The `from_hll` /
+    Callers (the TDOM modules; a DPccp cost model, not in this tree) consume
+    the returned `ColumnStatsValue.ndv` directly. The `from_hll` /
     `source` fields are advisory (used by the cost model's confidence
     discounting).
     """
@@ -244,8 +245,7 @@ struct DefaultColumnStatsProvider[origin: Origin[mut=False]](
     # `DEFAULT_SCAN_FILTER_SELECTIVITY` (50%) when the leaf scan has a
     # filter, and recursively walks PLAN_FILTER nodes (50% generic /
     # 1% HAVING). So `JoinRelation.cardinality` is semantically
-    # `cardinality_after_filters`, NOT raw footer `num_rows`. Benchmark
-    # validation can rely on this — no follow-up gap.
+    # `cardinality_after_filters`, NOT raw footer `num_rows`.
     """
 
     var _relations: Pointer[Slab[JoinRelation], Self.origin]
@@ -280,8 +280,8 @@ struct DefaultColumnStatsProvider[origin: Origin[mut=False]](
             ref ts = relation.table_stats.value()
             # STATS_SOURCE_SYNTHETIC_ROW_COUNT carries a synthesized
             # distinct_count derived from row_count (the
-            # fallback at `_synth_row_count_table_stats` in
-            # `optimizer_dpccp.mojo`). Treat that as Tier 2 — it's
+            # `_synth_row_count_table_stats` fallback of `optimizer_dpccp`,
+            # not in this tree). Treat that as Tier 2 — it's
             # the row-count heuristic in a different wrapper.
             if ts.source != STATS_SOURCE_SYNTHETIC_ROW_COUNT:
                 var dc = ts.column_distinct_count(column_name)
@@ -348,8 +348,8 @@ struct SyntheticColumnStatsProvider(
     behavior so test wiring + production wiring degrade identically.
 
     Design choice: test injection lives ON this provider,
-    NOT on the existing `cost_override` Dict in
-    `solve_dpccp_with_cost`. The two mechanisms target different
+    NOT on the `cost_override` Dict of `solve_dpccp_with_cost` (DPccp, not in
+    this tree). The two mechanisms target different
     layers (provider = per-column NDV; cost_override = per-RelationSet
     cost); keeping them separate avoids cross-coupling test fixtures.
     """

@@ -15,3 +15,7 @@ from .route import (
     RouteBlock,
     AppRouter,
 )
+from .compose import (
+    ComposedRoutes,
+    RoutedDispatcher,
+)

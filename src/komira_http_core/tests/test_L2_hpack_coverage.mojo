@@ -5,8 +5,8 @@
 #
 # The oracle is RFC 7541 itself, never this decoder's output:
 #   * Appendix A (the static table, all 61 rows), Appendix B (the Huffman
-#     code of every printable ASCII symbol, which is every symbol hpack.mojo
-#     tabulates), Appendix C.1 (integers), C.2 (one example per
+#     code of every printable ASCII symbol, and of all 256 octets in one
+#     string, encoded from the Appendix B table), Appendix C.1 (integers), C.2 (one example per
 #     representation), C.3 and C.4 (three requests on one connection, raw and
 #     Huffman), C.5 and C.6 (three responses with a 256-octet table, raw and
 #     Huffman, with evictions). The hex dumps and the dynamic tables after each
@@ -27,13 +27,15 @@
 # equal to the ceiling refused. Every decode error is matched by its exact
 # message, so renaming one or merging two fails too.
 #
-# Not pinned here, on purpose, because hpack.mojo does not do what RFC 7541
-# requires and a test of today's result would pin the defect: Huffman symbols
-# outside 0x20..0x7e (Appendix B codes all 256), raw octets of 0x80 and above
-# (decoded one code point per octet, so `c3 a9` reads back as 4 bytes), and a
-# size update that grows the table again after an earlier block shrank it
-# (refused: the ceiling checked is the table's maximum size as it stood at
-# the start of the block, not the SETTINGS_HEADER_TABLE_SIZE of §4.2).
+# Three RFC 7541 departures fixed for komira-ai/komira#881, each with a test
+# that failed before the fix: a size update that grows the table back after
+# an earlier block shrank it (§4.2, §6.3: the ceiling is
+# SETTINGS_HEADER_TABLE_SIZE, not the table's current maximum), raw octets of
+# 0x80 and above (§5.2: `c3 a9` is the two octets of "é", not four), and
+# Huffman symbols outside 0x20..0x7e (Appendix B codes all 256 octets).
+# Octets that are not UTF-8 cannot be held by a String as they are; the
+# decoder maps them one code point per octet (test_raw_non_utf8_octets_map_
+# one_code_point_each).
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -49,8 +51,10 @@ from komira_http_core.codec.h2.hpack import (
     decode_string,
     encode_integer,
     encode_string,
+    hpack_octets_to_string,
     hpack_static_lookup,
 )
+from komira_http_core.codec.h2.hpack_huffman import huffman_decode_octets
 
 
 # -----------------------------------------------------------------------------
@@ -330,6 +334,111 @@ def test_encode_string_huffman_flag_emits_raw() raises:
     var out = List[UInt8]()
     encode_string(String("custom-key"), True, out)
     assert_equal(_as_hex(out), "0a637573746f6d2d6b6579")
+
+
+def test_raw_utf8_octets_kept_as_they_are() raises:
+    """§5.2: a string literal is a sequence of octets. Raw `c3 a9` (H = 0,
+    length 2) is "é", two octets; the old decoder made each octet a code
+    point and returned four. Also through a whole block: a literal without
+    indexing (00), name "a", value c3 a9 (#881 item 2)."""
+    var buf = _hex("02c3 a9")
+    var r = decode_string(Span(buf), 0)
+    assert_true(r.ok)
+    assert_equal(r.value.byte_length(), 2)
+    assert_equal(r.value, "é")
+    assert_equal(r.consumed, 3)
+    var dec = HpackDecoder()
+    assert_equal(_decode(dec, "0001 6102 c3a9"), "a: é\n")
+
+
+def test_raw_non_utf8_octets_map_one_code_point_each() raises:
+    """Octets that are not well-formed UTF-8 (a lone 80, a lone ff, c3 cut
+    short) cannot be held by a String as they are; each becomes the code
+    point of its value, so 80 reads back as c2 80. ASCII stays one octet."""
+    var lone = _hex("0180")
+    var r = decode_string(Span(lone), 0)
+    assert_true(r.ok)
+    assert_equal(r.value, chr(0x80))
+    assert_equal(r.value.byte_length(), 2)
+    var mixed = _hex("0361 ffc3")
+    var m = decode_string(Span(mixed), 0)
+    assert_true(m.ok)
+    assert_equal(m.value, String("a") + chr(0xFF) + chr(0xC3))
+    var octets: List[UInt8] = [UInt8(0x41), UInt8(0x80)]
+    assert_equal(hpack_octets_to_string(octets), String("A") + chr(0x80))
+    assert_equal(hpack_octets_to_string(List[UInt8]()), "")
+
+
+def test_huffman_tab_outside_printable_ascii() raises:
+    """Appendix B: tab (0x09) is ffffea, 24 bits, no padding. The old table
+    knew 0x20..0x7e only and refused this legal string (#881 item 3)."""
+    var buf = _hex("83ff ffea")
+    var r = decode_string(Span(buf), 0)
+    assert_true(r.ok)
+    assert_equal(r.value, "\t")
+    assert_equal(r.consumed, 4)
+
+
+def test_huffman_utf8_octets_with_seven_bits_of_padding() raises:
+    """Appendix B: c3 is 7fff1 (19 bits) and a9 is 3fffdd (22 bits); 41 bits
+    with 7 bits of padding make ff fe 3f ff ee ff. They decode to the two octets
+    of "é"."""
+    var buf = _hex("86ff fe3f ffee ff")
+    var r = decode_string(Span(buf), 0)
+    assert_true(r.ok)
+    assert_equal(r.value.byte_length(), 2)
+    assert_equal(r.value, "é")
+
+
+def _all_octets_huffman() raises -> List[UInt8]:
+    """Octets 00..ff in order, each Huffman-coded by the Appendix B table
+    (4658 bits, 6 bits of padding, 583 octets). Encoded from the RFC text,
+    not by this decoder."""
+    return _hex(
+        "ffc7fffd8fffffe2fffffe3fffffe4fffffe5fffffe6fffffe7fffffe8ffffea"
+        "fffffff3fffffa7fffffabffffffdfffffebfffffecfffffedfffffeefffffef"
+        "ffffff0ffffff1ffffff2fffffffbfffffcffffffd3fffffd7fffffdbfffffdf"
+        "fffffe3fffffe7fffffebfffffed4fe3f9ffaffcabf1febfafefe7fdfd2cbb00"
+        "089969b71d79fb9f7fff20ffbff3ff50ddbd7f061c58f265cd9f469d5af66ddd"
+        "bf871e5f9cff7ff7fffc3ff9ffe45fff4719242cb34e6e9d68a6a3d7dac426de"
+        "fe3cfaf7fffbfe7ffbffdffffffcfffe6ffff4bfff9ffffa3fffd3ffff53fffd"
+        "5ffffb3fffeb7fffdaffffb7ffff73fffeeffffdeffffebffffbfffffd9ffffd"
+        "bfffebffffe0ffffeeffffc3ffff8bffff1ffffe4fffee7fffb1ffff97fffd9f"
+        "fffcdffff9fffffbffffdafffeeffff4ffffb7fffee7fffe8ffffd3fffdeffff"
+        "d5fffeeffffbdffffe1fffdfffff7fffff5ffffecffff07fff87fffe0ffff17f"
+        "ffedffff87ffff77fffeffffeaffff8bfffe3ffff93ffff87fffcbffff37ffff"
+        "1fffff83ffffe1fffebfffe3ffff3fffff2ffffa3ffffd9fffff17ffffc7ffff"
+        "f27ffffdefffffbffffff2fffff8fffffb7fff97fff8fffffe6fffffc1fffff8"
+        "7ffffe7fffffc5ffffe5fffe4ffff2fffffd1fffff4ffffffefffffe3fffffc9"
+        "fffff97fffb3ffffcffffb7fffcdffff4ffff9ffffd1ffffcffffeaffffaffff"
+        "fddffffeffffff4fffff5fffffabffffa7ffffd7fffff9bffffecfffffb7ffff"
+        "f3fffffe8fffffd3fffffabfffff5fffffff7ffffecfffffdbfffffbbfffff7f"
+        "fffff0fffffbbf"
+    )
+
+
+def test_appendix_b_every_octet() raises:
+    """All 256 octets, in order, decode to themselves: every code length
+    from 5 to 30 bits and every one of the 256 symbols of the table. Through
+    decode_string too, with the 583-octet length (ff c8 03); the octets are
+    not UTF-8, so the String has one code point per octet."""
+    var data = _all_octets_huffman()
+    assert_equal(len(data), 583)
+    var r = huffman_decode_octets(Span(data), 0, len(data))
+    assert_true(r[1])
+    assert_equal(len(r[0]), 256)
+    for i in range(256):
+        assert_equal(Int(r[0][i]), i, "octet " + String(i))
+    var lit = _hex("ffc803")
+    for i in range(len(data)):
+        lit.append(data[i])
+    var s = decode_string(Span(lit), 0)
+    assert_true(s.ok)
+    assert_equal(s.consumed, 586)
+    var want = String()
+    for i in range(256):
+        want += chr(i)
+    assert_equal(s.value, want)
 
 
 # -----------------------------------------------------------------------------
@@ -767,6 +876,62 @@ def test_size_update_bounds() raises:
     assert_equal(_decode(d2, "203f e11f 82"), ":method: GET\n")
     assert_equal(_render_table(d2.table), "Table size: 0\n")
     assert_equal(d2.table.max_size, 4096)
+
+
+def test_size_update_grows_table_back_after_shrink() raises:
+    """§4.2 / §6.3: the limit for a size update is SETTINGS_HEADER_TABLE_SIZE
+    (4096 here), not the maximum an earlier update set. A block shrinking to
+    256 (3f e1 01) and a later one growing back to 4096 (3f e1 1f) are both
+    accepted; the old decoder refused the second as "above
+    SETTINGS_HEADER_TABLE_SIZE" (#881 item 1). 4097 stays refused."""
+    var dec = HpackDecoder()
+    assert_equal(_decode(dec, "3fe1 0182"), ":method: GET\n")
+    assert_equal(dec.table.max_size, 256)
+    assert_equal(_decode(dec, "3fe1 1f82"), ":method: GET\n")
+    assert_equal(dec.table.max_size, 4096)
+    assert_equal(
+        _decode_error(dec, "3fe2 1f"),
+        "hpack: COMPRESSION_ERROR: size update above"
+        " SETTINGS_HEADER_TABLE_SIZE",
+    )
+
+
+def test_size_update_after_encoder_shrinks_then_grows() raises:
+    """The same sequence from komira's own encoder: SETTINGS to 256, a
+    block, SETTINGS back to 4096, a block. The peer decoder accepts both and
+    its table follows the encoder's."""
+    var enc = HpackEncoder()
+    var dec = HpackDecoder()
+    enc.on_settings_ack_table_size(UInt32(256))
+    var h1 = List[HpackHeader]()
+    h1.append(HpackHeader(String("a"), String("1")))
+    var w1 = enc.encode_block(h1^)
+    assert_equal(_as_hex(w1), "3fe1014001610131")
+    assert_equal(_render_headers(dec.decode_block(Span(w1))), "a: 1\n")
+    enc.on_settings_ack_table_size(UInt32(4096))
+    var h2 = List[HpackHeader]()
+    h2.append(HpackHeader(String("b"), String("2")))
+    var w2 = enc.encode_block(h2^)
+    assert_equal(_as_hex(w2), "3fe11f4001620132")
+    assert_equal(_render_headers(dec.decode_block(Span(w2))), "b: 2\n")
+    assert_equal(dec.table.max_size, 4096)
+    assert_equal(_render_table(dec.table), _render_table(enc.table))
+
+
+def test_set_max_table_size_moves_the_size_update_ceiling() raises:
+    """A decoder whose advertised SETTINGS_HEADER_TABLE_SIZE drops to 100
+    accepts an update to 100 (3f 45) and refuses 101 (3f 46)."""
+    var dec = HpackDecoder()
+    dec.set_max_table_size(100)
+    assert_equal(dec.settings_table_size, 100)
+    assert_equal(_decode(dec, "3f45 82"), ":method: GET\n")
+    assert_equal(
+        _decode_error(dec, "3f46"),
+        "hpack: COMPRESSION_ERROR: size update above"
+        " SETTINGS_HEADER_TABLE_SIZE",
+    )
+    var sized = HpackDecoder(max_table_size=512)
+    assert_equal(sized.settings_table_size, 512)
 
 
 def test_encoder_size_update_pair_keeps_tables_in_step() raises:
