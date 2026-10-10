@@ -334,12 +334,12 @@ withdrawn and the claim narrows to "the checks passed on this revision's source;
 checked the built bytes", which returns to the project owner.
 
 **Publish (the `beta` job, hosted, environment `beta`):** `kci run --stage beta`'s PUBLISH step, to
-the beta channel, exactly as today's `gamma` job publishes to the channel `gamma` (EXISTS under the
-old name). Its token is trusted by the beta channel's publisher and by nothing else (section e3).
+the beta channel (EXISTS since M2; before it the `gamma` job published the same way to the channel
+`gamma`). Its token is trusted by the beta channel's publisher and by nothing else (section e3).
 
 **Installs (`beta_validate`, hosted, no environment, no token):** the existing `CONDA_INSTALL_ENV`
 validations install from the beta channel with the pinned pixi and run every installed README, as
-today's `validate` does from the channel `gamma`. An install runs third-party code, so it never sits
+`beta_validate` does today (before M2, `validate` from the channel `gamma`). An install runs third-party code, so it never sits
 beside the publishing token. #1168's S12 installed-bytes checks land here. `beta_validate` outputs
 beta's validated hash.
 

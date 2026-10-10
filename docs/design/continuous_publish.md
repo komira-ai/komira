@@ -165,7 +165,7 @@ independent of this design, and each is its own slice:
 
 ### The gates before the beta channel and before gamma: results, not clicks
 
-**EXISTS:** prod publishes only the set that `validate` (beta's installs) vouched for. **PROPOSED:**
+**EXISTS:** prod publishes only the set that `beta_validate` (beta's installs) vouched for. **PROPOSED:**
 two more inputs, at two different points:
 
 | input | runs in | runs when | a failure stops | slice |
@@ -633,7 +633,7 @@ not reach, could show it.
 2. **No credentials.** The harness passes only fixed dummy values: a dummy AWS key pair, the emulator
    bearer, and Azurite's published development key. The emulator test targets carry no secret
    attribute, and the jobs that run them hold no cloud identity (`build` holds only the farm
-   connection; `beta_validate`, today's `validate`, has no `id-token`). The generated `_no_env_reads` scan covers only the
+   connection; `beta_validate`, `validate` before M2, has no `id-token`). The generated `_no_env_reads` scan covers only the
    generated files and only environment reads; it does **not** stop `komira_aws_core`'s chain from
    reading credential files or the metadata endpoints. Those are kept out by the lint above and by
    rule 3.
