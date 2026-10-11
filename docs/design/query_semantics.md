@@ -450,14 +450,14 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** An integer `BIN_DIV` or `BIN_MOD` whose divisor is zero answers NULL for that row. Other rows keep their values. No error is raised.
 - **DuckDB.** Measured on 1.5.3 (`src/komira_column_kernels/arithmetic.mojo:74-78`): `qty // 0` and `qty % 0` are NULL. This holds through 1.5; on 2.0 the oracle sets `error_on_division_by_zero = false` (see the oracle settings). **pyarrow.** `divide` on integers raises on a zero divisor; it is not the oracle for this item.
-- **Current behaviour.** `src/komira_column_kernels/arithmetic.mojo:572-580` and `:615-676` answer NULL per row. The expression executor's integer walkers raise instead, and its Float64 walker answers +-Inf or NaN ("Code that does not follow", item 1).
+- **Current behaviour.** `src/komira_column_kernels/arithmetic.mojo:572-580` and `:615-676` answer NULL per row. The expression executor (`src/komira_eval/expression_executor.mojo`) answers NULL too: its value walkers hold a placeholder for the row, and its NULL channel (`_mark_value_nulls_from_view`, `_value_is_null_from_source`), which its filters read, marks the row NULL.
 - **Mark.** MATCHES.
 
 ### 5.4 Signed MIN divided by -1
 
 - **Rule.** `MIN / -1` for a signed integer type is an error ("Out of Range"), since the quotient is not representable.
 - **DuckDB.** Measured on 1.5.3: `(-9223372036854775808) // (-1)` raises an Out of Range Error (`src/komira_column_kernels/arithmetic.mojo:74-80`).
-- **Current behaviour.** `src/komira_column_kernels/arithmetic.mojo:111-130` raises when both operands of such a pair are valid.
+- **Current behaviour.** `src/komira_column_kernels/arithmetic.mojo:111-130` raises when both operands of such a pair are valid. So do the expression executor's division arms (`_ee_div_overflows` in `src/komira_eval/expression_executor.mojo`).
 - **Mark.** MATCHES.
 
 ### 5.5 Integer overflow
