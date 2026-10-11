@@ -303,6 +303,30 @@ def _bits_of(x: Float64, width: Int) -> UInt64:
     return UInt64(bitcast[DType.uint16](x.cast[DType.float16]()))
 
 
+def _guess_text(cell: String, exp10: Int) -> String:
+    """`cell`'s value cut to its first 17 significant digits, as
+    `[-]0.<digits>e<exp>`: within one Float64 ulp of the value, and short
+    enough for the standard library's parse, which refuses a long digit
+    string. `exp10` is parse_decimal's (the value is the cell's digits
+    times 10^exp10)."""
+    var bs = cell.as_bytes()
+    var sig = String()
+    var nsig = 0
+    var negative = False
+    for i in range(len(bs)):
+        var b = bs[i]
+        if b == 45:  # '-'
+            negative = True
+        elif b == 101 or b == 69:  # 'e' / 'E': the digits end here
+            break
+        elif b >= 48 and b <= 57 and (nsig > 0 or b != 48):
+            if nsig < 17:
+                sig += chr(Int(b))
+            nsig += 1
+    var res = String("-0.") if negative else String("0.")
+    return res + sig + "e" + String(exp10 + nsig)
+
+
 def _float_cell(cell: String, width: Int) raises -> String:
     if cell == "nan" or cell == "-nan":
         return String("NaN")
@@ -316,7 +340,9 @@ def _float_cell(cell: String, width: Int) raises -> String:
         return float_cell_text(sign if dec.negative else UInt64(0), width)
     # The standard library's parse is a first guess only: the float the
     # decimal rounds to is decided exactly, among the guess's neighbours.
-    var guess = _bits_of(atof(cell), width)
+    # (A float32 or float16 guess is the Float64 cast, rounded twice, so it
+    # can be a neighbour off next to a midpoint.)
+    var guess = _bits_of(atof(_guess_text(cell, dec.exp10)), width)
     var neg_bit = guess & sign
     var mag = Int(guess & ~sign)
     var deltas: List[Int] = [0, -1, 1, -2, 2, -3, 3]

@@ -163,6 +163,33 @@ def test_floats_by_value() raises:
         _ = _canon("f:float64", "f\n1e999\n")
 
 
+def test_float32_next_to_a_midpoint_is_rounded_once() raises:
+    # A float32 cell parsed as a Float64 and then cast is rounded twice.
+    # 1.0000001788139343 lies just below the float32 midpoint 1+3*2^-24
+    # (1.000000178813934326171875): as a Float64 it is that midpoint
+    # exactly, and the cast ties to even, 1+2^-22 (0x3F800002). Rounded
+    # once it is 1+2^-23 (0x3F800001). 1.0000000596046448 lies just above
+    # the midpoint 1+2^-24: the double rounding gives 1.0 (0x3F800000),
+    # once gives 1+2^-23. Rows 3 and 4 are the same two sides of the
+    # midpoints with 26 digits, more than the standard library's parse
+    # takes. Float64's own halfway cases: 2^53+1 ties to even (2^53); a
+    # hair above it rounds up (2^53+2), though its first 17 digits are the
+    # halfway case. Row 3 is a long float64 with a sign, leading zeros and
+    # an exponent.
+    var c = _canon(
+        "f:float64\tg:float32",
+        "f\tg\n9007199254740993\t1.0000001788139343\n"
+        + "9007199254740993.0000000001\t1.0000000596046448\n"
+        + "-000123.4567890123456789012345e-2\t1.0000001788139343261718749\n"
+        + "1\t1.0000000596046447753906251\n",
+    )
+    for r in range(4):
+        assert_true(c.rows[r][1].endswith("|0x3F800001"), msg=c.rows[r][1])
+    assert_true(c.rows[0][0].endswith("|0x4340000000000000"), msg=c.rows[0][0])
+    assert_true(c.rows[1][0].endswith("|0x4340000000000001"), msg=c.rows[1][0])
+    assert_true(c.rows[2][0].endswith(_f64(-1.2345678901234568)), msg=c.rows[2][0])
+
+
 def test_compare_is_by_value() raises:
     # The HAND side writes 1.5, -0.0 and a bare NaN; DuckDB writes 1.50
     # (as a decimal digit string a float column reads by value), -0.0, -nan.
