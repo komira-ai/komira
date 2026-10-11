@@ -39,9 +39,11 @@ welded only by the computed list. That tree's welds come from a stand-in rule;
 [`negative/test_weld/real`](negative/test_weld/real/BUCK) runs the lint over a
 real `mojo_library` (a computed `test_srcs` with an entry in a comment and an
 entry naming another package's file by label) and a real `mojo_test` (a
-second `srcs` beside its `main`): `real:ok` holds the three unwelded files in
-its ledger and must pass, `real:red` has no row and must name exactly those
-three. Neither is built: the lint only analyses them.
+second `srcs` beside its `main`): `real:red` has no row and must name exactly
+the three unwelded files, and its green twin,
+[`functional/test_weld/real:ok`](functional/test_weld/real/BUCK), holds them
+in its ledger and must pass (the pull-request check runs it). Neither tree is
+built: the lint only analyses them.
 
 A rule cannot query the targets of `//src/...` (a query attribute takes
 labels only), so building a `test_weld` target checks nothing: it declares the
@@ -182,13 +184,13 @@ test, which
 names and which is built by its package pattern. That file and
 [`dangling.BUCK`](negative/surface_capability_matrix/dangling.BUCK) (a row
 naming a target that does not exist) are no BUCK files: either, loadable,
-fails every cquery over `tests//...`, so run_tests.sh copies each into its
-directory for its one build and deletes it. The lint only analyses the
+fails every cquery over `tests//...`, so the scenario
+[`analysis_refusals_lint`](../selftest/analysis_refusals_lint.zig) copies
+each into its directory of a scratch tree and analyses it there. The lint only analyses the
 e2e targets; `tests//functional/...` builds them.
 
 ```sh
 ./buck2 build //:surface_capability_matrix tests//functional/surface_capability_matrix:ok
 ./buck2 build tests//negative/surface_capability_matrix:alias           # must fail: ... stands for a target of tests//functional/surface_capability_matrix
-# after run_tests.sh's copy of incompatible.BUCK to incompatible/BUCK:
-./buck2 build tests//negative/surface_capability_matrix/incompatible:   # must fail: ... because its transitive dep .../pandas_e2e:test_mac
+./buck2 test //tools/build/selftest:analysis_refusals_lint            # dangling and incompatible, in a scratch tree
 ```

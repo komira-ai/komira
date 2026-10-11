@@ -40,7 +40,9 @@ pin that is not an https URL with a 64-digit lowercase sha256 and a positive
 in a registered row, two rows sharing a key or a host, an executable pin (`busybox`, `pixi`)
 not pinned `executable = True`, or `pixi` pinned at two releases across rows, fail every package that
 reads the table, naming the row and the pin. [`tests//functional/platform_table`](../tests/functional/platform_table/BUCK)
-holds the cases, each a table with one defect, and
+holds the cases, each a table with one defect (the self-test scenario
+[`analysis_refusals_platform_table`](../selftest/analysis_refusals_platform_table.zig)
+loads them), and
 [`check.sh`](../tests/functional/platform_table/check.sh) is test 37 of
 `run_tests.sh`. It also checks that each registered row's `golden_config_hash`
 is the hash buck2 gives the platform, and that the macOS row's `applets` are
