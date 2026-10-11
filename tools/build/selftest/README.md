@@ -51,6 +51,7 @@ given `--nested`, which the guard refuses.
 | [`analysis_refusals_rust`](analysis_refusals_rust.zig) | rust_library's test_srcs refusals | the `.rs` check deleted |
 | [`analysis_refusals_coverage`](analysis_refusals_coverage.zig) | the coverage rules' analysis refusals | the buck-out, no-args and LLVM_PROFILE_FILE checks deleted |
 | [`config_refusals`](config_refusals.zig) | `komira.coverage`, `komira.mutation`, `komira.test_timeout_s` values refused at load | any value but true read as false; the margin's `<=` made `<` |
+| [`graph_check_refusals`](graph_check_refusals.zig) | python_closure over planted graphs (`tests//negative/python_closure`): a Python rule reached only through an exec dependency, and a stale ceiling entry, refused; the same graph with its findings in the ceiling passes | the closure narrowed to target dependencies; the ceiling read as a cap |
 
 A refusal row passes only when `buck2 audit providers <target>` (analysis,
 nothing built) fails and its output holds the row's message exactly, as the
@@ -66,12 +67,18 @@ over them as a build action; `release/ci/build_targets.sh` runs it for every
 graph_check of a batch. `selftest_closure` fails when the closure of this
 package holds a library under `src/` (a scenario names what it builds as a
 string), so a change to a library does not reach `build_selftests`.
+`python_closure` (declared in the root package, `//:python_closure`) fails on
+Python outside the Python surface: a target whose closure, every kind of
+dependency, holds a Python rule, a target under `third_party/python/` or
+`tools/build/python/` or a `.py` source; a `.py` file; a kci textproto or a
+workflow that runs Python. Its allowlist, `tests/python_closure_allowlist.bzl`,
+only shrinks ([`graph/python_closure.zig`](graph/python_closure.zig)).
 
 ## In the pull-request check
 
 The package is the declared check `build_selftests`
 (`release/artifacts.textproto`): a change to `tools/build/**` widens the check
-to every unit, this one included. On a 28-core client the 14 scenarios ran in
-3.5 s of wall time, all 14 at once, each with its own inner daemon (3.0 GiB
+to every unit, this one included. On a 28-core client the 14 scenarios of that
+measurement ran in 3.5 s of wall time, all 14 at once, each with its own inner daemon (3.0 GiB
 of resident memory together at the peak). How many run at once on a runner is
 its local test concurrency.
