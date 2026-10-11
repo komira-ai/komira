@@ -206,6 +206,9 @@ fn hold(mib: u64, secs: u64) noreturn {
 ///   daemon FILE KIND   forks a child (KIND: sleep or hog) that stays in the
 ///                      group, writes its pid to FILE, and exits 0 at once
 ///   spawnwait FILE     forks a 100 s sleeper, writes its pid, waits for it
+///   treehog P C [S]    forks a child that holds C MiB for S s (5), then holds
+///                      P MiB itself and waits for the child, exits 0 (the
+///                      fork comes first, so neither counts the other's pages)
 ///   env [N]            prints its environment, exits N (default 3)
 ///   args               prints `[arg]` per argument (argv[0] too), exits 3
 ///   where              prints its cwd and the bytes on stdin, exits 3
@@ -263,6 +266,17 @@ fn behave(a: std.mem.Allocator, name: []const u8, args: []const []const u8, env:
         appendPid(file, sys.getpid());
         appendPid(file, pid);
         _ = sys.waitpid(-1, false);
+        posix.exit(0);
+    }
+    if (std.mem.eql(u8, name, "treehog")) {
+        const secs = num(arg(args, 3), 5);
+        const pid = posix.fork() catch posix.exit(99);
+        if (pid == 0) hold(num(arg(args, 2), 24), secs);
+        const mem = std.heap.page_allocator.alloc(u8, num(arg(args, 1), 16) << 20) catch posix.exit(99);
+        var k: usize = 0;
+        while (k < mem.len) : (k += 4096) mem[k] = 1;
+        say("parent holds {d} MiB\n", .{mem.len >> 20});
+        _ = sys.waitpid(pid, false);
         posix.exit(0);
     }
     if (std.mem.eql(u8, name, "env")) {

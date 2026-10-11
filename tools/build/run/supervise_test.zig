@@ -80,6 +80,21 @@ test "M3 cap: a test under its cap passes" {
     try std.testing.expectEqualStrings("", r.err);
 }
 
+// M2: the cap counts the test and every descendant. Neither process is over
+// the cap alone (16 and 24 MiB under 32); together they are. Mutants: sum
+// the test's own memory only (`rss(pids[0..1])`), or take the largest
+// process instead of the sum (both runs pass after 5 s).
+test "M2 cap: a test whose child pushes the tree's total over the cap is killed (137) with the MEMORY CAP line" {
+    const e = try Env.init();
+    defer e.deinit();
+    const r = try kit.runGate(e.a, e.dir, try e.args("treehog", &.{ "--mem-cap-mib", "32", "--arg", "16", "--arg", "24", "--arg", "5" }), .{});
+    try std.testing.expectEqual(@as(u8, 137), r.status);
+    try std.testing.expect(before(r.err, banner137, "MEMORY CAP: killed //x:y at "));
+    try std.testing.expect(contains(r.err, " MiB resident, over its cap of 32 MiB\n"));
+    try std.testing.expect(r.ms < 5000);
+    try std.testing.expect(!kit.exists(try e.pidFile("passed")));
+}
+
 var boundary_kib: u64 = 0;
 fn tableAtCap(alloc: std.mem.Allocator) ?proctab.Table {
     const t = proctab.read(alloc) orelse return null;

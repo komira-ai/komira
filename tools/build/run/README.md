@@ -114,7 +114,7 @@ are listed in the pull request that added the tool.
 | File | Holds |
 |---|---|
 | [mojo_test.zig](mojo_test.zig) | usage, reserved names, `--env` isolation, arguments, the run directory, the environment, the working directory, the marker and the banner |
-| [supervise_test.zig](supervise_test.zig) | the cap, an unreadable or blind `/proc`, the time limit, a failed clock, signals, the tether, no pid reuse, the coverage limit, the no-`/proc` (macOS) paths |
+| [supervise_test.zig](supervise_test.zig) | the cap (on the sum over the test and its descendants), an unreadable or blind `/proc`, the time limit, a failed clock, signals, the tether, no pid reuse, the coverage limit, the no-`/proc` (macOS) paths |
 | [rust_test.zig](rust_test.zig) | usage, the environment, each refusal, NO VERDICT, the marker |
 | [step_test.zig](step_test.zig) | usage, each result, the timeout's group kill, skips, `-o` outputs, infra exits, the scratch directory |
 | [util_test.zig](util_test.zig) | the tail against busybox `tail -n`, the `/proc` parsers |
