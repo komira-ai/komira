@@ -17,9 +17,10 @@
 # must work) or negative/ (planted defects that must go red); a test may have
 # both halves, under the same package name.
 #
-#   1. The examples build and their run checks pass (stdout compared byte for
-#      byte), and every action that executed ran on this checkout's executor
-#      (remotely, or locally in a local-only run).
+#   1. The examples build, and every action that executed ran on this
+#      checkout's executor (remotely, or locally in a local-only run). Their
+#      run checks (stdout compared byte for byte) are validations of the
+#      binaries (tools/build/mojo/README.md), so building one runs its check.
 #   2. The gate: tests//negative/libgate_bad fails with GATED TEST FAILED, while its
 #      [ungated] package builds -- the red comes from the test, not the compile.
 #      A binary depending on it fails the same way, and a binary naming its
@@ -113,10 +114,8 @@
 #      platforms,package,examples,cells} and third_party. A label naming `tests`
 #      (standalone-only) fails to load there.
 #  20. C/C++ dependencies of Mojo targets: see tools/build/tests/cxx_tests.sh.
-#  21. A Mojo binary whose own code records a source location (a List
-#      index) builds and runs: the compile wrapper strips the staging
-#      directory from recorded paths, so its exit-4 refusal does not fire
-#      (tests//functional/location_path).
+#  21. (In the gate: tests//functional/location_path:main, whose run check
+#      is a validation.)
 #  22. Rust rules, and rustc's host floor: see
 #      tools/build/tests/rust_tests.sh.
 #  23. mojo_proto_library and mojo_db_proto_library, mojo_gcp_client (REST
@@ -509,9 +508,10 @@ EXAMPLES=(
     //third_party/snappy:snappy //tools/build/examples/snappy:test_snappy
     //tools/build/examples/shared_lib:spike //tools/build/examples/shared_lib:spike_exact //tools/build/examples/shared_lib:plain //tools/build/examples/shared_lib:plain_exact //tools/build/examples/shared_lib_mid:mid
 )
-# Sub-targets are built in their own invocation. (`buck2 build //... 'T[sub]'`
-# was observed to skip the sub-target, so never rely on combining them with a
-# recursive pattern.)
+# The run checks, for test 5's scan (each is also a validation of its binary,
+# so the build of the binary runs it). Sub-targets are built in their own
+# invocation. (`buck2 build //... 'T[sub]'` was observed to skip the
+# sub-target, so never rely on combining them with a recursive pattern.)
 RUN_CHECKS=("//tools/build/examples:hello[run_check]" "//tools/build/examples:hello_pkg_user[run_check]"
     "//tools/build/examples/cshim:cadd_user[run_check]")
 
@@ -540,8 +540,6 @@ check_executor() { # name
 # 1
 expect_green examples "${EXAMPLES[@]}"
 check_executor examples
-expect_green run_checks "${RUN_CHECKS[@]}"
-check_executor run_checks
 
 # 2
 expect_red gate_red "GATED TEST FAILED" tests//negative/libgate_bad:libgate_bad
@@ -929,9 +927,6 @@ fi
 
 # 20
 . "$ROOT/tools/build/tests/cxx_tests.sh"
-
-# 21
-expect_green location_path "tests//functional/location_path:main[run_check]"
 
 # 22
 # shellcheck source=tools/build/tests/rust_tests.sh

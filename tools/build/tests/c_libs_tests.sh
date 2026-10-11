@@ -9,12 +9,10 @@
 #        (tools/build/third_party_srcs, a Mojo tool) reads out of the pinned
 #        archive's CMake lists today (the test //third_party/<lib>:srcs_drift,
 #        which `./buck2 test //...` also runs);
-#      - libcrypto passes aws-lc's own self tests and SHA-256, AES-128 and
-#        ChaCha20 known-answer vectors, called from Mojo on a worker
-#        (//tools/build/examples/aws_lc:test_aws_lc[run_check]);
-#      - an s2n-tls client and server complete a TLS 1.3 handshake with
-#        certificate verification and exchange data, driven from Mojo on a
-#        worker (//tools/build/examples/s2n_tls:test_s2n_handshake[run_check]);
+#      - (in the gate, each a validation of its binary: aws-lc's self tests
+#        and known-answer vectors, //tools/build/examples/aws_lc:test_aws_lc;
+#        an s2n-tls TLS 1.3 handshake,
+#        //tools/build/examples/s2n_tls:test_s2n_handshake);
 #      - s2n-tls's feature defines: every probe named in
 #        third_party/s2n-tls/features.bzl compiles (tests//functional/s2n_probes), and
 #        every other probe fails to (tests//negative/s2n_probes);
@@ -29,9 +27,6 @@ for lib in aws-lc s2n-tls; do
         fail "drift $lib: //third_party/$lib:srcs_drift failed (see $LOG/drift_$lib.log)"
     fi
 done
-
-expect_green aws_lc_kat "//tools/build/examples/aws_lc:test_aws_lc[run_check]"
-expect_green s2n_handshake "//tools/build/examples/s2n_tls:test_s2n_handshake[run_check]"
 
 features=$(grep -o '"S2N_[A-Z0-9_]*"' "$ROOT/third_party/s2n-tls/features.bzl" | tr -d '"')
 probes=$(cd "$ROOT" && "$BUCK2" uquery 'kind(cxx_library, tests//functional/s2n_probes: + tests//negative/s2n_probes:)' 2> "$LOG/s2n_probes_query.log" |

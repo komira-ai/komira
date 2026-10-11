@@ -23,6 +23,7 @@ rustc as one `-Ldependency=<dir>` per crate, and direct dependencies as
 
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/mojo:run_check.bzl", "run_check_validation")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 RustToolchainInfo = provider(fields = {
@@ -465,9 +466,11 @@ def _binary_impl(ctx):
         sub_targets = _tests_sub_target(_gate(ctx, tc, ungated, exe, markers))
     else:
         _compile(ctx, "bin", exe)
+    validation = []
     if ctx.attrs.expected_stdout != None:
         # Runs the binary in a remote action and fails unless its stdout is
-        # exactly `expected_stdout`.
+        # exactly `expected_stdout`: `[run_check]`, and a validation of the
+        # binary (tools/build/mojo/run_check.bzl).
         out = ctx.actions.declare_output(ctx.label.name + ".stdout")
         expected = ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout)
         ctx.actions.run(
@@ -475,10 +478,11 @@ def _binary_impl(ctx):
             category = "rust_run_check",
         )
         sub_targets["run_check"] = [DefaultInfo(default_output = out)]
+        validation = run_check_validation(ctx, tc.busybox, out, "rust_run_check_result")
     return [
         DefaultInfo(default_output = exe, sub_targets = sub_targets),
         RunInfo(args = cmd_args(exe)),
-    ]
+    ] + validation
 
 rust_binary_rule = rule(
     impl = _binary_impl,

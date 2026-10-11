@@ -2,12 +2,10 @@
 # rust_tests.sh -- test 22 (Rust rules), 35 (external tests). Sourced by run_tests.sh,
 # whose pass/fail/expect_* helpers and $BUCK2, $LOG, $ROOT it uses.
 
-# 22. The example binary uses prost's derive macro, so it compiles registry
-#     crates, a proc-macro and the zig link; its run check compares stdout
-#     byte for byte. A binary using prost without depending on it fails to
-#     compile: crates reach rustc only through `deps`.
-expect_green rust_example "//tools/build/examples/rust:prost_roundtrip[run_check]"
-check_executor rust_example
+# 22. A binary using prost without depending on it fails to compile: crates
+#     reach rustc only through `deps`. (The example binary using prost's
+#     derive macro, //tools/build/examples/rust:prost_roundtrip, is in the
+#     gate; its run check is a validation of the binary.)
 expect_red rust_missing_dep "unresolved import \`prost\`" tests//negative/rust_missing_dep:main
 
 # 22, host floor. rustc's host floor. Every NEEDED entry of bin/rustc and of each shared
