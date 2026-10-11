@@ -9,8 +9,9 @@
 # 6. STEP 14 (foreign member): a working cloud leaves the members it planted
 #    on the cell's policy standing, and a target's with its object; a planted
 #    member not present, a plant that makes the node plan a change, a member
-#    not reported as an unmanaged difference, an apply (a read) that strips
-#    it, an object left after the destroy, and a node the plan holds no
+#    not reported as an unmanaged difference (none, or a report the second
+#    plant leaves unchanged), an apply (a read) that strips it or is a served
+#    call, an object left after the destroy, and a node the plan holds no
 #    action for are each refused; a node with no access is not planted on.
 # 7. STEP 15 (born stamped): an armed create that does not fail, a failure
 #    reported for no node, an object that lands bare and is stamped in a
@@ -156,7 +157,7 @@ struct _Store(Movable):
             ref o = self.objs[i]
             if o.policy.byte_length() > 0 and m.policy == o.policy and (m.member != o.member or m.role != o.role):
                 out += String("member ") + m.member + String(" holding ") + m.role + String(" (not this cell's); ")
-        return out^
+        return String("a member (not this cell's); ") if out and self.defect == "member_report_fixed" else out^
 
     def strip_members(mut self, policy: String):
         var kept = List[_Member]()
@@ -359,7 +360,7 @@ struct _Node(EngineResource, Movable, Deinitable):
         if s.defect == "member_read_strips" and members.byte_length() > 0:
             s.strip_members(s.objs[i].policy.copy())
         ref o = s.objs[i]
-        if s.defect == "reads_mutate_present":
+        if s.defect == "reads_mutate_present" or (s.defect == "member_read_rewrites" and members.byte_length() > 0):
             s.calls.append(String("read ") + id)
         if s.defect == "race_ghost_create" and id == s.raced_id:
             s.calls.append(String("create ") + id)
@@ -914,6 +915,11 @@ def test_step_14_refuses() raises:
     miss += _refused(String("member_drifts"), what + String("planted and the node planned a change"))
     miss += _refused(String("member_unreported"), what + String("planted and not reported as an unmanaged difference"))
     miss += _refused(String("member_read_strips"), what + String("touched by an apply; it is not this cell's"))
+    # A report that does not change when a second member is planted, and a
+    # member read that is a served call: each is caught by its own check.
+    var cell = String("conformance [member]: g/grant: CELL holding UNMAPPED was ")
+    miss += _refused(String("member_report_fixed"), cell + String("planted and not reported as an unmanaged difference"))
+    miss += _refused(String("member_read_rewrites"), what + String("touched by an apply; it is not this cell's"))
     miss += _refused(String("member_plant_object"), String("conformance [member]: nodes left after the member destroy"))
     # The cell half's node, gone from the lowering and the list: no action.
     miss += _refused(

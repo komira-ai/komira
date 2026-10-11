@@ -18,6 +18,7 @@
 #    schedule of a service (onprem), a second schedule of one job and one
 #    not in UTC (azure); a GPU, a service that may scale to zero (onprem);
 #    a subnet with no zone (aws), a service in a subnet (azure).
+# 1b. A DEAD LETTER TO A QUEUE FED BY ONE TOPIC (gcp): one feed is enough.
 # 2. WHAT IS NOT A LIMIT stays quiet: a resource with no type, a schedule
 #    whose target is not in the list, a certificate with no name, the same
 #    index name twice, a cell edge of the resource's own identity, a name on
@@ -189,5 +190,20 @@ def test_every_limit_on_every_shape() raises:
     assert_equal(miss, "")
 
 
+def test_dead_letter_to_a_queue_fed_once() raises:
+    """A dead-letter queue fed by exactly one topic has no private topic: one feed is enough to refuse it."""
+    var res = _list(
+        String('{"id":"tp3","topic":{}},{"id":"q3","queue":{}},')
+        + String('{"id":"sb3","subscription":{"topic":{"resource":"tp3"},"queue":{"resource":"q3"}}},')
+        + String('{"id":"qd3","queue":{"deadLetter":{"resource":"q3"}}}')
+    )
+    var want = String(
+        'qd3 queue.dead_letter: on cloud "gcp" a queue dead-letters to the private topic of its dead-letter queue,'
+        ' and "q3" has none: it is fed from topic "tp3"\n'
+    )
+    assert_equal(_limits(shape_named(String("gcp")), res), want)
+
+
 def main() raises:
     test_every_limit_on_every_shape()
+    test_dead_letter_to_a_queue_fed_once()

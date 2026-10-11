@@ -159,7 +159,7 @@ struct _Store(Movable):
             ref o = self.objs[i]
             if o.policy.byte_length() > 0 and m.policy == o.policy and (m.member != o.member or m.role != o.role):
                 out += String("member ") + m.member + String(" holding ") + m.role + String(" (not this cell's); ")
-        return out^
+        return String("a member (not this cell's); ") if out and self.defect == "member_report_fixed" else out^
 
     def strip_members(mut self, policy: String):
         var kept = List[_Member]()
@@ -362,7 +362,7 @@ struct _Node(EngineResource, Movable, Deinitable):
         if s.defect == "member_read_strips" and members.byte_length() > 0:
             s.strip_members(s.objs[i].policy.copy())
         ref o = s.objs[i]
-        if s.defect == "reads_mutate_present":
+        if s.defect == "reads_mutate_present" or (s.defect == "member_read_rewrites" and members.byte_length() > 0):
             s.calls.append(String("read ") + id)
         if s.defect == "race_ghost_create" and id == s.raced_id:
             s.calls.append(String("create ") + id)
