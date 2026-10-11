@@ -178,6 +178,38 @@ def _record_of(file: String) -> String:
     return file.copy()
 
 
+def check_readme_program(
+    tool: String, p: ReadmeProgram, out_dir: String, record: String, scratch: String, started: Bool,
+    mut checks: List[ResultValidationCheck],
+) raises:
+    """Check 4 for README program `p`: one row. Its run left in `out_dir`
+    `<record>.exit` and the raw `<record>.stdout` and `<record>.stderr`
+    (when `started`), naming program lines. An assertion reports
+    `At <w>/readme_<import>_<line>.mojo:L:C` on stdout, a compile error on
+    stderr: the README examples tool `tool` (its `map`, run under `scratch`)
+    rewrites both to README lines, into `<record>.out` and `<record>.err`.
+    A report it cannot map is kept as it was, and the row fails naming why."""
+    var unmapped = String("")
+    if started:
+        var raws = [join_path(out_dir, record + String(".stdout")), join_path(out_dir, record + String(".stderr"))]
+        var kinds = [String(".out"), String(".err")]
+        for k in range(2):
+            var dest = join_path(out_dir, record + kinds[k])
+            try:
+                map_report_file(tool, raws[k], p.package, p.display, dest, scratch)
+            except e:
+                _write(dest, read_or_empty(raws[k]))
+                unmapped = String(e)
+    if not check_program(out_dir, p.file, checks, record):
+        checks[len(checks) - 1].got += (
+            String(" (") + p.installed + String(" is the installed copy of ") + p.display
+            + String(": the same bytes, so the same lines)")
+        )
+    if unmapped.byte_length() > 0:
+        checks[len(checks) - 1].ok = False
+        checks[len(checks) - 1].got += String(" (its report names program lines, not README lines: ") + unmapped + String(")")
+
+
 def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollLog](
     mut runner: R, mut transport: T, mut sleeper: S, mut log: L, req: ValidateRequest, host: EnvHost
 ) raises -> ResultValidation:
@@ -467,30 +499,7 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
         except e:
             started = False
             _write(join_path(out_dir, record + String(".err")), String("not started: ") + String(e) + String("\n"))
-        var unmapped = String("")
-        if started:
-            # an assertion reports `At <w>/readme_<import>_<line>.mojo:L:C` on
-            # stdout, a compile error on stderr: both name the README line
-            # (the tool's `map`; a report it cannot map is kept as it was,
-            # and the row fails naming why)
-            var raws = [raw_out.copy(), raw_err.copy()]
-            var kinds = [String(".out"), String(".err")]
-            for k in range(2):
-                var dest = join_path(out_dir, record + kinds[k])
-                try:
-                    map_report_file(
-                        req.readme_tool, raws[k], p.package, p.display, dest,
-                        join_path(dir, String("readme/") + p.package),
-                    )
-                except e:
-                    _write(dest, read_or_empty(raws[k]))
-                    unmapped = String(e)
-        if not check_program(out_dir, p.file, checks, record):
-            checks[len(checks) - 1].got += (
-                String(" (") + p.installed + String(" is the installed copy of ") + p.display
-                + String(": the same bytes, so the same lines)")
-            )
-        if unmapped.byte_length() > 0:
-            checks[len(checks) - 1].ok = False
-            checks[len(checks) - 1].got += String(" (its report names program lines, not README lines: ") + unmapped + String(")")
+        check_readme_program(
+            req.readme_tool, p, out_dir, record, join_path(dir, String("readme/") + p.package), started, checks
+        )
     return _finish(row^, checks^)

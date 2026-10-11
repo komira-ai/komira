@@ -4,14 +4,26 @@
 #   (readme_installed.mojo): where kci looks for it (beside its own
 #   executable), each way it is refused by name (no path, a missing file, a
 #   file that does not run), and the tool's own refusals passed on in its
-#   words. The real tool, the target bin/kci/BUCK ships, is this test's data.
+#   words; a report the tool fails to map is refused naming the report, and
+#   fails the program's row (check_readme_program) though the program
+#   passed. The real tool, the target bin/kci/BUCK ships, is this test's data.
 # =============================================================================
 
-from std.testing import TestSuite, assert_equal, assert_true
+from std.os import makedirs
+from std.testing import TestSuite, assert_equal, assert_false, assert_true
+
+from kci_api import ResultValidationCheck
 
 from komira_runtime_paths import data_path, executable_path, test_tmpdir
 
-from kci_validate import README_TOOL_NAME, map_report_file, readme_program_of, shipped_readme_tool
+from kci_validate import (
+    README_TOOL_NAME,
+    ReadmeProgram,
+    check_readme_program,
+    map_report_file,
+    readme_program_of,
+    shipped_readme_tool,
+)
 
 comptime README: String = "# x\n\n```mojo\nprint(1)\n```\n"
 
@@ -80,6 +92,73 @@ def test_the_tools_refusals_are_passed_on_in_its_words() raises:
     assert_equal(p.examples, 1)
     assert_equal(p.file, String("readme_x.mojo"))
     assert_equal(p.modules[0].name, String("readme_x_3.mojo"))
+
+
+def _write(path: String, text: String) raises:
+    var f = open(path, "w")
+    f.write_bytes(text.as_bytes())
+    f.close()
+
+
+def test_a_failed_map_is_refused_naming_the_report() raises:
+    # The tool runs, but cannot read the report: exit 2, and kci says which
+    # report and passes on the tool's words.
+    var tool = data_path(String("readme_examples"))
+    var tmp = test_tmpdir()
+    var report = tmp + String("/no_such_report")
+    var why = String("")
+    try:
+        map_report_file(tool, report, String("x"), String("src/x/README.md"), tmp + String("/mapped"), tmp + String("/fm"))
+    except e:
+        why = String(e)
+    assert_true(why.startswith(String("the README examples tool ") + tool + String(" failed on ") + report + String(" (")), why)
+    assert_true(why.find(String("readme-examples: cannot read ") + report) > 0, why)
+
+
+def _passed_run(out_dir: String, stderr_too: Bool) raises -> ReadmeProgram:
+    """A run of `readme_x.mojo` that passed, as the ENV validation leaves it
+    in `out_dir`: the exit status and the raw stdout, and the raw stderr
+    only when `stderr_too`."""
+    makedirs(out_dir, exist_ok=True)
+    _write(out_dir + String("/readme_x.exit"), String("0\n"))
+    _write(out_dir + String("/readme_x.stdout"), String("readme_x validation: 1 of 1 checks passed\n"))
+    if stderr_too:
+        _write(out_dir + String("/readme_x.stderr"), String(""))
+    var p = ReadmeProgram()
+    p.display = String("src/x/README.md")
+    p.installed = String(".pixi/envs/default/share/doc/x/README.md")
+    p.package = String("x")
+    p.file = String("readme_x.mojo")
+    return p^
+
+
+def test_a_report_the_tool_cannot_map_fails_the_program_row() raises:
+    # The program passed, but its stderr report is missing, so the tool
+    # cannot map it: the row fails, naming why, and the raw report is kept.
+    var tool = data_path(String("readme_examples"))
+    var tmp = test_tmpdir()
+    var out_dir = tmp + String("/unmapped")
+    var p = _passed_run(out_dir, False)
+    var checks = List[ResultValidationCheck]()
+    check_readme_program(tool, p, out_dir, String("readme_x"), tmp + String("/um"), True, checks)
+    assert_equal(len(checks), 1)
+    assert_false(checks[0].ok, checks[0].got)
+    assert_true(
+        checks[0].got.startswith(
+            String("program: mojo run of an import of readme_x ran 1 checks, all passed")
+            + String(" (its report names program lines, not README lines: the README examples tool ") + tool
+            + String(" failed on ") + out_dir + String("/readme_x.stderr (")
+        ),
+        checks[0].got,
+    )
+    # the same run with both reports present passes: the row failed for the map alone
+    var both = tmp + String("/mapped_both")
+    var q = _passed_run(both, True)
+    var ok = List[ResultValidationCheck]()
+    check_readme_program(tool, q, both, String("readme_x"), tmp + String("/mb"), True, ok)
+    assert_equal(len(ok), 1)
+    assert_true(ok[0].ok, ok[0].got)
+    assert_equal(open(both + String("/readme_x.out"), "r").read(), String("readme_x validation: 1 of 1 checks passed\n"))
 
 
 def main() raises:

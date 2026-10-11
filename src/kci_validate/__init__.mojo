@@ -16,7 +16,9 @@
 #                             cleared environment), and each installed
 #                             library's README examples as the programs. No
 #                             network at all is INDETERMINATE with a
-#                             skip_reason (exit 5), never a pass
+#                             skip_reason (exit 5), never a pass.
+#                             `check_readme_program`: one README program's
+#                             row, its reports mapped to README lines
 #   env.mojo                  the ENV scratch layout, the child's whole
 #                             environment, the exact pixi command lines, the
 #                             checkout and system-config refusals
@@ -57,7 +59,7 @@ from kci_validate.channel_index import (
     check_channel,
     poll_line,
 )
-from kci_validate.conda_install_env import run_install_env
+from kci_validate.conda_install_env import check_readme_program, run_install_env
 from kci_validate.file_channel import FileChannelTransport
 from kci_validate.conda_install_smoke import run_install_smoke
 from kci_validate.env import (
