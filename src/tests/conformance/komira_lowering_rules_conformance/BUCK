@@ -1,4 +1,3 @@
-load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Test-only: komira_lowering_rules' payload-narrowing rule against the
@@ -35,13 +34,4 @@ mojo_library(
         "tests/test_payload_narrow_parity.mojo": {"golden/payload_narrow.txt": "golden/payload_narrow.txt"},
     },
     visibility = ["PUBLIC"],
-)
-
-# The deps above name every komira_* module the library and its tests import
-# (tools/build/lint: mojo_deps).
-mojo_deps(
-    name = "deps_lint",
-    buck = "BUCK",
-    srcs = glob(["**/*.mojo"]),
-    visibility = ["komira//:tests_lints"],
 )

@@ -43,6 +43,7 @@ mojo_library(
         "tests/test_cloud_adoption_rules.mojo",
         "tests/test_cloud_validate_and_deploy.mojo",
         "tests/test_cloud_label_role_encoding.mojo",
+        "tests/test_cloud_derived_attribution.mojo",
         "tests/test_cloud_compose_expand.mojo",
         "tests/test_cloud_compose_refusals.mojo",
         "tests/test_cloud_compose_paths.mojo",
