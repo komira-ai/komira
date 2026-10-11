@@ -21,7 +21,8 @@
 #     values and group ids of different lengths, an argument batch without
 #     columns, a cancelled update, emit_first_n above the group count, each
 #     refused by name (a group id bound off by one; the groups after an
-#     early emit kept wrong).
+#     early emit kept wrong); a second group set on one instance of
+#     sum_one_group_set_per_instance refused by name.
 #   - shapes: call_batch on a frame UDF, frame_open on a scalar one and
 #     agg_open on a scalar one, each ERR_UNSUPPORTED naming the entry, the
 #     frame's input stream released (a library or the runtime running a UDF
@@ -267,6 +268,19 @@ def _aggregate(mut lib: _Lib) raises:
         "above the group count",
         n + ": emit after every group was emitted",
     )
+    # sum_one_group_set_per_instance: a second group set on one instance is
+    # refused by name, the first still usable (the corpus never opens two).
+    var one = _spec(SHAPE_AGG_MERGEABLE, "sum_one_group_set_per_instance", lib.code, False, True)
+    var i_one = lib.instance(one)
+    var g1 = lib.rt.agg_open(i_one)
+    assert_true(g1.outcome.is_ok(), n + ": the first group set: " + String(g1.outcome))
+    _status(
+        lib.rt.agg_open(i_one).outcome,
+        ERR_INTERNAL,
+        "already opened its group set",
+        n + ": a second group set on one instance",
+    )
+    lib.rt.agg_close(g1.handle)
     var before = lib.rt.ledger()
     _status(
         lib.update(g.handle, _batch([_col([1])], 1), [2], 2, CallOptions.plain()),
