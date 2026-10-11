@@ -14,8 +14,8 @@ def worker_pid(x: int) -> int:
 
 
 def worker_ppid(x: int) -> int:
-    """That process's parent: the engine for a spawned worker, the zygote
-    for a forked one."""
+    """That process's parent: the zygote for a forked worker, the engine
+    for one it started itself."""
     return os.getppid()
 
 
@@ -59,7 +59,7 @@ def blas_threads(x: int) -> int:
 
 def shares_memory(x: int) -> int:
     """How many shared regions (memfds named komira-udf-worker, counted by
-    inode) the worker maps: 1, or 0 on the pipe transport. A forked worker
+    inode) the worker maps: 1, or 0 with no region. A forked worker
     has dropped the zygote's region at its own HELLO."""
     inodes = set()
     with open("/proc/self/maps") as f:
@@ -73,6 +73,15 @@ def sleep_ms(ms: int) -> int:
     """Sleeps `ms` milliseconds."""
     time.sleep(ms / 1000)
     return ms
+
+
+def slow_on_1(x: int) -> int:
+    """Sleeps 2 s where its argument is 1, else returns at once: a batch
+    whose deadline passes during row 1 only (tests/test_runtime_table.mojo,
+    the deadline cases)."""
+    if x == 1:
+        time.sleep(2)
+    return x
 
 
 def uses_pyarrow(x: int) -> int:

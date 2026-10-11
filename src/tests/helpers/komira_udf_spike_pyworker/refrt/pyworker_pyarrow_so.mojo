@@ -2,7 +2,7 @@
 # FFI-BOUNDARY: the one export of the pyworker_pyarrow.so runtime library.
 # =============================================================================
 # komira_udf_runtime_init_v1 forwards to komira_udf_pyworker_pyarrow_init_v1
-# of native/proxy_runtime.c: spawn, shared memory, the worker reading and writing Arrow IPC with pyarrow.
+# of native/proxy_runtime.c: workers forked from the zygote, reading and writing Arrow IPC with pyarrow.
 # The three pointers belong to the caller (the host struct, the rt
 # out-slot, the error struct) and are passed through untouched; the table
 # returned is the runtime's static data.

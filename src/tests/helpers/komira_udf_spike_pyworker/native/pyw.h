@@ -1,12 +1,14 @@
 /*
- * The Python worker runtime's engine side: what proxy_runtime.c,
+ * The Python UDF runtime library's own parts: what proxy_runtime.c,
  * proxy_channel.c and ipc_codec.c share. Test-only spike code for
- * docs/design/udf_runtime_interface.md section 5 (the worker transport).
+ * docs/design/udf_runtime_interface.md (sections 1.2 and 4.1; section 5,
+ * informative).
  *
  * The engine reaches a Python worker process only through the table of
  * komira_udf_runtime.h: proxy_runtime.c implements that table, and each
  * entry becomes one message of komira_udf_wire.h on the worker's control
- * channel. The worker side is pyworker/komira_udf_pyworker.py.
+ * channel, a protocol private to this runtime. The worker side is
+ * pyworker/komira_udf_pyworker.py.
  */
 #ifndef KOMIRA_UDF_PYW_H
 #define KOMIRA_UDF_PYW_H
@@ -25,9 +27,12 @@
  *          socket's worker end arrives with it (SCM_RIGHTS). OK carries the
  *          child's pid, the zygote's thread count at the fork and any
  *          warning os.fork raised.
- *   CLOCK  worker to engine, pipe transport only: the worker read the
- *          clock; the engine calls the host's now_ns for it (with shared
- *          memory the worker counts its reads in the control page). */
+ *   CLOCK  worker to engine, on a channel without the shared region: the
+ *          worker read the clock; the engine calls the host's now_ns for
+ *          it (with shared memory the worker counts its reads in the
+ *          control page). No build of this runtime runs without the
+ *          region; the probes that drive a worker, or a fake one, message
+ *          by message do (probe_worker.c, probe_boundary.c, probe_fake.c). */
 #define PYW_OP_FORK 64u
 #define PYW_OP_CLOCK 65u
 
@@ -127,7 +132,7 @@ struct pyw_chan {
   int fd;        /* the control socket, engine end; -1 once closed */
   pid_t pid;     /* the worker's */
   int our_child; /* the engine spawned it: its exit status is ours to reap */
-  uint8_t* shm;  /* the shared region, NULL on the pipe transport */
+  uint8_t* shm;  /* the shared region, NULL when HELLO sent none */
   int memfd;
   uint64_t next_id;
   int dead; /* end of file, a protocol fault or a kill: no request is sent again */
@@ -154,7 +159,7 @@ struct pyw_reply {
  * <dir>/pyworker/komira_udf_pyworker.py. */
 struct pyw_launch {
   const char* dir;
-  const char* role;  /* "control", "zygote" or "context" */
+  const char* role;  /* "zygote" (the library), or "context" (a probe) */
   const char* codec; /* "own" or "pyarrow" */
   int limit_threads; /* OPENBLAS/OMP/MKL thread pools of one thread */
 };

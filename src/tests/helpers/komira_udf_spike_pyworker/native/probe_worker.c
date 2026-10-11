@@ -220,13 +220,9 @@ static void control_cases(struct pj* j, const char* dir) {
   ask(j, "fork_not_zygote", &w, PYW_OP_FORK, NULL, 0);
   pj_case(j, "context_exit", raw_end(&w), "", 0);
 
-  if (raw_start(&w, dir, "control") != 0) return;
-  say_hello(j, "control_hello", &w);
-  ask(j, "open_context_on_control", &w, KOMIRA_UDF_OP_OPEN_CONTEXT, &slot, 4);
-  pj_case(j, "control_exit", raw_end(&w), "", 0);
-
   if (raw_start(&w, dir, "zygote") != 0) return;
   say_hello(j, "zygote_hello", &w);
+  ask(j, "open_context_on_zygote", &w, KOMIRA_UDF_OP_OPEN_CONTEXT, &slot, 4);
   ask(j, "fork_without_socket", &w, PYW_OP_FORK, NULL, 0);
   pj_case(j, "zygote_exit", raw_end(&w), "", 0);
 
@@ -445,13 +441,6 @@ static void load_cases(struct pj* j, const char* dir) {
   ask(j, "call_one_column_for_two", &w, KOMIRA_UDF_OP_CALL_BATCH, one, 64 + sz);
   free(one);
   pj_case(j, "load_exit", raw_end(&w), "", 0);
-
-  /* On a control worker a VALUE's payload is checked, not deserialized. */
-  if (raw_start(&w, dir, "control") != 0) return;
-  say_hello(j, "control_load_hello", &w);
-  s = value_spec("bad_pickle", root, sizeof(root));
-  load(j, "control_value_not_deserialized", &w, L, &s);
-  raw_end(&w);
 #undef CASE
 }
 
@@ -465,7 +454,7 @@ static void frame_cases(struct pj* j, const char* dir) {
   hello_body(&b, 1);
   ask(j, "hello_shm_no_file", &w, KOMIRA_UDF_OP_HELLO, b.p, b.len);
   pyw_buf_free(&b);
-  /* a payload not inline on the pipe transport */
+  /* a payload not inline on a channel without the shared region */
   say_hello(j, "pipe_hello", &w);
   uint64_t id = ++w.id;
   raw_send(&w, KOMIRA_UDF_WIRE_MAGIC, KOMIRA_UDF_OP_CALL_BATCH, id, 0, 0, 64, NULL, 0, -1);

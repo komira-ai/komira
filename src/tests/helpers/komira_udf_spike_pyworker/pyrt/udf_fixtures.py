@@ -1,4 +1,4 @@
-"""User functions the tests and benches load through the komira-test/python
+"""User functions the tests and benches load through the komira-test/python-worker
 runtime: plain functions whose type hints are their only declaration.
 
 The conformance cases of komira_udf_spike_abi name their fixtures by bare
@@ -49,14 +49,10 @@ def null_out(x: int) -> int:
 
 
 def raise_on_row_3(x: int) -> int:
-    """Raises on row 3 of the batch it is called over, as echo's fixture
-    does: a position, not a value (under PROPAGATE the batch is the
-    compacted one). A per-row function is not told its row, so this one
-    reads the adapter's row index from the calling frame (`_rows`'s `i`)."""
-    import sys
-
-    if sys._getframe(1).f_locals["i"] == 3:
-        raise ValueError("raise_on_row_3: row 3")
+    """Raises where its argument is 3, as echo's fixture does (a value rule:
+    the adapter reports the row the value is on)."""
+    if x == 3:
+        raise ValueError("raise_on_row_3: the value 3")
     return x
 
 

@@ -1,7 +1,7 @@
 # The workloads the tests and the bench give native/drive.c, as its
-# `key=value` configuration lines. Each names a fixture: of the in-process
-# runtime's modules (pyrt/udf_fixtures.py, pyrt/udf_np.py), of this
-# package's (pyworker/udf_worker_*.py), or the closure the producer captured
+# `key=value` configuration lines. Each names a fixture: of the adapter's
+# fixture modules (pyrt/udf_fixtures.py, pyrt/udf_np.py), of the
+# worker's (pyworker/udf_worker_*.py), or the closure the producer captured
 # (producer/make_closure.py); the engine loop knows no runtime and no
 # language.
 

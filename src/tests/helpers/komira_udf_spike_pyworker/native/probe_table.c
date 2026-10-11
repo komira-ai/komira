@@ -21,12 +21,15 @@
  *   deadline the proxy's checks before a batch against the host's clock (a
  *            deadline equal to now passes, one ns before refuses, a cancel
  *            set refuses), the deadline reaching the worker, an empty batch
- *            without values, one row without values refused;
+ *            without values, one row without values refused; the clock
+ *            read after every row while a deadline is set (ERR_DEADLINE
+ *            at row 2 after a slow row 1), and a deadline passing during
+ *            the last row ending nothing;
  *   many     17 UDFs in one context: the 17th refused; one UDF opened twice
  *            in a context;
  *   init     init refusing a NULL, short or other-major host; a copy of the
  *            library loaded by absolute path from another directory finds
- *            that directory (its control worker's interpreter is looked for
+ *            that directory (its zygote's interpreter is looked for
  *            there).
  * Each case is one member of the JSON object (probe_json.h): status, the
  * error's message, and a value the case names (for refusals: 1 when the
@@ -410,9 +413,10 @@ static void deadline_cases(struct eng* e, struct pj* j) {
   rec(j, "deadline_equal_now", rc, &err, 0);
   rc = call1(e, o.i, 1, 0, 1, later - 1, NULL, &err, &v);
   rec(j, "deadline_one_ns_past", rc, &err, 0);
-  /* the proxy's clock says early; the worker's, that the deadline passed */
+  /* the library's clock says early; the worker's, that the deadline passed:
+   * seen after row 0 of 2, with a row left */
   e->hd.fixed_now = 1;
-  rc = call1(e, o.i, 1, 0, 1, mono() - 1000000000LL, NULL, &err, &v);
+  rc = call1(e, o.i, 2, 0, 1, mono() - 1000000000LL, NULL, &err, &v);
   rec(j, "deadline_in_worker", rc, &err, 0);
   e->hd.fixed_now = 0;
   volatile int32_t flag = 1;
@@ -422,6 +426,23 @@ static void deadline_cases(struct eng* e, struct pj* j) {
   rec(j, "empty_no_values", rc, &err, v);
   rc = call1(e, o.i, 1, 0, 0, 0, NULL, &err, &v);
   rec(j, "one_row_no_values", rc, &err, 0);
+  teardown(e, &o);
+  /* The worker reads the clock after every row while a deadline is set:
+   * slow_on_1 over the values 0, 1, 2 returns at once on rows 0 and 2 and
+   * takes 2 s on row 1, and the deadline is 1 s ahead (on the real clock;
+   * the library kills a worker only 2 s past it). Read after row 1 only, it
+   * has passed: ERR_DEADLINE at row 2. Over the values 0, 1 the deadline
+   * passes during the last row, and the batch is complete: OK, never row 2
+   * (a row past the batch). */
+  rc = setup(e, "udf_worker_fixtures:slow_on_1", &o, &err);
+  if (rc != KOMIRA_UDF_OK) {
+    rec(j, "row_deadline_setup", rc, &err, 0);
+    return;
+  }
+  rc = call1(e, o.i, 3, 0, 1, mono() + 1000000000LL, NULL, &err, &v);
+  rec(j, "deadline_after_row_1", rc, &err, 0);
+  rc = call1(e, o.i, 2, 0, 1, mono() + 1000000000LL, NULL, &err, &v);
+  rec(j, "deadline_in_last_row", rc, &err, 0);
   teardown(e, &o);
 }
 

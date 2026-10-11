@@ -1,38 +1,34 @@
 /*
- * komira-test/python-worker, engine side: the table of komira_udf_runtime.h
- * implemented as a proxy that sends every entry to Python worker processes
- * over the worker protocol (docs/design/udf_runtime_interface.md sections
- * 4.1 and 5). Test-only spike code. The engine, the harness and the
- * conformance suite drive it like any in-process runtime.
+ * komira-test/python-worker: the Python UDF runtime library. It implements
+ * the table of komira_udf_runtime.h and runs user code in worker processes
+ * it starts and manages (docs/design/udf_runtime_interface.md sections 1.2
+ * and 4.1; section 5, informative): each entry becomes one message of the
+ * runtime's private worker protocol (komira_udf_wire.h). Test-only spike
+ * code. The engine, the harness and the conformance suite drive it like any
+ * other runtime library, through the table alone.
  *
- * Processes. init starts one control worker (posix_spawn) that answers
- * DESCRIBE, VALIDATE and LOAD. Each open_context starts one context worker,
- * so one worker process serves one engine thread (section 3.3,
- * SINGLE_THREAD). Two ways to start it:
- *   spawn   posix_spawn a fresh interpreter; LOAD is sent to it again,
- *           so each worker imports or deserializes the UDF itself.
- *   zygote  the control worker is a zygote: LOAD imports or
- *           deserializes the UDF there, once, and each context worker is
- *           os.fork()ed from it (private op FORK, pyw.h), sharing the loaded
- *           pages copy-on-write. A UDF loaded after a child was forked is
- *           sent to that child with LOAD.
- * The engine itself never forks (section 5.2): the zygote is a
- * single-threaded process it spawned.
+ * Processes. init starts one zygote with posix_spawn (the engine is
+ * multi-threaded and never forks, section 5.2): a single-threaded
+ * interpreter with its native thread pools limited to one thread, which
+ * answers DESCRIBE and VALIDATE, and whose LOAD imports or deserializes the
+ * UDF, once. Each open_context has the zygote os.fork() one context worker
+ * (private op FORK, pyw.h), sharing the loaded pages copy-on-write, so one
+ * worker process serves one engine thread (section 3.3, SINGLE_THREAD). A
+ * UDF loaded after a worker was forked is sent to that worker with LOAD.
  *
  * Builds (one init each; refrt/ forwards the ABI's export to one):
- *   komira_udf_pyworker_spawn_init_v1    spawn, shared memory
- *   komira_udf_pyworker_zygote_init_v1   zygote, shared memory
- *   komira_udf_pyworker_pipe_init_v1     spawn, every payload on the socket
- *   komira_udf_pyworker_pyarrow_init_v1  spawn, shared memory, the worker
- *                                        reading and writing IPC with pyarrow
+ *   komira_udf_pyworker_zygote_init_v1   the runtime
+ *   komira_udf_pyworker_pyarrow_init_v1  the same, the workers reading and
+ *                                        writing Arrow IPC with pyarrow
+ *                                        (the engine's IPC is pyarrow's)
  *   komira_udf_pyworker_zygote_threads_init_v1
- *                                        zygote, native thread pools not
- *                                        limited to one thread (so a fork
- *                                        may find threads running)
+ *                                        the zygote's native thread pools
+ *                                        not limited (the counterfactual:
+ *                                        threads run at the fork)
  *
- * The worker answers describe; the proxy reports it with thread_affine 0:
- * the proxy's handles may be called from any engine thread, one at a time
- * (the worker's own thread runs the UDF).
+ * The worker answers describe; the library reports it with thread_affine 0:
+ * its handles may be called from any engine thread, one at a time (the
+ * worker's own thread runs the UDF).
  *
  * FFI-BOUNDARY. Owners: the rt, udf, context and instance structs are this
  * file's, freed by shutdown, unload, close_context and close_instance; each
@@ -51,27 +47,22 @@
 
 #include "pyw.h"
 
-#define MAX_ARGS 64 /* the in-process adapter's PYRT_MAX_ARGS; the IPC writer takes 64 columns */
+#define MAX_ARGS 64 /* the worker's MAX_ARGS; the IPC writer takes 64 columns */
 #define MAX_LOADED 16
-
-enum variant { V_SPAWN = 1, V_ZYGOTE = 2 };
 
 struct komira_udf_rt {
   const komira_udf_host* host;
-  enum variant variant;
-  int use_shm;
-  struct pyw_launch launch; /* role is set per start */
   char dir[1024];
-  pthread_mutex_t lock; /* the control channel, the load counter */
-  struct pyw_chan control;
-  uint64_t loads; /* LOADs the control worker has answered */
+  pthread_mutex_t lock; /* the zygote's channel, the load counter */
+  struct pyw_chan zygote;
+  uint64_t loads; /* LOADs the zygote has answered */
   komira_udf_capabilities caps;
   char runtime_id[96], runtime_abi[32];
 };
 
 struct komira_udf_udf {
   struct komira_udf_rt* rt;
-  uint64_t remote;  /* its id in the control worker */
+  uint64_t remote;  /* its id in the zygote, and in every worker forked after its load */
   uint64_t seq;     /* rt->loads when it was loaded: unique per load */
   struct pyw_buf body; /* the LOAD body, sent again to a worker that lacks it */
   int n_args;
@@ -83,7 +74,7 @@ struct komira_udf_context {
   struct komira_udf_rt* rt;
   struct pyw_chan ch;
   uint64_t remote;
-  uint64_t forked_at; /* rt->loads at the fork; UINT64_MAX: not forked */
+  uint64_t forked_at; /* rt->loads at the fork: the UDFs loaded up to it are inherited */
   int lost;
   struct {
     uint64_t seq; /* the UDF's load (not its address: a freed one's is reused) */
@@ -232,7 +223,7 @@ static int32_t pw_validate(komira_udf_rt* rt, const komira_udf_spec* s, komira_u
   int32_t rc = encode_spec(s, &b, NULL, e);
   if (rc == KOMIRA_UDF_OK) {
     pthread_mutex_lock(&rt->lock);
-    rc = request_id(&rt->control, KOMIRA_UDF_OP_VALIDATE, &b, NULL, e);
+    rc = request_id(&rt->zygote, KOMIRA_UDF_OP_VALIDATE, &b, NULL, e);
     pthread_mutex_unlock(&rt->lock);
   }
   pyw_buf_free(&b);
@@ -246,7 +237,7 @@ static int32_t pw_load(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf_u
   int32_t rc = encode_spec(s, &u->body, u, e);
   if (rc == KOMIRA_UDF_OK) {
     pthread_mutex_lock(&rt->lock);
-    rc = request_id(&rt->control, KOMIRA_UDF_OP_LOAD, &u->body, &u->remote, e);
+    rc = request_id(&rt->zygote, KOMIRA_UDF_OP_LOAD, &u->body, &u->remote, e);
     if (rc == KOMIRA_UDF_OK) u->seq = ++rt->loads;
     pthread_mutex_unlock(&rt->lock);
   }
@@ -267,7 +258,7 @@ static void pw_unload(komira_udf_udf* u) {
   put_id(&b, u->remote);
   komira_udf_error e = {sizeof(e), 0, NULL, NULL, -1, -1, NULL, NULL};
   pthread_mutex_lock(&rt->lock);
-  (void)request_id(&rt->control, KOMIRA_UDF_OP_UNLOAD, &b, NULL, &e);
+  (void)request_id(&rt->zygote, KOMIRA_UDF_OP_UNLOAD, &b, NULL, &e);
   pthread_mutex_unlock(&rt->lock);
   if (e.release) e.release(&e);
   pyw_buf_free(&b);
@@ -284,13 +275,13 @@ static int32_t fork_worker(struct komira_udf_rt* rt, struct komira_udf_context* 
     return fail(e, KOMIRA_UDF_ERR_INTERNAL, "open_context: socketpair failed", NULL, -1);
   struct pyw_reply r;
   pthread_mutex_lock(&rt->lock);
-  int rc = pyw_chan_request(&rt->control, PYW_OP_FORK, NULL, &sv[1], 1, &r);
+  int rc = pyw_chan_request(&rt->zygote, PYW_OP_FORK, NULL, &sv[1], 1, &r);
   c->forked_at = rt->loads;
   pthread_mutex_unlock(&rt->lock);
   close(sv[1]);
   if (rc != 0) {
     close(sv[0]);
-    return fail(e, KOMIRA_UDF_ERR_INTERNAL, rt->control.why, NULL, -1);
+    return fail(e, KOMIRA_UDF_ERR_INTERNAL, rt->zygote.why, NULL, -1);
   }
   if (r.op == KOMIRA_UDF_OP_ERROR) {
     close(sv[0]);
@@ -313,7 +304,7 @@ static int32_t fork_worker(struct komira_udf_rt* rt, struct komira_udf_context* 
   }
   free(warning);
   char why[300];
-  if (d.bad || pyw_chan_adopt(&c->ch, sv[0], pid, rt->use_shm, why, sizeof(why)) != 0) {
+  if (d.bad || pyw_chan_adopt(&c->ch, sv[0], pid, 1, why, sizeof(why)) != 0) {
     if (d.bad) close(sv[0]);
     return fail(e, KOMIRA_UDF_ERR_INTERNAL, d.bad ? "open_context: a malformed FORK reply" : why, NULL, -1);
   }
@@ -324,20 +315,9 @@ static int32_t pw_open_context(komira_udf_rt* rt, uint32_t slot, komira_udf_cont
   komira_udf_context* c = calloc(1, sizeof(*c));
   if (c == NULL) return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "open_context: out of memory", NULL, -1);
   c->rt = rt;
-  c->forked_at = UINT64_MAX;
   c->ch.fd = -1; /* no channel yet: closing it touches nothing */
   c->ch.memfd = -1;
-  int32_t rc;
-  if (rt->variant == V_ZYGOTE) {
-    rc = fork_worker(rt, c, e);
-  } else {
-    struct pyw_launch l = rt->launch;
-    l.role = "context";
-    char why[300];
-    rc = pyw_chan_spawn(&c->ch, &l, rt->use_shm, why, sizeof(why)) == 0
-             ? KOMIRA_UDF_OK
-             : fail(e, KOMIRA_UDF_ERR_INTERNAL, why, NULL, -1);
-  }
+  int32_t rc = fork_worker(rt, c, e);
   if (rc == KOMIRA_UDF_OK) {
     struct pyw_buf b = {0};
     pyw_buf_u32(&b, slot);
@@ -380,7 +360,7 @@ static void pw_close_context(komira_udf_context* c) {
 /* The UDF's id in the context's worker: inherited from the zygote when it
  * was loaded before the fork, else sent with LOAD now. */
 static int32_t remote_udf(komira_udf_context* c, const komira_udf_udf* u, uint64_t* id, komira_udf_error* e) {
-  if (c->forked_at != UINT64_MAX && u->seq <= c->forked_at) {
+  if (u->seq <= c->forked_at) {
     *id = u->remote;
     return KOMIRA_UDF_OK;
   }
@@ -571,7 +551,7 @@ static void pw_agg_close(komira_udf_groups* g) { (void)g; }
 /* ---- shutdown and init --------------------------------------------------- */
 
 static void pw_shutdown(komira_udf_rt* rt) {
-  pyw_chan_close(&rt->control);
+  pyw_chan_close(&rt->zygote);
   pthread_mutex_destroy(&rt->lock);
   free(rt);
 }
@@ -624,8 +604,8 @@ static int own_dir(char* out, size_t n) {
 /* DESCRIBE's body: runtime id, ABI tag, then ten u32 in the struct's order. */
 static int32_t describe_remote(struct komira_udf_rt* rt, komira_udf_error* e) {
   struct pyw_reply r;
-  if (pyw_chan_request(&rt->control, KOMIRA_UDF_OP_DESCRIBE, NULL, NULL, 0, &r) != 0)
-    return fail(e, KOMIRA_UDF_ERR_LOAD, rt->control.why, NULL, -1);
+  if (pyw_chan_request(&rt->zygote, KOMIRA_UDF_OP_DESCRIBE, NULL, NULL, 0, &r) != 0)
+    return fail(e, KOMIRA_UDF_ERR_LOAD, rt->zygote.why, NULL, -1);
   if (r.op == KOMIRA_UDF_OP_ERROR) {
     int32_t rc = fail_reply(e, &r);
     pyw_reply_free(&r);
@@ -652,18 +632,18 @@ static int32_t describe_remote(struct komira_udf_rt* rt, komira_udf_error* e) {
   c->max_descriptor_version = v[0];
   c->shapes = v[1];
   c->threading = v[2];
-  c->thread_affine = 0; /* the proxy's handles: any engine thread, one at a time */
+  c->thread_affine = 0; /* this library's handles: any engine thread, one at a time */
   c->transports = v[4];
   c->hosting = v[5];
   c->devices = v[6];
-  c->features = 0; /* the proxy has no memory_report entry */
+  c->features = 0; /* this library has no memory_report entry */
   c->udf_class = v[8];
   c->global_lock = v[9];
   return KOMIRA_UDF_OK;
 }
 
 static const komira_udf_runtime* init(const komira_udf_host* host, komira_udf_rt** out, komira_udf_error* e,
-                                      enum variant variant, int use_shm, const char* codec, int limit_threads) {
+                                      const char* codec, int limit_threads) {
   if (host == NULL || host->struct_size < sizeof(komira_udf_host) || host->abi_major != KOMIRA_UDF_ABI_MAJOR) {
     fail(e, KOMIRA_UDF_ERR_ABI, "this runtime speaks ABI major 1", NULL, -1);
     return NULL;
@@ -674,19 +654,19 @@ static const komira_udf_runtime* init(const komira_udf_host* host, komira_udf_rt
     return NULL;
   }
   rt->host = host;
-  rt->variant = variant;
-  rt->use_shm = use_shm;
   pthread_mutex_init(&rt->lock, NULL);
   if (!own_dir(rt->dir, sizeof(rt->dir))) {
     fail(e, KOMIRA_UDF_ERR_LOAD, "init: cannot find the runtime library's own directory", NULL, -1);
     pw_shutdown(rt);
     return NULL;
   }
-  rt->launch = (struct pyw_launch){rt->dir, variant == V_ZYGOTE ? "zygote" : "control", codec, limit_threads};
+  /* The zygote: the one process this library starts itself, with
+   * posix_spawn; every context worker is forked from it. */
+  struct pyw_launch l = {rt->dir, "zygote", codec, limit_threads};
   char why[300];
-  if (pyw_chan_spawn(&rt->control, &rt->launch, use_shm, why, sizeof(why)) != 0) {
+  if (pyw_chan_spawn(&rt->zygote, &l, 1, why, sizeof(why)) != 0) {
     char m[400];
-    snprintf(m, sizeof(m), "init: the control worker: %s", why);
+    snprintf(m, sizeof(m), "init: the zygote: %s", why);
     fail(e, KOMIRA_UDF_ERR_LOAD, m, NULL, -1);
     pw_shutdown(rt);
     return NULL;
@@ -699,27 +679,17 @@ static const komira_udf_runtime* init(const komira_udf_host* host, komira_udf_rt
   return &TABLE;
 }
 
-const komira_udf_runtime* komira_udf_pyworker_spawn_init_v1(const komira_udf_host* h, komira_udf_rt** rt,
-                                                            komira_udf_error* e) {
-  return init(h, rt, e, V_SPAWN, 1, "own", 1);
-}
-
 const komira_udf_runtime* komira_udf_pyworker_zygote_init_v1(const komira_udf_host* h, komira_udf_rt** rt,
                                                              komira_udf_error* e) {
-  return init(h, rt, e, V_ZYGOTE, 1, "own", 1);
-}
-
-const komira_udf_runtime* komira_udf_pyworker_pipe_init_v1(const komira_udf_host* h, komira_udf_rt** rt,
-                                                           komira_udf_error* e) {
-  return init(h, rt, e, V_SPAWN, 0, "own", 1);
+  return init(h, rt, e, "own", 1);
 }
 
 const komira_udf_runtime* komira_udf_pyworker_pyarrow_init_v1(const komira_udf_host* h, komira_udf_rt** rt,
                                                               komira_udf_error* e) {
-  return init(h, rt, e, V_SPAWN, 1, "pyarrow", 1);
+  return init(h, rt, e, "pyarrow", 1);
 }
 
 const komira_udf_runtime* komira_udf_pyworker_zygote_threads_init_v1(const komira_udf_host* h, komira_udf_rt** rt,
                                                                      komira_udf_error* e) {
-  return init(h, rt, e, V_ZYGOTE, 1, "own", 0);
+  return init(h, rt, e, "own", 0);
 }

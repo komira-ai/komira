@@ -208,6 +208,14 @@ _PURE_314 = [
     ),
 ] + [w for w in WHEELS if w["name"] in ("python-dateutil", "six", "tzdata")]
 
+# The Python UDF runtime spike's own closure on the 3.13 interpreter
+# (src/tests/helpers/komira_udf_spike_pyworker): cloudpickle, which
+# deserializes a VALUE UDF in its worker. The same file as the 3.14
+# closures' (a pure-Python wheel). Kept out of WHEELS, so nothing that
+# iterates the shared closure takes it; the package that uses it checks its
+# licence itself (its `licenses` py_test).
+WHEELS_UDF_PYTHON = [w for w in _PURE_314 if w["name"] == "cloudpickle"]
+
 # The binary wheels of numpy, pandas, pyarrow, scipy and scikit-learn for one
 # ABI tag, each given as (url path, sha256, size).
 def _binary_314(numpy, pandas, pyarrow, scipy, sklearn):

@@ -20,7 +20,7 @@
 # table entry alone); CPU of the engine and of the workers over wall time,
 # `noisy` when that is under 0.8 x wall x min(N, CPUs); involuntary
 # switches; the cgroup's cpu.max and throttling over the phase; memory of
-# the context workers (PSS, USS, RSS) and of the control worker or zygote,
+# the context workers (PSS, USS, RSS) and of the zygote,
 # taken with every context open and one batch done; cold start per context
 # (open_context to the end of its first batch) and for the engine (open to
 # the first run's first batch); and every call of the run split in three,
@@ -32,9 +32,9 @@
 from std.sys import argv
 
 from komira_json import JsonValue, parse_json_value
-from komira_udf_spike_python_worker.drive import Driver
-from komira_udf_spike_python_worker.report import call_split, num, per_thread, processes, text
-from komira_udf_spike_python_worker.workloads import closure, fahrenheit_np, fahrenheit_rows
+from komira_udf_spike_pyworker.drive import Driver
+from komira_udf_spike_pyworker.report import call_split, num, per_thread, processes, text
+from komira_udf_spike_pyworker.workloads import closure, fahrenheit_np, fahrenheit_rows
 
 comptime ROWS = 8192
 comptime BUILD = "bench program mojo -O3 (mojo_binary default); engine loop and proxy C -O2; worker CPython 3.13"
@@ -123,7 +123,6 @@ def _row(name: String, r: JsonValue, base: Float64, mut rps_out: Float64) raises
     s += ', "throttled_us_delta": ' + String(num(r, "throttled_us_delta")) + ', "loadavg": ' + _q(text(r, "loadavg"))
     s += ', "warm_threads": ' + String(warm) + ', "warmup_calls_median": ' + String(_quantile(warmup^, 0.5))
     s += ', "context_workers": ' + _mem(r, "context") + ', "zygote": ' + _mem(r, "zygote")
-    s += ', "control": ' + _mem(r, "control")
     s += ', "cold_ns_median": ' + String(_quantile(cold.copy(), 0.5)) + ', "cold_ns_max": '
     s += String(_quantile(cold^, 1.0)) + ', "open_context_ns_median": ' + String(_quantile(ctx^, 0.5))
     s += ', "load_ns": ' + String(num(r, "load_ns")) + ', "engine_cold_ns": ' + String(num(r, "engine_cold_ns"))

@@ -1,29 +1,35 @@
-"""komira-test/python-worker: the Python UDF runtime as a worker process.
+"""komira-test/python-worker: the Python UDF runtime's worker process.
 
-The engine reaches this process only through its proxy runtime
+The engine reaches this process only through the runtime library
 (native/proxy_runtime.c), which turns each entry of the UDF runtime C ABI
-into one message of the worker protocol (docs/design/udf_runtime_interface.md
-section 5.2; the header is komira_udf_wire.h). One process serves one engine
-thread: one context, one interpreter, one GIL.
+into one message of the runtime's private worker protocol (the header is
+komira_udf_wire.h; docs/design/udf_runtime_interface.md section 5,
+informative). One process serves one engine thread: one context, one
+interpreter, one GIL.
 
     python3.13 -I -S -B komira_udf_pyworker.py --role R --dir D --codec C
 
-  --role control  answers DESCRIBE, VALIDATE and LOAD (a LOAD here checks the
-                  spec and the code's digest; it runs no user code)
-  --role zygote   the same, but LOAD imports or deserializes the UDF, and FORK
-                  forks a context worker that inherits it
-  --role context  serves one context: LOAD, OPEN_*, CALL_BATCH, CLOSE_*
-  --dir D         the runtime directory: python/, pyrt/ (the adapter of the
-                  in-process runtime, komira_udf_pyrt.py, and the fixture
-                  modules), pyworker/, native/lib/ (libraries loaded before any
-                  extension module), site/<wheel>
+  --role zygote   the process the runtime library starts (posix_spawn), one
+                  per runtime: answers DESCRIBE and VALIDATE; LOAD imports
+                  or deserializes the UDF; FORK forks a context worker that
+                  inherits it
+  --role context  serves one context: LOAD, OPEN_*, CALL_BATCH, CLOSE_*. A
+                  forked child of the zygote takes this role; the library
+                  never starts one with it, and the tests that drive a
+                  worker message by message (native/probe_worker.c) do
+  --dir D         the runtime directory: python/, pyrt/ (the adapter,
+                  komira_udf_pyrt.py, and the fixture modules), pyworker/,
+                  native/lib/ (libraries loaded before any extension
+                  module), site/<wheel>
   --codec own     Arrow IPC read and written by kudf_ipc.py
   --codec pyarrow Arrow IPC read and written by pyarrow
 
 The control socket is fd 3. HELLO brings the shared region (a memfd, with
-SCM_RIGHTS) unless the engine runs the pipe transport. User code runs through
-the in-process runtime's adapter (komira_udf_pyrt.Instance), so the same
-type-hint rules and per-row and numpy readers serve both transports.
+SCM_RIGHTS); a HELLO without it (every payload inline, the clock read by a
+CLOCK message, cancel by SIGUSR1) is served too, though the runtime library
+always sends the region. User code runs through the adapter
+(komira_udf_pyrt.Instance): the type-hint rules and the per-row and numpy
+readers.
 """
 
 import ctypes
@@ -53,7 +59,7 @@ SHAPE_SCALAR, SHAPE_MAP_BATCHES_COLUMN = 1, 4
 FORM_PACKAGE, FORM_BUNDLE, FORM_VALUE = 1, 2, 3
 CALL_HEAD = 64
 WIDTH = {"l": 8, "i": 4, "g": 8}
-MAX_ARGS = 64  # the adapter's PYRT_MAX_ARGS
+MAX_ARGS = 64  # the most arguments a UDF of this runtime takes
 
 # The control page (pyw.h).
 CTRL_BYTES = 4096
@@ -136,8 +142,8 @@ class SlotBuffer:
 
 
 class Loaded:
-    """A loaded UDF: the bound types and, where user code was loaded, the
-    adapter's Instance."""
+    """A loaded UDF: the bound types and the adapter's Instance (user code
+    loaded)."""
 
     def __init__(self, spec, inst):
         self.spec, self.inst = spec, inst
@@ -320,9 +326,9 @@ class Worker:
         return out[0], out[1]
 
     def check_spec(self, s):
-        """The checks that need no user code (python_runtime.c check_spec, with
-        VALUE added): form, entry grammar, descriptor, code objects, shape and
-        the types the adapter maps."""
+        """The checks that need no user code: form, entry grammar,
+        descriptor, code objects (VALUE's), shape and the types the adapter
+        maps."""
         form = s["form"]
         if form not in (FORM_PACKAGE, FORM_BUNDLE, FORM_VALUE):
             raise Refused(ERR_DESCRIPTOR, "code form is not PACKAGE, BUNDLE or VALUE")
@@ -374,12 +380,7 @@ class Worker:
     def load(self, body):
         s = self.read_spec(body)
         self.validate(s)
-        inst = None
-        if self.role == "control":
-            if s["form"] == FORM_VALUE:
-                self.payload(s)  # the digest, checked; deserializing would run user code
-        else:
-            inst = self.load_code(s)
+        inst = self.load_code(s)
         self.ids += 1
         self.udfs[self.ids] = Loaded(s, inst)
         return struct.pack("<q", self.ids)
@@ -423,7 +424,7 @@ class Worker:
         if ctx not in self.contexts:
             raise Refused(ERR_INTERNAL, "open_instance: no context {}".format(ctx))
         u = self.udfs.get(uid)
-        if u is None or u.inst is None:
+        if u is None:
             raise Refused(ERR_INTERNAL, "open_instance: no loaded UDF {}".format(uid))
         i = u.inst
         self.ids += 1
@@ -659,8 +660,8 @@ class Worker:
 def main(argv):
     opts = dict(zip(argv[1::2], argv[2::2]))
     role, rtdir, codec = opts.get("--role"), opts.get("--dir"), opts.get("--codec", "own")
-    if role not in ("control", "zygote", "context") or not rtdir:
-        raise SystemExit("usage: komira_udf_pyworker.py --role control|zygote|context --dir D [--codec own|pyarrow]")
+    if role not in ("zygote", "context") or not rtdir:
+        raise SystemExit("usage: komira_udf_pyworker.py --role zygote|context --dir D [--codec own|pyarrow]")
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))  # a crash leaves no core file behind
     sys.path[:0] = [os.path.join(rtdir, "pyworker"), os.path.join(rtdir, "pyrt")]
     for lib in ("libgcc_s.so.1", "libstdc++.so.6", "libz.so.1"):

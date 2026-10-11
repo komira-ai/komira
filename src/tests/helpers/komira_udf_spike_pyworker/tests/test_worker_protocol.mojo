@@ -8,8 +8,8 @@
 #   - an unknown op refused with ERR_UNSUPPORTED; CANCEL for a call already
 #     answered gets no reply (the next reply answers the next request);
 #     UNLOAD and CLOSE_* of unknown ids taken; OPEN_INSTANCE naming no
-#     context or no UDF, CALL_BATCH naming no instance, OPEN_CONTEXT on a
-#     control worker, FORK on a context worker or without its socket: each
+#     context or no UDF, CALL_BATCH naming no instance, OPEN_CONTEXT on the
+#     zygote, FORK on a context worker or without its socket: each
 #     refused with ERR_INTERNAL and its reason; every ERROR with row and
 #     group -1 (a dispatch arm that serves the wrong op, a check deleted);
 #   - LOAD and VALIDATE with one defect each: the form, each way the entry
@@ -22,15 +22,13 @@
 #     not resolve or do not bind, a payload file missing: each refused with
 #     its status (ERR_DESCRIPTOR, ERR_UNSUPPORTED, ERR_LOAD, ERR_INTERNAL)
 #     and reason; 64 arguments, an int32 argument or result and a good
-#     VALUE taken; a control worker
-#     takes a VALUE without deserializing it (any of these checks deleted,
-#     or a bound moved by one);
+#     VALUE taken (any of these checks deleted, or a bound moved by one);
 #   - a batch the worker cannot read, and one column for two arguments:
 #     refused as the engine's batch;
 #   - HELLO announcing shared memory without its file refused; a payload
-#     not inline on the pipe transport, and payloads past the heap's end,
-#     refused, while one ending exactly at the end is read (a bound moved
-#     by one); a header without the magic ends the worker with exit 1; end
+#     not inline on a channel without the shared region, and payloads past
+#     the heap's end, refused, while one ending exactly at the end is read
+#     (a bound moved by one); a header without the magic ends the worker with exit 1; end
 #     of file before and after HELLO ends it with exit 0, and so does
 #     SHUTDOWN within a second with the socket still open; a worker started
 #     with a role it does not know exits 1 before HELLO, and the engine
@@ -44,8 +42,8 @@ from std.testing import assert_equal, assert_true
 
 from komira_json import JsonValue
 from komira_udf_spike_abi.contract import ERR_DESCRIPTOR, ERR_INTERNAL, ERR_LOAD, ERR_UNSUPPORTED
-from komira_udf_spike_python_worker.drive import probe_worker
-from komira_udf_spike_python_worker.report import num, text
+from komira_udf_spike_pyworker.drive import probe_worker
+from komira_udf_spike_pyworker.report import num, text
 
 
 def got(r: JsonValue, name: String, status: Int, reason: String) raises:
@@ -70,9 +68,9 @@ def main() raises:
     got(r, "open_instance_no_udf", Int(ERR_INTERNAL), "open_instance: no loaded UDF 99")
     got(r, "call_no_instance", Int(ERR_INTERNAL), "call_batch: no instance 4242")
     got(r, "fork_not_zygote", Int(ERR_INTERNAL), "FORK: not a zygote, or no socket came with it")
-    got(r, "open_context_on_control", Int(ERR_INTERNAL), "OPEN_CONTEXT on a control worker")
+    got(r, "open_context_on_zygote", Int(ERR_INTERNAL), "OPEN_CONTEXT on a zygote worker")
     got(r, "fork_without_socket", Int(ERR_INTERNAL), "FORK: not a zygote, or no socket came with it")
-    for k in ["context_exit", "control_exit", "zygote_exit", "shutdown_exit"]:
+    for k in ["context_exit", "zygote_exit", "shutdown_exit"]:
         got(r, k, 0, "")
 
     r = probe_worker("load", ".")
@@ -108,7 +106,6 @@ def main() raises:
     got(r, "call_unreadable_batch", Int(ERR_INTERNAL), "the engine's batch: a message without the continuation marker")
     got(r, "call_one_column_for_two", Int(ERR_INTERNAL), "1 columns and 2 buffers; the schema has 2 columns")
     got(r, "load_exit", 0, "")
-    got(r, "control_value_not_deserialized", 0, "OK")
 
     r = probe_worker("frame", ".")
     got(r, "hello_shm_no_file", Int(ERR_INTERNAL), "HELLO: shared memory without its file")

@@ -4,7 +4,7 @@
  * Test-only spike code (tests/test_worker_boundary.mojo).
  *
  *   codec   native/probe_codec.c's cases (the engine-side codec).
- *   hello   a real worker (posix_spawned, pyw_chan_start) sent a DESCRIBE
+ *   hello   a real zygote (posix_spawned, pyw_chan_start) sent a DESCRIBE
  *           before any HELLO, then HELLO with each of the wire version, ABI
  *           major and ABI minor off by one, a DESCRIBE again, then the
  *           right HELLO and a last DESCRIBE (section 5.2: any difference is
@@ -24,7 +24,7 @@
  *
  * FFI-BOUNDARY. Every buffer and array here is this file's: decoded arrays
  * are released before the case ends; a fake worker's socket end is closed
- * by its thread, the engine's by pyw_chan_close; a spawned worker is shut
+ * by its thread, the engine's by pyw_chan_close; a spawned zygote is shut
  * down and reaped by pyw_chan_close.
  */
 #define _GNU_SOURCE
@@ -64,7 +64,7 @@ static void hello_cases(struct pj* j, const char* arg) {
     return;
   }
   struct pyw_chan c;
-  struct pyw_launch l = {dir, "control", "own", 1};
+  struct pyw_launch l = {dir, "zygote", "own", 1};
   char why[300];
   if (pyw_chan_start(&c, &l, why, sizeof(why)) != 0) {
     pj_case(j, "worker_start", -1, why, 0);

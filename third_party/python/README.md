@@ -36,6 +36,13 @@ no test holds what this page says about the pins.
 | typing-extensions | 4.16.0 | | grpcio |
 | tzdata | 2026.5 | | the time-zone database of every `py_test` and `python_oracle` (IANA 2026e) |
 
+The Python UDF runtime spike (`src/tests/helpers/komira_udf_spike_pyworker`)
+has a closure of its own on the same interpreter, `WHEELS_UDF_PYTHON` in
+[`pins.bzl`](pins.bzl), visible to that package only: cloudpickle 3.1.2 (the
+3.14 closures' file), which deserializes a VALUE UDF in its worker. Nothing
+that iterates `WHEELS` takes it, and the package checks its licence itself
+(its `licenses` test).
+
 polars is pinned at 1.44.2, the version komira's Python surface implements;
 moving to polars 2 is a later change. pandas 3.0.6 is the version the
 surface implements.
@@ -99,7 +106,7 @@ source.
 | tzdata | Apache-2.0 | the IANA time-zone database, which is in the public domain |
 | scipy (3.14 closures) | BSD-3-Clause | OpenBLAS (BSD-3-Clause) and two GCC runtime libraries, libgfortran (GPL-3.0-or-later WITH GCC-exception-3.1) and libquadmath (LGPL-2.1-or-later), each in two builds, and the licences its `LICENSE.txt` lists |
 | scikit-learn (3.14 closures) | BSD-3-Clause | libgomp (GPL-3.0-or-later WITH GCC-exception-3.1), whose exception text its `COPYING` carries |
-| cloudpickle, joblib, threadpoolctl (3.14 closures) | BSD-3-Clause | |
+| cloudpickle, joblib, threadpoolctl (3.14 closures; cloudpickle also in WHEELS_UDF_PYTHON) | BSD-3-Clause | |
 | narwhals (3.14 closures) | MIT | |
 | libgcc_s, libstdc++ | GPL-3.0-or-later WITH GCC-exception-3.1 | |
 | zlib | Zlib | |

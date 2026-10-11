@@ -1,9 +1,8 @@
-"""The Python side of the komira-test/python UDF runtime (python_runtime.c).
-
-One copy of this module is imported in each interpreter the runtime runs
-(each sub-interpreter, or the one shared interpreter). The C side hands it
-Arrow buffers as memoryviews and takes back statuses and results; it never
-sees a language object other than these.
+"""The adapter of the komira-test/python-worker UDF runtime: the code that
+runs user code, imported in each worker process
+(pyworker/komira_udf_pyworker.py; a forked worker inherits the zygote's
+copy). The worker hands it Arrow buffers as memoryviews and takes back
+statuses and results; it never sees a language object other than these.
 
 - validate(): the static check of a UDF reference: the module's source is
   found on sys.path and parsed (ast), never run. The function's type hints
@@ -12,7 +11,7 @@ sees a language object other than these.
   function, its hints checked again as live objects.
 - Instance.call(): one batch. SCALAR: the function is called once per row
   over a pure-Python columnar view (memoryviews of the Arrow buffers, no
-  copy), and each result written into the output buffer the C side
+  copy), and each result written into the output buffer the worker
   allocated. MAP_BATCHES_COLUMN: the function gets whole columns, as Python
   lists (hint `list[float]`) or numpy arrays over the Arrow buffers (hint
   `numpy.ndarray`), and returns one.
@@ -182,7 +181,7 @@ def validate(entry, shape, arg_fmts, result_fmt):
 
 
 def _text(s):
-    """`s` as text the C side can encode: invalid UTF-8 (a lone surrogate)
+    """`s` as text the worker can send: invalid UTF-8 (a lone surrogate)
     escaped."""
     return s.encode("utf-8", "backslashreplace").decode("utf-8")
 

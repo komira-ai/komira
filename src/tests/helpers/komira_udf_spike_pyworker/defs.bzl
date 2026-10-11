@@ -1,35 +1,17 @@
-"""Two small rules for this package's runtime directory, and its layout.
-
-`pyrt_files` stages the in-process Python runtime's adapter and fixture
-modules (komira_udf_spike_python/pyrt/) that the worker runs user code
-through. That package exports no target for them, so this rule takes them
-from the staged data of one of its welded tests (`[tests][<test>]`, whose
-other output is the test's root: share/pyrt/<file>).
+"""The rules of this package's runtime directory and its bench.
 
 `dist_native_libs` is the directory of shared libraries the pinned CPython's
 wheels link beyond glibc (PythonDistInfo.native_libs); the worker loads them
 before any extension module, as a py_test does.
+
+`code_layer` lays out a VALUE capture's committed payloads as a code layer
+holds them; `bytecode` compiles a directory's modules; `udf_bench` runs the
+bench program and keeps its output.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/mojo:providers.bzl", "MojoRunnableInfo")
 load("@komira//tools/build/python:defs.bzl", "PythonDistInfo")
-
-def _pyrt_files_impl(ctx):
-    others = ctx.attrs.test[DefaultInfo].other_outputs
-    if len(others) != 1:
-        fail("{}: {} has {} other outputs; a welded test has one, its root".format(ctx.label, ctx.attrs.test.label, len(others)))
-    root = others[0]
-    out = ctx.actions.copied_dir("pyrt", {f: root.project("share/pyrt/" + f) for f in ctx.attrs.files})
-    return [DefaultInfo(default_output = out)]
-
-_pyrt_files = rule(
-    impl = _pyrt_files_impl,
-    doc = "A directory of files taken from share/pyrt/ of a welded Mojo test's staged root (the `[tests][<test>]` sub-target's other output).",
-    attrs = {
-        "files": attrs.list(attrs.string(), doc = "File names under share/pyrt/."),
-        "test": attrs.dep(doc = "A `<library>[tests][<test>]` sub-target."),
-    },
-)
 
 def _dist_native_libs_impl(ctx):
     libs = ctx.attrs.python[PythonDistInfo].native_libs
@@ -135,9 +117,74 @@ _bytecode = rule(
 
 bytecode = declares_docs(_bytecode)
 code_layer = declares_docs(_code_layer)
-pyrt_files = declares_docs(_pyrt_files)
 dist_native_libs = declares_docs(_dist_native_libs)
 
+
+# The bench (udf_bench): the action stages `data` in one directory (the
+# runtime library, the CPython install, the wheels, the Python modules),
+# changes into it and runs the binary from its runnable directory with
+# `args`, then the run id: the one line of the `run_id` file. The run id file
+# is an input of this action only, so bumping it re-runs the bench and
+# nothing else; every welded test keeps its action key and stays a cache
+# hit. Numbers from a cache hit are the numbers of the run that wrote them,
+# and their `run_id` says which.
+_BENCH = """
+set -eu
+BB="$1"; BIN="$2"; DATA="$3"; OUT="$4"; RUN_ID_FILE="$5"; shift 5
+case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
+case "$BIN" in /*) ;; *) BIN="$PWD/$BIN" ;; esac
+case "$OUT" in /*) ;; *) OUT="$PWD/$OUT" ;; esac
+RUN_ID=$("$BB" head -n 1 "$RUN_ID_FILE")
+cd "$DATA"
+"$BIN" "$@" "$RUN_ID" > "$OUT"
+"""
+
+def _out(dep):
+    return dep[DefaultInfo].default_outputs[0]
+
+def _udf_bench_impl(ctx):
+    runnable = ctx.attrs.binary[MojoRunnableInfo]
+    data = ctx.actions.symlinked_dir(ctx.label.name + ".data", ctx.attrs.data)
+    out = ctx.actions.declare_output(ctx.label.name + ".json")
+    ctx.actions.run(
+        cmd_args(
+            _out(ctx.attrs._busybox),
+            "sh",
+            "-c",
+            _BENCH,
+            "udf_bench",
+            _out(ctx.attrs._busybox),
+            cmd_args(runnable.run_dir.project(runnable.binary), hidden = runnable.run_dir),
+            data,
+            out.as_output(),
+            ctx.attrs.run_id,
+            ctx.attrs.args,
+        ),
+        category = "udf_bench",
+    )
+    return [DefaultInfo(default_output = out)]
+
+_udf_bench = rule(
+    impl = _udf_bench_impl,
+    doc = "Runs a bench mojo_binary over a staged data directory and keeps its stdout (one JSON object) as the output, with the run id file's first line as the last argument.",
+    attrs = {
+        "args": attrs.list(attrs.string(), default = [], doc = "Arguments before the run id."),
+        "binary": attrs.dep(providers = [MojoRunnableInfo], doc = "The bench program (a mojo_binary)."),
+        "data": attrs.dict(attrs.string(), attrs.source(), default = {}, doc = "{path in the data directory: file or directory}; the program runs there."),
+        "run_id": attrs.source(doc = "A file whose first line names the run."),
+        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+    },
+)
+
+udf_bench = declares_docs(_udf_bench)
+
+# The adapter and the shared cases' fixtures (pyrt/), and the worker and its
+# own fixtures (pyworker/), as runtime_dir stages them.
+PYRT = {f: "pyrt/" + f for f in [
+    "komira_udf_pyrt.py",
+    "udf_fixtures.py",
+    "udf_np.py",
+]}
 
 PYWORKER = {f: "pyworker/" + f for f in [
     "komira_udf_pyworker.py",
@@ -148,11 +195,12 @@ PYWORKER = {f: "pyworker/" + f for f in [
 ]}
 
 def runtime_dir(variants, site = ":site_bc", extra = {}):
-    """The directory a proxy build finds beside itself: pyworker_<variant>.so
-    for each of `variants`, the CPython install as python/, its native
-    libraries as native/, the in-process runtime's Python modules as pyrt/,
-    the worker's as pyworker/, and the wheels' site/<wheel> directories, each
-    compiled to bytecode (bytecode, above); then `extra`."""
+    """The directory a build of the runtime library finds beside itself:
+    pyworker_<variant>.so for each of `variants`, the CPython install as
+    python/, its native libraries as native/, the adapter and fixture
+    modules as pyrt/, the worker's as pyworker/, and the wheels'
+    site/<wheel> directories, each compiled to bytecode (bytecode, above);
+    then `extra`."""
     return {
         "native": ":native_libs",
         "pyrt": ":pyrt_bc",

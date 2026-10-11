@@ -57,8 +57,8 @@ from std.testing import assert_equal, assert_true
 
 from komira_json import JsonValue
 from komira_udf_spike_abi.contract import ERR_ABI
-from komira_udf_spike_python_worker.drive import probe_boundary
-from komira_udf_spike_python_worker.report import num, text
+from komira_udf_spike_pyworker.drive import probe_boundary
+from komira_udf_spike_pyworker.report import num, text
 
 comptime GOLDEN = 52
 """The writer's messages compared: 30 one-field schemas, 2 of several
