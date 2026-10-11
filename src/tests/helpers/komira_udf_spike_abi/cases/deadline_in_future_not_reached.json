@@ -1,6 +1,6 @@
 {
  "name": "deadline_in_future_not_reached",
- "defect": "a deadline still in the future ends the call (the deadline check inverted, or compared with the wrong clock). Virtual clock as in deadline_reached_during_call, deadline 1000 s ahead",
+ "defect": "a deadline still in the future ends the call (the deadline check inverted, or compared with the wrong clock). Virtual clock as in deadline_reached_during_call (1 ms per read), deadline 1000 s ahead",
  "run": "call_batch",
  "entry": "slow_loop",
  "shape": "SCALAR",

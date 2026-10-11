@@ -17,10 +17,10 @@
 
 from ._cabi import Word
 from ._host import (
-    VIRTUAL_START_NS,
     Counts,
     arm_virtual_clock,
     disarm_virtual_clock,
+    virtual_clock_on,
     _Arena,
     arm_cancel_on_clock,
     array_released,
@@ -230,8 +230,8 @@ struct CallOptions(Copyable, Movable):
     when. `deadline_passed`: the deadline is one nanosecond after the host
     clock's zero, long past. `deadline_after_ns` (0: none): the deadline is
     that far in the future, on a virtual clock the host's now_ns answers
-    during the call (one step per read, _host.arm_virtual_clock), so the
-    runtime reaches it after a fixed number of its own clock reads."""
+    during the call (1 ms per read, _host.arm_virtual_clock), so the runtime
+    reaches it after a fixed number of its own clock reads."""
 
     var cancel: Bool
     var cancel_during_call: Bool
@@ -434,8 +434,7 @@ struct UdfRuntime(Movable):
         if opts.deadline_passed:
             deadline = 1
         elif opts.deadline_after_ns > 0:
-            deadline = VIRTUAL_START_NS + opts.deadline_after_ns
-            arm_virtual_clock(host_data_of(self._host))
+            deadline = arm_virtual_clock(host_data_of(self._host)) + opts.deadline_after_ns
         var call = new_call(self._arena, deadline, self._calls, opts.cancel)
         if opts.cancel_during_call:
             arm_cancel_on_clock(host_data_of(self._host), cancel_flag_of(call))
@@ -671,6 +670,11 @@ struct UdfRuntime(Movable):
     def agg_close(mut self, g: Handle) raises:
         _need(g, KIND_GROUPS)
         t_agg_close(self._table, g._w)
+
+    def clock_is_virtual(self) -> Bool:
+        """Whether the host's clock answers the virtual clock now (only
+        while a call with a future deadline runs)."""
+        return virtual_clock_on(host_data_of(self._host))
 
     def ledger(self) -> Counts:
         """Arrays and streams the host exported and their release counts."""

@@ -126,7 +126,7 @@ enum fixture_id {
   F_FLAGS_PROBE,
   F_NEAR,
   F_YIELD_FIRST,
-  F_CLOCK
+  F_SLOW_ONCE
 };
 
 /* The variant of a fixture that keeps an input (F_ARGS_KEPT, F_FRAME_IN_KEPT,
@@ -375,8 +375,10 @@ static const struct fixture FIXTURES[] = {
     {"sum64", F_SUM_WIDE, SC, "llllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll", "l", "", 0},
     /* each row: the call's call_id */
     {"call_id", F_CALL_ID, MC, "l", "l", "", 0},
-    /* each row: the host's now_ns, read once per row */
-    {"clock", F_CLOCK, MC, "l", "l", "", 0},
+    /* slow_loop as a runtime that reads the host's clock exactly once per
+     * row (after its cancel check) and checks the deadline against that
+     * read: the read pattern the virtual-clock cases are calibrated for */
+    {"slow_loop_once_per_row", F_SLOW_ONCE, SC, "l", "l", "", 0},
     /* rows 0, 1, 2: the flags of the argument struct's schema, of its first
      * field, of the result schema, as load saw them */
     {"flags_probe", F_FLAGS_PROBE, MC, "l", "l", "", 0},
