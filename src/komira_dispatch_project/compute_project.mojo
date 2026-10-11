@@ -7,7 +7,7 @@
 # `RecordBatch` already in memory, and returns the projected batch.
 #
 # Each output expression takes one route (`compute_project_routes`):
-#   * a column reference, or an alias of one, is copied;
+#   * a column reference, under any number of aliases, is copied;
 #   * a literal is broadcast to the batch's row count;
 #   * CASE goes to `komira_batch_eval._eval_when_expr`;
 #   * REGEXP, SUBSTRING, the string functions, the type-preserving numeric
@@ -18,9 +18,11 @@
 #     that holds a math op whose domain is checked, goes to the column
 #     evaluator too;
 #   * everything else is translated by `lower_untyped_expr` and evaluated by
-#     the per-DType `komira_eval.ExpressionExecutor` walkers on the I64, F64
-#     or I32 channel (a FLOAT64 result first tries the dense evaluator,
-#     `project_dense_f64`).
+#     the per-DType `komira_eval.ExpressionExecutor` walkers on the I64 or
+#     F64 channel (a FLOAT64 result first tries the dense evaluator,
+#     `project_dense_f64`). An expression of the I32 family declines: it is
+#     an INT32 column under aliases, which the copy above serves, or INT32
+#     arithmetic, which the translator refuses.
 #
 # The contract: the output batch matches the declared schema, or the
 # evaluator returns None (a decline). It never returns a column whose type
@@ -98,7 +100,6 @@ from .compute_project_routes import (
 from .lower_untyped_expr import (
     translate_expr,
     RUNTIME_DTYPE_F64,
-    RUNTIME_DTYPE_I32,
     RUNTIME_DTYPE_I64,
     RUNTIME_DTYPE_UNSUPPORTED,
 )
@@ -148,7 +149,8 @@ def _eval_computed_column[
 
     Translates `e` into a `RuntimeExpr` pool, runs the `dtype` walker of
     `ExpressionExecutor` over an identity selection, and builds the column.
-    `fam` is the family `_infer_computed_family` chose for `dtype`. For
+    `dtype` is INT64 or FLOAT64, the two walker channels this evaluator
+    serves; `fam` is the family `_infer_computed_family` chose for it. For
     FLOAT64 with `dense_f64` set, the dense evaluator runs first and serves
     the column when it admits the expression; `dense_par` lets it fan out
     over `pool_h`."""
@@ -214,6 +216,9 @@ def _eval_computed_column[
     # shape", and the caller declines. An integer overflow means the value
     # does not exist in the output type, so it propagates with its message
     # (`is_int_overflow_error` recognises it).
+    comptime assert (
+        dtype == DType.int64 or dtype == DType.float64
+    ), "the walker channels this evaluator serves are INT64 and FLOAT64"
     comptime if dtype == DType.int64:
         try:
             exec_.eval_to_list_i64_from_view(
@@ -223,7 +228,7 @@ def _eval_computed_column[
             if is_int_overflow_error(String(e)):
                 raise e^
             return None
-    elif dtype == DType.float64:
+    else:
         try:
             exec_.eval_to_list_f64_from_view(
                 view, root_idx, sel, rebind[List[Scalar[DType.float64]]](out)
@@ -232,19 +237,6 @@ def _eval_computed_column[
             if is_int_overflow_error(String(e)):
                 raise e^
             return None
-    else:  # DType.int32
-        # The translator has no I32-family node: an I32-family expression is
-        # a bare INT32 column (served by the passthrough arm) or I32
-        # arithmetic (refused by `_translate_binary`), so no translated pool
-        # reaches this channel.
-        try:
-            exec_.eval_to_list_i32_from_view(  # cov: unreachable no translated pool has an I32 root (see above)
-                view, root_idx, sel, rebind[List[Scalar[DType.int32]]](out)
-            )
-        except e:  # cov: unreachable no translated pool has an I32 root (see above)
-            if is_int_overflow_error(String(e)):  # cov: unreachable no translated pool has an I32 root (see above)
-                raise e^  # cov: unreachable no translated pool has an I32 root (see above)
-            return None  # cov: unreachable no translated pool has an I32 root (see above)
 
     var arr = PrimitiveArray[dtype].from_list(out^)
     return Optional[Column[HeapRegion]](Column.from_primitive[dtype](arr^))
@@ -600,7 +592,11 @@ def _eval_project_exprs_impl[
             sb.add_field(Field(out_name, declared_at, nz_nullable))
             continue
 
-        # Everything else: the walker channel of the inferred family.
+        # Everything else: the walker channel of the inferred family. The I32
+        # family declines here: an INT32 column under any number of aliases
+        # took the copy above, and INT32 arithmetic is refused by the
+        # translator (`_translate_binary`), so no I32 expression is left
+        # that the I32 walker could evaluate.
         var fam = _infer_computed_family(e, name_to_dtype)
         var col_opt: Optional[Column[HeapRegion]]
         if fam == RUNTIME_DTYPE_I64:
@@ -610,11 +606,6 @@ def _eval_project_exprs_impl[
             )
         elif fam == RUNTIME_DTYPE_F64:
             col_opt = _eval_computed_column[DType.float64](
-                batch, e, name_to_idx, name_to_dtype, fam, pool_h,
-                dense_f64, dense_par,
-            )
-        elif fam == RUNTIME_DTYPE_I32:
-            col_opt = _eval_computed_column[DType.int32](
                 batch, e, name_to_idx, name_to_dtype, fam, pool_h,
                 dense_f64, dense_par,
             )

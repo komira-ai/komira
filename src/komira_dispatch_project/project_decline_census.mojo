@@ -67,13 +67,13 @@ def _bit(b: Bool) -> String:
 
 
 def _colref_name(imm e: Expr) -> Optional[String]:
-    """The column name when `e` is a column reference or an alias of one: the
-    shape `compute_project_routes._passthrough_col_index` matches, read
-    without a batch. It says only whether `e` names a column."""
+    """The column name when `e` is a column reference under any number of
+    aliases: the shape `compute_project_routes._passthrough_col_index`
+    matches, read without a batch. It says only whether `e` names a column."""
+    if e.tag == EXPR_ALIAS:
+        return _colref_name(e.alias_child_ref())
     if e.tag == EXPR_COL_REF:
         return Optional[String](e._col_ref.value().name.copy())
-    if e.tag == EXPR_ALIAS and e.alias_child_ref().tag == EXPR_COL_REF:
-        return Optional[String](e.alias_child_ref()._col_ref.value().name.copy())
     return None
 
 

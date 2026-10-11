@@ -69,6 +69,23 @@ def test_each_expression_and_input_column_has_its_line() raises:
     assert_false(text.find("EMPTY EXPR LIST") >= 0)
 
 
+def test_a_column_under_nested_aliases_is_reported_as_its_source() raises:
+    """A column reference under two aliases is the shape the copy route
+    serves, so its line names the source column like a single alias does.
+    Mutant: `_colref_name` unwrapping one alias only (the line then reads
+    `src=<computed>`)."""
+    var exprs = ExprArray()
+    exprs.append(
+        Expr.alias(Expr.alias(Expr.col_ref(String("c")), String("m")), String("n"))
+    )
+    var sb = SchemaBuilder()
+    sb.add_field(Field(String("n"), ArrowType.INT64, False))
+    var text = format_project_decline_census(_in_schema(), exprs, sb.build())
+    _has(text, "expr[0] tag=EXPR_ALIAS>EXPR_ALIAS out_name='n'")
+    _has(text, "src='c'@in[1] src_type=int64(id=5) src_nullable=0")
+    assert_false(text.find("src=<computed>") >= 0)
+
+
 def test_the_two_declines_before_any_expression_are_named() raises:
     """An empty list, and more expressions than declared columns (the extra
     one says it has no column). Mutant: the arity line's test made

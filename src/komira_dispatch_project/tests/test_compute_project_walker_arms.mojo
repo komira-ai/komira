@@ -53,13 +53,15 @@ def _lf(v: Float64) -> Expr:
 
 def _batch() raises -> RecordBatch:
     """Four rows: `k` INT64 1..4, `v` INT64 [10, -20, NULL, 40], `x` FLOAT64
-    [1.5, 4.0, 9.0, 0.25], `n` INT32 1..4, `s` STRING."""
+    [1.5, 4.0, 9.0, 0.25], `n` INT32 1..4, `s` STRING, `m` INT32
+    [7, NULL, 9, 10]."""
     var sb = SchemaBuilder()
     sb.add_field(Field(String("k"), ArrowType.INT64, False))
     sb.add_field(Field(String("v"), ArrowType.INT64, True))
     sb.add_field(Field(String("x"), ArrowType.FLOAT64, False))
     sb.add_field(Field(String("n"), ArrowType.INT32, False))
     sb.add_field(Field(String("s"), ArrowType.STRING, False))
+    sb.add_field(Field(String("m"), ArrowType.INT32, True))
     var k = List[Scalar[DType.int64]]()
     var n = List[Scalar[DType.int32]]()
     var s = List[String]()
@@ -77,12 +79,18 @@ def _batch() raises -> RecordBatch:
     v.set(1, Scalar[DType.int64](-20))
     v.set(3, Scalar[DType.int64](40))
     v._set_null(2)
-    var rbb = RecordBatchBuilder.with_capacity(5)
+    var m = PrimitiveArray[DType.int32].allocate_nullable(4)
+    m.set(0, Scalar[DType.int32](7))
+    m.set(2, Scalar[DType.int32](9))
+    m.set(3, Scalar[DType.int32](10))
+    m._set_null(1)
+    var rbb = RecordBatchBuilder.with_capacity(6)
     rbb.add_column(Column.from_primitive[DType.int64](PrimitiveArray[DType.int64].from_list(k)))
     rbb.add_column(Column.from_primitive[DType.int64](v^))
     rbb.add_column(Column.from_primitive[DType.float64](PrimitiveArray[DType.float64].from_list(x)))
     rbb.add_column(Column.from_primitive[DType.int32](PrimitiveArray[DType.int32].from_list(n)))
     rbb.add_column(Column.from_string(StringArray.from_strings(s)))
+    rbb.add_column(Column.from_primitive[DType.int32](m^))
     return rbb.build(sb.build())
 
 
@@ -210,6 +218,34 @@ def test_each_walker_channel_and_its_declines() raises:
     assert_false(Bool(_run(Expr.binary(BIN_MUL, _c("k"), _li(3)), ArrowType.FLOAT64)))
     assert_false(Bool(_run(Expr.binary(BIN_ADD, _c("n"), _c("n")), ArrowType.INT32)))
     assert_false(Bool(_run(Expr.binary(BIN_ADD, _c("s"), _c("s")), ArrowType.STRING)))
+
+
+def _aliased(var e: Expr, depth: Int) -> Expr:
+    """`e` under `depth` aliases."""
+    var out = e^
+    for d in range(depth):
+        out = Expr.alias(out^, String("a") + String(d))
+    return out^
+
+
+def test_a_column_under_nested_aliases_is_copied_with_its_nulls() raises:
+    """`m` (INT32, row 1 NULL) under two and three aliases is the column
+    itself, as in DuckDB: row 1 stays NULL and the other values are kept.
+    The INT32 walker reads values only, so a route that reaches it answers
+    a valid row 1. Mutant: `_passthrough_col_index` unwrapping one alias
+    only (two aliases then reach the walker, which answered a valid row 1
+    while it had an INT32 channel; without the channel it declines)."""
+    for depth in range(2, 4):
+        var out = _served(_aliased(_c("m"), depth), ArrowType.INT32)
+        var col = out.column_as_primitive_int32(0)
+        assert_equal(Int(col.get(0)), 7)
+        assert_true(col.is_null(1), "a NULL under nested aliases is NULL")
+        assert_equal(Int(col.get(2)), 9)
+        assert_equal(Int(col.get(3)), 10)
+        assert_true(out.schema.field_nullable(0))
+    # A NULL-free INT64 column under two aliases is copied the same way.
+    var k_out = _served(_aliased(_c("k"), 2), ArrowType.INT64)
+    assert_equal(Int(k_out.column_as_primitive_int64(0).get(3)), 4)
 
 
 def _case_with_a_string_branch(var else_: Expr) -> Expr:

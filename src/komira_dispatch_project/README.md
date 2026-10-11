@@ -22,7 +22,7 @@ Two switches are arguments, both on by default: `dense_f64 = False` runs the wal
 
 Each output expression takes one route (`compute_project_routes` holds the predicates):
 
-- a column reference is copied when its type shares storage with the declared type, or is the same variable-length type at the other offset width;
+- a column reference, under any number of aliases, is copied (with its NULLs) when its type shares storage with the declared type, or is the same variable-length type at the other offset width;
 - a literal is broadcast to the batch's row count;
 - CASE, REGEXP, SUBSTRING, the string functions, `abs`/`sign`/`trunc`/`round`/`bit_count`, a UDF call anywhere in the tree, EXTRACT, the null tests, the nested extracts and CAST go to the column evaluator (`komira_batch_eval`);
 - a strict arithmetic expression over an input that holds a NULL, or one holding a math op whose domain is checked, goes to the column evaluator, which keeps validity and checks the domain;

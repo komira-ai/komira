@@ -202,15 +202,17 @@ def _build_col_maps(
 
 def _passthrough_col_index(imm batch: RecordBatch, imm e: Expr) raises -> Int:
     """The position in `batch` of the column `e` names when `e` is a column
-    reference or an alias of one; -1 when `e` is anything else or the column
-    is absent."""
-    var name: String
-    if e.tag == EXPR_COL_REF:
-        name = e._col_ref.value().name
-    elif e.tag == EXPR_ALIAS and e.alias_child_ref().tag == EXPR_COL_REF:
-        name = e.alias_child_ref()._col_ref.value().name
-    else:
+    reference under any number of aliases (none included); -1 when `e` is
+    anything else or the column is absent.
+
+    Every alias level is unwrapped: an aliased column is the column, so it
+    is copied with its validity. A column left to the walkers would lose its
+    NULLs, since they read values only."""
+    if e.tag == EXPR_ALIAS:
+        return _passthrough_col_index(batch, e.alias_child_ref())
+    if e.tag != EXPR_COL_REF:
         return -1
+    var name = e._col_ref.value().name
     var n = batch.schema.num_columns()
     for i in range(n):
         if batch.schema.field_name(i) == name:
@@ -239,8 +241,8 @@ def is_literal_output_expr(imm e: Expr) -> Bool:
     The evaluator serves such an output by broadcasting the value
     (`broadcast_scalar`) and checking the column against the declared type,
     which covers STRING, BOOL, DATE32, INT32 and FLOAT32 literals; the
-    walkers have channels for I64, I32 and F64 only, and widen every narrow
-    literal. A literal inside a larger expression (`1 + col`) is not matched
+    walker channels the evaluator serves are I64 and F64 only, and they widen
+    every narrow literal. A literal inside a larger expression (`1 + col`) is not matched
     and keeps the walker route."""
     if e.tag == EXPR_LITERAL:
         return True
@@ -356,7 +358,7 @@ def _is_num_typepres_output(imm e: Expr) -> Bool:
 #
 # The predicate is an allowlist: the column evaluator raises on a tag it has
 # no arm for, so a tag outside the list keeps the walker route. A comparison
-# is not admitted (its BOOL result cannot ride the I64 / F64 / I32 channels),
+# is not admitted (its BOOL result cannot ride the I64 / F64 channels),
 # nor are CASE and the null tests, which are not strict.
 #
 # Domain-checked math. The column evaluator's unary math kernel refuses an

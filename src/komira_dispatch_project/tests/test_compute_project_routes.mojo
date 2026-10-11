@@ -190,9 +190,11 @@ def test_storage_compatibility_and_the_offset_width_alias() raises:
 
 def test_the_column_maps_and_the_passthrough_index() raises:
     """`_build_col_maps` maps every column (a STRING one to UNSUPPORTED);
-    `_passthrough_col_index` finds a column by reference or alias, and answers
-    -1 for an absent name or a computed expression. Mutant: the alias arm of
-    `_passthrough_col_index` removed."""
+    `_passthrough_col_index` finds a column by reference or under any number
+    of aliases, and answers -1 for an absent name or a computed expression,
+    aliased or not. Mutant: the alias arm of `_passthrough_col_index`
+    removed, or made to unwrap one alias only (`_a(_a(n))` then answers
+    -1)."""
     var b = _batch()
     var idx = Dict[String, Int]()
     var dt = Dict[String, Int]()
@@ -202,6 +204,10 @@ def test_the_column_maps_and_the_passthrough_index() raises:
     assert_equal(dt["s"], RUNTIME_DTYPE_UNSUPPORTED)
     assert_equal(_passthrough_col_index(b, _c("x")), 2)
     assert_equal(_passthrough_col_index(b, _a(_c("n"))), 3)
+    assert_equal(_passthrough_col_index(b, _a(_a(_c("n")))), 3)
+    assert_equal(_passthrough_col_index(b, _a(_a(_a(_c("x"))))), 2)
+    assert_equal(_passthrough_col_index(b, _a(_a(_li(1)))), -1)
+    assert_equal(_passthrough_col_index(b, _a(_a(_c("zz")))), -1)
     assert_equal(_passthrough_col_index(b, _c("zz")), -1)
     assert_equal(_passthrough_col_index(b, _a(_li(1))), -1)
     assert_equal(_passthrough_col_index(b, Expr.binary(BIN_ADD, _c("k"), _li(1))), -1)
