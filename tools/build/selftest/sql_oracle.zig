@@ -10,17 +10,24 @@
 //! invocation piece by piece (INVOCATION).
 //!
 //! Catches: `.safe_mode` dropped (undeclared_output, input_outside_inputs,
-//! absolute_path, setting_changed and dot_command build green; the
-//! invocation lacks it), the existence check dropped or narrowed to some
-//! positions (one of missing_{first,middle,last}_output fails with buck2's
-//! message, not the rule's), `SET TimeZone = 'UTC'` or the environment check
-//! dropped (the invocation lacks it; a dropped TZ, LC_ALL or LD_LIBRARY_PATH
-//! entry fails the green fixture in the environment check), and each of the
-//! sql_oracle analysis `fail()` calls deleted, or one arm of a condition that
-//! no other arm covers: the empty, absolute and trailing-`/` input paths each
-//! fall through to the segment message, a `*` segment passes once the name
-//! pattern is dropped, an output over an input's directory meets buck2's
-//! conflict. (The `.`/`..` arms are covered by the name pattern too.)
+//! absolute_path, glob_read, setting_changed and the dot_* targets build
+//! green; the invocation lacks it), the existence check dropped or narrowed
+//! to some positions (one of missing_{first,middle,last}_output fails with
+//! buck2's message, not the rule's), `SET TimeZone = 'UTC'`, the version
+//! check or the environment check dropped or made unable to fire (the
+//! invocation pins each statement from SELECT to END; a dropped TZ, LC_ALL
+//! or LD_LIBRARY_PATH entry fails the green fixture in the environment
+//! check), and each of the sql_oracle analysis `fail()` calls deleted, or
+//! one arm of a condition that no other arm covers: the empty, absolute and
+//! trailing-`/` input paths each fall through to the segment message, a `*`
+//! segment or output name passes once the name pattern is dropped or
+//! narrowed to `/`, an output over an input's directory meets buck2's
+//! conflict. Each list check has its bad entry past the first (the second
+//! src, output or list input; the middle of three input paths), and each
+//! suffix check a name that holds the suffix and ends in it without its dot
+//! (`notes.sql.mysql`, `out.<f>.m<f>`), so a check of the first entry only,
+//! a substring test or a suffix without its dot passes one of them. (The
+//! `.`/`..` arms are covered by the name pattern too.)
 const std = @import("std");
 const lib = @import("lib/lib.zig");
 
@@ -30,9 +37,24 @@ const WRITE = "tests//functional/sql_oracle:write";
 
 const REFUSALS = [_]lib.Row{
     .{
-        .name = "output_format",
-        .target = PKG ++ "output_format",
-        .text = PKG ++ "output_format: output \"out.txt\" must end in one of .parquet, .csv, .tsv",
+        .name = "output_format_parquet",
+        .target = PKG ++ "output_format_parquet",
+        .text = PKG ++ "output_format_parquet: output \"out.parquet.mparquet\" must end in one of .parquet, .csv, .tsv",
+    },
+    .{
+        .name = "output_format_csv",
+        .target = PKG ++ "output_format_csv",
+        .text = PKG ++ "output_format_csv: output \"out.csv.mcsv\" must end in one of .parquet, .csv, .tsv",
+    },
+    .{
+        .name = "output_format_tsv",
+        .target = PKG ++ "output_format_tsv",
+        .text = PKG ++ "output_format_tsv: output \"out.tsv.mtsv\" must end in one of .parquet, .csv, .tsv",
+    },
+    .{
+        .name = "output_glob",
+        .target = PKG ++ "output_glob",
+        .text = PKG ++ "output_glob: output \"o*.tsv\" is not a plain file name (^[A-Za-z0-9_][A-Za-z0-9_.-]*$): outputs land in the working directory itself",
     },
     .{
         .name = "output_in_directory",
@@ -63,6 +85,11 @@ const REFUSALS = [_]lib.Row{
         .name = "src_not_sql",
         .target = PKG ++ "src_not_sql",
         .text = PKG ++ "src_not_sql: srcs entry staged.csv is not a .sql file",
+    },
+    .{
+        .name = "src_not_sql_second",
+        .target = PKG ++ "src_not_sql_second",
+        .text = PKG ++ "src_not_sql_second: srcs entry notes.sql.mysql is not a .sql file",
     },
     .{
         .name = "srcs_empty",
@@ -126,7 +153,14 @@ const REDS = [_]Red{
     .{ .name = "input_outside_inputs", .text = "Permission Error: Cannot access file \"not_staged.csv\" - file system operations are disabled by configuration" },
     .{ .name = "absolute_path", .text = "Permission Error: Cannot access file \"/etc/passwd\" - file system operations are disabled by configuration" },
     .{ .name = "setting_changed", .text = "Invalid Input Error: Cannot change configuration option \"threads\" - the configuration has been locked" },
+    .{ .name = "glob_read", .text = "Permission Error: Cannot access file \"*.csv\" - file system operations are disabled by configuration" },
     .{ .name = "dot_command", .text = ".sh/.system cannot be used in -safe mode" },
+    .{ .name = "dot_system", .text = ".sh/.system cannot be used in -safe mode" },
+    .{ .name = "dot_read", .text = ".read cannot be used in -safe mode" },
+    .{ .name = "dot_output", .text = ".output/.once/.excel cannot be used in -safe mode" },
+    .{ .name = "dot_cd", .text = ".cd cannot be used in -safe mode" },
+    .{ .name = "dot_open", .text = ".open cannot be used in -safe mode" },
+    .{ .name = "dot_import", .text = ".import cannot be used in -safe mode" },
 };
 
 /// The pieces of the sql_oracle action's argv, as `buck2 aquery` prints it
@@ -141,7 +175,10 @@ const INVOCATION = [_]Pin{
     .{ .what = "the flags", .text = "duckdb, -no-init, -batch, -bail, -cmd, .cd " },
     .{ .what = "threads and TimeZone", .text = ", -cmd, .mode trash, -cmd, SET threads = 1; SET TimeZone = 'UTC'; " },
     .{ .what = "no extensions, no temp directory, the allowed paths, then the version check", .text = "SET autoinstall_known_extensions = false; SET autoload_known_extensions = false; SET temp_directory = ''; SET enable_progress_bar = false; SET allowed_paths = ['data.csv', 'expected.tsv', 'rows.csv', 'rows.parquet'], -cmd, SELECT CASE WHEN version() <> 'v" },
-    .{ .what = "the environment check (TZ=UTC, LC_ALL=C, the dist's lib/)", .text = ", -cmd, SELECT CASE WHEN getenv('TZ') IS DISTINCT FROM 'UTC' OR getenv('LC_ALL') IS DISTINCT FROM 'C' OR getenv('LD_LIBRARY_PATH') IS DISTINCT FROM '" },
+    .{ .what = "the version check's error, right after the pinned version", .text = "' THEN error('sql_oracle: this duckdb is ' || version() || ', the pin says v" },
+    .{ .what = "the version check's end", .text = "') END, -cmd, " },
+    .{ .what = "the environment check (TZ=UTC, LC_ALL=C, the dist's lib/)", .text = "SELECT CASE WHEN getenv('TZ') IS DISTINCT FROM 'UTC' OR getenv('LC_ALL') IS DISTINCT FROM 'C' OR getenv('LD_LIBRARY_PATH') IS DISTINCT FROM '" },
+    .{ .what = "the environment check's error, right after the dist's lib/", .text = "/lib' THEN error('sql_oracle: the action environment is TZ=' || coalesce(getenv('TZ'), '(unset)') || ' LC_ALL=' || coalesce(getenv('LC_ALL'), '(unset)') || ' LD_LIBRARY_PATH=' || coalesce(getenv('LD_LIBRARY_PATH'), '(unset)') || ', the rule sets TZ=UTC LC_ALL=C and the dist''s lib/') END" },
     .{ .what = ".safe_mode before the first src", .text = ", -cmd, .safe_mode, -cmd, .mode duckbox, -f, ../sql/0_write.sql, -cmd, .mode trash, -cmd, " },
     .{ .what = "the in-memory database, last", .text = ", :memory:]\"" },
 };

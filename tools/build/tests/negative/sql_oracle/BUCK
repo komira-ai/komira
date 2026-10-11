@@ -62,6 +62,15 @@ sql_oracle(
     outputs = ["out.tsv"],
 )
 
+# RED: `Permission Error: Cannot access file "*.csv"`: a glob pattern, though
+# the one file it matches is an input.
+sql_oracle(
+    name = "glob_read",
+    srcs = "glob_read.sql",
+    inputs = ["staged.csv"],
+    outputs = ["out.tsv"],
+)
+
 # RED: `.sh/.system cannot be used in -safe mode`.
 sql_oracle(
     name = "dot_command",
@@ -69,13 +78,56 @@ sql_oracle(
     outputs = ["out.tsv"],
 )
 
+# RED: each other dot command the README names as refused in safe mode
+# (`.system`, `.read`, `.output`, `.cd`, `.open`, `.import`), with the
+# message the selftest requires. The file each names is an input or a
+# declared output where it can be, so allowed_paths alone would let it
+# through.
+[sql_oracle(
+    name = "dot_{}".format(cmd),
+    srcs = "dot_{}.sql".format(cmd),
+    inputs = [
+        "ok.sql",
+        "staged.csv",
+    ],
+    outputs = ["out.tsv"],
+) for cmd in [
+    "system",
+    "read",
+    "output",
+    "cd",
+    "open",
+    "import",
+]]
+
 # ---- Analysis refusals: nothing runs.
 
-# REFUSED: an output in a format the rule does not document.
-sql_oracle(
-    name = "output_format",
+# REFUSED: an output that does not end in a format the rule documents, one
+# target per format: `out.<f>.m<f>` holds `.<f>` and ends in `<f>`, so a
+# substring test or a suffix without its dot passes it. It is the second
+# output, so a check of only the first passes it too.
+[sql_oracle(
+    name = "output_format_{}".format(f),
     srcs = "ok.sql",
-    outputs = ["out.txt"],
+    outputs = [
+        "ok.tsv",
+        "out.{}.m{}".format(f, f),
+    ],
+) for f in [
+    "parquet",
+    "csv",
+    "tsv",
+]]
+
+# REFUSED: an output name with a glob character, second: the name pattern,
+# not a directory check, refuses it.
+sql_oracle(
+    name = "output_glob",
+    srcs = "ok.sql",
+    outputs = [
+        "out.tsv",
+        "o*.tsv",
+    ],
 )
 
 # REFUSED: an output in a directory of the working directory.
@@ -101,11 +153,14 @@ sql_oracle(
 )
 
 # REFUSED: a build output in the list form of `inputs`, which stages each
-# entry at its path in the package.
+# entry at its path in the package; it is the second entry.
 sql_oracle(
     name = "built_input_in_list",
     srcs = "ok.sql",
-    inputs = [":sql_error[out.tsv]"],
+    inputs = [
+        "staged.csv",
+        ":sql_error[out.tsv]",
+    ],
     outputs = ["out.tsv"],
 )
 
@@ -117,10 +172,22 @@ sql_oracle(
     outputs = ["out.tsv"],
 )
 
-# REFUSED: a src that is not a .sql file.
+# REFUSED: a src that is not a .sql file, alone (the single-source form)...
 sql_oracle(
     name = "src_not_sql",
     srcs = "staged.csv",
+    outputs = ["out.tsv"],
+)
+
+# ...and second in a list: `notes.sql.mysql` holds `.sql` and ends in `sql`,
+# so a check of only the first src, a substring test or a suffix without its
+# dot passes it.
+sql_oracle(
+    name = "src_not_sql_second",
+    srcs = [
+        "ok.sql",
+        "notes.sql.mysql",
+    ],
     outputs = ["out.tsv"],
 )
 
@@ -196,10 +263,15 @@ sql_oracle(
 )
 
 # REFUSED: an input path with a segment the name pattern refuses (not `..`,
-# which the `.`/`..` check refuses on its own).
+# which the `.`/`..` check refuses on its own), the middle of three paths in
+# either order, so a check of only the first or the last path passes it.
 sql_oracle(
     name = "input_glob_segment",
     srcs = "ok.sql",
-    inputs = {"data/*.csv": "staged.csv"},
+    inputs = {
+        "a.csv": "staged.csv",
+        "data/*.csv": "staged.csv",
+        "z.csv": "staged.csv",
+    },
     outputs = ["out.tsv"],
 )

@@ -106,9 +106,8 @@ TO 'expected.tsv' (FORMAT csv, DELIMITER '\t', HEADER true);
 The rule does not read the SQL, so it cannot see whether a copied query has
 an `ORDER BY`, or whether that `ORDER BY` decides every row's place. One
 thread makes an unordered result repeat from run to run, which hides the
-gap instead of closing it. Ordering is the fixture author's duty; the
-oracle datasets' own discipline check (`json_serialize_sql` over each
-query) is where it is enforced.
+gap instead of closing it. Ordering is the fixture author's duty, and
+nothing checks it yet.
 
 ## Tests
 
@@ -130,8 +129,10 @@ query) is where it is enforced.
   analysis refusal's message and each build's failure in its `sql_oracle`
   action with its message: an undeclared output, a missing output (the
   first, the middle and the last of three), a SQL error, a read of a
-  package file that is not an input, a read of an absolute path, a changed
-  setting and a dot command. The farm's workers run in UTC, so `SET
+  package file that is not an input, a read of an absolute path, a read by
+  glob pattern, a changed setting and each dot command listed above. The
+  version and environment checks are pinned in the invocation from
+  `SELECT` to `END`, so a condition that can no longer fire fails it. The farm's workers run in UTC, so `SET
   TimeZone` is pinned by the invocation, not by a fixture's bytes. A failed
   action is never cached, so each red is a fresh run on the farm.
 
