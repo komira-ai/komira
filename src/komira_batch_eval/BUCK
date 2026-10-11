@@ -1,0 +1,24 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The vectorized expression evaluators over Arrow record batches. It holds the
+# arms the evaluators share: IN lists, dictionary-to-string
+# materialization, and the typing of a literal against the column it is
+# compared with.
+mojo_library(
+    name = "komira_batch_eval",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_plan_expr:komira_plan_expr",
+    ],
+    test_srcs = [
+        "tests/test_date32_in_list_filter.mojo",
+        "tests/test_dict_materialize_nulls_and_wide_codes.mojo",
+        "tests/test_dict_materialize_offset_honoring.mojo",
+        "tests/test_in_list_offset_honoring.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
