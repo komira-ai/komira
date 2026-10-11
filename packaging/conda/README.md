@@ -169,10 +169,11 @@ declares sonames is refused as stale. The trade-off: a stray soname-shaped
 string in a library that opens must be declared too, so the check fails
 closed. Its known limits fail open: a soname built at run time from parts or
 spelled with an escape (`\x2e`) is not found, and only `.mojo` files are
-read (a `.🔥` source is not). The installed-package checks are planned, not
-built (step S12, the installed-bytes checks of
-[continuous_publish.md](../../docs/design/continuous_publish.md)), and their
-design does not yet cover a run-time dlopen requirement
+read (a `.🔥` source is not). The installed native-file checks exist in kci
+(`check_native_install` in `kci_validate`) but no stage runs them yet (step
+S12, the installed-bytes checks of
+[continuous_publish.md](../../docs/design/continuous_publish.md)), and neither
+they nor their design cover a run-time dlopen requirement
 ([#1327](https://github.com/komira-ai/komira/issues/1327)), so today the
 packer's static check is the only guard. `komira_pack conda-check` is
 given the declarations and compares the package with them without the
