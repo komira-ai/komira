@@ -87,6 +87,17 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
+# Opens liblz4.so.1 and declares libz.so.1: as many sonames declared as
+# opened, other names. Refused by the packer; accepted, its package would
+# require libzlib and not lz4-c (komira_lz4 with zlib's declaration).
+mojo_library(
+    name = "fx_dlopen_misdeclared",
+    srcs = ["fx_dlopen_misdeclared/__init__.mojo"],
+    test_srcs = ["fx_dlopen_misdeclared/tests/test_fx_dlopen_misdeclared.mojo"],
+    dlopen = ["libz.so.1"],
+    visibility = ["PUBLIC"],
+)
+
 # Declares a soname system_libs.bzl does not name: refused at analysis, so
 # its dependent is refused too.
 mojo_library(
@@ -117,6 +128,12 @@ conda_package_expect(
     name = "fx_dlopen_undeclared_expect",
     package = ":fx_dlopen_undeclared_conda",
     refused = "its sources name [liblz4.so.1, libz.so.1] and the library declares `dlopen` [libz.so.1]",
+)
+
+conda_package_expect(
+    name = "fx_dlopen_misdeclared_expect",
+    package = ":fx_dlopen_misdeclared_conda",
+    refused = "its sources name [liblz4.so.1] and the library declares `dlopen` [libz.so.1]",
 )
 
 conda_package_expect(

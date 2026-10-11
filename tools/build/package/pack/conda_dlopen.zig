@@ -280,11 +280,18 @@ test "scanSource: code opens; comments and docstrings do not" {
     try testing.expect(!quiet.opens);
     try testing.expectEqual(@as(usize, 0), quiet.sonames.len);
     // A longer identifier is not the type; a literal after a `#` inside a
-    // string is still read; an escaped quote does not end the literal.
-    const near = try scanSource(a, "MyOwnedDLHandle = 1\nOwnedDLHandles = 2\ny = \"a#b\" + \"libbz2.so.1.0\" + \"x\\\"libq.so.1\"\n");
+    // string is still read.
+    const near = try scanSource(a, "MyOwnedDLHandle = 1\nOwnedDLHandles = 2\ny = \"a#b\" + \"libbz2.so.1.0\"\n");
     try testing.expect(!near.opens);
     try testing.expectEqual(@as(usize, 1), near.sonames.len);
     try testing.expectEqualStrings("libbz2.so.1.0", near.sonames[0]);
+    // An escaped quote does not end the literal: `"\""` is one literal, so
+    // the next one is `"libq.so.1"`. A reader that ended the first literal
+    // at its escaped quote would pair the quotes the other way and read
+    // `libq.so.1` as code, missing the soname.
+    const esc = try scanSource(a, "y = \"\\\"\" + \"libq.so.1\"\n");
+    try testing.expectEqual(@as(usize, 1), esc.sonames.len);
+    try testing.expectEqualStrings("libq.so.1", esc.sonames[0]);
 }
 
 test "dlopenReason: a declared soname is accepted" {
@@ -294,6 +301,33 @@ test "dlopenReason: a declared soname is accepted" {
     try testing.expect((try dlopenReason(a, &.{.{ .path = "zlib_ffi.mojo", .text = zlib_src }}, &.{zlib})) == null);
     // nothing opened, nothing declared: accepted
     try testing.expect((try dlopenReason(a, &.{.{ .path = "x.mojo", .text = "def f(): pass\n" }}, &.{})) == null);
+    // two sonames opened from two sources, out of soname order, both
+    // declared: accepted (the opened list is sorted before it is compared)
+    try testing.expect((try dlopenReason(a, &.{ .{ .path = "a.mojo", .text = zlib_src }, .{ .path = "b.mojo", .text = "h = OwnedDLHandle(\"liblz4.so.1\")\n" } }, &.{ lz4, zlib })) == null);
+}
+
+test "dlopenReason: as many sonames declared as opened, but other names, is refused" {
+    var arena = testAlloc();
+    defer arena.deinit();
+    const a = arena.allocator();
+    // komira_lz4 declaring zlib's soname: one opened, one declared, the
+    // names differ. Accepted, its package would require libzlib and not
+    // lz4-c, the package slice 3 must refuse.
+    const lz4_src = "def _open() raises -> OwnedDLHandle:\n    return OwnedDLHandle(\"liblz4.so.1\")\n";
+    const one = try refusal(try dlopenReason(a, &.{.{ .path = "lz4_ffi.mojo", .text = lz4_src }}, &.{zlib}));
+    try testing.expect(std.mem.indexOf(u8, one, "lz4_ffi.mojo: opens a shared library at run time (OwnedDLHandle); its sources name [liblz4.so.1] and the library declares `dlopen` [libz.so.1]") != null);
+    // two opened, two declared, the first names equal and the second not:
+    // every name is compared, not only the first
+    const bz2 = Dlopen{ .soname = "libbz2.so.1.0", .requirement = "bzip2 >=1.0.8,<2" };
+    const second = try refusal(try dlopenReason(a, &.{.{ .path = "c.mojo", .text = "a = OwnedDLHandle(\"libbz2.so.1.0\")\nb = OwnedDLHandle(\"libz.so.1\")\n" }}, &.{ bz2, lz4 }));
+    try testing.expect(std.mem.indexOf(u8, second, "its sources name [libbz2.so.1.0, libz.so.1] and the library declares `dlopen` [libbz2.so.1.0, liblz4.so.1]") != null);
+    // the first names differ and the second equal: not only the last
+    const first = try refusal(try dlopenReason(a, &.{.{ .path = "c.mojo", .text = "a = OwnedDLHandle(\"libbz2.so.1.0\")\nb = OwnedDLHandle(\"libz.so.1\")\n" }}, &.{ lz4, zlib }));
+    try testing.expect(std.mem.indexOf(u8, first, "its sources name [libbz2.so.1.0, libz.so.1] and the library declares `dlopen` [liblz4.so.1, libz.so.1]") != null);
+    // opens a library by a name it cannot see and declares nothing: zero
+    // opened and zero declared are equal counts, and still refused
+    const unseen = try refusal(try dlopenReason(a, &.{.{ .path = "x.mojo", .text = "h = OwnedDLHandle(name)\n" }}, &.{}));
+    try testing.expect(std.mem.indexOf(u8, unseen, "x.mojo: opens a shared library at run time (OwnedDLHandle); its sources name [] and the library declares `dlopen` []") != null);
 }
 
 test "dlopenReason: an undeclared soname is refused, naming both lists" {

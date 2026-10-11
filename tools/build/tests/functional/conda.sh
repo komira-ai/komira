@@ -531,6 +531,7 @@ fi
 # ---- refusals: a target that builds, and a release that does not ------------
 refused refuse_no_tests "has no tests, so its package would not be gated by any" "$FX:fx_notests_conda"
 refused refuse_dlopen_undeclared "its sources name [liblz4.so.1, libz.so.1] and the library declares \`dlopen\` [libz.so.1]" "$FX:fx_dlopen_undeclared_conda"
+refused refuse_dlopen_misdeclared "its sources name [liblz4.so.1] and the library declares \`dlopen\` [libz.so.1]" "$FX:fx_dlopen_misdeclared_conda"
 refused refuse_dlopen_unmapped "for which tools/build/package/system_libs.bzl names no conda package" "$FX:fx_dlopen_unmapped_conda"
 refused refuse_dep_dlopen_unmapped "fx_dlopen_unmapped, which has no conda package: " "$FX:fx_dlopen_unmapped_user_conda"
 # a declared soname: a package, requiring the package system_libs.bzl names for it
@@ -545,7 +546,7 @@ refused refuse_native "links native code" komira//tools/build/examples/cshim:cad
 refused refuse_dep_opted_out "which has no conda package (\`conda = False\`" "$FX:fx_optout_user_conda"
 refused refuse_dep_refused "it depends on" "$FX:fx_notests_user_conda"
 # the libraries themselves still build
-if "$BUCK2" build "$FX:fx_notests" "$FX:fx_dlopen_undeclared" "$FX:fx_dlopen_unmapped" "$FX:fx_dlopen_unmapped_user" "$FX:fx_badname" "$FX:fx_optout" "$FX:fx_optout_user" "$FX:fx_notests_user" komira//tools/build/examples/cshim:cadd > "$W/libs_build.log" 2>&1; then
+if "$BUCK2" build "$FX:fx_notests" "$FX:fx_dlopen_undeclared" "$FX:fx_dlopen_misdeclared" "$FX:fx_dlopen_unmapped" "$FX:fx_dlopen_unmapped_user" "$FX:fx_badname" "$FX:fx_optout" "$FX:fx_optout_user" "$FX:fx_notests_user" komira//tools/build/examples/cshim:cadd > "$W/libs_build.log" 2>&1; then
     pass "libraries: every library a package was refused for still builds"
 else
     fail "libraries: a library with a refused package does not build (see $W/libs_build.log)"
