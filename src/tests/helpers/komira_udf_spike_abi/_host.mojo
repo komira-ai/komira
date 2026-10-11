@@ -81,6 +81,9 @@ struct _HostData:
     var cancel_on_clock: Void
     """The cancel flag of the call in flight when it was started with
     cancel_during_call, else NULL: now_ns sets it (arm_cancel_on_clock)."""
+    var clock: Void
+    """Three words (native/cancel_flag.c): the virtual clock's next reading,
+    the last reading now_ns returned, and whether the virtual clock is on."""
 
 
 struct _ArrRec:
@@ -168,12 +171,64 @@ def disarm_cancel_on_clock(hd: Word):
     _hd(hd.p)[].cancel_on_clock = null_void()
 
 
+def arm_virtual_clock(hd: Word) -> Int64:
+    """From now until disarm_virtual_clock, now_ns answers a virtual clock
+    that starts at max(wall clock, last reading) and moves 1 ms on each read
+    (native/cancel_flag.c), so a deadline in the future is reached after a
+    number of the runtime's own clock reads, never by wall time. Returns the
+    start."""
+    # SAFETY: the clock block is the arena's three words new_host_data made.
+    return external_call["komira_udf_spike_clock_arm", Int64](_hd(hd.p)[].clock, Int64(perf_counter_ns()))
+
+
+def disarm_virtual_clock(hd: Word):
+    external_call["komira_udf_spike_clock_disarm", NoneType](_hd(hd.p)[].clock)
+
+
+def virtual_clock_on(hd: Word) -> Bool:
+    """Whether now_ns answers the virtual clock now."""
+    return external_call["komira_udf_spike_clock_is_virtual", Int64](_hd(hd.p)[].clock) == 1
+
+
+comptime CLOCK_READ = 0
+comptime CLOCK_ARM = 1
+comptime CLOCK_DISARM = 2
+comptime CLOCK_IS_VIRTUAL = 3
+
+
+def clock_probe(script: List[Int64]) -> List[Int64]:
+    """The host clock (native/cancel_flag.c) on a fresh ledger, driven by
+    `script`, pairs of (op, wall): CLOCK_READ answers now_ns as if the wall
+    clock read `wall`; CLOCK_ARM starts the virtual clock and answers its
+    start; CLOCK_DISARM answers 0; CLOCK_IS_VIRTUAL answers 1 or 0. For
+    test_harness, which holds the script and the answers it expects."""
+    var arena = _Arena()
+    var hd = new_host_data(arena)
+    var clk = _hd(hd.p)[].clock
+    var out = List[Int64]()
+    for k in range(len(script) // 2):
+        var op = script[2 * k]
+        var wall = script[2 * k + 1]
+        if op == CLOCK_READ:
+            out.append(external_call["komira_udf_spike_clock_read", Int64](clk, wall))
+        elif op == CLOCK_ARM:
+            out.append(external_call["komira_udf_spike_clock_arm", Int64](clk, wall))
+        elif op == CLOCK_DISARM:
+            disarm_virtual_clock(hd)
+            out.append(0)
+        else:
+            out.append(Int64(1) if virtual_clock_on(hd) else Int64(0))
+    arena.free_all()
+    return out^
+
+
 def _host_now_ns(host_data: Void) abi("C") -> Int64:
-    var flag = _hd(host_data)[].cancel_on_clock
+    var d = _hd(host_data)
+    var flag = d[].cancel_on_clock
     if not is_null(flag):
         # SAFETY: the armed flag is the in-flight call's arena block.
         external_call["komira_udf_spike_cancel_store", NoneType](flag)
-    return Int64(perf_counter_ns())
+    return external_call["komira_udf_spike_clock_read", Int64](d[].clock, Int64(perf_counter_ns()))
 
 
 def _host_log(host_data: Void, level: Int32, utf8: Void) abi("C"):
@@ -183,8 +238,10 @@ def _host_log(host_data: Void, level: Int32, utf8: Void) abi("C"):
 
 
 def new_host_data(mut arena: _Arena) -> Word:
-    """A fresh, zeroed _HostData: the counts one ledger keeps."""
-    return Word(arena.bytes(size_of[_HostData]()))
+    """A fresh, zeroed _HostData: the counts one ledger keeps, and its clock."""
+    var hd = arena.bytes(size_of[_HostData]())
+    _hd(hd)[].clock = arena.bytes(24)
+    return Word(hd)
 
 
 def make_host(mut arena: _Arena, abi_major: UInt32, hd_w: Word) -> Word:

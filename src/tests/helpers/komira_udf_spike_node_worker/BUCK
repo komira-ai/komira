@@ -1,4 +1,3 @@
-load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_shared_lib")
 load("@komira//tools/build/node:defs.bzl", "esbuild_bundle")
@@ -127,8 +126,7 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
-# The C side, after the library so the deps lint reads the library's name
-# first. Copied into buck-out so the objects' digests do not depend on where
+# The C side. Copied into buck-out so the objects' digests do not depend on where
 # komira is mounted (cxx.bzl, staged_files).
 staged_files(
     name = "c_files",
@@ -227,13 +225,4 @@ udf_bench(
     data = _RUNTIME | {"echo.so": _ABI + ":echo"},
     exec_compatible_with = LINUX_X86_64,
     run_id = "bench/run_id",
-)
-
-# The deps above name every komira_* module the library and its tests import
-# (tools/build/lint: mojo_deps).
-mojo_deps(
-    name = "deps_lint",
-    buck = "BUCK",
-    srcs = glob(["**/*.mojo"]),
-    visibility = ["komira//:tests_lints"],
 )

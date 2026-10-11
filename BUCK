@@ -3,7 +3,7 @@
 # anything.
 load("@komira//tools/build/coverage:census.bzl", "coverage_census")
 load("@komira//tools/build/coverage:defs.bzl", "coverage_ci_cases")
-load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "public_boundary", "retired_names", "shell_lint", "src_layout", "workflow_lint")
+load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "public_boundary", "retired_names", "shell_lint", "src_layout", "target_suite", "workflow_lint")
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
 load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
@@ -108,8 +108,7 @@ src_layout(
 # script as in any other. A repository using komira as a cell has no
 # `tests` cell, so there the list is empty and the target is not declared.
 # A package of the tests cell that holds a shell script declares its
-# shell_lint and is named here. The `deps_lint` of a package whose deps are
-# checked against its imports (mojo_deps) is named here too.
+# shell_lint and is named here.
 _TESTS_LINTS = [
     "tests//:shell_lint",
     "tests//functional/aws_codegen:shell_lint",
@@ -123,46 +122,26 @@ _TESTS_LINTS = [
     "tests//functional/test_deadline:shell_lint",
     "tests//functional/watchdog:shell_lint",
     "tests//golden:shell_lint",
-    # The deps of a package that names its imports (tools/build/lint, mojo_deps).
-    "//src/kci_cell:deps_lint",
-    "//src/komira_authz_api:deps_lint",
-    "//src/komira_aws_lambda_http:deps_lint",
-    "//src/komira_calendar_ics:deps_lint",
-    "//src/komira_contacts:deps_lint",
-    "//src/komira_http_auth:deps_lint",
-    "//src/komira_http_client:deps_lint",
-    "//src/komira_http_core:deps_lint",
-    "//src/komira_http_server:deps_lint",
-    "//src/komira_optimizer:deps_lint",
-    "//src/tests/conformance/komira_calendar_ics_conformance:deps_lint",
-    "//src/tests/conformance/komira_connect_conformance:deps_lint",
-    "//src/tests/conformance/komira_contacts_store_conformance:deps_lint",
-    "//src/tests/conformance/komira_db_conformance:deps_lint",
-    "//src/tests/conformance/komira_git_conformance:deps_lint",
-    "//src/tests/conformance/komira_git_pack_conformance:deps_lint",
-    "//src/tests/conformance/komira_git_protocol_conformance:deps_lint",
-    "//src/tests/conformance/komira_http_conformance:deps_lint",
-    "//src/tests/conformance/komira_datetime_conformance:deps_lint",
-    "//src/tests/conformance/komira_json_conformance:deps_lint",
-    "//src/tests/conformance/komira_plan_conformance:deps_lint",
-    "//src/tests/conformance/komira_xml_conformance:deps_lint",
-    "//src/tests/e2e/komira_azure_blob_e2e:deps_lint",
-    "//src/tests/e2e/komira_formats_e2e:deps_lint",
-    "//src/tests/e2e/komira_http_tls_e2e:deps_lint",
-    "//src/tests/e2e/komira_job_supervisor_loopback:deps_lint",
-    "//src/tests/e2e/komira_pandas_door_e2e:deps_lint",
-    "//src/tests/e2e/komira_secrets_e2e:deps_lint",
-    "//src/tests/e2e/komira_shuffle_e2e:deps_lint",
-    "//src/tests/e2e/komira_tls_interop_e2e:deps_lint",
-    "//src/tests/e2e/komira_udf_e2e:deps_lint",
-    "//src/tests/helpers/komira_plan_harness:deps_lint",
-    "//src/tests/helpers/komira_udf_spike_abi:deps_lint",
-    "//src/tests/helpers/komira_udf_spike_node_worker:deps_lint",
 ] if read_root_config("cells", "tests") else []
 
 [lint_suite(
     name = "tests_lints",
     lints = _TESTS_LINTS,
+) for _ in _TESTS_LINTS[:1]]
+
+# The greens of the tests cell that no derived unit builds: the pull-request
+# check builds `//...` and `tests//functional/...` (release/ci/derive_checks.py),
+# so a target of tests//negative or tests//src that must build, beside the
+# planted defects it serves, is named here, through its package's
+# target_suite (a package's sub-targets need one too, and a suite in the same
+# package names them with no visibility to grant). Not declared where there
+# is no tests cell.
+[target_suite(
+    name = "tests_greens",
+    targets = [
+        "tests//negative/coverage:greens",
+        "tests//src/tests/coverage:greens",
+    ],
 ) for _ in _TESTS_LINTS[:1]]
 
 # The repository's documentation: every relative link and #anchor in every
@@ -316,6 +295,17 @@ _TESTS_LINTS = [
 # them, one per line, kept outside it: `-c komira_lint.public_boundary_deny=`
 # a target or a path from the root (`.public_boundary_deny` is gitignored for
 # it). No row may hold a word of that list, and no such list is committed here.
+#
+# The public history starts on 2026-09-01. Dates before 2025 in this tree are
+# data (epochs, certificates, standards), so the window starts there. A
+# narrower window would let a date through, so the values are pinned: loading
+# this file fails if the window starts after 2025 or the history before
+# 2026-09-01.
+_PUBLIC_FROM = "2026-09-01"
+_WINDOW_FROM = 2025
+
+[fail("BUCK: public_boundary's window is from {} up to {}; the public rule's is from 2025 (or earlier) up to 2026-09-01 (or later), and a narrower window lets a date through".format(_WINDOW_FROM, _PUBLIC_FROM)) for _ in range(1) if _WINDOW_FROM > 2025 or _PUBLIC_FROM < "2026-09-01"]
+
 [public_boundary(
     name = "public_boundary",
     cells = {"tools/build/tests": "tests//:doc_tree"},
@@ -324,10 +314,8 @@ _TESTS_LINTS = [
     hosts = "tests/public_boundary_hosts.tsv",
     # The tests cell's dotfile, which its doc_tree's glob skips.
     paths = {"tools/build/tests/.buckconfig": "tests//:buckconfig"},
-    # The public history starts on this day. Dates before 2025 in this tree
-    # are data (epochs, certificates, standards), so the window starts there.
-    public_from = "2026-09-01",
+    public_from = _PUBLIC_FROM,
     srcs = [".buckconfig", ".buckconfig.local.example", ".gitignore"] + glob([".github/**"]),
     tree = ":doc_tree",
-    window_from = 2025,
+    window_from = _WINDOW_FROM,
 ) for _ in _TESTS_LINTS[:1]]

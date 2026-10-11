@@ -439,6 +439,9 @@ static int32_t next_table(komira_udf_frame* fr, struct ArrowDeviceArray* out, ko
       blk->bufs[0] = blk->validity;
       out->array.null_count = 0;
       break;
+    case TS_RELEASE_KEEPS_SLOT:
+      out->array.release = release_struct_keeps_slot;
+      break;
     case TS_NULL_COUNT_BELOW:
       out->array.null_count = -2;
       break;
