@@ -183,7 +183,7 @@ def assert_physical_plan_ir_version_compatible(
             PHYSICAL_PLAN_IR_VERSION,
             ". Either the two packages are built from different revisions",
             " (rebuild both), or a field was added/removed/retyped in",
-            " komira_plan_ir/physical_plan.mojo without bumping",
+            " komira_physical_plan/physical_plan.mojo without bumping",
             " PHYSICAL_PLAN_IR_VERSION in the same change. Do NOT silence",
             " this: the struct layouts have diverged, and reading a",
             " SegmentDescPod through the wrong layout was measured to",

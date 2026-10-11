@@ -123,6 +123,7 @@ from komira_objectstore.cas_manifest import (
 from komira_objectstore.store import CloneableConditionalWriteStore
 from komira_objectstore.sublineage_base_fold import BASE_SHARD_ID
 
+from .chunk_walk import is_not_found_msg
 from .manifest_body import ManifestBody, encode_manifest_body
 from .partition_assignment import sublineage_prefix
 
@@ -252,15 +253,10 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         `SubLineageConsumeResolver.has_base` — the routing layer uses this to
         decide between the legacy resolve and the sub-lineage resolve. A partition
         with no `_base` (never migrated, never folded) takes the legacy path
-        UNCHANGED (backward-compat)."""
+        UNCHANGED (backward-compat). An absent `_base` reads as chunk_seq -1;
+        an error reading its head raises."""
         var base = self._base_manifest()
-        var head: ManifestHead
-        try:
-            head = base.read_head_authoritative()
-        except e:
-            _ = e
-            _ = base^
-            return False
+        var head = base.read_head_authoritative()
         _ = base^
         return head.chunk_seq >= Int64(0)
 
@@ -275,15 +271,11 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         append seeds at the OLD manifest's `log_start_offset` (see
         `migrate_partition`), so `_base.base_offset == old log_start`. Once
         established, this returns the running dense high-water the next source
-        chunk must continue from."""
+        chunk must continue from. An error reading `_base`'s head raises: it
+        is not an empty `_base`, and reading it as one would re-record legacy
+        chunks over the dense offsets `_base` already holds."""
         var base = self._base_manifest()
-        var head: ManifestHead
-        try:
-            head = base.read_head_authoritative()
-        except e:
-            _ = e
-            _ = base^
-            return Int64(0)
+        var head = base.read_head_authoritative()
         _ = base^
         return head.next_offset
 
@@ -323,8 +315,9 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
           2. Resume from the established `_base` head: `expected_dense` ==
              `_base.next_offset` (0 for a fresh `_base`, anchored to the old
              log_start by the first append). Walk the legacy chunks whose dense
-             range is AT OR ABOVE `expected_dense` (skip already-migrated +
-             reaped); for each offset-bearing chunk, re-record its `ManifestBody`
+             range is AT OR ABOVE `expected_dense`, from the legacy log start
+             (skip already-migrated; a chunk that cannot be read raises); for
+             each offset-bearing chunk, re-record its `ManifestBody`
              (REUSING the source `.seg` object_key / record_count / crc32 /
              trailers) into `_base` in dense order via single-writer If-None-Match
              CAS, writing the chunk's MOVED marker on the legacy manifest just
@@ -345,22 +338,9 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         SAME record at the SAME dense offset before + after migration; the new-gen
         tail then continues densely from `_base.next_offset` == old `next_offset`."""
         var legacy = self._legacy_manifest()
-        var legacy_head: ManifestHead
-        try:
-            legacy_head = legacy.read_head_authoritative()
-        except e:
-            _ = e
-            _ = legacy^
-            # No legacy manifest at all (never produced) -> nothing to migrate.
-            # The partition is ready for new-gen writes with an empty `_base`.
-            return MigrationStats(
-                base_offset_start=Int64(0),
-                records_migrated=Int64(0),
-                base_chunks_appended=0,
-                source_chunks_retired=0,
-                dense_high_water=Int64(0),
-                already_migrated=False,
-            )
+        # No legacy manifest at all (never produced) reads as chunk_seq -1, and
+        # the walk below migrates nothing. An error reading the head raises.
+        var legacy_head = legacy.read_head_authoritative()
         var n_legacy_chunks = legacy_head.chunk_seq + Int64(1)  # -1 = empty
         var legacy_ls = legacy.read_log_start()
         var legacy_log_start_off = legacy_ls.log_start_offset
@@ -447,111 +427,108 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
             else Int64(0)
         )
         while seq < n_legacy_chunks:
-            try:
-                var body_bytes = legacy.read_chunk(seq)
-                var body = ManifestBody.decode(body_bytes)
-                # A chunk without a segment object (a COMMIT/ABORT marker, 0
-                # records) is skipped (it is NOT offset-bearing; the legacy
-                # resolver skips it too). One that still carries records cannot
-                # be re-recorded (its key is empty) nor dropped (every later
-                # dense offset would shift), so the migration refuses it.
-                if not body.has_segment():
-                    if body.record_count > Int64(0):
-                        _ = base^
-                        _ = legacy^
-                        raise Error(
-                            "SubLineageMigration.migrate_partition: legacy chunk "
-                            + String(seq)
-                            + " has "
-                            + String(body.record_count)
-                            + " records but no segment object (empty"
-                            " object_key); refusing to migrate it"
-                        )
-                    seq += Int64(1)
-                    continue
-                var rc = body.record_count
-                var chunk_lo = running  # this chunk's first dense offset
-                # Skip chunks ENTIRELY below the resume cursor (already migrated):
-                # the offset allocator commits whole chunks, so `expected_dense`
-                # always coincides with a chunk boundary; a chunk wholly below it
-                # is already in `_base`.
-                if chunk_lo + rc <= expected_dense:
-                    running = chunk_lo + rc
-                    seq += Int64(1)
-                    continue
-                # This chunk's first dense offset MUST equal the running expected
-                # dense (whole-chunk migration, chunk-boundary aligned). A mismatch
-                # is a torn / non-contiguous migration -> RAISE.
-                if chunk_lo != expected_dense:
+            # The walk starts AT the legacy log start, so every chunk it reads
+            # is live: ANY read error (not_found included) is raised and
+            # nothing further is migrated. Skipping a chunk would record every
+            # later chunk at a dense offset too low by its record_count; the
+            # chunks already in `_base` stay, and a re-run resumes after them.
+            var body_bytes = legacy.read_chunk(seq)
+            var body = ManifestBody.decode(body_bytes)
+            # A chunk without a segment object (a COMMIT/ABORT marker, 0
+            # records) is skipped (it is NOT offset-bearing; the legacy
+            # resolver skips it too). One that still carries records cannot
+            # be re-recorded (its key is empty) nor dropped (every later
+            # dense offset would shift), so the migration refuses it.
+            if not body.has_segment():
+                if body.record_count > Int64(0):
                     _ = base^
                     _ = legacy^
                     raise Error(
-                        "SubLineageMigration.migrate_partition: source chunk dense"
-                        " base "
-                        + String(chunk_lo)
-                        + " != expected dense "
-                        + String(expected_dense)
-                        + " (non-contiguous migration — torn offsets)"
+                        "SubLineageMigration.migrate_partition: legacy chunk "
+                        + String(seq)
+                        + " has "
+                        + String(body.record_count)
+                        + " records but no segment object (empty"
+                        " object_key); refusing to migrate it"
                     )
-                # Re-record the SOURCE chunk's segment metadata into `_base`,
-                # REUSING the source `.seg` object_key (NO byte copy). Copy the
-                # heap-owning `object_key` (Mojo 1.0.0b1 rejects a single-field
-                # `^`-move out of `body`).
-                var key = String(body.object_key)
-                var crc = body.crc32
-                var seg_bytes = body.segment_bytes
-                var created = body.creation_ts_ms
-                var base_body = encode_manifest_body(
-                    object_key=key^,
-                    record_count=rc,
-                    crc32=crc,
-                    segment_bytes=seg_bytes,
-                    creation_ts_ms=created,
-                )
-                # MOVED marker FIRST, then the `_base` append that makes `_base`
-                # reference this `.seg` (komira-ai/komira#494). For every chunk
-                # the migration has already marked (that is, every chunk `_base`
-                # references at the time of its append), no ordering of
-                # retention, reaping and migration deletes its `.seg`: the
-                # reaper checks MOVED first, and never touches a chunk at or
-                # above the legacy floor. Retention that expires a legacy chunk
-                # AHEAD of the migration cursor is not handled here
-                # (komira-ai/komira#560). If the migration stops after this
-                # mark and never appends, the `.seg` is kept (a leak).
-                legacy.schedule_moved_for_delete_at(seq, now_ms)
-                var r = base.append(base_body^, rc)
-                if r.base_offset != expected_dense:
-                    _ = base^
-                    _ = legacy^
-                    raise Error(
-                        "SubLineageMigration.migrate_partition: `_base` base_offset "
-                        + String(r.base_offset)
-                        + " != expected dense "
-                        + String(expected_dense)
-                        + " (torn migration — offset not preserved)"
-                    )
-                if r.last_offset != r.base_offset + rc - Int64(1):
-                    _ = base^
-                    _ = legacy^
-                    raise Error(  # cov: unreachable CasManifestStore.append returns last_offset = base_offset + record_count - 1
-                        "SubLineageMigration.migrate_partition: `_base` last_offset "  # cov: unreachable see the line above
-                        + String(r.last_offset)  # cov: unreachable see the line above
-                        + " != base+count-1 "  # cov: unreachable see the line above
-                        + String(r.base_offset + rc - Int64(1))  # cov: unreachable see the line above
-                        + " (manifest non-contiguity)"  # cov: unreachable see the line above
-                    )
-                expected_dense += rc
-                records_migrated += rc
-                chunks_appended += 1
+                seq += Int64(1)
+                continue
+            var rc = body.record_count
+            var chunk_lo = running  # this chunk's first dense offset
+            # Skip chunks ENTIRELY below the resume cursor (already migrated):
+            # the offset allocator commits whole chunks, so `expected_dense`
+            # always coincides with a chunk boundary; a chunk wholly below it
+            # is already in `_base`.
+            if chunk_lo + rc <= expected_dense:
                 running = chunk_lo + rc
                 seq += Int64(1)
-            except e:
-                if _is_not_found_msg(String(e)):
-                    seq += Int64(1)
-                    continue  # reaped mid-walk (benign race) — skip
+                continue
+            # This chunk's first dense offset MUST equal the running expected
+            # dense (whole-chunk migration, chunk-boundary aligned). A mismatch
+            # is a torn / non-contiguous migration -> RAISE.
+            if chunk_lo != expected_dense:
                 _ = base^
                 _ = legacy^
-                raise e^
+                raise Error(
+                    "SubLineageMigration.migrate_partition: source chunk dense"
+                    " base "
+                    + String(chunk_lo)
+                    + " != expected dense "
+                    + String(expected_dense)
+                    + " (non-contiguous migration — torn offsets)"
+                )
+            # Re-record the SOURCE chunk's segment metadata into `_base`,
+            # REUSING the source `.seg` object_key (NO byte copy). Copy the
+            # heap-owning `object_key` (Mojo 1.0.0b1 rejects a single-field
+            # `^`-move out of `body`).
+            var key = String(body.object_key)
+            var crc = body.crc32
+            var seg_bytes = body.segment_bytes
+            var created = body.creation_ts_ms
+            var base_body = encode_manifest_body(
+                object_key=key^,
+                record_count=rc,
+                crc32=crc,
+                segment_bytes=seg_bytes,
+                creation_ts_ms=created,
+            )
+            # MOVED marker FIRST, then the `_base` append that makes `_base`
+            # reference this `.seg` (komira-ai/komira#494). For every chunk
+            # the migration has already marked (that is, every chunk `_base`
+            # references at the time of its append), no ordering of
+            # retention, reaping and migration deletes its `.seg`: the
+            # reaper checks MOVED first, and never touches a chunk at or
+            # above the legacy floor. Retention that expires a legacy chunk
+            # AHEAD of the migration cursor is not handled here
+            # (komira-ai/komira#560). If the migration stops after this
+            # mark and never appends, the `.seg` is kept (a leak).
+            legacy.schedule_moved_for_delete_at(seq, now_ms)
+            var r = base.append(base_body^, rc)
+            if r.base_offset != expected_dense:
+                _ = base^
+                _ = legacy^
+                raise Error(
+                    "SubLineageMigration.migrate_partition: `_base` base_offset "
+                    + String(r.base_offset)
+                    + " != expected dense "
+                    + String(expected_dense)
+                    + " (torn migration — offset not preserved)"
+                )
+            if r.last_offset != r.base_offset + rc - Int64(1):
+                _ = base^
+                _ = legacy^
+                raise Error(  # cov: unreachable CasManifestStore.append returns last_offset = base_offset + record_count - 1
+                    "SubLineageMigration.migrate_partition: `_base` last_offset "  # cov: unreachable see the line above
+                    + String(r.last_offset)  # cov: unreachable see the line above
+                    + " != base+count-1 "  # cov: unreachable see the line above
+                    + String(r.base_offset + rc - Int64(1))  # cov: unreachable see the line above
+                    + " (manifest non-contiguity)"  # cov: unreachable see the line above
+                )
+            expected_dense += rc
+            records_migrated += rc
+            chunks_appended += 1
+            running = chunk_lo + rc
+            seq += Int64(1)
         _ = base^
 
         # RETIRE the migrated legacy chunks: MOVED markers on the migrated MANIFEST
@@ -625,7 +602,7 @@ struct SubLineageMigration[Store: CloneableConditionalWriteStore](
         try:
             head = legacy.read_head_authoritative()
         except e:
-            if not _is_not_found_msg(String(e)):
+            if not is_not_found_msg(String(e)):
                 raise e^
             return 0  # the legacy manifest is gone: nothing to retire
         # Count against the markers that predate this migration call when the
@@ -696,16 +673,3 @@ def _i64_in(xs: List[Int64], v: Int64) -> Bool:
         if xs[i] == v:
             return True
     return False
-
-
-@always_inline
-def _is_not_found_msg(msg: String) -> Bool:
-    """Classify a not-found / 404 store error (the reaped-chunk race in a walk).
-    Mirrors `consume_core._is_not_found_msg` + `sublineage_consume` +
-    `sublineage_segment_fold`."""
-    return (
-        msg.find("not_found") >= 0
-        or msg.find("NotFound") >= 0
-        or msg.find("404") >= 0
-        or msg.find("NoSuchKey") >= 0
-    )

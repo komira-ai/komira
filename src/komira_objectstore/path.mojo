@@ -83,7 +83,7 @@ struct Path(Copyable, ImplicitlyCopyable, Movable, Deinitable):
         while end > start and bs[end - 1] == slash:
             end -= 1
         if end <= start:
-            return Path(String(""))
+            return Path(String(""))  # cov: unreachable bs[start] is not '/' after the lead strip, so end > start
 
         # Walk segments, collapsing runs of `/` and rejecting `.` / `..`.
         # PERF/SAFETY (multi-threaded conditional-store callers):

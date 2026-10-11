@@ -455,7 +455,7 @@ struct XmlReader(Movable):
                 cp = c & 0x1F
                 w = 2
             if i + w > hi:
-                raise Error("xml: invalid character in a name" + self._at(i))
+                raise Error("xml: invalid character in a name" + self._at(i))  # cov: unreachable names end at ASCII; UTF-8 checked
             for k in range(1, w):
                 cp = (cp << 6) | (Int(self.src[i + k]) & 0x3F)
             var ok = _is_name_start_cp(cp) if first else _is_name_char_cp(cp)

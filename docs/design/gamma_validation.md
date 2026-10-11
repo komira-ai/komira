@@ -1,5 +1,15 @@
 # Gamma validation: what checks a release before prod, per package family
 
+**Superseded in part by [native_packaging.md](native_packaging.md).** Every
+row and note here about the shared-library package `komira_native` (the
+release state list, "Declared by open pull requests", its row in the library
+table, and the gap list) describes a plan that is replaced: each library that
+owns C ships its own shared library in its own package, and every check of an
+installed native package runs in beta's install job, not in gamma. That plan's
+slice 13 rewrites the `komira_native` rows and this document's stage and
+channel text; until then, read the rows as history and the channel text as
+today's pipeline, in the vocabulary below.
+
 **Vocabulary.** This document predates the staged pipeline's glossary
 (`docs/design/staged_pipeline.md`, section "Glossary"; a path, not a link,
 until that section is on `main`). Here "gamma" means today's stage that
@@ -316,8 +326,8 @@ Packages:
   `komira_orc`, `komira_csv`, `komira_json_index`, `komira_jsonl`,
   `komira_compression`, `komira_lz4`, `komira_zlib` (`komira_json`, a JSON
   reader and writer, is released and listed with the core utilities below);
-- the engine: `komira_plan_expr`, `komira_plan_ir`, `komira_plan_proto`,
-  `komira_plan_stats`, `komira_plan_wire`, `komira_pplan_wire`, `komira_sql`,
+- the engine: `komira_plan_expr`, `komira_plan_ir`, `komira_physical_plan`,
+  `komira_plan_proto`, `komira_plan_stats`, `komira_plan_wire`, `komira_pplan_wire`, `komira_sql`,
   `komira_optimizer`, `komira_eval`, `komira_expr`, `komira_agg`,
   `komira_agg_api`, `komira_op_agg_row_api`, `komira_op_agg_state`,
   `komira_kernels`, `komira_column_kernels`, `komira_column_format`,

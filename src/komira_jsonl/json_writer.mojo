@@ -549,11 +549,9 @@ def _civil_from_days(z_in: Int) -> Tuple[Int, Int, Int]:
     """
     var z = z_in
     z = z + 719468  # shift epoch from 1970-01-01 to 0000-03-01
-    var era: Int
-    if z >= 0:
-        era = z // 146097
-    else:
-        era = (z - 146096) // 146097
+    # Mojo's `//` floors, so it gives the era of a negative `z` directly;
+    # the C++ `z - 146096` adjustment is for truncating division only.
+    var era = z // 146097
     var doe = z - era * 146097  # day-of-era [0..146096]
     var yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
     var y = yoe + era * 400
@@ -1000,7 +998,7 @@ def write_batch_jsonl_direct(
     """
     var num_rows = batch.num_rows()
     var num_cols = batch.num_columns()
-    if num_cols == 0 or num_rows == 0:
+    if num_rows == 0:
         return
 
     # Pre-escape column names once.
@@ -1547,7 +1545,7 @@ def write_batch_jsonl_fused_range(
     """
     var num_cols = batch.num_columns()
     var n_range = row_end - row_start
-    if num_cols == 0 or n_range <= 0:
+    if n_range <= 0:
         return
 
     # Pre-render column-name JSON-key bytes (escaped) once.
@@ -1593,7 +1591,7 @@ def write_batch_jsonl_fused_range(
     for c in range(num_cols):
         per_row_key_chars += len(keys[c]) + 1  # +1 for ':'
         total_cell_bytes += len(cell_bytes_per_col[c])
-    var per_row_framing = 3 + (num_cols - 1)  # '{' + '}' + '\n' + commas
+    var per_row_framing = 3 + max(num_cols - 1, 0)  # '{' '}' '\n' + commas
     var total_bytes = (
         n_range * (per_row_framing + per_row_key_chars)
         + total_cell_bytes
@@ -1681,8 +1679,6 @@ def write_row_output_jsonl(
     """
     ref layout = ro.layout
     var n_cols = layout.n_cols()
-    if n_cols == 0:
-        return
     var has_validity = layout.has_validity
     var vo = layout.validity_offset
 
