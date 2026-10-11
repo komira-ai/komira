@@ -29,15 +29,10 @@ load(":coverage.bzl", "COVERAGE_ATTRS", "COVERAGE_SHARED_LIB_ATTRS", "COVERAGE_T
 load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
 load(":mutation.bzl", "MUTATION_ATTRS", "mutation_kwargs", "mutation_sub_targets")
 load(":native_reach.bzl", "NATIVE_REACH_ATTRS", "native_reach", "native_reach_kwargs")
-load(
-    ":test_runtime.bzl",
-    _arg_args = "arg_args",
-    _data_map = "data_map",
-    _env_args = "env_args",
-    _test_root = "test_root",
-)
+load(":test_runtime.bzl", _arg_args = "arg_args", _data_map = "data_map", _env_args = "env_args", _test_root = "test_root")
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "capped_prefix", "define_args", "mem_cap_script", "memory_cap")
 load(":readme.bzl", "readme_kwargs")
+load(":run_check.bzl", "run_check_validation")
 load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_prefix", "with_test_limit")
 
 def _toolchain(ctx):
@@ -674,13 +669,16 @@ def _runnable(ctx, tc, exe):
 def _run_check(ctx, tc, command):
     # Runs the RunInfo command itself, in a remote action with no library
     # path, so a runnable directory that cannot start on its own fails here.
-    # The action runs on this target's execution platform.
+    # The action runs on this target's execution platform. With
+    # `expected_stdout` it is also a validation of the binary (run_check.bzl).
     out = ctx.actions.declare_output(ctx.label.name + ".stdout")
     args = [tc.busybox, "sh", tc.run_check, tc.busybox, command, out.as_output()]
-    if ctx.attrs.expected_stdout != None:
-        args.append(ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout))
+    if ctx.attrs.expected_stdout == None:
+        ctx.actions.run(cmd_args(args), category = "mojo_run_check")
+        return out, []
+    args.append(ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout))
     ctx.actions.run(cmd_args(args), category = "mojo_run_check")
-    return out
+    return out, run_check_validation(ctx, out, ctx.attrs.expected_stdout)
 
 def _shared(ctx, tc):
     main = _main_src(ctx)
@@ -691,19 +689,20 @@ def _binary_impl(ctx):
     tc, exe = _executable(ctx, "mojo_build")
     run_dir, command = _runnable(ctx, tc, exe)
     shared = _shared(ctx, tc)
+    run_check, validation = _run_check(ctx, tc, command)
     return [
         DefaultInfo(
             default_output = exe,
             sub_targets = {
                 "shared": [DefaultInfo(default_output = shared)],
-                "run_check": [DefaultInfo(default_output = _run_check(ctx, tc, command))],
+                "run_check": [DefaultInfo(default_output = run_check)],
                 "runnable": [DefaultInfo(default_output = run_dir), RunInfo(args = command)],
             },
         ),
         RunInfo(args = command),
         MojoRunnableInfo(binary = exe.basename, command = command, run_dir = run_dir),
         MojoProgramInfo(name = ctx.label.name, shared = shared, runtime = tc.runtime, target_cpu = tc.target_cpu),
-    ]
+    ] + validation
 
 _EXECUTABLE_ATTRS = {
     # Mojo packages and C/C++ libraries; see _check_deps.
@@ -716,7 +715,8 @@ mojo_binary_rule = rule(
     impl = _binary_impl,
     attrs = _EXECUTABLE_ATTRS | BINARY_DEFINE_ATTRS | {
         "optimization_level": attrs.string(default = SHIPPED_OPT_LEVEL),
-        # When set, `[run_check]` fails unless the binary's stdout equals this.
+        # When set, `[run_check]` fails unless the binary's stdout equals this;
+        # it is then a validation, run by every build holding the binary.
         "expected_stdout": attrs.option(attrs.string(), default = None),
     },
 )
