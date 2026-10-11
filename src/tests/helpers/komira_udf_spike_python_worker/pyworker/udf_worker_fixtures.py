@@ -58,10 +58,15 @@ def blas_threads(x: int) -> int:
 
 
 def shares_memory(x: int) -> int:
-    """1 when the worker maps the engine's shared region (a memfd named
-    komira-udf-worker), else 0."""
+    """How many shared regions (memfds named komira-udf-worker, counted by
+    inode) the worker maps: 1, or 0 on the pipe transport. A forked worker
+    has dropped the zygote's region at its own HELLO."""
+    inodes = set()
     with open("/proc/self/maps") as f:
-        return 1 if "komira-udf-worker" in f.read() else 0
+        for line in f:
+            if "komira-udf-worker" in line:
+                inodes.add(line.split()[4])
+    return len(inodes)
 
 
 def sleep_ms(ms: int) -> int:

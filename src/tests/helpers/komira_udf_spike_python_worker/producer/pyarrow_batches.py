@@ -3,8 +3,8 @@ decoder (native/probe_codec.c, case "pyarrow"): pyarrow builds its
 flatbuffers back to front, shares vtables and leaves out fields at their
 default, so its layout is not the one the engine and the worker write.
 
-Run as a python_oracle (BUCK, :pyarrow_batches): argv is [script, out, ...];
-writes out/batches.txt, one line per batch:
+Run by tests/test_fixtures.py (a py_test), which compares what it writes
+with the committed tests/fixtures/pyarrow_batches.txt. Writes out/batches.txt, one line per batch:
     name width rows nulls message_hex values_hex validity_hex
 where values_hex is the rows' values (width bytes each, little endian, a
 null row's as pyarrow wrote it; "." for no rows) and validity_hex the rows' validity bitmap

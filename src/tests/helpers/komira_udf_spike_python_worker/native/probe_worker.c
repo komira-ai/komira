@@ -229,6 +229,25 @@ static void control_cases(struct pj* j, const char* dir) {
   say_hello(j, "zygote_hello", &w);
   ask(j, "fork_without_socket", &w, PYW_OP_FORK, NULL, 0);
   pj_case(j, "zygote_exit", raw_end(&w), "", 0);
+
+  /* SHUTDOWN with the socket still open: the worker ends by itself, with
+   * status 0, within a second (not when the engine closes the socket or
+   * kills it). */
+  if (raw_start(&w, dir, "context") != 0) return;
+  say_hello(j, "shutdown_hello", &w);
+  raw_send(&w, KOMIRA_UDF_WIRE_MAGIC, KOMIRA_UDF_OP_SHUTDOWN, ++w.id, 0, 0, 0, NULL, 0, -1);
+  int st = 0, ended = -1;
+  for (int i = 0; i < 1000 && ended < 0; i++) {
+    if (waitpid(w.pid, &st, WNOHANG) == w.pid) ended = WIFEXITED(st) ? WEXITSTATUS(st) : 128 + WTERMSIG(st);
+    else usleep(1000);
+  }
+  if (ended < 0) {
+    pj_case(j, "shutdown_exit", -1, "still running 1 s after SHUTDOWN", 0);
+    raw_end(&w);
+  } else {
+    close(w.fd);
+    pj_case(j, "shutdown_exit", ended, "", 0);
+  }
 }
 
 /* ---- load ------------------------------------------------------------------- */

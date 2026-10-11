@@ -11,7 +11,10 @@
 #     V4, the header type absent or Schema, no header, a compressed batch, a
 #     values buffer or a validity bitmap shorter than the column, a buffer
 #     past the body, a misaligned values buffer, a null count over the
-#     length, a column length other than the batch's, two columns; each
+#     length, a column length other than the batch's, two columns, two
+#     nodes, an absent nodes or buffers vector, a 1-byte bitmap for 9 rows,
+#     a root 2 bytes before the end of a message that ends there, a payload
+#     cut into its metadata; a bitmap away from body offset 0 read there; each
 #     8-byte number and each offset with a high byte set, a field offset
 #     past its table (a check deleted or loosened, a field read one byte
 #     short or long); pyarrow's own batches (another flatbuffer layout)
@@ -91,6 +94,15 @@ def main() raises:
     refused(r, "header_absent", "not a record batch")
     refused(r, "compressed", "a compressed record batch")
     refused(r, "uncompressed_moved", "decoded")
+    refused(r, "nodes_absent", "not one primitive column")
+    refused(r, "buffers_absent", "not one primitive column")
+    refused(r, "two_nodes", "not one primitive column")
+    refused(r, "validity_short_9_rows", "validity bitmap is shorter than the column")
+    refused(r, "validity_at_160", "decoded", 0)
+    assert_equal(num(r.get("validity_at_160"), "value"), 0, "a bitmap at body offset 160: the nulls and values")
+    refused(r, "root_two_before_end", "flatbuffer is malformed")
+    assert_equal(num(r.get("root_two_before_end"), "value"), 0, "the no-rows message ends at its metadata")
+    refused(r, "payload_cut_into_meta", "metadata length outside the payload")
     for k in ["body_len_high"]:
         refused(r, k, "the body length runs past the payload")
     for k in ["batch_length_high", "node_length_high"]:

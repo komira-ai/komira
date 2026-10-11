@@ -32,6 +32,15 @@
 #     the cancel, section 5.2: "If the worker has not answered after a grace
 #     period, the engine kills it").
 #
+#   - and the cases the scripted mutation sweep asked for (native/
+#     probe_calls.c's newer groups): a cancelled call leaves its context
+#     serving; two UDFs in one context each run their own code and schema;
+#     400 calls never fill the heap (each slot released with its own id
+#     through a ring that wraps); nulls at a bitmap byte's edges; a user
+#     error's Python traceback; a result over the reply heap; three clock
+#     reads under 1.5 s; no engine heap growth over 200 refusals, loads and
+#     instances; the library opened by its absolute path.
+#
 # Mutants planted: ipc_codec.c pyw_ipc_batch_write taking every column's
 # offset from the first column: red on two_args. proxy_runtime.c remote_udf
 # treating every UDF as inherited by a forked worker: red on
@@ -89,6 +98,46 @@ def killed(r: JsonValue, name: String, status: Int32, what: String) raises:
 
 
 def main() raises:
+    # First: the pipe library's first dlopen in this process is by its
+    # absolute path.
+    var a = probe_calls("./pyworker_pipe.so", "abs_path")
+    ok(a, "two_args", "pipe opened by absolute path")
+    for v in ["spawn", "zygote", "pipe", "pyarrow"]:
+        var m = probe_calls("./pyworker_" + v + ".so", "after_cancel")
+        var cn = m.get("cancelled")
+        assert_equal(num(cn, "status"), Int(ERR_CANCELLED), v + " cancelled: " + text(cn, "message"))
+        ok(m, "after_cancel_pair", v)
+        var same = m.get("after_cancel_same")
+        assert_equal(num(same, "status"), 0, v + " after_cancel_same: " + text(same, "message"))
+        assert_equal(num(same, "value"), 5, v + " after_cancel_same: slow_loop(5)")
+        var t2 = probe_calls("./pyworker_" + v + ".so", "two_udfs")
+        ok(t2, "two_udfs_pair", v)
+        ok(t2, "two_udfs_double", v)
+        ok(t2, "two_udfs_pair_again", v)
+        var n = probe_calls("./pyworker_" + v + ".so", "nulls")
+        assert_equal(num(n.get("rows_9_last_null"), "status"), 0, v + ": " + text(n.get("rows_9_last_null"), "message"))
+        assert_equal(num(n.get("rows_9_last_null"), "value"), 0, v + ": rows_9_last_null values and bits")
+        assert_equal(num(n.get("column_8_rows_null"), "status"), 0, v + ": " + text(n.get("column_8_rows_null"), "message"))
+        assert_equal(num(n.get("column_8_rows_null"), "value"), 0, v + ": column_8_rows_null values and bits")
+        var tr = probe_calls("./pyworker_" + v + ".so", "trace")
+        assert_true(text(tr.get("trace"), "message").startswith("TypeError"), v + ": " + text(tr.get("trace"), "message"))
+        assert_equal(num(tr.get("trace"), "value"), 1, v + ": the trace is the Python traceback")
+    for v in ["spawn", "zygote"]:
+        var mc = probe_calls("./pyworker_" + v + ".so", "many_calls")
+        assert_equal(num(mc.get("many_calls"), "status"), 0, v + ": " + text(mc.get("many_calls"), "message"))
+        assert_equal(num(mc.get("many_calls"), "value"), 0, v + ": heap-full warnings over 400 calls")
+        var ct = probe_calls("./pyworker_" + v + ".so", "clock_time")
+        assert_equal(num(ct.get("clock_time"), "status"), 0, v + ": " + text(ct.get("clock_time"), "message"))
+        assert_true(num(ct.get("clock_time"), "value") < 1500, v + ": 3 clock reads took " + String(num(ct.get("clock_time"), "value")) + " ms")
+    for v in ["spawn", "pyarrow"]:
+        var bg = probe_calls("./pyworker_" + v + ".so", "big")
+        assert_equal(num(bg.get("big"), "status"), 0, v + ": " + text(bg.get("big"), "message"))
+        assert_equal(num(bg.get("big"), "value"), 0, v + ": a result over the reply heap")
+    var lk = num(probe_calls("./pyworker_spawn.so", "leaks").get("leaks"), "value")
+    assert_true(lk // 1000000 < 400, "refused validates grew the heap by " + String(lk // 1000000))
+    assert_true((lk // 1000) % 1000 < 400, "load and unload grew the heap by " + String((lk // 1000) % 1000))
+    assert_true(lk % 1000 < 400, "open and close instance grew the heap by " + String(lk % 1000))
+
     for v in ["spawn", "zygote", "pipe", "pyarrow"]:
         var t = probe_calls("./pyworker_" + v + ".so", "two_args")
         ok(t, "two_args", v)

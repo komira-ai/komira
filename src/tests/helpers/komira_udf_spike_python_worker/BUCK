@@ -2,7 +2,7 @@ load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_shared_lib")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load("@komira//tools/build/python:defs.bzl", "py_test", "python_oracle")
+load("@komira//tools/build/python:defs.bzl", "py_test")
 load("//src/tests/helpers/komira_udf_spike_python:defs.bzl", "udf_bench")
 load(":defs.bzl", "PYWORKER", "bytecode", "code_layer", "dist_native_libs", "pyrt_files", "runtime_dir")
 
@@ -33,10 +33,14 @@ load(":defs.bzl", "PYWORKER", "bytecode", "code_layer", "dist_native_libs", "pyr
 #                           adapter (komira_udf_spike_python/pyrt), staged as pyrt/
 #   producer/make_closure.py  a VALUE UDF's capture: a function of __main__
 #                           closing over a 16 MiB numpy model, cloudpickled
-#                           (:closure_capture, laid out by digest as :closure)
 #   producer/pyarrow_batches.py, producer/value_payloads.py
 #                           batches as pyarrow writes them, and VALUE payloads
-#                           the worker refuses (python_oracle targets)
+#                           the worker refuses or takes
+#   tests/fixtures/         what the three producers wrote, committed (the
+#                           closure payloads gzip'd), with SHA256SUMS; the
+#                           Mojo tests read only these (the closure laid out
+#                           by digest as :closure), and :test_fixtures
+#                           regenerates them
 #   tests/ipc_golden.txt    the engine-side writer's messages, byte for byte
 #   refrt/                  the builds' one export each (below)
 #   native/drive.c, drive.mojo, workloads.mojo
@@ -72,8 +76,13 @@ load(":defs.bzl", "PYWORKER", "bytecode", "code_layer", "dist_native_libs", "pyr
 #   test_worker_calls     two arguments at different offsets, a UDF loaded
 #                         after a context, call_batch's refusals, and the
 #                         kill of a worker deaf to cancel or past a deadline.
-# And a py_test, :test_kudf_ipc: the worker's IPC codec against pyarrow, and
-# tests/ipc_golden.txt read by pyarrow.
+# And two py_tests: :test_kudf_ipc, the worker's IPC codec against pyarrow,
+# and tests/ipc_golden.txt read by pyarrow; :test_fixtures, the committed
+# fixtures against their producers.
+
+# The VALUE payloads the worker must refuse or take at LOAD
+# (producer/value_payloads.py), committed under tests/fixtures/value_payloads.
+_VALUE_PAYLOADS = ["bad_pickle", "bad_signature", "good", "info.txt", "not_function", "unresolved_hints"]
 
 _CASES = {"src/tests/helpers/komira_udf_spike_abi": "//src/tests/helpers/komira_udf_spike_abi:cases"}
 
@@ -110,11 +119,14 @@ mojo_library(
         ),
         "tests/test_worker_boundary.mojo": runtime_dir([], extra = {
             "ipc_golden.txt": "tests/ipc_golden.txt",
-            "pyarrow_batches": ":pyarrow_batches",
+            "pyarrow_batches/batches.txt": "tests/fixtures/pyarrow_batches.txt",
         }),
         "tests/test_worker_calls.mojo": runtime_dir(["pipe", "pyarrow", "spawn", "zygote"], site = ":site_bc_pyarrow"),
         "tests/test_worker_processes.mojo": runtime_dir(["spawn", "zygote"]),
-        "tests/test_worker_protocol.mojo": runtime_dir([], extra = {"value_payloads": ":value_payloads"}),
+        "tests/test_worker_protocol.mojo": runtime_dir([], extra = {
+            "value_payloads/" + f: "tests/fixtures/value_payloads/" + f
+            for f in _VALUE_PAYLOADS
+        }),
     },
     visibility = ["PUBLIC"],
 )
@@ -264,54 +276,14 @@ bytecode(
     },
 )
 
-# The VALUE UDF the closure cases load (producer/make_closure.py), captured
-# by a python_oracle (two runs must write the same bytes), then laid out as a
-# code layer: good/<sha256>, bad/<sha256>, info.json.
+# The VALUE UDF the closure cases load (producer/make_closure.py), committed
+# under tests/fixtures/closure (gzip'd), laid out as a code layer:
+# good/<sha256>, bad/<sha256>, info.json. :test_fixtures regenerates it.
 code_layer(
     name = "closure",
-    capture = ":closure_capture",
-)
-
-# One-column batches as pyarrow writes them (producer/pyarrow_batches.py),
-# for the engine-side decoder's cases (native/probe_codec.c).
-python_oracle(
-    name = "pyarrow_batches",
-    src = "producer/pyarrow_batches.py",
-    outs = ["batches.txt"],
-    deps = [
-        "//third_party/python:numpy",
-        "//third_party/python:pyarrow",
-    ],
-)
-
-# VALUE code objects the worker must refuse or take at LOAD
-# (producer/value_payloads.py), for native/probe_worker.c.
-python_oracle(
-    name = "value_payloads",
-    src = "producer/value_payloads.py",
-    outs = [
-        "bad_pickle",
-        "bad_signature",
-        "good",
-        "info.txt",
-        "not_function",
-        "unresolved_hints",
-    ],
-    deps = ["//third_party/python:cloudpickle"],
-)
-
-python_oracle(
-    name = "closure_capture",
-    src = "producer/make_closure.py",
-    outs = [
-        "info.json",
-        "payload",
-        "payload_bad",
-    ],
-    deps = [
-        "//third_party/python:cloudpickle",
-        "//third_party/python:numpy",
-    ],
+    info = "tests/fixtures/closure/info.json",
+    payload = "tests/fixtures/closure/payload.gz",
+    payload_bad = "tests/fixtures/closure/payload_bad.gz",
 )
 
 # The bench program and its runs, one per start-up and transport. Their
@@ -357,6 +329,31 @@ py_test(
         "tests/ipc_golden.txt",
     ],
     deps = [
+        "//third_party/python:numpy",
+        "//third_party/python:pyarrow",
+    ],
+)
+
+# The committed Python-made fixtures (tests/fixtures: the closure payload,
+# the VALUE payloads, pyarrow's batches) against their generators
+# (producer/*.py) on the pinned interpreter and wheels: a change in pickling
+# or in pyarrow's layout is red here, not in the Mojo tests, which read only
+# the committed files.
+py_test(
+    name = "test_fixtures",
+    src = "tests/test_fixtures.py",
+    srcs = [
+        "producer/make_closure.py",
+        "producer/pyarrow_batches.py",
+        "producer/value_payloads.py",
+        "tests/fixtures/SHA256SUMS",
+        "tests/fixtures/closure/info.json",
+        "tests/fixtures/closure/payload.gz",
+        "tests/fixtures/closure/payload_bad.gz",
+        "tests/fixtures/pyarrow_batches.txt",
+    ] + ["tests/fixtures/value_payloads/" + f for f in _VALUE_PAYLOADS],
+    deps = [
+        "//third_party/python:cloudpickle",
         "//third_party/python:numpy",
         "//third_party/python:pyarrow",
     ],

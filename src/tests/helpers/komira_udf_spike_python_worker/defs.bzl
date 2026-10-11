@@ -48,27 +48,36 @@ _dist_native_libs = rule(
 _CODE_LAYER = """
 set -eu
 BB="$1"; IN="$2"; OUT="$3"
-SHA=$("$BB" sha256sum "$IN/payload" | "$BB" cut -d ' ' -f 1)
 "$BB" mkdir -p "$OUT/good" "$OUT/bad"
-"$BB" cp "$IN/payload" "$OUT/good/$SHA"
-"$BB" cp "$IN/payload_bad" "$OUT/bad/$SHA"
+"$BB" gunzip -c "$IN/payload.gz" > "$OUT/payload"
+SHA=$("$BB" sha256sum "$OUT/payload" | "$BB" cut -d ' ' -f 1)
+"$BB" grep -q "$SHA" "$IN/info.json" || { echo "code_layer: the payload's sha256 $SHA is not the one info.json records" >&2; exit 1; }
+"$BB" mv "$OUT/payload" "$OUT/good/$SHA"
+"$BB" gunzip -c "$IN/payload_bad.gz" > "$OUT/bad/$SHA"
 "$BB" cp "$IN/info.json" "$OUT/info.json"
 """
 
 def _code_layer_impl(ctx):
     bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
+    src = ctx.actions.symlinked_dir(ctx.label.name + ".in", {
+        "info.json": ctx.attrs.info,
+        "payload.gz": ctx.attrs.payload,
+        "payload_bad.gz": ctx.attrs.payload_bad,
+    })
     out = ctx.actions.declare_output("code", dir = True)
     ctx.actions.run(
-        cmd_args(bb, "sh", "-c", _CODE_LAYER, "code_layer", bb, ctx.attrs.capture, out.as_output()),
+        cmd_args(bb, "sh", "-c", _CODE_LAYER, "code_layer", bb, src, out.as_output()),
         category = "code_layer",
     )
     return [DefaultInfo(default_output = out)]
 
 _code_layer = rule(
     impl = _code_layer_impl,
-    doc = "A VALUE capture's code objects named by their sha256, as a code layer holds them: good/<sha> (the payload), bad/<sha> (payload_bad under the payload's name) and info.json, from a directory holding payload, payload_bad and info.json.",
+    doc = "A VALUE capture's code objects named by their sha256, as a code layer holds them: good/<sha> (the payload), bad/<sha> (payload_bad under the payload's name) and info.json, from the committed gzip'd payloads; refuses a payload whose sha256 is not the one info.json records.",
     attrs = {
-        "capture": attrs.source(doc = "The capture's directory (make_closure.py's output)."),
+        "info": attrs.source(doc = "info.json: the payload's sha256 and sizes."),
+        "payload": attrs.source(doc = "The payload, gzip'd."),
+        "payload_bad": attrs.source(doc = "The payload with its last byte flipped, gzip'd."),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
     },
 )

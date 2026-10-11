@@ -31,7 +31,8 @@
 #     not inline on the pipe transport, and payloads past the heap's end,
 #     refused, while one ending exactly at the end is read (a bound moved
 #     by one); a header without the magic ends the worker with exit 1; end
-#     of file before and after HELLO ends it with exit 0; a worker started
+#     of file before and after HELLO ends it with exit 0, and so does
+#     SHUTDOWN within a second with the socket still open; a worker started
 #     with a role it does not know exits 1 before HELLO, and the engine
 #     says so.
 #
@@ -71,7 +72,7 @@ def main() raises:
     got(r, "fork_not_zygote", Int(ERR_INTERNAL), "FORK: not a zygote, or no socket came with it")
     got(r, "open_context_on_control", Int(ERR_INTERNAL), "OPEN_CONTEXT on a control worker")
     got(r, "fork_without_socket", Int(ERR_INTERNAL), "FORK: not a zygote, or no socket came with it")
-    for k in ["context_exit", "control_exit", "zygote_exit"]:
+    for k in ["context_exit", "control_exit", "zygote_exit", "shutdown_exit"]:
         got(r, k, 0, "")
 
     r = probe_worker("load", ".")

@@ -5,8 +5,9 @@ worker protocol cases (native/probe_worker.c):
     unresolved_hints  a function whose type hint names no type
     bad_signature     a function taking a str
     good              a function int -> int
-Run as a python_oracle (BUCK, :value_payloads): argv is [script, out, ...];
-writes each under its name and out/info.txt, one line per payload:
+Run by tests/test_fixtures.py (a py_test), which compares what it writes
+with the committed tests/fixtures/value_payloads. Writes each under its
+name and out/info.txt, one line per payload:
 name sha256hex. The functions are __main__'s, so cloudpickle captures them
 by value.
 """
@@ -31,7 +32,16 @@ def plus_one(x: int) -> int:
     return x + 1
 
 
+def _path_free(f):
+    """The file name cloudpickle keeps, and the module's __file__, set to the
+    script's bare name: the bytes do not depend on where the script runs."""
+    f.__code__ = f.__code__.replace(co_filename="value_payloads.py")
+    f.__globals__["__file__"] = "value_payloads.py"
+
+
 def main(out):
+    for f in (unresolved, takes_str, plus_one):
+        _path_free(f)
     payloads = {
         "not_function": pickle.dumps(5, protocol=4),
         "bad_pickle": b"these bytes are not a pickle",

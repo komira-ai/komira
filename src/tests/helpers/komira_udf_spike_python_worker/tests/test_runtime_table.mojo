@@ -17,7 +17,8 @@
 #     taken, and outputs left released (an entry that leaks or double
 #     releases its inputs);
 #   - per build: the worker's native thread pools limited to one thread
-#     (all but zygote_threads), the shared region mapped (all but pipe),
+#     (all but zygote_threads), one shared region mapped (none on pipe; a
+#     forked worker has dropped the zygote's),
 #     pyarrow imported (the pyarrow build only); a worker that exits with
 #     status 3 is named as such where the engine is its parent; a lost
 #     context refuses open_instance with ERR_INSTANCE_LOST; the proxy's

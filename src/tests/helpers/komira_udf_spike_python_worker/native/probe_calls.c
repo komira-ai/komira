@@ -18,6 +18,21 @@
  *              and, in a new context, past a deadline 300 ms away. Both are
  *              answered by killing the worker (section 5.2); the time each
  *              took, the worker gone, and the context lost.
+ *   after_cancel  a call cancelled 150 ms in, then a second instance and the
+ *              first again in the same context: both answer.
+ *   two_udfs   two UDFs of different arity loaded before the context opened
+ *              (zygote: before the fork), an instance of each in one context,
+ *              called in turn: each runs its own UDF and schema.
+ *   many_calls 400 calls of keep_then_drop (it holds its input's slot on its
+ *              first 30 calls): every call answers and the heap never fills.
+ *   nulls      a null in the last row of 9 (SCALAR) and in an 8-row column
+ *              result: every value and bit.
+ *   trace      a user error's trace is its Python traceback.
+ *   big        a 9.6 MB result, over the reply heap: every value.
+ *   clock_time 3000 rows read the host clock 3 times: the call's ms.
+ *   leaks      the engine's heap around 200 refused validates, loads with
+ *              unloads, and instances opened and closed: bytes grown.
+ *   abs_path   the library opened by its absolute path, then two_args.
  * Each case is one member of the JSON object kpw_probe_calls returns (as
  * probe_json.h); kpw_free (drive.c) frees it.
  *
@@ -28,9 +43,11 @@
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <malloc.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -54,7 +71,12 @@ static int64_t h_now(void* hd) {
   (void)hd;
   return mono();
 }
-static void h_log(void* hd, int32_t level, const char* m) { (void)hd, (void)level, (void)m; }
+/* "heap full" warnings the proxy logged (many_calls) */
+static int heap_full_logs;
+static void h_log(void* hd, int32_t level, const char* m) {
+  (void)hd, (void)level;
+  if (strstr(m, "heap full") != NULL) heap_full_logs++;
+}
 
 struct eng {
   const komira_udf_runtime* t;
@@ -81,23 +103,29 @@ struct spec_block {
   komira_udf_spec spec;
 };
 
-/* A BUNDLE SCALAR over `nargs` int64 arguments to an int64 result. */
-static void make_spec(struct spec_block* b, const char* entry, int nargs) {
+/* A BUNDLE of `shape` over `nargs` arguments of format `fmt` to a result
+ * of `fmt`. */
+static void make_spec_as(struct spec_block* b, const char* entry, int nargs, int32_t shape, const char* fmt) {
   memset(b, 0, sizeof(*b));
   for (int i = 0; i < nargs; i++) {
-    b->kid[i] = (struct ArrowSchema){"l", i ? "y" : "x", NULL, ARROW_FLAG_NULLABLE, 0, NULL, NULL, no_release, NULL};
+    b->kid[i] = (struct ArrowSchema){fmt, i ? "y" : "x", NULL, ARROW_FLAG_NULLABLE, 0, NULL, NULL, no_release, NULL};
     b->kids[i] = &b->kid[i];
   }
   b->args = (struct ArrowSchema){"+s", "", NULL, 0, nargs, b->kids, NULL, no_release, NULL};
-  b->result = (struct ArrowSchema){"l", "", NULL, ARROW_FLAG_NULLABLE, 0, NULL, NULL, no_release, NULL};
+  b->result = (struct ArrowSchema){fmt, "", NULL, ARROW_FLAG_NULLABLE, 0, NULL, NULL, no_release, NULL};
   b->spec.struct_size = sizeof(b->spec);
-  b->spec.shape = KOMIRA_UDF_SHAPE_SCALAR;
+  b->spec.shape = shape;
   b->spec.form = KOMIRA_UDF_FORM_BUNDLE;
   b->spec.entry = entry;
   b->spec.args = &b->args;
   b->spec.result = &b->result;
   b->spec.null_mode = KOMIRA_UDF_NULL_MANUAL;
   b->spec.stability = KOMIRA_UDF_IMMUTABLE;
+}
+
+/* A BUNDLE SCALAR over `nargs` int64 arguments to an int64 result. */
+static void make_spec(struct spec_block* b, const char* entry, int nargs) {
+  make_spec_as(b, entry, nargs, KOMIRA_UDF_SHAPE_SCALAR, "l");
 }
 
 /* ---- arguments ------------------------------------------------------------ */
@@ -219,10 +247,10 @@ static int open_engine(struct eng* e, const char* lib, struct pj* j) {
 }
 
 /* load + open_context + open_instance, or a failed case named `name`. */
-static int setup(struct eng* e, struct pj* j, const char* name, const char* entry, int nargs, komira_udf_udf** u,
-                 komira_udf_context** c, komira_udf_instance** i) {
+static int setup_as(struct eng* e, struct pj* j, const char* name, const char* entry, int nargs, int32_t shape,
+                    const char* fmt, komira_udf_udf** u, komira_udf_context** c, komira_udf_instance** i) {
   struct spec_block sb;
-  make_spec(&sb, entry, nargs);
+  make_spec_as(&sb, entry, nargs, shape, fmt);
   komira_udf_error err = ERR_INIT;
   char m[512];
   int32_t rc = KOMIRA_UDF_OK;
@@ -235,6 +263,11 @@ static int setup(struct eng* e, struct pj* j, const char* name, const char* entr
     return 0;
   }
   return 1;
+}
+
+static int setup(struct eng* e, struct pj* j, const char* name, const char* entry, int nargs, komira_udf_udf** u,
+                 komira_udf_context** c, komira_udf_instance** i) {
+  return setup_as(e, j, name, entry, nargs, KOMIRA_UDF_SHAPE_SCALAR, "l", u, c, i);
 }
 
 /* ---- the groups ------------------------------------------------------------ */
@@ -461,17 +494,337 @@ static void group_kills(struct eng* e, struct pj* j) {
   group_two_args(e, j);
 }
 
-/* `lib`: a runtime library; `group`: two_args, late_load, refusals or kills. */
+/* ---- the groups the mutation sweep asked for ------------------------------ */
+
+/* A SCALAR call of slow_loop (100 ms a row) over 20 rows, cancelled 150 ms
+ * in; then, in the same context, pair on a second instance and slow_loop
+ * again on one row: both answer (a cancelled call leaves the context and
+ * its worker serving: the worker's cancel flag cleared, the CANCEL kept
+ * for the record not taken as a request). */
+static void group_after_cancel(struct eng* e, struct pj* j) {
+  komira_udf_udf *slow = NULL, *pr = NULL;
+  komira_udf_context* c = NULL;
+  komira_udf_instance *is = NULL, *ip = NULL;
+  if (!setup(e, j, "cancelled", "udf_fixtures:slow_loop", 1, &slow, &c, &is)) return;
+  const struct col_spec cs[1] = {{0, 20, 0, 0, -1}};
+  int released = 0;
+  struct ArrowDeviceArray args, out;
+  char m[512];
+  int64_t ms;
+  make_args(&args, 20, 1, cs, &released);
+  int32_t rc = call(e, is, &args, &out, m, sizeof(m), 150, 0, &ms, sizeof(komira_udf_call));
+  if (rc == KOMIRA_UDF_OK) out.array.release(&out.array);
+  pj_case(j, "cancelled", rc, m, ms);
+  if (setup(e, j, "after_cancel_pair", "udf_worker_fixtures:pair", 2, &pr, &c, &ip))
+    two_args_case(e, j, "after_cancel_pair", ip);
+  const struct col_spec one[1] = {{0, 1, 0, 5, -1}};
+  make_args(&args, 1, 1, one, &released);
+  rc = call(e, is, &args, &out, m, sizeof(m), -1, 0, &ms, sizeof(komira_udf_call));
+  int64_t got = -1;
+  if (rc == KOMIRA_UDF_OK) {
+    got = ((const int64_t*)out.array.buffers[1])[out.array.offset];
+    out.array.release(&out.array);
+    snprintf(m, sizeof(m), "OK");
+  }
+  pj_case(j, "after_cancel_same", rc, m, got);
+  if (ip) e->t->close_instance(ip);
+  e->t->close_instance(is);
+  e->t->close_context(c);
+  if (pr) e->t->unload(pr);
+  e->t->unload(slow);
+}
+
+/* 1 + 2x over 4 rows from `base` through `inst`: the number of wrong
+ * values (0), or -1 when the call failed. */
+static int64_t double_case(struct eng* e, komira_udf_instance* inst, int64_t base, char* m, size_t n) {
+  const struct col_spec cs[1] = {{0, 4, 0, base, -1}};
+  int released = 0;
+  struct ArrowDeviceArray args, out;
+  int64_t ms;
+  make_args(&args, 4, 1, cs, &released);
+  if (call(e, inst, &args, &out, m, n, -1, 0, &ms, sizeof(komira_udf_call)) != KOMIRA_UDF_OK) return -1;
+  int64_t wrong = out.array.length != 4;
+  for (int r = 0; r < 4 && !wrong; r++) wrong += ((const int64_t*)out.array.buffers[1])[out.array.offset + r] != 2 * (base + r);
+  out.array.release(&out.array);
+  return wrong;
+}
+
+/* Two UDFs of different arity loaded before the context is opened (in the
+ * zygote build: both before the fork), each with an instance in the one
+ * context, called in turn: each instance runs its own UDF with its own
+ * schema. */
+static void group_two_udfs(struct eng* e, struct pj* j) {
+  komira_udf_udf *pa = NULL, *db = NULL;
+  komira_udf_context* c = NULL;
+  komira_udf_instance *ia = NULL, *ib = NULL;
+  struct spec_block sb;
+  komira_udf_error err = ERR_INIT;
+  char m[512];
+  make_spec(&sb, "udf_worker_fixtures:pair", 2);
+  int32_t rc = e->t->load(e->rt, &sb.spec, &pa, &err);
+  make_spec(&sb, "udf_fixtures:double", 1);
+  if (rc == KOMIRA_UDF_OK) rc = e->t->load(e->rt, &sb.spec, &db, &err);
+  if (rc != KOMIRA_UDF_OK) {
+    take(&err, m, sizeof(m));
+    pj_case(j, "two_udfs", rc, m, -1);
+    return;
+  }
+  if (setup(e, j, "two_udfs", "", 2, &pa, &c, &ia) && setup(e, j, "two_udfs", "", 1, &db, &c, &ib)) {
+    two_args_case(e, j, "two_udfs_pair", ia);
+    int64_t w = double_case(e, ib, 40, m, sizeof(m));
+    pj_case(j, "two_udfs_double", w < 0 ? -1 : 0, w < 0 ? m : "OK", w);
+    two_args_case(e, j, "two_udfs_pair_again", ia);
+  }
+  if (ib) e->t->close_instance(ib);
+  if (ia) e->t->close_instance(ia);
+  if (c) e->t->close_context(c);
+  e->t->unload(db);
+  e->t->unload(pa);
+}
+
+/* 200 calls of keep_then_drop (it keeps a view of its input, so the slot
+ * it came in stays held, on its first 30 calls, then lets all go): every
+ * call answers, and the heap never fills (each slot comes back through
+ * the release ring with its own id; 200 calls wrap the ring's 256 entries
+ * with the 30 held ones). */
+static void group_many_calls(struct eng* e, struct pj* j) {
+  komira_udf_udf* u = NULL;
+  komira_udf_context* c = NULL;
+  komira_udf_instance* i = NULL;
+  if (!setup_as(e, j, "many_calls", "udf_worker_np:keep_then_drop", 1, KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN, "g", &u,
+                &c, &i))
+    return;
+  heap_full_logs = 0;
+  int failed = 0;
+  char m[512] = "OK";
+  for (int k = 0; k < 400; k++) {
+    const struct col_spec cs[1] = {{0, 16, 0, k, -1}};
+    int released = 0;
+    struct ArrowDeviceArray args, out;
+    int64_t ms;
+    make_args(&args, 16, 1, cs, &released);
+    if (call(e, i, &args, &out, m, sizeof(m), -1, 0, &ms, sizeof(komira_udf_call)) == KOMIRA_UDF_OK)
+      out.array.release(&out.array);
+    else
+      failed++;
+  }
+  pj_case(j, "many_calls", failed, failed ? m : "OK", heap_full_logs);
+  e->t->close_instance(i);
+  e->t->close_context(c);
+  e->t->unload(u);
+}
+
+/* Nulls at the bitmap's edges: null_on_zero over 9 rows whose last is 0
+ * (the output bitmap's second byte holds one bit), and none_on_zero_list,
+ * a column result, over 8 rows with row 3 zero (a whole bitmap byte). The
+ * value is wrong values or bits. */
+static void nulls_case(struct eng* e, struct pj* j, const char* name, const char* entry, int32_t shape, int64_t rows,
+                       int64_t zero_row) {
+  komira_udf_udf* u = NULL;
+  komira_udf_context* c = NULL;
+  komira_udf_instance* i = NULL;
+  if (!setup_as(e, j, name, entry, 1, shape, "l", &u, &c, &i)) return;
+  const struct col_spec cs[1] = {{0, rows, 0, -zero_row, -1}};
+  int released = 0;
+  struct ArrowDeviceArray args, out;
+  char m[512];
+  int64_t ms;
+  make_args(&args, rows, 1, cs, &released);
+  int32_t rc = call(e, i, &args, &out, m, sizeof(m), -1, 0, &ms, sizeof(komira_udf_call));
+  int64_t wrong = 0;
+  if (rc == KOMIRA_UDF_OK) {
+    const struct ArrowArray* o = &out.array;
+    const uint8_t* b = o->buffers[0];
+    const int64_t* v = o->buffers[1];
+    wrong += o->length != rows || o->null_count != 1 || b == NULL;
+    for (int64_t r = 0; b != NULL && r < rows && o->length == rows; r++) {
+      int64_t p = o->offset + r;
+      int valid = (b[p >> 3] >> (p & 7)) & 1;
+      int64_t x = r - zero_row;
+      wrong += valid != (r != zero_row);
+      if (valid && r != zero_row) wrong += v[p] != (shape == KOMIRA_UDF_SHAPE_SCALAR ? 2 * x : x);
+    }
+    o->release(&out.array);
+    snprintf(m, sizeof(m), "OK");
+  }
+  pj_case(j, name, rc, m, wrong);
+  e->t->close_instance(i);
+  e->t->close_context(c);
+  e->t->unload(u);
+}
+
+/* A user error's trace: raise_type_error's ERR_RAISED carries the
+ * Python traceback, apart from its message. */
+static void group_trace(struct eng* e, struct pj* j) {
+  komira_udf_udf* u = NULL;
+  komira_udf_context* c = NULL;
+  komira_udf_instance* i = NULL;
+  if (!setup(e, j, "trace", "udf_fixtures:raise_type_error", 1, &u, &c, &i)) return;
+  const struct col_spec cs[1] = {{0, 2, 0, 0, -1}};
+  int released = 0;
+  struct ArrowDeviceArray args, out;
+  make_args(&args, 2, 1, cs, &released);
+  volatile int32_t flag = 0;
+  komira_udf_call call_ = {sizeof(call_), 0, 1, &flag};
+  komira_udf_error err = ERR_INIT;
+  memset(&out, 0, sizeof(out));
+  int32_t rc = e->t->call_batch(i, &call_, &args, &out, &err);
+  char m[600];
+  const char* tr = err.user_trace ? err.user_trace : "";
+  int has_tb = strstr(tr, "Traceback") != NULL && strstr(tr, "raise_type_error: always") != NULL;
+  snprintf(m, sizeof(m), "%s", err.message ? err.message : "");
+  if (err.release) err.release(&err);
+  if (rc == KOMIRA_UDF_OK) out.array.release(&out.array);
+  pj_case(j, "trace", rc, m, has_tb);
+  e->t->close_instance(i);
+  e->t->close_context(c);
+  e->t->unload(u);
+}
+
+/* np_int_out (x * 2) over 1,200,000 rows: a 9.6 MB result, over the 8 MiB
+ * worker-to-engine heap, so it comes back inline. */
+static void group_big(struct eng* e, struct pj* j) {
+  komira_udf_udf* u = NULL;
+  komira_udf_context* c = NULL;
+  komira_udf_instance* i = NULL;
+  if (!setup_as(e, j, "big", "udf_np:np_int_out", 1, KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN, "l", &u, &c, &i)) return;
+  const int64_t N = 1200000;
+  const struct col_spec cs[1] = {{0, N, 0, 0, -1}};
+  int released = 0;
+  struct ArrowDeviceArray args, out;
+  char m[512];
+  int64_t ms;
+  make_args(&args, N, 1, cs, &released);
+  int32_t rc = call(e, i, &args, &out, m, sizeof(m), -1, 0, &ms, sizeof(komira_udf_call));
+  int64_t wrong = 0;
+  if (rc == KOMIRA_UDF_OK) {
+    const int64_t* v = out.array.buffers[1];
+    wrong += out.array.length != N;
+    for (int64_t r = 0; r < N && !wrong; r += 997) wrong += v[out.array.offset + r] != 2 * r;
+    wrong += v[out.array.offset + N - 1] != 2 * (N - 1);
+    out.array.release(&out.array);
+    snprintf(m, sizeof(m), "OK");
+  }
+  pj_case(j, "big", rc, m, wrong);
+  e->t->close_instance(i);
+  e->t->close_context(c);
+  e->t->unload(u);
+}
+
+/* double over 3000 rows reads the host clock 3 times (after row 0, then
+ * every 1024 rows); each read is forwarded and acknowledged within the
+ * engine's 1 ms poll, so the call takes well under a second. The value is
+ * the call's ms. */
+static void group_clock_time(struct eng* e, struct pj* j) {
+  komira_udf_udf* u = NULL;
+  komira_udf_context* c = NULL;
+  komira_udf_instance* i = NULL;
+  if (!setup(e, j, "clock_time", "udf_fixtures:double", 1, &u, &c, &i)) return;
+  const struct col_spec cs[1] = {{0, 3000, 0, 0, -1}};
+  int released = 0;
+  struct ArrowDeviceArray args, out;
+  char m[512];
+  int64_t ms;
+  make_args(&args, 3000, 1, cs, &released);
+  int32_t rc = call(e, i, &args, &out, m, sizeof(m), -1, 0, &ms, sizeof(komira_udf_call));
+  if (rc == KOMIRA_UDF_OK) {
+    out.array.release(&out.array);
+    snprintf(m, sizeof(m), "OK");
+  }
+  pj_case(j, "clock_time", rc, m, ms);
+  e->t->close_instance(i);
+  e->t->close_context(c);
+  e->t->unload(u);
+}
+
+/* The engine's heap (glibc's main arena) around 200 rounds of: a refused
+ * validate whose error is released; load and unload; open_instance and
+ * close_instance. Each round frees what it made, so the arena's use stays
+ * within a few blocks (the value: bytes grown per kind, as a * 1000000 +
+ * b * 1000 + c, each capped at 999). */
+static size_t heap_used(void) { return mallinfo2().uordblks; }
+
+static void group_leaks(struct eng* e, struct pj* j) {
+  komira_udf_udf* u = NULL;
+  komira_udf_context* c = NULL;
+  komira_udf_instance* i = NULL;
+  if (!setup(e, j, "leaks", "udf_fixtures:double", 1, &u, &c, &i)) return;
+  struct spec_block sb;
+  make_spec(&sb, "udf_fixtures:double", 1);
+  komira_udf_spec bad = sb.spec;
+  bad.struct_size = 8;
+  int64_t grown[3];
+  for (int kind = 0; kind < 3; kind++) {
+    size_t before = 0;
+    for (int k = 0; k < 220; k++) {
+      if (k == 20) before = heap_used(); /* after a warm-up */
+      komira_udf_error err = ERR_INIT;
+      if (kind == 0) {
+        (void)e->t->validate(e->rt, &bad, &err);
+      } else if (kind == 1) {
+        komira_udf_udf* v = NULL;
+        if (e->t->load(e->rt, &sb.spec, &v, &err) == KOMIRA_UDF_OK) e->t->unload(v);
+      } else {
+        komira_udf_instance* x = NULL;
+        if (e->t->open_instance(c, u, &x, &err) == KOMIRA_UDF_OK) e->t->close_instance(x);
+      }
+      if (err.release) err.release(&err);
+    }
+    int64_t g = (int64_t)heap_used() - (int64_t)before;
+    grown[kind] = g < 0 ? 0 : g > 999 ? 999 : g;
+  }
+  pj_case(j, "leaks", 0, "", grown[0] * 1000000 + grown[1] * 1000 + grown[2]);
+  e->t->close_instance(i);
+  e->t->close_context(c);
+  e->t->unload(u);
+}
+
+/* The library opened by its absolute path: init finds its own directory
+ * from it (no working directory in front), and a call answers. */
+static void group_abs_path(struct pj* j, const char* lib) {
+  char real[4096];
+  if (realpath(lib, real) == NULL) {
+    pj_case(j, "abs_path", -1, "the library path does not resolve", 0);
+    return;
+  }
+  struct eng e2;
+  if (!open_engine(&e2, real, j)) return;
+  group_two_args(&e2, j);
+  e2.t->shutdown(e2.rt);
+}
+
+static int more_group(struct eng* e, struct pj* j, const char* group) {
+  if (strcmp(group, "after_cancel") == 0) group_after_cancel(e, j);
+  else if (strcmp(group, "two_udfs") == 0) group_two_udfs(e, j);
+  else if (strcmp(group, "many_calls") == 0) group_many_calls(e, j);
+  else if (strcmp(group, "nulls") == 0) {
+    nulls_case(e, j, "rows_9_last_null", "udf_fixtures:null_on_zero", KOMIRA_UDF_SHAPE_SCALAR, 9, 8);
+    nulls_case(e, j, "column_8_rows_null", "udf_fixtures:none_on_zero_list", KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN, 8, 3);
+  } else if (strcmp(group, "trace") == 0) group_trace(e, j);
+  else if (strcmp(group, "big") == 0) group_big(e, j);
+  else if (strcmp(group, "clock_time") == 0) group_clock_time(e, j);
+  else if (strcmp(group, "leaks") == 0) group_leaks(e, j);
+  else return 0;
+  return 1;
+}
+
+/* `lib`: a runtime library; `group`: two_args, late_load, refusals, kills,
+ * after_cancel, two_udfs, many_calls, nulls, trace, big, clock_time, leaks or
+ * abs_path. */
 char* kpw_probe_calls(const char* lib, const char* group) {
   struct pj j = {0};
   pj_open(&j);
   struct eng e;
-  if (open_engine(&e, lib, &j)) {
+  if (strcmp(group, "abs_path") == 0) {
+    /* the first dlopen of this library in the process, by absolute path
+     * (glibc keeps the name a library was first loaded by) */
+    group_abs_path(&j, lib);
+  } else if (open_engine(&e, lib, &j)) {
     if (strcmp(group, "two_args") == 0) group_two_args(&e, &j);
     else if (strcmp(group, "late_load") == 0) group_late_load(&e, &j);
     else if (strcmp(group, "refusals") == 0) group_refusals(&e, &j);
     else if (strcmp(group, "kills") == 0) group_kills(&e, &j);
-    else pj_case(&j, "group", -1, "no such group", 0);
+    else if (!more_group(&e, &j, group)) pj_case(&j, "group", -1, "no such group", 0);
     e.t->shutdown(e.rt);
   }
   return pj_close(&j);

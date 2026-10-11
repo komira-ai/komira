@@ -2,8 +2,8 @@
 type-hinted function defined in __main__ that closes over a loaded object
 (a numpy "model"), serialized by value with cloudpickle.
 
-Run as a python_oracle (BUCK, :closure_capture): argv is [script, out,
-data]. Writes
+Run by tests/test_fixtures.py (a py_test), which compares what it writes
+with the committed tests/fixtures/closure (the payloads gzip'd). Writes
   payload      the payload
   payload_bad  the payload with its last byte flipped (a code object that
                does not match its digest)
@@ -28,7 +28,9 @@ import numpy as np
 
 MODEL_MIB = 16
 
-model = np.random.default_rng(7).standard_normal((MODEL_MIB * 1024 * 1024 // 8 // 1024, 1024))
+# A constant model (its pages are as private or shared as random ones), so
+# the committed payload compresses to a few KiB (tests/fixtures/closure).
+model = np.full((MODEL_MIB * 1024 * 1024 // 8 // 1024, 1024), 0.25)
 model[0, 0] = 1.8
 
 
@@ -37,7 +39,16 @@ def score(x: np.ndarray) -> np.ndarray:
     return x * model[0, 0] + 32.0
 
 
+def _path_free(f, name):
+    """cloudpickle keeps the function's file name and its module's __file__;
+    both are set to the script's bare name, so the bytes do not depend on
+    where the script runs (tests/test_fixtures.py regenerates them)."""
+    f.__code__ = f.__code__.replace(co_filename=name)
+    f.__globals__["__file__"] = name
+
+
 def main(out):
+    _path_free(score, "make_closure.py")
     payload = cloudpickle.dumps(score)
     if len(payload) < model.nbytes:
         raise SystemExit(

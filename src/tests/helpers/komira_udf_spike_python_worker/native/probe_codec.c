@@ -7,8 +7,9 @@
  *     5.2: it decodes its own copy), including each 8-byte number and each
  *     offset of the flatbuffer with a high byte set (a reader that reads a
  *     field short or long takes them);
- *   - pyw_ipc_decode_column on batches pyarrow wrote (:pyarrow_batches, a
- *     python_oracle): another flatbuffer layout, every value and null;
+ *   - pyw_ipc_decode_column on batches pyarrow wrote (the committed
+ *     tests/fixtures/pyarrow_batches.txt, which :test_fixtures regenerates):
+ *     another flatbuffer layout, every value and null;
  *   - the writer's bytes, schema and batch, against tests/ipc_golden.txt,
  *     whose messages tests/test_kudf_ipc.py reads with pyarrow; widths and
  *     refused formats;
@@ -497,6 +498,83 @@ static void pyarrow_cases(struct pj* j) {
   pj_case(j, "pyarrow", cases, first_wrong[0] ? first_wrong : "every batch decoded", wrong);
 }
 
+/* Cases the sweep found no input for (each named for the decoder check it
+ * holds): `good` is the ten-row reply with nulls at rows 1, 4 and 7. */
+static void edge_cases(struct pj* j, const uint8_t* good, size_t len, const int64_t* vals) {
+  size_t rb = fb_batch(good);
+  /* A vector field absent from the RecordBatch: an absent vector has no
+   * elements (not one element at position 0). */
+  refusal_set(j, "nodes_absent", good, len, fb_entry(good, rb, 1), 2, 0);
+  refusal_set(j, "buffers_absent", good, len, fb_entry(good, rb, 2), 2, 0);
+  /* Two nodes over the two buffers: one primitive column needs one node
+   * and two buffers, both. */
+  size_t nv = fb_pos(good, rb, 1);
+  size_t nodes = nv + (size_t)get_u(good, nv, 4) + 4;
+  refusal_set(j, "two_nodes", good, len, nodes - 4, 4, 2);
+  /* A validity bitmap of 1 byte for 9 rows: (9 + 7) / 8 is 2. */
+  {
+    uint8_t v9[2] = {0xFF & ~(1u << 3), 0x01};
+    size_t l9;
+    uint8_t* m9 = write_column(vals, v9, 0, 9, 1, &l9);
+    if (m9 != NULL) {
+      const int64_t short9[4] = {0, 2, 0, 1};
+      refusal(j, "validity_short_9_rows", m9, l9, l9, short9);
+      free(m9);
+    }
+  }
+  /* The bitmap moved to body offset 160 (inside the body's 192 bytes): the
+   * nulls must still be rows 1, 4 and 7. */
+  {
+    int32_t meta;
+    memcpy(&meta, good + 4, 4);
+    uint8_t* m = malloc(len);
+    if (m != NULL) {
+      memcpy(m, good, len);
+      uint8_t* body = m + 8 + meta;
+      memcpy(body + 160, body, 2);
+      memset(body, 0, 2);
+      struct ArrowArray out;
+      int ok = patch_pair(m, 0, 2, 160, 2);
+      const char* why = ok ? decode_copy(m, len, &out) : "fixture: the validity pair is not there once";
+      int64_t wrong = 0;
+      if (ok && why == NULL) {
+        const uint8_t* b = out.buffers[0];
+        const int64_t* v = out.buffers[1];
+        for (int i = 0; i < 10; i++) {
+          int is_valid = b != NULL && ((b[i >> 3] >> (i & 7)) & 1);
+          wrong += is_valid != !(i == 1 || i == 4 || i == 7);
+          wrong += is_valid && v[i] != vals[i];
+        }
+        out.release(&out);
+        why = "decoded";
+      }
+      pj_case(j, "validity_at_160", ok ? 0 : -1, why, wrong);
+      free(m);
+    }
+  }
+  /* A message of no rows (it ends where its metadata ends) whose root
+   * points 2 bytes before that end: reading the table's 4-byte vtable
+   * offset there would cross the end (an unreadable page). */
+  size_t l0;
+  uint8_t* z = write_column(vals, NULL, 0, 0, 0, &l0);
+  if (z != NULL) {
+    int32_t meta0;
+    memcpy(&meta0, z + 4, 4);
+    uint32_t root = (uint32_t)meta0 - 2;
+    uint8_t* m = malloc(l0);
+    if (m != NULL) {
+      memcpy(m, z, l0);
+      memcpy(m + 8, &root, 4);
+      pj_case(j, "root_two_before_end", 1, decode_guarded(m, l0), (int64_t)(l0 - 8 - (size_t)meta0));
+      /* The payload cut one byte short of the metadata it declares. */
+      memcpy(m, z, l0);
+      pj_case(j, "payload_cut_into_meta", 1, decode_guarded(m, l0 - 1), 0);
+      free(m);
+    }
+    free(z);
+  }
+}
+
 void kpw_codec_cases(struct pj* j) {
   enum { N = 10 };
   int64_t vals[N];
@@ -594,6 +672,7 @@ void kpw_codec_cases(struct pj* j) {
     free(comp);
   }
   high_byte_cases(j, good, len);
+  edge_cases(j, good, len, vals);
   free(good);
 
   /* A batch of no rows whose metadata ends at its last vector (no padding

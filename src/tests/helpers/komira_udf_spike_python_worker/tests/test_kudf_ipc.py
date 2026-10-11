@@ -12,6 +12,8 @@ What it proves, and the defect each part catches:
     without nulls, sliced, 0 to 1000 rows: every value and every validity
     bit at the positions it returns (an offset taken from the wrong buffer,
     a validity bitmap given where there are no nulls);
+  - a field without its name reads as "", and a record batch without its
+    nodes or buffers vector as no elements (an absent field dereferenced);
   - every check of read_batch and of the message frame refuses a copy of a
     good message with exactly that defect, with its reason, and the reason
     is the expected one (a check deleted or loosened: the worker reads an
@@ -171,6 +173,9 @@ def schema_cases():
     name = deref(msg, pos(msg, field, 0))
     refused("name_past_end", lambda: kudf_ipc.read_schema(patched(msg, name, "<I", 1 << 20), 0, len(msg)),
             "runs past the metadata")
+    # a field without its name: the name is ""
+    fields, _ = kudf_ipc.read_schema(patched(msg, slot(msg, field, 0), "<H", 0), 0, len(msg))
+    check(fields == [("", "l", True)], "a field without its name: {}".format(fields))
 
 
 # ---- batches -------------------------------------------------------------------
@@ -253,6 +258,9 @@ def batch_refusals():
     # the record batch
     refused("columns", lambda: rd(msg, None, (8, 8)), "1 columns and 2 buffers; the schema has 2 columns")
     refused("buffers", lambda: rd(patched(msg, bufs, "<I", 1)), "1 columns and 1 buffers")
+    # a vector absent from the record batch: no elements (not one)
+    refused("nodes_absent", lambda: rd(patched(msg, slot(msg, h, 1), "<H", 0)), "0 columns and 2 buffers")
+    refused("buffers_absent", lambda: rd(patched(msg, slot(msg, h, 2), "<H", 0)), "1 columns and 0 buffers")
     lp = pos(msg, h, 0)
     refused("negative_length", lambda: rd(patched(msg, lp, "<q", -1)), "a negative batch length")
     refused("node_length", lambda: rd(patched(msg, nodes + 4, "<q", 9)), "column 0 has 9 rows, the batch 10")
