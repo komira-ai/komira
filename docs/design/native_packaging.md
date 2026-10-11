@@ -112,18 +112,18 @@ komira_column_kernels; komira_libc's shims from several; komira_fs's shims (`kom
 `komira_fs_enoent`, `komira_fs_errno_name`) from komira_objectstore. `callers` and the completeness
 lint count library sources only, never `test_srcs` (welded tests link the archives).
 
-**Three libraries reach an owner they do not depend on.** A package's run requirements come from
+**Three libraries reached an owner they did not depend on (fixed by #1325, slice 7).** A package's run requirements come from
 its Mojo dependencies (the packer writes one `name ==version build` row per direct dependency,
 `runRequirements` in `tools/build/package/pack/conda.zig`), so a `.so` whose `NEEDED` names an owner
-outside the library's Mojo closure installs without that owner. On `main`, walking every
+outside the library's Mojo closure installs without that owner. Before #1325, walking every
 `mojo_library` under `src/` (its `external_call` names in library sources, its `cxx_library` and
-vendored-archive dependencies, and the archives those archives need) against its Mojo closure finds:
+vendored-archive dependencies, and the archives those archives need) against its Mojo closure found:
 
-| library | owner it reaches | how | Mojo closure holds the owner |
+| library | owner it reaches | how, before #1325 | Mojo closure held the owner |
 |---|---|---|---|
-| komira_uuid | komira_crypto | declares `komira_awslc_RAND_bytes` and depends on `//third_party/aws-lc:crypto` directly, by design (`src/komira_uuid/BUCK`: "so the package does not depend on `komira_crypto`") | no |
-| komira_http_core | komira_crypto | its own archive: `//third_party/s2n-tls:s2n` has `exported_deps = ["//third_party/aws-lc:crypto"]`, so its `.so` has `NEEDED` on `libkomira_crypto_native.so.1`; its Mojo deps are komira_async, komira_clock, komira_collections, komira_libc and s2n | no |
-| komira_objectstore | komira_fs | depends on `//src/komira_fs:komira_fs_posix` directly and calls three of its functions | no |
+| komira_uuid | komira_crypto | declares `komira_awslc_RAND_bytes` and depended on `//third_party/aws-lc:crypto` directly, by design (its BUCK said "so the package does not depend on `komira_crypto`") | no; now a dependency |
+| komira_http_core | komira_crypto | its own archive: `//third_party/s2n-tls:s2n` has `exported_deps = ["//third_party/aws-lc:crypto"]`, so its `.so` has `NEEDED` on `libkomira_crypto_native.so.1`; its Mojo deps were komira_async, komira_clock, komira_collections, komira_libc and s2n | no; now a dependency |
+| komira_objectstore | komira_fs | depended on `//src/komira_fs:komira_fs_posix` directly and calls three of its functions | no; now depends on `//src/komira_fs:komira_fs` |
 
 (`komira_search_e2e`, an end-to-end suite under `src/tests/e2e`, also links `komira_fs_posix` without
 komira_fs; it is never packaged.) In a static link each is the same archive. Shipped, they differ:
@@ -135,14 +135,19 @@ environment holding the whole set (beta's install job) hides all three, and the 
 and the `install-set` validation refuse wrong requirements (a member listed before what it requires,
 a requirement on a package the set omits), not missing ones.
 
-**Rule (PROPOSED, slice 7):** every owner a library reaches is in its Mojo closure, so the
+**Rule (EXISTS since #1325, slice 7):** every owner a library reaches is in its Mojo closure, so the
 requirement comes from the one existing `depends` path and nothing derives requirements a second
-way. Slice 7 adds the three Mojo dependencies (`komira_uuid` and `komira_http_core` on
-`//src/komira_crypto:komira_crypto`, `komira_objectstore` on `//src/komira_fs:komira_fs`), removes the
-two direct dependencies its own lint refuses (komira_uuid's on `//third_party/aws-lc:crypto`, with the
-BUCK comment that justifies it, and komira_objectstore's on `//src/komira_fs:komira_fs_posix`), and the
-completeness lint refuses the pattern. That lint is the only check that covers komira_uuid and
-komira_objectstore, by construction: their reach is a Mojo call, which no `.so` records. The packer
+way. #1325 added the three Mojo dependencies (`komira_uuid` and `komira_http_core` on
+`//src/komira_crypto:komira_crypto`, `komira_objectstore` on `//src/komira_fs:komira_fs`), removed
+komira_uuid's direct dependency on `//third_party/aws-lc:crypto` and komira_objectstore's on
+`//src/komira_fs:komira_fs_posix`, and gave every `mojo_library` outside `src/tests/` two
+validations (`tools/build/mojo/native_reach.bzl`; [tools/build/mojo/README.md](../../tools/build/mojo/README.md),
+"Native reach"): `native_reach_archives` refuses a linked archive whose owner (`THIRD_PARTY_OWNERS`
+in `tools/build/one_definition/libraries.bzl` for a vendored one) is outside the closure, and
+`native_reach_calls` (a Zig tool) refuses a string literal in library sources starting with such an
+owner's prefix. The calls check is the only one that covers komira_uuid and komira_objectstore, by
+construction: their reach is a Mojo call, which no `.so` records. Still open from slice 7: the
+weak/common pair across two owners and the `callers` entry for a new `external_call` (slice 5). The packer
 (slice 8) checks the `NEEDED` kind of reach on each built package: every komira owner in the `.so`'s
 `NEEDED` is in the library's closure (planted: komira_http_core packed with its crypto dependency
 removed must go red), and beta's install job loads each package with C installed alone (install
@@ -159,7 +164,7 @@ generated version script (on #681: `native_archive` in `tools/build/native/defs.
 | contents, SONAME | the library's own archives, linked whole (dependencies' via `DT_NEEDED`); SONAME `lib<library>_native.so.1`, stable because a release pins every package to one version and build string (`runRequirements` writes `name ==version build`), until symbol versioning is decided. **Limit:** that holds inside one environment only. Two images built against different releases in one process (the SDK engine beside a program, or a user's Mojo shared library) share whichever `.so.1` loaded first, and an export the other image needs may be missing from it; symbol versioning is what would close this |
 | `DT_RUNPATH` | `$ORIGIN` when the library has a komira `DT_NEEDED`, relaxing #681's `native_check.sh`, which refuses any run path; none otherwise. A program's `DT_RUNPATH` is not searched for its dependencies' dependencies (a `DT_RPATH` would be), so http_core's `.so` must find crypto's by its own |
 | callers, declared | an owner's export list depends on its reverse dependencies, which a Buck2 target cannot discover, so each owner declares its `callers` (Mojo libraries and dependent owners' archives), as #681's `komira_native` rule does (`ctx.attrs.callers`). This replaces #685's central `members.bzl` |
-| completeness lint | a root target reads every `mojo_library` from the build graph (as `//:src_layout` does) and every owner archive, runs the call-site reader, and refuses: an `external_call` into an owner by a library its `callers` omits; a weak or common symbol defined in two owners' archives (the one-definition gate's blind spot); a `src/` library depending on a vendored archive or `cxx_library` another library owns; a library whose Mojo closure lacks an owner it reaches (by a call, a direct archive dependency, or an archive its own archive needs). Without it a new caller passes its welded tests (static archives) and fails only at a consumer's link |
+| completeness lint | a root target reads every `mojo_library` from the build graph (as `//:src_layout` does) and every owner archive, runs the call-site reader, and refuses: an `external_call` into an owner by a library its `callers` omits; a weak or common symbol defined in two owners' archives (the one-definition gate's blind spot); a `src/` library depending on a vendored archive or `cxx_library` another library owns; a library whose Mojo closure lacks an owner it reaches (by a call, a direct archive dependency, or an archive its own archive needs; this last refusal **EXISTS** since #1325, per library rather than at the root: `native_reach_archives` and `native_reach_calls`, section "Three libraries reached an owner"). Without it a new caller passes its welded tests (static archives) and fails only at a consumer's link |
 | version script | generated before any link: the callers' `external_call` names, plus the dependent archives' undefined symbols (their `symtab`, minus what they define) that this owner defines (s2n-tls needs many aws-lc functions Mojo never calls); everything else `local: *`. Inputs are archives and sources, never a linked `.so`: generate every list, link each owner before its dependents (`-z defs` against the owners' `.so`), then validate. A consumer cannot call an aws-lc function no komira package calls; the exported surface is what komira tests. A new caller changes the owner's artifact in the same release. Probe 3 (#1304) exported `komira_*` by wildcard instead, wider than this list and never narrower (crypto: 2837 `komira_awslc_` names), so the generated list is first linked in slice 5 |
 | `-Bsymbolic` | each library binds its own references to its own definitions, so nothing loaded earlier can interpose on them |
 
@@ -367,7 +372,7 @@ no exception:
      linked). It runs twice: once in the environment holding the whole set, and once per package
      with C in an environment holding only that package and its own requirements, which is what
      catches a `NEEDED` owner the package does not require (komira_http_core above; komira_uuid and
-     komira_objectstore reach their owner from Mojo, which only slice 7's lint covers);
+     komira_objectstore reach their owner from Mojo, which only slice 7's `native_reach_calls` covers);
   5. **the loaded-from row:** each README program (row 6) runs with the loader's record on
      (`LD_DEBUG=libs`, the record `tests//functional/runtime_libs:loader_trace` already reads for
      `runtime_libs`), and every komira `.so` and every dlopened codec it loaded must lie under
@@ -484,7 +489,7 @@ channel, a new package name, or a change to what a release publishes.
 | 4 | **komira_lz4 and komira_zlib released**: the loaded-from row (install check 5) in `kci_validate` for packages with `dlopen`, run by `beta_validate`; the two declared in `release/artifacts.textproto` and `release_set.txt`. Needs slice 1's DL case green, slice 3, and the staged pipeline's P4 (question 6 for the alternative) | planted: a komira_lz4 package without its `lz4-c` requirement (and komira_zlib without `libzlib`), installed alone on an image that ships its own `liblz4.so.1`/`libz.so.1`: the README run passes, the per-package loaded-from row is red (red only because nothing else installed ships the codec; the whole-set run may stay green if another package pulls it in) | **Go**: two new package names on the channel |
 | 5 | **`elfsyms dynsym`** and the per-library link rule (`native_archive` reworked from #681, `callers`, version-script generator, checks 1 to 7) over **komira_crypto only**, no package change | the planted defect of each of checks 1 to 7 (above), each red | none |
 | 6 | the rule over every owner in the table above, including http_core's `NEEDED` and `DT_RUNPATH` | planted: http_core without `DT_RUNPATH` (B3's check at build time), a caller dropped from `callers`, snappy's `.so` without its C++ runtime (check 7's real case: `_Znwm` undefined) | none |
-| 7 | **completeness lint** at the root; the three missing Mojo dependencies (komira_uuid and komira_http_core on komira_crypto, komira_objectstore on komira_fs) | red on `main`: those three libraries; planted: a weak pair across two owners, a new `external_call` with no `callers` entry, a library depending on another owner's `cxx_library` | none |
+| 7 | **completeness lint**: **done in part** by #1325 (the per-library `native_reach_archives` and `native_reach_calls` validations, and the three missing Mojo dependencies: komira_uuid and komira_http_core on komira_crypto, komira_objectstore on komira_fs); open: the weak/common pair and the `callers` entry | was red on `main` before #1325: those three libraries; #1325's planted cases are the `native_reach_case` targets in `tools/build/tests/negative/native_reach`; still to plant: a weak pair across two owners, a new `external_call` with no `callers` entry, a library depending on another owner's `cxx_library` | none |
 | 8 | **the packer**: `lib_files` (`shared`, `link`, `static`), `native_owns`, `native_links`; the `.so` into the library's `.conda`; `__glibc >=2.34` written from the platform row's `os_floor` beside `__linux`; every `NEEDED` owner in the library's closure; `_conda_facts` stops refusing a library whose every linked archive has an owner in its closure; komira_log's holder archive and (with 2A) JIT object; brotli prefixed before komira_parquet_codec is packaged (question 4) | `_conda_facts` refuses komira_crypto today; planted: a `.so` whose `lib_files` sha256 differs, an archive with no owner in the closure, a holder JIT object named in a built `.so`'s `NEEDED`, komira_http_core packed with its crypto dependency removed; mutant: the packer writes a constant `__glibc` instead of reading `os_floor` (a fixture platform row with another floor goes red) | none (builds only; nothing declared) |
 | 9 | **kci reads `lib_files`** (in part on `main`, #1391: the `lib_files` reader, the `__glibc` acceptance in PUBLISH, and in `src/kci_validate/native_install.mojo` install checks 2, 3 and 5 and a `DF_SYMBOLIC` row (per-library check 6 on the installed bytes), run by no job yet; the rest of this row is open): the generalised `native_link_args` (every pin, dependency order, or the README's flags with 5a), readback of `lib_files` sha256, install checks 3, 4, 6 and 7 (the generated load program, whole set and per package alone; the `mojo build` README row; the system OpenSSL row), and install check 5 extended from slice 4's `dlopen` packages to every package; kci accepts the one `__glibc` requirement, equal on every package of the set; the `native` kind and `_native_depends` never land | kci fixtures, each refused, with a mutant per check: a missing owner flag, a `.so` with an unresolved `NEEDED`, a `lib_files` sha256 mismatch, a JIT object in a built image's `NEEDED`, a `.so` with an unresolved symbol, linked without `-z now` (red only under `RTLD_NOW`), a package missing an owner requirement installed alone, two different `__glibc` values in one set, an unprefixed export planted in crypto's `.so` (install check 7: the system OpenSSL's `SSL_CTX_new` crashes, as in probe 2's leaky control) | none |
 | 10 | **README link commands and every owner called** (question 5a): the packer writes the `sh` block; the readme tool parses it; the install validation uses it or refuses a difference; the build refuses an owner whose README program references none of its exports; komira_metrics's and komira_scan_source's READMEs gain an example reaching their C | planted: a README without an owner's `-l` (install validation red); komira_metrics's README without its new example (build red) | none |
