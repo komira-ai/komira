@@ -144,7 +144,7 @@ src/komira_job_report_proto	0	-
 src/komira_job_supervisor	9976	-
 src/komira_join_assembly	6474	-
 src/komira_json	10000	10000
-src/komira_json_index	8477	-
+src/komira_json_index	10000	-
 src/komira_jsonl	9959	-
 src/komira_jwks	9917	9184
 src/komira_kafka_server	10000	-

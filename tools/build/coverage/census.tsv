@@ -128,7 +128,7 @@ komira//src/komira_job_report_proto:komira_job_report_proto	src/komira_job_repor
 komira//src/komira_job_supervisor:komira_job_supervisor	src/komira_job_supervisor	library	OK	1259	1262	-	-	no	conda	-	-
 komira//src/komira_join_assembly:komira_join_assembly	src/komira_join_assembly	library	OK	540	834	-	-	no	conda	-	-
 komira//src/komira_json:komira_json	src/komira_json	library	OK	656	656	580	580	yes	release	-	-
-komira//src/komira_json_index:komira_json_index	src/komira_json_index	library	OK	462	545	-	-	no	conda	-	-
+komira//src/komira_json_index:komira_json_index	src/komira_json_index	library	OK	607	607	-	-	no	conda	-	-
 komira//src/komira_jsonl:komira_jsonl	src/komira_jsonl	library	OK	3706	3721	-	-	no	conda	-	-
 komira//src/komira_jwks:komira_jwks	src/komira_jwks	library	OK	362	365	169	184	yes	conda	-	-
 komira//src/komira_kafka_server:komira_kafka_server	src/komira_kafka_server	library	OK	1588	1588	-	-	no	release	-	-
