@@ -20,6 +20,9 @@
 #   4. test_publish_past_a_stale_head_below_the_log_start_is_refused: a cold
 #      writer that trusts a `_HEAD` below `_LOG_START` wins a slot no reader
 #      replays; the publish raises instead of reporting success.
+#      test_publish_one_below_the_log_start_is_refused: the lower side of
+#      that refusal: a `_HEAD` at log start - 2 wins log start - 1, the
+#      slot just below the start, and the publish still raises.
 #      test_cold_publish_into_a_fully_reaped_lineage_wins_the_log_start: the
 #      boundary of that refusal: every chunk reaped, the recovered head is
 #      log start - 1, and the publish that wins exactly the log-start slot
@@ -485,6 +488,32 @@ def test_publish_past_a_stale_head_below_the_log_start_is_refused() raises:
     var msg = _error_of_publish(cold, 1)
     assert_true(
         msg.find("publish won chunk 1 below the log start 5") >= 0, msg
+    )
+    assert_true(msg.find("publish again") >= 0, msg)
+    assert_equal(
+        len(_meta(_plain(inner), _L).list_live_splits()),
+        0,
+        "the refused chunk is not visible to a reader",
+    )
+    _ = inner^
+
+
+def test_publish_one_below_the_log_start_is_refused() raises:
+    var inner = _Inner()
+    # A `_HEAD` object at chunk 3 left behind while the log start moved to 5:
+    # a cold writer wins chunk 4, one slot below the start, which no reader
+    # replays.
+    _ = inner.put(
+        head_key(_L), encode_head(ManifestHead(Int64(3), Int64(2), String("")))
+    )
+    _ = inner.put(
+        log_start_key(_L),
+        encode_log_start(LogStart(Int64(10), Int64(5), String(""))),
+    )
+    var cold = _meta(_plain(inner), _L)
+    var msg = _error_of_publish(cold, 1)
+    assert_true(
+        msg.find("publish won chunk 4 below the log start 5") >= 0, msg
     )
     assert_true(msg.find("publish again") >= 0, msg)
     assert_equal(
