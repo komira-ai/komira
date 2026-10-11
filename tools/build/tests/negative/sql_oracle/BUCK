@@ -1,4 +1,4 @@
-load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
+load("@komira//tools/build/sql:defs.bzl", "duckdb_dist", "sql_oracle")
 
 # Planted defects for sql_oracle (tools/build/sql). Every target here must
 # fail; the scenario //tools/build/selftest:sql_oracle builds each and
@@ -277,3 +277,20 @@ sql_oracle(
     },
     outputs = ["out.tsv"],
 )
+
+# REFUSED: `version ... is not a release number (^[0-9.]+$)`, for a
+# duckdb_dist whose version would end the version check's SQL string and
+# comment out the rest (the anchor `$` dropped passes it), one with a
+# leading `v` (the anchor `^` dropped passes it) and an empty one (`+` as
+# `*` passes it). The binary and lib directory are never read: the version
+# is refused first.
+[duckdb_dist(
+    name = "dist_version_{}".format(name),
+    binary = ":sql_error",
+    native_libs = ":sql_error",
+    version = version,
+) for name, version in [
+    ("quote", "1.5.6' AND false THEN NULL END; --"),
+    ("leading_v", "v1.5.6"),
+    ("empty", ""),
+]]
