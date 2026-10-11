@@ -236,6 +236,40 @@ def test_null_partition_and_order_keys() raises:
     _assert_pays(o2.take(), want, "nulls rank")
 
 
+def test_rank_drops_null_order_rows_at_exactly_n_non_null() raises:
+    # RANK <= 2, DESC, one partition. okey: NULL, 5, NULL, 3, NULL. Two
+    # non-NULL rows, exactly N: they rank 1 and 2, the NULL-okey rows rank 3
+    # (§9.2, NULLs last), so only rows 1 and 3 are kept. Rows 0 and 2 arrive
+    # while fewer than N non-NULL rows are seen and must be dropped when the
+    # second arrives; row 4 arrives after and must not be kept. A cut-off one
+    # off (`> N` / `<= N`) keeps all three NULL rows. The same rows split over
+    # two workers (rows 0-2 and rows 3-4, one non-NULL row each, so each
+    # worker alone keeps its NULLs) must drop them on combine.
+    var pk: List[Int64] = [1, 1, 1, 1, 1]
+    var okv: List[Int64] = [0, 5, 0, 3, 0]
+    var okvalid: List[Bool] = [False, True, False, True, False]
+    var b = _batch3(_col_i64(pk, _all(5)), _col_i64(okv, okvalid))
+    var bv = batch_view_over(b)
+    var want: List[Int64] = [1, 3]
+    var st = PartitionTopNHashState[KB_I64, 1, I64, 2, PTN_DIR_DESC, PTN_TIES_RANK, PAY2](KB_I64.make_empty(4))
+    for r in range(5):
+        st.feed_row(bv, r)
+    var o = st.drain_to_record_batch()
+    _assert_pays(o.take(), want, "rank nulls at N")
+    var w0 = PartitionTopNHashState[KB_I64, 1, I64, 2, PTN_DIR_DESC, PTN_TIES_RANK, PAY2](KB_I64.make_empty(4))
+    var w1 = PartitionTopNHashState[KB_I64, 1, I64, 2, PTN_DIR_DESC, PTN_TIES_RANK, PAY2](KB_I64.make_empty(4))
+    for r in range(3):
+        w0.feed_row(bv, r)
+    for r in range(3, 5):
+        w1.feed_row(bv, r)
+    var o1 = w1.drain_to_record_batch()
+    var want_w1: List[Int64] = [3, 4]
+    _assert_pays(o1.take(), want_w1, "rank nulls below N")
+    w0.combine(w1^)
+    var oc = w0.drain_to_record_batch()
+    _assert_pays(oc.take(), want, "rank nulls at N after combine")
+
+
 def test_float_partition_keys_nan_and_zero() raises:
     # pk: NaN, -0.0, NaN(other payload), +0.0 -> two partitions; ASC top 1
     # each over okey 4, 3, 2, 1: NaN partition -> row 2, zero partition -> row 3.
