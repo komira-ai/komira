@@ -6,7 +6,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # dispatcher), the extraction of join-key columns into its key slots, the
 # composite join probe operator, the deferred-output records of the
 # streaming join probe with their deferral rule and lever witnesses, the
-# radix-partitioned single-key hash join, and the SEMI / ANTI key set.
+# radix-partitioned single-key hash join, the SEMI / ANTI key set, and the
+# joins whose condition carries a residual predicate (serial, and the parallel
+# SEMI / ANTI mark join).
 mojo_library(
     name = "komira_op_join_probe",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -15,6 +17,7 @@ mojo_library(
         "//src/komira_async:komira_async",
         "//src/komira_async_api:komira_async_api",
         "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_batch_eval:komira_batch_eval",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
         "//src/komira_column_kernels:komira_column_kernels",
@@ -53,6 +56,8 @@ mojo_library(
         "tests/test_join_multikey_parallel_fill.mojo",
         "tests/test_join_probe_levers_counters.mojo",
         "tests/test_join_probe_multi_key_op.mojo",
+        "tests/test_join_residual_eval.mojo",
+        "tests/test_join_residual_latemat.mojo",
         "tests/test_multi_key_merge_parallel.mojo",
         "tests/test_multi_key_parallel_probe.mojo",
         "tests/test_multi_key_parallel_probe_geometry.mojo",
@@ -60,6 +65,9 @@ mojo_library(
         "tests/test_multi_key_skipindex_compaction.mojo",
         "tests/test_radix_join.mojo",
         "tests/test_radix_join_oracle.mojo",
+        "tests/test_residual_mark_cap_nearest.mojo",
+        "tests/test_residual_mark_chain_fill_elide.mojo",
+        "tests/test_residual_mark_parallel_byte_equiv.mojo",
         "tests/test_semi_join_int64_min_key.mojo",
         "tests/test_semi_join_skew_nulls_cancel.mojo",
         "tests/test_semi_salted_count_parallel_byte_equiv.mojo",

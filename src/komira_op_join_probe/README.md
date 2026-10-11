@@ -60,6 +60,14 @@ import from the modules.
   INT64 value is a key, INT64_MIN included. Keys that crowd into one of its
   eight partitions grow the table (a partition stays at most 3/4 full); a
   parallel build of such keys runs serially.
+- `komira_op_join_probe.nested_loop_join`: `execute_residual_join_probe`, the
+  join whose condition carries a residual (non-equi) predicate besides at most
+  one equi-key: INNER, LEFT, SEMI and ANTI (a NULL residual does not pass), and
+  `execute_residual_join_probe_parallel`, which runs a large SEMI or ANTI over
+  one non-NULL INT64 key as the parallel mark join
+  (`residual_semi_anti_parallel`), the same rows. `residual_mask_eval`
+  evaluates the residual over candidate pairs, assembling only the columns it
+  names; the mark join's levers are settings (`residual_mark_configure`).
 - `komira_op_join_probe.join_key_extract`: `extract_join_key_columns_typed`
   (and `extract_join_key_columns_serial`, without a dispatcher) renders a
   batch's key columns into one Int64 key slot per row and key

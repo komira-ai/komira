@@ -13,7 +13,10 @@ records of the streaming join probe (`join_deferred`, `join_deferred_idx`) with
 the rule that decides which morsels defer (`join_defer_verdict`) and the
 witnesses of its levers (`join_probe_levers`), the radix-partitioned
 single-INT64-key hash join (`radix_join`), and the key set of a
-single-INT64-key SEMI or ANTI join (`semi_join`, `semi_join_tasks`). Float keys
+single-INT64-key SEMI or ANTI join (`semi_join`, `semi_join_tasks`), and the joins whose condition carries a
+residual predicate (`nested_loop_join`, `residual_mask_eval`), with the parallel
+SEMI / ANTI mark join (`residual_semi_anti_parallel`) and their witnesses
+(`residual_latemat_counter`, `residual_mark_counter`). Float keys
 follow the query semantics' float model.
 Settings are set once per process from flags (`join_probe_settings`); nothing
 here reads the environment.
