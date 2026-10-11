@@ -57,7 +57,7 @@ from kci_artifact import read_artifacts
 from kci_api import release_platform_dir
 from kci_publish.inputs import LoadedRelease, load_release
 from kci_release_channel import ARTIFACT_TYPE_CONDA, find_channel, parse_channels_file
-from kci_release_set.conda_metadata import KIND_LIBRARY, KIND_METAPACKAGE
+from kci_release_set.conda_metadata import KIND_LIBRARY, KIND_METAPACKAGE, LibFile
 from kci_release_set.release_manifest import RELEASE_MANIFEST_NAME, read_release_manifest
 from kci_release_machine import StageValidation
 
@@ -162,7 +162,7 @@ struct InstallPin(Copyable, Movable):
     (file header). `payload_path` and `payload_sha256` are "" for a
     metapackage.
 
-    Layout: owned Strings and a Bool. No pointer field."""
+    Layout: owned Strings, Lists and Bools. No pointer field."""
 
     var name: String
     var version: String
@@ -176,6 +176,11 @@ struct InstallPin(Copyable, Movable):
     var label: String
     var has_doc_files: Bool
     var readme_sha256: String
+    # a library shipping native files: its metadata.json `lib_files` rows
+    # (`has_lib_files` False when the key is absent) and its run requirements
+    var lib_files: List[LibFile]
+    var has_lib_files: Bool
+    var depends: List[String]
 
     def __init__(out self, var name: String):
         self.name = name^
@@ -190,6 +195,9 @@ struct InstallPin(Copyable, Movable):
         self.label = String("")
         self.has_doc_files = False
         self.readme_sha256 = String("")
+        self.lib_files = List[LibFile]()
+        self.has_lib_files = False
+        self.depends = List[String]()
 
     def file_name(self) -> String:
         """`<name>-<version>-<build>.conda`: the file the channel serves."""
@@ -251,6 +259,9 @@ def install_pins(release: LoadedRelease, names: List[String]) raises -> List[Ins
                     pin.import_name = mem.conda.import_name.copy()
                     pin.label = mem.conda.label.copy()
                     pin.has_doc_files = mem.conda.has_doc_files
+                    pin.lib_files = mem.conda.lib_files.copy()
+                    pin.has_lib_files = mem.conda.has_lib_files
+                    pin.depends = mem.conda.depends.copy()
                     var readme = readme_doc_path(name)
                     for d in range(len(mem.conda.doc_files)):
                         if mem.conda.doc_files[d].path == readme:
