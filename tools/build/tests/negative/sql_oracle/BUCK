@@ -1,0 +1,279 @@
+load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
+
+# Planted defects for sql_oracle (tools/build/sql). Every target here must
+# fail; the scenario //tools/build/selftest:sql_oracle builds each and
+# requires the failure written above it (the message, not only the exit
+# status). The oracles that work are in tests//functional/sql_oracle.
+
+# ---- Build failures: the action runs and DuckDB (or the rule's last check)
+# refuses. A failed action is never cached, so each of these executes on
+# every run of the scenario.
+
+# RED: `Permission Error: Cannot access file "extra.tsv"`: a COPY to a file
+# that is not in `outputs`.
+sql_oracle(
+    name = "undeclared_output",
+    srcs = "undeclared_output.sql",
+    outputs = ["declared.tsv"],
+)
+
+# RED: `sql_oracle: the SQL wrote no <pos>.tsv, a declared output`, for the
+# first, the middle and the last of three outputs: the rule checks each
+# declared output, so a check of only some positions leaves one of these to
+# buck2's own missing-output message.
+[sql_oracle(
+    name = "missing_{}_output".format(pos),
+    srcs = "missing_{}_output.sql".format(pos),
+    outputs = [
+        "first.tsv",
+        "middle.tsv",
+        "last.tsv",
+    ],
+) for pos in ["first", "middle", "last"]]
+
+# RED: `Parser Error: syntax error at or near "SELEC"`.
+sql_oracle(
+    name = "sql_error",
+    srcs = "sql_error.sql",
+    outputs = ["out.tsv"],
+)
+
+# RED: `Permission Error: Cannot access file "not_staged.csv"`: the file is
+# in this package but not in `inputs`.
+sql_oracle(
+    name = "input_outside_inputs",
+    srcs = "input_outside_inputs.sql",
+    inputs = ["staged.csv"],
+    outputs = ["out.tsv"],
+)
+
+# RED: `Permission Error: Cannot access file "/etc/passwd"`: a worker's file.
+sql_oracle(
+    name = "absolute_path",
+    srcs = "absolute_path.sql",
+    outputs = ["out.tsv"],
+)
+
+# RED: `Cannot change configuration option "threads" - the configuration has
+# been locked`.
+sql_oracle(
+    name = "setting_changed",
+    srcs = "setting_changed.sql",
+    outputs = ["out.tsv"],
+)
+
+# RED: `Permission Error: Cannot access file "*.csv"`: a glob pattern, though
+# the one file it matches is an input.
+sql_oracle(
+    name = "glob_read",
+    srcs = "glob_read.sql",
+    inputs = ["staged.csv"],
+    outputs = ["out.tsv"],
+)
+
+# RED: `.sh/.system cannot be used in -safe mode`.
+sql_oracle(
+    name = "dot_command",
+    srcs = "dot_command.sql",
+    outputs = ["out.tsv"],
+)
+
+# RED: each other dot command the README names as refused in safe mode
+# (`.system`, `.read`, `.output`, `.cd`, `.open`, `.import`), with the
+# message the selftest requires. The file each names is an input or a
+# declared output where it can be, so allowed_paths alone would let it
+# through.
+[sql_oracle(
+    name = "dot_{}".format(cmd),
+    srcs = "dot_{}.sql".format(cmd),
+    inputs = [
+        "ok.sql",
+        "staged.csv",
+    ],
+    outputs = ["out.tsv"],
+) for cmd in [
+    "system",
+    "read",
+    "output",
+    "cd",
+    "open",
+    "import",
+]]
+
+# ---- Analysis refusals: nothing runs.
+
+# REFUSED: an output that does not end in a format the rule documents, one
+# target per format: `out.<f>.m<f>` holds `.<f>` and ends in `<f>`, so a
+# substring test or a suffix without its dot passes it. It is the second
+# output, so a check of only the first passes it too.
+[sql_oracle(
+    name = "output_format_{}".format(f),
+    srcs = "ok.sql",
+    outputs = [
+        "ok.tsv",
+        "out.{}.m{}".format(f, f),
+    ],
+) for f in [
+    "parquet",
+    "csv",
+    "tsv",
+]]
+
+# REFUSED: an output name with a glob character, second: the name pattern,
+# not a directory check, refuses it.
+sql_oracle(
+    name = "output_glob",
+    srcs = "ok.sql",
+    outputs = [
+        "out.tsv",
+        "o*.tsv",
+    ],
+)
+
+# REFUSED: an output in a directory of the working directory.
+sql_oracle(
+    name = "output_in_directory",
+    srcs = "ok.sql",
+    outputs = ["sub/out.tsv"],
+)
+
+# REFUSED: no outputs.
+sql_oracle(
+    name = "no_outputs",
+    srcs = "ok.sql",
+    outputs = [],
+)
+
+# REFUSED: an output that is also an input's path.
+sql_oracle(
+    name = "output_is_input",
+    srcs = "ok.sql",
+    inputs = {"out.tsv": "staged.csv"},
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: a build output in the list form of `inputs`, which stages each
+# entry at its path in the package; it is the second entry.
+sql_oracle(
+    name = "built_input_in_list",
+    srcs = "ok.sql",
+    inputs = [
+        "staged.csv",
+        ":sql_error[out.tsv]",
+    ],
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an input path with a `..` segment.
+sql_oracle(
+    name = "input_dotdot",
+    srcs = "ok.sql",
+    inputs = {"../staged.csv": "staged.csv"},
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: a src that is not a .sql file, alone (the single-source form)...
+sql_oracle(
+    name = "src_not_sql",
+    srcs = "staged.csv",
+    outputs = ["out.tsv"],
+)
+
+# ...and second in a list: `notes.sql.mysql` holds `.sql` and ends in `sql`,
+# so a check of only the first src, a substring test or a suffix without its
+# dot passes it.
+sql_oracle(
+    name = "src_not_sql_second",
+    srcs = [
+        "ok.sql",
+        "notes.sql.mysql",
+    ],
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: no srcs.
+sql_oracle(
+    name = "srcs_empty",
+    srcs = [],
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an output named twice.
+sql_oracle(
+    name = "output_twice",
+    srcs = "ok.sql",
+    outputs = [
+        "out.tsv",
+        "out.tsv",
+    ],
+)
+
+# REFUSED: an output that is the directory of an input's path.
+sql_oracle(
+    name = "output_is_input_directory",
+    srcs = "ok.sql",
+    inputs = {"out.tsv/staged.csv": "staged.csv"},
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: a source named twice in the list form of `inputs`.
+sql_oracle(
+    name = "input_twice",
+    srcs = "ok.sql",
+    inputs = [
+        "staged.csv",
+        "staged.csv",
+    ],
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an input path that is also the directory of another input, past
+# the first input path.
+sql_oracle(
+    name = "input_file_and_directory",
+    srcs = "ok.sql",
+    inputs = {
+        "a.csv": "staged.csv",
+        "data": "staged.csv",
+        "data/staged.csv": "staged.csv",
+    },
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an empty, an absolute and a directory (trailing `/`) input path,
+# each refused as a whole path before its segments are read (without that
+# check each would be refused for its empty segment instead).
+sql_oracle(
+    name = "input_empty",
+    srcs = "ok.sql",
+    inputs = {"": "staged.csv"},
+    outputs = ["out.tsv"],
+)
+
+sql_oracle(
+    name = "input_absolute",
+    srcs = "ok.sql",
+    inputs = {"/staged.csv": "staged.csv"},
+    outputs = ["out.tsv"],
+)
+
+sql_oracle(
+    name = "input_trailing_slash",
+    srcs = "ok.sql",
+    inputs = {"data/": "staged.csv"},
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an input path with a segment the name pattern refuses (not `..`,
+# which the `.`/`..` check refuses on its own), the middle of three paths in
+# either order, so a check of only the first or the last path passes it.
+sql_oracle(
+    name = "input_glob_segment",
+    srcs = "ok.sql",
+    inputs = {
+        "a.csv": "staged.csv",
+        "data/*.csv": "staged.csv",
+        "z.csv": "staged.csv",
+    },
+    outputs = ["out.tsv"],
+)
