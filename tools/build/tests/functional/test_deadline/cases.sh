@@ -45,6 +45,22 @@ esac
 RUNNER
 : > "$REPORT"
 bad=0
+# The floor: a run that printed fewer ok cases than this (a case deleted, a
+# case that never says ok, an `exit` before the last case) is refused, here
+# in the action, so the report cannot pass with less in it. It runs from the
+# EXIT trap, so it holds however the script ends. Raise it when a case is
+# added.
+floor() {
+    rc=$?
+    ok_lines=$("$BB" grep -c '^ok ' "$REPORT" || true)
+    if [ "$ok_lines" -lt 6 ]; then
+        echo "BAD floor: $ok_lines ok case(s), fewer than the 6 cases of this script" | "$BB" tee -a "$REPORT" >&2
+        rc=1
+    fi
+    "$BB" rm -rf "$D"
+    exit "$rc"
+}
+trap floor EXIT
 LABEL=//test_deadline:case
 
 alive() { # pid: running, stopped or sleeping, not a zombie
@@ -153,13 +169,4 @@ killed() {
 }
 killed term TERM 143
 killed kill KILL 137
-# The floor: a case list that ran fewer cases than this (a case deleted, an
-# early exit) is refused, here in the action, so the report cannot pass
-# with nothing in it. Raise it when a case is added.
-ok_lines=$("$BB" grep -c '^ok ' "$REPORT" || true)
-if [ "$ok_lines" -lt 6 ]; then
-    echo "BAD floor: $ok_lines ok case(s), fewer than the 6 cases of this script" | "$BB" tee -a "$REPORT" >&2
-    bad=1
-fi
-"$BB" rm -rf "$D"
 exit "$bad"
