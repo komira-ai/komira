@@ -4,6 +4,9 @@
 //!     readme_api_coverage, surface_capability_matrix, test_weld): naming
 //!     neither `tree` nor `files`, or both, is refused at analysis. Catches
 //!     any one of the five `fail()`s deleted.
+//!   - retired_names: an `unchecked` entry naming no file of the tree is
+//!     refused at analysis, by its own message. Catches the membership
+//!     `fail()` deleted.
 //!   - The surface capability matrix in a scratch tree (scratch.zig): a row
 //!     naming a target that does not exist, and a row naming a test
 //!     incompatible with the lint's platform under a package pattern, are
@@ -75,6 +78,12 @@ const ROWS = [_]lib.Row{
         .target = "tests//negative/surface_capability_matrix:both_tree_and_files",
         .text = "name the files in exactly one of `tree` and `files`",
         .also = &.{ "surface_capability_matrix tests//negative/surface_capability_matrix:both_tree_and_files (" },
+    },
+    .{
+        .name = "retired_names_stale_unchecked",
+        .target = "tests//negative/retired_names:stale_unchecked",
+        .text = "unchecked names negative/retired_names/gone.json, which is not in the tree; delete the entry",
+        .also = &.{ "retired_names tests//negative/retired_names:stale_unchecked (" },
     },
 };
 

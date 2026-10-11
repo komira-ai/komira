@@ -1,0 +1,5 @@
+# --from: the units read from a textproto artifacts file, loosely.
+arg "--from"
+arg "release/artifacts.textproto"
+file "release/artifacts.textproto" @artifacts.textproto
+exit 0

@@ -1,0 +1,3 @@
+call buck2 "uquery" "--output-format" "json" "owner(%s)" "src/a/a.mojo" "src/c/c.mojo"
+exit 0
+stdout "{\"src/a/a.mojo\": [\"komira//src/a:a\"]}\n"
