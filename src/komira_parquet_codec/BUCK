@@ -1,5 +1,4 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
-load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 
 # Parquet page compression: the codec dispatch a page reader and writer call
 # (UNCOMPRESSED, SNAPPY, GZIP, ZSTD, LZ4_RAW, the deprecated LZ4, BROTLI), the
@@ -137,28 +136,6 @@ mojo_library(
         "tests/test_snappy_mojo_oracle.mojo",
         "tests/test_snappy_short_offset.mojo",
         "tests/test_text_decompress_direct.mojo",
-    ],
-    visibility = ["PUBLIC"],
-)
-
-# libkomira_parquet_codec_native.so.1: the C this library owns, as its own
-# shared library exporting the names its callers call
-# (tools/build/native/README.md, "Each library's shared library"). Built and
-# checked here; no package ships it yet.
-native_shared_library(
-    name = "komira_parquet_codec_native",
-    archives = [
-        "//third_party/brotli:brotlidec",
-    ],
-    callers = [
-        ":komira_parquet_codec",
-    ],
-    library = "komira_parquet_codec",
-    # Every weak undefined symbol of the library, recorded from its first
-    # green link (checks 3 and 7 hold it to exactly this list):
-    weak_undefined = [
-        # zig's C runtime (crti.o): the profiling hook, absent unless -pg.
-        "__gmon_start__",
     ],
     visibility = ["PUBLIC"],
 )
