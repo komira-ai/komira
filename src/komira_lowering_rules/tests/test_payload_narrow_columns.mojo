@@ -320,8 +320,10 @@ def _derive_keys(var left_on: List[String], var right_on: List[String]) raises -
 
 
 def test_anything_but_one_key_per_side_is_refused() raises:
-    # Two keys on the left only, two on the right only, two on both, none.
-    # Catches: either side's key count check removed, or `== 1` widened.
+    # Two keys on the left only, two on the right only, two on both, none,
+    # and no key on one side only (nothing in the IR pairs the two key
+    # lists). Catches: either side's key count check removed, or `== 1`
+    # widened to `>= 1` or `<= 1`.
     var two = List[String]()
     two.append("key")
     two.append("pv")
@@ -332,6 +334,8 @@ def test_anything_but_one_key_per_side_is_refused() raises:
     _eq(_derive_keys(_keys("key"), two_r.copy()), " | ")
     _eq(_derive_keys(two^, two_r^), " | ")
     _eq(_derive_keys(List[String](), List[String]()), " | ")
+    _eq(_derive_keys(List[String](), _keys("key")), " | ")
+    _eq(_derive_keys(_keys("key"), List[String]()), " | ")
     # The control: one key each.
     _eq(_derive_keys(_keys("key"), _keys("key")), BASE)
 

@@ -108,3 +108,7 @@ union_asof_join => scan#0: | scan#1: | scan#2: | scan#3: | scan#4: | scan#5:
 union_filter_join => scan#0: | scan#1: | scan#2: | scan#3:
 cast_sort_join => scan#0: | scan#1:
 union_join_of_join => scan#0: | scan#1: | scan#2: | scan#3: | scan#4: | scan#5:
+refuse_no_left_key => scan#0: | scan#1: | scan#2: ov:2:1
+refuse_no_right_key => scan#0: | scan#1: | scan#2: ov:2:1
+side_limit => scan#0: | scan#1: bv:2:1
+side_sort => scan#0: | scan#1: bv:2:1

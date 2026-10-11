@@ -22,7 +22,10 @@
 #                          a plan without a join; a FILTER over a join as a side;
 #   union_* / cast_sort_join
 #                          a join two levels below a UNION or a CAST_TO_VARCHAR:
-#                          the node between passes the not-decided state down.
+#                          the node between passes the not-decided state down;
+#   refuse_no_*_key        no key on one side only, one on the other;
+#   side_limit, side_sort  a LIMIT and a SORT side, which keep the scan's
+#                          schema: only FILTER and PROJECT reach the scan.
 # =============================================================================
 
 from std.memory import OwnedPointer
@@ -35,6 +38,7 @@ from komira_plan_ir.logical_plan import (
     ExprArray,
     SOURCE_CSV,
     SOURCE_NDJSON,
+    JOIN_INNER,
 )
 from komira_plan_stats.table_stats import ColumnStats, TableStats
 from komira_scan_source.orc_source import OrcSource
@@ -53,6 +57,8 @@ from komira_lowering_rules_conformance.fixtures import (
     _table_stats,
     _side,
     _join,
+    _keys,
+    _outer,
     _good_right,
     _hc4p,
     _refused,
@@ -85,6 +91,10 @@ def extra_names() -> List[String]:
     n.append("union_filter_join")
     n.append("cast_sort_join")
     n.append("union_join_of_join")
+    n.append("refuse_no_left_key")
+    n.append("refuse_no_right_key")
+    n.append("side_limit")
+    n.append("side_sort")
     return n^
 
 
@@ -183,6 +193,14 @@ def _extra_fixture(name: String) raises -> Optional[LogicalPlan]:
         return LogicalPlan.cast_to_varchar(LogicalPlan.sort(_sort_keys(), _asc(), _hc4p()))
     if name == "union_join_of_join":
         return _union2(_join(_hc4p(), _o()), _join(_hc4p(), _o()))
+    if name == "refuse_no_left_key":
+        return _outer(LogicalPlan.join(_p(), _good_right(), List[String](), _keys(), JOIN_INNER))
+    if name == "refuse_no_right_key":
+        return _outer(LogicalPlan.join(_p(), _good_right(), _keys(), List[String](), JOIN_INNER))
+    if name == "side_limit":
+        return _join(LogicalPlan.limit(5, _p()), _good_right())
+    if name == "side_sort":
+        return _join(LogicalPlan.sort(_sort_keys(), _asc(), _p()), _good_right())
     return None
 
 

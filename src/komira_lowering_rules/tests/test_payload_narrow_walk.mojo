@@ -225,6 +225,14 @@ def test_sides_that_do_not_reach_a_parquet_scan_narrow_nothing() raises:
     middle.append(Expr.alias(Expr.binary(BIN_ADD, Expr.col_ref("pv"), Expr.literal(ScalarValue.from_int(1))), String("z")))
     middle.append(Expr.col_ref("pv"))
     _eq(_derive(_join(LogicalPlan.project(middle^, _scan("pv")), _scan("bv")), f), " | 1:bv:2:1")
+    # An unaliased computed expression: the alias arm is entered only for an
+    # alias. Catches: `(not pure) and e.is_alias()` widened to `or`, which
+    # reads an alias child out of a binary expression.
+    var bare = ExprArray()
+    bare.append(Expr.col_ref("key"))
+    bare.append(Expr.col_ref("pv"))
+    bare.append(Expr.binary(BIN_ADD, Expr.col_ref("pv"), Expr.literal(ScalarValue.from_int(1))))
+    _eq(_derive(_join(LogicalPlan.project(bare^, _scan("pv")), _scan("bv")), f), " | 1:bv:2:1")
 
     var in_cols = List[Tuple[String, UInt8]]()
     in_cols.append((String("pv"), DTAG_I64))
@@ -243,6 +251,16 @@ def test_sides_that_do_not_reach_a_parquet_scan_narrow_nothing() raises:
     aggs.append(AggExpr(AGG_SUM, Optional[Expr](Expr.col_ref("pv")), Optional[String]("pv")))
     var agg = LogicalPlan.aggregate(gb^, aggs^, _scan("pv"))
     _eq(_derive(_join(agg^, _scan("bv")), f), " | 1:bv:2:1")
+    # A LIMIT and a SORT over the scan keep its schema, so `pv` would narrow
+    # if the side were admitted. Catches: the side check admitting a node
+    # kind other than FILTER, PROJECT and SCAN, which the aggregate above
+    # does not catch: it narrows nothing even when admitted.
+    _eq(_derive(_join(LogicalPlan.limit(5, _scan("pv")), _scan("bv")), f), " | 1:bv:2:1")
+    var sort_keys = List[String]()
+    sort_keys.append(String("pv"))
+    var asc = List[Bool]()
+    asc.append(False)
+    _eq(_derive(_join(LogicalPlan.sort(sort_keys^, asc^, _scan("pv")), _scan("bv")), f), " | 1:bv:2:1")
 
     # A scan of every other source kind, each given a footer entry: only
     # Parquet is admitted. Each scan's `source_type` is asserted first, since
