@@ -2,14 +2,17 @@
 # The checks of the kcov distribution, each mode one build action of a
 # validation target (defs.bzl, README.md "Checks"):
 #   sh kcov_check.sh check <busybox> <zig_dir> <report_dir> <kcov_dir> <kcov.tar.gz>
-#       <strip_prefix> <fixture_dir> <version> <zig_triple> <glibc_floor_minor>
+#       <strip_prefix> <fixture_dir> <version> <zig_triple>
 #   sh kcov_check.sh cases <busybox> <zig_dir> <report_dir> <elf_rpath> <conda_payload>
-#       <fixture_dir> <zig_triple> <glibc_floor_minor>
+#       <fixture_dir> <zig_triple>
 #   sh kcov_check.sh same  <busybox> - <report_dir> <dir_a> <dir_b>
 #   sh kcov_check.sh identity <busybox> - <report_dir> <kcov_dir> <sha256> <usage_line>
 # Exits 1 on the first wrong result, naming it; otherwise writes
 # <report_dir>/validation.json, the validation result (and, for `check`, the
 # fixture's reports).
+#
+# The glibc floor and what the loader maps for bin/kcov, read from the ELF
+# files, are the validation :kcov_closure (../loader_closure).
 #
 # `check`, against the built kcov, with LD_LIBRARY_PATH set to a directory of
 # decoys (files named like each library kcov could want, none of them ELF),
@@ -17,31 +20,26 @@
 #   1. The distribution holds bin/kcov, lib/libgcc_s.so.1 and the licence
 #      files under share/licenses/, nothing else, and kcov's licence files
 #      are the source archive's.
-#   2. No GLIBC_2.<n> symbol version above the floor in bin/kcov (with the
-#      libraries it embeds) or lib/.
-#   3. bin/kcov imports from libgcc_s.so.1 (version GCC_3.0).
-#   4. The loader resolves, for bin/kcov, its own lib/libgcc_s.so.1 and
-#      glibc libraries from outside the distribution and the decoys, nothing
-#      else.
-#   5. `kcov --version` prints `kcov <version>`.
-#   6. kcov run on fixtures/cov_fixture.c (zig cc -g -O0) reports each
+#   2. bin/kcov imports from libgcc_s.so.1 (version GCC_3.0).
+#   3. `kcov --version` prints `kcov <version>`.
+#   4. kcov run on fixtures/cov_fixture.c (zig cc -g -O0) reports each
 #      COV:hit line hit and each COV:miss line missed, and the report, with
 #      the source directory and the timestamp normalized, is
 #      fixtures/cov_fixture.cobertura.xml byte for byte.
-#   7. In that run the loader searched the DT_RPATH of bin/kcov and
+#   5. In that run the loader searched the DT_RPATH of bin/kcov and
 #      initialised its lib/libgcc_s.so.1 and glibc libraries from outside the
 #      distribution and the decoys, nothing else; and in the traced fixture
 #      it initialised the preload library kcov wrote (libkcov_sowrapper.so).
-#   8. kcov run as the coverage variant runs it, on fixtures/cov_fixture.c
+#   6. kcov run as the coverage variant runs it, on fixtures/cov_fixture.c
 #      and fixtures/cov_part.c compiled with their directory mapped to a
 #      placeholder `/_..._` that exists nowhere:
 #      `--replace-src-path=^/_+:<root>` (a regex, kcov's std::regex, so zig's
 #      libc++) and `--configure=cobertura-full-paths=1`. Each COV line is
 #      reported as marked in its file, and the normalized report is
 #      fixtures/cov_fixture_relocated.cobertura.xml byte for byte.
-#   9. The HTML report writes the data files of the source archive's data/
+#   7. The HTML report writes the data files of the source archive's data/
 #      byte for byte (the arrays kcov_build.sh generated from them).
-# `cases` runs the functions behind 2, 4 and 7, and elf_rpath and
+# `cases` runs the functions behind 5, and elf_rpath and
 # conda_payload, and the mode `identity` (in its own process), on inputs
 # whose answer is known, wrong ones included.
 # `same` compares two builds of the distribution: same files, modes, bytes.
@@ -107,25 +105,6 @@ decoys() {
     for n in "$@"; do echo "decoy" >"$d/$n"; done
 }
 
-# The GLIBC_2.<n> versions above GLIBC_2.<floor> that <file>... name, one per
-# line (none: empty). Version names are strings of the dynamic string table,
-# so this also reads the libraries kcov embeds as byte arrays. Fails when a
-# stage does (a <file> it cannot read); grep finding no version is not a
-# failure.
-glibc_over() {
-    floor=$1
-    shift
-    cat "$@" | strings -n 8 | { grep -o 'GLIBC_2\.[0-9][0-9.]*' || [ "$?" = 1 ]; } | sort -u | awk -F. -v f="$floor" '$2 + 0 > f + 0 { print }'
-}
-
-# The loader's list of what <exe> loads, with LD_LIBRARY_PATH=<decoy>, into
-# <out>. Status 1 when the loader fails (it mapped a decoy) or names one.
-trace_loads() {
-    LD_LIBRARY_PATH="$2" LD_TRACE_LOADED_OBJECTS=1 "$1" >"$3" 2>&1 || return 1
-    if grep -q "$2" "$3"; then return 1; fi
-    return 0
-}
-
 # The LD_DEBUG_OUTPUT file of <prefix>.* that searched <exe>'s DT_RPATH
 # ("RPATH from file"; a DT_RUNPATH reads "RUNPATH from file"), or nothing.
 rpath_record() {
@@ -147,29 +126,6 @@ glibc_outside() {
         /*) return 0 ;;
     esac
     return 1
-}
-
-# The first entry of the loader's list <ldd> (LD_TRACE_LOADED_OBJECTS) of a
-# program in <dir>/bin that is neither one of its own libraries <own>...
-# (<dir>/bin/../lib/<own>) nor a glibc library outside <dir> and <decoy>;
-# nothing when there is none.
-ldd_stray() {
-    ldd=$1
-    dir=$2
-    decoy=$3
-    shift 3
-    while read -r name arrow path _; do
-        case "$name" in linux-vdso.so.1 | /lib64/ld-linux-x86-64.so.2) continue ;; esac
-        if [ "$arrow" = "=>" ]; then
-            for o in "$@"; do
-                [ "$name" = "$o" ] && [ "$path" = "$dir/bin/../lib/$o" ] && continue 2
-            done
-            glibc_outside "$path" "$dir" "$decoy" && continue
-        fi
-        echo "$name $arrow $path"
-        return 0
-    done <"$ldd"
-    return 0
 }
 
 # The first path in <inits> (the objects an LD_DEBUG=libs record initialised,
@@ -227,7 +183,6 @@ check() {
     FIX=$(abs "$4")
     VERSION=$5
     TRIPLE=$6
-    FLOOR=$7
     KCOV="$KDIR/bin/kcov"
     OWN="$KDIR/bin/../lib/libgcc_s.so.1"
     DECOY="$T/decoy"
@@ -247,33 +202,20 @@ check() {
     done
     pass
 
-    # 2. glibc floor (the static checks first)
-    cat "$KCOV" "$KDIR"/lib/* | strings -n 8 | grep 'GLIBC_2\.' >/dev/null || red "no GLIBC_ symbol version in bin/kcov: not a glibc binary?"
-    over=$(glibc_over "$FLOOR" "$KCOV" "$KDIR"/lib/*) || red "glibc_over failed on bin/kcov or lib/"
-    [ -z "$over" ] || red "bin/kcov or lib/ needs $over, above the floor GLIBC_2.$FLOOR"
-    pass
-
-    # 3. The unwinder. glibc's pthread_cancel unwinds kcov's threads with
+    # 2. The unwinder. glibc's pthread_cancel unwinds kcov's threads with
     # libgcc_s.so.1; kcov's C++ frames must name the same unwinder. This
     # sees one GCC_3.0 import, not where every _Unwind_* comes from: the
-    # run of check 6 ends in pthread_cancel, and a second unwinder crashes it.
+    # run of check 4 ends in pthread_cancel, and a second unwinder crashes it.
     strings -n 7 "$KCOV" | grep -x 'GCC_3\.0' >/dev/null ||
         red "bin/kcov imports no GCC_3.0 symbol from libgcc_s.so.1: its _Unwind_* are another unwinder's (README.md, The unwinder)"
     pass
 
-    # 4. what the loader resolves
-    trace_loads "$KCOV" "$DECOY" "$T/ldd" || red "the loader took a decoy from LD_LIBRARY_PATH for bin/kcov: $(cat "$T/ldd")"
-    grep -q "^[[:space:]]*libgcc_s.so.1 => $OWN " "$T/ldd" || red "bin/kcov does not load libgcc_s.so.1 from its own lib/: $(cat "$T/ldd")"
-    stray=$(ldd_stray "$T/ldd" "$KDIR" "$DECOY" libgcc_s.so.1)
-    [ -z "$stray" ] || red "bin/kcov loads $stray, which is neither glibc from the system nor its own lib/libgcc_s.so.1: $(cat "$T/ldd")"
-    pass
-
-    # 5. version
+    # 3. version
     v=$(LD_LIBRARY_PATH="$DECOY" "$KCOV" --version 2>"$T/log") || red "kcov --version failed"
     [ "$v" = "kcov $VERSION" ] || red "kcov --version printed '$v', want 'kcov $VERSION'"
     pass
 
-    # 6. A coverage run, with kcov's defaults and --cobertura-only. The
+    # 4. A coverage run, with kcov's defaults and --cobertura-only. The
     # fixture is copied to a real directory: kcov reports the realpath of a
     # source file and drops one it cannot open.
     SRC="$T/fixture"
@@ -297,7 +239,7 @@ check() {
         red "the fixture's report is not fixtures/cov_fixture.cobertura.xml (normalized: @SRC@, timestamp 0)"
     pass
 
-    # 7. The loader's records of that run (the traced fixture inherits
+    # 5. The loader's records of that run (the traced fixture inherits
     # LD_DEBUG and writes a file of its own). kcov's is the one that searched
     # the DT_RPATH of bin/kcov.
     rec=$(rpath_record "$KCOV" "$T/lddebug")
@@ -318,7 +260,7 @@ check() {
     [ -n "$found" ] || red "the fixture did not initialise the preload library libkcov_sowrapper.so: $(grep -h 'sowrapper' "$T"/lddebug.* | head -n 5)"
     pass
 
-    # 8. The coverage variant's run (tools/build/coverage). Its binaries'
+    # 6. The coverage variant's run (tools/build/coverage). Its binaries'
     # DWARF names their sources under a placeholder `/_..._` that never
     # exists, which kcov maps back to a source root (realpath first, then
     # the regex), and it writes full paths. The build directory is deleted
@@ -351,7 +293,7 @@ check() {
         red "the relocated fixture's report is not fixtures/cov_fixture_relocated.cobertura.xml (normalized: @ROOT@, timestamp 0)"
     pass
 
-    # 9. The HTML report (kcov's default output) and the arrays behind it.
+    # 7. The HTML report (kcov's default output) and the arrays behind it.
     # The arrays of the bash and Python helpers and of kcov_system_lib are
     # not checked: the variant runs none of those engines.
     DATA="$UP/data"
@@ -457,29 +399,11 @@ cases() {
     PAYLOAD=$(abs "$2")
     FIX=$(abs "$3")
     TRIPLE=$4
-    FLOOR=$5
     CC="$ZIG cc -target $TRIPLE -O1"
     R="$T/rpath"
     DECOY="$T/decoy"
     decoys "$DECOY" libkcovprobe.so.1
-    mkdir -p "$R/bin" "$R/lib" "$T/glibc"
-
-    # glibc_over: silent on a binary linked for the floor, and names the
-    # version of a binary that needs a newer glibc (arc4random is GLIBC_2.36).
-    # shellcheck disable=SC2086 # $CC is a command line
-    $CC "$FIX/glibc_new.c" -o "$T/glibc/floor" >"$T/log" 2>&1 && red "glibc_new.c linked for the floor: it must need a newer glibc"
-    grep -q arc4random "$T/log" || red "glibc_new.c failed to link for the floor, but not over arc4random"
-    "$ZIG" cc -target "${TRIPLE%%.*}.2.38" -O1 "$FIX/glibc_new.c" -o "$T/glibc/new" >"$T/log" 2>&1 || red "zig cc of glibc_new.c for glibc 2.38 failed"
-    over=$(glibc_over "$FLOOR" "$T/glibc/new") || red "glibc_over failed on a binary needing GLIBC_2.36"
-    [ "$over" = "GLIBC_2.36" ] || red "glibc_over says '$over' of a binary needing GLIBC_2.36, want 'GLIBC_2.36'"
-    pass
-    # A stage of glibc_over's pipeline that fails fails it (set -o pipefail):
-    # without that, `cat` of a file it cannot read leaves an empty list, which
-    # reads as "nothing above the floor".
-    if glibc_over "$FLOOR" "$T/glibc/missing" >"$T/log" 2>&1; then
-        red "glibc_over exited 0 on a file that does not exist: a failing stage of its pipeline is ignored (set -o pipefail)"
-    fi
-    pass
+    mkdir -p "$R/bin" "$R/lib"
 
     # The decoy and the run path. libkcovprobe.so.1 and a program linked
     # against it as kcov links libgcc_s.so.1: a positional input, with
@@ -491,14 +415,10 @@ cases() {
         red "zig cc of rpath_main.c failed"
     # shellcheck disable=SC2086
     $CC "$FIX/rpath_main.c" "$R/lib/libkcovprobe.so.1" -o "$R/bin/plain" >"$T/log" 2>&1 || red "zig cc of rpath_main.c without a run path failed"
-    over=$(glibc_over "$FLOOR" "$R/bin/probe" "$R/lib/libkcovprobe.so.1") || red "glibc_over failed on the probe"
-    [ -z "$over" ] || red "glibc_over says '$over' of binaries linked for the floor"
-    pass
     [ "$("$R/bin/probe")" = "kcov_probe 42" ] || red "the probe does not find its library through its run path"
     pass
     # As zig links it, the run path is a DT_RUNPATH: LD_LIBRARY_PATH comes
-    # first, the decoy wins, and both detectors see it.
-    trace_loads "$R/bin/probe" "$DECOY" "$T/ldd" && red "trace_loads missed a decoy that wins over a DT_RUNPATH: $(cat "$T/ldd")"
+    # first, and the decoy wins.
     LD_DEBUG=libs LD_DEBUG_OUTPUT="$T/runpath" LD_LIBRARY_PATH="$DECOY" "$R/bin/probe" >"$T/log" 2>&1 &&
         red "the probe ran with a decoy on LD_LIBRARY_PATH and a DT_RUNPATH: zig wrote a DT_RPATH (drop elf_rpath, README.md)"
     # With nothing on LD_LIBRARY_PATH holding the library, the loader reaches
@@ -515,39 +435,19 @@ cases() {
     # elf_rpath makes it a DT_RPATH: the loader's own lib/ comes first.
     cp "$R/bin/probe" "$T/probe.runpath"
     "$ELF_RPATH" "$R/bin/probe" >"$T/log" 2>&1 || red "elf_rpath refused a file with one DT_RUNPATH"
-    trace_loads "$R/bin/probe" "$DECOY" "$T/ldd" || red "after elf_rpath the loader still took the decoy: $(cat "$T/ldd")"
     out=$(LD_DEBUG=libs LD_DEBUG_OUTPUT="$T/rpath" LD_LIBRARY_PATH="$DECOY" "$R/bin/probe" 2>"$T/log") || red "after elf_rpath the probe fails with a decoy on LD_LIBRARY_PATH"
     [ "$out" = "kcov_probe 42" ] || red "after elf_rpath the probe printed '$out'"
     [ -n "$(rpath_record "$R/bin/probe" "$T/rpath")" ] || red "rpath_record found no DT_RPATH search of the converted probe"
     [ "$(cmp -l "$T/probe.runpath" "$R/bin/probe" | wc -l)" = 1 ] || red "elf_rpath changed more than the one tag byte"
     pass
-    # ldd_stray and inits_stray (checks 4 and 7) are silent on the converted
-    # probe, which loads its own library and glibc from the system...
-    stray=$(ldd_stray "$T/ldd" "$R" "$DECOY" libkcovprobe.so.1)
-    [ -z "$stray" ] || red "ldd_stray says '$stray' of the converted probe, which loads only its own library and glibc: $(cat "$T/ldd")"
+    # inits_stray (check 5) is silent on the converted probe, which loads
+    # its own library and glibc from the system...
     sed -n 's/.*calling init: //p' "$(rpath_record "$R/bin/probe" "$T/rpath")" | sort -u >"$T/inits"
     grep -qxF "$R/bin/../lib/libkcovprobe.so.1" "$T/inits" || red "the probe's record initialised no lib/libkcovprobe.so.1 of its own: $(cat "$T/inits")"
     stray=$(inits_stray "$T/inits" "$R" "$DECOY" libkcovprobe.so.1)
     [ -z "$stray" ] || red "inits_stray says '$stray' of the converted probe: $(cat "$T/inits")"
     pass
-    # A decoy that is an ELF library, as the Mojo toolchain's lib/ holds one:
-    # the loader maps it without a word, so only the detectors can see it.
-    # The unconverted probe (DT_RUNPATH) takes it; trace_loads must fail, and
-    # ldd_stray must name a library of the probe's own name taken from there.
-    E="$T/elf_decoy"
-    mkdir -p "$E"
-    # shellcheck disable=SC2086
-    $CC -shared -fPIC "$FIX/rpath_lib.c" -Wl,-soname,libkcovprobe.so.1 -o "$E/libkcovprobe.so.1" >"$T/log" 2>&1 || red "zig cc of the ELF decoy failed"
-    cp "$T/probe.runpath" "$R/bin/probe.runpath"
-    LD_LIBRARY_PATH="$E" LD_TRACE_LOADED_OBJECTS=1 "$R/bin/probe.runpath" >"$T/ldd" 2>&1 ||
-        red "the loader refused the ELF decoy, so this case shows nothing: $(cat "$T/ldd")"
-    trace_loads "$R/bin/probe.runpath" "$E" "$T/ldd" && red "trace_loads missed an ELF decoy that wins over a DT_RUNPATH: $(cat "$T/ldd")"
-    stray=$(ldd_stray "$T/ldd" "$R" "$E" libkcovprobe.so.1)
-    [ "$stray" = "libkcovprobe.so.1 => $E/libkcovprobe.so.1" ] ||
-        red "ldd_stray says '$stray' of a probe taking its own library's name from the ELF decoy, want that decoy: $(cat "$T/ldd")"
-    rm "$R/bin/probe.runpath"
-    pass
-    # ...and each names a library with a glibc name that the loader took from
+    # ...and names a library with a glibc name that the loader took from
     # the program's own lib/ (searched before the system): a probe linked
     # like the first one, with a libm.so.6 of its own.
     M="$T/glibc_named"
@@ -560,11 +460,6 @@ cases() {
     $CC "$FIX/rpath_main.c" "$M/lib/libkcovprobe.so.1" "$M/lib/libm.so.6" -Wl,--disable-new-dtags '-Wl,-rpath,$ORIGIN/../lib' \
         -o "$M/bin/probe" >"$T/log" 2>&1 || red "zig cc of rpath_main.c with a libm.so.6 failed"
     "$ELF_RPATH" "$M/bin/probe" >"$T/log" 2>&1 || red "elf_rpath refused the probe with a libm.so.6"
-    trace_loads "$M/bin/probe" "$DECOY" "$T/ldd" || red "the probe with a libm.so.6 took the decoy: $(cat "$T/ldd")"
-    grep -q "^[[:space:]]*libm.so.6 => $M/bin/../lib/libm.so.6 " "$T/ldd" ||
-        red "the probe does not load libm.so.6 from its own lib/, so this case shows nothing: $(cat "$T/ldd")"
-    stray=$(ldd_stray "$T/ldd" "$M" "$DECOY" libkcovprobe.so.1)
-    [ "$stray" = "libm.so.6 => $M/bin/../lib/libm.so.6" ] || red "ldd_stray says '$stray' of a probe loading libm.so.6 from its own lib/, want that libm.so.6"
     LD_DEBUG=libs LD_DEBUG_OUTPUT="$T/named" LD_LIBRARY_PATH="$DECOY" "$M/bin/probe" >"$T/log" 2>&1 || red "the probe with a libm.so.6 of its own failed"
     rec=$(rpath_record "$M/bin/probe" "$T/named")
     [ -n "$rec" ] || red "rpath_record found no DT_RPATH search of the probe with a libm.so.6"
@@ -712,8 +607,8 @@ identity() {
 }
 
 case "$MODE" in
-    check) [ $# -eq 7 ] || red "usage: check needs 7 arguments after the report dir" ;;
-    cases) [ $# -eq 5 ] || red "usage: cases needs 5 arguments after the report dir" ;;
+    check) [ $# -eq 6 ] || red "usage: check needs 6 arguments after the report dir" ;;
+    cases) [ $# -eq 4 ] || red "usage: cases needs 4 arguments after the report dir" ;;
     same) [ $# -eq 2 ] || red "usage: same needs 2 arguments after the report dir" ;;
     identity) [ $# -eq 3 ] || red "usage: identity needs 3 arguments after the report dir" ;;
     *) red "unknown mode '$MODE'" ;;
