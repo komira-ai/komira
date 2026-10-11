@@ -44,6 +44,16 @@ from komira_plan_ir.logical_plan import (
     SCAN_UNBOUNDED,
 )
 from komira_plan_ir.plan_helpers import _copy_plan, validate_plan_integrity
+from komira_plan_ir.plan_decisions import (
+    EXCHANGE_KIND_GATHER,
+    EXCHANGE_KIND_BROADCAST,
+    EXCHANGE_KIND_HASH,
+    EXCHANGE_KIND_RANGE,
+    write_join_build_side,
+    write_agg_mode,
+    write_scan_boundedness,
+    write_exchange_kind,
+)
 
 
 def _schema(a: String, b: String) -> Schema:
@@ -286,6 +296,55 @@ def test_integrity_refuses_a_boundedness_outside_the_space() raises:
     assert_true(validate_plan_integrity(s))
     s._scan.value()[].boundedness = UInt8(9)
     assert_false(validate_plan_integrity(s))
+
+
+def _side_text(v: UInt8) -> String:
+    var s = String("")
+    write_join_build_side(s, v)
+    return s^
+
+
+def _mode_text(v: UInt8) -> String:
+    var s = String("")
+    write_agg_mode(s, v)
+    return s^
+
+
+def _bound_text(v: UInt8) -> String:
+    var s = String("")
+    write_scan_boundedness(s, v)
+    return s^
+
+
+def _kind_text(v: UInt8) -> String:
+    var s = String("")
+    write_exchange_kind(s, v)
+    return s^
+
+
+def test_every_writer_names_every_value_and_shows_an_unnamed_one() raises:
+    """Each decision writer names every constant of its space (including
+    UNSET) and writes `<space>#<n>` for a value no constant names, so a
+    corrupt value is visible in a render instead of aliasing a neighbour.
+    Catches an arm dropped (its value would print as `#<n>`) and a fallback
+    that names a real value."""
+    assert_equal(_side_text(JOIN_BUILD_SIDE_LEFT), "left")
+    assert_equal(_side_text(JOIN_BUILD_SIDE_RIGHT), "right")
+    assert_equal(_side_text(JOIN_BUILD_SIDE_UNSET), "unset")
+    assert_equal(_side_text(UInt8(7)), "build_side#7")
+    assert_equal(_mode_text(AGG_MODE_SINGLE), "single")
+    assert_equal(_mode_text(AGG_MODE_PARTIAL), "partial")
+    assert_equal(_mode_text(AGG_MODE_FINAL), "final")
+    assert_equal(_mode_text(AGG_MODE_UNSET), "unset")
+    assert_equal(_mode_text(UInt8(9)), "agg_mode#9")
+    assert_equal(_bound_text(SCAN_BOUNDED), "bounded")
+    assert_equal(_bound_text(SCAN_UNBOUNDED), "unbounded")
+    assert_equal(_bound_text(UInt8(5)), "boundedness#5")
+    assert_equal(_kind_text(EXCHANGE_KIND_GATHER), "GATHER")
+    assert_equal(_kind_text(EXCHANGE_KIND_BROADCAST), "BROADCAST")
+    assert_equal(_kind_text(EXCHANGE_KIND_HASH), "HASH")
+    assert_equal(_kind_text(EXCHANGE_KIND_RANGE), "RANGE")
+    assert_equal(_kind_text(UInt8(9)), "exchange_kind#9")
 
 
 def main() raises:

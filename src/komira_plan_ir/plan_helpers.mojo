@@ -117,6 +117,20 @@ from komira_scan_source.source_variant import SourceVariant
 from komira_scan_source.parquet_source import ParquetSource
 from komira_scan_source.in_memory_source import InMemorySource
 from komira_collections.slab import Slab
+from komira_plan_ir.plan_copy_arms import (
+    _copy_scan_node,
+    _copy_filter_node,
+    _copy_project_node,
+    _copy_aggregate_node,
+    _copy_join_node,
+    _copy_sort_node,
+    _copy_limit_node,
+    _copy_distinct_node,
+    _copy_topn_node,
+    _copy_partition_by_node,
+    _copy_partition_topn_node,
+    _copy_asof_join_node,
+)
 
 
 # =============================================================================
@@ -531,255 +545,36 @@ def _copy_plan_body(plan: LogicalPlan) raises -> LogicalPlan:
 
     Call `_copy_plan`, not this -- the pre/post conditions that make the copy
     trustworthy live there.
+
+    ⚠ THE ARMS ARE FUNCTIONS (`plan_copy_arms.mojo`), SO THAT THIS FRAME STAYS
+    SMALL: it is on the stack once per plan level, and with the arms inline a
+    64-relation chain overflowed the stack at -O0 (that module's header has
+    the numbers). Do not inline an arm back.
     """
     if plan.tag == PLAN_SCAN:
-        # Route the source identity through
-        # `SourceVariant.copy()` (refcount-bumps an InMemorySource's
-        # ArcPointer[Slab[RecordBatch]] without buffer byte-copy); the
-        # InMemorySource arm of the SourceVariant carries the batch payload.
-        var proj_copy: Optional[List[String]] = None
-        if plan._scan.value()[].projection:
-            proj_copy = plan._scan.value()[].projection.value().copy()
-        var filter_copy: Optional[Expr] = None
-        if plan._scan.value()[].filter:
-            filter_copy = plan._scan.value()[].filter.value().copy()
-        var full_schema: Schema
-        if plan._scan.value()[].schema:
-            full_schema = _copy_schema(plan._scan.value()[].schema.value())
-        else:
-            full_schema = _copy_schema(plan.output_schema)
-        var rc_copy: Optional[Int] = None
-        if plan._scan.value()[].row_count:
-            rc_copy = plan._scan.value()[].row_count.value()
-        var ts_copy: Optional[TableStats] = None
-        if plan._scan.value()[].table_stats:
-            ts_copy = Optional[TableStats](plan._scan.value()[].table_stats.value().copy())
-        # Preserve the scan's
-        # `source_kind` across the deep-copy rebuild (the plan-compile cache
-        # `.copy()` and every optimizer copy route here). Without threading
-        # the kind the copy would reset it to COLUMNAR and a routing predicate
-        # would misread the copied scan.
-        return LogicalPlan.scan_from_source(
-            plan._scan.value()[].source.copy(),
-            full_schema^,
-            proj_copy^,
-            filter_copy^,
-            rc_copy^,
-            ts_copy^,
-            plan._scan.value()[].source_kind,
-            plan._scan.value()[].boundedness,
-        )
-
+        return _copy_scan_node(plan)
     elif plan.tag == PLAN_FILTER:
-        var child = _copy_plan(plan._filter.value()[].child[])
-        var pred = plan._filter.value()[].predicate.copy()
-        # ★★ THE UDF SNAPSHOT IS PRESERVED.
-        #
-        # A copy of a UDF-carrying Filter that drops `udf` comes back WITHOUT
-        # the customer's function — and `FilterData.predicate` on that path is
-        # the `lit(true)` PLACEHOLDER the UDF path stamps, so the copy would be
-        # a node that returns EVERY ROW and says nothing.
-        #
-        # ⚠ THE BLAST RADIUS IS NOT PUSHDOWN. `_copy_plan` is called from many
-        # sites across the optimizer rule modules plus
-        # `EngineContext.explain_analyze`, and every `_take_*_child` helper in
-        # this file routes through it, so ANY pass that copies a subtree
-        # would drop the UDF. Pinned by the optimizer UDF-opacity tests.
-        if plan._filter.value()[].has_udf():
-            return LogicalPlan.filter_with_udf(
-                pred^,
-                child^,
-                OwnedPointer[UdfData](
-                    plan._filter.value()[].udf.value()[].copy()
-                ),
-            )
-        return LogicalPlan.filter(pred^, child^)
-
+        return _copy_filter_node(plan)
     elif plan.tag == PLAN_PROJECT:
-        var child = _copy_plan(plan._project.value()[].child[])
-        var exprs = _copy_expr_array(plan._project.value()[].exprs)
-        # Preserve the
-        # `is_cse_introduced` barrier flag across plan copies.
-        # `push_predicates_down` reads it to skip pushing past a
-        # CSE-materializer Project; dropping it silently would let
-        # predicates leak below a synthetic Project and dangle the
-        # `_cse_*` ColRef target.
-        var cse_flag = plan._project.value()[].is_cse_introduced
-        # ★★ THE UDF SNAPSHOT IS PRESERVED. See the FILTER arm above. On a
-        # Project a dropped payload is worse to diagnose: `ProjectData.exprs`
-        # on the UDF path are PLACEHOLDER col-refs, so the copy would be a
-        # valid-looking projection of the wrong columns rather than an
-        # obviously empty node.
-        if plan._project.value()[].has_udf():
-            return LogicalPlan.project_with_udf(
-                exprs^,
-                child^,
-                OwnedPointer[UdfData](
-                    plan._project.value()[].udf.value()[].copy()
-                ),
-                cse_flag,
-            )
-        return LogicalPlan.project(exprs^, child^, cse_flag)
-
+        return _copy_project_node(plan)
     elif plan.tag == PLAN_AGGREGATE:
-        var child = _copy_plan(plan._aggregate.value()[].child[])
-        var gb = _copy_expr_array(plan._aggregate.value()[].group_by)
-        var aggs = _copy_agg_expr_array(plan._aggregate.value()[].agg_exprs)
-        # The recorded mode is a decision, not a derivable fact: a copy that
-        # dropped it would turn a PARTIAL into an UNSET (SINGLE) aggregate.
-        var agg_mode = plan._aggregate.value()[].mode
-        # ★★ THE UDF SNAPSHOT IS PRESERVED. See the FILTER arm above.
-        if plan._aggregate.value()[].has_udf():
-            return LogicalPlan.aggregate_with_udf(
-                gb^,
-                aggs^,
-                child^,
-                OwnedPointer[UdfData](
-                    plan._aggregate.value()[].udf.value()[].copy()
-                ),
-                agg_mode,
-            )
-        return LogicalPlan.aggregate(gb^, aggs^, child^, agg_mode)
-
+        return _copy_aggregate_node(plan)
     elif plan.tag == PLAN_JOIN:
-        var left = _copy_plan(plan._join.value()[].left[])
-        var right = _copy_plan(plan._join.value()[].right[])
-        # Preserve algo_hint across plan copies. Without this,
-        # `_copy_plan` defaults algo_hint to JOIN_ALGO_AUTO and loses explicit
-        # HASH/SORT_MERGE choices set by the caller (DataFrame.join algo=,
-        # the auto-select rule in _compile_join, etc).
-        # Also preserve `residual` (non-equi / range `predicate=`
-        # condition) across plan copies — dropping it silently loses the
-        # join condition.
-        # And preserve the recorded `build_side` and `adaptive_allowed`: a
-        # copy that dropped them would silently hand the build back to the
-        # right input.
-        var join_resid: Optional[OwnedPointer[Expr]] = None
-        if plan._join.value()[].has_residual():
-            join_resid = OwnedPointer(plan._join.value()[].residual.value()[].copy())
-        var build_side = plan._join.value()[].build_side
-        var adaptive = plan._join.value()[].adaptive_allowed
-        return LogicalPlan.join(
-            left^,
-            right^,
-            plan._join.value()[].left_on.copy(),
-            plan._join.value()[].right_on.copy(),
-            plan._join.value()[].join_type,
-            plan._join.value()[].algo_hint,
-            join_resid^,
-            build_side,
-            adaptive,
-        )
-
+        return _copy_join_node(plan)
     elif plan.tag == PLAN_SORT:
-        var child = _copy_plan(plan._sort.value()[].child[])
-        # ⛔ CARRY THE
-        # EXPLICIT NULL PLACEMENT. `nulls_first` is the LAST, OPTIONAL argument
-        # of `LogicalPlan.sort`/`.topn`, so omitting it COMPILES, RUNS, and
-        # silently re-derives the DEFAULT placement
-        # (`null_order_policy.derived_nulls_first`) — the SAME
-        # PLAN SHAPE carrying a DIFFERENT ORDER BY. `_copy_plan` is the generic
-        # deep copy the optimizer rule modules reach, so it is the highest-fanout
-        # dropper in the tree; it is stated in full here and named by tag at the
-        # other rebuild sites.
-        #
-        # ⚠ BOUND TO A LOCAL RATHER THAN SPELLED INSIDE THE CALL, matching the
-        # `ref ld` binds on the LIMIT arms: a third walk of the same
-        # `plan._sort.value()[]` chain inside one call expression is the shape
-        # that bit `.n`/`.offset` on Mojo 1.0.0.
-        var nf_copy = Optional(plan._sort.value()[].nulls_first.copy())
-        return LogicalPlan.sort(
-            plan._sort.value()[].keys.copy(),
-            plan._sort.value()[].descending.copy(),
-            child^,
-            nf_copy^,
-        )
-
+        return _copy_sort_node(plan)
     elif plan.tag == PLAN_LIMIT:
-        var child = _copy_plan(plan._limit.value()[].child[])
-        # Forward the RANGE offset, don't drop it on rebuild.
-        return LogicalPlan.limit(
-            plan._limit.value()[].n, child^, offset=plan._limit.value()[].offset
-        )
-
+        return _copy_limit_node(plan)
     elif plan.tag == PLAN_DISTINCT:
-        var child = _copy_plan(plan._distinct.value()[].child[])
-        var cols: Optional[List[String]] = None
-        if plan._distinct.value()[].columns:
-            cols = plan._distinct.value()[].columns.value().copy()
-        return LogicalPlan.distinct(cols^, child^)
-
+        return _copy_distinct_node(plan)
     elif plan.tag == PLAN_TOPN:
-        var child = _copy_plan(plan._topn.value()[].child[])
-        # Carry the EXPLICIT NULL
-        # placement; omitting it silently re-derives the DEFAULT
-        # (`null_order_policy.derived_nulls_first`).
-        var nf_copy = Optional(plan._topn.value()[].nulls_first.copy())
-        return LogicalPlan.topn(
-            plan._topn.value()[].keys.copy(),
-            plan._topn.value()[].descending.copy(),
-            plan._topn.value()[].n,
-            child^,
-            nf_copy^,
-        )
-
+        return _copy_topn_node(plan)
     elif plan.tag == PLAN_PARTITION_BY:
-        var child = _copy_plan(plan._partition_by.value()[].child[])
-        var pk = plan._partition_by.value()[].partition_keys.copy()
-        var ok = plan._partition_by.value()[].order_keys.copy()
-        var desc = plan._partition_by.value()[].descending.copy()
-        var exprs = List[PartitionExpr]()
-        for i in range(len(plan._partition_by.value()[].partition_exprs)):
-            exprs.append(plan._partition_by.value()[].partition_exprs[i].copy())
-        # `partition_by()` raises for unknown PartitionExpr func tags. On a copy
-        # path the input is already valid, so the raise is unreachable -- but
-        # a handler that returned `LogicalPlan(plan.tag, ...)` would answer an
-        # "unreachable" case by producing the exact SHELL this function exists
-        # never to produce (and `_copy_plan`'s post-condition would then report
-        # a dropped payload instead of the PartitionExpr the factory rejected).
-        # `_copy_plan` is a `def`, so it simply propagates.
-        return LogicalPlan.partition_by(pk^, ok^, desc^, exprs^, child^)
-
+        return _copy_partition_by_node(plan)
     elif plan.tag == PLAN_PARTITION_TOPN:
-        var child = _copy_plan(plan._partition_topn.value()[].child[])
-        # Preserve func + over_fetch_k across deep copy.
-        # Preserve output_rank_col_name across
-        # deep copy. Optional[String] requires explicit Some/None branch
-        # construction (no auto-derive sentinel).
-        var rank_col_copy: Optional[String] = None
-        if plan._partition_topn.value()[].output_rank_col_name:
-            rank_col_copy = String(
-                plan._partition_topn.value()[].output_rank_col_name.value()
-            )
-        return LogicalPlan.partition_topn(
-            plan._partition_topn.value()[].partition_keys.copy(),
-            plan._partition_topn.value()[].sort_keys.copy(),
-            plan._partition_topn.value()[].descending.copy(),
-            plan._partition_topn.value()[].k,
-            child^,
-            plan._partition_topn.value()[].func,
-            plan._partition_topn.value()[].over_fetch_k,
-            rank_col_copy^,
-        )
-
+        return _copy_partition_topn_node(plan)
     elif plan.tag == PLAN_ASOF_JOIN:
-        # AsofJoin deep copy.
-        ref aj = plan._asof_join.value()[]
-        var left = _copy_plan(aj.left[])
-        var right = _copy_plan(aj.right[])
-        return LogicalPlan.asof_join(
-            left^, right^,
-            aj.left_keys.copy(),
-            aj.right_keys.copy(),
-            aj.left_asof,
-            aj.right_asof,
-            aj.strategy,
-            aj.tolerance,
-            aj.left_sort_keys.copy(),
-            aj.left_sort_desc.copy(),
-            aj.right_sort_keys.copy(),
-            aj.right_sort_desc.copy(),
-        )
+        return _copy_asof_join_node(plan)
 
     # PLAN_CSE_REF / PLAN_UNION / PLAN_VIEW_REF / PLAN_CAST_TO_VARCHAR /
     # PLAN_EXCHANGE: delegate to `LogicalPlan.copy()`, which has an arm for

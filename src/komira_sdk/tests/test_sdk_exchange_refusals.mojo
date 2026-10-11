@@ -19,7 +19,7 @@
 #     nested slice passes `assert_offset_limit_is_root`, and the test goes red.
 # =============================================================================
 
-from std.testing import TestSuite, assert_equal, assert_true
+from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
@@ -101,6 +101,13 @@ def test_an_offset_limit_under_an_exchange_still_trips_the_range_invariant() rai
         raised = True
         assert_true("RANGE invariant" in String(e), String(e))
     assert_true(raised, "a nested slice under an exchange passed the RANGE check")
+
+
+def test_an_exchange_with_no_payload_holds_no_offset() raises:
+    """An exchange node whose payload is missing answers False instead of
+    dereferencing the empty payload. Catches the payload check dropped (the
+    walk would abort on `Optional.value()`)."""
+    assert_false(plan_contains_range_offset(LogicalPlan(PLAN_EXCHANGE, _schema())))
 
 
 def main() raises:

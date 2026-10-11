@@ -291,6 +291,43 @@ def test_the_factory_refuses_every_malformed_shape() raises:
     assert_equal(_refusal(_scan(), EXCHANGE_KIND_GATHER, none.copy(), none.copy(), nd.copy(), 0), "")
 
 
+def test_a_stated_nulls_first_is_kept_and_checked() raises:
+    """A RANGE exchange over two order keys with a stated `nulls_first`
+    keeps it as given (not the per-direction default) and renders both keys
+    and both partition keys with their separators; a stated list of the wrong
+    length is refused. Catches the stated list ignored (the default `[F, T]`
+    for ascending/descending would be stored), the length check dropped, and
+    a render that runs keys together."""
+    var ok: List[String] = ["k", "v"]
+    var desc: List[Bool] = [False, True]
+    var nf: List[Bool] = [True, False]
+    var e = LogicalPlan.exchange(
+        _scan(), EXCHANGE_KIND_RANGE, order_keys=ok^, descending=desc^,
+        nulls_first=Optional(nf^),
+    )
+    ref d = e.exchange_data_ref()
+    assert_true(d.nulls_first[0])
+    assert_false(d.nulls_first[1])
+    var text = _render(e)
+    assert_true("order=" in text and "/[T, F]" in text, text)
+    var keys: List[String] = ["k", "v"]
+    var h = LogicalPlan.exchange(_scan(), EXCHANGE_KIND_HASH, keys^)
+    var htext = _render(h)
+    assert_true('keys=["k", "v"]' in htext, htext)
+    var msg = String("")
+    var ok2: List[String] = ["k"]
+    var desc2: List[Bool] = [False]
+    var nf2: List[Bool] = [True, True]
+    try:
+        _ = LogicalPlan.exchange(
+            _scan(), EXCHANGE_KIND_RANGE, order_keys=ok2^, descending=desc2^,
+            nulls_first=Optional(nf2^),
+        )
+    except err:
+        msg = String(err)
+    assert_true("1 order keys and 2 nulls_first flags" in msg, msg)
+
+
 def test_integrity_refuses_an_exchange_with_no_payload() raises:
     """Catches `validate_plan_integrity` with no exchange arm (it would report
     'unknown tag' for a well-formed exchange) or one that skips the payload
