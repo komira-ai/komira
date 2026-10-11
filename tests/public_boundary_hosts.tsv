@@ -1,7 +1,7 @@
 # The domains a URL of this repository may name a host of, besides the names reserved
 # for examples and tests (localhost, example, test, invalid and their subdomains;
 # example.com, example.net, example.org): the public lint's allow-list
-# (//:public_boundary, tools/build/lint/public_boundary.awk, rule host). One row per
+# (//:public_boundary, tools/build/lint/public_boundary/src/rules.zig, rule host). One row per
 # domain, tab-separated: <domain> <reason>. A host is allowed when it is the domain or
 # ends in `.<domain>`. Every row must be used by some URL of the tree: a row no host is
 # under fails the build, so the list names only what the tree uses. A domain here is a
