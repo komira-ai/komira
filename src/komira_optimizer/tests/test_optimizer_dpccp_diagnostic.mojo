@@ -110,9 +110,11 @@ def test_k4_trace_reports_every_emit_and_every_repeat() raises:
     scored, completed; 18 full-set candidates (the first two both
     {0}|{1,2,3}), 7 distinct partitions, 11 repeats. Catches: the hook in
     `emit_pair` dropped (0 candidates), the target filter dropped (40),
-    the pass report reading anything but the iteration counter, a
-    repeated emit collapsed before it reaches the observer (7), and the
-    distinct count not collapsing repeats (18)."""
+    a repeated emit collapsed before it reaches the observer (7), and the
+    distinct count not collapsing repeats (18). In a full solve
+    `emit_pair` refuses nothing, so `emit_calls` equals `scored_pairs`
+    here; test_refused_calls_count_as_emits_not_as_scored tells the two
+    apart."""
     var trace = DPccpTrace(UInt64(15))
     _ = solve_dpccp_with_dp_trace(_k4(), _no_cost(), trace)
     assert_equal(len(trace.passes), 1)
@@ -295,11 +297,15 @@ def test_cross_pass_overflow_is_reported() raises:
     assert_equal(trace.passes[1].emit_calls, UInt64(500_001))
 
 
-def _capped(cap: Int) raises -> DPccpTrace:
-    var chain = _k4()
+def _one_pass(chain: JoinChain, cap: Int, drop_bits: UInt64) raises -> DPccpTrace:
+    """One literal-edge pass over `chain` (four relations) with iteration
+    cap `cap`, the base relations seeded, then the entry `drop_bits`
+    removed from the table (0: none)."""
     var nb = _build_neighbors(4, chain.edges)
     var dp = Dict[UInt64, DPNode]()
     _seed_dp_base_relations(4, chain, dp)
+    if drop_bits != UInt64(0):
+        _ = dp.pop(drop_bits)
     var counter = _IterCounter(UInt64(cap))
     var cache = Dict[UInt64, Int]()
     var none_tdom: Optional[TdomGraph] = None
@@ -308,6 +314,10 @@ def _capped(cap: Int) raises -> DPccpTrace:
         4, chain, nb, dp, counter, _no_cost(), none_tdom, cache, False, trace
     )
     return trace^
+
+
+def _capped(cap: Int) raises -> DPccpTrace:
+    return _one_pass(_k4(), cap, UInt64(0))
 
 
 def test_pass_end_reports_each_overflow_return() raises:
@@ -327,6 +337,23 @@ def test_pass_end_reports_each_overflow_return() raises:
 # =============================================================================
 # The guards in emit_pair, and the reset
 # =============================================================================
+
+
+def test_refused_calls_count_as_emits_not_as_scored() raises:
+    """Path 0-1-2-3, one pass over a table seeded without relation 3: the
+    enumeration does not read the table, so the pass still makes its 10
+    `emit_pair` calls, but every pair whose side contains relation 3 has
+    no DP entry and is refused. Scored are {0}|{1}, {1}|{2}, {0}|{1,2}
+    and {0,1}|{2}: 4 scored pairs, none of the full set, and the pass
+    completes. Catches: the report's `emit_calls` read from anything but
+    the iteration counter (the scored count would give 4), and a refused
+    call reaching `on_pair_scored` (more than 4)."""
+    var trace = _one_pass(_chain(4, [0, 1, 2], [1, 2, 3]), 500_000, _bits([3]))
+    assert_equal(len(trace.passes), 1)
+    assert_equal(trace.passes[0].emit_calls, UInt64(10))
+    assert_equal(trace.passes[0].scored_pairs, 4)
+    assert_true(trace.passes[0].completed)
+    assert_equal(len(trace.candidates), 0)
 
 
 def test_refused_pairs_are_not_scored() raises:

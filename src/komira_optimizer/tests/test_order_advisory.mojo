@@ -25,8 +25,15 @@ from komira_plan_ir.logical_plan import (
     ExprArray,
     AggExprArray,
     SOURCE_PARQUET,
+    PLAN_AGGREGATE,
+    PLAN_DISTINCT,
     PLAN_FILTER,
     PLAN_JOIN,
+    PLAN_LIMIT,
+    PLAN_PARTITION_BY,
+    PLAN_PARTITION_TOPN,
+    PLAN_PROJECT,
+    PLAN_SORT,
     JOIN_INNER,
 )
 from komira_async.runtime.sched_trace import (
@@ -186,10 +193,12 @@ def test_an_equal_cost_reorder_is_silent() raises:
 
 
 def test_a_plan_without_a_join_is_not_reordered() raises:
-    """A scan, a Filter over it, and Join and Filter nodes without their
-    payloads: silent, zero costs, empty orders. Catches: the no-join
-    early return removed (the orders would read "[a]"), and a payload read
-    without a presence check."""
+    """A scan, a Filter over it, and a node of each of the nine kinds the
+    walk descends (Join, Filter, Project, Limit, Aggregate, Sort,
+    Distinct, PartitionBy, PartitionTopN) without its payload: silent,
+    zero costs, empty orders. Catches: the no-join early return removed
+    (the orders would read "[a]"), and any one of the nine presence checks
+    dropped (the walk would read an empty payload)."""
     order_advisory_fire_reset()
     var pred = Expr.binary(BIN_GT, Expr.col_ref("a"), Expr.literal(ScalarValue.from_int(5)))
     var plans = List[LogicalPlan]()
@@ -197,6 +206,13 @@ def test_a_plan_without_a_join_is_not_reordered() raises:
     plans.append(LogicalPlan.filter(pred^, _scan("a", 10)))
     plans.append(LogicalPlan(PLAN_JOIN, _schema("a")))
     plans.append(LogicalPlan(PLAN_FILTER, _schema("a")))
+    plans.append(LogicalPlan(PLAN_PROJECT, _schema("a")))
+    plans.append(LogicalPlan(PLAN_LIMIT, _schema("a")))
+    plans.append(LogicalPlan(PLAN_AGGREGATE, _schema("a")))
+    plans.append(LogicalPlan(PLAN_SORT, _schema("a")))
+    plans.append(LogicalPlan(PLAN_DISTINCT, _schema("a")))
+    plans.append(LogicalPlan(PLAN_PARTITION_BY, _schema("a")))
+    plans.append(LogicalPlan(PLAN_PARTITION_TOPN, _schema("a")))
     for i in range(len(plans)):
         var adv = advise_join_order(plans[i])
         assert_false(adv.fired)
