@@ -1,6 +1,6 @@
 load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
-load(":tree.bzl", "REAL_TREE")
+load(":tree.bzl", "REAL_TREE", "check_real_tree")
 
 # Test 39 (test_weld) over the real rules: what a mojo_library and a mojo_test
 # give the lint (WeldedTestsInfo, tools/build/mojo/providers.bzl). Never
@@ -16,6 +16,12 @@ load(":tree.bzl", "REAL_TREE")
 #                        that name by label, and that file is the one welded
 
 _OTHER_SHARED = "//negative/test_weld/real/src/komira_other:tests/test_shared.mojo"
+
+# REAL_TREE (tree.bzl) is what tests//functional/test_weld/real:ok, the green
+# half, gives the lint; a file added here and not to the list would be seen
+# by `red` alone, which the pull-request check does not build. Loading this
+# package, as resolving `ok` does, fails unless the two agree.
+check_real_tree(glob(["src/komira_real/**"]))
 
 mojo_library(
     name = "komira_real",
