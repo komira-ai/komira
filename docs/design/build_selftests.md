@@ -8,7 +8,7 @@ tests are Zig too. The script is not ported as one runner with a table of cases.
 check moves to the cheapest place that can still fail. This doc lists every check, says where it goes and
 which planted defect proves it can go red. The conversion then lands in slices (the last section).
 
-Status: design, nothing converted yet. Today the script runs on a schedule in the build-system
+Status: slices 1 and 2 have landed; the rest is design. Today the script runs on a schedule in the build-system
 self-test workflow ([ci.md](../ci.md#build-system-self-tests)) and is not the gate. When the conversion is done, every
 check runs in `pr / check`, and nothing runs on a schedule.
 
@@ -66,7 +66,10 @@ incompatible with that platform is in no derived check.
 
 - **`[run_check]` as a validation.** The `[run_check]` of `mojo_binary` and of `rust_binary`
   (`rust/defs.bzl`) is a sub-target only, so nothing in the gate runs it. Making it a `ValidationInfo`
-  of every binary with `expected_stdout` puts rows 1, 21, 26, 22 and 35 in the gate.
+  of every binary with `expected_stdout` puts rows 1, 20, 21, 22, 26, 35 and 49 in the gate.
+  A validation result must be the one output of its action, so the result is a second action
+  that copies a fixed success result and takes the run check's stdout as an input
+  (`tools/build/mojo/run_check.bzl`).
   Mutant: change `:hello`'s `expected_stdout` to `hello from mojoX\n`. The unit must go red.
 - **Green fixtures parked under `tests//negative`** move to `tests//functional`:
   `rust_test:bin_green`, `rust_test:env_scrubbed`, `test_weld/real:ok`, the external-test greens of 35.
@@ -74,10 +77,14 @@ incompatible with that platform is in no derived check.
   (proto), or move them to the komira cell, where `build_targets.sh` already runs `buck2 test` (slice 2
   does this for `td_mojo_test`), or keep them in the `test_limits` scenario.
 - **Sub-targets and `tests//negative`/`tests//src` greens** need a root alias that names them (like
-  `//:tests_lints`). Plain `tests//functional` targets need no alias.
+  `//:tests_lints`). Plain `tests//functional` targets need no alias. Slice 2 names them per
+  package with a `target_suite` (same-package labels need no visibility):
+  `tests//functional/coverage:greens` is itself a functional target, and `//:tests_greens` names
+  `tests//negative/coverage:greens` and `tests//src/tests/coverage:greens`.
 - **Report floors move into the action.** Today the client counts "ok" lines (watchdog >= 15,
   runner_cases >= 5, mem_cap >= 4, test_deadline >= 6). A count floor is the only guard against a
-  case list that runs nothing. In slice 2 the existing case action refuses a short report. That is an
+  case list that runs nothing. In slice 2 the existing case action refuses a short report, at the
+  number of cases each runs (15, 12, 6, 6). That is an
   edit to a script that already exists, not a new one. In slice 7 each case becomes its own named Zig
   test, and the case script is deleted.
 - **A toolchains-cell file list.** The scans 17 tc_md and 19 exported_cells cover `tools/build/cells`.
@@ -312,7 +319,7 @@ goes with the last row that uses it.
 | 46 mojo_test_conda | the conda waits for a named mojo_test's run | 3 | `coverage_keys` row | drop coverage_tests runs from the join | 5 |
 | 46 mojo_test refusals, test_path, shared_lib_enforce | analysis refusals | 3 | `analysis_refusals_coverage` | delete the no-args check | 3 |
 | 46 codegen, coverage_tests_analysis, no_gate | gate counts under the switch; ledger | 3 | `coverage_analysis` | add a gate to a coverage_tests library | 5 |
-| 46 branch_gate_rows | each row names a library under src/ | 1 | target depending on each row, requiring MojoInfo (drops the rule-kind check) | a row naming nothing | 2 |
+| 46 branch_gate_rows | each row names a library under src/ | 1 | target depending on each row, requiring MojoInfo and the row string equal to the library's label (drops the rule-kind check) | a row naming nothing; a row spelled `//src/x:x` | 2 |
 | 47 test_fails, banner, no_profile, raw_version | cov_branch_run decisions | 2 | Zig port unit tests | skip the version check | 7 |
 | 47 annotate refusals, branchwide | cov_branch_annotate refuses; reads its whole input | 2 | Zig port unit tests on captured fixtures | drop the branch-weights scan | 7 |
 | 47 nodebug | classify refuses a nodebug call site | 2 | existing classify cases plus a captured Mojo IR fixture | accept the call site | 7 |
