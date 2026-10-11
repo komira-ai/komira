@@ -1,4 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":uv_fidelity.bzl", "uv_fidelity_targets")
 
 # Native package-registry clients: upload a package file, ask whether it is
 # there, read back what the registry holds, and fetch it, on PyPI and on a
@@ -77,4 +80,51 @@ mojo_library(
         ]),
     },
     visibility = ["PUBLIC"],
+)
+
+# ---- The fidelity fixtures' capture (tests/fidelity/README.md) ---------------
+#
+# `uv_fidelity` (tests/fidelity/main.zig) runs the pinned `uv publish` at a
+# loopback recorder and writes what arrived as the fixtures above. Its unit
+# tests (tests/fidelity/uv_fidelity_test.zig) need no uv: the wheel bytes,
+# the recorder's parser, the .request format, the Authorization assertion,
+# and the committed fixtures as this generator's output. They are part of
+# the package's check; the tool is built only behind them.
+
+_FIDELITY_FIXTURES = [
+    "tests/fidelity/{}.{}".format(case, ext)
+    for case in ["description_header", "minimal", "rich"]
+    for ext in ["METADATA", "request", "whl"]
+]
+
+zig_test(
+    name = "uv_fidelity_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tests/fidelity/uv_fidelity_test.zig",
+    imports = ["tests/fidelity/uv_fidelity.zig"] + _FIDELITY_FIXTURES,
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "uv_fidelity",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tests/fidelity/main.zig",
+    imports = ["tests/fidelity/uv_fidelity.zig"],
+    unit_tests = [":uv_fidelity_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# The capture and its check need the uv download and run uv, so they are
+# declared only on request (`-c komira.uv_fidelity=true`): no `//...` build,
+# no derived unit and no pull-request check builds them.
+#   :uv_fidelity_capture  the fixture directory, captured on the worker
+#   :uv_fidelity_check    the same capture compared with the committed
+#                         fixtures; fails with a diff summary
+uv_fidelity_targets(
+    exec_compatible_with = LINUX_X86_64,
+    fixtures = _FIDELITY_FIXTURES,
+    tool = ":uv_fidelity",
+    uv = "//third_party/uv:uv_dist[uv]",
 )

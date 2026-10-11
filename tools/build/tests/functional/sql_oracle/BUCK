@@ -1,4 +1,4 @@
-load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
+load("@komira//tools/build/sql:defs.bzl", "duckdb_dist", "sql_oracle")
 
 # sql_oracle (tools/build/sql) at work: `write` runs write.sql over data.csv
 # and writes a Parquet file, a CSV file and an expected-result TSV; `check`
@@ -41,4 +41,17 @@ sql_oracle(
         "golden/rows.csv": "golden/rows.csv",
     },
     outputs = ["schema.tsv"],
+)
+
+# A duckdb_dist whose version holds both ends of the digit range, 0 and 9:
+# //tools/build/selftest:sql_oracle builds it, so a version pattern whose
+# range is narrowed by one at either end (`[1-9.]`, `[0-8.]`) fails here.
+# The planted versions it must refuse are in tests//negative/sql_oracle
+# (dist_version_*). Nothing reads its binary or lib directory (`write`'s
+# outputs stand in): no sql_oracle takes it.
+duckdb_dist(
+    name = "dist_version_digit_bounds",
+    binary = ":write",
+    native_libs = ":write",
+    version = "0.9",
 )

@@ -55,7 +55,13 @@ DuckdbInfo = provider(
 def _out(dep):
     return dep[DefaultInfo].default_outputs[0]
 
+# A release number: digits and dots only. It is written into the SQL of
+# every sql_oracle action (the version check), so it can hold no quote.
+_VERSION_PATTERN = "^[0-9.]+$"
+
 def _duckdb_dist_impl(ctx):
+    if not regex_match(_VERSION_PATTERN, ctx.attrs.version):
+        fail("{}: version {} is not a release number ({}): it is written into the SQL of every sql_oracle action".format(ctx.label.raw_target(), repr(ctx.attrs.version), _VERSION_PATTERN))
     return [
         DefaultInfo(default_output = _out(ctx.attrs.binary)),
         DuckdbInfo(binary = _out(ctx.attrs.binary), native_libs = _out(ctx.attrs.native_libs), version = ctx.attrs.version),
@@ -63,7 +69,7 @@ def _duckdb_dist_impl(ctx):
 
 _duckdb_dist = rule(
     impl = _duckdb_dist_impl,
-    doc = "A pinned DuckDB CLI binary with the directory of its C++ runtime (`native_libs`, whose lib/ every sql_oracle action names in LD_LIBRARY_PATH) and the version it must report; nothing is run here.",
+    doc = "A pinned DuckDB CLI binary with the directory of its C++ runtime (`native_libs`, whose lib/ every sql_oracle action names in LD_LIBRARY_PATH) and the version it must report (digits and dots only; any other value is refused at analysis); nothing is run here.",
     attrs = {
         "binary": attrs.dep(),
         "native_libs": attrs.dep(),
