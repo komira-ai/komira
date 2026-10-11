@@ -19,7 +19,7 @@ in one package so the two steps cannot disagree:
   requirements that name no other library of the set, except one byte-equal
   to a conda-forge requirement of `system_libs()` (the system libraries a
   library may open, a compiled copy of
-  [`system_libs.bzl`](../../tools/build/package/system_libs.bzl) that a welded
+  [`system_libs.bzl`](https://github.com/komira-ai/komira/blob/main/tools/build/package/system_libs.bzl) that a welded
   test holds equal to it).
 
 It runs no process and opens no socket; only `verify_member` and the

@@ -1,6 +1,6 @@
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
-load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load(":conda.bzl", "conda_manifest_kci")
 load(":defs.bzl", "launcher_level_test")
 load(":kcov_guard.bzl", "kcov_guard_cases", "kcov_guard_tool")
@@ -13,7 +13,19 @@ launcher_level_test(
     exec_compatible_with = LINUX_X86_64,
 )
 
-# The package-format writer (tar, OCI), a static executable.
+# The unit tests of a library's native files in its package (pack/conda_lib.zig:
+# lib_files rows, the __glibc floor, NEEDED owners), run as a build action.
+zig_test(
+    name = "komira_pack_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "pack/conda_lib.zig",
+    imports = ["pack/common.zig"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# The package-format writer (tar, OCI), a static executable, built behind its
+# unit tests.
 zig_exe(
     name = "komira_pack",
     exec_compatible_with = LINUX_X86_64,
@@ -23,9 +35,11 @@ zig_exe(
         "pack/conda.zig",
         "pack/conda_check.zig",
         "pack/conda_index.zig",
+        "pack/conda_lib.zig",
         "pack/conda_meta.zig",
         "pack/tar_oci.zig",
     ],
+    unit_tests = [":komira_pack_unit"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],

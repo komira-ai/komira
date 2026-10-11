@@ -129,5 +129,9 @@ own BUCK file: komira_crypto, komira_http_core (`NEEDED` komira_crypto's),
 komira_compression and the first-party shims' owners (komira_libc, komira_async, komira_async_api,
 komira_fs, komira_objectstore, komira_metrics, komira_scan_source,
 komira_supervisor). komira_log has none: its holder's accessors are hidden
-by design, one copy per image (the design's question 2). No package ships
-any of them yet.
+by design, one copy per image (the design's question 2), so its holder ships
+as a static archive. Each owner's `mojo_library` names its target
+(`native = ":<library>_native"`; komira_log's says `native_static = True`),
+and its conda package holds the file at lib/ with a `lib_files` row
+([packaging/conda/README.md](../../../packaging/conda/README.md), "A library's
+native code in its package").

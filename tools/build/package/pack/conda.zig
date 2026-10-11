@@ -6,6 +6,7 @@ const json = std.json;
 const Alloc = std.mem.Allocator;
 const pack_common = @import("common.zig");
 const pack_conda_meta = @import("conda_meta.zig");
+const pack_conda_lib = @import("conda_lib.zig");
 const Args = pack_common.Args;
 const Entry = pack_common.Entry;
 const all = pack_common.all;
@@ -195,7 +196,8 @@ pub fn readZip(alloc: Alloc, z: []const u8, what: []const u8) ![]ZipMember {
     return list.toOwnedSlice();
 }
 
-pub const TarFile = struct { name: []const u8, mode: u32, data: []const u8 };
+/// A tar member: a regular file, or a symbolic link (`link` its target, no data).
+pub const TarFile = struct { name: []const u8, mode: u32, data: []const u8, link: []const u8 = "" };
 
 fn octalVal(field: []const u8, what: []const u8) u64 {
     var v: u64 = 0;
@@ -212,8 +214,10 @@ fn allZero(b: []const u8) bool {
     return true;
 }
 
-/// The regular files of a tar written by writeTar, refusing any header that
-/// breaks the determinism rules (mtime, owner, names) or any other entry type.
+/// The regular files and symbolic links of a tar written by writeTar,
+/// refusing any header that breaks the determinism rules (mtime, owner,
+/// names) or any other entry type. Which links a package may hold is the
+/// check's (conda_check.zig): only the link name of its shared library.
 pub fn readTar(alloc: Alloc, t: []const u8, what: []const u8) ![]TarFile {
     var list = std.ArrayList(TarFile).init(alloc);
     var at: usize = 0;
@@ -222,7 +226,9 @@ pub fn readTar(alloc: Alloc, t: []const u8, what: []const u8) ![]TarFile {
         const h = t[at .. at + 512];
         if (allZero(h)) break;
         const name = h[0 .. std.mem.indexOfScalar(u8, h[0..100], 0) orelse 100];
-        if (h[156] != '0') fail("{s}: {s}: entry type `{c}`; only regular files belong in a conda package", .{ what, name, h[156] });
+        if (h[156] != '0' and h[156] != '2') fail("{s}: {s}: entry type `{c}`; only regular files and symbolic links belong in a conda package", .{ what, name, h[156] });
+        const link = if (h[156] == '2') h[157 .. 157 + (std.mem.indexOfScalar(u8, h[157..257], 0) orelse 100)] else "";
+        if (h[156] == '2' and link.len == 0) fail("{s}: {s}: a symbolic link with no target", .{ what, name });
         var sum: u64 = 0;
         for (h, 0..) |c, i| sum += if (i >= 148 and i < 156) ' ' else c;
         if (sum != octalVal(h[148..156], what)) fail("{s}: {s}: bad tar header checksum", .{ what, name });
@@ -233,7 +239,8 @@ pub fn readTar(alloc: Alloc, t: []const u8, what: []const u8) ![]TarFile {
         const mode: u32 = @intCast(octalVal(h[100..108], what));
         at += 512;
         if (at + size > t.len) fail("{s}: {s}: truncated tar member", .{ what, name });
-        try list.append(.{ .name = name, .mode = mode, .data = t[at .. at + size] });
+        if (link.len != 0 and size != 0) fail("{s}: {s}: a symbolic link with data", .{ what, name });
+        try list.append(.{ .name = name, .mode = mode, .data = t[at .. at + size], .link = link });
         at += (size + 511) / 512 * 512;
     }
     if (!allZero(t[at..])) fail("{s}: bytes after the end of the tar", .{what});
@@ -303,14 +310,16 @@ fn guardFor(subdir: []const u8) []const u8 {
 }
 
 /// The run requirements of a library, in the order they are written and
-/// checked: the platform guard, the exact Mojo pin, then each direct
+/// checked: the platform guard, the glibc floor of a package shipping native
+/// files (`__glibc >=V`, conda_lib.zig), the exact Mojo pin, then each direct
 /// dependency at this version AND this build string (`name ==V BUILD`), sorted.
 /// Every package of a release is lockstep, so a dependency's build string is
 /// this package's. Direct dependencies only: the solver's closure is the
 /// build's.
-pub fn runRequirements(alloc: Alloc, subdir: []const u8, pin: []const u8, version: []const u8, build: []const u8, deps: []const []const u8) ![][]const u8 {
+pub fn runRequirements(alloc: Alloc, subdir: []const u8, glibc: ?[]const u8, pin: []const u8, version: []const u8, build: []const u8, deps: []const []const u8) ![][]const u8 {
     var list = std.ArrayList([]const u8).init(alloc);
     try list.append(guardFor(subdir));
+    if (glibc) |g| try list.append(g);
     try list.append(try std.fmt.allocPrint(alloc, "{s} =={s}", .{ mojo_conda_name, pin }));
     const sorted = try alloc.dupe([]const u8, deps);
     std.mem.sort([]const u8, sorted, {}, lessStr);
@@ -572,8 +581,14 @@ pub fn emitPackage(alloc: Alloc, a: Args, stem: []const u8, conda: []const u8, n
 /// pkg tar, one paths.json row, and one `doc_files` row ({path, sha256}) of
 /// metadata.json. A library's README.md is passed as REL README.md
 /// (conda.bzl). metadata.json carries `doc_files` always, [] when none.
+///
+/// A library owning C also gives [--lib-shared SONAME=FILE]
+/// [--lib-static NAME=FILE]... --glibc-floor V [--closure-owner SONAME]...:
+/// its files at lib/, the `__glibc >=V` requirement, and `lib_files` rows in
+/// metadata.json (conda_lib.zig, which also refuses a NEEDED owner outside
+/// the closure). Without them the package has no `lib_files` key.
 pub fn cmdConda(alloc: Alloc, a: Args) !void {
-    allow(a, &.{ "--stamp", "--timestamp-ms", "--subdir", "--mojo-pin", "--license", "--summary", "--home", "--payload", "--dep", "--sources", "--import-name", "--extra-file", "--doc-file", "--label", "--commit", "--refuse", "--out-dir" });
+    allow(a, &.{ "--stamp", "--timestamp-ms", "--subdir", "--mojo-pin", "--license", "--summary", "--home", "--payload", "--dep", "--sources", "--import-name", "--extra-file", "--doc-file", "--label", "--commit", "--refuse", "--out-dir", "--lib-shared", "--lib-static", "--glibc-floor", "--closure-owner" });
     const name = need(a.name, "--name");
     if (one(a, "--refuse")) |why| {
         try writeRefusal(alloc, a, why);
@@ -616,9 +631,14 @@ pub fn cmdConda(alloc: Alloc, a: Args) !void {
     const payload_path = try std.fmt.allocPrint(alloc, "{s}{s}.mojoc", .{ payload_dir, import_name });
     const payload_sha = sha256Hex(payload);
     const docs = try docFiles(alloc, a, name);
+    // The library's native files (conda_lib.zig): refused when a shared
+    // library's NEEDED names a komira owner outside the Mojo closure.
+    const libs = try pack_conda_lib.libFiles(alloc, a);
+    const glibc = try pack_conda_lib.glibcOf(alloc, a, libs);
+    try pack_conda_lib.checkNeeded(alloc, a, name, libs);
 
     // info/
-    const depends = try runRequirements(alloc, subdir, pin, version, build, deps);
+    const depends = try runRequirements(alloc, subdir, glibc, pin, version, build, deps);
     var index = newObject(alloc);
     try index.object.put("arch", str("x86_64"));
     try index.object.put("build", str(build));
@@ -636,10 +656,14 @@ pub fn cmdConda(alloc: Alloc, a: Args) !void {
     var pkg_list = std.ArrayList(Entry).init(alloc);
     try pkg_list.append(.{ .path = payload_path, .mode = 0o644, .data = payload });
     for (docs) |d| try pkg_list.append(.{ .path = d.path, .mode = 0o644, .data = d.data });
+    for (libs) |f| try pkg_list.append(.{ .path = f.path, .mode = f.mode(), .data = if (f.kind == .link) "" else f.data, .link = f.target });
     const pkg_entries = try pkg_list.toOwnedSlice();
     std.mem.sort(Entry, pkg_entries, {}, lessEntry);
     var rows = newArray(alloc);
-    for (pkg_entries) |e| try rows.array.append(try pathRow(alloc, e.path, e.data));
+    for (pkg_entries) |e| {
+        const row = if (pack_conda_lib.find(libs, e.path)) |f| try pack_conda_lib.pathRow(alloc, f) else try pathRow(alloc, e.path, e.data);
+        try rows.array.append(row);
+    }
     var paths = newObject(alloc);
     try paths.object.put("paths", rows);
     try paths.object.put("paths_version", .{ .integer = 1 });
@@ -665,6 +689,7 @@ pub fn cmdConda(alloc: Alloc, a: Args) !void {
     try m.object.put("import_name", str(import_name));
     try m.object.put("kind", str("library"));
     try m.object.put("label", str(need(one(a, "--label"), "--label")));
+    if (libs.len != 0) try m.object.put("lib_files", try pack_conda_lib.metadataRows(alloc, libs));
     try m.object.put("mojo_pin", str(pin));
     try m.object.put("payload_path", str(payload_path));
     try m.object.put("payload_sha256", str(&payload_sha));

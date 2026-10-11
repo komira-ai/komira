@@ -26,6 +26,8 @@ cxx_library(
 # base32 and PEM armor come from komira_encoding.
 mojo_library(
     name = "komira_crypto",
+    # Its C ships in its package as komira_crypto_native below (lib/libkomira_crypto_native.so.1).
+    native = ":komira_crypto_native",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         ":komira_crypto_sha256_hw",
@@ -115,7 +117,8 @@ mojo_library(
 # libkomira_crypto_native.so.1: the C this library owns (prefixed aws-lc and
 # the SHA-256 wrapper) as its own shared library, exporting the names its
 # sources call (tools/build/native/README.md, "Each library's shared
-# library"). Built and checked here; no package ships it yet.
+# library"). Built and checked here, and packed into the library's conda
+# package (`native`).
 native_shared_library(
     name = "komira_crypto_native",
     archives = [

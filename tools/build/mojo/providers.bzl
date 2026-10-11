@@ -34,6 +34,10 @@ MojoInfo = provider(fields = {
     "conda_refusal": provider_field(typing.Any, default = None),
     "direct_conda": provider_field(typing.Any, default = {}),
     "import_name": provider_field(str),
+    # The native code of the library and its closure, a struct from
+    # native_facts (tools/build/mojo/native_facts.bzl); None for a rule that
+    # is not a mojo_library.
+    "native": provider_field(typing.Any, default = None),
     "pkgs": provider_field(typing.Any),  # MojoPkgTSet
     # The package's README.md (the source artifact), None without one. Its
     # conda package installs it at share/doc/<conda name>/README.md
