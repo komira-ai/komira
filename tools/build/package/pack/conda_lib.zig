@@ -257,20 +257,40 @@ pub fn checkNeededOwners(alloc: Alloc, library: []const u8, path: []const u8, ne
     }
 }
 
-/// The NEEDED check of the command line, over every shared library packed.
-pub fn checkNeeded(alloc: Alloc, a: Args, library: []const u8, files: []const LibFile) !void {
-    const owners = try all(alloc, a, "--closure-owner");
+/// The `__glibc` requirement the packer writes, returned only after every
+/// packed shared library's NEEDED passed the closure check: the requirement
+/// cannot be written without the check.
+pub fn checkedGlibc(alloc: Alloc, library: []const u8, files: []const LibFile, floor: []const u8, owners: []const []const u8) Error![]const u8 {
     for (files) |f| {
         if (f.kind != .shared) continue;
         const needs = needed(alloc, f.data) catch |err| switch (err) {
-            error.Refused => pack_common.fail("{s}: {s}", .{ f.path, why }),
+            error.Refused => return refuse(alloc, "{s}: {s}", .{ f.path, why }),
             else => return err,
         };
-        checkNeededOwners(alloc, library, f.path, needs, owners) catch |err| switch (err) {
-            error.Refused => pack_common.fail("{s}", .{why}),
-            else => return err,
-        };
+        try checkNeededOwners(alloc, library, f.path, needs, owners);
     }
+    return glibcRequirement(alloc, floor);
+}
+
+/// `checkedGlibc` of the command line (`komira_pack conda`).
+pub fn packedGlibc(alloc: Alloc, a: Args, library: []const u8, files: []const LibFile) !?[]const u8 {
+    // Refuses a --glibc-floor missing or given without native files.
+    _ = try glibcOf(alloc, a, files);
+    if (files.len == 0) return null;
+    return checkedGlibc(alloc, library, files, one(a, "--glibc-floor").?, try all(alloc, a, "--closure-owner")) catch |err| switch (err) {
+        error.Refused => pack_common.fail("{s}", .{why}),
+        else => return err,
+    };
+}
+
+/// Refused unless the pkg tar member at `l.path` (its `mode`, `link` target
+/// and `data`) is `l`: a shared library 0755 with its bytes, its link name a
+/// symbolic link (0777) to the SONAME holding no data, a static archive 0644.
+pub fn checkMember(alloc: Alloc, mode: u32, link: []const u8, data: []const u8, l: LibFile) Error!void {
+    if (mode != l.mode()) return refuse(alloc, "pkg tar: {s} has mode {o}, must be {o}", .{ l.path, mode, l.mode() });
+    if (!std.mem.eql(u8, link, l.target)) return refuse(alloc, "pkg tar: {s} links to `{s}`, must be `{s}`", .{ l.path, link, l.target });
+    const want: []const u8 = if (l.kind == .link) "" else l.data;
+    if (!std.mem.eql(u8, data, want)) return refuse(alloc, "pkg tar: {s} differs from the library's native file ({d} bytes against {d})", .{ l.path, data.len, want.len });
 }
 
 // ---- rows ----------------------------------------------------------------
@@ -484,4 +504,65 @@ test "a NEEDED owner missing from the Mojo closure is refused" {
     // komira_http_core packed with its crypto dependency removed: refused.
     try testing.expectError(error.Refused, checkNeededOwners(alloc, "komira_http_core", lib, needs, &.{"libkomira_http_core_native.so.1"}));
     try testing.expect(std.mem.indexOf(u8, why, "NEEDED libkomira_crypto_native.so.1") != null);
+}
+
+test "the packer's __glibc comes only after the NEEDED check" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const elf = try testElf(alloc, &.{ "libkomira_crypto_native.so.1", "libc.so.6" });
+    const files = try libFilesOf(alloc, &.{.{ .name = "libkomira_http_core_native.so.1", .data = elf }}, &.{});
+    try testing.expectEqualStrings("__glibc >=2.17", try checkedGlibc(alloc, "komira_http_core", files, "2.17", &.{"libkomira_crypto_native.so.1"}));
+    try testing.expectError(error.Refused, checkedGlibc(alloc, "komira_http_core", files, "2.17", &.{"libkomira_http_core_native.so.1"}));
+    try testing.expect(std.mem.indexOf(u8, why, "NEEDED libkomira_crypto_native.so.1") != null);
+}
+
+test "lib_files rows: a sha256 mismatch on ANY row is refused" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const files = try testFiles(alloc);
+    for (files, 0..) |f, i| {
+        const rows = try metadataRows(alloc, files);
+        try rows.array.items[i].object.put("sha256", str(try alloc.dupe(u8, &sha256Hex("other bytes"))));
+        try testing.expectError(error.Refused, checkRows(alloc, rows, files));
+        const want = try std.fmt.allocPrint(alloc, "the sha256 of {s} is", .{f.path});
+        try testing.expect(std.mem.indexOf(u8, why, want) != null);
+    }
+}
+
+test "lib_files rows: a row for a file the package does not ship is refused" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const files = try testFiles(alloc);
+    // One extra row after the files' rows.
+    var rows = try metadataRows(alloc, files);
+    const extra = try metadataRows(alloc, &.{.{ .path = "lib/libz_extra.a", .kind = .static, .data = "!<arch>\n" }});
+    try rows.array.append(extra.array.items[0]);
+    try testing.expectError(error.Refused, checkRows(alloc, rows, files));
+    try testing.expect(std.mem.indexOf(u8, why, "rows, the package ships") != null);
+    // Rows on a package shipping no native file.
+    try testing.expectError(error.Refused, checkRows(alloc, try metadataRows(alloc, files), &.{}));
+    try testing.expect(std.mem.indexOf(u8, why, "ships no native file") != null);
+}
+
+test "pkg tar members: a native file's mode, link target and bytes are checked" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const files = try testFiles(alloc);
+    // As the packer writes them: accepted.
+    try checkMember(alloc, 0o644, "", files[0].data, files[0]);
+    try checkMember(alloc, 0o777, "libkomira_x_native.so.1", "", files[1]);
+    try checkMember(alloc, 0o755, "", files[2].data, files[2]);
+    // A shared library that is not executable.
+    try testing.expectError(error.Refused, checkMember(alloc, 0o644, "", files[2].data, files[2]));
+    // A static archive that is.
+    try testing.expectError(error.Refused, checkMember(alloc, 0o755, "", files[0].data, files[0]));
+    // The link name pointing elsewhere, or a regular file.
+    try testing.expectError(error.Refused, checkMember(alloc, 0o777, "libother.so.1", "", files[1]));
+    try testing.expectError(error.Refused, checkMember(alloc, 0o777, "", files[1].data, files[1]));
+    // Changed bytes.
+    try testing.expectError(error.Refused, checkMember(alloc, 0o755, "", "\x7fELF other", files[2]));
 }

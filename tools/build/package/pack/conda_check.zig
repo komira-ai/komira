@@ -265,13 +265,18 @@ pub fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
         for (want_files, pkg, rows.array.items) |w, f, row| {
             expectEq("pkg tar member", f.name, w.path);
             const lib = pack_conda_lib.find(libs, w.path);
-            const mode: u32 = if (lib) |l| l.mode() else 0o644;
-            if (f.mode != mode) fail("pkg tar: {s} has mode {o}, must be {o}", .{ f.name, f.mode, mode });
             const target: []const u8 = if (lib) |l| l.target else "";
-            expectEq("pkg tar link target", f.link, target);
-            if (target.len == 0 and !std.mem.eql(u8, f.data, w.data)) {
+            if (lib) |l| {
+                pack_conda_lib.checkMember(alloc, f.mode, f.link, f.data, l) catch |err| switch (err) {
+                    error.Refused => fail("{s}", .{pack_conda_lib.why}),
+                    else => return err,
+                };
+            } else {
+                if (f.mode != 0o644) fail("pkg tar: {s} has mode {o}, must be 644", .{ f.name, f.mode });
+                expectEq("pkg tar link target", f.link, "");
+            }
+            if (lib == null and !std.mem.eql(u8, f.data, w.data)) {
                 if (std.mem.eql(u8, w.path, want_path)) fail("pkg tar: the payload differs from the library's .mojoc ({d} bytes against {d})", .{ f.data.len, w.data.len });
-                if (lib != null) fail("pkg tar: {s} differs from the library's native file ({d} bytes against {d})", .{ f.name, f.data.len, w.data.len });
                 fail("pkg tar: {s} differs from the declared doc file ({d} bytes against {d})", .{ f.name, f.data.len, w.data.len });
             }
             expectEq("paths _path", memberStr(row, "_path", "paths row"), w.path);

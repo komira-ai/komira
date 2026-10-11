@@ -634,8 +634,7 @@ pub fn cmdConda(alloc: Alloc, a: Args) !void {
     // The library's native files (conda_lib.zig): refused when a shared
     // library's NEEDED names a komira owner outside the Mojo closure.
     const libs = try pack_conda_lib.libFiles(alloc, a);
-    const glibc = try pack_conda_lib.glibcOf(alloc, a, libs);
-    try pack_conda_lib.checkNeeded(alloc, a, name, libs);
+    const glibc = try pack_conda_lib.packedGlibc(alloc, a, name, libs);
 
     // info/
     const depends = try runRequirements(alloc, subdir, glibc, pin, version, build, deps);
