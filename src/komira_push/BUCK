@@ -1,0 +1,47 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The caller side of a notify service and the content-blind wake:
+# `WakeTrigger` and the payload-shape guard; the `NotifyPort` trait an
+# application calls, with `NoopNotify` (switched off), `RecordingNotify` (a
+# test double) and `RemoteNotifyPort` (the notify wire of
+# docs/design/notify_wire.md over an `HttpTransport`, with a bearer token from
+# a `BearerTokenSource`); and `register_device_for`, the application route
+# that registers its user's device with notify on the user's behalf. The
+# messages are komira_notify_proto's.
+#
+# Welded tests:
+#   test_wake_guard      the field set of WakeTrigger and of any struct,
+#                        the plaintext byte for byte, and every payload
+#                        refusal (extra member, non-string, duplicate).
+#   test_notify_requests the shape rules and the strict parsers (a `source`
+#                        in a request is refused), with exact messages.
+#   test_remote_notify   golden request bytes over a scripted transport,
+#                        the answer table (202/200 success, any other
+#                        status a failure, a raising transport and a failing
+#                        token source a failure, nothing raised), the
+#                        balance check, and the base URL rules.
+#   test_ports           NoopNotify answers "not configured"; RecordingNotify
+#                        records through a shared handle.
+#   test_device_proxy    the principal comes from the verified token, a
+#                        body naming one is refused, the status mapping (a
+#                        success without a device id is 503), and the error
+#                        envelope's escaping, read back by the strict decoder.
+mojo_library(
+    name = "komira_push",
+    srcs = glob(["*.mojo"]),
+    deps = [
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_server:komira_http_server",
+        "//src/komira_json:komira_json",
+        "//src/komira_notify_proto:komira_notify_proto",
+        "//src/komira_proto_codec:komira_proto_codec",
+    ],
+    test_srcs = [
+        "tests/test_wake_guard.mojo",
+        "tests/test_notify_requests.mojo",
+        "tests/test_remote_notify.mojo",
+        "tests/test_ports.mojo",
+        "tests/test_device_proxy.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

@@ -254,6 +254,10 @@ struct SharedScriptedTransport(
         provenance evidence a custody test asserts on."""
         return self._p[].calls[i].header_value.copy()
 
+    def header_name_at(self, i: Int) -> String:
+        """The token-header NAME the i-th recorded request carried."""
+        return self._p[].calls[i].header_name.copy()
+
     def sent_header_value(self, value: String) -> Bool:
         """True iff SOME recorded request carried exactly `value` as its token
         header. A guard asserts the DURABLE token was sent AND that the

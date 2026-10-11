@@ -1,0 +1,98 @@
+// The notify wire, package komira.notify.v1: what a service sends to a
+// notify service to wake a principal's devices, and to register a device on
+// a signed-in user's behalf. The HTTP routes, statuses and authentication are
+// in docs/design/notify_wire.md. Bodies are proto3 canonical JSON; a receiver
+// decodes requests strictly, so a key this file does not declare is refused.
+syntax = "proto3";
+package komira.notify.v1;
+
+// A principal, named by the issuer that vouches for it and its subject at
+// that issuer. Both are required wherever a PrincipalRef appears.
+message PrincipalRef {
+  // The issuer, exactly as the `iss` claim of the principal's token.
+  string iss = 1;
+  // The subject, exactly as the `sub` claim. Never empty and never the nil
+  // UUID.
+  string sub = 2;
+}
+
+// What happened, as the caller names it. There is no field for content: a
+// woken device fetches the item from the service that sent the wake. Which
+// service that is (the wake's `source`) is set by the notify service from
+// the caller's verified identity, so it is not a field here.
+message Trigger {
+  // The item the device should fetch, opaque to notify.
+  string id = 1;
+  // The kind of event, opaque to notify.
+  string kind = 2;
+}
+
+// POST /v1/notify: wake every device of `recipient`.
+message NotifyRequest {
+  PrincipalRef recipient = 1;
+  Trigger trigger = 2;
+  // Chosen by the caller; a retry of the same wake carries the same key.
+  string idempotency_key = 3;
+}
+
+// The answer to a NotifyRequest. accepted + dead + transient == sent.
+message NotifyResult {
+  // Devices a wake was sent to.
+  uint32 sent = 1;
+  // Devices whose push service accepted the wake.
+  uint32 accepted = 2;
+  // Devices whose push service reported the credential gone (removed).
+  uint32 dead = 3;
+  // Devices whose push service failed this time.
+  uint32 transient = 4;
+}
+
+enum DeviceTransport {
+  // Never sent; a registration carrying it is refused.
+  DEVICE_TRANSPORT_UNSPECIFIED = 0;
+  // A W3C Push API subscription, delivered by Web Push (RFC 8030, 8291).
+  DEVICE_TRANSPORT_WEB_PUSH = 1;
+  // A Firebase Cloud Messaging registration token.
+  DEVICE_TRANSPORT_FCM = 2;
+}
+
+// A Push API subscription (`PushSubscription.toJSON()`): the endpoint and
+// its two keys, base64url as the browser gives them.
+message WebPushSubscription {
+  string endpoint = 1;
+  string p256dh = 2;
+  string auth = 3;
+}
+
+// A device a user's UI wants woken: exactly one of `web_push` (for
+// DEVICE_TRANSPORT_WEB_PUSH) or `fcm_token` (for DEVICE_TRANSPORT_FCM).
+message DeviceSubscription {
+  DeviceTransport transport = 1;
+  WebPushSubscription web_push = 2;
+  string fcm_token = 3;
+}
+
+// PUT /v1/devices on the notify service: an application registers `device`
+// for the principal its own verified user token named.
+message RegisterDevice {
+  PrincipalRef on_behalf_of = 1;
+  DeviceSubscription device = 2;
+}
+
+// The answer to a RegisterDevice: the device's id at the notify service.
+message Device {
+  string device_id = 1;
+  DeviceTransport transport = 2;
+}
+
+// The body of every error answer: {"error":{"code":..., "message":...}}.
+message ErrorEnvelope {
+  ErrorDetail error = 1;
+}
+
+message ErrorDetail {
+  // A short machine-readable code, for example `invalid_request`.
+  string code = 1;
+  // A sentence for a person; it never quotes a credential.
+  string message = 2;
+}
