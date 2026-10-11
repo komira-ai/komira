@@ -8,7 +8,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # streaming join probe with their deferral rule and lever witnesses, the
 # radix-partitioned single-key hash join, the SEMI / ANTI key set, and the
 # joins whose condition carries a residual predicate (serial, and the parallel
-# SEMI / ANTI mark join).
+# SEMI / ANTI mark join), and the join probe over whole batches: every join
+# type and single-key strategy, the sort-merge joins, the join output schema.
 mojo_library(
     name = "komira_op_join_probe",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -25,7 +26,9 @@ mojo_library(
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_engine_runtime:komira_engine_runtime",
         "//src/komira_join_assembly:komira_join_assembly",
+        "//src/komira_op_fused_kernels:komira_op_fused_kernels",
         "//src/komira_op_join_build:komira_op_join_build",
+        "//src/komira_op_sort:komira_op_sort",
         "//src/komira_physical_plan:komira_physical_plan",
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_plan_ir:komira_plan_ir",
@@ -45,10 +48,13 @@ mojo_library(
         "tests/test_join_multikey_batched_probe_equiv.mojo",
         "tests/test_join_multikey_entry_space_equiv.mojo",
         "tests/test_join_multikey_parallel_build.mojo",
+        "tests/test_join_probe_dispatch_null_key_differential.mojo",
+        "tests/test_join_probe_driver.mojo",
         "tests/test_join_probe_levers_counters.mojo",
         "tests/test_join_probe_multi_key_op.mojo",
         "tests/test_join_residual_eval.mojo",
         "tests/test_join_residual_latemat.mojo",
+        "tests/test_multi_key_join_runtime_flip.mojo",
         "tests/test_multi_key_merge_parallel.mojo",
         "tests/test_multi_key_parallel_probe.mojo",
         "tests/test_multi_key_skipindex_compaction.mojo",
@@ -58,6 +64,7 @@ mojo_library(
         "tests/test_residual_mark_parallel_byte_equiv.mojo",
         "tests/test_semi_join_int64_min_key.mojo",
         "tests/test_semi_salted_count_parallel_byte_equiv.mojo",
+        "tests/test_sort_merge_join_outer.mojo",
     ],
     visibility = ["PUBLIC"],
 )

@@ -17,7 +17,11 @@ which morsels defer (`join_defer_verdict`) and the witnesses of its levers
 (`semi_join`, `semi_join_tasks`); and the joins whose condition carries a
 residual predicate (`nested_loop_join`, `residual_mask_eval`), with the
 parallel SEMI / ANTI mark join (`residual_semi_anti_parallel`) and their
-witnesses (`residual_latemat_counter`, `residual_mark_counter`). Float keys follow the query semantics' float model.
+witnesses (`residual_latemat_counter`, `residual_mark_counter`); the join
+probe over whole batches, every join type and strategy (`join_probe`), with
+the sort-merge joins (`join_probe_sort_merge`, `sort_merge_join_outer`) and
+the join output schema (`join_output_schema`). Float keys follow the query
+semantics' float model.
 Settings are set once per process from flags (`join_probe_settings`); nothing
 here reads the environment.
 

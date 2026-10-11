@@ -71,6 +71,23 @@ import from the modules.
   dispatcher.
 - `komira_op_join_probe.join_multi_key`: the key slots' constants, the
   composite hash and the string hash and equality the probes share.
+- `komira_op_join_probe.join_probe`: `execute_join_probe`, the join probe
+  operator over whole batches: one probe batch against the completed build
+  batch, every join type (INNER, LEFT, RIGHT, FULL, SEMI, ANTI, CROSS), as a
+  physical plan's `MorselOp` says. A residual predicate goes to
+  `execute_residual_join_probe`; two or more key pairs, or a key that is not
+  INT64-stored on both sides (`takes_composite_key_path`), to the
+  composite-key join; `JOIN_ALGO_SORT_MERGE` to the sort-merge join (SEMI and
+  ANTI keep their meaning under it); otherwise the single-INT64-key hash
+  kernels, chosen by row counts and what the fused kernels can carry. The
+  arms return the same rows.
+- `komira_op_join_probe.join_probe_sort_merge` and `sort_merge_join_outer`:
+  the sort-merge join over one INT64 key (INNER, LEFT, RIGHT, FULL): both
+  sides radix-sorted, then merged; a NULL key matches nothing.
+- `komira_op_join_probe.join_output_schema`: a join's output schema (probe
+  columns, then build columns, a colliding build name suffixed `_right`; the
+  outer form marks the side that can come out NULL nullable) and the
+  projection of a SEMI / ANTI result.
 
 A NULL key matches nothing: INNER and SEMI drop the row, LEFT and ANTI keep
 it unmatched, RIGHT and FULL still emit a NULL-keyed build row. FLOAT64 keys
