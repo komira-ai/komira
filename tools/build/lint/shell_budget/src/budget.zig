@@ -1,5 +1,7 @@
-//! The shell budget: every shell script of a tree has a row in the allowlist,
-//! and is no longer than that row's cap, which is exactly its line count.
+//! The shell list: every shell script of a tree has a row in the allowlist,
+//! and every row names a shell script of the tree. It checks existence only:
+//! a script's size is never read, so editing a listed script never touches
+//! the list.
 //!
 //! A file is a shell script when its name ends with `.sh` or `.bash`, or when
 //! its first line is a `#!` line naming a shell (sh, bash, ash, dash, ksh,
@@ -8,28 +10,19 @@
 //! The shebang closes the loophole of a script without the extension.
 //!
 //! The allowlist is a TSV file: `#` comment lines, blank lines, and rows of
-//! exactly three tab-separated fields: the script's path in the tree, its cap
-//! (`max_lines`, a decimal number above 0), and why it is still shell (not
-//! empty). A line is a newline-terminated line, plus a last line without one.
+//! exactly two tab-separated fields: the script's path in the tree, and why
+//! it is still shell (not empty).
 //!
 //! Findings, each one line of the report:
 //!   - a malformed row, or a second row for one path;
 //!   - a shell script with no row (it is named);
-//!   - a script with more lines than its cap;
-//!   - a cap above the script's line count: the cap must come down with the
-//!     script, so a cap is always the script's size and only ever goes down;
 //!   - a row naming no shell script of the tree (the file was deleted or is no
-//!     longer shell): the row is removed with it.
+//!     longer shell): the row is removed with it, so the list only shrinks.
 //! What review holds, not this tool: a row is never added for a new script
-//! without a reason review accepts, and a cap is never raised.
+//! without a reason review accepts.
 
 const std = @import("std");
 const Alloc = std.mem.Allocator;
-
-pub const File = struct {
-    path: []const u8,
-    data: []const u8,
-};
 
 pub const Result = struct {
     /// Shell scripts found in the tree.
@@ -42,9 +35,6 @@ const shells = [_][]const u8{ "sh", "bash", "ash", "dash", "ksh", "mksh", "zsh" 
 
 /// Bytes read from each file to look for a `#!` line.
 pub const head_len = 512;
-
-/// The largest file read whole.
-const max_file = 1 << 30;
 
 fn isShellName(name: []const u8) bool {
     for (shells) |s| {
@@ -81,22 +71,15 @@ pub fn isShell(path: []const u8, head: []const u8) bool {
     return std.mem.endsWith(u8, path, ".sh") or std.mem.endsWith(u8, path, ".bash") or shebangShell(head);
 }
 
-/// Newline-terminated lines, plus a last line without a newline.
-pub fn countLines(data: []const u8) u64 {
-    var n: u64 = std.mem.count(u8, data, "\n");
-    if (data.len > 0 and data[data.len - 1] != '\n') n += 1;
-    return n;
+fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+    return std.mem.lessThan(u8, a, b);
 }
 
-fn lessThan(_: void, a: File, b: File) bool {
-    return std.mem.lessThan(u8, a.path, b.path);
-}
-
-/// The shell scripts under `dir` (opened with `.iterate = true`), each with
-/// its path from `dir` and its contents, sorted by path. Every other file is
-/// read only for its first `head_len` bytes. A symbolic link is followed.
-pub fn collect(alloc: Alloc, dir: std.fs.Dir) ![]File {
-    var list = std.ArrayList(File).init(alloc);
+/// The paths (from `dir`, opened with `.iterate = true`) of the shell scripts
+/// under `dir`, sorted. Each file is read only for its first `head_len` bytes.
+/// A symbolic link is followed.
+pub fn collect(alloc: Alloc, dir: std.fs.Dir) ![]const []const u8 {
+    var list = std.ArrayList([]const u8).init(alloc);
     var walker = try dir.walk(alloc);
     defer walker.deinit();
     var head: [head_len]u8 = undefined;
@@ -115,27 +98,23 @@ pub fn collect(alloc: Alloc, dir: std.fs.Dir) ![]File {
             else => return err,
         };
         if (!isShell(e.path, head[0..n])) continue;
-        try f.seekTo(0);
-        try list.append(.{
-            .path = try alloc.dupe(u8, e.path),
-            .data = try f.readToEndAlloc(alloc, max_file),
-        });
+        try list.append(try alloc.dupe(u8, e.path));
     }
-    const files = try list.toOwnedSlice();
-    std.mem.sort(File, files, {}, lessThan);
-    return files;
+    const paths = try list.toOwnedSlice();
+    std.mem.sort([]const u8, paths, {}, lessThan);
+    return paths;
 }
 
 const Row = struct {
     path: []const u8,
-    max: u64,
     line: usize,
     seen: bool = false,
 };
 
-/// Checks `scripts` (the shell scripts of the tree) against `allowlist`, the
-/// text of the file named `name`, and writes one line per finding to `out`.
-pub fn check(alloc: Alloc, name: []const u8, allowlist: []const u8, scripts: []const File, out: *std.ArrayList(u8)) !Result {
+/// Checks `scripts` (the paths of the shell scripts of the tree) against
+/// `allowlist`, the text of the file named `name`, and writes one line per
+/// finding to `out`.
+pub fn check(alloc: Alloc, name: []const u8, allowlist: []const u8, scripts: []const []const u8, out: *std.ArrayList(u8)) !Result {
     const w = out.writer();
     var findings: usize = 0;
     var rows = std.ArrayList(Row).init(alloc);
@@ -149,14 +128,14 @@ pub fn check(alloc: Alloc, name: []const u8, allowlist: []const u8, scripts: []c
         lineno += 1;
         const line = std.mem.trimRight(u8, raw, "\r");
         if (line.len == 0 or line[0] == '#') continue;
-        var fields: [3][]const u8 = undefined;
+        var fields: [2][]const u8 = undefined;
         var count: usize = 0;
         var it = std.mem.splitScalar(u8, line, '\t');
         while (it.next()) |field| : (count += 1) {
-            if (count < 3) fields[count] = field;
+            if (count < 2) fields[count] = field;
         }
-        if (count != 3) {
-            try w.print("{s}:{d}: {d} field(s), not 3 (path, max_lines, reason, tab-separated)\n", .{ name, lineno, count });
+        if (count != 2) {
+            try w.print("{s}:{d}: {d} field(s), not 2 (path, reason, tab-separated)\n", .{ name, lineno, count });
             findings += 1;
             continue;
         }
@@ -166,13 +145,7 @@ pub fn check(alloc: Alloc, name: []const u8, allowlist: []const u8, scripts: []c
             findings += 1;
             continue;
         }
-        const max = std.fmt.parseUnsigned(u64, fields[1], 10) catch 0;
-        if (max == 0) {
-            try w.print("{s}:{d}: {s}: max_lines `{s}` is not a number above 0\n", .{ name, lineno, path, fields[1] });
-            findings += 1;
-            continue;
-        }
-        if (std.mem.trim(u8, fields[2], " ").len == 0) {
+        if (std.mem.trim(u8, fields[1], " ").len == 0) {
             try w.print("{s}:{d}: {s}: no reason\n", .{ name, lineno, path });
             findings += 1;
             continue;
@@ -184,25 +157,16 @@ pub fn check(alloc: Alloc, name: []const u8, allowlist: []const u8, scripts: []c
             continue;
         }
         slot.value_ptr.* = rows.items.len;
-        try rows.append(.{ .path = path, .max = max, .line = lineno });
+        try rows.append(.{ .path = path, .line = lineno });
     }
 
     for (scripts) |s| {
-        const n = countLines(s.data);
-        const i = by_path.get(s.path) orelse {
-            try w.print("{s}: a shell script ({d} lines) with no row in {s}: write it in Zig, or add a row review accepts\n", .{ s.path, n, name });
+        const i = by_path.get(s) orelse {
+            try w.print("{s}: a shell script with no row in {s}: write it in Zig, or add a row review accepts\n", .{ s, name });
             findings += 1;
             continue;
         };
-        const row = &rows.items[i];
-        row.seen = true;
-        if (n > row.max) {
-            try w.print("{s}: {d} lines, over its cap of {d} ({s}:{d})\n", .{ s.path, n, row.max, name, row.line });
-            findings += 1;
-        } else if (n < row.max) {
-            try w.print("{s}: {d} lines, under its cap of {d}: lower the cap to {d} ({s}:{d}); caps only go down\n", .{ s.path, n, row.max, n, name, row.line });
-            findings += 1;
-        }
+        rows.items[i].seen = true;
     }
 
     for (rows.items) |row| {

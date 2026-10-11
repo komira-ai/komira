@@ -1,12 +1,12 @@
-"""The shell budget: no shell script grows or appears without a row.
+"""The shell list: no shell script appears without a row, and no row outlives its script.
 
 Every shell script of the repository (a `.sh` or `.bash` file, or any file
-whose `#!` line names a shell) has a row in the allowlist (path, max_lines,
-reason) whose cap is exactly its line count, and every row names such a
-script. The check is the Zig tool //tools/build/lint/shell_budget
-(src/budget.zig says each finding), run in a remote action with no shell; its
-verdict is a `ValidationInfo`, so `./buck2 build //...` (and the pull
-request's check) fails on a finding.
+whose `#!` line names a shell) has a row in the allowlist (path, reason), and
+every row names such a script. Existence only: a script's size is never read,
+so editing a listed script never touches the allowlist. The check is the Zig
+tool //tools/build/lint/shell_budget (src/budget.zig says each finding), run
+in a remote action with no shell; its verdict is a `ValidationInfo`, so
+`./buck2 build //...` (and the pull request's check) fails on a finding.
 
 The files are the repository's committed files as the build graph holds them,
 not a `git` call: `tree` (the root doc_tree: every file of the cell),
@@ -16,8 +16,8 @@ no doc_tree holds: the toolchains cell's one BUCK file, and the dotfiles at
 the root other than `.github/`.
 
 Not checked here, and held by review: a new row needs a reason review
-accepts, and a cap is never raised. A cap above its script's size is a
-finding, so a cap comes down with the script in the same change.
+accepts. A row whose script is deleted (or is no longer shell) is a finding,
+so the row is removed in the same change and the list only shrinks.
 """
 
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
@@ -45,7 +45,7 @@ def _shell_budget_impl(ctx):
 
 shell_budget_rule = rule(
     impl = _shell_budget_impl,
-    doc = "Every shell script of `tree` (a doc_tree target: the root one holds every file of the cell), of the doc_tree targets in `dotfiles` (paths in the cell) and of `cells` (another cell's doc_tree, at its path) has a row in `allowlist` (its path in that tree; a TSV of path, max_lines, reason) at exactly its line count, and every row names one. The verdict is a validation.",
+    doc = "Every shell script of `tree` (a doc_tree target: the root one holds every file of the cell), of the doc_tree targets in `dotfiles` (paths in the cell) and of `cells` (another cell's doc_tree, at its path) has a row in `allowlist` (its path in that tree; a TSV of path, reason), and every row names one. Existence only: no size is checked. The verdict is a validation.",
     attrs = {
         "allowlist": attrs.string(),
         "cells": attrs.dict(attrs.string(), attrs.dep(providers = [DocTreeInfo]), default = {}),

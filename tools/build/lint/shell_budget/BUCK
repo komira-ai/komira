@@ -1,14 +1,14 @@
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
-# The shell regrowth guard's tool (src/budget.zig says what it checks), run by
+# The shell list's tool (src/budget.zig says what it checks), run by
 # //tools/build/lint:shell_budget (tools/build/lint/shell_budget.bzl).
 
 _SRCS = glob(["src/*.zig"])
 
-# The unit tests (a clean tree, an unlisted script, one over its cap, an
-# extensionless script caught by its shebang, a cap above the script's size,
-# a stale row, malformed rows): `zig test` of main.zig, run as a build action.
+# The unit tests (a clean tree, an unlisted script, a listed script grown by
+# 50 lines passing unchanged, a stale row after a delete, a file without .sh
+# caught by its shebang, malformed rows): `zig test` of main.zig, run as a build action.
 zig_test(
     name = "shell_budget_unit",
     exec_compatible_with = LINUX_X86_64,

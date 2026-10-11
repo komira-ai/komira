@@ -1,4 +1,4 @@
-//! shell_budget: the shell regrowth guard's validation (budget.zig says what
+//! shell_budget: the shell list's validation (budget.zig says what
 //! it checks).
 //!
 //! usage: shell_budget --tree <dir> --allowlist <path in the tree> --out <file>

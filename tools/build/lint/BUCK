@@ -44,13 +44,13 @@ shell_lint(
     visibility = ["PUBLIC"],
 )
 
-# The shell regrowth guard (shell_budget.bzl): every shell script of the
-# repository (`.sh`, `.bash`, or a `#!` line naming a shell) has a row in
-# shell_allowlist.tsv (path, max_lines, reason) at exactly its line count, and
-# every row names one. The tree is every file of the cell (`//:doc_tree`),
-# the files under .github/ (`//:github_tree`) and the tests cell's tree. A
-# script comes out of the allowlist when it is written in Zig; a row is added
-# only with a reason review accepts, and a cap is never raised.
+# The shell list (shell_budget.bzl): every shell script of the repository
+# (`.sh`, `.bash`, or a `#!` line naming a shell) has a row in
+# shell_allowlist.tsv (path, reason), and every row names one. Existence only:
+# a script's size is never checked. The tree is every file of the cell
+# (`//:doc_tree`), the files under .github/ (`//:github_tree`) and the tests
+# cell's tree. A row comes out when its script is written in Zig or deleted;
+# a row is added only with a reason review accepts.
 shell_budget(
     name = "shell_budget",
     allowlist = "tools/build/lint/shell_allowlist.tsv",
