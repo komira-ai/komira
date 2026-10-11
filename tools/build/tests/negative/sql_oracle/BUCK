@@ -1,0 +1,121 @@
+load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
+
+# Planted defects for sql_oracle (tools/build/sql). Every target here must
+# fail; the scenario //tools/build/selftest:sql_oracle builds each and
+# requires the failure written above it (the message, not only the exit
+# status). The oracles that work are in tests//functional/sql_oracle.
+
+# ---- Build failures: the action runs and DuckDB (or the rule's last check)
+# refuses. A failed action is never cached, so each of these executes on
+# every run of the scenario.
+
+# RED: `Permission Error: Cannot access file "extra.tsv"`: a COPY to a file
+# that is not in `outputs`.
+sql_oracle(
+    name = "undeclared_output",
+    srcs = "undeclared_output.sql",
+    outputs = ["declared.tsv"],
+)
+
+# RED: `sql_oracle: the SQL wrote no missing.tsv, a declared output`.
+sql_oracle(
+    name = "missing_output",
+    srcs = "missing_output.sql",
+    outputs = [
+        "written.tsv",
+        "missing.tsv",
+    ],
+)
+
+# RED: `Parser Error: syntax error at or near "SELEC"`.
+sql_oracle(
+    name = "sql_error",
+    srcs = "sql_error.sql",
+    outputs = ["out.tsv"],
+)
+
+# RED: `Permission Error: Cannot access file "not_staged.csv"`: the file is
+# in this package but not in `inputs`.
+sql_oracle(
+    name = "input_outside_inputs",
+    srcs = "input_outside_inputs.sql",
+    inputs = ["staged.csv"],
+    outputs = ["out.tsv"],
+)
+
+# RED: `Permission Error: Cannot access file "/etc/passwd"`: a worker's file.
+sql_oracle(
+    name = "absolute_path",
+    srcs = "absolute_path.sql",
+    outputs = ["out.tsv"],
+)
+
+# RED: `Cannot change configuration option "threads" - the configuration has
+# been locked`.
+sql_oracle(
+    name = "setting_changed",
+    srcs = "setting_changed.sql",
+    outputs = ["out.tsv"],
+)
+
+# RED: `.sh/.system cannot be used in -safe mode`.
+sql_oracle(
+    name = "dot_command",
+    srcs = "dot_command.sql",
+    outputs = ["out.tsv"],
+)
+
+# ---- Analysis refusals: nothing runs.
+
+# REFUSED: an output in a format the rule does not document.
+sql_oracle(
+    name = "output_format",
+    srcs = "ok.sql",
+    outputs = ["out.txt"],
+)
+
+# REFUSED: an output in a directory of the working directory.
+sql_oracle(
+    name = "output_in_directory",
+    srcs = "ok.sql",
+    outputs = ["sub/out.tsv"],
+)
+
+# REFUSED: no outputs.
+sql_oracle(
+    name = "no_outputs",
+    srcs = "ok.sql",
+    outputs = [],
+)
+
+# REFUSED: an output that is also an input's path.
+sql_oracle(
+    name = "output_is_input",
+    srcs = "ok.sql",
+    inputs = {"out.tsv": "staged.csv"},
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: a build output in the list form of `inputs`, which stages each
+# entry at its path in the package.
+sql_oracle(
+    name = "built_input_in_list",
+    srcs = "ok.sql",
+    inputs = [":sql_error[out.tsv]"],
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an input path with a `..` segment.
+sql_oracle(
+    name = "input_dotdot",
+    srcs = "ok.sql",
+    inputs = {"../staged.csv": "staged.csv"},
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: a src that is not a .sql file.
+sql_oracle(
+    name = "src_not_sql",
+    srcs = "staged.csv",
+    outputs = ["out.tsv"],
+)
