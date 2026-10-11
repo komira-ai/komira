@@ -5,7 +5,8 @@
 #   rule at a time; `{units_file}` holds every declared unit; every accepted
 #   and refused answer of the command; the derived checks join the file's
 #   value under its own rules; an UNMATCHED artifact target is told apart
-#   from a check's.
+#   from a check's; a BROKEN answer (the tool's graph query failed) parses
+#   alone, with its reason, and nowhere else.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -42,8 +43,10 @@ build_systems {
     args: "build"
   }
   derive_checks {
-    executable: "python3"
-    args: "release/ci/derive_checks.py"
+    executable: "buck2"
+    args: "run"
+    args: "//tools/build/ci:derive_checks"
+    args: "--"
     args: "{units_file}"
     args: "--base={base_commit}"
   }
@@ -130,11 +133,13 @@ def test_the_command_parses_and_renders() raises:
     var argv = render_derive_argv(
         a, String("buck2"), AffectedValues(String("/l/_changed_files"), String("/l/_declared_units.tsv"), String(_BASE), String(_REV))
     )
-    assert_equal(len(argv), 4)
-    assert_equal(argv[0], String("python3"))
-    assert_equal(argv[1], String("release/ci/derive_checks.py"))
-    assert_equal(argv[2], String("/l/_declared_units.tsv"))
-    assert_equal(argv[3], String("--base=") + String(_BASE))
+    assert_equal(len(argv), 6)
+    assert_equal(argv[0], String("buck2"))
+    assert_equal(argv[1], String("run"))
+    assert_equal(argv[2], String("//tools/build/ci:derive_checks"))
+    assert_equal(argv[3], String("--"))
+    assert_equal(argv[4], String("/l/_declared_units.tsv"))
+    assert_equal(argv[5], String("--base=") + String(_BASE))
     try:
         _ = render_derive_argv(a, String("pack"), AffectedValues(String("c"), String("u"), String(_BASE), String(_REV)))
         raise Error("rendered a derive_checks command 'pack' does not declare")
@@ -166,9 +171,9 @@ def test_the_refusals_of_the_command() raises:
         ),
     )
     assert_equal(
-        _refusal(_without(String("    executable: \"python3\"\n"), String("    executable: \"./py\"\n"))),
+        _refusal(_without(String("  derive_checks {\n    executable: \"buck2\"\n"), String("  derive_checks {\n    executable: \"./buck2\"\n"))),
         String(
-            "artifacts.textproto: the derive_checks command of build system 'buck2' executable './py' is a"
+            "artifacts.textproto: the derive_checks command of build system 'buck2' executable './buck2' is a"
             " relative path (expected a program name found on PATH, or an absolute path)"
         ),
     )
@@ -218,6 +223,14 @@ def test_the_answers_kci_accepts() raises:
     var refused = unmatched_artifacts(a, art)
     assert_equal(len(refused), 1)
     assert_equal(refused[0], String("lib_a //src/lib_a:lib_a_conda"))
+    # BROKEN: the tool's graph query failed; kci_build fails the check on it.
+    # A parser that read it as an unknown line would turn a broken graph
+    # into "cannot tell"; one that dropped the reason would hide buck2's error.
+    var b = parse_derive_answer(String("BROKEN the universe query failed: buck2 cquery failed (exit 3): x\n"), units_of(a))
+    assert_true(b.broken)
+    assert_equal(b.reason, String("the universe query failed: buck2 cquery failed (exit 3): x"))
+    assert_equal(len(b.names), 0)
+    assert_true(not d.broken)
 
 
 def test_every_answer_outside_the_grammar_is_refused() raises:
@@ -237,6 +250,9 @@ def test_every_answer_outside_the_grammar_is_refused() raises:
     rows.append((String("\nDERIVED 0\n"), String("not CHECK <name> <target>")))
     rows.append((String("WIDENED x\n"), String("not CHECK <name> <target>")))
     rows.append((String("check a //x/...\nDERIVED 1\n"), String("not CHECK <name> <target>")))
+    rows.append((String("BROKEN\n"), String("BROKEN needs a reason")))
+    rows.append((String("CHECK a //x/...\nBROKEN x\n"), String("BROKEN fails the check, so it is the only line")))
+    rows.append((String("BROKEN x\nDERIVED 0\n"), String("BROKEN fails the check, so it is the only line")))
     for i in range(len(rows)):
         var got = _answer_refusal(rows[i][0])
         if got.find(rows[i][1]) < 0:

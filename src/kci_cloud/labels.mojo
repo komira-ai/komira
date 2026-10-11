@@ -34,9 +34,10 @@
 # can exist without a relabel step (the precondition in adapter.mojo).
 #
 # THE BUDGET. The `role` label is the longest value: one segment per level
-# plus a separator each. `role_budget_findings` (validate.mojo) checks every
-# lowered node against `LABEL_VALUE_MAX` before anything is realized, so a
-# role over the budget refuses the graph instead of failing at create time.
+# plus a separator each. Validate checks every lowered node against
+# `LABEL_VALUE_MAX` (`lowered_budget_findings`, validate.mojo), so a role
+# over the budget is reported by `validate` and refuses a plan, an apply or
+# a destroy before anything is created, instead of failing at create time.
 #
 # RETENTION IS ONE MORE LABEL, OUTSIDE THE IDENTITY, ON EVERY OBJECT. Every
 # object kci creates or adopts carries komira_validation_run's retention mark
@@ -74,12 +75,66 @@
 # the scope's validation run id yet (kci_cli and kci_api have no flag for
 # it), so today only callers that build a `CellScope` themselves stamp it.
 #
-# A cloud object that cannot carry labels (a scheduler job, an IAM binding)
-# carries the identity as the first line of its description instead
-# (`OwnerStamp.identity()`); that is the adapter's own business.
+# AN ADOPTION IS ONE MORE LABEL, OUTSIDE THE IDENTITY, WRITTEN ONLY BY THE
+# ADOPTION. An object kci takes over for a resource that writes `adopt`
+# (`LoweredNode.adopted`) carries `kci_adopted=true` (`adoption_labels`)
+# beside its identity and retention mark: kci did not create it, and the
+# mark is how that is still known once nothing in the file says so (the
+# resource left the list). An update never writes or drops it.
+# `adopted_by` reads it back for `list_owned`. An adopted object carries no
+# run-id label, so it holds at most the six identity labels, the retention
+# mark and this one: `KCI_LABELS_MAX` (metadata.mojo) still bounds it. A
+# RELEASE drops every label `is_kci_label_key` names (`kci_*`, `kci-*`) and
+# no other.
+#
+# A DESCRIPTION CARRIER is a cloud object that cannot carry labels but has a
+# description (a service account, a scheduler job). It carries what a
+# labelled object carries, every label kci writes, as LINES of its
+# description, one per line, in this order:
+#
+#   kci:v<scheme> owner=<machine>/<cell>/<resource>/<role>
+#   kci-retention=<retain|delete>
+#   kci-run-id=<id>
+#
+# The first line is the identity (`OwnerStamp.identity()`), the second the
+# retention mark, the third the run-id label, present only when the object
+# was created in a scope with a validation run id. An adopted object carries
+# the adoption mark `kci_adopted=true` in place of the run-id line (an
+# adoption writes no run id). `description_lines` writes these lines from
+# the labels a create or an adoption builds (`create_labels`, or the
+# identity, retention and adoption labels), and `description_labels` reads
+# them back as labels, so `identity_of`, `retained_by`, `validation_run_of`
+# and `adopted_by` read a description carrier as they read any object. EVERY
+# line is read, not the first alone. The description is kci's WHOLE: a
+# description holding any other line, a line twice, or an empty line reads
+# as no labels at all (not stamped). So an adoption overwrites a description
+# carrier's description, and a release (`released_description`, which drops
+# kci's lines and keeps every other) leaves it empty. A cloud bounds a
+# description's length (256 bytes for a GCP service account):
+# `description_carrier_bytes` is the length of the lines a node will be
+# written with, counting the run-id line of a create and the mark line of an
+# adoption, so an adapter refuses a long machine, cell or resource name at
+# validate, before anything is created.
+#
+# An object with neither labels nor a description, a MEMBER BINDING (a member
+# holding a role on a target's policy), carries no stamp at all: on a shape
+# that declares its grants DERIVED, its stamp is computed from what the cloud
+# holds at its two ends (derived.mojo).
 # =============================================================================
 
-from kci_reconciler import Label, OwnerStamp, RETAIN_DELETE, RETAIN_KEEP
+from kci_reconciler import (
+    LABEL_CELL,
+    LABEL_MACHINE,
+    LABEL_MANAGED_BY,
+    LABEL_RESOURCE,
+    LABEL_ROLE,
+    LABEL_SCHEME,
+    Label,
+    MANAGED_BY_KCI,
+    OwnerStamp,
+    RETAIN_DELETE,
+    RETAIN_KEEP,
+)
 from komira_validation_run.validation_run_tag import (
     RETENTION_TAG_VALUE_RETAIN,
     VALIDATION_RUN_ID_MAX_LEN,
@@ -304,3 +359,231 @@ def label_problems(labels: List[Label]) raises -> List[String]:
                 )
                 break
     return out^
+
+
+comptime ADOPTED_LABEL_KEY = "kci_adopted"
+"""The adoption mark's key: `[a-z_]`, so the standard rule takes it as it
+takes the identity keys; it is not one of them."""
+comptime ADOPTED_LABEL_VALUE = "true"
+"""The adoption mark's one value."""
+
+
+def adoption_labels(adopted: Bool) -> List[Label]:
+    """The adoption mark of an object kci takes over for a resource that
+    writes `adopt` (`kci_adopted=true`), or nothing when `adopted` is
+    False."""
+    var out = List[Label]()
+    if adopted:
+        out.append(Label(String(ADOPTED_LABEL_KEY), String(ADOPTED_LABEL_VALUE)))
+    return out^
+
+
+def adopted_by(labels: List[Label]) -> Bool:
+    """True iff `labels` carry `kci_adopted=true`. Any other value is not
+    proven adopted."""
+    for i in range(len(labels)):
+        if labels[i].key == ADOPTED_LABEL_KEY and labels[i].value == ADOPTED_LABEL_VALUE:
+            return True
+    return False
+
+
+def is_kci_label_key(key: String) -> Bool:
+    """True iff `key` is in kci's own label space (`kci_*`, `kci-*`): the
+    identity, the marks. A release drops exactly these."""
+    return key.startswith("kci_") or key.startswith("kci-")
+
+
+comptime DESCRIPTION_LINE_SEPARATOR = "\n"
+"""What separates the lines of a description carrier's description."""
+comptime _IDENTITY_LINE_PREFIX = "kci:v"
+comptime _OWNER_WORD = " owner="
+
+
+def _mark_line(l: Label) -> String:
+    return l.key + String("=") + l.value
+
+
+def description_lines(labels: List[Label]) raises -> String:
+    """The description a DESCRIPTION CARRIER is written with for `labels`
+    (the encoded labels a create or an adoption builds; the file header): the
+    identity line, the retention mark, then the run-id label and the
+    adoption mark where `labels` carry them, one per line. Raises for labels
+    with no complete identity, with no retention mark, or holding any label
+    but kci's (an author's label has nowhere to go on such an object)."""
+    var identity = standard_identity_of(labels)
+    if identity.byte_length() == 0:
+        raise Error(String("description_lines: the labels carry no complete kci identity"))
+    var retention_key = retention_label_key()
+    var run_key = validation_run_label_key()
+    var retention: Optional[Label] = None
+    var run: Optional[Label] = None
+    var mark: Optional[Label] = None
+    for i in range(len(labels)):
+        ref l = labels[i]
+        if l.key == retention_key:
+            retention = l.copy()
+        elif l.key == run_key:
+            run = l.copy()
+        elif l.key == ADOPTED_LABEL_KEY:
+            mark = l.copy()
+        elif (
+            l.key == LABEL_MANAGED_BY
+            or l.key == LABEL_MACHINE
+            or l.key == LABEL_CELL
+            or l.key == LABEL_RESOURCE
+            or l.key == LABEL_ROLE
+            or l.key == LABEL_SCHEME
+        ):
+            continue
+        else:
+            raise Error(
+                String("description_lines: label \"") + l.key
+                + String("\" is not kci's; a description carrier holds kci's lines only")
+            )
+    if not retention:
+        raise Error(String("description_lines: the labels carry no retention mark"))
+    var out = identity^
+    out += String(DESCRIPTION_LINE_SEPARATOR) + _mark_line(retention.value())
+    if run:
+        out += String(DESCRIPTION_LINE_SEPARATOR) + _mark_line(run.value())
+    if mark:
+        out += String(DESCRIPTION_LINE_SEPARATOR) + _mark_line(mark.value())
+    return out^
+
+
+def _identity_labels(line: String) -> List[Label]:
+    """The six encoded identity labels of an identity line
+    (`kci:v<scheme> owner=<machine>/<cell>/<resource>/<role>`; the role is
+    the last segment, the resource every segment between the cell and it),
+    or empty when `line` is not one."""
+    var none = List[Label]()
+    if not line.startswith(_IDENTITY_LINE_PREFIX):
+        return none^
+    var at = line.find(_OWNER_WORD)
+    if at < 0:
+        return none^
+    var scheme = String(line[byte = String(_IDENTITY_LINE_PREFIX).byte_length() : at])
+    var sb = scheme.as_bytes()
+    if len(sb) == 0:
+        return none^
+    for i in range(len(sb)):
+        if sb[i] < UInt8(0x30) or sb[i] > UInt8(0x39):
+            return none^
+    var owner = String(line[byte = at + String(_OWNER_WORD).byte_length() : line.byte_length()])
+    var first = owner.find("/")
+    if first <= 0:
+        return none^
+    var second = owner.find("/", first + 1)
+    var last = owner.rfind("/")
+    if second <= first + 1 or last <= second + 1 or last == owner.byte_length() - 1:
+        return none^
+    var raw = List[Label]()
+    raw.append(Label(String(LABEL_MANAGED_BY), String(MANAGED_BY_KCI)))
+    raw.append(Label(String(LABEL_MACHINE), String(owner[byte=0:first])))
+    raw.append(Label(String(LABEL_CELL), String(owner[byte = first + 1 : second])))
+    raw.append(Label(String(LABEL_RESOURCE), String(owner[byte = second + 1 : last])))
+    raw.append(Label(String(LABEL_ROLE), String(owner[byte = last + 1 : owner.byte_length()])))
+    raw.append(Label(String(LABEL_SCHEME), scheme^))
+    var out = List[Label]()
+    try:
+        for i in range(len(raw)):
+            out.append(Label(raw[i].key.copy(), encode_label_value(raw[i].value)))
+    except:
+        return none^
+    return out^
+
+
+def _legal_value(v: String) -> Bool:
+    var b = v.as_bytes()
+    if len(b) == 0 or len(b) > LABEL_VALUE_MAX:
+        return False
+    for i in range(len(b)):
+        if not _legal_value_byte(Int(b[i])):
+            return False
+    return True
+
+
+def description_labels(text: String) -> List[Label]:
+    """The labels a description carrier's `text` reads as (the file header):
+    the six identity labels of its first line and one label per following
+    line, each one of kci's marks (`kci-retention`, `kci-run-id`,
+    `kci_adopted`). Every line is read. Empty (not stamped) when `text` is
+    not kci's whole: an empty description, a first line that is not an
+    identity, any other line, a mark given twice, or an empty line."""
+    var none = List[Label]()
+    if text.byte_length() == 0:
+        return none^
+    var lines = text.split(DESCRIPTION_LINE_SEPARATOR)
+    var out = _identity_labels(String(lines[0]))
+    if len(out) == 0:
+        return none^
+    var keys = List[String]()
+    try:
+        keys.append(retention_label_key())
+        keys.append(validation_run_label_key())
+    except:
+        return none^
+    keys.append(String(ADOPTED_LABEL_KEY))
+    var seen = List[Bool]()
+    for _ in range(len(keys)):
+        seen.append(False)
+    for i in range(1, len(lines)):
+        var line = String(lines[i])
+        var eq = line.find("=")
+        if eq <= 0:
+            return none^
+        var key = String(line[byte=0:eq])
+        var value = String(line[byte = eq + 1 : line.byte_length()])
+        var k = -1
+        for j in range(len(keys)):
+            if keys[j] == key:
+                k = j
+        if k < 0 or seen[k] or not _legal_value(value):
+            return none^
+        seen[k] = True
+        out.append(Label(key^, value^))
+    return out^
+
+
+def released_description(text: String) -> String:
+    """`text` with every kci line dropped (an identity line, and each line
+    of one of kci's marks) and every other line kept, in order: what a
+    release writes. On a stamped description carrier (kci's whole) it is
+    empty."""
+    if text.byte_length() == 0:
+        return String("")
+    var run_key = String("")
+    var retention_key = String("")
+    try:
+        run_key = validation_run_label_key() + String("=")
+        retention_key = retention_label_key() + String("=")
+    except:
+        pass
+    var adopted_key = String(ADOPTED_LABEL_KEY) + String("=")
+    var lines = text.split(DESCRIPTION_LINE_SEPARATOR)
+    var out = String("")
+    var kept = 0
+    for i in range(len(lines)):
+        var line = String(lines[i])
+        if len(_identity_labels(line)) > 0:
+            continue
+        if line.startswith(retention_key) or line.startswith(run_key) or line.startswith(adopted_key):
+            continue
+        if kept > 0:
+            out += String(DESCRIPTION_LINE_SEPARATOR)
+        out += line
+        kept += 1
+    return out^
+
+
+def description_carrier_bytes(stamp: OwnerStamp, retention: Int, adopted: Bool) raises -> Int:
+    """The length in bytes of the description a description carrier of
+    `stamp` is written with: a create's lines (the run-id line when the
+    stamp has a validation run id) or, for an `adopted` node, an
+    adoption's (the mark line, never a run-id line)."""
+    if adopted:
+        var labels = standard_label_rule(stamp)
+        labels.extend(retain_labels(retention))
+        labels.extend(adoption_labels(True))
+        return description_lines(labels).byte_length()
+    return description_lines(create_labels(stamp, retention)).byte_length()

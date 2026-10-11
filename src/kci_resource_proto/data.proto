@@ -1,0 +1,86 @@
+// The DATA primitives of the kci resource catalog (`kci.resource.v1`):
+// `table` and `bucket`.
+// The field numbers are what is stored, pinned as literal wire bytes by the
+// welded tests in tests/ (resource.proto says how the files are split).
+// held-numbers: Table 4 50-53
+// held-numbers: Bucket 50-53
+syntax = "proto3";
+
+package kci.resource.v1;
+
+import "kci/resource/v1/refs.proto";
+
+// ---- data: table -----------------------------------------------------------------
+
+// A key-value table: items found by a key, and by secondary access paths.
+// An ACCESS PATH is how items are found: a `partition` field (equality) and
+// optionally an `order` field (items of one partition, sorted). The KEY is the
+// table's primary access path, and it is immutable: a new key is a new table,
+// so changing it is refused (give the new table a new id). Its retention
+// default is KEEP, as for a bucket. Only the fields an access path or the TTL
+// names are declared; an item's other attributes are the application's.
+message Table {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+
+  AccessPath key = 1;
+  // Secondary access paths, each with a name unique in the table.
+  repeated AccessPath indexes = 2;
+  // A NUMBER attribute holding an item's expiry time (seconds since the
+  // epoch): an item is deleted some time after it. Unset: items never
+  // expire.
+  optional string ttl_field = 3;
+  // 4 is held for an analytics replica; 50 to 53 for the per-cloud
+  // extensions (resource.proto header).
+
+  message AccessPath {
+    string name = 1;
+    Field partition = 2;
+    Field order = 3;
+  }
+
+  message Field {
+    string name = 1;
+    FieldType type = 2;
+  }
+}
+
+// What a key or index attribute holds: the types every table service can key
+// on.
+enum FieldType {
+  FIELD_TYPE_UNSET = 0;
+  STRING = 1;
+  NUMBER = 2;
+  BYTES = 3;
+}
+
+// ---- data: bucket ----------------------------------------------------------------
+
+// Behaviours, not product names: how often objects are read, never a
+// provider's storage class.
+enum StorageTier {
+  STORAGE_TIER_UNSET = 0;
+  STANDARD = 1;
+  INFREQUENT = 2;
+  ARCHIVE = 3;
+}
+
+// An object store container. Access is always uniform (granted per
+// resource, never per object) and public access is always prevented. Its
+// retention default is KEEP: removing a bucket from the file leaves it in
+// the cloud unless `retention: DELETE` is written.
+message Bucket {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+  option (exposes) = ADDRESS;
+
+  // Days after which an object is deleted. Presence: unset means never; an
+  // explicit 0 (expire every object at once) is refused when the graph is
+  // validated.
+  optional uint32 object_expiry_days = 1;
+  // Keep earlier versions of an overwritten or deleted object.
+  bool versioning = 2;
+  // UNSET means STANDARD.
+  StorageTier tier = 3;
+  // 50 to 53 are held for the per-cloud extensions (resource.proto header).
+}

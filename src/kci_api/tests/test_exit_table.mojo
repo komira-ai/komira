@@ -23,6 +23,7 @@ from kci_api import (
     OUTCOME_PARTIAL,
     OUTCOME_REFUSED,
     OUTCOME_SUCCEEDED,
+    OUTCOME_SUPERSEDED,
     OUTCOME_VALIDATION_FAILED,
     RETRY_NEEDS_HUMAN,
     RETRY_SAFE,
@@ -88,7 +89,7 @@ def test_no_two_rows_share_a_number_or_a_name() raises:
 
 def test_every_outcome_has_exactly_one_number() raises:
     var o = all_outcomes()
-    assert_equal(len(o), 9)
+    assert_equal(len(o), 10)
     for i in range(len(o)):
         var n = exit_code_of(o[i])
         assert_true(n >= 0 and n <= 8)
@@ -97,6 +98,8 @@ def test_every_outcome_has_exactly_one_number() raises:
 
 def test_outcome_numbers() raises:
     assert_equal(exit_code_of(String(OUTCOME_SUCCEEDED)), 0)
+    # a run stopped because something newer is ahead is not a red job
+    assert_equal(exit_code_of(String(OUTCOME_SUPERSEDED)), 0)
     assert_equal(exit_code_of(String(OUTCOME_REFUSED)), 3)
     assert_equal(exit_code_of(String(OUTCOME_FAILED)), 4)
     assert_equal(exit_code_of(String(OUTCOME_INDETERMINATE)), 5)
@@ -169,6 +172,7 @@ def test_outcome_rank_orders_every_outcome() raises:
     var order = List[String]()
     order.append(String(OUTCOME_NOOP))
     order.append(String(OUTCOME_SUCCEEDED))
+    order.append(String(OUTCOME_SUPERSEDED))
     order.append(String(OUTCOME_REFUSED))
     order.append(String(OUTCOME_FAILED))
     order.append(String(OUTCOME_VALIDATION_FAILED))

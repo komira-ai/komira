@@ -26,6 +26,28 @@
 #      slot past its doc count, and reads a null cell as 0.
 #   6. An entry whose sub-region no longer lies in the region (a parsed entry
 #      changed after parse) is refused by every decoder.
+#   7. A length of 2^63 - 1 (Int.MAX), whose sum with an in-range offset wraps
+#      Int negative, is refused by its own check: a sub-region in the
+#      directory, a dictionary term in a KEYWORD sub-region, a field name
+#      (komira-ai/komira#1203). A sub-region one byte past the region end is
+#      refused by the same check.
+#   8. Each bound pinned at its exact edge: a field name one byte longer than
+#      the bytes left in the region, and a KEYWORD dictionary term one byte
+#      longer than the bytes left in its sub-region, are refused by their own
+#      checks (a bound off by one, or one that drops the offset, reads past).
+#   9. A validity bitmap for n_docs = 2^63 - 1, whose (n_docs + 7) >> 3 wraps
+#      negative, is refused by each decoder's own bitmap check: the numeric,
+#      float and keyword accessors, the float resolver, FieldnormResolver and
+#      the float materializer (komira-ai/komira#1261). Eight docs in one
+#      bitmap byte are read. The float materializer also refuses a header cut
+#      before its width or validity flag, and an entry outside the region.
+#  10. A packed column of 2^61 values at width 8 (2^64 bits, which wraps to
+#      0) is refused by the unpacker the materializer calls, for a numeric
+#      and a float column (komira-ai/komira#1260).
+#  11. A validity bitmap for a negative n_docs (a ULEB whose tenth byte is
+#      0x01 decodes to 2^63, which is Int.MIN) is refused by the same six
+#      bitmap checks as case 9; unrefused, (n_docs + 7) >> 3 is negative and
+#      moves the cursor backwards (komira-ai/komira#1261).
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_raises
@@ -325,6 +347,181 @@ def test_06_entry_outside_region_refused() raises:
         _ = r.float_resolver(v, String("g"))
     with assert_raises(contains="FastFieldReader: keyword sub-region out of bounds"):
         _ = r.fast_field_keyword(v, String("k"), 0)
+
+
+def _uleb_int_max(mut out: List[UInt8]):
+    """Int.MAX (2^63 - 1) as a ULEB128: nine 0xFF bytes, then 0x00."""
+    for _ in range(9):
+        out.append(0xFF)
+    out.append(0x00)
+
+
+def test_07_wrapping_lengths_refused() raises:
+    # Directory entry: sub-offset 1, sub-length Int.MAX (1 + len wraps).
+    var sub: List[UInt8] = [0x54, 0x48, 0x46, 0x46, 1, 1, 1, 0x61, 0, 5, 1, 1]
+    _uleb_int_max(sub)
+    with assert_raises(contains="FastFieldReader: sub-region [1, "):
+        _ = FastFieldReader(_split(sub^))
+    # The same check one byte past the end: a 13-byte region, [12, 14).
+    var one: List[UInt8] = [0x54, 0x48, 0x46, 0x46, 1, 1, 1, 0x61, 0, 5, 1, 12, 2]
+    with assert_raises(contains="sub-region [12, 14) out of region"):
+        _ = FastFieldReader(_split(one^))
+    # KEYWORD dictionary: 3 docs, 1 term of length Int.MAX.
+    var kw: List[UInt8] = [3, 1]
+    _uleb_int_max(kw)
+    kw.append(0x61)
+    var k = String("k")
+    var v = _one(_kw(k, kw^))
+    with assert_raises(contains="FastFieldReader: dict term out of bounds"):
+        _ = FastFieldReader(v).fast_field_keyword(v, k, 0)
+    # Field name of length Int.MAX at directory position 6.
+    var name: List[UInt8] = [0x54, 0x48, 0x46, 0x46, 1, 1]
+    _uleb_int_max(name)
+    name.append(0x61)
+    with assert_raises(contains="FastFieldReader: field name out of bounds"):
+        _ = FastFieldReader(_split(name^))
+
+
+
+def test_08_one_byte_past_end_refused() raises:
+    # Field name: the 8-byte region has 1 byte after the name length at
+    # position 7, and the name claims 2. A bound of `name_len > rlen` or
+    # `name_len > rlen - pos + 1` would read region[8].
+    var name: List[UInt8] = [0x54, 0x48, 0x46, 0x46, 1, 1, 2, 0x61]
+    with assert_raises(contains="FastFieldReader: field name out of bounds"):
+        _ = FastFieldReader(_split(name^))
+    # KEYWORD dictionary: 3 docs, 1 term of length 2 with 1 byte left in the
+    # 4-byte sub-region. A bound off by one walks the term past the
+    # sub-region end and is refused later, by a different check.
+    var k = String("k")
+    var v = _one(_kw(k, [3, 1, 2, 0x61]))
+    with assert_raises(contains="FastFieldReader: dict term out of bounds"):
+        _ = FastFieldReader(v).fast_field_keyword(v, k, 0)
+
+
+def _uleb_2_61(mut out: List[UInt8]):
+    """2^61 as a ULEB128: eight 0x80 bytes, then 0x20."""
+    for _ in range(8):
+        out.append(0x80)
+    out.append(0x20)
+
+
+def _max_docs(head: List[UInt8]) -> List[UInt8]:
+    """n_docs = Int.MAX, then `head`, then one bitmap byte 0xFF."""
+    var out = List[UInt8]()
+    _uleb_int_max(out)
+    for b in head:
+        out.append(b)
+    out.append(0xFF)
+    return out^
+
+
+def test_09_wrapping_validity_bitmap_refused() raises:
+    # Bit and code widths 0: an unrefused header reads slot 0 as a value.
+    var ents = List[_Ent]()
+    ents.append(_num(String("n"), _max_docs([0, 0, 1])))
+    ents.append(_flt(String("g"), _max_docs([0, 1])))
+    ents.append(_kw(String("k"), _max_docs([1, 1, 0x61, 0, 1])))
+    ents.append(_flt(String("h"), _max_docs([64, 1])))
+    ents.append(_num(String("e"), [8, 0, 0, 1, 0xFF]))
+    var v = _view_of(ents^)
+    var r = FastFieldReader(v)
+    with assert_raises(contains="FastFieldReader: validity bitmap out of bounds"):
+        _ = r.fast_field_i64(v, String("n"), 0)
+    with assert_raises(contains="FastFieldReader: float validity bitmap out of bounds"):
+        _ = r.fast_field_f64(v, String("g"), 0)
+    with assert_raises(contains="float_resolver: validity bitmap OOB"):
+        _ = r.float_resolver(v, String("g"))
+    with assert_raises(contains="FastFieldReader: keyword validity bitmap out of bounds"):
+        _ = r.fast_field_keyword(v, String("k"), 0)
+    var fr = FieldnormResolver(entry=r._entries[0].copy(), min_doc_id=0, doc_count=3)
+    with assert_raises(contains="FieldnormResolver: validity bitmap out of bounds"):
+        _ = fr.dl_at(v, 0)
+    with assert_raises(contains="_materialize_float: validity bitmap out of bounds"):
+        _ = r.fast_field_column(v, String("h"))
+    # The edge: eight docs fill the one bitmap byte, so the header is read.
+    assert_equal(r.fast_field_i64(v, String("e"), 2).value(), Int64(0), "9: doc 2")
+    # The float materializer read its header with no check at all: a header
+    # cut before the width or the validity flag, and an entry outside the
+    # region, are refused by its own checks.
+    var t = List[_Ent]()
+    t.append(_flt(String("w"), [3]))
+    t.append(_flt(String("f"), [3, 64]))
+    t.append(_num(String("z"), [0, 0, 0, 0]))
+    var vt = _view_of(t^)
+    var rt = FastFieldReader(vt)
+    with assert_raises(contains="_materialize_float: header truncated (width)"):
+        _ = rt.fast_field_column(vt, String("w"))
+    with assert_raises(
+        contains="_materialize_float: header truncated (validity_flag)"
+    ):
+        _ = rt.fast_field_column(vt, String("f"))
+    rt._entries[1].sub_len = 500
+    with assert_raises(contains="_materialize_float: float sub-region out of bounds"):
+        _ = rt.fast_field_column(vt, String("f"))
+
+
+def test_10_wrapping_packed_count_refused() raises:
+    var num = List[UInt8]()
+    _uleb_2_61(num)
+    num.append(0)  # min value
+    num.append(8)  # bits
+    num.append(0)  # no validity
+    var flt = List[UInt8]()
+    _uleb_2_61(flt)
+    flt.append(8)  # width
+    flt.append(0)  # no validity
+    var ents = List[_Ent]()
+    ents.append(_num(String("n"), num^))
+    ents.append(_flt(String("g"), flt^))
+    var v = _view_of(ents^)
+    var r = FastFieldReader(v)
+    with assert_raises(
+        contains="_unpack_bits_lsb_first: packed run of 2305843009213693952 values"
+    ):
+        _ = r.fast_field_column(v, String("n"))
+    with assert_raises(
+        contains="_unpack_bits_lsb_first_u64: packed run of 2305843009213693952"
+    ):
+        _ = r.fast_field_column(v, String("g"))
+
+
+def _min_docs(head: List[UInt8]) -> List[UInt8]:
+    """n_docs = Int.MIN (nine 0x80 bytes, then 0x01: bit 63 set), then
+    `head`, then one bitmap byte 0xFF."""
+    var out = List[UInt8]()
+    for _ in range(9):
+        out.append(0x80)
+    out.append(0x01)
+    for b in head:
+        out.append(b)
+    out.append(0xFF)
+    return out^
+
+
+def test_11_negative_n_docs_validity_bitmap_refused() raises:
+    # The headers of case 9, with a negative n_docs: each decoder's bitmap
+    # check refuses it before the later slot or sub-region checks run.
+    var ents = List[_Ent]()
+    ents.append(_num(String("n"), _min_docs([0, 0, 1])))
+    ents.append(_flt(String("g"), _min_docs([0, 1])))
+    ents.append(_kw(String("k"), _min_docs([1, 1, 0x61, 0, 1])))
+    ents.append(_flt(String("h"), _min_docs([64, 1])))
+    var v = _view_of(ents^)
+    var r = FastFieldReader(v)
+    with assert_raises(contains="FastFieldReader: validity bitmap out of bounds"):
+        _ = r.fast_field_i64(v, String("n"), 0)
+    with assert_raises(contains="FastFieldReader: float validity bitmap out of bounds"):
+        _ = r.fast_field_f64(v, String("g"), 0)
+    with assert_raises(contains="float_resolver: validity bitmap OOB"):
+        _ = r.float_resolver(v, String("g"))
+    with assert_raises(contains="FastFieldReader: keyword validity bitmap out of bounds"):
+        _ = r.fast_field_keyword(v, String("k"), 0)
+    var fr = FieldnormResolver(entry=r._entries[0].copy(), min_doc_id=0, doc_count=3)
+    with assert_raises(contains="FieldnormResolver: validity bitmap out of bounds"):
+        _ = fr.dl_at(v, 0)
+    with assert_raises(contains="_materialize_float: validity bitmap out of bounds"):
+        _ = r.fast_field_column(v, String("h"))
 
 
 def main() raises:

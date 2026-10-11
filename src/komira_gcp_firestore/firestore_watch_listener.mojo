@@ -445,9 +445,8 @@ def _extract_document_id(resource_name: String) raises -> String:
     for i in range(n):
         if rb[i] == UInt8(ord("/")):
             last_slash = i
-    var out = String("")
-    for i in range(last_slash + 1, n):
-        out += chr(Int(rb[i]))
+    # `/` is ASCII, so the cut is a char boundary: the id's UTF-8 bytes as they are.
+    var out = String(resource_name[byte=last_slash + 1 : n])
     if out.byte_length() == 0:
         raise Error(
             "firestore CDC: DocumentChange/Delete has an empty (id-less) resource"

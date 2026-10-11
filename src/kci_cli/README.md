@@ -5,18 +5,31 @@ The `kci` command line. There is one command, `kci run --stage S`:
 error before anything is read. `kci_main` then reads the machine file
 (`kci_release_machine`; `--machine`, default `release/machine.textproto`),
 resolves stage `S` and runs each of its steps in order through `kci_build`
-(BUILD) or `kci_publish` (PUBLISH), with each step's validations
-(`kci_validate`) after it. Under GitHub Actions it first checks the workflow
+(BUILD), `kci_publish` (PUBLISH) or `kci_cloud` (DEPLOY: a plan or an apply
+of a resource list into one cell of a cells file), with each step's
+validations (`kci_validate`) after it. The `kci` binary is built with no
+cloud adapter yet, so it refuses every DEPLOY step ("this kci was not built
+with that cloud"). Under GitHub Actions it first checks the workflow
 it runs under against the machine file, the ref it runs on (a stage that is
 neither the pull-request stage nor `break_glass` runs only on `main`) and the
-release set it was handed. Every
+release set it was handed; with `--admission`, a push re-run (or the first
+stage's first attempt) of a revision `main` has moved past stops SUPERSEDED,
+exit 0, before anything runs. Every
 run writes `kci_api`'s result document to `--result-file` (RUNNING before
 the first effect, FINISHED on every exit path), appends a markdown summary
 to `--summary-file` when given, and exits with `kci_api`'s exit numbers.
+A step that does not end SUCCEEDED or NOOP stops the run (a failed DEPLOY
+step leaves its cell as the failed apply left it, and no later step runs),
+and a run that does not end SUCCEEDED or NOOP hands on no set hash.
+`--rollback-on-failure` is parsed and refused: this kci has no per-cell
+deployed-revision record to roll a cell back to.
 
 `kci_main_with` and `run_stage_with` take the steps as a `StageSteps`
 value, so a test can run a stage over a recording fake; `LibrarySteps` is
-the one that reaches the real libraries. The `kci` program itself is a
+the one that reaches the real libraries. Their four-argument forms also take
+the clouds a DEPLOY step may use as a `CellDeploys` value:
+`CloudDeploys[S, St]` holds one built-in cloud adapter, its state store and
+its credentials, and `NoCloudBuilt` holds none. The `kci` program itself is a
 separate binary whose `main` calls `kci_main`.
 
 ## Examples

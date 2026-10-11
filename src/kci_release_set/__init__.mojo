@@ -8,7 +8,16 @@
 #                          `MOJO_COMPILER_PACKAGE`: every library requirement
 #                          names another library of the set (BUILD refuses
 #                          an open one; PUBLISH's closure check also pins it)
-#   conda_metadata.mojo    `CondaMetadata`, `read_conda_metadata`
+#   conda_metadata.mojo    `CondaMetadata`, `read_conda_metadata`; `LibFile`,
+#                          a `lib_files` row of a library shipping native files
+#   system_libs.mojo       `system_libs`, `is_system_lib_requirement`: the
+#                          conda-forge requirements a library may carry for
+#                          a system library it opens (tools/build/package/
+#                          system_libs.bzl), accepted by both closure checks
+#   glibc_floor.mojo       `glibc_requirement`, `glibc_requirement_refusals`:
+#                          the one `__glibc >=<floor>` a library shipping
+#                          native files carries (the platform table's
+#                          os_floor), and no other
 #   member.mojo            `ReleaseMember`, `verify_member`: the per-artifact
 #                          checks both verbs run, so build's early refusal and
 #                          publish's re-check cannot drift apart
@@ -26,6 +35,11 @@ from kci_release_set.conda_metadata import (
     KIND_METAPACKAGE,
     CondaMetadata,
     DocFile,
+    LIB_DIR,
+    LIB_KIND_LINK,
+    LIB_KIND_SHARED,
+    LIB_KIND_STATIC,
+    LibFile,
     MetaMember,
     parse_conda_metadata,
     read_conda_metadata,
@@ -48,6 +62,16 @@ from kci_release_set.release_manifest import (
     release_manifest_of,
     release_set_hash,
     render_release_manifest,
+)
+from kci_release_set.system_libs import SystemLib, is_system_lib_requirement, system_libs
+from kci_release_set.glibc_floor import (
+    GLIBC_PACKAGE,
+    GlibcFloor,
+    glibc_floor_of,
+    glibc_floors,
+    glibc_requirement,
+    glibc_requirement_refusals,
+    is_glibc_requirement,
 )
 from kci_release_set.set_hash import (
     SetHashLine,

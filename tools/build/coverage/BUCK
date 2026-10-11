@@ -1,7 +1,8 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load(":defs.bzl", "cov_gate_dir")
+load(":defs.bzl", "branch_gate_rows", "cov_gate_dir")
+load(":policy.bzl", "COVERAGE_BRANCH_GATE")
 
 # covcheck: coverage reports (kcov's Cobertura, lcov, and the branch records
 # of tools/build/coverage/branch) to per-package numbers,
@@ -11,6 +12,19 @@ load(":defs.bzl", "cov_gate_dir")
 # shipped file so it can never be left unparseable.
 export_file(
     name = "ratchet.tsv",
+    visibility = ["PUBLIC"],
+)
+
+# The coverage census (census.md): census.sh renders
+# docs/coverage_census.md and the rows of ratchet.tsv from census.tsv, and
+# the root BUCK's :coverage_census holds the three to each other.
+export_file(
+    name = "census.tsv",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "census.sh",
     visibility = ["PUBLIC"],
 )
 
@@ -46,6 +60,12 @@ mojo_library(
         # path mapping in its documented order (strip prefix, buck-out hash,
         # PKGDIR, outside vs unmapped) and a file's package
         "tests/test_paths.mojo",
+        # a test's generated main (a client's layout probe, named at its
+        # output path in the package) set aside as a test source, and every
+        # other unmapped path still an error: a missing file in a repository
+        # directory, another file of the output directory, the test's name
+        # in a repository directory, a report that is no test's
+        "tests/test_generated_tests.mojo",
         # every diff block shape: modified, added, deleted, renames, binary,
         # mode-only, omitted and zero counts, C-quoted paths
         "tests/test_diff.mojo",
@@ -54,7 +74,8 @@ mojo_library(
         "tests/test_exempt_mutants.mojo",
         # the source lexer: markers recognised only in a real comment (not
         # in a string, a docstring or another comment's text), CRLF, and the
-        # executable-line heuristic over every kind of line
+        # executable-line heuristic over every kind of line, trait
+        # requirements (no code) left out
         "tests/test_lexer.mojo",
         # declaration reachability (report only): the functions a source
         # declares (methods, multi-line and generic signatures, one-line
@@ -149,5 +170,16 @@ export_file(
 
 shell_lint(
     name = "shell_lint",
-    srcs = ["cov_gate.sh"],
+    srcs = [
+        "census.sh",
+        "cov_gate.sh",
+    ],
+)
+
+# Every row of COVERAGE_BRANCH_GATE (policy.bzl) names a Mojo library by the
+# exact label string mojo_library looks itself up by: a row naming none, or
+# spelled another way, fails this target, which the pull-request check builds.
+branch_gate_rows(
+    name = "branch_gate_rows",
+    libraries = {row: row for row in sorted(COVERAGE_BRANCH_GATE.keys())},
 )
