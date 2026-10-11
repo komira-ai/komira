@@ -42,7 +42,8 @@ the plugin as `--mojo_opt` arguments, never from a file, so they are part of
 the action key.
 """
 
-load(":defs.bzl", "mojo_compile_cmd", "mojo_library")
+load(":compile.bzl", "mojo_compile_cmd")
+load(":defs.bzl", "mojo_library")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 

@@ -5,7 +5,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_binary", "mojo_
 ```
 
 The rules are in [`defs.bzl`](defs.bzl); their providers in
-[`providers.bzl`](providers.bzl). Every action runs the hermetic toolchain
+[`providers.bzl`](providers.bzl); a compile's command line and `mojo build` of a
+program in [`compile.bzl`](compile.bzl). Every action runs the hermetic toolchain
 ([`toolchains//:mojo`](../toolchains/README.md)) through the compile wrapper,
 [`tools/mojo_compile.zig`](tools/mojo_compile.zig) on Linux (its header is
 where to read the environment the compiler sees) and

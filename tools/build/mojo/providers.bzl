@@ -58,7 +58,7 @@ MojoToolchainInfo = provider(fields = {
     # is the CPU of the machine the action runs on, which is not part of the
     # action key.
     "target_cpu": provider_field(str),
-    # The compile wrapper every Mojo compile runs through (defs.bzl,
+    # The compile wrapper every Mojo compile runs through (compile.bzl,
     # mojo_compile_cmd): on Linux the mojo_compile executable
     # (tools/mojo_compile.zig), on macOS darwin/mojo_wrapper.sh.
     "wrapper": provider_field(typing.Any),

@@ -352,7 +352,7 @@ mojo_toolchain_rule = rule(
             "komira//tools/build/mojo/darwin:shell_lint",
         ]),
         # The compile wrapper (tools/mojo_compile.zig), an executable built
-        # behind its unit tests; defs.bzl's mojo_compile_cmd runs it.
+        # behind its unit tests; compile.bzl's mojo_compile_cmd runs it.
         "_wrapper": attrs.exec_dep(default = "komira//tools/build/mojo:mojo_compile"),
     },
 )
