@@ -279,6 +279,13 @@ the table for the welded test that holds kci's compiled copy equal to it. The
 packer does not write them yet: it still refuses a library that opens a shared
 library by name.
 
+The target `:glibc_floor` ([`glibc_floor_record.bzl`](glibc_floor_record.bzl))
+writes the platform table's glibc floor of each subdir the packer writes
+(`linux-64 2.34`, from `os_floor_version`) for the welded test that holds kci's
+compiled copy (`src/kci_release_set/glibc_floor.mojo`) equal to it: kci accepts
+`__glibc >=<floor>` on a library shipping native files, and no other `__glibc`
+requirement.
+
 With coverage on (`-c komira.coverage=true`), both copies of a conda package
 (its default output and `[release]`) also wait for the library's coverage runs
 and its coverage gate, which the library hands over in its
