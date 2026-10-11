@@ -79,6 +79,14 @@ test "no subcommand, or an unknown one, is a usage error" {
     try std.testing.expectEqual(@as(u8, 2), try dispatch(a, &.{"lnk"}, where, run_cmd.real_runner, &err));
     try std.testing.expect(std.mem.indexOf(u8, err.items, "unknown subcommand lnk") != null);
     err.clearRetainingCapacity();
+    // A subcommand is matched on its whole name: a longer, shorter, other
+    // case or empty name is unknown.
+    for ([_][]const u8{ "linker", "lin", "blink", "LINK", "", "running" }) |name| {
+        try std.testing.expectEqual(@as(u8, 2), try dispatch(a, &.{name}, where, run_cmd.real_runner, &err));
+        const want = try std.fmt.allocPrint(a, "cov_branch: unknown subcommand {s}\n", .{name});
+        try std.testing.expect(std.mem.startsWith(u8, err.items, want));
+        err.clearRetainingCapacity();
+    }
     // `link` reaches the subcommand: its own usage error.
     try std.testing.expectEqual(@as(u8, 2), try dispatch(a, &.{"link"}, where, run_cmd.real_runner, &err));
     try std.testing.expect(std.mem.indexOf(u8, err.items, "cov_branch link: usage error: --busybox is missing") != null);
