@@ -11,10 +11,10 @@
 # changes the result, the portable render differs from `optimize`'s.
 #
 # Each plan below is a small plan on which one pass (or one arm of a driver
-# gate) changes the render; the table at the end names it. The last three
-# show an order instead: on them, `fuse_sort_limit` (17) run after
-# `optimize_window_rewrite` (18), or the window rewrite run after
-# `fuse_partition_topn` (19), gives a different plan
+# gate) changes the render; the table at the end names it. Three, named
+# "... before ..." there, show an order instead: on them, `fuse_sort_limit`
+# (17) run after `optimize_window_rewrite` (18), or the window rewrite run
+# after `fuse_partition_topn` (19), gives a different plan
 # (`test_optimizer_portable_order.mojo` holds the other steps' orders). No
 # scan carries statistics, so step 20 stamps nothing, and no plan holds a
 # scalar site, so no request is recorded and the portable entry refuses none
@@ -30,6 +30,21 @@
 # Two calls are left with no plan that tells them apart. `prune_columns` is
 # `push_projections_down` called again: either one alone is equivalent, and
 # the pair is caught.
+# The window gates (18, 19) scan the current plan. Step 15 can create the
+# first Project, so `window_fn_as_aggregate_input` catches a Project arm that
+# reads the `has_project` flag scanned after step 4 instead. Step 18 can
+# create the first PartitionBy, and `fuse_partition_topn` fires on two
+# patterns: a Filter directly over a PartitionBy, and an identity Project
+# directly over a PartitionTopN, including one already in the input that
+# steps 5-17 leave in place (they do not descend into a PartitionTopN). So
+# `identity_project_under_a_partition_topn` catches a step-19 gate that
+# reads PartitionBy from a scan after step 4. The opposite case, a
+# PartitionBy at step 4 and none at steps 18-19, does not occur under
+# `optimize_portable`: only a bound broadcast site (step 9) removes a
+# PartitionBy, with its whole Aggregate subtree, and the portable entry has
+# no binding (an unbound site records a request, which it refuses). So the
+# step-18 PartitionBy arm reading that flag changes no plan the portable
+# entry returns, and no plan here is for it.
 # =============================================================================
 
 from std.memory import OwnedPointer
@@ -443,6 +458,21 @@ def _window_function_in_a_project() -> LogicalPlan:
     return LogicalPlan.project(pe^, _scan("w.parquet", n))
 
 
+def _window_fn_as_aggregate_input() -> LogicalPlan:
+    """SUM(rank() OVER (PARTITION BY g)) AS s GROUP BY g over w(g, v): the
+    input holds no Project. Step 15 moves the window function into a new
+    Project below the Aggregate, so the window gate's Project arm is true
+    only on the current plan; a flag scanned after step 4 is false. The
+    window expression carries no alias of its own: the rewrite matches a
+    single Alias over the WindowFn, which step 15 adds."""
+    var n: List[String] = ["g", "v"]
+    var aggs = AggExprArray()
+    aggs.append(AggExpr(
+        AGG_SUM, Optional(col("v").rank().over("g")), Optional(String("s"))
+    ))
+    return LogicalPlan.aggregate(_cols(_l1("g")), aggs^, _scan("w.parquet", n))
+
+
 def _row_number_filter() raises -> LogicalPlan:
     """Project[a, b, c] over Filter(rn <= 5) over PartitionBy(row_number AS
     rn) over w(a, b, c): a per-partition top-N."""
@@ -484,12 +514,33 @@ def _row_number_filter_over_two_partition_bys() raises -> LogicalPlan:
     return LogicalPlan.project(_cols(keep^), f^)
 
 
+def _identity_project_under_a_partition_topn() raises -> LogicalPlan:
+    """Project[g, v, rank() OVER (PARTITION BY g) AS r] over PartitionTopN(g;
+    v; k=1) over Project[g, v] over PartitionTopN(g; v; k=2) over w(g, v).
+    The input holds no PartitionBy; step 18 makes one from the window
+    function, and step 19 then absorbs the identity Project over the inner
+    PartitionTopN. A step-19 gate reading PartitionBy from a scan after
+    step 4 skips the step and leaves that Project."""
+    var n: List[String] = ["g", "v"]
+    var inner = LogicalPlan.partition_topn(
+        _l1("g"), _l1("v"), _asc(), 2, _scan("w.parquet", n)
+    )
+    var ident: List[String] = ["g", "v"]
+    var mid = LogicalPlan.project(_cols(ident^), inner^)
+    var outer = LogicalPlan.partition_topn(_l1("g"), _l1("v"), _asc(), 1, mid^)
+    var pe = ExprArray()
+    pe.append(_c("g"))
+    pe.append(_c("v"))
+    pe.append(col("v").rank().over("g").alias("r"))
+    return LogicalPlan.project(pe^, outer^)
+
+
 # -----------------------------------------------------------------------------
 # The table: plan i, and the pass (driver step) whose drop it shows
 # -----------------------------------------------------------------------------
 
 
-comptime _N_PLANS = 26
+comptime _N_PLANS = 28
 
 
 def _plan_name(i: Int) -> String:
@@ -516,10 +567,12 @@ def _plan_name(i: Int) -> String:
         "fuse_sort_limit (17): limit_over_sort_over_filter",
         "optimize_window_rewrite (18): two_partition_bys",
         "the window gate's Project arm (18): window_function_in_a_project",
+        "the window gate's Project arm reads the current plan (18): window_fn_as_aggregate_input",
         "fuse_partition_topn (19): row_number_filter",
         "fuse_sort_limit (17) before optimize_window_rewrite (18): limit_over_sort_over_partition_by",
         "fuse_sort_limit (17) before optimize_window_rewrite (18): limit_over_two_key_sort_over_partition_by",
         "optimize_window_rewrite (18) before fuse_partition_topn (19): row_number_filter_over_two_partition_bys",
+        "the step-19 gate reads the current plan (19): identity_project_under_a_partition_topn",
     ]
     return names[i]
 
@@ -570,12 +623,16 @@ def _plan_at(i: Int) raises -> LogicalPlan:
     if i == 21:
         return _window_function_in_a_project()
     if i == 22:
-        return _row_number_filter()
+        return _window_fn_as_aggregate_input()
     if i == 23:
-        return _limit_over_sort_over_partition_by(False)
+        return _row_number_filter()
     if i == 24:
+        return _limit_over_sort_over_partition_by(False)
+    if i == 25:
         return _limit_over_sort_over_partition_by(True)
-    return _row_number_filter_over_two_partition_bys()
+    if i == 26:
+        return _row_number_filter_over_two_partition_bys()
+    return _identity_project_under_a_partition_topn()
 
 
 def test_portable_renders_as_optimize_on_a_plan_per_pass() raises:

@@ -45,18 +45,18 @@ This follows the build-architecture ruling:
 
 Every action this design adds runs a Zig-built tool, and every check it adds is a Buck2 target. It adds
 no CI step, no workflow logic and no shell: a scenario is a `buck2 test` target that `pr / check`
-already runs through its existing commands (`derive_checks.py`, `build_targets.sh`). The design
-changes `derive_checks.py` not at all and `build_targets.sh` in one place: its BXL step, which runs the
+already runs through its existing commands (`derive_checks`, `build_targets.sh`). The design
+changes `derive_checks` not at all and `build_targets.sh` in one place: its BXL step, which runs the
 test_weld check today, also runs the graph checks (see "Graph checks in the gate"). Existing rule scripts that the rows below lean on (`run_check.sh`, the
 `cases.sh` actions) keep running until their own Zig port. Rows 28, 29 and 49 schedule the ports of the
-case scripts. The rest, and the port of `derive_checks.py` and `build_targets.sh`, belong to the
+case scripts. The rest, and the port of `build_targets.sh` (`derive_checks` is now the Mojo `//tools/build/ci:derive_checks`), belong to the
 build-architecture ruling's own work, not to this design.
 
 A fourth outcome is **delete**: the check repeats what `pr / check` already builds. Every converted check
 has a planted mutant that turns it red, and each slice deletes its shell part in the same pull request.
 
 "Already in the gate" has a precise meaning here. `pr / check` builds the derived units the change
-reaches. Its universe is `//...` and `tests//functional/...` (`release/ci/derive_checks.py`); it is not
+reaches. Its universe is `//...` and `tests//functional/...` (`//tools/build/ci:derive_checks`); it is not
 a whole `//...` build. It runs `buck2 test` only on targets outside `tests//`
 (`release/ci/build_targets.sh`). It does not build sub-targets such as `[run_check]`. It never builds
 `tests//negative`. The universe is a `cquery` for the default target platform, so a target that is
@@ -425,12 +425,12 @@ passed through an attribute, say) is not caught on that pull request; every list
 ## Scenarios run in pr / check
 
 The scenarios run in `pr / check` whenever a pull request touches `tools/build/**`. They are selected
-by the derivation that already exists. Nothing in `pr.yml` or `derive_checks.py` changes, and nothing
+by the derivation that already exists. Nothing in `pr.yml` or the derive_checks tool changes, and nothing
 filters them. The one change to `build_targets.sh` is for the graph checks, not for the scenarios (see
 "Graph checks in the gate").
 
 - **They are in the universe.** A scenario test target is compatible with the default target
-  platform, so the `cquery` of `//...` in `derive_checks.py` sees it like any other target.
+  platform, so the `cquery` of `//...` in `//tools/build/ci:derive_checks` sees it like any other target.
 - **They are one declared check.** Slice 3 adds one check, `build_selftests`, to
   `release/artifacts.textproto`, with the `buck2` build system and the one target pattern
   `//tools/build/selftest/...`. A target a declared unit matches is not derived again: no derived

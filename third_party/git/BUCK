@@ -128,5 +128,8 @@ git_tool(
         ":shell_lint",
     ],
     dist = ":git_dist",
-    visibility = ["//src/tests/conformance/..."],
+    visibility = [
+        "//src/tests/conformance/...",
+        "//tools/build/bisect/...",
+    ],
 )
