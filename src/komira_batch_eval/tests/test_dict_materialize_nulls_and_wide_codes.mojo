@@ -82,6 +82,10 @@ from komira_column_kernels.regexp_functions import eval_regexp_like
 from komira_column_kernels.regexp_nfa import RegexProgram
 
 from komira_batch_eval.eval_dict import _materialize_dict_to_string
+from komira_batch_eval.dict_mat_counter import (
+    materialize_dict_to_string_call_count,
+    reset_materialize_dict_to_string_call_count,
+)
 
 
 # =============================================================================
@@ -424,6 +428,20 @@ def test_plain_int32_dict_control() raises:
         )
 
 
+def test_materialization_count_counts_each_call() raises:
+    """`dict_mat_counter` counts one per `_materialize_dict_to_string` call,
+    and `reset` returns it to 0. A counter that did not count (an `incr` that
+    did nothing, or two names for the cell) reads 0 after two calls."""
+    reset_materialize_dict_to_string_call_count()
+    assert_equal(materialize_dict_to_string_call_count(), 0, "after reset")
+    var col = _plain_int32_dict_column()
+    _ = _materialize_dict_to_string(col)
+    assert_equal(materialize_dict_to_string_call_count(), 1, "one call")
+    _ = _materialize_dict_to_string(col)
+    assert_equal(materialize_dict_to_string_call_count(), 2, "two calls")
+    reset_materialize_dict_to_string_call_count()
+    assert_equal(materialize_dict_to_string_call_count(), 0, "reset again")
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_fixture_is_null_bearing_and_discriminating]()
@@ -435,6 +453,7 @@ def main() raises:
     suite.test[test_dict_materialize_int64_codes_with_nulls]()
     suite.test[test_dict_materialize_int64_codes_with_nulls_sliced]()
     suite.test[test_plain_int32_dict_control]()
+    suite.test[test_materialization_count_counts_each_call]()
     # Registered LAST on purpose: pre-fix this case SIGSEGVs (the out-of-range
     # placeholder code at a null slot indexes the dict offsets buffer out of
     # bounds), and a crash kills the process before TestSuite flushes the
