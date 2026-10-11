@@ -22,6 +22,9 @@
 #      no document is empty.
 #   8. The unsigned 64-bit bitpack helpers: width 0, a width out of range, a
 #      run past the source, and a value with the top bit set round-trips.
+#   9. The unsigned unpacker refuses a run whose count times width wraps Int
+#      (2^61 values at width 8) by its own check before it reads
+#      (komira-ai/komira#1260); a run ending at the source end is read.
 # =============================================================================
 
 from std.memory import bitcast
@@ -385,10 +388,33 @@ def test_08_u64_bitpack() raises:
         _unpack_bits_lsb_first_u64(Span(out), 0, 1, 65, back)
     with assert_raises(contains="_unpack_bits_lsb_first_u64: bit_width -2"):
         _unpack_bits_lsb_first_u64(Span(out), 0, 1, -2, back)
-    with assert_raises(contains="packed run [8, 24) exceeds source length 16"):
+    with assert_raises(
+        contains="packed run of 2 values at width 64 from offset 8"
+        " exceeds source length 16"
+    ):
         _unpack_bits_lsb_first_u64(Span(out), 8, 2, 64, back)
-    with assert_raises(contains="packed run [-1, 7) exceeds source length 16"):
+    with assert_raises(
+        contains="packed run of 1 values at width 64 from offset -1"
+        " exceeds source length 16"
+    ):
         _unpack_bits_lsb_first_u64(Span(out), -1, 1, 64, back)
+
+
+def test_09_u64_wrapping_packed_count_refused() raises:
+    var src: List[UInt8] = [0xAB, 0xCD]
+    var got = List[UInt64]()
+    with assert_raises(
+        contains="_unpack_bits_lsb_first_u64: packed run of 2305843009213693952"
+        " values at width 8 from offset 0 exceeds source length 2"
+    ):
+        _unpack_bits_lsb_first_u64(Span(src), 0, 1 << 61, 8, got)
+    with assert_raises(contains="packed run of 1152921504606846976 values"):
+        _unpack_bits_lsb_first_u64(Span(src), 1, 1 << 60, 8, got)
+    assert_equal(len(got), 0, "9: a refused run appends nothing")
+    _unpack_bits_lsb_first_u64(Span(src), 1, 2, 3, got)
+    assert_equal(len(got), 2, "9: two 3-bit values from the last byte")
+    with assert_raises(contains="packed run of 3 values at width 3 from offset 1"):
+        _unpack_bits_lsb_first_u64(Span(src), 1, 3, 3, got)
 
 
 def main() raises:

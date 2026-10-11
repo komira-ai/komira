@@ -1,0 +1,31 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The shell list's tool (src/budget.zig says what it checks), run by
+# //tools/build/lint:shell_budget (tools/build/lint/shell_budget.bzl).
+
+_SRCS = glob(["src/*.zig"])
+
+# The unit tests (a clean tree, an unlisted script, a listed script grown by
+# 50 lines passing unchanged, a stale row after a delete, a file without .sh
+# caught by its shebang, malformed rows): `zig test` of main.zig, run as a build action.
+zig_test(
+    name = "shell_budget_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/main.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# Built only behind its unit tests.
+zig_exe(
+    name = "shell_budget",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/main.zig",
+    unit_tests = [":shell_budget_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)

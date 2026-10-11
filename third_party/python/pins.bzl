@@ -1,8 +1,7 @@
 """The hermetic Python of the tests: the interpreter and the wheels, each pinned by sha256 and size.
 
 Read by this package's BUCK, which declares the downloads and the installed
-targets, and by tests that hold what they import to these pins
-(src/tests/helpers/komira_test_python). Every wheel of WHEELS is a binary
+targets. Every wheel of WHEELS is a binary
 wheel for CPython 3.13 on manylinux x86_64 (glibc 2.28 or older) or a
 pure-Python one, and every wheel of WHEELS_314 one for CPython 3.14 (`cp314`)
 or free-threaded 3.14 (`cp314t`), or a pure-Python one; there is no source
