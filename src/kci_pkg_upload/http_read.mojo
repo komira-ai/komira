@@ -190,7 +190,7 @@ def _remove_dot_segments(path: String) -> String:
     for i in range(len(out)):
         res += String("/") + out[i]
     if res.byte_length() == 0:
-        return String("/")
+        return String("/")  # cov: unreachable the last segment always appends one entry, so res is never empty
     return res^
 
 

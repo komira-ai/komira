@@ -189,17 +189,18 @@ def _store_error(kind: String, what: String) -> Error:
 def _split_key_segments(key: String) raises -> List[String]:
     """Split a normalized object key on `/`. `Path.parse` has already collapsed
     `//`, stripped the leading `/` and rejected `.`/`..`, so this is a plain
-    split; an empty segment here would mean the caller bypassed `Path`."""
+    split; an empty segment here would mean the caller bypassed `Path`.
+
+    Each segment is a byte slice of `key`: `/` is ASCII, so every cut is a char
+    boundary and a multi-byte UTF-8 character stays whole."""
     var bs = key.as_bytes()
     var out = List[String]()
-    var cur = String("")
+    var start = 0
     for i in range(len(bs)):
         if bs[i] == UInt8(47):  # '/'
-            out.append(cur^)
-            cur = String("")
-        else:
-            cur += chr(Int(bs[i]))
-    out.append(cur^)
+            out.append(String(key[byte=start:i]))
+            start = i + 1
+    out.append(String(key[byte=start : len(bs)]))
     return out^
 
 
@@ -298,9 +299,7 @@ def collection_from_prefix(prefix: Path) raises -> String:
     var end = len(bs)
     if end > 0 and bs[end - 1] == UInt8(47):
         end -= 1
-    var name = String("")
-    for i in range(end):
-        name += chr(Int(bs[i]))
+    var name = String(raw[byte=0:end])
     var segs = _split_key_segments(name)
     if len(segs) != 1:
         raise _store_error(
@@ -334,11 +333,9 @@ def key_from_document_name(name: String) raises -> String:
                 " be recovered from it"
             ),
         )
-    var bs = name.as_bytes()
-    var out = String("")
-    for i in range(at + marker.byte_length(), len(bs)):
-        out += chr(Int(bs[i]))
-    return out^
+    # The marker ends in ASCII `/`, so the cut is a char boundary: the key's
+    # UTF-8 bytes as they are.
+    return String(name[byte=at + marker.byte_length() : name.byte_length()])
 
 
 # =============================================================================

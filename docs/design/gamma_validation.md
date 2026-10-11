@@ -1,10 +1,33 @@
 # Gamma validation: what checks a release before prod, per package family
 
+**Superseded in part by [native_packaging.md](native_packaging.md).** Every
+row and note here about the shared-library package `komira_native` (the
+release state list, "Declared by open pull requests", its row in the library
+table, and the gap list) describes a plan that is replaced: each library that
+owns C ships its own shared library in its own package, and every check of an
+installed native package runs in beta's install job, not in gamma. That plan's
+slice 13 rewrites the `komira_native` rows and this document's stage and
+channel text; until then, read the rows as history and the channel text as
+today's pipeline, in the vocabulary below.
+
+**Vocabulary.** This document predates the staged pipeline's glossary
+([staged_pipeline.md](staged_pipeline.md), section "Glossary"). Its tables
+and notes say "gamma" for the stage that publishes to a test conda channel
+and installs from it: since the rename (M2 in that document's section e3)
+that stage is **`beta`**, its channel `komira-ai/beta`, its jobs `beta` and
+`beta_validate` (the measurements below call that job by its old name,
+`validate`); "gamma, installed package" is beta's installs
+(`beta_validate`). The sections "What is this document for?", "What
+constrains gamma?" and "What runs in gamma today?" use today's names. The
+glossary's gamma holds only real cloud resources and publishes nothing, and
+the "real gamma cloud project" rows are that gamma's.
+
 ## What is this document for?
 
-`gamma` is the stage of komira's release machine that publishes a release to
-the conda channel `gamma` and then validates what it published, before the
-`prod` stage may publish the same set. This document says, for each family of
+`beta` (this document's "gamma", above) is the stage of komira's release
+machine that publishes a release to the conda channel `beta` and then
+validates what it published, before the `prod` stage may publish the same
+set. This document says, for each family of
 packages komira publishes or will publish, what checks the release before
 prod, where each check runs, what it can catch and what it cannot. It keeps
 three things apart that are easy to blur:
@@ -34,23 +57,23 @@ requests merge; issue #779 tracks updating them.
   them is whether an outside contributor can reproduce the run locally
   without an account, a token or a licence.
 - **No stored secret.** Publishing uses trusted publishing (an OIDC identity
-  token, no stored credential), and gamma and prod run kci with
+  token, no stored credential), and beta and prod run kci with
   `--secret-store none` (`.github/workflows/kci.yml`). kci reads secrets only
   through `--secret-store none|env` (`src/kci_cli/args.mojo`).
-- **The validate job holds nothing.** gamma runs as two jobs of `kci.yml`:
-  `gamma` publishes (`--only step:publish`, in the GitHub environment
-  `gamma`), and `validate` runs the validations (`--only validation:<name>`).
-  `validate` runs on a GitHub-hosted `ubuntu-24.04` runner with no farm, no
+- **The beta_validate job holds nothing.** beta runs as two jobs of `kci.yml`,
+  each on a push to `main` only: `beta` publishes (`--only step:publish`, in
+  the GitHub environment `beta`), and `beta_validate` runs the validations
+  (`--only validation:<name>`). `beta_validate` runs on a GitHub-hosted `ubuntu-24.04` runner with no farm, no
   container, no GitHub environment, `contents: read` and no `id-token`, and a
-  60-minute timeout (`.github/workflows/kci.yml`, job `validate`; the header
+  60-minute timeout (`.github/workflows/kci.yml`, job `beta_validate`; the header
   of `release/machine.textproto`). It is the job a validation runs in today.
-- **`validate` is a job, not a stage.** The stages are `build`, `gamma`,
+- **`beta_validate` is a job, not a stage.** The stages are `build`, `beta`,
   `prod` and `pr` (`release/machine.textproto`). This document says "gamma's
-  validations" for what the `validate` job runs.
+  validations" for what the `beta_validate` job runs.
 
 ## What runs in gamma today? (EXISTS)
 
-`release/machine.textproto` gives gamma's PUBLISH step two validations, both
+`release/machine.textproto` gives beta's PUBLISH step two validations, both
 of kind `CONDA_INSTALL_ENV` with `smoke: README`:
 
 | validation | installs | runs |
@@ -58,7 +81,7 @@ of kind `CONDA_INSTALL_ENV` with `smoke: README`:
 | `install-komira-encoding` | `komira_encoding` alone | its README examples |
 | `install-set` | `komira_all` alone; kci reads the members from the built metapackage's requirements | every member's README examples |
 
-Each one installs from the `gamma` channel with the pinned pixi, in a fresh
+Each one installs from the `beta` channel with the pinned pixi, in a fresh
 scratch directory outside the checkout and an environment built from nothing
 (`src/kci_validate/env.mojo`), checks each installed README's sha256 against
 the release's record, and runs every ` ```mojo ` block of every installed
@@ -204,8 +227,8 @@ client** in `src/`.
 | `komira_objectstore_gcs` signed URLs | EXISTS: Google's published V4 signing conformance vectors (`test_v4_sign_conformance` in `komira_gcp_core`, from the sha256-pinned `third_party/googleapis_conformance_tests`); `test_gcs_presign_portability` | in-process, build time | a wrong canonical request, string to sign, encoding or expiry, against Google's own vectors | whether a server accepts the URL: no test transfers against one. PROPOSED: one presigned PUT and GET round trip against storage-testbench's XML endpoint or fake-gcs-server (whether either verifies the signature needs a probe with a corrupted-signature mutant) |
 | `komira_gcp_firestore`, `komira_gcp_firestore_db` | EXISTS: `ScriptedFirestore` and `ExchangeConnector` (`src/komira_gcp_firestore/firestore_scripted.mojo`, `firestore_fake.mojo`); every `komira_gcp_firestore_db` test runs on `MockFirestore` | in-process | request and response encoding; `komira_db` conformance against the mock (open PR #679) | Firestore's real precondition, query and transaction behaviour |
 | `komira_gcp_secretmanager` | EXISTS: a stateful Secret Manager fake behind a TLS front in `komira_secrets_e2e` (`src/tests/e2e/komira_secrets_e2e/gcp_fake.mojo`): on every request it checks the bearer token's value (401 `UNAUTHENTICATED` for a missing or empty token and for any token other than the fake's), then the path, the global or regional host, and each method's preconditions (409 on a taken id, 400 on a bad CRC32C); `test_gcp_refusals` asserts both 401s and the exact request log, bearer tokens included | loopback in one action | transport and TLS; a missing, empty or wrong bearer token; request shape and endpoint choice; CRC32C | fake-vs-service divergence; token validity as Google judges it (scopes, expiry): a bearer token has no signature for the fake to recompute, so this is a value comparison, not an independent signature check like the AWS and Azure fakes' |
-| `komira_gcp_storage`, `komira_objectstore_gcs` | PROPOSED: Google's storage-testbench (Apache-2.0), which serves the gRPC v2 API Google's own client libraries test against, including per-request fault injection | per-test service process (needs a pinned Python with grpcio, open PR #767) or container | v2 preconditions, resumable and bidi write framing, ranges, error details, the retry classifier against Google's fault scripts | real auth (any bearer is accepted), IAM, TLS to the real service |
-| `komira_gcp_firestore`, `komira_gcp_firestore_db` | PROPOSED: Google's Firestore emulator; the client already supports a plaintext endpoint and the emulator bearer (`FIRESTORE_EMULATOR_BEARER` in `src/komira_gcp_firestore/firestore_client.mojo`); PR #679's suite as a third target | per-test service container (Java, from Google's CLI image) | real preconditions, queries, commit and listen framing against Google's implementation | IAM, security rules, index requirements, quotas |
+| `komira_gcp_storage`, `komira_objectstore_gcs` | PROPOSED: Google's storage-testbench (Apache-2.0), which serves the gRPC v2 API Google's own client libraries test against, including per-request fault injection | per-test service process, as [continuous publish](continuous_publish.md#the-emulator-test-tier) decides (unary methods only until its slice S7b) | v2 preconditions, resumable and bidi write framing, ranges, error details, the retry classifier against Google's fault scripts | real auth (any bearer is accepted), IAM, TLS to the real service |
+| `komira_gcp_firestore`, `komira_gcp_firestore_db` | PROPOSED: Google's Firestore emulator; the client already supports a plaintext endpoint and the emulator bearer (`FIRESTORE_EMULATOR_BEARER` in `src/komira_gcp_firestore/firestore_client.mojo`); PR #679's suite as a third target | per-test service process (a pinned JRE and the emulator jar), as [continuous publish](continuous_publish.md#the-emulator-test-tier) decides; Listen is out until its slice S7b | real preconditions, queries, commit and listen framing against Google's implementation | IAM, security rules, index requirements, quotas |
 | every released GCP library | PROPOSED (mechanism EXISTS): README examples, which use scripted connectors and open no socket | gamma, installed package | packaging and link defects; README-vs-API drift | any service behaviour |
 | iam, run, compute, artifactregistry, apigateway, cloudscheduler, cloudresourcemanager, serviceusage, secretmanager, logging, monitoring, wif | PROPOSED, decision: a small real gamma GCP project; read-mostly and free-tier calls, one create/delete where needed, no Compute instance by default | real gamma cloud project | real auth (scopes, STS exchange, expiry), real error envelopes, LRO polling, pagination, quota classification | determinism (needs an INDETERMINATE outcome for a provider outage); outsiders cannot run it |
 
@@ -234,7 +257,7 @@ released; `komira_azure_blob` also waits on `komira_plan_expr` and so on
 | packages | what runs | where it runs | what it catches | what it misses |
 |---|---|---|---|---|
 | `komira_azure_blob` | EXISTS: `komira_azure_blob_e2e`, a fake Blob service on `komira_http_server` that recomputes Shared Key with its own canonicalizer under the published Azurite development key and refuses a mismatch with 403 | loopback in one action | the real socket path; Shared Key as an independent canonicalizer computes it | real list XML, error codes and range semantics as Microsoft implements them |
-| `komira_azure_blob` | PROPOSED: Azurite (MIT); the client already has first-class Azurite addressing (`AzureConfig.azurite` in `src/komira_azure_blob/azure.mojo`, with a README example) | per-test service container (Azurite is Node.js, not one static binary) | list pagination (`NextMarker`, delimiters), 404/412/416 codes, conditional Put Blob, Shared Key as Microsoft's code checks it | Entra and IMDS auth, virtual-hosted addressing, TLS to the real service, Azurite's documented feature gaps |
+| `komira_azure_blob` | PROPOSED: Azurite (MIT); the client already has first-class Azurite addressing (`AzureConfig.azurite` in `src/komira_azure_blob/azure.mojo`, with a README example) | per-test service process or container, chosen by a probe ([continuous publish](continuous_publish.md#the-emulator-test-tier), slice S8) | list pagination (`NextMarker`, delimiters), 404/412/416 codes, conditional Put Blob, Shared Key as Microsoft's code checks it | Entra and IMDS auth, virtual-hosted addressing, TLS to the real service, Azurite's documented feature gaps |
 | both, once released | PROPOSED (mechanism EXISTS): README examples | gamma, installed package | packaging and link defects | service behaviour |
 | `komira_azure_core` Entra paths | PROPOSED, later, decision: a real subscription through a GitHub OIDC federated credential | real gamma cloud project | Entra tokens, virtual-hosted addressing, real TLS | IMDS (needs an Azure VM); blocked: `komira_azure_core` has no federated credential, and a client secret is a standing secret |
 
@@ -308,8 +331,8 @@ Packages:
   `komira_orc`, `komira_csv`, `komira_json_index`, `komira_jsonl`,
   `komira_compression`, `komira_lz4`, `komira_zlib` (`komira_json`, a JSON
   reader and writer, is released and listed with the core utilities below);
-- the engine: `komira_plan_expr`, `komira_plan_ir`, `komira_plan_proto`,
-  `komira_plan_stats`, `komira_plan_wire`, `komira_pplan_wire`, `komira_sql`,
+- the engine: `komira_plan_expr`, `komira_plan_ir`, `komira_physical_plan`,
+  `komira_plan_proto`, `komira_plan_stats`, `komira_plan_wire`, `komira_pplan_wire`, `komira_sql`,
   `komira_optimizer`, `komira_eval`, `komira_expr`, `komira_agg`,
   `komira_agg_api`, `komira_op_agg_row_api`, `komira_op_agg_state`,
   `komira_kernels`, `komira_column_kernels`, `komira_column_format`,

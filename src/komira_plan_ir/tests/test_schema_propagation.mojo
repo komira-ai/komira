@@ -88,16 +88,6 @@ def _fields(s: Schema) -> String:
     return out^
 
 
-def _names_types(s: Schema) -> String:
-    """`name:type_id` per field: `_fields` without nullability and zone."""
-    var out = String()
-    for i in range(s.num_columns()):
-        if i > 0:
-            out += ","
-        out += s.field_name(i) + ":" + String(Int(s.field_arrow_type(i).type_id))
-    return out^
-
-
 def _scan() raises -> LogicalPlan:
     return LogicalPlan.scan(String("l.parquet"), SOURCE_PARQUET, _schema())
 
@@ -177,12 +167,12 @@ def test_join_merges_both_sides_and_suffixes_a_colliding_right_name() raises:
     var inner = LogicalPlan.join(_scan(), _rscan(), on.copy(), on.copy(), JOIN_INNER)
     # The right `a` collides and keeps its own type; `b` does not collide.
     _agrees(inner, "a:5:0:,t:24:1:UTC,a_right:12:1:,b:5:0:")
-    # A LEFT join: names and types only. Whether a right-side column keeps
-    # its declared nullability under a LEFT join is komira-ai/komira#960, so
-    # nullability is not asserted here.
+    # A LEFT join: an unmatched left row has NULL in every right column, so
+    # the right side is nullable whatever it declared (`a_right` was not
+    # null on its own side); the left side keeps its flags
+    # (komira-ai/komira#960).
     var left = LogicalPlan.join(_rscan(), _scan(), on.copy(), on.copy(), JOIN_LEFT)
-    assert_equal(_names_types(infer_schema(left)), "a:12,b:5,a_right:5,t:24")
-    assert_equal(_names_types(left.output_schema), "a:12,b:5,a_right:5,t:24")
+    _agrees(left, "a:12:1:,b:5:0:,a_right:5:1:,t:24:1:UTC")
 
 
 def test_semi_and_anti_joins_keep_the_left_side_only() raises:

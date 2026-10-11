@@ -383,6 +383,52 @@ struct _Date32Acc(Copyable, Movable):
         return Column.from_primitive_with_arrow_type[DType.int32](arr, ArrowType.DATE32)
 
 
+def _scalar_child_column(
+    at: ArrowType,
+    mut ints: List[Int64],
+    mut floats: List[Float64],
+    mut bools: List[Bool],
+    mut strings: List[String],
+    mut dates: List[Int32],
+    mut nulls: List[Bool],
+    unsupported: String,
+) raises -> Column[HeapRegion]:
+    """The child column of a LIST, STRUCT or MAP: the one value list `at`
+    selects, with `nulls` as its validity, built by the scalar column's own
+    accumulator. A null element, member or map value (JSON `null`, a STRUCT
+    member missing from its object, every member of a null STRUCT row) reads
+    back NULL, not a valid 0, "" or false. The lists are moved out (left
+    empty). Raises `unsupported` + the type id for any other `at`."""
+    var n = List[Bool]()
+    swap(n, nulls)
+    if at == ArrowType.INT64:
+        var v = List[Int64]()
+        swap(v, ints)
+        return _Int64Acc(values=v^, nulls=n^).build_column()
+    elif at == ArrowType.FLOAT64:
+        var v = List[Float64]()
+        swap(v, floats)
+        return _Float64Acc(values=v^, nulls=n^).build_column()
+    elif at == ArrowType.BOOL:
+        var v = List[Bool]()
+        swap(v, bools)
+        return _BoolAcc(values=v^, nulls=n^).build_column()
+    elif at == ArrowType.STRING:
+        var acc = _StringAcc.create()
+        for i in range(len(strings)):
+            if n[i]:
+                acc.push_null()
+            else:
+                acc.push_bytes(strings[i].as_bytes())
+        strings.clear()
+        return acc^.build_column()
+    elif at == ArrowType.DATE32:
+        var v = List[Int32]()
+        swap(v, dates)
+        return _Date32Acc(values=v^, nulls=n^).build_column()
+    raise Error(unsupported + String(Int(at.type_id)))
+
+
 @fieldwise_init
 struct _ListAcc(Copyable, Movable):
     """Accumulator for a LIST<inner> column.
@@ -439,39 +485,16 @@ struct _ListAcc(Copyable, Movable):
         return False
 
     def build_column(var self) raises -> Column[HeapRegion]:
-        # Build the child Column based on inner_arrow_type.
-        var child_col: Column[HeapRegion]
-        if self.inner_arrow_type == ArrowType.INT64:
-            var arr = PrimitiveArray[DType.int64].from_list(self.child_int_vals)
-            child_col = Column.from_primitive[DType.int64](arr)
-        elif self.inner_arrow_type == ArrowType.FLOAT64:
-            var typed = List[Scalar[DType.float64]]()
-            for i in range(len(self.child_float_vals)):
-                typed.append(Float64(self.child_float_vals[i]))
-            var arr = PrimitiveArray[DType.float64].from_list(typed)
-            child_col = Column.from_primitive[DType.float64](arr)
-        elif self.inner_arrow_type == ArrowType.BOOL:
-            var n_child = len(self.child_bool_vals)
-            var arr = BooleanArray.allocate(n_child)
-            for i in range(n_child):
-                arr.set(i, self.child_bool_vals[i])
-            child_col = Column.from_boolean(arr)
-        elif self.inner_arrow_type == ArrowType.STRING:
-            var arr = StringArray.from_strings(self.child_string_vals)
-            child_col = Column.from_string(arr)
-        elif self.inner_arrow_type == ArrowType.DATE32:
-            var typed = List[Scalar[DType.int32]]()
-            for i in range(len(self.child_date_vals)):
-                typed.append(Int32(self.child_date_vals[i]))
-            var arr = PrimitiveArray[DType.int32].from_list(typed)
-            child_col = Column.from_primitive_with_arrow_type[DType.int32](
-                arr, ArrowType.DATE32
-            )
-        else:
-            raise Error(
-                "_ListAcc.build_column: unsupported inner arrow_type "
-                + String(Int(self.inner_arrow_type.type_id))
-            )
+        var child_col = _scalar_child_column(
+            self.inner_arrow_type,
+            self.child_int_vals,
+            self.child_float_vals,
+            self.child_bool_vals,
+            self.child_string_vals,
+            self.child_date_vals,
+            self.child_nulls,
+            "_ListAcc.build_column: unsupported inner arrow_type ",
+        )
 
         var n_rows = len(self.nulls)
         # Build offsets buffer: (n_rows + 1) * Int32.
@@ -595,39 +618,16 @@ struct _StructAcc(Copyable, Movable):
         # Build child Columns.
         var children = Slab[Column[HeapRegion]].create(n_children)
         for c in range(n_children):
-            var at = self.child_arrow_types[c]
-            var child_col: Column[HeapRegion]
-            if at == ArrowType.INT64:
-                var arr = PrimitiveArray[DType.int64].from_list(self.child_int_vals[c])
-                child_col = Column.from_primitive[DType.int64](arr)
-            elif at == ArrowType.FLOAT64:
-                var typed = List[Scalar[DType.float64]]()
-                for i in range(len(self.child_float_vals[c])):
-                    typed.append(Float64(self.child_float_vals[c][i]))
-                var arr = PrimitiveArray[DType.float64].from_list(typed)
-                child_col = Column.from_primitive[DType.float64](arr)
-            elif at == ArrowType.BOOL:
-                var n = len(self.child_bool_vals[c])
-                var arr = BooleanArray.allocate(n)
-                for i in range(n):
-                    arr.set(i, self.child_bool_vals[c][i])
-                child_col = Column.from_boolean(arr)
-            elif at == ArrowType.STRING:
-                var arr = StringArray.from_strings(self.child_string_vals[c])
-                child_col = Column.from_string(arr)
-            elif at == ArrowType.DATE32:
-                var typed = List[Scalar[DType.int32]]()
-                for i in range(len(self.child_date_vals[c])):
-                    typed.append(Int32(self.child_date_vals[c][i]))
-                var arr = PrimitiveArray[DType.int32].from_list(typed)
-                child_col = Column.from_primitive_with_arrow_type[DType.int32](
-                    arr, ArrowType.DATE32
-                )
-            else:
-                raise Error(
-                    "_StructAcc.build_column: unsupported child arrow_type "
-                    + String(Int(at.type_id))
-                )
+            var child_col = _scalar_child_column(
+                self.child_arrow_types[c],
+                self.child_int_vals[c],
+                self.child_float_vals[c],
+                self.child_bool_vals[c],
+                self.child_string_vals[c],
+                self.child_date_vals[c],
+                self.child_nulls[c],
+                "_StructAcc.build_column: unsupported child arrow_type ",
+            )
             children.append(child_col^)
 
         var validity = Optional[Bitmap[HeapRegion]](None)
@@ -706,39 +706,17 @@ struct _MapAcc(Copyable, Movable):
         var keys_arr = StringArray.from_strings(self.keys_acc)
         var keys_col = Column.from_string(keys_arr)
 
-        # Build values column.
-        var values_col: Column[HeapRegion]
-        if self.value_arrow_type == ArrowType.INT64:
-            var arr = PrimitiveArray[DType.int64].from_list(self.value_int_vals)
-            values_col = Column.from_primitive[DType.int64](arr)
-        elif self.value_arrow_type == ArrowType.FLOAT64:
-            var typed = List[Scalar[DType.float64]]()
-            for i in range(len(self.value_float_vals)):
-                typed.append(Float64(self.value_float_vals[i]))
-            var arr = PrimitiveArray[DType.float64].from_list(typed)
-            values_col = Column.from_primitive[DType.float64](arr)
-        elif self.value_arrow_type == ArrowType.BOOL:
-            var n = len(self.value_bool_vals)
-            var arr = BooleanArray.allocate(n)
-            for i in range(n):
-                arr.set(i, self.value_bool_vals[i])
-            values_col = Column.from_boolean(arr)
-        elif self.value_arrow_type == ArrowType.STRING:
-            var arr = StringArray.from_strings(self.value_string_vals)
-            values_col = Column.from_string(arr)
-        elif self.value_arrow_type == ArrowType.DATE32:
-            var typed = List[Scalar[DType.int32]]()
-            for i in range(len(self.value_date_vals)):
-                typed.append(Int32(self.value_date_vals[i]))
-            var arr = PrimitiveArray[DType.int32].from_list(typed)
-            values_col = Column.from_primitive_with_arrow_type[DType.int32](
-                arr, ArrowType.DATE32
-            )
-        else:
-            raise Error(
-                "_MapAcc.build_column: unsupported value arrow_type "
-                + String(Int(self.value_arrow_type.type_id))
-            )
+        # Build values column, with the null values' validity.
+        var values_col = _scalar_child_column(
+            self.value_arrow_type,
+            self.value_int_vals,
+            self.value_float_vals,
+            self.value_bool_vals,
+            self.value_string_vals,
+            self.value_date_vals,
+            self.value_nulls,
+            "_MapAcc.build_column: unsupported value arrow_type ",
+        )
 
         comptime int32_size = size_of[Int32]()
         var off_bytes = (n_rows + 1) * int32_size
@@ -813,20 +791,15 @@ struct _Decimal128Acc(Copyable, Movable):
 
 @fieldwise_init
 struct ColumnarMaterializer(Movable):
-    """Driver for Stage 2 columnar materialization.
+    """A struct-shaped Stage 2 driver that reads no rows: it has only
+    `init_for_schema`, which builds the key table, the column-kind tags and
+    an empty INT64, BOOL and STRING accumulator per column. No method feeds it an
+    object or builds a batch from it; read JSONL with the free function
+    `materialize_jsonl_to_batch` (or its parallel variants).
 
-    Initialize from a target `Schema`; then call `process_one_object`
-    once per top-level JSON object in the input. When all objects have
-    been consumed, call `build_batch()` to produce the final
-    RecordBatch.
-
-    Supports INT64, BOOL, STRING column types per schema. For other types
-    it raises during `init_for_schema`, pointing at the free-function
-    `materialize_jsonl_to_batch`, which covers the full type set.
-
-    Internal representation: one `_Int64Acc` / `_BoolAcc` / `_StringAcc`
-    per schema column, plus a parallel List of column-kind tags that
-    encodes which accumulator to dispatch to.
+    `init_for_schema` accepts INT64, BOOL and STRING columns and raises on
+    any other type, naming `materialize_jsonl_to_batch`, which covers the
+    full type set.
     """
 
     var schema: Schema
@@ -1088,10 +1061,11 @@ def _walk_jsonl_rows(
         elif at == ArrowType.DATE32:
             col_kinds.append(UInt8(4))
         elif at == ArrowType.DECIMAL128:
-            # Read precision + scale from the field metadata. The
-            # Field._decimal_p / _decimal_s accessors are the canonical
-            # path; default to (18, 4) on absent metadata to match
-            # DuckDB DECIMAL default.
+            # Read precision + scale from the field's decimal_precision /
+            # decimal_scale. A precision below 1 reads as 18 and a negative scale
+            # as 4; a field built without decimal metadata
+            # (`Field(name, DECIMAL128, ...)`) has precision 0 and scale 0,
+            # so it reads as DECIMAL128(18, 0).
             var p = fld.decimal_precision if fld.decimal_precision > 0 else 18
             var s = fld.decimal_scale if fld.decimal_scale >= 0 else 4
             dec_accs[i] = _Decimal128Acc.create_with_pscale(p, s)
@@ -1449,6 +1423,23 @@ def _walk_jsonl_rows(
                             + schema.field_name(col_idx)
                             + "' expects a quoted ISO 8601 string \"YYYY-MM-DD\" but value is unquoted at byte "
                             + String(s_start)
+                        )
+                    else:
+                        # LIST / STRUCT / MAP (kinds 6, 7, 8) given a number
+                        # or literal: refused, as an unquoted value for a
+                        # STRING or DATE32 column is (it is not a NULL).
+                        var name = String("LIST")
+                        var want = String("array")
+                        if kind == UInt8(7):
+                            name = String("STRUCT")
+                            want = String("object")
+                        elif kind == UInt8(8):
+                            name = String("MAP")
+                            want = String("object")
+                        raise Error(
+                            "materialize_jsonl_to_batch: " + name + " column '" + schema.field_name(col_idx)
+                            + "' expects a JSON " + want
+                            + " but value is a scalar at byte " + String(s_start)
                         )
                 # (col_idx < 0 → skip; nothing to push.)
         # End of one object — for any column NOT seen in this row,
@@ -1981,8 +1972,8 @@ def _materialize_with_partitions_impl[
 
     # Concat per-worker batches — single-pass multi-way.
     if k == 0:
-        _ = fj_out^
-        return materialize_jsonl_to_batch(bytes, schema^)
+        _ = fj_out^  # cov: unreachable k >= 1 here: k == 0 returned at the partition check above
+        return materialize_jsonl_to_batch(bytes, schema^)  # cov: unreachable see the line above
     # Zero-column parts (a schema with no fields) are joined by row count.
     var combined = _concat_jsonl_parts(fj_out, k)
     _ = fj_out^
@@ -2151,8 +2142,8 @@ def _materialize_parallel_impl[
     # Step 3: concat per-worker batches (single-pass multi-way).
     # ---------------------------------------------------------------------
     if k == 0:
-        _ = fj_out^
-        return materialize_jsonl_to_batch(bytes, schema^)
+        _ = fj_out^  # cov: unreachable k >= 2 here: k <= 1 returned after the line ranges above
+        return materialize_jsonl_to_batch(bytes, schema^)  # cov: unreachable see the line above
 
     # `_concat_jsonl_parts` walks slots [0, k) in order; zero-column parts
     # (a schema with no fields) are joined by row count.

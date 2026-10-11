@@ -44,6 +44,10 @@
 #      directory than the run stages is refused before kcov runs); clash and
 #      clash_buckout red at analysis (data where a run stages sources);
 #      refused[coverage] red (kcov refused by the executor is said so);
+#      covreadme[coverage][tests][readme] and covreadme_none's (a README's
+#      examples, and a README with none, run under kcov like a test) and
+#      covmt_cov_gate[tests] (the mojo_test targets covmt names in
+#      coverage_tests, one in another package, run against its sources);
 #      longarg[coverage] red (a cov_run.sh copy whose limit on a kcov
 #      argument is 64 bytes refuses the run before kcov starts, naming it);
 #      shared libraries: covso's driver report and census gate, covso_skip
@@ -51,16 +55,12 @@
 #      with the switch, coverage_shared_lib.sh (no release action moves),
 #      and covso_gen's run red (every source generated: nothing to check).
 #      The release actions with the switch on: coverage_keys.sh (test 41).
+#      The greens named below build in the pull-request check, not here:
+#      tests//functional/... is built, its sub-targets through
+#      tests//functional/coverage:greens, and the greens of tests//negative
+#      and tests//src through komira//:tests_greens. What stays here is
+#      what must go red.
 
-expect_green coverage_runs tests//functional/coverage:numbers tests//functional/coverage:census \
-    tests//functional/coverage:covgentest_report tests//functional/coverage:covgentest_result \
-    tests//functional/coverage:aggregates_tests tests//functional/coverage:aggregates_all \
-    tests//functional/coverage:covenv 'tests//functional/coverage:covenv[coverage]' \
-    tests//functional/coverage:covgen tests//functional/coverage:covgenmany \
-    'tests//functional/coverage:branchlib[coverage][tests][test_gate_env]' \
-    tests//negative/coverage:tracer tests//negative/coverage:lost \
-    tests//negative/coverage:orphan 'tests//negative/coverage:orphan[coverage]' \
-    tests//negative/coverage:linger 'tests//negative/coverage:linger[coverage][tests][test_brief]'
 expect_red coverage_run_tracer "test_tracer: traced, TracerPid" 'tests//negative/coverage:tracer[coverage][tests][test_tracer]'
 expect_red coverage_run_lost "lostlib/value.mojo': no --map or --exclude prefix covers it" 'tests//negative/coverage:lost[coverage][tests][test_lost]'
 expect_red coverage_run_data_clash 'collides with its source, which a coverage run stages at "tests/test_lost.mojo"' tests//negative/coverage:clash
@@ -102,8 +102,6 @@ expect_red coverage_run_proc "/proc is not readable as this run's own" 'tests//n
 # package's top, a force-loaded C library, a version script); and
 # coverage_shared_lib.sh: the switch moves no release action of a shared
 # library, and its published file waits for no coverage action.
-expect_green coverage_run_shared_lib tests//functional/coverage:covso_report tests//functional/coverage:covso_result \
-    tests//negative/coverage:covso_skip
 expect_red coverage_run_shared_lib_skip "no class for tools/build/tests/negative/coverage/covso/covso_one.mojo (--must-contain)" \
     'tests//negative/coverage:covso_skip[coverage][tests][covso_one_driver]'
 expect_red coverage_run_shared_lib_generated "cov_run: --solib with no --solib-src: every source of the shared library covso_one.so is generated" \

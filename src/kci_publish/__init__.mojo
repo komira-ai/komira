@@ -37,6 +37,8 @@ trusted publisher accepts the job.
   * index.mojo            step 5, report-only
   * report.mojo           the reasons, their outcomes, the result rows
   * run.mojo              `run_publish`: steps 1 to 6
+  * history.mojo          `HistoryReader`: the git reads of never-backward's
+                          split (SUPERSEDED or REFUSED)
   * flow.mojo             `publish_flow`, `publish_release_with_store`
   * lookahead.mojo        `read_new_names`, `lookahead_new_names`: a later
                           stage's NEW NAMES, read anonymously
@@ -77,9 +79,13 @@ from .plan import (
     previous_build_number,
     RevisionHistory,
     backward_files,
+    main_line_files,
+    newest_build_prefixes,
+    off_main_files,
     resolve_targets,
     superseding_files,
 )
+from .history import HistoryReader, ScriptedHistory, UnreadHistory
 from .channel_state import read_channel, read_file_state
 from .upload import PublishCredential, RunOptions, upload_members
 from .workers import (
@@ -99,14 +105,15 @@ from .report import (
     REASON_READ_BACK_MISMATCH,
     REASON_REFUSED,
     REASON_STOP_DIFFERENT_BYTES,
+    REASON_SUPERSEDED,
     FileRow,
     PublishReport,
     artifact_effect_of,
     record_publish_result,
 )
-from .run import run_publish
+from .run import run_publish, run_publish_reading
 from .scripted_channel import ScriptedChannel
 from .pause import NoWaitSleeper, UsleepSleeper
-from .flow import NoSecretStore, PreparedRelease, publish_flow, publish_release_with_store
+from .flow import NoSecretStore, PreparedRelease, publish_flow, publish_flow_reading, publish_release_with_store
 from .lookahead import NewNamesReport, lookahead_new_names, lookahead_new_names_https, new_names_of, read_new_names
 from .summary import new_names_markdown

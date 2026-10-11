@@ -33,6 +33,8 @@ from .cell_parsers import (
     _try_parse_float64,
     _try_parse_bool,
     _try_parse_date32,
+)
+from .temporal_parsers import (
     _try_parse_date64,
     _try_parse_timestamp_s,
     _try_parse_timestamp_ms,

@@ -7,8 +7,9 @@
 # This module is the SAFE BOUNDARY over the FFI declarations in
 # `ffi.mojo`. It exposes:
 #
-#   - `_S2nConfigHandle`     — internal RAII wrap; OwnedPointer-stored on
-#                              TlsConfig; __del__ calls s2n_config_free.
+#   - `_S2nConfigHandle`     — internal RAII wrap; ArcPointer-stored on
+#                              TlsConfig; __deinit__ calls s2n_config_free,
+#                              then frees every cert chain load_cert added.
 #   - `_S2nConnectionHandle` — internal RAII wrap; OwnedPointer-stored on
 #                              TlsConnection; __del__ calls s2n_connection_free.
 #   - `TlsConfig`            — public safe wrapper; ALPN + cert loading.
@@ -546,8 +547,8 @@ def tls_init() raises:
 # _S2nConfigHandle — internal RAII wrap for s2n_config_t*
 # =============================================================================
 #
-# 1-field internal wrapper struct; __del__ calls
-# s2n_config_free at the FFI boundary. The wildcard-origin field is the
+# Internal wrapper struct; __deinit__ calls s2n_config_free, then
+# s2n_cert_chain_and_key_free on each chain it owns. The opaque-handle field is the
 # canonical FFI-POD opaque-handle precedent (the opaque-handle carve-out
 # applied to opaque-handle FIELDS via the
 # OwnedPointer-of-handle pattern on the public TlsConfig — the handle
@@ -558,7 +559,8 @@ struct _S2nConfigHandle(Movable, Deinitable):
     """RAII wrap over an s2n_config_t*.
 
     The handle is constructed via `s2n_config_new()` and freed via
-    `s2n_config_free()` in `__del__`. Field set:
+    `s2n_config_free()` in `__deinit__`, which then frees every cert chain
+    in `_chains`. Field set:
 
       var _raw: S2nOpaquePtr  # UnsafePointer[NoneType, _S2N_FFI_ORIGIN]
         # SAFETY: opaque s2n_config_t pointer; never dereferenced
@@ -584,10 +586,25 @@ struct _S2nConfigHandle(Movable, Deinitable):
     # an OwnedPointer field on TlsConfig for a stable heap address.
     var _raw: S2nOpaquePtr
 
+    # FFI-BOUNDARY: every s2n_cert_chain_and_key_t that
+    # `TlsConfig.load_cert` handed to `s2n_config_add_cert_chain_and_key_to_store`.
+    # s2n allocates each one (s2n_cert_chain_and_key_new); this handle owns
+    # and frees each one (s2n_cert_chain_and_key_free) in `__deinit__`, after
+    # s2n_config_free. s2n_config_free frees none of them: that API marks the
+    # config's chains application-owned, and s2n's
+    # `s2n_config_free_cert_chain_and_key` returns early for those
+    # (tls/s2n_config.c). The config only borrows them, so they must outlive
+    # it, and every connection bound to the config co-owns this handle
+    # through the ArcPointer on TlsConfig.
+    # SAFETY: each entry is an opaque pointer only passed to s2n, never
+    # dereferenced Mojo-side; concrete `_S2N_FFI_ORIGIN` as for `_raw`.
+    var _chains: List[S2nOpaquePtr]
+
     def __init__(out self):
         """Construct an empty handle (null sentinel). Call
         `Self.create()` to eagerly allocate the s2n config."""
         self._raw = _null_ptr[NoneType, _S2N_FFI_ORIGIN]()
+        self._chains = List[S2nOpaquePtr]()
 
     @staticmethod
     def create() raises -> _S2nConfigHandle:
@@ -601,8 +618,9 @@ struct _S2nConfigHandle(Movable, Deinitable):
         return h^
 
     def __deinit__(deinit self):
-        """Release the s2n_config_t if non-null. Null-safe for moved-from
-        and default-constructed instances."""
+        """Release the s2n_config_t if non-null, then every cert chain the
+        config borrowed. Null-safe for moved-from and default-constructed
+        instances."""
         # SAFETY: idempotent free + null-guard. The concrete
         # `_S2N_FFI_ORIGIN` opaque-handle origin justification is on the
         # field declaration above (stale-pointer fix).
@@ -615,6 +633,12 @@ struct _S2nConfigHandle(Movable, Deinitable):
             # destroyed, so the store is dead (the compiler reports it as
             # such, x177 across the build). The double-free guard is the
             # `if Int(self._raw) != 0` above, which is unaffected.
+        # The chains go after the config that borrows them (FFI-BOUNDARY on
+        # `_chains`).
+        for chain in self._chains:
+            # SAFETY: each chain came from s2n_cert_chain_and_key_new, is in
+            # the list once, and no config uses it any more.
+            var _rc_chain = s2n_cert_chain_and_key_free(chain)
 
 
 # =============================================================================
@@ -698,9 +722,8 @@ struct TlsConfig(Copyable, Movable, Deinitable):
       - Moves transfer ownership of the underlying Arc handle.
       - `.copy()` is a REFCOUNT BUMP that shares the SAME s2n_config_t
         (see the SHARE-OWNERSHIP note below).
-      - Drop decrements the Arc; the s2n_config_t is freed (which
-        transitively frees any added cert chains) only when the LAST
-        clone drops.
+      - Drop decrements the Arc; the s2n_config_t, and then every cert
+        chain `load_cert` added, are freed only when the LAST clone drops.
 
     SHARE-OWNERSHIP.
     s2n's `s2n_connection_set_config(conn, config)` stashes `conn->config`
@@ -767,11 +790,14 @@ struct TlsConfig(Copyable, Movable, Deinitable):
         config. This supports a single default cert
         + chain per config (multi-cert / SNI-routed is a follow-on).
 
-        Raises on s2n parse error (e.g. malformed PEM, mismatched key).
+        Raises on s2n parse error (e.g. malformed PEM, mismatched key) or
+        when s2n refuses the chain for the config (e.g. its security policy
+        forbids the key).
         """
         # Allocate a chain-and-key struct, load PEM into it, then attach
-        # it to the config. On success, the config takes ownership and
-        # we MUST NOT free the chain. On failure, we free the chain.
+        # it to the config. A chain whose load fails is freed here. Once the
+        # attach is attempted, the config handle owns the chain and frees it
+        # after s2n_config_free (FFI-BOUNDARY on `_S2nConfigHandle._chains`).
         # SAFETY: chain_ptr is opaque; only the FFI calls below
         # dereference it. The PEM byte buffers (cert_pem / key_pem
         # strings) are borrowed via `as_bytes()` and held in scope
@@ -808,23 +834,23 @@ struct TlsConfig(Copyable, Movable, Deinitable):
             )
 
         # SAFETY: read the raw config pointer via the handle. The
-        # handle is alive (we just constructed self).
+        # handle is alive (we just constructed self). The handle takes the
+        # chain BEFORE the attach: a failed attach can leave the pointer in
+        # the config's SNI map (s2n builds the map before its last check),
+        # so the chain is freed with the config, not here.
+        self._handle[]._chains.append(chain_ptr)
         var config_ptr = self._handle[]._raw
         var rc_add = s2n_config_add_cert_chain_and_key_to_store(
             config_ptr, chain_ptr
         )
         if rc_add != S2N_SUCCESS:
-            # SAFETY: add failed; we still own the chain. Free it.
-            var _rc_free = s2n_cert_chain_and_key_free(chain_ptr)
             raise Error(
                 "TlsConfig.load_cert: "
                 "s2n_config_add_cert_chain_and_key_to_store failed (rc="
                 + String(Int(rc_add)) + ", errno="
                 + String(Int(last_s2n_errno())) + ")"
             )
-        # SUCCESS path: the config now owns the chain; do NOT free it.
-        # It will be freed transitively when s2n_config_free runs in
-        # _S2nConfigHandle.__del__.
+        # The config borrows the chain; _S2nConfigHandle.__deinit__ frees it.
 
     def set_alpn_protocols(mut self, protocols: List[String]) raises:
         """Set the ALPN protocol list. Phase 1: `["http/1.1"]`.
@@ -837,6 +863,9 @@ struct TlsConfig(Copyable, Movable, Deinitable):
         constraints in Mojo's FFI.
 
         Per s2n.h:1096 contract: protocol_len cannot be 0 (raises here).
+
+        Not atomic: when protocol `i` is refused (empty, over 255 bytes, or
+        by s2n), protocols `0..i-1` stay appended on the config.
         """
         var n = len(protocols)
         if n == 0:
@@ -1067,12 +1096,12 @@ struct TlsConfig(Copyable, Movable, Deinitable):
         Idempotent: calling twice is harmless (s2n just re-sets the
         same internal flag).
 
-        Raises on s2n FFI failure (rare — only fails if the config has
-        already been used to construct a connection, per s2n's
-        "modification after use" guard).
+        Raises on s2n FFI failure. In s2n-tls 1.5.6 that is a NULL config
+        or an allocation failure while creating the ticket keys; the call
+        has no guard against a config already bound to a connection.
         """
         # SAFETY: synchronous config mutation. No pointer escapes; the
-        # config handle's lifetime is owned by self via OwnedPointer.
+        # config handle's lifetime is owned by self via ArcPointer.
         var rc = s2n_config_set_session_tickets_onoff(
             self._handle[]._raw, UInt8(1),
         )
@@ -1421,7 +1450,9 @@ struct TlsConnection(Movable, Deinitable):
         # across the s2n_send call. `blocked_local` is a stack out-parameter.
         var total = Int64(len(data))
         if total == Int64(0):
-            # A zero-length send cannot be used as a flush (s2n rejects it).
+            # No s2n call: s2n accepts a zero-length send, but flushes any
+            # pending record first and can block doing so, which would turn
+            # "nothing to send" into a BLOCKED_ON_WRITE.
             return (TLS_OUTCOME_DONE, 0)
         var blocked_local = Int32(0)
         var blocked_ptr = UnsafePointer(to=blocked_local).unsafe_mut_cast[False]().unsafe_origin_cast[
@@ -1480,15 +1511,20 @@ struct TlsConnection(Movable, Deinitable):
                                                     Special: n == 0 means peer
                                                     sent close_notify
                                                     (graceful EOF).
-          outcome == TLS_OUTCOME_BLOCKED_ON_READ  — n == 0; NOTHING was
+          outcome == TLS_OUTCOME_BLOCKED_ON_READ  — n == -1; NOTHING was
                                                     decrypted. Retry on
                                                     INTEREST_READ.
-          outcome == TLS_OUTCOME_BLOCKED_ON_WRITE — n == 0. Not reachable
+          outcome == TLS_OUTCOME_BLOCKED_ON_WRITE — n == -1. Not reachable
                                                     through a rekey on
                                                     s2n-tls 1.5.6 (measured;
                                                     see
                                                     test_L2_h2_over_tls_real_rekey).
           outcome == TLS_OUTCOME_ERROR            — n == -1.
+
+        An EMPTY `dst` makes s2n return 0 without reading: the result is
+        (BLOCKED_ON_READ, 0) while s2n holds buffered plaintext, and
+        (DONE, 0), the same shape as EOF, when it holds none. A caller must
+        not pass an empty `dst`.
 
         WHY THE (rc>0, blocked=READ) HANDLING IS LOAD-BEARING (the bug this
         mirrors from `send`). `*blocked` on the recv side does NOT mean "the
@@ -1655,10 +1691,15 @@ struct TlsConnection(Movable, Deinitable):
                                                     n == 0 means peer sent
                                                     close_notify (graceful
                                                     EOF).
-          outcome == TLS_OUTCOME_BLOCKED_ON_READ  — n == 0; NOTHING decrypted.
-                                                    Retry on INTEREST_READ.
-          outcome == TLS_OUTCOME_BLOCKED_ON_WRITE — n == 0.
+          outcome == TLS_OUTCOME_BLOCKED_ON_READ  — n == -1; NOTHING
+                                                    decrypted, `buf` left
+                                                    alone. Retry on
+                                                    INTEREST_READ.
+          outcome == TLS_OUTCOME_BLOCKED_ON_WRITE — n == -1.
           outcome == TLS_OUTCOME_ERROR            — n == -1.
+
+        A `capacity` of 0 gives the same two results as an empty `dst` to
+        `recv_into_span`: (BLOCKED_ON_READ, 0) or the EOF-shaped (DONE, 0).
 
         Carries the SAME positive-partial rule as `recv_into_span` — see that
         method for the s2n_recv.c mechanism and the measured data loss. A

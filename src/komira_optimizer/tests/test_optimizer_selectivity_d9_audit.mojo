@@ -44,8 +44,8 @@ from komira_plan_stats.table_stats import TableStats
 # compute_selectivity → BIN_AND branches into recursive product →
 # `Int(1_500_000 * 0.09)` = 135_000.
 #
-# This test pins the SELECTIVITY only — the cardinality scale-down is
-# already covered by test_q9_real_filter_chain_propagates_post_filter_card.
+# This test pins the SELECTIVITY only — the cardinality scale-down of a
+# filtered scan is covered by test_optimizer_stats_b5_ceil.mojo.
 
 
 def test_b2_q5_shape_and_of_two_ranges_is_product() raises:
@@ -71,9 +71,9 @@ def test_b2_q5_shape_and_of_two_ranges_is_product() raises:
 # Test 2 — Range LT / LE / GE: each is DEFAULT_RANGE_SELECTIVITY (0.3)
 # =============================================================================
 #
-# The existing `test_selectivity_range_is_30pct` in
-# `test_optimizer_q9_real_filter.mojo` covers BIN_GT. This file extends to the
-# three remaining range tags (LT / LE / GE) so the rubric is symmetric.
+# BIN_GT is covered through the cardinality in test_optimizer_stats_b5_ceil.mojo
+# and under NOT in Test 5 below. This file pins the three remaining range tags
+# (LT / LE / GE) so the rubric is symmetric.
 
 
 def test_b2_range_lt_is_30pct() raises:
@@ -114,9 +114,7 @@ def test_b2_range_ge_is_30pct() raises:
 # =============================================================================
 #
 # IS_NULL = 5%, IS_NOT_NULL = 95% (DuckDB defaults for null-fraction-less
-# columns). Already covered by tests in test_optimizer_q9_real_filter.mojo
-# (test_selectivity_is_null_is_5pct, test_selectivity_is_not_null_is_95pct);
-# this re-pins the constants as verification anchors.
+# columns). These tests pin the constants as verification anchors.
 
 
 def test_b2_is_null_constant_matches() raises:

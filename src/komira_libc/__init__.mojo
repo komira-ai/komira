@@ -14,7 +14,9 @@
 #     `_read_env` (platform handshake values and test-runner variables only;
 #     configuration is never read from the environment) and `_read_env_into`
 #     (secret material only, copied into a caller's byte buffer so it can be
-#     wiped); the `access(2)` path probes; and `_thread_self`.
+#     wiped); the one `unsetenv(3)` declaration, `_unset_env` (removes a
+#     secret's variable once it is read); the `access(2)` path probes; and
+#     `_thread_self`.
 #
 # DO NOT add inline `external_call["getenv", ...]` calls anywhere
 # else, and do not add configuration readers here: configuration is a

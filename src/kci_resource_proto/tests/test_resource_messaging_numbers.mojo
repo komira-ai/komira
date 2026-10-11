@@ -34,15 +34,9 @@
 from std.testing import assert_equal, assert_true
 
 from komira_proto_codec import decode_json, decode_proto, encode_json, encode_proto
-from kci_resource_proto.resource import (
-    Access,
-    Queue,
-    Resource,
-    Retention,
-    Subscription,
-    Topic,
-    Uses,
-)
+from kci_resource_proto.messaging import Queue, Subscription, Topic
+from kci_resource_proto.refs import Access, Retention, Uses
+from kci_resource_proto.resource import Resource
 
 
 # ---- a hand-written wire stream (as in test_resource_field_numbers) -------------

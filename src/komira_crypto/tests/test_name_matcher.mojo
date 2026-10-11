@@ -325,6 +325,21 @@ def test_san_dns_double_wildcard_rejected() raises:
     assert_false(match_hostname(cert, "a.b.example.com"))
 
 
+def test_empty_names_never_match() raises:
+    """An empty dNSName (RFC 5280 4.2.1.6 forbids one) or an empty subject CN
+    names nothing, and an empty hostname matches no certificate."""
+    var pats = List[String]()
+    pats.append(String(""))
+    var ips = List[List[UInt8]]()
+    var cert = _cert_with_san(pats^, ips^)
+    assert_false(match_hostname(cert, ""), "empty dNSName, empty hostname")
+    assert_false(match_hostname(cert, "example.com"), "empty dNSName")
+    var cn = _cert_with_cn(String(""))
+    assert_false(match_hostname(cn, ""), "empty CN, empty hostname")
+    var named = _cert_with_cn(String("example.com"))
+    assert_false(match_hostname(named, ""), "empty hostname")
+
+
 def main() raises:
     test_san_dns_exact_match()
     test_san_dns_case_insensitive_match()
@@ -341,4 +356,5 @@ def main() raises:
     test_san_ipv4_no_match()
     test_san_dns_naked_wildcard_rejected()
     test_san_dns_double_wildcard_rejected()
-    print("All 15 name_matcher tests PASSED")
+    test_empty_names_never_match()
+    print("All 16 name_matcher tests PASSED")
