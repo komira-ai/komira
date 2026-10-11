@@ -6,6 +6,6 @@
  "shape": "SCALAR",
  "args": [{"type": "int64", "nullable": true}],
  "result": [{"type": "int64", "nullable": true}],
- "input": {"length": 8, "columns": [{"type": "int64", "values": [0, 1, 2, 3, 4, 5, 6, 7]}]},
+ "input": {"length": 5, "columns": [{"type": "int64", "values": [0, 1, 2, 3, 4]}]},
  "expect": {"status": "ERR_RAISED", "run_error": "UDF_RAISED", "row": 3, "message": "nonempty"}
 }

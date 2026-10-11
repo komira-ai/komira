@@ -81,7 +81,9 @@ static int32_t scalar(komira_udf_instance* inst, const komira_udf_call* call, co
     for (int64_t r = 0; r < n; r++)
       if (!is_valid(x, r) || (y != NULL && !is_valid(y, r)))
         return fail(h, e, KOMIRA_UDF_ERR_RAISED, "a strict fixture got a null argument", r);
-  if (fx->id == F_RAISE_ON_ROW_3 && n > 3) return fail(h, e, KOMIRA_UDF_ERR_RAISED, "raise_on_row_3: row 3", 3);
+  if (fx->id == F_RAISE_ON_ROW_3) /* raises on the value 3, reporting the row it is on */
+    for (int64_t r = 0; r < n; r++)
+      if (is_valid(x, r) && i64_at(x, r) == 3) return fail(h, e, KOMIRA_UDF_ERR_RAISED, "raise_on_row_3: the value 3", r);
   if (fx->id == F_RAISE_ON_SECOND_CALL && inst->calls == 1)
     return fail(h, e, KOMIRA_UDF_ERR_RAISED, "raise_on_second_call: this instance's second call", -1);
   uint8_t* v;
