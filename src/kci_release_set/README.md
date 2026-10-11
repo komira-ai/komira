@@ -21,6 +21,12 @@ in one package so the two steps cannot disagree:
   library may open, a compiled copy of
   [`system_libs.bzl`](https://github.com/komira-ai/komira/blob/main/tools/build/package/system_libs.bzl) that a welded
   test holds equal to it).
+- a library's `lib_files` rows (`LibFile`: `{kind, path, sha256}`, `kind`
+  `shared`, `link` or `static`, each path `lib/<file name>`), read when the
+  package ships native files, and `glibc_requirement_refusals`: such a
+  library requires exactly `__glibc >=<floor>` (`2.34` on `linux-64`, a
+  compiled copy of the platform table's `os_floor` that a welded test holds
+  equal to it), and a library with no native file requires no `__glibc`.
 
 It runs no process and opens no socket; only `verify_member` and the
 `read_*` functions read files.

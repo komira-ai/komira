@@ -29,7 +29,12 @@ library:
     library, by its published name, at the same version AND the same build
     string (`name ==V BUILD`: every package of a release is lockstep, so the
     solver's closure is the build's, and a second build of a dependency in
-    the channel cannot be chosen);
+    the channel cannot be chosen); then, for each
+    soname the library opens at run time (`mojo_library(dlopen = [...])`,
+    tools/build/mojo/dlopen.bzl), the conda-forge requirement
+    tools/build/package/system_libs.bzl names for it, byte for byte, in
+    soname order, once; the packer holds the declaration to the sonames the
+    sources open, and metadata.json records the rows as `dlopen`;
   * the subdir comes from the TARGET platform's constraints (a select), never an
     attribute: a package cannot say `osx-arm64` over a linux `.mojoc`;
   * the payload is the library's gated `.mojoc`, so the package cannot exist
@@ -62,15 +67,17 @@ library:
 
 A library that CANNOT be packaged (it links native code no library of its
 closure ships, has no tests, depends on
-a library with no package, opens a shared library by name at run time, or its name
-is not a conda name) keeps its package target, and the target builds: it is a
+a library with no package, declares in `dlopen` a soname system_libs.bzl does
+not name, opens a shared library at run time by a soname its `dlopen` does not
+declare or declares one no source opens, or its name is not a conda name) keeps
+its package target, and the target builds: it is a
 directory holding one file, `REFUSED`, with the reason. Refusing by failing would
 make `buck2 build //...` fail on every such library. What refuses is asking for
 the RELEASE: `[release]`, `[release][manifest]` and `[release_check]` fail naming
 the reason. The package's dependents are refused the same way when the reason is
-known to the build; a library that dlopens is found only when its package is made,
-so the release tool must also check that every dependency of a declared package is
-declared.
+known to the build; a library whose sources and `dlopen` disagree is found only
+when its package is made, so the release tool must also check that every
+dependency of a declared package is declared.
 
 Output contract. A package is a DIRECTORY, and an uploader reads `[release]` and
 nothing else:
@@ -91,7 +98,9 @@ nothing else:
                                depends, mojo_pin, source_commit, stamped,
                                timestamp_ms, label, import_name, payload_path,
                                payload_sha256, doc_files (`[{path, sha256}]`,
-                               [] without a README), lib_files
+                               [] without a README), dlopen
+                               (`[{requirement, soname}]`, only when the
+                               library declares one), lib_files
                                (`[{kind, path, sha256}]`, only with native
                                files) (sorted compact JSON)
 
@@ -191,6 +200,13 @@ def _copy_dir(ctx, bb, src, dst, category, identifier, hidden):
         identifier = identifier,
     )
     return cmd
+
+def _dlopen_args(info):
+    # The sonames the library opens at run time and the requirement of each
+    # (system_libs.bzl, through MojoInfo.dlopen). The packer holds them to
+    # the sources and writes them; its check compares the package against
+    # them without the packer's code.
+    return [cmd_args("--dlopen", "{}={}".format(s, r)) for s, r in info.dlopen]
 
 def _doc_args(info):
     # The package's documentation: its README.md, installed at
@@ -301,6 +317,7 @@ def _conda_package_impl(ctx):
             "--label",
             str(ctx.label.raw_target()),
             [cmd_args("--dep", d) for d in deps],
+            _dlopen_args(info),
             _doc_args(info),
             native_pack,
             "--out-dir",
@@ -330,6 +347,7 @@ def _conda_package_impl(ctx):
             args += ["--payload", payload]
             args += [cmd_args("--dep", info.direct_conda[d].name) for d in info.direct]
             args.append(_doc_args(info))
+            args.append(_dlopen_args(info))
             args.append(native_check)
         ctx.actions.run(
             cmd_args(args, extra, "--out", marker.as_output()),
@@ -565,6 +583,7 @@ def _conda_doc_check_impl(ctx):
             "--payload",
             lib[DefaultInfo].default_outputs[0],
             [cmd_args("--dep", info.direct_conda[d].name) for d in info.direct],
+            _dlopen_args(info),
             "--doc-file",
             cmd_args(info.readme, format = "README.md={}"),
             "--out",
@@ -595,7 +614,49 @@ def conda_doc_check(**kwargs):
     """
     _conda_doc_check(exec_compatible_with = LINUX_X86_64, **kwargs)
 
+# ---- a fixture's expected outcome -------------------------------------------
+
+def _conda_package_expect_impl(ctx):
+    if (ctx.attrs.refused == None) == (not ctx.attrs.depends):
+        fail("{}: give `refused` (text the reason contains) or `depends` (requirements the package lists), one of them".format(ctx.label))
+    marker = ctx.actions.declare_output(ctx.label.name + ".expected")
+    ctx.actions.run(
+        cmd_args(
+            ctx.attrs._pack[RunInfo],
+            "conda-expect",
+            "--dir",
+            ctx.attrs.package[DefaultInfo].default_outputs[0],
+            ["--refused", ctx.attrs.refused] if ctx.attrs.refused != None else [],
+            [cmd_args("--depend", d) for d in ctx.attrs.depends],
+            "--out",
+            marker.as_output(),
+        ),
+        category = "conda_expect",
+    )
+    return [DefaultInfo(default_output = marker)]
+
+_conda_package_expect = rule(
+    impl = _conda_package_expect_impl,
+    attrs = {
+        "depends": attrs.list(attrs.string(), default = []),
+        "package": attrs.dep(),
+        "refused": attrs.option(attrs.string(), default = None),
+        "_pack": attrs.exec_dep(default = "komira//tools/build/package:komira_pack", providers = [RunInfo]),
+    },
+)
+
+def conda_package_expect(**kwargs):
+    """Builds only while `package` (a conda_package target) has the outcome a
+    test fixture states: `refused`, a REFUSED directory whose reason contains
+    that text; or `depends`, a package (not refused) whose metadata.json
+    `depends` lists each requirement exactly once (`komira_pack
+    conda-expect`). The package's own check still runs: this says only which
+    outcome the fixture must have.
+    """
+    _conda_package_expect(exec_compatible_with = LINUX_X86_64, **kwargs)
+
 conda_package = declares_docs(conda_package)
 conda_package_test_stamped = declares_docs(conda_package_test_stamped)
 conda_manifest_kci = declares_docs(conda_manifest_kci)
 conda_doc_check = declares_docs(conda_doc_check)
+conda_package_expect = declares_docs(conda_package_expect)

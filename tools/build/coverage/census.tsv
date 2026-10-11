@@ -10,10 +10,10 @@ komira//src/kci_cli:kci_cli	src/kci_cli	library	OK	1360	1513	-	-	no	conda	-	-
 komira//src/kci_cloud:kci_cloud	src/kci_cloud	library	OK	2758	3230	-	-	no	conda	src/kci_cloud/conformance.mojo	-
 komira//src/kci_cloud_fake:kci_cloud_fake	src/kci_cloud_fake	library	OK	1979	2038	699	768	yes	conda	-	-
 komira//src/kci_deploy_model_proto:kci_deploy_model_proto	src/kci_deploy_model_proto	library	OK	0	0	-	-	no	conda	-	-
-komira//src/kci_logs:kci_logs	src/kci_logs	library	OK	905	1078	-	-	no	release	-	-
+komira//src/kci_logs:kci_logs	src/kci_logs	library	OK	1086	1086	-	-	no	release	-	-
 komira//src/kci_manifest_proto:kci_manifest_proto	src/kci_manifest_proto	library	OK	0	0	-	-	no	conda	-	-
 komira//src/kci_params:kci_params	src/kci_params	library	OK	407	407	-	-	no	release	-	-
-komira//src/kci_pkg_upload:kci_pkg_upload	src/kci_pkg_upload	library	OK	1953	2193	-	-	no	conda	-	-
+komira//src/kci_pkg_upload:kci_pkg_upload	src/kci_pkg_upload	library	OK	2207	2207	-	-	no	conda	-	-
 komira//src/kci_publish:kci_publish_lib	src/kci_publish	library	OK	2102	2281	-	-	no	conda	src/kci_publish/workers.mojo	-
 komira//src/kci_publish_oci:kci_publish_oci	src/kci_publish_oci	library	OK	87	89	-	-	no	conda	-	-
 komira//src/kci_reconciler:kci_reconciler	src/kci_reconciler	library	OK	1238	1407	-	-	no	conda	-	-
@@ -125,7 +125,7 @@ komira//src/komira_http_core:komira_http_core	src/komira_http_core	library	OK	30
 komira//src/komira_http_server:komira_http_server	src/komira_http_server	library	OK	2183	2570	-	-	no	conda	src/komira_http_server/middleware/passthrough.mojo	-
 komira//src/komira_iceberg_catalog:komira_iceberg_catalog	src/komira_iceberg_catalog	library	OK	204	234	-	-	no	conda	-	-
 komira//src/komira_job_report_proto:komira_job_report_proto	src/komira_job_report_proto	library	OK	0	0	-	-	no	release	-	-
-komira//src/komira_job_supervisor:komira_job_supervisor	src/komira_job_supervisor	library	OK	1105	1272	-	-	no	conda	-	-
+komira//src/komira_job_supervisor:komira_job_supervisor	src/komira_job_supervisor	library	OK	1259	1262	-	-	no	conda	-	-
 komira//src/komira_join_assembly:komira_join_assembly	src/komira_join_assembly	library	OK	540	834	-	-	no	conda	-	-
 komira//src/komira_json:komira_json	src/komira_json	library	OK	656	656	580	580	yes	release	-	-
 komira//src/komira_json_index:komira_json_index	src/komira_json_index	library	OK	462	545	-	-	no	conda	-	-
@@ -179,7 +179,7 @@ komira//src/komira_scan_resolver:komira_scan_resolver	src/komira_scan_resolver	l
 komira//src/komira_scan_source:komira_scan_source	src/komira_scan_source	library	OK	1462	2314	-	-	no	conda	src/komira_scan_source/arrow_source.mojo,src/komira_scan_source/avro_source.mojo,src/komira_scan_source/compiler_registry.mojo,src/komira_scan_source/json_source.mojo,src/komira_scan_source/orc_source.mojo,src/komira_scan_source/scan_registry.mojo,src/komira_scan_source/scan_resolver.mojo,src/komira_scan_source/sink.mojo,src/komira_scan_source/source_capabilities.mojo,src/komira_scan_source/source_like.mojo	-
 komira//src/komira_sdk:komira_sdk	src/komira_sdk	library	OK	1347	1360	-	-	no	conda	-	-
 komira//src/komira_search:komira_search	src/komira_search	library	OK	4158	4158	-	-	no	conda	-	-
-komira//src/komira_search_catalog:komira_search_catalog	src/komira_search_catalog	library	OK	591	707	-	-	no	conda	-	-
+komira//src/komira_search_catalog:komira_search_catalog	src/komira_search_catalog	library	OK	724	724	-	-	no	conda	-	-
 komira//src/komira_search_scan:komira_search_scan	src/komira_search_scan	library	OK	501	574	-	-	no	conda	-	-
 komira//src/komira_secret_env:komira_secret_env	src/komira_secret_env	library	OK	105	108	-	-	no	conda	-	-
 komira//src/komira_secret_registry:komira_secret_registry	src/komira_secret_registry	library	OK	64	65	13	16	yes	conda	-	-
@@ -238,6 +238,5 @@ komira//src/tests/helpers/komira_plan_harness:komira_plan_harness	src/tests/help
 komira//src/tests/helpers/komira_test_bucket:komira_test_bucket	src/tests/helpers/komira_test_bucket	test	OK	595	616	-	-	no	conda	-	-
 komira//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3	src/tests/helpers/komira_test_fake_s3	test	OK	28	28	-	-	no	no	-	-
 komira//src/tests/helpers/komira_test_minio:komira_test_minio	src/tests/helpers/komira_test_minio	test	OK	221	245	69	110	yes	conda	-	-
-komira//src/tests/helpers/komira_test_python:komira_test_python	src/tests/helpers/komira_test_python	test	OK	0	0	-	-	no	no	-	-
 komira//src/tests/helpers/komira_test_s3_adapter:komira_test_s3_adapter	src/tests/helpers/komira_test_s3_adapter	test	OK	205	245	-	-	no	conda	src/tests/helpers/komira_test_s3_adapter/open.mojo	-
 komira//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary	src/tests/helpers/komira_test_vocabulary	test	OK	59	59	-	-	no	no	-	-

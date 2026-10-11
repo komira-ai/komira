@@ -59,7 +59,10 @@ What works is tested by
 
 Every target of [`tests//negative/node`](../tests/negative/node/BUCK) must
 fail, and [`node_tests.sh`](../tests/node_tests.sh) (run by
-`tools/build/tests/run_tests.sh`) requires the text written above each:
+`tools/build/tests/run_tests.sh`) requires the text written above each; the
+analysis refusals (the three rows that say so) are the self-test scenario
+[`analysis_refusals_node`](../selftest/analysis_refusals_node.zig), which
+requires each one's exact message:
 
 | planted defect | what it proves |
 |---|---|

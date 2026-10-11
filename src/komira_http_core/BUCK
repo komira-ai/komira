@@ -1,12 +1,12 @@
-load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 
 # The part of the HTTP layer a client and a server share: the h1 and h2 codecs
 # (HPACK included), TLS over s2n-tls (the TLS layer declares its functions
-# itself, so s2n is a dep; s2n's shared library has NEEDED on komira_crypto's,
-# so komira_crypto is a dep too and its package a requirement), and the
-# transport seam:
+# itself, so s2n is a dep; s2n needs aws-lc's libcrypto, which komira_crypto
+# ships, and s2n's shared library has NEEDED on komira_crypto's, so
+# komira_crypto is a dep too and its package a requirement:
+# tools/build/mojo/README.md, "Native reach"), and the transport seam:
 # the IO stream traits, plain TCP, a scripted fake, stream parking and gRPC
 # trailer emission. komira_http_client and komira_http_server depend on it and
 # on nothing of each other.
@@ -151,16 +151,6 @@ mojo_library(
         ],
     },
     visibility = ["PUBLIC"],
-)
-
-# The deps above name every komira_* module the library and its tests import
-# (tools/build/lint: mojo_deps), so a missing dep fails here, in review, and
-# not only in the compile.
-mojo_deps(
-    name = "deps_lint",
-    buck = "BUCK",
-    srcs = glob(["**/*.mojo"]),
-    visibility = ["komira//:tests_lints"],
 )
 
 export_file(name = "tests/fixtures/tls/leaf_cert.pem", visibility = ["PUBLIC"])

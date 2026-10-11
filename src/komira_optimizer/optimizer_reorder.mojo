@@ -963,7 +963,7 @@ def greedy_join_order(var chain: JoinChain) raises -> LogicalPlan:
     Cost model: legacy `max(l, r)` fallback via
     `estimate_join_cardinality_for_reorder`. The NDV-aware path
     (`estimate_join_cardinality_with_ndv`) is the DPccp cost function
-    (`optimizer_dpccp._cost_for_pair`, on its no-TDOM-graph path); greedy
+    (`optimizer_dpccp_cost._cost_for_pair`, on its no-TDOM-graph path); greedy
     intentionally does NOT consume it. Multi-way reordering is designed to
     go through DPccp (n>=4 chains); greedy serves the n<4 fallback path,
     where the small chain shape makes the FK-PK cost signal moot.

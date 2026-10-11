@@ -3,10 +3,13 @@
 # anything.
 load("@komira//tools/build/coverage:census.bzl", "coverage_census")
 load("@komira//tools/build/coverage:defs.bzl", "coverage_ci_cases")
-load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "public_boundary", "retired_names", "shell_lint", "src_layout", "workflow_lint")
+load("@komira//tools/build/lint:doc_tree.bzl", "doc_tree")
+load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "public_boundary", "retired_names", "shell_lint", "src_layout", "target_suite", "workflow_lint")
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
 load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
+load("@komira//tools/build/selftest:defs.bzl", "graph_check")
+load("//tests:python_closure_allowlist.bzl", "PYTHON_CEILING", "PYTHON_SURFACE")
 load("//tests:surface_capability_matrix.bzl", "CAPABILITIES", "MATRIX", "NOT_CAPABILITIES", "SURFACES")
 
 # The licence text every published package carries (tools/build/package/conda.bzl).
@@ -26,6 +29,14 @@ export_file(
     name = "pr.yml",
     src = ".github/workflows/pr.yml",
     visibility = ["//src/kci_workflow_check:"],
+)
+
+# The files under .github/, which the root doc_tree's glob skips, at their
+# paths, for the shell budget (//tools/build/lint:shell_budget).
+doc_tree(
+    name = "github_tree",
+    srcs = glob([".github/**"]),
+    visibility = ["//tools/build/lint:shell_budget"],
 )
 
 shell_lint(
@@ -108,8 +119,7 @@ src_layout(
 # script as in any other. A repository using komira as a cell has no
 # `tests` cell, so there the list is empty and the target is not declared.
 # A package of the tests cell that holds a shell script declares its
-# shell_lint and is named here. The `deps_lint` of a package whose deps are
-# checked against its imports (mojo_deps) is named here too.
+# shell_lint and is named here.
 _TESTS_LINTS = [
     "tests//:shell_lint",
     "tests//functional/aws_codegen:shell_lint",
@@ -123,44 +133,26 @@ _TESTS_LINTS = [
     "tests//functional/test_deadline:shell_lint",
     "tests//functional/watchdog:shell_lint",
     "tests//golden:shell_lint",
-    # The deps of a package that names its imports (tools/build/lint, mojo_deps).
-    "//src/kci_cell:deps_lint",
-    "//src/komira_authz_api:deps_lint",
-    "//src/komira_aws_lambda_http:deps_lint",
-    "//src/komira_calendar_ics:deps_lint",
-    "//src/komira_contacts:deps_lint",
-    "//src/komira_http_auth:deps_lint",
-    "//src/komira_http_client:deps_lint",
-    "//src/komira_http_core:deps_lint",
-    "//src/komira_http_server:deps_lint",
-    "//src/komira_optimizer:deps_lint",
-    "//src/tests/conformance/komira_calendar_ics_conformance:deps_lint",
-    "//src/tests/conformance/komira_connect_conformance:deps_lint",
-    "//src/tests/conformance/komira_contacts_store_conformance:deps_lint",
-    "//src/tests/conformance/komira_db_conformance:deps_lint",
-    "//src/tests/conformance/komira_git_conformance:deps_lint",
-    "//src/tests/conformance/komira_git_pack_conformance:deps_lint",
-    "//src/tests/conformance/komira_git_protocol_conformance:deps_lint",
-    "//src/tests/conformance/komira_http_conformance:deps_lint",
-    "//src/tests/conformance/komira_datetime_conformance:deps_lint",
-    "//src/tests/conformance/komira_json_conformance:deps_lint",
-    "//src/tests/conformance/komira_plan_conformance:deps_lint",
-    "//src/tests/conformance/komira_xml_conformance:deps_lint",
-    "//src/tests/e2e/komira_azure_blob_e2e:deps_lint",
-    "//src/tests/e2e/komira_formats_e2e:deps_lint",
-    "//src/tests/e2e/komira_http_tls_e2e:deps_lint",
-    "//src/tests/e2e/komira_job_supervisor_loopback:deps_lint",
-    "//src/tests/e2e/komira_pandas_door_e2e:deps_lint",
-    "//src/tests/e2e/komira_secrets_e2e:deps_lint",
-    "//src/tests/e2e/komira_shuffle_e2e:deps_lint",
-    "//src/tests/e2e/komira_tls_interop_e2e:deps_lint",
-    "//src/tests/e2e/komira_udf_e2e:deps_lint",
-    "//src/tests/helpers/komira_plan_harness:deps_lint",
 ] if read_root_config("cells", "tests") else []
 
 [lint_suite(
     name = "tests_lints",
     lints = _TESTS_LINTS,
+) for _ in _TESTS_LINTS[:1]]
+
+# The greens of the tests cell that no derived unit builds: the pull-request
+# check builds `//...` and `tests//functional/...` (//tools/build/ci:derive_checks),
+# so a target of tests//negative or tests//src that must build, beside the
+# planted defects it serves, is named here, through its package's
+# target_suite (a package's sub-targets need one too, and a suite in the same
+# package names them with no visibility to grant). Not declared where there
+# is no tests cell.
+[target_suite(
+    name = "tests_greens",
+    targets = [
+        "tests//negative/coverage:greens",
+        "tests//src/tests/coverage:greens",
+    ],
 ) for _ in _TESTS_LINTS[:1]]
 
 # The repository's documentation: every relative link and #anchor in every
@@ -192,16 +184,23 @@ _TESTS_LINTS = [
 # Retired names: a package or type that was renamed may appear only in a
 # dated history note (a line carrying a YYYY-MM-DD date). The tree is every
 # file of the cell (`:doc_tree`) plus the dotfiles a glob skips. Each name is
-# spelt in parts so this file does not hold it.
+# spelt in parts so this file does not hold it. `unchecked` leaves out a
+# fixture that must hold a retired name and cannot carry a date.
 [retired_names(
     name = "retired_names",
     names = [
         "kci" + "_contract",
         "kci" + "_stage" + "_graph",
         "Stage" + "Graph",
+        # The package of the superseded one-library plan for komira's C
+        # (docs/design/native_packaging.md).
+        "komira" + "_native",
     ],
     srcs = [".buckconfig.local.example"] + glob([".github/**"]),
     tree = ":doc_tree",
+    # The metadata of the release-order fixture that requires that package
+    # (tools/build/package/BUCK), so that its exemption cannot come back.
+    unchecked = ["tools/build/package/release_order/requires_" + "komira" + "_native.json"],
 ) for _ in _TESTS_LINTS[:1]]
 
 # Test welding (tools/build/lint/test_weld.bzl): every tests/test_*.mojo under
@@ -314,6 +313,17 @@ _TESTS_LINTS = [
 # them, one per line, kept outside it: `-c komira_lint.public_boundary_deny=`
 # a target or a path from the root (`.public_boundary_deny` is gitignored for
 # it). No row may hold a word of that list, and no such list is committed here.
+#
+# The public history starts on 2026-09-01. Dates before 2025 in this tree are
+# data (epochs, certificates, standards), so the window starts there. A
+# narrower window would let a date through, so the values are pinned: loading
+# this file fails if the window starts after 2025 or the history before
+# 2026-09-01.
+_PUBLIC_FROM = "2026-09-01"
+_WINDOW_FROM = 2025
+
+[fail("BUCK: public_boundary's window is from {} up to {}; the public rule's is from 2025 (or earlier) up to 2026-09-01 (or later), and a narrower window lets a date through".format(_WINDOW_FROM, _PUBLIC_FROM)) for _ in range(1) if _WINDOW_FROM > 2025 or _PUBLIC_FROM < "2026-09-01"]
+
 [public_boundary(
     name = "public_boundary",
     cells = {"tools/build/tests": "tests//:doc_tree"},
@@ -322,10 +332,35 @@ _TESTS_LINTS = [
     hosts = "tests/public_boundary_hosts.tsv",
     # The tests cell's dotfile, which its doc_tree's glob skips.
     paths = {"tools/build/tests/.buckconfig": "tests//:buckconfig"},
-    # The public history starts on this day. Dates before 2025 in this tree
-    # are data (epochs, certificates, standards), so the window starts there.
-    public_from = "2026-09-01",
+    public_from = _PUBLIC_FROM,
     srcs = [".buckconfig", ".buckconfig.local.example", ".gitignore"] + glob([".github/**"]),
     tree = ":doc_tree",
-    window_from = 2025,
+    window_from = _WINDOW_FROM,
+) for _ in _TESTS_LINTS[:1]]
+
+# No Python outside the Python surface (the graph check python_closure,
+# tools/build/selftest/graph/python_closure.zig says what it refuses): no
+# target of `//...` or `tests//functional/...` whose closure (every kind of
+# dependency) holds a target under third_party/python/ or
+# tools/build/python/, a Python rule or a `.py` source; no `.py` file in the
+# repository; no kci textproto or GitHub workflow that runs Python. Building
+# it checks nothing: release/ci/build_targets.sh runs `./buck2 bxl
+# //tools/build/selftest/graph/checks.bxl:check -- --check //:python_closure`,
+# as it does for every graph_check of a batch.
+#
+# The allowlist, tests/python_closure_allowlist.bzl: the Python surface
+# (empty today) and the ceiling, every finding allowed today, which only
+# shrinks.
+[graph_check(
+    name = "python_closure",
+    check = "python_closure",
+    checker = "//tools/build/selftest/graph:graph_checks",
+    targets = ["//...", "tests//functional/..."],
+    trees = {
+        "": "//:doc_tree",
+        "tools/build/tests/": "tests//:doc_tree",
+    },
+    srcs = [".buckconfig", ".buckconfig.local.example", ".gitignore"] + glob([".github/**"]),
+    surface = PYTHON_SURFACE,
+    ceiling = PYTHON_CEILING,
 ) for _ in _TESTS_LINTS[:1]]

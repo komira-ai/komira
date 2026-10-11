@@ -1,4 +1,3 @@
-load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:proto.bzl", "proto_srcs")
 load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_fixture_case")
 
@@ -8,8 +7,7 @@ load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_fixture_case")
 # refusing a defect fails every build that checks a fixture, the pull-request
 # check's included. Each defect fixture is one defect away from `sample`, and
 # trips one leg (leg 2's also trip leg 3: protoc's text parser refuses a bare
-# field number). tests//negative/proto_fixture builds the same fixtures as
-# planted-defect twins, end to end.
+# field number).
 
 proto_srcs(
     name = "selftest_proto",
@@ -18,18 +16,11 @@ proto_srcs(
     visibility = ["PUBLIC"],
 )
 
-# The fixtures, for the twins in another cell: `:fixtures[fixtures/<file>]`.
-staged_files(
-    name = "fixtures",
-    srcs = glob(["fixtures/*"]),
-    visibility = ["PUBLIC"],
-)
-
 _SAMPLE = "example.fixture.v1.Sample"
 _METERS = "example.fixture.v1.Meters"
 
 # Defect -> (root, the text the refusal must hold). The expected text names
-# the leg and the fixture's file; it is what run_tests.sh's twins require too.
+# the leg and the fixture's file.
 _REFUSED = {
     # Three hex digits: not bytes.
     "hex_odd": (_METERS, "hex_odd: FIXTURE: hex_odd.hex holds an odd number of hex digits (3)"),
