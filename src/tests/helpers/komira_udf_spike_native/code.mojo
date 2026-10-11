@@ -139,8 +139,9 @@ def stdin_is_library_memfd() -> Bool:
 def with_batch_twins(cases: List[Case]) -> List[Case]:
     """`cases`, then a copy of every case whose entry is double or
     fahrenheit, with the entry double_batch or fahrenheit_batch and the name
-    suffixed `_batch`: the batch-loop fixtures (the same functions written
-    as one loop per batch) held to the same expectations."""
+    suffixed `_batch_twin` (no corpus case ends so): the batch-loop
+    fixtures (the same functions written as one loop per batch) held to the
+    same expectations."""
     var out = List[Case]()
     for i in range(len(cases)):
         out.append(cases[i].copy())
@@ -148,6 +149,6 @@ def with_batch_twins(cases: List[Case]) -> List[Case]:
         if cases[i].spec.entry == "double" or cases[i].spec.entry == "fahrenheit":
             var c = cases[i].copy()
             c.spec.entry = c.spec.entry + "_batch"
-            c.name = c.name + "_batch"
+            c.name = c.name + "_batch_twin"
             out.append(c^)
     return out^

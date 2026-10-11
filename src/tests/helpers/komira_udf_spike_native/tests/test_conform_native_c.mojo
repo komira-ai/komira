@@ -22,7 +22,7 @@
 # case ("no library for this host's platform").
 
 from std.os import getenv
-from std.testing import assert_equal
+from std.testing import assert_equal, assert_true
 
 from komira_udf_spike_abi.conform import load_cases, run_suite
 from komira_udf_spike_native.code import code_set, with_batch_twins
@@ -39,6 +39,13 @@ def main() raises:
     assert_equal(len(corpus), CASE_COUNT, "cases loaded from " + CASES)
     var cases = with_batch_twins(corpus)
     assert_equal(len(cases), CASE_COUNT + BATCH_TWINS, "the batch-loop twins")
+    # Each twin runs its batch fixture, not the generic one it copies.
+    var twins = 0
+    for i in range(len(cases)):
+        if cases[i].name.endswith("_batch_twin"):
+            assert_true(cases[i].spec.entry.endswith("_batch"), cases[i].name + " runs " + cases[i].spec.entry)
+            twins += 1
+    assert_equal(twins, BATCH_TWINS, "twins on a batch-loop fixture")
     var code = code_set("./native_c.so", getenv("TMPDIR") + "/code")
     var report = run_suite("./native.so", cases, code)
     print(report)

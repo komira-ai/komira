@@ -30,7 +30,7 @@
 # ERR_FIELD_NOT_DECLARED") and row_undeclared_field (no row).
 
 from std.os import getenv
-from std.testing import assert_equal
+from std.testing import assert_equal, assert_true
 
 from komira_udf_spike_abi.cases import Case
 from komira_udf_spike_abi.conform import load_cases, run_suite
@@ -111,6 +111,13 @@ def main() raises:
     assert_equal(len(cases), CASE_COUNT - len(left_out), "a left-out name is not a case of the corpus")
     cases = with_batch_twins(cases)
     assert_equal(len(cases), CASE_COUNT - len(left_out) + BATCH_TWINS, "the batch-loop twins")
+    # Each twin runs its batch fixture, not the generic one it copies.
+    var twins = 0
+    for i in range(len(cases)):
+        if cases[i].name.endswith("_batch_twin"):
+            assert_true(cases[i].spec.entry.endswith("_batch"), cases[i].name + " runs " + cases[i].spec.entry)
+            twins += 1
+    assert_equal(twins, BATCH_TWINS, "twins on a batch-loop fixture")
     var code = code_set("./native_mojo.so", getenv("TMPDIR") + "/code")
     var report = run_suite("./native.so", cases, code)
     print(report)

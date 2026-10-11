@@ -30,9 +30,11 @@
 #   - a frame cancelled before frame_open is refused by frame_open itself,
 #     before any pull ("cancelled before the batch"; a frame opened anyway
 #     and cancelled at its first frame_next says "between batches").
-#   - double_batch (the batch-loop fixture) over a sliced input of 12 rows
-#     with nulls at rows 1 and 10, whole (the input read without its offset;
-#     a row's validity bit read from the wrong byte).
+#   - double_batch and fahrenheit_batch (the batch-loop fixtures) over a
+#     sliced input of 12 rows with nulls at rows 1 and 10, whole (the input
+#     read without its offset; a row's validity bit read from the wrong
+#     byte); each refusing a batch with no columns by name (a child read
+#     that is not there: the spec is checked at load, the batch is not).
 #   - load: an entry the library does not have is refused by the library's
 #     load, through the runtime, with no handle (a library's refusal turned
 #     into a handle).
@@ -51,7 +53,7 @@ from std.testing import assert_equal, assert_true
 
 from komira_udf_spike_abi.contract import *
 from komira_udf_spike_abi.runtime import CallOptions, CodeSet, FrameResult, Handle, Outcome, UdfRuntime, UdfSpec
-from komira_udf_spike_abi.values import Batch, Column, ColumnType, TYPE_INT32, TYPE_INT64
+from komira_udf_spike_abi.values import Batch, Column, ColumnType, TYPE_FLOAT64, TYPE_INT32, TYPE_INT64
 
 from komira_udf_spike_native.code import code_set
 
@@ -352,10 +354,11 @@ def _shapes(mut lib: _Lib) raises:
 
 
 def _batch_loops(mut lib: _Lib) raises:
-    """double_batch over a sliced input (offset 5) of 12 rows with nulls at
-    rows 1 and 10, bits 6 and 15 of the bitmap: the batch loop must read the
-    input at its offset and each row's bit from its own byte (read at
-    `at >> 4` or `at >> 2`, bit 15 lands on a valid row's bit)."""
+    """double_batch and fahrenheit_batch over a sliced input (offset 5) of 12
+    rows with nulls at rows 1 and 10, bits 6 and 15 of the bitmap: the batch
+    loop must read the input at its offset and each row's bit from its own
+    byte (read at `at >> 4` or `at >> 2`, bit 15 lands on a valid row's
+    bit). Then each with a batch of no columns."""
     var n = lib.name
     var spec = _spec(SHAPE_SCALAR, "double_batch", lib.code)
     var inst = lib.instance(spec)
@@ -365,6 +368,40 @@ def _batch_loops(mut lib: _Lib) raises:
     assert_true(r.outcome.is_ok(), n + ": double_batch: " + String(r.outcome))
     assert_equal(
         String(r.column), "int64[0, null, 4, 6, 8, 10, 12, 14, 16, 18, null, 22]", n + ": double_batch, sliced"
+    )
+    # fahrenheit_batch over the same shape, float64: offset 5, nulls at rows
+    # 1 and 10; the expected column computed here with the same arithmetic.
+    var f64: List[ColumnType] = [ColumnType(TYPE_FLOAT64, True)]
+    var fspec = UdfSpec(SHAPE_MAP_BATCHES_COLUMN, "fahrenheit_batch", f64.copy(), f64.copy())
+    fspec.code_root = lib.code.root
+    fspec.code = lib.code.objects.copy()
+    var finst = lib.instance(fspec)
+    var fc = Column(TYPE_FLOAT64)
+    var want = Column(TYPE_FLOAT64)
+    for i in range(12):
+        if i == 1 or i == 10:
+            fc.append_null()
+            want.append_null()
+        else:
+            fc.append_float(Float64(5 * i))
+            want.append_float(Float64(5 * i) * 1.8 + 32.0)
+    fc.offset = 5
+    var fr = lib.rt.call_batch(finst, fspec, _batch([fc^], 12), CallOptions.plain())
+    assert_true(fr.outcome.is_ok(), n + ": fahrenheit_batch: " + String(fr.outcome))
+    assert_equal(String(fr.column), String(want), n + ": fahrenheit_batch, sliced")
+    # A batch with no columns: the spec is checked at load, the batch is not,
+    # so each batch fixture refuses it instead of reading a child it lacks.
+    _status(
+        lib.rt.call_batch(inst, spec, Batch(3), CallOptions.plain()).outcome,
+        ERR_INTERNAL,
+        "a batch fixture got no argument",
+        n + ": double_batch, a batch with no columns",
+    )
+    _status(
+        lib.rt.call_batch(finst, fspec, Batch(3), CallOptions.plain()).outcome,
+        ERR_INTERNAL,
+        "a batch fixture got no argument",
+        n + ": fahrenheit_batch, a batch with no columns",
     )
 
 

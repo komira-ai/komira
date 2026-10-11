@@ -244,13 +244,13 @@ def find_fixture(entry: String) -> Optional[Fixture]:
     # sum, whose agg_open refuses a second group set on one instance.
     if entry == "sum_one_group_set_per_instance":
         return Fixture(F_SUM_ONE_SET, SHAPE_AGG_MERGEABLE, "l", "l", "l")
-    # A frame whose frame_next raises, then answers ERR_INTERNAL to every
-    # later frame_next (the host must not pull after an error).
     # double and fahrenheit as a UDF author writes them: one loop per batch.
     if entry == "double_batch":
         return Fixture(F_DOUBLE_BATCH, SHAPE_SCALAR, "l", "l", "")
     if entry == "fahrenheit_batch":
         return Fixture(F_FAHRENHEIT_BATCH, SHAPE_MAP_BATCHES_COLUMN, "g", "g", "")
+    # A frame whose frame_next raises, then answers ERR_INTERNAL to every
+    # later frame_next (the host must not pull after an error).
     if entry == "raise_again":
         return Fixture(F_RAISE_AGAIN, SHAPE_MAP_BATCHES_FRAME, "l", "tl", "")
     return None
