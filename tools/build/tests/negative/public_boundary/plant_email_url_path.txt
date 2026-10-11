@@ -1,1 +1,0 @@
-See s3://bucket/jdoe@corp.zz.

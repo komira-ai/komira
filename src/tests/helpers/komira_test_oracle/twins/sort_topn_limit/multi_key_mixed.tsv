@@ -1,0 +1,16 @@
+#! komira-plan-conformance v1
+#  order: keys=a,b
+#  float: ulps=0
+# derivation: §4.2 per key: a ASC NULLS FIRST, then b DESC NULLS LAST
+# within equal a. a NULL: id 2 (b 2), id 5 (b 1), so 2 then 5. a = 1: id 3.
+# a = 2: id 6. a = 3: id 1 and 7 (b 1 both), then id 4 (b NULL, last).
+# Id 1 and 7 tie on both keys, so they compare as a multiset (§4.7).
+# Types: a sort keeps its input columns, as scanned.
+id:int64	a:int64?	b:int64?	f:float64?
+2	\N	2	0.0
+5	\N	1	\N
+3	1	2	-0.0
+6	2	1	0.0
+1	3	1	1.5
+7	3	1	0.5
+4	3	\N	-2.5

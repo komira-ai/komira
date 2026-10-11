@@ -1,0 +1,12 @@
+{
+ "name": "ledger_schema_released",
+ "defect": "an ownership bug in the fixture: the runner's release ledger must fail this case",
+ "run": "call_batch",
+ "entry": "release_schema",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 1, "columns": [{"type": "int64", "values": [1]}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [1]}},
+ "runner_fails_with": "borrowed schema"
+}
