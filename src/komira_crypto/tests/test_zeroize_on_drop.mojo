@@ -130,13 +130,70 @@ def test_zeroize_uint64_single_word() raises:
 
 
 # -----------------------------------------------------------------------------
-# Structural — Sha256 destructor invokes the helpers (compile-pass gate
-# that the destructor IS defined and IS callable from drop).
+# Bounds — each helper writes its own buffer and nothing next to it. The
+# buffer under test is the middle row of a 3-row nested array, so the bytes
+# just before it and just after it are the neighbouring rows: a byte count
+# one byte too long, or a start pointer moved off the buffer, changes a
+# neighbour and the test fails.
+# -----------------------------------------------------------------------------
+
+
+def test_zeroize_uint8_stays_in_bounds() raises:
+    """zeroize_inline_array[N] zeroes exactly its N bytes."""
+    var outer = Array[Array[UInt8, 16], 3](fill=Array[UInt8, 16](fill=UInt8(0xA5)))
+    zeroize_inline_array[16](outer[1])
+    for i in range(16):
+        assert_equal(Int(outer[1][i]), 0, String("byte ", i, " not zeroed"))
+        assert_equal(Int(outer[0][i]), 0xA5, String("before byte ", i, " touched"))
+        assert_equal(Int(outer[2][i]), 0xA5, String("after byte ", i, " touched"))
+
+
+def test_zeroize_uint32_stays_in_bounds() raises:
+    """zeroize_inline_array_u32[N] zeroes exactly its N*4 bytes."""
+    var outer = Array[Array[UInt32, 4], 3](fill=Array[UInt32, 4](fill=UInt32(0xA5A5A5A5)))
+    zeroize_inline_array_u32[4](outer[1])
+    for i in range(4):
+        assert_equal(outer[1][i], UInt32(0), String("word ", i, " not zeroed"))
+        assert_equal(outer[0][i], UInt32(0xA5A5A5A5), String("before word ", i, " touched"))
+        assert_equal(outer[2][i], UInt32(0xA5A5A5A5), String("after word ", i, " touched"))
+
+
+def test_zeroize_uint64_stays_in_bounds() raises:
+    """zeroize_inline_array_u64[N] zeroes exactly its N*8 bytes."""
+    var outer = Array[Array[UInt64, 4], 3](fill=Array[UInt64, 4](fill=UInt64(0xA5A5A5A5A5A5A5A5)))
+    zeroize_inline_array_u64[4](outer[1])
+    for i in range(4):
+        assert_equal(outer[1][i], UInt64(0), String("word ", i, " not zeroed"))
+        assert_equal(outer[0][i], UInt64(0xA5A5A5A5A5A5A5A5), String("before word ", i, " touched"))
+        assert_equal(outer[2][i], UInt64(0xA5A5A5A5A5A5A5A5), String("after word ", i, " touched"))
+
+
+def test_zeroize_list_stays_in_bounds() raises:
+    """zeroize_list zeroes len(a) bytes, not the spare capacity after them."""
+    var key = List[UInt8](capacity=64)
+    for _ in range(64):
+        key.append(UInt8(0xA5))
+    key.resize(32, UInt8(0))
+    zeroize_list(key)
+    for i in range(32):
+        assert_equal(Int(key[i]), 0, String("byte ", i, " not zeroed"))
+    # The 32 bytes after len(key) still hold 0xA5: shrinking a List keeps its
+    # buffer, so the spare capacity is the memory just after the elements.
+    # SAFETY: the read stays inside the 64-byte allocation, whose bytes were
+    # all written above; UInt8 has no destructor, so resize left them as is.
+    var spare = key.unsafe_ptr()
+    for i in range(32, 64):
+        assert_equal(Int(spare[i]), 0xA5, String("spare byte ", i, " touched"))
+
+
+# -----------------------------------------------------------------------------
+# Structural — a Sha256 is built, used and dropped (compile-and-run gate
+# that its destructor IS defined and IS callable from drop).
 #
-# We cannot directly observe `__del__` ran (the buffer is unmappable
-# afterward) — but if the destructor's body had a syntax / link error,
-# this test would fail to compile or fail to run: the minimal
-# zero-on-drop check at the test level.
+# Sha256 does not call these helpers: its state lives in an AWS-LC
+# context that its inner hasher's `__del__` frees (`EVP_MD_CTX_free`,
+# which AWS-LC clears). This test asserts nothing about zeroing; it fails only if the
+# destructor fails to compile, link or run.
 # -----------------------------------------------------------------------------
 
 
@@ -146,10 +203,9 @@ def test_sha256_destructor_invocable() raises:
     h.update("test".as_bytes())
     var dig = Array[UInt8, 32](fill=0)
     h.finalize_into(dig)
-    # Falling out of scope here triggers Sha256.__del__ which calls
-    # zeroize_inline_array_u32[8](self._state) + zeroize_inline_array
-    # [64](self._buffer). If the destructor is broken, this test fails
-    # at compile, link, or runtime.
+    # Falling out of scope here drops Sha256 and its inner hasher, whose
+    # `__del__` frees the AWS-LC context. If the destructor is broken, this test fails at
+    # compile, link, or runtime.
     assert_true(True)
 
 
@@ -178,6 +234,10 @@ def main() raises:
     test_zeroize_uint32_sha256_state_shape()
     test_zeroize_uint64_every_byte()
     test_zeroize_uint64_single_word()
+    test_zeroize_uint8_stays_in_bounds()
+    test_zeroize_uint32_stays_in_bounds()
+    test_zeroize_uint64_stays_in_bounds()
     test_sha256_destructor_invocable()
     test_zeroize_list()
+    test_zeroize_list_stays_in_bounds()
     print("OK")
