@@ -139,3 +139,30 @@ mojo_library(
     ],
     visibility = ["PUBLIC"],
 )
+
+# The pyarrow files komira_parquet's column decoder test reads.
+export_file(
+    name = "pyarrow_gzip_plain.parquet",
+    src = "tests/fixtures/parquet/pyarrow_gzip_plain.parquet",
+    visibility = ["//src/komira_parquet:"],
+)
+export_file(
+    name = "pyarrow_int96_ts.parquet",
+    src = "tests/fixtures/parquet/pyarrow_int96_ts.parquet",
+    visibility = ["//src/komira_parquet:"],
+)
+export_file(
+    name = "pyarrow_multi_dict_page.parquet",
+    src = "tests/fixtures/parquet/pyarrow_multi_dict_page.parquet",
+    visibility = ["//src/komira_parquet:"],
+)
+export_file(
+    name = "pyarrow_page_crc_zstd_v2.parquet",
+    src = "tests/fixtures/parquet/pyarrow_page_crc_zstd_v2.parquet",
+    visibility = ["//src/komira_parquet:"],
+)
+export_file(
+    name = "pyarrow_zero_row.parquet",
+    src = "tests/fixtures/parquet/pyarrow_zero_row.parquet",
+    visibility = ["//src/komira_parquet:"],
+)
