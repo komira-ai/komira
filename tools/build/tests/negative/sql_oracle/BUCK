@@ -78,6 +78,21 @@ sql_oracle(
     outputs = ["out.tsv"],
 )
 
+# RED: the oracle discipline (komira_test_oracle's sql/discipline.sql) run
+# by its case runner (sql/run.sql) on a planted case: a key with no NULL
+# placement, and no ORDER BY on the outermost query. Each must fail before
+# the case writes its answer, with the discipline's message; a runner that
+# stopped calling the discipline builds them green.
+[sql_oracle(
+    name = "discipline_" + case,
+    srcs = [
+        "komira//src/tests/helpers/komira_test_oracle:sql/discipline.sql",
+        "komira//src/tests/helpers/komira_test_oracle:sql/run.sql",
+    ],
+    inputs = {"case.sql": "discipline_" + case + ".sql"},
+    outputs = ["expected.tsv"],
+) for case in ["unplaced", "unordered"]]
+
 # RED: each other dot command the README names as refused in safe mode
 # (`.system`, `.read`, `.output`, `.cd`, `.open`, `.import`), with the
 # message the selftest requires. The file each names is an input or a

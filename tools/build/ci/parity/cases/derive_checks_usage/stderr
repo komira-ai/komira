@@ -1,0 +1,2 @@
+derive_checks: give one of a units file and --from
+usage: derive_checks (<units file> | --from <artifacts.textproto>) [--buck2 <path>]

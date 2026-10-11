@@ -44,6 +44,8 @@
 //! (`notes.sql.mysql`, `out.<f>.m<f>`), so a check of the first entry only,
 //! a substring test or a suffix without its dot passes one of them. (The
 //! `.`/`..` arms are covered by the name pattern too.)
+//! Also: komira_test_oracle's case runner no longer calling its oracle
+//! discipline (discipline_unplaced and discipline_unordered build green).
 const std = @import("std");
 const lib = @import("lib/lib.zig");
 
@@ -229,6 +231,8 @@ const REDS = [_]Red{
     .{ .name = "dot_cd", .text = ".cd cannot be used in -safe mode" },
     .{ .name = "dot_open", .text = ".open cannot be used in -safe mode" },
     .{ .name = "dot_import", .text = ".import cannot be used in -safe mode" },
+    .{ .name = "discipline_unplaced", .text = "Invalid Input Error: oracle discipline: case.sql the ORDER BY key at byte 67 states no NULLS FIRST or NULLS LAST" },
+    .{ .name = "discipline_unordered", .text = "Invalid Input Error: oracle discipline: case.sql its outermost query has no ORDER BY" },
 };
 
 /// The pieces of the sql_oracle action's argv, as `buck2 aquery` prints it

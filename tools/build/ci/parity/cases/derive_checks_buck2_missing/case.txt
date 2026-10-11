@@ -1,0 +1,6 @@
+# A --buck2 that is not there: the shell's exit 127, BROKEN.
+arg "{units_file}"
+arg "--buck2"
+arg "no-such-buck2"
+input units_file "lib_a\t//src/a:a\n"
+exit 0
