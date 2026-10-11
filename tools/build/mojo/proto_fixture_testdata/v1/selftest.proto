@@ -1,8 +1,7 @@
 syntax = "proto3";
 
 // The schema of proto_fixture_check's welded self-test (../BUCK says which
-// defect each fixture plants) and of its twins in
-// tools/build/tests/negative/proto_fixture; the same as
+// defect each fixture plants); the same as
 // tools/build/tests/functional/proto_fixture/v1/selftest.proto.
 package example.fixture.v1;
 
