@@ -76,7 +76,14 @@ ZigModuleInfo = provider(fields = {
     "inputs": provider_field(list),
 })
 
+# Names zig gives modules of its own: the importing file is `root`, and
+# `std` and `builtin` are always there. A module of one of these names would
+# clash with them.
+_ZIG_RESERVED_MODULES = ["root", "std", "builtin"]
+
 def _zig_module_impl(ctx):
+    if ctx.label.name in _ZIG_RESERVED_MODULES:
+        fail("{}: a zig_module may not be named {} (zig's own module names: {})".format(ctx.label.raw_target(), ctx.label.name, ", ".join(_ZIG_RESERVED_MODULES)))
     passed = [t[DefaultInfo].default_outputs[0] for t in ctx.attrs.unit_tests]
     return [
         DefaultInfo(default_output = ctx.attrs.src, other_outputs = passed),
@@ -99,10 +106,17 @@ def _zig_root(ctx):
     file naming `src` as the root module and each dep as a module it may
     import (`@file` is zig's own argument file, read in place of the
     argument). Without `deps` the command line is the one it always was, so
-    no existing action changes its key."""
+    no existing action changes its key. Two deps of one import name (the
+    same target twice, or two targets of one name) fail analysis rather
+    than zig's compile."""
     if not ctx.attrs.deps:
         return ctx.attrs.src
     mods = [d[ZigModuleInfo] for d in ctx.attrs.deps]
+    seen = {}
+    for d, m in zip(ctx.attrs.deps, mods):
+        if m.name in seen:
+            fail("{}: two deps are imported as \"{}\": {} and {} (a zig_module's import name is its target name)".format(ctx.label.raw_target(), m.name, seen[m.name], d.label.raw_target()))
+        seen[m.name] = d.label.raw_target()
     args = [cmd_args("--dep", m.name) for m in mods]
     args.append(cmd_args(ctx.attrs.src, format = "-Mroot={}"))
     args += [cmd_args(m.root, format = "-M" + m.name + "={}") for m in mods]

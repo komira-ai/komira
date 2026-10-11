@@ -192,7 +192,7 @@ test "inline link and image targets" {
     try eqs("e.md", t[3]);
     try eqs("f.md#x", t[4]);
     // A target with a space, or text after it that is not a title, is no link.
-    try eq(@as(usize, 0), (try md.inlineTargets(A, "[a](b c) [d](e.md 'x')")).len);
+    try eq(@as(usize, 0), (try md.inlineTargets(A, "[a](b c) [d](e.md x)")).len);
     // An outer `[` whose text never closes is no link; the inner one is.
     const inner = try md.inlineTargets(A, "[a [b](c.md)");
     try eq(@as(usize, 1), inner.len);
@@ -202,7 +202,7 @@ test "inline link and image targets" {
 test "reference definitions" {
     try eqs("f.md", md.refdefTarget("[ref]: <f.md>").?);
     try eqs("g.md#x", md.refdefTarget("   [r]:g.md#x \"title\"").?);
-    try eqs("<", md.refdefTarget("[r]: <").?);
+    try eqs("a>", md.refdefTarget("[r]: a>").?);
     try eq(@as(?[]const u8, null), md.refdefTarget("    [r]: four-spaces.md"));
     try eq(@as(?[]const u8, null), md.refdefTarget("[]: empty-label.md"));
     try eq(@as(?[]const u8, null), md.refdefTarget("[r]:   "));
@@ -236,14 +236,156 @@ test "a comment opener inside a fence opens no comment" {
 
 // ---- line numbers ------------------------------------------------------------
 
-test "lines split on newline and drop a carriage return before it" {
+test "lines split on every CommonMark line ending" {
     const ls = lines("a\r\n\r\nb\rc\n");
-    try eq(@as(usize, 3), ls.len);
+    try eq(@as(usize, 4), ls.len);
     try eqs("a", ls[0]);
     try eqs("", ls[1]);
-    try eqs("b\rc", ls[2]);
+    try eqs("b", ls[2]);
+    try eqs("c", ls[3]);
     try eq(@as(usize, 0), lines("").len);
     try eq(@as(usize, 2), lines("x\n\n").len);
     try eq(@as(usize, 1), lines("x").len);
     try eqs("2:c.md", links("```\r\n```\r\n[c](c.md)\r\n"));
+}
+
+test "a lone carriage return ends a line; a final one ends the last line" {
+    // CommonMark: "\n", "\r\n" and "\r" are line endings.
+    const ls = lines("x\ry\r\rz\r");
+    try eq(@as(usize, 4), ls.len);
+    try eqs("x", ls[0]);
+    try eqs("y", ls[1]);
+    try eqs("", ls[2]);
+    try eqs("z", ls[3]);
+    try eqs("2:b.md", links("```\r```\r[b](b.md)\r"));
+    // "\r\n" is one line ending, not two.
+    try eq(@as(usize, 2), lines("a\r\nb").len);
+}
+
+test "a final \\r\\n ends the last line rather than starting an empty one" {
+    // Catches a "\r\n" pair read as two endings when it closes the text.
+    try eq(@as(usize, 1), lines("x\r\n").len);
+    try eq(@as(usize, 2), lines("a\r\nb\r\n").len);
+}
+
+// ---- review cases ------------------------------------------------------------
+
+test "whitespace after a title, before the closing parenthesis" {
+    const t = try md.inlineTargets(A, "[a](b.md \"t\" )");
+    try eq(@as(usize, 1), t.len);
+    try eqs("b.md", t[0]);
+}
+
+test "a tab before the info string is stripped" {
+    try eqs("mojo", (try one("```\tmojo\n```\n")).info);
+    try eqs("mojo", (try one("~~~ \t mojo\t\n~~~\n")).info);
+}
+
+test "a comment block ends on its first line holding -->, even after another opener" {
+    try eqs("2:x.md", links("<!-- a\n<!-- b -->\n[x](x.md)\n"));
+}
+
+test "a title may be double-quoted, single-quoted or parenthesised" {
+    const t = try md.inlineTargets(A, "[d](e.md 'x') [f](g.md (y z)) [h](i.md \"q\") [j](k.md\t'x'  )");
+    try eq(@as(usize, 4), t.len);
+    try eqs("e.md", t[0]);
+    try eqs("g.md", t[1]);
+    try eqs("i.md", t[2]);
+    try eqs("k.md", t[3]);
+    // A title not separated from a <target>, an unclosed title, a (...)
+    // title holding `(`, and mismatched quotes: no link.
+    try eq(@as(usize, 0), (try md.inlineTargets(A, "[a](<b.md>'x')")).len);
+    try eq(@as(usize, 0), (try md.inlineTargets(A, "[c](d.md 'x)")).len);
+    try eq(@as(usize, 0), (try md.inlineTargets(A, "[e](f.md (a(b)))")).len);
+    try eq(@as(usize, 0), (try md.inlineTargets(A, "[g](h.md 'x\")")).len);
+    // With no whitespace before it, a quote is part of a plain target.
+    try eqs("b.md'x'", (try md.inlineTargets(A, "[a](b.md'x')"))[0]);
+    try eqs("0:e.md 1:g.md", links("[d](e.md 'x')\n[f](g.md (y))\n"));
+}
+
+test "a pointy target closes with > and a plain one does not start with <" {
+    try eq(@as(usize, 0), (try md.inlineTargets(A, "[a](<b) [c](<d<e>) [f](<>) [g](<h> 'x)")).len);
+    const t = try md.inlineTargets(A, "[a](b>c) [d](<e.md> 't')");
+    try eq(@as(usize, 2), t.len);
+    try eqs("b>c", t[0]);
+    try eqs("e.md", t[1]);
+}
+
+test "a reference definition's <target> must close" {
+    try eq(@as(?[]const u8, null), md.refdefTarget("[r]: <"));
+    try eq(@as(?[]const u8, null), md.refdefTarget("[r]: <a.md"));
+    try eq(@as(?[]const u8, null), md.refdefTarget("[r]: <>"));
+    try eq(@as(?[]const u8, null), md.refdefTarget("[r]: <a>b>"));
+    try eqs("a.md", md.refdefTarget("[r]: <a.md> \"t\"").?);
+}
+
+test "a comment block may close on its opening line: <!--> and <!--->" {
+    try eqs("1:a.md", links("<!-->\n[a](a.md)\n"));
+    try eqs("1:b.md", links("<!--->\n[b](b.md)\n"));
+    try eqs("", links("<!--\n[c](c.md)\n"));
+}
+
+test "whitespace is CommonMark's: bytes 28 to 31 are text" {
+    for ([_]u8{ ' ', '\t', '\n', 11, 12, '\r' }) |c| try std.testing.expect(md.isSpace(c));
+    for ([_]u8{ 0, 8, 14, 28, 29, 30, 31, 'a' }) |c| try std.testing.expect(!md.isSpace(c));
+    try eqs("\x1cx\x1f", md.strip(" \x1cx\x1f\t"));
+    try eq(@as(usize, 0), md.indentOf("\x1f  x"));
+}
+
+// ---- comment blocks ----------------------------------------------------------
+
+fn comments(text: []const u8) []const md.Comment {
+    const ls = lines(text);
+    return md.htmlComments(A, ls, md.codeMask(A, ls) catch unreachable) catch unreachable;
+}
+
+test "each comment block is its own entry, with its first and last line" {
+    // Adjacent blocks stay apart (a mask would merge them).
+    const cs = comments("<!-- a -->\n<!-- b\nc -->\nx\n  <!-- d\n");
+    try eq(@as(usize, 3), cs.len);
+    try eq(@as(usize, 0), cs[0].open_line);
+    try eq(@as(?usize, 0), cs[0].close_line);
+    try eq(@as(usize, 1), cs[1].open_line);
+    try eq(@as(?usize, 2), cs[1].close_line);
+    try eq(@as(usize, 4), cs[2].open_line);
+    try eq(@as(?usize, null), cs[2].close_line);
+    // Not code, not mid-line; text after the --> is in the block.
+    try eq(@as(usize, 0), comments("```\n<!-- a -->\n```\nx <!-- b -->\n").len);
+    try eq(@as(usize, 0), comments("").len);
+}
+
+test "the comment mask covers exactly the comment blocks" {
+    const ls = lines("<!-- a -->\n<!-- b\nc -->\nx\n  <!-- d\ne\n");
+    const m = try md.htmlCommentMask(A, ls, try md.codeMask(A, ls));
+    const want = [_]bool{ true, true, true, false, true, true };
+    try std.testing.expectEqualSlices(bool, &want, m);
+}
+
+fn expectOne(cs: []const md.Comment, open: usize, close: ?usize) !void {
+    try eq(@as(usize, 1), cs.len);
+    try eq(open, cs[0].open_line);
+    try eq(close, cs[0].close_line);
+}
+
+test "an opener inside an open block starts no second entry" {
+    // CommonMark: one HTML block from line 0 to the first line holding -->.
+    try expectOne(comments("<!-- a\n<!-- b -->\n"), 0, 1);
+    // Left open, the block runs to the end and swallows a later opener.
+    try expectOne(comments("<!-- a\nx\n<!-- b\n"), 0, null);
+}
+
+test "a block closing on the document's last line is closed" {
+    try expectOne(comments("x\n<!-- a\nb -->"), 1, 2);
+    try expectOne(comments("<!-- a -->"), 0, 0);
+}
+
+test "only <!-- opens a comment block" {
+    try eq(@as(usize, 0), comments("<!- a\n<! -- b\n").len);
+}
+
+test "a comment block closes on a --> line that a fence covers" {
+    // The fence on line 1 runs to line 3, but the --> on line 2 still ends
+    // the block that opened on line 0 (as CommonMark, where the fence lines
+    // are inside the HTML block).
+    try expectOne(comments("<!-- a\n```\n-->\n```\n"), 0, 2);
 }
