@@ -132,8 +132,8 @@ test "isLoopback: 127.0.0.1, 127.0.0.2 and ::1 are loopback" {
     try testing.expect(fid.isLoopback(try addr("::1")));
 }
 
-test "isLoopback: the wildcards 0.0.0.0 and ::, a LAN address, 128.0.0.1, ::2 and ::ffff:127.0.0.1 are not" {
-    for ([_][]const u8{ "0.0.0.0", "::", "192.168.1.10", "10.0.0.1", "128.0.0.1", "::2", "fe80::1", "::ffff:127.0.0.1" }) |s| {
+test "isLoopback: the wildcards 0.0.0.0 and ::, documentation-range addresses (IPv4 and IPv6), 128.0.0.1, ::2 and ::ffff:127.0.0.1 are not" {
+    for ([_][]const u8{ "0.0.0.0", "::", "192.0.2.10", "203.0.113.1", "128.0.0.1", "::2", "2001:db8::1", "::ffff:127.0.0.1" }) |s| {
         try testing.expect(!fid.isLoopback(try addr(s)));
     }
 }
