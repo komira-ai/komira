@@ -1,0 +1,150 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/sql:defs.bzl", "sql_oracle")
+
+# The plan conformance oracle (README.md): seeded datasets and the expected
+# answers of the ORACLE cases, all written by the pinned DuckDB as sql_oracle
+# build actions (tools/build/sql), and the Mojo check that holds each answer
+# to its HAND twin by value. Nothing here is Python, and nothing komira
+# builds is an input of an oracle.
+
+# ---- Datasets ---------------------------------------------------------------
+# datasets/gen.sql (the deterministic generator) and one file per dataset
+# build the tables; write.sql writes each as Parquet and CSV. `datasets_twin`
+# is the same SQL as another action; `datasets_check` holds both runs byte
+# for byte to each other, every file's rows to the table, the Parquet
+# layout, the special values by name, and a summary to golden/summary.tsv.
+
+_GEN = [
+    "datasets/gen.sql",
+    "datasets/types.sql",
+    "datasets/nulls.sql",
+    "datasets/joins.sql",
+]
+
+_DATASETS = [
+    "types",
+    "nulls",
+    "join_left",
+    "join_right",
+]
+
+_FILES = [d + "." + f for d in _DATASETS for f in ["parquet", "csv"]]
+
+[sql_oracle(
+    name = name,
+    srcs = _GEN + ["datasets/write.sql"],
+    outputs = _FILES,
+    visibility = ["//src/tests/..."],
+) for name in ["datasets", "datasets_twin"]]
+
+sql_oracle(
+    name = "datasets_check",
+    srcs = _GEN + ["datasets/check.sql"],
+    inputs = dict(
+        [("a/" + f, ":datasets[" + f + "]") for f in _FILES] +
+        [("b/" + f, ":datasets_twin[" + f + "]") for f in _FILES] +
+        [("golden/summary.tsv", "golden/summary.tsv")],
+    ),
+    outputs = ["summary.tsv"],
+)
+
+# ---- Expected answers ---------------------------------------------------------
+# One sql_oracle per case, named <shard>/<case>: sql/discipline.sql defines
+# the discipline, sql/tables.sql loads the twin inputs (the corpus's JSON
+# Lines files), sql/run.sql refuses a case the discipline faults and writes
+# its answer as expected.tsv. `discipline_check` holds the discipline to
+# planted violations.
+
+_CORPUS = "//src/tests/conformance/komira_plan_conformance:"
+
+_TABLES = {
+    "bool_pairs.jsonl": _CORPUS + "datasets/bool_pairs.jsonl",
+    "groups.jsonl": _CORPUS + "datasets/groups.jsonl",
+    "ints_nullable.jsonl": _CORPUS + "datasets/ints_nullable.jsonl",
+    "sort_rows.jsonl": "twins/sort_rows.jsonl",
+}
+
+_CASES = [p[len("oracle/"):-len(".sql")] for p in glob(["oracle/*/*.sql"])]
+
+[sql_oracle(
+    name = case,
+    srcs = [
+        "sql/discipline.sql",
+        "sql/tables.sql",
+        "sql/run.sql",
+    ],
+    inputs = dict(_TABLES, **{"case.sql": "oracle/" + case + ".sql"}),
+    outputs = ["expected.tsv"],
+    visibility = ["//src/tests/..."],
+) for case in _CASES]
+
+sql_oracle(
+    name = "discipline_check",
+    srcs = [
+        "sql/discipline.sql",
+        "sql/discipline_check.sql",
+    ],
+    outputs = ["discipline.tsv"],
+)
+
+# How the pinned DuckDB spells each kind of value in an expected TSV, for
+# test_duckdb_spellings.
+sql_oracle(
+    name = "spellings",
+    srcs = "sql/spellings.sql",
+    outputs = ["spellings.tsv"],
+)
+
+# ---- The twin check -------------------------------------------------------------
+# The welded tests, and the defect each one catches:
+#   test_twins             every oracle answer equals its HAND twin by value
+#                          (komira_plan_harness's duckdb_tsv, then
+#                          compare_canon under the twin's policy); an answer
+#                          or a twin without the other is reported. Catches a
+#                          wrong HAND file, a wrong oracle query, a DuckDB
+#                          that answers otherwise.
+#   test_twin_checks       the twin check fed planted defects: a wrong cell, a
+#                          missing row, NULL for a value, -0.0 for 0.0, the
+#                          twin's order policy, an unreadable answer, an
+#                          unpaired name.
+#   test_duckdb_spellings  the reader against bytes the pinned DuckDB wrote
+#                          (:spellings): a reader built on a transcription,
+#                          or a DuckDB bump that changes a spelling.
+mojo_library(
+    name = "komira_test_oracle",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/tests/helpers/komira_plan_harness:komira_plan_harness",
+    ],
+    test_srcs = [
+        "tests/test_duckdb_spellings.mojo",
+        "tests/test_twin_checks.mojo",
+        "tests/test_twins.mojo",
+    ],
+    test_data = {
+        "tests/test_duckdb_spellings.mojo": {"spellings.tsv": ":spellings"},
+        "tests/test_twins.mojo": dict(
+            [("oracle/" + c + ".tsv", ":" + c) for c in _CASES] +
+            # Each case's HAND twin: twins/<shard>/<case>.tsv for a shard
+            # the corpus does not hold yet, else the corpus's expectation.
+            [("hand/" + c + ".tsv", (glob(["twins/" + c + ".tsv"]) or [_CORPUS + "expect/" + c + ".tsv"])[0]) for c in _CASES],
+        ),
+    },
+    visibility = ["PUBLIC"],
+)
+
+# The discipline and the case runner, for the planted violations in
+# tests//negative/sql_oracle (the self-test scenario sql_oracle builds them
+# and requires each to fail with the discipline's message).
+[export_file(
+    name = f,
+    visibility = ["PUBLIC"],
+) for f in [
+    "sql/discipline.sql",
+    "sql/run.sql",
+]]
