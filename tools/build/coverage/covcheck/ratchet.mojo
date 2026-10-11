@@ -2,11 +2,14 @@
 
 The file (ratchet.tsv): lines starting with `#` are comments; every other
 line is a row `<package>\\t<line floor>\\t<branch floor>`, floors in basis
-points (0 to 10000), the branch floor `-` when the package has none. Rows
-are sorted by package in byte order, each package once.
+points (0 to 10000), the branch floor `-` when the package has none, or a
+pinned row with a fourth field, its reason (`\\t<reason>`): a floor set by
+hand below what was measured (a line run only on some runs, say), which the
+proposal keeps as written. Rows are sorted by package in byte order, each
+package once.
 
 Refused, naming `<origin>:<line>`: a carriage return, an empty line, a row
-with another number of fields, an empty package, a floor that is not a
+with another number of fields, a pinned row with an empty reason, an empty package, a floor that is not a
 number from 0 to 10000 (or `-` for the branch floor), a row out of order
 and a repeated package.
 
@@ -20,7 +23,11 @@ floor, no branch record for a branch floor; `measured` is then -1),
 repository) and, when every row is compared, `Regression` for a row whose
 package has a BUCK file and a floor above 0 but no data at all (its report
 or its tests were removed). A floor can therefore not be escaped by
-dropping the data. A value above its floor is no finding: the proposed
+dropping the data. The gate (not every row) finds no unmeasured floor for
+its package when the package has no executable line and no exempted one:
+the gate counts every source of its library, so that library has nothing to
+cover (one whose sources are all generated, next to another library of the
+same directory whose numbers set the row). A value above its floor is no finding: the proposed
 file raises the floor (`propose`).
 """
 
@@ -41,11 +48,14 @@ struct Row(Copyable, Movable):
     var package: String
     var line_floor: Int
     var branch_floor: Int
+    # Empty, or the reason of a pinned row.
+    var reason: String
 
-    def __init__(out self, package: String, line_floor: Int, branch_floor: Int):
+    def __init__(out self, package: String, line_floor: Int, branch_floor: Int, reason: String = String("")):
         self.package = package
         self.line_floor = line_floor
         self.branch_floor = branch_floor
+        self.reason = reason
 
 
 struct Ratchet(Copyable, Movable):
@@ -91,8 +101,13 @@ def parse_ratchet(text: String, origin: String) raises -> Ratchet:
         if line.byte_length() == 0:
             _fail(origin, n, String("an empty line (a comment starts with '#')"))
         var f = split_on(line, 9)
-        if len(f) != 3:
-            _fail(origin, n, String("a row has 3 tab-separated fields (package, line floor, branch floor), not ") + String(len(f)))
+        if len(f) != 3 and len(f) != 4:
+            _fail(origin, n, String("a row has 3 tab-separated fields (package, line floor, branch floor), or 4 (a pinned row's reason), not ") + String(len(f)))
+        var reason = String("")
+        if len(f) == 4:
+            reason = f[3]
+            if reason.byte_length() == 0:
+                _fail(origin, n, String("a pinned row has an empty reason"))
         if f[0].byte_length() == 0:
             _fail(origin, n, String("an empty package"))
         var lf = _floor(origin, n, f[1], String("line floor"))
@@ -105,7 +120,7 @@ def parse_ratchet(text: String, origin: String) raises -> Ratchet:
                 _fail(origin, n, String("package ") + f[0] + String(" has a second row"))
             if not bytes_less(prev, f[0]):
                 _fail(origin, n, String("rows are not sorted: ") + f[0] + String(" after ") + prev)
-        r.rows.append(Row(f[0], lf, bf))
+        r.rows.append(Row(f[0], lf, bf, reason))
     return r^
 
 
@@ -140,14 +155,16 @@ def compare(r: Ratchet, packages: List[PackageStats], repo: RepoFiles, all_rows:
                 ))
             continue
         ref row = r.rows[k]
+        # The gate counts every source of its library: no line, nothing to cover.
+        var nothing = not all_rows and p.line_found == 0 and p.exempt_lines == 0
         if lbp >= 0 and lbp < row.line_floor:
             out.append(Finding(
                 String(REGRESSION), p.package, String("line"), lbp, row.line_floor, String(""), 0,
                 String("line ") + _bp(lbp) + String(" is below its floor ") + _bp(row.line_floor),
             ))
-        elif lbp < 0 and p.exempt_lines == 0 and row.line_floor > 0:
+        elif lbp < 0 and p.exempt_lines == 0 and row.line_floor > 0 and not nothing:
             out.append(_unmeasured(p.package, String("line"), row.line_floor))
-        if bbp < 0 and row.branch_floor > 0:
+        if bbp < 0 and row.branch_floor > 0 and not nothing:
             out.append(_unmeasured(p.package, String("branch"), row.branch_floor))
         if bbp >= 0:
             if row.branch_floor == NO_FLOOR:
@@ -182,7 +199,8 @@ def compare(r: Ratchet, packages: List[PackageStats], repo: RepoFiles, all_rows:
 
 
 def propose(r: Ratchet, packages: List[PackageStats], repo: RepoFiles) -> Ratchet:
-    """The ratchet with every floor raised to what was measured, a row for
+    """The ratchet with every floor raised to what was measured (a pinned
+    row kept as written), a row for
     every measured package that had none, and no row for a package without
     a BUCK file. Rows sorted by package."""
     var out = Ratchet()
@@ -208,6 +226,12 @@ def propose(r: Ratchet, packages: List[PackageStats], repo: RepoFiles) -> Ratche
         if take_row and take_pkg:
             ref row = r.rows[i]
             ref p = packages[j]
+            if row.reason.byte_length() > 0:
+                if repo.has_buck(row.package):
+                    out.rows.append(row.copy())
+                i += 1
+                j += 1
+                continue
             var lf = max(row.line_floor, p.line_bp())
             var bf = row.branch_floor
             if p.branch_bp() >= 0:
@@ -236,5 +260,8 @@ def render_ratchet(r: Ratchet) -> String:
     for i in range(len(r.rows)):
         ref row = r.rows[i]
         out += row.package + String("\t") + String(row.line_floor) + String("\t")
-        out += (String("-") if row.branch_floor == NO_FLOOR else String(row.branch_floor)) + String("\n")
+        out += String("-") if row.branch_floor == NO_FLOOR else String(row.branch_floor)
+        if row.reason.byte_length() > 0:
+            out += String("\t") + row.reason
+        out += String("\n")
     return out^

@@ -10,6 +10,13 @@
 #   SUCCEEDED          the end state holds and this run made it so
 #   NOOP               the end state already held; nothing was changed
 #                      (publishing identical bytes that are already published)
+#   SUPERSEDED         a successful stop: something newer already reached
+#                      this stage, or main has moved past this revision, so
+#                      the run did nothing on purpose (a never-backward
+#                      publish whose channel's newest build descends from
+#                      this revision; a push run that the admission check,
+#                      R24, stops before any effect). A driver skips the
+#                      jobs after it
 #   REFUSED            a check refused; nothing external changed
 #   FAILED             a step failed and no external effect landed
 #   PARTIAL            some effect landed and the rest did not
@@ -34,6 +41,7 @@
 
 comptime OUTCOME_SUCCEEDED: String = "SUCCEEDED"
 comptime OUTCOME_NOOP: String = "NOOP"
+comptime OUTCOME_SUPERSEDED: String = "SUPERSEDED"
 comptime OUTCOME_REFUSED: String = "REFUSED"
 comptime OUTCOME_FAILED: String = "FAILED"
 comptime OUTCOME_PARTIAL: String = "PARTIAL"
@@ -52,6 +60,7 @@ def all_outcomes() -> List[String]:
     var out = List[String]()
     out.append(String(OUTCOME_SUCCEEDED))
     out.append(String(OUTCOME_NOOP))
+    out.append(String(OUTCOME_SUPERSEDED))
     out.append(String(OUTCOME_REFUSED))
     out.append(String(OUTCOME_FAILED))
     out.append(String(OUTCOME_PARTIAL))
@@ -111,25 +120,29 @@ def outcome_rank(word: String) raises -> Int:
     """How bad an outcome is, for "the run's outcome is its worst step's":
     SUCCEEDED and NOOP are best, INDETERMINATE worst. Two outcomes of equal
     rank never meet in one run except SUCCEEDED with NOOP, where SUCCEEDED
-    wins (something was changed)."""
+    wins (something was changed). SUPERSEDED ranks after SUCCEEDED: a run
+    whose step stopped superseded ends SUPERSEDED, whatever an earlier step
+    did, so the jobs after it skip."""
     require_outcome(word)
     if word == OUTCOME_NOOP:
         return 0
     if word == OUTCOME_SUCCEEDED:
         return 1
-    if word == OUTCOME_REFUSED:
+    if word == OUTCOME_SUPERSEDED:
         return 2
-    if word == OUTCOME_FAILED:
+    if word == OUTCOME_REFUSED:
         return 3
-    if word == OUTCOME_VALIDATION_FAILED:
+    if word == OUTCOME_FAILED:
         return 4
-    if word == OUTCOME_CANCELLED:
+    if word == OUTCOME_VALIDATION_FAILED:
         return 5
-    if word == OUTCOME_INTERRUPTED:
+    if word == OUTCOME_CANCELLED:
         return 6
-    if word == OUTCOME_PARTIAL:
+    if word == OUTCOME_INTERRUPTED:
         return 7
-    return 8  # INDETERMINATE
+    if word == OUTCOME_PARTIAL:
+        return 8
+    return 9  # INDETERMINATE
 
 
 def worst_outcome(a: String, b: String) raises -> String:

@@ -43,6 +43,12 @@ def test_the_field_names_are_the_golden_list() raises:
     want.append(String("validation.program"))
     want.append(String("validation.smoke"))
     want.append(String("validation.wait_for_index_seconds"))
+    want.append(String("validation.args"))
+    want.append(String("validation.target"))
+    want.append(String("validation.timeout_seconds"))
+    want.append(String("validation.expect"))
+    want.append(String("target.resource"))
+    want.append(String("target.output"))
     assert_equal(len(got), len(want))
     for i in range(len(want)):
         assert_equal(got[i], want[i])

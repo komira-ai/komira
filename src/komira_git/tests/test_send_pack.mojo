@@ -7,7 +7,7 @@
 # v2.56.0 (the capability string after the NUL starts with a space, command
 # lines have no LF, push options follow their own flush; receive_status's
 # refusals). The comparison with git itself is in
-# src/tests/conformance/komira_git_conformance.
+# src/tests/conformance/komira_git_protocol_conformance.
 #
 # WHAT EACH TEST CATCHES:
 #   * test_advertisement: `capabilities^{}` or `.have` taken for a ref; the

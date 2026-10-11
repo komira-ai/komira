@@ -63,6 +63,10 @@ mojo_library(
         # continuous auto-promotion at start-up: the ref (main only, break-glass
         # with a reason), the set hash handed on, never backward, the prod line
         "tests/test_kci_ref_check.mojo",
+        # the staged pipeline's ordering (P1): never backward per run, a
+        # superseded publish ends the run green, the admission check (R24) and
+        # its git reads (main's releasable tip, the split's rev-parse)
+        "tests/test_kci_staged_ordering.mojo",
         # the real libraries through a machine file; the secret store by name
         "tests/test_kci_library_wiring.mojo",
         # no exit number is spelled outside kci_api

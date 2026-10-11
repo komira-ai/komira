@@ -71,6 +71,34 @@
 #     differs from the stored one, before any change
 #     (`data.key_change_findings`): a new key is a new table, never an
 #     update.
+#   * THE METADATA IS KCI'S (metadata.mojo). After `lower`, kci writes the
+#     author's labels on every node of the resource as desired fields
+#     `label.<key>` (sorted by key), and the written cloud name on its
+#     primary node as the desired field `physical_name`; an adapter writes
+#     neither field itself (`deploy.lower_data` raises if it does). An
+#     adapter creates the primary object under `Resource.physical_name` when
+#     it is written (it reads it from the resource, as its outputs follow
+#     it) and writes the label fields where its object carries labels.
+#     `list_owned` reports the author's cloud name each object was created
+#     under (`OwnedRecord.name`; empty when the adapter chose the name), and
+#     kci refuses a plan, an apply or a destroy whose primary node asks for
+#     another one, before any change (`metadata.name_change_findings`): a
+#     new name is a new object. `Resource.adopt` adds the primary node to
+#     the scope's adopt list on plan and apply (`with_adopted`), so an
+#     unstamped object of that name is stamped instead of refused.
+#   * SAFE ADOPTION (adoption.mojo). kci marks the primary node of a
+#     resource that writes `adopt` (`LoweredNode.adopted`). Before planning,
+#     kci asks the cloud what stands at that node (`read_existing`: present,
+#     stamped, its kind, its cloud name and the fields of its shape the
+#     adapter can read) and refuses a missing object, or an unstamped one
+#     that is not what the node declares. An adapter's `adopt_owned` writes
+#     the adoption mark `kci_adopted=true` (`labels.adoption_labels`) when
+#     the node is marked, and `list_owned` reports it
+#     (`OwnedRecord.adopted`): kci did not create such an object, so it is
+#     never replaced, never deleted unless its resource writes `adopt`
+#     ADOPT_DELETABLE, and when its resource leaves the list kci RELEASES
+#     it (`release`: the cloud drops every kci label of the object, and
+#     nothing else, with no delete call).
 #
 # ⛔ PRECONDITION FOR THE FIRST REAL ADAPTER: NO `--` STAMPS MAY BE LEFT.
 # The standard label rule once wrote the `/` of a role as `--` (`uses--jobs`);
@@ -101,6 +129,8 @@
 #     the cloud says is kci's, as `OwnedRecord`s; deploy reads it to remove
 #     roles a resource still in the file turned off, and to report leftover
 #     resources the file no longer names.
+#   * `read_existing(creds, node)` and `release(creds, record)`: the read
+#     and the release of safe adoption (above).
 #   * `required_artifact(resource)` is the artifact type and platform (OS +
 #     CPU) a resource needs here; validate checks the referenced image
 #     against it.
@@ -108,6 +138,14 @@
 #   * `trust_render(scope)` and `trust_check(creds, scope)` are the cloud side
 #     of trust: what the cell's deploy identity must look like, and whether
 #     the live one does.
+#   * `image_registry(ctx)` is the pull and push address of the cell's
+#     bootstrap image registry (the `registry` item `bootstrap_resources`
+#     lists), computed from the cell's settings, machine and cell alone: pure,
+#     no read. Two cells never share one.
+#   * `registry_login(creds)` is the basic-auth user and secret a registry
+#     client presents to that registry, as plain strings (`RegistryLogin`), so
+#     this package needs no registry client. The secret is held in memory only,
+#     never printed, logged or put in argv.
 # =============================================================================
 
 from kci_reconciler import (
@@ -168,6 +206,12 @@ comptime FINDING_LIMIT: Int = 3
 """The cloud hosts the type but refuses one of its values or shapes."""
 comptime FINDING_CELL: Int = 4
 """The cell is wrong for this cloud: a setting, or the deploy identity."""
+comptime FINDING_ADOPTION: Int = 5
+"""What the cloud holds refuses an adoption: the object an adopted resource
+names is missing or is not the one it declares; a planned change would
+replace an adopted object (always refused) or delete one whose resource is
+not ADOPT_DELETABLE; or an object carries kci's stamp and adoption mark while
+its resource no longer writes adopt."""
 
 
 struct Finding(Copyable, Movable, Deinitable):
@@ -297,7 +341,12 @@ struct OwnedRecord(Copyable, Movable, Deinitable):
     list), its immutable KEY as the cloud stores it (a table's, rendered as
     `data.table_key_text`; empty for every other kind), and the VALIDATION
     RUN that created it: the `kci-run-id` label's value as the cloud stores
-    it (`labels.validation_run_of`), or None when the object carries none."""
+    it (`labels.validation_run_of`), or None when the object carries none;
+    and the author's cloud NAME it was created under
+    (`Resource.physical_name`, as the cloud stores it; empty when the
+    adapter chose the name); and whether kci ADOPTED it rather than created
+    it (it carries the adoption mark `kci_adopted=true`,
+    `labels.adopted_by`)."""
 
     var kind: String
     var id: String
@@ -310,6 +359,8 @@ struct OwnedRecord(Copyable, Movable, Deinitable):
     var retained: Bool
     var key: String
     var validation_run_id: Optional[String]
+    var name: String
+    var adopted: Bool
 
     def __init__(
         out self,
@@ -324,6 +375,8 @@ struct OwnedRecord(Copyable, Movable, Deinitable):
         retained: Bool,
         key: String,
         validation_run_id: Optional[String],
+        name: String = String(""),
+        adopted: Bool = False,
     ):
         self.kind = kind
         self.id = id
@@ -336,6 +389,8 @@ struct OwnedRecord(Copyable, Movable, Deinitable):
         self.retained = retained
         self.key = key
         self.validation_run_id = validation_run_id.copy()
+        self.name = name
+        self.adopted = adopted
 
     def __init__(out self, *, copy: Self):
         self.kind = copy.kind.copy()
@@ -349,6 +404,62 @@ struct OwnedRecord(Copyable, Movable, Deinitable):
         self.retained = copy.retained
         self.key = copy.key.copy()
         self.validation_run_id = copy.validation_run_id.copy()
+        self.name = copy.name.copy()
+        self.adopted = copy.adopted
+
+
+struct ExistingObject(Copyable, Movable, Deinitable):
+    """What one read of an adopted node's object saw (`read_existing`):
+    whether it is `present`, whether it carries a complete kci stamp
+    (`stamped`, any identity), its `kind` as the cloud names it (the same
+    vocabulary as `LoweredNode.kind`), the author's cloud `name` it stands
+    under (empty when it has none), and the `fields` of its shape the
+    adapter can read, in the keys and renderings of the node's desired
+    fields."""
+
+    var present: Bool
+    var stamped: Bool
+    var kind: String
+    var name: String
+    var fields: List[Setting]
+
+    def __init__(
+        out self,
+        present: Bool = False,
+        stamped: Bool = False,
+        kind: String = String(""),
+        name: String = String(""),
+        var fields: List[Setting] = List[Setting](),
+    ):
+        self.present = present
+        self.stamped = stamped
+        self.kind = kind
+        self.name = name
+        self.fields = fields^
+
+    def __init__(out self, *, copy: Self):
+        self.present = copy.present
+        self.stamped = copy.stamped
+        self.kind = copy.kind.copy()
+        self.name = copy.name.copy()
+        self.fields = copy.fields.copy()
+
+
+struct RegistryLogin(Copyable, Movable, Deinitable):
+    """What a registry client presents to the cell's image registry: the
+    basic-auth `user` and `secret`. The secret is a credential: it is never
+    printed, logged or put in argv (`__str__` is not defined on purpose)."""
+
+    var user: String
+    var secret: String
+
+    def __init__(out self, user: String, secret: String):
+        self.user = user
+        self.secret = secret
+
+    def __init__(out self, *, copy: Self):
+        self.user = copy.user.copy()
+        self.secret = copy.secret.copy()
 
 
 @fieldwise_init
@@ -395,7 +506,9 @@ struct LoweredNode(Copyable, Movable, Deinitable):
     `inputs` are the values it reads from other nodes at apply time;
     `wanted` is False for a role the file turned off; `retention` is the
     engine's RETAIN_* code, set by kci from the resource (`deploy.lower_data`)
-    and carried to the engine node by `realize`."""
+    and carried to the engine node by `realize`; `adopted` is True on the
+    primary node of a resource that writes `adopt` (set by kci, never by the
+    adapter): its `adopt_owned` writes the adoption mark."""
 
     var id: String
     var owner: String
@@ -405,6 +518,7 @@ struct LoweredNode(Copyable, Movable, Deinitable):
     var desired: List[Setting]
     var wanted: Bool
     var retention: Int
+    var adopted: Bool
 
     def __init__(
         out self,
@@ -416,6 +530,7 @@ struct LoweredNode(Copyable, Movable, Deinitable):
         var desired: List[Setting] = List[Setting](),
         wanted: Bool = True,
         retention: Int = RETAIN_DELETE,
+        adopted: Bool = False,
     ):
         self.id = id
         self.owner = owner
@@ -425,6 +540,7 @@ struct LoweredNode(Copyable, Movable, Deinitable):
         self.desired = desired^
         self.wanted = wanted
         self.retention = retention
+        self.adopted = adopted
 
     def __init__(out self, *, copy: Self):
         self.id = copy.id.copy()
@@ -435,6 +551,7 @@ struct LoweredNode(Copyable, Movable, Deinitable):
         self.desired = copy.desired.copy()
         self.wanted = copy.wanted
         self.retention = copy.retention
+        self.adopted = copy.adopted
 
     def field(self, key: String) -> String:
         """The desired field `key`, or empty."""
@@ -444,12 +561,15 @@ struct LoweredNode(Copyable, Movable, Deinitable):
         return String("")
 
     def to_json(self) -> String:
-        """One deterministic JSON object (fields in declaration order)."""
+        """One deterministic JSON object (fields in declaration order;
+        `adopted` written only when True, after the retention)."""
         var s = String("{\"id\":") + _json_str(self.id)
         s += String(",\"owner\":") + _json_str(self.owner)
         s += String(",\"kind\":") + _json_str(self.kind)
         s += String(",\"wanted\":") + (String("true") if self.wanted else String("false"))
         s += String(",\"retention\":") + _json_str(retention_name(self.retention))
+        if self.adopted:
+            s += String(",\"adopted\":true")
         s += String(",\"depends_on\":[")
         for i in range(len(self.depends_on)):
             if i > 0:
@@ -543,6 +663,20 @@ trait CloudAdapter(Movable):
         kci's."""
         ...
 
+    def read_existing(mut self, creds: Creds, node: LoweredNode) raises -> ExistingObject:
+        """What stands on the cloud at `node` (an adopted resource's primary
+        node), stamped or not: a read, never a change."""
+        ...
+
+    def release(mut self, creds: Creds, record: OwnedRecord) raises:
+        """Drop every kci label (the identity, the marks) of the object
+        `record` names, and change nothing else: the object stays, and is no
+        longer kci's. Never a delete. The change is atomic, or the adoption
+        mark (kci_adopted) goes last: a release that fails part-way must not
+        leave the identity stamp without the mark, because the next apply
+        would read that object as kci's own leftover and delete it."""
+        ...
+
     def whoami(mut self, creds: Creds) raises -> Principal:
         """Who `creds` are."""
         ...
@@ -554,4 +688,14 @@ trait CloudAdapter(Movable):
     def trust_check(mut self, creds: Creds, scope: CellScope) raises -> List[Finding]:
         """Whether the live deploy identity is what `trust_render` says
         (FINDING_CELL findings; empty when it is)."""
+        ...
+
+    def image_registry(self, ctx: CellContext) -> String:
+        """The pull and push address of the cell's bootstrap image registry,
+        computed from `ctx`'s settings, machine and cell alone (pure)."""
+        ...
+
+    def registry_login(mut self, creds: Creds) raises -> RegistryLogin:
+        """The basic-auth user and secret a registry client presents to
+        `image_registry`'s registry with `creds`."""
         ...

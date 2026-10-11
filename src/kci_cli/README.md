@@ -9,7 +9,9 @@ resolves stage `S` and runs each of its steps in order through `kci_build`
 (`kci_validate`) after it. Under GitHub Actions it first checks the workflow
 it runs under against the machine file, the ref it runs on (a stage that is
 neither the pull-request stage nor `break_glass` runs only on `main`) and the
-release set it was handed. Every
+release set it was handed; with `--admission`, a push re-run (or the first
+stage's first attempt) of a revision `main` has moved past stops SUPERSEDED,
+exit 0, before anything runs. Every
 run writes `kci_api`'s result document to `--result-file` (RUNNING before
 the first effect, FINISHED on every exit path), appends a markdown summary
 to `--summary-file` when given, and exits with `kci_api`'s exit numbers.

@@ -109,14 +109,14 @@ def p256_ecdh_shared_x(
     # handle and zeroizes raw65 on both the raising and the returning path.
     try:
         if Int(eckey) == 0:
-            raise Error("p256_ecdh: EC_KEY_new_by_curve_name failed")
+            raise Error("p256_ecdh: EC_KEY_new_by_curve_name failed")  # cov: unreachable an allocation failure
         var group = _ec_key_get0_group(eckey)
         if Int(group) == 0:
-            raise Error("p256_ecdh: EC_KEY_get0_group failed")
+            raise Error("p256_ecdh: EC_KEY_get0_group failed")  # cov: unreachable an EC_KEY made for P-256 always has its group
 
         priv_bn = _bn_bin2bn_from_span(priv_be)
         if Int(priv_bn) == 0:
-            raise Error("p256_ecdh: BN_bin2bn failed")
+            raise Error("p256_ecdh: BN_bin2bn failed")  # cov: unreachable an allocation failure
 
         # SAFETY: eckey and priv_bn are live handles allocated above.
         # EC_KEY_set_private_key copies the scalar and returns 0 when it is
@@ -135,7 +135,7 @@ def p256_ecdh_shared_x(
             _FfiHandle,  # group
         ](group)
         if Int(peer_pt) == 0:
-            raise Error("p256_ecdh: EC_POINT_new failed")
+            raise Error("p256_ecdh: EC_POINT_new failed")  # cov: unreachable an allocation failure
 
         # SAFETY: peer_uncompressed is the caller's live 65-byte buffer;
         # AWS-LC reads exactly 65 bytes during this synchronous call and
@@ -163,7 +163,7 @@ def p256_ecdh_shared_x(
             _FfiHandle,  # group
         ](group)
         if Int(shared_pt) == 0:
-            raise Error("p256_ecdh: EC_POINT_new failed")
+            raise Error("p256_ecdh: EC_POINT_new failed")  # cov: unreachable an allocation failure
 
         # SAFETY: EC_POINT_mul(group, r, n, q, m, ctx) computes r = n*G + m*q.
         # n = NULL selects r = m*q, AWS-LC's constant-time variable-point
@@ -178,7 +178,7 @@ def p256_ecdh_shared_x(
             _FfiHandle,  # ctx (NULL)
         ](group, shared_pt, null_ptr, peer_pt, priv_bn, null_ptr)
         if rc_mul != 1:
-            raise Error("p256_ecdh: EC_POINT_mul failed")
+            raise Error("p256_ecdh: EC_POINT_mul failed")  # cov: unreachable with an on-curve peer and a scalar in [1, n-1] the multiply fails only on an allocation failure
 
         # SAFETY: raw65 is a local 65-byte buffer and AWS-LC writes at most
         # 65 bytes. For a finite point it writes 0x04 || x || y and returns
@@ -202,7 +202,7 @@ def p256_ecdh_shared_x(
             raw_ptr, UInt(65), null_ptr,
         )
         if n_written != UInt(65) or raw65[0] != UInt8(0x04):
-            raise Error("p256_ecdh: EC_POINT_point2oct failed")
+            raise Error("p256_ecdh: EC_POINT_point2oct failed")  # cov: unreachable a scalar in [1, n-1] times a point of the prime-order group is never the point at infinity
 
         # Z is the x-coordinate: bytes 1..32 of 0x04 || x || y.
         for i in range(32):

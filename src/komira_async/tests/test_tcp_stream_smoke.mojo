@@ -12,6 +12,7 @@
 #     starts False, transitions to True on first EWOULDBLOCK).
 #   - Read + write round-trip with a localhost client.
 #   - Deregister + close on TcpStream / TcpListener drop (no fd leak).
+#   - release_fd: a released stream's drop leaves the fd open.
 #
 # Linux-only: the FFI relies on epoll syscalls; macOS branches in the
 # tcp_stream module raise on construction (BACKEND_KQUEUE not exercised
@@ -241,6 +242,23 @@ def test_tcp_stream_drop_closes_fd() raises:
         assert_true(dup_post < Int32(0))
 
 
+def test_tcp_stream_release_fd_leaves_it_open() raises:
+    """release_fd returns the fd and the stream's drop leaves it open: the
+    fd still duplicates after the drop (a drop that closed it would make
+    dup fail with EBADF). The released stream reads -1."""
+    comptime if CompilationTarget.is_linux():
+        var fd = socket_tcp_nonblocking()
+        assert_true(fd >= Int32(0))
+        var stream = TcpStream(fd)
+        assert_equal(stream.release_fd(), fd)
+        assert_equal(stream.fd(), Int32(-1))
+        _ = stream^
+        var dup_post = external_call["dup", Int32](fd)
+        assert_true(dup_post >= Int32(0))
+        close_fd(dup_post)
+        close_fd(fd)
+
+
 def test_tcp_listener_drop_closes_fd() raises:
     """dropping a TcpListener closes the underlying
     listener fd. Symmetric to test_tcp_stream_drop_closes_fd.
@@ -332,6 +350,7 @@ def main() raises:
     test_tcp_listener_accept_after_connect()
     test_tcp_stream_write_read_round_trip()
     test_tcp_stream_drop_closes_fd()
+    test_tcp_stream_release_fd_leaves_it_open()
     test_tcp_listener_drop_closes_fd()
     test_tcp_stream_lazy_registration_transitions()
     print("PASS komira_async.runtime TcpStream / TcpListener smoke")

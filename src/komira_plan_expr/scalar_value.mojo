@@ -23,6 +23,7 @@
 
 
 from komira_arrow.dtype_sentinel import DTYPE_NONE
+from komira_plan_expr.render_text import write_hex, write_quoted
 
 # Sub-tag for kinds that don't have a clean DType representative.
 comptime SCALAR_KIND_DTYPE: UInt8 = 0        # default — use the `dtype` field
@@ -677,7 +678,13 @@ struct ScalarValue(Movable, Copyable, Writable):
         elif self.is_decimal256():
             writer.write("ScalarValue(decimal256(", self.dec128_precision, ",", self.dec128_scale, "), hh=", Int(self.dec256_high_hi), ", hl=", Int(self.dec256_high_lo), ", lh=", Int(self.dec128_high), ", ll=", Int(self.dec128_low), ")")
         elif self.is_binary():
-            writer.write("ScalarValue(binary, ", self.string_val.byte_length(), " bytes)")
+            # ⛔ PLAN IDENTITY: the BYTES, not only their count. This render
+            # feeds `LogicalPlan.structural_hash`, the plan-compile cache key;
+            # a length-only render let `b = X'0102'` and `b = X'0304'` share a
+            # compiled plan (komira#960).
+            writer.write("ScalarValue(binary, ", self.string_val.byte_length(), " bytes, ")
+            write_hex(writer, self.string_val)
+            writer.write(")")
         elif self.is_int():
             writer.write("ScalarValue(", self.dtype, ", ", Int(self.int_val), ")")
         elif self.is_signed_int_narrow() or self.is_uint():
@@ -685,11 +692,20 @@ struct ScalarValue(Movable, Copyable, Writable):
         elif self.is_float():
             writer.write("ScalarValue(", self.dtype, ", ", self.float_val, ")")
         elif self.is_string():
-            writer.write("ScalarValue(utf8, \"", self.string_val, "\")")
+            # Escaped (`render_text`): a raw write lets the value close its
+            # own quote and spell a different list (komira#960).
+            writer.write("ScalarValue(utf8, ")
+            write_quoted(writer, self.string_val)
+            writer.write(")")
         elif self.is_bool():
             if self.bool_val:
                 writer.write("ScalarValue(bool, true)")
             else:
                 writer.write("ScalarValue(bool, false)")
-        else:
+        elif self.null_dtype == DTYPE_NONE:
             writer.write("ScalarValue(null)")
+        else:
+            # ⛔ PLAN IDENTITY: a typed NULL's declared type is its output
+            # column's type, so `null(int64)` and `null(float64)` must not
+            # render alike (komira#960). An untyped NULL renders as before.
+            writer.write("ScalarValue(null, ", self.null_dtype, ")")

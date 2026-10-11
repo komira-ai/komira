@@ -225,6 +225,9 @@ def test_405_wrong_verb_known_path() raises:
         reactor, _req(HttpMethod.put(), String("/users/42"))
     )
     assert_equal(Int(r2.status), 405, "known :param path + wrong verb -> 405")
+    # The 405 names the path's methods (RFC 9110 §15.5.6).
+    assert_equal(r.headers[String("allow")], String("GET"))
+    assert_equal(r2.headers[String("allow")], String("GET"))
 
     _ = router^
 

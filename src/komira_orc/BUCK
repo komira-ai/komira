@@ -48,6 +48,7 @@ mojo_library(
         "tests/test_orc_lineitem_decode_roundtrip.mojo",
         "tests/test_orc_list_decode.mojo",
         "tests/test_orc_lzo1x_decompress.mojo",
+        "tests/test_orc_packed_varint_block_bound.mojo",
         "tests/test_orc_map_decode.mojo",
         "tests/test_orc_postscript_parse.mojo",
         "tests/test_orc_projection_stripe_prune.mojo",
