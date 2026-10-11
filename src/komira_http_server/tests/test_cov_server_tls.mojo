@@ -358,14 +358,20 @@ struct _Counting(RequestDispatcher):
 
 
 def test_dispatch_loop_drops_a_tls_connection_unread() raises:
-    """`serve_one_iteration` accepts a TLS connection, the client sends its
-    ClientHello, and the next poll cycle is `serve_one_iteration_dispatch`:
-    the connection is dropped, the dispatcher is never called and nothing is
-    written back (no plaintext 400 for the ClientHello, no ServerHello)."""
+    """`serve_one_iteration` accepts a TLS connection; the client then writes
+    a complete plaintext GET on it, and the next poll cycle is
+    `serve_one_iteration_dispatch`. The connection is dropped unread: the
+    dispatcher is never called and nothing is written back. A plaintext GET
+    (not a ClientHello) is what makes a mis-dispatch visible: read as
+    plaintext it would be dispatched and answered 200, where a ClientHello
+    would be an incomplete head, dropped unanswered either way."""
     var empty = List[String]()
     var r = _Rig(empty, empty)
-    var o = r.client.handshake()
-    assert_equal(Int(o), Int(TLS_OUTCOME_BLOCKED_ON_READ), "no ClientHello sent")
+    var req = _bytes("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+    var rc = external_call["send", Int64](
+        r.fd, req.unsafe_ptr(), UInt64(len(req)), Int32(0)
+    )
+    assert_equal(Int(rc), len(req))
     var d = _Counting()
     for _ in range(200):
         _ = r.server.serve_one_iteration_dispatch[_Counting, _Rt](
@@ -373,8 +379,8 @@ def test_dispatch_loop_drops_a_tls_connection_unread() raises:
         )
         if r.server.live_conn_count() == 0:
             break
-    assert_equal(r.server.live_conn_count(), 0, "the TLS connection was kept")
     assert_equal(d.calls, 0, "the dispatcher ran on a TLS connection")
+    assert_equal(r.server.live_conn_count(), 0, "the TLS connection was kept")
     var buf = List[UInt8](length=4096, fill=UInt8(0))
     var n = external_call["recv", Int64](
         r.fd, buf.unsafe_ptr(), UInt64(4096), Int32(0)

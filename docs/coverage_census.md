@@ -24,7 +24,7 @@ target: they are listed for information at the end, with no floor.
 | Libraries (under `src/`, not `src/tests/`) | 209 |
 | Measured | 206 |
 | Not measured (a run or the gate failed; floor 0) | 3 |
-| Line coverage, all measured libraries | 90.16% (180011/199637) |
+| Line coverage, all measured libraries | 90.16% (180015/199641) |
 | Median line coverage (lower middle) | 96.27% |
 | At 100% / 90% to 100% / 50% to 90% / under 50% / no line | 45 / 65 / 47 / 3 / 46 |
 | Branch coverage of the libraries with branch records (40) | 89.78% (6847/7626) |
@@ -145,7 +145,7 @@ branch, `-` for none, *pinned* when set by hand ([Pinned floors](#pinned-floors)
 | 102 | `src/komira_jwks:komira_jwks` | 99.17% (362/365) | 3 | 91.84% (169/184) | 0 | conda | 99.17% / 91.84% |
 | 103 | `src/komira_avro:komira_avro` | 99.29% (3379/3403) | 24 | not gated | 0 | conda | 99.29% / - |
 | 104 | `src/komira_db_postgres:komira_db_postgres` | 99.29% (1128/1136) | 8 | not gated | 0 | conda | 99.29% / - |
-| 105 | `src/komira_http_server:komira_http_server` | 99.59% (2469/2479) | 10 | not gated | 0 | conda | 99.59% / - |
+| 105 | `src/komira_http_server:komira_http_server` | 99.59% (2473/2483) | 10 | not gated | 0 | conda | 99.59% / - |
 | 106 | `src/komira_jsonl:komira_jsonl` | 99.59% (3706/3721) | 15 | not gated | 0 | conda | 99.59% / - |
 | 107 | `src/komira_git:komira_git` | 99.60% (3252/3265) | 13 | not gated | 0 | conda | 99.60% / - |
 | 108 | `src/komira_plan_wire:komira_plan_wire` | 99.71% (5184/5199) | 15 | not gated | 0 | conda | 99.71% / - |
