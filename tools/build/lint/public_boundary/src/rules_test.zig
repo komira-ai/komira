@@ -135,6 +135,11 @@ test "home_path: a home directory naming a person is found, a placeholder is not
 const IPS = [_]Row{
     .{ .line = "Reach it at 10.1.2~.3.", .want = "10.1.2~.3" },
     .{ .line = "172.20.0~.5 private", .want = "172.20.0~.5" },
+    // The edges of 172.16/12: 172.16 and 172.31 are in it, 172.15 and 172.32 are not.
+    .{ .line = "172.16.0~.1 private, the first /16", .want = "172.16.0~.1" },
+    .{ .line = "172.31.255~.254 private, the last /16", .want = "172.31.255~.254" },
+    .{ .line = "172.15.255.254 public, below the range", .want = null },
+    .{ .line = "172.32.0.1 public, above the range", .want = null },
     .{ .line = "192.168.10~.1 private", .want = "192.168.10~.1" },
     .{ .line = "Reach it at 100.100.1~.2.", .want = "100.100.1~.2" },
     .{ .line = "Reach it at 169.254.1~.1.", .want = "169.254.1~.1" },
