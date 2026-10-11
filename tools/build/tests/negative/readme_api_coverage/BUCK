@@ -28,3 +28,19 @@ load("//functional/readme_api_coverage:fixture.bzl", "README_API_LEDGER", "READM
         ("empty", None, False, "nosuch"),
     ]
 ]
+
+# Neither `tree` nor `files`, and both: refused at analysis
+# (//tools/build/selftest:analysis_refusals_lint).
+readme_api_coverage(
+    name = "no_tree",
+    exceptions = README_API_LEDGER,
+    root = "src",
+)
+
+readme_api_coverage(
+    name = "both_tree_and_files",
+    exceptions = README_API_LEDGER,
+    files = README_API_TREE,
+    root = "src",
+    tree = ":doc_tree",
+)
