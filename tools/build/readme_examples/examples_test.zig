@@ -220,9 +220,43 @@ test "a marker inside another comment is refused" {
             " and runs nowhere; close that comment with `-->` first",
         try refusal(a, "x\n<!-- a note\n<!-- mojo-hidden\nassert_equal(1, 1)\n-->\n```mojo\nprint(1)\n```\n", false),
     );
+    // The commonest form: the marker comment is whole on one line, and its
+    // `-->` closes the outer comment there, on the block's closing line.
+    try t.expectEqualStrings(
+        "R.md:3: a `<!-- mojo` comment inside the HTML comment opened on line 2 is part of it" ++
+            " and runs nowhere; close that comment with `-->` first",
+        try refusal(a, "x\n<!-- a note\n<!-- mojo-hidden assert_equal(1, 2) -->\n```mojo\nprint(1)\n```\n", false),
+    );
     // A block that closes first leaves the next comment its own.
     const exs = try examplesOf(a, "<!-- a note -->\n<!-- mojo-hidden x = 1 -->\n```mojo\nprint(x)\n```\n");
     try t.expectEqualStrings("2|x = 1\n4|print(x)\n", try join(a, exs[0]));
+}
+
+test "hidden code before the closing --> is kept" {
+    // A multi-line comment's last line may hold code before `-->`; it runs
+    // like the lines above it. A blank tail adds no line.
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const exs = try examplesOf(a, "```mojo\nvar x = 2\n```\n<!-- mojo-hidden\nassert_equal(x, 2)\nprint(x) -->\n");
+    try t.expectEqualStrings("2|var x = 2\n5|assert_equal(x, 2)\n6|print(x) \n", try join(a, exs[0]));
+}
+
+test "a marker glued to text is not a marker" {
+    // `mojo-hidden` ends at a space, a tab or `-->`; `<!-- mojo-hiddenx = 1 -->`
+    // is a misspelled marker, refused, never hidden code `x = 1`.
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectEqualStrings(
+        "R.md:1: `<!-- mojo-hiddenx`: the hidden-lines marker is exactly `<!-- mojo-hidden`",
+        try refusal(a, "<!-- mojo-hiddenx = 1 -->\n```mojo\nprint(1)\n```\n", false),
+    );
+    // A tab ends the marker, and so does `-->` (an empty hidden comment).
+    const tab = try examplesOf(a, "<!-- mojo-hidden\tx = 1 -->\n```mojo\nprint(x)\n```\n");
+    try t.expectEqualStrings("1|x = 1\n3|print(x)\n", try join(a, tab[0]));
+    const empty = try examplesOf(a, "<!-- mojo-hidden-->\n```mojo\nprint(1)\n```\n");
+    try t.expectEqualStrings("3|print(1)\n", try join(a, empty[0]));
 }
 
 test "an unclosed hidden comment is refused" {
