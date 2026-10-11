@@ -1,0 +1,11 @@
+{
+ "name": "scalar_nulls_manual",
+ "defect": "a MANUAL scalar's nulls are not passed through, or values are wrong",
+ "run": "call_batch",
+ "entry": "double",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 4, "columns": [{"type": "int64", "values": [1, null, 3, -4]}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [2, null, 6, -8]}}
+}
