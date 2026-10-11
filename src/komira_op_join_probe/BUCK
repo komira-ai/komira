@@ -1,0 +1,28 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The probe side of the engine's joins: the composite-key hash join
+# (`MultiKeyHashJoinBuilder`, its INNER / LEFT / SEMI / ANTI / RIGHT / FULL
+# probes) and the extraction of join-key columns into its key slots.
+mojo_library(
+    name = "komira_op_join_probe",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_udf:komira_udf",
+    ],
+    test_srcs = [
+        "tests/test_engine_typed_multi_key_probe_dict.mojo",
+        "tests/test_engine_typed_multi_key_probe_string.mojo",
+        "tests/test_join_multi_key_float_key_model.mojo",
+        "tests/test_join_multi_key_memcmp_equiv.mojo",
+        "tests/test_join_multi_key_null_key.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
