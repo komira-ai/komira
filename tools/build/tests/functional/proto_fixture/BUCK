@@ -4,8 +4,8 @@ load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixtu
 # proto_fixture_check and proto_encode (test 23): building this package is
 # the self-test, so the pull-request check, which builds tests//functional,
 # runs it, and with it proto_fixture_check's welded self-test
-# (tools/build/mojo/proto_fixture_testdata). The same planted defects, end to
-# end, are in ../../negative/proto_fixture (nightly only).
+# (tools/build/mojo/proto_fixture_testdata), whose `refuses_*` cases are the
+# planted defects, each required to fail naming its leg.
 
 # Two fixtures, the schema staged from `srcs` at `import_prefix`. sample.hex
 # is not protoc's serialization (the fields in reverse order, `values`

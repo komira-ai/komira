@@ -2,13 +2,13 @@
 # test_optimizer_payload_narrow — the width LADDER and the REFUSALS
 # =============================================================================
 #
-# ⭐ EVERY ASSERTION HERE NAMES THE SPECIFIC VERDICT, NEVER A BOOLEAN. This
-# work has already been bitten once by the weaker form: deleting a memory
-# guard did NOT flip its guarded case to admit, because a SECOND term declined
-# it too — a `assert not admitted` would have passed over a deleted guard and
-# reported the guard as tested. So the ladder tests assert the exact BYTE COUNT
-# (a 4 where a 2 belongs is ~3 wall points on the measured hc4 ladder and is
-# invisible to `narrowed != 0`), and every refusal test asserts that the column
+# ⭐ EVERY ASSERTION HERE NAMES THE SPECIFIC VERDICT, NEVER A BOOLEAN. The
+# weaker form is blind: when a SECOND term declines the same case, deleting a
+# guard does NOT flip its guarded case to admit, so `assert not admitted`
+# passes over a deleted guard and reports the guard as tested. So the ladder
+# tests assert the exact BYTE COUNT
+# (a 4 where a 2 belongs is a wrong width and is invisible to
+# `narrowed != 0`), and every refusal test asserts that the column
 # it names carries NO spec while a sibling column in the SAME plan still does —
 # which is what distinguishes "this refusal fired" from "the rule never ran".
 # =============================================================================
@@ -51,9 +51,8 @@ from komira_optimizer.optimizer_payload_narrow import (
 
 
 def test_ladder_picks_the_narrowest_width_not_the_first_that_fits() raises:
-    # The hc4 payload ranges, verbatim from the fixture footers
-    # (`parquet_metadata()` over `bench_hc_hc4_{probe,build}.parquet`,
-    # 814 / 204 row groups, ZERO with a null `stats_min_value`).
+    # The hc4 join shape's payload ranges (the same ranges `_hc4_shaped_join`
+    # below stamps on its scans).
     assert_equal(
         Int(choose_narrow_width(1, 999)),
         Int(PAYLOAD_NARROW_2B),
@@ -64,7 +63,8 @@ def test_ladder_picks_the_narrowest_width_not_the_first_that_fits() raises:
         Int(PAYLOAD_NARROW_2B),
         "build_val [1,9999] must pick 2 bytes",
     )
-    # ⭐ THE ANTI-REGRESSION FOR "target INTEGER, never SMALLINT". A ladder that
+    # ⭐ THE GUARD AGAINST A LADDER THAT STOPS AT INTEGER (4 bytes) AND NEVER
+    # PICKS SMALLINT. A ladder that
     # stopped at 4 bytes would answer 4 here and the whole test file would still
     # be green under a boolean assertion.
     assert_true(
@@ -192,7 +192,7 @@ def _side(
 
 
 def _hc4_shaped_join(join_type: UInt8 = JOIN_INNER) raises -> LogicalPlan:
-    """The hc4 cell's shape, with hc4's measured ranges:
+    """The hc4 cell's shape, with hc4's column ranges:
     `probe(key[0,25M], probe_val[1,999]) INNER JOIN build(key, build_val[1,9999])`.
     """
     var l = List[String]()
@@ -261,8 +261,9 @@ def test_hc4_shape_narrows_both_payloads_to_two_bytes() raises:
 
 
 def test_the_join_key_is_never_narrowed() raises:
-    """⛔ THE LOAD-BEARING REFUSAL. An INT32 join key declines the fused leaf
-    and the fallback reached 130 GB anon-RSS / rc=137 on a 1M x 250K join.
+    """⛔ THE LOAD-BEARING REFUSAL. The join leaf this rule is designed for
+    keys on INT64 only, so a narrowed key would take the join off that route
+    (the PAYLOAD ONLY block of `optimizer_payload_narrow.mojo`).
     Note the key's own domain [0, 24999999] DOES fit four bytes — the ladder
     would say yes — so this test is asserting the EXCLUSION and not an accident
     of the range."""
@@ -407,9 +408,9 @@ def test_a_non_parquet_side_is_refused() raises:
 
 
 def test_the_rule_is_idempotent() raises:
-    """A second pass must not double-stamp — the plan-compile cache and the
-    optimizer's own re-entry both re-run passes over an already-optimized
-    plan."""
+    """A second pass must not double-stamp — the scalar-dependency protocol
+    (`optimizer_scalar_deps.mojo`) runs every pass again, and a caller may
+    re-run passes over an already-optimized plan."""
     var plan = _hc4_shaped_join()
     _ = narrow_join_payload_inplace(plan)
     _ = narrow_join_payload_inplace(plan)
@@ -428,8 +429,8 @@ def test_the_rule_is_idempotent() raises:
 def test_copy_carries_the_stamp() raises:
     """`ScanData.payload_narrow` is deliberately NOT a ctor argument, so
     `copy()` has to carry it by explicit assignment. A clone that dropped it
-    would make the rule fire and then silently un-fire at the plan-cache
-    boundary."""
+    would make the rule fire and then silently un-fire on every copied
+    plan."""
     var plan = _hc4_shaped_join()
     _ = narrow_join_payload_inplace(plan)
     var clone = plan.copy()

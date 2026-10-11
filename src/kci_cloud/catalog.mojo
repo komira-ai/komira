@@ -43,8 +43,8 @@
 # ⚠ HAND-KEPT, BECAUSE THE GENERATED MOJO CANNOT ANSWER IT. The proto states
 # portability and `exposes` as message options; the Mojo the codec emits does
 # not surface message options (spike S3 of the catalog plan failed). So the
-# two option columns are copied here from `resource.proto`, and the copy is
-# the one thing in this package that can drift from the schema. What IS
+# two option columns are copied here from the catalog's `.proto` files, and
+# the copy is the one thing in this package that can drift from the schema. What IS
 # checked against generated code: the arm numbers (a body decoded from wire
 # field N must map back to N, `test_catalog_arms_match_the_wire`), the output
 # names (each must be a value of the generated `Output` enum) and the access
@@ -103,6 +103,10 @@ comptime FIELD_IP_ADDRESS: Int = 30
 """`Resource.body` field number of `ip_address`."""
 comptime FIELD_EVENT_TRIGGER: Int = 31
 """`Resource.body` field number of `event_trigger`."""
+comptime FIELD_COMPOSITE: Int = 80
+"""`Resource.composite`: an instance of a composite. An arm of the body, not
+a catalog type: expansion (compose.mojo) replaces it with primitives before
+any type is looked up, so no catalog row and no cloud ever names it."""
 
 comptime OUTPUT_URL = "URL"
 comptime OUTPUT_HOST = "HOST"
@@ -577,7 +581,8 @@ struct BodyArm(Copyable, Movable, Deinitable):
 def body_arms() -> List[BodyArm]:
     """The `Resource.body` arms, in DECLARATION ORDER: entry `k` is the arm
     the generated struct records as position `k + 1`. One row per declared
-    arm; a new arm is one new row here, at its declaration position, pinned
+    arm (every catalog type, then the composite instance, which is not one);
+    a new arm is one new row here, at its declaration position, pinned
     against wire bytes by `test_catalog_arms_match_the_wire`."""
     var l = List[BodyArm]()
     l.append(BodyArm(FIELD_SERVICE, String("service")))
@@ -600,6 +605,7 @@ def body_arms() -> List[BodyArm]:
     l.append(BodyArm(FIELD_SUBNET, String("subnet")))
     l.append(BodyArm(FIELD_IP_ADDRESS, String("ip_address")))
     l.append(BodyArm(FIELD_EVENT_TRIGGER, String("event_trigger")))
+    l.append(BodyArm(FIELD_COMPOSITE, String("composite")))
     return l^
 
 
@@ -633,6 +639,19 @@ def body_field(r: Resource) raises -> Int:
             + String(" is not in this kci's catalog table")
         )
     return arms[arm - 1].field
+
+
+def body_is(r: Resource, field: Int) -> Bool:
+    """True iff `r`'s set arm is the `Resource.body` field `field`, read
+    through `body_field`. Never raises: no arm, or an arm beyond the table,
+    is no type. This, not an arm's `Optional`, is the type test: a message
+    merged from two bodies (protobuf's last arm wins) decodes with the
+    earlier arm's `Optional` still populated, and only the case says which
+    arm is set."""
+    try:
+        return body_field(r) == field
+    except:
+        return False
 
 
 def effective_retention(catalog: Catalog, r: Resource) raises -> Int:

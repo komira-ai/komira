@@ -23,7 +23,7 @@
 
 from komira_plan_expr.expr import Expr
 from komira_plan_expr.scalar_value import ScalarValue
-from komira_plan_ir.physical_plan import (
+from komira_physical_plan.physical_plan import (
     ParquetSourceData,
     MorselOp,
     OP_FILTER,

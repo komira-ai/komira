@@ -84,7 +84,6 @@
 
 from komira_objectstore.cas_manifest import (
     CasManifestStore,
-    ManifestHead,
     RetryPolicy,
 )
 from komira_objectstore.path import Path
@@ -315,20 +314,17 @@ struct ShardedLineage[Store: CloneableConditionalWriteStore](
         stale-low-cache fix), so the boundary is the true highest-committed chunk.
         Iterates in CANONICAL order so the snapshot is order-stable (two snapshots
         of the same committed universe are identical lists). A shard whose chunks
-        are ALL already folded+reaped (no live manifest) is skipped (empty tail).
+        are ALL already folded+reaped pins an empty tail; an error reading a
+        shard's head raises.
         Records appended AFTER the boundary fold in a LATER plan (additivity)."""
         var ids = self.enumerate_live_shards()
         var out = List[ShardSnapshot]()
         for i in range(len(ids)):
             var sid = ids[i]
             var s = self.shard_store(sid)
-            var head: ManifestHead
-            try:
-                head = s.read_head_authoritative()
-            except e:
-                _ = e
-                _ = s^
-                continue  # shard fully reaped post-fold — nothing to snapshot
+            # An absent or fully reaped shard reads as an empty tail (it does
+            # not raise); a read error raises rather than drop a live shard.
+            var head = s.read_head_authoritative()
             out.append(ShardSnapshot(sid, head.chunk_seq, head.next_offset))
             _ = s^
         return out^

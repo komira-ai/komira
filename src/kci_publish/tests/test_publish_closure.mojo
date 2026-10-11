@@ -17,7 +17,18 @@
 #   (4) the BUILD step's name check (`undeclared_requirements`) agrees: the
 #       good set is closed for it too, and an undeclared library
 #       (komira_gamma) and the pin on the metapackage are open for both, each
-#       named by the exact line BUILD prints.
+#       named by the exact line BUILD prints;
+#   (5) a system library: a library requiring `zstd >=1.5.2,<2` (and every
+#       row of kci_release_set's `system_libs`) is closed for both checks;
+#       `zstd >=1.0`, `zstd`, `conda-forge::zstd >=1.5.2,<2`,
+#       `ZSTD >=1.5.2,<2`, a second space, a tab and `notalib >=1` are
+#       refused by both, naming the library; the same row twice is refused;
+#       the metapackage requiring a row is refused (only a library may);
+#   (6) the glibc floor: a library with `lib_files` requiring
+#       `__glibc >=2.34` (what #1363's packer writes) is closed for both
+#       checks; `__glibc >=2.38`, the floor twice, no floor on a library with
+#       `lib_files`, and the floor on a library without are refused, naming
+#       the library; the metapackage requiring it is refused.
 #
 # The members are loaded from a written good directory and changed in
 # memory (the closure is a property of the set, which `verify_member` cannot
@@ -33,7 +44,9 @@ from std.testing import assert_true
 from kci_publish.release_fixture import ExampleRelease, example_loaded
 from kci_publish.verify import require_closure
 from kci_release_set.closure import undeclared_requirements
+from kci_release_set.conda_metadata import LibFile
 from kci_release_set.member import ReleaseMember
+from kci_release_set.system_libs import system_libs
 
 
 comptime _B: String = "h01234567_3"
@@ -143,7 +156,8 @@ def test_the_build_steps_name_check_agrees() raises:
     assert_true(
         open_a[0]
         == String("artifact 'komira_alpha' requires 'komira_gamma ==1.0.0 h01234567_3', and 'komira_gamma'")
-        + String(" is not another library of this release set"),
+        + String(" is not another library of this release set")
+        + String(" (nor a system library requirement of tools/build/package/system_libs.bzl)"),
         open_a[0],
     )
     _refused(m, String("artifact 'komira_alpha': requirement 'komira_gamma ==1.0.0 h01234567_3'"))
@@ -154,11 +168,89 @@ def test_the_build_steps_name_check_agrees() raises:
     assert_true(
         open_b[0]
         == String("artifact 'komira_beta' requires 'komira ==1.0.0 h01234567_3', and 'komira'")
-        + String(" is not another library of this release set"),
+        + String(" is not another library of this release set")
+        + String(" (nor a system library requirement of tools/build/package/system_libs.bzl)"),
         open_b[0],
     )
     _refused(m, String("artifact 'komira_beta': requirement 'komira ==1.0.0 h01234567_3'"))
     print("  test_the_build_steps_name_check_agrees: PASS")
+
+
+def test_a_library_may_require_a_system_library_exactly() raises:
+    var m = _good()
+    m[0].conda.depends.append(String("zstd >=1.5.2,<2"))
+    require_closure(m)
+    assert_true(len(undeclared_requirements(m)) == 0, "BUILD: zstd >=1.5.2,<2 is closed")
+    var rows = system_libs()
+    m = _good()
+    for i in range(len(rows)):
+        m[1].conda.depends.append(rows[i].requirement.copy())
+    require_closure(m)
+    assert_true(len(undeclared_requirements(m)) == 0, "BUILD: every row is closed")
+    for bad in [
+        String("zstd >=1.0"),
+        String("zstd"),
+        String("conda-forge::zstd >=1.5.2,<2"),
+        String("ZSTD >=1.5.2,<2"),
+        String("zstd  >=1.5.2,<2"),
+        String("zstd\t>=1.5.2,<2"),
+        String("notalib >=1"),
+    ]:
+        m = _good()
+        m[0].conda.depends.append(bad.copy())
+        _refused(m, String("artifact 'komira_alpha': requirement '") + bad + String("' is not the guard"))
+        var open_reqs = undeclared_requirements(m)
+        assert_true(len(open_reqs) == 1, String("BUILD did not list '") + bad + String("'"))
+        assert_true(
+            open_reqs[0].startswith(String("artifact 'komira_alpha' requires '") + bad + String("'")), open_reqs[0]
+        )
+    m = _good()
+    m[0].conda.depends.append(String("zstd >=1.5.2,<2"))
+    m[0].conda.depends.append(String("zstd >=1.5.2,<2"))
+    _refused(m, String("artifact 'komira_alpha': requirement 'zstd >=1.5.2,<2' is listed twice"))
+    m = _good()
+    m[2].conda.depends.append(String("zstd >=1.5.2,<2"))
+    _refused(m, String("metapackage 'komira': requirement 'zstd >=1.5.2,<2' is not the guard or a member pin"))
+    print("  test_a_library_may_require_a_system_library_exactly: PASS")
+
+
+def _with_lib_files(mut m: List[ReleaseMember], i: Int):
+    var f = LibFile()
+    f.kind = String("shared")
+    f.path = String("lib/libkomira_alpha_native.so.1")
+    f.sha256_hex = String("abababababababababababababababababababababababababababababababab")
+    m[i].conda.lib_files.append(f^)
+    m[i].conda.has_lib_files = True
+
+
+def test_a_library_with_native_files_requires_the_glibc_floor_exactly() raises:
+    var m = _good()
+    _with_lib_files(m, 0)
+    m[0].conda.depends.append(String("__glibc >=2.34"))
+    require_closure(m)
+    assert_true(len(undeclared_requirements(m)) == 0, "BUILD: __glibc >=2.34 is a virtual package, closed")
+    m = _good()
+    _with_lib_files(m, 0)
+    m[0].conda.depends.append(String("__glibc >=2.38"))
+    _refused(
+        m,
+        String("artifact 'komira_alpha': requires '__glibc >=2.38', not the platform floor '__glibc >=2.34'"),
+    )
+    m = _good()
+    _with_lib_files(m, 0)
+    m[0].conda.depends.append(String("__glibc >=2.34"))
+    m[0].conda.depends.append(String("__glibc >=2.34"))
+    _refused(m, String("artifact 'komira_alpha': requires __glibc 2 times; the floor is one requirement"))
+    m = _good()
+    _with_lib_files(m, 0)
+    _refused(m, String("artifact 'komira_alpha': ships native files (lib_files) and does not require '__glibc >=2.34'"))
+    m = _good()
+    m[1].conda.depends.append(String("__glibc >=2.34"))
+    _refused(m, String("artifact 'komira_beta': requires '__glibc >=2.34', but ships no native file"))
+    m = _good()
+    m[2].conda.depends.append(String("__glibc >=2.34"))
+    _refused(m, String("metapackage 'komira': requirement '__glibc >=2.34' is not the guard or a member pin"))
+    print("  test_a_library_with_native_files_requires_the_glibc_floor_exactly: PASS")
 
 
 def main() raises:
@@ -167,4 +259,6 @@ def main() raises:
     test_a_library_requires_exactly_the_closure()
     test_the_metapackage_holds_exactly_the_libraries()
     test_the_set_has_exactly_one_metapackage_and_a_guard()
+    test_a_library_may_require_a_system_library_exactly()
+    test_a_library_with_native_files_requires_the_glibc_floor_exactly()
     print("test_publish_closure: ALL PASS")

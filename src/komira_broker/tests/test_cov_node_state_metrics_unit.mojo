@@ -179,11 +179,11 @@ def test_audit_segment_contiguity() raises:
 
 
 def main() raises:
-    # The metrics set is built before anything else allocates: building one
-    # in a reused heap block hangs (komira-ai/komira#1072).
-    var m = SubLineageRolloutMetrics()
     test_seeded_set_is_canonical()
     test_reconcile_delta_and_epochs()
+    # Built after the other tests have freed heap blocks: the metrics set must
+    # initialize a reused block in place (komira-ai/komira#1072).
+    var m = SubLineageRolloutMetrics()
     test_rollout_metrics_signals(m)
     test_audit_segment_contiguity()
     print("[OK] test_cov_node_state_metrics_unit")

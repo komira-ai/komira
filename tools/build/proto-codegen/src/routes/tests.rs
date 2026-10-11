@@ -159,7 +159,7 @@ fn every_rpc_of_every_service_is_registered_the_last_included() {
         assert!(text.contains(call), "missing `{call}`");
     }
     assert!(text.contains("trait AlphaHandler(Movable, Deinitable):"));
-    assert!(text.contains("struct BetaRoutes[H: BetaHandler](Movable, RequestDispatcher):"));
+    assert!(text.contains("struct BetaRoutes[H: BetaHandler](Movable, RoutedDispatcher):"));
 }
 
 #[test]
@@ -230,10 +230,23 @@ fn a_wrong_method_on_a_known_path_is_405() {
     let text = emit_one(vec![service("S", vec![get("Get", "/v1/a")])]).unwrap();
     assert!(
         text.contains(
-            "if self._router.has_path_match(req.path):\n                return HttpResponse.method_not_allowed()"
+            "var allowed = self._router.allowed_methods(req.path)\n            if len(allowed) != 0:\n                return HttpResponse.method_not_allowed(allowed)"
         ),
         "{text}"
     );
+}
+
+#[test]
+fn a_dispatcher_says_which_routes_it_has() {
+    // What ComposedRoutes asks a service before dispatching to it.
+    let text = emit_one(vec![service("S", vec![get("Get", "/v1/a")])]).unwrap();
+    assert!(text.contains("from komira_http_server.routing.compose import RoutedDispatcher\n"), "{text}");
+    for line in [
+        "    def has_route(self, method: HttpMethod, path: String) -> Bool:\n        var params = Dict[String, String]()\n        return Bool(self._router.match_route(method, path, params))\n",
+        "    def allowed_methods(self, path: String, mut methods: List[HttpMethod]):\n        methods.extend(self._router.allowed_methods(path))\n",
+    ] {
+        assert!(text.contains(line), "missing `{line}` in:\n{text}");
+    }
 }
 
 #[test]

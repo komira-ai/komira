@@ -40,7 +40,8 @@ code with PKCE), token exchange (RFC 8693), DPoP (RFC 9449), mTLS-bound tokens (
 | `client_credentials` client, RFC 8414 metadata and RFC 7591 registration codecs | `komira_oauth` | target |
 | `RemoteAuthzPort` on AuthZEN, with the decision cache and batch `check_many` | `komira_authz_client` | target |
 | route catalog and deny-by-default gate | `komira_resource_gate` | target |
-| an in-process issuer and an in-process AuthZEN PDP for tests | `src/tests/helpers/komira_test_issuer`, `komira_test_pdp` | target. They are the executable spec of this document: any issuer or PDP that claims this contract passes their scenario tables. |
+| an in-process AuthZEN PDP for tests, and its scenario table | `src/tests/helpers/komira_test_pdp` | built. It verifies tokens through a `TokenVerifier`; the one it ships is a table of issued tokens, and a signed-JWT verifier conforms to the same trait once `komira_jose` exists. |
+| an in-process issuer for tests | `src/tests/helpers/komira_test_issuer` | target. With the PDP it is the executable spec of this document: any issuer or PDP that claims this contract passes their scenario tables. |
 
 ## How it works
 
