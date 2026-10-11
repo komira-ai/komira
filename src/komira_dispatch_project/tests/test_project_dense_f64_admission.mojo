@@ -177,6 +177,45 @@ def test_a_column_shorter_than_the_batch_declines() raises:
     assert_false(_admitted(pool, 0, b))
 
 
+def test_a_column_whose_type_differs_from_its_field_declines() raises:
+    """An INT64 column under a TIMESTAMP_US field: the field's type is not a
+    dense leaf type, and the column's tag is not the field's, so the leaf is
+    not admitted (the walker resolves it as it always did)."""
+    var sb = SchemaBuilder()
+    sb.add_field(Field(String("t"), ArrowType.TIMESTAMP_US, False))
+    var v = List[Scalar[DType.int64]]()
+    for r in range(5):
+        v.append(Scalar[DType.int64](r))
+    var rbb = RecordBatchBuilder.with_capacity(1)
+    rbb.add_column(Column.from_primitive[DType.int64](PrimitiveArray[DType.int64].from_list(v)))
+    var b = rbb.build(sb.build())
+    var names = List[String]()
+    names.append(String("t"))
+    var pool = List[RuntimeExpr]()
+    pool.append(make_col(0))
+    assert_false(Bool(try_eval_dense_f64(pool, 0, names, b)))
+
+
+def test_a_layout_conflict_declines_rather_than_raises() raises:
+    """A STRING column under an INT64 field is a layout conflict:
+    `RecordBatch.column_arrow_type` raises on it, and the admission walk
+    answers None instead of raising, so the walker meets the batch as it
+    would have. Mutant: the walk's `try` removed (the raise then escapes
+    `try_eval_dense_f64`)."""
+    var sb = SchemaBuilder()
+    sb.add_field(Field(String("t"), ArrowType.INT64, False))
+    var strs = List[String]()
+    strs.append(String("a"))
+    var rbb = RecordBatchBuilder.with_capacity(1)
+    rbb.add_column(Column.from_string(StringArray.from_strings(strs)))
+    var b = rbb.build(sb.build())
+    var names = List[String]()
+    names.append(String("t"))
+    var pool = List[RuntimeExpr]()
+    pool.append(make_col(0))
+    assert_false(Bool(try_eval_dense_f64(pool, 0, names, b)))
+
+
 def test_a_cyclic_pool_declines() raises:
     """A node whose operand is itself recurses until the depth bound. Mutant:
     the depth bound removed (the walk then never ends)."""
