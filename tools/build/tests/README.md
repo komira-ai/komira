@@ -878,8 +878,9 @@ a tree that enforces the pointer rules of
 no wildcard origin outside an FFI module, no `unsafe_from_address=`, no
 partial move through a pointer, no `parallelize[`, no second declaration of
 libc `read` or `open`, and no public function of a library file taking or
-returning a pointer. Its reader is [`pointer_lint.awk`](../lint/pointer_lint.awk),
-its action [`lint.sh`](../lint/lint.sh) (kind `pointer_lint`), which holds
+returning a pointer. Its action is the Zig tool
+[`pointer_lint.zig`](../lint/pointer_lint.zig), which reads Mojo through
+[`mojo_tokens.zig`](../lint/mojo_tokens.zig) and holds
 the sites against two ledgers: the FFI modules
 ([`tests/pointer_lint_ffi.tsv`](../../../tests/pointer_lint_ffi.tsv) for
 `//:pointer_lint`) and the holds, per rule and file at an exact count
@@ -900,9 +901,15 @@ package included), or one defect in a ledger (a
 malformed, repeated, unknown-rule, zero-count or reasonless row, a row for
 no file, a count above the sites, a row for an FFI module's origins, an FFI
 row with no `# FFI-BOUNDARY:` comment line or no wildcard origin), or empties
-the tree, and must fail naming it.
+the tree, and must fail naming it. The tool itself is built behind its
+unit tests, `zig test` run as build actions:
+[`pointer_lint_test.zig`](../lint/pointer_lint_test.zig) (one test per
+scenario: each rule's forms, the near misses, the library-file decision, each
+ledger defect and the result's text) and the lexer's own tests in
+`mojo_tokens.zig`; a failing one fails every build of `//:pointer_lint`.
 
 ```sh
+./buck2 build //tools/build/lint:pointer_lint_test //tools/build/lint:mojo_tokens_test
 ./buck2 build //:pointer_lint tests//functional/pointer_lint:ok
 ./buck2 build tests//negative/pointer_lint:partial_move_two   # must fail: plant.mojo:4: partial_move
 ```
