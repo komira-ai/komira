@@ -1,7 +1,17 @@
 # Test 38: README examples
 
-The checks of [test 38](README.md#38-readme-examples), run by
-[`run_tests.sh`](run_tests.sh).
+The checks of [test 38](README.md#38-readme-examples).
+
+Case 38 of [`run_tests.sh`](run_tests.sh) is stale: its shell checks still
+assert the previous outputs (one program per README, the old marker and
+error texts), so it fails against the per-block tool until the self-test
+slice of komira-ai/komira#1281 replaces it with targets. Until then the
+per-block behaviour is pinned by the tool's welded Zig unit tests
+(`:readme_examples_unit`) and by building the fixtures under
+[`functional/readme_examples`](functional/readme_examples/ok/BUCK) (each
+README's examples are gated tests, so the build fails if one fails); the
+markers and failure texts below are what the targets produce, checked by
+hand with the commands at the end, not by `run_tests.sh`.
 
 A library's `README.md` examples are a welded test, `[tests][readme]`
 ([README examples](../mojo/README.md#readme-examples)): each example is a

@@ -155,7 +155,8 @@ until it moves to the Zig module.
   refuses a relative link outside code, naming `README.md:<line>`: the
   installed copy has no neighbours. Link an absolute URL or an `#anchor`.
 
-Test 38 ([`tests/README.md`](../tests/README.md#38-readme-examples)) builds
+Test 38 ([`tests/README.md`](../tests/README.md#38-readme-examples); its
+`run_tests.sh` case is stale until komira-ai/komira#1281 replaces it) builds
 a README that uses every form and two whose examples declare the same names,
 and requires a raising example (and no other), a compile error, a struct in
 a plain ```` ```mojo ```` example and a `mojo skip` fence each to fail
