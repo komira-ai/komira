@@ -48,6 +48,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # names (arrow_schema_hint); and it reads a column chunk as stored for a
 # pass-through write (bypass).
 #
+# It keeps a session's parsed footers, by path, with their preambles and a
+# pinned whole-file mapping, revalidated by stat on each shared hit
+# (runtime_footer_cache, within the pin budget of footer_pin_budget), and
+# serves a footer's statistics as TableStats and as a StatsProvider
+# (table_stats).
+#
 # The welded tests:
 # - test_rle_simd, test_rle_simd_bw_small: bit-packed runs at every bit width
 #   the SIMD kernels specialize, and the dedicated bw=1/2/4 byte paths, at
@@ -134,6 +140,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   encoder, both framings, unreadable values, the key lookup and the guard.
 # - test_bypass_direct: a chunk's bytes read as stored, its start at a
 #   leading dictionary page, its leaf name after a group, and the refusals.
+# - test_runtime_footer_cache_direct: the footer cache on files written by
+#   the test: parse once, shared footers and one pin, revalidation of a
+#   rewritten or freshly written file, the pin budget, invalidate, the
+#   row-count memo, the stripped footer and summary, a file system that is
+#   not mmap-backed, and the budget policy.
+# - test_table_stats_direct: the eager fold and the provider: bounds decoded
+#   by type (unsigned, UINT_64 past Int64.MAX, DECIMAL), top-level leaves,
+#   HLL register merge against one sketch over the union, the path entry
+#   points.
 # - test_no_env_reads: the package's sources read no environment, import no
 #   komira package outside the deps below (and never komira_core), hold no
 #   raw pointer in a public signature, rebuild no address from an integer
@@ -153,9 +168,11 @@ mojo_library(
         "//src/komira_collections:komira_collections",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_fs:komira_fs",
+        "//src/komira_host:komira_host",
         "//src/komira_parquet_api:komira_parquet_api",
         "//src/komira_parquet_codec:komira_parquet_codec",
         "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_stats:komira_plan_stats",
         "//src/komira_simd:komira_simd",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
@@ -224,6 +241,7 @@ mojo_library(
         "tests/test_rle_decoder_direct.mojo",
         "tests/test_rle_simd.mojo",
         "tests/test_rle_simd_bw_small.mojo",
+        "tests/test_runtime_footer_cache_direct.mojo",
         "tests/test_row_selection_direct.mojo",
         "tests/test_row_window_direct.mojo",
         "tests/test_scan_copy_trace_direct.mojo",
@@ -235,6 +253,7 @@ mojo_library(
         "tests/test_subrg_cursor_dict_direct.mojo",
         "tests/test_subrg_cursor_flat_direct.mojo",
         "tests/test_subrg_traces_direct.mojo",
+        "tests/test_table_stats_direct.mojo",
         "tests/test_thrift_compact_direct.mojo",
     ],
     visibility = ["PUBLIC"],

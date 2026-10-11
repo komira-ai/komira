@@ -207,6 +207,21 @@ stored:
 - `bypass`: `read_raw_column_chunk`, a column chunk's bytes as stored (page
   headers and compressed pages), for a writer that copies a column into
   another file without decoding it.
+- `runtime_footer_cache`: `ParquetMetadataCache`, a session's parsed
+  footers by path (the `komira_fs.MetadataCache` trait). One read and parse
+  per file; the shared surface (`get_or_parse_shared_via_fs`) hands each
+  reader a share of the footer and of its raw preamble, and on an
+  mmap-backed file system a share of a whole-file mapping the cache pins for
+  the session, within a byte budget (`footer_pin_budget`: 30% of free RAM,
+  clamped to [1 GiB, 8 GiB], or an explicit override). Each shared hit
+  re-stats the file and re-reads it if it changed (or was written too
+  recently for its mtime to prove anything). It also memoizes a path set's
+  per-row-group row counts for `row_window`. Not thread-safe.
+- `table_stats`: a footer's statistics for a planner: `collect_table_stats`
+  (a `TableStats`, every column folded across row groups) and
+  `ParquetStatsProvider` (the `komira_plan_stats.StatsProvider` trait:
+  per-row-group and per-file bounds, counts, and an NDV estimate that merges
+  the row groups' HyperLogLog registers when every one has them).
 
 Every example below runs as a test when the package is built.
 
