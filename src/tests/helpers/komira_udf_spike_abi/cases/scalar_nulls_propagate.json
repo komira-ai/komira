@@ -1,0 +1,12 @@
+{
+ "name": "scalar_nulls_propagate",
+ "defect": "the host calls the runtime for rows with a null argument under PROPAGATE (no compaction), or does not scatter the result back",
+ "run": "call_batch",
+ "entry": "double_strict",
+ "shape": "SCALAR",
+ "null_mode": "PROPAGATE",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 5, "columns": [{"type": "int64", "values": [1, null, 3, null, 5]}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [2, null, 6, null, 10]}}
+}
