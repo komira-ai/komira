@@ -6,7 +6,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # selection, the sort and top-N sink kernels, the run-time-typed sort buffer
 # (SortBuffer_Untyped), the loser tree that k-way merges sorted runs, and the
 # parallel single-key sorts and merges of sorted partitions on the engine's
-# fork-join runtime. Float keys sort in DuckDB's total order (NaN above +inf).
+# fork-join runtime, the counting sort of a low-cardinality STRING key, and
+# SortSink (the sort as a MorselSink). Float keys sort in DuckDB's total order (NaN above +inf).
 mojo_library(
     name = "komira_op_sort",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -19,6 +20,7 @@ mojo_library(
         "//src/komira_column_format:komira_column_format",
         "//src/komira_column_kernels:komira_column_kernels",
         "//src/komira_counters:komira_counters",
+        "//src/komira_engine_runtime:komira_engine_runtime",
         "//src/komira_operator_api:komira_operator_api",
         "//src/komira_physical_plan:komira_physical_plan",
     ],
@@ -27,6 +29,7 @@ mojo_library(
         "tests/test_engine_sort_string.mojo",
         "tests/test_sort_buffer_narrow_signed_order.mojo",
         "tests/test_sort_buffer_untyped.mojo",
+        "tests/test_sort_dictrank.mojo",
         "tests/test_sort_float_total_order.mojo",
         "tests/test_sort_indices_nested.mojo",
         "tests/test_sort_lex_multikey.mojo",
@@ -35,6 +38,7 @@ mojo_library(
         "tests/test_sort_parallel.mojo",
         "tests/test_sort_parallel_merge_fold.mojo",
         "tests/test_sort_parallel_string.mojo",
+        "tests/test_sort_sink.mojo",
         "tests/test_sort_sink_float_nan_order.mojo",
         "tests/test_sort_skip_pass.mojo",
         "tests/test_sort_string_prefix_key.mojo",
