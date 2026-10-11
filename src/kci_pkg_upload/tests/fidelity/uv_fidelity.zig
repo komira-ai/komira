@@ -203,6 +203,25 @@ pub fn makeWheel(a: Allocator, metadata: []const u8) ![]u8 {
     return out.toOwnedSlice();
 }
 
+// ---- Where the recorder listens ---------------------------------------------
+
+/// The address the recorder binds (port 0: the kernel picks one) and the
+/// host of the publish URL uv is given. It must be loopback: the capture
+/// refuses to measure when the address it is actually bound to is not
+/// (`isLoopback`), and a unit test holds this constant to it.
+pub const RECORDER_HOST = "127.0.0.1";
+
+/// Whether `addr` is reachable from this host only: IPv4 127.0.0.0/8 or the
+/// IPv6 loopback `::1`. A wildcard (`0.0.0.0`, `::`), any other address and
+/// any other family (an IPv4-mapped IPv6 address included) are not.
+pub fn isLoopback(addr: std.net.Address) bool {
+    return switch (addr.any.family) {
+        std.posix.AF.INET => @as(*const [4]u8, @ptrCast(&addr.in.sa.addr))[0] == 127,
+        std.posix.AF.INET6 => std.mem.eql(u8, &addr.in6.sa.addr, &([_]u8{0} ** 15 ++ [_]u8{1})),
+        else => false,
+    };
+}
+
 // ---- What arrives at the recorder ------------------------------------------
 
 pub const Header = struct { name: []const u8, value: []const u8 };

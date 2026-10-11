@@ -16,7 +16,8 @@ No real registry is contacted: the publish URL is
 `http://127.0.0.1:<ephemeral>/legacy/`, the credential is a fixed placeholder
 that is not a token of any index, uv runs with no environment but its own
 scratch directories, its configuration and keyring disabled, and trusted
-publishing set to never.
+publishing set to never. The capture reads the address its recorder is
+actually bound to and refuses to measure (exit 3) unless it is loopback.
 
 ## The files
 

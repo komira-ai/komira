@@ -120,6 +120,28 @@ test "the normaliser replaces every boundary occurrence and refuses a head witho
     try testing.expectError(error.NoBoundary, fid.normalized(ar.allocator(), "METHOD POST\n\nbody"));
 }
 
+// ---- Where the recorder listens -------------------------------------------------
+
+fn addr(s: []const u8) !std.net.Address {
+    return std.net.Address.parseIp(s, 0);
+}
+
+test "isLoopback: 127.0.0.1, 127.0.0.2 and ::1 are loopback" {
+    try testing.expect(fid.isLoopback(try addr("127.0.0.1")));
+    try testing.expect(fid.isLoopback(try addr("127.0.0.2")));
+    try testing.expect(fid.isLoopback(try addr("::1")));
+}
+
+test "isLoopback: the wildcards 0.0.0.0 and ::, a LAN address, 128.0.0.1, ::2 and ::ffff:127.0.0.1 are not" {
+    for ([_][]const u8{ "0.0.0.0", "::", "192.168.1.10", "10.0.0.1", "128.0.0.1", "::2", "fe80::1", "::ffff:127.0.0.1" }) |s| {
+        try testing.expect(!fid.isLoopback(try addr(s)));
+    }
+}
+
+test "the recorder's bind address RECORDER_HOST is loopback" {
+    try testing.expect(fid.isLoopback(try addr(fid.RECORDER_HOST)));
+}
+
 // ---- The recorder's parser ---------------------------------------------------
 
 test "a Content-Length request parses whole, and not before it is all there" {

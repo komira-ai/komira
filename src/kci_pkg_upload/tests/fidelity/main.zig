@@ -10,15 +10,21 @@
 //!       normalised); writes <file> only when every file is the same
 //!
 //! Exit: 0 done (check: the same); 1 check: DIFFERENT, a diff summary on
-//! stderr; 2 bad usage; 3 cannot measure (uv failed, the recorder saw not
-//! exactly one request, or the request is not the expected shape). A check
-//! that did not measure is never a pass.
+//! stderr, and nothing else; 2 bad usage; 3 cannot measure, a reason on
+//! stderr: the recorder could not listen or its bound address is not
+//! loopback (`fid.isLoopback`), the scratch directory, the probe wheel or
+//! the recorder thread could not be made, uv could not be started, failed
+//! or timed out, the recorder failed or saw not exactly one request, the
+//! request is not the expected shape, or any other error (reading the
+//! committed fixtures, writing the output). A check that did not measure is
+//! never a pass.
 //!
 //! Both run as Buck2 build actions (BUCK, `uv_fidelity_capture` and
-//! `uv_fidelity_check`), so the recorder binds 127.0.0.1 inside the action.
+//! `uv_fidelity_check`), so the recorder binds `fid.RECORDER_HOST`
+//! (127.0.0.1) inside the action.
 //!
 //! NO REAL REGISTRY IS CONTACTED. The publish URL is
-//! `http://127.0.0.1:<ephemeral>/legacy/`; the credential is the fixed
+//! `http://<fid.RECORDER_HOST>:<ephemeral>/legacy/`; the credential is the fixed
 //! placeholder of uv_fidelity.zig, passed as `--username`/`--password`; uv
 //! runs with an environment of exactly HOME, XDG_CONFIG_HOME, UV_CACHE_DIR
 //! (all in the action's scratch directory), UV_NO_CONFIG=1 and
@@ -189,31 +195,47 @@ fn writeFile(dir: std.fs.Dir, name: []const u8, data: []const u8) !void {
 
 const Fixture = struct { name: []const u8, data: []const u8 };
 
+fn putWheel(dist: []const u8, wheel: []const u8) !void {
+    try std.fs.cwd().makePath(dist);
+    var dist_dir = try std.fs.cwd().openDir(dist, .{});
+    defer dist_dir.close();
+    try writeFile(dist_dir, fid.WHEEL_NAME, wheel);
+}
+
 /// Publishes one probe wheel with uv at a fresh recorder; returns the case's
 /// three fixture files.
 fn captureCase(a: Allocator, uv: []const u8, root: []const u8, case: fid.Case, out: *std.ArrayList(Fixture)) !void {
     const home = try std.fs.path.join(a, &.{ root, case.name });
     const dist = try std.fs.path.join(a, &.{ home, "dist" });
-    try std.fs.cwd().makePath(dist);
-    const wheel = try fid.makeWheel(a, case.metadata);
-    var dist_dir = try std.fs.cwd().openDir(dist, .{});
-    defer dist_dir.close();
-    try writeFile(dist_dir, fid.WHEEL_NAME, wheel);
+    const wheel = fid.makeWheel(a, case.metadata) catch |e|
+        cannotMeasure("{s}: cannot make the probe wheel: {s}", .{ case.name, @errorName(e) });
+    putWheel(dist, wheel) catch |e|
+        cannotMeasure("{s}: cannot write the probe wheel under {s}: {s}", .{ case.name, dist, @errorName(e) });
 
-    const addr = try std.net.Address.parseIp4("127.0.0.1", 0);
+    const addr = std.net.Address.parseIp(fid.RECORDER_HOST, 0) catch |e|
+        cannotMeasure("{s}: recorder address {s}: {s}", .{ case.name, fid.RECORDER_HOST, @errorName(e) });
     var rec = Recorder{
-        .server = try addr.listen(.{ .reuse_address = true }),
+        .server = addr.listen(.{ .reuse_address = true }) catch |e|
+            cannotMeasure("{s}: the recorder cannot listen on {s}: {s}", .{ case.name, fid.RECORDER_HOST, @errorName(e) }),
         .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
         .captured = undefined,
     };
     rec.captured = std.ArrayList(fid.Request).init(rec.arena.allocator());
     defer rec.arena.deinit();
     defer rec.server.deinit();
-    const port = rec.server.listen_address.getPort();
-    const thread = try std.Thread.spawn(.{}, Recorder.loop, .{&rec});
+    // The address the socket is actually bound to, from the kernel.
+    var bound: std.net.Address = undefined;
+    var bound_len: std.posix.socklen_t = @sizeOf(std.net.Address);
+    std.posix.getsockname(rec.server.stream.handle, &bound.any, &bound_len) catch |e|
+        cannotMeasure("{s}: cannot read the recorder's bound address: {s}", .{ case.name, @errorName(e) });
+    if (!fid.isLoopback(bound))
+        cannotMeasure("{s}: recorder is not loopback-only (bound to {})", .{ case.name, bound });
+    const port = bound.getPort();
+    const thread = std.Thread.spawn(.{}, Recorder.loop, .{&rec}) catch |e|
+        cannotMeasure("{s}: cannot start the recorder thread: {s}", .{ case.name, @errorName(e) });
 
     var env = try uvEnv(a, home);
-    const url = try std.fmt.allocPrint(a, "http://127.0.0.1:{d}/legacy/", .{port});
+    const url = try std.fmt.allocPrint(a, "http://{s}:{d}/legacy/", .{ fid.RECORDER_HOST, port });
     const wheel_path = try std.fs.path.join(a, &.{ dist, fid.WHEEL_NAME });
     const ran = run(a, &.{
         uv,
@@ -250,7 +272,13 @@ fn uvVersion(a: Allocator, uv: []const u8, root: []const u8) []const u8 {
     return if (r.ok) std.mem.trim(u8, r.stdout, " \r\n") else "uv (version unknown)";
 }
 
-pub fn main() !void {
+/// Every error not handled where it happens is a failure to measure (exit 3):
+/// exit 1 is DIFFERENT only, and Zig would exit 1 for an error out of `main`.
+pub fn main() void {
+    runMain() catch |e| cannotMeasure("{s}", .{@errorName(e)});
+}
+
+fn runMain() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -271,7 +299,7 @@ pub fn main() !void {
     if (uv == null or out_path == null) usage("--uv and --out are required");
     if (is_check and fixtures == null) usage("check needs --fixtures");
 
-    const root = try scratch(a);
+    const root = scratch(a) catch |e| cannotMeasure("cannot make the scratch directory: {s}", .{@errorName(e)});
     const version = uvVersion(a, uv.?, root);
     var fresh = std.ArrayList(Fixture).init(a);
     for (fid.CASES) |case| try captureCase(a, uv.?, root, case, &fresh);
