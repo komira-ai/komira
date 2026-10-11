@@ -276,6 +276,8 @@ test "each input missing or empty is exit 2, naming it, before anything runs" {
             try testing.expectEqual(@as(u8, 2), try c.go());
             try testing.expect(c.has(try std.fmt.allocPrint(c.a(), "cov_branch annotate: {s} is missing or empty", .{f})));
             try testing.expectEqual(@as(usize, 0), c.fake.calls.items.len);
+            // The scratch is made only once the inputs are found.
+            try testing.expectError(error.FileNotFound, c.tmp.dir.access("scratch/cov_branch_annotate", .{}));
         }
     }
 }
@@ -461,6 +463,8 @@ test "a process that cannot be created is exit 2, naming the program" {
         try testing.expectEqual(@as(u8, 2), try c.go());
         try testing.expect(c.has(try std.fmt.allocPrint(c.a(), "cov_branch annotate: cannot run {s}: SystemResources\n", .{prog})));
         try testing.expectError(error.FileNotFound, c.tmp.dir.access("out/test_one.ll", .{}));
+        // The scratch is kept after the failure.
+        try c.tmp.dir.access("scratch/cov_branch_annotate", .{});
     }
 }
 
