@@ -152,7 +152,7 @@ src/komira_kernels	5270	-
 src/komira_kg_code	10000	-
 src/komira_kg_code/tests/fixtures/repo	10000	-
 src/komira_libc	7992	7916
-src/komira_log	9089	-
+src/komira_log	10000	-
 src/komira_log_query	9531	-
 src/komira_lz4	8026	7631
 src/komira_mail_address	9655	-

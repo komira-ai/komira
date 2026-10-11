@@ -136,7 +136,7 @@ komira//src/komira_kernels:komira_kernels	src/komira_kernels	library	OK	1366	259
 komira//src/komira_kg_code/tests/fixtures/repo:kgfix	src/komira_kg_code/tests/fixtures/repo	library	OK	5	5	-	-	no	no	-	-
 komira//src/komira_kg_code:komira_kg_code	src/komira_kg_code	library	OK	684	684	-	-	no	conda	-	-
 komira//src/komira_libc:komira_libc	src/komira_libc	library	OK	227	284	76	96	yes	conda	-	-
-komira//src/komira_log:komira_log	src/komira_log	library	OK	1957	2153	-	-	no	conda	src/komira_log/engine/metric_sink.mojo	-
+komira//src/komira_log:komira_log	src/komira_log	library	OK	2193	2193	-	-	no	conda	-	-
 komira//src/komira_log_query:komira_log_query	src/komira_log_query	library	OK	468	491	-	-	no	conda	-	-
 komira//src/komira_lz4:komira_lz4	src/komira_lz4	library	OK	183	228	58	76	yes	conda	-	-
 komira//src/komira_mail_address:komira_mail_address	src/komira_mail_address	library	OK	533	552	-	-	no	release	-	-
