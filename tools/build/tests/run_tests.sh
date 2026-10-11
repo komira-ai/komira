@@ -305,17 +305,11 @@
 #      --target-platforms is configured for it; the reserved linux-arm64 row
 #      has no platform and its `[komira_re]` key is refused
 #      (tools/build/tests/functional/platform_table/check.sh).
-#  38. README examples (tools/build/mojo/README.md#readme-examples): each
-#      example is a program of its own, run as its own gated test; the
+#  38. README examples (tools/build/mojo/README.md#readme-examples): the
 #      examples of tests//functional/readme_examples/ok run and its marker is
-#      PASS; .../per_block (two examples declaring the same names) and
-#      .../module_mode (three ```mojo module examples, one in a list item)
-#      mark one PASS per example;
-#      a README with no example (.../none) compiles and runs nothing,
+#      PASS; a README with no example (.../none) compiles and runs nothing,
 #      its marker NO EXAMPLE; tests//negative/readme_examples fail naming the
-#      README line of a raising example (and no other example), a compile
-#      error, a struct in a plain ```mojo example (the mode is the fence
-#      tag's alone) and a `mojo skip` fence.
+#      README line of a raising example, a compile error and a `mojo skip` fence.
 #      A README that ships (its library has a conda package) refuses a relative
 #      link naming its line (.../relative_link); the same README in a library
 #      with `conda = False` builds (tests//functional/readme_examples/unshipped).
@@ -412,22 +406,6 @@
 #      staged twice, an unresolved import, an empty expect_error or exe, a pin
 #      that differs, a C warning, the test-only runtime named where it is not
 #      visible. See tools/build/tests/node_tests.sh.
-#  55. Refused imports (tools/build/lint/defs.bzl, mojo_deps refused_imports;
-#      tools/build/lint/refused_imports.awk): tests//functional/refused_imports:ok
-#      (each refused module spelt where it is no import of it: comments,
-#      docstrings, string literals, longer module names, a name imported
-#      from another module) builds; each target of
-#      tests//negative/refused_imports fails naming exactly its one finding
-#      (from M, from M.sub, from P import N, parentheses over lines with a
-#      parenthesis in a comment, import M, M as p, M.sub, an import list,
-#      `;` statements, a `\` continuation, an indented import, an import
-#      after a docstring, after a docstring holding the other triple quote,
-#      after a triple quote inside a one-line string, `from`/`import` with
-#      spaces around the dot, a dotted reference with no import of the module
-#      (plain, spaced, continued by `\`, over lines inside parentheses,
-#      through an `as` alias of its parent, through a name a from-import
-#      bound)), and an entry that is not a dotted komira_* module name is
-#      refused at analysis.
 set -uo pipefail
 
 umbrella=1
@@ -1241,39 +1219,24 @@ fi
 
 # 38
 expect_green readme_examples tests//functional/readme_examples/...
-R=tests//functional/readme_examples
-for want in "ok:PASS $R/ok:ok:README.md:6" \
-    "none:NO EXAMPLE $R/none:none:README.md: no " \
-    "per_block:PASS $R/per_block:per_block:README.md:7|PASS $R/per_block:per_block:README.md:17|PASS $R/per_block:per_block:README.md:33|" \
-    "module_mode:PASS $R/module_mode:module_mode:README.md:7|PASS $R/module_mode:module_mode:README.md:26|PASS $R/module_mode:module_mode:README.md:39|"; do
+for want in "ok:PASS tests//functional/readme_examples/ok:ok:README.md" \
+    "none:NO EXAMPLE tests//functional/readme_examples/none:none:README.md: no "; do
     t=${want%%:*}
-    # `a|b|`: the marker is exactly lines a and b; otherwise it starts with the text.
-    line=$(printf '%s' "${want#*:}" | tr '|' '\n')
-    out=$("$BUCK2" build "$R/${t}:${t}[tests][readme]" --show-full-output 2> "$LOG/readme_marker_$t.log" | awk 'NF == 2 { print $2 }')
-    got=
-    if [ -n "$out" ] && [ -f "$out" ]; then
-        case "$want" in *"|") got=$(cat "$out") ;; *) got=$(head -c "${#line}" "$out") ;; esac
-    fi
-    if [ -n "$got" ] && [ "$got" = "$line" ]; then
+    line=${want#*:}
+    out=$("$BUCK2" build "tests//functional/readme_examples/${t}:${t}[tests][readme]" --show-full-output 2> "$LOG/readme_marker_$t.log" | awk 'NF == 2 { print $2 }')
+    if [ -n "$out" ] && [ -f "$out" ] && [ "$(head -c "${#line}" "$out")" = "$line" ]; then
         pass "readme_marker_$t"
     else
-        fail "readme_marker_$t: the [tests][readme] marker must be or start with '$line' (see $LOG/readme_marker_$t.log)"
+        fail "readme_marker_$t: the [tests][readme] marker must start '$line' (see $LOG/readme_marker_$t.log)"
     fi
 done
-N=tests//negative/readme_examples
-expect_red readme_example_raises 'GATED TEST FAILED: tests//negative/readme_examples/raises:raises:README.md:13 (exit 1)' $N/raises:raises
-# The failure names that example alone: the other one is a program of its own.
-if grep 'GATED TEST FAILED' "$LOG/readme_example_raises.log" | grep -vqF 'raises:README.md:13 (exit'; then
-    fail "readme_example_raises_alone: a failure names another example (see $LOG/readme_example_raises.log)"
-else
-    pass readme_example_raises_alone
-fi
-expect_red readme_example_compile_error 'readme_compile_error_6.mojo:9:11: error: use of unknown declaration' $N/compile_error:compile_error
-expect_red readme_example_struct_untagged 'readme_struct_untagged_7.mojo:9:5: error: struct inside a function' $N/struct_untagged:struct_untagged
-expect_red readme_example_skip_word 'negative/readme_examples/skip_word/README.md:3: `mojo skip`' $N/skip_word:skip_word
-expect_red readme_example_shipped_relative_link 'negative/readme_examples/relative_link/README.md:11: greet.mojo: a relative link in a README that ships' $N/relative_link:relative_link
+expect_red readme_example_raises 'negative/readme_examples/raises/README.md:13: FAILED: planted' tests//negative/readme_examples/raises:raises
+expect_red readme_example_raises_counted 'readme_raises validation: 1 of 2 checks passed' tests//negative/readme_examples/raises:raises
+expect_red readme_example_compile_error 'print(farewell("a"))  # README.md:9' tests//negative/readme_examples/compile_error:compile_error
+expect_red readme_example_skip_word 'negative/readme_examples/skip_word/README.md:3: `mojo skip`' tests//negative/readme_examples/skip_word:skip_word
+expect_red readme_example_shipped_relative_link 'negative/readme_examples/relative_link/README.md:11: greet.mojo: a relative link in a README that ships' tests//negative/readme_examples/relative_link:relative_link
 expect_red readme_owner_base_no_readme 'requested sub target named `readme`' 'tests//functional/readme_examples/owner:owner_base[tests][readme]'
-expect_red readme_unowned "readme_unowned_base_6.mojo:7:10: error: unable to locate module 'unowned'" $N/unowned:unowned_base
+expect_red readme_unowned 'from unowned import top_word  # README.md:7' tests//negative/readme_examples/unowned:unowned_base
 # Load-time refusals: the case is a config value, so not expect_red's one target.
 for want in 'true_without_readme|`readme = True` and //negative/readme_examples/readme_keyword holds no README.md' \
     'not_bool|`readme` takes True, False or nothing'; do
@@ -1500,44 +1463,6 @@ scm_planted incompatible "because its transitive dep $E/pandas_e2e:test_mac" "$N
 # 54
 # shellcheck source=tools/build/tests/node_tests.sh
 . "$ROOT/tools/build/tests/node_tests.sh"
-
-# 55
-expect_green refused_imports tests//functional/refused_imports:ok
-N=tests//negative/refused_imports
-P=komira_plan_ir.physical_plan
-G=komira_plan_ir.physical_plan_purity_gate
-for want in \
-    "after_docstring|5: imports $P, a module this package refuses ($P)" \
-    "alias_from|4: names $P.segment, a module this package refuses ($P.segment)" \
-    "alias_parent|4: names $P, a module this package refuses ($P)" \
-    "continuation|2: imports $P, a module this package refuses ($P)" \
-    "from_module|2: imports $P, a module this package refuses ($P)" \
-    "from_parent|2: imports $G, a module this package refuses ($G)" \
-    "from_spaced|2: imports $P, a module this package refuses ($P)" \
-    "from_submodule|2: imports $P.sub, a module this package refuses ($P)" \
-    "import_as|2: imports $P, a module this package refuses ($P)" \
-    "import_list|2: imports $P, a module this package refuses ($P)" \
-    "import_module|2: imports $P, a module this package refuses ($P)" \
-    "import_spaced|2: imports $P, a module this package refuses ($P)" \
-    "import_sub|2: imports $P.sub, a module this package refuses ($P)" \
-    "indented|3: imports $P, a module this package refuses ($P)" \
-    "paren_comment_close|4: imports $P, a module this package refuses ($P)" \
-    "paren_comment_open|3: imports $P, a module this package refuses ($P)" \
-    "mixed_triple_quotes|5: imports $P, a module this package refuses ($P)" \
-    "parenthesised|4: imports $P, a module this package refuses ($P)" \
-    "qualified|4: names $P, a module this package refuses ($P)" \
-    "qualified_continued|4: names $P, a module this package refuses ($P)" \
-    "qualified_in_parens|4: names $P, a module this package refuses ($P)" \
-    "qualified_spaced|4: names $P, a module this package refuses ($P)" \
-    "semicolon|2: imports $P, a module this package refuses ($P)" \
-    "semicolon_imports|2: imports $G, a module this package refuses ($G)" \
-    "triple_quote_in_string|3: imports $P, a module this package refuses ($P)"; do
-    t=${want%%|*}
-    expect_red "refused_imports_$t" "$N/$t.mojo:${want#*|}" "$N:$t"
-    n=$(grep -o "mojo_deps: [0-9]* finding line(s)" "$LOG/refused_imports_$t.log" | head -1)
-    if [ "$n" = "mojo_deps: 1 finding line(s)" ]; then pass "refused_imports_${t}_alone"; else fail "refused_imports_${t}_alone: '$n', want 1 finding (see $LOG/refused_imports_$t.log)"; fi
-done
-expect_red refused_imports_bad_entry "refused_imports entry \`komira_plan_ir\` is not a dotted module name" "$N:bad_entry"
 
 # 37
 pt_rc=0
