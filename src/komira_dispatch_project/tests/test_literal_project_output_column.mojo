@@ -60,7 +60,7 @@ def _agg_out_batch(n_rows: Int) raises -> RecordBatch:
     var urls = List[String](capacity=n_rows)
     var counts = PrimitiveArray[DType.int64].allocate(n_rows)
     for i in range(n_rows):
-        urls.append(String("https://u/") + String(i))
+        urls.append(String("https://u.example/") + String(i))
         counts.store[1](i, SIMD[DType.int64, 1](Int64(100 + i)))
     var rbb = RecordBatchBuilder.with_capacity(2)
     rbb.add_column(Column.from_string(StringArray.from_strings(urls)))
@@ -97,7 +97,7 @@ def _assert_passthroughs_intact(imm out: RecordBatch, n_rows: Int) raises:
     assert_equal(urls.length, n_rows, "the url column keeps every row")
     assert_equal(counts.length, n_rows, "the count column keeps every row")
     for i in range(n_rows):
-        assert_equal(urls.get(i), String("https://u/") + String(i))
+        assert_equal(urls.get(i), String("https://u.example/") + String(i))
         assert_equal(Int(counts.get(i)), 100 + i)
 
 
