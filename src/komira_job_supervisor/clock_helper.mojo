@@ -19,12 +19,14 @@ from komira_clock import now_unix_ms
 # =============================================================================
 def _civil_from_days(z_in: Int) -> Tuple[Int, Int, Int]:
     """Howard Hinnant `civil_from_days`: days since the Unix epoch -> (year, month,
-    day) in the proleptic Gregorian calendar. Branch-free, O(1). Handles negative inputs
-    (pre-epoch) correctly.
+    day) in the proleptic Gregorian calendar, for every input including days before
+    the epoch and before year 0. Branch-free, O(1).
 
-    Reference: H. Hinnant, "chrono-Compatible Low-Level Date Algorithms"."""
+    Reference: H. Hinnant, "chrono-Compatible Low-Level Date Algorithms". Hinnant's
+    C++ subtracts 146096 from a negative `z` because C++ `/` truncates; Mojo's `//`
+    already floors, so the era is `z // 146097` for every `z`."""
     var z = z_in + 719468
-    var era = (z if z >= 0 else z - 146096) // 146097
+    var era = z // 146097
     var doe = z - era * 146097  # [0, 146096]
     var yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365  # [0, 399]
     var y = yoe + era * 400
@@ -67,8 +69,8 @@ def utc_stamp_from_unix_ms(unix_ms: Int64) -> String:
     var days = total_secs // 86400
     var secs_of_day = total_secs - days * 86400
     if secs_of_day < 0:
-        secs_of_day += 86400
-        days -= 1
+        secs_of_day += 86400  # cov: unreachable // floors: secs_of_day >= 0
+        days -= 1  # cov: unreachable // floors: secs_of_day >= 0
     var ymd = _civil_from_days(days)
     var hh = secs_of_day // 3600
     var mm = (secs_of_day % 3600) // 60

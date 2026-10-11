@@ -36,7 +36,7 @@
 #                      desired fields say, with the value written there
 #                      (`out.NAME`, `out.HOST`): how the node behaves, not
 #                      state, so never in its digest.
-# Those are the generic shape's kinds. On a provider shape (shapes.mojo) the
+# Those are the generic shape's kinds. On a provider shape (kci_cloud/shape/shapes.mojo) the
 # kind is the provider kind id (on onprem also a `<id>/vault` beside each
 # identity, a service's `<id>/endpoint`, which serves nothing, and a grant's
 # helper `<id>/r-<h>`; on gcp a table's `<id>/ix-<h>` and `<id>/ttl`; on aws
@@ -45,7 +45,10 @@
 # fields), not the kind, decide what it exposes. On aws a queue also has a
 # `<id>/policy`; on gcp a queue has its private `<id>/topic`, which
 # addresses nothing.
-# A role the file turned off is the same node with `wanted` False.
+# A role the file turned off is the same node with `wanted` False. A node
+# whose object the store marks replace-only (`FakeStore.replace_only`) plans
+# a drift as a replace and converges by replacing (which the engine refuses
+# in v1), never by an update.
 #
 # A NAMED PRIMARY OBJECT (`physical_name`, a desired field kci writes on the
 # primary node) is part of the digest like any field, and its outputs follow
@@ -67,9 +70,21 @@
 # standard label rule's labels, the `kci-run-id` label when the scope has a
 # validation run, the retention mark; and the provenance annotation, in the
 # one create call). An adoption writes the identity and retention labels, and
-# never a validation run: the run did not create the object. A node reads its
+# never a validation run: the run did not create the object; on a node kci
+# marked `adopted` (the primary node of a resource that writes `adopt`) it
+# also writes the adoption mark `kci_adopted=true`. A node reads its
 # stamp back from the labels, reports an out-of-band value on an unmodelled
 # field as an unmanaged difference, and never puts provenance in its digest.
+#
+# A MEMBER BINDING (a node of a grant kind on a shape whose grants are
+# DERIVED; `FakeCloud.realize` says which) is created with no labels at all:
+# the store records its member (the principal's identity node, or everyone
+# for a public role), its target (the target's primary node, the node it
+# fronts for a public role, or the cell scope for a cell edge) and the role
+# the store's table maps its access to, and every read derives its stamp
+# (fake_store.mojo). An update rewrites the role, never a label. A read of
+# any grant node also reports the members planted on its policy that are not
+# its cell's as an unmanaged difference.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -86,23 +101,28 @@ from kci_reconciler import (
     ResolvedInputs,
     ResourceStatus,
     CONVERGE_IN_PLACE,
+    CONVERGE_REPLACE,
     RES_ABSENT,
     RES_FAILED,
     RETAIN_KEEP,
     VERB_CREATE,
     VERB_NOOP,
+    VERB_REPLACE,
     VERB_UPDATE,
     unbound_error,
 )
 from kci_cloud import (
+    ALL_USERS,
     LoweredNode,
+    principal_node,
+    adoption_labels,
     create_labels,
     retain_labels,
     standard_identity_of,
     standard_label_rule,
 )
 
-from kci_cloud_fake.fake_store import FakeStore, FakeView
+from kci_cloud_fake.fake_store import CELL_SCOPE, FakeStore, FakeView
 
 
 def fake_url(resource_id: String) -> String:
@@ -169,9 +189,14 @@ def _plan(id: String, live: ResourceStatus, retention: Int) -> ChangeAction:
 
 
 def _unmanaged(v: FakeView) -> String:
-    if v.extra.byte_length() == 0:
-        return String("")
-    return String("label ") + v.extra + String(" (not modelled; left as it is)")
+    var out = String("")
+    if v.extra.byte_length() > 0:
+        out = String("label ") + v.extra + String(" (not modelled; left as it is)")
+    if v.members.byte_length() > 0:
+        if out.byte_length() > 0:
+            out += String("; ")
+        out += String("member ") + v.members + String(" (not this cell's; left as it is)")
+    return out^
 
 
 def static_digest(node: LoweredNode) raises -> String:
@@ -216,8 +241,15 @@ struct FakeNode(EngineResource, Movable, Deinitable):
     var _bound: List[String]
     var _is_bound: Bool
     var _wanted: Bool
+    var _adopted: Bool
+    var _binding: Bool
+    """A member binding (the file header): no labels, a derived stamp."""
+    var _member: String
+    var _target: String
+    var _access: String
+    var _cell: String
 
-    def __init__(out self, store: ArcPointer[FakeStore], node: LoweredNode) raises:
+    def __init__(out self, store: ArcPointer[FakeStore], node: LoweredNode, binding: Bool = False) raises:
         self._store = store.copy()
         self._id = node.id.copy()
         self._owner = node.owner.copy()
@@ -242,7 +274,31 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         self._bound = List[String]()
         self._is_bound = len(self._refs) == 0
         self._wanted = node.wanted
+        self._adopted = node.adopted
+        self._binding = binding
+        self._member = String("")
+        self._target = String("")
+        self._access = node.field(String("access"))
+        self._cell = node.field(String("cell"))
+        if binding:
+            var principal = node.field(String("principal"))
+            self._member = principal_node(principal) if principal.byte_length() > 0 else String(ALL_USERS)
+            if self._cell.byte_length() > 0:
+                self._target = String(CELL_SCOPE)
+            else:
+                # The target (resolved to its primary node), or what a public
+                # role fronts: the one dependency that is not the member.
+                for i in range(len(self._deps)):
+                    if self._deps[i] != self._member:
+                        self._target = self._deps[i].copy()
 
+    def _role(self) raises -> String:
+        """The role this binding holds. A node realized only to be removed
+        (the roles `list_owned` says the file turned off) carries no fields
+        and is never created or updated, so only a create or an update asks."""
+        if self._target.byte_length() == 0:
+            raise Error(String("fake: binding ") + self._id + String(" has no target"))
+        return self._store[].binding_role(self._target, self._member, self._access, self._cell)
     def _desired_digest(self) raises -> String:
         if not self._is_bound:
             raise unbound_error(self._id, self._refs[0])
@@ -251,12 +307,23 @@ struct FakeNode(EngineResource, Movable, Deinitable):
             d += String("|") + self._refs[i].field + String("=") + self._bound[i]
         return d^
 
+    def _resource(self) -> String:
+        """The id of the resource this node was lowered from: its id up to
+        the role (`store/app/files` of `store/app/files/bucket`). It is the
+        owner for a resource written at the top, and the full path for one
+        a composite expanded (whose owner is the top), so two objects under
+        one owner never share a default name."""
+        var at = self._id.rfind("/")
+        if at <= 0:
+            return self._owner.copy()
+        return String(self._id[byte=0:at])
+
     def _base(self) -> String:
         """What this node's outputs are built on: its object's name, else
-        its owner's id."""
+        its resource's id."""
         if self._name.byte_length() > 0:
             return self._name.copy()
-        return self._owner.copy()
+        return self._resource()
 
     def _url(self) -> String:
         if self._serves:
@@ -273,6 +340,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         return self._retention
 
     def read_status(mut self, creds: Creds) raises -> ResourceStatus:
+        self._store[].read_fault(self._id)
         var v = self._store[].read(self._id)
         if not v.present:
             return ResourceStatus.absent()
@@ -299,6 +367,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         return ResourceStatus.drifted(self._id, v.digest, v.url, String(""), stamp, extra)
 
     def read_presence(mut self, creds: Creds) raises -> ResourceStatus:
+        self._store[].read_fault(self._id)
         var v = self._store[].read(self._id)
         if not v.present:
             return ResourceStatus.absent()
@@ -307,9 +376,20 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         )
 
     def plan(mut self, live: ResourceStatus) raises -> ChangeAction:
-        return _plan(self._id, live, self._retention)
+        var action = _plan(self._id, live, self._retention)
+        if action.verb == VERB_UPDATE and self._store[].replaced_only(self._id):
+            action.verb = VERB_REPLACE
+            action.reason = String("drifted on a field the cloud cannot change in place -> replace")
+        return action^
 
     def create(mut self, creds: Creds) raises -> String:
+        if self._binding:
+            var role = self._role()
+            self._store[].create(
+                self._id, self._kind, self._desired_digest(), self._url(), List[Label](), String(""), self._name,
+                self._target, self._member, role,
+            )
+            return self._id.copy()
         self._store[].create(
             self._id,
             self._kind,
@@ -326,6 +406,15 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         # retention mark, all in the one create call.
         var labels = create_labels(stamp, self._retention)
         var note = stamp.provenance.run_id + String("@") + stamp.provenance.revision
+        if self._binding:
+            # No labels: the binding's stamp is derived from its member and
+            # its target, both already stamped.
+            var role = self._role()
+            self._store[].create(
+                self._id, self._kind, self._desired_digest(), self._url(), List[Label](), note, self._name,
+                self._target, self._member, role,
+            )
+            return self._id.copy()
         self._store[].create(
             self._id, self._kind, self._desired_digest(), self._url(), labels, note, self._name
         )
@@ -338,16 +427,20 @@ struct FakeNode(EngineResource, Movable, Deinitable):
         # No validation-run label: this run did not create the object.
         var labels = standard_label_rule(stamp)
         labels.extend(retain_labels(self._retention))
-        self._store[].relabel(physical_id, labels, note, self._name)
+        labels.extend(adoption_labels(self._adopted))
+        self._store[].relabel(physical_id, labels, note, self._name, self._kind)
 
     def update(mut self, creds: Creds) raises:
         var mark = retain_labels(self._retention)
-        self._store[].update(self._id, self._desired_digest(), self._url(), mark[0])
+        var role = self._role() if self._binding else String("")
+        self._store[].update(self._id, self._desired_digest(), self._url(), mark[0], role)
 
     def delete(mut self, physical_id: String, creds: Creds) raises:
         self._store[].remove(physical_id)
 
     def converge_mode(mut self, live: ResourceStatus) raises -> Int:
+        if self._store[].replaced_only(self._id):
+            return CONVERGE_REPLACE
         return CONVERGE_IN_PLACE
 
     def input_refs(mut self) -> List[InputRef]:
@@ -370,7 +463,7 @@ struct FakeNode(EngineResource, Movable, Deinitable):
             return o^
         var named = self._name.byte_length() > 0
         if self._stores:
-            var n = self._name.copy() if named else fake_bucket_name(self._owner)
+            var n = self._name.copy() if named else fake_bucket_name(self._resource())
             o.set(String("NAME"), n)
             o.set(String("ADDRESS"), String("fake-bucket://") + n)
             return o^
@@ -378,13 +471,13 @@ struct FakeNode(EngineResource, Movable, Deinitable):
             o.set(String("NAME"), fake_account_name(self._base()))
             return o^
         if self._named:
-            o.set(String("NAME"), self._name.copy() if named else fake_table_name(self._owner))
+            o.set(String("NAME"), self._name.copy() if named else fake_table_name(self._resource()))
             return o^
         if self._secret_named:
-            o.set(String("NAME"), self._name.copy() if named else fake_secret_name(self._owner))
+            o.set(String("NAME"), self._name.copy() if named else fake_secret_name(self._resource()))
             return o^
         if self._addressed.byte_length() > 0:
-            var n = self._name.copy() if named else fake_messaging_name(self._owner, self._addressed)
+            var n = self._name.copy() if named else fake_messaging_name(self._resource(), self._addressed)
             o.set(String("NAME"), n)
             o.set(String("ADDRESS"), String("fake-") + self._addressed + String("://") + n)
             return o^

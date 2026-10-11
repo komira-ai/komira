@@ -59,9 +59,11 @@ from kci_reconciler import (
     VERB_CREATE,
     VERB_NOOP,
 )
-from kci_resource_proto.resource import Resource, ResourceList, Retention
+from kci_resource_proto.refs import Retention
+from kci_resource_proto.resource import Resource, ResourceList
 
 from kci_cloud import (
+    RegistryLogin,
     GrantEdge,
     CloudAdapter,
     Absence,
@@ -74,6 +76,7 @@ from kci_cloud import (
     Finding,
     LoweredNode,
     OwnedRecord,
+    ExistingObject,
     Principal,
     RUN_UNKNOWN,
     Setting,
@@ -264,7 +267,7 @@ struct _Data(CloudAdapter, Movable):
         return List[Finding]()
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
-        return ArtifactNeed(String("oci-image"), String("linux/amd64"))
+        return ArtifactNeed(String("OCI"), String("linux/amd64"))
 
     def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]) raises -> List[LoweredNode]:
         var out = List[LoweredNode]()
@@ -316,6 +319,12 @@ struct _Data(CloudAdapter, Movable):
     def list_owned(mut self, creds: Creds, scope: CellScope) raises -> List[OwnedRecord]:
         return self.owned.copy()
 
+    def read_existing(mut self, creds: Creds, node: LoweredNode) raises -> ExistingObject:
+        return ExistingObject()  # nothing stands anywhere: these tests adopt nothing
+
+    def release(mut self, creds: Creds, record: OwnedRecord) raises:
+        raise Error("stub: these tests release nothing")
+
     def whoami(mut self, creds: Creds) raises -> Principal:
         return Principal(String("deployer"), String("data-account"))
 
@@ -324,6 +333,12 @@ struct _Data(CloudAdapter, Movable):
 
     def trust_check(mut self, creds: Creds, scope: CellScope) raises -> List[Finding]:
         return List[Finding]()
+
+    def image_registry(self, ctx: CellContext) -> String:
+        return String("")
+
+    def registry_login(mut self, creds: Creds) raises -> RegistryLogin:
+        return RegistryLogin(String(""), String(""))
 
 
 def _owned(node: String, retained: Bool) -> OwnedRecord:

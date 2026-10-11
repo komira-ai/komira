@@ -29,10 +29,10 @@
 #
 # The `komira_uuid` package declares this SAME `RAND_bytes` symbol with this
 # SAME signature, for UUIDv7's random bits (`src/komira_uuid/entropy.mojo`).
-# It is not a second RNG — both call this one AWS-LC implementation — but it
-# IS a second declaration, and it exists so that `komira_uuid` does not import
-# `komira_crypto`: every package that mints an id would otherwise have crypto
-# upstream of it, and any crypto edit would invalidate all of their builds.
+# It is not a second RNG — both call this one AWS-LC implementation, which
+# `komira_uuid` links through its dependency on this package — but it IS a
+# second declaration: `komira_uuid` calls the C function without importing
+# this package's Mojo modules (its own entropy module says why).
 # Read that entropy module before changing anything here.
 #
 # If you change WHICH AWS-LC entrypoint this file calls (e.g. to a FIPS-mode
@@ -118,4 +118,4 @@ def rand_bytes_ffi[o: Origin[mut=True]](dst: Span[UInt8, o]) raises:
         UInt,
     ](dst_ptr, UInt(len(dst)))
     if rc != 1:
-        raise Error("rand_bytes_ffi: RAND_bytes failed (entropy source failure)")
+        raise Error("rand_bytes_ffi: RAND_bytes failed (entropy source failure)")  # cov: unreachable RAND_bytes fails only when the operating system's entropy source fails

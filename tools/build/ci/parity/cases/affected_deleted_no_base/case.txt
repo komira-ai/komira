@@ -1,0 +1,14 @@
+# A deleted file and no --base: no tree says which package held it, WIDENED.
+arg "--files"
+arg "{changed_files}"
+arg "--units-file"
+arg "{units_file}"
+input units_file %units
+input changed_files "src/a/old.mojo\n"
+file ".buckconfig" %buckconfig
+file "tools/build/ci/rules.txt" %rules.txt
+file "src/a/BUCK"
+file "src/a/a.mojo"
+file "src/b/BUCK"
+file "src/c/BUCK"
+exit 0

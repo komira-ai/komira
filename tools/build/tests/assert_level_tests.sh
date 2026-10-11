@@ -17,13 +17,13 @@
 #      library's debug_asserts are off in its test at ASSERT=none, an
 #      assert_mode=none one is off at the default level, a define reaches the
 #      test and the library's package, a test holding 256 MiB for 2 s passes
-#      under a 1024 MiB cap), :bin_none's [run_check] and `buck2 test` of :test_none
-#      pass at ASSERT=none, and with komira.coverage=true the branch coverage
+#      under a 1024 MiB cap; :bin_none's run check, a validation, passes at
+#      ASSERT=none), `buck2 test` of :test_none passes at ASSERT=none, and with komira.coverage=true the branch coverage
 #      runs of :lib_none, :lib_defines and :lib_level_and_defines pass (their
 #      bitcode got the level and every define); each twin in tests//negative/assert_level fails
 #      (the same tests at ASSERT=all and at the default level, the same
-#      programs at the default level) and each inadmissible declaration is
-#      refused at analysis; a test that allocates without bound and the
+#      programs at the default level) (each inadmissible declaration is
+#      refused at analysis: //tools/build/selftest:analysis_refusals_mojo); a test that allocates without bound and the
 #      256 MiB test under a 192 MiB cap are killed by the cap
 #      (tests//negative/mem_cap), as a library's gated test and under
 #      `buck2 test`. The time limit of a mojo_test under `buck2 test`:
@@ -31,16 +31,15 @@
 #      once, kills the test at its limit and leaves the runner to report it,
 #      and leaves nothing alive (tests//functional/test_deadline:cases); a
 #      mojo_test sleeping past it, with the test runner's timeout at 90 s, is
-#      killed at 30 s and says so (tests//negative/test_deadline); a
+#      killed at 30 s and says so (tests//negative/test_deadline). (A
 #      komira.test_timeout_s that is not a whole number, or is not over the
-#      60 s margin, is refused.
+#      60 s margin, is refused: //tools/build/selftest:config_refusals.)
 
 if BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/assert_level.sh" "$LOG" > "$LOG/assert_level.log" 2>&1; then
     pass "$(grep -o 'PASS  assert level: .*' "$LOG/assert_level.log" | cut -c 7-)"
 else
     fail "$(grep -o 'FAIL  assert level: .*' "$LOG/assert_level.log" | cut -c 7- | cut -c 1-400) (see $LOG/assert_level.log)"
 fi
-expect_green assert_level_functional tests//functional/assert_level: tests//functional/mem_cap:
 # Each test's branch coverage run (its bitcode compiled, linked and run, as
 # the gate would read it) passes only when the bitcode got the test's level
 # and defines: at the default level safe_probe's assert fires (exit 132), and
@@ -60,7 +59,6 @@ else
         pass "mem_cap cases: $ok stand-in runs; an unreadable /proc, a signalled cap and a child reparented out of the tree leave nothing of the run alive"
     fi
 fi
-expect_green assert_level_run_check 'tests//functional/assert_level:bin_none[run_check]'
 if timeout 900 "$BUCK2" test tests//functional/assert_level:test_none > "$LOG/assert_level_test_none.log" 2>&1; then
     pass "assert_level_test_none: buck2 test of a mojo_test at ASSERT=none"
 else
@@ -72,12 +70,6 @@ expect_red assert_level_all "GATED TEST FAILED: $A:lib_all:tests/test_quiet_by_d
 expect_red assert_level_all_probe "Assert Error: ASSERT_PROBE all_only_probe: an assert_mode=none debug_assert fired" "$A:lib_all"
 expect_red assert_level_safe_default "Assert Error: ASSERT_PROBE safe_probe: an assert_mode=safe debug_assert fired" "$A:lib_safe_default"
 expect_red assert_level_bin_default "/bin_default exited 132" "$A:bin_default[run_check]"
-expect_red assert_level_bad_level "$A:bad_level: test_assert_level \`fast\` is not one of none, warn, safe, all" "$A:bad_level"
-expect_red assert_level_bad_binary_level "$A:bad_binary_level: assert_level \`off\` is not one of none, warn, safe, all" "$A:bad_binary_level"
-expect_red assert_level_define_assert "$A:define_assert: test_defines sets ASSERT; set \`test_assert_level\` instead" "$A:define_assert"
-expect_red assert_level_define_not_identifier "$A:define_not_identifier: defines entry \"1ST=x\" is not NAME or NAME=VALUE with NAME an identifier" "$A:define_not_identifier"
-expect_red assert_level_define_twice "$A:define_twice: defines sets KOMIRA_X twice" "$A:define_twice"
-expect_red assert_level_bad_cap "$A:bad_cap: test_memory_cap_mib is -1; it must be a number of MiB, or 0 for no cap" "$A:bad_cap"
 if timeout 900 "$BUCK2" test "$A:test_default" > "$LOG/assert_level_test_default.log" 2>&1; then
     fail "assert_level_test_default: buck2 test $A:test_default passed, but its safe assert must fire at the default level"
 elif ! grep -qF "GATED TEST FAILED: $A:test_default (exit 132)" "$LOG/assert_level_test_default.log"; then
@@ -123,12 +115,3 @@ elif ! grep -qF "TEST TIME LIMIT: killed $TD after 30 s, under the test runner's
 else
     pass "test_deadline_slow: a mojo_test past its limit is killed 60 s before the test runner's timeout, and says so"
 fi
-for v in abc 60; do
-    if "$BUCK2" build -c komira.test_timeout_s=$v "$TD" > "$LOG/test_deadline_bad_$v.log" 2>&1; then
-        fail "test_deadline_bad_$v: [komira] test_timeout_s = $v was accepted"
-    elif ! grep -qF -e "[komira] test_timeout_s = \"$v\" is not a whole number of seconds" -e "[komira] test_timeout_s = $v must be over 60 s" "$LOG/test_deadline_bad_$v.log"; then
-        fail "test_deadline_bad_$v: refused without its message (see $LOG/test_deadline_bad_$v.log)"
-    else
-        pass "test_deadline_bad_$v: [komira] test_timeout_s = $v is refused"
-    fi
-done

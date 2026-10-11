@@ -1,8 +1,10 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 
-# The exported name of aws-lc's SHA-NI block function, which aws-lc's
-# assembly declares hidden (native/komira_crypto_sha256_hw.c).
+# The exported names of aws-lc's SHA-256 block functions (the SHA-extension
+# body behind a CPUID check, and the portable body), which aws-lc's assembly
+# declares hidden (native/komira_crypto_sha256_hw.c).
 staged_files(
     name = "sha256_hw_files",
     srcs = ["native/komira_crypto_sha256_hw.c"],
@@ -93,6 +95,53 @@ mojo_library(
         "tests/test_x509_letsencrypt_r3.mojo",
         "tests/test_x509_smoke.mojo",
         "tests/test_zeroize_on_drop.mojo",
+        "tests/test_pbkdf2_ct_eq.mojo",
+        "tests/test_chain_policy.mojo",
+        "tests/test_chain_signatures.mojo",
+        "tests/test_rsa_sign_verify_edges.mojo",
+        "tests/test_chain_rsa_pss.mojo",
+        "tests/test_ecdsa_p256_edges.mojo",
+        "tests/test_ecdsa_p384_edges.mojo",
+        "tests/test_small_edges.mojo",
+        "tests/test_rs256_jwks_parser_edges.mojo",
+        "tests/test_name_matcher_edges.mojo",
+        "tests/test_asn1_edges.mojo",
+        "tests/test_x509_malformed.mojo",
+        "tests/test_sha256_compress.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# libkomira_crypto_native.so.1: the C this library owns (prefixed aws-lc and
+# the SHA-256 wrapper) as its own shared library, exporting the names its
+# sources call (tools/build/native/README.md, "Each library's shared
+# library"). Built and checked here; no package ships it yet.
+native_shared_library(
+    name = "komira_crypto_native",
+    archives = [
+        ":komira_crypto_sha256_hw",
+        "//third_party/aws-lc:crypto",
+    ],
+    # s2n-tls's archive (komira_http_core's) calls aws-lc functions no Mojo
+    # library calls; the library exports them to it.
+    caller_archives = ["//third_party/s2n-tls:s2n"],
+    callers = [":komira_crypto"],
+    library = "komira_crypto",
+    # Every weak undefined symbol of the library, recorded from its first
+    # green link (checks 3 and 7 hold it to exactly this list):
+    weak_undefined = [
+        # zig's C runtime (crti.o): the profiling hook, absent unless -pg.
+        "__gmon_start__",
+        # aws-lc's allocator hooks, prefixed, which a program may define
+        # to take over aws-lc's allocator; -Bsymbolic does not bind an
+        # undefined symbol, so they stay unbound (third_party/aws-lc/BUCK).
+        "komira_awslc_OPENSSL_memory_alloc",
+        "komira_awslc_OPENSSL_memory_free",
+        "komira_awslc_OPENSSL_memory_get_size",
+        "komira_awslc_OPENSSL_memory_realloc",
+        # jemalloc's sized free, which aws-lc calls only when the process's
+        # malloc defines it (third_party/aws-lc/BUCK, :crypto_symbols).
+        "sdallocx",
     ],
     visibility = ["PUBLIC"],
 )

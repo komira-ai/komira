@@ -15,7 +15,7 @@
 #      carries the same identity, provenance is written as an annotation, and
 #      a re-apply under a NEW run id and revision mutates nothing.
 #   4. A FOREIGN OBJECT REFUSES THE WHOLE RUN BEFORE ANY CHANGE, in apply,
-#      plan and destroy; `--adopt <id>` stamps and records it instead.
+#      plan and destroy; a resource that writes `adopt` stamps and records it instead.
 #   5. A CONFLICT (a recorded node whose stamp was stripped, or an object
 #      stamped for another owner) refuses apply and destroy; nothing is
 #      deleted.
@@ -439,7 +439,7 @@ def test_a_foreign_object_refuses_the_run_before_any_change() raises:
         msg = String(e)
     assert_true(_has(msg, "REFUSED apply"), msg)
     assert_true(_has(msg, "api/run: foreign"), msg)
-    assert_true(_has(msg, "--adopt api/run"), msg)
+    assert_true(_has(msg, "unless its resource writes adopt (which puts api/run in the run's adopt list)"), msg)
     assert_equal(cloud[].mutations(), 0, "nothing was created")
     assert_equal(len(landed), 0)
     assert_equal(len(pending), 3)
@@ -454,7 +454,7 @@ def test_a_foreign_object_refuses_the_run_before_any_change() raises:
     assert_true(_has(dmsg, "REFUSED destroy"), dmsg)
     assert_true(cloud[].find(String("api/run")) >= 0, "the foreign object stands")
 
-    # --adopt stamps it and records it
+    # a resource that writes adopt stamps it and records it
     var adopt = List[String]()
     adopt.append(String("api/run"))
     var cell = CellScope(String("shop"), String("blue"), Provenance.none(), adopt^)
