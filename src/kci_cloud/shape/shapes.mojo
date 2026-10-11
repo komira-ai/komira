@@ -1,6 +1,13 @@
 # =============================================================================
-# kci_cloud_fake/shapes.mojo: the provider shapes a fake cloud can lower to.
+# kci_cloud/shape/shapes.mojo: the provider shapes the built-in clouds lower to.
 # =============================================================================
+#
+# THE SHARED SHAPES. These are the shapes every cloud built into kci lowers
+# by: the fake clouds (kci_cloud_fake) are built with one, and a built-in
+# adapter lowers through the same shape (lower.mojo), so a cloud lowers as
+# its fake does. They moved here from kci_cloud_fake unchanged; the limits
+# they carry are still the reference limits the fakes were built to
+# exercise, cited as `kci_cloud_fake: reference limits` (limits.mojo).
 #
 # A primitive is 1:1 with a resource kind of the major clouds, and each cloud
 # lowers it to its OWN fixed set of roles. A `ProviderShape` is that set, as
@@ -65,7 +72,11 @@
 #                 bucket (storage.googleapis.com/Bucket); service account ->
 #                 identity. Every grant is a member binding on its target.
 #                 GCP has no asset type for one binding: the kind id names
-#                 the call that writes it, `setIamPolicy`.
+#                 the call that writes it, `setIamPolicy`. A binding (the
+#                 public role's invoker binding too) carries no labels and no
+#                 description, so gcp's grants are DERIVED (`grant_carrier`,
+#                 kci_cloud/derived.mojo), and lower.mojo refuses the two
+#                 edges whose node a derived stamp cannot name.
 #   * `azure`     service -> identity
 #                 (Microsoft.ManagedIdentity/userAssignedIdentities), run
 #                 (Microsoft.App/containerApps); container job -> identity,
@@ -311,13 +322,13 @@
 # cloud's id: the id stays opaque.
 # =============================================================================
 
-from kci_cloud import (
-    Absence,
+from kci_cloud.adapter import Absence, NOT_YET
+from kci_cloud.catalog import (
     FIELD_BUCKET,
     FIELD_CERTIFICATE,
+    FIELD_CONTAINER_JOB,
     FIELD_DNS_RECORD,
     FIELD_DNS_ZONE,
-    FIELD_CONTAINER_JOB,
     FIELD_EVENT_TRIGGER,
     FIELD_IP_ADDRESS,
     FIELD_NETWORK,
@@ -332,10 +343,9 @@ from kci_cloud import (
     FIELD_TABLE,
     FIELD_TOPIC,
     FIELD_WORKER,
-    NOT_YET,
 )
 
-from kci_cloud_fake.metadata import MetadataLimits
+from kci_cloud.shape.metadata import MetadataLimits
 
 
 comptime ROLE_BUCKET = "bucket"
@@ -378,6 +388,16 @@ comptime ROLE_RULES = "rules"
 
 comptime TARGET_ANY: Int = -1
 """A `GrantRow` for every target type without a row of its own."""
+
+comptime GRANTS_LABELLED: Int = 0
+"""A grant edge's object carries the stamp as labels (or its own
+description), like every other object."""
+comptime GRANTS_DERIVED: Int = 1
+"""A grant edge's object is a MEMBER BINDING (a member holding a role on a
+target's policy), which carries no labels and no description: its stamp is
+DERIVED from what the cloud holds (kci_cloud/derived.mojo), and the shape
+refuses the two edges whose node id that cannot compute (`lower.mojo`,
+`derived_grant_limits`)."""
 
 comptime _AWS_ROLE = "AWS::IAM::Role"
 comptime _GCP_SA = "iam.googleapis.com/ServiceAccount"
@@ -522,6 +542,10 @@ struct ProviderShape(Copyable, Movable, Deinitable):
     var metadata: MetadataLimits
     """How many labels an object carries here, and how a type's primary
     object may be named (metadata.mojo)."""
+    var grant_carrier: Int
+    """Where a grant edge's object carries its stamp: `GRANTS_LABELLED`, or
+    `GRANTS_DERIVED` (a member binding; the public role's object is one
+    too)."""
 
     def __init__(
         out self,
@@ -540,6 +564,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         subnet_zone_limit: String = String(""),
         service_network_limit: String = String(""),
         var metadata: MetadataLimits = MetadataLimits(),
+        grant_carrier: Int = GRANTS_LABELLED,
     ):
         self.name = name
         self.rows = rows^
@@ -556,6 +581,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         self.subnet_zone_limit = subnet_zone_limit
         self.service_network_limit = service_network_limit
         self.metadata = metadata^
+        self.grant_carrier = grant_carrier
 
     def __init__(out self, *, copy: Self):
         self.name = copy.name.copy()
@@ -573,6 +599,23 @@ struct ProviderShape(Copyable, Movable, Deinitable):
         self.subnet_zone_limit = copy.subnet_zone_limit.copy()
         self.service_network_limit = copy.service_network_limit.copy()
         self.metadata = copy.metadata.copy()
+        self.grant_carrier = copy.grant_carrier
+
+    def grants_derived(self) -> Bool:
+        """True iff a grant edge's object is a member binding whose stamp is
+        derived (`GRANTS_DERIVED`)."""
+        return self.grant_carrier == GRANTS_DERIVED
+
+    def is_binding(self, kind: String) -> Bool:
+        """True iff, on a DERIVED shape, a node of provider kind `kind` is a
+        member binding: the kind of a grant row, which on such a shape is
+        also the kind of the public role (gcp: `setIamPolicy`)."""
+        if not self.grants_derived():
+            return False
+        for i in range(len(self.grants)):
+            if self.grants[i].kind == kind:
+                return True
+        return False
 
     def hosts(self, field: Int) -> Bool:
         """False for a type the shape declares NOT_YET."""
@@ -746,6 +789,7 @@ struct ProviderShape(Copyable, Movable, Deinitable):
             gpu_limit=String(GPU_REASON_UNDECIDED),
             network_ranged=False,
             metadata=MetadataLimits.gcp(),
+            grant_carrier=GRANTS_DERIVED,
         )
 
     @staticmethod
