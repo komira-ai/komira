@@ -46,6 +46,19 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # _strings, and the dense-string rebuild counter in dict_mat_counter). The
 # page CRC is the standard CRC-32, from komira_zlib.
 #
+# It decides from a footer what a scan needs to read: the row-group pruner on
+# min/max statistics and its all-match dual (rg_pruner), row selections and
+# their page clip (row_selection), the row groups a table-scale row window
+# overlaps (row_window) and the Arrow types an `ARROW:schema` footer key
+# names (arrow_schema_hint); and it reads a column chunk as stored for a
+# pass-through write (bypass).
+#
+# It keeps a session's parsed footers, by path, with their preambles and a
+# pinned whole-file mapping, revalidated by stat on each shared hit
+# (runtime_footer_cache, within the pin budget of footer_pin_budget), and
+# serves a footer's statistics as TableStats and as a StatsProvider
+# (table_stats).
+#
 # The welded tests:
 # - test_rle_simd, test_rle_simd_bw_small: bit-packed runs at every bit width
 #   the SIMD kernels specialize, and the dedicated bw=1/2/4 byte paths, at
@@ -134,6 +147,29 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   (komira_parquet_codec's fixtures, staged at parquet/): ZSTD V2 pages with
 #   CRCs and nulls, dictionaries over several SNAPPY pages, GZIP PLAIN,
 #   INT96, zero rows; and a flipped byte refused by a real page's CRC.
+# - test_rg_pruner_direct: the min/max pruner and its all-match dual on
+#   footers built as structs: every operator on both sides, signed and
+#   unsigned integers, floats (no prune on !=), byte arrays, AND and OR,
+#   names resolved among the top-level leaves after a group, DECIMAL and the
+#   other conservative cases, the null trap and the file-level count.
+# - test_row_selection_direct: RowSelection operations against a per-row
+#   bitmap over generated selections, nulls in a mask, selects_all and the
+#   cursor's phases.
+# - test_row_window_direct: the row-group window, hand cases and a sweep
+#   against a brute-force answer.
+# - test_arrow_schema_hint_direct: ARROW:schema values made by the IPC
+#   encoder, both framings, unreadable values, the key lookup and the guard.
+# - test_bypass_direct: a chunk's bytes read as stored, its start at a
+#   leading dictionary page, its leaf name after a group, and the refusals.
+# - test_runtime_footer_cache_direct: the footer cache on files written by
+#   the test: parse once, shared footers and one pin, revalidation of a
+#   rewritten or freshly written file, the pin budget, invalidate, the
+#   row-count memo, the stripped footer and summary, a file system that is
+#   not mmap-backed, and the budget policy.
+# - test_table_stats_direct: the eager fold and the provider: bounds decoded
+#   by type (unsigned, UINT_64 past Int64.MAX, DECIMAL), top-level leaves,
+#   HLL register merge against one sketch over the union, the path entry
+#   points.
 # - test_no_env_reads: the package's sources read no environment, import no
 #   komira package outside the deps below (and never komira_core), hold no
 #   raw pointer in a public signature, rebuild no address from an integer
@@ -154,15 +190,18 @@ mojo_library(
     srcs = _SRCS,
     deps = [
         "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
         "//src/komira_async:komira_async",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_fs:komira_fs",
+        "//src/komira_host:komira_host",
         "//src/komira_parquet_api:komira_parquet_api",
         "//src/komira_parquet_codec:komira_parquet_codec",
         "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_stats:komira_plan_stats",
         "//src/komira_simd:komira_simd",
         "//src/komira_zlib:komira_zlib",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
@@ -178,9 +217,11 @@ mojo_library(
         },
     },
     test_srcs = [
+        "tests/test_arrow_schema_hint_direct.mojo",
         "tests/test_bloom_pruner_direct.mojo",
         "tests/test_bloom_reader_direct.mojo",
         "tests/test_bss_direct.mojo",
+        "tests/test_bypass_direct.mojo",
         "tests/test_column_decode_context_direct.mojo",
         "tests/test_column_decoder_dict_direct.mojo",
         "tests/test_column_decoder_direct.mojo",
@@ -232,10 +273,14 @@ mojo_library(
         "tests/test_plain_ba_raise_outlined.mojo",
         "tests/test_plain_direct.mojo",
         "tests/test_plain_flba_direct.mojo",
+        "tests/test_rg_pruner_direct.mojo",
         "tests/test_rle_bitunpack_sweep.mojo",
         "tests/test_rle_decoder_direct.mojo",
         "tests/test_rle_simd.mojo",
         "tests/test_rle_simd_bw_small.mojo",
+        "tests/test_runtime_footer_cache_direct.mojo",
+        "tests/test_row_selection_direct.mojo",
+        "tests/test_row_window_direct.mojo",
         "tests/test_scan_copy_trace_direct.mojo",
         "tests/test_scan_trace_leaves_direct.mojo",
         "tests/test_selection_interval.mojo",
@@ -245,6 +290,7 @@ mojo_library(
         "tests/test_subrg_cursor_dict_direct.mojo",
         "tests/test_subrg_cursor_flat_direct.mojo",
         "tests/test_subrg_traces_direct.mojo",
+        "tests/test_table_stats_direct.mojo",
         "tests/test_thrift_compact_direct.mojo",
     ],
     visibility = ["PUBLIC"],

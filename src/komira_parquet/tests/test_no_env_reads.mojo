@@ -32,9 +32,11 @@ def _read(name: String) raises -> String:
 
 comptime _FILES: List[String] = [
     "__init__.mojo",
+    "arrow_schema_hint.mojo",
     "bloom_pruner.mojo",
     "bloom_reader.mojo",
     "byte_stream_split.mojo",
+    "bypass.mojo",
     "column_decode_context.mojo",
     "column_decoder.mojo",
     "column_decoder_assemble.mojo",
@@ -56,6 +58,7 @@ comptime _FILES: List[String] = [
     "dictionary_resolve.mojo",
     "file_reader.mojo",
     "footer_header.mojo",
+    "footer_pin_budget.mojo",
     "gather.mojo",
     "gather_byte_array.mojo",
     "gather_common.mojo",
@@ -70,8 +73,12 @@ comptime _FILES: List[String] = [
     "payload_sel_trace.mojo",
     "plain.mojo",
     "plain_flba.mojo",
+    "rg_pruner.mojo",
     "rle.mojo",
     "rle_bitunpack.mojo",
+    "row_selection.mojo",
+    "row_window.mojo",
+    "runtime_footer_cache.mojo",
     "scan_copy_trace.mojo",
     "selection_vector.mojo",
     "staged_filter_trace.mojo",
@@ -79,6 +86,7 @@ comptime _FILES: List[String] = [
     "subrg_cursor_pages.mojo",
     "subrg_dbp_trace.mojo",
     "subrg_scan_route_trace.mojo",
+    "table_stats.mojo",
     "thrift_compact.mojo",
 ]
 
@@ -211,16 +219,19 @@ def test_imports_only_its_deps() raises:
     # komira_serde are refused outright.
     var allowed: List[String] = [
         "komira_arrow",
+        "komira_arrow_ipc",
         "komira_async",
         "komira_atomic_alias",
         "komira_buffer",
         "komira_collections",
         "komira_dynamic_filter",
         "komira_fs",
+        "komira_host",
         "komira_parquet",
         "komira_parquet_api",
         "komira_parquet_codec",
         "komira_plan_expr",
+        "komira_plan_stats",
         "komira_simd",
         "komira_zlib",
     ]
