@@ -294,6 +294,40 @@ test "scanSource: code opens; comments and docstrings do not" {
     try testing.expectEqualStrings("libq.so.1", esc.sonames[0]);
 }
 
+/// `text` opens and holds exactly [libz.so.1], and with nothing declared
+/// the library is refused. A scanner that stops reading at a docstring or a
+/// comment sees "opens nothing, declares nothing" and accepts: the package
+/// would ship without the requirement.
+fn expectOpensZlibAndRefusedUndeclared(text: []const u8) !void {
+    var arena = testAlloc();
+    defer arena.deinit();
+    const a = arena.allocator();
+    const scan = try scanSource(a, text);
+    try testing.expect(scan.opens);
+    try testing.expectEqual(@as(usize, 1), scan.sonames.len);
+    try testing.expectEqualStrings("libz.so.1", scan.sonames[0]);
+    const why = try refusal(try dlopenReason(a, &.{.{ .path = "x.mojo", .text = text }}, &.{}));
+    try testing.expect(std.mem.indexOf(u8, why, "x.mojo: opens a shared library at run time (OwnedDLHandle); its sources name [libz.so.1] and the library declares `dlopen` []") != null);
+}
+
+test "scanSource: code after a module docstring is read" {
+    // Every Mojo module begins with one; the closing quotes end it.
+    try expectOpensZlibAndRefusedUndeclared("\"\"\"doc\"\"\"\nh = OwnedDLHandle(\"libz.so.1\")\n");
+}
+
+test "scanSource: code after a comment line is read" {
+    // A comment ends at its newline, alone and after a docstring.
+    try expectOpensZlibAndRefusedUndeclared("# opens zlib\nh = OwnedDLHandle(\"libz.so.1\")\n");
+    try expectOpensZlibAndRefusedUndeclared("\"\"\"doc\"\"\"\n# opens zlib\nh = OwnedDLHandle(\"libz.so.1\")\n");
+}
+
+test "scanSource: code after a multi-line docstring holding quotes is read" {
+    // A lone `"` or `'` inside the docstring neither ends it nor opens a
+    // literal; only the matching triple closes it, for either quote kind.
+    try expectOpensZlibAndRefusedUndeclared("\"\"\"Opens zlib's \"libz\".\n\nIt's one \" and one ' here.\n\"\"\"\nh = OwnedDLHandle(\"libz.so.1\")\n");
+    try expectOpensZlibAndRefusedUndeclared("'''Opens \"libz\".\nIt's here.\n'''\nh = OwnedDLHandle(\"libz.so.1\")\n");
+}
+
 test "dlopenReason: a declared soname is accepted" {
     var arena = testAlloc();
     defer arena.deinit();
