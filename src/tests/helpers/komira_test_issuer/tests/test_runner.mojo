@@ -60,7 +60,10 @@
 
 from std.testing import assert_equal, assert_true
 
+from komira_crypto.ecdsa_p256 import ecdsa_p256_sign_deterministic
+from komira_encoding import base64_url_encode_nopad
 from komira_jose import JwsSigner
+from komira_json import write_json_string
 from komira_jwks import Jwk, parse_jwk_set, render_jwk_set
 from komira_secret_store import SecretValue
 from komira_test_issuer import (
@@ -164,19 +167,41 @@ def _odd_scalar() -> List[UInt8]:
     return d^
 
 
-def _odd_signer(kid: String) raises -> JwsSigner:
-    """An ES256 signer whose published kid is `kid`, not its thumbprint."""
-    var real = JwsSigner.es256(SecretValue(Span(_odd_scalar())))
-    var x = real.public_jwk().x()
-    var y = real.public_jwk().y()
-    var public = Jwk.ec_p256(
+def _odd_jwk(kid: String) raises -> Jwk:
+    """The odd ES256 key's public JWK, published under `kid` (not
+    necessarily its thumbprint)."""
+    var real = JwsSigner.es256(SecretValue(Span(_odd_scalar()))).public_jwk()
+    var x = real.x()
+    var y = real.y()
+    return Jwk.ec_p256(
         Span(x), Span(y), kid=kid, alg=String("ES256"), key_use=String("sig")
     )
-    return JwsSigner(
-        _alg=String("ES256"),
-        _secret=SecretValue(Span(_odd_scalar())),
-        _public=public^,
+
+
+def _odd_sign(kid: String, payload: String, typ: Optional[String]) raises -> String:
+    """The compact ES256 JWS of `payload` by the odd key, its header naming
+    `kid`. A komira_jose `JwsSigner` always names its own key's thumbprint,
+    so this signs with komira_crypto directly, writing the header the way
+    `JwsSigner.sign` does (test_kid_not_thumbprint checks the bytes agree
+    when `kid` is the thumbprint)."""
+    var h = List[UInt8]()
+    h.extend(Span(String('{"alg":"ES256","kid":').as_bytes()))
+    write_json_string(h, kid)
+    if typ:
+        h.extend(Span(String(',"typ":').as_bytes()))
+        write_json_string(h, typ.value())
+    h.append(0x7D)  # '}'
+    var si = (
+        base64_url_encode_nopad(Span(h))
+        + "."
+        + base64_url_encode_nopad(payload.as_bytes())
     )
+    var d = _odd_scalar()
+    var rs = ecdsa_p256_sign_deterministic(Span(d), si.as_bytes())
+    var sig = List[UInt8]()
+    for i in range(64):
+        sig.append(rs[i])
+    return si + "." + base64_url_encode_nopad(Span(sig))
 
 
 def _member(name: String, value: String) -> String:
@@ -265,7 +290,7 @@ struct Faulty(IssuerUnderTest, Movable, Deinitable):
             var other = derived_key("ES256", "seed-other", 0).public_jwk()
             return _with(_without(doc, drop), other)
         if self.fault == F_KID_NOT_THUMBPRINT:
-            return _with(doc, _odd_signer(self.alt.value()).public_jwk())
+            return _with(doc, _odd_jwk(self.alt.value()))
         if self.fault == F_KID_SWAP:
             # Key 0 published under another kid, and the odd key under key
             # 0's thumbprint: the kid a token names is some key's thumbprint,
@@ -279,7 +304,7 @@ struct Faulty(IssuerUnderTest, Movable, Deinitable):
                 Span(x), Span(y), kid=self.alt2, alg=String("ES256"), key_use=String("sig")
             )
             var swapped = _with(_without(doc, drop), renamed)
-            return _with(swapped, _odd_signer(self.alt.value()).public_jwk())
+            return _with(swapped, _odd_jwk(self.alt.value()))
         return doc
 
     def mint_user_token(
@@ -304,7 +329,7 @@ struct Faulty(IssuerUnderTest, Movable, Deinitable):
         var jti = Optional[String](String("jti-") + String(self.minted))
         if self.fault == F_KID_NOT_THUMBPRINT or self.fault == F_KID_SWAP:
             var c = _claims(sub, now, now + TTL, jti, client_id, scope)
-            return _odd_signer(self.alt.value()).sign(c.as_bytes(), typ)
+            return _odd_sign(self.alt.value(), c, typ)
         if self.fault == F_SUB:
             sub = self.alt.value()
         var cid = Optional[String](client_id)
@@ -522,7 +547,14 @@ def _repeat_of(mut misses: String, a: Int, b: Int) raises:
 def test_kid_not_thumbprint() raises:
     # Every near miss of the odd key's real thumbprint (the empty kid is
     # refused by komira_jwks before any token exists).
-    var real = JwsSigner.es256(SecretValue(Span(_odd_scalar()))).kid()
+    var odd = JwsSigner.es256(SecretValue(Span(_odd_scalar())))
+    var real = odd.kid()
+    # The hand-made signer is the library's, byte for byte, when it names
+    # the real thumbprint (ES256 here is RFC 6979 deterministic).
+    var c = _claims(SCENARIO_SUBJECT, T0, T0 + TTL, String("j"), CLIENT, SCENARIO_SCOPE)
+    for t in range(2):
+        var typ = Optional[String](String("at+jwt")) if t == 0 else Optional[String]()
+        assert_equal(_odd_sign(real, c, typ), odd.sign(c.as_bytes(), typ))
     var near = _near_misses(real)
     var misses = String("")
     comptime WHY = "the token's kid is not the RFC 7638 thumbprint of its key"

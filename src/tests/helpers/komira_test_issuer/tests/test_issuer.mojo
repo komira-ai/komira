@@ -14,7 +14,10 @@
 #
 # The rotation tests name the plan's defect: a rotation that drops the former
 # key before the max lifetime plus the leeway have passed makes a token
-# signed before the switch fail while it is still in flight.
+# signed before the switch fail while it is still in flight. The former key
+# leaves at the switch plus the max lifetime plus 60 s (komira_jose's
+# `JOSE_MAX_LEEWAY_S`, written out here as RETIRE_LEEWAY so a change to it
+# is seen), whatever the issuer's own leeway.
 #
 # main runs every test and reports every failure.
 # =============================================================================
@@ -32,6 +35,10 @@ comptime T0: Int64 = 1000000
 comptime TTL: Int64 = 300
 comptime LEEWAY: Int64 = 30
 comptime LEAD: Int64 = 600
+# komira_jose's JOSE_MAX_LEEWAY_S: the keyring retires a former key this
+# long after the max lifetime, whatever leeway the issuer's relying parties
+# use.
+comptime RETIRE_LEEWAY: Int64 = 60
 comptime ISS = "https://issuer.example/a"
 comptime AUD = "service-a"
 comptime CLIENT = "client-a"
@@ -39,14 +46,17 @@ comptime SEED = "seed-a"
 
 
 def _issuer(
-    alg: String = "ES256", typ: String = "at+jwt", lead: Int64 = LEAD
+    alg: String = "ES256",
+    typ: String = "at+jwt",
+    lead: Int64 = LEAD,
+    leeway: Int64 = LEEWAY,
 ) raises -> TestIssuer:
     return TestIssuer(
         issuer=ISS,
         alg=alg,
         typ=typ,
         max_ttl_s=TTL,
-        leeway_s=LEEWAY,
+        leeway_s=leeway,
         publish_lead_s=lead,
         seed=SEED,
         now=T0,
@@ -61,6 +71,7 @@ def _issuer_err(
     lead: Int64 = LEAD,
     seed: String = SEED,
     now: Int64 = T0,
+    leeway: Int64 = LEEWAY,
 ) -> String:
     try:
         _ = TestIssuer(
@@ -68,7 +79,7 @@ def _issuer_err(
             alg=alg,
             typ=typ,
             max_ttl_s=ttl,
-            leeway_s=LEEWAY,
+            leeway_s=leeway,
             publish_lead_s=lead,
             seed=seed,
             now=now,
@@ -234,7 +245,8 @@ def test_in_flight_token_survives_rotation() raises:
     # lifetime plus the leeway have passed. A token signed at the switch must
     # verify under the document served at every moment until its exp plus
     # the leeway minus 1 s; the former key leaves the document at exactly
-    # the switch plus the max lifetime plus the leeway.
+    # the switch plus the max lifetime plus RETIRE_LEEWAY (60 s, more than
+    # this issuer's 30 s leeway: the keyring retires for every verifier).
     var iss = _issuer()
     iss.begin_rotation()
     _ = iss.jwks()
@@ -259,12 +271,36 @@ def test_in_flight_token_survives_rotation() raises:
         if _check_err(doc, after, "ES256", "at+jwt", points[i]) != "":
             misses += String(points[i] - switch) + ": the new key's token\n"
     assert_equal(misses, "", "seconds after the switch at which a token failed")
-    _to(iss, switch + TTL + LEEWAY - 1)
+    _to(iss, switch + TTL + RETIRE_LEEWAY - 1)
     assert_equal(_kids(iss.jwks()), _kid(1) + " " + _kid(0))
     assert_equal(len(iss.retiring_kids()), 1)
-    _to(iss, switch + TTL + LEEWAY)
+    _to(iss, switch + TTL + RETIRE_LEEWAY)
     assert_equal(_kids(iss.jwks()), _kid(1))
     assert_equal(len(iss.retiring_kids()), 0)
+
+
+def test_retirement_ignores_issuer_leeway() raises:
+    # Catches: a retirement timed by the issuer's own leeway instead of
+    # RETIRE_LEEWAY (the keyring would refuse it as too early, or a 60 s
+    # issuer would hide it), and one second early or late at either end of
+    # the allowed leeway range.
+    var misses = String("")
+    for k in range(3):
+        var leeway = Int64(0) if k == 0 else (LEEWAY if k == 1 else Int64(60))
+        var iss = _issuer(lead=0, leeway=leeway)
+        iss.begin_rotation()
+        _ = iss.jwks()
+        iss.finish_rotation()
+        try:
+            iss.advance(TTL + RETIRE_LEEWAY - 1)
+            if _kids(iss.jwks()) != _kid(1) + " " + _kid(0):
+                misses += String(leeway) + ": gone 1 s early\n"
+            iss.advance(1)
+            if _kids(iss.jwks()) != _kid(1):
+                misses += String(leeway) + ": still served\n"
+        except e:
+            misses += String(leeway) + ": " + String(e) + "\n"
+    assert_equal(misses, "", "leeways whose retirement was mistimed")
 
 
 def test_publish_before_sign() raises:
@@ -339,8 +375,8 @@ def test_two_retirements_in_one_step() raises:
         iss.finish_rotation()
         iss.advance(1)
     assert_equal(_kids(iss.jwks()), _kid(2) + " " + _kid(0) + " " + _kid(1))
-    # Key 0 leaves at T0 + 330, key 1 at T0 + 331; one step past both.
-    iss.advance(TTL + LEEWAY + 10)
+    # Key 0 leaves at T0 + 360, key 1 at T0 + 361; one step past both.
+    iss.advance(TTL + RETIRE_LEEWAY + 10)
     assert_equal(_kids(iss.jwks()), _kid(2))
 
 
@@ -362,7 +398,7 @@ def test_sign_claims() raises:
     var typed = iss.sign_claims(claims, Optional[String]("JWT"))
     assert_equal(JwsVerifier("ES256", parse_jwk_set(doc)).verify(typed).typ().value(), "JWT")
     var long = (
-        String('{"exp":') + String(T0 + TTL + 1) + "}"
+        String('{"iat":') + String(T0) + ',"exp":' + String(T0 + TTL + 1) + "}"
     )
     var err = String("")
     try:
@@ -370,6 +406,15 @@ def test_sign_claims() raises:
     except e:
         err = String(e)
     assert_equal(err, "JoseError: the token would outlive the keyring's max token TTL")
+    # The keyring signs only claims a verifier can check: no integer iat,
+    # no token.
+    var no_iat = String('{"exp":') + String(T0 + 10) + "}"
+    var missing = String("")
+    try:
+        _ = iss.sign_claims(no_iat, Optional[String]())
+    except e:
+        missing = String(e)
+    assert_equal(missing, "JoseError: claim iat is missing")
 
 
 def test_clock() raises:
@@ -417,6 +462,11 @@ def test_constructor_refusals() raises:
     assert_equal(_issuer_err(now=LEAD - 1), EARLY)
     assert_equal(_issuer_err(now=LEAD), "")
     assert_equal(_issuer_err(lead=0, now=0), "")
+    comptime LEEWAY_RANGE = "TestIssuerError: the leeway must be 0 to 60 seconds"
+    assert_equal(_issuer_err(leeway=-1), LEEWAY_RANGE)
+    assert_equal(_issuer_err(leeway=0), "")
+    assert_equal(_issuer_err(leeway=60), "")
+    assert_equal(_issuer_err(leeway=61), LEEWAY_RANGE)
     assert_equal(
         _issuer_err(ttl=0), "JoseError: the keyring max token TTL must be 1 to 86400 seconds"
     )
@@ -455,6 +505,10 @@ def main() raises:
         test_in_flight_token_survives_rotation()
     except e:
         failures += String("test_in_flight_token_survives_rotation: ") + String(e) + "\n"
+    try:
+        test_retirement_ignores_issuer_leeway()
+    except e:
+        failures += String("test_retirement_ignores_issuer_leeway: ") + String(e) + "\n"
     try:
         test_publish_before_sign()
     except e:
