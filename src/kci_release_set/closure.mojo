@@ -7,8 +7,13 @@
 # CONDA library member whose package name is not the conda name of ANOTHER
 # library member. Skipped: virtual packages (a name starting `__`: the
 # platform guard, `__linux` / `__osx`) and the compiler pin
-# (`MOJO_COMPILER_PACKAGE`). A requirement's name is the text before its
-# first space (`komira_hash ==1.0.0 h0_7` names `komira_hash`). A library
+# (`MOJO_COMPILER_PACKAGE`); and a requirement byte-equal to one of the
+# conda-forge requirements of the system libraries a library may open
+# (system_libs.mojo, held to tools/build/package/system_libs.bzl:
+# `zstd >=1.5.2,<2`; `zstd >=1.0`, `zstd`, `ZSTD >=1.5.2,<2` and
+# `conda-forge::zstd >=1.5.2,<2` are listed; one given more than once is
+# listed once, as PUBLISH refuses it). A requirement's name is the text
+# before its first space (`komira_hash ==1.0.0 h0_7` names `komira_hash`). A library
 # requiring itself, or requiring the metapackage, is listed: neither is
 # another library. Only libraries are read: the metapackage's requirements
 # are its members, and PUBLISH checks those rows; a non-CONDA member has none.
@@ -26,6 +31,7 @@
 
 from kci_release_set.conda_metadata import KIND_LIBRARY
 from kci_release_set.member import ReleaseMember
+from kci_release_set.system_libs import is_system_lib_requirement
 
 
 comptime MOJO_COMPILER_PACKAGE: String = "mojo-compiler"
@@ -66,6 +72,17 @@ def undeclared_requirements(members: List[ReleaseMember]) -> List[String]:
                 continue
             if _is_other_library(members, name, i):
                 continue
+            if is_system_lib_requirement(dep):
+                var earlier = 0
+                for k in range(d):
+                    if m.conda.depends[k] == dep:
+                        earlier += 1
+                if earlier == 1:  # said once, at its second occurrence
+                    out.append(
+                        String("artifact '") + m.artifact + String("' requires '") + dep
+                        + String("' more than once")
+                    )
+                continue
             out.append(
                 String("artifact '")
                 + m.artifact
@@ -74,5 +91,7 @@ def undeclared_requirements(members: List[ReleaseMember]) -> List[String]:
                 + String("', and '")
                 + name
                 + String("' is not another library of this release set")
+                + String(" (nor a system library requirement of")
+                + String(" tools/build/package/system_libs.bzl)")
             )
     return out^

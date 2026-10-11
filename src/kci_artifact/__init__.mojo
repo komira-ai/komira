@@ -83,6 +83,7 @@ from kci_artifact.validate import (
 from kci_artifact.affected import (
     ANSWER_UNIT,
     VERDICT_AFFECTED,
+    VERDICT_BROKEN,
     VERDICT_WIDENED,
     AffectedAnswer,
     Unit,
@@ -96,6 +97,7 @@ from kci_artifact.affected import (
     units_of,
 )
 from kci_artifact.derive import (
+    DERIVE_BROKEN,
     DERIVE_CHECK,
     DERIVE_UNMATCHED,
     DERIVE_VERDICT,

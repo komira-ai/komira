@@ -84,9 +84,9 @@ def push_limit_down_inplace(mut plan: LogicalPlan) raises:
 
         # Pattern: Limit(N, Project(exprs, gc)) -> Project(exprs, Limit(N, gc))
         # OFFSET: only push a plain LIMIT (offset == 0) below Project. A
-        # RANGE (offset > 0) is a terminal viewport verb whose offset the
-        # materialize sink absorbs at the plan ROOT (skip-count); pushing it
-        # under Project would move it off the root and the sink would miss it.
+        # RANGE (offset > 0) is a terminal viewport verb whose offset is
+        # designed to be applied at the plan ROOT by the executing caller (not
+        # in this tree); pushing it under Project would move it off the root.
         # offset == 0 keeps the exact pre-range pushdown behavior.
         if (
             plan._limit.value()[].child[].tag == PLAN_PROJECT
@@ -217,36 +217,22 @@ def fuse_sort_limit_inplace(mut plan: LogicalPlan) raises:
 #
 # The Project above an Aggregate is evaluated over EVERY group when the TopN
 # sits above it, and over only `n` rows when it sits below; and below it the
-# TopN's child IS the aggregate, so the AGG-TOPK stamp (which refuses a
-# Project that does more than pass names through) no longer refuses a Project
-# that renames or computes a comparator column.
+# TopN's child IS the aggregate, so the AGG-TOPK stamp (a physical-plan step,
+# not in this tree, that refuses a Project doing more than pass names through)
+# no longer refuses a Project that renames or computes a comparator column.
 #
 #   * ClickBench Q35. The agg-group FD rule re-emits
-#     `client_ip - 1/-2/-3` in the post-aggregate Project; the walker evaluated
-#     them serially on the driver over all 9,762,046 groups before the TopN —
-#     449 ms of a 1,557 ms query. The pushed plan, written by hand as
-#     SQL: -450 ms alone there. This rule emits that plan
-#     (`Project[5] > TopN > Aggregate[1 key]`, runner `--explain`).
-#
-# REACH, MEASURED 2026-09-23 by materializing the 42 benchmark queries
-# with GROUP BY + ORDER BY + LIMIT: a pre-rule binary vs this one, comparing the
-# AGG-TOPK trace and `--dump`. The TopN's input
-# changes on EXACTLY FOUR queries, and on each the stamp flips from refused to
-# STAMPED: cbq35 (the computed restore above), and three pure renames, cbq18
-# (`__grp_key_0 AS m`), cbq39 (`__grp_key_0 AS src`, `url AS dst`, under
-# `OFFSET 1000`) and cbq42 (`__grp_key_0 AS m`, `OFFSET 1000`). All 42 dumps
-# are row-for-row identical between the two binaries; cbq35, cbq18 and cbq39
-# also match DuckDB row for row, and cbq42 matches it up to timestamp rendering.
-# Only cbq35 has a measured cost effect. On the three renames the bounded drain
-# still declines (the drain refuses a var-width ORDER BY key, and cbq42
-# has only 1,440 groups), so their route is otherwise unchanged.
-# ⚠ Measure reach by materializing the plan, never with `--explain`: explain
-# optimizes BEFORE an OFFSET is absorbed into the plan.
+#     `client_ip - 1/-2/-3` in the post-aggregate Project, which is then
+#     evaluated over every group before the TopN. This rule emits the pushed
+#     plan instead (`Project[5] > TopN > Aggregate[1 key]`).
+#   * Pure renames over an aggregate (ClickBench cbq18 `__grp_key_0 AS m`,
+#     cbq39 `__grp_key_0 AS src`, `url AS dst`, cbq42 `__grp_key_0 AS m`):
+#     the TopN's child becomes the aggregate, as above.
 #
 # ── THE ONE HAZARD: THE TIE ORDER ───────────────────────────────────────────
 #
-# The engine does not sort by `keys` alone. Before the cut it WIDENS them with
-# a deterministic tie-break over the TopN's INPUT schema
+# A TopN is not designed to sort by `keys` alone. Before the cut its keys are
+# WIDENED with a deterministic tie-break over the TopN's INPUT schema
 # (`topn_tiebreak_policy.append_deterministic_tiebreak_schema`
 # — every INT64/INT32/FLOAT64 column not already a key, in schema order, ASC).
 # Moving the TopN below the Project CHANGES ITS INPUT SCHEMA, so the widened
@@ -257,8 +243,8 @@ def fuse_sort_limit_inplace(mut plan: LogicalPlan) raises:
 # prove it cannot happen, and declines whenever it cannot.
 #
 # THE PROOF, per candidate:
-#   1. Widen `keys` over the PROJECT's schema exactly as the engine does today:
-#      that is the comparator the un-rewritten plan executes.
+#   1. Widen `keys` over the PROJECT's schema exactly as `topn_tiebreak_policy`
+#      does: that is the comparator the un-rewritten plan is designed to use.
 #   2. Translate every entry through the Project. A col-ref (renamed or not)
 #      maps to its aggregate column. An entry that orders NOTHING is dropped:
 #      a column already in the list (two names for one column), or a
@@ -283,9 +269,9 @@ def fuse_sort_limit_inplace(mut plan: LogicalPlan) raises:
 #
 # ⛔ WHAT IT DELIBERATELY DOES NOT DO: make the translated tie-break keys
 # EXPLICIT on the new TopN so that a reordering Project could be served too.
-# The engine pads each appended tie-break key's NULL placement
-# (in the engine's TopN operator); an explicit key would have to restate
-# that padding here — a second copy of an engine rule — and the resulting
+# An appended tie-break key's NULL placement is padded at execution, outside
+# komira_optimizer; an explicit key would have to restate that padding here —
+# a second copy of an executor rule — and the resulting
 # non-default placement list would make the AGG-TOPK stamp decline
 # (`is_explicit_nulls_first_request`) -- the stamp this rule exists to reach. Declined, not
 # approximated.
@@ -293,24 +279,22 @@ def fuse_sort_limit_inplace(mut plan: LogicalPlan) raises:
 # ⛔ ONLY OVER AN AGGREGATE, AND ONLY WHEN THE PROJECT DOES WORK. A pure
 # same-name col-ref Project is already peeled by the AGG-TOPK stamp and costs a
 # column narrow; moving the TopN buys nothing there, so the plan is left as it
-# is. Over a join, a scan or a distinct the totality argument is unavailable
-# and nothing has been measured.
+# is. Over a join, a scan or a distinct the totality argument is unavailable,
+# so the rule declines.
 #
 # ⛔ THE PROJECT IS NOW EVALUATED OVER `n` ROWS INSTEAD OF EVERY GROUP. For a
 # deterministic, row-local expression that is the same value on every row it
-# still sees. Anything else changes the answer: a window function (a later pass
-# would turn it into a PartitionBy over the TopN's `n` rows), an aggregate, a
+# still sees. Anything else changes the answer: a window function (it would
+# see the TopN's `n` rows instead of every group), an aggregate, a
 # UDF, a correlated subquery. So every COMPUTED Project entry must pass
 # `_row_local_shape` -- a FAIL-CLOSED allow-list walked over the WHOLE
 # expression (col-ref, literal, alias, cast, unary, binary), not a check of the
 # top tag. ⚠ A top-tag check is what the first draft of this rule used
 # (the agg-group FD rule's `_derived_key_is_deterministic`, which is right for a GROUP
-# BY key, where the binder has already refused windows): it admitted
-# `rank() OVER (...) + 1`, whose top tag is a BINARY_OP, and
-# `test_nested_window_function_in_the_project_declines` is the RED that caught
-# it. An expression that would RAISE on a group the TopN discards no longer
-# raises; that is the one observable difference and it runs in the direction
-# of answering.
+# BY key, where a binder (not in this tree) refuses windows): it admitted
+# `rank() OVER (...) + 1`, whose top tag is a BINARY_OP. An expression that
+# would RAISE on a group the TopN discards no longer raises; that is the one
+# observable difference and it runs in the direction of answering.
 # =============================================================================
 
 
@@ -367,7 +351,7 @@ def _row_local_shape(e: Expr) -> Bool:
         expression hiding one would under-report its inputs and a comparator
         entry that DOES order rows would be dropped -- a wrong answer.
     Any other tag returns False and the rule DECLINES. That covers both
-    measured shapes (Q35's `client_ip - k`, cbq18's rename) and costs, at worst,
+    target shapes (Q35's `client_ip - k`, cbq18's rename) and costs, at worst,
     a missed rewrite -- never a wrong one. Widening it is a per-tag decision
     with a test, not a default."""
     var tag = e.tag
@@ -461,8 +445,8 @@ def _build_topn_below_project(imm plan: LogicalPlan) raises -> Optional[LogicalP
         or len(td.nulls_first) != n_explicit
     ):
         return None
-    # Two output columns under one name: the engine resolves a key to the
-    # FIRST, and so would this rule, but nothing here needs to reason about it.
+    # Two output columns under one name: a key would resolve to the FIRST,
+    # but nothing here needs to reason about it, so decline.
     for i in range(n_out):
         for j in range(i):
             if s_p.field_name(i) == s_p.field_name(j):
@@ -604,9 +588,9 @@ def _build_topn_below_project(imm plan: LogicalPlan) raises -> Optional[LogicalP
 # =============================================================================
 
 def propagate_statistics(var plan: LogicalPlan) -> LogicalPlan:
-    """Propagate estimated row counts through the plan tree.
+    """Compute `estimate_row_count` over the plan and discard it.
 
-    This is an annotation pass -- the plan structure does not change.
+    Nothing is stored on the plan; it is returned unchanged.
     """
     _ = estimate_row_count(plan)
     return plan^
@@ -615,15 +599,18 @@ def propagate_statistics(var plan: LogicalPlan) -> LogicalPlan:
 def estimate_row_count(plan: LogicalPlan) -> Int:
     """Estimate the number of output rows for a plan node.
 
-    Uses simple heuristics:
-      Scan: 1_000_000 (default, would use Parquet stats in production)
+    Uses simple heuristics (each halving/tenth floored at 1):
+      Scan: 1_000_000 (a fixed default; no statistics are read)
       Filter: child * 0.5
       Aggregate: child * 0.1
-      Join (inner/cross): left * right * 0.3
+      Join (cross): left * right
       Join (semi/anti): left * 0.5
-      Project: child (unchanged)
-      Limit(N): min(N, child)
-      Sort/Distinct/TopN: child
+      Join (other): min(left * right, 1_000_000_000) * 0.3
+      Project / Sort: child (unchanged)
+      Limit(N, offset): min(N, max(child - offset, 0))
+      Distinct: child * 0.5
+      TopN(N): min(N, child)
+      Any other node: 1_000_000
     """
     if plan.tag == PLAN_SCAN:
         return 1_000_000

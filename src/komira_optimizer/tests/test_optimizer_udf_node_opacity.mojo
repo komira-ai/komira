@@ -4,41 +4,41 @@
 # =============================================================================
 #
 # The UDF design notes
-# asserted — from reading, not from measurement — that a handle bolted beside a
-# `lit(true)` placeholder is deleted by `push_predicates_down`. This file is
-# that assertion MEASURED, and it turned out to be understated in one arm and
+# asserted — from reading the code, not from a test — that a handle bolted
+# beside a `lit(true)` placeholder is deleted by `push_predicates_down`. This
+# file TESTS that assertion, and it turned out to be understated in one arm and
 # to have a second, worse arm nobody had named.
 #
-# ── THE TWO DEFECTS ─────────────────────────────────────────────────────────
+# ── THE TWO DEFECTS (both fixed; the tests below pin the fix) ──────────────
 #
-# 1. **A UDF-CARRYING PROJECT LOSES ITS UDF WHEN A FILTER IS PUSHED THROUGH
+# 1. **A UDF-CARRYING PROJECT LOST ITS UDF WHEN A FILTER WAS PUSHED THROUGH
 #    IT.** Every reconstruction in the Project arm of `push_predicates_down`
-#    calls `LogicalPlan.project(...)` — the NON-UDF factory — so the rebuilt
-#    node simply does not have the payload the original had. Not "the filter
-#    moved to a place it should not be": the customer's function is GONE, and
+#    called `LogicalPlan.project(...)` — the NON-UDF factory — so the rebuilt
+#    node simply did not have the payload the original had. Not "the filter
+#    moved to a place it should not be": the customer's function was GONE, and
 #    the Project's `exprs` are the placeholder col-refs the UDF path stamps, so
-#    the plan then executes the placeholder and returns wrong rows quietly.
+#    executing the plan would run the placeholder and return wrong rows quietly.
 #
-#    ⚠ IT USED TO BE GUARDED. The comment block above that arm still explains
+#    ⚠ IT USED TO BE GUARDED. The comment block above that arm explains
 #    exactly why a UDF-Project must be a pushdown barrier ("pushing changes the
 #    cardinality the UDF sees, which is illegal for non-stateless UDFs"), and
 #    then says: "UDF-Project barrier removed
 #    — ProjectData no longer carries `udf`." **A LATER CHANGE PUT THE FIELD BACK ONE DAY
-#    LATER AND THE BARRIER WAS NEVER RESTORED.** The rationale for
-#    the guard outlived the guard by fifteen months.
+#    LATER AND THE BARRIER WAS NOT RESTORED UNTIL THIS FIX.** The rationale for
+#    the guard outlived the guard.
 #
-# 2. **A UDF-CARRYING FILTER IS DELETED OUTRIGHT** when its predicate is fully
+# 2. **A UDF-CARRYING FILTER WAS DELETED OUTRIGHT** when its predicate was fully
 #    absorbed by the scan (`if len(kept) == 0: return new_scan^`). The UDF path
 #    stamps `lit(true)` as the predicate precisely because the real work is in
 #    the UDF — and a `lit(true)` is the most pushable predicate there is.
 #
-# ── WHY THIS IS LATENT TODAY AND WHY IT STILL HAS TO BE FIXED FIRST ─────────
-# `materialize_plan` refuses a UDF-carrying plan at the door
-# (plan materialization refuses it), ABOVE the optimizer, so neither defect can
-# produce a wrong answer right now. That refusal is what
-# UDF execution would NARROW. Narrowing it before this is
-# fixed converts a loud refusal into a silent wrong answer, which is the one
-# outcome that must never happen.
+# ── WHY THE DEFECTS WERE LATENT, AND WHY THEY HAD TO BE FIXED FIRST ─────────
+# komira_optimizer executes nothing, and no caller in this tree executes a
+# UDF-carrying plan. A caller that executes plans is designed to refuse a
+# UDF-carrying plan before it runs, so neither defect could produce a wrong
+# answer. UDF execution would NARROW that refusal. Narrowing it before these
+# were fixed would convert a loud refusal into a silent wrong answer, which is
+# the one outcome that must never happen.
 #
 # ── THE FIX, AND WHY IT IS THE CONSERVATIVE DIRECTION ───────────────────────
 # A UDF-carrying Filter or Project is OPAQUE: pushdown recurses INTO its child
@@ -197,19 +197,19 @@ def test_a_udf_filters_placeholder_predicate_does_not_delete_the_node() raises:
 
 
 def test_copy_plan_preserves_the_udf_on_all_three_carriers() raises:
-    """★★★ THIS IS THE REAL DEFECT; pushdown was one of ~60 symptoms.
+    """★★★ THIS IS THE REAL DEFECT; pushdown was one symptom of many.
 
     `_copy_plan_body`'s Filter, Project and Aggregate arms each rebuilt through
     the NON-UDF factory, under a comment saying the field no longer existed —
     removed one day, field restored the next, note never updated. Every
     `_take_*_child` helper routes through `_copy_plan`, and `_copy_plan` is
-    called from ~60 sites across six optimizer rule modules plus
-    `EngineContext.explain_analyze`.
+    called from about fifty sites across nine komira_optimizer modules.
 
-    ⚠ AND `_copy_plan`'s EXISTING POST-CONDITION PASSED OVER IT. It checks that
-    the VARIANT payload is present — and a Filter whose `_filter` is populated
-    and whose `udf` is gone satisfies that perfectly. A node can be
-    structurally intact and have lost the customer's function."""
+    ⚠ AND `_copy_plan`'s VARIANT-PAYLOAD POST-CONDITION PASSED OVER IT. That
+    check asks only that the VARIANT payload is present — and a Filter whose
+    `_filter` is populated and whose `udf` is gone satisfies it perfectly. A
+    node can be structurally intact and have lost the customer's function;
+    `_copy_plan` now also checks `has_udf()`."""
     var f = LogicalPlan.filter_with_udf(
         Expr.literal(ScalarValue.from_bool(True)),
         _scan(),
