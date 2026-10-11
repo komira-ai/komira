@@ -293,6 +293,9 @@ def _hard_cancel(mut rt: UdfRuntime) raises:
     var b = _bind(rt, s, 0)
     var r = rt.call_batch(b.inst, s, _ints([1, 2]), CallOptions(False, True, False))
     _expect(r.outcome, ERR_INSTANCE_LOST, "did not answer within 500 ms", "a cancel user code ignores")
+    # killed, then reaped and named (a kill left unreaped reads "could not
+    # be reaped")
+    _expect(r.outcome, ERR_INSTANCE_LOST, "was killed by signal 9", "a cancel user code ignores")
     _unbind(rt, b)
 
 
@@ -327,6 +330,27 @@ def _frames(mut rt: UdfRuntime) raises:
     _unbind(rt, sb)
 
 
+def _open_fails(lib: String) -> String:
+    try:
+        var rt = UdfRuntime.open(lib)
+        rt.shutdown()
+        return "opened"
+    except e:
+        return String(e)
+
+
+def _corrupt_hellos() raises:
+    # The corrupt runtime's workers break the HELLO handshake by the order
+    # they start (worker/corrupt.mjs, helloCorrupt): the first three are
+    # admission workers, so the first three opens fail at init.
+    var why = _open_fails(CORRUPT_LIB)
+    assert_true("ERR_INSTANCE_LOST" in why and "exited with status 5" in why, "HELLO 0, no answer: " + why)
+    why = _open_fails(CORRUPT_LIB)
+    assert_true("ERR_ABI" in why and "the worker speaks wire 2, ABI 1.0" in why, "HELLO 1, wire 2: " + why)
+    why = _open_fails(CORRUPT_LIB)
+    assert_true("ERR_ABI" in why and "the worker speaks wire 0, ABI 0.0" in why, "HELLO 2, 8 bytes: " + why)
+
+
 def _corrupt_describes() raises:
     # The corrupt runtime's first five DESCRIBE replies are malformed, one
     # length check each (worker/corrupt.mjs, describeCorrupt); open asks
@@ -345,6 +369,14 @@ def _corrupt_describes() raises:
     # one byte too strict refuses it).
     var empty = UdfRuntime.open(CORRUPT_LIB)
     assert_equal(empty.describe().runtime_abi, "", "DESCRIBE 5: an empty runtime ABI")
+    # Workers 0 to 8 were admission workers (three HELLO cases, six opens
+    # since); the tenth is this context's, which exits before its HELLO: the
+    # context is refused with the spawn's reason, and the next one opens.
+    var lost = empty.open_context(0)
+    _expect(lost.outcome, ERR_INSTANCE_LOST, "exited with status 5", "a context whose worker dies at HELLO")
+    var next = empty.open_context(0)
+    assert_true(next.outcome.is_ok(), "the context after: " + String(next.outcome))
+    empty.close_context(next.handle)
     empty.shutdown()
 
 
@@ -423,6 +455,7 @@ def _reader_bounds(mut rt: UdfRuntime, b: Bound, s: UdfSpec) raises:
 
 
 def _corrupt_outputs() raises:
+    _corrupt_hellos()
     _corrupt_describes()
     var rt = UdfRuntime.open(CORRUPT_LIB)
     assert_equal(rt.describe().runtime_id, "komira-test/node", "the DESCRIBE after the malformed ones")

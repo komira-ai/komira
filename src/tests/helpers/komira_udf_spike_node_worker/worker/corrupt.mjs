@@ -12,7 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { MAGIC, OP, FLAG_INLINE, HEADER_BYTES, writeRaw } from './wire.mjs';
+import { MAGIC, OP, FLAG_INLINE, HEADER_BYTES, nextRequest, reply, writeRaw } from './wire.mjs';
 
 class Fb {
   constructor() {
@@ -363,16 +363,40 @@ function u32(v) {
 // launcher passes it on), which only this test's workers share.
 const DESCRIBES = path.join(process.env.TMPDIR ?? '/tmp', 'komira-udf-corrupt-describes');
 
-function nextDescribe() {
+// The count kept in `file`, then incremented: 0 the first time.
+function nextCount(file) {
   let n = 0;
   try {
-    n = Number(fs.readFileSync(DESCRIBES, 'utf8'));
+    n = Number(fs.readFileSync(file, 'utf8'));
   } catch {
     n = 0;
   }
-  fs.writeFileSync(DESCRIBES, String(n + 1));
+  fs.writeFileSync(file, String(n + 1));
   return n;
 }
+
+const nextDescribe = () => nextCount(DESCRIBES);
+
+// HELLO replies that break the handshake (proxy/channel.c, kudfw_spawn), by
+// the order workers start in the test's TMPDIR: the first exits with status
+// 5 before answering, the second answers wire version 2, the third answers
+// 8 bytes (too short to hold three versions), and the tenth exits like the
+// first (the test's tenth worker is a context's, not an admission worker's:
+// tests/test_node_worker.mojo, _corrupt_hellos). The others are answered by
+// the main loop. HELLO is every worker's first request, read here when this
+// module is imported, before worker.mjs's loop starts.
+const HELLOS = path.join(process.env.TMPDIR ?? '/tmp', 'komira-udf-corrupt-hellos');
+
+function helloCorrupt() {
+  const k = nextCount(HELLOS);
+  if (k !== 0 && k !== 1 && k !== 2 && k !== 9) return;
+  const m = nextRequest();
+  if (k === 0 || k === 9) process.exit(5);
+  if (k === 1) reply(m.id, 0, [u32(2), u32(1), u32(0)]);
+  else reply(m.id, 0, [u32(1), u32(1)]);
+}
+
+if (process.argv.includes('--corrupt-output')) helloCorrupt();
 
 export function describeCorrupt(id, fixed, good) {
   const name = Buffer.from('komira-test/node');

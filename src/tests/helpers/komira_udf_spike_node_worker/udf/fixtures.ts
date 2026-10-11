@@ -250,6 +250,16 @@ export function returns_wrong_array(x: Vector<Float64>): Int32Array {
   return new Int32Array(x.length);
 }
 
+// sum, whose finish raises: an error out of AGG_FINISH.
+export const sum_finish_raises = {
+  init: (): bigint => 0n,
+  update: (s: bigint, x: I64): bigint => (x === null ? s : s + x),
+  merge: (s: bigint, t: I64): bigint => (t === null ? s : s + t),
+  finish: (_s: bigint): bigint => {
+    throw new Error('sum_finish_raises: finish');
+  },
+};
+
 export const not_a_function = 42;
 
 export function* not_a_table(_batches: Iterable<RecordBatch>): Generator<number> {
