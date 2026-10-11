@@ -1,0 +1,3 @@
+# komira_op_agg_hash
+
+The hash aggregation tables of the engine: `FlatHashAggregator`, a split-index table (a compact tag array to probe, a slot directory, and an insertion-order entry buffer of hash, Int64 keys and accumulator slots laid out by an `AggLayout`); `PerfectHashAggregator`, a flat array for small dense integer key domains (at most 65,536 keys); `PartitionedFlatHashAggregator`, one `FlatHashAggregator` per radix partition; and `FlatHashPartitionFlush`, the per-partition row buffers a table scatters into when it reaches its cache-resident cap. Batches of keys and handles are passed as spans; no public function takes a pointer. The sinks that drive these tables are in the packages above.
