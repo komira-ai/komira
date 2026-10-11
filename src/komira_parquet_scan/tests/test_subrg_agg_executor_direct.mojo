@@ -13,7 +13,8 @@
 #     any refused row group under a STRING key;
 #   - filters: the key keep-table, the gathered survivors, the resolved
 #     filter for other shapes, the statistics prune (an all-pruned file is an
-#     answer with no group), and a STRING key's all / none / partial chunks;
+#     answer with no group), and a STRING key's all / none / partial chunks,
+#     with an arithmetic predicate on a numeric key beside the STRING key;
 #   - the chunk type rule, and plans the route refuses.
 
 from std.collections import Dict
@@ -622,6 +623,25 @@ def test_a_string_key_chunk_folds_whole_skips_or_abandons() raises:
     assert_equal(len(_run(rt, path, names, 1, partial^)), 0)
     var on_key = Expr.binary(BIN_EQ, Expr.col_ref("s"), Expr.literal(ScalarValue.from_string("s1")))
     assert_equal(len(_run(rt, path, names, 1, on_key^)), 0)
+    rt.shutdown()
+
+
+def test_a_string_and_numeric_key_chunk_evaluates_arithmetic_on_the_numeric_key() raises:
+    # Keys [s, k]: the k column stays a numeric dictionary in the chunk, and
+    # `k + 0` is not a `column <cmp> literal` leaf, so the selection must be
+    # computed on k's flat values. Every row passes `k + 0 >= 100` (folded,
+    # DuckDB's groups), none passes `k + 0 < 100` (an empty answer), and
+    # `k + 0 >= 102` keeps part of each chunk (the run is abandoned).
+    var rt = _runtime()
+    var path = _file("sagg_sk_arith", _rgs(), -1)
+    var names: List[String] = ["s", "k", "v"]
+    var k_plus = Expr.binary(BIN_ADD, Expr.col_ref("k"), _lit(0))
+    var all_pass = Expr.binary(BIN_GE, k_plus.copy(), _lit(100))
+    _check(_run(rt, path, names, 2, all_pass^), _expected(names, 2, _all_rows(), -1), "#chunks=5 type_errors=0")
+    var none_pass = Expr.binary(BIN_LT, k_plus.copy(), _lit(100))
+    _check(_run(rt, path, names, 2, none_pass^), List[String](), "#chunks=0 type_errors=0")
+    var partial = Expr.binary(BIN_GE, k_plus^, _lit(102))
+    assert_equal(len(_run(rt, path, names, 2, partial^)), 0)
     rt.shutdown()
 
 

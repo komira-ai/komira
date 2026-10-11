@@ -23,7 +23,9 @@
 #     dictionary-preserved chunk and its survivors gathered from it;
 #   * any other predicate on a numeric-key chunk resolves the dictionary
 #     columns to flat values and filters them (`batch_filter`);
-#   * on a STRING-key chunk, a chunk every row of which passes is folded and
+#   * on a STRING-key chunk the predicate is evaluated with the numeric
+#     dictionary columns resolved to flat values (the STRING dictionary is
+#     kept); a chunk every row of which passes is folded and
 #     a chunk no row of which passes is skipped; a chunk only some rows of
 #     which pass declines the row group (filtering would build the string
 #     column on the worker).
@@ -48,7 +50,7 @@ from komira_parquet.subrg_column_cursor import ResumableColumnCursor
 from komira_parquet_api.metadata import SchemaElement
 from komira_plan_expr.expr import Expr
 
-from .batch_filter import filter_batch_by_predicate
+from .batch_filter import filter_batch_by_predicate, numeric_dict_cols_resolved
 from .parquet_reader import ParquetReader
 from .scan_chunk_sink import ScanChunkSink
 from .subrg_agg_plan import CHUNK_ROWS, SubrgAggPlan
@@ -303,7 +305,10 @@ def fold_one_rg_subrg[FS: FileSystem, SINK: ScanChunkSink](
                     _ = batch^
                     sink.consume_chunk(local, rg_idx, chunk_idx, survivors^)
             elif plan.has_string_key:
-                var sel = evaluate_filter_narrowed(batch, filter_pred.value())
+                # The selection is computed with the numeric keys resolved to
+                # flat values (the evaluator is not dictionary-aware for
+                # them); the chunk handed on keeps its dictionaries.
+                var sel = evaluate_filter_narrowed(numeric_dict_cols_resolved(batch), filter_pred.value())
                 if sel.length() == n_rows:
                     sink.consume_chunk(local, rg_idx, chunk_idx, batch^)
                 elif sel.length() == 0:
