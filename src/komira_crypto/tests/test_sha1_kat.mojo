@@ -8,9 +8,9 @@
 # SHA-1's, bit for bit, and it stays SHA-1's at package scale.
 #
 # THE ROWS
-#   (1) FIPS 180 examples: the empty string, "abc" (one block), the 448-bit
-#       two-block message, the 896-bit message, and one million 'a' (the
-#       ~1 MB NIST stress vector) — every one on BOTH surfaces (streaming
+#   (1) FIPS 180 example messages: the empty string, "abc" (one block), the
+#       448-bit two-block message, the 896-bit message (a FIPS 180 SHA-384/512
+#       example input), and one million 'a' (the ~1 MB NIST stress vector) — every one on BOTH surfaces (streaming
 #       `Sha1` and one-shot `sha1`), which reach AWS-LC through two
 #       different entry points (EVP_MD_CTX vs SHA1()).
 #   (2) NIST CAVP SHA1ShortMsg — all 65 vectors, Len = 0 .. 512 bits, both
@@ -25,8 +25,10 @@
 #       sizes (20-byte digest, 64-byte block).
 #
 # PROVENANCE OF EVERY EXPECTED VALUE
-#   * (1): FIPS 180 / NIST example values; each also agrees with GNU
-#     coreutils `sha1sum` (an implementation independent of AWS-LC).
+#   * (1): FIPS 180 / NIST SHA-1 example values, except the 896-bit message:
+#     no FIPS or NIST example gives its SHA-1 digest, so that one value rests
+#     on GNU coreutils `sha1sum` alone. Every value in (1) agrees with
+#     `sha1sum` (an implementation independent of AWS-LC).
 #   * (2), (3): copied verbatim from SHA1ShortMsg.rsp and SHA1Monte.rsp in
 #     NIST's `shabytetestvectors.zip` (the CAVP "Secure Hashing" byte-oriented
 #     vectors — the same archive the SHA-2 CAVP tests were taken from, byte-identical),
