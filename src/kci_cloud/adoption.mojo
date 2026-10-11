@@ -342,18 +342,27 @@ def replace_findings(actions: List[ChangeAction], adopted: List[String]) -> List
 struct PlanReport(Movable):
     """A plan, with what safe adoption adds to it: the engine's `actions`,
     the `adopted` nodes among them (rule 2), and the nodes the apply will
-    `released` (rule 4)."""
+    `released` (rule 4). And what an apply of the same graph would leave
+    alone and report, as `ApplyOutcome` names them: `leftover` (nodes of
+    resources the file no longer names) and `left_behind` (retained objects
+    of resources still in the file that it no longer lowers)."""
 
     var actions: List[ChangeAction]
     var adopted: List[String]
     var released: List[String]
+    var leftover: List[String]
+    var left_behind: List[String]
 
     def __init__(
         out self,
         var actions: List[ChangeAction],
         var adopted: List[String] = List[String](),
         var released: List[String] = List[String](),
+        var leftover: List[String] = List[String](),
+        var left_behind: List[String] = List[String](),
     ):
         self.actions = actions^
         self.adopted = adopted^
         self.released = released^
+        self.leftover = leftover^
+        self.left_behind = left_behind^

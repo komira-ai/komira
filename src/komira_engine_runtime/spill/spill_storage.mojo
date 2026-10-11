@@ -15,7 +15,7 @@
 # AlignedBufferTrait surface) plugs straight into the existing
 # column/row consumers. No new wrapper trait needed.
 #
-# # Why this lives in `komira_engine_runtime/spill/` (not `komira_core/`)
+# # Why this lives in `komira_engine_runtime/spill/`
 #
 # Spill is engine-internal. Its
 # consumers are spill paths (write) + restore paths (read), both inside

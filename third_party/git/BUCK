@@ -6,6 +6,7 @@ load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "row")
+load("@komira//tools/build/toolchains/loader_closure:defs.bzl", "loader_closure_check")
 load(":defs.bzl", "git_build", "git_check", "git_tool")
 
 _TRIPLE = row("linux-x86_64")["zig_triple"]
@@ -84,10 +85,27 @@ git_check(
     target_compatible_with = LINUX_X86_64,  # komira-limit:git-oracle-linux-x86-64
     git = ":git_dist",
     git_lfs = "//third_party/git-lfs:git-lfs[git-lfs]",
-    glibc_floor_minor = _TRIPLE.split(".")[-1],
     lfs_version = _LFS_VERSION,
     script = "git_check.sh",
     version = _VERSION,
+)
+
+# What the loader maps for each program, read from the ELF files
+# (//tools/build/toolchains/loader_closure): glibc's libraries from the
+# system and nothing else (libcurl and zlib are linked in); and no
+# GLIBC_2.<n> above the floor in any ELF file. The roots are the programs
+# that link libcurl; every program of the distribution is checked.
+loader_closure_check(
+    name = "git_closure",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:git-oracle-linux-x86-64
+    glibc_floor_minor = _TRIPLE.split(".")[-1],
+    prefix = ":git_dist",
+    roots = [
+        "bin/git",
+        "libexec/git-core/git-http-fetch",
+        "libexec/git-core/git-remote-http",
+    ],
 )
 
 shell_lint(
@@ -106,6 +124,7 @@ git_tool(
     target_compatible_with = LINUX_X86_64,  # komira-limit:git-oracle-linux-x86-64
     checks = [
         ":git_check",
+        ":git_closure",
         ":shell_lint",
     ],
     dist = ":git_dist",

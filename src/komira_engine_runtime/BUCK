@@ -4,9 +4,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # (measured once per host), hardware and topology detection and the async
 # runtime built from them, morsel sizing as a pure function of the host profile
 # and the segment (recorded in the physical plan), the dispatch-time fan-out
-# grain, the run and segment execution context, wake primitives, counters, and
-# the small shared row and column helpers. It depends on no engine package
-# above it.
+# grain, the run and segment execution context, the parallel RecordBatch concat,
+# wake primitives, counters, and the small shared row and column helpers. It
+# depends on no engine package above it.
 mojo_library(
     name = "komira_engine_runtime",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -24,13 +24,19 @@ mojo_library(
         "//src/komira_fs:komira_fs",
         "//src/komira_host:komira_host",
         "//src/komira_libc:komira_libc",
+        "//src/komira_metrics:komira_metrics",
         "//src/komira_morsel:komira_morsel",
+        "//src/komira_objectstore:komira_objectstore",
         "//src/komira_physical_plan:komira_physical_plan",
+        "//src/komira_shuffle:komira_shuffle",
     ],
     test_srcs = [
         "tests/test_asof_join_probe_column_native_transparency.mojo",
         "tests/test_cb20_morsel_count_mechanism.mojo",
         "tests/test_column_native_foundation.mojo",
+        "tests/test_concat_dict_unify.mojo",
+        "tests/test_concat_one_column_parallel.mojo",
+        "tests/test_concat_release_state.mojo",
         "tests/test_counters.mojo",
         "tests/test_distinct_column_native_transparency.mojo",
         "tests/test_filesystem_spill_fsync.mojo",
@@ -46,15 +52,23 @@ mojo_library(
         "tests/test_local_disk_spill_storage.mojo",
         "tests/test_machine_topology.mojo",
         "tests/test_memory_reservation_budget.mojo",
+        "tests/test_mixed_grain_arbitrator_poc.mojo",
         "tests/test_morsel_sizing_policy.mojo",
+        "tests/test_native_spill_writer_reader.mojo",
         "tests/test_partition_topn_hash_state_column_native_transparency.mojo",
         "tests/test_partition_topn_state_column_native_transparency.mojo",
         "tests/test_row_group_ref_borrow.mojo",
         "tests/test_segment_execution.mojo",
+        "tests/test_shuffle_combine_bounded_ram.mojo",
+        "tests/test_shuffle_combine_buffer.mojo",
+        "tests/test_shuffle_stream_combine.mojo",
+        "tests/test_spill_arbitration.mojo",
         "tests/test_spill_codec_boundary.mojo",
         "tests/test_spill_prefetch_seam.mojo",
+        "tests/test_spill_thspill2_robustness.mojo",
         "tests/test_spill_thsplc_robustness.mojo",
         "tests/test_streaming_microbench.mojo",
+        "tests/test_thspill2_zerocopy.mojo",
         "tests/test_thsplc_roundtrip.mojo",
         "tests/test_top_n_state_column_native_transparency.mojo",
         "tests/test_topn_state_column_native_transparency.mojo",
