@@ -1,8 +1,9 @@
 # =============================================================================
 # test_assertion.mojo: RFC 7523 JWT bearer assertions (assertion.mojo):
 #   minted with each algorithm and verified by the verify half; the exact
-#   claims; the random `jti` that is never omitted and always required; and
-#   the client rule `sub == iss`.
+#   claims; the random `jti` that is never omitted, always required, and
+#   chosen by no caller (no public function takes one); the 300-second
+#   lifetime bound on what verifies; and the client rule `sub == iss`.
 # =============================================================================
 #
 # Keys as in test_signer: RFC 7515 A.3 (ES256), RFC 8037 A.1 (EdDSA) and
@@ -25,13 +26,13 @@ from komira_jose import (
     ClaimPolicy,
     JwsSigner,
     JwsVerifier,
-    assertion_claims,
     mint_assertion,
     mint_client_assertion,
     new_jti,
     verify_assertion,
     verify_client_assertion,
 )
+from komira_jose.assertion import _assertion_claims
 from komira_jwks import Jwk, parse_jwk_set, render_jwk_set
 from komira_secret_store import SecretValue
 
@@ -142,7 +143,7 @@ def test_round_trip_each_algorithm() raises:
         assert_equal(len(base64_url_decode_nopad(a.jti)), JOSE_JTI_BYTES)
         assert_equal(
             _payload_of(t),
-            assertion_claims(
+            _assertion_claims(
                 issuer=CLIENT,
                 subject=CLIENT,
                 audience=ENDPOINT,
@@ -162,13 +163,13 @@ def test_round_trip_each_algorithm() raises:
 def test_claims_bytes() raises:
     # Catches: a claim added, dropped, reordered, or written unescaped.
     assert_equal(
-        assertion_claims(
+        _assertion_claims(
             issuer="i", subject="s", audience="a", now=0, ttl_s=1, jti="j"
         ),
         '{"iss":"i","sub":"s","aud":"a","iat":0,"exp":1,"jti":"j"}',
     )
     assert_equal(
-        assertion_claims(
+        _assertion_claims(
             issuer='a"b', subject="s\\", audience="a", now=7, ttl_s=300, jti="j"
         ),
         '{"iss":"a\\"b","sub":"s\\\\","aud":"a","iat":7,"exp":307,"jti":"j"}',
@@ -253,7 +254,7 @@ def test_mint_bounds() raises:
     assert_equal(_mint_err(now=Int64.MAX - 1, ttl=2), LATE)
     var got = String("")
     try:
-        _ = assertion_claims(
+        _ = _assertion_claims(
             issuer="i", subject="s", audience="a", now=0, ttl_s=1, jti=""
         )
     except e:
@@ -343,6 +344,274 @@ def test_policy_still_applies() raises:
     )
 
 
+def _policy_ttl(max_ttl: Int64) raises -> ClaimPolicy:
+    return ClaimPolicy(
+        issuer=CLIENT,
+        audience=ENDPOINT,
+        accept_typ="JWT",
+        now=NOW,
+        leeway_s=0,
+        max_ttl_s=max_ttl,
+    )
+
+
+def test_verify_bounds_the_lifetime() raises:
+    # Catches: an assertion that lives longer than 300 s accepted because
+    # the policy's max TTL allows it (a caller's replay cache would then
+    # hold its jti for up to a day), and the bound moved by one. Policies
+    # at 301 s, an hour and a day; exp - iat of 300 passes and 301 is
+    # refused under each, by both verify functions, with iat at now and
+    # with iat 100 s and 250 s before now (catches a bound on exp - now),
+    # and under a policy with leeway 60 with iat 30 s after now (catches a
+    # bound on exp - min(iat, now)).
+    comptime LONG = "JoseError: the assertion lives longer than 300 seconds"
+    var s = _signer("EdDSA")
+    var v = _verifier(s)
+    var head = String('{"iss":"client-1","sub":"client-1","aud":"') + ENDPOINT + '","iat":1000000,"exp":'
+    var misses = String("")
+    for max_ttl in [Int64(301), Int64(3600), Int64(86400)]:
+        var p = _policy_ttl(max_ttl)
+        for life in [Int64(1), Int64(299), Int64(300), Int64(301), Int64(3600)]:
+            var t = _signed(s, head + String(NOW + life) + ',"jti":"j"}')
+            var want = String("") if life <= 300 else String(LONG)
+            if life > max_ttl:
+                want = "JoseError: the token lives longer than the max TTL"
+            var got = _client_err(t, v, p)
+            if got != want:
+                misses += String(max_ttl) + "/" + String(life) + " client -> " + got + "; "
+            var got2 = String("")
+            try:
+                _ = verify_assertion(t, v, p)
+            except e:
+                got2 = String(e)
+            if got2 != want:
+                misses += String(max_ttl) + "/" + String(life) + " -> " + got2 + "; "
+        # iat before now: the bound is exp - iat, not exp - now. With iat =
+        # NOW - 100 a lifetime of 301 ends at NOW + 201, which a bound on
+        # exp - now (201) would accept.
+        for back in [Int64(100), Int64(250)]:
+            var iat = NOW - back
+            for life in [Int64(300), Int64(301)]:
+                var t = _signed(
+                    s,
+                    String('{"iss":"client-1","sub":"client-1","aud":"')
+                    + ENDPOINT
+                    + '","iat":'
+                    + String(iat)
+                    + ',"exp":'
+                    + String(iat + life)
+                    + ',"jti":"j"}',
+                )
+                var want = String("") if life <= 300 else String(LONG)
+                var got = _client_err(t, v, p)
+                if got != want:
+                    misses += String(max_ttl) + "/-" + String(back) + "/" + String(life) + " client -> " + got + "; "
+                var got2 = String("")
+                try:
+                    _ = verify_assertion(t, v, p)
+                except e:
+                    got2 = String(e)
+                if got2 != want:
+                    misses += String(max_ttl) + "/-" + String(back) + "/" + String(life) + " -> " + got2 + "; "
+        # iat after now, inside the leeway: a policy with leeway 60 and
+        # iat = NOW + 30 (verify_jwt accepts an iat up to now + leeway).
+        # Lifetime 300 verifies and 301 is refused, so the bound is
+        # exp - iat and not exp - min(iat, now) (330 for lifetime 300).
+        var lp = ClaimPolicy(
+            issuer=CLIENT,
+            audience=ENDPOINT,
+            accept_typ="JWT",
+            now=NOW,
+            leeway_s=60,
+            max_ttl_s=max_ttl,
+        )
+        var ahead = NOW + 30
+        for life in [Int64(300), Int64(301)]:
+            var t = _signed(
+                s,
+                String('{"iss":"client-1","sub":"client-1","aud":"')
+                + ENDPOINT
+                + '","iat":'
+                + String(ahead)
+                + ',"exp":'
+                + String(ahead + life)
+                + ',"jti":"j"}',
+            )
+            var want = String("") if life <= 300 else String(LONG)
+            var got = _client_err(t, v, lp)
+            if got != want:
+                misses += String(max_ttl) + "/+30/" + String(life) + " client -> " + got + "; "
+            var got2 = String("")
+            try:
+                _ = verify_assertion(t, v, lp)
+            except e:
+                got2 = String(e)
+            if got2 != want:
+                misses += String(max_ttl) + "/+30/" + String(life) + " -> " + got2 + "; "
+    assert_equal(misses, "")
+    # The bound is the literal 300 the refusal text names.
+    assert_equal(JOSE_ASSERTION_MAX_TTL_S, Int64(300))
+
+
+def _top_level_public_defs(text: String) -> List[String]:
+    """The names of the `def`s at column 0 of `text` whose name does not
+    start with `_`."""
+    var out = List[String]()
+    for line in text.split("\n"):
+        var l = String(line)
+        if not l.startswith("def "):
+            continue
+        var b = l.as_bytes()
+        var end = 4
+        while end < len(b) and b[end] != UInt8(0x28) and b[end] != UInt8(0x5B):  # ( [
+            end += 1
+        var name = String(l[byte = 4 : end])
+        if not name.startswith("_"):
+            out.append(name)
+    return out^
+
+
+def _column0_comptimes(text: String) -> List[String]:
+    """The names of the `comptime` and `alias` declarations at column 0 of
+    `text` (a name ends at `:`, `=`, `[` or a space)."""
+    var out = List[String]()
+    for line in text.split("\n"):
+        var l = String(line)
+        var start = 0
+        if l.startswith("comptime "):
+            start = 9
+        elif l.startswith("alias "):
+            start = 6
+        else:
+            continue
+        var b = l.as_bytes()
+        var end = start
+        while end < len(b) and b[end] != UInt8(0x3A) and b[end] != UInt8(0x3D) and b[end] != UInt8(0x5B) and b[end] != UInt8(0x20):  # : = [ space
+            end += 1
+        out.append(String(l[byte = start : end]))
+    return out^
+
+
+def _assertion_imports(init: String) raises -> List[String]:
+    """The names `init` imports from komira_jose.assertion, as written
+    (an `x as y` entry stays one entry). `init` must name the module
+    exactly once, in one parenthesized `from ... import (...)`."""
+    var at = init.find("from komira_jose.assertion import (")
+    assert_true(at >= 0, "__init__ has no assertion import block")
+    var rest = String(init[byte = at : init.byte_length()])
+    assert_equal(
+        rest.find("komira_jose.assertion", 6),  # past this block's own name
+        -1,
+        "__init__ names komira_jose.assertion twice",
+    )
+    assert_equal(
+        String(init[byte = 0 : at]).find("komira_jose.assertion"),
+        -1,
+        "__init__ names komira_jose.assertion twice",
+    )
+    var lpar = rest.find("(")
+    var rpar = rest.find(")")
+    var out = List[String]()
+    for part in String(rest[byte = lpar + 1 : rpar]).split(","):
+        var name = String(String(part).strip())
+        if name != "":
+            out.append(name)
+    return out^
+
+
+def _joined(names: List[String]) -> String:
+    var out = String("")
+    for i in range(len(names)):
+        if i > 0:
+            out += " "
+        out += names[i]
+    return out
+
+
+def _public_signatures_with_jti(text: String) -> List[String]:
+    """`Struct.name` (or `name` at column 0) of every `def` in `text`, at
+    any indentation, whose name does not start with `_` or is a dunder, and
+    whose signature (from `def` to the first line ending in `:`) has a
+    parameter named `jti`."""
+    var out = List[String]()
+    var owner = String("")
+    var name = String("")
+    var sig = String("")
+    var in_sig = False
+    for line in text.split("\n"):
+        var l = String(line)
+        if l.startswith("struct ") or l.startswith("trait "):
+            var b = l.as_bytes()
+            var start = 6 if l.startswith("trait ") else 7
+            var end = start
+            while end < len(b) and b[end] != UInt8(0x28) and b[end] != UInt8(0x5B) and b[end] != UInt8(0x3A):  # ( [ :
+                end += 1
+            owner = String(l[byte = start : end])
+            continue
+        var s = String(l.strip())
+        if not in_sig and s.startswith("def "):
+            if l.startswith("def "):
+                owner = ""
+            var b = s.as_bytes()
+            var end = 4
+            while end < len(b) and b[end] != UInt8(0x28) and b[end] != UInt8(0x5B):  # ( [
+                end += 1
+            name = String(s[byte = 4 : end])
+            sig = ""
+            in_sig = True
+        if in_sig:
+            sig += s + " "
+            if s.endswith(":"):
+                in_sig = False
+                var public = not name.startswith("_") or (
+                    name.startswith("__") and name.endswith("__")
+                )
+                if public and (sig.find(" jti:") >= 0 or sig.find("(jti:") >= 0 or sig.find(" jti :") >= 0):
+                    out.append(owner + "." + name if owner != "" else name)
+        elif l.byte_length() > 0 and not l.startswith(" ") and not l.startswith("@"):
+            owner = ""
+    return out^
+
+
+def test_no_public_function_takes_a_jti() raises:
+    # Catches: a public function that writes assertion claims with a jti
+    # the caller chooses (assertion_claims was one): the file header and
+    # README say a caller cannot choose or omit the jti. Reads the library
+    # sources staged by the BUCK file, and checks:
+    # - the public column-0 defs of assertion.mojo are exactly the
+    #   documented five;
+    # - its column-0 `comptime` and `alias` declarations are exactly its two
+    #   constants (catches a public alias of _assertion_claims);
+    # - __init__ names komira_jose.assertion once, and imports from it
+    #   exactly the eight documented names (an allow-list: catches any other
+    #   export, an `_assertion_claims as x` rename included);
+    # - no public def at any indentation (a dunder counts as public, a
+    #   struct method too) has a `jti` parameter except VerifiedAssertion's
+    #   constructor, which builds a verify result and writes no claims.
+    # It does not see an alias declared inside a struct, or one in another
+    # file of the package.
+    var src = Path("src/komira_jose/assertion.mojo").read_text()
+    assert_equal(
+        _joined(_top_level_public_defs(src)),
+        "new_jti mint_assertion mint_client_assertion verify_assertion"
+        " verify_client_assertion",
+    )
+    assert_equal(
+        _joined(_column0_comptimes(src)),
+        "JOSE_ASSERTION_MAX_TTL_S JOSE_JTI_BYTES",
+    )
+    var init = Path("src/komira_jose/__init__.mojo").read_text()
+    assert_equal(
+        _joined(_assertion_imports(init)),
+        "JOSE_ASSERTION_MAX_TTL_S JOSE_JTI_BYTES VerifiedAssertion"
+        " mint_assertion mint_client_assertion new_jti verify_assertion"
+        " verify_client_assertion",
+    )
+    assert_equal(
+        _joined(_public_signatures_with_jti(src)), "VerifiedAssertion.__init__"
+    )
+
+
 def main() raises:
     var failures = String("")
     try:
@@ -365,6 +634,14 @@ def main() raises:
         test_mint_bounds()
     except e:
         failures += String("test_mint_bounds: ") + String(e) + "\n"
+    try:
+        test_verify_bounds_the_lifetime()
+    except e:
+        failures += String("test_verify_bounds_the_lifetime: ") + String(e) + "\n"
+    try:
+        test_no_public_function_takes_a_jti()
+    except e:
+        failures += String("test_no_public_function_takes_a_jti: ") + String(e) + "\n"
     try:
         test_jti_required()
     except e:

@@ -6,7 +6,8 @@ Test-only (no conda package): a library names it in `test_deps`, never in
   - issuer.mojo     : `TestIssuer`, a JWK Set document and a user-token mint
                       over a komira_jose `Keyring`, with key rotation that
                       publishes before it signs and keeps a former key until
-                      the max lifetime plus the leeway have passed.
+                      the max lifetime plus the largest leeway (60 s) have
+                      passed.
   - keys.mojo       : `derived_key`, the issuer's keys derived from a seed.
   - user_token.mojo : `user_token_claims`, the claims of a user access token.
   - under_test.mojo : `IssuerUnderTest`, the trait a scenario drives, and

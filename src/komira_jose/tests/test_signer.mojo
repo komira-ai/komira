@@ -36,6 +36,7 @@ from komira_jose import (
     verify_jwt,
 )
 from komira_jwks import Jwk, JwkSet, parse_jwk_set, render_jwk_set
+from komira_jose.signer import _signature
 from komira_jwks.jwk import _JwkParts
 from komira_secret_store import SecretValue
 
@@ -486,6 +487,214 @@ def test_rs256_key_checks() raises:
     assert_equal(len(s.public_jwk().n()), 256)
 
 
+def test_rs256_modulus_counted_in_bits() raises:
+    # Catches: the RSA minimum counted in bytes (komira_jwks's 256-byte
+    # floor), which takes a 2041- to 2047-bit modulus. A 256-byte modulus
+    # whose first byte is 0x01, 0x02, 0x04, ..., 0x40 or 0x7F (2041 to 2047
+    # bits) is refused for its length before AWS-LC sees it; 0x80 and 0xFF
+    # (2048 bits) pass the length check and reach the AWS-LC probe, which
+    # refuses these made-up keys. The real 2048-bit key signs (above).
+    comptime SHORT = "JoseError: the RSA modulus is shorter than 2048 bits"
+    comptime AWSLC = "JoseError: AWS-LC does not sign with the RSA key"
+    var rsa_oid = _hex("2a864886f70d010101")
+    var misses = String("")
+    for top in [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x7F, 0x80, 0xFF]:
+        var n = List[UInt8](length=256, fill=UInt8(0xC5))
+        n[0] = UInt8(top)
+        var enc = List[UInt8]()
+        if top >= 0x80:
+            enc.append(UInt8(0))  # the DER sign pad of a positive INTEGER
+        enc.extend(Span(n))
+        var want = String(SHORT) if top < 0x80 else String(AWSLC)
+        var got = _err_build("RS256", _pkcs8(rsa_oid, enc))
+        if got != want:
+            misses += String(top) + " -> " + got + "; "
+    assert_equal(misses, "")
+
+
+def _jws_signer_constructors(text: String) -> List[String]:
+    """The signatures (from `def` to the first line ending in `:`, lines
+    stripped and joined by a space) of every `__init__` in `text`'s
+    `struct JwsSigner`, and of every method there whose return type (the
+    text after `->`) names `JwsSigner` or `Self`, plus `@fieldwise_init`
+    wherever `text` has that decorator (it would add a constructor taking
+    the fields as given)."""
+    var out = List[String]()
+    if text.find("@fieldwise_init") >= 0:
+        out.append("@fieldwise_init")
+    var inside = False
+    var sig = String("")
+    var in_sig = False
+    for line in text.split("\n"):
+        var l = String(line)
+        if l.startswith("struct JwsSigner"):
+            inside = True
+            continue
+        if not inside:
+            continue
+        if l.byte_length() > 0 and not l.startswith(" ") and not l.startswith("#"):
+            break
+        var s = String(l.strip())
+        if not in_sig and s.startswith("def "):
+            sig = ""
+            in_sig = True
+        if in_sig:
+            sig += (" " if sig != "" else "") + s
+            if s.endswith(":"):
+                in_sig = False
+                var arrow = sig.find("->")
+                var ret = String(sig[byte = arrow : sig.byte_length()]) if arrow >= 0 else String("")
+                if (
+                    sig.startswith("def __init__")
+                    or ret.find("JwsSigner") >= 0
+                    or ret.find("Self") >= 0
+                ):
+                    out.append(sig)
+    return out^
+
+
+def _public_writes_outside_init(text: String) -> List[String]:
+    """Every line of `text` (stripped) that assigns to a `._public` field
+    (`._public` then optional spaces then `=` not followed by `=`), except
+    inside the body of `struct JwsSigner`'s `__init__`. The enclosing
+    function is the last `def` line above, at any indentation."""
+    var out = List[String]()
+    var inside = False
+    var in_init = False
+    for line in text.split("\n"):
+        var l = String(line)
+        if l.startswith("struct JwsSigner"):
+            inside = True
+            in_init = False
+            continue
+        if l.byte_length() > 0 and not l.startswith(" ") and not l.startswith("#"):
+            inside = False
+            in_init = False
+        var s = String(l.strip())
+        if s.startswith("def "):
+            in_init = inside and s.startswith("def __init__")
+        var at = s.find("._public")
+        while at >= 0:
+            var b = s.as_bytes()
+            var i = at + 8
+            while i < len(b) and b[i] == UInt8(0x20):
+                i += 1
+            var assigns = i < len(b) and b[i] == UInt8(0x3D) and (
+                i + 1 >= len(b) or b[i + 1] != UInt8(0x3D)
+            )
+            if assigns and not in_init:
+                out.append(s)
+                break
+            at = s.find("._public", at + 8)
+    return out^
+
+
+def test_every_constructor_derives_the_kid() raises:
+    # Catches: a constructor that takes the algorithm without checking it,
+    # or one whose kid is not its own key's thumbprint (the raw
+    # constructor took a public key as given, so a Keyring could stage a
+    # signer naming another key's kid). `JwsSigner(alg=, private_key=)`
+    # gives each algorithm the same signer as its named constructor, and
+    # refuses every other algorithm name. The staged signer.mojo has exactly
+    # these four constructors: one `__init__`, no `@fieldwise_init`, and no
+    # other JwsSigner method whose return type names `JwsSigner` or `Self`;
+    # and no line in signer.mojo assigns to `._public` outside that
+    # `__init__`. It does not see a JwsSigner built through an `out`
+    # parameter, a `_public` changed without a `._public =` assignment
+    # (swap, a `ref` binding), or code in another file.
+    var ctors = _jws_signer_constructors(
+        Path("src/komira_jose/signer.mojo").read_text()
+    )
+    var joined = String("")
+    for c in ctors:
+        joined += c + "\n"
+    assert_equal(
+        joined,
+        "def __init__(out self, *, alg: String, var private_key: SecretValue) raises:\n"
+        + "def es256(var private_key: SecretValue) raises -> JwsSigner:\n"
+        + "def eddsa(var seed: SecretValue) raises -> JwsSigner:\n"
+        + "def rs256(var pkcs8_der: SecretValue) raises -> JwsSigner:\n",
+    )
+    var writes = String("")
+    for w in _public_writes_outside_init(
+        Path("src/komira_jose/signer.mojo").read_text()
+    ):
+        writes += w + "\n"
+    assert_equal(writes, "")
+    var ed = JwsSigner(alg="EdDSA", private_key=_secret(_b64d(SEED)))
+    assert_equal(ed.kid(), ED_THUMBPRINT)
+    assert_equal(ed.alg(), "EdDSA")
+    var es = JwsSigner(alg="ES256", private_key=_secret(_b64d(A3_D)))
+    assert_equal(es.kid(), _signer("ES256").kid())
+    var px = es.public_jwk().x()
+    assert_equal(base64_url_encode_nopad(Span(px)), A3_X)
+    var rs = JwsSigner(alg="RS256", private_key=_secret(_rsa_der()))
+    assert_equal(rs.kid(), _signer("RS256").kid())
+    assert_equal(rs.kid(), jwk_thumbprint(rs.public_jwk()))
+    # The key checks run under the general constructor too.
+    var bad = String("")
+    try:
+        _ = JwsSigner(alg="ES256", private_key=_secret(List[UInt8](length=32, fill=UInt8(0))))
+    except e:
+        bad = String(e)
+    assert_equal(bad, "JoseError: the ES256 private key is not a scalar from 1 to n - 1")
+    comptime ALG = "JoseError: a signer's algorithm must be ES256, EdDSA or RS256"
+    var misses = String("")
+    var names = _near_misses("ES256")
+    names.extend(_near_misses("EdDSA"))
+    names.extend(_near_misses("RS256"))
+    names.append("HS256")
+    names.append("none")
+    for a in names:
+        # Each key form under each wrong name: none is taken as another
+        # algorithm's key.
+        for k in ["ES256", "EdDSA", "RS256"]:
+            var key: List[UInt8]
+            if String(k) == "ES256":
+                key = _b64d(A3_D)
+            elif String(k) == "EdDSA":
+                key = _b64d(SEED)
+            else:
+                key = _rsa_der()
+            var got = String("")
+            try:
+                _ = JwsSigner(alg=a.copy(), private_key=_secret(key))
+            except e:
+                got = String(e)
+            if got != ALG:
+                misses += a + "/" + String(k) + " -> " + got + "; "
+    assert_equal(misses, "")
+
+
+def test_crypto_failures_are_jose_errors() raises:
+    # Catches: a komira_crypto failure raised through `sign` with its own
+    # text instead of a JoseError. A signer's key always signs (its
+    # constructor checked it), so the failure is driven through the private
+    # `_signature` with keys komira_crypto refuses: a 31-byte Ed25519 seed
+    # and RSA bytes that are not a PKCS#8 key.
+    comptime FAIL = "JoseError: komira_crypto could not sign"
+    var msg = _bytes_of("a.b")
+    var misses = String("")
+    var short = List[UInt8](length=31, fill=UInt8(7))
+    try:
+        _ = _signature("EdDSA", Span(short), Span(msg))
+        misses += "EdDSA signed; "
+    except e:
+        if String(e) != FAIL:
+            misses += String("EdDSA -> ") + String(e) + "; "
+    var junk = List[UInt8](length=64, fill=UInt8(0x30))
+    try:
+        _ = _signature("RS256", Span(junk), Span(msg))
+        misses += "RS256 signed; "
+    except e:
+        if String(e) != FAIL:
+            misses += String("RS256 -> ") + String(e) + "; "
+    assert_equal(misses, "")
+    # The good keys sign through the same function.
+    var seed = _b64d(SEED)
+    assert_equal(len(_signature("EdDSA", Span(seed), Span(msg))), 64)
+
+
 def test_public_jwk_and_header() raises:
     # Catches: a kid other than the thumbprint, alg or use missing from the
     # published key, a header member added, dropped or reordered, or a typ
@@ -682,6 +891,18 @@ def main() raises:
         test_rs256_key_checks()
     except e:
         failures += String("test_rs256_key_checks: ") + String(e) + "\n"
+    try:
+        test_rs256_modulus_counted_in_bits()
+    except e:
+        failures += String("test_rs256_modulus_counted_in_bits: ") + String(e) + "\n"
+    try:
+        test_every_constructor_derives_the_kid()
+    except e:
+        failures += String("test_every_constructor_derives_the_kid: ") + String(e) + "\n"
+    try:
+        test_crypto_failures_are_jose_errors()
+    except e:
+        failures += String("test_crypto_failures_are_jose_errors: ") + String(e) + "\n"
     try:
         test_public_jwk_and_header()
     except e:

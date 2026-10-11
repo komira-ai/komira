@@ -71,7 +71,6 @@ from komira_jose.assertion import (
     JOSE_ASSERTION_MAX_TTL_S,
     JOSE_JTI_BYTES,
     VerifiedAssertion,
-    assertion_claims,
     mint_assertion,
     mint_client_assertion,
     new_jti,

@@ -17,14 +17,16 @@
 #     of user_token.mojo with a fresh random `jti` (komira_jose `new_jti`),
 #     `iat` now and the max lifetime; `mint` takes the lifetime. `sign_claims`
 #     signs any claims object and header `typ`, for tests that need a token
-#     this issuer would never mint (the keyring still refuses an `exp` past
-#     the max lifetime).
+#     this issuer would never mint (the keyring still refuses claims without
+#     integer `exp` and `iat`, and an `exp` past the max lifetime).
 #   * `begin_rotation()` stages the next key; `finish_rotation()` makes it
 #     the signing key once it has been in a served document for the publish
 #     lead (the keyring refuses earlier). The former key is kept in the
 #     document and leaves it when the clock reaches the switch time plus the
-#     max lifetime plus the leeway: by then every token it signed has expired
-#     for a verifier with that leeway.
+#     max lifetime plus komira_jose's `JOSE_MAX_LEEWAY_S` (60 s, the largest
+#     leeway a `ClaimPolicy` accepts; the keyring refuses an earlier
+#     retirement): by then every token it signed has expired for every
+#     verifier, whatever its leeway.
 #   * `advance(seconds)` moves the clock forward and removes every former key
 #     whose time has come. The clock never moves back.
 #   * The token endpoint (token_endpoint.mojo): `register_client(record,
@@ -40,10 +42,14 @@
 #     issuer plus `/token`, `jwks_uri()` the issuer plus `/jwks`, and
 #     `metadata_document()` the RFC 8414 document naming both.
 #
+# The leeway is the one its relying parties are configured with
+# (`profile_of`, scenarios.mojo); it does not move a retirement. It must be 0
+# to `JOSE_MAX_LEEWAY_S` (60 s), so the retirement above covers it.
+#
 # The first key counts as published `publish_lead_s` before the start time,
 # so a new issuer signs at once; the start time must be at least the publish
-# lead. Max lifetime, leeway and publish lead are checked by the keyring
-# (1 to 86400 s, 0 to 60 s, 0 to 86400 s).
+# lead. Max lifetime and publish lead are checked by the keyring (1 to
+# 86400 s, 0 to 86400 s).
 #
 # Every refusal of this file raises `TestIssuerError: <fixed text>`; the
 # keyring's raise `JoseError: ...`.
@@ -53,6 +59,7 @@
 # =============================================================================
 
 from komira_jose import (
+    JOSE_MAX_LEEWAY_S,
     JWS_ALG_EDDSA,
     JWS_ALG_ES256,
     JWT_TYP_AT_JWT,
@@ -119,15 +126,18 @@ struct TestIssuer(IssuerUnderTest, Movable, Deinitable):
     ) raises:
         """An issuer whose key 0 of `seed` signs from `now` on. Raises
         `TestIssuerError: ...` for an empty issuer or seed, an algorithm
-        other than ES256 and EdDSA, a `typ` other than `at+jwt` and `JWT`, or
-        a start time earlier than the publish lead; and `JoseError: ...` for
-        a lifetime, leeway or publish lead the keyring refuses."""
+        other than ES256 and EdDSA, a `typ` other than `at+jwt` and `JWT`, a
+        leeway outside 0 to 60 seconds, or a start time earlier than the
+        publish lead; and `JoseError: ...` for a lifetime or publish lead the
+        keyring refuses."""
         if issuer.byte_length() == 0:
             _refuse("the issuer is empty")
         if alg != JWS_ALG_ES256 and alg != JWS_ALG_EDDSA:
             _refuse("the test issuer signs ES256 or EdDSA")
         if typ != JWT_TYP_AT_JWT and typ != JWT_TYP_JWT:
             _refuse("the token typ must be at+jwt or JWT")
+        if leeway_s < 0 or leeway_s > JOSE_MAX_LEEWAY_S:
+            _refuse("the leeway must be 0 to 60 seconds")
         if now < publish_lead_s:
             _refuse("the start time is earlier than the publish lead")
         # An empty seed is refused by `derived_key`, with the same text.
@@ -135,7 +145,6 @@ struct TestIssuer(IssuerUnderTest, Movable, Deinitable):
         var ring = Keyring(
             alg=alg,
             max_token_ttl_s=max_ttl_s,
-            leeway_s=leeway_s,
             publish_lead_s=publish_lead_s,
             now=start,
         )
@@ -174,7 +183,8 @@ struct TestIssuer(IssuerUnderTest, Movable, Deinitable):
         return self._max_ttl_s
 
     def leeway_s(self) -> Int64:
-        """The leeway a former key's retirement waits for, in seconds."""
+        """The leeway its relying parties accept, in seconds (it does not
+        move a retirement; see the file header)."""
         return self._leeway_s
 
     def publish_lead_s(self) -> Int64:
@@ -229,7 +239,7 @@ struct TestIssuer(IssuerUnderTest, Movable, Deinitable):
 
     def finish_rotation(mut self) raises:
         """Make the staged key the signing key; the former key is served
-        until now plus the max lifetime plus the leeway. Raises
+        until now plus the max lifetime plus `JOSE_MAX_LEEWAY_S`. Raises
         `TestIssuerError: ...` when no rotation is in progress and
         `JoseError: ...` when the staged key has not been served for the
         publish lead."""
@@ -240,7 +250,7 @@ struct TestIssuer(IssuerUnderTest, Movable, Deinitable):
         self._ring.promote(staged.value(), self._now)
         self._retirements.append(
             _Retirement(
-                former^, self._now + self._max_ttl_s + self._leeway_s
+                former^, self._now + self._max_ttl_s + JOSE_MAX_LEEWAY_S
             )
         )
 

@@ -5,11 +5,12 @@
 # =============================================================================
 #
 # Keys are Ed25519 seeds of 32 equal bytes (seed 1, 2, ...) and, for the
-# ES256 ring, the scalars 1, 2, ... A ring has max token TTL 300 s, leeway
-# 30 s and publish lead 600 s, starting at T0 = 1000000. Every token is
-# checked the way a relying party would: the document the ring rendered is
-# parsed with komira_jwks and a `JwsVerifier` pinned to the ring's algorithm
-# is built from it.
+# ES256 ring, the scalars 1, 2, ... A ring has max token TTL 300 s and
+# publish lead 600 s, starting at T0 = 1000000; its retirement leeway is
+# the largest a verifier may have, 60 s. Every token is checked the way a
+# relying party would: the document the ring rendered is parsed with
+# komira_jwks and a `JwsVerifier` pinned to the ring's algorithm is built
+# from it, with a policy at that largest leeway.
 #
 # main runs every test and reports every failure.
 # =============================================================================
@@ -33,7 +34,7 @@ from komira_secret_store import SecretValue
 
 comptime T0: Int64 = 1000000
 comptime TTL: Int64 = 300
-comptime LEEWAY: Int64 = 30
+comptime LEEWAY: Int64 = 60
 comptime LEAD: Int64 = 600
 comptime ISS = "https://issuer.example/a"
 comptime AUD = "service-a"
@@ -53,22 +54,17 @@ def _kid(i: Int, alg: String = "EdDSA") raises -> String:
 
 
 def _ring(alg: String = "EdDSA", now: Int64 = T0) raises -> Keyring:
-    return Keyring(
-        alg=alg, max_token_ttl_s=TTL, leeway_s=LEEWAY, publish_lead_s=LEAD, now=now
-    )
+    return Keyring(alg=alg, max_token_ttl_s=TTL, publish_lead_s=LEAD, now=now)
 
 
 def _ring_err(
     alg: String = "EdDSA",
     ttl: Int64 = TTL,
-    leeway: Int64 = LEEWAY,
     lead: Int64 = LEAD,
     now: Int64 = T0,
 ) -> String:
     try:
-        _ = Keyring(
-            alg=alg, max_token_ttl_s=ttl, leeway_s=leeway, publish_lead_s=lead, now=now
-        )
+        _ = Keyring(alg=alg, max_token_ttl_s=ttl, publish_lead_s=lead, now=now)
     except e:
         return String(e)
     return String("")
@@ -193,11 +189,6 @@ def test_bounds() raises:
     assert_equal(_ring_err(ttl=1), "")
     assert_equal(_ring_err(ttl=JOSE_MAX_TTL_S), "")
     assert_equal(_ring_err(ttl=JOSE_MAX_TTL_S + 1), TTL_E)
-    comptime LW = "JoseError: the keyring leeway must be 0 to 60 seconds"
-    assert_equal(_ring_err(leeway=-1), LW)
-    assert_equal(_ring_err(leeway=0), "")
-    assert_equal(_ring_err(leeway=JOSE_MAX_LEEWAY_S), "")
-    assert_equal(_ring_err(leeway=JOSE_MAX_LEEWAY_S + 1), LW)
     comptime LD = "JoseError: the keyring publish lead must be 0 to 86400 seconds"
     assert_equal(_ring_err(lead=-1), LD)
     assert_equal(_ring_err(lead=0), "")
@@ -210,8 +201,6 @@ def test_bounds() raises:
     assert_equal(_ring_err(lead=86401), LD)
     assert_equal(_ring_err(ttl=86400), "")
     assert_equal(_ring_err(ttl=86401), TTL_E)
-    assert_equal(_ring_err(leeway=60), "")
-    assert_equal(_ring_err(leeway=61), LW)
     assert_equal(_ring_err(now=-1), "JoseError: the keyring time is negative")
     assert_equal(_ring_err(now=0), "")
     assert_equal(_ring_err(alg="ES256"), "")
@@ -299,9 +288,7 @@ def test_publication_is_per_staged_key() raises:
         "JoseError: the staged key has not been in a rendered key set",
     )
     # A lead of 0 still needs the key in a document first.
-    var z = Keyring(
-        alg="EdDSA", max_token_ttl_s=TTL, leeway_s=LEEWAY, publish_lead_s=0, now=T0
-    )
+    var z = Keyring(alg="EdDSA", max_token_ttl_s=TTL, publish_lead_s=0, now=T0)
     z.rotate(_key(1), T0)
     assert_equal(
         _promote_err(z, _kid(1), T0),
@@ -359,6 +346,33 @@ def test_rotation_and_retirement() raises:
     assert_equal(_retire_err(r, _kid(3), q), "")
     assert_true(not r.staged_kid())
     assert_equal(_kids(r.render_jwks(q)), _kid(2))
+
+
+def test_retirement_outlasts_every_verifier_leeway() raises:
+    # Catches: a retirement bound below the largest leeway a verifier may
+    # have (a keyring leeway of its own, such as 0 or 30, under verifiers
+    # at 60), so the former key leaves the set while its last token still
+    # verifies; and the bound moved past it. Key 1's last token is signed
+    # the second key 1 stops signing, with the full TTL: a verifier at
+    # leeway 60 accepts it until p + TTL + 60.
+    assert_equal(JOSE_MAX_LEEWAY_S, Int64(60))
+    assert_equal(LEEWAY, JOSE_MAX_LEEWAY_S)
+    var r = _active_ring(1)
+    r.rotate(_key(2), T0 + LEAD)
+    _ = r.render_jwks(T0 + LEAD)
+    var p = T0 + 2 * LEAD
+    var last = _sign(r, p)
+    r.promote(_kid(2), p)
+    comptime EARLY = "JoseError: a retiring key stays published for the max token TTL plus the leeway"
+    var late = p + 300 + 59
+    var doc = r.render_jwks(late)
+    assert_equal(_kids(doc), _kid(2) + " " + _kid(1))
+    assert_equal(_check(doc, last, "EdDSA", late), "")
+    assert_equal(_retire_err(r, _kid(1), late), EARLY)
+    assert_equal(_retire_err(r, _kid(1), p + 300 + 60), "")
+    assert_equal(
+        _check(doc, last, "EdDSA", p + 300 + 60), "JoseError: the token has expired"
+    )
 
 
 def test_document_order() raises:
@@ -499,7 +513,7 @@ def test_sign_bounds_the_lifetime() raises:
         "JoseError: the token would outlive the keyring's max token TTL",
     )
     assert_equal(_sign_err(r, _payload(now, 1), now), "")
-    assert_equal(_sign_err(r, '{"exp":1}', now), "")
+    assert_equal(_sign_err(r, '{"exp":1,"iat":0}', now), "")
     assert_equal(_sign_err(r, "{", now), "JoseError: the payload is not JSON")
     assert_equal(_sign_err(r, "", now), "JoseError: the payload is not JSON")
     assert_equal(_sign_err(r, "[]", now), "JoseError: the payload is not a JSON object")
@@ -511,6 +525,19 @@ def test_sign_bounds_the_lifetime() raises:
     assert_equal(
         _sign_err(r, '{"exp":"1"}', now),
         "JoseError: claim exp is not a non-negative integer",
+    )
+    # iat is required as verify_jwt requires it: a token every relying
+    # party refuses is not signed.
+    assert_equal(_sign_err(r, '{"exp":1}', now), "JoseError: claim iat is missing")
+    var no_iat = _payload(now).replace(String('"iat":'), String('"iax":'))
+    assert_equal(_sign_err(r, no_iat, now), "JoseError: claim iat is missing")
+    assert_equal(
+        _sign_err(r, '{"exp":1,"iat":"0"}', now),
+        "JoseError: claim iat is not a non-negative integer",
+    )
+    assert_equal(
+        _sign_err(r, '{"exp":1,"iat":-1}', now),
+        "JoseError: claim iat is not a non-negative integer",
     )
     # The token a ring signs is the payload it was given.
     var t = r.sign(_payload(now), String("at+jwt"), now)
@@ -576,6 +603,10 @@ def main() raises:
         test_rotation_and_retirement()
     except e:
         failures += String("test_rotation_and_retirement: ") + String(e) + "\n"
+    try:
+        test_retirement_outlasts_every_verifier_leeway()
+    except e:
+        failures += String("test_retirement_outlasts_every_verifier_leeway: ") + String(e) + "\n"
     try:
         test_document_order()
     except e:

@@ -12,21 +12,27 @@
 #   {"iss":..,"sub":..,"aud":..,"iat":now,"exp":now+ttl_s,"jti":..}
 #
 # in that order. `jti` is 16 bytes (128 bits) from AWS-LC's random source,
-# base64url without padding: a caller cannot choose or omit it. `iss`, `sub`
+# base64url without padding: a caller cannot choose or omit it (the claims
+# writer that takes a `jti`, `_assertion_claims`, is private and not
+# exported by the package). `iss`, `sub`
 # and `aud` must be non-empty, `now` non-negative, `ttl_s` 1 to
 # `JOSE_ASSERTION_MAX_TTL_S` (300) seconds, and `now + ttl_s` no larger than
 # the largest Int64 (so `exp` cannot wrap negative).
 #
 # Verify (`verify_assertion`): `verify_jwt` with the policy (its one issuer,
 # audience, `typ`, time, leeway and max TTL; RFC 7523 section 3 items 1 to
-# 5), then `jti` must be a non-empty string (RFC 7523 makes `jti` optional;
+# 5), then `exp - iat` must be at most `JOSE_ASSERTION_MAX_TTL_S` (300)
+# whatever the policy's max TTL (a token verifies from `iat - leeway` to
+# `exp + leeway`, so a caller's replay cache holds a `jti` for at most 300
+# seconds plus twice the leeway; RFC 7523 section 3 item 4), and
+# `jti` must be a non-empty string (RFC 7523 makes `jti` optional;
 # this package requires it, so a replay check always has a key).
 # `verify_client_assertion` also requires `sub` to equal `iss`, byte for
 # byte. Remembering a `jti` until its `exp` to refuse a replay is the
 # caller's: it is the one that sees every assertion.
 #
-# Every refusal raises `JoseError: <fixed text>`; no text carries any byte
-# of the token.
+# Every refusal raises `JoseError: <fixed text>`, a failure of the random
+# source included; no text carries any byte of the token.
 #
 # ENCAPSULATION: `String` and the package's own types in and out. No
 # pointer crosses this file's API.
@@ -47,7 +53,8 @@ from komira_jose.signer import JwsSigner
 from komira_jose.verifier import JwsVerifier
 
 
-# The longest assertion lifetime `mint_assertion` accepts, in seconds.
+# The longest assertion lifetime `mint_assertion` mints and
+# `verify_assertion` accepts (`exp - iat`), in seconds.
 comptime JOSE_ASSERTION_MAX_TTL_S: Int64 = 300
 # The random bytes in a minted `jti`.
 comptime JOSE_JTI_BYTES: Int = 16
@@ -65,11 +72,14 @@ def new_jti() raises -> String:
     """A fresh `jti`: `JOSE_JTI_BYTES` random bytes, base64url without
     padding."""
     var b = List[UInt8](length=JOSE_JTI_BYTES, fill=UInt8(0))
-    system_entropy(Span(b))
+    try:
+        system_entropy(Span(b))
+    except:
+        raise Error("JoseError: the random source failed")
     return base64_url_encode_nopad(Span(b))
 
 
-def assertion_claims(
+def _assertion_claims(
     *,
     issuer: String,
     subject: String,
@@ -79,7 +89,8 @@ def assertion_claims(
     jti: String,
 ) raises -> String:
     """The claims object `mint_assertion` signs, with the given `jti`.
-    Raises as `mint_assertion` does, and for an empty `jti`."""
+    Raises as `mint_assertion` does, and for an empty `jti`. Private: the
+    package's callers get a `jti` only from `new_jti` inside the mint."""
     if issuer.byte_length() == 0:
         _refuse("the assertion issuer is empty")
     if subject.byte_length() == 0:
@@ -124,7 +135,7 @@ def mint_assertion(
     (see the file header). Raises `JoseError: ...` for an empty issuer,
     subject or audience, a negative time, a lifetime outside 1 to 300
     seconds, or an expiry past the largest Int64."""
-    var claims = assertion_claims(
+    var claims = _assertion_claims(
         issuer=issuer,
         subject=subject,
         audience=audience,
@@ -169,9 +180,12 @@ struct VerifiedAssertion(Copyable, Movable):
 def verify_assertion(
     token: String, verifier: JwsVerifier, policy: ClaimPolicy
 ) raises -> VerifiedAssertion:
-    """`verify_jwt(token, verifier, policy)`, then a non-empty string `jti`
-    is required."""
+    """`verify_jwt(token, verifier, policy)`, then `exp - iat` must be at
+    most `JOSE_ASSERTION_MAX_TTL_S` and a non-empty string `jti` is
+    required."""
     var jwt = verify_jwt(token, verifier, policy)
+    if jwt.exp - jwt.iat > JOSE_ASSERTION_MAX_TTL_S:
+        _refuse("the assertion lives longer than 300 seconds")
     var jti = _string_claim(jwt.claims, "jti")
     if not jti or jti.value().byte_length() == 0:
         _refuse("claim jti is missing, empty or not a string")
