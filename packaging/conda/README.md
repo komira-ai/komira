@@ -151,13 +151,19 @@ its other requirements and in soname order, the conda-forge requirement
 system_libs.bzl names for each soname, byte for byte (`libzlib >=1.2.13,<2`),
 and `metadata.json` records the rows as `dlopen`
 (`[{requirement, soname}]`, written only when there is one). The packer reads
-the sources: a file whose code names `OwnedDLHandle` opens a library, and its
-one-line string literals of the form `lib<name>.so[.<digits>]...` are the
-sonames it opens; comments and triple-quoted strings are not read. They must
-be exactly the declared sonames. A soname held only in a file that does not
-name `OwnedDLHandle` is not seen, so such a library is refused rather than
-published without the requirement. `komira_pack conda-check` is given the
-declarations and compares the package with them without the packer's code.
+the sources: the library opens a shared library if any of its files names
+`OwnedDLHandle` in its code (comments and docstrings are not code). If it
+does, every string literal in any of its files whose whole content has the
+form `lib<name>.so[.<digits>]...` is a soname it opens, in any quote form
+(`"..."`, `'...'`, `"""..."""`, `'''...'''`, raw `r"..."`); a docstring of
+prose is never one. They must be exactly the declared sonames, and a
+refusal names both lists and the files holding each literal. A library
+that opens nothing and declares sonames is refused as stale. The trade-off:
+a stray soname-shaped string in a library that opens must be declared too,
+so the check fails closed; the install check of each published package in
+beta (`beta_validate`) is the runtime backstop. `komira_pack conda-check` is
+given the declarations and compares the package with them without the
+packer's code.
 
 ### Sub-targets
 

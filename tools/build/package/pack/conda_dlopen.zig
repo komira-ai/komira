@@ -5,29 +5,47 @@
 //! The build gives the packer one `--dlopen <soname>=<requirement>` per
 //! declared soname, the requirement taken from
 //! tools/build/package/system_libs.bzl (a declaration that table lacks is
-//! refused at analysis, before the packer runs). The packer reads the
-//! library's sources: a source that opens a shared library names
-//! `OwnedDLHandle` in its code, and the sonames it opens are its string
-//! literals of the form `lib<name>.so[.<digits>]...`. Across those sources
-//! the sonames must be exactly the declared ones; otherwise the package is
-//! refused, naming both lists. Each declared requirement is then a run
-//! requirement of the package, after the others, in soname order, once.
+//! refused at analysis, before the packer runs). The packer reads every
+//! `.mojo` file of the library's `[src]` tree:
+//!
+//! - The library OPENS a shared library if any of its sources names
+//!   `OwnedDLHandle` in its code (comments and docstrings are not code).
+//! - If it opens, the sonames FOUND are every string literal, in ALL its
+//!   sources (not only the ones naming `OwnedDLHandle`), whose whole content
+//!   is a soname, `lib<name>.so[.<digits>]...`, in any quote form: `"..."`,
+//!   `'...'`, `"""..."""`, `'''...'''`, and each of them with the raw prefix
+//!   (`r"..."`). A triple-quoted string counts only if its whole content is
+//!   a soname, so a docstring of prose never does.
+//! - The declared sonames must EQUAL the found ones; otherwise the package
+//!   is refused, naming both sets and the sources holding each literal. A
+//!   library that opens and holds no soname literal is refused too, even
+//!   declaring nothing: what it opens cannot be seen.
+//! - If it does not open, declaring `dlopen` is refused as stale.
+//!
+//! Each declared requirement is then a run requirement of the package,
+//! after the others, in soname order, once.
 //!
 //! What the reader counts as code: comments (`#` to the end of the line)
-//! and triple-quoted strings (docstrings) are skipped, so a comment naming
+//! and string literals are not code, so a comment or a docstring naming
 //! `OwnedDLHandle("libz.so.1")` opens nothing. Strings end where the Mojo
 //! lexer ends them: a backslash escapes the next character in every kind,
-//! raw (`r"..."`) and triple-quoted ones included. A soname held in a file that
-//! does not itself name `OwnedDLHandle` is not seen; such a library is
-//! refused (its declaration names a soname no opening source holds), never
-//! packaged without the requirement.
+//! raw (`r"..."`) and triple-quoted ones included.
+//!
+//! The trade-off: the literals found are not tied to the call that opens.
+//! A soname-shaped string anywhere in a library that opens (a constant kept
+//! in another file, a name in a message) must be declared, so a stray one
+//! refuses the package until it is declared or reworded: the check fails
+//! closed, never packaging a library without a requirement it may need. A
+//! soname the sources build at run time from parts is not seen at all. The
+//! runtime backstop is beta's per-package install check (`beta_validate`,
+//! the installed-bytes checks of docs/design/continuous_publish.md), which
+//! runs each package as a consumer installs it.
 
 const std = @import("std");
 const json = std.json;
 const Alloc = std.mem.Allocator;
 const pack_common = @import("common.zig");
 const fail = pack_common.fail;
-const lessStr = pack_common.lessStr;
 const newArray = pack_common.newArray;
 const newObject = pack_common.newObject;
 const str = pack_common.str;
@@ -95,12 +113,20 @@ pub fn parseDlopens(alloc: Alloc, values: []const []const u8) ![]Dlopen {
 }
 
 /// What one source holds: whether its code names `OwnedDLHandle`, and the
-/// sonames among its one-line string literals, each once, in order of
-/// appearance. Comments and triple-quoted strings are not code.
+/// string literals whose whole content is a soname (any quote form,
+/// triple-quoted and raw included), each once, in order of appearance.
+/// Comments and string literals are not code.
 pub const Scan = struct { opens: bool, sonames: [][]const u8 };
 
 fn identChar(c: u8) bool {
     return std.ascii.isAlphanumeric(c) or c == '_';
+}
+
+/// Appends `lit` to `list` if it is a soname not held yet.
+fn holdOnce(list: *std.ArrayList([]const u8), lit: []const u8) !void {
+    if (!isSoname(lit)) return;
+    for (list.items) |f| if (std.mem.eql(u8, f, lit)) return;
+    try list.append(lit);
 }
 
 pub fn scanSource(alloc: Alloc, text: []const u8) !Scan {
@@ -114,11 +140,14 @@ pub fn scanSource(alloc: Alloc, text: []const u8) !Scan {
         } else if ((c == '"' or c == '\'') and i + 2 < text.len and text[i + 1] == c and text[i + 2] == c) {
             // Ends at the first unescaped triple of its quote: a backslash
             // escapes the next character, as in the Mojo lexer (raw strings
-            // included: `r"""a\"""` is unterminated to it).
+            // included: `r"""a\"""` is unterminated to it). It is a soname
+            // only if its whole content is one: a docstring of prose naming
+            // one holds none.
             var j = i + 3;
             while (j < text.len and !(j + 2 < text.len and text[j] == c and text[j + 1] == c and text[j + 2] == c)) : (j += 1) {
                 if (text[j] == '\\') j += 1;
             }
+            try holdOnce(&found, text[i + 3 .. @min(j, text.len)]);
             i = @min(j + 3, text.len);
         } else if (c == '"' or c == '\'') {
             var j = i + 1;
@@ -126,12 +155,7 @@ pub fn scanSource(alloc: Alloc, text: []const u8) !Scan {
                 if (text[j] == '\\') j += 1;
             }
             const end = @min(j, text.len);
-            const lit = text[i + 1 .. end];
-            if (isSoname(lit)) {
-                var seen = false;
-                for (found.items) |f| seen = seen or std.mem.eql(u8, f, lit);
-                if (!seen) try found.append(lit);
-            }
+            try holdOnce(&found, text[i + 1 .. end]);
             i = end + 1;
         } else if (identChar(c)) {
             var j = i;
@@ -143,22 +167,34 @@ pub fn scanSource(alloc: Alloc, text: []const u8) !Scan {
     return .{ .opens = opens, .sonames = try found.toOwnedSlice() };
 }
 
-/// Null when the sources open exactly the `declared` sonames (sorted, as
-/// parseDlopens returns them), or open nothing and declare nothing;
-/// otherwise why the package cannot be made: a source opens a soname the
-/// declaration omits, the declaration names one no opening source holds,
-/// or the library declares sonames and no source opens a library.
+/// A soname found and the sources holding it, in source order.
+const Held = struct { soname: []const u8, paths: std.ArrayList([]const u8) };
+
+fn lessHeld(_: void, x: Held, y: Held) bool {
+    return std.mem.lessThan(u8, x.soname, y.soname);
+}
+
+/// Null when the library opens nothing and declares nothing, or opens and
+/// its sources hold exactly the `declared` sonames (sorted, as parseDlopens
+/// returns them); otherwise why the package cannot be made. It opens when a
+/// source names `OwnedDLHandle` in its code; once it does, the soname
+/// literals of every source count, not only the opening ones'.
 pub fn dlopenReason(alloc: Alloc, sources: []const Source, declared: []const Dlopen) !?[]const u8 {
     var opener: ?[]const u8 = null;
-    var found = std.ArrayList([]const u8).init(alloc);
+    var held = std.ArrayList(Held).init(alloc);
     for (sources) |s| {
         const scan = try scanSource(alloc, s.text);
-        if (!scan.opens) continue;
-        if (opener == null) opener = s.path;
+        if (scan.opens and opener == null) opener = s.path;
         for (scan.sonames) |so| {
-            var seen = false;
-            for (found.items) |f| seen = seen or std.mem.eql(u8, f, so);
-            if (!seen) try found.append(so);
+            var at: ?usize = null;
+            for (held.items, 0..) |h, k| {
+                if (std.mem.eql(u8, h.soname, so)) at = k;
+            }
+            if (at == null) {
+                try held.append(.{ .soname = so, .paths = std.ArrayList([]const u8).init(alloc) });
+                at = held.items.len - 1;
+            }
+            try held.items[at.?].paths.append(s.path);
         }
     }
     var decl = std.ArrayList(u8).init(alloc);
@@ -170,18 +206,29 @@ pub fn dlopenReason(alloc: Alloc, sources: []const Source, declared: []const Dlo
         if (declared.len == 0) return null;
         return try std.fmt.allocPrint(alloc, "it declares `dlopen` [{s}], but no source opens a shared library (OwnedDLHandle); remove the stale declaration", .{decl.items});
     }
-    std.mem.sort([]const u8, found.items, {}, lessStr);
-    var same = found.items.len == declared.len and found.items.len != 0;
+    std.mem.sort(Held, held.items, {}, lessHeld);
+    var same = held.items.len == declared.len and held.items.len != 0;
     if (same) {
-        for (found.items, declared) |f, d| same = same and std.mem.eql(u8, f, d.soname);
+        for (held.items, declared) |h, d| same = same and std.mem.eql(u8, h.soname, d.soname);
     }
     if (same) return null;
     var names = std.ArrayList(u8).init(alloc);
-    for (found.items, 0..) |f, i| {
-        if (i != 0) try names.appendSlice(", ");
-        try names.appendSlice(f);
+    var where = std.ArrayList(u8).init(alloc);
+    for (held.items, 0..) |h, i| {
+        if (i != 0) {
+            try names.appendSlice(", ");
+            try where.appendSlice("; ");
+        }
+        try names.appendSlice(h.soname);
+        try where.appendSlice(h.soname);
+        try where.appendSlice(" in ");
+        for (h.paths.items, 0..) |p, k| {
+            if (k != 0) try where.appendSlice(", ");
+            try where.appendSlice(p);
+        }
     }
-    return try std.fmt.allocPrint(alloc, "{s}: opens a shared library at run time (OwnedDLHandle); its sources name [{s}] and the library declares `dlopen` [{s}]: each soname it opens must be declared, and only those (tools/build/package/system_libs.bzl names the conda package its package then requires)", .{ opener.?, names.items, decl.items });
+    if (held.items.len == 0) try where.appendSlice("none");
+    return try std.fmt.allocPrint(alloc, "{s}: opens a shared library at run time (OwnedDLHandle); its sources name [{s}] and the library declares `dlopen` [{s}]: once a library opens one, each soname-shaped string literal in its sources must be declared, and only those (tools/build/package/system_libs.bzl names the conda package its package then requires); the literals are held in: {s}", .{ opener.?, names.items, decl.items, where.items });
 }
 
 /// dlopenReason over every `.mojo` file under `dir_path` (the library's
@@ -422,6 +469,15 @@ test "scanSource: OwnedDLHandle named only as a type parameter opens" {
     try expectOpensZlibAndRefusedUndeclared("var p = alloc[OwnedDLHandle](1)\np.init_pointee_move(_load(\"libz.so.1\"))\n");
 }
 
+test "scanSource: OwnedDLHandle named only qualified opens" {
+    // `std.ffi.OwnedDLHandle(...)`, with no import: the name follows a `.`.
+    // A reader that skipped a name after `.` (as an attribute of something
+    // else; mutant Q) or read `.` as part of an identifier, so the token is
+    // `std.ffi.OwnedDLHandle` (mutant Q2), sees nothing open and accepts
+    // the undeclared soname (fix round 7).
+    try expectOpensZlibAndRefusedUndeclared("h = std.ffi.OwnedDLHandle(\"libz.so.1\")\n");
+}
+
 /// A `[src]` tree with a module at its top that opens nothing and the
 /// opener one directory down, at sub/opener.mojo; `dlopenReasonDir` over it
 /// with `declared`. The top module keeps a reader that skipped
@@ -491,14 +547,58 @@ test "dlopenReason: a soname opened in two sources counts once" {
     try testing.expect((try dlopenReason(a, &.{ .{ .path = "a.mojo", .text = z }, .{ .path = "b.mojo", .text = l }, .{ .path = "c.mojo", .text = z } }, &.{ lz4, zlib })) == null);
 }
 
-test "dlopenReason: a declared soname held only by a source that opens nothing is refused" {
+test "dlopenReason: a declared soname held only by a source that opens nothing is accepted" {
     var arena = testAlloc();
     defer arena.deinit();
     const a = arena.allocator();
-    // names.mojo holds the lz4 soname but does not name OwnedDLHandle: its
-    // literals are not read, so lz4 is declared and not opened.
-    const why = try refusal(try dlopenReason(a, &.{ .{ .path = "names.mojo", .text = "LZ4 = \"liblz4.so.1\"\n" }, .{ .path = "zlib_ffi.mojo", .text = zlib_src } }, &.{ lz4, zlib }));
-    try testing.expect(std.mem.indexOf(u8, why, "zlib_ffi.mojo: opens a shared library at run time (OwnedDLHandle); its sources name [libz.so.1] and the library declares `dlopen` [liblz4.so.1, libz.so.1]") != null);
+    // names.mojo holds the lz4 soname but does not name OwnedDLHandle; the
+    // library opens (zlib_ffi.mojo does), so every source's literals are
+    // found: [liblz4.so.1, libz.so.1], as declared. Before fix round 7 only
+    // opening sources were read and this was refused; reading them all is
+    // what refuses the undeclared case below (P2).
+    try testing.expectEqual(@as(?[]const u8, null), try dlopenReason(a, &.{ .{ .path = "names.mojo", .text = "LZ4 = \"liblz4.so.1\"\n" }, .{ .path = "zlib_ffi.mojo", .text = zlib_src } }, &.{ lz4, zlib }));
+}
+
+test "dlopenReason: a soname held in a source that opens nothing, undeclared, is refused" {
+    var arena = testAlloc();
+    defer arena.deinit();
+    const a = arena.allocator();
+    // P2 (fix round 7): names.mojo keeps the lz4 soname in a constant and
+    // ffi.mojo opens both libraries, lz4 through the constant; only libz is
+    // declared. A reader of the opening sources alone finds [libz.so.1] and
+    // accepts: the package would ship without lz4-c.
+    const names = "comptime LZ4 = \"liblz4.so.1\"\n";
+    const ffi = "from .names import LZ4\nz = OwnedDLHandle(\"libz.so.1\")\nl = OwnedDLHandle(LZ4)\n";
+    const why = try refusal(try dlopenReason(a, &.{ .{ .path = "ffi.mojo", .text = ffi }, .{ .path = "names.mojo", .text = names } }, &.{zlib}));
+    try testing.expect(std.mem.indexOf(u8, why, "ffi.mojo: opens a shared library at run time (OwnedDLHandle); its sources name [liblz4.so.1, libz.so.1] and the library declares `dlopen` [libz.so.1]") != null);
+    // the refusal names the source holding each literal, in soname order,
+    // every source of a literal held twice
+    try testing.expect(std.mem.endsWith(u8, why, "the literals are held in: liblz4.so.1 in names.mojo; libz.so.1 in ffi.mojo"));
+    const twice = try refusal(try dlopenReason(a, &.{ .{ .path = "ffi.mojo", .text = ffi }, .{ .path = "names.mojo", .text = "comptime LZ4 = \"liblz4.so.1\"\nZ = \"libz.so.1\"\n" } }, &.{}));
+    try testing.expect(std.mem.endsWith(u8, twice, "the literals are held in: liblz4.so.1 in names.mojo; libz.so.1 in ffi.mojo, names.mojo"));
+    // declared both: accepted
+    try testing.expectEqual(@as(?[]const u8, null), try dlopenReason(a, &.{ .{ .path = "ffi.mojo", .text = ffi }, .{ .path = "names.mojo", .text = names } }, &.{ lz4, zlib }));
+}
+
+test "dlopenReason: a triple-quoted soname literal is found" {
+    var arena = testAlloc();
+    defer arena.deinit();
+    const a = arena.allocator();
+    // P3 (fix round 7): `OwnedDLHandle("""liblz4.so.1""")`, and its `'''`
+    // and raw forms. A reader that skipped every triple-quoted string as a
+    // docstring finds [libz.so.1] and accepts with only libz declared.
+    for ([_][]const u8{
+        "z = OwnedDLHandle(\"libz.so.1\")\nl = OwnedDLHandle(\"\"\"liblz4.so.1\"\"\")\n",
+        "z = OwnedDLHandle(\"libz.so.1\")\nl = OwnedDLHandle('''liblz4.so.1''')\n",
+        "z = OwnedDLHandle(\"libz.so.1\")\nl = OwnedDLHandle(r\"\"\"liblz4.so.1\"\"\")\n",
+    }) |text| {
+        const why = try refusal(try dlopenReason(a, &.{.{ .path = "x.mojo", .text = text }}, &.{zlib}));
+        try testing.expect(std.mem.indexOf(u8, why, "its sources name [liblz4.so.1, libz.so.1] and the library declares `dlopen` [libz.so.1]") != null);
+    }
+    // a docstring of prose naming a soname is not a soname: declared
+    // exactly libz, accepted
+    const doc = "\"\"\"Opens libz.so.1 and never liblz4.so.1.\"\"\"\nz = OwnedDLHandle(\"libz.so.1\")\n";
+    try testing.expectEqual(@as(?[]const u8, null), try dlopenReason(a, &.{.{ .path = "x.mojo", .text = doc }}, &.{zlib}));
 }
 
 test "dlopenReason: the refusal names the first source that opens" {
