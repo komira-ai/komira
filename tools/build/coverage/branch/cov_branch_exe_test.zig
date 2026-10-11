@@ -2,18 +2,31 @@
 //! run as a build action by `:cov_branch_exe_test`, a validation of
 //! `:cov_branch_tool`. The unit tests (cov_branch_annotate_test.zig) call
 //! `annotate` in-process with a stand-in Runner; these run the executable the
-//! public target hands out (module `exes`: `cov_branch`, and `stub`, the
-//! stand-in lld and llvm-profdata of cov_branch_annotate_stub.zig) as a child
-//! process, and check what the process adds: the command line taken from
+//! public target hands out (its path in the environment as COV_BRANCH, and
+//! that of the stand-in lld and llvm-profdata of cov_branch_annotate_stub.zig
+//! as COV_BRANCH_STUB, the `zig_test`'s `env_tools`) as a child process, with
+//! an environment built by the test, and check what the process adds: the command line taken from
 //! argv, the working directory and $BUCK_SCRATCH_PATH from the process, the
 //! environment lld and llvm-profdata get, the programs run by their paths,
 //! a program that cannot start, the exit status, messages on stderr and none
-//! on stdout, and a stderr whose writes fail.
+//! on stdout, and a stderr whose writes fail. Without COV_BRANCH or
+//! COV_BRANCH_STUB every case fails: none passes without running the
+//! executable.
 
 const std = @import("std");
-const exes = @import("exes");
 const fx = @import("cov_branch_annotate_fixture.zig");
 const posix = std.posix;
+
+/// The path of a tool under test, from the environment variable `name`,
+/// which the zig_test's `env_tools` sets. A run without it fails loudly; it
+/// never passes unchecked.
+fn tool(a: std.mem.Allocator, name: []const u8) ![]const u8 {
+    const v = std.process.getEnvVarOwned(a, name) catch {
+        std.debug.print("the test target does not pass {s} (env_tools), so the executable cannot be run\n", .{name});
+        return error.TestToolMissing;
+    };
+    return std.fs.cwd().realpathAlloc(a, v);
+}
 
 const Run = struct {
     code: u8,
@@ -37,7 +50,7 @@ const Dir = struct {
         d.* = .{ .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator), .tmp = std.testing.tmpDir(.{}), .root = "", .wd = undefined, .cwd = "", .env = undefined };
         const al = d.arena.allocator();
         d.root = try d.tmp.dir.realpathAlloc(al, ".");
-        const stub = try std.fs.cwd().realpathAlloc(al, exes.stub);
+        const stub = try tool(al, "COV_BRANCH_STUB");
         try d.tmp.dir.makePath("tc/lld/bin");
         try d.tmp.dir.makePath("tc/llvm/bin");
         try d.tmp.dir.symLink(stub, "tc/lld/bin/lld", .{});
@@ -52,6 +65,8 @@ const Dir = struct {
         try d.wd.writeFile("in/test_one", try fx.binary(al, &fx.FNS));
         try d.tmp.dir.writeFile("tc/llvm/bin/llvm-profdata.stdout", try fx.show(al, &fx.FNS));
         try d.tmp.dir.writeFile("tc/lld/bin/lld.stderr", try std.mem.concat(al, u8, &.{ try fx.missing(al, "unrun"), try fx.dump(al, &fx.FNS) }));
+        // The child's environment is built here: it does not inherit
+        // COV_BRANCH or anything else of the test's.
         d.env = std.process.EnvMap.init(std.heap.page_allocator);
         try d.env.put("BUCK_SCRATCH_PATH", try d.path("scratch"));
         try d.env.put("LC_ALL", "fr_FR.UTF-8");
@@ -85,7 +100,7 @@ const Dir = struct {
     /// The shipped executable with `argv` in the working directory.
     fn run(self: *Dir, argv: []const []const u8) !Run {
         var full = std.ArrayList([]const u8).init(self.a());
-        try full.append(try std.fs.cwd().realpathAlloc(self.a(), exes.cov_branch));
+        try full.append(try tool(self.a(), "COV_BRANCH"));
         try full.appendSlice(argv);
         const r = try std.ChildProcess.run(.{
             .allocator = self.a(),
@@ -258,7 +273,7 @@ fn runFailingStderr(d: *Dir, argv: []const []const u8) !u8 {
     const nul = try posix.open("/dev/null", .{ .ACCMODE = .WRONLY }, 0);
     defer posix.close(nul);
     var full = std.ArrayList(?[*:0]const u8).init(a);
-    try full.append(try a.dupeZ(u8, try std.fs.cwd().realpathAlloc(a, exes.cov_branch)));
+    try full.append(try a.dupeZ(u8, try tool(a, "COV_BRANCH")));
     for (argv) |x| try full.append(try a.dupeZ(u8, x));
     try full.append(null);
     var envp = std.ArrayList(?[*:0]const u8).init(a);

@@ -16,8 +16,9 @@ configured target, the same bytes. A tool whose cases are `zig_test` unit
 tests (cov_normalize) has its `zig_exe` built behind them (`unit_tests`), so
 the executable does not exist unless they pass; those tests build the tool
 from source, so they do not test the shipped bytes. Its process cases are a
-`zig_test` that takes the executable in `exes` (the same configured target)
-and runs it: a validation, listed in `cases` like a script's.
+`zig_test` that names the executable in `env_tools` (the same configured
+target; its path reaches the test in the environment) and runs it: a
+validation, listed in `cases` like a script's.
 
 `cov_link_dir` and `cov_run_dir` are the two directories a coverage build of
 a `mojo_library` uses (tools/build/mojo/coverage.bzl): the one its test
@@ -76,7 +77,7 @@ _kcov_tool = rule(
     impl = _tool_impl,
     doc = "The executable `exe` (configured for the execution platform), gated by the validations in `cases` and by the `zig_test` targets `exe` is built behind.",
     attrs = {
-        "cases": attrs.list(attrs.dep(providers = [ValidationInfo]), default = [], doc = "Validations that run `exe`: its `kcov_tool_cases`, or a `zig_test` naming it in `exes`."),
+        "cases": attrs.list(attrs.dep(providers = [ValidationInfo]), default = [], doc = "Validations that run `exe`: its `kcov_tool_cases`, or a `zig_test` naming it in `env_tools`."),
         "exe": attrs.exec_dep(providers = [RunInfo]),
     },
 )

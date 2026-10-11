@@ -70,14 +70,16 @@ zig_exe(
 # 1 and 2, messages on stderr and none on stdout, the scratch directory from
 # $BUCK_SCRATCH_PATH, the environment and command lines lld and
 # llvm-profdata get, a program that cannot start and a stderr whose writes
-# fail. It runs the executable, so it cannot be an input of it; it is a
-# validation of :cov_branch_tool instead.
+# fail. The paths of the executable and the stand-in reach the test in the
+# environment (`env_tools`, COV_BRANCH and COV_BRANCH_STUB). It runs the
+# executable, so it cannot be an input of it; it is a validation of
+# :cov_branch_tool instead.
 zig_test(
     name = "cov_branch_exe_test",
     exec_compatible_with = LINUX_X86_64,
-    exes = {
-        "cov_branch": ":cov_branch_exe",
-        "stub": ":cov_branch_annotate_stub",
+    env_tools = {
+        "COV_BRANCH": ":cov_branch_exe",
+        "COV_BRANCH_STUB": ":cov_branch_annotate_stub",
     },
     imports = ["cov_branch_annotate_fixture.zig"],
     src = "cov_branch_exe_test.zig",

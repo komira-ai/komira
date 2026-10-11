@@ -1,21 +1,51 @@
 # The linters run by the lint rules (defs.bzl), as pinned downloads, and the
-# lint action script. linux x86_64 static binaries.
+# Zig lint tools: pointer_lint here, and in tool/ the lint action every other
+# lint rule but public_boundary (public_boundary/) runs. linux x86_64 static
+# binaries.
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
 load(":defs.bzl", "shell_lint", "tar_member")
 load(":shell_budget.bzl", "shell_budget")
 
-export_file(name = "lint.sh", visibility = ["PUBLIC"])
-
 export_file(name = "readme_api_coverage.sh", visibility = ["PUBLIC"])
 
 export_file(name = "test_weld.sh", visibility = ["PUBLIC"])
 
-# The reader of lint kind pointer_lint (lint.sh; the rule is pointer_lint in defs.bzl).
-export_file(name = "pointer_lint.awk", visibility = ["PUBLIC"])
+# The Mojo lexer the lint tools share (mojo_tokens.zig): strings, comments,
+# triple-quoted strings over lines, bracket nesting.
+zig_test(
+    name = "mojo_tokens_test",
+    exec_compatible_with = LINUX_X86_64,
+    src = "mojo_tokens.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
 
-# The reader of lint kind public_boundary (lint.sh; the rule is public_boundary in defs.bzl).
-export_file(name = "public_boundary.awk", visibility = ["PUBLIC"])
+# The pointer lint's scenarios (pointer_lint_test.zig): each rule's sites,
+# the near misses, the library-file decision, the ledgers and the result.
+zig_test(
+    name = "pointer_lint_test",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["mojo_tokens.zig", "pointer_lint.zig"],
+    src = "pointer_lint_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# The action of the pointer_lint rule (defs.bzl): a static executable built
+# with the pinned zig, behind its tests and the lexer's.
+zig_exe(
+    name = "pointer_lint",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["mojo_tokens.zig"],
+    src = "pointer_lint.zig",
+    unit_tests = [":mojo_tokens_test", ":pointer_lint_test"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
 
 pinned_file(**pinned_kwargs("linux-x86_64", "shellcheck"))
 
@@ -38,7 +68,7 @@ tar_member(
 # The lint actions' own scripts.
 shell_lint(
     name = "shell_lint",
-    srcs = ["lint.sh", "readme_api_coverage.sh", "test_weld.sh"],
+    srcs = ["readme_api_coverage.sh", "test_weld.sh"],
     visibility = ["PUBLIC"],
 )
 
