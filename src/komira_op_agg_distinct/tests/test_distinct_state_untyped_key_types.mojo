@@ -30,7 +30,7 @@
 #     from passing on an all-ASCII fixture.
 #
 # Mutants run while writing it: the float key equality replaced by IEEE `==`
-# and the float hash by the raw bits (thorium's arms) turned both float tests
+# and the float hash by the raw bits (the arms this state had before the float model) turned both float tests
 # red; dropping the NULL-hash / validity compare in `_hash_row` and
 # `_keys_match` turned the NULL-key tests red.
 # =============================================================================
