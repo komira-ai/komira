@@ -41,6 +41,13 @@ const KINDS = [_]Kind{
     .{ .rule = "coverage_ci_cases", .target = "komira//:coverage_ci_cases" },
     .{ .rule = "proto_fixture_case", .target = "komira//tools/build/mojo/proto_fixture_testdata:accepts" },
     .{ .rule = "proto_check_case", .target = "komira//tools/vendor/googleapis:proto_check_accepts" },
+    .{ .rule = "install_gate_cases", .target = "tests//functional/install_gate:cases" },
+    .{ .rule = "mojo_mem_cap_cases", .target = "tests//functional/mem_cap:cases" },
+    .{ .rule = "mojo_gate_runner_cases", .target = "tests//functional/test_data:runner_cases" },
+    .{ .rule = "mojo_test_command_case", .target = "tests//functional/test_data:mojo_test_args_action" },
+    .{ .rule = "mojo_test_deadline_cases", .target = "tests//functional/test_deadline:cases" },
+    .{ .rule = "mojo_watchdog_cases", .target = "tests//functional/watchdog:cases" },
+    .{ .rule = "git_check", .target = "komira//third_party/git:git_check" },
 };
 
 /// Test rules whose `buck2 test` command (ExternalRunnerTestInfo) takes the variable.

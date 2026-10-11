@@ -11,19 +11,21 @@ build action (test_command_case.sh), so a build of this package runs it.
 """
 
 load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 def _impl(ctx):
     tc = ctx.attrs._toolchain[MojoToolchainInfo]
     report = ctx.actions.declare_output("runner_cases.txt")
     ctx.actions.run(
         cmd_args(tc.busybox, "sh", ctx.attrs.script, tc.busybox, ctx.attrs.gate_runner, report.as_output(), ctx.attrs.dyld_prelude),
+        env = rerun_env(ctx),
         category = "mojo_gate_runner_cases",
     )
-    return [DefaultInfo(default_output = report)]
+    return [DefaultInfo(default_output = report), rerun_info(ctx)]
 
 mojo_gate_runner_cases = rule(
     impl = _impl,
-    attrs = {
+    attrs = RERUN_ATTRS | {
         "dyld_prelude": attrs.source(default = "komira//tools/build/mojo/darwin:dyld_prelude.sh"),
         # The darwin-arm64 toolchain's runner (linux runs the gate).
         "gate_runner": attrs.source(default = "komira//tools/build/mojo:gate_runner.sh"),
@@ -47,13 +49,14 @@ def _test_command_impl(ctx):
             "--",
             test.command,
         ),
+        env = rerun_env(ctx),
         category = "mojo_test_command_case",
     )
-    return [DefaultInfo(default_output = report)]
+    return [DefaultInfo(default_output = report), rerun_info(ctx)]
 
 mojo_test_command_case = rule(
     impl = _test_command_impl,
-    attrs = {
+    attrs = RERUN_ATTRS | {
         "script": attrs.source(),
         "test": attrs.dep(providers = [ExternalRunnerTestInfo]),
         "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),

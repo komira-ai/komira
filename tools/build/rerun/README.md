@@ -64,13 +64,29 @@ action that runs a test, and returns `rerun_info(ctx)` (the provider
 | `coverage_ci_cases` | the coverage workflow scripts' cases (`coverage_ci_cases`) |
 | `proto_fixture_case` | the fixture check over its case (`proto_fixture_case`) |
 | `proto_check_case` | the closure check over its case (`proto_check_case`) |
+| `install_gate_cases` (tests cell) | install_gate.sh's cases (`install_gate_cases`) |
+| `mojo_mem_cap_cases` (tests cell) | mem_cap.sh's cases (`mojo_mem_cap_cases`) |
+| `mojo_gate_runner_cases` (tests cell) | gate_runner.sh's cases (`mojo_gate_runner_cases`) |
+| `mojo_test_command_case` (tests cell) | a mojo_test's `buck2 test` command, run (`mojo_test_command_case`) |
+| `mojo_test_deadline_cases` (tests cell) | test_deadline.sh's cases (`mojo_test_deadline_cases`) |
+| `mojo_watchdog_cases` (tests cell) | the compile watchdog's cases (`mojo_watchdog_cases`) |
+| `git_check` | git_check.sh over the built git and git-lfs (`git_check`) |
 
-Not wired: the coverage and mutation builds' runs of a library's tests
-(`mojo_cov_run`, `mojo_cov_branch_run`, `mutation_run_test`), which are
-measurements under `-c komira.coverage` and `-c komira.mutation`, not the
-tests the build welds; checks over built artifacts (lints, `proto_check`,
-`proto_fixture_check`, `oci_image_check`, the conda checks); and the
-build system's own case scripts in the `tests` cell.
+Not wired:
+
+- Lints (`src_layout`, `public_boundary`, `pointer_lint`, `retired_names`,
+  `docs`, `no_endpoint` and the rest) and checks over
+  built artifacts (`proto_check`, `proto_fixture_check`, `oci_image_check`,
+  the conda checks, `prefixed_archive_check`). Each checks outputs the build
+  already made, deterministically: the same inputs give the same verdict, so
+  running it again measures nothing.
+- `gcp_client_tests_check` (tests cell): it reads a library's pass markers.
+  The tests that wrote them are the library's `test_srcs`; naming the library
+  re-runs them.
+- The coverage and mutation builds' runs of a library's tests
+  (`mojo_cov_run`, `mojo_cov_branch_run`, `mutation_run_test`): measurements
+  under `-c komira.coverage` and `-c komira.mutation`, not the tests the
+  build welds.
 
 ## The guard
 

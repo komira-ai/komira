@@ -51,7 +51,7 @@ given `--nested`, which the guard refuses.
 | [`analysis_refusals_rust`](analysis_refusals_rust.zig) | rust_library's test_srcs refusals | the `.rs` check deleted |
 | [`analysis_refusals_coverage`](analysis_refusals_coverage.zig) | the coverage rules' analysis refusals | the buck-out, no-args and LLVM_PROFILE_FILE checks deleted |
 | [`config_refusals`](config_refusals.zig) | `komira.coverage`, `komira.mutation`, `komira.test_timeout_s` values refused at load | any value but true read as false; the margin's `<=` made `<` |
-| [`rerun`](rerun.zig) | `-c komira.rerun` naming one target re-runs only its test actions, on the farm; naming one target of each of the 17 rules that run tests re-runs an action of each; the `buck2 test` commands of a mojo_test and a rust_test carry it; its value and label refusals | `rerun_env` ignoring the label (every target salted); a rule not calling it |
+| [`rerun`](rerun.zig) | `-c komira.rerun` naming one target re-runs only its test actions, on the farm; naming one target of each of the 24 rules that run tests re-runs an action of each; the `buck2 test` commands of a mojo_test and a rust_test carry it; its value and label refusals | `rerun_env` ignoring the label (every target salted); a rule not calling it |
 
 A refusal row passes only when `buck2 audit providers <target>` (analysis,
 nothing built) fails and its output holds the row's message exactly, as the
@@ -77,9 +77,9 @@ to every unit, this one included. On a 28-core client the 14 scenarios ran in
 of resident memory together at the peak). How many run at once on a runner is
 its local test concurrency.
 
-Those 14 query the graph; `rerun`, added since, builds: 18 targets three
-times, re-running 19 test actions on the farm. Its inner daemon's own
+Those 14 query the graph; `rerun`, added since, builds: 25 targets three
+times, re-running 26 test actions on the farm. Its inner daemon's own
 `--isolation-dir` changes the output paths in every command line, so its
 first run after a change to those targets' closure executes their actions
-anew (31 of 160 in the run its pull request recorded, 4 min 05 s); a run
-with nothing changed is cache hits and the 19 test actions.
+anew; a run with nothing changed is cache hits and the 26 test actions
+(5 min 36 s in the run that added the tests cell's case rules).

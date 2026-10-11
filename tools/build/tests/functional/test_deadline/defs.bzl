@@ -5,6 +5,7 @@ and nothing of the run is left alive.
 """
 
 load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 def _impl(ctx):
     tc = ctx.attrs._toolchain[MojoToolchainInfo]
@@ -12,13 +13,14 @@ def _impl(ctx):
     deadline = ctx.attrs._test_deadline[DefaultInfo].default_outputs[0]
     ctx.actions.run(
         cmd_args(tc.busybox, "sh", ctx.attrs.script, tc.busybox, deadline, report.as_output()),
+        env = rerun_env(ctx),
         category = "mojo_test_deadline_cases",
     )
-    return [DefaultInfo(default_output = report)]
+    return [DefaultInfo(default_output = report), rerun_info(ctx)]
 
 mojo_test_deadline_cases = rule(
     impl = _impl,
-    attrs = {
+    attrs = RERUN_ATTRS | {
         "script": attrs.source(),
         "_test_deadline": attrs.dep(default = "komira//tools/build/mojo:test_deadline.sh"),
         "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
