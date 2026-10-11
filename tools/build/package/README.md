@@ -321,9 +321,9 @@ fails the build in these cases:
 - the metapackage does not require a member at its version and build string; the
   message names the member;
 - a member's metadata.json requires, at the set's version and build string, a
-  member listed after it (the native package `komira_native` excepted); the
-  message names both. The `release_order_*` targets in [`BUCK`](BUCK) run this
-  check over the fixtures in `release_order/` and must pass first;
+  member listed after it; the message names both. The `release_order_*`
+  targets in [`BUCK`](BUCK) run this check over the fixtures in
+  `release_order/` and must pass first;
 - `komira_pack conda-check --kind metapackage --require-stamped true` refuses the
   metapackage;
 - its `libs`, its metapackage name, or the `--license`, `--summary` and `--home`

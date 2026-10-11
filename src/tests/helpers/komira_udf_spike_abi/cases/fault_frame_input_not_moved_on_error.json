@@ -1,0 +1,12 @@
+{
+ "name": "fault_frame_input_not_moved_on_error",
+ "defect": "an `in` stream a failing frame_open did not move is leaked, or accepted because the status was an error (design 4.4: moved whatever the status)",
+ "run": "frame",
+ "entry": "frame_in_kept_raise",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}, {"length": 1, "columns": [{"type": "int64", "values": [2]}]}],
+ "expect": {"status": "ERR_RAISED", "run_error": "UDF_RUNTIME_FAULT", "message": "nonempty"}
+}
