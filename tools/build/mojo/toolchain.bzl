@@ -185,9 +185,13 @@ mkdir -p "$TMPDIR"
 echo passed > "$3"
 rm -rf "$T"
 """
+    # The pinned tools a test runs, as environment variables naming their
+    # paths.
+    env = {name: dep[DefaultInfo].default_outputs[0] for name, dep in ctx.attrs.env_tools.items()}
     ctx.actions.run(
         cmd_args(busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output()), hidden = ctx.attrs.imports),
         category = "zig_test",
+        env = env,
     )
     return [DefaultInfo(default_output = out)]
 
@@ -200,6 +204,9 @@ zig_test_rule = rule(
         "busybox": attrs.dep(),
         # `zig_module` targets `src` imports by name.
         "deps": attrs.list(attrs.dep(providers = [ZigModuleInfo]), default = []),
+        # name -> a tool the tests run (its default output), in the
+        # environment as its path.
+        "env_tools": attrs.dict(attrs.string(), attrs.exec_dep(), default = {}),
         "imports": attrs.list(attrs.source(), default = []),
         "src": attrs.source(),
         "zig": attrs.dep(),
