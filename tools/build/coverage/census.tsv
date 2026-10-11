@@ -238,6 +238,5 @@ komira//src/tests/helpers/komira_plan_harness:komira_plan_harness	src/tests/help
 komira//src/tests/helpers/komira_test_bucket:komira_test_bucket	src/tests/helpers/komira_test_bucket	test	OK	595	616	-	-	no	conda	-	-
 komira//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3	src/tests/helpers/komira_test_fake_s3	test	OK	28	28	-	-	no	no	-	-
 komira//src/tests/helpers/komira_test_minio:komira_test_minio	src/tests/helpers/komira_test_minio	test	OK	221	245	69	110	yes	conda	-	-
-komira//src/tests/helpers/komira_test_python:komira_test_python	src/tests/helpers/komira_test_python	test	OK	0	0	-	-	no	no	-	-
 komira//src/tests/helpers/komira_test_s3_adapter:komira_test_s3_adapter	src/tests/helpers/komira_test_s3_adapter	test	OK	205	245	-	-	no	conda	src/tests/helpers/komira_test_s3_adapter/open.mojo	-
 komira//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary	src/tests/helpers/komira_test_vocabulary	test	OK	59	59	-	-	no	no	-	-

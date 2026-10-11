@@ -336,6 +336,5 @@ helpers. They are not held to the target and have no floor.
 | `src/tests/helpers/komira_test_bucket:komira_test_bucket` | 96.59% (595/616) | 21 | not gated | 0 | OK |
 | `src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3` | 100.00% (28/28) | 0 | not gated | 0 | OK |
 | `src/tests/helpers/komira_test_minio:komira_test_minio` | 90.20% (221/245) | 24 | 62.72% (69/110) | 0 | OK |
-| `src/tests/helpers/komira_test_python:komira_test_python` | n/a | 0 | not gated | 0 | OK |
 | `src/tests/helpers/komira_test_s3_adapter:komira_test_s3_adapter` | 83.67% (205/245) | 40 | not gated | 1 | OK |
 | `src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary` | 100.00% (59/59) | 0 | not gated | 0 | OK |
