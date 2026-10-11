@@ -87,9 +87,13 @@
 # RELEASE drops every label `is_kci_label_key` names (`kci_*`, `kci-*`) and
 # no other.
 #
-# A cloud object that cannot carry labels (a scheduler job, an IAM binding)
-# carries the identity as the first line of its description instead
-# (`OwnerStamp.identity()`); that is the adapter's own business.
+# A cloud object that cannot carry labels but has a description (a service
+# account, a scheduler job) carries the identity in its description instead
+# (`OwnerStamp.identity()`); that is the adapter's own business. An object
+# with neither, a MEMBER BINDING (a member holding a role on a target's
+# policy), carries no stamp at all: on a shape that declares its grants
+# DERIVED, its stamp is computed from what the cloud holds at its two ends
+# (derived.mojo).
 # =============================================================================
 
 from kci_reconciler import Label, OwnerStamp, RETAIN_DELETE, RETAIN_KEEP

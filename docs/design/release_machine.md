@@ -144,8 +144,8 @@ tool that writes them is itself a pinned build output.
 [`release/machine.textproto`](../../release/machine.textproto) (format
 `kci.machine`, read by `src/kci_release_machine`) is komira's own release machine:
 its stages in order, and the steps of each. `kci run --stage <S>` runs one
-stage. Three stages today: `build` (one BUILD step), `gamma` and `prod` (one
-PUBLISH step each, to prefix.dev `komira-ai/gamma` and `komira-ai/prod`). Three
+stage. Three stages today: `build` (one BUILD step), `beta` and `prod` (one
+PUBLISH step each, to prefix.dev `komira-ai/beta` and `komira-ai/prod`). Three
 fields of a stage carry what the CI workflow must agree with:
 
 | field | meaning |
@@ -167,7 +167,7 @@ metapackage is checked member by member: kci reads the members from the built
 metapackage's own requirements (each at the release's version and build, the
 list equal to the release's libraries, never empty) while `pixi.toml` names
 only the metapackage. `kci run` then takes `--pixi` and `--pixi-sha256`, the
-pinned pixi and its sha256. gamma's two validations are of this kind:
+pinned pixi and its sha256. beta's two validations are of this kind:
 `install-komira-encoding` (the library alone) and `install-set` (`komira_all`
 alone). Before anything is published, `--channel file:///<dir>` points such a
 run at a local channel that `komira_pack conda-index` wrote from the release

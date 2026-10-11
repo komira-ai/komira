@@ -6,16 +6,16 @@ what kci must add before gamma can run a service validation, and the
 questions left to the project owner. Section names and item numbers are
 referred to from that document.
 
-**Vocabulary.** This note and [gamma validation](gamma_validation.md)
-predate the staged pipeline's [glossary](staged_pipeline.md#glossary). Here
-"gamma" means today's stage that publishes to the conda channel `gamma` and
-installs from it, which the glossary calls **beta** (the beta channel and
-`beta_validate`); the glossary's gamma holds only real cloud resources.
+**Vocabulary.** This note predates the staged pipeline's [glossary](staged_pipeline.md#glossary). Here
+"gamma" means the stage that publishes to a test conda channel and installs
+from it, which since the rename (M2, [staged_pipeline.md](staged_pipeline.md)
+section e3) is the stage **`beta`**: the channel `komira-ai/beta`, the jobs
+`beta` and `beta_validate` (the `validate` job below, its name before M2). The glossary's gamma holds only real cloud
+resources and publishes nothing.
 Open decision 4 below already uses the glossary's words, and
-[gamma validation](gamma_validation.md) uses them throughout, with a table
-of the names `main` uses today. Every check of an installed native package
-is [native packaging](native_packaging.md)'s, in beta's installs; item 8
-of each list below points there.
+[gamma validation](gamma_validation.md) uses them throughout. Every check
+of an installed native package is [native packaging](native_packaging.md)'s,
+in beta's installs; item 8 of each list below points there.
 
 ## What kci must add to run service validations in gamma
 
@@ -106,7 +106,9 @@ whose rules `kci run` applies to the workflow it runs under (item 7).
    (each library that owns C ships its own `.so` in its own package). kci
    reads each package's `lib_files` rows and runs those checks in beta's
    installs: that plan's slices 9 and 11, which it specifies; nothing here
-   adds to them.
+   adds to them. Part of slice 9 is on `main`: `check_native_install`
+   (`src/kci_validate/native_install.mojo`) reads the `lib_files` rows, the
+   `__glibc` floor, `NEEDED` and `DF_SYMBOLIC`, and nothing calls it yet.
 
 ## Open decisions (for the project owner)
 

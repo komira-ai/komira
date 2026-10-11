@@ -5,16 +5,14 @@
 publishes the packages to the beta channel and then installs them from it
 and runs every README example (job `beta_validate`); **gamma** is only real
 resources in the gamma cloud accounts and names no conda channel; **prod**
-promotes the same bytes. On `main` the code still uses the old names,
-until the channel rename (M1 to M4, [staged_pipeline.md](staged_pipeline.md#e3-the-channel-rename-gamma-to-beta-a-migration-each-step-a-go))
-lands; where this document quotes the code, it quotes those names:
-
-| glossary | on `main` today (`release/machine.textproto`, `.github/workflows/kci.yml`) |
-|---|---|
-| beta's publish (job `beta`) | the stage `gamma`, job `gamma` (`--only step:publish`, GitHub environment `gamma`) |
-| the beta channel | the conda channel `gamma` |
-| beta's installs (job `beta_validate`) | the part job `validate` of the stage `gamma` (`--only validation:<name>`) |
-| gamma (real cloud only) | no stage yet ([staged_pipeline.md](staged_pipeline.md#e2-gamma-real-cloud-tests-as-ordinary-validations)) |
+promotes the same bytes. Since the channel rename's M2
+([staged_pipeline.md](staged_pipeline.md#e3-the-channel-rename-gamma-to-beta-a-migration-each-step-a-go))
+`main` uses these names too: the stage `beta` publishes as the job `beta`
+(`--only step:publish`, GitHub environment `beta`) to the conda channel
+`beta`, and the job `beta_validate` (`--only validation:<name>`; `validate`
+before M2) runs beta's installs (`release/machine.textproto`,
+`.github/workflows/kci.yml`). Gamma has no stage yet
+([staged_pipeline.md](staged_pipeline.md#e2-gamma-real-cloud-tests-as-ordinary-validations)).
 
 So "beta, installed package" in the tables below is a check run by beta's
 installs on what the beta channel serves, and "real gamma cloud project" is
@@ -61,26 +59,24 @@ requests merge; issue #779 tracks updating them.
   them is whether an outside contributor can reproduce the run locally
   without an account, a token or a licence.
 - **No stored secret.** Publishing uses trusted publishing (an OIDC identity
-  token, no stored credential), and beta's publish (job `gamma` today) and
-  prod run kci with `--secret-store none` (`.github/workflows/kci.yml`). kci reads secrets only
+  token, no stored credential), and beta and prod run kci with
+  `--secret-store none` (`.github/workflows/kci.yml`). kci reads secrets only
   through `--secret-store none|env` (`src/kci_cli/args.mojo`).
-- **Beta's installs hold nothing.** The stage `gamma` of `main` (beta's
-  publish and installs) runs as two jobs of `kci.yml`: `gamma` publishes
-  (`--only step:publish`, in the GitHub environment `gamma`), and `validate`
-  (`beta_validate` after the rename) runs the validations
-  (`--only validation:<name>`). `validate` runs on a GitHub-hosted `ubuntu-24.04` runner with no farm, no
+- **Beta's installs hold nothing.** The stage `beta` runs as two jobs of
+  `kci.yml`, each on a push to `main` only: `beta` publishes (`--only
+  step:publish`, in the GitHub environment `beta`), and `beta_validate` runs
+  the validations (`--only validation:<name>`). `beta_validate` runs on a GitHub-hosted `ubuntu-24.04` runner with no farm, no
   container, no GitHub environment, `contents: read` and no `id-token`, and a
-  60-minute timeout (`.github/workflows/kci.yml`, job `validate`; the header
+  60-minute timeout (`.github/workflows/kci.yml`, job `beta_validate`; the header
   of `release/machine.textproto`). It is the job a validation runs in today.
-- **`validate` is a job, not a stage.** The machine file's stages are
-  `build`, `gamma`, `prod` and `pr` (`release/machine.textproto`); `build` and
-  `gamma` are the glossary's beta. This document says "beta's installs" for
-  what the `validate` job runs.
+- **`beta_validate` is a job, not a stage.** The machine file's stages are
+  `build`, `beta`, `prod` and `pr` (`release/machine.textproto`); `build` and
+  `beta` are the glossary's beta. This document says "beta's installs" for
+  what the `beta_validate` job runs.
 
 ## What runs in beta's installs today? (EXISTS)
 
-`release/machine.textproto` gives the PUBLISH step of the stage `gamma`
-(beta's publish) two validations, both
+`release/machine.textproto` gives beta's PUBLISH step two validations, both
 of kind `CONDA_INSTALL_ENV` with `smoke: README`:
 
 | validation | installs | runs |
@@ -88,9 +84,8 @@ of kind `CONDA_INSTALL_ENV` with `smoke: README`:
 | `install-komira-encoding` | `komira_encoding` alone | its README examples |
 | `install-set` | `komira_all` alone; kci reads the members from the built metapackage's requirements | every member's README examples |
 
-Each one installs from the conda channel `gamma` (the beta channel) with
-the pinned pixi, in a fresh scratch directory outside the checkout and an
-environment built from nothing
+Each one installs from the `beta` channel with the pinned pixi, in a fresh
+scratch directory outside the checkout and an environment built from nothing
 (`src/kci_validate/env.mojo`), checks each installed README's sha256 against
 the release's record, and runs every ` ```mojo ` block of every installed
 README against the install (`src/kci_validate/readme_installed.mojo`).
@@ -398,7 +393,7 @@ about the installed package itself.
 | `komira_protobuf`, `komira_textproto`, `komira_wkt`, `komira_proto_codec`, `komira_xml` (released) | EXISTS: `komira_protobuf` decodes wire goldens generated once by prost 0.13 (`test_protobuf_prost_crosscheck`); `komira_proto_codec` byte-diffs its proto3-JSON output against hand-checked reference strings, one per mapping rule (`test_proto_codec_proto3_json_conformance`); `komira_xml` checks rows that each cite an XML 1.0 or Namespaces rule (`test_xml_strict`); round trips; README examples in `install-set` | in-process, build time; beta's installs for the README | wire-level decode compatibility with one independent encoder; mapping-rule regressions; well-formedness refusals | no upstream conformance corpus is pinned for any of them (not protobuf's conformance suite, not the W3C XML test suite), so each oracle is prost's output once or our reading of the spec; the encode direction against an independent decoder. PROPOSED: pin the protobuf conformance runner's test list and run the binary and proto3-JSON cases at build time |
 | `komira_validation_run`, `komira_test_run_id`, `komira_test_verdict` (released test support) | EXISTS: welded tests; README examples in `install-set` | in-process, build time; beta's installs for the README | label legality, id format, verdict parsing as their tests state them | nothing beyond the strings: they are used by tests and kci, not against a service |
 | every released library | EXISTS: `install-set` README examples | beta, installed package | layout and metadata errors, closure errors, README drift, a metapackage whose members drift from the release set | anything a README does not touch |
-| every library that owns C, and every library that reaches one | PROPOSED: the checks of [native packaging](native_packaging.md), which is their authority (the checks, their slices and their planted defects are there, not here). At build time, checks 1 to 7 on each owner's `.so` (its slices 5 and 6). In beta's installs, its install checks 1 to 7 ([Built once, promoted unchanged](native_packaging.md#built-once-promoted-unchanged); its slices 9 and 11), run with `LD_LIBRARY_PATH` unset: each installed `lib_files` row's sha256; every `NEEDED` resolving inside the environment; every `.so` loaded with `RTLD_NOW` in the whole set and in each package alone; the loaded-from row; every README run under `mojo run` and built with `mojo build`; one program per owner of `komira_http_core`'s closure beside a system OpenSSL | build time; beta, installed package | as that document lists per check: among them an export outside the owner's generated list, a `.so` changed after `build`, a `NEEDED` owner the package does not require, an undefined symbol, an owner's symbols clashing with a second libcrypto in one process | anything after beta: gamma runs none of these checks (it touches only real cloud resources); other platforms |
+| every library that owns C, and every library that reaches one | PROPOSED: the checks of [native packaging](native_packaging.md), which is their authority (the checks, their slices and their planted defects are there, not here). At build time, checks 1 to 7 on each owner's `.so` (its slices 5 and 6). In beta's installs, its install checks 1 to 7 ([Built once, promoted unchanged](native_packaging.md#built-once-promoted-unchanged); its slices 9 and 11; part of slice 9, `check_native_install` in `src/kci_validate/native_install.mojo`, is on `main` and nothing calls it yet), run with `LD_LIBRARY_PATH` unset: each installed `lib_files` row's sha256; every `NEEDED` resolving inside the environment; every `.so` loaded with `RTLD_NOW` in the whole set and in each package alone; the loaded-from row; every README run under `mojo run` and built with `mojo build`; one program per owner of `komira_http_core`'s closure beside a system OpenSSL | build time; beta, installed package | as that document lists per check: among them an export outside the owner's generated list, a `.so` changed after `build`, a `NEEDED` owner the package does not require, an undefined symbol, an owner's symbols clashing with a second libcrypto in one process | anything after beta: gamma runs none of these checks (it touches only real cloud resources); other platforms |
 | `komira_log` and every library above it | PROPOSED: how `komira_log`'s per-image holder ships is [native packaging](native_packaging.md#per-library-state-komira_logs-holder)'s open question 2; its install check 6 builds every installed README with `mojo build` and runs it, besides the `mojo run` | beta, installed package | a holder archive missing from its package or misnamed; a run-path or `NEEDED` mistake only a built binary shows | interop; it costs a full compile per README |
 | `komira_compression`, `komira_lz4`, `komira_zlib` and the formats above them | PROPOSED: [native packaging](native_packaging.md#system-codecs-dlopened)'s loaded-from row (install check 5) in beta's installs: each README program runs under the loader's record (`LD_DEBUG=libs`), in the whole set and in each package alone, and every codec it opened must have loaded from the environment's `lib/`. `komira_lz4` and `komira_zlib` come first (its slices 3 and 4), `komira_compression` with its own `.so` (its slice 8). Whether a bare-soname `dlopen` under `mojo run` finds the environment's `lib/` at all is probe 3's DL case there. This replaces the `CONDA_INSTALL_SMOKE` program reading `/proc/self/maps` that this row proposed before | beta, installed package | a wrong or missing conda-forge requirement: the codecs are opened by bare soname at first use (`src/komira_compression/codec_libraries.mojo`), and the runner image ships its own copies, so today such a requirement would pass | codec correctness (build time) |
 | `komira_parquet`, `komira_arrow_ipc`, `komira_orc`, `komira_avro`, `komira_csv`, `komira_jsonl` | PROPOSED: an interop leg: pyarrow (Apache-2.0) and fastavro (MIT) pinned exactly from conda-forge in the same environment read what the installed komira wrote, and komira reads what they wrote | beta, installed package; or build time with pinned downloads | the write direction; C Data Interface export into a real pyarrow process; komira's native library coexisting with pyarrow's in one process | breadth (one dataset per format); other platforms |
@@ -440,7 +435,7 @@ check (PROPOSED).
 - **Emulators need none.** moto, Azurite, the Firestore emulator,
   storage-testbench, PostgreSQL, h2spec and Connect conformance run with no
   account and no token. They are the default for every proposal above.
-- **A tokened emulator breaks two deliberate properties.** The `validate`
+- **A tokened emulator breaks two deliberate properties.** The `beta_validate`
   job has no environment and no secret (`kci.yml`), and a
   `CONDA_INSTALL_SMOKE` container receives four fixed `-e` variables and
   nothing else (`src/kci_validate/container.mojo`). A licence token would
@@ -527,7 +522,7 @@ validation run id is not `komira_test_run_id`, which names one test process.
 
 ### Time budget
 
-- `validate` job: 60 minutes for both validations together, each of which
+- `beta_validate` job (`validate` before M2): 60 minutes for both validations together, each of which
   may wait up to `wait_for_index_seconds` (1800 by default, 3600 at most,
   `src/kci_release_machine/graph.mojo`) for the channel index. Measured: in
   five consecutive successful `kci.yml` runs on `main` on 2026-10-07 (run
@@ -557,8 +552,8 @@ validation run id is not `komira_test_run_id`, which names one test process.
   proposal above needs a measured start-up time and a per-action budget, as
   the Connect conformance run has, before it is welded.
 - A service validation beside beta's installs therefore needs its own job
-  and timeout; it must not share the `validate` job's hour. Inside `kci.yml`
-  that job is a part job of the stage `gamma` (beta's, on `main`) under rule R9 of `src/kci_workflow_check/rules.mojo`: no
+  and timeout; it must not share the `beta_validate` job's hour. Inside `kci.yml`
+  that job is a part job of the stage `beta` under rule R9 of `src/kci_workflow_check/rules.mojo`: no
   environment, no identity token, and prod needs it (R2, R4, R3). A job
   that needs an environment or a token, or must not block prod, collides
   with those rules; item 7 of
@@ -603,7 +598,9 @@ validation run id is not `komira_test_run_id`, which names one test process.
   (each `.so`'s sha256, `NEEDED`, loading with `RTLD_NOW`, the loaded-from
   row, a `mojo build` of each README, a system OpenSSL beside each owner)
   run in beta's installs only after that plan's slices 9 and 11, the second
-  of which needs the staged pipeline's P4. Until install check 6 builds the
+  of which needs the staged pipeline's P4. Part of slice 9 is on `main`
+  (`check_native_install` in `src/kci_validate/native_install.mojo`), and
+  nothing calls it yet. Until install check 6 builds the
   READMEs, a README that passes as a welded test (the build links each
   per-library archive) can still fail under `mojo run` from the install
   (that plan's "Per-library state: komira_log's holder").
