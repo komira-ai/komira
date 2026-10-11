@@ -26,6 +26,7 @@ from komira_udf_spike_abi.contract import (
     ERR_DEADLINE,
     ERR_DESCRIPTOR,
     ERR_FIELD_NOT_DECLARED,
+    ERR_INTERNAL,
     ERR_RAISED,
     ERR_UNSUPPORTED,
     FORM_PACKAGE,
@@ -60,6 +61,7 @@ from ._arrow import (
     schema_format,
     schema_name,
     set_null,
+    word_at,
 )
 
 comptime F_DOUBLE = 1
@@ -108,6 +110,8 @@ comptime F_RAISE_ROW_UNSET = 43
 comptime F_FLAGS_PROBE = 44
 comptime F_SUM_ONE_SET = 45
 comptime F_RAISE_AGAIN = 46
+comptime F_DOUBLE_BATCH = 47
+comptime F_FAHRENHEIT_BATCH = 48
 
 comptime ROW_FIELDS_MAX = 8
 comptime SLOW_ROW_NS: Int64 = 100_000_000
@@ -242,6 +246,11 @@ def find_fixture(entry: String) -> Optional[Fixture]:
         return Fixture(F_SUM_ONE_SET, SHAPE_AGG_MERGEABLE, "l", "l", "l")
     # A frame whose frame_next raises, then answers ERR_INTERNAL to every
     # later frame_next (the host must not pull after an error).
+    # double and fahrenheit as a UDF author writes them: one loop per batch.
+    if entry == "double_batch":
+        return Fixture(F_DOUBLE_BATCH, SHAPE_SCALAR, "l", "l", "")
+    if entry == "fahrenheit_batch":
+        return Fixture(F_FAHRENHEIT_BATCH, SHAPE_MAP_BATCHES_COLUMN, "g", "g", "")
     if entry == "raise_again":
         return Fixture(F_RAISE_AGAIN, SHAPE_MAP_BATCHES_FRAME, "l", "tl", "")
     return None
@@ -380,6 +389,41 @@ def _value(fx: Int, x: Void, y: Void, r: Int, o: Void, d: Void) raises:
         d.bitcast[Int64]()[r] = i64_at(x, r)
 
 
+def _scalar_batch(fx: Int, a: Void, o: Void, e: Void) -> Int32:
+    """double_batch and fahrenheit_batch: the same functions as double and
+    fahrenheit, written as a UDF author writes a batch function. The input's
+    value and validity pointers are read once per batch, the values computed
+    in one loop over every row (a null row's value is unspecified), and the
+    null rows marked in a second loop over the validity bitmap."""
+    var n = length(a)
+    if n_children(a) < 1:
+        return fail(e, ERR_INTERNAL, "a batch fixture got no argument")
+    var x = child(a, 0)
+    var off = Int(arr(x)[].offset)
+    var d = make_col(o, n)
+    # SAFETY: the host validated `x`: buffer 1 holds offset + length values,
+    # buffer 0 (when not NULL) offset + length bits; `d` holds n values.
+    var src = word_at(arr(x)[].buffers, 1)
+    if fx == F_DOUBLE_BATCH:
+        var xs = src.bitcast[Int64]() + off
+        var ds = d.bitcast[Int64]()
+        for r in range(n):
+            ds[r] = 2 * xs[r]
+    else:
+        var xs = src.bitcast[Float64]() + off
+        var ds = d.bitcast[Float64]()
+        for r in range(n):
+            ds[r] = xs[r] * 1.8 + 32.0
+    var xv = word_at(arr(x)[].buffers, 0)
+    if not is_null(xv):
+        var bits = xv.bitcast[UInt8]()
+        for r in range(n):
+            var at = off + r
+            if (bits[at >> 3] >> UInt8(at & 7)) & 1 == 0:
+                set_null(o, r)
+    return OK
+
+
 def _scalar_more(fx: Int, a: Void, o: Void) -> Int32:
     """The column fixtures that never raise and need no per-call state
     (null_on_zero, add_mixed, narrow, near, sum12, sum64), in a loop of their
@@ -388,10 +432,11 @@ def _scalar_more(fx: Int, a: Void, o: Void) -> Int32:
     var n = length(a)
     var x = child(a, 0) if n_children(a) > 0 else null_void()
     var y = child(a, 1) if n_children(a) > 1 else null_void()
-    var d = make_col(o, n)  # a zeroed block: every value starts at 0
+    var d = make_col(o, n)
     for r in range(n):
         # SAFETY: `d` is make_col's values block of n rows (8 bytes each).
         if fx == F_SUM_WIDE:
+            d.bitcast[Int64]()[r] = 0
             for k in range(n_children(a)):
                 if not is_valid(child(a, k), r):
                     set_null(o, r)
@@ -415,6 +460,8 @@ def _scalar_more(fx: Int, a: Void, o: Void) -> Int32:
 
 def scalar(fx: Int, host: Void, call: Void, a: Void, o: Void, e: Void) -> Int32:
     """A column fixture over the argument struct `a`, into `o`."""
+    if fx == F_DOUBLE_BATCH or fx == F_FAHRENHEIT_BATCH:
+        return _scalar_batch(fx, a, o, e)
     if fx == F_NULL_ON_ZERO or fx == F_ADD_MIXED or fx == F_NARROW or fx == F_NEAR or fx == F_SUM_WIDE:
         return _scalar_more(fx, a, o)
     var n = length(a)

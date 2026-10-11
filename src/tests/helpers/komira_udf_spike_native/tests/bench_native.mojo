@@ -9,7 +9,10 @@
 #     the call alone, after a warmup: min, median, p90 and max over the
 #     samples, in ns;
 #   - rows/s: `double` (int64) and `fahrenheit` (float64) at 1024, 8192 and
-#     65536 rows, from the median;
+#     65536 rows, from the median; each twice: through the generic fixture
+#     loop the conformance fixtures share (double, fahrenheit), and written
+#     as a UDF author writes a batch function (double_batch,
+#     fahrenheit_batch: pointers read once per batch, one tight loop);
 #   - threads: `double` at 8192 rows on 1, 4 and 16 threads (each its own
 #     context and instance), where the machine has that many CPUs: rows/s
 #     over the wall time of the whole loop (the export, the call, reading
@@ -191,6 +194,16 @@ def _runtime(path: String, code: CodeSet, name: String, cpus: Int) raises -> Str
     out += '], "fahrenheit": ['
     for i in range(len(sizes)):
         out += (", " if i > 0 else "") + _measure(rt, fah, sizes[i], True, 1.8, 32.0, name + " fahrenheit")
+    # The same two functions written as a UDF author writes them: one loop
+    # per batch (double_batch, fahrenheit_batch).
+    var dbl_b = _instance(rt, _spec("double_batch", SHAPE_SCALAR, TYPE_INT64, code), 3)
+    var fah_b = _instance(rt, _spec("fahrenheit_batch", SHAPE_MAP_BATCHES_COLUMN, TYPE_FLOAT64, code), 4)
+    out += '], "double_batch": ['
+    for i in range(len(sizes)):
+        out += (", " if i > 0 else "") + _measure(rt, dbl_b, sizes[i], False, 2.0, 0.0, name + " double_batch")
+    out += '], "fahrenheit_batch": ['
+    for i in range(len(sizes)):
+        out += (", " if i > 0 else "") + _measure(rt, fah_b, sizes[i], True, 1.8, 32.0, name + " fahrenheit_batch")
     out += '], "threads": ['
     var one_rate = 0.0
     var ns: List[Int] = [1, 4, 16]

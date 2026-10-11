@@ -3,7 +3,9 @@
 # (//src/tests/helpers/komira_udf_spike_native_mojo:native_mojo), through the
 # C ABI only.
 #
-# What it proves: every case of the corpus but _left_out() passes on a
+# What it proves: every case of the corpus but _left_out(), and its double
+# and fahrenheit cases again on double_batch and fahrenheit_batch (the
+# batch-loop fixtures), passes on a
 # native UDF library written in Mojo, behind the native runtime, none
 # skipped. The left-out cases need fixtures user code cannot produce (an
 # input not moved, an error filled on OK or naming a row outside the batch,
@@ -32,10 +34,13 @@ from std.testing import assert_equal
 
 from komira_udf_spike_abi.cases import Case
 from komira_udf_spike_abi.conform import load_cases, run_suite
-from komira_udf_spike_native.code import code_set
+from komira_udf_spike_native.code import code_set, with_batch_twins
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
 comptime CASE_COUNT = 117
+comptime BATCH_TWINS = 9
+"""The corpus cases on double or fahrenheit, each run again on its batch-loop
+fixture (code.with_batch_twins)."""
 
 
 def _left_out() -> List[String]:
@@ -104,6 +109,8 @@ def main() raises:
     # the case it meant to leave out, and a renamed case would be dropped
     # unseen.
     assert_equal(len(cases), CASE_COUNT - len(left_out), "a left-out name is not a case of the corpus")
+    cases = with_batch_twins(cases)
+    assert_equal(len(cases), CASE_COUNT - len(left_out) + BATCH_TWINS, "the batch-loop twins")
     var code = code_set("./native_mojo.so", getenv("TMPDIR") + "/code")
     var report = run_suite("./native.so", cases, code)
     print(report)

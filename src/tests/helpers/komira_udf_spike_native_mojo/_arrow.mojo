@@ -8,8 +8,12 @@
 # Who owns and frees each pointer:
 #   - an input array: the host's until moved; then this library's copy, which
 #     it releases once through the array's own `release`.
-#   - an output column: one `zeroed` block holding its two-entry buffer list,
-#     its validity bitmap and its values; `_release_col` frees the block.
+#   - an output column: one libc malloc block holding its two-entry buffer
+#     list, its validity bitmap and its values (not zeroed: a fixture writes
+#     every row it does not mark null); `_release_col` frees it with libc
+#     free. libc's allocator, not Mojo's: Mojo's alloc and free cost about
+#     30 ns more per batch and slowed the larger blocks (measured on the
+#     farm; see the pull request's measurements).
 #   - an output struct: one block holding its buffer list (NULL validity
 #     unless a fixture points it at the block's own 8-byte bitmap, after the
 #     child pointers) and its child pointers, and one 80-byte block per
@@ -21,6 +25,8 @@
 # the host's or a block of this library that outlives any Mojo scope.
 # =============================================================================
 
+from std.ffi import external_call
+from std.memory import memset
 from std.sys import size_of
 
 from komira_udf_spike_abi._cabi import (
@@ -121,7 +127,7 @@ def set_cpu(d: Void):
 
 
 def _release_col(a: Void) abi("C"):
-    free_zeroed(arr(a)[].private_data)
+    external_call["free", NoneType](arr(a)[].private_data)
     arr(a)[].release = null_void()
 
 
@@ -131,15 +137,17 @@ def _vbytes(n: Int) -> Int:
 
 def make_col(a: Void, n: Int) -> Void:
     """Make `a` an array of `n` 8-byte values, every row valid; the values,
-    which the caller writes (int64 or float64 bits)."""
+    which the caller writes (int64 or float64 bits): the value block is not
+    zeroed, so a fixture writes every row it does not mark null."""
     var vb = _vbytes(n)
-    var block = zeroed(16 + vb + 8 * n + 8)
-    # SAFETY: the block holds the two buffer pointers, then the bitmap, then
-    # n values at the next 8-byte boundary; every byte is inside it.
+    # SAFETY: a libc malloc block (16-byte aligned) of the size below, freed
+    # once by _release_col with libc free; left uninitialized: the buffer
+    # pointers and the bitmap are written below, the values by the caller.
+    # An allocation failure is not handled (spike code, as `zeroed`).
+    var block = external_call["malloc", Void](16 + vb + 8 * n + 8)
     var bufs = block.bitcast[Void]()
     var validity = (block.bitcast[UInt8]() + 16).bitcast[NoneType]()
-    for i in range(vb):
-        validity.bitcast[UInt8]()[i] = 0xFF
+    memset(validity.bitcast[UInt8](), 0xFF, vb)
     var data = (block.bitcast[Int64]() + (16 + vb + 7) // 8).bitcast[NoneType]()
     bufs[0] = validity
     bufs[1] = data

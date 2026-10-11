@@ -135,7 +135,9 @@ enum fixture_id {
   F_CALL_ID,
   F_FLAGS_PROBE,
   F_NEAR,
-  F_YIELD_FIRST
+  F_YIELD_FIRST,
+  F_DOUBLE_BATCH, /* double, written as a batch loop (echo_calls.inc) */
+  F_FAHRENHEIT_BATCH
 };
 
 /* The variant of a fixture that keeps an input (F_ARGS_KEPT, F_FRAME_IN_KEPT,
@@ -391,6 +393,9 @@ static const struct fixture FIXTURES[] = {
     {"yield_first", F_YIELD_FIRST, MF, "l", "tl", "", 0},
     /* sum whose agg_open refuses a second group set on one instance */
     {"sum_one_group_set_per_instance", F_SUM, AM, "l", "l", "l", ONE_GROUP_SET_PER_INSTANCE},
+    /* double and fahrenheit as a UDF author writes them: one loop per batch */
+    {"double_batch", F_DOUBLE_BATCH, SC, "l", "l", "", 0},
+    {"fahrenheit_batch", F_FAHRENHEIT_BATCH, MC, "g", "g", "", 0},
 };
 
 #define N_FIXTURES (sizeof(FIXTURES) / sizeof(FIXTURES[0]))

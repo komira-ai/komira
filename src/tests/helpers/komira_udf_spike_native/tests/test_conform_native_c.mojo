@@ -1,7 +1,9 @@
 # The conformance suite against the native runtime (:native) loading the C
 # native UDF library (:native_c), through the C ABI only.
 #
-# What it proves: every case of the corpus passes on a native C library
+# What it proves: every case of the corpus, and its double and fahrenheit
+# cases again on double_batch and fahrenheit_batch (the batch-loop
+# fixtures), passes on a native C library
 # behind the native runtime, none skipped and none left out (the C library is
 # echo_runtime.c built as a native library, so it has every fixture, the
 # ABI-breaking ones included), and the native runtime's describe
@@ -23,20 +25,25 @@ from std.os import getenv
 from std.testing import assert_equal
 
 from komira_udf_spike_abi.conform import load_cases, run_suite
-from komira_udf_spike_native.code import code_set
+from komira_udf_spike_native.code import code_set, with_batch_twins
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
 comptime CASE_COUNT = 117
+comptime BATCH_TWINS = 9
+"""The corpus cases on double or fahrenheit, each run again on its batch-loop
+fixture (code.with_batch_twins)."""
 
 
 def main() raises:
-    var cases = load_cases(CASES)
-    assert_equal(len(cases), CASE_COUNT, "cases loaded from " + CASES)
+    var corpus = load_cases(CASES)
+    assert_equal(len(corpus), CASE_COUNT, "cases loaded from " + CASES)
+    var cases = with_batch_twins(corpus)
+    assert_equal(len(cases), CASE_COUNT + BATCH_TWINS, "the batch-loop twins")
     var code = code_set("./native_c.so", getenv("TMPDIR") + "/code")
     var report = run_suite("./native.so", cases, code)
     print(report)
     assert_equal(report.runtime_id, "komira/native")
     assert_equal(report.count("FAIL"), 0, "cases failed on the native C library")
     assert_equal(report.count("SKIP"), 0, "cases skipped on the native C library")
-    assert_equal(report.count("PASS"), CASE_COUNT + 1, "every case and the capabilities check pass")
+    assert_equal(report.count("PASS"), len(cases) + 1, "every case and the capabilities check pass")
     print("test_conform_native_c: ok")
