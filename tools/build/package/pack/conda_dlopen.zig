@@ -402,6 +402,26 @@ test "scanSource: a triple-single-quoted string holding a quote ends at its trip
     try expectOpensZlibAndRefusedUndeclared("d = '''it's'''; h = OwnedDLHandle(\"libz.so.1\")\n");
 }
 
+test "scanSource: OwnedDLHandle imported under another name opens" {
+    // The rule is that the code names `OwnedDLHandle`, not that it calls it
+    // by that name: here the call is `DL(...)`. A reader that counted only
+    // `OwnedDLHandle(` would see nothing open and accept the undeclared
+    // soname (mutant F1, fix round 6).
+    try expectOpensZlibAndRefusedUndeclared("from std.ffi import OwnedDLHandle as DL\nh = DL(\"libz.so.1\")\n");
+}
+
+test "scanSource: OwnedDLHandle named only in a type annotation opens" {
+    // The annotation names it with no `(` after the name; the handle comes
+    // from a helper (mutant F1, fix round 6).
+    try expectOpensZlibAndRefusedUndeclared("var h: OwnedDLHandle = _load(\"libz.so.1\")\n");
+}
+
+test "scanSource: OwnedDLHandle named only as a type parameter opens" {
+    // `alloc[OwnedDLHandle]` is followed by `]`, not `(` (mutant F1, fix
+    // round 6).
+    try expectOpensZlibAndRefusedUndeclared("var p = alloc[OwnedDLHandle](1)\np.init_pointee_move(_load(\"libz.so.1\"))\n");
+}
+
 /// A `[src]` tree with a module at its top that opens nothing and the
 /// opener one directory down, at sub/opener.mojo; `dlopenReasonDir` over it
 /// with `declared`. The top module keeps a reader that skipped
