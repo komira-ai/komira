@@ -18,6 +18,7 @@
 //!   orphanspin  the same with a grandchild that spins 7 s; sleep 8 s
 //!   spin        spin 7 s;   childspin  a child spins 7 s, wait
 //!   nap2, nap5  sleep 2 s, 5 s;   fail  exit 7
+//!   selfkill    die of SIGUSR1 (10), its default action restored first
 //!   envdump     write the environment, one NAME=value per line, to env.txt
 //!   sigstate    write sigstate.txt: whether stdin is /dev/null, SIGINT's and
 //!               SIGQUIT's dispositions, whether the pid is the session id
@@ -225,6 +226,13 @@ pub fn main() void {
         sleepSecs(5);
     } else if (eql(mode, "fail")) {
         std.process.exit(7);
+    } else if (eql(mode, "selfkill")) {
+        // SIGUSR1's default action terminates without a core file; the
+        // wrapper neither catches nor forwards it.
+        const sa = linux.Sigaction{ .handler = .{ .handler = linux.SIG.DFL }, .mask = linux.empty_sigset, .flags = 0 };
+        _ = linux.sigaction(linux.SIG.USR1, &sa, null);
+        _ = linux.kill(linux.getpid(), linux.SIG.USR1);
+        die("selfkill: still alive after SIGUSR1", .{});
     } else if (eql(mode, "envdump")) {
         envdump(arena);
     } else if (eql(mode, "sigstate")) {

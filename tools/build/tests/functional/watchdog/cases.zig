@@ -345,6 +345,10 @@ pub fn main() void {
     expect(.{ .name = "childspin", .flags = knobs, .mojo = &([_][]const u8{"childspin"} ++ o) }, 0, null);
     expect(.{ .name = "short_nap", .flags = knobs, .mojo = &([_][]const u8{"nap2"} ++ o) }, 0, null);
     expect(.{ .name = "compiler_error", .flags = knobs, .mojo = &([_][]const u8{"fail"} ++ o) }, 7, null);
+    // A compiler killed by signal N gives 128+N (design item 30), through
+    // the watchdog's wait and through the plain wait of idle 0.
+    expect(.{ .name = "compiler_signalled", .flags = knobs, .mojo = &([_][]const u8{"selfkill"} ++ o) }, 128 + 10, null);
+    expect(.{ .name = "compiler_signalled_plain", .flags = &.{"--watchdog-idle-secs=0"}, .mojo = &([_][]const u8{"selfkill"} ++ o) }, 128 + 10, null);
     expect(.{ .name = "disabled", .flags = &.{ "--watchdog-idle-secs=0", "--watchdog-sample-secs=1" }, .mojo = &([_][]const u8{"nap5"} ++ o) }, 0, null);
     expect(.{ .name = "enabled", .flags = &.{ "--watchdog-idle-secs=2", "--watchdog-sample-secs=1" }, .mojo = &([_][]const u8{"nap5"} ++ o) }, 124, killed_text);
     expect(.{ .name = "default_knobs", .mojo = &([_][]const u8{"nap2"} ++ o) }, 0, null);
