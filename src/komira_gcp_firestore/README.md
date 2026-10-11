@@ -92,6 +92,10 @@ A key-value store over Firestore. `put` is one Commit that replaces the whole
 document, `get` one BatchGetDocuments, and a key that is not there reads as
 `None`:
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+from komira_gcp_firestore.firestore_value import FsValue
+-->
 ```mojo
 from komira_gcp_firestore.document_store import FirestoreDocumentStore
 from komira_gcp_firestore.firestore_scripted import ScriptedFirestore
@@ -138,6 +142,17 @@ assert_equal(script.call_bearer(1), "test-bearer")
 A query returns each document's key (the last segment of its name) and its
 fields; the structured query is read strictly before anything is sent:
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+from komira_gcp_firestore.document_store import FirestoreDocumentStore
+from komira_gcp_firestore.firestore_scripted import ScriptedFirestore
+from komira_http_core.transport.scripted import ScriptedConnector
+
+def document_store(mut script: ScriptedFirestore) raises -> FirestoreDocumentStore[ScriptedConnector]:
+    return FirestoreDocumentStore[ScriptedConnector](
+        script.take_connector(), String("demo-project"), String("(default)"), String("test-bearer")
+    )
+-->
 ```mojo
 var script = ScriptedFirestore()
 script.queue_response(
@@ -167,6 +182,21 @@ A create that loses to an existing document raises the typed
 already-exists error, which a caller tells apart from any other failure
 without reading the message:
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+from komira_gcp_firestore.firestore_value import FsValue
+from komira_gcp_firestore.firestore_scripted import ScriptedFirestore
+from komira_http_core.transport.scripted import ScriptedConnector
+
+def profile(var email: String, var visits: String) -> FsValue:
+    var keys = List[String]()
+    var values = List[FsValue]()
+    keys.append(String("email"))
+    values.append(FsValue.string(email^))
+    keys.append(String("visits"))
+    values.append(FsValue.integer(visits^))
+    return FsValue.map_of(keys^, values^)
+-->
 ```mojo
 from komira_gcp_firestore.firestore_client import FirestoreClient, is_already_exists_error, is_not_found_error
 
@@ -190,6 +220,7 @@ assert_equal(client.document_name(String("profiles"), String("ada")), "projects/
 Where the client dials: an empty override is the public endpoint over TLS,
 and `host:port` with `insecure` is an emulator over plain HTTP:
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo
 from komira_gcp_firestore.firestore_endpoint import FIRESTORE_HOST, FIRESTORE_PORT, parse_firestore_endpoint
 

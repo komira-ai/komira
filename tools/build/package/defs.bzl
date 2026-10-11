@@ -8,6 +8,7 @@ builds `<name>/`, the program and everything it needs besides glibc and the
 kernel, for the target platform (linux x86_64):
 
     bin/<program>                              launcher (baseline x86-64)
+    bin/<helper>                               the binary's `helpers`, if any
     lib/glibc-hwcaps/<target_cpu>/lib<program>.so   the program
     lib/<runtime libraries>                    Mojo runtime, C++ runtime
     share/...                                  `data`
@@ -117,6 +118,12 @@ def _bundle_impl(ctx):
         if not regex_match("^share/[A-Za-z0-9_.+-]+(/[A-Za-z0-9_.+-]+)*$", dest) or "/../" in dest + "/" or "/./" in dest + "/":
             fail("{}: data path `{}` must be a plain relative path under share/".format(ctx.label, dest))
         data_args.extend([dest, src])
+    # The binary's `helpers` (tools/build/mojo/helpers.bzl): bin/<helper>,
+    # mode 0755, beside the launcher.
+    for helper, src in sorted(prog.helpers.items()):
+        if helper == name:
+            fail("{}: helper `{}` has the program's name; bin/{} is the launcher".format(ctx.label, helper, name))
+        data_args.extend(["bin/" + helper, src])
 
     version_lines = sorted([
         "cpu_levels=" + prog.target_cpu,
@@ -142,7 +149,7 @@ done
 cp "$VERSION" "$OUT/VERSION"
 find "$OUT" -type d -exec chmod 0755 {} +
 find "$OUT" -type f -exec chmod 0644 {} +
-chmod 0755 "$OUT/bin/$NAME"
+chmod 0755 "$OUT"/bin/*
 cd "$OUT"
 find . -type f | sed 's|^\\./||' | LC_ALL=C sort | while IFS= read -r f; do sha256sum "$f"; done > "$T/sums"
 mv "$T/sums" SHA256SUMS
