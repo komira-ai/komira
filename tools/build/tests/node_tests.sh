@@ -14,15 +14,7 @@ expect_red node_expected_fail_passed "exited 0; it was expected to fail with: an
 expect_red node_error_other_case "stderr does not hold: THE NEGATIVE FIXTURE FAILS ITS OWN ASSERTION" "$N:error_other_case"
 expect_red node_error_as_pattern "stderr does not hold: negative fixture.fails" "$N:error_as_pattern"
 # Analysis refuses an empty expect_error or exe, and what would stage two files
-# at one path or one package twice.
-expect_red node_expect_error_empty "$N:expect_error_empty: expect_error is empty" "$N:expect_error_empty"
-expect_red node_exe_empty "$N:exe_empty: exe is empty" "$N:exe_empty"
-expect_red node_src_listed_twice "$N:src_listed_twice: pass.js is listed twice" "$N:src_listed_twice"
-expect_red node_data_is_source "$N:data_is_source: data destination pass.js is also a source" "$N:data_is_source"
-expect_red node_data_is_package "$N:data_is_package: data destination node_modules/tslib is also a package of deps" "$N:data_is_package"
-expect_red node_version_conflict "$N:version_conflict: tslib is pinned at 1.0.0 and at 2.0.0 in its deps" "$N:version_conflict"
-expect_red node_bundle_listed_twice "$N:bundle_listed_twice: bundle/main.mjs is listed twice" "$N:bundle_listed_twice"
-expect_red node_own_dep "$N:own_dep: tslib is in its own deps" "$N:own_dep"
+# at one path or one package twice: //tools/build/selftest:analysis_refusals_node.
 # esbuild fails on an import it cannot resolve.
 expect_red node_unresolved_import 'Could not resolve "./absent.mjs"' "$N:unresolved_import"
 # The pins: npm_package's integrity, name, version and exe checks, node_dist's

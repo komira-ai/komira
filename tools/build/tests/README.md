@@ -100,14 +100,14 @@ buck2 build //tools/build/examples:hello //tools/build/examples:hello_pkg_user  
 [`libgate_bad`](negative/libgate_bad/BUCK) has a test that fails on purpose. The library
 fails with `GATED TEST FAILED` while its `[ungated]` package builds, so the red
 comes from the test and not the compile. A binary depending on it fails the
-same way, and a binary naming its `[ungated]` sub-target in `deps` fails
-analysis (`MojoInfo`): the gate cannot be bypassed.
+same way. A binary naming its `[ungated]` sub-target in `deps` is refused at
+analysis, so the gate cannot be bypassed: the scenario
+[`analysis_refusals_mojo`](../selftest/analysis_refusals_mojo.zig).
 
 ```sh
 buck2 build tests//negative/libgate_bad:libgate_bad            # must fail: GATED TEST FAILED
 buck2 build 'tests//negative/libgate_bad:libgate_bad[ungated]' # must build
 buck2 build tests//negative/libgate_bad:gated_consumer         # must fail: GATED TEST FAILED
-buck2 build tests//negative/libgate_bad:bypass_consumer        # must fail: MojoInfo
 ```
 
 ## 3. Missing dependency
@@ -237,13 +237,12 @@ tools/build/tests/functional/buck2_run.sh
 
 ## 10. Execution platforms
 
-Mojo compiles, gated tests and run checks, the toolchain unpack and copy
-targets, and the `third_party_srcs` generation, drift test and fixture
-archive all resolve to the one linux execution platform, `linux-x86_64`. See
+A self-test scenario, [`exec_platforms`](../selftest/exec_platforms.zig)
+([`selftest/README.md`](../selftest/README.md)). See
 [platforms/README.md](../platforms/README.md).
 
 ```sh
-buck2 audit execution-platform-resolution //tools/build/examples:hello //tools/build/toolchains:zig
+./buck2 test //tools/build/selftest:exec_platforms
 ```
 
 ## 11. (Retired)
@@ -367,21 +366,21 @@ that reads nothing cannot pass.
 calling a C function links and prints the C result when the `cxx_library` is
 in `deps` (`tests//functional/c_deps:c_linked`, in the pull-request check, its
 run check a validation), and its link fails on the undefined
-symbol when it is not (`c_missing`); `deps` refuses a target that is neither
-a Mojo package nor a C/C++ library (`bad_dep`). The two cshim tests, a gated library
+symbol when it is not (`c_missing`). The two cshim tests, a gated library
 test and a `mojo_test`, use `assert_equal` on `Int32` and index a `List`,
 which record the test file's source location in the binary; they build (in
 the pull-request check) only because the wrapper strips the staging
 directory from it (`-strip-file-prefix`), and fail with exit 4 on the
-worker's absolute path without it. C compiles and archives
-and the Mojo targets using them resolve to `linux-x86_64`. The
+worker's absolute path without it. The
 snappy test binary, which links C++ with zig's static libc++, carries
 libc++abi and exports no dynamic symbol, so its C++ runtime cannot interpose
-on the `libstdc++.so.6` the Mojo runtime loads. An unconfigured query, `buck2
-uquery 'deps(//tools/build/examples/cshim:cadd_user)'`, answers and reaches
-`toolchains//:cxx_no_default_deps`: the prelude's C/C++ toolchain select names
-that target on a branch no configured build takes, and the query fails with
-`Unknown target` if the toolchains cell does not declare it.
+on the `libstdc++.so.6` the Mojo runtime loads. Scenarios: `deps` refusing a
+target that is neither a Mojo package nor a C/C++ library (`bad_dep`) is
+[`analysis_refusals_mojo`](../selftest/analysis_refusals_mojo.zig); where C
+targets execute is [`exec_platforms`](../selftest/exec_platforms.zig); an
+unconfigured query reaching `toolchains//:cxx_no_default_deps` (the prelude's
+C/C++ toolchain select names it on a branch no configured build takes) is
+[`uquery_select_branches`](../selftest/uquery_select_branches.zig).
 
 ## 21. Location path
 
@@ -421,8 +420,9 @@ message compiles only with that file bundled
 (`tests//negative/proto:team_unbundled_proto` must fail). `bundle_only` generates part
 of the bundled closure: `tests//functional/proto:roster_proto` holds exactly
 `roster.mojo` and `person.mojo`, while bundling all of it also generates the
-options file its runtime cannot compile (`roster_full_bundle` must fail), and
-a selection outside the closure is refused (`roster_bad_selection`).
+options file its runtime cannot compile (`roster_full_bundle` must fail). A
+selection outside the closure is refused (`roster_bad_selection`, the
+scenario [`analysis_refusals_proto`](../selftest/analysis_refusals_proto.zig)).
 `mojo_db_proto_library`: the DbStorable code generated for the table of
 `db/tasks.proto` passes `tests//functional/proto:test_tasks_db` against a minimal
 `komira_db`, and a declared `outs` file the plugin does not write (a `.proto`
@@ -565,10 +565,9 @@ tests//negative/test_data:skip_77` must fail with `GATED TEST FAILED:
 <label> (exit 77)` and count as `Fail 1`: exit 77, "skipped" to automake
 and some harnesses, is a failure. On a pull request that rule is checked
 only by `runner_cases` (below), which runs the runner itself; mapping the
-runner's status to a verdict is Buck2's. Five `bad_*` targets must each fail
-at analysis with their own refusal: a `..` destination, a destination that
-is also another's directory, a `test_data` key that is not a test, a
-runner-owned env name, an env name that is not a variable name. The gate test
+runner's status to a verdict is Buck2's. The `bad_*` targets and the
+`test_deps` refusals at analysis are the scenario
+[`analysis_refusals_mojo`](../selftest/analysis_refusals_mojo.zig). The gate test
 of `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` (built with
 the examples) covers the executable-relative helpers.
 `runner_cases` (in the pull-request check; its action refuses a report with
@@ -793,8 +792,10 @@ the run, not the compile. `bin` (welded to `red`) and `lib_consumer` (linking
 must fail, naming its cause: no tests
 (`empty`, `EMPTY GATE`), an `#[ignore]`d test (`ignored`), and a test that
 hangs (`hang`, NO VERDICT at its 3 s `test_timeout_s`, exit 142).
-`ext_red` and `ext_red_consumer` fail naming `tests/ext_fail.rs` with `1 passed; 1 failed`. Refused at analysis: `ext_no_crate` (no
-`tests/<name>.rs`), `ext_outside` (outside `tests/`), `ext_bad_name` (`tests/1bad.rs`), `ext_not_rs` (`tests/ext_data.txt`) ([`rust_tests.sh`](rust_tests.sh)).
+`ext_red` and `ext_red_consumer` fail naming `tests/ext_fail.rs` with `1 passed; 1 failed` ([`rust_tests.sh`](rust_tests.sh)).
+The `test_srcs` refusals at analysis (`ext_no_crate`, `ext_outside`,
+`ext_bad_name`, `ext_not_rs`) are the scenario
+[`analysis_refusals_rust`](../selftest/analysis_refusals_rust.zig).
 `buck2 test tests//negative/rust_test:bin` must fail with `GATED TEST FAILED`.
 
 In the pull-request check, not here: the greens.
@@ -828,31 +829,30 @@ power of two, an undefined or unsorted feature, a golden hash that is not 16
 hex digits or is recorded for a row with no platform, a pool that is not
 `pool=<name>`, two rows sharing a key, a host or a pool) is refused with a
 sentence naming the row and the field; each `host_info()` selects its row, or
-is refused with a reason (a Linux arm64 host: the row is reserved).
-[`check.sh`](functional/platform_table/check.sh) then checks, on the client:
+is refused with a reason (a Linux arm64 host: the row is reserved). The
+scenario
+[`analysis_refusals_platform_table`](../selftest/analysis_refusals_platform_table.zig)
+loads the package, holds `komira//tools/build/platforms:` to `darwin-arm64`,
+`linux-x86_64` and `host` (nothing for the reserved `linux-arm64`), `host` to
+this client's own platform, and refuses `[komira_re] linux_arm64_properties`;
+[`exec_platforms`](../selftest/exec_platforms.zig) checks that the host
+platform's own `[komira_re]` key decides remote execution.
+[`check.sh`](functional/platform_table/check.sh) checks, on the client:
 
-1. `komira//tools/build/platforms:` declares `darwin-arm64`, `linux-x86_64`
-   and `host`, and nothing for the reserved `linux-arm64`;
-2. `host` is this client's own platform and a target stating no
-   `--target-platforms` is configured for it;
-3. `[komira_re] linux_arm64_properties` is refused, naming the platform;
-4. where actions run: with only the host platform's `[komira_re]` key set the
-   one execution platform is remote; with only another platform's key set it
-   is the local one and nothing fails (no key at all is test 25's);
-5. the limits ([`limits.tsv`](../platforms/limits.tsv),
-   [`limits_retired.sh`](functional/platform_table/limits_retired.sh)): the
-   real tree passes, five fixture trees are each refused (a limit with no
-   marker, a marker with no row, a row with no marker, a duplicate row, a
-   `never` with no product reason), a fixture whose retiring PR has merged is
-   refused while one naming a different PR (`44`, `4b` for `4`) is not, and
-   with every retiring PR named as merged the real tree is refused once per
-   retirable limit;
-6. each registered row's `golden_config_hash` is the hash buck2 gives its
-   platform, and the macOS applets are those of `busybox.sh`;
-7. on a Linux x86_64 client, the golden
-   ([`golden/golden.sh`](golden/golden.sh)): the configuration and the action
-   hashes of eight sample targets equal `linux-x86_64.golden`, and a copy with
-   one hex digit of one hash changed is refused naming the sample.
+- the limits ([`limits.tsv`](../platforms/limits.tsv),
+  [`limits_retired.sh`](functional/platform_table/limits_retired.sh)): the
+  real tree passes, five fixture trees are each refused (a limit with no
+  marker, a marker with no row, a row with no marker, a duplicate row, a
+  `never` with no product reason), a fixture whose retiring PR has merged is
+  refused while one naming a different PR (`44`, `4b` for `4`) is not, and
+  with every retiring PR named as merged the real tree is refused once per
+  retirable limit;
+- each registered row's `golden_config_hash` is the hash buck2 gives its
+  platform, and the macOS applets are those of `busybox.sh`;
+- on a Linux x86_64 client, the golden
+  ([`golden/golden.sh`](golden/golden.sh)): the configuration and the action
+  hashes of eight sample targets equal `linux-x86_64.golden`, and a copy with
+  one hex digit of one hash changed is refused naming the sample.
 
 Analysis only.
 
