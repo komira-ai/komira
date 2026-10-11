@@ -113,6 +113,17 @@ def test_another_floor_is_refused() raises:
     )
 
 
+def test_a_floor_the_platform_floor_only_prefixes_is_refused() raises:
+    # `__glibc >=2.340` and a floor with an upper bound start with the
+    # platform floor's text; only the exact requirement is the floor
+    for bad in [String("__glibc >=2.340"), String("__glibc >=2.34,<2.40"), String("__glibc >=2.34.1")]:
+        assert_equal(
+            _one(_deps(bad), True),
+            String("requires '") + bad
+            + String("', not the platform floor '__glibc >=2.34' (tools/build/platforms/table.bzl os_floor)"),
+        )
+
+
 def test_the_floor_twice_is_refused() raises:
     assert_equal(
         _one(_deps(String("__glibc >=2.34"), String("__glibc >=2.34")), True),

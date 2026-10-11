@@ -50,8 +50,9 @@
 # `system_libs()` loaded from outside `<env>/lib`, and a record with no
 # `calling init:` line at all (LD_DEBUG not honoured: a vacuous pass).
 # `run_loaded_from` runs a program through the injected `ProcessRunner` with
-# `LD_DEBUG=libs` and `LD_DEBUG_OUTPUT` added to its cleared environment,
-# then reads the record it wrote.
+# `LD_DEBUG=libs` and `LD_DEBUG_OUTPUT` added to its cleared environment and
+# any `LD_LIBRARY_PATH` entry of the caller's dropped from it, then reads the
+# record it wrote.
 #
 # Not wired: run_install_env does not call these. The design runs the native
 # install checks only in beta's install job (`beta_install`, slice 11 of
@@ -478,12 +479,17 @@ def loaded_from_findings(trace: String, env_dir: String) -> List[String]:
 def run_loaded_from[R: ProcessRunner](
     mut runner: R, var spec: RunSpec, env: List[String], record_prefix: String, env_dir: String
 ) raises -> List[String]:
-    """Run `spec` with `env` plus `LD_DEBUG=libs` and `LD_DEBUG_OUTPUT=
-    <record_prefix>` (the loader writes `<record_prefix>.<pid>`), then the
+    """Run `spec` with `env`, less any `LD_LIBRARY_PATH=` entry (the check
+    runs with it unset: a search path would load objects from wherever it
+    names), plus `LD_DEBUG=libs` and `LD_DEBUG_OUTPUT=<record_prefix>` (the
+    loader writes `<record_prefix>.<pid>`), then the
     findings of every record it wrote (file header). RAISES when the run
     cannot start or fails: a program that did not run says nothing about
     where it loaded from."""
-    var e = env.copy()
+    var e = List[String]()
+    for i in range(len(env)):
+        if not env[i].startswith(String("LD_LIBRARY_PATH=")):
+            e.append(env[i].copy())
     e.append(String("LD_DEBUG=libs"))
     e.append(String("LD_DEBUG_OUTPUT=") + record_prefix)
     spec.set_env(e^)

@@ -433,6 +433,7 @@ def test_read_names_an_unreadable_file() raises:
 
 comptime _SO = "lib/libkomira_crypto_native.so.1"
 comptime _LN = "lib/libkomira_crypto_native.so"
+comptime _HOLDER = "lib/libkomira_log_holder.a"
 
 
 def _libs(rows: String) raises -> String:
@@ -448,18 +449,20 @@ def test_lib_files_rows_parse() raises:
     # {kind, path, sha256}, path order; a link's sha256 is its target's
     var md = parse_conda_metadata(
         _libs(
-            String("[") + _lrow(String("static"), String("lib/libkomira_log_holder.a")) + String(",")
-            + _lrow(String("link"), String(_LN)) + String(",") + _lrow(String("shared"), String(_SO)) + String("]")
+            String("[") + _lrow(String("link"), String(_LN)) + String(",") + _lrow(String("shared"), String(_SO))
+            + String(",") + _lrow(String("static"), String(_HOLDER)) + String("]")
         ),
         String(_SRC),
     )
     assert_true(md.has_lib_files)
     assert_equal(len(md.lib_files), 3)
-    assert_equal(md.lib_files[0].kind, String("static"))
-    assert_equal(md.lib_files[0].path, String("lib/libkomira_log_holder.a"))
-    assert_equal(md.lib_files[1].kind, String("link"))
-    assert_equal(md.lib_files[2].path, String(_SO))
-    assert_equal(md.lib_files[2].sha256_hex, String(_H))
+    assert_equal(md.lib_files[0].kind, String("link"))
+    assert_equal(md.lib_files[0].path, String(_LN))
+    assert_equal(md.lib_files[1].kind, String("shared"))
+    assert_equal(md.lib_files[1].path, String(_SO))
+    assert_equal(md.lib_files[1].sha256_hex, String(_H))
+    assert_equal(md.lib_files[2].kind, String("static"))
+    assert_equal(md.lib_files[2].path, String(_HOLDER))
     assert_equal(len(md.ignored_keys), 0)
     var none = read_conda_metadata(String(_LIB))
     assert_false(none.has_lib_files)
@@ -496,6 +499,25 @@ def test_refuses_bad_lib_files() raises:
             + String("]")
         ),
         String("lib_files[1]: 'path' ") + String(_SO) + String(" is given twice"),
+    )
+    # rows out of path order, as conda_lib.zig checkRows refuses them: the
+    # shared library before its link name (a prefix sorts first), and a
+    # static archive before both
+    _expect(
+        _libs(
+            String("[") + _lrow(String("shared"), String(_SO)) + String(",") + _lrow(String("link"), String(_LN))
+            + String("]")
+        ),
+        String("lib_files[1]: 'path' ") + String(_LN) + String(" comes after ") + String(_SO)
+        + String(": the rows are in path order"),
+    )
+    _expect(
+        _libs(
+            String("[") + _lrow(String("link"), String(_LN)) + String(",") + _lrow(String("static"), String(_HOLDER))
+            + String(",") + _lrow(String("shared"), String(_SO)) + String("]")
+        ),
+        String("lib_files[2]: 'path' ") + String(_SO) + String(" comes after ") + String(_HOLDER)
+        + String(": the rows are in path order"),
     )
     # a metapackage ships no file
     _expect(

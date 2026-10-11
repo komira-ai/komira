@@ -101,6 +101,7 @@ struct Dyn(Copyable, Movable):
 
     var needed: List[String]
     var runpath: String
+    var rpath: String
     var flags: Int
     var symbolic_tag: Bool
     var soname: String
@@ -110,6 +111,7 @@ struct Dyn(Copyable, Movable):
         self.needed.append(String("libc.so.6"))
         self.needed.append(String("libkomira_crypto_native.so.1"))
         self.runpath = String("$ORIGIN")
+        self.rpath = String("")
         self.flags = 0x2
         self.symbolic_tag = False
         self.soname = String("libkomira_alpha_native.so.1")
@@ -142,6 +144,9 @@ def _elf(d: Dyn) -> List[UInt8]:
     if d.runpath.byte_length() > 0:
         tags.append(29)
         vals.append(_str_at(strtab, d.runpath))
+    if d.rpath.byte_length() > 0:
+        tags.append(15)
+        vals.append(_str_at(strtab, d.rpath))
     if d.symbolic_tag:
         tags.append(16)
         vals.append(0)
@@ -504,6 +509,50 @@ def test_needed_without_origin_or_with_another_runpath_is_refused() raises:
     assert_equal(len(needed_findings(e3.dir, e3.pin)), 0)
 
 
+def test_an_rpath_entry_outside_the_environment_is_refused() raises:
+    var d = Dyn()
+    d.rpath = String("$ORIGIN:/usr/lib")
+    var got = read_dynamic(_elf(d), String("x.so"))
+    assert_equal(len(got.rpath), 2)
+    assert_equal(got.rpath[1], String("/usr/lib"))
+    var e = Env(String("rpath_usr"), d)
+    var f = needed_findings(e.dir, e.pin)
+    assert_equal(len(f), 1, _joined(f))
+    _has(f, String(SO) + String(" has DT_RPATH entry '/usr/lib', which searches outside the environment"))
+    # DT_RPATH $ORIGIN (no RUNPATH) finds the NEEDED inside the environment
+    var d2 = Dyn()
+    d2.runpath = String("")
+    d2.rpath = String("$ORIGIN")
+    var e2 = Env(String("rpath_origin"), d2)
+    var f2 = needed_findings(e2.dir, e2.pin)
+    assert_equal(len(f2), 0, _joined(f2))
+
+
+def test_needed_in_a_directory_the_environment_only_prefixes_is_refused() raises:
+    # <env>-outside starts with <env>'s text and is not under it
+    var d = Dyn()
+    d.needed.append(String("libzstd.so.1"))
+    var e = Env(String("prefix_env"), d)
+    var outside = _tmp(String("prefix_env_outside"))
+    _write(outside + String("/libzstd.so.1"), String("not ours"))
+    symlink(outside + String("/libzstd.so.1"), e.path(String("lib/libzstd.so.1")))
+    var f = needed_findings(e.dir, e.pin)
+    assert_equal(len(f), 1, _joined(f))
+    assert_true(f[0].find(String("has NEEDED libzstd.so.1, whose lib/ entry resolves to ")) > 0, f[0])
+
+
+def test_loaded_from_a_directory_lib_only_prefixes_is_refused() raises:
+    var e = Env(String("loaded_lib64"))
+    var lib = e.dir + String("/lib")
+    var f = loaded_from_findings(_trace(e.dir, e.dir + String("/lib64"), lib), e.dir)
+    assert_equal(len(f), 1, _joined(f))
+    _has(
+        f,
+        String("libkomira_alpha_native.so.1 was loaded from ") + e.dir
+        + String("/lib64/libkomira_alpha_native.so.1, not from ") + lib + String("/"),
+    )
+
+
 def test_needed_on_the_jit_holder_is_refused() raises:
     var d = Dyn()
     d.needed.append(String("libkomira_log_holder_jit.so.1"))
@@ -595,6 +644,34 @@ def test_run_loaded_from_runs_the_program_with_the_loader_record_on() raises:
         raised = True
         assert_true(String(err).endswith(String(" did not pass: exit 1")), String(err))
     assert_true(raised)
+
+
+def test_run_loaded_from_unsets_ld_library_path() raises:
+    # the loaded-from check runs with LD_LIBRARY_PATH unset (file header): a
+    # caller's search path would load komira objects from wherever it names
+    var e = Env(String("run_loaded_unset"))
+    var out = _tmp(String("run_loaded_unset_out"))
+    var prefix = out + String("/ld")
+    var argv = List[String]()
+    argv.append(String("run"))
+    var lib = e.dir + String("/lib")
+    var runner = ScriptedRunner()
+    var step = ScriptedStep(argv.copy())
+    step.writes(prefix + String(".4243"), _trace(e.dir, lib, lib))
+    runner.expect(step^)
+    var spec = RunSpec(String("/bin/pixi"), argv.copy(), out.copy(), 60, out + String("/o"), out + String("/e"))
+    var env = List[String]()
+    env.append(String("LD_LIBRARY_PATH=/usr/lib"))
+    env.append(String("PATH=/usr/bin"))
+    var f = run_loaded_from(runner, spec^, env, prefix, e.dir)
+    assert_equal(len(f), 0, _joined(f))
+    var got = runner.calls[0].env.value().copy()
+    for i in range(len(got)):
+        assert_false(got[i].startswith(String("LD_LIBRARY_PATH")), got[i])
+    assert_equal(len(got), 3)
+    assert_equal(got[0], String("PATH=/usr/bin"))
+    assert_equal(got[1], String("LD_DEBUG=libs"))
+    assert_equal(got[2], String("LD_DEBUG_OUTPUT=") + prefix)
 
 
 def test_the_elf_reader() raises:

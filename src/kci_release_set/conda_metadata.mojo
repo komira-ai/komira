@@ -20,8 +20,9 @@
 #                   share/doc/<name>/ and given once; and, for a library
 #                   shipping native files, lib_files: a non-empty array of
 #                   {kind, path, sha256} objects (`kind` shared, link or
-#                   static; each path lib/<file name>, given once; a link's
-#                   sha256 is that of the bytes it resolves to), as
+#                   static; each path lib/<file name>, given once, the rows
+#                   in byte order of path; a link's sha256 is that of the
+#                   bytes it resolves to), as
 #                   tools/build/package/pack/conda_lib.zig writes them
 #   a metapackage   members: an array of {name, version, sha256} objects,
 #                   each optionally with build
@@ -493,6 +494,14 @@ def parse_conda_metadata(text: String, source: String) raises -> CondaMetadata:
                 _refuse(source, String("'lib_files' is empty: a package with no native file has no lib_files key"))
             for i in range(libs.array_len()):
                 var f = _lib_row(libs.element_at(i), i, md.lib_files, source, md.ignored_keys)
+                # the packer sorts the rows by path and its checker refuses
+                # any other order (conda_lib.zig libFilesOf, checkRows)
+                if i > 0 and not (md.lib_files[i - 1].path < f.path):
+                    _refuse(
+                        source,
+                        String("lib_files[") + String(i) + String("]: 'path' ") + f.path + String(" comes after ")
+                        + md.lib_files[i - 1].path + String(": the rows are in path order"),
+                    )
                 md.lib_files.append(f^)
     else:
         var rows = doc.get(String("members"))
