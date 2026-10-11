@@ -15,7 +15,9 @@
 //! to some positions (one of missing_{first,middle,last}_output fails with
 //! buck2's message, not the rule's), `SET TimeZone = 'UTC'`, the version
 //! check or the environment check dropped or made unable to fire (the
-//! invocation pins each statement from SELECT to END; a dropped TZ, LC_ALL
+//! invocation pins each statement from SELECT to END, and what stands
+//! between the pinned pieces: the pinned version exactly, a path with no
+//! quote, or nothing, so no SQL can be added there; a dropped TZ, LC_ALL
 //! or LD_LIBRARY_PATH entry fails the green fixture in the environment
 //! check), and each of the sql_oracle analysis `fail()` calls deleted, or
 //! one arm of a condition that no other arm covers: the empty, absolute and
@@ -23,7 +25,8 @@
 //! segment or output name passes once the name pattern is dropped or
 //! narrowed to `/`, an output over an input's directory meets buck2's
 //! conflict. Each list check has its bad entry past the first (the second
-//! src, output or list input; the middle of three input paths), and each
+//! src, output or list input; the middle of three input paths, for both
+//! input path loops), and each
 //! suffix check a name that holds the suffix and ends in it without its dot
 //! (`notes.sql.mysql`, `out.<f>.m<f>`), so a check of the first entry only,
 //! a substring test or a suffix without its dot passes one of them. (The
@@ -168,28 +171,82 @@ const REDS = [_]Red{
 };
 
 /// The pieces of the sql_oracle action's argv, as `buck2 aquery` prints it
-/// (`[word, word, ...]`), each required after the one before. `SET TimeZone`
-/// is one a farm build cannot see: every worker runs in UTC, so dropping it
+/// (`[word, word, ...]`), each required after the one before, and what may
+/// stand between a piece and the one before it (`gap`). `SET TimeZone` is
+/// one a farm build cannot see: every worker runs in UTC, so dropping it
 /// builds every fixture green. The rest of the documented invocation is
 /// pinned with it, so the README's invocation is the one that runs. The
-/// existence checks are left to the missing_*_output reds.
-const Pin = struct { what: []const u8, text: []const u8 };
-
-const INVOCATION = [_]Pin{
-    .{ .what = "the flags", .text = "duckdb, -no-init, -batch, -bail, -cmd, .cd " },
-    .{ .what = "threads and TimeZone", .text = ", -cmd, .mode trash, -cmd, SET threads = 1; SET TimeZone = 'UTC'; " },
-    .{ .what = "no extensions, no temp directory, the allowed paths, then the version check", .text = "SET autoinstall_known_extensions = false; SET autoload_known_extensions = false; SET temp_directory = ''; SET enable_progress_bar = false; SET allowed_paths = ['data.csv', 'expected.tsv', 'rows.csv', 'rows.parquet'], -cmd, SELECT CASE WHEN version() <> 'v" },
-    .{ .what = "the version check's error, right after the pinned version", .text = "' THEN error('sql_oracle: this duckdb is ' || version() || ', the pin says v" },
-    .{ .what = "the version check's end", .text = "') END, -cmd, " },
-    .{ .what = "the environment check (TZ=UTC, LC_ALL=C, the dist's lib/)", .text = "SELECT CASE WHEN getenv('TZ') IS DISTINCT FROM 'UTC' OR getenv('LC_ALL') IS DISTINCT FROM 'C' OR getenv('LD_LIBRARY_PATH') IS DISTINCT FROM '" },
-    .{ .what = "the environment check's error, right after the dist's lib/", .text = "/lib' THEN error('sql_oracle: the action environment is TZ=' || coalesce(getenv('TZ'), '(unset)') || ' LC_ALL=' || coalesce(getenv('LC_ALL'), '(unset)') || ' LD_LIBRARY_PATH=' || coalesce(getenv('LD_LIBRARY_PATH'), '(unset)') || ', the rule sets TZ=UTC LC_ALL=C and the dist''s lib/') END" },
-    .{ .what = ".safe_mode before the first src", .text = ", -cmd, .safe_mode, -cmd, .mode duckbox, -f, ../sql/0_write.sql, -cmd, .mode trash, -cmd, " },
-    .{ .what = "the in-memory database, last", .text = ", :memory:]\"" },
+/// existence checks, after the last src, are left to the missing_*_output
+/// reds.
+const Gap = enum {
+    /// Anything, or nothing.
+    any,
+    /// Nothing: the piece follows the one before it directly.
+    none,
+    /// The version of `komira//third_party/duckdb:duckdb`, exactly.
+    version,
+    /// A buck-out path: letters, digits, `_`, `-` and `/` only, so it holds
+    /// no quote that could close the SQL string it sits in and no `, ` that
+    /// could add an argv word.
+    path,
 };
 
+const Pin = struct { what: []const u8, gap: Gap, text: []const u8 };
+
+const INVOCATION = [_]Pin{
+    .{ .what = "the flags", .gap = .any, .text = "duckdb, -no-init, -batch, -bail, -cmd, .cd " },
+    .{ .what = "threads and TimeZone, right after the working directory", .gap = .path, .text = ", -cmd, .mode trash, -cmd, SET threads = 1; SET TimeZone = 'UTC'; " },
+    .{ .what = "no extensions, no temp directory, the allowed paths, then the version check", .gap = .none, .text = "SET autoinstall_known_extensions = false; SET autoload_known_extensions = false; SET temp_directory = ''; SET enable_progress_bar = false; SET allowed_paths = ['data.csv', 'expected.tsv', 'rows.csv', 'rows.parquet'], -cmd, SELECT CASE WHEN version() <> 'v" },
+    .{ .what = "the version check's error, right after the pinned version", .gap = .version, .text = "' THEN error('sql_oracle: this duckdb is ' || version() || ', the pin says v" },
+    .{ .what = "the version check's end, right after the pinned version", .gap = .version, .text = "') END, -cmd, " },
+    .{ .what = "the environment check (TZ=UTC, LC_ALL=C, the dist's lib/), right after the version check", .gap = .none, .text = "SELECT CASE WHEN getenv('TZ') IS DISTINCT FROM 'UTC' OR getenv('LC_ALL') IS DISTINCT FROM 'C' OR getenv('LD_LIBRARY_PATH') IS DISTINCT FROM '" },
+    .{ .what = "the environment check's error, right after the dist's lib/", .gap = .path, .text = "/lib' THEN error('sql_oracle: the action environment is TZ=' || coalesce(getenv('TZ'), '(unset)') || ' LC_ALL=' || coalesce(getenv('LC_ALL'), '(unset)') || ' LD_LIBRARY_PATH=' || coalesce(getenv('LD_LIBRARY_PATH'), '(unset)') || ', the rule sets TZ=UTC LC_ALL=C and the dist''s lib/') END" },
+    .{ .what = ".safe_mode before the first src, right after the environment check", .gap = .none, .text = ", -cmd, .safe_mode, -cmd, .mode duckbox, -f, ../sql/0_write.sql, -cmd, .mode trash, -cmd, " },
+    .{ .what = "the in-memory database, last", .gap = .any, .text = ", :memory:]\"" },
+};
+
+const DIST = "komira//third_party/duckdb:duckdb";
+
+/// The `version` attribute of DIST, from `buck2 uquery`.
+fn pinnedVersion(c: *lib.Ctx) !?[]const u8 {
+    const res = try c.run(&.{ "uquery", DIST, "--output-attribute", "version", "--json" }, .{});
+    if (!res.ok()) {
+        c.fail("invocation: buck2 uquery {s} failed (see {s}); its last lines:\n{s}", .{ DIST, res.log, lib.text.tail(res.stderr, 12) });
+        return null;
+    }
+    const key = "\"version\": \"";
+    const at = std.mem.indexOf(u8, res.stdout, key);
+    const end = if (at) |i| std.mem.indexOfScalarPos(u8, res.stdout, i + key.len, '"') else null;
+    if (lib.text.count(res.stdout, key) != 1 or end == null) {
+        c.fail("invocation: buck2 uquery {s} does not show one version (see {s})", .{ DIST, res.log });
+        return null;
+    }
+    return res.stdout[at.? + key.len .. end.?];
+}
+
+fn isPathByte(b: u8) bool {
+    return std.ascii.isAlphanumeric(b) or b == '_' or b == '-' or b == '/';
+}
+
+/// Why `gap`, the argv text before a piece, is not what `kind` allows, or
+/// null when it is.
+fn badGap(kind: Gap, gap: []const u8, version: []const u8) ?[]const u8 {
+    switch (kind) {
+        .any => return null,
+        .none => return if (gap.len == 0) null else "nothing may stand there",
+        .version => return if (std.mem.eql(u8, gap, version)) null else "only the pinned version may stand there",
+        .path => {
+            for (gap) |b| if (!isPathByte(b)) return "only a path of letters, digits, _, - and / may stand there";
+            return null;
+        },
+    }
+}
+
 /// `buck2 aquery` of the working oracle's action: its argv holds every
-/// INVOCATION piece in order, `-f` once (no src before `.safe_mode`).
+/// INVOCATION piece in order, each gap what the piece allows, `-f` once (no
+/// src before `.safe_mode`).
 fn invocation(c: *lib.Ctx) !void {
+    const version = try pinnedVersion(c) orelse return;
     const res = try c.run(&.{ "aquery", WRITE, "--output-attribute", "cmd", "--output-attribute", "category", "--json" }, .{});
     if (!res.ok()) {
         c.fail("invocation: buck2 aquery {s} failed (see {s}); its last lines:\n{s}", .{ WRITE, res.log, lib.text.tail(res.stderr, 12) });
@@ -205,13 +262,17 @@ fn invocation(c: *lib.Ctx) !void {
             c.fail("invocation: the sql_oracle action of {s} lacks {s}: no `{s}` after byte {d} of its argv (see {s})", .{ WRITE, pin.what, pin.text, pos, res.log });
             return;
         };
+        if (badGap(pin.gap, res.stdout[pos..at], version)) |why| {
+            c.fail("invocation: the sql_oracle action of {s} holds `{s}` before {s}: {s} (see {s})", .{ WRITE, res.stdout[pos..at], pin.what, why, res.log });
+            return;
+        }
         pos = at + pin.text.len;
     }
     if (lib.text.count(res.stdout, ", -f, ") != 1) {
         c.fail("invocation: the sql_oracle action of {s} runs -f {d} times, not once (see {s})", .{ WRITE, lib.text.count(res.stdout, ", -f, "), res.log });
         return;
     }
-    c.pass("invocation: the sql_oracle action of {s} runs with all {d} pinned pieces in order", .{ WRITE, INVOCATION.len });
+    c.pass("invocation: the sql_oracle action of {s} runs with all {d} pinned pieces in order, duckdb v{s}", .{ WRITE, INVOCATION.len, version });
 }
 
 fn holds(r: anytype, want: []const u8) bool {
