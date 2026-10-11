@@ -254,8 +254,10 @@ def _request_with_length(value: String) -> List[HpackHeader]:
 
 def test_non_numeric_content_length_is_refused() raises:
     """RFC 9113 section 8.1.1: a content-length that is not a number makes the
-    request malformed. The same request with "12" is accepted at 12."""
-    var bad: List[String] = ["12x", "", "-1", " 12"]
+    request malformed. The same request with "12" is accepted at 12. "1:"
+    and "/1" carry the bytes just past each end of '0'..'9' (0x3A, 0x2F), so
+    a digit bound off by one accepts one of them."""
+    var bad: List[String] = ["12x", "", "-1", " 12", "1:", "/1"]
     for v in bad:
         var r = _validate_h2_request_headers(_request_with_length(v))
         assert_false(r.ok, "content-length '" + v + "' accepted")

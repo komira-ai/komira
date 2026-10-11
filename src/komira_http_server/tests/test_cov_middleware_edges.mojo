@@ -162,10 +162,11 @@ def _body_text(r: HttpResponse) -> String:
 
 
 def test_fault_envelope_escapes_every_special_byte() raises:
-    """RFC 8259 section 7: a quote, a backslash and the control bytes must be
-    escaped inside a string. The envelope writes the named escapes for
-    quote, backslash, LF, CR and TAB, and a space for any other control
-    byte (here 0x01 and 0x1F)."""
+    """RFC 8259 section 7: a quote, a backslash and the control bytes may not
+    appear raw inside a string. The envelope writes the named escapes for
+    quote, backslash, LF, CR and TAB, and replaces any other control byte
+    (here 0x01 and 0x1F) with a space: valid JSON, though not an escape of
+    the original byte."""
     var msg = String('a"b\\c\nd\re\tf') + chr(1) + String("g") + chr(31)
     var r = fault_envelope(Int32(500), String("C"), String("I"), msg)
     var want = String('{"error":{"code":"C","message":"a\\"b\\\\c\\nd\\re\\tf g ')
@@ -246,7 +247,8 @@ def test_user_chain_preflight_skips_the_user_middleware() raises:
 def test_raising_user_after_is_mapped_and_retried_once() raises:
     """The user `after` raises: the chain answers the mapped 500, then runs
     the after legs once more on that 500, best-effort; the second raise is
-    swallowed."""
+    swallowed and the logging leg after it still runs, so the 500 is logged
+    once."""
     var chain = MiddlewareChain.default()
     var mw = _CountingMw(True)
     var out = chain.run_with_user_mw[_CountingMw](
@@ -258,6 +260,8 @@ def test_raising_user_after_is_mapped_and_retried_once() raises:
     assert_true(out.short_circuited)
     assert_equal(mw.befores, 1)
     assert_equal(mw.afters, 2)
+    assert_equal(chain.logging_ref().value().entries_len(), 1)
+    assert_equal(chain.logging_ref().value().entry(0).status, Int32(500))
 
 
 struct _Raising(Movable, RequestDispatcher, CtxRequestDispatcher):
@@ -303,6 +307,9 @@ def _raise_through_chain(raise_after: Bool) raises:
     assert_equal(mw.befores, 1)
     # The after legs ran once, on the 500 (the raise skipped the first run).
     assert_equal(mw.afters, 1)
+    # With a raising user `after`, the best-effort pass stops before the
+    # logging leg today (komira-ai/komira#1446), so the log is checked only
+    # without one.
     if not raise_after:
         assert_equal(chain.logging_ref().value().entries_len(), 1)
         assert_equal(chain.logging_ref().value().entry(0).status, Int32(500))

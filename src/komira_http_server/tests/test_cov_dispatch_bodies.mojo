@@ -265,6 +265,13 @@ def test_expect_continue_enabled_sends_interim_then_response() raises:
 
 
 def test_incomplete_head_is_dropped_unanswered() raises:
+    """A head missing its final CRLF, then the client waits. The round does
+    no buffering across receives, so it drops the connection unanswered.
+    That is a known limitation, not the behaviour RFC 9112 asks for (a head
+    may arrive in several segments): komira-ai/komira#1447. The fix for
+    that issue changes this test to wait for the rest of the head; until
+    then it pins that an incomplete head is neither dispatched nor answered
+    as if it were complete."""
     var c = _Client()
     c.send("GET / HTTP/1.1\r\nHost: example.com\r\n")
     c.run_until_closed()
@@ -305,6 +312,30 @@ def test_long_body_is_read_across_receives() raises:
     assert_equal(c.probe.calls, 1)
     assert_equal(c.probe.last_len, 20000)
     assert_equal(c.server.live_conn_count(), 1)
+
+
+def test_long_body_stops_at_its_content_length() raises:
+    """A 20000-byte body and a pipelined GET in one send: the body reader
+    reads the remainder from the kernel up to the declared length and no
+    further, so the dispatch sees exactly the 20000 body bytes, none of the
+    GET behind them."""
+    var c = _Client()
+    var body = _body(20000)
+    var req = _bytes(_post_head(20000))
+    req.extend(Span(body))
+    req.extend(Span(_bytes("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")))
+    _send_all(c.fd, req)
+    for _ in range(200):
+        c.step()
+        c.drain()
+        if c.probe.calls > 0 and _text(c.got).find(" sum=") >= 0:
+            break
+    var t = _text(c.got)
+    assert_true(c.probe.calls >= 1, "the POST was not dispatched: " + t)
+    assert_true(
+        t.find("len=20000 sum=" + String(_sum(body))) >= 0,
+        "the body reader over-read: " + t,
+    )
 
 
 def test_truncated_body_is_not_dispatched() raises:

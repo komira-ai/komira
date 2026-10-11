@@ -990,15 +990,15 @@ struct HttpServer[
                 continue
             var idx = maybe_idx.value()
 
-            # Defensive: a TLS/H2 conn cannot occur on a plaintext listener,
-            # but if one ever does, drop it rather than mis-dispatch.
+            # A TLS/H2 conn accepted by `serve_one_iteration` (same table) can
+            # reach this loop: drop it unread rather than mis-dispatch it.
             if self._conns[idx].is_tls() or self._conns[idx].is_h2():
                 try:
-                    close_and_remove(self._conns, self._fd_to_idx, idx)  # cov: unreachable a dispatch server accepts through accept_one_and_register: plaintext only
-                except e:  # cov: unreachable a dispatch server accepts through accept_one_and_register: plaintext only
+                    close_and_remove(self._conns, self._fd_to_idx, idx)
+                except e:
                     _ = e  # cov: unreachable close_and_remove raises only for an fd missing from fd_to_idx; idx came from it
-                i = i + 1  # cov: unreachable a dispatch server accepts through accept_one_and_register: plaintext only
-                continue  # cov: unreachable a dispatch server accepts through accept_one_and_register: plaintext only
+                i = i + 1
+                continue
 
             if self._conns[idx]._state == CONN_STATE_WAITING_FOR_WRITABLE:
                 var drained = resume_pending_write(

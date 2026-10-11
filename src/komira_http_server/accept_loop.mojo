@@ -775,8 +775,8 @@ def serve_read_round_tls(
         if read_outcome == TLS_OUTCOME_BLOCKED_ON_READ:
             break
         if read_outcome == TLS_OUTCOME_BLOCKED_ON_WRITE:
-            # Rare TLS-rekey case; treat as need-more-driver-loop.
-            break  # cov: unreachable s2n blocks a read on a write only to answer a KeyUpdate request; s2n peers send none
+            # Defensive: end the round (s2n_recv does not report this).
+            break  # cov: unreachable s2n_recv never reports BLOCKED_ON_WRITE: it sets *blocked to READ on entry and NOT_BLOCKED on success only
         if read_outcome == TLS_OUTCOME_ERROR:
             keep_alive = False
             break

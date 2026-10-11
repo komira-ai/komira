@@ -1651,8 +1651,8 @@ def serve_read_round_h2[
         if read_outcome == TLS_OUTCOME_BLOCKED_ON_READ:
             break
         if read_outcome == TLS_OUTCOME_BLOCKED_ON_WRITE:
-            # TLS rekey wants to write; flush our pending out then return.
-            break  # cov: unreachable s2n blocks a read on a write only to answer a KeyUpdate request; s2n peers send none
+            # Defensive: end the round (s2n_recv does not report this).
+            break  # cov: unreachable s2n_recv never reports BLOCKED_ON_WRITE: it sets *blocked to READ on entry and NOT_BLOCKED on success only
         if hit_peer_eof:
             break
         # Otherwise: we got some bytes; loop and try to absorb more. Write

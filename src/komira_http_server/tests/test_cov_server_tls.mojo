@@ -17,6 +17,11 @@
 #      client closes.
 #   2  h2: no answer on stream 1, an invalid preface or a failed write not
 #      closing.
+#   D  the dispatch loop on a TLS connection: `serve_one_iteration_dispatch`
+#      shares the connection table with `serve_one_iteration`, so a TLS
+#      connection accepted by the latter can reach the former. It must be
+#      dropped, never read as plaintext (komira-ai/komira#635: a
+#      RequestDispatcher cannot be served over TLS).
 # =============================================================================
 
 from std.ffi import external_call
@@ -38,6 +43,11 @@ from komira_http_core.codec.h2.hpack import (
     HpackEncoder,
     HpackHeader,
 )
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.reactor.reactor import Reactor
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_async.runtime.runtime_trait import Runtime
+from komira_http_core.codec import HttpRequest, HttpResponse
 from komira_http_core.codec.types import HttpMethod
 from komira_http_core.tls import (
     TLS_OUTCOME_BLOCKED_ON_READ,
@@ -48,6 +58,7 @@ from komira_http_core.tls import (
     tls_init,
 )
 from komira_http_core.transport.grpc_emit import NoopGrpcDispatch
+from komira_http_server.dispatch import RequestDispatcher
 from komira_http_server.routing import Router
 from komira_http_server.server import HttpServer, HttpServerConfig
 
@@ -319,6 +330,56 @@ def test_h2_write_failure_closes() raises:
     b.extend(Span(_frame(FRAME_SETTINGS, UInt8(0), 0, List[UInt8]())))
     r.write(b)
     r.step_until_dropped()
+
+
+# -----------------------------------------------------------------------------
+# D: the dispatch loop on a TLS connection.
+# -----------------------------------------------------------------------------
+
+
+comptime _Rt = BlockingRuntime[NoopSink]
+
+
+struct _Counting(RequestDispatcher):
+    """Answers 200 and counts its calls."""
+
+    var calls: Int
+
+    def __init__(out self):
+        self.calls = 0
+
+    def dispatch[
+        RT: Runtime,
+    ](
+        mut self, mut reactor: Reactor[RT.Sink], var req: HttpRequest
+    ) raises -> HttpResponse:
+        self.calls += 1
+        return HttpResponse.ok(String("dispatched"))
+
+
+def test_dispatch_loop_drops_a_tls_connection_unread() raises:
+    """`serve_one_iteration` accepts a TLS connection, the client sends its
+    ClientHello, and the next poll cycle is `serve_one_iteration_dispatch`:
+    the connection is dropped, the dispatcher is never called and nothing is
+    written back (no plaintext 400 for the ClientHello, no ServerHello)."""
+    var empty = List[String]()
+    var r = _Rig(empty, empty)
+    var o = r.client.handshake()
+    assert_equal(Int(o), Int(TLS_OUTCOME_BLOCKED_ON_READ), "no ClientHello sent")
+    var d = _Counting()
+    for _ in range(200):
+        _ = r.server.serve_one_iteration_dispatch[_Counting, _Rt](
+            d, Int32(20_000)
+        )
+        if r.server.live_conn_count() == 0:
+            break
+    assert_equal(r.server.live_conn_count(), 0, "the TLS connection was kept")
+    assert_equal(d.calls, 0, "the dispatcher ran on a TLS connection")
+    var buf = List[UInt8](length=4096, fill=UInt8(0))
+    var n = external_call["recv", Int64](
+        r.fd, buf.unsafe_ptr(), UInt64(4096), Int32(0)
+    )
+    assert_true(n <= 0, "the server wrote " + String(n) + " bytes back")
 
 
 def main() raises:
