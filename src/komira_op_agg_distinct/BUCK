@@ -7,9 +7,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # split, the group-table sizing rule, the string key emit, the radix-parallel
 # exact COUNT(DISTINCT) of Int64 buffers and of a STRING column, the
 # per-worker state of the streaming COUNT(DISTINCT) aggregation, its global
-# group directory and its MorselSink, and the parallel per-group finalize of
-# the stage MEDIAN drain. The grouped COUNT(DISTINCT) driver and the stage
-# distinct state are added by the changes that follow.
+# group directory and its MorselSink, the stage DISTINCT breaker state, and
+# the parallel per-group finalize of the stage MEDIAN drain. The grouped
+# COUNT(DISTINCT) driver is added by a later change.
 mojo_library(
     name = "komira_op_agg_distinct",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -26,6 +26,9 @@ mojo_library(
         "//src/komira_column_kernels:komira_column_kernels",
         "//src/komira_counters:komira_counters",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_engine_runtime:komira_engine_runtime",
+        "//src/komira_expr:komira_expr",
+        "//src/komira_libc:komira_libc",
         "//src/komira_op_agg_state:komira_op_agg_state",
         "//src/komira_operator_api:komira_operator_api",
         "//src/komira_physical_plan:komira_physical_plan",
@@ -54,7 +57,9 @@ mojo_library(
         "tests/test_cd_string_parallel_byte_equiv.mojo",
         "tests/test_count_distinct_agg_sink.mojo",
         "tests/test_count_distinct_agg_sink_mixed.mojo",
+        "tests/test_distinct_state.mojo",
         "tests/test_median_parallel_drain.mojo",
+        "tests/test_spill_distinct_state.mojo",
     ],
     visibility = ["PUBLIC"],
 )
