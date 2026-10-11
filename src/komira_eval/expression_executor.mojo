@@ -3624,35 +3624,50 @@ struct ExpressionExecutor(Movable, Deinitable):
             # A zero divisor answers NULL (§5.3): the row holds the
             # placeholder 0.0 and `_mark_value_nulls_from_view` reports it.
             # MIN / -1 raises (§5.4) unless an operand is NULL. Every Int64
-            # from MIN to MIN + 2^9 widens to -2^63, so a dividend that does
-            # is re-read once through the Int64 walker and only MIN itself
-            # raises: (MIN + 1) / -1 is MAX, which fits. Only -1 widens to
-            # -1.0, so the divisor test is exact.
+            # from MIN to MIN + 2^9 widens to -2^63, so a row whose dividend
+            # does over a -1 divisor is flagged, and only MIN itself raises:
+            # (MIN + 1) / -1 is MAX, which fits. Only -1 widens to -1.0, so
+            # the divisor test is exact. The flagged rows whose operands are
+            # all valid are re-read through the Int64 walker as their own
+            # sub-selection: that walker raises on overflow in any row it
+            # reads, NULL rows included, so it must read neither a NULL row
+            # nor a row outside the flagged set.
             var operand_nulls = List[Bool]()
-            var lhs_i64 = List[Scalar[DType.int64]]()
             var k = 0
+            while k < n_sel:
+                if rhs_vals[k] == -1.0 and lhs_vals[k] == Float64(Int64.MIN):
+                    operand_nulls = self._operand_nulls_from_view[bo](
+                        batch, node, sel, True
+                    )
+                    break
+                k = k + 1
+            if len(operand_nulls) > 0:
+                var reread_sel = RowSelectionVector(n_sel)
+                while k < n_sel:
+                    if (
+                        rhs_vals[k] == -1.0
+                        and lhs_vals[k] == Float64(Int64.MIN)
+                        and not operand_nulls[k]
+                    ):
+                        reread_sel.append(sel.get(k))
+                    k = k + 1
+                if reread_sel.len() > 0:
+                    var lhs_i64 = List[Scalar[DType.int64]](
+                        capacity=reread_sel.len()
+                    )
+                    self.eval_to_list_i64_from_view[bo](
+                        batch_view, node.left, reread_sel, lhs_i64
+                    )
+                    for j in range(len(lhs_i64)):
+                        if lhs_i64[j] == Int64.MIN:
+                            raise _ee_div_overflow_error[DType.int64]()
+            k = 0
             while k < n_sel:
                 var d = rhs_vals[k]
                 if d == 0.0:
                     out.append(0.0)
                     k = k + 1
                     continue
-                if d == -1.0 and lhs_vals[k] == Float64(Int64.MIN):
-                    if len(lhs_i64) == 0:
-                        lhs_i64 = List[Scalar[DType.int64]](capacity=n_sel)
-                        self.eval_to_list_i64_from_view[bo](
-                            batch_view, node.left, sel, lhs_i64
-                        )
-                    if lhs_i64[k] == Int64.MIN:
-                        if len(operand_nulls) == 0:
-                            operand_nulls = self._operand_nulls_from_view[bo](
-                                batch, node, sel, True
-                            )
-                        if not operand_nulls[k]:
-                            raise _ee_div_overflow_error[DType.int64]()
-                        out.append(0.0)
-                        k = k + 1
-                        continue
                 # Integer division truncates toward zero (query_semantics.md
                 # §5.1), so the widened quotient is truncated: 7 / 2 is 3.0,
                 # not 3.5. Exact while both operands are below 2^53. `+ 0.0`

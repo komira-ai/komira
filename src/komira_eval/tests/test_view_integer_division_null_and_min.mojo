@@ -370,6 +370,61 @@ def test_probe_f64_walker_min_plus_one_over_minus_one_no_raise() raises:
     assert_equal(got[0], Float64(Int64.MAX))
 
 
+def _minus_one_over_z() -> ExpressionExecutor:
+    """Pool [col a, 1, a - 1, col z, (a - 1) / z]."""
+    var pool = List[RuntimeExpr]()
+    pool.append(make_col(A))
+    pool.append(make_lit_i64(1))
+    pool.append(_node(EXPR_SUB_I64, 0, 1))
+    pool.append(make_col(Z))
+    pool.append(_node(EXPR_DIV_I64, 2, 3))
+    return _exec(pool^)
+
+
+def test_vprobe_null_row_overflow_in_reread_dividend() raises:
+    """`(a - 1) / z` with a = [MIN + 2, NULL storing MIN], z = [-1, 5]. Row 0
+    widens to -2^63 / -1, so the Float64 walker re-reads its dividend as
+    Int64: MIN + 1, which divides to MAX. Row 1 is NULL (§5.0), so its stored
+    MIN - 1 must not be computed: the re-read covers only the flagged valid
+    rows, not the whole selection."""
+    var batch = _build([Int(I64_MIN) + 2, Int(I64_MIN)], [-1, 5], [0, 0], [1, 1], 1, -1)
+    var got = _f64(_minus_one_over_z(), batch, [0, 1])
+    assert_equal(len(got), 2)
+    assert_equal(got[0], Float64(Int64.MAX))
+
+
+def test_null_flagged_row_is_not_reread() raises:
+    """`(a - 1) / z` with a = [MIN + 2, NULL storing MIN], z = [-1, -1]. Both
+    rows widen to -2^63 / -1. Row 1 is NULL, so it is not re-read (its stored
+    MIN - 1 would overflow) and the NULL channel reports it; row 0 is MAX."""
+    var batch = _build([Int(I64_MIN) + 2, Int(I64_MIN)], [-1, -1], [0, 0], [1, 1], 1, -1)
+    var got = _f64(_minus_one_over_z(), batch, [1, 0])
+    assert_equal(len(got), 2)
+    assert_equal(got[1], Float64(Int64.MAX))
+    var want: List[Bool] = [True, False]
+    _expect_bools(_nulls(_minus_one_over_z(), batch, [1, 0], True), want, "row 1 is NULL")
+
+
+def test_vprobe_min_in_second_position_raises() raises:
+    """a = [MIN + 1, MIN], z = [-1, -1]: both rows widen to -2^63 / -1, and
+    only row 1 is MIN. Whichever selection position it sits at, it raises."""
+    var batch = _build([Int(I64_MIN) + 1, Int(I64_MIN)], [-1, -1], [0, 0], [1, 1], -1, -1)
+    with assert_raises(contains="Out of Range Error: Overflow in division of INT64 (-9223372036854775808 / -1)!"):
+        _ = _f64(_div(EXPR_DIV_I64, A, Z), batch, [0, 1])
+    with assert_raises(contains="Out of Range Error: Overflow in division of INT64 (-9223372036854775808 / -1)!"):
+        _ = _f64(_div(EXPR_DIV_I64, A, Z), batch, [1, 0])
+
+
+def test_reread_reads_the_selected_row() raises:
+    """a = [MIN, MIN + 1], z = [2, -1], sel [1]: selection position 0 is row
+    1, (MIN + 1) / -1 = MAX. Row 0 holds MIN but is not selected and its
+    divisor is 2, so a re-read that used the position as the row would raise."""
+    var batch = _build([Int(I64_MIN), Int(I64_MIN) + 1], [2, -1], [0, 0], [1, 1], -1, -1)
+    var got = _f64(_div(EXPR_DIV_I64, A, Z), batch, [1])
+    assert_equal(len(got), 1)
+    assert_equal(got[0], Float64(Int64.MAX))
+
+
 def _diff_over_diff(mut pool: List[RuntimeExpr]) -> Int:
     """Append `(a - z) / (a - z)` to `pool`; return its slot."""
     var base = len(pool)
@@ -436,6 +491,10 @@ def main() raises:
     suite.test[test_f64_walker_min_over_minus_one_raises]()
     suite.test[test_i32_min_over_minus_one_raises]()
     suite.test[test_probe_f64_walker_min_plus_one_over_minus_one_no_raise]()
+    suite.test[test_vprobe_null_row_overflow_in_reread_dividend]()
+    suite.test[test_null_flagged_row_is_not_reread]()
+    suite.test[test_vprobe_min_in_second_position_raises]()
+    suite.test[test_reread_reads_the_selected_row]()
     suite.test[test_cast_quotient_null_channel_reads_the_int64_divisor]()
     suite.test[test_int64_case_branch_null_channel_reads_the_int64_divisor]()
     suite^.run()
