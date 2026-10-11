@@ -670,34 +670,58 @@ test "survivors still running after the wait are sent SIGKILL again" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    // A real sleeper leading a process group of its own (set on both sides
-    // of the fork, so the group exists before the scan's kill).
+    // A real group: a leader L and a member M, both sleeping (each setpgid
+    // is made on both sides of its fork, so the group exists before M joins
+    // it and before the scan's kill). As in run(), where the leader is still
+    // a zombie during the scan, the survivor is a member, never the leader:
+    // only a kill of the whole group (-pgid) reaches it.
     const argv = try zArray(a, &.{ try which(a, "sleep"), "30" });
     const envp = try zArray(a, &.{});
-    const pid = try posix.fork();
-    if (pid == 0) {
+    const leader = try posix.fork();
+    if (leader == 0) {
         _ = linux.syscall2(.setpgid, 0, 0);
         _ = linux.execve(argv[0].?, argv.ptr, envp.ptr);
         linux.exit_group(127);
     }
-    _ = linux.syscall2(.setpgid, @intCast(pid), @intCast(pid));
-    // A table that shows it running, never dying: the scan reports it after
-    // the wait, and its last kill must reach the real group.
+    _ = linux.syscall2(.setpgid, @intCast(leader), @intCast(leader));
+    const member = try posix.fork();
+    if (member == 0) {
+        _ = linux.syscall2(.setpgid, 0, @intCast(leader));
+        _ = linux.execve(argv[0].?, argv.ptr, envp.ptr);
+        linux.exit_group(127);
+    }
+    _ = linux.syscall2(.setpgid, @intCast(member), @intCast(leader));
+    // Whatever the outcome, neither sleeper outlives the test (and a pid
+    // already reaped is not signalled: it may have been reused).
+    var member_reaped = false;
+    defer {
+        if (!member_reaped) {
+            _ = linux.kill(member, linux.SIG.KILL);
+            _ = reap(member);
+        }
+        _ = linux.kill(leader, linux.SIG.KILL);
+        _ = reap(leader);
+    }
+    // A table that shows the leader a zombie and the member running, never
+    // dying: the scan reports the member after the wait, and its last kill
+    // must reach the member through the real group.
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     const root = try tmp.dir.realpathAlloc(a, ".");
     const me = try std.fmt.allocPrint(a, "{d}", .{linux.getpid()});
     try writeStat(tmp.dir, me, try std.fmt.allocPrint(a, "{s} (t) R 1 1 1 0\n", .{me}));
     try writeStat(tmp.dir, "self", try std.fmt.allocPrint(a, "{s} (t) R 1 1 1 0\n", .{me}));
-    const id = try std.fmt.allocPrint(a, "{d}", .{pid});
-    try writeStat(tmp.dir, id, try std.fmt.allocPrint(a, "{s} (sleep) S 1 {s} {s} 0\n", .{ id, id, id }));
-    const left = try survivorsAfterKill(a, root, pid, 0);
+    const lid = try std.fmt.allocPrint(a, "{d}", .{leader});
+    const mid = try std.fmt.allocPrint(a, "{d}", .{member});
+    try writeStat(tmp.dir, lid, try std.fmt.allocPrint(a, "{s} (sleep) Z 1 {s} {s} 0\n", .{ lid, lid, lid }));
+    try writeStat(tmp.dir, mid, try std.fmt.allocPrint(a, "{s} (sleep) S {s} {s} {s} 0\n", .{ mid, lid, lid, lid }));
+    const left = try survivorsAfterKill(a, root, leader, 0);
     try testing.expectEqual(@as(usize, 1), left.len);
-    try testing.expectEqual(pid, left[0].pid);
-    // Within 5 s the sleeper is dead of SIGKILL; if not, kill it here and fail.
+    try testing.expectEqual(member, left[0].pid);
+    // Within 5 s the member is dead of SIGKILL.
     var waited: u32 = 0;
-    while (!exitedNoReap(pid, false) and waited < 5000) : (waited += 20) std.time.sleep(20 * std.time.ns_per_ms);
-    if (waited >= 5000) _ = linux.kill(pid, linux.SIG.KILL);
-    try testing.expectEqual(Status{ .signaled = linux.SIG.KILL }, reap(pid));
+    while (!exitedNoReap(member, false) and waited < 5000) : (waited += 20) std.time.sleep(20 * std.time.ns_per_ms);
     try testing.expect(waited < 5000);
+    member_reaped = true;
+    try testing.expectEqual(Status{ .signaled = linux.SIG.KILL }, reap(member));
 }
