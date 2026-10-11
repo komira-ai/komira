@@ -416,15 +416,21 @@ struct PgConnection(Movable, Deinitable):
             var msg = self._read_one_message[RT](reactor)
             var t = msg.msg_type
             if t == MSG_ROW_DESC:
-                var cols = parse_row_description(msg)
-                col_names = List[String]()
-                col_oids = List[UInt32]()
-                for c in cols:
-                    col_names.append(c.name)
-                    col_oids.append(c.type_oid)
+                try:
+                    var cols = parse_row_description(msg)
+                    col_names = List[String]()
+                    col_oids = List[UInt32]()
+                    for c in cols:
+                        col_names.append(c.name)
+                        col_oids.append(c.type_oid)
+                except e:
+                    raise self._close_on_malformed(e^)
                 got_desc = True
             elif t == MSG_DATA_ROW:
-                rows.append(row_from_data_message(msg, col_oids))
+                try:
+                    rows.append(row_from_data_message(msg, col_oids))
+                except e:
+                    raise self._close_on_malformed(e^)
             elif t == MSG_CMD_COMPLETE:
                 pass  # tag available; row count via execute()
             elif t == MSG_EMPTY_QUERY:
@@ -503,16 +509,22 @@ struct PgConnection(Movable, Deinitable):
             if t == MSG_PARSE_COMPLETE:
                 pass
             elif t == MSG_PARAM_DESC:
-                param_oids = parse_parameter_description(m)
+                try:
+                    param_oids = parse_parameter_description(m)
+                except e:
+                    raise self._close_on_malformed(e^)
             elif t == MSG_ROW_DESC:
-                var cols = parse_row_description(m)
-                for ci in range(len(cols)):
-                    ref c = cols[ci]
-                    result_oids.append(c.type_oid)
-                    var nb = c.name.as_bytes()
-                    for bi in range(len(nb)):
-                        rname_data.append(nb[bi])
-                    rname_offsets.append(len(rname_data))
+                try:
+                    var cols = parse_row_description(m)
+                    for ci in range(len(cols)):
+                        ref c = cols[ci]
+                        result_oids.append(c.type_oid)
+                        var nb = c.name.as_bytes()
+                        for bi in range(len(nb)):
+                            rname_data.append(nb[bi])
+                        rname_offsets.append(len(rname_data))
+                except e:
+                    raise self._close_on_malformed(e^)
             elif t == MSG_NO_DATA:
                 pass  # statement returns no rows (e.g. INSERT/UPDATE/DELETE)
             elif t == MSG_ERROR:
@@ -602,15 +614,21 @@ struct PgConnection(Movable, Deinitable):
             if t == MSG_BIND_COMPLETE:
                 pass
             elif t == MSG_ROW_DESC:
-                var cols = parse_row_description(m)
-                if len(cols) > 0:
-                    col_names = List[String]()
-                    col_oids = List[UInt32]()
-                    for c in cols:
-                        col_names.append(c.name)
-                        col_oids.append(c.type_oid)
+                try:
+                    var cols = parse_row_description(m)
+                    if len(cols) > 0:
+                        col_names = List[String]()
+                        col_oids = List[UInt32]()
+                        for c in cols:
+                            col_names.append(c.name)
+                            col_oids.append(c.type_oid)
+                except e:
+                    raise self._close_on_malformed(e^)
             elif t == MSG_DATA_ROW:
-                rows.append(binary_row_from_data_message(m, col_oids))
+                try:
+                    rows.append(binary_row_from_data_message(m, col_oids))
+                except e:
+                    raise self._close_on_malformed(e^)
             elif t == MSG_CMD_COMPLETE:
                 pass
             elif t == MSG_EMPTY_QUERY:
@@ -900,6 +918,21 @@ struct PgConnection(Movable, Deinitable):
                 raise Error(_pg_error_from_fields(ef))
             guard += 1
         raise Error("PgConnection: did not reach ReadyForQuery")
+
+    def _close_on_malformed(mut self, var e: Error) -> Error:
+        """Close the connection after a backend message failed to decode
+        (a body shorter than the counts and lengths it declares, komira#1086)
+        and hand back `e` for the caller to raise.
+
+        The rest of that result (more DataRows, CommandComplete,
+        ReadyForQuery) is still unread. Left open, the connection would hand
+        those leftovers to the next `query` as its own result. A server that
+        sent a self-inconsistent message gives no basis for reading on to
+        ReadyForQuery, so the connection is closed instead: any later call
+        raises "connection is closed". An ErrorResponse is different (the
+        server is in step), and those paths drain to ReadyForQuery instead."""
+        self.close()
+        return e^
 
     def _maybe_error(
         self, msg: BackendMessage, fallback: String

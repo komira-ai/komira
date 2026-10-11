@@ -139,9 +139,10 @@ def append_unescaped(mut out: List[UInt8], b: Span[UInt8, _], lo: Int, hi: Int):
     """Append `b[lo:hi]` with XML entity references decoded.
 
     An `&` that does not begin a recognised reference is passed through
-    verbatim. `XmlReader` refuses such a document before it decodes
-    anything, so this leniency only reaches direct callers of
-    `xml_unescape`.
+    verbatim; so is a numeric reference to a surrogate (U+D800..U+DFFF) or
+    to a value past U+10FFFF, which have no UTF-8 encoding. `XmlReader`
+    refuses such a document before it decodes anything, so this leniency
+    only reaches direct callers of `xml_unescape`.
     """
     var i = lo
     while i < hi:
@@ -190,7 +191,16 @@ def append_unescaped(mut out: List[UInt8], b: Span[UInt8, _], lo: Int, hi: Int):
                 if cp > 0x10FFFF:
                     break
                 j += 1
-            if digits > 0 and j < hi and b[j] == _SEMI and cp <= 0x10FFFF:
+            # A surrogate (U+D800..U+DFFF) is not a scalar value and has no
+            # UTF-8 form: it is passed through like a value past U+10FFFF,
+            # so the output stays UTF-8.
+            if (
+                digits > 0
+                and j < hi
+                and b[j] == _SEMI
+                and cp <= 0x10FFFF
+                and not (cp >= 0xD800 and cp <= 0xDFFF)
+            ):
                 _append_utf8(out, cp)
                 i = j + 1
             else:

@@ -171,7 +171,9 @@ def format_timestamp_ms(epoch_ms: Int64) -> String:
     # days -> civil (y, m, d). Hinnant's algorithm with epoch shifted to
     # 0000-03-01. days here are days since 1970-01-01.
     var z = days + 719468
-    var era = (z if z >= 0 else z - 146096) // 146097
+    # Mojo's `//` floors, so Hinnant's truncation adjustment for a negative
+    # `z` is not needed (and would make the era one too low).
+    var era = z // 146097
     var doe = z - era * 146097
     var yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
     var y = yoe + era * 400

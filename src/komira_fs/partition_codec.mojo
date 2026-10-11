@@ -555,8 +555,36 @@ def _value_parses_as_int(v: String) -> Bool:
     return True
 
 
+def _days_in_month(yyyy: Int, mm: Int) -> Int:
+    """The number of days of month `mm` (1..12) of year `yyyy` in the
+    proleptic Gregorian calendar: February has 29 days in a year divisible
+    by 4 and not by 100, or divisible by 400."""
+    if mm == 2:
+        var leap = (yyyy % 4 == 0 and yyyy % 100 != 0) or yyyy % 400 == 0
+        return 29 if leap else 28
+    if mm == 4 or mm == 6 or mm == 9 or mm == 11:
+        return 30
+    return 31
+
+
+def _date_digits_are_calendar_date(v: String) -> Bool:
+    """True iff the digit bytes at `YYYY-MM-DD` positions 0..9 of `v` (shape
+    already checked by the caller) name a real calendar date: month 1..12 and
+    day 1 up to that month's last day."""
+    var bs = v.as_bytes()
+    var yyyy = 0
+    for i in range(4):
+        yyyy = yyyy * 10 + (Int(bs[i]) - ord("0"))
+    var mm = (Int(bs[5]) - ord("0")) * 10 + (Int(bs[6]) - ord("0"))
+    var dd = (Int(bs[8]) - ord("0")) * 10 + (Int(bs[9]) - ord("0"))
+    if mm < 1 or mm > 12:
+        return False
+    return dd >= 1 and dd <= _days_in_month(yyyy, mm)
+
+
 def _value_parses_as_date32(v: String) -> Bool:
-    """True iff `v` matches strict `YYYY-MM-DD` with plausible month/day."""
+    """True iff `v` matches strict `YYYY-MM-DD` and names a real calendar
+    date (a day past its month's last day, such as 2027-02-29, is not)."""
     var bs = v.as_bytes()
     if len(bs) != 10:
         return False
@@ -567,13 +595,7 @@ def _value_parses_as_date32(v: String) -> Bool:
         else:
             if bs[i] < UInt8(ord("0")) or bs[i] > UInt8(ord("9")):
                 return False
-    var mm = (Int(bs[5]) - ord("0")) * 10 + (Int(bs[6]) - ord("0"))
-    var dd = (Int(bs[8]) - ord("0")) * 10 + (Int(bs[9]) - ord("0"))
-    if mm < 1 or mm > 12:
-        return False
-    if dd < 1 or dd > 31:
-        return False
-    return True
+    return _date_digits_are_calendar_date(v)
 
 
 def _value_parses_as_timestamp(v: String) -> Bool:
@@ -605,12 +627,10 @@ def _value_parses_as_timestamp(v: String) -> Bool:
         else:
             if bs[i] < UInt8(ord("0")) or bs[i] > UInt8(ord("9")):
                 return False
-    var mm = (Int(bs[5]) - ord("0")) * 10 + (Int(bs[6]) - ord("0"))
-    var dd = (Int(bs[8]) - ord("0")) * 10 + (Int(bs[9]) - ord("0"))
     var hh = (Int(bs[11]) - ord("0")) * 10 + (Int(bs[12]) - ord("0"))
     var mi = (Int(bs[14]) - ord("0")) * 10 + (Int(bs[15]) - ord("0"))
     var ss = (Int(bs[17]) - ord("0")) * 10 + (Int(bs[18]) - ord("0"))
-    if mm < 1 or mm > 12 or dd < 1 or dd > 31:
+    if not _date_digits_are_calendar_date(v):
         return False
     if hh > 23 or mi > 59 or ss > 59:
         return False

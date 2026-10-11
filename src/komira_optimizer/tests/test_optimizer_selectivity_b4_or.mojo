@@ -96,9 +96,8 @@ def _or(var l: Expr, var r: Expr) -> Expr:
 def test_b4_or_of_two_ranges_is_inclusion_exclusion() raises:
     """`(a > 5) OR (b > 5)` -> 0.30 + 0.30 - 0.30 * 0.30 = 0.51.
 
-    Pin against the legacy regression already covered by
-    test_selectivity_or_is_inclusion_exclusion. This file adds the
-    deeper-nesting and AND-OR composition cases below.
+    The two-term base case. The tests below add the deeper-nesting and
+    AND-OR composition cases.
     """
     var p1 = Expr.binary(14, Expr.col_ref("a"), Expr.literal(ScalarValue.from_int(5)))  # GT
     var p2 = Expr.binary(14, Expr.col_ref("b"), Expr.literal(ScalarValue.from_int(5)))  # GT
@@ -143,8 +142,7 @@ def test_b4_or_q19_three_brand_groups() raises:
 
     Pin against the inclusion-exclusion expansion. This is the Q19-
     cardinality entry point: under SF1 lineitem (6M rows), a ~0.81%
-    selectivity narrows to ~48.5K rows. DuckDB's empirical Q19
-    cardinality is ~30-50K, so this is in the right magnitude band.
+    selectivity narrows to ~48.5K rows.
     """
     # Branch shape: brand = X AND size >= 1 AND size <= Y AND quantity >= Z
     var br1 = _and(_and(_and(_eq("p_brand", 12), _ge("p_size", 1)),

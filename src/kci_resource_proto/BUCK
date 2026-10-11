@@ -1,9 +1,13 @@
 load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixture_check")
 
+# Every `.proto` of the package, one file per message family (resource.proto
+# says which holds what); the held-number test reads them all.
+_PROTOS = ["resource.proto", "refs.proto", "compute.proto", "data.proto", "identity.proto", "messaging.proto", "secrets.proto", "names.proto", "triggers.proto", "networks.proto", "artifacts.proto", "composite.proto"]
+
 # Ten composed graphs, frozen as bytes (tests/test_resource_graph_golden_bytes.mojo
-# says what each holds): between them every field of every message of
-# `resource.proto`, each at a value other than its default. `Scale.min` and
+# says what each holds): between them every field of every message of the
+# catalog, each at a value other than its default. `Scale.min` and
 # `ContainerJob.max_retries` are also set to an explicit zero: an encoder that
 # drops a present zero still round-trips, and the field-number test compares
 # with zero records dropped, so only these bytes see it.
@@ -11,7 +15,7 @@ _GRAPHS = ["compute_graph", "dns_graph", "job_bucket_graph", "messaging_graph", 
 
 mojo_proto_library(
     name = "kci_resource_proto",
-    srcs = ["resource.proto"],
+    srcs = _PROTOS,
     import_prefix = "kci/resource/v1",
     deps = [
         "//src/komira_proto_codec:komira_proto_codec",
@@ -27,6 +31,8 @@ mojo_proto_library(
         "tests/test_resource_network_numbers.mojo",
         "tests/test_resource_registry_numbers.mojo",
         "tests/test_resource_metadata_numbers.mojo",
+        "tests/test_resource_composite_numbers.mojo",
+        "tests/test_resource_binding_numbers.mojo",
         "tests/test_resource_held_numbers.mojo",
         "tests/test_resource_list_copy_and_json.mojo",
         "tests/test_held_numbers_are_unused.mojo",
@@ -35,7 +41,8 @@ mojo_proto_library(
     # The held-number test reads the proto text itself.
     test_data = {
         "tests/test_held_numbers_are_unused.mojo": {
-            "resource.proto": "resource.proto",
+            p: p
+            for p in _PROTOS
         },
         "tests/test_resource_graph_golden_bytes.mojo": {
             "fixtures/{}{}".format(s, ext): "tests/fixtures/graph/{}{}".format(s, ext)
@@ -51,7 +58,7 @@ mojo_proto_library(
 # bytes this package's encoder writes for each graph as `<stem>.hex` and
 # reads them back through this package's decoder only; this check holds them
 # to an implementation that never saw it. Each `<stem>.txtpb` is protoc's
-# decode of `<stem>.hex` under `resource.proto`, and each
+# decode of `<stem>.hex` under the package's `.proto` files, and each
 # `<stem>.canonical.hex` is protoc's encoding of that text, made by the
 # `graph_<stem>_canonical` targets below:
 #   ./buck2 build //src/kci_resource_proto:graph_<stem>_canonical \

@@ -145,7 +145,7 @@ def _entry_is_readable(entry: JsonValue) -> Bool:
     try:
         return entry.get(String("filename")).kind_tag() == JSON_STRING
     except:
-        return False
+        return False  # cov: unreachable get() raises only on a non-object or a missing key, both checked above
 
 
 def classify_index_answer(
