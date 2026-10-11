@@ -112,16 +112,14 @@ def _check_impl(ctx):
         "@FIXTURES@",
         ctx.attrs.version,
         ctx.attrs.zig_triple,
-        ctx.attrs.glibc_floor_minor,
     ])
 
 _kcov_check = rule(
     impl = _check_impl,
-    doc = "Runs `kcov_check.sh check` against the `kcov` distribution: its files and licences, glibc floor, unwinder, loader closure under a decoy LD_LIBRARY_PATH, version, the golden Cobertura reports of the fixtures (kcov's defaults, and the coverage variant's --replace-src-path regex and full paths), the preload library, and the HTML report's data files. Fails the build on a wrong result; `[report]` holds the fixture's reports.",
+    doc = "Runs `kcov_check.sh check` against the `kcov` distribution: its files and licences, unwinder, version, the golden Cobertura reports of the fixtures (kcov's defaults, and the coverage variant's --replace-src-path regex and full paths), the preload library, and the HTML report's data files. Fails the build on a wrong result; `[report]` holds the fixture's reports.",
     attrs = _attrs({
         "archive": attrs.dep(doc = "The kcov source archive: its data/ files are what the HTML report must write."),
         "fixtures": attrs.list(attrs.source(), doc = "fixtures/cov_fixture.c and its golden report."),
-        "glibc_floor_minor": attrs.string(doc = "<n> of the floor GLIBC_2.<n>."),
         "kcov": attrs.exec_dep(),
         "strip_prefix": attrs.string(),
         "version": attrs.string(),
@@ -135,17 +133,15 @@ def _cases_impl(ctx):
         _out(ctx.attrs.conda_payload),
         "@FIXTURES@",
         ctx.attrs.zig_triple,
-        ctx.attrs.glibc_floor_minor,
     ])
 
 _kcov_check_cases = rule(
     impl = _cases_impl,
-    doc = "Runs `kcov_check.sh cases`: the glibc-floor and decoy checks, elf_rpath and conda_payload on inputs whose answer is known, wrong ones included. Fails the build on a wrong answer.",
+    doc = "Runs `kcov_check.sh cases`: the loader-record checks, elf_rpath and conda_payload on inputs whose answer is known, wrong ones included. Fails the build on a wrong answer.",
     attrs = _attrs({
         "conda_payload": attrs.exec_dep(),
         "elf_rpath": attrs.exec_dep(),
         "fixtures": attrs.list(attrs.source()),
-        "glibc_floor_minor": attrs.string(),
         "zig_triple": attrs.string(),
     }),
 )
