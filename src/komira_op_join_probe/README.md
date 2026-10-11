@@ -112,7 +112,10 @@ import from the modules.
 - `komira_op_join_probe.multi_key_probe_op`: `MultiKeyJoinProbeOp`, the
   composite-key streaming INNER probe: per morsel the composite join's
   extraction, probe and assembly, so the morsels' outputs are the whole-batch
-  join's rows; the JOIN-KEY CSE per key (`key_cse`, on by default).
+  join's rows; the JOIN-KEY CSE per key (`key_cse`, on by default). An
+  integer probe key paired with a FLOAT64 build key is cast to FLOAT64; a
+  FLOAT64 probe key needs an index built with its integer build key as
+  FLOAT64 (`build_as_float64`), else it raises.
 
 A NULL key matches nothing: INNER and SEMI drop the row, LEFT and ANTI keep
 it unmatched, RIGHT and FULL still emit a NULL-keyed build row. FLOAT64 keys

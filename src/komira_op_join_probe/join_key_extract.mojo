@@ -219,6 +219,12 @@ def _key_class(batch: RecordBatch, name: String) raises -> Int:
     return _KEY_CLASS_OTHER
 
 
+def join_key_is_integer(batch: RecordBatch, name: String) raises -> Bool:
+    """True iff key column `name` is INT32 or INT64 (plain, or a numeric
+    dictionary of them): the side `join_key_pairs_as_float64` casts."""
+    return _key_class(batch, name) == _KEY_CLASS_INTEGER
+
+
 def join_key_pairs_as_float64(
     probe_batch: RecordBatch,
     probe_keys: List[String],
@@ -238,8 +244,14 @@ def join_key_pairs_as_float64(
     `extract_join_key_columns_typed`, which refuses it.
 
     Raises:
-        On a string-against-number pair, or a key name that is not a column.
+        On a string-against-number pair, a key name that is not a column, or
+        key lists of different lengths.
     """
+    if len(build_keys) != len(probe_keys):
+        raise Error(
+            "join_key_pairs_as_float64: " + String(len(probe_keys))
+            + " probe keys but " + String(len(build_keys)) + " build keys"
+        )
     var out = List[Bool](capacity=len(probe_keys))
     for k in range(len(probe_keys)):
         var pc = _key_class(probe_batch, probe_keys[k])

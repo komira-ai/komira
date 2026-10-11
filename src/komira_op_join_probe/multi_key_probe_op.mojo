@@ -28,6 +28,13 @@
 # because a later morsel can differ and a share applied to it would emit the
 # wrong column with the right row count. A morsel that differs is gathered.
 # A refusal on the first morsel is kept for the operator's life.
+#
+# MIXED KEY TYPES. An INT32 or INT64 key paired with a FLOAT64 key compares
+# as FLOAT64, as DuckDB casts the integer to DOUBLE: a morsel's integer probe
+# key is rendered as FLOAT64 when its build key is FLOAT64 or the index holds
+# the integer build key as FLOAT64 (`build_as_float64`); a FLOAT64 probe key
+# against a build key the index holds as an integer raises, and so does a
+# STRING key against a numeric key.
 # =============================================================================
 
 from std.memory import ArcPointer, OwnedPointer
@@ -52,7 +59,11 @@ from komira_join_assembly.join_key_cse import (
     join_key_cse_aliases,
 )
 
-from .join_key_extract import extract_join_key_columns_serial
+from .join_key_extract import (
+    extract_join_key_columns_serial,
+    join_key_is_integer,
+    join_key_pairs_as_float64,
+)
 from .join_multi_key_builder import MultiKeyHashJoinBuilder
 
 
@@ -93,6 +104,7 @@ struct MultiKeyJoinProbeOp(MorselOperatorImpl):
     var _cse_probe_key_idx: List[Int]
     var _cse_probe_key_type: List[ArrowType]
     var _cse_probe_key_has_bitmap: List[Bool]
+    var _build_as_float64: List[Bool]
 
     def __init__(
         out self,
@@ -103,6 +115,7 @@ struct MultiKeyJoinProbeOp(MorselOperatorImpl):
         var output_schema: ArcPointer[Schema],
         join_type: UInt8 = JOIN_INNER,
         key_cse: Bool = True,
+        build_as_float64: List[Bool] = List[Bool](),
     ) raises:
         """An operator probing `index` (built from `build_batch`'s
         `build_key_names` columns) with each morsel's `probe_key_names`
@@ -119,6 +132,10 @@ struct MultiKeyJoinProbeOp(MorselOperatorImpl):
             join_type: JOIN_INNER; any other type raises.
             key_cse: Whether the output's build key columns may share the
                 probe key columns (see the header).
+            build_as_float64: Per key, True iff `index` was built with that
+                integer build key rendered as FLOAT64
+                (`extract_join_key_columns_serial`'s `as_float64`, from
+                `join_key_pairs_as_float64`). Empty: none was.
         """
         if join_type != JOIN_INNER:
             raise Error(
@@ -143,6 +160,7 @@ struct MultiKeyJoinProbeOp(MorselOperatorImpl):
         self._cse_probe_key_idx = List[Int]()
         self._cse_probe_key_type = List[ArrowType]()
         self._cse_probe_key_has_bitmap = List[Bool]()
+        self._build_as_float64 = build_as_float64.copy()
 
     def execute(mut self, mut morsel: Morsel) raises -> ExecResult:
         """Replace `morsel.batch` with its INNER join output against the
@@ -157,7 +175,8 @@ struct MultiKeyJoinProbeOp(MorselOperatorImpl):
         # sharing the morsel's buffers; they are reference-counted and
         # read-only, so replacing `morsel.batch` below cannot disturb them.
         var probe_keys = extract_join_key_columns_serial(
-            morsel.batch, self._probe_key_names
+            morsel.batch, self._probe_key_names,
+            self._probe_as_float64(morsel.batch),
         )
         var build_matches = List[Int]()
         var probe_matches = List[Int]()
@@ -185,6 +204,42 @@ struct MultiKeyJoinProbeOp(MorselOperatorImpl):
         morsel.replace_batch(joined^)
         self._record_metrics(rows_in, morsel.batch.num_rows(), t0)
         return ExecResult(NEED_MORE_INPUT)
+
+    def _probe_as_float64(self, imm probe_batch: RecordBatch) raises -> List[Bool]:
+        """Per key, True iff the morsel's integer probe key is rendered as
+        FLOAT64: its build key is FLOAT64, or the index holds the integer
+        build key as FLOAT64. A FLOAT64 probe key against an integer build key
+        the index holds as an integer raises (the index cannot match it), as
+        does a STRING key against a numeric key (`join_key_pairs_as_float64`).
+        """
+        # Only the pairs the operator was told both names of are known.
+        var n = min(len(self._probe_key_names), len(self._build_key_names))
+        var pnames = List[String](capacity=n)
+        var bnames = List[String](capacity=n)
+        for k in range(n):
+            pnames.append(self._probe_key_names[k])
+            bnames.append(self._build_key_names[k])
+        var mixed = join_key_pairs_as_float64(
+            probe_batch, pnames, self._build_batch[], bnames
+        )
+        var out = List[Bool](capacity=n)
+        for k in range(n):
+            var build_f = (
+                len(self._build_as_float64) > k and self._build_as_float64[k]
+            )
+            var probe_int = join_key_is_integer(
+                probe_batch, self._probe_key_names[k]
+            )
+            if mixed[k] and not probe_int and not build_f:
+                raise Error(
+                    "MultiKeyJoinProbeOp: the FLOAT64 probe key '"
+                    + self._probe_key_names[k] + "' is paired with the"
+                    " integer build key '" + self._build_key_names[k]
+                    + "', but the index holds that key as an integer; build"
+                    " it with the key as FLOAT64 and pass build_as_float64"
+                )
+            out.append(probe_int and (mixed[k] or build_f))
+        return out^
 
     def _cse_admits_morsel(mut self, imm probe_batch: RecordBatch) raises -> Bool:
         """True iff this morsel's output may take its build key columns from
