@@ -1,8 +1,8 @@
 # The linters run by the lint rules (defs.bzl), as pinned downloads, the
 # lint action script, and the Zig lint tools. linux x86_64 static binaries.
-load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
 load(":defs.bzl", "shell_lint", "tar_member")
 
@@ -15,35 +15,6 @@ export_file(name = "readme_api_coverage.sh", visibility = ["PUBLIC"])
 export_file(name = "surface_capability_matrix.sh", visibility = ["PUBLIC"])
 
 export_file(name = "test_weld.sh", visibility = ["PUBLIC"])
-
-
-# The reader of lint kind public_boundary (lint.sh; the rule is public_boundary in defs.bzl).
-export_file(name = "public_boundary.awk", visibility = ["PUBLIC"])
-
-pinned_file(**pinned_kwargs("linux-x86_64", "shellcheck"))
-
-tar_member(
-    name = "shellcheck",
-    archive = ":shellcheck-v0.11.0.linux.x86_64.tar.xz",
-    member = "shellcheck-v0.11.0/shellcheck",
-    visibility = ["PUBLIC"],
-)
-
-pinned_file(**pinned_kwargs("linux-x86_64", "actionlint"))
-
-tar_member(
-    name = "actionlint",
-    archive = ":actionlint_1.7.12_linux_amd64.tar.gz",
-    member = "actionlint",
-    visibility = ["PUBLIC"],
-)
-
-# The lint actions' own scripts.
-shell_lint(
-    name = "shell_lint",
-    srcs = ["lint.sh", "readme_api_coverage.sh", "retired_names.sh", "surface_capability_matrix.sh", "test_weld.sh"],
-    visibility = ["PUBLIC"],
-)
 
 # The Mojo lexer the lint tools share (mojo_tokens.zig): strings, comments,
 # triple-quoted strings over lines, bracket nesting.
@@ -76,5 +47,33 @@ zig_exe(
     unit_tests = [":mojo_tokens_test", ":pointer_lint_test"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
+# The reader of lint kind public_boundary (lint.sh; the rule is public_boundary in defs.bzl).
+export_file(name = "public_boundary.awk", visibility = ["PUBLIC"])
+
+pinned_file(**pinned_kwargs("linux-x86_64", "shellcheck"))
+
+tar_member(
+    name = "shellcheck",
+    archive = ":shellcheck-v0.11.0.linux.x86_64.tar.xz",
+    member = "shellcheck-v0.11.0/shellcheck",
+    visibility = ["PUBLIC"],
+)
+
+pinned_file(**pinned_kwargs("linux-x86_64", "actionlint"))
+
+tar_member(
+    name = "actionlint",
+    archive = ":actionlint_1.7.12_linux_amd64.tar.gz",
+    member = "actionlint",
+    visibility = ["PUBLIC"],
+)
+
+# The lint actions' own scripts.
+shell_lint(
+    name = "shell_lint",
+    srcs = ["lint.sh", "readme_api_coverage.sh", "retired_names.sh", "surface_capability_matrix.sh", "test_weld.sh"],
     visibility = ["PUBLIC"],
 )
