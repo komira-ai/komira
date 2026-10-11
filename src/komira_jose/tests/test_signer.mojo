@@ -515,9 +515,10 @@ def test_rs256_modulus_counted_in_bits() raises:
 def _jws_signer_constructors(text: String) -> List[String]:
     """The signatures (from `def` to the first line ending in `:`, lines
     stripped and joined by a space) of every `__init__` in `text`'s
-    `struct JwsSigner`, and of every method there returning `JwsSigner`,
-    plus `@fieldwise_init` wherever `text` has that decorator (it would add
-    a constructor taking the fields as given)."""
+    `struct JwsSigner`, and of every method there whose return type (the
+    text after `->`) names `JwsSigner` or `Self`, plus `@fieldwise_init`
+    wherever `text` has that decorator (it would add a constructor taking
+    the fields as given)."""
     var out = List[String]()
     if text.find("@fieldwise_init") >= 0:
         out.append("@fieldwise_init")
@@ -541,8 +542,50 @@ def _jws_signer_constructors(text: String) -> List[String]:
             sig += (" " if sig != "" else "") + s
             if s.endswith(":"):
                 in_sig = False
-                if sig.startswith("def __init__") or sig.find("-> JwsSigner:") >= 0:
+                var arrow = sig.find("->")
+                var ret = String(sig[byte = arrow : sig.byte_length()]) if arrow >= 0 else String("")
+                if (
+                    sig.startswith("def __init__")
+                    or ret.find("JwsSigner") >= 0
+                    or ret.find("Self") >= 0
+                ):
                     out.append(sig)
+    return out^
+
+
+def _public_writes_outside_init(text: String) -> List[String]:
+    """Every line of `text` (stripped) that assigns to a `._public` field
+    (`._public` then optional spaces then `=` not followed by `=`), except
+    inside the body of `struct JwsSigner`'s `__init__`. The enclosing
+    function is the last `def` line above, at any indentation."""
+    var out = List[String]()
+    var inside = False
+    var in_init = False
+    for line in text.split("\n"):
+        var l = String(line)
+        if l.startswith("struct JwsSigner"):
+            inside = True
+            in_init = False
+            continue
+        if l.byte_length() > 0 and not l.startswith(" ") and not l.startswith("#"):
+            inside = False
+            in_init = False
+        var s = String(l.strip())
+        if s.startswith("def "):
+            in_init = inside and s.startswith("def __init__")
+        var at = s.find("._public")
+        while at >= 0:
+            var b = s.as_bytes()
+            var i = at + 8
+            while i < len(b) and b[i] == UInt8(0x20):
+                i += 1
+            var assigns = i < len(b) and b[i] == UInt8(0x3D) and (
+                i + 1 >= len(b) or b[i + 1] != UInt8(0x3D)
+            )
+            if assigns and not in_init:
+                out.append(s)
+                break
+            at = s.find("._public", at + 8)
     return out^
 
 
@@ -553,8 +596,12 @@ def test_every_constructor_derives_the_kid() raises:
     # signer naming another key's kid). `JwsSigner(alg=, private_key=)`
     # gives each algorithm the same signer as its named constructor, and
     # refuses every other algorithm name. The staged signer.mojo has exactly
-    # these four constructors (no second `__init__`, no `@fieldwise_init`),
-    # so no other way to build a JwsSigner takes a public key as given.
+    # these four constructors: one `__init__`, no `@fieldwise_init`, and no
+    # other JwsSigner method whose return type names `JwsSigner` or `Self`;
+    # and no line in signer.mojo assigns to `._public` outside that
+    # `__init__`. It does not see a JwsSigner built through an `out`
+    # parameter, a `_public` changed without a `._public =` assignment
+    # (swap, a `ref` binding), or code in another file.
     var ctors = _jws_signer_constructors(
         Path("src/komira_jose/signer.mojo").read_text()
     )
@@ -568,6 +615,12 @@ def test_every_constructor_derives_the_kid() raises:
         + "def eddsa(var seed: SecretValue) raises -> JwsSigner:\n"
         + "def rs256(var pkcs8_der: SecretValue) raises -> JwsSigner:\n",
     )
+    var writes = String("")
+    for w in _public_writes_outside_init(
+        Path("src/komira_jose/signer.mojo").read_text()
+    ):
+        writes += w + "\n"
+    assert_equal(writes, "")
     var ed = JwsSigner(alg="EdDSA", private_key=_secret(_b64d(SEED)))
     assert_equal(ed.kid(), ED_THUMBPRINT)
     assert_equal(ed.alg(), "EdDSA")
