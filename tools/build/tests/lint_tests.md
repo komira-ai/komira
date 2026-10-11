@@ -39,9 +39,11 @@ welded only by the computed list. That tree's welds come from a stand-in rule;
 [`negative/test_weld/real`](negative/test_weld/real/BUCK) runs the lint over a
 real `mojo_library` (a computed `test_srcs` with an entry in a comment and an
 entry naming another package's file by label) and a real `mojo_test` (a
-second `srcs` beside its `main`): `real:ok` holds the three unwelded files in
-its ledger and must pass, `real:red` has no row and must name exactly those
-three. Neither is built: the lint only analyses them.
+second `srcs` beside its `main`): `real:red` has no row and must name exactly
+the three unwelded files, and its green twin,
+[`functional/test_weld/real:ok`](functional/test_weld/real/BUCK), holds them
+in its ledger and must pass (the pull-request check runs it). Neither tree is
+built: the lint only analyses them.
 
 A rule cannot query the targets of `//src/...` (a query attribute takes
 labels only), so building a `test_weld` target checks nothing: it declares the
