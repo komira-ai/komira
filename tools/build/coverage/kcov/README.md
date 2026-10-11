@@ -420,10 +420,13 @@ executable is built behind them (`unit_tests`), so it does not exist unless
 they pass. They build the tool from source in `zig test`'s own mode, so they
 are not the shipped bytes. The process cases
 ([cov_normalize_exe_test.zig](cov_normalize_exe_test.zig),
-`:cov_normalize_exe_test`) take the shipped executable (`exes`) and run it as
-a child process: exit 0 with the golden output, exit 1 with a refusal and
-exit 2 with the usage line, each message on stderr and nothing on stdout.
-They are a validation of the public target `:cov_normalize`. The other tools'
+`:cov_normalize_exe_test`) take the shipped executable (`env_tools`: its path
+is in the test's environment as `COV_NORMALIZE`, and the test fails, never
+passes, without it) and run it as a child process with an empty environment:
+exit 0 with the golden output, exit 1 with a refusal, exit 1 with no output
+when a file size limit cuts the write short, and exit 2 with the usage line,
+each message on stderr and nothing on stdout. They are a validation of the
+public target `:cov_normalize`. The other tools'
 cases are scripts (`kcov_tool_cases` in [defs.bzl](defs.bzl)), and the public
 target (`:debug_relocate`, `:cov_zig`) depends on them. `:cov_link` and
 `:cov_run` take the public targets, so a coverage build is gated by their
