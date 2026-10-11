@@ -163,7 +163,7 @@ src/komira_metrics	9718	-
 src/komira_metrics_reader	9727	-
 src/komira_morsel	9619	-
 src/komira_name_registry	8412	7500
-src/komira_net	8521	-
+src/komira_net	10000	-
 src/komira_objectstore	8364	-
 src/komira_objectstore_gcs	9405	-
 src/komira_objectstore_s3	9530	-

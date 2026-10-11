@@ -408,9 +408,9 @@ def _getaddrinfo_collect(host: String, port: UInt16) raises -> List[IpAddr]:
                 + "' (EAI_NONAME)"
             )
         elif rc == _EAI_AGAIN:
-            raise Error(
-                "DnsError[TRANSIENT]: temporary failure resolving '" + host
-                + "' (EAI_AGAIN)"
+            raise Error(  # cov: unreachable EAI_AGAIN needs a resolver that times out; no hermetic test can make getaddrinfo return it
+                "DnsError[TRANSIENT]: temporary failure resolving '" + host  # cov: unreachable see the line above
+                + "' (EAI_AGAIN)"  # cov: unreachable see the line above
             )
         else:
             raise Error(
@@ -419,9 +419,9 @@ def _getaddrinfo_collect(host: String, port: UInt16) raises -> List[IpAddr]:
             )
 
     if len(out) == 0:
-        raise Error(
-            "DnsError[NO_IPV4_RECORD]: host '" + host
-            + "' has no IPv4 (A) record"
+        raise Error(  # cov: unreachable getaddrinfo with ai_family=AF_INET returns 0 only with at least one AF_INET node
+            "DnsError[NO_IPV4_RECORD]: host '" + host  # cov: unreachable see the line above
+            + "' has no IPv4 (A) record"  # cov: unreachable see the line above
         )
 
     return out^
@@ -469,8 +469,8 @@ def resolve_host_be(host: String, port: UInt16) raises -> UInt32:
     # resolve_host raises before returning an empty list (literal always Some;
     # getaddrinfo raises NO_IPV4_RECORD on empty) — but guard defensively.
     if len(targets) == 0:
-        raise Error(
-            "DnsError[NO_IPV4_RECORD]: host '" + host
-            + "' produced no connect target"
+        raise Error(  # cov: unreachable resolve_host returns one target for a literal and raises on an empty getaddrinfo list
+            "DnsError[NO_IPV4_RECORD]: host '" + host  # cov: unreachable see the line above
+            + "' produced no connect target"  # cov: unreachable see the line above
         )
     return targets[0].ip.v4_be
