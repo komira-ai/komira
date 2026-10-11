@@ -457,14 +457,18 @@ test "the busybox applets not installed, or a program that cannot start, is exit
         // The script's `set -e` exit left the scratch as it was.
         try expectScratchKept(&c);
     }
-    for ([_][]const u8{ "install", "lld", "zig" }) |step| {
+    // Each message names the program that could not start, not another step's.
+    for ([_]struct { step: []const u8, path: []const u8 }{
+        .{ .step = "install", .path = "tc/busybox" },
+        .{ .step = "lld", .path = "link/lld/bin/lld" },
+        .{ .step = "zig", .path = "tc/zig/zig" },
+    }) |cs| {
         var c = try Case.init();
         defer c.deinit();
         var fake = Fake.init(c.a());
-        fake.fail_start = step;
+        fake.fail_start = cs.step;
         try testing.expectEqual(@as(u8, 2), try c.link(&fake));
-        try c.has("cov_branch link: cannot run ");
-        try c.has(": ForkFailed\n");
+        try testing.expectEqualStrings(try std.fmt.allocPrint(c.a(), "cov_branch link: cannot run {s}: ForkFailed\n", .{c.p(cs.path)}), c.err.items);
         try expectScratchKept(&c);
     }
 }
