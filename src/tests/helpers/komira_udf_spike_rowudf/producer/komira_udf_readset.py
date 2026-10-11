@@ -7,12 +7,17 @@ A row-shaped function takes one row object and reads its fields by name:
     def f(row) -> float:
         return row.price * row.qty
 
-Its read set is the fields it may read. The plan carries it (the ROW
-UdfRef's arg_types, one named field each), the optimizer keeps only those
-columns live, and the runtime builds rows from them alone.
+Its read set is the fields it may read. The plan carries it on the UDF
+call node as `UdfReadSet { repeated string columns }`, presence tracked:
+ABSENT means the UDF reads every input column; PRESENT means the planner
+projects to exactly those columns (unique names, each in the input schema,
+else refused naming the column); EMPTY (present, no columns) gives the UDF
+a zero-column batch that still carries the row count. The SDK fills it,
+by inspection or by annotation; the engine never infers it.
 
 read_set() decides it, in this order:
-  1. `columns=[...]`, when the user declares it;
+  1. `columns=[...]`, when the user declares it (PRESENT; `columns=[]` is
+     EMPTY);
   2. else a scan of the function's bytecode: every place the row parameter
      is loaded must be followed at once by an attribute load of a constant
      name (`row.price`) or a subscript by a constant string (`row["qty"]`).
@@ -22,14 +27,18 @@ read_set() decides it, in this order:
      `row.__class__`, which the language answers, a nested function that
      captures it) makes the scan undetermined. Every other name is a field,
      `row._i` and `row.keys` included: the runtime's row has no attribute
-     of its own;
-  3. else every input column, with a note saying why.
+     of its own. A function that reads no field gets an EMPTY read set;
+  3. else no read set (ABSENT), with a note saying why. Never a list of
+     every input column: that would claim a bound the scan did not find.
 
-A sample of rows, when given, is a cross-check only: the function runs over
-it with a recording row, and a field it reads outside the read set fails
-here (ReadSetError UDF_ROW_READ_SET_MISSED) rather than at run time. The
-runtime's by-name error (ERR_FIELD_NOT_DECLARED) is the safety net for
-what neither sees.
+A sample of rows, when given, is the SDK's own cross-check, and only of a
+PRESENT read set: the function runs over the sample with a recording row,
+and a field it reads outside the read set fails here (ReadSetError
+UDF_ROW_READ_SET_MISSED) rather than at run time. It never sets or widens
+the read set. A scan's set cannot miss a read the sample makes, so in
+practice it checks a `columns=[...]` declaration. ABSENT runs no sample.
+The engine's loud failure on a read outside the read set is the safety net
+for what neither sees.
 """
 
 import dis
@@ -37,7 +46,7 @@ import types
 
 SOURCE_COLUMNS = "columns"
 SOURCE_STATIC = "static"
-SOURCE_EVERY_COLUMN = "every_column"
+SOURCE_ABSENT = "absent"
 
 # The load instructions that push one local variable.
 _LOAD_ONE = ("LOAD_FAST", "LOAD_FAST_CHECK", "LOAD_FAST_AND_CLEAR")
@@ -52,11 +61,19 @@ class ReadSetError(Exception):
 
 
 class ReadSet:
-    """The read set of one function over one input: `names` in input order,
-    where they came from (`source`), the fields the sample read (`recorded`,
-    in input order; empty without a sample) and, for every_column, why."""
+    """The read set of one function over one input, as the plan's UDF call
+    node carries it (`UdfReadSet { repeated string columns }`, presence
+    tracked): `names` in input order when PRESENT (EMPTY is present with no
+    names), None when ABSENT (the UDF reads every input column). Also where
+    it came from (`source`), the fields the sample read (`recorded`, in
+    input order; empty without a sample or when absent) and, for absent,
+    why."""
 
     __slots__ = ("names", "source", "recorded", "note")
+
+    @property
+    def present(self):
+        return self.names is not None
 
     def __init__(self, names, source, recorded, note):
         self.names = names
@@ -222,7 +239,8 @@ def read_set(f, input_columns, columns=None, sample=None):
     if columns is not None:
         cols = list(columns)
         if len(set(cols)) != len(cols):
-            raise ReadSetError("UDF_ROW_READ_SET_INVALID", "columns=[...] names a field twice: {}".format(cols))
+            twice = next(c for k, c in enumerate(cols) if c in cols[:k])
+            raise ReadSetError("UDF_ROW_READ_SET_INVALID", "columns=[...] names {!r} twice".format(twice))
         for c in cols:
             if c not in order:
                 raise ReadSetError("UDF_ROW_COLUMN_UNKNOWN", "columns=[...] names {!r}; the input has {}".format(c, order))
@@ -233,9 +251,9 @@ def read_set(f, input_columns, columns=None, sample=None):
     else:
         fields, why = scan(f)
         if fields is None:
-            names = order
-            source = SOURCE_EVERY_COLUMN
-            note = why + "; every input column is passed (add columns=[...] to narrow it)"
+            names = None
+            source = SOURCE_ABSENT
+            note = why + "; no read set: the UDF reads every input column (add columns=[...] to bound it)"
         else:
             for c in fields:
                 if c not in order:
@@ -246,7 +264,7 @@ def read_set(f, input_columns, columns=None, sample=None):
             source = SOURCE_STATIC
             note = ""
     recorded = []
-    if sample is not None:
+    if sample is not None and names is not None:
         reads, _ = record(f, sample)
         recorded = [c for c in order if c in reads]
         missed = [c for c in reads if c not in names]

@@ -13,9 +13,12 @@ one argument. One line per case, tab-separated:
 
     case  entry  input columns  source  read set  recorded  note
 
-with comma-separated column lists. `source` is columns, static or
-every_column; `recorded` is what the sample run read (the cross-check),
-empty without a sample.
+with comma-separated column lists. `source` is columns (the user's
+columns=[...]), static (the scan) or absent (the scan could not bound the
+reads). `read set` is `absent` (no read set: the UDF reads every input
+column) or the present set in brackets: `[price,qty]`, and `[]` for an
+EMPTY one (present, no columns). `recorded` is what the sample run read
+(the cross-check), empty without a sample or when the read set is absent.
 """
 
 import os
@@ -56,6 +59,7 @@ def cases():
     out.append(("branchy_declared_ab", "branchy", abc, ["a", "b"], None))
     out.append(("pick", "pick", ["flag", "a", "b"], None, [{"flag": 1, "a": 10, "b": 100}]))
     out.append(("via_helper", "via_helper", bench_columns(4), None, None))
+    out.append(("constant", "constant", bench_columns(4), None, None))
     out.append(("underscored", "underscored", ["_b", "_i", "x", "_s"], None, [{"_b": 1.0, "_i": 2.0, "x": 0.0, "_s": 3.0}]))
     return out
 
@@ -65,11 +69,8 @@ def table():
     lines = []
     for case, name, cols, columns, sample in cases():
         r = rs.read_set(getattr(udf_rows, name), cols, columns=columns, sample=sample)
-        lines.append(
-            "\t".join(
-                [case, "udf_rows:" + name, ",".join(cols), r.source, ",".join(r.names), ",".join(r.recorded), r.note]
-            )
-        )
+        read = "[" + ",".join(r.names) + "]" if r.present else "absent"
+        lines.append("\t".join([case, "udf_rows:" + name, ",".join(cols), r.source, read, ",".join(r.recorded), r.note]))
     return "\n".join(lines) + "\n"
 
 

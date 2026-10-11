@@ -8,8 +8,13 @@ What it proves, and the defect each part catches:
     set too small, which the runtime would refuse mid-run;
   - every use of the row the scan cannot read a name from (passing it on, a
     computed key, a method call, iteration in a generator, reassignment, a
-    lambda capturing it, a callable that is not a plain function) gives
-    every input column, with a note: a guessed read set too small;
+    lambda capturing it, a callable that is not a plain function) gives no
+    read set (ABSENT: the UDF reads every input column), with a note, never
+    a guessed list (a read set too small, or every column listed as if it
+    were bounded);
+  - a function that reads nothing, and columns=[], give an EMPTY read set
+    (present, no columns), distinct from ABSENT; a repeated declared name
+    is refused naming it; ABSENT runs no sample;
   - columns=[...] wins over the scan, and names the input lacks, repeated
     names and a function not of one row are refused by name;
   - the sample run is a cross-check: it records what the function read on
@@ -75,12 +80,14 @@ def static(f, cols):
     return r.names
 
 
-def every(f, cols, why):
+def absent(f, cols, why):
+    """The scan cannot bound f's reads: no read set (ABSENT, every input
+    column is read), never a list of every column."""
     r = rs.read_set(f, cols)
-    assert r.source == "every_column" == rs.SOURCE_EVERY_COLUMN, "{}: {}".format(f, r)
-    assert r.names == cols, r
+    assert r.source == "absent" == rs.SOURCE_ABSENT, "{}: {}".format(f, r)
+    assert r.names is None and not r.present, r
     assert why in r.note, "{}: note {!r} lacks {!r}".format(f, r.note, why)
-    assert r.note.endswith("; every input column is passed (add columns=[...] to narrow it)"), r.note
+    assert r.note.endswith("; no read set: the UDF reads every input column (add columns=[...] to bound it)"), r.note
 
 
 def has(f, opname, pred=lambda argval: True):
@@ -204,20 +211,20 @@ def test_shapes():
     has(s_load_load, "LOAD_FAST_LOAD_FAST", lambda a: a == ("y", "row"))
     assert static(s_load_load, COLS) == ["price", "qty"]
     has(g_unpack_row, "STORE_FAST_STORE_FAST", lambda a: "row" in a)
-    every(g_unpack_row, COLS, "the row parameter is reassigned;")
+    absent(g_unpack_row, COLS, "the row parameter is reassigned;")
     has(g_store_load_row, "STORE_FAST_LOAD_FAST", lambda a: a[0] == "row")
-    every(g_store_load_row, COLS, "the row parameter is reassigned;")
+    absent(g_store_load_row, COLS, "the row parameter is reassigned;")
     has(g_store_row, "STORE_FAST", lambda a: a == "row")
-    every(g_store_row, COLS, "the row parameter is reassigned or deleted")
+    absent(g_store_row, COLS, "the row parameter is reassigned or deleted")
     has(g_del, "DELETE_FAST", lambda a: a == "row")
-    every(g_del, COLS, "the row parameter is reassigned or deleted")
+    absent(g_del, COLS, "the row parameter is reassigned or deleted")
     # The row loaded where it may be unbound, or saved around a
     # comprehension, then used as a value: that use is the reason, not the
     # deletion or the store after it.
     has(g_check, "LOAD_FAST_CHECK", lambda a: a == "row")
-    every(g_check, COLS, "the row is used other than by a constant field name")
+    absent(g_check, COLS, "the row is used other than by a constant field name")
     has(g_shadow, "LOAD_FAST_AND_CLEAR", lambda a: a == "row")
-    every(g_shadow, COLS, "the row is used other than by a constant field name")
+    absent(g_shadow, COLS, "the row is used other than by a constant field name")
     # More than 128 names: LOAD_ATTR takes an EXTENDED_ARG prefix.
     names = ["f{}".format(k) for k in range(300)]
     ns = {}
@@ -227,18 +234,18 @@ def test_shapes():
 
 
 def test_undetermined():
-    every(udf_rows.via_helper, COLS, "other than by a constant field name")
-    every(udf_rows.by_name, COLS, "the row is used as a value (line")
-    every(udf_rows.summed, COLS, "captures the row")
-    every(g_method, COLS, "a method of the row is called: .get")
-    every(g_reassigned, COLS, "reassigned")
-    every(g_lambda, COLS, "captures the row")
-    every(g_returned, COLS, "other than by a constant field name")
-    every(len, COLS, "not a plain Python function")
-    every(Holder().m, COLS, "not a plain Python function")
-    every(lambda row: row[0], COLS, "other than by a constant field name")
-    every(lambda row: row[KEY], COLS, "other than by a constant field name")
-    every(lambda row: helper(row, "price"), COLS, "other than by a constant field name")
+    absent(udf_rows.via_helper, COLS, "other than by a constant field name")
+    absent(udf_rows.by_name, COLS, "the row is used as a value (line")
+    absent(udf_rows.summed, COLS, "captures the row")
+    absent(g_method, COLS, "a method of the row is called: .get")
+    absent(g_reassigned, COLS, "reassigned")
+    absent(g_lambda, COLS, "captures the row")
+    absent(g_returned, COLS, "other than by a constant field name")
+    absent(len, COLS, "not a plain Python function")
+    absent(Holder().m, COLS, "not a plain Python function")
+    absent(lambda row: row[0], COLS, "other than by a constant field name")
+    absent(lambda row: row[KEY], COLS, "other than by a constant field name")
+    absent(lambda row: helper(row, "price"), COLS, "other than by a constant field name")
 
 
 def g_kwonly(row, *, k=1):
@@ -313,11 +320,34 @@ def test_sample_cross_check():
     assert (reads, whole) == (["__x", "y__"], ""), (reads, whole)
 
 
+def test_presence():
+    # EMPTY: present with no columns, from the scan or from columns=[].
+    r = rs.read_set(lambda row: 1.0, COLS)
+    assert (r.names, r.present, r.source) == ([], True, "static"), r
+    r = rs.read_set(udf_rows.constant, COLS)
+    assert (r.names, r.present) == ([], True), r
+    r = rs.read_set(udf_rows.price_qty, COLS, columns=[])
+    assert (r.names, r.present, r.source) == ([], True, "columns"), r
+    # PRESENT: input order, whatever the declaration's order.
+    r = rs.read_set(udf_rows.price_qty, COLS, columns=["qty", "price"])
+    assert (r.names, r.present) == (["price", "qty"], True), r
+    # A repeated declared name is refused naming it.
+    msg = expect_error("UDF_ROW_READ_SET_INVALID", rs.read_set, udf_rows.price_qty, COLS, columns=["qty", "price", "qty"])
+    assert msg == "UDF_ROW_READ_SET_INVALID: columns=[...] names 'qty' twice", msg
+    # ABSENT runs no sample: there is no read set to check it against.
+    calls = []
+    def counted(row):
+        calls.append(1)
+        return helper(row, "price")
+    r = rs.read_set(counted, COLS, sample=[{"c0": 0.0, "price": 1.0, "c2": 0.0, "qty": 2.0}])
+    assert (r.names, r.recorded, calls) == (None, [], []), (r, calls)
+
+
 def test_any_name():
     assert static(udf_rows.underscored, ["_b", "_i", "x", "_s"]) == ["_b", "_i", "_s"]
     assert static(lambda row: row.keys + row._values, ["keys", "_values", "z"]) == ["keys", "_values"]
-    every(lambda row: row.__class__, COLS, "a dunder attribute of the row is read: .__class__ (line")
-    every(lambda row: row.price + row.__dict__, COLS, "a dunder attribute of the row is read: .__dict__")
+    absent(lambda row: row.__class__, COLS, "a dunder attribute of the row is read: .__class__ (line")
+    absent(lambda row: row.price + row.__dict__, COLS, "a dunder attribute of the row is read: .__dict__")
     names = ["_reads", "_read", "_values", "_whole", "_mark", "keys"]
     sample = [{n: float(k) for k, n in enumerate(names)}]
     reads, whole = rs.record(lambda row: [getattr(row, n) for n in names], sample)
@@ -333,4 +363,5 @@ test_refusals()
 test_columns_override()
 test_sample_cross_check()
 test_any_name()
+test_presence()
 print("test_readset: ok")

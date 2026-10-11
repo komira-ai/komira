@@ -8,7 +8,7 @@ change to the capture (komira_udf_readset.py) or to a row function
 (pyrt/udf_rows.py) that alters a read set, a source, a recording or a note
 while the Mojo tests keep running on the old table. Mutant planted: scan()
 dropping the subscript arm (`row["qty"]` no longer a field read): red here,
-price_qty_keys came out every_column.
+price_qty_keys came out with no read set (absent).
 """
 
 import os
@@ -32,5 +32,5 @@ if now != golden:
             len(g), len(n), diff[:1]
         )
     )
-assert len(golden.splitlines()) == 9, golden
+assert len(golden.splitlines()) == 10, golden
 print("test_read_sets_golden: ok")

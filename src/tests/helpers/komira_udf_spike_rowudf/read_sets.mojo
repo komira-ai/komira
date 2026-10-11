@@ -1,8 +1,9 @@
 # The producer's read sets (producer/capture_main.py's table, committed as
 # golden/read_sets.tsv and checked against the capture by the py_test
-# read_sets_golden_test) read back into UDF references: a ROW UdfSpec whose argument
-# struct is the read set, one named field per entry (design section 3.1:
-# for a ROW, arg_types is the read set). The tests and the bench take their
+# read_sets_golden_test) read back into UDF references: a ROW UdfSpec whose
+# argument struct is the read set, one named field per entry. A PRESENT
+# read set gives its columns (EMPTY: none); an ABSENT one gives every input
+# column, which is what the planner passes a UDF with no read set. The tests and the bench take their
 # read sets from here, so what the runtime is given is what the producer
 # determined.
 
@@ -17,13 +18,16 @@ comptime READ_SETS = "read_sets.tsv"
 @fieldwise_init
 struct ReadSetRow(Copyable, Movable):
     """One line of read_sets.tsv: a case's name, the function's entry, the input's
-    columns, where the read set came from (columns, static, every_column),
-    the read set, what the sample run read, and the producer's note."""
+    columns, where the read set came from (columns, static, absent), whether
+    a read set is present, the read set (every input column when absent:
+    the UDF reads them all), what the sample run read, and the producer's
+    note."""
 
     var name: String
     var entry: String
     var input: List[String]
     var source: String
+    var present: Bool
     var read_set: List[String]
     var recorded: List[String]
     var note: String
@@ -49,10 +53,20 @@ def load_read_sets(path: String = READ_SETS) raises -> List[ReadSetRow]:
         var f = line.split("\t")
         if len(f) != 7:
             raise Error("UDF_READ_SETS_MALFORMED: " + String(len(f)) + " fields in '" + String(line) + "'")
+        var input = _names(String(f[2]))
+        var read = String(f[4])
+        var present = read != "absent"
+        var names = input.copy()
+        if present:
+            if read.byte_length() < 2 or not read.startswith("[") or not read.endswith("]"):
+                raise Error(
+                    "UDF_READ_SETS_MALFORMED: read set '" + read + "' of " + String(f[0]) + " is neither absent nor [...]"
+                )
+            # The brackets are one byte each: a slice inside them is whole code points.
+            names = _names(String(read[byte = 1 : read.byte_length() - 1]))
         out.append(
             ReadSetRow(
-                String(f[0]), String(f[1]), _names(String(f[2])), String(f[3]), _names(String(f[4])),
-                _names(String(f[5])), String(f[6]),
+                String(f[0]), String(f[1]), input^, String(f[3]), present, names^, _names(String(f[5])), String(f[6]),
             )
         )
     return out^

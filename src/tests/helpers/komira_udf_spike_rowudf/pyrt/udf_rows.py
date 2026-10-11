@@ -55,6 +55,11 @@ def nullable_half(row) -> float | None:
     return None if row.x is None else row.x / 2
 
 
+def constant(row) -> float:
+    """Reads no field: its read set is EMPTY (present, no columns)."""
+    return 1.0
+
+
 def via_helper(row) -> float:
     """Passes the row to other code: the scan cannot see what it reads."""
     return _total(row)
