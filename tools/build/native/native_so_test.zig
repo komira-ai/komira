@@ -287,6 +287,24 @@ test "check 5: green at the floor; red above it, on GLIBC_PRIVATE, and on no gli
     try t.expect(!checks.versionAbove(&.{ 2, 2, 5 }, &.{ 2, 34 }));
     try t.expect(!checks.versionAbove(&.{ 2, 34 }, &.{ 2, 34, 0 }));
     try t.expect(checks.versionAbove(&.{ 2, 34, 1 }, &.{ 2, 34 }));
+    // Planted: a version above the floor needed from the dynamic loader, not libc.
+    red = checks.Red.init(A);
+    so = withSym(und("_dl_find_object", "GLIBC_2.35"));
+    so.verneed = &.{ .{ .file = "libc.so.6", .version = "GLIBC_2.14" }, .{ .file = "ld-linux-x86-64.so.2", .version = "GLIBC_2.35" } };
+    _ = try checks.check5(A, so, "2.34", &red);
+    try expectRed(red, "needs GLIBC_2.35 from ld-linux-x86-64.so.2, above the floor glibc 2.34; symbols (1): _dl_find_object");
+    // Planted: a version from libc that is not GLIBC_-prefixed.
+    red = checks.Red.init(A);
+    so = good();
+    so.verneed = &.{ .{ .file = "libc.so.6", .version = "GLIBC_2.14" }, .{ .file = "libc.so.6", .version = "OTHER_1.0" } };
+    _ = try checks.check5(A, so, "2.34", &red);
+    try expectRed(red, "needs OTHER_1.0 from libc.so.6, not a GLIBC_ release version");
+    // Regression: an above-floor version that no dynamic symbol carries is still red.
+    red = checks.Red.init(A);
+    so = good();
+    so.verneed = &.{ .{ .file = "libc.so.6", .version = "GLIBC_2.14" }, .{ .file = "libc.so.6", .version = "GLIBC_2.38" } };
+    _ = try checks.check5(A, so, "2.34", &red);
+    try expectRed(red, "needs GLIBC_2.38 from libc.so.6, above the floor glibc 2.34; no dynamic symbol carries it");
 }
 
 test "check 6: green on 0xa (symbolic and bind-now); red on 0x8 and on no DT_FLAGS" {

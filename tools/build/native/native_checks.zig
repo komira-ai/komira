@@ -353,7 +353,9 @@ pub fn check5(alloc: Alloc, so: Shared, floor: []const u8, red: *Red) ![]const u
             for (so.syms) |s| {
                 if (s.version) |sv| if (std.mem.eql(u8, sv, need.version)) try users.append(s.name);
             }
-            try red.names(try std.fmt.allocPrint(alloc, "needs {s} from {s}, above the floor glibc {s}; symbols", .{ need.version, need.file, floor }), try sorted(alloc, users.items));
+            if (users.items.len == 0) {
+                try red.add("needs {s} from {s}, above the floor glibc {s}; no dynamic symbol carries it", .{ need.version, need.file, floor });
+            } else try red.names(try std.fmt.allocPrint(alloc, "needs {s} from {s}, above the floor glibc {s}; symbols", .{ need.version, need.file, floor }), try sorted(alloc, users.items));
         }
     }
     if (seen == 0) try red.add("needs no GLIBC_ version at all (not linked against glibc?)", .{});
