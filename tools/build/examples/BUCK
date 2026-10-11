@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
 load("@komira//tools/build/mojo:doc.bzl", "mojo_doc_json")
+load("@komira//tools/build/mojo:run_check.bzl", "run_check_wired")
 load("//tools/build/package:defs.bzl", "bundle_tarball", "mojo_bundle", "oci_image")
 
 # A binary with no dependencies. `[run_check]` runs it remotely and compares
@@ -62,6 +63,17 @@ mojo_binary(
     srcs = ["hello_pkg_user.mojo"],
     deps = [":hellopkg"],
     expected_stdout = "hello from hellopkg\n",
+)
+
+# Each mojo_binary above with `expected_stdout` returns its run check as a
+# validation: a mojo_binary rule that stopped returning it would build them
+# green with no run check run, and fails this target's analysis instead.
+run_check_wired(
+    name = "run_check_wired",
+    binaries = [
+        ":hello",
+        ":hello_pkg_user",
+    ],
 )
 
 # A standalone test target: `buck2 test //tools/build/examples:test_hellopkg`.
