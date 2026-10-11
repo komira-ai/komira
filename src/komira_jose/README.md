@@ -72,8 +72,9 @@ trusts two issuers with different algorithms builds two verifiers.
   `{"iss","sub","aud","iat","exp","jti"}` with `typ` `JWT`, a lifetime of 1 to
   300 s and a `jti` of 128 random bits the caller cannot omit.
   `verify_assertion(token, verifier, policy)` is `verify_jwt` plus
-  `exp - iat` of at most 300 s (whatever the policy's max TTL, so a replay
-  cache holds a `jti` for at most 300 s plus the leeway) and a required
+  `exp - iat` of at most 300 s (whatever the policy's max TTL; a token
+  verifies from `iat - leeway` to `exp + leeway`, so a replay cache holds a
+  `jti` for at most 300 s plus twice the leeway) and a required
   non-empty `jti`; `verify_client_assertion` also requires `sub == iss`.
   Refusing a replayed `jti` is the caller's: it is the one that sees every
   assertion.

@@ -512,13 +512,62 @@ def test_rs256_modulus_counted_in_bits() raises:
     assert_equal(misses, "")
 
 
+def _jws_signer_constructors(text: String) -> List[String]:
+    """The signatures (from `def` to the first line ending in `:`, lines
+    stripped and joined by a space) of every `__init__` in `text`'s
+    `struct JwsSigner`, and of every method there returning `JwsSigner`,
+    plus `@fieldwise_init` wherever `text` has that decorator (it would add
+    a constructor taking the fields as given)."""
+    var out = List[String]()
+    if text.find("@fieldwise_init") >= 0:
+        out.append("@fieldwise_init")
+    var inside = False
+    var sig = String("")
+    var in_sig = False
+    for line in text.split("\n"):
+        var l = String(line)
+        if l.startswith("struct JwsSigner"):
+            inside = True
+            continue
+        if not inside:
+            continue
+        if l.byte_length() > 0 and not l.startswith(" ") and not l.startswith("#"):
+            break
+        var s = String(l.strip())
+        if not in_sig and s.startswith("def "):
+            sig = ""
+            in_sig = True
+        if in_sig:
+            sig += (" " if sig != "" else "") + s
+            if s.endswith(":"):
+                in_sig = False
+                if sig.startswith("def __init__") or sig.find("-> JwsSigner:") >= 0:
+                    out.append(sig)
+    return out^
+
+
 def test_every_constructor_derives_the_kid() raises:
     # Catches: a constructor that takes the algorithm without checking it,
     # or one whose kid is not its own key's thumbprint (the raw
     # constructor took a public key as given, so a Keyring could stage a
     # signer naming another key's kid). `JwsSigner(alg=, private_key=)`
     # gives each algorithm the same signer as its named constructor, and
-    # refuses every other algorithm name.
+    # refuses every other algorithm name. The staged signer.mojo has exactly
+    # these four constructors (no second `__init__`, no `@fieldwise_init`),
+    # so no other way to build a JwsSigner takes a public key as given.
+    var ctors = _jws_signer_constructors(
+        Path("src/komira_jose/signer.mojo").read_text()
+    )
+    var joined = String("")
+    for c in ctors:
+        joined += c + "\n"
+    assert_equal(
+        joined,
+        "def __init__(out self, *, alg: String, var private_key: SecretValue) raises:\n"
+        + "def es256(var private_key: SecretValue) raises -> JwsSigner:\n"
+        + "def eddsa(var seed: SecretValue) raises -> JwsSigner:\n"
+        + "def rs256(var pkcs8_der: SecretValue) raises -> JwsSigner:\n",
+    )
     var ed = JwsSigner(alg="EdDSA", private_key=_secret(_b64d(SEED)))
     assert_equal(ed.kid(), ED_THUMBPRINT)
     assert_equal(ed.alg(), "EdDSA")

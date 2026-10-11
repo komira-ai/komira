@@ -72,7 +72,11 @@ mojo_library(
             "src/komira_jose/__init__.mojo": "__init__.mojo",
             "src/komira_jose/assertion.mojo": "assertion.mojo",
         },
-        "tests/test_signer.mojo": _RSA_KEY,
+        # The constructor test reads signer.mojo, staged at its repository
+        # path.
+        "tests/test_signer.mojo": _RSA_KEY | {
+            "src/komira_jose/signer.mojo": "signer.mojo",
+        },
         # The vocabulary test reads the library's own sources, staged at their
         # repository paths.
         "tests/test_no_product_vocabulary.mojo": glob(

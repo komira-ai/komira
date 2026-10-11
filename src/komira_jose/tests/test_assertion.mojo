@@ -360,7 +360,8 @@ def test_verify_bounds_the_lifetime() raises:
     # the policy's max TTL allows it (a caller's replay cache would then
     # hold its jti for up to a day), and the bound moved by one. Policies
     # at 301 s, an hour and a day; exp - iat of 300 passes and 301 is
-    # refused under each, by both verify functions.
+    # refused under each, by both verify functions, with iat at now and
+    # with iat 100 s and 250 s before now (catches a bound on exp - now).
     comptime LONG = "JoseError: the assertion lives longer than 300 seconds"
     var s = _signer("EdDSA")
     var v = _verifier(s)
@@ -383,6 +384,33 @@ def test_verify_bounds_the_lifetime() raises:
                 got2 = String(e)
             if got2 != want:
                 misses += String(max_ttl) + "/" + String(life) + " -> " + got2 + "; "
+        # iat before now: the bound is exp - iat, not exp - now. With iat =
+        # NOW - 100 a lifetime of 301 ends at NOW + 201, which a bound on
+        # exp - now (201) would accept.
+        for back in [Int64(100), Int64(250)]:
+            var iat = NOW - back
+            for life in [Int64(300), Int64(301)]:
+                var t = _signed(
+                    s,
+                    String('{"iss":"client-1","sub":"client-1","aud":"')
+                    + ENDPOINT
+                    + '","iat":'
+                    + String(iat)
+                    + ',"exp":'
+                    + String(iat + life)
+                    + ',"jti":"j"}',
+                )
+                var want = String("") if life <= 300 else String(LONG)
+                var got = _client_err(t, v, p)
+                if got != want:
+                    misses += String(max_ttl) + "/-" + String(back) + "/" + String(life) + " client -> " + got + "; "
+                var got2 = String("")
+                try:
+                    _ = verify_assertion(t, v, p)
+                except e:
+                    got2 = String(e)
+                if got2 != want:
+                    misses += String(max_ttl) + "/-" + String(back) + "/" + String(life) + " -> " + got2 + "; "
     assert_equal(misses, "")
     # The bound is the literal 300 the refusal text names.
     assert_equal(JOSE_ASSERTION_MAX_TTL_S, Int64(300))
@@ -415,14 +443,61 @@ def _joined(names: List[String]) -> String:
     return out
 
 
+def _public_signatures_with_jti(text: String) -> List[String]:
+    """`Struct.name` (or `name` at column 0) of every `def` in `text`, at
+    any indentation, whose name does not start with `_` or is a dunder, and
+    whose signature (from `def` to the first line ending in `:`) has a
+    parameter named `jti`."""
+    var out = List[String]()
+    var owner = String("")
+    var name = String("")
+    var sig = String("")
+    var in_sig = False
+    for line in text.split("\n"):
+        var l = String(line)
+        if l.startswith("struct ") or l.startswith("trait "):
+            var b = l.as_bytes()
+            var start = 6 if l.startswith("trait ") else 7
+            var end = start
+            while end < len(b) and b[end] != UInt8(0x28) and b[end] != UInt8(0x5B) and b[end] != UInt8(0x3A):  # ( [ :
+                end += 1
+            owner = String(l[byte = start : end])
+            continue
+        var s = String(l.strip())
+        if not in_sig and s.startswith("def "):
+            if l.startswith("def "):
+                owner = ""
+            var b = s.as_bytes()
+            var end = 4
+            while end < len(b) and b[end] != UInt8(0x28) and b[end] != UInt8(0x5B):  # ( [
+                end += 1
+            name = String(s[byte = 4 : end])
+            sig = ""
+            in_sig = True
+        if in_sig:
+            sig += s + " "
+            if s.endswith(":"):
+                in_sig = False
+                var public = not name.startswith("_") or (
+                    name.startswith("__") and name.endswith("__")
+                )
+                if public and (sig.find(" jti:") >= 0 or sig.find("(jti:") >= 0 or sig.find(" jti :") >= 0):
+                    out.append(owner + "." + name if owner != "" else name)
+        elif l.byte_length() > 0 and not l.startswith(" ") and not l.startswith("@"):
+            owner = ""
+    return out^
+
+
 def test_no_public_function_takes_a_jti() raises:
     # Catches: a public function that writes assertion claims with a jti
     # the caller chooses (assertion_claims was one): the file header and
     # README say a caller cannot choose or omit the jti. The public defs of
-    # assertion.mojo are exactly the documented five, none takes a `jti`
-    # parameter, and the package re-exports nothing with `claims` in its
-    # name from assertion.mojo. Reads the library sources staged by the
-    # BUCK file.
+    # assertion.mojo are exactly the documented five, the package
+    # re-exports nothing with `claims` in its name from assertion.mojo, and
+    # no public function or method (a struct method too, a public static
+    # helper on VerifiedAssertion for one) has a `jti` parameter except
+    # VerifiedAssertion's constructor, which writes no claims.
+    # Reads the library sources staged by the BUCK file.
     var src = Path("src/komira_jose/assertion.mojo").read_text()
     assert_equal(
         _joined(_top_level_public_defs(src)),
@@ -436,19 +511,12 @@ def test_no_public_function_takes_a_jti() raises:
     var close = rest.find(")")
     var block = String(rest[byte = 0 : close])
     assert_equal(block.find("claims"), -1, "__init__ re-exports a claims writer")
-    # No line of a public def (its parameters or body) declares a `jti`
-    # parameter.
-    var in_public = False
-    var bad = String("")
-    for line in src.split("\n"):
-        var l = String(line)
-        if l.startswith("def "):
-            in_public = not l.startswith("def _")
-        elif not l.startswith(" ") and l.byte_length() > 0:
-            in_public = False
-        if in_public and l.strip().startswith("jti:"):
-            bad += l + "; "
-    assert_equal(bad, "")
+    # No public function or method (at any indentation; a dunder counts as
+    # public) has a `jti` parameter, except VerifiedAssertion's constructor,
+    # which builds a verify result and writes no claims.
+    assert_equal(
+        _joined(_public_signatures_with_jti(src)), "VerifiedAssertion.__init__"
+    )
 
 
 def main() raises:

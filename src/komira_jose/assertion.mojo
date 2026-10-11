@@ -22,8 +22,9 @@
 # Verify (`verify_assertion`): `verify_jwt` with the policy (its one issuer,
 # audience, `typ`, time, leeway and max TTL; RFC 7523 section 3 items 1 to
 # 5), then `exp - iat` must be at most `JOSE_ASSERTION_MAX_TTL_S` (300)
-# whatever the policy's max TTL (so a caller's replay cache holds a `jti`
-# for at most 300 seconds plus the leeway; RFC 7523 section 3 item 4), and
+# whatever the policy's max TTL (a token verifies from `iat - leeway` to
+# `exp + leeway`, so a caller's replay cache holds a `jti` for at most 300
+# seconds plus twice the leeway; RFC 7523 section 3 item 4), and
 # `jti` must be a non-empty string (RFC 7523 makes `jti` optional;
 # this package requires it, so a replay check always has a key).
 # `verify_client_assertion` also requires `sub` to equal `iss`, byte for
