@@ -62,6 +62,7 @@ from komira_plan_ir.logical_plan import (
     AsofTolerance,
     LogicalPlan,
     ASOF_BACKWARD,
+    EXCHANGE_KIND_GATHER,
     JOIN_INNER,
     PLAN_SCAN,
     PLAN_TAG_COUNT,
@@ -404,6 +405,10 @@ def test_single_child_nodes_without_expressions() raises:
     _gate_plan(ptopn, 1, _hs(6))
     var cast = LogicalPlan.cast_to_varchar(_bscan(7))
     _gate_plan(cast, 1, _hs(7))
+    # The exchange arm descends to its child (a pass-through `return 0` would
+    # leave the binding-backed leaf below it unchecked).
+    var ex = LogicalPlan.exchange(_bscan(8), EXCHANGE_KIND_GATHER)
+    _gate_plan(ex, 1, _hs(8))
 
 
 def test_join_walks_both_sides_and_the_residual() raises:
