@@ -11,7 +11,8 @@
 //! paths, and so cache hits, the same across worktrees.
 //!
 //! The steps are `add`, `prepare`, `build` and `remove`; `attempt` runs them
-//! once, and flake.zig runs many builds in one prepared worktree.
+//! once, and flake.zig runs many builds (and `bxl`, its check) in one
+//! prepared worktree.
 const std = @import("std");
 const classify = @import("classify.zig");
 const Git = @import("git.zig").Git;
@@ -229,6 +230,29 @@ pub fn build(cfg: Config, wt: []const u8, targets: []const []const u8, extra: []
     if (b.timed_out) t = try std.fmt.allocPrint(a, "killed at --timeout-s {d}\n{s}", .{ cfg.timeout_s, t });
     if (c.outcome == .infra and c.reason.len > 0) t = try std.fmt.allocPrint(a, "{s}\n{s}", .{ c.reason, t });
     return .{ .classified = c, .exit = b.exit, .seconds = @intCast(@divTrunc(std.time.milliTimestamp() - started, 1000)), .tail = t };
+}
+
+/// `bxl <script> <--buck2-arg>... <extra>` in a prepared worktree, then
+/// `kill`; its output goes to `<work-dir>/logs/<tag>.buck2.log`. A buck2 that
+/// cannot be started is an Exec with exit null and the reason as stderr.
+pub fn bxl(cfg: Config, wt: []const u8, script: []const u8, extra: []const []const u8, tag: []const u8) !Exec {
+    const a = cfg.a;
+    const logs = try std.fmt.allocPrint(a, "{s}/logs", .{cfg.work_dir});
+    try std.fs.cwd().makePath(logs);
+    const log_path = try std.fmt.allocPrint(a, "{s}/{s}.buck2.log", .{ logs, tag });
+    const buck2 = try buck2For(a, cfg.buck2, wt);
+    var argv = std.ArrayList([]const u8).init(a);
+    try argv.appendSlice(&.{ buck2, "bxl" });
+    try argv.appendSlice(cfg.buck2_args);
+    try argv.appendSlice(extra);
+    try argv.append(script);
+    const b = exec(a, argv.items, wt, cfg.env, cfg.timeout_s) catch |e| {
+        _ = exec(a, &.{ buck2, "kill" }, wt, cfg.env, 120) catch {};
+        return .{ .exit = null, .timed_out = false, .stdout = "", .stderr = try std.fmt.allocPrint(a, "cannot run {s}: {s}", .{ buck2, @errorName(e) }) };
+    };
+    _ = exec(a, &.{ buck2, "kill" }, wt, cfg.env, 120) catch {};
+    writeLog(log_path, argv.items, b) catch {};
+    return b;
 }
 
 fn infraAttempt(exit: ?u8, msg: []const u8) Attempt {

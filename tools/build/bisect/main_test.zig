@@ -51,17 +51,17 @@ test "refusals: each is a usage error before anything runs" {
 test "bisect flake: its flags, and K and the base it measures with" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
-    const r = try main.parseArgs(arena.allocator(), &.{ "flake", "--rev", "HEAD~2", "--runs", "15", "--work-dir", "w", "--rerun-base", "0", "--", "//t:a", "komira//t:b" });
+    const r = try main.parseArgs(arena.allocator(), &.{ "flake", "--rev", "HEAD~2", "--runs", "15", "--work-dir", "w", "--rerun-base", "0", "--", "root//t:a", "komira//t:b" });
     try t.expectEqual(main.Mode.flake, r.mode);
     try t.expectEqualStrings("HEAD~2", r.rev);
     try t.expectEqual(@as(u32, 15), r.runs);
     try t.expectEqual(@as(?u64, 0), r.rerun_base);
     try t.expectEqual(@as(usize, 2), r.targets.len);
     // No base given: the tool picks one at start (main.run), not the parser.
-    const d = try main.parseArgs(arena.allocator(), &.{ "flake", "--rev", "r", "--runs", "1", "--work-dir", "w", "--", "//t:a" });
+    const d = try main.parseArgs(arena.allocator(), &.{ "flake", "--rev", "r", "--runs", "1", "--work-dir", "w", "--", "root//t:a" });
     try t.expectEqual(@as(?u64, null), d.rerun_base);
     // bisect measures a flake 5 times unless told otherwise.
-    const b = try main.parseArgs(arena.allocator(), &.{ "--good", "g", "--bad", "b", "--work-dir", "w", "--", "//t:a" });
+    const b = try main.parseArgs(arena.allocator(), &.{ "--good", "g", "--bad", "b", "--work-dir", "w", "--", "root//t:a" });
     try t.expectEqual(@as(u32, 5), b.flake_runs);
 }
 
@@ -83,6 +83,19 @@ test "bisect flake refusals: no rev, no or zero runs, a pattern, the other mode'
     try t.expectError(error.UnknownArgument, main.parseArgs(a, &.{ "flake", "--flake-runs", "3" }));
     try t.expectError(error.UnknownArgument, main.parseArgs(a, &.{ "--runs", "3" }));
     try t.expectError(error.UnknownArgument, main.parseArgs(a, &.{ "--rev", "r" }));
-    try t.expectError(error.BadRerunBase, main.parseArgs(a, &.{ "flake", "--rev", "r", "--runs", "5", "--work-dir", "w", "--rerun-base", "18446744073709551614", "--", "//t:a" }));
-    try t.expectError(error.BadRerunBase, main.parseArgs(a, &.{ "flake", "--rev", "r", "--runs", "5", "--work-dir", "w", "--rerun-base", "-1", "--", "//t:a" }));
+    try t.expectError(error.BadRerunBase, main.parseArgs(a, &.{ "flake", "--rev", "r", "--runs", "5", "--work-dir", "w", "--rerun-base", "18446744073709551614", "--", "root//t:a" }));
+    try t.expectError(error.BadRerunBase, main.parseArgs(a, &.{ "flake", "--rev", "r", "--runs", "5", "--work-dir", "w", "--rerun-base", "-1", "--", "root//t:a" }));
+}
+
+test "a label without a cell is a usage error wherever a rerun names it" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // The rules refuse `//p:n` in a rerun value: every run would fail
+    // analysis, and count as a failure.
+    try t.expectError(error.TargetWithoutCell, main.parseArgs(a, &.{ "flake", "--rev", "r", "--runs", "5", "--work-dir", "w", "--", "//t:a" }));
+    try t.expectError(error.TargetWithoutCell, main.parseArgs(a, &.{ "flake", "--rev", "r", "--runs", "5", "--work-dir", "w", "--", "komira//t:b", "//t:a" }));
+    // bisect measures at bad unless --flake-runs is 0.
+    try t.expectError(error.TargetWithoutCell, main.parseArgs(a, &.{ "--good", "g", "--bad", "b", "--work-dir", "w", "--", "//t:a" }));
+    _ = try main.parseArgs(a, &.{ "--good", "g", "--bad", "b", "--work-dir", "w", "--flake-runs", "0", "--", "//t:a" });
 }

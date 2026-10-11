@@ -9,7 +9,7 @@ the targets that failed: a CI job, a person, or a service.
 ```sh
 ./buck2 run //tools/build/bisect:bisect -- \
     --good <rev> --bad <rev> --work-dir <dir outside any buck2 project> \
-    --repo "$PWD" --buck2 ./buck2 --copy .buckconfig.local -- //:docs
+    --repo "$PWD" --buck2 ./buck2 --copy .buckconfig.local -- komira//:docs
 ```
 
 ## What it does
@@ -20,6 +20,11 @@ the targets that failed: a CI job, a person, or a service.
    - good and bad are the same commit;
    - good is not an ancestor of bad;
    - no target is given;
+   - a target has no cell (`//p:n`, not `komira//p:n`) while a measurement
+     is on (`bisect flake`, or `--flake-runs` above 0). The rerun flag names
+     a target with its cell and the rules refuse one without, so every run
+     would fail analysis and read as a 100% flake. The message names the
+     target and says to prefix its cell;
    - a `--copy` file is missing;
    - `--work-dir` is not empty;
    - `--work-dir` lies inside a buck2 project, meaning it or a directory above
@@ -100,11 +105,21 @@ bisect runs it after a `flake` verdict, and `bisect flake` runs it alone:
 ```sh
 ./buck2 run //tools/build/bisect:bisect -- flake --rev <rev> --runs 20 \
     --work-dir <dir outside any buck2 project> --repo "$PWD" --buck2 ./buck2 \
-    --copy .buckconfig.local -- //src/x:x
+    --copy .buckconfig.local -- komira//src/x:x
 ```
 
 - One worktree is made for the measurement (as for a probe) and removed
   after it.
+- Before its runs, each target is checked:
+  `buck2 bxl <--buck2-arg>... -c komira.rerun=<target>#<base+1> komira//tools/build/rerun/check.bxl:check`
+  in the worktree, then `kill` (`tools/build/rerun/README.md`).
+  Exit 0: the target is measured. Exit 3 (buck2's user error: the label
+  names nothing, or its rule runs no test action under the flag, or the
+  commit has no `check.bxl`): the target is `not_measurable`, is never
+  built, and its `check_excerpt` is the end of the check's stderr. Its runs
+  would all be cache hits, so "never failed" would mean nothing. Any other
+  exit is tried again once; if it stays, the target is never built and is
+  listed with one `infra` run, run 0.
 - The targets are measured one at a time. Run i of a target is one build
   of that target alone with `-c komira.rerun=<target>#<n>`, n = base + i.
   The flag gives that target's test actions an environment variable
@@ -115,20 +130,19 @@ bisect runs it after a `flake` verdict, and `bisect flake` runs it alone:
 - The base is `--rerun-base`, or the time in milliseconds when bisect
   started, so a second measurement does not reuse the n of the first. The
   verdict states it; `--rerun-base 0` gives the n 1..K.
-- A target is a single label. A pattern (`//p/...`, `//p:`) is a usage
-  error, because a rerun names one target and a pattern's runs would all be
-  cache hits.
+- A target is a single label with its cell. A pattern (`//p/...`, `//p:`)
+  is a usage error, because a rerun names one target and a pattern's runs
+  would all be cache hits; so is a label without a cell (above).
 - A run that ends INFRA is tried again once with the same n. If it stays
   INFRA it is listed in `infra` and counted neither as a run nor as a
   failure.
 - Failing runs are grouped by their first failing line: the first line of
-  the excerpt that says assert, expect, panic, fail or error (in any case),
-  else its first line that is not blank. Each group keeps the excerpt of
-  its first run.
-
-The flag only has an effect once the build rules read `komira.rerun`.
-Before that, every run after the first is a cache hit of the first run,
-and the measurement shows 0 or K failures.
+  the excerpt that marks a failure, meaning it holds `FAIL` (so also
+  `BUILD FAILED`) or `Action failed` as written, or `panic` or `error:` in
+  any case, and does not end `OK`. A test runner prints each passing test's
+  name with `OK` after it, and a name may hold any of those words. With no
+  such line, it is the first line that is neither blank nor ends `OK`.
+  Each group keeps the excerpt of its first run.
 
 ## Command line
 
@@ -149,9 +163,9 @@ bisect flake --rev <rev> --runs <k> --work-dir <dir> [the same flags, but
 | `--buck2` | `buck2` | absolute, a bare name looked up on PATH, or relative to each worktree |
 | `--git` | `git` | the git to run |
 | `--copy` | | a file, relative to the repository, copied into each worktree, for example a gitignored `.buckconfig.local`. It is never printed |
-| `--buck2-arg` | | passed to each build, before the targets |
+| `--buck2-arg` | | passed to each build, before the targets, and to each `check.bxl` run |
 | `--timeout-s` | 3600 | each build is killed after this many seconds, which makes the attempt INFRA |
-| `--flake-runs` | 5 | bisect: K, the runs per target at bad after a `flake` verdict. 0 measures nothing and allows patterns |
+| `--flake-runs` | 5 | bisect: K, the runs per target at bad after a `flake` verdict. 0 measures nothing and allows patterns and labels without a cell |
 | `--runs` | | `bisect flake`: K, required, at least 1 |
 | `--rev` | | `bisect flake`: the commit measured |
 | `--rerun-base` | the time in ms | n of run i is base + i |
@@ -161,7 +175,7 @@ Configuration is flags only. bisect reads no environment variable of its own.
 ## The verdict
 
 ```json
-{"verdict":"culprit","good":"<sha>","bad":"<sha>","targets":["//a:b"],
+{"verdict":"culprit","good":"<sha>","bad":"<sha>","targets":["komira//a:b"],
  "first_bad":{"commit":"<sha>","subject":"Merge pull request #N from ...","pr":N},
  "last_good":"<sha>",
  "probes":[{"commit":"<sha>","role":"recheck","outcome":"FAIL","attempts":1,
@@ -187,7 +201,8 @@ Configuration is flags only. bisect reads no environment variable of its own.
 - `infra` lists the commits that stayed INFRA after the retry, each with the
   reason and the end of buck2's stderr.
 - `flake_runs` is the measurement at bad after a `flake` verdict (below), and
-  null for any other verdict or with `--flake-runs 0`.
+  null for any other verdict or with `--flake-runs 0`. The exit stays 1
+  whatever it found; a target in it may be `not_measurable`.
 
 | exit | meaning |
 |---|---|
@@ -203,7 +218,8 @@ Configuration is flags only. bisect reads no environment variable of its own.
 ```json
 {"mode":"flake","verdict":"flake",
  "measurement":{"rev":"<sha>","runs_requested":15,"rerun_base":0,
-  "targets":[{"target":"//a:b","runs":15,"failures":3,"failure_rate":0.2,
+  "targets":[{"target":"komira//a:b","check":"measurable","check_excerpt":null,
+    "runs":15,"failures":3,"failure_rate":0.2,
     "attempts":15,"failing_runs":[3,8,13],
     "excerpts":[{"first_failing_line":"...","runs":[3,8,13],"excerpt":"..."}],
     "infra":[{"run":4,"buck2_exit":2,"excerpt":"..."}]}]}}
@@ -213,15 +229,21 @@ Configuration is flags only. bisect reads no environment variable of its own.
   `failures / runs` (0 when `runs` is 0); `attempts` counts every build,
   retries included. A rate of 1 means the target failed every counted run.
 - `failing_runs` and the `runs` of each excerpt group are the n of the runs.
+- `check` is `measurable`, `not_measurable` or `infra` (what `check.bxl`
+  said, above); `check_excerpt` is null for `measurable`. `attempts` counts
+  builds only, not checks.
 
 | exit | `bisect flake` verdict |
 |---|---|
 | 0 | `never_failed`: every target was counted in all K runs and never failed |
 | 1 | `flake`: some target failed in at least one counted run |
 | 2 | usage error |
-| 3 | `inconclusive`: no target failed, but some run stayed INFRA |
+| 3 | `inconclusive`: no target failed, and none is `not_measurable`, but some run (or some target's check) stayed INFRA |
 | 4 | a git or worktree command failed |
 | 5 | tool error, as above |
+| 6 | `not_measurable`: no target failed, and `check.bxl` refused some target |
+
+`flake` wins over `not_measurable`, which wins over `inconclusive`.
 
 ## Limits
 
@@ -256,13 +278,17 @@ passes.
 - `:report_unit` runs [`report_test.zig`](report_test.zig): the JSON read back
   field by field, and the pull request number of a merge subject.
 - `:flake_unit` runs [`flake_test.zig`](flake_test.zig): the rerun flag's
-  value, label versus pattern, the first failing line (the assertion, not a
-  first line naming the run), the grouping of failing runs, the rate, the
-  verdict (any failure is `flake`; a run that stayed INFRA makes "never
-  failed" `inconclusive`), and both verdicts' JSON read back.
+  value, label versus pattern, cell or none, the first failing line (the
+  `FAIL`, `panic`, `error:` or `Action failed` line, never a first line
+  naming the run nor a passing test's line ending `OK`), the grouping of
+  failing runs (two failures behind one such `OK` line are two groups), the
+  check's exit codes, the rate, the verdict (any failure is `flake`; a
+  refused target makes "never failed" `not_measurable`; a run that stayed
+  INFRA makes it `inconclusive`), and both verdicts' JSON read back.
 - `:main_unit` runs [`main_test.zig`](main_test.zig): the command line, both
-  modes, and their refusals (no `--rev`, `--runs` 0, a pattern, the other
-  mode's flags, a `--rerun-base` that would overflow).
+  modes, and their refusals (no `--rev`, `--runs` 0, a pattern, a label
+  without a cell, the other mode's flags, a `--rerun-base` that would
+  overflow).
 
 **Scenarios.** Each scenario is one `bisect_scenario` target
 ([`defs.bzl`](defs.bzl)). [`testing/scenario.zig`](testing/scenario.zig) runs
@@ -280,10 +306,16 @@ what to do there:
 - `infra-always`: exit 2 every time;
 - `flaky <period> <phase> <targets>`: a listed target fails when the
   `komira.rerun` flag names it with an n where n % period = phase. Without
-  the flag n is 0. Its stderr names the run on the first line and then
-  always has the same assertion line;
+  the flag n is 0. Its stderr names the run on the first line, then has a
+  passing test's line ending `OK` that says `error:`, then always the same
+  `FAIL` line;
 - `infra-run <n>`, `infra-run-always <n>`: exit 2 for the build with
-  rerun n, the first time or every time.
+  rerun n, the first time or every time;
+- `no-rerun <targets>`: `check.bxl` (its stand-in, `bxl`) exits 3 for
+  these. It also exits 3 for a label without a cell;
+- `check-infra`: `check.bxl` exits 2.
+
+Targets compare without their cells.
 
 The stand-in logs every call in the repository's git directory, with the
 rerun value and the targets of each build.
@@ -293,10 +325,12 @@ After every scenario, these must hold:
 - `for-each-ref`, `HEAD` and `status --porcelain --ignored` are unchanged;
 - no `probe-*` is left in the work dir;
 - every probed commit is a first-parent commit, never a side-branch one;
-- every build is followed by a `kill` in the same worktree;
+- every build and every `check.bxl` run is followed by a `kill` in the same
+  worktree;
 - the probes' attempts add up to the builds without a rerun flag that the
   stand-in saw;
-- in a scenario with no measurement, no build had a rerun flag;
+- in a scenario with no measurement, no build had a rerun flag and
+  `check.bxl` never ran;
 - no commit is probed twice.
 
 | scenario | what it proves |
@@ -304,18 +338,23 @@ After every scenario, these must hold:
 | `culprit_middle` | 9 candidates, the culprit at c5: `first_bad` = c5 with its subject, `pr` = 105, `last_good` = c4, at most 1 + ⌈log₂ 9⌉ probes, the excerpt is c5's failing stderr, exit 0 |
 | `culprit_first` | the culprit is c0: `last_good` is good |
 | `culprit_last` | the culprit is bad itself |
-| `two_culprits` | c3 breaks `//t:a`, c6 also breaks `//t:b`: `first_bad` = c3, and `failures` lists `//t:a` alone |
+| `two_culprits` | c3 breaks `root//t:a`, c6 also breaks `root//t:b`: `first_bad` = c3, and `failures` lists `//t:a` alone |
 | `flake` | bad (`flaky 5 3`) passes the recheck: one probe, verdict `flake`, exit 1, and `flake_runs` measured 5 runs at bad, 1 failure (any 5 consecutive n hold one n = 3 mod 5, whatever the base) |
 | `infra_retried` | the first search probe (c3) is INFRA once: `attempts` = 2, PASS, and the culprit c5 is still found |
 | `infra_boundary` | the culprit c5 is always INFRA: it is reported in `infra`, never as FAIL; verdict `inconclusive`, candidates c5 and c6, exit 3 |
-| `good_not_ancestor` | good is on an unmerged branch: exit 2, buck2 never ran, no worktree made |
+| `good_not_ancestor` | good is on an unmerged branch: exit 2, buck2 never ran, no worktree made, stderr says "not an ancestor" |
 | `single_commit` | good is the parent of bad: one probe, `first_bad` = bad |
 | `stdout_unwritable` | bisect's stdout is a file opened read-only: the search finds the culprit c4, writing the verdict fails, and bisect exits 5 (not 1, the flake code) with `bisect: tool error: NotOpenForWriting` on stderr |
-| `flake_rate` | `bisect flake --runs 15 --rerun-base 0` of `//t:a` (`flaky 5 3`) and `//t:b`: `//t:a` 3 of 15, rate 0.2, `failing_runs` 3, 8, 13 in one excerpt group under `assertion failed: ...` although each run's first line differs; `//t:b` 0 of 15; exit 1 |
+| `flake_rate` | `bisect flake --runs 15 --rerun-base 0` of `root//t:a` (`flaky 5 3`) and `root//t:b`: `root//t:a` 3 of 15, rate 0.2, `failing_runs` 3, 8, 13 in one excerpt group under its `FAIL` line, although each run's first line differs and an `OK` line saying `error:` comes first; `root//t:b` 0 of 15; exit 1 |
 | `flake_never` | a target that never fails: 0 of 5, verdict `never_failed`, exit 0 |
 | `flake_infra` | run 4 is INFRA once (retried and counted), run 8, a failing run, is always INFRA: 9 runs, 1 failure (run 3), `infra` lists run 8, 12 attempts; exit 1 |
 | `flake_fresh_base` | `bisect flake` twice with the tool's own base: 1 failure in 5 each time, and no rerun value of the first recurs in the second |
+| `flake_no_cell` | `bisect flake -- root//t:b //t:a`: exit 2, buck2 never ran, stderr says "target //t:a has no cell" |
+| `flake_not_measurable` | `check.bxl` refuses `root//t:a`: it is never built, `check` `not_measurable` with an excerpt; `root//t:b` 0 of 3; verdict `not_measurable` (not `never_failed`), exit 6 |
+| `flake_check_infra` | `check.bxl` exits 2 twice: the target is never built, `check` `infra`, `infra` run 0; verdict `inconclusive`, exit 3 |
 
 In each measuring scenario the stand-in must have seen, for every target,
-builds of that target alone whose flag names it, as many as its
-`attempts`, with exactly K distinct n, all in base+1..base+K.
+its `check.bxl` run (two when it stayed INFRA) with the value of run 1
+before any of its builds, then builds of that target alone whose flag names
+it, as many as its `attempts`, with exactly K distinct n (0 for a target
+never built), all in base+1..base+K.

@@ -31,6 +31,9 @@ pub const EXIT_GIT = 4;
 pub const EXIT_TOOL = 5;
 /// `bisect flake`: no target failed in any of its K runs.
 pub const EXIT_NEVER_FAILED = 0;
+/// `bisect flake`: no target failed, and some target has no test action the
+/// rerun flag runs again (flake.zig, CHECK_BXL).
+pub const EXIT_NOT_MEASURABLE = 6;
 
 const USAGE =
     \\usage: bisect --good <rev> --bad <rev> --work-dir <dir> [--repo <dir>]
@@ -72,7 +75,7 @@ pub const Args = struct {
     targets: []const []const u8 = &.{},
 };
 
-pub const ArgError = error{ MissingValue, UnknownArgument, BadVerb, BadTimeout, MissingGood, MissingBad, MissingWorkDir, NoTargets, BadCopy, MissingRev, BadRuns, BadRerunBase, PatternTarget };
+pub const ArgError = error{ MissingValue, UnknownArgument, BadVerb, BadTimeout, MissingGood, MissingBad, MissingWorkDir, NoTargets, BadCopy, MissingRev, BadRuns, BadRerunBase, PatternTarget, TargetWithoutCell };
 
 pub fn parseArgs(a: std.mem.Allocator, argv_in: []const []const u8) !Args {
     var r = Args{};
@@ -146,6 +149,9 @@ pub fn parseArgs(a: std.mem.Allocator, argv_in: []const []const u8) !Args {
     // every run would replay the cache.
     if (r.mode == .flake or r.flake_runs > 0) {
         for (r.targets) |t| if (!flake.isLabel(t)) return error.PatternTarget;
+        // The rules refuse a rerun value without a cell: every run would
+        // fail analysis and count as a failure.
+        if (flake.firstWithoutCell(r.targets) != null) return error.TargetWithoutCell;
     }
     if (r.rerun_base) |b| {
         const k: u64 = if (r.mode == .flake) r.runs else r.flake_runs;
@@ -238,6 +244,17 @@ fn run() !void {
     const a = arena.allocator();
     const argv = try std.process.argsAlloc(a);
     const args = parseArgs(a, argv[1..]) catch |e| {
+        if (e == error.TargetWithoutCell) {
+            var after: []const []const u8 = &.{};
+            for (argv, 0..) |x, k| {
+                if (std.mem.eql(u8, x, "--")) {
+                    after = argv[k + 1 ..];
+                    break;
+                }
+            }
+            const t = flake.firstWithoutCell(after) orelse "";
+            fail(EXIT_USAGE, "target {s} has no cell: a rerun names a target with its cell, so prefix it with its cell, as in komira{s} (or pass --flake-runs 0 to bisect without measuring)", .{ t, t });
+        }
         std.io.getStdErr().writer().print("bisect: {s}\n{s}", .{ @errorName(e), USAGE }) catch {};
         std.process.exit(EXIT_USAGE);
     };
@@ -322,6 +339,7 @@ fn run() !void {
             .flake => EXIT_FLAKE,
             .never_failed => EXIT_NEVER_FAILED,
             .inconclusive => EXIT_INCONCLUSIVE,
+            .not_measurable => EXIT_NOT_MEASURABLE,
         });
     }
 

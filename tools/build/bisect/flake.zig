@@ -5,6 +5,10 @@
 //! failing run is a real failure, never a cache hit replaying another run.
 //! An INFRA run is tried again once with the same n; if it stays INFRA it is
 //! not counted, as a failure or as a run.
+//!
+//! Before its runs, a target is checked with CHECK_BXL: a target whose rule
+//! runs no test action under the flag (or that names nothing) would replay
+//! the cache in every run, so it is `not_measurable`, never `never_failed`.
 const std = @import("std");
 const classify = @import("classify.zig");
 const prober = @import("probe.zig");
@@ -12,6 +16,11 @@ const Outcome = @import("search.zig").Outcome;
 
 /// The buckconfig key a run names its target and number in.
 pub const RERUN_KEY = "komira.rerun";
+
+/// The BXL script that checks a rerun value (tools/build/rerun/README.md):
+/// it fails unless the label names a target whose rule passes KOMIRA_RERUN
+/// to its test actions.
+pub const CHECK_BXL = "komira//tools/build/rerun/check.bxl:check";
 
 pub const Verdict = enum {
     /// Some target failed in at least one counted run.
@@ -21,7 +30,32 @@ pub const Verdict = enum {
     /// No target failed, but some run stayed INFRA, so "never failed in K
     /// runs" was not shown.
     inconclusive,
+    /// No target failed, and some target has no test action the rerun flag
+    /// runs again (CHECK_BXL refused it): its runs would all be cache hits.
+    not_measurable,
 };
+
+/// What CHECK_BXL said of a target.
+pub const Check = enum {
+    /// It exited 0: the target's test actions run again under the flag.
+    measurable,
+    /// It exited 3, buck2's user error: the label names no target, or one
+    /// whose rule runs no test action under the flag. Not built.
+    not_measurable,
+    /// It exited otherwise (or was killed) twice. Not built; the target is
+    /// listed with one infra run, run 0.
+    infra,
+};
+
+/// The Check of a CHECK_BXL run that exited `exit` (null: killed).
+pub fn checkOutcome(exit: ?u8) Check {
+    const e = exit orelse return .infra;
+    return switch (e) {
+        0 => .measurable,
+        3 => .not_measurable,
+        else => .infra,
+    };
+}
 
 /// The failing runs that share a first failing line.
 pub const Excerpt = struct {
@@ -35,6 +69,9 @@ pub const InfraRun = struct { run: u64, buck2_exit: ?u8, excerpt: []const u8 };
 
 pub const Target = struct {
     target: []const u8,
+    check: Check = .measurable,
+    /// The end of CHECK_BXL's stderr when it did not exit 0.
+    check_excerpt: []const u8 = "",
     /// Counted runs: those that ended PASS or FAIL.
     runs: u32,
     failures: u32,
@@ -64,21 +101,44 @@ pub fn isLabel(target: []const u8) bool {
     return std.mem.indexOfScalar(u8, target, ':') != null;
 }
 
+/// Whether `target` names its cell (`komira//p:n`). A rerun value must: the
+/// rules refuse `//p:n`, so every run would fail analysis.
+pub fn hasCell(target: []const u8) bool {
+    const i = std.mem.indexOf(u8, target, "//") orelse return false;
+    return i > 0;
+}
+
+/// The first of `targets` that is a label without a cell.
+pub fn firstWithoutCell(targets: []const []const u8) ?[]const u8 {
+    for (targets) |t| if (isLabel(t) and !hasCell(t)) return t;
+    return null;
+}
+
+/// Whether `line` (trimmed) marks a failure: it holds `FAIL` (so `FAILED`,
+/// `BUILD FAILED`) or `Action failed` as written, or `panic` or `error:` in
+/// any case, and does not end `OK`. A runner prints a passing test's name
+/// with `OK` after it, and a name may hold any of the words.
+pub fn marksFailure(line: []const u8) bool {
+    if (std.mem.endsWith(u8, line, "OK")) return false;
+    if (std.mem.indexOf(u8, line, "FAIL") != null) return true;
+    if (std.mem.indexOf(u8, line, "Action failed") != null) return true;
+    if (std.ascii.indexOfIgnoreCase(line, "panic") != null) return true;
+    return std.ascii.indexOfIgnoreCase(line, "error:") != null;
+}
+
 /// The line failing runs are grouped by: the first line of the excerpt that
-/// says assert, expect, panic, fail or error (any case), trimmed; else its
-/// first non-blank line. A test's first lines often name the run (a seed, a
-/// time, a path); its assertion line names the defect.
+/// marks a failure (marksFailure), trimmed; else its first non-blank line
+/// that does not end `OK`; else "". A test's first lines often name the run
+/// (a seed, a time, a path) or a test that passed; the failing line names
+/// the defect.
 pub fn firstFailingLine(excerpt: []const u8) []const u8 {
-    const words = [_][]const u8{ "assert", "expect", "panic", "fail", "error" };
     var first: ?[]const u8 = null;
     var it = std.mem.splitScalar(u8, excerpt, '\n');
     while (it.next()) |raw| {
         const line = std.mem.trim(u8, raw, " \t\r");
         if (line.len == 0) continue;
-        if (first == null) first = line;
-        for (words) |w| {
-            if (std.ascii.indexOfIgnoreCase(line, w) != null) return line;
-        }
+        if (marksFailure(line)) return line;
+        if (first == null and !std.mem.endsWith(u8, line, "OK")) first = line;
     }
     return first orelse "";
 }
@@ -112,12 +172,17 @@ pub fn dedup(a: std.mem.Allocator, failed: []const Failed) ![]const Excerpt {
     return out;
 }
 
+/// flake, else not_measurable, else inconclusive, else never_failed.
 pub fn verdict(m: Measurement) Verdict {
     var short = false;
+    var unmeasurable = false;
     for (m.targets) |t| {
         if (t.failures > 0) return .flake;
-        if (t.runs < m.runs_requested) short = true;
+        if (t.check == .not_measurable) {
+            unmeasurable = true;
+        } else if (t.runs < m.runs_requested) short = true;
     }
+    if (unmeasurable) return .not_measurable;
     return if (short) .inconclusive else .never_failed;
 }
 
@@ -130,6 +195,30 @@ pub fn rate(t: Target) f64 {
 /// One target K times in the prepared worktree `wt`. `err` takes progress.
 fn measureTarget(cfg: prober.Config, wt: []const u8, rev: []const u8, idx: usize, target: []const u8, runs: u32, base: u64, err: anytype) !Target {
     const a = cfg.a;
+    // CHECK_BXL first, with run 1's value; INFRA is tried again once.
+    const first_value = try rerunValue(a, target, base + 1);
+    var ck: prober.Exec = undefined;
+    var verdict_of_check: Check = .infra;
+    var check_tries: u32 = 0;
+    while (check_tries < 2) {
+        check_tries += 1;
+        const tag = try std.fmt.allocPrint(a, "{s}-check-t{d}-{d}", .{ rev[0..@min(12, rev.len)], idx, check_tries });
+        ck = try prober.bxl(cfg, wt, CHECK_BXL, &.{ "-c", first_value }, tag);
+        verdict_of_check = checkOutcome(ck.exit);
+        err.print("bisect: check {s} (attempt {d}): {s}\n", .{ target, check_tries, @tagName(verdict_of_check) }) catch {};
+        if (verdict_of_check != .infra) break;
+    }
+    if (verdict_of_check != .measurable) {
+        const tail = prober.tail(ck.stderr, 20);
+        var infra_runs: []const InfraRun = &.{};
+        if (verdict_of_check == .infra) {
+            const one = try a.alloc(InfraRun, 1);
+            one[0] = .{ .run = 0, .buck2_exit = ck.exit, .excerpt = tail };
+            infra_runs = one;
+        }
+        return .{ .target = target, .check = verdict_of_check, .check_excerpt = tail, .runs = 0, .failures = 0, .attempts = 0, .failing_runs = &.{}, .excerpts = &.{}, .infra = infra_runs };
+    }
+
     var failed = std.ArrayList(Failed).init(a);
     var failing = std.ArrayList(u64).init(a);
     var infra = std.ArrayList(InfraRun).init(a);
@@ -228,6 +317,10 @@ pub fn write(m: Measurement, w: anytype) !void {
         try w.beginObject();
         try w.objectField("target");
         try w.write(t.target);
+        try w.objectField("check");
+        try w.write(@tagName(t.check));
+        try w.objectField("check_excerpt");
+        if (t.check == .measurable) try w.write(null) else try w.write(t.check_excerpt);
         try w.objectField("runs");
         try w.write(t.runs);
         try w.objectField("failures");

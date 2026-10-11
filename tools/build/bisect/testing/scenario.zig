@@ -27,12 +27,16 @@ const FlakeTarget = struct {
     /// The excerpt groups, with the runs of the first.
     excerpts: usize = 0,
     first_excerpt_runs: ?[]const i64 = null,
+    /// The measurement's `check` of the target, and how many check.bxl runs
+    /// of it (with run 1's value) fake_buck2 saw.
+    check: []const u8 = "measurable",
+    checks: i64 = 1,
 };
 
 const Spec = struct {
     /// Fixture of each candidate, oldest first; the last is bad.
     states: []const []const u8,
-    targets: []const []const u8 = &.{"//t:a"},
+    targets: []const []const u8 = &.{"root//t:a"},
     good: Good = .base,
     mode: Mode = .bisect,
     /// `bisect flake --runs`.
@@ -64,6 +68,8 @@ const Expect = struct {
     retried_at: ?usize = null,
     failure_target: ?[]const u8 = null,
     no_buck2: bool = false,
+    /// What stderr must say (a usage error's message).
+    stderr_says: ?[]const u8 = null,
     /// bisect's stdout is a file opened read-only, so writing the verdict
     /// fails: a tool error, exit 5, never the flake code 1.
     tool_error: bool = false,
@@ -95,26 +101,42 @@ const flaky_infra = [_][]const u8{ "pass", "infra-run 4\ninfra-run-always 8\nfla
 const retried = [_][]const u8{ "pass", "pass", "pass", "infra-once\npass", "pass", "fail //t:a", "fail //t:a", "fail //t:a", "fail //t:a" };
 const boundary = [_][]const u8{ "pass", "pass", "pass", "pass", "pass", "infra-always\nfail //t:a", "fail //t:a", "fail //t:a", "fail //t:a" };
 const single = [_][]const u8{"fail //t:a"};
+// check.bxl refuses //t:a at bad: its rule runs no test action under the flag.
+const no_rerun_a = [_][]const u8{ "pass", "no-rerun //t:a\npass" };
+const check_infra = [_][]const u8{ "pass", "check-infra\npass" };
 
 fn spec(name: []const u8) ?Spec {
     const table = .{
         .{ "culprit_middle", Spec{ .states = &middle, .expect = .{ .exit = 0, .verdict = "culprit", .first_bad = 5, .last_good = 4, .pr = 105, .max_probes = 1 + 4, .failure_target = "//t:a" } } },
         .{ "culprit_first", Spec{ .states = &first, .expect = .{ .exit = 0, .verdict = "culprit", .first_bad = 0, .last_good = -1, .pr = 100 } } },
         .{ "culprit_last", Spec{ .states = &last, .expect = .{ .exit = 0, .verdict = "culprit", .first_bad = 4, .last_good = 3, .pr = 104 } } },
-        .{ "two_culprits", Spec{ .states = &two, .targets = &.{ "//t:a", "//t:b" }, .expect = .{ .exit = 0, .verdict = "culprit", .first_bad = 3, .last_good = 2, .pr = 103, .failure_target = "//t:a" } } },
-        .{ "flake", Spec{ .states = &flake, .expect = .{ .exit = 1, .verdict = "flake", .exact_probes = 1, .flake = &.{.{ .target = "//t:a", .runs = 5, .failures = 1, .attempts = 5, .excerpts = 1 }} } } },
+        .{ "two_culprits", Spec{ .states = &two, .targets = &.{ "root//t:a", "root//t:b" }, .expect = .{ .exit = 0, .verdict = "culprit", .first_bad = 3, .last_good = 2, .pr = 103, .failure_target = "//t:a" } } },
+        .{ "flake", Spec{ .states = &flake, .expect = .{ .exit = 1, .verdict = "flake", .exact_probes = 1, .flake = &.{.{ .target = "root//t:a", .runs = 5, .failures = 1, .attempts = 5, .excerpts = 1 }} } } },
         .{ "infra_retried", Spec{ .states = &retried, .expect = .{ .exit = 0, .verdict = "culprit", .first_bad = 5, .last_good = 4, .pr = 105, .retried_at = 3 } } },
         .{ "infra_boundary", Spec{ .states = &boundary, .expect = .{ .exit = 3, .verdict = "inconclusive", .last_good = 4, .candidates = &.{ 5, 6 }, .infra_at = 5 } } },
-        .{ "good_not_ancestor", Spec{ .states = &middle, .good = .stray, .expect = .{ .exit = 2, .no_buck2 = true } } },
+        .{ "good_not_ancestor", Spec{ .states = &middle, .good = .stray, .expect = .{ .exit = 2, .no_buck2 = true, .stderr_says = "not an ancestor" } } },
         .{ "single_commit", Spec{ .states = &single, .expect = .{ .exit = 0, .verdict = "culprit", .first_bad = 0, .last_good = -1, .pr = 100, .exact_probes = 1 } } },
         .{ "stdout_unwritable", Spec{ .states = &last, .expect = .{ .exit = 5, .tool_error = true } } },
-        .{ "flake_rate", Spec{ .states = &flaky_a, .mode = .flake, .runs = 15, .rerun_base = 0, .targets = &.{ "//t:a", "//t:b" }, .expect = .{ .exit = 1, .flake_verdict = "flake", .flake = &.{
-            .{ .target = "//t:a", .runs = 15, .failures = 3, .attempts = 15, .failing_runs = &.{ 3, 8, 13 }, .excerpts = 1, .first_excerpt_runs = &.{ 3, 8, 13 } },
-            .{ .target = "//t:b", .runs = 15, .failures = 0, .attempts = 15, .failing_runs = &.{} },
+        .{ "flake_rate", Spec{ .states = &flaky_a, .mode = .flake, .runs = 15, .rerun_base = 0, .targets = &.{ "root//t:a", "root//t:b" }, .expect = .{ .exit = 1, .flake_verdict = "flake", .flake = &.{
+            .{ .target = "root//t:a", .runs = 15, .failures = 3, .attempts = 15, .failing_runs = &.{ 3, 8, 13 }, .excerpts = 1, .first_excerpt_runs = &.{ 3, 8, 13 } },
+            .{ .target = "root//t:b", .runs = 15, .failures = 0, .attempts = 15, .failing_runs = &.{} },
         } } } },
-        .{ "flake_never", Spec{ .states = &steady, .mode = .flake, .runs = 5, .expect = .{ .exit = 0, .flake_verdict = "never_failed", .flake = &.{.{ .target = "//t:a", .runs = 5, .failures = 0, .attempts = 5, .failing_runs = &.{} }} } } },
-        .{ "flake_infra", Spec{ .states = &flaky_infra, .mode = .flake, .runs = 10, .rerun_base = 0, .expect = .{ .exit = 1, .flake_verdict = "flake", .flake = &.{.{ .target = "//t:a", .runs = 9, .failures = 1, .attempts = 12, .failing_runs = &.{3}, .infra_runs = &.{8}, .excerpts = 1 }} } } },
-        .{ "flake_fresh_base", Spec{ .states = &flaky_a, .mode = .flake, .runs = 5, .invocations = 2, .expect = .{ .exit = 1, .flake_verdict = "flake", .flake = &.{.{ .target = "//t:a", .runs = 5, .failures = 1, .attempts = 5, .excerpts = 1 }} } } },
+        .{ "flake_never", Spec{ .states = &steady, .mode = .flake, .runs = 5, .expect = .{ .exit = 0, .flake_verdict = "never_failed", .flake = &.{.{ .target = "root//t:a", .runs = 5, .failures = 0, .attempts = 5, .failing_runs = &.{} }} } } },
+        .{ "flake_infra", Spec{ .states = &flaky_infra, .mode = .flake, .runs = 10, .rerun_base = 0, .expect = .{ .exit = 1, .flake_verdict = "flake", .flake = &.{.{ .target = "root//t:a", .runs = 9, .failures = 1, .attempts = 12, .failing_runs = &.{3}, .infra_runs = &.{8}, .excerpts = 1 }} } } },
+        .{ "flake_fresh_base", Spec{ .states = &flaky_a, .mode = .flake, .runs = 5, .invocations = 2, .expect = .{ .exit = 1, .flake_verdict = "flake", .flake = &.{.{ .target = "root//t:a", .runs = 5, .failures = 1, .attempts = 5, .excerpts = 1 }} } } },
+        // A target without a cell: a usage error before buck2 runs, never a
+        // measured 100% flake (the rules refuse a rerun value without one).
+        .{ "flake_no_cell", Spec{ .states = &flaky_a, .mode = .flake, .runs = 5, .targets = &.{ "root//t:b", "//t:a" }, .expect = .{ .exit = 2, .no_buck2 = true, .stderr_says = "target //t:a has no cell" } } },
+        // check.bxl refuses //t:a: never built, verdict not_measurable (not
+        // never_failed) although //t:b never failed; exit 6.
+        .{ "flake_not_measurable", Spec{ .states = &no_rerun_a, .mode = .flake, .runs = 3, .rerun_base = 0, .targets = &.{ "root//t:a", "root//t:b" }, .expect = .{ .exit = 6, .flake_verdict = "not_measurable", .flake = &.{
+            .{ .target = "root//t:a", .runs = 0, .failures = 0, .attempts = 0, .failing_runs = &.{}, .check = "not_measurable" },
+            .{ .target = "root//t:b", .runs = 3, .failures = 0, .attempts = 3, .failing_runs = &.{} },
+        } } } },
+        // check.bxl exits 2 twice: never built, infra run 0, inconclusive.
+        .{ "flake_check_infra", Spec{ .states = &check_infra, .mode = .flake, .runs = 3, .rerun_base = 0, .expect = .{ .exit = 3, .flake_verdict = "inconclusive", .flake = &.{
+            .{ .target = "root//t:a", .runs = 0, .failures = 0, .attempts = 0, .failing_runs = &.{}, .infra_runs = &.{0}, .check = "infra", .checks = 2 },
+        } } } },
     };
     inline for (table) |row| {
         if (std.mem.eql(u8, row[0], name)) return row[1];
@@ -311,7 +333,7 @@ fn checkFlake(a: std.mem.Allocator, s: Spec, want: []const FlakeTarget, stdout: 
         const ex = jarr(jget(o, "excerpts"));
         check(ex.len == wt.excerpts, "{s}: {d} excerpt groups, expected {d}", .{ wt.target, ex.len, wt.excerpts });
         if (ex.len > 0) {
-            const line = try std.fmt.allocPrint(a, "assertion failed: planted flake of {s}", .{wt.target});
+            const line = try std.fmt.allocPrint(a, "2/2 test.planted flake of {s}...FAIL (PlantedFlake)", .{wt.target});
             check(std.mem.eql(u8, jstr(jget(ex[0], "first_failing_line")) orelse "", line), "{s}: first_failing_line {?s}", .{ wt.target, jstr(jget(ex[0], "first_failing_line")) });
             check(std.mem.indexOf(u8, jstr(jget(ex[0], "excerpt")) orelse "", line) != null, "{s}: the excerpt is not the failing run's stderr", .{wt.target});
             if (wt.first_excerpt_runs) |er| check(intsEqual(jarr(jget(ex[0], "runs")), er), "{s}: the first group's runs differ", .{wt.target});
@@ -326,7 +348,30 @@ fn checkFlake(a: std.mem.Allocator, s: Spec, want: []const FlakeTarget, stdout: 
             check(@as(i64, @intCast(b.n)) > base and @as(i64, @intCast(b.n)) <= base + k, "{s}: run n {d} outside base+1..base+K ({d}..{d})", .{ wt.target, b.n, base + 1, base + k });
         }
         check(count == wt.attempts, "{s}: fake_buck2 saw {d} rerun builds, expected {d}", .{ wt.target, count, wt.attempts });
-        check(seen.count() == @as(u32, @intCast(k)), "{s}: fake_buck2 saw {d} distinct n, expected {d}: runs sharing an n would replay the cache", .{ wt.target, seen.count(), k });
+        const want_distinct: u32 = if (wt.attempts > 0) @intCast(k) else 0;
+        check(seen.count() == want_distinct, "{s}: fake_buck2 saw {d} distinct n, expected {d}: runs sharing an n would replay the cache", .{ wt.target, seen.count(), want_distinct });
+        check(std.mem.eql(u8, jstr(jget(o, "check")) orelse "", wt.check), "{s}: check {?s}, expected {s}", .{ wt.target, jstr(jget(o, "check")), wt.check });
+        const ce = jget(o, "check_excerpt") orelse .null;
+        if (std.mem.eql(u8, wt.check, "measurable")) {
+            check(ce == .null, "{s}: a check_excerpt for a measurable target", .{wt.target});
+        } else check(ce == .string and ce.string.len > 0, "{s}: no check_excerpt", .{wt.target});
+        // check.bxl ran for the target before its runs, with run 1's value.
+        const first_value = try std.fmt.allocPrint(a, "{s}#{d}", .{ wt.target, base + 1 });
+        var checks: i64 = 0;
+        var before_runs = true;
+        var segl = std.mem.tokenizeScalar(u8, seg, '\n');
+        while (segl.next()) |ln| {
+            var w = std.mem.tokenizeScalar(u8, ln, ' ');
+            const verb = w.next() orelse continue;
+            _ = w.next();
+            _ = w.next();
+            const rv = w.next() orelse "-";
+            if (std.mem.eql(u8, verb, "bxl") and std.mem.eql(u8, rv, first_value)) {
+                checks += 1;
+            } else if (std.mem.eql(u8, verb, "build") and std.mem.startsWith(u8, rv, wt.target) and rv.len > wt.target.len and rv[wt.target.len] == '#' and checks == 0) before_runs = false;
+        }
+        check(checks == wt.checks, "{s}: fake_buck2 saw {d} check.bxl runs with {s}, expected {d}", .{ wt.target, checks, first_value, wt.checks });
+        check(before_runs, "{s}: a run was built before its check", .{wt.target});
     }
 }
 
@@ -473,6 +518,8 @@ pub fn main() !void {
     // What fake_buck2 saw.
     const log = std.fs.cwd().readFileAlloc(a, log_path, 1 << 24) catch "";
     var builds: usize = 0;
+    // check.bxl runs; each also has a kill after it.
+    var bxls: usize = 0;
     // Builds without a rerun flag: the probes' attempts.
     var plain_builds: usize = 0;
     var kills: usize = 0;
@@ -495,17 +542,19 @@ pub fn main() !void {
             }
             check(merge, "probed {s}, which is not a first-parent commit", .{commit});
             for (sides) |sd| check(!std.mem.eql(u8, sd, commit), "probed the side-branch commit {s}", .{commit});
+        } else if (std.mem.eql(u8, verb, "bxl")) {
+            bxls += 1;
+            try build_cwds.append(where);
         } else if (std.mem.eql(u8, verb, "kill")) {
             kills += 1;
             try kill_cwds.append(where);
         }
     }
-    check(builds == kills, "{d} builds but {d} kills", .{ builds, kills });
-    for (build_cwds.items, 0..) |b, k| check(k < kill_cwds.items.len and std.mem.eql(u8, b, kill_cwds.items[k]), "build {d} in {s} has no kill in the same worktree", .{ k, b });
-    if (e.no_buck2) {
-        check(log.len == 0, "buck2 ran in a usage error:\n{s}", .{log});
-        check(std.mem.indexOf(u8, r.stderr, "not an ancestor") != null, "the refusal does not say good is not an ancestor", .{});
-    }
+    check(builds + bxls == kills, "{d} builds and {d} check.bxl runs but {d} kills", .{ builds, bxls, kills });
+    for (build_cwds.items, 0..) |b, k| check(k < kill_cwds.items.len and std.mem.eql(u8, b, kill_cwds.items[k]), "build or check {d} in {s} has no kill in the same worktree", .{ k, b });
+    if (e.flake == null) check(bxls == 0, "check.bxl ran in a scenario with no measurement", .{});
+    if (e.no_buck2) check(log.len == 0, "buck2 ran in a usage error:\n{s}", .{log});
+    if (e.stderr_says) |want| check(std.mem.indexOf(u8, r.stderr, want) != null, "stderr does not say \"{s}\"", .{want});
     if (e.tool_error) {
         check(code == null or code.? != 1, "a tool error exited 1, the flake code", .{});
         check(std.mem.indexOf(u8, r.stderr, "bisect: tool error: NotOpenForWriting") != null, "stderr does not name the tool error", .{});
