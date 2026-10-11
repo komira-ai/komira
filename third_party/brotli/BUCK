@@ -1,3 +1,4 @@
+load("@komira//tools/build/one_definition:libraries.bzl", "THIRD_PARTY_OWNERS")
 load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
@@ -118,7 +119,7 @@ prefixed_archive_check(
     exec_compatible_with = LINUX_X86_64,
     min_defined = 20,
     original_names = [":prefix_symbols[symbols]"],
-    prefix = "komira_brotli_",
+    prefix = THIRD_PARTY_OWNERS["third_party/brotli"].prefix,
 )
 
 # The decoder as its users take it: its C API is
