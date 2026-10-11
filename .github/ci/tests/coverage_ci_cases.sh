@@ -26,7 +26,9 @@
 # (enforce) failing in its gate alone, beside its census twin; and so is
 # build_report_branch_failed.json: `tests//negative/coverage:branchretor`'s
 # `[coverage][tests]` and `[coverage][branch_info]` in one build, its runs
-# built and its classifier refusing its branch records.
+# built and its classifier refusing its branch records (a recorded report:
+# that target, whose `return a or b` the classifier refused then, has since
+# been deleted; the cases read the report, not the target).
 # Exits 1 on the first wrong result, naming it; writes the validation
 # result and exits 0 when every case holds.
 set -eu
@@ -425,6 +427,7 @@ echo "\$*" >>"$W/buck2_calls"
 case "\$1" in
     uquery)
         [ ! -f "$W/uquery_fail" ] || { echo "uquery: a BUCK file failed to load" >&2; exit 3; }
+        case "\$*" in *attrregexfilter*) if [ -f "$W/cov_tests_out" ]; then cat "$W/cov_tests_out"; fi; exit 0 ;; esac
         if [ -f "$W/uquery_raw" ]; then cat "$W/uquery_raw"; exit 0; fi
         printf '{\n'
         n=0
@@ -445,7 +448,7 @@ case "\$1" in
                 --build-report) br=\$2; shift 2 ;;
                 -c) shift 2 ;;
                 -*) shift ;;
-                *"[coverage][tests]" | *"[coverage][branch_info]")
+                *"[coverage][tests]" | *"[coverage][branch_info]" | *"_cov_gate[tests]")
                     lib=\${1%%\[*}
                     case " \$libs " in *" \$lib "*) ;; *) libs="\$libs \$lib" ;; esac
                     case "\$1" in *branch_info]) bi="\$bi\$lib " ;; esac
@@ -591,6 +594,7 @@ measure M1
 [ "$RC" -eq 0 ] || red "M1: a failed coverage build, and the script exited $RC (it must exit 0)"
 {
     echo "uquery -c komira.coverage=true $QUERY --output-attribute ^coverage_branch_gate\$"
+    echo "uquery -c komira.coverage=true attrregexfilter(coverage_tests, '.', $QUERY)"
     echo "build -c komira.coverage=true --keep-going --build-report $O/logs/build_report.json komira//src/alpha:alpha[coverage][tests] komira//src/beta:beta[coverage][tests] komira//src/gamma:gamma[coverage][tests]"
 } >"$W/want_buck2"
 cmp -s "$W/buck2_calls" "$W/want_buck2" || { diff "$W/want_buck2" "$W/buck2_calls" >&2 || true; red "M1: buck2 was not asked the expected query and builds"; }
@@ -757,6 +761,7 @@ measure B1
 [ "$RC" -eq 0 ] || red "B1: exited $RC"
 {
     echo "uquery -c komira.coverage=true $QUERY2 --output-attribute ^coverage_branch_gate\$"
+    echo "uquery -c komira.coverage=true attrregexfilter(coverage_tests, '.', $QUERY2)"
     echo "build -c komira.coverage=true --keep-going --build-report $O/logs/build_report.json komira//src/alpha:alpha[coverage][tests] komira//src/alpha:alpha[coverage][branch_info] komira//src/beta:beta[coverage][tests]"
 } >"$W/want_buck2"
 cmp -s "$W/buck2_calls" "$W/want_buck2" || { diff "$W/want_buck2" "$W/buck2_calls" >&2 || true; red "B1: buck2 was not asked for alpha's branch records (alone) in the one build"; }
@@ -828,6 +833,46 @@ printf 'komira//src/alpha:alpha SUCCESS - %s\n' "$XA" >"$W/build_table"
 measure B4
 [ "$RC" -eq 1 ] && grep -q "names 0 branch record file(s) for 1 report(s)" "$W/err" || red "B4: a listed library with no record, and the script exited $RC"
 pass
+
+# B7. A listed library whose entry names its README's report
+# (cov/tests/readme.xml) beside its test's report and the test's one branch
+# record: the README's run has no branch records (line coverage only), so
+# one record for its one test is right, exit 0, and covcheck reads both
+# reports and the record. Red when the README's report is counted as a
+# test's (exit 1, "1 branch record file(s) for 2 report(s)").
+XR="buck-out/v2/art/komira/0123/src/alpha/__alpha__/cov/tests/readme.xml"
+cp "$M/$XA" "$M/$XR"
+printf 'komira//src/alpha:alpha SUCCESS - %s %s %s\n' "$XA" "$XR" "$IA" >"$W/build_table"
+measure B7
+[ "$RC" -eq 0 ] || red "B7: a listed library with a README report beside one test's report and record, and the script exited $RC: $(head -c 300 "$W/err")"
+[ "$(grep -c -x -- --cobertura "$W/covcheck_argv")" -eq 2 ] && grep -qx "$XR" "$W/covcheck_argv" || red "B7: covcheck did not read both reports, the README's included"
+[ "$(grep -A1 -x -- --branch-lcov "$W/covcheck_argv" | tail -n 1)" = "$IA" ] || red "B7: covcheck's --branch-lcov is not the test's record"
+pass
+
+# C1. A library naming mojo_test targets in coverage_tests (the second
+# query's answer): its `<library>_cov_gate[tests]` is built in the same
+# call, and that entry's reports are read beside its own. C2: when that
+# entry failed (a run of a named test), the library is NOT MEASURED. Red
+# when the runs of coverage_tests are not asked for or not read.
+rm -f "$W/branch_gate"
+printf 'komira//src/alpha:alpha\n' >"$W/uquery_out"
+printf 'komira//src/alpha:alpha\n' >"$W/cov_tests_out"
+XT="buck-out/v2/art/komira/0123/src/alpha/__alpha_cov_gate__/cov/tests/test_far.xml"
+mkdir -p "$M/${XT%/*}"
+cp "$M/$XA" "$M/$XT"
+printf 'komira//src/alpha:alpha SUCCESS - %s\nkomira//src/alpha:alpha_cov_gate SUCCESS - %s\n' "$XA" "$XT" >"$W/build_table"
+measure C1
+[ "$RC" -eq 0 ] || red "C1: exited $RC: $(head -c 300 "$W/err")"
+grep -q "build .*komira//src/alpha:alpha\[coverage\]\[tests\] komira//src/alpha:alpha_cov_gate\[tests\]\$" "$W/buck2_calls" || red "C1: the build did not ask for alpha_cov_gate[tests]"
+[ "$(grep -c -x -- --cobertura "$W/covcheck_argv")" -eq 2 ] && grep -qx "$XT" "$W/covcheck_argv" || red "C1: covcheck did not read the coverage_tests run's report"
+[ "$(cat "$O/publish/coverage_tests_libraries.txt")" = "komira//src/alpha:alpha" ] || red "C1: coverage_tests_libraries.txt is not alpha"
+pass
+printf 'komira//src/alpha:alpha SUCCESS - %s\nkomira//src/alpha:alpha_cov_gate FAIL mojo_cov_run@self\n' "$XA" >"$W/build_table"
+measure C2
+[ "$RC" -eq 0 ] || red "C2: exited $RC"
+[ "$(cat "$O/publish/not_measured.txt")" = "komira//src/alpha:alpha" ] || red "C2: a library whose coverage_tests run failed is not listed as not measured"
+pass
+rm "$W/cov_tests_out"
 
 # B5. The query's answer is a library and its attribute, each: a library
 # with no value (buck2 printing `{}`) is a wrong answer, exit 1.

@@ -57,7 +57,19 @@ from kci_api import (
 comptime DEFAULT_BUILD_TIMEOUT_S: Int = 3600
 """Seconds each build run may take, when the command line gives no
 `--build-timeout-s`: one artifact on the release path; one unit or one
-whole batch of units in the per-change check."""
+whole batch of units in the per-change check without `--build-budget-s`
+(with one, a run may take all the budget left: affected_batch.mojo, THE
+BUDGET)."""
+
+comptime NO_BUILD_BUDGET: Int = 0
+"""`BuildRequest.build_budget_s` when the command line gives no
+`--build-budget-s`: the per-change check's runs are bounded by
+`--build-timeout-s` each, and by nothing in total."""
+
+comptime MAX_BUILD_BUDGET_S: Int = 7 * 24 * 3600
+"""The largest `--build-budget-s` kci takes (a week, longer than any CI
+job runs): a larger one is refused, so `budget * 10^9` added to a
+monotonic reading never comes near overflowing an Int."""
 
 
 struct BuildRequest(Copyable, Movable):
@@ -68,7 +80,12 @@ struct BuildRequest(Copyable, Movable):
     --plan`: resolve and render, build nothing (build.mojo).
     `affected_by` is `kci run --affected-by` (the change's base, a full
     commit id) or "": when set, the step is the per-change check
-    (affected.mojo) and `release_dir` is not used.
+    (affected.mojo) and `release_dir` is not used. `build_budget_s` is
+    `kci run --build-budget-s` or NO_BUILD_BUDGET; with a budget,
+    `build_deadline_ns` is when it ends on the runner's monotonic clock
+    (`ProcessRunner.now_ns`): kci's start plus the budget, so everything
+    kci did before the step is charged to it (affected_batch.mojo, THE
+    BUDGET).
 
     Layout: owned values only. No pointer field."""
 
@@ -81,6 +98,8 @@ struct BuildRequest(Copyable, Movable):
     var platform: String
     var run: RunIdentity
     var build_timeout_s: Int
+    var build_budget_s: Int
+    var build_deadline_ns: Int
     var plan: Bool
     var affected_by: String
 
@@ -94,6 +113,8 @@ struct BuildRequest(Copyable, Movable):
         self.platform = String("")
         self.run = run^
         self.build_timeout_s = DEFAULT_BUILD_TIMEOUT_S
+        self.build_budget_s = NO_BUILD_BUDGET
+        self.build_deadline_ns = 0
         self.plan = False
         self.affected_by = String("")
 

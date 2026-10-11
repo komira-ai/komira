@@ -285,5 +285,41 @@ def test_text_after_a_quoted_scalar_close_is_cannot_tell() raises:
     _cannot(String("a: 'x'#y\n"), String("text after a quoted scalar's close"))
 
 
+def test_items_of_no_node_and_of_a_scalar_are_none() raises:
+    var d = read_workflow(String("a: x\nb: [y]\n"))
+    assert_equal(len(d.items(-1)), 0)
+    assert_equal(len(d.items(d.child(0, String("a")))), 0)
+    assert_equal(len(d.items(d.child(0, String("b")))), 1)
+
+
+def test_a_bare_dash_is_an_empty_item() raises:
+    # `-` alone (YAML's null item) reads as an empty scalar, as `key:` does
+    var d = read_workflow(String("a:\n  -\n  - x\n"))
+    var items = d.items(d.child(0, String("a")))
+    assert_equal(len(items), 2)
+    assert_equal(d.kind(items[0]), NODE_SCALAR)
+    assert_equal(d.text(items[0]), String(""))
+    assert_equal(d.text(items[1]), String("x"))
+
+
+def test_a_list_at_its_keys_indentation_ends_at_the_next_key() raises:
+    var d = read_workflow(String("a:\n- x\n- y\nb: 1\n"))
+    assert_equal(d.scalar_or_list(d.child(0, String("a")))[1], String("y"))
+    assert_equal(d.text(d.child(0, String("b"))), String("1"))
+    assert_equal(len(d.keys(0)), 2)
+
+
+def test_what_breaks_a_block_is_cannot_tell() raises:
+    # a line between a list's dash column and its items' content column: no
+    # open block holds it (the top-level list, where nothing encloses the
+    # list to say so)
+    _cannot(String("- a: 1\n b: 2\n"), String("line 2: a line indented in a way no open block holds"))
+    # a list item inside a mapping
+    _cannot(String("a:\n  b: 1\n  - c\n"), String("line 3: a list item where a mapping key was expected"))
+    # the top level is a mapping: a list there, ended or not, is not one
+    _cannot(String("- a\nb: 1\n"), String("line 2: a line outside the top-level mapping"))
+    _cannot(String("- a\n"), String("line 1: the top level is not a mapping"))
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

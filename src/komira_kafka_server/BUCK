@@ -14,7 +14,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #
 # The welded tests are byte-exact against the Apache Kafka protocol spec and
 # round-trip every codec; none opens a socket. The test_kafka_golden_* tests
-# check the consumer-group, topic-admin, idempotent-producer and
+# check the handshake (ApiVersions, Metadata), data-path (Produce, Fetch,
+# ListOffsets), consumer-group, topic-admin, idempotent-producer and
 # transactional codecs against hand-written reference bytes (provenance:
 # tests/GOLDENS.md).
 mojo_library(
@@ -31,6 +32,10 @@ mojo_library(
         "tests/test_kafka_golden_init_producer_id.mojo",
         "tests/test_kafka_golden_transaction.mojo",
         "tests/test_produce_error_for.mojo",
+        "tests/test_kafka_wire_primitive_edges.mojo",
+        "tests/test_kafka_record_batch_edges.mojo",
+        "tests/test_kafka_golden_metadata.mojo",
+        "tests/test_kafka_golden_data_path.mojo",
     ],
     visibility = ["PUBLIC"],
 )

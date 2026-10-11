@@ -4,9 +4,6 @@
 #
 # DuckDB analogue: `src/optimizer/compressed_materialization/
 # compress_comparison_join.cpp`, the join arm of `compressed_materialization`.
-# Measured INSIDE DuckDB on the hc4 cell with a single variable
-# (`SET disabled_optimizers='compressed_materialization'`): 0.978 s on vs
-# 1.038 s off — 5.7% of their own wall.
 #
 # WHAT IT DOES. For an INNER equi-join whose sides bottom out in Parquet scans,
 # every NON-KEY integer column the join has to carry is examined against the
@@ -17,30 +14,22 @@
 # removed, or re-typed, and the plan's output schema is untouched.
 #
 # ⛔ WHY IT STAMPS DATA RATHER THAN INSERTING PROJECTIONS. See the header of
-# `komira_plan_expr/payload_narrow.mojo`. In one line: a compress `Project`
-# below the join and a decompress `Project` above it EACH take the join off the
-# fused parquet-on-parquet leaf — the first because the leaf's side resolver
-# requires a PURE COL-REF project, the second because the leaf declines an
-# OFF-ROOT join — so DuckDB's spelling would disable the route it is supposed
-# to accelerate. The leaf performs both halves internally instead.
+# `komira_plan_expr/payload_narrow.mojo`. In one line: the join route this
+# rule is designed for (a fused parquet-on-parquet join leaf, not in this tree)
+# accepts only a PURE COL-REF project on a side and only a join at the plan
+# root, so a compress `Project` below the join and a decompress `Project` above
+# it would EACH take the join off that route. The spec is designed to be
+# applied inside the leaf instead, both halves.
 #
-# ⛔ PAYLOAD ONLY. THE JOIN KEY IS NEVER NARROWED. `join_node_exec` declines
-# the direct/fused leaf for a non-INT64 key (at three separate checks), and
-# the fallback it declines to reached 130 GB anon-RSS / rc=137 on a 1M x 250K
-# join with a dense INT32 key (reproduced twice, once under an 8 GiB cap).
-# Key narrowing is a
-# separate, BLOCKED piece of work. The key columns are excluded here by name,
-# on both sides, and that exclusion is the rule's most important line.
+# ⛔ PAYLOAD ONLY. THE JOIN KEY IS NEVER NARROWED. The leaf this rule is
+# designed for keys on INT64 only, so a narrowed key would take the join off
+# that route. Key narrowing is a separate, BLOCKED piece of work. The key
+# columns are excluded here by name, on both sides, and that exclusion is the
+# rule's most important line.
 #
-# ⚠ AND THE RULE IS THE CHEAP HALF. The measured ladder that motivates it was
-# taken by CASTING THE FIXTURE, i.e. by handing the engine data that was
-# already narrow on disk; this rule hands the engine a WIDE file and narrows it
-# internally, so it delivers the gather-side and output-side terms and NOT a
-# cheaper scan. On hc4 that over-credit is bounded and small — the two fixtures
-# differ by 0.003% on disk — but on a cell whose key is dense the same 8->4
-# cast shrinks the parquet 22%, and most of the apparent win there is a smaller
-# file. Check the file-size delta before quoting this rule's number anywhere
-# but hc4.
+# ⚠ AND THE RULE IS THE CHEAP HALF. The file stays WIDE on disk and is
+# narrowed after the read, so the rule can shrink what the join gathers and
+# outputs, NOT the scan. A file written narrow on disk is a different lever.
 # =============================================================================
 
 from komira_arrow.arrow_types import ArrowType
@@ -97,12 +86,12 @@ def _is_narrowable_declared_type(t: ArrowType) -> Bool:
 # §2 — resolving a join side to its SCAN
 # =============================================================================
 #
-# ⚠ THIS MIRRORS `join_node_exec._resolve_join_scan_side` AND MUST STAY A
+# ⚠ THIS IS DESIGNED TO MIRROR THE JOIN LEAF'S SIDE RESOLVER
+# (`join_node_exec._resolve_join_scan_side`, not in this tree) AND TO STAY A
 # SUBSET OF IT. Stamping a scan the leaf will not recognise is harmless (the
-# spec is advisory and nothing reads it) but it is dead weight and it makes the
-# EXPLAIN lie about what will happen. The shapes admitted here —
-# `PLAN_PROJECT? -> PLAN_FILTER* -> PLAN_SCAN(parquet)` — are exactly the ones
-# that resolver accepts.
+# spec is advisory and nothing reads it) but it is dead weight. The shapes
+# admitted here are
+# `PLAN_PROJECT? -> PLAN_FILTER* -> PLAN_SCAN(parquet)`.
 
 
 def _peel_to_parquet_scan(mut node: LogicalPlan) -> Bool:
@@ -116,9 +105,9 @@ def _peel_to_parquet_scan(mut node: LogicalPlan) -> Bool:
     if node.tag == PLAN_FILTER and node._filter:
         return _peel_to_parquet_scan(node._filter.value()[].child[])
     if node.tag == PLAN_PROJECT and node._project:
-        # A COMPUTED project is not peeled: the leaf declines it, and a column
-        # this rule narrowed would be read by an expression evaluator that
-        # knows nothing about `base`.
+        # A COMPUTED project is not peeled: the leaf this rule is designed for
+        # declines it, and a column this rule narrowed would be read by an
+        # expression evaluator that knows nothing about `base`.
         ref pd = node._project.value()[]
         if pd.udf:
             return False
@@ -272,7 +261,7 @@ def _narrow_one_side(
 
 def narrow_join_payload_inplace(mut plan: LogicalPlan) raises -> Int:
     """In-place stamp. Returns the number of columns narrowed across the plan
-    (0 for the overwhelmingly common case — a plan with no eligible join).
+    (0 for a plan with no eligible join).
     """
     var total = 0
     if plan.tag == PLAN_JOIN and plan._join:
@@ -287,12 +276,12 @@ def narrow_join_payload_inplace(mut plan: LogicalPlan) raises -> Int:
         # consumer owns.
         if jd.join_type != JOIN_INNER:
             return total
-        # A residual is evaluated by name over the JOINED batch, inside the
-        # leaf, and this rule cannot see where that evaluation sits relative to
-        # the widen. Refuse.
+        # A residual is designed to be evaluated by name over the JOINED batch,
+        # inside the leaf, and this rule cannot see where that evaluation sits
+        # relative to the widen. Refuse.
         if jd.has_residual():
             return total
-        # Single equi-key per side — the shape the measured route takes.
+        # Single equi-key per side — the shape the leaf is designed for.
         if len(jd.left_on) != 1 or len(jd.right_on) != 1:
             return total
 
@@ -335,6 +324,6 @@ def narrow_join_payload_inplace(mut plan: LogicalPlan) raises -> Int:
 
 
 def narrow_join_payload(var plan: LogicalPlan) raises -> LogicalPlan:
-    """Value-taking wrapper for the pipeline."""
+    """Value-taking wrapper around `narrow_join_payload_inplace`."""
     _ = narrow_join_payload_inplace(plan)
     return plan^

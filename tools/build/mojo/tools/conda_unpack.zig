@@ -1,3 +1,7 @@
+// Why Zig: build tools are Zig (tools/build/README.md), and this one could
+// not be Rust in any case. The Rust toolchain unpacks its own conda libraries
+// with it (toolchains/rust/BUCK `rustc_libs`), so a Rust version would be a
+// bootstrap cycle.
 //! conda_unpack: extract the Mojo compiler closure out of a `.conda` package.
 //!
 //! usage: conda_unpack <package.conda> <out_dir> [--keep <member>]...

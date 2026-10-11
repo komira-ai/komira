@@ -1,8 +1,10 @@
 # =============================================================================
-# src/kci_publish/tests/test_publish_never_backward.mojo -- a stage that
-#   never goes backward (kci_cli sets it for a stage without break_glass:
-#   prod) refuses to publish a release whose build number is LOWER than any
-#   build its channel already lists, of any name and any version.
+# src/kci_publish/tests/test_publish_never_backward.mojo -- a run that
+#   never goes backward (kci_cli sets it for a push to main, and for prod on
+#   any run) refuses to publish a release whose build number is LOWER than
+#   any build its channel already lists, of any name and any version, when
+#   the release is on none of those builds' histories (THE SPLIT, run.mojo;
+#   the other answers are test_publish_never_backward_split.mojo's).
 # =============================================================================
 #
 #   (1) the channel lists a member at the same version with a HIGHER build
@@ -58,9 +60,10 @@ from kci_publish import (
     RevisionHistory,
     RunOptions,
     ScriptedChannel,
+    ScriptedHistory,
     backward_files,
     previous_build_number,
-    run_publish,
+    run_publish_reading,
     superseding_files,
 )
 from kci_publish.release_fixture import EXAMPLE_HOST, ExampleRelease, example_channel_path, example_targets
@@ -137,9 +140,17 @@ def _run_with(
     var opts = RunOptions(2, 0, 2, 0, 0, 1, 0, concurrency=4)
     opts.never_backward = never_backward
     var h = RevisionHistory()
+    h.revision = _id(String("01234567"))
     h.commits = history.copy()
     h.unread = unread.copy()
-    return run_publish(targets, reg, src, plan, opts, sl, PublishReport(), h)
+    # THE SPLIT (run.mojo): every commit the fixtures' channels name
+    # resolves, and the release is on none of their histories, so each
+    # refusal here stays REFUSED (test_publish_never_backward_split.mojo
+    # holds the other answers)
+    var reader = ScriptedHistory()
+    for p in ["89abcdef", "fedcba98", "11111111", "00000000"]:
+        reader.put_commit(String(p), _id(String(p)))
+    return run_publish_reading(targets, reg, src, plan, opts, sl, PublishReport(), h, reader)
 
 
 def _run(

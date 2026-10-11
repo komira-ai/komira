@@ -4,12 +4,27 @@
 # renderer that ignores validity prints the value stored under a NULL (99,
 # "garbage", 2.0, ...) and fails here for every type at once. The string
 # `\N` must print as `\\N`, never as the NULL cell `\N`.
+# test_table_with_zero_row_chunks: a zero-row chunk (an engine's empty
+# morsel) whose dictionary and list columns have no dictionary or child must
+# neither fail the schema check nor be read, and the schema comes from the
+# first chunk that holds rows. test_zero_row_chunk_with_another_name_is_refused
+# and test_zero_row_chunk_with_another_nullability_is_refused: a renderer that
+# skips a zero-row chunk's Fields entirely passes an empty morsel whose
+# column is renamed or changes nullability; both must be refused.
+# test_zero_row_chunk_with_another_type_is_refused: a renderer that compares
+# a zero-row chunk's names and nullability but not its top-level type passes
+# an empty date32 morsel among int32 chunks. The decimal and time zone tests:
+# one that compares only the top-level type passes an empty decimal128 of
+# another precision or scale, or an empty timestamp in another time zone,
+# though a chunk with rows and those Fields would be refused.
 
+from std.memory import bitcast
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.boolean_array import BooleanArray
 from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.record_batch import RecordBatch
 from komira_arrow.schema import Field
 from komira_arrow.table import Table
@@ -26,8 +41,11 @@ from komira_plan_harness import (
 from komira_plan_harness.fixtures import (
     BatchBuilder,
     all_valid,
+    decimal_column,
     fixed_column,
     ints,
+    list_column,
+    small_decimal,
     string_column,
     varlen_column,
 )
@@ -275,6 +293,217 @@ def test_table_renders_chunks_in_order() raises:
     # The text form parses back to the same rows.
     var again = parse_canon(got.to_text())
     assert_equal(again.num_rows(), 4)
+
+
+def _dict_batch(rows: Int) raises -> RecordBatch:
+    """Two dictionary columns (string values, float64 values) and a
+    list<int32> holding `rows` rows; with 0 rows they hold no dictionary and
+    no child column, as an engine's empty morsel may, so the dictionaries
+    spell `dictionary<index>` without a value type and the list cannot be
+    read as a list."""
+    var bb = BatchBuilder()
+    var fs = Field.dictionary("s", ArrowType.INT64, False)
+    var ff = Field.dictionary("f", ArrowType.INT32, False)
+    var fl = Field.list_of("l", ArrowType.INT32, False)
+    if rows == 0:
+        bb.add(fs, _empty_column(ArrowType.DICTIONARY))
+        bb.add(ff, _empty_column(ArrowType.DICTIONARY))
+        bb.add(fl, _empty_column(ArrowType.LIST))
+        return bb.build()
+    var codes64 = List[Int64]()
+    var codes = PrimitiveArray[DType.int32].allocate(rows)
+    for r in range(rows):
+        codes64.append(Int64(r % 2))
+        codes.set(r, Int32(r % 2))
+    var sv: List[String] = ["x", "y"]
+    bb.add(fs, Column.from_int64_dict_indices(codes64^, sv^))
+    var fv: List[Int64] = [
+        bitcast[DType.int64](Float64(2.5)),
+        bitcast[DType.int64](Float64(-1.0)),
+    ]
+    bb.add(ff, Column.from_numeric_dict[DType.int32, DType.float64](codes^, fv^))
+    var items = List[Int]()
+    var offs: List[Int] = [0]
+    for r in range(rows):
+        items.append(r)
+        offs.append(r + 1)
+    bb.add(fl, list_column(fixed_column(ArrowType.INT32, 4, ints(items), all_valid(rows)), offs, all_valid(rows)))
+    return bb.build()
+
+
+def _empty_column(t: ArrowType) -> Column[HeapRegion]:
+    return Column[HeapRegion](
+        arrow_type=t,
+        data=OwnedAlignedBuffer(0),
+        offsets=None,
+        validity=None,
+        length=0,
+        null_count=0,
+        offset=0,
+    )
+
+
+def test_table_with_zero_row_chunks() raises:
+    """Engines emit empty morsels. A zero-row dictionary chunk has no value
+    layout, so its schema text is not a full chunk's: render_table must
+    skip it in the schema check and spell the schema (and the float widths)
+    from the first chunk that holds rows, wherever that chunk is."""
+    var chunks = List[RecordBatch]()
+    chunks.append(_dict_batch(0))
+    chunks.append(_dict_batch(2))
+    chunks.append(_dict_batch(0))
+    chunks.append(_dict_batch(1))
+    var schema = chunks[1].schema.copy()
+    var table = Table.from_chunks(chunks^, schema^)
+    var got = render_table(table, CanonPolicy.total())
+    assert_equal(got.schema[0], "s:dictionary<int64,string>")
+    assert_equal(got.schema[1], "f:dictionary<int32,float64>")
+    assert_equal(got.float_widths[1], 64)
+    assert_equal(got.num_rows(), 3)
+    assert_equal(got.rows[1][0], "y")
+    assert_equal(got.rows[2][1], "2.5|0x4004000000000000")
+    assert_equal(got.rows[2][2], "[0]")
+    # Every chunk empty: the rows are none and the schema is chunk 0's.
+    var empties = List[RecordBatch]()
+    empties.append(_dict_batch(0))
+    empties.append(_dict_batch(0))
+    var es = empties[0].schema.copy()
+    var none = render_table(Table.from_chunks(empties^, es^), CanonPolicy.total())
+    assert_equal(none.num_rows(), 0)
+    assert_equal(none.schema[0], "s:dictionary<int64>")
+
+
+def _int32_batch(name: String, nullable: Bool, rows: Int) raises -> RecordBatch:
+    var bb = BatchBuilder()
+    var vals = List[Int]()
+    for r in range(rows):
+        vals.append(r)
+    bb.add(
+        Field(name, ArrowType.INT32, nullable),
+        fixed_column(ArrowType.INT32, 4, ints(vals), all_valid(rows)),
+    )
+    return bb.build()
+
+
+def test_zero_row_chunk_with_another_name_is_refused() raises:
+    """An empty chunk is not rendered, but its column names are the
+    result's: a zero-row chunk naming its column `b` where the others name
+    it `a` is refused, before or after the chunk that holds rows."""
+    for at_front in range(2):
+        var chunks = List[RecordBatch]()
+        if at_front == 1:
+            chunks.append(_int32_batch("b", False, 0))
+        chunks.append(_int32_batch("a", False, 2))
+        if at_front == 0:
+            chunks.append(_int32_batch("b", False, 0))
+        var schema = chunks[at_front].schema.copy()
+        var table = Table.from_chunks(chunks^, schema^)
+        with assert_raises(contains="(zero rows) has another column name"):
+            _ = render_table(table, CanonPolicy.total())
+    # The same name and nullability passes.
+    var ok = List[RecordBatch]()
+    ok.append(_int32_batch("a", False, 0))
+    ok.append(_int32_batch("a", False, 2))
+    var os = ok[1].schema.copy()
+    assert_equal(render_table(Table.from_chunks(ok^, os^), CanonPolicy.total()).num_rows(), 2)
+
+
+def test_zero_row_chunk_with_another_nullability_is_refused() raises:
+    """A zero-row chunk whose column is nullable where the others' is not
+    (or not where they are) is refused; with every chunk empty, chunk 0 is
+    the reference."""
+    var chunks = List[RecordBatch]()
+    chunks.append(_int32_batch("a", False, 2))
+    chunks.append(_int32_batch("a", True, 0))
+    var schema = chunks[0].schema.copy()
+    with assert_raises(contains="(zero rows) has another column name"):
+        _ = render_table(Table.from_chunks(chunks^, schema^), CanonPolicy.total())
+    var empties = List[RecordBatch]()
+    empties.append(_int32_batch("a", True, 0))
+    empties.append(_int32_batch("a", False, 0))
+    var es = empties[0].schema.copy()
+    with assert_raises(contains="(zero rows) has another column name"):
+        _ = render_table(Table.from_chunks(empties^, es^), CanonPolicy.total())
+
+
+def _one_field_batch(f: Field, rows: Int) raises -> RecordBatch:
+    """One column of `rows` rows for an int32, date32, timestamp or
+    decimal128 Field."""
+    var bb = BatchBuilder()
+    var t = f.arrow_type
+    if t == ArrowType.DECIMAL128:
+        var limbs = List[List[UInt64]]()
+        for r in range(rows):
+            limbs.append(small_decimal(r, 2))
+        bb.add(f, decimal_column(t, limbs, f.decimal_scale, all_valid(rows)))
+        return bb.build()
+    var vals = List[Int]()
+    for r in range(rows):
+        vals.append(r)
+    var width = 4 if (t == ArrowType.INT32 or t == ArrowType.DATE32) else 8
+    bb.add(f, fixed_column(t, width, ints(vals), all_valid(rows)))
+    return bb.build()
+
+
+def _zero_row_second(full: Field, empty: Field) raises -> Table:
+    """A chunk of two rows with Field `full`, then a zero-row chunk with
+    Field `empty`."""
+    var chunks = List[RecordBatch]()
+    chunks.append(_one_field_batch(full, 2))
+    chunks.append(_one_field_batch(empty, 0))
+    var schema = chunks[0].schema.copy()
+    return Table.from_chunks(chunks^, schema^)
+
+
+def test_zero_row_chunk_with_another_type_is_refused() raises:
+    """A zero-row chunk whose column has the others' name and nullability
+    but another top-level type (date32 where they hold int32) is refused,
+    before or after the chunk that holds rows. The pair shares one buffer
+    layout, so Table.from_chunks admits it (a pair it refuses, such as int64
+    under int32, never reaches canon) and the refusal must be canon's."""
+    var date = Field("a", ArrowType.DATE32, False)
+    var narrow = Field("a", ArrowType.INT32, False)
+    with assert_raises(contains="(zero rows) has another column name, type"):
+        _ = render_table(_zero_row_second(narrow, date), CanonPolicy.total())
+    var chunks = List[RecordBatch]()
+    chunks.append(_one_field_batch(date, 0))
+    chunks.append(_one_field_batch(narrow, 2))
+    var schema = chunks[1].schema.copy()
+    with assert_raises(contains="(zero rows) has another column name, type"):
+        _ = render_table(Table.from_chunks(chunks^, schema^), CanonPolicy.total())
+    # The same type passes.
+    var same = render_table(_zero_row_second(narrow, narrow), CanonPolicy.total())
+    assert_equal(same.num_rows(), 2)
+
+
+def test_zero_row_chunk_with_another_decimal_is_refused() raises:
+    """A zero-row decimal128 chunk whose Field has another scale, or another
+    precision, than the reference's is refused; the same pair passes."""
+    var ref_f = Field.decimal128("d", 38, 2, True)
+    var other_scale = Field.decimal128("d", 38, 3, True)
+    var other_precision = Field.decimal128("d", 20, 2, True)
+    with assert_raises(contains="(zero rows) has another column name, type"):
+        _ = render_table(_zero_row_second(ref_f, other_scale), CanonPolicy.total())
+    with assert_raises(contains="(zero rows) has another column name, type"):
+        _ = render_table(_zero_row_second(ref_f, other_precision), CanonPolicy.total())
+    var same = render_table(_zero_row_second(ref_f, ref_f), CanonPolicy.total())
+    assert_equal(same.num_rows(), 2)
+    assert_equal(same.schema[0], "d:decimal128(38,2)?")
+
+
+def test_zero_row_chunk_with_another_time_zone_is_refused() raises:
+    """A zero-row timestamp chunk whose Field names another time zone, or
+    none, where the reference names UTC is refused; the same zone passes."""
+    var utc = Field.timestamp("t", ArrowType.TIMESTAMP_US, "UTC", False)
+    var other = Field.timestamp("t", ArrowType.TIMESTAMP_US, "Europe/Paris", False)
+    var naive = Field.timestamp("t", ArrowType.TIMESTAMP_US, "", False)
+    with assert_raises(contains="(zero rows) has another column name, type"):
+        _ = render_table(_zero_row_second(utc, other), CanonPolicy.total())
+    with assert_raises(contains="(zero rows) has another column name, type"):
+        _ = render_table(_zero_row_second(utc, naive), CanonPolicy.total())
+    var same = render_table(_zero_row_second(utc, utc), CanonPolicy.total())
+    assert_equal(same.num_rows(), 2)
+    assert_equal(same.schema[0], "t:timestamp_us(UTC)")
 
 
 def main() raises:

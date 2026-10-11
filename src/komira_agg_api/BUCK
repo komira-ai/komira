@@ -12,8 +12,11 @@ mojo_library(
         "//src/komira_plan_ir:komira_plan_ir",
     ],
     test_srcs = [
+        "tests/test_accumulator_trait.mojo",
+        "tests/test_agg_column_ptrs.mojo",
         "tests/test_agg_layout.mojo",
         "tests/test_agg_strategy.mojo",
+        "tests/test_cd_distinct_key.mojo",
         "tests/test_select_optimal_strategy.mojo",
         "tests/test_select_strategy.mojo",
     ],

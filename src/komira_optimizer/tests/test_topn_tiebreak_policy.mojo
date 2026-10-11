@@ -8,8 +8,9 @@
 # turns that proof into a wrong answer on ties. These tests pin the rule the
 # module header states: every INT64 / INT32 / FLOAT64 column that is not
 # already a key, in schema order, ascending, appended after the given keys.
-# (The engine-side agreement test moves with the engine's copy later; it is an
-# extra integration test, not this module's coverage.)
+# (An agreement test against the executor's copy of the rule needs the
+# executor, which is not in this tree; it is an integration test, not this
+# module's coverage.)
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -24,8 +25,8 @@ from komira_optimizer.topn_tiebreak_policy import (
 
 def test_admitted_types_are_exactly_int64_int32_float64() raises:
     # Defect: a dropped admitted type (the list misses a tie column) or a
-    # widened one (a STRING key diverts a bounded heap to a full sort, and the
-    # optimizer's list disagrees with the engine's).
+    # widened one (a STRING key would turn the bounded heap the header describes
+    # into a full sort, and the list would no longer match the header's rule).
     assert_true(tiebreak_admits_type(ArrowType.INT64))
     assert_true(tiebreak_admits_type(ArrowType.INT32))
     assert_true(tiebreak_admits_type(ArrowType.FLOAT64))

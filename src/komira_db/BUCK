@@ -7,7 +7,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # komira_db_postgres and komira_db_sqlite.
 #
 # The tests need no database server: the pool tests drive a mock resource and
-# a scripted HTTP/1.1 keep-alive transport through the generic `Pool[T]`.
+# a scripted HTTP/1.1 keep-alive transport through the generic `Pool[T]`, and
+# the SQL tests drive the shared neutral-op SQL and the migration runner
+# through a recording `SqlDatabase`.
 
 mojo_library(
     name = "komira_db",
@@ -25,6 +27,14 @@ mojo_library(
     test_srcs = [
         "tests/test_generic_pool_non_pg.mojo",
         "tests/test_h1_keepalive_pooled_conn.mojo",
+        "tests/test_migration.mojo",
+        "tests/test_sql_ops.mojo",
+        "tests/test_sql_ops_split.mojo",
+        "tests/test_sql_render.mojo",
+        # the SQL renderer's refusals and edge shapes: an OR filter over
+        # query_rows' client-side split, a SET term of an unknown kind, an
+        # empty IN list, a JSON-key predicate outside query_rows on pgstore
+        "tests/test_sql_split_and_binds.mojo",
     ],
     visibility = ["PUBLIC"],
 )

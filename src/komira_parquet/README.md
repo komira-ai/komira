@@ -118,6 +118,21 @@ pages:
 - `page_header_parser`: the PageHeader of a data page (V1 and V2) or a
   dictionary page, from a `Span`, with every size and count checked before a
   decoder can use it.
+- `gather`: `decode_column_with_selection`, the selected rows of a column
+  chunk. It walks the chunk's pages, decompresses only the data pages a page
+  mask selects (a V2 page whose header says its values are not compressed is
+  copied), loads a dictionary page, and hands the selected pages to the gather
+  for their shape: PLAIN fixed-width (INT32, INT64, FLOAT, DOUBLE; these
+  gathers are in `gather` too), PLAIN BYTE_ARRAY or dictionary-encoded,
+  non-null or flat nullable (V1 definition levels). Every gathered column gets
+  the Arrow type of its annotations (unsigned, narrow and date integers,
+  timestamps, binary BYTE_ARRAY). A shape it does not gather (nested,
+  FIXED_LEN_BYTE_ARRAY, DECIMAL, other encodings, mixed encodings, V2 pages
+  with levels, dictionary-encoded pages with `preserve_dict`) and some
+  malformed chunks (a page that runs past the chunk, a fixed-width dictionary
+  page shorter than its value count) return `None`, and the caller must decode
+  that chunk some other way. Errors from the page header parser, the codec
+  and the dictionary decoder, and the gathers' refusals, are raised.
 - `bloom_reader`, `bloom_pruner`: a column chunk's split-block bloom filter
   (xxHash64, as parquet-format's BloomFilter.md defines it), and the
   row-group pruner that probes it for `col == literal` leaves under AND and
@@ -127,6 +142,42 @@ pages:
 - `partition_pred_bridge`: maps a partition predicate between its plan form
   (`komira_plan_expr.partition_pred_pod`) and the form the Hive discovery
   prunes with (`komira_fs.pruned_hive_discovery`).
+
+And it decodes column chunks a chunk of rows at a time, and nested leaves:
+
+- `subrg_column_cursor`: `ResumableColumnCursor`, a page cursor over one
+  column chunk that keeps its page walk across calls and fills a caller's
+  fixed buffer: dictionary codes (`fill_next_codes`, exactly
+  `min(max_rows, rows left)` per call, with the dictionary held as Int64,
+  Float64 or offsets plus bytes) or flat values (`fill_next_flat`, PLAIN
+  copied, DELTA_BINARY_PACKED decoded with the running value carried across
+  calls). PLAIN pages can be read in place (`open_next_plain_grain` and
+  `load_grain`, or `ensure_plain_page`, `commit_plain_grain` and
+  `grain_view_ro`); `seek_to_row(lo, hi)` limits it to a row range. It
+  decodes V1 pages only, and OPTIONAL columns only without an actual null;
+  `try_open` reads the first data page and walks every page header
+  (`subrg_cursor_pages._admit_all_pages`), so a chunk it cannot finish (a
+  dictionary spill to PLAIN, a DATA_PAGE_V2 page, an encoding change, a
+  malformed header) is refused before it emits a row. A page holding a null
+  refuses mid-decode, and the caller checks `supported()` and
+  `rows_emitted()`.
+- `subrg_dbp_trace`, `subrg_scan_route_trace`: the cursor's counters. The DBP
+  arm counts chunks admitted and refused at open, pages, values and stalls,
+  and prints them only when `set_subrg_dbp_trace_enabled(True)`; the scan
+  route counts rows and chunks streamed, rows and row groups that fell back
+  to a whole decode, chunks refused at open and rows retracted.
+- `column_decode_context`: `ColumnDecodeContext`, a worker's decode buffers
+  reused across chunks and row groups (the decompression scratch, the
+  dictionary codes, the cursor's fixed buffers, the band slots and cursors of
+  a multi-column band). Its two decode choices are construction arguments.
+- `nested_decoder`: `decode_column_with_levels`, a leaf column chunk's
+  present values with its definition and repetition levels, at any maximum
+  level, for the Dremel rebuild in `nested`. V1 and V2 pages, PLAIN and
+  dictionary-encoded, each page by its own encoding; a BYTE_ARRAY chunk that
+  mixes the two is refused.
+- `column_reader`: one PLAIN INT32, INT64, FLOAT or DOUBLE page read from its
+  file byte range and aliased as the array (decompressed into it when
+  compressed).
 
 Every example below runs as a test when the package is built.
 

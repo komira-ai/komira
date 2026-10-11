@@ -41,8 +41,14 @@ mojo_library(
         "tests/test_release_manifest.mojo",
         # the set hash: a golden vector, order-free, every field counts
         "tests/test_set_hash.mojo",
-        # requirement closure by name: what is open, what is skipped, member order
+        # requirement closure by name: what is open, what is skipped, member order;
+        # a library's conda-forge system-library requirement, byte-exact only
         "tests/test_closure.mojo",
+        # the system-library copy equals tools/build/package/system_libs.bzl, both ways
+        "tests/test_system_libs.mojo",
+        # the glibc floor copy equals the platform table's os_floor; only
+        # `__glibc >=<floor>`, once, and only on a library shipping native files
+        "tests/test_glibc_floor.mojo",
     ],
     test_data = {
         "tests/test_conda_metadata.mojo": glob(["tests/data/*.json", "tests/data/komira/metadata.json"]),
@@ -51,6 +57,10 @@ mojo_library(
             "hello": "//tools/build/examples:hello_image[release]",
             "hello_image.digest": "//tools/build/examples:hello_image[digest]",
         },
+        # the table as the build evaluates it (system_libs_record.bzl)
+        "tests/test_system_libs.mojo": {"system_libs.txt": "//tools/build/package:system_libs"},
+        # the platform table's floor as the build evaluates it (glibc_floor_record.bzl)
+        "tests/test_glibc_floor.mojo": {"glibc_floor.txt": "//tools/build/package:glibc_floor"},
     },
     visibility = ["PUBLIC"],
 )

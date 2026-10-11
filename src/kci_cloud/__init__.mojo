@@ -6,7 +6,8 @@ package sits between them. A CLOUD is the deploy target of a cell (`gcp`,
 `aws`, `fake`): the id of a cloud adapter built into kci. It is not a
 platform; a platform is an OS and a CPU (`Image.platform`). Every cloud is
 built into kci, so the list of clouds is closed and nothing here is a plugin
-interface. This package names no cloud:
+interface. No type or branch here names a cloud; the built-in clouds' shapes
+are values (`shape/`):
 
   * catalog.mojo     — the catalog's types as data (arm number, portability,
                        exposed outputs, accepted access, retention default,
@@ -112,6 +113,15 @@ interface. This package names no cloud:
                        findings, collected in one pass; on a graph with
                        no other finding, the role label budget over the
                        cloud's lowering; the refusal text.
+  * cycles.mojo      — the graph finding for a reference cycle between
+                       resources (two services each reading the other's
+                       URL), which no order can create.
+  * refusal.mojo     — the typed refusal (`Refusal`): a refused run as a
+                       value carrying its findings, so a caller tells a
+                       refusal from a failed read without reading text.
+  * outcome.mojo     — `ApplyOutcome`: what an apply did, whether or not
+                       it finished, with the engine's refusal and a failed
+                       release typed apart from an engine error.
   * deploy.mojo      — plan / apply / destroy in a cell: configure and
                        validate first, lower to data with the lowering
                        contract checked (`lowering_json` for golden tests),
@@ -121,11 +131,22 @@ interface. This package names no cloud:
                        error, leftover, left behind, released); and the
                        plan grouped by authored resource, adopted nodes and
                        releases marked (`render_plan`).
-  * conformance.mojo — the conformance kit every cloud runs (thirteen
+  * derived.mojo     — the DERIVED stamp of a member binding (a grant that
+                       carries no labels): its attribution to a node, from
+                       the role table and the stamps of its member and its
+                       target, and the table's injectivity.
+  * shape/           — THE shared shape lowering of the built-in clouds
+                       (`ProviderShape`, `lower_shape`, `shape_limits`): the
+                       roles and provider kinds of each type per cloud, as
+                       data. The fakes and every built-in adapter lower
+                       through it. It is the one place that names the
+                       built-in clouds, as values; no type or branch does.
+  * conformance.mojo — the conformance kit every cloud runs (fifteen
                        steps, from label stamping to two interleaved
                        applies, the validation-run tag under the kit's own
-                       run id, and an adoption through `Resource.adopt`:
-                       the mark kept on update, then the release).
+                       run id, an adoption through `Resource.adopt`: the
+                       mark kept on update, then the release; a foreign
+                       member left alone; and every object born stamped).
 
 The fake clouds (working in-memory clouds, not mocks) that exercise all of it live in
 `kci_cloud_fake`.
@@ -224,6 +245,7 @@ from kci_cloud.grants import (
 )
 from kci_cloud.adapter import (
     CloudAdapter,
+    RegistryLogin,
     Absence,
     Finding,
     Setting,
@@ -244,6 +266,7 @@ from kci_cloud.adapter import (
     FINDING_LIMIT,
     FINDING_CELL,
     FINDING_ADOPTION,
+    FINDING_OWNERSHIP,
     absence_word,
 )
 from kci_cloud.data import (
@@ -390,8 +413,10 @@ from kci_cloud.validate import (
     lowered_budget_findings,
     role_budget_findings,
 )
+from kci_cloud.cycles import reference_cycle_findings
+from kci_cloud.refusal import Refusal, engine_refusal, graph_refusal
+from kci_cloud.outcome import ApplyOutcome
 from kci_cloud.deploy import (
-    ApplyOutcome,
     Removals,
     engine_retention,
     refuse_unless_valid,
@@ -438,4 +463,37 @@ from kci_cloud.metadata import (
     shared_name_findings,
     sorted_label_keys,
 )
-from kci_cloud.conformance import ConformanceTarget, run_conformance
+from kci_cloud.conformance import (
+    ConformanceTarget,
+    MEMBER_CELL,
+    MEMBER_FOREIGN,
+    ROLE_MAPPED,
+    ROLE_UNMAPPED,
+    run_conformance,
+)
+from kci_cloud.derived import (
+    ACCESS_PUBLIC,
+    ALL_USERS,
+    BindingEnd,
+    DerivedStamp,
+    ROLE_PUBLIC_NODE,
+    RoleRow,
+    attribute,
+    role_for,
+    role_table_problems,
+)
+from kci_cloud.shape import (
+    DERIVED_CITATION,
+    GRANTS_DERIVED,
+    GRANTS_LABELLED,
+    GrantRow,
+    MetadataLimits,
+    NameRule,
+    ProviderShape,
+    ShapeRow,
+    builtin_shapes,
+    derived_grant_limits,
+    lower_shape,
+    shape_limits,
+    shape_named,
+)

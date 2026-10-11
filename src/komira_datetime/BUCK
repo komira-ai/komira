@@ -1,15 +1,29 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The civil calendar and the timestamp text formats: days <-> (year, month,
-# day) in the proleptic Gregorian calendar, epoch seconds <-> UTC fields,
-# ISO 8601 / RFC 3339 read and write, and the HTTP-date (IMF-fixdate). Pure Mojo
-# over the standard library; the wall clock is komira_clock's.
+# The civil calendar, the timestamp text formats and IANA time zones: days
+# <-> (year, month, day) in the proleptic Gregorian calendar, epoch seconds
+# <-> UTC fields, ISO 8601 / RFC 3339 read and write, the HTTP-date
+# (IMF-fixdate); TZif (RFC 9636) files read into zones, the POSIX TZ string
+# of their footers, UTC to local, and local to UTC with gap and fold policies
+# the caller names. Pure Mojo over the standard library; the wall clock is
+# komira_clock's. No zone data is bundled: a caller passes TZif bytes or
+# names a zoneinfo directory. The conformance goldens against the pinned tz
+# release (third_party/tzdata) are in
+# //src/tests/conformance/komira_datetime_conformance, so that data is a
+# test input there and never in this library's closure.
 #
 # test_civil checks both directions on every day of years -1000..3000 against a
 # calendar WALKED day by day from 1970-01-01 (no formula in common with the
 # code), plus the leap-year centuries and the 10^9-year boundary. test_timestamp
 # and test_http_date pin each place the copies of this arithmetic that grew up
 # in other packages disagree (see the comment above each such test).
+#
+# test_tzif feeds files built byte by byte (each refusal by its exact text;
+# a version 1 block that disagrees with the version 2 one); test_posix_tz
+# checks the grammar and the rule dates against a printed calendar;
+# test_resolve checks gaps, folds and each policy on zones from POSIX TZ
+# strings; test_zone_name checks the name check that keeps a zone name inside
+# the zoneinfo directory.
 mojo_library(
     name = "komira_datetime",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -17,6 +31,10 @@ mojo_library(
         "tests/test_civil.mojo",
         "tests/test_timestamp.mojo",
         "tests/test_http_date.mojo",
+        "tests/test_posix_tz.mojo",
+        "tests/test_resolve.mojo",
+        "tests/test_tzif.mojo",
+        "tests/test_zone_name.mojo",
     ],
     visibility = ["PUBLIC"],
 )

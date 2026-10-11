@@ -18,8 +18,9 @@
 # LEADING `#` as `\#` (a schema line must not read as a comment line).
 #
 # `\xHH` is lower-case hex, and only for a byte canon escapes that way: a
-# control byte other than TAB/LF/CR, DEL, or a byte >= 0x80. The parser
-# refuses any other escape, in scalar cells and in nested cells alike.
+# control byte other than TAB/LF/CR, DEL, or a byte >= 0x80 that does not
+# start well-formed UTF-8 with the bytes after it. The parser refuses any
+# other escape, in scalar cells and in nested cells alike.
 # =============================================================================
 
 
@@ -175,9 +176,43 @@ def _hex_val(b: UInt8) -> Int:
     return -1
 
 
+def _byte_at(bs: Span[UInt8, _], j: Int, mut after: Int) -> Int:
+    """The byte the escaped text at `j` stands for, setting `after` to where
+    the following one starts; -1 for an escape that names no byte. A
+    structural escape (`\\,` and the like) stands for its ASCII byte."""
+    var n = len(bs)
+    if bs[j] != 92:
+        after = j + 1
+        return Int(bs[j])
+    if j + 1 >= n:
+        after = n
+        return -1
+    var c = bs[j + 1]
+    after = j + 2
+    if c == 120:
+        if j + 3 >= n:
+            after = n
+            return -1
+        var h = _hex_val(bs[j + 2])
+        var l = _hex_val(bs[j + 3])
+        if h < 0 or l < 0:
+            return -1
+        after = j + 4
+        return h * 16 + l
+    if c == 116:
+        return 9
+    if c == 110:
+        return 10
+    if c == 114:
+        return 13
+    return Int(c)
+
+
 def _canon_hex_escape(bs: Span[UInt8, _], i: Int) -> Bool:
     """Is `\\xHH` at `i` one canon writes: lower-case hex, for a control
-    byte other than TAB/LF/CR, DEL, or a byte >= 0x80?"""
+    byte other than TAB/LF/CR, DEL, or a byte >= 0x80 that does not start a
+    well-formed UTF-8 sequence with the bytes the text after it stands for
+    (canon writes such a sequence raw)?"""
     if i + 3 >= len(bs):
         return False
     var h = _hex_val(bs[i + 2])
@@ -187,7 +222,23 @@ def _canon_hex_escape(bs: Span[UInt8, _], i: Int) -> Bool:
     var v = h * 16 + l
     if v == 9 or v == 10 or v == 13:
         return False
-    return v < 32 or v == 127 or v >= 128
+    if v < 32 or v == 127:
+        return True
+    if v < 128:
+        return False
+    var seq = InlineArray[UInt8, 4](fill=UInt8(0))
+    seq[0] = UInt8(v)
+    var count = 1
+    var j = i + 4
+    while count < 4 and j < len(bs):
+        var after = j
+        var b = _byte_at(bs, j, after)
+        if b < 0:
+            break
+        seq[count] = UInt8(b)
+        count += 1
+        j = after
+    return _utf8_len(Span(seq)[:count], 0) == 0
 
 
 def _is_open(b: UInt8) -> Bool:

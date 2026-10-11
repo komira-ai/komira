@@ -22,7 +22,7 @@ from covcheck.text import basis_points, render_bp, render_bp_or_na
 comptime MAX_SUMMARY: Int = 65535
 comptime MAX_RANGES: Int = 200
 
-comptime CAVEAT = "Line coverage counts the lines the compiler emitted code for, and every executable line of a package's source file that no test binary compiled (`UnmeasuredFile`). Still missing: a function no test reaches inside a compiled file may emit no lines at all, so these numbers are upper bounds until declaration reachability lands."
+comptime CAVEAT = "Line coverage counts the lines the compiler emitted code for, and every executable line of a package's source file that no test binary compiled (`UnmeasuredFile`). Still missing: a function no test reaches inside a compiled file emits no lines at all, so these numbers are upper bounds; the result JSON lists the functions none of whose lines has a record (`unrecorded_functions`) without counting them."
 
 
 def md_code(s: String) -> String:
@@ -176,8 +176,8 @@ def render_summary(
             s += _finding_line(a.findings[i], a.mode == String(MODE_CENSUS))
         s += String("\n")
     if len(a.info_findings) > 0:
-        s += String("### Info: test-only packages (") + String(len(a.info_findings)) + String(")\n\n")
-        s += String("What the policy would find in a package held to no target; none of it counts.\n\n")
+        s += String("### Info: test-only packages, declaration-only files (") + String(len(a.info_findings)) + String(")\n\n")
+        s += String("What the policy would find in a package held to no target, and files no test compiled that emit no code; none of it counts.\n\n")
         for i in range(len(a.info_findings)):
             s += _finding_line(a.info_findings[i], False)
         s += String("\n")

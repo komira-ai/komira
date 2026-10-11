@@ -7,6 +7,11 @@ extra headers they carry; loose objects (`encode_loose`, `decode_loose`,
 `read_loose`, `loose_path`). Every parser refuses what `git fsck` reports as
 an error, so an accepted object serializes back to its own bytes and id.
 
+Packs: `index_pack` and `index_thin_pack` (an `IndexedPack` of a
+`PackIndex` and `PackEntryInfo`s), `read_pack_object`, `PackIndex` written and
+read as an index v2 file (`serialize`, `parse_pack_index`), `apply_delta`,
+and the `PackLimits` every reader enforces.
+
 SHA-1 with collision detection (sha1collisiondetection, as git uses):
 `Sha1dc`, the one-shot `sha1dc`, and `is_object_id_collision` for the error
 (`OBJECT_ID_COLLISION`) that `hash_object` and `read_loose` raise for an
@@ -60,6 +65,27 @@ from .pkt_line import (
     read_pkt_line,
 )
 from .ref_name import check_ref_format, check_ref_name, is_valid_ref_name, normalize_ref_name
+from .pack_format import (
+    PACK_OBJ_BLOB,
+    PACK_OBJ_COMMIT,
+    PACK_OBJ_OFS_DELTA,
+    PACK_OBJ_REF_DELTA,
+    PACK_OBJ_TAG,
+    PACK_OBJ_TREE,
+    PackLimits,
+    PackObject,
+)
+from .delta import DeltaHeader, apply_delta, read_delta_header
+from .pack_index import PACK_INDEX_DEFAULT_LARGE_OFFSET, PackIndex, parse_pack_index
+from .pack_reader import (
+    ExternalBases,
+    IndexedPack,
+    PackEntryInfo,
+    index_pack,
+    index_thin_pack,
+    read_pack_object,
+    read_thin_pack_object,
+)
 from .pkt_stream import (
     SIDEBAND_DATA,
     SIDEBAND_ERROR,

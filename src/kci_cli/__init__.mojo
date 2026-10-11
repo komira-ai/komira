@@ -22,10 +22,14 @@
 #   * dispatch.mojo       `run_stage_with`, `kci_main_with`,
 #                         `evidence_line_of`
 #   * start_checks.mojo   under GitHub Actions, at start-up: the workflow,
-#                         the ref (main only; break-glass with a reason)
-#                         and the set hash; `workflow_path_of`
+#                         the ref (main only; break-glass with a reason),
+#                         the admission check (`--admission`: a re-run or
+#                         the first stage of a revision main has moved past
+#                         stops SUPERSEDED) and the set hash;
+#                         `workflow_path_of`
 #   * summary.mojo        `run_summary_markdown`, `promotion_line`,
-#                         `break_glass_line`, `append_summary`
+#                         `superseded_line`, `break_glass_line`,
+#                         `append_summary`
 #   * library_verbs.mojo  `LibrarySteps` (kci_build, kci_publish), the
 #                         composed secret store, `kci_main`
 #
@@ -57,6 +61,7 @@ from kci_cli.start_checks import (
     GITHUB_EVENT_NAME,
     GITHUB_REF,
     GITHUB_REPOSITORY,
+    GITHUB_RUN_ATTEMPT,
     GITHUB_SHA,
     GITHUB_WORKFLOW_REF,
     GITHUB_WORKFLOW_SHA,
@@ -71,5 +76,24 @@ from kci_cli.dispatch import (
     run_stage_with,
     validation_failure_message,
 )
-from kci_cli.summary import append_summary, break_glass_line, carried_markdown, promotion_line, run_summary_markdown
-from kci_cli.library_verbs import ComposedSecretStore, LibrarySteps, RefusingSecretStore, git_first_parent, git_history, git_is_ancestor, kci_main
+from kci_cli.summary import (
+    append_summary,
+    break_glass_line,
+    carried_markdown,
+    promotion_line,
+    run_summary_markdown,
+    superseded_line,
+)
+from kci_cli.library_verbs import (
+    ComposedSecretStore,
+    GitHistory,
+    LibrarySteps,
+    RefusingSecretStore,
+    git_commit_of,
+    git_first_parent,
+    git_history,
+    git_is_ancestor,
+    git_main_line,
+    git_main_tip_past,
+    kci_main,
+)
