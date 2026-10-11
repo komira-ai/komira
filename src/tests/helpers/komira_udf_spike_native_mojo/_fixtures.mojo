@@ -366,33 +366,57 @@ def _value(fx: Int, x: Void, y: Void, r: Int, o: Void, d: Void) raises:
     var strict = fx == F_DOUBLE_STRICT or fx == F_ADD_STRICT
     if strict and (not is_valid(x, r) or (fx == F_ADD_STRICT and not is_valid(y, r))):
         raise Error("a strict fixture got a null argument")
-    if (
-        fx == F_NULL_OUT
-        or not is_valid(x, r)
-        or (fx == F_NULL_ON_ZERO and i64_at(x, r) == 0)
-        or (fx == F_ADD_MIXED and not is_valid(y, r))
-    ):
+    if fx == F_NULL_OUT or not is_valid(x, r):
         set_null(o, r)
         return
     # SAFETY: `d` is make_col's values block of at least r + 1 rows.
     if fx == F_FAHRENHEIT:
         d.bitcast[Float64]()[r] = f64_at(x, r) * 1.8 + 32.0
-    elif fx == F_NEAR:
-        d.bitcast[Float64]()[r] = f64_at(x, r) * (1.0 + 5e-10)
-    elif fx == F_DOUBLE or fx == F_DOUBLE_STRICT or fx == F_NULL_ON_ZERO:
+    elif fx == F_DOUBLE or fx == F_DOUBLE_STRICT:
         d.bitcast[Int64]()[r] = 2 * i64_at(x, r)
-    elif fx == F_ADD_MIXED:
-        d.bitcast[Int64]()[r] = i64_at(x, r) + Int64(i32_at(y, r))
-    elif fx == F_NARROW:
-        d.bitcast[Int32]()[r] = Int32(i64_at(x, r))
     elif fx == F_ADD_STRICT:
         d.bitcast[Int64]()[r] = i64_at(x, r) + i64_at(y, r)
     else:
         d.bitcast[Int64]()[r] = i64_at(x, r)
 
 
+def _scalar_more(fx: Int, a: Void, o: Void) -> Int32:
+    """The column fixtures that never raise and need no per-call state
+    (null_on_zero, add_mixed, narrow, near, sum12, sum64), in a loop of their
+    own: chosen once per batch, so their per-row tests stay out of the loop
+    the other fixtures (double and fahrenheit among them) run."""
+    var n = length(a)
+    var x = child(a, 0) if n_children(a) > 0 else null_void()
+    var y = child(a, 1) if n_children(a) > 1 else null_void()
+    var d = make_col(o, n)  # a zeroed block: every value starts at 0
+    for r in range(n):
+        # SAFETY: `d` is make_col's values block of n rows (8 bytes each).
+        if fx == F_SUM_WIDE:
+            for k in range(n_children(a)):
+                if not is_valid(child(a, k), r):
+                    set_null(o, r)
+                    break
+                d.bitcast[Int64]()[r] += i64_at(child(a, k), r)
+            continue
+        var null_row = not is_valid(x, r) or (fx == F_NULL_ON_ZERO and i64_at(x, r) == 0)
+        if null_row or (fx == F_ADD_MIXED and not is_valid(y, r)):
+            set_null(o, r)
+            continue
+        if fx == F_NEAR:
+            d.bitcast[Float64]()[r] = f64_at(x, r) * (1.0 + 5e-10)
+        elif fx == F_NULL_ON_ZERO:
+            d.bitcast[Int64]()[r] = 2 * i64_at(x, r)
+        elif fx == F_ADD_MIXED:
+            d.bitcast[Int64]()[r] = i64_at(x, r) + Int64(i32_at(y, r))
+        else:  # narrow
+            d.bitcast[Int32]()[r] = Int32(i64_at(x, r))
+    return OK
+
+
 def scalar(fx: Int, host: Void, call: Void, a: Void, o: Void, e: Void) -> Int32:
     """A column fixture over the argument struct `a`, into `o`."""
+    if fx == F_NULL_ON_ZERO or fx == F_ADD_MIXED or fx == F_NARROW or fx == F_NEAR or fx == F_SUM_WIDE:
+        return _scalar_more(fx, a, o)
     var n = length(a)
     var x = child(a, 0) if n_children(a) > 0 else null_void()
     var y = child(a, 1) if n_children(a) > 1 else null_void()
@@ -418,21 +442,11 @@ def scalar(fx: Int, host: Void, call: Void, a: Void, o: Void, e: Void) -> Int32:
                 var until = now_ns(host) + SLOW_ROW_NS
                 while now_ns(host) < until and not cancelled(call):
                     pass
-            if fx == F_NARROW:
-                d.bitcast[Int32]()[r] = 0
-            else:
-                d.bitcast[Int64]()[r] = 0
+            d.bitcast[Int64]()[r] = 0
             if r >= n:
                 continue
             if fx == F_CONST7:
                 d.bitcast[Int64]()[r] = 7
-                continue
-            if fx == F_SUM_WIDE:
-                for k in range(n_children(a)):
-                    if not is_valid(child(a, k), r):
-                        set_null(o, r)
-                        break
-                    d.bitcast[Int64]()[r] += i64_at(child(a, k), r)
                 continue
             _value(fx, x, y, r, o, d)
     except err:
