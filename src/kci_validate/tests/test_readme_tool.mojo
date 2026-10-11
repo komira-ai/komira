@@ -151,6 +151,7 @@ def test_a_report_the_tool_cannot_map_fails_the_program_row() raises:
         ),
         checks[0].got,
     )
+    assert_equal(open(out_dir + String("/readme_x.err"), "r").read(), String(""))
     # the same run with both reports present passes: the row failed for the map alone
     var both = tmp + String("/mapped_both")
     var q = _passed_run(both, True)
