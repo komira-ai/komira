@@ -1,0 +1,6 @@
+# proto-message: komira.plan.v1.PinGroup
+group: "social_graph"
+lineage: "graph/lineage"
+commit_seq: 42
+members: 0
+members: 1

@@ -8,18 +8,22 @@
 # once by `partition_frame_index.frame_index` into `[lo, hi)` row indices; the
 # kernels here never see a bound.
 #
-# SUM, COUNT and AVG are invertible, so the frame is a two-pointer window over
-# the partition: as `[lo, hi)` advances, the rows leaving at the back are
-# removed and the rows entering at the front are added, O(rows) per partition.
+# COUNT and the INT64 SUM / AVG are invertible (an exact count, an exact
+# 128-bit sum), so the frame is a two-pointer window over the partition: as
+# `[lo, hi)` advances, the rows leaving at the back are removed and the rows
+# entering at the front are added, O(rows) per partition.
 # When the frame jumps past everything it held (`1 FOLLOWING .. 2 FOLLOWING`
 # on a partition's first row), the rows it removes and never added are the
 # rows it adds again, so the two cancel.
 #
-# A FLOAT64 sum cannot remove an infinity or a NaN by subtraction (inf - inf
-# is NaN), so the window keeps the finite part of its sum and counts its +inf,
-# -inf and NaN values apart (`_F64Window`); the frame's sum is NaN if it holds
-# a NaN or both infinities, the infinity if it holds one kind, else the
-# finite sum.
+# A FLOAT64 sum is not invertible: subtracting a value that leaves the frame
+# does not undo adding it. `inf - inf` is NaN, and a 1 added to 1e20 is
+# lost, so removing 1e20 takes it too: over v = 1e20, 1, 1 with `1 PRECEDING
+# .. CURRENT ROW` the last frame {1, 1} would sum to 1, not 2, a whole-value
+# error, not a last-bits one. DuckDB answers each frame from its own values
+# (a segment tree), so FLOAT64 SUM / AVG do the same: a sum tree over the
+# partition (`_F64SumTree`) sums each frame from the O(log rows) nodes that
+# tile it, O(rows x log rows) per partition.
 #
 # MIN and MAX are not invertible and rescan the frame per row, O(rows x
 # width). Float MIN / MAX use DuckDB's order (NaN above every number, §2.7).
@@ -36,8 +40,6 @@
 # answers NULL for a frame with no surviving value; a framed output is
 # nullable iff the input carries NULLs or some frame is empty.
 # =============================================================================
-
-from std.math import inf, isinf, isnan
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.column import Column
@@ -73,6 +75,10 @@ from .partition_null_policy import (
     store_i64_or_null,
 )
 
+
+# -0.0 is the identity of float addition (`-0.0 + x` is `x`, +0.0 included);
+# +0.0 is not (`0.0 + -0.0` is +0.0).
+comptime _NEG_ZERO: Float64 = -Float64(0.0)
 
 # =============================================================================
 # Loads and per-frame reducers
@@ -158,70 +164,71 @@ def _frame_extreme_f64[is_min: Bool](col: Column[HeapRegion], lo: Int, hi: Int) 
     return AggF64(best, cnt)
 
 
-struct _F64Window(Movable):
-    """The running state of a FLOAT64 sum over a sliding window: the sum of
-    its finite values, its non-NULL count, and how many +inf, -inf and NaN
-    values it holds. Removing a value undoes adding it, which a plain float
-    sum cannot do for a non-finite value."""
+def _live_prefix(col: Column[HeapRegion], nulls: Bool, n: Int) -> List[Int]:
+    """`out[r]` is the number of non-NULL cells in rows `[0, r)`, so a
+    frame `[lo, hi)` holds `out[hi] - out[lo]` of them."""
+    var out = List[Int](capacity=n + 1)
+    out.append(0)
+    var live = 0
+    for r in range(n):
+        if not (nulls and cell_is_null(col, r)):
+            live += 1
+        out.append(live)
+    return out^
 
-    var finite: Float64
-    var cnt: Int
-    var n_nan: Int
-    var n_pinf: Int
-    var n_ninf: Int
+
+struct _F64SumTree(Movable):
+    """A sum tree over one partition's FLOAT64 cells, for a frame sum that
+    only ever adds the values the frame holds.
+
+    Leaves are the partition's cells, a NULL cell holding -0.0 (the identity
+    of float addition: `-0.0 + x` is `x` for every `x`, +0.0 and NaN
+    included); node `i` below `m` is the sum of nodes `2i` and `2i + 1`. A
+    query combines the O(log m) nodes that tile `[lo, hi)` exactly, so no
+    value outside the frame enters its sum: an infinity, a NaN or a large
+    value that has left the frame cannot change the sum of the values still
+    in it, as subtracting it back out would. NULL cells are not counted
+    here; the caller keeps the count."""
+
+    var node: List[Float64]
+    var m: Int
 
     def __init__(out self):
-        self.finite = 0.0
-        self.cnt = 0
-        self.n_nan = 0
-        self.n_pinf = 0
-        self.n_ninf = 0
+        self.node = List[Float64]()
+        self.m = 0
+
+    def build(mut self, col: Column[HeapRegion], s: Int, e: Int, nulls: Bool):
+        """Load the partition `[s, e)` of `col` and sum the inner nodes."""
+        self.m = e - s
+        self.node = List[Float64](length=2 * self.m, fill=_NEG_ZERO)
+        for i in range(self.m):
+            if not (nulls and cell_is_null(col, s + i)):
+                self.node[self.m + i] = _load_f64(col, s + i)
+        var i = self.m - 1
+        while i >= 1:
+            self.node[i] = self.node[2 * i] + self.node[2 * i + 1]
+            i -= 1
 
     @always_inline
-    def reset(mut self):
-        self.finite = 0.0
-        self.cnt = 0
-        self.n_nan = 0
-        self.n_pinf = 0
-        self.n_ninf = 0
-
-    @always_inline
-    def add(mut self, v: Float64):
-        self.cnt += 1
-        if isnan(v):
-            self.n_nan += 1
-        elif isinf(v):
-            if v > 0:
-                self.n_pinf += 1
-            else:
-                self.n_ninf += 1
-        else:
-            self.finite += v
-
-    @always_inline
-    def remove(mut self, v: Float64):
-        self.cnt -= 1
-        if isnan(v):
-            self.n_nan -= 1
-        elif isinf(v):
-            if v > 0:
-                self.n_pinf -= 1
-            else:
-                self.n_ninf -= 1
-        else:
-            self.finite -= v
-
-    @always_inline
-    def sum(self) -> Float64:
-        if self.n_nan > 0 or (self.n_pinf > 0 and self.n_ninf > 0):
-            return Float64(0.0) / Float64(0.0)
-        if self.n_pinf > 0:
-            return inf[DType.float64]()
-        if self.n_ninf > 0:
-            return -inf[DType.float64]()
-        if self.cnt == 0:
-            return 0.0
-        return self.finite
+    def query(self, lo: Int, hi: Int) -> Float64:
+        """The sum of the cells `[lo, hi)`, relative to the partition start.
+        An empty range sums to +0.0, as the whole-partition sum starts."""
+        # PERF-CRITICAL: one call per row of every framed FLOAT64 SUM / AVG;
+        # O(log m) node reads, no allocation.
+        var l = lo + self.m
+        var h = hi + self.m
+        var acc_l = _NEG_ZERO
+        var acc_r = _NEG_ZERO
+        while l < h:
+            if l & 1:
+                acc_l = acc_l + self.node[l]
+                l += 1
+            if h & 1:
+                h -= 1
+                acc_r = self.node[h] + acc_r
+            l >>= 1
+            h >>= 1
+        return Float64(0.0) + (acc_l + acc_r)
 
 
 # =============================================================================
@@ -232,9 +239,10 @@ struct _F64Window(Movable):
 def eval_sliding_sum(
     batch: RecordBatch, bounds: List[Int], col_name: String, lo_idx: List[Int], hi_idx: List[Int],
 ) raises -> Column[HeapRegion]:
-    """SUM over a sliding frame, O(rows) per partition (two-pointer window).
-    The non-NULL count rides the same window: a frame with no non-NULL value
-    sums to NULL."""
+    """SUM over a sliding frame. INT64 on a two-pointer window, O(rows) per
+    partition: its 128-bit sum is exact, so removing a row undoes adding it.
+    FLOAT64 on `_F64SumTree`, O(rows x log rows): each frame sums only its
+    own values. A frame with no non-NULL value sums to NULL."""
     var n = batch.num_rows()
     var ends = _segment_ends(bounds, n)
     ref col = batch.column_at(batch.schema.column_index(col_name))
@@ -269,25 +277,18 @@ def eval_sliding_sum(
         return Column.from_primitive[DType.int64](arr)
     elif col.arrow_type == ArrowType.FLOAT64:
         var arr = alloc_frame_out_f64(n, nulls, lo_idx, hi_idx)
-        var win = _F64Window()
+        var tree = _F64SumTree()
+        var live = _live_prefix(col, nulls, n)
         for p in range(len(bounds)):
-            var cur_lo = bounds[p]
-            var cur_hi = bounds[p]
-            win.reset()
-            for row in range(bounds[p], ends[p]):
-                var new_lo = lo_idx[row]
-                var new_hi = hi_idx[row]
-                for r in range(cur_lo, new_lo):
-                    if nulls and cell_is_null(col, r):
-                        continue
-                    win.remove(_load_f64(col, r))
-                for r in range(cur_hi, new_hi):
-                    if nulls and cell_is_null(col, r):
-                        continue
-                    win.add(_load_f64(col, r))
-                cur_lo = new_lo
-                cur_hi = new_hi
-                store_f64_or_null(arr, row, win.sum(), win.cnt)
+            var s = bounds[p]
+            tree.build(col, s, ends[p], nulls)
+            for row in range(s, ends[p]):
+                var lo = lo_idx[row]
+                var hi = hi_idx[row]
+                if hi < lo:
+                    hi = lo
+                var cnt = live[hi] - live[lo]
+                store_f64_or_null(arr, row, tree.query(lo - s, hi - s), cnt)
         return Column.from_primitive[DType.float64](arr)
     raise Error("partition_sliding_frame: SUM unsupported type " + String(col.arrow_type))
 
@@ -332,8 +333,8 @@ def eval_sliding_count(
 def eval_sliding_avg(
     batch: RecordBatch, bounds: List[Int], col_name: String, lo_idx: List[Int], hi_idx: List[Int],
 ) raises -> Column[HeapRegion]:
-    """AVG over a sliding frame, always FLOAT64: the two-pointer SUM divided
-    by the non-NULL count of the same window."""
+    """AVG over a sliding frame, always FLOAT64: the frame's SUM (as
+    `eval_sliding_sum` computes it) divided by its non-NULL count."""
     var n = batch.num_rows()
     var ends = _segment_ends(bounds, n)
     ref col = batch.column_at(batch.schema.column_index(col_name))
@@ -366,28 +367,21 @@ def eval_sliding_avg(
                     mean = i64_mean(total_i, cnt)
                 store_f64_or_null(arr, row, mean, cnt)
     elif col.arrow_type == ArrowType.FLOAT64:
-        var win = _F64Window()
+        var tree = _F64SumTree()
+        var live = _live_prefix(col, nulls, n)
         for p in range(len(bounds)):
-            var cur_lo = bounds[p]
-            var cur_hi = bounds[p]
-            win.reset()
-            for row in range(bounds[p], ends[p]):
-                var new_lo = lo_idx[row]
-                var new_hi = hi_idx[row]
-                for r in range(cur_lo, new_lo):
-                    if nulls and cell_is_null(col, r):
-                        continue
-                    win.remove(_load_f64(col, r))
-                for r in range(cur_hi, new_hi):
-                    if nulls and cell_is_null(col, r):
-                        continue
-                    win.add(_load_f64(col, r))
-                cur_lo = new_lo
-                cur_hi = new_hi
+            var s = bounds[p]
+            tree.build(col, s, ends[p], nulls)
+            for row in range(s, ends[p]):
+                var lo = lo_idx[row]
+                var hi = hi_idx[row]
+                if hi < lo:
+                    hi = lo
+                var cnt = live[hi] - live[lo]
                 var meanf: Float64 = 0.0
-                if win.cnt > 0:
-                    meanf = win.sum() / Float64(win.cnt)
-                store_f64_or_null(arr, row, meanf, win.cnt)
+                if cnt > 0:
+                    meanf = tree.query(lo - s, hi - s) / Float64(cnt)
+                store_f64_or_null(arr, row, meanf, cnt)
     else:
         raise Error("partition_sliding_frame: AVG unsupported type " + String(col.arrow_type))
     return Column.from_primitive[DType.float64](arr)
