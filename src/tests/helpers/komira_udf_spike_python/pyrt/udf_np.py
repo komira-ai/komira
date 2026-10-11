@@ -2,6 +2,7 @@
 so that a function above that does not need numpy does not import it)."""
 
 import numpy as np
+import numpy.typing as npt
 
 
 def fahrenheit_np(c: np.ndarray) -> np.ndarray:
@@ -27,3 +28,41 @@ def drop_views(x: np.ndarray) -> np.ndarray:
     """Lets go of every input keep_view kept."""
     KEPT.clear()
     return x * 1.0
+
+
+def typed_np(x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """A subscripted numpy hint: its dtype is read from the source."""
+    return x * 2.0
+
+
+def np_raise(x: np.ndarray) -> np.ndarray:
+    raise ValueError("np_raise: the whole batch")
+
+
+def np_list(x: np.ndarray) -> np.ndarray:
+    """Returns a Python list, which the adapter converts."""
+    return [float(v) * 2.0 for v in x]
+
+
+def np_2d(x: np.ndarray) -> np.ndarray:
+    return x.reshape(-1, 1)
+
+
+def np_int_out(x: np.ndarray) -> np.ndarray:
+    """int64 in, int64 out: a safe cast to a declared float64 result."""
+    return x * 2
+
+
+def np_float_out(x: np.ndarray) -> np.ndarray:
+    """float64 out for a declared int64 result: an unsafe cast."""
+    return x * 0.5
+
+
+def np_reversed(x: np.ndarray) -> np.ndarray:
+    """A view with a negative stride: not contiguous."""
+    return x[::-1]
+
+
+def np_filled(x: np.ndarray) -> np.ndarray:
+    """A masked input in, a plain array out: no row of the result is null."""
+    return x.filled(0.0) + 1.0

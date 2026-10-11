@@ -251,7 +251,7 @@ static int32_t check_spec(const komira_udf_spec* s, komira_udf_error* e, struct 
     return pyrt_fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "shape is not SCALAR or MAP_BATCHES_COLUMN", NULL, -1);
   if (s->args == NULL || s->args->format == NULL || strcmp(s->args->format, "+s") != 0 ||
       s->args->n_children > PYRT_MAX_ARGS)
-    return pyrt_fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "args is not a struct of at most 8 fields", NULL, -1);
+    return pyrt_fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "args is not a struct of at most 64 fields", NULL, -1);
   u->n_args = (int)s->args->n_children;
   for (int i = 0; i < u->n_args; i++)
     if (!leaf_fmt(s->args->children[i], &u->arg_fmt[i]))

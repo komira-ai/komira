@@ -28,9 +28,9 @@ from komira_udf_spike_abi.conform import run_suite
 from komira_udf_spike_python.managed_cases import managed_cases
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
-comptime RUN = 49
-"""The corpus's 107 cases less the 58 runtime-fault ones."""
-comptime SKIPPED = 15
+comptime RUN = 54
+"""The corpus's 117 cases less the 63 runtime-fault ones."""
+comptime SKIPPED = 16
 """The cases of shapes this runtime does not declare."""
 
 

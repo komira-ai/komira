@@ -5,14 +5,17 @@
 # implements in its language (design section 6.3). This runtime's entries are
 # `module:function`, so every entry becomes `udf_fixtures:<name>`.
 #
-# 58 cases are left out: their fixtures are runtime bugs or output layouts
+# 63 cases are left out: their fixtures are runtime bugs or output layouts
 # that only a runtime's own C code chooses. The bugs: an output or table with
 # the wrong layout, buffers or device, a null_count that lies, OK without an
 # output, `out` left set on an error, an input not moved (on OK or on an
 # error), an error row outside the batch or left unset, an error filled on
-# OK, a frame that never ends or answers after its error. The legal layout
-# edges: an empty output without a data buffer, null_count -1, an output or
-# table at a nonzero offset. A runtime's user code cannot commit any of them;
+# OK, a frame that never ends or answers after its error, an aggregate that
+# refuses a second group set per instance. The legal layout edges: an empty
+# output without a data buffer, null_count -1, an output or table at a
+# nonzero offset. What a runtime's C side does with the Arrow structs: a
+# child array moved out and released on its own, the borrowed schemas'
+# flags read back. A runtime's user code cannot commit any of them;
 # only a runtime written to break the ABI can, which is what
 # komira-test/echo-broken is for. Everything else runs, and a case whose
 # shape the runtime does not declare is skipped by the runner and reported.
@@ -26,7 +29,9 @@ comptime FIXTURE_MODULE = "udf_fixtures"
 def runtime_fault_cases() -> List[String]:
     """The cases whose fixtures are runtime bugs (above)."""
     return [
+        "agg_partials_on_own_instances",
         "bad_output_layout",
+        "child_moved_out",
         "error_released_on_ok",
         "error_row_left_unset",
         "fault_agg_args_not_moved",
@@ -38,6 +43,7 @@ def runtime_fault_cases() -> List[String]:
         "fault_args_not_moved",
         "fault_args_not_moved_on_error",
         "fault_error_row_below_minus_one",
+        "fault_error_row_minus_two",
         "fault_error_row_past_batch",
         "fault_error_row_past_batch_propagate",
         "fault_frame_input_not_moved",
@@ -72,6 +78,7 @@ def runtime_fault_cases() -> List[String]:
         "fault_table_n_children_2",
         "fault_table_negative_length",
         "fault_table_negative_offset",
+        "fault_table_null_count_below",
         "fault_table_null_count_lies",
         "fault_table_null_count_zero",
         "fault_table_null_rows",
@@ -83,6 +90,7 @@ def runtime_fault_cases() -> List[String]:
         "output_empty_without_data",
         "output_null_count_unknown",
         "output_sliced_offset",
+        "schema_flags_exported",
         "table_null_count_unknown",
     ]
 

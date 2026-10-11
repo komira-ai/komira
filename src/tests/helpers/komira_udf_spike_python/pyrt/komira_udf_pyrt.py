@@ -304,10 +304,7 @@ class Instance:
                 try:
                     o[i] = y
                 except (TypeError, ValueError, OverflowError):
-                    if self.result_fmt == "g" and type(y) is int:
-                        o[i] = float(y)
-                    else:
-                        return self._bad_value(y, i)
+                    return self._bad_value(y, i)
             if i == 0 or not i % CLOCK_EVERY:
                 t = now()
                 if deadline and t > deadline:
@@ -343,7 +340,7 @@ class Instance:
                 nulls += 1
                 continue
             try:
-                o[i] = float(y) if self.result_fmt == "g" and type(y) is int else y
+                o[i] = y
             except (TypeError, ValueError, OverflowError):
                 return self._bad_value(y, i)
         o.release()

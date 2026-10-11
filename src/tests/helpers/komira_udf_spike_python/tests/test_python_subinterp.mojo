@@ -27,7 +27,16 @@
 #     at its own; int32 arguments and results (4 bytes per value) in the
 #     per-row path, and 2^31 refused as an int32 result;
 #   - a cancel landing while a batch function runs is ERR_CANCELLED with
-#     row -1 (a row at the batch's length is a host fault).
+#     row -1 (a row at the batch's length is a host fault);
+#   - validate refuses a list of lists, *args, **kwargs and keyword-only
+#     arguments, names the shape a row or list hint does not fit, and reads
+#     a subscripted numpy hint's dtype; open_instance refuses live hints that
+#     differ from their source (a union, a set, a list of lists, a class
+#     named ndarray that is not numpy's: udf_shadow.py);
+#   - nulls past the first bitmap byte, per row (row 9 of 12) and in a
+#     column result (row 8 of 9); a column function returning no list; an
+#     int no float64 holds, refused as ERR_RETURN_TYPE at its row (it was
+#     ERR_INTERNAL: the adapter's int-to-float retry raised OverflowError).
 #
 # Mutants planted: komira_udf_pyrt.py's _rows writing a float into an int64
 # column through int() instead of refusing it: red (float_into_int); its
@@ -82,7 +91,25 @@ def _validate(mut rt: UdfRuntime) raises:
     )
     _refused(
         rt, spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_fixtures:fahrenheit_rows", TYPE_FLOAT64, TYPE_FLOAT64),
-        ERR_UNSUPPORTED, "is a row hint",
+        ERR_UNSUPPORTED, "is a row hint; shape MAP_BATCHES_COLUMN takes list or numpy",
+    )
+    _refused(
+        rt, spec1(SHAPE_SCALAR, "udf_fixtures:identity", TYPE_INT64, TYPE_INT64), ERR_UNSUPPORTED,
+        "is a list hint; shape SCALAR takes row",
+    )
+    _refused(
+        rt, spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_fixtures:nested_list", TYPE_INT64, TYPE_INT64), ERR_UNSUPPORTED,
+        "argument 0 has no type hint this runtime maps",
+    )
+    for e in ["var_args", "var_kwargs", "keyword_only"]:
+        _refused(rt, spec1(SHAPE_SCALAR, "udf_fixtures:" + e, TYPE_INT64, TYPE_INT64), ERR_UNSUPPORTED, "*args")
+    # A subscripted numpy hint's dtype, from the source (numpy is never
+    # imported by validate, so this runs in a sub-interpreter too).
+    var typed = spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_np:typed_np", TYPE_FLOAT64, TYPE_FLOAT64)
+    assert_equal(rt.validate(typed).status, OK, "NDArray[np.float64] validates as float64")
+    _refused(
+        rt, spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_np:typed_np", TYPE_INT64, TYPE_INT64), ERR_UNSUPPORTED,
+        "is hinted float64, declared int64",
     )
     _refused(rt, spec1(SHAPE_SCALAR, "no_such_module:f", TYPE_INT64, TYPE_INT64), ERR_DESCRIPTOR, "not on the runtime's path")
     _refused(rt, spec1(SHAPE_SCALAR, "udf_fixtures.double", TYPE_INT64, TYPE_INT64), ERR_DESCRIPTOR, "<module>:<function>")
@@ -198,6 +225,60 @@ def _two_args_and_int32(mut rt: UdfRuntime) raises:
     assert_equal(r.outcome.fault, "", String(r.outcome))
 
 
+def _live_hint_refused(mut rt: UdfRuntime, spec: UdfSpec) raises:
+    assert_equal(rt.validate(spec).status, OK, spec.entry + ": its source reads as a mapped hint")
+    var o = open_instance_outcome(rt, spec)
+    assert_equal(status_name(o.status), "ERR_LOAD", spec.entry + ": " + String(o))
+    assert_true("type hint this runtime maps" in o.message, spec.entry + ": " + String(o))
+
+
+def _values_and_refusals(mut rt: UdfRuntime) raises:
+    # The live hints, checked again by open_instance: each function's
+    # source reads as a mapped hint, and the name it uses was rebound before
+    # its def (udf_shadow.py), so the live object is another type.
+    _live_hint_refused(rt, spec1(SHAPE_SCALAR, "udf_shadow:union_hint", TYPE_INT64, TYPE_INT64))
+    _live_hint_refused(rt, spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_shadow:set_hint", TYPE_INT64, TYPE_INT64))
+    _live_hint_refused(rt, spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_shadow:nested_hint", TYPE_INT64, TYPE_INT64))
+    _live_hint_refused(rt, spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_shadow:fake_ndarray", TYPE_INT64, TYPE_INT64))
+
+    # A per-row null past the first byte of the validity bitmap: row 9 of 12.
+    var nz = spec1(SHAPE_SCALAR, "udf_fixtures:null_on_zero", TYPE_INT64, TYPE_INT64)
+    var r = call_once(rt, nz, ints([1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 11, 12]))
+    assert_true(r.outcome.is_ok(), String(r.outcome))
+    var want = Column(TYPE_INT64)
+    for v in [2, 4, 6, 8, 10, 12, 14, 16, 18]:
+        want.append_int(Int64(v))
+    want.append_null()
+    want.append_int(22)
+    want.append_int(24)
+    assert_equal(same_column(r.column, want), "", "per row, row 9 null")
+
+    # A column result with a null at row 8 of 9: its bitmap needs a second
+    # byte, and the bit is row 8's.
+    var nzl = spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_fixtures:none_on_zero_list", TYPE_INT64, TYPE_INT64)
+    r = call_once(rt, nzl, ints([1, 2, 3, 4, 5, 6, 7, 8, 0]))
+    assert_true(r.outcome.is_ok(), String(r.outcome))
+    var wantl = Column(TYPE_INT64)
+    for v in [1, 2, 3, 4, 5, 6, 7, 8]:
+        wantl.append_int(Int64(v))
+    wantl.append_null()
+    assert_equal(same_column(r.column, wantl), "", "column, row 8 null")
+
+    # A column function returning no list: ERR_RETURN_TYPE for the batch.
+    var nal = spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_fixtures:not_a_list", TYPE_INT64, TYPE_INT64)
+    r = call_once(rt, nal, ints([1, 2]))
+    assert_equal(status_name(r.outcome.status), "ERR_RETURN_TYPE", String(r.outcome))
+    assert_equal(r.outcome.row, -1, String(r.outcome))
+    assert_true("the result is a int, not a list" in r.outcome.message, String(r.outcome))
+
+    # An int no float64 holds, returned per row: ERR_RETURN_TYPE at its row
+    # (user code's value), not a runtime failure.
+    var huge = spec1(SHAPE_SCALAR, "udf_fixtures:huge_float", TYPE_FLOAT64, TYPE_FLOAT64)
+    r = call_once(rt, huge, floats([1.0]))
+    assert_equal(status_name(r.outcome.status), "ERR_RETURN_TYPE", String(r.outcome))
+    assert_equal(r.outcome.row, 0, String(r.outcome))
+
+
 def _numpy_fails_here(mut rt: UdfRuntime) raises:
     var np = spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_np:fahrenheit_np", TYPE_FLOAT64, TYPE_FLOAT64)
     assert_equal(rt.validate(np).status, OK, "validate reads the source; numpy is never imported")
@@ -213,6 +294,7 @@ def main() raises:
     _validate(rt)
     _calls(rt)
     _two_args_and_int32(rt)
+    _values_and_refusals(rt)
     _numpy_fails_here(rt)
     rt.shutdown()
     print("test_python_subinterp: ok")
