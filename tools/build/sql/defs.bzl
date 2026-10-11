@@ -14,6 +14,7 @@ script), with one fixed invocation:
         -cmd ".mode trash"
         -cmd "SET threads = 1; SET TimeZone = 'UTC'; ...; SET allowed_paths = [...]"
         -cmd "SELECT CASE WHEN version() <> 'v<version>' THEN error(...) END"
+        -cmd "SELECT CASE WHEN getenv('TZ') IS DISTINCT FROM 'UTC' OR ... THEN error(...) END"
         -cmd ".safe_mode"
         -cmd ".mode duckbox"
         -f ../sql/0_<src> -f ../sql/1_<src> ...
@@ -22,7 +23,9 @@ script), with one fixed invocation:
         :memory:
 
 with `LD_LIBRARY_PATH` naming the dist's `native_libs`, `LC_ALL=C` and
-`TZ=UTC`, and nothing else in its environment.
+`TZ=UTC`, and nothing else in its environment, read back by the getenv()
+check (the farm's workers run in UTC with a libstdc++ of their own, so a
+dropped entry would otherwise change nothing).
 
 `<work>` is the action's working directory, the directory of its declared
 outputs, where every input is copied first. The SQL names inputs and outputs
@@ -162,7 +165,21 @@ def _sql_oracle_impl(ctx):
         "SET allowed_paths = " + _sql_list(allowed),
     ])
     version = "SELECT CASE WHEN version() <> 'v{v}' THEN error('sql_oracle: this duckdb is ' || version() || ', the pin says v{v}') END".format(v = dist.version)
-    exists = "; ".join([
+
+    # The action's environment, read back before `.safe_mode` turns getenv()
+    # off. Every worker runs in UTC with libstdc++ installed, so an entry
+    # dropped from `env` below would change nothing a fixture can see on the
+    # farm; this check makes the drop (or another value) fail every oracle.
+    # The values are written here a second time, not taken from `env`.
+    env_check = cmd_args(
+        dist.native_libs,
+        format = ("SELECT CASE WHEN getenv('TZ') IS DISTINCT FROM 'UTC' OR getenv('LC_ALL') IS DISTINCT FROM 'C' " +
+                  "OR getenv('LD_LIBRARY_PATH') IS DISTINCT FROM '{}/lib' " +
+                  "THEN error('sql_oracle: the action environment is TZ=' || coalesce(getenv('TZ'), '(unset)') || " +
+                  "' LC_ALL=' || coalesce(getenv('LC_ALL'), '(unset)') || ' LD_LIBRARY_PATH=' || coalesce(getenv('LD_LIBRARY_PATH'), '(unset)') || " +
+                  "', the rule sets TZ=UTC LC_ALL=C and the dist''s lib/') END"),
+    )
+    exists ="; ".join([
         "SELECT CASE WHEN (SELECT count(*) FROM glob('{o}')) = 0 THEN error('sql_oracle: the SQL wrote no {o}, a declared output') END".format(o = o)
         for o in ctx.attrs.outputs
     ])
@@ -182,6 +199,8 @@ def _sql_oracle_impl(ctx):
         settings,
         "-cmd",
         version,
+        "-cmd",
+        env_check,
         "-cmd",
         ".safe_mode",
         "-cmd",

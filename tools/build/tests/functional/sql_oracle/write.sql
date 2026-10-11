@@ -1,5 +1,7 @@
--- The settings sql_oracle fixes, read back: a change to them in the rule
--- fails this target.
+-- The settings sql_oracle fixes, read back: a change to threads in the rule
+-- fails this target. The farm's workers run in UTC, so a dropped
+-- `SET TimeZone` does not; the sql_oracle self-test pins it in the
+-- invocation (buck2 aquery).
 SELECT CASE
     WHEN current_setting('threads') <> 1 THEN error('threads is ' || current_setting('threads') || ', not 1')
     WHEN current_setting('TimeZone') <> 'UTC' THEN error('TimeZone is ' || current_setting('TimeZone') || ', not UTC')

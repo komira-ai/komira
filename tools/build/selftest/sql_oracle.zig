@@ -1,21 +1,28 @@
 //! sql_oracle: the rule's refusals (tools/build/sql/defs.bzl), each with its
-//! exact message. The analysis refusals are a refusal table; the build
-//! failures are builds of tests//negative/sql_oracle that must fail in the
-//! sql_oracle action itself, with DuckDB's (or the rule's own) message. A
-//! failed action is never cached, so every red here is a fresh execution on
-//! the farm (what-ran is checked after each). The working fixture,
-//! tests//functional/sql_oracle:check, is built first: a red is only proof
-//! while the same rule builds a correct oracle green.
+//! exact message, and the action's invocation. The analysis refusals are a
+//! refusal table; the build failures are builds of tests//negative/sql_oracle
+//! that must fail in the sql_oracle action itself, with DuckDB's (or the
+//! rule's own) message. A failed action is never cached, so every red here is
+//! a fresh execution on the farm (what-ran is checked after each). The
+//! working fixture, tests//functional/sql_oracle:check, is built first: a red
+//! is only proof while the same rule builds a correct oracle green. Then
+//! `buck2 aquery` of tests//functional/sql_oracle:write must show the fixed
+//! invocation piece by piece (INVOCATION).
 //!
 //! Catches: `.safe_mode` dropped (undeclared_output, input_outside_inputs,
-//! absolute_path, setting_changed and dot_command build green), the
-//! existence check dropped (missing_output fails with buck2's message, not
-//! the rule's), and each analysis `fail()` deleted.
+//! absolute_path, setting_changed and dot_command build green; the
+//! invocation lacks it), the existence check dropped or narrowed to some
+//! positions (one of missing_{first,middle,last}_output fails with buck2's
+//! message, not the rule's), `SET TimeZone = 'UTC'` or the environment check
+//! dropped (the invocation lacks it; a dropped TZ, LC_ALL or LD_LIBRARY_PATH
+//! entry fails the green fixture in the environment check), and each
+//! analysis `fail()` deleted.
 const std = @import("std");
 const lib = @import("lib/lib.zig");
 
 const PKG = "tests//negative/sql_oracle:";
 const GREEN = "tests//functional/sql_oracle:check";
+const WRITE = "tests//functional/sql_oracle:write";
 
 const REFUSALS = [_]lib.Row{
     .{
@@ -63,13 +70,59 @@ const Red = struct {
 
 const REDS = [_]Red{
     .{ .name = "undeclared_output", .text = "Permission Error: Cannot access file \"extra.tsv\" - file system operations are disabled by configuration" },
-    .{ .name = "missing_output", .text = "Invalid Input Error: sql_oracle: the SQL wrote no missing.tsv, a declared output" },
+    .{ .name = "missing_first_output", .text = "Invalid Input Error: sql_oracle: the SQL wrote no first.tsv, a declared output" },
+    .{ .name = "missing_middle_output", .text = "Invalid Input Error: sql_oracle: the SQL wrote no middle.tsv, a declared output" },
+    .{ .name = "missing_last_output", .text = "Invalid Input Error: sql_oracle: the SQL wrote no last.tsv, a declared output" },
     .{ .name = "sql_error", .text = "Parser Error: syntax error at or near \"SELEC\"" },
     .{ .name = "input_outside_inputs", .text = "Permission Error: Cannot access file \"not_staged.csv\" - file system operations are disabled by configuration" },
     .{ .name = "absolute_path", .text = "Permission Error: Cannot access file \"/etc/passwd\" - file system operations are disabled by configuration" },
     .{ .name = "setting_changed", .text = "Invalid Input Error: Cannot change configuration option \"threads\" - the configuration has been locked" },
     .{ .name = "dot_command", .text = ".sh/.system cannot be used in -safe mode" },
 };
+
+/// The pieces of the sql_oracle action's argv, as `buck2 aquery` prints it
+/// (`[word, word, ...]`), each required after the one before. `SET TimeZone`
+/// is one a farm build cannot see: every worker runs in UTC, so dropping it
+/// builds every fixture green. The rest of the documented invocation is
+/// pinned with it, so the README's invocation is the one that runs. The
+/// existence checks are left to the missing_*_output reds.
+const Pin = struct { what: []const u8, text: []const u8 };
+
+const INVOCATION = [_]Pin{
+    .{ .what = "the flags", .text = "duckdb, -no-init, -batch, -bail, -cmd, .cd " },
+    .{ .what = "threads and TimeZone", .text = ", -cmd, .mode trash, -cmd, SET threads = 1; SET TimeZone = 'UTC'; " },
+    .{ .what = "no extensions, no temp directory, the allowed paths, then the version check", .text = "SET autoinstall_known_extensions = false; SET autoload_known_extensions = false; SET temp_directory = ''; SET enable_progress_bar = false; SET allowed_paths = ['data.csv', 'expected.tsv', 'rows.csv', 'rows.parquet'], -cmd, SELECT CASE WHEN version() <> 'v" },
+    .{ .what = "the environment check (TZ=UTC, LC_ALL=C, the dist's lib/)", .text = ", -cmd, SELECT CASE WHEN getenv('TZ') IS DISTINCT FROM 'UTC' OR getenv('LC_ALL') IS DISTINCT FROM 'C' OR getenv('LD_LIBRARY_PATH') IS DISTINCT FROM '" },
+    .{ .what = ".safe_mode before the first src", .text = ", -cmd, .safe_mode, -cmd, .mode duckbox, -f, ../sql/0_write.sql, -cmd, .mode trash, -cmd, " },
+    .{ .what = "the in-memory database, last", .text = ", :memory:]\"" },
+};
+
+/// `buck2 aquery` of the working oracle's action: its argv holds every
+/// INVOCATION piece in order, `-f` once (no src before `.safe_mode`).
+fn invocation(c: *lib.Ctx) !void {
+    const res = try c.run(&.{ "aquery", WRITE, "--output-attribute", "cmd", "--output-attribute", "category", "--json" }, .{});
+    if (!res.ok()) {
+        c.fail("invocation: buck2 aquery {s} failed (see {s}); its last lines:\n{s}", .{ WRITE, res.log, lib.text.tail(res.stderr, 12) });
+        return;
+    }
+    if (lib.text.count(res.stdout, "\"category\": \"sql_oracle\"") != 1) {
+        c.fail("invocation: buck2 aquery {s} does not show one sql_oracle action (see {s})", .{ WRITE, res.log });
+        return;
+    }
+    var pos: usize = 0;
+    for (INVOCATION) |pin| {
+        const at = std.mem.indexOfPos(u8, res.stdout, pos, pin.text) orelse {
+            c.fail("invocation: the sql_oracle action of {s} lacks {s}: no `{s}` after byte {d} of its argv (see {s})", .{ WRITE, pin.what, pin.text, pos, res.log });
+            return;
+        };
+        pos = at + pin.text.len;
+    }
+    if (lib.text.count(res.stdout, ", -f, ") != 1) {
+        c.fail("invocation: the sql_oracle action of {s} runs -f {d} times, not once (see {s})", .{ WRITE, lib.text.count(res.stdout, ", -f, "), res.log });
+        return;
+    }
+    c.pass("invocation: the sql_oracle action of {s} runs with all {d} pinned pieces in order", .{ WRITE, INVOCATION.len });
+}
 
 fn holds(r: anytype, want: []const u8) bool {
     return lib.text.contains(r.stderr, want) or lib.text.contains(r.stdout, want);
@@ -114,6 +167,7 @@ fn body(c: *lib.Ctx) !void {
     }
     c.pass("precondition: {s} builds", .{GREEN});
     try farmOnly(c, "precondition");
+    try invocation(c);
     try c.refusals(&REFUSALS);
     for (REDS) |row| try red(c, row);
 }

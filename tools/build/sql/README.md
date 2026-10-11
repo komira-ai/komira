@@ -33,6 +33,8 @@ duckdb -no-init -batch -bail \
           SET autoload_known_extensions = false; SET temp_directory = '';
           SET enable_progress_bar = false; SET allowed_paths = [<inputs>, <outputs>]" \
     -cmd "SELECT CASE WHEN version() <> 'v<version>' THEN error(...) END" \
+    -cmd "SELECT CASE WHEN getenv('TZ') IS DISTINCT FROM 'UTC' OR getenv('LC_ALL') IS DISTINCT FROM 'C'
+          OR getenv('LD_LIBRARY_PATH') IS DISTINCT FROM '<native_libs>/lib' THEN error(...) END" \
     -cmd ".safe_mode" \
     -cmd ".mode duckbox" \
     -f ../sql/0_<src> -f ../sql/1_<src> ... \
@@ -55,6 +57,13 @@ duckdb -no-init -batch -bail \
 - **The version check**: the binary must report the version
   `komira//third_party/duckdb:duckdb` pins
   (`sql_oracle: this duckdb is <got>, the pin says v<version>`).
+- **The environment check**: the action's `TZ`, `LC_ALL` and
+  `LD_LIBRARY_PATH`, read back with `getenv()` before `.safe_mode` turns it
+  off, must be the values the rule sets (`sql_oracle: the action
+  environment is TZ=<got> LC_ALL=<got> LD_LIBRARY_PATH=<got>, ...`). The
+  farm's workers run in UTC with a libstdc++ of their own, so without this
+  check an entry dropped from the rule's environment would build every
+  fixture green.
 - **`.safe_mode`** sets `enable_external_access = false` and
   `lock_configuration = true` before any of the SQL runs. From then on:
   - the SQL can open only the paths in `allowed_paths`, its inputs and
@@ -112,19 +121,32 @@ query) is where it is enforced.
 - [`tests//negative/sql_oracle`](../tests/negative/sql_oracle/BUCK): the
   planted defects. The self-test scenario
   [`sql_oracle`](../selftest/sql_oracle.zig) builds the working `check`
-  first, then requires each analysis refusal's message and each build's
-  failure in its `sql_oracle` action with its message: an undeclared
-  output, a missing output, a SQL error, a read of a package file that is
-  not an input, a read of an absolute path, a changed setting and a dot
-  command. A failed action is never cached, so each red is a fresh run on
-  the farm.
+  first, then requires `buck2 aquery` of `write` to show the invocation
+  above piece by piece (the flags, `SET threads = 1; SET TimeZone = 'UTC'`,
+  the other settings and allowed paths, the version and environment
+  checks, `.safe_mode` before the first src, `:memory:` last), then each
+  analysis refusal's message and each build's failure in its `sql_oracle`
+  action with its message: an undeclared output, a missing output (the
+  first, the middle and the last of three), a SQL error, a read of a
+  package file that is not an input, a read of an absolute path, a changed
+  setting and a dot command. The farm's workers run in UTC, so `SET
+  TimeZone` is pinned by the invocation, not by a fixture's bytes. A failed
+  action is never cached, so each red is a fresh run on the farm.
 
 Mutants seen red when the rule was written: `.safe_mode` dropped (five reds
 of the scenario fail, four of them because the target built: `/etc/passwd`
 was readable and `.shell` ran on the worker); the existence check dropped
-(`missing_output` fails with buck2's message instead); `SET threads = 1`
+(the missing-output target fails with buck2's message instead); `SET threads = 1`
 dropped (`write` fails: `threads is 88, not 1`); a golden byte changed
 (`check` fails: `differ: a/expected.tsv vs golden/expected.tsv (golden)`);
 `random()` added to the Parquet query (`check` fails: `differ:
 a/rows.parquet vs b/rows.parquet (twin)`); the pinned version string
-changed (`this duckdb is v1.5.6, the pin says v1.5.5`).
+changed (`this duckdb is v1.5.6, the pin says v1.5.5`). Later: `SET
+TimeZone = 'UTC'` dropped (the scenario's invocation check fails; every
+fixture still built green); `TZ`, `LC_ALL` or `LD_LIBRARY_PATH` dropped
+from the environment (`check` fails in the environment check; the binary
+itself still ran without its `lib/`); the environment check dropped (the
+invocation check fails); the existence check narrowed to the last output
+(`missing_first_output` and `missing_middle_output` fail with buck2's
+message) or to the first (`missing_middle_output` and `missing_last_output`
+do).

@@ -17,15 +17,19 @@ sql_oracle(
     outputs = ["declared.tsv"],
 )
 
-# RED: `sql_oracle: the SQL wrote no missing.tsv, a declared output`.
-sql_oracle(
-    name = "missing_output",
-    srcs = "missing_output.sql",
+# RED: `sql_oracle: the SQL wrote no <pos>.tsv, a declared output`, for the
+# first, the middle and the last of three outputs: the rule checks each
+# declared output, so a check of only some positions leaves one of these to
+# buck2's own missing-output message.
+[sql_oracle(
+    name = "missing_{}_output".format(pos),
+    srcs = "missing_{}_output.sql".format(pos),
     outputs = [
-        "written.tsv",
-        "missing.tsv",
+        "first.tsv",
+        "middle.tsv",
+        "last.tsv",
     ],
-)
+) for pos in ["first", "middle", "last"]]
 
 # RED: `Parser Error: syntax error at or near "SELEC"`.
 sql_oracle(
