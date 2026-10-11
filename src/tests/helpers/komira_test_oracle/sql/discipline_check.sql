@@ -69,7 +69,8 @@ INSERT INTO planted VALUES
     ('limit and offset over order', 'SELECT id FROM t ORDER BY id ASC NULLS LAST LIMIT 2 OFFSET 1', ''),
     ('limit in an ordered subquery', 'SELECT id FROM (SELECT id FROM t ORDER BY id DESC NULLS FIRST LIMIT 2) AS s ORDER BY id ASC NULLS LAST', ''),
     ('distinct on ordered', 'SELECT DISTINCT ON (k) k, id FROM t ORDER BY k ASC NULLS LAST, id ASC NULLS LAST', ''),
-    ('plain distinct', 'SELECT DISTINCT k FROM t ORDER BY k ASC NULLS LAST', ''),
+    ('distinct on ordered by its key', 'SELECT DISTINCT ON (k) k FROM t ORDER BY k ASC NULLS LAST', ''),
+    ('plain distinct','SELECT DISTINCT k FROM t ORDER BY k ASC NULLS LAST', ''),
     ('plain distinct in a subquery', 'SELECT k FROM (SELECT DISTINCT k FROM t) AS s ORDER BY k ASC NULLS LAST', ''),
     -- histogram: a one-argument key that is a CAST to a type other than FLOAT or DOUBLE; bins that name no column.
     ('histogram of a column', 'SELECT histogram(f) AS h FROM t ORDER BY h ASC NULLS LAST', 'histogram() at byte 7 takes an argument that is not a CAST to a type other than FLOAT or DOUBLE (no CAST); a FLOAT or DOUBLE histogram merges NaN and -0.0 by the order rows reach it'),
