@@ -17,6 +17,7 @@ INSERT INTO planted VALUES
     ('two statements', 'SELECT 1 AS a ORDER BY a ASC NULLS LAST; SELECT 2 AS b ORDER BY b ASC NULLS LAST', 'holds 2 statements, not one SELECT'),
     ('not a select', 'COPY t TO ''x.csv''', 'is not one SELECT: Only SELECT statements can be serialized to json!'),
     ('syntax error', 'SELEC 1', 'is not one SELECT: syntax error at or near "SELEC"'),
+    ('empty text', '', 'holds 0 statements, not one SELECT; its outermost query has no ORDER BY'),
     -- An ORDER BY on the outermost query.
     ('no order', 'SELECT id FROM t', 'its outermost query has no ORDER BY'),
     ('limit without order', 'SELECT id FROM t LIMIT 2', 'a LIMIT or OFFSET with no ORDER BY in the same query keeps the rows DuckDB reaches first; its outermost query has no ORDER BY'),
@@ -46,7 +47,13 @@ INSERT INTO planted VALUES
     ('rows frame, the function ordered', 'SELECT first_value(v ORDER BY id ASC NULLS LAST) OVER (ROWS 1 PRECEDING) AS c FROM t ORDER BY c ASC NULLS LAST', 'the window function first_value at byte 7 has a ROWS frame and no ORDER BY in its OVER clause, so the frame counts rows in the order they reach it'),
     ('rows frame of a named window', 'SELECT count(v) OVER w AS c FROM t WINDOW w AS (ROWS 1 PRECEDING) ORDER BY c ASC NULLS LAST', 'the window function count at byte 7 has a ROWS frame and no ORDER BY in its OVER clause, so the frame counts rows in the order they reach it'),
     ('rows frame in a subquery', 'SELECT s FROM (SELECT sum(v) OVER (ROWS BETWEEN CURRENT ROW AND CURRENT ROW) AS s FROM t) AS q ORDER BY s ASC NULLS LAST', 'the window function sum at byte 22 has a ROWS frame and no ORDER BY in its OVER clause, so the frame counts rows in the order they reach it'),
-    ('rows frame ordered', 'SELECT sum(v) OVER (ORDER BY id ASC NULLS LAST ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS c FROM t ORDER BY c ASC NULLS LAST', ''),
+    -- One case per bound kind where only that bound is a ROWS bound.
+    ('rows frame from the current row', 'SELECT sum(v) OVER (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS c FROM t ORDER BY c ASC NULLS LAST', 'the window function sum at byte 7 has a ROWS frame and no ORDER BY in its OVER clause, so the frame counts rows in the order they reach it'),
+    ('rows frame from a following row', 'SELECT sum(v) OVER (ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) AS c FROM t ORDER BY c ASC NULLS LAST', 'the window function sum at byte 7 has a ROWS frame and no ORDER BY in its OVER clause, so the frame counts rows in the order they reach it'),
+    ('rows frame to a preceding row', 'SELECT sum(v) OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS c FROM t ORDER BY c ASC NULLS LAST', 'the window function sum at byte 7 has a ROWS frame and no ORDER BY in its OVER clause, so the frame counts rows in the order they reach it'),
+    ('range frame from the current row', 'SELECT sum(v) OVER (RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS c FROM t ORDER BY c ASC NULLS LAST', ''),
+    ('groups frame unordered', 'SELECT sum(v) OVER (GROUPS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS c FROM t ORDER BY c ASC NULLS LAST', ''),
+    ('rows frame ordered','SELECT sum(v) OVER (ORDER BY id ASC NULLS LAST ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS c FROM t ORDER BY c ASC NULLS LAST', ''),
     ('rows frame unbounded', 'SELECT sum(v) OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS c FROM t ORDER BY c ASC NULLS LAST', ''),
     ('range frame unordered', 'SELECT sum(v) OVER (RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS c FROM t ORDER BY c ASC NULLS LAST', ''),
     -- A LIMIT, an OFFSET or a DISTINCT ON needs an ORDER BY in its own query node.
@@ -63,6 +70,7 @@ INSERT INTO planted VALUES
     ('limit in an ordered subquery', 'SELECT id FROM (SELECT id FROM t ORDER BY id DESC NULLS FIRST LIMIT 2) AS s ORDER BY id ASC NULLS LAST', ''),
     ('distinct on ordered', 'SELECT DISTINCT ON (k) k, id FROM t ORDER BY k ASC NULLS LAST, id ASC NULLS LAST', ''),
     ('plain distinct', 'SELECT DISTINCT k FROM t ORDER BY k ASC NULLS LAST', ''),
+    ('plain distinct in a subquery', 'SELECT k FROM (SELECT DISTINCT k FROM t) AS s ORDER BY k ASC NULLS LAST', ''),
     -- histogram: a one-argument key that is a CAST to a type other than FLOAT or DOUBLE; bins that name no column.
     ('histogram of a column', 'SELECT histogram(f) AS h FROM t ORDER BY h ASC NULLS LAST', 'histogram() at byte 7 takes an argument that is not a CAST to a type other than FLOAT or DOUBLE (no CAST); a FLOAT or DOUBLE histogram merges NaN and -0.0 by the order rows reach it'),
     ('histogram of a double', 'SELECT histogram(CAST(f AS DOUBLE)) AS h FROM t ORDER BY h ASC NULLS LAST', 'histogram() at byte 7 takes an argument that is not a CAST to a type other than FLOAT or DOUBLE (DOUBLE); a FLOAT or DOUBLE histogram merges NaN and -0.0 by the order rows reach it'),
@@ -77,6 +85,11 @@ INSERT INTO planted VALUES
     ('histogram_exact bins from a column', 'SELECT histogram_exact(id, [k]) AS h FROM t ORDER BY h ASC NULLS LAST', 'histogram_exact() at byte 7 takes bins that read a column, so each group''s bins are those of the first row that reaches it'),
     ('histogram bins from a subquery', 'SELECT histogram(id, (SELECT [max(k)] FROM u)) AS h FROM t ORDER BY h ASC NULLS LAST', 'histogram() at byte 7 takes bins that read a column, so each group''s bins are those of the first row that reaches it'),
     ('histogram constant bins', 'SELECT histogram(id, [1, 5]) AS h FROM t ORDER BY h ASC NULLS LAST', ''),
+    ('histogram bins from a column as a window', 'SELECT histogram(id, [k]) OVER () AS h FROM t ORDER BY h ASC NULLS LAST', 'histogram() at byte 7 takes bins that read a column, so each group''s bins are those of the first row that reaches it'),
+    -- The discipline reads the parse only: a call no DuckDB function binds
+    -- is left to the binder.
+    ('histogram of no argument', 'SELECT histogram() AS h FROM t ORDER BY h ASC NULLS LAST', ''),
+    ('json_group_array as a window', 'SELECT json_group_array(id) OVER () AS j FROM t ORDER BY j ASC NULLS LAST', 'json_group_array at byte 7 is refused: a macro over string_agg with no ORDER BY'),
     -- No clock, random draw or session read, wherever the call stands.
     ('random as a tie breaker', 'SELECT a FROM t ORDER BY a ASC NULLS FIRST, random() ASC NULLS LAST', 'random() at byte 44 depends on when, where or in which session the query runs'),
     ('now in a filter', 'SELECT id FROM t WHERE d < now() ORDER BY id ASC NULLS LAST', 'now() at byte 27 depends on when, where or in which session the query runs'),
@@ -85,6 +98,9 @@ INSERT INTO planted VALUES
     ('SQL text in FROM', 'SELECT a FROM query(''SELECT random() AS a'') ORDER BY a ASC NULLS LAST', 'query() at byte 14 runs SQL text the discipline cannot read'),
     ('age of one', 'SELECT age(d) AS a FROM t ORDER BY a ASC NULLS LAST', 'age() at byte 7 with one argument subtracts from today''s midnight'),
     ('age of two', 'SELECT age(d, e) AS a FROM t ORDER BY a ASC NULLS LAST', ''),
+    ('age of none', 'SELECT age() AS a FROM t ORDER BY a ASC NULLS LAST', ''),
+    ('now as a window', 'SELECT now() OVER () AS a FROM t ORDER BY a ASC NULLS LAST', 'now() at byte 7 depends on when, where or in which session the query runs'),
+    ('pragma function as a window', 'SELECT pragma_version() OVER () AS v ORDER BY v ASC NULLS LAST', 'pragma_version() at byte 7 reads the session''s catalog, settings or storage'),
     ('quoted value keyword', 'SELECT "current_date" AS d FROM t ORDER BY d ASC NULLS LAST', 'current_date at byte 7 is a SQL value keyword; DuckDB binds it to a clock or session function unless a column of that name is in scope'),
     ('qualified value keyword', 'SELECT t.CURRENT_TIMESTAMP AS d FROM t ORDER BY d ASC NULLS LAST', 'CURRENT_TIMESTAMP at byte 7 is a SQL value keyword; DuckDB binds it to a clock or session function unless a column of that name is in scope'),
     ('using sample', 'SELECT id FROM t USING SAMPLE 2 ORDER BY id ASC NULLS LAST', 'USING SAMPLE or TABLESAMPLE draws rows at random'),

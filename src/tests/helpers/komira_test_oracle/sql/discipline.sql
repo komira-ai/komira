@@ -130,15 +130,13 @@ WHERE class = 'WINDOW' AND coalesce(json_array_length(v, '$.orders'), 0) = 0
     OR json_extract_string(v, '$.end') IN ('CURRENT_ROW_ROWS', 'EXPR_PRECEDING_ROWS', 'EXPR_FOLLOWING_ROWS'))
 UNION ALL
 SELECT 'a LIMIT or OFFSET with no ORDER BY in the same query keeps the rows DuckDB reaches first' FROM located
-WHERE json_type(v, '$.modifiers') = 'ARRAY'
-  AND EXISTS (SELECT 1 FROM json_each(json_extract(v, '$.modifiers')) AS m
+WHERE EXISTS (SELECT 1 FROM json_each(json_extract(v, '$.modifiers')) AS m
     WHERE json_extract_string(m.value, '$.type') IN ('LIMIT_MODIFIER', 'LIMIT_PERCENT_MODIFIER'))
   AND NOT EXISTS (SELECT 1 FROM json_each(json_extract(v, '$.modifiers')) AS m
     WHERE json_extract_string(m.value, '$.type') = 'ORDER_MODIFIER' AND json_array_length(m.value, '$.orders') > 0)
 UNION ALL
 SELECT 'DISTINCT ON with no ORDER BY in the same query keeps the row of each key DuckDB reaches first' FROM located
-WHERE json_type(v, '$.modifiers') = 'ARRAY'
-  AND EXISTS (SELECT 1 FROM json_each(json_extract(v, '$.modifiers')) AS m
+WHERE EXISTS (SELECT 1 FROM json_each(json_extract(v, '$.modifiers')) AS m
     WHERE json_extract_string(m.value, '$.type') = 'DISTINCT_MODIFIER'
       AND coalesce(json_array_length(m.value, '$.distinct_on_targets'), 0) > 0)
   AND NOT EXISTS (SELECT 1 FROM json_each(json_extract(v, '$.modifiers')) AS m
@@ -148,8 +146,8 @@ SELECT fn || '()' || loc || ' takes an argument that is not a CAST to a type oth
     || CASE WHEN json_extract_string(v, '$.children[0].class') = 'CAST' THEN coalesce(json_extract_string(v, '$.children[0].cast_type.id'), '?') ELSE 'no CAST' END
     || '); a FLOAT or DOUBLE histogram merges NaN and -0.0 by the order rows reach it' FROM located
 WHERE class IN ('FUNCTION', 'WINDOW') AND list_contains(histograms(), fn) AND json_array_length(v, '$.children') = 1
-  AND (json_extract_string(v, '$.children[0].class') IS DISTINCT FROM 'CAST'
-    OR coalesce(json_extract_string(v, '$.children[0].cast_type.id'), 'UNBOUND') IN ('FLOAT', 'DOUBLE', 'UNBOUND'))
+  -- (only a CAST has a cast_type: any other argument reads as UNBOUND)
+  AND coalesce(json_extract_string(v, '$.children[0].cast_type.id'), 'UNBOUND') IN ('FLOAT', 'DOUBLE', 'UNBOUND')
 UNION ALL
 SELECT fn || '()' || loc || ' takes bins that read a column, so each group''s bins are those of the first row that reaches it' FROM located
 WHERE class IN ('FUNCTION', 'WINDOW') AND list_contains(histograms(), fn) AND json_array_length(v, '$.children') >= 2

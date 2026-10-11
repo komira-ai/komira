@@ -108,7 +108,8 @@ sql_oracle(
 #                          twin's order policy, an unreadable answer, an
 #                          unpaired name, and a two-shard tree
 #                          (tests/data/twin_tree) whose pairs must all be
-#                          compared.
+#                          compared and whose unpaired answer and twin must
+#                          both be reported, a .sql file skipped.
 #   test_duckdb_spellings  the reader against bytes the pinned DuckDB wrote
 #                          (:spellings): a reader built on a transcription,
 #                          or a DuckDB bump that changes a spelling.
@@ -130,10 +131,11 @@ mojo_library(
     ],
     test_data = {
         "tests/test_duckdb_spellings.mojo": {"spellings.tsv": ":spellings"},
-        # A two-shard tree for check_twins, staged at twin_tree/.
+        # A two-shard tree for check_twins, staged at twin_tree/ (a .sql
+        # file among the answers, which check_twins must skip).
         "tests/test_twin_checks.mojo": {
             f[len("tests/data/"):]: f
-            for f in glob(["tests/data/twin_tree/**/*.tsv"])
+            for f in glob(["tests/data/twin_tree/**"])
         },
         "tests/test_twins.mojo": dict(
             [("oracle/" + c + ".tsv", ":" + c) for c in _CASES] +

@@ -151,7 +151,9 @@ lists one:
 set before any SQL runs and locked.
 
 `:discipline_check` ([sql/discipline_check.sql](sql/discipline_check.sql))
-holds `oracle_offences` to planted cases, one per rule and arm (and cases
+holds `oracle_offences` to planted cases, one per rule and arm (a ROWS
+frame with each kind of bound alone, a call as a function and as a window
+where the rule reads both, and cases
 it must accept), each against the exact offences it must list, and one
 planted case per entry of each of the discipline's name lists, generated
 from a copy of the lists it holds itself (the lists must equal the copies),
@@ -186,7 +188,7 @@ compares rows in order, not when it compares the tied rows as a multiset.
 | test | what it proves | the defect it catches |
 |---|---|---|
 | `test_twins` | every `:<shard>/<case>` answer, read by value under its HAND twin's schema and policy (komira_plan_harness's `duckdb_tsv`, then `compare_canon`), equals the twin; no answer lacks a twin, no twin an answer | a wrong HAND file, a wrong oracle query, a DuckDB that answers otherwise |
-| `test_twin_checks` | the check fed planted defects, and a two-shard tree (`tests/data/twin_tree`) whose two pairs must both be compared | a check that compares text (`1.50` against `1.5`), misses a wrong cell, a missing row, NULL for a value, `-0.0` for `0.0`, ignores the twin's order policy, misses an unpaired name, or reads only some shards |
+| `test_twin_checks` | the check fed planted defects, and a two-shard tree (`tests/data/twin_tree`) whose two pairs must both be compared and whose unpaired answer and twin must both be reported | a check that compares text (`1.50` against `1.5`), misses a wrong cell, a missing row, NULL for a value, `-0.0` for `0.0`, ignores the twin's order policy, misses an unpaired name (in `pair_names` or in `check_twins`), reads a non-`.tsv` file as an answer, or reads only some shards |
 | `test_duckdb_spellings` | the reader against bytes the pinned DuckDB wrote (`:spellings`) | a reader built on a transcription of DuckDB's output; a DuckDB bump that changes a spelling |
 
 The mutants each test was seen red against are in the pull request that

@@ -4,7 +4,9 @@
 # (`1.50` against `1.5` would be a false difference), that misses a wrong
 # cell, a missing row or a NULL where the twin has a value, that ignores the
 # twin's row-order policy, or that does not report an answer with no twin
-# and a twin with no answer, or that reads only some shards of the tree.
+# and a twin with no answer (from pair_names or from check_twins over a
+# tree), that reads a file other than .tsv as an answer, that fails on a
+# tree with no oracle/ or hand/, or that reads only some shards of the tree.
 
 from std.testing import TestSuite, assert_equal, assert_true
 
@@ -57,13 +59,26 @@ def test_unpaired_names() raises:
 
 def test_every_shard_of_the_tree() raises:
     # BUCK stages tests/data/twin_tree at twin_tree/: shard s1 holds a pair
-    # that agrees, shard s2 a pair that differs. check_twins must compare
-    # both pairs and report the second, whichever shard listdir returns
-    # first: a walk that stops after one shard compares one pair.
+    # that agrees (a/), a HAND twin with no answer (d) and a .sql file
+    # beside the answers; shard s2 a pair that differs (b) and an answer with
+    # no twin (c). check_twins must compare both pairs, report the second,
+    # whichever shard listdir returns first (a walk that stops after one
+    # shard compares one pair), report both unpaired names (a check that
+    # drops pair_names' findings reports neither), and skip the .sql file.
     var report = check_twins(String("twin_tree"))
     assert_equal(report.compared, 2)
-    assert_equal(len(report.problems), 1)
-    assert_true(report.problems[0].startswith("s2/b: the DuckDB answer and its HAND twin differ: 1 mismatch"))
+    assert_equal(len(report.problems), 3)
+    assert_equal(report.problems[0], "s2/c: a DuckDB answer with no HAND twin")
+    assert_equal(report.problems[1], "s1/d: a HAND twin with no DuckDB answer")
+    assert_true(report.problems[2].startswith("s2/b: the DuckDB answer and its HAND twin differ: 1 mismatch"))
+
+
+def test_a_missing_tree_is_empty() raises:
+    # No oracle/ and no hand/ under the root: nothing to compare and
+    # nothing unpaired, not an error from listdir.
+    var report = check_twins(String("twin_tree/absent"))
+    assert_equal(report.compared, 0)
+    assert_equal(len(report.problems), 0)
 
 
 def main() raises:
