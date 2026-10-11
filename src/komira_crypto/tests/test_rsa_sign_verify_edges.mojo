@@ -5,8 +5,8 @@
 #   * rsa_sha256_sign with a real RSA-2048 PKCS#8 key: its signature equals
 #     the one Python's `cryptography` made for the same key and message
 #     (PKCS#1 v1.5 is deterministic) and verifies under rsa_pkcs1_sha256_verify;
-#   * rsa_sha256_sign refusing an Ed25519 PKCS#8 key (EVP_DigestSignInit
-#     fails: Ed25519 takes no digest) and a 488-bit RSA key (61 bytes cannot
+#   * rsa_sha256_sign refusing an Ed25519, a P-256 and an RSA-PSS PKCS#8 key
+#     (the parsed key is not EVP_PKEY_RSA) and a 488-bit RSA key (61 bytes cannot
 #     hold the 62-byte SHA-256 DigestInfo encoding, so the final sign fails
 #     after the size query);
 #   * rsa_pss_verify over SHA-384 and SHA-512 (the MD_SHA384 / MD_SHA512
@@ -181,14 +181,43 @@ def test_sign_matches_an_independent_signer() raises:
     )
 
 
+# A PKCS#8 PrivateKeyInfo holding a P-256 key (id-ecPublicKey, prime256v1)
+# whose ECPrivateKey carries the scalar 0x0102...20 and no public key (AWS-LC
+# computes it). Before the key-type check, rsa_sha256_sign returned a DER
+# ECDSA-SHA256 signature for it.
+def _p256_pkcs8_hex() -> String:
+    return (
+        "3041020100301306072a8648ce3d020106082a8648ce3d030107042730250201010420"
+        + "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+    )
+
+
+# The 488-bit key above with its AlgorithmIdentifier changed to id-RSASSA-PSS
+# (1.2.840.113549.1.1.10) and no parameters, which AWS-LC parses as an
+# EVP_PKEY_RSA_PSS key: the RSA key bytes are the same, so only the key-type
+# check refuses it before the sign step (whose error would say "final emit").
+comptime _RSA488_HEAD = "30820147020100300d06092a864886f70d0101010500"
+
+
+def _rsa488_pss_pkcs8_hex() -> String:
+    return "30820145020100300b06092a864886f70d01010a" + String(
+        _rsa488_pkcs8_hex()[byte=_RSA488_HEAD.byte_length():]
+    )
+
+
 def test_sign_refuses_keys_it_cannot_use() raises:
     var ed = _hex(
         "302e020100300506032b657004220420000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
     )
-    var e = _sign_err(ed)
-    assert_true(e.find("EVP_DigestSignInit failed") >= 0, "Ed25519 key: " + e)
+    var e = _sign_err(_hex(_p256_pkcs8_hex()))
+    assert_true(e.find("the key is not an RSA key") >= 0, "P-256 key: " + e)
+    e = _sign_err(ed)
+    assert_true(e.find("the key is not an RSA key") >= 0, "Ed25519 key: " + e)
     e = _sign_err(_hex(_rsa488_pkcs8_hex()))
     assert_true(e.find("EVP_DigestSign final emit failed") >= 0, "488-bit key: " + e)
+    assert_true(_rsa488_pkcs8_hex().startswith(_RSA488_HEAD), "rsaEncryption head")
+    e = _sign_err(_hex(_rsa488_pss_pkcs8_hex()))
+    assert_true(e.find("the key is not an RSA key") >= 0, "RSA-PSS key: " + e)
 
 
 # -----------------------------------------------------------------------------

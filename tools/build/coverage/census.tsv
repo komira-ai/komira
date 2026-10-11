@@ -159,8 +159,9 @@ komira//src/komira_orc:komira_orc	src/komira_orc	library	OK	3943	4729	-	-	no	con
 komira//src/komira_parquet:komira_parquet	src/komira_parquet	library	OK	5158	5165	-	-	no	conda	-	-
 komira//src/komira_parquet_api:komira_parquet_api	src/komira_parquet_api	library	OK	265	265	124	124	yes	release	-	-
 komira//src/komira_parquet_codec:komira_parquet_codec	src/komira_parquet_codec	library	OK	557	580	386	416	yes	conda	-	-
+komira//src/komira_physical_plan:komira_physical_plan	src/komira_physical_plan	library	OK	273	281	140	148	yes	conda	-	-
 komira//src/komira_plan_expr:komira_plan_expr	src/komira_plan_expr	library	OK	1983	3645	-	-	no	conda	src/komira_plan_expr/col_expr_bind.mojo,src/komira_plan_expr/col_expr_name.mojo,src/komira_plan_expr/expr_id.mojo,src/komira_plan_expr/expr_pool.mojo,src/komira_plan_expr/fs_bindings.mojo,src/komira_plan_expr/fs_descriptor_pod.mojo,src/komira_plan_expr/fs_resolver.mojo,src/komira_plan_expr/null_order_policy.mojo,src/komira_plan_expr/partition_expr.mojo,src/komira_plan_expr/partition_pred_pod.mojo,src/komira_plan_expr/payload_narrow.mojo,src/komira_plan_expr/scalar_desugar.mojo,src/komira_plan_expr/udf_data.mojo	-
-komira//src/komira_plan_ir:komira_plan_ir	src/komira_plan_ir	library	OK	2149	2401	1354	1662	yes	conda	-	-
+komira//src/komira_plan_ir:komira_plan_ir	src/komira_plan_ir	library	OK	1876	2120	1214	1514	yes	conda	-	-
 komira//src/komira_plan_proto:komira_plan_proto	src/komira_plan_proto	library	OK	0	0	-	-	no	release	-	-
 komira//src/komira_plan_stats:komira_plan_stats	src/komira_plan_stats	library	OK	163	283	91	116	yes	conda	src/komira_plan_stats/physical_type.mojo,src/komira_plan_stats/precision_scalar.mojo,src/komira_plan_stats/source_statistics.mojo	-
 komira//src/komira_plan_wire:komira_plan_wire	src/komira_plan_wire	library	OK	5184	5199	-	-	no	conda	-	-

@@ -76,6 +76,7 @@ def _held() -> List[Held]:
     # Resource: header fields, then the body oneof.
     l.append(Held("Resource", 4, 4, "reserved: the retired stage filter"))
     l.append(Held("Resource", 5, 5, "a typed per-cloud settings map"))
+    l.append(Held("Resource", 9, 9, "reserved: a deletable flag ADOPT_DELETABLE replaces"))
     l.append(Held("Resource", 17, 17, "unused"))
     l.append(Held("Resource", 19, 19, "unused"))
     l.append(
@@ -338,7 +339,7 @@ def test_the_probe_sees_a_declared_number() raises:
     what.append("labels (a map)")
     names.append("Resource")
     nums.append(8)
-    what.append("adopt (a bool)")
+    what.append("adopt (an enum, Adoption)")
     names.append("Value")
     nums.append(2)
     what.append("param (a string oneof arm)")

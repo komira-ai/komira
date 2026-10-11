@@ -194,11 +194,16 @@ def _match_dns_pattern(pattern: String, hostname: String) -> Bool:
     """Match a single SAN dNSName pattern against `hostname` per RFC 6125
     §6.4.3 wildcard rules.
 
+    - An empty pattern or an empty hostname never matches: RFC 5280
+      §4.2.1.6 forbids an empty dNSName, and an empty hostname names
+      nothing.
     - Lowercase both sides for ASCII case-insensitive compare.
     - Exact match always wins.
     - Wildcard `*.example.com`: matches `<one-label>.example.com` only.
     - Rejects `f*.example.com`, `*.*.example.com`, `*`.
     """
+    if len(pattern.as_bytes()) == 0 or len(hostname.as_bytes()) == 0:
+        return False
     var p = _ascii_lower_str(pattern)
     var h = _ascii_lower_str(hostname)
     # Exact match path
@@ -363,8 +368,12 @@ def match_hostname(cert: X509Certificate, hostname: String) raises -> Bool:
       2. If no SAN at all, fall back to subject CN (RFC 6125 §6.4.4 —
          legacy compat).
 
+    An empty hostname names nothing and matches no certificate (False).
+
     Raises on malformed SAN bytes; otherwise returns True/False.
     """
+    if len(hostname.as_bytes()) == 0:
+        return False
     var san_idx = x509_find_extension(cert, _oid_subject_alt_name())
     if san_idx >= 0:
         # NOTE: Extension is Copyable + Movable but NOT ImplicitlyCopyable

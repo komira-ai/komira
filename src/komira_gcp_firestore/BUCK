@@ -184,6 +184,7 @@ mojo_library(
         "tests/test_firestore_listen_resume_token.mojo",
         "tests/test_firestore_listen_terminal_rules.mojo",
         "tests/test_firestore_listen_terminal_status.mojo",
+        "tests/test_firestore_non_ascii_keys.mojo",
         "tests/test_firestore_preconditions.mojo",
         "tests/test_firestore_send_honours_its_request_deadline.mojo",
         "tests/test_firestore_value.mojo",

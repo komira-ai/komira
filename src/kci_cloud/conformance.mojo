@@ -16,7 +16,10 @@
 #                 carries exactly one retention mark, the node's
 #                 (`kci-retention=retain|delete`); and it carries the scope's
 #                 validation run id under the run-id key exactly, or no
-#                 run-id label when the scope has none;
+#                 run-id label when the scope has none. A node whose object
+#                 is a member binding with a DERIVED stamp (derived.mojo)
+#                 carries no labels: `live_labels` returns what attribution
+#                 derives for it, and steps 3, 12 and 15 check those;
 #   4. re-apply   an IDEMPOTENT RE-APPLY under a NEW provenance (another run
 #                 id and revision) is NOOP everywhere and mutates nothing:
 #                 provenance is never part of a digest;
@@ -48,6 +51,53 @@
 #                 same with no validation run (no run-id label anywhere).
 #                 A caller's scope without a run id cannot let an adapter
 #                 whose create path skips the tag pass.
+#  13. adoption   ADOPTION THROUGH `Resource.adopt`, into the emptied cloud:
+#                 the kit adds to `base` one resource it can adopt
+#                 (`_adoptable`: its type takes a cloud name, and its
+#                 primary node reads no value of another node), a copy of
+#                 the first such resource of `base`, else an empty body of
+#                 its own (a bucket, a queue, a topic, a secret or a service
+#                 account), with id and cloud name `KIT_ADOPTED`, no `uses`,
+#                 writing `adopt` ADOPT, and plants the object its primary
+#                 node declares (`plant_like`). `read_existing` must report that
+#                 object present and unstamped, of the node's kind and
+#                 under its cloud name. The apply that adopts it must not create it,
+#                 and must leave it stamped for the node and carrying the
+#                 adoption mark (`kci_adopted=true`). A modelled field
+#                 changed out of band is then converged by an UPDATE that
+#                 keeps the stamp and the mark (an adapter whose update
+#                 rewrites the label map would drop the mark, and kci would
+#                 then delete an object it did not create). An apply of
+#                 `base` alone RELEASES it: the outcome lists
+#                 it, the object still stands, unstamped, under its name,
+#                 it carries no kci label, and `list_owned` no longer
+#                 reports it. The kit then destroys the rest; the released
+#                 object stays.
+#  14. member     FOREIGN MEMBER, on a fresh apply of `base`: on the first
+#                 wanted grant node whose target is an owned object, and on
+#                 the first whose target is a cell resource (a cell-scope
+#                 binding; on GCP the project's policy), the kit plants out
+#                 of band (`plant_foreign_member`) a member this cell does not
+#                 stamp holding a role the adapter maps to a verb
+#                 (`MEMBER_FOREIGN`, `ROLE_MAPPED`), then the node's own
+#                 principal holding a role it does not map (`MEMBER_CELL`,
+#                 `ROLE_UNMAPPED`). After each, a plan must keep the node a
+#                 NOOP and report the new member as an unmanaged difference
+#                 (the node's report changes); an apply must change nothing,
+#                 and `member_present` must stay true. Where `base` lowers no
+#                 grant node of a kind (a shape that folds cell edges into the
+#                 identity), that half has nothing to plant on.
+#  15. born       BORN STAMPED, for every wanted node of `base`'s lowering,
+#                 from the emptied cloud each time: the kit arms
+#                 `fail_after_create_of(node)` (the create stores the object
+#                 as the request carried it, then reports an error) and
+#                 applies `base`, which must stop with an error, at that node
+#                 (`failed_after_create`). The node must then pass step 3's
+#                 label check as it stands, from the create request alone. A
+#                 re-apply under a new provenance must finish with no foreign
+#                 refusal, and must not create that node a second time. An
+#                 adapter that creates an object and stamps it in a second
+#                 call leaves an unstamped object behind and fails here.
 # Every apply that should finish must: one that stops part-way fails the kit
 # with what landed and what is pending.
 #
@@ -75,23 +125,29 @@ from kci_reconciler import (
     VERB_NOOP,
     VERB_UPDATE,
 )
-from kci_resource_proto.resource import Resource
+from komira_proto_codec import decode_json
+from kci_resource_proto.resource import Adoption, Resource
 
 from kci_cloud.adapter import CellContext, CloudAdapter, LoweredNode
+from kci_cloud.catalog import Catalog, body_field, primary_node
 from kci_cloud.deploy import (
     ApplyOutcome,
     apply_resources,
     destroy_resources,
     lower_data,
     plan_resources,
+    refuse_unless_valid,
 )
 from kci_cloud.clouds import Clouds
 from kci_cloud.labels import (
+    adopted_by,
+    is_kci_label_key,
     label_problems,
     retention_label_key,
     retention_label_value,
     validation_run_of,
 )
+from kci_cloud.metadata import PHYSICAL_NAME_FIELD
 
 
 trait ConformanceTarget(CloudAdapter):
@@ -126,7 +182,9 @@ trait ConformanceTarget(CloudAdapter):
         ...
 
     def live_labels(self, logical_id: String) -> List[Label]:
-        """The labels the live object of node `logical_id` carries."""
+        """The labels the live object of node `logical_id` carries; for a
+        member binding whose stamp is DERIVED, the labels its attribution
+        derives (derived.mojo)."""
         ...
 
     def plant_foreign(mut self, logical_id: String) raises:
@@ -146,6 +204,36 @@ trait ConformanceTarget(CloudAdapter):
     def creates_of(self, logical_id: String) -> Int:
         """How many creates of node `logical_id` the cloud has served over
         its lifetime (the kit compares counts before and after a step)."""
+        ...
+
+    def plant_like(mut self, node: LoweredNode) raises:
+        """Create, out of band and unstamped, the object `node` declares
+        (its kind, its cloud name and its state): what an adoption of it
+        expects to find."""
+        ...
+
+    def plant_foreign_member(mut self, node: String, member: String, role: String) raises:
+        """Add, out of band, `member` holding `role` to the binding behind
+        lowered grant node `node` (its target's policy, or the cell scope's
+        for a cell edge). `member` is `MEMBER_FOREIGN` (an identity this cell
+        does not stamp) or `MEMBER_CELL` (the node's own principal); `role`
+        is `ROLE_MAPPED` (a role the adapter's table maps to a verb) or
+        `ROLE_UNMAPPED`. The adapter turns each word into its own value."""
+        ...
+
+    def member_present(self, node: String, member: String, role: String) -> Bool:
+        """Whether `member` holds `role` (the kit's words, as for
+        `plant_foreign_member`) on the binding behind node `node` now."""
+        ...
+
+    def fail_after_create_of(mut self, node: String):
+        """Make the next create of lowered node `node` store the object
+        exactly as the request carried it, then report an error to the
+        caller (the wait timed out)."""
+        ...
+
+    def failed_after_create(self) -> String:
+        """The node `fail_after_create_of` hit (empty if none yet)."""
         ...
 
 
@@ -174,6 +262,13 @@ def _verb_of(actions: List[ChangeAction], lid: String) -> Int:
     for i in range(len(actions)):
         if actions[i].logical_id == lid:
             return actions[i].verb
+    return -1
+
+
+def _verb_of_applied(applied: List[AppliedNode], lid: String) -> Int:
+    for i in range(len(applied)):
+        if applied[i].logical_id == lid:
+            return applied[i].verb
     return -1
 
 
@@ -256,6 +351,121 @@ def _check_labels[
                 lowered[k].id + String(" carries validation run \"") + _shown(run)
                 + String("\", not \"") + _shown(want_run) + String("\""),
             )
+
+
+comptime MEMBER_FOREIGN = "FOREIGN"
+"""Step 14's word for an identity this cell does not stamp."""
+comptime MEMBER_CELL = "CELL"
+"""Step 14's word for the planted node's own principal."""
+comptime ROLE_MAPPED = "MAPPED"
+"""Step 14's word for a role the adapter's table maps to a verb."""
+comptime ROLE_UNMAPPED = "UNMAPPED"
+"""Step 14's word for a role the adapter's table does not map."""
+
+
+def _is_grant_node(n: LoweredNode) -> Bool:
+    """A wanted node of one grant edge: it names its principal, its access,
+    and a target or a cell resource (the shared lowering's edge fields)."""
+    if not n.wanted or n.field(String("principal")).byte_length() == 0:
+        return False
+    if n.field(String("access")).byte_length() == 0:
+        return False
+    return n.field(String("target")).byte_length() > 0 or n.field(String("cell")).byte_length() > 0
+
+
+def _grant_picks(lowered: List[LoweredNode]) -> List[String]:
+    """Step 14's nodes: the first grant node with an owned target, then the
+    first with a cell target (each where one exists)."""
+    var out = List[String]()
+    for want_cell in range(2):
+        for k in range(len(lowered)):
+            var on_cell = lowered[k].field(String("cell")).byte_length() > 0
+            if _is_grant_node(lowered[k]) and on_cell == (want_cell == 1):
+                out.append(lowered[k].id.copy())
+                break
+    return out^
+
+
+def _unmanaged_of(actions: List[ChangeAction], lid: String) -> String:
+    var act = _action_of(actions, lid)
+    if not act:
+        return String("")
+    return act.value().unmanaged.copy()
+
+
+comptime KIT_ADOPTED = "kitadopt"
+"""The id and the cloud name of the resource step 13 adopts: letters only
+and 8 bytes, inside every shape's name rule."""
+
+
+def _kit_arms() -> List[String]:
+    """The bodies step 13 tries, written empty, when no resource of `base`
+    can be copied: each a standalone type that reads no other resource."""
+    return ["bucket", "queue", "topic", "secret", "serviceAccount"]
+
+
+def _candidate(base: List[Resource], i: Int) raises -> Resource:
+    """Candidate `i` of step 13: a copy of `base[i]` for `i < len(base)`,
+    else an empty body of `_KIT_ARMS`; with id and cloud name
+    `KIT_ADOPTED`, no `uses`, writing `adopt` ADOPT."""
+    var r: Resource
+    if i < len(base):
+        r = base[i].copy()
+    else:
+        r = decode_json[Resource](
+            String('{"id":"x","') + _kit_arms()[i - len(base)] + String('":{}}')
+        )
+    r.id = String(KIT_ADOPTED)
+    r.uses.clear()
+    r.physical_name = String(KIT_ADOPTED)
+    r.adopt = Adoption(Adoption.ADOPT)
+    return r^
+
+
+def _adoptable[
+    S: ConformanceTarget
+](clouds: Clouds, mut cloud: S, ctx: CellContext, base: List[Resource]) raises -> List[Resource]:
+    """`base` and, after it, the first candidate (`_candidate`) step 13 can
+    adopt, or empty: its type takes a cloud name, the list with it is valid
+    on `cloud`, and its primary node is wanted and reads no value of another
+    node (so the object `plant_like` makes is the one the node declares).
+    Nothing in `base` names it, so `base` alone is the list it leaves."""
+    var catalog = Catalog.v1()
+    for i in range(len(base) + len(_kit_arms())):
+        try:
+            var r = _candidate(base, i)
+            var t = catalog.index_of(body_field(r))
+            if t < 0 or not catalog.types[t].takes_name:
+                continue
+            var adopting = base.copy()
+            adopting.append(r^)
+            refuse_unless_valid(clouds, cloud, ctx, adopting)
+            var pid = primary_node(catalog, adopting, String(KIT_ADOPTED))
+            var nodes = lower_data(cloud, adopting)
+            for k in range(len(nodes)):
+                if nodes[k].id == pid and nodes[k].wanted and len(nodes[k].inputs) == 0:
+                    return adopting^
+        except:
+            continue
+    return List[Resource]()
+
+
+def _check_adopted[
+    S: ConformanceTarget
+](step: String, cloud: S, ctx: CellContext, node: LoweredNode, when: String) raises:
+    """The live object of `node` carries the stamp of `node` and the
+    adoption mark."""
+    var labels = cloud.live_labels(node.id)
+    var want = ctx.scope.stamp(node.owner, node.id).identity()
+    var got = cloud.identity_of(labels)
+    if got != want:
+        raise _fail(step, node.id + String(" ") + when + String(" carries \"") + got + String("\", not \"") + want + String("\""))
+    if not adopted_by(labels):
+        raise _fail(
+            step,
+            node.id + String(" ") + when
+            + String(" does not carry the adoption mark kci_adopted=true; without it kci would delete an object it did not create"),
+        )
 
 
 def _wanted(nodes: List[LoweredNode]) -> Int:
@@ -502,3 +712,118 @@ def run_conformance[
         _ = destroy_resources(clouds, cloud, c12, base, creds, store12)
         if cloud.live_count() != 0:
             raise _fail("run tag", String("nodes left after the run-tag destroy"))
+
+    # 13. adoption through the resource's adopt field
+    var adopting = _adoptable(clouds, cloud, ctx, base)
+    if len(adopting) == 0:
+        raise _fail(
+            "adopt",
+            String("no resource of base, and none of the kit's own, can be adopted on this cloud: a type that")
+            + String(" takes a cloud name, whose primary node reads no value of another node"),
+        )
+    var rest = base.copy()
+    var pid = primary_node(Catalog.v1(), adopting, String(KIT_ADOPTED))
+    var low13 = lower_data(cloud, adopting)
+    var pnode = low13[0].copy()
+    for k in range(len(low13)):
+        if low13[k].id == pid:
+            pnode = low13[k].copy()
+    var name13 = pnode.field(String(PHYSICAL_NAME_FIELD))
+    cloud.plant_like(pnode)
+    var seen = cloud.read_existing(creds, pnode)
+    if not seen.present or seen.stamped:
+        raise _fail("adopt", pid + String(": read_existing does not report the planted object, present and unstamped"))
+    if seen.kind != pnode.kind or seen.name != name13:
+        raise _fail(
+            "adopt",
+            pid + String(": read_existing reports kind \"") + seen.kind + String("\" and name \"") + seen.name
+            + String("\"; the object is kind \"") + pnode.kind + String("\" named \"") + name13 + String("\""),
+        )
+    var store13 = InMemoryStateStore()
+    var creates13 = cloud.creates_of(pid)
+    _ = _applied("adopt", apply_resources(clouds, cloud, ctx, adopting, creds, store13))
+    if cloud.creates_of(pid) != creates13:
+        raise _fail("adopt", pid + String(" was created, not adopted"))
+    _check_adopted("adopt", cloud, ctx, pnode, String("after the adoption"))
+    cloud.tamper(pid)
+    var u13 = _applied("adopt", apply_resources(clouds, cloud, ctx, adopting, creds, store13))
+    if _verb_of_applied(u13, pid) != VERB_UPDATE:
+        raise _fail("adopt", pid + String(": a modelled field changed out of band did not update the adopted object"))
+    _check_adopted("adopt", cloud, ctx, pnode, String("after an update"))
+    var r13 = apply_resources(clouds, cloud, ctx, rest, creds, store13)
+    _ = _applied("release", r13)
+    var released = False
+    for i in range(len(r13.released)):
+        if r13.released[i] == pid:
+            released = True
+    if not released:
+        raise _fail("release", pid + String(" left the list but the apply did not release it"))
+    var after = cloud.read_existing(creds, pnode)
+    if not after.present or after.stamped or after.name != name13:
+        raise _fail("release", pid + String(": the released object does not still stand, unstamped, under its name"))
+    var left = cloud.live_labels(pid)
+    for i in range(len(left)):
+        if is_kci_label_key(left[i].key):
+            raise _fail("release", pid + String(" still carries the kci label ") + left[i].key)
+    var owned = cloud.list_owned(creds, ctx.scope)
+    for i in range(len(owned)):
+        if owned[i].owner_node == pid:
+            raise _fail("release", pid + String(" is still listed as kci's"))
+    _ = destroy_resources(clouds, cloud, ctx, rest, creds, store13)
+
+    # 14. foreign member, on the grant nodes of a fresh apply
+    var live14 = cloud.live_count()
+    var store14 = InMemoryStateStore()
+    _ = _applied("member", apply_resources(clouds, cloud, ctx, base, creds, store14))
+    var picks = _grant_picks(lowered)
+    for p in range(len(picks)):
+        ref node = picks[p]
+        for w in range(2):
+            var member = String(MEMBER_FOREIGN) if w == 0 else String(MEMBER_CELL)
+            var role = String(ROLE_MAPPED) if w == 0 else String(ROLE_UNMAPPED)
+            var what = node + String(": ") + member + String(" holding ") + role
+            var before = _unmanaged_of(plan_resources(clouds, cloud, ctx, base, creds, store14), node)
+            cloud.plant_foreign_member(node, member, role)
+            if not cloud.member_present(node, member, role):
+                raise _fail("member", what + String(" was planted but is not present"))
+            var act14 = _action_of(plan_resources(clouds, cloud, ctx, base, creds, store14), node)
+            if not act14 or act14.value().verb != VERB_NOOP:
+                raise _fail("member", what + String(" was planted and the node planned a change"))
+            ref now = act14.value().unmanaged
+            if now.byte_length() == 0 or now == before:
+                raise _fail("member", what + String(" was planted and not reported as an unmanaged difference"))
+            var m14 = cloud.mutations()
+            _all_noop("member", _applied("member", apply_resources(clouds, cloud, ctx, base, creds, store14)))
+            if cloud.mutations() != m14 or not cloud.member_present(node, member, role):
+                raise _fail("member", what + String(" was touched by an apply; it is not this cell's"))
+    _ = destroy_resources(clouds, cloud, ctx, base, creds, store14)
+    if cloud.live_count() != live14:
+        raise _fail("member", String("nodes left after the member destroy"))
+
+    # 15. born stamped: every created node, its create failing after it landed
+    var live15 = cloud.live_count()
+    for k in range(len(lowered)):
+        if not lowered[k].wanted:
+            continue
+        ref lid = lowered[k].id
+        var store15 = InMemoryStateStore()
+        cloud.fail_after_create_of(lid)
+        var o15 = apply_resources(clouds, cloud, ctx, base, creds, store15)
+        if not o15.error:
+            raise _fail("born", lid + String(": an apply whose create failed after landing did not stop"))
+        var hit15 = cloud.failed_after_create()
+        if hit15 != lid:
+            raise _fail("born", lid + String(" was armed, but the failed create was \"") + hit15 + String("\""))
+        var one = List[LoweredNode]()
+        one.append(lowered[k].copy())
+        _check_labels("born", cloud, ctx, one)
+        var c15 = cloud.creates_of(lid)
+        var again15 = _with_run(ctx, String("conformance-born"))
+        var r15 = apply_resources(clouds, cloud, again15, base, creds, store15)
+        if r15.error:
+            raise _fail("born", lid + String(": the re-apply after its failed create stopped: ") + r15.error.value())
+        if cloud.creates_of(lid) != c15:
+            raise _fail("born", lid + String(" was created again by the re-apply; it was not recognised as ours"))
+        _ = destroy_resources(clouds, cloud, ctx, base, creds, store15)
+        if cloud.live_count() != live15:
+            raise _fail("born", String("nodes left after the destroy that followed ") + lid)

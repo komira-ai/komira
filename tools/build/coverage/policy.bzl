@@ -111,8 +111,10 @@ COVERAGE_NO_GATE = {
 # red in census mode. A fixture of the tests cell reads its branch records
 # unless it passes `coverage_branch_gate = False` (coverage.bzl). A library
 # not on the list keeps BranchNotMeasured. mojo_library looks itself up by
-# its label, so a row whose library moved would be read by nothing:
-# branch_gate.bxl fails unless every row names a mojo_library.
+# its label's exact string, so a row whose library moved, or a row spelled
+# another way (`//src/x:x`), would be read by nothing: :branch_gate_rows
+# (BUCK) fails unless every row names a Mojo library and is spelled as that
+# library's label.
 #
 # A raising call in a `try:` body of its function is a decision of two arms
 # (kind `try`: the call returned, it raised into the handler), so a
@@ -160,7 +162,8 @@ COVERAGE_BRANCH_GATE = {
     # call's compiler-made branch before, refused in a `try:` body by it.
     "komira//src/komira_parquet_api:komira_parquet_api": "its four tests' branches all classify (124 arms of 2 files)",
     "komira//src/komira_parquet_codec:komira_parquet_codec": "its 16 tests' branches all classify (416 arms of 8 files, 14 of them `try` arms)",
-    "komira//src/komira_plan_ir:komira_plan_ir": "its 19 tests' branches all classify (1130 arms of 9 files)",
+    "komira//src/komira_physical_plan:komira_physical_plan": "its two tests' branches all classify (148 arms of 2 files)",
+    "komira//src/komira_plan_ir:komira_plan_ir": "its 25 tests' branches all classify (1514 arms of 10 files)",
     "komira//src/komira_plan_stats:komira_plan_stats": "its test's branches all classify (116 arms of 2 files)",
     "komira//src/komira_protobuf:komira_protobuf": "its two tests' branches all classify (106 arms of 2 files)",
     "komira//src/komira_resources:komira_resources": "its test's branches all classify (2 arms of 1 file)",

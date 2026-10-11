@@ -165,6 +165,10 @@ conda_release_set_check(
         "//src/komira_trace:komira_trace",
         "//src/komira_calendar:komira_calendar",
         "//src/komira_calendar_ics:komira_calendar_ics",
+        "//src/kci_artifact_proto:kci_artifact_proto",
+        "//src/kci_deploy_model_proto:kci_deploy_model_proto",
+        "//src/kci_manifest_proto:kci_manifest_proto",
+        "//src/kci_artifact:kci_artifact",
     ],
     release_set = "release_set.txt",
     order_tests = [

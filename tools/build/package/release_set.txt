@@ -69,6 +69,10 @@ member komira_vcard
 member komira_trace
 member komira_calendar
 member komira_calendar_ics
+member kci_artifact_proto
+member kci_deploy_model_proto
+member kci_manifest_proto
+member kci_artifact
 license Apache-2.0
 summary Every komira library of one release.
 home https://github.com/komira-ai/komira
