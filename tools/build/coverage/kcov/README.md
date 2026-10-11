@@ -112,7 +112,7 @@ count above 0.
 <dir>/zig <zig arguments...>
 ```
 
-`mojo_wrapper.sh` runs every link of `mojo build` as `<zig_dir>/zig cc
+`mojo_compile` runs every link of `mojo build` as `<zig_dir>/zig cc
 -target <t> -Wl,--strip-debug ...`. A coverage build passes `:cov_link` as
 `<zig_dir>`, so the wrapper is the same file for every compile; `cov_zig`
 finds its directory from `argv[0]` and runs `real/zig` and `debug_relocate`

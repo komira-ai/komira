@@ -866,8 +866,10 @@ When `conda.sh` and `conda_set.sh` go, slice 10 also drops their argument case f
 Action scripts that targets run, not the harness:
 - Replaced by their rows' Zig ports: `functional/aws_codegen/aws_codegen.sh` 8,
   `platform_table/limits_retired.sh` 6, `coverage/link_line.sh` 7, `mem_cap/cases.sh` 7,
-  `test_deadline/cases.sh` 7, `watchdog/cases.sh` 7, `test_data/runner_cases.sh` and
-  `test_command_case.sh` 7.
+  `test_deadline/cases.sh` 7, `test_data/runner_cases.sh` and `test_command_case.sh` 7.
+- Already replaced: `watchdog/cases.sh`. The compile wrapper's Zig port
+  (`tools/build/mojo/tools/mojo_compile.zig`) deleted it; `functional/watchdog/cases.zig` runs its
+  cases against the stand-in toolchain `functional/watchdog/standin.zig`.
 - Not in this design: `bundle_parity/parity.sh`, `coverage/{check,report,branch_check}.sh` and
   `install_gate/{cases,install_gate}.sh`. They are the actions of green functional targets that are
   already in the gate. Their port is part of the rule-script work under the build-architecture

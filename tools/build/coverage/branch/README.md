@@ -44,7 +44,7 @@ sub-target of the library's `[coverage]` (and each `[bc]`, `[pgo_bin]`,
 
 | sub-target | action category | output | what it does |
 |---|---|---|---|
-| `[coverage][bc][<test>]` | `mojo_emit_cov_bc` | `cov/branch/<test>.bc` | `mojo_wrapper.sh` (unchanged) runs `mojo build --emit llvm-bitcode --optimization-level 0 --debug-level line-tables`, with the same `-D` arguments (the library's `test_assert_level` and `test_defines`), against the same closure (the ungated package, its deps and the library's `test_deps`), with the same source root, as the test's `[coverage][bin]` and its release build |
+| `[coverage][bc][<test>]` | `mojo_emit_cov_bc` | `cov/branch/<test>.bc` | `mojo_compile` (unchanged) runs `mojo build --emit llvm-bitcode --optimization-level 0 --debug-level line-tables`, with the same `-D` arguments (the library's `test_assert_level` and `test_defines`), against the same closure (the ungated package, its deps and the library's `test_deps`), with the same source root, as the test's `[coverage][bin]` and its release build |
 | `[coverage][pgo_bin][<test>]` | `mojo_cov_pgo_link` | `cov/branch/<test>` | [cov_branch_link](#cov_branch_link) |
 | `[coverage][branch][<test>]` | `mojo_cov_branch_run` | `cov/branch/<test>.profdata` | [cov_branch_run](#cov_branch_run) |
 | `[coverage][branch_ir][<test>]` | `mojo_cov_branch_annotate` | `cov/branch/<test>.ll` | [cov_branch_annotate](#cov_branch_annotate) |
@@ -65,7 +65,7 @@ records).
    the pass pipeline `pgo-instr-gen,instrprof,default<O0>`: a relocatable
    object whose code counts its edges. Only this LLVM 24 reads the bitcode
    ([toolchains/llvm_branch](../../toolchains/llvm_branch/README.md#why-llvm-23-tools-are-safe-next-to-llvm-24)).
-2. The Mojo toolchain's zig links it as `mojo_wrapper.sh`'s `cc` shim links
+2. The Mojo toolchain's zig links it as `mojo_compile`'s `cc` shim links
    a release test (the line `mojo build` gives it: the compiler's
    `libKGENCompilerRTShared.so`, `--gc-sections`, `-lm`; the shim's
    `--strip-debug` and the one run path `$ORIGIN/lib`; then the C libraries

@@ -109,7 +109,7 @@ at its limit; its whole process group was killed) or `skipped` (a step it
 waits for was not `ok`), then the last lines of the output, and exits 0:
 that is the mutant's result, cached as any action's output. One exception:
 a compile that exits with a status of the compile wrapper's own
-(`mojo_wrapper.sh`: 2, 3 and 4, its refusals; 124, the watchdog; 129, 130
+(`mojo_compile`: 2, 3 and 4, its refusals; 124, the watchdog; 129, 130
 and 143, a signal) fails the action. That is the machine failing, not the
 mutant, so it is never cached as a result: the build fails and a rerun
 retries it. A file the step writes that is no output (the runner's PASS

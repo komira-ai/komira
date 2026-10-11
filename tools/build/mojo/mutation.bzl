@@ -199,7 +199,7 @@ def _step(v, status, limit, after, command, infra_exits):
     )
 
 # The compile wrapper's exit statuses that are a failure of the machine, not
-# of the mutant (mojo_wrapper.sh): a refusal, an output missing or naming the
+# of the mutant (mojo_compile): a refusal, an output missing or naming the
 # action's directory, the watchdog, a signal. `gate step` fails the action on
 # them, so they are never cached as a mutant's result.
 _INFRA_EXITS = ["2", "3", "4", "124", "129", "130", "143"]

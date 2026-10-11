@@ -2,7 +2,7 @@
 //!
 //! usage: <dir>/zig <zig arguments...>
 //!
-//! mojo_wrapper.sh runs every link of `mojo build` as
+//! mojo_compile runs every link of `mojo build` as
 //! `<zig_dir>/zig cc -target <t> -Wl,--strip-debug ... <compiler arguments>`.
 //! A coverage build (tools/build/mojo/README.md, "Coverage builds") passes a
 //! directory holding this program as <zig_dir>, so the wrapper itself is the
