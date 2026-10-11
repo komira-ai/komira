@@ -10,7 +10,8 @@
 # supervisor reads an empty envp as "inherit". Its stdout and stderr are drained concurrently
 # into the two files named by the spec, so neither pipe can fill and stall
 # it. Past `timeout_s` it is stopped (SIGTERM, then SIGKILL after
-# `grace_ms`) and the result says `timed_out`.
+# `grace_ms`) and the result says `timed_out`. Its clock (`now_ns`) is the
+# ProcessRunner default, CLOCK_MONOTONIC.
 #
 # After the child exits, the pipes are read until both reach EOF, or until
 # nothing has arrived for `_LINGER_TICKS` ticks: a grandchild that inherited a

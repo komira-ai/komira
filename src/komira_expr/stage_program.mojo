@@ -4,14 +4,25 @@
 # This module publishes the foundational engine IR for `Stage[Program]`:
 #
 #   - 3 role traits: FilterLike / ProjectsLike / BreakerLike
-#   - 5 BreakerSpec sibling-family arms: HashAggSpec / SortSpec /
-#     TopNSpec / WindowSpec / JoinProbeSpec
+#   - 12 BreakerSpec arms: HashAggSpec / SortSpec / TopNSpec / WindowSpec /
+#     PartitionUdfSpec / WindowUdfSpec / JoinProbeSpec / DistinctSpec /
+#     PartitionTopNSpec / AsofJoinSpec (§5) and JoinBuildSpec /
+#     AsofJoinBuildSpec (§5b)
 #   - 3 sentinel structs (Optional-shaped slot fillers):
 #     NoFilter / NoProjects / NoBreaker
+#   - 1 FilterLike conformer over a predicate: PredicateFilter[P]
 #   - 1 aggregate marker: StageProgram[Filter, Projects, Breaker]
 #   - 1 placeholder ProjectsLike conformer for test coverage:
 #     ProjectListStub[arity: Int] (superseded by the typed per-arity-N
 #     Project family — kept here for unit-test self-containment).
+#
+# The consumer these shapes were written for is not in komira: a
+# `Stage[Program]` operator template that holds one state per breaker kind
+# and comptime-dispatches on `Self.Breaker.tag()`. Every mention below of
+# `Stage`, its arms or "the engine" describes that intended consumer, not
+# code in the tree. In the tree, `tests/test_stage_program.mojo` pins every
+# accessor row, and `ProjectsLike` is implemented by
+# `typed_projects.ProjectList` and `komira_op_agg_state.row_map_projects`.
 #
 # # Design discipline
 #
@@ -46,16 +57,16 @@
 #
 # # Encapsulation invariants
 #
-#   - NO UnsafePointer anywhere in this module (POD-only structs).
+#   - NO UnsafePointer anywhere in this module.
 #   - NO wildcard origins anywhere in this module (no fields hold
-#     references; every struct is a single `var sentinel: Int` POD).
+#     references). Every struct is a single `var sentinel: Int` POD except
+#     `PredicateFilter`, which holds its predicate by value (`var pred`).
 #   - NO partial-move-via-UnsafePointer shapes.
 #
 # # Cross-references
 #
 #   - ExprXBool / ExprXI64 / ExprXF64 / ExprXString trait family:
 #     komira_expr.expr_x
-#   - FusedMorselOp trait: komira_engine_operators.fused_morsel_op
 # =============================================================================
 
 from std.collections import Optional
@@ -91,19 +102,13 @@ comptime BREAKER_ASOF_JOIN: Int = 8
 # -----------------------------------------------------------------------------
 # BUILD-side breaker tags
 #
-# The two BUILD-side breaker arms — `JoinBuildSpec` / `AsofJoinBuildSpec` — are
-# TRUE pipeline breakers that accumulate the build-side input into a hash-join
-# / asof build table and emit NO downstream batch (`finalize` returns None).
-# The populated `OwnedPointer[<build table>]` is handed off to a downstream
-# PROBE segment via the executor-scoped cross-segment carrier slab (the
-# `take_*_build_table()` single-owner MOVE surface; OUT OF SCOPE for the
-# isolated arm — wired by the two-segment orchestration).
+# The two BUILD-side breaker arms — `JoinBuildSpec` / `AsofJoinBuildSpec` —
+# name the build side of a hash join and of an asof join: a breaker that
+# consumes the build input into a table and emits no batch downstream. The
+# table and its handoff to the probe side are not in komira.
 #
-# NOTE on numbering: these are the TYPED-path discriminators. They are
-# INDEPENDENT of the runtime path's breaker spec
-# `BREAKER_JOIN_BUILD = 7` / `BREAKER_ASOF_JOIN_BUILD = 8` (which collide with
-# the typed path's PARTITION_TOPN / ASOF_JOIN at 7 / 8). The typed path numbers
-# its query-shape arms 0..8 and appends the two build arms at 9 / 10.
+# Numbering: the query-shape arms are 0..8 and the two build arms follow at
+# 9 / 10.
 # -----------------------------------------------------------------------------
 
 comptime BREAKER_JOIN_BUILD: Int = 9
@@ -112,14 +117,11 @@ comptime BREAKER_ASOF_JOIN_BUILD: Int = 10
 # -----------------------------------------------------------------------------
 # PARTITION-UDF breaker tag
 #
-# The `partition_local` stateful-UDF breaker. An ACCUMULATE-then-DRAIN
-# breaker — buffers every input row, then at drain sorts by
-# (PART_KEYS ++ ORDER_KEYS), detects partition boundaries, and runs the user
-# `PartitionLocalMapFn`'s per-partition `run_partition_row` scan, emitting one
-# value-additive output column appended to the input columns. Production gets a
-# DEDICATED tag (rather than riding `BREAKER_WINDOW`) so it does NOT
-# share `WindowSpec`). The drain reuses the window-operator partition-sort
-# substrate (`sort_batch_by_keys` + `_detect_partition_boundaries`).
+# The `partition_local` stateful-UDF breaker (`komira_udf.PartitionLocalMapFn`):
+# buffer every input row, then per partition run the UDF's
+# `run_partition_row` scan, emitting one output column appended to the input
+# columns. It has its own tag rather than sharing `BREAKER_WINDOW` /
+# `WindowSpec`. The operator that runs it is not in komira.
 # -----------------------------------------------------------------------------
 
 comptime BREAKER_PARTITION_UDF: Int = 11
@@ -128,16 +130,12 @@ comptime BREAKER_PARTITION_UDF: Int = 11
 # -----------------------------------------------------------------------------
 # WINDOW-UDF breaker tag
 #
-# The custom FRAME-bearing window-fn breaker. A SIBLING of
-# `BREAKER_PARTITION_UDF`: same ACCUMULATE-then-DRAIN
-# shape (buffer every input row, then at drain sort by (PART_KEYS ++ ORDER_KEYS),
-# detect partition boundaries), but instead of the single-row `run_partition_row`
-# step it runs a per-row sliding-FRAME scan — for each row r it computes the
-# ROWS frame `[lo(r), hi(r))` and calls `F.compute_frame(FrameView(...))`,
-# emitting one value-additive output column. Gets a DEDICATED tag (does NOT
-# reuse the built-in `BREAKER_WINDOW` tag nor the partition-UDF tag — same
-# reasoning the partition-UDF path gave). The drain reuses the same
-# window-operator partition-sort substrate.
+# The custom frame-bearing window-fn breaker (`komira_udf.WindowFn`). A
+# sibling of `BREAKER_PARTITION_UDF`: buffer every input row, then per
+# partition, for each row r, compute its ROWS frame `[lo(r), hi(r))` and call
+# the UDF over it (`FrameView`), emitting one output column. It has its own
+# tag, distinct from `BREAKER_WINDOW` and `BREAKER_PARTITION_UDF`. The
+# operator that runs it is not in komira.
 # -----------------------------------------------------------------------------
 
 comptime BREAKER_WINDOW_UDF: Int = 12
@@ -147,12 +145,8 @@ comptime BREAKER_WINDOW_UDF: Int = 12
 # §2 — Join-type comptime constants
 #
 # Carried by `JoinProbeSpec[n_probe_keys, join_t]`. Read via
-# `Self.Breaker.join_t_static()`.
-#
-# Only INNER + LEFT are supported by the HashJoin
-# infrastructure (JoinBuildTable3I64 builds for INNER and LEFT shapes);
-# RIGHT / SEMI / ANTI are reserved for later JoinProbe template
-# extensions.
+# `Self.Breaker.join_t_static()`. This module names the join types; it
+# neither checks a `join_t` value nor implements any join.
 # -----------------------------------------------------------------------------
 
 comptime JOIN_INNER: Int = 1
@@ -160,12 +154,8 @@ comptime JOIN_LEFT: Int = 2
 comptime JOIN_RIGHT: Int = 3
 comptime JOIN_SEMI: Int = 4
 comptime JOIN_ANTI: Int = 5
-# FULL-OUTER. INNER matches + unmatched-probe (LEFT side) + unmatched-build
-# rows. The unmatched-build side requires a per-build-slot matched bitmap,
-# OR-merged across the parallel probe workers in the driver (each worker marks
-# the build slots it matched; after probe, the serial OR-merge emits the build
-# slots with bit == 0, null-padded on the probe side). Wired through the typed
-# join driver `run_typed_join_two_segment`.
+# FULL OUTER: the INNER matches plus the unmatched rows of both sides, each
+# null-padded on the other side.
 comptime JOIN_OUTER: Int = 6
 
 
@@ -174,18 +164,18 @@ comptime JOIN_OUTER: Int = 6
 #
 # Three role traits bound the three slots on `StageProgram[Filter,
 # Projects, Breaker]`. Every conformer is required to be Copyable,
-# Movable, and ImplicitlyCopyable so the aggregate marker, the SDK chain
-# and the Stage[Program] template can all instantiate
-# without ownership friction.
+# Movable, and ImplicitlyCopyable so the aggregate marker and its intended
+# consumer can instantiate them without ownership friction. `ProjectsLike` is
+# the exception: it requires only `(Movable, Deinitable)` (see its docstring).
 # -----------------------------------------------------------------------------
 
 
 trait FilterLike(Copyable, Movable, ImplicitlyCopyable, Deinitable):
     """Role trait for the StageProgram Filter slot.
 
-    Conformers: `NoFilter` (sentinel) OR a comptime-ExprBool wrapping
-    struct (typically an ExprXBool conformer in the production engine;
-    a test stub such as `ExprBoolStub[col, lit]` also works).
+    Conformers: `NoFilter` (sentinel) and `PredicateFilter[P]`, which wraps
+    an `ExprXBool` conformer (tests/test_stage_program.mojo wraps its own
+    stubs, e.g. `GtNamed`).
 
     The Filter slot is Optional-by-convention: `NoFilter` is the
     sentinel for the Optional.None case. We do NOT use stdlib
@@ -259,11 +249,10 @@ trait FilterLike(Copyable, Movable, ImplicitlyCopyable, Deinitable):
 trait ProjectsLike(Movable, Deinitable):
     """Role trait for the StageProgram Projects slot.
 
-    Conformers: `NoProjects` (sentinel) OR per-arity-N Project structs.
-
     Conformers: `NoProjects`, the placeholder `ProjectListStub[arity: Int]`
-    (so unit tests can exercise non-pass-through Projects shapes), and the
-    variadic `ProjectList[*Outs]` in `typed_projects.mojo`.
+    (so unit tests can exercise non-pass-through Projects shapes), the
+    variadic `ProjectList[*Outs]` in `typed_projects.mojo`, and
+    `RowMapProjects` in `komira_op_agg_state.row_map_projects`.
 
     # Why the bound is `(Movable, Deinitable)`
     #
@@ -273,26 +262,21 @@ trait ProjectsLike(Movable, Deinitable):
     # uses `self._outs[k].project_one` instance dispatch (a bound leaf carries
     # `_idx >= 0` after `bind`); `bind` walks `self._outs[k].bind(resolver)`.
     # That storage shape is NOT ImplicitlyCopyable when an `Outs` element is
-    # not (HashAggTable / SortBuffer / JoinBuildTable have the same shape and
-    # are Movable-only), so the ProjectsLike bound is `(Movable, Deinitable)`.
+    # not, so the ProjectsLike bound is `(Movable, Deinitable)`.
     #
     # Every holder of a ProjectsLike needs only that:
-    #   (a) `Stage[F, Projects: ProjectsLike, B, BState]` storage: the field
-    #       `var projects: Self.Projects` only needs Movable — Stage itself
-    #       conforms to `FusedMorselOp(Movable, Deinitable)`.
+    #   (a) A `Stage[F, Projects: ProjectsLike, B, BState]` (not in komira)
+    #       would store `var projects: Self.Projects`, which needs only
+    #       Movable.
     #   (b) `StageProgram[F, Projects: ProjectsLike, B]`: POD `var sentinel:
     #       Int` aggregate — type parameters are pure compile-time witnesses,
     #       no instance storage of Projects, so the StageProgram's
     #       `(Copyable, Movable, ImplicitlyCopyable)` self-bound is
     #       satisfiable regardless of Projects's own bound.
-    #   (c) Sentinel conformers (NoProjects, ProjectListStub, MapFnProjects,
-    #       EvaluatorAdapter) are POD Ints, hence trivially Movable +
+    #   (c) The sentinel conformers (NoProjects, ProjectListStub) are POD
+    #       Ints, hence trivially Movable +
     #       Deinitable (and incidentally Copyable).
 
-
-    Heterogeneous-DType
-    Project lists compose by trait conformance — each per-arity-N
-    Project struct conforms to ProjectsLike.
 
     `pdescribe()`: discriminator / identity Int for tests + EXPLAIN
     ANALYZE label preservation. NoProjects returns 0;
@@ -349,23 +333,16 @@ trait ProjectsLike(Movable, Deinitable):
     # --- bind: propagate to projected Exprs -------------------------
     def bind(mut self, resolver: ColumnResolver) raises:
         """Walk to populate runtime _idx on every leaf inside the project
-        Expr pack. NoProjects no-ops; ProjectListStub no-ops; production
-        ProjectList[*Outs] needs an instance store to do this — current
-        ProjectList carries `*Outs` as comptime-only (no instance to walk)
-        so its bind is a no-op stub today. SDK-side, project-bearing typed
-        pipelines fall through to .untyped() at materialize_typed; a future
-        slot adds the per-output-instance ProjectList variant or a
-        @parameter for static bind walk.
-
-        Default body is no-op for sentinel conformers."""
+        Expr pack. NoProjects and ProjectListStub keep this no-op default;
+        `ProjectList[*Outs]` (typed_projects.mojo) overrides it to call
+        `bind` on each stored output instance."""
         pass
 
 
 trait BreakerLike(Copyable, Movable, ImplicitlyCopyable, Deinitable):
     """Role trait for the StageProgram Breaker slot.
 
-    Conformers: `NoBreaker` + 5 BreakerSpec arms (`HashAggSpec` /
-    `SortSpec` / `TopNSpec` / `WindowSpec` / `JoinProbeSpec`).
+    Conformers: `NoBreaker` + the 12 BreakerSpec arms of §5 and §5b.
 
     UNIFORM accessor surface: every conformer
     implements all 9 accessors, returning `-1` for slots the flavor
@@ -383,6 +360,15 @@ trait BreakerLike(Copyable, Movable, ImplicitlyCopyable, Deinitable):
     | TopNSpec      | BREAKER_TOPN    | -1     | -1     | S           | N      | -1          | -1           | -1           | -1     |
     | WindowSpec    | BREAKER_WINDOW  | -1     | -1     | -1          | -1     | P           | W            | -1           | -1     |
     | JoinProbeSpec | BREAKER_JOIN_PROBE| -1   | -1     | -1          | -1     | -1          | -1           | Pk           | JT     |
+    | PartitionUdfSpec | BREAKER_PARTITION_UDF | -1 | -1 | -1        | -1     | P           | -1           | -1           | -1     |
+    | WindowUdfSpec | BREAKER_WINDOW_UDF| -1   | -1     | -1          | -1     | P           | -1           | -1           | -1     |
+    | DistinctSpec  | BREAKER_DISTINCT| K      | -1     | -1          | -1     | -1          | -1           | -1           | -1     |
+    | PartitionTopNSpec | BREAKER_PARTITION_TOPN | -1 | -1 | S        | N      | P           | -1           | -1           | -1     |
+    | AsofJoinSpec  | BREAKER_ASOF_JOIN | -1   | -1     | -1          | -1     | -1          | -1           | Pk           | -1     |
+    | JoinBuildSpec | BREAKER_JOIN_BUILD | K     | Pl     | -1          | -1     | -1          | -1           | -1           | -1     |
+    | AsofJoinBuildSpec | BREAKER_ASOF_JOIN_BUILD | K | Pl | -1       | -1     | -1          | -1           | -1           | -1     |
+
+    `Pl` is the build arms' payload count, carried in the n_aggs slot.
 
     The Stage[Program] body comptime-dispatches via
     `comptime if Self.Breaker.tag() == BREAKER_HASH_AGG: ...` and
@@ -617,11 +603,9 @@ struct PredicateFilter[P: ExprXBool](FilterLike):
     hot-path SIMD. `ExprXBool` already refines
     `ImplicitlyCopyable`, so the bound carries it transitively (the field
     stays copyable; `FilterLike`'s `ImplicitlyCopyable` requirement holds).
-    Every in-tree `PredicateFilter[...]` is instantiated with an `ExprXBool`
-    conformer already (UDF `FilterFn` filters go through the separate
-    `EvaluatorAdapterFor_Filter[F: FilterFn]` adapter, NOT this wrapper), so
-    the tightening is a no-op on the call surface and a real perf win on the
-    hot path.
+    Every in-tree `PredicateFilter[...]` was already instantiated with an
+    `ExprXBool` conformer, so the tightening is a no-op on the call surface
+    and a real perf win on the hot path.
     """
 
     var pred: Self.P
@@ -665,9 +649,8 @@ struct PredicateFilter[P: ExprXBool](FilterLike):
         vectorized W-wide column loads + lane compares. This is the hot-path
         SIMD; it does NOT route through the slow inherited `Predicate.eval[W]`
         per-lane fan-out (which an `ExprXBool` cannot override; see the struct
-        doc PERF note). Caller (`_compute_survivors`) guarantees `i + W <= n`
-        for SIMD chunks, so there is no in-bounds masking here (the scalar tail
-        handles the remainder).
+        doc PERF note). There is no in-bounds masking here: the caller must
+        keep `i + W <= n` and handle the remainder with `keep_row`.
 
         Instance dispatch via FIELD access."""
         return self.pred.eval_simd[W, bo](batch, i)
@@ -683,21 +666,19 @@ def predicate_filter[
 ](var pred: P) -> PredicateFilter[P]:
     """Factory for a `PredicateFilter` over an `ExprXBool` conformer.
 
-    The ergonomic call-site entry point: `predicate_filter(GtXI64(...))`
-    — mirrors the `column_slot[dt]()` / `agg_slot[...]()` factory style used
-    elsewhere in the unified Stage substrate.
+    The ergonomic call-site entry point: `predicate_filter(GtXI64(...))`.
     """
     return PredicateFilter[P](pred=pred^)
 
 
 # -----------------------------------------------------------------------------
-# §5 — BreakerSpec sibling-family — 5 arms
+# §5 — BreakerSpec arms (the query-shape side; §5b holds the build arms)
 #
 # Each arm encodes its sub-state via comptime-Int parameters. The uniform BreakerLike trait surface is
 # implemented by every arm with `-1` for fields the flavor does NOT
-# carry. The engine's Stage[Program] body reads sub-state via
-# `Self.Breaker.<accessor>_static()` calls — comptime resolved by the
-# Mojo 1.0.0b1 monomorphizer.
+# carry. A consumer reads sub-state via `Self.Breaker.<accessor>_static()`
+# calls, resolved at compile time. An arm carries its counts only: no arm
+# holds or names the state that would execute it.
 # -----------------------------------------------------------------------------
 
 
@@ -705,16 +686,8 @@ def predicate_filter[
 struct HashAggSpec[n_keys: Int, n_aggs: Int](BreakerLike):
     """HashAgg breaker — `n_keys` group-by keys, `n_aggs` aggregates.
 
-    Engine-side BreakerState backing storage at lowering time:
-      - `n_keys == 1`, single primitive DType -> `HashAggTableF64` /
-        `HashAggTableI64` (direct field, slab-safe).
-      - `n_keys >= 2` -> `CompositeHashTable2F64` / arity-N variants
-        (direct field).
-
-    Scalar-agg shape: `n_keys == 0` + `n_aggs == 1` is the canonical
-    convenience lowering for `df.scalar_agg[A]()` per the SDK
-    chain — the engine routes scalar-agg through the same HashAgg
-    breaker path with a degenerate 0-key shape (single-bucket).
+    Carried through `n_keys_static()` and `n_aggs_static()`. `n_keys == 0`
+    is the scalar-aggregate shape: one group over every row.
     """
 
     var sentinel: Int
@@ -760,8 +733,7 @@ struct HashAggSpec[n_keys: Int, n_aggs: Int](BreakerLike):
 struct SortSpec[n_sort_keys: Int](BreakerLike):
     """Sort breaker — `n_sort_keys` ORDER BY columns.
 
-    BreakerState backing: `SortBufferI64` (direct field; slab-safe;
-    InlineArray of dict-rank-encoded Int64 lanes per key).
+    Carried through `n_sort_keys_static()`.
     """
 
     var sentinel: Int
@@ -807,8 +779,7 @@ struct SortSpec[n_sort_keys: Int](BreakerLike):
 struct TopNSpec[n_sort_keys: Int, N: Int](BreakerLike):
     """TopN breaker — `n_sort_keys` ORDER BY + LIMIT N.
 
-    BreakerState backing: `TopNStageScaffoldI64[N]` (direct field;
-    InlineArray-backed bounded heap, slab-safe).
+    Carried through `n_sort_keys_static()` and `topn_n_static()`.
     """
 
     var sentinel: Int
@@ -855,8 +826,7 @@ struct WindowSpec[n_part_keys: Int, n_window_fns: Int](BreakerLike):
     """Window breaker — `n_part_keys` PARTITION BY keys, `n_window_fns`
     windowed aggregates.
 
-    BreakerState backing: `WindowStageScaffoldI64` /
-    `WindowStageScaffoldF64` (direct field; per-partition state).
+    Carried through `n_part_keys_static()` and `n_window_fns_static()`.
     """
 
     var sentinel: Int
@@ -903,12 +873,8 @@ struct PartitionUdfSpec[n_part_keys: Int](BreakerLike):
     """Partition-UDF breaker — `n_part_keys` PARTITION BY keys, one
     value-additive output column (the `partition_local` stateful UDF).
 
-    BreakerState backing: `PartitionUdfState[F]`
-    (`stage_primitives/partition_udf_state.mojo`) — a buffer-all-rows
-    accumulate state that runs `F.run_partition_row` per partition at drain.
-    `tag() == BREAKER_PARTITION_UDF` matches `PartitionUdfState.state_tag()`
-    (the `Stage` (Breaker, BState) consistency guard). Distinct from
-    `WindowSpec` (partition-UDF has its own tag).
+    Carried through `n_part_keys_static()`; the tag is
+    `BREAKER_PARTITION_UDF` (see §1), distinct from `WindowSpec`'s.
     """
 
     var sentinel: Int
@@ -955,14 +921,9 @@ struct WindowUdfSpec[n_part_keys: Int](BreakerLike):
     """Window-UDF breaker — `n_part_keys` PARTITION BY keys, one value-additive
     output column (the custom FRAME-bearing window fn).
 
-    BreakerState backing: `WindowUdfState[F]`
-    (`stage_primitives/window_udf_state.mojo`) — a buffer-all-rows accumulate
-    state that, at drain, sorts by (PART_KEYS ++ ORDER_KEYS), detects partition
-    boundaries, and runs a per-row sliding-FRAME scan calling `F.compute_frame`
-    over each row's `[lo, hi)` frame. `tag() == BREAKER_WINDOW_UDF` matches
-    `WindowUdfState.state_tag()` (the `Stage` (Breaker, BState) consistency
-    guard). Distinct from `WindowSpec` (built-in window track) and
-    `PartitionUdfSpec` (the single-row partition-UDF sibling)."""
+    Carried through `n_part_keys_static()`; the tag is `BREAKER_WINDOW_UDF`
+    (see §1), distinct from `WindowSpec` (built-in window functions) and
+    `PartitionUdfSpec` (the partition-UDF sibling)."""
 
     var sentinel: Int
 
@@ -1005,18 +966,14 @@ struct WindowUdfSpec[n_part_keys: Int](BreakerLike):
 
 @fieldwise_init
 struct JoinProbeSpec[n_probe_keys: Int, join_t: Int](BreakerLike):
-    """JoinProbe breaker — `n_probe_keys` probe keys, `join_t` selects
-    INNER / LEFT / RIGHT / SEMI / ANTI semantics.
+    """JoinProbe breaker — `n_probe_keys` probe keys and `join_t`, one of
+    the JOIN_* constants of §2 (INNER / LEFT / RIGHT / SEMI / ANTI /
+    OUTER).
 
-    BreakerState backing: `JoinBuildTable3I64` carried via
-    `ArcPointer` (the one shared-ownership carve-out) — true
-    shared ownership across the build / probe pipeline boundary.
-    JoinProbe is the SOLE Arc carve-out among the 7 breaker
-    primitives; the other 6 use direct-field storage.
-
-    Supported `join_t` values are JOIN_INNER + JOIN_LEFT.
-    JOIN_RIGHT / JOIN_SEMI / JOIN_ANTI are not supported by this
-    JoinProbe template.
+    This struct only carries the two values, through
+    `n_probe_keys_static()` and `join_t_static()`. It does not check
+    `join_t`; which values a probe accepts is decided by the join operator
+    that reads it, which is not in this package.
     """
 
     var sentinel: Int
@@ -1063,16 +1020,11 @@ struct DistinctSpec[n_keys: Int](BreakerLike):
     """Distinct breaker — dedup rows by `n_keys` key columns, emit each distinct
     key combination once.
 
-    BreakerState backing: `DistinctState[*Keys]` (a variadic-arity dedup set —
-    `distinct_state.mojo`; SoA per-key `List[Scalar[dt]]` storage + a parallel
-    `List[UInt64]` hash filter + linear-scan FNV-1a dedup). Reuses the
-    `n_keys_static()` accessor for the DISTINCT key count (the BreakerLike trait
-    has no DISTINCT-specific accessor; the typed `Stage` DISTINCT arm never reads
-    the count — it loops rows feeding `DistinctState`, which is fully
-    self-describing via its `*Keys` pack).
+    The DISTINCT key count is carried through `n_keys_static()`: the
+    BreakerLike trait has no DISTINCT-specific accessor.
 
-    Accumulate-then-drain (like HashAgg / Sort), NOT the have_output mid-batch
-    path (JoinProbe). DISTINCT semantics permit unordered output.
+    An accumulate-then-drain breaker (like HashAgg / Sort), not a per-batch
+    emitter (like JoinProbe). DISTINCT semantics permit unordered output.
     """
 
     var sentinel: Int
@@ -1124,20 +1076,9 @@ struct PartitionTopNSpec[n_part_keys: Int, n_sort_keys: Int, N: Int](
     per partition. The "top-K per group" query shape (SQL `ROW_NUMBER() OVER
     (PARTITION BY ... ORDER BY ...) <= N`).
 
-    BreakerState backing: `PartitionTopNState[part_key_col, key_col,
-    payload_col, N, sort_dir]` (`partition_topn_state.mojo`) — a per-partition
-    map of comptime-N bounded heaps (`BoundedHeapInt64Payload[N]`). Each input
-    row selects (or creates) its partition's heap by the partition key, then
-    pushes the (order-key, payload) with eviction. Drain emits each partition's
-    top-N in sorted order. This is the `TopNState` shape but partitioned —
-    it wraps the SAME comptime-N bounded heap primitive per partition, so it is
-    fully orthogonal to the runtime-N top-N path / `_validate_topn_n`.
-
-    Accumulate-then-drain (like HashAgg / Sort / TopN / Distinct), NOT the
-    have_output mid-batch path (JoinProbe). Populates `n_part_keys_static()`,
-    `n_sort_keys_static()`, and `topn_n_static()`; the typed `Stage`
-    PARTITION_TOPN arm never reads them (it loops rows feeding the
-    self-describing `PartitionTopNState`).
+    An accumulate-then-drain breaker (like HashAgg / Sort / TopN /
+    Distinct), not a per-batch emitter (like JoinProbe). Carried through
+    `n_part_keys_static()`, `n_sort_keys_static()` and `topn_n_static()`.
     """
 
     var sentinel: Int
@@ -1189,20 +1130,11 @@ struct AsofJoinSpec[n_probe_keys: Int](BreakerLike):
     temporal key, no partition by-keys; the >=1-by-key partitioned asof is a
     future widen, as JoinProbe took single-key INNER first).
 
-    BreakerState backing: `AsofJoinProbeState[probe_temp_col, KB, TempK,
-    *Payload]` (`asof_join_probe_state.mojo`) — a thin `BreakerState` wrapper
-    OWNING a pre-built `AsofJoinBuildTable[KB, TempK, *Payload]` (sorted Int64
-    temporal key + binary lower-bound forward-search). The wrapper IS the
-    per-batch `have_output` probe (mirror of `JoinProbeState`).
-
-    Like JoinProbe (and UNLIKE HashAgg / Sort / TopN / Distinct / PartitionTopN),
-    this is the have_output MID-BATCH path — `process_batch` probes the build
-    table per row + EMITS the joined rows per batch; `finalize` returns None.
-    There is NO INNER/LEFT join_t axis: asof is always a forward INNER match (an
-    unmatched probe row emits nothing), matching the live runtime
-    `feed_asof_join_single_i64_temporal_key`. Populates `n_probe_keys_static()`;
-    the typed `Stage` ASOF_JOIN arm never reads it (it loops rows feeding the
-    self-describing `AsofJoinProbeState`).
+    Like JoinProbe (and unlike HashAgg / Sort / TopN / Distinct /
+    PartitionTopN), a per-batch emitter: each probe batch yields its joined
+    rows. There is no join_t axis (`join_t_static()` returns -1): asof is
+    always a forward INNER match, so an unmatched probe row emits nothing.
+    Carried through `n_probe_keys_static()`.
     """
 
     var sentinel: Int
@@ -1248,41 +1180,26 @@ struct AsofJoinSpec[n_probe_keys: Int](BreakerLike):
 # §5b — BUILD-side BreakerSpec arms — JoinBuildSpec / AsofJoinBuildSpec
 #
 #
-# The two BUILD-side TRUE-pipeline-breaker arms. UNLIKE the PROBE arms
-# (`JoinProbeSpec` / `AsofJoinSpec` — the have_output mid-batch path), a BUILD
-# arm ACCUMULATES the build-side input into a hash-join / asof build table and
-# emits NO downstream batch (`finalize` returns None). The populated build
-# table escapes via the state's `take_*_build_table()` single-owner MOVE
-# surface (an `OwnedPointer[<build table>]`), handed to a downstream PROBE
-# segment through the executor-scoped carrier slab (the cross-segment handoff
-# wiring is the two-segment orchestration, OUT OF
-# SCOPE for the isolated arm).
+# The two BUILD-side pipeline-breaker arms. Unlike the PROBE arms
+# (`JoinProbeSpec` / `AsofJoinSpec`, per-batch emitters), a BUILD arm names a
+# breaker that consumes the build-side input into a hash-join / asof build
+# table and emits no downstream batch. The build tables and their handoff to
+# a probe are not in komira.
 #
-# Both carry the comptime build-key arity (`n_keys`) + the comptime payload
-# arity (`n_aggs`, reusing the existing accessor for the payload column count —
-# the BreakerLike trait has no payload-specific accessor; the typed `Stage`
-# build arms never read either, the self-describing state carries the real
-# shape). Mirror of the runtime path's breaker state
-# `feed_join_build_*` / `feed_asof_join_build_*` BUILD arms.
+# Both carry the build-key arity through `n_keys_static()` and the payload
+# column count through `n_aggs_static()`: the BreakerLike trait has no
+# payload-specific accessor.
 # -----------------------------------------------------------------------------
 
 
 @fieldwise_init
 struct JoinBuildSpec[n_keys: Int, n_payload: Int](BreakerLike):
-    """Hash-join BUILD breaker — accumulate the build side into a
-    `JoinBuildTable[KB, *Payload]`.
+    """Hash-join BUILD breaker — names the build side of a hash join.
 
-    `n_keys` build-key columns, `n_payload` build-payload columns. A TRUE
-    pipeline breaker: `process_batch` feeds every row into the build table
-    (`need_input(None)`), `finalize` returns None (no downstream batch). The
-    populated build table escapes via the state's `take_join_build_table()`
-    single-owner MOVE for the cross-segment handoff.
-
-    BreakerState backing: `JoinBuildState[key_col0, key_col1, KB, *Payload]`
-    (`join_build_state.mojo`) — owns the freshly-built `JoinBuildTable` via an
-    `Optional[OwnedPointer[...]]` (mirror of the runtime path's
-    `RuntimeBreakerState.join_build_table` slot). Populates `n_keys_static()`
-    + `n_aggs_static()` (the payload count); the arm never reads them.
+    `n_keys` build-key columns, `n_payload` build-payload columns, carried
+    through `n_keys_static()` and `n_aggs_static()` (the payload count). A
+    pipeline breaker that emits no downstream batch. The build table is not
+    in komira.
     """
 
     var sentinel: Int
@@ -1326,23 +1243,13 @@ struct JoinBuildSpec[n_keys: Int, n_payload: Int](BreakerLike):
 
 @fieldwise_init
 struct AsofJoinBuildSpec[n_keys: Int, n_payload: Int](BreakerLike):
-    """Asof-join BUILD breaker — accumulate the build side into an
-    `AsofJoinBuildTable[KB, TempK, *Payload]`.
+    """Asof-join BUILD breaker — names the build side of an asof join.
 
-    `n_keys` partition by-key columns (0 for the 0-by-key family),
-    `n_payload` build-payload columns. A TRUE pipeline breaker (mirror of
-    `JoinBuildSpec`): `process_batch` appends every row into the asof build
-    table IN APPEND ORDER (caller guarantees ASC-sorted temporal keys, exactly
-    as the runtime `feed_asof_join_build_single_i64_3_payload` does — this arm
-    does NOT sort), `finalize` returns None. The populated build table escapes
-    via the state's `take_asof_build_table()` single-owner MOVE.
-
-    BreakerState backing: `AsofJoinBuildState[temp_col, KB, TempK, *Payload]`
-    (`asof_join_build_state.mojo`) — owns the freshly-built
-    `AsofJoinBuildTable` via an `Optional[OwnedPointer[...]]` (mirror of the
-    runtime path's `RuntimeBreakerState.asof_build_table` slot). Populates
-    `n_keys_static()` + `n_aggs_static()` (the payload count); the arm never
-    reads them.
+    `n_keys` partition by-key columns (0 for no by-key), `n_payload`
+    build-payload columns, carried through `n_keys_static()` and
+    `n_aggs_static()` (the payload count). A pipeline breaker that emits no
+    downstream batch, like `JoinBuildSpec`. The asof build table is not in
+    komira.
     """
 
     var sentinel: Int
@@ -1440,18 +1347,14 @@ struct ProjectListStub[arity: Int](ProjectsLike):
 #   - Projects (ProjectsLike — optional via `NoProjects` sentinel)
 #   - Breaker  (BreakerLike  — optional via `NoBreaker` sentinel)
 #
-# The Stage[Program] template consumes a StageProgram instance
-# as its parameter; the engine's process_batch body comptime-branches
-# on `Self.Breaker.tag()` to pick the per-breaker code path.
+# The intended consumer, a `Stage[Program]` template (not in komira),
+# takes a StageProgram as its parameter and comptime-branches on
+# `Self.Breaker.tag()` to pick the per-breaker code path. A builder of the
+# three slots carries them flat (per the AnyType-erasure caveat in the module
+# header) and forms a `StageProgram` from them.
 #
-# this aggregate IS the IR-EMIT
-# BOUNDARY type — the SDK chain carries the 3 slots FLAT
-# (per the AnyType-erasure caveat) and constructs `StageProgram` only
-# at `to_program()` time.
-#
-# A composition probe compiles and runs end-to-end with 12 chain shapes
-# covering all 6 BreakerSpec arms (NoBreaker + HashAgg + Sort + TopN + Window
-# + JoinProbe x {INNER, LEFT}).
+# tests/test_stage_program.mojo pins the accessor row of NoBreaker and of
+# every BreakerSpec arm.
 # -----------------------------------------------------------------------------
 
 
@@ -1464,8 +1367,8 @@ struct StageProgram[
     """Engine-side compile-time IR for one fused Stage's shape.
 
     POD aggregate marker; the actual per-slot conformer types ARE
-    the compile-time information. `Stage[Program]` instantiates
-    its template body using this aggregate's three slots.
+    the compile-time information. Its intended consumer, a `Stage[Program]`
+    template, is not in komira.
     """
 
     var sentinel: Int

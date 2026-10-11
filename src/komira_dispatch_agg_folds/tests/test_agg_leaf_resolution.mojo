@@ -32,7 +32,7 @@ from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_ir.logical_plan import (
     ExprArray, LogicalPlan, PLAN_PROJECT, SOURCE_PARQUET,
 )
-from komira_plan_ir.physical_plan import OP_PROJECT
+from komira_physical_plan.physical_plan import OP_PROJECT
 
 from komira_dispatch_agg_folds.agg_leaf_resolution import (
     AggLeafBinding,

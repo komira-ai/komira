@@ -72,8 +72,10 @@
 # `T` it pushes images with, and `NoCloudBuilt` refuses that step at its step
 # 1 too.
 #
-# `--rollback-on-failure`, and emptying `set_hash` when a DEPLOY step fails,
-# are not here.
+# What follows a failed DEPLOY step, or a failed PUBLISH step into a cell,
+# is not here: the run stops at it and empties `set_hash` (dispatch.mojo's
+# header, 6 and 4b), and `--rollback-on-failure` is refused before the run
+# starts (args.mojo: this kci has no deployed-revision record).
 #
 # Encapsulation: owned values and generic parameters; no pointer, no
 # wildcard origin.

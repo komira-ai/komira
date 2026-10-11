@@ -175,13 +175,21 @@ struct ColumnAcc(Movable):
         self.has_any_nulls = False
 
     @always_inline
-    def _null_count(self) -> Int:
+    def _null_count(self) raises -> Int:
         # No-null columns return 0 in O(1) — liborc pays one
         # `test hasNulls` per stripe, not a full-column scan per build call.
-        # When `has_any_nulls` is set, `present` is fully materialized (the
-        # nullable slow path keeps it in sync), so the scan is correct.
+        # When `has_any_nulls` is set, `present` must hold one flag per row;
+        # the builds index it by row, so a short list is refused here.
         if not self.has_any_nulls:
             return 0
+        if len(self.present) != self.n_rows:
+            raise Error(
+                String("OrcDecodeError.INTERNAL: the column has ")
+                + String(self.n_rows)
+                + " rows but "
+                + String(len(self.present))
+                + " validity flags"
+            )
         var c = 0
         for i in range(len(self.present)):
             if not self.present[i]:
@@ -494,6 +502,21 @@ def decode_stripe_column(
         encoding_kind == ORC_ENCODING_DICTIONARY
         or encoding_kind == ORC_ENCODING_DICTIONARY_V2
     )
+    # The ORC v1 spec ("Column Encoding") allows DICTIONARY / DICTIONARY_V2
+    # only on STRING, VARCHAR and CHAR. Any other kind would be decoded as
+    # DIRECT, which reads the wrong streams, so it is refused.
+    if is_dict and not (
+        kind == ORC_KIND_STRING
+        or kind == ORC_KIND_VARCHAR
+        or kind == ORC_KIND_CHAR
+    ):
+        raise Error(
+            String("OrcDecodeError.BAD_ENCODING: ORC Type.Kind ")
+            + orc_kind_name(kind)
+            + " has a DICTIONARY encoding ("
+            + String(encoding_kind)
+            + "); the ORC spec allows dictionary encoding only on string kinds"
+        )
 
     # Fast-path detection: ORC's PRESENT stream is OPTIONAL per column per
     # stripe (ORC spec). Its absence means every row
@@ -536,6 +559,13 @@ def decode_stripe_column(
                 + orc_kind_name(kind)
                 + " is not a primitive kind this decoder handles"
             )
+        # The fast paths do not touch `acc.present`. Once an earlier stripe
+        # had a null, `present` holds one flag per row so far and must grow
+        # by this stripe's rows too, or a later stripe's flags land on the
+        # wrong rows (ORC writers omit PRESENT for a stripe with no nulls).
+        # STRING keeps validity in its builder and never sets `has_any_nulls`.
+        if acc.has_any_nulls:
+            _append_n_true(acc.present, n_rows)
         return
 
     # Slow-path (nullable): some rows are null; need full PRESENT walk.
@@ -1216,11 +1246,44 @@ def _bulk_fill_int[
     var limit = n - (n % W)
     while i < limit:
         var v64 = src.load[width=W](i)
-        arr.store[W](i, v64.cast[dt]())
+        var narrow = v64.cast[dt]()
+        # A value outside `dt` would be truncated by the cast: refuse it.
+        # The round trip back to int64 differs exactly when it does not fit.
+        comptime if dt != DType.int64:
+            if narrow.cast[DType.int64]().ne(v64).reduce_or():
+                _refuse_out_of_width[dt](vals, i, W)
+        arr.store[W](i, narrow)
         i += W
     while i < n:
-        arr.store[1](i, SIMD[dt, 1](Scalar[dt](vals[i])))
+        var v = Scalar[dt](vals[i])
+        comptime if dt != DType.int64:
+            if v.cast[DType.int64]() != vals[i]:
+                _refuse_out_of_width[dt](vals, i, 1)
+        arr.store[1](i, SIMD[dt, 1](v))
         i += 1
+
+
+@no_inline
+def _refuse_out_of_width[
+    dt: DType
+](vals: List[Int64], start: Int, count: Int) raises:
+    """Raise naming the first of `vals[start : start + count]` that `dt`
+    cannot hold (the caller found one there). ORC stores SHORT / INT / DATE
+    as 64-bit RLE integers, so a file can carry a value wider than the
+    column's Arrow type."""
+    var row = start
+    for i in range(start + count - 1, start - 1, -1):
+        if Scalar[dt](vals[i]).cast[DType.int64]() != vals[i]:
+            row = i
+    raise Error(
+        String("OrcDecodeError.VALUE_OUT_OF_RANGE: row ")
+        + String(row)
+        + " holds "
+        + String(vals[row])
+        + ", which does not fit the column's "
+        + String(dt)
+        + " type"
+    )
 
 
 def _bulk_fill_same[
@@ -1288,9 +1351,8 @@ def _u64_to_f64(u: UInt64) -> Float64:
 #      per column).
 #   2. Skips the `_count_true` scan.
 #   3. Decodes values directly into the accumulator's active inner list
-#      with no per-row branching. `acc.present` gets n_rows True appends
-#      (no validity bitmap), `acc.i64s` / `acc.f32s` / etc. gets the
-#      dense value list with a single per-element append loop.
+#      with no per-row branching. They do not touch `acc.present`; the
+#      caller appends n_rows True flags when an earlier stripe had a null.
 #
 # Pre-condition (caller-enforced in `decode_stripe_column`):
 #   `_has_present_stream(streams)` returned False.
@@ -1353,8 +1415,8 @@ def _no_present_int_into(
 ) raises:
     """Integer (SHORT/INT/LONG/DATE) no-null fast-path.
 
-    Decodes n_rows values via RLE, then bulk-extends `acc.i64s` and
-    `acc.present` without per-row PRESENT dispatch. This is the
+    Decodes n_rows values via RLE straight into `acc.i64s` (or the BIGINT
+    zero-copy buffer) without per-row PRESENT dispatch. This is the
     dominant hit for non-nullable integer columns.
 
     `List.extend(var other)` memcpys the entire trivially-copyable Int64

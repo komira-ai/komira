@@ -87,6 +87,8 @@ from .split import (
     SplitView,
     _min_bit_width,
     _packed_byte_count,
+    _packed_run_error,
+    _packed_run_fits,
     _pack_bits_lsb_first,
     _unpack_bits_lsb_first,
     _read_uleb128_span,
@@ -290,16 +292,9 @@ def _unpack_bits_lsb_first_u64(
             + String(bit_width)
             + " out of range [0, 64]"
         )
-    var total_bytes = _packed_byte_count(count, bit_width)
-    if src_off < 0 or src_off + total_bytes > len(src):
-        raise Error(
-            "_unpack_bits_lsb_first_u64: packed run ["
-            + String(src_off)
-            + ", "
-            + String(src_off + total_bytes)
-            + ") exceeds source length "
-            + String(len(src))
-            + " (corrupt)"
+    if not _packed_run_fits(len(src), src_off, count, bit_width):
+        raise _packed_run_error(
+            "_unpack_bits_lsb_first_u64", len(src), src_off, count, bit_width
         )
     var bit_pos = 0
     for _ in range(count):
@@ -313,6 +308,15 @@ def _unpack_bits_lsb_first_u64(
                 v = v | (UInt64(1) << UInt64(b))
         out.append(v)
         bit_pos += bit_width
+
+
+@always_inline
+def _validity_fits(n_docs: Int, off: Int, end: Int) -> Bool:
+    """True iff a validity bitmap of `n_docs` bits starting at byte `off` ends
+    by `end` (off <= end). Bounds n_docs against the bits left rather than
+    computing (n_docs + 7) >> 3, which wraps negative for an untrusted n_docs
+    near the Int maximum and would move the cursor backwards."""
+    return n_docs >= 0 and n_docs <= (end - off) * 8
 
 
 @always_inline
@@ -917,7 +921,7 @@ struct FastFieldReader(Movable, Deinitable):
             var nl_t = _read_uleb128_span(region, pos, rlen)
             var name_len = nl_t[0]
             pos = nl_t[1]
-            if name_len < 0 or pos + name_len > rlen:
+            if name_len < 0 or name_len > rlen - pos:  # no wrapping sum
                 raise Error("FastFieldReader: field name out of bounds (corrupt)")
             var name_buf = List[UInt8](capacity=name_len)
             for k in range(name_len):
@@ -940,7 +944,8 @@ struct FastFieldReader(Movable, Deinitable):
             var sl_t = _read_uleb128_span(region, pos, rlen)
             var sub_len = sl_t[0]
             pos = sl_t[1]
-            if rel_sub_off < 0 or sub_len < 0 or rel_sub_off + sub_len > rlen:
+            # A difference of non-negatives, not offset + len: the sum can wrap.
+            if rel_sub_off < 0 or sub_len < 0 or sub_len > rlen - rel_sub_off:
                 raise Error(
                     "FastFieldReader: sub-region [" + String(rel_sub_off) + ", "
                     + String(rel_sub_off + sub_len) + ") out of region (corrupt)"
@@ -1172,12 +1177,11 @@ struct FastFieldReader(Movable, Deinitable):
         var has_validity = vflag == 1
         var validity_off = off
         if has_validity:
-            var vbytes = (n_docs + 7) >> 3
-            if off + vbytes > end:
+            if not _validity_fits(n_docs, off, end):
                 raise Error(
                     "FastFieldReader.float_resolver: validity bitmap OOB"
                 )
-            off += vbytes
+            off += (n_docs + 7) >> 3
         return FloatFastFieldResolver(
             n_docs=n_docs,
             float_width=fw,
@@ -1218,10 +1222,9 @@ struct FastFieldReader(Movable, Deinitable):
         var has_validity = vflag == 1
         var validity_off = off
         if has_validity:
-            var vbytes = (n_docs + 7) >> 3
-            if off + vbytes > end:
+            if not _validity_fits(n_docs, off, end):
                 raise Error("FastFieldReader: validity bitmap out of bounds")
-            off += vbytes
+            off += (n_docs + 7) >> 3
         return (n_docs, min_value, bits, validity_off, has_validity, off)
 
     def _decode_numeric_slot(
@@ -1263,10 +1266,9 @@ struct FastFieldReader(Movable, Deinitable):
         var has_validity = vflag == 1
         var validity_off = off
         if has_validity:
-            var vbytes = (n_docs + 7) >> 3
-            if off + vbytes > end:
+            if not _validity_fits(n_docs, off, end):
                 raise Error("FastFieldReader: float validity bitmap out of bounds")
-            off += vbytes
+            off += (n_docs + 7) >> 3
         if slot < 0 or slot >= n_docs:
             raise Error("FastFieldReader: slot out of float sub-region range")
         if has_validity and not _read_validity_bit(region, validity_off, slot):
@@ -1306,7 +1308,7 @@ struct FastFieldReader(Movable, Deinitable):
             var tl_t = _read_uleb128_span(region, off, end)
             var term_len = tl_t[0]
             off = tl_t[1]  # off now points at the term BYTES start
-            if term_len < 0 or off + term_len > end:
+            if term_len < 0 or term_len > end - off:  # no wrapping sum
                 raise Error("FastFieldReader: dict term out of bounds (corrupt)")
             term_bounds.append(off)  # start of term bytes
             off += term_len
@@ -1322,10 +1324,9 @@ struct FastFieldReader(Movable, Deinitable):
         var has_validity = vflag == 1
         var validity_off = off
         if has_validity:
-            var vbytes = (n_docs + 7) >> 3
-            if off + vbytes > end:
+            if not _validity_fits(n_docs, off, end):
                 raise Error("FastFieldReader: keyword validity bitmap out of bounds")
-            off += vbytes
+            off += (n_docs + 7) >> 3
         return (
             n_docs, dict_size, term_bounds^, code_bits, validity_off,
             has_validity, off,
@@ -1543,16 +1544,31 @@ struct FastFieldReader(Movable, Deinitable):
         # primitive column with explicit nulls.
         var off = e.sub_offset
         var end = e.sub_offset + e.sub_len
+        if off < 0 or end > len(region):
+            raise Error(
+                "FastFieldReader._materialize_float: float sub-region out of bounds"
+            )
         var n_t = _read_uleb128_span(region, off, end)
         var n_docs = n_t[0]
         off = n_t[1]
+        if off >= end:
+            raise Error("FastFieldReader._materialize_float: header truncated (width)")
         var fw = Int(region[off])
         off += 1
+        if off >= end:
+            raise Error(
+                "FastFieldReader._materialize_float: header truncated (validity_flag)"
+            )
         var vflag = Int(region[off])
         off += 1
         var has_validity = vflag == 1
         var validity_off = off
         if has_validity:
+            if not _validity_fits(n_docs, off, end):
+                raise Error(
+                    "FastFieldReader._materialize_float: validity bitmap out"
+                    " of bounds"
+                )
             off += (n_docs + 7) >> 3
         var packed_off = off
         var bits_list = List[UInt64]()
@@ -1737,10 +1753,9 @@ def _decode_numeric_header_standalone(
     var has_validity = vflag == 1
     var validity_off = off
     if has_validity:
-        var vbytes = (n_docs + 7) >> 3
-        if off + vbytes > end:
+        if not _validity_fits(n_docs, off, end):
             raise Error("FieldnormResolver: validity bitmap out of bounds")
-        off += vbytes
+        off += (n_docs + 7) >> 3
     return (n_docs, min_value, bits, validity_off, has_validity, off)
 
 

@@ -1,0 +1,12 @@
+{
+ "name": "frame_output_sliced_offset",
+ "defect": "the host ignores a table output's struct offset (2) or its child's offset (3), or refuses a struct at an offset",
+ "run": "frame",
+ "entry": "table_sliced",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 3, "columns": [{"type": "int64", "values": [1, null, 3]}]}],
+ "expect": {"status": "OK", "batches": [{"length": 3, "columns": [{"type": "int64", "values": [1, null, 3]}]}]}
+}

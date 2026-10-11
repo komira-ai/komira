@@ -1,0 +1,6 @@
+call buck2 "cquery" "deps(set(//src/a:a //src/b/... //src/c: tests//functional/...))"
+exit 0
+stdout %universe_cquery
+call buck2 "targets" "//..." "tests//..."
+exit 0
+stdout %universe_targets

@@ -2,7 +2,8 @@
 # src/kci_release_set/tests/test_oci_member.mojo
 #   An OCI member (an image) of a release set: `verify_member` over the real
 #   //tools/build/examples:hello_image[release], its digest in the set hash,
-#   and each refusal of the OCI arm caused by one change.
+#   the same over :hello_root_image[release] (an image of a tree), and each
+#   refusal of the OCI arm caused by one change.
 # =============================================================================
 #
 # Test data (BUCK): `hello/` is hello_image[release] as the build wrote it (its
@@ -10,6 +11,8 @@
 # is hello_image[digest], the digest komira_pack wrote. The digest file is
 # read independently of the artifact manifest, so a manifest that carried
 # another hash, or a set hash that left it out, does not compare equal.
+# `hello_root/` and `hello_root_image.digest` are the same two of
+# hello_root_image, an image of the oci_tree `hello_layer`.
 #
 # A refusal case changes one thing in a COPY of `hello/` under TEST_TMPDIR
 # (the staged data stays as built), or in a small layout written by
@@ -42,6 +45,10 @@ from kci_release_set import (
 comptime _HELLO = "hello"
 comptime _LAYOUT = "hello_image.oci"
 comptime _DIGEST_FILE = "hello_image.digest"
+# hello_root_image[release] and [digest]: the image of a tree.
+comptime _ROOT = "hello_root"
+comptime _ROOT_LAYOUT = "hello_root_image.oci"
+comptime _ROOT_DIGEST_FILE = "hello_root_image.digest"
 comptime _REV = "0123456789abcdef0123456789abcdef01234567"
 comptime _PLATFORM = "linux-x86_64"
 
@@ -161,6 +168,29 @@ def test_hello_image_release_verifies_and_its_digest_is_in_the_set_hash() raises
     assert_equal(len(r.entries), 1)
     assert_equal(r.entries[0].sha256_hex, hex)
     assert_equal(r.entries[0].artifact_type, String("OCI"))
+
+
+def test_a_tree_image_release_is_named_by_its_repository_and_verifies() raises:
+    # hello_root_image: an oci_image of a tree (oci_tree `hello_layer`) with
+    # repository komira/hello_root. Its member name is the repository's last
+    # segment, never the tree's name; its platform is the image's,
+    # linux-x86_64; its sha256 is the digest the image action wrote, read
+    # from hello_root_image[digest] independently of the manifest.
+    var digest = String(Path(String(_ROOT_DIGEST_FILE)).read_text().strip())
+    assert_true(digest.startswith(String("sha256:")), digest)
+    var m = verify_member(String(_ROOT), String(_ROOT))
+    assert_equal(m.manifest.artifact_type, String("OCI"))
+    assert_equal(m.manifest.name, String("hello_root"))
+    assert_true(m.manifest.name != String("hello_layer"), m.manifest.name)
+    assert_equal(m.manifest.platform, String(_PLATFORM))
+    assert_equal(member_platform(m, String(_PLATFORM)), String(_PLATFORM))
+    assert_equal(m.manifest.version, String("0.1.0"))
+    assert_equal(m.manifest.file, String(_ROOT_LAYOUT))
+    assert_equal(m.manifest.sha256_hex, _hex_of(digest))
+    assert_equal(
+        Path(String(_ROOT) + String("/manifest.json")).read_text(),
+        render_artifact_manifest(m.manifest),
+    )
 
 
 def _blob_path(layout: String, digest: String) -> String:

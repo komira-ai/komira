@@ -7,7 +7,8 @@
 # "Pushing Data To a Server", "Report Status") and builtin/receive-pack.c at
 # v2.56.0 (show_ref's capability list, read_head_info, report(), and the
 # reasons `unpacker error`, `atomic push failure`, `funny refname`). The
-# comparison with git itself is in src/tests/conformance/komira_git_conformance.
+# comparison with git itself is in
+# src/tests/conformance/komira_git_protocol_conformance.
 #
 # WHAT EACH TEST CATCHES:
 #   * test_advertisement: refs not sorted, the capabilities on a line other

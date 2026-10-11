@@ -381,5 +381,40 @@ def test_schema_version_anywhere_at_the_top_level() raises:
     var channels = parse_channels_file(_one_channel() + String("schema_version: 1\n"))
     assert_equal(len(channels), 1)
 
+# ── A scalar field's value: a string, a word or a number, nothing else. ─────
+
+
+def test_a_structural_token_is_not_a_value() raises:
+    # the line named is the offending token's, not the field's
+    assert_equal(
+        _refusal(String("channel {\n  name: }\n}\n")),
+        String("channels file: line 2: expected a value for 'name' but got '}'"),
+    )
+    assert_equal(
+        _refusal(String("channel {\n  name: \"beta\"\n  visibility:\n\n  {\n}\n")),
+        String("channels file: line 5: expected a value for 'visibility' but got '{'"),
+    )
+    assert_equal(
+        _refusal(
+            String("channel {\n  name: \"beta\"\n  repository {\n    location: :\n  }\n}\n")
+        ),
+        String("channels file: line 4: expected a value for 'location' but got ':'"),
+    )
+
+
+def test_a_word_and_a_number_are_values() raises:
+    # a number passes the value check and is refused for its meaning
+    var number = _channel(
+        String("beta"), String("7"), _oci(String("registry.example.invalid/beta"))
+    )
+    _assert_refused(number, String("channel 'beta' declares unknown visibility '7'"))
+    # a bare word is a value too: an unquoted name parses
+    var word = String("channel {\n  name: beta\n  visibility: PRIVATE\n") + _oci(
+        String("registry.example.invalid/beta")
+    ) + String("}\n")
+    var channels = _parse(word)
+    assert_equal(channels[0].name, String("beta"))
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

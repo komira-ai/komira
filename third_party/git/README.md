@@ -32,7 +32,7 @@ is:
 - every library except glibc is linked from a static archive, and the glibc
   floor is the platform row's own (`zig_triple`, `x86_64-linux-gnu.2.34`): zig
   links against glibc 2.34's symbols, so the link fails if git or curl calls a
-  newer one, and check 3 reads the symbol versions of the result;
+  newer one, and `:git_closure` reads the symbol versions of the result;
 - nothing is taken from the worker: the compiler is the pinned zig, the
   shell and utilities are the pinned busybox, and every input is a sha256 pin.
   The one exception is at run time: git runs `/bin/sh` for shell aliases,
@@ -52,7 +52,7 @@ is:
 | `//third_party/git-lfs:git-lfs-linux-amd64.tar.gz` | git-lfs's release binary archive (MIT); the release notes list the same sha256 |
 
 A pin bump changes the pin and `_VERSION` (or `_LFS_VERSION`) in
-[`BUCK`](BUCK); check 2 (or 9) fails until both agree.
+[`BUCK`](BUCK); check 2 (or 7) fails until both agree.
 
 ## How it is built
 
@@ -108,18 +108,28 @@ so a decoy runs only when something reaches for a git other than the one
 under test. Each row names the defect the check catches and the planted
 defect it was seen to fail on.
 
+`:git_closure`, a second validation, runs
+[`loader_closure`](../../tools/build/toolchains/loader_closure/README.md) on the
+distribution: it reads the ELF files and runs none of them. Every program
+(`bin/git`, `git-remote-http` and `git-http-fetch` among them) has the
+system's interpreter and maps glibc's libraries from the system and nothing
+else, since libcurl and zlib are linked in; and no ELF file names a
+`GLIBC_2.<n>` above the row's floor. It catches libcurl or zlib linked
+dynamically, so taken from the worker, and git or curl needing a newer glibc
+than the workers and users have. Planted, red: the floor given as 27, `bin/git
+needs GLIBC_2.28 GLIBC_2.33 GLIBC_2.34, above the floor GLIBC_2.27`, and the
+same for each other program.
+
 | # | check | catches | planted, red |
 |---|---|---|---|
 | 1 | the distribution holds `bin/git`, `git-remote-http`, `git-upload-pack`, `git-receive-pack` and the licence files, and no shared library | a build without the HTTP transport (no libcurl found), a missing licence | `LGPL-2.1` not copied: `the distribution has no share/licenses/git/LGPL-2.1` |
 | 2 | `git --version` prints `git version 2.56.0` | the wrong source, a git that does not start | `_VERSION` set to `2.55.0`: `git --version printed 'git version 2.56.0', want 'git version 2.55.0'` |
-| 3 | no `GLIBC_2.<n>` above the row's floor in any ELF file | git or curl needing a newer glibc than the workers and users have | the floor passed as 27 (git itself is not rebuilt): `the programs need GLIBC_2.28 GLIBC_2.33 GLIBC_2.34 above the floor GLIBC_2.27` |
-| 4 | the loader's list for `bin/git`, `git-remote-http` and `git-http-fetch` (the programs that link libcurl) names glibc's libraries only | libcurl or zlib linked dynamically, so taken from the worker | `libc.so.6` dropped from the check's list of glibc libraries: `bin/git loads libc.so.6, which is not glibc's` |
-| 5 | `git --exec-path` is the distribution's `libexec/git-core` | a git built without `RUNTIME_PREFIX`, which looks for its programs at a path compiled in, and on a worker with git installed finds that git's | git built without `RUNTIME_PREFIX`: `git --exec-path is '/git/libexec/git-core', not the distribution's libexec/git-core` |
-| 6 | `hash-object` of `hello\n`, the empty tree, and a commit with fixed identities and dates are the SHA-1s of the object bytes computed by busybox `sha1sum` | a git that does not start or write objects; the object format | the expected blob computed from `hellp\n`: `hash-object of 'hello\n' is <id>, want <other id>` |
-| 7 | `clone --no-local` over `file://` (git-upload-pack) and `push` (git-receive-pack) carry that commit, and `fsck --strict` passes on both sides | the pack protocol's programs missing from the exec path | `git-upload-pack` deleted after the build's own install check, and dropped from check 1's list: `git clone over file:// failed` |
-| 8 | `ls-remote` to `http://127.0.0.1:1/r` fails in libcurl's connect, and to `https://...` as a disabled protocol (whole messages) | a git without the HTTP transport; a libcurl with TLS | the first expected messages, written before libcurl 8.22's were seen (`... port 1`, `... not supported`): each red with the message libcurl prints |
-| 9 | `git-lfs version` (with the distribution's `bin/` first on `PATH`) prints `git-lfs/3.8.0 ...`, and `git lfs version` prints the same line | the wrong git-lfs pin; a git that cannot run git-lfs from `PATH` | `_LFS_VERSION` set to `3.7.0`: `git-lfs version printed 'git-lfs/3.8.0 (...)', want 'git-lfs/3.7.0 ...'` |
-| 10 | no decoy ran | a git, or a check, that ran a program from `PATH` instead of the distribution | git-lfs run alone with only the decoys on `PATH`: `a git from PATH ran instead of the distribution's: git version git ... rev-parse --git-dir ...` |
+| 3 | `git --exec-path` is the distribution's `libexec/git-core` | a git built without `RUNTIME_PREFIX`, which looks for its programs at a path compiled in, and on a worker with git installed finds that git's | git built without `RUNTIME_PREFIX`: `git --exec-path is '/git/libexec/git-core', not the distribution's libexec/git-core` |
+| 4 | `hash-object` of `hello\n`, the empty tree, and a commit with fixed identities and dates are the SHA-1s of the object bytes computed by busybox `sha1sum` | a git that does not start or write objects; the object format | the expected blob computed from `hellp\n`: `hash-object of 'hello\n' is <id>, want <other id>` |
+| 5 | `clone --no-local` over `file://` (git-upload-pack) and `push` (git-receive-pack) carry that commit, and `fsck --strict` passes on both sides | the pack protocol's programs missing from the exec path | `git-upload-pack` deleted after the build's own install check, and dropped from check 1's list: `git clone over file:// failed` |
+| 6 | `ls-remote` to `http://127.0.0.1:1/r` fails in libcurl's connect, and to `https://...` as a disabled protocol (whole messages) | a git without the HTTP transport; a libcurl with TLS | the first expected messages, written before libcurl 8.22's were seen (`... port 1`, `... not supported`): each red with the message libcurl prints |
+| 7 | `git-lfs version` (with the distribution's `bin/` first on `PATH`) prints `git-lfs/3.8.0 ...`, and `git lfs version` prints the same line | the wrong git-lfs pin; a git that cannot run git-lfs from `PATH` | `_LFS_VERSION` set to `3.7.0`: `git-lfs version printed 'git-lfs/3.8.0 (...)', want 'git-lfs/3.7.0 ...'` |
+| 8 | no decoy ran | a git, or a check, that ran a program from `PATH` instead of the distribution | git-lfs run alone with only the decoys on `PATH`: `a git from PATH ran instead of the distribution's: git version git ... rev-parse --git-dir ...` |
 
 The build actions refuse a wrong result too, each seen red on a planted
 defect:
@@ -135,7 +145,7 @@ defect:
 | `bin/git`, `git-remote-http`, `git-upload-pack` or `git-receive-pack` not installed | `NO_CURL`: `git_build: libexec/git-core/git-remote-http was not installed`; `SKIP_DASHED_BUILT_INS`: the same for `git-upload-pack` |
 
 git-lfs runs `git` from `PATH` (`git version`, `git rev-parse`, `git
-remote`, even for `git-lfs version`); check 10 caught that when check 9 first
+remote`, even for `git-lfs version`); check 8 caught that when check 7 first
 ran git-lfs with only the decoys on `PATH`. A test that runs git-lfs itself
 puts the distribution's `bin/` first on `PATH`. Run by git (`git lfs ...`),
 git-lfs finds the distribution's git through the exec path git puts first.

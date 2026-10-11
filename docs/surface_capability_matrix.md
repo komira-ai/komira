@@ -4,7 +4,8 @@ komira is reached through surfaces: the pandas-shaped and polars-shaped
 frontends, SQL, the polars-shaped Mojo and TypeScript APIs, and Excel. Excel is
 a surface of its own, built on top of the TypeScript SDK: it uses that SDK and
 maps the engine's errors to Excel's own values, so its tests exercise Excel's
-layer and, through it, the TypeScript SDK. komira's
+layer and, through it, the TypeScript SDK. The `ts_polars` column covers the
+TypeScript SDK itself, so the two columns are filled independently. komira's
 **product coverage** is every capability of the plan exercised through every
 surface by an end-to-end test of that surface, checked against an independent
 oracle. The **surface capability matrix** tracks it: one cell per
@@ -13,12 +14,14 @@ capability through that surface. The goal is every cell filled: **100%**.
 It is not line or branch coverage, which are separate metrics, and it is not
 [README API coverage](readme_api_coverage.md), which counts public symbols.
 
-The lint is [`surface_capability_matrix`](../tools/build/lint/surface_capability_matrix.bzl)
-(its action, [`surface_capability_matrix.sh`](../tools/build/lint/surface_capability_matrix.sh),
-states the same rules), declared once in the root [`BUCK`](../BUCK) as
-`//:surface_capability_matrix`. Its ledger is
+The lint is [`surface_capability_matrix`](../tools/build/lint/surface_capability_matrix.bzl),
+declared once in the root [`BUCK`](../BUCK) as
+`//:surface_capability_matrix`. Its analysis refuses a malformed or lying row
+before any action runs (a `fail()` naming every finding), and its validation,
+the Zig tool [`surface_grounding`](../tools/build/lint/surface_grounding/src/grounding.zig),
+reads the grounding files. Its ledger is
 [`tests/surface_capability_matrix.bzl`](../tests/surface_capability_matrix.bzl).
-It is a validation that runs on the farm like the other lints; its tests are
+It runs on the farm like the other lints; its tests are
 [test 53](../tools/build/tests/lint_tests.md#53-the-surface-capability-matrix).
 
 ```sh

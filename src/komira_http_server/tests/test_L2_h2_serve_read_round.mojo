@@ -20,12 +20,15 @@
 #      invalid preface not closing it.
 #   D  dispatch and flush: a response not flushed in the same round, the
 #      byte counter wrong, a protocol error closing before its GOAWAY is
-#      written.
+#      written or with the peer's bytes left unread (close then sends RST).
 #   B  bounds: one round reading without limit (the 32-read bound), a
 #      blocked write losing or reordering the unsent tail, a GOAWAY closing
-#      the connection before its queue is written.
+#      the connection before its queue is written; a prepended GOAWAY
+#      overtaking the server preface (RFC 9113 §3.4) or an unwritten tail.
 #   C  close: the peer's close_notify, a socket closed without one, or a
-#      failed TLS read (a reset peer) not closing the connection.
+#      failed TLS read (a reset peer) not closing the connection; a frame
+#      queued before the close_notify lost because it was not written
+#      before the next read.
 # =============================================================================
 
 from std.ffi import external_call
@@ -123,6 +126,18 @@ def _set_sndbuf(fd: Int32, bytes: Int) raises:
     )
     if rc < 0:
         raise Error("setsockopt(SO_SNDBUF) failed")
+
+
+def _unread_bytes(fd: Int32) -> Int:
+    """Bytes waiting unread in `fd`'s receive queue (up to 64), by a
+    MSG_PEEK recv on the non-blocking socket; 0 when it would block."""
+    var buf = List[UInt8](length=64, fill=UInt8(0))
+    # SAFETY: `buf` is a local of 64 bytes that outlives the call; recv(2)
+    # writes at most 64 bytes into it and retains nothing.
+    var n = external_call["recv", Int64](
+        fd, buf.unsafe_ptr(), UInt64(64), Int32(2),  # MSG_PEEK
+    )
+    return Int(n) if n > Int64(0) else 0
 
 
 def _close(fd: Int32):
@@ -479,6 +494,35 @@ def test_protocol_error_writes_goaway_then_closes() raises:
     _close(link.client_fd)
 
 
+def test_connection_error_reads_the_rest_before_closing() raises:
+    """A GOAWAY on stream 1 (h2spec http2/6.8/1, a connection error) and
+    then 36 KiB more in the same write. The round writes GOAWAY(
+    PROTOCOL_ERROR), then reads and drops what the peer already sent before
+    it says close: close(2) on a socket with unread bytes sends RST, which
+    can reach the peer ahead of the GOAWAY (h2spec http2/4.2/2 saw exactly
+    that)."""
+    var link = _Link()
+    link.opened()
+    var p = List[UInt8]()
+    for _ in range(8):
+        p.append(UInt8(0))
+    var b = _frame(FRAME_GOAWAY, UInt8(0), 1, p)
+    var big = List[UInt8]()
+    for _ in range(4096):
+        big.append(UInt8(0))
+    for _ in range(9):
+        _cat(b, _frame(UInt8(0x16), UInt8(0), 0, big))
+    link.write(b)
+    assert_false(link.round())
+    assert_equal(_unread_bytes(link.entry.fd()), 0, "unread bytes left at close")
+    _ = link.read()
+    var outs = link.frames()
+    assert_equal(len(outs), 1)
+    assert_equal(Int(outs[0].kind), Int(FRAME_GOAWAY))
+    assert_equal(Int(outs[0].code), Int(PROTOCOL_ERROR))
+    _close(link.client_fd)
+
+
 # -----------------------------------------------------------------------------
 # B. Bounds.
 # -----------------------------------------------------------------------------
@@ -552,8 +596,11 @@ def test_blocked_write_keeps_the_unsent_tail_in_order() raises:
 def test_goaway_waits_for_its_queue_before_closing() raises:
     """h2spec http2/5.1.2/1 behind a backlog: 1000 PINGs, a zero initial
     window and 51 GETs, with the smallest send buffer. The 51st GET is refused
-    with GOAWAY(REFUSED_STREAM), queued first; the round says alive while
-    the queue is unwritten and close once it is all written."""
+    with GOAWAY(REFUSED_STREAM) and RST_STREAM(101), together, ahead of
+    everything not yet offered to TLS (the round flushes between reads, so
+    the frames of earlier reads were offered already and stay in front, see
+    test_refusal_never_overtakes_an_unwritten_tail); the round says alive
+    while the queue is unwritten and close once it is all written."""
     var link = _Link()
     link.opened()
     _set_sndbuf(link.entry.fd(), 1)
@@ -574,20 +621,102 @@ def test_goaway_waits_for_its_queue_before_closing() raises:
     assert_true(rounds > 1, "closed before the queue was written")
     _ = link.read()
     var outs = link.frames()
-    assert_equal(Int(outs[0].kind), Int(FRAME_GOAWAY))
-    assert_equal(Int(outs[0].code), Int(REFUSED_STREAM))
-    assert_equal(Int(outs[1].kind), Int(FRAME_RST_STREAM))
-    assert_equal(Int(outs[1].sid), 101)
+    assert_equal(link.cursor, len(link.received), "bytes that do not decode as frames")
     var pings = 0
     var heads = 0
+    var goaways = 0
     for i in range(len(outs)):
         if outs[i].kind == FRAME_PING:
             pings += 1
         if outs[i].kind == FRAME_HEADERS:
             heads += 1
+        if outs[i].kind == FRAME_GOAWAY:
+            goaways += 1
+            assert_equal(Int(outs[i].code), Int(REFUSED_STREAM))
+            assert_true(i + 1 < len(outs), "nothing after the GOAWAY")
+            assert_equal(Int(outs[i + 1].kind), Int(FRAME_RST_STREAM))
+            assert_equal(Int(outs[i + 1].sid), 101)
+    assert_equal(goaways, 1)
     assert_equal(pings, 1000)
     assert_equal(heads, 50)
     assert_equal(link.queued(), 0)
+    _close(link.client_fd)
+
+
+def test_server_settings_precede_a_refusal_in_the_first_read() raises:
+    """The client preface, a zero initial window (so no answer completes and
+    every stream stays open) and 51 GETs in one write, before the server has
+    said anything: the 51st GET is refused with GOAWAY(REFUSED_STREAM),
+    which the §5.1.2 gate puts at the front of the queue. The server's own
+    SETTINGS is still the first frame on the wire (RFC 9113 §3.4), and the
+    GOAWAY comes straight after it."""
+    var link = _Link()
+    var b = _bytes(PREFACE)
+    _cat(b, _settings_initial_window(0))
+    for k in range(51):
+        _cat(b, link.get(2 * k + 1))
+    link.write(b)
+    _ = link.round()
+    _ = link.read()
+    var outs = link.frames()
+    assert_true(len(outs) >= 3)
+    assert_equal(Int(outs[0].kind), Int(FRAME_SETTINGS), "a frame overtook the server preface")
+    assert_equal(Int(outs[0].flags), 0)
+    assert_equal(outs[0].n_settings, 5)
+    assert_equal(Int(outs[1].kind), Int(FRAME_GOAWAY))
+    assert_equal(Int(outs[1].code), Int(REFUSED_STREAM))
+    assert_equal(Int(outs[2].kind), Int(FRAME_RST_STREAM))
+    assert_equal(Int(outs[2].sid), 101)
+    _close(link.client_fd)
+
+
+def test_refusal_never_overtakes_an_unwritten_tail() raises:
+    """With the smallest send buffer, a zero initial window and 1000 PINGs
+    leave a partly written queue whose unwritten tail may begin mid-frame.
+    Then 51 GETs: the 51st is refused and its GOAWAY and RST_STREAM go to
+    the front of the queue, but behind that tail. Every frame the client
+    reads decodes: the 1000 PING ACKs in order, then the refusal, then the
+    50 answers."""
+    var link = _Link()
+    link.opened()
+    _set_sndbuf(link.entry.fd(), 1)
+    var b = _settings_initial_window(0)
+    for k in range(1000):
+        _cat(b, _ping(k))
+    link.write(b)
+    assert_true(link.round())
+    assert_true(link.queued() > 0, "the first flush was not partial")
+    var g = List[UInt8]()
+    for k in range(51):
+        _cat(g, link.get(2 * k + 1))
+    link.write(g)
+    var alive = link.round()
+    var rounds = 1
+    while alive and rounds < 400:
+        _ = link.read()
+        alive = link.round()
+        rounds += 1
+    assert_false(alive, "the connection was never closed")
+    _ = link.read()
+    var outs = link.frames()
+    assert_equal(link.cursor, len(link.received), "bytes that do not decode as frames")
+    var pings = 0
+    var heads = 0
+    var goaway_at = -1
+    var last_ping_at = -1
+    for i in range(len(outs)):
+        if outs[i].kind == FRAME_PING:
+            assert_equal(outs[i].ping_k, pings, "a PING ACK out of order")
+            pings += 1
+            last_ping_at = i
+        if outs[i].kind == FRAME_HEADERS:
+            heads += 1
+        if outs[i].kind == FRAME_GOAWAY:
+            assert_equal(Int(outs[i].code), Int(REFUSED_STREAM))
+            goaway_at = i
+    assert_equal(pings, 1000)
+    assert_equal(heads, 50)
+    assert_true(goaway_at > last_ping_at, "the GOAWAY overtook the unwritten tail")
     _close(link.client_fd)
 
 
@@ -596,11 +725,12 @@ def test_goaway_waits_for_its_queue_before_closing() raises:
 # -----------------------------------------------------------------------------
 
 
-def test_close_notify_closes() raises:
-    """A PING then the client's close_notify. The round reads the PING and
-    then the end of the stream; the ACK cannot be written once the peer has
-    sent close_notify (s2n refuses the write), so nothing is counted, nothing
-    stays queued, and the round says close."""
+def test_close_notify_after_a_ping_still_gets_the_ack() raises:
+    """A PING then the client's close_notify, both in the socket before the
+    round. The round reads the PING, writes its ACK before it reads again
+    (once s2n has processed the close_notify it refuses every write), then
+    reads the end of the stream and says close: the 17-byte ACK is counted
+    and nothing stays queued."""
     var link = _Link()
     link.opened()
     link.write(_ping(5))
@@ -608,7 +738,7 @@ def test_close_notify_closes() raises:
     assert_true(s == TLS_OUTCOME_BLOCKED_ON_READ or s == TLS_OUTCOME_DONE)
     var before = Int(link.sent)
     assert_false(link.round())
-    assert_equal(Int(link.sent), before)
+    assert_equal(Int(link.sent), before + 17, "the PING ACK was not written")
     assert_equal(link.queued(), 0)
     _close(link.client_fd)
 

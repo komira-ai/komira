@@ -364,23 +364,57 @@ def test_two_deploy_steps_naming_one_cell() raises:
     assert_equal(len(g.stages), 2)
 
 
-def test_a_deploy_in_a_stage_another_runs_after() raises:
+comptime _PROBE: String = (
+    " validation { name: \"probe\" kind: DEPLOY_PROBE"
+    " image: \"registry.example.invalid/probe@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\""
+    " timeout_seconds: 60 expect: \"health\" }"
+)
+"""A DEPLOY_PROBE with every required field."""
+
+
+def test_a_promoted_deploy_needs_a_probe() raises:
     var later = _stage(String("prod"), String(" after: \"staging\"\n"), String(_BUILD_STEP))
+    # no validation: refused
     _assert_refused(
         _named(_stage(String("staging"), String(""), _deploy(String("d"), String("staging"))) + later),
-        String("step 'd' of stage 'staging' writes into cell 'staging' in a stage another stage runs after: ")
-        + String(PROMOTED_DEPLOY_REFUSAL),
+        String("step 'd' of stage 'staging' writes into cell 'staging' in a stage another stage runs after, with no")
+        + String(" DEPLOY_PROBE: ") + String(PROMOTED_DEPLOY_REFUSAL),
     )
-    # with a validation block it is refused too: no validation belongs to a DEPLOY step yet
-    var validation = String(" validation { name: \"probe\" kind: CONDA_INSTALL_ENV install: \"x\"")
-    validation += String(" compiler_channel: \"https://conda.example\" }")
+    # a CONDA_* validation is no probe: refused, as a validation of the wrong kind
+    var conda = String(" validation { name: \"probe\" kind: CONDA_INSTALL_ENV install: \"x\"")
+    conda += String(" compiler_channel: \"https://conda.example\" }")
     _assert_refused(
-        _named(_stage(String("staging"), String(""), _deploy(String("d"), String("staging"), validation)) + later),
-        String("validation 'probe' of step 'd' of stage 'staging': a validation belongs to a PUBLISH step"),
+        _named(_stage(String("staging"), String(""), _deploy(String("d"), String("staging"), conda)) + later),
+        String("validation 'probe' of step 'd' of stage 'staging': a CONDA_INSTALL_ENV validation belongs to a")
+        + String(" PUBLISH step"),
     )
+    # with a probe: accepted
+    var g = parse_machine_file(
+        _named(_stage(String("staging"), String(""), _deploy(String("d"), String("staging"), String(_PROBE))) + later),
+        String(_SRC),
+    )
+    assert_equal(len(g.stages[0].steps[0].validations), 1)
+    assert_equal(g.stages[0].steps[0].validations[0].kind, String("DEPLOY_PROBE"))
+    # each DEPLOY step of a promoted stage carries its own: a probe on one
+    # does not cover another
+    _assert_refused(
+        _named(
+            _stage(
+                String("staging"),
+                String(""),
+                _deploy(String("a"), String("staging"), String(_PROBE)) + _deploy(String("b"), String("east")),
+            )
+            + later
+        ),
+        String("step 'b' of stage 'staging' writes into cell 'east' in a stage another stage runs after, with no")
+        + String(" DEPLOY_PROBE"),
+    )
+    # a stage nobody runs after needs no probe
+    var alone = parse_machine_file(_named(_stage(String("staging"), String(""), _deploy(String("d"), String("staging")))), String(_SRC))
+    assert_equal(len(alone.stages[0].steps[0].validations), 0)
     # a PUBLISH into a cell in a promoted stage is not this rule's
-    var g = parse_machine_file(_named(_stage(String("staging"), String(""), _into_cell()) + later), String(_SRC))
-    assert_equal(len(g.stages), 2)
+    var p = parse_machine_file(_named(_stage(String("staging"), String(""), _into_cell()) + later), String(_SRC))
+    assert_equal(len(p.stages), 2)
 
 
 def main() raises:

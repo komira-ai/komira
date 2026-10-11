@@ -1,0 +1,34 @@
+{
+  "trace_id": "00000000-0000-0000-0000-000000000000",
+  "success": true,
+  "results": {
+    "komira//tools/build/bisect/capture_tmp:green": {
+      "success": "SUCCESS",
+      "outputs": {
+        "DEFAULT": [
+          "buck-out/v2/art/komira/03cc1a891c89e4be/tools/build/bisect/capture_tmp/__green__/green.passed"
+        ]
+      },
+      "other_outputs": {},
+      "configured_graph_size": null,
+      "configured": {
+        "komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be": {
+          "errors": [],
+          "success": "SUCCESS",
+          "outputs": {
+            "DEFAULT": [
+              "buck-out/v2/art/komira/03cc1a891c89e4be/tools/build/bisect/capture_tmp/__green__/green.passed"
+            ]
+          },
+          "other_outputs": {},
+          "configured_graph_size": null
+        }
+      },
+      "errors": []
+    }
+  },
+  "failures": {},
+  "project_root": "/repo",
+  "truncated": false,
+  "strings": {}
+}

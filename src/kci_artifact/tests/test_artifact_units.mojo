@@ -597,6 +597,13 @@ def test_answers_accepted() raises:
     assert_true(w.widened)
     assert_equal(w.reason, String("tools/build/mojo/defs.bzl is a build file"))
     assert_equal(len(w.units), 0)
+    # BROKEN: the build graph cannot be configured; never a widening, and no
+    # unit (kci_build fails the check on it)
+    assert_equal(_answer_refusal(String("BROKEN tests//p:t cannot be configured\n")), String("<parsed>"))
+    var b = parse_affected_answer(String("BROKEN tests//p:t cannot be configured"), _owned())
+    assert_false(b.widened)
+    assert_equal(b.reason, String("tests//p:t cannot be configured"))
+    assert_equal(len(b.units), 0)
 
 
 def test_answers_refused() raises:
@@ -604,7 +611,7 @@ def test_answers_refused() raises:
     assert_equal(_answer_refusal(String("\n")), String("printed nothing (expected UNIT lines and one verdict line)"))
     assert_equal(
         _answer_refusal(String("UNIT lints\n")),
-        String("line 1 'UNIT lints': the last line must be the verdict (AFFECTED <n> or WIDENED <reason>)"),
+        String("line 1 'UNIT lints': the last line must be the verdict (AFFECTED <n>, WIDENED <reason> or BROKEN <reason>)"),
     )
     assert_equal(
         _answer_refusal(String("UNIT meta\nAFFECTED 1\n")),
@@ -630,13 +637,22 @@ def test_answers_refused() raises:
         _answer_refusal(String("UNIT lints\nWIDENED x\n")),
         String("line 2 'WIDENED x': WIDENED reaches every unit, so it comes with no UNIT line"),
     )
+    assert_equal(_answer_refusal(String("BROKEN\n")), String("line 1 'BROKEN': BROKEN needs a reason"))
+    assert_equal(
+        _answer_refusal(String("UNIT lints\nBROKEN x\n")),
+        String("line 2 'BROKEN x': BROKEN fails the check, so it comes with no UNIT line"),
+    )
+    assert_equal(
+        _answer_refusal(String("BROKEN x\nAFFECTED 0\n")),
+        String("line 1 'BROKEN x': the verdict must be the last line, and there is one"),
+    )
     assert_equal(
         _answer_refusal(String("UNIT lints\n\nAFFECTED 1\n")),
-        String("line 2 '': not UNIT <name>, AFFECTED <n> or WIDENED <reason>"),
+        String("line 2 '': not UNIT <name>, AFFECTED <n>, WIDENED <reason> or BROKEN <reason>"),
     )
     assert_equal(
         _answer_refusal(String("unit lints\nAFFECTED 1\n")),
-        String("line 1 'unit lints': not UNIT <name>, AFFECTED <n> or WIDENED <reason>"),
+        String("line 1 'unit lints': not UNIT <name>, AFFECTED <n>, WIDENED <reason> or BROKEN <reason>"),
     )
 
 

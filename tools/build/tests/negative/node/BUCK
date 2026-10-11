@@ -1,0 +1,496 @@
+load("@komira//third_party/node:pins.bzl", "NODE", "NPM")
+load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "esbuild_bundle", "node_dist", "node_test", "npm_package")
+load(":stand_in.bzl", "stand_in_archive", "stand_in_npm")
+
+# Planted defects for the hermetic Node.js rules (test 54,
+# tools/build/node/README.md): every target here must fail, and
+# tools/build/tests/run_tests.sh requires the text written above each. The
+# targets that work are in src/tests/helpers/komira_test_node. The pinned
+# runtime, packages and downloads are visible here
+# (third_party/node/BUCK, _NEGATIVE): this package exists only in komira's
+# own checkout.
+
+_TSLIB = [p for p in NPM if p["name"] == "tslib"][0]
+
+_FLATBUFFERS = [p for p in NPM if p["name"] == "flatbuffers"][0]
+
+_PKG = "komira//third_party/node:"
+
+# The sha512 of the Node.js archive (`sha512-<base64>`), for an npm_package
+# fixture over it.
+_NODE_SHA512 = "sha512-exyTGgmF8h4eV3qLcr2iyXfpDDcBkQL63gY0D8CXiKXQgf5EKhdQnJpvsmaS4DSFPFvQHUgoSWtKScPFYSq1Kg=="
+
+# tslib's integrity with its last byte changed: the base64 group holding
+# that byte is the last four characters, "<c1><c2>==", and c1 carries its
+# high six bits.
+_TSLIB_NEAR = _TSLIB["integrity"][:-4] + ("B" if _TSLIB["integrity"][-4] == "A" else "A") + _TSLIB["integrity"][-3:]
+
+# An integrity of 64 zero bytes.
+_ZERO_SHA512 = "sha512-" + "A" * 86 + "=="
+
+# ---- node_test: the verdict -------------------------------------------------
+
+# RED "the negative fixture fails its own assertion": a script that fails
+# fails its node_test.
+node_test(
+    name = "script_fails",
+    src = "fail.js",
+)
+
+# RED "failed, but its stderr does not hold": the script fails, but not with
+# the expected error.
+node_test(
+    name = "error_not_on_stderr",
+    src = "fail.js",
+    expect_error = "text the script never prints",
+)
+
+# RED "failed, but its stderr does not hold: printed on stdout only": the
+# script fails and prints the expected text, but on stdout.
+node_test(
+    name = "error_on_stdout",
+    src = "stdout_only.js",
+    expect_error = "printed on stdout only",
+)
+
+# RED "exited 0; it was expected to fail": the script passes, but an error was
+# expected.
+node_test(
+    name = "expected_fail_passed",
+    src = "pass.js",
+    expect_error = "any error",
+)
+
+# RED "stderr does not hold: THE NEGATIVE FIXTURE FAILS ITS OWN ASSERTION":
+# the script's message in other case, so expect_error is matched with case.
+node_test(
+    name = "error_other_case",
+    src = "fail.js",
+    expect_error = "THE NEGATIVE FIXTURE FAILS ITS OWN ASSERTION",
+)
+
+# RED "stderr does not hold: negative fixture.fails": a regular expression
+# that the message matches ("fixture fails"), so expect_error is fixed text.
+node_test(
+    name = "error_as_pattern",
+    src = "fail.js",
+    expect_error = "negative fixture.fails",
+)
+
+# ---- node_test: analysis ----------------------------------------------------
+
+stand_in_npm(
+    name = "tslib_a",
+    dir = "pass.js",
+    package = "tslib",
+    version = "1.0.0",
+)
+
+stand_in_npm(
+    name = "tslib_b",
+    dir = "pass.js",
+    package = "tslib",
+    version = "2.0.0",
+)
+
+# RED "expect_error is empty": an empty text would be held by any stderr.
+node_test(
+    name = "expect_error_empty",
+    src = "fail.js",
+    expect_error = "",
+)
+
+# RED "pass.js is listed twice".
+node_test(
+    name = "src_listed_twice",
+    src = "pass.js",
+    srcs = ["pass.js"],
+)
+
+# RED "data destination pass.js is also a source".
+node_test(
+    name = "data_is_source",
+    src = "pass.js",
+    data = {"pass.js": "fail.js"},
+)
+
+# RED "data destination node_modules/tslib is also a package of deps".
+node_test(
+    name = "data_is_package",
+    src = "pass.js",
+    data = {"node_modules/tslib": "fail.js"},
+    deps = [":tslib_a"],
+)
+
+# RED "tslib is pinned at 1.0.0 and at 2.0.0 in its deps".
+node_test(
+    name = "version_conflict",
+    src = "pass.js",
+    deps = [":tslib_a", ":tslib_b"],
+)
+
+# ---- esbuild_bundle ---------------------------------------------------------
+
+# RED "Could not resolve \"./absent.mjs\"": an import of a file not staged.
+esbuild_bundle(
+    name = "unresolved_import",
+    entry = "bundle/main.mjs",
+)
+
+# RED "bundle/main.mjs is listed twice".
+esbuild_bundle(
+    name = "bundle_listed_twice",
+    entry = "bundle/main.mjs",
+    srcs = ["bundle/main.mjs"],
+)
+
+# ---- npm_package ------------------------------------------------------------
+
+# RED "integrity sha256-AAAA is not sha512-<base64>".
+npm_package(
+    name = "integrity_not_sha512",
+    package = "tslib",
+    version = _TSLIB["version"],
+    integrity = "sha256-AAAA",
+    tarball = _PKG + _TSLIB["file"],
+)
+
+# RED "is not sha512-<base64>": an empty digest.
+npm_package(
+    name = "integrity_empty",
+    package = "tslib",
+    version = _TSLIB["version"],
+    integrity = "sha512-",
+    tarball = _PKG + _TSLIB["file"],
+)
+
+# RED "is not sha512-<base64>": the right integrity after one more
+# character, so the form is anchored at the start.
+npm_package(
+    name = "integrity_not_leading",
+    package = "tslib",
+    version = _TSLIB["version"],
+    integrity = "x" + _TSLIB["integrity"],
+    tarball = _PKG + _TSLIB["file"],
+)
+
+# RED "the pinned integrity": tslib's tarball with flatbuffers' integrity.
+npm_package(
+    name = "integrity_differs",
+    package = "tslib",
+    version = _TSLIB["version"],
+    integrity = _FLATBUFFERS["integrity"],
+    tarball = _PKG + _TSLIB["file"],
+)
+
+# RED "the pinned integrity": tslib's tarball with its own integrity but for
+# the last byte, so every byte of the digest is compared.
+npm_package(
+    name = "integrity_last_byte",
+    package = "tslib",
+    version = _TSLIB["version"],
+    integrity = _TSLIB_NEAR,
+    tarball = _PKG + _TSLIB["file"],
+)
+
+# RED "the pinned integrity sha512-AAAA...AA== is 000...000" (128 zeros):
+# an integrity of 64 zero bytes, whose rows of od output repeat, decodes to
+# all 64 bytes, not to od's "*" for a repeated row.
+npm_package(
+    name = "integrity_repeated_rows",
+    package = "tslib",
+    version = _TSLIB["version"],
+    integrity = _ZERO_SHA512,
+    tarball = _PKG + _TSLIB["file"],
+)
+
+# RED "holds no package/package.json": a tarball (the Node.js archive, at its
+# own sha512) whose top directory is not `package`.
+npm_package(
+    name = "no_package_json",
+    package = "node",
+    version = NODE["version"],
+    integrity = _NODE_SHA512,
+    tarball = _PKG + NODE["archive"],
+)
+
+# RED "does not state \"name\":\"tslib2\"": another name than package.json's,
+# which begins with it.
+npm_package(
+    name = "name_differs",
+    package = "tslib2",
+    version = _TSLIB["version"],
+    integrity = _TSLIB["integrity"],
+    tarball = _PKG + _TSLIB["file"],
+)
+
+# RED "does not state \"name\":\"tsli\"": a name package.json's begins with,
+# so the name is compared to its end.
+npm_package(
+    name = "name_prefix",
+    package = "tsli",
+    version = _TSLIB["version"],
+    integrity = _TSLIB["integrity"],
+    tarball = _PKG + _TSLIB["file"],
+)
+
+# RED "does not state \"version\":\"2.8.0\"": another version than
+# package.json's.
+npm_package(
+    name = "version_differs",
+    package = "tslib",
+    version = "2.8.0",
+    integrity = _TSLIB["integrity"],
+    tarball = _PKG + _TSLIB["file"],
+)
+
+# RED "does not state \"version\":\"2.8\"": a version package.json's begins
+# with, so the version is compared to its end.
+npm_package(
+    name = "version_prefix",
+    package = "tslib",
+    version = "2.8",
+    integrity = _TSLIB["integrity"],
+    tarball = _PKG + _TSLIB["file"],
+)
+
+# RED "tslib: package.json does not run": `exe` names a file that is no
+# executable.
+npm_package(
+    name = "exe_does_not_run",
+    package = "tslib",
+    version = _TSLIB["version"],
+    integrity = _TSLIB["integrity"],
+    tarball = _PKG + _TSLIB["file"],
+    exe = "package.json",
+)
+
+# Tarballs made for the checks of package.json, each holding package/ with a
+# package.json, pinned below at their own sha512. Built with
+# `tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0
+# --mode=u=rwX,go=rX --format=ustar -C <dir> -cf - package | gzip -n -9`.
+[export_file(name = f, src = "package_json/" + f) for f in [
+    "distractors.tgz",
+    "exe_other_version.tgz",
+    "name_absent.tgz",
+    "name_nested.tgz",
+    "version_nested.tgz",
+    "version_number.tgz",
+]]
+
+# RED "does not state \"name\":\"komira-fixture\" at its top level; its
+# top-level \"name\" is \"komira-fixture-other\"": package.json's top-level
+# name differs, and a nested object, before it, holds the pinned one.
+npm_package(
+    name = "name_nested",
+    package = "komira-fixture",
+    version = "1.0.0",
+    integrity = "sha512-ey4aOtnemuvYHXTBnCuN7kFkyP6oJGFVYIWhGIpIy6xrvwL+BeaunGpijCHmwjJLiujSzFHqEM8sE9YlT931pA==",
+    tarball = ":name_nested.tgz",
+)
+
+# RED "its top-level \"name\" is absent": no top-level name; a nested
+# object and the description hold the pinned one.
+npm_package(
+    name = "name_absent",
+    package = "komira-fixture",
+    version = "1.0.0",
+    integrity = "sha512-QAvHA1o1diU6pT+oW4Re1Jo/GX/4EfHGE985hf1hPbQ9J0837IZwXEMV4mIcpI0ElLrRZyCvDadamc5qvtYHZQ==",
+    tarball = ":name_absent.tgz",
+)
+
+# RED "its top-level \"version\" is \"1.0.1\"": package.json's top-level
+# version differs, and a nested object, before it, holds the pinned one.
+npm_package(
+    name = "version_nested",
+    package = "komira-fixture",
+    version = "1.0.0",
+    integrity = "sha512-TSWmMZSWcjVCkOQJfO4Mi39U52i7Sibr1TDF47JW8TSh81xNuYwQ9ODwxHGqja33xPKdMTg33uM668GFzqOH5g==",
+    tarball = ":version_nested.tgz",
+)
+
+# RED "its top-level \"version\" is 1": the number 1, not the string "1".
+npm_package(
+    name = "version_number",
+    package = "komira-fixture",
+    version = "1",
+    integrity = "sha512-/PETCJiK0DNW43rPHC5hZPdNNww44uYOywZsDPE6ndcHGstshbac6EVPHdxMYLHWiBUk0R6iheAbEJ9r/JmDsA==",
+    tarball = ":version_number.tgz",
+)
+
+# RED "komira-fixture: package.json does not run": the top-level name and
+# version are the pinned ones while nested objects before and after them hold
+# others, so the package.json check passes and the exe check refuses.
+npm_package(
+    name = "nested_distractors",
+    package = "komira-fixture",
+    version = "1.0.0",
+    integrity = "sha512-j6YnXUPW8/fGTRemXcHsxqXiWFYMKL+n8+OCpuoJwjDrGubGR0hbOyz8jIAGNaGcDEWpuz5Noq4XXnJnp6JFRw==",
+    tarball = ":distractors.tgz",
+    exe = "package.json",
+)
+
+# RED "bin/echo --version prints --version, the pin says 1.0.0": an exe that
+# runs and prints another version. bin/echo is a symlink to /proc/self/exe,
+# which the kernel resolves for the process that executes it, the pinned
+# busybox, so it runs busybox's `echo`.
+npm_package(
+    name = "exe_other_version",
+    package = "komira-fixture",
+    version = "1.0.0",
+    integrity = "sha512-Y1KEAijs5lufsFqRnDA1aJW5Uz3kZMtKchif6q2s0A0/I0v9/4E8RkGcAMIo1d8oaS0DZpG1chiZWKwbOq2Iig==",
+    tarball = ":exe_other_version.tgz",
+    exe = "bin/echo",
+)
+
+# RED "exe is empty".
+npm_package(
+    name = "exe_empty",
+    package = "tslib",
+    version = _TSLIB["version"],
+    integrity = _TSLIB["integrity"],
+    tarball = _PKG + _TSLIB["file"],
+    exe = "",
+)
+
+# RED "tslib is in its own deps".
+npm_package(
+    name = "own_dep",
+    package = "tslib",
+    version = "1.0.0",
+    integrity = _TSLIB["integrity"],
+    tarball = _PKG + _TSLIB["file"],
+    deps = [":tslib_a"],
+)
+
+# ---- node_dist --------------------------------------------------------------
+
+# RED "the pin says v24.20.0": the pinned archive under another version.
+node_dist(
+    name = "version_differs_node",
+    archive = _PKG + NODE["archive"],
+    native_libs = _PKG + "native_libs",
+    top = NODE["top"],
+    version = "24.20.0",
+)
+
+# RED "is v24.21.0, the pin says v24.21": a version the node's begins with.
+node_dist(
+    name = "version_prefix_node",
+    archive = _PKG + NODE["archive"],
+    native_libs = _PKG + "native_libs",
+    top = NODE["top"],
+    version = "24.21",
+)
+
+# RED "is v24.21.0, the pin says v4.21.0": a version the node's ends with.
+node_dist(
+    name = "version_suffix_node",
+    archive = _PKG + NODE["archive"],
+    native_libs = _PKG + "native_libs",
+    top = NODE["top"],
+    version = "4.21.0",
+)
+
+# RED "holds no package/bin/node": an archive that is no Node.js release
+# (tslib's tarball, whose top directory is `package`).
+node_dist(
+    name = "not_node",
+    archive = _PKG + _TSLIB["file"],
+    native_libs = _PKG + "native_libs",
+    top = "package",
+    version = NODE["version"],
+)
+
+# Archives built here, top directory `node-x`, for the checks of what the
+# archive holds and of the node in it.
+
+stand_in_archive(
+    name = "archive_no_bin_node",
+    top = "node-x",
+    files = ["LICENSE", "include/node/node_api.h"],
+)
+
+stand_in_archive(
+    name = "archive_no_header",
+    top = "node-x",
+    files = ["LICENSE"],
+    programs = ["bin/node"],
+)
+
+stand_in_archive(
+    name = "archive_node_not_executable",
+    top = "node-x",
+    files = ["LICENSE", "bin/node", "include/node/node_api.h"],
+)
+
+stand_in_archive(
+    name = "archive_header_is_dir",
+    top = "node-x",
+    files = ["LICENSE", "include/node/node_api.h/not_a_header"],
+    programs = ["bin/node"],
+)
+
+stand_in_archive(
+    name = "archive_node_does_not_run",
+    top = "node-x",
+    files = ["LICENSE", "include/node/node_api.h"],
+    programs = ["bin/node"],
+)
+
+# RED "holds no node-x/bin/node": the Node-API header, but no node.
+node_dist(
+    name = "no_bin_node",
+    archive = ":archive_no_bin_node",
+    native_libs = _PKG + "native_libs",
+    top = "node-x",
+    version = NODE["version"],
+)
+
+# RED "holds no node-x/bin/node or node-x/include/node/node_api.h": a node,
+# but no Node-API header.
+node_dist(
+    name = "no_header",
+    archive = ":archive_no_header",
+    native_libs = _PKG + "native_libs",
+    top = "node-x",
+    version = NODE["version"],
+)
+
+# RED "holds no node-x/bin/node or node-x/include/node/node_api.h": a
+# node_api.h that is a directory, not a file.
+node_dist(
+    name = "header_is_dir",
+    archive = ":archive_header_is_dir",
+    native_libs = _PKG + "native_libs",
+    top = "node-x",
+    version = NODE["version"],
+)
+
+# RED "holds no node-x/bin/node": a bin/node that is not executable.
+node_dist(
+    name = "node_not_executable",
+    archive = ":archive_node_not_executable",
+    native_libs = _PKG + "native_libs",
+    top = "node-x",
+    version = NODE["version"],
+)
+
+# RED "bin/node does not run": a bin/node that exits non-zero (busybox, run
+# as `node`, which is none of its applets).
+node_dist(
+    name = "node_does_not_run",
+    archive = ":archive_node_does_not_run",
+    native_libs = _PKG + "native_libs",
+    top = "node-x",
+    version = NODE["version"],
+)
+
+# ---- c_shared_lib -----------------------------------------------------------
+
+# RED "error: unused variable 'unused_on_purpose'": a warning fails the
+# build (-Wall -Werror).
+c_shared_lib(
+    name = "warns",
+    srcs = ["warns.c"],
+)

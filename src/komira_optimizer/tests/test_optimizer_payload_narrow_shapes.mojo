@@ -181,7 +181,8 @@ def test_a_side_behind_a_filter_or_a_pure_project_narrows() raises:
 def test_refused_side_shapes_narrow_nothing_on_that_side() raises:
     # A computed Project, a UDF Project and an Aggregate side. Catches: a
     # computed column narrowed (its evaluator knows nothing of the base), or
-    # a side the fused leaf would not recognise being stamped.
+    # a side the fused join leaf (not in this tree) would not recognise
+    # being stamped.
     var pe = ExprArray()
     pe.append(Expr.col_ref("key"))
     pe.append(Expr.binary(BIN_ADD, Expr.col_ref("pv"), Expr.literal(ScalarValue.from_int(1))))
@@ -271,8 +272,9 @@ def test_a_side_whose_only_column_is_the_key_returns_zero() raises:
 
 
 def test_a_residual_or_a_multi_key_join_is_refused() raises:
-    # Catches: narrowing under a residual the leaf evaluates by name over the
-    # joined batch, or under a multi-key join the measured route never takes.
+    # Catches: narrowing under a residual (evaluated by name over the joined
+    # batch), or under a multi-key join, which the leaf this rule is designed
+    # for (not in this tree) does not take.
     var residual = Optional[OwnedPointer[Expr]](
         OwnedPointer(
             Expr.binary(BIN_GT, Expr.col_ref("pv"), Expr.col_ref("bv"))

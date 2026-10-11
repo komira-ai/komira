@@ -3,14 +3,16 @@
 # =============================================================================
 #
 #   kci run [--machine <file>] --stage <S> [--only step:<name>|validation:<name>]...
-#           [--affected-by <commit>] [--plan] --revision-id <commit>
+#           [--affected-by <commit>] [--plan] [--admission] --revision-id <commit>
 #           --run-id <id> --attempt <n> [--context <key=value>]...
 #           --release-dir <dir> [--result-file <file>] [--summary-file <file>]
-#           [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]
+#           [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]
+#            [--build-budget-s <n>]]
 #           [--release-version <file>] [--concurrency <n>]
 #           [--secret-store <none|env>] [--scratch-dir <dir>]
 #           [--release-set-hash <64 hex>]
 #           [--pixi <file> --pixi-sha256 <hex>] [--channel file:///<dir>]
+#           [--rollback-on-failure]   (refused: see below)
 #   kci --help
 #
 # kci has exactly ONE command: `kci run --stage S` runs every step of stage S
@@ -37,6 +39,15 @@
 #             and nothing ships (kci_build affected.mojo). <commit> is a
 #             FULL commit id, like --revision-id (a CI job passes the pull
 #             request's base sha, not a branch name). The run is SELECTIVE.
+#             `--build-budget-s <n>` (with --affected-by only, refused
+#             without it) is the seconds the per-change check's build of
+#             the units may take in all, every run of it included
+#             (kci_build affected_batch.mojo, THE BUDGET), counted from
+#             kci's own start (`started_ns`, set by dispatch.mojo
+#             `kci_main_with`), at most MAX_BUILD_BUDGET_S (a week); pr.yml
+#             passes what is left of its job's time limit. Every build run
+#             may take all the budget left, so --build-timeout-s (the cap of
+#             each run without a budget) is refused beside it.
 #             It is refused with --only, with --release-dir (nothing is
 #             released, so there is no release directory; without
 #             --affected-by the flag is required), and for a stage holding a
@@ -45,6 +56,12 @@
 #             renders and builds nothing (with --affected-by: asks the
 #             affected commands and builds nothing); a PUBLISH step checks
 #             and reads and writes nothing to the channel.
+#
+# `--admission` (any stage; no value) asks for THE ADMISSION CHECK (rule
+# R24 of the staged pipeline, dispatch.mojo's header, 4c): on a push to main,
+# a re-run, or the first attempt of the first stage, whose revision is not
+# main's releasable tip stops SUPERSEDED (exit 0) before any effect. It
+# selects nothing and checks nothing on any other run.
 #
 # Every other flag is an input, never a selector. `--summary-file <file>`
 # (any stage) names a markdown file kci APPENDS its summary to (never
@@ -57,7 +74,8 @@
 # the rest once the stage is resolved:
 #
 #   a selected BUILD step    needs --work-dir and --log-dir; --build-timeout-s
-#                            optional
+#                            or (with --affected-by) --build-budget-s
+#                            optional, never both
 #   a selected PUBLISH step  to a channel needs --release-version;
 #                            --concurrency, --secret-store optional
 #   a selected DEPLOY step, or PUBLISH step into a cell,
@@ -94,12 +112,21 @@
 #
 # `--release-set-hash <64 lowercase hex>` (a selected PUBLISH step,
 # validation or DEPLOY step): the set hash of the release the run was handed
-# (kci.yml: the build job's, or the validate job's for prod). kci recomputes
+# (kci.yml: the build job's, or the beta_validate job's for prod). kci recomputes
 # the release directory's set and refuses another (KCI-E-SET-HASH, exit 3)
 # before any effect; under GitHub Actions a run that publishes or validates
 # without it is a usage error (dispatch.mojo), and a run that deploys
 # without it always is. It is refused with --affected-by and on a stage
 # whose selection publishes, validates and deploys nothing.
+#
+# `--rollback-on-failure` (a boolean, like `--plan`) would re-apply a failed
+# DEPLOY step's cell at its last known-good revision. That needs a per-cell
+# deployed-revision record, which this kci does not have, so the flag is
+# parsed (it takes no value and is given once) and then REFUSED for every
+# stage, with or without `--plan`, before anything is read
+# (`refuse_rollback_on_failure`, dispatch.mojo's header, 0; KCI-E-USAGE,
+# exit 2). Without it a failed DEPLOY step stops the run and leaves its cell
+# as the failed apply left it (deploy_step.md, "After a failed deploy").
 #
 # Every refusal here is a usage error (kci_api's KCI-E-USAGE, exit 2;
 # a malformed `--only` is KCI-E-SELECTOR, also exit 2).
@@ -123,6 +150,7 @@ from kci_api import (
     parse_selectors,
     require_full_commit_id,
 )
+from kci_build import MAX_BUILD_BUDGET_S
 from kci_release_machine import Selection, Stage
 from kci_validate import ChannelUrl
 
@@ -131,15 +159,17 @@ comptime CLI_VERB_HELP: String = "help"
 
 comptime KCI_USAGE: String = (
     "usage:\n"
-    "  kci run [--machine <file>] --stage <S> [--only step:<name>|validation:<name>]... [--plan]\n"
+    "  kci run [--machine <file>] --stage <S> [--only step:<name>|validation:<name>]... [--plan] [--admission]\n"
     "          [--affected-by <commit>] --revision-id <commit> --run-id <id> --attempt <n>\n"
     "          [--context <key=value>]... --release-dir <dir> [--result-file <file>] [--summary-file <file>]\n"
     "          [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]         (a selected BUILD step)\n"
+    "          [--build-budget-s <n>]       (with --affected-by: the seconds the whole build of the units may take)\n"
     "          --release-version <file> [--concurrency <n>] [--secret-store <none|env>]  (a selected PUBLISH step to a channel)\n"
     "          --scratch-dir <dir>                                          (a selected validation)\n"
     "          [--release-set-hash <64 hex>]   (a selected PUBLISH step or validation; required by a DEPLOY step or a PUBLISH into a cell)\n"
     "          --pixi <file> --pixi-sha256 <hex>                  (a selected CONDA_INSTALL_ENV validation)\n"
     "          [--channel file:///<dir>]       (validations only: install from this local channel, not the step's)\n"
+    "          [--rollback-on-failure]         (refused: this kci has no deployed-revision record)\n"
     "  kci --help\n"
     "kci has one command: kci run --stage S runs every step of stage S of the machine file, in order.\n"
     "--machine defaults to release/machine.textproto.\n"
@@ -147,11 +177,20 @@ comptime KCI_USAGE: String = (
     "--affected-by <commit>: build only the units the change <commit>...--revision-id reaches (no --release-dir).\n"
     "A step's validations run after it in a FULL run; with --only, only the validations it names run.\n"
     "--plan: a dry run; a BUILD step builds nothing, a PUBLISH step checks and reads and writes nothing.\n"
+    "--admission: on a push to main, a re-run or the first stage's first attempt of a revision that is not\n"
+    "main's releasable tip stops SUPERSEDED (exit 0) before anything is run.\n"
     "--summary-file: a markdown file kci appends its summary to (the outcome, the steps, the NEW NAMES).\n"
     "Under GitHub Actions kci first checks the workflow it runs under against the machine file.\n"
     "--secret-store: how a channel credential's secret NAME is resolved: none (default) refuses;\n"
     "env reads the environment variable of that name."
 )
+
+
+comptime ROLLBACK_ON_FAILURE_REFUSED: String = (
+    "--rollback-on-failure needs the per-cell deployed-revision record, which this kci does not have:"
+    " without the flag a failed DEPLOY step stops the run and leaves its cell as the failed apply left it"
+)
+"""The refusal of `--rollback-on-failure` (file header)."""
 
 
 struct SecretStoreChoice(ImplicitlyCopyable, Movable, Equatable):
@@ -195,7 +234,10 @@ struct KciCommand(Copyable, Movable):
     var work_dir: String
     var log_dir: String
     var build_timeout_s: Int
+    var build_budget_s: Int
+    var started_ns: Int
     var plan: Bool
+    var admission: Bool
     var summary_file: String
     var release_version: String
     var concurrency: Int
@@ -207,6 +249,7 @@ struct KciCommand(Copyable, Movable):
     var only: List[String]
     var affected_by: String
     var release_set_hash: String
+    var rollback_on_failure: Bool
     var seen: List[String]
 
     def __init__(out self):
@@ -222,7 +265,10 @@ struct KciCommand(Copyable, Movable):
         self.work_dir = String("")
         self.log_dir = String("")
         self.build_timeout_s = 0
+        self.build_budget_s = 0
+        self.started_ns = 0
         self.plan = False
+        self.admission = False
         self.summary_file = String("")
         self.release_version = String("")
         self.concurrency = 0
@@ -234,6 +280,7 @@ struct KciCommand(Copyable, Movable):
         self.only = List[String]()
         self.affected_by = String("")
         self.release_set_hash = String("")
+        self.rollback_on_failure = False
         self.seen = List[String]()
 
     def given(self, flag: String) -> Bool:
@@ -260,8 +307,10 @@ def usage_error(why: String) -> Error:
 def _run_common_flags() -> List[String]:
     var l = List[String]()
     for f in [
-        "--machine", "--stage", "--only", "--affected-by", "--plan", "--revision-id", "--run-id", "--attempt",
+        "--machine", "--stage", "--only", "--affected-by", "--plan", "--admission", "--revision-id", "--run-id",
+        "--attempt",
         "--context", "--release-dir", "--result-file", "--summary-file", "--release-set-hash",
+        "--rollback-on-failure",
     ]:
         l.append(String(f))
     return l^
@@ -269,7 +318,7 @@ def _run_common_flags() -> List[String]:
 
 def build_flags() -> List[String]:
     var l = List[String]()
-    for f in ["--work-dir", "--log-dir", "--build-timeout-s"]:
+    for f in ["--work-dir", "--log-dir", "--build-timeout-s", "--build-budget-s"]:
         l.append(String(f))
     return l^
 
@@ -325,7 +374,7 @@ def _repeatable(flag: String) -> Bool:
 
 
 def _boolean(flag: String) -> Bool:
-    return flag == String("--plan")
+    return flag == String("--plan") or flag == String("--admission") or flag == String("--rollback-on-failure")
 
 
 def _positive_int(flag: String, value: String) raises -> Int:
@@ -402,8 +451,19 @@ def _set(mut cmd: KciCommand, flag: String, value: String) raises:
         cmd.log_dir = value.copy()
     elif flag == String("--build-timeout-s"):
         cmd.build_timeout_s = _positive_int(flag, value)
+    elif flag == String("--build-budget-s"):
+        cmd.build_budget_s = _positive_int(flag, value)
+        if cmd.build_budget_s > MAX_BUILD_BUDGET_S:
+            raise usage_error(
+                flag + String(" '") + value + String("' is more than ") + String(MAX_BUILD_BUDGET_S)
+                + String(" (a week)")
+            )
     elif flag == String("--plan"):
         cmd.plan = True
+    elif flag == String("--admission"):
+        cmd.admission = True
+    elif flag == String("--rollback-on-failure"):
+        cmd.rollback_on_failure = True
     elif flag == String("--summary-file"):
         cmd.summary_file = value.copy()
     elif flag == String("--release-version"):
@@ -540,13 +600,33 @@ def parse_kci_args(args: List[String]) raises -> KciCommand:
             raise usage_error(
                 String("--release-set-hash is not used with --affected-by: the per-change check releases nothing")
             )
-    elif not cmd.given(String("--release-dir")):
-        raise usage_error(String("kci run needs --release-dir"))
+        if cmd.given(String("--build-budget-s")) and cmd.given(String("--build-timeout-s")):
+            raise usage_error(
+                String("--build-timeout-s is not used with --build-budget-s: every build run may take all the")
+                + String(" budget left")
+            )
+    else:
+        if cmd.given(String("--build-budget-s")):
+            raise usage_error(
+                String("--build-budget-s bounds the per-change check's build of the units: it is used only")
+                + String(" with --affected-by")
+            )
+        if not cmd.given(String("--release-dir")):
+            raise usage_error(String("kci run needs --release-dir"))
     try:
         _ = cmd.run_identity()
     except e:
         raise usage_error(String(e))
     return cmd^
+
+
+def refuse_rollback_on_failure(cmd: KciCommand) raises:
+    """Raises the usage error `ROLLBACK_ON_FAILURE_REFUSED` when the
+    command line gave `--rollback-on-failure` (file header): this kci has
+    no deployed-revision record to roll a cell back to. The caller records
+    it as KCI-E-USAGE (exit 2) before anything is read."""
+    if cmd.rollback_on_failure:
+        raise usage_error(String(ROLLBACK_ON_FAILURE_REFUSED))
 
 
 def selectors_of(cmd: KciCommand) raises -> List[Selector]:

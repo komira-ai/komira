@@ -1,4 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 
 # The storage substrate for sources and sinks: the `FileSystem` and
 # `FileFormat` traits, the local-disk implementation, glob and partition
@@ -38,7 +39,10 @@ mojo_library(
     test_srcs = [
         "tests/test_cloud_lazy_hive_prune.mojo",
         "tests/test_file_discovery.mojo",
+        "tests/test_fs_handles.mojo",
         "tests/test_fs_path_bytes_non_ascii.mojo",
+        "tests/test_fs_stub_backend.mojo",
+        "tests/test_fs_value_types.mojo",
         "tests/test_glob_engine.mojo",
         "tests/test_local_fs_clone.mojo",
         "tests/test_local_fs_delete_errno.mojo",
@@ -46,13 +50,40 @@ mojo_library(
         "tests/test_local_fs_list_dir_shallow.mojo",
         "tests/test_local_fs_list_recursive.mojo",
         "tests/test_local_fs_read_at_mmap.mojo",
+        "tests/test_local_fs_read_paths.mojo",
         "tests/test_local_fs_real_file_read.mojo",
         "tests/test_local_fs_trait_elaboration.mojo",
         "tests/test_local_fs_write_at.mojo",
+        "tests/test_local_fs_write_chunked.mojo",
+        "tests/test_local_fs_write_paths.mojo",
+        "tests/test_partition_codec_edges.mojo",
         "tests/test_path_discovery.mojo",
         "tests/test_pruned_hive_discovery.mojo",
         "tests/test_pruned_hive_raw_spelling.mojo",
         "tests/test_pruned_hive_writer_spellings.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# libkomira_fs_native.so.1: the C this library owns, as its own
+# shared library exporting the names its callers call
+# (tools/build/native/README.md, "Each library's shared library"). Built and
+# checked here; no package ships it yet.
+native_shared_library(
+    name = "komira_fs_native",
+    archives = [
+        ":komira_fs_posix",
+    ],
+    callers = [
+        ":komira_fs",
+        "//src/komira_objectstore:komira_objectstore",
+    ],
+    library = "komira_fs",
+    # Every weak undefined symbol of the library, recorded from its first
+    # green link (checks 3 and 7 hold it to exactly this list):
+    weak_undefined = [
+        # zig's C runtime (crti.o): the profiling hook, absent unless -pg.
+        "__gmon_start__",
     ],
     visibility = ["PUBLIC"],
 )

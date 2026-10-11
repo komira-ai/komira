@@ -210,11 +210,11 @@ def test_right_renamed_and_colliding_names_map_to_the_right_child() raises:
 
 
 def test_key_types_outside_the_envelope_are_not_folded() raises:
-    # UINT32 is not a join-key type: folding it would make the executor
-    # refuse. Defect: the envelope check removed on either side or in either
-    # operand order. Each of the four checks has a case where it is the ONLY
-    # one that refuses (the other key is INT64), so removing any one of them
-    # folds that case.
+    # UINT32 is not a join-key type: folding it would key a join on a type
+    # `join_key_envelope` does not admit. Defect: the check removed on
+    # either side or in either operand order. Each of the four checks has a
+    # case where it is the ONLY one that refuses (the other key is INT64), so
+    # removing any one of them folds that case.
     var o1 = _ecj(_eq("u", "ru"), _cross(_t(), _r()))
     assert_equal(Int(o1.tag), Int(PLAN_FILTER))
     assert_equal(Int(o1._filter.value()[].child[]._join.value()[].join_type), Int(JOIN_CROSS))
