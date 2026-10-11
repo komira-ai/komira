@@ -179,6 +179,15 @@ def test_errors_do_not_echo_input() raises:
 
 def test_error_kind_of_foreign_error() raises:
     assert_equal(error_kind(Error("something else")), String(""))
+    # The komira_encoding prefix with no colon after the kind is no
+    # komira_encoding error either.
+    assert_equal(error_kind(Error("komira_encoding.NoColon")), String(""))
+    assert_equal(error_kind(Error("komira_encoding.")), String(""))
+    # The kind is what lies between the prefix and the first colon.
+    assert_equal(
+        error_kind(Error("komira_encoding.Kind: f: a: b at position 0")),
+        String("Kind"),
+    )
 
 
 def main() raises:

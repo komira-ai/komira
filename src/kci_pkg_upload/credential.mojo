@@ -203,4 +203,4 @@ struct ScriptedCredential(RegistryCredential, Deinitable):
             if self._surfaces[i] == surface:
                 return self._values[i].copy()
         refuse_surface(String("ScriptedCredential"), surface)
-        return String("")
+        return String("")  # cov: unreachable refuse_surface above always raises

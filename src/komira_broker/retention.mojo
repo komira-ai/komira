@@ -363,13 +363,13 @@ struct RetentionPass[Storage: ConditionalWriteStore](
             expect_offset += chunks[k].record_count
             k += 1
         if expect_offset != new_offset:
-            raise Error(
-                "RetentionPass: survivor offset contiguity broken — expected"
+            raise Error(  # cov: unreachable new_offset is the same sum: chunks[retire].base_offset, or running_base when every snapshot chunk retires
+                "RetentionPass: survivor offset contiguity broken — expected"  # cov: unreachable see the line above
                 " new log_start_offset "
-                + String(expect_offset)
-                + " got "
-                + String(new_offset)
-                + " (retention must NEVER renumber the log)"
+                + String(expect_offset)  # cov: unreachable see the line above
+                + " got "  # cov: unreachable see the line above
+                + String(new_offset)  # cov: unreachable see the line above
+                + " (retention must NEVER renumber the log)"  # cov: unreachable see the line above
             )
 
         # Advance the persisted log_start atomically (If-Match CAS). On a
@@ -490,13 +490,13 @@ struct RetentionPass[Storage: ConditionalWriteStore](
             expect_offset += chunks[k].record_count
             k += 1
         if expect_offset != new_offset:
-            raise Error(
-                "RetentionPass: survivor offset contiguity broken — expected"
+            raise Error(  # cov: unreachable new_offset is the same sum: chunks[retire].base_offset, or running_base when every snapshot chunk retires
+                "RetentionPass: survivor offset contiguity broken — expected"  # cov: unreachable see the line above
                 " new log_start_offset "
-                + String(expect_offset)
-                + " got "
-                + String(new_offset)
-                + " (retention must NEVER renumber the log)"
+                + String(expect_offset)  # cov: unreachable see the line above
+                + " got "  # cov: unreachable see the line above
+                + String(new_offset)  # cov: unreachable see the line above
+                + " (retention must NEVER renumber the log)"  # cov: unreachable see the line above
             )
 
         var advanced = self._advance_log_start_cas(

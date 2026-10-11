@@ -16,7 +16,11 @@ in one package so the two steps cannot disagree:
 - `verify_member`, the checks over one artifact's directory (one manifest,
   bare file names, nothing else in the directory, the sha256, the conda
   metadata agreeing), and `undeclared_requirements`, which lists library
-  requirements that name no other library of the set.
+  requirements that name no other library of the set, except one byte-equal
+  to a conda-forge requirement of `system_libs()` (the system libraries a
+  library may open, a compiled copy of
+  [`system_libs.bzl`](../../tools/build/package/system_libs.bzl) that a welded
+  test holds equal to it).
 
 It runs no process and opens no socket; only `verify_member` and the
 `read_*` functions read files.

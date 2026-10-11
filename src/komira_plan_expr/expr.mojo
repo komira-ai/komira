@@ -24,6 +24,7 @@ from std.memory import OwnedPointer, ArcPointer
 from komira_collections.slab import Slab
 from komira_arrow.arrow_types import ArrowType
 from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.render_text import write_escaped, write_quoted
 # `PartitionFrame` comes from the ZERO-IMPORT leaf `partition_frame.mojo`, NOT
 # from `partition_expr.mojo`. Same type (that file re-exports this one); the
 # difference is the CLOSURE — `partition_expr` also declares
@@ -4911,26 +4912,34 @@ struct Expr(Movable, Writable):
         elif self.tag == EXPR_ALIAS:
             writer.write("Alias(")
             self._alias.value().child[].write_to(writer)
-            writer.write(", \"", self._alias.value().name, "\")")
+            writer.write(", ")
+            write_quoted(writer, self._alias.value().name)
+            writer.write(")")
         elif self.tag == EXPR_STRING_OP:
             writer.write("StringOp(")
             _write_strop(writer, self._string_op.value().op)
             writer.write(", ")
             self._string_op.value().child[].write_to(writer)
-            writer.write(", \"", self._string_op.value().pattern, "\")")
+            writer.write(", ")
+            write_quoted(writer, self._string_op.value().pattern)
+            writer.write(")")
         elif self.tag == EXPR_REGEXP:
             ref rd = self._regexp.value()
             writer.write("Regexp(op=", Int(rd.op), ", ")
             rd.child[].write_to(writer)
-            writer.write(", pattern=\"", rd.pattern, "\"")
+            writer.write(", pattern=")
+            write_quoted(writer, rd.pattern)
             if rd.flags.byte_length() > 0:
-                writer.write(", flags=\"", rd.flags, "\"")
+                writer.write(", flags=")
+                write_quoted(writer, rd.flags)
             if rd.op == REGEXP_EXTRACT or rd.op == REGEXP_EXTRACT_ALL:
                 writer.write(", group=", rd.group)
             if rd.group_name.byte_length() > 0:
-                writer.write(", group_name=\"", rd.group_name, "\"")
+                writer.write(", group_name=")
+                write_quoted(writer, rd.group_name)
             if rd.op == REGEXP_REPLACE:
-                writer.write(", replacement=\"", rd.replacement, "\"")
+                writer.write(", replacement=")
+                write_quoted(writer, rd.replacement)
             writer.write(")")
         elif self.tag == EXPR_SUBSTRING:
             ref sd = self._substring.value()
@@ -4972,10 +4981,9 @@ struct Expr(Movable, Writable):
             # one ASC, answer the FIRST query (MEASURED). Every field is
             # emitted; the three lists are NOT parallel, so each prints in full.
             ref w = self._window_fn.value()
-            writer.write(
-                "WindowFn(func=", Int(w.func), ", col=\"", w.arg_col,
-                "\", offset=", w.arg_offset, ", partition_by=[",
-            )
+            writer.write("WindowFn(func=", Int(w.func), ", col=")
+            write_quoted(writer, w.arg_col)
+            writer.write(", offset=", w.arg_offset, ", partition_by=[")
             for i in range(len(w.partition_by)):
                 if i > 0:
                     writer.write(", ")
@@ -5009,7 +5017,9 @@ struct Expr(Movable, Writable):
             ref sf = self._struct_field.value()
             writer.write("StructField(")
             sf.parent[].write_to(writer)
-            writer.write(", \"", sf.field_name, "\")")
+            writer.write(", ")
+            write_quoted(writer, sf.field_name)
+            writer.write(")")
         elif self.tag == EXPR_STRUCT_FIELD_IDX:
             # Surface for EXPLAIN (by-idx).
             ref sfi = self._struct_field_idx.value()
@@ -5118,8 +5128,12 @@ struct Expr(Movable, Writable):
             writer.write("JsonExtract(")
             je.parent[].write_to(writer)
             writer.write(", path=\"$")
+            # Each segment escaped, `.` included: the ONE key `a.b`
+            # (`$."a.b"`) must not render like the TWO keys `a`, `b`
+            # (`$.a.b`) -- this render is plan identity (komira#960).
             for i in range(len(je.path_segments)):
-                writer.write(".", je.path_segments[i])
+                writer.write(".")
+                write_escaped(writer, je.path_segments[i], escape_dot=True)
             writer.write("\"")
             if je.preserve_extension_metadata:
                 writer.write(", mode=->")

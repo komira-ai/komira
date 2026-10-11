@@ -9,6 +9,8 @@ export_file(name = "run_check.sh", visibility = ["PUBLIC"])
 
 export_file(name = "mem_cap.sh", visibility = ["PUBLIC"])
 
+export_file(name = "test_deadline.sh", visibility = ["PUBLIC"])
+
 export_file(name = "proto_fixture.sh", visibility = ["PUBLIC"])
 
 export_file(name = "conda_unpack.zig", src = "tools/conda_unpack.zig", visibility = ["PUBLIC"])

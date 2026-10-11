@@ -28,7 +28,7 @@
 #   decimals (int-backed at a fixed column scale) and strings (byte equality)
 #   are all identity, so they are served.
 #
-# ⛔ DETERMINISM. The only scalar construct in this engine that is not a pure
+# ⛔ DETERMINISM. The only scalar construct in `Expr` that is not a pure
 # function of its inputs is `EXPR_UDF_CALL` (there is no `random()`, no `now()`
 # -- checked, not assumed). `_derived_key_is_deterministic` runs the ONE
 # maintained UDF walk (`expr_udf_sites.collect_udf_calls`) rather than a second
@@ -38,6 +38,7 @@
 # ── THE SHAPE IT MATCHES, AND WHY THE MATCH IS AT THE **PROJECT** ───────────
 #
 #   Project [outer]                 <- the SQL binder's post-aggregate list
+#                                      (the binder is not in this tree)
 #     Aggregate [k0 .. kn, aggs]
 #       Project [inner]             <- where the computed keys are evaluated
 #         <anything>
@@ -50,11 +51,12 @@
 # ⭐ THE MATCH IS ANCHORED AT THE OUTER PROJECT ON PURPOSE. The elided key's
 # expression has to be re-emitted ABOVE the aggregate, and the outer Project is
 # already there -- so the rewrite FOLDS INTO IT and the plan gains no node. The
-# alternative (insert a second Project and let `merge_projects` fold the
-# stack) was rejected: the merge substitution then descended only COL_REF /
+# alternative (insert a second Project and let a project merge,
+# `merge_projects`, not in this tree, fold the stack) was rejected: the merge
+# substitution then descended only COL_REF /
 # BINARY / UNARY / CAST / ALIAS, so an outer expression of any other tag that
 # named an elided key would come out of the merge with a DANGLING col_ref.
-# (Since 2026-09-25 `optimizer_project_merge_guard.substitute_project_refs`
+# (`optimizer_project_merge_guard.substitute_project_refs` now
 # also descends MathFn / CASE / string / IN-list nodes and REFUSES a merge that
 # would still dangle; the fold-here design stands.)
 # Folding here means the substitution is a two-case match on the outer entry's
@@ -68,16 +70,13 @@
 # `src/optimizer/` does functional-dependency elimination. It does not need to:
 # `plan_aggregate.cpp:239` extracts every group expression into a streaming
 # `PhysicalProjection` FIRST and then picks a route, so a computed key costs it
-# a projection and nothing else. Ours is an admission ladder whose decline
-# routes the aggregate onto a strictly worse operator -- which is why the same
-# query is 4.2 s here and 0.34 s there, and why REMOVING the key is worth more
-# to us than it would be to them.
+# a projection and nothing else. This rule instead REMOVES the key, so the
+# aggregate groups on fewer keys.
 #
-# ── MEASURED (ClickBench Q35, this fixture) ─────────────────────────────────
+# ── EXAMPLE (ClickBench Q35) ────────────────────────────────────────────────
 # `GROUP BY client_ip, client_ip-1, client_ip-2, client_ip-3` and
-# `GROUP BY client_ip` produce the SAME 9,762,046 groups. The four-key form
-# routes to `resident_grace_hash_spill` (13.7 GB resident, 1.2 effective
-# cores); the one-key form routes to the fused `vector_decode_leaf` RADIX leaf.
+# `GROUP BY client_ip` produce the SAME groups; this rule rewrites the first
+# into the second plus a Project above the aggregate.
 # =============================================================================
 
 from std.collections import Optional, Set
@@ -125,7 +124,7 @@ def _grouping_is_value_identity(schema: Schema, col_name: String) -> Bool:
 
     See the header: the FD argument needs "two rows the grouping calls equal on
     `a` agree on `f(a)`", which fails for floating point (`-0.0` / `0.0` group
-    together but `1/x` separates them). Everything else this engine groups on
+    together but `1/x` separates them). Every other type GROUP BY compares
     is identity: integers, bool, temporal (int-backed), decimal (int-backed at
     one column scale), and strings (byte equality).
 
@@ -152,7 +151,7 @@ def _derived_key_is_deterministic(body: Expr) -> Bool:
     `refuse_correlated_subquery=True` makes a correlated subquery inside the key
     RAISE, which is caught here and reported as "not deterministic" (a decline).
     An `EXPR_AGG_FN` / `EXPR_WINDOW_FN` / `EXPR_COL_IDX` at the top is rejected
-    outright: the first two cannot legally be group keys (the binder raises),
+    outright: the first two cannot legally be group keys (a SQL binder raises),
     and a POSITIONAL reference would silently re-bind under the narrowed schema
     this rewrite produces.
     """
@@ -330,8 +329,8 @@ def _build_fd_elided(imm plan: LogicalPlan) raises -> Optional[LogicalPlan]:
         var cols = Set[String]()
         _collect_expr_columns(e.alias_child_ref(), cols)
         if len(cols) == 0:
-            # A constant key. The binder already elides those (its `const_canon`
-            # arm); doing it here too would duplicate a rule that owns the
+            # A constant key. The SQL binder (not in this tree) elides those (its
+            # `const_canon` arm); doing it here too would duplicate a rule that owns the
             # "last surviving key" reasoning.
             elide.append(False)
             continue

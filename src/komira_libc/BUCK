@@ -28,6 +28,7 @@ mojo_library(
         "tests/test_posix_io_relative_path_open.mojo",
         "tests/test_posix_io_writev.mojo",
         "tests/test_posix_read_env.mojo",
+        "tests/test_posix_unset_env.mojo",
         "tests/test_pwrite_at.mojo",
         "tests/test_thread_self_discriminates.mojo",
     ],

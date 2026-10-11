@@ -705,7 +705,7 @@ def join_output_chunk_bounds[
         var tlo = tile_lo[t]
         var thi = tile_lo[t + 1]
         if thi <= tlo:
-            continue
+            continue  # cov: unreachable n_tiles <= n makes every tile hold at least one row
 
         if n_tiles > 1:
             # FAST ABSORB. Sound because the per-row running total is monotone

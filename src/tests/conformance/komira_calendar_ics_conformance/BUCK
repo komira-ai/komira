@@ -1,0 +1,48 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: komira_calendar_ics against RFC 5545 and against files in the
+# shape calendar clients export.
+#
+#   test_rfc5545        the §3.6.1 VEVENT examples, the §4 iCalendar
+#                       objects (the VTODO, VJOURNAL and VFREEBUSY ones
+#                       refused as out of subset), every §3.8.5.3 RRULE
+#                       example (read into the structured rule, or refused
+#                       with its reason) and the §3.6.5 America/New_York
+#                       VTIMEZONE as write_vtimezone writes it
+#   test_client_shapes  Google, Apple, Outlook and Thunderbird shaped files
+#                       (ours, dated 2030): each event and each report line,
+#                       then export and import again with nothing lost
+#
+# The test files say what was changed in an RFC example. Zones are built
+# from POSIX TZ strings in the library (__init__.mojo). Welded: nothing
+# named komira_calendar_ics_conformance exists unless every test passed.
+# Nothing depends on it.
+mojo_library(
+    name = "komira_calendar_ics_conformance",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_calendar:komira_calendar",
+        "//src/komira_calendar_ics:komira_calendar_ics",
+        "//src/komira_calendar_proto:komira_calendar_proto",
+        "//src/komira_content_line:komira_content_line",
+        "//src/komira_datetime:komira_datetime",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
+    ],
+    conda = False,
+    test_srcs = [
+        "tests/test_client_shapes.mojo",
+        "tests/test_rfc5545.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps).
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)

@@ -279,6 +279,33 @@ def test_pr_yml_agrees_with_the_machine_file() raises:
     assert_equal(runs, 1)
     assert_equal(farm, 1)
     assert_true(doc.child(doc.items(jobs)[0], String("environment")) < 0)
+    # the build budget: the FIRST step takes the job's deadline, 5 of its
+    # 120 minutes before GitHub would cancel it, and the one `kci run` gets
+    # the seconds left of it as --build-budget-s (kci_build THE BUDGET)
+    assert_equal(doc.text(doc.child(doc.items(jobs)[0], String("timeout-minutes"))), String("120"))
+    var first = doc.child(steps[0], String("run"))
+    assert_true(first >= 0, String("pr.yml's first step runs nothing"))
+    assert_equal(
+        doc.text(first), String('echo "$(( $(date +%s) + 115 * 60 ))" > "$RUNNER_TEMP/job_deadline_s"\n')
+    )
+    var budgeted = 0
+    for i in range(len(steps)):
+        var r = doc.child(steps[i], String("run"))
+        if r >= 0 and doc.kind(r) == NODE_SCALAR and len(kci_run_calls(doc.text(r))) > 0:
+            var t = doc.text(r)
+            # a missing deadline file stops the step before the arithmetic
+            # (which would read it as 0: a huge negative budget)
+            assert_true(
+                t.startswith(
+                    String('[ -s "$RUNNER_TEMP/job_deadline_s" ] || { echo "::error::no job deadline in ')
+                    + String("\\$RUNNER_TEMP/job_deadline_s: the job's first step did not write it\"; exit 1; }\n")
+                    + String('budget_s=$(( $(cat "$RUNNER_TEMP/job_deadline_s") - $(date +%s) ))\n')
+                ),
+                t,
+            )
+            assert_true(t.find(String(' --build-budget-s "$budget_s" ')) >= 0, t)
+            budgeted += 1
+    assert_equal(budgeted, 1)
 
 
 def test_each_real_workflow_is_refused_when_read_as_the_other() raises:

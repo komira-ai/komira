@@ -118,6 +118,21 @@ pages:
 - `page_header_parser`: the PageHeader of a data page (V1 and V2) or a
   dictionary page, from a `Span`, with every size and count checked before a
   decoder can use it.
+- `gather`: `decode_column_with_selection`, the selected rows of a column
+  chunk. It walks the chunk's pages, decompresses only the data pages a page
+  mask selects (a V2 page whose header says its values are not compressed is
+  copied), loads a dictionary page, and hands the selected pages to the gather
+  for their shape: PLAIN fixed-width (INT32, INT64, FLOAT, DOUBLE; these
+  gathers are in `gather` too), PLAIN BYTE_ARRAY or dictionary-encoded,
+  non-null or flat nullable (V1 definition levels). Every gathered column gets
+  the Arrow type of its annotations (unsigned, narrow and date integers,
+  timestamps, binary BYTE_ARRAY). A shape it does not gather (nested,
+  FIXED_LEN_BYTE_ARRAY, DECIMAL, other encodings, mixed encodings, V2 pages
+  with levels, dictionary-encoded pages with `preserve_dict`) and some
+  malformed chunks (a page that runs past the chunk, a fixed-width dictionary
+  page shorter than its value count) return `None`, and the caller must decode
+  that chunk some other way. Errors from the page header parser, the codec
+  and the dictionary decoder, and the gathers' refusals, are raised.
 - `bloom_reader`, `bloom_pruner`: a column chunk's split-block bloom filter
   (xxHash64, as parquet-format's BloomFilter.md defines it), and the
   row-group pruner that probes it for `col == literal` leaves under AND and

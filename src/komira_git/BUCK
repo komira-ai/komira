@@ -13,8 +13,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # names where its vectors come from), and the pack tests against packs built
 # entry by entry; see README.md for what each test proves.
 # //src/tests/conformance/komira_git_conformance checks sha1dc against the C
-# library itself, the pack reader against packs git itself writes, and the
-# protocol state machines against the pinned git.
+# library itself, //src/tests/conformance/komira_git_pack_conformance the
+# pack reader against packs git itself writes, and
+# //src/tests/conformance/komira_git_protocol_conformance the protocol state
+# machines against the pinned git.
 mojo_library(
     name = "komira_git",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),

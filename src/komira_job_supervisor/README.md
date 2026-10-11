@@ -26,9 +26,42 @@ object key that is 64 lowercase hex characters (a content-addressed layout
 such as `<sha256>/binary`). A key with neither is fetched and run
 unverified; pass `--binary-sha256` when the key does not carry the digest.
 
-Process handling (pipes, pids, signals) is komira_supervisor's. A job is
-stopped by signalling its pid, not its process group, so a child the job
-spawns itself is not signalled.
+## The entrypoint binary
+
+`job_supervisor_main` runs the supervisor as a container entrypoint
+(`run_entrypoint`, entrypoint.mojo). It takes exactly these flags and refuses
+any other: `--job-name`, `--instance-name`, `--heartbeat-url` (https only),
+one of `--heartbeat-credential-file` (a bearer token re-read from the file for
+every beat) and `--heartbeat-credential-env` (a bearer token read once from
+the named environment variable, which is then removed so the job never
+inherits it), `--heartbeat-interval-secs`, `--max-runtime-secs` (required;
+past it the job is stopped and reported FAILED with a timeout message),
+`--log-prefix=gs://BUCKET/PREFIX` (the logs go to Google Cloud Storage, with
+Application Default Credentials) and `--job-binary` (a name without a `/` is
+looked up on `PATH`). Everything after the first bare `--` is the job's
+arguments, verbatim. It exits 0 when the job COMPLETED, 1 when it FAILED or
+was CANCELLED, and 2 when the start was refused.
+
+Process handling (pipes, pids, signals) is komira_supervisor's. The
+supervisor is built to be a container's PID 1:
+
+- the job leads its own process group, so every stop (a cancel reply, the
+  maximum runtime, a stop signal) sends SIGTERM to the job and every
+  descendant still in that group, waits up to 5 s for the group to empty,
+  then sends SIGKILL to what is left;
+- a SIGTERM or SIGINT sent to the supervisor (a platform stopping the
+  container) is caught, forwarded to the job's group as the same signal, and
+  the job is reported CANCELLED; one that arrives before the job is started
+  (during the fetch or the first heartbeat) cancels it without starting it;
+- descendants orphaned by the job are re-parented to the supervisor (PID 1
+  receives them; elsewhere on Linux it becomes a child subreaper) and
+  collected, so none stays a zombie. The supervisor assumes it owns every
+  child of its process;
+- the job starts with every signal at its default action, not with the
+  ignored SIGPIPE the supervisor's TLS connections leave behind;
+- the terminal heartbeat is sent again after a failure that may pass (no
+  reply, 408, 429, 5xx, an unreadable credential), with a growing delay,
+  for at most 8 sends within 15 s; a 4xx is not repeated.
 
 ## Examples
 
@@ -125,4 +158,29 @@ assert_true(phase == JobSupervisorPhase.failed())
 var report = text_of(reader, "logs/failing-job/crash_report.json")
 assert_true('"exit_code":3' in report)
 assert_true("boom" in report)
+```
+
+The entrypoint's flags: the log prefix names the bucket and the key prefix,
+and every word after `--` belongs to the job, one that looks like a flag
+included:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from komira_job_supervisor import EntrypointConfig
+
+var flags: List[String] = [
+    "--job-name=run-1",
+    "--heartbeat-url=https://heartbeat.example.com/beat",
+    "--heartbeat-credential-file=/var/run/creds/token",
+    "--max-runtime-secs=3600",
+    "--log-prefix=gs://job-logs/runs/run-1",
+    "--job-binary=/opt/job/run",
+    "--",
+    "--verbose",
+]
+var entry = EntrypointConfig.from_args(flags)
+assert_equal(entry.log.bucket, "job-logs")
+assert_equal(entry.job.log_prefix, "runs/run-1")
+assert_equal(entry.job.max_runtime_secs, 3600)
+assert_equal(entry.job.job_argv[0], "--verbose")
 ```

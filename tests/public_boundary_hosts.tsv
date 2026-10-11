@@ -19,6 +19,7 @@ microsoftonline.us	the Azure Government identity endpoint
 azure.com	the Azure management endpoint
 windows.net	the Azure Storage endpoints
 microsoft.com	Microsoft documentation
+apple.com	Apple developer documentation
 pkg.dev	Google Artifact Registry's regional endpoints
 localstack.cloud	the local AWS emulator's documented endpoint names
 github.com	the source of upstream projects and actions
@@ -31,6 +32,8 @@ nist.gov	NIST standards and test vectors
 modular.com	the Mojo toolchain's distribution and documentation
 pypi.org	the Python package index
 pythonhosted.org	the Python package index's file host
+nodejs.org	the Node.js runtime's distribution (third_party/node)
+npmjs.org	the npm package registry (third_party/node)
 prefix.dev	the conda package host the toolchain pins download from
 anaconda.org	the conda package index
 crates.io	the Rust package index

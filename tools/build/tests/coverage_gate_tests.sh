@@ -35,7 +35,11 @@
 #      tests are outside its package's tests/ analyzes with coverage, and
 #      its gate leaves both tests out of its numbers (--test-source); covbad:
 #      a census gate over a malformed ratchet is red (covcheck exit 1 fails
-#      the gate in every mode); what a red gate blocks: the libraries above
+#      the gate in every mode); covfloor: a census gate under a ratchet
+#      floor it does not hold is red, a Regression, and so is its conda
+#      package, while covfloor_held at its floors is green; the census
+#      check (census.bzl) is green on the doc and floors census.sh renders
+#      and red on a doc edited by hand or a floor under the census; what a red gate blocks: the libraries above
 #      and covlow_user (which depends on covlow and runs its test against
 #      covlow's package) are green, and covlow_conda and covnotests_conda
 #      (a REFUSED package: no test) are red with their gate's failure; a
@@ -56,6 +60,20 @@
 #      release action of a library, its join included: coverage_keys.sh
 #      (test 41). The refusals of the coverage attributes outside the tests
 #      cell are test 7's (umbrella_cache.sh, in a consumer's cell).
+#      README examples and mojo_test targets: tests//functional/coverage
+#      covreadme_result (a library whose only test is its README's example
+#      is measured by it: 2 of 2 lines), covreadme_none_result (a README
+#      with no example: NotMeasured), covmt_result (covmt_cov_gate reads the
+#      runs of the two mojo_test targets covmt names in coverage_tests, one
+#      in another package: 2 of 2 lines, its own test set aside);
+#      tests//negative/coverage:tracer_mt and test_tracer_mt green and
+#      tracer_mt_conda red (what ships waits for the run of a test the
+#      library names); covmt_stray_cov_gate, covmt_args_cov_gate,
+#      covmt_gen_cov_gate and covmt_nocov_cov_gate red at analysis (a named
+#      test must depend on the library, have no args and a source main, and
+#      have a coverage build); komira_db_sqlite (outside the tests cell,
+#      naming coverage_tests) analyzes with the switch on, with no gate
+#      action of its own and one in komira_db_sqlite_cov_gate.
 #      A shared library's gate (COVERAGE_SHARED_LIB_MODE): covso_traced is
 #      green with the switch on and its driver's coverage run red (nothing
 #      waits for it); enforce is refused in analysis (covso_enforce). A
@@ -112,6 +130,35 @@ expect_green coverage_gate_library "$N:covlow" "$N:covnotests" "$N:covun" "$N:co
     "$N:covbranch" "$N:covtry" "$N:covandor" "$N:covbad" "$N:covlow_user"
 expect_red coverage_gate_conda "COVERAGE GATE FAILED (enforce): $P ($N:covlow [coverage gate]): covcheck gate exited 3" "$N:covlow_conda"
 expect_red coverage_gate_conda_notests "- **NotMeasured** \`$P\`: no line of this package was measured" "$N:covnotests_conda"
+# A floor holds in census mode (README.md of tools/build/coverage, "The
+# ratchet"): covfloor measures line 50.00% under a floor of 50.01%, a
+# Regression, so its census gate and its conda package are red and the
+# library green; covfloor_held, at its floors, is green.
+expect_red coverage_gate_floor "COVERAGE GATE FAILED (census): $P ($N:covfloor [coverage gate]): covcheck gate exited 3" "$N:covfloor[coverage][gate]"
+if grep -qF -- "- **Regression** \`$P\`: line 50.00% is below its floor 50.01%" "$LOG/coverage_gate_floor.log"; then
+    pass coverage_gate_floor_finding
+else
+    fail "coverage_gate_floor_finding: the log does not name the Regression (see $LOG/coverage_gate_floor.log)"
+fi
+expect_red coverage_gate_floor_conda "COVERAGE GATE FAILED (census): $P ($N:covfloor [coverage gate]): covcheck gate exited 3" "$N:covfloor_conda"
+expect_green coverage_gate_floor_held "$N:covfloor" "$N:covfloor_held[coverage][gate]"
+# The census check: the doc and floors census.sh renders are green; a doc
+# edited by hand, or a floor under what the census measured, is red.
+expect_green coverage_census_ok "$N:census_ok"
+expect_red coverage_census_doc_edited "docs/coverage_census.md is not what census.sh render writes" "$N:census_doc_edited"
+expect_red coverage_census_floor_lowered "ratchet.tsv is not what census.sh render writes" "$N:census_floor_lowered"
+expect_red coverage_census_pin_no_reason "has an empty reason" "$N:census_pin_no_reason"
+# README examples and the mojo_test targets a library names in
+# coverage_tests are its tests for coverage: their runs reach its gate, and
+# what ships waits for them.
+expect_green coverage_gate_readme_mojo_test tests//functional/coverage:covreadme_result \
+    tests//functional/coverage:covreadme_none_result tests//functional/coverage:covmt_result \
+    "$N:tracer_mt" "$N:test_tracer_mt"
+expect_red coverage_gate_mojo_test_conda "COVERAGE RUN FAILED: $N:test_tracer_mt [coverage of $N:tracer_mt]" "$N:tracer_mt_conda"
+expect_red coverage_gate_mojo_test_stray "$N:test_tracer_mt does not name $N:covmt_stray in its deps" "$N:covmt_stray_cov_gate"
+expect_red coverage_gate_mojo_test_args "$N:test_args cannot run under kcov: it has" "$N:covmt_args_cov_gate"
+expect_red coverage_gate_mojo_test_gen "$N:test_gen_main cannot run under kcov: its main source" "$N:covmt_gen_cov_gate"
+expect_red coverage_gate_mojo_test_nocov "$N:test_nocov is not a mojo_test with a coverage build" "$N:covmt_nocov_cov_gate"
 # A generated client whose welded tests are at its package's top analyzes
 # with the switch on, and has its gate (analysis only: aquery).
 CG=//tools/build/proto-codegen/aws_query:komira_aws_tiny_query
@@ -120,6 +167,17 @@ if "$BUCK2" aquery "attrfilter(category, mojo_cov_gate, all_actions($CG))" -c ko
     pass coverage_gate_codegen
 else
     fail "coverage_gate_codegen: $CG has no coverage gate with -c komira.coverage=true, or does not analyze (see $LOG/coverage_gate_codegen.log and .err)"
+fi
+# A library outside the tests cell naming coverage_tests analyzes with the
+# switch on (the rule accepts no gate of its own for it), and its gate is the
+# one action of komira_db_sqlite_cov_gate (analysis only: aquery).
+DB=//src/komira_db_sqlite:komira_db_sqlite
+if "$BUCK2" aquery "attrfilter(category, mojo_cov_gate, all_actions(set($DB ${DB}_cov_gate)))" -c komira.coverage=true > "$LOG/coverage_gate_db_sqlite.log" 2> "$LOG/coverage_gate_db_sqlite.err" &&
+    [ "$(grep -c "^(target: \`komira${DB} (" "$LOG/coverage_gate_db_sqlite.log")" = 0 ] &&
+    [ "$(grep -c "^(target: \`komira${DB}_cov_gate (" "$LOG/coverage_gate_db_sqlite.log")" = 1 ]; then
+    pass coverage_gate_coverage_tests_analysis
+else
+    fail "coverage_gate_coverage_tests_analysis: $DB does not analyze with -c komira.coverage=true, or its gate is not the one action of ${DB}_cov_gate (see $LOG/coverage_gate_db_sqlite.log and .err)"
 fi
 # The switch: a library with no coverage attribute of its own, whose test
 # fails only under kcov, builds with it on; its conda package does not.

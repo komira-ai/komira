@@ -50,9 +50,9 @@
 #   R18 THE MANUAL RUN'S INPUTS. `workflow_dispatch.inputs` is exactly
 #       `revision` (type string), `reason` (type string, `required: true`,
 #       no default) and `dry_run` (type boolean, `default: false`). No
-#       `run:` script of any job holds a `${{ }}` expression other than the
-#       pull request's base commit (`${{ github.event.pull_request.base.sha
-#       }}`): an input (the reason above all) or the event payload expanded
+#       `run:` script of any job holds a `${{ }}` expression (the pull
+#       request's check reads its change base from git, R6, not from the
+#       event): an input (the reason above all) or the event payload expanded
 #       into a script is script injection, so a value reaches a script only
 #       through an `env:` value. The same holds for every `with: script:`
 #       (actions/github-script runs it as code), and no step's or job's
@@ -135,7 +135,7 @@
 from kci_release_machine import ReleaseMachine, Stage
 
 from .kci_run_calls import KciRunCall, kci_run_calls
-from .pull_request import PULL_REQUEST_BASE_EXPRESSION, RELEASE_BRANCH, is_expression, top_level_terms
+from .pull_request import RELEASE_BRANCH, is_expression, top_level_terms
 from .workflow_reader import NODE_LIST, NODE_MAP, NODE_SCALAR, WorkflowDoc
 
 comptime MAIN_REF_TERM: String = "github.ref == 'refs/heads/main'"
@@ -508,12 +508,11 @@ def _check_script(doc: WorkflowDoc, job_id: String, node: Int, what: String, mut
         return
     var exprs = _expressions(doc.text(node))
     for k in range(len(exprs)):
-        if not is_expression(exprs[k], String(PULL_REQUEST_BASE_EXPRESSION)):
-            findings.append(
-                _at(doc, node) + String("job '") + job_id + String("': R18: ") + what + String(" holds `") + exprs[k]
-                + String("`: an expression expanded into a script is script injection (a manual run's reason")
-                + String(" above all); pass the value through the job's or the step's `env:`")
-            )
+        findings.append(
+            _at(doc, node) + String("job '") + job_id + String("': R18: ") + what + String(" holds `") + exprs[k]
+            + String("`: an expression expanded into a script is script injection (a manual run's reason")
+            + String(" above all); pass the value through the job's or the step's `env:`")
+        )
 
 
 def _check_name(doc: WorkflowDoc, job_id: String, node: Int, mut findings: List[String]):
@@ -532,8 +531,8 @@ def _check_name(doc: WorkflowDoc, job_id: String, node: Int, mut findings: List[
 
 
 def check_no_expression_in_run(doc: WorkflowDoc, mut findings: List[String]):
-    """R18: no `run:` script, and no `with: script:`, holds a `${{ }}`
-    other than the pull request's base commit, and no job's or step's
+    """R18: no `run:` script, and no `with: script:`, holds a `${{ }}`,
+    and no job's or step's
     `name:` names an input or the event payload (file header)."""
     var jobs = doc.child(0, String("jobs"))
     var ids = doc.keys(jobs)
@@ -847,7 +846,7 @@ def check_auto_promotion(
         try:
             st = g.stage(stage_name)
         except:
-            continue
+            continue  # part_stage names a stage the machine lacks: nothing here to hold
         if st.is_pull_request():
             continue  # R6
         var whose = String("job '") + ids[i] + String("': ")

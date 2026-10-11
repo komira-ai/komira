@@ -16,6 +16,7 @@ mojo_library(
         "tests/test_date_to_days_closed_form.mojo",
         "tests/test_expr_copy.mojo",
         "tests/test_expr_render_is_plan_identity.mojo",
+        "tests/test_expr_render_value_identity.mojo",
         "tests/test_expr_walk_field.mojo",
         "tests/test_expr_walk_refs.mojo",
         "tests/test_sdk_expr.mojo",

@@ -69,12 +69,12 @@ struct UrandomEntropy(Entropy):
     def next_u64(mut self) raises -> UInt64:
         var bytes: List[UInt8]
         try:
-            with open("/dev/urandom", "r") as f:
-                bytes = f.read_bytes(8)
+            with open("/dev/urandom", "r") as f:  # cov: unreachable a test cannot make the fixed path /dev/urandom fail to open
+                bytes = f.read_bytes(8)  # cov: unreachable a test cannot make a read of /dev/urandom fail
         except:
-            raise Error("entropy: cannot read /dev/urandom")
-        if len(bytes) != 8:
-            raise Error("entropy: short read from /dev/urandom")
+            raise Error("entropy: cannot read /dev/urandom")  # cov: unreachable reached only when lines 72-73 raise
+        if len(bytes) != 8:  # cov: unreachable a read of 8 bytes from /dev/urandom returns 8 bytes or raises
+            raise Error("entropy: short read from /dev/urandom")  # cov: unreachable see the line above
         var v = UInt64(0)
         for i in range(8):
             v = (v << 8) | UInt64(bytes[i])

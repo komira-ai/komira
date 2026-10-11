@@ -16,7 +16,8 @@
 from std.pathlib import Path
 from std.testing import TestSuite
 
-from kci_workflow_check import ChannelsFile, check_running_workflow
+from kci_workflow_check import ChannelsFile, check_running_workflow, read_workflow
+from kci_workflow_check.auto_promotion import check_auto_promotion
 from kci_release_machine import parse_machine_file
 
 comptime _CLEAN: Int = 0
@@ -293,6 +294,49 @@ def test_every_row_ends_as_it_expects() raises:
             failed += String("\n  ROW '") + rows[i].label + String("': want ") + rows[i].needle + String("; ") + got
     if failed.byte_length() > 0:
         raise Error(String(red) + String(" of ") + String(len(rows)) + String(" rows did not end as expected:") + failed)
+
+
+def test_a_part_of_a_stage_the_machine_lacks_is_skipped() raises:
+    # check_auto_promotion is public: a caller's part_stage may name a stage
+    # the machine does not have. That job is skipped (no finding names it) and
+    # the jobs after it are still held (R4 on `build`).
+    var g = parse_machine_file(
+        String(
+            "schema_version: 1\n"
+            "stage { name: \"build\" farm_connected: true break_glass: true\n"
+            "  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" }\n"
+            "}\n"
+        ),
+        String("machine file"),
+    )
+    var doc = read_workflow(
+        String(
+            "jobs:\n  ghost-job:\n    permissions:\n      contents: write\n"
+            "  build:\n    permissions:\n      contents: write\n"
+        )
+    )
+    var jobs = doc.child(0, String("jobs"))
+    var ids = List[String]()
+    ids.append(String("ghost-job"))
+    ids.append(String("build"))
+    var nodes = List[Int]()
+    nodes.append(doc.child(jobs, String("ghost-job")))
+    nodes.append(doc.child(jobs, String("build")))
+    var part_stage = List[String]()
+    part_stage.append(String("ghost"))
+    part_stage.append(String(""))
+    var f = List[String]()
+    check_auto_promotion(doc, g, ids, nodes, part_stage, f)
+    var all = String("")
+    var build_r4 = False
+    for i in range(len(f)):
+        all += f[i] + String(" | ")
+        if f[i].find(String("job 'ghost-job'")) >= 0:
+            raise Error(String("a job of a missing stage was held: ") + f[i])
+        if f[i].find(String("job 'build': R4: permissions grant `contents: write`")) >= 0:
+            build_r4 = True
+    if not build_r4:
+        raise Error(String("no R4 finding for job 'build': [") + all + String("]"))
 
 
 def main() raises:

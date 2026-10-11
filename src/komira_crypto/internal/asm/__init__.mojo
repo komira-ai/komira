@@ -20,10 +20,13 @@
 # Each primitive's instruction-level recipe comes from production crypto
 # libraries. SHA-256 specifically:
 #   * SHA-256: AWS-LC's `crypto/fipsmodule/sha/asm/sha512-armv8.pl` (and the
-#     x86-64 equivalent) → the `sha256_block_data_order_hw` symbol in
-#     libcrypto (Apache 2.0 / OpenSSL dual license). FFI-called verbatim
-#     via `sha256_compress.mojo` — the instruction sequences are AWS-LC's;
-#     the Mojo wrapper is ours.
+#     x86-64 equivalent) → the `sha256_block_data_order_hw` and
+#     `sha256_block_data_order_nohw` bodies in libcrypto (Apache 2.0 /
+#     OpenSSL dual license). Called verbatim by `sha256_compress.mojo`
+#     through the C wrappers `komira_crypto_sha256_block_data_order` (CPUID
+#     dispatch) and `komira_crypto_sha256_block_data_order_nohw`
+#     (`native/komira_crypto_sha256_hw.c`) — the instruction sequences are
+#     AWS-LC's; the wrappers are ours.
 #
 # # The public API of `komira_crypto` does not expose this directory
 #
