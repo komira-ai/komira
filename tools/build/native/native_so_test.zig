@@ -318,6 +318,13 @@ test "check 3: undefined komira_ symbols each exported by a declared NEEDED owne
     const idle = checks.Owner{ .soname = "libkomira_libc_native.so.1", .exports = &.{"komira_fsync"} };
     _ = try checks.check3(A, httpCore(), &.{}, &.{ crypto_owner, idle }, &red);
     try expectRed(red, "exporting none of the library's undefined komira_ symbols (1): libkomira_libc_native.so.1");
+    red = checks.Red.init(A);
+    _ = try checks.check3(A, good(), &weak_list, &.{crypto_owner}, &red);
+    try expectRed(red, "exporting none of the library's undefined komira_ symbols (1): libkomira_crypto_native.so.1");
+    red = checks.Red.init(A);
+    const refs: elf.Shared = .{ .soname = crypto_owner.soname, .syms = &.{ def("komira_awslc_SHA256"), und("komira_awslc_EVP_sha256", null) } };
+    _ = try checks.check3(A, httpCore(), &.{}, &.{try checks.ownerOf(A, crypto_owner.soname, refs)}, &red);
+    try expectRed(red, "no declared NEEDED owner exports (1): komira_awslc_EVP_sha256");
     // The owner listed second still resolves (no first-owner-only lookup).
     red = checks.Red.init(A);
     const other = checks.Owner{ .soname = "libkomira_x_native.so.1", .exports = &.{"komira_awslc_SHA256"} };
@@ -362,6 +369,11 @@ test "check 4: a declared owner NEEDED with RUNPATH $ORIGIN is green; red withou
     red = checks.Red.init(A);
     _ = try checks.check4(A, httpCore(), "libkomira_http_core_native.so.1", &.{}, &red);
     try expectRed(red, "neither glibc nor a declared owner (1): libkomira_crypto_native.so.1");
+    red = checks.Red.init(A);
+    so = httpCore();
+    so.needed = &.{ "libkomira_crypto_native.so.1", "libkomira_libc_native.so.1", "libc.so.6" };
+    _ = try checks.check4(A, so, "libkomira_http_core_native.so.1", &owners, &red);
+    try expectRed(red, "neither glibc nor a declared owner (1): libkomira_libc_native.so.1");
 }
 
 test "check 5: green at the floor; red above it, on GLIBC_PRIVATE, and on no glibc at all" {

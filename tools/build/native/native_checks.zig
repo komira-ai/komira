@@ -112,6 +112,10 @@ pub fn exportsOf(alloc: Alloc, so: Shared) ![][]const u8 {
     return sorted(alloc, out.items);
 }
 
+pub fn ownerOf(alloc: Alloc, soname: []const u8, so: Shared) !Owner {
+    return .{ .soname = soname, .exports = try exportsOf(alloc, so) };
+}
+
 fn undefinedOf(alloc: Alloc, so: Shared, weak: bool) ![]Sym {
     var out = std.ArrayList(Sym).init(alloc);
     for (so.syms) |s| {

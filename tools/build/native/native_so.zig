@@ -106,7 +106,7 @@ fn parse(alloc: Alloc, argv: []const []const u8) !Opts {
             const path = argv[i + 1];
             const so = readShared(alloc, path);
             const soname = so.soname orelse usage("--owner {s}: no SONAME", .{path});
-            try o.owners.append(.{ .soname = soname, .exports = try checks.exportsOf(alloc, so) });
+            try o.owners.append(try checks.ownerOf(alloc, soname, so));
             i += 2;
             continue;
         }
