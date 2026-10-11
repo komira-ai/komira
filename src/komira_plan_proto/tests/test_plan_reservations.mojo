@@ -31,8 +31,9 @@
 # so a field named `reserved` is a field. A HELD row that is not four words
 # ending `held` or `reserved` is refused. The checks are run over planted
 # defects as well (a deleted number, a deleted name, a reserved held number,
-# an added reservation, each unreadable form, each malformed HELD row), and
-# each must be reported; a refusal is matched on its whole message.
+# an added reservation, in optimized_plan.proto, and an added and a deleted
+# number in plan_vocabulary.proto; each unreadable form, each malformed HELD
+# row), and each must be reported; a refusal is matched on its whole message.
 # =============================================================================
 
 from std.os import listdir
@@ -355,6 +356,29 @@ def main() raises:
     var twice = _with_after(optimized, "message PinGroup {", "\n  reserved 13;\n  reserved 13;")
     p = _run(twice, others, expected, held)
     assert_true(_has(p, "`PinGroup 13` twice"), "a number reserved twice is reported" + _report(p))
+    # The same two directions in a .proto other than optimized_plan.proto
+    # (plan_vocabulary.proto's PlanTag), with optimized_plan.proto as staged.
+    var vocab = -1
+    for i in range(len(others)):
+        if others[i].find("enum PlanTag {") >= 0:
+            vocab = i
+    assert_true(vocab >= 0, "a .proto under protos/ declares `enum PlanTag {`")
+    var others_added = others.copy()
+    others_added[vocab] = _with_after(others[vocab], "enum PlanTag {", "\n  reserved 99;")
+    p = _run(optimized, others_added, expected, held)
+    assert_equal(len(p), 1, "a reservation added outside optimized_plan.proto is the only problem" + _report(p))
+    assert_equal(
+        p[0], "the .proto reserves `PlanTag 99`, which RESERVED does not list", "an added PlanTag reservation is reported"
+    )
+    var others_deleted = others.copy()
+    others_deleted[vocab] = _without(others[vocab], "  reserved 17;  // PLAN_CONVERT_COLUMN_TO_ROW")
+    p = _run(optimized, others_deleted, expected, held)
+    assert_equal(len(p), 1, "a reservation deleted outside optimized_plan.proto is the only problem" + _report(p))
+    assert_equal(
+        p[0],
+        "RESERVED lists `PlanTag 17`, which no `reserved` statement declares",
+        "a deleted PlanTag reservation is reported",
+    )
     var bad_held = held.copy()
     bad_held.append("ScanPin 13 len reserved")
     p = _compare(_reserved(optimized), _reserved(optimized), expected, bad_held)
