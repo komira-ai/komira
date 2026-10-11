@@ -28,7 +28,7 @@ runs included ([The coverage workflow](#the-coverage-workflow), step 4).
 | `:census.tsv`, `:census.sh`, `census.bzl` | the census: every library's numbers, the script that measures them and renders `docs/coverage_census.md` and the floors, and the rule of the root's `:coverage_census` check ([The census](#the-census)) |
 | `policy.bzl` | the gate's mode and target, and the ledger of libraries that cannot have a gate of their own |
 | `no_gate.bxl` | the check that holds that ledger equal to the libraries the gate depends on |
-| `:branch_gate_rows` ([`BUCK`](BUCK), `defs.bzl`) | the check that every row of `COVERAGE_BRANCH_GATE` (`policy.bzl`) names a Mojo library: a row naming none is read by nothing, so it fails this target's build |
+| `:branch_gate_rows` (`BUCK`, `defs.bzl`) | the check that every row of `COVERAGE_BRANCH_GATE` (`policy.bzl`) names a Mojo library: a row naming none is read by nothing, so it fails this target's build |
 | `mutate/` | the mutation tool: `:mutate` (the library, its tests welded), `:mutate_bin`, `:mut_dir` (what every library's `[mutation]` runs from) ([Mutation score](#mutation-score)) |
 
 ## What line coverage means here
