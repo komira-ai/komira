@@ -101,10 +101,15 @@ def test_a_long_expression_is_reported_by_its_length() raises:
     sb.add_field(Field(String("p"), ArrowType.INT64, True))
     sb.add_field(Field(String("c"), ArrowType.INT64, False))
     var text = format_project_decline_census(_in_schema(), exprs, sb.build())
-    _has(text, " bytes, omitted>")
     var line1 = text.find("expr[1]")
     assert_true(line1 >= 0)
-    assert_true(text.find(" expr=", line1) >= 0, "the short expression is rendered")
+    var omitted = text.find(" bytes, omitted>")
+    assert_true(
+        omitted >= 0 and omitted < line1, "the long expression (expr[0]) is omitted"
+    )
+    assert_true(
+        text.find(" bytes, omitted>", line1) < 0, "the short expression (expr[1]) is rendered"
+    )
 
 
 def main() raises:
