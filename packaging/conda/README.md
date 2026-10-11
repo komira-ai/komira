@@ -50,7 +50,7 @@ disagree with it ([`conda.bzl`](../../tools/build/package/conda.bzl) lists each)
 | fact | where it comes from |
 |---|---|
 | name | `conda_name` of the library, else its import name (the `.mojoc` basename): lowercase letters, digits, `_`, starting with a letter |
-| run requirements | the platform guard (`__linux`), exactly `mojo-compiler ==<compiler version>`, then each **direct** dependency of the library, by its published name, at the same version **and the same build string** (`name ==<version> <build string>`), sorted. Direct only: every package of a release is built in lockstep, so the solver's closure is the build's, and a second build of a dependency in the channel cannot be chosen |
+| run requirements | the platform guard (`__linux`), exactly `mojo-compiler ==<compiler version>`, then each **direct** dependency of the library, by its published name, at the same version **and the same build string** (`name ==<version> <build string>`), sorted. Direct only: every package of a release is built in lockstep, so the solver's closure is the build's, and a second build of a dependency in the channel cannot be chosen. Then the conda-forge requirement of each shared library it declares in `dlopen` (below) |
 | subdir | the target platform's constraints (a `select`), never an attribute. Only `linux-64` is written: a `.mojoc` cannot be cross-compiled, so another subdir needs a build for that platform. On any other target platform the package target still builds, as a refusal saying so |
 | payload | the library's gated `.mojoc`, so the package cannot exist until the library's own welded tests pass |
 | version | **the Mojo compiler version** the library is built with, below |
@@ -91,7 +91,8 @@ compact JSON): `format` (`kci.conda_metadata`), `schema_version`, `kind` (`libra
 `build_number`, `file_name`, `size`, `depends`, `timestamp_ms`,
 `source_commit`, `stamped`, `label`, and for a library `import_name`,
 `mojo_pin`, `payload_path`, `payload_sha256`, `doc_files` (path and sha256
-of each documentation file the package installs, `[]` when none); for a
+of each documentation file the package installs, `[]` when none), and
+`dlopen` when the library declares a shared library it opens; for a
 metapackage `members` (name, version, build, sha256 each). The manifest's `version` is the compiler
 version; the build number, build string and source commit are metadata (kci's
 manifest has no key for them).
@@ -130,15 +131,33 @@ reason. The reasons:
 - it has no tests (no test would gate its package);
 - it depends on a library with no package (`conda = False`, or itself refused);
 - its name is not a conda name;
-- it opens a shared library by name at run time (`OwnedDLHandle`), whose conda
-  package this tool does not derive yet.
+- it declares in `dlopen` a soname that
+  [system_libs.bzl](../../tools/build/package/system_libs.bzl) does not name;
+- its sources open a shared library at run time (`OwnedDLHandle`) by a soname
+  its `dlopen` does not declare, or it declares one no opening source holds.
 
-The first four are known to the build when it analyses the library, so a
+The first five are known to the build when it analyses the library, so a
 dependent of such a library is refused too. The last is found only when the
 package is made (the tool reads the sources), so **a dependent of a library
-that dlopens is not refused by the build**; the release tool must therefore
-check that every dependency of a declared package is itself declared and has a
-`[release]` (below).
+whose sources and `dlopen` disagree is not refused by the build**; the release
+tool must therefore check that every dependency of a declared package is itself
+declared and has a `[release]` (below).
+
+### A library that opens a shared library at run time
+
+It declares each soname: `mojo_library(dlopen = ["libz.so.1"])`
+([dlopen.bzl](../../tools/build/mojo/dlopen.bzl)). Its package requires, after
+its other requirements and in soname order, the conda-forge requirement
+system_libs.bzl names for each soname, byte for byte (`libzlib >=1.2.13,<2`),
+and `metadata.json` records the rows as `dlopen`
+(`[{requirement, soname}]`, written only when there is one). The packer reads
+the sources: a file whose code names `OwnedDLHandle` opens a library, and its
+one-line string literals of the form `lib<name>.so[.<digits>]...` are the
+sonames it opens; comments and triple-quoted strings are not read. They must
+be exactly the declared sonames. A soname held only in a file that does not
+name `OwnedDLHandle` is not seen, so such a library is refused rather than
+published without the requirement. `komira_pack conda-check` is given the
+declarations and compares the package with them without the packer's code.
 
 ### Sub-targets
 
@@ -363,8 +382,8 @@ rule, when it is written:
 
 - `linux-aarch64` and `osx-arm64` (they need their own payload build and an
   architecture guard);
-- libraries that link native code, and libraries that open a shared library
-  at run time (both refused by name rather than published incompletely);
+- libraries that link native code (refused by name rather than published
+  incompletely);
 - the upload step and the release tool's list (kci's; the files it reads are
   above);
 - the Python wheel rule (design above);
@@ -374,7 +393,8 @@ rule, when it is written:
   `-o`), or ask the compiler for a path-remapping option; then the gate in
   "Reproducibility" can be a test (two isolation directories, one sha256)
   instead of a rule for the release job;
-- the build does not refuse a dependent of a library that dlopens (above).
+- the build does not refuse a dependent of a library whose sources and `dlopen`
+  disagree (above).
 
 How it is tested: [`conda.sh`](../../tools/build/tests/functional/conda.sh) (one
 package, the generated targets, the refusals, the packer and its check, the

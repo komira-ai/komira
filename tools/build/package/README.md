@@ -275,9 +275,10 @@ packaged keeps a target that builds as a refusal, and the bytes are reproducible
 at run time (by soname) to the conda-forge requirement of the package that ships
 it. kci's closure checks accept exactly those requirements on a library; the
 target `:system_libs` ([`system_libs_record.bzl`](system_libs_record.bzl)) writes
-the table for the welded test that holds kci's compiled copy equal to it. The
-packer does not write them yet: it still refuses a library that opens a shared
-library by name.
+the table for the welded test that holds kci's compiled copy equal to it. A
+library declares the sonames it opens (`mojo_library(dlopen = [...])`), and its
+package requires each one's row, byte for byte
+([packaging/conda/README.md](../../../packaging/conda/README.md#a-library-that-opens-a-shared-library-at-run-time)).
 
 With coverage on (`-c komira.coverage=true`), both copies of a conda package
 (its default output and `[release]`) also wait for the library's coverage runs

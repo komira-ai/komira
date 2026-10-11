@@ -1,4 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/package:conda.bzl", "conda_package_expect")
 
 # The fixture libraries of tools/build/tests/functional/conda.sh. NONE is declared in a
 # list or has a packaging target written by hand: each gets `<name>_conda` from
@@ -66,11 +67,68 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
+# Opens libz.so.1 and declares it: its package requires libzlib, the
+# requirement tools/build/package/system_libs.bzl names for the soname.
 mojo_library(
     name = "fx_dlopen",
     srcs = ["fx_dlopen/__init__.mojo"],
     test_srcs = ["fx_dlopen/tests/test_fx_dlopen.mojo"],
+    dlopen = ["libz.so.1"],
     visibility = ["PUBLIC"],
+)
+
+# Opens libz.so.1 and liblz4.so.1 and declares only libz.so.1: refused by
+# the packer, which reads the sources.
+mojo_library(
+    name = "fx_dlopen_undeclared",
+    srcs = ["fx_dlopen_undeclared/__init__.mojo"],
+    test_srcs = ["fx_dlopen_undeclared/tests/test_fx_dlopen_undeclared.mojo"],
+    dlopen = ["libz.so.1"],
+    visibility = ["PUBLIC"],
+)
+
+# Declares a soname system_libs.bzl does not name: refused at analysis, so
+# its dependent is refused too.
+mojo_library(
+    name = "fx_dlopen_unmapped",
+    srcs = ["fx_dlopen_unmapped/__init__.mojo"],
+    test_srcs = ["fx_dlopen_unmapped/tests/test_fx_dlopen_unmapped.mojo"],
+    dlopen = ["libfx_nowhere.so.1"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_library(
+    name = "fx_dlopen_unmapped_user",
+    srcs = ["fx_dlopen_unmapped_user/__init__.mojo"],
+    test_srcs = ["fx_dlopen_unmapped_user/tests/test_fx_dlopen_unmapped_user.mojo"],
+    deps = [":fx_dlopen_unmapped"],
+    visibility = ["PUBLIC"],
+)
+
+# The outcomes of the dlopen fixtures, as targets: each builds only while
+# its package has the outcome stated (conda.bzl, conda_package_expect).
+conda_package_expect(
+    name = "fx_dlopen_expect",
+    package = ":fx_dlopen_conda",
+    depends = ["libzlib >=1.2.13,<2"],
+)
+
+conda_package_expect(
+    name = "fx_dlopen_undeclared_expect",
+    package = ":fx_dlopen_undeclared_conda",
+    refused = "its sources name [liblz4.so.1, libz.so.1] and the library declares `dlopen` [libz.so.1]",
+)
+
+conda_package_expect(
+    name = "fx_dlopen_unmapped_expect",
+    package = ":fx_dlopen_unmapped_conda",
+    refused = "declares `dlopen` of libfx_nowhere.so.1, for which tools/build/package/system_libs.bzl names no conda package",
+)
+
+conda_package_expect(
+    name = "fx_dlopen_unmapped_user_expect",
+    package = ":fx_dlopen_unmapped_user_conda",
+    refused = "fx_dlopen_unmapped, which has no conda package: ",
 )
 
 mojo_library(

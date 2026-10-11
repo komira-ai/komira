@@ -36,10 +36,11 @@ on `main` uses; continuous_publish.md already calls it `beta_validate`, the name
   (`kci_release_set` computes the set hash with `komira_crypto`'s SHA-256).
 - **Two more open a system library at run time** and link no native code: `komira_lz4`
   (`liblz4.so.1`, `src/komira_lz4/codec.mojo`) and `komira_zlib` (`libz.so.1`,
-  `src/komira_zlib/zlib_ffi.mojo`) (#1188). The packer refuses them when it reads the sources
-  (**EXISTS:** `tools/build/package/pack/conda.zig`, lines 360-361: "opens a shared library at run time
-  (OwnedDLHandle); its conda package must depend on the package shipping that library, which this
-  tool does not derive yet"). `komira_compression` opens zstd, bz2 and lzma the same way
+  `src/komira_zlib/zlib_ffi.mojo`) (#1188). Before slice 3 the packer refused them when it read the
+  sources ("opens a shared library at run time (OwnedDLHandle); its conda package must depend on the
+  package shipping that library, which this tool does not derive yet"); slice 3 declares their sonames,
+  and their packages now build, requiring `lz4-c` and `libzlib`, but neither is released.
+  `komira_compression` opens zstd, bz2 and lzma the same way
   (`src/komira_compression/codec_libraries.mojo`) and also links snappy, so it is in both lists.
 - The released set today is its member libraries plus the metapackage `komira_all`
   (`release/artifacts.textproto`, held equal to `tools/build/package/release_set.txt`), none with
@@ -73,7 +74,7 @@ on `main` uses; continuous_publish.md already calls it `beta_validate`, the name
 | glibc floor | **EXISTS:** `os_floor` `glibc-2.34` in `tools/build/platforms/table.bzl` (rows `linux-x86_64` and `linux-arm64`; read by `os_floor_version`), the floor zig links against (`zig_triple` `x86_64-linux-gnu.2.34`, `aarch64-linux-gnu.2.34`). The packer writes only the platform guard `__linux` (`guardFor` in `tools/build/package/pack/conda.zig`), no `__glibc` requirement | the packer writes `__glibc >=2.34` from that cell on each library with C (slice 8); per-library check 5 reads the same cell; kci accepts it (slice 9). No second floor |
 | conda metadata kinds | **EXISTS:** `library` and `metapackage` only (`src/kci_release_set/conda_metadata.mojo`) | no new kind. `lib_files`, `native_owns`, `native_links`, `dlopen` fields on `library` (slices 3, 8) |
 | kind `native`, `lib_files`, `native_link_args` | on #695 and #704 only | `lib_files` survives on `library`; the kind goes |
-| dlopen declarations | the packer refuses any `OwnedDLHandle` (above). `mojo_library(dlopen = ...)` and `tools/build/package/system_libs.bzl` on #685 only; kci's acceptance of the requirements (`src/kci_release_set/system_libs.mojo`) on #704 only (from #763) | slice 3, ahead of the shared libraries |
+| dlopen declarations | **EXISTS:** `mojo_library(dlopen = ...)` (`tools/build/mojo/dlopen.bzl`), the map `tools/build/package/system_libs.bzl`, the packer writing each declared requirement and `dlopen` and refusing sources that open an undeclared soname (`tools/build/package/pack/conda_dlopen.zig`), and kci's acceptance of exactly the map's requirements (`src/kci_release_set/system_libs.mojo`, `closure.mojo`); `komira_lz4` and `komira_zlib` declare their sonames | slice 3 (done); releasing the two is slice 4 |
 | beta stage, `beta_install` | design only ([staged_pipeline.md](staged_pipeline.md), merged; its follow-up #1184 on gamma is open). `kci.yml` runs `build → gamma → validate → prod` | native install checks run only in `beta_install` (section "Built once"); gamma runs none |
 
 ## What each library ships
