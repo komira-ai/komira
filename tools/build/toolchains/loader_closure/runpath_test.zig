@@ -29,12 +29,16 @@ test "a DT_RUNPATH hides the object's DT_RPATH and the chain's, as in glibc" {
 // libmid has both tags; libleaf, which libmid loads, has neither, and needs
 // libdep.so.1, which only libmid's DT_RPATH directory private/ holds. glibc
 // walks libleaf's loader chain for DT_RPATH and skips libmid, whose
-// DT_RUNPATH hides its DT_RPATH; the program's lib/ lacks libdep.so.1. The
+// DT_RUNPATH hides its DT_RPATH; the program's lib/ lacks libdep.so.1.
+// libleaf also needs libprog.so.1, which only the program's DT_RPATH
+// directory lib/ holds: a library mapped through a DT_RUNPATH keeps its
+// loader, so the chain walk reaches the program and finds it there. The
 // green twin below differs only in libmid having no DT_RUNPATH.
 fn chain(t: fx.Tree, mid_runpath: ?[]const u8) !void {
     try t.plant("bin/prog", fx.program(&.{"libmid.so.1"}));
     try t.plant("lib/libmid.so.1", .{ .soname = "libmid.so.1", .needed = &.{"libleaf.so.1"}, .rpath = "$ORIGIN/../private", .runpath = mid_runpath });
-    try t.plant("lib/libleaf.so.1", .{ .soname = "libleaf.so.1", .needed = &.{"libdep.so.1"} });
+    try t.plant("lib/libleaf.so.1", .{ .soname = "libleaf.so.1", .needed = &.{ "libdep.so.1", "libprog.so.1" } });
+    try t.plant("lib/libprog.so.1", .{ .soname = "libprog.so.1" });
     try t.plant("private/libdep.so.1", .{ .soname = "libdep.so.1" });
 }
 
