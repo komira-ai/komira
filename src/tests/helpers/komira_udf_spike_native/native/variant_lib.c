@@ -12,6 +12,7 @@
  *   global_lock    describe reports global_lock 1
  *   managed        describe reports udf_class MANAGED (runtime_id unchanged)
  *   no_scalar      describe's shapes lack SCALAR
+ *   thread_safe    accepted: describe reports threading THREAD_SAFE
  *   abi2           the table reports ABI major 2
  *   short_table    the table's struct_size ends before close_instance
  *   one_short      the table's struct_size ends before shutdown, the last
@@ -115,7 +116,7 @@ static const komira_udf_runtime* copy_inner(const komira_udf_host* host, komira_
 
 /* ---- one changed field in describe ----------------------------------------- */
 
-enum change { C_SINGLE_THREAD, C_WORKER_ONLY, C_GLOBAL_LOCK, C_MANAGED, C_NO_SCALAR };
+enum change { C_SINGLE_THREAD, C_WORKER_ONLY, C_GLOBAL_LOCK, C_MANAGED, C_NO_SCALAR, C_THREAD_SAFE };
 static enum change changed;
 
 static int32_t changed_describe(komira_udf_rt* rt, komira_udf_capabilities* c) {
@@ -136,6 +137,9 @@ static int32_t changed_describe(komira_udf_rt* rt, komira_udf_capabilities* c) {
       break;
     case C_NO_SCALAR:
       c->shapes &= ~(uint32_t)KOMIRA_UDF_SHAPE_SCALAR;
+      break;
+    case C_THREAD_SAFE:
+      c->threading = KOMIRA_UDF_THREAD_SAFE;
       break;
   }
   return KOMIRA_UDF_OK;
@@ -167,6 +171,11 @@ const komira_udf_runtime* komira_udf_variant_global_lock_init_v1(const komira_ud
 const komira_udf_runtime* komira_udf_variant_managed_init_v1(const komira_udf_host* host, komira_udf_rt** rt,
                                                              komira_udf_error* e) {
   return with_describe(C_MANAGED, host, rt, e);
+}
+
+const komira_udf_runtime* komira_udf_variant_thread_safe_init_v1(const komira_udf_host* host, komira_udf_rt** rt,
+                                                                 komira_udf_error* e) {
+  return with_describe(C_THREAD_SAFE, host, rt, e);
 }
 
 const komira_udf_runtime* komira_udf_variant_no_scalar_init_v1(const komira_udf_host* host, komira_udf_rt** rt,

@@ -283,6 +283,22 @@ def _free_error(e: Void) abi("C"):
     p[].release = null_void()
 
 
+def schema_flags(s: Void) -> Int64:
+    """ArrowSchema.flags of `s` (-1 for NULL)."""
+    if is_null(s):
+        return -1
+    # SAFETY: `s` is a struct ArrowSchema the host lent for the call.
+    return s.bitcast[CArrowSchema]()[].flags
+
+
+def fail_keep_row(e: Void, code: Int32, msg: String) -> Int32:
+    """fail, but `row` left as the host set it."""
+    if is_null(e) or e.bitcast[CUdfError]()[].struct_size < size_of[CUdfError]():
+        return code
+    # SAFETY: the host's komira_udf_error, of at least this library's size.
+    return fail(e, code, msg, Int(e.bitcast[CUdfError]()[].row))
+
+
 def fail(e: Void, code: Int32, msg: String, row: Int = -1) -> Int32:
     """Fill the host's error `e` (when its struct_size covers ours) and
     return `code`. A raised error gets a trace naming this library."""

@@ -5,16 +5,17 @@
 #
 # What it proves: every case of the corpus but _left_out() passes on a
 # native UDF library written in Mojo, behind the native runtime, none
-# skipped. The left-out cases each need a fixture that breaks the ABI on
-# purpose (an input not moved, an error filled on OK or naming a row outside
-# the batch, a malformed output array or table, a child moved out of the
-# argument struct, the schema flags probed, a second group set refused),
-# which the reference runtime has and this library does not; every case user
-# code can produce is run, the legal output layouts (sliced, null_count -1,
-# no data buffer) and the wide argument structs (sum12, sum64) included. A
-# Mojo package can export the table (design section 6.3), read the arrays
-# the host moves in, return arrays the host releases, and keep a Mojo error from crossing the
-# ABI (raise_on_row_3: the fixture raises a Mojo Error; the library returns
+# skipped. The left-out cases need fixtures user code cannot produce (an
+# input not moved, an error filled on OK or naming a row outside the batch,
+# a malformed output array or table), which the reference runtime has and
+# this library does not. Every other case runs: the legal output layouts
+# (sliced, null_count -1, no data buffer), the wide argument structs (sum12,
+# sum64), a child moved out of the argument struct and released on its own,
+# an error row left as the host set it, the schema flags load saw, one group
+# set per instance, and a frame that answers after its error. A Mojo
+# package can export the table (design section 6.3), read the arrays the
+# host moves in, return arrays the host releases, and keep a Mojo error from
+# crossing the ABI (raise_on_row_3: the fixture raises a Mojo Error; the library returns
 # ERR_RAISED with the row).
 #
 # Defects caught: a Mojo fixture or entry that breaks the contract: an input
@@ -38,10 +39,10 @@ comptime CASE_COUNT = 117
 
 
 def _left_out() -> List[String]:
-    """The cases whose fixture breaks the ABI on purpose."""
+    """The cases whose fixtures user code cannot produce."""
     return [
-        # inputs not moved, an error filled on OK, a frame answering after
-        # its error, an error row outside the batch or left as the host set it
+        # inputs not moved, an error filled on OK, an error row outside the
+        # batch
         "fault_args_not_moved_on_error",
         "fault_frame_input_not_moved",
         "fault_frame_input_not_moved_on_error",
@@ -52,17 +53,10 @@ def _left_out() -> List[String]:
         "fault_agg_states_not_moved_on_error",
         "error_released_on_ok",
         "frame_error_released_on_ok",
-        "frame_no_next_after_error",
         "fault_error_row_below_minus_one",
         "fault_error_row_past_batch",
         "fault_error_row_past_batch_propagate",
         "fault_error_row_minus_two",
-        "error_row_left_unset",
-        # a child moved out of the argument struct, the schema flags as load
-        # saw them, a second group set refused on one instance
-        "child_moved_out",
-        "schema_flags_exported",
-        "agg_partials_on_own_instances",
         # malformed output columns
         "fault_output_buffers_null",
         "fault_output_data_null",

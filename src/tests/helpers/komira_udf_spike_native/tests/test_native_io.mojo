@@ -18,7 +18,8 @@
 #   - the runtime's own checks come first: a descriptor version 1 and a
 #     non-empty descriptor are refused with ERR_DESCRIPTOR although the code
 #     object is absent (a check left to the library, which is never opened).
-#   - describe: the native runtime reports exactly its fixed set (design
+#   - describe, into a struct filled with 0xFF bytes so a field it never
+#     writes shows: the native runtime writes exactly its fixed set (design
 #     section 1.2): komira/native, abi1, descriptor version 0, every shape,
 #     CONTEXT_PER_THREAD, no thread_affine, IN_PROCESS, hosting 0, CPU, no
 #     features, NATIVE, global_lock 0.
@@ -158,7 +159,9 @@ def _descriptor_first(mut rt: UdfRuntime, tmp: String) raises:
 
 
 def _describe(mut rt: UdfRuntime) raises:
-    var c = rt.describe()
+    # Over a struct of 0xFF bytes: every field below must be written by
+    # describe, the zeros included.
+    var c = rt.describe(0xFF)
     assert_equal(c.runtime_id, "komira/native")
     assert_equal(c.runtime_abi, "abi1")
     assert_equal(c.max_descriptor_version, 0, "max_descriptor_version")

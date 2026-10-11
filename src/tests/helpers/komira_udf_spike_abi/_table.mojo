@@ -216,8 +216,15 @@ struct CapsText(Copyable, Movable):
     hosting, devices, features, udf_class, global_lock, in that order."""
 
 
-def new_caps(mut arena: _Arena) -> Word:
-    var c = arena.bytes(size_of[CUdfCapabilities]()).bitcast[CUdfCapabilities]()
+def new_caps(mut arena: _Arena, fill: UInt8 = 0) -> Word:
+    """A capabilities struct for describe: every byte `fill` (0 by default),
+    then struct_size. A non-zero fill shows a field describe never wrote."""
+    var b = arena.bytes(size_of[CUdfCapabilities]())
+    # SAFETY: a zeroed arena block of the struct's size, written in place.
+    if fill != 0:
+        for i in range(size_of[CUdfCapabilities]()):
+            b.bitcast[UInt8]()[i] = fill
+    var c = b.bitcast[CUdfCapabilities]()
     c[].struct_size = size_of[CUdfCapabilities]()
     return Word(c.bitcast[NoneType]())
 

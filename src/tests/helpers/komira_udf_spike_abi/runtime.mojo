@@ -390,8 +390,11 @@ struct UdfRuntime(Movable):
             return Outcome(OK, "", "", -1, -1, "UDF_RUNTIME_FAULT: init accepted ABI major " + String(abi_major))
         return Outcome(e.code, e.message, e.trace, e.row, e.group, "")
 
-    def describe(mut self) raises -> Capabilities:
-        var c = new_caps(self._arena)
+    def describe(mut self, fill: UInt8 = 0) raises -> Capabilities:
+        """describe's answer. A non-zero `fill` is written over every byte of
+        the struct first, so a field the runtime never writes reads back as
+        that pattern instead of 0."""
+        var c = new_caps(self._arena, fill)
         var rc = t_describe(self._table, self._rt, c)
         if rc != OK:
             raise Error("UDF_RUNTIME_FAULT: describe returned " + status_name(rc))

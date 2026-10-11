@@ -91,7 +91,7 @@ def main() raises:
     assert_true(table_size(t) >= required_size())
     assert_false(memory_report_present(t))
 
-    var c = new_caps(arena)
+    var c = new_caps(arena, 0xFF)  # every field must be written, the zeros too
     assert_equal(t_describe(t, rt, c), OK)
     var caps = read_caps(c)
     assert_equal(caps.runtime_id, "komira/native")

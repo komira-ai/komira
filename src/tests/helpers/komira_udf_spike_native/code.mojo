@@ -116,3 +116,20 @@ def heap_in_use() -> Int:
 def open_fds() -> Int:
     """The file descriptors open in this process (native/probe.c)."""
     return Int(external_call["komira_udf_spike_open_fds", Int64]())
+
+
+def close_stdin() -> Bool:
+    """Close descriptor 0, so the next one this process opens is 0
+    (native/probe.c)."""
+    return external_call["komira_udf_spike_close_stdin", Int64]() == 1
+
+
+def stdin_open() -> Bool:
+    """Descriptor 0 is open (native/probe.c)."""
+    return external_call["komira_udf_spike_stdin_open", Int64]() == 1
+
+
+def stdin_is_library_memfd() -> Bool:
+    """Descriptor 0 names the native runtime's library memory file
+    (native/probe.c)."""
+    return external_call["komira_udf_spike_stdin_is_library_memfd", Int64]() == 1

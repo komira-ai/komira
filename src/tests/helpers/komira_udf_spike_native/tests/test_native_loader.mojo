@@ -39,11 +39,13 @@
 #     MANAGED; and one of another runtime_id (a library bound to concurrency
 #     or a transport it cannot take; one arm of the check dropped); each
 #     variant refused after its init is shut down at once (the host bytes
-#     its init reserved come back).
+#     its init reserved come back); a library reporting THREAD_SAFE loads
+#     and runs (the threading check narrowed to CONTEXT_PER_THREAD).
 #   - table: a library whose table reports ABI major 2, one whose table's
 #     struct_size ends before close_instance and one that ends one entry
 #     short (before shutdown) are refused with ERR_ABI naming which, and no
-#     entry of theirs is called again, shutdown included; a table ending
+#     entry of theirs is called again, the runtime's shutdown included (their
+#     init bytes still held after it); a table ending
 #     exactly at shutdown loads (a library table read past its end or in
 #     another ABI; the bound moved by one entry).
 #   - shapes: a library whose describe lacks SCALAR loads a column UDF but
@@ -261,12 +263,21 @@ def _symbols(tmp: String) raises:
     _refused(rt.load(fails).outcome, ERR_LOAD, "init_fails refuses every host", "a library whose init failed, again")
     rt.shutdown()
     # A library whose init fills the error and returns its table loads, and
-    # the error is released all the same (its message holds host bytes): a
-    # fresh runtime, so every byte must be back after its shutdown.
+    # the error is released all the same (its message holds host bytes). It
+    # holds what exact_table holds while loaded (both are the C library with
+    # INIT_BYTES), no more; and nothing after the runtime's shutdown.
     var ok_rt = UdfRuntime.open("./native.so")
+    var base = ok_rt.reserved_bytes()
+    _double(ok_rt, _spec(root, [stage("./variant_exact_table.so", root, host_role())]))
+    var exact_holds = ok_rt.reserved_bytes() - base
     _double(ok_rt, _spec(root, [stage("./variant_error_on_ok.so", root, host_role())]))
+    assert_equal(
+        ok_rt.reserved_bytes() - base,
+        2 * exact_holds,
+        "the error a library's init filled before it succeeded was not released",
+    )
     ok_rt.shutdown()
-    assert_equal(ok_rt.reserved_bytes(), 0, "the error a library's init filled before it succeeded was not released")
+    assert_equal(ok_rt.reserved_bytes(), 0, "a loaded library was not shut down with the runtime")
 
 
 def _capabilities(tmp: String) raises:
@@ -285,6 +296,9 @@ def _capabilities(tmp: String) raises:
         "./variant_managed.so",
     ]
     var fields: List[String] = ["threading", "IN_PROCESS", "global_lock", "udf_class"]
+    # A library reporting THREAD_SAFE, which the runtime takes as well as
+    # CONTEXT_PER_THREAD, loads and runs.
+    _double(rt, _spec(root, [stage("./variant_thread_safe.so", root, host_role())]))
     for i in range(len(libs)):
         var spec = _spec(root, [stage(libs[i], root, host_role())])
         var reserved = rt.reserved_bytes()
@@ -316,7 +330,10 @@ def _table(tmp: String) raises:
     _refused(rt.load(one_short).outcome, ERR_ABI, "struct_size", "a library table one entry short")
     assert_equal(rt.reserved_bytes() - reserved, 3 * held, "a table without shutdown was shut down")
     _double(rt, _spec(root, [stage("./variant_exact_table.so", root, host_role())]))
+    # The runtime's shutdown reaches exact_table's (its bytes come back) and
+    # none of the three refused tables' (theirs stay held).
     rt.shutdown()
+    assert_equal(rt.reserved_bytes() - reserved, 3 * held, "the runtime's shutdown called a refused table's shutdown")
 
 
 def _shapes(tmp: String) raises:

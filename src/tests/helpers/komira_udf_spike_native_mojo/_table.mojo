@@ -36,6 +36,7 @@ from komira_udf_spike_abi._cabi import (
     CUdfCapabilities,
     CUdfHost,
     CUdfRuntime,
+    CUdfSpec,
     Void,
     as_get_next,
     as_release,
@@ -85,8 +86,13 @@ from ._arrow import (
     release_array,
     set_cpu,
     set_null,
+    fail_keep_row,
+    schema_child,
+    schema_children,
+    schema_flags,
     slice_col,
     struct_validity,
+    word_at,
 )
 from ._fixtures import (
     F_ARGS_KEPT,
@@ -107,6 +113,11 @@ from ._fixtures import (
     F_TABLE_NULL_COUNT_UNKNOWN,
     F_TABLE_SLICED,
     F_TWO_TYPES,
+    F_CHILD_MOVED_OUT,
+    F_FLAGS_PROBE,
+    F_RAISE_AGAIN,
+    F_RAISE_ROW_UNSET,
+    F_SUM_ONE_SET,
     F_YIELD_FIRST,
     F_YIELD_TWO_THEN_RAISE,
     Fixture,
@@ -144,6 +155,7 @@ struct _Udf(Movable):
     var host: Void
     var fx: Fixture
     var fields: List[String]
+    var flags: List[Int64]
 
 
 @fieldwise_init
@@ -157,7 +169,9 @@ struct _Inst(Movable):
     var host: Void
     var fx: Fixture
     var fields: List[String]
+    var flags: List[Int64]
     var scratch: Void
+    var group_sets: Int
 
 
 @fieldwise_init
@@ -263,8 +277,15 @@ def _load(rt: Void, s: Void, out_p: Void, e: Void) abi("C") -> Int32:
     if rc != OK:
         return rc
     var fields = read_set(s) if fx.shape == SHAPE_ROW else List[String]()
+    # flags_probe: the flags of the argument struct's schema, of its first
+    # field and of the result schema, as load sees them.
+    # SAFETY: check_spec read the spec's struct_size, args and result.
+    var sp = s.bitcast[CUdfSpec]()
+    var args_s = sp[].args
+    var first = schema_child(args_s, 0) if schema_children(args_s) > 0 else null_void()
+    var flags: List[Int64] = [schema_flags(args_s), schema_flags(first), schema_flags(sp[].result)]
     var host = rt.bitcast[_Rt]()[].host
-    _set_out_slot(out_p, _box(host, _Udf(host, fx^, fields^)))
+    _set_out_slot(out_p, _box(host, _Udf(host, fx^, fields^, flags^)))
     return OK
 
 
@@ -285,7 +306,7 @@ def _open_instance(c: Void, u: Void, out_p: Void, e: Void) abi("C") -> Int32:
     var udf = u.bitcast[_Udf]()
     var host = c.bitcast[_Ctx]()[].rt.bitcast[_Rt]()[].host
     var scratch = _scratch(host, _DEVICE_ARRAY)
-    _set_out_slot(out_p, _box(host, _Inst(host, udf[].fx.copy(), udf[].fields.copy(), scratch)))
+    _set_out_slot(out_p, _box(host, _Inst(host, udf[].fx.copy(), udf[].fields.copy(), udf[].flags.copy(), scratch, 0)))
     return OK
 
 
@@ -343,6 +364,27 @@ def _call_batch(i: Void, call: Void, args: Void, out_p: Void, e: Void) abi("C") 
             # SAFETY: make_col's two-entry buffer list; the block stays
             # private_data, which the release frees.
             arr(out_p)[].buffers.bitcast[Void]()[1] = null_void()
+        # Each row r: the flags load saw, row 2 on the result schema's.
+        elif fx == F_FLAGS_PROBE:
+            for r in range(length(out_p)):
+                # SAFETY: make_col's values block of length rows.
+                word_at(arr(out_p)[].buffers, 1).bitcast[Int64]()[r] = inst[].flags[r if r < 2 else 2]
+        # Code and message set, the row left as the host set it.
+        elif fx == F_RAISE_ROW_UNSET:
+            release_array(out_p)
+            rc = fail_keep_row(e, ERR_RAISED, "raise_row_unset: no row given")
+    if fx == F_CHILD_MOVED_OUT and n_children(mine) > 0 and not is_null(arr(mine)[].release):
+        # The child moved out: its 80 bytes copied, the struct's slot marked
+        # released, so the struct's release skips it; then released here.
+        var kid = _scratch(inst[].host, _DEVICE_ARRAY)
+        var slot = child(mine, 0)
+        # SAFETY: `slot` is a struct ArrowArray (10 words) of the moved-in
+        # argument struct; `kid` a 128-byte scratch block.
+        for w in range(10):
+            kid.bitcast[Int64]()[w] = slot.bitcast[Int64]()[w]
+        arr(slot)[].release = null_void()
+        release_array(kid)
+        _free_scratch(inst[].host, kid, _DEVICE_ARRAY)
     release_array(mine)
     return rc
 
@@ -354,6 +396,10 @@ def _agg_open(i: Void, out_p: Void, e: Void) abi("C") -> Int32:
     var inst = i.bitcast[_Inst]()
     if inst[].fx.shape != SHAPE_AGG_MERGEABLE:
         return fail(e, ERR_UNSUPPORTED, "agg_open on a fixture of another shape")
+    if inst[].fx.id == F_SUM_ONE_SET:
+        inst[].group_sets += 1
+        if inst[].group_sets > 1:
+            return fail(e, ERR_INTERNAL, "this instance already opened its group set")
     var host = inst[].host
     var scratch = _scratch(host, 2 * _DEVICE_ARRAY)
     _set_out_slot(out_p, _box(host, _Groups(host, inst[].fx.id, List[Int64](), scratch)))
@@ -700,6 +746,11 @@ def _frame_next(fr: Void, call: Void, out_p: Void, e: Void) abi("C") -> Int32:
     var f = fr.bitcast[_Frame]()
     if f[].done:
         return OK  # the end: out's release stays NULL
+    if f[].fx == F_RAISE_AGAIN:
+        f[].running += 1
+        if f[].running == 1:
+            return fail(e, ERR_RAISED, "raise_again: raised")
+        return fail(e, ERR_INTERNAL, "raise_again: frame_next called after an error")
     if f[].fx == F_YIELD_FIRST and not f[].yielded:
         # One output before any pull: a one-row table [0].
         f[].yielded = True

@@ -103,6 +103,11 @@ comptime F_TABLE_NULL_COUNT_UNKNOWN = 38
 comptime F_SUM_WIDE = 39
 comptime F_NEAR = 40
 comptime F_YIELD_FIRST = 41
+comptime F_CHILD_MOVED_OUT = 42
+comptime F_RAISE_ROW_UNSET = 43
+comptime F_FLAGS_PROBE = 44
+comptime F_SUM_ONE_SET = 45
+comptime F_RAISE_AGAIN = 46
 
 comptime ROW_FIELDS_MAX = 8
 comptime SLOW_ROW_NS: Int64 = 100_000_000
@@ -220,6 +225,25 @@ def find_fixture(entry: String) -> Optional[Fixture]:
     # A one-row table [0] before pulling anything, then running_sum.
     if entry == "yield_first":
         return Fixture(F_YIELD_FIRST, SHAPE_MAP_BATCHES_FRAME, "l", "tl", "")
+    # Identity that moves its argument's child out and releases it on its
+    # own, before the struct (Arrow C Data allows it).
+    if entry == "child_moved_out":
+        return Fixture(F_CHILD_MOVED_OUT, SHAPE_MAP_BATCHES_COLUMN, "l", "l", "")
+    # An error with its code and message set and its row left as the host
+    # set it.
+    if entry == "raise_row_unset":
+        return Fixture(F_RAISE_ROW_UNSET, SHAPE_MAP_BATCHES_COLUMN, "l", "l", "")
+    # Rows 0, 1, 2: the flags of the argument struct's schema, of its first
+    # field and of the result schema, as load saw them.
+    if entry == "flags_probe":
+        return Fixture(F_FLAGS_PROBE, SHAPE_MAP_BATCHES_COLUMN, "l", "l", "")
+    # sum, whose agg_open refuses a second group set on one instance.
+    if entry == "sum_one_group_set_per_instance":
+        return Fixture(F_SUM_ONE_SET, SHAPE_AGG_MERGEABLE, "l", "l", "l")
+    # A frame whose frame_next raises, then answers ERR_INTERNAL to every
+    # later frame_next (the host must not pull after an error).
+    if entry == "raise_again":
+        return Fixture(F_RAISE_AGAIN, SHAPE_MAP_BATCHES_FRAME, "l", "tl", "")
     return None
 
 
