@@ -406,6 +406,22 @@
 #      staged twice, an unresolved import, an empty expect_error or exe, a pin
 #      that differs, a C warning, the test-only runtime named where it is not
 #      visible. See tools/build/tests/node_tests.sh.
+#  55. Refused imports (tools/build/lint/defs.bzl, mojo_deps refused_imports;
+#      tools/build/lint/refused_imports.awk): tests//functional/refused_imports:ok
+#      (each refused module spelt where it is no import of it: comments,
+#      docstrings, string literals, longer module names, a name imported
+#      from another module) builds; each target of
+#      tests//negative/refused_imports fails naming exactly its one finding
+#      (from M, from M.sub, from P import N, parentheses over lines with a
+#      parenthesis in a comment, import M, M as p, M.sub, an import list,
+#      `;` statements, a `\` continuation, an indented import, an import
+#      after a docstring, after a docstring holding the other triple quote,
+#      after a triple quote inside a one-line string, `from`/`import` with
+#      spaces around the dot, a dotted reference with no import of the module
+#      (plain, spaced, continued by `\`, over lines inside parentheses,
+#      through an `as` alias of its parent, through a name a from-import
+#      bound)), and an entry that is not a dotted komira_* module name is
+#      refused at analysis.
 set -uo pipefail
 
 umbrella=1
@@ -1463,6 +1479,44 @@ scm_planted incompatible "because its transitive dep $E/pandas_e2e:test_mac" "$N
 # 54
 # shellcheck source=tools/build/tests/node_tests.sh
 . "$ROOT/tools/build/tests/node_tests.sh"
+
+# 55
+expect_green refused_imports tests//functional/refused_imports:ok
+N=tests//negative/refused_imports
+P=komira_plan_ir.physical_plan
+G=komira_plan_ir.physical_plan_purity_gate
+for want in \
+    "after_docstring|5: imports $P, a module this package refuses ($P)" \
+    "alias_from|4: names $P.segment, a module this package refuses ($P.segment)" \
+    "alias_parent|4: names $P, a module this package refuses ($P)" \
+    "continuation|2: imports $P, a module this package refuses ($P)" \
+    "from_module|2: imports $P, a module this package refuses ($P)" \
+    "from_parent|2: imports $G, a module this package refuses ($G)" \
+    "from_spaced|2: imports $P, a module this package refuses ($P)" \
+    "from_submodule|2: imports $P.sub, a module this package refuses ($P)" \
+    "import_as|2: imports $P, a module this package refuses ($P)" \
+    "import_list|2: imports $P, a module this package refuses ($P)" \
+    "import_module|2: imports $P, a module this package refuses ($P)" \
+    "import_spaced|2: imports $P, a module this package refuses ($P)" \
+    "import_sub|2: imports $P.sub, a module this package refuses ($P)" \
+    "indented|3: imports $P, a module this package refuses ($P)" \
+    "paren_comment_close|4: imports $P, a module this package refuses ($P)" \
+    "paren_comment_open|3: imports $P, a module this package refuses ($P)" \
+    "mixed_triple_quotes|5: imports $P, a module this package refuses ($P)" \
+    "parenthesised|4: imports $P, a module this package refuses ($P)" \
+    "qualified|4: names $P, a module this package refuses ($P)" \
+    "qualified_continued|4: names $P, a module this package refuses ($P)" \
+    "qualified_in_parens|4: names $P, a module this package refuses ($P)" \
+    "qualified_spaced|4: names $P, a module this package refuses ($P)" \
+    "semicolon|2: imports $P, a module this package refuses ($P)" \
+    "semicolon_imports|2: imports $G, a module this package refuses ($G)" \
+    "triple_quote_in_string|3: imports $P, a module this package refuses ($P)"; do
+    t=${want%%|*}
+    expect_red "refused_imports_$t" "$N/$t.mojo:${want#*|}" "$N:$t"
+    n=$(grep -o "mojo_deps: [0-9]* finding line(s)" "$LOG/refused_imports_$t.log" | head -1)
+    if [ "$n" = "mojo_deps: 1 finding line(s)" ]; then pass "refused_imports_${t}_alone"; else fail "refused_imports_${t}_alone: '$n', want 1 finding (see $LOG/refused_imports_$t.log)"; fi
+done
+expect_red refused_imports_bad_entry "refused_imports entry \`komira_plan_ir\` is not a dotted module name" "$N:bad_entry"
 
 # 37
 pt_rc=0
