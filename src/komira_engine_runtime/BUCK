@@ -4,9 +4,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # (measured once per host), hardware and topology detection and the async
 # runtime built from them, morsel sizing as a pure function of the host profile
 # and the segment (recorded in the physical plan), the dispatch-time fan-out
-# grain, the run and segment execution context, wake primitives, counters, and
-# the small shared row and column helpers. It depends on no engine package
-# above it.
+# grain, the run and segment execution context, the parallel RecordBatch concat,
+# wake primitives, counters, and the small shared row and column helpers. It
+# depends on no engine package above it.
 mojo_library(
     name = "komira_engine_runtime",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -34,6 +34,9 @@ mojo_library(
         "tests/test_asof_join_probe_column_native_transparency.mojo",
         "tests/test_cb20_morsel_count_mechanism.mojo",
         "tests/test_column_native_foundation.mojo",
+        "tests/test_concat_dict_unify.mojo",
+        "tests/test_concat_one_column_parallel.mojo",
+        "tests/test_concat_release_state.mojo",
         "tests/test_counters.mojo",
         "tests/test_distinct_column_native_transparency.mojo",
         "tests/test_filesystem_spill_fsync.mojo",
