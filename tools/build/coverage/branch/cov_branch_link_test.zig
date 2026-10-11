@@ -271,7 +271,10 @@ test "a bitcode without the bitcode magic is refused before lld runs, named as g
         var fake = Fake.init(c.a());
         try testing.expectEqual(@as(u8, 1), try c.link(&fake));
         try c.has("BRANCH COVERAGE LINK FAILED: cov/test_one.bc is not LLVM bitcode\n");
+        // No step has run, so there is no log, and no log header.
+        try testing.expect(std.mem.indexOf(u8, c.err.items, "--- log:") == null);
         try testing.expectEqual(@as(usize, 1), fake.calls.items.len);
+        try testing.expect(c.exists("scratch/cov_branch_link/bin"));
     }
 }
 
@@ -309,16 +312,31 @@ test "zig failing fails the link with its log, the last line without a newline k
     fake.zig_out = null;
     try testing.expectEqual(@as(u8, 1), try c.link(&fake));
     try c.has("BRANCH COVERAGE LINK FAILED: zig could not link the instrumented test with the profile runtime\n--- log:\nld.lld: error: undefined symbol: komira_example_add\n");
+    // A failed link keeps the scratch directory, its log included.
+    try testing.expect(c.exists("scratch/cov_branch_link/log"));
 }
 
-test "a link that writes no ELF file, or nothing, fails" {
-    for ([_]?[]const u8{ null, "", "\x7fEL", "#!/bin/sh\n" }) |out| {
+test "zig killed by a signal fails the link; the scratch is kept" {
+    var c = try Case.init();
+    defer c.deinit();
+    var fake = Fake.init(c.a());
+    fake.zig_status = .{ .signaled = 9 };
+    try testing.expectEqual(@as(u8, 1), try c.link(&fake));
+    try c.has("BRANCH COVERAGE LINK FAILED: zig could not link the instrumented test with the profile runtime\n");
+    try testing.expect(c.exists("scratch/cov_branch_link/log"));
+}
+
+test "a link that writes no ELF file, or nothing, fails; the scratch is kept" {
+    // Each of the 4 magic bytes wrong on its own, as well as short and
+    // missing outputs: all 4 bytes are compared.
+    for ([_]?[]const u8{ null, "", "\x7fEL", "#!/bin/sh\n", "\x7eELF\x02", "\x7fXLF\x02", "\x7fEXF\x02", "\x7fELG\x02" }) |out| {
         var c = try Case.init();
         defer c.deinit();
         var fake = Fake.init(c.a());
         fake.zig_out = out;
         try testing.expectEqual(@as(u8, 1), try c.link(&fake));
         try c.has("BRANCH COVERAGE LINK FAILED: the link wrote no ELF file\n");
+        try testing.expect(c.exists("scratch/cov_branch_link/log"));
     }
 }
 
@@ -333,6 +351,7 @@ test "a binary holding the working directory or the scratch directory fails, quo
         // The scratch directory holds the working directory: the first one
         // found is the working directory.
         try c.has(try std.fmt.allocPrint(c.a(), "BRANCH COVERAGE LINK FAILED: the binary holds this action's directory {s}: {s}/x.c {s} \n", .{ c.root, d, d }));
+        try testing.expect(c.exists("scratch/cov_branch_link/log"));
     }
 }
 

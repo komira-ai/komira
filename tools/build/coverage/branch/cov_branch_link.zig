@@ -256,8 +256,8 @@ pub fn linkAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: 
     const bc = try run_cmd.abs(alloc, cwd, a.bitcode);
     const out = try run_cmd.abs(alloc, cwd, a.out);
 
-    // 0. The inputs, as the script's `[ -s ]` (a usage error), before the
-    // scratch directory exists.
+    // 0. The inputs, each a file that is not empty (`[ -s ]`; else a usage
+    // error), before the scratch directory exists.
     for ([_][]const u8{ lld, rt, kgen, zig, bc }) |f| {
         if (!nonEmpty(f)) {
             try err.writer().print("cov_branch link: {s} is missing or empty\n", .{f});
