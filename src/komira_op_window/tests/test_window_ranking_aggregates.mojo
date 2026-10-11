@@ -320,6 +320,75 @@ def test_sliding_float_sum_after_infinity_leaves() raises:
     assert_equal(_getf(out, 2, 3), 5.0)
 
 
+def _f64_nullable(vals: List[Float64], valid: List[Bool]) -> Column[HeapRegion]:
+    var arr = PrimitiveArray[DType.float64].allocate_nullable(len(vals))
+    for i in range(len(vals)):
+        arr.store[1](i, vals[i])
+        if not valid[i]:
+            arr._set_null(i)
+    return Column.from_primitive[DType.float64](arr)
+
+
+def test_sliding_float_sum_is_the_sum_of_the_frame_alone() raises:
+    # DuckDB sums each frame from its own values. Three partitions, ROWS
+    # BETWEEN 1 PRECEDING AND CURRENT ROW (cols 3 SUM, 4 AVG) and ROWS
+    # BETWEEN 2 PRECEDING AND 1 PRECEDING (col 5 SUM):
+    #   g = 1, v = 1e20, 1, 1: SUM 1e20, 1e20, 2; AVG 1e20, 5e19, 1.
+    #     1e20 + 1 is 1e20, so a window that subtracts 1e20 back out when it
+    #     leaves takes the 1 with it and answers 1 (AVG 0.5) for the last
+    #     frame {1, 1}.
+    #   g = 2, v = 4, NULL, 1e20, 1, 1 (the NULL slot holds 1e30): SUM 4, 4,
+    #     1e20, 1e20, 2; AVG 4, 4, 1e20, 5e19, 1. A frame that starts past the
+    #     partition's first row must read the right cells, and the NULL's
+    #     slot value never enters a sum.
+    #   g = 3, v = NaN, 2, 3: SUM NaN, NaN, 5 (a NaN that has left the frame
+    #     leaves no NaN behind).
+    #   The lagged frame is empty on each partition's first row (NULL), then
+    #   g = 1: 1e20, 1e20; g = 2: 4, 4, 1e20, 1e20; g = 3: NaN, NaN.
+    var nan = Float64(0.0) / Float64(0.0)
+    var g: List[Int64] = [1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3]
+    var o: List[Int64] = [1, 2, 3, 1, 2, 3, 4, 5, 1, 2, 3]
+    var v: List[Float64] = [1.0e20, 1.0, 1.0, 4.0, 1.0e30, 1.0e20, 1.0, 1.0, nan, 2.0, 3.0]
+    var valid: List[Bool] = [True, True, True, True, False, True, True, True, True, True, True]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_plain_i64(g))
+    cols.append(_plain_i64(o))
+    cols.append(_f64_nullable(v, valid))
+    var names: List[String] = ["g", "o", "v"]
+    var cur = _rows(FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0)
+    var exprs = List[PartitionExpr]()
+    exprs.append(PartitionExpr.agg_with_frame(PF_SUM, "v", cur.copy()))
+    exprs.append(PartitionExpr.agg_with_frame(PF_AVG, "v", cur.copy()))
+    exprs.append(
+        PartitionExpr.agg_with_frame(
+            PF_SUM, "v", _rows(FRAME_BOUND_PRECEDING, 2, FRAME_BOUND_PRECEDING, 1)
+        )
+    )
+    var pk: List[String] = ["g"]
+    var ok: List[String] = ["o"]
+    var out = _run(_batch(names, cols^), pk, ok, exprs^)
+    var want_sum: List[Float64] = [1.0e20, 1.0e20, 2.0, 4.0, 4.0, 1.0e20, 1.0e20, 2.0]
+    var want_avg: List[Float64] = [1.0e20, 5.0e19, 1.0, 4.0, 4.0, 1.0e20, 5.0e19, 1.0]
+    for r in range(8):
+        assert_false(_null(out, 3, r))
+        assert_equal(_getf(out, 3, r), want_sum[r])
+        assert_equal(_getf(out, 4, r), want_avg[r])
+    assert_true(isnan(_getf(out, 3, 8)))
+    assert_true(isnan(_getf(out, 3, 9)))
+    assert_equal(_getf(out, 3, 10), 5.0)
+    assert_equal(_getf(out, 4, 10), 2.5)
+    var empty_rows: List[Int] = [0, 3, 8]
+    for r in empty_rows:
+        assert_true(_null(out, 5, r))
+    var lag_rows: List[Int] = [1, 2, 4, 5, 6, 7]
+    var want_lag: List[Float64] = [1.0e20, 1.0e20, 4.0, 4.0, 1.0e20, 1.0e20]
+    for i in range(len(lag_rows)):
+        assert_false(_null(out, 5, lag_rows[i]))
+        assert_equal(_getf(out, 5, lag_rows[i]), want_lag[i])
+    assert_true(isnan(_getf(out, 5, 9)))
+    assert_true(isnan(_getf(out, 5, 10)))
+
+
 def test_empty_frame_over_non_null_input_is_null() raises:
     # ROWS BETWEEN 2 PRECEDING AND 1 PRECEDING over a non-nullable v, two
     # partitions (g = 1: v 5, -2, 7; g = 2: v 4, 9): the first row of each
