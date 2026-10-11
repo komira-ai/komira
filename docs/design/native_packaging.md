@@ -308,12 +308,14 @@ Each codec is opened at first use by soname, with `OwnedDLHandle`, by its owning
 
 No other library under `src/` (tests aside) calls `OwnedDLHandle`.
 
-- **PROPOSED (slice 3, from #685):** `mojo_library(dlopen = [...])` declares the sonames;
-  `tools/build/package/system_libs.bzl` maps each to its requirement; the packer writes the
-  requirement into `depends`, records `dlopen` in `metadata.json`, and refuses a library whose sources
-  open a soname its declaration omits (replacing today's blanket refusal). The build refuses a
-  declaration the map lacks.
-- **PROPOSED (slice 3, from #763):** kci accepts exactly those requirements, byte-equal to the map,
+- **EXISTS (slice 3, #1305, from #685):** `mojo_library(dlopen = [...])` declares the sonames
+  (komira_lz4 and komira_zlib declare theirs); `tools/build/package/system_libs.bzl` maps each to its
+  requirement, and analysis refuses a declaration the map lacks. The packer writes the requirement
+  into `depends`, records `dlopen` in `metadata.json`, and marks the package REFUSED, so its release
+  fails, when its sources open a soname its declaration omits or it declares one it never opens
+  (`pack/conda_dlopen.zig`; this replaced the blanket refusal).
+- **EXISTS (slice 3; kci's half since #1235, from #763):** kci accepts exactly those requirements,
+  byte-equal to the map (`src/kci_release_set/system_libs.mojo`),
   plus the `__glibc` floor (slice 9), as the only non-komira, non-compiler requirements of a library
   package.
 - **komira_lz4 and komira_zlib (#1188) go first, in slices 3 and 4.** They link no native code, so
