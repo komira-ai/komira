@@ -19,6 +19,7 @@ glibc (2.34 or later) and the kernel. Package formats are built from it.
 
 ```
 bin/hello                                 launcher
+bin/<helper>                              the binary's `helpers`, if any
 lib/glibc-hwcaps/x86-64-v3/libhello.so    the program
 lib/                                      Mojo runtime, C++ runtime
 share/                                    data
@@ -54,7 +55,9 @@ those of the executable (tests//functional/bundle_parity compares the two).
 `lib<name>.so` has run path `$ORIGIN/../..`, the bundle's `lib/`. Every run
 path is relative to its file, so the bundle runs from wherever it is copied
 and through a symlink. A program finds its data through `/proc/self/exe`:
-`<its directory>/../share`. The runtime libraries in `lib/` are the vendor's
+`<its directory>/../share`, and a helper program (a `mojo_binary`'s
+`helpers`, [helpers.bzl](../mojo/helpers.bzl)) in `<its directory>`, as it
+does in the binary's runnable directory. The runtime libraries in `lib/` are the vendor's
 files, unchanged, and keep the vendor's run paths; [bundle_expected](../tests/functional/bundle_expected)
 lists every run path in the bundle.
 
@@ -96,6 +99,20 @@ oci_image(name = "hello_image", bundle = ":hello_bundle", repository = "komira/h
   docker load < "$(buck2 build '//tools/build/examples:hello_image[docker_archive]' --show-full-simple-output)"
   docker run --rm komira/hello:0.1.0
   ```
+
+  `[release]` is the image as a release set holds it: a directory with the
+  layout (`hello_image.oci/`) and kci's artifact manifest, `manifest.json`
+  (type `OCI`, `file` the layout directory, `sha256` the hex of `[digest]`,
+  and as the name the bundle's program for an image of a bundle, or the last
+  segment of `repository` for an image of a tree: one tree can make several
+  images). A BUILD step copies it into the release directory
+  (`--out <release_dir>/<name>`), and kci's `verify_member` hashes every blob
+  of the layout and requires its manifest digest to be the manifest's
+  `sha256` (`src/kci_release_set`, which reads the real `hello_image[release]`
+  and `hello_root_image[release]`, an image of a tree, in a welded test). The
+  name must be a kci artifact name (`[a-z][a-z0-9_]*`): it is never rewritten,
+  so a repository such as `komira/oci-check` (a hyphen) makes a valid image
+  whose `[release]` fails to build, naming the image and its repository.
 
 `[layers]` is the digest of each layer of the image manifest, one per line,
 in order: the base's layers, then the one the build adds. It is read from the
@@ -139,7 +156,8 @@ image`. `oci_image_check`
 ([`oci_check.bzl`](oci_check.bzl), running
 [`komira_oci check`](oci/README.md)) reads the
 built image back in a build action and is that image with the check's output
-added to its default output and each sub-target, so the image cannot be built
+added to its default output, each sub-target and each sub-target of those
+(`[release][manifest]`), so the image cannot be built
 through it unless: the config's Entrypoint is exactly the one named; it and
 each of `executables` is a regular file with mode 0755 in the image's
 filesystem (layers applied in order; a whiteout removes its path and
