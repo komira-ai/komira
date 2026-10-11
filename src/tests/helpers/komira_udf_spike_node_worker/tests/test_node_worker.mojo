@@ -297,6 +297,7 @@ def _hard_cancel(mut rt: UdfRuntime) raises:
     # killed, then reaped and named (a kill left unreaped reads "could not
     # be reaped")
     _expect(r.outcome, ERR_INSTANCE_LOST, "was killed by signal 9", "a cancel user code ignores")
+    assert_equal(r.outcome.row, -1, "the row of a worker killed after a cancel")
     _unbind(rt, b)
 
 

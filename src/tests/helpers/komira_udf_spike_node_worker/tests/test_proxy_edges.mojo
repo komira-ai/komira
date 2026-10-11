@@ -14,7 +14,13 @@
 #   - one context holds 32 UDFs and refuses the 33rd by name, and serves 40
 #     instances of one UDF (a full table written past its end, or a UDF
 #     loaded again for every instance); 40 UDFs loaded and unloaded one
-#     after another fit, because a full table drops the unloaded ones;
+#     after another fit, because a full table drops the unloaded ones; a
+#     full table with one entry unloaded takes a new UDF, whether that entry
+#     is first or last in the runtime's list of loaded UDFs (an unload
+#     that removes the wrong entry, a drop past the list's end, a drop only
+#     while not full);
+#   - a deadline that leaves exactly 0 ns at frame_next is refused before
+#     sending (0 on the wire would mean no deadline);
 #   - a cancel already set is refused before anything is sent, by name, for
 #     a call (row 0), a frame's open and an aggregate's update (a cancel
 #     left to the worker instead);
@@ -38,7 +44,10 @@
 # width check (m1242), agg_emit decoding an ERROR reply (m1258); channel.c
 # kudfw_stop not closing the channel (m0915) or the cancel word (m0917), or
 # not reaping (m0919); frames.mjs answering the abandoned FRAME_OUT
-# (m1561); node_launcher.c resolving an absolute path as relative (m1279).
+# (m1561); node_launcher.c resolving an absolute path as relative (m1279);
+# proxy.c t_unload removing the wrong live entry (m1147), drop_unloaded
+# reading past the list (m1167), the drop only while not full (m1178);
+# channel.c refusing only a negative remaining time (m0610).
 # Each red on the farm.
 
 from std.os import listdir
@@ -169,6 +178,70 @@ def _unloaded_dropped(mut rt: UdfRuntime) raises:
     rt.close_context(c.handle)
 
 
+def _full_table_one_unloaded(mut rt: UdfRuntime, last_unloaded: Bool) raises:
+    # A full table (32 UDFs open in one context) with one entry unloaded: a
+    # new UDF must open, in two orders of the runtime's list of loaded UDFs.
+    # last_unloaded False: load A1, an extra X, A2..A32; unload A1 (the
+    # list's first entry; an unload that removes another entry, or a drop
+    # that runs only on a table not full, keeps A1 in the table).
+    # last_unloaded True: load A1..A31, an extra E, A32; unload A32, then E
+    # (a drop that reads one slot past the list sees A32 there).
+    var s = _spec(SHAPE_SCALAR, "fixtures.mjs#double")
+    var c = rt.open_context(3)
+    assert_true(c.outcome.is_ok(), String(c.outcome))
+    var a = List[Handle]()
+    var extras = List[Handle]()
+    var extra_at = 31 if last_unloaded else 1
+    for k in range(33):
+        var u = rt.load(s)
+        assert_true(u.outcome.is_ok(), "load: " + String(u.outcome))
+        if k == extra_at:
+            extras.append(u.handle.copy())
+        else:
+            a.append(u.handle.copy())
+    var insts = List[Handle]()
+    for i in range(32):
+        var o = rt.open_instance(c.handle, a[i])
+        assert_true(o.outcome.is_ok(), "open " + String(i) + ": " + String(o.outcome))
+        insts.append(o.handle.copy())
+    var gone = 31 if last_unloaded else 0
+    rt.close_instance(insts[gone])
+    rt.unload(a[gone])
+    if last_unloaded:
+        rt.unload(extras[0])
+    var b = rt.load(s)
+    var ob = rt.open_instance(c.handle, b.handle)
+    assert_true(ob.outcome.is_ok(), "a full table with one unloaded entry (last_unloaded " + String(last_unloaded) + "): " + String(ob.outcome))
+    rt.close_instance(ob.handle)
+    for i in range(32):
+        if i != gone:
+            rt.close_instance(insts[i])
+            rt.unload(a[i])
+    rt.unload(b.handle)
+    if not last_unloaded:
+        rt.unload(extras[0])
+    rt.close_context(c.handle)
+
+
+def _deadline_exact(mut rt: UdfRuntime) raises:
+    # A frame whose deadline is 1 ms after its open and whose generator
+    # yields before reading input: frame_open's request reads the clock at
+    # the start, frame_next's at the deadline, which leaves 0 ns, so
+    # frame_next is refused before sending and no output reaches the host
+    # (sending 0 would send no deadline, and the frame would yield).
+    var f = _spec(SHAPE_MAP_BATCHES_FRAME, "fixtures.mjs#yield_first")
+    f.result_is_table = True
+    var u = rt.load(f)
+    var c = rt.open_context(4)
+    var i = rt.open_instance(c.handle, u.handle)
+    var r = rt.run_frame(i.handle, f, [_ints([1])], CallOptions(False, False, False, 1_000_000))
+    _expect(r.outcome, ERR_DEADLINE, "the call's deadline passed before it was sent", "a deadline reached at frame_next")
+    assert_equal(len(r.outputs), 0, "outputs before a deadline reached at frame_next")
+    rt.close_instance(i.handle)
+    rt.close_context(c.handle)
+    rt.unload(u.handle)
+
+
 def _cancelled_before(mut rt: UdfRuntime) raises:
     var cancel = CallOptions(True, False, False)
     var s = _spec(SHAPE_SCALAR, "fixtures.mjs#slow_loop")
@@ -254,6 +327,9 @@ def main() raises:
     _load_refusal(rt)
     _udfs_per_context(rt)
     _unloaded_dropped(rt)
+    _full_table_one_unloaded(rt, False)
+    _full_table_one_unloaded(rt, True)
+    _deadline_exact(rt)
     _cancelled_before(rt)
     _aggregates(rt)
     var l = rt.ledger()

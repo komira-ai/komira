@@ -276,6 +276,7 @@ def _future_deadlines(mut rt: UdfRuntime, ctx: Handle) raises:
     var b = _bind(rt, ctx, s)
     var r = rt.call_batch(b.inst, s, _ints([1]), CallOptions(False, False, False, 2_500_000))
     _expect(r.outcome, ERR_DEADLINE, "past its deadline and the worker did not answer within 500 ms", "a deadline user code ignores")
+    assert_equal(r.outcome.row, -1, "the row of a worker killed at its deadline")
     _unbind(rt, b)
 
 
