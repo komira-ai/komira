@@ -55,10 +55,13 @@ and `link_driver` (PR 3).
 Every place the build says it builds for one platform only is a **limit**:
 a `target_compatible_with` or a refusal. Each is declared at its site by a
 `komira-limit:<id>` marker and listed in [`limits.tsv`](limits.tsv) with the
-PR that deletes it. [`limits_retired.sh`](../tests/functional/platform_table/limits_retired.sh)
-refuses a `target_compatible_with` with no marker, a marker with no row, a row
-with no marker, and a row whose retiring PR has merged (a commit subject on
-main contains `[native-pr:<n>]`) while its marker is still there. A PR that
+PR that deletes it. The validation `//:limits` (the Zig tool
+[`limits_check`](limits/src/limits.zig), so `./buck2 build //...` and the
+pull request's check run it) refuses a malformed row, a
+`target_compatible_with` with no marker, a marker with no row, and a row with
+no marker. The platform table's check (test 37) runs the same tool over the
+commit subjects of main and refuses a row whose retiring PR has merged (a
+subject contains `native-pr:<n>`), which no build action can read. A PR that
 deletes a limit deletes its marker and its row; `never` is only for product
 statements (images are a Linux product), including a test whose subject is
 one OS's features (the farm capability probe tests the Linux kernel features

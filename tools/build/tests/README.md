@@ -836,14 +836,13 @@ is refused with a reason (a Linux arm64 host: the row is reserved).
 4. where actions run: with only the host platform's `[komira_re]` key set the
    one execution platform is remote; with only another platform's key set it
    is the local one and nothing fails (no key at all is test 25's);
-5. the limits ([`limits.tsv`](../platforms/limits.tsv),
-   [`limits_retired.sh`](functional/platform_table/limits_retired.sh)): the
-   real tree passes, five fixture trees are each refused (a limit with no
-   marker, a marker with no row, a row with no marker, a duplicate row, a
-   `never` with no product reason), a fixture whose retiring PR has merged is
-   refused while one naming a different PR (`44`, `4b` for `4`) is not, and
-   with every retiring PR named as merged the real tree is refused once per
-   retirable limit;
+5. the limits ([`limits.tsv`](../platforms/limits.tsv)): no row's retiring
+   PR has merged, by `limits_check merged`
+   ([`limits.zig`](../platforms/limits/src/limits.zig)) over the commit
+   subjects of main. The tree checks are the validation `//:limits`, and every
+   case of both (each malformed row, a limit with no marker, a marker with no
+   row, a row with no marker, a merged PR, `44` and `4b` not being `4`) is a
+   unit test of the tool, one target per scenario;
 6. each registered row's `golden_config_hash` is the hash buck2 gives its
    platform, and the macOS applets are those of `busybox.sh`;
 7. on a Linux x86_64 client, the golden
