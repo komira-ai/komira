@@ -255,6 +255,14 @@ or the komira cell; sub-targets and the greens of `tests//negative` and
 `tests//src` that must build are named by `target_suite`s
 (`//:tests_greens`); the case actions refuse a short report; and the rows the
 check already built are gone from the script.
+Slice 3 added the scenarios: `buck2 test` targets under
+[`tools/build/selftest`](../tools/build/selftest/README.md) that drive buck2
+from outside, each inner build on the farm. They are one declared check,
+`build_selftests` (`release/artifacts.textproto`), which a widened change
+reaches (the derived check `tools_build`, whose pattern `//tools/build/...`
+still covers the package, reaches them too: open, see the design), and
+`build_targets.sh` runs the package's graph checks with their BXL script. The analysis-time refusals, where targets execute and the
+unconfigured query through the prelude's select moved there.
 
 ## kci.yml: the release
 
