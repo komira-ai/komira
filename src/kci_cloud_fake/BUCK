@@ -53,6 +53,8 @@ mojo_library(
         "tests/test_fake_triggers.mojo",
         "tests/test_fake_network.mojo",
         "tests/test_fake_registry.mojo",
+        # every fake's ArtifactNeed is the one image word, OCI
+        "tests/test_fake_required_artifact.mojo",
         "tests/test_fake_metadata.mojo",
         "tests/test_fake_adoption.mojo",
         "tests/test_fake_adoption_release.mojo",
@@ -61,6 +63,7 @@ mojo_library(
         "tests/test_fake_composite.mojo",
         "tests/test_fake_kci_job.mojo",
         "tests/test_fake_kci_app.mojo",
+        "tests/test_fake_typed_refusal.mojo",
         "tests/test_fake_derived_grants.mojo",
     ],
     test_data = {
