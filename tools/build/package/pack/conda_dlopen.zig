@@ -12,10 +12,13 @@
 //!   `OwnedDLHandle` in its code (comments and docstrings are not code).
 //! - If it opens, the sonames FOUND are every string literal, in ALL its
 //!   sources (not only the ones naming `OwnedDLHandle`), whose whole content
-//!   is a soname, `lib<name>.so[.<digits>]...`, in any quote form: `"..."`,
-//!   `'...'`, `"""..."""`, `'''...'''`, and each of them with the raw prefix
-//!   (`r"..."`). A triple-quoted string counts only if its whole content is
-//!   a soname, so a docstring of prose never does.
+//!   is a soname, `lib<name>.so[.<digits>]...`, or is a path (it holds a
+//!   `/`) whose last component is one: `"/usr/lib/liblz4.so.1"` and
+//!   `"lib/liblz4.so.1"` both count as `liblz4.so.1`. Any quote form
+//!   counts: `"..."`, `'...'`, `"""..."""`, `'''...'''`, and each of them
+//!   with the raw prefix (`r"..."`). A triple-quoted string counts only if
+//!   its whole content is a soname or such a path, so a docstring of prose
+//!   never does.
 //! - The declared sonames must EQUAL the found ones; otherwise the package
 //!   is refused, naming both sets and the sources holding each literal. A
 //!   library that opens and holds no soname literal is refused too, even
@@ -35,11 +38,19 @@
 //! A soname-shaped string anywhere in a library that opens (a constant kept
 //! in another file, a name in a message) must be declared, so a stray one
 //! refuses the package until it is declared or reworded: the check fails
-//! closed, never packaging a library without a requirement it may need. A
-//! soname the sources build at run time from parts is not seen at all. The
-//! runtime backstop is beta's per-package install check (`beta_validate`,
-//! the installed-bytes checks of docs/design/continuous_publish.md), which
-//! runs each package as a consumer installs it.
+//! closed, never packaging a library without a requirement it may need.
+//!
+//! Known limits, which fail OPEN (the package is made without the
+//! requirement): a soname the sources build at run time from parts
+//! (`"lib" + name + ".so.1"`) or spell with an escape (`"libz\x2eso.1"`) is
+//! not found, since the reader compares a literal's bytes as written; and
+//! only `.mojo` files are read, so a source named `*.🔥` is not (a library
+//! whose only opener is one is read as opening nothing). An
+//! installed-package check is PLANNED, not built: step S12 of the staged
+//! pipeline (the installed-bytes checks of docs/design/continuous_publish.md).
+//! Once it runs each package installed alone, it will catch a requirement
+//! missing for a library the package opens at run time, these cases
+//! included.
 
 const std = @import("std");
 const json = std.json;
@@ -122,11 +133,20 @@ fn identChar(c: u8) bool {
     return std.ascii.isAlphanumeric(c) or c == '_';
 }
 
-/// Appends `lit` to `list` if it is a soname not held yet.
+/// The soname a literal names, or null: its whole content when that is a
+/// soname, else, for a path (it holds a `/`), its last component when that
+/// is one (`"/usr/lib/liblz4.so.1"` and `"lib/liblz4.so.1"` name
+/// `liblz4.so.1`).
+pub fn literalSoname(lit: []const u8) ?[]const u8 {
+    const last = if (std.mem.lastIndexOfScalar(u8, lit, '/')) |k| lit[k + 1 ..] else lit;
+    return if (isSoname(last)) last else null;
+}
+
+/// Appends the soname `lit` names to `list` if it names one not held yet.
 fn holdOnce(list: *std.ArrayList([]const u8), lit: []const u8) !void {
-    if (!isSoname(lit)) return;
-    for (list.items) |f| if (std.mem.eql(u8, f, lit)) return;
-    try list.append(lit);
+    const so = literalSoname(lit) orelse return;
+    for (list.items) |f| if (std.mem.eql(u8, f, so)) return;
+    try list.append(so);
 }
 
 pub fn scanSource(alloc: Alloc, text: []const u8) !Scan {
@@ -599,6 +619,29 @@ test "dlopenReason: a triple-quoted soname literal is found" {
     // exactly libz, accepted
     const doc = "\"\"\"Opens libz.so.1 and never liblz4.so.1.\"\"\"\nz = OwnedDLHandle(\"libz.so.1\")\n";
     try testing.expectEqual(@as(?[]const u8, null), try dlopenReason(a, &.{.{ .path = "x.mojo", .text = doc }}, &.{zlib}));
+}
+
+test "dlopenReason: a path literal counts as the soname it ends in" {
+    var arena = testAlloc();
+    defer arena.deinit();
+    const a = arena.allocator();
+    // Fix round 8: `OwnedDLHandle("/usr/lib/liblz4.so.1")`, absolute and
+    // relative, with only libz declared. A reader that compared only a
+    // literal's whole content with the soname form finds [libz.so.1] and
+    // accepts: the package would ship without lz4-c.
+    for ([_][]const u8{
+        "z = OwnedDLHandle(\"libz.so.1\")\nl = OwnedDLHandle(\"/usr/lib/liblz4.so.1\")\n",
+        "z = OwnedDLHandle(\"libz.so.1\")\nl = OwnedDLHandle(\"lib/liblz4.so.1\")\n",
+    }) |text| {
+        const why = try refusal(try dlopenReason(a, &.{.{ .path = "x.mojo", .text = text }}, &.{zlib}));
+        try testing.expect(std.mem.indexOf(u8, why, "its sources name [liblz4.so.1, libz.so.1] and the library declares `dlopen` [libz.so.1]") != null);
+        // declared both: accepted
+        try testing.expectEqual(@as(?[]const u8, null), try dlopenReason(a, &.{.{ .path = "x.mojo", .text = text }}, &.{ lz4, zlib }));
+    }
+    // a path whose last component is not a soname names none; a soname
+    // in a middle component does not count
+    for ([_][]const u8{ "/usr/lib/", "/usr/lib/liblz4.so.1/x", "lib/liblz4.dylib" }) |lit| try testing.expectEqual(@as(?[]const u8, null), literalSoname(lit));
+    try testing.expectEqualStrings("liblz4.so.1", literalSoname("./liblz4.so.1").?);
 }
 
 test "dlopenReason: the refusal names the first source that opens" {
