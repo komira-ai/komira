@@ -147,7 +147,13 @@ def _expect(got: Outcome, status: Int32, text: String, what: String) raises:
 def _describe(mut rt: UdfRuntime) raises:
     var caps = rt.describe()
     assert_equal(caps.runtime_id, "komira-test/node")
+    # "node" and the major version, nothing else: an ABI copied from the
+    # wrong offset of the reply starts with the id's last bytes, "node".
     assert_true(caps.runtime_abi.startswith("node"), caps.runtime_abi)
+    var abi = caps.runtime_abi.as_bytes()
+    assert_true(len(abi) > 4, caps.runtime_abi)
+    for i in range(4, len(abi)):
+        assert_true(abi[i] >= 48 and abi[i] <= 57, "runtime_abi '" + caps.runtime_abi + "': not node<major>")
     assert_equal(caps.udf_class, CLASS_MANAGED)
     assert_equal(caps.hosting, HOSTING_EMBEDDED)
     assert_equal(caps.threading, CONTEXT_PER_THREAD)
@@ -239,6 +245,25 @@ def _propagate_error_row(mut rt: UdfRuntime) raises:
     var r = rt.call_batch(b.inst, s, batch, CallOptions.plain())
     _expect(r.outcome, ERR_RAISED, "raise_on_row_3", "a raise under PROPAGATE")
     assert_equal(r.outcome.row, 3, "the caller's row of the value 3")
+    # The worker's JavaScript stack is the error's trace, and a call that
+    # is no aggregate names no group.
+    assert_true("raise_on_row_3" in r.outcome.trace, "trace: '" + r.outcome.trace + "'")
+    assert_equal(r.outcome.group, -1, "the group of a scalar call's error")
+    _unbind(rt, b)
+
+
+def _deadline_before_send(mut rt: UdfRuntime) raises:
+    # A call whose deadline has passed is refused before it is sent: the
+    # worker never sees it, so it is not killed, and the next call on the
+    # same instance runs. A proxy that sent it anyway would wait out the
+    # grace period and kill the worker.
+    var s = _spec(SHAPE_SCALAR, "fixtures.mjs#slow_loop", TYPE_INT64)
+    var b = _bind(rt, s, 0)
+    var d = rt.call_batch(b.inst, s, _ints([1, 2]), CallOptions(False, False, True))
+    _expect(d.outcome, ERR_DEADLINE, "the call's deadline passed before it was sent", "a passed deadline")
+    var after = rt.call_batch(b.inst, s, _ints([5]), CallOptions.plain())
+    assert_true(after.outcome.is_ok(), "the call after a refused deadline: " + String(after.outcome))
+    assert_equal(after.column.bits[0], 5)
     _unbind(rt, b)
 
 
@@ -316,6 +341,11 @@ def _corrupt_describes() raises:
         except e:
             why = String(e)
         assert_true("describe returned ERR_INTERNAL" in why, "corrupt DESCRIBE " + String(i) + ": " + why)
+    # The sixth is valid: a runtime ABI of 0 bytes ending the reply (a bound
+    # one byte too strict refuses it).
+    var empty = UdfRuntime.open(CORRUPT_LIB)
+    assert_equal(empty.describe().runtime_abi, "", "DESCRIBE 5: an empty runtime ABI")
+    empty.shutdown()
 
 
 def _same(k: Int, n: Int) -> Batch:
@@ -354,6 +384,42 @@ def _bitmap_and_alignment(mut rt: UdfRuntime, b: Bound, s: UdfSpec) raises:
     assert_equal(len(r39.column), 1, "corrupt case 39")
     assert_equal(r39.column.bits[0], 0, "corrupt case 39")
     _unbind(rt, nb)
+
+
+def _reader_bounds(mut rt: UdfRuntime, b: Bound, s: UdfSpec) raises:
+    # The flatbuffer reader's own bounds and the payload's (corrupt cases 40
+    # to 56, laid out byte by byte by worker/corrupt.mjs's layout()): each
+    # piece moved to the metadata's end, past it by part of its width, or
+    # onto offset 0; "" is a layout the proxy must accept (one row, 0).
+    var reasons: List[String] = [
+        "",
+        "the RecordBatch metadata is malformed",
+        "the RecordBatch metadata is malformed",
+        "",
+        "the RecordBatch metadata is malformed",
+        "the IPC message is not a RecordBatch",
+        "the RecordBatch's columns or buffers differ from the bound schema",
+        "the RecordBatch metadata is malformed",
+        "",
+        "the IPC message is not a RecordBatch",
+        "the IPC message is not a RecordBatch",
+        "the IPC metadata length is past the payload or not a multiple of 8",
+        "the RecordBatch body is longer than the payload",
+        "a node or buffer vector runs past the metadata",
+        "a node or buffer vector runs past the metadata",
+        "a buffer lies outside the body",
+        "a buffer lies outside the body",
+    ]
+    for i in range(len(reasons)):
+        var k = 40 + i
+        var r = rt.call_batch(b.inst, s, _ints([k]), CallOptions.plain())
+        if reasons[i] != "":
+            _expect(r.outcome, ERR_INTERNAL, "failed validation: " + reasons[i], "corrupt case " + String(k))
+            continue
+        assert_true(r.outcome.is_ok(), "corrupt case " + String(k) + " is valid: " + String(r.outcome))
+        assert_equal(len(r.column), 1, "corrupt case " + String(k))
+        assert_true(r.column.valid[0], "corrupt case " + String(k) + ": null")
+        assert_equal(r.column.bits[0], 0, "corrupt case " + String(k))
 
 
 def _corrupt_outputs() raises:
@@ -417,6 +483,7 @@ def _corrupt_outputs() raises:
         assert_equal(r.column.valid[0], k != 24, "corrupt case " + String(k) + ": null")
         assert_equal(r.column.bits[0], 0, "corrupt case " + String(k))
     _bitmap_and_alignment(rt, b, s)
+    _reader_bounds(rt, b, s)
     # Malformed ERROR replies and ERROR codes that are not errors (cases 111
     # to 116: too short, a message longer than the payload, codes 0 and -5,
     # no message length, a trace longer than the payload): the framing
@@ -432,6 +499,11 @@ def _corrupt_outputs() raises:
     for i in range(len(errors)):
         var r = rt.call_batch(b.inst, s, _ints([111 + i]), CallOptions.plain())
         _expect(r.outcome, ERR_INTERNAL, errors[i], "corrupt case " + String(111 + i))
+        if i == 4:
+            # 20 bytes, exactly the fixed fields: refused by the message's
+            # length field, not by the short-reply check (which names the
+            # byte count)
+            assert_true("bytes)" not in r.outcome.message, "corrupt case 115: " + r.outcome.message)
     var ok = rt.call_batch(b.inst, s, _ints([1, 2, 3, 4, 5]), CallOptions.plain())
     assert_true(ok.outcome.is_ok(), "the worker after refused replies: " + String(ok.outcome))
     assert_equal(ok.column.bits[4], 10)
@@ -443,6 +515,17 @@ def _corrupt_outputs() raises:
         var r = rt.call_batch(f.inst, s, _ints([k]), CallOptions.plain())
         _expect(r.outcome, ERR_INSTANCE_LOST, "a reply broke the framing", "corrupt case " + String(k))
         _unbind(rt, f)
+    # Case 106: a payload of exactly the limit (2^31 bytes) is not a framing
+    # break; the worker exits before sending it, so the call ends at end of
+    # file (or, where the 2 GiB buffer cannot be had, out of memory).
+    var f6 = _bind(rt, s, 0)
+    var r6 = rt.call_batch(f6.inst, s, _ints([106]), CallOptions.plain())
+    assert_true("broke the framing" not in r6.outcome.message, "corrupt case 106: " + String(r6.outcome))
+    assert_true(
+        r6.outcome.status == ERR_INSTANCE_LOST or r6.outcome.status == ERR_OUT_OF_MEMORY,
+        "corrupt case 106: " + String(r6.outcome),
+    )
+    _unbind(rt, f6)
     var l = rt.ledger()
     assert_equal(l.exported, l.released, "corrupt: arrays exported vs released")
     rt.shutdown()
@@ -456,6 +539,7 @@ def main() raises:
     _load_refusals(rt)
     _return_types(rt)
     _propagate_error_row(rt)
+    _deadline_before_send(rt)
     _state_per_context(rt)
     _crashes(rt)
     _hard_cancel(rt)
