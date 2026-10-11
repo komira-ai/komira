@@ -473,5 +473,62 @@ def test_range_offset_frame_on_int64_key() raises:
         assert_equal(_get(out, 2, r), want[r])
 
 
+# =============================================================================
+# INT64 SUM / AVG are exact (§2.12, query_semantics_types.md §8.1)
+# =============================================================================
+
+
+def _sum_over(v: List[Int64], frame: PartitionFrame, func: UInt8) raises -> RecordBatch:
+    var o = List[Int64]()
+    for i in range(len(v)):
+        o.append(Int64(i))
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_plain_i64(o))
+    cols.append(_plain_i64(v))
+    var names: List[String] = ["o", "v"]
+    var exprs = List[PartitionExpr]()
+    exprs.append(PartitionExpr.agg_with_frame(func, "v", frame.copy()))
+    var ok: List[String] = ["o"]
+    return _run(_batch(names, cols^), List[String](), ok, exprs^)
+
+
+def test_int64_sum_outside_int64_raises() raises:
+    # A SUM whose total leaves INT64 is refused, not wrapped: running,
+    # sliding and whole-partition frames.
+    var big: List[Int64] = [Int64.MAX, 1]
+    var frames = List[PartitionFrame]()
+    frames.append(_rows(FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_CURRENT_ROW, 0))
+    frames.append(_rows(FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0))
+    frames.append(_rows(FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0))
+    for f in range(len(frames)):
+        var raised = False
+        try:
+            _ = _sum_over(big, frames[f], PF_SUM)
+        except:
+            raised = True
+        assert_true(raised, "SUM past INT64 must raise, frame " + String(f))
+    # Every frame's total fits even though a running prefix does not:
+    # v = MAX, MAX, -MAX over 1 PRECEDING .. CURRENT ROW is MAX, raise
+    # (MAX + MAX), so instead MAX, -MAX, MAX: MAX, 0, 0.
+    var fits: List[Int64] = [Int64.MAX, -Int64.MAX, Int64.MAX]
+    var out = _sum_over(fits, frames[1], PF_SUM)
+    assert_equal(_get(out, 2, 0), Int64.MAX)
+    assert_equal(_get(out, 2, 1), 0)
+    assert_equal(_get(out, 2, 2), 0)
+
+
+def test_int64_avg_sums_exactly() raises:
+    # AVG over 2^53, 1, 1: a DOUBLE running sum loses the 1s (2^53 + 1 is not
+    # a double); the exact sum divided once is (2^53 + 2) / 3, and over the
+    # running frame the second row is (2^53 + 1) / 2.
+    var v: List[Int64] = [Int64(1) << 53, 1, 1]
+    var running = _rows(FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_CURRENT_ROW, 0)
+    var out = _sum_over(v, running, PF_AVG)
+    var t2 = Scalar[DType.int128](Int64(1) << 53) + 2
+    var t1 = Scalar[DType.int128](Int64(1) << 53) + 1
+    assert_equal(_getf(out, 2, 2), t2.cast[DType.float64]() / 3.0)
+    assert_equal(_getf(out, 2, 1), t1.cast[DType.float64]() / 2.0)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
