@@ -218,3 +218,19 @@ test "check: refuses a bad prefix or allow before reading" {
     try expectFail(P.check(symtab, &.{}, "/x/lib.a", "", 0, &.{}), "prefix_tool: prefix is empty");
     try expectFail(P.check(symtab, &.{}, "/x/lib.a", "k_", 0, &.{"_Z.*"}), "prefix_tool: allow _Z.*: a name, or a name's beginning followed by *");
 }
+
+test "check: the prefix is matched whole: a name missing its last byte is red" {
+    const v = try P.check(symtab ++ "DEF GLOBAL FUNC DEFAULT komira_s2ninit\n", &.{}, "/x/lib.a", "komira_s2n_", 2, &.{});
+    try expect(v.red);
+    try eqs("archive_check RED: 1 defined symbols without the prefix komira_s2n_ in /x/lib.a:\n  komira_s2ninit\n", v.stderr);
+    // Allowed, it is still not counted toward min.
+    const w = try P.check("DEF GLOBAL FUNC DEFAULT komira_s2ninit\n", &.{}, "/x/lib.a", "komira_s2n_", 1, &.{"komira_s2ninit"});
+    try expect(w.red);
+    try eqs("archive_check RED: only 0 defined symbols start with komira_s2n_ in /x/lib.a (at least 1 expected)\n", w.stderr);
+}
+
+test "check: an archive with no symbols is red" {
+    const v = try P.check("", &.{}, "/x/lib.a", "komira_s2n_", 1, &.{});
+    try expect(v.red);
+    try eqs("archive_check RED: only 0 defined symbols start with komira_s2n_ in /x/lib.a (at least 1 expected)\n", v.stderr);
+}
