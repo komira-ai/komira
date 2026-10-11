@@ -21,6 +21,8 @@
 //! fall through to the segment message, a `*` segment passes once the name
 //! pattern is dropped, an output over an input's directory meets buck2's
 //! conflict. (The `.`/`..` arms are covered by the name pattern too.)
+//! Also: komira_test_oracle's case runner no longer calling its oracle
+//! discipline (discipline_unplaced and discipline_unordered build green).
 const std = @import("std");
 const lib = @import("lib/lib.zig");
 
@@ -127,6 +129,8 @@ const REDS = [_]Red{
     .{ .name = "absolute_path", .text = "Permission Error: Cannot access file \"/etc/passwd\" - file system operations are disabled by configuration" },
     .{ .name = "setting_changed", .text = "Invalid Input Error: Cannot change configuration option \"threads\" - the configuration has been locked" },
     .{ .name = "dot_command", .text = ".sh/.system cannot be used in -safe mode" },
+    .{ .name = "discipline_unplaced", .text = "Invalid Input Error: oracle discipline: case.sql the ORDER BY key at byte 67 states no NULLS FIRST or NULLS LAST" },
+    .{ .name = "discipline_unordered", .text = "Invalid Input Error: oracle discipline: case.sql its outermost query has no ORDER BY" },
 };
 
 /// The pieces of the sql_oracle action's argv, as `buck2 aquery` prints it

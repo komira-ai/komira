@@ -107,8 +107,9 @@ The rule does not read the SQL, so it cannot see whether a copied query has
 an `ORDER BY`, or whether that `ORDER BY` decides every row's place. One
 thread makes an unordered result repeat from run to run, which hides the
 gap instead of closing it. Ordering is the fixture author's duty; the
-oracle datasets' own discipline check (`json_serialize_sql` over each
-query) is where it is enforced.
+plan conformance oracle enforces it with a discipline of its own, run on
+DuckDB's parse of each case (`json_serialize_sql`) before the case runs
+([komira_test_oracle](../../../src/tests/helpers/komira_test_oracle/README.md#the-oracle-discipline)).
 
 ## Tests
 
@@ -131,7 +132,9 @@ query) is where it is enforced.
   action with its message: an undeclared output, a missing output (the
   first, the middle and the last of three), a SQL error, a read of a
   package file that is not an input, a read of an absolute path, a changed
-  setting and a dot command. The farm's workers run in UTC, so `SET
+  setting, a dot command, and two cases the oracle discipline of
+  komira_test_oracle refuses when its case runner calls it (a key with no
+  NULL placement, no outer ORDER BY). The farm's workers run in UTC, so `SET
   TimeZone` is pinned by the invocation, not by a fixture's bytes. A failed
   action is never cached, so each red is a fresh run on the farm.
 
