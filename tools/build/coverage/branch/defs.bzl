@@ -9,13 +9,16 @@ def _branch_dir_impl(ctx):
     llvm = ctx.attrs.llvm[LlvmBranchInfo]
 
     # Two directories, as cov_link and cov_run are two: each action's key
-    # holds only what it reads, so an edit of the run tool re-keys no link,
-    # and one of the link script no run's inputs but the binary it links. (A projection of one directory would
+    # holds only what it reads, so an edit of the LLVM tools one reads
+    # re-keys no action of the other. (A projection of one directory would
     # not: an action given `dir.project(p)` is keyed on the whole directory,
-    # as measured remotely.) The annotation's directory is a third, and the
-    # classifier (a static executable) is given as it is.
+    # as measured remotely.) Both hold cov_branch, whose `link` and `run`
+    # are one executable: `link_tool` and `run_tool` are the same target
+    # but in a fixture of the tests cell that plants a defect in one. The
+    # annotation's directory is a third, and the classifier (a static
+    # executable) is given as it is.
     link = ctx.actions.copied_dir("cov_branch_link", {
-        "cov_branch_link.sh": ctx.attrs.link_script,
+        "cov_branch": ctx.attrs.link_tool[DefaultInfo].default_outputs[0],
         "llvm/runtime/libclang_rt.profile-x86_64.a": llvm.runtime,
         "lld": llvm.lld_dir,
     })
@@ -38,13 +41,13 @@ def _branch_dir_impl(ctx):
 
 _cov_branch_dir = rule(
     impl = _branch_dir_impl,
-    doc = "The directories and the classifier a branch coverage build of a mojo_library links, runs, annotates and classifies with (tools/build/mojo/coverage_branch.bzl), its default outputs in this order: `[link]`, `cov_branch_link.sh` (`link_script`) with `lld/` (Mojo's lld, of `llvm`, an llvm_branch_tool) and `llvm/runtime/` (the profile runtime); `[run]`, the cov_branch executable (`run_tool`, whose `run` subcommand the run calls with the raw profile version every run requires, RAW_PROFILE_VERSION of toolchains/llvm_branch/defs.bzl) as `cov_branch`, with `llvm/` (llvm-profdata and its libraries); `[annotate]`, `cov_branch_annotate.sh` (`annotate_script`) with `lld/` and `llvm/` (llvm-profdata); and `[classify]`, the cov_branch_classify executable (`classify`). Each script finds its tools (`lld/`, `llvm/`) beside itself, in its own directory; the run is given llvm-profdata's path in its directory; the classifier is a static executable of its own.",
+    doc = "The directories and the classifier a branch coverage build of a mojo_library links, runs, annotates and classifies with (tools/build/mojo/coverage_branch.bzl), its default outputs in this order: `[link]`, the cov_branch executable (`link_tool`, whose `link` subcommand the link calls) as `cov_branch`, with `lld/` (Mojo's lld, of `llvm`, an llvm_branch_tool) and `llvm/runtime/` (the profile runtime); `[run]`, the cov_branch executable (`run_tool`, whose `run` subcommand the run calls with the raw profile version every run requires, RAW_PROFILE_VERSION of toolchains/llvm_branch/defs.bzl) as `cov_branch`, with `llvm/` (llvm-profdata and its libraries); `[annotate]`, `cov_branch_annotate.sh` (`annotate_script`) with `lld/` and `llvm/` (llvm-profdata); and `[classify]`, the cov_branch_classify executable (`classify`). The annotation script finds its tools (`lld/`, `llvm/`) beside itself, in its own directory; the link is given the paths of lld and the profile runtime in its directory, and the run llvm-profdata's; the classifier is a static executable of its own.",
     attrs = {
         "annotate_script": attrs.source(default = "komira//tools/build/coverage/branch:cov_branch_annotate.sh"),
         "classify": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/coverage/branch:cov_branch_classify"),
-        "link_script": attrs.source(default = "komira//tools/build/coverage/branch:cov_branch_link.sh"),
+        "link_tool": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/coverage/branch:cov_branch_tool"),
         "llvm": attrs.exec_dep(providers = [LlvmBranchInfo], default = "komira//tools/build/toolchains/llvm_branch:llvm_branch"),
-        "run_tool": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/coverage/branch:cov_branch_exe"),
+        "run_tool": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/coverage/branch:cov_branch_tool"),
     },
 )
 

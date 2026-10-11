@@ -33,10 +33,10 @@ and they are built when asked for:
 
 | target | what |
 |---|---|
-| `:cov_branch` | the directories every library's branch coverage links, runs and annotates from, and the classifier (`cov_branch_dir`, [`defs.bzl`](defs.bzl)), from `komira//tools/build/toolchains/llvm_branch:llvm_branch` (so its checks gate every use): `[link]`, [`cov_branch_link.sh`](cov_branch_link.sh) with `lld/` and `llvm/runtime/` (the profile runtime); `[run]`, the `:cov_branch_exe` executable as `cov_branch`, with `llvm/` (`llvm-profdata`); the run passes it the raw profile version every run requires (`RAW_PROFILE_VERSION` of [`llvm_branch/defs.bzl`](../../toolchains/llvm_branch/defs.bzl)); `[annotate]`, [`cov_branch_annotate.sh`](cov_branch_annotate.sh) with `lld/` and `llvm/` (`llvm-profdata`); `[classify]`, the `:cov_branch_classify` executable. One directory per action, as `cov_link` and `cov_run` are two: an edit of one script or tool re-keys no other action. (Projections of one directory would not do it: an action given `dir.project(path)` is keyed on the whole directory, as measured remotely.) |
+| `:cov_branch` | the directories every library's branch coverage links, runs and annotates from, and the classifier (`cov_branch_dir`, [`defs.bzl`](defs.bzl)), from `komira//tools/build/toolchains/llvm_branch:llvm_branch` (so its checks gate every use): `[link]`, the `:cov_branch_tool` executable as `cov_branch` (its `link`), with `lld/` and `llvm/runtime/` (the profile runtime); `[run]`, the same executable as `cov_branch` (its `run`), with `llvm/` (`llvm-profdata`); the run passes it the raw profile version every run requires (`RAW_PROFILE_VERSION` of [`llvm_branch/defs.bzl`](../../toolchains/llvm_branch/defs.bzl)); `[annotate]`, [`cov_branch_annotate.sh`](cov_branch_annotate.sh) with `lld/` and `llvm/` (`llvm-profdata`); `[classify]`, the `:cov_branch_classify` executable. One directory per action, as `cov_link` and `cov_run` are two: an edit of the LLVM tools one action reads re-keys no other action (an edit of `cov_branch`, whose `link` and `run` are one executable, re-keys both). (Projections of one directory would not do it: an action given `dir.project(path)` is keyed on the whole directory, as measured remotely.) |
 | `:cov_branch_classify` | [`cov_branch_classify.zig`](cov_branch_classify.zig) (importing [`cov_branch_andor.zig`](cov_branch_andor.zig), [`cov_branch_source.zig`](cov_branch_source.zig), [`cov_branch_ir.zig`](cov_branch_ir.zig) and [`cov_branch_records.zig`](cov_branch_records.zig): `zig_exe`'s `imports`), a static executable built with the pinned zig, gated by `:cov_branch_classify_cases` ([`cov_branch_classify_cases.sh`](cov_branch_classify_cases.sh) over [`fixtures/`](fixtures)), which run as a build action: no build hands out the classifier unless they pass. Zig, not Mojo: a Mojo tool would be in the closure of the libraries it measures, the cycle covcheck has (`COVERAGE_NO_GATE`) |
-| `:cov_branch_exe` | `cov_branch`, the branch coverage actions' tool, one subcommand each (today `run`, [cov_branch_run](#cov_branch_run)): [`cov_branch.zig`](cov_branch.zig) importing [`cov_branch_run.zig`](cov_branch_run.zig) and [`bounded_run.zig`](bounded_run.zig) (a command waited for with an optional time limit; with one, it is run as the leader of a session of its own, whose whole process group is killed at the limit, and the members that survived the kill listed from a `/proc` that must be this process's own: what `cov_run.sh` and `mut_step.sh` do in shell, kept free of any other import so that a tool of another package can take it as a module), a static executable built with the pinned zig. Welded: it is built only after `:cov_branch_unit` passed, `zig test` of those files and [`cov_branch_run_test.zig`](cov_branch_run_test.zig) run as a build action (each process step a stand-in that writes what the real program would) |
-| `:cov_branch_link.sh`, `:cov_branch_annotate.sh`, `:cov_branch.zig`, `:cov_branch_run.zig`, `:bounded_run.zig`, `:cov_branch_run_test.zig` | the scripts and the tool's sources, exported so a fixture of the tests cell can plant a defect in a copy (test 47) |
+| `:cov_branch_tool`, `:cov_branch_exe` | `cov_branch`, the branch coverage actions' tool, one subcommand each (`link`, [cov_branch_link](#cov_branch_link), and `run`, [cov_branch_run](#cov_branch_run)): [`cov_branch.zig`](cov_branch.zig) importing [`cov_branch_link.zig`](cov_branch_link.zig), [`cov_branch_run.zig`](cov_branch_run.zig) and [`bounded_run.zig`](bounded_run.zig) (a command waited for with an optional time limit; with one, it is run as the leader of a session of its own, whose whole process group is killed at the limit, and the members that survived the kill listed from a `/proc` that must be this process's own: what `cov_run.sh` and `mut_step.sh` do in shell, kept free of any other import so that a tool of another package can take it as a module), a static executable built with the pinned zig. Welded: it is built only after `:cov_branch_unit` passed, `zig test` of those files, [`cov_branch_link_test.zig`](cov_branch_link_test.zig) and [`cov_branch_run_test.zig`](cov_branch_run_test.zig) run as a build action (each process step a stand-in that writes what the real program would). `:cov_branch_tool` (a `kcov_tool`, what `:cov_branch` takes) hands out that executable gated by `:cov_branch_link_exe_test`, [`cov_branch_link_exe_test.zig`](cov_branch_link_exe_test.zig): the shipped executable's `link` run as a process over a stand-in busybox, lld and zig (`:cov_branch_link_stub`, [`cov_branch_link_stub.zig`](cov_branch_link_stub.zig), which records its arguments and environment), a validation since it runs the executable |
+| `:cov_branch_annotate.sh`, `:cov_branch.zig`, `:cov_branch_link.zig`, `:cov_branch_link_test.zig`, `:cov_branch_run.zig`, `:bounded_run.zig`, `:cov_branch_run_test.zig` | the script and the tool's sources, exported so a fixture of the tests cell can plant a defect in a copy (test 47) |
 
 Per `test_srcs` entry that is a source file, five actions, each a
 sub-target of the library's `[coverage]` (and each `[bc]`, `[pgo_bin]`,
@@ -61,6 +61,16 @@ records).
 
 ## cov_branch_link
 
+`cov_branch link` ([`cov_branch_link.zig`](cov_branch_link.zig)), with flags
+for what the script it replaced took as positions or found beside itself:
+`--busybox`, `--compiler`, `--zig` (the Mojo toolchain's link directory),
+`--target`, `--lld` (`lld/bin/lld` of `[link]`), `--runtime`
+(`llvm/runtime/libclang_rt.profile-x86_64.a` of `[link]`), `--bitcode`,
+`--out`, and after `--` the C libraries of the test's closure.
+
+0. lld, the runtime, the compiler's `lib/libKGENCompilerRTShared.so`, zig
+   and the bitcode must be files that are not empty (a usage error, exit
+   2), and the bitcode must start with the bitcode magic `BC 0xC0DE`.
 1. `lld/bin/lld` reads the bitcode as an LTO link with `-r`, `--lto-O0` and
    the pass pipeline `pgo-instr-gen,instrprof,default<O0>`: a relocatable
    object whose code counts its edges. Only this LLVM 24 reads the bitcode
@@ -75,7 +85,15 @@ records).
    profile runtime, so a Mojo release that links with another library, or
    another flag, is caught there.
 3. The binary must be an ELF file holding no path of the action (its
-   working directory or scratch directory).
+   working directory or scratch directory, `$BUCK_SCRATCH_PATH/cov_branch_link`).
+
+lld and zig run with the tool's environment but for `PATH` (the busybox
+applets, installed in the scratch directory), `HOME`, `TMPDIR` and zig's
+cache directories (in the scratch directory) and `LC_ALL=C`; their output
+goes to a log whose last 40 lines a failure prints after `BRANCH COVERAGE
+LINK FAILED: <step>`. Exit status: 1 when a step fails; 2 for a usage
+error, a missing or empty input, or a scratch directory or program it
+cannot set up or start.
 
 **Why no debug info.** The binary's debug info is stripped, as in a release
 link. Nothing reads it: what each counter means in the source is read
@@ -162,7 +180,7 @@ that wrote it (`[coverage][pgo_bin][<test>]`).
    show`) must be one set. A record the profile lacks is a profile of
    another binary, or a merge that lost records (tests//negative/coverage:branchmissing
    plants one); one it holds besides, a profile of another binary.
-2. `lld/bin/lld` reads the test's bitcode as `cov_branch_link.sh` does (`-r`,
+2. `lld/bin/lld` reads the test's bitcode as `cov_branch link` does (`-r`,
    `--lto-O0`) with the one pass `pgo-instr-use`, given the merged profile
    (`-pgo-test-profile-file`), and prints the module after it
    (`-print-after=pgo-instr-use -print-module-scope`, on stderr): every

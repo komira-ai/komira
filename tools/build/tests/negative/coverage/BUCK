@@ -830,6 +830,9 @@ _RUN_PLANTS = [
 
 _BRANCH_SRC = "komira//tools/build/coverage/branch:"
 
+# The files cov_branch.zig imports (zig_exe's `imports`), by sub-target.
+_COV_BRANCH_MODULES = ("bounded_run", "cov_branch_link", "cov_branch_link_test", "cov_branch_run", "cov_branch_run_test")
+
 [
     (
         cov_plant(
@@ -843,6 +846,8 @@ _BRANCH_SRC = "komira//tools/build/coverage/branch:"
             files = {
                 "bounded_run.zig": _BRANCH_SRC + "bounded_run.zig",
                 "cov_branch.zig": _BRANCH_SRC + "cov_branch.zig",
+                "cov_branch_link.zig": _BRANCH_SRC + "cov_branch_link.zig",
+                "cov_branch_link_test.zig": _BRANCH_SRC + "cov_branch_link_test.zig",
                 "cov_branch_run.zig": ":{}_run_zig".format(name),
                 "cov_branch_run_test.zig": _BRANCH_SRC + "cov_branch_run_test.zig",
             },
@@ -850,7 +855,7 @@ _BRANCH_SRC = "komira//tools/build/coverage/branch:"
         zig_exe(
             name = "{}_cov_branch".format(name),
             exec_compatible_with = LINUX_X86_64,
-            imports = [":{}_run_src[{}]".format(name, f) for f in ("bounded_run", "cov_branch_run", "cov_branch_run_test")],
+            imports = [":{}_run_src[{}]".format(name, f) for f in _COV_BRANCH_MODULES],
             src = ":{}_run_src[cov_branch]".format(name),
             busybox = "komira//tools/build/toolchains:busybox",
             zig = "komira//tools/build/toolchains:zig",
@@ -968,21 +973,43 @@ mojo_library(
     test_srcs = ["tests/test_one.mojo"],
 )
 
-# A cov_branch_link.sh copy whose zig line drops `-lm`: the branch coverage
-# link is no longer the release link plus the profile runtime. RED:
-# tests//negative/coverage:branchlinkline, "the branch coverage link is not
-# the release link".
+# A copy of cov_branch's `link` (cov_branch_link.zig) whose zig line drops
+# `-lm`, built as the run plants above are (without its unit tests, which
+# the defect would fail): the branch coverage link is no longer the release
+# link plus the profile runtime. RED: tests//negative/coverage:branchlinkline,
+# "the branch coverage link is not the release link".
 cov_plant(
-    name = "branchlinkline_link_sh",
-    expr = "s|-Wl,--gc-sections -lm|-Wl,--gc-sections|",
-    out = "cov_branch_link.sh",
-    src = "komira//tools/build/coverage/branch:cov_branch_link.sh",
+    name = "branchlinkline_link_zig",
+    expr = "s|\"-Wl,--gc-sections\", \"-lm\",|\"-Wl,--gc-sections\",|",
+    out = "cov_branch_link.zig",
+    src = _BRANCH_SRC + "cov_branch_link.zig",
+)
+
+cov_zig_tree(
+    name = "branchlinkline_link_src",
+    files = {
+        "bounded_run.zig": _BRANCH_SRC + "bounded_run.zig",
+        "cov_branch.zig": _BRANCH_SRC + "cov_branch.zig",
+        "cov_branch_link.zig": ":branchlinkline_link_zig",
+        "cov_branch_link_test.zig": _BRANCH_SRC + "cov_branch_link_test.zig",
+        "cov_branch_run.zig": _BRANCH_SRC + "cov_branch_run.zig",
+        "cov_branch_run_test.zig": _BRANCH_SRC + "cov_branch_run_test.zig",
+    },
+)
+
+zig_exe(
+    name = "branchlinkline_cov_branch",
+    exec_compatible_with = LINUX_X86_64,
+    imports = [":branchlinkline_link_src[{}]".format(f) for f in _COV_BRANCH_MODULES],
+    src = ":branchlinkline_link_src[cov_branch]",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 cov_branch_dir(
     name = "branchlinkline_branch",
     exec_compatible_with = LINUX_X86_64,
-    link_script = ":branchlinkline_link_sh",
+    link_tool = ":branchlinkline_cov_branch",
 )
 
 cov_link_line_check(

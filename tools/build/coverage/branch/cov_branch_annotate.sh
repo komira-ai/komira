@@ -23,7 +23,7 @@
 #      does it hold entry counts (no "function_entry_count"), which step 3
 #      counts as the functions the pass found in the profile.
 #   1. The profile holds exactly the functions <binary> links. Every function
-#      of the bitcode is instrumented (cov_branch_link.sh), but the link
+#      of the bitcode is instrumented (`cov_branch link`), but the link
 #      (--gc-sections, as a release test's) drops a function nothing live
 #      calls, with its counters and its profile data record: one the compiler
 #      calls only from a branch it folds to never taken, as an assert's
@@ -33,7 +33,7 @@
 #      the profile's functions (`llvm-profdata show`) must be one set: a
 #      record the profile lacks, or holds besides, is a profile of another
 #      binary or a merge that lost records, and fails the action.
-#   2. lld reads the bitcode as cov_branch_link.sh does (an LTO link with -r
+#   2. lld reads the bitcode as `cov_branch link` does (an LTO link with -r
 #      at -O0), with the one pass `pgo-instr-use` reading <profdata>, and
 #      prints the module after that pass (`-print-after=pgo-instr-use
 #      -print-module-scope`, on stderr). The pass gives every conditional

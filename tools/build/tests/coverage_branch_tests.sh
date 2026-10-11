@@ -56,7 +56,7 @@
 #      copy with the weights check off: the entry counts refused), branchnodebug[...][branch_info] red
 #      (a nodebug helper's decision at its call),
 #      branchenv red at analysis (a test_env setting
-#      LLVM_PROFILE_FILE), branchlinkline red (a cov_branch_link.sh copy
+#      LLVM_PROFILE_FILE), branchlinkline red (a `cov_branch link` copy
 #      without -lm: not the release link). The actions exist only with the
 #      switch on: coverage_keys.sh (test 41).
 
