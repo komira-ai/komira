@@ -86,6 +86,7 @@ _SCENARIOS = [
     "infra_boundary",
     "infra_retried",
     "single_commit",
+    "stdout_unwritable",
     "two_culprits",
 ]
 

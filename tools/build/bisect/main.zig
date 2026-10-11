@@ -7,6 +7,9 @@
 //! 4. Binary-search them (search.zig), one probe per commit (probe.zig),
 //!    an infra outcome retried once and never counted as a failure.
 //! 5. Print the verdict as JSON (report.zig).
+//!
+//! Any other error (out of memory, a filesystem call, a stdout that cannot
+//! be written) is a tool error, exit 5: never 1, which is the flake verdict.
 const std = @import("std");
 const classify = @import("classify.zig");
 const search = @import("search.zig");
@@ -19,6 +22,8 @@ pub const EXIT_FLAKE = 1;
 pub const EXIT_USAGE = 2;
 pub const EXIT_INCONCLUSIVE = 3;
 pub const EXIT_GIT = 4;
+/// An error bisect did not expect; stdout holds no verdict (or a cut one).
+pub const EXIT_TOOL = 5;
 
 const USAGE =
     \\usage: bisect --good <rev> --bad <rev> --work-dir <dir> [--repo <dir>]
@@ -137,7 +142,7 @@ const State = struct {
             at = prober.attempt(self.cfg, commit, attempts, &why) catch |e| switch (e) {
                 error.Git => fail(EXIT_GIT, "{s}", .{why}),
                 error.NotOwnProject => fail(EXIT_USAGE, "{s}", .{why}),
-                else => fail(EXIT_GIT, "probe of {s} failed: {s}", .{ commit, @errorName(e) }),
+                else => fail(EXIT_TOOL, "tool error in the probe of {s}: {s}", .{ commit, @errorName(e) }),
             };
             err.print("bisect: {s} {s}: {s}\n", .{ @tagName(self.role), commit, report.outcomeName(at.classified.outcome) }) catch {};
             if (at.classified.outcome != .infra) break;
@@ -167,7 +172,13 @@ const State = struct {
     }
 };
 
-pub fn main() !void {
+/// Every error `run` returns is a tool error, exit 5. Without this, Zig
+/// would exit 1 for it, the code of the flake verdict.
+pub fn main() void {
+    run() catch |e| fail(EXIT_TOOL, "tool error: {s}", .{@errorName(e)});
+}
+
+fn run() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const a = arena.allocator();
     const argv = try std.process.argsAlloc(a);

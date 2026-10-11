@@ -39,6 +39,9 @@ const Expect = struct {
     retried_at: ?usize = null,
     failure_target: ?[]const u8 = null,
     no_buck2: bool = false,
+    /// bisect's stdout is a file opened read-only, so writing the verdict
+    /// fails: a tool error, exit 5, never the flake code 1.
+    tool_error: bool = false,
 };
 
 fn culpritAt(comptime n: usize, comptime k: usize) [n][]const u8 {
@@ -67,6 +70,7 @@ fn spec(name: []const u8) ?Spec {
         .{ "infra_boundary", Spec{ .states = &boundary, .expect = .{ .exit = 3, .verdict = "inconclusive", .last_good = 4, .candidates = &.{ 5, 6 }, .infra_at = 5 } } },
         .{ "good_not_ancestor", Spec{ .states = &middle, .good = .stray, .expect = .{ .exit = 2, .no_buck2 = true } } },
         .{ "single_commit", Spec{ .states = &single, .expect = .{ .exit = 0, .verdict = "culprit", .first_bad = 0, .last_good = -1, .pr = 100, .exact_probes = 1 } } },
+        .{ "stdout_unwritable", Spec{ .states = &last, .expect = .{ .exit = 5, .tool_error = true } } },
     };
     inline for (table) |row| {
         if (std.mem.eql(u8, row[0], name)) return row[1];
@@ -123,6 +127,28 @@ fn snapshot(c: Ctx) Snapshot {
         .head = c.git_(&.{ "rev-parse", "HEAD" }),
         .status = c.git_(&.{ "status", "--porcelain", "--ignored" }),
     };
+}
+
+/// Runs argv in `cwd` with its stdout a file opened read-only (this
+/// process's fd 1, which the child inherits), so every write to it fails;
+/// the file's bytes afterwards are the result's stdout.
+fn runUnwritable(a: std.mem.Allocator, cwd: []const u8, env: *const std.process.EnvMap, argv: []const []const u8) !std.ChildProcess.RunResult {
+    const path = try std.fs.path.join(a, &.{ cwd, "bisect_stdout" });
+    (try std.fs.createFileAbsolute(path, .{})).close();
+    const ro = try std.fs.openFileAbsolute(path, .{});
+    try std.posix.dup2(ro.handle, std.posix.STDOUT_FILENO);
+    ro.close();
+    var child = std.ChildProcess.init(argv, a);
+    child.cwd = cwd;
+    child.env_map = env;
+    child.stdin_behavior = .Ignore;
+    child.stdout_behavior = .Inherit;
+    child.stderr_behavior = .Pipe;
+    try child.spawn();
+    const err = try child.stderr.?.reader().readAllAlloc(a, 1 << 26);
+    const term = try child.wait();
+    const out = try std.fs.cwd().readFileAlloc(a, path, 1 << 26);
+    return .{ .term = term, .stdout = out, .stderr = err };
 }
 
 fn jget(v: std.json.Value, k: []const u8) ?std.json.Value {
@@ -219,7 +245,7 @@ pub fn main() !void {
     var cmd = std.ArrayList([]const u8).init(a);
     try cmd.appendSlice(&.{ bisect_abs, "--good", good, "--bad", bad, "--work-dir", work, "--repo", repo, "--buck2", fake_abs, "--git", git, "--timeout-s", "120", "--" });
     try cmd.appendSlice(s.targets);
-    const r = try c.run(root, cmd.items);
+    const r = if (s.expect.tool_error) try runUnwritable(a, root, &env, cmd.items) else try c.run(root, cmd.items);
     const stderr = std.io.getStdErr().writer();
     try stderr.print("---- bisect stdout\n{s}---- bisect stderr\n{s}----\n", .{ r.stdout, r.stderr });
     const code: ?u8 = if (r.term == .Exited) r.term.Exited else null;
@@ -272,6 +298,14 @@ pub fn main() !void {
     if (e.no_buck2) {
         check(log.len == 0, "buck2 ran in a usage error:\n{s}", .{log});
         check(std.mem.indexOf(u8, r.stderr, "not an ancestor") != null, "the refusal does not say good is not an ancestor", .{});
+    }
+    if (e.tool_error) {
+        check(code == null or code.? != 1, "a tool error exited 1, the flake code", .{});
+        check(std.mem.indexOf(u8, r.stderr, "bisect: tool error: NotOpenForWriting") != null, "stderr does not name the tool error", .{});
+        check(builds >= 1, "the search never ran: the tool error was not in writing the verdict", .{});
+        if (std.json.parseFromSlice(std.json.Value, a, r.stdout, .{})) |parsed| {
+            check(!std.mem.eql(u8, jstr(jget(parsed.value, "verdict")) orelse "", "flake"), "stdout is a flake verdict", .{});
+        } else |_| {}
     }
 
     // The verdict.

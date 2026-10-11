@@ -147,6 +147,7 @@ Configuration is flags only. bisect reads no environment variable of its own.
 | 2 | usage error |
 | 3 | inconclusive |
 | 4 | a git or worktree command failed |
+| 5 | tool error: an error bisect did not expect (out of memory, a filesystem call, a stdout it cannot write); stdout holds no verdict, or a cut one, and stderr names the error. Never 1, so a crash cannot read as a flake |
 
 ## Limits
 
@@ -220,3 +221,4 @@ After every scenario, these must hold:
 | `infra_boundary` | the culprit c5 is always INFRA: it is reported in `infra`, never as FAIL; verdict `inconclusive`, candidates c5 and c6, exit 3 |
 | `good_not_ancestor` | good is on an unmerged branch: exit 2, buck2 never ran, no worktree made |
 | `single_commit` | good is the parent of bad: one probe, `first_bad` = bad |
+| `stdout_unwritable` | bisect's stdout is a file opened read-only: the search finds the culprit c4, writing the verdict fails, and bisect exits 5 (not 1, the flake code) with `bisect: tool error: NotOpenForWriting` on stderr |
