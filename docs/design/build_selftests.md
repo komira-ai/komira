@@ -835,7 +835,7 @@ Sourced sections:
 | `coverage_run_tests.sh` | 7 |
 | `coverage_gate_tests.sh` | 7 |
 | `coverage_branch_tests.sh` | 7 |
-| `public_boundary_tests.sh` | 6 |
+| `public_boundary_tests.sh` | 6 (deleted with the Zig `public_boundary` tool, whose `zig test` rows took its cases) |
 | `assert_level_tests.sh` | 7 |
 | `node_tests.sh` | 8 |
 | `golden/golden.sh` | 5 (with its call in `platform_table/check.sh`) |
