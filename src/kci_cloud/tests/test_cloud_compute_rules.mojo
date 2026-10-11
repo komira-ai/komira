@@ -180,7 +180,7 @@ def test_every_compute_refusal_in_one_pass() raises:
     _expect(l, "w-asbkt|worker.run_as|", 'run_as must name a service_account; "store" is a bucket')
     _expect(l, "w-asout|worker.run_as|", "run_as names an identity, not one of its outputs")
     _expect(l, "w-asgone|worker.run_as|", 'ref to missing resource "nobody"')
-    _expect(l, "bare|", "")  # an account with no type is reported on itself, once
+    _expect(l, "bare|body|", "resource 'bare' has no type: exactly one of ")  # on itself, once
     _expect(l, "w-env|worker.env.P|", 'release parameter "region" is unresolved')
     _expect(l, "w-env|worker.env.R|", 'ref to missing resource "ghost"')
     _expect(l, "w-dup|worker.secret_env.K|", "the variable is set by env and by secret_env; set it in one")

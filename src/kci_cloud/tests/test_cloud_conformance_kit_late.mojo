@@ -16,12 +16,13 @@
 #    that forgets it), an adoption that re-creates or does not stamp, an
 #    adopted object left standing; a race that never happens, is not
 #    reported, creates twice, is not adopted by the re-run, or leaves its
-#    object standing; a create with no validation-run label, and run-tagged
-#    objects left standing.
+#    object standing; a create with no validation-run label or with another
+#    run's, and run-tagged objects left standing.
 # 5. STEP 13: no adoptable resource; the planted object not read back, read
 #    as another kind, or not the one the engine sees; an adoption without the
 #    stamp or the mark; a tamper of the adopted object not converged; a
-#    release not made, made by deleting, leaving a kci label, or still listed.
+#    release not made, made by deleting, read back as stamped, leaving a kci
+#    label, or still listed.
 #
 # THE KIT CLOUD (the three sections headed "the kit cloud") is the same
 # text in test_cloud_conformance_kit.mojo, test_cloud_conformance_kit_late.mojo
@@ -47,7 +48,7 @@ from kci_cloud import (
     FIELD_SERVICE, FINDING_LIMIT, Feed, Finding, Firing, GrantEdge, LoweredNode, OwnedRecord, Principal, RUN_UNKNOWN,
     Setting, adopted_by, adoption_labels, body_field, create_labels, decode_label_value, describe, is_kci_label_key,
     retain_labels, retained_by, retention_label_key, run_conformance, standard_identity_of, standard_label_rule,
-    validation_run_labels, validation_run_of,
+    validation_run_label_key, validation_run_labels, validation_run_of,
 )
 
 
@@ -166,7 +167,7 @@ struct _Store(Movable):
         if self.defect == "release_deletes":
             _ = self.objs.pop(i)
             return
-        if self.defect == "owned_remembers":
+        if self.defect == "owned_remembers" or self.defect == "release_read_stamped":
             self.released.append(record.copy())
         var kept = List[Label]()
         var mark = retention_label_key()
@@ -289,6 +290,8 @@ struct _Node(EngineResource, Movable, Deinitable):
         var extra = String("")
         if o.extra.byte_length() > 0 and s.defect != "hide_unmanaged":
             extra = String("label ") + o.extra + String(" (not modelled; left as it is)")
+        if o.extra.byte_length() > 0 and s.defect == "unmodelled_read_mutates":
+            s.calls.append(String("read ") + id)
         if o.failed:
             if s.defect == "fail_once":
                 o.failed = False
@@ -335,6 +338,10 @@ struct _Node(EngineResource, Movable, Deinitable):
             labels.extend(retain_labels(RETAIN_KEEP))
         elif defect == "run_label_missing":
             labels = standard_label_rule(stamp)
+            labels.extend(retain_labels(self._low.retention))
+        elif defect == "run_label_stale" and stamp.validation_run_id:
+            labels = standard_label_rule(stamp)
+            labels.append(Label(validation_run_label_key(), String("kit-run-000000")))
             labels.extend(retain_labels(self._low.retention))
         elif defect == "bad_label":
             labels.append(Label(String("Bad"), String("x")))
@@ -570,6 +577,8 @@ struct _Kit(ConformanceTarget, Movable):
         var i = s.visible(node.id)
         if i < 0:
             return ExistingObject()
+        if s.defect == "release_read_stamped" and len(s.released) > 0:
+            return ExistingObject(True, True, s.objs[i].kind, s.objs[i].name)
         var kind = String("other") if s.defect == "existing_wrong_kind" else s.objs[i].kind
         return ExistingObject(True, standard_identity_of(s.objs[i].labels).byte_length() > 0, kind, s.objs[i].name)
 
@@ -795,6 +804,11 @@ def test_steps_10_to_12_refuse() raises:
         String("run_label_missing"),
         String("conformance [run tag]: g/grant carries validation run \"(none)\", not \"kit-run-5e0b71\""),
     )
+    # The run id's value, not only its presence: a label naming another run.
+    miss += _refused(
+        String("run_label_stale"),
+        String("conformance [run tag]: g/grant carries validation run \"kit-run-000000\", not \"kit-run-5e0b71\""),
+    )
     miss += _refused(String("run_hides"), String("conformance [run tag]: nodes left after the run-tag destroy"))
     assert_equal(miss, "")
 
@@ -831,6 +845,11 @@ def test_step_13_refuses() raises:
     )
     miss += _refused(
         String("release_deletes"),
+        String("conformance [release]: kitadopt/run: the released object does not still stand, unstamped, under its name"),
+    )
+    # Labels and list_owned clean, but read_existing still says stamped.
+    miss += _refused(
+        String("release_read_stamped"),
         String("conformance [release]: kitadopt/run: the released object does not still stand, unstamped, under its name"),
     )
     miss += _refused(String("release_keeps_mark"), String("conformance [release]: kitadopt/run still carries the kci label kci-retention"))

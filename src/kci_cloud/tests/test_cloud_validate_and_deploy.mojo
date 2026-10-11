@@ -965,6 +965,7 @@ def test_validate_at_its_edges() raises:
     assert_true(_has(f[0].reason, "clouds built into this kci that implement it: full, also"), f[0].reason)
     assert_equal(node_role(LoweredNode(String("x/run"), String("y"), String("k"))), "x/run")
     assert_equal(node_role(LoweredNode(String("y/a/run"), String("y"), String("k"))), "a/run")
+    assert_equal(node_role(LoweredNode(String("/run"), String(""), String("k"))), "/run")  # no owner: whole
     print("  test_validate_at_its_edges: PASS")
 
 

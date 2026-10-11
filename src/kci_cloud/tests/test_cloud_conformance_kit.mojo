@@ -18,8 +18,9 @@
 #    landed, what is pending), a node not created, a live count that
 #    disagrees; a label the standard rule refuses, another identity, the
 #    other retention mark; a re-apply that does not settle or that mutates;
-#    a tamper node the plan does not hold, each half of the tamper pair, and
-#    a lowering that leaves out the node edited out of band;
+#    a tamper node the plan does not hold, each half of the tamper pair, a
+#    settling apply that mutates or loses the unmodelled field, and a
+#    lowering that leaves out the node edited out of band;
 #    a failed node not planned, not updated, or fixed by changing another.
 # (Steps 7 to 13: test_cloud_conformance_kit_late.mojo.)
 #
@@ -47,7 +48,7 @@ from kci_cloud import (
     FIELD_SERVICE, FINDING_LIMIT, Feed, Finding, Firing, GrantEdge, LoweredNode, OwnedRecord, Principal, RUN_UNKNOWN,
     Setting, adopted_by, adoption_labels, body_field, create_labels, decode_label_value, describe, is_kci_label_key,
     retain_labels, retained_by, retention_label_key, run_conformance, standard_identity_of, standard_label_rule,
-    validation_run_labels, validation_run_of,
+    validation_run_label_key, validation_run_labels, validation_run_of,
 )
 
 
@@ -166,7 +167,7 @@ struct _Store(Movable):
         if self.defect == "release_deletes":
             _ = self.objs.pop(i)
             return
-        if self.defect == "owned_remembers":
+        if self.defect == "owned_remembers" or self.defect == "release_read_stamped":
             self.released.append(record.copy())
         var kept = List[Label]()
         var mark = retention_label_key()
@@ -289,6 +290,8 @@ struct _Node(EngineResource, Movable, Deinitable):
         var extra = String("")
         if o.extra.byte_length() > 0 and s.defect != "hide_unmanaged":
             extra = String("label ") + o.extra + String(" (not modelled; left as it is)")
+        if o.extra.byte_length() > 0 and s.defect == "unmodelled_read_mutates":
+            s.calls.append(String("read ") + id)
         if o.failed:
             if s.defect == "fail_once":
                 o.failed = False
@@ -335,6 +338,10 @@ struct _Node(EngineResource, Movable, Deinitable):
             labels.extend(retain_labels(RETAIN_KEEP))
         elif defect == "run_label_missing":
             labels = standard_label_rule(stamp)
+            labels.extend(retain_labels(self._low.retention))
+        elif defect == "run_label_stale" and stamp.validation_run_id:
+            labels = standard_label_rule(stamp)
+            labels.append(Label(validation_run_label_key(), String("kit-run-000000")))
             labels.extend(retain_labels(self._low.retention))
         elif defect == "bad_label":
             labels.append(Label(String("Bad"), String("x")))
@@ -570,6 +577,8 @@ struct _Kit(ConformanceTarget, Movable):
         var i = s.visible(node.id)
         if i < 0:
             return ExistingObject()
+        if s.defect == "release_read_stamped" and len(s.released) > 0:
+            return ExistingObject(True, True, s.objs[i].kind, s.objs[i].name)
         var kind = String("other") if s.defect == "existing_wrong_kind" else s.objs[i].kind
         return ExistingObject(True, standard_identity_of(s.objs[i].labels).byte_length() > 0, kind, s.objs[i].name)
 
@@ -835,6 +844,10 @@ def test_steps_4_to_6_refuse() raises:
     )
     miss += _refused(String("hide_unmanaged"), String("conformance [tamper]: api/run: an unmodelled change was not reported"))
     miss += _refused(String("unmodelled_hook_empty"), String("conformance [tamper]: api/run: an unmodelled field was touched"))
+    # The settling apply reads the node and counts a mutation, the field kept.
+    miss += _refused(
+        String("unmodelled_read_mutates"), String("conformance [tamper]: api/run: an unmodelled field was touched")
+    )
     miss += _refused(String("fail_noop"), String("conformance [failed]: api/run is FAILED but did not plan an update"))
     miss += _refused(String("fail_once"), String("conformance [failed]: api/run was 0, not updated"))
     miss += _refused(String("fail_spills"), String("conformance [failed]: web/run changed while fixing another node"))

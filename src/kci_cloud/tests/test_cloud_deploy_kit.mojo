@@ -39,19 +39,20 @@ from std.memory import ArcPointer
 
 from komira_proto_codec import decode_json
 from kci_reconciler import (
-    CONVERGE_IN_PLACE, CellScope, ChangeAction, Creds, ErasedResource, InputRef, LABEL_CELL, LABEL_MACHINE,
-    LABEL_RESOURCE, LABEL_ROLE, Label, ModelledDigest, Outputs, OwnerStamp, Provenance, RES_ABSENT, RES_FAILED,
-    RETAIN_KEEP, ResolvedInputs, Resource as EngineResource, ResourceStatus, VERB_CREATE, VERB_NOOP, VERB_REPLACE,
-    VERB_UPDATE, unbound_error,
+    CONVERGE_IN_PLACE, CellScope, ChangeAction, Creds, ErasedResource, InMemoryStateStore, InputRef, LABEL_CELL,
+    LABEL_MACHINE, LABEL_RESOURCE, LABEL_ROLE, Label, ModelledDigest, Outputs, OwnerStamp, Provenance, RES_ABSENT,
+    RES_FAILED, RETAIN_DELETE, RETAIN_KEEP, ResolvedInputs, Resource as EngineResource, ResourceStatus, VERB_CREATE,
+    VERB_NOOP, VERB_REPLACE, VERB_UPDATE, unbound_error,
 )
 from kci_resource_proto.resource import Resource, ResourceList
 
 from kci_cloud import (
-    Absence, ArtifactNeed, BootstrapItem, Catalog, CellContext, CloudId, Clouds, ConformanceTarget, ExistingObject,
-    FIELD_SERVICE, FINDING_LIMIT, Feed, Finding, Firing, GrantEdge, LoweredNode, OwnedRecord, Principal, RUN_UNKNOWN,
-    Setting, adopted_by, adoption_labels, body_field, create_labels, decode_label_value, describe, is_kci_label_key,
-    retain_labels, retained_by, retention_label_key, run_conformance, standard_identity_of, standard_label_rule,
-    validation_run_labels, validation_run_of,
+    Absence, ApplyOutcome, ArtifactNeed, BootstrapItem, Catalog, CellContext, CloudId, Clouds, ConformanceTarget,
+    ExistingObject, FIELD_SERVICE, FINDING_LIMIT, Feed, Finding, Firing, GrantEdge, LoweredNode, OwnedRecord, Principal,
+    RUN_UNKNOWN, Setting, adopted_by, adoption_labels, apply_resources, body_field, create_labels, decode_label_value,
+    describe, destroy_resources, is_kci_label_key, lower_data, lowered_budget_findings, plan_report, plan_resources,
+    render_plan, retain_labels, retained_by, retention_label_key, run_conformance, shared_name_findings,
+    standard_identity_of, standard_label_rule, validation_run_label_key, validation_run_labels, validation_run_of,
 )
 
 
@@ -170,7 +171,7 @@ struct _Store(Movable):
         if self.defect == "release_deletes":
             _ = self.objs.pop(i)
             return
-        if self.defect == "owned_remembers":
+        if self.defect == "owned_remembers" or self.defect == "release_read_stamped":
             self.released.append(record.copy())
         var kept = List[Label]()
         var mark = retention_label_key()
@@ -293,6 +294,8 @@ struct _Node(EngineResource, Movable, Deinitable):
         var extra = String("")
         if o.extra.byte_length() > 0 and s.defect != "hide_unmanaged":
             extra = String("label ") + o.extra + String(" (not modelled; left as it is)")
+        if o.extra.byte_length() > 0 and s.defect == "unmodelled_read_mutates":
+            s.calls.append(String("read ") + id)
         if o.failed:
             if s.defect == "fail_once":
                 o.failed = False
@@ -339,6 +342,10 @@ struct _Node(EngineResource, Movable, Deinitable):
             labels.extend(retain_labels(RETAIN_KEEP))
         elif defect == "run_label_missing":
             labels = standard_label_rule(stamp)
+            labels.extend(retain_labels(self._low.retention))
+        elif defect == "run_label_stale" and stamp.validation_run_id:
+            labels = standard_label_rule(stamp)
+            labels.append(Label(validation_run_label_key(), String("kit-run-000000")))
             labels.extend(retain_labels(self._low.retention))
         elif defect == "bad_label":
             labels.append(Label(String("Bad"), String("x")))
@@ -574,6 +581,8 @@ struct _Kit(ConformanceTarget, Movable):
         var i = s.visible(node.id)
         if i < 0:
             return ExistingObject()
+        if s.defect == "release_read_stamped" and len(s.released) > 0:
+            return ExistingObject(True, True, s.objs[i].kind, s.objs[i].name)
         var kind = String("other") if s.defect == "existing_wrong_kind" else s.objs[i].kind
         return ExistingObject(True, standard_identity_of(s.objs[i].labels).byte_length() > 0, kind, s.objs[i].name)
 
@@ -678,13 +687,6 @@ struct _Kit(ConformanceTarget, Movable):
 
 
 # ---- helpers ------------------------------------------------------------------
-
-
-from kci_cloud import (
-    ApplyOutcome, apply_resources, destroy_resources, lower_data, lowered_budget_findings, plan_report, plan_resources, render_plan,
-    shared_name_findings,
-)
-from kci_reconciler import InMemoryStateStore, RETAIN_DELETE
 
 
 def _ctx() -> CellContext:
