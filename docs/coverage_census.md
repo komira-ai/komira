@@ -24,7 +24,7 @@ target: they are listed for information at the end, with no floor.
 | Libraries (under `src/`, not `src/tests/`) | 209 |
 | Measured | 206 |
 | Not measured (a run or the gate failed; floor 0) | 3 |
-| Line coverage, all measured libraries | 90.29% (181850/201388) |
+| Line coverage, all measured libraries | 90.38% (183625/203163) |
 | Median line coverage (lower middle) | 96.27% |
 | At 100% / 90% to 100% / 50% to 90% / under 50% / no line | 45 / 65 / 47 / 3 / 46 |
 | Branch coverage of the libraries with branch records (40) | 89.78% (6847/7626) |
@@ -150,10 +150,10 @@ branch, `-` for none, *pinned* when set by hand ([Pinned floors](#pinned-floors)
 | 107 | `src/komira_plan_wire:komira_plan_wire` | 99.71% (5184/5199) | 15 | not gated | 0 | conda | 99.71% / - |
 | 108 | `src/komira_scalar_arithmetic:komira_scalar_arithmetic` | 99.72% (357/358) | 1 | 99.65% (285/286) | 0 | release | 99.72% / 99.65% |
 | 109 | `src/kci_release_machine:kci_release_machine` | 99.79% (988/990) | 2 | not gated | 0 | release | 99.79% / - |
-| 110 | `src/kci_cloud:kci_cloud` | 99.85% (4883/4890) | 7 | not gated | 0 | conda | 99.85% / - |
-| 111 | `src/komira_parquet:komira_parquet` | 99.86% (5158/5165) | 7 | not gated | 0 | conda | 99.86% / - |
-| 112 | `src/komira_sql:komira_sql` | 99.87% (3192/3196) | 4 | not gated | 0 | conda | 99.87% / - |
-| 113 | `src/komira_wkt:komira_wkt` | 99.87% (809/810) | 1 | 99.10% (551/556) | 0 | release | 99.87% / 99.10% |
+| 110 | `src/komira_parquet:komira_parquet` | 99.86% (5158/5165) | 7 | not gated | 0 | conda | 99.86% / - |
+| 111 | `src/komira_sql:komira_sql` | 99.87% (3192/3196) | 4 | not gated | 0 | conda | 99.87% / - |
+| 112 | `src/komira_wkt:komira_wkt` | 99.87% (809/810) | 1 | 99.10% (551/556) | 0 | release | 99.87% / 99.10% |
+| 113 | `src/kci_cloud:kci_cloud` | 99.89% (6658/6665) | 7 | not gated | 0 | conda | 99.89% / - |
 | 114 | `src/komira_op_agg_state:komira_op_agg_state` | 99.94% (3439/3441) | 2 | not gated | 0 | conda | 99.94% / - |
 | 115 | `src/komira_optimizer:komira_optimizer` | 99.95% (9302/9306) | 4 | not gated | 0 | conda | 99.95% / - |
 | 116 | `src/kci_api:kci_api` | 100.00% (1560/1560) | 0 | not gated | 0 | release | 100.00% / - |

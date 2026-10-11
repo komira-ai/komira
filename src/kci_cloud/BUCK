@@ -56,6 +56,11 @@ mojo_library(
         "tests/test_cloud_deploy_kit.mojo",
         "tests/test_cloud_deploy_kit_adopt.mojo",
         "tests/test_cloud_deploy_kit_names.mojo",
+        "tests/test_cloud_shape_lower_data.mojo",
+        "tests/test_cloud_shape_lower_compute.mojo",
+        "tests/test_cloud_shape_limits.mojo",
+        "tests/test_cloud_reference_cycles.mojo",
+        "tests/test_cloud_refusal.mojo",
     ],
     visibility = ["PUBLIC"],
 )

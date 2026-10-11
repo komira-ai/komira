@@ -25,7 +25,7 @@ src/kci_artifact_proto	0	-
 src/kci_build	9392	-
 src/kci_cell	10000	-
 src/kci_cli	8988	-
-src/kci_cloud	9985	-
+src/kci_cloud	9989	-
 src/kci_cloud_fake	9710	9101
 src/kci_deploy_model_proto	0	-
 src/kci_logs	8395	-

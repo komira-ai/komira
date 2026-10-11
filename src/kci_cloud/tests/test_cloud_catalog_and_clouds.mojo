@@ -73,6 +73,7 @@ from kci_cloud import (
     primary_node,
     body_arms,
     body_field,
+    body_is,
     artifact_problems,
     LoweredNode,
     Setting,
@@ -582,8 +583,17 @@ def test_every_code_has_a_word() raises:
     print("  test_every_code_has_a_word: PASS")
 
 
+def test_body_is_never_raises() raises:
+    """A resource with no arm is no type: `body_is` answers False where
+    `body_field` raises (a mutant that lets the raise through aborts)."""
+    var none = decode_json[Resource](String('{"id":"r"}'))
+    assert_false(body_is(none, FIELD_BUCKET))
+    assert_true(body_is(decode_json[Resource](String('{"id":"r","bucket":{}}')), FIELD_BUCKET))
+
+
 def main() raises:
     print("test_cloud_catalog_and_clouds")
+    test_body_is_never_raises()
     test_catalog_arms_match_the_wire()
     test_catalog_names_are_generated_enum_values()
     test_catalog_refuses_unset_and_duplicates()
