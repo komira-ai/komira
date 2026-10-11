@@ -14,7 +14,23 @@
 --     ORDER BY of its own, as a plain aggregate or in its OVER clause, and
 --     so does a window function that reads row positions;
 --   - json_group_array, json_group_object and json_group_structure, macros
---     over string_agg with no ORDER BY, are refused.
+--     over string_agg with no ORDER BY, are refused;
+--   - no call reads the clock, a random draw or the session: a function in
+--     unstable_functions() (every scalar or aggregate DuckDB v1.5.6 marks
+--     VOLATILE or CONSISTENT_WITHIN_QUERY but error, ICU's clock readers,
+--     the session's settings and variables, the functions whose argument is
+--     SQL text or whose answer is the running DuckDB, and the built-in
+--     macros over any of these), a function named duckdb_* or pragma_*, a
+--     table function that runs SQL text (sql_text_functions()), or age()
+--     with one argument (it subtracts from today's midnight);
+--   - no SQL value keyword: DuckDB parses `current_date` (quoted or not)
+--     as a COLUMN_REF and its binder calls the clock or session function
+--     the name maps to when no column has that name; a COLUMN_REF whose
+--     last name is one of value_keywords() is refused however qualified,
+--     which refuses more than DuckDB would (a column of such a name in an
+--     oracle table must be renamed);
+--   - no USING SAMPLE or TABLESAMPLE (a random draw kept in the `sample`
+--     key of the SELECT or the table reference, not as a call).
 -- threads = 1 and TimeZone = 'UTC' are the sql_oracle rule's own settings,
 -- fixed before any of this SQL runs and locked.
 CREATE MACRO order_sensitive_aggregates() AS [
@@ -24,6 +40,31 @@ CREATE MACRO order_sensitive_aggregates() AS [
 CREATE MACRO positional_windows() AS [
     'row_number', 'ntile', 'lead', 'lag', 'first_value', 'last_value', 'nth_value', 'fill'];
 CREATE MACRO refused_functions() AS ['json_group_array', 'json_group_object', 'json_group_structure'];
+CREATE MACRO unstable_functions() AS [
+    -- CONSISTENT_WITHIN_QUERY: a clock or the session.
+    'current_database', 'current_date', 'current_schema', 'current_schemas', 'get_current_time',
+    'get_current_timestamp', 'in_search_path', 'now', 'today', 'transaction_timestamp', 'txid_current',
+    -- VOLATILE.
+    'current_connection_id', 'current_query', 'current_query_id', 'current_transaction_id', 'currval',
+    'gen_random_uuid', 'nextval', 'random', 'setseed', 'sleep_ms', 'stats', 'uuid', 'uuidv4', 'uuidv7', 'write_log',
+    -- ICU's clock readers DuckDB leaves CONSISTENT; settings and variables.
+    'current_localtime', 'current_localtimestamp', 'current_setting', 'getvariable',
+    -- CONSISTENT, but answering with more than their arguments: SQL text
+    -- planned or parsed on the session, a name looked up in the catalog or
+    -- the loaded extensions, the running DuckDB itself.
+    'json_serialize_plan', 'json_serialize_sql', 'json_deserialize_sql', 'make_type',
+    'parse_duckdb_log_message', 'st_setcrs', 'version', 'vector_type',
+    -- Called by these names they are the clock too (`current_time()`).
+    'current_time', 'current_timestamp', 'localtime', 'localtimestamp',
+    -- Built-in scalar macros over the above, the catalog or the session.
+    'ago', 'current_catalog', 'format_type', 'get_block_size', 'pg_conf_load_time', 'pg_get_constraintdef',
+    'pg_get_viewdef', 'pg_postmaster_start_time', 'pg_sleep'];
+CREATE MACRO sql_text_functions() AS ['query', 'query_table', 'json_execute_serialized_sql'];
+-- GetSQLValueFunctionName's map in DuckDB v1.5.6: a column name the binder
+-- cannot resolve, which it calls as a function instead.
+CREATE MACRO value_keywords() AS [
+    'current_catalog', 'current_date', 'current_role', 'current_schema', 'current_time', 'current_timestamp',
+    'current_user', 'localtime', 'localtimestamp', 'session_user', 'user'];
 
 -- (json_extract and json_extract_string, not -> and ->>: inside a function
 -- call this release can read `x->'key'` as a lambda.)
@@ -64,4 +105,22 @@ WHERE class = 'WINDOW' AND (list_contains(order_sensitive_aggregates(), fn) OR l
   AND coalesce(json_array_length(v, '$.orders'), 0) = 0 AND coalesce(json_array_length(v, '$.arg_orders'), 0) = 0
 UNION ALL
 SELECT fn || loc || ' is refused: a macro over string_agg with no ORDER BY' FROM located
-WHERE class IN ('FUNCTION', 'WINDOW') AND list_contains(refused_functions(), fn);
+WHERE class IN ('FUNCTION', 'WINDOW') AND list_contains(refused_functions(), fn)
+UNION ALL
+SELECT fn || '()' || loc || ' depends on when, where or in which session the query runs' FROM located
+WHERE class IN ('FUNCTION', 'WINDOW') AND list_contains(unstable_functions(), fn)
+UNION ALL
+SELECT fn || '()' || loc || ' reads the session''s catalog, settings or storage' FROM located
+WHERE class IN ('FUNCTION', 'WINDOW') AND (starts_with(fn, 'duckdb_') OR starts_with(fn, 'pragma_'))
+UNION ALL
+SELECT fn || '()' || loc || ' runs SQL text the discipline cannot read' FROM located
+WHERE class = 'FUNCTION' AND list_contains(sql_text_functions(), fn)
+UNION ALL
+SELECT 'age()' || loc || ' with one argument subtracts from today''s midnight' FROM located
+WHERE class = 'FUNCTION' AND fn = 'age' AND coalesce(json_array_length(v, '$.children'), 0) = 1
+UNION ALL
+SELECT json_extract_string(v, '$.column_names[#-1]') || loc || ' is a SQL value keyword; DuckDB binds it to a clock or session function unless a column of that name is in scope' FROM located
+WHERE class = 'COLUMN_REF' AND list_contains(value_keywords(), lower(json_extract_string(v, '$.column_names[#-1]')))
+UNION ALL
+SELECT 'USING SAMPLE or TABLESAMPLE draws rows at random' FROM located
+WHERE coalesce(json_type(v, '$.sample'), 'NULL') <> 'NULL';

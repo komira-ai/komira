@@ -110,26 +110,46 @@ lists one:
   reads positions (`row_number`, `ntile`, `lead`, `lag`, `first_value`,
   `last_value`, `nth_value`, `fill`);
 - `json_group_array`, `json_group_object` and `json_group_structure`
-  (macros over `string_agg` with no ORDER BY) are refused.
+  (macros over `string_agg` with no ORDER BY) are refused;
+- no call reads the clock, a random draw or the session, wherever it
+  stands (a select list, a filter, an ORDER BY key, FROM): every scalar or
+  aggregate the pinned DuckDB marks VOLATILE or CONSISTENT_WITHIN_QUERY
+  (`random`, `setseed`, `uuid`, `gen_random_uuid`, `now`, `today`,
+  `get_current_timestamp`, `nextval`...), ICU's clock readers, the
+  session's settings and variables, the functions that parse or plan SQL
+  text or answer with the running DuckDB (`json_serialize_plan`,
+  `version`...), the built-in macros over any of these (`ago`...), any
+  function named `duckdb_*` or `pragma_*`, the table functions that run SQL
+  text (`query`, `query_table`, `json_execute_serialized_sql`), and `age`
+  with one argument;
+- no SQL value keyword: `current_date`, `current_timestamp`, `localtime`,
+  `current_user` and the rest of the names DuckDB's binder turns into a
+  clock or session call parse as column references, so a column reference
+  whose last name is one of them is refused, quoted or qualified (more than
+  DuckDB would refuse: an oracle table's column must not have such a name);
+- no `USING SAMPLE` or `TABLESAMPLE`.
 
 `threads = 1` and `TimeZone = 'UTC'` are the `sql_oracle` rule's own,
 set before any SQL runs and locked.
 
 `:discipline_check` ([sql/discipline_check.sql](sql/discipline_check.sql))
 holds `oracle_offences` to planted cases, one per rule and arm (and cases
-it must accept), each against the exact offences it must list; its output
-`discipline.tsv` lists them. The runner's own call of the discipline is
+it must accept), each against the exact offences it must list, and one
+planted case per entry of each of the discipline's name lists, generated
+from a copy of the lists it holds itself (the lists must equal the copies),
+so deleting an entry fails it; its output `discipline.tsv` lists them. The runner's own call of the discipline is
 proved by two planted cases in `tests//negative/sql_oracle`
 (`discipline_unplaced`, `discipline_unordered`), which the self-test
 scenario `sql_oracle` requires to fail with the discipline's message.
 
 Rules of the Python discipline this does not carry: every literal the
-operand of a CAST, FROM limited to the registered tables and CTEs, the
-function deny-list of clocks and random draws, COLLATE, list-sort
-direction, and the run of each case over every reordering of its tables'
-rows with a tie check per ORDER BY. Each answer is compared with its HAND
-twin instead (below), which a tie DuckDB resolved by accident fails unless
-the twin's policy compares the tied rows as a multiset.
+operand of a CAST, FROM limited to the registered tables and CTEs (the
+`sql_oracle` action's `allowed_paths` still confines file reads to the
+case's inputs), COLLATE, list-sort direction, and the run of each case
+over every reordering of its tables' rows with a tie check per ORDER BY.
+The HAND twin comparison (below) does not stand in for the tie check: a
+tie DuckDB resolved by accident fails it only when the twin's policy
+compares rows in order, not when it compares the tied rows as a multiset.
 
 ## The twin check
 
