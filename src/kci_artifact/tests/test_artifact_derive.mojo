@@ -5,7 +5,8 @@
 #   rule at a time; `{units_file}` holds every declared unit; every accepted
 #   and refused answer of the command; the derived checks join the file's
 #   value under its own rules; an UNMATCHED artifact target is told apart
-#   from a check's.
+#   from a check's; a BROKEN answer (the tool's graph query failed) parses
+#   alone, with its reason, and nowhere else.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -218,6 +219,14 @@ def test_the_answers_kci_accepts() raises:
     var refused = unmatched_artifacts(a, art)
     assert_equal(len(refused), 1)
     assert_equal(refused[0], String("lib_a //src/lib_a:lib_a_conda"))
+    # BROKEN: the tool's graph query failed; kci_build fails the check on it.
+    # A parser that read it as an unknown line would turn a broken graph
+    # into "cannot tell"; one that dropped the reason would hide buck2's error.
+    var b = parse_derive_answer(String("BROKEN the universe query failed: buck2 cquery failed (exit 3): x\n"), units_of(a))
+    assert_true(b.broken)
+    assert_equal(b.reason, String("the universe query failed: buck2 cquery failed (exit 3): x"))
+    assert_equal(len(b.names), 0)
+    assert_true(not d.broken)
 
 
 def test_every_answer_outside_the_grammar_is_refused() raises:
@@ -237,6 +246,9 @@ def test_every_answer_outside_the_grammar_is_refused() raises:
     rows.append((String("\nDERIVED 0\n"), String("not CHECK <name> <target>")))
     rows.append((String("WIDENED x\n"), String("not CHECK <name> <target>")))
     rows.append((String("check a //x/...\nDERIVED 1\n"), String("not CHECK <name> <target>")))
+    rows.append((String("BROKEN\n"), String("BROKEN needs a reason")))
+    rows.append((String("CHECK a //x/...\nBROKEN x\n"), String("BROKEN fails the check, so it is the only line")))
+    rows.append((String("BROKEN x\nDERIVED 0\n"), String("BROKEN fails the check, so it is the only line")))
     for i in range(len(rows)):
         var got = _answer_refusal(rows[i][0])
         if got.find(rows[i][1]) < 0:

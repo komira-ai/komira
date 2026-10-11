@@ -14,7 +14,7 @@ _DEPS = [
 
 _LIB_SRCS = glob(
     ["src/**/*.rs"],
-    exclude = ["src/main.rs", "src/main_*.rs"],
+    exclude = ["src/main.rs", "src/main_*.rs", "src/routes/**"],
 )
 
 # The library is published behind its inline #[test]s: it, and every
@@ -55,6 +55,31 @@ rust_binary(
     crate_root = "src/main_db.rs",
     deps = _DEPS + [":komira_proto_codegen"],
     visibility = ["PUBLIC"],
+)
+
+# The same, emitting `<stem>_routes.mojo` for each input `.proto` that
+# declares a service: per service a handler trait, a komira_http_server route
+# table from the RPCs' `(google.api.http)` rules, and a dispatcher
+# (mojo_routes_proto_library). Its emitter (src/routes/) is part of this
+# binary, not of the library, so it can change without rebuilding the other
+# plugins. It is published behind its unit tests.
+_ROUTES_SRCS = ["src/main_routes.rs"] + glob(["src/routes/*.rs"])
+
+rust_binary(
+    name = "protoc-gen-mojo-routes",
+    srcs = _ROUTES_SRCS,
+    crate_root = "src/main_routes.rs",
+    deps = _DEPS + [":komira_proto_codegen"],
+    tests = [":protoc_gen_mojo_routes_unit"],
+    visibility = ["PUBLIC"],
+)
+
+rust_test(
+    name = "protoc_gen_mojo_routes_unit",
+    srcs = _ROUTES_SRCS,
+    crate_root = "src/main_routes.rs",
+    crate_name = "protoc_gen_mojo_routes",
+    deps = _DEPS + [":komira_proto_codegen"],
 )
 
 # The `(komira.db.*)` options protoc-gen-mojo-db reads, imported as

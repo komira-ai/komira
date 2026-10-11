@@ -22,10 +22,13 @@ Percentages are basis points, `null` when n/a; a floor is `null` when the
 package has no row (or, for the branch floor, the row has `-`). A package's
 `files` counts every file in its numbers, `unmeasured_files` those that
 raised `UnmeasuredFile`; a finding's `line` is 0 when it is about a whole file, its `count`
-the lines an `UnmeasuredFile` counts uncovered (`null` for other kinds).
+the lines an `UnmeasuredFile` counts uncovered or a `DeclarationOnlyFile`
+would have counted (`null` for other kinds).
 `info_packages` are the measured test-only packages (`--info-package`) and
-`info_findings` their findings, which `findings` does not hold and the
-conclusion does not count (analyze.mojo, step 8).
+`info_findings` their findings, then any package's `DeclarationOnlyFile`
+(a file no test compiled that counts no line, analyze.mojo step 4), which
+`findings` does not hold and the conclusion does not count (analyze.mojo,
+step 8).
 A `<function>` (`{"package", "path", "line", "name", "class", "lines"}`)
 is a function of a measured file none of whose lines has a record
 (analyze.mojo, step 9), `lines` its executable lines without an exemption

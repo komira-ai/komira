@@ -72,6 +72,7 @@ from kci_cloud import (
     PlanReport,
     Principal,
     Refusal,
+    RegistryLogin,
     apply_resources,
     describe,
     lower_data,
@@ -562,6 +563,12 @@ struct _Faulty(CloudAdapter, Movable):
 
     def trust_check(mut self, creds: Creds, scope: CellScope) raises -> List[Finding]:
         return self.inner.trust_check(creds, scope)
+
+    def image_registry(self, ctx: CellContext) -> String:
+        return self.inner.image_registry(ctx)
+
+    def registry_login(mut self, creds: Creds) raises -> RegistryLogin:
+        return self.inner.registry_login(creds)
 
 
 def test_a_raising_realize_and_a_broken_contract_are_not_typed() raises:

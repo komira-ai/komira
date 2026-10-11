@@ -38,7 +38,7 @@ from komira_collections.slab import Slab
 from komira_plan_expr.col_expr import col
 from komira_plan_expr.expr import Expr
 from komira_plan_ir.logical_plan import ExprArray
-from komira_plan_ir.physical_plan import MorselOp, ParquetSourceData
+from komira_physical_plan.physical_plan import MorselOp, ParquetSourceData
 from komira_pplan_wire import pplan_fields_equal, pplan_from_bytes, pplan_to_bytes
 
 var columns = List[String]()
@@ -84,7 +84,7 @@ name:
 from komira_collections.slab import Slab
 from komira_plan_expr.col_expr import col
 from komira_plan_expr.expr import Expr, STR_CONTAINS
-from komira_plan_ir.physical_plan import MorselOp, ParquetSourceData
+from komira_physical_plan.physical_plan import MorselOp, ParquetSourceData
 from komira_pplan_wire import PPLAN_WIRE_BAD_MAGIC, PPLAN_WIRE_TRAILING_BYTES, PPLAN_WIRE_TRUNCATED, PPLAN_WIRE_UNSUPPORTED_EXPR_TAG, pplan_from_bytes, pplan_to_bytes
 
 def decode_error(var data: List[UInt8]) -> String:

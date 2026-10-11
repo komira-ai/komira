@@ -183,7 +183,7 @@ def _pattern_has_multiple_wildcards(pattern: String) -> Bool:
     var bs = pattern.as_bytes()
     # Already validated leftmost '*' at index 0; check remainder.
     if len(bs) < 2:
-        return False
+        return False  # cov: unreachable only called after _is_wildcard_pattern, which needs at least 2 bytes
     for i in range(1, len(bs)):
         if bs[i] == UInt8(0x2A):
             return True
@@ -194,11 +194,16 @@ def _match_dns_pattern(pattern: String, hostname: String) -> Bool:
     """Match a single SAN dNSName pattern against `hostname` per RFC 6125
     §6.4.3 wildcard rules.
 
+    - An empty pattern or an empty hostname never matches: RFC 5280
+      §4.2.1.6 forbids an empty dNSName, and an empty hostname names
+      nothing.
     - Lowercase both sides for ASCII case-insensitive compare.
     - Exact match always wins.
     - Wildcard `*.example.com`: matches `<one-label>.example.com` only.
     - Rejects `f*.example.com`, `*.*.example.com`, `*`.
     """
+    if len(pattern.as_bytes()) == 0 or len(hostname.as_bytes()) == 0:
+        return False
     var p = _ascii_lower_str(pattern)
     var h = _ascii_lower_str(hostname)
     # Exact match path
@@ -217,7 +222,7 @@ def _match_dns_pattern(pattern: String, hostname: String) -> Bool:
     var h_pair = _split_first_label(h)
     # pattern left MUST be exactly "*"
     if p_pair[0] != "*":
-        return False
+        return False  # cov: unreachable _is_wildcard_pattern guarantees the pattern starts with '*.', so its first label is '*'
     # hostname left must be non-empty (no `.example.com` matching)
     if len(h_pair[0].as_bytes()) == 0:
         return False
@@ -253,7 +258,7 @@ def _parse_ipv4_literal(s: String) raises -> List[UInt8]:
             if not has_digit:
                 raise Error("ipv4: empty octet")
             if cur > UInt32(255):
-                raise Error("ipv4: octet > 255")
+                raise Error("ipv4: octet > 255")  # cov: unreachable the digit branch refuses an octet as soon as it exceeds 255
             out.append(UInt8(Int(cur)))
             cur = UInt32(0)
             has_digit = False
@@ -363,8 +368,12 @@ def match_hostname(cert: X509Certificate, hostname: String) raises -> Bool:
       2. If no SAN at all, fall back to subject CN (RFC 6125 §6.4.4 —
          legacy compat).
 
+    An empty hostname names nothing and matches no certificate (False).
+
     Raises on malformed SAN bytes; otherwise returns True/False.
     """
+    if len(hostname.as_bytes()) == 0:
+        return False
     var san_idx = x509_find_extension(cert, _oid_subject_alt_name())
     if san_idx >= 0:
         # NOTE: Extension is Copyable + Movable but NOT ImplicitlyCopyable

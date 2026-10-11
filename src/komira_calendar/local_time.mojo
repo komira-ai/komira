@@ -33,6 +33,10 @@ struct LocalDateTime(Copyable, Movable, ImplicitlyCopyable, Equatable):
             return self.days < other.days
         return self.second_of_day < other.second_of_day
 
+    def seconds(self) -> Int:
+        """Seconds since 1970-01-01T00:00:00 on the same wall clock."""
+        return self.days * 86400 + self.second_of_day
+
 
 def parse_local_date(text: String) raises -> Int:
     """`YYYY-MM-DD` to a day count since 1970-01-01. Exactly ten bytes and a

@@ -90,8 +90,8 @@ struct Token(Copyable, Movable):
         self.line = line
 
     def describe(self) -> String:
-        """`<kind> '<text>'` for words, numbers and strings; the kind alone
-        for structural tokens."""
+        """`<kind> '<text>'` for words and numbers, `string "<text>"` for
+        strings, and the kind alone for structural tokens."""
         if self.kind == TOKEN_WORD or self.kind == TOKEN_NUMBER:
             return token_kind_name(self.kind) + String(" '") + self.text + String("'")
         if self.kind == TOKEN_STRING:

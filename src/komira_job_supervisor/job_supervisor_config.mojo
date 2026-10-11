@@ -38,6 +38,10 @@
 #   --log-chunk-bytes=N         stream stdout in chunks of this size
 #                               (default 64 KiB)
 #   --log-flush-secs=N          ... or after this many seconds (default 10)
+#   --max-runtime-secs=N        stop the job once it has run N seconds since
+#                               its spawn (SIGTERM, a 5 s grace, SIGKILL) and
+#                               report FAILED with a timeout message
+#                               (default: no limit)
 #
 # Which object stores exist, and how the heartbeat is authenticated, is the
 # embedding binary's choice; its own flags are passed through `from_args`'s
@@ -62,6 +66,7 @@ comptime FLAG_BINARY_DOWNLOAD_PATH: StaticString = "--binary-download-path"
 comptime FLAG_LOG_PREFIX: StaticString = "--log-prefix"
 comptime FLAG_LOG_CHUNK_BYTES: StaticString = "--log-chunk-bytes"
 comptime FLAG_LOG_FLUSH_SECS: StaticString = "--log-flush-secs"
+comptime FLAG_MAX_RUNTIME_SECS: StaticString = "--max-runtime-secs"
 
 comptime _DEFAULT_HEARTBEAT_SECS = 5
 comptime _DEFAULT_STDERR_LINES = 100
@@ -87,6 +92,7 @@ def job_supervisor_flag_names() -> List[String]:
     out.append(String(FLAG_LOG_PREFIX))
     out.append(String(FLAG_LOG_CHUNK_BYTES))
     out.append(String(FLAG_LOG_FLUSH_SECS))
+    out.append(String(FLAG_MAX_RUNTIME_SECS))
     return out^
 
 
@@ -236,7 +242,9 @@ struct JobSupervisorConfig(Movable):
       binary_sha256        : Some -> the fetched binary's expected digest.
       binary_download_path : where a fetched binary is written.
       log_prefix           : the log store's key prefix.
-      log_chunk_bytes, log_flush_secs : the live stdout stream's chunking."""
+      log_chunk_bytes, log_flush_secs : the live stdout stream's chunking.
+      max_runtime_secs     : seconds the job may run from its spawn; 0 is
+                             no limit."""
 
     var job_name: String
     var instance_name: String
@@ -252,6 +260,7 @@ struct JobSupervisorConfig(Movable):
     var log_prefix: String
     var log_chunk_bytes: Int
     var log_flush_secs: Int
+    var max_runtime_secs: Int
 
     def __init__(
         out self,
@@ -269,11 +278,12 @@ struct JobSupervisorConfig(Movable):
         var log_prefix: String = String(""),
         log_chunk_bytes: Int = _DEFAULT_CHUNK_BYTES,
         log_flush_secs: Int = _DEFAULT_FLUSH_SECS,
+        max_runtime_secs: Int = 0,
     ):
         """A config stated in code (tests, an embedding binary). A
         non-positive number takes that setting's default; an empty
         `binary_download_path` is `job_binary_path`; an empty `log_prefix`
-        is `job_name`."""
+        is `job_name`; a non-positive `max_runtime_secs` is no limit."""
         self.job_name = job_name^
         self.instance_name = instance_name^
         self.job_binary_path = job_binary_path^
@@ -305,6 +315,7 @@ struct JobSupervisorConfig(Movable):
         self.log_flush_secs = (
             log_flush_secs if log_flush_secs > 0 else _DEFAULT_FLUSH_SECS
         )
+        self.max_runtime_secs = max_runtime_secs if max_runtime_secs > 0 else 0
 
     def uses_binary_store(self) -> Bool:
         """True iff the binary is fetched from the binary store first."""
@@ -383,6 +394,7 @@ struct JobSupervisorConfig(Movable):
             log_flush_secs=f.positive_int(
                 String(FLAG_LOG_FLUSH_SECS), _DEFAULT_FLUSH_SECS
             ),
+            max_runtime_secs=f.positive_int(String(FLAG_MAX_RUNTIME_SECS), 0),
         )
 
 

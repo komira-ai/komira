@@ -15,7 +15,7 @@ from komira_plan_expr.col_expr import col
 from komira_plan_expr.expr import Expr
 from komira_plan_expr.fs_descriptor_pod import FsDescriptorPod, FS_SCHEME_S3
 from komira_plan_ir.logical_plan import ExprArray
-from komira_plan_ir.physical_plan import (
+from komira_physical_plan.physical_plan import (
     MorselOp,
     ParquetRowWindow,
     ParquetSourceData,

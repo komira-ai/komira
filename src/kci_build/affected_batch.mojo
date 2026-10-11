@@ -9,7 +9,7 @@
 # 1. GROUP: kci_artifact `batch_groups` splits `units` (decision order) into
 #    groups whose build_targets commands are element-wise identical; groups
 #    in the order of their first unit, decision order inside each.
-# 2. Each group runs ONCE (cwd --work-dir, timeout --build-timeout-s):
+# 2. Each group runs ONCE (cwd --work-dir, timeout: see THE BUDGET below):
 #    - a group of one unit runs `render_targets_argv` with stdout and stderr
 #      at `<log>/<unit>.stdout|.stderr`, and is never rerun;
 #    - a group of two or more is BATCH k (k counts multi-unit groups from 1):
@@ -30,19 +30,42 @@
 #      proves its units). A batch that failed while every one of its units
 #      built alone is INTERFERENCE.
 # 4. The outcome, first match: a run that could not be started is
-#    INDETERMINATE (KCI-E-CANNOT-TELL); any failed unit, or a batch nobody
-#    was attributed for, is FAILED (KCI-E-BUILD-FAILED); any interference is
+#    INDETERMINATE (KCI-E-CANNOT-TELL); any failed unit, a batch nobody
+#    was attributed for, or a unit the budget left no time to start is
+#    FAILED (KCI-E-BUILD-FAILED); any interference is
 #    INDETERMINATE (KCI-E-CANNOT-TELL: the units interfere or the build is
 #    flaky, never a pass); else SUCCEEDED, `<head>: N unit(s) built`.
 #    A FAILED message's first line is `BUILD step: F of N unit(s) failed:
-#    a, c` (with no failed unit, the first unattributed batch's note), then
-#    one paragraph per failed unit, the units not tried, the failed batches'
-#    notes, the (other) unattributed batches' notes, and the interference
-#    notes. An INDETERMINATE message for a run that could not be started is
+#    a, c` (with no failed unit, the first unattributed batch's note; with
+#    neither, the not-built line below), then one paragraph per failed
+#    unit, the units not tried, the failed batches' notes, the (other)
+#    unattributed batches' notes, `BUILD step: U of N unit(s) not built:
+#    the build budget (--build-budget-s B) was spent before their run could
+#    start: x, y` when there are such units, and the interference notes. An INDETERMINATE message for a run that could not be started is
 #    that run, then the paragraphs of the units already failed.
 # 5. The lines: `notices`, then `BUILT <unit>` for each proven unit in
 #    decision order, whatever the outcome. A unit is BUILT only when an
 #    exit-0 run covered it.
+#
+# THE BUDGET (`req.build_budget_s`, `kci run --build-budget-s`). Without
+# one, every run (a group of one, a batch, a retry) may take
+# --build-timeout-s. With one, it ends at `req.build_deadline_ns`: kci's
+# own start plus the budget, on the runner's monotonic clock
+# (`ProcessRunner.now_ns`), so all of kci's work before this step (the
+# workflow check, the git reads, the derive and affected commands of
+# affected.mojo) is charged to it. Each run's timeout is `run_timeout_s`,
+# read just before the run: the whole seconds left until the deadline, all
+# of them (--build-timeout-s caps nothing here; kci_cli refuses it beside
+# --build-budget-s), so the one batch of a file whose units share a
+# command has the whole budget left, however wide the change. A run with
+# less than one second left is NOT STARTED: its units are "not built: the
+# build budget was spent", which is FAILED (KCI-E-BUILD-FAILED) like an
+# unattributed batch, never a pass, and every later run is not started
+# either, so the message lists every unit left. A run that timed out under
+# a budget is FAILED and says `timed out after N min` (N the minutes it was
+# allowed, then ` S s` when not whole minutes), `all that was left of the
+# build budget (--build-budget-s B)`. A batch whose units were cut off by
+# the budget during their one-at-a-time retries is not interference.
 #
 # Raises only when an argv cannot be rendered or the argv file cannot be
 # written; the caller maps that to FAILED (KCI-E-BUILD-FAILED).
@@ -68,9 +91,33 @@ comptime _SHOWN_TARGETS: Int = 4
 comptime _STDERR: FileDescriptor = FileDescriptor(2)
 
 
-def affected_spec(argv: List[String], req: BuildRequest, base: String) -> RunSpec:
-    """`argv` run from --work-dir with --build-timeout-s, stdout and stderr
-    at `<base>.stdout` and `<base>.stderr`."""
+def run_timeout_s(build_timeout_s: Int, build_budget_s: Int, deadline_ns: Int, now_ns: Int) -> Int:
+    """The timeout of a run starting at `now_ns` (file header, THE BUDGET):
+    `build_timeout_s` without a budget (`build_budget_s` <= 0); else the
+    whole seconds left until `deadline_ns`, all of them (`build_timeout_s`
+    does not cap a run under a budget). Less than 1 means the run is not
+    started."""
+    if build_budget_s <= 0:
+        return build_timeout_s
+    var left_ns = deadline_ns - now_ns
+    if left_ns <= 0:
+        return 0
+    return left_ns // 1_000_000_000
+
+
+def budget_timeout_s[R: ProcessRunner](req: BuildRequest, runner: R) -> Int:
+    """`run_timeout_s` for a run `runner` starts now."""
+    return run_timeout_s(req.build_timeout_s, req.build_budget_s, req.build_deadline_ns, runner.now_ns())
+
+
+def budget_spent_text(req: BuildRequest) -> String:
+    """Why a run was not started (file header, THE BUDGET)."""
+    return String("the build budget (--build-budget-s ") + String(req.build_budget_s) + String(") was spent")
+
+
+def affected_spec(argv: List[String], req: BuildRequest, base: String, timeout_s: Int) -> RunSpec:
+    """`argv` run from --work-dir with `timeout_s`, stdout and stderr at
+    `<base>.stdout` and `<base>.stderr`."""
     var rest = List[String]()
     for k in range(1, len(argv)):
         rest.append(argv[k].copy())
@@ -78,7 +125,7 @@ def affected_spec(argv: List[String], req: BuildRequest, base: String) -> RunSpe
         argv[0].copy(),
         rest^,
         req.work_dir.copy(),
-        req.build_timeout_s,
+        timeout_s,
         base + String(".stdout"),
         base + String(".stderr"),
     )
@@ -96,6 +143,7 @@ struct _Tally(Movable):
     var batch_notes: List[String]
     var unattributed: List[String]
     var interference: List[String]
+    var over_budget: List[String]
     var cannot: String
 
     def __init__(out self):
@@ -106,6 +154,7 @@ struct _Tally(Movable):
         self.batch_notes = List[String]()
         self.unattributed = List[String]()
         self.interference = List[String]()
+        self.over_budget = List[String]()
         self.cannot = String("")
 
 
@@ -155,6 +204,26 @@ def _shown(argv: List[String], command_len: Int) -> String:
     return s^
 
 
+def _minutes_text(seconds: Int) -> String:
+    """`N min`, or `N min S s` when `seconds` is not whole minutes."""
+    var text = String(seconds // 60) + String(" min")
+    if seconds % 60 != 0:
+        text += String(" ") + String(seconds % 60) + String(" s")
+    return text^
+
+
+def _budget_clause(req: BuildRequest, timeout_s: Int, r: RunResult) -> String:
+    """For a run that timed out under a budget: how long it was allowed,
+    which was all the budget had left (file header, THE BUDGET)."""
+    if not r.timed_out or req.build_budget_s <= 0:
+        return String("")
+    return (
+        String(" after ") + _minutes_text(timeout_s)
+        + String(", all that was left of the build budget (--build-budget-s ")
+        + String(req.build_budget_s) + String(")")
+    )
+
+
 def _with_tail(var text: String, r: RunResult) -> String:
     if r.stderr_tail.byte_length() > 0:
         text += String("\n") + r.stderr_tail
@@ -163,39 +232,51 @@ def _with_tail(var text: String, r: RunResult) -> String:
 
 def _run_unit[R: ProcessRunner](
     req: BuildRequest, arts: Artifacts, name: String, mut runner: R, mut t: _Tally
-) raises:
+) raises -> Bool:
     """One unit alone, as a group of one: proven, or a failed unit with
-    its paragraph, or `t.cannot` set when it could not be started."""
-    var spec = affected_spec(render_targets_argv(arts, name), req, req.log_dir + String("/") + name)
+    its paragraph, or `t.cannot` set when it could not be started. False
+    (and the unit over budget) when the budget left no time to start it."""
+    var timeout_s = budget_timeout_s(req, runner)
+    if timeout_s < 1:
+        t.over_budget.append(name.copy())
+        return False
+    var spec = affected_spec(render_targets_argv(arts, name), req, req.log_dir + String("/") + name, timeout_s)
     print(String("BUILD step: building unit ") + name + String(": ") + spec.command_line(), file=_STDERR)
     var r: RunResult
     try:
         r = runner.run(spec)
     except e:
         t.cannot = String("unit '") + name + String("': the build could not be started: ") + String(e)
-        return
+        return True
     if r.ok():
         t.proven.append(name.copy())
-        return
+        return True
     t.failed.append(name.copy())
     t.paragraphs.append(
         _with_tail(
             String("unit '") + name + String("': `") + spec.command_line() + String("` ")
-            + r.describe() + String(" (stderr: ") + spec.stderr_path + String(")"),
+            + r.describe() + _budget_clause(req, timeout_s, r) + String(" (stderr: ") + spec.stderr_path
+            + String(")"),
             r,
         )
     )
+    return True
 
 
 def _run_batch[R: ProcessRunner](
     req: BuildRequest, arts: Artifacts, group: List[String], k: Int, mut runner: R, mut t: _Tally
 ) raises:
     """Batch `k` over `group` (file header, steps 2 and 3)."""
+    var timeout_s = budget_timeout_s(req, runner)
+    if timeout_s < 1:
+        for i in range(len(group)):
+            t.over_budget.append(group[i].copy())
+        return
     var argv = render_batch_argv(arts, group)
     var base = req.log_dir + String("/_batch_") + String(k)
     var argv_path = base + String(".argv")
     _write_argv(argv_path, argv)
-    var spec = affected_spec(argv, req, base)
+    var spec = affected_spec(argv, req, base, timeout_s)
     var command_len = _command_len(arts, group[0])
     var shown = _shown(argv, command_len)
     var more = len(argv) - command_len - _SHOWN_TARGETS
@@ -223,7 +304,7 @@ def _run_batch[R: ProcessRunner](
         t.unattributed.append(
             _with_tail(
                 tag + String(" (") + n + String(": ") + _names(group) + String("): `") + shown + String("` ")
-                + r.describe() + String(" (stderr: ") + spec.stderr_path
+                + r.describe() + _budget_clause(req, timeout_s, r) + String(" (stderr: ") + spec.stderr_path
                 + String("): no unit of it was attributed"),
                 r,
             )
@@ -253,7 +334,9 @@ def _run_batch[R: ProcessRunner](
             t.not_tried.append(group[i].copy())
             every_one_tried = False
             continue
-        _run_unit(req, arts, group[i], runner, t)
+        if not _run_unit(req, arts, group[i], runner, t):
+            every_one_tried = False
+            continue
         if t.cannot.byte_length() > 0:
             return
     if every_one_tried and len(t.failed) == failed_before:
@@ -264,25 +347,38 @@ def _run_batch[R: ProcessRunner](
         )
 
 
-def _finish(units: List[String], head: String, notices: List[String], t: _Tally) -> BuildOutcome:
-    """The outcome, first match (file header, step 4), and the lines."""
+def _over_budget_line(t: _Tally, units: List[String], budget_s: Int) -> String:
+    return (
+        String("BUILD step: ") + String(len(t.over_budget)) + String(" of ") + String(len(units))
+        + String(" unit(s) not built: the build budget (--build-budget-s ") + String(budget_s)
+        + String(") was spent before their run could start: ") + _names(t.over_budget)
+    )
+
+
+def _finish(units: List[String], head: String, notices: List[String], t: _Tally, budget_s: Int) -> BuildOutcome:
+    """The outcome, first match (file header, step 4 and THE BUDGET), and
+    the lines."""
     var o: BuildOutcome
     if t.cannot.byte_length() > 0:
         var m = String("BUILD step: ") + t.cannot
         for i in range(len(t.paragraphs)):
             m += String("\n") + t.paragraphs[i]
         o = BuildOutcome(String(OUTCOME_INDETERMINATE), String(ERROR_CANNOT_TELL), m^)
-    elif len(t.failed) > 0 or len(t.unattributed) > 0:
+    elif len(t.failed) > 0 or len(t.unattributed) > 0 or len(t.over_budget) > 0:
         var m: String
         var skip = 0
+        var budget_first = False
         if len(t.failed) > 0:
             m = (
                 String("BUILD step: ") + String(len(t.failed)) + String(" of ") + String(len(units))
                 + String(" unit(s) failed: ") + _names(t.failed)
             )
-        else:
+        elif len(t.unattributed) > 0:
             m = String("BUILD step: ") + t.unattributed[0]
             skip = 1
+        else:
+            m = _over_budget_line(t, units, budget_s)
+            budget_first = True
         for i in range(len(t.paragraphs)):
             m += String("\n") + t.paragraphs[i]
         if len(t.not_tried) > 0:
@@ -294,6 +390,8 @@ def _finish(units: List[String], head: String, notices: List[String], t: _Tally)
             m += String("\n") + t.batch_notes[i]
         for i in range(skip, len(t.unattributed)):
             m += String("\n") + t.unattributed[i]
+        if len(t.over_budget) > 0 and not budget_first:
+            m += String("\n") + _over_budget_line(t, units, budget_s)
         for i in range(len(t.interference)):
             m += String("\n") + t.interference[i]
         o = BuildOutcome(String(OUTCOME_FAILED), String(ERROR_BUILD_FAILED), m^)
@@ -330,10 +428,10 @@ def build_affected_units[R: ProcessRunner](
     var k = 0
     for g in range(len(groups)):
         if len(groups[g]) == 1:
-            _run_unit(req, arts, groups[g][0], runner, t)
+            _ = _run_unit(req, arts, groups[g][0], runner, t)
         else:
             k += 1
             _run_batch(req, arts, groups[g], k, runner, t)
         if t.cannot.byte_length() > 0:
             break
-    return _finish(units, head, notices, t)
+    return _finish(units, head, notices, t, req.build_budget_s)

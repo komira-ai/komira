@@ -8,7 +8,7 @@
 #   raw residual shape) should produce, AFTER running the
 #   `join_predicate_decompose` pass, a LogicalPlan with `left_on=[a,c]`
 #   and `right_on=[b,d]` that is STRUCTURALLY IDENTICAL to a user-
-#   written `inner_join(left_keys=["a","c"], right_keys=["b","d"])`.
+#   written INNER `LogicalPlan.join` with `left_on=["a","c"]`, `right_on=["b","d"]`.
 #
 #   The chain extractor's per-column split must produce IDENTICAL
 #   per-column edge sets for the two shapes — proving that the decompose
@@ -17,8 +17,8 @@
 # This test exists because the decompose pass's lift-equi-conjuncts step
 # is the upstream producer of the composite `left_on`/`right_on` shape
 # that the chain extractor splits per-column. If the two paths diverged
-# (different key ORDER, different relation routing, etc.), Q5's
-# two-clause residual decomposition would not benefit from the split.
+# (different key ORDER, different relation routing, etc.), a decomposed
+# two-clause residual would not benefit from the split.
 # =============================================================================
 
 from std.memory import OwnedPointer
@@ -113,8 +113,9 @@ def _build_bk7_residual_composite_join(
 def plan_default_algo() -> UInt8:
     """Default join algo hint constant (JOIN_ALGO_AUTO = 0).
 
-    Local constant to avoid importing JOIN_ALGO_AUTO from the engine
-    layer; the wire format is a UInt8 and AUTO is 0 by contract."""
+    Local constant rather than importing JOIN_ALGO_AUTO from
+    `komira_plan_ir.logical_plan`; the wire format is a UInt8 and AUTO is 0
+    by contract."""
     return UInt8(0)
 
 
@@ -236,9 +237,8 @@ def test_bk7_decompose_idempotent_chain_shape() raises:
     )
     # Decompose once.
     var once = join_predicate_decompose(plan^)
-    # Decompose again — must be a no-op (the residual is already
-    # COL_SIDE_NONE after the first pass; the residual on `once` is
-    # also None because both conjuncts lifted).
+    # Decompose again — must be a no-op (both conjuncts lifted, so the
+    # residual on `once` is None).
     var once_copy = once.copy()
     var twice = join_predicate_decompose(once_copy^)
 

@@ -12,3 +12,13 @@ py_test(
     src = "test_main_red.py",
     srcs = ["//release:main_red.py"] + glob(["fixtures/*.log"]),
 )
+
+# release/ci/derive_checks.py, the derive_checks command of the per-change
+# check: any failure of its universe query answers one BROKEN line (kci
+# fails the check), never an exit kci reads as "cannot tell". Its header
+# says what each case proves.
+py_test(
+    name = "test_derive_checks",
+    src = "test_derive_checks.py",
+    srcs = ["//release:derive_checks.py"],
+)
