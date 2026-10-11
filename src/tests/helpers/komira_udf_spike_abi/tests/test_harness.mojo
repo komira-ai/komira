@@ -46,7 +46,7 @@ from komira_udf_spike_abi.conform import CaseResult, Report, load_cases, run_cas
 from komira_udf_spike_abi.contract import *
 from komira_udf_spike_abi.runtime import CallOptions, Outcome, UdfRuntime, UdfSpec
 from komira_udf_spike_abi.runtime import Handle
-from komira_udf_spike_abi.values import Batch, Column, ColumnType, TYPE_INT32
+from komira_udf_spike_abi.values import Batch, Column, ColumnType, TYPE_INT32, TYPE_INT64
 
 comptime VARIANT = "./echo_variant.so"
 comptime MALFORMED = "src/tests/helpers/komira_udf_spike_abi/tests/data/malformed"
@@ -301,6 +301,77 @@ def _oracle_edges() raises:
     _ = unsetenv("KOMIRA_UDF_ECHO_VARIANT")  # no variant left selected for what runs next
     assert_equal(r.verdict, "FAIL", "a runtime accepting major 2 passed init_abi")
     assert_true("init accepted ABI major 2" in r.reason, r.reason)
+
+
+def _clock_is_wall(mut rt: UdfRuntime, after: String) raises:
+    """Two consecutive reads of the host's clock in a fresh call are not
+    exactly one virtual step apart: the virtual clock is off."""
+    var c = _call_case("clock", "MAP_BATCHES_COLUMN", 2)
+    var h = _bound(rt, c)
+    var clock = rt.call_batch(h[2], c.spec, c.input, c.options)
+    assert_true(clock.outcome.is_ok(), String(clock.outcome))
+    assert_true(
+        clock.column.bits[1] - clock.column.bits[0] != 1_000_000,
+        "the virtual clock outlived its " + after + ": " + String(clock.column),
+    )
+    _unbound(rt, h)
+
+
+def _virtual_clock_ends_with_its_call() raises:
+    """The virtual clock of a call with a future deadline is the host's
+    clock for that call only, whatever the entry: a later call reads the
+    wall clock again."""
+    var rt = UdfRuntime.open("./echo.so")
+    var d = parse_case(
+        '{"name": "n", "defect": "d", "run": "call_batch", "entry": "slow_loop", "shape": "SCALAR",'
+        + ' "args": [{"type": "int64"}], "result": [{"type": "int64"}], "options": {"deadline_after_ns": 1},'
+        + ' "input": {"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]}, "expect": {}}'
+    )
+    var h = _bound(rt, d)
+    var res = rt.call_batch(h[2], d.spec, d.input, d.options)
+    assert_equal(res.outcome.status, ERR_DEADLINE, String(res.outcome))
+    _unbound(rt, h)
+    _clock_is_wall(rt, "call_batch")
+    var later = CallOptions(False, False, False, 1_000_000_000_000)
+    var f = parse_case(
+        '{"name": "n", "defect": "d", "run": "frame", "entry": "running_sum", "shape": "MAP_BATCHES_FRAME",'
+        + ' "args": [{"type": "int64"}], "result": [{"type": "int64"}], "result_is_table": true, "expect": {}}'
+    )
+    h = _bound(rt, f)
+    var fr = rt.run_frame(h[2], f.spec, List[Batch](), later)
+    assert_true(fr.outcome.is_ok(), String(fr.outcome))
+    _clock_is_wall(rt, "frame")
+    # the same when the entry fails (cancelled before it starts)
+    var later_cancelled = CallOptions(True, False, False, 1_000_000_000_000)
+    fr = rt.run_frame(h[2], f.spec, List[Batch](), later_cancelled)
+    assert_equal(fr.outcome.status, ERR_CANCELLED, String(fr.outcome))
+    _unbound(rt, h)
+    _clock_is_wall(rt, "failed frame")
+    var a = parse_case(
+        '{"name": "n", "defect": "d", "run": "agg_split", "entry": "sum", "shape": "AGG_MERGEABLE",'
+        + ' "args": [{"type": "int64"}], "result": [{"type": "int64"}], "state": [{"type": "int64"}], "expect": {}}'
+    )
+    h = _bound(rt, a)
+    var g = rt.agg_open(h[2])
+    var one = Column(TYPE_INT64)
+    one.append_int(5)
+    var b = Batch(1)
+    b.columns.append(one.copy())
+    var up = rt.agg_update(g.handle, b, [Int32(0)], 1, later)
+    assert_true(up.is_ok(), String(up))
+    _clock_is_wall(rt, "agg_update")
+    var mg = rt.agg_merge(g.handle, one, [Int32(0)], 1, later)
+    assert_true(mg.is_ok(), String(mg))
+    _clock_is_wall(rt, "agg_merge")
+    up = rt.agg_update(g.handle, b, [Int32(0)], 1, later_cancelled)
+    assert_equal(up.status, ERR_CANCELLED, String(up))
+    _clock_is_wall(rt, "failed agg_update")
+    mg = rt.agg_merge(g.handle, one, [Int32(0)], 1, later_cancelled)
+    assert_equal(mg.status, ERR_CANCELLED, String(mg))
+    _clock_is_wall(rt, "failed agg_merge")
+    rt.agg_close(g.handle)
+    _unbound(rt, h)
+    rt.shutdown()
 
 
 def _refusing_variants() raises:
@@ -609,4 +680,5 @@ def main() raises:
     _refusing_variants()
     _destructor_shuts_down()
     _oracle_edges()
+    _virtual_clock_ends_with_its_call()
     print("test_harness: ok")

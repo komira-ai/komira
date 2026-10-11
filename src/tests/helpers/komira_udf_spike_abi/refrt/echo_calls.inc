@@ -106,6 +106,10 @@ static int32_t scalar(komira_udf_instance* inst, const komira_udf_call* call, co
     }
     di[r] = 0;
     if (r >= n) continue; /* long_by_one's extra row */
+    if (fx->id == F_CLOCK) {
+      di[r] = h->now_ns(h->host_data);
+      continue;
+    }
     if (fx->id == F_CALL_ID || fx->id == F_FLAGS_PROBE) {
       di[r] = fx->id == F_CALL_ID ? call->call_id : inst->udf->flags[r < 2 ? r : 2];
       continue;

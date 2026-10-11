@@ -1,0 +1,12 @@
+{
+ "name": "deadline_reached_during_call",
+ "defect": "a deadline in the future is not checked during the call (design 4.7: the runtime checks the deadline between rows), or is checked inverted. The host's clock is virtual for this call: 1 ms per read, deadline 250 ms ahead, so slow_loop reaches it after a few rows whatever the wall clock does",
+ "run": "call_batch",
+ "entry": "slow_loop",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "options": {"deadline_after_ns": 250000000},
+ "input": {"length": 8, "columns": [{"type": "int64", "values": [0], "repeat": 8}]},
+ "expect": {"status": "ERR_DEADLINE", "run_error": "UDF_DEADLINE_EXCEEDED", "row_at_least": 1, "message": "nonempty"}
+}

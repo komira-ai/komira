@@ -81,6 +81,10 @@ struct _HostData:
     var cancel_on_clock: Void
     """The cancel flag of the call in flight when it was started with
     cancel_during_call, else NULL: now_ns sets it (arm_cancel_on_clock)."""
+    var virtual_on: Int
+    """1 while a call with a future deadline is in flight: now_ns answers
+    the virtual clock, not the wall clock (arm_virtual_clock)."""
+    var virtual_now: Int64
 
 
 struct _ArrRec:
@@ -168,11 +172,35 @@ def disarm_cancel_on_clock(hd: Word):
     _hd(hd.p)[].cancel_on_clock = null_void()
 
 
+comptime VIRTUAL_START_NS: Int64 = 1_000_000_000_000
+"""The virtual clock's reading when a call with a future deadline starts."""
+comptime VIRTUAL_STEP_NS: Int64 = 1_000_000
+"""How far the virtual clock moves on each read: 1 ms."""
+
+
+def arm_virtual_clock(hd: Word):
+    """From now until disarm_virtual_clock, now_ns answers a virtual clock
+    that starts at VIRTUAL_START_NS and moves VIRTUAL_STEP_NS on each read,
+    so a deadline in the future is reached after a number of the runtime's
+    own clock reads, never by wall time."""
+    _hd(hd.p)[].virtual_now = VIRTUAL_START_NS
+    _hd(hd.p)[].virtual_on = 1
+
+
+def disarm_virtual_clock(hd: Word):
+    _hd(hd.p)[].virtual_on = 0
+
+
 def _host_now_ns(host_data: Void) abi("C") -> Int64:
-    var flag = _hd(host_data)[].cancel_on_clock
+    var d = _hd(host_data)
+    var flag = d[].cancel_on_clock
     if not is_null(flag):
         # SAFETY: the armed flag is the in-flight call's arena block.
         external_call["komira_udf_spike_cancel_store", NoneType](flag)
+    if d[].virtual_on == 1:
+        var now = d[].virtual_now
+        d[].virtual_now = now + VIRTUAL_STEP_NS
+        return now
     return Int64(perf_counter_ns())
 
 
