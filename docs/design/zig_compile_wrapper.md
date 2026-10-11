@@ -280,8 +280,7 @@ Three things must hold, each already checked:
 - the exec line of item 16 stays byte for byte, and `argv[0]` stays absolute;
 - `PWD` and `BUCK_SCRATCH_PATH` reach the link (the exact-environment pass-through);
 - `cov_branch link` (`cov_branch_link.zig`) reproduces that line for the branch link, and test 47
-  (`link_line.sh`) compares
-  the two. `link_line.sh` takes the wrapper as an argument; its rule passes the new executable.
+  (`link_line.sh`) compares the two. `link_line.sh` takes the wrapper as an argument; its rule passes the new executable.
 
 The negative coverage target (`tests//negative/coverage`, the no-op relocator) must still fail with exit 4:
 it proves item 30 through a real `cov_zig` link.
