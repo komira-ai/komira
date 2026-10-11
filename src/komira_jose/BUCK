@@ -20,6 +20,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   implementation, and the JWK Set Google publishes (member order varies by
 #   entry): verify, tamper, wrong key under a kid, ES256 against RS256.
 # - test_header_gate: each header refusal, its order, and the compact form.
+# - test_rs256_verify_edges: an RS256 verifier with a real RSA-2048 key on
+#   malformed segments, header shapes, a one-byte-off signature, a shared or
+#   unknown kid and an undecodable payload.
 # - test_key_selection: kid selection and the key checks (type, alg, use,
 #   key_ops, length).
 # - test_claims: the policy's own checks and every claim refusal at its
@@ -43,6 +46,7 @@ mojo_library(
         "tests/test_no_product_vocabulary.mojo",
         "tests/test_rfc_vectors.mojo",
         "tests/test_rs256_third_party.mojo",
+        "tests/test_rs256_verify_edges.mojo",
         "tests/test_wycheproof_jws.mojo",
     ],
     test_deps = ["//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary"],
