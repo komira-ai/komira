@@ -20,7 +20,9 @@
 //! view shows the hidden lines. A `mojo-hidden` comment next to no example,
 //! and a comment that spells the marker differently (`mojo_hidden`,
 //! `Mojo-hidden`), are refused: hidden code that never runs is the defect
-//! this guards.
+//! this guards. A comment is the Markdown module's HTML comment block (it
+//! runs to the first `-->`), so a `<!-- mojo-hidden` line inside another
+//! comment is part of that one and is refused too.
 //!
 //! What is code, a fence and a link is the shared Markdown reader's
 //! (`@import("markdown")`, tools/build/markdown). Every refusal names
@@ -126,28 +128,16 @@ fn isBlank(s: []const u8) bool {
     return md.indentOf(s) == s.len;
 }
 
-// The comments that may hold hidden lines, each with its own line range: a
-// comment opens on a line that is not code and whose text starts with
-// `<!--`, and ends on the first line after it holding `-->`.
-// TODO: take each comment's line range from the Markdown module's
-// per-comment function once it has one, and keep only the marker reading
-// here (markdown.zig's htmlCommentMask merges adjacent comments, so it cannot
-// give the range of one).
+// The comments that hold hidden lines: of the Markdown module's HTML
+// comment blocks (`md.htmlComments`: each opens on a line that is not code
+// whose text starts with `<!--`, and ends on the first line from there
+// holding `-->`), those whose opening line reads `<!-- mojo-hidden`. A block
+// whose opening line spells the marker differently is refused.
 fn hiddenComments(alloc: Allocator, lines: []const []const u8, mask: []const bool, display: []const u8, refusals: *std.ArrayList(Refusal)) Allocator.Error![]Hidden {
     var out = std.ArrayList(Hidden).init(alloc);
-    var i: usize = 0;
-    const n = lines.len;
-    while (i < n) {
-        if (mask[i]) {
-            i += 1;
-            continue;
-        }
-        const t = md.strip(lines[i]);
-        if (!std.mem.startsWith(u8, t, "<!--")) {
-            i += 1;
-            continue;
-        }
-        const body = md.strip(t[4..]);
+    for (try md.htmlComments(alloc, lines, mask)) |c| {
+        const i = c.open_line;
+        const body = md.strip(md.strip(lines[i])[4..]);
         const L = MARK.len;
         const marked = std.mem.startsWith(u8, body, MARK) and !(body.len > L and body[L] != ' ' and body[L] != '\t' and
             !std.mem.startsWith(u8, body[L..], "-->"));
@@ -155,7 +145,16 @@ fn hiddenComments(alloc: Allocator, lines: []const []const u8, mask: []const boo
             if (lowerStartsWith(body, "mojo")) {
                 try refuse(alloc, refusals, display, i + 1, "`<!-- {s}`: the hidden-lines marker is exactly `<!-- mojo-hidden`", .{firstWord(body)});
             }
-            i += 1;
+            // A marker inside this block is part of it, so its lines would
+            // run nowhere.
+            const last = c.close_line orelse lines.len - 1;
+            for (i + 1..last + 1) |k| {
+                const t = md.strip(lines[k]);
+                if (std.mem.startsWith(u8, t, "<!--") and lowerStartsWith(md.strip(t[4..]), "mojo")) {
+                    try refuse(alloc, refusals, display, k + 1, "a `<!-- mojo` comment inside the HTML comment opened on line {d} is part of it" ++
+                        " and runs nowhere; close that comment with `-->` first", .{i + 1});
+                }
+            }
             continue;
         }
         const rest = body[L..];
@@ -165,8 +164,9 @@ fn hiddenComments(alloc: Allocator, lines: []const []const u8, mask: []const boo
             .code = std.ArrayList([]const u8).init(alloc),
             .code_lines = std.ArrayList(usize).init(alloc),
         };
-        if (std.mem.indexOf(u8, rest, "-->")) |end| {
+        if (c.close_line == i) {
             // One line: `<!-- mojo-hidden CODE -->`.
+            const end = std.mem.indexOf(u8, rest, "-->").?;
             const code = md.strip(rest[0..end]);
             if (md.strip(rest[end + 3 ..]).len > 0) {
                 try refuse(alloc, refusals, display, i + 1, "text after `-->` on a mojo-hidden line", .{});
@@ -176,37 +176,30 @@ fn hiddenComments(alloc: Allocator, lines: []const []const u8, mask: []const boo
                 try h.code_lines.append(i + 1);
             }
             try out.append(h);
-            i += 1;
             continue;
         }
         if (md.strip(rest).len > 0) {
             try refuse(alloc, refusals, display, i + 1, "a multi-line mojo-hidden comment holds nothing after `<!-- mojo-hidden` on its first line", .{});
         }
-        var j = i + 1;
-        var closed = false;
-        while (j < n) : (j += 1) {
-            if (std.mem.indexOf(u8, lines[j], "-->")) |e| {
-                const tail = lines[j][0..e];
-                if (!isBlank(tail)) {
-                    try h.code.append(tail);
-                    try h.code_lines.append(j + 1);
-                }
-                if (md.strip(lines[j][e + 3 ..]).len > 0) {
-                    try refuse(alloc, refusals, display, j + 1, "text after `-->` on a mojo-hidden line", .{});
-                }
-                closed = true;
-                break;
-            }
-            try h.code.append(lines[j]);
-            try h.code_lines.append(j + 1);
-        }
-        if (!closed) {
+        const j = c.close_line orelse {
             try refuse(alloc, refusals, display, i + 1, "a mojo-hidden comment is never closed with `-->`", .{});
             break;
+        };
+        for (i + 1..j) |k| {
+            try h.code.append(lines[k]);
+            try h.code_lines.append(k + 1);
+        }
+        const e = std.mem.indexOf(u8, lines[j], "-->").?;
+        const tail = lines[j][0..e];
+        if (!isBlank(tail)) {
+            try h.code.append(tail);
+            try h.code_lines.append(j + 1);
+        }
+        if (md.strip(lines[j][e + 3 ..]).len > 0) {
+            try refuse(alloc, refusals, display, j + 1, "text after `-->` on a mojo-hidden line", .{});
         }
         h.last = j;
         try out.append(h);
-        i = j + 1;
     }
     return out.toOwnedSlice();
 }

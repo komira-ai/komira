@@ -182,6 +182,23 @@ test "a misspelled marker is refused" {
     try t.expectEqualStrings("", try refusal(a, "<!-- a note -->\n```mojo\nprint(1)\n```\n", false));
 }
 
+test "a marker inside another comment is refused" {
+    // An HTML comment block runs to its first `-->` (the Markdown module's
+    // htmlComments), so a `<!-- mojo-hidden` line inside one is part of it:
+    // its lines would run nowhere.
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectEqualStrings(
+        "R.md:3: a `<!-- mojo` comment inside the HTML comment opened on line 2 is part of it" ++
+            " and runs nowhere; close that comment with `-->` first",
+        try refusal(a, "x\n<!-- a note\n<!-- mojo-hidden\nassert_equal(1, 1)\n-->\n```mojo\nprint(1)\n```\n", false),
+    );
+    // A block that closes first leaves the next comment its own.
+    const exs = try examplesOf(a, "<!-- a note -->\n<!-- mojo-hidden x = 1 -->\n```mojo\nprint(x)\n```\n");
+    try t.expectEqualStrings("2|x = 1\n4|print(x)\n", try join(a, exs[0]));
+}
+
 test "an unclosed hidden comment is refused" {
     var arena = Arena.init(t.allocator);
     defer arena.deinit();
