@@ -17,8 +17,10 @@
 # (a skipped stride that could hold a matching row is a wrong answer; a kept
 # stride the statistics or bloom disprove is a missed skip).
 #
-#   T1  statistics level: <, <=, >, >=, =, != (a constant stride equal to the
-#       literal is the only != skip), the literal on the left (the operator
+#   T1  statistics level: <, <=, >, >=, = (the literal inside a stride and on
+#       its minimum and maximum), != (a constant stride equal to the literal is
+#       the only != skip; a literal on a non-constant stride's minimum or
+#       maximum keeps it), the literal on the left (the operator
 #       mirrored), AND / OR, and every shape it cannot judge (a non-integer
 #       literal, a column the file lacks, column-vs-column, arithmetic, a bare
 #       column) kept.
@@ -179,11 +181,17 @@ def _stats_cases(file: List[UInt8], label: String) raises:
     _check(file, _cmp(BIN_GT, "k", 19), _kept(2), label + " k>19")
     _check(file, _cmp(BIN_GE, "k", 19), _kept(1, 2), label + " k>=19")
     _check(file, _cmp(BIN_EQ, "k", 15), _kept(1), label + " k=15")
+    # = with the literal on a stride's minimum (10 opens stride 1) and on its
+    # maximum (9 closes stride 0): the range test is inclusive at both ends.
+    _check(file, _cmp(BIN_EQ, "k", 10), _kept(1), label + " k=10 (stride min)")
+    _check(file, _cmp(BIN_EQ, "k", 9), _kept(0), label + " k=9 (stride max)")
     _check(file, _cmp(BIN_NE, "c", 7), _kept(0, 2), label + " c!=7")
     _check(file, _cmp(BIN_NE, "c", 8), _kept(0, 1, 2), label + " c!=8")
     _check(file, _cmp(BIN_NE, "k", 3), _kept(0, 1, 2), label + " k!=3")
     # Stride 0's minimum is 0, but it is not constant: k != 0 keeps it.
     _check(file, _cmp(BIN_NE, "k", 0), _kept(0, 1, 2), label + " k!=0")
+    # Stride 0's maximum is 9, but it is not constant: k != 9 keeps it.
+    _check(file, _cmp(BIN_NE, "k", 9), _kept(0, 1, 2), label + " k!=9")
     # Literal on the left: the operator is mirrored.
     _check(file, _cmp_left(BIN_LT, 25, "k"), _kept(2), label + " 25<k")
     _check(file, _cmp_left(BIN_LE, 20, "k"), _kept(2), label + " 20<=k")

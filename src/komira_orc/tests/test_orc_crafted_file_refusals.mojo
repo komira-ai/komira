@@ -444,6 +444,9 @@ def test_nested_files() raises:
     var unnamed = _assemble(s, _nested_types(List[String]()), 2, 0, List[UInt8]())
     assert_equal(read_orc_bytes(Span(unnamed)).schema.field_name(0), "_col0")
 
+    # A zero-stripe file is valid ORC. Refusing it is a known gap of the
+    # single-stripe nested path (komira-ai/komira#1449), not the right answer:
+    # this pins today's refusal, and fixing the gap changes it to an empty batch.
     var zero = _assemble(List[_S](), _nested_types(_names("x")), 0, 0, List[UInt8]())
     with assert_raises(contains="nested / ACID ORC read is single-stripe (got 0 stripes)"):
         _ = read_orc_bytes(Span(zero))

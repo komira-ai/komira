@@ -1216,8 +1216,8 @@ def read_orc_file_with_dispatcher[
 # The flat fast path accumulates PRIMITIVE columns across stripes into a flat
 # ColumnAcc. The nested path materializes each top-level output column (which
 # may be a compound subtree) via `decode_column_subtree`. Multi-stripe
-# concatenation of nested columns is not supported yet: >1 stripe with nested
-# top-level columns raises a clear error.
+# concatenation of nested columns is not supported yet: a stripe count other
+# than 1 (zero stripes included) raises UNSUPPORTED (komira-ai/komira#1449).
 
 
 def _build_nested_output_schema(

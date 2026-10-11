@@ -134,6 +134,8 @@ def test_stripe_size_raised_to_stride() raises:
 def test_zero_row_batch() raises:
     var bytes = write_orc_bytes(_i64_batch(0), OrcWriterOptions(ORC_COMPRESSION_NONE, 10, "UTC"))
     var tail = OrcFileTail.parse(Span(bytes))
+    # One empty stripe is this writer's choice, not an ORC requirement (a file
+    # with no stripes is also valid); the test pins what this writer emits.
     assert_equal(tail.footer.num_stripes(), 1)
     assert_equal(tail.footer.stripes[0].number_of_rows, 0)
     assert_equal(tail.num_rows(), 0)
