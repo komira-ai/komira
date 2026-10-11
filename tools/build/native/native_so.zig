@@ -200,4 +200,5 @@ pub fn main() !void {
 
 test {
     _ = @import("native_so_test.zig");
+    _ = @import("native_elf_test.zig");
 }

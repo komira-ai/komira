@@ -19,6 +19,7 @@ _NATIVE_SO = [
     "native_callsites.zig",
     "native_checks.zig",
     "native_elf.zig",
+    "native_elf_test.zig",
     "native_so_test.zig",
 ]
 

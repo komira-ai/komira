@@ -219,7 +219,7 @@ test "check 3: green; red on a strong undefined komira_ symbol and an unlisted w
     try expectRed(red, "komira_awslc_OPENSSL_memory_free");
 }
 
-test "check 4: green with libpthread, libc and ld-linux; red on an extra NEEDED, a run path, a SONAME" {
+test "check 4: green with libpthread, libc and ld-linux; red on an extra NEEDED, an undeclared komira owner, a run path, a SONAME" {
     var red = checks.Red.init(A);
     var so = good();
     so.needed = &.{ "libpthread.so.0", "libc.so.6", "ld-linux-x86-64.so.2" };
@@ -230,6 +230,12 @@ test "check 4: green with libpthread, libc and ld-linux; red on an extra NEEDED,
     so.needed = &.{ "libc.so.6", "libm.so.6" };
     _ = try checks.check4(A, so, "libkomira_crypto_native.so.1", &red);
     try expectRed(red, "neither glibc nor a declared owner (1): libm.so.6");
+    // Planted: an undeclared komira owner, NEEDED but bound by no symbol
+    // (linked --no-as-needed), so check 3 cannot see it.
+    red = checks.Red.init(A);
+    so.needed = &.{ "libc.so.6", "libkomira_x_native.so.1" };
+    _ = try checks.check4(A, so, "libkomira_crypto_native.so.1", &red);
+    try expectRed(red, "neither glibc nor a declared owner (1): libkomira_x_native.so.1");
     red = checks.Red.init(A);
     so = good();
     so.runpath = &.{"$ORIGIN"};
@@ -288,13 +294,17 @@ test "check 6: green on 0xa (symbolic and bind-now); red on 0x8 and on no DT_FLA
     try expectRed(red, "no DT_FLAGS");
 }
 
-test "check 7: green; red on an unversioned strong undefined name, an unlisted weak one, a stale list" {
+test "check 7: green; red on an unversioned or non-glibc-versioned strong undefined name, an unlisted weak one, a stale list" {
     var red = checks.Red.init(A);
     _ = try checks.check7(A, good(), &weak_list, &red);
     try t.expect(red.green());
     red = checks.Red.init(A);
     _ = try checks.check7(A, withSym(und("planted_undefined", null)), &weak_list, &red);
     try expectRed(red, "neither GLIBC_-versioned nor komira_ (1): planted_undefined");
+    // Planted: a strong undefined name versioned, but not by glibc.
+    red = checks.Red.init(A);
+    _ = try checks.check7(A, withSym(und("planted_versioned", "OTHER_1.0")), &weak_list, &red);
+    try expectRed(red, "neither GLIBC_-versioned nor komira_ (1): planted_versioned@OTHER_1.0");
     // Planted: an undefined name outside the recorded weak list.
     red = checks.Red.init(A);
     _ = try checks.check7(A, withSym(weakUnd("planted_weak")), &weak_list, &red);

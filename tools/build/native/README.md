@@ -109,7 +109,11 @@ them (`callers`). Every action runs a Zig-built tool: `native_so`
 and every dynamic symbol with its version. The unit tests
 ([`native_so_test.zig`](native_so_test.zig), `:native_so_unit`, which
 `:native_so` waits for) show each check green on a library shaped as
-komira_crypto's is and red on its defect.
+komira_crypto's is and red on its defect;
+[`native_elf_test.zig`](native_elf_test.zig) builds a small shared object
+byte by byte, with every dynamic tag and version section the reader keeps
+(a run path among them, which komira_crypto's library lacks), and checks
+what the reader reads from it.
 
 Only `//src/komira_crypto:komira_crypto_native` exists so far, and no
 package ships it.
