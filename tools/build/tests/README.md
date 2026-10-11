@@ -40,6 +40,10 @@ do:
   be loadable: it is a `<case>.BUCK` file that the driver copies to
   `<case>/BUCK` for its one build and deletes, its directory gitignored, as
   [`surface_capability_matrix/dangling.BUCK`](negative/surface_capability_matrix/dangling.BUCK) is.
+  A check that writes its refusal as a validation result can instead be
+  tested in the graph: [`negative/native_reach`](negative/native_reach/BUCK)
+  holds such cases, each green only while refused with its named error, and
+  `tests//functional/native_reach:cases` builds them in the pull request check.
 
 A test with both halves keeps one package name in each, for example
 `tests//functional/test_data` (the test runtime contract that works) and

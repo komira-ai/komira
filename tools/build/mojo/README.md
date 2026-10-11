@@ -849,6 +849,14 @@ of every target holding it:
 `<library>[native_reach]` builds the two results without the library's
 tests.
 
+The check's cases are `native_reach_case` targets in
+[`tests//negative/native_reach`](../tests/negative/native_reach/BUCK): each
+runs the same check on a library's sources and deps with one planted defect
+(an archive whose owner is missing, an archive a C dep needs, a prefixed
+`external_call` with no archive dep, the scanner's quoting) and builds only
+while the check refuses it with the named error, or passes a correct tree.
+`tests//functional/native_reach:cases` builds them all.
+
 ## Coverage builds
 
 `-c komira.coverage=true` (default `false`) gives every `mojo_library` on

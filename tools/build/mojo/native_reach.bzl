@@ -28,7 +28,7 @@ Libraries under src/tests/ are exempt: no package ships them.
 
 load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo")
 load("@komira//tools/build/one_definition:libraries.bzl", "THIRD_PARTY_OWNERS")
-load(":providers.bzl", "MojoInfo")
+load(":providers.bzl", "MojoInfo", "mojo_pkg_children")
 
 NATIVE_REACH_ATTRS = {
     # The Zig scanner (native_reach/), set by the macro on linux-x86_64.
@@ -151,3 +151,78 @@ def native_reach(ctx, src_dir, deps):
         calls = _result(ctx, "calls", False, "{}: sources not read ({})".format(self_label, why))
     specs.append(ValidationSpec(name = "native_reach_calls", validation_result = calls))
     return [ValidationInfo(validations = specs)], {"native_reach": [DefaultInfo(default_outputs = [archives, calls])]}
+
+# The check's own cases (tools/build/tests/negative/native_reach): a
+# `native_reach_case` runs `native_reach` above, unchanged, on its own
+# `srcs` and `deps` as a `mojo_library` with them would, and passes only when
+# each half answers as its case says: refused, naming every text of
+# `expect_archives` (or `expect_calls`), or passed when the list is empty.
+# The library's own validations are not returned, so a refusal is the case's
+# green, and a check that stops refusing is its red.
+
+def _case_impl(actions, archives, calls, out, expect):
+    wrong = []
+    for half, value in [("archives", archives), ("calls", calls)]:
+        data = value.read_json()["data"]
+        want = expect[half]
+        if not want:
+            if data["status"] != "success":
+                wrong.append("native_reach_{} refused a case it must pass: {}".format(half, data["message"]))
+        elif data["status"] != "failure":
+            wrong.append("native_reach_{} passed a case it must refuse naming {}: {}".format(half, want, data["message"]))
+        else:
+            missing = [w for w in want if w not in data["message"]]
+            if missing:
+                wrong.append("native_reach_{} refused without naming {}: {}".format(half, missing, data["message"]))
+    actions.write_json(out, {
+        "data": {
+            "message": "\n".join(wrong) if wrong else "each half answered as the case expects",
+            "status": "failure" if wrong else "success",
+        },
+        "version": 1,
+    })
+    return []
+
+_case = dynamic_actions(
+    impl = _case_impl,
+    attrs = {
+        "archives": dynattrs.artifact_value(),
+        "calls": dynattrs.artifact_value(),
+        "expect": dynattrs.value(typing.Any),
+        "out": dynattrs.output(),
+    },
+)
+
+def _native_reach_case_impl(ctx):
+    src_dir = ctx.actions.copied_dir("src", {s.short_path: s for s in ctx.attrs.srcs})
+    deps = mojo_pkg_children(ctx, [d[MojoInfo] for d in ctx.attrs.deps if MojoInfo in d])
+    _providers, subs = native_reach(ctx, src_dir, deps)
+    if "native_reach" not in subs:
+        fail("{}: native_reach checked nothing (a case under src/tests/?)".format(ctx.label))
+    archives, calls = subs["native_reach"][0].default_outputs
+    out = ctx.actions.declare_output("native_reach_case/{}.json".format(ctx.label.name))
+    ctx.actions.dynamic_output_new(_case(
+        archives = archives,
+        calls = calls,
+        expect = {"archives": ctx.attrs.expect_archives, "calls": ctx.attrs.expect_calls},
+        out = out.as_output(),
+    ))
+    return [
+        DefaultInfo(default_output = out),
+        ValidationInfo(validations = [ValidationSpec(name = "native_reach_case", validation_result = out)]),
+    ]
+
+_native_reach_case_rule = rule(
+    impl = _native_reach_case_impl,
+    attrs = {
+        "deps": attrs.list(attrs.dep(), default = []),
+        "expect_archives": attrs.list(attrs.string(), default = []),
+        "expect_calls": attrs.list(attrs.string(), default = []),
+        "srcs": attrs.list(attrs.source(), default = []),
+    } | NATIVE_REACH_ATTRS,
+)
+
+def native_reach_case(**kwargs):
+    """A case of the check (above): `srcs`, `deps`, `expect_archives`, `expect_calls`."""
+    native_reach_kwargs(kwargs)
+    _native_reach_case_rule(**kwargs)
