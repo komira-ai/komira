@@ -34,10 +34,11 @@ load(
     _data_map = "data_map",
     _env_args = "env_args",
     _test_root = "test_root",
+    gate_mojo = "gate_mojo",
 )
-load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "capped_prefix", "define_args", "mem_cap_script", "memory_cap")
+load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "cap_flags", "define_args", "mem_cap_script", "memory_cap")
 load(":readme.bzl", "readme_kwargs")
-load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_prefix", "with_test_limit")
+load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_flags", "with_test_limit")
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
@@ -390,16 +391,7 @@ def _library_impl(ctx):
         test_dir, staged = _test_root(ctx, "tests/{}/root".format(stem), exe, test_data.get(key, {}))
         ctx.actions.run(
             cmd_args(
-                capped_prefix(tc, mem_cap_script(ctx), "{}:{}".format(ctx.label.raw_target(), t.short_path), cap),
-                tc.busybox,
-                "sh",
-                tc.gate_runner,
-                tc.busybox,
-                tc.compiler,
-                "{}:{}".format(ctx.label.raw_target(), t.short_path),
-                staged,
-                marker.as_output(),
-                env_args,
+                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), t.short_path), staged, marker.as_output(), cap_flags(cap), env_args, struct(mem_cap = mem_cap_script(ctx), test_deadline = None)),
                 hidden = test_dir,
             ),
             category = "mojo_gated_test",
@@ -434,7 +426,7 @@ def _library_impl(ctx):
     # With coverage on, the README's run (above) and the gate (coverage.bzl);
     # only the conda package waits for them and the runs, never this package.
     cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs, cov_branch, src_dir, import_name, root) if cov_link else (None, [])
-    mutation = mutation_sub_targets(ctx, tc, _mojo_cmd, src_dir, root, deps, tests_closure[1:], _link_tail(tests_c_link), test_data, env_args, test_defines, cap, mem_cap_script(ctx))  # mutation.bzl
+    mutation = mutation_sub_targets(ctx, tc, _mojo_cmd, src_dir, root, deps, tests_closure[1:], _link_tail(tests_c_link), test_data, env_args, test_defines, cap)  # mutation.bzl
     if markers:
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
         ctx.actions.run(
@@ -495,7 +487,7 @@ def _library_impl(ctx):
 # Whether a README holds an example is in its bytes, which analysis cannot
 # read, so a dynamic action reads the count: with one or more examples it
 # compiles the program against the UNGATED package and runs it through
-# gate_runner.sh exactly as a `test_srcs` entry; with none it compiles and
+# the gate exactly as a `test_srcs` entry; with none it compiles and
 # runs nothing, and the marker records that no example exists (never a
 # PASS line). A refused README (an info string such as `mojo skip`, a stray
 # hidden-lines comment) fails `generate`, naming README.md:<line>.
@@ -559,15 +551,7 @@ def _readme_test_impl(actions, label, gate_label, count, program, marker, tc, cl
     root, staged = _test_root(shim, "tests/readme/root", exe, {})
     actions.run(
         cmd_args(
-            tc.busybox,
-            "sh",
-            tc.gate_runner,
-            tc.busybox,
-            tc.compiler,
-            gate_label,
-            staged,
-            marker,
-            env_args,
+            gate_mojo(tc, gate_label, staged, marker, [], env_args),
             hidden = root,
         ),
         category = "mojo_gated_test",
@@ -727,18 +711,15 @@ def _test_impl(ctx):
     root, staged = _test_root(ctx, ctx.label.name + ".testroot", exe, data)
     cap = memory_cap(where, "memory_cap_mib", ctx.attrs.memory_cap_mib, ctx.attrs.assert_level)
     command = cmd_args(
-        deadline_prefix(ctx, tc.busybox, where),
-        capped_prefix(tc, mem_cap_script(ctx), where, cap),
-        tc.busybox,
-        "sh",
-        tc.gate_runner,
-        tc.busybox,
-        tc.compiler,
-        where,
-        staged,
-        "/dev/null",
-        env_args,
-        _arg_args(ctx.attrs.args),
+        gate_mojo(
+            tc,
+            where,
+            staged,
+            "/dev/null",
+            deadline_flags(ctx, where) + cap_flags(cap),
+            [env_args, _arg_args(ctx.attrs.args)],
+            struct(mem_cap = mem_cap_script(ctx), test_deadline = ctx.attrs._test_deadline[DefaultInfo].default_outputs[0]),
+        ),
         hidden = root,
     )
     run_dir, run_command = _runnable(ctx, tc, exe)
@@ -914,14 +895,7 @@ def _shared_lib_impl(ctx):
         marker = ctx.actions.declare_output("gate/{}.passed".format(stem))
         ctx.actions.run(
             cmd_args(
-                tc.busybox,
-                "sh",
-                tc.gate_runner,
-                tc.busybox,
-                tc.compiler,
-                "{}:{}".format(ctx.label.raw_target(), stem),
-                staged,
-                marker.as_output(),
+                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), stem), staged, marker.as_output()),
                 hidden = root,
             ),
             category = "mojo_shared_lib_gate",

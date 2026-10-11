@@ -395,7 +395,7 @@ def _cov_run(actions, tc, facts, label, where, t, name, stem, cov_bin, test_repo
             "sh",
             facts.dir.project("cov_run.sh"),
             tc.busybox,
-            tc.gate_runner,
+            tc.gate,
             tc.compiler,
             label,
             cov_bin,

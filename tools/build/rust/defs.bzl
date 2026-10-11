@@ -36,8 +36,9 @@ RustToolchainInfo = provider(fields = {
     "cc_target": provider_field(str),
     "wrapper": provider_field(typing.Any),
     "run_check": provider_field(typing.Any),
-    # Runs one rust_test in a build action (test_runner.sh).
-    "test_runner": provider_field(typing.Any),
+    # The gate (tools/build/run): `gate rust` runs one rust_test in a build
+    # action.
+    "gate": provider_field(typing.Any),
 })
 
 RustCrateInfo = provider(fields = {
@@ -146,7 +147,7 @@ def _rust_toolchain_impl(ctx):
             cc_target = ctx.attrs.cc_target,
             wrapper = ctx.attrs._wrapper[DefaultInfo].default_outputs[0],
             run_check = ctx.attrs._run_check[DefaultInfo].default_outputs[0],
-            test_runner = ctx.attrs._test_runner[DefaultInfo].default_outputs[0],
+            gate = ctx.attrs._gate[DefaultInfo].default_outputs[0],
         ),
     ]
 
@@ -158,6 +159,7 @@ rust_toolchain = rule(
         "cc_target": attrs.string(),
         "sysroot": attrs.exec_dep(),
         "zig": attrs.exec_dep(),
+        "_gate": attrs.exec_dep(default = "komira//tools/build/run:gate"),
         "_run_check": attrs.dep(default = "komira//tools/build/mojo:run_check.sh"),
         # The lint of the scripts the Rust rules run: a validation (see
         # tools/build/lint/defs.bzl), not an input of any action.
@@ -166,7 +168,6 @@ rust_toolchain = rule(
             "komira//tools/build/mojo:shell_lint",
             "komira//tools/build/rust:shell_lint",
         ]),
-        "_test_runner": attrs.dep(default = "komira//tools/build/rust:test_runner.sh"),
         "_wrapper": attrs.dep(default = "komira//tools/build/rust:rustc_wrapper.sh"),
     },
 )
@@ -314,7 +315,7 @@ _COMMON_ATTRS = {
 _DEFAULT_TEST_TIMEOUT_S = 600
 
 def _runner(tc, label, exe, marker_arg, timeout_s):
-    return cmd_args(tc.busybox, "sh", tc.test_runner, tc.busybox, label, exe, marker_arg, str(timeout_s))
+    return cmd_args(tc.gate, "rust", "--busybox", tc.busybox, "--label", label, "--test", exe, "--marker", marker_arg, "--timeout-s", str(timeout_s))
 
 def _gate(ctx, tc, ungated, public, markers):
     """Publishes `ungated` as `public` once every marker in `markers` exists."""

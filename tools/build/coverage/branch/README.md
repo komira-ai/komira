@@ -88,14 +88,14 @@ binary holds this action's directory`.
 
 ## cov_branch_run
 
-1. `gate_runner.sh` (unchanged) runs the test from the release gate's
+1. The gate ([`gate mojo`](../../run/README.md), the release gate's runner) runs the test from the release gate's
    staged tree (its data under `share/`), with the gate's environment (the
    script exports nothing of its own to the test: its `LC_ALL=C` is set
    after the run), the test's `test_env`, and one more variable, `LLVM_PROFILE_FILE` =
    `<scratch>/prof/%p.profraw` (`%p`, the pid: a child the test starts
    writes a profile of its own). The test must pass. When it fails, so does
    the action, with the test's output and `BRANCH COVERAGE RUN FAILED`, not
-   gate_runner's banner (which says the release gate's test failed: that
+   the gate's banner (which says the release gate's test failed: that
    one passed).
 2. At least one `.profraw` was written there; otherwise `The test passed but
    wrote no .profraw` (the runtime was not linked, the variable did not

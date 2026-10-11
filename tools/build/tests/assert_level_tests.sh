@@ -6,11 +6,13 @@
 #
 #  49. Assert level, defines and memory cap: the commands carry `-D
 #      ASSERT=<level>` and each define where a target sets them, the gated
-#      test runs under mem_cap.sh at 4096 MiB by default at ASSERT=none and at
+#      test runs under the gate's memory cap (`gate mojo --mem-cap-mib`) at
+#      4096 MiB by default at ASSERT=none and at
 #      the cap a target names, and a target that sets none of them has neither
 #      (tools/build/tests/functional/assert_level.sh: aquery, with and
 #      without komira.coverage=true, and a mojo_test's buck2-test command);
-#      mem_cap.sh on a stand-in leaves nothing alive when /proc stops being
+#      mem_cap.sh (the darwin-arm64 toolchain's cap; the gate's cases are its
+#      unit tests, tools/build/run) on a stand-in leaves nothing alive when /proc stops being
 #      readable, it is signalled, or a child left the stand-in's process tree
 #      (tests//functional/mem_cap:cases);
 #      tests//functional/assert_level and tests//functional/mem_cap build (a
@@ -27,7 +29,8 @@
 #      256 MiB test under a 192 MiB cap are killed by the cap
 #      (tests//negative/mem_cap), as a library's gated test and under
 #      `buck2 test`. The time limit of a mojo_test under `buck2 test`:
-#      test_deadline.sh on a stand-in passes the runner's status through at
+#      the gate on linux; test_deadline.sh, the darwin-arm64 toolchain's, on a
+#      stand-in passes the runner's status through at
 #      once, kills the test at its limit and leaves the runner to report it,
 #      and leaves nothing alive (tests//functional/test_deadline:cases); a
 #      mojo_test sleeping past it, with the test runner's timeout at 90 s, is

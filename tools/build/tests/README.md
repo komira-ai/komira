@@ -565,18 +565,20 @@ section run only here, in the nightly self-tests. `buck2 test
 tests//negative/test_data:skip_77` must fail with `GATED TEST FAILED:
 <label> (exit 77)` and count as `Fail 1`: exit 77, "skipped" to automake
 and some harnesses, is a failure. On a pull request that rule is checked
-only by `runner_cases` (below), which runs the runner itself; mapping the
-runner's status to a verdict is Buck2's. Five `bad_*` targets must each fail
+by the runner's own unit tests (below); mapping the runner's status to a
+verdict is Buck2's. Five `bad_*` targets must each fail
 at analysis with their own refusal: a `..` destination, a destination that
 is also another's directory, a `test_data` key that is not a test, a
 runner-owned env name, an env name that is not a variable name. The gate test
 of `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` (built with
 the examples) covers the executable-relative helpers.
-`runner_cases` also runs the runner on a stand-in that kills itself: with
-SIGKILL it must exit 137 and with SIGABRT 134, each with no marker; one that
-exits 77 must exit 77 with no marker; `--arg` values must reach the
-stand-in in order, unexported, with every `@KOMIRA_ACTION_DIR@` replaced by
-the action's directory; and an `--env` after an `--arg` is refused (exit 2).
+The runner's unit tests ([`tools/build/run/mojo_test.zig`](../run/mojo_test.zig),
+welded to the runner, so a pull request that builds any test runs them) run
+it on a test that kills itself: with SIGKILL it must exit 137 and with SIGABRT
+134, each with no marker; one that exits 77 must exit 77 with no marker;
+`--arg` values must reach the test in order, unexported, with every
+`@KOMIRA_ACTION_DIR@` replaced by the action's directory; and an `--env`
+after an `--arg` is refused (exit 2).
 
 ## 30. Optimization levels
 

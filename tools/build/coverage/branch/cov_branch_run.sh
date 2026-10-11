@@ -5,7 +5,7 @@
 # the raw profiles it writes into an indexed profile (README.md,
 # "cov_branch_run").
 #
-# usage: busybox sh <branch_dir>/cov_branch_run.sh <busybox> <gate_runner> <compiler_dir> <label>
+# usage: busybox sh <branch_dir>/cov_branch_run.sh <busybox> <gate> <compiler_dir> <label>
 #            <test_binary> <profdata_out> [--env NAME=VALUE]...
 #
 #   <branch_dir>    the run directory of a cov_branch_dir ([run]): this
@@ -15,17 +15,18 @@
 #   <test_binary>   <root>/bin/<test> of the test's staged tree (the release
 #                   gate's: <root>/share holds its declared data), the binary
 #                   of [coverage][pgo_bin][<test>]
-#   --env           the test's environment, passed to gate_runner.sh as given
+#   <gate>          the gate (tools/build/run), which runs the test as `gate mojo`
+#   --env           the test's environment, passed to the gate as given
 #
 # Steps:
-#   1. gate_runner.sh (unchanged: the release gate's runner) runs the test
+#   1. `gate mojo` (the release gate's runner) runs the test
 #      in the gate's environment (this script exports nothing to it but its
-#      own PATH, which gate_runner replaces) with one more --env,
+#      own PATH, which the gate replaces) with one more --env,
 #      LLVM_PROFILE_FILE=<scratch>/prof/%p.profraw (an
 #      absolute path in this action; %p is the pid, so a child the test
 #      starts writes a profile of its own). The test must pass: when it
 #      fails, so does this action, with the test's output and this script's
-#      message (not gate_runner's banner, which says the release gate's
+#      message (not the gate's banner, which says the release gate's
 #      test failed: that one passed).
 #   2. At least one raw profile was written there; none (the runtime was not
 #      linked, the variable did not reach the test, the test left without
@@ -49,7 +50,7 @@
 # it has no time limit of its own (cov_run.sh has one): a test that hangs
 # holds the action until the executor's timeout.
 #
-# Exit status: the test's when it fails (gate_runner's); 1 when no profile
+# Exit status: the test's when it fails (the gate's); 1 when no profile
 # was written or one is refused; 2 for a usage error.
 set -euf
 # shellcheck disable=SC3040 # busybox sh (ash) has pipefail
@@ -65,7 +66,7 @@ LABEL=$4
 BIN=$(abs "$5")
 OUT=$(abs "$6")
 shift 6
-# What is left is gate_runner's (--env NAME=VALUE...); it checks them.
+# What is left is the gate's (--env NAME=VALUE...); it checks them.
 
 case "${BUCK_SCRATCH_PATH:-}" in
     "") K="$PWD/.cov_branch_run" ;;
@@ -76,8 +77,8 @@ esac
 "$BB" --install -s "$K/bin"
 PATH="$K/bin"
 # LC_ALL=C is set for this script's own tools after the test has run: the
-# test gets the gate's environment, and the gate sets no LC_ALL (gate_runner
-# passes on what it does not set).
+# test gets the gate's environment, and the gate sets no LC_ALL (it passes
+# on what it does not set).
 export PATH
 
 red() {
@@ -95,11 +96,11 @@ case "$RAW" in "" | 0* | *[!0-9]*) echo "cov_branch_run: $HERE/raw_version holds
 
 # 1. The test, under the gate's runner.
 rc=0
-"$BB" sh "$GATE" "$BB" "$TC" "$LABEL" "$BIN" "$K/gate.passed" "$@" \
+"$GATE" mojo --busybox "$BB" --runtime-lib "$TC/lib" --label "$LABEL" --test "$BIN" --marker "$K/gate.passed" "$@" \
     --env "LLVM_PROFILE_FILE=$K/prof/%p.profraw" 2>"$K/gate.err" || rc=$?
 export LC_ALL=C
 if [ "$rc" != 0 ]; then
-    # gate_runner's banner says the release gate's test failed, which it did
+    # The gate's banner says the release gate's test failed, which it did
     # not (this is the branch coverage run). Its other lines, the test's
     # output among them, are kept.
     awk -v H="GATED TEST FAILED: $LABEL (exit $rc)" \

@@ -37,7 +37,7 @@
 #      tests//negative/coverage: branchfail, branchannotate,
 #      branchnoprof and branchversion build green (their release gates),
 #      and branchfail[coverage][branch][test_profile_env] is red (a test
-#      failing only instrumented: the run's message, without gate_runner's
+#      failing only instrumented: the run's message, without the gate's
 #      banner), branchnoprof[...] red (a cov_branch_run.sh copy whose test
 #      gets no LLVM_PROFILE_FILE: no .profraw), branchversion[...] red (a
 #      copy raising each raw profile's version to 12: refused as version 12,
@@ -75,7 +75,7 @@ expect_green coverage_branch tests//functional/coverage:branch_counts tests//fun
     tests//negative/coverage:branchnodebug
 expect_red coverage_branch_test_fails "The test failed instrumented for branch coverage (exit 1)" \
     'tests//negative/coverage:branchfail[coverage][branch][test_profile_env]'
-# The failing run's message is a branch coverage run's: not gate_runner's
+# The failing run's message is a branch coverage run's: not the gate's
 # banner, which would say the release gate's test failed (it passed).
 # A missing log is a failure, not a pass (grep's exit 2 is not "absent").
 if [ ! -f "$LOG/coverage_branch_test_fails.log" ]; then

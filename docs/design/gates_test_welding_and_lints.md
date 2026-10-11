@@ -19,7 +19,7 @@ For a library `L` with import name `I` and tests `t1`, `t2`:
 ```
 mojo precompile  ->  L/ungated/I.mojoc
                        |                    \
-        build t1 against it, run (gate_runner.sh) -> L/tests/t1.passed   "PASS <label>"
+        build t1 against it, run (gate mojo)      -> L/tests/t1.passed   "PASS <label>"
         build t2 against it, run                  -> L/tests/t2.passed
                        |                    /
         cp ungated/I.mojoc  (markers are hidden inputs)  ->  L/pkg/I.mojoc   (the public package)
@@ -71,7 +71,7 @@ The tests reach `ungated` in the rule and never through a label. That is why a b
 
 ### Why does the test run in a staged tree with a fixed environment?
 
-**Decision.** `gate_runner.sh` runs a test from a tree of its own, with a fixed environment, and gives a `test_env` variable to the test process only, never to the runner's own shell. The rule refuses the reserved names, and the script refuses them again.
+**Decision.** The gate (`gate mojo`, `tools/build/run`) runs a test from a tree of its own, with a fixed environment, and gives a `test_env` variable to the test process only: it builds the test's environment itself and reads none of its own state from it. The rule refuses the reserved names, and the gate refuses them again.
 
 **Because.** A test that reaches a file it did not declare passes here and fails somewhere that lacks the file. Staging the declared data under `share/` and running from there makes a relative path reach a declared file and nothing else. Exported into the runner's shell, a variable would reach the values the verdict is computed from, so a `BIN` set in `env` would change what the runner decides. Putting the variable on the test's own command line closes that.
 
@@ -129,7 +129,7 @@ The tests reach `ungated` in the rule and never through a label. That is why a b
 | What | Where |
 |---|---|
 | The gate: compile, tests, copy | `tools/build/mojo/defs.bzl` (`mojo_library`) |
-| The test runner | `tools/build/mojo/gate_runner.sh` |
+| The test runner | `tools/build/run` (`gate`, a Zig executable) |
 | The lint rules | `tools/build/lint/defs.bzl`, `lint.sh` |
 | The pinned linters | `tools/build/lint/BUCK` (shellcheck, actionlint) |
 | The doc tree | `tools/build/lint/doc_tree.bzl`, `includes.bzl` |
