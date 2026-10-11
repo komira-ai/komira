@@ -35,6 +35,8 @@ comptime _FILES: List[String] = [
     "bloom_pruner.mojo",
     "bloom_reader.mojo",
     "byte_stream_split.mojo",
+    "column_decode_context.mojo",
+    "column_reader.mojo",
     "decimal_decode.mojo",
     "decode_arm_trace.mojo",
     "decode_helpers.mojo",
@@ -52,6 +54,7 @@ comptime _FILES: List[String] = [
     "gather_dict.mojo",
     "metadata_parser.mojo",
     "nested.mojo",
+    "nested_decoder.mojo",
     "null_expand.mojo",
     "num_rows_cache.mojo",
     "page_header_parser.mojo",
@@ -64,6 +67,10 @@ comptime _FILES: List[String] = [
     "scan_copy_trace.mojo",
     "selection_vector.mojo",
     "staged_filter_trace.mojo",
+    "subrg_column_cursor.mojo",
+    "subrg_cursor_pages.mojo",
+    "subrg_dbp_trace.mojo",
+    "subrg_scan_route_trace.mojo",
     "thrift_compact.mojo",
 ]
 

@@ -107,7 +107,7 @@
 #
 # `--release-set-hash <64 lowercase hex>` (a selected PUBLISH step or
 # validation): the set hash of the release the run was handed (kci.yml: the
-# build job's, or the validate job's for prod). kci recomputes the release
+# build job's, or the beta_validate job's for prod). kci recomputes the release
 # directory's set and refuses another (KCI-E-SET-HASH, exit 3) before any
 # effect; under GitHub Actions a run that publishes or validates without it
 # is a usage error (dispatch.mojo). It is refused with --affected-by and on a

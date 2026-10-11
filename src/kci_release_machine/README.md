@@ -73,7 +73,7 @@ var machine = parse_machine_file(
     String('schema_version: 1\nstage { name: "release"\n')
     + '  step { name: "build" kind: BUILD platform: "linux-x86_64" artifacts: "d.textproto" }\n'
     + '  step { name: "publish" kind: PUBLISH platform: "linux-x86_64" artifacts: "d.textproto"\n'
-    + '         channels: "c.textproto" channel: "gamma" }\n}\n',
+    + '         channels: "c.textproto" channel: "beta" }\n}\n',
     "machine file",
 )
 var only = List[String]()

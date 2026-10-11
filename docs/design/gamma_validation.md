@@ -11,18 +11,23 @@ channel text; until then, read the rows as history and the channel text as
 today's pipeline, in the vocabulary below.
 
 **Vocabulary.** This document predates the staged pipeline's glossary
-(`docs/design/staged_pipeline.md`, section "Glossary"; a path, not a link,
-until that section is on `main`). Here "gamma" means today's stage that
-publishes to the conda channel `gamma` and installs from it, which the
-glossary calls **beta**; "gamma, installed package" is beta's installs
-(`beta_validate`). The glossary's gamma holds only real cloud resources, and
+([staged_pipeline.md](staged_pipeline.md), section "Glossary"). Its tables
+and notes say "gamma" for the stage that publishes to a test conda channel
+and installs from it: since the rename (M2 in that document's section e3)
+that stage is **`beta`**, its channel `komira-ai/beta`, its jobs `beta` and
+`beta_validate` (the measurements below call that job by its old name,
+`validate`); "gamma, installed package" is beta's installs
+(`beta_validate`). The sections "What is this document for?", "What
+constrains gamma?" and "What runs in gamma today?" use today's names. The
+glossary's gamma holds only real cloud resources and publishes nothing, and
 the "real gamma cloud project" rows are that gamma's.
 
 ## What is this document for?
 
-`gamma` is the stage of komira's release machine that publishes a release to
-the conda channel `gamma` and then validates what it published, before the
-`prod` stage may publish the same set. This document says, for each family of
+`beta` (this document's "gamma", above) is the stage of komira's release
+machine that publishes a release to the conda channel `beta` and then
+validates what it published, before the `prod` stage may publish the same
+set. This document says, for each family of
 packages komira publishes or will publish, what checks the release before
 prod, where each check runs, what it can catch and what it cannot. It keeps
 three things apart that are easy to blur:
@@ -52,23 +57,23 @@ requests merge; issue #779 tracks updating them.
   them is whether an outside contributor can reproduce the run locally
   without an account, a token or a licence.
 - **No stored secret.** Publishing uses trusted publishing (an OIDC identity
-  token, no stored credential), and gamma and prod run kci with
+  token, no stored credential), and beta and prod run kci with
   `--secret-store none` (`.github/workflows/kci.yml`). kci reads secrets only
   through `--secret-store none|env` (`src/kci_cli/args.mojo`).
-- **The validate job holds nothing.** gamma runs as two jobs of `kci.yml`:
-  `gamma` publishes (`--only step:publish`, in the GitHub environment
-  `gamma`), and `validate` runs the validations (`--only validation:<name>`).
-  `validate` runs on a GitHub-hosted `ubuntu-24.04` runner with no farm, no
+- **The beta_validate job holds nothing.** beta runs as two jobs of `kci.yml`,
+  each on a push to `main` only: `beta` publishes (`--only step:publish`, in
+  the GitHub environment `beta`), and `beta_validate` runs the validations
+  (`--only validation:<name>`). `beta_validate` runs on a GitHub-hosted `ubuntu-24.04` runner with no farm, no
   container, no GitHub environment, `contents: read` and no `id-token`, and a
-  60-minute timeout (`.github/workflows/kci.yml`, job `validate`; the header
+  60-minute timeout (`.github/workflows/kci.yml`, job `beta_validate`; the header
   of `release/machine.textproto`). It is the job a validation runs in today.
-- **`validate` is a job, not a stage.** The stages are `build`, `gamma`,
+- **`beta_validate` is a job, not a stage.** The stages are `build`, `beta`,
   `prod` and `pr` (`release/machine.textproto`). This document says "gamma's
-  validations" for what the `validate` job runs.
+  validations" for what the `beta_validate` job runs.
 
 ## What runs in gamma today? (EXISTS)
 
-`release/machine.textproto` gives gamma's PUBLISH step two validations, both
+`release/machine.textproto` gives beta's PUBLISH step two validations, both
 of kind `CONDA_INSTALL_ENV` with `smoke: README`:
 
 | validation | installs | runs |
@@ -76,7 +81,7 @@ of kind `CONDA_INSTALL_ENV` with `smoke: README`:
 | `install-komira-encoding` | `komira_encoding` alone | its README examples |
 | `install-set` | `komira_all` alone; kci reads the members from the built metapackage's requirements | every member's README examples |
 
-Each one installs from the `gamma` channel with the pinned pixi, in a fresh
+Each one installs from the `beta` channel with the pinned pixi, in a fresh
 scratch directory outside the checkout and an environment built from nothing
 (`src/kci_validate/env.mojo`), checks each installed README's sha256 against
 the release's record, and runs every ` ```mojo ` block of every installed
