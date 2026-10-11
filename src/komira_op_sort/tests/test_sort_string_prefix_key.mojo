@@ -314,7 +314,7 @@ def test_prefix_key_nulls() raises:
 
 
 def _make_wide_value(i: Int) -> String:
-    """Mirror bench/engine/sa_string_movement.mojo::_make_wide_value."""
+    """A wide value: a shared 7-byte prefix, an ordinal, then padding."""
     var KEY_BYTES_MIN = 48
     var KEY_BYTES_MAX = 64
     var target = KEY_BYTES_MIN + (i % (KEY_BYTES_MAX - KEY_BYTES_MIN + 1))
