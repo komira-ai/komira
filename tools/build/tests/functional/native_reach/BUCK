@@ -12,9 +12,11 @@ filegroup(
             "archive_no_row",
             "archive_no_row_through_c_dep",
             "archive_owner_missing",
+            "archive_refused_in_second_dep",
             "call_in_comment",
             "call_owner_missing",
             "call_quoting",
+            "objects_no_row",
             "owner_through_mojo_dep",
             "vendored_owner_missing",
         ]

@@ -8,5 +8,13 @@ cxx_library(
     visibility = [
         "//negative/native_reach:archive_no_row",
         "//negative/native_reach:needs_no_row",
+        "//negative/native_reach:archive_refused_in_second_dep",
     ],
+)
+
+cxx_library(
+    name = "no_row_objects",
+    srcs = ["no_row.c"],
+    use_archive = False,
+    visibility = ["//negative/native_reach:objects_no_row"],
 )

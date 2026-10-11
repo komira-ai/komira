@@ -124,3 +124,27 @@ native_reach_case(
     expect_archives = ["links tests//third_party/native_reach_no_row:no_row through tests//negative/native_reach:needs_no_row: third_party/native_reach_no_row has no row in THIRD_PARTY_OWNERS"],
     visibility = _PUBLIC,
 )
+
+# Two C deps, the refused archive not first, and a Mojo dep last: every
+# entry of `deps` is checked, not only the first or the last.
+native_reach_case(
+    name = "archive_refused_in_second_dep",
+    srcs = ["plain.mojo"],
+    deps = [
+        "komira//src/komira_fs:komira_fs_posix",
+        "//third_party/native_reach_no_row:no_row",
+        "komira//src/komira_fs:komira_fs",
+    ],
+    expect_archives = ["links tests//third_party/native_reach_no_row:no_row: third_party/native_reach_no_row has no row in THIRD_PARTY_OWNERS"],
+    visibility = _PUBLIC,
+)
+
+# A C library linked as objects, not an archive (use_archive = False): the
+# check reads an ObjectsLinkable's owner too.
+native_reach_case(
+    name = "objects_no_row",
+    srcs = ["plain.mojo"],
+    deps = ["//third_party/native_reach_no_row:no_row_objects"],
+    expect_archives = ["links tests//third_party/native_reach_no_row:no_row_objects: third_party/native_reach_no_row has no row in THIRD_PARTY_OWNERS"],
+    visibility = _PUBLIC,
+)

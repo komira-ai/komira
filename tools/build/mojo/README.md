@@ -854,7 +854,8 @@ The check's cases are `native_reach_case` targets in
 runs the same check on a library's sources and deps with one planted defect
 (an archive whose owner is missing, an archive a C dep needs, a third_party
 archive with no owner row, named or reached through a C dep, or a row with no
-owner, a prefixed `external_call` with no archive dep, the scanner's quoting)
+owner, an archive in a dep that is not first, an archive linked as objects, a
+prefixed `external_call` with no archive dep, the scanner's quoting)
 and builds only while the check refuses it with the named error, or passes a
 correct tree. Two cases sit outside `src/tests/`, in `tests//src/native_reach`
 and `tests//src/tests_native_reach` (sharing the prefix without the slash), so
