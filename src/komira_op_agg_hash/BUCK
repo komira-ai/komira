@@ -20,6 +20,7 @@ mojo_library(
         "tests/test_flat_hash_agg.mojo",
         "tests/test_flat_hash_partition_flush.mojo",
         "tests/test_max_perfect_hash_domain.mojo",
+        "tests/test_minmax_float_order.mojo",
         "tests/test_partitioned_and_perfect.mojo",
     ],
     visibility = ["PUBLIC"],
