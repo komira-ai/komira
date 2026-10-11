@@ -20,7 +20,11 @@ parallel SEMI / ANTI mark join (`residual_semi_anti_parallel`) and their
 witnesses (`residual_latemat_counter`, `residual_mark_counter`); the join
 probe over whole batches, every join type and strategy (`join_probe`), with
 the sort-merge joins (`join_probe_sort_merge`, `sort_merge_join_outer`) and
-the join output schema (`join_output_schema`). Float keys follow the query
+the join output schema (`join_output_schema`); and the streaming join probe
+operators over a morsel: the single-key `JoinProbeOp` (`join_probe_op`, its
+worker slots and helpers `join_probe_op_state`, its deferred drain
+`join_probe_op_deferred`, the 4-byte index sink `join_probe_narrow`) and the
+composite-key `MultiKeyJoinProbeOp` (`multi_key_probe_op`). Float keys follow the query
 semantics' float model.
 Settings are set once per process from flags (`join_probe_settings`); nothing
 here reads the environment.
