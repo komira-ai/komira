@@ -6,25 +6,43 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "cov_link_dir", "cov_run_dir", "kcov_tool", "kcov_tool_cases")
 
 # debug_relocate: a directory path in a file overwritten by a placeholder of
-# the same length.
-zig_exe(
-    name = "debug_relocate_exe",
+# the same length. Its cases (debug_relocate_test.zig, which imports the tool)
+# run as a build action, `zig test`; the executable is built behind them, so
+# it does not exist unless they pass.
+zig_test(
+    name = "debug_relocate_unit",
     exec_compatible_with = LINUX_X86_64,
-    src = "debug_relocate.zig",
+    imports = ["debug_relocate.zig"],
+    src = "debug_relocate_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
 )
 
-kcov_tool_cases(
-    name = "debug_relocate_cases",
+zig_exe(
+    name = "debug_relocate_exe",
     exec_compatible_with = LINUX_X86_64,
-    script = "debug_relocate_cases.sh",
-    tool = ":debug_relocate_exe",
+    src = "debug_relocate.zig",
+    unit_tests = [":debug_relocate_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# The shipped executable run as a process (debug_relocate_exe_test.zig): exit
+# 0, 1 and 2, the counts on stdout and the messages on stderr. It runs the
+# executable, so it cannot be an input of it; it is a validation of the
+# public target instead.
+zig_test(
+    name = "debug_relocate_exe_test",
+    exec_compatible_with = LINUX_X86_64,
+    exes = {"debug_relocate": ":debug_relocate_exe"},
+    src = "debug_relocate_exe_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 kcov_tool(
     name = "debug_relocate",
-    cases = [":debug_relocate_cases"],
+    cases = [":debug_relocate_exe_test"],
     exec_compatible_with = LINUX_X86_64,
     exe = ":debug_relocate_exe",
     visibility = ["PUBLIC"],
@@ -143,6 +161,5 @@ shell_lint(
     srcs = [
         "cov_run.sh",
         "cov_zig_cases.sh",
-        "debug_relocate_cases.sh",
     ],
 )

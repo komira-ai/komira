@@ -413,33 +413,38 @@ sources refused, sources named by another directory refused before kcov
 runs, and kcov refused by the executor named as such.
 
 Each tool's cases run as a build action that fails on the first wrong
-result. `cov_normalize` has two sets, both `zig_test`s. Its unit tests
-([cov_normalize_test.zig](cov_normalize_test.zig), `:cov_normalize_unit`)
-import the tool and call `entry`, the program but for the process; its
-executable is built behind them (`unit_tests`), so it does not exist unless
-they pass. They build the tool from source in `zig test`'s own mode, so they
-are not the shipped bytes. The process cases
-([cov_normalize_exe_test.zig](cov_normalize_exe_test.zig),
+result. `debug_relocate` and `cov_normalize` each have two sets, both
+`zig_test`s. Their unit tests ([debug_relocate_test.zig](debug_relocate_test.zig),
+`:debug_relocate_unit`; [cov_normalize_test.zig](cov_normalize_test.zig),
+`:cov_normalize_unit`) import the tool and call `entry`, the program but for
+the process; its executable is built behind them (`unit_tests`), so it does
+not exist unless they pass. They build the tool from source in `zig test`'s
+own mode, so they are not the shipped bytes. The process cases
+([debug_relocate_exe_test.zig](debug_relocate_exe_test.zig),
+`:debug_relocate_exe_test`; [cov_normalize_exe_test.zig](cov_normalize_exe_test.zig),
 `:cov_normalize_exe_test`) take the shipped executable (`exes`) and run it as
-a child process: exit 0 with the golden output, exit 1 with a refusal and
-exit 2 with the usage line, each message on stderr and nothing on stdout.
-They are a validation of the public target `:cov_normalize`. The other tools'
-cases are scripts (`kcov_tool_cases` in [defs.bzl](defs.bzl)), and the public
-target (`:debug_relocate`, `:cov_zig`) depends on them. `:cov_link` and
-`:cov_run` take the public targets, so a coverage build is gated by their
-cases. The cases of `cov_zig` also take `:debug_relocate` and the pinned zig
-(`helpers`). Buck2 runs a dependency's validations with any build that uses
-it, so the tool cannot be built, or used, unless its cases pass. The public
-target and its script or process cases take the executable as an `exec_dep`
-on the same execution platform, so those cases test the very binary the
-public target hands out; the unit tests do not.
+a child process: exit 0, exit 1 with a refusal and exit 2 with the usage
+line, each message on stderr and on stdout only what the tool prints there
+(`debug_relocate`'s counts; nothing for `cov_normalize`). They are a
+validation of the public target (`:debug_relocate`, `:cov_normalize`).
+The cases of `cov_zig` are a script (`kcov_tool_cases` in [defs.bzl](defs.bzl)),
+and the public target `:cov_zig` depends on them; they also take
+`:debug_relocate` and the pinned zig (`helpers`). `:cov_link` and `:cov_run`
+take the public targets, so a coverage build is gated by their cases. Buck2
+runs a dependency's validations with any build that uses it, so the tool
+cannot be built, or used, unless its cases pass. The public target and its
+script or process cases take the executable as an `exec_dep` on the same
+execution platform, so those cases test the very binary the public target
+hands out; the unit tests do not.
 
 The cases that need a write to fail set a file size limit (`ulimit -f` in a
 script, `setrlimit` in a unit test, with `SIGXFSZ` ignored), so the write
 fails with `EFBIG` part way; a probe first checks that the limit stops a
 plain write.
 
-`debug_relocate_cases.sh`:
+[debug_relocate_test.zig](debug_relocate_test.zig) runs `debug_relocate` as
+its `main` does (`entry`: the arguments, a working directory of the test's
+own, stdout, stderr) over small files and ELF files it writes byte by byte:
 
 | case | proves | a defect it catches |
 |---|---|---|
@@ -447,14 +452,14 @@ plain write.
 | followed by `/` | a path under the directory is rewritten | |
 | followed by `x` | exit 1 naming offset 39, and the file byte for byte unchanged although an earlier occurrence was rewritable | no check on the following byte |
 | at the end of the file | refused the same way | |
-| two directories, several occurrences | each counted and rewritten; permission bits 757 kept (other-write, which umask 022 clears) | stopping after the first occurrence; no `chmod` after the temporary file |
+| two directories, several occurrences | each counted and rewritten; permission bits 757 kept (other-write, which the umask 022 the test sets clears) | stopping after the first occurrence; no `chmod` after the temporary file |
 | 7-byte, relative, trailing-`/` directory, none | exit 2 with usage, file unchanged | no length floor |
 | 8-byte directory | accepted and rewritten | a floor of 9 (`<=` for `<`) |
 | no occurrence | `0 <dir>`, exit 0, unchanged | |
 | second directory refused | exit 1 naming the second directory's offset, nothing printed, file unchanged although the first had been rewritten in memory | writing after each directory |
 | symbolic link | exit 1, the link still a link, its target unchanged | the link replaced by a regular file |
 | failed write | exit 1, file unchanged, no temporary file left | exiting without removing the temporary file |
-| failed stdout | exit 1 and the file unchanged | printing the counts after the rename |
+| failed stdout | a stdout whose every write fails: exit 1 and the file unchanged | printing the counts after the rename |
 | compressed section | an ELF64 file whose second section has `SHF_COMPRESSED` (0x800) is refused, exit 1 naming the section, nothing printed, untouched, although its directory is rewritable | no check (red-first: it failed before the check existed); a mask other than 0x800 |
 | uncompressed ELF | the same file with flags 0x2 is relocated as any file | refusing every ELF file |
 | idempotent | the relocated file again: `0 <dir>`, exit 0, same bytes, same inode | a placeholder that holds the directory; writing a file with no occurrence |
