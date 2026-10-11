@@ -25,6 +25,12 @@
 #   misses) is 400 invalid_target; a scope token outside the record's (first
 #   or last) is 400 invalid_scope; the request parse's own codes pass through
 #   with 400.
+# - test_refusal_order: the header order of token_endpoint.mojo between
+#   codes: a request that fails a client step (unknown client, a record with
+#   only a jwks_uri, another key, expired, a replayed jti) is 401
+#   invalid_client whatever its resource and scope; one refused for both its
+#   resource and its scope is 400 invalid_target; a first use refused for
+#   its resource, its scope or both still spends the jti.
 # - test_metadata_document: the RFC 8414 document's exact bytes, read back
 #   by komira_oauth for the issuer.
 # - test_register_refusals: each refusal of register and remove.
@@ -341,6 +347,64 @@ def test_request_refusals() raises:
     assert_equal(r.body, '{"error":"invalid_request"}')
 
 
+def test_refusal_order() raises:
+    var i = _ready()
+    var by_uri = ClientMetadata.with_jwks_uri(
+        client_id="client-u", client_name="", signing_alg="ES256", scope="",
+        jwks_uri="https://client-u.example/keys", resource_types=List[String](),
+    )
+    i.register_client(by_uri, _resources(RESOURCE))
+    var other = derived_key("ES256", "someone else", 0)
+    var misses = String("")
+    var bad_resource = String("https://elsewhere.example/")
+    # A request past a failed client step: its resource refused, its scope
+    # refused, or both.
+    var shape_resource = _resources(bad_resource, RESOURCE, bad_resource)
+    var shape_scope = _resources("", "admin", "admin")
+    var shape_name = _resources("resource", "scope", "resource and scope")
+    var spent = _assertion(CLIENT, NOW, jti="spent")
+    if _outcome(i, _form(spent)) != "200":
+        misses += String("first use of the assertion to replay refused\n")
+    for k in range(3):
+        var tag = String(k)
+        var early_name = List[String]()
+        var early = List[String]()
+        early_name.append("unknown client")
+        early.append(_assertion("client-9", NOW, jti=String("u") + tag))
+        early_name.append("a record with only a jwks_uri")
+        early.append(_assertion("client-u", NOW, jti=String("w") + tag))
+        early_name.append("signed by another key")
+        early.append(other.sign(assertion_claims(issuer=CLIENT, subject=CLIENT, audience=ISS, now=NOW, ttl_s=60, jti=String("x") + tag).as_bytes(), String("JWT")))
+        early_name.append("expired")
+        early.append(_assertion(CLIENT, NOW - 200, jti=String("e") + tag))
+        early_name.append("replayed jti")
+        early.append(spent)
+        for e in range(len(early)):
+            var got = _outcome(i, _form(early[e], resource=shape_resource[k], scope=shape_scope[k]))
+            if got != "401 invalid_client":
+                misses += early_name[e] + " with a refused " + shape_name[k] + " -> " + got + "\n"
+    # The resource answers before the scope.
+    var resources = _resources(bad_resource, "https://pdp.example/v2")
+    var scopes = _resources("admin", "read admin", "admin read")
+    for r in range(len(resources)):
+        for s in range(len(scopes)):
+            var a = _assertion(CLIENT, NOW, jti=String("rs-") + String(r) + "-" + String(s))
+            var got = _outcome(i, _form(a, resource=resources[r], scope=scopes[s]))
+            if got != "400 invalid_target":
+                misses += String("resource ") + resources[r] + " and scope " + scopes[s] + " -> " + got + "\n"
+    # A first use refused for its resource, its scope or both spends the jti.
+    var first_code = _resources("400 invalid_target", "400 invalid_scope", "400 invalid_target")
+    for k in range(3):
+        var a = _assertion(CLIENT, NOW, jti=String("spend-") + String(k))
+        var got = _outcome(i, _form(a, resource=shape_resource[k], scope=shape_scope[k]))
+        if got != first_code[k]:
+            misses += String("first use with a refused ") + shape_name[k] + " -> " + got + "\n"
+        var again = _outcome(i, _form(a))
+        if again != "401 invalid_client":
+            misses += String("reuse after a refused ") + shape_name[k] + " -> " + again + "\n"
+    assert_equal(misses, "")
+
+
 def test_metadata_document() raises:
     var i = _issuer()
     assert_equal(i.token_endpoint_url(), ENDPOINT)
@@ -408,6 +472,10 @@ def main() raises:
         test_request_refusals()
     except e:
         failures += String("test_request_refusals: ") + String(e) + "\n"
+    try:
+        test_refusal_order()
+    except e:
+        failures += String("test_refusal_order: ") + String(e) + "\n"
     try:
         test_metadata_document()
     except e:
