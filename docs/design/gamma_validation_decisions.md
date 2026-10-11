@@ -59,7 +59,7 @@ whose rules `kci run` applies to the workflow it runs under (item 7).
      sweeper and keeps billing, so the program's own cleanup (delete, list
      again, CLEAN or fail) is required, with the sweeper as the backstop.
 6. For the release revision: a run of every derived check
-   (`release/ci/derive_checks.py`), not only the affected ones, before or
+   (`//tools/build/ci:derive_checks`), not only the affected ones, before or
    alongside the `build` stage, so the standalone e2e and conformance checks
    gate a release and not only the pull requests that reached them. It is
    unsized: the `build` job has `timeout-minutes: 120` (`kci.yml`) and its

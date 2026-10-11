@@ -180,12 +180,12 @@ for, by its validated hash (and, under the staged pipeline, gamma's as well).
    the `TEST` step, `buck2 build` then `buck2 test` over the same targets: the build runs the welded
    `test_srcs`, the test runs the standalone tests a build never runs, and dropping either is a
    planted mutant there (its slice P3). A failure fails `build`, so nothing reaches the beta
-   channel. **The list is derived, not kept by hand**: it is every check `release/ci/derive_checks.py` derives whose targets depend on a declared
+   channel. **The list is derived, not kept by hand**: it is every check `//tools/build/ci:derive_checks` derives whose targets depend on a declared
    library, the emulator and fixture tiers included. A new standalone test of a released library, or a
    newly declared library, joins the gate with no edit. This is decision item 6 of
    [gamma validation decisions](gamma_validation_decisions.md#what-kci-must-add-to-run-service-validations-in-gamma)
    restricted to the released set's reverse dependencies. **That restriction is PROPOSED S10c work:**
-   `derive_checks.py` today groups targets by path and has no reverse-dependency filter; S10c adds one
+   `derive_checks` today groups targets by path and has no reverse-dependency filter; S10c adds one
    through `buck2 cquery "rdeps(<standalone tests>, <declared libraries>)"`. It is sized before it gates: S10c's first
    task measures its wall time and farm cost on a release revision and writes both here. It gates only
    if the measured time plus the 95th-percentile `build` time fits under `build`'s 120 minutes with a
@@ -334,7 +334,7 @@ reason from a closed set: `NATIVE`, `DLOPEN`, `NO_README`, `UNDECLARED_DEP`, `NO
 
 It is not welded into `kci_release_set`: that would make kci's build depend on every library's
 `[conda_status]`, so kci would rebuild whenever any library changed, which is the slowness #1153 is
-about. As a standalone target it is derived by `derive_checks.py`, runs in the pull-request check
+about. As a standalone target it is derived by `derive_checks`, runs in the pull-request check
 whenever `release/` or a library changes, and is a release check (S10c). There is no "the ledger only
 shrinks" rule: a test that sees one tree has no history to compare with. A new library that nobody
 declares or lists turns the check red. The day #835 lands, the `NATIVE` rows become declare work, and
@@ -362,7 +362,7 @@ the defect (an emulator descriptor pointing at a missing file) and the test must
 `src/tests/emulator/<family>/`. Each one starts its emulator as a pinned process inside the test
 action. They run in three places:
 
-- in the pull-request check when they are affected (`release/ci/derive_checks.py` derives them like any
+- in the pull-request check when they are affected (`//tools/build/ci:derive_checks` derives them like any
   other standalone check);
 - on every release revision, as release checks (S10c);
 - on a developer's machine with the same command.
