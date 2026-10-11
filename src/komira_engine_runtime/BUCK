@@ -1,11 +1,12 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The engine's execution primitives, with no algorithm logic. So far: the host
-# profile (measured once per host), hardware and topology detection and the
-# async runtime built from them, morsel sizing as a pure function of the host
-# profile and the segment (recorded in the physical plan), the dispatch-time
-# fan-out grain, and the run and segment execution context. It depends on no
-# engine package above it.
+# The engine's execution primitives, with no algorithm logic: the host profile
+# (measured once per host), hardware and topology detection and the async
+# runtime built from them, morsel sizing as a pure function of the host profile
+# and the segment (recorded in the physical plan), the dispatch-time fan-out
+# grain, the run and segment execution context, wake primitives, counters, and
+# the small shared row and column helpers. It depends on no engine package
+# above it.
 mojo_library(
     name = "komira_engine_runtime",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -14,13 +15,17 @@ mojo_library(
         "//src/komira_async:komira_async",
         "//src/komira_async_api:komira_async_api",
         "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_host:komira_host",
         "//src/komira_morsel:komira_morsel",
         "//src/komira_physical_plan:komira_physical_plan",
     ],
     test_srcs = [
         "tests/test_cb20_morsel_count_mechanism.mojo",
+        "tests/test_counters.mojo",
+        "tests/test_fnv1a_and_wake.mojo",
         "tests/test_hardware_profile.mojo",
         "tests/test_hardware_profile_detect.mojo",
         "tests/test_hardware_topology.mojo",
@@ -30,6 +35,7 @@ mojo_library(
         "tests/test_l1_chunk_sizing.mojo",
         "tests/test_machine_topology.mojo",
         "tests/test_morsel_sizing_policy.mojo",
+        "tests/test_row_group_ref_borrow.mojo",
         "tests/test_segment_execution.mojo",
         "tests/test_streaming_microbench.mojo",
         "tests/test_wave_uaf_batch_shape.mojo",
