@@ -18,7 +18,9 @@ from sha256-pinned downloads, using the rules in
 kcov, the line coverage tool, is built from its pinned source in its own
 package, [`kcov/`](kcov/README.md). The LLVM pieces of branch coverage (Mojo's
 own lld, and the LLVM 23 profile runtime and llvm-profdata) are unpacked and
-checked in [`llvm_branch/`](llvm_branch/README.md).
+checked in [`llvm_branch/`](llvm_branch/README.md). What the loader maps for
+the programs of kcov, the LLVM pieces and the git oracle is read from their
+ELF files by one tool, [`loader_closure/`](loader_closure/README.md).
 
 The buck2 binary, and with it the bundled prelude, is pinned separately by
 [`tools/buck2`](../../buck2) ([DEVELOPMENT.md](../../../DEVELOPMENT.md#1-get-buck2)).

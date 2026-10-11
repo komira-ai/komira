@@ -16,6 +16,12 @@ service; it holds what every client shares:
   fetcher it chose (metadata server, service-account key, self-signed JWT,
   authorized_user). Workload identity federation's `external_account` files
   are refused by name.
+- **Who a token is.** `token_info_request` builds the POST that asks
+  Google's token-information endpoint who an access token belongs to (the
+  token in the form body, never the URL), `parse_token_info` reads the
+  answer (`TokenInfo.principal()`: the email, else the subject, else the
+  authorized party), and `fetch_token_info` sends it over a
+  `GcpHttpTransport`. No googleapis proto declares the endpoint.
 - **Errors.** `parse_gcp_status` and `gcp_status_error` turn a non-2xx answer
   into an error naming the verb, the method, the HTTP status and the
   canonical `google.rpc.Code`, counting bytes and never quoting the body;
@@ -30,7 +36,8 @@ service; it holds what every client shares:
 
 Only `sources.mojo` (`ProcessEnv`) reads the process environment, and only
 the variables Google's auth libraries read. The only connections the package
-opens are the token fetches, over the connectors its caller gives.
+opens are the token fetches and the token-information read, over the
+connectors its caller gives.
 
 ## Examples
 
@@ -181,4 +188,22 @@ try:
 except e:
     raised = String(e)
 assert_equal(raised, String(ADC_NOT_FOUND))
+```
+
+Who a token is: the request carries the token in its form body, and the
+answer's principal is its email:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from komira_gcp_core import TokenHttpResponse, parse_token_info, token_info_request
+
+var req = token_info_request("ya29.a/b")
+assert_equal(req.method, "POST")
+assert_equal(req.target, "/tokeninfo")
+assert_equal(req.body_text(), "access_token=ya29.a%2Fb")
+var body = List[UInt8]()
+body.extend(Span(String('{"email":"deployer@demo-project.example","sub":"42","expires_in":"3599"}').as_bytes()))
+var info = parse_token_info(TokenHttpResponse(200, body^))
+assert_equal(info.principal(), "deployer@demo-project.example")
+assert_equal(info.expires_in, 3599)
 ```
