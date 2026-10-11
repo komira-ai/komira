@@ -77,8 +77,8 @@
 #           is `pr / check`; the machine file declares exactly one
 #           PULL_REQUEST stage and the job runs it, `kci run --stage <it>`;
 #         * the `pull_request` trigger ALONE (no push, workflow_dispatch,
-#           pull_request_target, workflow_run, ...); no other job (no gamma,
-#           prod, validate or build job, no second job holding an
+#           pull_request_target, workflow_run, ...); no other job (no beta,
+#           beta_validate, prod or build job, no second job holding an
 #           environment, a secret or `id-token: write`);
 #         * the job carries the condition `if: github.event.pull_request.head.
 #           repo.full_name == github.repository` (bare, or exactly `${{ <it>
@@ -766,7 +766,7 @@ def check_pull_request_workflow(
     read` and the farm connection's `id-token: write`, R5, R10, R11, R12, R14,
     and `check_pull_request_job`'s same-repository condition, pinned runner,
     full history and `--affected-by`); no secret anywhere (`check_no_secret`);
-    every `uses:` pinned (R8). Any other job (a gamma, prod, validate or build
+    every `uses:` pinned (R8). Any other job (a beta, beta_validate, prod or build
     job, a second job holding `id-token: write`, an `environment`) is a
     finding: it is no part of the pull request's check."""
     var findings = List[String]()
@@ -842,7 +842,7 @@ def check_pull_request_workflow(
         findings.append(
             _at(doc, job_nodes[i]) + String("R1: job '") + job_ids[i] + String("' is not the one job `")
             + String(PULL_REQUEST_JOB_ID) + String("` of pr.yml: only the PULL_REQUEST stage '") + st.name
-            + String("' runs here, so no gamma, prod, validate, build or other job, and no second job holding")
+            + String("' runs here, so no beta, beta_validate, prod, build or other job, and no second job holding")
             + String(" an environment, a secret or `id-token: write`")
         )
     if found < 0:

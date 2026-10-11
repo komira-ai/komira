@@ -24,6 +24,16 @@ Every failure is `VALIDATION_FAILED` (exit 7); under `--plan` nothing runs.
 An ENV validation can install from a local `file:///` channel instead
 (`FileChannelTransport`).
 
+The native install checks (`check_native_install`, `native_install.mojo`)
+read a library's installed native files against its `metadata.json`
+`lib_files` rows `{kind, path, sha256}` (as `komira_pack conda` writes them):
+each file present with its sha256 and mode (a `shared` `.so` 755, a `static`
+archive 644), the `link` a symbolic link resolving to the `.so`, nothing
+extra under `lib/`; the one `__glibc >=2.34` requirement; each `.so`'s
+`NEEDED` resolving inside the environment with `LD_LIBRARY_PATH` unset, and
+`DF_SYMBOLIC`. `loaded_from_findings` reads the loader's `LD_DEBUG=libs`
+record. Nothing calls them yet: beta's install job will.
+
 Processes, the channel and waits go through seams (`ProcessRunner`,
 `PkgTransport`, `Sleeper`); the pure pieces (the generated program, the
 `pixi.toml`, argv lists, the child environment) are public and shown below.
@@ -96,6 +106,30 @@ assert_equal(
     + "komira_encoding = { version = \"==1.0.0\", build = \"h0a1b2c3d_7\","
     + " channel = \"https://conda.example.invalid/example/gamma\" }\n"
     + "mojo-compiler = { version = \"==1.0.0\", channel = \"https://conda.example.invalid/max\" }\n",
+)
+```
+
+A library's `lib_files` rows must agree with each other before any file is
+read:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from kci_release_set import LibFile
+from kci_validate import lib_rows_findings, link_name_of
+
+assert_equal(link_name_of("lib/libkomira_crypto_native.so.1"), "lib/libkomira_crypto_native.so")
+
+var so = LibFile()
+so.kind = "shared"
+so.path = "lib/libkomira_crypto_native.so.1"
+so.sha256_hex = "a" * 64
+var rows = List[LibFile]()
+rows.append(so^)
+var findings = lib_rows_findings(rows)
+assert_equal(len(findings), 1)
+assert_equal(
+    findings[0],
+    "the shared row lib/libkomira_crypto_native.so.1 has 0 link rows; it must have one, lib/libkomira_crypto_native.so",
 )
 ```
 

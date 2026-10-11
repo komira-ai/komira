@@ -1,7 +1,7 @@
 # The pull request's check (docs/ci.md, "pr.yml"): the machine file's `pr` stage
 # (release/machine.textproto) as the ONE job of this workflow, so the required
 # status check is `pr / check` (workflow name `pr`, job id `check`) and a pull
-# request never shows a skipped gamma, validate, prod or build job. The release
+# request never shows a skipped beta, beta_validate, prod or build job. The release
 # is .github/workflows/kci.yml, which has no `pull_request` trigger.
 #
 # HAND-WRITTEN, and held to the machine file the way kci.yml is: `kci run`

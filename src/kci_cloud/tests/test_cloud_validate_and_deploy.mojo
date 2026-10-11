@@ -72,6 +72,7 @@ from kci_reconciler import (
 from kci_resource_proto.resource import Resource, ResourceList
 
 from kci_cloud import (
+    RegistryLogin,
     GrantEdge,
     CloudAdapter,
     Absence,
@@ -353,7 +354,7 @@ struct _Stub(CloudAdapter, Movable):
         return l^
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
-        return ArtifactNeed(String("oci-image"), String("linux/amd64"))
+        return ArtifactNeed(String("OCI"), String("linux/amd64"))
 
     def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]) raises -> List[LoweredNode]:
         var owner = r.id.copy()
@@ -433,6 +434,12 @@ struct _Stub(CloudAdapter, Movable):
                 Finding(FINDING_CELL, String("(cell)"), String("trust"), creds.token + String(" is not deployer"))
             )
         return l^
+
+    def image_registry(self, ctx: CellContext) -> String:
+        return String("")
+
+    def registry_login(mut self, creds: Creds) raises -> RegistryLogin:
+        return RegistryLogin(String(""), String(""))
 
 
 def _ctx() -> CellContext:
@@ -709,7 +716,7 @@ def test_id_grammar_platform_and_secret_rules() raises:
         _has(
             pt,
             'mac|service.image.platform|platform "darwin/arm64" is not deployable on cloud'
-            ' "full": it runs oci-image for linux/amd64',
+            ' "full": it runs OCI for linux/amd64',
         ),
         pt,
     )
@@ -844,7 +851,7 @@ def test_the_adapter_interface_and_the_label_rule() raises:
     var tf = full.trust_check(Creds(String("intruder")), scope)
     assert_equal(len(tf), 1)
     assert_equal(tf[0].kind, FINDING_CELL)
-    assert_equal(full.required_artifact(_list(_good())[0]).kind, "oci-image")
+    assert_equal(full.required_artifact(_list(_good())[0]).kind, "OCI")
 
     # the standard label rule: born with the object, decoded exactly
     var store = InMemoryStateStore()

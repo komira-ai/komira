@@ -66,6 +66,7 @@ from kci_resource_proto.resource import Resource, ResourceList
 from kci_cloud import (
     data_findings,
     table_key_text,
+    RegistryLogin,
     GrantEdge,
     CloudAdapter,
     Absence,
@@ -269,7 +270,7 @@ struct _Data(CloudAdapter, Movable):
         return List[Finding]()
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
-        return ArtifactNeed(String("oci-image"), String("linux/amd64"))
+        return ArtifactNeed(String("OCI"), String("linux/amd64"))
 
     def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]) raises -> List[LoweredNode]:
         var out = List[LoweredNode]()
@@ -335,6 +336,12 @@ struct _Data(CloudAdapter, Movable):
 
     def trust_check(mut self, creds: Creds, scope: CellScope) raises -> List[Finding]:
         return List[Finding]()
+
+    def image_registry(self, ctx: CellContext) -> String:
+        return String("")
+
+    def registry_login(mut self, creds: Creds) raises -> RegistryLogin:
+        return RegistryLogin(String(""), String(""))
 
 
 def _owned(node: String, retained: Bool) -> OwnedRecord:

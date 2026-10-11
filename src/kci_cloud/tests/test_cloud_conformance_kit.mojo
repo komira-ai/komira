@@ -2,32 +2,27 @@
 # test_cloud_conformance_kit.mojo
 # =============================================================================
 #
-# The conformance kit (conformance.mojo) over a small working cloud defined
-# here, `kit` (the fake clouds live in kci_cloud_fake, which depends on this
-# package). It keeps its objects in memory; a constructor argument names one
-# DEFECT it plants, so each check of the kit is seen to fail on the adapter
-# it exists to catch, naming its step.
+# The conformance kit (conformance.mojo) over `kit`, a small working cloud
+# kept in memory (the fakes are kci_cloud_fake, which depends on this one); a
+# constructor argument names one DEFECT it plants, so each check of the kit
+# is seen to fail, naming its step, on the adapter it exists to catch.
+# 1. A WORKING CLOUD PASSES all fifteen steps: a grant resource (no cloud
+#    name: step 13 passes over it), an internal service reading a public
+#    one's URL, the public one. Step 13's release leaves its object, bare.
+# 2. STEPS 1 TO 6 REFUSE: a cloud not empty, a plan node not lowered, a plan
+#    verb other than create on an empty cloud, a node with no owner, a dry
+#    run that mutates; an apply that stops (what landed and is pending), a
+#    node not created, a wrong live count; a label the rule refuses, another
+#    identity, the other retention mark; a re-apply that does not settle or
+#    that mutates; a tamper node not planned, each half of the tamper pair,
+#    a settling apply that mutates or loses the unmodelled field, a lowering
+#    that drops the node edited out of band; a failed node not planned, not
+#    updated, or fixed by changing another. (7-13: _late; 14, 15: _member.)
 #
-# 1. A WORKING CLOUD PASSES all thirteen steps, on a graph with a grant
-#    resource (no cloud name, so step 13 passes over it), an internal service
-#    reading a public one's URL, and the public one. Step 13 leaves the object
-#    it released standing, unstamped, under its name.
-# 2. STEPS 1 TO 6 REFUSE: a cloud that is not empty, a plan with a node the
-#    file does not lower, a plan verb other than create on an empty cloud, a
-#    plan with no owner, a dry run that mutates; an apply that stops (what
-#    landed, what is pending), a node not created, a live count that
-#    disagrees; a label the standard rule refuses, another identity, the
-#    other retention mark; a re-apply that does not settle or that mutates;
-#    a tamper node the plan does not hold, each half of the tamper pair, a
-#    settling apply that mutates or loses the unmodelled field, and a
-#    lowering that leaves out the node edited out of band;
-#    a failed node not planned, not updated, or fixed by changing another.
-# (Steps 7 to 13: test_cloud_conformance_kit_late.mojo.)
-#
-# THE KIT CLOUD (the three sections headed "the kit cloud") is the same
-# text in test_cloud_conformance_kit.mojo, test_cloud_conformance_kit_late.mojo
-# and test_cloud_deploy_kit.mojo: a welded test is one file, and the runs are
-# split so each file's coverage run stays short. Change all three.
+# THE KIT CLOUD (the sections headed "the kit cloud") is the same text in
+# test_cloud_conformance_kit{,_late,_member}.mojo and
+# test_cloud_deploy_kit{,_adopt,_names}.mojo: a welded test is one file, and
+# the runs are split so each file's coverage run stays short. Change all six.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -48,7 +43,7 @@ from kci_cloud import (
     FIELD_SERVICE, FINDING_LIMIT, Feed, Finding, Firing, GrantEdge, LoweredNode, OwnedRecord, Principal, RUN_UNKNOWN,
     Setting, adopted_by, adoption_labels, body_field, create_labels, decode_label_value, describe, is_kci_label_key,
     retain_labels, retained_by, retention_label_key, run_conformance, standard_identity_of, standard_label_rule,
-    validation_run_label_key, validation_run_labels, validation_run_of,
+    validation_run_label_key, validation_run_labels, validation_run_of, MEMBER_FOREIGN, ROLE_UNMAPPED, RegistryLogin,
 )
 
 
@@ -69,10 +64,23 @@ struct _Obj(Copyable, Movable):
     var failed: Bool
     var extra: String
     var hidden: Bool
+    var policy: String
+    var member: String
+    var role: String
+
+
+@fieldwise_init
+struct _Member(Copyable, Movable):
+    """Planted out of band on `resource:<id>`'s or `cell:<name>`'s policy."""
+
+    var policy: String
+    var member: String
+    var role: String
 
 
 struct _Store(Movable):
-    """Every object, every mutating call (`calls`), and the defect."""
+    """Every object (a grant's is a member binding), every mutating call,
+    the planted members, the creates that landed and failed, the defect."""
 
     var objs: List[_Obj]
     var calls: List[String]
@@ -85,6 +93,10 @@ struct _Store(Movable):
     var released: List[OwnedRecord]
     var foreign_seen: Bool
     var forget: String
+    var members: List[_Member]
+    var fail_after: String
+    var failed_after: String
+    var born: List[String]
 
     def __init__(out self, defect: String):
         self.objs = List[_Obj]()
@@ -98,6 +110,10 @@ struct _Store(Movable):
         self.released = List[OwnedRecord]()
         self.foreign_seen = False
         self.forget = String("")
+        self.members = List[_Member]()
+        self.fail_after = String("")
+        self.failed_after = String("")
+        self.born = List[String]()
 
     def find(self, id: String) -> Int:
         """The true state, hidden objects included."""
@@ -113,26 +129,76 @@ struct _Store(Movable):
             return -1
         return i
 
-    def insert(mut self, id: String, kind: String, digest: String, url: String, labels: List[Label], note: String, name: String):
-        self.objs.append(_Obj(id, kind, digest, url, labels.copy(), note, name, False, String(""), False))
+    def insert(
+        mut self, id: String, kind: String, digest: String, url: String, labels: List[Label], note: String, name: String,
+        binding: List[String] = List[String](),
+    ):
+        var b = binding.copy() if binding else [String(""), String(""), String("")]
+        self.objs.append(_Obj(id, kind, digest, url, labels.copy(), note, name, False, String(""), False, b[0], b[1], b[2]))
+
+    def forgets(self, id: String) -> Bool:
+        """`forget`; under member_forgets, web's cell grant once two members stand."""
+        var i = self.find(id) if self.defect == "member_forgets" and len(self.members) > 1 else -1
+        return id == self.forget or (i >= 0 and id.startswith("web/") and self.objs[i].policy.startswith("cell:"))
+
+    def stamp_of(self, i: Int) -> String:
+        if self.defect == "born_unread" and self.objs[i].id in self.born:
+            return String("")
+        return standard_identity_of(self.objs[i].labels)
+
+    def member_of(self, i: Int, member: String, role: String) -> _Member:
+        ref o = self.objs[i]
+        var m = String("kit:outsider") if member == MEMBER_FOREIGN else o.member.copy()
+        return _Member(o.policy, m^, String("kit.role/custom") if role == ROLE_UNMAPPED else o.role.copy())
+
+    def members_report(self, i: Int) -> String:
+        """The planted members on grant object `i`'s policy but its own."""
+        var out = String("")
+        for m in self.members:
+            ref o = self.objs[i]
+            if o.policy.byte_length() > 0 and m.policy == o.policy and (m.member != o.member or m.role != o.role):
+                out += String("member ") + m.member + String(" holding ") + m.role + String(" (not this cell's); ")
+        return out^
+
+    def strip_members(mut self, policy: String):
+        var kept = List[_Member]()
+        for m in self.members:
+            if m.policy != policy:
+                kept.append(m.copy())
+        self.members = kept^
 
     def plant(mut self, id: String, kind: String, digest: String, name: String):
         """An object made outside kci: no stamp, not a served call."""
         self.insert(id, kind, digest, String(""), List[Label](), String(""), name)
 
-    def create(mut self, id: String, kind: String, digest: String, url: String, labels: List[Label], note: String, name: String) raises:
+    def create(
+        mut self, id: String, kind: String, digest: String, url: String, labels: List[Label], note: String, name: String,
+        binding: List[String] = List[String](),
+    ) raises:
         if self.race_next:
             # A second apply of the same cell created it a moment earlier.
             self.race_next = False
             self.raced_id = id
-            self.insert(id, kind, String("stale") if self.defect == "race_stale" else digest, url, labels, note, name)
+            self.insert(id, kind, String("stale") if self.defect == "race_stale" else digest, url, labels, note, name, binding)
             self.calls.append(String("create ") + id)
             if self.defect == "race_double":
                 self.calls.append(String("create ") + id)
-        if self.find(id) >= 0:
+        var at = self.find(id)
+        if at >= 0 and self.defect == "born_recreated" and id in self.born:
+            _ = self.objs.pop(at)  # this cloud's create overwrites
+        elif at >= 0:
             raise Error(String("kit: ALREADY_EXISTS: ") + id)
-        self.insert(id, kind, digest, url, labels, note, name)
+        var two_step = self.defect == "stamp_after_create"  # labels in a second step
+        self.insert(id, kind, digest, url, List[Label]() if two_step else labels.copy(), note, name, binding)
         self.calls.append(String("create ") + id)
+        if self.fail_after.byte_length() > 0 and self.fail_after == id and self.defect != "fail_after_noop":
+            # It landed as the request carried it; the caller hears an error.
+            self.fail_after = String("")
+            self.failed_after = id
+            self.born.append(id)
+            raise Error(String("kit: DEADLINE_EXCEEDED waiting for the create of ") + id + String(", which landed"))
+        if two_step:
+            self.objs[len(self.objs) - 1].labels = labels.copy()
 
     def at(mut self, verb: String, id: String) raises -> Int:
         """The visible object `id`, for a served call `verb`."""
@@ -190,6 +256,8 @@ struct _Store(Movable):
             return self.objs[i].id == self.raced_id
         if d == "run_hides":
             return Bool(validation_run_of(self.objs[i].labels))
+        if d == "born_leaves":
+            return self.objs[i].id in self.born
         return False
 
     def remove(mut self, id: String, consumer: Bool) raises:
@@ -201,6 +269,11 @@ struct _Store(Movable):
             self.objs[i].hidden = True
             return
         _ = self.objs.pop(i)
+        var res = String(id[byte = 0 : max(id.rfind("/"), 0)])  # its policy goes with its last object
+        for o in self.objs:
+            if o.id.startswith(res + String("/")):
+                return
+        self.strip_members(String("resource:") + res)
 
     def creates_of(self, id: String) -> Int:
         var n = 0
@@ -281,8 +354,13 @@ struct _Node(EngineResource, Movable, Deinitable):
             if s.defect == "phantom_present" and id == "api/public":
                 return ResourceStatus.matched(id, self._static, String(""), String(""), s.phantom)
             return ResourceStatus.absent()
+        var stamp = s.stamp_of(i)
+        if s.defect == "born_recreated" and id in s.born:
+            return ResourceStatus.absent()
+        var members = s.members_report(i) if s.defect != "member_unreported" else String("")
+        if s.defect == "member_read_strips" and members.byte_length() > 0:
+            s.strip_members(s.objs[i].policy.copy())
         ref o = s.objs[i]
-        var stamp = standard_identity_of(o.labels)
         if s.defect == "reads_mutate_present":
             s.calls.append(String("read ") + id)
         if s.defect == "race_ghost_create" and id == s.raced_id:
@@ -292,11 +370,13 @@ struct _Node(EngineResource, Movable, Deinitable):
             extra = String("label ") + o.extra + String(" (not modelled; left as it is)")
         if o.extra.byte_length() > 0 and s.defect == "unmodelled_read_mutates":
             s.calls.append(String("read ") + id)
+        extra += members
         if o.failed:
             if s.defect == "fail_once":
                 o.failed = False
             return ResourceStatus(RES_FAILED, id, o.digest, String("kit: not ready"), o.url, String(""), stamp, extra)
-        if self._is_bound and o.digest == self._desired():
+        var drift = s.defect == "member_drifts" and members.byte_length() > 0
+        if self._is_bound and o.digest == self._desired() and not drift:
             return ResourceStatus.matched(id, o.digest, o.url, String(""), stamp, extra)
         return ResourceStatus.drifted(id, o.digest, o.url, String(""), stamp, extra)
 
@@ -305,7 +385,7 @@ struct _Node(EngineResource, Movable, Deinitable):
         var i = s.visible(self._low.id)
         if i < 0:
             return ResourceStatus.absent()
-        var stamp = standard_identity_of(s.objs[i].labels)
+        var stamp = s.stamp_of(i)
         if s.defect == "foreign_read_mutates" and stamp.byte_length() == 0:
             s.calls.append(String("read ") + self._low.id)
         if s.defect == "foreign_seen_once" and stamp.byte_length() == 0:
@@ -349,9 +429,21 @@ struct _Node(EngineResource, Movable, Deinitable):
         if defect == "provenance_digest":
             digest += String("|run=") + stamp.provenance.run_id
         self._store[].create(
-            self._low.id, self._low.kind, digest, self._url(), labels, stamp.provenance.run_id, self._name()
+            self._low.id, self._low.kind, digest, self._url(), labels, stamp.provenance.run_id, self._name(),
+            self._binding(),
         )
         return self._low.id.copy()
+
+    def _binding(self) -> List[String]:
+        """A grant's `[policy, member, role]`: its principal holding its verb's role."""
+        var out = List[String]()
+        ref n = self._low
+        if n.kind == "grant":
+            var cell = n.field(String("cell"))
+            out.append(String("cell:") + cell if cell else String("resource:") + n.field(String("target")))
+            out.append(n.field(String("principal")))
+            out.append(String("kit.role/") + n.field(String("access")))
+        return out^
 
     def adopt_owned(mut self, stamp: OwnerStamp, physical_id: String, creds: Creds) raises:
         var defect = self._defect()
@@ -439,6 +531,7 @@ def _lower(r: Resource, edges: List[GrantEdge]) raises -> List[LoweredNode]:
             g.append(Setting(String("target"), e.target))
             deps.append(e.target)
         g.append(Setting(String("access"), e.access))
+        g.append(Setting(String("principal"), e.principal))
         out.append(LoweredNode(r.id + String("/") + e.role, r.id, String("grant"), deps^, List[InputRef](), g^))
     return out^
 
@@ -505,9 +598,12 @@ struct _Kit(ConformanceTarget, Movable):
     def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]) raises -> List[LoweredNode]:
         var out = List[LoweredNode]()
         for n in _lower(r, edges):
-            if n.id != self.store[].forget:
+            if not self.store[].forgets(n.id):
                 out.append(n.copy())
         var d = self._defect()
+        if d == "grantless_edge" and r.id == "g":  # a principal and a target, and no access
+            var f: List[Setting] = [Setting(String("principal"), String("api")), Setting(String("target"), String("web"))]
+            out.insert(0, LoweredNode(String("g/route"), r.id, String("route"), List[String](), List[InputRef](), f^))
         if d == "lower_raises" and r.id == "boom":
             raise Error(String("kit: cannot lower boom"))
         if not r.id.startswith("api"):
@@ -545,7 +641,7 @@ struct _Kit(ConformanceTarget, Movable):
         var out = List[OwnedRecord]()
         ref s = self.store[]
         for o in s.objs:
-            if o.hidden or o.id == s.forget or standard_identity_of(o.labels).byte_length() == 0:
+            if o.hidden or s.forgets(o.id) or standard_identity_of(o.labels).byte_length() == 0:
                 continue
             if _label(o.labels, String(LABEL_MACHINE)) != scope.machine or _label(o.labels, String(LABEL_CELL)) != scope.cell:
                 continue
@@ -680,6 +776,44 @@ struct _Kit(ConformanceTarget, Movable):
 
     def creates_of(self, logical_id: String) -> Int:
         return self.store[].creates_of(logical_id)
+
+    def image_registry(self, ctx: CellContext) -> String:
+        return String("registry.kit.test/") + ctx.scope.machine + String("/") + ctx.scope.cell
+
+    def registry_login(mut self, creds: Creds) raises -> RegistryLogin:
+        return RegistryLogin(String("kit"), creds.token)
+
+    def plant_foreign_member(mut self, node: String, member: String, role: String) raises:
+        ref s = self.store[]
+        var i = s.visible(node)
+        if i < 0 or s.objs[i].policy.byte_length() == 0:
+            raise Error(String("kit: no binding at ") + node)
+        if s.defect != "member_plant_noop":
+            s.members.append(s.member_of(i, member, role))
+        if s.defect == "member_plant_object" and s.find(String("zz/member")) < 0:
+            s.plant(String("zz/member"), String("foreign"), String("made-outside-kci"), String(""))
+
+    def member_present(self, node: String, member: String, role: String) -> Bool:
+        ref s = self.store[]
+        var i = s.visible(node)
+        if i < 0:
+            return False
+        var w = s.member_of(i, member, role)
+        if s.objs[i].member == w.member and s.objs[i].role == w.role:
+            return True
+        for p in s.members:
+            if p.policy == w.policy and p.member == w.member and p.role == w.role:
+                return True
+        return False
+
+    def fail_after_create_of(mut self, node: String):
+        self.store[].fail_after = node
+        self.store[].failed_after = String("")
+
+    def failed_after_create(self) -> String:
+        if self._defect() == "fail_after_misreport":
+            return String("")
+        return self.store[].failed_after.copy()
 
 
 # ---- the graphs ---------------------------------------------------------------
