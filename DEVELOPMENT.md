@@ -279,14 +279,13 @@ service.
   toolchain unpack runs on Linux x86_64 workers of the same service. Checks:
   [check.sh](tools/build/tests/functional/darwin/check.sh).
 - Welded tests and the runtime library path: a test binary finds the Mojo
-  runtime libraries through `DYLD_LIBRARY_PATH`, which the macOS gate runner
-  sets. macOS drops every `DYLD_*` variable when it starts one of its protected
+  runtime libraries through `DYLD_LIBRARY_PATH`, which the gate
+  (`run:gate_darwin`) sets. macOS drops every `DYLD_*` variable when it starts one of its protected
   binaries (everything in `/bin` and `/usr/bin`, so every busybox applet on a
-  macOS worker), so the runner starts the test itself, with no applet such as
-  `env` in between. Two checks need no macOS worker:
-  `tests//functional/test_data:runner_cases` (a build action) and section 6 of
-  [check.sh](tools/build/tests/functional/darwin/check.sh) run the macOS
-  runner against a busybox that drops `DYLD_*` as macOS does. Section 7 of
+  macOS worker), so the gate executes the test itself, with no applet such as
+  `env` in between. Its macOS unit tests (`komira//tools/build/run:mojo_test_darwin`,
+  run on the macOS workers before `run:gate_darwin` is built) check that the
+  environment the gate builds for a test holds it. Section 7 of
   check.sh builds `//tools/build/examples/libgate_ok:libgate_ok`, whose welded
   test needs the variable, on the macOS workers. A C or C++ dependency cannot
   build for `darwin-arm64` yet (the C toolchain is Linux x86_64 only), so no

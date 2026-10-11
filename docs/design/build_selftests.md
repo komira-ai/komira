@@ -222,7 +222,6 @@ goes with the last row that uses it.
 | 29 td_undeclared | an undeclared fixture is not staged | 3 | `compile_isolation` | stage the whole package as share/ | 4 |
 | 29 td_skip_77 | exit 77 is red | 2 | gate runner unit test | treat 77 as pass | 7 |
 | 29 td_env_bin(_lib) | `BIN=true` cannot replace a red test | 2 | gate runner unit test, BIN set through `--env` and in the process env | runner execs `$BIN` | 7 |
-| 29 runner_cases | cases build, at least 5 ok | 1 | floor inside the action | reuse one TEST_TMPDIR | 2 |
 | 29 td_bad_*, test_deps refusals | 7 analysis refusals | 3 | `analysis_refusals_mojo` | delete the shell-name check in test_runtime.bzl | 3 |
 | 29 td_test_deps_src/consumer | a library and its consumer cannot import test_deps | 3 | `compile_isolation` | add test_deps to the compile path | 4 |
 | 30 opt_level | per-kind `-O` levels from aquery | 3 | `aquery_opt_levels` | mojo_binary default `-O1` | 5 |
@@ -865,9 +864,10 @@ When `conda.sh` and `conda_set.sh` go, slice 10 also drops their argument case f
 
 Action scripts that targets run, not the harness:
 - Replaced by their rows' Zig ports: `functional/aws_codegen/aws_codegen.sh` 8,
-  `platform_table/limits_retired.sh` 6, `coverage/link_line.sh` 7, `mem_cap/cases.sh` 7,
-  `test_deadline/cases.sh` 7, `test_data/runner_cases.sh` and `test_command_case.sh` 7.
-- Already replaced: `watchdog/cases.sh`. The compile wrapper's Zig port
+  `platform_table/limits_retired.sh` 6, `coverage/link_line.sh` 7, `test_data/test_command_case.sh` 7.
+- Already replaced: `mem_cap/cases.sh`, `test_deadline/cases.sh` and `test_data/runner_cases.sh`, by the
+  gate's unit tests on linux and on macOS (`tools/build/run`), when the darwin-arm64 toolchain moved to
+  the gate. `watchdog/cases.sh`. The compile wrapper's Zig port
   (`tools/build/mojo/tools/mojo_compile.zig`) deleted it; `functional/watchdog/cases.zig` runs its
   cases against the stand-in toolchain `functional/watchdog/standin.zig`.
 - Not in this design: `bundle_parity/parity.sh`, `coverage/{check,report,branch_check}.sh` and

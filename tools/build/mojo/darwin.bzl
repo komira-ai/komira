@@ -13,11 +13,12 @@ mojo_binary and mojo_test are unchanged; what differs is what each field holds:
             compile may run on.
   cc_target the deployment target (MACOSX_DEPLOYMENT_TARGET).
   wrapper   tools/build/mojo/darwin/mojo_wrapper.sh.
-  gate_runner, launcher
-            the shared scripts with tools/build/mojo/darwin/dyld_prelude.sh prepended
-            (a `dyld_script`), so they set DYLD_LIBRARY_PATH. (`launcher` is read
-            only by bundles, which are linux only; it is the field's macOS
-            form.)
+  gate      komira//tools/build/run:gate_darwin, the gate built for macOS
+            (it sets DYLD_LIBRARY_PATH beside LD_LIBRARY_PATH for the test).
+  launcher  launch.sh with tools/build/mojo/darwin/dyld_prelude.sh prepended
+            (a `dyld_script`), so it sets DYLD_LIBRARY_PATH. (`launcher` is
+            read only by bundles, which are linux only; it is the field's
+            macOS form.)
 
 Link story, measured on the macOS workers: the compiler links through the
 `cc` on PATH, as it does on linux (where every link goes through the zig cc
@@ -95,7 +96,7 @@ def _mojo_darwin_toolchain_impl(ctx):
             wrapper = one(ctx.attrs._wrapper),
             watchdog_idle_secs = ctx.attrs.watchdog_idle_secs,
             watchdog_sample_secs = ctx.attrs.watchdog_sample_secs,
-            gate_runner = one(ctx.attrs.gate_runner),
+            gate = one(ctx.attrs.gate),
             run_check = one(ctx.attrs._run_check),
             launcher = one(ctx.attrs.launcher),
             runtime = one(ctx.attrs.runtime),
@@ -110,8 +111,9 @@ mojo_darwin_toolchain_rule = rule(
         "busybox": attrs.exec_dep(),
         "compiler": attrs.exec_dep(),
         "deployment_target": attrs.string(),
-        # `dyld_script`s of komira//tools/build/mojo:gate_runner.sh and komira//tools/build/mojo:launch.sh.
-        "gate_runner": attrs.exec_dep(),
+        # The gate built for macOS (komira//tools/build/run:gate_darwin).
+        "gate": attrs.exec_dep(),
+        # A `dyld_script` of komira//tools/build/mojo:launch.sh.
         "launcher": attrs.exec_dep(),
         # A `mojo_darwin_link`.
         "link": attrs.exec_dep(),

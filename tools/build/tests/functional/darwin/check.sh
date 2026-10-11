@@ -24,7 +24,7 @@
 #   4. The linux actions are the same with and without the darwin key.
 #   5. The osx-arm64 closure, unpacked and cut on the farm (linux
 #      actions): its Mach-O load commands, read by tools/build/inspect (`inspect macho`), and the
-#      DYLD scripts are the shared scripts behind dyld_prelude.sh.
+#      launcher is launch.sh behind dyld_prelude.sh.
 #   6. The macOS scripts, run on this machine against stand-ins: busybox.sh
 #      (applets only from /bin and /usr/bin, anything else refused), the cc
 #      shim (run paths replaced by the wrapper's, link tail appended),
@@ -33,8 +33,9 @@
 #      shared-lib build, a non-$ORIGIN run path and a host whose identity is
 #      not listed are refused, a listed host is accepted; modular.cfg is
 #      rendered with the one run path @loader_path/lib), and run_check.sh
-#      (clears DYLD_* as well as LD_*), and gate_runner.sh (the test sees
-#      DYLD_LIBRARY_PATH although the `env` applet prunes it, as on macOS).
+#      (clears DYLD_* as well as LD_*). (The gate, which runs welded tests,
+#      has its macOS unit tests in komira//tools/build/run, run on the macOS
+#      workers.)
 #   7. Live, on the macOS workers (SKIP unless both `[komira_re]
 #      darwin_arm64_properties` and `darwin_macos_hosts` are set):
 #      every host identity the workers report (tests//functional/darwin:host_census,
@@ -43,8 +44,8 @@
 #      what-ran`; the binary is an arm64 Mach-O for macOS 11.0 whose only run
 #      path is @loader_path/lib and which loads only the runtime library and
 #      the system; the mojo_shared_lib examples and their gates, and
-#      libgate_ok's welded test, pass there (both start through
-#      gate_runner.sh and need DYLD_LIBRARY_PATH); and a compile whose
+#      libgate_ok's welded test, pass there (both start through the gate,
+#      run:gate_darwin, and need DYLD_LIBRARY_PATH); and a compile whose
 #      host list names no worker is refused (exit 2) on the worker.
 
 set -u
@@ -265,10 +266,10 @@ fi
 # ---- 2. set: resolution and load-time refusals --------------------------------
 want=$(printf '%s komira//tools/build/platforms:darwin-arm64\n' "${MOJO_TARGETS[@]/#\/\//komira//}"
        printf '%s komira//tools/build/platforms:linux-x86_64\n' komira//tools/build/toolchains/darwin:mojo_compiler komira//tools/build/toolchains/darwin:mojo_runtime \
-           komira//tools/build/toolchains/darwin:gate_runner komira//tools/build/toolchains/darwin:launcher komira//tools/build/toolchains/darwin:link)
+           komira//tools/build/run:gate_darwin komira//tools/build/toolchains/darwin:launcher komira//tools/build/toolchains/darwin:link)
 want=$(printf '%s\n' "$want" | LC_ALL=C sort)
 if ! got=$(resolve darwin_set "${PLACEHOLDER[@]}" "${DARWIN[@]}" "${MOJO_TARGETS[@]}" \
-        komira//tools/build/toolchains/darwin:mojo_compiler komira//tools/build/toolchains/darwin:mojo_runtime komira//tools/build/toolchains/darwin:gate_runner \
+        komira//tools/build/toolchains/darwin:mojo_compiler komira//tools/build/toolchains/darwin:mojo_runtime komira//tools/build/run:gate_darwin \
         komira//tools/build/toolchains/darwin:launcher komira//tools/build/toolchains/darwin:link); then
     fail "set: audit failed (see $LOG/darwin_set.txt)"
 elif [ "$(printf '%s\n' "$got" | LC_ALL=C sort)" != "$want" ]; then
@@ -336,7 +337,7 @@ else
 fi
 
 # ---- 5. the osx-arm64 closure, built on the farm --------------------------------
-if ! "$BUCK2" build "${DARWIN[@]}" komira//tools/build/toolchains/darwin:mojo_compiler komira//tools/build/toolchains/darwin:mojo_runtime komira//tools/build/toolchains/darwin:gate_runner \
+if ! "$BUCK2" build "${DARWIN[@]}" komira//tools/build/toolchains/darwin:mojo_compiler komira//tools/build/toolchains/darwin:mojo_runtime \
         komira//tools/build/toolchains/darwin:launcher --materializations all --show-full-output \
         > "$LOG/darwin_closure.txt" 2> "$LOG/darwin_closure.log"; then
     fail "closure: build failed (see $LOG/darwin_closure.log)"
@@ -355,14 +356,10 @@ else
     else
         pass "closure: modular.cfg asks for the one run path the wrapper rewrites; no bin/lld"
     fi
-    bad=""
-    for s in gate_runner:gate_runner.sh launcher:launch.sh; do
-        if ! cmp -s "$(out "${s%%:*}")" <(cat tools/build/mojo/darwin/dyld_prelude.sh "tools/build/mojo/${s#*:}"); then bad="$bad ${s%%:*}"; fi
-    done
-    if [ -n "$bad" ]; then
-        fail "dyld scripts:$bad differ from dyld_prelude.sh + the shared script"
+    if ! cmp -s "$(out launcher)" <(cat tools/build/mojo/darwin/dyld_prelude.sh tools/build/mojo/launch.sh); then
+        fail "dyld scripts: launcher differs from dyld_prelude.sh + launch.sh"
     else
-        pass "dyld scripts: gate_runner and launcher are the shared scripts behind dyld_prelude.sh"
+        pass "dyld scripts: launcher is launch.sh behind dyld_prelude.sh"
     fi
 fi
 
@@ -599,44 +596,6 @@ else
     pass "run_check.sh: the binary starts with no LD_* or DYLD_* library path"
 fi
 
-# gate_runner.sh hands the test the toolchain's lib/ through DYLD_LIBRARY_PATH.
-# On macOS /usr/bin/env is a system-integrity-protected binary: dyld prunes every
-# DYLD_* variable from the environment of such a process, so a test started
-# through the `env` applet never sees the variable and dies with "Library not
-# loaded: @rpath/libKGENCompilerRTShared.dylib". The stand-in busybox below
-# prunes them in its `env` applet as the operating system does; the test must
-# still see the variable, and its --env variables.
-mkdir -p "$U/gate/root/bin" "$U/gate/tmp"
-cat > "$U/sip_busybox.sh" <<SIPBB
-#!/bin/sh
-if [ "\$1" = env ]; then
-    shift
-    unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_INSERT_LIBRARIES
-    exec /usr/bin/env "\$@"
-fi
-exec sh "$BB" "\$@"
-SIPBB
-chmod +x "$U/sip_busybox.sh"
-cat > "$U/gate/root/bin/seen" <<SEEN
-#!/bin/sh
-printf '%s|%s\n' "\${DYLD_LIBRARY_PATH-}" "\${GATE_FOO-}" > "$U/gate/seen.txt"
-SEEN
-chmod +x "$U/gate/root/bin/seen"
-# A --env BIN naming another program must not replace the test.
-printf '#!/bin/sh\n: > "%s/gate/other_ran"\n' "$U" > "$U/gate/root/bin/other"
-chmod +x "$U/gate/root/bin/other"
-cat tools/build/mojo/darwin/dyld_prelude.sh tools/build/mojo/gate_runner.sh > "$U/gate/gate_runner.sh"
-rm -f "$U/gate/seen.txt" "$U/gate/marker" "$U/gate/other_ran"
-if ! (cd "$U/gate/tmp" && sh "$U/gate/gate_runner.sh" "$U/sip_busybox.sh" "$TC" //stand:in "$U/gate/root/bin/seen" "$U/gate/marker" --env GATE_FOO=bar --env "BIN=$U/gate/root/bin/other") > "$U/gate/run.txt" 2>&1; then
-    fail "gate_runner.sh: the stand-in test failed (see $U/gate/run.txt)"
-elif [ "$(cat "$U/gate/seen.txt")" != "$TC/lib|bar" ]; then
-    fail "gate_runner.sh: the test saw [$(cat "$U/gate/seen.txt")], not [$TC/lib|bar]: DYLD_LIBRARY_PATH did not reach it (an SIP binary between the runner and the test prunes it)"
-elif [ -e "$U/gate/other_ran" ]; then
-    fail "gate_runner.sh: --env BIN=<other program> ran that program in place of the test"
-else
-    pass "gate_runner.sh: the test starts with DYLD_LIBRARY_PATH at the toolchain's lib/ although env prunes DYLD_*, and with its --env variables, and --env BIN does not replace it"
-fi
-
 # ---- 7. live, on the macOS workers ----------------------------------------------
 MAC_PROPS=$(cfg_value "$KEY")
 MAC_HOSTS=$(cfg_value "$HOSTS_KEY")
@@ -681,9 +640,9 @@ else
         fi
     fi
     # A mojo_library's welded test: the test binary loads the runtime library
-    # through DYLD_LIBRARY_PATH, which gate_runner.sh must hand it past
-    # macOS's pruning (section 6 and tests//functional/test_data:runner_cases
-    # show the same against stand-ins).
+    # through DYLD_LIBRARY_PATH, which the gate (run:gate_darwin) sets in the
+    # environment it executes the test with: no system-protected binary in
+    # between prunes it (the gate's macOS unit tests, mojo_test_darwin).
     if ! timeout 900 "$BUCK2" --isolation-dir "$ISO" build --no-remote-cache "${DARWIN[@]}" \
             //tools/build/examples/libgate_ok:libgate_ok > "$LOG/darwin_welded.log" 2>&1; then
         fail "live: the welded test of //tools/build/examples/libgate_ok failed on macOS (see $LOG/darwin_welded.log)"

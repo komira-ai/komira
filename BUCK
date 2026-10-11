@@ -116,10 +116,8 @@ _TESTS_LINTS = [
     "tests//functional/coverage:shell_lint",
     "tests//functional/darwin:shell_lint",
     "tests//functional/install_gate:shell_lint",
-    "tests//functional/mem_cap:shell_lint",
     "tests//functional/platform_table:shell_lint",
     "tests//functional/test_data:shell_lint",
-    "tests//functional/test_deadline:shell_lint",
     "tests//golden:shell_lint",
 ] if read_root_config("cells", "tests") else []
 

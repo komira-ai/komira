@@ -589,10 +589,9 @@ it on a test that kills itself: with SIGKILL it must exit 137 and with SIGABRT
 134, each with no marker; one that exits 77 must exit 77 with no marker;
 `--arg` values must reach the test in order, unexported, with every
 `@KOMIRA_ACTION_DIR@` replaced by the action's directory; and an `--env`
-after an `--arg` is refused (exit 2).
-`runner_cases` (in the pull-request check; its action refuses a report with
-fewer ok cases than its floor) runs the same cases on `gate_runner.sh`, the
-darwin-arm64 toolchain's runner.
+after an `--arg` is refused (exit 2). The darwin-arm64 build of the runner
+(`run:gate_darwin`) is published behind the same unit tests run on the macOS
+workers (`mojo_test_darwin`, `supervise_test_darwin`).
 
 ## 30. Optimization levels
 
