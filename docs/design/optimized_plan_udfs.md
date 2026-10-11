@@ -659,7 +659,8 @@ not use it.
 - **For an `AGGREGATE` UDF**, `PROPAGATE` drops rows whose arguments are null before the call, as a SQL aggregate
   ignores nulls, and `MANUAL` passes them.
 
-**Delivery.** Within one run a batch is delivered at most once: nothing is retried at the first release
+**Delivery.** Within one run, user code never runs a `VOLATILE` batch twice, and nothing is retried after a loss at
+the first release; a non-`VOLATILE` `call_batch` batch runs again only through bisection after `ERR_RAISED`
 (`udf_runtime_interface.md` §3.4 rule 6, §4.5). A lost context or a crash of the process running user code
 (`ERR_INSTANCE_LOST`, `ERR_WORKER_CRASHED`) fails the run with `UDF_WORKER_CRASHED`, naming the UDF and the signal or
 exit status, whatever the stability, so a `VOLATILE` call never runs twice. When a `call_batch` batch raises
