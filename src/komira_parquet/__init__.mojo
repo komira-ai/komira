@@ -28,6 +28,12 @@ It decodes a column chunk a chunk of rows at a time into a reused buffer
 (`column_decode_context`), decodes a nested leaf with its levels
 (`nested_decoder`) and reads one PLAIN page from a file range
 (`column_reader`).
+
+It decides from a footer what a scan reads: the min/max row-group pruner
+and its all-match dual (`rg_pruner`), row selections (`row_selection`), the
+row groups a row window overlaps (`row_window`) and the Arrow types an
+`ARROW:schema` key names (`arrow_schema_hint`); and it reads a column chunk
+as stored (`bypass`).
 """
 
 from .byte_stream_split import (
@@ -100,3 +106,8 @@ from .bloom_reader import BloomFilterHeaderInfo, load_bloom_filter, parse_bloom_
 from .bloom_pruner import can_prune_row_group_by_bloom
 from .num_rows_cache import ParquetNumRowsCache
 from .partition_pred_bridge import pod_from_predicate, predicate_from_pod
+from .rg_pruner import all_match_row_count, can_prune_row_group, rg_all_match_row_group
+from .row_selection import IntervalCursor, RowInterval, RowSelection
+from .row_window import ParquetRowWindowResolution, resolve_row_group_window
+from .arrow_schema_hint import ArrowSchemaHint, arrow_schema_hint_from_metadata, refine_from_hint
+from .bypass import RawColumnChunk, read_raw_column_chunk

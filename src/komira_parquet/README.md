@@ -179,6 +179,35 @@ And it decodes column chunks a chunk of rows at a time, and nested leaves:
   file byte range and aliased as the array (decompressed into it when
   compressed).
 
+It decides from a footer what a scan needs to read, and reads a chunk as
+stored:
+
+- `rg_pruner`: `can_prune_row_group`, True when a row group's min/max
+  statistics prove no row matches a filter (`col op literal`, either way
+  round, for =, !=, <, <=, >, >=, under AND and OR) over INT64, INT32 (signed
+  or UINT_64 / UINT_32, compared unsigned), DOUBLE, FLOAT and BYTE_ARRAY
+  columns; and its dual `rg_all_match_row_group`, True when they prove every
+  row matches (INT64 and INT32, with `null_count` present and 0), which
+  `all_match_row_count` turns into a `count(*) WHERE` answered from the
+  footer when every row group is decided. Both answer the safe way on
+  anything else: missing statistics, other shapes and types, DECIMAL columns
+  (unscaled statistics), a name that is not a top-level leaf.
+- `row_selection`: `RowSelection`, sorted (skip, select) intervals over a row
+  group: from a page mask or a row mask (a null selects nothing), intersected
+  with another selection or with a mask over the selected rows, and clipped to
+  one page (`to_column_intervals`). `IntervalCursor` walks one.
+- `row_window`: `resolve_row_group_window`, the row groups a table-scale
+  `(offset, length)` window overlaps and the trim of their concatenated rows.
+- `arrow_schema_hint`: the `ARROW:schema` footer key of Arrow writers, which
+  names the Arrow string and binary flavour of each field (`string`,
+  `large_string`, `dictionary<utf8>`, `binary`, `large_binary` are the same
+  bytes in Parquet). It is optional: a file without it, or with a value that
+  does not parse, gives an empty hint. `refine_from_hint` lets a hint change
+  only the spelling of a type the column's physical layout already has.
+- `bypass`: `read_raw_column_chunk`, a column chunk's bytes as stored (page
+  headers and compressed pages), for a writer that copies a column into
+  another file without decoding it.
+
 Every example below runs as a test when the package is built.
 
 ## The footer
@@ -326,6 +355,21 @@ var runs = SelectionInterval.from_bool_mask(mask)
 assert_equal(len(runs), 2)
 assert_equal(Int(runs[1].skip), 2)
 assert_equal(Int(runs[1].select), 1)
+```
+
+## Row windows
+
+```mojo
+from komira_parquet.row_window import resolve_row_group_window
+from std.testing import assert_equal
+
+# Row groups of 4, 4 and 4 rows; rows 5 to 8 lie in row groups 1 and 2.
+var counts: List[Int] = [4, 4, 4]
+var w = resolve_row_group_window(counts, 5, 4)
+assert_equal(w.first_rg, 1)
+assert_equal(w.last_rg, 2)
+assert_equal(w.local_skip, 1)  # row 5 is the second row of row group 1
+assert_equal(w.keep, 4)
 ```
 
 ## The decode arms

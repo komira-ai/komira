@@ -32,9 +32,11 @@ def _read(name: String) raises -> String:
 
 comptime _FILES: List[String] = [
     "__init__.mojo",
+    "arrow_schema_hint.mojo",
     "bloom_pruner.mojo",
     "bloom_reader.mojo",
     "byte_stream_split.mojo",
+    "bypass.mojo",
     "column_decode_context.mojo",
     "column_reader.mojo",
     "decimal_decode.mojo",
@@ -62,8 +64,11 @@ comptime _FILES: List[String] = [
     "payload_sel_trace.mojo",
     "plain.mojo",
     "plain_flba.mojo",
+    "rg_pruner.mojo",
     "rle.mojo",
     "rle_bitunpack.mojo",
+    "row_selection.mojo",
+    "row_window.mojo",
     "scan_copy_trace.mojo",
     "selection_vector.mojo",
     "staged_filter_trace.mojo",
@@ -203,6 +208,7 @@ def test_imports_only_its_deps() raises:
     # komira_serde are refused outright.
     var allowed: List[String] = [
         "komira_arrow",
+        "komira_arrow_ipc",
         "komira_async",
         "komira_atomic_alias",
         "komira_buffer",
