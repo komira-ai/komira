@@ -6,6 +6,7 @@
 #
 #   * zeroize_inline_array[N]     — for InlineArray[UInt8, N]
 #   * zeroize_inline_array_u32[N] — for InlineArray[UInt32, N]
+#   * zeroize_inline_array_u64[N] — for InlineArray[UInt64, N]
 #   * zeroize_list                — for List[UInt8]
 #
 # The canonical secure-zero is `external_call["memset_s"]` on macOS /
@@ -26,6 +27,7 @@ from komira_crypto import (
     Sha256,
     zeroize_inline_array,
     zeroize_inline_array_u32,
+    zeroize_inline_array_u64,
     zeroize_list,
 )
 
@@ -100,6 +102,33 @@ def test_zeroize_uint32_sha256_state_shape() raises:
         assert_equal(Int(state[i]), 0)
 
 
+def test_zeroize_uint64_every_byte() raises:
+    """zeroize_inline_array_u64[N] zeroes all 8N bytes of an N-word buffer.
+
+    Every byte of every word is nonzero and distinct before the call, so a
+    byte count short by one byte (the top byte of the last word, on a
+    little-endian target) or by whole words leaves a nonzero word behind.
+    """
+    var state = Array[UInt64, 8](fill=UInt64(0))
+    for i in range(8):
+        state[i] = UInt64(0x8877665544332211) + UInt64(i)
+    # Pre.
+    assert_equal(state[7], UInt64(0x8877665544332218))
+
+    zeroize_inline_array_u64[8](state)
+
+    # Post.
+    for i in range(8):
+        assert_equal(state[i], UInt64(0), String("word ", i, " not zeroed"))
+
+
+def test_zeroize_uint64_single_word() raises:
+    """N == 1: the one word, high bit set, is cleared (8 bytes, not N)."""
+    var one = Array[UInt64, 1](fill=UInt64(0xFFFFFFFFFFFFFFFF))
+    zeroize_inline_array_u64[1](one)
+    assert_equal(one[0], UInt64(0))
+
+
 # -----------------------------------------------------------------------------
 # Structural — Sha256 destructor invokes the helpers (compile-pass gate
 # that the destructor IS defined and IS callable from drop).
@@ -147,6 +176,8 @@ def main() raises:
     test_zeroize_uint8_various_sizes()
     test_zeroize_uint32_basic()
     test_zeroize_uint32_sha256_state_shape()
+    test_zeroize_uint64_every_byte()
+    test_zeroize_uint64_single_word()
     test_sha256_destructor_invocable()
     test_zeroize_list()
     print("OK")

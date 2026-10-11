@@ -24,11 +24,11 @@ target: they are listed for information at the end, with no floor.
 | Libraries (under `src/`, not `src/tests/`) | 209 |
 | Measured | 206 |
 | Not measured (a run or the gate failed; floor 0) | 3 |
-| Line coverage, all measured libraries | 89.86% (179471/199714) |
-| Median line coverage (lower middle) | 96.19% |
-| At 100% / 90% to 100% / 50% to 90% / under 50% / no line | 44 / 64 / 49 / 3 / 46 |
+| Line coverage, all measured libraries | 90.09% (179854/199630) |
+| Median line coverage (lower middle) | 96.26% |
+| At 100% / 90% to 100% / 50% to 90% / under 50% / no line | 45 / 64 / 48 / 3 / 46 |
 | Branch coverage of the libraries with branch records (40) | 89.78% (6847/7626) |
-| Libraries with files no test compiles | 28 (100 files) |
+| Libraries with files no test compiles | 27 (98 files) |
 | Published: in the release / a conda package only / neither | 54 / 154 / 1 |
 | Measured under their floor | 0 |
 
@@ -65,114 +65,114 @@ branch, `-` for none, *pinned* when set by hand ([Pinned floors](#pinned-floors)
 | 22 | `src/komira_orc:komira_orc` | 83.37% (3943/4729) | 786 | not gated | 0 | conda | 83.37% / - |
 | 23 | `src/komira_simd:komira_simd` | 83.37% (632/758) | 126 | not gated | 3 | release | 83.37% / - |
 | 24 | `src/komira_counters:komira_counters` | 83.38% (266/319) | 53 | 97.50% (78/80) | 1 | release | 83.38% / 97.50% |
-| 25 | `src/komira_crypto:komira_crypto` | 83.56% (2374/2841) | 467 | not gated | 2 | conda | 83.56% / - |
-| 26 | `src/komira_search_catalog:komira_search_catalog` | 83.59% (591/707) | 116 | not gated | 0 | conda | 83.59% / - |
-| 27 | `src/komira_objectstore:komira_objectstore` | 83.64% (2819/3370) | 551 | not gated | 4 | conda | 83.64% / - |
-| 28 | `src/kci_logs:kci_logs` | 83.95% (905/1078) | 173 | not gated | 0 | release | 83.95% / - |
-| 29 | `src/komira_broker_coordinator:komira_broker_coordinator` | 83.96% (440/524) | 84 | not gated | 0 | conda | 83.96% / - |
-| 30 | `src/komira_name_registry:komira_name_registry` | 84.12% (53/63) | 10 | 75.00% (24/32) | 0 | release | 84.12% / 75.00% |
-| 31 | `src/komira_async_api:komira_async_api` | 84.31% (86/102) | 16 | 50.00% (1/2) | 1 | conda | 84.31% / 50.00% |
-| 32 | `src/komira_json_index:komira_json_index` | 84.77% (462/545) | 83 | not gated | 0 | conda | 84.77% / - |
-| 33 | `src/komira_http_server:komira_http_server` | 84.94% (2183/2570) | 387 | not gated | 1 | conda | 84.94% / - |
-| 34 | `src/komira_net:komira_net` | 85.21% (98/115) | 17 | not gated | 0 | conda | 85.21% / - |
-| 35 | `src/komira_table_store:komira_table_store` | 85.24% (884/1037) | 153 | not gated | 0 | conda | 85.24% / - |
-| 36 | `src/kci_cloud:kci_cloud` | 85.38% (2758/3230) | 472 | not gated | 1 | conda | 85.38% / - |
-| 37 | `src/komira_shuffle:komira_shuffle` | 85.76% (464/541) | 77 | not gated | 0 | conda | 85.76% / - |
-| 38 | `src/komira_arrow_ipc:komira_arrow_ipc` | 86.09% (5878/6827) | 949 | not gated | 0 | conda | 86.09% / - |
-| 39 | `src/komira_spsc_ring:komira_spsc_ring` | 86.23% (119/138) | 19 | 78.00% (39/50) | 0 | release | 86.23% / 78.00% |
-| 40 | `src/komira_async:komira_async` | 86.24% (4195/4864) | 669 | not gated | 5 | conda | 86.18% / - pinned |
-| 41 | `src/komira_compression:komira_compression` | 86.32% (341/395) | 54 | 70.00% (70/100) | 0 | conda | 86.32% / 70.00% |
-| 42 | `src/komira_job_supervisor:komira_job_supervisor` | 86.87% (1105/1272) | 167 | not gated | 0 | conda | 86.87% / - |
-| 43 | `src/komira_iceberg_catalog:komira_iceberg_catalog` | 87.17% (204/234) | 30 | not gated | 0 | conda | 87.17% / - |
-| 44 | `src/komira_search_scan:komira_search_scan` | 87.28% (501/574) | 73 | not gated | 0 | conda | 87.28% / - |
-| 45 | `src/komira_pplan_wire:komira_pplan_wire` | 87.41% (486/556) | 70 | not gated | 0 | conda | 87.41% / - |
-| 46 | `src/komira_connect:komira_connect` | 87.95% (752/855) | 103 | not gated | 0 | conda | 87.95% / - |
-| 47 | `src/kci_reconciler:kci_reconciler` | 87.98% (1238/1407) | 169 | not gated | 0 | conda | 87.98% / - |
-| 48 | `src/komira_snapshotter:komira_snapshotter` | 88.23% (60/68) | 8 | 78.57% (22/28) | 0 | release | 88.23% / 78.57% |
-| 49 | `src/komira_viewport:komira_viewport` | 88.31% (461/522) | 61 | not gated | 0 | conda | 88.31% / - |
-| 50 | `src/komira_plan_ir:komira_plan_ir` | 88.49% (1876/2120) | 244 | 80.18% (1214/1514) | 0 | conda | 88.49% / 80.18% |
-| 51 | `src/kci_pkg_upload:kci_pkg_upload` | 89.05% (1953/2193) | 240 | not gated | 0 | conda | 89.05% / - |
-| 52 | `src/kci_cli:kci_cli` | 89.88% (1360/1513) | 153 | not gated | 0 | conda | 89.88% / - |
-| 53 | `src/komira_log:komira_log` | 90.89% (1957/2153) | 196 | not gated | 1 | conda | 90.89% / - |
-| 54 | `src/kci_validate:kci_validate` | 91.23% (1229/1347) | 118 | not gated | 0 | conda | 91.23% / - |
-| 55 | `src/komira_http_core:komira_http_core` | 91.88% (3070/3341) | 271 | not gated | 0 | conda | 91.88% / - |
-| 56 | `src/kci_publish:kci_publish_lib` | 92.15% (2102/2281) | 179 | not gated | 1 | conda | 92.15% / - |
-| 57 | `src/komira_grpc:komira_grpc` | 92.17% (1049/1138) | 89 | not gated | 0 | conda | 92.17% / - |
-| 58 | `src/komira_agg:komira_agg` | 92.36% (1185/1283) | 98 | 98.26% (566/576) | 1 | conda | 92.36% / 98.26% |
-| 59 | `src/komira_gcp_wif:komira_gcp_wif` | 92.39% (510/552) | 42 | not gated | 0 | conda | 92.39% / - |
-| 60 | `src/komira_aws_core:komira_aws_core` | 93.24% (4939/5297) | 358 | not gated | 1 | conda | 93.24% / - |
-| 61 | `src/komira_gcp_firestore:komira_gcp_firestore` | 93.79% (1829/1950) | 121 | not gated | 0 | conda | 93.79% / - |
-| 62 | `src/kci_secret_writer:kci_secret_writer` | 93.84% (61/65) | 4 | 81.25% (13/16) | 0 | conda | 93.84% / 81.25% |
-| 63 | `src/komira_gcp_fcm:komira_gcp_fcm` | 93.85% (214/228) | 14 | not gated | 0 | conda | 93.85% / - |
-| 64 | `src/kci_build:kci_build_lib` | 93.92% (1129/1202) | 73 | not gated | 0 | conda | 93.92% / - |
-| 65 | `src/komira_aws_lambda_http:komira_aws_lambda_http` | 94.00% (565/601) | 36 | not gated | 0 | conda | 94.00% / - |
-| 66 | `src/komira_db_sqlite:komira_db_sqlite` | 94.02% (315/335) | 20 | not gated | 0 | conda | 94.02% / - |
-| 67 | `src/komira_objectstore_gcs:komira_objectstore_gcs` | 94.05% (901/958) | 57 | not gated | 1 | conda | 94.05% / - |
-| 68 | `src/komira_dynamic_filter:komira_dynamic_filter` | 94.06% (206/219) | 13 | 80.76% (42/52) | 0 | conda | 94.06% / 80.76% |
-| 69 | `src/komira_vcard:komira_vcard` | 95.00% (609/641) | 32 | not gated | 0 | release | 95.00% / - |
-| 70 | `src/komira_proto_codec:komira_proto_codec` | 95.28% (1050/1102) | 52 | not gated | 0 | release | 95.28% / - |
-| 71 | `src/komira_objectstore_s3:komira_objectstore_s3` | 95.30% (1138/1194) | 56 | not gated | 0 | conda | 95.30% / - |
-| 72 | `src/komira_log_query:komira_log_query` | 95.31% (468/491) | 23 | not gated | 0 | conda | 95.31% / - |
-| 73 | `src/komira_uuid:komira_uuid` | 95.34% (123/129) | 6 | 89.28% (75/84) | 0 | conda | 95.34% / 89.28% |
-| 74 | `src/komira_buffer:komira_buffer` | 95.60% (478/500) | 22 | 86.36% (133/154) | 0 | conda | 95.60% / 86.36% |
-| 75 | `src/komira_http_auth:komira_http_auth` | 95.71% (983/1027) | 44 | not gated | 0 | conda | 95.71% / - |
-| 76 | `src/komira_xml:komira_xml` | 95.75% (858/896) | 38 | not gated | 0 | release | 95.75% / - |
-| 77 | `src/komira_scan_resolver:komira_scan_resolver` | 95.96% (499/520) | 21 | not gated | 0 | conda | 95.96% / - |
-| 78 | `src/komira_parquet_codec:komira_parquet_codec` | 96.03% (557/580) | 23 | 92.78% (386/416) | 0 | conda | 96.03% / 92.78% |
-| 79 | `src/komira_gcp_core:komira_gcp_core` | 96.04% (1580/1645) | 65 | not gated | 0 | conda | 96.04% / - |
-| 80 | `src/komira_morsel:komira_morsel` | 96.19% (1515/1575) | 60 | not gated | 0 | conda | 96.19% / - |
-| 81 | `src/komira_mcp_server:komira_mcp_server` | 96.26% (438/455) | 17 | not gated | 0 | release | 96.26% / - |
-| 82 | `src/komira_row_format:komira_row_format` | 96.27% (1602/1664) | 62 | 96.24% (820/852) | 0 | conda | 96.27% / 96.24% |
-| 83 | `src/komira_aws_metrics:komira_aws_metrics` | 96.51% (305/316) | 11 | not gated | 0 | conda | 96.51% / - |
-| 84 | `src/komira_mail_address:komira_mail_address` | 96.55% (533/552) | 19 | not gated | 0 | release | 96.55% / - |
-| 85 | `src/kci_cloud_fake:kci_cloud_fake` | 97.10% (1979/2038) | 59 | 91.01% (699/768) | 0 | conda | 97.10% / 91.01% |
-| 86 | `src/komira_physical_plan:komira_physical_plan` | 97.15% (273/281) | 8 | 94.59% (140/148) | 0 | conda | 97.15% / 94.59% |
-| 87 | `src/komira_metrics:komira_metrics` | 97.18% (896/922) | 26 | not gated | 0 | conda | 97.18% / - |
-| 88 | `src/komira_secret_env:komira_secret_env` | 97.22% (105/108) | 3 | not gated | 0 | conda | 97.22% / - |
-| 89 | `src/komira_metrics_reader:komira_metrics_reader` | 97.27% (572/588) | 16 | not gated | 0 | conda | 97.27% / - |
-| 90 | `src/kci_artifact:kci_artifact` | 97.32% (910/935) | 25 | not gated | 0 | conda | 97.32% / - |
-| 91 | `src/kci_publish_oci:kci_publish_oci` | 97.75% (87/89) | 2 | not gated | 0 | conda | 97.75% / - |
-| 92 | `src/komira_collections:komira_collections` | 97.83% (316/323) | 7 | not gated | 0 | release | 97.83% / - |
-| 93 | `src/komira_source_url:komira_source_url` | 98.07% (102/104) | 2 | not gated | 0 | conda | 98.07% / - |
-| 94 | `src/komira_gcp_monitoring:komira_gcp_monitoring` | 98.37% (364/370) | 6 | not gated | 0 | conda | 98.37% / - |
-| 95 | `src/komira_secret_registry:komira_secret_registry` | 98.46% (64/65) | 1 | 81.25% (13/16) | 0 | conda | 98.46% / 81.25% |
-| 96 | `src/komira_content_line:komira_content_line` | 98.59% (350/355) | 5 | not gated | 0 | release | 98.59% / - |
-| 97 | `src/komira_fs:komira_fs` | 98.77% (1213/1228) | 15 | not gated | 1 | conda | 98.77% / - |
-| 98 | `src/komira_azure_core:komira_azure_core` | 98.78% (325/329) | 4 | not gated | 0 | conda | 98.78% / - |
-| 99 | `src/komira_broker:komira_broker` | 98.90% (5759/5823) | 64 | not gated | 0 | conda | 98.90% / - |
-| 100 | `src/kci_release_set:kci_release_set` | 98.92% (738/746) | 8 | not gated | 0 | conda | 98.92% / - |
-| 101 | `src/komira_dispatch_agg_exec:komira_dispatch_agg_exec` | 99.02% (407/411) | 4 | not gated | 0 | conda | 99.02% / - |
-| 102 | `src/komira_sdk:komira_sdk` | 99.04% (1347/1360) | 13 | not gated | 0 | conda | 99.04% / - |
-| 103 | `src/komira_eval:komira_eval` | 99.15% (2816/2840) | 24 | not gated | 0 | conda | 99.15% / - |
-| 104 | `src/komira_jwks:komira_jwks` | 99.17% (362/365) | 3 | 91.84% (169/184) | 0 | conda | 99.17% / 91.84% |
-| 105 | `src/komira_avro:komira_avro` | 99.29% (3379/3403) | 24 | not gated | 0 | conda | 99.29% / - |
-| 106 | `src/komira_db_postgres:komira_db_postgres` | 99.29% (1128/1136) | 8 | not gated | 0 | conda | 99.29% / - |
-| 107 | `src/komira_jsonl:komira_jsonl` | 99.59% (3706/3721) | 15 | not gated | 0 | conda | 99.59% / - |
-| 108 | `src/komira_git:komira_git` | 99.60% (3252/3265) | 13 | not gated | 0 | conda | 99.60% / - |
-| 109 | `src/komira_plan_wire:komira_plan_wire` | 99.71% (5184/5199) | 15 | not gated | 0 | conda | 99.71% / - |
-| 110 | `src/komira_scalar_arithmetic:komira_scalar_arithmetic` | 99.72% (357/358) | 1 | 99.65% (285/286) | 0 | release | 99.72% / 99.65% |
-| 111 | `src/kci_release_machine:kci_release_machine` | 99.79% (988/990) | 2 | not gated | 0 | release | 99.79% / - |
-| 112 | `src/komira_parquet:komira_parquet` | 99.86% (5158/5165) | 7 | not gated | 0 | conda | 99.86% / - |
-| 113 | `src/komira_sql:komira_sql` | 99.87% (3192/3196) | 4 | not gated | 0 | conda | 99.87% / - |
-| 114 | `src/komira_wkt:komira_wkt` | 99.87% (809/810) | 1 | 99.10% (551/556) | 0 | release | 99.87% / 99.10% |
-| 115 | `src/komira_op_agg_state:komira_op_agg_state` | 99.94% (3439/3441) | 2 | not gated | 0 | conda | 99.94% / - |
-| 116 | `src/komira_optimizer:komira_optimizer` | 99.95% (9302/9306) | 4 | not gated | 0 | conda | 99.95% / - |
-| 117 | `src/kci_api:kci_api` | 100.00% (1560/1560) | 0 | not gated | 0 | release | 100.00% / - |
-| 118 | `src/kci_artifact_manifest:kci_artifact_manifest` | 100.00% (170/170) | 0 | not gated | 0 | release | 100.00% / - |
-| 119 | `src/kci_cell:kci_cell` | 100.00% (246/246) | 0 | not gated | 0 | release | 100.00% / - |
-| 120 | `src/kci_params:kci_params` | 100.00% (407/407) | 0 | not gated | 0 | release | 100.00% / - |
-| 121 | `src/kci_release_channel:kci_release_channel` | 100.00% (460/460) | 0 | not gated | 0 | release | 100.00% / - |
-| 122 | `src/kci_validator_report:kci_validator_report` | 100.00% (746/746) | 0 | not gated | 0 | release | 100.00% / - |
-| 123 | `src/kci_validator_rows:kci_validator_rows` | 100.00% (117/117) | 0 | 100.00% (40/40) | 0 | release | 100.00% / 100.00% |
-| 124 | `src/kci_workflow_check:kci_workflow_check` | 100.00% (1876/1876) | 0 | not gated | 0 | release | 100.00% / - |
-| 125 | `src/komira_anomaly:komira_anomaly` | 100.00% (869/869) | 0 | not gated | 0 | release | 100.00% / - |
-| 126 | `src/komira_authz_api:komira_authz_api` | 100.00% (27/27) | 0 | not gated | 0 | conda | 100.00% / - |
-| 127 | `src/komira_calendar:komira_calendar` | 100.00% (630/630) | 0 | not gated | 0 | conda | 100.00% / - |
-| 128 | `src/komira_calendar_ics:komira_calendar_ics` | 100.00% (1360/1360) | 0 | not gated | 0 | conda | 100.00% / - |
-| 129 | `src/komira_calendar_store:komira_calendar_store` | 100.00% (665/665) | 0 | not gated | 0 | conda | 100.00% / - |
-| 130 | `src/komira_chat_store:komira_chat_store` | 100.00% (1156/1156) | 0 | not gated | 0 | conda | 100.00% / - |
-| 131 | `src/komira_clock:komira_clock` | 100.00% (13/13) | 0 | 100.00% (2/2) | 0 | release | 100.00% / 100.00% |
-| 132 | `src/komira_contacts:komira_contacts` | 100.00% (419/419) | 0 | not gated | 0 | conda | 100.00% / - |
+| 25 | `src/komira_search_catalog:komira_search_catalog` | 83.59% (591/707) | 116 | not gated | 0 | conda | 83.59% / - |
+| 26 | `src/komira_objectstore:komira_objectstore` | 83.64% (2819/3370) | 551 | not gated | 4 | conda | 83.64% / - |
+| 27 | `src/kci_logs:kci_logs` | 83.95% (905/1078) | 173 | not gated | 0 | release | 83.95% / - |
+| 28 | `src/komira_broker_coordinator:komira_broker_coordinator` | 83.96% (440/524) | 84 | not gated | 0 | conda | 83.96% / - |
+| 29 | `src/komira_name_registry:komira_name_registry` | 84.12% (53/63) | 10 | 75.00% (24/32) | 0 | release | 84.12% / 75.00% |
+| 30 | `src/komira_async_api:komira_async_api` | 84.31% (86/102) | 16 | 50.00% (1/2) | 1 | conda | 84.31% / 50.00% |
+| 31 | `src/komira_json_index:komira_json_index` | 84.77% (462/545) | 83 | not gated | 0 | conda | 84.77% / - |
+| 32 | `src/komira_http_server:komira_http_server` | 84.94% (2183/2570) | 387 | not gated | 1 | conda | 84.94% / - |
+| 33 | `src/komira_net:komira_net` | 85.21% (98/115) | 17 | not gated | 0 | conda | 85.21% / - |
+| 34 | `src/komira_table_store:komira_table_store` | 85.24% (884/1037) | 153 | not gated | 0 | conda | 85.24% / - |
+| 35 | `src/kci_cloud:kci_cloud` | 85.38% (2758/3230) | 472 | not gated | 1 | conda | 85.38% / - |
+| 36 | `src/komira_shuffle:komira_shuffle` | 85.76% (464/541) | 77 | not gated | 0 | conda | 85.76% / - |
+| 37 | `src/komira_arrow_ipc:komira_arrow_ipc` | 86.09% (5878/6827) | 949 | not gated | 0 | conda | 86.09% / - |
+| 38 | `src/komira_spsc_ring:komira_spsc_ring` | 86.23% (119/138) | 19 | 78.00% (39/50) | 0 | release | 86.23% / 78.00% |
+| 39 | `src/komira_async:komira_async` | 86.24% (4195/4864) | 669 | not gated | 5 | conda | 86.18% / - pinned |
+| 40 | `src/komira_compression:komira_compression` | 86.32% (341/395) | 54 | 70.00% (70/100) | 0 | conda | 86.32% / 70.00% |
+| 41 | `src/komira_job_supervisor:komira_job_supervisor` | 86.87% (1105/1272) | 167 | not gated | 0 | conda | 86.87% / - |
+| 42 | `src/komira_iceberg_catalog:komira_iceberg_catalog` | 87.17% (204/234) | 30 | not gated | 0 | conda | 87.17% / - |
+| 43 | `src/komira_search_scan:komira_search_scan` | 87.28% (501/574) | 73 | not gated | 0 | conda | 87.28% / - |
+| 44 | `src/komira_pplan_wire:komira_pplan_wire` | 87.41% (486/556) | 70 | not gated | 0 | conda | 87.41% / - |
+| 45 | `src/komira_connect:komira_connect` | 87.95% (752/855) | 103 | not gated | 0 | conda | 87.95% / - |
+| 46 | `src/kci_reconciler:kci_reconciler` | 87.98% (1238/1407) | 169 | not gated | 0 | conda | 87.98% / - |
+| 47 | `src/komira_snapshotter:komira_snapshotter` | 88.23% (60/68) | 8 | 78.57% (22/28) | 0 | release | 88.23% / 78.57% |
+| 48 | `src/komira_viewport:komira_viewport` | 88.31% (461/522) | 61 | not gated | 0 | conda | 88.31% / - |
+| 49 | `src/komira_plan_ir:komira_plan_ir` | 88.49% (1876/2120) | 244 | 80.18% (1214/1514) | 0 | conda | 88.49% / 80.18% |
+| 50 | `src/kci_pkg_upload:kci_pkg_upload` | 89.05% (1953/2193) | 240 | not gated | 0 | conda | 89.05% / - |
+| 51 | `src/kci_cli:kci_cli` | 89.88% (1360/1513) | 153 | not gated | 0 | conda | 89.88% / - |
+| 52 | `src/komira_log:komira_log` | 90.89% (1957/2153) | 196 | not gated | 1 | conda | 90.89% / - |
+| 53 | `src/kci_validate:kci_validate` | 91.23% (1229/1347) | 118 | not gated | 0 | conda | 91.23% / - |
+| 54 | `src/komira_http_core:komira_http_core` | 91.88% (3070/3341) | 271 | not gated | 0 | conda | 91.88% / - |
+| 55 | `src/kci_publish:kci_publish_lib` | 92.15% (2102/2281) | 179 | not gated | 1 | conda | 92.15% / - |
+| 56 | `src/komira_grpc:komira_grpc` | 92.17% (1049/1138) | 89 | not gated | 0 | conda | 92.17% / - |
+| 57 | `src/komira_agg:komira_agg` | 92.36% (1185/1283) | 98 | 98.26% (566/576) | 1 | conda | 92.36% / 98.26% |
+| 58 | `src/komira_gcp_wif:komira_gcp_wif` | 92.39% (510/552) | 42 | not gated | 0 | conda | 92.39% / - |
+| 59 | `src/komira_aws_core:komira_aws_core` | 93.24% (4939/5297) | 358 | not gated | 1 | conda | 93.24% / - |
+| 60 | `src/komira_gcp_firestore:komira_gcp_firestore` | 93.79% (1829/1950) | 121 | not gated | 0 | conda | 93.79% / - |
+| 61 | `src/kci_secret_writer:kci_secret_writer` | 93.84% (61/65) | 4 | 81.25% (13/16) | 0 | conda | 93.84% / 81.25% |
+| 62 | `src/komira_gcp_fcm:komira_gcp_fcm` | 93.85% (214/228) | 14 | not gated | 0 | conda | 93.85% / - |
+| 63 | `src/kci_build:kci_build_lib` | 93.92% (1129/1202) | 73 | not gated | 0 | conda | 93.92% / - |
+| 64 | `src/komira_aws_lambda_http:komira_aws_lambda_http` | 94.00% (565/601) | 36 | not gated | 0 | conda | 94.00% / - |
+| 65 | `src/komira_db_sqlite:komira_db_sqlite` | 94.02% (315/335) | 20 | not gated | 0 | conda | 94.02% / - |
+| 66 | `src/komira_objectstore_gcs:komira_objectstore_gcs` | 94.05% (901/958) | 57 | not gated | 1 | conda | 94.05% / - |
+| 67 | `src/komira_dynamic_filter:komira_dynamic_filter` | 94.06% (206/219) | 13 | 80.76% (42/52) | 0 | conda | 94.06% / 80.76% |
+| 68 | `src/komira_vcard:komira_vcard` | 95.00% (609/641) | 32 | not gated | 0 | release | 95.00% / - |
+| 69 | `src/komira_proto_codec:komira_proto_codec` | 95.28% (1050/1102) | 52 | not gated | 0 | release | 95.28% / - |
+| 70 | `src/komira_objectstore_s3:komira_objectstore_s3` | 95.30% (1138/1194) | 56 | not gated | 0 | conda | 95.30% / - |
+| 71 | `src/komira_log_query:komira_log_query` | 95.31% (468/491) | 23 | not gated | 0 | conda | 95.31% / - |
+| 72 | `src/komira_uuid:komira_uuid` | 95.34% (123/129) | 6 | 89.28% (75/84) | 0 | conda | 95.34% / 89.28% |
+| 73 | `src/komira_buffer:komira_buffer` | 95.60% (478/500) | 22 | 86.36% (133/154) | 0 | conda | 95.60% / 86.36% |
+| 74 | `src/komira_http_auth:komira_http_auth` | 95.71% (983/1027) | 44 | not gated | 0 | conda | 95.71% / - |
+| 75 | `src/komira_xml:komira_xml` | 95.75% (858/896) | 38 | not gated | 0 | release | 95.75% / - |
+| 76 | `src/komira_scan_resolver:komira_scan_resolver` | 95.96% (499/520) | 21 | not gated | 0 | conda | 95.96% / - |
+| 77 | `src/komira_parquet_codec:komira_parquet_codec` | 96.03% (557/580) | 23 | 92.78% (386/416) | 0 | conda | 96.03% / 92.78% |
+| 78 | `src/komira_gcp_core:komira_gcp_core` | 96.04% (1580/1645) | 65 | not gated | 0 | conda | 96.04% / - |
+| 79 | `src/komira_morsel:komira_morsel` | 96.19% (1515/1575) | 60 | not gated | 0 | conda | 96.19% / - |
+| 80 | `src/komira_mcp_server:komira_mcp_server` | 96.26% (438/455) | 17 | not gated | 0 | release | 96.26% / - |
+| 81 | `src/komira_row_format:komira_row_format` | 96.27% (1602/1664) | 62 | 96.24% (820/852) | 0 | conda | 96.27% / 96.24% |
+| 82 | `src/komira_aws_metrics:komira_aws_metrics` | 96.51% (305/316) | 11 | not gated | 0 | conda | 96.51% / - |
+| 83 | `src/komira_mail_address:komira_mail_address` | 96.55% (533/552) | 19 | not gated | 0 | release | 96.55% / - |
+| 84 | `src/kci_cloud_fake:kci_cloud_fake` | 97.10% (1979/2038) | 59 | 91.01% (699/768) | 0 | conda | 97.10% / 91.01% |
+| 85 | `src/komira_physical_plan:komira_physical_plan` | 97.15% (273/281) | 8 | 94.59% (140/148) | 0 | conda | 97.15% / 94.59% |
+| 86 | `src/komira_metrics:komira_metrics` | 97.18% (896/922) | 26 | not gated | 0 | conda | 97.18% / - |
+| 87 | `src/komira_secret_env:komira_secret_env` | 97.22% (105/108) | 3 | not gated | 0 | conda | 97.22% / - |
+| 88 | `src/komira_metrics_reader:komira_metrics_reader` | 97.27% (572/588) | 16 | not gated | 0 | conda | 97.27% / - |
+| 89 | `src/kci_artifact:kci_artifact` | 97.32% (910/935) | 25 | not gated | 0 | conda | 97.32% / - |
+| 90 | `src/kci_publish_oci:kci_publish_oci` | 97.75% (87/89) | 2 | not gated | 0 | conda | 97.75% / - |
+| 91 | `src/komira_collections:komira_collections` | 97.83% (316/323) | 7 | not gated | 0 | release | 97.83% / - |
+| 92 | `src/komira_source_url:komira_source_url` | 98.07% (102/104) | 2 | not gated | 0 | conda | 98.07% / - |
+| 93 | `src/komira_gcp_monitoring:komira_gcp_monitoring` | 98.37% (364/370) | 6 | not gated | 0 | conda | 98.37% / - |
+| 94 | `src/komira_secret_registry:komira_secret_registry` | 98.46% (64/65) | 1 | 81.25% (13/16) | 0 | conda | 98.46% / 81.25% |
+| 95 | `src/komira_content_line:komira_content_line` | 98.59% (350/355) | 5 | not gated | 0 | release | 98.59% / - |
+| 96 | `src/komira_fs:komira_fs` | 98.77% (1213/1228) | 15 | not gated | 1 | conda | 98.77% / - |
+| 97 | `src/komira_azure_core:komira_azure_core` | 98.78% (325/329) | 4 | not gated | 0 | conda | 98.78% / - |
+| 98 | `src/komira_broker:komira_broker` | 98.90% (5759/5823) | 64 | not gated | 0 | conda | 98.90% / - |
+| 99 | `src/kci_release_set:kci_release_set` | 98.92% (738/746) | 8 | not gated | 0 | conda | 98.92% / - |
+| 100 | `src/komira_dispatch_agg_exec:komira_dispatch_agg_exec` | 99.02% (407/411) | 4 | not gated | 0 | conda | 99.02% / - |
+| 101 | `src/komira_sdk:komira_sdk` | 99.04% (1347/1360) | 13 | not gated | 0 | conda | 99.04% / - |
+| 102 | `src/komira_eval:komira_eval` | 99.15% (2816/2840) | 24 | not gated | 0 | conda | 99.15% / - |
+| 103 | `src/komira_jwks:komira_jwks` | 99.17% (362/365) | 3 | 91.84% (169/184) | 0 | conda | 99.17% / 91.84% |
+| 104 | `src/komira_avro:komira_avro` | 99.29% (3379/3403) | 24 | not gated | 0 | conda | 99.29% / - |
+| 105 | `src/komira_db_postgres:komira_db_postgres` | 99.29% (1128/1136) | 8 | not gated | 0 | conda | 99.29% / - |
+| 106 | `src/komira_jsonl:komira_jsonl` | 99.59% (3706/3721) | 15 | not gated | 0 | conda | 99.59% / - |
+| 107 | `src/komira_git:komira_git` | 99.60% (3252/3265) | 13 | not gated | 0 | conda | 99.60% / - |
+| 108 | `src/komira_plan_wire:komira_plan_wire` | 99.71% (5184/5199) | 15 | not gated | 0 | conda | 99.71% / - |
+| 109 | `src/komira_scalar_arithmetic:komira_scalar_arithmetic` | 99.72% (357/358) | 1 | 99.65% (285/286) | 0 | release | 99.72% / 99.65% |
+| 110 | `src/kci_release_machine:kci_release_machine` | 99.79% (988/990) | 2 | not gated | 0 | release | 99.79% / - |
+| 111 | `src/komira_parquet:komira_parquet` | 99.86% (5158/5165) | 7 | not gated | 0 | conda | 99.86% / - |
+| 112 | `src/komira_sql:komira_sql` | 99.87% (3192/3196) | 4 | not gated | 0 | conda | 99.87% / - |
+| 113 | `src/komira_wkt:komira_wkt` | 99.87% (809/810) | 1 | 99.10% (551/556) | 0 | release | 99.87% / 99.10% |
+| 114 | `src/komira_op_agg_state:komira_op_agg_state` | 99.94% (3439/3441) | 2 | not gated | 0 | conda | 99.94% / - |
+| 115 | `src/komira_optimizer:komira_optimizer` | 99.95% (9302/9306) | 4 | not gated | 0 | conda | 99.95% / - |
+| 116 | `src/kci_api:kci_api` | 100.00% (1560/1560) | 0 | not gated | 0 | release | 100.00% / - |
+| 117 | `src/kci_artifact_manifest:kci_artifact_manifest` | 100.00% (170/170) | 0 | not gated | 0 | release | 100.00% / - |
+| 118 | `src/kci_cell:kci_cell` | 100.00% (246/246) | 0 | not gated | 0 | release | 100.00% / - |
+| 119 | `src/kci_params:kci_params` | 100.00% (407/407) | 0 | not gated | 0 | release | 100.00% / - |
+| 120 | `src/kci_release_channel:kci_release_channel` | 100.00% (460/460) | 0 | not gated | 0 | release | 100.00% / - |
+| 121 | `src/kci_validator_report:kci_validator_report` | 100.00% (746/746) | 0 | not gated | 0 | release | 100.00% / - |
+| 122 | `src/kci_validator_rows:kci_validator_rows` | 100.00% (117/117) | 0 | 100.00% (40/40) | 0 | release | 100.00% / 100.00% |
+| 123 | `src/kci_workflow_check:kci_workflow_check` | 100.00% (1876/1876) | 0 | not gated | 0 | release | 100.00% / - |
+| 124 | `src/komira_anomaly:komira_anomaly` | 100.00% (869/869) | 0 | not gated | 0 | release | 100.00% / - |
+| 125 | `src/komira_authz_api:komira_authz_api` | 100.00% (27/27) | 0 | not gated | 0 | conda | 100.00% / - |
+| 126 | `src/komira_calendar:komira_calendar` | 100.00% (630/630) | 0 | not gated | 0 | conda | 100.00% / - |
+| 127 | `src/komira_calendar_ics:komira_calendar_ics` | 100.00% (1360/1360) | 0 | not gated | 0 | conda | 100.00% / - |
+| 128 | `src/komira_calendar_store:komira_calendar_store` | 100.00% (665/665) | 0 | not gated | 0 | conda | 100.00% / - |
+| 129 | `src/komira_chat_store:komira_chat_store` | 100.00% (1156/1156) | 0 | not gated | 0 | conda | 100.00% / - |
+| 130 | `src/komira_clock:komira_clock` | 100.00% (13/13) | 0 | 100.00% (2/2) | 0 | release | 100.00% / 100.00% |
+| 131 | `src/komira_contacts:komira_contacts` | 100.00% (419/419) | 0 | not gated | 0 | conda | 100.00% / - |
+| 132 | `src/komira_crypto:komira_crypto` | 100.00% (2757/2757) | 0 | not gated | 0 | conda | 100.00% / - |
 | 133 | `src/komira_datetime:komira_datetime` | 100.00% (853/853) | 0 | not gated | 0 | release | 100.00% / - |
 | 134 | `src/komira_dispatch_agg_folds:komira_dispatch_agg_folds` | 100.00% (1616/1616) | 0 | not gated | 0 | conda | 100.00% / - |
 | 135 | `src/komira_dispatch_join_kernels:komira_dispatch_join_kernels` | 100.00% (709/709) | 0 | not gated | 0 | conda | 100.00% / - |
@@ -287,7 +287,6 @@ executable lines uncovered (covcheck's UnmeasuredFile).
 - `src/komira_db:komira_db`: `src/komira_db/blocking.mojo`, `src/komira_db/db_storable.mojo`
 - `src/komira_simd:komira_simd`: `src/komira_simd/byte_class/broadcast_iota.mojo`, `src/komira_simd/byte_class/prefix_xor.mojo`, `src/komira_simd/width_policy.mojo`
 - `src/komira_counters:komira_counters`: `src/komira_counters/runtime_introspection.mojo`
-- `src/komira_crypto:komira_crypto`: `src/komira_crypto/aead.mojo`, `src/komira_crypto/internal/asm/sha256_compress.mojo`
 - `src/komira_objectstore:komira_objectstore`: `src/komira_objectstore/presign.mojo`, `src/komira_objectstore/request_core.mojo`, `src/komira_objectstore/shared_in_memory_latency_store.mojo`, `src/komira_objectstore/store_readiness.mojo`
 - `src/komira_async_api:komira_async_api`: `src/komira_async_api/worker_pool_traits.mojo`
 - `src/komira_http_server:komira_http_server`: `src/komira_http_server/middleware/passthrough.mojo`
