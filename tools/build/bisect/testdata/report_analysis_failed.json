@@ -1,0 +1,40 @@
+{
+  "trace_id": "00000000-0000-0000-0000-000000000000",
+  "success": false,
+  "results": {
+    "komira//tools/build/bisect/capture_tmp:std": {
+      "success": "FAIL",
+      "outputs": {},
+      "other_outputs": {},
+      "configured_graph_size": null,
+      "configured": {
+        "komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be": {
+          "errors": [
+            {
+              "message_content": "215095554721000729",
+              "action_error": null,
+              "error_tags": [
+                "ANALYSIS",
+                "STARLARK_FAIL"
+              ],
+              "cause_index": 0,
+              "error_category": "USER"
+            }
+          ],
+          "success": "FAIL",
+          "outputs": {},
+          "other_outputs": {},
+          "configured_graph_size": null
+        }
+      },
+      "errors": []
+    }
+  },
+  "failures": {},
+  "project_root": "/repo",
+  "truncated": false,
+  "strings": {
+    "215095554721000729": "Error running analysis for `komira//tools/build/bisect/capture_tmp:std (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)`\n\nCaused by:\n    Traceback (most recent call last):\n      File <builtin>, in <module>\n      * tools/build/mojo/toolchain.bzl:86, in _zig_module_impl\n          fail(\"{}: a zig_module may not be named {} (zig's own module names: {})\".form...\n    error: fail: komira//tools/build/bisect/capture_tmp:std: a zig_module may not be named std (zig's own module names: root, std, builtin)\n      --> tools/build/mojo/toolchain.bzl:86:9\n       |\n    86 | ...   fail(\"{}: a zig_module may not be named {} (zig's own module names: {})\".format(ctx.label.raw_target(), ctx.label.name, \", \".join(_ZIG_RESERVED_MODULES)))\n       |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    "
+  },
+  "error_category": "USER"
+}
