@@ -57,18 +57,12 @@
 #      LLVM_PROFILE_FILE), branchlinkline red (a cov_branch_link.sh copy
 #      without -lm: not the release link). The actions exist only with the
 #      switch on: coverage_keys.sh (test 41).
+#      The greens named below build in the pull-request check, not here:
+#      tests//functional/... is built, its sub-targets through
+#      tests//functional/coverage:greens, and the greens of tests//negative
+#      and tests//src through komira//:tests_greens. What stays here is
+#      what must go red.
 
-expect_green coverage_branch tests//functional/coverage:branch_counts tests//functional/coverage:link_line \
-    tests//functional/coverage:branchlib 'tests//functional/coverage:branchlib[coverage][branch][test_gate_env]' \
-    tests//functional/coverage:branchc 'tests//functional/coverage:branchc[coverage][branch]' \
-    tests//functional/coverage:branchtd 'tests//functional/coverage:branchtd[coverage][branch]' \
-    tests//functional/coverage:reproducible_branch tests//functional/coverage:reproducible_pgo_bin \
-    tests//functional/coverage:branch_info \
-    tests//negative/coverage:branchfail tests//negative/coverage:branchannotate \
-    tests//negative/coverage:branchnoprof tests//negative/coverage:branchversion \
-    tests//negative/coverage:branchmissing tests//negative/coverage:branchweights \
-    tests//negative/coverage:branchinternal tests//negative/coverage:branchentry \
-    tests//negative/coverage:branchnodebug
 expect_red coverage_branch_test_fails "The test failed instrumented for branch coverage (exit 1)" \
     'tests//negative/coverage:branchfail[coverage][branch][test_profile_env]'
 # The failing run's message is a branch coverage run's: not gate_runner's

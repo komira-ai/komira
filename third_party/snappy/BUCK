@@ -141,7 +141,7 @@ cxx_library(
 # komira_snappy_*, and it references none of the C API's unprefixed names.
 prefixed_archive_check(
     name = "snappy_symbols",
-    allow = ["_Z.*"],
+    allow = ["_Z*"],
     archive = ":snappy_prefixed[static-pic]",
     exec_compatible_with = LINUX_X86_64,
     min_defined = 5,
