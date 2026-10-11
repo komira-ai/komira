@@ -36,6 +36,13 @@
 #   6. A run refused at start AFTER the PUBLISH step's check set `set_hash`
 #      (a DEPLOY step with no BUILD step to hold the release to): REFUSED,
 #      exit 3, and `set_hash` empty (the emptying is on every exit path).
+#   7. Which outcome wins (dispatch.mojo's header, 6): the PUBLISH step
+#      ends SUPERSEDED before the DEPLOY steps: the run is SUPERSEDED, exit
+#      0, no cell asked for, no call on any fake, `set_hash` empty.
+#   8. The PUBLISH step uploads (it changed something outside), then the
+#      DEPLOY step into `a` ends FAILED: the run is PARTIAL, exit 6 (not
+#      FAILED, exit 4: the upload stands), `b` and `c` never asked for,
+#      `set_hash` empty.
 #
 # The step reads `resources` relative to the directory kci runs in, so each
 # case changes into its own directory first.
@@ -77,20 +84,25 @@ comptime _ROLLBACK_REFUSAL: String = (
 
 struct Steps(StageSteps, Movable):
     """Answers every BUILD and PUBLISH step with `outcome` and pushes
-    nothing; records each call. Runs a PUBLISH step into a cell. Every run
-    is handed `_SET_HASH`. Layout: owned values only."""
+    nothing; records each call; says it changed something outside when
+    `uploads`. Runs a PUBLISH step into a cell. Every run is handed
+    `_SET_HASH`. Layout: owned values only."""
 
     var calls: List[String]
     var outcome: String
+    var uploads: Bool
 
     def __init__(out self):
         self.calls = List[String]()
         self.outcome = String("SUCCEEDED")
+        self.uploads = False
 
     def _answer(mut self, call: String, name: String, kind: String, platform: String, mut result: KciRunResult) -> StepEnd:
         self.calls.append(call.copy())
         result.steps.append(ResultStep(name.copy(), kind.copy(), platform.copy(), self.outcome.copy()))
-        return StepEnd(self.outcome.copy(), String(""), String(""))
+        var end = StepEnd(self.outcome.copy(), String(""), String(""))
+        end.changed_outside = self.uploads
+        return end^
 
     def build(mut self, req: BuildRequest, mut result: KciRunResult, mut recorder: CliRecorder) -> StepEnd:
         return self._answer(String("build ") + req.step_name, req.step_name, String("BUILD"), req.platform, result)
@@ -466,6 +478,54 @@ def test_a_run_refused_at_start_hands_on_no_set() raises:
     assert_equal(r.error.id, String("KCI-E-SET-HASH"))
     assert_equal(len(r.steps), 0)
     assert_equal(r.set_hash, String(""), "a refused run hands on no set")
+
+
+def test_a_superseded_publish_before_the_deploys_wins() raises:
+    """Catches: the step loop going on to the DEPLOY steps after a
+    SUPERSEDED step, a SUPERSEDED run ranked as a failure (exit not 0), and
+    a SUPERSEDED run handing its set on."""
+    var d = _root(String("superseded"))
+    var m = _machine(d)
+    var steps = Steps()
+    steps.outcome = String("SUPERSEDED")
+    var deploys = Cells(FakeCloud(), FakeCloud())
+    var rec = CliRecorder.memory(String(""))
+    var rc = kci_main_with(_run(m, d + String("/summary.md")), steps, deploys, rec)
+    var r = _last(rec)
+    assert_equal(rc, 0, r.error.message)
+    assert_equal(r.outcome, String("SUPERSEDED"))
+    assert_equal(r.set_hash, String(""), "a SUPERSEDED run hands on no set")
+    assert_equal(len(steps.calls), 1)
+    assert_equal(len(deploys.asked), 0, "no DEPLOY step runs after a SUPERSEDED step")
+    assert_equal(deploys.a.cloud.mutations(), 0)
+    assert_equal(deploys.b.cloud.mutations(), 0)
+    assert_equal(deploys.c.cloud.mutations(), 0)
+    assert_equal(len(r.steps), 1)
+    _no_row(r, String("apply-a"))
+
+
+def test_a_failed_deploy_after_an_upload_is_partial() raises:
+    """Catches: a failed DEPLOY step after a step that changed something
+    outside reported FAILED (exit 4) as if nothing had changed, and the
+    loop going on after it."""
+    var d = _root(String("upload-then-failed"))
+    var m = _machine(d)
+    var steps = Steps()
+    steps.uploads = True
+    var deploys = Cells(FakeCloud(trust_check_raises=True), FakeCloud())
+    var rec = CliRecorder.memory(String(""))
+    var rc = kci_main_with(_run(m, d + String("/summary.md")), steps, deploys, rec)
+    var r = _last(rec)
+    assert_equal(rc, 6, r.error.message)
+    assert_equal(r.outcome, String("PARTIAL"))
+    assert_equal(r.set_hash, String(""), "a PARTIAL run hands on no set")
+    assert_equal(len(r.steps), 2)
+    assert_equal(r.steps[1].outcome, String("FAILED"), "the step's own row keeps its outcome")
+    assert_equal(len(deploys.asked), 1)
+    assert_equal(deploys.b.cloud.mutations(), 0)
+    assert_equal(deploys.c.cloud.mutations(), 0)
+    _no_row(r, String("apply-b"))
+    _no_row(r, String("apply-c"))
 
 
 def main() raises:
