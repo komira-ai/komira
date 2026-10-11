@@ -94,7 +94,7 @@ jobs:
       # kci first holds this workflow (as committed) to the machine file, then
       # builds the units the change reaches: the artifacts of
       # release/artifacts.textproto and the checks its buck2 build system
-      # derives from the live graph (release/ci/derive_checks.py), so every
+      # derives from the live graph (//tools/build/ci:derive_checks), so every
       # target of the graph is in some unit. The change base is the first
       # parent of the merge commit checked out (kci holds HEAD to
       # $REVISION): exactly the main the pull request is merged into, so the

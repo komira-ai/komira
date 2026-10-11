@@ -1,0 +1,13 @@
+{
+ "name": "agg_partials_differ_in_groups",
+ "defect": "the merge gives every partial's states the group ids of the first partial's state count",
+ "run": "agg_split",
+ "entry": "sum",
+ "shape": "AGG_MERGEABLE",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "state": [{"type": "int64", "nullable": true}],
+ "partials": [{"input": {"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]}, "group_ids": [0, 0], "n_groups": 1}, {"input": {"length": 3, "columns": [{"type": "int64", "values": [10, 20, 30]}]}, "group_ids": [0, 1, 1], "n_groups": 2}],
+ "n_groups": 2,
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [13, 50]}}
+}

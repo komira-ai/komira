@@ -40,6 +40,10 @@ do:
   be loadable: it is a `<case>.BUCK` file that the driver copies to
   `<case>/BUCK` for its one build and deletes, its directory gitignored, as
   [`surface_capability_matrix/dangling.BUCK`](negative/surface_capability_matrix/dangling.BUCK) is.
+  A check that writes its refusal as a validation result can instead be
+  tested in the graph: [`negative/native_reach`](negative/native_reach/BUCK)
+  holds such cases, each green only while refused with its named error, and
+  `tests//functional/native_reach:cases` builds them in the pull request check.
 
 A test with both halves keeps one package name in each, for example
 `tests//functional/test_data` (the test runtime contract that works) and
@@ -640,8 +644,9 @@ declares a package, and a NEW fixture library gets `<name>_conda` from the
 `mojo_library` macro with no declaration anywhere and builds; `conda = False`
 gets no target; `conda_name` publishes under another name and a dependent
 requires that name; a dependency is rendered at its own version; a library that
-cannot be packaged (no tests, native code, a run-time `dlopen`, a name that is
-not a conda name, a dependency with no package) keeps a target that builds as a
+cannot be packaged (no tests, native code, a run-time `dlopen` its declaration
+omits, a `dlopen` system_libs.bzl does not name, a name that is not a conda
+name, a dependency with no package) keeps a target that builds as a
 `REFUSED` directory holding the reason, its `[release]` fails naming it, and
 the library still builds; `komira_pack conda-check` refuses a different
 payload, name, subdir or dependency list, a corrupt zip, a manifest that is not

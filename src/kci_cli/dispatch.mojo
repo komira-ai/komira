@@ -6,7 +6,12 @@
 #
 # `kci run --stage S`:
 #
-#   0. every `--only` parsed (args.mojo `selectors_of`): a malformed or
+#   0. `--rollback-on-failure` is REFUSED (args.mojo
+#      `refuse_rollback_on_failure`, KCI-E-USAGE, exit 2) for every stage,
+#      with or without `--plan`, before anything is read and before the
+#      RUNNING record: re-applying a failed DEPLOY step's cell needs a
+#      per-cell deployed-revision record, which this kci does not have.
+#      Then every `--only` parsed (args.mojo `selectors_of`): a malformed or
 #      repeated selector is KCI-E-SELECTOR, exit 2, before anything is read.
 #      `--affected-by <base>` makes the run SELECTIVE and records
 #      `affected_by` (its base) from the first record on; each BUILD step
@@ -17,9 +22,13 @@
 #      that names no file is a usage error (KCI-E-USAGE, exit 2); a file
 #      whose schema_version this kci does not read is REFUSED
 #      (KCI-E-FORMAT-VERSION); any other refusal of the file is REFUSED
-#      (KCI-E-FORMAT), and so is a file holding a step that writes into a
-#      cell (a DEPLOY step, or a PUBLISH step into a cell), which this kci
-#      parses and does not run;
+#      (KCI-E-FORMAT), and so is a file holding a PUBLISH step into a cell,
+#      which this kci parses and does not run (unless the seam's steps say
+#      they run one, `StageSteps.runs_publish_into_cell`: the kci binary's
+#      `LibrarySteps` do not, a test's may); then every cells file a step
+#      names is read (kci_cell) and a step naming a cell its cells file does
+#      not declare, or a cells file that cannot be read or parsed, is
+#      REFUSED (KCI-E-FORMAT) before any step runs;
 #   2. resolve S: an unknown stage is REFUSED (KCI-E-STAGE-UNKNOWN, the
 #      message lists the stages); then the selection (kci_release_machine
 #      `resolve_selection`): a selector that matches nothing in S is
@@ -81,7 +90,14 @@
 #      run, NOT on a run that ended SUPERSEDED, and, for a run that selects validations, only when every one of
 #      them VALIDATED and SUCCEEDED (checked at the run's end): kci.yml hands
 #      the beta_validate job's on to prod, and prod refuses an empty one. Under
-#      GitHub Actions the flag is required (KCI-E-USAGE, exit 2);
+#      GitHub Actions the flag is required (KCI-E-USAGE, exit 2). A run
+#      that selects a DEPLOY step always takes the flag (args.mojo), and its
+#      release is recomputed the same way (deploy_step.mojo
+#      `check_deploy_set_hash`). Whatever set it, a run that ends neither
+#      SUCCEEDED nor NOOP hands on no set: on every exit path its
+#      `set_hash` is "" (start_checks.mojo `keep_set_hash_only_if_passed`,
+#      in `_finish`), so a failed DEPLOY step never promotes its release,
+#      and neither does a run that ends SUPERSEDED (4c, 6);
 #   4c. THE ADMISSION CHECK (rule R24 of the staged pipeline), right after
 #      4a and before 4b, with `--admission`, on a RELEASE run (4a): a re-run
 #      (the platform-set `GITHUB_RUN_ATTEMPT` above 1) at any stage, or the
@@ -98,7 +114,9 @@
 #   6. every SELECTED step of S, in file order: a BUILD step through
 #      `steps.build`, a PUBLISH step through `steps.publish`, each given its
 #      name, the stage and its GitHub environment, the revision, the
-#      platform, the run identity, `--plan` and its own inputs. NEVER
+#      platform, the run identity, `--plan` and its own inputs; a DEPLOY step
+#      through `deploys.deploy` (deploy_step.mojo: the clouds this kci was
+#      built with, given the machine file's `name`). NEVER
 #      BACKWARD is a property of the RUN: a PUBLISH step never goes
 #      backward on a RELEASE run (4a), and on any run of a stage without
 #      `break_glass`; a `break_glass` stage's channel also takes break-glass
@@ -121,7 +139,21 @@
 #      INDETERMINATE with a skip_reason, exit 5, never a pass, its reason the
 #      run's error message); a selected validation after that point gets a
 #      NOT_REACHED row. Under `--plan` a validation runs nothing and its row
-#      is WOULD_VALIDATE;
+#      is WOULD_VALIDATE. A DEPLOY step that ends FAILED or PARTIAL stops
+#      the run the same way, and that is all kci does about it: its cell is
+#      left exactly as the failed apply left it (no rollback, no unwind), a
+#      later step has no row (a DEPLOY step into another cell later in the
+#      stage never runs), and the job exits non-zero with no set handed on
+#      (4b), so no later stage starts (deploy_step.md, "After a failed
+#      deploy"). WHICH OUTCOME WINS when a stop meets SUPERSEDED: the
+#      admission check (4c) stops the run SUPERSEDED before the RUNNING
+#      record, so no step, DEPLOY included, runs. In the step loop only the
+#      first step that does not pass ends the run, so a failed DEPLOY step
+#      and a SUPERSEDED PUBLISH step never both end one run: whichever comes
+#      first in the stage stops it with its own outcome. Either one after a
+#      step that changed something outside (an upload, or a DEPLOY step
+#      that landed or released an object) makes the run PARTIAL, exit 6.
+#      None of these hands on a set (4b);
 #   7. NEW NAMES AHEAD: when the run ended SUCCEEDED or NOOP, every PUBLISH
 #      step of each stage whose `after` is S is read through `steps.lookahead`
 #      (anonymous reads of that stage's channel, kci_publish
@@ -169,8 +201,10 @@
 # Everything a run does outside this process goes through the `StageSteps`
 # seam: the steps, the lookahead reads, the platform-set variables and the
 # committed workflow. `LibrarySteps` (library_verbs.mojo) is the real one;
-# the welded tests drive a recording fake. Human text goes to stderr; stdout
-# carries nothing.
+# the welded tests drive a recording fake. DEPLOY steps go through the
+# `CellDeploys` seam (deploy_step.mojo): `NoCloudBuilt` in the kci binary,
+# `CloudDeploys[FakeCloud, InMemoryStateStore]` in the welded tests. Human
+# text goes to stderr; stdout carries nothing but a DEPLOY step's plan.
 #
 # Encapsulation: owned values and a generic seam; no pointer, no wildcard
 # origin.
@@ -236,11 +270,15 @@ from kci_release_machine import (
     ReleaseMachine,
     StageStep,
     StageValidation,
+    cells_files_named,
     machine_schema_version,
     parse_machine_file,
+    require_cells_declared,
     resolve_selection,
 )
+from kci_cell import cell_names, parse_cells_file
 
+from .deploy_step import CellDeploys, NoCloudBuilt, check_deploy_set_hash, deploy_request
 from .args import (
     CLI_VERB_HELP,
     KCI_USAGE,
@@ -249,6 +287,7 @@ from .args import (
     find_result_file,
     find_summary_file,
     parse_kci_args,
+    refuse_rollback_on_failure,
     require_stage_flags,
     selectors_of,
 )
@@ -268,6 +307,7 @@ from .start_checks import (
     check_ref_at_start,
     check_set_hash_at_start,
     check_workflow_at_start,
+    keep_set_hash_only_if_passed,
     keep_set_hash_only_if_validated,
     workflow_path_of,
 )
@@ -286,7 +326,9 @@ def _now() -> Int:
 def _finish(mut result: KciRunResult, mut recorder: CliRecorder, outcome: String, retry: String = String("")) -> Int:
     """Write the FINISHED record with `outcome`; return its exit number. A
     record that cannot be made or written is said on stderr; the number
-    stands."""
+    stands. A run that ends neither SUCCEEDED nor NOOP hands on no set
+    (file header, 4b), on every exit path."""
+    keep_set_hash_only_if_passed(outcome, result)
     var rec: KciRunResult
     try:
         rec = result.finish_record(outcome.copy(), _now(), retry.copy())
@@ -325,8 +367,10 @@ def _read(path: String) raises -> String:
     return Path(path).read_text()
 
 
-def _load_graph(cmd: KciCommand, mut result: KciRunResult) raises -> ReleaseMachine:
-    """Step 1 of the file header; raises `<error id>\\n<message>`."""
+def _load_graph(cmd: KciCommand, mut result: KciRunResult, publish_into_cell: Bool) raises -> ReleaseMachine:
+    """Step 1 of the file header; raises `<error id>\\n<message>`.
+    `publish_into_cell`: the steps run a PUBLISH step into a cell
+    (`StageSteps.runs_publish_into_cell`)."""
     if not isfile(cmd.machine):
         raise Error(
             String(ERROR_USAGE) + String("\nthe machine file '") + cmd.machine
@@ -345,13 +389,21 @@ def _load_graph(cmd: KciCommand, mut result: KciRunResult) raises -> ReleaseMach
     for i in range(len(g.stages)):
         for k in range(len(g.stages[i].steps)):
             ref step = g.stages[i].steps[k]
-            if step.writes_cell():
+            if step.is_publish() and step.names_cell() and not publish_into_cell:
                 raise Error(
                     String(ERROR_FORMAT) + String("\n") + cmd.machine + String(": line ") + String(step.line)
                     + String(": step '") + step.name + String("' of stage '") + g.stages[i].name
-                    + String("' writes into cell '") + step.cell
-                    + String("': that needs a newer kci (this kci runs BUILD steps and PUBLISH steps to a channel)")
+                    + String("' publishes into cell '") + step.cell
+                    + String("': that needs a newer kci (this kci runs BUILD steps, PUBLISH steps to a channel and")
+                    + String(" DEPLOY steps)")
                 )
+    var files = cells_files_named(g)
+    for i in range(len(files)):
+        try:
+            var declared = cell_names(parse_cells_file(_read(files[i])))
+            require_cells_declared(g, files[i], declared, cmd.machine)
+        except e:
+            raise Error(String(ERROR_FORMAT) + String("\nthe cells file '") + files[i] + String("': ") + String(e))
     result.machine_path = cmd.machine.copy()
     result.machine_sha256 = file_sha256_hex(cmd.machine)
     return g^
@@ -524,11 +576,13 @@ def _lookahead[S: StageSteps](
     return out^
 
 
-def _run_step[S: StageSteps](
+def _run_step[S: StageSteps, D: CellDeploys](
     cmd: KciCommand,
+    machine: String,
     stage: Stage,
     step: StageStep,
     mut steps: S,
+    mut deploys: D,
     mut recorder: CliRecorder,
     mut result: KciRunResult,
     mut step_blocks: List[String],
@@ -537,12 +591,15 @@ def _run_step[S: StageSteps](
 ) -> StepEnd:
     """One selected step (file header, 6): run it, print its lines, keep its
     summary block. `break_glass`: the run is break-glass; `release`: it is a
-    push to main (4a)."""
+    push to main (4a); `machine`: the machine file's `name`, a DEPLOY step's
+    scope."""
     _say(String("kci: stage ") + stage.name + String(", step ") + step.name + String(" (") + step.kind + String(")"))
     var end: StepEnd
     try:
         if step.is_build():
             end = steps.build(_build_request(cmd, step), result, recorder)
+        elif step.is_deploy():
+            end = deploys.deploy(deploy_request(cmd, machine, stage, step), result)
         else:
             end = steps.publish(_publish_request(cmd, stage, step, break_glass, release), result, recorder, cmd.store)
             # the run's dry-run flag is the command line's: a step refused
@@ -559,9 +616,10 @@ def _run_step[S: StageSteps](
     return end^
 
 
-def _run_stage[S: StageSteps](
+def _run_stage[S: StageSteps, D: CellDeploys](
     cmd: KciCommand,
     mut steps: S,
+    mut deploys: D,
     mut recorder: CliRecorder,
     mut result: KciRunResult,
     mut step_blocks: List[String],
@@ -578,7 +636,11 @@ def _run_stage[S: StageSteps](
         result.set_run(cmd.run_identity())
     except e:
         return _stop(result, recorder, String(OUTCOME_REFUSED), String(ERROR_USAGE), String(e))
-    # 0. the selectors, before anything is read
+    # 0. --rollback-on-failure, then the selectors, before anything is read
+    try:
+        refuse_rollback_on_failure(cmd)
+    except e:
+        return _stop(result, recorder, String(OUTCOME_REFUSED), String(ERROR_USAGE), String(e))
     var selectors: List[Selector]
     try:
         selectors = selectors_of(cmd)
@@ -594,7 +656,7 @@ def _run_stage[S: StageSteps](
         result.affected_base = cmd.affected_by.copy()
     var g: ReleaseMachine
     try:
-        g = _load_graph(cmd, result)
+        g = _load_graph(cmd, result, steps.runs_publish_into_cell())
     except e:
         var p = _split(e)
         return _stop_run(result, recorder, String(OUTCOME_REFUSED), p[0], p[1])
@@ -645,6 +707,9 @@ def _run_stage[S: StageSteps](
     var hash_verdict = check_set_hash_at_start(cmd, stage, sel, steps, result)
     if hash_verdict.outcome.byte_length() > 0:
         return _stop_run(result, recorder, hash_verdict.outcome, hash_verdict.error_id, hash_verdict.message)
+    var deploy_verdict = check_deploy_set_hash(cmd, g, stage, sel, steps, result)
+    if deploy_verdict.outcome.byte_length() > 0:
+        return _stop_run(result, recorder, deploy_verdict.outcome, deploy_verdict.error_id, deploy_verdict.message)
     for i in range(len(stage.steps)):
         var validated = False
         for m in range(len(stage.steps[i].validations)):
@@ -675,7 +740,7 @@ def _run_stage[S: StageSteps](
             _say(String("kci: stage ") + stage.name + String(", step ") + step.name + String(": not selected (--only)"))
             result.steps.append(ResultStep.unselected(step.name.copy(), step.kind.copy(), step.platform.copy()))
         else:
-            var end = _run_step(cmd, stage, step, steps, recorder, result, step_blocks, break_glass, release)
+            var end = _run_step(cmd, g.name, stage, step, steps, deploys, recorder, result, step_blocks, break_glass, release)
             if end.outcome == OUTCOME_SUPERSEDED:
                 superseded_why = (
                     String("step '") + step.name + String("': the channel's newest build descends from this")
@@ -730,7 +795,8 @@ def _run_stage[S: StageSteps](
                         _say(String("kci: ") + String(e))
                     stopped = True
             result.validations.append(row^)
-    # 4b, at the end: only a validated set is handed on
+    # 4b, at the end: only a validated set is handed on (and only by a run
+    # that passed: `_finish`)
     keep_set_hash_only_if_validated(sel, result)
     # a superseded run hands nothing on (file header, 4b)
     if outcome == OUTCOME_SUPERSEDED:
@@ -751,8 +817,18 @@ def _run_stage[S: StageSteps](
 
 
 def run_stage_with[S: StageSteps](cmd: KciCommand, mut steps: S, mut recorder: CliRecorder) -> Int:
-    """`kci run --stage S` (file header). Returns the exit number; the
-    summary goes to `--summary-file` on every path."""
+    """`run_stage_with` (the next form) on a kci built with no cloud: every
+    DEPLOY step is refused (deploy_step.mojo `NoCloudBuilt`)."""
+    var deploys = NoCloudBuilt()
+    return run_stage_with(cmd, steps, deploys, recorder)
+
+
+def run_stage_with[S: StageSteps, D: CellDeploys](
+    cmd: KciCommand, mut steps: S, mut deploys: D, mut recorder: CliRecorder
+) -> Int:
+    """`kci run --stage S` (file header), its DEPLOY steps through
+    `deploys`. Returns the exit number; the summary goes to
+    `--summary-file` on every path."""
     var result = KciRunResult(String(VERB_RUN), String("run"))
     result.started_at_ms = _now()
     result.stage = cmd.stage.copy()
@@ -763,7 +839,7 @@ def run_stage_with[S: StageSteps](cmd: KciCommand, mut steps: S, mut recorder: C
     var banner = String("")
     var main_only = False
     var superseded_why = String("")
-    var rc = _run_stage(cmd, steps, recorder, result, step_blocks, ahead, banner, main_only, superseded_why)
+    var rc = _run_stage(cmd, steps, deploys, recorder, result, step_blocks, ahead, banner, main_only, superseded_why)
     var text = String("")
     if banner.byte_length() > 0:
         text += String("### ") + banner + String("\n\n")
@@ -781,7 +857,16 @@ def run_stage_with[S: StageSteps](cmd: KciCommand, mut steps: S, mut recorder: C
 
 
 def kci_main_with[S: StageSteps](args: List[String], mut steps: S, mut recorder: CliRecorder) -> Int:
-    """`kci <args>`: parse; print the usage; or `kci run`. A refused command
+    """`kci_main_with` (the next form) on a kci built with no cloud."""
+    var deploys = NoCloudBuilt()
+    return kci_main_with(args, steps, deploys, recorder)
+
+
+def kci_main_with[S: StageSteps, D: CellDeploys](
+    args: List[String], mut steps: S, mut deploys: D, mut recorder: CliRecorder
+) -> Int:
+    """`kci <args>`: parse; print the usage; or `kci run`, its DEPLOY steps
+    through `deploys`. A refused command
     line is exit 2, recorded in the file `--result-file` names and summarized
     in the file `--summary-file` names, when it names them. Returns the exit
     number. Its first act reads the monotonic clock: kci's start, from which
@@ -808,7 +893,7 @@ def kci_main_with[S: StageSteps](args: List[String], mut steps: S, mut recorder:
         _say(String(KCI_USAGE))
         return EXIT_OK
     cmd.started_ns = started_ns
-    return run_stage_with(cmd, steps, recorder)
+    return run_stage_with(cmd, steps, deploys, recorder)
 
 
 def recorder_for(args: List[String]) -> CliRecorder:

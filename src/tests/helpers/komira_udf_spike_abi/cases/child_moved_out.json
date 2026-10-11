@@ -1,0 +1,11 @@
+{
+ "name": "child_moved_out",
+ "defect": "the host's struct release calls a child's release that the runtime already moved out (Arrow C Data: a consumer may move a child out and release it on its own; the parent's release then skips it), or a child released twice or never",
+ "run": "call_batch",
+ "entry": "child_moved_out",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 3, "columns": [{"type": "int64", "values": [1, null, 3]}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [1, null, 3]}}
+}
