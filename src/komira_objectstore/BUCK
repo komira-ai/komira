@@ -47,6 +47,7 @@ mojo_library(
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
+        "tests/test_cas_gate_released_once_offline.mojo",
         "tests/test_cas_manifest_absence_is_anchored.mojo",
         "tests/test_cas_manifest_concurrent_offline.mojo",
         "tests/test_cas_manifest_property.mojo",
@@ -66,6 +67,7 @@ mojo_library(
         "tests/test_cov_seams.mojo",
         "tests/test_cov_sublineage.mojo",
         "tests/test_delimiter_listing_byte_faithful.mojo",
+        "tests/test_idempotent_scan_missing_chunk_offline.mojo",
         "tests/test_local_fs_conditional_store.mojo",
         "tests/test_local_fs_read_errno.mojo",
         "tests/test_local_fs_store_create_write_failure.mojo",
@@ -80,6 +82,7 @@ mojo_library(
         "tests/test_sharded_lineage_kernel.mojo",
         "tests/test_slow_cas_store_start_412_abi.mojo",
         "tests/test_sublineage_base_fold.mojo",
+        "tests/test_sublineage_read_errors_offline.mojo",
     ],
     visibility = ["PUBLIC"],
 )

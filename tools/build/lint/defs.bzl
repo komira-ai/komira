@@ -135,42 +135,6 @@ push_verdicts_rule = rule(
     attrs = _COMMON | {"srcs": attrs.list(attrs.source())},
 )
 
-def _mojo_deps_impl(ctx):
-    if not ctx.attrs.srcs:
-        fail("mojo_deps {}: srcs is empty, so it would check nothing".format(ctx.label))
-    staged, copy = _stage(ctx, [ctx.attrs.buck] + ctx.attrs.srcs)
-    for m in ctx.attrs.refused_imports:
-        if not _dotted_komira_module(m):
-            fail("mojo_deps {}: refused_imports entry `{}` is not a dotted module name komira_<x>.<y>[.<z>...] of letters, digits and _".format(ctx.label, m))
-    refused = ",".join(ctx.attrs.refused_imports) or "-"
-    return _lint(ctx, "mojo_deps", [ctx.attrs._reader], [copy[ctx.attrs.buck.short_path], refused] + [copy[s.short_path] for s in ctx.attrs.srcs], staged)
-
-_WORD = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
-
-def _dotted_komira_module(m):
-    """Whether m matches komira_[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+."""
-    parts = m.split(".")
-    if len(parts) < 2 or not parts[0].startswith("komira_") or len(parts[0]) == len("komira_"):
-        return False
-    for p in parts:
-        if not p:
-            return False
-        for i in range(len(p)):
-            if p[i] not in _WORD:
-                return False
-    return True
-
-mojo_deps_rule = rule(
-    impl = _mojo_deps_impl,
-    doc = "The `deps` of the package's mojo_library (the BUCK file in `buck`) name every `komira_*` module that the Mojo files in `srcs` import, library files and tests alike. A missing dep fails the build of the package; this finds it from the text, so a dependency list is checked in review as well as at build time. Extra deps are allowed. `refused_imports` names dotted modules (`komira_x.y`) that no file in `srcs` may import, nor any module under them, nor name by their dotted path outside an import: a layering rule finer than a target's deps.",
-    attrs = _COMMON | {
-        "buck": attrs.source(),
-        "refused_imports": attrs.list(attrs.string(), default = []),
-        "_reader": attrs.source(default = "komira//tools/build/lint:refused_imports.awk"),
-        "srcs": attrs.list(attrs.source()),
-    },
-)
-
 def _retired_names_impl(ctx):
     if not ctx.attrs.names:
         fail("retired_names {}: names is empty, so it would check nothing".format(ctx.label))
@@ -281,6 +245,20 @@ lint_suite_rule = rule(
     attrs = {"lints": attrs.list(attrs.dep())},
 )
 
+def _target_suite_impl(ctx):
+    if not ctx.attrs.targets:
+        fail("target_suite {}: targets is empty".format(ctx.label))
+    outs = []
+    for d in ctx.attrs.targets:
+        outs.extend(d[DefaultInfo].default_outputs)
+    return [DefaultInfo(default_outputs = outs)]
+
+target_suite_rule = rule(
+    impl = _target_suite_impl,
+    doc = "Depends on targets that must build but that no unit of the pull-request check builds by itself (sub-targets; targets of tests//negative and tests//src beside the planted defects they serve), so building it builds every default output of each and runs their validations. Its outputs are theirs.",
+    attrs = {"targets": attrs.list(attrs.dep())},
+)
+
 
 def _markdown_docs_impl(ctx):
     if not [f for f in ctx.attrs.srcs if f.short_path.endswith(".md")]:
@@ -355,9 +333,6 @@ def no_endpoint(**kwargs):
 def push_verdicts(**kwargs):
     push_verdicts_rule(**_linux(kwargs))
 
-def mojo_deps(**kwargs):
-    mojo_deps_rule(**_linux(kwargs))
-
 def pointer_lint(**kwargs):
     pointer_lint_rule(**_linux(kwargs))
 
@@ -397,8 +372,8 @@ def markdown_docs(**kwargs):
 # (doc_tree.bzl), so no BUCK file names one.
 action_pins = declares_docs(action_pins)
 lint_suite = declares_docs(lint_suite_rule)
+target_suite = declares_docs(target_suite_rule)
 markdown_docs = declares_docs(markdown_docs)
-mojo_deps = declares_docs(mojo_deps)
 no_endpoint = declares_docs(no_endpoint)
 pointer_lint = declares_docs(pointer_lint)
 public_boundary = declares_docs(public_boundary)

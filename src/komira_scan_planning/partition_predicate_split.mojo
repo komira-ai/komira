@@ -147,7 +147,9 @@ def split_partition_predicate(
            * `col IN (lit, lit, ...)` where `col` is a partition col -> an IN
              `PartitionConstraint`.
          A conjunct that touches a partition col with a shape cannot
-         enumerate cleanly (e.g. `col` on BOTH sides, function-wrapped) is
+         enumerate cleanly (e.g. `col` on BOTH sides, function-wrapped, or a
+         literal with no canonical partition text: NULL, FLOAT, DATE32,
+         TIMESTAMP, binary, decimal; see `_scalar_to_partition_string`) is
          routed CONSERVATIVELY: it becomes an `OTHER` fold constraint (so the
          fold keeps the file) AND it stays in the residual (so the
          row-group pruner still sees it). Correctness over pruning.
@@ -339,7 +341,9 @@ def _classify_binary(
             return _Classified.data()  # data col -> Tier-2
         var atype = partition_types[pidx]
         var val = _scalar_to_partition_string(rhs.literal_value())
-        return _make_compare_constraint(col, op, val, atype)
+        if not val:
+            return _Classified.conservative(PartitionConstraint.other(col))
+        return _make_compare_constraint(col, op, val.value(), atype)
 
     # Shape B: literal <op> col  -> flip the op
     if right_is_col and left_is_lit:
@@ -349,7 +353,9 @@ def _classify_binary(
             return _Classified.data()
         var atype = partition_types[pidx]
         var val = _scalar_to_partition_string(lhs.literal_value())
-        return _make_compare_constraint(col, _flip_op(op), val, atype)
+        if not val:
+            return _Classified.conservative(PartitionConstraint.other(col))
+        return _make_compare_constraint(col, _flip_op(op), val.value(), atype)
 
     # Shape C: a comparison NOT of the (col, literal) form but referencing a
     # partition col (col-on-both-sides, expr-on-one-side) -> conservative.
@@ -383,7 +389,12 @@ def _classify_in_list(
     ref values = conj.in_list_values_ref()
     var vs = List[String]()
     for vi in range(len(values)):
-        vs.append(_scalar_to_partition_string(values[vi]))
+        var v = _scalar_to_partition_string(values[vi])
+        if not v:
+            # One value without a canonical text form: the fold cannot
+            # match the list, so keep the file and the conjunct.
+            return _Classified.conservative(PartitionConstraint.other(col))
+        vs.append(v.value())
     return _Classified.clean(PartitionConstraint.in_list(col, vs^, atype))
 
 
@@ -434,7 +445,7 @@ def _collect_or_eq_leaves(
         ref r = e.binary_right_ref()
         # col == literal  OR  literal == col
         var this_col: String
-        var this_val: String
+        var this_val: Optional[String]
         if l.tag == EXPR_COL_REF and r.tag == EXPR_LITERAL:
             this_col = l.col_ref_name()
             this_val = _scalar_to_partition_string(r.literal_value())
@@ -443,11 +454,15 @@ def _collect_or_eq_leaves(
             this_val = _scalar_to_partition_string(l.literal_value())
         else:
             return False
+        if not this_val:
+            # A literal without a canonical text form: not a clean IN; the
+            # caller routes the OR conservatively.
+            return False
         if col_name.byte_length() == 0:
             col_name = this_col
         elif col_name != this_col:
             return False  # an EQ on a DIFFERENT col -> not a clean IN
-        values.append(this_val)
+        values.append(this_val.value())
         return True
     return False
 
@@ -572,39 +587,34 @@ def _partition_col_index(col: String, partition_cols: List[String]) -> Int:
     return -1
 
 
-def _scalar_to_partition_string(value: ScalarValue) -> String:
+def _scalar_to_partition_string(value: ScalarValue) -> Optional[String]:
     """Render a literal `ScalarValue` into its CANONICAL partition-value text
     form — the form the `PartitionConstraint` stores and the fold /
-    prefix-encode consume.
+    prefix-encode consume — or `None` when the literal has no such form.
 
-      * INT  -> decimal digits (`String(int_val)`). The fold compares INT64
-        cols numerically, so `1` matches an on-disk `01` regardless.
       * STRING -> the string itself.
+      * Integers that fit Int64 (int8..int64, uint8..uint32) -> decimal
+        digits. The fold compares INT64 cols numerically, so `1` matches an
+        on-disk `01` regardless.
       * BOOL -> `true` / `false`.
-      * FLOAT -> the float's text (rare as a partition col; supported for
-        completeness — the fold treats unknown types lexically).
-      * DATE32 -> the days-since-epoch integer text. (Canonical `YYYY-MM-DD`
-        rendering of a DATE32 literal is deferred — a date partition predicate
-        most commonly arrives as a STRING literal `dt='2026-11-04'`, which
-        takes the STRING branch and matches the path text directly.)
-      * TIMESTAMP -> the micros integer text (same deferral note as DATE32).
-      * NULL -> the empty string (the codec's NULL sentinel form).
+      * Every other kind -> `None`: NULL (`col = NULL` is never true, while
+        the empty text would match the null partition), FLOAT (`2020.0` is
+        neither the INT64 text `2020` nor numerically parsed by the fold),
+        DATE32 / TIMESTAMP (the day / micros count is not the `YYYY-MM-DD` /
+        `YYYY-MM-DD HH:MM:SS` path text), binary, decimal, uint64 (a value
+        >= 2^63 has no Int64 text) and the remaining kinds. The caller
+        routes such a conjunct conservatively (an OTHER constraint, kept on
+        the residual), so pruning never changes the result. A date predicate
+        written as a STRING literal (`dt = '2026-11-04'`) still prunes.
 
     This matches the `encode_partition_value` contract: the caller produces
     canonical text; encode url-escapes it for the path segment."""
-    if value.is_null():
-        return String("")
     if value.is_string():
-        return value.string_val.copy()
-    if value.is_int():
-        return String(value.int_val)
+        return Optional[String](value.string_val.copy())
+    if value.fits_int64_family():
+        return Optional[String](String(value.int_val))
     if value.is_bool():
-        return String("true") if value.bool_val else String("false")
-    if value.is_float():
-        return String(value.float_val)
-    if value.is_date32():
-        return String(Int(value.date32_val))
-    if value.is_timestamp():
-        return String(value.ts_micros)
-    # Fallback (decimal / other): the int field is the most likely carrier.
-    return String(value.int_val)
+        return Optional[String](
+            String("true") if value.bool_val else String("false")
+        )
+    return Optional[String](None)

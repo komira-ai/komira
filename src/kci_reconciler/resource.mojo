@@ -721,7 +721,7 @@ trait Resource(Movable, Deinitable):
         mut self, stamp: OwnerStamp, physical_id: String, creds: Creds
     ) raises:
         """Stamp the EXISTING unstamped object `physical_id` with `stamp`: the
-        explicit `--adopt <id>` takeover, and nothing else calls it. The
+        explicit `adopt` takeover, and nothing else calls it. The
         stamp's validation run is NOT written: the run did not create the
         object, so it must not be able to claim it.
 

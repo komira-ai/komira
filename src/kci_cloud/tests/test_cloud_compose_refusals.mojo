@@ -355,7 +355,10 @@ def test_a_nested_instance() raises:
     cases.append(w + ',"physicalName":"p",' + inst + "}}}")
     fields.append("component[w].composite")
     needles.append("physical_name, labels and adopt are written on the components")
-    cases.append(w + ',"adopt":true,' + inst + "}}}")
+    cases.append(w + ',"adopt":"ADOPT",' + inst + "}}}")
+    fields.append("component[w].composite")
+    needles.append("physical_name, labels and adopt are written on the components")
+    cases.append(w + ',"adopt":"ADOPT_DELETABLE",' + inst + "}}}")
     fields.append("component[w].composite")
     needles.append("physical_name, labels and adopt are written on the components")
     for i in range(len(cases)):

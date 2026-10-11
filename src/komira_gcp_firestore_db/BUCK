@@ -44,6 +44,7 @@ mojo_library(
         "tests/test_firestore_db_batch_cap_update.mojo",
         "tests/test_firestore_db_claim.mojo",
         "tests/test_firestore_db_encoding.mojo",
+        "tests/test_firestore_db_non_ascii_doc_id.mojo",
         "tests/test_firestore_db_query.mojo",
         "tests/test_firestore_db_tx.mojo",
         "tests/test_firestore_index_guard.mojo",

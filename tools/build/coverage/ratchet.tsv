@@ -175,8 +175,9 @@ src/komira_orc	8337	-
 src/komira_parquet	9986	-
 src/komira_parquet_api	10000	10000
 src/komira_parquet_codec	9603	9278
+src/komira_physical_plan	9715	9459
 src/komira_plan_expr	5440	-
-src/komira_plan_ir	8950	8146
+src/komira_plan_ir	8849	8018
 src/komira_plan_proto	0	-
 src/komira_plan_stats	5759	7844
 src/komira_plan_wire	9971	-
