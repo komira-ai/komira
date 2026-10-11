@@ -5,7 +5,7 @@
 # implements in its language (design section 6.3). This runtime's entries are
 # `module:function`, so every entry becomes `udf_fixtures:<name>`.
 #
-# 63 cases are left out: their fixtures are runtime bugs or output layouts
+# 64 cases are left out: their fixtures are runtime bugs or output layouts
 # that only a runtime's own C code chooses. The bugs: an output or table with
 # the wrong layout, buffers or device, a null_count that lies, OK without an
 # output, `out` left set on an error, an input not moved (on OK or on an
@@ -83,6 +83,7 @@ def runtime_fault_cases() -> List[String]:
         "fault_table_null_count_zero",
         "fault_table_null_rows",
         "fault_table_out_on_error",
+        "fault_table_release_keeps_slot",
         "frame_error_released_on_ok",
         "frame_fault_then_raise",
         "frame_no_next_after_error",

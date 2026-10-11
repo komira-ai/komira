@@ -245,6 +245,18 @@ def bad_iter(x: list[int]) -> list[int]:
     return _BadIter(x)
 
 
+class _BadNext(list):
+    """Iterates its first value, then raises."""
+
+    def __iter__(self):
+        yield self[0]
+        raise RuntimeError("_BadNext: no second value")
+
+
+def bad_next(x: list[int]) -> list[int]:
+    return _BadNext(x)
+
+
 class _BadRepr:
     """A wrong value (no int) whose repr raises: the refusal's message must
     still be made."""

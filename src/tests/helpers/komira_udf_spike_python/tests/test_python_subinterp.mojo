@@ -316,6 +316,19 @@ def _edges(mut rt: UdfRuntime) raises:
     assert_equal(r.outcome.row, -1, String(r.outcome))
     assert_true("the deadline passed before the batch" in r.outcome.message, String(r.outcome))
 
+    # A deadline that passes while the last row runs ends nothing: on the
+    # host's virtual clock (1 ms a read) a deadline 1.5 ms ahead passes at
+    # the runtime's third read, after row 1 of 2 (the C side's read before
+    # the batch, then one after each row). Reported as row 2 it would be a
+    # row past the batch, a host fault.
+    r = call_once_with(rt, dbl, ints([1, 2]), CallOptions(False, False, False, 1_500_000))
+    assert_true(r.outcome.is_ok(), "deadline at the last row: " + String(r.outcome))
+    assert_equal(same_column(r.column, _ints_want([2, 4])), "", "deadline at the last row")
+    # The same deadline over 3 rows ends the call at row 2 (rows 0 and 1 ran).
+    r = call_once_with(rt, dbl, ints([1, 2, 3]), CallOptions(False, False, False, 1_500_000))
+    assert_equal(status_name(r.outcome.status), "ERR_DEADLINE", String(r.outcome))
+    assert_equal(r.outcome.row, 2, String(r.outcome))
+
     # Column results of 0 and 1 rows.
     var ident = spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_fixtures:identity", TYPE_INT64, TYPE_INT64)
     r = call_once(rt, ident, ints(List[Int64]()))

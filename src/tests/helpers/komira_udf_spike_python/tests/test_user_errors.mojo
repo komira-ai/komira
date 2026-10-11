@@ -12,7 +12,8 @@
 #     C side as ERR_INTERNAL);
 #   - a value whose __bool__ raises converts (the adapter never asks a
 #     returned value's truth);
-#   - a list result whose __len__ or __iter__ raises: ERR_RAISED, row -1;
+#   - a list result whose __len__ or __iter__ raises, or whose iterator
+#     raises after its first value: ERR_RAISED, row -1;
 #   - a wrong value whose repr raises: ERR_RETURN_TYPE at its row, the
 #     message made without the repr;
 #   - an exception whose str() raises, whose __str__ returns a non-str, one
@@ -65,6 +66,7 @@ def main() raises:
     ))
     why.append(_user_error(rt, spec1(col, "udf_fixtures:bad_len", TYPE_INT64, TYPE_INT64), "ERR_RAISED", -1, "RuntimeError: _BadLen"))
     why.append(_user_error(rt, spec1(col, "udf_fixtures:bad_iter", TYPE_INT64, TYPE_INT64), "ERR_RAISED", -1, "RuntimeError: _BadIter"))
+    why.append(_user_error(rt, spec1(col, "udf_fixtures:bad_next", TYPE_INT64, TYPE_INT64), "ERR_RAISED", -1, "RuntimeError: _BadNext"))
     why.append(_user_error(
         rt, spec1(row, "udf_fixtures:bad_repr_value", TYPE_INT64, TYPE_INT64), "ERR_RETURN_TYPE", 0,
         "row 0: _BadRepr",

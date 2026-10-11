@@ -51,9 +51,6 @@ DTYPE = {"l": "int64", "i": "int32", "g": "float64"}
 TYPE = {"l": "int64", "i": "int32", "g": "float64"}
 WIDTH = {"l": 8, "i": 4, "g": 8}
 
-# How often (in rows) a SCALAR call reads the host clock for its deadline,
-# after reading it once past row 0.
-CLOCK_EVERY = 1024
 
 _NO_FLAG = memoryview(b"\0\0\0\0").cast("i")
 
@@ -339,9 +336,13 @@ class Instance:
                 except BaseException as exc:
                     # The value's own conversion code raised: user code's.
                     return self._raised(exc, i)
-            if i == 0 or not i % CLOCK_EVERY:
+            # The host clock is read after row 0 (where a host may raise the
+            # cancel flag) and, with a deadline, after every row (design
+            # 4.7: checked between rows). A deadline seen after the last
+            # row ends nothing: the batch is complete.
+            if i == 0 or deadline:
                 t = now()
-                if deadline and t > deadline:
+                if deadline and t > deadline and i + 1 < n:
                     return (ERR_DEADLINE, "the deadline passed at row {}".format(i + 1), None, i + 1)
         return (OK, nulls)
 
