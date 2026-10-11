@@ -54,7 +54,9 @@
 //! A static executable: it runs with no shell, no PATH and no network.
 //! Its cases are cov_normalize_test.zig, which imports this file, run by
 //! `zig test` as a build action (`:cov_normalize_unit`): the executable is not
-//! built unless they pass.
+//! built unless they pass. cov_normalize_exe_test.zig runs the built
+//! executable as a process (`:cov_normalize_exe_test`, a validation of
+//! `:cov_normalize`) for what `main` adds: argv, stderr and the exit status.
 
 const std = @import("std");
 const Alloc = std.mem.Allocator;

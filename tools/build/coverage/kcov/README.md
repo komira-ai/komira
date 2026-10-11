@@ -413,17 +413,26 @@ sources refused, sources named by another directory refused before kcov
 runs, and kcov refused by the executor named as such.
 
 Each tool's cases run as a build action that fails on the first wrong
-result. `cov_normalize`'s are Zig unit tests ([cov_normalize_test.zig](cov_normalize_test.zig)),
-which import the tool, run by `zig test` (`:cov_normalize_unit`, a `zig_test`), and its executable is built behind
-them (`unit_tests`), so it does not exist unless they pass. The others' are
-scripts (`kcov_tool_cases` in [defs.bzl](defs.bzl)), and the public target
-(`:debug_relocate`, `:cov_zig`) depends on them. `:cov_link` and `:cov_run`
-take the public targets, so a coverage build is gated by their cases. The cases of `cov_zig` also take `:debug_relocate` and the pinned zig
-(`helpers`). Buck2 runs
-a dependency's validations with any build that uses it, so the tool cannot be
-built, or used, unless its cases pass. The public target and the cases both
-take the executable as an `exec_dep` on the same execution platform, so the
-cases test the very binary the public target hands out.
+result. `cov_normalize` has two sets, both `zig_test`s. Its unit tests
+([cov_normalize_test.zig](cov_normalize_test.zig), `:cov_normalize_unit`)
+import the tool and call `entry`, the program but for the process; its
+executable is built behind them (`unit_tests`), so it does not exist unless
+they pass. They build the tool from source in `zig test`'s own mode, so they
+are not the shipped bytes. The process cases
+([cov_normalize_exe_test.zig](cov_normalize_exe_test.zig),
+`:cov_normalize_exe_test`) take the shipped executable (`exes`) and run it as
+a child process: exit 0 with the golden output, exit 1 with a refusal and
+exit 2 with the usage line, each message on stderr and nothing on stdout.
+They are a validation of the public target `:cov_normalize`. The other tools'
+cases are scripts (`kcov_tool_cases` in [defs.bzl](defs.bzl)), and the public
+target (`:debug_relocate`, `:cov_zig`) depends on them. `:cov_link` and
+`:cov_run` take the public targets, so a coverage build is gated by their
+cases. The cases of `cov_zig` also take `:debug_relocate` and the pinned zig
+(`helpers`). Buck2 runs a dependency's validations with any build that uses
+it, so the tool cannot be built, or used, unless its cases pass. The public
+target and its script or process cases take the executable as an `exec_dep`
+on the same execution platform, so those cases test the very binary the
+public target hands out; the unit tests do not.
 
 The cases that need a write to fail set a file size limit (`ulimit -f` in a
 script, `setrlimit` in a unit test, with `SIGXFSZ` ignored), so the write
