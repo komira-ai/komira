@@ -206,17 +206,20 @@ def test_a_domain_checked_op_takes_the_column_evaluator_without_a_null() raises:
 
 def test_each_walker_channel_and_its_declines() raises:
     """I64 (`k * 3`) and F64 (`x * 2.0`) are served; a type other than the
-    channel's declines; an I32 expression (`n + n`) declines because the
-    translator has no I32 arithmetic; an expression with no family
-    (`s + s`) declines. Mutant: the declared-type check of the walker tail
-    removed (`k * 3` declared FLOAT64 is then served with an INT64
-    column)."""
+    channel's declines; an I32 expression (`n + n`) declines, since the
+    evaluator serves no I32 channel; an INT64 expression the translator
+    refuses (`k + n`, an INT64/INT32 pair) declines; an expression with no
+    family (`s + s`) declines. Mutants: the declared-type check of the
+    walker tail removed (`k * 3` declared FLOAT64 is then served with an
+    INT64 column); the translator refusal's `return None` made a raise
+    (`k + n` then raises)."""
     var out = _served(Expr.binary(BIN_MUL, _c("k"), _li(3)), ArrowType.INT64)
     assert_equal(Int(out.column_as_primitive_int64(0).get(3)), 12)
     out = _served(Expr.binary(BIN_MUL, _c("x"), _lf(2.0)), ArrowType.FLOAT64)
     assert_equal(out.column_as_primitive_float64(0).get(1), 8.0)
     assert_false(Bool(_run(Expr.binary(BIN_MUL, _c("k"), _li(3)), ArrowType.FLOAT64)))
     assert_false(Bool(_run(Expr.binary(BIN_ADD, _c("n"), _c("n")), ArrowType.INT32)))
+    assert_false(Bool(_run(Expr.binary(BIN_ADD, _c("k"), _c("n")), ArrowType.INT64)))
     assert_false(Bool(_run(Expr.binary(BIN_ADD, _c("s"), _c("s")), ArrowType.STRING)))
 
 
