@@ -304,20 +304,11 @@ struct TcpStream(Movable):
     threads in.
 
     Field set:
-      var _fd: OwnedPointer[Int32]          — heap-stashed fd (Movable-only;
-                                              prevents synth-copy of
-                                              the trivially-Copyable Int32
-                                              that would let two
-                                              TcpStream values race the
-                                              close at drop. Pattern
-                                              borrowed from
-                                              `the core packages.OwnedFd`.)
+      var _fd: OwnedPointer[Int32]          — the fd (-1 once released)
       var _registration: Optional[RegistrationHandle]
                                             — None until first EWOULDBLOCK
       var _epoll_fd: OwnedPointer[Int32]    — multiplexer fd captured at
-                                              registration time; same
-                                              double-close-prevention
-                                              rationale as `_fd`. -1
+                                              registration time; -1
                                               sentinel before registration.
 
     Why OwnedPointer for the two Int32 fds: a bare Int32 field is
@@ -346,9 +337,8 @@ struct TcpStream(Movable):
         self._registration = Optional[RegistrationHandle]()
         self._epoll_fd = OwnedPointer[Int32](Int32(-1))
 
-    # Mojo 0.26.3 synthesizes Movable's __moveinit__ when all fields are
-    # Movable. The OwnedPointer fields propagate Movable-only semantics
-    # so the source is properly consumed on move (no double-close).
+    # The synthesized __moveinit__ moves the OwnedPointer fields, consuming
+    # the source (no double-close).
 
     def __deinit__(deinit self):
         """Drop: deregister (if registered) + close.
@@ -370,6 +360,15 @@ struct TcpStream(Movable):
         """Public accessor for the underlying fd. Used by tests + by the
         worker loop's reactor-direct path."""
         return self._fd[]
+
+    def release_fd(mut self) -> Int32:
+        """Give up the fd without closing it, and return it. The stream
+        then holds -1 and its drop neither closes nor deregisters the
+        number, so a stream whose fd was closed behind its back and reused
+        can be dropped without closing the new owner's descriptor."""
+        var fd = self._fd[]
+        self._fd[] = Int32(-1)
+        return fd
 
     @always_inline
     def is_registered(self) -> Bool:

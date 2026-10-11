@@ -241,11 +241,24 @@ def _value_parses_as_int(v: String) -> Bool:
     return True
 
 
+def _days_in_month(yyyy: Int, mm: Int) -> Int:
+    """The number of days of month `mm` (1..12) of year `yyyy` in the
+    proleptic Gregorian calendar: February has 29 days in a year divisible
+    by 4 and not by 100, or divisible by 400."""
+    if mm == 2:
+        var leap = (yyyy % 4 == 0 and yyyy % 100 != 0) or yyyy % 400 == 0
+        return 29 if leap else 28
+    if mm == 4 or mm == 6 or mm == 9 or mm == 11:
+        return 30
+    return 31
+
+
 def _value_parses_as_date32(v: String) -> Bool:
-    """True iff `v` matches the strict `YYYY-MM-DD` shape with plausible
-    month (01-12) and day (01-31) ranges. (DuckDB uses the full date
-    parser; this strict-shape check is the conservative subset that never
-    mis-classifies a string as a date.)"""
+    """True iff `v` matches the strict `YYYY-MM-DD` shape and names a real
+    calendar date: month 01-12 and day 01 up to the month's last day (29
+    February only in a leap year). (DuckDB uses the full date parser; this
+    strict-shape check is the conservative subset that never mis-classifies
+    a string as a date.)"""
     var bs = v.as_bytes()
     if len(bs) != 10:
         return False
@@ -256,11 +269,14 @@ def _value_parses_as_date32(v: String) -> Bool:
         else:
             if bs[i] < UInt8(ord("0")) or bs[i] > UInt8(ord("9")):
                 return False
+    var yyyy = 0
+    for i in range(4):
+        yyyy = yyyy * 10 + (Int(bs[i]) - ord("0"))
     var mm = (Int(bs[5]) - ord("0")) * 10 + (Int(bs[6]) - ord("0"))
     var dd = (Int(bs[8]) - ord("0")) * 10 + (Int(bs[9]) - ord("0"))
     if mm < 1 or mm > 12:
         return False
-    if dd < 1 or dd > 31:
+    if dd < 1 or dd > _days_in_month(yyyy, mm):
         return False
     return True
 

@@ -70,7 +70,7 @@ from komira_plan_ir.logical_plan_variants import CorrelatedSubqueryData
 # `make_correlated_subquery_data`, which reads `inner_tag` and the box's type
 # tag off the plan before consuming it so the two cannot disagree.
 from komira_plan_expr.corr_subquery_data import make_correlated_subquery_data
-from komira_plan_ir.physical_plan import (
+from komira_physical_plan.physical_plan import (
     KEY_DTYPE_NONE,
     MorselOp,
     SINK_COLLECT,
@@ -79,7 +79,7 @@ from komira_plan_ir.physical_plan import (
     SegmentDescPod,
     SourceSpecPod,
 )
-from komira_plan_ir.physical_plan_purity_gate import (
+from komira_physical_plan.physical_plan_purity_gate import (
     assert_physical_plan_carries_no_logical_plan,
     expr_carries_correlated_subquery,
 )

@@ -72,6 +72,7 @@ from komira_jsonl.columnar_materializer import _compute_jsonl_line_ranges
 from komira_json_index.input_limits import check_json_column_count
 from komira_jsonl.key_dispatch import KeyRegistryBuilder
 from komira_jsonl.key_unescape import key_has_escape, unescape_key
+from komira_jsonl.line_check import _byte_text
 from komira_json_index.simd_primitives import (
     TAG_OPEN_BRACE,
     TAG_CLOSE_BRACE,
@@ -237,8 +238,8 @@ def _classify_scalar(bytes: Span[UInt8, _], start: Int, end: Int) raises -> UInt
     # Anything else is malformed JSON — the caller's structural walk
     # should have raised already, but defensively surface the issue.
     raise Error(
-        "_classify_scalar: unrecognized scalar starting with byte 0x"
-        + String(Int(first))
+        "_classify_scalar: unrecognized scalar starting with "
+        + _byte_text(first)
         + " at byte "
         + String(start)
     )
@@ -740,9 +741,8 @@ def _infer_partial_into(
     (column_names / column_inferred parallel Lists) is what the parallel
     inferrer's merge path consumes.
     """
-    # If column_names is already non-empty (the merge path uses this
-    # directly), seed the builder from it. The serial + parallel-worker
-    # paths pass empty lists, so this is the no-op fast path.
+    # Seed the builder with names already in the lists (no caller passes
+    # any today); only the names past them are appended at the end.
     var builder = KeyRegistryBuilder()
     var seeded = len(column_names)
     if seeded > 0:
@@ -924,7 +924,7 @@ def _infer_partial_into(
     # input bytes -- so the unbounded QUADRATIC blowup is downstream, in the
     # materializer, and this raise happens long before it.
     check_json_column_count(len(final_names))
-    for i in range(len(final_names)):
+    for i in range(seeded, len(final_names)):  # the seeded names are there
         column_names.append(final_names[i].copy())
 
 

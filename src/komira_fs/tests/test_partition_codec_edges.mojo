@@ -10,8 +10,10 @@
 #     with an empty key,
 #     and a path with no `/` has no partition components.
 #   * the type probe: no values is a string; a bare sign is not an integer;
-#     a date with a wrong separator, a non-digit or a day outside 1..31 is not
-#     a date; month-end days of a leap and a common year are dates; the
+#     a date with a wrong separator, a non-digit, a month outside 1..12 or a
+#     day outside 1..31 is not
+#     a date; month-end days of a leap and a common year are dates and the
+#     day after each is not (February by the Gregorian leap rule); the
 #     timestamp shape `YYYY-MM-DD HH:MM:SS` and each way it can be wrong
 #     (separator, digit, month, day, hour, minute, second), at the bounds.
 #   * `_compare_values`: every operator, numeric for INT64 (zero-padded
@@ -136,6 +138,36 @@ def test_probe_month_end_sweep() raises:
         assert_true(_probe("2028-" + mm + "-" + String(leap[m])) == ArrowType.DATE32)
         assert_true(_probe("2027-" + mm + "-" + String(common[m])) == ArrowType.DATE32)
         assert_true(_probe("2027-" + mm + "-01") == ArrowType.DATE32)
+
+
+def test_probe_day_past_month_end() raises:
+    """The day after the last day of every month of a leap year (2028) and of
+    a common year (2027) is not a date, so the column is a string: 29
+    February only in a leap year, 31 only in a 31-day month. The century
+    rule: 2000 is a leap year, 1900 and 2100 are not. The same days with a
+    time are not timestamps (komira-ai/komira#1110)."""
+    var leap = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    var common = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    for m in range(12):
+        var mm = String(m + 1) if m + 1 >= 10 else "0" + String(m + 1)
+        if leap[m] < 31:
+            var ld = "2028-" + mm + "-" + String(leap[m] + 1)
+            assert_true(_probe(ld) == ArrowType.STRING, ld)
+            assert_true(_probe(ld + " 10:00:00") == ArrowType.STRING, ld)
+        if common[m] < 31:
+            var cd = "2027-" + mm + "-" + String(common[m] + 1)
+            assert_true(_probe(cd) == ArrowType.STRING, cd)
+            assert_true(_probe(cd + " 10:00:00") == ArrowType.STRING, cd)
+    assert_true(_probe("2000-02-29") == ArrowType.DATE32)
+    assert_true(_probe("2000-02-29 10:00:00") == ArrowType.TIMESTAMP)
+    assert_true(_probe("1900-02-29") == ArrowType.STRING)
+    assert_true(_probe("2100-02-29") == ArrowType.STRING)
+    assert_true(_probe("2100-02-29 10:00:00") == ArrowType.STRING)
+    # One impossible date among real ones makes the whole column a string.
+    var mixed = List[String]()
+    mixed.append("2028-02-28")
+    mixed.append("2028-02-30")
+    assert_true(probe_partition_type(mixed) == ArrowType.STRING)
 
 
 def test_probe_timestamp() raises:
@@ -335,6 +367,7 @@ def main() raises:
     suite.test[test_probe_empty_and_sign_only]()
     suite.test[test_probe_date_rejections]()
     suite.test[test_probe_month_end_sweep]()
+    suite.test[test_probe_day_past_month_end]()
     suite.test[test_probe_timestamp]()
     suite.test[test_probe_timestamp_rejections]()
     suite.test[test_compare_values_int64]()

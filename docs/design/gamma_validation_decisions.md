@@ -6,6 +6,13 @@ what kci must add before gamma can run a service validation, and the
 questions left to the project owner. Section names and item numbers are
 referred to from that document.
 
+**Vocabulary.** This note and [gamma validation](gamma_validation.md)
+predate the staged pipeline's [glossary](staged_pipeline.md#glossary). Here
+"gamma" means today's stage that publishes to the conda channel `gamma` and
+installs from it, which the glossary calls **beta** (the beta channel and
+`beta_validate`); the glossary's gamma holds only real cloud resources.
+Open decision 4 below already uses the glossary's words.
+
 ## What kci must add to run service validations in gamma
 
 None of this exists. Each item is a change to `kci_api`,
@@ -140,7 +147,19 @@ Each is a question with a recommendation; none is decided by this document.
    by package hash, after a probe shows that a corrupted signature turns a
    run red with authentication enabled; until then it proves the protocol,
    not the signature.
-4. **Real gamma cloud projects (AWS, GCP, Azure).** Approve the spend and the
+4. **Real gamma cloud projects (AWS, GCP, Azure).** *Superseded:* the
+   project owner ruled that the real-cloud tests are ordinary kci validations
+   of the gamma stage, run with the `gamma` environment's federated (OIDC)
+   credential, and that a red one **blocks** prod rather than advising:
+   [the staged pipeline, e2](staged_pipeline.md#e2-gamma-real-cloud-tests-as-ordinary-validations).
+   The spend is ruled. Under the vocabulary ruling the conda channel this
+   document calls `gamma` becomes `beta` (the staged pipeline, section e3)
+   and gamma holds only real cloud resources, so the `gamma` environment is
+   trusted by the gamma accounts' roles and by no channel, which is what the
+   separate environment proposed below was for. Locking `gamma` to `main`
+   and retiring the old channel's trust of `gamma` come first. The keyless-identity prerequisites below still decide when GCP and
+   Azure join (AWS first). The text below is the earlier recommendation, kept
+   for its reasoning. Approve the spend and the
    one-time bootstrap? *Recommendation:* not yet. First land keyless identity
    (`external_account` in `komira_gcp_core`, a federated credential in
    `komira_azure_core`), the verb that sets the validation run id, and the

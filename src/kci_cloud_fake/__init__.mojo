@@ -23,7 +23,11 @@ written, a failed flag per node, unmodelled values and a call log), honour
 the ownership labels (every object born stamped by the standard label
 rule, read back exactly, listed per cell; every object carries the
 `kci-retention` mark, and an object created in a scope with a validation run
-id also carries `kci-run-id=<id>`, an adopted one never), and pass the
+id also carries `kci-run-id=<id>`, an adopted one never; one adopted for a
+resource that writes `adopt` carries `kci_adopted=true`), answer an
+adoption's read (`read_existing`: the object at a node, its kind, name and
+the fields of its stored state) and release an object (its kci labels
+dropped, nothing else), and pass the
 `kci_cloud` conformance kit. Each shape carries its metadata limits as a value
 (`MetadataLimits`: how many labels an object carries, how each type's
 primary object may be named), and a named primary object's outputs follow
@@ -50,6 +54,7 @@ from kci_cloud_fake.nodes import (
     static_digest,
 )
 from kci_cloud_fake.clouds import FakeLimitedCloud, FakeCloud
+from kci_cloud_fake.existing import digest_fields, planted_like, read_existing, release
 from kci_cloud_fake.shapes import (
     GPU_REASON_AWS,
     GPU_REASON_UNDECIDED,

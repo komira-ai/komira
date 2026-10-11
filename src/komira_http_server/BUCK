@@ -25,6 +25,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_L0_accept_loop_rounds.mojo",
+        "tests/test_L0_accept_loop_sweep.mojo",
         "tests/test_L0_accept_loop_tls.mojo",
         "tests/test_L0_transport_basic.mojo",
         "tests/test_L2_codec_header_limits.mojo",

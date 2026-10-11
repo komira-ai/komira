@@ -291,9 +291,9 @@ def run_publish_reading[T: ChannelTransport, S: RegistryCredential, W: WorkerSle
         r.names_known = v.names_known
         r.new_names = v.new_names.copy()
     except e:
-        r.lines.append(String(e))
-        r.end(String(REASON_CANNOT_TELL))
-        return r^
+        r.lines.append(String(e))  # cov: unreachable read_channel returns one state per target, the one raise of plan_from_state
+        r.end(String(REASON_CANNOT_TELL))  # cov: unreachable read_channel returns one state per target, the one raise of plan_from_state
+        return r^  # cov: unreachable read_channel returns one state per target, the one raise of plan_from_state
     if verdict != VERDICT_PROCEED:
         r.end(_reason_of_verdict(verdict))
         return r^

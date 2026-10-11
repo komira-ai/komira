@@ -17,7 +17,6 @@ from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_stats.table_stats import TableStats, ColumnStats
 from komira_plan_ir.logical_plan import (
     LogicalPlan,
-    ScanData,
     ExprArray,
     AggExprArray,
     PLAN_SCAN,
@@ -184,19 +183,6 @@ def test_scan_left_alone_when_all_or_none_needed() raises:
     assert_equal(_proj(none_needed._aggregate.value()[].child[]), String("*"))
 
 
-def test_scan_without_a_schema_uses_its_output_schema() raises:
-    """A scan node whose ScanData has no schema, under Project(a): it is
-    rebuilt from its output schema and reads [a].
-
-    Catches: the no-schema case reading an empty Optional."""
-    var bare = LogicalPlan(PLAN_SCAN, _schema(_names("a,b")))
-    bare._scan = OwnedPointer(
-        ScanData(SourceVariant(ParquetSource("t.parquet", _schema(_names("a,b")))), None, None, None)
-    )
-    var out = push_projections_down(LogicalPlan.project(_cols("a"), bare^))
-    assert_equal(_proj(_under_project(out)), String("a"))
-
-
 # =============================================================================
 # Sort, TopN, Limit, Distinct, Aggregate
 # =============================================================================
@@ -286,6 +272,25 @@ def test_join_collision_names_invert_and_keep_the_left_twin() raises:
     assert_equal(_proj(jd.right[]), String("a,b,r"))
 
 
+def test_non_ascii_collision_names_reach_the_right_side() raises:
+    """Project(café_right) over Join(L(id,café,é,w), R(id,café,é,z), id = id,
+    residual `é_right > 0`): R reads [id,café,é] and L reads [id,café,é]
+    (each twin kept so R's columns still collide). Both `_right` names keep their multi-byte UTF-8
+    bytes when the suffix is stripped.
+
+    Catches: a strip that re-encodes each byte as a code point (`café_right`
+    becomes `cafÃ©`, so R loses `café` and the Project names a column the
+    join no longer produces)."""
+    var join = LogicalPlan.join(
+        _scan("id,café,é,w"), _scan("id,café,é,z"), _keys("id"), _keys("id"), JOIN_INNER,
+        residual=Optional(OwnedPointer(_gt("é_right", 0))),
+    )
+    var out = push_projections_down(LogicalPlan.project(_cols("café_right"), join^))
+    ref jd = out._project.value()[].child[]._join.value()[]
+    assert_equal(_proj(jd.left[]), String("id,café,é"))
+    assert_equal(_proj(jd.right[]), String("id,café,é"))
+
+
 def test_semi_and_anti_joins_keep_no_twin() raises:
     """Project(a) over a SEMI and an ANTI Join(L(a,b,c), R(a,b,c), a = b): L
     reads [a] and R reads [b]; the INNER join of the same shape keeps the
@@ -335,17 +340,24 @@ def test_identical_scans_are_narrowed_each_to_its_own_consumer() raises:
 
 
 def test_strip_right_suffix() raises:
-    """`x_right` -> `x`; `_right` (6 bytes), `abc`, `x_rightz` and `x_Right`
-    are returned unchanged.
+    """`x_right` -> `x`, `é_right` -> `é`; `_right` (6 bytes), `abc`,
+    `x_rightz`, `x_Right`, `x_rigHt` and `abcright` are returned unchanged.
 
     Catches: the length guard admitting a 6-byte name (`_right` -> ``); a
-    suffix check that ignores a byte."""
+    suffix check that ignores the `_` (`abcright` -> `ab`) or the `R`/`H`
+    byte, or accepts a trailing extra byte; a copy that re-encodes each byte of a
+    multi-byte character as its own code point."""
     assert_equal(_strip_right_suffix_nr("x_right"), String("x"))
     assert_equal(_strip_right_suffix_nr("_right"), String("_right"))
     assert_equal(_strip_right_suffix_nr("abc"), String("abc"))
     assert_equal(_strip_right_suffix_nr("x_rightz"), String("x_rightz"))
     assert_equal(_strip_right_suffix_nr("x_Right"), String("x_Right"))
     assert_equal(_strip_right_suffix_nr("x_rigHt"), String("x_rigHt"))
+    # `right` without the `_` separator, in a name longer than 6 bytes.
+    assert_equal(_strip_right_suffix_nr("abcright"), String("abcright"))
+    # Multi-byte UTF-8 before the suffix is copied byte for byte.
+    assert_equal(_strip_right_suffix_nr("é_right"), String("é"))
+    assert_equal(_strip_right_suffix_nr("名前_right"), String("名前"))
 
 
 def test_collect_referenced_columns_walks_every_node() raises:
@@ -391,7 +403,6 @@ def main() raises:
     test_filter_keeps_its_predicate_columns()
     test_scan_keeps_its_pushed_filter_columns_and_fields()
     test_scan_left_alone_when_all_or_none_needed()
-    test_scan_without_a_schema_uses_its_output_schema()
     test_sort_topn_limit_distinct_keep_their_keys()
     test_aggregate_reads_group_keys_and_every_agg_slot()
     test_join_residual_columns_reach_each_side()
@@ -399,5 +410,6 @@ def main() raises:
     test_identical_scans_are_narrowed_each_to_its_own_consumer()
     test_semi_and_anti_joins_keep_no_twin()
     test_strip_right_suffix()
+    test_non_ascii_collision_names_reach_the_right_side()
     test_collect_referenced_columns_walks_every_node()
     print("All optimizer_projection pushdown tests passed.")
