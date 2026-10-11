@@ -21,7 +21,8 @@
 //!   - every needed name that is not one of glibc's (SYSTEM) is found inside
 //!     the prefix through a DT_RPATH, which the loader searches before
 //!     LD_LIBRARY_PATH; found only through a DT_RUNPATH, or not found, the
-//!     loader would take it from LD_LIBRARY_PATH or the system;
+//!     loader would take it from LD_LIBRARY_PATH or the system (a library
+//!     found through a DT_RUNPATH is still mapped, and its needs checked);
 //!   - no glibc name is found inside the prefix: glibc comes from the system;
 //!   - every object it maps is an ELF64 little-endian file, and a link it
 //!     follows stays inside the prefix;
@@ -349,6 +350,10 @@ fn closure(p: *Prefix, root: []const u8, seen: *std.StringHashMap(void)) !void {
                     if (try searchPath(p, obj.rel, "DT_RUNPATH", rp, name)) |f| {
                         const at = f.rel orelse continue;
                         try p.red("{s} finds {s} at {s} only through its DT_RUNPATH, which the loader searches after LD_LIBRARY_PATH: it would take {s} from LD_LIBRARY_PATH (link it with a DT_RPATH)", .{ obj.rel, name, at, name });
+                        // Mapped all the same, loaded by `obj`, so what it
+                        // needs is checked too, through a chain that holds
+                        // an object with a DT_RUNPATH.
+                        if (p.elfs.get(at)) |elf| try maps.append(.{ .rel = at, .name = name, .elf = elf, .loader = i });
                         continue;
                     }
                 }

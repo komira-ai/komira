@@ -48,7 +48,8 @@ It is red, naming each failure and writing nothing, unless:
 - every needed name that is not one of glibc's (`libc.so.6`, `libm.so.6`,
   `libdl.so.2`, `libpthread.so.0`, `librt.so.1`, `ld-linux-x86-64.so.2`) is
   found in the prefix by step 2. Found only by step 4, `LD_LIBRARY_PATH`
-  would supply it; not found, `LD_LIBRARY_PATH` or the worker would;
+  would supply it, and the library is still mapped so what it needs is
+  checked too; not found, `LD_LIBRARY_PATH` or the worker would;
 - no glibc name is found in the prefix: glibc comes from the system;
 - every object it maps is an ELF64 little-endian file, and a symbolic link
   it follows stays inside the prefix;
@@ -77,7 +78,8 @@ is built only after all of them pass. Each test plants minimal ELF files
 ([`fixture.zig`](fixture.zig) writes the ELF header, a `PT_LOAD` whose
 virtual address differs from its file offset, `PT_INTERP`, the string table
 and the dynamic section) into a directory of its own, runs the check, and
-requires exactly one finding naming the planted defect. A red scenario
+requires exactly one finding naming the planted defect (the chain scenario
+of `:runpath_test` requires exactly two, in order). A red scenario
 next to a green twin shows the defect, not the tree, made it red. Each
 mutant below was planted in `loader_closure.zig` and the build of the
 scenarios was seen red on the farm, then removed.
@@ -88,7 +90,7 @@ scenarios was seen red on the farm, then removed.
 | `:missing_needed_test` | a needed library not in the prefix is red, for the program and for a library it maps (the closure is transitive) | not-found names accepted as the system's: `:missing_needed_test` |
 | `:rpath_absolute_test` | an absolute `DT_RPATH` entry is red before and after the entry that finds the library, and an absolute `DT_RUNPATH` entry of a library | entries checked only when a search reads them: `:rpath_absolute_test`, `:rpath_escape_test` |
 | `:rpath_escape_test` | an `$ORIGIN` entry climbing above the prefix, relative, empty and other-token entries, and a library that is a link leaving the prefix are red | (the same mutant) |
-| `:runpath_test` | a library found only through a `DT_RUNPATH` is red; an object with both tags uses its `DT_RUNPATH` only and none of the chain's `DT_RPATH` | a `DT_RUNPATH` find accepted: `:runpath_test` |
+| `:runpath_test` | a library found only through a `DT_RUNPATH` is red; an object with both tags uses its `DT_RUNPATH` only and none of the chain's `DT_RPATH`; an object up the loader chain with both tags lends no `DT_RPATH` to a library it loaded (red, next to a green twin whose object has no `DT_RUNPATH`) | a `DT_RUNPATH` find accepted: `:runpath_test`; the chain's skip of an object with a `DT_RUNPATH` removed: `:runpath_test` |
 | `:glibc_named_test` | a `libm.so.6` in the prefix's `lib/`, found through the `DT_RPATH`, is red | glibc names accepted wherever found: `:glibc_named_test` |
 | `:interp_test` | another interpreter, a `--root` that is missing or a library, and a prefix with no program are red | the interpreter comparison dropped: `:interp_test` |
 | `:glibc_floor_test` | a version above the floor in a library is red, each named once in order; `GLIBC_2.2.5`, the floor itself and `GLIBC_PRIVATE` are green; a prefix naming no glibc version is red under a floor | the comparison made `m > floor + 2`: `:glibc_floor_test` |

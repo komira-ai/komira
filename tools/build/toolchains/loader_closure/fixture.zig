@@ -178,3 +178,20 @@ pub fn expectMaps(r: lc.Report, want: []const u8) !void {
     show(r);
     return error.TestExpectedMapping;
 }
+
+/// Fails unless the check of `t` is red with exactly `want.len` findings,
+/// the i-th containing `want[i]`.
+pub fn expectRedAll(t: Tree, opts: lc.Options, want: []const []const u8) !void {
+    const r = try t.check(opts);
+    var ok = r.findings.items.len == want.len;
+    if (ok) for (r.findings.items, want) |f, w| {
+        if (std.mem.indexOf(u8, f, w) == null) ok = false;
+    };
+    if (!ok) {
+        std.debug.print("want {d} findings containing, in order:\n", .{want.len});
+        for (want) |w| std.debug.print("  '{s}'\n", .{w});
+        std.debug.print("got {d}:\n", .{r.findings.items.len});
+        show(r);
+        return error.TestExpectedRed;
+    }
+}
