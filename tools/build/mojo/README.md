@@ -90,7 +90,8 @@ reads Markdown through the shared Zig module
 [`//tools/build/markdown`](../markdown/BUCK) (CommonMark fences, code spans,
 links). kci ships the same tool beside its executable (`bin/kci` `helpers`)
 and runs it on an installed README, so the programs an ENV validation runs
-are the ones `[tests][readme]` ran (`src/kci_validate`). Only
+are the ones `[tests][readme]` ran (`src/kci_validate`, whose test compares
+them with `[tests][readme][generated]`, made from `[tests][readme][file]`). Only
 `buildtools.doc_links` (the link check) still reads Markdown through a Mojo
 reader, the `markdown` of the package's Mojo library `readme_examples`,
 until it moves to the Zig module.
@@ -257,7 +258,9 @@ binary and a copy of those libraries in `lib/`, where its run path finds them,
 so it starts from anywhere with no environment. `RunInfo` points at it. A
 binary's `helpers` (`{file name: target}`, e.g. a `zig_exe`) sit beside it
 there, and in `bin/` of its bundle, where it finds them next to its own
-executable ([helpers.bzl](helpers.bzl)).
+executable ([helpers.bzl](helpers.bzl)). A `mojo_helper_check` (same file)
+runs a helper's copy in `[runnable]` as a build action, so a binary that lost
+it, or a copy that does not start, is red (`//bin/kci:runnable_readme_examples`).
 ([`launch.sh`](launch.sh) starts a binary from outside its runnable
 directory, pointing the loader at the toolchain's `lib/`.) The list of
 libraries is checked against what the loader actually maps during a run

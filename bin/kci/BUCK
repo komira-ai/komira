@@ -1,4 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_test")
+load("@komira//tools/build/mojo:helpers.bzl", "mojo_helper_check")
 
 # kci: ONE binary with ONE command. `kci run --stage S` runs a stage of the
 # machine file (under GitHub Actions it first holds the workflow it runs under
@@ -13,6 +14,21 @@ mojo_binary(
     # `[tests][readme]` test runs, built behind its own unit tests.
     helpers = {"readme_examples": "//tools/build/readme_examples:tool"},
     visibility = ["PUBLIC"],
+)
+
+# kci's `[runnable]` holds the README examples tool, and that copy runs: it
+# makes a one-example README into programs, run from the runnable directory
+# as a build action. Red when the copy is missing or does not start (the
+# bundle's copy is the base image check's, packaging/images/base).
+mojo_helper_check(
+    name = "runnable_readme_examples",
+    binary = ":kci",
+    helper = "readme_examples",
+    args = [
+        "generate", "--readme", "README", "--display", "README.md", "--package", "x",
+        "--links", "refuse", "--out-dir", "{out}", "--examples", "{out}/examples",
+    ],
+    files = {"README": "tests/fixtures/helper_readme.md"},
 )
 
 # Read by kci_cli's test that no kci source but kci_api spells an exit
