@@ -10,6 +10,8 @@ process can hold komira's copy of a library and any other copy (a system
 | aws-lc | `//third_party/aws-lc:crypto` | `komira_awslc_` (e.g. `komira_awslc_SHA256`) |
 | s2n-tls | `//third_party/s2n-tls:s2n` | `komira_s2n_` (`s2n_init` becomes `komira_s2n_init`; any other global `X`, `komira_s2n__X`) |
 | snappy | `//third_party/snappy:snappy` | `komira_snappy_` on its C API (`komira_snappy_compress`); its C++ names stay |
+| brotli (the decoder) | `//third_party/brotli:brotlidec` | `komira_brotli_` (`BrotliDecoderDecompress` becomes `komira_brotli_DecoderDecompress`; any other global `X`, `komira_brotli__X`) |
+| SQLite | `//third_party/sqlite:sqlite3` | `komira_sqlite3_` (`sqlite3_open_v2` becomes `komira_sqlite3_open_v2`) |
 
 Mojo code calls the prefixed names: `external_call["komira_awslc_SHA256", ...]`.
 A C caller that includes the library's headers gets them without writing
@@ -126,7 +128,8 @@ reader reads from it.
 
 Each owner of the design's table has its `<library>_native` target in its
 own BUCK file: komira_crypto, komira_http_core (`NEEDED` komira_crypto's),
-komira_compression and the first-party shims' owners (komira_libc, komira_async, komira_async_api,
+komira_compression, komira_parquet_codec, komira_db_sqlite and the
+first-party shims' owners (komira_libc, komira_async, komira_async_api,
 komira_fs, komira_objectstore, komira_metrics, komira_scan_source,
 komira_supervisor). komira_log has none: its holder's accessors are hidden
 by design, one copy per image (the design's question 2). No package ships
