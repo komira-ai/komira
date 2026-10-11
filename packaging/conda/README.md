@@ -158,7 +158,10 @@ form `lib<name>.so[.<digits>]...` is a soname it opens, and so is a path
 literal (it holds a `/`) whose last component has that form:
 `"/usr/lib/liblz4.so.1"` and `"lib/liblz4.so.1"` both count as
 `liblz4.so.1`. Any quote form counts (`"..."`, `'...'`, `"""..."""`,
-`'''...'''`, raw `r"..."`); a docstring of prose is never one. They must be
+`'''...'''`, raw `r"..."`), docstrings included: prose whose text after its
+last `/` is a soname counts as that soname (`"""Loads the library from
+/usr/lib/liblz4.so.1"""` counts as `liblz4.so.1`, so it must be declared:
+fail closed), and other prose names none. They must be
 exactly the declared sonames, and a refusal names both lists and the files
 holding each literal. A library that opens but holds no visible soname
 literal is refused, even declaring nothing. A library that opens nothing and
@@ -166,11 +169,12 @@ declares sonames is refused as stale. The trade-off: a stray soname-shaped
 string in a library that opens must be declared too, so the check fails
 closed. Its known limits fail open: a soname built at run time from parts or
 spelled with an escape (`\x2e`) is not found, and only `.mojo` files are
-read (a `.🔥` source is not). An installed-package check is planned, not
-built: step S12 of the staged pipeline (the installed-bytes checks of
-[continuous_publish.md](../../docs/design/continuous_publish.md)). Once it
-runs each package installed alone, it will catch a requirement missing for
-a library the package opens at run time. `komira_pack conda-check` is
+read (a `.🔥` source is not). The installed-package checks are planned, not
+built (step S12, the installed-bytes checks of
+[continuous_publish.md](../../docs/design/continuous_publish.md)), and their
+design does not yet cover a run-time dlopen requirement
+([#1327](https://github.com/komira-ai/komira/issues/1327)), so today the
+packer's static check is the only guard. `komira_pack conda-check` is
 given the declarations and compares the package with them without the
 packer's code.
 

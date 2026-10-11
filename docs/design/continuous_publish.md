@@ -259,7 +259,9 @@ analysis; asking for `[release]` then fails naming the reason, `tools/build/pack
 - it has no tests;
 - it depends on a library that is refused.
 
-The packer refuses a library that uses `OwnedDLHandle` (`tools/build/package/pack/conda.zig`). The
+The packer refuses a library that uses `OwnedDLHandle` but does not declare exactly the sonames its
+sources hold (`tools/build/package/pack/conda_dlopen.zig`; [A library that opens a shared library at
+run time](../../packaging/conda/README.md#a-library-that-opens-a-shared-library-at-run-time)). The
 installs (beta's) refuse a library that has no README, or a README with no runnable example
 (`src/kci_validate/readme_installed.mojo`). **PROPOSED (S3a):** one more refusal, below, for a cloud
 library with no release check.

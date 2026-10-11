@@ -16,9 +16,11 @@
 //!   `/`) whose last component is one: `"/usr/lib/liblz4.so.1"` and
 //!   `"lib/liblz4.so.1"` both count as `liblz4.so.1`. Any quote form
 //!   counts: `"..."`, `'...'`, `"""..."""`, `'''...'''`, and each of them
-//!   with the raw prefix (`r"..."`). A triple-quoted string counts only if
-//!   its whole content is a soname or such a path, so a docstring of prose
-//!   never does.
+//!   with the raw prefix (`r"..."`). A triple-quoted string is read the
+//!   same way, docstrings included: prose whose text after its last `/` is
+//!   a soname counts as that soname (`"""Loads the library from
+//!   /usr/lib/liblz4.so.1"""` counts as `liblz4.so.1`), which fails closed
+//!   (it must be declared); other prose names none.
 //! - The declared sonames must EQUAL the found ones; otherwise the package
 //!   is refused, naming both sets and the sources holding each literal. A
 //!   library that opens and holds no soname literal is refused too, even
@@ -45,12 +47,11 @@
 //! (`"lib" + name + ".so.1"`) or spell with an escape (`"libz\x2eso.1"`) is
 //! not found, since the reader compares a literal's bytes as written; and
 //! only `.mojo` files are read, so a source named `*.🔥` is not (a library
-//! whose only opener is one is read as opening nothing). An
-//! installed-package check is PLANNED, not built: step S12 of the staged
-//! pipeline (the installed-bytes checks of docs/design/continuous_publish.md).
-//! Once it runs each package installed alone, it will catch a requirement
-//! missing for a library the package opens at run time, these cases
-//! included.
+//! whose only opener is one is read as opening nothing). The
+//! installed-package checks are PLANNED, not built (step S12, the
+//! installed-bytes checks of docs/design/continuous_publish.md), and their
+//! design does not yet cover a run-time dlopen requirement
+//! (komira-ai/komira#1327), so today this static check is the only guard.
 
 const std = @import("std");
 const json = std.json;
@@ -160,9 +161,10 @@ pub fn scanSource(alloc: Alloc, text: []const u8) !Scan {
         } else if ((c == '"' or c == '\'') and i + 2 < text.len and text[i + 1] == c and text[i + 2] == c) {
             // Ends at the first unescaped triple of its quote: a backslash
             // escapes the next character, as in the Mojo lexer (raw strings
-            // included: `r"""a\"""` is unterminated to it). It is a soname
-            // only if its whole content is one: a docstring of prose naming
-            // one holds none.
+            // included: `r"""a\"""` is unterminated to it). It names the
+            // soname literalSoname finds, docstrings included: prose whose
+            // text after its last `/` is a soname names that one (fails
+            // closed); other prose names none.
             var j = i + 3;
             while (j < text.len and !(j + 2 < text.len and text[j] == c and text[j + 1] == c and text[j + 2] == c)) : (j += 1) {
                 if (text[j] == '\\') j += 1;
@@ -615,10 +617,26 @@ test "dlopenReason: a triple-quoted soname literal is found" {
         const why = try refusal(try dlopenReason(a, &.{.{ .path = "x.mojo", .text = text }}, &.{zlib}));
         try testing.expect(std.mem.indexOf(u8, why, "its sources name [liblz4.so.1, libz.so.1] and the library declares `dlopen` [libz.so.1]") != null);
     }
-    // a docstring of prose naming a soname is not a soname: declared
-    // exactly libz, accepted
+    // a docstring of prose whose text after its last `/` (here the whole
+    // text: it has none) is not a soname names none: declared exactly
+    // libz, accepted
     const doc = "\"\"\"Opens libz.so.1 and never liblz4.so.1.\"\"\"\nz = OwnedDLHandle(\"libz.so.1\")\n";
     try testing.expectEqual(@as(?[]const u8, null), try dlopenReason(a, &.{.{ .path = "x.mojo", .text = doc }}, &.{zlib}));
+}
+
+test "dlopenReason: a docstring of prose ending in a soname path counts as that soname" {
+    var arena = testAlloc();
+    defer arena.deinit();
+    const a = arena.allocator();
+    // Fix round 9 pins current behaviour: literalSoname takes the text
+    // after a literal's last `/`, docstrings included, so this prose names
+    // liblz4.so.1 and, with only libz declared, the package is refused
+    // (fail closed). A reader that skipped prose would accept it.
+    const doc = "\"\"\"Loads the library from /usr/lib/liblz4.so.1\"\"\"\nz = OwnedDLHandle(\"libz.so.1\")\n";
+    const why = try refusal(try dlopenReason(a, &.{.{ .path = "x.mojo", .text = doc }}, &.{zlib}));
+    try testing.expect(std.mem.indexOf(u8, why, "its sources name [liblz4.so.1, libz.so.1] and the library declares `dlopen` [libz.so.1]") != null);
+    // declared both: accepted
+    try testing.expectEqual(@as(?[]const u8, null), try dlopenReason(a, &.{.{ .path = "x.mojo", .text = doc }}, &.{ lz4, zlib }));
 }
 
 test "dlopenReason: a path literal counts as the soname it ends in" {
