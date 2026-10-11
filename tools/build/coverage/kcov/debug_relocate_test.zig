@@ -310,13 +310,14 @@ test "at the end of the file: exit 1 naming offset 2, the file untouched" {
     try c.same("at the end of the file (must be untouched)", "f", f);
 }
 
-// 5. Several occurrences of several directories, each counted; the
+// 5. Several occurrences of several directories, each counted (D three
+// times, D2 twice, so a count printed against the wrong directory shows); the
 // permission bits are kept through the rename, other-write included, which a
 // umask of 022 (set here) clears from a file created with them.
 test "two directories: each occurrence counted and rewritten, mode 757 kept" {
     var c = Case.init();
     defer c.deinit();
-    try c.put("f", D ++ "\x00" ++ D2 ++ "/f\x00" ++ D ++ "/g\x00" ++ D2 ++ "\x00");
+    try c.put("f", D ++ "\x00" ++ D2 ++ "/f\x00" ++ D ++ "/g\x00" ++ D2 ++ "\x00" ++ D ++ "/h\x00");
     {
         var f = try c.tmp.dir.openFile("f", .{});
         defer f.close();
@@ -324,11 +325,11 @@ test "two directories: each occurrence counted and rewritten, mode 757 kept" {
     }
     const linux = std.os.linux;
     const old_mask = linux.syscall1(.umask, 0o022);
+    defer _ = linux.syscall1(.umask, old_mask);
     const r = try c.run(&.{ "f", D, D2 });
-    _ = linux.syscall1(.umask, old_mask);
     try expectStatus("two directories", r, 0);
-    try expectStdout("two directories", r, "2 " ++ D ++ "\n2 " ++ D2 ++ "\n");
-    try c.same("two directories", "f", P ++ "\x00" ++ P2 ++ "/f\x00" ++ P ++ "/g\x00" ++ P2 ++ "\x00");
+    try expectStdout("two directories", r, "3 " ++ D ++ "\n2 " ++ D2 ++ "\n");
+    try c.same("two directories", "f", P ++ "\x00" ++ P2 ++ "/f\x00" ++ P ++ "/g\x00" ++ P2 ++ "\x00" ++ P ++ "/h\x00");
     const mode = (try c.tmp.dir.statFile("f")).mode & 0o7777;
     if (mode != 0o757) {
         std.debug.print("two directories: mode {o}, want 757\n", .{mode});
@@ -583,4 +584,20 @@ test "compressed section, ELF32, e_shnum 0: refused through section 0's count; 0
     const r2 = try c.run(&.{ "f", D });
     try expectStatus("uncompressed, ELF32, e_shnum 0", r2, 0);
     try expectStdout("uncompressed, ELF32, e_shnum 0", r2, "1 " ++ D ++ "\n");
+}
+
+// 20. e_shnum 0 and section 0's sh_size claiming 4 section headers where the
+// file holds 3: the table starts inside the file, so only the count check
+// finds it runs past the end. Refused (exit 1), untouched.
+test "e_shnum 0, a count past the end: exit 1, untouched" {
+    var c = Case.init();
+    defer c.deinit();
+    const f = try c.alloc().dupe(u8, elf64(c.alloc(), 0x2, null, true));
+    const shoff = 64 + strtab.len + data.len;
+    try std.testing.expectEqual(@as(usize, shoff + 3 * 64), f.len);
+    std.mem.writeInt(u64, f[shoff + 0x20 ..][0..8], 4, .little);
+    try c.put("f", f);
+    const r = try c.run(&.{ "f", D });
+    try refused("e_shnum 0, a count past the end", r, "section headers past the end of the file");
+    try c.same("e_shnum 0, a count past the end (must be untouched)", "f", f);
 }

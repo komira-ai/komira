@@ -425,7 +425,10 @@ own mode, so they are not the shipped bytes. The process cases
 `:cov_normalize_exe_test`) take the shipped executable (`exes`) and run it as
 a child process: exit 0, exit 1 with a refusal and exit 2 with the usage
 line, each message on stderr and on stdout only what the tool prints there
-(`debug_relocate`'s counts; nothing for `cov_normalize`). They are a
+(`debug_relocate`'s counts; nothing for `cov_normalize`); for
+`debug_relocate` also a stdout whose writes fail, which must be exit 1 with
+the file unchanged (a `main` that buffers stdout and drops the flush error
+fails it). They are a
 validation of the public target (`:debug_relocate`, `:cov_normalize`).
 The cases of `cov_zig` are a script (`kcov_tool_cases` in [defs.bzl](defs.bzl)),
 and the public target `:cov_zig` depends on them; they also take
@@ -438,7 +441,8 @@ execution platform, so those cases test the very binary the public target
 hands out; the unit tests do not.
 
 The cases that need a write to fail set a file size limit (`ulimit -f` in a
-script, `setrlimit` in a unit test, with `SIGXFSZ` ignored), so the write
+script, `setrlimit` in a unit test or in the forked child of a process case,
+with `SIGXFSZ` ignored), so the write
 fails with `EFBIG` part way; a probe first checks that the limit stops a
 plain write.
 
@@ -452,7 +456,7 @@ own, stdout, stderr) over small files and ELF files it writes byte by byte:
 | followed by `/` | a path under the directory is rewritten | |
 | followed by `x` | exit 1 naming offset 39, and the file byte for byte unchanged although an earlier occurrence was rewritable | no check on the following byte |
 | at the end of the file | refused the same way | |
-| two directories, several occurrences | each counted and rewritten; permission bits 757 kept (other-write, which the umask 022 the test sets clears) | stopping after the first occurrence; no `chmod` after the temporary file |
+| two directories, several occurrences | each counted (three and two, so a count printed against the wrong directory shows) and rewritten; permission bits 757 kept (other-write, which the umask 022 the test sets clears) | stopping after the first occurrence; the wrong directory's count printed; no `chmod` after the temporary file |
 | 7-byte, relative, trailing-`/` directory, none | exit 2 with usage, file unchanged | no length floor |
 | 8-byte directory | accepted and rewritten | a floor of 9 (`<=` for `<`) |
 | no occurrence | `0 <dir>`, exit 0, unchanged | |
@@ -467,6 +471,7 @@ own, stdout, stderr) over small files and ELF files it writes byte by byte:
 | compressed section, `e_shnum` 0 | an ELF64 file whose `e_shnum` is 0 and whose section 0 `sh_size` holds the count (3): the compressed section is found and refused; with flags 0x2 it is relocated | the count in section 0 not read (planted: red) |
 | compressed section, ELF32 | an ELF32 file (40-byte section headers, 32-bit flags) with a compressed section: refused, untouched; with flags 0x2 it is relocated | ELF32 files not looked at (planted: red) |
 | compressed section, ELF32, `e_shnum` 0 | an ELF32 file whose `e_shnum` is 0 and whose section 0 holds the count (3) in its 32-bit `sh_size` (offset 0x14 of its header): the compressed section is found and refused; with flags 0x2 it is relocated | the ELF32 count in section 0 not read (planted: red) |
+| `e_shnum` 0, a count past the end | an ELF64 file whose section 0 claims 4 section headers where it holds 3: refused, exit 1, untouched | no bounds check on the count read from section 0 |
 
 `cov_zig_cases.sh` runs `cov_zig` from a directory whose `real/zig` is a
 stand-in (a script that records its arguments and copies a given ELF file to
