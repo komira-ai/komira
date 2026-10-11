@@ -174,6 +174,30 @@ test "exports: a hidden definition, an uncalled archive and a non-caller are red
     try expectRed(red, "caller nobody calls none");
 }
 
+test "exports: a dependent owner's archive calls what it references and does not define" {
+    // s2n-tls's shape: it defines komira_s2n_*, references aws-lc's functions
+    // (one of them twice, from two members) and libc's, and one of its own.
+    const s2n = [_]Sym{ def("komira_s2n_init"), und("komira_awslc_EVP_sha256", null), und("komira_awslc_EVP_sha256", null), und("komira_awslc_RAND_bytes", null), und("memcpy", null), und("komira_s2n_init", null) };
+    const c = try checks.archiveCalls(A, "s2n", &s2n);
+    try t.expectEqual(@as(usize, 3), c.calls.len);
+    try t.expectEqualStrings("komira_awslc_EVP_sha256", c.calls[0]);
+    try t.expectEqualStrings("komira_awslc_RAND_bytes", c.calls[1]);
+    try t.expectEqualStrings("memcpy", c.calls[2]);
+    // The owner exports what the Mojo caller calls and what the archive needs.
+    var red = checks.Red.init(A);
+    const archives = [_]checks.Archive{.{ .label = "aws-lc", .syms = &.{ def("komira_awslc_SHA256"), def("komira_awslc_EVP_sha256"), def("komira_awslc_RAND_bytes"), def("komira_awslc_internal") } }};
+    const callers = [_]checks.Caller{ .{ .label = "komira_crypto", .calls = &.{"komira_awslc_SHA256"} }, c };
+    const e = try checks.exportList(A, &archives, &callers, &red);
+    try t.expect(red.green());
+    try t.expectEqual(@as(usize, 3), e.names.len);
+    try t.expectEqualStrings("komira_awslc_EVP_sha256", e.names[0]);
+    // check 2 holds the library to the archive's needs too.
+    red = checks.Red.init(A);
+    const so: elf.Shared = .{ .soname = "libkomira_crypto_native.so.1", .needed = &.{"libc.so.6"}, .syms = &.{ def("komira_awslc_SHA256"), def("komira_awslc_RAND_bytes") } };
+    _ = try checks.check2(A, so, &archives, &callers, &red);
+    try expectRed(red, "does not export (1): komira_awslc_EVP_sha256");
+}
+
 // ---- checks 1 to 7: green on the good object, red on each planted defect -----
 
 test "check 1: green; red on an unprefixed export and on an export off the list" {
@@ -209,13 +233,13 @@ test "check 2: green; red on a called name the library does not export" {
 
 test "check 3: green; red on a strong undefined komira_ symbol and an unlisted weak one" {
     var red = checks.Red.init(A);
-    _ = try checks.check3(A, good(), &weak_list, &red);
+    _ = try checks.check3(A, good(), &weak_list, &.{}, &red);
     try t.expect(red.green());
     red = checks.Red.init(A);
-    _ = try checks.check3(A, withSym(und("komira_planted_missing", null)), &weak_list, &red);
+    _ = try checks.check3(A, withSym(und("komira_planted_missing", null)), &weak_list, &.{}, &red);
     try expectRed(red, "strong undefined komira_ symbols no declared NEEDED owner exports (1): komira_planted_missing");
     red = checks.Red.init(A);
-    _ = try checks.check3(A, withSym(weakUnd("komira_awslc_OPENSSL_memory_free")), &weak_list, &red);
+    _ = try checks.check3(A, withSym(weakUnd("komira_awslc_OPENSSL_memory_free")), &weak_list, &.{}, &red);
     try expectRed(red, "komira_awslc_OPENSSL_memory_free");
 }
 
@@ -223,37 +247,133 @@ test "check 4: green with libpthread, libc and ld-linux; red on an extra NEEDED,
     var red = checks.Red.init(A);
     var so = good();
     so.needed = &.{ "libpthread.so.0", "libc.so.6", "ld-linux-x86-64.so.2" };
-    _ = try checks.check4(A, so, "libkomira_crypto_native.so.1", &red);
+    _ = try checks.check4(A, so, "libkomira_crypto_native.so.1", &.{}, &red);
     try t.expect(red.green());
     // Planted: an extra NEEDED.
     red = checks.Red.init(A);
     so.needed = &.{ "libc.so.6", "libm.so.6" };
-    _ = try checks.check4(A, so, "libkomira_crypto_native.so.1", &red);
+    _ = try checks.check4(A, so, "libkomira_crypto_native.so.1", &.{}, &red);
     try expectRed(red, "neither glibc nor a declared owner (1): libm.so.6");
     // Planted: an undeclared komira owner, NEEDED but bound by no symbol
     // (linked --no-as-needed), so check 3 cannot see it.
     red = checks.Red.init(A);
     so.needed = &.{ "libc.so.6", "libkomira_x_native.so.1" };
-    _ = try checks.check4(A, so, "libkomira_crypto_native.so.1", &red);
+    _ = try checks.check4(A, so, "libkomira_crypto_native.so.1", &.{}, &red);
     try expectRed(red, "neither glibc nor a declared owner (1): libkomira_x_native.so.1");
     // Planted: the extra NEEDED first.
     red = checks.Red.init(A);
     so.needed = &.{ "libm.so.6", "libc.so.6" };
-    _ = try checks.check4(A, so, "libkomira_crypto_native.so.1", &red);
+    _ = try checks.check4(A, so, "libkomira_crypto_native.so.1", &.{}, &red);
     try expectRed(red, "neither glibc nor a declared owner (1): libm.so.6");
     red = checks.Red.init(A);
     so = good();
     so.runpath = &.{"$ORIGIN"};
-    _ = try checks.check4(A, so, "libkomira_crypto_native.so.1", &red);
+    _ = try checks.check4(A, so, "libkomira_crypto_native.so.1", &.{}, &red);
     try expectRed(red, "RUNPATH");
     red = checks.Red.init(A);
-    _ = try checks.check4(A, good(), "libother.so.1", &red);
+    _ = try checks.check4(A, good(), "libother.so.1", &.{}, &red);
     try expectRed(red, "SONAME is libkomira_crypto_native.so.1, not libother.so.1");
     red = checks.Red.init(A);
     so = good();
     so.needed = &.{"libpthread.so.0"};
-    _ = try checks.check4(A, so, "libkomira_crypto_native.so.1", &red);
+    _ = try checks.check4(A, so, "libkomira_crypto_native.so.1", &.{}, &red);
     try expectRed(red, "libc.so.6 is not NEEDED");
+}
+
+const crypto_owner = checks.Owner{ .soname = "libkomira_crypto_native.so.1", .exports = &.{ "komira_awslc_EVP_sha256", "komira_awslc_SHA256" } };
+
+/// komira_http_core's shape: s2n-tls's exports, aws-lc's functions undefined
+/// and NEEDED from crypto's library, found through RUNPATH $ORIGIN.
+fn httpCore() elf.Shared {
+    var so = good();
+    so.soname = "libkomira_http_core_native.so.1";
+    so.needed = &.{ "libkomira_crypto_native.so.1", "libc.so.6" };
+    so.runpath = &.{"$ORIGIN"};
+    so.syms = A.dupe(Sym, &[_]Sym{
+        def("komira_s2n_init"),
+        und("komira_awslc_EVP_sha256", null),
+        und("komira_awslc_SHA256", null),
+        und("memcpy", "GLIBC_2.14"),
+        weakUnd("__gmon_start__"),
+    }) catch unreachable;
+    return so;
+}
+
+test "check 3: undefined komira_ symbols each exported by a declared NEEDED owner; red when no owner exports one, or an owner is bound by nothing" {
+    var red = checks.Red.init(A);
+    _ = try checks.check3(A, httpCore(), &.{}, &.{crypto_owner}, &red);
+    try t.expect(red.green());
+    // Planted: the owner's library does not export a name this one needs
+    // (a caller archive dropped from the owner's caller_archives).
+    red = checks.Red.init(A);
+    const short = checks.Owner{ .soname = crypto_owner.soname, .exports = &.{"komira_awslc_SHA256"} };
+    _ = try checks.check3(A, httpCore(), &.{}, &.{short}, &red);
+    try expectRed(red, "no declared NEEDED owner exports (1): komira_awslc_EVP_sha256");
+    // Planted: no owner declared at all.
+    red = checks.Red.init(A);
+    _ = try checks.check3(A, httpCore(), &.{}, &.{}, &red);
+    try expectRed(red, "no declared NEEDED owner exports (2): komira_awslc_EVP_sha256 komira_awslc_SHA256");
+    // Planted: a second declared owner nothing binds to.
+    red = checks.Red.init(A);
+    const idle = checks.Owner{ .soname = "libkomira_libc_native.so.1", .exports = &.{"komira_fsync"} };
+    _ = try checks.check3(A, httpCore(), &.{}, &.{ crypto_owner, idle }, &red);
+    try expectRed(red, "exporting none of the library's undefined komira_ symbols (1): libkomira_libc_native.so.1");
+    red = checks.Red.init(A);
+    _ = try checks.check3(A, good(), &weak_list, &.{crypto_owner}, &red);
+    try expectRed(red, "exporting none of the library's undefined komira_ symbols (1): libkomira_crypto_native.so.1");
+    red = checks.Red.init(A);
+    const refs: elf.Shared = .{ .soname = crypto_owner.soname, .syms = &.{ def("komira_awslc_SHA256"), und("komira_awslc_EVP_sha256", null) } };
+    _ = try checks.check3(A, httpCore(), &.{}, &.{try checks.ownerOf(A, crypto_owner.soname, refs)}, &red);
+    try expectRed(red, "no declared NEEDED owner exports (1): komira_awslc_EVP_sha256");
+    // The owner listed second still resolves (no first-owner-only lookup).
+    red = checks.Red.init(A);
+    const other = checks.Owner{ .soname = "libkomira_x_native.so.1", .exports = &.{"komira_awslc_SHA256"} };
+    const rest = checks.Owner{ .soname = crypto_owner.soname, .exports = &.{"komira_awslc_EVP_sha256"} };
+    _ = try checks.check3(A, httpCore(), &.{}, &.{ other, rest }, &red);
+    try t.expect(red.green());
+}
+
+test "check 4: a declared owner NEEDED with RUNPATH $ORIGIN is green; red without the run path (B3), with another run path, an owner not NEEDED, an undeclared one" {
+    const owners = [_][]const u8{"libkomira_crypto_native.so.1"};
+    var red = checks.Red.init(A);
+    _ = try checks.check4(A, httpCore(), "libkomira_http_core_native.so.1", &owners, &red);
+    try t.expect(red.green());
+    // Planted (B3 at build time): http_core linked without its run path.
+    red = checks.Red.init(A);
+    var so = httpCore();
+    so.runpath = &.{};
+    _ = try checks.check4(A, so, "libkomira_http_core_native.so.1", &owners, &red);
+    try expectRed(red, "no RUNPATH, but a komira owner is NEEDED: the loader would not find libkomira_crypto_native.so.1");
+    // A run path other than $ORIGIN, alone or beside it.
+    red = checks.Red.init(A);
+    so.runpath = &.{"$ORIGIN/../lib"};
+    _ = try checks.check4(A, so, "libkomira_http_core_native.so.1", &owners, &red);
+    try expectRed(red, "RUNPATH entries other than $ORIGIN (1): $ORIGIN/../lib");
+    red = checks.Red.init(A);
+    so.runpath = &.{ "$ORIGIN", "/opt/lib" };
+    _ = try checks.check4(A, so, "libkomira_http_core_native.so.1", &owners, &red);
+    try expectRed(red, "RUNPATH entries other than $ORIGIN (1): /opt/lib");
+    // An RPATH instead of a RUNPATH.
+    red = checks.Red.init(A);
+    so = httpCore();
+    so.rpath = &.{"$ORIGIN"};
+    _ = try checks.check4(A, so, "libkomira_http_core_native.so.1", &owners, &red);
+    try expectRed(red, "RPATH entries (1): $ORIGIN");
+    // Planted: the owner declared but not NEEDED (the link left it out).
+    red = checks.Red.init(A);
+    so = httpCore();
+    so.needed = &.{"libc.so.6"};
+    _ = try checks.check4(A, so, "libkomira_http_core_native.so.1", &owners, &red);
+    try expectRed(red, "declared owners not NEEDED (1): libkomira_crypto_native.so.1");
+    // An owner NEEDED but not declared is red, as any non-glibc NEEDED is.
+    red = checks.Red.init(A);
+    _ = try checks.check4(A, httpCore(), "libkomira_http_core_native.so.1", &.{}, &red);
+    try expectRed(red, "neither glibc nor a declared owner (1): libkomira_crypto_native.so.1");
+    red = checks.Red.init(A);
+    so = httpCore();
+    so.needed = &.{ "libkomira_crypto_native.so.1", "libkomira_libc_native.so.1", "libc.so.6" };
+    _ = try checks.check4(A, so, "libkomira_http_core_native.so.1", &owners, &red);
+    try expectRed(red, "neither glibc nor a declared owner (1): libkomira_libc_native.so.1");
 }
 
 test "check 5: green at the floor; red above it, on GLIBC_PRIVATE, and on no glibc at all" {
@@ -305,6 +425,35 @@ test "check 5: green at the floor; red above it, on GLIBC_PRIVATE, and on no gli
     so.verneed = &.{ .{ .file = "libc.so.6", .version = "GLIBC_2.14" }, .{ .file = "libc.so.6", .version = "GLIBC_2.38" } };
     _ = try checks.check5(A, so, "2.34", &red);
     try expectRed(red, "needs GLIBC_2.38 from libc.so.6, above the floor glibc 2.34; no dynamic symbol carries it");
+}
+
+test "checks 4 and 5: a shim calling nothing outside komira is green without libc; one undefined libc name makes both red" {
+    // komira_async_api's shape: three exports over an atomic counter; the
+    // link records no NEEDED and no version at all.
+    var so: elf.Shared = .{
+        .soname = "libkomira_async_api_native.so.1",
+        .flags = 0xa,
+        .syms = &.{ def("komira_on_pool_depth"), weakUnd("__gmon_start__") },
+    };
+    var red = checks.Red.init(A);
+    _ = try checks.check4(A, so, "libkomira_async_api_native.so.1", &.{}, &red);
+    try t.expect(red.green());
+    red = checks.Red.init(A);
+    _ = try checks.check5(A, so, "2.34", &red);
+    try t.expect(red.green());
+    // An undefined komira_ name alone still needs no glibc.
+    so.syms = &.{ def("komira_on_pool_depth"), und("komira_other", null), weakUnd("__gmon_start__") };
+    red = checks.Red.init(A);
+    _ = try checks.check5(A, so, "2.34", &red);
+    try t.expect(red.green());
+    // Planted: the same shim calling memcpy, linked without glibc.
+    so.syms = &.{ def("komira_on_pool_depth"), und("memcpy", null), weakUnd("__gmon_start__") };
+    red = checks.Red.init(A);
+    _ = try checks.check4(A, so, "libkomira_async_api_native.so.1", &.{}, &red);
+    try expectRed(red, "libc.so.6 is not NEEDED");
+    red = checks.Red.init(A);
+    _ = try checks.check5(A, so, "2.34", &red);
+    try expectRed(red, "needs no GLIBC_ version at all");
 }
 
 test "check 6: green on 0xa (symbolic and bind-now); red on 0x8 and on no DT_FLAGS" {
