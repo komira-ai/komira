@@ -239,5 +239,55 @@ def test_tiled_driver_releases_inputs_exactly_once() raises:
         _concat_and_check(8, _ROWS_PER_BATCH, 2, String("tiled route ") + String(it))
 
 
+def _cancelled_concat_and_check(
+    n_batches: Int, rows: Int, cols: Int, label: String
+) raises:
+    """The RAISING path of a driver: the token is cancelled before the call, so
+    the dispatch fails and the driver takes its `raised` arm. That arm drops the
+    moved-out input slab SERIALLY (a teardown dispatch on a cancelled token
+    would raise a second error and mask the first), drops the half-built output
+    and re-raises. The contract: the call raises, and every input batch is
+    destroyed exactly once all the same, so the failure path neither leaks the
+    inputs nor frees a slot twice."""
+    var probes = List[SharedAlignedBuffer[HeapRegion]]()
+    var opt_slab = _make_inputs(n_batches, rows, cols, probes)
+    _assert_probes_live(label, probes)
+    var runtime = _runtime(_WORKERS)
+    ref disp = runtime.dispatcher()
+    var batches = Slab[RecordBatch].create(n_batches)
+    for m in range(n_batches):
+        var taken = opt_slab.take_slot_unchecked(m)
+        batches.append(taken.take())
+    opt_slab.set_len_unchecked(0)
+    _ = opt_slab^
+    var ct = CancellationToken.new()
+    ct.cancel(String("test: cancel before the concat dispatch"))
+    var raised = False
+    try:
+        var out = concat_record_batches_column_parallel(
+            batches^, disp, ct^
+        )
+        _ = out^
+    except:
+        raised = True
+    _ = runtime^
+    assert_true(raised, label + ": a cancelled token must make the concat raise, not succeed")
+    _assert_all_released(label + " inputs after the raise", probes)
+
+
+def test_column_parallel_driver_raising_path_releases_inputs_exactly_once() raises:
+    for it in range(4):
+        _cancelled_concat_and_check(
+            6, 9_000, 3, String("cancelled column route ") + String(it)
+        )
+
+
+def test_tiled_driver_raising_path_releases_inputs_exactly_once() raises:
+    for it in range(4):
+        _cancelled_concat_and_check(
+            8, _ROWS_PER_BATCH, 2, String("cancelled tiled route ") + String(it)
+        )
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
