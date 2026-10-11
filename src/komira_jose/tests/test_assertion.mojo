@@ -1,8 +1,9 @@
 # =============================================================================
 # test_assertion.mojo: RFC 7523 JWT bearer assertions (assertion.mojo):
 #   minted with each algorithm and verified by the verify half; the exact
-#   claims; the random `jti` that is never omitted and always required; and
-#   the client rule `sub == iss`.
+#   claims; the random `jti` that is never omitted, always required, and
+#   chosen by no caller (no public function takes one); the 300-second
+#   lifetime bound on what verifies; and the client rule `sub == iss`.
 # =============================================================================
 #
 # Keys as in test_signer: RFC 7515 A.3 (ES256), RFC 8037 A.1 (EdDSA) and
@@ -25,13 +26,13 @@ from komira_jose import (
     ClaimPolicy,
     JwsSigner,
     JwsVerifier,
-    assertion_claims,
     mint_assertion,
     mint_client_assertion,
     new_jti,
     verify_assertion,
     verify_client_assertion,
 )
+from komira_jose.assertion import _assertion_claims
 from komira_jwks import Jwk, parse_jwk_set, render_jwk_set
 from komira_secret_store import SecretValue
 
@@ -142,7 +143,7 @@ def test_round_trip_each_algorithm() raises:
         assert_equal(len(base64_url_decode_nopad(a.jti)), JOSE_JTI_BYTES)
         assert_equal(
             _payload_of(t),
-            assertion_claims(
+            _assertion_claims(
                 issuer=CLIENT,
                 subject=CLIENT,
                 audience=ENDPOINT,
@@ -162,13 +163,13 @@ def test_round_trip_each_algorithm() raises:
 def test_claims_bytes() raises:
     # Catches: a claim added, dropped, reordered, or written unescaped.
     assert_equal(
-        assertion_claims(
+        _assertion_claims(
             issuer="i", subject="s", audience="a", now=0, ttl_s=1, jti="j"
         ),
         '{"iss":"i","sub":"s","aud":"a","iat":0,"exp":1,"jti":"j"}',
     )
     assert_equal(
-        assertion_claims(
+        _assertion_claims(
             issuer='a"b', subject="s\\", audience="a", now=7, ttl_s=300, jti="j"
         ),
         '{"iss":"a\\"b","sub":"s\\\\","aud":"a","iat":7,"exp":307,"jti":"j"}',
@@ -253,7 +254,7 @@ def test_mint_bounds() raises:
     assert_equal(_mint_err(now=Int64.MAX - 1, ttl=2), LATE)
     var got = String("")
     try:
-        _ = assertion_claims(
+        _ = _assertion_claims(
             issuer="i", subject="s", audience="a", now=0, ttl_s=1, jti=""
         )
     except e:
@@ -343,6 +344,113 @@ def test_policy_still_applies() raises:
     )
 
 
+def _policy_ttl(max_ttl: Int64) raises -> ClaimPolicy:
+    return ClaimPolicy(
+        issuer=CLIENT,
+        audience=ENDPOINT,
+        accept_typ="JWT",
+        now=NOW,
+        leeway_s=0,
+        max_ttl_s=max_ttl,
+    )
+
+
+def test_verify_bounds_the_lifetime() raises:
+    # Catches: an assertion that lives longer than 300 s accepted because
+    # the policy's max TTL allows it (a caller's replay cache would then
+    # hold its jti for up to a day), and the bound moved by one. Policies
+    # at 301 s, an hour and a day; exp - iat of 300 passes and 301 is
+    # refused under each, by both verify functions.
+    comptime LONG = "JoseError: the assertion lives longer than 300 seconds"
+    var s = _signer("EdDSA")
+    var v = _verifier(s)
+    var head = String('{"iss":"client-1","sub":"client-1","aud":"') + ENDPOINT + '","iat":1000000,"exp":'
+    var misses = String("")
+    for max_ttl in [Int64(301), Int64(3600), Int64(86400)]:
+        var p = _policy_ttl(max_ttl)
+        for life in [Int64(1), Int64(299), Int64(300), Int64(301), Int64(3600)]:
+            var t = _signed(s, head + String(NOW + life) + ',"jti":"j"}')
+            var want = String("") if life <= 300 else String(LONG)
+            if life > max_ttl:
+                want = "JoseError: the token lives longer than the max TTL"
+            var got = _client_err(t, v, p)
+            if got != want:
+                misses += String(max_ttl) + "/" + String(life) + " client -> " + got + "; "
+            var got2 = String("")
+            try:
+                _ = verify_assertion(t, v, p)
+            except e:
+                got2 = String(e)
+            if got2 != want:
+                misses += String(max_ttl) + "/" + String(life) + " -> " + got2 + "; "
+    assert_equal(misses, "")
+    # The bound is the literal 300 the refusal text names.
+    assert_equal(JOSE_ASSERTION_MAX_TTL_S, Int64(300))
+
+
+def _top_level_public_defs(text: String) -> List[String]:
+    """The names of the `def`s at column 0 of `text` whose name does not
+    start with `_`."""
+    var out = List[String]()
+    for line in text.split("\n"):
+        var l = String(line)
+        if not l.startswith("def "):
+            continue
+        var b = l.as_bytes()
+        var end = 4
+        while end < len(b) and b[end] != UInt8(0x28) and b[end] != UInt8(0x5B):  # ( [
+            end += 1
+        var name = String(l[byte = 4 : end])
+        if not name.startswith("_"):
+            out.append(name)
+    return out^
+
+
+def _joined(names: List[String]) -> String:
+    var out = String("")
+    for i in range(len(names)):
+        if i > 0:
+            out += " "
+        out += names[i]
+    return out
+
+
+def test_no_public_function_takes_a_jti() raises:
+    # Catches: a public function that writes assertion claims with a jti
+    # the caller chooses (assertion_claims was one): the file header and
+    # README say a caller cannot choose or omit the jti. The public defs of
+    # assertion.mojo are exactly the documented five, none takes a `jti`
+    # parameter, and the package re-exports nothing with `claims` in its
+    # name from assertion.mojo. Reads the library sources staged by the
+    # BUCK file.
+    var src = Path("src/komira_jose/assertion.mojo").read_text()
+    assert_equal(
+        _joined(_top_level_public_defs(src)),
+        "new_jti mint_assertion mint_client_assertion verify_assertion"
+        " verify_client_assertion",
+    )
+    var init = Path("src/komira_jose/__init__.mojo").read_text()
+    var at = init.find("from komira_jose.assertion import (")
+    assert_true(at >= 0)
+    var rest = String(init[byte = at : init.byte_length()])
+    var close = rest.find(")")
+    var block = String(rest[byte = 0 : close])
+    assert_equal(block.find("claims"), -1, "__init__ re-exports a claims writer")
+    # No line of a public def (its parameters or body) declares a `jti`
+    # parameter.
+    var in_public = False
+    var bad = String("")
+    for line in src.split("\n"):
+        var l = String(line)
+        if l.startswith("def "):
+            in_public = not l.startswith("def _")
+        elif not l.startswith(" ") and l.byte_length() > 0:
+            in_public = False
+        if in_public and l.strip().startswith("jti:"):
+            bad += l + "; "
+    assert_equal(bad, "")
+
+
 def main() raises:
     var failures = String("")
     try:
@@ -365,6 +473,14 @@ def main() raises:
         test_mint_bounds()
     except e:
         failures += String("test_mint_bounds: ") + String(e) + "\n"
+    try:
+        test_verify_bounds_the_lifetime()
+    except e:
+        failures += String("test_verify_bounds_the_lifetime: ") + String(e) + "\n"
+    try:
+        test_no_public_function_takes_a_jti()
+    except e:
+        failures += String("test_no_public_function_takes_a_jti: ") + String(e) + "\n"
     try:
         test_jti_required()
     except e:
