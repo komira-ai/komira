@@ -29,7 +29,17 @@ do:
   there fails to analyse, to compile or to pass its gate, and
   `run_tests.sh` requires the failure it names (the message, not only the
   exit status); [`lint_weld.sh`](negative/lint_weld.sh) plants its defects
-  in a snapshot of the tree.
+  in a snapshot of the tree. A fixture that fails to analyse, to compile
+  or to pass its gate is fine as an ordinary package: the CI's
+  reverse-dependency query (`//tools/build/ci:affected`, a `cquery` over
+  `tests//...`) configures every target but analyses none. Only a
+  configuration failure breaks it: a target with an unknown or invisible
+  dependency makes the query fail for every change, and any failure of
+  that query answers BROKEN (with buck2's error, which names the target)
+  and fails the check, never a widening. Such a fixture must not
+  be loadable: it is a `<case>.BUCK` file that the driver copies to
+  `<case>/BUCK` for its one build and deletes, its directory gitignored, as
+  [`surface_capability_matrix/dangling.BUCK`](negative/surface_capability_matrix/dangling.BUCK) is.
 
 A test with both halves keeps one package name in each, for example
 `tests//functional/test_data` (the test runtime contract that works) and
@@ -965,6 +975,7 @@ With coverage, a library's conda package (what ships), not the library, waits fo
 ## 51. [Python oracles](../python/README.md#test-51-python-oracles)
 ## 52. [API JSON: mojo_doc_json](../mojo/doc.md)
 ## 53. [Surface capability matrix](lint_tests.md#53-the-surface-capability-matrix)
+## 54. [Hermetic Node.js: planted defects](../node/README.md#test-54-planted-defects)
 
 ## 49. Assert level, defines and memory cap
 

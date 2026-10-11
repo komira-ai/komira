@@ -19,8 +19,11 @@
 #   it prints   on stdout, `UNIT <name>` per affected unit, then exactly one
 #               verdict line, LAST: `AFFECTED <n>`, n the number of UNIT
 #               lines (0 allowed), or `WIDENED <reason>` with no UNIT line
-#               (the change reaches every declared unit). One trailing
-#               newline is allowed.
+#               (the change reaches every declared unit), or `BROKEN
+#               <reason>` with no UNIT line (the tool's query of its build
+#               graph failed, for any reason, such as a target with an
+#               unknown or invisible dependency; kci_build FAILS the check). One
+#               trailing newline is allowed.
 #
 # And to build the units it decided:
 #
@@ -37,9 +40,9 @@
 #
 # `parse_affected_answer` refuses anything else: an unknown line, an empty
 # line, a UNIT the build system does not own or names twice, a missing,
-# repeated or misplaced verdict, an n that is not the count, a WIDENED with
-# no reason or with UNIT lines. A refusal is "cannot tell" for the caller
-# (kci_build), never a widening and never an empty answer.
+# repeated or misplaced verdict, an n that is not the count, a WIDENED or
+# BROKEN with no reason or with UNIT lines. A refusal is "cannot tell" for
+# the caller (kci_build), never a widening and never an empty answer.
 #
 # Pure functions over owned values; no pointer, no process, no file.
 # =============================================================================
@@ -54,6 +57,8 @@ from .validate import find_build_system
 comptime ANSWER_UNIT: String = "UNIT"
 comptime VERDICT_AFFECTED: String = AFFECTED_VERDICT_AFFECTED
 comptime VERDICT_WIDENED: String = AFFECTED_VERDICT_WIDENED
+comptime VERDICT_BROKEN: String = "BROKEN"
+"""Not a verdict a result records: the check is FAILED on it."""
 
 
 struct Unit(Copyable, Movable):
@@ -246,17 +251,19 @@ def render_batch_argv(arts: Artifacts, units: List[String]) raises -> List[Strin
 
 
 struct AffectedAnswer(Copyable, Movable):
-    """One build system's parsed answer: WIDENED with its reason, or the
-    affected units (possibly none).
+    """One build system's parsed answer: WIDENED or BROKEN with its reason,
+    or the affected units (possibly none).
 
     Layout: owned values only. No pointer field."""
 
     var widened: Bool
+    var broken: Bool
     var reason: String
     var units: List[String]
 
     def __init__(out self):
         self.widened = False
+        self.broken = False
         self.reason = String("")
         self.units = List[String]()
 
@@ -304,14 +311,14 @@ def parse_affected_answer(text: String, owned: List[String]) raises -> AffectedA
         var rest = String("") if sp < 0 else String(line[byte = sp + 1 :])
         if word == ANSWER_UNIT:
             if i == n - 1:
-                raise Error(where + String(": the last line must be the verdict (AFFECTED <n> or WIDENED <reason>)"))
+                raise Error(where + String(": the last line must be the verdict (AFFECTED <n>, WIDENED <reason> or BROKEN <reason>)"))
             if not _contains(owned, rest):
                 raise Error(where + String(": '") + rest + String("' is not a unit this build system owns"))
             if _contains(out.units, rest):
                 raise Error(where + String(": unit '") + rest + String("' is named twice"))
             out.units.append(rest^)
             continue
-        if word == VERDICT_AFFECTED or word == VERDICT_WIDENED:
+        if word == VERDICT_AFFECTED or word == VERDICT_WIDENED or word == VERDICT_BROKEN:
             if i != n - 1:
                 raise Error(where + String(": the verdict must be the last line, and there is one"))
             if word == VERDICT_AFFECTED:
@@ -325,11 +332,17 @@ def parse_affected_answer(text: String, owned: List[String]) raises -> AffectedA
                     )
                 return out^
             if rest.byte_length() == 0:
-                raise Error(where + String(": WIDENED needs a reason"))
+                raise Error(where + String(": ") + word + String(" needs a reason"))
+            if word == VERDICT_BROKEN:
+                if len(out.units) > 0:
+                    raise Error(where + String(": BROKEN fails the check, so it comes with no UNIT line"))
+                out.broken = True
+                out.reason = rest^
+                return out^
             if len(out.units) > 0:
                 raise Error(where + String(": WIDENED reaches every unit, so it comes with no UNIT line"))
             out.widened = True
             out.reason = rest^
             return out^
-        raise Error(where + String(": not UNIT <name>, AFFECTED <n> or WIDENED <reason>"))
-    raise Error(String("no verdict line (AFFECTED <n> or WIDENED <reason>)"))
+        raise Error(where + String(": not UNIT <name>, AFFECTED <n>, WIDENED <reason> or BROKEN <reason>"))
+    raise Error(String("no verdict line (AFFECTED <n>, WIDENED <reason> or BROKEN <reason>)"))

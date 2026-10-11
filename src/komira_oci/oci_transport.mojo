@@ -262,6 +262,7 @@ struct ScriptedOciTransport(OciTransport, Movable, Deinitable):
     var _call_paths: List[String]
     var _call_auths: List[String]
     var _call_bodies: List[List[UInt8]]
+    var _call_content_types: List[String]
 
     def __init__(out self):
         self._resp = List[OciResponse]()
@@ -271,6 +272,7 @@ struct ScriptedOciTransport(OciTransport, Movable, Deinitable):
         self._call_paths = List[String]()
         self._call_auths = List[String]()
         self._call_bodies = List[List[UInt8]]()
+        self._call_content_types = List[String]()
 
     def queue(mut self, var response: OciResponse):
         """Queue the next scripted response (FIFO). Each `send` consumes one."""
@@ -294,12 +296,20 @@ struct ScriptedOciTransport(OciTransport, Movable, Deinitable):
     def call_body(self, i: Int) -> List[UInt8]:
         return self._call_bodies[i].copy()
 
+    def call_content_type(self, i: Int) -> String:
+        """The `content-type` the i-th call declared ("" when it sent none):
+        what a manifest PUT told the destination the bytes are."""
+        return String(self._call_content_types[i])
+
     def send(mut self, var request: OciRequest) raises -> OciResponse:
         self._call_methods.append(request.method)
         self._call_registries.append(request.registry.copy())
         self._call_paths.append(request.path.copy())
         self._call_auths.append(request.header_value(String("authorization")))
         self._call_bodies.append(request.body.copy())
+        self._call_content_types.append(
+            request.header_value(String("content-type"))
+        )
         if self._cursor >= len(self._resp):
             raise Error(
                 String("ScriptedOciTransport.send: no scripted response for call #")

@@ -323,7 +323,7 @@ struct ChaCha20Poly1305Ctx(Movable, Deinitable):
             UInt(len(aad)),
         )
         if rc != 1:
-            raise Error(
+            raise Error(  # cov: unreachable seal fails only on arguments fixed here (key, nonce, tag sizes) or a plaintext of hundreds of GiB
                 "ChaCha20Poly1305.seal_in_place: EVP_AEAD_CTX_seal failed"
             )
 

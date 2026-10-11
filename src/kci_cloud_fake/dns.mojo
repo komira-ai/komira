@@ -49,6 +49,7 @@ from kci_cloud import (
     Finding,
     LoweredNode,
     Setting,
+    body_is,
     record_type_word,
     ttl_seconds,
 )
@@ -221,7 +222,7 @@ def lower_certificate(r: Resource, shape: ProviderShape) raises -> List[LoweredN
 
 def dns_limits(r: Resource, shape: ProviderShape, cloud: String, mut out: List[Finding]):
     """The limits a shape puts on a certificate (see the file header)."""
-    if not r.certificate:
+    if not body_is(r, FIELD_CERTIFICATE):
         return
     ref c = r.certificate.value()
     var n = len(c.domains)

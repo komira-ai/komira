@@ -1027,19 +1027,28 @@ def _encode_composite_part(part: String) -> String:
     """Percent-encode a composite-key part so it is slash-free AND separator-free
     (`~`): encode `%` first (reversible), then `/`, then `~`. Injective — the
     joined tuple id round-trips uniquely."""
+    return _percent_escape(part, escape_tilde=True)
+
+
+def _percent_escape(part: String, escape_tilde: Bool) -> String:
+    """`part` with `%`, `/` (and `~` when `escape_tilde`) percent-encoded. The
+    bytes between escapes are copied as they are (each escaped byte is ASCII, so
+    every cut is a char boundary): a multi-byte UTF-8 character stays whole."""
     var sb = part.as_bytes()
     var out = String("")
+    var run = 0
     for i in range(len(sb)):
         var c = sb[i]
         if c == UInt8(ord("%")):
-            out += "%25"
+            out += String(part[byte=run:i]) + "%25"
         elif c == UInt8(ord("/")):
-            out += "%2F"
-        elif c == UInt8(ord("~")):
-            out += "%7E"
+            out += String(part[byte=run:i]) + "%2F"
+        elif escape_tilde and c == UInt8(ord("~")):
+            out += String(part[byte=run:i]) + "%7E"
         else:
-            out += chr(Int(c))
-    return out^
+            continue
+        run = i + 1
+    return out + String(part[byte=run : len(sb)])
 
 
 struct TableKeys(Copyable, Movable, Deinitable):
@@ -1788,27 +1797,15 @@ def _last_name_segment(name: String) -> String:
         if sb[i] == UInt8(ord("/")):
             last_slash = i
     var start = last_slash + 1 if last_slash >= 0 else 0
-    var out = String("")
-    for i in range(start, len(sb)):
-        out += chr(Int(sb[i]))
-    return out^
+    # `/` is ASCII, so `start` is a char boundary: the id's UTF-8 bytes as they are.
+    return String(name[byte=start : len(sb)])
 
 
 def _encode_doc_id_part(part: String) -> String:
     """Percent-encode a doc-id part so it is slash-free + never a reserved `__.*__`
     id (an idempotency key could contain `/`). Encodes `%` first (reversible), then
     `/`."""
-    var sb = part.as_bytes()
-    var out = String("")
-    for i in range(len(sb)):
-        var c = sb[i]
-        if c == UInt8(ord("%")):
-            out += "%25"
-        elif c == UInt8(ord("/")):
-            out += "%2F"
-        else:
-            out += chr(Int(c))
-    return out^
+    return _percent_escape(part, escape_tilde=False)
 
 
 def _hex2(b: Int) -> String:
