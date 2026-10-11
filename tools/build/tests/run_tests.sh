@@ -135,17 +135,9 @@
 #  26. The vendored aws-lc and s2n-tls: source lists against their archives,
 #      known-answer tests, a TLS handshake, the s2n-tls feature probes: see
 #      tools/build/tests/c_libs_tests.sh.
-#  28. The compile watchdog of mojo_wrapper.sh on stand-in compilers
-#      (tests//functional/watchdog:cases, a remote action): a process tree using no CPU
-#      is killed with exit 124 and the message, its children and an orphaned
-#      grandchild with it; a tree using CPU (itself, through a child, or
-#      through an orphaned member of its session while it waits), a
-#      short idle and a disabled watchdog are not killed; a compiler error
-#      keeps its exit status; malformed knobs are refused (exit 2); and the
-#      compiler dies with the wrapper: TERM to the wrapper kills compiler and
-#      child before it exits 143, and after a KILL the tether in the
-#      compiler's session kills them within 5 s. The macOS wrapper's
-#      watchdog (ps rather than /proc) is part of test 24.
+#  28. (In the gate: tests//functional/watchdog:cases, the compile watchdog
+#      of mojo_wrapper.sh on stand-in compilers, whose action refuses a report
+#      with fewer ok cases than its floor.)
 #  29. The test runtime contract (tests//functional/test_data): a gated test opens a
 #      declared fixture by its repository path from its staged share/, and a
 #      fixture it did not declare is absent (the gate goes red); TEST_TMPDIR
@@ -154,12 +146,9 @@
 #      komira//tools/build/mojo/mojo_test_testdata, in the gate); a mojo_test
 #      exiting 77 (SKIP to some harnesses) fails; a red test stays
 #      red with test_env {BIN: true} (library) and env {BIN: true} (mojo_test);
-#      the runner itself, run twice in ONE action directory
-#      (tests//functional/test_data:runner_cases), gives each run its own empty
-#      TEST_TMPDIR under that directory and removes it, no --env reaches
-#      the verdict, --arg values arrive in order and unexported, exit 77 is
-#      red, and a test killed by SIGKILL or SIGABRT fails with its
-#      own status (137, 134) and no marker; five inadmissible data/env
+#      (the runner's own cases, tests//functional/test_data:runner_cases, are
+#      in the gate, its action holding the report to a floor); five
+#      inadmissible data/env
 #      declarations are refused at analysis. A library's `test_deps`
 #      (tests//functional/test_deps) reach its welded tests: a test imports a
 #      test-support package the library does not depend on; and nothing else
@@ -946,19 +935,6 @@ else
     fail "local default: $(grep -o 'FAIL  local default: .*' "$LOG/local_default.log" | cut -c 22-) (see $LOG/local_default.log)"
 fi
 
-# 28
-if ! "$BUCK2" build tests//functional/watchdog:cases --show-full-simple-output > "$LOG/watchdog_cases.txt" 2> "$LOG/watchdog_cases.log"; then
-    fail "compile watchdog cases: $(grep '^BAD ' "$LOG/watchdog_cases.log" | sort -u | tr '\n' ' ')(see $LOG/watchdog_cases.log)"
-else
-    report=$(tail -n 1 "$LOG/watchdog_cases.txt")
-    ok=$(grep -c '^ok ' "$report" || true)
-    if grep -q '^BAD ' "$report" || [ "$ok" -lt 15 ]; then
-        fail "compile watchdog cases: $(grep -v '^ok ' "$report" | tr '\n' ' ') ($ok ok; see $report)"
-    else
-        pass "compile watchdog: $ok stand-in compilers, each killed (124) or left alone as required"
-    fi
-fi
-
 # 29
 expect_red td_undeclared "No such file or directory" tests//negative/test_data:undeclared
 expect_red td_undeclared_gate "GATED TEST FAILED: tests//negative/test_data:undeclared:" tests//negative/test_data:undeclared
@@ -978,17 +954,6 @@ elif grep -qF "test_red: DELIBERATE FAILURE" "$LOG/td_env_bin.log"; then
     pass "td_env_bin: env {BIN: true} does not replace a red mojo_test"
 else
     fail "td_env_bin: failed without the test's own failure (see $LOG/td_env_bin.log)"
-fi
-if ! "$BUCK2" build tests//functional/test_data:runner_cases --show-full-simple-output > "$LOG/runner_cases.txt" 2> "$LOG/runner_cases.log"; then
-    fail "gate runner cases: $(grep '^BAD ' "$LOG/runner_cases.log" | sort -u | tr '\n' ' ')(see $LOG/runner_cases.log)"
-else
-    report=$(tail -n 1 "$LOG/runner_cases.txt")
-    ok=$(grep -c '^ok ' "$report" || true)
-    if grep -q '^BAD ' "$report" || [ "$ok" -lt 5 ]; then
-        fail "gate runner cases: $(grep -v '^ok ' "$report" | tr '\n' ' ') ($ok ok; see $report)"
-    else
-        pass "gate runner: $ok cases in one action (private TEST_TMPDIR per run; env cannot reach the verdict)"
-    fi
 fi
 expect_red td_bad_dest "holds an empty, \`.\` or \`..\` segment" tests//negative/test_data:bad_dest
 expect_red td_bad_dest_clash "is both a file and the directory of" tests//negative/test_data:bad_dest_clash

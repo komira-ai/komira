@@ -150,5 +150,13 @@ killed() {
 }
 killed wrapper_term TERM 143
 killed wrapper_kill KILL 137
+# The floor: a case list that ran fewer cases than this (a case deleted, an
+# early exit) is refused, here in the action, so the report cannot pass
+# with nothing in it. Raise it when a case is added.
+ok_lines=$("$BB" grep -c '^ok ' "$REPORT" || true)
+if [ "$ok_lines" -lt 15 ]; then
+    echo "BAD floor: $ok_lines ok case(s), fewer than the 15 cases of this script" | "$BB" tee -a "$REPORT" >&2
+    bad=1
+fi
 "$BB" rm -rf "$D"
 exit "$bad"

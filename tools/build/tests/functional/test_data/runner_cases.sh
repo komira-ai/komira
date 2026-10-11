@@ -164,5 +164,13 @@ if [ "$rc" = 0 ] && [ "$("$BB" cat "$D/m11" 2> /dev/null)" = "PASS //x:darwin_lo
 RUN_SCRIPT=$RUNNER
 RUN_BB=$BB
 
+# The floor: a case list that ran fewer cases than this (a case deleted, an
+# early exit) is refused, here in the action, so the report cannot pass
+# with nothing in it. Raise it when a case is added.
+ok_lines=$("$BB" grep -c '^ok ' "$REPORT" || true)
+if [ "$ok_lines" -lt 12 ]; then
+    echo "BAD floor: $ok_lines ok case(s), fewer than the 12 cases of this script" | "$BB" tee -a "$REPORT" >&2
+    bad=1
+fi
 "$BB" rm -rf "$D"
 exit "$bad"
