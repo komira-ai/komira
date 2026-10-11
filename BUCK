@@ -8,6 +8,7 @@ load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdow
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
 load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
+load("@komira//tools/build/platforms/limits:limits.bzl", "limits")
 load("@komira//tools/build/selftest:defs.bzl", "graph_check")
 load("//tests:python_closure_allowlist.bzl", "PYTHON_CEILING", "PYTHON_SURFACE")
 load("//tests:surface_capability_matrix.bzl", "CAPABILITIES", "MATRIX", "NOT_CAPABILITIES", "SURFACES")
@@ -336,6 +337,23 @@ _WINDOW_FROM = 2025
     tree = ":doc_tree",
     window_from = _WINDOW_FROM,
 ) for _ in _TESTS_LINTS[:1]]
+
+# The limits of the build (tools/build/platforms/README.md, "Limits, and the
+# golden"; the rule is tools/build/platforms/limits/limits.bzl): every place
+# the build says it builds for one platform only carries a `komira-limit:<id>`
+# marker naming a row of tools/build/platforms/limits.tsv, every row has a
+# marker, and the rows are well formed, over every file of the repository but
+# Markdown and the check's own directory (its sources and fixtures spell
+# both). Whether a row's retiring PR has merged is the platform table's
+# check, which reads git (tests//functional/platform_table).
+limits(
+    name = "limits",
+    cells = {"tools/build/tests": "tests//:doc_tree"},
+    exclude = ["tools/build/platforms/limits/"],
+    limits = "tools/build/platforms/limits.tsv",
+    srcs = [".buckconfig", ".buckconfig.local.example", ".gitignore"] + glob([".github/**"]),
+    tree = ":doc_tree",
+)
 
 # No Python outside the Python surface (the graph check python_closure,
 # tools/build/selftest/graph/python_closure.zig says what it refuses): no
