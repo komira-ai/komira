@@ -1,5 +1,6 @@
 load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
+load(":tree.bzl", "REAL_TREE", "check_real_tree")
 
 # Test 39 (test_weld) over the real rules: what a mojo_library and a mojo_test
 # give the lint (WeldedTestsInfo, tools/build/mojo/providers.bzl). Never
@@ -15,6 +16,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
 #                        that name by label, and that file is the one welded
 
 _OTHER_SHARED = "//negative/test_weld/real/src/komira_other:tests/test_shared.mojo"
+
+# REAL_TREE (tree.bzl) is what tests//functional/test_weld/real:ok, the green
+# half, gives the lint; a file added here and not to the list would be seen
+# by `red` alone, which the pull-request check does not build. Loading this
+# package, as resolving `ok` does, fails unless the two agree.
+check_real_tree(glob(["src/komira_real/**"]))
 
 mojo_library(
     name = "komira_real",
@@ -35,18 +42,22 @@ mojo_test(
     deps = [":komira_real"],
 )
 
-# `ok` holds the three unwelded files in its ledger; `red` has no row, so it
-# must name exactly those three. run_tests.sh checks both.
+# `red` has no ledger row, so it must name exactly the three unwelded files
+# (run_tests.sh checks it). Its green twin, which holds those three in its
+# ledger, is tests//functional/test_weld/real:ok, over these files.
+test_weld(
+    name = "red",
+    files = glob(["src/komira_real/**"]) + [_OTHER_SHARED],
+    known_untested = "ledger_empty.tsv",
+    root = "negative/test_weld/real/src",
+    welds = "//negative/test_weld/real/...",
+)
+
 [
-    test_weld(
-        name = name,
-        files = glob(["src/komira_real/**"]) + [_OTHER_SHARED],
-        known_untested = ledger,
-        root = "negative/test_weld/real/src",
-        welds = "//negative/test_weld/real/...",
+    export_file(
+        name = f,
+        mode = "reference",
+        visibility = ["//functional/test_weld/real:"],
     )
-    for name, ledger in [
-        ("ok", "known_untested.tsv"),
-        ("red", "ledger_empty.tsv"),
-    ]
+    for f in REAL_TREE
 ]
