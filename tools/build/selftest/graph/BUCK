@@ -13,15 +13,19 @@ zig_test(
     name = "graph_checks_unit",
     exec_compatible_with = LINUX_X86_64,
     src = "graph_checks.zig",
+    imports = ["python_closure.zig"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
 )
 
+# The root package's python_closure check and its negative fixture name it.
 zig_exe(
     name = "graph_checks",
     exec_compatible_with = LINUX_X86_64,
     src = "graph_checks.zig",
+    imports = ["python_closure.zig"],
     unit_tests = [":graph_checks_unit"],
+    visibility = ["//:", "tests//negative/python_closure:"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
 )
