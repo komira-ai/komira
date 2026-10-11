@@ -10,7 +10,8 @@
 #      that finds nothing is ABSENT, and ANY OTHER RAISE PROPAGATES — an
 #      AccessDenied is never laundered into "absent". `read_presence` reports
 #      a present object with an empty digest and never digests. Both reads
-#      carry the live stamp, endpoint and image the descriptor decodes.
+#      carry the live stamp, endpoint and image the descriptor decodes, and
+#      `read_status` carries them on both its matched and drifted arms.
 #   2. THE DELETE ENVELOPE: a not-found is a no-op; any other raise
 #      propagates.
 #   3. THE DESCRIPTOR DEFAULTS reach the driver: no undeletable reason, an
@@ -52,12 +53,14 @@ struct _Log(Movable):
     var read_mode: Int
     var delete_mode: Int
     var digest_raises: Bool
+    var drift: Bool
     var calls: List[String]
 
     def __init__(out self):
         self.read_mode = _FOUND
         self.delete_mode = _FOUND
         self.digest_raises = False
+        self.drift = False
         self.calls = List[String]()
 
 
@@ -185,6 +188,8 @@ struct _Stamping(ResourceDescriptor, Movable, Deinitable):
         return spec.name.copy()
 
     def live_digest(self, spec: _Spec, view: _View) raises -> String:
+        if self._log[].drift:
+            return spec.name + String("-old")
         return spec.name.copy()
 
     def retention(self, spec: _Spec) -> Int:
@@ -428,6 +433,16 @@ def test_reads_carry_the_live_stamp_endpoint_and_image() raises:
     assert_equal(s.endpoint, "https://images.example.com/serve")
     assert_equal(s.live_image, "registry.example.com/images@sha256:abc")
     assert_equal(s.unmanaged, "tags: 1 extra")
+    # The drifted arm builds its status separately and carries the same fields.
+    log[].drift = True
+    var d = n.read_status(Creds.none())
+    assert_equal(d.phase, RES_PRESENT_DRIFTED)
+    assert_equal(d.physical_id, "https://images.example.com")
+    assert_equal(d.live_digest, "images-old")
+    assert_equal(d.stamp, "kci:v1 owner=shop/blue/images/images/repo")
+    assert_equal(d.endpoint, "https://images.example.com/serve")
+    assert_equal(d.live_image, "registry.example.com/images@sha256:abc")
+    assert_equal(d.unmanaged, "tags: 1 extra")
     print("  test_reads_carry_the_live_stamp_endpoint_and_image: PASS")
 
 

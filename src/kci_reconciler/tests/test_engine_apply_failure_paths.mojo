@@ -11,7 +11,9 @@
 #   3. A ROLE TURNED OFF WHOSE DELETE FAILS stops the apply naming the delete,
 #      and the store keeps the record (it is retired only on a confirmed gone).
 #      A role turned off whose object is already gone retires the record
-#      with no delete.
+#      with no delete. A role turned off produces nothing even when it is
+#      live and its conformer would report outputs, whether it is deleted or
+#      left alone: its consumer is refused as UNBOUND and never called.
 #   4. OWNERSHIP THAT CHANGES BETWEEN THE PRE-FLIGHT AND THE NODE'S OWN READ
 #      stops the apply before any create or adopt.
 #   5. A NON-STEADY PHASE (converging) is refused, never converged.
@@ -39,6 +41,7 @@ from kci_reconciler import (
     Provenance,
     InputRef,
     ResolvedInputs,
+    Outputs,
     RES_CONVERGING,
     RETAIN_DELETE,
     CONVERGE_IN_PLACE,
@@ -49,6 +52,7 @@ from kci_reconciler import (
     FAULT_USER,
     FAULT_PROVIDER,
     FAULT_OURS,
+    UNBOUND_TOKEN,
     apply_graph,
     apply_graph_owned,
     rollback_create,
@@ -79,6 +83,7 @@ struct _World(Movable):
     var retention: Int
     var fault_verb: String
     var fault: Int
+    var out_url: String
 
     def __init__(out self, var first: ResourceStatus):
         self.reads = List[ResourceStatus]()
@@ -93,6 +98,7 @@ struct _World(Movable):
         self.retention = RETAIN_DELETE
         self.fault_verb = String("")
         self.fault = FAULT_UNSET
+        self.out_url = String("")
 
     def next_read(mut self, var next: ResourceStatus):
         self.reads.append(next^)
@@ -216,6 +222,13 @@ struct _Scripted(Resource, Movable, Deinitable):
 
     def wanted(mut self) -> Bool:
         return self._w[].wanted
+
+    def outputs(mut self, physical_id: String, creds: Creds) raises -> Outputs:
+        # Empty unless the test gives this node a URL to report.
+        var o = Outputs()
+        if self._w[].out_url.byte_length() > 0:
+            o.set(String("URL"), self._w[].out_url)
+        return o^
 
 
 def _graph1(w: ArcPointer[_World], id: String, owner: String = String("")) raises -> ResourceGraph:
@@ -373,6 +386,51 @@ def test_a_turned_off_role_already_gone_retires_the_record() raises:
     print("  test_a_turned_off_role_already_gone_retires_the_record: PASS")
 
 
+def _producer_and_consumer(
+    wp: ArcPointer[_World], wc: ArcPointer[_World]
+) raises -> ResourceGraph:
+    var refs = List[InputRef]()
+    refs.append(InputRef(String("pp"), String("URL"), String("env.A")))
+    var g = ResourceGraph()
+    g.add(ErasedResource.erase(_Scripted(wc, String("c"), String(""), refs^)))
+    g.add(ErasedResource.erase(_Scripted(wp, String("pp"))))
+    return g^
+
+
+def _unbound_c() -> String:
+    return String(UNBOUND_TOKEN) + ": node 'c' (field env.A) reads output 'URL' of 'pp'"
+
+
+def test_a_turned_off_producer_binds_nothing_left_alone_or_deleted() raises:
+    # Left alone: live, not on record, so not proven ours.
+    var wp = _world(ResourceStatus.matched(String("pid-pp"), String("d")))
+    wp[].wanted = False
+    wp[].out_url = String("https://pp.example.com")
+    var wc = _world(ResourceStatus.absent())
+    var store = InMemoryStateStore()
+    var g = _producer_and_consumer(wp, wc)
+    var msg = _apply_err(g, store)
+    assert_true(msg.startswith(_unbound_c()), msg)
+    assert_equal(wp[].count(String("delete")), 0, "a leftover is left alone")
+    assert_equal(len(wc[].calls), 0, "the consumer is never called")
+
+    # Deleted: created by an earlier apply, then turned off.
+    var wq = _world(ResourceStatus.absent())
+    wq[].out_url = String("https://pp.example.com")
+    var store2 = InMemoryStateStore()
+    var g1 = _graph1(wq, String("pp"))
+    _ = apply_graph(g1, Creds.none(), store2)
+    assert_equal(store2.physical_id_for(String("pp")), "pid-pp")
+    wq[].wanted = False
+    var wd = _world(ResourceStatus.absent())
+    var g2 = _producer_and_consumer(wq, wd)
+    var msg2 = _apply_err(g2, store2)
+    assert_true(msg2.startswith(_unbound_c()), msg2)
+    assert_equal(wq[].count(String("delete pid-pp")), 1, "the role was deleted")
+    assert_equal(len(wd[].calls), 0, "the consumer is never called")
+    print("  test_a_turned_off_producer_binds_nothing_left_alone_or_deleted: PASS")
+
+
 # ---- 4. ownership that changes during the run ------------------------------------
 
 
@@ -489,6 +547,7 @@ def main() raises:
     test_a_failed_adopt_names_the_node_the_verb_and_the_fault()
     test_a_failed_closed_world_delete_is_named_and_keeps_the_record()
     test_a_turned_off_role_already_gone_retires_the_record()
+    test_a_turned_off_producer_binds_nothing_left_alone_or_deleted()
     test_ownership_changed_between_preflight_and_read_stops_the_apply()
     test_a_converging_phase_is_refused_not_converged()
     test_an_empty_live_id_keeps_the_confirmed_one()

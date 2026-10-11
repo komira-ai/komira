@@ -22,7 +22,10 @@
 #      waits on a, and c waits on b because b is itself waiting; neither is
 #      read, and c is not refused as unbound.
 #   8. A TURNED-OFF PRODUCER PRODUCES NOTHING: its consumer is refused as
-#      UNBOUND by the dry run, never reported as "known after apply".
+#      UNBOUND by the dry run, never reported as "known after apply". That
+#      holds for a producer that is absent and for one that is present and
+#      would report outputs: the consumer is never bound to the outputs of an
+#      object the file turned off.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -41,6 +44,7 @@ from kci_reconciler import (
     Provenance,
     InputRef,
     ResolvedInputs,
+    Outputs,
     REFUSED_TOKEN,
     UNBOUND_TOKEN,
     RETAIN_DELETE,
@@ -84,6 +88,7 @@ struct _World(Movable):
     var retention: Int
     var fault_verb: String
     var fault: Int
+    var out_url: String
 
     def __init__(out self, var first: ResourceStatus):
         self.reads = List[ResourceStatus]()
@@ -98,6 +103,7 @@ struct _World(Movable):
         self.retention = RETAIN_DELETE
         self.fault_verb = String("")
         self.fault = FAULT_UNSET
+        self.out_url = String("")
 
     def next_read(mut self, var next: ResourceStatus):
         self.reads.append(next^)
@@ -221,6 +227,13 @@ struct _Scripted(Resource, Movable, Deinitable):
 
     def wanted(mut self) -> Bool:
         return self._w[].wanted
+
+    def outputs(mut self, physical_id: String, creds: Creds) raises -> Outputs:
+        # Empty unless the test gives this node a URL to report.
+        var o = Outputs()
+        if self._w[].out_url.byte_length() > 0:
+            o.set(String("URL"), self._w[].out_url)
+        return o^
 
 
 def _graph1(w: ArcPointer[_World], id: String, owner: String = String("")) raises -> ResourceGraph:
@@ -482,6 +495,34 @@ def test_a_consumer_of_a_turned_off_producer_is_refused_as_unbound() raises:
     print("  test_a_consumer_of_a_turned_off_producer_is_refused_as_unbound: PASS")
 
 
+def test_a_present_turned_off_producer_with_outputs_binds_nothing() raises:
+    # The producer is live and its conformer would report a URL; the file has
+    # turned it off, so the dry run must not hand that URL to the consumer.
+    var wp = _world(ResourceStatus.matched(String("pid-pp"), String("d")))
+    wp[].wanted = False
+    wp[].out_url = String("https://pp.example.com")
+    var wc = _world(ResourceStatus.absent())
+    var refs = List[InputRef]()
+    refs.append(InputRef(String("pp"), String("URL"), String("env.A")))
+    var g = ResourceGraph()
+    g.add(ErasedResource.erase(_Scripted(wc, String("c"), String(""), refs^)))
+    g.add(ErasedResource.erase(_Scripted(wp, String("pp"))))
+    var msg = String("")
+    try:
+        _ = plan_graph(g, Creds.none())
+    except e:
+        msg = String(e)
+    assert_true(
+        msg.startswith(
+            String(UNBOUND_TOKEN)
+            + ": node 'c' (field env.A) reads output 'URL' of 'pp'"
+        ),
+        msg,
+    )
+    assert_equal(len(wc[].calls), 0, "the consumer is not read")
+    print("  test_a_present_turned_off_producer_with_outputs_binds_nothing: PASS")
+
+
 def main() raises:
     print("test_engine_destroy_and_plan_paths:")
     test_owned_plan_and_destroy_refuse_the_unowned_scope()
@@ -492,4 +533,5 @@ def main() raises:
     test_known_after_apply_names_every_pending_producer()
     test_known_after_apply_flows_down_a_chain()
     test_a_consumer_of_a_turned_off_producer_is_refused_as_unbound()
+    test_a_present_turned_off_producer_with_outputs_binds_nothing()
     print("ALL DESTROY AND PLAN PATH TESTS PASSED")
