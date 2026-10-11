@@ -127,6 +127,10 @@ def test_the_declared_names_in_release_order() raises:
     want.append(String("komira_trace"))
     want.append(String("komira_calendar"))
     want.append(String("komira_calendar_ics"))
+    want.append(String("kci_artifact_proto"))
+    want.append(String("kci_deploy_model_proto"))
+    want.append(String("kci_manifest_proto"))
+    want.append(String("kci_artifact"))
     want.append(String("komira_all"))
     assert_equal(len(d.artifacts), len(want))
     for i in range(len(want)):

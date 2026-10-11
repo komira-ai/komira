@@ -103,7 +103,7 @@ from komira_plan_expr.scalar_value import (
     SCALAR_TIME_UNIT_NANO,
 )
 from komira_plan_ir.logical_plan import ExprArray
-from komira_plan_ir.physical_plan import (
+from komira_physical_plan.physical_plan import (
     ParquetSourceData,
     ParquetRowWindow,
     MorselOp,

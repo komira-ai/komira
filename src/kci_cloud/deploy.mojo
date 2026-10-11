@@ -582,6 +582,21 @@ def _prepare[
         if len(check.findings) > 0:
             _refuse(cloud.cloud_id(), check.findings, refusal)
         taking = check.taking.copy()
+    if not destroy:
+        # A role `list_owned` names and the file no longer lowers carries no
+        # dependency kci can read, but it was a DEPENDENT of its resource's
+        # other roles (a grant on the identity it binds), never one of their
+        # dependencies. A plan or an apply deletes turned-off nodes in topo
+        # order, so each turned-off role of the same resource waits for it:
+        # a member binding whose stamp is DERIVED (derived.mojo) from its
+        # identity must go while that identity still stands, or it reads as
+        # unstamped and is never deleted. (A destroy deletes in reverse topo
+        # order, where a node with no dependency is already first.)
+        for i in range(len(rem.roles)):
+            var res = owner_of_node(rem.roles[i].id)
+            for k in range(len(out.nodes)):
+                if not out.nodes[k].wanted and owner_of_node(out.nodes[k].id) == res:
+                    out.nodes[k].depends_on.append(rem.roles[i].id.copy())
     for i in range(len(rem.roles)):
         out.nodes.append(rem.roles[i].copy())
     var deletes = delete_findings(out.nodes, rem.owned, resources, destroy)

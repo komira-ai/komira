@@ -34,23 +34,24 @@
 #     satisfy from `bindings`. Filled on a MISS; the pass then leaves the plan
 #     site UNTOUCHED and continues.
 #
-# komira_optimizer has no driver that orders its passes or runs this loop. The
-# protocol the table is designed for is:
+# `optimizer_driver.optimize(plan, config, deps)` runs the passes in order once.
+# The loop around it belongs to a caller that executes plans; the protocol the
+# table is designed for is:
 #
 #     var deps = ScalarDepTable()
-#     var opt  = <run the passes in order>(plan^, deps)        # PURE
+#     var opt  = optimize(plan^, config, deps)                 # PURE
 #     if deps.has_requests():
 #         <the caller executes each request, appends a binding>
 #         deps.clear_requests()
-#         opt = <run the passes in order>(original^, deps)     # PURE, re-plan
+#         opt = optimize(original^, config, deps)              # PURE, re-plan
 #
 # ★ WHY THE SECOND PASS RUNS EVERY PASS FROM THE ORIGINAL PLAN, rather than
 # binding into the once-optimized output. The two folding passes are designed
 # for FIXED POSITIONS in the pass order -- `resolve_scalar_subqueries_rewrite`
 # BEFORE `flatten_dependent_joins`, constant folding and `push_predicates_down`,
 # and `scalar_broadcast_rewrite` BEFORE projection pushdown and column pruning
-# (neither is in this tree), join reorder (`reorder_joins`) and limit pushdown
-# (`push_limit_down`). Every
+# (`push_projections_down`, `prune_columns`), join reorder
+# (`reorder_joins_with_dp`) and limit pushdown (`push_limit_down`). Every
 # one of those later passes is designed to see the FOLDED plan. Re-running from
 # the original with the bindings in hand makes the fold happen at its position
 # with its value. Binding into the already-optimized plan instead would be a

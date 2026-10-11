@@ -617,8 +617,9 @@ def _perform_eager_rewrite(
 
 def eager_aggregate_pushdown(var plan: LogicalPlan) raises -> LogicalPlan:
     """Cross-side eager aggregation pushdown. UNCONDITIONAL — whether to run
-    the pass is the caller's decision (komira_optimizer has no driver that
-    orders its passes), so this entry always rewrites."""
+    the pass is the caller's decision (`optimizer_driver.optimize` runs it on a
+    plan with a join when `OptimizerConfig.eager_agg` is True), so this entry
+    always rewrites."""
     return _eager_rec(plan^)
 
 

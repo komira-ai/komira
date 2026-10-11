@@ -18,6 +18,7 @@ mojo_library(
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_exec_types:komira_exec_types",
         "//src/komira_metrics:komira_metrics",
+        "//src/komira_physical_plan:komira_physical_plan",
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_plan_ir:komira_plan_ir",
         "//src/komira_plan_stats:komira_plan_stats",

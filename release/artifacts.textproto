@@ -689,6 +689,42 @@ artifacts {
 }
 
 artifacts {
+  name: "kci_artifact_proto"
+  build_system: "buck2"
+  args: "//src/kci_artifact_proto:kci_artifact_proto_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/kci_artifact_proto:kci_artifact_proto_conda"
+}
+
+artifacts {
+  name: "kci_deploy_model_proto"
+  build_system: "buck2"
+  args: "//src/kci_deploy_model_proto:kci_deploy_model_proto_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/kci_deploy_model_proto:kci_deploy_model_proto_conda"
+}
+
+artifacts {
+  name: "kci_manifest_proto"
+  build_system: "buck2"
+  args: "//src/kci_manifest_proto:kci_manifest_proto_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/kci_manifest_proto:kci_manifest_proto_conda"
+}
+
+artifacts {
+  name: "kci_artifact"
+  build_system: "buck2"
+  args: "//src/kci_artifact:kci_artifact_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/kci_artifact:kci_artifact_conda"
+}
+
+artifacts {
   name: "komira_all"
   build_system: "komira_pack"
   args: "conda-meta"
@@ -810,6 +846,14 @@ artifacts {
   args: "{release_dir}/komira_calendar/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_calendar_ics/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/kci_artifact_proto/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/kci_deploy_model_proto/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/kci_manifest_proto/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/kci_artifact/manifest.json"
   args: "--license"
   args: "Apache-2.0"
   args: "--summary"

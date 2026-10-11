@@ -1,8 +1,9 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The exported name of aws-lc's SHA-NI block function, which aws-lc's
-# assembly declares hidden (native/komira_crypto_sha256_hw.c).
+# The exported names of aws-lc's SHA-256 block functions (the SHA-extension
+# body behind a CPUID check, and the portable body), which aws-lc's assembly
+# declares hidden (native/komira_crypto_sha256_hw.c).
 staged_files(
     name = "sha256_hw_files",
     srcs = ["native/komira_crypto_sha256_hw.c"],
@@ -105,6 +106,7 @@ mojo_library(
         "tests/test_name_matcher_edges.mojo",
         "tests/test_asn1_edges.mojo",
         "tests/test_x509_malformed.mojo",
+        "tests/test_sha256_compress.mojo",
     ],
     visibility = ["PUBLIC"],
 )

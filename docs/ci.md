@@ -230,7 +230,7 @@ fail by design (the `tests` cell), and the `./buck2` bootstrap. It is one shell
 script of numbered cases, takes well over an hour, and is **not the gate**: the
 gate is `pr / check`. It runs in its own workflow,
 [`build_system_selftests.yml`](../.github/workflows/build_system_selftests.yml),
-on a nightly schedule and on demand, never on a push or a pull request, with
+on a daily schedule and on demand, never on a push or a pull request, with
 the same farm connection and the same job permissions as `pr / check`. Two runs never
 overlap. It needs a Linux x86_64 client and refuses any other (exit 2).
 The workflow puts the platform table's pinned pixi on `PATH` (built as

@@ -474,7 +474,7 @@ def _decode_posting_list(
     of `_encode_posting_list` — the reusable SearchCore decode helper + the split writer
     round-trip test. Fail-loud bounds validation throughout.
     """
-    if region_off < 0 or region_len < 0 or region_off + region_len > len(src):
+    if region_off < 0 or region_len < 0 or region_len > len(src) - region_off:
         raise Error(
             "_decode_posting_list: region ["
             + String(region_off)
@@ -557,7 +557,7 @@ def _decode_posting_block(
     which pays O(bytes-to-landing)). The decoded doc-ids/tfs are byte-identical to
     the corresponding slice of a full _decode_posting_list. Fail-loud bounds.
     """
-    if region_off < 0 or region_len < 0 or region_off + region_len > len(src):
+    if region_off < 0 or region_len < 0 or region_len > len(src) - region_off:
         raise Error("_decode_posting_block: term region out of bounds")
     var end = region_off + region_len
     var cur = region_off + block_data_base_rel + block_byte_off
@@ -609,7 +609,7 @@ def _decode_posting_block_dids_only(
     blocks whose docs are never scored. A scored block re-decodes (doc-ids + tfs)
     via `_decode_posting_block` — paid only for the few above-theta blocks, so on
     long posting lists the bulk of the TF unpack work is skipped. Fail-loud."""
-    if region_off < 0 or region_len < 0 or region_off + region_len > len(src):
+    if region_off < 0 or region_len < 0 or region_len > len(src) - region_off:
         raise Error("_decode_posting_block_dids_only: term region out of bounds")
     var end = region_off + region_len
     var cur = region_off + block_data_base_rel + block_byte_off
