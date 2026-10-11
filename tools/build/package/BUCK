@@ -1,6 +1,6 @@
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
-load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load(":conda.bzl", "conda_manifest_kci")
 load(":defs.bzl", "launcher_level_test")
 load(":kcov_guard.bzl", "kcov_guard_cases", "kcov_guard_tool")
@@ -14,15 +14,32 @@ launcher_level_test(
     exec_compatible_with = LINUX_X86_64,
 )
 
-# The package-format writer (tar, OCI), a static executable.
+# The unit tests of the packer's dlopen declarations (pack/conda_dlopen.zig):
+# the soname reader (code, not comments or docstrings), a declared soname
+# accepted, an undeclared one refused, a declaration no source opens refused,
+# and each declared requirement written after the others, once. `zig test`
+# run as a build action.
+zig_test(
+    name = "komira_pack_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "pack/conda_dlopen.zig",
+    imports = ["pack/common.zig"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# The package-format writer (tar, OCI), a static executable, built only
+# behind its unit tests.
 zig_exe(
     name = "komira_pack",
     exec_compatible_with = LINUX_X86_64,
     src = "pack/komira_pack.zig",
+    unit_tests = [":komira_pack_unit"],
     imports = [
         "pack/common.zig",
         "pack/conda.zig",
         "pack/conda_check.zig",
+        "pack/conda_dlopen.zig",
         "pack/conda_index.zig",
         "pack/conda_meta.zig",
         "pack/tar_oci.zig",
