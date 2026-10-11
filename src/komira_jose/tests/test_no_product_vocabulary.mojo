@@ -17,8 +17,9 @@ from komira_test_vocabulary import scan_library
 
 
 def test_library_names_no_product_vocabulary() raises:
-    # All four library files, so an empty staging cannot be a vacuous green.
-    var report = scan_library(String("src/komira_jose"), 4)
+    # All eight library files, so a partial staging cannot be a vacuous
+    # green.
+    var report = scan_library(String("src/komira_jose"), 8)
     assert_equal(
         report,
         String(""),
