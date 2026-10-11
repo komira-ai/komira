@@ -73,7 +73,8 @@
 #
 # Each call below says what its position does. `tests/test_optimizer_driver_
 # passes.mojo` (steps 1-10) and `tests/test_optimizer_driver_passes_late.mojo`
-# (steps 10-19) pin each pass at its position.
+# (steps 10-19) pin each pass at its position; `tests/test_optimizer_driver_
+# gates.mojo` pins the gate arms a plan with a Filter cannot reach.
 #
 # NOT IN THIS ORDER, though the reference pipeline ran them at step 13:
 #
