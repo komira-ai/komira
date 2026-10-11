@@ -239,6 +239,21 @@ test "zig failing, an output that is not ELF, or one holding the working directo
         try expect("zig fails", r, 1, "BRANCH COVERAGE LINK FAILED: zig could not link the instrumented test with the profile runtime\n--- log:\nstdout: ld.lld: error: undefined symbol: komira_example_add\n");
     }
     {
+        // Each step's log replaces the one before (the script's `>"$K/log"`):
+        // zig's failure prints zig's output, none of lld's.
+        var b = try Box.init();
+        defer b.deinit();
+        // lld's output is the longer, so a log written over without being
+        // cut would keep its end.
+        try b.put("link/lld/bin/say", "lld was here and wrote a longer log");
+        try b.put("zig/stub_rc", "1");
+        try b.put("zig/say", "zig was here");
+        const r = try b.run(try b.linkArgs(&.{}), &ENV);
+        try expect("zig log alone", r, 1, "--- log:\nstdout: zig was here\nstderr: zig was here\n");
+        try testing.expect(std.mem.endsWith(u8, r.stderr, "--- log:\nstdout: zig was here\nstderr: zig was here\n"));
+        try testing.expect(std.mem.indexOf(u8, r.stderr, "lld was here") == null);
+    }
+    {
         var b = try Box.init();
         defer b.deinit();
         try b.put("zig/stub_out", "#!/bin/sh\n");

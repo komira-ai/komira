@@ -74,17 +74,18 @@ test "no subcommand, or an unknown one, is a usage error" {
     const where = run_cmd.Where{ .cwd = "/nowhere", .k = "/nowhere/k", .env = &.{} };
     var err = std.ArrayList(u8).init(a);
     try std.testing.expectEqual(@as(u8, 2), try dispatch(a, &.{}, where, run_cmd.real_runner, &err));
-    try std.testing.expect(std.mem.indexOf(u8, err.items, "cov_branch: no subcommand") != null);
+    // The whole message: the reason, then the usage of both subcommands.
+    try std.testing.expectEqualStrings("cov_branch: no subcommand\n" ++ USAGE ++ "\n", err.items);
     err.clearRetainingCapacity();
     try std.testing.expectEqual(@as(u8, 2), try dispatch(a, &.{"lnk"}, where, run_cmd.real_runner, &err));
-    try std.testing.expect(std.mem.indexOf(u8, err.items, "unknown subcommand lnk") != null);
+    try std.testing.expectEqualStrings("cov_branch: unknown subcommand lnk\n" ++ USAGE ++ "\n", err.items);
     err.clearRetainingCapacity();
     // A subcommand is matched on its whole name: a longer, shorter, other
     // case or empty name is unknown.
     for ([_][]const u8{ "linker", "lin", "blink", "LINK", "", "running" }) |name| {
         try std.testing.expectEqual(@as(u8, 2), try dispatch(a, &.{name}, where, run_cmd.real_runner, &err));
-        const want = try std.fmt.allocPrint(a, "cov_branch: unknown subcommand {s}\n", .{name});
-        try std.testing.expect(std.mem.startsWith(u8, err.items, want));
+        const want = try std.fmt.allocPrint(a, "cov_branch: unknown subcommand {s}\n{s}\n", .{ name, USAGE });
+        try std.testing.expectEqualStrings(want, err.items);
         err.clearRetainingCapacity();
     }
     // `link` reaches the subcommand: its own usage error.

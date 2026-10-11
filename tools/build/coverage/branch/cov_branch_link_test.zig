@@ -25,9 +25,19 @@ const Fake = struct {
     /// The step whose start fails (error.ForkFailed), or none.
     fail_start: ?[]const u8 = null,
     calls: std.ArrayList(br.Spec),
+    /// The scratch directory; when set, each call records whether its bin,
+    /// home and tmp are directories as the step starts.
+    k: ?[]const u8 = null,
+    dirs: std.ArrayList([3]bool),
 
     fn init(alloc: std.mem.Allocator) Fake {
-        return .{ .calls = std.ArrayList(br.Spec).init(alloc) };
+        return .{ .calls = std.ArrayList(br.Spec).init(alloc), .dirs = std.ArrayList([3]bool).init(alloc) };
+    }
+
+    fn isDir(alloc: std.mem.Allocator, k: []const u8, name: []const u8) !bool {
+        var d = std.fs.cwd().openDir(try std.fs.path.join(alloc, &.{ k, name }), .{}) catch return false;
+        d.close();
+        return true;
     }
 
     fn runner(self: *Fake) r.Runner {
@@ -51,6 +61,7 @@ const Fake = struct {
         copy.argv = try alloc.dupe([]const u8, spec.argv);
         copy.env = try alloc.dupe([]const u8, spec.env);
         try self.calls.append(copy);
+        if (self.k) |k| try self.dirs.append(.{ try isDir(alloc, k, "bin"), try isDir(alloc, k, "home"), try isDir(alloc, k, "tmp") });
         const step: []const u8 = if (std.mem.eql(u8, spec.argv[1], "--install"))
             "install"
         else if (std.mem.eql(u8, spec.argv[1], "-flavor"))
@@ -155,6 +166,17 @@ const Case = struct {
     }
 };
 
+/// The scratch's bin, home and tmp are directories after a failure.
+fn expectScratchKept(c: *Case) !void {
+    for ([_][]const u8{ "bin", "home", "tmp" }) |d| {
+        var dir = c.tmp.dir.openDir(try std.fmt.allocPrint(c.a(), "scratch/cov_branch_link/{s}", .{d}), .{}) catch |e| {
+            std.debug.print("scratch/cov_branch_link/{s} is not a directory\n", .{d});
+            return e;
+        };
+        dir.close();
+    }
+}
+
 fn expectArgv(want: []const []const u8, got: []const []const u8) !void {
     testing.expectEqual(want.len, got.len) catch |e| {
         std.debug.print("want {d} entries, got {d}:\n", .{ want.len, got.len });
@@ -245,6 +267,7 @@ test "each input missing or empty is a usage error naming it, after the install 
             // The script made the scratch and installed the applets first.
             try testing.expectEqual(@as(usize, 1), fake.calls.items.len);
             try testing.expectEqualStrings("--install", fake.calls.items[0].argv[1]);
+            try expectScratchKept(&c);
         }
     }
 }
@@ -299,6 +322,7 @@ test "lld failing fails the link with the last 40 lines of its log; zig does not
     try testing.expect(std.mem.endsWith(u8, c.err.items, "lld line 49\nlld line 50\n"));
     try testing.expectEqual(@as(usize, 2), fake.calls.items.len);
     try testing.expect(c.exists("scratch/cov_branch_link/log"));
+    try expectScratchKept(&c);
 }
 
 test "lld killed by a signal fails the link; an empty log still prints its header" {
@@ -430,6 +454,8 @@ test "the busybox applets not installed, or a program that cannot start, is exit
         try c.has("--install -s");
         try c.has(cs.msg);
         try testing.expectEqual(@as(usize, 1), fake.calls.items.len);
+        // The script's `set -e` exit left the scratch as it was.
+        try expectScratchKept(&c);
     }
     for ([_][]const u8{ "install", "lld", "zig" }) |step| {
         var c = try Case.init();
@@ -439,6 +465,7 @@ test "the busybox applets not installed, or a program that cannot start, is exit
         try testing.expectEqual(@as(u8, 2), try c.link(&fake));
         try c.has("cov_branch link: cannot run ");
         try c.has(": ForkFailed\n");
+        try expectScratchKept(&c);
     }
 }
 
@@ -560,4 +587,166 @@ test "lastLines is tail -n N" {
     try testing.expectEqualStrings("b", l.lastLines("a\nb", 1));
     try testing.expectEqualStrings("a\nb\n", l.lastLines("a\nb\n", 40));
     try testing.expectEqualStrings("\n\n", l.lastLines("x\n\n\n", 2));
+}
+
+test "bin, home and tmp of the scratch are directories when each step starts" {
+    // The script's `mkdir -p "$K/bin" "$K/home" "$K/tmp"` ran before the
+    // install: lld and zig get HOME and TMPDIR that exist.
+    var c = try Case.init();
+    defer c.deinit();
+    var fake = Fake.init(c.a());
+    fake.k = c.p("scratch/cov_branch_link");
+    try testing.expectEqual(@as(u8, 0), try c.link(&fake));
+    try testing.expectEqual(@as(usize, 3), fake.dirs.items.len);
+    for (fake.dirs.items, 0..) |seen, i| {
+        for (seen, [_][]const u8{ "bin", "home", "tmp" }) |is, name| {
+            if (!is) std.debug.print("step {d}: {s} is not a directory\n", .{ i, name });
+            try testing.expect(is);
+        }
+    }
+}
+
+test "a scratch directory that cannot be made: each one is tried, the first named, nothing run" {
+    // busybox `mkdir -p a b c` tries every directory and fails if one
+    // failed, so the others exist after it.
+    const names = [_][]const u8{ "bin", "home", "tmp" };
+    for (names, 0..) |blocked, j| {
+        var c = try Case.init();
+        defer c.deinit();
+        try c.put(try std.fmt.allocPrint(c.a(), "scratch/cov_branch_link/{s}", .{blocked}), "a file");
+        var fake = Fake.init(c.a());
+        try testing.expectEqual(@as(u8, 2), try c.link(&fake));
+        try testing.expectEqualStrings(try std.fmt.allocPrint(c.a(), "cov_branch link: cannot make {s}/{s}: NotDir\n", .{ c.p("scratch/cov_branch_link"), blocked }), c.err.items);
+        try testing.expectEqual(@as(usize, 0), fake.calls.items.len);
+        for (names, 0..) |other, i| {
+            if (i == j) continue;
+            var d = try c.tmp.dir.openDir(try std.fmt.allocPrint(c.a(), "scratch/cov_branch_link/{s}", .{other}), .{});
+            d.close();
+        }
+    }
+}
+
+/// One fault of an input, in the order the script checked for it.
+const Fault = enum { mk_bin, mk_home, mk_tmp, install, no_lld, no_runtime, no_kgen, no_zig, no_bitcode, magic, lld, zig, elf, holds_cwd, holds_k };
+
+/// Links with every fault in `faults`; returns the exit status. The
+/// working directory is <root>/cov and the scratch <root>/k, so that a
+/// binary can hold either without the other.
+fn linkWith(c: *Case, faults: []const Fault) !u8 {
+    var fake = Fake.init(c.a());
+    var w = c.where();
+    w.cwd = c.p("cov");
+    w.k = c.p("k");
+    var a = c.args();
+    a.busybox = c.p("tc/busybox");
+    a.compiler = c.p("tc/compiler");
+    a.zig = c.p("tc/zig");
+    a.lld = c.p("link/lld/bin/lld");
+    a.runtime = c.p("link/llvm/runtime/libclang_rt.profile-x86_64.a");
+    a.bitcode = c.p("cov/test_one.bc");
+    a.out = c.p("out");
+    var head: []const u8 = ELF;
+    var cwd_in: []const u8 = "";
+    var k_in: []const u8 = "";
+    for (faults) |f| switch (f) {
+        .mk_bin => try c.put("k/bin", "a file"),
+        .mk_home => try c.put("k/home", "a file"),
+        .mk_tmp => try c.put("k/tmp", "a file"),
+        .install => fake.install_status = .{ .exited = 1 },
+        .no_lld => try c.tmp.dir.deleteFile("link/lld/bin/lld"),
+        .no_runtime => try c.tmp.dir.deleteFile("link/llvm/runtime/libclang_rt.profile-x86_64.a"),
+        .no_kgen => try c.tmp.dir.deleteFile("tc/compiler/lib/libKGENCompilerRTShared.so"),
+        .no_zig => try c.tmp.dir.deleteFile("tc/zig/zig"),
+        .no_bitcode => try c.tmp.dir.deleteFile("cov/test_one.bc"),
+        .magic => try c.put("cov/test_one.bc", "XXXX"),
+        .lld => fake.lld_status = .{ .exited = 1 },
+        .zig => fake.zig_status = .{ .exited = 1 },
+        .elf => head = "#!/bin/sh\n",
+        .holds_cwd => cwd_in = w.cwd,
+        .holds_k => k_in = w.k,
+    };
+    fake.zig_out = try std.fmt.allocPrint(c.a(), "{s}\x00{s}\x00{s}\x00", .{ head, cwd_in, k_in });
+    return l.linkAll(c.a(), a, w, fake.runner(), &c.err);
+}
+
+/// The exit status and the start of the message of `f` alone.
+fn refusal(c: *Case, f: Fault) !struct { code: u8, msg: []const u8 } {
+    const al = c.a();
+    const k = c.p("k");
+    const missing = "cov_branch link: {s} is missing or empty\n";
+    const red = "BRANCH COVERAGE LINK FAILED: ";
+    return switch (f) {
+        .mk_bin => .{ .code = 2, .msg = try std.fmt.allocPrint(al, "cov_branch link: cannot make {s}/bin: NotDir\n", .{k}) },
+        .mk_home => .{ .code = 2, .msg = try std.fmt.allocPrint(al, "cov_branch link: cannot make {s}/home: NotDir\n", .{k}) },
+        .mk_tmp => .{ .code = 2, .msg = try std.fmt.allocPrint(al, "cov_branch link: cannot make {s}/tmp: NotDir\n", .{k}) },
+        .install => .{ .code = 2, .msg = try std.fmt.allocPrint(al, "cov_branch link: {s} --install -s {s}/bin failed (exit 1)\n", .{ c.p("tc/busybox"), k }) },
+        .no_lld => .{ .code = 2, .msg = try std.fmt.allocPrint(al, missing, .{c.p("link/lld/bin/lld")}) },
+        .no_runtime => .{ .code = 2, .msg = try std.fmt.allocPrint(al, missing, .{c.p("link/llvm/runtime/libclang_rt.profile-x86_64.a")}) },
+        .no_kgen => .{ .code = 2, .msg = try std.fmt.allocPrint(al, missing, .{c.p("tc/compiler/lib/libKGENCompilerRTShared.so")}) },
+        .no_zig => .{ .code = 2, .msg = try std.fmt.allocPrint(al, missing, .{c.p("tc/zig/zig")}) },
+        .no_bitcode => .{ .code = 2, .msg = try std.fmt.allocPrint(al, missing, .{c.p("cov/test_one.bc")}) },
+        .magic => .{ .code = 1, .msg = try std.fmt.allocPrint(al, red ++ "{s} is not LLVM bitcode\n", .{c.p("cov/test_one.bc")}) },
+        .lld => .{ .code = 1, .msg = try std.fmt.allocPrint(al, red ++ "lld could not instrument {s} (pgo-instr-gen)\n", .{c.p("cov/test_one.bc")}) },
+        .zig => .{ .code = 1, .msg = red ++ "zig could not link the instrumented test with the profile runtime\n" },
+        .elf => .{ .code = 1, .msg = red ++ "the link wrote no ELF file\n" },
+        .holds_cwd => .{ .code = 1, .msg = try std.fmt.allocPrint(al, red ++ "the binary holds this action's directory {s}: ", .{c.p("cov")}) },
+        .holds_k => .{ .code = 1, .msg = try std.fmt.allocPrint(al, red ++ "the binary holds this action's directory {s}: ", .{k}) },
+    };
+}
+
+fn expectRefusal(c: *Case, faults: []const Fault, want: Fault) !void {
+    const got = try linkWith(c, faults);
+    const want_r = try refusal(c, want);
+    if (got != want_r.code or !std.mem.startsWith(u8, c.err.items, want_r.msg)) {
+        std.debug.print("faults {any}: exit {d}, want {d} and a message starting '{s}'; got:\n{s}\n", .{ faults, got, want_r.code, want_r.msg, c.err.items });
+        return error.TestUnexpectedResult;
+    }
+}
+
+test "each fault alone is refused with its own message" {
+    for (std.enums.values(Fault)) |f| {
+        var c = try Case.init();
+        defer c.deinit();
+        try expectRefusal(&c, &.{f}, f);
+    }
+}
+
+test "two faults on one input: the one the script checked first is named" {
+    // Every pair but a bitcode that is missing and has the wrong magic,
+    // which one file cannot be. The later fault is applied last, so the
+    // order of application is not what decides.
+    const all = std.enums.values(Fault);
+    for (all, 0..) |first, i| {
+        for (all[i + 1 ..]) |second| {
+            if (first == .no_bitcode and second == .magic) continue;
+            var c = try Case.init();
+            defer c.deinit();
+            try expectRefusal(&c, &.{ first, second }, first);
+        }
+    }
+}
+
+test "two usage errors in one command line: the first check of the scan is named" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var why: []const u8 = "";
+    const full = [_][]const u8{ "--busybox", "b", "--compiler", "c", "--zig", "z", "--target", "t", "--lld", "l", "--runtime", "r", "--bitcode", "bc", "--out", "o" };
+    const cases = [_]struct { argv: []const []const u8, why: []const u8 }{
+        // Unknown before needing a value, and before being empty.
+        .{ .argv = &(full ++ [_][]const u8{"--bogus"}), .why = "unknown argument --bogus" },
+        .{ .argv = &(full ++ [_][]const u8{ "--bogus", "" }), .why = "unknown argument --bogus" },
+        // Needing a value before given twice; given twice before empty.
+        .{ .argv = &(full ++ [_][]const u8{"--out"}), .why = "--out needs a value" },
+        .{ .argv = &(full ++ [_][]const u8{ "--out", "" }), .why = "--out given twice" },
+        // Each of them before a flag that is missing.
+        .{ .argv = &.{ "--bogus", "x" }, .why = "unknown argument --bogus" },
+        .{ .argv = &.{"--busybox"}, .why = "--busybox needs a value" },
+        .{ .argv = &.{ "--busybox", "b", "--busybox", "b" }, .why = "--busybox given twice" },
+        .{ .argv = &.{ "--busybox", "" }, .why = "--busybox is empty" },
+    };
+    for (cases) |cs| {
+        try testing.expect((try l.parseArgs(a, cs.argv, &why)) == null);
+        try testing.expectEqualStrings(cs.why, why);
+    }
 }
