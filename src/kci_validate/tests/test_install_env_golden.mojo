@@ -6,20 +6,19 @@
 #   exact `pixi install` and `pixi run --as-is` argv, the manifest (every
 #   install pinned to version AND build on the step's channel), and the
 #   installed README's programs: byte-equal to the programs SOURCE mode
-#   generates for the welded `[tests][readme]` test of the same README
-#   (tools/build/mojo/defs.bzl `_readme_gate` runs the README examples tool
-#   with display `<package dir>/README.md`, the import name, relative links
-#   refused; this test runs the same tool, the one kci ships, with that
-#   argv, and kci's run of it must give the same bytes), the runner named
-#   `readme_<import>.mojo`, never `<import>.mojo`, and each example's
-#   `readme_<import>_<line>.mojo`. A change to any of them is a visible
-#   edit of this file.
+#   generated for the welded `[tests][readme]` test of the same README,
+#   read from that gate itself (komira_encoding's `[tests][readme][file]`,
+#   its README.md, and `[tests][readme][generated]`, what
+#   tools/build/mojo/defs.bzl `_readme_gate` made of it), so the gate's
+#   arguments are stated in one place and a change to them is red here; the
+#   runner named `readme_<import>.mojo`, never `<import>.mojo`, and each
+#   example's `readme_<import>_<line>.mojo`. A change to any of the rest is
+#   a visible edit of this file.
 # =============================================================================
 
-from std.os import setenv
+from std.os import listdir, setenv
 from std.testing import TestSuite, assert_equal, assert_true
 
-from kci_build import RunSpec, SupervisorRunner
 from kci_release_machine import StageValidation
 from komira_runtime_paths import data_path, test_tmpdir
 from kci_validate import (
@@ -139,67 +138,27 @@ def test_manifest_pins_version_and_build() raises:
     )
 
 
-comptime README: String = (
-    "# komira_encoding\n"
-    "\n"
-    "Binary-to-text encodings. See [the RFC](https://www.rfc-editor.org/rfc/rfc4648).\n"
-    "\n"
-    "```mojo\n"
-    "from std.testing import assert_equal\n"
-    "from komira_encoding import base64_encode\n"
-    "\n"
-    "assert_equal(base64_encode(\"foobar\".as_bytes()), \"Zm9vYmFy\")\n"
-    "```\n"
-    "\n"
-    "<!-- mojo-hidden\n"
-    "from komira_encoding import hex_encode\n"
-    "-->\n"
-    "```mojo\n"
-    "def twice(s: String) -> String:\n"
-    "    return s + s\n"
-    "\n"
-    "assert_equal(hex_encode(twice(\"f\").as_bytes()), \"6666\")\n"
-    "```\n"
-)
-
-
 def test_installed_program_is_byte_equal_to_source_mode() raises:
-    # SOURCE mode, as defs.bzl `_readme_gate` runs the tool for
-    # //src/komira_encoding:komira_encoding: display = <package>/README.md,
-    # --package = the import name, --links refuse (the README ships)
+    # SOURCE mode is the gate's own output for //src/komira_encoding; INSTALLED
+    # mode is kci's run of the tool it ships on the same README bytes, the
+    # display from the package's build label, the package its import name
     var tool = data_path(String("readme_examples"))
-    var tmp = test_tmpdir()
-    var readme = tmp + String("/README.md")
-    var f = open(readme, "w")
-    f.write_bytes(String(README).as_bytes())
-    f.close()
-    var src = tmp + String("/source")
-    var spec = RunSpec(
-        tool.copy(),
-        [
-            String("generate"), String("--readme"), readme, String("--display"), String("src/komira_encoding/README.md"),
-            String("--package"), String("komira_encoding"), String("--links"), String("refuse"),
-            String("--out-dir"), src, String("--examples"), tmp + String("/examples"),
-        ],
-        tmp.copy(), 120, tmp + String("/source.stdout"), tmp + String("/source.stderr"),
-    )
-    var runner = SupervisorRunner()
-    assert_true(runner.run(spec).ok(), open(tmp + String("/source.stdout"), "r").read())
-    assert_equal(open(tmp + String("/examples"), "r").read(), String("5\n15\n"))
-    # INSTALLED mode: the display comes from the package's build label, the
-    # package from its import name
+    var text = open(data_path(String("encoding_readme")), "r").read()
+    var src = data_path(String("encoding_generated"))
     var dir = package_dir_of(String("komira//src/komira_encoding:komira_encoding_conda"))
     assert_equal(dir, String("src/komira_encoding"))
     var installed = readme_program_of(
-        String(README), String("komira_encoding"), dir + String("/README.md"), tool, tmp + String("/installed")
+        text, String("komira_encoding"), dir + String("/README.md"), tool, test_tmpdir() + String("/installed")
     )
+    assert_true(installed.examples > 0)
     assert_equal(installed.text, open(src + String("/readme_komira_encoding.mojo"), "r").read())
-    assert_equal(len(installed.modules), 2)
-    for i in range(2):
-        assert_equal(installed.modules[i].text, open(src + String("/") + installed.modules[i].name, "r").read())
-    assert_equal(installed.modules[0].name, String("readme_komira_encoding_5.mojo"))
-    assert_equal(installed.modules[1].name, String("readme_komira_encoding_15.mojo"))
-    assert_equal(installed.examples, 2)
+    assert_equal(len(installed.modules), installed.examples)
+    for i in range(len(installed.modules)):
+        ref m = installed.modules[i]
+        assert_true(m.name.startswith(String("readme_komira_encoding_")), m.name)
+        assert_equal(m.text, open(src + String("/") + m.name, "r").read(), m.name)
+    # nothing the gate made is missing from kci's: the runner and each example
+    assert_equal(len(listdir(src)), installed.examples + 1)
     # never `<import>.mojo`: a file beside the program named like the
     # package is an import root that would shadow the installed package
     assert_equal(installed.file, String("readme_komira_encoding.mojo"))

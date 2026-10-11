@@ -68,14 +68,21 @@ mojo_library(
         # the installed README's program byte-equal to SOURCE mode's, golden
         "tests/test_install_env_golden.mojo",
         # the README examples tool: where kci looks for it, and a missing,
-        # empty or unrunnable tool refused by name
+        # empty or unrunnable tool refused by name; a failed map refused
+        # naming the report, and the program row it fails
         "tests/test_readme_tool.mojo",
     ],
     # The README examples tool kci ships, for the tests that make an
     # installed README into programs (the same target bin/kci/BUCK ships).
     test_data = {
         "tests/test_conda_install_env.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
-        "tests/test_install_env_golden.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
+        # and the README and programs of komira_encoding's welded README
+        # test, to compare kci's programs with
+        "tests/test_install_env_golden.mojo": {
+            "readme_examples": "//tools/build/readme_examples:tool",
+            "encoding_readme": "//src/komira_encoding:komira_encoding[tests][readme][file]",
+            "encoding_generated": "//src/komira_encoding:komira_encoding[tests][readme][generated]",
+        },
         "tests/test_readme_tool.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
     },
     visibility = ["PUBLIC"],

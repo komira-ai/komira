@@ -427,7 +427,8 @@ def _library_impl(ctx):
     if readme_marker != None:
         if "readme" in test_subtargets:
             fail("{}: a test_srcs file is named `readme.mojo`; `[tests][readme]` is the README's examples".format(ctx.label))
-        test_subtargets["readme"] = [DefaultInfo(default_output = readme_marker[0], other_outputs = [readme_marker[1]])]
+        # [generated] and [file]: the programs and README.md the gate ran, for kci_validate's golden test.
+        test_subtargets["readme"] = [DefaultInfo(default_output = readme_marker[0], other_outputs = [readme_marker[1]], sub_targets = {"file": [DefaultInfo(default_output = ctx.attrs.readme)], "generated": [DefaultInfo(default_output = readme_marker[1])]})]
         markers.append(readme_marker[0])
         if cov_link:
             coverage_readme(ctx, tc, _build_executable, readme_marker, ungated_tset, _link_tail(c_link), src_dir, import_name, root, env_args, cov_bins, cov_runs)
