@@ -19,8 +19,8 @@ load(
 # Two cases are not here: a row naming a target that does not exist
 # (dangling.BUCK) and one naming a test incompatible with Linux
 # (incompatible.BUCK). Loadable, either fails every cquery over tests//...,
-# the CI affected step's included; run_tests.sh copies each into its own
-# directory for its one build.
+# the CI affected step's included; //tools/build/selftest:analysis_refusals_lint
+# copies each into its own directory of a scratch tree, never of the checkout.
 
 [
     surface_capability_matrix(
@@ -86,4 +86,30 @@ surface_capability_matrix(
     root = SCM_ROOT,
     rows = SCM_MATRIX,
     surfaces = SCM_SURFACES,
+)
+
+# Neither `tree` nor `files`, and both: refused at analysis
+# (//tools/build/selftest:analysis_refusals_lint).
+surface_capability_matrix(
+    name = "no_tree",
+    capabilities = SCM_CAPABILITIES,
+    floor = SCM_FLOOR,
+    grounding = SCM_GROUNDING,
+    not_capabilities = SCM_NOT_CAPABILITIES,
+    root = SCM_ROOT,
+    rows = SCM_MATRIX,
+    surfaces = SCM_SURFACES,
+)
+
+surface_capability_matrix(
+    name = "both_tree_and_files",
+    capabilities = SCM_CAPABILITIES,
+    files = SCM_FILES,
+    floor = SCM_FLOOR,
+    grounding = SCM_GROUNDING,
+    not_capabilities = SCM_NOT_CAPABILITIES,
+    root = SCM_ROOT,
+    rows = SCM_MATRIX,
+    surfaces = SCM_SURFACES,
+    tree = ":doc_tree",
 )

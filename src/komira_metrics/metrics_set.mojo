@@ -812,20 +812,35 @@ def new_owned_metrics_set() raises -> OwnedPointer[MetricsSet]:
     underlying pointer (encapsulation rule).
     """
     # SAFETY: alloc[MetricsSet](1) returns one slot of MetricsSet-sized
-    # raw bytes. We populate every field directly via field assignment —
-    # `raw[].__init__()` crashes (the compiler treats `out self` as a
-    # value-construction site, not an interior-mutation site). This
-    # mirrors repro2's MiniAtomicSlab populate-fields-directly pattern.
+    # UNINITIALIZED bytes (a reused heap block holds whatever its last owner
+    # left there). Every field is initialized in place through
+    # `init_pointee_move` on a pointer to that field: plain assignment
+    # (`raw[].counters = ...`) would first destroy the field's "old value",
+    # running `Slab.__deinit__` over a garbage slot count and freeing a garbage
+    # buffer pointer (komira-ai/komira#1072). `raw[].__init__()` is not an
+    # option either: the compiler treats `out self` as a value-construction
+    # site, not an interior-initialization site. Every field is written
+    # exactly once, so the OwnedPointer below owns a fully constructed value.
     var raw = alloc[MetricsSet](1)
     # +1 for the quarantine slot; see QUARANTINE_COUNTER above. This is the
-    # SECOND construction path — it populates fields directly rather than
+    # SECOND construction path — it initializes fields directly rather than
     # calling `__init__`, so it must mirror every field the ctor sets.
-    raw[].counters = Slab[NamedCounter].create_prefilled(MAX_COUNTERS + 1)
-    raw[].times = Slab[NamedTime].create_prefilled(MAX_TIMES + 1)
-    raw[].gauges = Slab[NamedGauge].create_prefilled(MAX_GAUGES + 1)
-    raw[].lookup_misses = Slab[Counter].create_prefilled(1)
-    raw[].n_counters = UInt8(0)
-    raw[].n_times = UInt8(0)
-    raw[].n_gauges = UInt8(0)
-    raw[].dropped_registrations = AtomicI32(Int32(0))
+    UnsafePointer(to=raw[].counters).init_pointee_move(
+        Slab[NamedCounter].create_prefilled(MAX_COUNTERS + 1)
+    )
+    UnsafePointer(to=raw[].times).init_pointee_move(
+        Slab[NamedTime].create_prefilled(MAX_TIMES + 1)
+    )
+    UnsafePointer(to=raw[].gauges).init_pointee_move(
+        Slab[NamedGauge].create_prefilled(MAX_GAUGES + 1)
+    )
+    UnsafePointer(to=raw[].lookup_misses).init_pointee_move(
+        Slab[Counter].create_prefilled(1)
+    )
+    UnsafePointer(to=raw[].n_counters).init_pointee_move(UInt8(0))
+    UnsafePointer(to=raw[].n_times).init_pointee_move(UInt8(0))
+    UnsafePointer(to=raw[].n_gauges).init_pointee_move(UInt8(0))
+    UnsafePointer(to=raw[].dropped_registrations).init_pointee_move(
+        AtomicI32(Int32(0))
+    )
     return OwnedPointer[MetricsSet](unsafe_from_raw_pointer=raw)
