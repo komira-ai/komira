@@ -1,0 +1,6 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §1.2: x = NULL is NULL for every row (NULL = NULL included), and
+# a filter drops NULL, so the result has no rows and keeps the input columns.
+id:int64	x:int64?

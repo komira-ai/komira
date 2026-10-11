@@ -13,8 +13,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # `--summary-file`, a pull_request trigger exactly when the machine file
 # declares a PULL_REQUEST stage, whose job is then the only one a pull request
 # runs (same-repository pull requests only, no environment, `contents: read`
-# and the farm connection's token, `--affected-by` the pull request's base
-# commit, the full history) while every other job's `if:` keeps a pull request
+# and the farm connection's token, `--affected-by` the merge commit's first
+# parent, the full history) while every other job's `if:` keeps a pull request
 # out, a `revision` input on workflow_dispatch, every `uses:` pinned to a commit id (the farm-connect
 # action excepted), no `--only` on a release job unless the stage is SPLIT
 # (the job named after the stage runs its steps, other jobs run its
@@ -57,6 +57,11 @@ mojo_library(
         # pinned runner and uses, the pull_request trigger alone); one
         # mutation per branch
         "tests/test_ci_pull_request.mojo",
+        # R6's change base: `--affected-by "$change_base"`, the merge commit's
+        # first parent, never the event's base.sha (which widened a pull
+        # request by every later change to main); R18 lets no `${{ }}` into a
+        # script
+        "tests/test_ci_pr_change_base.mojo",
         # R6 for kci.yml: no pull_request trigger and no job for the
         # PULL_REQUEST stage; each file refused when read as the other
         "tests/test_ci_two_workflows.mojo",

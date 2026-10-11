@@ -6,7 +6,8 @@
 #
 # usage: busybox sh <run_dir>/cov_run.sh <busybox> <gate_runner> <compiler_dir> <label>
 #            <test_binary> <share> <src_dir> <xml_out> <marker_out>
-#            <src_repo> <test> <test_repo> <import> [--gen <file>]... [--env NAME=VALUE]...
+#            <src_repo> <test> <test_repo> <import> [--solib <file> [--solib-src <path>]...]
+#            [--gen <file>]... [--env NAME=VALUE]...
 #
 #   <run_dir>      the cov_run_dir: this script, kcov/ (bin/kcov, lib/), cov_normalize
 #                  and limit (the seconds the run may take: 450, or a tests
@@ -22,6 +23,16 @@
 #                  `/` (empty for the repository's root)
 #   <test_repo>    the repository path of the test source
 #   <import>       the library's import name: <src_dir> ends in src/<import>
+#   --solib        the test is a shared library's driver (a mojo_shared_lib's
+#                  gate_srcs entry): <file> is the library's coverage build in
+#                  <share>, which the driver loads; kcov measures the
+#                  libraries the driver loads
+#   --solib-src    a source of that library, by its path in the package, which
+#                  is how the library's line tables name it (as a test's name
+#                  it), at that path in <share>: measured, and mapped to the
+#                  package's repository directory (<test_repo> without
+#                  <test>); the report must hold the first. --solib with
+#                  none (every source generated) is refused
 #   --gen <file>   a generated source in <src_dir> (its path there): not measured
 #   --env          passed to gate_runner.sh as given
 #
@@ -40,14 +51,21 @@
 #      source by a relative path and records no compilation directory, so
 #      kcov, started in share/, resolves each name to the copy. A second
 #      copy of the sources, lost/, is where a name that does NOT resolve
-#      there lands (below).
+#      there lands (below). The one exception to the copies: each generated
+#      source (--gen) is moved to gen/, outside share/ and lost/, and linked
+#      from both, so its name resolves to gen/ and is outside every
+#      --include-path (not measured, with no argument naming it).
 #   2. gate_runner.sh (unchanged: the release gate's runner) runs bin/kcov as
 #      the program of the test root: share/ is the working directory, PATH,
 #      LD_LIBRARY_PATH, TMPDIR, TEST_TMPDIR and HOME are the gate's, each
 #      --env is exported to kcov and so reaches the test. kcov's arguments:
-#      --cobertura-only --skip-solibs --configure=cobertura-full-paths=1;
+#      --cobertura-only --skip-solibs --configure=cobertura-full-paths=1
+#      (no --skip-solibs with --solib: kcov then preloads its library,
+#      which reports each library the driver loads, and sets breakpoints in
+#      it as it is loaded);
 #      --include-path of exactly <src_dir> and this test, under share/ and
-#      under lost/ (an --exclude-path per generated source);
+#      under lost/ (no --exclude-path: kcov takes no argument of 2048
+#      bytes or more, and the run refuses one before kcov does);
 #      --replace-src-path='^(?!/):<lost>/'; the output directory and
 #      bin/<test>. komira's kcov exits with the test's status (128+N when a
 #      signal N killed it), not another traced process's (the toolchain's
@@ -70,8 +88,10 @@
 #      would hold the action open.
 #   3. kcov writes exactly one report (<out>/cov.xml); anything else fails.
 #   4. cov_normalize maps <share>/<src_dir>/ to <src_repo> and the test's
-#      directory under share/ to the repository's, requires the test's own
-#      source in the report and refuses the action's directories in the
+#      directory under share/ to the repository's (and with --solib, share/
+#      itself to the package's), requires the test's own source in the report
+#      (and the first --solib-src, so a library kcov did not measure is
+#      refused, not reported as no line) and refuses the action's directories in the
 #      output. Its output is <xml_out>; then `PASS <label>` goes to
 #      <marker_out>.
 #
@@ -105,8 +125,8 @@
 # and used as a --map ABS: kcov reports realpath'd names (README.md, "Why").
 #
 # Exit status: the test's under kcov when it fails (gate_runner's); 1 when the
-# binary names the sources elsewhere, the run passed its limit, or the report
-# is missing or refused; 2
+# binary names the sources elsewhere, a kcov argument is too long, the run
+# passed its limit, or the report is missing or refused; 2
 # for a usage error, which includes a `,` or `:` in a path given to kcov (its
 # options split on them).
 set -euf
@@ -143,6 +163,26 @@ case "$LIMIT" in "" | 0* | *[!0-9]*) echo "cov_run: $HERE/limit holds '$LIMIT', 
 case "$TEST" in */*) TEST_DIR=${TEST%/*}/ ;; *) TEST_DIR="" ;; esac
 case "$TEST_REPO" in */*) TEST_REPO_DIR=${TEST_REPO%/*}/ ;; *) TEST_REPO_DIR="" ;; esac
 
+SOLIB=""
+SOLIB_SRCS=""
+if [ "$#" -gt 0 ] && [ "$1" = --solib ]; then
+    [ "$#" -ge 2 ] || { echo "cov_run: --solib needs a file" >&2; exit 2; }
+    case "$2" in "" | /* | */) echo "cov_run: --solib $2 must be a relative file path" >&2; exit 2 ;; esac
+    SOLIB=$2
+    shift 2
+    while [ "$#" -gt 0 ] && [ "$1" = --solib-src ]; do
+        [ "$#" -ge 2 ] || { echo "cov_run: --solib-src needs a path" >&2; exit 2; }
+        case "$2" in "" | /* | */ | buck-out/* | *[,:\ ]*) echo "cov_run: --solib-src $2 must be a relative file path outside buck-out/ without a space, , or :" >&2; exit 2 ;; esac
+        SOLIB_SRCS="$SOLIB_SRCS $2"
+        shift 2
+    done
+fi
+# The package's repository directory ("" or ending in /), for --solib.
+case "$TEST_REPO" in "$TEST") PKG_REPO="" ;; */"$TEST") PKG_REPO=${TEST_REPO%"$TEST"} ;; *) PKG_REPO=- ;; esac
+if [ -n "$SOLIB" ] && [ "$PKG_REPO" = - ]; then
+    echo "cov_run: with --solib, <test_repo> $TEST_REPO must be a directory then <test> $TEST" >&2
+    exit 2
+fi
 GEN=""
 while [ "$#" -gt 0 ] && [ "$1" = --gen ]; do
     [ "$#" -ge 2 ] || { echo "cov_run: --gen needs a file" >&2; exit 2; }
@@ -192,6 +232,13 @@ group_left() {
         }'
 }
 
+# A shared library's driver with no source of the library to require in the
+# report: every one generated (not measured), so a run in which kcov did not
+# measure the library could not be told from one in which it did.
+if [ -n "$SOLIB" ] && [ -z "$SOLIB_SRCS" ]; then
+    red "cov_run: --solib with no --solib-src: every source of the shared library $SOLIB is generated, so none is measured and whether kcov measured the library cannot be checked; its drivers have no coverage run."
+fi
+
 # 0. Where the binary names the library's sources. Each string is on a line
 # of its own (tr), so the expression sees one name at a time. Only a
 # src/<import> component inside an artifact (after buck2's __<target>__/
@@ -215,12 +262,20 @@ cp -RL "$HERE/kcov/lib/." "$R/lib/"
 cp -L "$BIN" "$R/bin/$NAME"
 cp -RL "$SHARE/." "$R/share/"
 [ -f "$R/share/$TEST" ] || red "the test's source $TEST is not in its share directory"
+[ -z "$SOLIB" ] || [ -f "$R/share/$SOLIB" ] || red "the shared library $SOLIB (--solib) is not in the test's share directory"
+for p in $SOLIB_SRCS; do
+    [ -f "$R/share/$p" ] || red "the shared library's source $p (--solib-src) is not in the test's share directory"
+done
 [ ! -e "$R/share/$SRC_REL" ] || red "the share directory already holds $SRC_REL (a data file under it?)"
 mkdir -p "$R/share/$SRC_REL"
 cp -RL "$SRC/." "$R/share/$SRC_REL/"
 mkdir -p "$L/$SRC_REL" "$L/$TEST_DIR"
 cp -RL "$SRC/." "$L/$SRC_REL/"
 cp -L "$SHARE/$TEST" "$L/$TEST"
+for p in $SOLIB_SRCS; do
+    case "$p" in */*) mkdir -p "$L/${p%/*}" ;; esac
+    cp -L "$SHARE/$p" "$L/$p"
+done
 R=$(realpath "$R")
 L=$(realpath "$L")
 S="$R/share"
@@ -229,22 +284,55 @@ for p in "$S" "$L" "$SRC_REL" "$TEST"; do
 done
 OUT="$K/kout"
 
-EXCL=""
+# The generated sources: in share/ and lost/, each is a symbolic link to a
+# copy under gen/, outside both. kcov resolves a name with realpath before
+# it filters (filter.cc, mangleSourcePath and PathHandler), so a generated
+# source resolves to gen/, outside every --include-path, and is not
+# measured. No argument names them: kcov reads every argument before the
+# program as a path when it looks for the program (configuration.cc, its
+# argv scan) and fails "Too long string!" at one of 2048 bytes or more
+# (utils.cc, peek_file), and it keeps only the last --exclude-path given,
+# so a list of them cannot be split over several.
+G="$K/gen"
 for g in $GEN; do
-    EXCL="${EXCL:+$EXCL,}$S/$SRC_REL/$g,$L/$SRC_REL/$g"
+    [ -f "$S/$SRC_REL/$g" ] && [ ! -L "$S/$SRC_REL/$g" ] || red "the generated source $g is not a file in $SRC_REL"
+    case "$g" in */*) mkdir -p "$G/${g%/*}" ;; *) mkdir -p "$G" ;; esac
+    mv "$S/$SRC_REL/$g" "$G/$g"
+    ln -s "$G/$g" "$S/$SRC_REL/$g"
+    rm "$L/$SRC_REL/$g"
+    ln -s "$G/$g" "$L/$SRC_REL/$g"
 done
 
-# 2. kcov under the gate's runner.
+# 2. kcov under the gate's runner. The --include-path list: <src_dir> and
+# the test, and each --solib-src, under share/ and under lost/.
+INC="$S/$SRC_REL,$S/$TEST,$L/$SRC_REL,$L/$TEST"
+for p in $SOLIB_SRCS; do
+    INC="$INC,$S/$p,$L/$p"
+done
+set -- "$@" --arg --cobertura-only
+[ -n "$SOLIB" ] || set -- "$@" --arg --skip-solibs
 set -- "$@" \
-    --arg --cobertura-only \
-    --arg --skip-solibs \
     --arg --configure=cobertura-full-paths=1 \
-    --arg "--include-path=$S/$SRC_REL,$S/$TEST,$L/$SRC_REL,$L/$TEST"
-[ -z "$EXCL" ] || set -- "$@" --arg "--exclude-path=$EXCL"
-set -- "$@" \
+    --arg "--include-path=$INC" \
     --arg "--replace-src-path=^(?!/):$L/" \
     --arg "$OUT" \
     --arg "$R/bin/$NAME"
+# Each of kcov's arguments is shorter than its 2048 bytes (above): each
+# holds this action's directory, and --include-path also grows with the
+# --solib-src paths of a shared library's driver (two per source). Bytes,
+# counted under LC_ALL=C (the shell's ${#a} counts characters in the gate's
+# locale, which this script does not set).
+KCOV_ARG_MAX=2047
+prev=""
+for a in "$@"; do
+    if [ "$prev" = --arg ]; then
+        n=$(( $(printf '%s' "$a" | LC_ALL=C wc -c) ))
+        if [ "$n" -gt "$KCOV_ARG_MAX" ]; then
+            red "cov_run: a kcov argument of $n bytes ($(printf '%s' "$a" | LC_ALL=C cut -c 1-80)...) is longer than kcov takes ($KCOV_ARG_MAX): kcov reads each argument before the program as a path and fails \"Too long string!\" (README.md, \"cov_run\")."
+        fi
+    fi
+    prev=$a
+done
 # gate_runner leads a new session and process group, which kcov, the test
 # and every child it starts join (setsid needs no fork: this shell has no job
 # control, so its background job leads no group, and $! is gate_runner's
@@ -342,6 +430,14 @@ IN=$(cat "$K/xmls")
 # 4. Repository paths.
 set -- --map "$S/$SRC_REL/=$SRC_REPO" --map "$S/$TEST_DIR=$TEST_REPO_DIR" \
     --must-contain "$TEST_REPO" --forbid "$PWD" --forbid "$R" --forbid "$L"
+if [ -n "$SOLIB" ]; then
+    # A driver at the package's top has that map already (its directory's).
+    [ -z "$TEST_DIR" ] || set -- "$@" --map "$S/=$PKG_REPO"
+    for p in $SOLIB_SRCS; do
+        set -- "$@" --must-contain "$PKG_REPO$p"
+        break
+    done
+fi
 P=$(realpath "$PWD")
 [ "$P" = "$PWD" ] || set -- "$@" --forbid "$P"
 "$HERE/cov_normalize" --in "$IN" --out "$XML" "$@" >"$K/norm.log" 2>&1 || {

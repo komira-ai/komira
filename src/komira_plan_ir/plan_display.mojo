@@ -7,8 +7,10 @@
 # =============================================================================
 
 from komira_plan_expr.null_order_policy import derived_nulls_first
+from komira_plan_expr.render_text import write_quoted
 from komira_plan_ir.logical_plan import (
     LogicalPlan,
+    AsofTolerance,
     PLAN_SCAN,
     PLAN_FILTER,
     PLAN_PROJECT,
@@ -155,7 +157,10 @@ def _write_plan_node[
         writer.write("  ")
 
     if plan.tag == PLAN_SCAN:
-        writer.write("Scan(path=\"", plan._scan.value()[].source_path, "\"")
+        # The path is quoted with `render_text.write_quoted`: a path holding
+        # `"` must not close its own quote (this render is plan identity).
+        writer.write("Scan(path=")
+        write_quoted(writer, plan._scan.value()[].source_path)
         writer.write(", type=")
         _write_source_type(writer, plan._scan.value()[].source_type)
         # Emit the in-memory source's CONTENT-
@@ -692,9 +697,24 @@ def _write_plan_node[
             writer.write("=")
             writer.write(aj.right_keys[i])
         writer.write("]")
+        # ⛔ PLAN IDENTITY: the tolerance VALUE, not just its tag. This render
+        # is `structural_hash`'s input, and a tag-only `tolerance=INT64` let
+        # `int64(5)` and `int64(500000)` share a compiled plan: the second
+        # query matched inside the first one's window. Falsifier:
+        # `test_asof_join_render_identity.mojo`.
         if not aj.tolerance.is_none():
             writer.write(", tolerance=")
-            _write_asof_tolerance(writer, aj.tolerance.tag)
+            _write_asof_tolerance(writer, aj.tolerance)
+        # ⛔ PLAN IDENTITY: a non-empty pre-sort hint tells the kernel to SKIP
+        # its sort, so a plan with the hint must not share a compiled plan with
+        # one that has to sort. Emitted only when present, so a plain as-of
+        # join renders as before.
+        if len(aj.left_sort_keys) > 0 or len(aj.left_sort_desc) > 0:
+            writer.write(", left_sorted=")
+            _write_sort_hint(writer, aj.left_sort_keys, aj.left_sort_desc)
+        if len(aj.right_sort_keys) > 0 or len(aj.right_sort_desc) > 0:
+            writer.write(", right_sorted=")
+            _write_sort_hint(writer, aj.right_sort_keys, aj.right_sort_desc)
         writer.write(")\n")
         _write_plan_node(
             writer, plan._asof_join.value()[].left[], indent + 1, placeholder_inmem_id
@@ -716,7 +736,9 @@ def _write_plan_node[
         # registry key; `view_resolution_pass` replaces this node with
         # the registered view's expanded plan before plan-compile.
         ref vrd = plan._view_ref.value()[]
-        writer.write("ViewRef(name=\"", vrd.view_name, "\")\n")
+        writer.write("ViewRef(name=")
+        write_quoted(writer, vrd.view_name)
+        writer.write(")\n")
 
     elif plan.tag == PLAN_CSE_REF:
         # Leaf reference to the canonical occurrence
@@ -879,13 +901,41 @@ def _write_asof_strategy[W: Writer](mut writer: W, s: UInt8):
         writer.write("UNKNOWN")
 
 
-def _write_asof_tolerance[W: Writer](mut writer: W, t: UInt8):
-    """Human-readable ASOF tolerance payload tag."""
+def _write_asof_tolerance[W: Writer](mut writer: W, tol: AsofTolerance):
+    """ASOF tolerance: its tag AND the value the tag selects (`INT64(5)`,
+    `FLOAT64(0.5)`). The value is plan identity -- see the PLAN_ASOF_JOIN arm.
+    """
+    var t = tol.tag
     if t == ASOF_TOL_NONE:
         writer.write("NONE")
     elif t == ASOF_TOL_INT64:
-        writer.write("INT64")
+        writer.write("INT64(", tol.int_val, ")")
     elif t == ASOF_TOL_FLOAT64:
-        writer.write("FLOAT64")
+        writer.write("FLOAT64(", tol.float_val, ")")
     else:
-        writer.write("UNKNOWN")
+        # An unknown tag keeps both payload slots so two unknown tolerances
+        # still render apart.
+        writer.write(
+            "UNKNOWN(tag=", Int(t), ", ", tol.int_val, ", ", tol.float_val, ")"
+        )
+
+
+def _write_sort_hint[W: Writer](
+    mut writer: W, keys: List[String], desc: List[Bool]
+):
+    """An as-of pre-sort hint: the keys, then the per-key directions as their
+    own list (`["k", "ts"]/[F, T]`). The two lists are written separately so a
+    length mismatch between them still reaches the render. Each key is QUOTED
+    (`write_quoted`): a raw key `k, ts` rendered like the two keys `k`, `ts`,
+    and a key could spell `]/[F], right_sorted=[…` and forge the other hint."""
+    writer.write("[")
+    for i in range(len(keys)):
+        if i > 0:
+            writer.write(", ")
+        write_quoted(writer, keys[i])
+    writer.write("]/[")
+    for i in range(len(desc)):
+        if i > 0:
+            writer.write(", ")
+        writer.write("T" if desc[i] else "F")
+    writer.write("]")

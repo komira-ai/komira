@@ -38,8 +38,18 @@ string spanning lines, a line of a string concatenated over lines that
 holds nothing but the string), or part of an import (`import x`,
 `from x import y`, a parenthesised list over several lines). Every other
 line is counted, declarations (`def`, `struct`, `comptime`, a decorator)
-and lone brackets included: this is a heuristic, which declaration
-reachability will replace with what the compiler emits.
+and lone brackets included, with one exception: a trait's header and its
+**requirements** are not executable, since a requirement emits no code. A
+requirement is a `def` inside a `trait` block whose body is only `...`
+(after an optional docstring), or a `def` line ending in `: ...`; its
+decorators, its signature lines and the `...` line are not counted. A trait
+method with a default body is counted like any other `def`. A `trait` block
+is its header (with the lines its open parentheses carry) and every line
+after it up to the next line holding code at the header's indent or less.
+This is a heuristic, which declaration reachability will replace with what
+the compiler emits. A file no test compiled whose executable lines are all
+declarations the compiler emits no code for counts none of them:
+decls.declaration_only decides that.
 """
 
 from covcheck.text import split_lines, substr, suffix
@@ -67,19 +77,27 @@ struct LexState(Copyable, Movable):
 struct SourceLine(Copyable, Movable):
     """One line as the lexer read it. `text` is the line without a trailing
     carriage return; `comment` the byte offset of its comment's `#`, or -1;
-    `opens`/`closes` count `(` and `)` in its code; `semi` is the offset of
-    its first `;` in code, or -1; `tail_code` is set on an import line when
-    a statement that is not an import follows a `;`."""
+    `opens`/`closes` count `(` and `)` in its code, `brackets` is the
+    number of `[` less the number of `]` in it (decls.mojo reads both to
+    find where a signature ends), `braces` the number of `{` less the number
+    of `}` (decls.declaration_only reads all three to find where a
+    statement ends); `semi` is the offset of its first `;` in
+    code, or -1; `tail_code` is set on an import line when
+    a statement that is not an import follows a `;`; `in_string` is set when
+    the line starts inside a string literal."""
 
     var text: String
     var comment: Int
     var code: Bool
     var opens: Int
     var closes: Int
+    var brackets: Int
+    var braces: Int
     var semi: Int
     var continued: Bool
     var is_import: Bool
     var tail_code: Bool
+    var in_string: Bool
 
     def __init__(out self, text: String):
         self.text = text
@@ -87,10 +105,13 @@ struct SourceLine(Copyable, Movable):
         self.code = False
         self.opens = 0
         self.closes = 0
+        self.brackets = 0
+        self.braces = 0
         self.semi = -1
         self.continued = False
         self.is_import = False
         self.tail_code = False
+        self.in_string = False
 
 
 def _is_ident(c: Int) -> Bool:
@@ -134,6 +155,8 @@ def lex_line(line: String, mut st: LexState) -> SourceLine:
     var code = False
     var opens = 0
     var closes = 0
+    var brackets = 0
+    var braces = 0
     var semi = -1
     var continued = False
     var string_continues = False
@@ -178,6 +201,14 @@ def lex_line(line: String, mut st: LexState) -> SourceLine:
             opens += 1
         elif c == 41:
             closes += 1
+        elif c == 91:
+            brackets += 1
+        elif c == 93:
+            brackets -= 1
+        elif c == 123:
+            braces += 1
+        elif c == 125:
+            braces -= 1
         elif c == 59 and semi < 0:
             semi = i
         elif c == _BACKSLASH and i == n - 1:
@@ -191,6 +222,8 @@ def lex_line(line: String, mut st: LexState) -> SourceLine:
     out.code = code
     out.opens = opens
     out.closes = closes
+    out.brackets = brackets
+    out.braces = braces
     out.semi = semi
     out.continued = continued
     return out^
@@ -265,6 +298,7 @@ def lex_source(text: String) -> List[SourceLine]:
     for i in range(len(lines)):
         var starts_in_string = st.quote != 0
         var l = lex_line(lines[i], st)
+        l.in_string = starts_in_string
         var starts = not in_import and not starts_in_string and l.code and _starts_import(l.text)
         if in_import or starts:
             l.is_import = True
@@ -285,8 +319,105 @@ def executable_lines(text: String) -> List[Int]:
     """The 1-based numbers of the executable lines of `text`, ascending
     (see the module header)."""
     var ls = lex_source(text)
+    var skip = _trait_requirement_lines(ls)
     var out = List[Int]()
     for i in range(len(ls)):
+        if skip[i]:
+            continue
         if ls[i].code and (not ls[i].is_import or ls[i].tail_code):
             out.append(i + 1)
     return out^
+
+
+def _indent(text: String) -> Int:
+    """How many spaces and tabs start `text`."""
+    var b = text.as_bytes()
+    var i = 0
+    while i < len(b) and (b[i] == UInt8(32) or b[i] == UInt8(9)):
+        i += 1
+    return i
+
+
+def _code_text(l: SourceLine) -> String:
+    """`l`'s text before its comment, without the spaces around it."""
+    var t = l.text if l.comment < 0 else substr(l.text, 0, l.comment)
+    return String(t.strip())
+
+
+def _statement(l: SourceLine) -> Bool:
+    """`l` holds code that starts a statement: code, not inside a string at
+    its start, not part of an import."""
+    return l.code and not l.in_string and not l.is_import
+
+
+def _depth(l: SourceLine) -> Int:
+    return l.opens - l.closes + l.brackets
+
+
+def _block_end(ls: List[SourceLine], start: Int, indent: Int) -> Int:
+    """The index of the first statement line from `start` on whose indent is
+    `indent` or less, or `len(ls)`."""
+    var j = start
+    while j < len(ls):
+        if _statement(ls[j]) and _indent(ls[j].text) <= indent:
+            return j
+        j += 1
+    return j
+
+
+def _header_end(ls: List[SourceLine], start: Int) -> Int:
+    """The index of the last line of the statement starting at `start`: the
+    line where its open brackets close (or one not ending in a backslash)."""
+    var depth = 0
+    var j = start
+    while j < len(ls):
+        depth += _depth(ls[j])
+        if depth <= 0 and not ls[j].continued:
+            return j
+        j += 1
+    return len(ls) - 1
+
+
+def _trait_requirement_lines(ls: List[SourceLine]) -> List[Bool]:
+    """Per line, whether it is a trait header or requirement line (see the
+    module header)."""
+    var skip = List[Bool](length=len(ls), fill=False)
+    var i = 0
+    while i < len(ls):
+        var ti = _indent(ls[i].text)
+        if not (_statement(ls[i]) and _keyword_then_blank(suffix(ls[i].text, ti), String("trait"))):
+            i += 1
+            continue
+        var he = _header_end(ls, i)
+        for k in range(i, he + 1):
+            skip[k] = True
+        var end = _block_end(ls, he + 1, ti)
+        var j = he + 1
+        while j < end:
+            if not (_statement(ls[j]) and _keyword_then_blank(suffix(ls[j].text, _indent(ls[j].text)), String("def"))):
+                j += 1
+                continue
+            var di = _indent(ls[j].text)
+            var se = _header_end(ls, j)
+            var body_end = _block_end(ls, se + 1, di)
+            var body = List[Int]()
+            for k in range(se + 1, body_end):
+                if ls[k].code:
+                    body.append(k)
+            var sig = _code_text(ls[se])
+            var inline = sig.endswith(": ...")
+            var stub = inline or (len(body) == 1 and _code_text(ls[body[0]]) == "...")
+            if stub and (not inline or len(body) == 0):
+                # Its decorators: the statement lines right above it at its indent.
+                var d = j - 1
+                while d > he and (not ls[d].code or (_statement(ls[d]) and _indent(ls[d].text) == di and _code_text(ls[d]).startswith("@"))):
+                    if ls[d].code:
+                        skip[d] = True
+                    d -= 1
+                for k in range(j, se + 1):
+                    skip[k] = True
+                if not inline:
+                    skip[body[0]] = True
+            j = body_end
+        i = end
+    return skip^

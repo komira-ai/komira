@@ -70,6 +70,7 @@ from komira_csv.byte_span_numeric import (
     fast_parse_int64_simple,
     fast_parse_float64_simple,
 )
+from komira_csv.temporal_range import epoch_seconds_to_ns
 
 
 # =============================================================================
@@ -477,7 +478,7 @@ def _parse_fractional_seconds_inline(
 ) -> Optional[Tuple[Int, Int]]:
     """Parse leading `.<digits>` (at most `max_digits`) starting at offset.
 
-    Mirrors `cell_parsers.mojo:_parse_fractional_seconds` to keep this
+    Mirrors `temporal_parsers.mojo:_parse_fractional_seconds` to keep this
     module self-contained (avoids the import cycle).
     """
     var n = len(cell)
@@ -808,8 +809,9 @@ def fast_parse_iso_timestamp_us(cell: Span[UInt8, _]) -> Optional[Int64]:
 def fast_parse_iso_timestamp_ns(cell: Span[UInt8, _]) -> Optional[Int64]:
     """Parse `YYYY-MM-DD[ T]HH:MM:SS[.fffffffff][Z]` -> ns-since-epoch.
 
-    Overflow check: Int64 ns covers ~1677-09-21 to ~2262-04-11. Rejects
-    outside the [-106751, 106751] day window.
+    Returns None for an instant outside the Int64 nanosecond range,
+    1677-09-21T00:12:43.145224192 to 2262-04-11T23:47:16.854775807
+    (`epoch_seconds_to_ns`, shared with the scalar parser).
     """
     if not cell_is_iso_timestamp_prefix(cell):
         return None
@@ -841,12 +843,11 @@ def fast_parse_iso_timestamp_ns(cell: Span[UInt8, _]) -> Optional[Int64]:
     pos = _consume_z_inline(cell, pos)
     if pos != n:
         return None
-    var days = _days_since_epoch_int(year, month, day)
-    if days < -106751 or days > 106751:
-        return None
-    var ns_in_day = (h * 3600 + m * 60 + s) * 1000000000 + frac_value
-    var ns_per_day: Int64 = Int64(86400) * Int64(1000000000)
-    return Optional[Int64](Int64(days) * ns_per_day + Int64(ns_in_day))
+    var secs = (
+        _days_since_epoch_int(year, month, day) * 86400
+        + h * 3600 + m * 60 + s
+    )
+    return epoch_seconds_to_ns(secs, frac_value)
 
 
 # =============================================================================
@@ -855,16 +856,13 @@ def fast_parse_iso_timestamp_ns(cell: Span[UInt8, _]) -> Optional[Int64]:
 # ISO 8601 duration "PnDTnHnMnS" has variable-length per-component digit
 # runs (1+ digits per unit, optional units, optional fractional seconds);
 # the shape doesn't decompose into fixed SIMD lane positions. The
-# scalar parser at cell_parsers.mojo:_try_parse_duration_iso_to_ns is
-# already a single-pass tight loop with branchless digit accumulation,
-# and benchmarks show no measurable win from a partial SIMD wrapper.
+# scalar parser at temporal_parsers.mojo:_try_parse_duration_iso_to_ns is
+# a single pass with an overflow check per digit and per component.
 #
-# Numeric-seconds duration (pandas default) routes through
-# fast_parse_float64_simple already (integer-shape only -- decimal-tail
-# durations fall back to scalar).
+# Numeric-seconds durations (pandas default) parse through the scalar
+# `_try_parse_float64` inside `_try_parse_duration_ns`.
 #
-# This module ships NO SIMD entry for Duration_*: the scalar fallback is
-# adequate there. The wire-through path in typed_column_builders.mojo
-# is left unchanged for Duration_*.
+# This module ships NO SIMD entry for Duration_*: the Duration builders in
+# typed_column_builders.mojo call the scalar `_try_parse_duration_*` only.
 # =============================================================================
 

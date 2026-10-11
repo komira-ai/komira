@@ -16,7 +16,17 @@ in one package so the two steps cannot disagree:
 - `verify_member`, the checks over one artifact's directory (one manifest,
   bare file names, nothing else in the directory, the sha256, the conda
   metadata agreeing), and `undeclared_requirements`, which lists library
-  requirements that name no other library of the set.
+  requirements that name no other library of the set, except one byte-equal
+  to a conda-forge requirement of `system_libs()` (the system libraries a
+  library may open, a compiled copy of
+  [`system_libs.bzl`](../../tools/build/package/system_libs.bzl) that a welded
+  test holds equal to it).
+- a library's `lib_files` rows (`LibFile`: `{kind, path, sha256}`, `kind`
+  `shared`, `link` or `static`, each path `lib/<file name>`), read when the
+  package ships native files, and `glibc_requirement_refusals`: such a
+  library requires exactly `__glibc >=<floor>` (`2.34` on `linux-64`, a
+  compiled copy of the platform table's `os_floor` that a welded test holds
+  equal to it), and a library with no native file requires no `__glibc`.
 
 It runs no process and opens no socket; only `verify_member` and the
 `read_*` functions read files.

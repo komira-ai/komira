@@ -106,9 +106,17 @@ def oauth_error_code(body: List[UInt8]) -> String:
 
 
 def sts_exchange_form(
-    audience: String, scope: String, subject_token: String
+    audience: String,
+    scope: String,
+    subject_token: String,
+    subject_token_type: String,
 ) -> String:
-    """The token-exchange form body. Every value is percent-encoded with no
+    """The token-exchange form body. `subject_token_type` is what the subject
+    token is: `AWS_SUBJECT_TOKEN_TYPE` for the `aws1` token, and an
+    external-account file's own `subject_token_type` (`urn:ietf:params:oauth:
+    token-type:jwt` for an OIDC token) for external_account.mojo's reader.
+
+    Every value is percent-encoded with no
     byte kept but RFC 3986 unreserved ones. That is byte for byte what
     `urllib.parse.urlencode` writes except for a space, which this writes as
     `%20` and `urlencode` as `+`; a form decoder reads both as a space (a
@@ -119,7 +127,7 @@ def sts_exchange_form(
     out += String("&scope=") + uri_encode(scope)
     out += String("&requested_token_type=") + uri_encode(String(ACCESS_TOKEN_TYPE))
     out += String("&subject_token=") + uri_encode(subject_token)
-    out += String("&subject_token_type=") + uri_encode(String(AWS_SUBJECT_TOKEN_TYPE))
+    out += String("&subject_token_type=") + uri_encode(subject_token_type)
     return out^
 
 
@@ -149,6 +157,37 @@ def parse_sts_token_response(body: List[UInt8], now_ms: Int64) raises -> AccessT
     if expires_in <= 0:
         raise Error("komira_gcp_wif: the STS answer's expires_in is not positive")
     return AccessToken.expiring_in(token^, now_ms, expires_in)
+
+
+def exchange_at_sts[
+    C: Connector
+](
+    mut client: HttpClient[C],
+    mut rt: BlockingRuntime[NoopSink],
+    host: String,
+    path: String,
+    form: String,
+    what: String,
+    now_ms: Int64,
+) raises -> AccessToken:
+    """POST `form` to `https://<host><path>` and read the answer. Not
+    re-exported: both fetchers' one exchange. A non-2xx answer raises
+    `komira_gcp_wif: <what> refused: ` plus komira_gcp_core's status text and
+    an allow-listed OAuth code, before the body is read for a token."""
+    var reply = post(
+        client, rt, host, path, String(FORM_CONTENT_TYPE), String(""), form
+    )
+    if not reply.is_success():
+        var msg = String("komira_gcp_wif: ") + what + String(
+            " refused: "
+        ) + parse_gcp_status(
+            String("POST"), String("sts.v1.token"), reply.status, reply.body
+        ).message()
+        var oauth = oauth_error_code(reply.body)
+        if oauth.byte_length() > 0:
+            msg += String(", ") + oauth
+        raise Error(msg)
+    return parse_sts_token_response(reply.body, now_ms)
 
 
 struct AwsWifTokenFetcher[
@@ -221,23 +260,17 @@ struct AwsWifTokenFetcher[
         var subject = aws1_subject_token(
             self._creds.credentials(), self._region, self._audience, amz_date
         )
-        var reply = post(
+        return exchange_at_sts(
             self._client,
             self._rt,
             self._sts_host,
             String(GOOGLE_STS_PATH),
-            String(FORM_CONTENT_TYPE),
-            String(""),
-            sts_exchange_form(self._audience, self._scope, subject),
+            sts_exchange_form(
+                self._audience,
+                self._scope,
+                subject,
+                String(AWS_SUBJECT_TOKEN_TYPE),
+            ),
+            String("AWS to Google federation"),
+            now_ms,
         )
-        if not reply.is_success():
-            var msg = String(
-                "komira_gcp_wif: AWS to Google federation refused: "
-            ) + parse_gcp_status(
-                String("POST"), String("sts.v1.token"), reply.status, reply.body
-            ).message()
-            var oauth = oauth_error_code(reply.body)
-            if oauth.byte_length() > 0:
-                msg += String(", ") + oauth
-            raise Error(msg)
-        return parse_sts_token_response(reply.body, now_ms)

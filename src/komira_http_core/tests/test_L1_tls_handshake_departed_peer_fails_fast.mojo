@@ -68,17 +68,16 @@
 #       `TLS_OUTCOME_BLOCKED_ON_READ` and the ERROR lands on trip 2 ⇒ RED on
 #       the trip-count assertion.
 #
-# Pointer discipline: UnsafePointer use is confined to the
-# socketpair / pthread / s2n out-param FFI thunks (concrete or
-# MutExternalOrigin AT the FFI boundary, never crossing a non-FFI module) — the
-# same carve-out as the two fixtures whose harness this clones.
+# Pointer discipline: UnsafePointer use is confined to the socketpair / recv /
+# s2n out-param FFI thunks (concrete or untracked origin AT the FFI boundary,
+# never crossing a non-FFI module) — the same carve-out as the two fixtures
+# whose harness this clones.
 #
 # Mojo 1.0.0b2 (def-only).
 # =============================================================================
 
 from std.sys.info import CompilationTarget
 from std.ffi import external_call
-from std.memory import alloc
 from std.testing import assert_equal, assert_true
 
 from komira_http_core.tls import (
@@ -119,18 +118,6 @@ comptime _HANDSHAKE_TRIP_CAP: Int = 512
 # How many raw `s2n_negotiate` probes §0 makes. The shim's correctness needs
 # the post-departure state to be PERMANENT, so the LAST probe is asserted too.
 comptime _POST_DEPARTURE_PROBES: Int = 64
-
-
-@always_inline
-def _null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
-    """A NULL typed pointer with a concrete origin.
-
-    # SAFETY: `Optional[UnsafePointer[...]]` is layout-compatible with the bare
-    # pointer; `None` is the all-zero (NULL) bit pattern. Origin `o` is
-    # concrete; the NULL sentinel is never dereferenced.
-    """
-    var none: Optional[UnsafePointer[T, o]] = None
-    return UnsafePointer(to=none).bitcast[UnsafePointer[T, o]]()[]
 
 
 def _socketpair() raises -> Tuple[Int32, Int32]:
@@ -194,90 +181,91 @@ def _build_client_config() raises -> TlsConfig:
 
 
 # -----------------------------------------------------------------------------
-# The PEER, on a detached helper pthread.
+# The PEER, driven in line on the test's own thread.
 #
-# ⚠ IT NEVER SPEAKS TLS. It reads whatever the client's ClientHello puts on the
-# wire — so the client has genuinely STARTED a handshake and is waiting on a
+# ⚠ IT NEVER SPEAKS TLS. It reads the ClientHello the client put on the wire —
+# so the client has genuinely STARTED a handshake and is waiting on a
 # ServerHello — and then closes the fd abruptly, with no alert and no
 # close_notify. That is what a load balancer does to a half-open connection and
 # what a draining frontend does to one it will not serve.
+#
+# ★ THE ORDERING IS THE MEASUREMENT, SO IT IS NOT LEFT TO A SCHEDULER. Both
+# tests need the departure to land AFTER the step that sends the ClientHello
+# has returned and BEFORE the step being measured. A peer on its own thread
+# cannot promise that: one `s2n_negotiate` call writes the ClientHello and then
+# goes straight on to read the ServerHello, and a peer that reads and closes
+# inside that window makes the SETUP step see the EOF. The setup step then
+# spends the one-call-deep misreport, the connection is marked closed, and the
+# first measured probe reads back the caller's `*blocked=0`: a red §0 that
+# says nothing about s2n. With the peer's poll sleep removed that interleaving
+# wins on nearly every run. Here the setup step returns first, then the test
+# drains and closes the peer itself, and `_send_client_hello_then_depart`
+# asserts that order.
 # -----------------------------------------------------------------------------
 
 
-@fieldwise_init
-struct _PeerArg(Copyable, Movable, Deinitable):
-    var peer_fd: Int32
-    # 0 = running, 1 = read the ClientHello + closed, 2 = error.
-    var done_flag_ptr: UnsafePointer[Int32, MutUntrackedOrigin]
+def _drain_peer(peer_fd: Int32) raises -> Int:
+    """Read everything the client has written so far; return the byte count.
 
+    The client's write has completed before this runs, so the bytes are already
+    queued on the peer end and a non-blocking `recv` loop ends on EAGAIN.
 
-def _peer_entry(
-    raw: UnsafePointer[NoneType, MutUntrackedOrigin]
-) -> UnsafePointer[NoneType, MutUntrackedOrigin]:
-    """Detached peer thread. ABI matches pthread `void* (*)(void*)`.
+    ⚠ The drain is not optional: closing an AF_UNIX stream socket with unread
+    bytes queued makes the other end's read fail with ECONNRESET instead of
+    seeing a clean EOF, which is a different departure from the one measured:
+    without the drain §0 measures a misreport TWO probes deep, not one.
 
-    SAFETY (FFI-BOUNDARY): `raw` is the heap `_PeerArg` this thread solely
-    owns; it reads the POD fields, frees the arg, then drains and closes. No
-    Mojo exception can cross the FFI boundary from here — the body raises
-    nothing."""
-    var arg = raw.bitcast[_PeerArg]()
-    var peer_fd = arg[].peer_fd
-    var done_flag_ptr = arg[].done_flag_ptr
-    arg.bitcast[UInt8]().free()
-
-    # Drain whatever the client sent (the ClientHello). Non-blocking fd, so
-    # poll with a bounded number of sleeps rather than blocking forever.
-    var buf = alloc[UInt8](8192).unsafe_origin_cast[MutUntrackedOrigin]()
+    ⚠ `recv`, NOT `read`: the Mojo stdlib RESERVES the libc `read` symbol with
+    its own binding, and a second declaration with a differing signature fails
+    MLIR legalization at archive-lower time on LINUX ONLY."""
+    var buf = Array[UInt8, 4096](fill=UInt8(0))
+    # SAFETY: `buf` is a stack local that outlives every `recv` below; the
+    # pointer is handed to libc for the length of `buf` and goes no further.
+    var buf_ptr = UnsafePointer(to=buf).unsafe_origin_cast[
+        MutUntrackedOrigin
+    ]().bitcast[UInt8]()
     var total = 0
-    var spins = 0
-    while spins < 4000 and total == 0:
-        spins = spins + 1
-        # ⚠ `recv`, NOT `read`: the Mojo stdlib RESERVES the libc `read`
-        # symbol with its own binding, and a second declaration with a
-        # differing signature fails MLIR legalization at archive-lower time on
-        # LINUX ONLY. `scripts`' package lint refuses it by name; `recv` is the
-        # spelling the other socket fixtures in this tree use
-        # (`test_e2e_bring_up.mojo:127`).
+    while True:
         var n = external_call["recv", Int64](
-            peer_fd, buf, UInt64(8192), Int32(0)
+            peer_fd, buf_ptr, UInt64(4096), Int32(0)
         )
-        if n > Int64(0):
-            total = total + Int(n)
+        if n <= Int64(0):
             break
-        _ = external_call["usleep", Int32](UInt32(500))
-    buf.free()
-
-    if total == 0:
-        done_flag_ptr[] = Int32(2)
-        return _null_ptr[NoneType, MutUntrackedOrigin]()
-
-    # ★ THE DEPARTURE. Bare close(2) — a FIN, no TLS alert, no close_notify,
-    # and no ServerHello ever written.
-    _close_fd(peer_fd)
-    done_flag_ptr[] = Int32(1)
-    return _null_ptr[NoneType, MutUntrackedOrigin]()
+        total = total + Int(n)
+    return total
 
 
-def _spawn_peer_thread(
-    peer_fd: Int32,
-    done_flag_ptr: UnsafePointer[Int32, MutUntrackedOrigin],
+def _send_client_hello_then_depart(
+    mut client_conn: TlsConnection, peer_fd: Int32
 ) raises:
-    var raw = alloc[_PeerArg](1)
-    UnsafePointer(to=raw[]).unsafe_write(
-        _PeerArg(peer_fd=peer_fd, done_flag_ptr=done_flag_ptr)
+    """Run ONE handshake step (it writes the ClientHello), then depart.
+
+    Asserts the ordering both tests rest on:
+      1. the setup step must return BLOCKED_ON_READ: it sent the ClientHello and
+         is waiting on a peer that has not left yet. ERROR here means the setup
+         step saw the departure and spent the misreport the tests measure;
+      2. the peer must find a ClientHello to read, so the handshake had
+         genuinely started;
+    then closes the peer's fd: a bare close(2), a FIN, no TLS alert, no
+    close_notify, no ServerHello ever written. The caller must not close
+    `peer_fd` again."""
+    var first = client_conn.handshake()
+    assert_equal(
+        Int(first), Int(TLS_OUTCOME_BLOCKED_ON_READ),
+        "PRECONDITION: the step that sends the ClientHello must return"
+        " BLOCKED_ON_READ, because the peer has not departed yet. Got "
+        + String(_outcome_str(first))
+        + ". ERROR means the departure landed inside the setup step, which"
+        " then spent the misreport this file measures.",
     )
-    var raw_void = raw.bitcast[NoneType]().unsafe_origin_cast[MutUntrackedOrigin]()
-    var tid: Int64 = 0
-    var slot = UnsafePointer(to=tid)
-    var rc = external_call["pthread_create", Int32](
-        slot.bitcast[UInt8](),
-        _null_ptr[UInt8, MutUntrackedOrigin](),
-        _peer_entry,
-        raw_void,
+    var hello_bytes = _drain_peer(peer_fd)
+    assert_true(
+        hello_bytes > 0,
+        "PRECONDITION: the peer must read a ClientHello before it departs;"
+        " none was queued, so this would measure a handshake that never"
+        " started",
     )
-    if rc != Int32(0):
-        raise Error("pthread_create returned " + String(Int(rc)))
-    _ = external_call["pthread_detach", Int32](tid)
+    _close_fd(peer_fd)
 
 
 # -----------------------------------------------------------------------------
@@ -316,10 +304,7 @@ def test_s2n_negotiate_answers_departed_peer_with_blocked_status() raises:
     _set_nonblock(peer_fd)
     _set_nonblock(client_fd)
 
-    var done_flag: Int32 = 0
-    var done_flag_ptr = UnsafePointer(to=done_flag).unsafe_origin_cast[
-        MutUntrackedOrigin
-    ]()
+    var peer_open = True
 
     var blocked_status_hits = 0
     var non_blocked_type_hits = 0
@@ -330,28 +315,15 @@ def test_s2n_negotiate_answers_departed_peer_with_blocked_status() raises:
     var first_blocked: Int32 = -1
     var last_blocked: Int32 = -1
     try:
-        _spawn_peer_thread(peer_fd, done_flag_ptr)
-
         var client_conn = TlsConnection.new_client(client_config)
         client_conn.bind_fd(client_fd)
         client_conn.set_server_name(String("localhost"))
 
-        # ONE handshake step to put the ClientHello on the wire. It cannot
-        # complete (nothing will answer), so a BLOCKED return here is expected
-        # and is the precondition, not the measurement.
-        var _first = client_conn.handshake()
-
-        var wait_iters = 0
-        while done_flag == 0 and wait_iters < 2000:
-            wait_iters = wait_iters + 1
-            _ = external_call["usleep", Int32](UInt32(5000))
-        assert_equal(
-            Int(done_flag), 1,
-            "PRECONDITION: the peer thread must read the ClientHello and then"
-            " close (done_flag 1); 0 = still running, 2 = it never saw a"
-            " ClientHello, which would mean this measures a handshake that"
-            " never started",
-        )
+        # ONE handshake step puts the ClientHello on the wire and must come
+        # back BLOCKED_ON_READ; only then does the peer read it and close.
+        # That step is the precondition, not the measurement.
+        _send_client_hello_then_depart(client_conn, peer_fd)
+        peer_open = False
 
         # ---- THE MEASUREMENT. Raw `s2n_negotiate`, repeatedly. ----
         var raw = client_conn._raw_conn_ptr_for_test()
@@ -387,7 +359,8 @@ def test_s2n_negotiate_answers_departed_peer_with_blocked_status() raises:
         _ = client_conn^
     finally:
         _close_fd(client_fd)
-        _close_fd(peer_fd)
+        if peer_open:
+            _close_fd(peer_fd)
 
     assert_equal(
         probes_made, _POST_DEPARTURE_PROBES,
@@ -496,31 +469,18 @@ def test_handshake_reports_error_not_blocked_after_peer_departs() raises:
     _set_nonblock(peer_fd)
     _set_nonblock(client_fd)
 
-    var done_flag: Int32 = 0
-    var done_flag_ptr = UnsafePointer(to=done_flag).unsafe_origin_cast[
-        MutUntrackedOrigin
-    ]()
+    var peer_open = True
 
     var trips = 0
     var final_outcome: UInt8 = TLS_OUTCOME_DONE
     var saw_error = False
     try:
-        _spawn_peer_thread(peer_fd, done_flag_ptr)
-
         var client_conn = TlsConnection.new_client(client_config)
         client_conn.bind_fd(client_fd)
         client_conn.set_server_name(String("localhost"))
 
-        var _first = client_conn.handshake()
-
-        var wait_iters = 0
-        while done_flag == 0 and wait_iters < 2000:
-            wait_iters = wait_iters + 1
-            _ = external_call["usleep", Int32](UInt32(5000))
-        assert_equal(
-            Int(done_flag), 1,
-            "PRECONDITION: the peer must read the ClientHello and then close",
-        )
+        _send_client_hello_then_depart(client_conn, peer_fd)
+        peer_open = False
 
         while trips < _HANDSHAKE_TRIP_CAP:
             trips = trips + 1
@@ -534,7 +494,8 @@ def test_handshake_reports_error_not_blocked_after_peer_departs() raises:
         _ = client_conn^
     finally:
         _close_fd(client_fd)
-        _close_fd(peer_fd)
+        if peer_open:
+            _close_fd(peer_fd)
 
     assert_true(
         saw_error,

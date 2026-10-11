@@ -139,7 +139,7 @@ Well-formed XML, leniently. `XmlReader` (`src/komira_xml/xml_reader.mojo`) is a 
 - **A CSV record has exactly the header's field count, and nothing follows a closing quote but the delimiter, a line end or the end of input.** Under every dialect (Rfc4180, Excel, Posix) the readers refuse a record with more fields than the header, one with fewer, and a byte after a closing quote; the error names the record number (the header is record 1), its physical line, its byte offset, the field and the problem. No dialect or option tolerates these: before the check the extra cells were dropped, short records were padded with nulls and a stray byte split the field, all in silence. Enforced by `check_csv_record_shape` (`record_shape.mojo`), called by `read_csv_bytes_to_batch`, `read_csv_bytes_to_schema` and every worker of the parallel reader; pinned by `test_csv_record_shape` and `test_csv_record_shape_parallel`.
 - **Blank lines (policy).** A fully blank line (zero bytes between two line terminators; `""` is not blank) in a file with two or more columns is skipped, anywhere in the file, as pandas does by default: it holds no data. It is not counted as a record but is counted as a line in error messages. In a one-column file a blank line is a record with one empty field, read as NULL, except before the header or the first record: blank lines there are skipped whatever the column count (a header cannot be blank, and the field count is not known yet). Same paths as above; pinned by `test_csv_blank_lines`, `test_csv_record_shape_edges` and `test_csv_record_shape_parallel`.
 - **A CSV split starts every range at a row start.** Pinned by `test_csv_quote_safe_chunk_split`, including a stray-quote fixture.
-- **Parallel decode keeps file order.** CSV concatenates in range order and Avro reassembles in block order. Pinned by `test_csv_parallel_reader` (parallel against serial values) and `test_avro_block_parallel_decode`.
+- **Parallel decode keeps file order.** CSV concatenates in range order and Avro reassembles in block order. Pinned by the `test_csv_parallel_reader_*` tests (parallel against serial values) and `test_avro_block_parallel_decode`.
 - **A writer refuses a type it cannot encode, by name.** Avro raises `AvroWriteError.UNSUPPORTED_TYPE`, pinned by `test_avro_write_roundtrip`; ORC raises `OrcWriteError.UNSUPPORTED_TYPE`, which no test checks.
 - **A `CsvSink` that never finishes removes its partial file.** Its destructor unlinks a file it created; no test is named for it.
 
@@ -151,7 +151,7 @@ Well-formed XML, leniently. `XmlReader` (`src/komira_xml/xml_reader.mojo`) is a 
 | `src/komira_csv/parallel_reader.mojo` | parallel CSV reader | `read_csv_bytes_to_batch_parallel_dynamic_with_dispatcher`, `_concat_csv_batches_column_parallel` |
 | `src/komira_csv/csv_chunk_split.mojo` | quote-safe split | `compute_csv_quote_safe_row_ranges` |
 | `src/komira_csv/csv_scanner_phase1.mojo`, `csv_state_machine.mojo`, `scanned_cells.mojo` | scanners | `scan_csv_phase2_movemask_into_cells`, `scan_csv_phase3_pclmulqdq_into_cells`, `ScannedCells` |
-| `src/komira_csv/type_inference.mojo`, `cell_parsers*.mojo`, `typed_column_builders.mojo` | types and cells | `infer_column_types`, `dispatch_typed_builder` |
+| `src/komira_csv/type_inference.mojo`, `cell_parsers*.mojo`, `temporal_parsers.mojo`, `temporal_range.mojo`, `typed_column_builders.mojo` | types and cells | `infer_column_types`, `dispatch_typed_builder` |
 | `src/komira_csv/csv_options.mojo`, `null_detection.mojo`, `input_limits.mojo` | options, tokens, ceilings | `CsvReadOptions`, `check_declared_column_types` |
 | `src/komira_csv/csv_sink.mojo` | CSV writer | `CsvSink`, `_format_column_cells` |
 | `src/komira_avro/parallel_driver.mojo`, `comptime_decoder.mojo`, `action_table.mojo` | Avro decode | `read_avro_bytes_parallel_with_dispatcher`, `decode_block_comptime`, `ActionTableInterpreter`, `ResolutionTable` |
@@ -169,7 +169,7 @@ Entry points are the functions and types in the last column.
 |---|---|
 | Add a CSV option | `CsvReadOptions` in `csv_options.mojo`, then the reader that honours it |
 | Change CSV type inference | `infer_column_types` in `type_inference.mojo` |
-| Parse a new type from CSV | `dispatch_typed_builder` in `typed_column_builders.mojo`, plus a parser in `cell_parsers.mojo` |
+| Parse a new type from CSV | `dispatch_typed_builder` in `typed_column_builders.mojo`, plus a parser in `cell_parsers.mojo` (date, time, timestamp and duration parsers: `temporal_parsers.mojo`) |
 | Change how a CSV body is split | `compute_csv_quote_safe_row_ranges` in `csv_chunk_split.mojo` |
 | Decode a new Avro shape fast | `classify_avro_shape`, `is_hot_shape` and `decode_block_comptime` in `comptime_decoder.mojo` |
 | Write a new type to Avro or ORC | `_resolve_write_tag` in `avro_ocf_writer.mojo`; `_arrow_to_orc_kind` in `orc_writer.mojo` |
@@ -177,12 +177,12 @@ Entry points are the functions and types in the last column.
 
 ## How is it tested?
 
-Each library lists its tests in `test_srcs` in its `BUCK` file: 21 for `komira_csv`, 24 for `komira_avro`, 33 for `komira_orc` and one for `komira_xml`. Each test is built against the library and run, and the package is published only if every one passes, unless the BUCK file holds a test in its known-failing ledger (see [the Mojo rules](../../tools/build/mojo/README.md), "The gate"). Run: `./buck2 build //src/komira_csv:komira_csv` (likewise for the other three).
+Each library lists its tests in `test_srcs` in its `BUCK` file: 41 for `komira_csv`, 32 for `komira_avro`, 37 for `komira_orc` and four for `komira_xml`. Each test is built against the library and run, and the package is published only if every one passes, unless the BUCK file holds a test in its known-failing ledger (see [the Mojo rules](../../tools/build/mojo/README.md), "The gate"). Run: `./buck2 build //src/komira_csv:komira_csv` (likewise for the other three).
 
 | Test | Covers |
 |---|---|
 | `test_csv_scanner_phase1`, `test_csv_scanner_phase2_movemask`, `test_csv_scanner_phase3_pclmulqdq`, `test_csv_scanner_flat_cells` | the three scanners |
-| `test_csv_quote_safe_chunk_split`, `test_csv_parallel_reader`, `test_csv_phase_4_column_parallel_concat` | split, parallel decode, concat |
+| `test_csv_quote_safe_chunk_split`, `test_csv_parallel_reader_*`, `test_csv_phase_4_column_parallel_concat_*` | split, parallel decode, concat |
 | `test_csv_phase_b`, `test_csv_dtype_completion`, `test_csv_schema_sample_inference` | options, types, prefix inference |
 | `test_avro_codec_matrix`, `test_avro_block_parallel_decode`, `test_avro_comptime_shape_kind_decode` | codecs, block parallelism, specialised shapes |
 | `test_avro_resolve_*` (five files: aliases and defaults, errors, field skip, promotions, union and enum), `test_avro_recursive_reject` | schema resolution, recursive schemas |

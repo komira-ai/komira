@@ -415,7 +415,7 @@ def _check(r: RunResult) raises:
     for i in range(len(r.only)):
         var sel = parse_selector(r.only[i])
         if sel.canonical() != r.only[i]:
-            raise Error(String("result: only[") + String(i) + String("] '") + r.only[i] + String("' is not canonical"))
+            raise Error(String("result: only[") + String(i) + String("] '") + r.only[i] + String("' is not canonical"))  # cov: unreachable parse_selector splits at the first ':' and canonical() rejoins it there, so it is the text
         for j in range(i):
             if r.only[j] == r.only[i]:
                 raise Error(String("result: only '") + r.only[i] + String("' is given twice"))
@@ -732,7 +732,7 @@ def parse_result(text: String, source: String) raises -> RunResult:
         doc = parse_json_value(text)
     except e:
         _refuse(source, String("not JSON: ") + String(e))
-        return RunResult(String(""), String(""))
+        return RunResult(String(""), String(""))  # cov: unreachable _refuse always raises; the return only satisfies the compiler
     if not doc.is_object():
         _refuse(source, String("not a JSON object"))
     _no_dup_keys(doc, source, String(""))

@@ -75,7 +75,7 @@ def test_fuzz_lowercase_method() raises:
         String("lowercase-method"),
         _bytes(String("post / HTTP/1.1\r\n\r\n")),
         PARSE_ERR_METHOD_LOWERCASE,
-        UInt16(400),
+        UInt16(501),
     )
 
 
@@ -84,7 +84,7 @@ def test_fuzz_unknown_method() raises:
         String("unknown-method"),
         _bytes(String("CONNECT_FOO / HTTP/1.1\r\n\r\n")),
         PARSE_ERR_METHOD_UNKNOWN,
-        UInt16(400),
+        UInt16(501),
     )
 
 

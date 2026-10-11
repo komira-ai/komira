@@ -595,7 +595,7 @@ def _aws_client(
         test_data = {},
         visibility = None,
         **kwargs):
-    """See the module docstring. `kwargs` go to the mojo_library (test_env)."""
+    """See the module docstring. `kwargs` go to the mojo_library (test_env, readme)."""
     gen = name + "_gen"
     vis = {"visibility": visibility} if visibility != None else {}
     _aws_client_gen(

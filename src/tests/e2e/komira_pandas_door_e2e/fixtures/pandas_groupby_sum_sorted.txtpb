@@ -1,0 +1,157 @@
+# proto-message: komira.plan.v1.WirePlanEnvelope
+format_version: 4
+plan {
+  output_schema {
+    fields {
+      name: "cust_id"
+      arrow_type_id: 5
+      dtype_code: _DT_INT64
+      dict_index_type_id: 4
+    }
+    fields {
+      name: "amount"
+      arrow_type_id: 12
+      dtype_code: _DT_FLOAT64
+      nullable: true
+      dict_index_type_id: 4
+    }
+  }
+  sort {
+    keys: "cust_id"
+    descending: false
+    nulls_first: true
+    child {
+      output_schema {
+        fields {
+          name: "cust_id"
+          arrow_type_id: 5
+          dtype_code: _DT_INT64
+          dict_index_type_id: 4
+        }
+        fields {
+          name: "amount"
+          arrow_type_id: 12
+          dtype_code: _DT_FLOAT64
+          nullable: true
+          dict_index_type_id: 4
+        }
+      }
+      aggregate {
+        group_by {
+          col_ref {
+            name: "cust_id"
+            side: COL_SIDE_NONE
+          }
+        }
+        agg_exprs {
+          func: AGG_SUM
+          has_child0: true
+          child0 {
+            col_ref {
+              name: "amount"
+              side: COL_SIDE_NONE
+            }
+          }
+          has_alias_name: true
+          alias_name: "amount"
+        }
+        child {
+          output_schema {
+            fields {
+              name: "order_id"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "cust_id"
+              arrow_type_id: 5
+              dtype_code: _DT_INT64
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "amount"
+              arrow_type_id: 12
+              dtype_code: _DT_FLOAT64
+              nullable: true
+              dict_index_type_id: 4
+            }
+            fields {
+              name: "city"
+              arrow_type_id: 13
+              nullable: true
+              dict_index_type_id: 4
+            }
+          }
+          scan {
+            source {
+              parquet {
+                paths: "/data/orders.parquet"
+                schema {
+                  fields {
+                    name: "order_id"
+                    arrow_type_id: 5
+                    dtype_code: _DT_INT64
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "cust_id"
+                    arrow_type_id: 5
+                    dtype_code: _DT_INT64
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "amount"
+                    arrow_type_id: 12
+                    dtype_code: _DT_FLOAT64
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                  fields {
+                    name: "city"
+                    arrow_type_id: 13
+                    nullable: true
+                    dict_index_type_id: 4
+                  }
+                }
+                mtime_ns: 1234567890
+                fs_is_local: true
+              }
+            }
+            has_schema: true
+            schema {
+              fields {
+                name: "order_id"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "cust_id"
+                arrow_type_id: 5
+                dtype_code: _DT_INT64
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "amount"
+                arrow_type_id: 12
+                dtype_code: _DT_FLOAT64
+                nullable: true
+                dict_index_type_id: 4
+              }
+              fields {
+                name: "city"
+                arrow_type_id: 13
+                nullable: true
+                dict_index_type_id: 4
+              }
+            }
+            has_row_count: true
+            row_count: 6
+            source_kind: SOURCE_KIND_COLUMNAR
+          }
+        }
+      }
+    }
+  }
+}

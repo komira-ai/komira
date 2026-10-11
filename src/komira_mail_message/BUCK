@@ -1,0 +1,24 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Email messages over bytes: compose and parse RFC 5322 messages with MIME
+# (RFC 2045-2049, RFC 2183, RFC 2231) and RFC 2047 encoded words. Addresses
+# are komira_mail_address values; base64 is komira_encoding. See
+# __init__.mojo.
+mojo_library(
+    name = "komira_mail_message",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_mail_address:komira_mail_address",
+    ],
+    test_srcs = [
+        "tests/test_rfc2047.mojo",
+        "tests/test_mime_values.mojo",
+        "tests/test_build_golden.mojo",
+        "tests/test_build_paths.mojo",
+        "tests/test_folding.mojo",
+        "tests/test_parse_corpus.mojo",
+        "tests/test_refusals.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

@@ -1,0 +1,568 @@
+# proto-message: komira.chat.v1.corpus.ChatCorpus
+subject {
+  iss: "https://issuer.example.com"
+  sub: "user-0001"
+}
+user {
+  user_id: "u-ada"
+  subject {
+    iss: "https://issuer.example.com"
+    sub: "user-0001"
+  }
+  display_name: "Ada"
+  email: "ada@example.com"
+}
+channel {
+  channel_id: "c-general"
+  kind: CHANNEL_KIND_PUBLIC
+  name: "general"
+  topic: "Everything else"
+  archived: true
+  head_seq: 43
+  created_at_ms: 1790000000000
+  created_by_user_id: "u-ada"
+  dm_user_ids: "u-ada"
+  dm_user_ids: "u-bob"
+}
+member {
+  channel_id: "c-general"
+  user_id: "u-bob"
+  joined_at_ms: 1790000000500
+}
+message {
+  channel_id: "c-general"
+  seq: 43
+  kind: EVENT_KIND_MESSAGE
+  sender_user_id: "u-ada"
+  body: "hi @bob, see the file"
+  thread_root_seq: 40
+  target_seq: 41
+  client_msg_id: "m-7f3a"
+  mention_user_ids: "u-bob"
+  mentions_channel: true
+  file_ids: "f-0001"
+  created_at_ms: 1790000001000
+  edited: true
+  deleted: true
+}
+file_info {
+  file_id: "f-0001"
+  channel_id: "c-general"
+  name: "plan.pdf"
+  content_type: "application/pdf"
+  size_bytes: 20480
+  state: FILE_STATE_COMPLETE
+  uploader_user_id: "u-ada"
+  created_at_ms: 1790000000900
+}
+read_state {
+  channel_id: "c-general"
+  read_seq: 40
+  unread_count: 3
+  mention_count: 1
+}
+http_header {
+  name: "x-ms-blob-type"
+  value: "BlockBlob"
+}
+api_error {
+  code: "invalid_argument"
+  message: "body is required"
+  field: "body"
+}
+get_me_request {
+}
+get_me_response {
+  user {
+    user_id: "u-ada"
+    subject {
+      iss: "https://issuer.example.com"
+      sub: "user-0001"
+    }
+    display_name: "Ada"
+    email: "ada@example.com"
+  }
+}
+get_user_request {
+  user_id: "u-bob"
+}
+get_user_response {
+  user {
+    user_id: "u-ada"
+    subject {
+      iss: "https://issuer.example.com"
+      sub: "user-0001"
+    }
+    display_name: "Ada"
+    email: "ada@example.com"
+  }
+}
+list_users_request {
+  page_size: 50
+  page_token: "t-users-2"
+}
+list_users_response {
+  users {
+    user_id: "u-ada"
+    subject {
+      iss: "https://issuer.example.com"
+      sub: "user-0001"
+    }
+    display_name: "Ada"
+    email: "ada@example.com"
+  }
+  next_page_token: "t-users-3"
+}
+create_channel_request {
+  name: "design"
+  topic: "Design reviews"
+  kind: CHANNEL_KIND_PRIVATE
+  member_user_ids: "u-bob"
+  member_user_ids: "u-cy"
+}
+create_channel_response {
+  channel {
+    channel_id: "c-general"
+    kind: CHANNEL_KIND_PUBLIC
+    name: "general"
+    topic: "Everything else"
+    archived: true
+    head_seq: 43
+    created_at_ms: 1790000000000
+    created_by_user_id: "u-ada"
+    dm_user_ids: "u-ada"
+    dm_user_ids: "u-bob"
+  }
+}
+get_channel_request {
+  channel_id: "c-general"
+}
+get_channel_response {
+  channel {
+    channel_id: "c-general"
+    kind: CHANNEL_KIND_PUBLIC
+    name: "general"
+    topic: "Everything else"
+    archived: true
+    head_seq: 43
+    created_at_ms: 1790000000000
+    created_by_user_id: "u-ada"
+    dm_user_ids: "u-ada"
+    dm_user_ids: "u-bob"
+  }
+}
+list_channels_request {
+  browse: true
+  include_archived: true
+  page_size: 20
+  page_token: "t-ch-2"
+}
+list_channels_response {
+  channels {
+    channel_id: "c-general"
+    kind: CHANNEL_KIND_PUBLIC
+    name: "general"
+    topic: "Everything else"
+    archived: true
+    head_seq: 43
+    created_at_ms: 1790000000000
+    created_by_user_id: "u-ada"
+    dm_user_ids: "u-ada"
+    dm_user_ids: "u-bob"
+  }
+  next_page_token: "t-ch-3"
+}
+update_channel_request {
+  channel_id: "c-general"
+  name: "general-chat"
+  topic: ""
+  archived: false
+}
+update_channel_response {
+  channel {
+    channel_id: "c-general"
+    kind: CHANNEL_KIND_PUBLIC
+    name: "general"
+    topic: "Everything else"
+    archived: true
+    head_seq: 43
+    created_at_ms: 1790000000000
+    created_by_user_id: "u-ada"
+    dm_user_ids: "u-ada"
+    dm_user_ids: "u-bob"
+  }
+}
+join_channel_request {
+  channel_id: "c-general"
+}
+join_channel_response {
+  channel {
+    channel_id: "c-general"
+    kind: CHANNEL_KIND_PUBLIC
+    name: "general"
+    topic: "Everything else"
+    archived: true
+    head_seq: 43
+    created_at_ms: 1790000000000
+    created_by_user_id: "u-ada"
+    dm_user_ids: "u-ada"
+    dm_user_ids: "u-bob"
+  }
+}
+leave_channel_request {
+  channel_id: "c-general"
+}
+leave_channel_response {
+}
+add_members_request {
+  channel_id: "c-design"
+  user_ids: "u-bob"
+  user_ids: "u-cy"
+}
+add_members_response {
+  members {
+    channel_id: "c-general"
+    user_id: "u-bob"
+    joined_at_ms: 1790000000500
+  }
+}
+remove_member_request {
+  channel_id: "c-design"
+  user_id: "u-cy"
+}
+remove_member_response {
+}
+list_members_request {
+  channel_id: "c-general"
+  page_size: 100
+  page_token: "t-m-2"
+}
+list_members_response {
+  members {
+    channel_id: "c-general"
+    user_id: "u-bob"
+    joined_at_ms: 1790000000500
+  }
+  next_page_token: "t-m-3"
+}
+open_dm_request {
+  user_ids: "u-bob"
+}
+open_dm_response {
+  channel {
+    channel_id: "c-general"
+    kind: CHANNEL_KIND_PUBLIC
+    name: "general"
+    topic: "Everything else"
+    archived: true
+    head_seq: 43
+    created_at_ms: 1790000000000
+    created_by_user_id: "u-ada"
+    dm_user_ids: "u-ada"
+    dm_user_ids: "u-bob"
+  }
+}
+send_message_request {
+  channel_id: "c-general"
+  body: "hi @bob, see the file"
+  thread_root_seq: 40
+  client_msg_id: "m-7f3a"
+  file_ids: "f-0001"
+}
+send_message_response {
+  message {
+    channel_id: "c-general"
+    seq: 43
+    kind: EVENT_KIND_MESSAGE
+    sender_user_id: "u-ada"
+    body: "hi @bob, see the file"
+    thread_root_seq: 40
+    target_seq: 41
+    client_msg_id: "m-7f3a"
+    mention_user_ids: "u-bob"
+    mentions_channel: true
+    file_ids: "f-0001"
+    created_at_ms: 1790000001000
+    edited: true
+    deleted: true
+  }
+}
+edit_message_request {
+  channel_id: "c-general"
+  seq: 43
+  body: "hi @bob, see the new file"
+}
+edit_message_response {
+  message {
+    channel_id: "c-general"
+    seq: 43
+    kind: EVENT_KIND_MESSAGE
+    sender_user_id: "u-ada"
+    body: "hi @bob, see the file"
+    thread_root_seq: 40
+    target_seq: 41
+    client_msg_id: "m-7f3a"
+    mention_user_ids: "u-bob"
+    mentions_channel: true
+    file_ids: "f-0001"
+    created_at_ms: 1790000001000
+    edited: true
+    deleted: true
+  }
+}
+delete_message_request {
+  channel_id: "c-general"
+  seq: 43
+}
+delete_message_response {
+  message {
+    channel_id: "c-general"
+    seq: 43
+    kind: EVENT_KIND_MESSAGE
+    sender_user_id: "u-ada"
+    body: "hi @bob, see the file"
+    thread_root_seq: 40
+    target_seq: 41
+    client_msg_id: "m-7f3a"
+    mention_user_ids: "u-bob"
+    mentions_channel: true
+    file_ids: "f-0001"
+    created_at_ms: 1790000001000
+    edited: true
+    deleted: true
+  }
+}
+list_messages_request {
+  channel_id: "c-general"
+  since_seq: 30
+  before_seq: 44
+  limit: 50
+}
+list_messages_response {
+  messages {
+    channel_id: "c-general"
+    seq: 43
+    kind: EVENT_KIND_MESSAGE
+    sender_user_id: "u-ada"
+    body: "hi @bob, see the file"
+    thread_root_seq: 40
+    target_seq: 41
+    client_msg_id: "m-7f3a"
+    mention_user_ids: "u-bob"
+    mentions_channel: true
+    file_ids: "f-0001"
+    created_at_ms: 1790000001000
+    edited: true
+    deleted: true
+  }
+  head_seq: 43
+  has_more: true
+}
+list_thread_request {
+  channel_id: "c-general"
+  thread_root_seq: 40
+  since_seq: 41
+  limit: 50
+}
+list_thread_response {
+  root {
+    channel_id: "c-general"
+    seq: 43
+    kind: EVENT_KIND_MESSAGE
+    sender_user_id: "u-ada"
+    body: "hi @bob, see the file"
+    thread_root_seq: 40
+    target_seq: 41
+    client_msg_id: "m-7f3a"
+    mention_user_ids: "u-bob"
+    mentions_channel: true
+    file_ids: "f-0001"
+    created_at_ms: 1790000001000
+    edited: true
+    deleted: true
+  }
+  replies {
+    channel_id: "c-general"
+    seq: 43
+    kind: EVENT_KIND_MESSAGE
+    sender_user_id: "u-ada"
+    body: "hi @bob, see the file"
+    thread_root_seq: 40
+    target_seq: 41
+    client_msg_id: "m-7f3a"
+    mention_user_ids: "u-bob"
+    mentions_channel: true
+    file_ids: "f-0001"
+    created_at_ms: 1790000001000
+    edited: true
+    deleted: true
+  }
+  has_more: true
+}
+list_mentions_request {
+  page_size: 20
+  page_token: "t-men-2"
+}
+list_mentions_response {
+  messages {
+    channel_id: "c-general"
+    seq: 43
+    kind: EVENT_KIND_MESSAGE
+    sender_user_id: "u-ada"
+    body: "hi @bob, see the file"
+    thread_root_seq: 40
+    target_seq: 41
+    client_msg_id: "m-7f3a"
+    mention_user_ids: "u-bob"
+    mentions_channel: true
+    file_ids: "f-0001"
+    created_at_ms: 1790000001000
+    edited: true
+    deleted: true
+  }
+  next_page_token: "t-men-3"
+}
+mark_read_request {
+  channel_id: "c-general"
+  read_seq: 43
+}
+mark_read_response {
+  read_state {
+    channel_id: "c-general"
+    read_seq: 40
+    unread_count: 3
+    mention_count: 1
+  }
+}
+sync_request {
+  since: "s-0007"
+  wait_seconds: 25
+}
+channel_sync {
+  channel {
+    channel_id: "c-general"
+    kind: CHANNEL_KIND_PUBLIC
+    name: "general"
+    topic: "Everything else"
+    archived: true
+    head_seq: 43
+    created_at_ms: 1790000000000
+    created_by_user_id: "u-ada"
+    dm_user_ids: "u-ada"
+    dm_user_ids: "u-bob"
+  }
+  read_state {
+    channel_id: "c-general"
+    read_seq: 40
+    unread_count: 3
+    mention_count: 1
+  }
+  removed: true
+}
+sync_response {
+  channels {
+    channel {
+      channel_id: "c-general"
+      kind: CHANNEL_KIND_PUBLIC
+      name: "general"
+      topic: "Everything else"
+      archived: true
+      head_seq: 43
+      created_at_ms: 1790000000000
+      created_by_user_id: "u-ada"
+      dm_user_ids: "u-ada"
+      dm_user_ids: "u-bob"
+    }
+    read_state {
+      channel_id: "c-general"
+      read_seq: 40
+      unread_count: 3
+      mention_count: 1
+    }
+    removed: true
+  }
+  next_since: "s-0008"
+}
+create_upload_request {
+  channel_id: "c-general"
+  name: "plan.pdf"
+  content_type: "application/pdf"
+  size_bytes: 20480
+}
+create_upload_response {
+  file {
+    file_id: "f-0001"
+    channel_id: "c-general"
+    name: "plan.pdf"
+    content_type: "application/pdf"
+    size_bytes: 20480
+    state: FILE_STATE_COMPLETE
+    uploader_user_id: "u-ada"
+    created_at_ms: 1790000000900
+  }
+  upload_url: "https://blobs.example.com/staging/f-0001?sig=abc"
+  upload_headers {
+    name: "x-ms-blob-type"
+    value: "BlockBlob"
+  }
+  expires_at_ms: 1790000300000
+}
+complete_upload_request {
+  file_id: "f-0001"
+}
+complete_upload_response {
+  file {
+    file_id: "f-0001"
+    channel_id: "c-general"
+    name: "plan.pdf"
+    content_type: "application/pdf"
+    size_bytes: 20480
+    state: FILE_STATE_COMPLETE
+    uploader_user_id: "u-ada"
+    created_at_ms: 1790000000900
+  }
+}
+get_download_url_request {
+  file_id: "f-0001"
+}
+get_download_url_response {
+  download_url: "https://blobs.example.com/files/f-0001?sig=def"
+  expires_at_ms: 1790000300000
+}
+search_messages_request {
+  query: "plan"
+  channel_id: "c-general"
+  page_size: 20
+  page_token: "t-s-2"
+}
+search_messages_response {
+  messages {
+    channel_id: "c-general"
+    seq: 43
+    kind: EVENT_KIND_MESSAGE
+    sender_user_id: "u-ada"
+    body: "hi @bob, see the file"
+    thread_root_seq: 40
+    target_seq: 41
+    client_msg_id: "m-7f3a"
+    mention_user_ids: "u-bob"
+    mentions_channel: true
+    file_ids: "f-0001"
+    created_at_ms: 1790000001000
+    edited: true
+    deleted: true
+  }
+  next_page_token: "t-s-3"
+}
+erase_subject_request {
+  subject {
+    iss: "https://issuer.example.com"
+    sub: "user-0001"
+  }
+}
+erase_subject_response {
+  rows_erased: 12
+  bodies_redacted: 7
+  blobs_deleted: 2
+  search_splits_rebuilt: 3
+}

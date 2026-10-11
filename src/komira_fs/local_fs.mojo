@@ -119,7 +119,7 @@ def _local_fs_file_size_via_fp(fp: Int64) -> Int:
         return -1
     var size = external_call["ftell", Int64](fp)
     if size < 0:
-        return -1
+        return -1  # cov: unreachable fseek(SEEK_END) succeeded, so ftell cannot fail (64-bit off_t)
     var _restore = external_call["fseek", Int32](fp, Int64(0), Int32(0))
     return Int(size)
 

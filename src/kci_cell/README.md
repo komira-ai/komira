@@ -2,10 +2,10 @@
 
 Cells for kci. A cell is one closed world a DEPLOY step deploys into: one
 cloud, one place, owned by one machine. Every cell is declared once, in one
-cells file (format `kci.cells`, a textproto). A DEPLOY step will name the file
-and pick one cell from it, the way a PUBLISH step names a channels file and
-picks one channel; that machine-file wiring is not built yet, and today
-`kci_release_machine` still refuses a DEPLOY step. A cell has a `name` (the step-name grammar: `[a-z][a-z0-9-]*`, at
+cells file (format `kci.cells`, a textproto). A DEPLOY step, or a PUBLISH step
+into a cell, names the file and picks one cell from it, the way a PUBLISH step
+names a channels file and picks one channel (`kci_release_machine` parses those
+steps; `kci run` does not run them yet). A cell has a `name` (the step-name grammar: `[a-z][a-z0-9-]*`, at
 most 63 bytes, not ending in `-`), a `cloud` (a cloud id; the parser refuses
 only an empty or whitespace-only one and does not check the word's form, which
 is checked, with whether this kci was built with that cloud, where the step

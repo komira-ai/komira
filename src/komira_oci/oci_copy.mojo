@@ -115,6 +115,7 @@ from komira_http_client.redirect_policy import (
 
 from .oci_digest import digest_of_bytes, verify_digest
 from .oci_ref import (
+    MEDIA_TYPE_OCI_INDEX,
     MEDIA_TYPE_OCI_MANIFEST,
     OciImageRef,
     manifest_accept_header,
@@ -259,16 +260,16 @@ struct OciCopier[T: OciTransport](Movable, Deinitable):
         # `found[0]` is the root, and phase 3 walks backwards, so the LAST PUT is
         # the root — `confirmed` therefore holds the root's confirmed digest.
         if confirmed != src.reference:
-            raise Error(
-                String("oci: stage copy of ")
-                + src_ref
-                + String(" -> ")
-                + dst_ref
-                + String(" did NOT preserve the digest: source ")
-                + src.reference
-                + String(", destination confirmed ")
-                + confirmed
-                + String(
+            raise Error(  # cov: unreachable _put_manifest returns the root digest it PUT or raises
+                String("oci: stage copy of ")  # cov: unreachable _put_manifest returns the root digest it PUT or raises
+                + src_ref  # cov: unreachable _put_manifest returns the root digest it PUT or raises
+                + String(" -> ")  # cov: unreachable _put_manifest returns the root digest it PUT or raises
+                + dst_ref  # cov: unreachable _put_manifest returns the root digest it PUT or raises
+                + String(" did NOT preserve the digest: source ")  # cov: unreachable _put_manifest returns the root digest it PUT or raises
+                + src.reference  # cov: unreachable _put_manifest returns the root digest it PUT or raises
+                + String(", destination confirmed ")  # cov: unreachable _put_manifest returns the root digest it PUT or raises
+                + confirmed  # cov: unreachable _put_manifest returns the root digest it PUT or raises
+                + String(  # cov: unreachable _put_manifest returns the root digest it PUT or raises
                     ". REFUSING to report success — the recorded deployable ref"
                     " would point at different content than was built."
                 )
@@ -322,11 +323,10 @@ struct OciCopier[T: OciTransport](Movable, Deinitable):
 
             var media_type = resp.header(String("content-type"))
             if media_type.byte_length() == 0:
-                # A registry that omits Content-Type leaves us unable to declare
-                # the type on the destination PUT. Default to the OCI image
-                # manifest only when the body does not look like an index; an
-                # index misdeclared as a manifest would drop every child.
-                media_type = MEDIA_TYPE_OCI_MANIFEST
+                # A registry that omits Content-Type leaves only the body to
+                # say what it is, and the destination PUT must declare a type.
+                # An index misdeclared as a manifest would drop every child.
+                media_type = _media_type_from_body(resp.body)
             var is_index = media_type_is_index(media_type)
 
             if is_index:
@@ -636,6 +636,25 @@ def _index_child_digests(raw: List[UInt8]) raises -> List[String]:
         if entry.has(String("digest")):
             out.append(entry.get(String("digest")).as_string())
     return out^
+
+
+def _media_type_from_body(raw: List[UInt8]) raises -> String:
+    """The media type of a manifest served with no `Content-Type`.
+
+    The body's own `mediaType` when it is a non-empty string (an OCI index or
+    image manifest, a Docker manifest list or image manifest); otherwise an OCI
+    index when the body has a `manifests` array (the field `mediaType` is
+    optional in an OCI index); otherwise an OCI image manifest."""
+    var doc = parse_json_value(String(unsafe_from_utf8=Span(raw)))
+    if doc.has(String("mediaType")):
+        var declared = doc.get(String("mediaType"))
+        if declared.is_string():
+            var media_type = declared.as_string()
+            if media_type.byte_length() > 0:
+                return media_type^
+    if doc.has(String("manifests")) and doc.get(String("manifests")).is_array():
+        return String(MEDIA_TYPE_OCI_INDEX)
+    return String(MEDIA_TYPE_OCI_MANIFEST)
 
 
 def image_blob_digests(raw: List[UInt8]) raises -> List[String]:

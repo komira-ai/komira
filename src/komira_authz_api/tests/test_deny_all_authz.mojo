@@ -21,18 +21,17 @@ def _denies_everything(mut reactor: Reactor[NoopSink]) raises -> Int64:
     actions.append(AuthzAction(String("unrecognized")))
 
     var resources = List[AuthzResource]()
-    resources.append(AuthzResource.workspace(String("repo"), String("ws")))
+    resources.append(AuthzResource(kind=String("repo"), id=String("")))
+    resources.append(AuthzResource(kind=String("repo"), id=String("r1")))
     resources.append(
-        AuthzResource.workspace_resource(String("repo"), String("ws"), String("r1"))
-    )
-    resources.append(AuthzResource.org(String("document"), String("org")))
-    resources.append(
-        AuthzResource.org_and_workspace(String("document"), String("org"), String("ws"))
+        AuthzResource(kind=String("document"), id=String("d1")).with_attribute(
+            String("label"), String("draft")
+        )
     )
 
     var users = List[Principal]()
-    users.append(Principal(String("subject-1")))  # authenticated
-    users.append(Principal(String("")))  # empty
+    users.append(Principal(scheme=String("jwt"), subject=String("subject-1")))  # authenticated
+    users.append(Principal(scheme=String("session"), subject=String("")))  # empty
 
     var authz = DenyAllAuthz()
     var granted = Int64(0)

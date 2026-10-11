@@ -1,5 +1,5 @@
 # =============================================================================
-# Optimizer expression rules — constant folding + predicate simplification
+# Optimizer expression rules
 # =============================================================================
 #
 # Rule 5: Constant folding — evaluate expressions with no column references
@@ -8,8 +8,17 @@
 # Rule 9: Predicate simplification — simplify boolean expressions
 #   (x AND TRUE -> x, NOT NOT x -> x, etc.)
 #
-# Rule 18: Common subexpression elimination (CSE) — stub
-# Rule 21: IN clause rewrite — stub
+# Rule 18: Common subexpression elimination (CSE) — hoist a subtree repeated
+#   within one Project's outputs, one Filter's AND-conjuncts or one
+#   Aggregate's aggregate-function arguments into a synthetic Project below
+#   the node, and reference it by column
+#   (`eliminate_common_subexpressions`)
+#
+# Rule 21: IN clause rewrite — collapse an OR chain of equalities on one
+#   column (col = 1 OR col = 2) into one IN list (`rewrite_in_clauses`)
+#
+# Also here: the matcher from an Expr to a kernel template id
+# (`_match_expr_to_kernel_template`).
 # =============================================================================
 
 from std.collections import Dict, Set
@@ -212,12 +221,12 @@ def fold_constants_inplace(mut plan: LogicalPlan):
 
     elif plan.tag == PLAN_AGGREGATE:
         fold_constants_inplace(plan._aggregate.value()[].child[])
-        # group_by / agg_exprs are not currently transformed by fold_constants
-        # (only the child plan is); leave in place.
+        _rewrite_agg_and_residual_sites[_SITE_RULE_FOLD](plan)
 
     elif plan.tag == PLAN_JOIN:
         fold_constants_inplace(plan._join.value()[].left[])
         fold_constants_inplace(plan._join.value()[].right[])
+        _rewrite_agg_and_residual_sites[_SITE_RULE_FOLD](plan)
 
     elif plan.tag == PLAN_SORT:
         fold_constants_inplace(plan._sort.value()[].child[])
@@ -400,6 +409,52 @@ def _is_bool_literal(expr: Expr, value: Bool) -> Bool:
     return False
 
 
+# The expression rule `_rewrite_agg_and_residual_sites` applies.
+comptime _SITE_RULE_FOLD: Int = 0
+comptime _SITE_RULE_SIMPLIFY: Int = 1
+comptime _SITE_RULE_IN: Int = 2
+
+
+@always_inline
+def _apply_site_rule[rule: Int](var expr: Expr) -> Expr:
+    comptime if rule == _SITE_RULE_FOLD:
+        return _fold_expr(expr^)
+    elif rule == _SITE_RULE_SIMPLIFY:
+        return _simplify_expr(expr^)
+    else:
+        return _rewrite_in_expr(expr^)
+
+
+def _rewrite_optional_site[rule: Int](mut slot: Optional[Expr]):
+    if slot:
+        var e = slot.take()
+        slot = _apply_site_rule[rule](e^)
+
+
+def _rewrite_agg_and_residual_sites[rule: Int](mut plan: LogicalPlan):
+    """Apply one expression rule to every argument slot of an Aggregate's
+    aggregate functions, or to a Join's residual condition, in place.
+
+    An Aggregate's group-by keys are left as they are: the output column name
+    of a key that is not a plain column is inferred from the expression's
+    kind, so a rewritten key (an OR chain becoming an IN list) would infer a
+    different name than the one the Aggregate's schema already carries.
+    """
+    if plan.tag == PLAN_AGGREGATE:
+        ref aggs = plan._aggregate.value()[].agg_exprs
+        for i in range(len(aggs)):
+            ref agg = aggs[i]
+            _rewrite_optional_site[rule](agg.child)
+            _rewrite_optional_site[rule](agg.child1)
+            _rewrite_optional_site[rule](agg.child2)
+            _rewrite_optional_site[rule](agg.child3)
+    elif plan.tag == PLAN_JOIN:
+        ref j = plan._join.value()[]
+        if j.residual:
+            var e = j.residual.value()[].copy()
+            j.residual.value()[] = _apply_site_rule[rule](e^)
+
+
 # =============================================================================
 # Rule 9: Predicate Simplification
 # =============================================================================
@@ -437,10 +492,12 @@ def simplify_predicates_inplace(mut plan: LogicalPlan):
 
     elif plan.tag == PLAN_AGGREGATE:
         simplify_predicates_inplace(plan._aggregate.value()[].child[])
+        _rewrite_agg_and_residual_sites[_SITE_RULE_SIMPLIFY](plan)
 
     elif plan.tag == PLAN_JOIN:
         simplify_predicates_inplace(plan._join.value()[].left[])
         simplify_predicates_inplace(plan._join.value()[].right[])
+        _rewrite_agg_and_residual_sites[_SITE_RULE_SIMPLIFY](plan)
 
     elif plan.tag == PLAN_SORT:
         simplify_predicates_inplace(plan._sort.value()[].child[])
@@ -1400,8 +1457,9 @@ def rewrite_in_clauses(var plan: LogicalPlan) -> LogicalPlan:
     and collapses every such chain of two or more leaves into one
     `EXPR_IN_LIST` node; an IN list of no values folds to FALSE and one of
     one value to `col == v` (`_rewrite_in_expr`). Filter predicates and
-    Project expressions are rewritten; Aggregate expressions and Join
-    conditions are not.
+    Project expressions, the argument slots of an Aggregate's aggregate
+    functions and a Join's residual condition are rewritten; an Aggregate's
+    group-by keys are not (see `_rewrite_agg_and_residual_sites`).
     """
     rewrite_in_clauses_inplace(plan)
     return plan^
@@ -1425,10 +1483,12 @@ def rewrite_in_clauses_inplace(mut plan: LogicalPlan):
 
     elif plan.tag == PLAN_AGGREGATE:
         rewrite_in_clauses_inplace(plan._aggregate.value()[].child[])
+        _rewrite_agg_and_residual_sites[_SITE_RULE_IN](plan)
 
     elif plan.tag == PLAN_JOIN:
         rewrite_in_clauses_inplace(plan._join.value()[].left[])
         rewrite_in_clauses_inplace(plan._join.value()[].right[])
+        _rewrite_agg_and_residual_sites[_SITE_RULE_IN](plan)
 
     elif plan.tag == PLAN_SORT:
         rewrite_in_clauses_inplace(plan._sort.value()[].child[])

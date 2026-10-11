@@ -5,9 +5,10 @@
 # Ordered request/response interceptors.
 #
 # Submodules:
-#   - middleware.mojo      — Middleware trait, RequestContext, and the opaque
-#                            Principal / Claims an embedder's own middleware
-#                            attaches (this library gives them no meaning)
+#   - middleware.mojo      — Middleware trait, RequestContext, and the
+#                            Principal / Claims / PresentedCredential an
+#                            embedder's own middleware attaches (the library
+#                            gives the subject and claims no meaning)
 #   - chain.mojo           — MiddlewareChain driver
 #   - logging.mojo         — LoggingMiddleware
 #   - tracing.mojo         — TracingMiddleware
@@ -51,5 +52,13 @@ from .fault_report import (
 )
 from .logging import LogEntry, LoggingMiddleware
 from .passthrough import PassthroughMiddleware
-from .middleware import Claims, Middleware, Principal, RequestContext
+from .middleware import (
+    Claims,
+    Middleware,
+    PresentedCredential,
+    Principal,
+    PRINCIPAL_SCHEME_JWT,
+    PRINCIPAL_SCHEME_SESSION,
+    RequestContext,
+)
 from .tracing import TracingMiddleware

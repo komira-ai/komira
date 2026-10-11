@@ -1,10 +1,12 @@
-"""GENERATED from the engine's `comptime` tag declarations by the plan-wire
-vocabulary generator — DO NOT EDIT BY HAND.
+"""The plan wire vocabulary, first produced from the engine's `comptime`
+tag declarations by a vocabulary generator that is not in this
+repository; it is now kept in step by hand.
 
-The vocabulary is DERIVED from the engine's own `comptime` tag
-declarations. Hand-editing this file makes the wire format a SECOND
-source of truth, which is the exact failure the generator exists to
-prevent — and the generator's check mode goes red on the next run.
+Two tests hold it: tests/test_plan_wire_vocabulary.mojo to the engine
+(member counts, wire = engine + 1) and
+tests/test_plan_wire_vocabulary_names.mojo to protoc's reading of
+`komira_plan_proto/plan_vocabulary.proto` (names, membership, and the
+numbers the .proto reserves).
 
 The plan IR's wire vocabulary: the encode/decode between the
 engine's `comptime` tag values and their permanent wire numbers.
@@ -104,7 +106,10 @@ def plan_tag_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("PlanTag: wire value " + String(Int(wire))
+            + " is negative; no PlanTag value has a negative wire number")
+    if wire == 0:
         raise Error("PlanTag: wire 0 is PLAN_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -203,9 +208,11 @@ def plan_tag_wire_name(wire: Int32) -> String:
 # expression tree back into the plan tree.
 # Declared in: src/komira_plan_expr/expr.mojo
 #
-# EXEMPT — the tag encodes, but a WHOLE PLAN carrying it does not
-# round-trip: the arm holds something the wire cannot. Each row is
-# a debt with a named blocker; the row disappears when it is paid.
+# EXEMPT — declared by the engine and named here, but its wire number
+# is RESERVED in plan_vocabulary.proto, so `expr_tag_to_wire` and
+# `expr_tag_from_wire` both refuse it (`_expr_tag_is_reserved_on_wire`).
+# Each row is a debt with a named blocker; the row disappears when it is
+# paid.
 #   EXPR_BETWEEN: declared with no payload field on Expr — the SQL frontend desugars
 #     BETWEEN into two comparisons, so no Expr in the tree carries this
 #     tag
@@ -237,7 +244,20 @@ def expr_tag_to_wire(engine_tag: UInt8) raises -> Int32:
     if not expr_tag_is_declared(engine_tag):
         raise Error("ExprTag: engine tag " + String(Int(engine_tag))
             + " is not in the plan wire vocabulary")
+    if _expr_tag_is_reserved_on_wire(engine_tag):
+        raise Error("ExprTag: engine tag " + String(Int(engine_tag)) + " ("
+            + expr_tag_wire_name(Int32(Int(engine_tag)) + 1)
+            + ") is reserved on the wire: plan_vocabulary.proto keeps it off")
     return Int32(Int(engine_tag)) + 1
+
+
+def _expr_tag_is_reserved_on_wire(engine_tag: UInt8) -> Bool:
+    """The EXEMPT rows above: EXPR_BETWEEN (10) and EXPR_SORT_KEY (11).
+
+    The engine declares both, so `expr_tag_is_declared` is true for them;
+    plan_vocabulary.proto reserves their wire numbers (11 and 12), so
+    neither direction may carry them."""
+    return engine_tag == 10 or engine_tag == 11
 
 
 def expr_tag_from_wire(wire: Int32) raises -> UInt8:
@@ -246,7 +266,10 @@ def expr_tag_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("ExprTag: wire value " + String(Int(wire))
+            + " is negative; no ExprTag value has a negative wire number")
+    if wire == 0:
         raise Error("ExprTag: wire 0 is EXPR_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -256,6 +279,10 @@ def expr_tag_from_wire(wire: Int32) raises -> UInt8:
     if not expr_tag_is_declared(engine_tag):
         raise Error("ExprTag: wire value " + String(Int(wire))
             + " is unknown to this reader")
+    if _expr_tag_is_reserved_on_wire(engine_tag):
+        raise Error("ExprTag: wire value " + String(Int(wire)) + " ("
+            + expr_tag_wire_name(wire)
+            + ") is reserved: plan_vocabulary.proto keeps it off the wire")
     return engine_tag
 
 
@@ -413,7 +440,10 @@ def agg_fn_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("AggFn: wire value " + String(Int(wire))
+            + " is negative; no AggFn value has a negative wire number")
+    if wire == 0:
         raise Error("AggFn: wire 0 is AGG_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -610,7 +640,10 @@ def window_fn_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("WindowFn: wire value " + String(Int(wire))
+            + " is negative; no WindowFn value has a negative wire number")
+    if wire == 0:
         raise Error("WindowFn: wire 0 is PF_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -742,7 +775,10 @@ def frame_units_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("FrameUnits: wire value " + String(Int(wire))
+            + " is negative; no FrameUnits value has a negative wire number")
+    if wire == 0:
         raise Error("FrameUnits: wire 0 is FRAME_UNITS_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -832,7 +868,10 @@ def frame_bound_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("FrameBound: wire value " + String(Int(wire))
+            + " is negative; no FrameBound value has a negative wire number")
+    if wire == 0:
         raise Error("FrameBound: wire 0 is FRAME_BOUND_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -933,7 +972,10 @@ def join_type_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("JoinType: wire value " + String(Int(wire))
+            + " is negative; no JoinType value has a negative wire number")
+    if wire == 0:
         raise Error("JoinType: wire 0 is JOIN_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -1038,7 +1080,10 @@ def join_algo_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("JoinAlgo: wire value " + String(Int(wire))
+            + " is negative; no JoinAlgo value has a negative wire number")
+    if wire == 0:
         raise Error("JoinAlgo: wire 0 is JOIN_ALGO_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -1131,7 +1176,10 @@ def asof_direction_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("AsofDirection: wire value " + String(Int(wire))
+            + " is negative; no AsofDirection value has a negative wire number")
+    if wire == 0:
         raise Error("AsofDirection: wire 0 is ASOF_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -1224,7 +1272,10 @@ def asof_tolerance_kind_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("AsofToleranceKind: wire value " + String(Int(wire))
+            + " is negative; no AsofToleranceKind value has a negative wire number")
+    if wire == 0:
         raise Error("AsofToleranceKind: wire 0 is ASOF_TOL_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -1317,7 +1368,10 @@ def correlated_kind_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("CorrelatedKind: wire value " + String(Int(wire))
+            + " is negative; no CorrelatedKind value has a negative wire number")
+    if wire == 0:
         raise Error("CorrelatedKind: wire 0 is CORR_KIND_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -1414,7 +1468,10 @@ def source_type_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("SourceType: wire value " + String(Int(wire))
+            + " is negative; no SourceType value has a negative wire number")
+    if wire == 0:
         raise Error("SourceType: wire 0 is SOURCE_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -1527,7 +1584,10 @@ def source_orientation_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("SourceOrientation: wire value " + String(Int(wire))
+            + " is negative; no SourceOrientation value has a negative wire number")
+    if wire == 0:
         raise Error("SourceOrientation: wire 0 is SOURCE_KIND_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -1588,9 +1648,13 @@ def source_orientation_wire_name(wire: Int32) -> String:
 # rows below.
 # Declared in: src/komira_scan_source/source_variant.mojo
 #
-# EXEMPT — the tag encodes, but a WHOLE PLAN carrying it does not
-# round-trip: the arm holds something the wire cannot. Each row is
-# a debt with a named blocker; the row disappears when it is paid.
+# EXEMPT — declared by the engine and named here, but its wire number
+# is RESERVED in plan_vocabulary.proto, so `source_variant_tag_to_wire`
+# and `source_variant_tag_from_wire` both refuse it
+# (`_source_variant_tag_is_reserved_on_wire`). Neither arm carries a
+# `ScanBinding`, so a binding message naming one could only build a
+# SourceVariant whose payload is absent. Each row is a debt with a named
+# blocker; the row disappears when it is paid.
 #   SOURCE_VARIANT_IN_MEMORY: InMemorySource holds `data: ArcPointer[Slab[RecordBatch]]` — LIVE
 #     HEAP DATA INSIDE THE IR. A plan carrying this arm is a container
 #     of the data, not a description of work, and cannot be written to
@@ -1625,7 +1689,21 @@ def source_variant_tag_to_wire(engine_tag: UInt8) raises -> Int32:
     if not source_variant_tag_is_declared(engine_tag):
         raise Error("SourceVariantTag: engine tag " + String(Int(engine_tag))
             + " is not in the plan wire vocabulary")
+    if _source_variant_tag_is_reserved_on_wire(engine_tag):
+        raise Error("SourceVariantTag: engine tag " + String(Int(engine_tag))
+            + " (" + source_variant_tag_wire_name(Int32(Int(engine_tag)) + 1)
+            + ") is reserved on the wire: plan_vocabulary.proto keeps it off")
     return Int32(Int(engine_tag)) + 1
+
+
+def _source_variant_tag_is_reserved_on_wire(engine_tag: UInt8) -> Bool:
+    """The EXEMPT rows above: SOURCE_VARIANT_PARQUET (0) and
+    SOURCE_VARIANT_IN_MEMORY (1).
+
+    The engine declares both, so `source_variant_tag_is_declared` is true
+    for them; plan_vocabulary.proto reserves their wire numbers (1 and 2),
+    so neither direction may carry them."""
+    return engine_tag == 0 or engine_tag == 1
 
 
 def source_variant_tag_from_wire(wire: Int32) raises -> UInt8:
@@ -1634,7 +1712,10 @@ def source_variant_tag_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("SourceVariantTag: wire value " + String(Int(wire))
+            + " is negative; no SourceVariantTag value has a negative wire number")
+    if wire == 0:
         raise Error("SourceVariantTag: wire 0 is SOURCE_VARIANT_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -1644,6 +1725,10 @@ def source_variant_tag_from_wire(wire: Int32) raises -> UInt8:
     if not source_variant_tag_is_declared(engine_tag):
         raise Error("SourceVariantTag: wire value " + String(Int(wire))
             + " is unknown to this reader")
+    if _source_variant_tag_is_reserved_on_wire(engine_tag):
+        raise Error("SourceVariantTag: wire value " + String(Int(wire)) + " ("
+            + source_variant_tag_wire_name(wire)
+            + ") is reserved: plan_vocabulary.proto keeps it off the wire")
     return engine_tag
 
 
@@ -1750,7 +1835,10 @@ def binary_op_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("BinaryOp: wire value " + String(Int(wire))
+            + " is negative; no BinaryOp value has a negative wire number")
+    if wire == 0:
         raise Error("BinaryOp: wire 0 is BIN_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -1873,7 +1961,10 @@ def unary_op_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("UnaryOp: wire value " + String(Int(wire))
+            + " is negative; no UnaryOp value has a negative wire number")
+    if wire == 0:
         raise Error("UnaryOp: wire 0 is UN_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -1984,7 +2075,10 @@ def string_op_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("StringOp: wire value " + String(Int(wire))
+            + " is negative; no StringOp value has a negative wire number")
+    if wire == 0:
         raise Error("StringOp: wire 0 is STR_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -2080,7 +2174,10 @@ def string_fn_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("StringFn: wire value " + String(Int(wire))
+            + " is negative; no StringFn value has a negative wire number")
+    if wire == 0:
         raise Error("StringFn: wire 0 is STRFN_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -2221,7 +2318,10 @@ def string_fn_n_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("StringFnN: wire value " + String(Int(wire))
+            + " is negative; no StringFnN value has a negative wire number")
+    if wire == 0:
         raise Error("StringFnN: wire 0 is STRFNN_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -2347,7 +2447,10 @@ def col_side_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("ColSide: wire value " + String(Int(wire))
+            + " is negative; no ColSide value has a negative wire number")
+    if wire == 0:
         raise Error("ColSide: wire 0 is COL_SIDE_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -2440,7 +2543,10 @@ def math_fn1_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("MathFn1: wire value " + String(Int(wire))
+            + " is negative; no MathFn1 value has a negative wire number")
+    if wire == 0:
         raise Error("MathFn1: wire 0 is MATH_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -2596,7 +2702,10 @@ def math_fn2_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("MathFn2: wire value " + String(Int(wire))
+            + " is negative; no MathFn2 value has a negative wire number")
+    if wire == 0:
         raise Error("MathFn2: wire 0 is MATH2_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -2689,7 +2798,10 @@ def extract_field_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("ExtractField: wire value " + String(Int(wire))
+            + " is negative; no ExtractField value has a negative wire number")
+    if wire == 0:
         raise Error("ExtractField: wire 0 is EXTRACT_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -2848,7 +2960,10 @@ def regexp_op_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("RegexpOp: wire value " + String(Int(wire))
+            + " is negative; no RegexpOp value has a negative wire number")
+    if wire == 0:
         raise Error("RegexpOp: wire 0 is REGEXP_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -2971,7 +3086,10 @@ def arrow_type_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("ArrowType: wire value " + String(Int(wire))
+            + " is negative; no ArrowType value has a negative wire number")
+    if wire == 0:
         raise Error("ArrowType: wire 0 is ARROW_TYPE_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -3211,7 +3329,10 @@ def write_format_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("WriteFormat: wire value " + String(Int(wire))
+            + " is negative; no WriteFormat value has a negative wire number")
+    if wire == 0:
         raise Error("WriteFormat: wire 0 is WFMT_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -3311,7 +3432,10 @@ def write_compression_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("WriteCompression: wire value " + String(Int(wire))
+            + " is negative; no WriteCompression value has a negative wire number")
+    if wire == 0:
         raise Error("WriteCompression: wire 0 is WCOMP_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -3416,7 +3540,10 @@ def scalar_kind_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("ScalarKind: wire value " + String(Int(wire))
+            + " is negative; no ScalarKind value has a negative wire number")
+    if wire == 0:
         raise Error("ScalarKind: wire 0 is SCALAR_KIND_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -3532,7 +3659,10 @@ def scalar_time_unit_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("ScalarTimeUnit: wire value " + String(Int(wire))
+            + " is negative; no ScalarTimeUnit value has a negative wire number")
+    if wire == 0:
         raise Error("ScalarTimeUnit: wire 0 is SCALAR_TIME_UNIT_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -3632,7 +3762,10 @@ def param_tag_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("ParamTag: wire value " + String(Int(wire))
+            + " is negative; no ParamTag value has a negative wire number")
+    if wire == 0:
         raise Error("ParamTag: wire 0 is PARAM_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -3740,7 +3873,10 @@ def pushdown_gate_mode_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("PushdownGateMode: wire value " + String(Int(wire))
+            + " is negative; no PushdownGateMode value has a negative wire number")
+    if wire == 0:
         raise Error("PushdownGateMode: wire 0 is GATE_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:
@@ -3837,7 +3973,10 @@ def snapshot_policy_from_wire(wire: Int32) raises -> UInt8:
     RAISES on 0 (UNSPECIFIED — which is what an ABSENT proto3 enum
     field decodes to) and on any value this reader does not know.
     Fail loud; never guess a plan node."""
-    if wire <= 0:
+    if wire < 0:
+        raise Error("SnapshotPolicy: wire value " + String(Int(wire))
+            + " is negative; no SnapshotPolicy value has a negative wire number")
+    if wire == 0:
         raise Error("SnapshotPolicy: wire 0 is SNAPSHOT_WIRE_UNSPECIFIED — an absent"
             + " proto3 enum field is not a tag")
     if wire > 256:

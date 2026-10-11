@@ -35,7 +35,9 @@
 #
 # Mojo idioms:
 #   - `Self.T_IN` / `Self.T_OUT` / `Self.W` for parameter refs in bodies.
-#   - SIMD compare uses `.ge() / .gt() / .lt() / .le() / .eq() / .ne()` for W>1.
+#   - SIMD compare uses `.ge() / .gt() / .lt() / .le() / .eq()` for W>1; float
+#     `<>` is `~eq` (see the comparison templates).
+#   - A Bool splat at W>1 is `SIMD[DType.bool, W](fill=b)`.
 #   - `mask.select(if_true, if_false)` is the lane-select.
 #   - `var out = self` requires `.copy()` for SimdOf (Copyable but not
 #     ImplicitlyCopyable).
@@ -735,8 +737,9 @@ struct GenBinaryArithDiv_I64_ColLit(Copyable, Movable):
 # `col(...) >=/<=/<` Lit filter expressions (F64 + I32-as-Date32).
 #
 # Mojo 1.0.0b1 idiom: SIMD compare uses `.ge() / .gt() / .lt() / .le() /
-# .eq() / .ne()` method form for W>1; `>=`/`>`/`<`/`<=`/`==`/`!=` are
-# Scalar-only (W=1).
+# .eq()` method form for W>1; `>=`/`>`/`<`/`<=`/`==`/`!=` are
+# Scalar-only (W=1). Float `<>` is `~eq`: `.ne()` is ordered (NaN -> FALSE)
+# and would disagree with the scalar `!=` (NaN -> TRUE).
 # =============================================================================
 
 @fieldwise_init
@@ -852,7 +855,10 @@ struct GenBinaryCmpNe_F64_ColLit(Copyable, Movable):
     @always_inline
     def eval[W: Int](input: SimdOf[F64Row, W], lit: Float64) -> SimdOf[BoolRow, W]:
         var out = SimdOf[BoolRow, W].zero()
-        out.set_bool[0](input.get_f64[0]().ne(SIMD[DType.float64, W](lit)))
+        # `~eq`, not `.ne()`: SIMD `.ne()` is an ORDERED compare and answers
+        # a NaN row FALSE, where `eval_row`'s `!=` (IEEE unordered) answers
+        # TRUE. The two paths must agree on every row.
+        out.set_bool[0](~input.get_f64[0]().eq(SIMD[DType.float64, W](lit)))
         return out^
 
 
@@ -1355,7 +1361,7 @@ struct GenIsNull_F64(Copyable, Movable):
     @always_inline
     def eval[W: Int](input: SimdOf[F64Row, W]) -> SimdOf[BoolRow, W]:
         var out = SimdOf[BoolRow, W].zero()
-        out.set_bool[0](SIMD[DType.bool, W](False))
+        out.set_bool[0](SIMD[DType.bool, W](fill=False))
         return out^
 
 
@@ -1374,7 +1380,7 @@ struct GenIsNotNull_F64(Copyable, Movable):
     @always_inline
     def eval[W: Int](input: SimdOf[F64Row, W]) -> SimdOf[BoolRow, W]:
         var out = SimdOf[BoolRow, W].zero()
-        out.set_bool[0](SIMD[DType.bool, W](True))
+        out.set_bool[0](SIMD[DType.bool, W](fill=True))
         return out^
 
 
@@ -1393,7 +1399,7 @@ struct GenIsNull_F32(Copyable, Movable):
     @always_inline
     def eval[W: Int](input: SimdOf[F32Row, W]) -> SimdOf[BoolRow, W]:
         var out = SimdOf[BoolRow, W].zero()
-        out.set_bool[0](SIMD[DType.bool, W](False))
+        out.set_bool[0](SIMD[DType.bool, W](fill=False))
         return out^
 
 
@@ -1412,7 +1418,7 @@ struct GenIsNotNull_F32(Copyable, Movable):
     @always_inline
     def eval[W: Int](input: SimdOf[F32Row, W]) -> SimdOf[BoolRow, W]:
         var out = SimdOf[BoolRow, W].zero()
-        out.set_bool[0](SIMD[DType.bool, W](True))
+        out.set_bool[0](SIMD[DType.bool, W](fill=True))
         return out^
 
 
@@ -1431,7 +1437,7 @@ struct GenIsNull_I64(Copyable, Movable):
     @always_inline
     def eval[W: Int](input: SimdOf[I64Row, W]) -> SimdOf[BoolRow, W]:
         var out = SimdOf[BoolRow, W].zero()
-        out.set_bool[0](SIMD[DType.bool, W](False))
+        out.set_bool[0](SIMD[DType.bool, W](fill=False))
         return out^
 
 
@@ -1450,7 +1456,7 @@ struct GenIsNotNull_I64(Copyable, Movable):
     @always_inline
     def eval[W: Int](input: SimdOf[I64Row, W]) -> SimdOf[BoolRow, W]:
         var out = SimdOf[BoolRow, W].zero()
-        out.set_bool[0](SIMD[DType.bool, W](True))
+        out.set_bool[0](SIMD[DType.bool, W](fill=True))
         return out^
 
 
@@ -1469,7 +1475,7 @@ struct GenIsNull_I32(Copyable, Movable):
     @always_inline
     def eval[W: Int](input: SimdOf[I32Row, W]) -> SimdOf[BoolRow, W]:
         var out = SimdOf[BoolRow, W].zero()
-        out.set_bool[0](SIMD[DType.bool, W](False))
+        out.set_bool[0](SIMD[DType.bool, W](fill=False))
         return out^
 
 
@@ -1488,7 +1494,7 @@ struct GenIsNotNull_I32(Copyable, Movable):
     @always_inline
     def eval[W: Int](input: SimdOf[I32Row, W]) -> SimdOf[BoolRow, W]:
         var out = SimdOf[BoolRow, W].zero()
-        out.set_bool[0](SIMD[DType.bool, W](True))
+        out.set_bool[0](SIMD[DType.bool, W](fill=True))
         return out^
 
 

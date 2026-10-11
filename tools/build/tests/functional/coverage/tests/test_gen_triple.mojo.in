@@ -1,0 +1,9 @@
+# The template of tests/test_gen_triple.mojo, which BUCK generates (test
+# 43): a generated test source, which has its coverage run as a written one
+# has, so its report counts what it runs of covgentest.
+from covgentest import triple
+from std.testing import assert_equal
+
+
+def main() raises:
+    assert_equal(triple(@ARG@), 12, "triple 4")

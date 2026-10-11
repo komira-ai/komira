@@ -1,0 +1,73 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":defs.bzl", "mut_dir", "mut_step_cases")
+
+# mutate: operator mutants of one Mojo package's sources, a deterministic
+# sample of them, and their score from the statuses of each mutant's build
+# steps (../README.md, "Mutation score"; the build side is
+# tools/build/mojo/mutation.bzl). No README.md here: the mojo_library macro
+# would gate it with the README tool, whose library, with the mutation
+# switch on, depends on this package's mut_dir (a cycle).
+mojo_library(
+    name = "mutate",
+    srcs = glob(["mutate/*.mojo"]),
+    test_srcs = [
+        # a fixture source to its exact mutant list (every operator, what is
+        # never code, early returns and where not, both markers); each rule
+        # alone; what a mutant does to the source
+        "tests/test_gen.mojo",
+        # the sample (deterministic, smallest hashes, stable under an
+        # unrelated mutant), FNV-1a vectors, the list file and its refusals
+        "tests/test_sample.mojo",
+        # each verdict rule and its precedence, inconsistent statuses
+        # refused, a planted survivor reported and a killed mutant not
+        "tests/test_score.mojo",
+        # the command line end to end through files, every exit code
+        "tests/test_cli.mojo",
+    ],
+    test_data = {
+        "tests/test_gen.mojo": [
+            "tests/fixtures/ops.expected",
+            "tests/fixtures/ops.src",
+        ],
+    },
+    conda = False,
+    visibility = ["PUBLIC"],
+)
+
+mojo_binary(
+    name = "mutate_bin",
+    srcs = ["main.mojo"],
+    deps = [":mutate"],
+    visibility = ["PUBLIC"],
+)
+
+# The directory every mojo_library's `[mutation]` sub-target runs from.
+mut_dir(
+    name = "mut_dir",
+    exec_compatible_with = LINUX_X86_64,
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "mut_step.sh",
+    visibility = ["PUBLIC"],
+)
+
+# mut_step.sh's cases: ok, fail <n>, timeout (the process group killed),
+# skipped, empty -o outputs, --infra-exit, @MUT_SCRATCH@, usage errors.
+mut_step_cases(
+    name = "mut_step_cases",
+    exec_compatible_with = LINUX_X86_64,
+    script = "mut_step_cases.sh",
+    step = "mut_step.sh",
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = [
+        "mut_step.sh",
+        "mut_step_cases.sh",
+    ],
+)

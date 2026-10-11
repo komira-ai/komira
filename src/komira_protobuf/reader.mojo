@@ -79,14 +79,25 @@ def pb_read_varint(bytes: Span[UInt8, _], pos: Int) raises -> PbVarint:
     Little-endian groups of 7 bits; the high bit of each byte is the
     continuation flag. Caps at 10 bytes (the max for a 64-bit varint).
     """
+    return _pb_read_varint_upto(bytes, pos, len(bytes), "buffer end")
+
+
+@always_inline
+def _pb_read_varint_upto(
+    bytes: Span[UInt8, _], pos: Int, limit: Int, limit_name: StaticString
+) raises -> PbVarint:
+    """Decode a varint at `pos` whose bytes all lie before `limit`
+    (`limit <= len(bytes)`; callers guarantee it). A varint still continuing
+    at `limit` is refused with "varint runs past <limit_name>"."""
     var p = pos
     var shift: UInt64 = 0
     var acc: UInt64 = 0
     var count = 0
     while True:
-        if p >= len(bytes):
+        if p >= limit:
             raise Error(
-                "ProtobufError.MALFORMED: varint runs past buffer end"
+                String("ProtobufError.MALFORMED: varint runs past ")
+                + String(limit_name)
             )
         var b = bytes[p]
         p += 1
@@ -292,15 +303,23 @@ def pb_read_bytes(
 # =============================================================================
 
 
+comptime _PACKED_BLOCK_END = "the end of its packed block"
+
+
 def pb_read_packed_varints(
     bytes: Span[UInt8, _], start: Int, end: Int
 ) raises -> List[UInt64]:
-    """Decode a packed-repeated varint block `[start, end)` into a List."""
+    """Decode a packed-repeated varint block `[start, end)` into a List.
+
+    Raises MALFORMED if a varint runs past `end` (see `_PACKED_BLOCK_END`).
+    """
     _pb_check_span(bytes, start, end, "packed varint block")
     var out = List[UInt64]()
     var ip = start
     while ip < end:
-        var v = pb_read_varint(bytes, ip)
+        # Bounded by the block, not the buffer: a varint still continuing at
+        # `end` would otherwise be completed by the bytes that follow it.
+        var v = _pb_read_varint_upto(bytes, ip, end, _PACKED_BLOCK_END)
         out.append(v.value)
         ip = v.new_pos
     return out^
@@ -309,25 +328,51 @@ def pb_read_packed_varints(
 def pb_read_packed_sint64(
     bytes: Span[UInt8, _], start: Int, end: Int
 ) raises -> List[Int64]:
-    """Decode a packed-repeated sint64 (zigzag) block `[start, end)`."""
+    """Decode a packed-repeated sint64 (zigzag) block `[start, end)`.
+
+    Raises MALFORMED if a varint runs past `end`.
+    """
     _pb_check_span(bytes, start, end, "packed sint64 block")
     var out = List[Int64]()
     var ip = start
     while ip < end:
-        var v = pb_read_varint(bytes, ip)
+        # Bounded by the block, not the buffer: a varint still continuing at
+        # `end` would otherwise be completed by the bytes that follow it.
+        var v = _pb_read_varint_upto(bytes, ip, end, _PACKED_BLOCK_END)
         out.append(zigzag_decode(v.value))
         ip = v.new_pos
     return out^
 
 
+@always_inline
+def _pb_check_packed_width(
+    start: Int, end: Int, width: Int, what: StaticString
+) raises:
+    """Refuse a fixed-width packed block whose length is not a whole number
+    of values: the trailing bytes would otherwise be dropped silently."""
+    if (end - start) % width != 0:
+        raise Error(
+            String("ProtobufError.MALFORMED: ")
+            + String(what)
+            + " length "
+            + String(end - start)
+            + " is not a multiple of "
+            + String(width)
+        )
+
+
 def pb_read_packed_fixed32(
     bytes: Span[UInt8, _], start: Int, end: Int
 ) raises -> List[UInt32]:
-    """Decode a packed-repeated fixed32 block `[start, end)`."""
+    """Decode a packed-repeated fixed32 block `[start, end)`.
+
+    Raises MALFORMED if `end - start` is not a multiple of 4.
+    """
     _pb_check_span(bytes, start, end, "packed fixed32 block")
+    _pb_check_packed_width(start, end, 4, "packed fixed32 block")
     var out = List[UInt32]()
     var ip = start
-    while ip + 4 <= end:
+    while ip < end:
         var s = pb_read_fixed32(bytes, ip)
         out.append(s.value)
         ip = s.new_pos
@@ -337,11 +382,15 @@ def pb_read_packed_fixed32(
 def pb_read_packed_fixed64(
     bytes: Span[UInt8, _], start: Int, end: Int
 ) raises -> List[UInt64]:
-    """Decode a packed-repeated fixed64 block `[start, end)`."""
+    """Decode a packed-repeated fixed64 block `[start, end)`.
+
+    Raises MALFORMED if `end - start` is not a multiple of 8.
+    """
     _pb_check_span(bytes, start, end, "packed fixed64 block")
+    _pb_check_packed_width(start, end, 8, "packed fixed64 block")
     var out = List[UInt64]()
     var ip = start
-    while ip + 8 <= end:
+    while ip < end:
         var s = pb_read_fixed64(bytes, ip)
         out.append(s.value)
         ip = s.new_pos

@@ -17,9 +17,10 @@
 # must work) or negative/ (planted defects that must go red); a test may have
 # both halves, under the same package name.
 #
-#   1. The examples build and their run checks pass (stdout compared byte for
-#      byte), and every action that executed ran on this checkout's executor
-#      (remotely, or locally in a local-only run).
+#   1. Every action that a build of the examples executed (test 5 builds
+#      them) ran on this checkout's executor (remotely, or locally in a
+#      local-only run). That the examples build, and their run checks
+#      (validations of the binaries), is the pull-request check's.
 #   2. The gate: tests//negative/libgate_bad fails with GATED TEST FAILED, while its
 #      [ungated] package builds -- the red comes from the test, not the compile.
 #      A binary depending on it fails the same way, and a binary naming its
@@ -59,7 +60,6 @@
 #      toolchain unpack/copy targets, and third_party_srcs generation, drift
 #      test and fixture archive all resolve to the one linux execution
 #      platform, `linux-x86_64`.
-#  11. (Retired 2026-09-30 with the multi-NUMA rule.)
 #  12. Every action runs with the one linux property set, read per action:
 #      an uncached build of //tools/build/examples:hello and
 #      //tools/build/third_party_srcs:aws_lc_mini_gen (its own daemon under a
@@ -70,12 +70,7 @@
 #      third_party_srcs and mojo_build (`buck2 log what-ran`; a cache hit
 #      records no properties, so a warm build cannot answer this). Costs about 3 minutes of remote execution; the isolated
 #      daemon's buck-out/komira_tests_uncached (~50 MB) is reused per run.
-#  13. A program built as a bundle behaves as its executable: stdout, stderr
-#      and exit status agree byte for byte across argv, environment, exit(),
-#      an unhandled error, buffered output, a data file found through
-#      /proc/self/exe, abort() and SIGSEGV (status and stdout exact, the
-#      stack dump's first line), and a symlink invocation with another
-#      argv[0] (tests//functional/bundle_parity:parity, a remote action).
+#  13. (In the gate: tests//functional/bundle_parity:parity.)
 #  14. The launcher's CPU level function gives glibc's level for the made-up
 #      CPUs of tools/build/package/launcher/cpu_models.h: the hand-written ones, and one
 #      per feature glibc requires, a CPU of that level or above with just that
@@ -94,8 +89,8 @@
 #      base layers are checked; the base is fetched only by pinned
 #      downloads; `docker run` of the loaded image prints the greeting (SKIP
 #      without docker).
-#  17. Markdown links are a validation of the build: //:docs (every Markdown
-#      file of the repository) and tests//functional/doc_links:ok build, and
+#  17. Markdown links are a validation of the build (//:docs and
+#      tests//functional/doc_links:ok are in the gate):
 #      tests//negative/doc_links:dead fails naming a missing file, a bad
 #      #anchor and a link leaving the tree. Every package of the komira and
 #      tests cells is in //:docs through the doc_tree its rules declare, the
@@ -113,10 +108,8 @@
 #      platforms,package,examples,cells} and third_party. A label naming `tests`
 #      (standalone-only) fails to load there.
 #  20. C/C++ dependencies of Mojo targets: see tools/build/tests/cxx_tests.sh.
-#  21. A Mojo binary whose own code records a source location (a List
-#      index) builds and runs: the compile wrapper strips the staging
-#      directory from recorded paths, so its exit-4 refusal does not fire
-#      (tests//functional/location_path).
+#  21. (In the gate: tests//functional/location_path:main, whose run check
+#      is a validation.)
 #  22. Rust rules, and rustc's host floor: see
 #      tools/build/tests/rust_tests.sh.
 #  23. mojo_proto_library and mojo_db_proto_library, mojo_gcp_client (REST
@@ -142,33 +135,20 @@
 #  26. The vendored aws-lc and s2n-tls: source lists against their archives,
 #      known-answer tests, a TLS handshake, the s2n-tls feature probes: see
 #      tools/build/tests/c_libs_tests.sh.
-#  28. The compile watchdog of mojo_wrapper.sh on stand-in compilers
-#      (tests//functional/watchdog:cases, a remote action): a process tree using no CPU
-#      is killed with exit 124 and the message, its children and an orphaned
-#      grandchild with it; a tree using CPU (itself, through a child, or
-#      through an orphaned member of its session while it waits), a
-#      short idle and a disabled watchdog are not killed; a compiler error
-#      keeps its exit status; malformed knobs are refused (exit 2); and the
-#      compiler dies with the wrapper: TERM to the wrapper kills compiler and
-#      child before it exits 143, and after a KILL the tether in the
-#      compiler's session kills them within 5 s. The macOS wrapper's
-#      watchdog (ps rather than /proc) is part of test 24.
+#  28. (In the gate: tests//functional/watchdog:cases, the compile watchdog
+#      of mojo_wrapper.sh on stand-in compilers, whose action refuses a report
+#      with fewer ok cases than its floor.)
 #  29. The test runtime contract (tests//functional/test_data): a gated test opens a
 #      declared fixture by its repository path from its staged share/, and a
 #      fixture it did not declare is absent (the gate goes red); TEST_TMPDIR
-#      is private, empty and not /tmp in each of two actions; test_env and a
-#      mojo_test's data and env arrive under `buck2 test`, and so do its
-#      args, each $(location) an absolute path the test opens and an
-#      $(exe_target) a binary with its lib/ (also as a build action,
-#      mojo_test_args_action, which is what a pull request builds); a mojo_test
+#      is private, empty and not /tmp in each of two actions; test_env
+#      arrives (a mojo_test's data, env and args under `buck2 test` are
+#      komira//tools/build/mojo/mojo_test_testdata, in the gate); a mojo_test
 #      exiting 77 (SKIP to some harnesses) fails; a red test stays
 #      red with test_env {BIN: true} (library) and env {BIN: true} (mojo_test);
-#      the runner itself, run twice in ONE action directory
-#      (tests//functional/test_data:runner_cases), gives each run its own empty
-#      TEST_TMPDIR under that directory and removes it, no --env reaches
-#      the verdict, --arg values arrive in order and unexported, exit 77 is
-#      red, and a test killed by SIGKILL or SIGABRT fails with its
-#      own status (137, 134) and no marker; five inadmissible data/env
+#      (the runner's own cases, tests//functional/test_data:runner_cases, are
+#      in the gate, its action holding the report to a floor); five
+#      inadmissible data/env
 #      declarations are refused at analysis. A library's `test_deps`
 #      (tests//functional/test_deps) reach its welded tests: a test imports a
 #      test-support package the library does not depend on; and nothing else
@@ -235,12 +215,11 @@
 #      makes the test, a binary welded to it, and a binary linking a library
 #      welded to it unbuildable (GATED TEST FAILED, with the harness's
 #      `1 passed; 1 failed`: the panic unwound), while the test executable
-#      itself compiles; a binary welded to a passing test builds and runs;
-#      the harness sees only HOME, PATH and TMPDIR; a target with no tests
+#      itself compiles (a binary welded to a passing test, whose harness sees
+#      only HOME, PATH and TMPDIR, is tests//functional/rust_test); a target with no tests
 #      and an #[ignore]d test are each refused; a hanging test is NO VERDICT
 #      at its timeout. There are no holds: every welded test must pass.
-#      `buck2 test` of a welded library runs its rust_test (Pass, with the
-#      harness's count), and of a binary welded to a red test fails.
+#      `buck2 test` of a binary welded to a red test fails.
 #  36. mojo_aws_client (tools/build/cloud/aws.bzl; tests//functional/mojo_aws_client): a
 #      pure-mode CloudWatch Logs client generated from the pinned botocore
 #      model with operations = [GetLogEvents], over stub runtime deps, builds
@@ -280,8 +259,9 @@
 #      `overrides` without `hand_srcs` and the reverse, a hand_srcs entry
 #      that is a label, not `.mojo`, or named like a generated file, and a
 #      model path the service id cannot be read from, and a caller
-#      `test_data` entry for the environment scan; an operation the model
-#      lacks by the generator; a failing caller test reds the client; and so
+#      `test_data` entry for the environment scan (an operation the model
+#      lacks is refused by the generator: a unit test of
+#      tools/build/proto-codegen/src/aws_in.rs); a failing caller test reds the client; and so
 #      does a hand-written module of the package that reads HOME, through
 #      the environment scan (tests//negative/mojo_aws_client): by a banned
 #      name, or by an import of std.pathlib off its allow-list, which it reads
@@ -313,9 +293,15 @@
 #      A README that ships (its library has a conda package) refuses a relative
 #      link naming its line (.../relative_link); the same README in a library
 #      with `conda = False` builds (tests//functional/readme_examples/unshipped).
+#      Two libraries, one README (`readme`, tools/build/mojo/readme.bzl):
+#      .../owner builds with the README on :owner only (`readme = False` on
+#      :owner_base, which has no [tests][readme]); without the keyword
+#      (tests//negative/readme_examples/unowned) the base library's README
+#      compile fails; `readme = True` with no README.md and a non-bool
+#      `readme` are refused at load (.../readme_keyword, per -c case).
 #  39. Test welding (tools/build/lint/test_weld.bzl), each lint checked by
-#      its BXL script: //:test_weld (every package under src/) and
-#      tests//functional/test_weld:ok (a planted tree with its ledger) pass;
+#      its BXL script (the greens, //:test_weld, tests//functional/test_weld:ok
+#      and tests//functional/test_weld/real:ok, are in the gate):
 #      each target of tests//negative/test_weld fails
 #      naming its one planted finding: an unwelded test file (named only in a
 #      comment of a test_srcs list), a package with no welded test, a ledger
@@ -334,8 +320,6 @@
 #      root with no package.
 
 #  41. Coverage builds: see tools/build/tests/coverage_tests.sh.
-#  45. Assert level, defines and memory cap: see
-#      tools/build/tests/assert_level_tests.sh.
 #  42. The pointer lint (tools/build/lint/defs.bzl, pointer_lint;
 #      docs/design/mojo_safety_and_idioms.md): //:pointer_lint (every .mojo
 #      file of the cell, against tests/pointer_lint_ffi.tsv and
@@ -370,6 +354,15 @@
 #      a second row for a package, and a row whose name is not its link's.
 #  46. The coverage gate and what ships waits for it: tools/build/tests/coverage_gate_tests.sh (sourced by 43's).
 #  47. Branch coverage runs: tools/build/tests/coverage_branch_tests.sh (sourced by 43's).
+#  49. Assert level, defines and memory cap: see
+#      tools/build/tests/assert_level_tests.sh.
+#  51. Python oracles (tools/build/python/defs.bzl, python_oracle): each
+#      target of tests//negative/python_oracle fails analysis naming the
+#      input an action built outside third_party/ (a komira library's
+#      package as data, a komira binary in srcs or as src, a wheel installed
+#      outside third_party/ as a dep or as the tzdata wheel, an interpreter
+#      unpacked outside third_party/).
+#      What works is in src/tests/helpers/komira_test_python.
 #  53. The surface capability matrix (tools/build/lint/surface_capability_matrix.bzl;
 #      docs/surface_capability_matrix.md): //:surface_capability_matrix (every
 #      surface and capability of the plan, against tests/surface_capability_matrix.bzl)
@@ -387,6 +380,12 @@
 #      a repeated capability, fewer filled cells than the floor, no surface,
 #      and (built by package pattern) a test incompatible with the lint's
 #      platform.
+#  54. The hermetic Node.js rules (tools/build/node/defs.bzl): each target of
+#      tests//negative/node and below fails with its planted defect: a failing
+#      script, a wrong expected error or an unexpected pass, a path or package
+#      staged twice, an unresolved import, an empty expect_error or exe, a pin
+#      that differs, a C warning, the test-only runtime named where it is not
+#      visible. See tools/build/tests/node_tests.sh.
 set -uo pipefail
 
 umbrella=1
@@ -479,6 +478,8 @@ expect_red() { # name, required text, target
     fi
 }
 
+# The examples, for test 5's scan and test 1's executor check (each target
+# is in the pull-request check, which builds it).
 EXAMPLES=(
     //tools/build/examples:hello //tools/build/examples:hellopkg //tools/build/examples:hello_pkg_user
     //tools/build/examples/libgate_ok:libgate_ok //tools/build/examples:test_hellopkg
@@ -490,9 +491,10 @@ EXAMPLES=(
     //third_party/snappy:snappy //tools/build/examples/snappy:test_snappy
     //tools/build/examples/shared_lib:spike //tools/build/examples/shared_lib:spike_exact //tools/build/examples/shared_lib:plain //tools/build/examples/shared_lib:plain_exact //tools/build/examples/shared_lib_mid:mid
 )
-# Sub-targets are built in their own invocation. (`buck2 build //... 'T[sub]'`
-# was observed to skip the sub-target, so never rely on combining them with a
-# recursive pattern.)
+# The run checks, for test 5's scan (each is also a validation of its binary,
+# so the build of the binary runs it). Sub-targets are built in their own
+# invocation. (`buck2 build //... 'T[sub]'` was observed to skip the
+# sub-target, so never rely on combining them with a recursive pattern.)
 RUN_CHECKS=("//tools/build/examples:hello[run_check]" "//tools/build/examples:hello_pkg_user[run_check]"
     "//tools/build/examples/cshim:cadd_user[run_check]")
 
@@ -518,11 +520,6 @@ check_executor() { # name
     fi
 }
 
-# 1
-expect_green examples "${EXAMPLES[@]}"
-check_executor examples
-expect_green run_checks "${RUN_CHECKS[@]}"
-check_executor run_checks
 
 # 2
 expect_red gate_red "GATED TEST FAILED" tests//negative/libgate_bad:libgate_bad
@@ -560,21 +557,36 @@ expect_red closure_refusal "REFUSING: toolchain member" tests//negative/closure_
 # 5
 # The scan covers the Rust and protobuf actions too (rustc, protoc, the
 # plugin, the generated packages), and aws-lc's and s2n-tls's.
-SCAN=("${EXAMPLES[@]}" "${RUN_CHECKS[@]}" //tools/build/examples/rust:prost_roundtrip
+SCAN_TARGETS=(//tools/build/examples/rust:prost_roundtrip
     tests//functional/proto:test_person tests//functional/proto:team_proto
     //tools/build/examples/aws_lc:test_aws_lc //tools/build/examples/s2n_tls:test_s2n_handshake)
+SCAN=("${EXAMPLES[@]}" "${RUN_CHECKS[@]}" "${SCAN_TARGETS[@]}")
 query="deps(set($(printf '"%s" ' "${SCAN[@]}")))"
 abs_path_re="[\"' =:]/[A-Za-z][A-Za-z0-9_.-]*"
+# The closure holds libraries with a README (komira_runtime_paths among
+# them, and komira libraries the examples import). aquery cannot run a
+# README's generate step (a local-only dynamic action) and fails on it unless
+# this daemon has already built it, so the scan builds what it reads first
+# rather than depend on an earlier test having done so. Sub-targets get their
+# own invocation (see RUN_CHECKS). The builds keep going and their failure is
+# not this test's: a target that does not build is reported by the tests that
+# build it, and the scan still reads every action aquery can reach (it fails,
+# and names the build log, only if that leaves a README unbuilt).
+host_paths_built=yes
+"$BUCK2" build --keep-going "${EXAMPLES[@]}" "${SCAN_TARGETS[@]}" > "$LOG/host_paths_build.log" 2>&1 || host_paths_built=no
+# 1: every action that build executed ran on this checkout's executor.
+check_executor examples
+"$BUCK2" build --keep-going "${RUN_CHECKS[@]}" >> "$LOG/host_paths_build.log" 2>&1 || host_paths_built=no
 if ! printf '%s\n' "\"cmd\": \"['/bin/sh', 'x']\"" | grep -qE "$abs_path_re"; then
     fail "host paths: the scan pattern does not detect a planted absolute path"
 elif ! "$BUCK2" aquery "$query" --output-attribute cmd --output-attribute env --json > "$LOG/aquery.json" 2> "$LOG/aquery.err"; then
-    fail "host paths: aquery failed (see $LOG/aquery.err)"
+    fail "host paths: aquery failed (see $LOG/aquery.err; building the scanned targets succeeded: $host_paths_built, see $LOG/host_paths_build.log)"
 elif ! grep -q '"cmd"' "$LOG/aquery.json"; then
     fail "host paths: aquery returned no commands"
 elif grep -oE "$abs_path_re" "$LOG/aquery.json" > "$LOG/abs_paths.txt"; then
     fail "host paths: absolute paths in action commands: $(sort -u "$LOG/abs_paths.txt" | tr '\n' ' ')"
 else
-    pass "host paths: no absolute path in $(grep -c '"cmd"' "$LOG/aquery.json") action commands"
+    pass "host paths: no absolute path in $(grep -c '"cmd"' "$LOG/aquery.json") action commands$([ "$host_paths_built" = yes ] || echo " (some scanned targets did not build; see $LOG/host_paths_build.log)")"
 fi
 
 # 6
@@ -738,13 +750,6 @@ else
 fi
 [ "$MODE" = local ] || "$BUCK2" --isolation-dir "$ISO" kill > /dev/null 2>&1
 
-# 13
-if "$BUCK2" build tests//functional/bundle_parity:parity --show-full-simple-output > "$LOG/parity.txt" 2> "$LOG/parity.log"; then
-    pass "bundle parity: $(tail -n 1 "$(tail -n 1 "$LOG/parity.txt")") between executable and bundle"
-else
-    fail "bundle parity: $(grep -m1 -E '^[0-9]+ cases' "$LOG/parity.log") (see $LOG/parity.log)"
-fi
-
 # 14
 if "$BUCK2" build //tools/build/package:level_test --show-full-simple-output > "$LOG/level.txt" 2> "$LOG/level.log"; then
     lt=$(tail -n 1 "$LOG/level.txt")
@@ -787,7 +792,6 @@ grep -qE '^(PASS|FAIL)  formats ' "$LOG/formats.log" || fail "formats: tools/bui
 # The negative fixture plants one link per diagnostic beside two that
 # resolve; the validation must name each dead one with its reason, and only
 # those.
-expect_green docs //:docs tests//functional/doc_links:ok
 DEAD=(
     'dead.md:4: sub/missing.md (no such file)'
     'dead.md:5: sub/a.md#nope (no heading #nope)'
@@ -898,9 +902,6 @@ fi
 # 20
 . "$ROOT/tools/build/tests/cxx_tests.sh"
 
-# 21
-expect_green location_path "tests//functional/location_path:main[run_check]"
-
 # 22
 # shellcheck source=tools/build/tests/rust_tests.sh
 . "$ROOT/tools/build/tests/rust_tests.sh"
@@ -935,34 +936,9 @@ else
     fail "local default: $(grep -o 'FAIL  local default: .*' "$LOG/local_default.log" | cut -c 22-) (see $LOG/local_default.log)"
 fi
 
-# 28
-if ! "$BUCK2" build tests//functional/watchdog:cases --show-full-simple-output > "$LOG/watchdog_cases.txt" 2> "$LOG/watchdog_cases.log"; then
-    fail "compile watchdog cases: $(grep '^BAD ' "$LOG/watchdog_cases.log" | sort -u | tr '\n' ' ')(see $LOG/watchdog_cases.log)"
-else
-    report=$(tail -n 1 "$LOG/watchdog_cases.txt")
-    ok=$(grep -c '^ok ' "$report" || true)
-    if grep -q '^BAD ' "$report" || [ "$ok" -lt 15 ]; then
-        fail "compile watchdog cases: $(grep -v '^ok ' "$report" | tr '\n' ' ') ($ok ok; see $report)"
-    else
-        pass "compile watchdog: $ok stand-in compilers, each killed (124) or left alone as required"
-    fi
-fi
-
 # 29
-expect_green td_declared tests//functional/test_data:declared
 expect_red td_undeclared "No such file or directory" tests//negative/test_data:undeclared
 expect_red td_undeclared_gate "GATED TEST FAILED: tests//negative/test_data:undeclared:" tests//negative/test_data:undeclared
-if timeout 900 "$BUCK2" test tests//functional/test_data:mojo_test_data > "$LOG/td_mojo_test.log" 2>&1; then
-    pass "td_mojo_test: buck2 test of a mojo_test with data and env"
-else
-    fail "td_mojo_test: buck2 test tests//functional/test_data:mojo_test_data failed (see $LOG/td_mojo_test.log)"
-fi
-if timeout 900 "$BUCK2" test tests//functional/test_data:mojo_test_args > "$LOG/td_mojo_test_args.log" 2>&1; then
-    pass "td_mojo_test_args: buck2 test of a mojo_test with args, \$(location) and \$(exe_target) expanded to files it opens"
-else
-    fail "td_mojo_test_args: buck2 test tests//functional/test_data:mojo_test_args failed (see $LOG/td_mojo_test_args.log)"
-fi
-expect_green td_mojo_test_args_action tests//functional/test_data:mojo_test_args_action
 if timeout 900 "$BUCK2" test tests//negative/test_data:skip_77 > "$LOG/td_skip_77.log" 2>&1; then
     fail "td_skip_77: buck2 test tests//negative/test_data:skip_77 passed, but its test exits 77 (see $LOG/td_skip_77.log)"
 elif ! grep -qE "GATED TEST FAILED: [a-z]*//([a-z/]*/)?negative/test_data:skip_77 \(exit 77\)" "$LOG/td_skip_77.log"; then
@@ -980,22 +956,10 @@ elif grep -qF "test_red: DELIBERATE FAILURE" "$LOG/td_env_bin.log"; then
 else
     fail "td_env_bin: failed without the test's own failure (see $LOG/td_env_bin.log)"
 fi
-if ! "$BUCK2" build tests//functional/test_data:runner_cases --show-full-simple-output > "$LOG/runner_cases.txt" 2> "$LOG/runner_cases.log"; then
-    fail "gate runner cases: $(grep '^BAD ' "$LOG/runner_cases.log" | sort -u | tr '\n' ' ')(see $LOG/runner_cases.log)"
-else
-    report=$(tail -n 1 "$LOG/runner_cases.txt")
-    ok=$(grep -c '^ok ' "$report" || true)
-    if grep -q '^BAD ' "$report" || [ "$ok" -lt 5 ]; then
-        fail "gate runner cases: $(grep -v '^ok ' "$report" | tr '\n' ' ') ($ok ok; see $report)"
-    else
-        pass "gate runner: $ok cases in one action (private TEST_TMPDIR per run; env cannot reach the verdict)"
-    fi
-fi
 expect_red td_bad_dest "holds an empty, \`.\` or \`..\` segment" tests//negative/test_data:bad_dest
 expect_red td_bad_dest_clash "is both a file and the directory of" tests//negative/test_data:bad_dest_clash
 expect_red td_bad_data_entry "test_data[\"tests/test_nope.mojo\"]: not a test_srcs entry" tests//negative/test_data:bad_data_entry
 expect_red td_bad_env_owned "env sets TEST_TMPDIR, which the test runner sets itself" tests//negative/test_data:bad_env_owned
-expect_green td_test_deps tests//functional/test_deps:tdlib
 expect_red td_test_deps_src "unable to locate module 'tdhelper'" tests//negative/test_deps:src_imports_test_dep
 expect_red td_test_deps_consumer "unable to locate module 'tdhelper'" tests//negative/test_deps:consumer_of_test_dep
 expect_red td_test_deps_not_mojo "test_deps entry tests//negative/test_deps:not_a_package is not a Mojo package" tests//negative/test_deps:not_mojo
@@ -1028,7 +992,6 @@ fi
 conda_args=()
 [ "$uncached" = 1 ] || conda_args+=(--no-uncached)
 [ "$require_install" = 0 ] || conda_args+=(--require-install)
-expect_green install_gate tests//functional/install_gate:cases
 BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/conda.sh" ${conda_args[@]+"${conda_args[@]}"} > "$LOG/conda.log" 2>&1
 while IFS= read -r line; do
     case "$line" in
@@ -1098,17 +1061,9 @@ expect_red rust_test_red "GATED TEST FAILED: tests//negative/rust_test:red" "$RT
 expect_red rust_test_unwinds "1 passed; 1 failed" "$RT:red"
 expect_red rust_test_bin_red "GATED TEST FAILED" "$RT:bin"
 expect_red rust_test_lib_consumer_red "GATED TEST FAILED" "$RT:lib_consumer"
-expect_green rust_test_bin_green "$RT:bin_green" "$RT:bin_green[run_check]"
 expect_red rust_test_empty "EMPTY GATE" "$RT:empty"
 expect_red rust_test_ignored "#[ignore]d test(s) did not run" "$RT:ignored"
-expect_green rust_test_env_scrubbed "$RT:env_scrubbed"
 expect_red rust_test_hang "timed out after 3s (exit 142)" "$RT:hang"
-if "$BUCK2" test //tools/build/proto-codegen:komira_proto_codegen > "$LOG/rust_test_buck2_test.log" 2>&1 &&
-    grep -qE 'PASS komira//tools/build/proto-codegen:komira_proto_codegen_unit: [1-9][0-9]* passed' "$LOG/rust_test_buck2_test.log"; then
-    pass "rust_test_buck2_test: $(grep -m1 -oE 'komira_proto_codegen_unit: [0-9]+ passed' "$LOG/rust_test_buck2_test.log")"
-else
-    fail "rust_test_buck2_test: buck2 test of the welded library did not run its tests (see $LOG/rust_test_buck2_test.log)"
-fi
 if "$BUCK2" test "$RT:bin" > "$LOG/rust_test_buck2_test_red.log" 2>&1; then
     fail "rust_test_buck2_test_red: buck2 test $RT:bin passed, but its welded test fails"
 elif grep -qF "GATED TEST FAILED: tests//negative/rust_test:red" "$LOG/rust_test_buck2_test_red.log"; then
@@ -1118,16 +1073,10 @@ else
 fi
 
 # 36
-expect_green mojo_aws_client tests//functional/mojo_aws_client:
-expect_green aws_rest_json //tools/build/proto-codegen/aws_rest_json:
-expect_green aws_rest_xml //tools/build/proto-codegen/aws_rest_xml:
-expect_green aws_query //tools/build/proto-codegen/aws_query:
 expect_red aws_client_no_operations '`operations` is empty' tests//negative/mojo_aws_client:no_operations
 expect_red aws_client_joined_operations 'is not a botocore operation name' tests//negative/mojo_aws_client:joined_operations
 expect_red aws_client_no_runtime '`deps` is empty' tests//negative/mojo_aws_client:no_runtime
-expect_red aws_client_unknown_operation 'declares no operation(s) ["GetLogEvent"]' tests//negative/mojo_aws_client:unknown_operation
 expect_red aws_client_caller_test_red 'GATED TEST FAILED: tests//negative/mojo_aws_client:caller_test_red:test_logs_deliberate_failure.mojo' tests//negative/mojo_aws_client:caller_test_red
-expect_green aws_client_mode tests//functional/aws_client_mode:
 expect_red aws_client_duplicate_operation '`operations` names `GetLogEvents` twice' tests//negative/mojo_aws_client:duplicate_operation
 expect_red aws_client_overrides_without_hand_srcs '`overrides` is set and `hand_srcs` is empty' tests//negative/mojo_aws_client:overrides_without_hand_srcs
 expect_red aws_client_hand_srcs_without_overrides '`hand_srcs` is set and `overrides` is not' tests//negative/mojo_aws_client:hand_srcs_without_overrides
@@ -1186,7 +1135,6 @@ else
 fi
 
 # 38
-expect_green readme_examples tests//functional/readme_examples/...
 for want in "ok:PASS tests//functional/readme_examples/ok:ok:README.md" \
     "none:NO EXAMPLE tests//functional/readme_examples/none:none:README.md: no "; do
     t=${want%%:*}
@@ -1203,6 +1151,20 @@ expect_red readme_example_raises_counted 'readme_raises validation: 1 of 2 check
 expect_red readme_example_compile_error 'print(farewell("a"))  # README.md:9' tests//negative/readme_examples/compile_error:compile_error
 expect_red readme_example_skip_word 'negative/readme_examples/skip_word/README.md:3: `mojo skip`' tests//negative/readme_examples/skip_word:skip_word
 expect_red readme_example_shipped_relative_link 'negative/readme_examples/relative_link/README.md:11: greet.mojo: a relative link in a README that ships' tests//negative/readme_examples/relative_link:relative_link
+expect_red readme_owner_base_no_readme 'requested sub target named `readme`' 'tests//functional/readme_examples/owner:owner_base[tests][readme]'
+expect_red readme_unowned 'from unowned import top_word  # README.md:7' tests//negative/readme_examples/unowned:unowned_base
+# Load-time refusals: the case is a config value, so not expect_red's one target.
+for want in 'true_without_readme|`readme = True` and //negative/readme_examples/readme_keyword holds no README.md' \
+    'not_bool|`readme` takes True, False or nothing'; do
+    c=${want%%|*}
+    if "$BUCK2" build -c "readme_keyword.case=$c" tests//negative/readme_examples/readme_keyword:kw > "$LOG/readme_keyword_$c.log" 2>&1; then
+        fail "readme_keyword_$c: tests//negative/readme_examples/readme_keyword:kw built, but it must fail"
+    elif grep -qF -- "${want#*|}" "$LOG/readme_keyword_$c.log"; then
+        pass "readme_keyword_$c"
+    else
+        fail "readme_keyword_$c: failed without '${want#*|}' (see $LOG/readme_keyword_$c.log)"
+    fi
+done
 
 # 39
 # A test_weld target only declares its lint; its BXL script checks it
@@ -1210,10 +1172,6 @@ expect_red readme_example_shipped_relative_link 'negative/readme_examples/relati
 test_weld_check() { # name, lint target: the check's exit status, its log in $LOG
     "$BUCK2" bxl //tools/build/lint/test_weld.bxl:check -- --lint "$2" > "$LOG/$1.log" 2>&1
 }
-for lint in //:test_weld tests//functional/test_weld:ok tests//negative/test_weld/real:ok; do
-    name="test_weld_green_$(printf '%s' "${lint#*//}" | tr '/:' '__')"
-    if test_weld_check "$name" "$lint"; then pass "$name"; else fail "$name: $lint (see $LOG/$name.log)"; fi
-done
 tw_tree=tests//functional/test_weld/src
 for want in \
     "unwelded|$tw_tree/komira_a/tests/test_dead.mojo: a test file no target welds" \
@@ -1271,10 +1229,6 @@ expect_red readme_api_coverage_enforce_ledger "or give it a row in $L" "$N:enfor
 # 41
 # shellcheck source=tools/build/tests/coverage_tests.sh
 . "$ROOT/tools/build/tests/coverage_tests.sh"
-
-# 45
-# shellcheck source=tools/build/tests/assert_level_tests.sh
-. "$ROOT/tools/build/tests/assert_level_tests.sh"
 
 # 42
 expect_green pointer_lint //:pointer_lint tests//functional/pointer_lint:ok
@@ -1350,6 +1304,19 @@ for want in \
     expect_red "src_layout_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
 done
 
+# 49
+# shellcheck source=tools/build/tests/assert_level_tests.sh
+. "$ROOT/tools/build/tests/assert_level_tests.sh"
+# 51
+N=tests//negative/python_oracle
+F="which is not under third_party/; an oracle reads checked-in files and third_party/ outputs only"
+expect_red python_oracle_komira_data "the oracle's data \"encoding.mojoc\" is built by komira//src/komira_encoding:komira_encoding, $F" "$N:komira_data"
+expect_red python_oracle_komira_srcs "the oracle's srcs entry \"hello\" is built by komira//tools/build/examples:hello, $F" "$N:komira_srcs"
+expect_red python_oracle_local_wheel "the oracle's wheel local is built by tests//negative/python_oracle:local_wheel, $F" "$N:local_wheel_dep"
+expect_red python_oracle_local_tzdata "the oracle's wheel local is built by tests//negative/python_oracle:local_wheel, $F" "$N:local_tzdata"
+expect_red python_oracle_komira_src "the oracle's src is built by komira//tools/build/examples:hello, $F" "$N:komira_src"
+expect_red python_oracle_local_python "the oracle's python is built by tests//negative/python_oracle:stand_in_python, $F" "$N:local_python"
+
 # 52
 expect_green mojo_doc_json tests//functional/mojo_doc_json:docpkg_doc
 N=tests//negative/mojo_doc_json
@@ -1404,6 +1371,10 @@ done
 # A row naming a test incompatible with the lint's platform fails the build
 # even under a package pattern, so the lint never drops out of //... silently.
 scm_planted incompatible "because its transitive dep $E/pandas_e2e:test_mac" "$N/incompatible:"
+
+# 54
+# shellcheck source=tools/build/tests/node_tests.sh
+. "$ROOT/tools/build/tests/node_tests.sh"
 
 # 37
 pt_rc=0

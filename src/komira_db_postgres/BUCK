@@ -10,13 +10,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # poll-shaped query and transaction operations driven by a komira_async
 # reactor.
 #
-# The tests (all under wire/tests) need no database server: SCRAM and codec
-# vectors, hand-built rows, host resolution through /etc/hosts, and the
-# poll-shaped read frame driven over a local socketpair.
+# The tests (under tests/ and wire/tests) need no database server: SCRAM and codec
+# vectors, hand-built rows, host resolution through /etc/hosts, the
+# poll-shaped read frame driven over a local socketpair, and a PgConnection
+# reading a canned reply over an in-process TLS session on a socketpair (with
+# komira_http_core's throwaway test certificate).
 
 mojo_library(
     name = "komira_db_postgres",
-    srcs = glob(["**/*.mojo"], exclude = ["wire/tests/**/*.mojo"]),
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "wire/tests/**/*.mojo"]),
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_crypto:komira_crypto",
@@ -26,12 +28,26 @@ mojo_library(
         "//src/komira_net:komira_net",
     ],
     test_srcs = [
+        "tests/test_pg_driver_mappers.mojo",
+        "tests/test_pg_pool_lease.mojo",
         "wire/tests/test_binary_codec.mojo",
         "wire/tests/test_dns_resolve_pg_host.mojo",
+        "wire/tests/test_frame_and_wire_edges.mojo",
         "wire/tests/test_pg_query_op_poll.mojo",
         "wire/tests/test_pg_tx_op_sequence.mojo",
         "wire/tests/test_pgrow_accumulation.mojo",
+        "wire/tests/test_read_frame_guard.mojo",
         "wire/tests/test_scram_and_pgwire.mojo",
+        "wire/tests/test_server_free_helpers.mojo",
+        "wire/tests/test_truncated_closes_connection.mojo",
+        "wire/tests/test_truncated_messages.mojo",
+        "wire/tests/test_wire_decode_edges.mojo",
     ],
+    test_data = {
+        "wire/tests/test_truncated_closes_connection.mojo": {
+            "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+            "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+        },
+    },
     visibility = ["PUBLIC"],
 )

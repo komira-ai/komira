@@ -46,6 +46,9 @@ from .cell_parsers import (
     _try_parse_int16,
     _try_parse_int32,
     _try_parse_float32,
+    _try_parse_decimal128_to_int64,
+)
+from .temporal_parsers import (
     _try_parse_date64,
     _try_parse_timestamp_s,
     _try_parse_timestamp_ms,
@@ -59,7 +62,6 @@ from .cell_parsers import (
     _try_parse_duration_ms,
     _try_parse_duration_us,
     _try_parse_duration_ns,
-    _try_parse_decimal128_to_int64,
 )
 # ISO-8601
 # SIMD fast paths for Date64 / Timestamp_* / Time_*. Each ships with a

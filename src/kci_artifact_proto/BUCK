@@ -15,11 +15,14 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 # Reading, validating and rendering a build's argv is
 # `//src/kci_artifact`, whose welded tests also round-trip this
 # schema on the proto binary wire with every field number pinned as bytes.
+# `test_srcs` welds this package to its own wire test: every field of every
+# message written out as bytes (tests/test_artifact_wire.mojo).
 # Other `.proto` files import it as `kci/release/v1/artifact.proto`.
 mojo_proto_library(
     name = "kci_artifact_proto",
     srcs = ["artifact.proto"],
     import_prefix = "kci/release/v1",
     deps = ["//src/komira_proto_codec:komira_proto_codec"],
+    test_srcs = ["tests/test_artifact_wire.mojo"],
     visibility = ["PUBLIC"],
 )
