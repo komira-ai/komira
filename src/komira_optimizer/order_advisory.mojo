@@ -21,10 +21,12 @@
 # and never changes the plan it is given: the caller decides whether to log
 # the warning or run the reordered plan.
 #
-# All three walks descend through Filter, Project, Limit, Aggregate, Sort,
-# Distinct, PartitionBy and PartitionTopN to the joins below them (the
-# reorderer reorders each inner-join subtree between such nodes); any other
-# node, or a node without its payload, is a leaf.
+# One walk (`_walk`) collects the join count, the cost and the order
+# signature of a plan in a single pass; `advise_join_order` runs it on the
+# written plan and on the reordered one. It descends through Filter, Project,
+# Limit, Aggregate, Sort, Distinct, PartitionBy and PartitionTopN to the joins
+# below them (the reorderer reorders each inner-join subtree between such
+# nodes); any other node, or a node without its payload, is a leaf.
 # =============================================================================
 
 from komira_async.runtime.sched_trace import order_advisory_fire_inc

@@ -282,8 +282,10 @@ def test_cross_pass_is_a_second_report() raises:
 def test_cross_pass_overflow_is_reported() raises:
     """Twelve relations and no edges: the first pass emits nothing and
     completes; the cross pass stops at the iteration cap (500,001 calls)
-    and there is no plan. Catches: the overflow reported as a completed
-    pass."""
+    and there is no plan. The table handed back is the first pass's: the
+    twelve base entries and nothing else. Catches: the overflow reported as
+    a completed pass, and the table emptied (or replaced by the partial
+    cross-pass table) when the cross pass overflows."""
     var trace = DPccpTrace(UInt64(1))
     var none_edges = List[Int]()
     var plan = solve_dpccp_with_dp_trace(
@@ -295,6 +297,65 @@ def test_cross_pass_overflow_is_reported() raises:
     assert_true(trace.passes[0].completed)
     assert_false(trace.passes[1].completed)
     assert_equal(trace.passes[1].emit_calls, UInt64(500_001))
+    assert_equal(len(trace.dp), DPCCP_MAX_RELATIONS)
+    for i in range(DPCCP_MAX_RELATIONS):
+        assert_true(Bool(trace.entry_for(UInt64(1) << UInt64(i))))
+
+
+def test_first_pass_overflow_keeps_its_partial_table() raises:
+    """A twelve-relation clique: the literal-edge pass stops at the
+    iteration cap (500,001 calls), no cross pass runs, and there is no
+    plan. The table handed back is that pass's partial table: the twelve
+    base entries plus the pair entries scored before the cap. Catches: the
+    overflow reported as a completed pass, a cross pass run after a
+    first-pass overflow, and the table emptied on the overflow return."""
+    var ls = List[Int]()
+    var rs = List[Int]()
+    for i in range(DPCCP_MAX_RELATIONS):
+        for j in range(i + 1, DPCCP_MAX_RELATIONS):
+            ls.append(i)
+            rs.append(j)
+    var trace = DPccpTrace(UInt64(1))
+    var plan = solve_dpccp_with_dp_trace(
+        _chain(DPCCP_MAX_RELATIONS, ls, rs), _no_cost(), trace
+    )
+    assert_false(Bool(plan))
+    assert_equal(len(trace.passes), 1)
+    assert_false(trace.passes[0].allow_cross)
+    assert_false(trace.passes[0].completed)
+    assert_equal(trace.passes[0].emit_calls, UInt64(500_001))
+    for i in range(DPCCP_MAX_RELATIONS):
+        assert_true(Bool(trace.entry_for(UInt64(1) << UInt64(i))))
+    assert_true(len(trace.dp) > DPCCP_MAX_RELATIONS)
+
+
+def test_top_cross_rejection_keeps_the_cross_pass_table() raises:
+    """Components {0,1} and {2,3}, both pairs cheap: the cross pass's
+    cheapest full plan joins the components at the root with no keys, so
+    the solver rejects it and returns None. The table handed back is still
+    the one the solver read: the replayed cross-pass table, all 15 subsets,
+    the full set split {0,1} | {2,3}. Catches: the table emptied on the
+    top-level CROSS rejection."""
+    var cost = Dict[UInt64, Int]()
+    for bits in range(1, 16):
+        if bits & (bits - 1) != 0:
+            cost[UInt64(bits)] = 1_000_000_000
+    cost[_bits([0, 1])] = 1
+    cost[_bits([2, 3])] = 1
+    cost[UInt64(15)] = 5
+    var trace = DPccpTrace(UInt64(15))
+    assert_false(Bool(solve_dpccp_with_dp_trace(
+        _chain(4, [0, 2], [1, 3]), cost, trace
+    )))
+    assert_equal(len(trace.passes), 2)
+    assert_equal(len(trace.dp), 15)
+    var full = trace.entry_for(UInt64(15)).value().copy()
+    var l = full.best_left.bits
+    var r = full.best_right.bits
+    assert_true(
+        (l == _bits([0, 1]) and r == _bits([2, 3]))
+        or (l == _bits([2, 3]) and r == _bits([0, 1]))
+    )
 
 
 def _one_pass(chain: JoinChain, cap: Int, drop_bits: UInt64) raises -> DPccpTrace:
