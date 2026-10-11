@@ -22,7 +22,6 @@ tools/build/coverage/kcov/cov_zig_cases.sh	coverage and mutation tooling: to por
 tools/build/coverage/kcov/debug_relocate_cases.sh	coverage and mutation tooling: to port to Zig
 tools/build/coverage/mutate/mut_step.sh	coverage and mutation tooling: to port to Zig
 tools/build/coverage/mutate/mut_step_cases.sh	coverage and mutation tooling: to port to Zig
-tools/build/lint/lint.sh	lint or validation: to port to Zig
 tools/build/lint/readme_api_coverage.sh	lint or validation: to port to Zig
 tools/build/lint/test_weld.sh	lint or validation: to port to Zig
 tools/build/mojo/darwin/busybox.sh	a thin wrapper: the darwin applet allowlist
@@ -80,7 +79,6 @@ tools/build/tests/functional/watchdog/cases.sh	build system self-tests: to port 
 tools/build/tests/golden/golden.sh	build system self-tests: to port to Zig
 tools/build/tests/negative/lint_weld.sh	build system self-tests: to port to Zig
 tools/build/tests/proto_tests.sh	build system self-tests: to port to Zig
-tools/build/tests/public_boundary_tests.sh	build system self-tests: to port to Zig
 tools/build/tests/run_tests.sh	build system self-tests: to port to Zig
 tools/build/tests/rust_tests.sh	build system self-tests: to port to Zig
 tools/build/tests/tool_lib.sh	build system self-tests: to port to Zig

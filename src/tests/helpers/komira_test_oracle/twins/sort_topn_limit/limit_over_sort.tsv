@@ -1,0 +1,11 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: LIMIT 2 over SORT BY a ASC NULLS LAST takes the first two
+# rows of that order (§4.2, §4.7): a = 1 (id 3) and a = 2 (id 6), both
+# unique, so no tie reaches the boundary. The root is a LIMIT, not a SORT,
+# so no order is promised (§4.8) and the rows compare as a multiset.
+# Types: a LIMIT keeps its input columns, as scanned.
+id:int64	a:int64?	b:int64?	f:float64?
+3	1	2	-0.0
+6	2	1	0.0

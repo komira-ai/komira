@@ -3,19 +3,33 @@
 //! validation of `:cov_branch_tool` (what the branch coverage directories
 //! take). The cases in cov_branch_link_test.zig call the subcommand
 //! in-process with stand-in steps; these run the executable the public
-//! target hands out (module `exes`, the `zig_test`'s `exes`) as a child,
-//! over a stand-in busybox, lld and zig (cov_branch_link_stub.zig, each a
+//! target hands out (its path in the environment as COV_BRANCH, the
+//! `zig_test`'s `env_tools`) as a child, with an environment built here,
+//! over a stand-in busybox, lld and zig (cov_branch_link_stub.zig, its path
+//! as COV_BRANCH_LINK_STUB; each a
 //! symbolic link to it that records its arguments and environment), and
 //! check what only a process shows: the command line taken from argv, the
 //! scratch directory taken from BUCK_SCRATCH_PATH, the environment each
 //! step gets, both output streams of a step in the log a failure prints,
 //! messages on stderr and none on stdout, the exit status, a program that
-//! cannot be executed, and a failing write of stderr.
+//! cannot be executed, and a failing write of stderr. Without COV_BRANCH or
+//! COV_BRANCH_LINK_STUB every case fails: none passes without running the
+//! executable.
 
 const std = @import("std");
-const exes = @import("exes");
 const br = @import("bounded_run.zig");
 const testing = std.testing;
+
+/// The absolute path of the executable the zig_test's `env_tools` names
+/// `name` (COV_BRANCH, COV_BRANCH_LINK_STUB). A run without it fails
+/// loudly; it never passes unchecked.
+fn tool(a: std.mem.Allocator, name: []const u8) ![]const u8 {
+    const v = std.process.getEnvVarOwned(a, name) catch {
+        std.debug.print("the test target does not pass {s} (env_tools), so the executable cannot be run\n", .{name});
+        return error.TestToolMissing;
+    };
+    return std.fs.cwd().realpathAlloc(a, v);
+}
 
 const ELF = "\x7fELF\x02\x01\x01\x00binary";
 
@@ -37,7 +51,7 @@ const Box = struct {
         var b = Box{ .arena = std.heap.ArenaAllocator.init(testing.allocator), .tmp = testing.tmpDir(.{}) };
         const al = b.arena.allocator();
         b.root = try b.tmp.dir.realpathAlloc(al, ".");
-        const stub = try std.fs.cwd().realpathAlloc(al, exes.stub);
+        const stub = try tool(al, "COV_BRANCH_LINK_STUB");
         for ([_][]const u8{ "bb/busybox", "link/lld/bin/lld", "zig/zig" }) |s| {
             try b.tmp.dir.makePath(std.fs.path.dirname(s).?);
             try b.tmp.dir.symLink(stub, s, .{});
@@ -91,7 +105,7 @@ const Box = struct {
         const al = self.a();
         try self.tmp.dir.makePath("out");
         var argv = std.ArrayList([]const u8).init(al);
-        try argv.append(try std.fs.cwd().realpathAlloc(al, exes.cov_branch));
+        try argv.append(try tool(al, "COV_BRANCH"));
         try argv.appendSlice(args);
         var map = std.process.EnvMap.init(al);
         for (env) |e| try map.put(e[0], e[1]);
@@ -309,7 +323,7 @@ test "stderr that cannot be written: the exit status is the link's all the same"
     try b.put("zig/stub_rc", "1");
     const a = b.a();
     var argv = std.ArrayList([]const u8).init(a);
-    try argv.append(try std.fs.cwd().realpathAlloc(a, exes.cov_branch));
+    try argv.append(try tool(a, "COV_BRANCH"));
     try argv.appendSlice(&.{ "link", "--busybox", b.p("bb/busybox"), "--compiler", b.p("tc"), "--zig", b.p("zig"), "--target", "t", "--lld", b.p("link/lld/bin/lld"), "--runtime", b.p("link/llvm/runtime/libclang_rt.profile-x86_64.a"), "--bitcode", b.p("test_one.bc"), "--out", b.p("test_one") });
     const env = [_][]const u8{try std.fmt.allocPrint(a, "BUCK_SCRATCH_PATH={s}", .{b.p("scr")})};
     const out = b.p("stdout");

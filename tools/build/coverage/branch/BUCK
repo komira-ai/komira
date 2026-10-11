@@ -66,15 +66,16 @@ zig_exe(
 )
 
 # The shipped executable's `link` run as a process
-# (cov_branch_link_exe_test.zig) over the stand-ins. It runs the
-# executable, so it cannot be an input of it: it is a validation of
-# :cov_branch_tool instead.
+# (cov_branch_link_exe_test.zig) over the stand-ins. Their paths reach the
+# test in the environment (`env_tools`, COV_BRANCH and COV_BRANCH_LINK_STUB).
+# It runs the executable, so it cannot be an input of it: it is a validation
+# of :cov_branch_tool instead.
 zig_test(
     name = "cov_branch_link_exe_test",
     exec_compatible_with = LINUX_X86_64,
-    exes = {
-        "cov_branch": ":cov_branch_exe",
-        "stub": ":cov_branch_link_stub",
+    env_tools = {
+        "COV_BRANCH": ":cov_branch_exe",
+        "COV_BRANCH_LINK_STUB": ":cov_branch_link_stub",
     },
     imports = ["bounded_run.zig"],
     src = "cov_branch_link_exe_test.zig",
