@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
 load("@komira//tools/build/mojo:proto.bzl", "mojo_db_proto_library")
+load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 
 # The SQLite driver for komira_db: `SqliteDatabase` conforms to the
 # backend-generic `SqlDatabase` trait over the in-process libsqlite3 library,
@@ -23,6 +24,28 @@ mojo_library(
         # library 'sqlite3' using strategy 'paths_first'. searched paths:
         # none".
         "//third_party/sqlite:sqlite3",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# libkomira_db_sqlite_native.so.1: the C this library owns (SQLite, prefixed
+# komira_sqlite3_), as its own shared library exporting the names its callers
+# call (tools/build/native/README.md, "Each library's shared library"). Built
+# and checked here; no package ships it yet.
+native_shared_library(
+    name = "komira_db_sqlite_native",
+    archives = [
+        "//third_party/sqlite:sqlite3",
+    ],
+    callers = [
+        ":komira_db_sqlite",
+    ],
+    library = "komira_db_sqlite",
+    # Every weak undefined symbol of the library, recorded from its first
+    # green link (checks 3 and 7 hold it to exactly this list):
+    weak_undefined = [
+        # zig's C runtime (crti.o): the profiling hook, absent unless -pg.
+        "__gmon_start__",
     ],
     visibility = ["PUBLIC"],
 )

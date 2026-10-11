@@ -209,7 +209,7 @@ src/komira_sql	9987	-
 src/komira_supervisor	7878	-
 src/komira_supervisor_proto	0	-
 src/komira_sync	10000	10000
-src/komira_table_store	8524	-
+src/komira_table_store	9981	-
 src/komira_test_run_id	10000	10000
 src/komira_test_verdict	10000	-
 src/komira_textproto	10000	-
