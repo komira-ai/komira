@@ -15,7 +15,9 @@
 //!
 //! What the reader counts as code: comments (`#` to the end of the line)
 //! and triple-quoted strings (docstrings) are skipped, so a comment naming
-//! `OwnedDLHandle("libz.so.1")` opens nothing. A soname held in a file that
+//! `OwnedDLHandle("libz.so.1")` opens nothing. Strings end where the Mojo
+//! lexer ends them: a backslash escapes the next character in every kind,
+//! raw (`r"..."`) and triple-quoted ones included. A soname held in a file that
 //! does not itself name `OwnedDLHandle` is not seen; such a library is
 //! refused (its declaration names a soname no opening source holds), never
 //! packaged without the requirement.
@@ -110,8 +112,14 @@ pub fn scanSource(alloc: Alloc, text: []const u8) !Scan {
         if (c == '#') {
             while (i < text.len and text[i] != '\n') i += 1;
         } else if ((c == '"' or c == '\'') and i + 2 < text.len and text[i + 1] == c and text[i + 2] == c) {
-            const close = [3]u8{ c, c, c };
-            i = if (std.mem.indexOfPos(u8, text, i + 3, &close)) |e| e + 3 else text.len;
+            // Ends at the first unescaped triple of its quote: a backslash
+            // escapes the next character, as in the Mojo lexer (raw strings
+            // included: `r"""a\"""` is unterminated to it).
+            var j = i + 3;
+            while (j < text.len and !(j + 2 < text.len and text[j] == c and text[j + 1] == c and text[j + 2] == c)) : (j += 1) {
+                if (text[j] == '\\') j += 1;
+            }
+            i = @min(j + 3, text.len);
         } else if (c == '"' or c == '\'') {
             var j = i + 1;
             while (j < text.len and text[j] != c and text[j] != '\n') : (j += 1) {
@@ -328,6 +336,107 @@ test "scanSource: code after a multi-line docstring holding quotes is read" {
     try expectOpensZlibAndRefusedUndeclared("'''Opens \"libz\".\nIt's here.\n'''\nh = OwnedDLHandle(\"libz.so.1\")\n");
 }
 
+test "scanSource: code after a single-quoted string on the same line is read" {
+    // A single-quoted literal ends at its closing `'`, not at the newline.
+    try expectOpensZlibAndRefusedUndeclared("m = 'r'; h = OwnedDLHandle(\"libz.so.1\")\n");
+}
+
+test "scanSource: a single-quoted soname literal is held" {
+    var arena = testAlloc();
+    defer arena.deinit();
+    const scan = try scanSource(arena.allocator(), "h = OwnedDLHandle('libz.so.1')\n");
+    try testing.expect(scan.opens);
+    try testing.expectEqual(@as(usize, 1), scan.sonames.len);
+    try testing.expectEqualStrings("libz.so.1", scan.sonames[0]);
+}
+
+test "scanSource: an escaped quote inside single quotes does not end the literal" {
+    // `'a\'b'` is one literal. Ended at the escaped quote, the reader would
+    // open a literal at the real closing `'` and run it to the newline,
+    // swallowing the call.
+    try expectOpensZlibAndRefusedUndeclared("m = 'a\\'b'; h = OwnedDLHandle(\"libz.so.1\")\n");
+}
+
+test "scanSource: a raw-string prefix does not hide the literal" {
+    // Mojo's `r"..."`: the prefix is read as an identifier and the literal
+    // after it as a literal.
+    try expectOpensZlibAndRefusedUndeclared("h = OwnedDLHandle(r\"libz.so.1\")\n");
+}
+
+test "scanSource: a backslash-quote inside a raw string does not end it" {
+    // The Mojo 1.0 lexer, like Python's, does not end `r"a\"b"` at `\"`
+    // (`r"a\"` alone is "unterminated string"; farm probe, fix round 3). A
+    // reader treating backslashes in a raw string as plain characters would
+    // end it at `\"` and swallow the call into the next literal.
+    try expectOpensZlibAndRefusedUndeclared("p = r\"a\\\"b\"; h = OwnedDLHandle(\"libz.so.1\")\n");
+}
+
+test "scanSource: an escaped quote inside a triple-quoted string does not end it" {
+    // `"""x \""" y"""` is one string to the Mojo lexer. Ended at `\"""`, the
+    // reader would start a new triple-quoted string at the real end and
+    // swallow the code up to the next docstring: an opening source read as
+    // opening nothing, its package made without the requirement.
+    try expectOpensZlibAndRefusedUndeclared("\"\"\"x \\\"\"\" y\"\"\"\nh = OwnedDLHandle(\"libz.so.1\")\n\"\"\"end\"\"\"\n");
+}
+
+test "isSoname: a version of several multi-digit parts" {
+    try testing.expect(isSoname("libz.so.1.2.13"));
+    try testing.expect(isSoname("libfoo.so.10"));
+}
+
+test "isSoname: underscores and dashes in the name" {
+    try testing.expect(isSoname("libgcc_s.so.1"));
+    try testing.expect(isSoname("libLLVM-17.so.1"));
+}
+
+test "isSoname: a dot in the name is not a soname" {
+    // `lib<name>.so`, the name without dots: `libpython3.12.so.1.0` is
+    // refused as a --dlopen value and not held by the scan (a source opening
+    // it is then refused as opening an undeclared library, never accepted).
+    try testing.expect(!isSoname("libpython3.12.so.1.0"));
+    try testing.expect(!isSoname("libz.1.so.1"));
+}
+
+test "dlopenReason: a soname opened twice in one source counts once" {
+    var arena = testAlloc();
+    defer arena.deinit();
+    const a = arena.allocator();
+    // z, lz4, z: the repeat is not next to its first (a reader comparing only
+    // with the last one held keeps both)
+    const text = "a = OwnedDLHandle(\"libz.so.1\")\nb = OwnedDLHandle(\"liblz4.so.1\")\nc = OwnedDLHandle(\"libz.so.1\")\n";
+    const scan = try scanSource(a, text);
+    try testing.expectEqual(@as(usize, 2), scan.sonames.len);
+    try testing.expect((try dlopenReason(a, &.{.{ .path = "x.mojo", .text = text }}, &.{ lz4, zlib })) == null);
+}
+
+test "dlopenReason: a soname opened in two sources counts once" {
+    var arena = testAlloc();
+    defer arena.deinit();
+    const a = arena.allocator();
+    const z = "h = OwnedDLHandle(\"libz.so.1\")\n";
+    const l = "h = OwnedDLHandle(\"liblz4.so.1\")\n";
+    try testing.expect((try dlopenReason(a, &.{ .{ .path = "a.mojo", .text = z }, .{ .path = "b.mojo", .text = l }, .{ .path = "c.mojo", .text = z } }, &.{ lz4, zlib })) == null);
+}
+
+test "dlopenReason: a declared soname held only by a source that opens nothing is refused" {
+    var arena = testAlloc();
+    defer arena.deinit();
+    const a = arena.allocator();
+    // names.mojo holds the lz4 soname but does not name OwnedDLHandle: its
+    // literals are not read, so lz4 is declared and not opened.
+    const why = try refusal(try dlopenReason(a, &.{ .{ .path = "names.mojo", .text = "LZ4 = \"liblz4.so.1\"\n" }, .{ .path = "zlib_ffi.mojo", .text = zlib_src } }, &.{ lz4, zlib }));
+    try testing.expect(std.mem.indexOf(u8, why, "zlib_ffi.mojo: opens a shared library at run time (OwnedDLHandle); its sources name [libz.so.1] and the library declares `dlopen` [liblz4.so.1, libz.so.1]") != null);
+}
+
+test "dlopenReason: the refusal names the first source that opens" {
+    var arena = testAlloc();
+    defer arena.deinit();
+    const a = arena.allocator();
+    // n.mojo comes first and opens nothing; a.mojo and b.mojo open
+    const why = try refusal(try dlopenReason(a, &.{ .{ .path = "n.mojo", .text = "x = 1\n" }, .{ .path = "a.mojo", .text = zlib_src }, .{ .path = "b.mojo", .text = "h = OwnedDLHandle(\"liblz4.so.1\")\n" } }, &.{}));
+    try testing.expect(std.mem.startsWith(u8, why, "a.mojo: opens a shared library at run time (OwnedDLHandle); its sources name [liblz4.so.1, libz.so.1]"));
+}
+
 test "dlopenReason: a declared soname is accepted" {
     var arena = testAlloc();
     defer arena.deinit();
@@ -358,6 +467,11 @@ test "dlopenReason: as many sonames declared as opened, but other names, is refu
     // the first names differ and the second equal: not only the last
     const first = try refusal(try dlopenReason(a, &.{.{ .path = "c.mojo", .text = "a = OwnedDLHandle(\"libbz2.so.1.0\")\nb = OwnedDLHandle(\"libz.so.1\")\n" }}, &.{ lz4, zlib }));
     try testing.expect(std.mem.indexOf(u8, first, "its sources name [libbz2.so.1.0, libz.so.1] and the library declares `dlopen` [liblz4.so.1, libz.so.1]") != null);
+    // names of one length: opens libz.so.1, declares libm.so.6 (a reader
+    // comparing lengths, not bytes, accepts)
+    const libm = Dlopen{ .soname = "libm.so.6", .requirement = "libm >=1,<2" };
+    const same_len = try refusal(try dlopenReason(a, &.{.{ .path = "zlib_ffi.mojo", .text = zlib_src }}, &.{libm}));
+    try testing.expect(std.mem.indexOf(u8, same_len, "its sources name [libz.so.1] and the library declares `dlopen` [libm.so.6]") != null);
     // opens a library by a name it cannot see and declares nothing: zero
     // opened and zero declared are equal counts, and still refused
     const unseen = try refusal(try dlopenReason(a, &.{.{ .path = "x.mojo", .text = "h = OwnedDLHandle(name)\n" }}, &.{}));
