@@ -445,6 +445,8 @@ def _oci_image_impl(ctx):
         # komira_pack (zig): the bundle at /opt/<name>/.
         tool, category = [ctx.attrs._pack[RunInfo], "oci", "--bundle", b.dir], "komira_pack_oci"
         name, version, guard, platform = b.name, b.version, b.kcov_guard, b.platform
+        # The release member is the bundle's program.
+        member, member_from = b.name, "the bundle's program"
     else:
         t = ctx.attrs.tree[OciTreeInfo]
         # komira_oci (zig): the tree at /.
@@ -453,6 +455,10 @@ def _oci_image_impl(ctx):
         category = "komira_oci_image"
         # oci_tree takes only linux-x86_64 bundles, and the image is linux/amd64.
         name, version, guard, platform = t.name, t.version, t.kcov_guard, "linux-x86_64"
+        # The release member is the image, not the tree (one tree can make
+        # several images): the last segment of its repository, as written.
+        member = ctx.attrs.repository.split("/")[-1]
+        member_from = "the last segment of the repository"
     if not regex_match("^[a-z0-9]+([._/-][a-z0-9]+)*$", ctx.attrs.repository):
         fail("{}: repository `{}` is not an image repository name".format(ctx.label, ctx.attrs.repository))
     base = ctx.attrs.base[OciBaseInfo]
@@ -510,11 +516,11 @@ def _oci_image_impl(ctx):
     # BUILD step copies into the release set (`--out <release_dir>/<name>`).
     # The manifest is written from the digest the image action wrote, in the
     # bytes kci's `render_artifact_manifest` writes (src/kci_artifact_manifest):
-    # type OCI, the image's name (the bundle's program, or the oci_tree's
-    # name) as the name, `file` the layout directory, `sha256` the image
-    # manifest digest's hex. kci's
-    # `verify_member` reads it back over the real hello_image
-    # (src/kci_release_set/tests/test_oci_member.mojo).
+    # type OCI, the member name (the bundle's program for a bundle image, the
+    # repository's last segment for a tree image), `file` the layout
+    # directory, `sha256` the image manifest digest's hex. kci's
+    # `verify_member` reads it back over the real hello_image and
+    # hello_root_image (src/kci_release_set/tests/test_oci_member.mojo).
     manifest = ctx.actions.declare_output(ctx.label.name + ".release_manifest.json")
     ctx.actions.run(
         busybox_sh(
@@ -522,10 +528,13 @@ def _oci_image_impl(ctx):
             _OCI_RELEASE_MANIFEST,
             manifest.as_output(),
             digest,
-            name,
+            member,
             version,
             platform,
             layout.basename,
+            str(ctx.label.raw_target()),
+            ctx.attrs.repository,
+            member_from,
         ),
         category = "oci_release_manifest",
     )
@@ -552,21 +561,25 @@ def _oci_image_impl(ctx):
 
 # The artifact manifest of an image (`oci_image[release]`): compact JSON in the
 # key order of kci's `render_artifact_manifest`, one trailing newline. Refuses,
-# naming the reason, a digest that is not `sha256:<64 lowercase hex>` and an
-# image name (the bundle's program or the oci_tree's name) that is not a kci
-# artifact name ([a-z][a-z0-9_]*: the release set keys members by it). The
-# version and the layout's name are plain (mojo_bundle, oci_tree and buck2
-# refuse anything else), so nothing needs escaping.
+# naming the reason, a digest that is not `sha256:<64 lowercase hex>`, and a
+# member name that is not a kci artifact name ([a-z][a-z0-9_]*: the release
+# set keys members by it), naming the image, its repository and where the name
+# came from. The name is refused, never rewritten: a repository whose last
+# segment has a hyphen or a dot (`komira/oci-check`) is a valid image but has
+# no `[release]`. The version and the layout's name are plain (mojo_bundle,
+# oci_tree and buck2 refuse anything else), so nothing needs escaping.
 _OCI_RELEASE_MANIFEST = """
 BB="$1"; OUT="$2"; DIGEST="$3"; NAME="$4"; VERSION="$5"; PLATFORM="$6"; FILE="$7"
+LABEL="$8"; REPO="$9"; FROM="${10}"
 case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
-no() { echo "oci_image[release]: $*" >&2; exit 1; }
+no() { echo "oci_image[release] of $LABEL (repository $REPO): $*" >&2; exit 1; }
 d=$("$BB" cat "$DIGEST")
 hex="${d#sha256:}"
 [ "$d" = "sha256:$hex" ] && [ "${#hex}" = 64 ] || no "$DIGEST holds '$d', not sha256:<64 hex>"
 case "$hex" in *[!0-9a-f]*) no "$DIGEST holds '$d', not sha256:<64 lowercase hex>" ;; esac
-case "$NAME" in [a-z]*) ;; *) no "program '$NAME' is not a kci artifact name ([a-z][a-z0-9_]*)" ;; esac
-case "$NAME" in *[!a-z0-9_]*) no "program '$NAME' is not a kci artifact name ([a-z][a-z0-9_]*)" ;; esac
+bad="member name '$NAME' ($FROM) is not a kci artifact name ([a-z][a-z0-9_]*)"
+case "$NAME" in [a-z]*) ;; *) no "$bad" ;; esac
+case "$NAME" in *[!a-z0-9_]*) no "$bad" ;; esac
 printf '{"format":"kci.artifact_manifest","schema_version":1,"artifact_type":"OCI","name":"%s","version":"%s","platform":"%s","file":"%s","sha256":"%s"}\n' \
     "$NAME" "$VERSION" "$PLATFORM" "$FILE" "$hex" > "$OUT"
 """
@@ -599,9 +612,12 @@ def oci_image(**kwargs):
     holds the manifest digest; `[layers]` the digest of each layer of the
     manifest, one per line, in order. `[release]` is what a release set
     holds: the layout and kci's artifact manifest (`manifest.json`: type
-    OCI, name the bundle's program or the oci_tree's name, `file` the layout
-    directory, `sha256` the hex of `[digest]`); `[release][manifest]` is that
-    manifest alone. Nothing is pushed.
+    OCI, name the bundle's program for a `bundle` image and the last segment
+    of `repository` for a `tree` image, `file` the layout directory,
+    `sha256` the hex of `[digest]`); `[release][manifest]` is that manifest
+    alone. A name that is not a kci artifact name ([a-z][a-z0-9_]*, so no
+    hyphen or dot) fails building `[release]`, naming the image and its
+    repository; it is never rewritten. Nothing is pushed.
     """
     _oci_image(exec_compatible_with = LINUX_X86_64, **kwargs)
 

@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
 load("@komira//tools/build/mojo:doc.bzl", "mojo_doc_json")
 load("@komira//tools/build/mojo:run_check.bzl", "run_check_wired")
-load("//tools/build/package:defs.bzl", "bundle_tarball", "mojo_bundle", "oci_image")
+load("//tools/build/package:defs.bzl", "bundle_tarball", "mojo_bundle", "oci_image", "oci_tree")
 
 # A binary with no dependencies. `[run_check]` runs it remotely and compares
 # its stdout byte for byte.
@@ -38,6 +38,24 @@ oci_image(
     name = "hello_image",
     bundle = ":hello_bundle",
     repository = "komira/hello",
+    visibility = ["//src/kci_release_set:"],
+)
+
+# The same bundle as an image of a tree (oci_tree, at /app/): kci_release_set's
+# welded test reads its `[release]` too, whose member name is `hello_root`,
+# the last segment of the repository, not the tree's name. The tree and
+# repository names differ on purpose, so the test tells which one was used.
+oci_tree(
+    name = "hello_layer",
+    bundles = {"app/": ":hello_bundle"},
+    version = "0.1.0",
+)
+
+oci_image(
+    name = "hello_root_image",
+    tree = ":hello_layer",
+    entrypoint = "/app/bin/hello",
+    repository = "komira/hello_root",
     visibility = ["//src/kci_release_set:"],
 )
 

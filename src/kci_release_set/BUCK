@@ -15,7 +15,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # byte-exact, round-tripped and refused; the set hash against a golden vector.
 # An OCI member (an image) is the one whose `file` is a directory, its layout,
 # verified with komira_oci's `read_oci_layout` (every blob hashed); its test
-# reads the real //tools/build/examples:hello_image[release].
+# reads the real //tools/build/examples:hello_image[release] (an image of a
+# bundle) and :hello_root_image[release] (an image of a tree).
 mojo_library(
     name = "kci_release_set",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -34,8 +35,9 @@ mojo_library(
         # every verify_member refusal, one changed thing per case
         "tests/test_verify_member.mojo",
         # an OCI member: hello_image[release] verifies and its digest is in the
-        # set hash; a flipped layer byte, a digest the layout does not have and
-        # every OCI refusal by its message
+        # set hash; hello_root_image[release] (a tree image) verifies with its
+        # name, platform and [digest]; a flipped layer byte, a digest the
+        # layout does not have and every OCI refusal by its message
         "tests/test_oci_member.mojo",
         # release.json: byte-exact render, parse(render(x)) == x, every refusal
         "tests/test_release_manifest.mojo",
@@ -56,6 +58,8 @@ mojo_library(
         "tests/test_oci_member.mojo": {
             "hello": "//tools/build/examples:hello_image[release]",
             "hello_image.digest": "//tools/build/examples:hello_image[digest]",
+            "hello_root": "//tools/build/examples:hello_root_image[release]",
+            "hello_root_image.digest": "//tools/build/examples:hello_root_image[digest]",
         },
         # the table as the build evaluates it (system_libs_record.bzl)
         "tests/test_system_libs.mojo": {"system_libs.txt": "//tools/build/package:system_libs"},
