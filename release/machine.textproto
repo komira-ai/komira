@@ -16,9 +16,10 @@
 #          linux-x86_64, into a release directory with release.json. It is
 #          FARM-CONNECTED: its job joins the tailnet to reach the build farm,
 #          and so it may never publish.
-#   gamma  publishes that release set to the channel `gamma` (prefix.dev
-#          komira-ai/gamma, release/channels.textproto), in the GitHub
-#          environment `gamma` that the channel's trusted publisher names.
+#   beta   publishes that release set to the channel `beta` (prefix.dev
+#          komira-ai/beta, release/channels.textproto), in the GitHub
+#          environment `beta` that the channel's trusted publisher names,
+#          on a push to main only (no `break_glass`, below).
 #          Its two validations then install what was published the way a
 #          consumer gets it, each on the machine that runs kci with no
 #          container (CONDA_INSTALL_ENV: the pinned pixi, a fresh scratch
@@ -36,8 +37,8 @@
 #                                     requirements (they must be exactly the
 #                                     release's libraries, at its version and
 #                                     build) and checks every one of them
-#          kci.yml runs the stage as two jobs: `gamma` (`--only
-#          step:publish`) and `validate` (`--only validation:<name>` for each
+#          kci.yml runs the stage as two jobs: `beta` (`--only
+#          step:publish`) and `beta_validate` (`--only validation:<name>` for each
 #          of the two, no environment, no identity token), and prod waits
 #          for both.
 #          Each validation is also a target a developer runs, before or
@@ -45,12 +46,12 @@
 #          (release/validations/BUCK, held equal to the validations here).
 #   prod   publishes the SAME release set (never rebuilt) to the channel
 #          `prod` (prefix.dev komira-ai/prod), in the GitHub environment
-#          `prod`, after gamma's publish and validation, on every push to main
+#          `prod`, after beta's publish and validation, on every push to main
 #          (continuous auto-promotion). It is the one stage that is not
 #          break_glass: it runs only on a push to main, for the pushed commit
 #          on main's history, and never publishes a build number lower than
 #          its channel holds.
-#          The gamma job's summary lists the names new to prod (NEW NAMES).
+#          The beta job's summary lists the names new to prod (NEW NAMES).
 #   pr     the per-change check of a pull request (trigger PULL_REQUEST):
 #          `kci run --stage pr --affected-by <the merge commit's first parent>`
 #          builds, with each build system's `build_targets` command, exactly
@@ -65,16 +66,17 @@
 #          identity token is the farm connection's only. It runs after no
 #          stage and no stage runs after it.
 #
-# BREAK-GLASS: build and gamma are `break_glass: true`, so a manual run (of
-# any branch, main included; with a required reason) builds and publishes
-# its revision to gamma, and stops there; prod is not, so only a push to
-# main reaches it. The break-glass stages are a prefix of the chain (the
-# machine file refuses a break_glass stage after one that is not). A
-# break-glass run of gamma runs in the GitHub environment
-# `gamma-breakglass` (`break_glass_environment`), not `gamma`: `gamma` is
-# locked to main, and `gamma-breakglass` has a required reviewer, so every
-# break-glass publish waits for an approval GitHub records (docs/ci.md,
-# "Break-glass"). The channel names both trusted publishers.
+# BREAK-GLASS: only build is `break_glass: true`, so a manual run (of any
+# branch, main included; with a required reason) builds its revision on
+# the farm and stops there: it publishes nothing. beta and prod are not
+# break_glass, so only a push to main reaches them: the workflow's `if:`
+# on each of their jobs (rule R15 of src/kci_workflow_check), its step
+# `only a push to main reaches this job` (R21), and kci itself
+# (KCI-E-NOT-ON-MAIN). The GitHub environment `beta` has no branch
+# policy, so those three, not the environment, keep a branch's or a
+# manual run's publish out of the channel `beta`. The break-glass stages
+# are a prefix of the chain (the machine file refuses a break_glass stage
+# after one that is not).
 #
 # A stage's `environment` is the GitHub environment its job runs in, and the
 # one its channel's trusted publisher names (push_identity
@@ -103,18 +105,16 @@ stage {
 }
 
 stage {
-  name: "gamma"
-  environment: "gamma"
+  name: "beta"
+  environment: "beta"
   after: "build"
-  break_glass: true
-  break_glass_environment: "gamma-breakglass"
   step {
     name: "publish"
     kind: PUBLISH
     platform: "linux-x86_64"
     artifacts: "release/artifacts.textproto"
     channels: "release/channels.textproto"
-    channel: "gamma"
+    channel: "beta"
     # Each validation installs from the step's channel only; mojo-compiler,
     # pinned to the libraries' mojo_pin, comes from compiler_channel, and
     # its own dependencies (python for mojo-python) from conda-forge. Only
@@ -145,7 +145,7 @@ stage {
 stage {
   name: "prod"
   environment: "prod"
-  after: "gamma"
+  after: "beta"
   step {
     name: "publish"
     kind: PUBLISH

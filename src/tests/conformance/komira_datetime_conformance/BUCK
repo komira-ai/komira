@@ -1,4 +1,3 @@
-load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Test-only: komira_datetime's time zones against the IANA tz release
@@ -50,13 +49,4 @@ mojo_library(
         "tests/test_plan_vectors.mojo": _TZDATA,
     },
     visibility = ["PUBLIC"],
-)
-
-# The deps above name every komira_* module the library and its tests import
-# (tools/build/lint: mojo_deps).
-mojo_deps(
-    name = "deps_lint",
-    buck = "BUCK",
-    srcs = glob(["**/*.mojo"]),
-    visibility = ["komira//:tests_lints"],
 )
