@@ -1,0 +1,11 @@
+{
+ "name": "schema_flags_exported",
+ "defect": "the borrowed schemas carry wrong flags: the argument struct nullable, a non-nullable field marked nullable, or a nullable result not marked (ArrowSchema.flags, ARROW_FLAG_NULLABLE = 2)",
+ "run": "call_batch",
+ "entry": "flags_probe",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": false}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 3, "columns": [{"type": "int64", "values": [7, 8, 9]}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [0, 0, 2]}}
+}

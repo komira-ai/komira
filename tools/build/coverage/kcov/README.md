@@ -49,7 +49,7 @@ The rewrite has to satisfy two things at once:
 So a directory of length L becomes `/` and L-1 `_`. A name under the
 placeholder could be mapped with `--replace-src-path='^/_+:<source root>'`
 (the expression matches the placeholder of any length, so no length needs to
-agree between actions), as kcov's own check 8 does
+agree between actions), as kcov's own check 6 does
 ([kcov](../../toolchains/kcov/README.md)); in a Mojo binary that is only the
 C runtime, which is not measured, and the Mojo names are relative (see the
 table below), so [cov_run](#cov_run) uses the one replacement kcov allows

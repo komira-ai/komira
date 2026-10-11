@@ -259,7 +259,7 @@ def test_a_failing_or_garbled_derive_tool_is_cannot_tell() raises:
 
 
 def test_a_broken_derive_answer_fails_the_check() raises:
-    # release/ci/derive_checks.py answers BROKEN when its universe query
+    # //tools/build/ci:derive_checks answers BROKEN when its universe query
     # fails (a target with an unknown dependency, here buck2's own text):
     # the check is FAILED naming the reason, not "cannot tell" and never a
     # widening; no affected command runs and nothing is built. A kci that
