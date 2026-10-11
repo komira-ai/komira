@@ -61,6 +61,7 @@ mojo_library(
         "tests/test_fake_composite.mojo",
         "tests/test_fake_kci_job.mojo",
         "tests/test_fake_kci_app.mojo",
+        "tests/test_fake_typed_refusal.mojo",
         "tests/test_fake_derived_grants.mojo",
     ],
     test_data = {
