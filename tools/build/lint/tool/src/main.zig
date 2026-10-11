@@ -1,6 +1,6 @@
 //! lint: the action behind the lint rules in tools/build/lint/defs.bzl.
 //!
-//! usage: lint <busybox> <result.json> <kind> <stage> <prefix> [tools...] -- <args...>
+//! usage: lint <result.json> <kind> <stage> <prefix> [tools...] -- <args...>
 //!
 //! Runs one lint over its inputs and writes <result.json>, the validation
 //! result Buck2 reads (ValidationInfo): status "failure" with the findings as
@@ -15,23 +15,22 @@
 //!   shellcheck, actionlint, doc_links       tools.zig (a pinned tool's findings)
 //!   action_pins, push_verdicts, no_endpoint workflow.zig
 //!   retired_names, src_layout               tree.zig
-//!   public_boundary                         readers.zig (an awk reader, run by <busybox>)
-//! The pointer_lint rule runs a Zig tool of its own (tools/build/lint/pointer_lint.zig).
+//! The pointer_lint and public_boundary rules each run a Zig tool of their own
+//! (tools/build/lint/pointer_lint.zig, tools/build/lint/public_boundary).
 //!
 //! Exit status: 0 the result is written (either status); 1 an input cannot be
 //! read, a tool cannot be run or the result cannot be written; 2 bad usage.
 //!
-//! A static executable: it runs no shell and reads no PATH. Only <busybox>
-//! (its awk, for public_boundary's reader) and the pinned tools passed in run.
+//! A static executable: it runs no shell and reads no PATH. Only the pinned
+//! tools passed in run.
 
 const std = @import("std");
 const lint = @import("lint.zig");
 const tools = @import("tools.zig");
 const workflow = @import("workflow.zig");
 const tree = @import("tree.zig");
-const readers = @import("readers.zig");
 
-const usage = "usage: lint <busybox> <result.json> <kind> <stage> <prefix> [tools...] -- <args...>\n";
+const usage = "usage: lint <result.json> <kind> <stage> <prefix> [tools...] -- <args...>\n";
 
 fn usageFail(comptime fmt: []const u8, args: anytype) noreturn {
     std.debug.print("lint: " ++ fmt ++ "\n" ++ usage, args);
@@ -49,7 +48,6 @@ pub fn dispatch(c: *lint.Ctx, kind: []const u8, tl: []const []const u8, args: []
     if (eql(u8, kind, "shellcheck")) return tools.shellcheck(c, tl, args);
     if (eql(u8, kind, "actionlint")) return tools.actionlint(c, tl, args);
     if (eql(u8, kind, "doc_links")) return tools.docLinks(c, tl, args);
-    if (eql(u8, kind, "public_boundary")) return readers.publicBoundary(c, tl, args);
     if (tl.len != 0) return error.Usage;
     if (eql(u8, kind, "action_pins")) return workflow.actionPins(c, args);
     if (eql(u8, kind, "push_verdicts")) return workflow.pushVerdicts(c, args);
@@ -78,24 +76,23 @@ pub fn main() void {
     defer arena.deinit();
     const alloc = arena.allocator();
     const argv = std.process.argsAlloc(alloc) catch fail("out of memory", .{});
-    if (argv.len < 6) usageFail("too few arguments", .{});
-    const kind = argv[3];
-    const stage = argv[4];
-    var sep: usize = 6;
+    if (argv.len < 5) usageFail("too few arguments", .{});
+    const kind = argv[2];
+    const stage = argv[3];
+    var sep: usize = 5;
     while (sep < argv.len and !std.mem.eql(u8, argv[sep], "--")) sep += 1;
     if (sep == argv.len) usageFail("no `--` before the arguments", .{});
-    const tl: []const []const u8 = argv[6..sep];
+    const tl: []const []const u8 = argv[5..sep];
     const args: []const []const u8 = argv[sep + 1 ..];
 
     const scratch = scratchDir(alloc) catch |err| fail("cannot make a scratch directory: {s}", .{@errorName(err)});
-    var c = lint.Ctx.init(alloc, "", stage, scratch);
-    c.busybox = c.abs(argv[1]) catch fail("out of memory", .{});
+    var c = lint.Ctx.init(alloc, stage, scratch);
     dispatch(&c, kind, tl, args) catch |err| switch (err) {
         error.Usage => usageFail("bad arguments for kind {s}", .{kind}),
         error.UnknownKind => usageFail("unknown kind {s}", .{kind}),
         else => fail("{s}: {s}", .{ kind, @errorName(err) }),
     };
-    const json = lint.result(alloc, kind, stage, argv[5], c.report.items, c.checked) catch fail("out of memory", .{});
-    std.fs.cwd().writeFile(argv[2], json) catch |err| fail("cannot write {s}: {s}", .{ argv[2], @errorName(err) });
+    const json = lint.result(alloc, kind, stage, argv[4], c.report.items, c.checked) catch fail("out of memory", .{});
+    std.fs.cwd().writeFile(argv[1], json) catch |err| fail("cannot write {s}: {s}", .{ argv[1], @errorName(err) });
     std.fs.cwd().deleteTree(scratch) catch {};
 }

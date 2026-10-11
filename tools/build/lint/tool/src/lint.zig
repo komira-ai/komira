@@ -11,8 +11,6 @@ pub const max_bytes = 1 << 30;
 /// One lint run: the findings so far and how many inputs were checked.
 pub const Ctx = struct {
     alloc: Alloc,
-    /// The pinned busybox, an absolute path (its awk runs the readers).
-    busybox: []const u8,
     /// The staged copies of the linted files (a buck-out directory). Findings
     /// name them under it; `result` renames them.
     stage: []const u8,
@@ -23,8 +21,8 @@ pub const Ctx = struct {
     /// The inputs checked: a run that checks none fails.
     checked: usize = 0,
 
-    pub fn init(alloc: Alloc, busybox: []const u8, stage: []const u8, scratch: []const u8) Ctx {
-        return .{ .alloc = alloc, .busybox = busybox, .stage = stage, .scratch = scratch, .report = std.ArrayList(u8).init(alloc) };
+    pub fn init(alloc: Alloc, stage: []const u8, scratch: []const u8) Ctx {
+        return .{ .alloc = alloc, .stage = stage, .scratch = scratch, .report = std.ArrayList(u8).init(alloc) };
     }
 
     /// Adds one finding line.

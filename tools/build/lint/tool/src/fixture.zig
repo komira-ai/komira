@@ -45,7 +45,7 @@ pub const Fixture = struct {
         const scratch = try f.path("scratch");
         try std.fs.cwd().makePath(scratch);
         try f.tmp.dir.makePath(stage);
-        var c = lint.Ctx.init(f.alloc(), try busybox(f.alloc()), try f.path(stage), scratch);
+        var c = lint.Ctx.init(f.alloc(), try f.path(stage), scratch);
         try main.dispatch(&c, kind, tools, args);
         const json = try lint.result(f.alloc(), kind, c.stage, "test//", c.report.items, c.checked);
         return .{ .report = c.report.items, .checked = c.checked, .json = json };
@@ -88,12 +88,5 @@ pub fn tool(alloc: std.mem.Allocator, name: []const u8) ![]const u8 {
         std.debug.print("the test target does not pass {s}\n", .{name});
         return error.TestToolMissing;
     };
-    return std.fs.cwd().realpathAlloc(alloc, v);
-}
-
-/// The pinned busybox when the target passes it (the reader tests require
-/// it with `tool`), else a name no test runs.
-fn busybox(alloc: std.mem.Allocator) ![]const u8 {
-    const v = std.process.getEnvVarOwned(alloc, "LINT_BUSYBOX") catch return "busybox";
     return std.fs.cwd().realpathAlloc(alloc, v);
 }

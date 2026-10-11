@@ -24,7 +24,6 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":doc_tree.bzl", "DocTreeInfo", "collect_docs", "declares_docs")
 
 _COMMON = {
-    "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
     "_lint": attrs.exec_dep(default = "komira//tools/build/lint/tool:lint", providers = [RunInfo]),
 }
 
@@ -43,10 +42,9 @@ def _stage(ctx, files):
 
 def _lint(ctx, kind, tools, args, staged):
     result = ctx.actions.declare_output("validation.json")
-    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     package = ctx.label.package + "/" if ctx.label.package else ""
     ctx.actions.run(
-        cmd_args(ctx.attrs._lint[RunInfo], bb, result.as_output(), kind, staged, "{}//{}".format(ctx.label.cell, package), tools, "--", args),
+        cmd_args(ctx.attrs._lint[RunInfo], result.as_output(), kind, staged, "{}//{}".format(ctx.label.cell, package), tools, "--", args),
         category = "lint_" + kind,
     )
     return _validation(kind, result)
@@ -333,7 +331,7 @@ def _linux(kwargs):
     kwargs.setdefault("exec_compatible_with", LINUX_X86_64)
     return kwargs
 
-# Every lint runs linux x86_64 tools (the lint tool, busybox, shellcheck): it reads a few files.
+# Every lint runs linux x86_64 tools (the lint tool, shellcheck): it reads a few files.
 def shell_lint(**kwargs):
     shell_lint_rule(**_linux(kwargs))
 

@@ -2,9 +2,8 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 # The lint action (src/main.zig): every lint rule of tools/build/lint/defs.bzl
-# but pointer_lint (a Zig tool of its own) runs it. Each kind it checks is
-# written in Zig; public_boundary's text reader, public_boundary.awk, still
-# runs under the pinned busybox's awk.
+# but pointer_lint and public_boundary (each a Zig tool of its own) runs it.
+# Each kind it checks is written in Zig.
 
 _SRCS = glob(["src/*.zig"])
 
@@ -25,7 +24,6 @@ _UNITS = {
     "actionlint": {"LINT_ACTIONLINT": "//tools/build/lint:actionlint", "LINT_SHELLCHECK": _SHELLCHECK},
     "doc_links": {"LINT_INSPECT": "//tools/build/inspect:inspect[runnable]"},
     "no_endpoint": {},
-    "public_boundary": {"LINT_BUSYBOX": "komira//tools/build/toolchains:busybox"},
     "push_verdicts": {},
     "result": {},
     "retired_names": {},
@@ -33,16 +31,11 @@ _UNITS = {
     "src_layout": {},
 }
 
-_DATA = {
-    "public_boundary": {"LINT_PUBLIC_AWK": "//tools/build/lint:public_boundary.awk"},
-}
-
 [
     zig_test(
         name = "lint_unit_" + kind,
         src = "src/{}_test.zig".format(kind),
         env_tools = tools,
-        env_files = _DATA.get(kind, {}),
         **_ZIG
     )
     for kind, tools in _UNITS.items()
