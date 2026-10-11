@@ -2,6 +2,7 @@
 
     python3.<minor> -I -S pyrun.py --out <file> --tmpdir <dir>
         [--preload <lib>]... [--site <dir>]... [--expect-error <line>]
+        [--report <file> --run-id <file> --target <label>]
         -- <script> [<arg>]...
 
 Loads each `--preload` library by path (RTLD_GLOBAL, in the order given),
@@ -19,10 +20,25 @@ The script passes when it returns or exits with status 0. With
 traceback line (`Type: message`) is exactly the given line. On a pass,
 `--tmpdir` is emptied and `--out` is written; otherwise this exits 1 and
 writes nothing to `--out`.
+
+Reports: with `--report`, everything the script and its children write to
+file descriptor 1 is captured (not shown), and the script passes only if
+that is one JSON object without a `run_id` or `target` key, without a key
+written twice, and without NaN, an infinity or a number (with or without a
+fraction) out of the range of a double. The object is written to `--report` with `run_id` (the
+content of the `--run-id` file, one line of at most 128 characters from
+`A-Z a-z 0-9 . _ : + -`, starting with a letter or a digit) and `target` (the
+`--target` label) put first. A script that fails, or whose output is
+refused, has its captured output copied to standard error, and writes no
+report. `--report`, `--run-id` and
+`--target` come together, and not with `--expect-error`.
 """
 
 import ctypes
+import json
+import math
 import os
+import re
 import runpy
 import shutil
 import sys
@@ -37,7 +53,16 @@ def _usage(msg):
 
 
 def _parse(argv):
-    opts = {"out": None, "tmpdir": None, "preload": [], "site": [], "expect_error": None}
+    opts = {
+        "out": None,
+        "tmpdir": None,
+        "preload": [],
+        "site": [],
+        "expect_error": None,
+        "report": None,
+        "run_id": None,
+        "target": None,
+    }
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -59,10 +84,83 @@ def _parse(argv):
             opts["site"].append(v)
         elif a == "--expect-error":
             opts["expect_error"] = v
+        elif a == "--report":
+            opts["report"] = v
+        elif a == "--run-id":
+            opts["run_id"] = v
+        elif a == "--target":
+            opts["target"] = v
         else:
             _usage("unknown flag " + a)
         i += 2
     _usage("no -- before the script")
+
+
+_RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}")
+
+
+def _run_id(path):
+    """The run id the file at `path` holds: its one line, without the newline."""
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    line = text[:-1] if text.endswith("\n") else text
+    if not _RUN_ID.fullmatch(line):
+        _usage("the run id file {} holds {!r}, not one run id (A-Z a-z 0-9 . _ : + -, at most 128)".format(path, text))
+    return line
+
+
+def _refuse_constant(name):
+    raise ValueError("{} is not a number JSON allows".format(name))
+
+
+def _finite(text):
+    """A JSON number with a fraction or an exponent, refused outside the range of a double (json.loads reads 1e999 as infinity)."""
+    v = float(text)
+    if math.isinf(v):
+        raise ValueError("{} is out of the range of a double".format(text))
+    return v
+
+
+def _whole(text):
+    """A JSON number without a fraction or an exponent, refused outside the range of a double (json.loads reads it as a Python int of any size)."""
+    v = int(text)
+    try:
+        float(v)
+    except OverflowError:
+        raise ValueError("an integer of {} digits is out of the range of a double".format(len(text.lstrip("-")))) from None
+    return v
+
+
+def _no_duplicates(pairs):
+    """An object's members, refused if a key is written twice (a dict would keep only the last value)."""
+    obj = {}
+    for k, v in pairs:
+        if k in obj:
+            raise ValueError("key '{}' written twice".format(k))
+        obj[k] = v
+    return obj
+
+
+def _report(captured, run_id, target):
+    """The report: the script's JSON object, `run_id` and `target` first; or the reason it is none."""
+    try:
+        obj = json.loads(
+            captured.decode("utf-8"),
+            parse_constant=_refuse_constant,
+            parse_float=_finite,
+            parse_int=_whole,
+            object_pairs_hook=_no_duplicates,
+        )
+    except (UnicodeDecodeError, ValueError) as e:
+        return None, "its standard output is not one JSON object ({})".format(e)
+    if not isinstance(obj, dict):
+        return None, "its standard output is a JSON {}, not an object".format(type(obj).__name__)
+    for key in ("run_id", "target"):
+        if key in obj:
+            return None, "its JSON object sets '{}', which the runner writes".format(key)
+    out = {"run_id": run_id, "target": target}
+    out.update(obj)
+    return out, None
 
 
 def _last_line(exc):
@@ -73,6 +171,12 @@ def main():
     opts, script, args = _parse(sys.argv[1:])
     if opts["out"] is None or opts["tmpdir"] is None:
         _usage("--out and --tmpdir are required")
+    reporting = [opts[k] is not None for k in ("report", "run_id", "target")]
+    if any(reporting) and not all(reporting):
+        _usage("--report, --run-id and --target come together")
+    if opts["report"] is not None and opts["expect_error"] is not None:
+        _usage("--report does not go with --expect-error")
+    run_id = _run_id(opts["run_id"]) if opts["report"] is not None else None
     for lib in opts["preload"]:
         ctypes.CDLL(os.path.abspath(lib), mode=ctypes.RTLD_GLOBAL)
     tmpdir = os.path.abspath(opts["tmpdir"])
@@ -93,6 +197,15 @@ def main():
     )
     sys.argv = [script] + args
 
+    capture = None
+    if opts["report"] is not None:
+        # At the descriptor, so the script's children and native code are
+        # captured too; the file is under tmpdir, emptied on a pass.
+        sys.stdout.flush()
+        capture = tempfile.TemporaryFile(dir=tmpdir)
+        saved = os.dup(1)
+        os.dup2(capture.fileno(), 1)
+
     error = None
     try:
         runpy.run_path(script, run_name="__main__")
@@ -101,6 +214,21 @@ def main():
             error = e
     except BaseException as e:  # noqa: BLE001 - every failure of the script is reported
         error = e
+
+    report = None
+    if capture is not None:
+        sys.stdout.flush()
+        os.dup2(saved, 1)
+        os.close(saved)
+        capture.seek(0)
+        captured = capture.read()
+        capture.close()
+        if error is None:
+            report, why = _report(captured, run_id, opts["target"])
+            if why is not None:
+                error = ValueError("report: " + why)
+        if error is not None:
+            sys.stderr.write(captured.decode("utf-8", "replace"))
 
     want = opts["expect_error"]
     if want is None:
@@ -128,6 +256,9 @@ def main():
             shutil.rmtree(path)
         else:
             os.unlink(path)
+    if report is not None:
+        with open(opts["report"], "w", encoding="utf-8") as f:
+            f.write(json.dumps(report, indent=2, allow_nan=False) + "\n")
     with open(opts["out"], "w") as f:
         f.write(verdict + "\n")
 
