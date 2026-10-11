@@ -71,6 +71,7 @@ from komira_optimizer.optimizer_dpccp import (
     enumerate_complement_rec,
     solve_dpccp_with_cost,
 )
+from komira_optimizer.optimizer_dpccp_observer import NoDPccpObserver
 
 
 # =============================================================================
@@ -350,18 +351,19 @@ def test_emit_pair_needs_both_entries() raises:
     var chain = _chain(2, 10, [0], [1])
     var cache = Dict[UInt64, Int]()
     var none_tdom: Optional[TdomGraph] = None
+    var obs = NoDPccpObserver()
     var only_right = Dict[UInt64, DPNode]()
     only_right[UInt64(2)] = DPNode(Float64(0.0), 10, RelationSet.empty(), RelationSet.empty())
     emit_pair(
         RelationSet.singleton(0), RelationSet.singleton(1), chain, only_right,
-        Dict[UInt64, Int](), none_tdom, cache,
+        Dict[UInt64, Int](), none_tdom, cache, obs,
     )
     assert_equal(len(only_right), 1)
     var only_left = Dict[UInt64, DPNode]()
     only_left[UInt64(1)] = DPNode(Float64(0.0), 10, RelationSet.empty(), RelationSet.empty())
     emit_pair(
         RelationSet.singleton(0), RelationSet.singleton(1), chain, only_left,
-        Dict[UInt64, Int](), none_tdom, cache,
+        Dict[UInt64, Int](), none_tdom, cache, obs,
     )
     assert_equal(len(only_left), 1)
 
@@ -377,14 +379,15 @@ def test_emit_pair_needs_a_real_edge_unless_cross_is_allowed() raises:
     dp[UInt64(2)] = DPNode(Float64(0.0), 7, RelationSet.empty(), RelationSet.empty())
     var cache = Dict[UInt64, Int]()
     var none_tdom: Optional[TdomGraph] = None
+    var obs = NoDPccpObserver()
     emit_pair(
         RelationSet.singleton(0), RelationSet.singleton(1), chain, dp,
-        Dict[UInt64, Int](), none_tdom, cache,
+        Dict[UInt64, Int](), none_tdom, cache, obs,
     )
     assert_equal(len(dp), 2)
     emit_pair(
         RelationSet.singleton(0), RelationSet.singleton(1), chain, dp,
-        Dict[UInt64, Int](), none_tdom, cache, True,
+        Dict[UInt64, Int](), none_tdom, cache, obs, True,
     )
     var e = dp.get(UInt64(3)).value().copy()
     assert_equal(e.cardinality, 21)
@@ -399,9 +402,10 @@ def _cross_card(left_card: Int, right_card: Int) raises -> Int:
     dp[UInt64(2)] = DPNode(Float64(0.0), right_card, RelationSet.empty(), RelationSet.empty())
     var cache = Dict[UInt64, Int]()
     var none_tdom: Optional[TdomGraph] = None
+    var obs = NoDPccpObserver()
     emit_pair(
         RelationSet.singleton(0), RelationSet.singleton(1), chain, dp,
-        Dict[UInt64, Int](), none_tdom, cache, True,
+        Dict[UInt64, Int](), none_tdom, cache, obs, True,
     )
     return dp.get(UInt64(3)).value().cardinality
 
@@ -429,6 +433,7 @@ def test_emit_pair_cross_card_goes_through_tdom_when_present() raises:
     var chain = _chain(2, 10, List[Int](), List[Int]())
     var provider = DefaultColumnStatsProvider(chain.relations)
     var tdom: Optional[TdomGraph] = build_tdom_graph(chain, provider)
+    var obs = NoDPccpObserver()
     var dp = Dict[UInt64, DPNode]()
     dp[UInt64(1)] = DPNode(Float64(0.0), 3, RelationSet.empty(), RelationSet.empty())
     dp[UInt64(2)] = DPNode(Float64(0.0), 7, RelationSet.empty(), RelationSet.empty())
@@ -437,7 +442,7 @@ def test_emit_pair_cross_card_goes_through_tdom_when_present() raises:
     var cache = Dict[UInt64, Int]()
     emit_pair(
         RelationSet.singleton(0), RelationSet.singleton(1), chain, dp,
-        cost, tdom, cache, True,
+        cost, tdom, cache, obs, True,
     )
     assert_equal(dp.get(UInt64(3)).value().cardinality, 42)
 
@@ -449,6 +454,7 @@ def test_emit_pair_keeps_the_cheaper_entry() raises:
     var dp = _seeded(2, chain)
     var cache = Dict[UInt64, Int]()
     var none_tdom: Optional[TdomGraph] = None
+    var obs = NoDPccpObserver()
     var cards = List[Int]()
     cards.append(100)
     cards.append(50)
@@ -458,7 +464,7 @@ def test_emit_pair_keeps_the_cheaper_entry() raises:
         cost[UInt64(3)] = cards[i]
         emit_pair(
             RelationSet.singleton(0), RelationSet.singleton(1), chain, dp,
-            cost, none_tdom, cache,
+            cost, none_tdom, cache, obs,
         )
     var e = dp.get(UInt64(3)).value().copy()
     assert_equal(e.cardinality, 50)
@@ -480,22 +486,23 @@ def test_enumerators_return_when_the_counter_is_already_over() raises:
     var cost = Dict[UInt64, Int]()
     var cache = Dict[UInt64, Int]()
     var none_tdom: Optional[TdomGraph] = None
+    var obs = NoDPccpObserver()
     var c1 = _over_counter()
     emit_csg_complements(
         RelationSet.singleton(0), RelationSet.empty(), nb, chain, dp, c1,
-        cost, none_tdom, cache,
+        cost, none_tdom, cache, obs,
     )
     assert_equal(c1.n, UInt64(1))
     var c2 = _over_counter()
     enumerate_csg_rec(
         RelationSet.singleton(0), RelationSet.empty(), nb, chain, dp, c2,
-        cost, none_tdom, cache,
+        cost, none_tdom, cache, obs,
     )
     assert_equal(c2.n, UInt64(1))
     var c3 = _over_counter()
     enumerate_complement_rec(
         RelationSet.singleton(1), RelationSet.singleton(0), RelationSet.empty(),
-        nb, chain, dp, c3, cost, none_tdom, cache,
+        nb, chain, dp, c3, cost, none_tdom, cache, obs,
     )
     assert_equal(c3.n, UInt64(1))
     assert_equal(len(dp), 4)
@@ -507,8 +514,9 @@ def _passes(cap: Int, mut dp: Dict[UInt64, DPNode]) raises -> Tuple[Bool, UInt64
     var counter = _IterCounter(UInt64(cap))
     var cache = Dict[UInt64, Int]()
     var none_tdom: Optional[TdomGraph] = None
+    var obs = NoDPccpObserver()
     var ok = _run_dpccp_passes(
-        4, chain, nb, dp, counter, Dict[UInt64, Int](), none_tdom, cache, False
+        4, chain, nb, dp, counter, Dict[UInt64, Int](), none_tdom, cache, False, obs
     )
     return (ok, counter.n)
 
@@ -558,8 +566,9 @@ def test_seed_order_is_canonical() raises:
     var counter = _IterCounter(UInt64(1000))
     var cache = Dict[UInt64, Int]()
     var none_tdom: Optional[TdomGraph] = None
+    var obs = NoDPccpObserver()
     assert_true(
-        _run_dpccp_passes(4, chain, nb, dp, counter, cost, none_tdom, cache, False)
+        _run_dpccp_passes(4, chain, nb, dp, counter, cost, none_tdom, cache, False, obs)
     )
     var e = dp.get(_bits([1, 2, 3])).value().copy()
     assert_equal(e.best_left.bits, _bits([1, 2]))
