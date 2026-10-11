@@ -246,17 +246,15 @@ gh workflow run build_system_selftests.yml --ref <branch>
 
 or locally with `tools/build/tests/run_tests.sh`.
 
-**Direction.** The script is to be replaced, case by case, by targets of the
-`tests` cell, so that each case is cached, runs in parallel, has a name, and
-runs under `./buck2 test` or `./buck2 build` like everything else. Cases that
-look convertible from their description: 2 (gate red, ungated builds), 3
-(a binary without the dep fails to compile), 4 (incomplete closure refused),
-10 (execution platform resolution, an aquery), 13 and 14 (bundle and launcher
-parity, already remote actions), 17 (Markdown link validation), 28 and 29
-(already `tests//functional` targets), 30 (optimization levels from aquery),
-31 (lint weld), 34 to 36 (generator goldens and refusals). Cases that observe
-the client or the daemon (1, 5, 6, 7, 9, 12, 25, 32, 33) need a harness that
-can start a scratch daemon or clone and are still to be analysed.
+**Direction.** The script is being dissolved into the gate, slice by slice
+([build_selftests.md](design/build_selftests.md), whose inventory says where
+each check goes). Slice 2 moved what needed no new tool: the run check of a
+binary with `expected_stdout` is a validation of the binary; the greens that
+sat in `tests//negative` or needed `buck2 test` moved to `tests//functional`
+or the komira cell; sub-targets and the greens of `tests//negative` and
+`tests//src` that must build are named by `target_suite`s
+(`//:tests_greens`); the case actions refuse a short report; and the rows the
+check already built are gone from the script.
 
 ## kci.yml: the release
 

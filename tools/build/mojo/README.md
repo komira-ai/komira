@@ -176,7 +176,10 @@ session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.sh),
 - **`[run_check]`** (`mojo_binary`): runs the binary remotely from its
   runnable directory, with no library path set, and with `expected_stdout`
   compares its stdout byte for byte
-  ([`examples/BUCK`](../examples/BUCK) `hello`, `hello_pkg_user`).
+  ([`examples/BUCK`](../examples/BUCK) `hello`, `hello_pkg_user`). With
+  `expected_stdout` the check is also a validation of the binary
+  ([`run_check.bzl`](run_check.bzl)): every build whose graph holds the
+  binary runs it, and fails when its stdout differs or it exits non-zero.
 - **`buck2 run <target>`**: builds remotely and runs the binary on your
   machine (Linux x86_64) from its runnable directory, downloading the binary
   and its runtime libraries, never the compiler
@@ -413,7 +416,8 @@ mojo_test(
   `buck2 run` and `[runnable]` do not pass `args`. A library's `test_srcs`
   take none: a gated test is a unit test of its package and gets everything
   it reads through `test_data`
-  ([`tests//functional/test_data:mojo_test_args`](../tests/functional/test_data/BUCK)).
+  ([`mojo_test_testdata:mojo_test_args`](mojo_test_testdata/BUCK), run by
+  `buck2 test` in the pull-request check).
 - **Scratch.** `TEST_TMPDIR` (equal to `TMPDIR`) and `HOME` are two empty
   directories the runner makes for this run inside the action's working
   directory, so no two runs share them, and they are removed afterwards.
