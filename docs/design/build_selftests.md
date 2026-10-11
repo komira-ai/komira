@@ -139,8 +139,10 @@ rules. Graph checks are BXL scripts that the gate runs, following the test_weld 
 `build_targets.sh`. They are not scenarios.
 
 - **The target.** Each graph check is a `graph_check` target under `//tools/build/selftest/graph/`, in
-  the declared check `build_selftests`. It names the check and the targets it queries as strings, never
-  as dependencies. Its only dependencies are its BXL source and its Zig checker.
+  the declared check `build_selftests`, except `//:python_closure`, in the root package so that the
+  unit `repo_root`, which nearly every change reaches, runs it. It names the check and the targets it queries as strings, never
+  as dependencies. Its only dependencies are its BXL source and its Zig checker (and, for `python_closure`,
+  the dotfiles of the root package it reads).
 - **How the gate runs it.** `build_targets.sh` runs `buck2 bxl //tools/build/lint/test_weld.bxl:check`
   for every `test_weld_rule` target of the batch today. That step also queries the batch for
   `graph_check` targets and runs `buck2 bxl //tools/build/selftest/graph/checks.bxl:check -- --check
@@ -161,6 +163,12 @@ rules. Graph checks are BXL scripts that the gate runs, following the test_weld 
     label. It keeps true what slice 3's `--plan` proof shows once (see "Only a widened change reaches
     `build_selftests`"). Mutant: the same one as the `--plan` proof, a library under `src/` added as a
     dependency of one scenario target.
+  - `python_closure` (no row): no Python outside the Python surface. The facts are the configured
+    closure of `//...` and `tests//functional/...` as a graph (each node's kind, direct dependencies of
+    every kind and sources), every file of the trees, and the kci textprotos and workflows themselves;
+    `graph/python_closure.zig` says what is refused. Its allowlist, `tests/python_closure_allowlist.bzl`,
+    holds the Python surface (empty) and a ceiling of today's findings that only shrinks. Its fixtures
+    are `tests//negative/python_closure`, run by the scenario `graph_check_refusals`.
 - A graph query that needs its own `-c` overrides, such as the aquery diffs across coverage and
   optimization switches, stays a scenario: a BXL script runs in the gate's own configuration.
 
@@ -225,8 +233,8 @@ goes with the last row that uses it.
 | 29 runner_cases | cases build, at least 5 ok | 1 | floor inside the action | reuse one TEST_TMPDIR | 2 |
 | 29 td_bad_*, test_deps refusals | 7 analysis refusals | 3 | `analysis_refusals_mojo` | delete the shell-name check in test_runtime.bzl | 3 |
 | 29 td_test_deps_src/consumer | a library and its consumer cannot import test_deps | 3 | `compile_isolation` | add test_deps to the compile path | 4 |
-| 30 opt_level | per-kind `-O` levels from aquery | 3 | `aquery_opt_levels` | mojo_binary default `-O1` | 5 |
-| 30 opt_bad_level | `fast` refused | 3 | `analysis_refusals_mojo` | remove the level check | 5 |
+| 30 opt_level | per-kind `-O` levels, as each compile puts them on its command line | 1 | `mojo_opt_level_check` targets (`mojo/opt_level.bzl`, rows over `MojoOptLevelInfo`): `examples:opt_levels`, `examples/aws_lc:opt_levels`, `examples/s2n_tls:opt_levels`, `tests//functional/opt_level:levels`; red at analysis | mojo_binary default `-O1` | 4 |
+| 30 opt_bad_level | `fast` refused | 3 | `analysis_refusals_mojo` | remove the level check | 4 |
 | 31 lint_weld (planted) | a planted shellcheck finding reds the Mojo and Rust examples | 3 | `lint_weld` (scratch tree) | drop one target from `_script_lint` | 9 |
 | 31 lint_weld (lists) | the toolchains' lint lists are complete | 3 | `lint_weld` derives the scripts the rules run from the graph, independent of the lists (a shared constant cannot catch a drop) | drop `rust:shell_lint` from the Rust list | 9 |
 | 32 bootstrap | `./buck2` installs only the pinned release, refuses wrong sha/size | 3 (2 if ported) | `bootstrap_pin`: a made-up pin and release in a scratch dir, no network, `./buck2` run as the program under test; unit tests instead if the bootstrap becomes Zig | skip the sha256 check | 9 |
@@ -328,14 +336,14 @@ goes with the last row that uses it.
 
 | id | what | bucket | lands in | mutant | slice |
 |---|---|---|---|---|---|
-| 54 node_test verdict | stderr-only, fixed-string, case-sensitive expect_error | 2 | node_test runner (Zig port of the embedded script) | match as a regex | 8 |
+| 54 node_test verdict | stderr-only, fixed-string, case-sensitive expect_error | 3 | `planted_red_builds_node` (the node_test runner's Zig port adds its unit tests in slice 8) | match case-insensitively | 4 |
 | 54 node analysis refusals | 8 `fail()`s | 3 | `analysis_refusals_node` | delete the staged-twice check | 3 |
-| 54 unresolved_import | a failing esbuild fails the build | 3 | `planted_red_builds` (no Zig port only for this) | ignore esbuild's exit status | 4 |
-| 54 npm integrity | SRI checks, all 64 bytes | 2 | npm_unpack (Zig port) unit tests | compare a digest prefix | 8 |
-| 54 npm package.json | top-level string name/version compared whole; nested_distractors is a must-accept case | 2 | npm_unpack unit tests, a duplicate-key case decided | take the first `"name"` anywhere | 8 |
-| 54 npm exe | exe runs and prints the pin | 2 | npm_unpack unit tests | skip the version compare | 8 |
-| 54 node_dist | bin/node, node_api.h, exact version | 2 | node_dist check (Zig port) | `-e` for `-f` | 8 |
-| 54 c_warns | `-Wall -Werror` | 3 | `planted_red_builds` (2 only after a Zig launcher) | drop `-Werror` | 4 |
+| 54 unresolved_import | a failing esbuild fails the build | 3 | `planted_red_builds_node` | ignore esbuild's exit status | 4 |
+| 54 npm integrity | SRI checks, all 64 bytes | 3 | `planted_red_builds_node` (npm_unpack's Zig port adds unit tests in slice 8) | compare a digest prefix | 4 |
+| 54 npm package.json | top-level string name/version compared whole; nested_distractors is a must-accept case | 3 | `planted_red_builds_node` (npm_unpack's unit tests, a duplicate-key case decided, in slice 8) | take the first `"name"` anywhere | 4 |
+| 54 npm exe | exe runs and prints the pin | 3 | `planted_red_builds_node` | skip the version compare | 4 |
+| 54 node_dist | bin/node, node_api.h, exact version | 3 | `planted_red_builds_node` (node_dist's Zig port adds unit tests in slice 8) | `-e` for `-f` | 4 |
+| 54 c_warns | `-Wall -Werror` | 3 | `planted_red_builds_node` (2 only after a Zig launcher) | drop `-Werror` | 4 |
 | 23 proto generated tests | test_person, test_team, test_tasks_db pass | 1 | welded as test_srcs (a small library for the bundled team) | wrong field type | 8 |
 | 23 check_executor | proto build ran remotely | 3 | `local_zero` | a local test executor | 5 |
 | 23 id/ident, proto_mismatch | generated struct follows the .proto, old name absent | 1 | gen_check present/absent on both `[gen]` outputs | emit both names | 8 |
@@ -397,10 +405,11 @@ All under `//tools/build/selftest/`, one Zig test target each:
   `analysis_refusals_mojo`, `_aws_client`, `_gcp_client`, `_proto`, `_readme`, `_lint`,
   `_python_oracle`, `_node`, `_rust`, `_coverage`, `_platform_table`, `_zig`, and `config_refusals`.
 - Builds that must go red: `gate_wiring`, `shared_lib_gate`, `compile_isolation`, `planted_red_builds`,
+  `planted_red_builds_node`,
   `assert_level_reds`, `test_limits`, `coverage_gate_reds`, `sql_oracle` (with its analysis refusals
   and an aquery pin of its invocation; a rule added after this inventory, so it has no row in the
   tables above).
-- aquery diffs: `assert_level_commands`, `aquery_opt_levels`, `coverage_platforms`, `coverage_keys`,
+- aquery diffs: `assert_level_commands`, `coverage_platforms`, `coverage_keys`,
   `coverage_analysis`, `coverage_switch`.
 - Scratch trees and clones: `consumer_cell_cache`, `buck2_run_fresh_clone`, `fresh_clone_local_default`,
   `lint_weld`, `bootstrap_pin`, `docker_run`.
@@ -716,9 +725,12 @@ after the slice of its last callee. Slice 11 deletes `run_tests.sh` last.
    - The wall time these scenarios add to a widened check, and the peak number of inner daemons.
 4. **Red builds.** `gate_wiring`, `shared_lib_gate`, `compile_isolation`, `planted_red_builds`,
    `assert_level_reds`, `test_limits`, `coverage_gate_reds`.
+   - First, in a pull request of its own: the helper library's planted-red table (`lib/reds.zig`),
+     `planted_red_builds_node` (row 54, deleting `node_tests.sh`), and row 30 as `mojo_opt_level_check`
+     targets read at analysis (deleting `opt_level.sh`).
 5. **aquery, what-ran and graph checks.**
    - `local_zero`, with its per-run change, red on the hybrid-executor mutant on a warm cache;
-     `assert_level_commands`, `aquery_opt_levels`, and the `coverage_*` aquery scenarios.
+     `assert_level_commands` and the `coverage_*` aquery scenarios.
    - The graph checks, each a BXL script run in the gate, each red on its row's mutant:
      `aquery_host_paths`, `docs_package_coverage`, `config_hash_pin`, `test_weld_real_graph` and
      `golden_linux_x86_64`. golden.sh goes with them.
@@ -742,7 +754,7 @@ after the slice of its last callee. Slice 11 deletes `run_tests.sh` last.
      3. **This doc's `doc_links` slice** comes last. It ports `doc_links` to Zig on the shared markdown
         module and writes no second reader. Its welded unit tests carry the link cases of
         `test_buildtools` (row 17 doc_links_dead), each with the planted defect it names. It moves the
-        `doc_links` lint (`tools/build/lint/defs.bzl` passes `inspect` to `lint.sh`, which runs
+        `doc_links` lint (`tools/build/lint/defs.bzl` passes `inspect` to the lint tool, which runs
         `inspect doc-links` today; the slice moves both) to the Zig
         binary. The rest of `tools/build/inspect` is not part of this slice.
    - Rows 38 readme_marker, compile_error (`compile_isolation`) and owner_base_no_readme, readme_keyword
@@ -835,9 +847,9 @@ Sourced sections:
 | `coverage_run_tests.sh` | 7 |
 | `coverage_gate_tests.sh` | 7 |
 | `coverage_branch_tests.sh` | 7 |
-| `public_boundary_tests.sh` | 6 |
+| `public_boundary_tests.sh` | 6 (deleted with the Zig `public_boundary` tool, whose `zig test` rows took its cases) |
 | `assert_level_tests.sh` | 7 |
-| `node_tests.sh` | 8 |
+| `node_tests.sh` | 4 |
 | `golden/golden.sh` | 5 (with its call in `platform_table/check.sh`) |
 | `negative/lint_weld.sh` | 9 |
 
@@ -846,7 +858,7 @@ The 16 `functional/` drivers the harness calls:
 | driver | slice |
 |---|---|
 | `assert_level.sh` | 5 |
-| `opt_level.sh` | 5 |
+| `opt_level.sh` | 4 |
 | `coverage_keys.sh` | 5 |
 | `coverage_platforms.sh` | 5 |
 | `coverage_shared_lib.sh` | 5 |
@@ -867,9 +879,11 @@ When `conda.sh` and `conda_set.sh` go, slice 10 also drops their argument case f
 
 Action scripts that targets run, not the harness:
 - Replaced by their rows' Zig ports: `functional/aws_codegen/aws_codegen.sh` 8,
-  `platform_table/limits_retired.sh` 6, `coverage/link_line.sh` 7, `mem_cap/cases.sh` 7,
+  `coverage/link_line.sh` 7, `mem_cap/cases.sh` 7,
   `test_deadline/cases.sh` 7, `watchdog/cases.sh` 7, `test_data/runner_cases.sh` and
   `test_command_case.sh` 7.
+- Ported: `platform_table/limits_retired.sh` is the Zig tool `tools/build/platforms/limits` (the
+  validation `//:limits`, and its `merged` mode in `platform_table/check.sh`).
 - Not in this design: `bundle_parity/parity.sh`, `coverage/{check,report,branch_check}.sh` and
   `install_gate/{cases,install_gate}.sh`. They are the actions of green functional targets that are
   already in the gate. Their port is part of the rule-script work under the build-architecture

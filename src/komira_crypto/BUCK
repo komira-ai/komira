@@ -122,6 +122,9 @@ native_shared_library(
         ":komira_crypto_sha256_hw",
         "//third_party/aws-lc:crypto",
     ],
+    # s2n-tls's archive (komira_http_core's) calls aws-lc functions no Mojo
+    # library calls; the library exports them to it.
+    caller_archives = ["//third_party/s2n-tls:s2n"],
     callers = [":komira_crypto"],
     library = "komira_crypto",
     # Every weak undefined symbol of the library, recorded from its first

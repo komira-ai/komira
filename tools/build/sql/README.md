@@ -106,8 +106,10 @@ TO 'expected.tsv' (FORMAT csv, DELIMITER '\t', HEADER true);
 The rule does not read the SQL, so it cannot see whether a copied query has
 an `ORDER BY`, or whether that `ORDER BY` decides every row's place. One
 thread makes an unordered result repeat from run to run, which hides the
-gap instead of closing it. Ordering is the fixture author's duty, and
-nothing checks it yet.
+gap instead of closing it. Ordering is the fixture author's duty; the
+plan conformance oracle enforces it with a discipline of its own, run on
+DuckDB's parse of each case (`json_serialize_sql`) before the case runs
+([komira_test_oracle](../../../src/tests/helpers/komira_test_oracle/README.md#the-oracle-discipline)).
 
 ## Tests
 
@@ -130,7 +132,9 @@ nothing checks it yet.
   action with its message: an undeclared output, a missing output (the
   first, the middle and the last of three), a SQL error, a read of a
   package file that is not an input, a read of an absolute path, a read by
-  glob pattern, a changed setting and each dot command listed above. The
+  glob pattern, a changed setting, each dot command listed above, and two
+  cases the oracle discipline of komira_test_oracle refuses when its case
+  runner calls it (a key with no NULL placement, no outer ORDER BY). The
   version and environment checks are pinned in the invocation from
   `SELECT` to `END`, and so is what stands between the pinned pieces (the
   version `buck2 uquery` reads from the dist, a path with no quote, or

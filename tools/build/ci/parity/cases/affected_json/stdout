@@ -1,0 +1,1 @@
+{"verdict":"AFFECTED","reason":"","widened":false,"files":2,"seeds":3,"milliseconds":#,"warnings":[],"targets":["//src/a:a","//src/a:a_test","//src/b:b","tests//functional/x:x"]}
