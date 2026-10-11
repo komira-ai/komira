@@ -754,7 +754,7 @@ after the slice of its last callee. Slice 11 deletes `run_tests.sh` last.
      3. **This doc's `doc_links` slice** comes last. It ports `doc_links` to Zig on the shared markdown
         module and writes no second reader. Its welded unit tests carry the link cases of
         `test_buildtools` (row 17 doc_links_dead), each with the planted defect it names. It moves the
-        `doc_links` lint (`tools/build/lint/defs.bzl` passes `inspect` to `lint.sh`, which runs
+        `doc_links` lint (`tools/build/lint/defs.bzl` passes `inspect` to the lint tool, which runs
         `inspect doc-links` today; the slice moves both) to the Zig
         binary. The rest of `tools/build/inspect` is not part of this slice.
    - Rows 38 readme_marker, compile_error (`compile_isolation`) and owner_base_no_readme, readme_keyword
@@ -847,7 +847,7 @@ Sourced sections:
 | `coverage_run_tests.sh` | 7 |
 | `coverage_gate_tests.sh` | 7 |
 | `coverage_branch_tests.sh` | 7 |
-| `public_boundary_tests.sh` | 6 |
+| `public_boundary_tests.sh` | 6 (deleted with the Zig `public_boundary` tool, whose `zig test` rows took its cases) |
 | `assert_level_tests.sh` | 7 |
 | `node_tests.sh` | 4 |
 | `golden/golden.sh` | 5 (with its call in `platform_table/check.sh`) |

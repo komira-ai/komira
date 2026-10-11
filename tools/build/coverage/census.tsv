@@ -194,7 +194,7 @@ komira//src/komira_sql:komira_sql	src/komira_sql	library	OK	3192	3196	-	-	no	con
 komira//src/komira_supervisor:komira_supervisor	src/komira_supervisor	library	OK	312	396	-	-	no	conda	src/komira_supervisor/exit_monitor.mojo,src/komira_supervisor/pid1.mojo	-
 komira//src/komira_supervisor_proto:komira_supervisor_proto	src/komira_supervisor_proto	library	OK	0	0	-	-	no	release	-	-
 komira//src/komira_sync:komira_sync	src/komira_sync	library	OK	16	16	4	4	yes	release	-	-
-komira//src/komira_table_store:komira_table_store	src/komira_table_store	library	OK	884	1037	-	-	no	conda	-	-
+komira//src/komira_table_store:komira_table_store	src/komira_table_store	library	OK	1051	1053	-	-	no	conda	-	-
 komira//src/komira_test_run_id:komira_test_run_id	src/komira_test_run_id	library	OK	46	46	8	8	yes	release	-	-
 komira//src/komira_test_verdict:komira_test_verdict	src/komira_test_verdict	library	OK	65	65	-	-	no	release	-	-
 komira//src/komira_textproto:komira_textproto	src/komira_textproto	library	OK	174	174	-	-	no	release	-	-
