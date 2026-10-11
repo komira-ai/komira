@@ -48,7 +48,6 @@ here executes a plan.
 | `optimizer_scan_share` | deciding which Parquet scans share one read (`plan_scan_shares`), the dynamic-filter slot, and which scans stay Parquet sources |
 | `optimizer_config` | `OptimizerConfig`: the optimizer's options and their defaults, as one value |
 | `optimizer_driver` | `optimize(plan, config, deps)`: the rules above run over one logical plan in a fixed order, returning the optimized logical plan; `optimize_status`, its non-raising twin returning an `OptimizeResult` |
-| `optimizer_payload_narrow` | stamping narrow integer payload widths on an equi-join's scans from column min/max stats |
 | `optimizer_partition_topn` | fusing a row_number / rank, a `<= K` filter and the column drop into one PartitionTopN |
 | `optimizer_window_rewrite` | window co-location and fusion of matching PartitionBy nodes, and eliding a Sort the PartitionBy already satisfies |
 

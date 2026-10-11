@@ -1,11 +1,12 @@
 # The payload-narrowing decision of every fixture, one row per case:
 # `<case> => scan#<i>: <column>:<bytes>:<base>,... | ...`, every scan in scan
-# pre-order (render.mojo). test_payload_narrow_parity checks the host rule,
-# and komira_optimizer's payload-narrowing pass while it exists, against it.
+# pre-order (render.mojo). test_payload_narrow_parity checks the host rule
+# against it.
 #
-# The first block is the 83-row table of komira_optimizer's
-# tests/test_optimizer_payload_narrow_parity.mojo, copied verbatim; its
-# fixtures are in fixtures.mojo. Edit it only together with that table.
+# The first block is the 83-row table of the parity test of
+# komira_optimizer's payload-narrowing pass, copied verbatim before that pass
+# was deleted; its fixtures are in fixtures.mojo. A change to it is a change
+# to the decisions that pass made.
 hc4 => scan#0: probe_val:2:1 | scan#1: build_val:2:1
 ladder_0_255 => scan#0: pv:1:0 | scan#1: bv:2:1
 ladder_0_256 => scan#0: pv:2:0 | scan#1: bv:2:1

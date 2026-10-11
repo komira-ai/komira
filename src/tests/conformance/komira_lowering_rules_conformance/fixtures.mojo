@@ -2,16 +2,15 @@
 # fixtures: the fixtures of the optimizer's payload-narrowing parity table
 # =============================================================================
 #
-# The builders and fixtures below, from `Col` through `_nested_fixture`, are
-# copied verbatim from komira_optimizer's
-# tests/test_optimizer_payload_narrow_parity.mojo, whose table is the first
-# block of golden/payload_narrow.txt. Each row of that table names the
-# fixture built here under the same name, so the host rule is checked against
-# the optimizer's table on the optimizer's own plans. Every scan carries its
-# statistics on the plan (`ScanData.table_stats`, what the optimizer rule
-# reads); `case_footers` (render.mojo) hands the same statistics to the host
-# rule as its footer list. The cases this package adds beyond that table are
-# in extra_fixtures.mojo.
+# The builders and fixtures below, from `Col` through `_nested_fixture`, were
+# copied verbatim from the parity test of komira_optimizer's payload-narrowing
+# pass (deleted with that pass), whose table is the first block of
+# golden/payload_narrow.txt. Each row of that table names the fixture built
+# here under the same name, so the host rule is checked against the
+# optimizer's table on the optimizer's own plans. Every scan carries its
+# statistics on the plan (`ScanData.table_stats`); `case_footers`
+# (render.mojo) hands them to the host rule as its footer list. The cases this
+# package adds beyond that table are in extra_fixtures.mojo.
 # =============================================================================
 
 from std.memory import OwnedPointer

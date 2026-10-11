@@ -4,10 +4,11 @@
 # =============================================================================
 #
 # The corpus covers every node-kind gate of the driver: filters over a scan and
-# over a join, a join residual, functionally dependent group keys, payload
-# narrowing, SEMI over INNER, eager aggregation, decorrelated and unbound
-# scalar subqueries, a correlated EXISTS, a window with a rank filter,
-# consecutive filters under Sort + Limit, and joins in both size orders.
+# over a join, a join residual, functionally dependent group keys, a join of
+# scans that carry column statistics, SEMI over INNER, eager aggregation,
+# decorrelated and unbound scalar subqueries, a correlated EXISTS, a window
+# with a rank filter, consecutive filters under Sort + Limit, and joins in
+# both size orders.
 #
 # Three properties, each the design's promise:
 #   * idempotence: optimize(optimize(p)) renders exactly as optimize(p);
@@ -162,7 +163,7 @@ def _stats(payload: String, extra: String, hi: Int64) raises -> TableStats:
     return TableStats(1000, names^, stats^, STATS_SOURCE_PARQUET_METADATA)
 
 
-def _narrowable_join() raises -> LogicalPlan:
+def _join_with_stats() raises -> LogicalPlan:
     var pn: List[String] = ["key", "probe_val", "p_extra"]
     var bn: List[String] = ["key", "build_val", "b_extra"]
     var p = LogicalPlan.scan("probe.parquet", SOURCE_PARQUET, _schema(pn), None, None, None,
@@ -274,7 +275,7 @@ def _corpus(i: Int) raises -> LogicalPlan:
     if i == 3:
         return _fd_group_keys()
     if i == 4:
-        return _narrowable_join()
+        return _join_with_stats()
     if i == 5:
         return _semi_over_inner()
     if i == 6:

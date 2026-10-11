@@ -10,7 +10,7 @@
 #     with whatever statistics the caller has injected on its scans
 #     (`ScanData.table_stats`, `ScanData.row_count`). The driver reads those
 #     only through the rules that consume them (join reordering, eager
-#     aggregation, payload narrowing); it computes and stores none.
+#     aggregation); it computes and stores none.
 #   * `config`: the `OptimizerConfig` the caller built. The driver reads
 #     `eager_agg` and `semi_pushdown`; the other fields belong to rules that run
 #     outside this pass order (scan-share planning, aggregate CSE) and do not
@@ -70,7 +70,6 @@
 #   17 push_limit_down, fuse_sort_limit (sort above limit only)  [limit]
 #   18 optimize_window_rewrite      [PartitionBy or Project in the current plan]
 #   19 fuse_partition_topn          [PartitionBy in the current plan]
-#   20 narrow_join_payload                                   (last)
 #
 # The reasons the positions are load-bearing are stated at each call below.
 #
@@ -147,7 +146,6 @@ from .optimizer_dpccp import reorder_joins_with_dp
 from .optimizer_misc import push_limit_down, fuse_sort_limit
 from .optimizer_window_rewrite import optimize_window_rewrite
 from .optimizer_partition_topn import fuse_partition_topn
-from .optimizer_payload_narrow import narrow_join_payload
 
 
 def optimize(
@@ -315,11 +313,6 @@ def optimize(
         plan = optimize_window_rewrite(plan^)
     if _plan_has_tag(plan, PLAN_PARTITION_BY):
         plan = fuse_partition_topn(plan^)
-
-    # 20. Payload narrowing LAST. Its stamp is a `ScanData` field that is not a
-    # constructor argument, so any later pass that rebuilt the scan would start
-    # it empty and drop the stamp. It adds, removes and reorders nothing.
-    plan = narrow_join_payload(plan^)
 
     return plan^
 

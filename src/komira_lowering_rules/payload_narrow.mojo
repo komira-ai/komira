@@ -50,11 +50,11 @@
 #   A filter between the join and the scan is safe: footer bounds hold every
 #   value the scan reads, so they hold every value that survives the filter.
 #
-# PARITY. These are the decisions `komira_optimizer`'s
-# `optimizer_payload_narrow` stamps on `ScanData.payload_narrow` when each
-# scan's `table_stats` equals its footer entry here; the parity test in
-# `src/tests/conformance/komira_lowering_rules_conformance` pins it. Matching it
-# exactly keeps two of its behaviours:
+# PARITY. These are the decisions `komira_optimizer`'s payload-narrowing pass,
+# which this rule replaced and which is deleted, made when each scan's
+# `table_stats` equalled its footer entry here; the parity test in
+# `src/tests/conformance/komira_lowering_rules_conformance` holds that pass's
+# table as its golden file. Matching it exactly keeps two of its behaviours:
 #   - a join below a UNION or a CAST_TO_VARCHAR narrows nothing;
 #   - a column is judged by the side's output schema (name, type,
 #     nullability), while its bounds are looked up under the same name in the

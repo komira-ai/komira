@@ -52,7 +52,6 @@ from komira_scan_source.in_memory_source import InMemorySource
 from komira_plan_expr.expr import Expr
 from komira_plan_expr.partition_expr import PartitionExpr
 from komira_plan_stats.table_stats import TableStats
-from komira_plan_expr.payload_narrow import PayloadNarrowSpec
 from komira_plan_expr.null_order_policy import derived_nulls_first
 # The Filter/Project/Aggregate variants carry the typed-UDF carrier as a thin
 # `Optional[OwnedPointer[UdfData]]` field. The IR payload itself (UdfData) is
@@ -177,20 +176,6 @@ struct ScanData(Movable):
     var row_count: Optional[Int]
     var table_stats: Optional[TableStats]
     var source_kind: UInt8
-    # --- The per-column integral-narrowing
-    #     instructions the compressed-materialization rule
-    #     (`komira_optimizer.optimizer_payload_narrow`) proved from
-    #     `table_stats`' folded [min,max].
-    #
-    #     ⛔ IT IS NOT A CTOR ARGUMENT, DELIBERATELY. Every construction site in
-    #     the tree — and every REBUILD site (`optimizer_helpers`,
-    #     `attach_hive_predicate`, `partition_prune_scans`) — must start EMPTY,
-    #     because a rebuild that silently carried a stale narrowing forward past
-    #     the pass that proved it would be applying an unproven cast. The rule
-    #     stamps it by direct field assignment, LAST in the pipeline, after every
-    #     pass that rebuilds a ScanData has run. `copy()` DOES carry it: a deep
-    #     clone of an already-stamped plan is the same plan.
-    var payload_narrow: List[PayloadNarrowSpec]
 
     def __init__(
         out self,
@@ -302,8 +287,6 @@ struct ScanData(Movable):
         self.filter = filter^
         self.row_count = row_count^
         self.table_stats = table_stats^
-        # Payload narrowing: always EMPTY at construction. See the field comment.
-        self.payload_narrow = List[PayloadNarrowSpec]()
         # =====================================================================
         # ORIENTATION — the binding's DECLARATION DECIDES.
         # =====================================================================
@@ -408,7 +391,7 @@ struct ScanData(Movable):
         var ts_copy: Optional[TableStats] = None
         if self.table_stats:
             ts_copy = Optional(self.table_stats.value().copy())
-        var out = Self(
+        return Self(
             self.source.copy(),
             schema_copy^,
             proj_copy^,
@@ -417,13 +400,6 @@ struct ScanData(Movable):
             ts_copy^,
             self.source_kind,
         )
-        # Payload narrowing: carried across the clone. The ctor cannot take it (see
-        # the field comment), so it is assigned after construction.
-        var pn = List[PayloadNarrowSpec]()
-        for i in range(len(self.payload_narrow)):
-            pn.append(self.payload_narrow[i].copy())
-        out.payload_narrow = pn^
-        return out^
 
     def fingerprint(self) -> UInt64:
         """Stable identity hash for plan-cache discrimination.

@@ -27,8 +27,8 @@ The package root exports nothing; import each rule's module:
   is no `PLAN_*` tag (`LOWERING_SCAN_ORDER_UNKNOWN_TAG`). The module header
   states the rule in full.
 
-The decisions are the ones `komira_optimizer`'s payload-narrowing pass makes
-when each scan's plan statistics equal its footers;
+The decisions are the ones `komira_optimizer`'s payload-narrowing pass, now
+deleted, made when each scan's plan statistics equalled its footers;
 `src/tests/conformance/komira_lowering_rules_conformance` checks this on a
 fixture set and holds the expected results as a golden file.
 

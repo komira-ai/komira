@@ -3,46 +3,24 @@
 # =============================================================================
 #
 # Every row of golden/payload_narrow.txt names a fixture; the first block is
-# komira_optimizer's 83-row parity table, verbatim, over its own fixtures
+# the 83-row parity table of komira_optimizer's payload-narrowing pass (the
+# rule the host rule replaced, now deleted), verbatim, over its own fixtures
 # (fixtures.mojo), the rest are this package's (extra_fixtures.mojo). For
 # every row, the host rule `derive_payload_narrow`, given each scan's
-# statistics as its footer entry, and the optimizer rule
-# `narrow_join_payload_inplace` (the oracle), which stamps
-# `ScanData.payload_narrow` from the same statistics on the plan, must both
-# render to the row. Every mismatch is reported, and on any mismatch both
-# rules' rows for the whole file are printed.
-#
-# The oracle part (the import of komira_optimizer, `_stamped` and `_oracle`)
-# goes when the optimizer rule and `ScanData.payload_narrow` are deleted; the
-# golden file then holds the decisions on its own.
+# statistics as its footer entry, must render to the row. Every mismatch is
+# reported, and on any mismatch the rule's rows for the whole file are
+# printed.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_plan_expr.payload_narrow import PayloadNarrowSpec
 from komira_plan_ir.logical_plan import (
-    LogicalPlan,
-    PLAN_SCAN,
-    PLAN_FILTER,
-    PLAN_PROJECT,
-    PLAN_AGGREGATE,
-    PLAN_JOIN,
-    PLAN_SORT,
-    PLAN_LIMIT,
-    PLAN_DISTINCT,
-    PLAN_TOPN,
-    PLAN_PARTITION_BY,
-    PLAN_PARTITION_TOPN,
-    PLAN_ASOF_JOIN,
-    PLAN_UNION,
-    PLAN_CAST_TO_VARCHAR,
     SOURCE_CSV,
     SOURCE_JSON,
     SOURCE_ORC,
     SOURCE_IN_MEMORY,
 )
 from komira_lowering_rules.payload_narrow import derive_payload_narrow
-from komira_optimizer.optimizer_payload_narrow import narrow_join_payload_inplace
 
 from komira_lowering_rules_conformance.extra_fixtures import build, extra_names
 from komira_lowering_rules_conformance.golden import GoldenRow, parse_golden, read_golden
@@ -53,72 +31,20 @@ comptime OPTIMIZER_TABLE_ROWS = 83
 """The rows of komira_optimizer's parity table, the golden file's first block."""
 
 
-def _stamped(node: LogicalPlan, mut out: List[List[PayloadNarrowSpec]]) raises:
-    """Append each scan's stamped specs, in scan pre-order."""
-    if node.tag == PLAN_SCAN:
-        out.append(node.scan_data_ref().payload_narrow.copy())
-    elif node.tag == PLAN_JOIN:
-        _stamped(node.join_data_ref().left[], out)
-        _stamped(node.join_data_ref().right[], out)
-    elif node.tag == PLAN_ASOF_JOIN:
-        _stamped(node.asof_join_data_ref().left[], out)
-        _stamped(node.asof_join_data_ref().right[], out)
-    elif node.tag == PLAN_UNION:
-        ref kids = node.union_data_ref().children
-        for i in range(len(kids)):
-            _stamped(kids[i][], out)
-    elif node.tag == PLAN_FILTER:
-        _stamped(node.filter_data_ref().child[], out)
-    elif node.tag == PLAN_PROJECT:
-        _stamped(node.project_data_ref().child[], out)
-    elif node.tag == PLAN_AGGREGATE:
-        _stamped(node.aggregate_data_ref().child[], out)
-    elif node.tag == PLAN_SORT:
-        _stamped(node.sort_data_ref().child[], out)
-    elif node.tag == PLAN_LIMIT:
-        _stamped(node.limit_data_ref().child[], out)
-    elif node.tag == PLAN_DISTINCT:
-        _stamped(node.distinct_data_ref().child[], out)
-    elif node.tag == PLAN_TOPN:
-        _stamped(node.topn_data_ref().child[], out)
-    elif node.tag == PLAN_PARTITION_BY:
-        _stamped(node.partition_by_data_ref().child[], out)
-    elif node.tag == PLAN_PARTITION_TOPN:
-        _stamped(node.partition_topn_data_ref().child[], out)
-    elif node.tag == PLAN_CAST_TO_VARCHAR:
-        _stamped(node.cast_to_varchar_data_ref().child[], out)
-
-
-def _oracle(plan: LogicalPlan) raises -> String:
-    """The optimizer rule's decisions on a copy of `plan`, rendered."""
-    var p = plan.copy()
-    _ = narrow_join_payload_inplace(p)
-    var slots = List[List[PayloadNarrowSpec]]()
-    _stamped(p, slots)
-    return render(slots)
-
-
-def test_host_rule_and_oracle_match_every_golden_row() raises:
+def test_host_rule_matches_every_golden_row() raises:
     var golden = read_golden(GOLDEN)
     var problems = List[String]()
     var host_rows = String()
-    var oracle_rows = String()
     for i in range(len(golden)):
         ref g = golden[i]
         var plan = build(g.name)
         var host = row(g.name, render(derive_payload_narrow(plan, case_footers(plan))))
-        var oracle = row(g.name, _oracle(plan))
         host_rows += host + "\n"
-        oracle_rows += oracle + "\n"
         if host != g.text:
             problems.append("line " + String(g.line) + ": golden `" + g.text + "` host `" + host + "`")
-        if oracle != g.text:
-            problems.append("line " + String(g.line) + ": golden `" + g.text + "` oracle `" + oracle + "`")
     if len(problems) > 0:
         print("the host rule's rows:")
         print(host_rows)
-        print("the oracle's rows:")
-        print(oracle_rows)
         var msg = String(len(problems)) + " problem(s):"
         for i in range(len(problems)):
             msg += "\n  " + problems[i]
