@@ -34,12 +34,14 @@ the same package without the keyword, fails: the README is attached to
 `# README.md:7`).
 [`negative/readme_examples/readme_keyword`](negative/readme_examples/readme_keyword/BUCK)
 fails loading, per `-c readme_keyword.case=`, for `readme = True` in a
-package with no README.md and for a `readme` that is not True or False.
+package with no README.md and for a `readme` that is not True or False; those
+refusals, and `owner_base` having no `[tests][readme]`, are the scenario
+[`analysis_refusals_readme`](../selftest/analysis_refusals_readme.zig).
 
 ```sh
 ./buck2 build tests//functional/readme_examples/...
 ./buck2 build tests//negative/readme_examples/unowned:unowned_base   # must fail: README.md:7
-./buck2 build -c readme_keyword.case=true_without_readme tests//negative/readme_examples/readme_keyword:kw   # must fail: holds no README.md
+./buck2 test //tools/build/selftest:analysis_refusals_readme
 ./buck2 build tests//negative/readme_examples/raises:raises   # must fail: README.md:13: FAILED
 ./buck2 build tests//negative/readme_examples/relative_link:relative_link   # must fail: README.md:11: greet.mojo: a relative link
 ```

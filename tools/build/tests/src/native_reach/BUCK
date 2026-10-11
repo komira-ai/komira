@@ -1,0 +1,14 @@
+load("@komira//tools/build/mojo:native_reach.bzl", "native_reach_case")
+
+# A case of mojo_library's native-reach check (tests//negative/native_reach)
+# in a package under src/ but not src/tests/: only libraries under src/tests/
+# are exempt, so the check runs here and must refuse the owner's archive
+# linked without its owner. A wider exemption fails this case's analysis
+# ("native_reach checked nothing").
+native_reach_case(
+    name = "shipped_library_checked",
+    srcs = ["plain.mojo"],
+    deps = ["komira//src/komira_fs:komira_fs_posix"],
+    expect_archives = ["links komira//src/komira_fs:komira_fs_posix, which komira//src/komira_fs:komira_fs owns"],
+    visibility = ["//functional/native_reach:"],
+)
