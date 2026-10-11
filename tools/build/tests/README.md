@@ -659,8 +659,9 @@ declares a package, and a NEW fixture library gets `<name>_conda` from the
 `mojo_library` macro with no declaration anywhere and builds; `conda = False`
 gets no target; `conda_name` publishes under another name and a dependent
 requires that name; a dependency is rendered at its own version; a library that
-cannot be packaged (no tests, native code, a run-time `dlopen`, a name that is
-not a conda name, a dependency with no package) keeps a target that builds as a
+cannot be packaged (no tests, native code, a run-time `dlopen` its declaration
+omits, a `dlopen` system_libs.bzl does not name, a name that is not a conda
+name, a dependency with no package) keeps a target that builds as a
 `REFUSED` directory holding the reason, its `[release]` fails naming it, and
 the library still builds; `komira_pack conda-check` refuses a different
 payload, name, subdir or dependency list, a corrupt zip, a manifest that is not

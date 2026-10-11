@@ -110,3 +110,7 @@ selftest_scenario(name = "analysis_refusals_coverage")
 selftest_scenario(name = "config_refusals")
 
 selftest_scenario(name = "rerun")
+
+selftest_scenario(name = "graph_check_refusals")
+
+selftest_scenario(name = "sql_oracle")

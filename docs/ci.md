@@ -360,10 +360,25 @@ channel answers NOOP (exit 0).
   Those are lint rules a script could spell around. **The lock is kci**,
   which on a push is built from `main`: it refuses `--plan` on a push to
   `refs/heads/main` for every stage (exit 3, `KCI-E-PLAN-ON-RELEASE`), and
-  its result carries a `set_hash` only for a run that is not `--plan` and,
-  when it selects validations, whose every validation VALIDATED and
-  SUCCEEDED. `beta_validate`'s `validated_set_hash` comes from that field, so a
-  dry run hands `prod` nothing, and `prod` refuses an empty hash.
+  its result carries a `set_hash` only for a run that is not `--plan`, that
+  ended SUCCEEDED or NOOP, and, when it selects validations, whose every
+  validation VALIDATED and SUCCEEDED. `beta_validate`'s `validated_set_hash`
+  comes from that field, so a dry run, a failed run or a SUPERSEDED run
+  (exit 0) hands `prod` nothing, and `prod` refuses an empty hash.
+- **A failed DEPLOY step stops the run, and nothing rolls it back.** `kci
+  run` stops at the first step that does not end SUCCEEDED or NOOP. A DEPLOY
+  step that ends FAILED or PARTIAL leaves its cell exactly as the failed
+  apply left it: kci does not unwind what landed, and a later step of the
+  stage (a DEPLOY step into another cell included) has no row and never
+  runs. The job exits non-zero (4 or 6), so no job that `needs:` it starts,
+  and the run's result carries no `set_hash`, so the next stage, which
+  refuses an empty hash, could not start from it either. The recovery is a
+  fixed revision pushed to `main`: its apply completes what the failed one
+  left `pending`. `--rollback-on-failure`, which would re-apply the failed
+  cell at its last known-good revision, needs a per-cell deployed-revision
+  record that kci does not have yet, so kci refuses the flag on every stage,
+  with or without `--plan`, before it reads anything (exit 2,
+  `KCI-E-USAGE`, no RUNNING record).
 - **Queued runs: one release at a time, newest push wins.** A PUSH to `main`
   is in the concurrency group `kci-release-main` (rule R16 holds the group
   text byte for byte). A running release is never cancelled. GitHub keeps at
@@ -807,7 +822,7 @@ so the release files list no package:
 - **Declared:** the artifacts of `release/artifacts.textproto` (and any
   explicit `checks` it declares, to group targets its own way).
 - **Derived:** the buck2 build system's `derive_checks` command,
-  `release/ci/derive_checks.py`, reads `//...` and `tests//functional/...`
+  `//tools/build/ci:derive_checks`, reads `//...` and `tests//functional/...`
   from the live graph (`buck2 cquery`) and answers one check per path group
   for every target no declared unit names or matches: `<p>` for each
   library `//src/<p>/...` and each test-only package
@@ -829,7 +844,7 @@ so the release files list no package:
   "cannot tell" (`KCI-E-AFFECTED`), never a pass.
 - **A universe the derive tool cannot query:** when its `buck2 cquery` fails,
   for any reason (a target with an unknown or invisible dependency, a
-  transport error, a buck2 that does not start), `derive_checks.py` answers
+  transport error, a buck2 that does not start), `derive_checks` answers
   one `BROKEN <reason>` line holding buck2's error, and kci FAILS the check
   (`KCI-E-BUILD-FAILED`): nothing is built, and no affected command runs.
 
@@ -944,7 +959,7 @@ To see the units a change would build, with nothing built:
 ```sh
 kci run --stage pr --affected-by <base commit> --revision-id <HEAD> \
   --work-dir "$PWD" --log-dir <dir> --result-file <file> --plan
-python3 release/ci/derive_checks.py --from release/artifacts.textproto  # the derived checks alone
+./buck2 run //tools/build/ci:derive_checks -- --from release/artifacts.textproto  # the derived checks alone
 ```
 
 ### The workflow subset kci reads

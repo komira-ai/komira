@@ -40,6 +40,7 @@ load(
 )
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "cap_flags", "define_args", "mem_cap_script", "memory_cap")
 load(":native_reach.bzl", "NATIVE_REACH_ATTRS", "native_reach", "native_reach_kwargs")
+load(":dlopen.bzl", "DLOPEN_ATTRS", "dlopen_refusal", "dlopen_rows")
 load(":readme.bzl", "readme_kwargs")
 load(":run_check.bzl", "run_check_validation")
 load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_flags", "with_test_limit")
@@ -130,8 +131,8 @@ def _conda_facts(ctx, import_name, c_link, has_tests):
 
     The name is None when the library opted out. The refusal is None when the
     package can be built, else the reason it cannot: a reason known without
-    reading a source (native code, no tests, a dependency with no package, a name
-    that is not a conda name). The package target still builds, as a directory
+    reading a source (native code, a `dlopen` system_libs.bzl lacks, no tests, a
+    dependency with no package, a name that is not a conda name). The package target still builds, as a directory
     holding the reason (tools/build/package/conda.bzl).
     """
     if not ctx.attrs.conda:
@@ -141,6 +142,8 @@ def _conda_facts(ctx, import_name, c_link, has_tests):
         return name, "`{}` is not a conda name (a lowercase letter, then lowercase letters, digits and _); set `conda_name`".format(name)
     if c_link != None:
         return name, "{} links native code. A `.mojoc` holds none, so a consumer would fail at its own link; no conda package for it until native code is supported".format(ctx.label.raw_target())
+    if dlopen_refusal(ctx) != None:
+        return name, dlopen_refusal(ctx)
     if not has_tests:
         return name, "{} has no tests, so its package would not be gated by any; declare test_srcs on the library".format(ctx.label.raw_target())
     for d in ctx.attrs.deps:
@@ -288,6 +291,7 @@ def _library_impl(ctx):
             c_link = c_link,
             conda_name = conda_name,
             conda_refusal = conda_refusal,
+            dlopen = dlopen_rows(ctx),
             direct = sorted([d[MojoInfo].import_name for d in ctx.attrs.deps if MojoInfo in d]),
             direct_conda = {
                 d[MojoInfo].import_name: struct(name = d[MojoInfo].conda_name, refusal = d[MojoInfo].conda_refusal)
@@ -445,7 +449,7 @@ mojo_library_rule = rule(
         # itself built from a mojo_library, so a default would be a cycle.
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
-    } | COVERAGE_ATTRS | MUTATION_ATTRS | NATIVE_REACH_ATTRS | LIBRARY_DEFINE_ATTRS | RERUN_ATTRS | _TOOLCHAIN_ATTR,
+    } | COVERAGE_ATTRS | DLOPEN_ATTRS | MUTATION_ATTRS | NATIVE_REACH_ATTRS | LIBRARY_DEFINE_ATTRS | RERUN_ATTRS | _TOOLCHAIN_ATTR,
 )
 
 # ---- mojo_binary / mojo_test ----------------------------------------------
