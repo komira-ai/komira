@@ -1,5 +1,5 @@
-//! bounded_run: run one command as the leader of a session of its own, wait
-//! for it with an optional time limit, and report how it ended.
+//! bounded_run: run one command, wait for it with an optional time limit
+//! (under which it leads a session of its own), and report how it ended.
 //!
 //! What the coverage actions do in shell today, once: cov_branch_run (no
 //! limit: the release gate's runner, waited for alone), cov_run.sh (a limit,
@@ -15,8 +15,12 @@
 //!   - stdin, stdout and stderr are inherited, or a file each (stdin read,
 //!     the others created or truncated; `stderr_to_stdout` gives stderr the
 //!     stdout descriptor, so the two interleave in one file as `>f 2>&1`);
-//!   - it calls setsid() before execve, so its pid is its process group's id
-//!     and everything it starts (that does not leave the group) is a member.
+//!   - with a limit, it calls setsid() before execve, so its pid is its
+//!     process group's id and everything it starts (that does not leave the
+//!     group) is a member the limit's kill reaches;
+//!   - with no limit, it stays in the caller's process group and session, as
+//!     a command a shell runs does: whatever stops the caller's group (an
+//!     executor's timeout) stops the command too.
 //!
 //! Waiting: with no limit, a blocking wait for the command alone (like the
 //! shell's `wait`): processes it left running are not waited for, and not
@@ -48,9 +52,11 @@ pub const Spec = struct {
     env: []const []const u8,
     stdin_path: ?[]const u8 = null,
     stdout_path: ?[]const u8 = null,
+    /// Ignored when `stderr_to_stdout` is set (the file is still created).
     stderr_path: ?[]const u8 = null,
+    /// stderr gets the stdout descriptor; it wins over `stderr_path`.
     stderr_to_stdout: bool = false,
-    /// null: no limit.
+    /// null: no limit, and the command stays in the caller's process group.
     limit_ms: ?u64 = null,
     /// null: SIGKILL at the limit; n: SIGTERM, n ms, then SIGKILL.
     term_grace_ms: ?u64 = null,
@@ -75,8 +81,9 @@ pub const Survivor = struct {
 pub const Outcome = struct {
     status: Status,
     timed_out: bool,
-    /// The command's pid, which is its process group's id.
-    pgid: i32,
+    /// With a limit, the command's pid, which is its process group's id;
+    /// null with none (the command is in the caller's group).
+    pgid: ?i32,
     /// Members of the group not a zombie after the kill (check_survivors).
     survivors: []const Survivor,
 
@@ -146,10 +153,11 @@ pub fn run(alloc: std.mem.Allocator, spec: Spec) Error!Outcome {
     defer if (err_fd) |fd| posix.close(fd);
 
     const pid = try posix.fork();
-    if (pid == 0) child(argv, envp, msg, in_fd, out_fd, err_fd, spec.stderr_to_stdout);
+    const own_group = spec.limit_ms != null;
+    if (pid == 0) child(argv, envp, msg, in_fd, out_fd, err_fd, spec.stderr_to_stdout, own_group);
 
-    if (spec.limit_ms == null) {
-        return .{ .status = reap(pid), .timed_out = false, .pgid = pid, .survivors = &.{} };
+    if (!own_group) {
+        return .{ .status = reap(pid), .timed_out = false, .pgid = null, .survivors = &.{} };
     }
     const start = std.time.Instant.now() catch return error.Unexpected;
     var nap: u64 = std.time.ns_per_ms;
@@ -214,8 +222,9 @@ fn child(
     out_fd: ?posix.fd_t,
     err_fd: ?posix.fd_t,
     err_to_out: bool,
+    own_group: bool,
 ) noreturn {
-    _ = linux.setsid();
+    if (own_group) _ = linux.setsid();
     if (in_fd) |fd| _ = linux.dup2(fd, 0);
     if (out_fd) |fd| _ = linux.dup2(fd, 1);
     if (err_to_out) {
@@ -360,28 +369,54 @@ test "an exit status is the command's own, and 128 + N for a signal" {
     try testing.expectEqual(@as(u8, 137), killed.shellStatus());
 }
 
-test "the command leads a session and process group of its own" {
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
+/// The process group and session of a /proc/<pid>/stat line.
+fn groupAndSession(text: []const u8) ![2]i32 {
+    const close = std.mem.lastIndexOfScalar(u8, text, ')') orelse return error.BadStat;
+    var it = std.mem.tokenizeScalar(u8, text[close + 1 ..], ' ');
+    _ = it.next(); // state
+    _ = it.next(); // ppid
+    const pgrp = try std.fmt.parseInt(i32, it.next() orelse return error.BadStat, 10);
+    const session = try std.fmt.parseInt(i32, it.next() orelse return error.BadStat, 10);
+    return .{ pgrp, session };
+}
+
+/// Runs `cat /proc/self/stat` under `sh` with `limit_ms`; the command's
+/// outcome and cat's process group and session.
+fn catStat(a: std.mem.Allocator, limit_ms: ?u64) !struct { o: Outcome, gs: [2]i32 } {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     const dir = try tmp.dir.realpathAlloc(a, ".");
     const out = try std.fs.path.join(a, &.{ dir, "stat" });
     var spec = try shSpec(a, "cat /proc/self/stat");
     spec.stdout_path = out;
+    spec.limit_ms = limit_ms;
     const o = try run(a, spec);
     try testing.expectEqual(Status{ .exited = 0 }, o.status);
-    // `cat` runs in the shell's group: pgrp and session are the shell's pid.
-    const text = try std.fs.cwd().readFileAlloc(a, out, 4096);
-    const close = std.mem.lastIndexOfScalar(u8, text, ')').?;
-    var it = std.mem.tokenizeScalar(u8, text[close + 1 ..], ' ');
-    _ = it.next(); // state
-    _ = it.next(); // ppid
-    const pgrp = try std.fmt.parseInt(i32, it.next().?, 10);
-    const session = try std.fmt.parseInt(i32, it.next().?, 10);
-    try testing.expectEqual(o.pgid, pgrp);
-    try testing.expectEqual(o.pgid, session);
+    try testing.expect(!o.timed_out);
+    // `cat` runs in the shell's group and session.
+    return .{ .o = o, .gs = try groupAndSession(try std.fs.cwd().readFileAlloc(a, out, 4096)) };
+}
+
+test "with a limit, the command leads a session and process group of its own" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const r = try catStat(a, 20_000);
+    const pgid = r.o.pgid.?;
+    try testing.expectEqual(pgid, r.gs[0]);
+    try testing.expectEqual(pgid, r.gs[1]);
+}
+
+test "with no limit, the command stays in the caller's process group and session" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const r = try catStat(a, null);
+    try testing.expect(r.o.pgid == null);
+    // Ours, from this process's own stat: a kill of our group reaches it.
+    const mine = try groupAndSession(try std.fs.cwd().readFileAlloc(a, "/proc/self/stat", 4096));
+    try testing.expectEqual(mine[0], r.gs[0]);
+    try testing.expectEqual(mine[1], r.gs[1]);
 }
 
 test "the environment is exactly the one given" {
@@ -432,6 +467,25 @@ test "stdout and stderr go to their files, or interleave in one" {
     try testing.expectEqualStrings("out\nerr\nout2\n", try std.fs.cwd().readFileAlloc(a, both, 4096));
 }
 
+test "stderr_to_stdout wins over stderr_path, whose file is still created empty" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try tmp.dir.realpathAlloc(a, ".");
+    const o = try std.fs.path.join(a, &.{ dir, "o" });
+    const e = try std.fs.path.join(a, &.{ dir, "e" });
+    try tmp.dir.writeFile("e", "stale\n");
+    var spec = try shSpec(a, "echo out; echo err >&2");
+    spec.stdout_path = o;
+    spec.stderr_path = e;
+    spec.stderr_to_stdout = true;
+    _ = try run(a, spec);
+    try testing.expectEqualStrings("out\nerr\n", try std.fs.cwd().readFileAlloc(a, o, 4096));
+    try testing.expectEqualStrings("", try std.fs.cwd().readFileAlloc(a, e, 4096));
+}
+
 test "a program that cannot be run is exit 127 with its name on stderr" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
@@ -452,16 +506,25 @@ test "no limit: the command is waited for alone, and nothing is killed" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    // The shell leaves a sleeper behind and exits at once.
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try tmp.dir.realpathAlloc(a, ".");
+    const out = try std.fs.path.join(a, &.{ dir, "pid" });
+    // The shell leaves a sleeper behind, says its pid, and exits at once.
+    var spec = try shSpec(a, "sleep 3 & echo $!; exit 0");
+    spec.stdout_path = out;
     const t0 = try std.time.Instant.now();
-    const o = try run(a, try shSpec(a, "sleep 3 & exit 0"));
+    const o = try run(a, spec);
     const took = (try std.time.Instant.now()).since(t0);
     try testing.expectEqual(Status{ .exited = 0 }, o.status);
     try testing.expect(took < 2 * std.time.ns_per_s);
-    // The sleeper is still a running member of the group.
-    const left = try groupLeft(a, "/proc", o.pgid);
-    try testing.expectEqual(@as(usize, 1), left.len);
-    _ = linux.kill(-o.pgid, linux.SIG.KILL);
+    // The sleeper is still running (it is in our group: only it is killed).
+    const text = try std.fs.cwd().readFileAlloc(a, out, 64);
+    const sleeper = try std.fmt.parseInt(i32, std.mem.trimRight(u8, text, "\n"), 10);
+    defer _ = linux.kill(sleeper, linux.SIG.KILL);
+    const p = try std.fmt.allocPrint(a, "/proc/{d}/stat", .{sleeper});
+    const s = parseStat(std.mem.trimRight(u8, try std.fs.cwd().readFileAlloc(a, p, 4096), "\n")).?;
+    try testing.expect(s.state != 'Z' and s.state != 'X');
 }
 
 test "a limit kills the whole group, and the scan finds no survivor" {
@@ -480,7 +543,7 @@ test "a limit kills the whole group, and the scan finds no survivor" {
     try testing.expectEqual(Status{ .signaled = 9 }, o.status);
     try testing.expectEqual(@as(usize, 0), o.survivors.len);
     // Not the leader alone: the background sleeper is gone too.
-    try testing.expectEqual(@as(usize, 0), (try groupLeft(a, "/proc", o.pgid)).len);
+    try testing.expectEqual(@as(usize, 0), (try groupLeft(a, "/proc", o.pgid.?)).len);
     try testing.expect(took < 10 * std.time.ns_per_s);
 }
 
@@ -601,4 +664,40 @@ test "parseStat refuses lines it cannot read" {
     try testing.expect(parseStat("12 (a) S 1") == null);
     const s = parseStat("12 (a) S 1 2 3").?;
     try testing.expectEqual(@as(i32, 2), s.pgrp);
+}
+
+test "survivors still running after the wait are sent SIGKILL again" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // A real sleeper leading a process group of its own (set on both sides
+    // of the fork, so the group exists before the scan's kill).
+    const argv = try zArray(a, &.{ try which(a, "sleep"), "30" });
+    const envp = try zArray(a, &.{});
+    const pid = try posix.fork();
+    if (pid == 0) {
+        _ = linux.syscall2(.setpgid, 0, 0);
+        _ = linux.execve(argv[0].?, argv.ptr, envp.ptr);
+        linux.exit_group(127);
+    }
+    _ = linux.syscall2(.setpgid, @intCast(pid), @intCast(pid));
+    // A table that shows it running, never dying: the scan reports it after
+    // the wait, and its last kill must reach the real group.
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    const me = try std.fmt.allocPrint(a, "{d}", .{linux.getpid()});
+    try writeStat(tmp.dir, me, try std.fmt.allocPrint(a, "{s} (t) R 1 1 1 0\n", .{me}));
+    try writeStat(tmp.dir, "self", try std.fmt.allocPrint(a, "{s} (t) R 1 1 1 0\n", .{me}));
+    const id = try std.fmt.allocPrint(a, "{d}", .{pid});
+    try writeStat(tmp.dir, id, try std.fmt.allocPrint(a, "{s} (sleep) S 1 {s} {s} 0\n", .{ id, id, id }));
+    const left = try survivorsAfterKill(a, root, pid, 0);
+    try testing.expectEqual(@as(usize, 1), left.len);
+    try testing.expectEqual(pid, left[0].pid);
+    // Within 5 s the sleeper is dead of SIGKILL; if not, kill it here and fail.
+    var waited: u32 = 0;
+    while (!exitedNoReap(pid, false) and waited < 5000) : (waited += 20) std.time.sleep(20 * std.time.ns_per_ms);
+    if (waited >= 5000) _ = linux.kill(pid, linux.SIG.KILL);
+    try testing.expectEqual(Status{ .signaled = linux.SIG.KILL }, reap(pid));
+    try testing.expect(waited < 5000);
 }

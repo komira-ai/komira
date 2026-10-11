@@ -19,9 +19,9 @@ cov_branch_dir(
 
 # cov_branch: the tool of the branch coverage actions, one subcommand each
 # (cov_branch.zig; README.md, "cov_branch_run"); `run` runs a test through
-# the release gate's runner with bounded_run.zig (a command in a session of
-# its own, waited for with an optional limit, and the survivors of a limit's
-# kill), the module the coverage runs share.
+# the release gate's runner with bounded_run.zig (a command waited for with
+# an optional limit; with one, in a session of its own, and the survivors of
+# the limit's kill), the module the coverage runs share.
 _COV_BRANCH_SRCS = [
     "bounded_run.zig",
     "cov_branch_run.zig",

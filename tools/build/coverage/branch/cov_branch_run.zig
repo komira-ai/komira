@@ -46,7 +46,8 @@
 //! child still running when the test exits writes its profile after the
 //! merge, or never, and its counts are not in <profdata_out>. Like the gate,
 //! it has no time limit of its own: a test that hangs holds the action until
-//! the executor's timeout.
+//! the executor's timeout. With no limit the test stays in this tool's
+//! process group, so a kill of that group at the timeout reaches it too.
 //!
 //! The scratch directory is $BUCK_SCRATCH_PATH/cov_branch_run (relative to
 //! the working directory when it is relative), or .cov_branch_run in the

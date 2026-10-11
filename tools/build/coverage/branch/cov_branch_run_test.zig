@@ -337,6 +337,20 @@ test "a merge refused for its version says which version llvm-profdata expects" 
     try testing.expectEqual(@as(usize, 2), fake.calls.items.len);
 }
 
+test "a line holding the expected version twice gives its last one with digits" {
+    var c = try Case.init();
+    defer c.deinit();
+    var fake = Fake.init(c.a());
+    fake.merge_status = .{ .exited = 1 };
+    // As the script's greedy sed: the last "; expected version = " followed
+    // by digits, so 10 (not 8) on the first line, and 9 on the second, whose
+    // last one has none.
+    fake.merge_log = "warning: raw profile version mismatch: x; expected version = 8; expected version = 10\n" ++
+        "warning: y; expected version = 9; expected version = \n";
+    try testing.expectEqual(@as(u8, 1), try c.go(&fake));
+    try testing.expect(c.has("llvm-profdata refused a raw profile of version 11: it expects 10 9: "));
+}
+
 test "any other merge failure gives the first three lines of its log" {
     var c = try Case.init();
     defer c.deinit();
