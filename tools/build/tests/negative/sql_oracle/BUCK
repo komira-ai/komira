@@ -123,3 +123,83 @@ sql_oracle(
     srcs = "staged.csv",
     outputs = ["out.tsv"],
 )
+
+# REFUSED: no srcs.
+sql_oracle(
+    name = "srcs_empty",
+    srcs = [],
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an output named twice.
+sql_oracle(
+    name = "output_twice",
+    srcs = "ok.sql",
+    outputs = [
+        "out.tsv",
+        "out.tsv",
+    ],
+)
+
+# REFUSED: an output that is the directory of an input's path.
+sql_oracle(
+    name = "output_is_input_directory",
+    srcs = "ok.sql",
+    inputs = {"out.tsv/staged.csv": "staged.csv"},
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: a source named twice in the list form of `inputs`.
+sql_oracle(
+    name = "input_twice",
+    srcs = "ok.sql",
+    inputs = [
+        "staged.csv",
+        "staged.csv",
+    ],
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an input path that is also the directory of another input.
+sql_oracle(
+    name = "input_file_and_directory",
+    srcs = "ok.sql",
+    inputs = {
+        "data": "staged.csv",
+        "data/staged.csv": "staged.csv",
+    },
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an empty, an absolute and a directory (trailing `/`) input path,
+# each refused as a whole path before its segments are read (without that
+# check each would be refused for its empty segment instead).
+sql_oracle(
+    name = "input_empty",
+    srcs = "ok.sql",
+    inputs = {"": "staged.csv"},
+    outputs = ["out.tsv"],
+)
+
+sql_oracle(
+    name = "input_absolute",
+    srcs = "ok.sql",
+    inputs = {"/staged.csv": "staged.csv"},
+    outputs = ["out.tsv"],
+)
+
+sql_oracle(
+    name = "input_trailing_slash",
+    srcs = "ok.sql",
+    inputs = {"data/": "staged.csv"},
+    outputs = ["out.tsv"],
+)
+
+# REFUSED: an input path with a segment the name pattern refuses (not `..`,
+# which the `.`/`..` check refuses on its own).
+sql_oracle(
+    name = "input_glob_segment",
+    srcs = "ok.sql",
+    inputs = {"data/*.csv": "staged.csv"},
+    outputs = ["out.tsv"],
+)

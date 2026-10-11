@@ -15,8 +15,12 @@
 //! positions (one of missing_{first,middle,last}_output fails with buck2's
 //! message, not the rule's), `SET TimeZone = 'UTC'` or the environment check
 //! dropped (the invocation lacks it; a dropped TZ, LC_ALL or LD_LIBRARY_PATH
-//! entry fails the green fixture in the environment check), and each
-//! analysis `fail()` deleted.
+//! entry fails the green fixture in the environment check), and each of the
+//! sql_oracle analysis `fail()` calls deleted, or one arm of a condition that
+//! no other arm covers: the empty, absolute and trailing-`/` input paths each
+//! fall through to the segment message, a `*` segment passes once the name
+//! pattern is dropped, an output over an input's directory meets buck2's
+//! conflict. (The `.`/`..` arms are covered by the name pattern too.)
 const std = @import("std");
 const lib = @import("lib/lib.zig");
 
@@ -59,6 +63,51 @@ const REFUSALS = [_]lib.Row{
         .name = "src_not_sql",
         .target = PKG ++ "src_not_sql",
         .text = PKG ++ "src_not_sql: srcs entry staged.csv is not a .sql file",
+    },
+    .{
+        .name = "srcs_empty",
+        .target = PKG ++ "srcs_empty",
+        .text = PKG ++ "srcs_empty: srcs is empty: name the .sql file(s) to run",
+    },
+    .{
+        .name = "output_twice",
+        .target = PKG ++ "output_twice",
+        .text = PKG ++ "output_twice: outputs names \"out.tsv\" twice",
+    },
+    .{
+        .name = "output_is_input_directory",
+        .target = PKG ++ "output_is_input_directory",
+        .text = PKG ++ "output_is_input_directory: output \"out.tsv\" is also an input path",
+    },
+    .{
+        .name = "input_twice",
+        .target = PKG ++ "input_twice",
+        .text = PKG ++ "input_twice: inputs names \"staged.csv\" twice",
+    },
+    .{
+        .name = "input_file_and_directory",
+        .target = PKG ++ "input_file_and_directory",
+        .text = PKG ++ "input_file_and_directory: input \"data\" is both a file and the directory of \"data/staged.csv\"",
+    },
+    .{
+        .name = "input_empty",
+        .target = PKG ++ "input_empty",
+        .text = PKG ++ "input_empty: input \"\" must be a relative file path",
+    },
+    .{
+        .name = "input_absolute",
+        .target = PKG ++ "input_absolute",
+        .text = PKG ++ "input_absolute: input \"/staged.csv\" must be a relative file path",
+    },
+    .{
+        .name = "input_trailing_slash",
+        .target = PKG ++ "input_trailing_slash",
+        .text = PKG ++ "input_trailing_slash: input \"data/\" must be a relative file path",
+    },
+    .{
+        .name = "input_glob_segment",
+        .target = PKG ++ "input_glob_segment",
+        .text = PKG ++ "input_glob_segment: input \"data/*.csv\" holds a segment that is not a plain name (^[A-Za-z0-9_][A-Za-z0-9_.-]*$)",
     },
 };
 

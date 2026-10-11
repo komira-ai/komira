@@ -87,9 +87,11 @@ duckdb -no-init -batch -bail \
 Analysis refuses: no `srcs`, a src that is not a `.sql` file, no `outputs`,
 an output that is not a plain file name (no directory, no glob character)
 or does not end in `.parquet`, `.csv` or `.tsv`, an output named twice or
-also an input path, an input path with an empty, `.` or `..` segment, an
-input that is both a file and another input's directory, and a build output
-in the list form of `inputs`.
+also an input path or an input's directory, an input path that is empty,
+absolute or ends in `/`, an input path with a segment that is not a plain
+name (empty, `.`, `..` or a glob character), an input that is both a file
+and another input's directory, a source named twice in the list form of
+`inputs`, and a build output in that list form.
 
 ## Expected results and row order
 
