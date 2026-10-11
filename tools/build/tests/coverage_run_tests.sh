@@ -55,19 +55,12 @@
 #      with the switch, coverage_shared_lib.sh (no release action moves),
 #      and covso_gen's run red (every source generated: nothing to check).
 #      The release actions with the switch on: coverage_keys.sh (test 41).
+#      The greens named below build in the pull-request check, not here:
+#      tests//functional/... is built, its sub-targets through
+#      tests//functional/coverage:greens, and the greens of tests//negative
+#      and tests//src through komira//:tests_greens. What stays here is
+#      what must go red.
 
-expect_green coverage_runs tests//functional/coverage:numbers tests//functional/coverage:census \
-    tests//functional/coverage:covgentest_report tests//functional/coverage:covgentest_result \
-    tests//functional/coverage:aggregates_tests tests//functional/coverage:aggregates_all \
-    tests//functional/coverage:covenv 'tests//functional/coverage:covenv[coverage]' \
-    tests//functional/coverage:covgen tests//functional/coverage:covgenmany \
-    'tests//functional/coverage:branchlib[coverage][tests][test_gate_env]' \
-    tests//negative/coverage:tracer tests//negative/coverage:lost \
-    tests//negative/coverage:orphan 'tests//negative/coverage:orphan[coverage]' \
-    tests//negative/coverage:linger 'tests//negative/coverage:linger[coverage][tests][test_brief]' \
-    'tests//functional/coverage/covreadme:covreadme[coverage][tests][readme]' \
-    'tests//functional/coverage/covreadme_none:covreadme_none[coverage][tests][readme]' \
-    'tests//functional/coverage:covmt_cov_gate[tests]'
 expect_red coverage_run_tracer "test_tracer: traced, TracerPid" 'tests//negative/coverage:tracer[coverage][tests][test_tracer]'
 expect_red coverage_run_lost "lostlib/value.mojo': no --map or --exclude prefix covers it" 'tests//negative/coverage:lost[coverage][tests][test_lost]'
 expect_red coverage_run_data_clash 'collides with its source, which a coverage run stages at "tests/test_lost.mojo"' tests//negative/coverage:clash
@@ -109,8 +102,6 @@ expect_red coverage_run_proc "/proc is not readable as this run's own" 'tests//n
 # package's top, a force-loaded C library, a version script); and
 # coverage_shared_lib.sh: the switch moves no release action of a shared
 # library, and its published file waits for no coverage action.
-expect_green coverage_run_shared_lib tests//functional/coverage:covso_report tests//functional/coverage:covso_result \
-    tests//negative/coverage:covso_skip
 expect_red coverage_run_shared_lib_skip "no class for tools/build/tests/negative/coverage/covso/covso_one.mojo (--must-contain)" \
     'tests//negative/coverage:covso_skip[coverage][tests][covso_one_driver]'
 expect_red coverage_run_shared_lib_generated "cov_run: --solib with no --solib-src: every source of the shared library covso_one.so is generated" \
