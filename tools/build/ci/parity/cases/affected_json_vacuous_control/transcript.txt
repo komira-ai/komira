@@ -1,0 +1,5 @@
+call git "rev-parse" "--verify" "--quiet" "parity-base^{commit}"
+exit 0
+stdout "1111111111111111111111111111111111111111\n"
+call git "cat-file" "-e" "parity-base:BUCK"
+exit 1
