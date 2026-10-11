@@ -64,7 +64,7 @@ comptime _T_WARM_STABLE: Int32 = 11
 comptime _T_SAMPLES: Int32 = 12
 
 
-# Probe kinds: the order of native/row_engine.c's PK_* enum.
+# Probe kinds: the order of native/row_probe.c's PK_* enum.
 comptime PROBE_GOOD: Int32 = 0
 comptime PROBE_SHORT_CHILD: Int32 = 1
 comptime PROBE_NEG_LENGTH: Int32 = 2
@@ -78,6 +78,10 @@ comptime PROBE_CALL_SIZE: Int32 = 9
 comptime PROBE_OTHER_THREAD: Int32 = 10
 comptime PROBE_FOREIGN_CLOSE: Int32 = 11
 comptime PROBE_NULL_CANCEL: Int32 = 12
+comptime PROBE_UNKNOWN_NULLS: Int32 = 13
+comptime PROBE_STRUCT_VALIDITY: Int32 = 14
+comptime PROBE_STRUCT_NO_BUFFERS: Int32 = 15
+comptime PROBE_STRUCT_BUFFERS: Int32 = 16
 
 # Misuse kinds: the order of native/row_probe.c's MU_* enum.
 comptime MISUSE_CAPS_SMALL: Int32 = 0

@@ -11,6 +11,13 @@
 #     and the fault, before any of it is read, and the args are still moved
 #     and released (a runtime that reads past a short buffer, or keeps the
 #     host's array); an empty batch with no values buffer is accepted;
+#   - an argument struct with a validity buffer, a NULL buffer list or no
+#     buffer slot is refused by name (design section 4.3, rule 5: a runtime
+#     that ignores the struct's nulls runs a null row on its children's
+#     values, or reads a buffer list that is not there);
+#   - a field whose null_count is -1 (not computed) has its bitmap read, in
+#     either field (a runtime that reads the bitmap only for a positive
+#     count reads a null row's value);
 #   - arrays on another device are refused with ERR_UNSUPPORTED, a short
 #     call struct with ERR_ABI;
 #   - the cancel flag set before the call fails it before the batch; set by
@@ -48,7 +55,10 @@
 # the runtime tests (the PR's mutation scorecard). Mutants planted
 # by hand, each red: row_call.c's args_fit without the short-child check
 # (the probe read past field 1's buffer: status OK); the adapter's per-row
-# cancel check made `if False` (cancelled at row 1 came back OK).
+# cancel check made `if False` (cancelled at row 1 came back OK);
+# field_columns reading the bitmap only for `null_count > 0` (the -1 field
+# came back OK with 0 nulls); args_fit without its struct-validity refusal
+# (struct validity came back OK).
 
 from std.os.path import realpath
 from std.testing import assert_equal, assert_false, assert_true
@@ -98,7 +108,11 @@ from komira_udf_spike_rowudf.engine import (
     PROBE_NULL_CHILD,
     PROBE_OTHER_THREAD,
     PROBE_SHORT_CHILD,
+    PROBE_STRUCT_BUFFERS,
+    PROBE_STRUCT_NO_BUFFERS,
     PROBE_STRUCT_OFFSET,
+    PROBE_STRUCT_VALIDITY,
+    PROBE_UNKNOWN_NULLS,
     Probe,
     ProbeResult,
     RowEngine,
@@ -164,12 +178,40 @@ def test_layouts(mut e: RowEngine) raises:
         "args has a nonzero offset (the argument struct is at offset 0)", -1, "struct offset",
     )
     expect(e.probe(Probe.of(ENTRY, pq(), PROBE_NEG_LENGTH, 3)), "ERR_INTERNAL", "args has a negative length", -1, "length")
+    # Rule 5: the argument struct has no validity buffer (no null rows).
+    expect(
+        e.probe(Probe.of(ENTRY, pq(), PROBE_STRUCT_VALIDITY, 3)), "ERR_INTERNAL",
+        "args has a validity buffer (the argument struct has no null rows)", -1, "struct validity",
+    )
+    for kind in [PROBE_STRUCT_NO_BUFFERS, PROBE_STRUCT_BUFFERS]:
+        expect(
+            e.probe(Probe.of(ENTRY, pq(), kind, 3)), "ERR_INTERNAL",
+            "args has no buffer list of one (a struct array's)", -1, "struct buffers " + String(kind),
+        )
     # No values buffer: refused for one row, accepted for none.
     expect(e.probe(Probe.of(ENTRY, pq(), PROBE_NO_VALUES, 1)), "ERR_INTERNAL", "qty has no values buffer", -1, "1 row")
     expect_ok(e.probe(Probe.of(ENTRY, pq(), PROBE_NO_VALUES, 0)), 0, "empty, no values buffer")
     expect(e.probe(Probe.of(ENTRY, pq(), PROBE_NOT_CPU, 3)), "ERR_UNSUPPORTED", "not on the CPU", -1, "device")
     expect(e.probe(Probe.of(ENTRY, pq(), PROBE_CALL_SIZE, 3)), "ERR_ABI", "call struct_size", -1, "call size")
     expect_ok(e.probe(Probe.of(ENTRY, pq(), PROBE_NULL_CANCEL, 3)), 3, "no cancel flag")
+
+
+def test_unknown_null_count(mut e: RowEngine) raises:
+    """A field whose null_count is -1 (not computed, Arrow C data) has its
+    bitmap read: row 1 is null, in either field."""
+    var xy: List[String] = ["x", "y"]
+    for f in range(2):
+        var p = Probe.of("udf_rows:x_plus_y", xy.copy(), PROBE_UNKNOWN_NULLS, 3)
+        p.field = Int32(f)
+        var r = e.probe(p)
+        var what = "null_count -1 in field " + String(f) + ": " + status_name(r.status) + " " + r.message
+        assert_equal(status_name(r.status), "OK", what)
+        assert_equal(r.out_len, 3, what)
+        assert_equal(r.out_nulls, 1, what)
+        assert_equal(r.out[0], 11.0, what)
+        assert_true(r.out[1] != r.out[1], what + ": row 1 is not null: " + String(r.out[1]))
+        assert_equal(r.out[2], 33.0, what)
+        assert_true(r.moved and r.released, what + ": args not moved and released")
 
 
 def test_cancel(mut e: RowEngine) raises:
@@ -288,6 +330,7 @@ def main() raises:
     var e = RowEngine(realpath(".") + "/python_row.so")
     assert_equal(e.status(), 0, e.message())
     test_layouts(e)
+    test_unknown_null_count(e)
     test_cancel(e)
     test_clock(e)
     test_deadline(e)

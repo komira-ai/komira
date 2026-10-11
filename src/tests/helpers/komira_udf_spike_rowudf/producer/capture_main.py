@@ -52,6 +52,7 @@ def cases():
     out.append(("branchy_declared_ab", "branchy", abc, ["a", "b"], None))
     out.append(("pick", "pick", ["flag", "a", "b"], None, [{"flag": 1, "a": 10, "b": 100}]))
     out.append(("via_helper", "via_helper", bench_columns(4), None, None))
+    out.append(("underscored", "underscored", ["_b", "_i", "x", "_s"], None, [{"_b": 1.0, "_i": 2.0, "x": 0.0, "_s": 3.0}]))
     return out
 
 

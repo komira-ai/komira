@@ -18,8 +18,11 @@ read_set() decides it, in this order:
      name (`row.price`) or a subscript by a constant string (`row["qty"]`).
      Every such name is in the read set, on every branch, taken or not.
      Any other use of the row (passing it to a call, iterating it, storing
-     it, a computed key, a method call on it, a nested function that
-     captures it) makes the scan undetermined;
+     it, a computed key, a method call on it, a dunder attribute such as
+     `row.__class__`, which the language answers, a nested function that
+     captures it) makes the scan undetermined. Every other name is a field,
+     `row._i` and `row.keys` included: the runtime's row has no attribute
+     of its own;
   3. else every input column, with a note saying why.
 
 A sample of rows, when given, is a cross-check only: the function runs over
@@ -120,6 +123,10 @@ def scan(f):
         if nxt.opname == "LOAD_ATTR":
             if nxt.arg & 1:
                 return None, "a method of the row is called: .{} (line {})".format(nxt.argval, nxt.positions.lineno)
+            if _dunder(nxt.argval):
+                return None, "a dunder attribute of the row is read: .{} (line {})".format(
+                    nxt.argval, nxt.positions.lineno
+                )
             name = nxt.argval
         elif nxt.opname == "LOAD_CONST" and isinstance(nxt.argval, str) and ins[k + 2].opname == "BINARY_SUBSCR":
             name = nxt.argval
@@ -130,15 +137,38 @@ def scan(f):
     return fields, ""
 
 
+def _dunder(name):
+    return name.startswith("__") and name.endswith("__")
+
+
 class _Undetermined(Exception):
     pass
+
+
+def _rec_read(row, name):
+    """Records a read of field `name` and returns its sample value."""
+    reads = object.__getattribute__(row, "_reads")
+    if name not in reads:
+        reads.append(name)
+    values = object.__getattribute__(row, "_values")
+    if name not in values:
+        raise AttributeError("the input has no column {!r}".format(name))
+    return values[name]
+
+
+def _rec_mark(row, why):
+    object.__getattribute__(row, "_whole").append(why)
+    raise _Undetermined(why)
 
 
 class RecordingRow:
     """The row the sample check passes: it records each field read by name
     and hands back that field's sample value. A whole-row operation
-    (iteration, length, membership, conversion) marks the recording
-    undetermined, as the design's recording proxy does."""
+    (iteration, length, membership, conversion, keys() when the input has
+    no column `keys`) marks the recording undetermined, as the design's
+    recording proxy does. Every name but a dunder is a field, as on the
+    runtime's row: its own state is reached through object.__getattribute__
+    only."""
 
     __slots__ = ("_values", "_reads", "_whole")
 
@@ -147,40 +177,26 @@ class RecordingRow:
         object.__setattr__(self, "_reads", reads)
         object.__setattr__(self, "_whole", whole)
 
-    def _read(self, name):
-        reads = object.__getattribute__(self, "_reads")
-        if name not in reads:
-            reads.append(name)
-        values = object.__getattribute__(self, "_values")
-        if name not in values:
-            raise AttributeError("the input has no column {!r}".format(name))
-        return values[name]
-
-    def __getattr__(self, name):
-        if name.startswith("__") and name.endswith("__"):
-            raise AttributeError(name)
-        return self._read(name)
+    def __getattribute__(self, name):
+        if _dunder(name):
+            return object.__getattribute__(self, name)
+        if name == "keys" and "keys" not in object.__getattribute__(self, "_values"):
+            return lambda: _rec_mark(self, "the row's keys are listed")
+        return _rec_read(self, name)
 
     def __getitem__(self, key):
         if not isinstance(key, str):
-            self._mark("the row is indexed by a {}".format(type(key).__name__))
-        return self._read(key)
-
-    def _mark(self, why):
-        object.__getattribute__(self, "_whole").append(why)
-        raise _Undetermined(why)
+            _rec_mark(self, "the row is indexed by a {}".format(type(key).__name__))
+        return _rec_read(self, key)
 
     def __iter__(self):
-        self._mark("the row is iterated")
+        _rec_mark(self, "the row is iterated")
 
     def __len__(self):
-        self._mark("the length of the row is taken")
+        _rec_mark(self, "the length of the row is taken")
 
     def __contains__(self, item):
-        self._mark("membership is tested on the row")
-
-    def keys(self):
-        self._mark("the row's keys are listed")
+        _rec_mark(self, "membership is tested on the row")
 
 
 def record(f, sample):

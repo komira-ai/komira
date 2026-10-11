@@ -23,6 +23,8 @@ Arrow types) is decided by the producer when the plan is built
   its batch raises RowExpired when read: after the call returned, and in a
   later batch of the same instance, where the instance's columns hold that
   batch's buffers (each row carries the number of the batch that made it).
+  A field may have any name: no attribute name reaches a row's own state.
+  A row user code makes itself raises TypeError.
   The host's cancel flag is read before each row (ERR_CANCELLED at that
   row); the host clock after row 0 and every CLOCK_EVERY rows, and a passed
   deadline fails the batch with ERR_DEADLINE at the next row.
@@ -149,53 +151,88 @@ def validate(entry, result_fmt):
 # ---- the row type ----------------------------------------------------------------
 
 
+def _dunder(name):
+    return name.startswith("__") and name.endswith("__")
+
+
+EXPIRED = "a row was read after its batch returned; keep the field's value, not the row"
+FORGED = "this row was not made by the runtime: a ROW row is made for one batch only"
+
+
 def _row_type(names):
     """A row class over the read set `names`, and the per-call state it
     reads: `slots[j]` is (values, validity or None, offset) of field j while
-    a batch runs, else None; `batch[0]` numbers the latest batch (a row's
-    `_b` is the number of the batch that made it) and `batch[1]` says
-    whether it is running; `seen[0]` is the first (name, row) read outside
-    the read set in the running batch, else None."""
+    a batch runs, else None; `batch[0]` numbers the latest batch and
+    `batch[1]` says whether it is running; `seen[0]` is the first (name,
+    row) read outside the read set in the running batch, else None. Also
+    `state` and `set_state`: a row's own (batch number, row index).
+
+    A field may have any name: a row's own state lives in a slot whose
+    descriptor is taken off the class once it is made, so no attribute name
+    reaches it (`row._i`, `row._b` and `row._s` read fields like any other
+    name). Every field whose name is an identifier and not a dunder gets a
+    property; a dunder is read by subscript, since the language answers
+    some of them itself (`row.__class__`)."""
     slots = [None] * len(names)
     batch = [0, False]
     seen = [None]
     index = {n: j for j, n in enumerate(names)}
+    hidden = "_s"
+    while hidden in index:
+        hidden += "_"
+
+    def state_of(r):
+        # (batch, row) of a row the runtime made; TypeError for any other.
+        try:
+            return state(r)
+        except AttributeError:
+            raise TypeError(FORGED) from None
 
     def live(r):
         # The slots hold the running batch's buffers: a row of an earlier
         # batch of this instance would read them at its old index.
-        if not batch[1] or r._b != batch[0]:
-            raise RowExpired("a row was read after its batch returned; keep the field's value, not the row")
+        b, i = state_of(r)
+        if not batch[1] or b != batch[0]:
+            raise RowExpired(EXPIRED)
+        return i
 
     def read(r, j):
         # live(r), inlined on the per-field path: slots are None exactly
-        # when no batch runs.
+        # when no batch runs. Nothing here may raise AttributeError: from a
+        # property it would send the read on to __getattr__.
         c = slots[j]
-        if c is None or r._b != batch[0]:
-            raise RowExpired("a row was read after its batch returned; keep the field's value, not the row")
+        try:
+            b, i = state(r)
+        except AttributeError:
+            raise TypeError(FORGED) from None
+        if c is None or b != batch[0]:
+            raise RowExpired(EXPIRED)
         v, valid, off = c
-        p = off + r._i
+        p = off + i
         if valid is not None and not (valid[p >> 3] >> (p & 7)) & 1:
             return None
         return v[p]
 
     def violation(r, name):
-        live(r)
+        i = live(r)
         if seen[0] is None:
-            seen[0] = (name, r._i)
+            seen[0] = (name, i)
         return "field {!r} is not in this ROW UDF's read set {}; add it to columns=[...]".format(name, list(names))
 
     def field(j):
         return property(lambda self: read(self, j))
 
+    def __new__(cls, *args, **kwargs):
+        raise TypeError("a ROW row is made by the runtime only, one per row of a batch")
+
     def __getattr__(self, name):
-        # Names no property or slot answers: a field read by attribute
-        # without a property (below), a dunder the language probes for, or
-        # a name outside the read set.
+        # Names no property answers: a field whose name is not an
+        # identifier or is a dunder, a dunder the language probes for, or a
+        # name outside the read set.
         j = index.get(name)
         if j is not None:
             return read(self, j)
-        if name.startswith("__") and name.endswith("__"):
+        if _dunder(name):
             raise AttributeError(name)
         raise FieldNotDeclared(violation(self, name))
 
@@ -212,20 +249,22 @@ def _row_type(names):
         return "Row({})".format(", ".join("{}={!r}".format(n, read(self, j)) for j, n in enumerate(names)))
 
     ns = {
-        "__slots__": ("_i", "_b"),
+        "__slots__": (hidden,),
+        "__new__": __new__,
         "__getattr__": __getattr__,
         "__getitem__": __getitem__,
         "__iter__": __iter__,
         "__repr__": __repr__,
     }
     for j, n in enumerate(names):
-        # The fast path for a field read by attribute. A name that is not an
-        # identifier, or starts with "_" (it could shadow the row's own
-        # slots), gets none: __getattr__ answers it, and `_i` and `_b` are
-        # the row's own (read such a field by subscript).
-        if n.isidentifier() and not n.startswith("_"):
+        # The fast path for a field read by attribute.
+        if n.isidentifier() and not _dunder(n):
             ns[n] = field(j)
-    return type("Row", (), ns), slots, batch, seen
+    row = type("Row", (), ns)
+    d = row.__dict__[hidden]
+    delattr(row, hidden)
+    state = d.__get__
+    return row, slots, batch, seen, state, d.__set__
 
 
 # ---- open_instance and calls ------------------------------------------------------
@@ -267,13 +306,13 @@ def _fill(slots, cols):
 class RowInstance:
     """One ROW UDF bound in one interpreter."""
 
-    __slots__ = ("f", "names", "result_fmt", "row", "slots", "batch", "seen")
+    __slots__ = ("f", "names", "result_fmt", "row", "slots", "batch", "seen", "state", "set_state")
 
     def __init__(self, f, names, result_fmt):
         self.f = f
         self.names = names
         self.result_fmt = result_fmt
-        self.row, self.slots, self.batch, self.seen = _row_type(names)
+        self.row, self.slots, self.batch, self.seen, self.state, self.set_state = _row_type(names)
 
     def call(self, n, cols, out, outv, cancel, now, deadline):
         """One batch. `cols`: one (fmt, values view, validity view or None,
@@ -325,15 +364,16 @@ class RowInstance:
     def _rows(self, n, o, outv, flag, now, deadline):
         f = self.f
         Row = self.row
+        new = object.__new__
+        set_state = self.set_state
         seen = self.seen
         b = self.batch[0]
         nulls = 0
         for i in range(n):
             if flag[0]:
                 return (ERR_CANCELLED, "cancelled at row {}".format(i), None, i)
-            r = Row()
-            r._i = i
-            r._b = b
+            r = new(Row)
+            set_state(r, (b, i))
             try:
                 y = f(r)
             except BaseException as exc:

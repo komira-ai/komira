@@ -99,6 +99,12 @@ static int args_fit(const struct ArrowArray* in, const struct komira_udf_udf* u,
   const char* field = "";
   if (in->length < 0) what = "args has a negative length";
   if (what == NULL && in->offset != 0) what = "args has a nonzero offset (the argument struct is at offset 0)";
+  /* Rule 5: no validity buffer, so no null rows. One the runtime ignored
+   * would turn each null row into a row of whatever its children hold. */
+  if (what == NULL && (in->n_buffers != 1 || in->buffers == NULL))
+    what = "args has no buffer list of one (a struct array's)";
+  else if (what == NULL && in->buffers[0] != NULL)
+    what = "args has a validity buffer (the argument struct has no null rows)";
   for (int64_t i = 0; what == NULL && i < in->n_children; i++) {
     const struct ArrowArray* c = in->children[i];
     field = u->fields[i].name;
@@ -224,6 +230,7 @@ static PyObject* field_columns(struct komira_udf_context* c, struct row_owner* o
     char fmt[2] = {u->fields[i].fmt, 0};
     PyObject* d = owned_view(c, owner, ch->buffers[1], (ch->offset + n) * 8);
     PyObject* v = a->none;
+    /* A null_count of -1 is "not computed" (Arrow C data): the bitmap is read. */
     if (ch->buffers[0] != NULL && ch->null_count != 0)
       v = owned_view(c, owner, ch->buffers[0], (ch->offset + n + 7) / 8);
     else

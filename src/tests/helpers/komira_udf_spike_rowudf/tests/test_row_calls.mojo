@@ -35,6 +35,13 @@
 #     the read set and by one outside it (a row of batch 1 reading batch 2's
 #     buffers at its old index: a wrong value with status OK, or a
 #     violation charged to the wrong row);
+#   - a field may have any name: fields named `_i`, `_b`, `_s` read their
+#     columns (a row whose own state answers such a name: its index or batch
+#     number with status OK), `_i` outside the read set is an undeclared
+#     field, and a field named `__x__` reads by subscript;
+#   - a row user code makes (`type(row)()`, `object.__new__(type(row))`)
+#     fails the batch with a TypeError naming the cause (a RecursionError
+#     through __getattr__, or a value);
 #   - an argument struct with a child outside the read set is refused, and
 #     its args still moved (a runtime that accepts columns it did not bind);
 #   - validate refuses, by name, a shape other than ROW, PROPAGATE, an
@@ -50,7 +57,11 @@
 # recorded violation dropped (the batch after a caught violation failed);
 # the validity bit read at the row instead of offset + row (the sliced
 # nullable_half lost its null); row_call.c's field_columns handing child
-# 0's offset to every field (price_qty at offsets 3 and 0 read padding).
+# 0's offset to every field (price_qty at offsets 3 and 0 read padding);
+# the adapter's earlier row type, its state in slots `_i` and `_b` and no
+# property for a name starting with "_" (underscored read 510.0 for 513.0
+# with status OK); the row type without its __new__ (forged_new's
+# `type(row)()` made a row, and the error named a forged row instead).
 
 from std.testing import assert_equal, assert_true
 
@@ -379,6 +390,53 @@ def test_kept_row(mut rt: UdfRuntime) raises:
     rt.unload(ur.handle)
 
 
+def test_any_name(mut rt: UdfRuntime, sets: List[ReadSetRow]) raises:
+    """Fields named `_i`, `_b` and `_s` (names a row's own state could take)
+    read their columns, with the read set the producer captured; `_i` outside
+    the read set is an undeclared field, not the row's index; a dunder field
+    reads by subscript."""
+    var u = read_set_of(sets, "underscored")
+    assert_equal(u.source, "static")
+    assert_equal(len(u.read_set), 3)
+    assert_equal(u.read_set[0], "_b")
+    assert_equal(u.read_set[1], "_i")
+    assert_equal(u.read_set[2], "_s")
+    var b: List[Float64] = [1.0, 2.0]
+    var i: List[Float64] = [3.0, 4.0]
+    var s: List[Float64] = [5.0, 6.0]
+    var spec = row_spec(u.entry, u.read_set, TYPE_FLOAT64, TYPE_FLOAT64)
+    var want: List[Float64] = [513.0, 624.0]
+    assert_floats(call_once(rt, spec, floats([b.copy(), i.copy(), s.copy()])), want, "underscored")
+    var bs: List[String] = ["_b", "_s"]
+    spec = row_spec(u.entry, bs, TYPE_FLOAT64, TYPE_FLOAT64)
+    assert_not_declared(call_once(rt, spec, floats([b.copy(), s.copy()])), "_i", "['_b', '_s']", 0, "underscored {_b, _s}")
+    spec = row_spec("udf_rows:dunder_field", [String("__x__")], TYPE_FLOAT64, TYPE_FLOAT64)
+    var x: List[Float64] = [1.5, 4.0]
+    var dbl: List[Float64] = [3.0, 8.0]
+    assert_floats(call_once(rt, spec, floats([x.copy()])), dbl, "dunder_field")
+
+
+def test_forged(mut rt: UdfRuntime) raises:
+    """A row user code makes for itself fails its batch with ERR_RAISED and
+    a TypeError naming the cause, never a RecursionError or a value."""
+    var x: List[String] = ["x"]
+    var v: List[Float64] = [1.0]
+    var names: List[String] = ["forged_new", "forged_object", "forged_misread"]
+    var words: List[String] = [
+        "made by the runtime only",
+        "not made by the runtime",
+        "not made by the runtime",
+    ]
+    for k in range(len(names)):
+        var spec = row_spec("udf_rows:" + names[k], x, TYPE_FLOAT64, TYPE_FLOAT64)
+        var r = call_once(rt, spec, floats([v.copy()]))
+        var what = names[k] + ": " + String(r.outcome)
+        assert_equal(status_name(r.outcome.status), "ERR_RAISED", what)
+        assert_true("TypeError: " in r.outcome.message, what)
+        assert_true(words[k] in r.outcome.message, what)
+        assert_equal(r.outcome.row, Int64(0), what)
+
+
 def test_extra_column(mut rt: UdfRuntime) raises:
     var pq: List[String] = ["price", "qty"]
     var spec = row_spec("udf_rows:price_qty", pq, TYPE_FLOAT64, TYPE_FLOAT64)
@@ -429,6 +487,8 @@ def main() raises:
     test_kept_row(rt)
     test_kept_row_same_instance(rt)
     test_extra_column(rt)
+    test_any_name(rt, sets)
+    test_forged(rt)
     var l = rt.ledger()
     assert_equal(l.released, l.exported, "every exported argument array released")
     rt.shutdown()

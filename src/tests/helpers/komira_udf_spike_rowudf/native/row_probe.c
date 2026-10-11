@@ -50,7 +50,11 @@ enum {
   PK_CALL_SIZE,        /* the call struct's size is one byte short */
   PK_OTHER_THREAD,     /* the context and instance are another thread's */
   PK_FOREIGN_CLOSE,    /* another thread closes the instance and context first */
-  PK_NULL_CANCEL       /* the call has no cancel flag */
+  PK_NULL_CANCEL,      /* the call has no cancel flag */
+  PK_UNKNOWN_NULLS,    /* the field has row 1 null and null_count -1 (not computed) */
+  PK_STRUCT_VALIDITY,  /* the struct has a validity buffer (row 1 null) */
+  PK_STRUCT_NO_BUFFERS, /* the struct's buffer list is NULL */
+  PK_STRUCT_BUFFERS    /* the struct's n_buffers is 0 */
 };
 
 struct probe {
@@ -75,7 +79,9 @@ struct probe_block {
   struct ArrowArray* kids[2];
   const void* cbufs[2][3];
   const void* pbufs[1];
+  uint8_t pvalid[1];
   double* vals[2];
+  uint8_t* bits; /* PK_UNKNOWN_NULLS: the field's validity */
   int32_t* released;
 };
 
@@ -84,6 +90,7 @@ static void release_probe(struct ArrowArray* a) {
   *b->released = 1;
   free(b->vals[0]);
   free(b->vals[1]);
+  free(b->bits);
   free(b);
   a->release = NULL;
 }
@@ -124,6 +131,24 @@ static int probe_args(struct ArrowDeviceArray* d, int32_t kind, int32_t field, i
   if (kind == PK_CHILD_BUFFERS) b->child[f].n_buffers = 3;
   if (kind == PK_NEG_CHILD_OFFSET) b->child[f].offset = -1;
   if (kind == PK_NO_VALUES) b->cbufs[f][1] = NULL;
+  if (kind == PK_UNKNOWN_NULLS && n > 1) {
+    b->bits = malloc((size_t)((n + 7) / 8));
+    if (b->bits == NULL) {
+      release_probe(p);
+      return 0;
+    }
+    memset(b->bits, 0xFF, (size_t)((n + 7) / 8));
+    b->bits[0] &= (uint8_t)~2u;
+    b->cbufs[f][0] = b->bits;
+    b->child[f].null_count = -1;
+  }
+  if (kind == PK_STRUCT_VALIDITY) {
+    b->pvalid[0] = 0xFD; /* row 1 null */
+    b->pbufs[0] = b->pvalid;
+    p->null_count = 1;
+  }
+  if (kind == PK_STRUCT_NO_BUFFERS) p->buffers = NULL;
+  if (kind == PK_STRUCT_BUFFERS) p->n_buffers = 0;
   return 1;
 }
 

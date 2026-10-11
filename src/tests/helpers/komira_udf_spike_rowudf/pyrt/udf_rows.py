@@ -114,6 +114,33 @@ def x_plus_y(row) -> float | None:
     return None if row.x is None or row.y is None else row.x + row.y
 
 
+def underscored(row) -> float:
+    """Reads fields named `_i`, `_b` and `_s`: names a row's own state could
+    take; each must read its column."""
+    return row._i + 10 * row._b + 100 * row._s
+
+
+def dunder_field(row) -> float:
+    """Reads a field named `__x__` by subscript."""
+    return row["__x__"] * 2
+
+
+def forged_new(row) -> float:
+    """Makes a row of its own through the row's type."""
+    return type(row)().x
+
+
+def forged_object(row) -> float:
+    """Makes a row of its own around the row type's __new__, and reads a
+    field of the read set from it."""
+    return object.__new__(type(row)).x
+
+
+def forged_misread(row) -> float:
+    """The same, reading a name outside the read set."""
+    return object.__new__(type(row)).nope
+
+
 def as_text(row) -> float:
     """Hinted float, returns a str."""
     return "not a number"

@@ -24,13 +24,23 @@ What it proves, and the defect each part catches:
     asserted present in the function's bytecode, so a scan that misreads
     one shape is caught on its own function;
   - the producer's errors, sources and notes are the exact strings the plan
-    and the oracle carry.
+    and the oracle carry;
+  - a field may have any name the runtime's row reads: `row._i`, `row._b`,
+    `row._s` and `row.keys` are fields to the scan, and `row._reads`,
+    `row._read`, `row._values` and `row.keys` to the recording row (a
+    recording row whose own state or methods answer such a name records
+    nothing), while a dunder attribute (`row.__class__`, which the language
+    answers on the runtime's row) makes the scan undetermined instead of a
+    field the runtime would never read.
 
 Every single-point mutant of komira_udf_readset.py was run against this
 file (the PR's mutation scorecard). Mutant planted by hand:
 komira_udf_readset.scan without its LOAD_CONST + BINARY_SUBSCR arm (a
 constant subscript treated as a whole-row use): red (price_qty_keys came
-out every_column).
+out every_column); scan without its dunder arm (the input has no
+'__class__': UDF_ROW_COLUMN_UNKNOWN); a recording row that answers a name
+from its own attributes first (it recorded ['_read', '_mark', 'keys'],
+missing '_reads', '_values' and '_whole').
 """
 
 import dis
@@ -303,10 +313,24 @@ def test_sample_cross_check():
     assert (reads, whole) == (["__x", "y__"], ""), (reads, whole)
 
 
+def test_any_name():
+    assert static(udf_rows.underscored, ["_b", "_i", "x", "_s"]) == ["_b", "_i", "_s"]
+    assert static(lambda row: row.keys + row._values, ["keys", "_values", "z"]) == ["keys", "_values"]
+    every(lambda row: row.__class__, COLS, "a dunder attribute of the row is read: .__class__ (line")
+    every(lambda row: row.price + row.__dict__, COLS, "a dunder attribute of the row is read: .__dict__")
+    names = ["_reads", "_read", "_values", "_whole", "_mark", "keys"]
+    sample = [{n: float(k) for k, n in enumerate(names)}]
+    reads, whole = rs.record(lambda row: [getattr(row, n) for n in names], sample)
+    assert (reads, whole) == (names, ""), (reads, whole)
+    r = rs.read_set(udf_rows.underscored, ["_b", "_i", "x", "_s"], sample=[{"_b": 1.0, "_i": 2.0, "x": 0.0, "_s": 3.0}])
+    assert (r.names, r.recorded) == (["_b", "_i", "_s"], ["_b", "_i", "_s"]), r
+
+
 test_scan()
 test_shapes()
 test_undetermined()
 test_refusals()
 test_columns_override()
 test_sample_cross_check()
+test_any_name()
 print("test_readset: ok")
