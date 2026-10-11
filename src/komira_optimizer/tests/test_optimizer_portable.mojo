@@ -1,6 +1,6 @@
 # =============================================================================
 # test_optimizer_portable -- `optimizer_driver.optimize_portable`, the
-# portable profile of design `optimized_plan.md` §5.3
+# portable profile of komira-ai/komira#1094 (§5.3)
 # =============================================================================
 #
 # What the profile promises, one test per promise:
@@ -382,7 +382,7 @@ def test_portable_output_renders_as_optimize_where_no_host_rule_applies() raises
 
 def test_portable_does_not_narrow_join_payload() raises:
     """`optimize` stamps both scans of the narrowable join; the portable
-    profile stamps none: payload narrowing is a host-local rule (§5.3).
+    profile stamps none: payload narrowing is a host-local rule.
 
     Defect caught: the portable entry running step 20."""
     var in_process = _in_process(_narrowable_join())
@@ -463,7 +463,7 @@ def test_portable_refuses_a_profile_version_it_does_not_implement() raises:
 
 
 # -----------------------------------------------------------------------------
-# Config comes from the argument (design §12 stage 7 mutant)
+# Config comes from the argument (komira-ai/komira#1094, stage 7 mutant)
 # -----------------------------------------------------------------------------
 
 

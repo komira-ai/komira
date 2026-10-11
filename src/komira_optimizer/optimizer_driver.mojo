@@ -82,7 +82,7 @@
 #
 # THE PORTABLE PROFILE. `optimize_portable(plan, config, profile)` is the
 # entry a producer calls when its output must be the same plan on every
-# platform that runs it (design `optimized_plan.md` §5.3). It runs the same
+# platform that runs it (komira-ai/komira#1094, §5.3). It runs the same
 # pass order through the same function as `optimize`, with three
 # differences:
 #
@@ -355,7 +355,7 @@ def _run_pass_order(
     # 20. Payload narrowing LAST. Its stamp is a `ScanData` field that is not a
     # constructor argument, so any later pass that rebuilt the scan would start
     # it empty and drop the stamp. It adds, removes and reorders nothing.
-    # `optimize_portable` skips it: narrowing is a host-local rule (§5.3).
+    # `optimize_portable` skips it: narrowing is a host-local rule.
     if narrow_payload:
         plan = narrow_join_payload(plan^)
 
@@ -396,8 +396,8 @@ executes nothing, so `optimize_portable` refuses it."""
 
 
 struct PortableProfile(Copyable, Movable):
-    """The portable profile a producer passes to `optimize_portable` (design
-    `optimized_plan.md` §5.3). A required argument with no default, so a
+    """The portable profile a producer passes to `optimize_portable`
+    (komira-ai/komira#1094, §5.3). A required argument with no default, so a
     caller states which pass set it wants.
 
     Fields:
