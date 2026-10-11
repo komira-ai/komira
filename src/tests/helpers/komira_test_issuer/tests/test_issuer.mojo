@@ -271,7 +271,8 @@ def test_publish_before_sign() raises:
     # Catches: a staged key that signs before it was served for the lead; a
     # switch that does not take effect; a rotation that skips the publication
     # check; a token after the switch that a relying party holding the
-    # document from the rotation's start cannot verify.
+    # document from the rotation's start cannot verify;
+    # a refused `begin_rotation` that still uses up a key index.
     var iss = _issuer()
     iss.begin_rotation()
     assert_equal(iss.staged_kid().value(), _kid(1))
@@ -307,6 +308,14 @@ def test_publish_before_sign() raises:
     except e:
         twice = String(e)
     assert_equal(twice, "JoseError: a staged key is waiting: promote or retire it first")
+    # The refused call used up no key: key 2 is still the one that switches,
+    # and the next rotation stages key 3 (the order is key 0, 1, 2, ...).
+    _ = iss.jwks()
+    iss.advance(LEAD)
+    iss.finish_rotation()
+    assert_equal(iss.signing_kid(), _kid(2))
+    iss.begin_rotation()
+    assert_equal(iss.staged_kid().value(), _kid(3))
 
 
 def test_finish_without_rotation() raises:
