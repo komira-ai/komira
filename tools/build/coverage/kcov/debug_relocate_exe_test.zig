@@ -2,15 +2,16 @@
 //! `zig test` of this file, run as a build action by
 //! `:debug_relocate_exe_test`, a validation of `:debug_relocate`. The cases in
 //! debug_relocate_test.zig call the program's `entry` in-process; these run
-//! the executable the public target hands out (module `exes`, the
-//! `zig_test`'s `exes`) as a child process, with an empty environment, and
-//! check what `main` adds: the command line taken from argv[1..], the counts
-//! written to stdout and the messages to stderr, and `entry`'s status as the
-//! process's exit status, and a stdout whose writes fail (EFBIG) as exit 1
-//! with the file unchanged.
+//! the executable the public target hands out (its path in the environment
+//! as DEBUG_RELOCATE, the `zig_test`'s `env_tools`) as a child process, with
+//! an empty environment, and check what `main` adds: the command line taken
+//! from argv[1..], the counts written to stdout and the messages to stderr,
+//! and `entry`'s status as the process's exit status, and a stdout whose
+//! writes fail (EFBIG) as exit 1 with the file unchanged. Without
+//! DEBUG_RELOCATE every case fails: none passes without running the
+//! executable.
 
 const std = @import("std");
-const exes = @import("exes");
 
 const D = "/worker/build/0123456789abcdef/root";
 const P = "/__________________________________";
@@ -22,6 +23,17 @@ const Run = struct {
     file: []const u8,
 };
 
+/// The path of the executable under test: DEBUG_RELOCATE, which the
+/// zig_test's `env_tools` sets. A run without it fails loudly; it never
+/// passes unchecked.
+fn tool(a: std.mem.Allocator) ![]const u8 {
+    const v = std.process.getEnvVarOwned(a, "DEBUG_RELOCATE") catch {
+        std.debug.print("the test target does not pass DEBUG_RELOCATE (env_tools), so the executable cannot be run\n", .{});
+        return error.TestToolMissing;
+    };
+    return std.fs.cwd().realpathAlloc(a, v);
+}
+
 /// Runs the executable with `args` in a directory of its own holding `f`
 /// (the bytes `bytes`), and reads back its exit status, stdout, stderr and f.
 fn run(a: std.mem.Allocator, tmp: *std.testing.TmpDir, bytes: []const u8, args: []const []const u8) !Run {
@@ -30,10 +42,12 @@ fn run(a: std.mem.Allocator, tmp: *std.testing.TmpDir, bytes: []const u8, args: 
         defer f.close();
         try f.writeAll(bytes);
     }
-    const exe = try std.fs.cwd().realpathAlloc(a, exes.debug_relocate);
+    const exe = try tool(a);
     var argv = std.ArrayList([]const u8).init(a);
     try argv.append(exe);
     try argv.appendSlice(args);
+    // The child's environment is built here, empty: it does not inherit
+    // DEBUG_RELOCATE or anything else of the test's.
     var env = std.process.EnvMap.init(a);
     const r = try std.ChildProcess.run(.{
         .allocator = a,
@@ -114,7 +128,7 @@ fn runFullStdout(a: std.mem.Allocator, tmp: *std.testing.TmpDir, bytes: []const 
     }
     const out = try posix.openat(tmp.dir.fd, "out", .{ .ACCMODE = .WRONLY, .APPEND = true, .CLOEXEC = true }, 0);
     defer posix.close(out);
-    const exe = try std.fs.cwd().realpathAlloc(a, exes.debug_relocate);
+    const exe = try tool(a);
     const argv = try a.allocSentinel(?[*:0]const u8, args.len + 1, null);
     argv[0] = try a.dupeZ(u8, exe);
     for (args, 1..) |arg, i| argv[i] = try a.dupeZ(u8, arg);

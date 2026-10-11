@@ -1,0 +1,5 @@
+# A flag with no value: usage, exit 2.
+arg "--files"
+file ".buckconfig" %buckconfig
+file "tools/build/ci/rules.txt" %rules.txt
+exit 2

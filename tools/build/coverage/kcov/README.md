@@ -49,7 +49,7 @@ The rewrite has to satisfy two things at once:
 So a directory of length L becomes `/` and L-1 `_`. A name under the
 placeholder could be mapped with `--replace-src-path='^/_+:<source root>'`
 (the expression matches the placeholder of any length, so no length needs to
-agree between actions), as kcov's own check 8 does
+agree between actions), as kcov's own check 6 does
 ([kcov](../../toolchains/kcov/README.md)); in a Mojo binary that is only the
 C runtime, which is not measured, and the Mojo names are relative (see the
 table below), so [cov_run](#cov_run) uses the one replacement kcov allows
@@ -422,13 +422,16 @@ not exist unless they pass. They build the tool from source in `zig test`'s
 own mode, so they are not the shipped bytes. The process cases
 ([debug_relocate_exe_test.zig](debug_relocate_exe_test.zig),
 `:debug_relocate_exe_test`; [cov_normalize_exe_test.zig](cov_normalize_exe_test.zig),
-`:cov_normalize_exe_test`) take the shipped executable (`exes`) and run it as
-a child process: exit 0, exit 1 with a refusal and exit 2 with the usage
+`:cov_normalize_exe_test`) take the shipped executable (`env_tools`: its path
+is in the test's environment as `DEBUG_RELOCATE` or `COV_NORMALIZE`, and the
+test fails, never passes, without it) and run it as a child process with an
+empty environment: exit 0, exit 1 with a refusal and exit 2 with the usage
 line, each message on stderr and on stdout only what the tool prints there
-(`debug_relocate`'s counts; nothing for `cov_normalize`); for
-`debug_relocate` also a stdout whose writes fail, which must be exit 1 with
-the file unchanged (a `main` that buffers stdout and drops the flush error
-fails it). They are a
+(`debug_relocate`'s counts; nothing for `cov_normalize`). Each also has a
+write that fails: for `cov_normalize`, a file size limit cuts the output
+short, which must be exit 1 with no output; for `debug_relocate`, a stdout
+whose writes fail, which must be exit 1 with the file unchanged (a `main`
+that buffers stdout and drops the flush error fails it). They are a
 validation of the public target (`:debug_relocate`, `:cov_normalize`).
 The cases of `cov_zig` are a script (`kcov_tool_cases` in [defs.bzl](defs.bzl)),
 and the public target `:cov_zig` depends on them; they also take

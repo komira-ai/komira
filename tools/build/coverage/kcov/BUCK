@@ -28,13 +28,14 @@ zig_exe(
 )
 
 # The shipped executable run as a process (debug_relocate_exe_test.zig): exit
-# 0, 1 and 2, the counts on stdout and the messages on stderr. It runs the
-# executable, so it cannot be an input of it; it is a validation of the
-# public target instead.
+# 0, 1 and 2, the counts on stdout and the messages on stderr, and a stdout
+# whose writes fail. Its path reaches the test in the environment
+# (`env_tools`, DEBUG_RELOCATE). It runs the executable, so it cannot be an
+# input of it; it is a validation of the public target instead.
 zig_test(
     name = "debug_relocate_exe_test",
     exec_compatible_with = LINUX_X86_64,
-    exes = {"debug_relocate": ":debug_relocate_exe"},
+    env_tools = {"DEBUG_RELOCATE": ":debug_relocate_exe"},
     src = "debug_relocate_exe_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
@@ -75,12 +76,14 @@ zig_exe(
 )
 
 # The shipped executable run as a process (cov_normalize_exe_test.zig): exit
-# 0, 1 and 2 with their messages on stderr. It runs the executable, so it
-# cannot be an input of it; it is a validation of the public target instead.
+# 0, 1 and 2 with their messages on stderr, and a write cut short. Its path
+# reaches the test in the environment (`env_tools`, COV_NORMALIZE). It runs
+# the executable, so it cannot be an input of it; it is a validation of the
+# public target instead.
 zig_test(
     name = "cov_normalize_exe_test",
     exec_compatible_with = LINUX_X86_64,
-    exes = {"cov_normalize": ":cov_normalize_exe"},
+    env_tools = {"COV_NORMALIZE": ":cov_normalize_exe"},
     imports = [
         "fixtures/kcov_full_paths.golden.xml",
         "fixtures/kcov_full_paths.xml",

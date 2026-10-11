@@ -58,6 +58,71 @@ zig_dist_rule = rule(
     },
 )
 
+# A Zig source file other Zig targets import by name: `@import("<name>")`
+# in a `zig_exe` or `zig_test` that lists the target in `deps`. Zig refuses
+# a relative `@import` of a file outside the importing file's directory, so a
+# file shared by tools in two packages is passed to the compiler as a module
+# of its own (`-M<name>=<root>`). A module imports no other module (it has
+# no `deps` of its own); that is added when a module first needs one.
+ZigModuleInfo = provider(fields = {
+    # The import name: the target's name.
+    "name": provider_field(str),
+    # The module's root source file.
+    "root": provider_field(typing.Any),
+    # What a compile importing the module takes as inputs: the files `root`
+    # imports by a relative name, and the `.passed` output of each of the
+    # module's `unit_tests`, so nothing imports the module unless its tests
+    # passed.
+    "inputs": provider_field(list),
+})
+
+# Names zig gives modules of its own: the importing file is `root`, and
+# `std` and `builtin` are always there. A module of one of these names would
+# clash with them.
+_ZIG_RESERVED_MODULES = ["root", "std", "builtin"]
+
+def _zig_module_impl(ctx):
+    if ctx.label.name in _ZIG_RESERVED_MODULES:
+        fail("{}: a zig_module may not be named {} (zig's own module names: {})".format(ctx.label.raw_target(), ctx.label.name, ", ".join(_ZIG_RESERVED_MODULES)))
+    passed = [t[DefaultInfo].default_outputs[0] for t in ctx.attrs.unit_tests]
+    return [
+        DefaultInfo(default_output = ctx.attrs.src, other_outputs = passed),
+        ZigModuleInfo(name = ctx.label.name, root = ctx.attrs.src, inputs = ctx.attrs.imports + passed),
+    ]
+
+zig_module_rule = rule(
+    impl = _zig_module_impl,
+    attrs = {
+        # Files `src` imports by a relative name (beside it).
+        "imports": attrs.list(attrs.source(), default = []),
+        "src": attrs.source(),
+        # `zig_test` targets of the module; every importer waits for them.
+        "unit_tests": attrs.list(attrs.dep(), default = []),
+    },
+)
+
+def _zig_root(ctx):
+    """What the compile is given as its root: `src`; with `deps`, an argument
+    file naming `src` as the root module and each dep as a module it may
+    import (`@file` is zig's own argument file, read in place of the
+    argument). Without `deps` the command line is the one it always was, so
+    no existing action changes its key. Two deps of one import name (the
+    same target twice, or two targets of one name) fail analysis rather
+    than zig's compile."""
+    if not ctx.attrs.deps:
+        return ctx.attrs.src
+    mods = [d[ZigModuleInfo] for d in ctx.attrs.deps]
+    seen = {}
+    for d, m in zip(ctx.attrs.deps, mods):
+        if m.name in seen:
+            fail("{}: two deps are imported as \"{}\": {} and {} (a zig_module's import name is its target name)".format(ctx.label.raw_target(), m.name, seen[m.name], d.label.raw_target()))
+        seen[m.name] = d.label.raw_target()
+    args = [cmd_args("--dep", m.name) for m in mods]
+    args.append(cmd_args(ctx.attrs.src, format = "-Mroot={}"))
+    args += [cmd_args(m.root, format = "-M" + m.name + "={}") for m in mods]
+    argfile, _ = ctx.actions.write(ctx.label.name + ".zig_modules", cmd_args(args), allow_args = True)
+    return cmd_args(argfile, format = "@{}", hidden = [ctx.attrs.src] + [m.root for m in mods] + [i for m in mods for i in m.inputs])
+
 def _zig_exe_impl(ctx):
     bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
     zig = ctx.attrs.zig[DefaultInfo].default_outputs[0]
@@ -68,7 +133,7 @@ export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME
 "$1/zig" build-exe -OReleaseSafe -target x86_64-linux-musl -fstrip "$2" "-femit-bin=$3"
 rm -rf "$T"
 """
-    cmd = busybox_sh(bb, script, zig, ctx.attrs.src, out.as_output())
+    cmd = busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output())
     if ctx.attrs.imports:
         # Files `src` imports by a relative name: inputs at their paths, so
         # beside it, and not on the command line.
@@ -87,6 +152,8 @@ zig_exe_rule = rule(
     impl = _zig_exe_impl,
     attrs = {
         "busybox": attrs.dep(),
+        # `zig_module` targets `src` imports by name.
+        "deps": attrs.list(attrs.dep(providers = [ZigModuleInfo]), default = []),
         "imports": attrs.list(attrs.source(), default = []),
         "src": attrs.source(),
         # `zig_test` targets the executable waits for.
@@ -98,44 +165,32 @@ zig_exe_rule = rule(
 def _zig_test_impl(ctx):
     bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
     zig = ctx.attrs.zig[DefaultInfo].default_outputs[0]
-    out = ctx.actions.declare_output(ctx.label.name + (".json" if ctx.attrs.exes else ".passed"))
-    args = [zig, ctx.attrs.src, out.as_output()]
-    hidden = list(ctx.attrs.imports)
-
+    # A test that runs tools (`env_tools`) is also a validation: a target
+    # that hands a tool out lists the test that runs it (`kcov_tool`'s
+    # `cases`), as the test cannot be an input of the tool it runs. Its
+    # result is then a validation result; a test without tools writes
+    # `passed`, as it always did.
+    validation = bool(ctx.attrs.env_tools)
+    out = ctx.actions.declare_output(ctx.label.name + (".json" if validation else ".passed"))
+    passed = """printf '{"version": 1, "data": {"status": "success", "message": "zig test passed"}}\\n' > "$3"\n""" if validation else "echo passed > \"$3\"\n"
     # The tests run with the busybox applets as their PATH and a TMPDIR of
     # their own, inside the action's scratch directory.
     script = _PRELUDE + """
 ZIG_GLOBAL_CACHE_DIR="$T/zig-global"; ZIG_LOCAL_CACHE_DIR="$T/zig-local"; HOME="$T/home"; TMPDIR="$T/tmp"
 export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME TMPDIR
 mkdir -p "$TMPDIR"
+"$1/zig" test -target x86_64-linux-musl "$2"
+""" + passed + """rm -rf "$T"
 """
-    if ctx.attrs.exes:
-        # The executables under test reach the tests as the module `exes`:
-        # one `pub const <name> = "<path>";` per entry, the path relative to
-        # the action's working directory, where `zig test` runs the tests.
-        lines = []
-        for name, exe in sorted(ctx.attrs.exes.items()):
-            if not name.replace("_", "x").isalnum() or name[0].isdigit():
-                fail("{}: exes key '{}' is not a Zig identifier".format(ctx.label.raw_target(), name))
-            path = exe[DefaultInfo].default_outputs[0]
-            lines.append(cmd_args(path, format = "pub const " + name + " = \"{}\";"))
-            hidden.append(path)
-        exes = ctx.actions.write(ctx.label.name + "_exes.zig", lines)
-        args.append(exes)
-        script += """"$1/zig" test -target x86_64-linux-musl --dep exes "-Mroot=$2" "-Mexes=$4"
-printf '{"version": 1, "data": {"status": "success", "message": "zig test passed"}}\\n' > "$3"
-rm -rf "$T"
-"""
-    else:
-        script += """"$1/zig" test -target x86_64-linux-musl "$2"
-echo passed > "$3"
-rm -rf "$T"
-"""
+    # The pinned tools a test runs, as environment variables naming their
+    # paths.
+    env = {name: dep[DefaultInfo].default_outputs[0] for name, dep in ctx.attrs.env_tools.items()}
     ctx.actions.run(
-        cmd_args(busybox_sh(bb, script, *args), hidden = hidden),
+        cmd_args(busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output()), hidden = ctx.attrs.imports),
         category = "zig_test",
+        env = env,
     )
-    if ctx.attrs.exes:
+    if validation:
         return [
             DefaultInfo(default_output = out),
             ValidationInfo(validations = [ValidationSpec(name = ctx.label.name, validation_result = out)]),
@@ -145,17 +200,18 @@ rm -rf "$T"
 # `zig test` of `src` (and the `test` blocks of the files it imports, the
 # `imports`), run as a build action: the target exists only if every test
 # passed. A `zig_exe` names it in `unit_tests` to be built behind it. A test
-# of built executables names them in `exes`; it is then a validation, which a
-# target that hands the executables out lists (`kcov_tool`'s `cases`), as it
+# that runs tools names them in `env_tools`; it is then also a validation,
+# which a target that hands a tool out lists (`kcov_tool`'s `cases`), as it
 # cannot be an input of the executable it runs.
 zig_test_rule = rule(
     impl = _zig_test_impl,
     attrs = {
         "busybox": attrs.dep(),
-        # Executables the tests run, configured for the execution platform
-        # like the target that hands them out, so the same bytes: module
-        # `exes`, `pub const <key>` = its path.
-        "exes": attrs.dict(attrs.string(), attrs.exec_dep(providers = [RunInfo]), default = {}),
+        # `zig_module` targets `src` imports by name.
+        "deps": attrs.list(attrs.dep(providers = [ZigModuleInfo]), default = []),
+        # name -> a tool the tests run (its default output), in the
+        # environment as its path.
+        "env_tools": attrs.dict(attrs.string(), attrs.exec_dep(), default = {}),
         "imports": attrs.list(attrs.source(), default = []),
         "src": attrs.source(),
         "zig": attrs.dep(),
@@ -316,3 +372,4 @@ mojo_toolchain = declares_docs(mojo_toolchain_rule)
 zig_dist = declares_docs(zig_dist_rule)
 zig_exe = declares_docs(zig_exe_rule)
 zig_test = declares_docs(zig_test_rule)
+zig_module = declares_docs(zig_module_rule)
