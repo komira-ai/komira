@@ -59,6 +59,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # serves a footer's statistics as TableStats and as a StatsProvider
 # (table_stats).
 #
+# It reads a local file a row group or a morsel at a time
+# (morsel_reader, its morsel windows in morsel_slice, the data-page count of
+# the one-pass selection decode in data_page_count), and decodes a row group
+# from bytes the caller already holds, with no I/O (bytes_decode). Each
+# column chunk decoded there is counted (komira_counters).
+#
 # The welded tests:
 # - test_rle_simd, test_rle_simd_bw_small: bit-packed runs at every bit width
 #   the SIMD kernels specialize, and the dedicated bw=1/2/4 byte paths, at
@@ -170,6 +176,20 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   by type (unsigned, UINT_64 past Int64.MAX, DECIMAL), top-level leaves,
 #   HLL register merge against one sketch over the union, the path entry
 #   points.
+# - test_morsel_reader_direct: ParquetMorselReader on files written by
+#   komira_test_parquet_file: morsels per row group and cut across row groups
+#   and pages at unaligned rows (validity rebased), one-row morsels, reset,
+#   a file of no rows, a kept dictionary through morsel windows, projections
+#   and the decode census (one count per row group and column, never per
+#   morsel), the shared decodes with and without the buffer move, the
+#   one-pass selection decode, raw chunks against the file's bytes, the
+#   footer cache, and the refusals.
+# - test_bytes_decode_direct: the I/O-free entry points on the same kind of
+#   file: the row group's byte range exactly its chunks, every row group
+#   decoded from its own bytes (projection, kept dictionary, census), one
+#   chunk out of the whole file, INT64 and nullable INT32 dictionary codes
+#   mapped back to the rows (PLAIN and BYTE_ARRAY chunks get None), and the
+#   refusals.
 # - test_no_env_reads: the package's sources read no environment, import no
 #   komira package outside the deps below (and never komira_core), hold no
 #   raw pointer in a public signature, rebuild no address from an integer
@@ -195,6 +215,7 @@ mojo_library(
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
+        "//src/komira_counters:komira_counters",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_fs:komira_fs",
         "//src/komira_host:komira_host",
@@ -222,6 +243,7 @@ mojo_library(
         "tests/test_bloom_reader_direct.mojo",
         "tests/test_bss_direct.mojo",
         "tests/test_bypass_direct.mojo",
+        "tests/test_bytes_decode_direct.mojo",
         "tests/test_column_decode_context_direct.mojo",
         "tests/test_column_decoder_dict_direct.mojo",
         "tests/test_column_decoder_direct.mojo",
@@ -259,6 +281,7 @@ mojo_library(
         "tests/test_gather_fixed_width_non_null.mojo",
         "tests/test_int96_decode.mojo",
         "tests/test_metadata_parser_direct.mojo",
+        "tests/test_morsel_reader_direct.mojo",
         "tests/test_neon_bss_decode.mojo",
         "tests/test_nested_decoder_direct.mojo",
         "tests/test_nested_direct.mojo",
@@ -292,6 +315,9 @@ mojo_library(
         "tests/test_subrg_traces_direct.mojo",
         "tests/test_table_stats_direct.mojo",
         "tests/test_thrift_compact_direct.mojo",
+    ],
+    test_deps = [
+        "//src/tests/helpers/komira_test_parquet_file:komira_test_parquet_file",
     ],
     visibility = ["PUBLIC"],
 )
