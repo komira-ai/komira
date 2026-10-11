@@ -1,0 +1,97 @@
+load("@komira//third_party/node:pins.bzl", "NODE")
+load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "esbuild_bundle", "node_test")
+
+# The tests of the hermetic Node.js (third_party/node, tools/build/node): each
+# node_test runs its script with the pinned node as a build action, so building
+# a target is running it, and its output exists only if it passed. What each
+# test proves is in README.md; the mutants each was seen red against are in
+# the pull request that added it.
+
+node_test(
+    name = "isolation",
+    src = "isolation.js",
+    args = [NODE["version"]],
+)
+
+# node_test's own verdict: a script that fails must fail the target, with its
+# error on stderr.
+node_test(
+    name = "fails",
+    src = "fails.js",
+    expect_error = "AssertionError [ERR_ASSERTION]: node_test reports this failure",
+)
+
+# An expect_error that starts with "--" is text to match, not an option.
+node_test(
+    name = "fails_dash",
+    src = "fails_dash.js",
+    expect_error = "--flag-like text node_test must match",
+)
+
+# Two modules, one of them TypeScript, bundled into one file that runs alone.
+esbuild_bundle(
+    name = "two_module_bundle",
+    entry = "two_module/main.mjs",
+    srcs = ["two_module/greet.ts"],
+)
+
+node_test(
+    name = "two_module",
+    src = ":two_module_bundle",
+)
+
+# An ES module bundle (`format = "esm"`): its entry awaits at the top level,
+# which esbuild refuses to write as cjs.
+esbuild_bundle(
+    name = "esm_bundle",
+    entry = "esm/main.mjs",
+    srcs = ["two_module/greet.ts"],
+    format = "esm",
+    out = "esm_bundle.mjs",
+)
+
+node_test(
+    name = "esm",
+    src = ":esm_bundle",
+)
+
+# apache-arrow and its dependencies bundled from the pinned npm packages.
+esbuild_bundle(
+    name = "arrow_ipc_bundle",
+    entry = "arrow_ipc.mjs",
+    deps = ["//third_party/node:apache-arrow"],
+)
+
+node_test(
+    name = "arrow_ipc",
+    src = ":arrow_ipc_bundle",
+)
+
+# The same script unbundled: node resolves apache-arrow and its dependencies
+# from the packages node_test stages under node_modules.
+node_test(
+    name = "arrow_ipc_node_modules",
+    src = "arrow_ipc.mjs",
+    deps = ["//third_party/node:apache-arrow"],
+)
+
+# A Node-API addon: napi_* left undefined, resolved by node when it loads.
+c_shared_lib(
+    name = "addon",
+    srcs = ["addon/addon.c"],
+    include_dirs = ["//third_party/node:node[include]"],
+    out = "addon.node",
+)
+
+node_test(
+    name = "addon_loads",
+    src = "addon/addon_test.js",
+    data = {"addon/addon.node": ":addon"},
+)
+
+# What the addon exports: only the two Node-API module symbols.
+node_test(
+    name = "addon_exports",
+    src = "addon/exports_test.js",
+    data = {"addon/addon.node": ":addon"},
+)

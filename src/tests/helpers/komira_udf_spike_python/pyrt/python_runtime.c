@@ -220,7 +220,7 @@ static int32_t py_describe(komira_udf_rt* rt, komira_udf_capabilities* c) {
 
 static int leaf_fmt(const struct ArrowSchema* s, char* fmt) {
   if (s == NULL || s->format == NULL || s->n_children != 0 || s->format[1] != 0) return 0;
-  if (s->format[0] != 'l' && s->format[0] != 'g') return 0;
+  if (s->format[0] != 'l' && s->format[0] != 'i' && s->format[0] != 'g') return 0;
   *fmt = s->format[0];
   return 1;
 }
@@ -251,13 +251,13 @@ static int32_t check_spec(const komira_udf_spec* s, komira_udf_error* e, struct 
     return pyrt_fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "shape is not SCALAR or MAP_BATCHES_COLUMN", NULL, -1);
   if (s->args == NULL || s->args->format == NULL || strcmp(s->args->format, "+s") != 0 ||
       s->args->n_children > PYRT_MAX_ARGS)
-    return pyrt_fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "args is not a struct of at most 8 fields", NULL, -1);
+    return pyrt_fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "args is not a struct of at most 64 fields", NULL, -1);
   u->n_args = (int)s->args->n_children;
   for (int i = 0; i < u->n_args; i++)
     if (!leaf_fmt(s->args->children[i], &u->arg_fmt[i]))
-      return pyrt_fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "an argument type is not int64 or float64", NULL, -1);
+      return pyrt_fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "an argument type is not int64, int32 or float64", NULL, -1);
   if (!leaf_fmt(s->result, &u->result_fmt))
-    return pyrt_fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "the result type is not int64 or float64", NULL, -1);
+    return pyrt_fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "the result type is not int64, int32 or float64", NULL, -1);
   if (s->state != NULL) return pyrt_fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "a state type is for aggregates", NULL, -1);
   u->result_nullable = (s->result->flags & ARROW_FLAG_NULLABLE) != 0;
   u->shape = s->shape;

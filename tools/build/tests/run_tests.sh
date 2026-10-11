@@ -400,6 +400,12 @@
 #      a repeated capability, fewer filled cells than the floor, no surface,
 #      and (built by package pattern) a test incompatible with the lint's
 #      platform.
+#  54. The hermetic Node.js rules (tools/build/node/defs.bzl): each target of
+#      tests//negative/node and below fails with its planted defect: a failing
+#      script, a wrong expected error or an unexpected pass, a path or package
+#      staged twice, an unresolved import, an empty expect_error or exe, a pin
+#      that differs, a C warning, the test-only runtime named where it is not
+#      visible. See tools/build/tests/node_tests.sh.
 set -uo pipefail
 
 umbrella=1
@@ -1453,6 +1459,10 @@ done
 # A row naming a test incompatible with the lint's platform fails the build
 # even under a package pattern, so the lint never drops out of //... silently.
 scm_planted incompatible "because its transitive dep $E/pandas_e2e:test_mac" "$N/incompatible:"
+
+# 54
+# shellcheck source=tools/build/tests/node_tests.sh
+. "$ROOT/tools/build/tests/node_tests.sh"
 
 # 37
 pt_rc=0

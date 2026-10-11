@@ -8,6 +8,8 @@
 #   * `reset` returns a counter to 0, and only that counter;
 #   * a table's slots are independent, `reset` clears all of them, and a slot
 #     out of range REFUSES rather than writing past the table;
+#   * a negative slot computed at run time is refused by `read`,
+#     `reset_slot` and `add`;
 #   * `add` takes a negative delta;
 #   * N workers each adding M sum to exactly N * M (no lost update).
 #
@@ -116,6 +118,25 @@ def test_table_refuses_a_slot_out_of_range() raises:
         T.reset_slot(5)
     # The refused writes touched nothing, and a refused `try_add` is dropped.
     T.try_add(9, 1)
+    assert_equal(T.read(0), 0)
+    assert_equal(T.read(1), 0)
+
+
+def test_table_refuses_a_negative_slot_known_only_at_run_time() raises:
+    # The slot is computed at run time so the bound check cannot be folded
+    # away: `read`, `reset_slot` and `add` must refuse a slot below 0, not
+    # address the word before the table.
+    comptime T = GlobalCounterTable["komira_counters_test_table_negative", 2]
+    T.reset()
+    var widths = List[Int]()
+    widths.append(1)
+    var neg = -len(widths)
+    with assert_raises(contains="slot out of range"):
+        _ = T.read(neg)
+    with assert_raises(contains="slot out of range"):
+        T.reset_slot(neg)
+    with assert_raises(contains="slot out of range"):
+        T.add(neg, 1)
     assert_equal(T.read(0), 0)
     assert_equal(T.read(1), 0)
 

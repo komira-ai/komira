@@ -18,7 +18,7 @@ sees a language object other than these.
   `numpy.ndarray`), and returns one.
 
 Type hints are the only declaration: a plain function, no decorator.
-`float` is Arrow float64 and `int` int64; `X | None` (or Optional[X])
+`float` is Arrow float64 and `int` int64 or int32; `X | None` (or Optional[X])
 allows None, which is a null; `list[X]` and `numpy.ndarray` (or
 `numpy.typing.NDArray[...]`) are the column forms.
 
@@ -44,10 +44,12 @@ ERR_DEADLINE = 12
 SHAPE_SCALAR = 1
 SHAPE_MAP_BATCHES_COLUMN = 4
 
-# Arrow format -> memoryview code, numpy dtype name, type name.
-CODE = {"l": "q", "g": "d"}
-DTYPE = {"l": "int64", "g": "float64"}
-TYPE = {"l": "int64", "g": "float64"}
+# Arrow format -> memoryview code, numpy dtype name, type name, bytes per
+# value. An `int` hint (format "l") also fits a declared int32 ("i").
+CODE = {"l": "q", "i": "i", "g": "d"}
+DTYPE = {"l": "int64", "i": "int32", "g": "float64"}
+TYPE = {"l": "int64", "i": "int32", "g": "float64"}
+WIDTH = {"l": 8, "i": 4, "g": 8}
 
 # How often (in rows) a SCALAR call reads the host clock for its deadline,
 # after reading it once past row 0.
@@ -137,7 +139,7 @@ def _check_signature(name, params, ret, shape, arg_fmts, result_fmt):
             return "{}: {} is a {} hint; shape {} takes {}".format(
                 name, what, h[0], "SCALAR" if shape == SHAPE_SCALAR else "MAP_BATCHES_COLUMN", " or ".join(kinds)
             )
-        if h[1] is not None and h[1] != fmt:
+        if h[1] is not None and h[1] != fmt and not (h[1] == "l" and fmt == "i"):
             return "{}: {} is hinted {}, declared {}".format(name, what, TYPE[h[1]], TYPE[fmt])
     return ""
 
@@ -249,7 +251,8 @@ class Instance:
         else:
             res = self._lists(n, cols)
         if res[0] == OK and flag[0]:
-            return (ERR_CANCELLED, "cancelled during the batch", None, n)
+            # The whole batch ran: no row of it is the one cancelled.
+            return (ERR_CANCELLED, "cancelled during the batch", None, -1)
         return res
 
     def _raised(self, exc, row):
@@ -301,10 +304,7 @@ class Instance:
                 try:
                     o[i] = y
                 except (TypeError, ValueError, OverflowError):
-                    if self.result_fmt == "g" and type(y) is int:
-                        o[i] = float(y)
-                    else:
-                        return self._bad_value(y, i)
+                    return self._bad_value(y, i)
             if i == 0 or not i % CLOCK_EVERY:
                 t = now()
                 if deadline and t > deadline:
@@ -328,7 +328,7 @@ class Instance:
         if not isinstance(res, (list, tuple)):
             return (ERR_RETURN_TYPE, "the result is a {}, not a list".format(type(res).__name__), None, -1)
         m = len(res)
-        buf = bytearray(8 * m)
+        buf = bytearray(WIDTH[self.result_fmt] * m)
         o = memoryview(buf).cast(CODE[self.result_fmt])
         valid = None
         nulls = 0
@@ -340,7 +340,7 @@ class Instance:
                 nulls += 1
                 continue
             try:
-                o[i] = float(y) if self.result_fmt == "g" and type(y) is int else y
+                o[i] = y
             except (TypeError, ValueError, OverflowError):
                 return self._bad_value(y, i)
         o.release()
@@ -364,7 +364,10 @@ class Instance:
         if isinstance(res, np.ma.MaskedArray):
             mask = np.ma.getmaskarray(res)
             res = res.filled(0)
-        res = np.asarray(res)
+        try:
+            res = np.asarray(res)
+        except (TypeError, ValueError) as exc:
+            return (ERR_RETURN_TYPE, "the result is no array: " + _exception_text(exc), None, -1)
         want = np.dtype(DTYPE[self.result_fmt])
         if res.ndim != 1:
             return (ERR_RETURN_TYPE, "the result has {} dimensions, not 1".format(res.ndim), None, -1)

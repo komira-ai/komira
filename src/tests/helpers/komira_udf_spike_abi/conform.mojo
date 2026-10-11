@@ -7,8 +7,12 @@
 #
 # Besides each case's own expectation, every case checks what the contract
 # promises for any call:
-#   - every array and stream the host exported was released exactly once by
-#     the end of the case, and no borrowed schema was released;
+#   - every array, child array and stream the host exported was released
+#     exactly once by the end of the case, and no borrowed schema was
+#     released (checked on a failed case too, and added to its reason);
+#   - every byte the runtime reserved through mem_reserve was returned by the
+#     end of the case (a runtime that reserves its outputs and error strings,
+#     as the reference runtime does, shows a host that never released one);
 #   - an error status carries a message (an error code alone is a failure);
 #   - no host post-condition broke unless the case expects that fault.
 # The `capabilities` result checks the describe answer itself: the runtime
@@ -34,6 +38,7 @@ from .contract import (
     TRANSPORT_IN_PROCESS,
     status_name,
 )
+from ._host import Counts
 from .runtime import CallOptions, Handle, Opened, Outcome, UdfRuntime
 from .values import Batch, Column, TYPE_FLOAT64, TYPE_INT32
 
@@ -127,6 +132,8 @@ def _check(got: Outcome, e: Expect, at_call: Bool = True) -> String:
         return "run error " + got.run_error(at_call) + " (" + String(got) + "), expected " + e.run_error
     if e.run_error == "" and got.fault != "":
         return "host fault: " + got.fault
+    if e.fault not in got.fault:
+        return "fault '" + got.fault + "' does not contain the expected '" + e.fault + "'"
     if e.row != -2 and got.row != e.row:
         return "error row " + String(got.row) + ", expected " + String(e.row)
     if e.row_at_least != -2 and got.row < e.row_at_least:
@@ -281,41 +288,58 @@ def _run_frame(mut rt: UdfRuntime, c: Case) raises -> String:
 def _run_agg_split(mut rt: UdfRuntime, c: Case) raises -> String:
     """Each partial on its own instance (agg_update, then agg_state of every
     group: a PARTIAL step); the states merged on one more instance
-    (agg_merge, then agg_finish: the FINAL step)."""
+    (agg_merge, then agg_finish: the FINAL step). The first step whose
+    outcome is not OK is the one the case's expectation is checked against;
+    when every step is OK, the expectation must be OK and the final column
+    the expected one."""
     var b = _bind(rt, c, len(c.partials) + 1)
+    var bad = List[Outcome]()
     var states = List[Column]()
-    var why = String("")
     for i in range(len(c.partials)):
         var g = rt.agg_open(b.insts[i])
         if not g.outcome.is_ok():
-            why = "agg_open: " + String(g.outcome)
+            bad.append(g.outcome.copy())
             break
         var p = c.partials[i].copy()
         var up = rt.agg_update(g.handle, p.input, p.group_ids, p.n_groups, c.options)
+        if not up.is_ok():
+            rt.agg_close(g.handle)
+            bad.append(up^)
+            break
         var st = rt.agg_state(g.handle, p.n_groups, c.spec.state.value())
         rt.agg_close(g.handle)
-        why = _check(up, c.expect)
-        if why == "" and up.is_ok():
-            why = _check(st.outcome, c.expect)
-        if why != "" or not up.is_ok():
+        if not st.outcome.is_ok():
+            bad.append(st.outcome.copy())
             break
         states.append(st.column.copy())
-    if why == "" and c.expect.status == OK and len(states) == len(c.partials):
+    var result_col = Column(c.spec.result[0].type_id)
+    if len(bad) == 0:
         var g = rt.agg_open(b.insts[len(c.partials)])
+        if not g.outcome.is_ok():
+            bad.append(g.outcome.copy())
         for i in range(len(states)):
+            if len(bad) > 0:
+                break
             var ids = List[Int32]()
             for k in range(len(states[i])):
                 ids.append(Int32(k))
             var m = rt.agg_merge(g.handle, states[i], ids, c.n_groups, c.options)
-            if why == "":
-                why = _check(m, c.expect)
-        var fin = rt.agg_finish(g.handle, c.n_groups, c.spec.result[0])
-        rt.agg_close(g.handle)
-        if why == "":
-            why = _check(fin.outcome, c.expect)
-        if why == "":
-            why = same_column(fin.column, c.expect.column.value())
+            if not m.is_ok():
+                bad.append(m^)
+        if len(bad) == 0:
+            var fin = rt.agg_finish(g.handle, c.n_groups, c.spec.result[0])
+            if fin.outcome.is_ok():
+                result_col = fin.column.copy()
+            else:
+                bad.append(fin.outcome.copy())
+        if g.outcome.is_ok():
+            rt.agg_close(g.handle)
     _unbind(rt, b)
+    if len(bad) > 0:
+        return _check(bad[0], c.expect)
+    var why = _check(Outcome.of(OK), c.expect)
+    if why == "" and c.expect.column:
+        why = same_column(result_col, c.expect.column.value())
     return why
 
 
@@ -336,18 +360,29 @@ def run_case(mut rt: UdfRuntime, c: Case) raises -> String:
     raise Error("UDF_CASE_MALFORMED: " + c.name + ": run " + c.run)
 
 
-def _ledger_check(rt: UdfRuntime, before_exported: Int, before_released: Int, before_double: Int, before_schemas: Int, before_streams: Int, before_streams_released: Int) -> String:
+def _ledger_check(rt: UdfRuntime, b: Counts) -> String:
+    """"" when every array, child, stream and reservation of the case since
+    `b` was released exactly once, and no borrowed schema was released."""
     var a = rt.ledger()
-    var exported = a.exported - before_exported
-    var released = a.released - before_released
+    var exported = a.exported - b.exported
+    var released = a.released - b.released
     if released != exported:
         return String(exported) + " arrays exported to the runtime, " + String(released) + " released"
-    if a.double_released != before_double:
+    var kids = a.children_exported - b.children_exported
+    var kids_released = a.children_released - b.children_released
+    if kids_released != kids:
+        return String(kids) + " child arrays exported to the runtime, " + String(kids_released) + " released"
+    if a.double_released != b.double_released:
         return "an array was released twice"
-    if a.schemas_released != before_schemas:
+    if a.schemas_released != b.schemas_released:
         return "a borrowed schema was released by the runtime"
-    if a.streams_released - before_streams_released != a.streams_exported - before_streams:
+    if a.streams_released - b.streams_released != a.streams_exported - b.streams_exported:
         return "an input stream was not released"
+    if a.reserved_bytes != b.reserved_bytes:
+        return (
+            String(a.reserved_bytes - b.reserved_bytes) + " bytes the runtime reserved are still held:"
+            + " an output or an error the host never released, a handle never closed, or a runtime leak"
+        )
     return ""
 
 
@@ -394,11 +429,13 @@ def run_suite(runtime_path: String, cases: List[Case]) raises -> Report:
             why = run_case(rt, c)
         except e:
             why = String(e)
+        # The ledger is checked on a failed case too: a failure path that
+        # leaks (a handle left open) is a failure of its own.
+        var leak = _ledger_check(rt, l)
         if why == "":
-            why = _ledger_check(
-                rt, l.exported, l.released, l.double_released, l.schemas_released, l.streams_exported,
-                l.streams_released,
-            )
+            why = leak
+        elif leak != "":
+            why += "; and " + leak
         if why != "":
             why += " [defect caught: " + c.defect + "]"
         report.results.append(CaseResult(c.name, "PASS" if why == "" else "FAIL", why))

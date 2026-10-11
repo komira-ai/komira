@@ -26,7 +26,8 @@
 # attaches one is that cloud's limit.
 # =============================================================================
 
-from kci_resource_proto.resource import Ref, Resource
+from kci_resource_proto.refs import Ref
+from kci_resource_proto.resource import Resource
 
 from kci_cloud.adapter import FINDING_GRAPH, Finding
 from kci_cloud.catalog import Catalog, FIELD_SERVICE_ACCOUNT, body_field

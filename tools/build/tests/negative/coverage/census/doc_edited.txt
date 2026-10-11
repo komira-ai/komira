@@ -1,0 +1,86 @@
+# Coverage census
+
+Generated: `tools/build/coverage/census.sh render` writes this file from
+[census.tsv](../tools/build/coverage/census.tsv), the numbers of one coverage
+build of every library under `src/`, and from the floors of
+[ratchet.tsv](../tools/build/coverage/ratchet.tsv), which it raises to them.
+The build holds this file, census.tsv and ratchet.tsv to each other
+(`//:coverage_census`), so edit none of them by hand except to lower a floor;
+[The census](../tools/build/coverage/census.md) says how to refresh
+them and what a floor does: a library measured under its package's floor
+fails its coverage gate in every mode, so its conda package is not built.
+
+Census of 2026-10-08, built with
+`-c komira.coverage=true`: line coverage from kcov over every test of the
+library, branch coverage from the branch records of the libraries in
+`COVERAGE_BRANCH_GATE` (tools/build/coverage/policy.bzl); the others show
+*not gated*. The libraries under `src/tests/` are test code, outside the
+target: they are listed for information at the end, with no floor.
+
+## Summary
+
+| | |
+|---|---:|
+| Libraries (under `src/`, not `src/tests/`) | 12 |
+| Measured | 11 |
+| Not measured (a run or the gate failed; floor 0) | 1 |
+| Line coverage, all measured libraries | 73.33% (44/60) |
+| Median line coverage (lower middle) | 75.00% |
+| At 100% / 90% to 100% / 50% to 90% / under 50% / no line | 3 / 1 / 5 / 0 / 2 |
+| Branch coverage of the libraries with branch records (6) | 50.00% (10/20) |
+| Libraries with files no test compiles | 1 (2 files) |
+| Published: in the release / a conda package only / neither | 1 / 2 / 9 |
+| Measured under their floor | 1 |
+
+## Ranked by line coverage
+
+Lowest first. *Uncovered* counts executable lines no test ran, the lines of
+files no test compiles included; *Floor* is the package's (ratchet.tsv), line /
+branch, `-` for none, *pinned* when set by hand ([Pinned floors](#pinned-floors));
+**under floor** marks a library measured under it.
+
+| # | Library | Line | Uncovered | Branch | Files no test compiles | Published | Floor |
+|---:|---|---:|---:|---|---:|---|---|
+| 1 | `src/a:a` | 60.00% (5/10) | 5 | 25.00% (1/4) | 2 | release | 50.00% / 25.00% |
+| 2 | `src/c:c1` | 50.00% (2/4) | 2 | 25.00% (1/4) | 0 | no | 50.00% / 25.00% |
+| 3 | `src/d:d` | 50.00% (5/10) | 5 | not gated | 0 | conda | 90.00% / - **under floor** |
+| 4 | `src/e:e2` | 50.00% (2/4) | 2 | not gated | 0 | no | 50.00% / - |
+| 5 | `src/f:f1` | 75.00% (3/4) | 1 | 50.00% (1/2) | 0 | no | 75.00% / 50.00% |
+| 6 | `src/g:g` | 90.00% (9/10) | 1 | 50.00% (1/2) | 0 | no | 50.00% / - pinned |
+| 7 | `src/b:b` | 100.00% (10/10) | 0 | not gated | 0 | no | 0.00% / - |
+| 8 | `src/c:c2` | 100.00% (4/4) | 0 | 75.00% (3/4) | 0 | no | 50.00% / 25.00% |
+| 9 | `src/e:e1` | 100.00% (4/4) | 0 | 75.00% (3/4) | 0 | no | 50.00% / - |
+| 10 | `src/f:f2` | n/a | 0 | not gated | 0 | no | 75.00% / 50.00% |
+| 11 | `src/g:g2` | n/a | 0 | not gated | 0 | no | 50.00% / - pinned |
+
+## Not measured
+
+| Library | Status | Why | Published | Floor |
+|---|---|---|---|---|
+| `src/b:b2` | RUN_FAILED | mojo_cov_run test_x: boom | conda | 0.00% / - |
+
+## Pinned floors
+
+A pinned row of ratchet.tsv holds a floor set by hand, with its reason;
+render keeps it as written, whatever the census measured (*measured* is
+the package floor the census would give it).
+
+| Package | Floor | Measured | Why |
+|---|---|---|---|
+| `src/g` | 50.00% / - | 90.00% / 50.00% | fixture: a line run only when two threads contend |
+
+## Files no test compiles
+
+Sources of a library that no test binary of it includes: each counts all its
+executable lines uncovered (covcheck's UnmeasuredFile).
+
+- `src/a:a`: `src/a/x.mojo`, `src/a/y.mojo`
+
+## Test packages (information)
+
+Libraries under `src/tests/`: conformance suites, end-to-end tests and test
+helpers. They are not held to the target and have no floor.
+
+| Library | Line | Uncovered | Branch | Files no test compiles | Status |
+|---|---:|---:|---|---:|---|
+| `src/tests/e2e/t:t` | 75.00% (3/4) | 1 | not gated | 0 | OK |

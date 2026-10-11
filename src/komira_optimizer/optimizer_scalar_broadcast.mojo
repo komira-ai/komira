@@ -3,11 +3,12 @@
 # =============================================================================
 #
 # Detects the user-side `df.filter(col("x") == col("x").max())` shape after
-# `.group_by(...).agg(...)` and rewrites it with values the engine has
-# bound: `Expr.literal(scalar_value)` replaces the `EXPR_AGG_FN` node in the
-# outer Filter predicate, and the inner Aggregate becomes a scan of its
-# already-materialized batch (plan-compile-time eager fold). This module
-# executes nothing.
+# `.group_by(...).agg(...)` and rewrites it with values bound in the
+# `ScalarDepTable`: `Expr.literal(scalar_value)` replaces the `EXPR_AGG_FN`
+# node in the outer Filter predicate, and the inner Aggregate becomes a scan
+# of its already-materialized batch. This
+# module executes nothing, and komira has no caller in this tree that
+# executes the requests it records.
 #
 # Pattern (the only one that triggers):
 #   Filter(<predicate referencing EXPR_AGG_FN>)
@@ -18,31 +19,33 @@
 #   1. Extract the agg-fn op + child column from the EXPR_AGG_FN node.
 #   2. Look the inner Aggregate's structural hash up in the `ScalarDepTable`.
 #      On a miss, record a request carrying the inner Aggregate and the
-#      `(op, col_name)` pair, and leave the plan unchanged. The engine runs
-#      the group-by Aggregate, reduces its batch with the ungrouped
+#      `(op, col_name)` pair, and leave the plan unchanged. The caller this
+#      is designed for (not in this tree) runs the group-by Aggregate,
+#      reduces its batch with the ungrouped
 #      Aggregate(max/min/sum/avg/count(child)) that `_build_inner_sub_plan`
 #      builds (two cascaded aggregates: per-group values, then one scalar),
-#      binds the scalar and the batch, and re-runs the optimizer.
+#      binds the scalar and the batch, and runs this pass again.
 #   3. On a hit, substitute every EXPR_AGG_FN node in the outer Filter
 #      predicate with `Expr.literal(scalar_value)` via a recursive
 #      Expr-tree walk with rebuild.
 #   4. Replace the inner Aggregate subtree with a scan of the bound
 #      `InMemorySource`, so the outer plan does not re-run the group-by.
 #
-# Position in the pipeline: AFTER `push_predicates_down` (so any
-# non-EXPR_AGG_FN predicates have already moved out of the same Filter),
-# BEFORE `convert_inner_to_semi` (so the SEMI swap sees the rewritten
-# literal-comparison filter). See `optimizer.mojo` for the order.
+# Pass order: `optimizer_driver.optimize` runs this pass AFTER
+# `push_predicates_down` (so any non-EXPR_AGG_FN predicates have already moved
+# out of the same Filter) and BEFORE the inner-to-semi join conversion
+# (`convert_inner_to_semi`), so the SEMI swap sees the rewritten
+# literal-comparison filter.
 #
 # Failure modes (with explicit error messages):
 #   * Pattern not matched (no EXPR_AGG_FN in any Filter, or Filter not
 #     above Aggregate): the rule no-ops; the plan passes through.
-#     `eval_expr` later raises if an EXPR_AGG_FN reaches eval.
-#   * The inner sub-plan runs in the engine, which raises its own errors;
-#     this pass only reads bound values.
-#   * Inner sub-plan returns 0 rows: the engine binds
-#     `ScalarValue.null(dtype)` and substitution puts `Expr.literal(NULL)`
-#     in the predicate (matches DuckDB semantics for empty subquery).
+#   * The inner sub-plan is executed outside this module; this pass only
+#     reads bound values.
+#   * Inner sub-plan returns 0 rows: the binding this pass is designed for
+#     is `ScalarValue.null(dtype)`, and substitution puts
+#     `Expr.literal(NULL)` in the predicate (matches DuckDB semantics for
+#     empty subquery).
 # =============================================================================
 
 from komira_arrow.schema import RecordBatch, Schema
@@ -113,11 +116,9 @@ def _expr_has_agg_fn(expr: Expr) -> Bool:
         return _expr_has_agg_fn(expr.alias_child_ref())
     if expr.tag == EXPR_STRING_OP:
         return _expr_has_agg_fn(expr.string_op_child_ref())
-    # ★ MathFn / MathFn2 / CASE (untyped API tests): `having
-    # sqrt(s) > sqrt(s.mean())` and a CASE-wrapped aggregate were NOT seen,
-    # so the aggregate reached the engine and the run died UNNAMED
-    # ("materialize_subplan: non-breaker child is not a parquet-collect
-    # shape"; MEASURED at the untyped Mojo door). Every
+    # ★ MathFn / MathFn2 / CASE: `having
+    # sqrt(s) > sqrt(s.mean())` and a CASE-wrapped aggregate must be seen,
+    # or the aggregate is left in the plan unrewritten. Every
     # arm here needs its twin in `_substitute_agg_fn` and `_walk_for_agg_fn`.
     if expr.tag == EXPR_MATH_FN:
         return _expr_has_agg_fn(expr.math_fn_child_ref())
@@ -165,8 +166,8 @@ def _substitute_agg_fn(
         return Expr.unary(expr.unary_op(), new_child^)
     if expr.tag == EXPR_CAST:
         # `cast_preserving_arrow` — rebuilding from `cast_target()` alone RESETS
-        # a temporal or decimal target to its bare physical DType. Full measured
-        # account at `optimizer_expr._fold_expr`'s EXPR_CAST arm (2026-09-17).
+        # a temporal or decimal target to its bare physical DType (the same
+        # rule as `optimizer_expr._fold_expr`'s EXPR_CAST arm).
         var new_child = _substitute_agg_fn(expr.cast_child_ref(), scalar_value)
         return Expr.cast_preserving_arrow(new_child^, expr)
     if expr.tag == EXPR_ALIAS:
@@ -253,8 +254,8 @@ def _build_inner_sub_plan(
 # to keep execution (and its FileHandle reach) OUT of any recursive,
 # parametric `def`: the AOT-monomorphization trap
 # (parametric+recursive+FileHandle reach). With execution gone, no phase is
-# parametric and none reaches a FileHandle. See the closing note below
-# `scalar_broadcast_rewrite`.
+# parametric and none reaches a FileHandle. See the closing note at the end
+# of this file.
 #
 # Phase 1 — pure walker `_collect_scalar_broadcast_sites`:
 #   non-parametric, recursive on `LogicalPlan`. Identifies every
@@ -276,7 +277,7 @@ def _build_inner_sub_plan(
 #   on the same site list emitted by Phase 1 (post-order via a shared
 #   index counter passed by reference).
 #
-# Why the split closes the trap: per 35 experiments, the trap
+# Why the split closes the trap: the trap
 # requires ALL THREE legs simultaneously — parametric, recursive, and
 # FileHandle reach. Phase 1's recursion is non-parametric. Phase 2 is
 # neither recursive nor parametric. Phase 3's recursion is
@@ -393,16 +394,15 @@ def _rewrite_scalar_broadcast_sites(
       1. Substitute the predicate's EXPR_AGG_FN with
          `Expr.literal(scalars[next_idx])`.
       2. **Replace the inner Aggregate child with `Scan(SOURCE_IN_MEMORY,
-         cache_names[next_idx])`.** This is the perf
-         caveat closure — the engine already materialized the inner
-         Aggregate's batch, and Phase 2 looked it up under
-         `cache_names[next_idx]`; rewriting the outer plan to scan it
-         from memory avoids the second parquet decode + filters +
-         group-by that the original plan would otherwise re-execute.
+         cache_names[next_idx])`.** The inner Aggregate's batch is a
+         bound value (materialized by whoever executed the request),
+         and Phase 2 looked it up under `cache_names[next_idx]`;
+         rewriting the outer plan to scan it from memory means the
+         plan no longer carries the inner scan + filters + group-by.
       3. Advance `next_idx`.
 
     NON-PARAMETRIC by construction. The walker depends only on
-    pure-data inputs (Slab, List, Int counter); no engine handle or
+    pure-data inputs (Slab, List, Int counter); no execution handle or
     origin parameter is in this function's monomorphization
     closure.
 
@@ -422,21 +422,17 @@ def _rewrite_scalar_broadcast_sites(
             # Clone the per-
             # site InMemorySource (ArcPointer refcount-bump; no batch
             # byte-copy) and emit a SourceVariant-carrying scan via
-            # `scan_from_source`. Earlier this emitted
-            # `LogicalPlan.scan(cache_name, SOURCE_IN_MEMORY, schema)`
-            # which the engine resolved through `registry.lookup(name)`;
-            # now the engine reads the batch directly from
-            # `scan.source._in_memory.value().data[][0]`. Path B
-            # semantics PRESERVED (still scans a materialized batch
-            # instead of re-emitting the inner Aggregate).
+            # `scan_from_source`, so the batch travels in
+            # `scan.source._in_memory` rather than by name (the plan
+            # still scans a materialized batch instead of re-emitting
+            # the inner Aggregate).
             var in_mem_clone = cache_sources[next_idx].copy()
             next_idx += 1
             var new_predicate = _substitute_agg_fn(predicate_copy, scalar_value)
             _ = sites  # parallel consume — sites[next_idx-1] consumed.
-            # Perf caveat closure: instead of re-emitting
-            # the inner Aggregate (which re-runs the parquet scan +
-            # filters + group-by that the engine already ran), scan the
-            # already-materialized batch inline on the SourceVariant.
+            # Instead of re-emitting the inner Aggregate (its scan +
+            # filters + group-by were already executed to produce the
+            # bound batch), scan the batch inline on the SourceVariant.
             # The schema matches the inner Aggregate's output_schema
             # captured in Phase 2.
             var in_mem_scan = LogicalPlan.scan_from_source(
@@ -500,25 +496,22 @@ def scalar_broadcast_rewrite(
 ) raises -> LogicalPlan:
     """Scalar-broadcast rewrite — the 3-phase driver.
 
-    ⛔ THIS PASS NO LONGER EXECUTES ANYTHING (the pure-optimizer
-    rule). Phase 2 used to run TWO chained executions per site via
-    `ctx.exec_mut().execute_subplan(...)`: (2a) the original group-by Aggregate,
-    to get the multi-row batch, and (2c) an ungrouped reduction of that batch,
-    to get the scalar. Both now happen in the ENGINE
-    (`EngineContext._resolve_scalar_deps`), which binds the results into a
-    `ScalarDepTable` and re-invokes the pure optimizer.
+    ⛔ THIS PASS EXECUTES NOTHING. Resolving a site takes TWO chained
+    executions: (a) the original group-by Aggregate, to get the multi-row
+    batch, and (b) an ungrouped reduction of that batch, to get the scalar.
+    Both belong to a caller that executes plans (komira has none in this
+    tree); it binds the results into the `ScalarDepTable` and runs this pass
+    again.
 
     ★ WHY THIS PASS IS THE HARDER OF THE TWO, AND WHY IT STILL FITS THE RULE.
     `resolve_scalar_subqueries` folds a value into a literal and nothing else.
     This one ALSO splices materialized RESULT DATA into the plan: Phase 3
     replaces the whole inner Aggregate subtree with
-    `Scan(SourceVariant(InMemorySource))` over the batch Phase 2 produced (the
-    perf-caveat closure — without it the outer plan re-runs the
-    parquet decode + filters + group-by that the engine already ran). So the optimizer
-    was not merely calling out; it was embedding engine output in its own
-    output. Under the dependency model that batch is a BOUND VALUE like any
-    other — the engine produces it, the table carries it, and this pass consumes
-    it as pure data. The plan the pass emits is unchanged.
+    `Scan(SourceVariant(InMemorySource))` over the batch Phase 2 looked up
+    (without it the outer plan would still carry the inner scan + filters +
+    group-by that produced the batch). Under the dependency model that batch
+    is a BOUND VALUE like any other — the executing caller produces it, the
+    table carries it, and this pass consumes it as pure data.
 
     Three-phase implementation:
 
@@ -532,20 +525,16 @@ def scalar_broadcast_rewrite(
         Look each site's `inner_hash` up in the dependency table's bindings.
         A HIT yields all four parallel values Phase 3 needs (scalar, synthetic
         name, schema, `InMemorySource`). A MISS records a request carrying the
-        inner Aggregate PLUS the `(op, col_name)` the engine needs to build the
-        ungrouped reduction, and the plan passes through untouched.
+        inner Aggregate PLUS the `(op, col_name)` the executing caller needs to
+        build the ungrouped reduction, and the plan passes through untouched.
 
       Phase 3 (pure, recursive):
         Re-walk the plan with `_rewrite_scalar_broadcast_sites`,
         substituting EXPR_AGG_FN -> Expr.literal(scalar) and the Aggregate
         subtree -> the inline-batch scan, in lockstep with Phase 1's order.
 
-    The split originally existed to keep the FileHandle reach out of a
-    parametric recursive `def` — the AOT-monomorphization trap that bit
-    the benchmark runner and 6 tests when this pass first landed.
-    Removing execution removes the trap's remaining leg
-    outright: with no execution here, NO phase of this pass is parametric and
-    none reaches a FileHandle.
+    With no execution here, NO phase of this pass is parametric and none
+    reaches a FileHandle.
 
     Multi-broadcast detection: if more than one distinct EXPR_AGG_FN
     appears in any Filter's predicate (e.g. `col(x).max() AND
@@ -579,11 +568,11 @@ def scalar_broadcast_rewrite(
         var h = sites[i].inner_hash
         var bi = deps.binding_index(DEP_SCALAR_BROADCAST, h)
         if bi < 0:
-            # MISS: ask the engine to materialize this site. The request
+            # MISS: request this site's materialization. The request
             # carries the inner Aggregate AND the `(op, col_name)` pair,
             # because resolving a broadcast is two CHAINED executions and the
-            # second one's plan is DERIVED from the first one's output — the
-            # engine cannot reconstruct it from the inner plan alone.
+            # second one's plan is DERIVED from the first one's output — it
+            # cannot be reconstructed from the inner plan alone.
             all_bound = False
             deps.request(
                 DEP_SCALAR_BROADCAST,
@@ -698,11 +687,11 @@ def _walk_for_agg_fn(
 #
 # The previous `_recurse_into_children[ctx_origin, reg_origin]` parametric
 # recursive walker was the monomorphization trap shape: parametric on the
-# OptimizerContext's origins AND mutually recursive with
-# `scalar_broadcast_rewrite` AND reaching `FileHandle` via
-# `execute_plan_on_session` from inside the recursion. The 3-phase design
-# replaces it with the non-parametric `_collect_scalar_broadcast_sites`
+# origins of an `OptimizerContext` (not in this tree) AND mutually recursive
+# with `scalar_broadcast_rewrite` AND reaching `FileHandle` via
+# `execute_plan_on_session` (not in this tree) from inside the recursion. The
+# 3-phase design replaces it with the non-parametric `_collect_scalar_broadcast_sites`
 # (Phase 1) + non-parametric `_rewrite_scalar_broadcast_sites`
 # (Phase 3); the dependency lookup is the FLAT for-loop in
-# `scalar_broadcast_rewrite`'s body (Phase 2), and execution is the
-# engine's. See that docstring above for the full rationale.
+# `scalar_broadcast_rewrite`'s body (Phase 2), and execution is outside
+# komira_optimizer. See the "Main rule body" notes above for the rationale.

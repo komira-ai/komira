@@ -65,6 +65,12 @@ mojo_library(
         # 1: a stage that never goes backward refuses a lower build number than
         # its channel lists for the same name and version (KCI-E-SUPERSEDED)
         "tests/test_publish_never_backward.mojo",
+        # 1, the split (staged pipeline P1): a channel AHEAD of the release whose
+        # newest build descends from it is SUPERSEDED (exit 0, no upload), an
+        # unrelated one REFUSED, one git cannot resolve exit 5; the main-line
+        # filter: a branch's break-glass build is not counted, an ambiguous
+        # prefix is
+        "tests/test_publish_never_backward_split.mojo",
         # 2: no request of any scenario says force
         "tests/test_publish_never_force.mojo",
         # 6: the result document's rows, new_names[], the probe, no secret, one outcome
@@ -85,6 +91,27 @@ mojo_library(
         # the subdir is the platform's; an OIDC channel publishes only from its
         # stage's environment
         "tests/test_publish_platform.mojo",
+        # step 0: an empty --release-dir, an unreadable artifacts, release.json,
+        # --release-version or channels file, each its own error id; a lockstep
+        # refusal; prepare_release's lines; --release-version's own refusals
+        "tests/test_publish_step0_refusals.mojo",
+        # a write: the credential each request carries (PUBLIC/PRIVATE OIDC,
+        # PRIVATE API token), minted or resolved once
+        "tests/test_publish_flow_write_credential.mojo",
+        # steps 2-4 when a read, the file, the retry policy, the sleeper or a
+        # worker fails; the metapackage present before step 4
+        "tests/test_publish_run_faults.mojo",
+        # a write value that cannot be had; the run credential's surface; step 1
+        # unconfigured or empty; the index polls; the reason tables
+        "tests/test_publish_credential_reads.mojo",
+        # plan.mojo's edges: every refusal listed, library order, the count
+        # check, build strings with no build number or no commit
+        "tests/test_publish_plan_edges.mojo",
+        # the set's checks and NEW NAMES at their edges; a trailing `/`; the fixture
+        "tests/test_publish_set_edges.mojo",
+        # the test double's contract; HttpChannelTransport over a scripted
+        # connection; UsleepSleeper
+        "tests/test_publish_scripted_channel.mojo",
     ],
     visibility = ["PUBLIC"],
 )
