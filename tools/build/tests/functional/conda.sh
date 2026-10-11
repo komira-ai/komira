@@ -41,9 +41,11 @@
 #   refusals   a library that cannot be packaged keeps a target that BUILDS (so
 #              `buck2 build //...` stays green), holding a REFUSED file with the
 #              reason, and its [release] fails naming it: no tests, native code,
-#              a run-time shared library, a name that is not a conda name, a
-#              dependency with no package (opted out, or itself refused). The
-#              libraries still build.
+#              a run-time shared library its `dlopen` does not declare, a
+#              `dlopen` system_libs.bzl does not name, a name that is not a
+#              conda name, a dependency with no package (opted out, or itself
+#              refused). The libraries still build. A declared soname is a
+#              package requiring the conda-forge package system_libs.bzl names.
 #   packer     komira_pack run directly gives the same bytes as the rule; its
 #              check refuses a different payload, name, subdir or dependency
 #              list, a doc file it was not told of, a missing one, one that
@@ -528,20 +530,30 @@ fi
 
 # ---- refusals: a target that builds, and a release that does not ------------
 refused refuse_no_tests "has no tests, so its package would not be gated by any" "$FX:fx_notests_conda"
-refused refuse_dlopen "opens a shared library at run time (OwnedDLHandle)" "$FX:fx_dlopen_conda"
+refused refuse_dlopen_undeclared "its sources name [liblz4.so.1, libz.so.1] and the library declares \`dlopen\` [libz.so.1]" "$FX:fx_dlopen_undeclared_conda"
+refused refuse_dlopen_misdeclared "its sources name [liblz4.so.1] and the library declares \`dlopen\` [libz.so.1]" "$FX:fx_dlopen_misdeclared_conda"
+refused refuse_dlopen_unmapped "for which tools/build/package/system_libs.bzl names no conda package" "$FX:fx_dlopen_unmapped_conda"
+refused refuse_dep_dlopen_unmapped "fx_dlopen_unmapped, which has no conda package: " "$FX:fx_dlopen_unmapped_user_conda"
+# a declared soname: a package, requiring the package system_libs.bzl names for it
+d=$(out_of "$FX:fx_dlopen_conda")
+if [ -n "$d" ] && jq -e --arg v "$pin" '.depends == ["__linux", "mojo-compiler ==\($v)", "libzlib >=1.2.13,<2"] and .dlopen == [{"requirement": "libzlib >=1.2.13,<2", "soname": "libz.so.1"}]' "$d/metadata.json" > /dev/null 2>&1; then
+    pass "dlopen: fx_dlopen declares libz.so.1 and its package requires libzlib >=1.2.13,<2, recorded in metadata.json's dlopen"
+else
+    fail "dlopen: fx_dlopen's package does not require libzlib by its declaration (see $W)"
+fi
 refused refuse_bad_name "is not a conda name" "$FX:fx_badname_conda"
 refused refuse_native "links native code" komira//tools/build/examples/cshim:cadd_conda
 refused refuse_dep_opted_out "which has no conda package (\`conda = False\`" "$FX:fx_optout_user_conda"
 refused refuse_dep_refused "it depends on" "$FX:fx_notests_user_conda"
 # the libraries themselves still build
-if "$BUCK2" build "$FX:fx_notests" "$FX:fx_dlopen" "$FX:fx_badname" "$FX:fx_optout" "$FX:fx_optout_user" "$FX:fx_notests_user" komira//tools/build/examples/cshim:cadd > "$W/libs_build.log" 2>&1; then
+if "$BUCK2" build "$FX:fx_notests" "$FX:fx_dlopen_undeclared" "$FX:fx_dlopen_misdeclared" "$FX:fx_dlopen_unmapped" "$FX:fx_dlopen_unmapped_user" "$FX:fx_badname" "$FX:fx_optout" "$FX:fx_optout_user" "$FX:fx_notests_user" komira//tools/build/examples/cshim:cadd > "$W/libs_build.log" 2>&1; then
     pass "libraries: every library a package was refused for still builds"
 else
     fail "libraries: a library with a refused package does not build (see $W/libs_build.log)"
 fi
 # Building every package of the fixtures at once is green: a refusal is data.
 if "$BUCK2" build "$FX:" > "$W/fx_all.log" 2>&1; then
-    pass "refusals: \`buck2 build $FX:\` is green with six refused packages in it"
+    pass "refusals: \`buck2 build $FX:\` is green with its refused packages in it"
 else
     fail "refusals: building every fixture target failed (see $W/fx_all.log)"
 fi

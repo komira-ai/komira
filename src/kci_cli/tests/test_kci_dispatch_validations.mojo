@@ -170,6 +170,10 @@ struct FakeSteps(StageSteps, Movable):
         self.reads.append(String("is-ancestor ") + commit + String(" ") + of)
         return True
 
+    def main_tip_past(mut self, revision: String) raises -> String:
+        # no run here passes --admission (test_kci_staged_ordering.mojo does)
+        raise Error(String("main_tip_past is not asked in this test"))
+
     def release_set_hash(mut self, artifacts_file: String, platform_dir: String) raises -> String:
         # the release every gamma run here is handed (`_gamma`)
         return String(_SET_HASH)

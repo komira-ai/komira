@@ -9,6 +9,7 @@ mojo_library(
     deps = [
         "//src/komira_arrow:komira_arrow",
         "//src/komira_collections:komira_collections",
+        "//src/komira_physical_plan:komira_physical_plan",
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_plan_ir:komira_plan_ir",
     ],

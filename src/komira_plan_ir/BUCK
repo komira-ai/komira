@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# LogicalPlan and PhysicalPlan trees, their variants, schema propagation, display, the scan-binding bind pass and audits.
+# The LogicalPlan tree, its variants, schema propagation, display, the scan-binding bind pass and audits.
 mojo_library(
     name = "komira_plan_ir",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -24,8 +24,6 @@ mojo_library(
         "tests/test_infer_agg_field_keeps_timestamp_zone.mojo",
         "tests/test_inmem_content_identity.mojo",
         "tests/test_outer_join_nullability.mojo",
-        "tests/test_physical_plan_ir_version_door.mojo",
-        "tests/test_physical_plan_purity_gate.mojo",
         "tests/test_plan_display.mojo",
         "tests/test_plan_helpers_fingerprint.mojo",
         "tests/test_plan_union_copy.mojo",

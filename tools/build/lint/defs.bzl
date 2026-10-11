@@ -135,36 +135,30 @@ push_verdicts_rule = rule(
     attrs = _COMMON | {"srcs": attrs.list(attrs.source())},
 )
 
-def _mojo_deps_impl(ctx):
-    if not ctx.attrs.srcs:
-        fail("mojo_deps {}: srcs is empty, so it would check nothing".format(ctx.label))
-    staged, copy = _stage(ctx, [ctx.attrs.buck] + ctx.attrs.srcs)
-    return _lint(ctx, "mojo_deps", [], [copy[ctx.attrs.buck.short_path]] + [copy[s.short_path] for s in ctx.attrs.srcs], staged)
-
-mojo_deps_rule = rule(
-    impl = _mojo_deps_impl,
-    doc = "The `deps` of the package's mojo_library (the BUCK file in `buck`) name every `komira_*` module that the Mojo files in `srcs` import, library files and tests alike. A missing dep fails the build of the package; this finds it from the text, so a dependency list is checked in review as well as at build time. Extra deps are allowed.",
-    attrs = _COMMON | {
-        "buck": attrs.source(),
-        "srcs": attrs.list(attrs.source()),
-    },
-)
-
 def _retired_names_impl(ctx):
     if not ctx.attrs.names:
         fail("retired_names {}: names is empty, so it would check nothing".format(ctx.label))
     staged, copy = _stage(ctx, ctx.attrs.srcs)
     tree = ctx.attrs.tree[DefaultInfo].default_outputs[0]
+    if ctx.attrs.unchecked:
+        files = dict(ctx.attrs.tree[DocTreeInfo].files)
+        for path in ctx.attrs.unchecked:
+            if path not in files:
+                # An exemption must not outlive the file it was written for.
+                fail("retired_names {}: unchecked names {}, which is not in the tree; delete the entry".format(ctx.label, path))
+            files.pop(path)
+        tree = ctx.actions.copied_dir("checked_tree", files)
     args = [tree, "{}//".format(ctx.label.cell)] + ctx.attrs.names + ["--"] + [copy[s.short_path] for s in ctx.attrs.srcs]
     return _lint(ctx, "retired_names", [], args, staged)
 
 retired_names_rule = rule(
     impl = _retired_names_impl,
-    doc = "No file of `tree` (a doc_tree target: the root one holds every file of the cell) and no file in `srcs` (the dotfiles a glob skips) holds one of `names`, fixed strings, on a line without a YYYY-MM-DD date: a renamed package or type survives only in a dated history note. Spell each name in parts (`\"kci\" + \"_old\"`) so the BUCK file naming it does not hold it.",
+    doc = "No file of `tree` (a doc_tree target: the root one holds every file of the cell) and no file in `srcs` (the dotfiles a glob skips) holds one of `names`, fixed strings, on a line without a YYYY-MM-DD date: a renamed package or type survives only in a dated history note. Spell each name in parts (`\"kci\" + \"_old\"`) so the BUCK file naming it does not hold it. `unchecked` names files of `tree` (paths in the cell) left out: a fixture that must hold a retired name and cannot carry a date (JSON); an entry naming no file of `tree` is refused.",
     attrs = _COMMON | {
         "names": attrs.list(attrs.string()),
         "srcs": attrs.list(attrs.source(), default = []),
         "tree": attrs.dep(providers = [DocTreeInfo]),
+        "unchecked": attrs.list(attrs.string(), default = []),
     },
 )
 
@@ -260,6 +254,20 @@ lint_suite_rule = rule(
     attrs = {"lints": attrs.list(attrs.dep())},
 )
 
+def _target_suite_impl(ctx):
+    if not ctx.attrs.targets:
+        fail("target_suite {}: targets is empty".format(ctx.label))
+    outs = []
+    for d in ctx.attrs.targets:
+        outs.extend(d[DefaultInfo].default_outputs)
+    return [DefaultInfo(default_outputs = outs)]
+
+target_suite_rule = rule(
+    impl = _target_suite_impl,
+    doc = "Depends on targets that must build but that no unit of the pull-request check builds by itself (sub-targets; targets of tests//negative and tests//src beside the planted defects they serve), so building it builds every default output of each and runs their validations. Its outputs are theirs.",
+    attrs = {"targets": attrs.list(attrs.dep())},
+)
+
 
 def _markdown_docs_impl(ctx):
     if not [f for f in ctx.attrs.srcs if f.short_path.endswith(".md")]:
@@ -334,9 +342,6 @@ def no_endpoint(**kwargs):
 def push_verdicts(**kwargs):
     push_verdicts_rule(**_linux(kwargs))
 
-def mojo_deps(**kwargs):
-    mojo_deps_rule(**_linux(kwargs))
-
 def pointer_lint(**kwargs):
     pointer_lint_rule(**_linux(kwargs))
 
@@ -376,8 +381,8 @@ def markdown_docs(**kwargs):
 # (doc_tree.bzl), so no BUCK file names one.
 action_pins = declares_docs(action_pins)
 lint_suite = declares_docs(lint_suite_rule)
+target_suite = declares_docs(target_suite_rule)
 markdown_docs = declares_docs(markdown_docs)
-mojo_deps = declares_docs(mojo_deps)
 no_endpoint = declares_docs(no_endpoint)
 pointer_lint = declares_docs(pointer_lint)
 public_boundary = declares_docs(public_boundary)

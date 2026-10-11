@@ -89,8 +89,9 @@ mojo_library(
         # for units an exit-0 run covered; one case over SupervisorRunner
         "tests/test_affected_batch.mojo",
         # the per-change check's build budget (--build-budget-s): each run gets
-        # what the earlier runs left, a run with none left is not started and
-        # its units are named, a timeout the budget caused says so
+        # all the earlier runs left (no 3600 s cap), a run with none left is
+        # not started and its units are named, a timeout says `timed out
+        # after N min` and names the budget, no budget keeps --build-timeout-s
         "tests/test_affected_budget.mojo",
         # SupervisorRunner over /bin/sh: output files, exit codes, the timeout,
         # how long a run took, an explicit child environment and inheritance

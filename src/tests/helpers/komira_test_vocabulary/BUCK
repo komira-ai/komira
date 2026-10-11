@@ -20,6 +20,8 @@ mojo_library(
         "//src/komira_http_auth:",
         "//src/komira_http_server:",
         "//src/komira_jose:",
+        "//src/komira_resource_gate:",
         "//src/tests/helpers/komira_test_issuer:",
+        "//src/tests/helpers/komira_test_pdp:",
     ],
 )

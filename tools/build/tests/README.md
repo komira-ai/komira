@@ -29,7 +29,21 @@ do:
   there fails to analyse, to compile or to pass its gate, and
   `run_tests.sh` requires the failure it names (the message, not only the
   exit status); [`lint_weld.sh`](negative/lint_weld.sh) plants its defects
-  in a snapshot of the tree.
+  in a snapshot of the tree. A fixture that fails to analyse, to compile
+  or to pass its gate is fine as an ordinary package: the CI's
+  reverse-dependency query (`//tools/build/ci:affected`, a `cquery` over
+  `tests//...`) configures every target but analyses none. Only a
+  configuration failure breaks it: a target with an unknown or invisible
+  dependency makes the query fail for every change, and any failure of
+  that query answers BROKEN (with buck2's error, which names the target)
+  and fails the check, never a widening. Such a fixture must not
+  be loadable: it is a `<case>.BUCK` file that the driver copies to
+  `<case>/BUCK` for its one build and deletes, its directory gitignored, as
+  [`surface_capability_matrix/dangling.BUCK`](negative/surface_capability_matrix/dangling.BUCK) is.
+  A check that writes its refusal as a validation result can instead be
+  tested in the graph: [`negative/native_reach`](negative/native_reach/BUCK)
+  holds such cases, each green only while refused with its named error, and
+  `tests//functional/native_reach:cases` builds them in the pull request check.
 
 A test with both halves keeps one package name in each, for example
 `tests//functional/test_data` (the test runtime contract that works) and
@@ -72,33 +86,32 @@ rather than reusing the [examples](../examples/) (see
 
 ## 1. Examples
 
-The [examples](../examples/BUCK) build, their run checks pass (stdout
-compared byte for byte), and every action that executed ran remotely or was a
-remote cache hit -- or, in a local-only run, ran locally (read from `buck2 log
-what-ran`; an invocation that executed nothing says so instead of passing).
+The [examples](../examples/BUCK) build in the pull-request check, and so do
+their run checks (stdout compared byte for byte): a run check of a binary
+with `expected_stdout` is a validation of the binary
+([`run_check.bzl`](../mojo/run_check.bzl)), so building the binary runs it.
+What stays here: every action that test 5's build of the examples executed
+ran remotely or was a remote cache hit -- or, in a local-only run, ran
+locally (read from `buck2 log what-ran`; an invocation that executed nothing
+says so instead of passing).
 
 ```sh
-buck2 build //tools/build/examples:hello //tools/build/examples:hellopkg //tools/build/examples:hello_pkg_user \
-    //tools/build/examples/libgate_ok:libgate_ok //tools/build/examples:test_hellopkg
-buck2 build '//tools/build/examples:hello[run_check]' '//tools/build/examples:hello_pkg_user[run_check]'
+buck2 build //tools/build/examples:hello //tools/build/examples:hello_pkg_user   # each runs its run check
 ```
-
-Sub-targets are built in their own invocation: `buck2 build //... 'T[sub]'`
-was observed to skip the sub-target.
 
 ## 2. Gate
 
 [`libgate_bad`](negative/libgate_bad/BUCK) has a test that fails on purpose. The library
 fails with `GATED TEST FAILED` while its `[ungated]` package builds, so the red
 comes from the test and not the compile. A binary depending on it fails the
-same way, and a binary naming its `[ungated]` sub-target in `deps` fails
-analysis (`MojoInfo`): the gate cannot be bypassed.
+same way. A binary naming its `[ungated]` sub-target in `deps` is refused at
+analysis, so the gate cannot be bypassed: the scenario
+[`analysis_refusals_mojo`](../selftest/analysis_refusals_mojo.zig).
 
 ```sh
 buck2 build tests//negative/libgate_bad:libgate_bad            # must fail: GATED TEST FAILED
 buck2 build 'tests//negative/libgate_bad:libgate_bad[ungated]' # must build
 buck2 build tests//negative/libgate_bad:gated_consumer         # must fail: GATED TEST FAILED
-buck2 build tests//negative/libgate_bad:bypass_consumer        # must fail: MojoInfo
 ```
 
 ## 3. Missing dependency
@@ -228,13 +241,12 @@ tools/build/tests/functional/buck2_run.sh
 
 ## 10. Execution platforms
 
-Mojo compiles, gated tests and run checks, the toolchain unpack and copy
-targets, and the `third_party_srcs` generation, drift test and fixture
-archive all resolve to the one linux execution platform, `linux-x86_64`. See
+A self-test scenario, [`exec_platforms`](../selftest/exec_platforms.zig)
+([`selftest/README.md`](../selftest/README.md)). See
 [platforms/README.md](../platforms/README.md).
 
 ```sh
-buck2 audit execution-platform-resolution //tools/build/examples:hello //tools/build/toolchains:zig
+./buck2 test //tools/build/selftest:exec_platforms
 ```
 
 ## 11. (Retired)
@@ -258,12 +270,13 @@ run.
 
 ## 13. Bundle parity
 
-A program built as a bundle behaves as its executable: stdout, stderr and exit
-status agree byte for byte across argv, environment, `exit()`, an unhandled
-error, buffered output, a data file found through `/proc/self/exe`, `abort()`
-and `SIGSEGV` (status and stdout exact, the stack dump's first line), and a
-symlink invocation with another `argv[0]` (`tests//functional/bundle_parity:parity`, a
-remote action).
+In the pull-request check, not `run_tests.sh`:
+`tests//functional/bundle_parity:parity`, a remote action whose build is the
+check. A program built as a bundle behaves as its executable: stdout, stderr
+and exit status agree byte for byte across argv, environment, `exit()`, an
+unhandled error, buffered output, a data file found through
+`/proc/self/exe`, `abort()` and `SIGSEGV` (status and stdout exact, the stack
+dump's first line), and a symlink invocation with another `argv[0]`.
 
 ## 14. Launcher CPU levels
 
@@ -309,9 +322,10 @@ Buck2 finds ([`doc_tree.bzl`](../lint/doc_tree.bzl)); `//:docs` takes the
 root package's, and this cell's through `tests//:doc_tree`. The toolchains
 cell is not read: it is one BUCK file, the template a consuming repository
 copies, whose targets test 7 pins equal to a consumer's.
-The test builds `//:docs` and
+`//:docs` and
 [`functional/doc_links`](functional/doc_links/BUCK) (a directory, headings and
-a file of `tree`, which must resolve), and requires
+a file of `tree`, which must resolve) build in the pull-request check. The
+test requires
 [`negative/doc_links`](negative/doc_links/BUCK) to fail naming each of its
 planted links: a missing file, a bad anchor and a link leaving the tree, and
 nothing else. It also requires every package of the komira and tests cells
@@ -354,37 +368,40 @@ that reads nothing cannot pass.
 
 [`cxx_tests.sh`](cxx_tests.sh), sourced by `run_tests.sh`. A Mojo binary
 calling a C function links and prints the C result when the `cxx_library` is
-in `deps` (`tests//functional/c_deps:c_linked`), and its link fails on the undefined
-symbol when it is not (`c_missing`); `deps` refuses a target that is neither
-a Mojo package nor a C/C++ library (`bad_dep`). The two cshim tests, a gated library
+in `deps` (`tests//functional/c_deps:c_linked`, in the pull-request check, its
+run check a validation), and its link fails on the undefined
+symbol when it is not (`c_missing`). The two cshim tests, a gated library
 test and a `mojo_test`, use `assert_equal` on `Int32` and index a `List`,
-which record the test file's source location in the binary; they build only
-because the wrapper strips the staging directory from it
-(`-strip-file-prefix`), and fail with exit 4 on the worker's absolute path
-without it (`test_source_paths`). C compiles and archives
-and the Mojo targets using them resolve to `linux-x86_64`. The
+which record the test file's source location in the binary; they build (in
+the pull-request check) only because the wrapper strips the staging
+directory from it (`-strip-file-prefix`), and fail with exit 4 on the
+worker's absolute path without it. The
 snappy test binary, which links C++ with zig's static libc++, carries
 libc++abi and exports no dynamic symbol, so its C++ runtime cannot interpose
-on the `libstdc++.so.6` the Mojo runtime loads. An unconfigured query, `buck2
-uquery 'deps(//tools/build/examples/cshim:cadd_user)'`, answers and reaches
-`toolchains//:cxx_no_default_deps`: the prelude's C/C++ toolchain select names
-that target on a branch no configured build takes, and the query fails with
-`Unknown target` if the toolchains cell does not declare it.
+on the `libstdc++.so.6` the Mojo runtime loads. Scenarios: `deps` refusing a
+target that is neither a Mojo package nor a C/C++ library (`bad_dep`) is
+[`analysis_refusals_mojo`](../selftest/analysis_refusals_mojo.zig); where C
+targets execute is [`exec_platforms`](../selftest/exec_platforms.zig); an
+unconfigured query reaching `toolchains//:cxx_no_default_deps` (the prelude's
+C/C++ toolchain select names it on a branch no configured build takes) is
+[`uquery_select_branches`](../selftest/uquery_select_branches.zig).
 
 ## 21. Location path
 
-`tests//functional/location_path:main[run_check]`: a `mojo_binary` whose main file
+In the pull-request check, not `run_tests.sh`:
+`tests//functional/location_path:main`, a `mojo_binary` whose main file
 indexes a `List`, so the binary records the main file's source location. It
 builds only because the wrapper strips the staging directory from recorded
-paths, and its run check compares stdout exactly. Test 20 covers the same
-for tests with a C dependency; this one is a plain binary.
+paths, and its run check, a validation of the binary, compares stdout
+exactly.
 
 ## 22. Rust rules
 
 [`rust_tests.sh`](rust_tests.sh), sourced by `run_tests.sh`. The example
 binary `//tools/build/examples/rust:prost_roundtrip` uses prost's derive
 macro, so it compiles registry crates, a proc-macro and the zig link; its run
-test compares stdout exactly, and must have run remotely. A binary using
+check, a validation of the binary, compares stdout exactly (in the
+pull-request check). A binary using
 prost without depending on it fails to compile
 (`tests//negative/rust_missing_dep:main`): crates reach rustc only through `deps`.
 The host floor of rustc: every `NEEDED` entry of the sysroot's `bin/rustc`
@@ -405,8 +422,9 @@ message compiles only with that file bundled
 (`tests//negative/proto:team_unbundled_proto` must fail). `bundle_only` generates part
 of the bundled closure: `tests//functional/proto:roster_proto` holds exactly
 `roster.mojo` and `person.mojo`, while bundling all of it also generates the
-options file its runtime cannot compile (`roster_full_bundle` must fail), and
-a selection outside the closure is refused (`roster_bad_selection`).
+options file its runtime cannot compile (`roster_full_bundle` must fail). A
+selection outside the closure is refused (`roster_bad_selection`, the
+scenario [`analysis_refusals_proto`](../selftest/analysis_refusals_proto.zig)).
 `mojo_db_proto_library`: the DbStorable code generated for the table of
 `db/tasks.proto` passes `tests//functional/proto:test_tasks_db` against a minimal
 `komira_db`, and a declared `outs` file the plugin does not write (a `.proto`
@@ -422,29 +440,22 @@ fixtures, one of them a producer's bytes that are not protoc's serialization
 (the fields in reverse order, a packed field unpacked; a `bytes` value holding
 0x00 and 0xff); `selftest_encoded` reads `proto_encode`'s output back as the
 `.hex` (declared in `canonical_producer`, since it checks no producer).
-[`negative/proto_fixture`](negative/proto_fixture/BUCK) builds the welded
-cases' fixtures end to end, one defect per refusal, each a fixture one change
-away from the self-test's, and each must fail naming its leg: `leg0_identical`
-(the `.hex` is protoc's own bytes), `leg0_duplicate` (`id` written twice,
-which the decode shows once), `leg0_duplicate_message` (the string `name`
-written twice, so the walk must step over a length-delimited value), `leg1_value` (the `.txtpb` says `id: 151` where
-the bytes hold 150; its `.canonical.hex` is protoc's encoding of that text, so
-only leg 1 fires), `leg2_unknown`, `leg2_nested` and `leg2_group` (field 99 at
-the top level, field 9 inside `inner`, and an empty group 99, which protoc
-prints as `99: 1`, `  9: 1` and `99 {`; the `.txtpb` holds them, so leg 1
-passes, and protoc's text parser refuses the numbers, so leg 3 fires too),
+Each planted defect is one of those welded cases, `refuses_<defect>`, a
+fixture one change away from the self-test's that must be refused naming its
+leg: `leg0_identical` (the `.hex` is protoc's own bytes), `leg0_duplicate`
+(`id` written twice, which the decode shows once), `leg0_duplicate_message`
+(the string `name` written twice, so the walk must step over a
+length-delimited value), `leg1_value` (the `.txtpb` says `id: 151` where the
+bytes hold 150), `leg2_unknown`, `leg2_nested` and `leg2_group` (field 99 at
+the top level, field 9 inside `inner`, and an empty group 99),
 `leg3_noncanonical` (the `.canonical.hex` is a second non-protoc form of the
-message), `leg4_root` (a `Meters` fixture checked as a `Feet`, the same wire
-and text form), `leg5_enum` (`kind: 99`, a value `Kind` does not declare,
-which protoc decodes and encodes back as a number) and `hex_odd` (a `.hex`
-with three digits). These twins are `expect_red` lines of `proto_tests.sh`,
-so they run only in `build_system_selftests.yml` (nightly and on demand), not
-in the pull-request check; per pull request the same defects are gated by the
-welded cases, through `tests//functional/proto_fixture`.
+message), `leg4_root` (a `Meters` fixture checked as a `Feet`), `leg5_enum`
+(`kind: 99`, a value `Kind` does not declare) and `hex_odd` (a `.hex` with
+three digits). A case whose check stops refusing its defect fails every build
+that checks a fixture.
 
 ```sh
 ./buck2 build tests//functional/proto_fixture:
-./buck2 build tests//negative/proto_fixture:leg4_root   # must fail: LEG 4: leg4_root.txtpb names example.fixture.v1.Meters ...
 ```
 
 Generation is deterministic: two uncached builds (an isolated daemon,
@@ -496,23 +507,25 @@ tools/build/tests/functional/local_default.sh
 ## 26. aws-lc and s2n-tls
 
 [`c_libs_tests.sh`](c_libs_tests.sh), sourced by `run_tests.sh`.
-Drift: `//third_party/<lib>:srcs_drift`, the test that holds
-`third_party/<lib>/srcs.bzl` to what the Mojo tool
+In the pull-request check, not here: `//third_party/<lib>:srcs_drift`, the
+test that holds `third_party/<lib>/srcs.bzl` to what the Mojo tool
 [`third_party_srcs`](../third_party_srcs/) reads out of the pinned archive's
-CMake lists, passes.
-libcrypto passes aws-lc's own self tests and SHA-256, AES-128 and ChaCha20
-known-answer vectors, and an s2n-tls client and server complete a TLS 1.3
-handshake with certificate verification, both driven from Mojo in a run
-check on a worker. Every probe named in `third_party/s2n-tls/features.bzl`
-compiles (`tests//functional/s2n_probes`) and every other probe fails to
-(`tests//negative/s2n_probes`), so a feature
-define cannot be added or dropped without its probe agreeing. Neither test
-binary exports a dynamic symbol.
+CMake lists; aws-lc's own self tests and SHA-256, AES-128 and ChaCha20
+known-answer vectors, and an s2n-tls TLS 1.3 handshake with certificate
+verification, each a run check that is a validation of its binary; and
+every probe named in `third_party/s2n-tls/features.bzl` compiling
+(`tests//functional/s2n_probes`; a named feature with no probe is refused at
+load by `third_party/s2n-tls/BUCK`). Here: every other probe fails to
+compile (`tests//negative/s2n_probes`), so a feature define cannot be
+dropped without its probe agreeing, and neither test binary exports a
+dynamic symbol.
 
 ## 28. Compile watchdog
 
+In the pull-request check, not `run_tests.sh`:
 [`watchdog/cases.sh`](functional/watchdog/cases.sh), a remote action
-(`tests//functional/watchdog:cases`), runs [`mojo_wrapper.sh`](../mojo/mojo_wrapper.sh)
+(`tests//functional/watchdog:cases`) that refuses its own report when it holds
+fewer ok cases than its floor (a case dropped), runs [`mojo_wrapper.sh`](../mojo/mojo_wrapper.sh)
 on a stand-in toolchain whose `mojo` sleeps, spins, or spawns children. A
 tree using no CPU is killed with exit 124 and the message, and so are its
 child and an orphaned grandchild (a child left in any state but zombie fails
@@ -538,9 +551,10 @@ start, equal to `TMPDIR`, and the library's `test_env` value present;
 in [`negative/test_data`](negative/test_data/BUCK), `undeclared` must fail
 with `GATED TEST FAILED` and the test's
 `No such file or directory` for a fixture that exists in the repository but
-was not declared. `buck2 test tests//functional/test_data:mojo_test_data` must pass: a
-`mojo_test` with dict `data` and `env`. `buck2 test
-tests//functional/test_data:mojo_test_args` must pass: a `mojo_test` whose
+was not declared. In the pull-request check, which runs `buck2 test` over the
+komira cell: `komira//tools/build/mojo/mojo_test_testdata:mojo_test_data`, a
+`mojo_test` with dict `data` and `env`, and
+`komira//tools/build/mojo/mojo_test_testdata:mojo_test_args`, a `mojo_test` whose
 `args` hold a `$(location)` of a build output, one of a source and one
 argument with both, each of which it must open as an absolute path from its
 `share/`, an `$(exe_target)` of a `mojo_binary` that must arrive as an
@@ -548,21 +562,18 @@ absolute path with the runnable directory's `lib/` beside it, plus plain
 arguments that arrive verbatim, in order, and unexported (dropping `args`
 from the test command, their absolute prefix, or the inputs behind the
 `$(location)` paths turns it red). `mojo_test_args_action` runs that same
-`buck2 test` command as a build action and must build: the pull-request
-check builds `tests//functional/...` and runs no `buck2 test`, so this
-target is what gates `args` on a pull request; the `buck2 test` runs of this
-section run only here, in the nightly self-tests. `buck2 test
+`buck2 test` command as a build action. `buck2 test
 tests//negative/test_data:skip_77` must fail with `GATED TEST FAILED:
 <label> (exit 77)` and count as `Fail 1`: exit 77, "skipped" to automake
 and some harnesses, is a failure. On a pull request that rule is checked
 only by `runner_cases` (below), which runs the runner itself; mapping the
-runner's status to a verdict is Buck2's. Five `bad_*` targets must each fail
-at analysis with their own refusal: a `..` destination, a destination that
-is also another's directory, a `test_data` key that is not a test, a
-runner-owned env name, an env name that is not a variable name. The gate test
+runner's status to a verdict is Buck2's. The `bad_*` targets and the
+`test_deps` refusals at analysis are the scenario
+[`analysis_refusals_mojo`](../selftest/analysis_refusals_mojo.zig). The gate test
 of `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` (built with
 the examples) covers the executable-relative helpers.
-`runner_cases` also runs the runner on a stand-in that kills itself: with
+`runner_cases` (in the pull-request check; its action refuses a report with
+fewer ok cases than its floor) also runs the runner on a stand-in that kills itself: with
 SIGKILL it must exit 137 and with SIGABRT 134, each with no marker; one that
 exits 77 must exit 77 with no marker; `--arg` values must reach the
 stand-in in order, unexported, with every `@KOMIRA_ACTION_DIR@` replaced by
@@ -633,8 +644,9 @@ declares a package, and a NEW fixture library gets `<name>_conda` from the
 `mojo_library` macro with no declaration anywhere and builds; `conda = False`
 gets no target; `conda_name` publishes under another name and a dependent
 requires that name; a dependency is rendered at its own version; a library that
-cannot be packaged (no tests, native code, a run-time `dlopen`, a name that is
-not a conda name, a dependency with no package) keeps a target that builds as a
+cannot be packaged (no tests, native code, a run-time `dlopen` its declaration
+omits, a `dlopen` system_libs.bzl does not name, a name that is not a conda
+name, a dependency with no package) keeps a target that builds as a
 `REFUSED` directory holding the reason, its `[release]` fails naming it, and
 the library still builds; `komira_pack conda-check` refuses a different
 payload, name, subdir or dependency list, a corrupt zip, a manifest that is not
@@ -649,9 +661,9 @@ channel is the built file served from `file://` installs it, with the compiler
 from Modular's `max` channel, and `mojo run` of a program importing it prints
 the right bytes, while the same project without it cannot (skipped with
 `--no-install`, without `pixi`, or without network; with `--require-install`,
-the nightly workflow's flag, a missing `pixi` or network is a FAIL line). The
+the scheduled workflow's flag, a missing `pixi` or network is a FAIL line). The
 switch is [`install_gate.sh`](functional/install_gate/install_gate.sh), and
-`tests//functional/install_gate:cases` holds it, on PATHs it makes: no `pixi`
+`tests//functional/install_gate:cases` (in the pull-request check) holds it, on PATHs it makes: no `pixi`
 gives `SKIP  conda install (no pixi)`, and with the flag
 `FAIL  conda install: --require-install, but it cannot run (no pixi)`. Each
 script calls the gate before any build, so the target also runs conda.sh and
@@ -779,26 +791,31 @@ and one failing test. It must fail with `GATED TEST FAILED` and the harness's
 `1 passed; 1 failed` (the panic unwound through the zig-linked harness, so
 the run continued), while `red[bin]`, the test executable, builds: the red is
 the run, not the compile. `bin` (welded to `red`) and `lib_consumer` (linking
-`red_lib`, which is welded to `red`) must fail the same way. `bin_green`,
-welded to `env_scrubbed`, must build and run (`[run_check]`); `env_scrubbed`
-must build: its test asserts the harness's environment is exactly `HOME`,
-`PATH` and `TMPDIR`. Each of these must fail, naming its cause: no tests
+`red_lib`, which is welded to `red`) must fail the same way. Each of these
+must fail, naming its cause: no tests
 (`empty`, `EMPTY GATE`), an `#[ignore]`d test (`ignored`), and a test that
-hangs (`hang`, NO VERDICT at its 3 s `test_timeout_s`, exit 142). `ext` and `ext_consumer` build (its external `test_srcs` test passes);
-`ext_red` and `ext_red_consumer` fail naming `tests/ext_fail.rs` with `1 passed; 1 failed`. Refused at analysis: `ext_no_crate` (no
-`tests/<name>.rs`), `ext_outside` (outside `tests/`), `ext_bad_name` (`tests/1bad.rs`), `ext_not_rs` (`tests/ext_data.txt`) ([`rust_tests.sh`](rust_tests.sh)).
+hangs (`hang`, NO VERDICT at its 3 s `test_timeout_s`, exit 142).
+`ext_red` and `ext_red_consumer` fail naming `tests/ext_fail.rs` with `1 passed; 1 failed` ([`rust_tests.sh`](rust_tests.sh)).
+The `test_srcs` refusals at analysis (`ext_no_crate`, `ext_outside`,
+`ext_bad_name`, `ext_not_rs`) are the scenario
+[`analysis_refusals_rust`](../selftest/analysis_refusals_rust.zig).
+`buck2 test tests//negative/rust_test:bin` must fail with `GATED TEST FAILED`.
 
-`buck2 test //tools/build/proto-codegen:komira_proto_codegen` must pass and
-print the harness's `komira_proto_codegen_unit: <n> passed`: `rust_test`
-gives `buck2 test` the same runner, so the reused `tests` attribute runs what
-it names. `buck2 test tests//negative/rust_test:bin` must fail with `GATED
-TEST FAILED`.
+In the pull-request check, not here: the greens.
+[`functional/rust_test`](functional/rust_test/BUCK): `bin_green`, welded to
+`env_scrubbed`, builds and runs (its run check is a validation), and
+`env_scrubbed`'s test asserts the harness's environment is exactly `HOME`,
+`PATH` and `TMPDIR`. [`examples/rust/ext`](../examples/rust/ext/BUCK): `ext`
+and `ext_consumer` build (the external `test_srcs` test passes), `both`
+builds with its unit and external tests, and a `rust_weld_check` holds each
+library to its markers (a weld that dropped its external tests would still
+build green). `buck2 test //tools/build/proto-codegen:komira_proto_codegen`
+runs the `rust_test` its `tests` names.
 
 ```sh
 buck2 build //tools/build/proto-codegen:komira_proto_codegen_unit
-buck2 build tests//negative/rust_test:env_scrubbed 'tests//negative/rust_test:bin_green[run_check]'
+buck2 build tests//functional/rust_test: //tools/build/examples/rust/ext:
 buck2 build tests//negative/rust_test:bin       # must fail: GATED TEST FAILED
-buck2 test //tools/build/proto-codegen:komira_proto_codegen
 ```
 
 ## 37. Platform table
@@ -815,31 +832,30 @@ power of two, an undefined or unsorted feature, a golden hash that is not 16
 hex digits or is recorded for a row with no platform, a pool that is not
 `pool=<name>`, two rows sharing a key, a host or a pool) is refused with a
 sentence naming the row and the field; each `host_info()` selects its row, or
-is refused with a reason (a Linux arm64 host: the row is reserved).
-[`check.sh`](functional/platform_table/check.sh) then checks, on the client:
+is refused with a reason (a Linux arm64 host: the row is reserved). The
+scenario
+[`analysis_refusals_platform_table`](../selftest/analysis_refusals_platform_table.zig)
+loads the package, holds `komira//tools/build/platforms:` to `darwin-arm64`,
+`linux-x86_64` and `host` (nothing for the reserved `linux-arm64`), `host` to
+this client's own platform, and refuses `[komira_re] linux_arm64_properties`;
+[`exec_platforms`](../selftest/exec_platforms.zig) checks that the host
+platform's own `[komira_re]` key decides remote execution.
+[`check.sh`](functional/platform_table/check.sh) checks, on the client:
 
-1. `komira//tools/build/platforms:` declares `darwin-arm64`, `linux-x86_64`
-   and `host`, and nothing for the reserved `linux-arm64`;
-2. `host` is this client's own platform and a target stating no
-   `--target-platforms` is configured for it;
-3. `[komira_re] linux_arm64_properties` is refused, naming the platform;
-4. where actions run: with only the host platform's `[komira_re]` key set the
-   one execution platform is remote; with only another platform's key set it
-   is the local one and nothing fails (no key at all is test 25's);
-5. the limits ([`limits.tsv`](../platforms/limits.tsv),
-   [`limits_retired.sh`](functional/platform_table/limits_retired.sh)): the
-   real tree passes, five fixture trees are each refused (a limit with no
-   marker, a marker with no row, a row with no marker, a duplicate row, a
-   `never` with no product reason), a fixture whose retiring PR has merged is
-   refused while one naming a different PR (`44`, `4b` for `4`) is not, and
-   with every retiring PR named as merged the real tree is refused once per
-   retirable limit;
-6. each registered row's `golden_config_hash` is the hash buck2 gives its
-   platform, and the macOS applets are those of `busybox.sh`;
-7. on a Linux x86_64 client, the golden
-   ([`golden/golden.sh`](golden/golden.sh)): the configuration and the action
-   hashes of eight sample targets equal `linux-x86_64.golden`, and a copy with
-   one hex digit of one hash changed is refused naming the sample.
+- the limits ([`limits.tsv`](../platforms/limits.tsv),
+  [`limits_retired.sh`](functional/platform_table/limits_retired.sh)): the
+  real tree passes, five fixture trees are each refused (a limit with no
+  marker, a marker with no row, a row with no marker, a duplicate row, a
+  `never` with no product reason), a fixture whose retiring PR has merged is
+  refused while one naming a different PR (`44`, `4b` for `4`) is not, and
+  with every retiring PR named as merged the real tree is refused once per
+  retirable limit;
+- each registered row's `golden_config_hash` is the hash buck2 gives its
+  platform, and the macOS applets are those of `busybox.sh`;
+- on a Linux x86_64 client, the golden
+  ([`golden/golden.sh`](golden/golden.sh)): the configuration and the action
+  hashes of eight sample targets equal `linux-x86_64.golden`, and a copy with
+  one hex digit of one hash changed is refused naming the sample.
 
 Analysis only.
 
@@ -945,8 +961,9 @@ reasonless rows, a row for a missing file or for binary data, a count above
 the findings, a row for no finding, a row holding a deny-list word, a hosts
 row that is reserved or unused), sets a window with month 13 or not ending
 on the first day of a month, or empties the tree, and must fail naming it.
-The test also pins the root target's window (2025 up to 2026-09-01) by
-querying its attributes, so narrowing it fails.
+The root BUCK pins its own window (2025 up to 2026-09-01) at load, so
+narrowing it fails every build; `//:public_boundary` and
+`functional/public_boundary:ok` build in the pull-request check.
 [`public_boundary_tests.sh`](public_boundary_tests.sh) lists them.
 
 ```sh
@@ -959,12 +976,13 @@ querying its attributes, so narrowing it fails.
 `src_layout`: `src/` holds what komira ships; test-only packages are under `src/tests/<kind>/`; the module map in `docs/architecture.md` has one row per package and none for a directory that is not one. The test is in [the repository lint tests](lint_tests.md#45-the-layout-of-src).
 
 ## 46. Coverage gate
-With coverage, a library's conda package (what ships), not the library, waits for its runs and [its gate](../coverage/README.md#the-build-gate); [`coverage_gate_tests.sh`](coverage_gate_tests.sh) runs [these checks](coverage_runs.md#test-46-the-coverage-gate).
+With coverage, a library's conda package (what ships), not the library, waits for its runs and [its gate](../coverage/README.md#the-build-gate); [`coverage_gate_tests.sh`](coverage_gate_tests.sh) runs [these checks](coverage_runs.md#test-46-the-coverage-gate). The coverage fixtures that must build (41, 43, 46, 47) build in the pull-request check: `tests//functional/coverage:greens` names the sub-targets of tests//functional, and `//:tests_greens` the greens of [`negative/coverage`](negative/coverage/BUCK) and [`src/tests/coverage`](src/tests/coverage/BUCK).
 ## 47. Branch coverage runs
 [`coverage_branch_tests.sh`](coverage_branch_tests.sh) runs [these checks](coverage_runs.md#test-47-branch-coverage-runs).
 ## 51. [Python oracles](../python/README.md#test-51-python-oracles)
 ## 52. [API JSON: mojo_doc_json](../mojo/doc.md)
 ## 53. [Surface capability matrix](lint_tests.md#53-the-surface-capability-matrix)
+## 54. [Hermetic Node.js: planted defects](../node/README.md#test-54-planted-defects)
 
 ## 49. Assert level, defines and memory cap
 

@@ -23,6 +23,9 @@
 # `neutral_ops.mojo` (which has no `Database` dependency), so there is no cycle:
 #   neutral_ops (value types)  <-  database (traits, 9 op sigs)  <-  sql_neutral_ops (SQL impl)
 #
+# The claim op (`sql_op_claim_rows`) lives in `sql_claim_ops.mojo` and is
+# re-exported here, so drivers keep importing every `sql_op_*` from this module.
+#
 # Encapsulation: String / List[DbValue] / structured value types in,
 # DbRows / DbRow / UInt64 / Bool out. ZERO UnsafePointer crosses any boundary.
 # =============================================================================
@@ -36,13 +39,12 @@ from komira_db.database import SqlDatabase
 from komira_db.db_value import DbValue
 from komira_db.db_row import DbRow, DbRows
 from komira_db.proto_json import from_proto_json
+from komira_db.sql_claim_ops import sql_op_claim_rows, _unknown_kind
 from komira_db.neutral_ops import (
     Pred,
     Filter,
     Order,
     DbColVal,
-    PodNameMinter,
-    POD_NAME_ID_TAIL_LEN,
     PRED_EQ,
     PRED_LT,
     PRED_LE,
@@ -139,6 +141,11 @@ def render_where[DB: SqlDatabase](
             #     literal (`status IN (0, 1)`); binds NOTHING.
             #   * bound mode   — one placeholder per value (`col IN ($n, $n+1)`),
             #     each consuming a positional bind.
+            # An EMPTY list matches no row. `col IN ()` is not SQL (pg refuses
+            # it), so it renders the always-false `1 = 0` and binds nothing.
+            if len(p.in_vals) == 0:
+                out += String("1 = 0")
+                continue
             out += p.col + String(" IN (")
             for j in range(len(p.in_vals)):
                 if j > 0:
@@ -152,7 +159,10 @@ def render_where[DB: SqlDatabase](
         elif p.op == PRED_JSON_KEY_EQ:
             # The JSON map-key predicate (config->>key = value), per dialect.
             # Both bind the KEY first ($k), then the VALUE ($v) — matching the
-            # JobStore `list_jobs_by_config_key` bind order.
+            # JobStore `list_jobs_by_config_key` bind order. pgstore's narrow
+            # executor has neither spelling: its query-rows op strips these preds
+            # and filters client-side, and every other op on pgstore refuses one
+            # here (fail closed) rather than render SQL it cannot run.
             if dialect == String("pg"):
                 out += (
                     p.col
@@ -161,7 +171,7 @@ def render_where[DB: SqlDatabase](
                     + String(" = ")
                     + DB.placeholder(next_bind + 1)
                 )
-            else:
+            elif dialect == String("sqlite"):
                 # sqlite: json_extract(config, '$.' || $k) = $v
                 out += (
                     String("json_extract(")
@@ -171,6 +181,15 @@ def render_where[DB: SqlDatabase](
                     + String(") = ")
                     + DB.placeholder(next_bind + 1)
                 )
+            else:
+                raise Error(
+                    String(
+                        "render_where: PRED_JSON_KEY_EQ renders only for dialects"
+                        " \"pg\" and \"sqlite\"; dialect \""
+                    )
+                    + dialect
+                    + String("\" filters it client-side in query_rows only")
+                )
             next_bind += 2
         elif p.op == PRED_ARRAY_CONTAINS:
             # `<ph> = ANY(<col>)` — the pg-only array-membership push-down, BYTE-
@@ -178,8 +197,9 @@ def render_where[DB: SqlDatabase](
             # LEFT, `ANY(col)` on the RIGHT; binds `val`). ONLY the pg dialect
             # reaches this arm: sqlite / pgstore cannot parse `= ANY(col)`, so the
             # query-rows op STRIPS array_contains preds before rendering + evaluates
-            # them client-side (`filter_without_array_contains`). If a non-pg dialect
-            # reaches here it is a wiring bug — fail closed, never a silent drop.
+            # them client-side (`_is_client_side`). Any other op on those
+            # dialects reaches here and is refused: fail closed, never a silent
+            # drop.
             if dialect != String("pg"):
                 raise Error(
                     String(
@@ -327,16 +347,6 @@ def render_query_rows_locked[DB: SqlDatabase](
     return sql^
 
 
-def _n_update_binds(updates: List[DbColVal]) -> Int:
-    """How many positional binds the `updates` SET terms consume (BIND +
-    COALESCE bind one each; RAW_EXPR binds nothing)."""
-    var n = 0
-    for i in range(len(updates)):
-        if updates[i].binds_a_param():
-            n += 1
-    return n
-
-
 def render_conditional_update[DB: SqlDatabase](
     table: String,
     guard: Filter,
@@ -384,9 +394,14 @@ def render_conditional_update[DB: SqlDatabase](
                 + String(")")
             )
             bind += 1
-        else:  # plain bind
+        elif u.is_bind():
             sql += u.col + String(" = ") + DB.placeholder(bind)
             bind += 1
+        else:
+            # A kind with no SET-term shape binds no param in
+            # sql_op_conditional_update, so a placeholder here would shift
+            # every later bind onto the wrong value.
+            raise Error(_unknown_kind(u))
     if bump_version_col:
         var vc = bump_version_col.value()
         if not first:
@@ -463,126 +478,70 @@ def sql_op_delete_by_key[RT: Runtime, DB: SqlDatabase](
     return db.execute[RT](reactor, sql, params)
 
 
-def _filter_has_array_contains(filter: Filter) -> Bool:
-    """True iff `filter` carries any PRED_ARRAY_CONTAINS predicate."""
-    for i in range(len(filter.preds)):
-        if filter.preds[i].op == PRED_ARRAY_CONTAINS:
-            return True
-    return False
-
-
-def filter_without_array_contains(filter: Filter) raises -> Filter:
-    """A copy of `filter` with every PRED_ARRAY_CONTAINS predicate REMOVED — the
-    pushed-down part for the sqlite / pgstore arms (whose executors cannot parse
-    `= ANY(col)`). The removed preds are evaluated CLIENT-SIDE by
-    `_row_matches_array_contains`. Preserves the combine mode + the order of the
-    remaining preds. When there are no array_contains preds this is a value-equal
-    copy of `filter`."""
-    var kept = List[Pred]()
-    for i in range(len(filter.preds)):
-        if filter.preds[i].op != PRED_ARRAY_CONTAINS:
-            kept.append(filter.preds[i].copy())
-    return Filter(kept^, filter.combine)
-
-
-def _array_contains_preds_of(filter: Filter) raises -> List[Pred]:
-    """The PRED_ARRAY_CONTAINS predicates of `filter` (evaluated CLIENT-SIDE by
-    `_row_matches_array_contains` on sqlite / pgstore). Empty when the filter has
-    none."""
-    var out = List[Pred]()
-    for i in range(len(filter.preds)):
-        if filter.preds[i].op == PRED_ARRAY_CONTAINS:
-            out.append(filter.preds[i].copy())
-    return out^
-
-
-def _row_matches_array_contains(row: DbRow, ac_preds: List[Pred]) raises -> Bool:
-    """True iff `row` satisfies EVERY array_contains predicate: the row's decoded
-    TEXT[] column (`p.col`) contains the scalar `p.val` (compared by `as_text()`).
-    An absent / NULL array column never matches. Empty `ac_preds` -> True. The
-    load-and-filter Mojo-side membership test for the sqlite / pgstore arms (which
-    cannot push `= ANY(col)` into SQL) — the SAME semantics the pg push-down
-    computes server-side."""
-    for i in range(len(ac_preds)):
-        ref p = ac_preds[i]
-        var ci = row.column_index(p.col)
-        if ci < 0 or row.is_null(ci):
-            return False  # absent / NULL array column never contains anything
-        var want = p.val.as_text()
-        var elems = row.get_text_array(ci)
-        var found = False
-        for j in range(len(elems)):
-            if elems[j] == want:
-                found = True
-                break
-        if not found:
-            return False
-    return True
-
-
 # =============================================================================
-# JSON-key-EQ split (PRED_JSON_KEY_EQ) — pgstore CANNOT push `config ->> $k = $v`
-# (its NARROW executor has NEITHER pg `->>` NOR sqlite `json_extract`), so the
-# query-rows op DROPS the json_key_eq preds from the pushed WHERE and evaluates
-# them CLIENT-SIDE in Mojo over the decoded JSONB column (`config` is a proto-
-# canonical `{"k":"v",...}` object). The SAME load-and-filter split shape as
-# PRED_ARRAY_CONTAINS. pg / sqlite still push `config ->> $k = $v` /
-# `json_extract(config,'$.'||$k)=$v` (byte-identical to JobStore, GIN/expr-index
-# accelerated). A document backend (Firestore) does the same client-side split in
-# its own `query_rows` (config is a serialized JSONB stringValue there too).
+# The client-side split of query_rows. Some predicates cannot be pushed into a
+# dialect's SQL, so query_rows strips them from the pushed WHERE and evaluates
+# them in Mojo over the decoded candidate rows ("load candidates, filter in
+# Mojo"):
+#   * PRED_ARRAY_CONTAINS: pg pushes `<val> = ANY(<col>)` (GIN, byte-identical);
+#     sqlite / pgstore cannot parse `= ANY(col)`.
+#   * PRED_JSON_KEY_EQ: pg / sqlite push `config ->> $k = $v` /
+#     `json_extract(config,'$.'||$k)=$v` (byte-identical to JobStore); pgstore's
+#     NARROW executor has neither. `config` is a proto-canonical `{"k":"v",...}`
+#     object. A document backend (Firestore) does the same split in its own
+#     `query_rows`.
+# An AND filter pushes the rest and keeps a candidate only if every client-side
+# predicate holds. An OR filter cannot be split that way: a row matching only a
+# client-side predicate is not among the pushed candidates. So an OR filter made
+# only of client-side predicates pushes no WHERE and keeps a row if any holds,
+# and an OR filter mixing them with pushed predicates is refused.
 # =============================================================================
 
 
-def _filter_has_json_key_eq(filter: Filter) -> Bool:
-    """True iff `filter` carries any PRED_JSON_KEY_EQ predicate."""
-    for i in range(len(filter.preds)):
-        if filter.preds[i].op == PRED_JSON_KEY_EQ:
-            return True
+def _is_client_side(p: Pred, dialect: String) -> Bool:
+    """True iff `dialect` cannot push `p` into SQL (see the section header)."""
+    if p.op == PRED_ARRAY_CONTAINS:
+        return dialect != String("pg")
+    if p.op == PRED_JSON_KEY_EQ:
+        return dialect == String("pgstore")
     return False
 
 
-def filter_without_json_key_eq(filter: Filter) raises -> Filter:
-    """A copy of `filter` with every PRED_JSON_KEY_EQ predicate REMOVED — the
-    pushed-down part for the pgstore arm (whose NARROW executor cannot parse a
-    JSON-extract predicate). The removed preds are evaluated CLIENT-SIDE by
-    `_row_matches_json_key_eq`. Preserves the combine mode + remaining-pred
-    order. When there are no json_key_eq preds this is a value-equal copy."""
-    var kept = List[Pred]()
-    for i in range(len(filter.preds)):
-        if filter.preds[i].op != PRED_JSON_KEY_EQ:
-            kept.append(filter.preds[i].copy())
-    return Filter(kept^, filter.combine)
-
-
-def _json_key_eq_preds_of(filter: Filter) raises -> List[Pred]:
-    """The PRED_JSON_KEY_EQ predicates of `filter` (evaluated CLIENT-SIDE by
-    `_row_matches_json_key_eq` on the pgstore arm). Empty when the filter has
-    none."""
-    var out = List[Pred]()
-    for i in range(len(filter.preds)):
-        if filter.preds[i].op == PRED_JSON_KEY_EQ:
-            out.append(filter.preds[i].copy())
-    return out^
-
-
-def _row_matches_json_key_eq(row: DbRow, jk_preds: List[Pred]) raises -> Bool:
-    """True iff `row` satisfies EVERY json_key_eq predicate: the row's decoded
-    JSONB column (`p.col`, a proto-canonical `{"k":"v",...}` object) carries
-    `p.key` with a value equal to `p.val` (compared by `as_text()`). An absent /
-    NULL JSON column, or a missing key, never matches. Empty `jk_preds` -> True.
-    The load-and-filter Mojo-side membership test for the pgstore arm (which
-    cannot push `config ->> $k = $v` into SQL) — the SAME semantics the pg / sqlite
-    push-down computes server-side."""
-    for i in range(len(jk_preds)):
-        ref p = jk_preds[i]
-        var ci = row.column_index(p.col)
-        if ci < 0 or row.is_null(ci):
-            return False  # absent / NULL JSON column carries no key
+def _row_matches_client_pred(row: DbRow, p: Pred) raises -> Bool:
+    """Whether `row` satisfies the client-side predicate `p`, with the semantics
+    the pg push-down computes server-side. An absent or NULL column never
+    matches.
+      * PRED_ARRAY_CONTAINS: the decoded TEXT[] column `p.col` holds `p.val`
+        (compared by `as_text()`).
+      * PRED_JSON_KEY_EQ: the decoded JSONB object in `p.col` carries `p.key`
+        with a value equal to `p.val.as_text()`; a missing key never matches."""
+    var ci = row.column_index(p.col)
+    if ci < 0 or row.is_null(ci):
+        return False
+    var want = p.val.as_text()
+    if p.op == PRED_JSON_KEY_EQ:
         var config = from_proto_json[Dict[String, String]](row.get_jsonb(ci))
         var got = config.get(p.key)
-        if not got or got.value() != p.val.as_text():
+        return got.__bool__() and got.value() == want
+    var elems = row.get_text_array(ci)
+    for j in range(len(elems)):
+        if elems[j] == want:
+            return True
+    return False
+
+
+def _row_matches_client_preds(
+    row: DbRow, client: List[Pred], combine: UInt8
+) raises -> Bool:
+    """Whether `row` passes the client-side half of a split filter: every
+    predicate of `client` for COMBINE_AND, at least one for COMBINE_OR."""
+    for i in range(len(client)):
+        var hit = _row_matches_client_pred(row, client[i])
+        if combine == COMBINE_OR and hit:
+            return True
+        if combine != COMBINE_OR and not hit:
             return False
-    return True
+    return combine != COMBINE_OR
 
 
 def sql_op_query_rows[RT: Runtime, DB: SqlDatabase](
@@ -594,32 +553,25 @@ def sql_op_query_rows[RT: Runtime, DB: SqlDatabase](
     order: List[Order],
     limit: Optional[UInt32],
 ) raises -> DbRows:
-    # CLIENT-SIDE-SPLIT preds — the ones THIS dialect cannot push into SQL, so
-    # `query_rows` STRIPS them from the pushed WHERE + evaluates them in Mojo over
-    # the decoded rows (the "load candidates, filter in Mojo" split):
-    #   * PRED_ARRAY_CONTAINS — pg pushes `<val> = ANY(<col>)` (GIN, byte-identical);
-    #     sqlite / pgstore cannot parse `= ANY(col)` -> client-side membership.
-    #   * PRED_JSON_KEY_EQ — pg / sqlite push `config ->> $k = $v` /
-    #     `json_extract(config,'$.'||$k)=$v` (byte-identical); ONLY pgstore (whose
-    #     NARROW executor has neither) needs the client-side key filter.
-    # When neither split applies the pushed filter IS the full filter.
-    var is_pg = DB.dialect() == String("pg")
-    var is_pgstore = DB.dialect() == String("pgstore")
-    var split_array = (not is_pg) and _filter_has_array_contains(filter)
-    var split_jsonkey = is_pgstore and _filter_has_json_key_eq(filter)
-    if split_array or split_jsonkey:
-        var ac_preds = _array_contains_preds_of(
-            filter
-        ) if split_array else List[Pred]()
-        var jk_preds = _json_key_eq_preds_of(
-            filter
-        ) if split_jsonkey else List[Pred]()
-        # Strip whichever splits apply from the pushed WHERE (order preserved).
-        var pushed = filter.copy()
-        if split_array:
-            pushed = filter_without_array_contains(pushed)
-        if split_jsonkey:
-            pushed = filter_without_json_key_eq(pushed)
+    var dialect = DB.dialect()
+    var pushed_preds = List[Pred]()
+    var client = List[Pred]()
+    for i in range(len(filter.preds)):
+        if _is_client_side(filter.preds[i], dialect):
+            client.append(filter.preds[i].copy())
+        else:
+            pushed_preds.append(filter.preds[i].copy())
+    if len(client) > 0:
+        if filter.combine == COMBINE_OR and len(pushed_preds) > 0:
+            raise Error(
+                String("query_rows: an OR filter mixing array_contains /")
+                + String(" json_key_eq predicates that dialect \"")
+                + dialect
+                + String("\" evaluates client-side with predicates pushed into")
+                + String(" SQL cannot be split; use an AND filter or one query")
+                + String(" per branch")
+            )
+        var pushed = Filter(pushed_preds^, filter.combine)
         # A client-side filter can drop rows, so the SQL LIMIT would be applied
         # BEFORE the Mojo check (wrong count). Drop the SQL LIMIT here + cap AFTER.
         var pushed_params = List[DbValue]()
@@ -635,14 +587,10 @@ def sql_op_query_rows[RT: Runtime, DB: SqlDatabase](
             if lim >= 0 and len(out) >= lim:
                 break
             ref r = candidates.row(i)
-            if split_array and not _row_matches_array_contains(r, ac_preds):
-                continue
-            if split_jsonkey and not _row_matches_json_key_eq(r, jk_preds):
-                continue
-            out.append(r.copy())
+            if _row_matches_client_preds(r, client, filter.combine):
+                out.append(r.copy())
         return DbRows(out^, cols.copy())
-    # pg / sqlite (push the JSON-extract + `= ANY` where they can) OR any dialect
-    # without a client-side-only pred: the unchanged render + bind + query path.
+    # Every predicate pushes: the unchanged render + bind + query path.
     var params = List[DbValue]()
     _append_filter_binds(filter, params)
     var bind = 0
@@ -884,52 +832,6 @@ def _create_if_absent_composite_pgstore[RT: Runtime, DB: SqlDatabase](
     return True
 
 
-def sql_op_claim_rows[RT: Runtime, DB: SqlDatabase](
-    mut db: DB,
-    mut reactor: Reactor[RT.Sink],
-    table: String,
-    n: Int,
-    filter: Filter,
-    order: List[Order],
-    phase_col: String,
-    from_phase: String,
-    to_phase: String,
-    extra: List[DbColVal],
-    per_row_mint: PodNameMinter,
-    bump_version_col: Optional[String],
-    now_cols: List[String],
-) raises -> DbRows:
-    """The neutral claim over the driver's native `claim_pending`. Builds the
-    `extra_set` string (the per-row pod_name mint + the `extra` SET terms + the
-    `version = version + 1` bump + each `now_cols` `= <now_expr>` stamp) and
-    the bind params, then hands to `claim_pending`. The pod_name term binds
-    NOTHING (see `_render_pod_name_term`); the `extra` terms
-    own every placeholder from the first. `filter` / `order` are
-    accepted for surface generality but the concurrent claim's pending/order is
-    owned by `claim_pending` (WHERE <phase_col>=<from> ORDER BY created_at) — the
-    JobStore claim uses exactly that fixed shape, so we thread the phase COLUMN
-    NAME (`phase_col`), from/to phase, and the extra_set. A caller whose queue
-    column is named `"phase"` (JobStore, an outbound queue) gets the default
-    shape; a caller with a different column name
-    threads it here and it lands in `claim_pending`'s WHERE + SET."""
-    _ = filter
-    _ = order
-    var extra_set = _render_claim_extra_set[DB](
-        per_row_mint, extra, bump_version_col, now_cols
-    )
-    var claim_params = List[DbValue]()
-    # ⭐ THE MINT BINDS NOTHING. `pod_name` is a pure function of the
-    # row's own `id`, rendered entirely server-side, so the extra terms own
-    # every placeholder from the first. RAW-EXPR extra terms (`version =
-    # version + 1`, `updated_at = <now_expr>`) bind NOTHING either.
-    for i in range(len(extra)):
-        if not extra[i].is_raw_expr():
-            claim_params.append(extra[i].val.copy())
-    return db.claim_pending[RT](
-        reactor, table, n, from_phase, to_phase, extra_set, claim_params, phase_col
-    )
-
-
 # =============================================================================
 # 3 — private render/bind helpers.
 # =============================================================================
@@ -965,110 +867,3 @@ def _append_filter_binds(filter: Filter, mut params: List[DbValue]):
             pass
         elif p.binds_a_param():
             params.append(p.val.copy())
-
-
-def _render_claim_extra_set[DB: SqlDatabase](
-    mint: PodNameMinter,
-    extra: List[DbColVal],
-    bump_version_col: Optional[String],
-    now_cols: List[String],
-) raises -> String:
-    """Render the claim's `extra_set` clause: the per-row pod_name mint (if
-    active) + each `extra` SET term (`col = $n` binds / `col = <expr>` raw) +
-    the `version = version + 1` bump (`bump_version_col`) + each `now_cols`
-    `= <now_expr>` stamp.
-
-    The pod_name mint is the server-side spelling of `derive_pod_name`:
-      * pgstore: `pod_name = pgstore_pod_name('<prefix>')`
-      * pg:  `pod_name = CONCAT('<prefix>', '-', RIGHT(id::text, 12))`
-      * sqlite: `pod_name = ('<prefix>' || '-' || lower(substr(hex(id), 21,
-             12)))`
-    then `, ` + each `extra` term, then `, version = version + 1` (when
-    `bump_version_col`), then `, <col> = <now_expr>` per `now_cols`. The version
-    bump + now-stamp are FIRST-CLASS params (not raw-expr `extra` terms) so the
-    NEUTRAL caller (JobStore on the `Database` bound) never needs `now_expr()` —
-    the renderer supplies the dialect now-expr here. The FULL extra_set matches
-    JobStore's `pod_name = <expr>, version = version + 1, updated_at =
-    <now_expr>`."""
-    var out = String()
-    var first = True
-    # ⭐ EXTRA BINDS START AT placeholder(0). The mint binds nothing, so no
-    # placeholder is reserved for it — whether the mint is active or not, the
-    # rendered placeholders and the params `claim_rows` binds stay in step.
-    var bind = 0
-    if mint.is_active():
-        out += _render_pod_name_term[DB](mint.prefix)
-        first = False
-    for i in range(len(extra)):
-        ref e = extra[i]
-        if not first:
-            out += String(", ")
-        first = False
-        if e.is_raw_expr():
-            # A raw-SQL expression term (`version = version + 1`, `updated_at =
-            # <now_expr>`) — NO bind; render the literal expression.
-            out += e.col + String(" = ") + e.val.as_text()
-        else:
-            # A bound value term: `col = $bind`.
-            out += e.col + String(" = ") + DB.placeholder(bind)
-            bind += 1
-    if bump_version_col:
-        var vc = bump_version_col.value()
-        if not first:
-            out += String(", ")
-        first = False
-        out += vc + String(" = ") + vc + String(" + 1")
-    for i in range(len(now_cols)):
-        if not first:
-            out += String(", ")
-        first = False
-        out += now_cols[i] + String(" = ") + DB.now_expr()
-    return out^
-
-
-def _render_pod_name_term[DB: SqlDatabase](prefix: String) raises -> String:
-    """Render ONLY the `pod_name = <expr>` term of the claim extra_set: the
-    server-side spelling of `derive_pod_name(prefix, id_text)` —
-    `<prefix>-<last POD_NAME_ID_TAIL_LEN chars of the id text, lowercased>`.
-
-    ⛔⛔ IT BINDS NOTHING, AND THAT IS THE POINT. A bound CSPRNG suffix would
-    make the placement name unrecomputable from the job id — so a job manager
-    that crashed between the `pod_name` write and the `create` could never
-    address the unit that create may have left behind. Every term below is a
-    pure function of the row's own `id`. Do NOT add a bind here: a parameter is, by
-    construction, something the recovery path does not have.
-
-    ⚠ THE THREE DIALECTS MUST AGREE WITH `derive_pod_name` BYTE FOR BYTE, which
-    is what `lower(...)` is doing on the sqlite arm: `hex()` answers in
-    UPPERCASE where pg's `id::text` is lowercase, so without it the same job id
-    would produce two different names on two backends (and an uppercase character is
-    illegal in a Cloud Run resource name). The 12-character tail is the
-    hyphenated id's FINAL group, the one slice carrying no hyphen — which is why
-    a raw `RIGHT(id::text, N)` and a raw `substr(hex(id), k, N)` can be equal at
-    all."""
-    if DB.dialect() == String("pgstore"):
-        return (
-            String("pod_name = pgstore_pod_name('") + prefix + String("')")
-        )
-    if DB.placeholder(0) == String("$1"):
-        # pg dialect. `id::text` is the lowercase hyphenated form; its last 12
-        # characters are the final `8-4-4-4-12` group.
-        return (
-            String("pod_name = CONCAT('")
-            + prefix
-            + String("', '-', RIGHT(id::text, ")
-            + String(POD_NAME_ID_TAIL_LEN)
-            + String("))")
-        )
-    # sqlite dialect. `id` is a 16-byte BLOB, so `hex(id)` is 32 UPPERCASE hex
-    # characters with no hyphens: the final group starts at 1-based char
-    # 32 - 12 + 1 = 21.
-    return (
-        String("pod_name = ('")
-        + prefix
-        + String("' || '-' || lower(substr(hex(id), ")
-        + String(32 - POD_NAME_ID_TAIL_LEN + 1)
-        + String(", ")
-        + String(POD_NAME_ID_TAIL_LEN)
-        + String(")))")
-    )

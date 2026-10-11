@@ -12,9 +12,11 @@
 #                        summary
 #
 #   * args.mojo           the one parser: `parse_kci_args`, `KciCommand`,
-#                         `selectors_of`, `require_stage_flags`, `KCI_USAGE`
-#                         (the default machine file is kci_api's
-#                         `DEFAULT_MACHINE_FILE`)
+#                         `selectors_of`, `require_stage_flags`, `KCI_USAGE`,
+#                         `refuse_rollback_on_failure` (the flag is parsed
+#                         and refused: no deployed-revision record); the
+#                         default machine file is kci_api's
+#                         `DEFAULT_MACHINE_FILE`
 #   * recorder.mojo       `CliRecorder`: the result document, written
 #                         temp-and-rename to `--result-file`
 #   * seam.mojo           `StageSteps` (the steps and the reads around
@@ -22,10 +24,19 @@
 #   * dispatch.mojo       `run_stage_with`, `kci_main_with`,
 #                         `evidence_line_of`
 #   * start_checks.mojo   under GitHub Actions, at start-up: the workflow,
-#                         the ref (main only; break-glass with a reason)
-#                         and the set hash; `workflow_path_of`
+#                         the ref (main only; break-glass with a reason),
+#                         the admission check (`--admission`: a re-run or
+#                         the first stage of a revision main has moved past
+#                         stops SUPERSEDED) and the set hash;
+#                         `workflow_path_of`
 #   * summary.mojo        `run_summary_markdown`, `promotion_line`,
-#                         `break_glass_line`, `append_summary`
+#                         `superseded_line`, `break_glass_line`,
+#                         `append_summary`
+#   * deploy_step.mojo    a DEPLOY step: `deploy_step[S: CloudAdapter, St:
+#                         StateStore]`, the `CellDeploys` seam with
+#                         `CloudDeploys[S, St]` (one built-in cloud) and
+#                         `NoCloudBuilt` (the kci binary: every DEPLOY step
+#                         refused), `check_deploy_set_hash`, `plan_hash_of`
 #   * library_verbs.mojo  `LibrarySteps` (kci_build, kci_publish), the
 #                         composed secret store, `kci_main`
 #
@@ -38,6 +49,7 @@ from kci_cli.args import (
     CLI_VERB_HELP,
     CLI_VERB_RUN,
     KCI_USAGE,
+    ROLLBACK_ON_FAILURE_REFUSED,
     KciCommand,
     SecretStoreChoice,
     build_flags,
@@ -46,6 +58,7 @@ from kci_cli.args import (
     parse_kci_args,
     publish_flags,
     validation_flags,
+    refuse_rollback_on_failure,
     require_stage_flags,
     selectors_of,
 )
@@ -57,6 +70,7 @@ from kci_cli.start_checks import (
     GITHUB_EVENT_NAME,
     GITHUB_REF,
     GITHUB_REPOSITORY,
+    GITHUB_RUN_ATTEMPT,
     GITHUB_SHA,
     GITHUB_WORKFLOW_REF,
     GITHUB_WORKFLOW_SHA,
@@ -71,5 +85,36 @@ from kci_cli.dispatch import (
     run_stage_with,
     validation_failure_message,
 )
-from kci_cli.summary import append_summary, break_glass_line, carried_markdown, promotion_line, run_summary_markdown
-from kci_cli.library_verbs import ComposedSecretStore, LibrarySteps, RefusingSecretStore, git_first_parent, git_history, git_is_ancestor, kci_main
+from kci_cli.summary import (
+    append_summary,
+    break_glass_line,
+    carried_markdown,
+    deploy_markdown,
+    promotion_line,
+    run_summary_markdown,
+    superseded_line,
+)
+from kci_cli.deploy_step import (
+    NOT_BUILT_WITH,
+    CellDeploys,
+    CloudDeploys,
+    DeployRequest,
+    NoCloudBuilt,
+    check_deploy_set_hash,
+    deploy_request,
+    deploy_step,
+    plan_hash_of,
+)
+from kci_cli.library_verbs import (
+    ComposedSecretStore,
+    GitHistory,
+    LibrarySteps,
+    RefusingSecretStore,
+    git_commit_of,
+    git_first_parent,
+    git_history,
+    git_is_ancestor,
+    git_main_line,
+    git_main_tip_past,
+    kci_main,
+)
