@@ -1,0 +1,55 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_test")
+
+# mojo_test under `buck2 test` (tools/build/mojo/README.md, "Test data,
+# environment and scratch"): the pull-request check runs `buck2 test` over
+# every target of the komira cell (release/ci/build_targets.sh), so these
+# tests run there. Only the standard library is used. The library half of
+# the contract, and its planted defects, are tests//functional/test_data and
+# tests//negative/test_data.
+
+# A mojo_test with dict data and env: the entry is staged at its key only
+# (not at its source path), the undeclared fixture is absent, the env value
+# arrives.
+mojo_test(
+    name = "mojo_test_data",
+    srcs = ["tests/test_mojo_test_data.mojo"],
+    data = {"staged/as.txt": "fixtures/declared.txt"},
+    env = {"TD_MODE": "mojo_test"},
+)
+
+# A mojo_test with `args`. Each `$(location ...)`, of a build output
+# (args_copied) and of a source (args_referenced), reaches the test as an
+# absolute path it can open from its share/; `$(exe_target :args_helper)`
+# reaches it as the absolute path of the binary in its runnable directory,
+# lib/ beside it; plain arguments arrive verbatim and in order, and a
+# NAME=VALUE argument is not exported. tests//functional/test_data:
+# mojo_test_args_action runs its `buck2 test` command as a build action.
+export_file(
+    name = "args_copied",
+    src = "fixtures/declared.txt",
+)
+
+export_file(
+    name = "args_referenced",
+    src = "fixtures/declared.txt",
+    mode = "reference",
+)
+
+mojo_binary(
+    name = "args_helper",
+    srcs = ["args_helper.mojo"],
+)
+
+mojo_test(
+    name = "mojo_test_args",
+    srcs = ["tests/test_mojo_test_args.mojo"],
+    args = [
+        "--copied=$(location :args_copied)",
+        "--referenced=$(location :args_referenced)",
+        "--pair=$(location :args_copied),$(location :args_referenced)",
+        "--helper=$(exe_target :args_helper)",
+        "two words",
+        "TD_ARG=exported",
+    ],
+    visibility = ["tests//functional/test_data:"],
+)

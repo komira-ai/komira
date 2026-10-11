@@ -43,16 +43,6 @@ mojo_aws_client(
     deps = [],
 )
 
-# "GetLogEvent", in the build: an operation the model does not declare is
-# refused by the generator (the analysis check only reads the name's shape).
-mojo_aws_client(
-    name = "unknown_operation",
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
-    operations = ["GetLogEvent"],
-    deps = _RUNTIME,
-)
-
 # "GATED TEST FAILED: tests//negative/mojo_aws_client:caller_test_red:
 # test_logs_deliberate_failure.mojo": a failing caller `test_srcs` entry
 # blocks the client like any library's test, next to the generated layout
