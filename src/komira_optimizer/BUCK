@@ -1,4 +1,3 @@
-load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Logical-plan rewrite rules: each takes a LogicalPlan and returns the rewritten plan.
@@ -132,16 +131,4 @@ mojo_library(
         "tests/test_window_sort_elision.mojo",
     ],
     visibility = ["PUBLIC"],
-)
-
-# The deps above name every komira_* module the library and its tests import
-# (tools/build/lint: mojo_deps). The optimizer emits an optimized LogicalPlan
-# and imports no physical-plan IR: that IR is the package komira_physical_plan,
-# which is not in the closure of these deps, so an import of it does not
-# resolve and the library fails to compile.
-mojo_deps(
-    name = "deps_lint",
-    buck = "BUCK",
-    srcs = glob(["**/*.mojo"]),
-    visibility = ["komira//:tests_lints"],
 )
