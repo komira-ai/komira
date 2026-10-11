@@ -1,0 +1,15 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# An O(1)-reset bump allocator over a fixed-capacity byte region. Its public
+# API returns `ByteView` and typed scalars, never a raw pointer.
+mojo_library(
+    name = "komira_bump_arena",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_buffer:komira_buffer",
+    ],
+    test_srcs = [
+        "tests/test_bump_arena.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
