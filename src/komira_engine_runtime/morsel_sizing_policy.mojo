@@ -25,8 +25,8 @@
 #   * DEFAULT    -- 2.0x -- general source / filter pipelines
 #   * BULK_SCAN  -- 8.0x -- a scan that only collects
 #
-# The fork grain and the fan-out cap are not in this file: they are decided at
-# dispatch time from exact facts (the input's size and the pool), not recorded.
+# The fork grain and the fan-out cap are decided at dispatch time from exact
+# facts (the input's size and the pool), not recorded (`fan_out_grain.mojo`).
 # The L1-chunk predicate is in `l1_chunk_sizing.mojo`.
 # =============================================================================
 
