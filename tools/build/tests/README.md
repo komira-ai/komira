@@ -927,43 +927,54 @@ such as `abfss://<container>@<account>.dfs.core.windows.net`; before any other
 host it is read), and a commit id in prose, in a file's contents or (dates,
 home directories, deny-list words) its path. Binary data is not read, but its
 path is; nothing committed is upstream bytes, so `third_party/` is read whole.
-Its reader is
-[`public_boundary.awk`](../lint/public_boundary.awk), which says what each rule
-matches and what it cannot see (vocabulary is no shape); its action is
-[`lint.sh`](../lint/lint.sh) (kind `public_boundary`). The findings a file must
-keep are held per rule and file at an exact count in
+It is checked by a Zig tool,
+[`lint/public_boundary`](../lint/public_boundary/BUCK), run with no shell:
+[`check.zig`](../lint/public_boundary/src/check.zig) says what is read and the
+ledger formats, and [`rules.zig`](../lint/public_boundary/src/rules.zig) what
+each rule matches and what it cannot see (vocabulary is no shape). The
+findings a file must keep are held per rule and file at an exact count in
 [`tests/public_boundary_holds.tsv`](../../../tests/public_boundary_holds.tsv),
 which only shrinks, and every row of the hosts list must be used. A
 repository that keeps words of its own out of this one passes them as a list
 kept outside it (`-c komira_lint.public_boundary_deny=<target or path>`,
 `.public_boundary_deny` being gitignored for it): a finding no row can hold.
 
-[`functional/public_boundary:ok`](functional/public_boundary/BUCK) builds a
-planted tree ([`fixture.bzl`](functional/public_boundary/fixture.bzl)) whose
-`held.mojo` and `shim.c` hold every rule in each spelling the reader knows,
-held at exact counts, so a spelling the reader missed would fail the build;
-whose near misses (dates outside the window, placeholders, loopback and
+The tool is built only behind its two `zig test` targets, so the
+pull-request check (which builds `//:public_boundary`) runs them:
+[`rules_test.zig`](../lint/public_boundary/src/rules_test.zig) has one row per
+spelling of each rule (a date in each of its forms, the three home directory
+forms, each private range and each way of writing an address, hosts and
+email addresses of each kind, commit ids in each kind of prose) and one per
+near miss (dates outside the window, placeholders, loopback and
 documentation addresses, reserved hosts, templates, digests, UUIDs, hex in
-code, a `//` in a C string) must find nothing; and whose binary file holds
-findings that must not be read. The planted tree's window is 2030 up to 2031-09-01,
-so none of its files holds a date the root target refuses. Each target of
-[`negative/public_boundary`](negative/public_boundary/BUCK) plants one finding
-(each spelling of each rule, a date in a `third_party/` BUCK file and C
-header, a date, home directory or deny-list word in a path, the path of
-binary data, a file given by `paths`, one over a hold, a deny-list word) or
-one ledger defect (malformed, repeated, unknown-rule, zero-count or
-reasonless rows, a row for a missing file or for binary data, a count above
-the findings, a row for no finding, a row holding a deny-list word, a hosts
-row that is reserved or unused), sets a window with month 13 or not ending
-on the first day of a month, or empties the tree, and must fail naming it.
-The root BUCK pins its own window (2025 up to 2026-09-01) at load, so
-narrowing it fails every build; `//:public_boundary` and
-`functional/public_boundary:ok` build in the pull-request check.
-[`public_boundary_tests.sh`](public_boundary_tests.sh) lists them.
+code, a `//` in a C string), and
+[`check_test.zig`](../lint/public_boundary/src/check_test.zig) runs the lint
+over a planted tree that must pass and one case per defect, each of which
+must be reported by its line: a finding of each rule with its file and line,
+a date in a `third_party/` BUCK file and C header, a date, home directory or
+deny-list word in a path, the path of binary data, one finding over a hold, a
+deny-list word, a file that cannot be read, each ledger defect (malformed,
+repeated, unknown-rule, zero-count or reasonless rows, a row for a missing
+file or for binary data, a count above the findings, a row for no finding, a
+row holding a deny-list word, a hosts row that is reserved or unused), a
+window with month 13 or not ending on the first day of a month, and a tree
+with nothing to read.
+
+[`functional/public_boundary:ok`](functional/public_boundary/BUCK) runs the
+rule end to end on a planted tree
+([`fixture.bzl`](functional/public_boundary/fixture.bzl)) whose `held.mojo`
+and `shim.c` hold every rule in each spelling, held at exact counts, so a
+spelling the tool missed would fail the build; whose near misses must find
+nothing; whose binary file holds findings that must not be read; and whose
+file given through `paths` holds a held date, so its row names no file
+unless the rule stages it. The planted tree's window is 2030 up to
+2031-09-01, so none of its files holds a date the root target refuses. The
+root BUCK pins its own window (2025 up to 2026-09-01) at load, so narrowing it
+fails every build. [`negative/public_boundary`](negative/public_boundary/BUCK)
+holds the rule's two analysis refusals (no tree, or both a tree and files).
 
 ```sh
 ./buck2 build //:public_boundary tests//functional/public_boundary:ok
-./buck2 build tests//negative/public_boundary:host_single   # must fail: docs/plant.md:1: host: builder
 ```
 
 ## 45. The layout of src/

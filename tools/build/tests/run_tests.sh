@@ -331,7 +331,8 @@
 #      target of tests//negative/mojo_doc_json fails naming its defect: a
 #      source that does not compile, a golden that differs, and three paths
 #      the JSON does not declare.
-#  44. The public boundary lint: see tools/build/tests/public_boundary_tests.sh.
+#  44. (In the gate: the public boundary tool's zig tests,
+#      //tools/build/lint/public_boundary, and tests//functional/public_boundary:ok.)
 #  45. The layout of src/ (tools/build/lint/defs.bzl, src_layout): //:src_layout
 #      (every package under src/, read from the build graph) and
 #      tests//functional/src_layout:ok (a planted list) build; each target of
@@ -1192,10 +1193,6 @@ done
 # 43
 # shellcheck source=tools/build/tests/coverage_run_tests.sh
 . "$ROOT/tools/build/tests/coverage_run_tests.sh"
-
-# 44
-# shellcheck source=tools/build/tests/public_boundary_tests.sh
-. "$ROOT/tools/build/tests/public_boundary_tests.sh"
 
 # 45
 expect_green src_layout //:src_layout tests//functional/src_layout:ok
