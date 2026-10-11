@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_cloud_fake/triggers.mojo: how the fake clouds lower and limit the
+# kci_cloud/shape/triggers.mojo: how the shared shapes lower and limit the
 # TRIGGERS (schedule, event trigger).
 # =============================================================================
 #
@@ -37,29 +37,33 @@
 # =============================================================================
 
 from kci_reconciler import InputRef
-from kci_cloud import (
+from kci_cloud.adapter import (
+    FINDING_LIMIT,
+    Finding,
+    LoweredNode,
+    Setting,
+)
+from kci_cloud.catalog import (
     FIELD_CONTAINER_JOB,
     FIELD_EVENT_TRIGGER,
     FIELD_SCHEDULE,
     FIELD_SERVICE,
-    FINDING_LIMIT,
-    Finding,
-    Firing,
-    GrantEdge,
-    LoweredNode,
-    Setting,
-    TIMEZONE_DEFAULT,
     body_field,
     body_is,
-    cron_fields,
+)
+from kci_cloud.firing import (
+    Firing,
+    TIMEZONE_DEFAULT,
     firing_of,
     firings_into,
     schedule_timezone,
 )
+from kci_cloud.grants import GrantEdge
+from kci_cloud.triggers import cron_fields
 from kci_resource_proto.resource import Resource
 
-from kci_cloud_fake.limits import FAKE_CITATION
-from kci_cloud_fake.shapes import ProviderShape, ROLE_IDENTITY, ROLE_SCHEDULE, ROLE_TRIGGER
+from kci_cloud.shape.limits import FAKE_CITATION
+from kci_cloud.shape.shapes import ProviderShape, ROLE_IDENTITY, ROLE_SCHEDULE, ROLE_TRIGGER
 
 
 comptime _DAY_OF_MONTH: Int = 2

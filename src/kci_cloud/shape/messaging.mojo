@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_cloud_fake/messaging.mojo: how the fake clouds lower the MESSAGING
+# kci_cloud/shape/messaging.mojo: how the shared shapes lower the MESSAGING
 # types (queue, topic, subscription), and the limits a shape whose queue is
 # a pull subscription refuses.
 # =============================================================================
@@ -45,26 +45,25 @@
 # =============================================================================
 
 from kci_reconciler import InputRef
-from kci_cloud import (
+from kci_cloud.adapter import (
+    FINDING_LIMIT,
+    Finding,
+    LoweredNode,
+    Setting,
+)
+from kci_cloud.catalog import (
     ACCESS_SEND,
     FIELD_QUEUE,
     FIELD_SUBSCRIPTION,
     FIELD_TOPIC,
-    FINDING_LIMIT,
-    Feed,
-    Finding,
-    GrantEdge,
-    LoweredNode,
-    Setting,
-    ack_deadline_seconds,
     body_is,
-    dead_letter_of,
-    edges_of,
-    feeds_into,
 )
+from kci_cloud.feed import Feed, feeds_into
+from kci_cloud.grants import GrantEdge, edges_of
+from kci_cloud.messaging import ack_deadline_seconds, dead_letter_of
 from kci_resource_proto.resource import Resource
 
-from kci_cloud_fake.shapes import ProviderShape, ROLE_POLICY, ROLE_QUEUE, ROLE_SUB, ROLE_TOPIC
+from kci_cloud.shape.shapes import ProviderShape, ROLE_POLICY, ROLE_QUEUE, ROLE_SUB, ROLE_TOPIC
 
 
 comptime FAKE_MESSAGING_CITATION = "kci_cloud_fake: reference limits"

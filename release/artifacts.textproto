@@ -34,7 +34,7 @@
 # THE NAMES A RELEASE PUBLISHES are the ones this file declares, and this file
 # is reviewed through CODEOWNERS; there is no per-run claim. A PUBLISH step
 # reads its channel first and reports every declared name the channel holds
-# no file of yet (NEW NAMES) in its result and the job summary; the gamma
+# no file of yet (NEW NAMES) in its result and the job summary; the beta
 # stage reports prod's before the prod approval.
 #
 # Which farm buck2 builds on is the build job's machine configuration, written
