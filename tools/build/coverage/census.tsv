@@ -155,7 +155,7 @@ komira//src/komira_oci:komira_oci	src/komira_oci	library	OK	1678	1678	-	-	no	con
 komira//src/komira_op_agg_row_api:komira_op_agg_row_api	src/komira_op_agg_row_api	library	OK	41	55	-	-	no	conda	src/komira_op_agg_row_api/agg_chunk_rows.mojo	-
 komira//src/komira_op_agg_state:komira_op_agg_state	src/komira_op_agg_state	library	OK	3439	3441	-	-	no	conda	-	-
 komira//src/komira_optimizer:komira_optimizer	src/komira_optimizer	library	OK	9302	9306	-	-	no	conda	-	-
-komira//src/komira_orc:komira_orc	src/komira_orc	library	OK	3943	4729	-	-	no	conda	-	-
+komira//src/komira_orc:komira_orc	src/komira_orc	library	OK	4847	4851	-	-	no	conda	-	-
 komira//src/komira_parquet:komira_parquet	src/komira_parquet	library	OK	5158	5165	-	-	no	conda	-	-
 komira//src/komira_parquet_api:komira_parquet_api	src/komira_parquet_api	library	OK	265	265	124	124	yes	release	-	-
 komira//src/komira_parquet_codec:komira_parquet_codec	src/komira_parquet_codec	library	OK	557	580	386	416	yes	conda	-	-
