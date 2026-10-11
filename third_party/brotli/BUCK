@@ -1,6 +1,7 @@
 load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/native:defs.bzl", "checked_cxx_library", "prefix_header", "prefixed_archive_check")
 
 # google/brotli 1.1.0, MIT (LICENSE in the archive). Nothing of it is
 # committed here: the archive is fetched at build time, checked against its
@@ -61,12 +62,12 @@ archive_files(
     strip_prefix = "brotli-1.1.0",
 )
 
-# The Brotli decoder (libbrotlidec and the libbrotlicommon it needs), static,
-# with its C API <brotli/decode.h>. The sources include each other by their
-# path from the including source ("../common/constants.h"), found at their
-# real paths in :src (one_tree, raw_headers).
-cxx_library(
-    name = "brotlidec",
+# Every argument of the Brotli decoder's compile but the prefix (below): the
+# decoder (libbrotlidec and the libbrotlicommon it needs), static, with its C
+# API <brotli/decode.h>. The sources include each other by their path from
+# the including source ("../common/constants.h"), found at their real paths
+# in :src (one_tree, raw_headers).
+_BROTLIDEC = dict(
     srcs = [":src[{}]".format(s) for s in _SRCS],
     raw_headers = [":src[{}]".format(h) for h in _PRIVATE_HEADERS],
     compiler_flags = [
@@ -78,6 +79,56 @@ cxx_library(
         for h in _PUBLIC_HEADERS
     },
     header_namespace = "",
+)
+
+# The decoder with upstream's names. Nothing links it: its archive's symbol
+# table is the list of names :prefix_symbols renames.
+cxx_library(
+    name = "brotlidec_unprefixed",
+    **_BROTLIDEC
+)
+
+# Every global symbol renamed komira_brotli_*: BrotliX becomes
+# komira_brotli_X (BrotliDecoderDecompress is komira_brotli_DecoderDecompress),
+# any other global X komira_brotli__X (the decoder's tables, such as
+# _kBrotliPrefixCodeRanges). An unprefixed exported BrotliDecoder* would
+# interpose on a system libbrotlidec in the same process.
+prefix_header(
+    name = "prefix_symbols",
+    archive = ":brotlidec_unprefixed[static-pic]",
+    exec_compatible_with = LINUX_X86_64,
+    header = "brotli_prefix_symbols.h",
+    min_symbols = 20,
+    prefix = "komira_brotli_",
+    strip = "Brotli",
+    style = "strip",
+)
+
+cxx_library(
+    name = "brotlidec_prefixed",
+    exported_preprocessor_flags = ["-include", "$(location :prefix_symbols)"],
+    **_BROTLIDEC
+)
+
+# Every symbol :brotlidec_prefixed defines is komira_brotli_*, and it
+# references none of the decoder's unprefixed names.
+prefixed_archive_check(
+    name = "brotlidec_symbols",
+    archive = ":brotlidec_prefixed[static-pic]",
+    exec_compatible_with = LINUX_X86_64,
+    min_defined = 20,
+    original_names = [":prefix_symbols[symbols]"],
+    prefix = "komira_brotli_",
+)
+
+# The decoder as its users take it: its C API is
+# komira_brotli_DecoderDecompress, ... (C callers that include
+# <brotli/decode.h> get the renamed names), and :brotlidec_symbols gates
+# every build holding it.
+checked_cxx_library(
+    name = "brotlidec",
+    checks = [":brotlidec_symbols"],
+    lib = ":brotlidec_prefixed",
     visibility = ["PUBLIC"],
 )
 

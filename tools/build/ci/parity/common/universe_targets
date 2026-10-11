@@ -1,0 +1,5 @@
+komira//src/a:a
+komira//src/a:a_test
+komira//src/b:b
+komira//src/c:c
+tests//functional/x:x

@@ -25,6 +25,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # that retire and reap move it both before and after their change. The fifth
 # stages two reapers racing on one chunk: the loser of the stub rewrite carries
 # on when the winner left a stub or deleted the chunk, and raises otherwise.
+# The codecs test feeds the decoders every corrupt split summary and
+# generation record it can build and sees each refused. The two fault tests
+# wrap the in-memory store so a chosen read, write or LIST fails, loses its
+# race or deletes a key on cue: a failure that does not prove absence reaches
+# the caller, a lost compare-and-swap is tried at most 64 times, a torn head
+# recovery is retried while the log start moves, and the reaper's listing is
+# checked on a store whose LIST folds sub-directories.
 mojo_library(
     name = "komira_search_catalog",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -33,9 +40,12 @@ mojo_library(
         "//src/komira_objectstore:komira_objectstore",
     ],
     test_srcs = [
+        "tests/test_search_catalog_codecs.mojo",
         "tests/test_search_catalog_lifecycle.mojo",
+        "tests/test_search_catalog_record_faults.mojo",
         "tests/test_search_generation_moves.mojo",
         "tests/test_search_metastore_concurrent.mojo",
+        "tests/test_search_metastore_faults.mojo",
         "tests/test_search_reap_chunk_race_offline.mojo",
         "tests/test_search_sublineage_sharding.mojo",
     ],
