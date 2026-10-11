@@ -125,6 +125,13 @@ def dunder_field(row) -> float:
     return row["__x__"] * 2
 
 
+def dunder_repr(row) -> float:
+    """A field named `__repr__`: read by subscript, while repr(row) is
+    still the row's own (a property of that name would replace it)."""
+    v = row["__repr__"]
+    return v if repr(row) == "Row(__repr__={!r})".format(v) else -1.0
+
+
 def forged_new(row) -> float:
     """Makes a row of its own through the row's type."""
     return type(row)().x

@@ -42,10 +42,8 @@
 #   - a row user code makes (`type(row)()`, `object.__new__(type(row))`)
 #     fails the batch with a TypeError naming the cause (a RecursionError
 #     through __getattr__, or a value);
-#   - under PROPAGATE a row with a null field (in either field, at its own
-#     offset) is a null result and the function is not called on it, and an
-#     error keeps the caller's row number; under MANUAL the function sees the
-#     null (a runtime that ignores the null mode, or renumbers rows);
+#   - PROPAGATE is accepted and runs (the harness drops the null rows and
+#     maps an error's row back); under MANUAL the function sees the null;
 #   - an argument struct with a child outside the read set is refused, and
 #     its args still moved (a runtime that accepts columns it did not bind);
 #   - validate accepts PROPAGATE and refuses, by name, a shape other than
@@ -415,10 +413,17 @@ def test_any_name(mut rt: UdfRuntime, sets: List[ReadSetRow]) raises:
     var bs: List[String] = ["_b", "_s"]
     spec = row_spec(u.entry, bs, TYPE_FLOAT64, TYPE_FLOAT64)
     assert_not_declared(call_once(rt, spec, floats([b.copy(), s.copy()])), "_i", "['_b', '_s']", 0, "underscored {_b, _s}")
+    # `_s` outside the read set: the row's own state is not behind it either.
+    var bi: List[String] = ["_b", "_i"]
+    spec = row_spec(u.entry, bi, TYPE_FLOAT64, TYPE_FLOAT64)
+    assert_not_declared(call_once(rt, spec, floats([b.copy(), i.copy()])), "_s", "['_b', '_i']", 0, "underscored {_b, _i}")
     spec = row_spec("udf_rows:dunder_field", [String("__x__")], TYPE_FLOAT64, TYPE_FLOAT64)
     var x: List[Float64] = [1.5, 4.0]
     var dbl: List[Float64] = [3.0, 8.0]
     assert_floats(call_once(rt, spec, floats([x.copy()])), dbl, "dunder_field")
+    # A field named like a method the language calls keeps the row's own.
+    spec = row_spec("udf_rows:dunder_repr", [String("__repr__")], TYPE_FLOAT64, TYPE_FLOAT64)
+    assert_floats(call_once(rt, spec, floats([x.copy()])), x, "dunder_repr")
 
 
 def test_forged(mut rt: UdfRuntime) raises:
@@ -443,11 +448,12 @@ def test_forged(mut rt: UdfRuntime) raises:
 
 
 def test_propagate(mut rt: UdfRuntime) raises:
-    """Under PROPAGATE a row with a null field is a null result and the
-    function is not called on it (price_qty would raise on None); rows keep
-    the caller's numbers, so a read outside the read set after a skipped
-    row is reported at its own row. Under MANUAL the same input calls the
-    function on the null (a runtime that ignores the null mode)."""
+    """PROPAGATE through the harness, which drops the rows with a null
+    field before the call and maps an error's row back (section 3.4, rule
+    2): the runtime accepts the null mode and runs the compacted batch, a
+    null field's row is a null result (price_qty would raise on None), and a
+    read outside the read set after a dropped row is reported at the
+    caller's row. Under MANUAL the function sees the null."""
     var pq: List[String] = ["price", "qty"]
     var spec = row_spec("udf_rows:price_qty", pq, TYPE_FLOAT64, TYPE_FLOAT64)
     spec.null_mode = NULL_PROPAGATE

@@ -242,6 +242,8 @@ static struct komira_udf_udf* check_spec(const komira_udf_spec* s, komira_udf_er
   if (s->shape != (int32_t)KOMIRA_UDF_SHAPE_ROW) REFUSE(KOMIRA_UDF_ERR_UNSUPPORTED, "this runtime runs ROW UDFs only");
   if (s->null_mode != KOMIRA_UDF_NULL_MANUAL && s->null_mode != KOMIRA_UDF_NULL_PROPAGATE)
     REFUSE(KOMIRA_UDF_ERR_UNSUPPORTED, "the null mode is not MANUAL or PROPAGATE");
+  /* PROPAGATE needs nothing here: the host drops the rows with a null
+   * field before the call and maps an error's row back (section 3.4). */
   if (s->args == NULL || s->args->format == NULL || strcmp(s->args->format, "+s") != 0 || s->args->n_children < 0)
     REFUSE(KOMIRA_UDF_ERR_UNSUPPORTED, "args is not a struct");
   if (s->state != NULL) REFUSE(KOMIRA_UDF_ERR_UNSUPPORTED, "a state type is for aggregates");
@@ -250,7 +252,6 @@ static struct komira_udf_udf* check_spec(const komira_udf_spec* s, komira_udf_er
   u->n = (int)s->args->n_children;
   u->fields = u->n > 0 ? calloc((size_t)u->n, sizeof(struct rowrt_field)) : NULL;
   u->entry = dup_str(s->entry);
-  u->propagate = s->null_mode == KOMIRA_UDF_NULL_PROPAGATE;
   if ((u->n > 0 && u->fields == NULL) || u->entry == NULL) REFUSE(KOMIRA_UDF_ERR_OUT_OF_MEMORY, "load: out of memory");
   for (int i = 0; i < u->n; i++) {
     const struct ArrowSchema* f = s->args->children[i];
@@ -270,9 +271,9 @@ static struct komira_udf_udf* check_spec(const komira_udf_spec* s, komira_udf_er
 #undef REFUSE
 }
 
-/* komira_udf_rowrt.<method>(entry, [names,] result_fmt[, propagate]) on
- * `adapter`, in the entered interpreter (validate takes no names and no
- * null mode). A new reference, or NULL with the exception set. */
+/* komira_udf_rowrt.<method>(entry, [names,] result_fmt) on `adapter`, in
+ * the entered interpreter (validate takes no names). A new reference, or
+ * NULL with the exception set. */
 static PyObject* adapter_call(struct rowpy* a, PyObject* adapter, const char* method, const struct komira_udf_udf* u,
                               int with_names) {
   char res[2] = {u->result_fmt, 0};
@@ -280,8 +281,7 @@ static PyObject* adapter_call(struct rowpy* a, PyObject* adapter, const char* me
   PyObject* entry = a->PyUnicode_FromString(u->entry);
   PyObject* result = a->PyUnicode_FromString(res);
   PyObject* names = with_names ? a->PyList_New(u->n) : NULL;
-  PyObject* prop = with_names ? a->PyLong_FromLongLong(u->propagate) : NULL;
-  int ok = m != NULL && entry != NULL && result != NULL && ((names != NULL && prop != NULL) || !with_names);
+  int ok = m != NULL && entry != NULL && result != NULL && (names != NULL || !with_names);
   for (int i = 0; ok && with_names && i < u->n; i++) {
     PyObject* n = a->PyUnicode_FromString(u->fields[i].name);
     if (n == NULL)
@@ -291,12 +291,12 @@ static PyObject* adapter_call(struct rowpy* a, PyObject* adapter, const char* me
   }
   PyObject* r = NULL;
   if (ok && with_names)
-    r = a->PyObject_CallMethodObjArgs(adapter, m, entry, names, result, prop, NULL);
+    r = a->PyObject_CallMethodObjArgs(adapter, m, entry, names, result, NULL);
   else if (ok)
     r = a->PyObject_CallMethodObjArgs(adapter, m, entry, result, NULL);
-  /* The list first: of these it is the one a collection can count. */
-  PyObject* drop[5] = {names, m, entry, result, prop};
-  for (int i = 0; i < 5; i++)
+  /* The list first: of the four it is the one a collection can count. */
+  PyObject* drop[4] = {names, m, entry, result};
+  for (int i = 0; i < 4; i++)
     if (drop[i] != NULL) a->Py_DecRef(drop[i]);
   return r;
 }

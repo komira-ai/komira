@@ -5,8 +5,8 @@
 #
 # What it proves: a correct read set computes every row from the right
 # child; a read outside the read set fails with ERR_FIELD_NOT_DECLARED at
-# its row, with a message, also under PROPAGATE after a null row the
-# function is not called on (the error keeps the caller's row number); a
+# its row, with a message, also under PROPAGATE (the runner drops the null
+# row and maps the error's row back; the runtime must accept the mode); a
 # function that catches the language's error
 # around that read still fails the batch; every exported array is released
 # once (the runner's ledger). The corpus's other cases are of shapes this
