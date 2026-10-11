@@ -3,9 +3,10 @@
 # =============================================================================
 #
 # THE CENSUS IS COMPLETE: every field and every enum value `komira.plan.v1`
-# declares has a row in one of the five census ledgers, and every row names
-# one that exists. A field added to plan.proto without a census row fails
-# here, so a number no census pins cannot ship.
+# declares (plan.proto, plan_vocabulary.proto, optimized_plan.proto) has a
+# row in one of the six census ledgers, and every row names one that
+# exists. A field added to any of them without a census row fails here, so a
+# number no census pins cannot ship.
 #
 # WHERE "DECLARED" COMES FROM. Not from a parser written here: from protoc.
 # protoc parses the .proto files and hands their descriptors to the Mojo
@@ -49,6 +50,21 @@ from std.pathlib import Path
 from std.testing import assert_equal, assert_true
 
 from komira_proto_codec import FieldKey, ProtoEnum, Serializable, WireDecoder
+from komira_plan_proto.optimized_plan import (
+    DeclaredNeeds,
+    ExchangeEdge,
+    OptimizedPlan,
+    OptimizedPlanBody,
+    OptimizedSegment,
+    OptimizedSegmentDag,
+    PinGroup,
+    PlanAdvice,
+    ProducerStamp,
+    RuntimeNeed,
+    ScanPin,
+    ScanStats,
+    SharedSubplan,
+)
 from komira_plan_proto.plan import (
     WireAggExpr,
     WireAggFn,
@@ -154,7 +170,7 @@ from komira_plan_proto.plan_vocabulary import (
 comptime _CENSUS = (
     "test_plan_field_numbers_scan.mojo test_plan_field_numbers_expr.mojo"
     + " test_plan_field_numbers_plan.mojo test_plan_enum_numbers_nodes.mojo"
-    + " test_plan_enum_numbers_functions.mojo"
+    + " test_plan_enum_numbers_functions.mojo test_optimized_plan_field_numbers.mojo"
 )
 
 
@@ -465,6 +481,32 @@ def _fields_of(message: String) raises -> _Shape:
         return _vocabulary[WireWriteTarget]()
     elif message == "WirePlanEnvelope":
         return _vocabulary[WirePlanEnvelope]()
+    elif message == "DeclaredNeeds":
+        return _vocabulary[DeclaredNeeds]()
+    elif message == "ExchangeEdge":
+        return _vocabulary[ExchangeEdge]()
+    elif message == "OptimizedPlan":
+        return _vocabulary[OptimizedPlan]()
+    elif message == "OptimizedPlanBody":
+        return _vocabulary[OptimizedPlanBody]()
+    elif message == "OptimizedSegment":
+        return _vocabulary[OptimizedSegment]()
+    elif message == "OptimizedSegmentDag":
+        return _vocabulary[OptimizedSegmentDag]()
+    elif message == "PinGroup":
+        return _vocabulary[PinGroup]()
+    elif message == "PlanAdvice":
+        return _vocabulary[PlanAdvice]()
+    elif message == "ProducerStamp":
+        return _vocabulary[ProducerStamp]()
+    elif message == "RuntimeNeed":
+        return _vocabulary[RuntimeNeed]()
+    elif message == "ScanPin":
+        return _vocabulary[ScanPin]()
+    elif message == "ScanStats":
+        return _vocabulary[ScanStats]()
+    elif message == "SharedSubplan":
+        return _vocabulary[SharedSubplan]()
     raise Error("the census has no message " + message)
 
 
