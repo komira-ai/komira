@@ -147,7 +147,7 @@ farm, as welded `test_srcs` or as standalone tests under `src/tests/e2e` and
 
 - The pull request's check (`kci run --stage pr --affected-by <base>`,
   `src/kci_build/affected.mojo`) builds the units the change reaches,
-  including the standalone and per-package checks `release/ci/derive_checks.py`
+  including the standalone and per-package checks `//tools/build/ci:derive_checks`
   derives.
 - The release's `build` stage is one BUILD step over
   `release/artifacts.textproto` (`release/machine.textproto`). It builds the
