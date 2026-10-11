@@ -34,7 +34,7 @@
 # THE NAMES A RELEASE PUBLISHES are the ones this file declares, and this file
 # is reviewed through CODEOWNERS; there is no per-run claim. A PUBLISH step
 # reads its channel first and reports every declared name the channel holds
-# no file of yet (NEW NAMES) in its result and the job summary; the gamma
+# no file of yet (NEW NAMES) in its result and the job summary; the beta
 # stage reports prod's before the prod approval.
 #
 # Which farm buck2 builds on is the build job's machine configuration, written
@@ -867,4 +867,18 @@ artifacts {
   args: "--out-dir"
   args: "{out_dir}"
   targets: "//tools/build/package:komira_pack"
+}
+
+# The build system's self-tests (docs/design/build_selftests.md): the
+# scenarios and graph checks of tools/build/selftest, one declared check.
+# Declared so that the package leaves the derived check `tools_build`,
+# which a change under src/ reaches through the reverse dependencies of
+# targets under tools/build. Nothing in the package depends on a library
+# under src/ (its graph check selftest_closure holds that), so only a
+# widened change (tools/build/ci/rules.txt: tools/build/** among them)
+# reaches this check.
+checks {
+  name: "build_selftests"
+  build_system: "buck2"
+  targets: "//tools/build/selftest/..."
 }
