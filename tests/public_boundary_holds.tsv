@@ -39,7 +39,6 @@ date	src/komira_http_client/tests/test_objectstore_http.mojo	2	a Last-Modified h
 date	src/komira_mcp_server/protocol.mojo	2	the MCP protocol revision identifiers this server speaks, not history dates
 date	src/komira_mcp_server/tests/test_mcp_spec_examples.mojo	3	the MCP specification examples: a revision identifier and an example tool error text (test data)
 date	src/komira_plan_ir/tests/test_scan_binding_substrate.mojo	1	a partition key literal (test data)
-date	tools/build/tests/functional/darwin/check.sh	1	the build line a stubbed linker prints (test data)
 email	src/komira_crypto/tests/test_rs256_jwks_verify.mojo	1	a made-up service account or address (test data)
 email	src/komira_gcp_apigateway/tests/test_apigateway_requests.mojo	2	a made-up service account or address (test data)
 email	src/komira_gcp_cloudresourcemanager/tests/test_crm_projects.mojo	1	a made-up service account or address (test data)

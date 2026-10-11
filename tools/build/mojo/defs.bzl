@@ -58,7 +58,7 @@ def _watchdog_flags(tc):
         "--watchdog-sample-secs={}".format(tc.watchdog_sample_secs),
     ]
 
-def mojo_compile_cmd(tc, args, runpath = None, source_root = None, link_tail = None, link = None, darwin_knobs = True):
+def mojo_compile_cmd(tc, args, runpath = None, source_root = None, link_tail = None, link = None):
     """The command line of one Mojo compile (`mojo precompile`, `build`, `doc`).
 
     Every rule that runs the compiler builds its command here: mojo_library,
@@ -66,31 +66,29 @@ def mojo_compile_cmd(tc, args, runpath = None, source_root = None, link_tail = N
     mojo_doc_json (doc.bzl) and the proto packages (proto.bzl).
 
     `link` replaces the toolchain's link directory: a coverage build's
-    (coverage.bzl), whose `zig` keeps and relocates the debug info.
-    `link_tail` is appended by the wrapper's `cc` shim to the END of every
-    link line, after the compiler's own objects and archive.
+    (coverage.bzl), whose `zig` keeps and relocates the debug info. Linux
+    only. `link_tail` is appended by the wrapper's `cc` shim to the END of
+    every link line, after the compiler's own objects and archive.
 
-    On Linux the wrapper is komira//tools/build/mojo:mojo_compile, a Zig
-    program (tools/mojo_compile.zig), and the toolchain's watchdog knobs are
-    always passed. The macOS toolchain still runs its shell wrapper
-    (darwin/mojo_wrapper.sh) under the toolchain's busybox, with the
-    command line it always had: `darwin_knobs = False` where that line had
-    no knobs (doc.bzl, proto.bzl).
+    The wrapper is the Zig program mojo_compile (tools/mojo_compile.zig on
+    Linux, tools/mojo_compile_macos.zig on macOS), and the toolchain's
+    watchdog knobs are always passed. On macOS the deployment target and the
+    host identities a compile may run on (`macos_hosts`) take the place of
+    the zig directory and target.
     """
     tail = [cmd_args(link_tail, format = "--link-tail={}")] if link_tail else []
     if tc.os == "darwin":
+        if link:
+            fail("mojo_compile_cmd: `link` (a coverage link directory) is Linux only")
         return cmd_args(
-            tc.busybox,
-            "sh",
             tc.wrapper,
-            tc.busybox,
-            tc.compiler,
-            link or tc.link,
-            tc.cc_target,
+            cmd_args(tc.compiler, format = "--compiler={}"),
+            "--deployment-target=" + tc.cc_target,
+            ["--macos-host=" + h for h in tc.macos_hosts],
             ["--runpath=" + runpath] if runpath else [],
             [cmd_args(source_root, format = "--source-root={}")] if source_root else [],
             tail,
-            _watchdog_flags(tc) if darwin_knobs else [],
+            _watchdog_flags(tc),
             "--",
             args,
         )
