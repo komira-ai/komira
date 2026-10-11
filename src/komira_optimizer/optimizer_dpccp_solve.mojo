@@ -357,7 +357,8 @@ def solve_dpccp_observed[O: DPccpObserver](
         # We do NOT replay into `dp` because the augmented graph admits
         # cross-product pairs whose presence would corrupt the literal-
         # edge winners stored from the first pass — DPccp's pair-emit
-        # update replaces an entry whenever `pair_cost < existing.cost`,
+        # update replaces an entry whenever `dp_pair_beats` orders the new
+        # pair first (lower cost; an equal cost breaks on relation bits),
         # so a cross-product winner could overwrite the first-pass winner
         # of a connected subset.
         var dp_aug = Dict[UInt64, DPNode]()
