@@ -17,15 +17,23 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # flat columns built from their buffers (subrg_columns), a predicate over a
 # decoded batch (batch_filter), the collect sink (scan_chunk_sink), the
 # sub-row-group scan (subrg_scan_executor), row-range decodes
-# (subrg_split_decode), the aggregate read plan (subrg_agg_plan), the band
+# (subrg_split_decode), the aggregate read plan (subrg_agg_plan), the
+# sub-row-group aggregate (subrg_agg_executor, its per-row-group fold in
+# subrg_agg_fold, the chunk type rule in subrg_agg_chunk_schema), the band
 # producer (band_producer) and the cursor-grain route (cursor_grain_feed, with
 # its split in cursor_grain_split_emit and its move arm in grain_decode_move).
+#
+# Chunk arms: a PLAIN column read a grain at a time in its decoded page
+# (flat_view_chunk), a dictionary column's codes a grain at a time
+# (code_view_chunk), several PLAIN columns as a row-aligned MorselView grain
+# (flat_morsel_chunk).
 #
 # Morsel source: ParquetSource (parquet_source) with its options and pure
 # decisions (parquet_source_options), its emit (parquet_source_emit), the
 # filtered decode of a claim (parquet_source_claim, parquet_source_arms,
 # parquet_source_late_mat), the cursor-grain route (parquet_source_grain) and
-# the row-range split (parquet_source_subrg).
+# the row-range split (parquet_source_subrg); the row-group stamp and winners
+# of a two-phase top-N (topn_late_mat).
 #
 # Welded tests (each against files written by komira_test_parquet_file, or
 # hand-built values; the executors on a 4-worker runtime):
@@ -81,6 +89,17 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_cursor_grain_feed_direct: the grain formula, every row once grain by
 #   grain on the copy and the move arm with their byte counters crossing, the
 #   refusal of strings and of a column that may hold a null, the gates.
+# - test_subrg_agg_executor_direct: the sub-row-group aggregate into a test
+#   sink with DuckDB's rules (NULL group, NaN largest): every value arm under
+#   INT64, INT32, composite and STRING keys with the chunk types checked, the
+#   whole-row-group decode (PLAIN key, early NULL), the abandoned run (late
+#   NULL, STRING-key refusal), every filter arm, the statistics prune, the
+#   chunk type rule, refused plans.
+# - test_chunk_arms_direct: the in-place PLAIN grain, the dictionary codes
+#   grain with a lockstep key, the multi-column grain ending at every page
+#   boundary and read through MorselView, the refusals.
+# - test_topn_late_mat_direct: the row-group stamp, the winners' row groups
+#   and their refusals, the route counters.
 mojo_library(
     name = "komira_parquet_scan",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -96,6 +115,7 @@ mojo_library(
         "//src/komira_counters:komira_counters",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_engine_runtime:komira_engine_runtime",
+        "//src/komira_exec_types:komira_exec_types",
         "//src/komira_fs:komira_fs",
         "//src/komira_morsel:komira_morsel",
         "//src/komira_parquet:komira_parquet",
@@ -108,6 +128,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_band_producer_direct.mojo",
+        "tests/test_chunk_arms_direct.mojo",
         "tests/test_cursor_grain_feed_direct.mojo",
         "tests/test_parked_morsel_share_direct.mojo",
         "tests/test_parquet_reader_direct.mojo",
@@ -117,10 +138,12 @@ mojo_library(
         "tests/test_parquet_source_options_direct.mojo",
         "tests/test_scan_chunk_sink_direct.mojo",
         "tests/test_staged_filter_direct.mojo",
+        "tests/test_subrg_agg_executor_direct.mojo",
         "tests/test_subrg_columns_direct.mojo",
         "tests/test_subrg_filter_gather_direct.mojo",
         "tests/test_subrg_scan_executor_direct.mojo",
         "tests/test_subrg_split_decode_direct.mojo",
+        "tests/test_topn_late_mat_direct.mojo",
         "tests/test_topn_rg_bounds_direct.mojo",
     ],
     test_deps = [
