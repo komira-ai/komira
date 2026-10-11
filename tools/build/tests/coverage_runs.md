@@ -244,9 +244,14 @@ these checks:
 | `:branchtd` and `[coverage][branch]` | `branchtd`'s test imports `branchtdsup`, a package only the library's `test_deps` give it, which calls into C (`komira//tools/build/examples/cshim:add`): its release gate passes, and its branch coverage bitcode is compiled against the tests' closure (`test_deps` included) and its link ends with the tests' C libraries (`test_deps` included), as its release build and `[coverage][bin]` are | `coverage_branch` given the library's closure (`ungated_tset`), as it first was: `error: unable to locate module 'branchtdsup'` (`mojo_emit_cov_bc`); given the tests' closure but the library's C link (`c_link`): `ld.lld: error: undefined symbol: komira_example_add` (`mojo_cov_pgo_link`) |
 
 The link's own check, that the instrumented binary holds no directory of
-its action, went red with `--strip-debug` left out of
-the link script `cov_branch link` replaced (`the binary holds this action's directory`); no
-fixture keeps that plant.
+its action, went red with `--strip-debug` left out of the link script
+`cov_branch link` replaced (`the binary holds this action's directory`);
+no fixture keeps that plant. `cov_branch link`'s own tests
+([`cov_branch_link_test.zig`](../coverage/branch/cov_branch_link_test.zig),
+welded into the tool, and
+[`cov_branch_link_exe_test.zig`](../coverage/branch/cov_branch_link_exe_test.zig),
+the shipped executable as a process, a validation of every use) hold that
+check and each other one of its steps.
 
 A passing test's output is not kept (gate_runner removes it), so that an
 instrumented test prints what its release build prints was seen once, not
