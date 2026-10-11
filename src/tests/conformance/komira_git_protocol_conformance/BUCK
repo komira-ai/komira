@@ -1,4 +1,4 @@
-load("@komira//tools/build/lint:defs.bzl", "mojo_deps", "shell_lint")
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "git_transcripts")
@@ -77,13 +77,4 @@ git_transcripts(
 shell_lint(
     name = "shell_lint",
     srcs = ["capture.sh"],
-)
-
-# The deps above name every komira_* module the library and its tests import
-# (tools/build/lint: mojo_deps).
-mojo_deps(
-    name = "deps_lint",
-    buck = "BUCK",
-    srcs = glob(["**/*.mojo"]),
-    visibility = ["komira//:tests_lints"],
 )
