@@ -1972,8 +1972,8 @@ def _materialize_with_partitions_impl[
 
     # Concat per-worker batches — single-pass multi-way.
     if k == 0:
-        _ = fj_out^
-        return materialize_jsonl_to_batch(bytes, schema^)
+        _ = fj_out^  # cov: unreachable k >= 1 here: k == 0 returned at the partition check above
+        return materialize_jsonl_to_batch(bytes, schema^)  # cov: unreachable see the line above
     # Zero-column parts (a schema with no fields) are joined by row count.
     var combined = _concat_jsonl_parts(fj_out, k)
     _ = fj_out^
@@ -2142,8 +2142,8 @@ def _materialize_parallel_impl[
     # Step 3: concat per-worker batches (single-pass multi-way).
     # ---------------------------------------------------------------------
     if k == 0:
-        _ = fj_out^
-        return materialize_jsonl_to_batch(bytes, schema^)
+        _ = fj_out^  # cov: unreachable k >= 2 here: k <= 1 returned after the line ranges above
+        return materialize_jsonl_to_batch(bytes, schema^)  # cov: unreachable see the line above
 
     # `_concat_jsonl_parts` walks slots [0, k) in order; zero-column parts
     # (a schema with no fields) are joined by row count.

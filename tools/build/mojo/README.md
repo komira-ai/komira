@@ -176,7 +176,13 @@ session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.sh),
 - **`[run_check]`** (`mojo_binary`): runs the binary remotely from its
   runnable directory, with no library path set, and with `expected_stdout`
   compares its stdout byte for byte
-  ([`examples/BUCK`](../examples/BUCK) `hello`, `hello_pkg_user`).
+  ([`examples/BUCK`](../examples/BUCK) `hello`, `hello_pkg_user`). With
+  `expected_stdout` the check is also a validation of the binary
+  ([`run_check.bzl`](run_check.bzl)): every build whose graph holds the
+  binary runs it, and fails when its stdout differs or it exits non-zero.
+  A `run_check_wired` target ([`examples/BUCK`](../examples/BUCK),
+  [`examples/rust/BUCK`](../examples/rust/BUCK)) fails analysis if a
+  binary rule stops returning that validation.
 - **`buck2 run <target>`**: builds remotely and runs the binary on your
   machine (Linux x86_64) from its runnable directory, downloading the binary
   and its runtime libraries, never the compiler
@@ -419,7 +425,8 @@ mojo_test(
   `buck2 run` and `[runnable]` do not pass `args`. A library's `test_srcs`
   take none: a gated test is a unit test of its package and gets everything
   it reads through `test_data`
-  ([`tests//functional/test_data:mojo_test_args`](../tests/functional/test_data/BUCK)).
+  ([`mojo_test_testdata:mojo_test_args`](mojo_test_testdata/BUCK), run by
+  `buck2 test` in the pull-request check).
 - **Scratch.** `TEST_TMPDIR` (equal to `TMPDIR`) and `HOME` are two empty
   directories the runner makes for this run inside the action's working
   directory, so no two runs share them, and they are removed afterwards.
@@ -840,7 +847,7 @@ rules, sub-targets, scope and fixtures are in [coverage.md](coverage.md).
 | message | from | meaning |
 |---|---|---|
 | `GATED TEST FAILED: <label> (exit N)` | [`gate_runner.sh`](gate_runner.sh) | a `test_srcs` test (or `buck2 test` of a `mojo_test`) failed |
-| `COVERAGE GATE FAILED (enforce): <package> (<label> [coverage gate]): covcheck gate exited 3` | [`cov_gate.sh`](../coverage/cov_gate.sh) | with coverage on, the library's coverage gate in enforce mode found something (its summary follows: below the target, not measured, a file no test compiled, branch not measured, ...); the conda package (`<name>_conda`) is not produced, while the library and its dependents still build ([The build gate](../coverage/README.md#the-build-gate)) |
+| `COVERAGE GATE FAILED (<mode>): <package> (<label> [coverage gate]): covcheck gate exited 3` | [`cov_gate.sh`](../coverage/cov_gate.sh) | with coverage on, the library's coverage gate in enforce mode found something (its summary follows: below the target, not measured, a file no test compiled, branch not measured, ...), or in any mode the package is under its floor (`Regression`, [The ratchet](../coverage/README.md#the-ratchet)); the conda package (`<name>_conda`) is not produced, while the library and its dependents still build ([The build gate](../coverage/README.md#the-build-gate)) |
 | `COVERAGE GATE ERROR: <package> (<label> [coverage gate]): covcheck exited N` | [`cov_gate.sh`](../coverage/cov_gate.sh) | covcheck refused the gate's inputs (an unmapped report path, a source it cannot read: exit 1) or its command line (exit 2), in any mode; its message is above |
 | `COVERAGE RUN FAILED: <label> [coverage]` | [`cov_run.sh`](../coverage/kcov/cov_run.sh) | a coverage run failed: the test failed under kcov (with its exit status, after its output), it left processes running or did not finish within the run's limit (450 s), kcov could not trace it or failed itself, the binary names the library's sources by another directory than the run stages, or its report was missing or refused by `cov_normalize` ([cov_run](../coverage/kcov/README.md#cov_run)) |
 | `<name>_cov_gate: coverage_tests of <lib>: <test> does not name <lib> in its deps` (or `cannot run under kcov: ...`, `is not a mojo_test with a coverage build`) | [`coverage.bzl`](coverage.bzl) | with coverage on, a library's `coverage_tests` names a test that does not depend on it, has `args` or a generated main, or is not a `mojo_test` ([Coverage builds](#coverage-builds)) |

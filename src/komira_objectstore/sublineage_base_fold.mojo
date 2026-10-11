@@ -89,7 +89,6 @@ from komira_objectstore.cas_manifest import (
     AppendResult,
     CasManifestStore,
     LogStart,
-    ManifestHead,
     RetryPolicy,
     is_not_found,
     _get_i64_le,
@@ -623,19 +622,16 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
         the true highest-committed chunk. Iterates in CANONICAL order so the
         snapshot itself is order-stable (two snapshots of the same committed
         universe are identical lists). A shard whose chunks are ALL already
-        folded+reaped (no live manifest) is skipped (its tail is empty)."""
+        folded+reaped pins an empty tail; an error reading a shard's head
+        raises."""
         var ids = self.enumerate_live_shards()
         var out = List[ShardSnapshot]()
         for i in range(len(ids)):
             var sid = ids[i]
             var s = self._shard_store(sid)
-            var head: ManifestHead
-            try:
-                head = s.read_head_authoritative()
-            except e:
-                _ = e
-                _ = s^
-                continue  # shard fully reaped post-fold — nothing to snapshot
+            # An absent or fully reaped shard reads as an empty tail (it does
+            # not raise); a read error raises rather than drop a live shard.
+            var head = s.read_head_authoritative()
             out.append(ShardSnapshot(sid, head.chunk_seq, head.next_offset))
             _ = s^
         return out^
@@ -915,17 +911,16 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
         # `_LOG_START.log_start_offset` is the authoritative fold cursor (it
         # survives `_base` reaping). Take the MAX of the source log-start and the
         # `_base`-derived lower bound. A fully-reaped source shard contributes
-        # only the `_base`-derived bound (already in `wms`).
+        # only the `_base`-derived bound (already in `wms`). An absent
+        # `_LOG_START` reads as zero; a read error raises (the bound alone can
+        # be too low, and the next fold would fold records again).
         var live_ids = self.enumerate_live_shards()
         for i in range(len(live_ids)):
             var sid = live_ids[i]
             var src = self._shard_store(sid)
-            try:
-                var src_ls = src.read_log_start()
-                if src_ls.log_start_offset > Int64(0):
-                    _bump_watermark(wms, sid, src_ls.log_start_offset)
-            except e3:
-                _ = e3
+            var src_ls = src.read_log_start()
+            if src_ls.log_start_offset > Int64(0):
+                _bump_watermark(wms, sid, src_ls.log_start_offset)
             _ = src^
         self._watermarks = wms^
 
@@ -1009,12 +1004,12 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
                 + String(expected_dense)
             )
         if r.last_offset != r.base_offset + count - Int64(1):
-            _ = base^
-            raise Error(
-                "sublineage_base_fold: _base last_offset "
-                + String(r.last_offset)
-                + " != base+count-1 "
-                + String(r.base_offset + count - Int64(1))
+            _ = base^  # cov: unreachable CasManifestStore.append returns last = base + count - 1
+            raise Error(  # cov: unreachable see the line above
+                "sublineage_base_fold: _base last_offset "  # cov: unreachable see the line above
+                + String(r.last_offset)  # cov: unreachable see the line above
+                + " != base+count-1 "  # cov: unreachable see the line above
+                + String(r.base_offset + count - Int64(1))  # cov: unreachable see the line above
             )
         _ = base^
         self._base_chunks.append(
@@ -1046,13 +1041,9 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
         prefix `[0..folded_count)` is reclaimable, and `_LOG_START` records that.
         Raw retention-key arithmetic stays INSIDE this module."""
         var s = self._shard_store(shard_id)
-        var head: ManifestHead
-        try:
-            head = s.read_head_authoritative()
-        except e:
-            _ = e
-            _ = s^
-            return  # already reaped
+        # A fully reaped shard reads as an empty head (the walk below then
+        # retires nothing); a read error raises.
+        var head = s.read_head_authoritative()
         var already_tomb = s.tombstone_seqs()
         var cur = s.read_log_start()
         var running = cur.log_start_offset
@@ -1269,12 +1260,10 @@ struct SubLineageBaseFold[Store: CloneableConditionalWriteStore](
         var ids = self.enumerate_live_shards()
         for i in range(len(ids)):
             var s = self._shard_store(ids[i])
-            try:
-                var head = s.read_head_authoritative()
-                if head.next_offset > self._folded_count_for_shard(ids[i]):
-                    live_tail += 1
-            except e:
-                _ = e
+            # An absent shard reads as an empty head; a read error raises.
+            var head = s.read_head_authoritative()
+            if head.next_offset > self._folded_count_for_shard(ids[i]):
+                live_tail += 1
             _ = s^
         return BoundStats(
             len(self._base_chunks), len(self._watermarks), live_tail

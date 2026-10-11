@@ -1,0 +1,200 @@
+// The shared vocabulary of the kci resource catalog (`kci.resource.v1`):
+// the catalog's one declared bit (`Portability`, and the `portability` and
+// `exposes` options every primitive message carries), and the references
+// and values a resource holds: `Output`, `Ref`, `Access`, `CellResource`,
+// `Retention`, `Uses`, `Value`, `StepOutput`, `Image` and `SecretRef`.
+// The field numbers are what is stored, pinned as literal wire bytes by the
+// welded tests in tests/ (resource.proto says how the files are split).
+// held-numbers: Value 4
+// held-numbers: Image 4
+// held-numbers: Uses 3
+syntax = "proto3";
+
+package kci.resource.v1;
+
+import "google/protobuf/descriptor.proto";
+
+// ---- the catalog's one declared bit ------------------------------------------
+
+// Whether every complete cloud must host a type. PORTABLE: a complete cloud
+// implements it or carries a ledgered gap. CLOUD_BOUND: partial coverage is
+// legitimate, and applying it on a cloud with no adapter for it is refused
+// before anything is created. UNSET is never a legal marking.
+enum Portability {
+  PORTABILITY_UNSET = 0;
+  PORTABLE = 1;
+  CLOUD_BOUND = 2;
+}
+
+extend google.protobuf.MessageOptions {
+  // Marks each primitive message of this package (v1: `Service`, `ContainerJob`,
+  // `Worker`, `Table`, `Bucket`, `Queue`, `Secret`, `DnsZone`,
+  // `ServiceAccount`, `Topic`, `Schedule`, `Network`, `Registry`, `Grant`,
+  // `DnsRecord`, `Certificate`, `Subscription`, `Subnet`, `IpAddress`,
+  // `EventTrigger`).
+  Portability portability = 50001;
+  // The outputs a type exposes to a `Ref`. A `Ref` asking a type for an
+  // output it does not expose is refused when the graph is loaded.
+  repeated Output exposes = 50002;
+}
+
+// ---- references ----------------------------------------------------------------
+
+// What a produced value IS, never whose attribute it is. ADDRESS is where a
+// client reaches the object (a bucket's URI); NAME is the cloud's own name
+// for it. 5 is held for REVISION (the cloud's revision of a service, never
+// kci's revision id).
+enum Output {
+  OUTPUT_UNSET = 0;
+  URL = 1;
+  HOST = 2;
+  ADDRESS = 3;
+  NAME = 4;
+}
+
+// A reference to another resource of the same list. With neither arm of
+// `output` set it names the resource itself (as in `Uses.target`); with
+// `standard` set it names one value the resource produces at apply time;
+// `named` names an output a composite DECLARES (composite.proto), and is
+// refused for every other producer (it is also held for the escape hatch).
+// THE BASE is exactly one of `resource` (a top-level resource; refused
+// inside a composite definition), `local` (inside a definition: a sibling
+// component) and `input` (inside a definition: a REF input), written and
+// not empty. They are separate fields, not a oneof, so the generated
+// `resource` keeps its shape (the wire is the same); `path`, `local` and
+// `input` have presence, so a graph that writes none encodes as before.
+// `path` goes below the base into a composite instance: `/`-joined
+// component ids, each EXPORTED by its definition; one that ends on an
+// instance reads a declared output with `named`. Expansion rewrites every
+// reference to `resource` alone, the full path (composite.proto).
+message Ref {
+  string resource = 1;
+  oneof output {
+    Output standard = 2;
+    string named = 3;
+  }
+  optional string path = 4;
+  optional string local = 5;
+  optional string input = 6;
+}
+
+// What a consumer may do to a resource. CALL is accepted by a service (call
+// it) and a container job (start a run of it); a worker accepts no verb, and
+// neither does a schedule, an event trigger, a network, a subnet or an IP
+// address.
+// READ, WRITE and READ_WRITE by a table, a bucket, a secret (on a
+// secret: READ its value, WRITE a new version of it) and a registry (READ:
+// pull its artifacts; WRITE: push them); SEND (put a
+// message in) by a queue and a topic; RECEIVE (take a message out and
+// acknowledge it) by a queue; DESCRIBE by a table (read its definition,
+// never its items) and by a service account (read what the identity is,
+// never act as it). 7 is held for ACT_AS (one identity acting as another)
+// and 9 for MANAGE (changing a resource's own configuration), both
+// undeclared until their rules are decided.
+enum Access {
+  ACCESS_UNSET = 0;
+  CALL = 1;
+  READ = 2;
+  WRITE = 3;
+  READ_WRITE = 4;
+  SEND = 5;
+  RECEIVE = 6;
+  DESCRIBE = 8;
+}
+
+// A resource the CELL provides, which a grant may target instead of a
+// resource of the list. LOGS and METRICS accept READ and WRITE (WRITE: the
+// workload's own logs or metrics); ARTIFACTS accepts READ (pull the cell's
+// artifacts). 4 is held for placing workloads into the cell, undeclared
+// until its rules are decided.
+enum CellResource {
+  CELL_RESOURCE_UNSET = 0;
+  LOGS = 1;
+  METRICS = 2;
+  ARTIFACTS = 3;
+}
+
+// Whether a data resource's objects are deleted when the resource leaves the
+// file or the graph is destroyed. UNSET means the type's versioned default.
+enum Retention {
+  RETENTION_UNSET = 0;
+  DELETE = 1;
+  KEEP = 2;
+}
+
+// "The identity of this resource may do `access` to `target`" (or to the
+// cell's `cell`): exactly one of `target` and `cell` is set. The cloud
+// adapter turns it into whatever its own permission system needs.
+// `target.output` must be unset: access is granted to a resource, not to one
+// of its values. 3 is held.
+message Uses {
+  Ref target = 1;
+  Access access = 2;
+  CellResource cell = 4;
+}
+
+// A configuration value: a literal, a release machine parameter, a value
+// another resource produces, or (inside a composite definition only) a
+// STRING input of the definition, which expansion replaces with its value.
+// All are plain (not secret) values. 4 is held; a secret never rides a
+// `Value` (see `SecretRef`).
+message Value {
+  oneof v {
+    string literal = 1;
+    string param = 2;
+    Ref ref = 3;
+    string input = 5;
+  }
+}
+
+// An output of an earlier BUILD step of the same run of the release
+// machine. A different namespace from `Ref`: resolved before the deploy
+// graph exists, and never a graph edge.
+message StepOutput {
+  string step = 1;
+  string name = 2;
+}
+
+// What to run: a build step's output, or a literal content digest. Never a
+// mutable tag. 4 is held for an `artifact_ref` arm (an artifact of another
+// revision).
+//
+// `platform` is the OS + CPU of the build, an OCI-style string such as
+// "linux/amd64": the step output of that platform, or, for a digest, that
+// the digest is of that platform's single image (not a multi-platform
+// index). It is the same spelling every other kci file uses. Empty means the
+// v1 default, "linux/amd64"; that default is fixed, because stored lists
+// rely on it. In v1, linux/amd64 is the only platform a reader accepts: any
+// other value decodes, and is refused when the graph is validated, before
+// anything is created.
+message Image {
+  oneof source {
+    StepOutput output = 1;
+    string digest = 2;
+  }
+  string platform = 3;
+}
+
+// A secret, referenced, never valued: EITHER one that already exists in the
+// cell's secret store, by `name`, OR a `secret` resource of this list, by
+// `secret` (exactly one of the two; validate refuses both and neither). A
+// workload (a service, a container job or a worker) names it in its
+// `secret_env`.
+// kci passes the REFERENCE to the cloud adapter, which makes the secret's
+// value available to the container at run time; the value is never in this
+// file, in kci's state or in kci's memory. The map key of a `secret_env`
+// field is the environment variable the container reads it from.
+//
+// `store` names the secret store of a `name` (unset: the cell's default
+// store); a `secret` resource is in the store its cloud puts it in, so
+// `store` beside `secret` is refused. `version` pins one version of the
+// value (unset: the latest). Both have presence, so "not written" is never
+// confused with a written empty string. `secret` names the resource itself
+// (its `output` unset), and the identity the workload runs as must hold
+// READ (or READ_WRITE) on it: the reference is not a grant.
+message SecretRef {
+  string name = 1;
+  optional string store = 2;
+  optional string version = 3;
+  Ref secret = 4;
+}

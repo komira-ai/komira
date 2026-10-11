@@ -32,6 +32,7 @@ from komira_db_postgres.wire.pgwire import (
     read_i16_be,
     read_i32_be,
     owned_utf8_string,
+    data_row_truncated_error,
 )
 from komira_db_postgres.wire.pg_binary import (
     encode_int4_binary,
@@ -570,14 +571,16 @@ struct PgRows(Movable):
 # Parse a DataRow ('D') message body directly into a PgRow (one scope — no
 # intermediate multi-field struct to partial-move out of).
 # -----------------------------------------------------------------------------
-def row_from_data_message(msg: BackendMessage, oids: List[UInt32]) -> PgRow:
+def row_from_data_message(
+    msg: BackendMessage, oids: List[UInt32]
+) raises -> PgRow:
     """Parse a TEXT-format DataRow ('D') into a PgRow (simple-query path)."""
     return _row_from_data_message_fmt(msg, oids, False)
 
 
 def binary_row_from_data_message(
     msg: BackendMessage, oids: List[UInt32]
-) -> PgRow:
+) raises -> PgRow:
     """Parse a BINARY-format DataRow ('D') into a PgRow (extended-protocol
     path). The wire framing is identical to the text path — Int16 column count,
     then per column Int32 length (-1 == NULL) + bytes — only the column-value
@@ -589,7 +592,7 @@ def binary_row_from_data_message(
 
 def _row_from_data_message_fmt(
     msg: BackendMessage, oids: List[UInt32], binary: Bool
-) -> PgRow:
+) raises -> PgRow:
     """Parse a DataRow ('D') message into a PgRow over the given column OIDs.
     DataRow body: Int16 column count, then per column Int32 length (-1 ==
     NULL) followed by `length` bytes. `binary` selects the column wire format.
@@ -597,6 +600,9 @@ def _row_from_data_message_fmt(
     Builds the FLAT PgRow storage directly (one concatenated `data` buffer +
     an `offsets` table) — it never materializes a doubly-nested
     `List[List[UInt8]]`, which is the move/copy hazard described on PgRow.
+    Raises when the body ends before the column count, a column length or a
+    column value (a self-inconsistent message, never a partial read: the
+    caller framed it by its length header).
     """
     var data = List[UInt8]()
     var offsets = List[Int]()
@@ -604,23 +610,25 @@ def _row_from_data_message_fmt(
     var nulls = List[Bool]()
     var b = Span[UInt8](msg.body)
     var n = len(b)
-    if n >= 2:
-        var col_count = Int(read_i16_be(b, 0))
-        var off = 2
-        for _c in range(col_count):
-            if off + 4 > n:
-                break
-            var col_len = Int(read_i32_be(b, off))
-            off += 4
-            if col_len < 0:
-                nulls.append(True)
-            else:
-                nulls.append(False)
-                for i in range(off, off + col_len):
-                    if i < n:
-                        data.append(b[i])
-                off += col_len
-            offsets.append(len(data))
+    if n < 2:
+        raise Error("pgwire: DataRow truncated: body under 2 bytes")
+    var col_count = Int(read_i16_be(b, 0))
+    var off = 2
+    for c in range(col_count):
+        if off + 4 > n:
+            raise data_row_truncated_error(c, col_count, -1, 0)
+        var col_len = Int(read_i32_be(b, off))
+        off += 4
+        if col_len < 0:
+            nulls.append(True)
+        else:
+            if col_len > n - off:
+                raise data_row_truncated_error(c, col_count, col_len, n - off)
+            nulls.append(False)
+            for i in range(off, off + col_len):
+                data.append(b[i])
+            off += col_len
+        offsets.append(len(data))
     var oids_copy = List[UInt32]()
     for o in oids:
         oids_copy.append(o)

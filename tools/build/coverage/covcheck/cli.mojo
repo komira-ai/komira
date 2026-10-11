@@ -25,7 +25,7 @@ from covcheck.diff import parse_diff
 from covcheck.paths import RepoFiles, package_of, parse_repo_files
 from covcheck.ratchet import parse_ratchet, render_ratchet
 from covcheck.result import gate_json, report_json
-from covcheck.stats import MODE_ENFORCE, MODE_NEUTRAL, valid_mode
+from covcheck.stats import MODE_NEUTRAL, valid_mode
 from covcheck.summary import render_summary, truncate_summary
 from covcheck.text import parse_count, read_bytes, read_text, render_bp_or_na, split_on, substr, suffix, write_text
 
@@ -309,7 +309,8 @@ def run_gate(a: Args) raises -> Int:
     var an = _analysis(a, repo)
     write_text(a.get(String("--summary-out")), render_summary(an, List[String](), DiffCoverage(), False, pkg))
     write_text(a.get(String("--result-out")), gate_json(an, pkg))
-    if an.mode == String(MODE_ENFORCE) and len(an.findings) > 0:
+    # `failure`: a finding in enforce mode, or a floor not held in any mode.
+    if an.conclusion == String("failure"):
         return EXIT_GATE
     return EXIT_OK
 

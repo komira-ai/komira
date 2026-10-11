@@ -2,7 +2,7 @@
 # Direct tests for optimizer_tdom_card: the one-set cardinality estimate
 # =============================================================================
 #
-# The welded tests (test_optimizer_tdom_card_b6_xprod) drive
+# The other welded test (test_optimizer_tdom_card_b6_xprod) drives
 # estimate_cardinality_with_set through a TPC-H Q9 fixture. These tests pin
 # the branches that fixture does not reach: the subgraph-merge walk (extend
 # on either side, merge in either order, same-subgraph skip, the

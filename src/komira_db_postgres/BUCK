@@ -11,8 +11,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # reactor.
 #
 # The tests (under tests/ and wire/tests) need no database server: SCRAM and codec
-# vectors, hand-built rows, host resolution through /etc/hosts, and the
-# poll-shaped read frame driven over a local socketpair.
+# vectors, hand-built rows, host resolution through /etc/hosts, the
+# poll-shaped read frame driven over a local socketpair, and a PgConnection
+# reading a canned reply over an in-process TLS session on a socketpair (with
+# komira_http_core's throwaway test certificate).
 
 mojo_library(
     name = "komira_db_postgres",
@@ -37,7 +39,15 @@ mojo_library(
         "wire/tests/test_read_frame_guard.mojo",
         "wire/tests/test_scram_and_pgwire.mojo",
         "wire/tests/test_server_free_helpers.mojo",
+        "wire/tests/test_truncated_closes_connection.mojo",
+        "wire/tests/test_truncated_messages.mojo",
         "wire/tests/test_wire_decode_edges.mojo",
     ],
+    test_data = {
+        "wire/tests/test_truncated_closes_connection.mojo": {
+            "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+            "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+        },
+    },
     visibility = ["PUBLIC"],
 )

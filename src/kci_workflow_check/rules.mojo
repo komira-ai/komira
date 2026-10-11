@@ -77,8 +77,8 @@
 #           is `pr / check`; the machine file declares exactly one
 #           PULL_REQUEST stage and the job runs it, `kci run --stage <it>`;
 #         * the `pull_request` trigger ALONE (no push, workflow_dispatch,
-#           pull_request_target, workflow_run, ...); no other job (no gamma,
-#           prod, validate or build job, no second job holding an
+#           pull_request_target, workflow_run, ...); no other job (no beta,
+#           beta_validate, prod or build job, no second job holding an
 #           environment, a secret or `id-token: write`);
 #         * the job carries the condition `if: github.event.pull_request.head.
 #           repo.full_name == github.repository` (bare, or exactly `${{ <it>
@@ -90,17 +90,17 @@
 #           self-hosted label, label list, runner group, expression or
 #           quotes), has its own `permissions:` mapping holding `contents:
 #           read` and `id-token: write` only (R4: the farm connection's
-#           token), its one `kci run` carries `--affected-by ${{ github.event.
-#           pull_request.base.sha }}` (the base commit; quotes and the spacing
-#           inside `${{ }}` aside), and each `actions/checkout` step has `with:
-#           fetch-depth: 0` (there is one);
+#           token), its one `kci run` carries `--affected-by "$change_base"`
+#           (the merge commit's first parent, set by `CHANGE_BASE_LINE`:
+#           pull_request.mojo; never the event's base.sha), and each
+#           `actions/checkout` step has `with: fetch-depth: 0` (there is one);
 #         * no stored secret reaches it: no scalar of the job, nor of the
 #           workflow-level `env:`, names the `secrets` context (read ignoring
 #           case; only `secrets.GITHUB_TOKEN`, written so, is the job's own
 #           token), and no key of the job is `secrets`;
 #         * R17 and R18 hold it too: `pull_request` has no path filter
-#           (`check_pull_request_paths`), and no `run:` script holds a `${{ }}`
-#           but the base commit, no step or job `name:` an expression
+#           (`check_pull_request_paths`), and no `run:` script holds a `${{ }}`,
+#           no step or job `name:` an expression
 #           (`check_no_expression_in_run`: script injection);
 #         * what it runs is a BUILD step (the machine file refuses any other
 #           kind in a PULL_REQUEST stage), and a `kci run` of another stage in
@@ -528,6 +528,7 @@ def _check_job(
         )
     # R5, R11
     var calls = List[KciRunCall]()
+    var call_scripts = List[String]()
     var steps = doc.items(doc.child(job, String("steps")))
     var farm_connect_steps = 0
     for i in range(len(steps)):
@@ -539,6 +540,7 @@ def _check_job(
             var got = kci_run_calls(doc.text(r))
             for k in range(len(got)):
                 calls.append(got[k].copy())
+                call_scripts.append(doc.text(r))
     if len(calls) != 1:
         findings.append(
             where + String(": R5: invokes `kci run` ") + String(len(calls))
@@ -570,7 +572,7 @@ def _check_job(
         for i in range(len(calls)):
             values.append(calls[i].affected_by.copy())
             given.append(calls[i].has_affected_by)
-        check_pull_request_job(doc, job_id, job, st.name, values, given, findings)
+        check_pull_request_job(doc, job_id, job, st.name, values, given, call_scripts, findings)
         check_no_secret(doc, job, job_id, String("job '") + job_id + String("': "), findings)
     else:
         if pr_trigger:
@@ -764,7 +766,7 @@ def check_pull_request_workflow(
     read` and the farm connection's `id-token: write`, R5, R10, R11, R12, R14,
     and `check_pull_request_job`'s same-repository condition, pinned runner,
     full history and `--affected-by`); no secret anywhere (`check_no_secret`);
-    every `uses:` pinned (R8). Any other job (a gamma, prod, validate or build
+    every `uses:` pinned (R8). Any other job (a beta, beta_validate, prod or build
     job, a second job holding `id-token: write`, an `environment`) is a
     finding: it is no part of the pull request's check."""
     var findings = List[String]()
@@ -840,7 +842,7 @@ def check_pull_request_workflow(
         findings.append(
             _at(doc, job_nodes[i]) + String("R1: job '") + job_ids[i] + String("' is not the one job `")
             + String(PULL_REQUEST_JOB_ID) + String("` of pr.yml: only the PULL_REQUEST stage '") + st.name
-            + String("' runs here, so no gamma, prod, validate, build or other job, and no second job holding")
+            + String("' runs here, so no beta, beta_validate, prod, build or other job, and no second job holding")
             + String(" an environment, a secret or `id-token: write`")
         )
     if found < 0:
