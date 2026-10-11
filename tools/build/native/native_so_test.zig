@@ -236,6 +236,11 @@ test "check 4: green with libpthread, libc and ld-linux; red on an extra NEEDED,
     so.needed = &.{ "libc.so.6", "libkomira_x_native.so.1" };
     _ = try checks.check4(A, so, "libkomira_crypto_native.so.1", &red);
     try expectRed(red, "neither glibc nor a declared owner (1): libkomira_x_native.so.1");
+    // Planted: the extra NEEDED first.
+    red = checks.Red.init(A);
+    so.needed = &.{ "libm.so.6", "libc.so.6" };
+    _ = try checks.check4(A, so, "libkomira_crypto_native.so.1", &red);
+    try expectRed(red, "neither glibc nor a declared owner (1): libm.so.6");
     red = checks.Red.init(A);
     so = good();
     so.runpath = &.{"$ORIGIN"};
@@ -263,6 +268,11 @@ test "check 5: green at the floor; red above it, on GLIBC_PRIVATE, and on no gli
     so.verneed = &.{ .{ .file = "libc.so.6", .version = "GLIBC_2.14" }, .{ .file = "libc.so.6", .version = "GLIBC_2.38" } };
     _ = try checks.check5(A, so, "2.34", &red);
     try expectRed(red, "needs GLIBC_2.38 from libc.so.6, above the floor glibc 2.34; symbols (1): strlcpy");
+    // Planted: the version above the floor neither first nor last.
+    red = checks.Red.init(A);
+    so.verneed = &.{ .{ .file = "libc.so.6", .version = "GLIBC_2.14" }, .{ .file = "libc.so.6", .version = "GLIBC_2.38" }, .{ .file = "libpthread.so.0", .version = "GLIBC_2.2.5" } };
+    _ = try checks.check5(A, so, "2.34", &red);
+    try expectRed(red, "needs GLIBC_2.38 from libc.so.6, above the floor glibc 2.34; symbols (1): strlcpy");
     red = checks.Red.init(A);
     so = good();
     so.verneed = &.{.{ .file = "libc.so.6", .version = "GLIBC_PRIVATE" }};
@@ -276,6 +286,7 @@ test "check 5: green at the floor; red above it, on GLIBC_PRIVATE, and on no gli
     try t.expect(checks.versionAbove(&.{ 2, 38 }, &.{ 2, 34 }));
     try t.expect(!checks.versionAbove(&.{ 2, 2, 5 }, &.{ 2, 34 }));
     try t.expect(!checks.versionAbove(&.{ 2, 34 }, &.{ 2, 34, 0 }));
+    try t.expect(checks.versionAbove(&.{ 2, 34, 1 }, &.{ 2, 34 }));
 }
 
 test "check 6: green on 0xa (symbolic and bind-now); red on 0x8 and on no DT_FLAGS" {
