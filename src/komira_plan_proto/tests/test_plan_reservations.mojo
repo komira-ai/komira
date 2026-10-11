@@ -28,9 +28,11 @@
 # `reserved` outside a message or enum body (in a `oneof`, say), a `/* */`
 # comment, a `}` with no `{`) is refused rather than skipped. `reserved` is
 # read as the keyword only where a statement starts (after `{`, `}` or `;`),
-# so a field named `reserved` is a field. The checks are run over planted
+# so a field named `reserved` is a field. A HELD row that is not four words
+# ending `held` or `reserved` is refused. The checks are run over planted
 # defects as well (a deleted number, a deleted name, a reserved held number,
-# an added reservation, each unreadable form), and each must be reported.
+# an added reservation, each unreadable form, each malformed HELD row), and
+# each must be reported; a refusal is matched on its whole message.
 # =============================================================================
 
 from std.os import listdir
@@ -251,12 +253,27 @@ def _run(text: String, others: List[String], expected: List[String], held: List[
     return _check(texts, text, expected, held)
 
 
-def _refuses(text: String, needle: String) -> Bool:
-    """`_reserved` raises on `text`, naming `needle`."""
+def _refuses(text: String, message: String) -> Bool:
+    """`_reserved` raises on `text` with exactly `message`."""
     try:
         _ = _reserved(text)
     except e:
-        return String(e).find(needle) >= 0
+        return String(e) == message
+    return False
+
+
+def _unreadable(item: String) -> String:
+    """The message `_item` raises for an item of message `A` it cannot read."""
+    return "`reserved` in A: an item the reservation scan cannot read: `" + item + "`"
+
+
+def _held_refused(row: String) -> Bool:
+    """`_compare` raises on the HELD row `row` with exactly the malformed-row message."""
+    var held: List[String] = [row]
+    try:
+        _ = _compare(List[String](), List[String](), List[String](), held)
+    except e:
+        return String(e) == "malformed HELD row: `" + row + "`"
     return False
 
 
@@ -342,15 +359,32 @@ def main() raises:
     bad_held.append("ScanPin 13 len reserved")
     p = _compare(_reserved(optimized), _reserved(optimized), expected, bad_held)
     assert_true(_has(p, "HELD row `ScanPin 13 len reserved`"), "a HELD reserved row with no reservation is reported")
+    assert_true(_held_refused("ScanPin 12 varint hold"), "a HELD row whose last word is neither held nor reserved is refused")
+    assert_true(_held_refused("ScanPin 12 varint"), "a HELD row of three words is refused")
+    assert_true(_held_refused("ScanPin 12 varint held x"), "a HELD row of five words is refused")
 
-    assert_true(_refuses("message A {\n  reserved 5 to max;\n}\n", "cannot read: `5 to max`"), "`max` is refused")
-    assert_true(_refuses("message A {\n  reserved foo;\n}\n", "cannot read: `foo`"), "a bare identifier is refused")
-    assert_true(_refuses("message A {\n  reserved 1 to 5000;\n}\n", "over 1000"), "a huge range is refused")
-    assert_true(_refuses("message A {\n  reserved 1 to 1001;\n}\n", "over 1000"), "1001 numbers is over the limit")
+    # The scanner, one case per branch and per side of each bound.
+    assert_true(_refuses("message A {\n  reserved 5 to max;\n}\n", _unreadable("5 to max")), "`max` is refused")
+    assert_true(_refuses("message A {\n  reserved foo;\n}\n", _unreadable("foo")), "a bare identifier is refused")
+    assert_true(
+        _refuses("message A {\n  reserved 1 to 5000;\n}\n", "`reserved` in A: the range 1 to 5000 is over 1000 numbers"),
+        "a huge range is refused",
+    )
+    assert_true(
+        _refuses("message A {\n  reserved 1 to 1001;\n}\n", "`reserved` in A: the range 1 to 1001 is over 1000 numbers"),
+        "1001 numbers is over the limit",
+    )
     var thousand = _reserved("message A {\n  reserved 1 to 1000;\n}\n")
     assert_equal(len(thousand), 1000, "a range of exactly 1000 numbers is read in full")
     assert_equal(thousand[999], "A 1000", "the 1000-number range ends at its last number")
-    assert_true(_refuses("message A {\n  reserved 5 to 3;\n}\n", "is empty"), "an inverted range is refused, not read as nothing")
+    assert_true(
+        _refuses("message A {\n  reserved 5 to 3;\n}\n", "`reserved` in A: the range 5 to 3 is empty"),
+        "an inverted range is refused, not read as nothing",
+    )
+    assert_true(
+        _refuses("message A {\n  reserved 5 to 4;\n}\n", "`reserved` in A: the range 5 to 4 is empty"),
+        "a range whose end is one below its start is refused",
+    )
     var single = _reserved("message A {\n  reserved 4 to 4;\n}\n")
     assert_equal(len(single), 1, "a one-number range `4 to 4` is not empty")
     var field = _reserved("message A {\n  int32 reserved = 1;\n  reserved 2;\n}\n")
@@ -359,28 +393,51 @@ def main() raises:
     var packed = _reserved('message A{reserved 2;}enum E{reserved "X";}')
     assert_equal(len(packed), 2, "`{`, `}` and `;` split tokens with no spaces round them")
     assert_equal(packed[1], 'E "X"', "a `{` with no space before it still opens the named type's body")
+    assert_true(
+        _refuses("A {\n  reserved 1;\n} message\n", "a `reserved` statement outside a message or enum body"),
+        "a `{` second in the text has no `message` or `enum` before its name, whatever the last token is",
+    )
     var spaced = _reserved("message A {\n  reserved 1\t,2\r,3\f,4\v,5;\n}\n")
     assert_equal(len(spaced), 5, "tab, carriage return, form feed and vertical tab separate tokens")
     var commented = _reserved("message A {\n  // reserved 9;\n  reserved 2; // reserved 8;\n}\n")
     assert_equal(len(commented), 1, "a `//` comment is not read")
     assert_equal(commented[0], "A 2", "the code before a `//` comment is read")
-    assert_true(_refuses("message A {\n  reserved -1;\n}\n", "cannot read: `-1`"), "a signed number is refused")
-    assert_true(_refuses('message A {\n  reserved "";\n}\n', 'cannot read: `""`'), "an empty name is refused")
-    assert_true(_refuses('message A {\n  reserved "ab;\n}\n', 'cannot read: `"ab`'), "a name with no closing quote is refused")
-    assert_true(_refuses('message A {\n  reserved ab";\n}\n', 'cannot read: `ab"`'), "a name with no opening quote is refused")
-    assert_true(_refuses('message A {\n  reserved "a"b";\n}\n', 'cannot read: `"a"b"`'), "a name with a quote inside is refused")
-    assert_true(_refuses("message A {\n  reserved 1 2;\n}\n", "cannot read: `1 2`"), "two numbers with no comma are refused")
-    assert_true(_refuses("message A {\n  reserved 1 too 5;\n}\n", "cannot read: `1 too 5`"), "a range without `to` is refused")
-    assert_true(_refuses("message A {\n  reserved 1,,2;\n}\n", "cannot read: ``"), "an empty item is refused")
-    assert_true(_refuses("}\n", "never opened"), "a `}` with no `{` is refused")
-    assert_true(_refuses("reserved 1;\n", "outside a message"), "a top-level reserved is refused")
+    var column0 = _reserved("message A {\n// note; reserved 9;\n// }\n  reserved 2;\n}\n")
+    assert_equal(len(column0), 1, "a `//` comment that starts its line is not read")
+    assert_equal(column0[0], "A 2", "the statement after column-0 comments is read")
+    var digits = _reserved("message A {\n  reserved 0, 9, 90;\n}\n")
+    assert_equal(len(digits), 3, "the digits 0 and 9 are read as numbers")
+    assert_equal(digits[2], "A 90", "a number of the digits 9 and 0 is read")
+    assert_true(_refuses("message A {\n  reserved 1/;\n}\n", _unreadable("1/")), "`/`, the byte below `0`, is not a digit")
+    assert_true(_refuses("message A {\n  reserved 1:;\n}\n", _unreadable("1:")), "`:`, the byte above `9`, is not a digit")
+    assert_true(_refuses("message A {\n  reserved -1;\n}\n", _unreadable("-1")), "a signed number is refused")
+    assert_true(_refuses('message A {\n  reserved "";\n}\n', _unreadable('""')), "an empty name is refused")
+    assert_true(_refuses('message A {\n  reserved "ab;\n}\n', _unreadable('"ab')), "a name with no closing quote is refused")
+    assert_true(_refuses('message A {\n  reserved ab";\n}\n', _unreadable('ab"')), "a name with no opening quote is refused")
+    assert_true(_refuses('message A {\n  reserved "a"b";\n}\n', _unreadable('"a"b"')), "a name with a quote inside is refused")
+    assert_true(_refuses('message A {\n  reserved ""a";\n}\n', _unreadable('""a"')), "a quote just after the opening quote is refused")
+    assert_true(_refuses('message A {\n  reserved "a"";\n}\n', _unreadable('"a""')), "a quote just before the closing quote is refused")
+    assert_true(_refuses("message A {\n  reserved 1 2;\n}\n", _unreadable("1 2")), "two numbers with no comma are refused")
+    assert_true(_refuses("message A {\n  reserved 1 too 5;\n}\n", _unreadable("1 too 5")), "a range without `to` is refused")
+    assert_true(_refuses("message A {\n  reserved 1,,2;\n}\n", _unreadable("")), "an empty item is refused")
+    assert_true(_refuses("}\n", "the .proto text closes a block it never opened"), "a `}` with no `{` is refused")
+    assert_true(_refuses("reserved 1;\n", "a `reserved` statement outside a message or enum body"), "a top-level reserved is refused")
     assert_true(
-        _refuses("message A {\n  oneof c {\n    reserved 1;\n  }\n}\n", "outside a message"),
+        _refuses("message A {\n  oneof c {\n    reserved 1;\n  }\n}\n", "a `reserved` statement outside a message or enum body"),
         "a reserved inside a oneof is refused, not credited to the oneof",
     )
-    assert_true(_refuses("message A {\n  reserved 1\n}\n", "no `;`"), "an unterminated statement is refused")
-    assert_true(_refuses("/* x */ message A {\n}\n", "/* */"), "a block comment is refused")
-    assert_true(_refuses("message A {\n", "leaves a block open"), "an open block is refused")
+    assert_true(
+        _refuses("message A {\n  reserved 1\n}\n", "`reserved` in A: the statement has no `;`"), "an unterminated statement is refused"
+    )
+    assert_true(
+        _refuses("/* x */ message A {\n}\n", "the .proto text holds a /* */ comment, which the reservation scan does not read"),
+        "a block comment at the start of the text is refused",
+    )
+    assert_true(
+        _refuses("message A {\n}\n/* x */\n", "the .proto text holds a /* */ comment, which the reservation scan does not read"),
+        "a block comment later in the text is refused",
+    )
+    assert_true(_refuses("message A {\n", "the .proto text leaves a block open"), "an open block is refused")
     var nested = _reserved("message A {\n  message B {\n    reserved 2;\n  }\n  oneof c {\n    int32 x = 1;\n  }\n  reserved 3;\n}\n")
     assert_equal(len(nested), 2, "a nested message and a oneof are read")
     assert_equal(nested[0], "B 2", "a nested message's reservation is its own")
@@ -389,6 +446,38 @@ def main() raises:
     assert_equal(len(spread), 3, "a statement over lines with a range and a name")
     assert_equal(spread[1], "E 10", "a range's last number is reserved")
     assert_equal(spread[2], 'E "OLD"', "a name after a range")
+
+    # The helpers that read this file and plant the defects above.
+    var rows = _rows("\n x \n\n  \nab\n")
+    assert_equal(len(rows), 2, "_rows drops blank lines and keeps a one-character line")
+    assert_equal(rows[0], "x", "_rows strips a row")
+    assert_equal(_block('comptime X = """a"""', "X"), "a", "_block reads a block at the start of the source")
+    var missing = False
+    try:
+        _ = _block('comptime X = """a"""', "Y")
+    except e:
+        missing = String(e) == 'no `comptime Y = """` block'
+    assert_true(missing, "_block refuses a source with no such block")
+    var unclosed = False
+    try:
+        _ = _block('comptime X = """a', "X")
+    except e:
+        unclosed = String(e) == "the `X` block is not closed"
+    assert_true(unclosed, "_block refuses a block with no closing quotes")
+    assert_equal(_without("x\ny\n", "x"), "y\n", "_without removes the first line and its newline")
+    assert_equal(_with_after("ab", "a", "X"), "aXb", "_with_after inserts right after an anchor at the start")
+    var no_line = False
+    try:
+        _ = _without("x\n", "z")
+    except e:
+        no_line = String(e) == "planted defect: the .proto has no line `z`"
+    assert_true(no_line, "_without refuses a line the text does not hold")
+    var no_anchor = False
+    try:
+        _ = _with_after("x", "z", "y")
+    except e:
+        no_anchor = String(e) == "planted defect: the .proto has no `z`"
+    assert_true(no_anchor, "_with_after refuses an anchor the text does not hold")
 
     print("THE komira.plan.v1 RESERVATIONS ARE PINNED:", len(expected), "rows,", len(held), "HELD rows,", protos, ".proto files")
 
