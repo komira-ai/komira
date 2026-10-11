@@ -27,6 +27,20 @@ test "action_pins: a SHA one digit short, or one in a trailing comment, is refus
     try fx.expectFinding(r, "ci.yml:2:");
 }
 
+test "action_pins: a SHA run on into a 41st hex digit or another non-space is refused" {
+    // The first 40 characters after `@` are a full SHA; what follows must end
+    // the word. pinned()'s last check is what refuses these lines.
+    var f = try fx.Fixture.init();
+    defer f.deinit();
+    const wf = try f.write("stage/ci.yml", "    - uses: a/b@" ++ sha ++ "0\n    - uses: a/c@" ++ sha ++ "-x\n    - uses: a/d@" ++ sha ++ " # v4\n");
+    const r = try f.run("action_pins", "stage", &.{}, &.{wf});
+    try fx.expectFinding(r, "ci.yml:1:    - uses: a/b@");
+    try fx.expectFinding(r, "ci.yml:2:    - uses: a/c@");
+    // The third line's SHA ends at a space, so it passes: only two findings.
+    try std.testing.expect(std.mem.indexOf(u8, r.json, "ci.yml:3:") == null);
+    try std.testing.expectEqual(@as(usize, 3), r.checked);
+}
+
 test "action_pins: full SHAs and local actions pass" {
     var f = try fx.Fixture.init();
     defer f.deinit();
