@@ -41,6 +41,17 @@ Modules:
   every aggregate over the whole partition.
 - `partition_value_fns`: LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE over
   INT64, FLOAT64 and STRING columns.
+- `partition_scan_sink_parallel`: `_execute_partition_by_sink_parallel`, the
+  same rows on the engine's workers: one sort, then whole-partition buckets
+  evaluated in parallel and concatenated in order; below 65,536 rows, four
+  partitions or two workers it runs on the calling thread.
+- `partition_scan_sink_hash_scatter`: above that size, with INT64 partition
+  keys holding no NULL, rows are scattered by key range (sampled equi-depth
+  splitters) and each bucket is sorted and evaluated on its own worker.
+- `partition_by_sink`: `PartitionBySink`, the window operator as a
+  `MorselSink` of `komira_operator_api`; `finalize` runs the parallel driver.
+  Every route emits the same rows in the same order
+  (`komira_exec_types.partition_by_output_contract`).
 - `partition_null_policy`: the NULL policy every aggregate kernel shares,
   and the output allocators that size a validity bitmap only when a NULL can
   be written.
