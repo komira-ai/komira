@@ -145,6 +145,7 @@ from kci_reconciler import (
 from kci_cloud import (
     ABSENT_BY_DESIGN,
     Absence,
+    ARTIFACT_TYPE_OCI,
     ArtifactNeed,
     BootstrapItem,
     CellContext,
@@ -407,7 +408,7 @@ struct FakeCloud(ConformanceTarget, Movable):
         return out^
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
-        return ArtifactNeed(String("oci-image"), String(V1_IMAGE_PLATFORM))
+        return ArtifactNeed(String(ARTIFACT_TYPE_OCI), String(V1_IMAGE_PLATFORM))
 
     def lower(
         self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]
@@ -626,7 +627,7 @@ struct FakeLimitedCloud(ConformanceTarget, Movable):
         return out^
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
-        return ArtifactNeed(String("oci-image"), String(V1_IMAGE_PLATFORM))
+        return ArtifactNeed(String(ARTIFACT_TYPE_OCI), String(V1_IMAGE_PLATFORM))
 
     def lower(
         self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]

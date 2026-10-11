@@ -1,7 +1,8 @@
-# Not a BUCK file of the repository: run_tests.sh (test 53) copies it to
-# dangling/BUCK, builds tests//negative/surface_capability_matrix/dangling:dangling
-# and deletes it. Loadable, this target would make every query over tests//...
-# fail (the CI affected step's cquery among them).
+# Not a BUCK file of the repository: //tools/build/selftest:analysis_refusals_lint
+# copies it to dangling/BUCK in a scratch tree of the checkout and analyses
+# tests//negative/surface_capability_matrix/dangling:dangling there.
+# Loadable, this target would make every query over tests//... fail (the CI
+# affected step's cquery among them).
 load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
 load(
     "//functional/surface_capability_matrix:fixture.bzl",
