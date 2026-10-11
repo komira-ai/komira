@@ -206,6 +206,16 @@ export function* table_two_types(batches: Iterable<RecordBatch>): Generator<Tabl
   }
 }
 
+// A batch function that raises; the error names no row.
+export function raise_row_unset(_x: Vector<Int64>): Vector<Int64> {
+  throw new Error('raise_row_unset: the batch as a whole');
+}
+
+// A frame that raises before its first output.
+export function* raise_again(_batches: Iterable<RecordBatch>): Generator<Table> {
+  throw new Error('raise_again: raised');
+}
+
 // ---- this runtime's own cases --------------------------------------------------
 
 // Rows seen by this module in this process: a module global, so each worker
@@ -341,6 +351,37 @@ export const count = {
   merge: (s: bigint, t: I64): bigint => (t === null ? s : s + t),
   finish: (s: bigint): bigint => s,
 };
+
+// Throws a value with no prototype at the value 2: no toString, no
+// message, no stack.
+export function throws_bare(x: I64): I64 {
+  if (x === 2n) throw Object.create(null);
+  return x;
+}
+
+// running_sum after 30 ms of work before it reads any input: a cancel
+// raised during that work is seen between batches.
+export function* sleepy_running_sum(batches: Iterable<RecordBatch>): Generator<Table> {
+  sleepMs(30);
+  yield* running_sum(batches);
+}
+
+// sum, whose update raises on the value 3.
+export const sum_raise_on_3 = {
+  init: (): bigint => 0n,
+  update: (s: bigint, x: I64): bigint => {
+    if (x === 3n) throw new Error('sum_raise_on_3: update of 3');
+    return x === null ? s : s + x;
+  },
+  merge: (s: bigint, t: I64): bigint => (t === null ? s : s + t),
+  finish: (s: bigint): bigint => s,
+};
+
+// Names the corrupt worker refuses (worker/corrupt.mjs, refuseCorrupt):
+// `double` that a context's worker will not load, `sum` whose groups it
+// will not open.
+export const refused_in_context = double;
+export const agg_open_refused = sum;
 
 export const not_a_function = 42;
 

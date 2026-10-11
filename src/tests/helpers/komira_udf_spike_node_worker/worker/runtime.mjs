@@ -11,7 +11,7 @@ import path from 'node:path';
 
 import { batchParts, readBatch, readMessages, readSchema } from './arrow_io.mjs';
 import { ST, UdfError, column, raised, row, rowShape, scalar } from './calls.mjs';
-import { describeCorrupt, replyCorrupt } from './corrupt.mjs';
+import { describeCorrupt, refuseCorrupt, replyCorrupt } from './corrupt.mjs';
 import { Frame, Groups } from './frames.mjs';
 import { OP, WIRE_VERSION, reply, replyError, replyU64 } from './wire.mjs';
 
@@ -211,6 +211,7 @@ export class Runtime {
   }
 
   dispatch(req) {
+    if (this.corrupt && refuseCorrupt(this, req)) return;
     switch (req.op) {
       case OP.HELLO: {
         const dv = new DataView(req.body.buffer, req.body.byteOffset, req.body.byteLength);
@@ -252,6 +253,7 @@ export class Runtime {
         reply(req.id, 0);
         return;
       case OP.OPEN_CONTEXT:
+        this.inContext = true;
         replyU64(req.id, ++this.ids);
         return;
       case OP.CLOSE_CONTEXT:

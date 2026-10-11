@@ -6,18 +6,20 @@
 # are `<bundle>#<export>`, so every entry becomes `fixtures.mjs#<name>`: the
 # esbuild bundle of udf/fixtures.ts.
 #
-# Sixty-six cases are left out (runtime_fault_cases): each one's fixture is
-# an act at the C ABI, which only a runtime library can commit, or a per-row
-# function that raises by its row's position; user code cannot express
-# either. In this runtime the proxy, not user code, builds every
-# array the host sees, moves and releases the inputs, and fills the error, so
-# a TypeScript function cannot leave an input unmoved, fill an error on OK,
-# name a row outside its batch, leave the error's row as the host set it,
-# hand back a malformed or sliced output array or table, move a child out of
-# the argument struct, read the schema flags, refuse a second group set, or
-# answer after its own error. komira-test/echo has those fixtures.
-# Every case user code can express runs, among them the frame that never
-# ends (an endless generator is user code).
+# Sixty-five cases are left out (runtime_fault_cases): each one's fixture
+# is an act at the C ABI, which only a runtime library can commit, or a
+# per-row function that raises by its row's position. In this runtime the
+# proxy, not user code, builds every array the host sees, moves and
+# releases the inputs, and fills the error, so a TypeScript function cannot
+# leave an input unmoved, fill an error on OK, name a row outside its batch,
+# hand back a malformed or sliced output array or table, move a child out
+# of the argument struct, read the schema flags, or refuse a second group
+# set. komira-test/echo has those fixtures. Where a case's fixture is a
+# runtime act whose outcome plain user code also reaches, the case runs
+# with the user code: raise_row_unset is a batch function that throws (the
+# proxy reports row -1), raise_again a generator that throws (the worker
+# ends the frame, so nothing answers after the error). The frame that
+# never ends runs too (an endless generator is user code).
 
 from komira_udf_spike_abi.cases import Case
 from komira_udf_spike_abi.conform import load_cases
@@ -29,7 +31,6 @@ def runtime_fault_cases() -> List[String]:
     """The cases whose fixtures user code cannot express (above)."""
     return [
         # inputs not moved, an error filled on OK, an error row outside the batch
-        # or left as the host set it
         "fault_args_not_moved",
         "fault_args_not_moved_on_error",
         "fault_agg_args_not_moved",
@@ -46,7 +47,6 @@ def runtime_fault_cases() -> List[String]:
         "fault_error_row_minus_two",
         "fault_error_row_past_batch",
         "fault_error_row_past_batch_propagate",
-        "error_row_left_unset",
         # output columns the proxy builds: malformed, or a legal layout it never
         # writes (sliced, null_count -1, no data buffer)
         "bad_output_layout",
@@ -88,6 +88,7 @@ def runtime_fault_cases() -> List[String]:
         "fault_table_null_count_zero",
         "fault_table_null_rows",
         "fault_table_out_on_error",
+        "fault_table_release_keeps_slot",
         "frame_output_sliced_offset",
         "table_null_count_unknown",
         # a frame that yields its two-column input as a one-column table:
@@ -106,12 +107,10 @@ def runtime_fault_cases() -> List[String]:
         "agg_state_long_by_one",
         "agg_finish_short_by_one",
         # acts at the ABI: a child moved out of the argument struct, the schema
-        # flags read, a second group set refused, a frame answering after its
-        # error
+        # flags read, a second group set refused
         "child_moved_out",
         "schema_flags_exported",
         "agg_partials_on_own_instances",
-        "frame_no_next_after_error",
     ]
 
 

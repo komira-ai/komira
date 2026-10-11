@@ -37,6 +37,8 @@ typedef struct komira_udf_rt {
   komira_udf_capabilities caps;
   char runtime_id[128];
   char runtime_abi[64];
+  uint64_t* live; /* the serials of the udfs loaded and not unloaded (admin_mu) */
+  int n_live, cap_live;
 } rt_t;
 
 typedef struct komira_udf_udf {
@@ -48,6 +50,9 @@ typedef struct komira_udf_udf {
   kudfw_schema args, result, state;
 } udf_t;
 
+/* The UDFs one context's worker holds at once. A UDF the host unloaded is
+ * dropped from a full table (UNLOAD to the context's worker) before a new
+ * one is refused. */
 #define MAX_LOADED 32
 
 typedef struct komira_udf_context {
@@ -125,8 +130,9 @@ static void drop(struct ArrowArray* a) {
 static int32_t take_output(const komira_udf_host* host, kudfw_reply* r, const kudfw_schema* want, int as_struct,
                            struct ArrowDeviceArray* out, komira_udf_error* err) {
   if (host->mem_reserve != NULL && host->mem_reserve(host->host_data, (int64_t)r->len) != KOMIRA_UDF_OK) {
+    size_t n = r->len;
     kudfw_reply_free(r);
-    return kudfw_fail(err, KOMIRA_UDF_ERR_OUT_OF_MEMORY, -1, "the host refused %zu bytes of output", r->len);
+    return kudfw_fail(err, KOMIRA_UDF_ERR_OUT_OF_MEMORY, -1, "the host refused %zu bytes of output", n);
   }
   kudfw_hold* hold = kudfw_hold_new(r->payload, r->len, host);
   if (hold == NULL) {
@@ -295,6 +301,21 @@ static int32_t t_load(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf_ud
   u->rt = rt;
   u->shape = s->shape;
   u->serial = atomic_fetch_add(&udf_serials, 1);
+  pthread_mutex_lock(&rt->admin_mu);
+  if (rt->n_live == rt->cap_live) {
+    int cap = rt->cap_live ? 2 * rt->cap_live : 16;
+    uint64_t* p = (uint64_t*)realloc(rt->live, (size_t)cap * sizeof(*p));
+    if (p == NULL) {
+      pthread_mutex_unlock(&rt->admin_mu);
+      kudfw_buf_free(&u->load_body);
+      free(u);
+      return kudfw_fail(err, KOMIRA_UDF_ERR_OUT_OF_MEMORY, -1, "no memory for a udf");
+    }
+    rt->live = p;
+    rt->cap_live = cap;
+  }
+  rt->live[rt->n_live++] = u->serial;
+  pthread_mutex_unlock(&rt->admin_mu);
   *out = u;
   return KOMIRA_UDF_OK;
 }
@@ -306,6 +327,11 @@ static void t_unload(komira_udf_udf* u) {
   pthread_mutex_lock(&rt->admin_mu);
   if (ask(&rt->admin, rt->host, KOMIRA_UDF_OP_UNLOAD, 0, u->admin_id, NULL, 0, 0, NULL, &rep, NULL) == KOMIRA_UDF_OK)
     kudfw_reply_free(&rep);
+  for (int i = 0; i < rt->n_live; i++)
+    if (rt->live[i] == u->serial) {
+      rt->live[i] = rt->live[--rt->n_live];
+      break;
+    }
   pthread_mutex_unlock(&rt->admin_mu);
   kudfw_buf_free(&u->load_body);
   free(u);
@@ -362,6 +388,29 @@ static void t_close_context(komira_udf_context* c) {
   free(c);
 }
 
+/* Drop the UDFs the host has unloaded from a context's table, and from its
+ * worker. */
+static void drop_unloaded(ctx_t* c) {
+  rt_t* rt = c->rt;
+  int keep = 0;
+  for (int i = 0; i < c->n_loaded; i++) {
+    int live = 0;
+    pthread_mutex_lock(&rt->admin_mu);
+    for (int k = 0; k < rt->n_live && !live; k++) live = rt->live[k] == c->loaded_serial[i];
+    pthread_mutex_unlock(&rt->admin_mu);
+    if (live) {
+      c->loaded_serial[keep] = c->loaded_serial[i];
+      c->loaded_id[keep] = c->loaded_id[i];
+      keep++;
+      continue;
+    }
+    kudfw_reply rep;
+    if (ask(&c->w, rt->host, KOMIRA_UDF_OP_UNLOAD, 0, c->loaded_id[i], NULL, 0, 0, NULL, &rep, NULL) == KOMIRA_UDF_OK)
+      kudfw_reply_free(&rep);
+  }
+  c->n_loaded = keep;
+}
+
 static int32_t t_open_instance(komira_udf_context* c, komira_udf_udf* u, komira_udf_instance** out,
                                komira_udf_error* err) {
   *out = NULL;
@@ -374,6 +423,7 @@ static int32_t t_open_instance(komira_udf_context* c, komira_udf_udf* u, komira_
     }
   kudfw_reply rep;
   int32_t rc;
+  if (!found && c->n_loaded == MAX_LOADED) drop_unloaded(c);
   if (!found) {
     if (c->n_loaded == MAX_LOADED)
       return kudfw_fail(err, KOMIRA_UDF_ERR_UNSUPPORTED, -1, "more than %d UDFs in one context", MAX_LOADED);
@@ -668,6 +718,7 @@ static void t_shutdown(komira_udf_rt* rt) {
   if (rt == NULL) return;
   kudfw_stop(&rt->admin);
   pthread_mutex_destroy(&rt->admin_mu);
+  free(rt->live);
   free(rt);
 }
 

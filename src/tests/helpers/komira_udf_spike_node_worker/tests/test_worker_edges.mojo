@@ -21,6 +21,16 @@
 #   - validate refuses a column shape returning a table, a mergeable
 #     aggregate without a state, and ROW fields named twice; open_instance
 #     refuses a mergeable aggregate whose export is a function.
+#   - a value thrown with no prototype is ERR_RAISED at its row, named "a
+#     thrown value" (raised() calling String() on it threw instead, losing
+#     the row: red before the fix);
+#   - a frame cancelled while it works is ERR_CANCELLED when it asks for
+#     input (the proxy's check between batches);
+#   - an aggregate update's error names its row and group (the ERROR
+#     reply's group decoded);
+#   - a future deadline: a batch function that ignores it is killed at it,
+#     ERR_DEADLINE; a frame whose deadline is reached by frame_next's own
+#     clock read is refused before sending.
 #
 # Mutants planted (the sweep's ids in the pull request): calls.mjs Out.set
 # without its float64 (m1415), int64 range (m1421), safe-number (m1423) and
@@ -213,6 +223,67 @@ def _validate(mut rt: UdfRuntime, ctx: Handle) raises:
     rt.unload(u.handle)
 
 
+def _thrown_values(mut rt: UdfRuntime, ctx: Handle) raises:
+    # A value with no prototype thrown at row 1: the error keeps its row
+    # and names the value, whatever String() of it does.
+    var s = _spec(SHAPE_SCALAR, "fixtures.mjs#throws_bare")
+    var b = _bind(rt, ctx, s)
+    var r = rt.call_batch(b.inst, s, _ints([1, 2, 3]), CallOptions.plain())
+    _expect(r.outcome, ERR_RAISED, "a thrown value", "a bare object thrown")
+    assert_equal(r.outcome.row, 1, "the row of the bare object")
+    _unbind(rt, b)
+
+
+def _cancel_between_batches(mut rt: UdfRuntime, ctx: Handle) raises:
+    # The frame works 30 ms before it asks for input; the cancel raised
+    # during that work is seen when it asks.
+    var s = _spec(SHAPE_MAP_BATCHES_FRAME, "fixtures.mjs#sleepy_running_sum")
+    s.result_is_table = True
+    var b = _bind(rt, ctx, s)
+    var f = rt.run_frame(b.inst, s, [_ints([1]), _ints([2])], CallOptions(False, True, False))
+    _expect(f.outcome, ERR_CANCELLED, "cancelled between frame batches", "a frame cancelled while it works")
+    _unbind(rt, b)
+
+
+def _agg_error_group(mut rt: UdfRuntime, ctx: Handle) raises:
+    # An update raising on the value 3, at row 2 of group 1: both named.
+    var s = _spec(SHAPE_AGG_MERGEABLE, "fixtures.mjs#sum_raise_on_3")
+    s.state = ColumnType(TYPE_INT64, True)
+    var b = _bind(rt, ctx, s)
+    var g = rt.agg_open(b.inst)
+    var up = rt.agg_update(g.handle, _ints([1, 2, 3]), [Int32(0), Int32(0), Int32(1)], 2, CallOptions.plain())
+    _expect(up, ERR_RAISED, "sum_raise_on_3: update of 3", "an update that raises")
+    assert_equal(up.row, 2, "the row of the update's error")
+    assert_equal(up.group, 1, "the group of the update's error")
+    rt.agg_close(g.handle)
+    _unbind(rt, b)
+
+
+def _future_deadlines(mut rt: UdfRuntime, ctx: Handle) raises:
+    # A future deadline on the harness's virtual clock (1 ms per read of
+    # the host's clock). A batch function that never checks it is killed
+    # once the proxy's own reads pass it, after the grace period, as
+    # ERR_DEADLINE.
+    var s = _spec(SHAPE_MAP_BATCHES_COLUMN, "fixtures.mjs#spin_forever")
+    var b = _bind(rt, ctx, s)
+    var r = rt.call_batch(b.inst, s, _ints([1]), CallOptions(False, False, False, 2_500_000))
+    _expect(r.outcome, ERR_DEADLINE, "past its deadline and the worker did not answer within 500 ms", "a deadline user code ignores")
+    _unbind(rt, b)
+
+
+def _deadline_at_next(mut rt: UdfRuntime, ctx: Handle) raises:
+    # A frame whose deadline is 1 ms after its open: frame_open's request
+    # reads the clock once (the start), frame_next's request reads it at
+    # the deadline, which leaves nothing to send, so frame_next refuses it
+    # before sending, whatever the worker would do.
+    var s = _spec(SHAPE_MAP_BATCHES_FRAME, "fixtures.mjs#running_sum")
+    s.result_is_table = True
+    var b = _bind(rt, ctx, s)
+    var f = rt.run_frame(b.inst, s, [_ints([1])], CallOptions(False, False, False, 1_000_000))
+    _expect(f.outcome, ERR_DEADLINE, "the call's deadline passed before it was sent", "a deadline reached at frame_next")
+    _unbind(rt, b)
+
+
 def main() raises:
     arm_watchdog()
     var rt = UdfRuntime.open(LIB)
@@ -223,11 +294,19 @@ def main() raises:
     _frames(rt, c.handle)
     _merge(rt, c.handle)
     _validate(rt, c.handle)
+    _thrown_values(rt, c.handle)
+    _agg_error_group(rt, c.handle)
+    _deadline_at_next(rt, c.handle)
     rt.close_context(c.handle)
     # cancels end in the worker's error, so each gets a fresh context
     var c2 = rt.open_context(1)
     _cancel_every_loop(rt, c2.handle)
+    _cancel_between_batches(rt, c2.handle)
     rt.close_context(c2.handle)
+    # a worker killed at its deadline: its own context
+    var c3 = rt.open_context(2)
+    _future_deadlines(rt, c3.handle)
+    rt.close_context(c3.handle)
     var l = rt.ledger()
     assert_equal(l.exported, l.released, "arrays exported vs released")
     assert_equal(l.streams_exported, l.streams_released, "streams exported vs released")

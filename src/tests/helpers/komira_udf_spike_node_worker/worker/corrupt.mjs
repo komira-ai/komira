@@ -12,7 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { MAGIC, OP, FLAG_INLINE, HEADER_BYTES, nextRequest, reply, writeRaw } from './wire.mjs';
+import { MAGIC, OP, FLAG_INLINE, HEADER_BYTES, nextRequest, reply, replyError, writeRaw } from './wire.mjs';
 
 class Fb {
   constructor() {
@@ -314,6 +314,7 @@ function errorBody(code, message, messageLen = null) {
 }
 
 const ERR_RAISED = 6;
+const ERR_INTERNAL_CODE = 15;
 
 // Each case's whole reply (header and payload), by number: framing breaks
 // (channel.c, kudfw_request; the proxy kills the worker) and malformed
@@ -339,6 +340,10 @@ const FRAMES = {
     return [header({ id, op: OP.ERROR, len: b.length }), b];
   },
   115: (id) => [header({ id, op: OP.ERROR, len: 20 }), errorBody(ERR_RAISED, '').subarray(0, 20)], // no message length
+  117: (id) => {
+    const b = errorBody(999, 'an ERROR reply with code 999'); // past the status table
+    return [header({ id, op: OP.ERROR, len: b.length }), b];
+  },
   116: (id) => {
     const b = errorBody(ERR_RAISED, 'a trace longer than the payload');
     b.writeUInt32LE(1000, b.length - 4);
@@ -397,6 +402,33 @@ function helloCorrupt() {
 }
 
 if (process.argv.includes('--corrupt-output')) helloCorrupt();
+
+// Requests the corrupt worker refuses with an ERROR, each a refusal the
+// proxy must pass on (tests/test_node_worker.mojo, _corrupt_refusals):
+// OPEN_CONTEXT for slot 7; LOAD of `refused_in_context` in a context's
+// worker (the admission worker loads it); AGG_OPEN on an instance of
+// `agg_open_refused`. True when it replied.
+export function refuseCorrupt(rt, req) {
+  let why = null;
+  if (req.op === OP.OPEN_CONTEXT && req.body.byteLength >= 4) {
+    const slot = new DataView(req.body.buffer, req.body.byteOffset, 4).getUint32(0, true);
+    if (slot === 7) why = 'corrupt: OPEN_CONTEXT refused for slot 7';
+  } else if (req.op === OP.LOAD && rt.inContext) {
+    let s = null;
+    try {
+      s = rt.spec(req.body);
+    } catch {
+      s = null;
+    }
+    if (s !== null && s.exportName === 'refused_in_context') why = 'corrupt: LOAD refused in a context';
+  } else if (req.op === OP.AGG_OPEN) {
+    const inst = rt.instances.get(req.handle);
+    if (inst !== undefined && inst.udf.exportName === 'agg_open_refused') why = 'corrupt: AGG_OPEN refused';
+  }
+  if (why === null) return false;
+  replyError(req.id, ERR_INTERNAL_CODE, why);
+  return true;
+}
 
 export function describeCorrupt(id, fixed, good) {
   const name = Buffer.from('komira-test/node');

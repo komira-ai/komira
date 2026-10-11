@@ -25,13 +25,44 @@ export class UdfError extends Error {
   }
 }
 
+// The first of `tries` that returns a string without throwing, else `last`.
+function firstText(tries, last) {
+  for (const t of tries) {
+    try {
+      const v = t();
+      if (typeof v === 'string') return v;
+    } catch {
+      // a getter, toString or Proxy trap of user code that throws
+    }
+  }
+  return last;
+}
+
+// What user code threw, as the error of the call: any value, whatever its
+// prototype, getters or traps do; the row and group are kept.
 export function raised(e, row, group = -1) {
-  if (e instanceof UdfError) {
+  let ours = false;
+  try {
+    ours = e instanceof UdfError;
+  } catch {
+    ours = false;
+  }
+  if (ours) {
     if (e.row < 0) e.row = row;
     return e;
   }
-  const msg = e instanceof Error ? `${e.name}: ${e.message}` : `a thrown value: ${String(e)}`;
-  return new UdfError(ST.RAISED, msg, { row, group, trace: e instanceof Error ? e.stack : '' });
+  let isError = false;
+  try {
+    isError = e instanceof Error;
+  } catch {
+    isError = false;
+  }
+  const what = firstText(
+    [() => (isError ? `${e.name}: ${e.message}` : undefined), () => `a thrown value: ${String(e)}`, () => `a thrown value: ${Object.prototype.toString.call(e)}`],
+    'a thrown value',
+  );
+  const trace = isError ? firstText([() => e.stack], '') : '';
+  return new UdfError(ST.RAISED, what, { row, group, trace });
 }
 
 // The cancel word and the deadline, read between rows: never before row 0

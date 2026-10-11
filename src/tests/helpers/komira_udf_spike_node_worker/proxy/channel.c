@@ -272,9 +272,16 @@ int32_t kudfw_request(kudfw_worker* w, const komira_udf_host* host, uint32_t op,
   uint8_t* payload = NULL;
   if (rh.payload_len > 0) {
     void* p = NULL;
-    if (posix_memalign(&p, KUDFW_ALIGN, (size_t)rh.payload_len) != 0)
+    if (posix_memalign(&p, KUDFW_ALIGN, (size_t)rh.payload_len) != 0) {
+      /* The reply's bytes stay unread on the channel, so the next request
+       * would read them as its reply: the worker cannot be used again. */
+      kill(w->pid, SIGKILL);
+      char how[160];
+      reap(w, 0, how, sizeof(how));
+      mark_lost(w, "no memory for a reply; the worker was killed");
       return kudfw_fail(err, KOMIRA_UDF_ERR_OUT_OF_MEMORY, -1, "no memory for a %llu-byte reply",
                         (unsigned long long)rh.payload_len);
+    }
     payload = (uint8_t*)p;
     if (recv_all(w->sock, payload, (size_t)rh.payload_len) != 0) {
       free(payload);
@@ -337,7 +344,8 @@ int32_t kudfw_reply_status(const kudfw_reply* r, komira_udf_error* err) {
     free(trace);
     return kudfw_fail(err, KOMIRA_UDF_ERR_INTERNAL, -1, "a malformed ERROR reply");
   }
-  if (code <= 0) code = KOMIRA_UDF_ERR_INTERNAL; /* ERROR with OK, or a negative code */
+  /* ERROR with OK, a negative code, or one past the status table */
+  if (code <= 0 || code > KOMIRA_UDF_ERR_FIELD_NOT_DECLARED) code = KOMIRA_UDF_ERR_INTERNAL;
   if (trace != NULL && trace[0] == 0) {
     free(trace);
     trace = NULL;

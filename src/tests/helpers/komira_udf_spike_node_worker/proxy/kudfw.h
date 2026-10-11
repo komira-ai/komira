@@ -151,7 +151,11 @@ typedef struct kudfw_reply {
   size_t len;
 } kudfw_reply;
 
-/* Start a worker and exchange HELLO. 0, or a status with `err` filled. */
+/* Start a worker and exchange HELLO. 0, or a status with `err` filled.
+ * The worker exits at end of file on its channel (worker/wire.mjs), which is
+ * how it ends when the engine process dies without sending SHUTDOWN: the
+ * kernel closes the engine's end. No parent-death signal is set; a worker
+ * busy in user code when the engine dies runs until that call returns. */
 int32_t kudfw_spawn(const kudfw_launcher* l, const komira_udf_host* host, kudfw_worker* w,
                     komira_udf_error* err);
 

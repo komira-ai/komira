@@ -272,6 +272,7 @@ def _crashes(mut rt: UdfRuntime) raises:
     var b = _bind(rt, s, 0)
     var r = rt.call_batch(b.inst, s, _ints([0, 1, 2, 3]), CallOptions.plain())
     _expect(r.outcome, ERR_INSTANCE_LOST, "exited with status 3", "exit mid-batch")
+    assert_equal(r.outcome.row, -1, "the row of a lost worker's error")
     var again = rt.call_batch(b.inst, s, _ints([0]), CallOptions.plain())
     _expect(again.outcome, ERR_INSTANCE_LOST, "worker lost", "a call on the lost context")
     _unbind(rt, b)
@@ -454,6 +455,33 @@ def _reader_bounds(mut rt: UdfRuntime, b: Bound, s: UdfSpec) raises:
         assert_equal(r.column.bits[0], 0, "corrupt case " + String(k))
 
 
+def _corrupt_refusals(mut rt: UdfRuntime) raises:
+    # Requests the corrupt worker refuses (worker/corrupt.mjs,
+    # refuseCorrupt), each passed on by the proxy with the worker's reason
+    # and no handle: OPEN_CONTEXT, a context's LOAD of a UDF the admission
+    # worker loaded, AGG_OPEN.
+    var c7 = rt.open_context(7)
+    _expect(c7.outcome, ERR_INTERNAL, "OPEN_CONTEXT refused for slot 7", "a refused OPEN_CONTEXT")
+    var c = rt.open_context(0)
+    assert_true(c.outcome.is_ok(), String(c.outcome))
+    var s = _spec(SHAPE_SCALAR, "fixtures.mjs#refused_in_context", TYPE_INT64)
+    var u = rt.load(s)
+    assert_true(u.outcome.is_ok(), "the admission worker's LOAD: " + String(u.outcome))
+    var i = rt.open_instance(c.handle, u.handle)
+    _expect(i.outcome, ERR_INTERNAL, "LOAD refused in a context", "a context's refused LOAD")
+    rt.unload(u.handle)
+    var a = _spec(SHAPE_AGG_MERGEABLE, "fixtures.mjs#agg_open_refused", TYPE_INT64)
+    a.state = ColumnType(TYPE_INT64, True)
+    var au = rt.load(a)
+    var ai = rt.open_instance(c.handle, au.handle)
+    assert_true(ai.outcome.is_ok(), String(ai.outcome))
+    var g = rt.agg_open(ai.handle)
+    _expect(g.outcome, ERR_INTERNAL, "AGG_OPEN refused", "a refused AGG_OPEN")
+    rt.close_instance(ai.handle)
+    rt.unload(au.handle)
+    rt.close_context(c.handle)
+
+
 def _corrupt_outputs() raises:
     _corrupt_hellos()
     _corrupt_describes()
@@ -518,9 +546,9 @@ def _corrupt_outputs() raises:
     _bitmap_and_alignment(rt, b, s)
     _reader_bounds(rt, b, s)
     # Malformed ERROR replies and ERROR codes that are not errors (cases 111
-    # to 116: too short, a message longer than the payload, codes 0 and -5,
-    # no message length, a trace longer than the payload): the framing
-    # holds, so the worker stays usable.
+    # to 117: too short, a message longer than the payload, codes 0 and -5,
+    # no message length, a trace longer than the payload, code 999, past
+    # the status table): the framing holds, so the worker stays usable.
     var errors: List[String] = [
         "a malformed ERROR reply (10 bytes)",
         "a malformed ERROR reply",
@@ -528,6 +556,7 @@ def _corrupt_outputs() raises:
         "an ERROR reply with code -5",
         "a malformed ERROR reply",
         "a malformed ERROR reply",
+        "an ERROR reply with code 999",
     ]
     for i in range(len(errors)):
         var r = rt.call_batch(b.inst, s, _ints([111 + i]), CallOptions.plain())
@@ -541,6 +570,7 @@ def _corrupt_outputs() raises:
     assert_true(ok.outcome.is_ok(), "the worker after refused replies: " + String(ok.outcome))
     assert_equal(ok.column.bits[4], 10)
     _unbind(rt, b)
+    _corrupt_refusals(rt)
     # Breaks of the framing (cases 101 to 105): the worker is killed, so
     # each case gets its own context.
     for k in range(101, 106):

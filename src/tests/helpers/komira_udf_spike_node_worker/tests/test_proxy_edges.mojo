@@ -13,7 +13,8 @@
 #     refusal turned into a udf);
 #   - one context holds 32 UDFs and refuses the 33rd by name, and serves 40
 #     instances of one UDF (a full table written past its end, or a UDF
-#     loaded again for every instance);
+#     loaded again for every instance); 40 UDFs loaded and unloaded one
+#     after another fit, because a full table drops the unloaded ones;
 #   - a cancel already set is refused before anything is sent, by name, for
 #     a call (row 0), a frame's open and an aggregate's update (a cancel
 #     left to the worker instead);
@@ -150,6 +151,24 @@ def _udfs_per_context(mut rt: UdfRuntime) raises:
         rt.unload(udfs[i])
 
 
+def _unloaded_dropped(mut rt: UdfRuntime) raises:
+    # 40 UDFs one after another in one context, each unloaded before the
+    # next is loaded: the context drops the unloaded ones, so it never fills
+    # (a table that keeps every UDF ever opened refuses the 33rd).
+    var s = _spec(SHAPE_SCALAR, "fixtures.mjs#double")
+    var c = rt.open_context(0)
+    for k in range(40):
+        var u = rt.load(s)
+        assert_true(u.outcome.is_ok(), "load " + String(k) + ": " + String(u.outcome))
+        var i = rt.open_instance(c.handle, u.handle)
+        assert_true(i.outcome.is_ok(), "UDF " + String(k) + " after " + String(k) + " unloaded: " + String(i.outcome))
+        var r = rt.call_batch(i.handle, s, _ints([k]), CallOptions.plain())
+        assert_equal(r.column.bits[0], Int64(2 * k), "UDF " + String(k))
+        rt.close_instance(i.handle)
+        rt.unload(u.handle)
+    rt.close_context(c.handle)
+
+
 def _cancelled_before(mut rt: UdfRuntime) raises:
     var cancel = CallOptions(True, False, False)
     var s = _spec(SHAPE_SCALAR, "fixtures.mjs#slow_loop")
@@ -234,6 +253,7 @@ def main() raises:
     _spec_refusals(rt)
     _load_refusal(rt)
     _udfs_per_context(rt)
+    _unloaded_dropped(rt)
     _cancelled_before(rt)
     _aggregates(rt)
     var l = rt.ledger()
