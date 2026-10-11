@@ -36,10 +36,11 @@ Modules:
   RANGE bounds without an offset (peer groups, any key type), and RANGE
   offsets on one INT64 / FLOAT64 key with no NULL and no NaN (other RANGE
   offsets raise).
-- `partition_sliding_frame`: SUM / COUNT / AVG over a bounded frame on a
-  two-pointer window (a float sum keeps its infinities and NaNs apart, so
-  one leaving the frame does not leave NaN behind), MIN / MAX by rescan, and
-  every aggregate over the whole partition.
+- `partition_sliding_frame`: COUNT and INT64 SUM / AVG over a bounded frame
+  on a two-pointer window; FLOAT64 SUM / AVG on a sum tree, so each frame is
+  summed from its own values alone (subtracting a value that leaves would
+  take with it what it absorbed, or leave NaN behind an infinity); MIN / MAX
+  by rescan; every aggregate over the whole partition.
 - `partition_value_fns`: LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE over
   INT64, FLOAT64 and STRING columns.
 - `partition_scan_sink_parallel`: `_execute_partition_by_sink_parallel`, the

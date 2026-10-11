@@ -1,0 +1,27 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The hash aggregation tables of the engine: the split-index
+# FlatHashAggregator (a compact tag array to probe, a slot directory, and an
+# insertion-order entry buffer of hashes, keys and aggregate slots) with its
+# hash, probe, accumulator and resize helpers; the perfect-hash aggregator
+# for small dense integer key domains; the radix-partitioned aggregator; and
+# the partition flush buffers of the abandon cycle. The sinks that drive
+# these tables are in the packages above.
+mojo_library(
+    name = "komira_op_agg_hash",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_agg_api:komira_agg_api",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_udf:komira_udf",
+    ],
+    test_srcs = [
+        "tests/test_flat_hash_agg.mojo",
+        "tests/test_flat_hash_partition_flush.mojo",
+        "tests/test_max_perfect_hash_domain.mojo",
+        "tests/test_minmax_float_order.mojo",
+        "tests/test_partitioned_and_perfect.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

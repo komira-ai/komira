@@ -176,7 +176,13 @@ session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.sh),
 - **`[run_check]`** (`mojo_binary`): runs the binary remotely from its
   runnable directory, with no library path set, and with `expected_stdout`
   compares its stdout byte for byte
-  ([`examples/BUCK`](../examples/BUCK) `hello`, `hello_pkg_user`).
+  ([`examples/BUCK`](../examples/BUCK) `hello`, `hello_pkg_user`). With
+  `expected_stdout` the check is also a validation of the binary
+  ([`run_check.bzl`](run_check.bzl)): every build whose graph holds the
+  binary runs it, and fails when its stdout differs or it exits non-zero.
+  A `run_check_wired` target ([`examples/BUCK`](../examples/BUCK),
+  [`examples/rust/BUCK`](../examples/rust/BUCK)) fails analysis if a
+  binary rule stops returning that validation.
 - **`buck2 run <target>`**: builds remotely and runs the binary on your
   machine (Linux x86_64) from its runnable directory, downloading the binary
   and its runtime libraries, never the compiler
@@ -413,7 +419,8 @@ mojo_test(
   `buck2 run` and `[runnable]` do not pass `args`. A library's `test_srcs`
   take none: a gated test is a unit test of its package and gets everything
   it reads through `test_data`
-  ([`tests//functional/test_data:mojo_test_args`](../tests/functional/test_data/BUCK)).
+  ([`mojo_test_testdata:mojo_test_args`](mojo_test_testdata/BUCK), run by
+  `buck2 test` in the pull-request check).
 - **Scratch.** `TEST_TMPDIR` (equal to `TMPDIR`) and `HOME` are two empty
   directories the runner makes for this run inside the action's working
   directory, so no two runs share them, and they are removed afterwards.
@@ -818,6 +825,49 @@ aws-lc, s2n-tls and snappy are built with their global symbols renamed:
 Mojo code calls `external_call["komira_awslc_SHA256", ...]`. The renaming is a
 generated header each library force-includes, and a symbol check gates
 every build that links the library; see [`../native`](../native/README.md).
+
+### Native reach
+
+A library's conda package requires the packages of its Mojo `deps` and
+nothing else, so a library reaching another library's native code must have
+that library in its Mojo deps closure. Each C archive has one owner, the
+`mojo_library` that ships it: the library of its own package
+(`//src/<name>:<name>`) for a `cxx_library` under `src/`, and the
+`THIRD_PARTY_OWNERS` row of its package
+([`one_definition/libraries.bzl`](../one_definition/libraries.bzl)) for a
+vendored one, with the symbol prefix of its renamed build (`komira_awslc_`
+for aws-lc, whose owner is `komira_crypto`). Every `mojo_library` outside
+`src/tests/` carries two validations
+([`native_reach.bzl`](native_reach.bzl)), which fail its build and the build
+of every target holding it:
+
+- `native_reach_archives`, decided at analysis: each archive its own C/C++
+  `deps` link, with every archive those need, has its owner in the closure
+  or is its own. A third_party archive with no owner row, or a row with no
+  owner, is refused. So `komira_http_core`, whose `//third_party/s2n-tls:s2n`
+  needs aws-lc, depends on `komira_crypto`, and a library calling
+  `komira_fs`'s shim depends on `komira_fs`, never on `:komira_fs_posix`.
+- `native_reach_calls`, a run of the Zig tool
+  [`native_reach/`](native_reach/README.md): no string literal in its
+  sources (not its tests) starts with the prefix of an owner outside the
+  closure, as `external_call["komira_awslc_RAND_bytes", ...]` does in
+  `komira_uuid`. On a target platform other than linux-x86_64, it is not run.
+
+`<library>[native_reach]` builds the two results without the library's
+tests.
+
+The check's cases are `native_reach_case` targets in
+[`tests//negative/native_reach`](../tests/negative/native_reach/BUCK): each
+runs the same check on a library's sources and deps with one planted defect
+(an archive whose owner is missing, an archive a C dep needs, a third_party
+archive with no owner row, named or reached through a C dep, or a row with no
+owner, an archive in a dep that is not first, an archive linked as objects, a
+prefixed `external_call` with no archive dep, the scanner's quoting)
+and builds only while the check refuses it with the named error, or passes a
+correct tree. Two cases sit outside `src/tests/`, in `tests//src/native_reach`
+and `tests//src/tests_native_reach` (sharing the prefix without the slash), so
+a wider exemption fails them. `tests//functional/native_reach:cases` builds
+them all.
 
 ## Coverage builds
 
