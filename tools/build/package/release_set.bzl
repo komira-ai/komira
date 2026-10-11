@@ -48,8 +48,7 @@ build actions:
   * a release order check: no member's metadata.json `depends` holds
     `"<name> ==<version> TEST_BUILD"` for a member `release_set` lists after
     it (a requirement at another version or build string is not one of this
-    set's). The native package komira_native, which libraries require and
-    which is listed after every library, is the one exception. The target's
+    set's). The target's
     `order_tests` (release_order_test: this check over fixture
     metadata.json files) must pass first;
   * after the stamp check, `komira_pack conda-check --kind metapackage
@@ -160,9 +159,8 @@ rm -rf "$T"
 # it requires. Arguments: the busybox, the output, the release set file (named
 # in the message only), the version, the build string, then `<name>
 # <metadata.json>` per member in order. A requirement is `"<name> ==<V> <B>"`
-# in metadata.json's `depends` (komira_pack). The one exception is the native
-# package komira_native: libraries require it and it is listed after every
-# library. release_order_test runs this script over fixtures.
+# in metadata.json's `depends` (komira_pack). release_order_test runs this
+# script over fixtures.
 _ORDER_CHECK = """
 BB="$1"; OUT="$2"; SET="$3"; V="$4"; B="$5"; shift 5
 case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
@@ -188,7 +186,6 @@ for m in $names; do
     f="$1"; shift
     later="${later# $m}"
     for r in $later; do
-        [ "$r" != komira_native ] || continue
         if grep -qF "\\"$r ==$V $B\\"" "$f"; then
             no "member $m requires $r, which $SET lists after it: list each member after the members it requires (here, in release/artifacts.textproto and in libs)"
         fi
