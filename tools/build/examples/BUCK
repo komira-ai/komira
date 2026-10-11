@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
 load("@komira//tools/build/mojo:doc.bzl", "mojo_doc_json")
+load("@komira//tools/build/mojo:opt_level.bzl", "mojo_opt_level_check")
 load("@komira//tools/build/mojo:run_check.bzl", "run_check_wired")
 load("//tools/build/package:defs.bzl", "bundle_tarball", "mojo_bundle", "oci_image", "oci_tree")
 
@@ -102,4 +103,20 @@ mojo_test(
     name = "test_hellopkg",
     srcs = ["test_hellopkg.mojo"],
     deps = [":hellopkg"],
+)
+
+# The rules' default optimization levels, read at analysis from the level
+# each compile puts on its `mojo build` command line (mojo/opt_level.bzl):
+# a mojo_test and a library's welded tests at -O1; a binary and its
+# `[shared]` (the library hello_bundle ships) at -O3. Building this target
+# is the check: a row that does not hold fails analysis.
+mojo_opt_level_check(
+    name = "opt_levels",
+    rows = [
+        (":test_hellopkg", "mojo_build_test", "1"),
+        ("//tools/build/examples/libgate_ok:libgate_ok", "mojo_build_test", "1"),
+        (":hello", "mojo_build", "3"),
+        (":hello", "mojo_build_shared", "3"),
+        (":hello_pkg_user", "mojo_build", "3"),
+    ],
 )

@@ -290,9 +290,10 @@ packaged keeps a target that builds as a refusal, and the bytes are reproducible
 at run time (by soname) to the conda-forge requirement of the package that ships
 it. kci's closure checks accept exactly those requirements on a library; the
 target `:system_libs` ([`system_libs_record.bzl`](system_libs_record.bzl)) writes
-the table for the welded test that holds kci's compiled copy equal to it. The
-packer does not write them yet: it still refuses a library that opens a shared
-library by name.
+the table for the welded test that holds kci's compiled copy equal to it. A
+library declares the sonames it opens (`mojo_library(dlopen = [...])`), and its
+package requires each one's row, byte for byte
+([packaging/conda/README.md](../../../packaging/conda/README.md#a-library-that-opens-a-shared-library-at-run-time)).
 
 The target `:glibc_floor` ([`glibc_floor_record.bzl`](glibc_floor_record.bzl))
 writes the platform table's glibc floor of each subdir the packer writes
@@ -336,9 +337,9 @@ fails the build in these cases:
 - the metapackage does not require a member at its version and build string; the
   message names the member;
 - a member's metadata.json requires, at the set's version and build string, a
-  member listed after it (the native package `komira_native` excepted); the
-  message names both. The `release_order_*` targets in [`BUCK`](BUCK) run this
-  check over the fixtures in `release_order/` and must pass first;
+  member listed after it; the message names both. The `release_order_*`
+  targets in [`BUCK`](BUCK) run this check over the fixtures in
+  `release_order/` and must pass first;
 - `komira_pack conda-check --kind metapackage --require-stamped true` refuses the
   metapackage;
 - its `libs`, its metapackage name, or the `--license`, `--summary` and `--home`

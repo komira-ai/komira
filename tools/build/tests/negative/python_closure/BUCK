@@ -1,0 +1,55 @@
+load("@komira//tools/build/selftest:defs.bzl", "graph_check")
+load(":stand_in.bzl", "python_stand_in", "uses_tool")
+
+# The graph check python_closure (tools/build/selftest/graph/python_closure.zig)
+# over planted graphs. The scenario graph_check_refusals
+# (tools/build/selftest/graph_check_refusals.zig) runs `buck2 bxl
+# //tools/build/selftest/graph/checks.bxl:check -- --check <target>` for each
+# check here and requires the result written above it.
+
+_CHECKER = "komira//tools/build/selftest/graph:graph_checks"
+
+# A target that reaches a Python rule only through an exec dependency: the
+# shape of a test whose peer or oracle runs under a pinned interpreter.
+python_stand_in(name = "interpreter")
+
+uses_tool(
+    name = "lib",
+    tool = ":interpreter",
+)
+
+# A target with no Python in its closure.
+uses_tool(name = "plain")
+
+# Refused: `target tests//negative/python_closure:lib: its closure holds
+# tests//negative/python_closure:interpreter: it is a Python rule
+# (python_stand_in)`. Green if the closure loses its exec dependencies.
+graph_check(
+    name = "exec_dep",
+    check = "python_closure",
+    checker = _CHECKER,
+    targets = ["tests//negative/python_closure:lib"],
+)
+
+# Passes: the same graph, each finding in the ceiling. So exec_dep is refused
+# for its findings, not for anything else of the fixture.
+graph_check(
+    name = "exec_dep_in_ceiling",
+    check = "python_closure",
+    checker = _CHECKER,
+    targets = ["tests//negative/python_closure:lib"],
+    ceiling = [
+        "target tests//negative/python_closure:interpreter",
+        "target tests//negative/python_closure:lib",
+    ],
+)
+
+# Refused: `the ceiling entry `target tests//negative/python_closure:lib` is
+# no longer found`: a violator gone, its entry left behind.
+graph_check(
+    name = "stale_ceiling",
+    check = "python_closure",
+    checker = _CHECKER,
+    targets = ["tests//negative/python_closure:plain"],
+    ceiling = ["target tests//negative/python_closure:lib"],
+)
