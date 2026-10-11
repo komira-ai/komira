@@ -1,10 +1,13 @@
-load("@komira//third_party/python:pins.bzl", "PYTHON", "WHEELS")
-load("@komira//tools/build/python:defs.bzl", "py_test")
+load("@komira//third_party/python:pins.bzl", "PYTHON", "PYTHON_314", "PYTHON_314T", "WHEELS", "WHEELS_314")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/python:defs.bzl", "py_test", "python_oracle", "python_proto")
 
 # The tests of the hermetic Python (third_party/python, tools/build/python):
 # each py_test runs its script with the pinned interpreter as a build action,
-# so building a target is running it, and its output exists only if it passed.
-# What each test proves is in README.md.
+# so building a target is running it, and its output exists only if it passed;
+# a python_oracle's output exists only if its two runs agreed. What each test
+# proves is in README.md; the mutants each was seen red against are in the
+# pull request that added it.
 
 _ALL = ["//third_party/python:" + w["name"] for w in WHEELS]
 
@@ -81,3 +84,194 @@ py_test(
     srcs = glob(["cases/*.py"]),
     args = ["$(location //tools/build/python:pyrun.py)"],
 )
+
+# python_oracle (tools/build/python): DuckDB sums a checked-in CSV on the farm;
+# the output directory (and each `outs` file, a sub-target) is test data for
+# the targets below. The twin is the same oracle in an action of its own, so
+# `oracle_twins` compares two separate runs.
+[python_oracle(
+    name = name,
+    src = "golden_sums.py",
+    data = {"scores.csv": "oracle_data/scores.csv"},
+    outs = [
+        "sums.tsv",
+        "summary/count.txt",
+    ],
+    deps = ["//third_party/python:duckdb"],
+) for name in [
+    "golden_sums",
+    "golden_sums_twin",
+]]
+
+py_test(
+    name = "oracle_twins",
+    src = "oracle_twins.py",
+    args = [
+        "$(location :golden_sums)",
+        "$(location :golden_sums_twin)",
+    ],
+)
+
+# An oracle that needs the zone database: pyarrow writes an ORC timestamp
+# column (ORC reads its writer's zone, GMT, from TZDIR) and the script asserts
+# the zone setup the rule gives each run; it builds only if both runs wrote
+# the same bytes.
+python_oracle(
+    name = "orc_timestamps",
+    src = "orc_timestamps.py",
+    outs = ["ts.orc"],
+    deps = ["//third_party/python:pyarrow"],
+)
+
+py_test(
+    name = "oracle_cases",
+    src = "oracle_cases.py",
+    srcs = glob(["oracle_cases/*.py"]),
+    args = ["$(location //tools/build/python:oracle_run.py)"],
+)
+
+# The oracle's files read by a welded Mojo test, as declared test data. The
+# library has no API; it exists for this test (__init__.mojo).
+mojo_library(
+    name = "komira_test_python",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    test_data = {
+        "tests/test_oracle_output.mojo": {
+            "oracle/sums.tsv": ":golden_sums[sums.tsv]",
+            "oracle_dir": ":golden_sums",
+        },
+    },
+    test_srcs = ["tests/test_oracle_output.mojo"],
+)
+
+# The pinned protobuf runtime against code the pinned protoc generates
+# (protoc 29.1 writes Python gencode 5.29.1): protobuf_gencode imports and
+# parses with it.
+python_proto(
+    name = "gencode_probe_pb2",
+    src = "gencode_probe.proto",
+)
+
+py_test(
+    name = "protobuf_gencode",
+    src = "protobuf_gencode.py",
+    srcs = [":gencode_probe_pb2"],
+    args = [
+        "gencode=5.29.1",
+        "runtime=" + [w["version"] for w in WHEELS if w["name"] == "protobuf"][0],
+    ],
+    deps = ["//third_party/python:protobuf"],
+)
+
+# ---- CPython 3.14 and free-threaded 3.14t ------------------------------------
+#
+# Each interpreter of third_party/python/pins.bzl (PYTHON_314, PYTHON_314T)
+# with its own closure (WHEELS_314). The pinned outcomes below are measured
+# facts about the pinned versions: a bump that changes one fails until the
+# pin here says the new outcome.
+
+_PRELOAD = ["preload=$(location //third_party/python:native_libs)/lib/" + lib for lib in [
+    "libgcc_s.so.1",
+    "libstdc++.so.6",
+    "libz.so.1",
+]]
+
+_CLOSURE_314 = {
+    abi: ["//third_party/python:" + w["name"] + "-" + abi for w in WHEELS_314[abi]]
+    for abi in WHEELS_314
+}
+
+# The GIL's state after a fresh interpreter imports each distribution
+# (gil_probe.py): on 3.14 it is always enabled; on 3.14t it is disabled at
+# startup and stays so unless an extension module that does not declare
+# free-threading support enables it.
+_GIL_AFTER_IMPORT = {
+    "cp314": {w["name"]: "enabled" for w in WHEELS_314["cp314"]},
+    "cp314t": {w["name"]: "disabled" for w in WHEELS_314["cp314t"]},
+}
+
+# The same after every extension module the distribution installs is
+# imported too. scipy.linalg._matfuncs_sqrtm_triu does not import alone (a
+# circular import between the extension module and scipy.linalg).
+_SCIPY_ALONE = "; failed to import scipy.linalg._matfuncs_sqrtm_triu (ImportError)"
+
+_GIL_AFTER_EVERY = {
+    abi: {
+        w["name"]: state + (_SCIPY_ALONE if w["name"] == "scipy" else "")
+        for w in WHEELS_314[abi]
+    }
+    for abi, state in [("cp314", "enabled"), ("cp314t", "disabled")]
+}
+
+# Whether each library imports in an own-GIL sub-interpreter
+# (concurrent.interpreters, Python 3.14; subinterp_matrix.py).
+# The outcome is the innermost exception: pandas fails on numpy's module.
+_SUBINTERP_IMPORT = {
+    abi: {
+        "cloudpickle": "ok",
+        "numpy": "ImportError: module numpy._core._multiarray_umath does not support loading in subinterpreters",
+        "pandas": "ImportError: module numpy._core._multiarray_umath does not support loading in subinterpreters",
+        "pyarrow": "ImportError: module pyarrow.lib does not support loading in subinterpreters",
+        "sklearn": "ImportError: module sklearn.__check_build._check_build does not support loading in subinterpreters",
+    }
+    for abi in ["cp314", "cp314t"]
+}
+
+# The files of each 3.14 closure that name a GNU licence, reviewed as
+# _REVIEWED's are: CPython's, pandas' and numpy's as above, and the GCC
+# runtime libraries numpy and scipy bundle (libgfortran,
+# GPL-3.0-or-later WITH GCC-exception-3.1; libquadmath, LGPL-2.1-or-later),
+# with scipy's licence file listing them, and scikit-learn's licence file,
+# which carries the text of the GCC Runtime Library Exception for the libgomp
+# its wheel bundles.
+_REVIEWED_WHEELS_314 = [
+    "pandas:pandas-3.0.6.dist-info/LICENSE",
+    "numpy:numpy-2.5.3.dist-info/licenses/LICENSE.txt",
+    "numpy:numpy.libs/libgfortran-83c28eba-468e71e5.so.5.0.0",
+    "numpy:numpy.libs/libquadmath-2284e583-a9307bba.so.0.0.0",
+    "scikit-learn:scikit_learn-1.9.1.dist-info/licenses/COPYING",
+    "scipy:scipy-1.18.1.dist-info/LICENSE.txt",
+    "scipy:scipy.libs/libgfortran-040039e1-0352e75f.so.5.0.0",
+    "scipy:scipy.libs/libgfortran-83c28eba.so.5.0.0",
+    "scipy:scipy.libs/libquadmath-2284e583.so.0.0.0",
+    "scipy:scipy.libs/libquadmath-96973f99-934c22de.so.0.0.0",
+]
+
+_REVIEWED_314 = {
+    "cp314": ["cpython:lib/python3.14/LICENSE.txt"] + _REVIEWED_WHEELS_314,
+    "cp314t": ["cpython:lib/python3.14t/LICENSE.txt"] + _REVIEWED_WHEELS_314,
+}
+
+[py_test(
+    name = "gil_" + p["abi"],
+    src = "gil_probe.py",
+    args = [
+        "python=" + p["version"],
+        "build=" + ("freethreaded" if p["freethreaded"] else "gil"),
+    ] + _PRELOAD + [w["name"] + "=" + w["version"] for w in WHEELS_314[p["abi"]]] + [
+        "gil:" + d + "=" + s
+        for d, s in _GIL_AFTER_IMPORT[p["abi"]].items()
+    ] + [
+        "gil-every:" + d + "=" + s
+        for d, s in _GIL_AFTER_EVERY[p["abi"]].items()
+    ],
+    python = "//third_party/python:" + p["name"],
+    deps = _CLOSURE_314[p["abi"]],
+) for p in [PYTHON_314, PYTHON_314T]]
+
+[py_test(
+    name = "subinterp_" + p["abi"],
+    src = "subinterp_matrix.py",
+    args = _PRELOAD + [m + "=" + o for m, o in _SUBINTERP_IMPORT[p["abi"]].items()],
+    python = "//third_party/python:" + p["name"],
+    deps = _CLOSURE_314[p["abi"]],
+) for p in [PYTHON_314, PYTHON_314T]]
+
+[py_test(
+    name = "licenses_" + p["abi"],
+    src = "licenses.py",
+    args = ["cpython=" + p["license"]] + [w["name"] + "=" + w["license"] for w in WHEELS_314[p["abi"]]] + ["allow=" + r for r in _REVIEWED_314[p["abi"]]],
+    python = "//third_party/python:" + p["name"],
+    deps = _CLOSURE_314[p["abi"]],
+) for p in [PYTHON_314, PYTHON_314T]]

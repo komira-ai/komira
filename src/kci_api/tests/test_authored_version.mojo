@@ -8,7 +8,7 @@ from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_textproto import TOKEN_WORD, TokenCursor, lex
 
-from kci_api import FORMAT_CHANNELS, FORMAT_MACHINE, authored_schema_version, skip_schema_version
+from kci_api import FORMAT_CHANNELS, FORMAT_MACHINE, FORMAT_RESULT, authored_schema_version, skip_schema_version
 
 
 def _v(text: String) -> String:
@@ -54,6 +54,41 @@ def test_refusals() raises:
     assert_true(_v(String("schema_version: -1\n")).find(String("not a decimal integer")) >= 0)
     assert_true(_v(String("schema_version: 1.0\n")).find(String("not a decimal integer")) >= 0)
     assert_true(_v(String("schema_version\n")).find(String("not a decimal integer")) >= 0)
+    # A major longer than nine digits is still a decimal integer above the
+    # supported range: the format table's "needs a newer kci" refusal, with
+    # the digits as written, never "not a decimal integer" and never a
+    # wrapped number (komira-ai/komira#1016).
+    assert_equal(
+        _v(String("schema_version: 999999999\n")),
+        String("f: schema_version 999999999 needs a newer kci (this kci reads kci.channels up to major 1)"),
+    )
+    assert_equal(
+        _v(String("schema_version: 1000000000\n")),
+        String("f: schema_version 1000000000 needs a newer kci (this kci reads kci.channels up to major 1)"),
+    )
+    assert_equal(
+        _v(String("schema_version: 123456789012345678901234567890\n")),
+        String(
+            "f: schema_version 123456789012345678901234567890 needs a newer kci (this kci reads kci.channels up to"
+            " major 1)"
+        ),
+    )
+    # still malformed when long: a leading zero or a non-digit
+    assert_true(_v(String("schema_version: 01000000000\n")).find(String("not a decimal integer")) >= 0)
+    assert_true(_v(String("schema_version: 10000000000.5\n")).find(String("not a decimal integer")) >= 0)
+    # the set-twice refusal still names its line when the first value is long
+    assert_equal(
+        _v(String("schema_version: 1000000000\nschema_version: 1\n")),
+        String("f: line 2: field 'schema_version' is set twice (first on line 1)"),
+    )
+    # a produced format is not read as an authored file, whatever its major's length
+    for text in [String("schema_version: 1\n"), String("schema_version: 1000000000\n")]:
+        var got: String
+        try:
+            got = String(authored_schema_version(lex(text, String("f")), String(FORMAT_RESULT), String("f")))
+        except e:
+            got = String(e)
+        assert_equal(got, String("format 'kci.result' is not an authored file"))
 
 
 def test_skip_then_parse_the_rest() raises:

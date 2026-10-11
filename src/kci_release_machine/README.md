@@ -6,8 +6,11 @@ it is given (it opens no file) into a `ReleaseMachine`: each `Stage` has a
 name, the GitHub environment its job runs in (its name by default), the one
 earlier stage it runs `after`, whether it is farm-connected, its trigger
 (`PUSH` or `PULL_REQUEST`) and its `StageStep`s (`BUILD`, `PUBLISH` to a
-channel or into a cell, and `DEPLOY` into a cell), and a `PUBLISH` step's
-`StageValidation`s. A machine that writes into a cell has a `name`; a cell is
+channel or into a cell, and `DEPLOY` into a cell), and their
+`StageValidation`s: `CONDA_INSTALL_SMOKE` and `CONDA_INSTALL_ENV` on a `PUBLISH`
+step, `DEPLOY_PROBE` (a digest-pinned image, its args, an optional target,
+a timeout and the case ids it must report) on a `DEPLOY` step. A `DEPLOY`
+step in a stage another stage runs `after` must carry a `DEPLOY_PROBE`. A machine that writes into a cell has a `name`; a cell is
 picked from a cells file, and `require_cells_declared` checks the pick against
 the names that file declares (this package opens no file).
 Every malformed or inconsistent file is refused with an error naming the
@@ -70,7 +73,7 @@ var machine = parse_machine_file(
     String('schema_version: 1\nstage { name: "release"\n')
     + '  step { name: "build" kind: BUILD platform: "linux-x86_64" artifacts: "d.textproto" }\n'
     + '  step { name: "publish" kind: PUBLISH platform: "linux-x86_64" artifacts: "d.textproto"\n'
-    + '         channels: "c.textproto" channel: "gamma" }\n}\n',
+    + '         channels: "c.textproto" channel: "beta" }\n}\n',
     "machine file",
 )
 var only = List[String]()

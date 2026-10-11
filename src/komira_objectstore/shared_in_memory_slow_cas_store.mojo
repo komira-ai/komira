@@ -320,7 +320,7 @@ struct SharedInMemorySlowCasStore(
                     )
                 )
             else:
-                raise Error(msg)
+                raise Error(msg)  # cov: unreachable the inner shared store's head/get raise only not_found
 
     def read_take(mut self) raises -> CasReadResult:
         """Move the completed read result out (caller checks READY first)."""

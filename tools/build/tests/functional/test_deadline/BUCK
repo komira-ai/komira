@@ -1,0 +1,19 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load(":defs.bzl", "mojo_test_deadline_cases")
+
+# The time limit of a mojo_test under `buck2 test` (test 49;
+# tools/build/mojo/test_deadline.sh), on a stand-in for gate_runner.sh: the
+# runner's status passes through at once, a test past its limit is killed and
+# the runner reports it, and nothing of the run is left alive after a normal
+# exit or when the script is signalled. The slow mojo_test that must go red
+# is in tests//negative/test_deadline.
+mojo_test_deadline_cases(
+    name = "cases",
+    script = "cases.sh",
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = ["cases.sh"],
+    visibility = ["komira//:tests_lints"],
+)

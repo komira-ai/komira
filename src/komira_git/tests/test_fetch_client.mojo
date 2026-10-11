@@ -6,7 +6,7 @@
 # WHERE THE VECTORS COME FROM: gitprotocol-v2 and git's connect.c and
 # fetch-pack.c at v2.56.0 (which lines end in LF, the order of the request
 # lines, the refusals' words). The comparison with what git itself writes
-# and reads is in src/tests/conformance/komira_git_conformance.
+# and reads is in src/tests/conformance/komira_git_protocol_conformance.
 #
 # WHAT EACH TEST CATCHES:
 #   * test_advertisement: a capability lost or misread (`fetch=shallow

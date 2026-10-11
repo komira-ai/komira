@@ -6,7 +6,7 @@
 # The coordinate's `repo` is `<host>/<channel>`, no scheme, where `<channel>`
 # is prefix.dev's channel path: `<namespace>` for a namespace's primary
 # channel, `<namespace>/<channel>` for any other, e.g.
-# `prefix.dev/komira-ai/gamma` (`prefix_dev_repo_of_location` turns
+# `prefix.dev/komira-ai/beta` (`prefix_dev_repo_of_location` turns
 # `https://<host>/<channel>` into it). The two segments travel unchanged in
 # every path below. The `@` of the website route
 # (`https://prefix.dev/channels/@<namespace>/...`) is never part of an upload,
@@ -18,7 +18,7 @@
 #   repository URL `https://prefix.dev/<namespace>/<channel>`).
 #
 #   upload     POST https://<host>/api/v1/upload/<channel>
-#              e.g. POST https://prefix.dev/api/v1/upload/komira-ai/gamma
+#              e.g. POST https://prefix.dev/api/v1/upload/komira-ai/beta
 #              Authorization: Bearer <token>   (surface PREFIX_DEV)
 #              multipart/form-data, ONE part named `file`:
 #                Content-Disposition: form-data; name="file"; filename="<file>"
@@ -28,7 +28,7 @@
 #                X-File-SHA256: <hex>
 #              — the part rattler's `upload prefix` sends.
 #   read_back  GET https://<host>/<channel>/<subdir>/repodata.json, the file's
-#              (e.g. https://prefix.dev/komira-ai/gamma/linux-64/repodata.json;
+#              (e.g. https://prefix.dev/komira-ai/beta/linux-64/repodata.json;
 #              the `<subdir>/repodata.json` suffix is the conda channel
 #              layout, not stated by the pages above)
 #              `sha256` (`conda_repodata.mojo`). The server answers 303 to a

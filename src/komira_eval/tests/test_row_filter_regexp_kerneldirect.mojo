@@ -288,10 +288,51 @@ def test_not_regexp_3vl_null() raises:
         )
 
 
+def test_regexp_3vl_null_stored_match() raises:
+    """Plain `regexp_like(x, '^a.*z$')`, no NOT: a NULL row whose stored
+    bytes ('abz') match is UNKNOWN and excluded. Under NOT, FALSE and
+    UNKNOWN both exclude the row, so only the plain form tells a walker that
+    reads the stored bytes of a NULL cell from one that does not."""
+    var pool = List[RuntimeExpr]()
+    pool.append(make_col_string(0))      # 0
+    pool.append(make_regexp(0, 0))       # 1 ROOT
+
+    var prog = RegexProgram.compile("^a.*z$", "")
+    var rp = _regex_pool_with(prog^)
+
+    var vals: List[String] = ["abz", "abz", "hello", "azz"]
+    var is_null: List[Bool] = [False, True, False, True]
+    var n = len(vals)
+    var rb = RowBlock.with_capacity(n, n * 16, _SSTRIDE_NULLABLE)
+    for i in range(n):
+        rb.write_var_string_cell(i, _SOFF0, vals[i].as_bytes())
+        if is_null[i]:
+            rb.set_cell_null(i, _SVAL_OFF, 0)
+    rb.set_n_rows(n)
+
+    var cs = RowCellSource(
+        rb, _string_offsets(), _string_dtypes(),
+        has_validity=True, validity_offset=_SVAL_OFF,
+    )
+    var exec = ExpressionExecutor(pool^, 1, List[String](), regex_pool=rp^)
+
+    var want: List[Bool] = [True, False, False, False]
+    for r in range(n):
+        assert_equal(
+            exec._eval_bool_from_source(cs, 1, r), want[r],
+            "regexp_like(x,'^a.*z$') row " + String(r)
+            + " null=" + String(is_null[r]) + " x=" + vals[r],
+        )
+    var sel = exec.select_filter_from_source(cs)
+    assert_equal(sel.len(), 1, "regexp_like survivors")
+    assert_equal(Int(sel.get(0)), 0, "regexp_like survivor 0")
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_regexp_anchored]()
     suite.test[test_regexp_contains_unanchored]()
     suite.test[test_regexp_charclass_digits]()
     suite.test[test_not_regexp_3vl_null]()
+    suite.test[test_regexp_3vl_null_stored_match]()
     suite^.run()

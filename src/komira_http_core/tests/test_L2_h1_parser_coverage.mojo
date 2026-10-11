@@ -55,6 +55,7 @@ from komira_http_core.codec.h1.parser import (
     _is_vchar_or_obs_text,
     _parse_decimal,
     _parse_header_line,
+    _parse_request_line,
     _reason_phrase,
     _static_error_body,
     _str_contains_token_ci,
@@ -174,11 +175,28 @@ def test_need_more_short_and_unterminated() raises:
         assert_equal(o.err.offset, 0 if n < 2 else n, repr(s))
 
 
-def test_empty_request_line_refused() raises:
-    """An empty line where the request-line belongs. RFC 9112 section 2.2 says
-    a server SHOULD ignore at least one leading CRLF; this parser refuses it
-    (400). This pins today's behaviour, a deviation from that SHOULD."""
-    _expect_err("\r\n\r\n", _D(), PARSE_ERR_REQUEST_LINE_MALFORMED, 400, 0)
+def test_empty_lines_alone_need_more() raises:
+    """Empty lines before the request-line are ignored (RFC 9112 section 2.2),
+    so a buffer of nothing else is a request not yet started: need-more at its
+    length, not a refusal."""
+    var cases = List[String]()
+    cases.append(String("\r\n\r\n"))
+    cases.append(String("\r\n\r\n\r\n"))
+    cases.append(String("\r\n\r"))
+    for s in cases:
+        var o = _parse(s, _D())
+        assert_equal(Int(o.err.kind), Int(PARSE_ERR_NEED_MORE), repr(s))
+        assert_equal(o.err.offset, len(s.as_bytes()), repr(s))
+
+
+def test_empty_request_line_helper_contract() raises:
+    """_parse_request_line on an empty line (its caller skips empty lines
+    first) is malformed at the line's start."""
+    var buf = _bytes(String("\r\n\r\n"))
+    var rl = _parse_request_line(Span[UInt8](buf), 2, 2)
+    assert_equal(Int(rl.err.kind), Int(PARSE_ERR_REQUEST_LINE_MALFORMED))
+    assert_equal(Int(rl.err.status), 400)
+    assert_equal(rl.err.offset, 2)
 
 
 def test_single_token_is_http09() raises:
@@ -191,17 +209,18 @@ def test_single_token_is_http09() raises:
 def test_method_token_syntax() raises:
     """method = token (RFC 9112 section 3.1). A non-tchar byte is malformed at
     its own offset, before case is judged; methods are case-sensitive (RFC
-    9110 section 9.1), so any lowercase letter is METHOD_LOWERCASE."""
+    9110 section 9.1), so any lowercase letter is METHOD_LOWERCASE; it and an
+    unrecognized method are 501 (RFC 9110 section 9.1)."""
     _expect_err("G@T / HTTP/1.1\r\n\r\n", _D(),
                 PARSE_ERR_REQUEST_LINE_MALFORMED, 400, 1)
     _expect_err("g@T / HTTP/1.1\r\n\r\n", _D(),
                 PARSE_ERR_REQUEST_LINE_MALFORMED, 400, 1)
     _expect_err("GeT / HTTP/1.1\r\n\r\n", _D(), PARSE_ERR_METHOD_LOWERCASE,
-                400, 0)
+                501, 0)
     _expect_err(" / HTTP/1.1\r\n\r\n", _D(),
                 PARSE_ERR_REQUEST_LINE_MALFORMED, 400, 0)
     _expect_err("BREW / HTTP/1.1\r\n\r\n", _D(), PARSE_ERR_METHOD_UNKNOWN,
-                400, 0)
+                501, 0)
 
 
 def test_request_target_syntax() raises:
@@ -258,15 +277,15 @@ def test_http_version_syntax() raises:
 
 
 def test_http_version_unsupported() raises:
-    """Only HTTP/1.0 and HTTP/1.1 (RFC 9112 section 2.3); another major is
-    505 at the major digit, another minor of 1 is 505 at the minor digit
-    (RFC 9110 section 15.6.6)."""
+    """A major version other than 1 is 505 at the major digit (RFC 9110
+    section 15.6.6); a higher HTTP/1 minor is HTTP/1.1 (RFC 9110 section
+    6.2)."""
     _expect_err("GET / HTTP/0.9\r\n\r\n", _D(),
                 PARSE_ERR_HTTP_VERSION_UNSUPPORTED, 505, 11)
     _expect_err("GET / HTTP/2.0\r\n\r\n", _D(),
                 PARSE_ERR_HTTP_VERSION_UNSUPPORTED, 505, 11)
-    _expect_err("GET / HTTP/1.2\r\n\r\n", _D(),
-                PARSE_ERR_HTTP_VERSION_UNSUPPORTED, 505, 13)
+    var o = _ok("GET / HTTP/1.2\r\n\r\n", _D())
+    assert_equal(Int(o.http_version_minor), 1)
 
 
 def test_http_version_minor_and_persistence() raises:
@@ -393,7 +412,9 @@ def test_field_value_ows_and_content() raises:
 
 def test_field_value_ctl_and_del_refused() raises:
     """CTLs and DEL are not field-vchar (RFC 9110 section 5.5): refused at
-    their offset. obs-text (0x80-0xFF) is accepted."""
+    their offset. obs-text (0x80-0xFF) is kept as sent when it is well-formed
+    UTF-8; when it is not, the request is still served, each octet stored as
+    the code point of the same number."""
     _expect_err(String(_RL) + "X: a" + chr(0x7F) + "b\r\n\r\n", _D(),
                 PARSE_ERR_HEADER_VALUE_CONTROL_CHAR, 400, 20)
     _expect_err(String(_RL) + "X: a" + chr(0x01) + "\r\n\r\n", _D(),
@@ -406,8 +427,23 @@ def test_field_value_ctl_and_del_refused() raises:
         buf.append(b)
     var o = _parse_bytes(buf, _D())
     assert_true(o.err.is_ok())
-    assert_equal(o.headers_end_off, len(buf))
-    assert_true(o.request.headers.find(String("x")).__bool__())
+    var lat = String("a") + chr(0x80) + chr(0xFF)
+    var lat_s = _header(o, String("x"))
+    var lat_got = lat_s.as_bytes()
+    var lat_want = lat.as_bytes()
+    assert_equal(len(lat_got), len(lat_want))
+    for i in range(len(lat_want)):
+        assert_equal(lat_got[i], lat_want[i])
+    var ok = _bytes(String(_RL) + "X: a" + chr(0xFF) + "\r\n\r\n")
+    var p = _parse_bytes(ok, _D())
+    assert_true(p.err.is_ok())
+    var want_s = String("a") + chr(0xFF)
+    var got_s = _header(p, String("x"))
+    var want = want_s.as_bytes()
+    var got = got_s.as_bytes()
+    assert_equal(len(got), len(want))
+    for i in range(len(want)):
+        assert_equal(got[i], want[i])
 
 
 def test_header_line_size_boundary() raises:
@@ -617,6 +653,7 @@ def test_error_responses_exact_bytes() raises:
     rows.append((417, String("Expectation Failed")))
     rows.append((431, String("Request Header Fields Too Large")))
     rows.append((500, String("Internal Server Error")))
+    rows.append((501, String("Not Implemented")))
     rows.append((505, String("HTTP Version Not Supported")))
     rows.append((418, String("Error")))
     for r in rows:
@@ -654,7 +691,8 @@ def main() raises:
     test_tchar_all_bytes()
     test_field_vchar_and_ows_all_bytes()
     test_need_more_short_and_unterminated()
-    test_empty_request_line_refused()
+    test_empty_lines_alone_need_more()
+    test_empty_request_line_helper_contract()
     test_single_token_is_http09()
     test_method_token_syntax()
     test_request_target_syntax()

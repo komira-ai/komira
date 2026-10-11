@@ -138,7 +138,7 @@ def _byte_bit_length(b: UInt8) -> Int:
     """Return the bit-position of the highest set bit of b (0 if b=0;
     1 for b=1; 8 for b=0x80..0xFF)."""
     if b == UInt8(0):
-        return 0
+        return 0  # cov: unreachable the only caller passes the first non-zero byte of the modulus
     var bl = 0
     var y = b
     while y > UInt8(0):

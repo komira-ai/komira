@@ -70,6 +70,13 @@ def test_member_platform() raises:
     assert_equal(_member(String("linux-x86_64"), String("noarch")), String("<ok>"))
     assert_true(_member(String("linux-x86_64"), String("linux-arm64")).find(String("is not released")) >= 0)
     assert_true(_member(String("linux-x86_64"), String("bogus")).find(String("is not one of")) >= 0)
+    # a released member platform that is not the release's: refused by name
+    # (the release platform itself is checked by require_release_platform)
+    assert_equal(
+        _member(String("darwin-arm64"), String("linux-x86_64")),
+        String("platform 'linux-x86_64' is neither the release's 'darwin-arm64' nor 'noarch'"),
+    )
+    assert_equal(_member(String("darwin-arm64"), String("noarch")), String("<ok>"))
 
 
 def test_conda_subdirs() raises:
