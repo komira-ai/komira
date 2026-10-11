@@ -176,7 +176,7 @@ conda_release_set_check(
         ":release_order_passes_a_requirement_listed_earlier",
         ":release_order_passes_another_version_or_build",
         ":release_order_passes_a_longer_name",
-        ":release_order_exempts_komira_native",
+        ":release_order_refuses_komira_native_listed_later",
     ],
 )
 
@@ -222,13 +222,16 @@ release_order_test(
     metadata_files = ["release_order/requires_bb.json", "release_order/leaf.json"],
 )
 
-# a requires komira_native, listed after it: the one exemption.
+# a requires komira_native, listed after it: refused like any member. The
+# check once exempted this name (the native package of a superseded plan,
+# docs/design/native_packaging.md); this fixture keeps the exemption gone.
 release_order_test(
-    name = "release_order_exempts_komira_native",
+    name = "release_order_refuses_komira_native_listed_later",
     version = "1.0.0",
     build = "hb_1",
     members = ["a", "komira_native"],
     metadata_files = ["release_order/requires_komira_native.json", "release_order/leaf.json"],
+    refuses = "member a requires komira_native, which release_set lists after it",
 )
 
 # The release set file: kci_artifact's welded test holds it equal to
