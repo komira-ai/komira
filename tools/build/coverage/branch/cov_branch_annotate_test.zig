@@ -23,6 +23,9 @@ const Fake = struct {
     lld_status: br.Status = .{ .exited = 0 },
     /// The step (`show` or `-flavor`) whose process cannot be created.
     fail: ?[]const u8 = null,
+    /// Calls at whose start PATH or TMPDIR of the environment given was not
+    /// a directory (the script made both before either program ran).
+    no_dir: usize = 0,
     calls: std.ArrayList(br.Spec),
 
     fn runner(self: *Fake) run_cmd.Runner {
@@ -39,6 +42,16 @@ const Fake = struct {
         copy.argv = try alloc.dupe([]const u8, spec.argv);
         copy.env = try alloc.dupe([]const u8, spec.env);
         try self.calls.append(copy);
+        for ([_][]const u8{ "PATH=", "TMPDIR=" }) |p| {
+            const v = for (spec.env) |e| {
+                if (std.mem.startsWith(u8, e, p)) break e[p.len..];
+            } else "";
+            var d = std.fs.cwd().openDir(v, .{}) catch {
+                self.no_dir += 1;
+                continue;
+            };
+            d.close();
+        }
         if (self.fail) |f| if (std.mem.eql(u8, spec.argv[1], f)) return error.SystemResources;
         var status: br.Status = .{ .exited = 0 };
         if (std.mem.eql(u8, spec.argv[1], "show")) {
@@ -54,14 +67,14 @@ const Fake = struct {
     }
 };
 
-const Case = struct {
+pub const Case = struct {
     arena: std.heap.ArenaAllocator,
     tmp: testing.TmpDir,
     root: []const u8 = "",
     err: std.ArrayList(u8) = undefined,
     fake: Fake = undefined,
 
-    fn init() !*Case {
+    pub fn init() !*Case {
         const c = try testing.allocator.create(Case);
         c.* = .{ .arena = std.heap.ArenaAllocator.init(testing.allocator), .tmp = testing.tmpDir(.{}) };
         const al = c.arena.allocator();
@@ -77,27 +90,29 @@ const Case = struct {
         try c.put("in/test_one.bc", try fx.bitcode(al, "body"));
         try c.put("in/test_one.profdata", "indexed");
         try c.put("in/test_one", try fx.binary(al, &fx.FNS));
+        // A file beside the scratch directory, as Buck2's scratch holds others.
+        try c.put("scratch/keep", "");
         c.fake.show_text = try fx.show(al, &fx.FNS);
         c.fake.lld_err = try std.mem.concat(al, u8, &.{ try fx.missing(al, "unrun"), try fx.dump(al, &fx.FNS) });
         return c;
     }
 
-    fn deinit(self: *Case) void {
+    pub fn deinit(self: *Case) void {
         self.tmp.cleanup();
         self.arena.deinit();
         testing.allocator.destroy(self);
     }
 
-    fn a(self: *Case) std.mem.Allocator {
+    pub fn a(self: *Case) std.mem.Allocator {
         return self.arena.allocator();
     }
 
-    fn put(self: *Case, rel: []const u8, data: []const u8) !void {
+    pub fn put(self: *Case, rel: []const u8, data: []const u8) !void {
         if (std.fs.path.dirname(rel)) |d| try self.tmp.dir.makePath(d);
         try self.tmp.dir.writeFile(rel, data);
     }
 
-    fn k(self: *Case) ![]const u8 {
+    pub fn k(self: *Case) ![]const u8 {
         return std.fmt.allocPrint(self.a(), "{s}/scratch/cov_branch_annotate", .{self.root});
     }
 
@@ -109,14 +124,14 @@ const Case = struct {
         };
     }
 
-    fn argv(self: *Case) []const []const u8 {
+    pub fn argv(self: *Case) []const []const u8 {
         _ = self;
         return &.{ "--lld", "tc/lld/bin/lld", "--profdata", "tc/llvm/bin/llvm-profdata", "--bitcode", "in/test_one.bc", "--profile", "in/test_one.profdata", "--binary", "in/test_one", "--out", "out/test_one.ll" };
     }
 
     /// Runs the subcommand with `argv` from the case's directory (paths
     /// relative to it, as a build action's are to its working directory).
-    fn goWith(self: *Case, args: []const []const u8) !u8 {
+    pub fn goWith(self: *Case, args: []const []const u8) !u8 {
         self.err.clearRetainingCapacity();
         var old = try std.fs.cwd().openDir(".", .{});
         defer old.close();
@@ -125,22 +140,24 @@ const Case = struct {
         return an.cli(self.a(), args, try self.where(), self.fake.runner(), &self.err);
     }
 
-    fn go(self: *Case) !u8 {
+    pub fn go(self: *Case) !u8 {
         return self.goWith(self.argv());
     }
 
-    fn has(self: *Case, text: []const u8) bool {
+    pub fn has(self: *Case, text: []const u8) bool {
         return std.mem.indexOf(u8, self.err.items, text) != null;
     }
 
     /// A refusal: exit 1, `text` in the message, and no output written.
-    fn refused(self: *Case, text: []const u8) !void {
+    pub fn refused(self: *Case, text: []const u8) !void {
         const code = try self.go();
         if (code != 1 or !self.has("BRANCH COVERAGE ANNOTATE FAILED: ") or !self.has(text)) {
             std.debug.print("want exit 1 with '{s}'; got {d}:\n{s}\n", .{ text, code, self.err.items });
             return error.TestUnexpectedResult;
         }
         try testing.expectError(error.FileNotFound, self.tmp.dir.access("out/test_one.ll", .{}));
+        // The scratch directory is kept for the failed action's reader.
+        try self.tmp.dir.access("scratch/cov_branch_annotate", .{});
     }
 };
 
@@ -164,6 +181,10 @@ test "a passing annotation: show's and lld's command lines and environment, the 
     const ir = try c.tmp.dir.readFileAlloc(c.a(), "out/test_one.ll", 1 << 20);
     try testing.expectEqualStrings(try fx.dump(c.a(), &fx.FNS), ir);
     try testing.expectError(error.FileNotFound, c.tmp.dir.access("scratch/cov_branch_annotate", .{}));
+    // Only it: what else the scratch holds stays.
+    try c.tmp.dir.access("scratch/keep", .{});
+    // Both programs found PATH and TMPDIR made, as directories.
+    try testing.expectEqual(@as(usize, 0), c.fake.no_dir);
 
     const k = try c.k();
     const ab = struct {
@@ -291,6 +312,13 @@ test "step 0: branch weights or entry counts in the bitcode are refused, each al
         defer c.deinit();
         try c.put("in/test_one.bc", try fx.bitcode(c.a(), "branch_weight function_entry_coun"));
         try testing.expectEqual(@as(u8, 0), try c.go());
+    }
+    {
+        // Both: branch weights are named, as the script checked them first.
+        var c = try Case.init();
+        defer c.deinit();
+        try c.put("in/test_one.bc", try fx.bitcode(c.a(), "function_entry_count branch_weights"));
+        try c.refused("in/test_one.bc already holds branch weights before the profile is applied");
     }
 }
 
@@ -700,6 +728,12 @@ test "step 3: lld writing to its standard output is refused" {
     // One byte is enough; lines are not cut (the script's `head -n 3 | tr`).
     c.fake.lld_out = "x";
     try c.refused("lld wrote to its standard output: x \n");
+    // A diagnostic as well: the diagnostic is named, as the script checked it first.
+    c.fake.lld_err = try std.mem.concat(c.a(), u8, &.{ "lld: error: boom\n", try fx.dump(c.a(), &fx.FNS) });
+    try c.refused("lld reported 1 diagnostic(s) applying the profile: lld: error: boom \n");
+    // No dump at all as well: the standard output is named, checked before the header.
+    c.fake.lld_err = "";
+    try c.refused("lld wrote to its standard output: x \n");
     c.fake.lld_out = "o" ** 400 ++ "\n";
     try c.refused("lld wrote to its standard output: " ++ "o" ** 400 ++ " \n");
 }
@@ -785,6 +819,8 @@ test "the dump cannot be written: exit 1, naming it" {
     v[v.len - 1] = "nowhere/test_one.ll";
     try testing.expectEqual(@as(u8, 1), try c.goWith(v));
     try testing.expect(c.has("cov_branch annotate: cannot write nowhere/test_one.ll: FileNotFound"));
+    // The scratch directory is kept, as after a refusal.
+    try c.tmp.dir.access("scratch/cov_branch_annotate/err", .{});
 }
 
 test "the scratch directory follows BUCK_SCRATCH_PATH" {

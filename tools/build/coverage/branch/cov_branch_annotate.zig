@@ -55,7 +55,8 @@
 //! directory of its scratch, TMPDIR a directory of its scratch and LC_ALL=C.
 //! The scratch directory is $BUCK_SCRATCH_PATH/cov_branch_annotate (relative
 //! to the working directory when it is relative), or .cov_branch_annotate in
-//! the working directory without one; it is removed after a success.
+//! the working directory without one. It is made once the inputs are found,
+//! removed after a success and kept after a failure.
 //!
 //! Exit status: 1 when a step fails, naming it (`BRANCH COVERAGE ANNOTATE
 //! FAILED: ...`; lld or llvm-profdata that cannot be started fails its

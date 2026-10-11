@@ -27,14 +27,15 @@ _COV_BRANCH_SRCS = [
     "bounded_run.zig",
     "cov_branch_annotate.zig",
     "cov_branch_annotate_fixture.zig",
+    "cov_branch_annotate_order_test.zig",
     "cov_branch_annotate_test.zig",
     "cov_branch_run.zig",
     "cov_branch_run_test.zig",
 ]
 
-# Its unit tests (cov_branch_run_test.zig, cov_branch_annotate_test.zig and
-# the test blocks of bounded_run.zig and cov_branch.zig), run by `zig test`
-# as a build action.
+# Its unit tests (cov_branch_run_test.zig, cov_branch_annotate_test.zig,
+# cov_branch_annotate_order_test.zig and the test blocks of bounded_run.zig
+# and cov_branch.zig), run by `zig test` as a build action.
 zig_test(
     name = "cov_branch_unit",
     exec_compatible_with = LINUX_X86_64,

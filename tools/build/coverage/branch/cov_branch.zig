@@ -66,6 +66,7 @@ test {
     _ = annotate_cmd;
     _ = @import("cov_branch_run_test.zig");
     _ = @import("cov_branch_annotate_test.zig");
+    _ = @import("cov_branch_annotate_order_test.zig");
 }
 
 test "no subcommand, or an unknown one, is a usage error" {
