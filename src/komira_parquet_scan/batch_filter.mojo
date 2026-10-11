@@ -31,6 +31,16 @@ def resolve_numeric_dict_cols_to_flat(var batch: RecordBatch) raises -> RecordBa
             break
     if not any_dict:
         return batch^
+    return numeric_dict_cols_resolved(batch)
+
+
+def numeric_dict_cols_resolved(batch: RecordBatch) raises -> RecordBatch:
+    """A new batch over `batch`'s columns (shared, not copied) with every
+    numeric dictionary column resolved to its flat values; a STRING
+    dictionary column stays a dictionary. `batch` itself is unchanged, so a
+    caller can evaluate a predicate on the result and still hand `batch` on
+    with its dictionaries."""
+    var n_cols = batch.num_columns()
     var builder = RecordBatchBuilder.with_capacity(n_cols)
     var sb = SchemaBuilder()
     for c in range(n_cols):
