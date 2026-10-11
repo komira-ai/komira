@@ -293,7 +293,7 @@ attempt 1's `build` succeeded and `gamma` was cancelled: exactly one call, to
 **On the farm (the `build` job, machine stage `build`):** after the BUILD step, a `TEST` step `test`
 runs two commands over `checks` and the derived set: **`buck2 build <targets>`, then `buck2 test
 <targets>`**, the order the PR check uses (ci.md), the second only if the first passed. The targets
-are **#1168 S10c's derived release checks** (every standalone check `release/ci/derive_checks.py`
+are **#1168 S10c's derived release checks** (every standalone check `//tools/build/ci:derive_checks`
 derives whose targets depend on a declared library: the fake, emulator and fixture tiers, plus every
 `release_checks` target) and the patterns in `checks`. The e2e suite, `//src/tests/e2e/...`, joins
 `checks` **once the engine port lands**; until then `checks` is empty and the derived set alone runs.
