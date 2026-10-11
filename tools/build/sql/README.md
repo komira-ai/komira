@@ -132,7 +132,9 @@ nothing checks it yet.
   package file that is not an input, a read of an absolute path, a read by
   glob pattern, a changed setting and each dot command listed above. The
   version and environment checks are pinned in the invocation from
-  `SELECT` to `END`, so a condition that can no longer fire fails it. The farm's workers run in UTC, so `SET
+  `SELECT` to `END`, and so is what stands between the pinned pieces (the
+  version `buck2 uquery` reads from the dist, a path with no quote, or
+  nothing), so a condition added to make a check unable to fire fails it. The farm's workers run in UTC, so `SET
   TimeZone` is pinned by the invocation, not by a fixture's bytes. A failed
   action is never cached, so each red is a fresh run on the farm.
 

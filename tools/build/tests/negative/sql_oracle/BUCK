@@ -227,11 +227,13 @@ sql_oracle(
     outputs = ["out.tsv"],
 )
 
-# REFUSED: an input path that is also the directory of another input.
+# REFUSED: an input path that is also the directory of another input, past
+# the first input path.
 sql_oracle(
     name = "input_file_and_directory",
     srcs = "ok.sql",
     inputs = {
+        "a.csv": "staged.csv",
         "data": "staged.csv",
         "data/staged.csv": "staged.csv",
     },
