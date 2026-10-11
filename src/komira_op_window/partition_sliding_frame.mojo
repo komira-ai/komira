@@ -28,6 +28,10 @@
 # RANGE) is computed once per partition and broadcast, O(rows) for every
 # function, MIN / MAX included.
 #
+# An INT64 SUM / AVG accumulates exactly, in 128 bits: a SUM whose total
+# leaves INT64 raises rather than wrapping (query_semantics_types.md §8.1), an
+# AVG divides the exact total once (§2.12).
+#
 # NULLs follow `partition_null_policy`: every kernel skips NULL cells and
 # answers NULL for a frame with no surviving value; a framed output is
 # nullable iff the input carries NULLs or some frame is empty.
@@ -54,13 +58,17 @@ from .partition_frame_index import frame_index
 from .partition_keys import _segment_ends
 from .partition_null_policy import (
     AggF64,
+    AggI128,
     AggI64,
+    I128,
     alloc_frame_out_f64,
     alloc_frame_out_i64,
     alloc_out_f64,
     alloc_out_i64,
     cell_is_null,
     count_is_star,
+    i64_mean,
+    i64_sum_result,
     store_f64_or_null,
     store_i64_or_null,
 )
@@ -85,16 +93,16 @@ def _load_f64(col: Column[HeapRegion], r: Int) -> Float64:
 
 
 @always_inline
-def _frame_sum_i64(col: Column[HeapRegion], lo: Int, hi: Int) -> AggI64:
+def _frame_sum_i64(col: Column[HeapRegion], lo: Int, hi: Int) -> AggI128:
     var nulls = col.has_validity_buffer()
-    var total: Int64 = 0
+    var total = I128(0)
     var cnt = 0
     for r in range(lo, hi):
         if nulls and cell_is_null(col, r):
             continue
-        total += _load_i64(col, r)
+        total += I128(_load_i64(col, r))
         cnt += 1
-    return AggI64(total, cnt)
+    return AggI128(total, cnt)
 
 
 @always_inline
@@ -237,7 +245,7 @@ def eval_sliding_sum(
         for p in range(len(bounds)):
             var cur_lo = bounds[p]
             var cur_hi = bounds[p]
-            var total: Int64 = 0
+            var total = I128(0)
             var cnt = 0
             for row in range(bounds[p], ends[p]):
                 var new_lo = lo_idx[row]
@@ -245,16 +253,19 @@ def eval_sliding_sum(
                 for r in range(cur_lo, new_lo):
                     if nulls and cell_is_null(col, r):
                         continue
-                    total -= _load_i64(col, r)
+                    total -= I128(_load_i64(col, r))
                     cnt -= 1
                 for r in range(cur_hi, new_hi):
                     if nulls and cell_is_null(col, r):
                         continue
-                    total += _load_i64(col, r)
+                    total += I128(_load_i64(col, r))
                     cnt += 1
                 cur_lo = new_lo
                 cur_hi = new_hi
-                store_i64_or_null(arr, row, total, cnt)
+                if cnt == 0:
+                    store_i64_or_null(arr, row, Int64(0), 0)
+                else:
+                    store_i64_or_null(arr, row, i64_sum_result(total), cnt)
         return Column.from_primitive[DType.int64](arr)
     elif col.arrow_type == ArrowType.FLOAT64:
         var arr = alloc_frame_out_f64(n, nulls, lo_idx, hi_idx)
@@ -333,7 +344,7 @@ def eval_sliding_avg(
         for p in range(len(bounds)):
             var cur_lo = bounds[p]
             var cur_hi = bounds[p]
-            var total_i: Int64 = 0
+            var total_i = I128(0)
             var cnt = 0
             for row in range(bounds[p], ends[p]):
                 var new_lo = lo_idx[row]
@@ -341,18 +352,18 @@ def eval_sliding_avg(
                 for r in range(cur_lo, new_lo):
                     if nulls and cell_is_null(col, r):
                         continue
-                    total_i -= _load_i64(col, r)
+                    total_i -= I128(_load_i64(col, r))
                     cnt -= 1
                 for r in range(cur_hi, new_hi):
                     if nulls and cell_is_null(col, r):
                         continue
-                    total_i += _load_i64(col, r)
+                    total_i += I128(_load_i64(col, r))
                     cnt += 1
                 cur_lo = new_lo
                 cur_hi = new_hi
                 var mean: Float64 = 0.0
                 if cnt > 0:
-                    mean = Float64(Int(total_i)) / Float64(cnt)
+                    mean = i64_mean(total_i, cnt)
                 store_f64_or_null(arr, row, mean, cnt)
     elif col.arrow_type == ArrowType.FLOAT64:
         var win = _F64Window()
@@ -458,7 +469,7 @@ def eval_full_partition_agg(
                 var ai = _frame_sum_i64(col, bounds[p], ends[p])
                 live = ai.count
                 if live > 0:
-                    mean = Float64(Int(ai.value)) / Float64(live)
+                    mean = i64_mean(ai.value, live)
             elif col.arrow_type == ArrowType.FLOAT64:
                 var af = _frame_sum_f64(col, bounds[p], ends[p])
                 live = af.count
@@ -478,7 +489,11 @@ def eval_full_partition_agg(
         for p in range(len(bounds)):
             var agg: AggI64
             if expr.func == PF_SUM:
-                agg = _frame_sum_i64(col, bounds[p], ends[p])
+                var s = _frame_sum_i64(col, bounds[p], ends[p])
+                var v = Int64(0)
+                if s.count > 0:
+                    v = i64_sum_result(s.value)
+                agg = AggI64(v, s.count)
             elif expr.func == PF_MIN:
                 agg = _frame_extreme_i64[True](col, bounds[p], ends[p])
             elif expr.func == PF_MAX:

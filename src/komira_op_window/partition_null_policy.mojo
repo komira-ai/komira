@@ -81,6 +81,39 @@ struct AggF64(Copyable, Movable):
     var count: Int
 
 
+comptime I128 = Scalar[DType.int128]
+"""The accumulator of an INT64 SUM / AVG: exact for any number of INT64
+values a batch can hold."""
+
+
+@fieldwise_init
+struct AggI128(Copyable, Movable):
+    """An exact INT64 sum (in 128 bits) and its non-NULL count."""
+
+    var value: I128
+    var count: Int
+
+
+def i64_sum_result(total: I128) raises -> Int64:
+    """An INT64 SUM's answer: the exact total when it fits INT64, else an
+    error. A window SUM of INT64 is INT64 in the plan, and a total outside
+    that range is refused by name rather than wrapped
+    (docs/design/query_semantics_types.md §8.1)."""
+    if total < I128(Int64.MIN) or total > I128(Int64.MAX):
+        raise Error(
+            "window SUM: the INT64 total "
+            + String(total)
+            + " is outside INT64 (refused rather than wrapped)"
+        )
+    return total.cast[DType.int64]()
+
+
+@always_inline
+def i64_mean(total: I128, count: Int) -> Float64:
+    """An INT64 AVG: the exact total divided once, in DOUBLE (§2.12)."""
+    return total.cast[DType.float64]() / Float64(count)
+
+
 def alloc_out_i64(n: Int, nullable: Bool) raises -> PrimitiveArray[DType.int64]:
     """Allocate a window output column, with a validity bitmap only if needed.
 
