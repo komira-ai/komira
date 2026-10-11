@@ -8,6 +8,11 @@
 # every composite build and probe loop skips (`join_multi_key`'s header). An
 # INT64 column without a validity bitmap passes through uncopied.
 #
+# A key pair of an integer and a FLOAT64 compares as FLOAT64, as DuckDB casts
+# it: `join_key_pairs_as_float64` says which pairs, and the extraction renders
+# their integer side as FLOAT64 keys. A STRING key against a numeric key is
+# refused there.
+#
 # The string hash wave tiles rows into chunks (about four per physical core,
 # at least 4,096 rows, and one chunk below 65,536 rows); each chunk writes only
 # its own rows' slots.
@@ -185,14 +190,85 @@ def hash_string_keys[
     return out.slots.take()
 
 
+comptime _KEY_CLASS_INTEGER: Int = 0
+comptime _KEY_CLASS_FLOAT64: Int = 1
+comptime _KEY_CLASS_STRING: Int = 2
+comptime _KEY_CLASS_OTHER: Int = 3
+
+
+def _key_class(batch: RecordBatch, name: String) raises -> Int:
+    """The comparison class of key column `name`: INT32 / INT64 (plain or a
+    numeric dictionary of them), FLOAT64 (plain or numeric dictionary),
+    STRING / string DICTIONARY, or any other type (which
+    `extract_join_key_columns_typed` refuses on its own)."""
+    ref col = batch.column_at(batch.schema.column_index(name))
+    if col.is_numeric_dict():
+        var vt = col.dict_value_dtype()
+        if vt == DType.int64 or vt == DType.int32:
+            return _KEY_CLASS_INTEGER
+        if vt == DType.float64:
+            return _KEY_CLASS_FLOAT64
+        return _KEY_CLASS_OTHER
+    var at = col.arrow_type
+    if at == ArrowType.INT64 or at == ArrowType.INT32:
+        return _KEY_CLASS_INTEGER
+    if at == ArrowType.FLOAT64:
+        return _KEY_CLASS_FLOAT64
+    if at == ArrowType.STRING or at == ArrowType.DICTIONARY:
+        return _KEY_CLASS_STRING
+    return _KEY_CLASS_OTHER
+
+
+def join_key_pairs_as_float64(
+    probe_batch: RecordBatch,
+    probe_keys: List[String],
+    build_batch: RecordBatch,
+    build_keys: List[String],
+) raises -> List[Bool]:
+    """For each key pair (`probe_keys[k]`, `build_keys[k]`), True iff the pair
+    compares as FLOAT64: one side FLOAT64 and the other INT32 or INT64.
+
+    This is DuckDB's rule: the common type of an integer and a DOUBLE is
+    DOUBLE, so the integer side is cast to DOUBLE (rounded to nearest) and
+    the pair compares as doubles; `1 = 1.0` matches, and so does
+    9007199254740993 with 9007199254740992.0. INT32 against INT64 needs no
+    cast (the INT32 slot is sign-extended). A STRING key against a numeric
+    key raises, as DuckDB refuses to compare VARCHAR with a number without an
+    explicit cast; a type outside these classes is left to
+    `extract_join_key_columns_typed`, which refuses it.
+
+    Raises:
+        On a string-against-number pair, or a key name that is not a column.
+    """
+    var out = List[Bool](capacity=len(probe_keys))
+    for k in range(len(probe_keys)):
+        var pc = _key_class(probe_batch, probe_keys[k])
+        var bc = _key_class(build_batch, build_keys[k])
+        if pc == _KEY_CLASS_OTHER or bc == _KEY_CLASS_OTHER or pc == bc:
+            out.append(False)
+            continue
+        if pc == _KEY_CLASS_STRING or bc == _KEY_CLASS_STRING:
+            raise Error(
+                "join key pair ('" + probe_keys[k] + "', '" + build_keys[k]
+                + "'): a STRING key cannot be compared with a numeric key"
+                " without an explicit cast"
+            )
+        out.append(True)
+    return out^
+
+
 def _numeric_key_slots[
-    dt: DType
+    dt: DType, as_float64: Bool = False
 ](ref src: PrimitiveArray[dt]) raises -> PrimitiveArray[DType.int64]:
     """Render a numeric key column into the Int64 key-slot domain: INT64 as
     is, INT32 sign-extended (injective, so a mixed INT32/INT64 pair compares
     by value), FLOAT64 by `_canonicalize_float64_for_hash`; every NULL row,
     read from the validity bitmap, to `_NAN_SENTINEL_BITS`. The validity
     bitmap is carried onto the result, rebased to offset 0.
+
+    With `as_float64` an integer column is cast to Float64 (rounded to
+    nearest) and rendered as a FLOAT64 key, for a pair whose other side is
+    FLOAT64 (`join_key_pairs_as_float64`).
     """
     var n = src.length
     var out = PrimitiveArray[DType.int64].allocate(n)
@@ -211,8 +287,10 @@ def _numeric_key_slots[
             if has_validity and not src.validity.value().test(soff + r):
                 dp[r] = _NAN_SENTINEL_BITS
                 continue
-            comptime if dt == DType.float64:
-                dp[r] = _canonicalize_float64_for_hash(Float64(sp[r]))
+            comptime if dt == DType.float64 or as_float64:
+                dp[r] = _canonicalize_float64_for_hash(
+                    sp[r].cast[DType.float64]()
+                )
             else:
                 dp[r] = Int64(Int(sp[r]))
         _ = sv
@@ -225,6 +303,18 @@ def _numeric_key_slots[
     return out^
 
 
+def _int_key_slots[
+    dt: DType
+](ref src: PrimitiveArray[dt], as_float64: Bool) raises -> PrimitiveArray[
+    DType.int64
+]:
+    """`_numeric_key_slots` for an integer column, cast to Float64 when
+    `as_float64`."""
+    if as_float64:
+        return _numeric_key_slots[dt, True](src)
+    return _numeric_key_slots[dt](src)
+
+
 def extract_join_key_columns_typed[
     has_pool: Bool,
     D: ParallelDispatch,
@@ -233,6 +323,7 @@ def extract_join_key_columns_typed[
     batch: RecordBatch,
     key_names: List[String],
     dispatcher_ptr: Optional[Pointer[D, disp_o]],
+    as_float64: List[Bool] = List[Bool](),
 ) raises -> MultiKeyColumns:
     """Extract N join-key columns from a RecordBatch into a MultiKeyColumns bundle.
 
@@ -244,11 +335,15 @@ def extract_join_key_columns_typed[
     Args:
         batch: Source batch.
         key_names: List of column names to extract (1..MAX_JOIN_KEYS).
+        as_float64: Per key, True to render an INT32 or INT64 key as a
+            FLOAT64 key (its value cast to Float64), for a pair whose other
+            side is FLOAT64 (`join_key_pairs_as_float64`). Empty: none.
 
     Returns:
         A MultiKeyColumns bundle. `int_keys[k]` holds Int64 bit patterns
         regardless of input dtype (the value for INT64 and INT32, the
-        float-model canonical bits for FLOAT64, the byte hash for STRING /
+        float-model canonical bits for FLOAT64 and for an integer key cast by
+        `as_float64`, the byte hash for STRING /
         DICT; `_NAN_SENTINEL_BITS` for a NULL key).
         `string_keys[k]` is `Some(StringArray)` for STRING and DICT
         keys (the DICT case decodes to a fresh StringArray) and `None`
@@ -269,15 +364,16 @@ def extract_join_key_columns_typed[
     for _ in range(n_keys):
         out_fp.append(UInt64(0))
     for i in range(n_keys):
+        var promote = len(as_float64) > i and as_float64[i]
         var idx = batch.schema.column_index(key_names[i])
         if batch.column_at(idx).is_numeric_dict():
             var flat = batch.column_at(idx).resolve_numeric_dict_to_flat()
             if flat.arrow_type == ArrowType.INT64:
                 var src = flat.as_primitive[DType.int64]()
-                out_int.append(_numeric_key_slots[DType.int64](src))
+                out_int.append(_int_key_slots[DType.int64](src, promote))
             elif flat.arrow_type == ArrowType.INT32:
                 var src = flat.as_primitive[DType.int32]()
-                out_int.append(_numeric_key_slots[DType.int32](src))
+                out_int.append(_int_key_slots[DType.int32](src, promote))
             elif flat.arrow_type == ArrowType.FLOAT64:
                 var src = flat.as_primitive[DType.float64]()
                 out_int.append(_numeric_key_slots[DType.float64](src))
@@ -297,15 +393,15 @@ def extract_join_key_columns_typed[
         var col_dtype = col.arrow_type
         if col_dtype == ArrowType.INT64:
             var i64 = col.as_primitive[DType.int64]()
-            if i64.validity:
-                out_int.append(_numeric_key_slots[DType.int64](i64))
+            if i64.validity or promote:
+                out_int.append(_int_key_slots[DType.int64](i64, promote))
             else:
                 out_int.append(i64^)
             out_str.append(None)
             out_dict.append(None)
         elif col_dtype == ArrowType.INT32:
             var i32 = col.as_primitive[DType.int32]()
-            out_int.append(_numeric_key_slots[DType.int32](i32))
+            out_int.append(_int_key_slots[DType.int32](i32, promote))
             out_str.append(None)
             out_dict.append(None)
         elif col_dtype == ArrowType.FLOAT64:
@@ -396,7 +492,9 @@ def extract_join_key_columns_typed[
 
 
 def extract_join_key_columns_serial(
-    batch: RecordBatch, key_names: List[String]
+    batch: RecordBatch,
+    key_names: List[String],
+    as_float64: List[Bool] = List[Bool](),
 ) raises -> MultiKeyColumns:
     """`extract_join_key_columns_typed` for a caller that has NO dispatcher to
     thread — the key-hash wave runs inline on the calling thread.
@@ -404,5 +502,5 @@ def extract_join_key_columns_serial(
     var _nd = NoDispatch()
     comptime nd_o = origin_of(_nd)
     return extract_join_key_columns_typed[False, NoDispatch, nd_o](
-        batch, key_names, Optional[Pointer[NoDispatch, nd_o]](None)
+        batch, key_names, Optional[Pointer[NoDispatch, nd_o]](None), as_float64
     )

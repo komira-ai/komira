@@ -16,7 +16,10 @@
 #          more keys, or a FLOAT64, INT32, STRING or dictionary key): the
 #          composite-key join `execute_multi_key_join_probe` (INNER, LEFT,
 #          SEMI, ANTI; RIGHT and FULL raise), whose float keys follow the float
-#          model (NaN equals NaN, -0.0 equals +0.0);
+#          model (NaN equals NaN, -0.0 equals +0.0); an INT32 or INT64 key
+#          paired with a FLOAT64 key is cast to FLOAT64 and compares as one,
+#          as DuckDB casts it to DOUBLE, and a STRING key paired with a
+#          numeric key raises;
 #       4. `JOIN_ALGO_SORT_MERGE` for INNER, LEFT, RIGHT and FULL: the
 #          sort-merge join (SEMI and ANTI take the key set whatever the
 #          algorithm says);
@@ -128,7 +131,8 @@ def takes_composite_key_path(
 ) raises -> Bool:
     """True iff `execute_join_probe` sends this join to the composite-key
     join: two or more key pairs, or one pair that is not INT64-stored on both
-    sides. A key name that is not a column raises."""
+    sides (there an integer key paired with a FLOAT64 key compares as
+    FLOAT64). A key name that is not a column raises."""
     if len(op.probe_left_keys) != 1:
         return True
     var li = probe_batch.schema.column_index(op.probe_left_keys[0])
@@ -249,7 +253,8 @@ def execute_join_probe(
 
     Raises:
         On a join the arms refuse: RIGHT or FULL over composite keys, more than
-        one equi key with a residual, RIGHT or FULL with a residual.
+        one equi key with a residual, RIGHT or FULL with a residual, a STRING
+        key paired with a numeric key.
     """
     var join_type = op.probe_join_type
 
