@@ -1,0 +1,38 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Source support for the engine dispatcher: the typed in-memory source and its scan plan builders, the bare multi-batch in-memory scan fold, the row gate of the resident-filter fan-out, the leaf-servability pre-gates, and the column-parallel concat re-exported.
+mojo_library(
+    name = "komira_dispatch_sources",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_format:komira_column_format",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_engine_runtime:komira_engine_runtime",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_morsel:komira_morsel",
+        "//src/komira_op_agg_row_api:komira_op_agg_row_api",
+        "//src/komira_op_typed_source_api:komira_op_typed_source_api",
+        "//src/komira_parquet:komira_parquet",
+        "//src/komira_physical_plan:komira_physical_plan",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_scan_source:komira_scan_source",
+    ],
+    test_srcs = [
+        # the resident-filter fan-out's row gate: a STRING predicate is
+        # admitted from 65,536 rows, a fixed-width one keeps its floor, the
+        # band edges, and varlen_on=False restores the row-only gate (welded)
+        "tests/test_inmem_filter_varlen_gate.mojo",
+        # every branch of the moved modules the welded test does not reach
+        # (direct tests, new): one file per module
+        "tests/test_inmem_source.mojo",
+        "tests/test_materialize_zerocopy_gate.mojo",
+        "tests/test_plan_leaf_servable.mojo",
+        "tests/test_varlen_gate_columns.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
