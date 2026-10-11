@@ -3623,9 +3623,13 @@ struct ExpressionExecutor(Movable, Deinitable):
             )
             # A zero divisor answers NULL (§5.3): the row holds the
             # placeholder 0.0 and `_mark_value_nulls_from_view` reports it.
-            # MIN / -1 raises (§5.4) unless an operand is NULL: a dividend
-            # that widens to -2^63 is INT64's MIN as far as this arm knows.
+            # MIN / -1 raises (§5.4) unless an operand is NULL. Every Int64
+            # from MIN to MIN + 2^9 widens to -2^63, so a dividend that does
+            # is re-read once through the Int64 walker and only MIN itself
+            # raises: (MIN + 1) / -1 is MAX, which fits. Only -1 widens to
+            # -1.0, so the divisor test is exact.
             var operand_nulls = List[Bool]()
+            var lhs_i64 = List[Scalar[DType.int64]]()
             var k = 0
             while k < n_sel:
                 var d = rhs_vals[k]
@@ -3634,15 +3638,21 @@ struct ExpressionExecutor(Movable, Deinitable):
                     k = k + 1
                     continue
                 if d == -1.0 and lhs_vals[k] == Float64(Int64.MIN):
-                    if len(operand_nulls) == 0:
-                        operand_nulls = self._operand_nulls_from_view[bo](
-                            batch, node, sel, True
+                    if len(lhs_i64) == 0:
+                        lhs_i64 = List[Scalar[DType.int64]](capacity=n_sel)
+                        self.eval_to_list_i64_from_view[bo](
+                            batch_view, node.left, sel, lhs_i64
                         )
-                    if not operand_nulls[k]:
-                        raise _ee_div_overflow_error[DType.int64]()
-                    out.append(0.0)
-                    k = k + 1
-                    continue
+                    if lhs_i64[k] == Int64.MIN:
+                        if len(operand_nulls) == 0:
+                            operand_nulls = self._operand_nulls_from_view[bo](
+                                batch, node, sel, True
+                            )
+                        if not operand_nulls[k]:
+                            raise _ee_div_overflow_error[DType.int64]()
+                        out.append(0.0)
+                        k = k + 1
+                        continue
                 # Integer division truncates toward zero (query_semantics.md
                 # §5.1), so the widened quotient is truncated: 7 / 2 is 3.0,
                 # not 3.5. Exact while both operands are below 2^53. `+ 0.0`

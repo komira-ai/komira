@@ -11,8 +11,8 @@
 # refuses, as `ColumnCellSource` does for a numeric column).
 #
 # Zero source: k = [7, -7, 0, -9], d = [2, 0, 0, -2].
-# MIN source: k = [MIN, N/MIN, 6, MIN], d = [-1, -1, -1, 1] (row 1 NULL when
-# the source carries validity).
+# MIN source: k = [MIN, N/MIN, 6, MIN, MIN], d = [-1, -1, -1, 1, N/-1] (k row
+# 1 and d row 4 NULL when the source carries validity).
 #
 # Refs komira-ai/komira#1276.
 # =============================================================================
@@ -98,8 +98,8 @@ def _zero_cells(validity: Bool) -> _Cells:
 
 
 def _min_cells(validity: Bool) -> _Cells:
-    var ints: List[List[Int]] = [[I64_MIN, I64_MIN, 6, I64_MIN], [-1, -1, -1, 1]]
-    var nulls: List[List[Bool]] = [[False, True, False, False], [False, False, False, False]]
+    var ints: List[List[Int]] = [[I64_MIN, I64_MIN, 6, I64_MIN, I64_MIN], [-1, -1, -1, 1, -1]]
+    var nulls: List[List[Bool]] = [[False, True, False, False, False], [False, False, False, False, True]]
     return _Cells(ints^, nulls^, validity)
 
 
@@ -222,6 +222,8 @@ def test_min_over_minus_one_raises() raises:
         _ = exec._eval_i64_from_source(c, 2, 0)
     assert_equal(Int(exec._eval_i64_from_source(c, 2, 1)), 0, "NULL dividend: no raise")
     assert_true(exec._value_is_null_from_source(c, 2, 1))
+    assert_equal(Int(exec._eval_i64_from_source(c, 2, 4)), 0, "NULL divisor: no raise")
+    assert_true(exec._value_is_null_from_source(c, 2, 4))
     assert_equal(Int(exec._eval_i64_from_source(c, 2, 2)), -6)
     assert_equal(Int(exec._eval_i64_from_source(c, 2, 3)), I64_MIN, "MIN / 1")
     # Without a validity region every cell is present: row 1 is MIN / -1.

@@ -30,6 +30,16 @@
 # | 3   | MIN      | 1       | MIN      | 1       |
 # | 4   | 6        | -1      | 6        | -1      |
 #
+# Wide fixture (values the Float64 walker cannot hold exactly):
+#
+# | row | a (i64)  | z (i64) |
+# |-----|----------|---------|
+# | 0   | 2^62 + 1 | 2^62    |
+# | 1   | 5        | 5       |
+#
+# Read through the Int64 walker, (a - z) is 1 and 0; widened to Float64 first,
+# both rows give 0.0, since 2^62 + 1 rounds to 2^62.
+#
 # Refs komira-ai/komira#1276.
 # =============================================================================
 
@@ -51,12 +61,16 @@ from komira_kernels.runtime_expr import (
     EXPR_DIV_I64,
     EXPR_EQ_F64_MIXED,
     EXPR_GE_F64_MIXED,
+    EXPR_GE_I64,
     EXPR_LT_F64_MIXED,
+    EXPR_SUB_I64,
     RuntimeExpr,
+    make_case_i64,
     make_col,
     make_i64_to_f64,
     make_lit_f64,
     make_lit_i32,
+    make_lit_i64,
     make_not_bool,
 )
 
@@ -121,6 +135,11 @@ def _min_batch() raises -> RecordBatch:
     )
 
 
+def _wide_batch() raises -> RecordBatch:
+    var big = 1 << 62
+    return _build([big + 1, 5], [big, 5], [0, 0], [1, 1], -1, -1)
+
+
 def _sel(rows: List[Int]) -> RowSelectionVector:
     var sel = RowSelectionVector(8)
     for r in rows:
@@ -132,10 +151,10 @@ def _node(kind: Int, left: Int, right: Int) -> RuntimeExpr:
     return RuntimeExpr(kind, Int64(0), 0.0, False, 0, left, right)
 
 
-def _exec(var pool: List[RuntimeExpr]) -> ExpressionExecutor:
+def _exec(var pool: List[RuntimeExpr], var when: List[List[Int]] = List[List[Int]]()) -> ExpressionExecutor:
     """Root is the last slot."""
     var root = len(pool) - 1
-    return ExpressionExecutor(pool^, root, _names())
+    return ExpressionExecutor(pool^, root, _names(), when_pool=when^)
 
 
 def _div(kind: Int, l: Int, r: Int) -> ExpressionExecutor:
@@ -336,6 +355,76 @@ def test_i32_min_over_minus_one_raises() raises:
     assert_equal(got_nested[0], -6, "(6 / -1) + 0")
 
 
+# -----------------------------------------------------------------------------
+# Operands past 2^53: each check reads the value the division used
+# -----------------------------------------------------------------------------
+
+
+def test_probe_f64_walker_min_plus_one_over_minus_one_no_raise() raises:
+    """(MIN + 1) / -1 is MAX, which fits: §5.4 refuses only MIN / -1. The
+    Float64 walker widens MIN + 1 to -2^63, the same Float64 as MIN, so its
+    overflow check must look at the Int64 dividend. MAX widens to 2^63."""
+    var batch = _build([Int(I64_MIN) + 1], [-1], [0], [-1], -1, -1)
+    var got = _f64(_div(EXPR_DIV_I64, A, Z), batch, [0])
+    assert_equal(len(got), 1)
+    assert_equal(got[0], Float64(Int64.MAX))
+
+
+def _diff_over_diff(mut pool: List[RuntimeExpr]) -> Int:
+    """Append `(a - z) / (a - z)` to `pool`; return its slot."""
+    var base = len(pool)
+    pool.append(make_col(A))                          # base
+    pool.append(make_col(Z))                          # base + 1
+    pool.append(_node(EXPR_SUB_I64, base, base + 1))  # base + 2: a - z
+    pool.append(_node(EXPR_DIV_I64, base + 2, base + 2))
+    return base + 3
+
+
+def _eq_one(var pool: List[RuntimeExpr], value: Int, negate: Bool, var when: List[List[Int]] = List[List[Int]]()) -> ExpressionExecutor:
+    """`[NOT] (CAST(<value> AS DOUBLE) = 1)` over `pool`."""
+    pool.append(make_i64_to_f64(value))
+    var cast = len(pool) - 1
+    pool.append(make_lit_f64(1.0))
+    pool.append(_node(EXPR_EQ_F64_MIXED, cast, cast + 1))
+    if negate:
+        pool.append(make_not_bool(cast + 2))
+    return _exec(pool^, when^)
+
+
+def test_cast_quotient_null_channel_reads_the_int64_divisor() raises:
+    """`CAST((a - z) / (a - z) AS DOUBLE) = 1`: the Int64 walker divides 1 / 1
+    on row 0, so the row is TRUE, not NULL. Row 1 is 0 / 0, NULL. A NULL
+    channel that read the divisor through the Float64 walker would see 0.0 on
+    row 0 too."""
+    var batch = _wide_batch()
+    var pool = List[RuntimeExpr]()
+    var q = _diff_over_diff(pool)
+    _expect(_run(_eq_one(pool.copy(), q, False), batch), [0], "CAST(q) = 1")
+    _expect(_run(_eq_one(pool^, q, True), batch), List[Int](), "NOT (CAST(q) = 1)")
+
+
+def test_int64_case_branch_null_channel_reads_the_int64_divisor() raises:
+    """`CAST(CASE WHEN a >= 0 THEN (a - z) / (a - z) ELSE 0 END AS DOUBLE) =
+    1`: an Int64 CASE evaluates its branches through the Int64 walker, so the
+    NULL channel reads the branch's divisor there (1 on row 0, 0 on row 1)."""
+    var batch = _wide_batch()
+    var pool = List[RuntimeExpr]()
+    var q = _diff_over_diff(pool)
+    pool.append(make_col(A))
+    pool.append(make_lit_i64(0))
+    pool.append(_node(EXPR_GE_I64, len(pool) - 2, len(pool) - 1))
+    var cond = len(pool) - 1
+    pool.append(make_lit_i64(0))
+    var else_slot = len(pool) - 1
+    pool.append(make_case_i64(0))
+    var case_slot = len(pool) - 1
+    var slots: List[Int] = [cond, q, else_slot]
+    var when = List[List[Int]]()
+    when.append(slots^)
+    _expect(_run(_eq_one(pool.copy(), case_slot, False, when.copy()), batch), [0], "CAST(CASE) = 1")
+    _expect(_run(_eq_one(pool^, case_slot, True, when^), batch), List[Int](), "NOT (CAST(CASE) = 1)")
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_i64_zero_divisor_is_null_not_a_raise]()
@@ -346,4 +435,7 @@ def main() raises:
     suite.test[test_i64_min_over_minus_one_raises]()
     suite.test[test_f64_walker_min_over_minus_one_raises]()
     suite.test[test_i32_min_over_minus_one_raises]()
+    suite.test[test_probe_f64_walker_min_plus_one_over_minus_one_no_raise]()
+    suite.test[test_cast_quotient_null_channel_reads_the_int64_divisor]()
+    suite.test[test_int64_case_branch_null_channel_reads_the_int64_divisor]()
     suite^.run()
