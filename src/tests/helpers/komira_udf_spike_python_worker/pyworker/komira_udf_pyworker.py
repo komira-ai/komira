@@ -571,6 +571,11 @@ class Worker:
                     continue
                 payload = self.e2w[off : off + length]
                 in_slot = True
+            if not hello_done and op not in (OP["HELLO"], OP["SHUTDOWN"]):
+                # HELLO is the version gate (section 5.2): nothing else is
+                # served until one was taken.
+                self.send_error(req, ERR_ABI, "op {} before HELLO: nothing is served until HELLO".format(op))
+                continue
             try:
                 if op == OP["HELLO"]:
                     self.send(OP["OK"], req, self.hello(payload, fds))

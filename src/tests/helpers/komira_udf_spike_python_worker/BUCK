@@ -2,7 +2,7 @@ load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_shared_lib")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load("@komira//tools/build/python:defs.bzl", "python_oracle")
+load("@komira//tools/build/python:defs.bzl", "py_test", "python_oracle")
 load("//src/tests/helpers/komira_udf_spike_python:defs.bzl", "udf_bench")
 load(":defs.bzl", "PYWORKER", "bytecode", "code_layer", "dist_native_libs", "pyrt_files", "runtime_dir")
 
@@ -18,11 +18,15 @@ load(":defs.bzl", "PYWORKER", "bytecode", "code_layer", "dist_native_libs", "pyr
 #                           forwards clock reads and cancel
 #   native/ipc_codec.c      the Arrow IPC subset the engine side writes
 #                           (schemas, batches) and reads (one-column batches)
-#   native/probe_boundary.c, native/probe_calls.c
-#                           single cases the engine loop does not reach: the
-#                           checks at the worker boundary, and calls through a
-#                           library's table (two arguments, a late load,
-#                           refusals, kills)
+#   native/probe_*.c       single cases the engine loop does not reach:
+#                           probe_codec.c the engine-side codec (golden bytes,
+#                           pyarrow's batches, each refusal); probe_boundary.c
+#                           HELLO and replies a fake worker breaks;
+#                           probe_fake.c the channel against a scripted fake
+#                           worker (slots, clock, cancel, heap edges, partial
+#                           reads and writes, reaping); probe_worker.c a real
+#                           worker driven message by message; probe_calls.c and
+#                           probe_table.c calls through a library's table
 #   pyworker/               the worker (komira_udf_pyworker.py), its IPC codec
 #                           (kudf_ipc.py) and the fixtures only these tests load;
 #                           user code runs through the in-process runtime's
@@ -30,6 +34,10 @@ load(":defs.bzl", "PYWORKER", "bytecode", "code_layer", "dist_native_libs", "pyr
 #   producer/make_closure.py  a VALUE UDF's capture: a function of __main__
 #                           closing over a 16 MiB numpy model, cloudpickled
 #                           (:closure_capture, laid out by digest as :closure)
+#   producer/pyarrow_batches.py, producer/value_payloads.py
+#                           batches as pyarrow writes them, and VALUE payloads
+#                           the worker refuses (python_oracle targets)
+#   tests/ipc_golden.txt    the engine-side writer's messages, byte for byte
 #   refrt/                  the builds' one export each (below)
 #   native/drive.c, drive.mojo, workloads.mojo
 #                           the engine loop the tests and the bench drive a
@@ -37,8 +45,8 @@ load(":defs.bzl", "PYWORKER", "bytecode", "code_layer", "dist_native_libs", "pyr
 #   bench/                  the bench program; :bench_zygote, :bench_spawn and
 #                           :bench_pipe are its runs
 #
-# The welded tests (each file's header names the mutant planted to see it go
-# red):
+# The welded tests (each file's header says what it proves; the pull
+# request's operator sweep names the mutants each kills):
 #   test_conform_worker   the shared conformance cases a managed runtime can
 #                         express, through the proxy, on four builds.
 #   test_worker_processes describe through the proxy, one process per context
@@ -51,14 +59,21 @@ load(":defs.bzl", "PYWORKER", "bytecode", "code_layer", "dist_native_libs", "pyr
 #                         payload by value, a digest mismatch refused, the
 #                         model's pages shared by forked workers and not by
 #                         spawned ones, and the fork's thread facts.
-#   test_worker_boundary  the engine's decode of a reply against each defect
-#                         a worker could write, the writer's re-basing at
-#                         every bit shift, HELLO refused on any version
-#                         difference by a real worker and by the engine, and
-#                         malformed replies from a fake worker.
+#   test_worker_boundary  the engine-side codec (golden writer bytes, every
+#                         decode refusal, pyarrow's batches), HELLO refused on
+#                         any version difference by a real worker and by the
+#                         engine, malformed replies from a fake worker, and the
+#                         channel against a scripted fake worker.
+#   test_worker_protocol  a real worker driven message by message: its
+#                         refusals of requests and LOAD bodies, its frame.
+#   test_runtime_table    the table entries the others do not reach (spec
+#                         refusals, describe, frames and aggregates), what each
+#                         build starts, deadlines before a batch, init.
 #   test_worker_calls     two arguments at different offsets, a UDF loaded
 #                         after a context, call_batch's refusals, and the
 #                         kill of a worker deaf to cancel or past a deadline.
+# And a py_test, :test_kudf_ipc: the worker's IPC codec against pyarrow, and
+# tests/ipc_golden.txt read by pyarrow.
 
 _CASES = {"src/tests/helpers/komira_udf_spike_abi": "//src/tests/helpers/komira_udf_spike_abi:cases"}
 
@@ -76,9 +91,11 @@ mojo_library(
     test_srcs = [
         "tests/test_closure.mojo",
         "tests/test_conform_worker.mojo",
+        "tests/test_runtime_table.mojo",
         "tests/test_worker_boundary.mojo",
         "tests/test_worker_calls.mojo",
         "tests/test_worker_processes.mojo",
+        "tests/test_worker_protocol.mojo",
     ],
     test_data = {
         "tests/test_closure.mojo": runtime_dir(["spawn", "zygote", "zygote_threads"], extra = {"closure": ":closure"}),
@@ -87,9 +104,17 @@ mojo_library(
             site = ":site_bc_pyarrow",
             extra = _CASES,
         ),
-        "tests/test_worker_boundary.mojo": runtime_dir([]),
+        "tests/test_runtime_table.mojo": runtime_dir(
+            ["pipe", "pyarrow", "spawn", "zygote", "zygote_threads"],
+            site = ":site_bc_pyarrow",
+        ),
+        "tests/test_worker_boundary.mojo": runtime_dir([], extra = {
+            "ipc_golden.txt": "tests/ipc_golden.txt",
+            "pyarrow_batches": ":pyarrow_batches",
+        }),
         "tests/test_worker_calls.mojo": runtime_dir(["pipe", "pyarrow", "spawn", "zygote"], site = ":site_bc_pyarrow"),
         "tests/test_worker_processes.mojo": runtime_dir(["spawn", "zygote"]),
+        "tests/test_worker_protocol.mojo": runtime_dir([], extra = {"value_payloads": ":value_payloads"}),
     },
     visibility = ["PUBLIC"],
 )
@@ -105,7 +130,11 @@ staged_files(
         "native/proxy_channel.c",
         "native/probe_boundary.c",
         "native/probe_calls.c",
+        "native/probe_codec.c",
+        "native/probe_fake.c",
         "native/probe_json.h",
+        "native/probe_table.c",
+        "native/probe_worker.c",
         "native/proxy_runtime.c",
         "native/pyw.h",
     ],
@@ -143,6 +172,10 @@ cxx_library(
     srcs = [
         ":c_files[native/probe_boundary.c]",
         ":c_files[native/probe_calls.c]",
+        ":c_files[native/probe_codec.c]",
+        ":c_files[native/probe_fake.c]",
+        ":c_files[native/probe_table.c]",
+        ":c_files[native/probe_worker.c]",
     ],
     headers = {
         "probe_json.h": ":c_files[native/probe_json.h]",
@@ -238,6 +271,34 @@ code_layer(
     capture = ":closure_capture",
 )
 
+# One-column batches as pyarrow writes them (producer/pyarrow_batches.py),
+# for the engine-side decoder's cases (native/probe_codec.c).
+python_oracle(
+    name = "pyarrow_batches",
+    src = "producer/pyarrow_batches.py",
+    outs = ["batches.txt"],
+    deps = [
+        "//third_party/python:numpy",
+        "//third_party/python:pyarrow",
+    ],
+)
+
+# VALUE code objects the worker must refuse or take at LOAD
+# (producer/value_payloads.py), for native/probe_worker.c.
+python_oracle(
+    name = "value_payloads",
+    src = "producer/value_payloads.py",
+    outs = [
+        "bad_pickle",
+        "bad_signature",
+        "good",
+        "info.txt",
+        "not_function",
+        "unresolved_hints",
+    ],
+    deps = ["//third_party/python:cloudpickle"],
+)
+
 python_oracle(
     name = "closure_capture",
     src = "producer/make_closure.py",
@@ -282,6 +343,23 @@ mojo_binary(
     "spawn",
     "zygote",
 ]]
+
+# The worker's Arrow IPC codec (pyworker/kudf_ipc.py) against pyarrow: the
+# schemas and batches pyarrow writes read back, each reader check refusing a
+# copy with its defect, and BatchWriter's messages read by pyarrow. A py_test
+# runs as a build action: building the target is running it.
+py_test(
+    name = "test_kudf_ipc",
+    src = "tests/test_kudf_ipc.py",
+    srcs = [
+        "pyworker/kudf_ipc.py",
+        "tests/ipc_golden.txt",
+    ],
+    deps = [
+        "//third_party/python:numpy",
+        "//third_party/python:pyarrow",
+    ],
+)
 
 # The deps above name every komira_* module the library and its tests import
 # (tools/build/lint: mojo_deps).

@@ -201,6 +201,24 @@ void pyw_reply_free(struct pyw_reply* r) {
   r->len = 0;
 }
 
+/* A reply must answer request `id`, with OK or ERROR. 0, or -1 with the
+ * channel dead and `rep` freed. */
+static int check_reply(struct pyw_chan* c, const komira_udf_wire_header* h, uint64_t id, struct pyw_reply* rep) {
+  if (h->request_id != id) {
+    pyw_reply_free(rep);
+    die(c, "UDF_RUNTIME_FAULT: a reply that answers no request");
+    return -1;
+  }
+  if (h->op != KOMIRA_UDF_OP_OK && h->op != KOMIRA_UDF_OP_ERROR) {
+    char m[96];
+    snprintf(m, sizeof(m), "UDF_RUNTIME_FAULT: a reply of op %u, not OK or ERROR", h->op);
+    pyw_reply_free(rep);
+    die(c, m);
+    return -1;
+  }
+  return 0;
+}
+
 int pyw_chan_request(struct pyw_chan* c, uint32_t op, const struct pyw_buf* body, const int* fds, int nfds,
                      struct pyw_reply* rep) {
   memset(rep, 0, sizeof(*rep));
@@ -211,12 +229,7 @@ int pyw_chan_request(struct pyw_chan* c, uint32_t op, const struct pyw_buf* body
     return -1;
   komira_udf_wire_header h;
   if (read_message(c, &h, rep) != 0) return -1;
-  if (h.request_id != id || (h.op != KOMIRA_UDF_OP_OK && h.op != KOMIRA_UDF_OP_ERROR)) {
-    pyw_reply_free(rep);
-    die(c, "UDF_RUNTIME_FAULT: a reply that answers no request");
-    return -1;
-  }
-  return 0;
+  return check_reply(c, &h, id, rep);
 }
 
 /* ---- the shared region --------------------------------------------------- */
@@ -439,11 +452,7 @@ static int await_reply(struct pyw_chan* c, uint64_t id, const komira_udf_call* c
       (void)host->now_ns(host->host_data);
       continue;
     }
-    if (h.request_id != id || (h.op != KOMIRA_UDF_OP_OK && h.op != KOMIRA_UDF_OP_ERROR)) {
-      pyw_reply_free(rep);
-      die(c, "UDF_RUNTIME_FAULT: a reply that answers no request");
-      return -1;
-    }
+    if (check_reply(c, &h, id, rep) != 0) return -1;
     c->worker_ns += h.slot;
     return 0;
   }

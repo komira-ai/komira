@@ -387,6 +387,24 @@ static int64_t pid_in(struct eng* e, komira_udf_context* c) {
   return pid;
 }
 
+/* Whether `pid` has ended (a zombie not yet reaped counts: the engine reaps
+ * its own children at close_context), polling for up to `ms`. */
+static int ended_within(int64_t pid, int ms) {
+  char path[64], st[512];
+  snprintf(path, sizeof(path), "/proc/%lld/stat", (long long)pid);
+  for (int i = 0; i <= ms; i++) {
+    FILE* f = fopen(path, "r");
+    if (f == NULL) return 1;
+    size_t n = fread(st, 1, sizeof(st) - 1, f);
+    fclose(f);
+    st[n] = 0;
+    const char* rp = strrchr(st, ')'); /* the state follows the command name */
+    if (rp != NULL && (rp[2] == 'Z' || rp[2] == 'X')) return 1;
+    usleep(1000);
+  }
+  return 0;
+}
+
 /* sleep_deaf(20), cancelled at 300 ms or past a deadline 300 ms away: the
  * status, the reason and the ms (value); then whether the context is lost
  * and whether its worker is gone after close_context. */
@@ -415,6 +433,12 @@ static void kill_case(struct eng* e, struct pj* j, const char* name, int by_canc
                     sizeof(komira_udf_call));
   if (rc == KOMIRA_UDF_OK) out.array.release(&out.array);
   pj_case(j, name, rc, m, ms);
+  /* Killed by the time call_batch returned (a second or so for the signal
+   * to land), not later by close_context. */
+  char key0[64];
+  snprintf(key0, sizeof(key0), "%s_ended_at_return", name);
+  int ended = pid > 0 && ended_within(pid, 1000);
+  pj_case(j, key0, pid > 0 ? 0 : -1, ended ? "ended" : "running", ended);
   /* The next call on the same instance. */
   char m2[512], key[64];
   make_args(&args, 1, 1, cs, &released);

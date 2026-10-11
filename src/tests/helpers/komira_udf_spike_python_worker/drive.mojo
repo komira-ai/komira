@@ -3,15 +3,17 @@
 # =============================================================================
 # Driver opens a UDF runtime library and keeps it until close(); run() takes
 # one workload as `key=value` lines and returns the loop's JSON report, which
-# Report parses. probe_boundary and probe_calls run one group of the cases of
-# native/probe_boundary.c and native/probe_calls.c and return their report.
+# Report parses. probe_boundary, probe_calls, probe_table and probe_worker
+# run one group of the cases of native/probe_boundary.c (with
+# native/probe_codec.c and native/probe_fake.c), native/probe_calls.c,
+# native/probe_table.c and native/probe_worker.c and return their report.
 #
 # Who owns and frees each pointer:
 #   - the engine handle (struct engine): native/drive.c's, created by
 #     kpw_open, freed by kpw_close in Driver.close (or __del__), which shuts
 #     the runtime down first. Held as a Word only this file reads through.
 #   - a report string: created by kpw_run (or kpw_probe_boundary,
-#     kpw_probe_calls), copied here by read_cstr and freed by kpw_free
+#     kpw_probe_calls, kpw_probe_table, kpw_probe_worker), copied here by read_cstr and freed by kpw_free
 #     before the function returns.
 #   - C strings passed in (the library path, the configuration): zeroed
 #     blocks freed right after the call; the C side copies what it keeps.
@@ -54,7 +56,7 @@ def _report(r: Void) raises -> JsonValue:
 
 def probe_boundary(group: String, arg: String) raises -> JsonValue:
     """native/probe_boundary.c: "codec", "hello" (`arg`: the runtime
-    directory) or "faults"; one member per case."""
+    directory), "faults" or "fake"; one member per case."""
     var g = _cstr(group)
     var a = _cstr(arg)
     var r = external_call["kpw_probe_boundary", Void](g, a)
@@ -69,6 +71,29 @@ def probe_calls(library: String, group: String) raises -> JsonValue:
     var l = _cstr(library)
     var g = _cstr(group)
     var r = external_call["kpw_probe_calls", Void](l, g)
+    free_zeroed(l)
+    free_zeroed(g)
+    return _report(r)
+
+
+def probe_worker(group: String, dir: String) raises -> JsonValue:
+    """native/probe_worker.c: "control", "load" or "frame" against workers
+    started from the runtime directory `dir`; one member per case."""
+    var g = _cstr(group)
+    var d = _cstr(dir)
+    var r = external_call["kpw_probe_worker", Void](g, d)
+    free_zeroed(g)
+    free_zeroed(d)
+    return _report(r)
+
+
+def probe_table(library: String, group: String) raises -> JsonValue:
+    """native/probe_table.c: "specs", "entries", "builds", "builds_long",
+    "deadline", "many" or "init" through the runtime library at `library`;
+    one member per case."""
+    var l = _cstr(library)
+    var g = _cstr(group)
+    var r = external_call["kpw_probe_table", Void](l, g)
     free_zeroed(l)
     free_zeroed(g)
     return _report(r)

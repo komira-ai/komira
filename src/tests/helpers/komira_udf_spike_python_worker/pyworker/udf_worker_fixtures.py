@@ -40,3 +40,38 @@ def sleep_deaf(seconds: int) -> int:
     signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1})
     time.sleep(seconds)
     return seconds
+
+
+def eight(a: int, b: int, c: int, d: int, e: int, f: int, g: int, h: int) -> int:
+    """The most arguments a UDF takes here."""
+    return a + b + c + d + e + f + g + h
+
+
+def exit_3(x: int) -> int:
+    """Ends the worker process with exit status 3."""
+    os._exit(3)
+
+
+def blas_threads(x: int) -> int:
+    """OPENBLAS_NUM_THREADS as the worker sees it, 0 when unset."""
+    return int(os.environ.get("OPENBLAS_NUM_THREADS", "0"))
+
+
+def shares_memory(x: int) -> int:
+    """1 when the worker maps the engine's shared region (a memfd named
+    komira-udf-worker), else 0."""
+    with open("/proc/self/maps") as f:
+        return 1 if "komira-udf-worker" in f.read() else 0
+
+
+def sleep_ms(ms: int) -> int:
+    """Sleeps `ms` milliseconds."""
+    time.sleep(ms / 1000)
+    return ms
+
+
+def uses_pyarrow(x: int) -> int:
+    """1 when the worker imported pyarrow (its IPC codec), else 0."""
+    import sys
+
+    return 1 if "pyarrow" in sys.modules else 0

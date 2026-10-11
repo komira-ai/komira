@@ -22,8 +22,9 @@
 #     (a check deleted: the engine reads past a child's buffers);
 #   - kills, on the spawn, pipe and zygote builds: a call deaf to cancel and
 #     to the clock (SIGUSR1 blocked, sleeping 20 s) is cancelled 300 ms in;
-#     the worker is killed 2 s after the cancel reached it, and the call
-#     returns ERR_CANCELLED in 2 .. 12 s. In a new context the same call
+#     the worker is killed 2 s after the cancel reached it (it has ended
+#     by the time call_batch returns, not only after close_context), and the
+#     call returns ERR_CANCELLED in 2 .. 12 s. In a new context the same call
 #     past a deadline 300 ms away is killed 2 s after it: ERR_DEADLINE in
 #     2 .. 12 s. After each the next call on that context is
 #     ERR_INSTANCE_LOST, its worker is gone after close_context, and a new
@@ -76,6 +77,9 @@ def killed(r: JsonValue, name: String, status: Int32, what: String) raises:
     assert_equal(num(c, "status"), Int(status), said)
     assert_true("killed" in text(c, "message"), said)
     assert_true(ms >= 2000 and ms <= 12000, said)
+    var ended = r.get(name + "_ended_at_return")
+    assert_equal(num(ended, "status"), 0, what + ": the worker's pid was read")
+    assert_equal(text(ended, "message"), "ended", what + ": the worker was not killed by the time the call returned")
     var next = r.get(name + "_next")
     assert_equal(num(next, "status"), Int(ERR_INSTANCE_LOST), what + ": " + text(next, "message"))
     assert_equal(num(next, "value"), 2, what + ": both calls' args released")

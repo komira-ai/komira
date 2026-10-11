@@ -133,6 +133,7 @@ dist_native_libs = declares_docs(_dist_native_libs)
 PYWORKER = {f: "pyworker/" + f for f in [
     "komira_udf_pyworker.py",
     "kudf_ipc.py",
+    "udf_worker_badimport.py",
     "udf_worker_fixtures.py",
     "udf_worker_np.py",
 ]}
