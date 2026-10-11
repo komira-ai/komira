@@ -38,13 +38,13 @@
 #      branchnoprof and branchversion build green (their release gates),
 #      and branchfail[coverage][branch][test_profile_env] is red (a test
 #      failing only instrumented: the run's message, without the gate's
-#      banner), branchnoprof[...] red (a cov_branch_run.sh copy whose test
+#      banner), branchnoprof[...] red (a copy of `cov_branch run` whose test
 #      gets no LLVM_PROFILE_FILE: no .profraw), branchversion[...] red (a
-#      copy raising each raw profile's version to 12: refused as version 12,
+#      copy reading each raw profile's version as 12: refused as version 12,
 #      not 11), branchannotate[coverage][branch_ir][test_one] red (a
 #      cov_branch_annotate.sh copy changing the control flow before the
 #      profile is applied: LLVM's hash mismatch warning, refused),
-#      branchmissing[...][branch_ir] red (a cov_branch_run.sh copy merging
+#      branchmissing[...][branch_ir] red (a `cov_branch run` copy merging
 #      without the test's main: a function the binary links that the
 #      profile lacks, refused), branchinternal[...][branch_ir] red (a copy
 #      internalizing the bitcode before the profile is applied: a function

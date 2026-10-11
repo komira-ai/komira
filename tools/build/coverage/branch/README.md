@@ -33,9 +33,10 @@ and they are built when asked for:
 
 | target | what |
 |---|---|
-| `:cov_branch` | the directories every library's branch coverage links, runs and annotates from, and the classifier (`cov_branch_dir`, [`defs.bzl`](defs.bzl)), from `komira//tools/build/toolchains/llvm_branch:llvm_branch` (so its checks gate every use): `[link]`, [`cov_branch_link.sh`](cov_branch_link.sh) with `lld/` and `llvm/runtime/` (the profile runtime); `[run]`, [`cov_branch_run.sh`](cov_branch_run.sh) with `llvm/` (`llvm-profdata`) and `raw_version`, the raw profile version every run requires (`RAW_PROFILE_VERSION` of [`llvm_branch/defs.bzl`](../../toolchains/llvm_branch/defs.bzl)); `[annotate]`, [`cov_branch_annotate.sh`](cov_branch_annotate.sh) with `lld/` and `llvm/` (`llvm-profdata`); `[classify]`, the `:cov_branch_classify` executable. One directory per action, as `cov_link` and `cov_run` are two: an edit of one script re-keys no other action. (Projections of one directory would not do it: an action given `dir.project(path)` is keyed on the whole directory, as measured remotely.) |
+| `:cov_branch` | the directories every library's branch coverage links, runs and annotates from, and the classifier (`cov_branch_dir`, [`defs.bzl`](defs.bzl)), from `komira//tools/build/toolchains/llvm_branch:llvm_branch` (so its checks gate every use): `[link]`, [`cov_branch_link.sh`](cov_branch_link.sh) with `lld/` and `llvm/runtime/` (the profile runtime); `[run]`, the `:cov_branch_exe` executable as `cov_branch`, with `llvm/` (`llvm-profdata`); the run passes it the raw profile version every run requires (`RAW_PROFILE_VERSION` of [`llvm_branch/defs.bzl`](../../toolchains/llvm_branch/defs.bzl)); `[annotate]`, [`cov_branch_annotate.sh`](cov_branch_annotate.sh) with `lld/` and `llvm/` (`llvm-profdata`); `[classify]`, the `:cov_branch_classify` executable. One directory per action, as `cov_link` and `cov_run` are two: an edit of one script or tool re-keys no other action. (Projections of one directory would not do it: an action given `dir.project(path)` is keyed on the whole directory, as measured remotely.) |
 | `:cov_branch_classify` | [`cov_branch_classify.zig`](cov_branch_classify.zig) (importing [`cov_branch_andor.zig`](cov_branch_andor.zig), [`cov_branch_source.zig`](cov_branch_source.zig), [`cov_branch_ir.zig`](cov_branch_ir.zig) and [`cov_branch_records.zig`](cov_branch_records.zig): `zig_exe`'s `imports`), a static executable built with the pinned zig, gated by `:cov_branch_classify_cases` ([`cov_branch_classify_cases.sh`](cov_branch_classify_cases.sh) over [`fixtures/`](fixtures)), which run as a build action: no build hands out the classifier unless they pass. Zig, not Mojo: a Mojo tool would be in the closure of the libraries it measures, the cycle covcheck has (`COVERAGE_NO_GATE`) |
-| `:cov_branch_link.sh`, `:cov_branch_run.sh`, `:cov_branch_annotate.sh` | the scripts, exported so a fixture of the tests cell can plant a defect in a copy (test 47) |
+| `:cov_branch_exe` | `cov_branch`, the branch coverage actions' tool, one subcommand each (today `run`, [cov_branch_run](#cov_branch_run)): [`cov_branch.zig`](cov_branch.zig) importing [`cov_branch_run.zig`](cov_branch_run.zig) and [`bounded_run.zig`](bounded_run.zig) (a command waited for with an optional time limit; with one, it is run as the leader of a session of its own, whose whole process group is killed at the limit, and the members that survived the kill listed from a `/proc` that must be this process's own: what `cov_run.sh` and `mut_step.sh` do in shell, kept free of any other import so that a tool of another package can take it as a module), a static executable built with the pinned zig. Welded: it is built only after `:cov_branch_unit` passed, `zig test` of those files and [`cov_branch_run_test.zig`](cov_branch_run_test.zig) run as a build action (each process step a stand-in that writes what the real program would) |
+| `:cov_branch_link.sh`, `:cov_branch_annotate.sh`, `:cov_branch.zig`, `:cov_branch_run.zig`, `:bounded_run.zig`, `:cov_branch_run_test.zig` | the scripts and the tool's sources, exported so a fixture of the tests cell can plant a defect in a copy (test 47) |
 
 Per `test_srcs` entry that is a source file, five actions, each a
 sub-target of the library's `[coverage]` (and each `[bc]`, `[pgo_bin]`,
@@ -88,10 +89,18 @@ binary holds this action's directory`.
 
 ## cov_branch_run
 
-1. The gate ([`gate mojo`](../../run/README.md), the release gate's runner) runs the test from the release gate's
+`cov_branch run` ([`cov_branch_run.zig`](cov_branch_run.zig)), with flags
+for what the script it replaced took as positions: `--busybox`,
+`--gate`, `--compiler`, `--label`, `--profdata`, `--raw-version`,
+`--binary`, `--out` and the test's `--env NAME=VALUE`s.
+
+1. The gate ([`gate mojo`](../../run/README.md), the release gate's runner,
+   run as the release gate runs it but with no limit flag: no memory cap and
+   no time limit) runs the test from the release gate's
    staged tree (its data under `share/`), with the gate's environment (the
-   script exports nothing of its own to the test: its `LC_ALL=C` is set
-   after the run), the test's `test_env`, and one more variable, `LLVM_PROFILE_FILE` =
+   tool sets nothing of its own for the test: PATH is an empty directory of
+   its scratch, which the gate replaces, and `LC_ALL=C` is set only for
+   `llvm-profdata`), the test's `test_env`, and one more variable, `LLVM_PROFILE_FILE` =
    `<scratch>/prof/%p.profraw` (`%p`, the pid: a child the test starts
    writes a profile of its own). The test must pass. When it fails, so does
    the action, with the test's output and `BRANCH COVERAGE RUN FAILED`, not
@@ -101,22 +110,31 @@ binary holds this action's directory`.
    wrote no .profraw` (the runtime was not linked, the variable did not
    reach the test, or the test left without running its exit handlers).
 3. Each raw profile starts with the 64-bit raw magic, has version
-   `raw_version` (11) and carries the IR-instrumentation flag `0x01000000`,
+   `--raw-version` (11) and carries the IR-instrumentation flag `0x01000000`,
    read as `:raw_version_check` reads its fixture's
    ([The version coupling](../../toolchains/llvm_branch/README.md#the-version-coupling)).
 4. `llvm/bin/llvm-profdata merge` writes the indexed profile; a refusal
    that is LLVM's `raw profile version mismatch` says which version it
-   expected. `llvm-profdata show` must report IR instrumentation and at
-   least one function.
+   expected. `llvm-profdata show` must report IR instrumentation and one
+   count of functions, above 0.
 
 What differs from the release gate: the binary is the test at -O0, compiled
 by Mojo to bitcode and instrumented and code-generated by lld, not Mojo's
 own -O1 build; its environment also holds `LLVM_PROFILE_FILE`. Like the
-gate, the run waits for the test alone: a child still running when it exits
-writes its profile after the merge, or never. Like the gate, it has no time
-limit of its own (the kcov run, `cov_run.sh`, has one, with a kill of the
-test's process group): a test that hangs instrumented holds its action
-until the executor's timeout.
+gate, the run waits for the test alone (`bounded_run.zig` with no limit): a
+child still running when it exits writes its profile after the merge, or
+never. It has no time limit of its own and passes the gate none (the kcov
+run, `cov_run.sh`, passes the gate `--limit-s` and `--limit-report
+coverage`): a test that hangs instrumented holds its action until the
+executor's timeout.
+With no limit the test is not moved out of the action's process group (as
+the deleted script ran it), so a kill of that group at the executor's
+timeout reaches the test too.
+
+Exit status: the test's when it fails (128 + N for a signal N); 1 when no
+profile was written or one is refused; 2 for a usage error (a flag missing,
+repeated or unknown, a version that is not a positive number, an
+`llvm-profdata` that is not there) or a program it cannot start.
 
 ## cov_branch_annotate
 

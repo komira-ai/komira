@@ -6,7 +6,7 @@ load("@komira//tools/build/lint:defs.bzl", "target_suite")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "mojo_shared_lib_rule", "mojo_test")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load("//functional/coverage:defs.bzl", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "kcov_stub_dir")
+load("//functional/coverage:defs.bzl", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_zig_tree", "kcov_stub_dir")
 
 # A coverage link whose relocator rewrites nothing (test 41). Its [coverage]
 # must fail with mojo_wrapper.sh's exit 4, "contains this action's working
@@ -768,24 +768,76 @@ mojo_library(
     test_srcs = ["tests/test_profile_env.mojo"],
 )
 
+# Copies of cov_branch's `run` (cov_branch_run.zig), each with one planted
+# defect (name, cov_plant's sed expression): the copy is :<name>_run_zig,
+# the tool's sources with it in place of the original :<name>_run_src, the
+# tool built from them (without its unit tests, which the defect would
+# fail) :<name>_cov_branch, its directory :<name>_branch, and the library
+# below of the same name runs tests/test_one.mojo's branch coverage through it.
+_RUN_PLANTS = [
+    # A run that gives the test LLVM_PROFILE_FILE_OFF in place of
+    # LLVM_PROFILE_FILE: the profile runtime writes its default
+    # (default.profraw in the test's working directory), or nothing, and never
+    # where the run reads. RED:
+    # tests//negative/coverage:branchnoprof[coverage][branch][test_one], "wrote
+    # no .profraw".
+    ("branchnoprof", "s|\"LLVM_PROFILE_FILE={s}/prof/|\"LLVM_PROFILE_FILE_OFF={s}/prof/|"),
+    # A run that reads each raw profile's version as 12, not 11 (the low byte
+    # of the version field, byte 8, raised), as a runtime and instrumenter of
+    # another LLVM would write it. RED:
+    # tests//negative/coverage:branchversion[coverage][branch][test_one], "has
+    # raw profile version 12, not 11".
+    ("branchversion", "s|const head = readHead(alloc, f) catch \"\";|var hb = [_]u8{0} ** 16; const h0 = readHead(alloc, f) catch \"\"; const hn = @min(h0.len, 16); @memcpy(hb[0..hn], h0[0..hn]); hb[8] = 12; const head = hb[0..hn];|"),
+    # A run whose merge leaves out the test's `main`: the profile holds no
+    # record of a function the instrumented binary links (a run writes one
+    # for each, ran or not), as a profile of another binary would not, and
+    # applying it would read that function as never run. RED:
+    # tests//negative/coverage:branchmissing[coverage][branch_ir][test_one],
+    # "a run writes the record of every function its binary links".
+    ("branchmissing", "s|\"merge\", \"-o\", out|\"merge\", \"--no-function=main\", \"-o\", out|"),
+]
+
+_BRANCH_SRC = "komira//tools/build/coverage/branch:"
+
+[
+    (
+        cov_plant(
+            name = "{}_run_zig".format(name),
+            expr = expr,
+            out = "cov_branch_run.zig",
+            src = _BRANCH_SRC + "cov_branch_run.zig",
+        ),
+        cov_zig_tree(
+            name = "{}_run_src".format(name),
+            files = {
+                "bounded_run.zig": _BRANCH_SRC + "bounded_run.zig",
+                "cov_branch.zig": _BRANCH_SRC + "cov_branch.zig",
+                "cov_branch_run.zig": ":{}_run_zig".format(name),
+                "cov_branch_run_test.zig": _BRANCH_SRC + "cov_branch_run_test.zig",
+            },
+        ),
+        zig_exe(
+            name = "{}_cov_branch".format(name),
+            exec_compatible_with = LINUX_X86_64,
+            imports = [":{}_run_src[{}]".format(name, f) for f in ("bounded_run", "cov_branch_run", "cov_branch_run_test")],
+            src = ":{}_run_src[cov_branch]".format(name),
+            busybox = "komira//tools/build/toolchains:busybox",
+            zig = "komira//tools/build/toolchains:zig",
+        ),
+        cov_branch_dir(
+            name = "{}_branch".format(name),
+            exec_compatible_with = LINUX_X86_64,
+            run_tool = ":{}_cov_branch".format(name),
+        ),
+    )
+    for name, expr in _RUN_PLANTS
+]
+
 # Copies of the branch coverage scripts, each with one planted defect
 # (name, the script it copies, cov_plant's sed expression): the copy is
 # :<name>_<script>_sh, its directory :<name>_branch, and the library below
 # of the same name runs tests/test_one.mojo's branch coverage through it.
 _BRANCH_PLANTS = [
-    # A cov_branch_run.sh copy that gives the test LLVM_PROFILE_FILE_OFF in
-    # place of LLVM_PROFILE_FILE: the profile runtime writes its default
-    # (default.profraw in the test's working directory), or nothing, and never
-    # where the run reads. RED:
-    # tests//negative/coverage:branchnoprof[coverage][branch][test_one], "wrote
-    # no .profraw".
-    ("branchnoprof", "run", "s|--env \"LLVM_PROFILE_FILE=|--env \"LLVM_PROFILE_FILE_OFF=|"),
-    # A cov_branch_run.sh copy that raises each raw profile's version from 11 to
-    # 12 (the low byte of the version field, byte 8) before reading it, as a
-    # runtime and instrumenter of another LLVM would write it. RED:
-    # tests//negative/coverage:branchversion[coverage][branch][test_one], "has
-    # raw profile version 12, not 11".
-    ("branchversion", "run", "s|^n=0$|n=0; while read -r f; do printf '\\\\014' \\| dd of=\"$f\" bs=1 seek=8 count=1 conv=notrunc 2>/dev/null; done <\"$K/raws\"|"),
     # A cov_branch_annotate.sh copy that runs `simplifycfg` before applying the
     # profile: the control flow the profile is applied to is no longer the one
     # that was instrumented, as with a profile of other bitcode, and LLVM drops
@@ -793,13 +845,6 @@ _BRANCH_PLANTS = [
     # tests//negative/coverage:branchannotate[coverage][branch_ir][test_one],
     # "diagnostic(s) applying the profile".
     ("branchannotate", "annotate", "s|\"--lto-newpm-passes=pgo-instr-use\"|\"--lto-newpm-passes=function(simplifycfg),pgo-instr-use\"|"),
-    # A cov_branch_run.sh copy whose merge leaves out the test's `main`: the
-    # profile holds no record of a function the instrumented binary links (a run
-    # writes one for each, ran or not), as a profile of another binary would
-    # not, and applying it would read that function as never run. RED:
-    # tests//negative/coverage:branchmissing[coverage][branch_ir][test_one],
-    # "a run writes the record of every function its binary links".
-    ("branchmissing", "run", "s|\"$PD\" merge -o|\"$PD\" merge --no-function=main -o|"),
     # A cov_branch_annotate.sh copy that internalizes the bitcode before applying
     # the profile: `main` becomes a local function, whose profile name is not
     # the one the binary's run wrote, so the bitcode the profile is applied to
@@ -860,7 +905,7 @@ _BRANCH_PLANTS = [
         import_name = "noop",
         test_srcs = ["tests/test_one.mojo"],
     )
-    for name, _script, _expr in _BRANCH_PLANTS
+    for name in [n for n, _expr in _RUN_PLANTS] + [n for n, _script, _expr in _BRANCH_PLANTS]
 ]
 
 # A helper declared @always_inline("nodebug"): its `while` carries the
