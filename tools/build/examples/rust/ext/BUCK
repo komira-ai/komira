@@ -1,0 +1,55 @@
+load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_library", "rust_test", "rust_weld_check")
+
+# External tests (`test_srcs`, Cargo's tests/*.rs) gate a rust_library: each
+# is compiled against the UNGATED library and run, and the library is
+# published behind their markers. Its planted defects (a failing external
+# test, malformed test_srcs) are tests//negative/rust_test.
+
+# The external test passes, so the library builds, and so does a binary
+# linking it (its run check, stdout `4`, is a validation of the binary).
+rust_library(
+    name = "ext",
+    srcs = ["src/lib.rs"],
+    crate_root = "src/lib.rs",
+    test_srcs = ["tests/ext_pass.rs", "tests/common/mod.rs"],
+)
+
+rust_binary(
+    name = "ext_consumer",
+    srcs = ["src/main.rs"],
+    crate_root = "src/main.rs",
+    deps = [":ext"],
+    expected_stdout = "4\n",
+)
+
+# The inline tests of src/lib.rs, for `both`.
+rust_test(
+    name = "ext_unit",
+    srcs = ["src/lib.rs"],
+    crate_root = "src/lib.rs",
+    crate_name = "ext",
+)
+
+# `tests` and `test_srcs` together: the markers of both gate the library.
+rust_library(
+    name = "both",
+    crate_name = "ext",
+    srcs = ["src/lib.rs"],
+    crate_root = "src/lib.rs",
+    tests = [":ext_unit"],
+    test_srcs = ["tests/ext_pass.rs", "tests/common/mod.rs"],
+)
+
+# A weld that dropped a test would still build green, its test not run; these
+# hold each library to the markers it is published behind.
+rust_weld_check(
+    name = "ext_markers",
+    markers = ["test_srcs/ext_pass.passed"],
+    target = ":ext",
+)
+
+rust_weld_check(
+    name = "both_markers",
+    markers = ["ext_unit.passed", "test_srcs/ext_pass.passed"],
+    target = ":both",
+)
