@@ -37,6 +37,7 @@ load(
     gate_mojo = "gate_mojo",
 )
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "cap_flags", "define_args", "mem_cap_script", "memory_cap")
+load(":native_reach.bzl", "NATIVE_REACH_ATTRS", "native_reach", "native_reach_kwargs")
 load(":readme.bzl", "readme_kwargs")
 load(":run_check.bzl", "run_check_validation")
 load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_flags", "with_test_limit")
@@ -428,6 +429,7 @@ def _library_impl(ctx):
     # only the conda package waits for them and the runs, never this package.
     cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs, cov_branch, src_dir, import_name, root) if cov_link else (None, [])
     mutation = mutation_sub_targets(ctx, tc, _mojo_cmd, src_dir, root, deps, tests_closure[1:], _link_tail(tests_c_link), test_data, env_args, test_defines, cap)  # mutation.bzl
+    reach = native_reach(ctx, src_dir, deps)  # native_reach.bzl: (providers, sub-targets)
     if markers:
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
         ctx.actions.run(
@@ -454,7 +456,7 @@ def _library_impl(ctx):
                 # gated package. The tests above use the ungated package
                 # in-rule, never through a label.
                 "ungated": [DefaultInfo(default_output = ungated)],
-            } | ({"gen": [ctx.attrs.gen[DefaultInfo]]} if ctx.attrs.gen else {}) | (coverage_sub_targets(cov_bins, cov_runs, cov_gate, cov_branch) if cov_link else {}) | mutation,
+            } | ({"gen": [ctx.attrs.gen[DefaultInfo]]} if ctx.attrs.gen else {}) | (coverage_sub_targets(cov_bins, cov_runs, cov_gate, cov_branch) if cov_link else {}) | mutation | reach[1],
         ),
         MojoInfo(
             c_link = c_link,
@@ -472,7 +474,7 @@ def _library_impl(ctx):
             readme = ctx.attrs.readme,
         ),
         welded_tests_info(ctx.attrs.test_srcs),
-    ] + cov_providers
+    ] + cov_providers + reach[0]
 
 # ---- README examples ----------------------------------------------------------
 #
@@ -613,7 +615,7 @@ mojo_library_rule = rule(
         # itself built from a mojo_library, so a default would be a cycle.
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
-    } | COVERAGE_ATTRS | MUTATION_ATTRS | LIBRARY_DEFINE_ATTRS | _TOOLCHAIN_ATTR,
+    } | COVERAGE_ATTRS | MUTATION_ATTRS | NATIVE_REACH_ATTRS | LIBRARY_DEFINE_ATTRS | _TOOLCHAIN_ATTR,
 )
 
 # ---- mojo_binary / mojo_test ----------------------------------------------
@@ -953,6 +955,7 @@ def _mojo_library(**kwargs):
     readme_kwargs(kwargs)
     cov_gate = coverage_kwargs(kwargs)
     mutation_kwargs(kwargs)
+    native_reach_kwargs(kwargs)
     mojo_library_rule(**kwargs)
     if kwargs.get("conda", True):
         name = kwargs["name"]

@@ -31,8 +31,8 @@ here from the tag's source:
 - every library except the unwinder is linked from a static archive, and
   the glibc floor is the platform row's own (`zig_triple`,
   `x86_64-linux-gnu.2.34`). zig links against glibc 2.34's symbols, so the
-  link fails if kcov or an archive calls a newer one, and check 2 reads
-  the symbol versions of the result;
+  link fails if kcov or an archive calls a newer one, and `:kcov_closure`
+  reads the symbol versions of the result;
 - nothing is taken from the worker: the compiler is the pinned zig, and
   every input is a sha256 pin;
 - libcurl and libbfd are left out (see below), which also removes OpenSSL.
@@ -210,7 +210,7 @@ action's working directory, and its output directory is in the action's
 scratch directory. The other
 fixed `/tmp` paths of v42 (`/tmp/kcov-system.pipe`, `/tmp/kcov-data/`)
 belong to the system-wide mode (`kcov_system_lib`, `kcov-system-daemon`),
-which the coverage variant does not run. Check 7 requires that the traced
+which the coverage variant does not run. Check 5 requires that the traced
 fixture initialised the preload library.
 
 ## Licences
@@ -265,13 +265,25 @@ nor a remote cache readable by others from holding it.
 ## Checks
 
 [`kcov_check.sh`](kcov_check.sh) runs as four validations that `:kcov` depends
-on. Each row below names the defect the check catches and the planted defect
-it was seen to fail on. Each validation's result names its count:
-`:kcov_check` 9 checks (one per row), `:kcov_check_cases` 24,
+on, and [`loader_closure`](../loader_closure/README.md) as a fifth,
+`:kcov_closure`. Each row below names the defect the check catches and the
+planted defect it was seen to fail on. Each validation's result names its
+count: `:kcov_check` 7 checks (one per row), `:kcov_check_cases` 20,
 `:kcov_identity` 2, `:kcov_reproducible` 1. The scripts run with
 `set -o pipefail` (busybox `sh` has it), so a pipeline stage that fails, such
 as a `cat` that cannot read its file, fails the check rather than leaving an
 empty result.
+
+`:kcov_closure` reads the ELF files of the distribution, running none of
+them: `bin/kcov`'s interpreter is the system's, it maps its own
+`lib/libgcc_s.so.1` through its `DT_RPATH` (searched before
+`LD_LIBRARY_PATH`) and glibc from the system, nothing else, and no ELF file
+names a `GLIBC_2.<n>` above the row's floor (any string of the file, so the
+libraries kcov embeds as byte arrays count). It catches a library taken from
+`LD_LIBRARY_PATH` or the worker, a `lib/` file under a glibc name, the
+`elf_rpath` step skipped (a `DT_RUNPATH`), and kcov or a pinned library
+needing a newer glibc than the workers and users have. Planted, red: the
+floor given as 33, `bin/kcov needs GLIBC_2.34, above the floor GLIBC_2.33`.
 
 `:kcov_check` checks the built kcov. Throughout, `LD_LIBRARY_PATH` names a
 directory of decoys: files named `libz.so.1`, `libdw.so.1`, `libelf.so.1`,
@@ -281,29 +293,24 @@ loader fails loudly if it takes one.
 | # | check | catches | planted, red |
 |---|---|---|---|
 | 1 | the distribution holds `bin/kcov`, `lib/libgcc_s.so.1` and the three licence files, nothing else, and kcov's licence files are the archive's | a library in `lib/`, which the loader searches before `LD_LIBRARY_PATH` and the system whatever its name; a missing or wrong licence file | a `libm.so.6` copied into `lib/`: `the distribution holds ... ./lib/libm.so.6`; `COPYING.externals` copied as `COPYING` |
-| 2 | no `GLIBC_2.<n>` symbol version above the row's floor in `bin/kcov` (including the libraries it embeds) or `lib/` | kcov or a pinned library needing a newer glibc than the workers and users have | kcov linked for `x86_64-linux-gnu.2.38`: `needs GLIBC_2.38, above the floor GLIBC_2.34` |
-| 3 | `bin/kcov` names the version `GCC_3.0`, so it imports from `libgcc_s.so.1` | a second unwinder (above). This sees one import, not where every `_Unwind_*` comes from; the run of check 6 ends in `pthread_cancel`, which a second unwinder crashes | `libgcc_s.so.1` left out of the link |
-| 4 | the loader's list for `bin/kcov` (`LD_TRACE_LOADED_OBJECTS`) holds its own `lib/libgcc_s.so.1` and glibc libraries from outside the distribution and the decoys, nothing else | a library taken from `LD_LIBRARY_PATH`, the worker, or `lib/` under a glibc name | the `elf_rpath` step skipped: `the loader took a decoy ... decoy/libgcc_s.so.1`; a `libm.so.6` in `lib/` with check 1 and 2 let past: `bin/kcov loads libm.so.6 => .../bin/../lib/libm.so.6` |
-| 5 | `kcov --version` prints `kcov v42` | the wrong source, or a kcov that does not start | the build's `version` set to `v41`: `kcov --version printed 'kcov v41', want 'kcov v42'` |
-| 6 | kcov `--cobertura-only` on [`fixtures/cov_fixture.c`](fixtures/cov_fixture.c) (`zig cc -g -O0`) reports every `COV:hit` line hit and every `COV:miss` line missed, and its report, with the source directory written `@SRC@` and the timestamp 0, is [`fixtures/cov_fixture.cobertura.xml`](fixtures/cov_fixture.cobertura.xml) byte for byte | wrong hits, missing or extra lines, a changed report format | kcov's Cobertura writer reporting `hits + 1`: the markers pass and the golden fails |
-| 7 | in that run, the loader's `LD_DEBUG=libs` record of kcov searched a `DT_RPATH` of `bin/kcov` and initialised its own `lib/libgcc_s.so.1` and glibc libraries from outside the distribution and the decoys, nothing else; the fixture's record initialised the preload library kcov wrote, `libkcov_sowrapper.so` | the same as 4, observed in the process that does the work; a preload library the loader cannot map, which it ignores with a warning while check 6 stays green | the array `__library` built from `glass.png`: `the fixture did not initialise the preload library` |
-| 8 | kcov run as the coverage variant runs it: on `cov_fixture.c` and [`fixtures/cov_part.c`](fixtures/cov_part.c), compiled with their directory mapped to a placeholder `/_..._` that exists nowhere (the build directory is then deleted), with `--replace-src-path=^/_+:<root>` and `--configure=cobertura-full-paths=1`. Every COV line is reported as marked in its own file's class, no placeholder is left, and the report with the root written `@ROOT@` is [`fixtures/cov_fixture_relocated.cobertura.xml`](fixtures/cov_fixture_relocated.cobertura.xml) byte for byte | the regex mapping (kcov's `std::regex`, here zig's libc++ rather than the release binary's libstdc++), and file names relative to the common directory | `filter.cc` without its `regex_replace`: `cov_fixture.c is not in rout/cov.xml`; the Cobertura writer ignoring `cobertura-full-paths`: the same |
-| 9 | the HTML report (kcov's default output) writes nine of the files of the archive's `data/` byte for byte (one check) | a generated byte array that does not hold its file | the array `icon_amber` built from `glass.png` |
+| 2 | `bin/kcov` names the version `GCC_3.0`, so it imports from `libgcc_s.so.1` | a second unwinder (above). This sees one import, not where every `_Unwind_*` comes from; the run of check 4 ends in `pthread_cancel`, which a second unwinder crashes | `libgcc_s.so.1` left out of the link |
+| 3 | `kcov --version` prints `kcov v42` | the wrong source, or a kcov that does not start | the build's `version` set to `v41`: `kcov --version printed 'kcov v41', want 'kcov v42'` |
+| 4 | kcov `--cobertura-only` on [`fixtures/cov_fixture.c`](fixtures/cov_fixture.c) (`zig cc -g -O0`) reports every `COV:hit` line hit and every `COV:miss` line missed, and its report, with the source directory written `@SRC@` and the timestamp 0, is [`fixtures/cov_fixture.cobertura.xml`](fixtures/cov_fixture.cobertura.xml) byte for byte | wrong hits, missing or extra lines, a changed report format | kcov's Cobertura writer reporting `hits + 1`: the markers pass and the golden fails |
+| 5 | in that run, the loader's `LD_DEBUG=libs` record of kcov searched a `DT_RPATH` of `bin/kcov` and initialised its own `lib/libgcc_s.so.1` and glibc libraries from outside the distribution and the decoys, nothing else; the fixture's record initialised the preload library kcov wrote, `libkcov_sowrapper.so` | what `:kcov_closure` reads from the files, observed in the process that does the work; a preload library the loader cannot map, which it ignores with a warning while check 4 stays green | the array `__library` built from `glass.png`: `the fixture did not initialise the preload library` |
+| 6 | kcov run as the coverage variant runs it: on `cov_fixture.c` and [`fixtures/cov_part.c`](fixtures/cov_part.c), compiled with their directory mapped to a placeholder `/_..._` that exists nowhere (the build directory is then deleted), with `--replace-src-path=^/_+:<root>` and `--configure=cobertura-full-paths=1`. Every COV line is reported as marked in its own file's class, no placeholder is left, and the report with the root written `@ROOT@` is [`fixtures/cov_fixture_relocated.cobertura.xml`](fixtures/cov_fixture_relocated.cobertura.xml) byte for byte | the regex mapping (kcov's `std::regex`, here zig's libc++ rather than the release binary's libstdc++), and file names relative to the common directory | `filter.cc` without its `regex_replace`: `cov_fixture.c is not in rout/cov.xml`; the Cobertura writer ignoring `cobertura-full-paths`: the same |
+| 7 | the HTML report (kcov's default output) writes nine of the files of the archive's `data/` byte for byte (one check) | a generated byte array that does not hold its file | the array `icon_amber` built from `glass.png` |
 
 The arrays of the bash and Python helpers and of `kcov_system_lib` are not
 checked: the coverage variant runs none of those engines.
 
-`:kcov_check_cases` runs the functions behind checks 2, 4 and 7, the two
+`:kcov_check_cases` runs the functions behind check 5, the two
 tools, and the `identity` mode of `:kcov_identity`, on inputs whose answer is
 known:
 
 | case | catches | planted, red |
 |---|---|---|
-| a program needing `arc4random` (`GLIBC_2.36`) fails to link for the floor, over `arc4random`, and check 2's function names `GLIBC_2.36` in its 2.38 build and nothing in floor builds | a floor check that cannot see a version; a floor link that fails for another reason | the version strings filtered by length: `glibc_over says ''`; the floor link given a missing source: `failed to link for the floor, but not over arc4random` |
-| check 2's function fails on a file that does not exist | a pipeline whose failing `cat` leaves an empty list, read as "nothing above the floor" | the scripts without `set -o pipefail`: `glibc_over exited 0 on a file that does not exist` |
-| a probe linked like `bin/kcov` against its own `libkcovprobe.so.1`: with zig's `DT_RUNPATH` the decoy wins and both detectors see it; with an empty `LD_LIBRARY_PATH` its `LD_DEBUG` record names a `RUNPATH` search, which check 7's function does not take for an `RPATH` one; after `elf_rpath` the probe's own library loads, the `LD_DEBUG` record says `RPATH`, and one byte changed | a detector that misses a decoy; a check 7 that accepts a `DT_RUNPATH` search; a zig that starts writing `DT_RPATH` (then `elf_rpath` is no longer needed) | `elf_rpath` writing nothing: `after elf_rpath the loader still took the decoy`; the record matched as `PATH from file`: `rpath_record took a DT_RUNPATH search for a DT_RPATH one` |
-| the functions of checks 4 and 7 are silent on the converted probe, and each names the `libm.so.6` a second probe loads from its own `lib/` | a closure check that accepts a library by its glibc name wherever it was found | the functions matching glibc by name only: `ldd_stray says ''` |
-| the unconverted probe takes a decoy that is an ELF library (as the Mojo toolchain's `lib/` holds a real `libgcc_s.so.1`): the loader maps it without error, check 4's function still fails, and `ldd_stray` names the library of the probe's own name taken from the decoy directory | a detector that relies on the loader failing; a closure check that accepts its own library by name wherever it was found | `trace_loads` without its search for the decoy path: `trace_loads missed an ELF decoy`; own libraries matched by name only: `ldd_stray says ''` |
+| a probe linked like `bin/kcov` against its own `libkcovprobe.so.1`: with zig's `DT_RUNPATH` the decoy wins and the probe fails; with an empty `LD_LIBRARY_PATH` its `LD_DEBUG` record names a `RUNPATH` search, which check 5's function does not take for an `RPATH` one; after `elf_rpath` the probe's own library loads with the decoy on `LD_LIBRARY_PATH`, the `LD_DEBUG` record says `RPATH`, and one byte changed | a check 5 that accepts a `DT_RUNPATH` search; a zig that starts writing `DT_RPATH` (then `elf_rpath` is no longer needed) | `elf_rpath` writing nothing: `after elf_rpath the probe fails with a decoy on LD_LIBRARY_PATH`; the record matched as `PATH from file`: `rpath_record took a DT_RUNPATH search for a DT_RPATH one` |
+| check 5's function is silent on the converted probe, and names the `libm.so.6` a second probe loads from its own `lib/` | a check that accepts a library by its glibc name wherever it was found | the function matching glibc by name only: `inits_stray says ''` |
 | `elf_rpath` exits 2 and leaves the file unchanged on a file with a `DT_RPATH`, one with no run path, a file that is not ELF, and the unconverted probe edited to `e_machine` aarch64, to `e_type` `ET_REL`, to two `PT_DYNAMIC` headers, or with its `DT_DEBUG` entry retagged `DT_RPATH` (both run paths) or `DT_RUNPATH` (two) | an edit of the wrong file | the tool before it checked the machine, the type and the headers: `elf_rpath exited 0 on machine, want 2`; without its `DT_RPATH` or second-`DT_RUNPATH` refusal: `elf_rpath exited 0 on both_paths` / `on two_runpaths` |
 | `conda_payload` writes the payload of a stored `pkg-*.tar.zst` with 32-bit sizes (after another member) and with zip64 sizes, and exits 2 with no output on a zip with no payload member or a compressed one | the zip64 failure that made busybox unusable | zip64 sizes ignored: `conda_payload refused zip64.conda` |
 | `kcov_check.sh identity`, in its own process, on a file standing for `bin/kcov` (its sha256 written in the script): accepted with that sha256 and a line it holds (a result of 2 checks); refused, naming `KCOV_BIN_SHA256` and the sha256 to write, with a sha256 one digit off; refused with a line it does not hold | an identity check that cannot refuse, so a stale `KCOV_BIN_SHA256` passes | the sha256 comparison skipped: `identity_sha: exited 0, want 1`; the line matched by its first word: `identity_line: exited 0, want 1` |
@@ -335,10 +342,10 @@ digit (`bin/kcov's sha256 is 57243a23..., but KCOV_BIN_SHA256 ... is
   says so; update `KCOV_USAGE_LINE` and review the near misses of
   `kcov_guard.sh cases`, which are written for the current line. Compare `src/CMakeLists.txt` with the source
   list and the generated sources of `kcov_build.sh`. If the report format
-  changed, the red checks 6 and 8 print the difference against the golden; review
+  changed, the red checks 4 and 6 print the difference against the golden; review
   it before updating the golden.
 - **A new conda package build.** Update its pin in the table. The build stops
-  naming any file the script needs that the package lacks, and check 2 fails
-  if the package raises the glibc floor.
-- **A new zig.** The goldens of checks 6 and 8 may move with the compiler's line
+  naming any file the script needs that the package lacks, and `:kcov_closure`
+  fails if the package raises the glibc floor.
+- **A new zig.** The goldens of checks 4 and 6 may move with the compiler's line
   table. The `cases` probe shows whether zig now writes a `DT_RPATH` itself.
