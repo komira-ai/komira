@@ -9,6 +9,8 @@ load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
 load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
 load("@komira//tools/build/platforms/limits:limits.bzl", "limits")
+load("@komira//tools/build/selftest:defs.bzl", "graph_check")
+load("//tests:python_closure_allowlist.bzl", "PYTHON_CEILING", "PYTHON_SURFACE")
 load("//tests:surface_capability_matrix.bzl", "CAPABILITIES", "MATRIX", "NOT_CAPABILITIES", "SURFACES")
 
 # The licence text every published package carries (tools/build/package/conda.bzl).
@@ -183,16 +185,23 @@ _TESTS_LINTS = [
 # Retired names: a package or type that was renamed may appear only in a
 # dated history note (a line carrying a YYYY-MM-DD date). The tree is every
 # file of the cell (`:doc_tree`) plus the dotfiles a glob skips. Each name is
-# spelt in parts so this file does not hold it.
+# spelt in parts so this file does not hold it. `unchecked` leaves out a
+# fixture that must hold a retired name and cannot carry a date.
 [retired_names(
     name = "retired_names",
     names = [
         "kci" + "_contract",
         "kci" + "_stage" + "_graph",
         "Stage" + "Graph",
+        # The package of the superseded one-library plan for komira's C
+        # (docs/design/native_packaging.md).
+        "komira" + "_native",
     ],
     srcs = [".buckconfig.local.example"] + glob([".github/**"]),
     tree = ":doc_tree",
+    # The metadata of the release-order fixture that requires that package
+    # (tools/build/package/BUCK), so that its exemption cannot come back.
+    unchecked = ["tools/build/package/release_order/requires_" + "komira" + "_native.json"],
 ) for _ in _TESTS_LINTS[:1]]
 
 # Test welding (tools/build/lint/test_weld.bzl): every tests/test_*.mojo under
@@ -346,3 +355,30 @@ limits(
     srcs = [".buckconfig", ".buckconfig.local.example", ".gitignore"] + glob([".github/**"]),
     tree = ":doc_tree",
 )
+
+# No Python outside the Python surface (the graph check python_closure,
+# tools/build/selftest/graph/python_closure.zig says what it refuses): no
+# target of `//...` or `tests//functional/...` whose closure (every kind of
+# dependency) holds a target under third_party/python/ or
+# tools/build/python/, a Python rule or a `.py` source; no `.py` file in the
+# repository; no kci textproto or GitHub workflow that runs Python. Building
+# it checks nothing: release/ci/build_targets.sh runs `./buck2 bxl
+# //tools/build/selftest/graph/checks.bxl:check -- --check //:python_closure`,
+# as it does for every graph_check of a batch.
+#
+# The allowlist, tests/python_closure_allowlist.bzl: the Python surface
+# (empty today) and the ceiling, every finding allowed today, which only
+# shrinks.
+[graph_check(
+    name = "python_closure",
+    check = "python_closure",
+    checker = "//tools/build/selftest/graph:graph_checks",
+    targets = ["//...", "tests//functional/..."],
+    trees = {
+        "": "//:doc_tree",
+        "tools/build/tests/": "tests//:doc_tree",
+    },
+    srcs = [".buckconfig", ".buckconfig.local.example", ".gitignore"] + glob([".github/**"]),
+    surface = PYTHON_SURFACE,
+    ceiling = PYTHON_CEILING,
+) for _ in _TESTS_LINTS[:1]]
