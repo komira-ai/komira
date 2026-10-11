@@ -11,9 +11,14 @@
 # changes the result, the portable render differs from `optimize`'s.
 #
 # Each plan below is a small plan on which one pass (or one arm of a driver
-# gate) changes the render; the table at the end names it. No scan carries
-# statistics, so step 20 stamps nothing, and no plan holds a scalar site, so
-# no request is recorded and the portable entry refuses none of them.
+# gate) changes the render; the table at the end names it. The last three
+# show an order instead: on them, `fuse_sort_limit` (17) run after
+# `optimize_window_rewrite` (18), or the window rewrite run after
+# `fuse_partition_topn` (19), gives a different plan
+# (`test_optimizer_portable_order.mojo` holds the other steps' orders). No
+# scan carries statistics, so step 20 stamps nothing, and no plan holds a
+# scalar site, so no request is recorded and the portable entry refuses none
+# of them.
 #
 # The passes these plans do not reach are reached in
 # `test_optimizer_portable.mojo`: by its seven-plan parity test (scalar
@@ -455,12 +460,42 @@ def _row_number_filter() raises -> LogicalPlan:
     return LogicalPlan.project(_cols(keep^), f^)
 
 
+def _limit_over_sort_over_partition_by(two_keys: Bool) raises -> LogicalPlan:
+    """Limit 10 over Sort(a ASC), or Sort(a ASC, b DESC) if `two_keys`, over
+    PartitionBy(row_number) over w(a, b, c). `fuse_sort_limit` makes the
+    Limit and the Sort one TopN before the window rewrite runs; run after it,
+    the rewrite has removed the Sort (the PartitionBy's order satisfies it)
+    and a plain Limit is left."""
+    var wn: List[String] = ["a", "b", "c"]
+    var keys = _l1("a")
+    var desc = _asc()
+    if two_keys:
+        keys.append("b")
+        desc.append(True)
+    var pb = _pb(PartitionExpr.row_number(), _scan("w.parquet", wn))
+    return LogicalPlan.limit(10, LogicalPlan.sort(keys^, desc^, pb^))
+
+
+def _row_number_filter_over_two_partition_bys() raises -> LogicalPlan:
+    """Project[a, b, c] over Filter(rn <= 5) over PartitionBy(row_number AS
+    rn) over PartitionBy(rank) over w(a, b, c). The window rewrite fuses the
+    two PartitionBys into one with both functions, which `fuse_partition_topn`
+    then leaves alone; run before the rewrite, it makes the upper one a
+    PartitionTopN."""
+    var wn: List[String] = ["a", "b", "c"]
+    var pb = _pb(PartitionExpr.row_number(), _pb(PartitionExpr.rank(), _scan("w.parquet", wn)))
+    var rn = pb.output_schema.field_name(pb.output_schema.num_columns() - 1)
+    var keep: List[String] = ["a", "b", "c"]
+    var f = LogicalPlan.filter(Expr.binary(BIN_LE, _c(rn), _lit(5)), pb^)
+    return LogicalPlan.project(_cols(keep^), f^)
+
+
 # -----------------------------------------------------------------------------
 # The table: plan i, and the pass (driver step) whose drop it shows
 # -----------------------------------------------------------------------------
 
 
-comptime _N_PLANS = 23
+comptime _N_PLANS = 26
 
 
 def _plan_name(i: Int) -> String:
@@ -488,6 +523,9 @@ def _plan_name(i: Int) -> String:
         "optimize_window_rewrite (18): two_partition_bys",
         "the window gate's Project arm (18): window_function_in_a_project",
         "fuse_partition_topn (19): row_number_filter",
+        "fuse_sort_limit (17) before optimize_window_rewrite (18): limit_over_sort_over_partition_by",
+        "fuse_sort_limit (17) before optimize_window_rewrite (18): limit_over_two_key_sort_over_partition_by",
+        "optimize_window_rewrite (18) before fuse_partition_topn (19): row_number_filter_over_two_partition_bys",
     ]
     return names[i]
 
@@ -537,7 +575,13 @@ def _plan_at(i: Int) raises -> LogicalPlan:
         return _two_partition_bys()
     if i == 21:
         return _window_function_in_a_project()
-    return _row_number_filter()
+    if i == 22:
+        return _row_number_filter()
+    if i == 23:
+        return _limit_over_sort_over_partition_by(False)
+    if i == 24:
+        return _limit_over_sort_over_partition_by(True)
+    return _row_number_filter_over_two_partition_bys()
 
 
 def test_portable_renders_as_optimize_on_a_plan_per_pass() raises:
