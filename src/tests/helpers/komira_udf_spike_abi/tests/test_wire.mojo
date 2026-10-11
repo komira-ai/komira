@@ -68,6 +68,15 @@ def _refusals() raises:
     var op0 = good.copy()
     op0[4] = 0
     _raises_with(op0, "UDF_WIRE_OP")
+    # The edges of the two op ranges: 1 to 22 (requests), 128 and 129 (replies).
+    for edge in [1, 22, 128, 129]:
+        var e = good.copy()
+        e[4] = UInt8(edge)
+        assert_equal(Int(decode_header(Span(e)).op), edge)
+    for gap in [127, 130]:
+        var e = good.copy()
+        e[4] = UInt8(gap)
+        _raises_with(e, "UDF_WIRE_OP")
     var flags = good.copy()
     flags[16] = 4
     _raises_with(flags, "UDF_WIRE_FLAGS")

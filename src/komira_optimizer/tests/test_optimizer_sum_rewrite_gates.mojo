@@ -308,8 +308,8 @@ def test_bare_sums_alone_are_declined() raises:
 
 def test_grouped_topk_and_udf_aggregates_are_declined() raises:
     # Gate 1 and the two node flags. Catches: a grouped fold (the COUNT
-    # becomes a real per-group accumulator), a fold that loses a fused TopK
-    # hint, or one that rebuilds a UDF aggregate without its UDF.
+    # becomes a real per-group accumulator), a fold that loses the
+    # `group_topk` hint, or one that rebuilds a UDF aggregate without its UDF.
     var gb = ExprArray()
     gb.append(Expr.col_ref("i8"))
     var grouped = LogicalPlan.aggregate(

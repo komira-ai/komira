@@ -11,8 +11,8 @@
 //   * A COMPOSITE is DATA, not an arm of this file: a named graph of other
 //     resources (primitives or other composites, to any depth) with inputs
 //     and outputs. It is expanded into its primitives before lowering, so the
-//     engine only ever sees primitives. Its format and its instance arm are
-//     not declared yet (body arm 80 is held for the instance).
+//     engine only ever sees primitives. Its format is composite.proto; an
+//     INSTANCE of one is `Resource.body` 80, not a catalog type.
 //
 // THE RULE THAT DECIDES A PRIMITIVE'S SHAPE
 //   * R1, a NEUTRAL primitive (PORTABLE): one type for a kind whose identity
@@ -42,40 +42,19 @@
 //   * `Resource.body` 17, 19 and 32 to 36: the later neutral primitives
 //     (17 and 19 unused, 32 mail domain, 33 parameter, 34 encryption key,
 //     35 function, 36 virtual machine).
-//   * `Resource.body` 80: a composite instance.
 //   * `Resource.body` 90: the `raw` escape hatch, specified separately.
 //   * `Resource.body` 100-299, 300-499, 500-699 and 700-899: provider
 //     primitives (R2) of four clouds, one range each.
 //   * Fields 50, 51, 52 and 53 of every primitive message: its per-cloud
 //     extension messages, one per cloud.
-// THE HELD NUMBERS, MACHINE-READABLE. The lines below are what the welded
-// test `test_held_numbers_are_unused` reads: no field of the named message may
-// use a held number, and no message may reuse a `reserved` number. A held
-// number leaves this list in the same change that declares it.
-// held-numbers: Resource 5 17 19 32-36 80 90 100-299 300-499 500-699 700-899
-// held-numbers: Value 4
-// held-numbers: Image 4
-// held-numbers: Uses 3
-// held-numbers: Service 13 50-53
-// held-numbers: ContainerJob 8 50-53
-// held-numbers: Worker 12 50-53
-// held-numbers: Table 4 50-53
-// held-numbers: Bucket 50-53
-// held-numbers: ServiceAccount 50-53
-// held-numbers: Grant 50-53
-// held-numbers: Queue 50-53
-// held-numbers: Topic 50-53
-// held-numbers: Subscription 50-53
-// held-numbers: Secret 50-53
-// held-numbers: DnsZone 50-53
-// held-numbers: DnsRecord 50-53
-// held-numbers: Certificate 50-53
-// held-numbers: Schedule 50-53
-// held-numbers: EventTrigger 50-53
-// held-numbers: Network 50-53
-// held-numbers: Subnet 50-53
-// held-numbers: IpAddress 50-53
-// held-numbers: Registry 2 50-53
+// THE HELD NUMBERS, MACHINE-READABLE. Each file of this package carries the
+// `held-numbers:` lines of the messages it declares (this file's are below);
+// they are what the welded test `test_held_numbers_are_unused` reads: no
+// field of the named message may use a held number, and no message may reuse
+// a `reserved` number. A held number leaves its line in the same change that
+// declares it.
+// held-numbers: Resource 5 17 19 32-36 90 100-299 300-499 500-699 700-899
+// held-numbers: CompositeInstance 6
 // The list of clouds is data (a cloud is a value checked against the
 // built-in clouds); the four ranges and the four extension numbers are held
 // for the four built-in clouds, never named by a type here.
@@ -83,14 +62,34 @@
 // names. Declaring any of them changes the promise below that no vendor word
 // appears in this schema, so it is a recorded decision, not an addition.
 //
-// WHAT THIS FILE PROMISES
+// THE FILES. One package, `kci.resource.v1`, in files by message family, so
+// a message's wire form does not depend on which file declares it:
+//   * refs.proto       the catalog's declared bit (`Portability`, the
+//                      `portability` and `exposes` options) and what a
+//                      resource holds of others: `Output`, `Ref`, `Access`,
+//                      `CellResource`, `Retention`, `Uses`, `Value`,
+//                      `StepOutput`, `Image`, `SecretRef`;
+//   * compute.proto    `Size`, `Scale`, `Service`, `ContainerJob`, `Worker`;
+//   * data.proto       `Table`, `FieldType`, `StorageTier`, `Bucket`;
+//   * identity.proto   `ServiceAccount`, `Grant`;
+//   * messaging.proto  `Queue`, `Topic`, `Subscription`;
+//   * secrets.proto    `Secret`;
+//   * names.proto      `DnsZone`, `RecordType`, `DnsRecord`, `Certificate`;
+//   * triggers.proto   `Schedule`, `SourceEvent`, `EventTrigger`;
+//   * networks.proto   `Network`, `Subnet`, `IpAddress`;
+//   * artifacts.proto  `ArtifactFormat`, `Registry`;
+//   * this file        `Resource`, `CompositeInstance`, `ValueMap`,
+//                      `ResourceList`;
+//   * composite.proto  the format of a composite definition.
+//
+// WHAT THESE FILES PROMISE
 //   * Every field is a BEHAVIOUR (a port, a scale, a public URL, an expiry),
 //     never a part of somebody's product. No vendor word appears in a
 //     message, field or enum value name.
 //   * The resource types are a CLOSED oneof. There is no kind string, no
 //     `google.protobuf.Any` and no provider enum: which cloud a graph runs
 //     on comes from the cell the stage deploys to (`--cloud=<id>`), never
-//     from this file.
+//     from these files.
 //   * Every field that names another resource is a `Ref`. The only
 //     id-bearing string is `Resource.id`. So one walk over `Ref` fields finds
 //     every edge of the graph.
@@ -147,17 +146,20 @@
 // an author chooses, so it has no value here.
 //
 // METADATA (`Resource.physical_name` 6, `labels` 7, `adopt` 8) means the
-// same on every type that takes it. `physical_name` is the cloud name of
-// the resource's primary object; a `grant` (an edge: its objects are
-// bindings) and a `dns_record` (named by the DNS name and type it writes)
-// have no name of their own, so writing one there is refused. `adopt` takes
-// over the existing object of that name instead of refusing it as foreign.
-// `labels` are the author's, written beside kci's own; a key in kci's own
-// label space (`kci_*`, `kci-*`) is refused. A name or a label a cloud
-// refuses (a name too long or too short, a kind with no name of its own
-// there, one name on two objects of one kind there, more labels than an
-// object carries there) is refused as a limit
-// of that cloud when the graph is validated, before anything is created.
+// same on every type that takes it.
+// `physical_name` is the cloud name of the resource's primary object; a
+// `grant` (an edge: its objects are bindings) and a `dns_record` (named by
+// the DNS name and type it writes) have no name of their own, so writing one
+// there is refused. `adopt` (an `Adoption`) takes over the existing object of
+// that name instead of refusing it as foreign, once kci has read it and
+// found what the resource declares; kci never replaces an adopted object,
+// never deletes one unless `adopt` is ADOPT_DELETABLE, and releases it when
+// the resource leaves the list. `labels` are the author's, written beside kci's own; a key in
+// kci's own label space (`kci_*`, `kci-*`) is refused. A name or a label a
+// cloud refuses (a name too long or too short, a kind with no name of its
+// own there, one name on two objects of one kind there, more labels than an
+// object carries there) is refused as a limit of that cloud when the graph
+// is validated, before anything is created.
 //
 // RESERVED NOW, BUILT LATER (held numbers, not declared; each is an addition
 // when it lands): `Resource` 5 a typed per-cloud settings map, `Image` 4 an
@@ -174,7 +176,7 @@
 // is held for who may read a registry beyond the identities granted READ.
 //
 // "PLATFORM" MEANS OS + CPU AND NOTHING ELSE (`Image.platform`). The deploy
-// target is the cloud, which this file never names.
+// target is the cloud, which no file here names.
 //
 // Field numbers are what is stored. They are pinned as literal wire bytes by
 // the welded tests in tests/; renumbering a field is protoc-legal and decodes
@@ -183,179 +185,33 @@ syntax = "proto3";
 
 package kci.resource.v1;
 
-import "google/protobuf/descriptor.proto";
-import "google/protobuf/duration.proto";
-
-// ---- the catalog's one declared bit ------------------------------------------
-
-// Whether every complete cloud must host a type. PORTABLE: a complete cloud
-// implements it or carries a ledgered gap. CLOUD_BOUND: partial coverage is
-// legitimate, and applying it on a cloud with no adapter for it is refused
-// before anything is created. UNSET is never a legal marking.
-enum Portability {
-  PORTABILITY_UNSET = 0;
-  PORTABLE = 1;
-  CLOUD_BOUND = 2;
-}
-
-extend google.protobuf.MessageOptions {
-  // Marks each resource type message below (v1: `Service`, `ContainerJob`,
-  // `Worker`, `Table`, `Bucket`, `Queue`, `Secret`, `DnsZone`,
-  // `ServiceAccount`, `Topic`, `Schedule`, `Network`, `Registry`, `Grant`,
-  // `DnsRecord`, `Certificate`, `Subscription`, `Subnet`, `IpAddress`,
-  // `EventTrigger`).
-  Portability portability = 50001;
-  // The outputs a type exposes to a `Ref`. A `Ref` asking a type for an
-  // output it does not expose is refused when the graph is loaded.
-  repeated Output exposes = 50002;
-}
-
-// ---- references ----------------------------------------------------------------
-
-// What a produced value IS, never whose attribute it is. ADDRESS is where a
-// client reaches the object (a bucket's URI); NAME is the cloud's own name
-// for it. 5 is held for REVISION (the cloud's revision of a service, never
-// kci's revision id).
-enum Output {
-  OUTPUT_UNSET = 0;
-  URL = 1;
-  HOST = 2;
-  ADDRESS = 3;
-  NAME = 4;
-}
-
-// A reference to another resource of the same list. With neither arm of
-// `output` set it names the resource itself (as in `Uses.target`); with
-// `standard` set it names one value the resource
-// produces at apply time. `named` is reserved for the escape hatch's own
-// outputs and is refused for every other producer.
-message Ref {
-  string resource = 1;
-  oneof output {
-    Output standard = 2;
-    string named = 3;
-  }
-}
-
-// What a consumer may do to a resource. CALL is accepted by a service (call
-// it) and a container job (start a run of it); a worker accepts no verb, and
-// neither does a schedule, an event trigger, a network, a subnet or an IP
-// address.
-// READ, WRITE and READ_WRITE by a table, a bucket, a secret (on a
-// secret: READ its value, WRITE a new version of it) and a registry (READ:
-// pull its artifacts; WRITE: push them); SEND (put a
-// message in) by a queue and a topic; RECEIVE (take a message out and
-// acknowledge it) by a queue; DESCRIBE by a table (read its definition,
-// never its items) and by a service account (read what the identity is,
-// never act as it). 7 is held for ACT_AS (one identity acting as another)
-// and 9 for MANAGE (changing a resource's own configuration), both
-// undeclared until their rules are decided.
-enum Access {
-  ACCESS_UNSET = 0;
-  CALL = 1;
-  READ = 2;
-  WRITE = 3;
-  READ_WRITE = 4;
-  SEND = 5;
-  RECEIVE = 6;
-  DESCRIBE = 8;
-}
-
-// A resource the CELL provides, which a grant may target instead of a
-// resource of the list. LOGS and METRICS accept READ and WRITE (WRITE: the
-// workload's own logs or metrics); ARTIFACTS accepts READ (pull the cell's
-// artifacts). 4 is held for placing workloads into the cell, undeclared
-// until its rules are decided.
-enum CellResource {
-  CELL_RESOURCE_UNSET = 0;
-  LOGS = 1;
-  METRICS = 2;
-  ARTIFACTS = 3;
-}
-
-// Whether a data resource's objects are deleted when the resource leaves the
-// file or the graph is destroyed. UNSET means the type's versioned default.
-enum Retention {
-  RETENTION_UNSET = 0;
-  DELETE = 1;
-  KEEP = 2;
-}
-
-// "The identity of this resource may do `access` to `target`" (or to the
-// cell's `cell`): exactly one of `target` and `cell` is set. The cloud
-// adapter turns it into whatever its own permission system needs.
-// `target.output` must be unset: access is granted to a resource, not to one
-// of its values. 3 is held.
-message Uses {
-  Ref target = 1;
-  Access access = 2;
-  CellResource cell = 4;
-}
-
-// A configuration value: a literal, a release machine parameter, or a value
-// another resource produces. All three are plain (not secret) values. 4 is
-// held; a secret never rides a `Value` (see `SecretRef`).
-message Value {
-  oneof v {
-    string literal = 1;
-    string param = 2;
-    Ref ref = 3;
-  }
-}
-
-// An output of an earlier BUILD step of the same run of the release
-// machine. A different namespace from `Ref`: resolved before the deploy
-// graph exists, and never a graph edge.
-message StepOutput {
-  string step = 1;
-  string name = 2;
-}
-
-// What to run: a build step's output, or a literal content digest. Never a
-// mutable tag. 4 is held for an `artifact_ref` arm (an artifact of another
-// revision).
-//
-// `platform` is the OS + CPU of the build, an OCI-style string such as
-// "linux/amd64": the step output of that platform, or, for a digest, that
-// the digest is of that platform's single image (not a multi-platform
-// index). It is the same spelling every other kci file uses. Empty means the
-// v1 default, "linux/amd64"; that default is fixed, because stored lists
-// rely on it. In v1, linux/amd64 is the only platform a reader accepts: any
-// other value decodes, and is refused when the graph is validated, before
-// anything is created.
-message Image {
-  oneof source {
-    StepOutput output = 1;
-    string digest = 2;
-  }
-  string platform = 3;
-}
-
-// A secret, referenced, never valued: EITHER one that already exists in the
-// cell's secret store, by `name`, OR a `secret` resource of this list, by
-// `secret` (exactly one of the two; validate refuses both and neither). A
-// workload (a service, a container job or a worker) names it in its
-// `secret_env`.
-// kci passes the REFERENCE to the cloud adapter, which makes the secret's
-// value available to the container at run time; the value is never in this
-// file, in kci's state or in kci's memory. The map key of a `secret_env`
-// field is the environment variable the container reads it from.
-//
-// `store` names the secret store of a `name` (unset: the cell's default
-// store); a `secret` resource is in the store its cloud puts it in, so
-// `store` beside `secret` is refused. `version` pins one version of the
-// value (unset: the latest). Both have presence, so "not written" is never
-// confused with a written empty string. `secret` names the resource itself
-// (its `output` unset), and the identity the workload runs as must hold
-// READ (or READ_WRITE) on it: the reference is not a grant.
-message SecretRef {
-  string name = 1;
-  optional string store = 2;
-  optional string version = 3;
-  Ref secret = 4;
-}
+import "kci/resource/v1/refs.proto";
+import "kci/resource/v1/compute.proto";
+import "kci/resource/v1/data.proto";
+import "kci/resource/v1/identity.proto";
+import "kci/resource/v1/messaging.proto";
+import "kci/resource/v1/secrets.proto";
+import "kci/resource/v1/names.proto";
+import "kci/resource/v1/triggers.proto";
+import "kci/resource/v1/networks.proto";
+import "kci/resource/v1/artifacts.proto";
 
 // ---- one entry of a deploy step's list ----------------------------------------
+
+// `Resource.adopt`: whether kci takes over an existing object, and whether
+// it may delete it. Any other value is refused when the graph is validated.
+enum Adoption {
+  // kci creates the object, and refuses an unstamped one of its name.
+  ADOPTION_UNSET = 0;
+  // Take over the object; never delete it (a destroy, or the resource no
+  // longer lowering it while it stays in the list, is refused before any
+  // change).
+  ADOPT = 1;
+  // Take over the object, and let kci delete it as it deletes its own
+  // (never replace it: a replace of an adopted object is refused at plan
+  // time at either value).
+  ADOPT_DELETABLE = 2;
+}
 
 message Resource {
   // Author-chosen and stable: the identity key for state.
@@ -389,18 +245,28 @@ message Resource {
   // starts with `kci_` or `kci-` (kci's identity labels and marks) is
   // refused.
   map<string, string> labels = 7;
-  // Take over the existing object named `physical_name` (which must be
-  // written): an object of that name that carries no kci stamp is stamped
-  // and recorded instead of being refused as foreign, and is then the
-  // resource's like any object kci created (the closed world and the
-  // resource's retention apply to it). With no such object, it is created.
-  // Without `adopt`, an unstamped object of that name refuses the apply.
-  bool adopt = 8;
+  // Whether kci takes over the existing object named `physical_name`
+  // (which must be written), and what it may do to it (`Adoption`). Before
+  // anything is planned, the object must exist and be what the resource
+  // declares (its kind, its name and every field of its shape the cloud can
+  // read); a missing or different object refuses the plan. The object is
+  // then stamped and recorded instead of being refused as foreign, and kci
+  // keeps it in step with the file like any of its own, by updates in place
+  // only: a plan that would replace it is refused before any change, at
+  // either value. kci did not create it, so when the resource leaves the
+  // list, kci RELEASES the object (drops its stamp and its record) and
+  // leaves it standing. Unset: an unstamped object of that name refuses the
+  // apply. Like every plain field it is written at its default (`40 00`);
+  // ADOPT is `40 01` and ADOPT_DELETABLE `40 02`.
+  Adoption adopt = 8;
+  // An earlier draft's deletable flag, which ADOPT_DELETABLE replaces.
+  reserved 9;
+  reserved "adopt_deletable";
 
   // Typed and closed. Held, not declared (see the file header): 17, 19
-  // and 32 to 36 the later neutral primitives, 80
-  // a composite instance, 90 the escape hatch, 100-299 / 300-499 / 500-699 /
-  // 700-899 the provider primitives of four clouds.
+  // and 32 to 36 the later neutral primitives, 90 the escape hatch,
+  // 100-299 / 300-499 / 500-699 / 700-899 the provider primitives of four
+  // clouds. 80 is not a primitive: an instance of a composite.
   oneof body {
     Service service = 10;
     ContainerJob container_job = 11;
@@ -422,545 +288,39 @@ message Resource {
     Subnet subnet = 29;
     IpAddress ip_address = 30;
     EventTrigger event_trigger = 31;
+    CompositeInstance composite = 80;
   }
+}
+
+// `Resource.body` 80: one use of a composite definition (composite.proto),
+// in a list or as a component of another definition. kci EXPANDS it into
+// its primitives (ids `<top>/<component>/...`, all OWNED by the top-level
+// resource) before validating; the engine never sees one. It has no object,
+// so `uses`, `retention`, `physical_name`, `labels` and `adopt` (the
+// `Adoption`) are refused on it. `definition` and `version` name a given definition; `digest`, when
+// written, must be `sha256:<hex>` of its bytes as this kci encodes them.
+// Each input is bound by name, in the map of its type: `input` a STRING,
+// INT or BOOL input (a `Value`: a literal of the type, or inside a definition
+// an input of the same type) and a REF input (a `Ref` naming a resource),
+// `image_input` an IMAGE input, `map_input` a VALUE_MAP input. 6 is held
+// (secret inputs).
+message CompositeInstance {
+  string definition = 1;
+  string version = 2;
+  optional string digest = 3;
+  map<string, Value> input = 4;
+  map<string, Image> image_input = 5;
+  map<string, ValueMap> map_input = 7;
+}
+
+// The value of a VALUE_MAP input: plain values by key (an environment, say),
+// each a literal, a parameter or another resource's output, as in `env`.
+message ValueMap {
+  map<string, Value> value = 1;
 }
 
 // The resources of one deploy step, in no particular order: ordering is
 // derived from the `Ref`s between them.
 message ResourceList {
   repeated Resource resource = 1;
-}
-
-// ---- shared shapes -------------------------------------------------------------
-
-// Neutral sizes, per instance. `gpus` is a count of whole GPUs (0: none);
-// which GPU a cloud attaches is that cloud's, and a cloud that attaches none
-// to a workload refuses a non-zero count when the graph is validated.
-message Size {
-  uint32 cpu_millis = 1;
-  uint32 memory_mb = 2;
-  uint32 gpus = 3;
-}
-
-// Instance bounds. `min = 0` allows scaling to zero; `min` has presence, so
-// an explicit 0 is told apart from "not written" (the versioned default).
-message Scale {
-  optional uint32 min = 1;
-  uint32 max = 2;
-}
-
-// ---- compute: service, container job and worker ----------------------------------
-//
-// Three WORKLOADS, each a container: one that answers requests (`service`),
-// one that runs to completion when started (`container_job`), and one that
-// runs always (`worker`). Each has an image, an optional `command` (the
-// program to run, replacing the image's entrypoint; unset: the image's own),
-// `args` (passed to it), `env` and `secret_env`, a `size` per instance, and
-// the `run_as` account.
-
-// A container that answers requests, scales (to zero if allowed) and may have
-// a public URL.
-message Service {
-  option (portability) = PORTABLE;
-  option (exposes) = URL;
-  option (exposes) = HOST;
-
-  Image image = 1;
-  uint32 port = 2;
-  repeated string args = 3;
-  map<string, Value> env = 4;
-  Size size = 5;
-  Scale scale = 6;
-  string health_path = 7;
-  // Behaviours, not products: an adapter reports a finding when the
-  // cloud's ceiling is lower.
-  google.protobuf.Duration request_timeout = 8;
-  uint32 max_concurrency = 9;
-
-  // "A public URL" is an arm, not a gateway resource.
-  oneof exposure {
-    Public public = 10;
-    Internal internal = 11;
-  }
-
-  // Secrets this service receives by reference, keyed by environment
-  // variable. A key must not also appear in `env`.
-  map<string, SecretRef> secret_env = 12;
-  // 13 is held for a `source` that may be a non-image artifact.
-  // The `service_account` this service runs as. Unset: a private identity of
-  // its own.
-  Ref run_as = 14;
-  // The program to run, replacing the image's entrypoint; `args` follow it.
-  // Unset: the image's own entrypoint.
-  repeated string command = 15;
-  // The `subnet` the service's outbound connections leave through (the
-  // resource itself, no output). Every outbound connection takes it: the
-  // service reaches the private addresses of the subnet's network, and
-  // reaches a public address only if the network has a way out (a NAT is not
-  // a primitive yet). It says nothing about who may call the service. Unset:
-  // the cloud's own outbound path, in no network of the list.
-  Ref network = 16;
-  // 50 to 53 are held for the per-cloud extensions (file header).
-
-  // Reachable from outside the graph at a URL.
-  message Public {}
-  // No public URL; callable by other resources of this graph. Not a
-  // statement about networks.
-  message Internal {}
-}
-
-// A container that runs to completion: a run-to-completion DEFINITION. kci
-// declares the job; each run is started by an identity granted CALL on it,
-// and a run is an execution of the definition, never a declared object. It
-// was `job` (the same arm, 11, and fields 1 to 7 and 13 at the same
-// numbers). Its trigger (10 on demand, 11 a schedule) is no longer part of
-// it: both numbers are reserved, so a list written with a trigger decodes
-// without it, and its JSON form is refused. A schedule is a primitive of its
-// own (`schedule`, `Resource.body` 22).
-message ContainerJob {
-  option (portability) = PORTABLE;
-
-  Image image = 1;
-  repeated string args = 2;
-  Size size = 3;
-  // Presence: an explicit 0 ("never retry") is told apart from "not
-  // written" (the versioned default).
-  optional uint32 max_retries = 4;
-  google.protobuf.Duration timeout = 5;
-  // Plain values only, as on `Service.env`: a literal, a parameter or
-  // another resource's output. Secrets go in `secret_env`.
-  map<string, Value> env = 6;
-  // Secrets this job receives by reference, keyed by environment variable.
-  // A key must not also appear in `env`.
-  map<string, SecretRef> secret_env = 7;
-  // 8 is held for a `source` that may be a non-image artifact.
-  // The program to run, replacing the image's entrypoint; `args` follow it.
-  // Unset: the image's own entrypoint.
-  repeated string command = 9;
-  // The trigger that was part of the job: `on_demand` 10 and `schedule` 11.
-  reserved 10, 11;
-  reserved "on_demand", "schedule";
-  // The `service_account` this job runs as. Unset: a private identity of its
-  // own.
-  Ref run_as = 13;
-  // 50 to 53 are held for the per-cloud extensions (file header).
-}
-
-// A container that runs ALWAYS, on a fixed number of instances, and answers
-// no request: it takes its own work (from a queue, say, through a `uses`
-// line). It exposes nothing and accepts no verb. An early draft of this arm
-// had `scale` at 3 and a `source` oneof at 10 and 11; those three numbers
-// are reserved, so a list written against the draft decodes without them
-// rather than as another field.
-message Worker {
-  option (portability) = PORTABLE;
-
-  Image image = 1;
-  Size size = 2;
-  reserved 3, 10, 11;
-  reserved "scale", "always_on", "queue";
-  repeated string args = 4;
-  // The program to run, replacing the image's entrypoint; `args` follow it.
-  // Unset: the image's own entrypoint.
-  repeated string command = 5;
-  // Plain values only, as on `Service.env`. Secrets go in `secret_env`.
-  map<string, Value> env = 6;
-  // Secrets this worker receives by reference, keyed by environment
-  // variable. A key must not also appear in `env`.
-  map<string, SecretRef> secret_env = 7;
-  // How many instances run, always: 1 or more. Presence: unset is the
-  // versioned default, 1; an explicit 0 is refused when the graph is
-  // validated (a worker that runs nowhere is no worker).
-  optional uint32 replicas = 8;
-  // The `service_account` this worker runs as. Unset: a private identity of
-  // its own.
-  Ref run_as = 9;
-  // 12 is held for a `source` that may be a non-image artifact; 50 to 53
-  // for the per-cloud extensions (file header).
-}
-
-// ---- data: table -----------------------------------------------------------------
-
-// A key-value table: items found by a key, and by secondary access paths.
-// An ACCESS PATH is how items are found: a `partition` field (equality) and
-// optionally an `order` field (items of one partition, sorted). The KEY is the
-// table's primary access path, and it is immutable: a new key is a new table,
-// so changing it is refused (give the new table a new id). Its retention
-// default is KEEP, as for a bucket. Only the fields an access path or the TTL
-// names are declared; an item's other attributes are the application's.
-message Table {
-  option (portability) = PORTABLE;
-  option (exposes) = NAME;
-
-  AccessPath key = 1;
-  // Secondary access paths, each with a name unique in the table.
-  repeated AccessPath indexes = 2;
-  // A NUMBER attribute holding an item's expiry time (seconds since the
-  // epoch): an item is deleted some time after it. Unset: items never
-  // expire.
-  optional string ttl_field = 3;
-  // 4 is held for an analytics replica; 50 to 53 for the per-cloud
-  // extensions (file header).
-
-  message AccessPath {
-    string name = 1;
-    Field partition = 2;
-    Field order = 3;
-  }
-
-  message Field {
-    string name = 1;
-    FieldType type = 2;
-  }
-}
-
-// What a key or index attribute holds: the types every table service can key
-// on.
-enum FieldType {
-  FIELD_TYPE_UNSET = 0;
-  STRING = 1;
-  NUMBER = 2;
-  BYTES = 3;
-}
-
-// ---- data: bucket ----------------------------------------------------------------
-
-// Behaviours, not product names: how often objects are read, never a
-// provider's storage class.
-enum StorageTier {
-  STORAGE_TIER_UNSET = 0;
-  STANDARD = 1;
-  INFREQUENT = 2;
-  ARCHIVE = 3;
-}
-
-// An object store container. Access is always uniform (granted per
-// resource, never per object) and public access is always prevented. Its
-// retention default is KEEP: removing a bucket from the file leaves it in
-// the cloud unless `retention: DELETE` is written.
-message Bucket {
-  option (portability) = PORTABLE;
-  option (exposes) = NAME;
-  option (exposes) = ADDRESS;
-
-  // Days after which an object is deleted. Presence: unset means never; an
-  // explicit 0 (expire every object at once) is refused when the graph is
-  // validated.
-  optional uint32 object_expiry_days = 1;
-  // Keep earlier versions of an overwritten or deleted object.
-  bool versioning = 2;
-  // UNSET means STANDARD.
-  StorageTier tier = 3;
-  // 50 to 53 are held for the per-cloud extensions (file header).
-}
-
-// ---- identity: service account and grant -------------------------------------------
-
-// A workload identity: the provider's own identity object for workloads (a
-// role only the compute service may assume, a service account, a managed
-// identity, a Kubernetes service account). Its NAME is the cloud's name for
-// it. An identity with an arbitrary trust is not this type. No field yet;
-// 50 to 53 are held for the per-cloud extensions (file header).
-message ServiceAccount {
-  option (portability) = PORTABLE;
-  option (exposes) = NAME;
-}
-
-// One edge: `principal` may do `access` to `target`, or to the cell's
-// `cell` (exactly one of the two). `principal` names a `service_account`,
-// or a workload with no `run_as` (its private identity). The verb
-// must be one the target accepts. A grant exposes nothing and accepts
-// nothing. 50 to 53 are held for the per-cloud extensions (file header).
-message Grant {
-  option (portability) = PORTABLE;
-
-  Ref principal = 1;
-  Ref target = 2;
-  Access access = 3;
-  CellResource cell = 4;
-}
-
-// ---- messaging: queue, topic and subscription ------------------------------------
-
-// A queue of messages that receivers PULL: a received message is hidden from
-// every other receiver until it is acknowledged or its `ack_deadline`
-// passes, and then it is delivered again. A message delivered
-// `max_deliveries` times without an acknowledgement moves to the
-// `dead_letter` queue. Messages reach a queue by a direct SEND, or from a
-// topic through a `subscription`. Its retention default is DELETE.
-message Queue {
-  option (portability) = PORTABLE;
-  option (exposes) = NAME;
-  option (exposes) = ADDRESS;
-
-  // How long a received message stays hidden before it is delivered again,
-  // in whole seconds from 10 to 300 (the range every built-in cloud honours).
-  // Unset: the versioned default, 30 seconds.
-  google.protobuf.Duration ack_deadline = 1;
-  // The `queue` a message moves to after `max_deliveries` deliveries. Set
-  // together with `max_deliveries`, or neither: with no dead-letter queue a
-  // message is delivered until it is acknowledged.
-  Ref dead_letter = 2;
-  // From 5 to 100 (the range every built-in cloud honours). Presence: an
-  // explicit 0 is told apart from "not written".
-  optional uint32 max_deliveries = 3;
-  // 50 to 53 are held for the per-cloud extensions (file header).
-}
-
-// A fan-out point: every message SENT to a topic is delivered to every
-// queue a `subscription` connects to it. A topic holds no receivers of its
-// own. Its retention default is DELETE. No field yet; 50 to 53 are held for
-// the per-cloud extensions (file header).
-message Topic {
-  option (portability) = PORTABLE;
-  option (exposes) = NAME;
-  option (exposes) = ADDRESS;
-}
-
-// One edge of fan-out: every message sent to `topic` is delivered to
-// `queue`. Both are required, each names a resource of its own type, and a
-// (topic, queue) pair is connected once. A subscription exposes nothing and
-// accepts nothing, and is deleted with its resource. 50 to 53 are held for
-// the per-cloud extensions (file header).
-message Subscription {
-  option (portability) = PORTABLE;
-
-  Ref topic = 1;
-  Ref queue = 2;
-}
-
-// ---- secrets: secret ------------------------------------------------------------
-
-// The CONTAINER of a secret value: the provider's secret object, created with
-// no value, so kci still writes none. Its value is written by an identity
-// granted WRITE on it (or by a person, out of band), and read by an identity
-// granted READ, which a workload names in `secret_env` through
-// `SecretRef.secret`. Its NAME is the cloud's name for it. Deleting it deletes
-// every version of its value, so its retention default is KEEP: removing a
-// secret from the file leaves it in the cloud unless `retention: DELETE` is
-// written. No field yet; 50 to 53 are held for the per-cloud extensions (file
-// header).
-message Secret {
-  option (portability) = PORTABLE;
-  option (exposes) = NAME;
-}
-
-// ---- names: DNS zone, DNS record and certificate ------------------------------------
-
-// A PUBLIC DNS zone: the servers that answer for `name` and every name below
-// it that no other zone holds. A private zone (one answered only inside a
-// network) is not this type. Its NAME is the cloud's name for the zone
-// object, not the domain. kci creates the zone; pointing the domain's
-// registrar at the zone's servers is the domain owner's step, outside kci.
-// A zone re-created after a delete may be answered by other servers, which
-// is the domain owner's step again. Its retention default is DELETE. 50 to
-// 53 are held for the per-cloud extensions (file header).
-message DnsZone {
-  option (portability) = PORTABLE;
-  option (exposes) = NAME;
-
-  // The domain, lowercase, with no trailing dot ("example.com"): at least
-  // two labels, each of letters, digits and inner hyphens. One zone per
-  // domain in a list.
-  string name = 1;
-}
-
-// What a DNS record set holds. Only the types every built-in cloud hosts
-// with one meaning: A (IPv4 addresses), AAAA (IPv6 addresses), CNAME
-// (another name: one value, never at a zone's own name), TXT (text) and MX
-// (mail servers, each "<preference> <host>").
-enum RecordType {
-  RECORD_TYPE_UNSET = 0;
-  A = 1;
-  AAAA = 2;
-  CNAME = 3;
-  TXT = 4;
-  MX = 5;
-}
-
-// One record set: every value of one `type` at one `name`, in one `zone`
-// of the list. Its HOST is `name`. A value is a literal, or (for a CNAME
-// only) a `Ref` to the HOST another resource exposes, so the record follows
-// the service it names. Its retention default is DELETE. 50 to 53 are held
-// for the per-cloud extensions (file header).
-message DnsRecord {
-  option (portability) = PORTABLE;
-  option (exposes) = HOST;
-
-  // The full name, lowercase, with no trailing dot: the zone's own name or
-  // a name below it. A first label `*` is a wildcard.
-  string name = 1;
-  // The `dns_zone` the record is in (the resource itself, no output).
-  Ref zone = 2;
-  RecordType type = 3;
-  // At least one, in order; a CNAME has exactly one.
-  repeated Value values = 4;
-  // Whole seconds from 60 to 86400. Unset: the versioned default, 300
-  // seconds.
-  google.protobuf.Duration ttl = 5;
-}
-
-// A MANAGED, DOMAIN-VALIDATED certificate, publicly trusted: the cloud
-// obtains it, proves control of each domain with records in `zone`, and
-// renews it. kci never holds its private key. This version means a publicly
-// trusted certificate only; whether private-CA certificates join this type
-// (a new field) or another type is open. Its NAME is the cloud's name for
-// it. Its retention default is DELETE. 50 to 53 are held for the per-cloud extensions (file header).
-message Certificate {
-  option (portability) = PORTABLE;
-  option (exposes) = NAME;
-
-  // From 1 to 10 names, each the zone's own name or below it; a first label
-  // `*` is a wildcard. The first is the certificate's subject.
-  repeated string domains = 1;
-  // The `dns_zone` the validation records go in (the resource itself, no
-  // output).
-  Ref zone = 2;
-}
-
-// ---- triggers: schedule and event trigger ------------------------------------------
-//
-// A TRIGGER starts a run of a container job, or calls a service, when
-// something happens: a time comes (`schedule`) or a resource of the list
-// changes (`event_trigger`). Its `target` is the resource itself (its
-// `output` unset). The trigger reaches the target through an identity of its
-// own, a private helper that only the cloud's scheduling or eventing service
-// may use, holding exactly one edge: CALL on the target (file header). A
-// trigger exposes nothing, accepts no verb and takes no retention: it is
-// deleted with its resource, and it is never a grant's principal.
-
-// Starts its `target` at the times `cron` names, in `timezone`.
-message Schedule {
-  option (portability) = PORTABLE;
-
-  // When: five fields separated by single spaces, minute (0-59), hour
-  // (0-23), day of the month (1-31), month (1-12) and day of the week (0-6,
-  // 0 is Sunday). Each field is `*`, a number or a range `a-b`, either with
-  // a step `/n`, or a comma-separated list of those. No names (`MON`) and no
-  // shorthands (`@daily`): the form every built-in cloud reads alike. A cron
-  // a cloud cannot express is refused when the graph is validated.
-  string cron = 1;
-  // An IANA time zone name ("Europe/Paris"). Empty: UTC.
-  string timezone = 2;
-  // A `container_job` (each time starts a run of it) or a `service` (each
-  // time is an HTTP POST, with no body, to its URL).
-  Ref target = 3;
-  // 50 to 53 are held for the per-cloud extensions (file header).
-}
-
-// What happened to a resource, as every built-in cloud delivers it with one
-// meaning. 3 is held for a message published to a topic (how a cloud
-// delivers that to a service is not decided).
-enum SourceEvent {
-  SOURCE_EVENT_UNSET = 0;
-  // An object was written to the bucket: created, or overwritten.
-  OBJECT_CREATED = 1;
-  // An object was removed from the bucket. Where a cloud also reports the
-  // replaced copy of an overwritten object as removed, an overwrite
-  // delivers this too: a receiver reads the object before it acts.
-  OBJECT_DELETED = 2;
-}
-
-// Delivers each `event` of `source` to `target`: one call per event,
-// carrying it.
-message EventTrigger {
-  option (portability) = PORTABLE;
-
-  // The `bucket` whose events are delivered.
-  Ref source = 1;
-  SourceEvent event = 2;
-  // The `service` each event is delivered to, as an HTTP POST to its URL.
-  Ref target = 3;
-  // 50 to 53 are held for the per-cloud extensions (file header).
-}
-
-// ---- networks: network, subnet and IP address --------------------------------------
-//
-// A private NETWORK (an address space), the SUBNETS cut from it, and a static
-// public IP ADDRESS. None runs as an identity or accepts a verb; each takes
-// retention, DELETE by default. A network and a subnet expose their cloud
-// name (NAME), an IP address the address itself (ADDRESS). This version
-// speaks IPv4 only: another address family would be a new field of each
-// message (an addition), and whether one is added is not decided. Firewalls,
-// NAT, peering and the objects a cloud needs to attach a workload are not
-// primitives here yet.
-
-// A private network: the IPv4 range its subnets are cut from.
-message Network {
-  option (portability) = PORTABLE;
-  option (exposes) = NAME;
-
-  // "a.b.c.d/n": a private range (inside 10.0.0.0/8, 172.16.0.0/12 or
-  // 192.168.0.0/16, the ranges every built-in cloud takes alike), n from 16
-  // to 28, no bit set after the first n. Every subnet of the network lies
-  // inside it.
-  string ipv4_cidr = 1;
-  // 50 to 53 are held for the per-cloud extensions (file header).
-}
-
-// A range of a `network`'s addresses that the workloads placed in it take
-// their private addresses from.
-message Subnet {
-  option (portability) = PORTABLE;
-  option (exposes) = NAME;
-
-  // The `network` (the resource itself, no output).
-  Ref network = 1;
-  // "a.b.c.d/n": inside its network's range, n from 16 to 28, no bit set
-  // after the first n, overlapping no other subnet of the network.
-  string ipv4_cidr = 2;
-  // A zone of the cell's region, from 1 to 3 (the cloud's own zones, in its
-  // own order). Presence: an explicit 0 is refused when the graph is
-  // validated. A cloud whose subnets are each in one zone refuses an unset
-  // zone; a cloud whose subnets span the region has the subnet in every
-  // zone, the one written included.
-  optional uint32 zone = 3;
-  // 50 to 53 are held for the per-cloud extensions (file header).
-}
-
-// A static public IPv4 address, reserved in the cell's region: it stays the
-// same until the resource is deleted, and once deleted it cannot be taken
-// back. Its ADDRESS is the address. Nothing in this version serves on it (a load
-// balancer is a later primitive). No field yet; 50 to 53 are held for the
-// per-cloud extensions (file header).
-message IpAddress {
-  option (portability) = PORTABLE;
-  option (exposes) = ADDRESS;
-}
-
-// ---- artifacts: registry --------------------------------------------------------
-
-// What a registry holds, by the protocol its clients speak. OCI: container
-// images and the other artifacts an OCI distribution client pushes and
-// pulls. No other format is declared in this version: a Python package index
-// and an npm registry need a parent object on one built-in cloud and an
-// onprem backing that is not chosen, and a conda channel is native on no
-// built-in cloud. Each would be a new value, an addition.
-enum ArtifactFormat {
-  ARTIFACT_FORMAT_UNSET = 0;
-  OCI = 1;
-}
-
-// A private store of artifacts of one `format`. Its ADDRESS is the name a
-// client pushes and pulls an image as (`host/path`: no scheme, no tag; a
-// client appends `:<tag>` or `@<digest>`). An identity granted WRITE pushes
-// artifacts (a push may move a tag); one granted READ pulls them. Nobody else
-// reads it: who may read it beyond its grants (field 2) is held. Deleting it
-// deletes every artifact in it, so its retention default is KEEP: removing a
-// registry from the file leaves it in the cloud unless `retention: DELETE` is
-// written.
-//
-// A workload's `image` names a build step's output or a digest, never a
-// registry of the list: an image source that names one is not declared
-// (`Image` 4 is held for an artifact reference). A registry holds what the
-// graph's own workloads push and pull, through their grants and its ADDRESS.
-message Registry {
-  option (portability) = PORTABLE;
-  option (exposes) = ADDRESS;
-
-  // Required: UNSET is refused when the graph is validated.
-  ArtifactFormat format = 1;
-  // 2 is held for who may read it beyond the identities granted READ (public
-  // read is an open question); 50 to 53 for the per-cloud extensions (file
-  // header).
 }

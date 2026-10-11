@@ -1,0 +1,12 @@
+{
+ "name": "column_value_mismatch",
+ "defect": "a deliberate mismatch: the runner must fail this case",
+ "run": "call_batch",
+ "entry": "identity",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [1, 3]}},
+ "runner_fails_with": "row 1:"
+}

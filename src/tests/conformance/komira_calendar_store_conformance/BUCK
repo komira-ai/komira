@@ -1,0 +1,53 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: komira_calendar_store's contract, written once, generic over the
+# backend (a `CalendarTarget`: a fresh calendar database and another
+# connection to it), and run against each backend a build action can run:
+#
+#   tests/test_sqlite.mojo          SqliteDatabase, a new database file per
+#                                   check under the test's temporary
+#                                   directory, the migration chain applied;
+#                                   also: the chain creates exactly
+#                                   CALENDAR_TABLES.
+#   tests/test_firestore_mock.mojo  FirestoreDatabase over MockFirestore,
+#                                   declaring only CALENDAR_DOCUMENT_INDEXES;
+#                                   also: the window query is refused without
+#                                   its declared index.
+#
+# Postgres is not run: a build action has no server. Nothing depends on this
+# package.
+mojo_library(
+    name = "komira_calendar_store_conformance",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_calendar_ics:komira_calendar_ics",
+        "//src/komira_calendar_proto:komira_calendar_proto",
+        "//src/komira_calendar_store:komira_calendar_store",
+        "//src/komira_datetime:komira_datetime",
+        "//src/komira_db:komira_db",
+        "//src/komira_proto_codec:komira_proto_codec",
+    ],
+    conda = False,
+    test_deps = [
+        "//src/komira_db_sqlite:komira_db_sqlite",
+        "//src/komira_gcp_firestore:komira_gcp_firestore",
+        "//src/komira_gcp_firestore_db:komira_gcp_firestore_db",
+    ],
+    test_srcs = [
+        "tests/test_firestore_mock.mojo",
+        "tests/test_sqlite.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps). The lint reads `deps` only, so the tests
+# that import the `test_deps` packages are left out of it.
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)

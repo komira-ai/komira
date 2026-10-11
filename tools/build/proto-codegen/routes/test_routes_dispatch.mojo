@@ -10,6 +10,7 @@ from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.blocking_runtime import BlockingRuntime
 from komira_async.runtime.runtime_trait import Runtime
 from komira_http_core.codec.types import HttpMethod, HttpRequest, HttpResponse
+from komira_http_server.routing.compose import ComposedRoutes
 from komira_proto_codec import decode_json
 
 from komira_routes_fixture.library_service_routes import (
@@ -231,12 +232,28 @@ def test_the_response_is_the_handlers_message_as_json() raises:
     assert_equal(got.title, String("t"))
 
 
+def _allow(
+    mut routes: BookServiceRoutes[Books],
+    mut reactor: Reactor[_Rt.Sink],
+    var req: HttpRequest,
+) raises -> String:
+    """The `Allow` header of `req`'s 405."""
+    var resp = routes.dispatch[_Rt](reactor, req^)
+    assert_equal(Int(resp.status), 405)
+    assert_true(String("allow") in resp.headers, "a 405 without Allow")
+    return resp.headers[String("allow")]
+
+
 def test_a_known_path_under_another_method_is_405() raises:
-    """Catches a dispatcher that answers 404 for a path some route matches."""
+    """Catches a dispatcher that answers 404 for a path some route matches,
+    and a 405 whose `Allow` is missing or names only one of the path's
+    methods (the path's last route, DELETE, sorts first)."""
     var rt = _rt()
     ref reactor = rt.reactor()
     var books = BookServiceRoutes[Books](Books())
     var shelves = ShelfServiceRoutes[Shelves](Shelves())
+    assert_equal(_allow(books, reactor, _req(POST, String("/v1/shelves/s/books/7"))), String("DELETE, GET"))
+    assert_equal(_allow(books, reactor, _req(PUT, String("/v1/shelves/s/books"))), String("GET, POST"))
     assert_equal(_book(books, reactor, _req(POST, String("/v1/shelves/s/books/7"))), 405)
     assert_equal(_book(books, reactor, _req(PUT, String("/v1/shelves/s/books"))), 405)
     assert_equal(_shelf(shelves, reactor, _req(GET, String("/v1/shelves:search"))), 405)
@@ -245,6 +262,46 @@ def test_a_known_path_under_another_method_is_405() raises:
     # A path no route matches is 404.
     assert_equal(_book(books, reactor, _req(GET, String("/v1/nowhere"))), 404)
     assert_equal(_book(books, reactor, _req(GET, String("/v1/shelves/s/books/7/pages"))), 404)
+
+
+comptime _Both = ComposedRoutes[BookServiceRoutes[Books], ShelfServiceRoutes[Shelves]]
+
+
+def _both(mut app: _Both, mut reactor: Reactor[_Rt.Sink], var req: HttpRequest) raises -> HttpResponse:
+    app.services[0].handler.last = String("")
+    app.services[1].handler.last = String("")
+    return app.dispatch[_Rt](reactor, req^)
+
+
+def test_two_services_share_one_server() raises:
+    """Both services behind one ComposedRoutes. Catches a composite that
+    asks only its first service (the second service's last route is
+    answered), and one that answers 404 for a path only the second service
+    has under another method (405, its methods in Allow)."""
+    var rt = _rt()
+    ref reactor = rt.reactor()
+    var app = _Both(BookServiceRoutes[Books](Books()), ShelfServiceRoutes[Shelves](Shelves()))
+    var last = _both(app, reactor, _req(GET, String("/v1/shelves/s/info")))
+    assert_equal(Int(last.status), 200)
+    assert_equal(app.services[1].handler.last, String("GetShelf s"))
+    assert_equal(app.services[0].handler.last, String(""))
+    var first = _both(app, reactor, _req(DELETE, String("/v1/shelves/s/books/7")))
+    assert_equal(Int(first.status), 200)
+    assert_equal(app.services[0].handler.last, String("DeleteBook s 7"))
+
+    var other = _both(app, reactor, _req(DELETE, String("/v1/shelves/s")))
+    assert_equal(Int(other.status), 405)
+    assert_equal(other.headers[String("allow")], String("GET"))
+    var search = _both(app, reactor, _req(GET, String("/v1/shelves:search")))
+    assert_equal(Int(search.status), 405)
+    assert_equal(search.headers[String("allow")], String("POST"))
+    var books = _both(app, reactor, _req(PUT, String("/v1/shelves/s/books/7")))
+    assert_equal(Int(books.status), 405)
+    assert_equal(books.headers[String("allow")], String("DELETE, GET"))
+    assert_equal(app.services[0].handler.last, String(""))
+    assert_equal(app.services[1].handler.last, String(""))
+
+    assert_equal(Int(_both(app, reactor, _req(GET, String("/v1/nowhere"))).status), 404)
 
 
 def test_an_unknown_json_field_is_refused() raises:
@@ -343,6 +400,7 @@ def main() raises:
     test_every_rpc_is_routed_through_each_binding()
     test_the_response_is_the_handlers_message_as_json()
     test_a_known_path_under_another_method_is_405()
+    test_two_services_share_one_server()
     test_an_unknown_json_field_is_refused()
     test_path_values_bind_by_field_type()
     test_query_values_bind_by_field_type()

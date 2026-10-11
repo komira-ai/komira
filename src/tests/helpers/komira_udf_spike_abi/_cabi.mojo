@@ -362,3 +362,19 @@ def c_layout_rows() -> LayoutRows:
         out.names.append(read_cstr(name))
         out.values.append(external_call["komira_udf_spike_layout_value", Int64](Int64(i)))
     return out^
+
+
+def c_layout_edges() -> List[Int64]:
+    """The probe's answers at -1 and at its row count, just outside its rows:
+    [name(-1) is NULL, name(n) is NULL, value(-1), value(n)], a Bool as 0 or 1.
+    """
+    var n = external_call["komira_udf_spike_layout_count", Int64]()
+    var at: List[Int64] = [Int64(-1), n]
+    var out = List[Int64]()
+    for k in range(2):
+        # SAFETY: only compared with NULL, never read through.
+        var name = external_call["komira_udf_spike_layout_name", Void](at[k])
+        out.append(Int64(1) if is_null(name) else Int64(0))
+    for k in range(2):
+        out.append(external_call["komira_udf_spike_layout_value", Int64](at[k]))
+    return out^

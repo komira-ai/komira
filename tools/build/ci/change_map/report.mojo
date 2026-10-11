@@ -2,7 +2,7 @@
 
 from buildtools.bytes import byte_at, hex_byte, join
 
-from change_map.plan import KIND_AFFECTED, KIND_WIDENED, Verdict
+from change_map.plan import KIND_AFFECTED, KIND_BROKEN, KIND_WIDENED, Verdict
 
 
 def one_line(text: String) -> String:
@@ -91,10 +91,12 @@ def render_json(v: Verdict, ms: Int) -> String:
 
 def render_units_answer(v: Verdict, units: List[String]) -> String:
     """The answer in kci's grammar: `UNIT <name>` lines, then exactly one verdict line.
-    A WIDENED answer names no unit; a change that reaches none says
-    `AFFECTED 0` and kci refuses it."""
+    A WIDENED or BROKEN answer names no unit (kci fails the check on BROKEN);
+    a change that reaches none says `AFFECTED 0` and kci refuses it."""
     if v.kind == String(KIND_WIDENED):
         return String("WIDENED ") + one_line(v.reason) + String("\n")
+    if v.kind == String(KIND_BROKEN):
+        return String("BROKEN ") + one_line(v.reason) + String("\n")
     var s = String()
     for i in range(len(units)):
         s += String("UNIT ") + units[i] + String("\n")

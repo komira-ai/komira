@@ -26,15 +26,18 @@ def _fixture(name: String) raises -> String:
 
 def test_the_fixture_is_declaration_only() raises:
     var text = _fixture(String("declaration_only.mojo"))
-    # The heuristic counts its declarations: 26 lines, the docstrings'
-    # `return`/`var` text and the imports aside.
-    assert_equal(len(executable_lines(text)), 26)
+    # The heuristic counts its declarations: 11 lines (the comptime values,
+    # Marker's `...`, the `fn width` stub), the docstrings' `return`/`var`
+    # text, the imports, and the trait headers and requirements
+    # (lexer.mojo) aside.
+    assert_equal(len(executable_lines(text)), 11)
     assert_true(declaration_only(text))
 
 
 def test_the_near_miss_fixture_is_not() raises:
     var text = _fixture(String("near_miss.mojo"))
-    assert_equal(len(executable_lines(text)), 7)
+    # 4 lines: the trait header and the `run_row` requirement are left out.
+    assert_equal(len(executable_lines(text)), 4)
     assert_false(declaration_only(text))
 
 
@@ -148,7 +151,7 @@ def _kinds(fs: List[Finding]) -> String:
 
 
 def test_a_declaration_only_file_is_not_charged() raises:
-    # Before: decl.mojo's 26 lines counted uncovered, 2/28, UnmeasuredFile
+    # Before: decl.mojo's 11 lines counted uncovered, 2/13, UnmeasuredFile
     # and BelowTarget. Now: 2/2 and success, the file a note.
     var a = _run(_fixture(String("declaration_only.mojo")))
     var k = a.package_index(String("src/p"))
@@ -159,7 +162,7 @@ def test_a_declaration_only_file_is_not_charged() raises:
     assert_equal(_kinds(a.findings), "")
     assert_equal(a.conclusion, "success")
     assert_equal(_kinds(a.info_findings), "DeclarationOnlyFile@src/p/decl.mojo")
-    assert_equal(a.info_findings[0].count, 26)
+    assert_equal(a.info_findings[0].count, 11)
     assert_equal(a.info_findings[0].package, "src/p")
     assert_equal(a.info_findings[0].line, 0)
     assert_true(a.info_findings[0].message.startswith("UnmeasuredFile (declaration-only): "), a.info_findings[0].message)
@@ -169,7 +172,7 @@ def test_a_declaration_only_file_is_not_charged() raises:
 def test_the_near_miss_is_charged() raises:
     var a = _run(_fixture(String("near_miss.mojo")))
     var k = a.package_index(String("src/p"))
-    assert_equal(a.packages[k].line_found, 9, _kinds(a.findings))
+    assert_equal(a.packages[k].line_found, 6, _kinds(a.findings))
     assert_equal(a.packages[k].unmeasured_files, 1)
     assert_equal(_kinds(a.findings), "BelowTarget@ Regression@ UnmeasuredFile@src/p/decl.mojo")
     assert_equal(len(a.info_findings), 0)
@@ -184,7 +187,7 @@ def test_a_declaration_only_file_with_a_marker_still_counts() raises:
     )
     var a = _run(text)
     var k = a.package_index(String("src/p"))
-    assert_equal(a.packages[k].line_found, 27)
+    assert_equal(a.packages[k].line_found, 12)
     assert_equal(a.packages[k].exempt_lines, 1)
     assert_equal(len(a.info_findings), 0)
 

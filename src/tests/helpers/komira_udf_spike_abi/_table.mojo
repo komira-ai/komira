@@ -15,11 +15,9 @@
 #     created and freed only through the table.
 #   - out-slots (`komira_udf_xxx** out`), capabilities, spec and call
 #     structs, and the cancel flag: arena blocks of _host.mojo.
-#   - a cancel timer (native/cancel_timer.c): the C side's, freed by its join,
-#     which runtime.mojo calls before the call's arena blocks can go.
 # =============================================================================
 
-from std.ffi import OwnedDLHandle, RTLD, external_call
+from std.ffi import OwnedDLHandle, RTLD
 from std.memory import alloc
 from std.sys import size_of
 
@@ -279,18 +277,7 @@ def new_call(mut arena: _Arena, deadline_ns: Int64, call_id: Int64, cancel: Bool
     return Word(c.bitcast[NoneType]())
 
 
-def start_cancel_timer(call: Word, clock_reads: Word) -> Word:
-    """Start a C thread that sets `call`'s cancel flag once the host's clock
-    has been read after this point (the call has started); the timer, to
-    pass to join_cancel_timer before the call's blocks are freed. NULL when
-    no thread could be started."""
-    # SAFETY: the flag is an 8-byte arena block and `clock_reads` a field of
-    # the arena's _HostData block; both outlive the join.
-    var flag = call.p.bitcast[CUdfCall]()[].cancel
-    return Word(external_call["komira_udf_spike_cancel_on_clock_read", Void](flag, clock_reads.p))
-
-
-def join_cancel_timer(timer: Word):
-    """Wait for the timer's thread and free the timer (NULL: nothing)."""
-    if not timer.is_null():
-        external_call["komira_udf_spike_cancel_join", NoneType](timer.p)
+def cancel_flag_of(call: Word) -> Word:
+    """The cancel flag of `call` (an arena block new_call allocated)."""
+    # SAFETY: `call` is a CUdfCall block new_call filled.
+    return Word(call.p.bitcast[CUdfCall]()[].cancel)

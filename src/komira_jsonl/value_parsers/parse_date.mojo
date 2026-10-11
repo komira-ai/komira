@@ -29,7 +29,8 @@
 #      For a Gregorian-calendar (Year, Month, Day) tuple, days from
 #      1970-01-01:
 #         y = Year - (Month <= 2)
-#         era = (y >= 0 ? y : y-399) / 400
+#         era = floor(y / 400)    (the C++ form adjusts y-399 for
+#                                  truncating division; Mojo's // floors)
 #         yoe = (y - era*400)                              [0, 399]
 #         doy = (153*(Month + (Month > 2 ? -3 : 9)) + 2) / 5 + Day - 1
 #         doe = yoe*365 + yoe/4 - yoe/100 + doy            [0, 146096]
@@ -114,11 +115,8 @@ def _days_from_civil(y: Int, m: Int, d: Int) -> Int:
     """Howard Hinnant's days_from_civil algorithm. Returns days since
     1970-01-01 (negative for earlier dates)."""
     var y_adj = y if m > 2 else (y - 1)
-    var era: Int
-    if y_adj >= 0:
-        era = y_adj // 400
-    else:
-        era = (y_adj - 399) // 400
+    # Mojo's `//` floors: no C++ `y - 399` adjustment for negative years.
+    var era = y_adj // 400
     var yoe = y_adj - era * 400  # [0, 399]
     var m_off = m + (-3 if m > 2 else 9)
     var doy = (153 * m_off + 2) // 5 + d - 1  # [0, 365]
