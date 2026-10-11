@@ -13,7 +13,6 @@ src/tests/conformance/komira_git_pack_conformance/gen_packs.sh	conformance fixtu
 src/tests/conformance/komira_git_protocol_conformance/capture.sh	conformance fixture generator: to port to Zig
 third_party/git/git_build.sh	toolchain or vendored-source builder or check: to port to Zig
 third_party/git/git_check.sh	toolchain or vendored-source builder or check: to port to Zig
-tools/build/coverage/branch/cov_branch_annotate.sh	coverage and mutation tooling: to port to Zig
 tools/build/coverage/branch/cov_branch_link.sh	coverage and mutation tooling: to port to Zig
 tools/build/coverage/census.sh	coverage and mutation tooling: to port to Zig
 tools/build/coverage/cov_gate.sh	coverage and mutation tooling: to port to Zig

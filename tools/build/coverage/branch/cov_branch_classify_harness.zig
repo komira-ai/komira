@@ -13,6 +13,12 @@
 //! on stderr, the exit status, the output written or not) as well as the
 //! classification. The IR edits (`Ir`) are line edits, each failing the case
 //! when it changes nothing, so no case checks an unedited fixture.
+//!
+//! fixtures/case.ll, rules.ll and try.ll are annotated IR made by hand in
+//! the form `cov_branch annotate` writes it (made-up paths and counts;
+//! rules.ll holds the shapes of README.md's String lifetime, raising call,
+//! loop head and short-circuit rules, each excerpted from a library's IR;
+//! try.ll those of a `try:` body).
 
 const std = @import("std");
 const Alloc = std.mem.Allocator;
