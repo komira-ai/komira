@@ -16,27 +16,32 @@
 #       (what a slow or instrumented build stretches most) are not in it.
 #   test_a_stop_signal_between_beats_stops_the_job_before_its_next_line
 #       With a 120 s interval, the job prints "signalling", sends SIGTERM to
-#       the supervisor 2 s in, sleeps 3 s, prints "late", then sleeps 60 s.
-#       The run ends CANCELLED, naming SIGTERM, after two RUNNING beats, and
-#       its logs.txt holds "signalling" and nothing else. No wall-clock
-#       bound: the job itself is the clock. "signalling" proves the job was
-#       still running when it sent the signal (a stop before the signal kills
-#       it during its first sleep, before it prints); the absent "late"
-#       proves the stop came within the job's 3 s sleep after the signal (a
-#       loop that took the stop only every few seconds lets the job print
-#       it); CANCELLED proves the stop came before the job's own end (a loop
-#       that ignored the signal, or took it only at the next beat 120 s in,
-#       sees the job exit 0: COMPLETED); and no signal is left latched
-#       afterwards, so the stop took this one.
+#       the supervisor 2 s in, sleeps 3 s, creates a file in the test's
+#       temporary directory, then sleeps 60 s. The run ends CANCELLED, naming
+#       SIGTERM, after two RUNNING beats; its logs.txt holds "signalling" and
+#       nothing else; the file does not exist after the run. No wall-clock
+#       bound: the job itself is the clock, and the file is its tick, written
+#       whether or not the supervisor drains anything after it. "signalling"
+#       proves the job was still running when it sent the signal (a stop
+#       before the signal kills it during its first sleep, before it prints).
+#       The absent file proves the job was killed within the 3 s it slept
+#       after the signal: a loop that took the stop only every few seconds,
+#       or a stop step that waited before it forwarded the signal, lets the
+#       job create it. CANCELLED proves the stop came before the job's own
+#       end (a loop that ignored the signal, or took it only at the next beat
+#       120 s in, sees the job exit 0: COMPLETED); and no signal is left
+#       latched afterwards, so the stop took this one.
 #
 # No heartbeat endpoint: the reporter records each beat. The stop test
 # reads logs.txt from an in-memory log store; the other has no store.
 # =============================================================================
 
 from std.memory import ArcPointer
-from std.testing import assert_equal, assert_true
+from std.os.path import exists
+from std.testing import assert_equal, assert_false, assert_true
 
 from komira_clock import now_ns
+from komira_libc.posix import _read_env
 from komira_objectstore import (
     InMemoryConditionalStore,
     SharedInMemoryConditionalStore,
@@ -139,6 +144,12 @@ def test_a_job_that_ends_between_beats_is_noticed_within_seconds() raises:
     print("  test_a_job_that_ends_between_beats_is_noticed_within_seconds: PASS")
 
 
+def _tmp(name: String) raises -> String:
+    var tmp = _read_env("TEST_TMPDIR")
+    assert_true(tmp.byte_length() > 0, "TEST_TMPDIR is unset")
+    return tmp + "/" + name
+
+
 def _text_at(store: SharedInMemoryConditionalStore, key: String) -> String:
     """The object's text, or "<absent>"."""
     try:
@@ -150,16 +161,19 @@ def _text_at(store: SharedInMemoryConditionalStore, key: String) -> String:
 
 def test_a_stop_signal_between_beats_stops_the_job_before_its_next_line() raises:
     _ = take_stop_signal()  # nothing left over from before
+    # The job creates this file 3 s after it sends the signal, unless it was
+    # killed first. The temporary directory is the test run's own.
+    var late = _tmp(String("stop-mid-interval-late"))
+    assert_false(exists(late), "the late file exists before the run")
     var beats = ArcPointer[List[String]](List[String]())
     var store = SharedInMemoryConditionalStore()
     var view = store.clone()
     var phase = run_job_supervisor[Recorder, SharedInMemoryConditionalStore](
         _shell(
             String("stop-mid-interval"),
-            String(
-                "sleep 2; echo signalling; kill -TERM $PPID; sleep 3; echo late;"
-                " exec sleep 60"
-            ),
+            String("sleep 2; echo signalling; kill -TERM $PPID; sleep 3; : > '")
+            + late
+            + String("'; exec sleep 60"),
             120,
         ),
         Recorder(beats),
@@ -174,12 +188,16 @@ def test_a_stop_signal_between_beats_stops_the_job_before_its_next_line() raises
     )
     assert_equal(_count(beats[], String("RUNNING|")), 2)
     # "signalling": the job was still running when it sent the signal, so
-    # the stop came after it. No "late": the stop came within the 3 s the job
-    # slept after the signal.
+    # the stop came after it.
     assert_equal(
         _text_at(view, String("stop-mid-interval/logs.txt")),
         String("signalling"),
-        "the stop came after the signal and before the job's next line",
+        "the job's output up to the signal",
+    )
+    # No file: the job was killed within the 3 s it slept after the signal.
+    # The run has reaped the job, so the file cannot appear later.
+    assert_false(
+        exists(late), "the job outlived the 3 s after its signal: the stop was late"
     )
     # The stop took the signal: none is left latched (a stop that came from
     # anything else would leave it).
