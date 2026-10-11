@@ -19,8 +19,8 @@
 #      given by `paths`, one finding over a hold, a word of a deny list) or
 #      ledger defect (a row for binary data among them, and a row holding a
 #      deny-list word), a window with month 13 or not ending on the first day
-#      of a month is refused, the root target's window is pinned (uquery of
-#      window_from and public_from), an empty tree fails as checking nothing,
+#      of a month is refused (the root target's window is pinned at load by
+#      the root BUCK), an empty tree fails as checking nothing,
 #      and a target naming no tree is refused at analysis. The
 #      planted tree's window is 2030 to 2031-09-01, so no file of it holds a
 #      date of the root target's window.
@@ -90,14 +90,5 @@ for want in \
     "empty|public_boundary: checked nothing"; do
     expect_red "public_boundary_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
 done
-# The root target's window is the public rule's: from 2025 up to 2026-09-01.
-# Narrowing it would let a date through, so it is pinned here.
-pbw_rc=0
-(cd "$ROOT" && "$BUCK2" uquery //:public_boundary --output-attribute public_from --output-attribute window_from) > "$LOG/public_boundary_window.log" 2>&1 || pbw_rc=$?
-if [ "$pbw_rc" = 0 ] && grep -q '"public_from": "2026-09-01"' "$LOG/public_boundary_window.log" && grep -q '"window_from": 2025' "$LOG/public_boundary_window.log"; then
-    pass public_boundary_window
-else
-    fail "public_boundary_window: //:public_boundary does not read from 2025 up to 2026-09-01 (see $LOG/public_boundary_window.log)"
-fi
 expect_red public_boundary_no_tree "name the files in exactly one of \`tree\` and \`files\`" "$N:no_tree"
 expect_red public_boundary_both_tree_and_files "name the files in exactly one of \`tree\` and \`files\`" "$N:both_tree_and_files"

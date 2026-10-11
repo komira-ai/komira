@@ -259,8 +259,9 @@
 #      `overrides` without `hand_srcs` and the reverse, a hand_srcs entry
 #      that is a label, not `.mojo`, or named like a generated file, and a
 #      model path the service id cannot be read from, and a caller
-#      `test_data` entry for the environment scan; an operation the model
-#      lacks by the generator; a failing caller test reds the client; and so
+#      `test_data` entry for the environment scan (an operation the model
+#      lacks is refused by the generator: a unit test of
+#      tools/build/proto-codegen/src/aws_in.rs); a failing caller test reds the client; and so
 #      does a hand-written module of the package that reads HOME, through
 #      the environment scan (tests//negative/mojo_aws_client): by a banned
 #      name, or by an import of std.pathlib off its allow-list, which it reads
@@ -1075,7 +1076,6 @@ fi
 expect_red aws_client_no_operations '`operations` is empty' tests//negative/mojo_aws_client:no_operations
 expect_red aws_client_joined_operations 'is not a botocore operation name' tests//negative/mojo_aws_client:joined_operations
 expect_red aws_client_no_runtime '`deps` is empty' tests//negative/mojo_aws_client:no_runtime
-expect_red aws_client_unknown_operation 'declares no operation(s) ["GetLogEvent"]' tests//negative/mojo_aws_client:unknown_operation
 expect_red aws_client_caller_test_red 'GATED TEST FAILED: tests//negative/mojo_aws_client:caller_test_red:test_logs_deliberate_failure.mojo' tests//negative/mojo_aws_client:caller_test_red
 expect_red aws_client_duplicate_operation '`operations` names `GetLogEvents` twice' tests//negative/mojo_aws_client:duplicate_operation
 expect_red aws_client_overrides_without_hand_srcs '`overrides` is set and `hand_srcs` is empty' tests//negative/mojo_aws_client:overrides_without_hand_srcs

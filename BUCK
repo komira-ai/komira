@@ -314,6 +314,17 @@ _TESTS_LINTS = [
 # them, one per line, kept outside it: `-c komira_lint.public_boundary_deny=`
 # a target or a path from the root (`.public_boundary_deny` is gitignored for
 # it). No row may hold a word of that list, and no such list is committed here.
+#
+# The public history starts on 2026-09-01. Dates before 2025 in this tree are
+# data (epochs, certificates, standards), so the window starts there. A
+# narrower window would let a date through, so the values are pinned: loading
+# this file fails if the window starts after 2025 or the history before
+# 2026-09-01.
+_PUBLIC_FROM = "2026-09-01"
+_WINDOW_FROM = 2025
+
+[fail("BUCK: public_boundary's window is from {} up to {}; the public rule's is from 2025 (or earlier) up to 2026-09-01 (or later), and a narrower window lets a date through".format(_WINDOW_FROM, _PUBLIC_FROM)) for _ in range(1) if _WINDOW_FROM > 2025 or _PUBLIC_FROM < "2026-09-01"]
+
 [public_boundary(
     name = "public_boundary",
     cells = {"tools/build/tests": "tests//:doc_tree"},
@@ -322,10 +333,8 @@ _TESTS_LINTS = [
     hosts = "tests/public_boundary_hosts.tsv",
     # The tests cell's dotfile, which its doc_tree's glob skips.
     paths = {"tools/build/tests/.buckconfig": "tests//:buckconfig"},
-    # The public history starts on this day. Dates before 2025 in this tree
-    # are data (epochs, certificates, standards), so the window starts there.
-    public_from = "2026-09-01",
+    public_from = _PUBLIC_FROM,
     srcs = [".buckconfig", ".buckconfig.local.example", ".gitignore"] + glob([".github/**"]),
     tree = ":doc_tree",
-    window_from = 2025,
+    window_from = _WINDOW_FROM,
 ) for _ in _TESTS_LINTS[:1]]
