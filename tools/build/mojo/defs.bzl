@@ -28,15 +28,11 @@ load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":coverage.bzl", "COVERAGE_ATTRS", "COVERAGE_SHARED_LIB_ATTRS", "COVERAGE_TEST_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_readme", "coverage_run", "coverage_branch_of", "coverage_shared_lib", "coverage_shared_lib_macro", "coverage_sub_targets", "coverage_test", "coverage_test_kwargs")
 load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
 load(":mutation.bzl", "MUTATION_ATTRS", "mutation_kwargs", "mutation_sub_targets")
-load(
-    ":test_runtime.bzl",
-    _arg_args = "arg_args",
-    _data_map = "data_map",
-    _env_args = "env_args",
-    _test_root = "test_root",
-)
+load(":native_reach.bzl", "NATIVE_REACH_ATTRS", "native_reach", "native_reach_kwargs")
+load(":test_runtime.bzl", _arg_args = "arg_args", _data_map = "data_map", _env_args = "env_args", _test_root = "test_root")
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "capped_prefix", "define_args", "mem_cap_script", "memory_cap")
 load(":readme.bzl", "readme_kwargs")
+load(":run_check.bzl", "run_check_validation")
 load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_prefix", "with_test_limit")
 
 def _toolchain(ctx):
@@ -434,6 +430,7 @@ def _library_impl(ctx):
     # With coverage on, the README's run (above) and the gate (coverage.bzl);
     # only the conda package waits for them and the runs, never this package.
     cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs, cov_branch, src_dir, import_name, root) if cov_link else (None, [])
+    reach = native_reach(ctx, src_dir, deps)  # native_reach.bzl: (providers, sub-targets)
     mutation = mutation_sub_targets(ctx, tc, _mojo_cmd, src_dir, root, deps, tests_closure[1:], _link_tail(tests_c_link), test_data, env_args, test_defines, cap, mem_cap_script(ctx))  # mutation.bzl
     if markers:
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
@@ -461,7 +458,7 @@ def _library_impl(ctx):
                 # gated package. The tests above use the ungated package
                 # in-rule, never through a label.
                 "ungated": [DefaultInfo(default_output = ungated)],
-            } | ({"gen": [ctx.attrs.gen[DefaultInfo]]} if ctx.attrs.gen else {}) | (coverage_sub_targets(cov_bins, cov_runs, cov_gate, cov_branch) if cov_link else {}) | mutation,
+            } | ({"gen": [ctx.attrs.gen[DefaultInfo]]} if ctx.attrs.gen else {}) | (coverage_sub_targets(cov_bins, cov_runs, cov_gate, cov_branch) if cov_link else {}) | mutation | reach[1],
         ),
         MojoInfo(
             c_link = c_link,
@@ -479,7 +476,7 @@ def _library_impl(ctx):
             readme = ctx.attrs.readme,
         ),
         welded_tests_info(ctx.attrs.test_srcs),
-    ] + cov_providers
+    ] + cov_providers + reach[0]
 
 # ---- README examples ----------------------------------------------------------
 #
@@ -628,7 +625,7 @@ mojo_library_rule = rule(
         # itself built from a mojo_library, so a default would be a cycle.
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
-    } | COVERAGE_ATTRS | MUTATION_ATTRS | LIBRARY_DEFINE_ATTRS | _TOOLCHAIN_ATTR,
+    } | COVERAGE_ATTRS | MUTATION_ATTRS | NATIVE_REACH_ATTRS | LIBRARY_DEFINE_ATTRS | _TOOLCHAIN_ATTR,
 )
 
 # ---- mojo_binary / mojo_test ----------------------------------------------
@@ -672,13 +669,16 @@ def _runnable(ctx, tc, exe):
 def _run_check(ctx, tc, command):
     # Runs the RunInfo command itself, in a remote action with no library
     # path, so a runnable directory that cannot start on its own fails here.
-    # The action runs on this target's execution platform.
+    # The action runs on this target's execution platform. With
+    # `expected_stdout` it is also a validation of the binary (run_check.bzl).
     out = ctx.actions.declare_output(ctx.label.name + ".stdout")
     args = [tc.busybox, "sh", tc.run_check, tc.busybox, command, out.as_output()]
-    if ctx.attrs.expected_stdout != None:
-        args.append(ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout))
+    if ctx.attrs.expected_stdout == None:
+        ctx.actions.run(cmd_args(args), category = "mojo_run_check")
+        return out, []
+    args.append(ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout))
     ctx.actions.run(cmd_args(args), category = "mojo_run_check")
-    return out
+    return out, run_check_validation(ctx, out, ctx.attrs.expected_stdout)
 
 def _shared(ctx, tc):
     main = _main_src(ctx)
@@ -689,19 +689,20 @@ def _binary_impl(ctx):
     tc, exe = _executable(ctx, "mojo_build")
     run_dir, command = _runnable(ctx, tc, exe)
     shared = _shared(ctx, tc)
+    run_check, validation = _run_check(ctx, tc, command)
     return [
         DefaultInfo(
             default_output = exe,
             sub_targets = {
                 "shared": [DefaultInfo(default_output = shared)],
-                "run_check": [DefaultInfo(default_output = _run_check(ctx, tc, command))],
+                "run_check": [DefaultInfo(default_output = run_check)],
                 "runnable": [DefaultInfo(default_output = run_dir), RunInfo(args = command)],
             },
         ),
         RunInfo(args = command),
         MojoRunnableInfo(binary = exe.basename, command = command, run_dir = run_dir),
         MojoProgramInfo(name = ctx.label.name, shared = shared, runtime = tc.runtime, target_cpu = tc.target_cpu),
-    ]
+    ] + validation
 
 _EXECUTABLE_ATTRS = {
     # Mojo packages and C/C++ libraries; see _check_deps.
@@ -714,7 +715,8 @@ mojo_binary_rule = rule(
     impl = _binary_impl,
     attrs = _EXECUTABLE_ATTRS | BINARY_DEFINE_ATTRS | {
         "optimization_level": attrs.string(default = SHIPPED_OPT_LEVEL),
-        # When set, `[run_check]` fails unless the binary's stdout equals this.
+        # When set, `[run_check]` fails unless the binary's stdout equals this;
+        # it is then a validation, run by every build holding the binary.
         "expected_stdout": attrs.option(attrs.string(), default = None),
     },
 )
@@ -973,6 +975,7 @@ def _mojo_library(**kwargs):
     readme_kwargs(kwargs)
     cov_gate = coverage_kwargs(kwargs)
     mutation_kwargs(kwargs)
+    native_reach_kwargs(kwargs)
     mojo_library_rule(**kwargs)
     if kwargs.get("conda", True):
         name = kwargs["name"]
