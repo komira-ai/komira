@@ -37,9 +37,9 @@
 #
 # Aggregates: COUNT(DISTINCT) admits (aggregate, group, value) into the
 # worker's `CdDistinctSet` and counts the admits; a NULL value admits nothing.
-# SUM / COUNT / MIN / MAX / AVG fold into a `FixedAggCell` per (aggregate,
+# SUM / COUNT / MIN / MAX / AVG fold into a `CDFixedCell` per (aggregate,
 # group): NULL values are skipped (COUNT(*) counts every row), integer inputs
-# accumulate as Int64, MIN / MAX seed from the first value and compare floats
+# accumulate exactly in 128 bits (the emit refuses a SUM past INT64), MIN / MAX seed from the first value and compare floats
 # in DuckDB's order (NaN above +inf).
 # =============================================================================
 
@@ -69,7 +69,10 @@ from komira_op_agg_distinct.agg_cd_distinct_set import (
 )
 from komira_op_agg_distinct.agg_cd_dictkey_encode import _owned_i8
 from komira_op_agg_distinct.agg_cd_heavy_split import CD_HEAVY_MAX, cd_pair_bucket
-from komira_op_agg_distinct.streaming_agg_count_distinct import FixedAggCell
+from komira_op_agg_distinct.cd_parallel_emit import (
+    CDFixedCell,
+    cd_fixed_cell_identity,
+)
 
 
 comptime _PARALLEL_CD_MIN_ROWS_PER_WORKER: Int = 16_384
@@ -156,7 +159,7 @@ struct _PerWorkerCDState(Movable):
     var cd_counts: List[List[Int]]
     """`[a][gid]`: distinct values admitted for COUNT(DISTINCT) `a`."""
     var cd_pairs: CdDistinctSet
-    var fx: List[List[FixedAggCell]]
+    var fx: List[List[CDFixedCell]]
     """`[a][gid]`: the cell of fixed aggregate `a`."""
 
     def __init__(out self):
@@ -175,7 +178,7 @@ struct _PerWorkerCDState(Movable):
         self.group_null_masks = List[Int]()
         self.cd_counts = List[List[Int]]()
         self.cd_pairs = CdDistinctSet()
-        self.fx = List[List[FixedAggCell]]()
+        self.fx = List[List[CDFixedCell]]()
 
     def init(
         mut self,
@@ -201,7 +204,7 @@ struct _PerWorkerCDState(Movable):
         self.cd_pairs.reserve_hint(cd_rows_hint)
         for _ in range(num_aggs):
             self.cd_counts.append(List[Int]())
-            self.fx.append(List[FixedAggCell]())
+            self.fx.append(List[CDFixedCell]())
 
     def ensure_ht(mut self):
         """Allocate the group table at `ht_cap_hint`, inside the worker."""
@@ -438,7 +441,7 @@ def _cdp_owner_pass[o: ImmOrigin](mut st: _CDParallelState[o], t: Int):
 
 @always_inline
 def _fx_fold(
-    mut cell: FixedAggCell, func: UInt8, d: UInt8, v: Int64, f: Float64
+    mut cell: CDFixedCell, func: UInt8, d: UInt8, v: Int64, f: Float64
 ):
     """Fold one non-NULL input into `cell`: `v` for an INT32 / INT64 lane,
     `f` for a FLOAT64 lane (`d` is the lane kind). COUNT(*) has no value and
@@ -447,14 +450,17 @@ def _fx_fold(
     if d == AGG_KIND_COUNT or func == AGG_COUNT:
         return
     if d == AGG_KIND_I32 or d == AGG_KIND_I64:
+        # Exact: a 128-bit add of an INT64 cannot wrap before 2^64 rows. A
+        # 64-bit `+=` answered 0 for 70,000 rows of 2^62 (DuckDB: 8.07e22).
+        var w = v.cast[DType.int128]()
         if func == AGG_MIN:
-            if cell.n == 1 or v < cell.i_acc:
-                cell.i_acc = v
+            if cell.n == 1 or w < cell.i_acc:
+                cell.i_acc = w
         elif func == AGG_MAX:
-            if cell.n == 1 or v > cell.i_acc:
-                cell.i_acc = v
+            if cell.n == 1 or w > cell.i_acc:
+                cell.i_acc = w
         else:
-            cell.i_acc += v
+            cell.i_acc += w
         return
     # MIN / MAX in DuckDB's order: NaN sorts above +inf. A bare `<` / `>` is
     # false against a NaN, so `max{0.1, NaN}` would answer 0.1.
@@ -531,7 +537,7 @@ def _cd_agg_rows[o: ImmOrigin](mut st: _CDParallelState[o], wid: Int) raises:
                     ws.group_null_masks.append(nmask)
                 for a in range(num_aggs):
                     ws.cd_counts[a].append(0)
-                    ws.fx[a].append(FixedAggCell(Int64(0), Float64(0.0), Int64(0)))
+                    ws.fx[a].append(cd_fixed_cell_identity())
                 break
             if Int(ws.ht_keys[slot]) == h:
                 var same = not nullable or ws.group_null_masks[sg] == nmask
