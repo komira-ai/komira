@@ -44,6 +44,10 @@
 #  10. A packed column of 2^61 values at width 8 (2^64 bits, which wraps to
 #      0) is refused by the unpacker the materializer calls, for a numeric
 #      and a float column (komira-ai/komira#1260).
+#  11. A validity bitmap for a negative n_docs (a ULEB whose tenth byte is
+#      0x01 decodes to 2^63, which is Int.MIN) is refused by the same six
+#      bitmap checks as case 9; unrefused, (n_docs + 7) >> 3 is negative and
+#      moves the cursor backwards (komira-ai/komira#1261).
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_raises
@@ -480,6 +484,44 @@ def test_10_wrapping_packed_count_refused() raises:
         contains="_unpack_bits_lsb_first_u64: packed run of 2305843009213693952"
     ):
         _ = r.fast_field_column(v, String("g"))
+
+
+def _min_docs(head: List[UInt8]) -> List[UInt8]:
+    """n_docs = Int.MIN (nine 0x80 bytes, then 0x01: bit 63 set), then
+    `head`, then one bitmap byte 0xFF."""
+    var out = List[UInt8]()
+    for _ in range(9):
+        out.append(0x80)
+    out.append(0x01)
+    for b in head:
+        out.append(b)
+    out.append(0xFF)
+    return out^
+
+
+def test_11_negative_n_docs_validity_bitmap_refused() raises:
+    # The headers of case 9, with a negative n_docs: each decoder's bitmap
+    # check refuses it before the later slot or sub-region checks run.
+    var ents = List[_Ent]()
+    ents.append(_num(String("n"), _min_docs([0, 0, 1])))
+    ents.append(_flt(String("g"), _min_docs([0, 1])))
+    ents.append(_kw(String("k"), _min_docs([1, 1, 0x61, 0, 1])))
+    ents.append(_flt(String("h"), _min_docs([64, 1])))
+    var v = _view_of(ents^)
+    var r = FastFieldReader(v)
+    with assert_raises(contains="FastFieldReader: validity bitmap out of bounds"):
+        _ = r.fast_field_i64(v, String("n"), 0)
+    with assert_raises(contains="FastFieldReader: float validity bitmap out of bounds"):
+        _ = r.fast_field_f64(v, String("g"), 0)
+    with assert_raises(contains="float_resolver: validity bitmap OOB"):
+        _ = r.float_resolver(v, String("g"))
+    with assert_raises(contains="FastFieldReader: keyword validity bitmap out of bounds"):
+        _ = r.fast_field_keyword(v, String("k"), 0)
+    var fr = FieldnormResolver(entry=r._entries[0].copy(), min_doc_id=0, doc_count=3)
+    with assert_raises(contains="FieldnormResolver: validity bitmap out of bounds"):
+        _ = fr.dl_at(v, 0)
+    with assert_raises(contains="_materialize_float: validity bitmap out of bounds"):
+        _ = r.fast_field_column(v, String("h"))
 
 
 def main() raises:
