@@ -101,6 +101,28 @@
 # `except` around the one `optimize` call, returning `OptimizeResult.ok(plan)`
 # or `OptimizeResult.from_error(<message>)` (`optimizer_result.mojo` classifies
 # the message by imported token). There is no second pass list to drift.
+#
+# THE PORTABLE PROFILE. `optimize_portable(plan, config, profile)` is the
+# entry a producer calls when its output must be the same plan on every
+# platform that runs it (komira-ai/komira#1094, §5.3). It runs the same
+# pass order through the same function as `optimize`, with three
+# differences:
+#
+#   * Step 20 (payload narrowing) does not run. The host derives narrowing
+#     from footers it has verified itself; no producer statistic drives it.
+#   * There is no `deps` argument. Steps 3 and 9 see an empty binding table,
+#     so neither folds a value; a site that needs an executed sub-plan
+#     records a request, and a plan that ends with one is refused with
+#     `PORTABLE_REFUSAL_NEEDS_EXECUTION` (the producer executes nothing).
+#   * A `PortableProfile` whose version this build does not implement is
+#     refused with `PORTABLE_REFUSAL_UNKNOWN_PROFILE` before any pass runs.
+#
+# `config` is read only from the argument, as in `optimize`. What makes the
+# output the same on every platform is a property of the passes, not of this
+# entry: no pass reads the environment, a clock or an address; Dict and Set
+# iteration is insertion order; every cost comparison is a total order
+# (`optimizer_cost_order.dp_pair_beats` breaks equal DP costs on relation-set
+# bits).
 # =============================================================================
 
 from komira_plan_ir.logical_plan import (
@@ -187,6 +209,20 @@ def optimize(
 
     Raises:
         The first pass's `Error` that refuses the plan, unchanged.
+    """
+    return _run_pass_order(plan^, config, deps, True)
+
+
+def _run_pass_order(
+    var plan: LogicalPlan,
+    config: OptimizerConfig,
+    mut deps: ScalarDepTable,
+    narrow_payload: Bool,
+) raises -> LogicalPlan:
+    """The pass order, shared by `optimize` and `optimize_portable`.
+
+    `narrow_payload` False skips step 20; nothing else differs between the two
+    entries.
     """
     # 1. Scans. Partition pruning first: it reads a Filter directly over a
     # partitioned scan (the shape before pushdown rewrites it), and a smaller
@@ -372,7 +408,9 @@ def optimize(
     # 20. Payload narrowing LAST. Its stamp is a `ScanData` field that is not a
     # constructor argument, so any later pass that rebuilt the scan would start
     # it empty and drop the stamp. It adds, removes and reorders nothing.
-    plan = narrow_join_payload(plan^)
+    # `optimize_portable` skips it: narrowing is a host-local rule.
+    if narrow_payload:
+        plan = narrow_join_payload(plan^)
 
     return plan^
 
@@ -393,3 +431,79 @@ def optimize_status(
         return OptimizeResult.ok(optimize(plan^, config, deps))
     except e:
         return OptimizeResult.from_error(String(e))
+
+
+comptime PORTABLE_PROFILE_V1: Int = 1
+"""The one `PortableProfile` version this build implements: the driver's pass
+order without step 20, with no scalar bindings (see the module header)."""
+
+comptime PORTABLE_REFUSAL_UNKNOWN_PROFILE = "OPTIMIZE_PORTABLE_UNKNOWN_PROFILE"
+"""`optimize_portable` was given a profile version this build does not
+implement. Raised before any pass runs."""
+
+comptime PORTABLE_REFUSAL_NEEDS_EXECUTION = "OPTIMIZE_PORTABLE_NEEDS_EXECUTION"
+"""The plan holds a scalar site that only an executed sub-plan can fold (an
+uncorrelated scalar subquery that decorrelation cannot prove single-row, or a
+Filter comparing against an aggregate of its own grouped input). A producer
+executes nothing, so `optimize_portable` refuses it."""
+
+
+struct PortableProfile(Copyable, Movable):
+    """The portable profile a producer passes to `optimize_portable`
+    (komira-ai/komira#1094, §5.3). A required argument with no default, so a
+    caller states which pass set it wants.
+
+    Fields:
+        version: The profile version. `PORTABLE_PROFILE_V1` is the only one
+            this build implements; any other value is refused.
+    """
+
+    var version: Int
+
+    def __init__(out self, version: Int):
+        """A profile of `version` (checked when it is used, not here)."""
+        self.version = version
+
+
+def optimize_portable(
+    var plan: LogicalPlan,
+    config: OptimizerConfig,
+    profile: PortableProfile,
+) raises -> LogicalPlan:
+    """Run the driver's pass order under the portable profile.
+
+    The same function `optimize` runs, with step 20 (payload narrowing) off and
+    an empty scalar binding table: no value is folded from an execution, and a
+    plan that would need one is refused.
+
+    Args:
+        plan: The logical plan, views already resolved. Consumed.
+        config: The options; read only from this argument (`eager_agg` and
+            `semi_pushdown` are read by the passes).
+        profile: The portable profile; its version must be
+            `PORTABLE_PROFILE_V1`.
+
+    Returns:
+        The optimized logical plan.
+
+    Raises:
+        `PORTABLE_REFUSAL_UNKNOWN_PROFILE` for a profile version this build
+        does not implement; `PORTABLE_REFUSAL_NEEDS_EXECUTION` with the number
+        of sites when the plan needs an executed sub-plan; otherwise the first
+        pass's `Error`, unchanged.
+    """
+    if profile.version != PORTABLE_PROFILE_V1:
+        raise Error(
+            PORTABLE_REFUSAL_UNKNOWN_PROFILE + ": version "
+            + String(profile.version) + ", this build implements "
+            + String(PORTABLE_PROFILE_V1)
+        )
+    var deps = ScalarDepTable()
+    var out = _run_pass_order(plan^, config, deps, False)
+    if deps.has_requests():
+        raise Error(
+            PORTABLE_REFUSAL_NEEDS_EXECUTION + ": "
+            + String(deps.num_requests())
+            + " scalar site(s) need an executed sub-plan"
+        )
+    return out^
