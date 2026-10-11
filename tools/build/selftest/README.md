@@ -45,7 +45,7 @@ given `--nested`, which the guard refuses.
 | [`analysis_refusals_gcp_client`](analysis_refusals_gcp_client.zig) | mojo_gcp_client's 10 analysis refusals | the roots-or-methods check deleted |
 | [`analysis_refusals_proto`](analysis_refusals_proto.zig) | a `bundle_only` entry outside the closure | the membership check deleted |
 | [`analysis_refusals_readme`](analysis_refusals_readme.zig) | no `[readme]` on a base library; the `readme` keyword's load refusals | the bool check removed |
-| [`analysis_refusals_lint`](analysis_refusals_lint.zig) | the five files-xor refusals of the lints; in a scratch tree, a matrix row naming a missing target or an incompatible test | one xor `fail()` deleted; the matrix's deps made soft |
+| [`analysis_refusals_lint`](analysis_refusals_lint.zig) | the five files-xor refusals of the lints; a retired_names `unchecked` entry naming no file; in a scratch tree, a matrix row naming a missing target or an incompatible test | one xor `fail()` deleted; the `unchecked` membership `fail()` deleted; the matrix's deps made soft |
 | [`analysis_refusals_python_oracle`](analysis_refusals_python_oracle.zig) | inputs built outside third_party/ | the owner check dropped |
 | [`analysis_refusals_node`](analysis_refusals_node.zig) | the Node.js rules' 8 analysis refusals | the staged-twice check deleted |
 | [`analysis_refusals_rust`](analysis_refusals_rust.zig) | rust_library's test_srcs refusals | the `.rs` check deleted |

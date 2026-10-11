@@ -182,16 +182,23 @@ _TESTS_LINTS = [
 # Retired names: a package or type that was renamed may appear only in a
 # dated history note (a line carrying a YYYY-MM-DD date). The tree is every
 # file of the cell (`:doc_tree`) plus the dotfiles a glob skips. Each name is
-# spelt in parts so this file does not hold it.
+# spelt in parts so this file does not hold it. `unchecked` leaves out a
+# fixture that must hold a retired name and cannot carry a date.
 [retired_names(
     name = "retired_names",
     names = [
         "kci" + "_contract",
         "kci" + "_stage" + "_graph",
         "Stage" + "Graph",
+        # The package of the superseded one-library plan for komira's C
+        # (docs/design/native_packaging.md).
+        "komira" + "_native",
     ],
     srcs = [".buckconfig.local.example"] + glob([".github/**"]),
     tree = ":doc_tree",
+    # The metadata of the release-order fixture that requires that package
+    # (tools/build/package/BUCK), so that its exemption cannot come back.
+    unchecked = ["tools/build/package/release_order/requires_" + "komira" + "_native.json"],
 ) for _ in _TESTS_LINTS[:1]]
 
 # Test welding (tools/build/lint/test_weld.bzl): every tests/test_*.mojo under
