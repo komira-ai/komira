@@ -98,6 +98,14 @@ def _apply_selectivity_ceil(card: Int, sel: Float64) -> Int:
     if card < 1:
         return 1
     var raw = Float64(card) * sel
+    # A product at or above `Float64(card)` keeps every row (the selectivity
+    # is clamped to at most 1.0). Returning `card` here is exact where
+    # `Float64(card)` rounds (card > 2^53), and it keeps the conversion below
+    # in range: near `Int.MAX`, `Float64(card)` is 2^63, which `Int` cannot
+    # hold. That conversion is undefined (x86-64 hardware answers Int.MIN,
+    # which the clamp below turned into 1; arm64 saturates to Int.MAX).
+    if raw >= Float64(card):
+        return card
     var floored = Int(raw)
     if floored < 1:
         return 1

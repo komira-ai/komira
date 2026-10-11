@@ -194,7 +194,7 @@ src/komira_scan_resolver	9596	-
 src/komira_scan_source	6318	-
 src/komira_sdk	9904	-
 src/komira_search	10000	-
-src/komira_search_catalog	8359	-
+src/komira_search_catalog	10000	-
 src/komira_search_scan	8728	-
 src/komira_secret_env	9722	-
 src/komira_secret_registry	9846	8125
