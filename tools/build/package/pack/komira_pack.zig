@@ -6,6 +6,7 @@
 //!   komira_pack conda ...           (a `.conda` conda package; see below)
 //!   komira_pack conda-meta ...      (the metapackage: pins the members whose manifests it is given, no file)
 //!   komira_pack conda-check ...     (reads a package directory back and refuses what is wrong; both kinds)
+//!   komira_pack conda-expect ...    (a fixture's expected outcome: refused with a reason, or a package with requirements)
 //!   komira_pack conda-index --out-dir <dir> --package-manifest <m.json>...
 //!                                   (a local channel: the packages and each subdir's repodata.json)
 //!   komira_pack oci --bundle <dir> --name <n> --version <v> --repo <r>
@@ -70,6 +71,7 @@ const cmdTar = pack_tar_oci.cmdTar;
 const cmdConda = pack_conda.cmdConda;
 const cmdCondaMeta = pack_conda_meta.cmdCondaMeta;
 const cmdCondaCheck = pack_conda_check.cmdCondaCheck;
+const cmdCondaExpect = pack_conda_check.cmdCondaExpect;
 const cmdCondaIndex = pack_conda_index.cmdCondaIndex;
 
 pub fn main() !void {
@@ -77,7 +79,7 @@ pub fn main() !void {
     defer arena.deinit();
     const alloc = arena.allocator();
     const argv = try std.process.argsAlloc(alloc);
-    if (argv.len < 2) fail("usage: komira_pack tar|oci|conda|conda-meta|conda-check|conda-index --flag value ...", .{});
+    if (argv.len < 2) fail("usage: komira_pack tar|oci|conda|conda-meta|conda-check|conda-expect|conda-index --flag value ...", .{});
     const a = try parseArgs(alloc, argv);
     if (std.mem.eql(u8, argv[1], "tar")) {
         try cmdTar(alloc, a);
@@ -89,6 +91,8 @@ pub fn main() !void {
         try cmdCondaMeta(alloc, a);
     } else if (std.mem.eql(u8, argv[1], "conda-check")) {
         try cmdCondaCheck(alloc, a);
+    } else if (std.mem.eql(u8, argv[1], "conda-expect")) {
+        try cmdCondaExpect(alloc, a);
     } else if (std.mem.eql(u8, argv[1], "conda-index")) {
         try cmdCondaIndex(alloc, a);
     } else fail("unknown command {s}", .{argv[1]});

@@ -69,6 +69,13 @@ mojo_library(
   refused; one that depends on the library is a cycle buck2 refuses
   ([`tests//functional/test_deps`](../tests/functional/test_deps/BUCK),
   [`tests//negative/test_deps`](../tests/negative/test_deps/BUCK)).
+- **`dlopen`** (optional) lists the sonames the library opens at run time
+  (`OwnedDLHandle`), each a row of
+  [`system_libs.bzl`](../package/system_libs.bzl) ([`dlopen.bzl`](dlopen.bzl)).
+  Only its conda package reads it: the package requires each row's
+  conda-forge package, and the packer refuses it unless the sources open
+  exactly those sonames
+  ([Conda packages](../../../packaging/conda/README.md#a-library-that-opens-a-shared-library-at-run-time)).
 
 Output layout of a library `L` with import name `I`:
 
