@@ -103,7 +103,8 @@ mojo_library(
         "tests/test_kci_deploy_faults.mojo",
         # a failed DEPLOY step stops the run: a PUBLISH into cell a, then
         # DEPLOY steps into a and b, one FakeCloud each; a fault in a or b,
-        # set_hash emptied, --rollback-on-failure refused before anything
+        # or a failed PUBLISH into a, set_hash emptied, --rollback-on-failure
+        # refused before anything
         "tests/test_kci_deploy_stop.mojo",
         # a PUBLISH step into a cell end to end: a push to the fake cell's
         # registry then NOOP, a read-back mismatch INDETERMINATE, --plan sends

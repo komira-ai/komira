@@ -44,6 +44,11 @@
 #      DEPLOY step into `a` ends FAILED: the run is PARTIAL, exit 6 (not
 #      FAILED, exit 4: the upload stands), `b` and `c` never asked for,
 #      `set_hash` empty.
+#   9. The PUBLISH step into cell `a` ends FAILED (it goes through the
+#      `CellDeploys` seam, I3 of deploy_step.md): the run stops there the
+#      same way, exit 4, no DEPLOY step asked for, no call on any fake, one
+#      row, `set_hash` empty, and the channel seam (`Steps.publish`) never
+#      called.
 #
 # The step reads `resources` relative to the directory kci runs in, so each
 # case changes into its own directory first.
@@ -544,6 +549,36 @@ def test_a_failed_deploy_after_an_upload_is_partial() raises:
     assert_equal(len(deploys.asked), 1)
     assert_equal(deploys.b.cloud.mutations(), 0)
     assert_equal(deploys.c.cloud.mutations(), 0)
+    _no_row(r, String("apply-b"))
+    _no_row(r, String("apply-c"))
+
+
+def test_a_failed_publish_into_a_cell_stops_the_run() raises:
+    """Catches: the step loop going on after a PUBLISH step into a cell
+    that did not pass (a DEPLOY step asked for, a fake records calls, a row
+    after it); the failed run handing its set on; the PUBLISH into a cell
+    sent to the channel seam (`steps.calls` not empty)."""
+    var d = _root(String("publish-failed"))
+    var m = _machine(d)
+    var steps = Steps()
+    var deploys = Cells(FakeCloud(), FakeCloud())
+    deploys.push_outcome = String("FAILED")
+    var rec = CliRecorder.memory(String(""))
+    var rc = kci_main_with(_run(m, d + String("/summary.md")), steps, deploys, rec)
+    var r = _last(rec)
+    assert_equal(rc, 4, r.error.message)
+    assert_equal(r.outcome, String("FAILED"))
+    assert_equal(r.set_hash, String(""), "a failed run hands on no set")
+    assert_equal(len(r.steps), 1, "the PUBLISH step's row, nothing after")
+    assert_equal(r.steps[0].name, String("push-a"))
+    assert_equal(r.steps[0].outcome, String("FAILED"))
+    assert_equal(len(deploys.pushed), 1)
+    assert_equal(len(steps.calls), 0, "a PUBLISH into a cell never reaches the channel seam")
+    assert_equal(len(deploys.asked), 0, "no DEPLOY step runs after a failed PUBLISH into a cell")
+    assert_equal(deploys.a.cloud.mutations(), 0)
+    assert_equal(deploys.b.cloud.mutations(), 0)
+    assert_equal(deploys.c.cloud.mutations(), 0)
+    _no_row(r, String("apply-a"))
     _no_row(r, String("apply-b"))
     _no_row(r, String("apply-c"))
 
