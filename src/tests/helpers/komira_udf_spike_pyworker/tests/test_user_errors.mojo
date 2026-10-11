@@ -22,15 +22,24 @@
 #   - an exception whose str() raises, whose __str__ returns a non-str, one
 #     derived from BaseException only, and one whose message is not valid
 #     UTF-8 (a lone surrogate): ERR_RAISED at its row, with a message naming
-#     the exception type, the surrogate escaped (a message builder that
-#     raises, or a worker that replaces what it cannot encode, losing the
-#     user's text).
+#     the exception type, the surrogate escaped in the message and in the
+#     trace (a message builder that raises, or a worker that replaces what
+#     it cannot encode, losing the user's text);
+#   - a wrong value whose type's name, or whose repr, is not valid UTF-8,
+#     and one whose type's __name__ raises: ERR_RETURN_TYPE at its row,
+#     with the name and repr escaped, or "?" for the name;
+#   - a list result that says it is one item shorter than it yields:
+#     ERR_RETURN_TYPE at the row past its length; a list result whose
+#     values' __index__ raises: ERR_RAISED at row 0; a result that is no
+#     list: ERR_RETURN_TYPE, row -1.
 #
 # Mutants planted: the adapter as it was before (only TypeError, ValueError
 # and OverflowError caught around a conversion; the exception's text taken
 # with str() unguarded; the message not made encodable; a numpy result
-# converted outside the guard): red on every case but bad_bool and
-# raise_base, which pin behaviour that held already.
+# converted outside the guard): red on every case of the first version of
+# this file but bad_bool and raise_base, which pin behaviour that held
+# already. The cases after raise_surrogate were added for the survivors of
+# the pull request's sweep of the adapter's changed lines.
 
 from std.testing import assert_equal, assert_true
 
@@ -82,10 +91,11 @@ def call_once(mut rt: UdfRuntime, spec: UdfSpec, args: Batch) raises -> CallResu
 
 def user_error(
     mut rt: UdfRuntime, shape: UInt32, entry: String, type_id: Int, want_status: String, want_row: Int64,
-    text: String, file: String = "udf_fixtures.py",
+    text: String, file: String = "udf_fixtures.py", trace_text: String = "",
 ) raises -> String:
     """"" when the call fails as expected, else why not. Every case runs, so
-    a red build names each case that fails."""
+    a red build names each case that fails. `trace_text`: also in the
+    trace."""
     var spec = spec1(shape, entry, type_id)
     var r = call_once(rt, spec, two_rows(type_id))
     var at = entry + ": " + String(r.outcome)
@@ -99,6 +109,8 @@ def user_error(
         return at + ": a host fault"
     if want_status == "ERR_RAISED" and file not in r.outcome.trace:
         return at + ": the trace does not name the user's file: " + r.outcome.trace
+    if trace_text not in r.outcome.trace:
+        return at + ": expected '" + trace_text + "' in the trace: " + r.outcome.trace
     return ""
 
 
@@ -124,8 +136,20 @@ def main() raises:
         rt, row, "udf_fixtures:raise_base", i64, "ERR_RAISED", 0, "_NotAnException: raise_base: a BaseException"
     ))
     why.append(user_error(
-        rt, row, "udf_fixtures:raise_surrogate", i64, "ERR_RAISED", 0, "ValueError: raise_surrogate: \\udc80"
+        rt, row, "udf_fixtures:raise_surrogate", i64, "ERR_RAISED", 0, "ValueError: raise_surrogate: \\udc80",
+        trace_text="ValueError: raise_surrogate: \\udc80",
     ))
+    why.append(user_error(rt, row, "udf_fixtures:bad_type_name", i64, "ERR_RETURN_TYPE", 0, "row 0: _Bad\\udc80Type <"))
+    why.append(user_error(
+        rt, row, "udf_fixtures:bad_repr_surrogate", i64, "ERR_RETURN_TYPE", 0,
+        "row 0: _SurrogateRepr \\udc80 repr is not int64",
+    ))
+    why.append(user_error(
+        rt, row, "udf_fixtures:bad_type_name_raises", i64, "ERR_RETURN_TYPE", 0, "row 0: ? <udf_fixtures._NoName object"
+    ))
+    why.append(user_error(rt, col, "udf_fixtures:len_short", i64, "ERR_RETURN_TYPE", 1, "row 1: int 2 is not int64"))
+    why.append(user_error(rt, col, "udf_fixtures:bad_index_list", i64, "ERR_RAISED", 0, "RuntimeError: _BadInt: no int"))
+    why.append(user_error(rt, col, "udf_fixtures:not_a_list", i64, "ERR_RETURN_TYPE", -1, "the result is a int, not a list"))
 
     var failed = String("")
     for w in why:

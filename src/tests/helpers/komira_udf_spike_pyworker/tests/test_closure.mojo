@@ -21,9 +21,11 @@
 #     runtime starts its zygote (section 5.2), it forks with one thread.
 #     Unlimited (pyworker_zygote_threads.so, the counterfactual), numpy's
 #     BLAS pool is running at the fork (more than one thread when the action
-#     has more than one CPU), and CPython 3.13 raises no warning for it: the
-#     warning cannot be relied on to see native threads, so the limit is
-#     what keeps the fork single-threaded (pinned, so a change shows).
+#     has more than one CPU). CPython 3.13's DeprecationWarning for a fork
+#     with threads alive came in about 1 of 70 runs on the farm and not in
+#     the others, so it is logged, not asserted: the warning cannot be
+#     relied on to see native threads, and the limit is what keeps the fork
+#     single-threaded.
 #
 # Mutants planted: proxy_runtime.c remote_udf sending LOAD to every forked
 # worker as well (each deserializes its own model): red (a forked worker's
@@ -101,6 +103,5 @@ def main() raises:
     print("native thread pools unlimited:", fline, "cpus", num(r, "cpus"))
     if num(r, "cpus") > 1:
         assert_true(fork_threads(fline) > 1, "numpy's BLAS threads run at the fork: " + fline)
-    assert_true("warning: none" in fline, "os.fork raised a warning: " + fline)
     # Not closed here: dropping the Driver shuts the runtime down.
     print("test_closure: ok")

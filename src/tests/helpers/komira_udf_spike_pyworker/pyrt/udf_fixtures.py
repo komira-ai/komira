@@ -299,6 +299,62 @@ def raise_surrogate(x: int) -> int:
     raise ValueError("raise_surrogate: \udc80")
 
 
+class _SurrogateNameMeta(type):
+    @property
+    def __name__(cls):
+        return "_Bad\udc80Type"
+
+
+class _SurrogateName(metaclass=_SurrogateNameMeta):
+    """A wrong value (no int) whose type's __name__ is not valid UTF-8 (a
+    class statement cannot name it so: the interpreter encodes that name)."""
+
+
+def bad_type_name(x: int) -> int:
+    return _SurrogateName()
+
+
+class _SurrogateRepr:
+    """A wrong value (no int) whose repr is not valid UTF-8."""
+
+    def __repr__(self):
+        return "\udc80 repr"
+
+
+def bad_repr_surrogate(x: int) -> int:
+    return _SurrogateRepr()
+
+
+class _NoNameMeta(type):
+    @property
+    def __name__(cls):
+        raise RuntimeError("_NoNameMeta: no name")
+
+
+class _NoName(metaclass=_NoNameMeta):
+    """A wrong value (no int) whose type's __name__ raises."""
+
+
+def bad_type_name_raises(x: int) -> int:
+    return _NoName()
+
+
+class _LenShort(list):
+    """Says it holds one item fewer than it yields."""
+
+    def __len__(self):
+        return list.__len__(self) - 1
+
+
+def len_short(x: list[int]) -> list[int]:
+    return _LenShort(x)
+
+
+def bad_index_list(x: list[int]) -> list[int]:
+    """A list result whose values' __index__ raises RuntimeError."""
+    return [_BadInt() for _ in x]
+
+
 def allocated_blocks(x: int) -> int:
     """The interpreter's allocated memory blocks when this row runs: what
     the previous calls left behind shows here."""
