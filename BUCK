@@ -130,7 +130,7 @@ _TESTS_LINTS = [
 ) for _ in _TESTS_LINTS[:1]]
 
 # The greens of the tests cell that no derived unit builds: the pull-request
-# check builds `//...` and `tests//functional/...` (release/ci/derive_checks.py),
+# check builds `//...` and `tests//functional/...` (//tools/build/ci:derive_checks),
 # so a target of tests//negative or tests//src that must build, beside the
 # planted defects it serves, is named here, through its package's
 # target_suite (a package's sub-targets need one too, and a suite in the same

@@ -5,7 +5,8 @@
 `graph`: the questions the mapping asks of the repository (`Graph`) and the
 answer to each from buck2 and git (`BuckGraph`).
 `plan`: the mapping itself, a pure function over a `Graph`. `units`: the
-answer in kci's protocol. `report`: text and JSON. `process`: one process, its
+answer in kci's protocol. `report`: text and JSON. `derive`: the derived
+checks, the answer of //tools/build/ci:derive_checks. `process`: one process, its
 two streams captured.
 
 The mapping never under-approximates: a file it cannot map widens the answer
