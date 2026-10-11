@@ -37,7 +37,7 @@ load(
 )
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "capped_prefix", "define_args", "mem_cap_script", "memory_cap")
 load(":helpers.bzl", "HELPER_ATTRS", "helper_files")
-load(":readme.bzl", "readme_kwargs")
+load(":readme.bzl", "readme_gate", "readme_kwargs")
 load(":run_check.bzl", "run_check_validation")
 load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_prefix", "with_test_limit")
 
@@ -416,7 +416,7 @@ def _library_impl(ctx):
 
     # Whether the conda package is gated by a test: the test_srcs only. A
     # README's examples are not counted, since analysis cannot tell whether
-    # it holds any (see _readme_gate).
+    # it holds any (see readme.bzl, readme_gate).
     has_tests = len(markers) > 0
     conda_name, conda_refusal = _conda_facts(ctx, import_name, c_link, has_tests)
 
@@ -424,7 +424,7 @@ def _library_impl(ctx):
     # which installs it at share/doc/<conda name>/README.md) refuses relative
     # links: the installed copy has no neighbours.
     ships = conda_name != None and conda_refusal == None
-    readme_marker = _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args, ships)
+    readme_marker = readme_gate(ctx, tc, import_name, ungated_tset, _link_tail(c_link), env_args, ships, _readme_test)
     if readme_marker != None:
         if "readme" in test_subtargets:
             fail("{}: a test_srcs file is named `readme.mojo`; `[tests][readme]` is the README's examples".format(ctx.label))
@@ -486,74 +486,9 @@ def _library_impl(ctx):
 
 # ---- README examples ----------------------------------------------------------
 #
-# A library whose package holds a README.md runs the README's ```mojo
-# examples as one more welded test, `[tests][readme]`: the docs cannot rot.
-# The macro passes the README (declaring is gating: a README is declared by
-# existing; a library of a several-library package can refuse it with
-# `readme = False`, readme.bzl) and the tool, //tools/build/readme_examples:tool, whose
-# `generate` writes one program per example, `readme_<import name>_<line>.mojo`
-# (and the runner of them all, which coverage builds), into a directory, and
-# the README line of each example to `examples`. The convention (what an
-# example is, its two modes, hidden lines, the refusals) is in that package
-# and in README.md here.
-#
-# Whether a README holds an example is in its bytes, which analysis cannot
-# read, so a dynamic action reads `examples`: for each example it compiles
-# that example's program alone against the UNGATED package and runs it
-# through gate_runner.sh exactly as a `test_srcs` entry, labelled
-# `<target>:README.md:<line>`, and the marker joins their markers; with none
-# it compiles and runs nothing, and the marker records that no example
-# exists (never a PASS line). A refused README (an info string such as
-# `mojo skip`, a stray hidden-lines comment) fails `generate`, naming
-# README.md:<line>.
-
-def _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args, ships):
-    """(marker, generated directory, examples file) of the README's
-    examples, or None without a README. `ships`: the library's conda
-    package installs the README, so a relative link in it is refused."""
-    readme = ctx.attrs.readme
-    if readme == None:
-        if ctx.attrs.readme_tool != None:
-            fail("{}: readme_tool is set and readme is not".format(ctx.label))
-        return None
-    if ctx.attrs.readme_tool == None:
-        fail("{}: readme is set and readme_tool is not; the mojo_library macro sets both".format(ctx.label))
-    src = ctx.actions.declare_output("tests/readme/src", dir = True)
-    examples = ctx.actions.declare_output("tests/readme/examples")
-    ctx.actions.run(
-        cmd_args(
-            ctx.attrs.readme_tool[RunInfo],
-            "generate",
-            "--readme",
-            readme,
-            "--display",
-            _join(ctx.label.package, readme.short_path),
-            "--package",
-            import_name,
-            "--links",
-            "refuse" if ships else "allow",
-            "--out-dir",
-            src.as_output(),
-            "--examples",
-            examples.as_output(),
-        ),
-        category = "mojo_readme_generate",
-    )
-    marker = ctx.actions.declare_output("tests/readme.passed")
-    ctx.actions.dynamic_output_new(_readme_test(
-        label = ctx.label,
-        gate_label = "{}:{}".format(ctx.label.raw_target(), readme.short_path),
-        examples = examples,
-        package = import_name,
-        src = src,
-        marker = marker.as_output(),
-        tc = tc,
-        closure = ungated_tset,
-        opt_level = ctx.attrs.test_optimization_level,
-        link_tail = _link_tail(c_link),
-        env_args = env_args,
-    ))
-    return marker, src, examples
+# readme.bzl's readme_gate declares the README's `generate` action and this
+# dynamic action, which compiles and runs each example (the convention and
+# the gate are described there).
 
 def _readme_test_impl(actions, label, gate_label, examples, package, src, marker, tc, closure, opt_level, link_tail, env_args):
     lines = [x.strip() for x in examples.read_string().split("\n") if x.strip()]
@@ -630,7 +565,7 @@ mojo_library_rule = rule(
         # Environment for every gated test of this library.
         "test_env": attrs.dict(attrs.string(), attrs.string(), default = {}),
         # The package's README.md and the tool that runs its examples; the
-        # macro sets both, or neither (readme.bzl, _readme_gate). No default tool: the tool is
+        # macro sets both, or neither (readme.bzl, readme_gate). No default tool: the tool is
         # itself built from a mojo_library, so a default would be a cycle.
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),

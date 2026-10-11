@@ -2,7 +2,7 @@
 
 A library takes its directory's README.md: the README's ```mojo examples run
 as its welded `[tests][readme]` test and its conda package installs the file
-(defs.bzl, _readme_gate; tools/build/package/conda.bzl). A BUCK file that
+(readme_gate below; tools/build/package/conda.bzl). A BUCK file that
 declares one library needs to say nothing. One that declares several says
 which of them the README is about, with the macro's `readme` keyword:
 
@@ -42,3 +42,77 @@ def readme_kwargs(kwargs):
         return
     kwargs["readme"] = found[0]
     kwargs["readme_tool"] = _README_TOOL
+
+# ---- The gate -----------------------------------------------------------------
+#
+# A library whose package holds a README.md runs the README's ```mojo
+# examples as one more welded test, `[tests][readme]`: the docs cannot rot.
+# The macro passes the README (declaring is gating: a README is declared by
+# existing; a library of a several-library package can refuse it with
+# `readme = False`, readme_kwargs above) and the tool, //tools/build/readme_examples:tool, whose
+# `generate` writes one program per example, `readme_<import name>_<line>.mojo`
+# (and the runner of them all, which coverage builds), into a directory, and
+# the README line of each example to `examples`. The convention (what an
+# example is, its two modes, hidden lines, the refusals) is in that package
+# and in README.md here.
+#
+# Whether a README holds an example is in its bytes, which analysis cannot
+# read, so a dynamic action reads `examples`: for each example it compiles
+# that example's program alone against the UNGATED package and runs it
+# through gate_runner.sh exactly as a `test_srcs` entry, labelled
+# `<target>:README.md:<line>`, and the marker joins their markers; with none
+# it compiles and runs nothing, and the marker records that no example
+# exists (never a PASS line). A refused README (an info string such as
+# `mojo skip`, a stray hidden-lines comment) fails `generate`, naming
+# README.md:<line>.
+
+def readme_gate(ctx, tc, import_name, ungated_tset, link_tail, env_args, ships, readme_test):
+    """(marker, generated directory, examples file) of the README's
+    examples, or None without a README. `ships`: the library's conda
+    package installs the README, so a relative link in it is refused.
+    `link_tail`: the link arguments of the library's C closure (defs.bzl's
+    _link_tail); `readme_test`: defs.bzl's dynamic action that builds and
+    runs each example (it needs defs.bzl's _build_executable)."""
+    readme = ctx.attrs.readme
+    if readme == None:
+        if ctx.attrs.readme_tool != None:
+            fail("{}: readme_tool is set and readme is not".format(ctx.label))
+        return None
+    if ctx.attrs.readme_tool == None:
+        fail("{}: readme is set and readme_tool is not; the mojo_library macro sets both".format(ctx.label))
+    src = ctx.actions.declare_output("tests/readme/src", dir = True)
+    examples = ctx.actions.declare_output("tests/readme/examples")
+    ctx.actions.run(
+        cmd_args(
+            ctx.attrs.readme_tool[RunInfo],
+            "generate",
+            "--readme",
+            readme,
+            "--display",
+            (ctx.label.package + "/" + readme.short_path) if ctx.label.package else readme.short_path,
+            "--package",
+            import_name,
+            "--links",
+            "refuse" if ships else "allow",
+            "--out-dir",
+            src.as_output(),
+            "--examples",
+            examples.as_output(),
+        ),
+        category = "mojo_readme_generate",
+    )
+    marker = ctx.actions.declare_output("tests/readme.passed")
+    ctx.actions.dynamic_output_new(readme_test(
+        label = ctx.label,
+        gate_label = "{}:{}".format(ctx.label.raw_target(), readme.short_path),
+        examples = examples,
+        package = import_name,
+        src = src,
+        marker = marker.as_output(),
+        tc = tc,
+        closure = ungated_tset,
+        opt_level = ctx.attrs.test_optimization_level,
+        link_tail = link_tail,
+        env_args = env_args,
+    ))
+    return marker, src, examples

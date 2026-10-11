@@ -9,7 +9,7 @@
 #   generated for the welded `[tests][readme]` test of the same README,
 #   read from that gate itself (komira_encoding's `[tests][readme][file]`,
 #   its README.md, and `[tests][readme][generated]`, what
-#   tools/build/mojo/defs.bzl `_readme_gate` made of it), so the gate's
+#   tools/build/mojo/readme.bzl `readme_gate` made of it), so the gate's
 #   arguments are stated in one place and a change to them is red here; the
 #   runner named `readme_<import>.mojo`, never `<import>.mojo`, and each
 #   example's `readme_<import>_<line>.mojo`. A change to any of the rest is

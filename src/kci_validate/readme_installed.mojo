@@ -10,7 +10,7 @@
 # they installed.
 #
 # The programs are the ones SOURCE mode generates for the welded
-# `[tests][readme]` test (tools/build/mojo/defs.bzl `_readme_gate`): one per
+# `[tests][readme]` test (tools/build/mojo/readme.bzl `readme_gate`): one per
 # example, `readme_<import name>_<line>.mojo`, and the runner that imports
 # and runs them all, `readme_<import name>.mojo`. Both modes run the same
 # program, the Zig tool //tools/build/readme_examples:tool, with the same

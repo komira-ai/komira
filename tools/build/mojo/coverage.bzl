@@ -439,7 +439,7 @@ def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, en
 
 def coverage_readme(ctx, tc, build, readme, closure, link_tail, src_dir, import_name, root, env_args, bins, runs):
     """With coverage, the README's examples as a test (`readme`, the
-    (marker, generated directory, examples) of defs.bzl's _readme_gate): the
+    (marker, generated directory, examples) of readme.bzl's readme_gate): the
     directory's runner, `readme_<import>.mojo`, which imports each example's
     program beside it and runs them all (with no example it prints that it
     ran nothing), built at -O0 with line tables against `closure` (the
