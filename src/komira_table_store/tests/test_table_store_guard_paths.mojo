@@ -15,7 +15,8 @@
 #   * commit_index_shard is refused unless enabled and for a negative DML-LSN;
 #     enabled, it writes a v3 chunk whose rows are visible at the DML-LSN and
 #     not one below, on the writing handle and on a handle that replays the
-#     WAL (a snapshot above the tail ends the fold at the first missing slot).
+#     WAL (a snapshot above the tail ends the fold at the first missing slot),
+#     and through register_index's catch-up fold of an already-folded v3 chunk.
 #   * the scan overlay drops buffered keys below lo, at or above hi, and
 #     buffered tombstones.
 #   * the async commit path refuses a non-zero writer-lease epoch (either one).
@@ -232,6 +233,24 @@ def test_commit_index_shard_v3() raises:
     assert_equal(replayed.folded_seq(), Int64(0), "the fold stopped at the tail")
 
 
+def test_register_index_catch_up_folds_v3_at_dml_lsn() raises:
+    print("[guards] register_index catch-up folds a v3 chunk at its DML-LSN")
+    var backing = SharedInMemoryConditionalStore()
+    var ts = _open(backing, "g/v3cu")
+    var t = ts.begin()
+    t.insert(_ik(9, "a"), _b("ia"))
+    var res = ts.commit_index_shard(t^, Int64(7), True)
+    assert_equal(res.commit_lsn, Int64(0), "the WAL slot is 0")
+    # Lineage 9 was not registered when slot 0 folded; the catch-up re-folds it
+    # at the chunk's stamp (7), not at its WAL slot (0).
+    ts.register_index(Int32(9))
+    var at6 = ts.index_scan_visible(Txn(Int64(6)), Int32(9), _ik(9, ""), _ik(10, ""))
+    assert_equal(len(at6), 0, "catch-up: invisible at 6")
+    var at7 = ts.index_scan_visible(Txn(Int64(7)), Int32(9), _ik(9, ""), _ik(10, ""))
+    assert_equal(len(at7), 1, "catch-up: visible at 7")
+    assert_true(bytes_eq(at7[0].row, _b("ia")), "catch-up row value")
+
+
 def test_scan_overlay_bounds() raises:
     print("[guards] scan overlay drops buffered keys out of range and tombstones")
     var ts = _open(SharedInMemoryConditionalStore(), "g/scan")
@@ -281,6 +300,7 @@ def main() raises:
     test_async_op_state_guards()
     test_register_index_catch_up_and_idempotent()
     test_commit_index_shard_v3()
+    test_register_index_catch_up_folds_v3_at_dml_lsn()
     test_scan_overlay_bounds()
     test_async_refuses_nonzero_lease_epoch()
     print("ALL table store guard-path tests PASSED")

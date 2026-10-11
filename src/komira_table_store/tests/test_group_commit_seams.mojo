@@ -16,8 +16,9 @@
 #   * estimate_bytes sums key + row + 9 per write.
 #   * encode_group_batch: a member whose OCC window reaches a chunk that is not
 #     there raises the RETRYABLE-tagged in-flight error naming the seq.
-#   * classify_append_error: 412 / precondition / If-None-Match / If-Match are a
-#     lost slot, anything else an error.
+#   * classify_append_error: 412 / precondition / If-None-Match are a lost
+#     slot, anything else an error. "If-Match" is not asserted
+#     (komira-ai/komira#1402).
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -233,7 +234,8 @@ def test_classify_append_error() raises:
     lost.append(String("HTTP 412"))
     lost.append(String("precondition failed"))
     lost.append(String("If-None-Match: *"))
-    lost.append(String("If-Match mismatch"))
+    # "If-Match" is deliberately not asserted either way: the appender matches
+    # it and the async classifier (LOW-2) does not (komira-ai/komira#1402).
     for i in range(len(lost)):
         assert_equal(
             Int(app.classify_append_error(lost[i])), Int(APPEND_LOST_SLOT), lost[i]

@@ -23,12 +23,14 @@
 # What each test proves (the planted mutant for each is in the PR body):
 #   * replay retries a transient chunk read and fails on a fatal one.
 #   * the OCC scan's failed chunk read is re-driven (sync and async), not
-#     reported as an error or a conflict.
+#     reported as an error or a conflict. The injected failure is deliberately
+#     NOT torn-create wording: the OCC scans tag ANY chunk-read error RETRYABLE,
+#     so a non-torn read failure is retried by design, not only the torn window.
 #   * a non-retryable head-listing failure ends the sync commit with it.
 #   * async create-CAS: a raised 412 re-runs and commits; a raised or ERR
 #     transport failure from start or poll errors the op with its text; a 412
 #     deferred to take re-runs and commits; 412s past the bound error the op
-#     as retryable-exhausted.
+#     as retryable-exhausted after exactly 256 create-CAS starts.
 #   * the appender maps a 412 deferred to take to a lost slot.
 # =============================================================================
 
@@ -432,9 +434,28 @@ def test_async_start_err_transport_errors() raises:
     )
 
 
+def _left(backing: SharedInMemoryConditionalStore, name: String) raises -> Int:
+    """The firings still armed on marker `name` (0 once it is consumed)."""
+    var spec: List[UInt8]
+    try:
+        spec = backing.get(_marker(name))
+    except e:
+        _ = e
+        return 0
+    return Int(spec[1]) + 256 * Int(spec[2])
+
+
 def test_async_412_past_the_bound_is_exhausted() raises:
     print("[faults] async start: 412 on every attempt ends as retryable-exhausted")
-    var op = _async_with_start_fault(_MODE_ERR_412, 300)
+    var reactor = _new_reactor()
+    var backing = SharedInMemoryConditionalStore()
+    var ts = _open(backing)
+    var op = _async_op(ts.begin().snapshot_lsn, "k", "v")
+    _arm(backing, "start", 0, 300, _MODE_ERR_412)
+    _ = commit_async_start[_FaultStore, NoopSink](ts, op, reactor)
+    # Exactly 256 create-CAS starts ran before the bound ended the op: the
+    # message alone names the constant, not the number of attempts made.
+    assert_equal(_left(backing, "start"), 300 - 256, "256 attempts, not 255 or 257")
     assert_true(op.is_error(), "errored")
     assert_true(is_commit_retryable(op.err_text()), op.err_text())
     assert_true(op.err_text().find("commit_async exhausted 256") >= 0, op.err_text())
