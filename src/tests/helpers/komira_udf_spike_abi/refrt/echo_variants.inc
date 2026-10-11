@@ -67,6 +67,7 @@ static const struct {
     {"instance_refused", (enum variant_id)RT_INSTANCE_REFUSED},
     {"agg_open_refused_first", (enum variant_id)RT_AGG_OPEN_REFUSED_FIRST},
     {"agg_open_refused_second", (enum variant_id)RT_AGG_OPEN_REFUSED_SECOND},
+    {"one_live", (enum variant_id)RT_ONE_LIVE},
 };
 
 static const komira_udf_runtime TABLE_MAJOR_2 = {
@@ -150,8 +151,13 @@ const komira_udf_runtime* ECHO_INIT_VARIANT(const komira_udf_host* host, komira_
     fail(host, e, KOMIRA_UDF_ERR_INTERNAL, "KOMIRA_UDF_ECHO_VARIANT names no variant", -1);
     return NULL;
   }
+  if (id == RT_ONE_LIVE && one_live_up) {
+    fail(host, e, KOMIRA_UDF_ERR_INTERNAL, "one_live: a runtime is still up", -1);
+    return NULL;
+  }
   komira_udf_rt* r = new_rt(host, e, 0, id == V_ANY_MAJOR || id == V_ERROR_ON_OK_INIT);
   if (r == NULL) return NULL;
+  if (id == RT_ONE_LIVE) one_live_up = 1;
   r->variant = id;
   if (id == V_ERROR_ON_OK_INIT) /* the host releases an error filled on success too */
     fail(host, e, KOMIRA_UDF_ERR_INTERNAL, "error_on_ok_init: filled, then the table returned", -1);

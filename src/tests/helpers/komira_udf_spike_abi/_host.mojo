@@ -349,6 +349,10 @@ def _set_cpu(dst: Void):
     d[].device_id = -1
     d[].device_type = ARROW_DEVICE_CPU
     d[].sync_event = null_void()
+    # Arrow C Device: reserved must be zero; a runtime's `out` (the stream's
+    # get_next) arrives with whatever it held.
+    for i in range(3):
+        d[].reserved[i] = 0
 
 
 def device_struct(mut arena: _Arena, batch: Batch, hd: Word) -> Word:

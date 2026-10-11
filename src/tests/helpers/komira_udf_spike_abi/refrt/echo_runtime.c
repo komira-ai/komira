@@ -156,6 +156,10 @@ enum fixture_id {
 #define RT_INSTANCE_REFUSED 102
 #define RT_AGG_OPEN_REFUSED_FIRST 103
 #define RT_AGG_OPEN_REFUSED_SECOND 104
+#define RT_ONE_LIVE 105 /* one runtime at a time, as an embedded interpreter */
+
+/* one_live: whether a runtime of that variant is up (init to shutdown). */
+static int one_live_up;
 
 /* F_RAISE_ROW: the row its ERR_RAISED names, for an n-row batch. -1 is
  * legal ("not known"); n and -2 are outside the batch, a runtime bug. */
@@ -548,7 +552,8 @@ static int cancelled(const komira_udf_call* c) {
 
 /* An input on the device of design 4.4: CPU, device_id -1, no sync event. */
 static int on_cpu(const struct ArrowDeviceArray* d) {
-  return d->device_type == ARROW_DEVICE_CPU && d->device_id == -1 && d->sync_event == NULL;
+  return d->device_type == ARROW_DEVICE_CPU && d->device_id == -1 && d->sync_event == NULL &&
+         d->reserved[0] == 0 && d->reserved[1] == 0 && d->reserved[2] == 0; /* Arrow C Device: reserved is zero */
 }
 
 static int past_deadline(const komira_udf_rt* rt, const komira_udf_call* c) {
@@ -645,6 +650,16 @@ static void release_struct(struct ArrowArray* a) {
   }
   free(b);
   a->release = NULL;
+}
+
+/* table_out_on_error's release: frees the table once and leaves `release`
+ * set (a second call does nothing), so a host that keeps reading the slot
+ * after an error sees a table that looks unreleased. */
+static void release_struct_keeps_slot(struct ArrowArray* a) {
+  if (a->private_data == NULL) return;
+  release_struct(a);
+  a->private_data = NULL;
+  a->release = release_struct_keeps_slot;
 }
 
 /* A struct array of `n` rows whose `k` children the caller fills with
@@ -841,6 +856,7 @@ static int64_t echo_memory_report(komira_udf_context* c) {
 }
 
 static void echo_shutdown(komira_udf_rt* rt) {
+  if (rt->variant == RT_ONE_LIVE) one_live_up = 0;
   drop(rt->host, sizeof(*rt));
   free(rt);
 }

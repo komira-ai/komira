@@ -196,6 +196,8 @@ static int pull(komira_udf_frame* fr, struct ArrowDeviceArray* b) {
   memset(b, 0, sizeof(*b));
   b->array.release = unwritten;
   b->device_id = 77;
+  b->sync_event = &b->device_id; /* not NULL: the host must write it */
+  b->reserved[0] = b->reserved[1] = b->reserved[2] = 77; /* the host must zero them */
   int rc = fr->in.get_next(&fr->in, b);
   if (rc != 0 || b->array.release == unwritten) {
     b->array.release = NULL;
@@ -464,6 +466,7 @@ static int32_t next_table(komira_udf_frame* fr, struct ArrowDeviceArray* out, ko
       out->array.dictionary = &NOT_A_DICTIONARY;
       break;
     case TS_OUT_ON_ERROR:
+      out->array.release = release_struct_keeps_slot;
       fr->done = 1;
       return fail(h, e, KOMIRA_UDF_ERR_RAISED, "table_out_on_error: raised with out still set", -1);
     default:

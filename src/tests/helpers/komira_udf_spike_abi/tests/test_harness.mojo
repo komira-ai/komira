@@ -243,6 +243,23 @@ def _host_values() raises:
     rt.shutdown()
 
 
+def _open_and_drop() raises:
+    """Open the one_live variant and drop it without calling shutdown."""
+    _ = UdfRuntime.open(VARIANT)
+
+
+def _destructor_shuts_down() raises:
+    """A UdfRuntime dropped without shutdown is shut down by its destructor:
+    one_live refuses init while an earlier runtime of it is up (as an
+    embedded interpreter does), so the second open fails otherwise."""
+    _ = setenv("KOMIRA_UDF_ECHO_VARIANT", "one_live")
+    _open_and_drop()
+    var rt = UdfRuntime.open(VARIANT)  # UDF_RUNTIME_INIT ... a runtime is still up, if the first leaked
+    rt.shutdown()
+    var again = UdfRuntime.open(VARIANT)
+    again.shutdown()
+
+
 def _refusing_variants() raises:
     """The runner on a runtime that refuses open_context, open_instance, or
     its first or second agg_open: each case fails for that refusal, and the
@@ -547,4 +564,5 @@ def main() raises:
     _ok_drops_error_text()
     _host_values()
     _refusing_variants()
+    _destructor_shuts_down()
     print("test_harness: ok")
