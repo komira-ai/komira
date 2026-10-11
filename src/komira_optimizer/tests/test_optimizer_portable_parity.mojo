@@ -27,15 +27,9 @@
 # build-side selection and the order restore), and by its refusal tests for
 # scalar resolution and the broadcast rewrite (skipped, either records no
 # request, so a plan that needs an execution is not refused).
-# Four calls are left with no plan that tells them apart. `prune_columns` is
+# Two calls are left with no plan that tells them apart. `prune_columns` is
 # `push_projections_down` called again: either one alone is equivalent, and
-# the pair is caught. `detect_bypass_columns` returns its input.
-# `late_materialize` rewrites only a Filter left directly over a scan that
-# accepts the Filter's predicate, the shape step 9's pushdown folds into the
-# scan; the one shape known to keep it is a bound broadcast fold
-# (komira-ai/komira#1292), and the portable entry binds nothing. It changed
-# no plan in either file; that is what was measured, not a proof for every
-# plan.
+# the pair is caught.
 # =============================================================================
 
 from std.memory import OwnedPointer
@@ -590,7 +584,7 @@ def test_portable_renders_as_optimize_on_a_plan_per_pass() raises:
 
     Defect caught: a pass of the driver's order made conditional on
     `narrow_payload` (so `optimize` runs it and `optimize_portable` does not),
-    for every pass call but the four named in the header. A Limit block gated
+    for every pass call but the two named in the header. A Limit block gated
     that way, for one, leaves `Limit(n=10)` where `optimize` has
     `TopN(n=10, keys=[a ASC])`."""
     for i in range(_N_PLANS):
