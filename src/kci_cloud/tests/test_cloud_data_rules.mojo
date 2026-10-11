@@ -63,6 +63,7 @@ from kci_resource_proto.refs import Retention
 from kci_resource_proto.resource import Resource, ResourceList
 
 from kci_cloud import (
+    RegistryLogin,
     GrantEdge,
     CloudAdapter,
     Absence,
@@ -332,6 +333,12 @@ struct _Data(CloudAdapter, Movable):
 
     def trust_check(mut self, creds: Creds, scope: CellScope) raises -> List[Finding]:
         return List[Finding]()
+
+    def image_registry(self, ctx: CellContext) -> String:
+        return String("")
+
+    def registry_login(mut self, creds: Creds) raises -> RegistryLogin:
+        return RegistryLogin(String(""), String(""))
 
 
 def _owned(node: String, retained: Bool) -> OwnedRecord:
