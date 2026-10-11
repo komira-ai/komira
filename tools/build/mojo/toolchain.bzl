@@ -147,15 +147,19 @@ rm -rf "$T"
 # passed. A `zig_exe` names it in `unit_tests` to be built behind it. A test
 # of built executables names them in `exes`; it is then a validation, which a
 # target that hands the executables out lists (`kcov_tool`'s `cases`), as it
-# cannot be an input of the executable it runs.
+# cannot be an input of the executable it runs. It can still be in the
+# `unit_tests` of an executable it does not run (cov_zig's unit tests run a
+# stand-in zig and debug_relocate).
 zig_test_rule = rule(
     impl = _zig_test_impl,
     attrs = {
         "busybox": attrs.dep(),
         # Executables the tests run, configured for the execution platform
         # like the target that hands them out, so the same bytes: module
-        # `exes`, `pub const <key>` = its path.
-        "exes": attrs.dict(attrs.string(), attrs.exec_dep(providers = [RunInfo]), default = {}),
+        # `exes`, `pub const <key>` = the path of its default output. That
+        # may be a directory of executables: the pinned zig
+        # (komira//tools/build/toolchains:zig) is the directory holding `zig`.
+        "exes": attrs.dict(attrs.string(), attrs.exec_dep(), default = {}),
         "imports": attrs.list(attrs.source(), default = []),
         "src": attrs.source(),
         "zig": attrs.dep(),
