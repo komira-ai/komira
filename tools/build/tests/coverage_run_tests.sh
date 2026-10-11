@@ -39,7 +39,8 @@
 #      line tables do not name them are refused as unmapped, not dropped);
 #      lostdir[coverage] red (a binary naming the sources by another
 #      directory than the run stages is refused before kcov runs); clash and
-#      clash_buckout red at analysis (data where a run stages sources);
+#      clash_buckout are refused at analysis (data where a run stages
+#      sources: //tools/build/selftest:analysis_refusals_coverage);
 #      refused[coverage] red (kcov refused by the executor is said so);
 #      covreadme[coverage][tests][readme] and covreadme_none's (a README's
 #      examples, and a README with none, run under kcov like a test) and
@@ -60,8 +61,6 @@
 
 expect_red coverage_run_tracer "test_tracer: traced, TracerPid" 'tests//negative/coverage:tracer[coverage][tests][test_tracer]'
 expect_red coverage_run_lost "lostlib/value.mojo': no --map or --exclude prefix covers it" 'tests//negative/coverage:lost[coverage][tests][test_lost]'
-expect_red coverage_run_data_clash 'collides with its source, which a coverage run stages at "tests/test_lost.mojo"' tests//negative/coverage:clash
-expect_red coverage_run_data_buckout 'the data destination "buck-out/data.txt" is under buck-out/, where a coverage run stages' tests//negative/coverage:clash_buckout
 expect_red coverage_run_parent_fails "The test failed under kcov (exit 1)" 'tests//negative/coverage:exits[coverage][tests][test_parent_fails]'
 expect_red coverage_run_killed "The test failed under kcov (exit 137)" 'tests//negative/coverage:exits[coverage][tests][test_killed]'
 # The failing run's message is a coverage run's: not the gate's banner,

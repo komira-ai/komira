@@ -55,8 +55,8 @@
 #      already holds branch weights), branchentry[...][branch_ir] red (that
 #      copy with the weights check off: the entry counts refused), branchnodebug[...][branch_info] red
 #      (a nodebug helper's decision at its call),
-#      branchenv red at analysis (a test_env setting
-#      LLVM_PROFILE_FILE), branchlinkline red (a cov_branch_link.sh copy
+#      branchenv refused at analysis (a test_env setting
+#      LLVM_PROFILE_FILE: //tools/build/selftest:analysis_refusals_coverage), branchlinkline red (a cov_branch_link.sh copy
 #      without -lm: not the release link). The actions exist only with the
 #      switch on: coverage_keys.sh (test 41).
 #      The greens named below build in the pull-request check, not here:
@@ -93,7 +93,5 @@ expect_red coverage_branch_static_entry_counts "already holds function entry cou
     'tests//negative/coverage:branchentry[coverage][branch_ir][test_one]'
 expect_red coverage_branch_nodebug "may be a decision of count_down" \
     'tests//negative/coverage:branchnodebug[coverage][branch_info][test_nodebug]'
-expect_red coverage_branch_test_env "test_env sets LLVM_PROFILE_FILE, which a branch coverage run sets itself" \
-    tests//negative/coverage:branchenv
 expect_red coverage_branch_link_line "the branch coverage link is not the release link plus the profile runtime" \
     tests//negative/coverage:branchlinkline
