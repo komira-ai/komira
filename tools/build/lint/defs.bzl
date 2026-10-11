@@ -12,18 +12,19 @@ target builds while a script the rules run has a finding.
 A validation is not an input of the targets it guards: adding or fixing a
 lint changes no other action's digest.
 
-The lint action is lint.sh, under the pinned busybox; the linters are pinned
-downloads (tools/build/lint/BUCK). pointer_lint's action is a Zig tool built
-there (pointer_lint.zig). Each rule's default output is the validation
-result, a JSON file whose message holds the findings.
+The lint action is the Zig tool //tools/build/lint/tool:lint (its
+src/main.zig says each kind), run with no shell; the linters are pinned
+downloads (tools/build/lint/BUCK). pointer_lint and public_boundary each run
+a Zig tool of their own (pointer_lint.zig there, and
+//tools/build/lint/public_boundary). Each rule's default output is the
+validation result, a JSON file whose message holds the findings.
 """
 
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":doc_tree.bzl", "DocTreeInfo", "collect_docs", "declares_docs")
 
 _COMMON = {
-    "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
-    "_script": attrs.source(default = "komira//tools/build/lint:lint.sh"),
+    "_lint": attrs.exec_dep(default = "komira//tools/build/lint/tool:lint", providers = [RunInfo]),
 }
 
 def _stage(ctx, files):
@@ -41,10 +42,9 @@ def _stage(ctx, files):
 
 def _lint(ctx, kind, tools, args, staged):
     result = ctx.actions.declare_output("validation.json")
-    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     package = ctx.label.package + "/" if ctx.label.package else ""
     ctx.actions.run(
-        cmd_args(bb, "sh", ctx.attrs._script, bb, result.as_output(), kind, staged, "{}//{}".format(ctx.label.cell, package), tools, "--", args),
+        cmd_args(ctx.attrs._lint[RunInfo], result.as_output(), kind, staged, "{}//{}".format(ctx.label.cell, package), tools, "--", args),
         category = "lint_" + kind,
     )
     return _validation(kind, result)
@@ -144,16 +144,25 @@ def _retired_names_impl(ctx):
         fail("retired_names {}: names is empty, so it would check nothing".format(ctx.label))
     staged, copy = _stage(ctx, ctx.attrs.srcs)
     tree = ctx.attrs.tree[DefaultInfo].default_outputs[0]
+    if ctx.attrs.unchecked:
+        files = dict(ctx.attrs.tree[DocTreeInfo].files)
+        for path in ctx.attrs.unchecked:
+            if path not in files:
+                # An exemption must not outlive the file it was written for.
+                fail("retired_names {}: unchecked names {}, which is not in the tree; delete the entry".format(ctx.label, path))
+            files.pop(path)
+        tree = ctx.actions.copied_dir("checked_tree", files)
     args = [tree, "{}//".format(ctx.label.cell)] + ctx.attrs.names + ["--"] + [copy[s.short_path] for s in ctx.attrs.srcs]
     return _lint(ctx, "retired_names", [], args, staged)
 
 retired_names_rule = rule(
     impl = _retired_names_impl,
-    doc = "No file of `tree` (a doc_tree target: the root one holds every file of the cell) and no file in `srcs` (the dotfiles a glob skips) holds one of `names`, fixed strings, on a line without a YYYY-MM-DD date: a renamed package or type survives only in a dated history note. Spell each name in parts (`\"kci\" + \"_old\"`) so the BUCK file naming it does not hold it.",
+    doc = "No file of `tree` (a doc_tree target: the root one holds every file of the cell) and no file in `srcs` (the dotfiles a glob skips) holds one of `names`, fixed strings, on a line without a YYYY-MM-DD date: a renamed package or type survives only in a dated history note. Spell each name in parts (`\"kci\" + \"_old\"`) so the BUCK file naming it does not hold it. `unchecked` names files of `tree` (paths in the cell) left out: a fixture that must hold a retired name and cannot carry a date (JSON); an entry naming no file of `tree` is refused.",
     attrs = _COMMON | {
         "names": attrs.list(attrs.string()),
         "srcs": attrs.list(attrs.source(), default = []),
         "tree": attrs.dep(providers = [DocTreeInfo]),
+        "unchecked": attrs.list(attrs.string(), default = []),
     },
 )
 
@@ -331,7 +340,7 @@ def _linux(kwargs):
     kwargs.setdefault("exec_compatible_with", LINUX_X86_64)
     return kwargs
 
-# Every lint runs linux x86_64 tools (busybox, shellcheck): it reads a few files.
+# Every lint runs linux x86_64 tools (the lint tool, shellcheck): it reads a few files.
 def shell_lint(**kwargs):
     shell_lint_rule(**_linux(kwargs))
 

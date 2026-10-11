@@ -1,0 +1,11 @@
+{
+ "name": "long_batch_with_nulls",
+ "defect": "a long argument's validity bitmap is built too small (1025 rows: a bitmap one byte short no longer fits in the allocation's last word)",
+ "run": "call_batch",
+ "entry": "identity",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 1025, "columns": [{"type": "int64", "values": [null, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40], "repeat": 25}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [null, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40], "repeat": 25}}
+}

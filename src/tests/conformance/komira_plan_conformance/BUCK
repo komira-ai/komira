@@ -51,3 +51,11 @@ mojo_library(
     },
     visibility = ["PUBLIC"],
 )
+
+# The datasets and expectations, for komira_test_oracle: its sql_oracle
+# targets read the same JSON Lines files the HAND cases derive from, and its
+# twin test holds each DuckDB answer to the HAND expectation by value.
+[export_file(
+    name = f,
+    visibility = ["//src/tests/helpers/komira_test_oracle:"],
+) for f in glob(["expect/**/*.tsv", "datasets/*.jsonl"])]

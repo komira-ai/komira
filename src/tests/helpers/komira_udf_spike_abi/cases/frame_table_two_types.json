@@ -1,0 +1,12 @@
+{
+ "name": "frame_table_two_types",
+ "defect": "a table output's columns are read with the first column's type, or compared against the first column",
+ "run": "frame",
+ "entry": "table_two_types",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}, {"type": "int32", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 3, "columns": [{"type": "int64", "values": [1, null, 3]}]}],
+ "expect": {"status": "OK", "batches": [{"length": 3, "columns": [{"type": "int64", "values": [1, null, 3]}, {"type": "int32", "values": [10, null, 30]}]}]}
+}
