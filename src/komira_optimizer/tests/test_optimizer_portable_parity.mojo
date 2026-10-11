@@ -30,6 +30,13 @@
 # Two calls are left with no plan that tells them apart. `prune_columns` is
 # `push_projections_down` called again: either one alone is equivalent, and
 # the pair is caught.
+# The window gates (18, 19) scan the current plan. Step 15 can create the
+# first Project, so `window_fn_as_aggregate_input` catches a Project arm that
+# reads the `has_project` flag scanned after step 4 instead. No step between
+# 4 and 18 adds or removes a PartitionBy, and step 18 puts each PartitionBy it
+# makes under a Project, where `fuse_partition_topn` (which fuses a Filter
+# directly over a PartitionBy) does not fire; so reading PartitionBy from a
+# scan after step 4 changes no plan, and no plan here is for it.
 # =============================================================================
 
 from std.memory import OwnedPointer
@@ -443,6 +450,21 @@ def _window_function_in_a_project() -> LogicalPlan:
     return LogicalPlan.project(pe^, _scan("w.parquet", n))
 
 
+def _window_fn_as_aggregate_input() -> LogicalPlan:
+    """SUM(rank() OVER (PARTITION BY g)) AS s GROUP BY g over w(g, v): the
+    input holds no Project. Step 15 moves the window function into a new
+    Project below the Aggregate, so the window gate's Project arm is true
+    only on the current plan; a flag scanned after step 4 is false. The
+    window expression carries no alias of its own: the rewrite matches a
+    single Alias over the WindowFn, which step 15 adds."""
+    var n: List[String] = ["g", "v"]
+    var aggs = AggExprArray()
+    aggs.append(AggExpr(
+        AGG_SUM, Optional(col("v").rank().over("g")), Optional(String("s"))
+    ))
+    return LogicalPlan.aggregate(_cols(_l1("g")), aggs^, _scan("w.parquet", n))
+
+
 def _row_number_filter() raises -> LogicalPlan:
     """Project[a, b, c] over Filter(rn <= 5) over PartitionBy(row_number AS
     rn) over w(a, b, c): a per-partition top-N."""
@@ -489,7 +511,7 @@ def _row_number_filter_over_two_partition_bys() raises -> LogicalPlan:
 # -----------------------------------------------------------------------------
 
 
-comptime _N_PLANS = 26
+comptime _N_PLANS = 27
 
 
 def _plan_name(i: Int) -> String:
@@ -516,6 +538,7 @@ def _plan_name(i: Int) -> String:
         "fuse_sort_limit (17): limit_over_sort_over_filter",
         "optimize_window_rewrite (18): two_partition_bys",
         "the window gate's Project arm (18): window_function_in_a_project",
+        "the window gate's Project arm reads the current plan (18): window_fn_as_aggregate_input",
         "fuse_partition_topn (19): row_number_filter",
         "fuse_sort_limit (17) before optimize_window_rewrite (18): limit_over_sort_over_partition_by",
         "fuse_sort_limit (17) before optimize_window_rewrite (18): limit_over_two_key_sort_over_partition_by",
@@ -570,10 +593,12 @@ def _plan_at(i: Int) raises -> LogicalPlan:
     if i == 21:
         return _window_function_in_a_project()
     if i == 22:
-        return _row_number_filter()
+        return _window_fn_as_aggregate_input()
     if i == 23:
-        return _limit_over_sort_over_partition_by(False)
+        return _row_number_filter()
     if i == 24:
+        return _limit_over_sort_over_partition_by(False)
+    if i == 25:
         return _limit_over_sort_over_partition_by(True)
     return _row_number_filter_over_two_partition_bys()
 
