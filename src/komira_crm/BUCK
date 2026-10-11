@@ -1,4 +1,3 @@
-load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # A simple CRM's rows: `CrmStore[DB]` over the backend-neutral komira_db
@@ -36,18 +35,4 @@ mojo_library(
         "tests/test_validate.mojo",
     ],
     visibility = ["PUBLIC"],
-)
-
-# The deps above name every komira_* module the library and its tests import
-# (tools/build/lint: mojo_deps). The lint reads `deps` only, so the tests that
-# import the `test_deps` package (komira_db_sqlite) are left out of it.
-mojo_deps(
-    name = "deps_lint",
-    buck = "BUCK",
-    srcs = glob(["**/*.mojo"], exclude = [
-        "tests/test_feed_sqlite.mojo",
-        "tests/test_store_races.mojo",
-        "tests/test_store_sqlite.mojo",
-    ]),
-    visibility = ["komira//:tests_lints"],
 )

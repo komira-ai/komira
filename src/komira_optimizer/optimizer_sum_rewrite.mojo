@@ -8,27 +8,24 @@
 # ==================================================================
 # It emits ONE `SUM(x)` PER MATCHED AGGREGATE plus ONE `COUNT(x)` per non-zero
 # offset, i.e. UP TO 2N AGGREGATES WHERE THERE WERE N. What makes that a win is
-# `dedup_common_aggregates` (`optimizer_agg_cse.mojo`), which runs immediately
-# after and collapses the structurally-identical ones: for ClickBench cbq29
-# (`SELECT sum(rw), sum(rw+1), ... sum(rw+89)`) this pass produces **179**
-# aggregates and the dedup collapses them to **2**. Run this pass WITHOUT the
-# dedup and the cell gets SLOWER, measurably. The two are wired as one step in
-# `optimizer.mojo`; do not fund, move or gate one without the other.
+# `dedup_common_aggregates` (`optimizer_agg_cse.mojo`), designed to run
+# immediately after and collapse the structurally-identical ones: for ClickBench
+# cbq29 (`SELECT sum(rw), sum(rw+1), ... sum(rw+89)`) this pass produces **179**
+# aggregates and the dedup collapses them to **2**. komira_optimizer has no
+# driver that orders its passes; the order this pass is designed for is this
+# pass, then the dedup. Without the dedup the plan carries up to 2N aggregates
+# where it had N; do not fund, move or gate one without the other.
 #
 # WHY IT IS WORTH ANYTHING AT ALL
 # ===============================
 # `sum(rw + 1)` is a SUM over a COMPUTED input, so `materialize_agg_input`
-# (this file's downstream neighbour) mints a `__agg_in_<k>` column for
+# (a pass designed to run after this one, not in this tree) mints a `__agg_in_<k>` column for
 # it and splices a Project below the aggregate to materialise it. At 90
-# aggregates that is 90 derived 100M-row columns -- measured as the DOMINANT
-# per-aggregate cost of that cell -- and it also pushes the aggregate's child
-# from a bare SCAN to a PROJECT, which costs a ROUTE (the fused streaming
-# parquet agg leaf matches `FILTER? -> SCAN` only).
+# aggregates that is 90 derived columns, and it also pushes the aggregate's
+# child from a bare SCAN to a PROJECT.
 #
 # After the rewrite, every aggregate input is the RAW column: nothing is
-# materialised, the aggregate's child stays the SCAN, and the 0-key scalar fold
-# (`agg_scalar_fold.scalar_agg_servable`) serves `SUM(col_ref)` / `COUNT(col_ref)`
-# in ONE pass instead of `ceil(N / MAX_AGGS)` independent re-scans of the column.
+# materialised and the aggregate's child stays the SCAN.
 #
 # SCOPE -- ALL FOUR GATES ARE LOAD-BEARING
 # ========================================
@@ -56,11 +53,12 @@
 # NULL SEMANTICS -- WHY `COUNT(x)` AND NOT `COUNT(*)`
 # ===================================================
 # `sum(x + C)` skips rows where `x` IS NULL. `COUNT(x)` counts non-NULL `x`
-# (`agg_scalar_fold`, "COUNT(col) counts non-null rows"), so
+# (standard SQL), so
 # `sum(x) + C*count(x)` skips exactly the same rows. `COUNT(*)` would count the
 # NULL rows too and answer `C` too high per NULL. Over an all-NULL or empty
 # input `sum(x)` is NULL and `NULL + C*0` is NULL -- which is what `sum(x + C)`
-# answers. Pinned by `test_optimizer_sum_rewrite.mojo`.
+# answers. `test_optimizer_sum_rewrite_gates.mojo` pins that the replacement
+# is `COUNT(x)`, not `COUNT(*)`.
 #
 # ⚠ RESIDUAL, STATED RATHER THAN GUARDED: the rewrite is exact in Int64 whenever
 # `sum(x)` itself is representable. A pathological input whose `x` values
@@ -250,7 +248,8 @@ def rewrite_sum_of_offset_inplace(mut plan: LogicalPlan) raises:
 
     Children are rewritten FIRST so a nested aggregate is settled before its
     parent is inspected. The node kinds walked mirror
-    `materialize_agg_input_inplace`; a kind not walked simply does not fold.
+    `materialize_agg_input_inplace` (not in this tree); a kind not walked
+    simply does not fold.
     """
     if plan.tag == PLAN_AGGREGATE:
         rewrite_sum_of_offset_inplace(plan._aggregate.value()[].child[])

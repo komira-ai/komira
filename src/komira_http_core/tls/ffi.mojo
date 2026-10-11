@@ -182,9 +182,10 @@ def s2n_cert_chain_and_key_new() -> S2nOpaquePtr:
     Maps to s2n.h:658 `struct s2n_cert_chain_and_key *
         s2n_cert_chain_and_key_new(void)`.
     """
-    # SAFETY: void-arg returning an opaque pointer. Caller owns lifetime
-    # via TlsConfig.load_cert which calls s2n_cert_chain_and_key_free on
-    # the cleanup path.
+    # SAFETY: void-arg returning an opaque pointer. The caller owns it and
+    # frees it with s2n_cert_chain_and_key_free: TlsConfig.load_cert frees it
+    # when the PEM load fails, and otherwise hands it to the config handle,
+    # which frees it after s2n_config_free.
     return external_call[
         "komira_s2n_cert_chain_and_key_new",
         S2nOpaquePtr,
@@ -198,14 +199,15 @@ def s2n_cert_chain_and_key_free(
 
     Maps to s2n.h:713 `int s2n_cert_chain_and_key_free(...)`.
 
-    Note: per s2n docs, once a cert-chain-and-key has been added to a
-    config via s2n_config_add_cert_chain_and_key_to_store, the config
-    takes ownership and the chain is freed when the config is freed.
-    Caller MUST NOT free a chain that has been added to a config.
+    A chain added with s2n_config_add_cert_chain_and_key_to_store stays
+    owned by the caller (s2n marks the config's chains application-owned,
+    and s2n_config_free then frees none of them, tls/s2n_config.c
+    `s2n_config_free_cert_chain_and_key`). The caller frees it with this
+    call, and must not free it while a config still uses it.
     """
-    # SAFETY: caller is responsible for the "not-added-to-config-yet"
-    # contract. The TlsConfig.load_cert path always adds-then-leaves-ref
-    # so this free is only used on the OOM/error rollback path.
+    # SAFETY: the caller passes a chain no live config uses: one whose load
+    # failed (TlsConfig.load_cert) or one whose config was already freed
+    # (_S2nConfigHandle.__deinit__).
     return external_call["komira_s2n_cert_chain_and_key_free", Int32](cert_and_key)
 
 
@@ -237,15 +239,18 @@ def s2n_config_add_cert_chain_and_key_to_store(
     config: S2nOpaquePtr,
     cert_key_pair: S2nOpaquePtr,
 ) -> Int32:
-    """Attach a cert-chain-and-key to a config. The config takes
-    ownership of the chain; do NOT free the chain after this returns
-    successfully — it is freed when the config is freed.
+    """Attach a cert-chain-and-key to a config. The config borrows the
+    chain and does NOT take ownership: s2n marks the config's chains
+    application-owned, and s2n_config_free does not free them. The caller
+    frees the chain with s2n_cert_chain_and_key_free after it frees the
+    config.
 
     Maps to s2n.h:819 `int s2n_config_add_cert_chain_and_key_to_store(...)`.
     """
-    # SAFETY: synchronous call. On S2N_SUCCESS, ownership of cert_key_pair
-    # transfers to config. On S2N_FAILURE, caller retains ownership and
-    # must free the chain.
+    # SAFETY: synchronous call. The caller keeps ownership of cert_key_pair
+    # whatever the result; on S2N_FAILURE the config may already hold the
+    # pointer (s2n builds its SNI map before its last check), so the chain
+    # must outlive the config either way.
     return external_call[
         "komira_s2n_config_add_cert_chain_and_key_to_store", Int32,
     ](config, cert_key_pair)

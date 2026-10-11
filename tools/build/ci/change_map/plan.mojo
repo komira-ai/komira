@@ -14,8 +14,23 @@ A pure function over a `Graph`. The rules, in this order, for each file:
      widens, unless an `inert` rule names it (it builds nothing).
 
 The answer is the seeds and everything that depends on one of them. It never
-under-approximates: anything the mapping cannot do widens, with the reason,
-and a change whose files reach no target is VACUOUS, never an empty pass.
+under-approximates: a file the rules above cannot map widens, with the
+reason, and a change whose files reach no target is VACUOUS, never an empty
+pass.
+
+A failed query is never a widening. When the query mapping the files, the
+reverse-dependency query, or the query that configures the universe fails,
+for any reason, the answer is BROKEN, carrying buck2's error, and kci fails
+the check. Whether buck2's text names a target it could not configure (an
+unknown or invisible dependency) decides nothing: `named_target` reads it,
+best effort, only to put the name at the front of the message. A target
+buck2 cannot configure fails every configured query over the universe, for
+every change, so widening on it would answer every unit on every change and
+bury the cause in a reason; dropping it from the universe would pass the
+change that broke it. A widened answer queries nothing configured, so
+`compute` configures the universe before it widens: a change that plants
+such a target under a widen rule (tools/build/**) fails its own check,
+instead of passing and breaking every change after it.
 """
 
 from buildtools.bytes import dirname, join, sorted_unique
@@ -27,13 +42,14 @@ comptime KIND_AFFECTED: String = "AFFECTED"
 comptime KIND_WIDENED: String = "WIDENED"
 comptime KIND_VACUOUS: String = "VACUOUS"
 comptime KIND_EMPTY: String = "EMPTY"
+comptime KIND_BROKEN: String = "BROKEN"
 
 
 struct Verdict(Copyable, Movable):
     """The answer. `targets` is sorted and unique; for WIDENED it is every
-    target of the universe, for VACUOUS and EMPTY it is empty. `reason` says
-    why for WIDENED and VACUOUS. `warnings` are events the run saw (a file no
-    target owns, inert or not)."""
+    target of the universe, for VACUOUS, EMPTY and BROKEN it is empty.
+    `reason` says why for WIDENED, VACUOUS and BROKEN. `warnings` are events
+    the run saw (a file no target owns, inert or not)."""
 
     var kind: String
     var reason: String
@@ -127,7 +143,65 @@ def _collect[
     return String("")
 
 
+comptime _CONFIGURED_NODE: String = "Error looking up configured node "
+comptime _DEPENDENCY_CHAIN: String = "dependency chain follows"
+comptime QUERY_MAPPING: String = "query mapping the changed files to targets"
+comptime QUERY_RDEPS: String = "reverse-dependency query"
+comptime QUERY_UNIVERSE: String = "query configuring the universe"
+
+
+def _is_blank(c: Int) -> Bool:
+    return c == 32 or c == 10 or c == 9 or c == 13
+
+
+def _word_at(error: String, from_byte: Int) -> String:
+    """The first word at or after `from_byte`: blanks skipped, then up to the
+    next blank."""
+    var b = error.as_bytes()
+    var start = from_byte
+    while start < len(b) and _is_blank(Int(b[start])):
+        start += 1
+    var end = start
+    while end < len(b) and not _is_blank(Int(b[end])):
+        end += 1
+    return String(error[byte=start:end])
+
+
+def named_target(error: String) -> String:
+    """For the message only, never for a decision: the target buck2's text
+    names as one it could not configure, or "". Two forms: `Error looking
+    up configured node <label> (<cfg>)` (an invisible dependency) and
+    `dependency chain follows (...):` then the chain, its first label the
+    target whose dependency is unknown."""
+    var at = error.find(String(_CONFIGURED_NODE))
+    if at >= 0:
+        return _word_at(error, at + String(_CONFIGURED_NODE).byte_length())
+    var chain = error.find(String(_DEPENDENCY_CHAIN))
+    if chain >= 0:
+        var opened = error.find(String("):"), chain)
+        if opened >= 0:
+            return _word_at(error, opened + 2)
+    return String("")
+
+
+def _broken(query: String, error: String, files: Int, var warnings: List[String]) -> Verdict:
+    """BROKEN: the `query` failed with `error` (buck2's text). The named
+    target, when buck2 names one, leads the message."""
+    var reason = String("the ") + query + String(" failed")
+    var named = named_target(error)
+    if named.byte_length() > 0:
+        reason += String(", naming ") + named
+    reason += String(": ") + error
+    return Verdict(String(KIND_BROKEN), reason^, List[String](), files, 0, warnings^)
+
+
 def _widened[G: Graph](var reason: String, files: Int, var warnings: List[String], mut graph: G) raises -> Verdict:
+    """WIDENED, once the universe configures; BROKEN when that query fails,
+    whatever buck2 says."""
+    try:
+        graph.configure_universe()
+    except e:
+        return _broken(String(QUERY_UNIVERSE), String(e), files, warnings^)
     var all = sorted_unique(graph.all_targets())
     return Verdict(String(KIND_WIDENED), reason^, all^, files, 0, warnings^)
 
@@ -135,7 +209,8 @@ def _widened[G: Graph](var reason: String, files: Int, var warnings: List[String
 def compute[G: Graph](rules: Rules, files_in: List[String], mut graph: G) raises -> Verdict:
     """The verdict for a change of `files_in` (repository-relative paths).
     Raises only when even the widened answer cannot be made (the graph
-    cannot be listed)."""
+    cannot be listed). A failed query is BROKEN, never a widening (the
+    module's header says why)."""
     var files = sorted_unique(files_in)
     var warnings = List[String]()
     if len(files) == 0:
@@ -145,7 +220,7 @@ def compute[G: Graph](rules: Rules, files_in: List[String], mut graph: G) raises
     try:
         reason = _collect(rules, files, graph, seeds, warnings)
     except e:
-        reason = String("a file could not be mapped: ") + String(e)
+        return _broken(String(QUERY_MAPPING), String(e), len(files), warnings^)
     if reason.byte_length() > 0:
         return _widened(reason^, len(files), warnings^, graph)
     if len(seeds) == 0:
@@ -166,7 +241,7 @@ def compute[G: Graph](rules: Rules, files_in: List[String], mut graph: G) raises
     try:
         reached = graph.rdeps(seeds)
     except e:
-        return _widened(String("the reverse-dependency query failed: ") + String(e), len(files), warnings^, graph)
+        return _broken(String(QUERY_RDEPS), String(e), len(files), warnings^)
     if len(reached) == 0:
         return _widened(
             String("the reverse-dependency query of ") + String(len(seeds)) + String(" seed(s) answered nothing"),
