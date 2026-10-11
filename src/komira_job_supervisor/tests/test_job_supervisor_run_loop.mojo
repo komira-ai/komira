@@ -7,23 +7,27 @@
 #   test_a_job_that_ends_between_beats_is_noticed_within_seconds
 #       With a 30 s heartbeat interval, a job that exits after 2 s ends the
 #       run COMPLETED, after two RUNNING beats, and the COMPLETED beat is sent
-#       less than 8 s after the first beat after the spawn: the loop checks
+#       less than 9.5 s after the first beat after the spawn: the loop checks
 #       for the exit every second between beats, where a loop that checked
-#       every 10 s would send it about 10 s after, and one that checked only
-#       at the next beat about 30 s after. The time is read between two beats,
-#       so the start-up before the spawn and the teardown after the last beat
+#       every 10 s cannot send it sooner than 10 s after (no signal reaches
+#       this test to end its sleep early), and one that checked only at the
+#       next beat about 30 s after. The time is read between two beats, so
+#       the start-up before the spawn and the teardown after the last beat
 #       (what a slow or instrumented build stretches most) are not in it.
-#   test_a_stop_signal_between_beats_ends_the_run_at_once
-#       With a 120 s interval, the job prints a line, then sends SIGTERM to
-#       the supervisor 2 s in, then sleeps 60 s. The run ends CANCELLED,
-#       naming SIGTERM, after two RUNNING beats, and its logs.txt holds the
-#       line. No wall-clock bound: the job itself is the clock. The line
-#       proves the job was still running when it sent the signal (a stop
-#       before the signal kills it during its first sleep, before it prints);
-#       CANCELLED proves the stop came before the job's own end 60 s after
-#       the signal (a loop that ignored the signal, or took it only at the
-#       next beat 120 s in, sees the job exit 0: COMPLETED); and no signal
-#       is left latched afterwards, so the stop took this one.
+#   test_a_stop_signal_between_beats_stops_the_job_before_its_next_line
+#       With a 120 s interval, the job prints "signalling", sends SIGTERM to
+#       the supervisor 2 s in, sleeps 3 s, prints "late", then sleeps 60 s.
+#       The run ends CANCELLED, naming SIGTERM, after two RUNNING beats, and
+#       its logs.txt holds "signalling" and nothing else. No wall-clock
+#       bound: the job itself is the clock. "signalling" proves the job was
+#       still running when it sent the signal (a stop before the signal kills
+#       it during its first sleep, before it prints); the absent "late"
+#       proves the stop came within the job's 3 s sleep after the signal (a
+#       loop that took the stop only every few seconds lets the job print
+#       it); CANCELLED proves the stop came before the job's own end (a loop
+#       that ignored the signal, or took it only at the next beat 120 s in,
+#       sees the job exit 0: COMPLETED); and no signal is left latched
+#       afterwards, so the stop took this one.
 #
 # No heartbeat endpoint: the reporter records each beat. The stop test
 # reads logs.txt from an in-memory log store; the other has no store.
@@ -122,8 +126,12 @@ def test_a_job_that_ends_between_beats_is_noticed_within_seconds() raises:
     assert_equal(beats[][n - 1], String("COMPLETED|"))
     # Beat 0 is sent before the spawn, beat 1 after it.
     var ms = Int((at_ns[][n - 1] - at_ns[][1]) // 1_000_000)
+    # The bound is just under 10 s: a loop that checked every 10 s sleeps the
+    # whole 10 s before it can see the exit (no signal ends that sleep here),
+    # so it fails, while the 2 s exit checked every second has 7.5 s to spare
+    # for a slow or instrumented build.
     assert_true(
-        ms < 8000,
+        ms < 9500,
         "the 2 s exit was reported "
         + String(ms)
         + " ms after the spawn's beat, not between beats",
@@ -140,7 +148,7 @@ def _text_at(store: SharedInMemoryConditionalStore, key: String) -> String:
         return String("<absent>")
 
 
-def test_a_stop_signal_between_beats_ends_the_run_at_once() raises:
+def test_a_stop_signal_between_beats_stops_the_job_before_its_next_line() raises:
     _ = take_stop_signal()  # nothing left over from before
     var beats = ArcPointer[List[String]](List[String]())
     var store = SharedInMemoryConditionalStore()
@@ -148,34 +156,39 @@ def test_a_stop_signal_between_beats_ends_the_run_at_once() raises:
     var phase = run_job_supervisor[Recorder, SharedInMemoryConditionalStore](
         _shell(
             String("stop-mid-interval"),
-            String("sleep 2; echo signalling; kill -TERM $PPID; exec sleep 60"),
+            String(
+                "sleep 2; echo signalling; kill -TERM $PPID; sleep 3; echo late;"
+                " exec sleep 60"
+            ),
             120,
         ),
         Recorder(beats),
         None,
         Optional[SharedInMemoryConditionalStore](store^),
     )
-    # The stop came before the job's own end, 60 s after the signal.
+    # The stop came before the job's own end, 63 s after the signal.
     assert_true(phase == JobSupervisorPhase.cancelled(), "CANCELLED")
     var last = beats[][len(beats[]) - 1]
     assert_equal(
         last, String("CANCELLED|the supervisor received SIGTERM; the job was stopped")
     )
     assert_equal(_count(beats[], String("RUNNING|")), 2)
-    # The job was still running when it sent the signal: the stop came after.
+    # "signalling": the job was still running when it sent the signal, so
+    # the stop came after it. No "late": the stop came within the 3 s the job
+    # slept after the signal.
     assert_equal(
         _text_at(view, String("stop-mid-interval/logs.txt")),
         String("signalling"),
-        "the job printed before it signalled, so it was not stopped before",
+        "the stop came after the signal and before the job's next line",
     )
     # The stop took the signal: none is left latched (a stop that came from
     # anything else would leave it).
     assert_equal(take_stop_signal(), Int32(0), "the run took the SIGTERM")
-    print("  test_a_stop_signal_between_beats_ends_the_run_at_once: PASS")
+    print("  test_a_stop_signal_between_beats_stops_the_job_before_its_next_line: PASS")
 
 
 def main() raises:
     print("test_job_supervisor_run_loop:")
     test_a_job_that_ends_between_beats_is_noticed_within_seconds()
-    test_a_stop_signal_between_beats_ends_the_run_at_once()
+    test_a_stop_signal_between_beats_stops_the_job_before_its_next_line()
     print("test_job_supervisor_run_loop: ALL PASS")
