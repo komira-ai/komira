@@ -12,7 +12,9 @@
 # on dense graphs the same csg-cmp pair is emitted many times (a clique of
 # n relations: 40, 236, 1,541, 11,327, 93,528, 860,736 emits for n = 4..9,
 # against the canonical (3^n - 2^(n+1) + 1) / 2 = 25..9,330). Plans stay
-# optimal (the DP table keeps the cheaper entry); the cost is time. The
+# optimal (the DP table keeps the cheaper entry, and of two equal-cost
+# entries the one `dp_pair_beats` orders first, whatever the emission order);
+# the cost is time. The
 # relation bound (more than 12 relations fall back to greedy) and the
 # iteration cap keep it bounded; a 9-relation clique already exceeds the
 # cap and falls back to greedy. komira-ai/komira#1176 tracks the fix.
@@ -121,6 +123,7 @@ from .optimizer_reorder import (
     greedy_join_order,
 )
 from .optimizer_transitive_edges import derive_transitive_edges
+from .optimizer_cost_order import dp_pair_beats
 from .optimizer_join import (
     join_reorder_output_names,
     narrow_reordered_join_to_declared_columns,
@@ -866,7 +869,10 @@ def emit_pair(
     var existing = dp.get(combined.bits)
     if existing:
         var e = existing.value().copy()
-        if pair_cost < e.cost:
+        if dp_pair_beats(
+            pair_cost, left_set.bits, right_set.bits,
+            e.cost, e.best_left.bits, e.best_right.bits,
+        ):
             dp[combined.bits] = DPNode(
                 pair_cost, join_card, left_set, right_set
             )
