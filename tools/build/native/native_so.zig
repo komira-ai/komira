@@ -8,12 +8,18 @@
 //!       sub-target, for reading;
 //!   native_so exports --soname <s> --list <out> --script <out> --report <out>
 //!                     (--archive <label> <lib.a>)... (--caller <label> <src dir>)...
+//!                     (--caller-archive <label> <lib.a>)...
 //!       the export list, its version script and a report (native_checks.zig,
-//!       `exportList`); exit 1 on a finding;
+//!       `exportList`); a caller archive is a dependent owner's archive, which
+//!       calls every name it references and does not define
+//!       (`archiveCalls`); exit 1 on a finding;
 //!   native_so check <1-7> --result <out.json> --so <lib.so> [options]
 //!       one of the checks of native_checks.zig; options as each needs:
-//!       1 --list --script; 2 --archive... --caller...; 3 --weak...;
-//!       4 --soname; 5 --floor <glibc version>; 6 none; 7 --weak...
+//!       1 --list --script; 2 --archive... --caller... --caller-archive...;
+//!       3 --weak... --owner <owner.so>...; 4 --soname --owner <owner.so>...;
+//!       5 --floor <glibc version>; 6 none; 7 --weak...
+//!       An --owner is a declared NEEDED owner's shared library, read for its
+//!       SONAME and exports.
 //!       Writes the validation result and exits 0 when green; prints every
 //!       finding and exits 1 when red.
 //!
@@ -58,6 +64,7 @@ const Opts = struct {
     so: ?[]const u8 = null,
     floor: ?[]const u8 = null,
     weak: std.ArrayList([]const u8),
+    owners: std.ArrayList(checks.Owner),
     archives: std.ArrayList(checks.Archive),
     callers: std.ArrayList(checks.Caller),
 };
@@ -69,6 +76,7 @@ fn need(v: ?[]const u8, what: []const u8) []const u8 {
 fn parse(alloc: Alloc, argv: []const []const u8) !Opts {
     var o = Opts{
         .weak = std.ArrayList([]const u8).init(alloc),
+        .owners = std.ArrayList(checks.Owner).init(alloc),
         .archives = std.ArrayList(checks.Archive).init(alloc),
         .callers = std.ArrayList(checks.Caller).init(alloc),
     };
@@ -93,18 +101,29 @@ fn parse(alloc: Alloc, argv: []const []const u8) !Opts {
             matched = true;
         }
         if (matched) continue;
-        if (std.mem.eql(u8, a, "--archive") or std.mem.eql(u8, a, "--caller")) {
+        if (std.mem.eql(u8, a, "--owner")) {
+            if (i + 1 >= argv.len) usage("--owner needs a shared library", .{});
+            const path = argv[i + 1];
+            const so = readShared(alloc, path);
+            const soname = so.soname orelse usage("--owner {s}: no SONAME", .{path});
+            try o.owners.append(try checks.ownerOf(alloc, soname, so));
+            i += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, a, "--archive") or std.mem.eql(u8, a, "--caller") or std.mem.eql(u8, a, "--caller-archive")) {
             if (i + 2 >= argv.len) usage("{s} needs a label and a path", .{a});
             const label = argv[i + 1];
             const path = argv[i + 2];
-            if (a[2] == 'a') {
+            if (std.mem.eql(u8, a, "--caller")) {
+                try o.callers.append(.{ .label = label, .calls = try calls.scanDir(alloc, path) });
+            } else {
                 const syms = elf.readArchive(alloc, readFile(alloc, path)) catch |err| switch (err) {
                     error.BadElf => usage("{s} ({s}): {s}", .{ path, label, elf.why }),
                     else => usage("{s}: {s}", .{ path, @errorName(err) }),
                 };
-                try o.archives.append(.{ .label = label, .syms = syms });
-            } else {
-                try o.callers.append(.{ .label = label, .calls = try calls.scanDir(alloc, path) });
+                if (std.mem.eql(u8, a, "--archive")) {
+                    try o.archives.append(.{ .label = label, .syms = syms });
+                } else try o.callers.append(try checks.archiveCalls(alloc, label, syms));
             }
             i += 3;
             continue;
@@ -124,8 +143,8 @@ fn finish(what: []const u8, soname: []const u8, red: checks.Red) void {
 const titles = [_][]const u8{
     "check 1 (exports: komira_ prefix, exactly the list)",
     "check 2 (every called name exported)",
-    "check 3 (undefined komira_ symbols)",
-    "check 4 (SONAME, NEEDED, run path)",
+    "check 3 (undefined komira_ symbols: a declared NEEDED owner exports each)",
+    "check 4 (SONAME, NEEDED glibc and the declared owners, run path)",
     "check 5 (glibc version floor)",
     "check 6 (DT_FLAGS DF_SYMBOLIC)",
     "check 7 (undefined symbols: GLIBC_, komira_ or the weak list)",
@@ -182,8 +201,12 @@ pub fn main() !void {
             if (o.archives.items.len == 0 or o.callers.items.len == 0) usage("check 2 needs --archive and --caller", .{});
             break :blk try checks.check2(alloc, so, o.archives.items, o.callers.items, &red);
         },
-        3 => try checks.check3(alloc, so, o.weak.items, &red),
-        4 => try checks.check4(alloc, so, need(o.soname, "--soname"), &red),
+        3 => try checks.check3(alloc, so, o.weak.items, o.owners.items, &red),
+        4 => blk: {
+            var sonames = std.ArrayList([]const u8).init(alloc);
+            for (o.owners.items) |ow| try sonames.append(ow.soname);
+            break :blk try checks.check4(alloc, so, need(o.soname, "--soname"), sonames.items, &red);
+        },
         5 => try checks.check5(alloc, so, need(o.floor, "--floor"), &red),
         6 => try checks.check6(alloc, so, &red),
         else => try checks.check7(alloc, so, o.weak.items, &red),

@@ -1,9 +1,9 @@
 # The limits of the build that exist today: every place it states, in a rule or a refusal, that it builds for one platform only.
 # Each is declared at its site by a `komira-limit:<id>` marker (a comment on the `target_compatible_with` line, or beside the
-# refusal) and listed here with the PR that deletes it. tools/build/tests/functional/platform_table/limits_retired.sh checks, from git, that the two agree:
+# refusal) and listed here with the PR that deletes it. //:limits (tools/build/platforms/limits) checks that the two agree:
 #   - a `target_compatible_with` line with no marker, a marker with no row, and a row with no marker, are each refused;
-#   - a row whose `retired_by` PR has merged (a commit subject on main contains `[native-pr:<n>]`) while its marker still
-#     exists is refused, naming the row and the site.
+#   - a row whose `retired_by` PR has merged (a commit subject on main contains `[native-pr:<n>]`) is refused, naming the
+#     row: the platform table's check (test 37) reads git for it.
 # `retired_by` is `native-pr:<n>` (the PR of the native-platform plan, tools/build/platforms/README.md) or `never`, which
 # needs a reason that starts `product:`. Delete a row in the PR that deletes its marker. Columns are tab-separated.
 id	retired_by	reason

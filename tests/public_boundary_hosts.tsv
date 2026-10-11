@@ -38,6 +38,7 @@ prefix.dev	the conda package host the toolchain pins download from
 anaconda.org	the conda package index
 crates.io	the Rust package index
 rust-lang.org	the Rust toolchain's distribution and documentation
+docs.rs	Rust crate documentation (DataFusion's GroupsAccumulator) cited by docs/design/udf_runtime_interface.md
 ziglang.org	the zig toolchain's distribution
 sqlite.org	SQLite documentation
 postgresql.org	PostgreSQL documentation
@@ -45,16 +46,19 @@ clickhouse.com	ClickHouse documentation cited by docs/design/storage_stack.md
 confluent.io	Confluent documentation cited by docs/design/storage_stack.md
 databricks.com	Databricks documentation cited by docs/design/storage_stack.md
 dremio.com	Dremio documentation cited by docs/design/storage_stack.md
-duckdb.org	DuckDB documentation cited by docs/design/storage_stack.md
+duckdb.org	DuckDB documentation cited by docs/design/storage_stack.md and docs/design/optimized_plan_udfs.md
 ducklake.select	the DuckLake specification cited by docs/design/storage_stack.md
 estuary.dev	Estuary documentation cited by docs/design/storage_stack.md
 fivetran.com	Fivetran documentation cited by docs/design/storage_stack.md
 lance.org	the Lance format specification cited by docs/design/storage_stack.md
 redpanda.com	Redpanda documentation cited by docs/design/storage_stack.md
 ryft.io	Ryft documentation cited by docs/design/storage_stack.md
-snowflake.com	Snowflake documentation cited by docs/design/storage_stack.md
+snowflake.com	Snowflake documentation cited by docs/design/storage_stack.md and docs/design/optimized_plan_udfs.md
 trino.io	Trino documentation cited by docs/design/storage_stack.md
 turbopuffer.com	turbopuffer documentation cited by docs/design/storage_stack.md
+daft.ai	Daft documentation cited by docs/design/optimized_plan_udfs.md
+pulumi.com	Pulumi documentation of closure serialization cited by docs/design/optimized_plan_udfs.md
+idl.uw.edu	the Arquero documentation (a University of Washington lab site) cited by docs/design/optimized_plan_udfs.md
 grpc.io	gRPC specifications
 connectrpc.com	the Connect protocol specification
 flatbuffers.dev	FlatBuffers documentation

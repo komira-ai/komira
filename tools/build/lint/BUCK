@@ -11,8 +11,6 @@ load(":shell_budget.bzl", "shell_budget")
 
 export_file(name = "readme_api_coverage.sh", visibility = ["PUBLIC"])
 
-export_file(name = "surface_capability_matrix.sh", visibility = ["PUBLIC"])
-
 export_file(name = "test_weld.sh", visibility = ["PUBLIC"])
 
 # The Mojo lexer the lint tools share (mojo_tokens.zig): strings, comments,
@@ -70,7 +68,7 @@ tar_member(
 # The lint actions' own scripts.
 shell_lint(
     name = "shell_lint",
-    srcs = ["readme_api_coverage.sh", "surface_capability_matrix.sh", "test_weld.sh"],
+    srcs = ["readme_api_coverage.sh", "test_weld.sh"],
     visibility = ["PUBLIC"],
 )
 

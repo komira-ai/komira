@@ -1,0 +1,14 @@
+# With rules that do not widen on prelude/, a prelude .bzl the audit lists
+# is still not a load of the package: the prelude is skipped, WIDENED.
+arg "--files"
+arg "{changed_files}"
+arg "--base"
+arg "parity-base"
+arg "--units-file"
+arg "{units_file}"
+input units_file %units
+input changed_files "prelude/rules.bzl\n"
+file ".buckconfig" %buckconfig
+file "tools/build/ci/rules.txt" @rules.txt
+file "prelude/rules.bzl"
+exit 0
