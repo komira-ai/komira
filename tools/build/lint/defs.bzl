@@ -13,7 +13,8 @@ A validation is not an input of the targets it guards: adding or fixing a
 lint changes no other action's digest.
 
 The lint action is lint.sh, under the pinned busybox; the linters are pinned
-downloads (tools/build/lint/BUCK). Each rule's default output is the validation
+downloads (tools/build/lint/BUCK). pointer_lint's action is a Zig tool built
+there (pointer_lint.zig). Each rule's default output is the validation
 result, a JSON file whose message holds the findings.
 """
 
@@ -46,6 +47,9 @@ def _lint(ctx, kind, tools, args, staged):
         cmd_args(bb, "sh", ctx.attrs._script, bb, result.as_output(), kind, staged, "{}//{}".format(ctx.label.cell, package), tools, "--", args),
         category = "lint_" + kind,
     )
+    return _validation(kind, result)
+
+def _validation(kind, result):
     return [
         DefaultInfo(default_output = result),
         ValidationInfo(validations = [ValidationSpec(name = kind, validation_result = result)]),
@@ -178,23 +182,25 @@ def _pointer_lint_impl(ctx):
     else:
         staged = ctx.actions.copied_dir("tree", ctx.attrs.files)
     package = "{}//{}".format(ctx.label.cell, ctx.label.package + "/" if ctx.label.package else "")
-    args = [ctx.attrs.public_root]
+    result = ctx.actions.declare_output("validation.json")
+    args = [result.as_output(), staged, package, ctx.attrs.public_root]
     for ledger in [ctx.attrs.ffi, ctx.attrs.holds]:
         # Findings name a source of this package by its path in the cell, and a
         # file another package exports by its target.
         args += [ledger, str(ledger.owner.raw_target()) if ledger.owner != None else package + ledger.short_path]
-    return _lint(ctx, "pointer_lint", [ctx.attrs._reader], args, staged)
+    ctx.actions.run(cmd_args(ctx.attrs._tool[RunInfo], args), category = "lint_pointer_lint")
+    return _validation("pointer_lint", result)
 
 pointer_lint_rule = rule(
     impl = _pointer_lint_impl,
-    doc = "The Mojo pointer rules (docs/design/mojo_safety_and_idioms.md) over every .mojo file of `tree` (a doc_tree target: the root one holds every file of the cell) or, for a fixture, of `files` ({path in the tree: source}), never both: no wildcard origin outside the FFI modules `ffi` lists, no `unsafe_from_address=`, no partial move through a pointer, no `parallelize[`, no second declaration of libc read/open, and no public function of a library file under `public_root` taking or returning a pointer. `holds` lists the sites that predate the lint, per rule and file with an exact count, and only shrinks. lint.sh (kind pointer_lint) says the ledger formats; pointer_lint.awk, the reader, says what each rule matches.",
-    attrs = _COMMON | {
+    doc = "The Mojo pointer rules (docs/design/mojo_safety_and_idioms.md) over every .mojo file of `tree` (a doc_tree target: the root one holds every file of the cell) or, for a fixture, of `files` ({path in the tree: source}), never both: no wildcard origin outside the FFI modules `ffi` lists, no `unsafe_from_address=`, no partial move through a pointer, no `parallelize[`, no second declaration of libc read/open, and no public function of a library file under `public_root` taking or returning a pointer. `holds` lists the sites that predate the lint, per rule and file with an exact count, and only shrinks. The action is the Zig tool pointer_lint.zig, which says what each rule matches and the ledger formats; it reads Mojo through mojo_tokens.zig.",
+    attrs = {
         "ffi": attrs.source(),
         "files": attrs.dict(attrs.string(), attrs.source(), default = {}),
         "holds": attrs.source(),
         "public_root": attrs.string(default = "src"),
         "tree": attrs.option(attrs.dep(providers = [DocTreeInfo]), default = None),
-        "_reader": attrs.source(default = "komira//tools/build/lint:pointer_lint.awk"),
+        "_tool": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/lint:pointer_lint"),
     },
 )
 
