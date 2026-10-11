@@ -103,6 +103,10 @@ def test_script_page_is_keyed_by_handle_and_bounded() raises:
     assert_false(c.ok(), "exec/c answers with its own failed page")
     assert_equal(c.fault, String("dial refused"))
     assert_equal(c.pages, 0, "a refusal that never dialled read no page")
+    assert_false(
+        cloud_log_page_to_run_log_tail(c, String("exec/c")).done,
+        "a failed read with no continuation token is still not complete",
+    )
 
 
 def _run(name: String, f: def() raises thin -> None, mut failed: List[String]):
