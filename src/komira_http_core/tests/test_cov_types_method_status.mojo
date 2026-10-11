@@ -14,7 +14,8 @@
 #     headers they document.
 #   * ParseError.make fills the status of each kind (0 for NONE and
 #     NEED_MORE, 431 for an oversized trailer section).
-#   * sanitize_for_log replaces control bytes and truncates.
+#   * sanitize_for_log replaces control bytes (and no byte at or above
+#     0x80) with '?', and truncates.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -195,6 +196,15 @@ def test_parse_error_status_of_kind() raises:
     assert_equal(t.offset, 7)
 
 
+def _question_marks(s: String) -> Int:
+    var n = 0
+    var r = s.as_bytes()
+    for i in range(len(r)):
+        if r[i] == UInt8(ord("?")):
+            n += 1
+    return n
+
+
 def test_sanitize_for_log() raises:
     """Every byte under 0x20 and 0x7F becomes '?', printable ASCII is kept,
     and a source longer than max_len is cut there and marked "..."."""
@@ -203,6 +213,13 @@ def test_sanitize_for_log() raises:
     assert_equal(sanitize_for_log(String("abcdefg"), 6), String("abcdef..."))
     assert_equal(sanitize_for_log(String("x\x1f "), 2), String("x?..."))
     assert_equal(sanitize_for_log(String(""), 4), String(""))
+    # A byte at or above 0x80 is neither under 0x20 nor 0x7F, so it must
+    # not become '?'. Only that is checked: how such a byte is written out
+    # is open (komira-ai/komira#1368).
+    var hi = sanitize_for_log(String("aé\x01b"), 64)
+    assert_equal(_question_marks(hi), 1, hi)
+    assert_true(hi.startswith("a"), hi)
+    assert_true(hi.endswith("?b"), hi)
 
 
 def main() raises:

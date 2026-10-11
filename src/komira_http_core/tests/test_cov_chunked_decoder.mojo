@@ -5,7 +5,8 @@
 # The refusals and resumption points of the chunked decoder
 # (codec/h1/chunked.mojo) its happy-path test does not reach:
 #
-#   * chunk-size lines: whitespace before the end or a ';' (accepted) and
+#   * chunk-size lines: the bytes on each side of every hex-digit range
+#     (refused), whitespace before the end or a ';' (accepted) and
 #     before anything else (refused), a 2^62 + 1 size, a line over the
 #     256-byte cap with and without its CRLF in hand;
 #   * the cumulative chunk-extension budget;
@@ -35,7 +36,6 @@ from komira_http_core.codec.h1.limits import (
     PARSE_ERR_CHUNK_SIZE_INVALID,
     PARSE_ERR_CHUNK_TRAILER_INVALID,
     PARSE_ERR_CHUNK_TRAILER_TOO_LARGE,
-    PARSE_ERR_NONE,
     ParseLimits,
 )
 
@@ -287,8 +287,32 @@ def test_called_again_after_done_and_error() raises:
     var e3 = decode_block(odd, Span[UInt8](more), d, body)
     assert_equal(Int(e3.outcome), Int(CHUNKED_RES_ERROR))
     assert_equal(e3.consumed, 0)
-    assert_equal(Int(odd.err.kind), Int(PARSE_ERR_NONE))
+    # odd.err is deliberately not checked: decode_block's docstring promises
+    # a ParseError on every ERROR outcome, and this bail leaves none
+    # (komira-ai/komira#1369).
     assert_equal(len(body), 0)
+
+
+def test_size_digit_range_edges() raises:
+    """The bytes on each side of every hex-digit range are no chunk-size
+    digit, alone or after a real digit. The second form is the one that
+    tells: a digit test that let `@` through would read "1@" as
+    16 + _hex_value(`@`) = 15 and ask for 15 bytes of data."""
+    var d = ParseLimits.defaults()
+    var edges = List[String]()
+    edges.append(String("/"))
+    edges.append(String(":"))
+    edges.append(String("@"))
+    edges.append(String("G"))
+    edges.append(String("`"))
+    edges.append(String("g"))
+    for k in range(len(edges)):
+        _expect_error(edges[k] + String("\r\n"), d, PARSE_ERR_CHUNK_SIZE_INVALID, 0)
+        _expect_error(String("1") + edges[k] + String("\r\n"), d, PARSE_ERR_CHUNK_SIZE_INVALID, 0)
+    # The range ends themselves are digits: "Ff" is 255 bytes of data.
+    var r = _run(String("Ff\r\n") + _repeat(String("x"), 255) + String("\r\n0\r\n\r\n"), d)
+    assert_equal(Int(r[0]), Int(CHUNKED_RES_DONE))
+    assert_equal(r[4], 255)
 
 
 def test_hex_value() raises:
@@ -304,6 +328,8 @@ def test_hex_value() raises:
     assert_equal(_hex_value(UInt8(ord("G"))), -1)
     assert_equal(_hex_value(UInt8(ord("/"))), -1)
     assert_equal(_hex_value(UInt8(ord(":"))), -1)
+    assert_equal(_hex_value(UInt8(ord("@"))), -1)
+    assert_equal(_hex_value(UInt8(ord("`"))), -1)
     assert_equal(_hex_value(UInt8(0xFF)), -1)
 
 
@@ -317,5 +343,6 @@ def main() raises:
     test_trailer_complete_line_ceilings()
     test_trailer_field_octets()
     test_called_again_after_done_and_error()
+    test_size_digit_range_edges()
     test_hex_value()
     print("PASS test_cov_chunked_decoder")
