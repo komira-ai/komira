@@ -371,12 +371,19 @@ def test_wide_string_left_side_does_not_build_against_the_cost() raises:
 
 def test_both_sides_wide_string_leaves_the_cost_decision() raises:
     """The override cannot help when both sides are wide-STRING: the cost
-    decides (L is cheaper: LEFT). Catches either override firing when both
-    are wide."""
+    decides, in both directions. L cheaper: LEFT, which catches the
+    left-side override (build RIGHT) firing when both are wide. R cheaper:
+    RIGHT, which catches the right-side override (build LEFT) firing when
+    both are wide; the first case cannot see that mutant, since there the
+    cost already says LEFT."""
     var j = _join(_wide_string("l", "a", 10), _wide_string("r", "b", 1000), "a", "b", JOIN_INNER)
     var before = j.structural_hash()
     var out = select_join_build_side(j^)
     _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_LEFT)
+
+    var k = _join(_wide_string("l", "a", 1000), _wide_string("r", "b", 10), "a", "b", JOIN_INNER)
+    var kb = k.structural_hash()
+    _assert_only_build_side_changed(select_join_build_side(k^), kb, JOIN_BUILD_SIDE_RIGHT)
 
 
 def test_multi_key_join_skips_the_string_override() raises:
@@ -480,6 +487,95 @@ def test_the_rule_is_idempotent() raises:
     var twice = select_join_build_side(once^)
     assert_equal(twice.structural_hash(), h)
     assert_equal(_side(twice), Int(JOIN_BUILD_SIDE_LEFT))
+
+
+def _overwrites(var j: LogicalPlan, stale: UInt8, want: UInt8, what: String) raises:
+    """Records `stale` on the root join of `j`, runs the rule, and requires
+    `want` with nothing else changed."""
+    var before = j.structural_hash()
+    j._join.value()[].build_side = stale
+    var out = select_join_build_side(j^)
+    assert_equal(_side(out), Int(want), what)
+    _assert_only_build_side_changed(out^, before, want)
+
+
+def test_a_stale_inner_decision_is_overwritten() raises:
+    """A join can arrive with a build side already recorded: `optimize` run
+    again over an optimized plan whose child an in-place pass has changed.
+    The rule recomputes; it never keeps a recorded side. Stale LEFT where the
+    cost says RIGHT, stale RIGHT where it says LEFT, and the same for each
+    STRING-override arm (each recorded against what the override decides),
+    and for a join below another join. Catches the rule keeping a stale
+    decision (returning the recorded side when it is not UNSET), whether at
+    the top of the decision or in the join arm of the walk."""
+    var ln: List[String] = ["a", "lv"]
+    var rn: List[String] = ["b", "rv"]
+    _overwrites(
+        _join(_ints("l", ln, 1000), _ints("r", rn, 10), "a", "b", JOIN_INNER),
+        JOIN_BUILD_SIDE_LEFT, JOIN_BUILD_SIDE_RIGHT, "cost RIGHT, stale LEFT",
+    )
+    _overwrites(
+        _small_left_inner(),
+        JOIN_BUILD_SIDE_RIGHT, JOIN_BUILD_SIDE_LEFT, "cost LEFT, stale RIGHT",
+    )
+    _overwrites(
+        _join(_ints("l", ln, 1000), _wide_string("r", "b", 10), "a", "b", JOIN_INNER),
+        JOIN_BUILD_SIDE_RIGHT, JOIN_BUILD_SIDE_LEFT, "wide right, stale RIGHT",
+    )
+    _overwrites(
+        _join(_wide_string("l", "a", 10), _ints("r", rn, 1000), "a", "b", JOIN_INNER),
+        JOIN_BUILD_SIDE_LEFT, JOIN_BUILD_SIDE_RIGHT, "wide left, stale LEFT",
+    )
+    _overwrites(
+        _join(_wide_string("l", "a", 1000), _wide_string("r", "b", 10), "a", "b", JOIN_INNER),
+        JOIN_BUILD_SIDE_LEFT, JOIN_BUILD_SIDE_RIGHT, "both wide, stale LEFT",
+    )
+
+    # A stale decision on a join below a join: the child is recomputed too.
+    var xn: List[String] = ["x", "xv"]
+    var inner = _small_left_inner()
+    var j = _join(inner^, _ints("x", xn, 1000000), "a", "x", JOIN_INNER)
+    var before = j.structural_hash()
+    j._join.value()[].left[]._join.value()[].build_side = JOIN_BUILD_SIDE_RIGHT
+    var out = select_join_build_side(j^)
+    assert_equal(
+        _side(out._join.value()[].left[]), Int(JOIN_BUILD_SIDE_LEFT),
+        "child join: cost LEFT, stale RIGHT",
+    )
+    _clear_build_sides(out)
+    assert_equal(out.structural_hash(), before)
+
+
+def test_a_stale_left_on_a_right_only_join_is_overwritten() raises:
+    """Every join the rule must build RIGHT, arriving with LEFT recorded:
+    each non-INNER join type, and an INNER join with a residual, both over a
+    cheaper left side. Catches the residual guard or the non-INNER fall-
+    through keeping a stale decision instead of returning RIGHT (a stale
+    LEFT kept on such a join is a pair the design admits in no contract
+    version)."""
+    var types: List[UInt8] = [
+        JOIN_LEFT, JOIN_RIGHT, JOIN_FULL, JOIN_SEMI, JOIN_ANTI, JOIN_CROSS
+    ]
+    var ln: List[String] = ["a", "lv"]
+    var rn: List[String] = ["b", "rv"]
+    for i in range(len(types)):
+        _overwrites(
+            _join(_ints("l", ln, 10), _ints("r", rn, 1000), "a", "b", types[i]),
+            JOIN_BUILD_SIDE_LEFT, JOIN_BUILD_SIDE_RIGHT,
+            "join type " + String(Int(types[i])) + ", stale LEFT",
+        )
+    var lo: List[String] = ["a"]
+    var ro: List[String] = ["b"]
+    var res = Optional[OwnedPointer[Expr]](
+        OwnedPointer(Expr.binary(BIN_LT, Expr.col_ref("lv"), Expr.col_ref("rv")))
+    )
+    _overwrites(
+        LogicalPlan.join(
+            _ints("l", ln, 10), _ints("r", rn, 1000), lo^, ro^, JOIN_INNER,
+            JOIN_ALGO_AUTO, res^,
+        ),
+        JOIN_BUILD_SIDE_LEFT, JOIN_BUILD_SIDE_RIGHT, "residual, stale LEFT",
+    )
 
 
 # -----------------------------------------------------------------------------
