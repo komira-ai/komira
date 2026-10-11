@@ -34,6 +34,26 @@ native_reach_case(
     visibility = _PUBLIC,
 )
 
+# Links a vendored archive whose THIRD_PARTY_OWNERS row names no owner
+# (sha1dc: only tests and the one-definition gate link it).
+native_reach_case(
+    name = "archive_no_owner",
+    srcs = ["plain.mojo"],
+    deps = ["komira//third_party/sha1collisiondetection:sha1dc"],
+    expect_archives = ["links komira//third_party/sha1collisiondetection:sha1dc: no library ships third_party/sha1collisiondetection (THIRD_PARTY_OWNERS)"],
+    visibility = _PUBLIC,
+)
+
+# Links an archive of a third_party package with no THIRD_PARTY_OWNERS row
+# at all (tests//third_party/native_reach_no_row, a package of this cell).
+native_reach_case(
+    name = "archive_no_row",
+    srcs = ["plain.mojo"],
+    deps = ["//third_party/native_reach_no_row:no_row"],
+    expect_archives = ["links tests//third_party/native_reach_no_row:no_row: third_party/native_reach_no_row has no row in THIRD_PARTY_OWNERS"],
+    visibility = _PUBLIC,
+)
+
 # A C library of no owner (outside src/ and third_party/) whose link needs
 # aws-lc: the archive the library names is not the one refused.
 cxx_library(

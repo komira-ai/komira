@@ -8,6 +8,8 @@ filegroup(
         "//negative/native_reach:" + name
         for name in [
             "archive_needed_by_c_dep",
+            "archive_no_owner",
+            "archive_no_row",
             "archive_owner_missing",
             "call_in_comment",
             "call_owner_missing",
@@ -15,5 +17,8 @@ filegroup(
             "owner_through_mojo_dep",
             "vendored_owner_missing",
         ]
+    ] + [
+        # A case in a package under src/ (not src/tests/): the check runs.
+        "//src/native_reach:shipped_library_checked",
     ],
 )

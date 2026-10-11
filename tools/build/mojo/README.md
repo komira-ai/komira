@@ -852,10 +852,12 @@ tests.
 The check's cases are `native_reach_case` targets in
 [`tests//negative/native_reach`](../tests/negative/native_reach/BUCK): each
 runs the same check on a library's sources and deps with one planted defect
-(an archive whose owner is missing, an archive a C dep needs, a prefixed
-`external_call` with no archive dep, the scanner's quoting) and builds only
-while the check refuses it with the named error, or passes a correct tree.
-`tests//functional/native_reach:cases` builds them all.
+(an archive whose owner is missing, an archive a C dep needs, a third_party
+archive with no owner row or a row with no owner, a prefixed `external_call`
+with no archive dep, the scanner's quoting) and builds only while the check
+refuses it with the named error, or passes a correct tree. One case sits in
+`tests//src/native_reach`, under `src/` but not `src/tests/`, so a wider
+exemption fails it. `tests//functional/native_reach:cases` builds them all.
 
 ## Coverage builds
 

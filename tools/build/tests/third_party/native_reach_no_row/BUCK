@@ -1,0 +1,9 @@
+# A vendored-looking C library whose package (third_party/native_reach_no_row)
+# has no THIRD_PARTY_OWNERS row (tools/build/one_definition/libraries.bzl):
+# the native-reach check must refuse any library linking it
+# (tests//negative/native_reach:archive_no_row).
+cxx_library(
+    name = "no_row",
+    srcs = ["no_row.c"],
+    visibility = ["//negative/native_reach:archive_no_row"],
+)
