@@ -208,6 +208,16 @@ test "the dump's last line gets a newline when lld's stderr has none" {
     try testing.expectEqualStrings(d, try c.tmp.dir.readFileAlloc(c.a(), "out/test_one.ll", 1 << 20));
 }
 
+test "a blank last line of the dump is kept: only one final newline ends the text" {
+    var c = try Case.init();
+    defer c.deinit();
+    const d = try fx.dump(c.a(), &fx.FNS);
+    const blank = try std.mem.concat(c.a(), u8, &.{ d, "\n" });
+    c.fake.lld_err = blank;
+    try testing.expectEqual(@as(u8, 0), try c.go());
+    try testing.expectEqualStrings(blank, try c.tmp.dir.readFileAlloc(c.a(), "out/test_one.ll", 1 << 20));
+}
+
 test "usage errors: a missing, repeated, empty or unknown flag, a flag without a value" {
     const cases = [_]struct { args: []const []const u8, msg: []const u8 }{
         .{ .args = &.{}, .msg = "--lld is missing" },
@@ -330,6 +340,17 @@ test "step 1: two data or counter sections, or none, are refused" {
     }
 }
 
+test "step 1: a section name ends at a newline as at a NUL, within its 16 bytes" {
+    var c = try Case.init();
+    defer c.deinit();
+    try c.put("in/test_one", try fx.elf(c.a(), &.{
+        .{ .name = "__llvm_prf_cnts", .size = fx.cntsSize(&fx.FNS) },
+        .{ .name = "__llvm_prf_data\nx", .bytes = try fx.dataOf(c.a(), &fx.FNS) },
+    }, .{}));
+    try testing.expectEqual(@as(u8, 0), try c.go());
+    try testing.expectEqualStrings("", c.err.items);
+}
+
 test "step 1: a data section that is not whole 72-byte records, or whose counters do not fill the counter section, is refused" {
     const a = std.heap.page_allocator;
     const data = try fx.dataOf(a, &fx.FNS);
@@ -385,6 +406,8 @@ test "step 1: a listing the tool cannot read is refused with its line" {
         // A hash in capitals, or with no digit.
         .{ .text = "Counters:\n  main:\n    Hash: 0xABC\nTotal functions: 1\n", .line = "line 3" },
         .{ .text = "Counters:\n  main:\n    Hash: 0x\nTotal functions: 1\n", .line = "line 3" },
+        // A hash with a letter past f.
+        .{ .text = "Counters:\n  main:\n    Hash: 0x1g\nTotal functions: 1\n", .line = "line 3" },
         // Two names in a row.
         .{ .text = "  a:\n  b:\n    Hash: 0x1\nTotal functions: 1\n", .line = "line 2" },
     };
@@ -394,6 +417,15 @@ test "step 1: a listing the tool cannot read is refused with its line" {
         c.fake.show_text = l.text;
         try c.refused(try std.fmt.allocPrint(c.a(), "the function list of in/test_one.profdata could not be read (llvm-profdata show, {s})", .{l.line}));
     }
+}
+
+test "step 1: a line of three spaces before its text is not a function name" {
+    var c = try Case.init();
+    defer c.deinit();
+    const s = try fx.show(c.a(), &fx.FNS);
+    c.fake.show_text = try std.mem.replaceOwned(u8, c.a(), s, "Counters:\n", "Counters:\n   x:\n");
+    try testing.expectEqual(@as(u8, 0), try c.go());
+    try testing.expectEqualStrings("", c.err.items);
 }
 
 test "step 1: the functions read must be the count show reports, given once" {
@@ -530,7 +562,8 @@ test "step 3: a diagnostic of lld before the dump is refused, a missing-function
 test "step 3: a line of lld's own inside the dump is refused; the first five named, each cut to 300 bytes" {
     const a = std.heap.page_allocator;
     const d = try fx.dump(a, &fx.FNS);
-    for ([_][]const u8{ "lld: warning: late\n", "ld.lld: error: late\n", "warning: late\n", "error: late\n" }) |l| {
+    // A missing-function line is lld's own too, once the dump has started.
+    for ([_][]const u8{ "lld: warning: late\n", "ld.lld: error: late\n", "warning: late\n", "error: late\n", "lld: warning: ld-temp.o: no profile data available for function late Hash = 1234 up to 0 count discarded\n" }) |l| {
         var c = try Case.init();
         defer c.deinit();
         c.fake.lld_err = try std.mem.concat(c.a(), u8, &.{ d, l });
@@ -577,6 +610,14 @@ test "step 3: no dump, or two, is refused" {
         defer c.deinit();
         const d = try fx.dump(c.a(), &fx.FNS);
         c.fake.lld_err = try std.mem.concat(c.a(), u8, &.{ d, "; *** IR Dump After Other on [module] ***\n" });
+        try c.refused("lld printed 2 IR dumps, expected exactly one");
+    }
+    {
+        // A header is counted anywhere in its line, as `grep -c -F` counts.
+        var c = try Case.init();
+        defer c.deinit();
+        const d = try fx.dump(c.a(), &fx.FNS);
+        c.fake.lld_err = try std.mem.concat(c.a(), u8, &.{ d, "  ; *** IR Dump After Other on [module] ***\n" });
         try c.refused("lld printed 2 IR dumps, expected exactly one");
     }
 }
