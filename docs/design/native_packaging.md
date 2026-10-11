@@ -18,9 +18,10 @@ into it). They stay on hold until this plan is approved and are then closed; wha
 "What happens to each open PR".
 
 **Stages**, as the glossary of [staged_pipeline.md](staged_pipeline.md) names them (its follow-up
-#1184, open, writes the glossary): **beta** builds once, publishes the packages to the `beta` conda
-channel, installs from it and runs the README examples and the package test tiers; **gamma** is only
-real resources in the gamma cloud accounts (deploys and real-cloud validations) and names no conda
+#1184, merged, holds the [glossary](staged_pipeline.md#glossary)): **beta** builds once, publishes
+the packages to the `beta` conda channel, installs from it and runs the README examples and the
+package test tiers; **gamma** is only real resources in the gamma cloud accounts (deploys and
+real-cloud validations) and names no conda
 channel; **prod** promotes the same bytes to the prod channel. Every check of an installed native
 package below is therefore beta's, in its install job: `beta_install`, the name staged_pipeline.md
 on `main` uses; continuous_publish.md already calls it `beta_validate`, the name #1184 gives it.
@@ -74,7 +75,7 @@ on `main` uses; continuous_publish.md already calls it `beta_validate`, the name
 | conda metadata kinds | **EXISTS:** `library` and `metapackage` only (`src/kci_release_set/conda_metadata.mojo`) | no new kind. `lib_files`, `native_owns`, `native_links`, `dlopen` fields on `library` (slices 3, 8) |
 | kind `native`, `lib_files`, `native_link_args` | on #695 and #704 only | `lib_files` survives on `library`; the kind goes |
 | dlopen declarations | the packer refuses any `OwnedDLHandle` (above). `mojo_library(dlopen = ...)` and `tools/build/package/system_libs.bzl` on #685 only; kci's acceptance of the requirements (`src/kci_release_set/system_libs.mojo`) on #704 only (from #763) | slice 3, ahead of the shared libraries |
-| beta stage, `beta_install` | design only ([staged_pipeline.md](staged_pipeline.md), merged; its follow-up #1184 on gamma is open). `kci.yml` runs `build → gamma → validate → prod` | native install checks run only in `beta_install` (section "Built once"); gamma runs none |
+| beta stage, `beta_install` | design only ([staged_pipeline.md](staged_pipeline.md), merged; its follow-up #1184 on gamma merged). `kci.yml` runs `build → beta → beta_validate → prod` (`gamma` and `validate` before M2) | native install checks run only in `beta_install` (section "Built once"); gamma runs none |
 
 ## What each library ships
 
@@ -318,8 +319,8 @@ no exception:
 
 - **Where they are built.** Each `.so` is a build action of `<lib>_conda[release]`, so the `build`
   job (on the farm, with the release stamp) links it, runs checks 1 to 7 on it, and packs it into the
-  library's `.conda`. No later job compiles or links anything: `beta`, `beta_install`, `gamma`,
-  `validate` and `prod` download the run's `kci-release-<revision>` artifact.
+  library's `.conda`. No later job compiles or links anything: `beta`, `beta_validate`, `gamma`
+  and `prod` download the run's `kci-release-<revision>` artifact.
 - **How the set hash covers them.** The set hash has one line per artifact with the sha256 of its
   `.conda` (**EXISTS:** `set_hash.mojo`), and the `.so` is inside that file, so any change to a `.so`
   changes the hash and every later stage refuses the set before any effect (`KCI-E-SET-HASH`, exit 3).
@@ -431,7 +432,7 @@ channel, a new package name, or a change to what a release publishes.
 | 10 | **README link commands and every owner called** (question 5a): the packer writes the `sh` block; the readme tool parses it; the install validation uses it or refuses a difference; the build refuses an owner whose README program references none of its exports; komira_metrics's and komira_scan_source's READMEs gain an example reaching their C | planted: a README without an owner's `-l` (install validation red); komira_metrics's README without its new example (build red) | none |
 | 11 | **beta wiring**: install checks 3 to 7 run in `beta_install` for every package (install check 5 is already there for slice 4's `dlopen` packages; this slice runs the rows slice 9 adds; needs the staged pipeline's P4, which creates the job) | nothing on `main` can be red (the job does not exist); shown by mutants on the new job: a `.so` changed after `build` is refused by step 4b (mutant: skip step 4b in `beta_install`), and a planted `.so` with an unresolved symbol makes row 4 red | **Go**: it changes the release (inherits P4's go) |
 | 12 | **the release set**: declare the first native batch (the owners and their dependents up to the cloud SDKs, question 9) in `release/artifacts.textproto` and `release_set.txt` | `release_set_check` red on a batch member listed before an owner it requires | **Go**: new package names on the channel, a change to what beta and prod publish |
-| 13 | **gamma_validation.md** rewritten: its `komira_native` rows are replaced by a pointer to this doc's beta install checks, and `gamma_validation_decisions.md` likewise; its stage and channel text (gamma publishing to and installing from a `gamma` conda channel, which is today's `kci.yml`) is rewritten to #1184's glossary, replacing its "Vocabulary" note, since #1184 does not edit this file | `komira_native` joins the root `retired_names` lint (root `BUCK`), which refuses a retired name outside a dated history note: red while either doc still carries it (the doc links lint cannot go red on a content rewrite); every mention left in this doc moves onto a dated history line | none |
+| 13 | **gamma_validation.md** rewritten: its `komira_native` rows are replaced by a pointer to this doc's beta install checks, and `gamma_validation_decisions.md` likewise; its stage and channel text (gamma publishing to and installing from a `gamma` conda channel, which was `kci.yml`'s before M2) is rewritten to #1184's glossary, replacing its "Vocabulary" note, since #1184 does not edit this file | `komira_native` joins the root `retired_names` lint (root `BUCK`), which refuses a retired name outside a dated history note: red while either doc still carries it (the doc links lint cannot go red on a content rewrite); every mention left in this doc moves onto a dated history line | none |
 
 Slices 1, 2 and 3 are independent; 4 needs 1, 3 and P4; 5 to 10 are a chain (5 needs nothing
 earlier); 11 needs 9, 10 and P4; 12 needs 11; 13 needs 2. **No library with native code or a
@@ -472,7 +473,7 @@ until it has welded tests).
    nowhere in a release; they run only in beta's install job (slice 11, after P4), and no library
    with native code or a dlopened codec is declared (slices 4 and 12) before then. Gamma no longer
    installs packages, so the earlier draft's interim home (gamma's `validate`) is gone. The
-   alternative is an interim run in today's `validate` job, which the staged pipeline then moves to
+   alternative is an interim run in today's `beta_validate` job, which the staged pipeline then moves to
    `beta_install`: earlier releases, and a job that P4 rewrites.
 8. **Keep the glibc floor at 2.34?** The floor already exists: `os_floor` `glibc-2.34` in
    `tools/build/platforms/table.bzl`, which zig links against. Recommended: keep it; the packer
