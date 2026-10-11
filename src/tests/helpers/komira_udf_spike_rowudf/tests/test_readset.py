@@ -42,7 +42,7 @@ Every single-point mutant of komira_udf_readset.py was run against this
 file (the PR's mutation scorecard). Mutant planted by hand:
 komira_udf_readset.scan without its LOAD_CONST + BINARY_SUBSCR arm (a
 constant subscript treated as a whole-row use): red (price_qty_keys came
-out every_column); scan without its dunder arm (the input has no
+out every_column, now absent); scan without its dunder arm (the input has no
 '__class__': UDF_ROW_COLUMN_UNKNOWN); a recording row that answers a name
 from its own attributes first (it recorded ['_read', '_mark', 'keys'],
 missing '_reads', '_values' and '_whole').
@@ -342,6 +342,8 @@ def test_presence():
     # A repeated declared name is refused naming it.
     msg = expect_error("UDF_ROW_READ_SET_INVALID", rs.read_set, udf_rows.price_qty, COLS, columns=["qty", "price", "qty"])
     assert msg == "UDF_ROW_READ_SET_INVALID: columns=[...] names 'qty' twice", msg
+    msg = expect_error("UDF_ROW_READ_SET_INVALID", rs.read_set, udf_rows.price_qty, COLS, columns=["price", "c0", "c0"])
+    assert msg == "UDF_ROW_READ_SET_INVALID: columns=[...] names 'c0' twice", msg
     # ABSENT runs no sample: there is no read set to check it against.
     calls = []
     def counted(row):
