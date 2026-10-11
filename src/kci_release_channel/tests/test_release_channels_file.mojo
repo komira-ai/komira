@@ -1,11 +1,11 @@
 # =============================================================================
 # src/kci_release_channel/tests/test_release_channels_file.mojo
 #   The repository's own channels file, release/channels.textproto, read
-#   through the real parser: exactly two channels, `gamma` and `prod`, the
-#   public prefix.dev conda channels komira-ai/gamma and komira-ai/prod, each
-#   pushed to by trusted publishing from its own GitHub environment only;
-#   gamma also from the break-glass environment gamma-breakglass, prod from
-#   nothing else.
+#   through the real parser: exactly two channels, `beta` and `prod`, the
+#   public prefix.dev conda channels komira-ai/beta and komira-ai/prod, each
+#   pushed to by trusted publishing from its own GitHub environment only and
+#   from no break-glass environment (no channel is named `gamma`: gamma is a
+#   stage of real cloud resources and publishes nothing).
 # =============================================================================
 #
 # The file is staged as test data at `channels.textproto` (BUCK). A typo in
@@ -31,10 +31,10 @@ def _read() raises -> String:
     return Path(String("channels.textproto")).read_text()
 
 
-def test_the_two_channels_are_gamma_and_prod() raises:
+def test_the_two_channels_are_beta_and_prod() raises:
     var channels = parse_channels_file(_read())
     assert_equal(len(channels), 2)
-    assert_equal(channels[0].name, String("gamma"))
+    assert_equal(channels[0].name, String("beta"))
     assert_equal(channels[1].name, String("prod"))
     for i in range(len(channels)):
         assert_true(channels[i].is_public())
@@ -60,10 +60,11 @@ def _break_glass_env(name: String) raises -> String:
     return break_glass_push_identity_environment(ch.repository_for(String(ARTIFACT_TYPE_CONDA)))
 
 
-def test_gamma_is_komira_ai_gamma_by_trusted_publishing_from_environment_gamma() raises:
-    _check(String("gamma"))
-    # a break-glass run publishes from its own environment (required reviewer)
-    assert_equal(_break_glass_env(String("gamma")), String("gamma-breakglass"))
+def test_beta_is_komira_ai_beta_by_trusted_publishing_from_environment_beta() raises:
+    _check(String("beta"))
+    # no break-glass run reaches beta: a manual run builds only, and the
+    # channel trusts no second environment (no `beta-breakglass` exists)
+    assert_equal(_break_glass_env(String("beta")), String(""))
 
 
 def test_prod_is_komira_ai_prod_by_trusted_publishing_from_environment_prod() raises:

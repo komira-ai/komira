@@ -2,6 +2,7 @@ load("@komira//tools/build/coverage:census.bzl", "coverage_census")
 load("@komira//tools/build/coverage:defs.bzl", "cov_gate_dir")
 load("@komira//tools/build/coverage/branch:defs.bzl", "cov_branch_dir")
 load("@komira//tools/build/coverage/kcov:defs.bzl", "cov_link_dir", "cov_run_dir")
+load("@komira//tools/build/lint:defs.bzl", "target_suite")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "mojo_shared_lib_rule", "mojo_test")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
@@ -1070,4 +1071,52 @@ mojo_library(
     coverage_mode = "census",
     import_name = "lostlib",
     test_srcs = ["lostlib/value.mojo"],
+)
+
+# The targets of this package that must build, beside the planted defects
+# they serve, and the green sub-targets: komira//:tests_greens names this
+# target, so the pull-request check builds them. Release gates of the
+# coverage-run fixtures (tracer, lost, orphan, linger, covso_skip: each test
+# passes outside kcov) and two of their runs that must pass; the census
+# twins of the enforce fixtures and the enforce gates every arm of whose
+# decisions is taken; the census check over what census.sh renders; the
+# release gates of the mojo_test coverage fixture; and the release gates of
+# the branch-run fixtures.
+target_suite(
+    name = "greens",
+    targets = [
+        ":tracer",
+        ":lost",
+        ":orphan",
+        ":orphan[coverage]",
+        ":linger",
+        ":linger[coverage][tests][test_brief]",
+        ":covso_skip",
+        ":covlow_census_result",
+        ":covnotests_census_result",
+        ":covun_census_result",
+        ":covfull_census_result",
+        ":covfull_unread_census_result",
+        ":covtop_census_result",
+        ":covbranch_census_result",
+        ":covtry_census_result",
+        ":covandor_census_result",
+        ":covbranch_both[coverage][gate]",
+        ":covtry_both[coverage][gate]",
+        ":covandor_both[coverage][gate]",
+        ":covfull[coverage][gate]",
+        ":census_ok",
+        ":tracer_mt",
+        ":test_tracer_mt",
+        ":branchfail",
+        ":branchannotate",
+        ":branchnoprof",
+        ":branchversion",
+        ":branchmissing",
+        ":branchweights",
+        ":branchinternal",
+        ":branchentry",
+        ":branchnodebug",
+    ],
+    visibility = ["komira//:tests_greens"],
 )
