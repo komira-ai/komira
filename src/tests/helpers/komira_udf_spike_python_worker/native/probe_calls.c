@@ -23,8 +23,8 @@
  *   two_udfs   two UDFs of different arity loaded before the context opened
  *              (zygote: before the fork), an instance of each in one context,
  *              called in turn: each runs its own UDF and schema.
- *   many_calls 400 calls of keep_then_drop (it holds its input's slot on its
- *              first 30 calls): every call answers and the heap never fills.
+ *   many_calls eight rounds of 40 calls that hold their input's slot and one
+ *              that lets all go: every call answers and the heap never fills.
  *   nulls      a null in the last row of 9 (SCALAR) and in an 8-row column
  *              result: every value and bit.
  *   trace      a user error's trace is its Python traceback.
@@ -582,36 +582,40 @@ static void group_two_udfs(struct eng* e, struct pj* j) {
   e->t->unload(pa);
 }
 
-/* 200 calls of keep_then_drop (it keeps a view of its input, so the slot
- * it came in stays held, on its first 30 calls, then lets all go): every
- * call answers, and the heap never fills (each slot comes back through
- * the release ring with its own id; 200 calls wrap the ring's 256 entries
- * with the 30 held ones). */
+/* Eight rounds of 40 calls of keep_view (each keeps a view of its input,
+ * so the slot it came in stays held) and one of drop_views (all let go),
+ * in one worker: every call answers and the heap never fills, since each
+ * round's 40 slots come back through the release ring with their own ids
+ * (a worker that released them under another id would leak 40 a round,
+ * and the second round would find no slot). */
 static void group_many_calls(struct eng* e, struct pj* j) {
-  komira_udf_udf* u = NULL;
+  komira_udf_udf *uk = NULL, *ud = NULL;
   komira_udf_context* c = NULL;
-  komira_udf_instance* i = NULL;
-  if (!setup_as(e, j, "many_calls", "udf_worker_np:keep_then_drop", 1, KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN, "g", &u,
-                &c, &i))
+  komira_udf_instance *ik = NULL, *id = NULL;
+  if (!setup_as(e, j, "many_calls", "udf_np:keep_view", 1, KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN, "g", &uk, &c, &ik) ||
+      !setup_as(e, j, "many_calls", "udf_np:drop_views", 1, KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN, "g", &ud, &c, &id))
     return;
   heap_full_logs = 0;
   int failed = 0;
   char m[512] = "OK";
-  for (int k = 0; k < 400; k++) {
+  for (int k = 0; k < 8 * 41; k++) {
     const struct col_spec cs[1] = {{0, 16, 0, k, -1}};
     int released = 0;
     struct ArrowDeviceArray args, out;
     int64_t ms;
     make_args(&args, 16, 1, cs, &released);
-    if (call(e, i, &args, &out, m, sizeof(m), -1, 0, &ms, sizeof(komira_udf_call)) == KOMIRA_UDF_OK)
+    if (call(e, k % 41 == 40 ? id : ik, &args, &out, m, sizeof(m), -1, 0, &ms, sizeof(komira_udf_call)) ==
+        KOMIRA_UDF_OK)
       out.array.release(&out.array);
     else
       failed++;
   }
   pj_case(j, "many_calls", failed, failed ? m : "OK", heap_full_logs);
-  e->t->close_instance(i);
+  e->t->close_instance(id);
+  e->t->close_instance(ik);
   e->t->close_context(c);
-  e->t->unload(u);
+  e->t->unload(ud);
+  e->t->unload(uk);
 }
 
 /* Nulls at the bitmap's edges: null_on_zero over 9 rows whose last is 0

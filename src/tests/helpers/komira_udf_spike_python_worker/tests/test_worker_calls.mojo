@@ -35,8 +35,8 @@
 #   - and the cases the scripted mutation sweep asked for (native/
 #     probe_calls.c's newer groups): a cancelled call leaves its context
 #     serving; two UDFs in one context each run their own code and schema;
-#     400 calls never fill the heap (each slot released with its own id
-#     through a ring that wraps); nulls at a bitmap byte's edges; a user
+#     eight rounds of 40 held slots never fill the heap (each slot released
+#     with its own id); nulls at a bitmap byte's edges; a user
 #     error's Python traceback; a result over the reply heap; three clock
 #     reads under 1.5 s; no engine heap growth over 200 refusals, loads and
 #     instances; the library opened by its absolute path.
@@ -125,7 +125,7 @@ def main() raises:
     for v in ["spawn", "zygote"]:
         var mc = probe_calls("./pyworker_" + v + ".so", "many_calls")
         assert_equal(num(mc.get("many_calls"), "status"), 0, v + ": " + text(mc.get("many_calls"), "message"))
-        assert_equal(num(mc.get("many_calls"), "value"), 0, v + ": heap-full warnings over 400 calls")
+        assert_equal(num(mc.get("many_calls"), "value"), 0, v + ": heap-full warnings over 8 rounds of 40 held slots")
         var ct = probe_calls("./pyworker_" + v + ".so", "clock_time")
         assert_equal(num(ct.get("clock_time"), "status"), 0, v + ": " + text(ct.get("clock_time"), "message"))
         assert_true(num(ct.get("clock_time"), "value") < 1500, v + ": 3 clock reads took " + String(num(ct.get("clock_time"), "value")) + " ms")
