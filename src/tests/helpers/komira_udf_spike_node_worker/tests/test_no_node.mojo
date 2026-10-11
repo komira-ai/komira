@@ -14,9 +14,11 @@
 from std.testing import assert_true
 
 from komira_udf_spike_abi.runtime import UdfRuntime
+from komira_udf_spike_node_worker.watchdog import arm_watchdog
 
 
 def main() raises:
+    arm_watchdog()
     var why = String("")
     try:
         var rt = UdfRuntime.open("./node_worker.so")

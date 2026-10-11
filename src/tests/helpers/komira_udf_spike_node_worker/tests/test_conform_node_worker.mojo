@@ -38,6 +38,7 @@ from std.testing import assert_equal, assert_true
 
 from komira_udf_spike_abi.conform import run_suite
 from komira_udf_spike_node_worker.node_cases import node_cases
+from komira_udf_spike_node_worker.watchdog import arm_watchdog
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
 comptime RUN = 51
@@ -45,6 +46,7 @@ comptime RUN = 51
 
 
 def main() raises:
+    arm_watchdog()
     var cases = node_cases(CASES)
     assert_equal(len(cases), RUN, "cases loaded from " + CASES)
     var report = run_suite("./node_worker.so", cases)

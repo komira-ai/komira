@@ -14,4 +14,6 @@ measures it on N engine threads. Test-only spike code.
 - node_cases: the shared conformance cases of komira_udf_spike_abi that user
   code can express, with their entries in this runtime's `<bundle>#<export>`
   form.
+- watchdog: arm_watchdog, the alarm each test arms so a hang fails it
+  instead of holding its build action.
 """

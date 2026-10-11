@@ -88,6 +88,7 @@ from std.testing import assert_equal, assert_true
 from komira_udf_spike_abi.contract import *
 from komira_udf_spike_abi.runtime import CallOptions, Handle, Outcome, UdfRuntime, UdfSpec
 from komira_udf_spike_abi.values import Batch, Column, ColumnType, TYPE_FLOAT64, TYPE_INT32, TYPE_INT64
+from komira_udf_spike_node_worker.watchdog import arm_watchdog
 
 comptime LIB = "./node_worker.so"
 comptime CORRUPT_LIB = "./node_worker_corrupt.so"
@@ -448,6 +449,7 @@ def _corrupt_outputs() raises:
 
 
 def main() raises:
+    arm_watchdog()
     var rt = UdfRuntime.open(LIB)
     _describe(rt)
     _validate(rt)

@@ -26,6 +26,7 @@ from komira_json import JsonValue, parse_json_value
 
 from komira_udf_spike_abi.contract import SHAPE_SCALAR
 from komira_udf_spike_node_worker.engine import CHECK_AFFINE, CHECK_ROWS, Workload, run
+from komira_udf_spike_node_worker.watchdog import arm_watchdog
 
 comptime LIB = "./node_worker.so"
 
@@ -50,6 +51,7 @@ def _ok(r: JsonValue, what: String) raises:
 
 
 def main() raises:
+    arm_watchdog()
     _neutral()
     var r = parse_json_value(
         run(LIB, Workload("fahrenheit.mjs#fahrenheitRow", SHAPE_SCALAR, "g", 4, 1024, 20, 20, 0, CHECK_AFFINE, 1.8, 32.0))
