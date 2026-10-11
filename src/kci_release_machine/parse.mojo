@@ -16,7 +16,7 @@
 #     }
 #   }
 #   stage {
-#     name: "gamma"
+#     name: "beta"
 #     after: "build"
 #     step {
 #       name: "publish"
@@ -24,7 +24,7 @@
 #       platform: "linux-x86_64"
 #       artifacts: "release/artifacts.textproto"
 #       channels: "release/channels.textproto"
-#       channel: "gamma"
+#       channel: "beta"
 #       validation {
 #         name: "install"
 #         kind: CONDA_INSTALL_SMOKE
@@ -40,7 +40,7 @@
 #   }
 #   stage {
 #     name: "prod"
-#     after: "gamma"
+#     after: "beta"
 #     step { ... channel: "prod" }
 #   }
 #
