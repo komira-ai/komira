@@ -42,15 +42,13 @@
 #      gets no LLVM_PROFILE_FILE: no .profraw), branchversion[...] red (a
 #      copy reading each raw profile's version as 12: refused as version 12,
 #      not 11), branchannotate[coverage][branch_ir][test_one] red (a
-#      cov_branch_annotate.sh copy changing the control flow before the
+#      copy of `cov_branch annotate` changing the control flow before the
 #      profile is applied: LLVM's hash mismatch warning, refused),
 #      branchmissing[...][branch_ir] red (a `cov_branch run` copy merging
 #      without the test's main: a function the binary links that the
 #      profile lacks, refused), branchinternal[...][branch_ir] red (a copy
 #      internalizing the bitcode before the profile is applied: a function
-#      of the profile the bitcode does not hold, refused), branchwide's
-#      [branch_ir] green (a copy padding the section-name pipeline with
-#      1 MB: its reader takes all of it, so no writer dies of SIGPIPE),
+#      of the profile the bitcode does not hold, refused),
 #      branchweights[...][branch_ir] red (a copy annotating a bitcode that
 #      already holds branch weights), branchentry[...][branch_ir] red (that
 #      copy with the weights check off: the entry counts refused), branchnodebug[...][branch_info] red
