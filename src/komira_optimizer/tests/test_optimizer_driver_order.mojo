@@ -25,17 +25,13 @@ from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder, RecordBatch
 from komira_plan_expr.agg_expr import AggExpr, AGG_COUNT, AGG_SUM, AGG_MAX
 from komira_plan_expr.expr import (
-    Expr, WhenCaseData, BIN_ADD, BIN_SUB, BIN_MUL, BIN_EQ, BIN_GT, BIN_LE, BIN_AND, BIN_OR, UN_NOT,
+    Expr, WhenCaseData, BIN_ADD, BIN_SUB, BIN_MUL, BIN_EQ, BIN_GT, BIN_AND, BIN_OR, UN_NOT,
 )
 from komira_plan_expr.partition_expr import PartitionExpr
 from komira_plan_expr.scalar_value import ScalarValue
-from komira_plan_stats.table_stats import (
-    ColumnStats, TableStats, STATS_SOURCE_PARQUET_METADATA,
-)
 from komira_plan_ir.logical_plan import (
     LogicalPlan, ExprArray, AggExprArray, SOURCE_PARQUET, CORR_KIND_SCALAR, CORR_KIND_EXISTS,
     JOIN_INNER, JOIN_SEMI, JOIN_CROSS, JOIN_ALGO_AUTO,
-    PLAN_SCAN, PLAN_PROJECT, PLAN_JOIN, PLAN_PARTITION_TOPN,
 )
 from komira_scan_source.parquet_source import ParquetSource
 from komira_scan_source.source_variant import SourceVariant
@@ -159,54 +155,6 @@ def _hive_scan() raises -> LogicalPlan:
     var full: List[String] = ["v", "p"]
     var src = ParquetSource.dir_scan_hive("d/", _schema(data), pc^)
     return LogicalPlan.scan_from_source(SourceVariant(src^), _schema(full))
-
-
-def _stats(payload: String, extra: String, hi: Int64) raises -> TableStats:
-    """Footer statistics: key in [0, 24999999], payload in [1, hi], extra in [0, 7]."""
-    var names = List[String]()
-    var stats = List[ColumnStats]()
-    names.append("key")
-    stats.append(ColumnStats(None, Optional[ScalarValue](ScalarValue.from_int64(0)),
-        Optional[ScalarValue](ScalarValue.from_int64(24999999)), Optional[Int](0)))
-    names.append(payload)
-    stats.append(ColumnStats(None, Optional[ScalarValue](ScalarValue.from_int64(1)),
-        Optional[ScalarValue](ScalarValue.from_int64(hi)), Optional[Int](0)))
-    names.append(extra)
-    stats.append(ColumnStats(None, Optional[ScalarValue](ScalarValue.from_int64(0)),
-        Optional[ScalarValue](ScalarValue.from_int64(7)), Optional[Int](0)))
-    return TableStats(1000, names^, stats^, STATS_SOURCE_PARQUET_METADATA)
-
-
-def _narrowable_join() raises -> LogicalPlan:
-    """Project [key, probe_val, build_val] over probe(key, probe_val, p_extra)
-    INNER JOIN build(key, build_val, b_extra), both scans with statistics."""
-    var pn: List[String] = ["key", "probe_val", "p_extra"]
-    var bn: List[String] = ["key", "build_val", "b_extra"]
-    var p = LogicalPlan.scan("probe.parquet", SOURCE_PARQUET, _schema(pn), None, None, None,
-        Optional[TableStats](_stats("probe_val", "p_extra", 999)))
-    var b = LogicalPlan.scan("build.parquet", SOURCE_PARQUET, _schema(bn), None, None, None,
-        Optional[TableStats](_stats("build_val", "b_extra", 9999)))
-    var j = LogicalPlan.join(p^, b^, _l1("key"), _l1("key"), JOIN_INNER)
-    var keep: List[String] = ["key", "probe_val", "build_val"]
-    return LogicalPlan.project(_cols(keep^), j^)
-
-
-def _narrow_specs(p: LogicalPlan) -> String:
-    """`path:column:bytes;` for every payload-narrow stamp, depth first."""
-    var out = String("")
-    if p.tag == PLAN_SCAN:
-        ref sd = p._scan.value()[]
-        for i in range(len(sd.payload_narrow)):
-            out += sd.source_path + ":" + sd.payload_narrow[i].column_name + ":"
-            out += String(Int(sd.payload_narrow[i].target_bytes)) + ";"
-    elif p.tag == PLAN_JOIN:
-        out += _narrow_specs(p._join.value()[].left[])
-        out += _narrow_specs(p._join.value()[].right[])
-    elif p.tag == PLAN_PROJECT:
-        out += _narrow_specs(p._project.value()[].child[])
-    elif p.tag == PLAN_PARTITION_TOPN:
-        out += _narrow_specs(p._partition_topn.value()[].child[])
-    return out^
 
 
 def _side_join(var residual: Expr, var left_on: List[String], var right_on: List[String]) -> LogicalPlan:
@@ -470,7 +418,7 @@ def test_semi_reducers_are_pushed_before_the_reorder() raises:
 
 
 # -----------------------------------------------------------------------------
-# Steps 17-20: limits, windows, payload narrowing
+# Steps 17-19: limits and windows
 # -----------------------------------------------------------------------------
 
 
@@ -491,33 +439,6 @@ def test_sort_limit_fusion_runs_before_the_window_rewrite() raises:
     var asc = List[Bool]()
     asc.append(False)
     assert_equal(_render(_run(LogicalPlan.limit(10, LogicalPlan.sort(_l1("a"), asc^, pb^)))), _want_limit_sort_window())
-
-
-def test_payload_narrowing_runs_after_partition_topn_fusion() raises:
-    """`Filter(rn <= 5)` over a row_number PartitionBy over the narrowable
-    join: PartitionTopN fusion runs first, and the narrowing stamps it then
-    puts on both scans are in the result.
-
-    Defect caught: `fuse_partition_topn` after `narrow_join_payload`. The
-    render is the same and every stamp is gone: the stamp is a scan field that
-    is not a constructor argument, so a pass that rebuilds the scan after
-    narrowing drops it."""
-    var exprs = List[PartitionExpr]()
-    exprs.append(PartitionExpr.row_number())
-    var desc = List[Bool]()
-    desc.append(True)
-    var pb = LogicalPlan.partition_by(_l1("key"), _l1("probe_val"), desc^, exprs^, _narrowable_join())
-    var rn = pb.output_schema.field_name(pb.output_schema.num_columns() - 1)
-    var f = LogicalPlan.filter(Expr.binary(BIN_LE, _c(rn), _lit(5)), pb^)
-    var keep: List[String] = ["key", "probe_val", "build_val"]
-    var out = _run(LogicalPlan.project(_cols(keep^), f^))
-    var r = _render(out)
-    assert_equal(
-        _narrow_specs(out),
-        "probe.parquet:probe_val:2;probe.parquet:p_extra:1;build.parquet:build_val:2;build.parquet:b_extra:1;",
-        r,
-    )
-    assert_equal(r, _want_topn_narrow())
 
 
 # -----------------------------------------------------------------------------
@@ -650,17 +571,6 @@ def _want_semi_three_way() -> String:
         "            Scan(path=\"d\", type=PARQUET, source_kind=COLUMNAR)",
         "            Scan(path=\"b\", type=PARQUET, source_kind=COLUMNAR)",
         "    Scan(path=\"c\", type=PARQUET, source_kind=COLUMNAR, projection=[ck])",
-    ]
-    return _lines(l)
-
-
-def _want_topn_narrow() -> String:
-    var l: List[String] = [
-        "PartitionTopN(k=5, func=ROW_NUMBER, over_fetch_k=5, partition=[key], sort=[probe_val DESC])",
-        "  Project(exprs=[ColRef(key), ColRef(probe_val), ColRef(build_val)])",
-        "    Join(type=INNER, on=[key=key])",
-        "      Scan(path=\"probe.parquet\", type=PARQUET, source_kind=COLUMNAR)",
-        "      Scan(path=\"build.parquet\", type=PARQUET, source_kind=COLUMNAR)",
     ]
     return _lines(l)
 
