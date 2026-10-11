@@ -41,6 +41,22 @@
 #      summary states the two v1 limits (no lease, no destroy).
 #  13. A step naming a cell its cells file does not declare: REFUSED at
 #      load (KCI-E-FORMAT), no step run, no call.
+#  14. THE ADMISSION CHECK holds a DEPLOY stage too: a push to main, attempt
+#      1, `--admission`, of the FIRST stage (no `after`), which holds the
+#      BUILD and the DEPLOY step, whose revision main has moved past (the
+#      seam's `main_tip_past` names a newer tip): SUPERSEDED, exit 0, main
+#      asked once, no step run, `deploys.deploy` never called, no call on
+#      the cloud and no intent in the store. Mutants: "skip the admission
+#      check when the stage holds a DEPLOY step"; "run the step loop after
+#      an admission SUPERSEDED".
+#  15. The same run when main has not moved (`main_tip_past` answers ""):
+#      admitted, the BUILD then the DEPLOY step run, every node lands,
+#      SUCCEEDED, exit 0. Catches an admission that stops every DEPLOY run.
+#
+# Cases 1 to 13 run outside GitHub Actions on `Steps` (its `main_tip_past`
+# raises: none passes `--admission`); 14 and 15 run as a push to main under
+# GitHub Actions on `PushSteps`, whose `main_tip_past` answers `tip`, with a
+# release workflow that agrees with their one-stage machine file.
 #
 # The step reads `resources` relative to the directory kci runs in (the
 # parser refuses an absolute path, and kci has no working-directory flag),
@@ -57,8 +73,10 @@ from kci_reconciler import ChangeAction, CellScope, Creds, InMemoryStateStore, L
 from kci_cloud import decode_label_value
 from kci_cloud_fake import FakeCloud
 from kci_cli import (
+    CellDeploys,
     CliRecorder,
     CloudDeploys,
+    DeployRequest,
     NOT_BUILT_WITH,
     SecretStoreChoice,
     StageSteps,
@@ -67,7 +85,7 @@ from kci_cli import (
     plan_hash_of,
     write_whole_file,
 )
-from kci_api import OUTCOME_SUCCEEDED, ResultValidation, parse_result
+from kci_api import OUTCOME_SUCCEEDED, OUTCOME_SUPERSEDED, ResultStep, ResultValidation, parse_result
 from kci_api import RunResult as KciRunResult
 from kci_publish import NewNamesReport, PublishRequest
 from kci_validate import ValidateRequest
@@ -76,6 +94,13 @@ from kci_validate import ValidateRequest
 comptime _REV: String = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
 comptime _SET_HASH: String = "5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a5e7a"
 comptime _OTHER_HASH: String = "0000000000000000000000000000000000000000000000000000000000000000"
+comptime _NEWER: String = "fedcba9876543210fedcba9876543210fedcba98"
+comptime _WORKFLOW_SHA: String = "0123456789abcdef0123456789abcdef01234567"
+comptime _R19: String = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          ref: ${{ env.REVISION }}\n      - name: the revision this run releases\n        run: |\n          case \"$REVISION\" in\n            *[!0-9a-f]*) echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1 ;;\n          esac\n          [ \"${#REVISION}\" = 40 ] || { echo \"refused: REVISION '$REVISION' is not a full commit id\"; exit 1; }\n          if [ \"$GITHUB_EVENT_NAME\" = workflow_dispatch ] && [ \"$DRY_RUN\" = true ]; then\n            git merge-base --is-ancestor \"$REVISION\" \"$GITHUB_SHA\" ||\n              { echo \"refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on\"; exit 1; }\n          else\n            [ \"$REVISION\" = \"$GITHUB_SHA\" ] ||\n              { echo \"refused: a run that can publish releases the commit it started on ($GITHUB_SHA), not $REVISION (a revision input is for a dry run)\"; exit 1; }\n          fi\n"
+"""R21: the first two steps of every release job (kci_workflow_check
+auto_promotion.mojo), as test_kci_staged_ordering.mojo spells them."""
+comptime _R19_MAIN: String = "      - name: only a push to main reaches this job\n        run: |\n          [ \"$GITHUB_EVENT_NAME\" = push ] && [ \"$GITHUB_REF\" = refs/heads/main ] ||\n            { echo \"refused: only a push to refs/heads/main reaches this job; this run is a $GITHUB_EVENT_NAME of $GITHUB_REF\"; exit 1; }\n"
+"""R21: the third step of a main-only job."""
 comptime _BUCKETS: String = '{"resource":[{"id":"media","bucket":{}},{"id":"logs","bucket":{}},{"id":"cache","bucket":{}}]}'
 comptime _APP: String = '{"resource":[{"id":"web","composite":{"definition":"kci.app","version":"1","input":{"public":{"literal":"true"}},"imageInput":{"image":{"digest":"sha256:a1"}}}}]}'
 
@@ -510,6 +535,206 @@ def test_a_cell_its_cells_file_does_not_declare_is_refused_at_load() raises:
     assert_equal(len(r.steps), 0, "refused at load: no step ran")
     assert_equal(len(steps.hashed), 0, "refused before the start checks")
     assert_equal(deploys.cloud.mutations(), 0)
+
+
+# ---- 14, 15: the admission check on a stage that holds a DEPLOY step -------
+
+
+struct PushSteps(StageSteps, Movable):
+    """A push to main under GitHub Actions: the platform variables from
+    `env_names`/`env_values`, the committed workflow from `workflow`;
+    `is_ancestor` answers True; `main_tip_past` answers `tip` and records
+    each question in `tip_asked`; a BUILD step SUCCEEDS and is recorded in
+    `built`. Layout: owned values only. No pointer field."""
+
+    var env_names: List[String]
+    var env_values: List[String]
+    var workflow: String
+    var tip: String
+    var tip_asked: List[String]
+    var built: List[String]
+
+    def __init__(out self, machine: String, tip: String):
+        self.env_names = List[String]()
+        self.env_values = List[String]()
+        self.workflow = _workflow(machine)
+        self.tip = tip.copy()
+        self.tip_asked = List[String]()
+        self.built = List[String]()
+        self._set(String("GITHUB_ACTIONS"), String("true"))
+        self._set(String("GITHUB_REPOSITORY"), String("komira-ai/komira"))
+        self._set(String("GITHUB_WORKFLOW_REF"), String("komira-ai/komira/.github/workflows/kci.yml@refs/heads/main"))
+        self._set(String("GITHUB_WORKFLOW_SHA"), String(_WORKFLOW_SHA))
+        self._set(String("GITHUB_REF"), String("refs/heads/main"))
+        self._set(String("GITHUB_EVENT_NAME"), String("push"))
+        self._set(String("GITHUB_SHA"), String(_REV))
+        self._set(String("GITHUB_ACTOR"), String("octocat"))
+        self._set(String("GITHUB_RUN_ATTEMPT"), String("1"))
+
+    def _set(mut self, name: String, value: String):
+        self.env_names.append(name.copy())
+        self.env_values.append(value.copy())
+
+    def build(mut self, req: BuildRequest, mut result: KciRunResult, mut recorder: CliRecorder) -> StepEnd:
+        self.built.append(req.step_name.copy())
+        result.steps.append(ResultStep(req.step_name.copy(), String("BUILD"), req.platform.copy(), String(OUTCOME_SUCCEEDED)))
+        return StepEnd(String(OUTCOME_SUCCEEDED), String(""), String(""))
+
+    def publish(
+        mut self, req: PublishRequest, mut result: KciRunResult, mut recorder: CliRecorder, store: SecretStoreChoice
+    ) -> StepEnd:
+        return StepEnd(String("FAILED"), String("KCI-E-INTERNAL"), String("no PUBLISH step runs here"))
+
+    def validate(mut self, req: ValidateRequest) -> ResultValidation:
+        return ResultValidation(req.validation.name.copy(), req.step_name.copy(), req.validation.kind.copy(), String("NOT_REACHED"), String(""))
+
+    def lookahead(mut self, req: PublishRequest) -> NewNamesReport:
+        return NewNamesReport(req.stage.copy(), req.step_name.copy(), req.channel.copy())
+
+    def platform_env(mut self, name: String) -> String:
+        for i in range(len(self.env_names)):
+            if self.env_names[i] == name:
+                return self.env_values[i].copy()
+        return String("")
+
+    def committed_file(mut self, commit: String, path: String) raises -> String:
+        return self.workflow.copy()
+
+    def is_ancestor(mut self, commit: String, of: String) raises -> Bool:
+        return True
+
+    def main_tip_past(mut self, revision: String) raises -> String:
+        self.tip_asked.append(revision.copy())
+        return self.tip.copy()
+
+    def release_set_hash(mut self, artifacts_file: String, platform_dir: String) raises -> String:
+        return String(_SET_HASH)
+
+
+struct CountedDeploys(CellDeploys, Movable):
+    """`CloudDeploys` on the fake cloud, counting the DEPLOY steps handed to
+    it (`calls`). Layout: owned values only. No pointer field."""
+
+    var inner: CloudDeploys[FakeCloud, InMemoryStateStore]
+    var calls: Int
+
+    def __init__(out self) raises:
+        self.inner = _deploys(FakeCloud())
+        self.calls = 0
+
+    def deploy(mut self, req: DeployRequest, mut result: KciRunResult) -> StepEnd:
+        self.calls += 1
+        return self.inner.deploy(req, result)
+
+
+def _first_stage_machine(dir: String) raises -> String:
+    """One stage, `build`, with no `after` (the first stage) and no
+    `break_glass` (only a push to main writes into a cell): the BUILD step
+    whose release the DEPLOY step deploys, then the DEPLOY step."""
+    write_whole_file(
+        dir + String("/cells.textproto"),
+        String("schema_version: 1\ncell { name: \"blue\" cloud: \"fake\" bootstrap_level: 1 }\n"),
+    )
+    write_whole_file(dir + String("/app.json"), String(_BUCKETS))
+    var m = dir + String("/machine.textproto")
+    write_whole_file(
+        m,
+        String("schema_version: 1\nname: \"shop\"\n")
+        + String("stage { name: \"build\"")
+        + String(" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"a.textproto\" }")
+        + String(" step { name: \"apply\" kind: DEPLOY cells: \"") + dir
+        + String("/cells.textproto\" cell: \"blue\" resources: \"app.json\" } }\n"),
+    )
+    return m^
+
+
+def _workflow(machine: String) -> String:
+    """The release workflow that agrees with `_first_stage_machine`: its one
+    job, main-only (R15, R21) as test_kci_staged_ordering.mojo's prod job."""
+    var run = String("kci run --machine ") + machine + String(" --summary-file \"$GITHUB_STEP_SUMMARY\" --stage ")
+    var line = String("      - name: the prod line\n        if: always()\n        run: echo prod line\n")
+    return (
+        String("name: kci\non:\n  push:\n    branches: [main]\n    paths-ignore:\n      - 'docs/**'\n      - '**.md'\n")
+        + String("  workflow_dispatch:\n    inputs:\n      revision:\n        type: string\n")
+        + String("      reason:\n        type: string\n        required: true\n")
+        + String("      dry_run:\n        type: boolean\n        default: false\n")
+        + String("permissions: {}\n")
+        + String("concurrency:\n  group: kci-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main' || inputs.dry_run && format('plan-{0}', github.run_id) || format('ref-{0}', github.ref_name) }}\n")
+        + String("  cancel-in-progress: false\n")
+        + String("env:\n  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}\n")
+        + String("jobs:\n")
+        + String("  build:\n    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n    environment: build\n")
+        + String("    outputs:\n      set_hash: ${{ steps.k.outputs.set_hash }}\n")
+        + String("    steps:\n") + String(_R19) + String(_R19_MAIN) + String("      - run: ") + run + String("build\n") + line
+    )
+
+
+def _push_run(machine: String, summary: String) -> List[String]:
+    """`kci run --stage build --admission`, attempt 1, with the flags its
+    BUILD and DEPLOY steps take."""
+    var l = List[String]()
+    for s in ["run", "--machine"]:
+        l.append(String(s))
+    l.append(machine.copy())
+    for s in ["--stage", "build", "--revision-id"]:
+        l.append(String(s))
+    l.append(String(_REV))
+    for s in ["--run-id", "gh-7", "--attempt", "1", "--release-dir", "/r", "--work-dir", "/w", "--log-dir", "/l"]:
+        l.append(String(s))
+    for s in ["--admission", "--release-set-hash"]:
+        l.append(String(s))
+    l.append(String(_SET_HASH))
+    l.append(String("--summary-file"))
+    l.append(summary.copy())
+    return l^
+
+
+def test_admission_stops_a_superseded_first_stage_before_its_deploy() raises:
+    """Catches: the admission check skipped when the stage holds a DEPLOY
+    step, and the step loop run after an admission SUPERSEDED (either way
+    the DEPLOY step reaches the cloud)."""
+    var d = _root(String("admit_superseded"))
+    var m = _first_stage_machine(d)
+    var steps = PushSteps(m, String(_NEWER))
+    var deploys = CountedDeploys()
+    var rec = CliRecorder.memory(String(""))
+    var rc = kci_main_with(_push_run(m, d + String("/summary.md")), steps, deploys, rec)
+    var r = _last(rec)
+    assert_equal(rc, 0, r.error.message)
+    assert_equal(r.outcome, String(OUTCOME_SUPERSEDED), r.error.message)
+    assert_equal(len(steps.tip_asked), 1, "main is asked once")
+    assert_equal(steps.tip_asked[0], String(_REV))
+    assert_equal(len(steps.built), 0, "no BUILD step ran")
+    assert_equal(deploys.calls, 0, "no DEPLOY step reached the deploys")
+    assert_equal(deploys.inner.cloud.mutations(), 0, "no call on the cloud that mutates")
+    assert_equal(deploys.inner.cloud.live_count(), 0, "no object stands")
+    assert_equal(deploys.inner.store.total_intents(_scope().key(String("media/bucket"))), 0, "no intent recorded")
+    for i in range(len(r.steps)):
+        assert_equal(len(r.steps[i].deploy.landed), 0, "nothing landed")
+    var summary = Path(d + String("/summary.md")).read_text()
+    assert_true(summary.find(String("superseded")) >= 0, summary)
+
+
+def test_admission_lets_mains_releasable_tip_deploy() raises:
+    """Catches: an admission check that stops every run of a stage holding
+    a DEPLOY step (main not moved: the seam answers "")."""
+    var d = _root(String("admit_tip"))
+    var m = _first_stage_machine(d)
+    var steps = PushSteps(m, String(""))
+    var deploys = CountedDeploys()
+    var rec = CliRecorder.memory(String(""))
+    var rc = kci_main_with(_push_run(m, d + String("/summary.md")), steps, deploys, rec)
+    var r = _last(rec)
+    assert_equal(rc, 0, r.error.message)
+    assert_equal(r.outcome, String(OUTCOME_SUCCEEDED), r.error.message)
+    assert_equal(len(steps.tip_asked), 1, "main is asked once")
+    assert_equal(len(steps.built), 1, "the BUILD step ran")
+    assert_equal(deploys.calls, 1, "the DEPLOY step ran once")
+    assert_equal(deploys.inner.cloud.mutations(), 3, "every node landed")
+    assert_equal(len(r.steps), 2)
+    assert_equal(r.steps[1].kind, String("DEPLOY"))
+    assert_equal(len(r.steps[1].deploy.landed), 3)
+    assert_equal(deploys.inner.store.count_confirmed(_scope().key(String("media/bucket"))), 1)
 
 
 def main() raises:
