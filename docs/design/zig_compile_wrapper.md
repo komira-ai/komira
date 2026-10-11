@@ -158,8 +158,10 @@ Every item is something the shell does today, with the test (see "Tests") that p
 - **Process shape.** In the shell the root is an intermediate `sh`: on Linux it leads the session (via
   `setsid(1)`), starts the compiler and the tether as its two children, waits for the compiler and then
   kills the tether; on macOS the same `sh` runs without a session. In the port the root is the compiler
-  itself: it calls `setsid()`, forks the tether as its own child, then `execve`s the compiler, so the
-  compiler is the session leader and the tether's parent. The tree (items 21 and 22) and the kill (item 24)
+  itself: it calls `setsid()`, starts the tether through an intermediate process that reports the
+  tether's pid and exits, then `execve`s the compiler. The compiler is the session leader; the tether is
+  in its session but is not its child, so a compiler that waits for every child it has never waits for,
+  or reaps, the tether. The tree (items 21 and 22) and the kill (item 24)
   are unchanged in effect, because both select by session and by descendants of the root; a case pins
   that the compiler's pid is the session id.
 - **Scratch removed on every exit the wrapper makes.** The port also removes scratch on the exit-2
@@ -167,8 +169,10 @@ Every item is something the shell does today, with the test (see "Tests") that p
   and a SIGKILLed wrapper still leave it, as today; buck2 owns `BUCK_SCRATCH_PATH` either way.
 - **One exit-4 report.** macOS prints the Linux form (item 30).
 - **Exact environment.** The port builds the compiler's environment from nothing, like
-  `zig_cc_launcher.zig`: the variables of items 12 and 13, plus `PWD` and `BUCK_SCRATCH_PATH` passed through
-  because `cov_zig` reads them, plus one shim variable (below). Anything else buck2 or a worker put in the
+  `zig_cc_launcher.zig`: the variables of items 12 and 13, plus `PWD` and `BUCK_SCRATCH_PATH` (when set) passed through
+  because `cov_zig` reads them, plus one shim variable (below). With `--ld-debug-output=<file>` (Linux)
+  it also sets `LD_DEBUG=libs` and `LD_DEBUG_OUTPUT=<file>`: `functional/runtime_libs` set those two on
+  the shell wrapper, which passed them on, and now asks for them by flag. Anything else buck2 or a worker put in the
   action no longer reaches the compiler. A case pins the exact list.
 - **No applets on the compiler's `PATH`.** The applet directory existed for the shell itself. If the
   compiler, a link step or `xcrun` runs a tool by bare name, the build fails loudly ("not found"), never
@@ -212,7 +216,8 @@ symlinks with those six names in `<scratch>/cc/`, all pointing to its own execut
 mojo_compile --compiler=<dir> --cc-target=<triple> --zig=<dir>                  (Linux)
 mojo_compile --compiler=<dir> --deployment-target=<v> --macos-host=<id>...      (macOS)
              [--runpath=<$ORIGIN*>] [--source-root=<dir>] [--link-tail=<arg>]...
-             [--watchdog-idle-secs=<n>] [--watchdog-sample-secs=<n>] -- <mojo arguments...>
+             [--watchdog-idle-secs=<n>] [--watchdog-sample-secs=<n>]
+             [--ld-debug-output=<file>] -- <mojo arguments...>                     (the last: Linux)
 ```
 
 Named flags replace the four positionals (flags, not environment, per the project's configuration rule).
@@ -221,9 +226,11 @@ reverse, is exit 2, so one source cannot be run with the other platform's contra
 
 ### Process model
 
-The wrapper forks the root. In the root: `setsid()`, then fork the tether (it reads the tether pipe; on
-EOF it sends SIGKILL to process group 0, its own, which is the session's), report the tether's pid on a
-close-on-exec status pipe, put `/dev/null` on fd 0 and ignore SIGINT and SIGQUIT (item 29), then `execve`
+The wrapper forks the root. In the root: `setsid()`, then fork an intermediate process that forks the
+tether (it reads the tether pipe; on EOF it sends SIGKILL to process group 0, its own, which is the
+session's), reports the tether's pid on a close-on-exec status pipe and exits, so the tether is in the
+session but is not the compiler's child. The root waits for the intermediate (no tether is exit 2, "the
+compiler's session did not start"), then puts `/dev/null` on fd 0 and ignores SIGINT and SIGQUIT (item 29), then `execve`
 the compiler with the built environment. Exec failure is written to the same pipe (errno), and the
 wrapper exits 127 for `ENOENT` and 126 otherwise, the statuses the shell gives. The wrapper holds the only write end of the tether pipe.
 
@@ -240,22 +247,25 @@ declarations are written in the module as `extern` (no SDK headers), with their 
 
 ## Rule changes
 
-- **`zig_exe` gains `target`** (default `x86_64-linux-musl`, so every existing command line and golden
-  line is unchanged). The macOS wrapper is built on a Linux worker for the darwin triple, the way the
+- **`zig_exe` gains `target`** with the macOS pull request (default `x86_64-linux-musl`, so every
+  existing command line and golden line is unchanged); the Linux pull request does not change `zig_exe`. The macOS wrapper is built on a Linux worker for the darwin triple, the way the
   osx-arm64 compiler closure is unpacked on Linux today.
 - **`zig_test` stays Linux** for the pure modules; the macOS-only code paths are proved on the macOS
   workers (see "Tests").
-- **New targets:** `komira//tools/build/toolchains:mojo_compile` (Linux) and
-  `komira//tools/build/toolchains/darwin:mojo_compile`, each with `unit_tests` naming its `zig_test`, so the
-  wrapper cannot exist unless the unit tests passed.
+- **New targets:** `komira//tools/build/mojo:mojo_compile` (Linux, `unit_tests = [":mojo_compile_unit"]`)
+  and a darwin `mojo_compile` with the macOS pull request, each with `unit_tests` naming its `zig_test`, so
+  the wrapper cannot exist unless the unit tests passed. The Linux process cases are
+  `tests//functional/watchdog:cases`.
 - **`MojoToolchainInfo.wrapper`** holds the executable. `busybox` stays: other actions still use it.
 - **One Starlark helper builds every compile command.** Today three rule files spell the compile argv by
   hand (`defs.bzl` `_mojo_cmd`, which `coverage_branch.bzl` and `mutation.bzl` reuse; `doc.bzl`;
   `proto.bzl`), and three test rules hand `tc.wrapper` to a script (`functional/watchdog`,
   `functional/runtime_libs`, whose inline script runs the wrapper, and `functional/coverage`'s
   `link_line.sh`). `doc.bzl` and `proto.bzl` pass no watchdog flags, so they run on the wrapper's
-  built-in defaults. The helper `mojo_compile_cmd(tc, args, ...)` lives in `defs.bzl` and
+  built-in defaults. The helper `mojo_compile_cmd(tc, args, ...)` lives in `defs.bzl`. On Linux it
   always passes the toolchain's knobs; the values are the same (300 and 30) unless a toolchain changes them.
+  Until the macOS pull request it also builds the darwin shell wrapper's unchanged command line, with
+  `darwin_knobs = False` for `doc.bzl` and `proto.bzl`, which passed no knobs there.
 - **`mojo_darwin_toolchain`** drops `link` and passes `macos_hosts` as flags; `mojo_darwin_link` and the
   `cc`/`host_identity.sh` exports are deleted. `functional/darwin/census.bzl` runs
   `mojo_compile host-identity` instead of the script.
@@ -314,7 +324,7 @@ The bar: every test says which defect it catches and names the mutant planted to
 ### Process cases (a Buck2 target on Linux, replacing `watchdog/cases.sh`)
 
 A Zig stand-in compiler (`zig_exe`, modes `hang`, `hangpid`, `treehang`, `orphan`, `orphanspin`, `spin`,
-`childspin`, `nap2`, `nap5`, `fail`, plus `envdump`, `sigstate`, `link`, `empty`, `cwd`, `noout`) and a Zig cases
+`childspin`, `nap2`, `nap5`, `fail`, `selfkill`, plus `envdump`, `sigstate`, `link`, `empty`, `cwd`) and a Zig cases
 runner that runs the real wrapper against it, each case under its own deadline so a dead watchdog is a red
 case, never a hung action:
 
@@ -326,8 +336,10 @@ case, never a hung action:
   runner compares it to item 16;
 - `sigstate`: with idle > 0 the stand-in reports stdin is `/dev/null`, SIGINT and SIGQUIT ignored, and its
   pid equal to its session id; with idle 0 it reports the runner's stdin and dispositions (items 28, 29);
-- `empty` 3, `cwd` 4 (output holds the working directory), `noout` 2, a manifest member missing 2, each
-  with the scratch directory gone afterwards.
+- `selfkill` (the stand-in dies of SIGUSR1): 138, with idle > 0 and with idle 0 (item 30's `128+N`);
+- `empty` 3, `cwd` 4 (output holds the working directory), no `-o` 2, a manifest member missing 2, a
+  compiler that cannot be started 127 (with idle > 0 and with idle 0), each with the scratch directory
+  gone afterwards.
 
 Mutants, each run once on the farm and named in the pull request: no tether (KILL case red); no signal
 flag handling (TERM, HUP, INT red); session rule dropped (`orphan` red, and `orphanspin` killed); post
@@ -345,7 +357,7 @@ The `host-identity` value is checked on each macOS worker by the census target a
 
 ## Rollout
 
-1. **Linux.** Add the modules, unit tests, `zig_exe` `target`, the Linux `mojo_compile` target, the
+1. **Linux.** Add the modules, unit tests, the Linux `mojo_compile` target, the
    stand-in and cases runner; switch the Linux toolchain's `wrapper`; add `mojo_compile_cmd` and move the
    three rule files to it; point the runtime-libs and link-line rules at the executable; regenerate the
    golden. Delete
@@ -359,7 +371,7 @@ The `host-identity` value is checked on each macOS worker by the census target a
    The darwin toolchain still names its own shell wrapper, so macOS is untouched. Proof: unit tests and
    cases green with each mutant red once; the compile-ran, tests-cached report of "Cache impact";
    test 47 and the negative coverage target unchanged.
-2. **macOS.** Darwin `mojo_compile` target; `mojo_darwin_toolchain` and `census.bzl` changes; delete
+2. **macOS.** `zig_exe` `target`; darwin `mojo_compile` target; `mojo_darwin_toolchain` and `census.bzl` changes; delete
    `darwin/mojo_wrapper.sh`, `darwin/cc`, `darwin/host_identity.sh`, `mojo_darwin_link`; update
    `DEVELOPMENT.md` ("macOS workers") and `functional/darwin/check.sh` sections that drove the scripts;
    `git grep mojo_wrapper.sh` then returns only design notes that describe the replacement.
