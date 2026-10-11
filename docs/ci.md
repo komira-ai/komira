@@ -807,7 +807,7 @@ so the release files list no package:
 - **Declared:** the artifacts of `release/artifacts.textproto` (and any
   explicit `checks` it declares, to group targets its own way).
 - **Derived:** the buck2 build system's `derive_checks` command,
-  `release/ci/derive_checks.py`, reads `//...` and `tests//functional/...`
+  `//tools/build/ci:derive_checks`, reads `//...` and `tests//functional/...`
   from the live graph (`buck2 cquery`) and answers one check per path group
   for every target no declared unit names or matches: `<p>` for each
   library `//src/<p>/...` and each test-only package
@@ -829,7 +829,7 @@ so the release files list no package:
   "cannot tell" (`KCI-E-AFFECTED`), never a pass.
 - **A universe the derive tool cannot query:** when its `buck2 cquery` fails,
   for any reason (a target with an unknown or invisible dependency, a
-  transport error, a buck2 that does not start), `derive_checks.py` answers
+  transport error, a buck2 that does not start), `derive_checks` answers
   one `BROKEN <reason>` line holding buck2's error, and kci FAILS the check
   (`KCI-E-BUILD-FAILED`): nothing is built, and no affected command runs.
 
@@ -944,7 +944,7 @@ To see the units a change would build, with nothing built:
 ```sh
 kci run --stage pr --affected-by <base commit> --revision-id <HEAD> \
   --work-dir "$PWD" --log-dir <dir> --result-file <file> --plan
-python3 release/ci/derive_checks.py --from release/artifacts.textproto  # the derived checks alone
+./buck2 run //tools/build/ci:derive_checks -- --from release/artifacts.textproto  # the derived checks alone
 ```
 
 ### The workflow subset kci reads

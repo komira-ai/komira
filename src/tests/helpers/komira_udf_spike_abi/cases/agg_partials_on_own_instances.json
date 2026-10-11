@@ -1,0 +1,13 @@
+{
+ "name": "agg_partials_on_own_instances",
+ "defect": "the runner opens every partial's group set on one instance instead of one instance per partial",
+ "run": "agg_split",
+ "entry": "sum_one_group_set_per_instance",
+ "shape": "AGG_MERGEABLE",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "state": [{"type": "int64", "nullable": true}],
+ "partials": [{"input": {"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]}, "group_ids": [0, 1], "n_groups": 2}, {"input": {"length": 2, "columns": [{"type": "int64", "values": [10, 20]}]}, "group_ids": [1, 0], "n_groups": 2}],
+ "n_groups": 2,
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [21, 12]}}
+}
