@@ -30,6 +30,9 @@
 #   - a frame cancelled before frame_open is refused by frame_open itself,
 #     before any pull ("cancelled before the batch"; a frame opened anyway
 #     and cancelled at its first frame_next says "between batches").
+#   - double_batch (the batch-loop fixture) over a sliced input of 12 rows
+#     with nulls at rows 1 and 10, whole (the input read without its offset;
+#     a row's validity bit read from the wrong byte).
 #   - load: an entry the library does not have is refused by the library's
 #     load, through the runtime, with no handle (a library's refusal turned
 #     into a handle).
@@ -348,6 +351,23 @@ def _shapes(mut lib: _Lib) raises:
     _status(none.outcome, ERR_DESCRIPTOR, "no fixture has this entry", n + ": load of an entry the library lacks")
 
 
+def _batch_loops(mut lib: _Lib) raises:
+    """double_batch over a sliced input (offset 5) of 12 rows with nulls at
+    rows 1 and 10, bits 6 and 15 of the bitmap: the batch loop must read the
+    input at its offset and each row's bit from its own byte (read at
+    `at >> 4` or `at >> 2`, bit 15 lands on a valid row's bit)."""
+    var n = lib.name
+    var spec = _spec(SHAPE_SCALAR, "double_batch", lib.code)
+    var inst = lib.instance(spec)
+    var c = _col([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], [1, 10])
+    c.offset = 5
+    var r = lib.rt.call_batch(inst, spec, _batch([c^], 12), CallOptions.plain())
+    assert_true(r.outcome.is_ok(), n + ": double_batch: " + String(r.outcome))
+    assert_equal(
+        String(r.column), "int64[0, null, 4, 6, 8, 10, 12, 14, 16, 18, null, 22]", n + ": double_batch, sliced"
+    )
+
+
 def main() raises:
     var tmp = getenv("TMPDIR")
     for path in ["./native_c.so", "./native_mojo.so"]:
@@ -355,5 +375,6 @@ def main() raises:
         _frames(lib)
         _aggregate(lib)
         _shapes(lib)
+        _batch_loops(lib)
         lib.rt.shutdown()
     print("test_library_calls: ok")
