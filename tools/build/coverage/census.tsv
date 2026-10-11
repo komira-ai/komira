@@ -179,7 +179,7 @@ komira//src/komira_scan_resolver:komira_scan_resolver	src/komira_scan_resolver	l
 komira//src/komira_scan_source:komira_scan_source	src/komira_scan_source	library	OK	1462	2314	-	-	no	conda	src/komira_scan_source/arrow_source.mojo,src/komira_scan_source/avro_source.mojo,src/komira_scan_source/compiler_registry.mojo,src/komira_scan_source/json_source.mojo,src/komira_scan_source/orc_source.mojo,src/komira_scan_source/scan_registry.mojo,src/komira_scan_source/scan_resolver.mojo,src/komira_scan_source/sink.mojo,src/komira_scan_source/source_capabilities.mojo,src/komira_scan_source/source_like.mojo	-
 komira//src/komira_sdk:komira_sdk	src/komira_sdk	library	OK	1347	1360	-	-	no	conda	-	-
 komira//src/komira_search:komira_search	src/komira_search	library	OK	4158	4158	-	-	no	conda	-	-
-komira//src/komira_search_catalog:komira_search_catalog	src/komira_search_catalog	library	OK	591	707	-	-	no	conda	-	-
+komira//src/komira_search_catalog:komira_search_catalog	src/komira_search_catalog	library	OK	724	724	-	-	no	conda	-	-
 komira//src/komira_search_scan:komira_search_scan	src/komira_search_scan	library	OK	501	574	-	-	no	conda	-	-
 komira//src/komira_secret_env:komira_secret_env	src/komira_secret_env	library	OK	105	108	-	-	no	conda	-	-
 komira//src/komira_secret_registry:komira_secret_registry	src/komira_secret_registry	library	OK	64	65	13	16	yes	conda	-	-
@@ -238,6 +238,5 @@ komira//src/tests/helpers/komira_plan_harness:komira_plan_harness	src/tests/help
 komira//src/tests/helpers/komira_test_bucket:komira_test_bucket	src/tests/helpers/komira_test_bucket	test	OK	595	616	-	-	no	conda	-	-
 komira//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3	src/tests/helpers/komira_test_fake_s3	test	OK	28	28	-	-	no	no	-	-
 komira//src/tests/helpers/komira_test_minio:komira_test_minio	src/tests/helpers/komira_test_minio	test	OK	221	245	69	110	yes	conda	-	-
-komira//src/tests/helpers/komira_test_python:komira_test_python	src/tests/helpers/komira_test_python	test	OK	0	0	-	-	no	no	-	-
 komira//src/tests/helpers/komira_test_s3_adapter:komira_test_s3_adapter	src/tests/helpers/komira_test_s3_adapter	test	OK	205	245	-	-	no	conda	src/tests/helpers/komira_test_s3_adapter/open.mojo	-
 komira//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary	src/tests/helpers/komira_test_vocabulary	test	OK	59	59	-	-	no	no	-	-
