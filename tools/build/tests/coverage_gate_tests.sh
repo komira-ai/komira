@@ -69,15 +69,17 @@
 #      tests//negative/coverage:tracer_mt and test_tracer_mt green and
 #      tracer_mt_conda red (what ships waits for the run of a test the
 #      library names); covmt_stray_cov_gate, covmt_args_cov_gate,
-#      covmt_gen_cov_gate and covmt_nocov_cov_gate red at analysis (a named
-#      test must depend on the library, have no args and a source main, and
-#      have a coverage build); komira_db_sqlite (outside the tests cell,
+#      covmt_gen_cov_gate and covmt_nocov_cov_gate are refused at analysis (a
+#      named test must depend on the library, have no args and a source main,
+#      and have a coverage build: //tools/build/selftest:analysis_refusals_coverage);
+#      komira_db_sqlite (outside the tests cell,
 #      naming coverage_tests) analyzes with the switch on, with no gate
 #      action of its own and one in komira_db_sqlite_cov_gate.
 #      A shared library's gate (COVERAGE_SHARED_LIB_MODE): covso_traced is
 #      green with the switch on and its driver's coverage run red (nothing
-#      waits for it); enforce is refused in analysis (covso_enforce). A
-#      welded test at a library source's path is refused (testpath).
+#      waits for it); enforce is refused in analysis (covso_enforce), and so
+#      is a welded test at a library source's path (testpath), both
+#      //tools/build/selftest:analysis_refusals_coverage.
 #      The greens named below build in the pull-request check, not here:
 #      tests//functional/... is built, its sub-targets through
 #      tests//functional/coverage:greens, and the greens of tests//negative
@@ -150,10 +152,6 @@ expect_red coverage_census_pin_no_reason "has an empty reason" "$N:census_pin_no
 # coverage_tests are its tests for coverage: their runs reach its gate, and
 # what ships waits for them.
 expect_red coverage_gate_mojo_test_conda "COVERAGE RUN FAILED: $N:test_tracer_mt [coverage of $N:tracer_mt]" "$N:tracer_mt_conda"
-expect_red coverage_gate_mojo_test_stray "$N:test_tracer_mt does not name $N:covmt_stray in its deps" "$N:covmt_stray_cov_gate"
-expect_red coverage_gate_mojo_test_args "$N:test_args cannot run under kcov: it has" "$N:covmt_args_cov_gate"
-expect_red coverage_gate_mojo_test_gen "$N:test_gen_main cannot run under kcov: its main source" "$N:covmt_gen_cov_gate"
-expect_red coverage_gate_mojo_test_nocov "$N:test_nocov is not a mojo_test with a coverage build" "$N:covmt_nocov_cov_gate"
 # A generated client whose welded tests are at its package's top analyzes
 # with the switch on, and has its gate (analysis only: aquery).
 CG=//tools/build/proto-codegen/aws_query:komira_aws_tiny_query
@@ -235,5 +233,3 @@ elif grep -qF "COVERAGE RUN FAILED: $N:covso_traced:tests/covso_traced_driver.mo
 else
     fail "coverage_shared_lib_run: failed without the coverage run's message (see $LOG/coverage_shared_lib_run.log)"
 fi
-expect_red coverage_gate_test_path "$N:testpath: coverage gate: the test lostlib/value.mojo has the path of a source of the library" "$N:testpath"
-expect_red coverage_shared_lib_enforce "$N:covso_enforce: a mojo_shared_lib's coverage gate is reported, never enforced" "$N:covso_enforce"
