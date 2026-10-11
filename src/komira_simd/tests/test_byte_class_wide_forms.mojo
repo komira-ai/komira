@@ -269,6 +269,15 @@ def test_quote_mask_carry_out() raises:
     var r4 = quote_region_mask_u64_with_carry_out(UInt64(1), carry)
     assert_equal(r4, ~UInt64(0), "chunk 4 region")
     assert_true(carry, "chunk 4 ends inside")
+    # Bit 63 alone, carried in: the quote on bit 63 closes the string, so bit 63
+    # is outside while bit 62 is inside; the carry-out must read bit 63.
+    var r5 = quote_region_mask_u64_with_carry_out(UInt64(1) << 63, carry)
+    assert_equal(r5, ~(UInt64(1) << 63), "chunk 5 region")
+    assert_false(carry, "chunk 5 ends outside")
+    # Bit 63 alone, carry out: the quote on bit 63 opens a string on the last bit.
+    var r6 = quote_region_mask_u64_with_carry_out(UInt64(1) << 63, carry)
+    assert_equal(r6, UInt64(1) << 63, "chunk 6 region")
+    assert_true(carry, "chunk 6 ends inside")
 
 
 # --- T1 ---------------------------------------------------------------------
