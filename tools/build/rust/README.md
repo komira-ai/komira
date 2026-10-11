@@ -12,7 +12,7 @@ The rules are in [`defs.bzl`](defs.bzl). Worked uses are in
 |---|---|
 | `rust_library(srcs, crate_root, deps, edition, features, cfgs, proc_macro, tests, test_srcs)` | `lib<crate>.rlib`, or `lib<crate>.so` for a proc-macro |
 | `rust_binary(srcs, crate_root, deps, expected_stdout, tests)` | an executable, and `RunInfo`. With `expected_stdout`, `[run_check]` runs it remotely and compares its stdout exactly, and that check is a validation of the binary: every build holding the binary runs it ([`run_check.bzl`](../mojo/run_check.bzl)). |
-| `rust_weld_check(target, markers)` | fails analysis unless `target` is published behind exactly the test markers `markers`: a weld that drops a test still builds green, so this is what shows it (see [`examples/rust/ext`](../examples/rust/ext/BUCK)) |
+| `rust_weld_check(target, markers)` | fails analysis unless the `[tests]` sub-target of `target` (the marker list its rule hands the publishing action) is exactly `markers`: a weld that drops a test still builds green, so this is what shows it. It reads the list, not that action's inputs (see [`examples/rust/ext`](../examples/rust/ext/BUCK)) |
 | `crates_io_library(name, version, sha256, size, ...)` | a crates.io crate, downloaded by the sha256 and size in bytes of its `.crate` file, unpacked remotely, and compiled with `rust_library` |
 | `rust_test(srcs, crate_root, deps, ..., test_timeout_s)` | the crate compiled with `rustc --test`, RUN as a build action; its output is a `.passed` marker. `[bin]` is the test executable. |
 

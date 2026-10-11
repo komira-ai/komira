@@ -682,7 +682,7 @@ def _run_check(ctx, tc, command):
         return out, []
     args.append(ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout))
     ctx.actions.run(cmd_args(args), category = "mojo_run_check")
-    return out, run_check_validation(ctx, tc.busybox, out, "mojo_run_check_result")
+    return out, run_check_validation(ctx, out, ctx.attrs.expected_stdout)
 
 def _shared(ctx, tc):
     main = _main_src(ctx)

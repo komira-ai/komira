@@ -180,6 +180,9 @@ session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.sh),
   `expected_stdout` the check is also a validation of the binary
   ([`run_check.bzl`](run_check.bzl)): every build whose graph holds the
   binary runs it, and fails when its stdout differs or it exits non-zero.
+  A `run_check_wired` target ([`examples/BUCK`](../examples/BUCK),
+  [`examples/rust/BUCK`](../examples/rust/BUCK)) fails analysis if a
+  binary rule stops returning that validation.
 - **`buck2 run <target>`**: builds remotely and runs the binary on your
   machine (Linux x86_64) from its runnable directory, downloading the binary
   and its runtime libraries, never the compiler

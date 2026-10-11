@@ -478,7 +478,7 @@ def _binary_impl(ctx):
             category = "rust_run_check",
         )
         sub_targets["run_check"] = [DefaultInfo(default_output = out)]
-        validation = run_check_validation(ctx, tc.busybox, out, "rust_run_check_result")
+        validation = run_check_validation(ctx, out, ctx.attrs.expected_stdout)
     return [
         DefaultInfo(default_output = exe, sub_targets = sub_targets),
         RunInfo(args = cmd_args(exe)),
@@ -496,16 +496,19 @@ rust_binary_rule = rule(
 # A library or binary with `tests` or `test_srcs` is published behind the
 # markers of its tests (`[tests]`). A weld that drops one still builds green,
 # its test simply not run, so building the target cannot show it. This check
-# reads the target's marker list at analysis and fails unless it is exactly
-# `markers` (each a marker's path in its target's outputs: `<test>.passed` of
-# a rust_test, `test_srcs/<crate>.passed` of an external test).
+# reads the target's `[tests]` sub-target at analysis, the marker list _gate
+# returns, and fails unless it is exactly `markers` (each a marker's path in
+# its target's outputs: `<test>.passed` of a rust_test,
+# `test_srcs/<crate>.passed` of an external test). It reads that list, not
+# the publishing copy action's inputs: a _gate that kept a marker in the list
+# but dropped it from the action's hidden inputs passes here.
 
 def _rust_weld_check_impl(ctx):
     tests = ctx.attrs.target[DefaultInfo].sub_targets.get("tests")
     got = sorted([m.short_path for m in tests[DefaultInfo].default_outputs]) if tests else []
     want = sorted(ctx.attrs.markers)
     if got != want:
-        fail("rust_weld_check {}: {} is published behind the markers {}, not {}".format(
+        fail("rust_weld_check {}: the [tests] markers of {} are {}, not {}".format(
             ctx.label.raw_target(),
             ctx.attrs.target.label.raw_target(),
             got,
@@ -515,7 +518,7 @@ def _rust_weld_check_impl(ctx):
 
 rust_weld_check_rule = rule(
     impl = _rust_weld_check_impl,
-    doc = "Fails analysis unless `target` (a rust_library or rust_binary) is published behind exactly the test markers `markers`.",
+    doc = "Fails analysis unless the `[tests]` sub-target of `target` (a rust_library or rust_binary), the marker list its rule hands the publishing copy action, is exactly `markers`. It reads that list, not the action's inputs.",
     attrs = {
         "markers": attrs.list(attrs.string()),
         "target": attrs.dep(),
