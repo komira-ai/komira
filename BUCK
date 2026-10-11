@@ -3,7 +3,7 @@
 # anything.
 load("@komira//tools/build/coverage:census.bzl", "coverage_census")
 load("@komira//tools/build/coverage:defs.bzl", "coverage_ci_cases")
-load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "public_boundary", "retired_names", "shell_lint", "src_layout", "workflow_lint")
+load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "public_boundary", "retired_names", "shell_lint", "src_layout", "target_suite", "workflow_lint")
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
 load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
@@ -161,6 +161,21 @@ _TESTS_LINTS = [
 [lint_suite(
     name = "tests_lints",
     lints = _TESTS_LINTS,
+) for _ in _TESTS_LINTS[:1]]
+
+# The greens of the tests cell that no derived unit builds: the pull-request
+# check builds `//...` and `tests//functional/...` (release/ci/derive_checks.py),
+# so a target of tests//negative or tests//src that must build, beside the
+# planted defects it serves, is named here, through its package's
+# target_suite (a package's sub-targets need one too, and a suite in the same
+# package names them with no visibility to grant). Not declared where there
+# is no tests cell.
+[target_suite(
+    name = "tests_greens",
+    targets = [
+        "tests//negative/coverage:greens",
+        "tests//src/tests/coverage:greens",
+    ],
 ) for _ in _TESTS_LINTS[:1]]
 
 # The repository's documentation: every relative link and #anchor in every

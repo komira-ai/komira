@@ -260,6 +260,20 @@ lint_suite_rule = rule(
     attrs = {"lints": attrs.list(attrs.dep())},
 )
 
+def _target_suite_impl(ctx):
+    if not ctx.attrs.targets:
+        fail("target_suite {}: targets is empty".format(ctx.label))
+    outs = []
+    for d in ctx.attrs.targets:
+        outs.extend(d[DefaultInfo].default_outputs)
+    return [DefaultInfo(default_outputs = outs)]
+
+target_suite_rule = rule(
+    impl = _target_suite_impl,
+    doc = "Depends on targets that must build but that no unit of the pull-request check builds by itself (sub-targets; targets of tests//negative and tests//src beside the planted defects they serve), so building it builds every default output of each and runs their validations. Its outputs are theirs.",
+    attrs = {"targets": attrs.list(attrs.dep())},
+)
+
 
 def _markdown_docs_impl(ctx):
     if not [f for f in ctx.attrs.srcs if f.short_path.endswith(".md")]:
@@ -376,6 +390,7 @@ def markdown_docs(**kwargs):
 # (doc_tree.bzl), so no BUCK file names one.
 action_pins = declares_docs(action_pins)
 lint_suite = declares_docs(lint_suite_rule)
+target_suite = declares_docs(target_suite_rule)
 markdown_docs = declares_docs(markdown_docs)
 mojo_deps = declares_docs(mojo_deps)
 no_endpoint = declares_docs(no_endpoint)

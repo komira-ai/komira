@@ -78,19 +78,17 @@
 #      green with the switch on and its driver's coverage run red (nothing
 #      waits for it); enforce is refused in analysis (covso_enforce). A
 #      welded test at a library source's path is refused (testpath).
+#      The greens named below build in the pull-request check, not here:
+#      tests//functional/... is built, its sub-targets through
+#      tests//functional/coverage:greens, and the greens of tests//negative
+#      and tests//src through komira//:tests_greens. What stays here is
+#      what must go red.
 
 N=tests//negative/coverage
 P=tools/build/tests/negative/coverage
-expect_green coverage_gate_census "$N:covlow_census_result" "$N:covnotests_census_result" \
-    "$N:covun_census_result" "$N:covfull_census_result" "$N:covfull_unread_census_result" \
-    "$N:covtop_census_result" "$N:covbranch_census_result" "$N:covtry_census_result" \
-    "$N:covandor_census_result" "$N:covbranch_both[coverage][gate]" "$N:covtry_both[coverage][gate]" \
-    "$N:covandor_both[coverage][gate]" "$N:covfull[coverage][gate]"
-# A test-only package below the target: its gate is green in enforce mode,
-# what it found information (covlow, the same library elsewhere, is red
-# below).
-expect_green coverage_gate_test_only "tests//src/tests/coverage:covinfo[coverage][gate]" tests//src/tests/coverage:covinfo_result
-# ... at a segment boundary: src/testsuite is not under src/tests.
+# A test-only package below the target has a green gate in enforce mode
+# (tests//src/tests/coverage:greens, in the gate) ... at a segment boundary:
+# src/testsuite is not under src/tests.
 expect_red coverage_gate_not_test_only "COVERAGE GATE FAILED (enforce): tools/build/tests/src/testsuite/coverage (tests//src/testsuite/coverage:covnotinfo [coverage gate]): covcheck gate exited 3" "tests//src/testsuite/coverage:covnotinfo[coverage][gate]"
 expect_red coverage_gate_census_malformed "COVERAGE GATE ERROR: $P ($N:covbad [coverage gate]): covcheck exited 1" "$N:covbad[coverage][gate]"
 expect_red coverage_gate_enforce "COVERAGE GATE FAILED (enforce): $P ($N:covlow [coverage gate]): covcheck gate exited 3" "$N:covlow[coverage][gate]"
@@ -142,18 +140,15 @@ else
 fi
 expect_red coverage_gate_floor_conda "COVERAGE GATE FAILED (census): $P ($N:covfloor [coverage gate]): covcheck gate exited 3" "$N:covfloor_conda"
 expect_green coverage_gate_floor_held "$N:covfloor" "$N:covfloor_held[coverage][gate]"
-# The census check: the doc and floors census.sh renders are green; a doc
-# edited by hand, or a floor under what the census measured, is red.
-expect_green coverage_census_ok "$N:census_ok"
+# The census check: a doc edited by hand, or a floor under what the census
+# measured, is red (the doc and floors census.sh renders, :census_ok, are
+# green: tests//negative/coverage:greens, in the gate).
 expect_red coverage_census_doc_edited "docs/coverage_census.md is not what census.sh render writes" "$N:census_doc_edited"
 expect_red coverage_census_floor_lowered "ratchet.tsv is not what census.sh render writes" "$N:census_floor_lowered"
 expect_red coverage_census_pin_no_reason "has an empty reason" "$N:census_pin_no_reason"
 # README examples and the mojo_test targets a library names in
 # coverage_tests are its tests for coverage: their runs reach its gate, and
 # what ships waits for them.
-expect_green coverage_gate_readme_mojo_test tests//functional/coverage:covreadme_result \
-    tests//functional/coverage:covreadme_none_result tests//functional/coverage:covmt_result \
-    "$N:tracer_mt" "$N:test_tracer_mt"
 expect_red coverage_gate_mojo_test_conda "COVERAGE RUN FAILED: $N:test_tracer_mt [coverage of $N:tracer_mt]" "$N:tracer_mt_conda"
 expect_red coverage_gate_mojo_test_stray "$N:test_tracer_mt does not name $N:covmt_stray in its deps" "$N:covmt_stray_cov_gate"
 expect_red coverage_gate_mojo_test_args "$N:test_args cannot run under kcov: it has" "$N:covmt_args_cov_gate"
