@@ -42,9 +42,14 @@
 #   - a row user code makes (`type(row)()`, `object.__new__(type(row))`)
 #     fails the batch with a TypeError naming the cause (a RecursionError
 #     through __getattr__, or a value);
+#   - under PROPAGATE a row with a null field (in either field, at its own
+#     offset) is a null result and the function is not called on it, and an
+#     error keeps the caller's row number; under MANUAL the function sees the
+#     null (a runtime that ignores the null mode, or renumbers rows);
 #   - an argument struct with a child outside the read set is refused, and
 #     its args still moved (a runtime that accepts columns it did not bind);
-#   - validate refuses, by name, a shape other than ROW, PROPAGATE, an
+#   - validate accepts PROPAGATE and refuses, by name, a shape other than
+#     ROW, another null mode, an
 #     unnamed or repeated field, a function not of one row, one with no or
 #     the wrong return hint, and a missing function.
 #
@@ -437,6 +442,46 @@ def test_forged(mut rt: UdfRuntime) raises:
         assert_equal(r.outcome.row, Int64(0), what)
 
 
+def test_propagate(mut rt: UdfRuntime) raises:
+    """Under PROPAGATE a row with a null field is a null result and the
+    function is not called on it (price_qty would raise on None); rows keep
+    the caller's numbers, so a read outside the read set after a skipped
+    row is reported at its own row. Under MANUAL the same input calls the
+    function on the null (a runtime that ignores the null mode)."""
+    var pq: List[String] = ["price", "qty"]
+    var spec = row_spec("udf_rows:price_qty", pq, TYPE_FLOAT64, TYPE_FLOAT64)
+    spec.null_mode = NULL_PROPAGATE
+    var price: List[Float64] = [1.5, 2.0, 3.0]
+    var qty: List[Float64] = [2.0, 3.0, 0.5]
+    for k in range(2):
+        var nulls: List[Int] = [1, -1]
+        if k == 1:
+            nulls = [-1, 2]
+        var b = floats_at([price.copy(), qty.copy()], [0, 3], nulls^)
+        var r = call_once(rt, spec, b)
+        var what = "PROPAGATE, null in field " + String(k) + ": " + String(r.outcome) + " " + String(r.column)
+        assert_true(r.outcome.is_ok(), what)
+        assert_equal(r.column.null_count(), 1, what)
+        var null_row = 1 if k == 0 else 2
+        for i in range(3):
+            if i == null_row:
+                assert_true(not r.column.valid[i], what)
+            else:
+                assert_true(r.column.valid[i], what)
+                assert_equal(r.column.as_float(i), price[i] * qty[i], what)
+    var manual = row_spec("udf_rows:price_qty", pq, TYPE_FLOAT64, TYPE_FLOAT64)
+    var m = call_once(rt, manual, floats_at([price.copy(), qty.copy()], [0, 0], [1, -1]))
+    assert_equal(status_name(m.outcome.status), "ERR_RAISED", "MANUAL: " + String(m.outcome))
+    assert_equal(m.outcome.row, Int64(1), String(m.outcome))
+    # branchy reads c, outside {a, b}, at row 2: row 0 (a null) is skipped.
+    var ab: List[String] = ["a", "b"]
+    spec = row_spec("udf_rows:branchy", ab, TYPE_FLOAT64, TYPE_FLOAT64)
+    spec.null_mode = NULL_PROPAGATE
+    var a: List[Float64] = [-1.0, 2.0, -3.0]
+    var bb: List[Float64] = [10.0, 20.0, 30.0]
+    assert_not_declared(call_once(rt, spec, floats([a.copy(), bb.copy()], null_at=0)), "c", "['a', 'b']", 2, "PROPAGATE branchy")
+
+
 def test_extra_column(mut rt: UdfRuntime) raises:
     var pq: List[String] = ["price", "qty"]
     var spec = row_spec("udf_rows:price_qty", pq, TYPE_FLOAT64, TYPE_FLOAT64)
@@ -456,7 +501,9 @@ def test_validate(mut rt: UdfRuntime) raises:
     refused(rt, s, "ERR_UNSUPPORTED", "ROW UDFs only", "a SCALAR spec")
     s = ok.copy()
     s.null_mode = NULL_PROPAGATE
-    refused(rt, s, "ERR_UNSUPPORTED", "MANUAL", "PROPAGATE")
+    assert_equal(rt.validate(s).status, OK, "PROPAGATE: " + String(rt.validate(s)))
+    s.null_mode = 3
+    refused(rt, s, "ERR_UNSUPPORTED", "the null mode is not MANUAL or PROPAGATE", "null mode 3")
     s = ok.copy()
     s.arg_names[1] = "price"
     refused(rt, s, "ERR_UNSUPPORTED", "names a field twice", "a repeated field")
@@ -488,6 +535,7 @@ def main() raises:
     test_kept_row_same_instance(rt)
     test_extra_column(rt)
     test_any_name(rt, sets)
+    test_propagate(rt)
     test_forged(rt)
     var l = rt.ledger()
     assert_equal(l.released, l.exported, "every exported argument array released")

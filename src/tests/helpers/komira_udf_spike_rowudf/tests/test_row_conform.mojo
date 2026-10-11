@@ -5,7 +5,9 @@
 #
 # What it proves: a correct read set computes every row from the right
 # child; a read outside the read set fails with ERR_FIELD_NOT_DECLARED at
-# its row, with a message; a function that catches the language's error
+# its row, with a message, also under PROPAGATE after a null row the
+# function is not called on (the error keeps the caller's row number); a
+# function that catches the language's error
 # around that read still fails the batch; every exported array is released
 # once (the runner's ledger). The corpus's other cases are of shapes this
 # runtime does not declare; komira_udf_spike_python's suites run them.
@@ -21,8 +23,9 @@ from komira_udf_spike_abi.conform import load_cases, run_suite
 from komira_udf_spike_abi.contract import SHAPE_ROW
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
-comptime ROW_CASES = 3
-"""row_caught_violation, row_declared_fields, row_undeclared_field."""
+comptime ROW_CASES = 4
+"""row_caught_violation, row_declared_fields, row_propagate_error_row_first,
+row_undeclared_field."""
 
 
 def main() raises:

@@ -82,6 +82,8 @@ comptime PROBE_UNKNOWN_NULLS: Int32 = 13
 comptime PROBE_STRUCT_VALIDITY: Int32 = 14
 comptime PROBE_STRUCT_NO_BUFFERS: Int32 = 15
 comptime PROBE_STRUCT_BUFFERS: Int32 = 16
+comptime PROBE_CALL_LEAK: Int32 = 17
+comptime PROBE_UNKNOWN_NO_BITMAP: Int32 = 18
 
 # Misuse kinds: the order of native/row_probe.c's MU_* enum.
 comptime MISUSE_CAPS_SMALL: Int32 = 0
@@ -282,13 +284,17 @@ struct ProbeResult(Copyable, Movable):
     var open_message: String
     var open_row: Int64
     var reserved_zero: Bool
-    """An OK output's device struct came back with zero reserved words."""
+    """An OK output came back with every word set: zero reserved words, the
+    CPU device, no sync event, offset 0, two buffers, no children or
+    dictionary, and a null count equal to its bitmap's."""
     var last_level: Int32
     """The level of the last host log line, by the probe's end."""
     var out_len: Int64
     var out_nulls: Int64
     var out: List[Float64]
     """The first (at most 8) output values; NaN for a null."""
+    var heap: Int64
+    """PROBE_CALL_LEAK: heap bytes left by 2000 good calls after 20."""
 
 
 @fieldwise_init
@@ -425,7 +431,7 @@ struct RowEngine(Movable):
             Int32(_pget(h, 0)), read_cstr(external_call["rowe_probe_message", Void](h.p, Int32(0))), _pget(h, 1),
             _pget(h, 2) != 0, _pget(h, 3) != 0, _pget(h, 4), _pget(h, 5), Int32(_pget(h, 6)),
             read_cstr(external_call["rowe_probe_message", Void](h.p, Int32(1))), _pget(h, 9), _pget(h, 10) != 0,
-            Int32(_pget(h, 11)), _pget(h, 7), _pget(h, 8), out^,
+            Int32(_pget(h, 11)), _pget(h, 7), _pget(h, 8), out^, _pget(h, 12),
         )
         external_call["rowe_probe_free", NoneType](h.p)
         return r^

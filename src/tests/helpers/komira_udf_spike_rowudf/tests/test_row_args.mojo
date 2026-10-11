@@ -96,6 +96,7 @@ from komira_udf_spike_rowudf.engine import (
     MISUSE_RESULT_NULL,
     MISUSE_SIGNALS,
     MISUSE_SPEC_SMALL,
+    PROBE_CALL_LEAK,
     PROBE_CALL_SIZE,
     PROBE_CHILD_BUFFERS,
     PROBE_FOREIGN_CLOSE,
@@ -112,6 +113,7 @@ from komira_udf_spike_rowudf.engine import (
     PROBE_STRUCT_NO_BUFFERS,
     PROBE_STRUCT_OFFSET,
     PROBE_STRUCT_VALIDITY,
+    PROBE_UNKNOWN_NO_BITMAP,
     PROBE_UNKNOWN_NULLS,
     Probe,
     ProbeResult,
@@ -143,7 +145,7 @@ def expect_ok(r: ProbeResult, rows: Int, what: String) raises:
         assert_equal(r.out[i], Float64((i + 1) * (i + 1) * 10), w + ": row " + String(i))
     assert_true(r.moved and r.released, what + ": args not moved and released")
     if rows > 0:
-        assert_true(r.reserved_zero, what + ": the output's reserved words")
+        assert_true(r.reserved_zero, what + ": the output's words (reserved, device, children, dictionary)")
 
 
 def test_layouts(mut e: RowEngine) raises:
@@ -212,6 +214,19 @@ def test_unknown_null_count(mut e: RowEngine) raises:
         assert_true(r.out[1] != r.out[1], what + ": row 1 is not null: " + String(r.out[1]))
         assert_equal(r.out[2], 33.0, what)
         assert_true(r.moved and r.released, what + ": args not moved and released")
+        # null_count -1 with no validity buffer: every row is valid.
+        p = Probe.of(ENTRY, pq(), PROBE_UNKNOWN_NO_BITMAP, 3)
+        p.field = Int32(f)
+        expect_ok(e.probe(p), 3, "null_count -1, no bitmap, field " + String(f))
+
+
+def test_call_leak(mut e: RowEngine) raises:
+    """2000 calls of 1000 rows, each output released, leave the C heap within
+    64 KiB: an output block (about 8 KiB) or an argument owner (88 bytes)
+    not freed per call leaves 16 MB or 176 KB."""
+    var r = e.probe(Probe.of(ENTRY, pq(), PROBE_CALL_LEAK, 1000))
+    expect_ok(r, 1000, "after 2020 calls")
+    assert_true(r.heap < 65536, "2000 calls left " + String(r.heap) + " heap bytes")
 
 
 def test_cancel(mut e: RowEngine) raises:
@@ -331,6 +346,7 @@ def main() raises:
     assert_equal(e.status(), 0, e.message())
     test_layouts(e)
     test_unknown_null_count(e)
+    test_call_leak(e)
     test_cancel(e)
     test_clock(e)
     test_deadline(e)

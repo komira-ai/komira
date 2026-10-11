@@ -24,7 +24,8 @@ Arrow types) is decided by the producer when the plan is built
   later batch of the same instance, where the instance's columns hold that
   batch's buffers (each row carries the number of the batch that made it).
   A field may have any name: no attribute name reaches a row's own state.
-  A row user code makes itself raises TypeError.
+  A row user code makes itself raises TypeError. Under PROPAGATE a row
+  with a null field is a null result and the function is not called on it.
   The host's cancel flag is read before each row (ERR_CANCELLED at that
   row); the host clock after row 0 and every CLOCK_EVERY rows, and a passed
   deadline fails the batch with ERR_DEADLINE at the next row.
@@ -270,8 +271,10 @@ def _row_type(names):
 # ---- open_instance and calls ------------------------------------------------------
 
 
-def open_instance(entry, names, result_fmt):
-    """(OK, RowInstance) or (status, message)."""
+def open_instance(entry, names, result_fmt, propagate=False):
+    """(OK, RowInstance) or (status, message). `propagate`: the spec's
+    null mode is PROPAGATE (a row with a null field is a null result, and
+    the function is not called on it)."""
     import importlib
     import inspect
 
@@ -293,7 +296,7 @@ def open_instance(entry, names, result_fmt):
     st = _check(entry, len(params), varargs, ret, result_fmt)
     if st[0] != OK:
         return (ERR_LOAD, st[1])
-    return (OK, RowInstance(f, list(names), result_fmt))
+    return (OK, RowInstance(f, list(names), result_fmt, bool(propagate)))
 
 
 def _fill(slots, cols):
@@ -306,12 +309,13 @@ def _fill(slots, cols):
 class RowInstance:
     """One ROW UDF bound in one interpreter."""
 
-    __slots__ = ("f", "names", "result_fmt", "row", "slots", "batch", "seen", "state", "set_state")
+    __slots__ = ("f", "names", "result_fmt", "propagate", "row", "slots", "batch", "seen", "state", "set_state")
 
-    def __init__(self, f, names, result_fmt):
+    def __init__(self, f, names, result_fmt, propagate=False):
         self.f = f
         self.names = names
         self.result_fmt = result_fmt
+        self.propagate = propagate
         self.row, self.slots, self.batch, self.seen, self.state, self.set_state = _row_type(names)
 
     def call(self, n, cols, out, outv, cancel, now, deadline):
@@ -368,21 +372,31 @@ class RowInstance:
         set_state = self.set_state
         seen = self.seen
         b = self.batch[0]
+        # PROPAGATE: the (validity, offset) of each field that has a bitmap;
+        # a row null in any of them is a null result, f not called on it.
+        # Rows keep their caller's numbers: nothing is compacted.
+        nv = [(c[1], c[2]) for c in self.slots if c[1] is not None] if self.propagate else ()
         nulls = 0
         for i in range(n):
             if flag[0]:
                 return (ERR_CANCELLED, "cancelled at row {}".format(i), None, i)
-            r = new(Row)
-            set_state(r, (b, i))
-            try:
-                y = f(r)
-            except BaseException as exc:
+            y = None
+            for valid, off in nv:
+                p = off + i
+                if not (valid[p >> 3] >> (p & 7)) & 1:
+                    break
+            else:
+                r = new(Row)
+                set_state(r, (b, i))
+                try:
+                    y = f(r)
+                except BaseException as exc:
+                    if seen[0] is not None:
+                        return self._not_declared()
+                    return self._raised(exc, i)
                 if seen[0] is not None:
+                    # The read outside the read set was caught by user code.
                     return self._not_declared()
-                return self._raised(exc, i)
-            if seen[0] is not None:
-                # The read outside the read set was caught by user code.
-                return self._not_declared()
             if y is None:
                 nulls += 1
                 outv[i >> 3] &= ~(1 << (i & 7)) & 0xFF

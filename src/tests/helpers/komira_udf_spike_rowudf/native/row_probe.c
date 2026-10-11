@@ -54,7 +54,9 @@ enum {
   PK_UNKNOWN_NULLS,    /* the field has row 1 null and null_count -1 (not computed) */
   PK_STRUCT_VALIDITY,  /* the struct has a validity buffer (row 1 null) */
   PK_STRUCT_NO_BUFFERS, /* the struct's buffer list is NULL */
-  PK_STRUCT_BUFFERS    /* the struct's n_buffers is 0 */
+  PK_STRUCT_BUFFERS,   /* the struct's n_buffers is 0 */
+  PK_CALL_LEAK,        /* 2020 good calls first, the heap measured over the last 2000 (heap) */
+  PK_UNKNOWN_NO_BITMAP /* the field has null_count -1 and no validity buffer: every row valid */
 };
 
 struct probe {
@@ -66,9 +68,10 @@ struct probe {
   int64_t logs;         /* host log lines during the probe */
   int32_t open_status;  /* PK_OTHER_THREAD: open_instance from this thread */
   int64_t open_row;     /* its error row */
-  int32_t reserved_zero; /* an OK output's device struct has zero reserved words */
+  int32_t reserved_zero; /* an OK output's every word set: reserved 0, CPU, a primitive with no children */
   int32_t last_level;   /* the last log line's level */
   int64_t out_len, out_nulls;
+  int64_t heap; /* PK_CALL_LEAK: heap bytes (mallinfo2 uordblks) left by 2000 calls after 20 */
   double out[8]; /* the first values; NaN for a null */
   char message[MSG];
   char open_message[MSG];
@@ -142,6 +145,7 @@ static int probe_args(struct ArrowDeviceArray* d, int32_t kind, int32_t field, i
     b->cbufs[f][0] = b->bits;
     b->child[f].null_count = -1;
   }
+  if (kind == PK_UNKNOWN_NO_BITMAP) b->child[f].null_count = -1;
   if (kind == PK_STRUCT_VALIDITY) {
     b->pvalid[0] = 0xFD; /* row 1 null */
     b->pbufs[0] = b->pvalid;
@@ -182,9 +186,35 @@ static void* helper_thread(void* arg) {
   return NULL;
 }
 
+/* PK_CALL_LEAK: 20 good calls, then 2000 more over which the heap is
+ * measured; every output released. 0 when a call fails. */
+static int leak_calls(const komira_udf_runtime* t, komira_udf_instance* inst, const komira_udf_call* call,
+                      int64_t rows, int64_t* heap) {
+  struct mallinfo2 before = {0};
+  for (int k = 0; k < 2020; k++) {
+    if (k == 20) before = mallinfo2();
+    struct ArrowDeviceArray a, o;
+    int32_t released = 0;
+    memset(&o, 0, sizeof(o));
+    komira_udf_error err = {sizeof(komira_udf_error), 0, NULL, NULL, -1, -1, NULL, NULL};
+    if (!probe_args(&a, PK_GOOD, 0, rows, &released)) return 0;
+    int32_t rc = t->call_batch(inst, call, &a, &o, &err);
+    if (a.array.release != NULL) a.array.release(&a.array);
+    if (o.array.release != NULL) o.array.release(&o.array);
+    if (err.release != NULL) err.release(&err);
+    if (rc != KOMIRA_UDF_OK) return 0;
+  }
+  struct mallinfo2 after = mallinfo2();
+  *heap = (int64_t)after.uordblks - (int64_t)before.uordblks;
+  return 1;
+}
+
 static void probe_output(struct probe* p, const struct ArrowDeviceArray* d) {
   const struct ArrowArray* o = &d->array;
-  p->reserved_zero = d->reserved[0] == 0 && d->reserved[1] == 0 && d->reserved[2] == 0;
+  /* Every word the runtime hands back is set: the probe filled `out` with 0xFF. */
+  p->reserved_zero = d->reserved[0] == 0 && d->reserved[1] == 0 && d->reserved[2] == 0 && d->sync_event == NULL &&
+                     d->device_id == -1 && d->device_type == ARROW_DEVICE_CPU && o->offset == 0 &&
+                     o->n_buffers == 2 && o->n_children == 0 && o->children == NULL && o->dictionary == NULL;
   p->out_len = o->length;
   const double* v = (const double*)o->buffers[1] + o->offset;
   const uint8_t* valid = o->buffers[0];
@@ -194,6 +224,7 @@ static void probe_output(struct probe* p, const struct ArrowDeviceArray* d) {
     p->out_nulls += is_null;
     if (i < 8) p->out[i] = is_null ? NAN : v[i];
   }
+  p->reserved_zero = p->reserved_zero && o->null_count == p->out_nulls;
 }
 
 struct probe* rowe_probe(struct engine* e, const char* entry, const char* read_csv, int32_t kind, int32_t field,
@@ -260,6 +291,8 @@ struct probe* rowe_probe(struct engine* e, const char* entry, const char* read_c
   if (kind == PK_CALL_SIZE) call.struct_size = sizeof(komira_udf_call) - 1;
   if (h.inst == NULL) {
     /* PK_OTHER_THREAD's open failed: no call */
+  } else if (kind == PK_CALL_LEAK && !leak_calls(t, h.inst, &call, rows, &p->heap)) {
+    p->status = KOMIRA_UDF_ERR_OUT_OF_MEMORY;
   } else if (!probe_args(&args, kind, field, rows, &p->released)) {
     p->status = KOMIRA_UDF_ERR_OUT_OF_MEMORY;
   } else {
@@ -301,7 +334,7 @@ struct probe* rowe_probe(struct engine* e, const char* entry, const char* read_c
 
 /* rowe_probe's fields: 0 status, 1 row, 2 moved, 3 released, 4 clock reads,
  * 5 log lines, 6 open_status, 7 output rows, 8 output nulls, 9 open_row,
- * 10 reserved_zero, 11 last log level. */
+ * 10 reserved_zero, 11 last log level, 12 heap (PK_CALL_LEAK). */
 int64_t rowe_probe_get(const struct probe* p, int32_t field) {
   switch (field) {
     case 0: return p->status;
@@ -316,6 +349,7 @@ int64_t rowe_probe_get(const struct probe* p, int32_t field) {
     case 9: return p->open_row;
     case 10: return p->reserved_zero;
     case 11: return p->last_level;
+    case 12: return p->heap;
     default: return 0;
   }
 }

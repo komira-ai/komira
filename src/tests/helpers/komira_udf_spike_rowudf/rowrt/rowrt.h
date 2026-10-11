@@ -36,6 +36,7 @@ struct komira_udf_udf {
   int n;                      /* fields in the read set */
   struct rowrt_field* fields; /* in the argument struct's order; NULL when n is 0 */
   char result_fmt;
+  int propagate; /* null mode PROPAGATE: a row with a null field is a null result */
 };
 
 struct komira_udf_context {
