@@ -71,12 +71,21 @@
 #   19 fuse_partition_topn          [PartitionBy in the current plan]
 #   20 narrow_join_payload                                   (last)
 #
-# Each call below says what its position does. `tests/test_optimizer_driver_
-# passes.mojo` (steps 1-10) and `tests/test_optimizer_driver_passes_late.mojo`
-# (steps 10-19) pin each pass at its position; `tests/test_optimizer_driver_
-# order.mojo` pins the order of adjacent calls, one plan per pair that the two
-# orders optimize differently; `tests/test_optimizer_driver_gates.mojo` pins
-# the gate arms a plan with a Filter cannot reach.
+# Each call below says what its position does.
+#
+# WHAT THE TESTS PIN. `tests/test_optimizer_driver_passes.mojo` (steps 1-10)
+# and `tests/test_optimizer_driver_passes_late.mojo` (steps 10-19) show each
+# pass changing some plan at its step, so dropping a pass fails a test, as
+# do fourteen named moves of a pass out of its stated position.
+# `tests/test_optimizer_driver_order.mojo` and `tests/test_optimizer_driver_
+# order_steps.mojo` hold one plan per reorder that changes the plan, for
+# these reorders only: two adjacent calls inside a step swapped; the last call
+# of a step swapped with the first call of the next; a whole step swapped with
+# the whole next step; and step 6 moved after step 8.
+# `tests/test_optimizer_driver_gates.mojo` pins the gate arms a plan with a
+# Filter cannot reach. komira#1297 lists every mutant; a reorder in these
+# families whose two orders gave the same plan on every plan tried is argued
+# there, not tested. Any other move of a pass is not pinned.
 #
 # NOT IN THIS ORDER, though the reference pipeline ran them at step 13:
 #
@@ -226,6 +235,10 @@ def optimize(
     # Project expressions and scan filters only, so a plan whose one foldable
     # or simplifiable expression is an aggregate argument or a join residual
     # skips the pass, although the pass rewrites those slots (komira#1306).
+    # Both run after step 5, so a residual step 5 moved into a Filter folds,
+    # and before steps 7-8, which read their output: a removed double
+    # negation exposes an OR to factoring, and a folded constant makes two
+    # expressions equal for CSE.
     if _plan_has_foldable_exprs(plan):
         plan = fold_constants(plan^)
     if _plan_has_simplifiable_exprs(plan):
@@ -277,10 +290,10 @@ def optimize(
     plan = prune_columns(plan^)
 
     # 12. A GROUP BY key that is a function of the other keys is elided and
-    # recomputed above the aggregate. After `prune_columns` (it reads the
-    # narrowed shape) and BEFORE `eliminate_identity_projects`: dropping the
-    # computed key usually leaves the aggregate's child Project an identity,
-    # and step 13 is what removes it.
+    # recomputed above the aggregate. After step 11 as in the reference order
+    # (on every plan tried, running it before step 11 gave the same plan),
+    # and BEFORE step 13: dropping the computed key usually leaves the
+    # aggregate's child Project an identity, and step 13 is what removes it.
     if has_aggregate and has_project:
         plan = elide_functionally_dependent_group_keys(plan^)
 
@@ -297,7 +310,9 @@ def optimize(
     # `config.eager_agg` False skips eager aggregation. Absorb runs before
     # inner-to-semi, and step 15 after it, so a join over a unique side under
     # an Aggregate stays INNER where either other order would make it SEMI
-    # (the reference order, kept and pinned).
+    # (the reference order, kept and pinned). Step 13 runs first: eager
+    # aggregation declines an Aggregate over two stacked Projects, which
+    # `merge_projects` makes one.
     if has_join:
         if config.eager_agg:
             plan = eager_aggregate_pushdown(plan^)
@@ -335,7 +350,8 @@ def optimize(
         # already run. Removing it here keeps `optimize` idempotent.
         plan = eliminate_identity_projects(plan^)
 
-    # 17. Limits: push down, then Sort over Limit becomes TopN.
+    # 17. Limits: push down, then Sort over Limit becomes TopN. After step 16,
+    # so a Limit goes below the Project that restores the join's column order.
     if has_limit:
         plan = push_limit_down(plan^)
         if _plan_has_sort_above_limit(plan):

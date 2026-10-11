@@ -54,6 +54,7 @@ mojo_library(
         "tests/test_optimizer_driver_corpus.mojo",
         "tests/test_optimizer_driver_gates.mojo",
         "tests/test_optimizer_driver_order.mojo",
+        "tests/test_optimizer_driver_order_steps.mojo",
         "tests/test_optimizer_driver_passes.mojo",
         "tests/test_optimizer_driver_passes_late.mojo",
         "tests/test_optimizer_eager_agg.mojo",
