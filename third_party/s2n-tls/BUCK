@@ -54,6 +54,14 @@ _C_FLAGS = [
     "-w",
 ]
 
+# Each feature defined for the compile is one a probe of tests/features/ has
+# shown to compile here (tests//functional/s2n_probes builds the probe of
+# every feature listed, and tests//negative/s2n_probes the rest), so a
+# feature with no probe of that name was never shown and is refused.
+_UNPROBED = [f for f in S2N_FEATURES if f not in PROBES]
+
+[fail("third_party/s2n-tls/features.bzl: {} name(s) no probe of srcs.bzl's PROBES (tests/features/<name>.c), so nothing shows they compile here: {}".format(len(_UNPROBED), ", ".join(_UNPROBED))) for _ in _UNPROBED[:1]]
+
 _DEFINES = [
     "-DNDEBUG",
     "-DS2N_EXPORTS",

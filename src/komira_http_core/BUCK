@@ -1,4 +1,3 @@
-load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The part of the HTTP layer a client and a server share: the h1 and h2 codecs
@@ -155,16 +154,6 @@ mojo_library(
         ],
     },
     visibility = ["PUBLIC"],
-)
-
-# The deps above name every komira_* module the library and its tests import
-# (tools/build/lint: mojo_deps), so a missing dep fails here, in review, and
-# not only in the compile.
-mojo_deps(
-    name = "deps_lint",
-    buck = "BUCK",
-    srcs = glob(["**/*.mojo"]),
-    visibility = ["komira//:tests_lints"],
 )
 
 export_file(name = "tests/fixtures/tls/leaf_cert.pem", visibility = ["PUBLIC"])

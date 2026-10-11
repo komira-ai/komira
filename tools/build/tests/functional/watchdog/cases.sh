@@ -44,6 +44,22 @@ MOJO
 "$BB" chmod +x "$D/tc/bin/mojo" "$D/zig/zig"
 : > "$REPORT"
 bad=0
+# The floor: a run that printed fewer ok cases than this (a case deleted, a
+# case that never says ok, an `exit` before the last case) is refused, here
+# in the action, so the report cannot pass with less in it. It runs from the
+# EXIT trap, so it holds however the script ends. Raise it when a case is
+# added.
+floor() {
+    rc=$?
+    ok_lines=$("$BB" grep -c '^ok ' "$REPORT" || true)
+    if [ "$ok_lines" -lt 15 ]; then
+        echo "BAD floor: $ok_lines ok case(s), fewer than the 15 cases of this script" | "$BB" tee -a "$REPORT" >&2
+        rc=1
+    fi
+    "$BB" rm -rf "$D"
+    exit "$rc"
+}
+trap floor EXIT
 
 # expect <case> <want rc> <want text or -> <stand-in mode> <wrapper flags...>
 expect() {
@@ -150,5 +166,4 @@ killed() {
 }
 killed wrapper_term TERM 143
 killed wrapper_kill KILL 137
-"$BB" rm -rf "$D"
 exit "$bad"
