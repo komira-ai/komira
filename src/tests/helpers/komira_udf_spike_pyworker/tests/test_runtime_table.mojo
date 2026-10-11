@@ -42,12 +42,13 @@
 #     of the library loaded by absolute path from another directory looks
 #     for the zygote's interpreter in that directory.
 #
-# Mutants planted: komira_udf_pyrt.py reading the clock after row 0 and every
-# 1024 rows (as it did before):
-# red on deadline_after_row_1; komira_udf_pyrt.py without `i + 1 < n`: red
+# Mutants planted: komira_udf_pyrt.py reading the clock after row 0 and then
+# every 1024 rows (as it did before): red on deadline_after_row_1 only (the
+# conformance case deadline_reached_during_call stays green on this runtime:
+# the worker compares its own monotonic clock, and slow_loop's first row
+# already passes the deadline). komira_udf_pyrt.py without `i + 1 < n`: red
 # on deadline_in_last_row. The pull request's sweep ran every mutant of
-# proxy_runtime.c against this file (its table names each one this file
-# kills).
+# proxy_runtime.c against this file.
 
 from std.testing import assert_equal, assert_true
 
