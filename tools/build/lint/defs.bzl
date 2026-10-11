@@ -14,11 +14,10 @@ lint changes no other action's digest.
 
 The lint action is the Zig tool //tools/build/lint/tool:lint (its
 src/main.zig says each kind), run with no shell; the linters are pinned
-downloads (tools/build/lint/BUCK), and public_boundary's text reader
-(public_boundary.awk) runs under the pinned busybox's awk. pointer_lint's
-action is a Zig tool of its own, built there (pointer_lint.zig). Each rule's
-default output is the validation result, a JSON file whose message holds the
-findings.
+downloads (tools/build/lint/BUCK). pointer_lint and public_boundary each run
+a Zig tool of their own (pointer_lint.zig there, and
+//tools/build/lint/public_boundary). Each rule's default output is the
+validation result, a JSON file whose message holds the findings.
 """
 
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
@@ -218,17 +217,25 @@ def _public_boundary_impl(ctx):
     files.update(ctx.attrs.paths)
     staged = ctx.actions.copied_dir("tree", files)
     package = "{}//{}".format(ctx.label.cell, ctx.label.package + "/" if ctx.label.package else "")
-    args = []
-    for ledger in [ctx.attrs.holds, ctx.attrs.hosts]:
-        args += [ledger, str(ledger.owner.raw_target()) if ledger.owner != None else package + ledger.short_path]
-    args.append(ctx.attrs.deny if ctx.attrs.deny != None else "-")
-    args += [str(ctx.attrs.window_from), ctx.attrs.public_from]
-    return _lint(ctx, "public_boundary", [ctx.attrs._reader], args, staged)
+    args = [ctx.attrs._tool[RunInfo], "--tree", staged, "--prefix", package]
+    for flag, ledger in [("--holds", ctx.attrs.holds), ("--hosts", ctx.attrs.hosts)]:
+        # Findings name a ledger of this package by its path in the cell, and
+        # one another package exports by its target.
+        args += [flag, ledger, flag + "-name", str(ledger.owner.raw_target()) if ledger.owner != None else package + ledger.short_path]
+    if ctx.attrs.deny != None:
+        args += ["--deny", ctx.attrs.deny]
+    result = ctx.actions.declare_output("validation.json")
+    args += ["--from", str(ctx.attrs.window_from), "--public", ctx.attrs.public_from, "--out", result.as_output()]
+    ctx.actions.run(cmd_args(args), category = "lint_public_boundary")
+    return [
+        DefaultInfo(default_output = result),
+        ValidationInfo(validations = [ValidationSpec(name = "public_boundary", validation_result = result)]),
+    ]
 
 public_boundary_rule = rule(
     impl = _public_boundary_impl,
-    doc = "What a public repository may not hold, over every file of `tree` (a doc_tree target: the root one holds every file of the cell) or, for a fixture, of `files` ({path in the tree: source}), never both, plus `srcs` (the dotfiles a glob skips), the doc_tree of each other cell in `cells` (at its path), and `paths` ({path in the tree: source}, a file another cell exports, such as its dotfiles): no date from the year `window_from` up to `public_from` (the first day of the public history, YYYY-MM-01), home directory naming a person, private or written-out network address, URL host outside the reserved example names and the domains of `hosts`, email address outside the reserved example domains, or commit id in prose; binary data is not read (its path is), and the path of every file is read for dates, home directories and deny-list words. `holds` holds the findings a file must keep, per rule and file at an exact count, and only shrinks. `deny`, absent by default, is a list of words kept outside the repository (a private consumer's), one per line: a finding no row can hold. The lint tool (tool/src/readers.zig, kind public_boundary) says the formats; public_boundary.awk, the reader, says what each rule matches.",
-    attrs = _COMMON | {
+    doc = "What a public repository may not hold, over every file of `tree` (a doc_tree target: the root one holds every file of the cell) or, for a fixture, of `files` ({path in the tree: source}), never both, plus `srcs` (the dotfiles a glob skips), the doc_tree of each other cell in `cells` (at its path), and `paths` ({path in the tree: source}, a file another cell exports, such as its dotfiles): no date from the year `window_from` up to `public_from` (the first day of the public history, YYYY-MM-01), home directory naming a person, private or written-out network address, URL host outside the reserved example names and the domains of `hosts`, email address outside the reserved example domains, or commit id in prose; binary data is not read (its path is), and the path of every file is read for dates, home directories and deny-list words. `holds` holds the findings a file must keep, per rule and file at an exact count, and only shrinks. `deny`, absent by default, is a list of words kept outside the repository (a private consumer's), one per line: a finding no row can hold. The check is the Zig tool //tools/build/lint/public_boundary (src/check.zig says what is read and the ledger formats, src/rules.zig what each rule matches), run with no shell.",
+    attrs = {
         "cells": attrs.dict(attrs.string(), attrs.dep(providers = [DocTreeInfo]), default = {}),
         "deny": attrs.option(attrs.source(), default = None),
         "files": attrs.dict(attrs.string(), attrs.source(), default = {}),
@@ -239,7 +246,7 @@ public_boundary_rule = rule(
         "public_from": attrs.string(),
         "tree": attrs.option(attrs.dep(providers = [DocTreeInfo]), default = None),
         "window_from": attrs.int(),
-        "_reader": attrs.source(default = "komira//tools/build/lint:public_boundary.awk"),
+        "_tool": attrs.exec_dep(default = "komira//tools/build/lint/public_boundary:public_boundary", providers = [RunInfo]),
     },
 )
 
@@ -252,6 +259,20 @@ lint_suite_rule = rule(
     impl = _lint_suite_impl,
     doc = "Depends on lint targets another build graph does not reach, so their validations run in any build holding this target. Its outputs are their results.",
     attrs = {"lints": attrs.list(attrs.dep())},
+)
+
+def _target_suite_impl(ctx):
+    if not ctx.attrs.targets:
+        fail("target_suite {}: targets is empty".format(ctx.label))
+    outs = []
+    for d in ctx.attrs.targets:
+        outs.extend(d[DefaultInfo].default_outputs)
+    return [DefaultInfo(default_outputs = outs)]
+
+target_suite_rule = rule(
+    impl = _target_suite_impl,
+    doc = "Depends on targets that must build but that no unit of the pull-request check builds by itself (sub-targets; targets of tests//negative and tests//src beside the planted defects they serve), so building it builds every default output of each and runs their validations. Its outputs are theirs.",
+    attrs = {"targets": attrs.list(attrs.dep())},
 )
 
 
@@ -367,6 +388,7 @@ def markdown_docs(**kwargs):
 # (doc_tree.bzl), so no BUCK file names one.
 action_pins = declares_docs(action_pins)
 lint_suite = declares_docs(lint_suite_rule)
+target_suite = declares_docs(target_suite_rule)
 markdown_docs = declares_docs(markdown_docs)
 no_endpoint = declares_docs(no_endpoint)
 pointer_lint = declares_docs(pointer_lint)

@@ -13,9 +13,6 @@ export_file(name = "surface_capability_matrix.sh", visibility = ["PUBLIC"])
 
 export_file(name = "test_weld.sh", visibility = ["PUBLIC"])
 
-# The reader of lint kind public_boundary (tool/src/readers.zig; the rule is public_boundary in defs.bzl).
-export_file(name = "public_boundary.awk", visibility = ["PUBLIC"])
-
 pinned_file(**pinned_kwargs("linux-x86_64", "shellcheck"))
 
 tar_member(
