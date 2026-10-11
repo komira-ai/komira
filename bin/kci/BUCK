@@ -7,6 +7,11 @@ mojo_binary(
     name = "kci",
     srcs = ["main.mojo"],
     deps = ["//src/kci_cli:kci_cli"],
+    # Shipped beside kci (`[runnable]`, and bin/ of a bundle): the README
+    # examples tool an ENV validation runs on each installed README
+    # (src/kci_validate readme_installed.mojo), the program the welded
+    # `[tests][readme]` test runs, built behind its own unit tests.
+    helpers = {"readme_examples": "//tools/build/readme_examples:tool"},
     visibility = ["PUBLIC"],
 )
 

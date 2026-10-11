@@ -19,6 +19,7 @@ glibc (2.34 or later) and the kernel. Package formats are built from it.
 
 ```
 bin/hello                                 launcher
+bin/<helper>                              the binary's `helpers`, if any
 lib/glibc-hwcaps/x86-64-v3/libhello.so    the program
 lib/                                      Mojo runtime, C++ runtime
 share/                                    data
@@ -54,7 +55,9 @@ those of the executable (tests//functional/bundle_parity compares the two).
 `lib<name>.so` has run path `$ORIGIN/../..`, the bundle's `lib/`. Every run
 path is relative to its file, so the bundle runs from wherever it is copied
 and through a symlink. A program finds its data through `/proc/self/exe`:
-`<its directory>/../share`. The runtime libraries in `lib/` are the vendor's
+`<its directory>/../share`, and a helper program (a `mojo_binary`'s
+`helpers`, [helpers.bzl](../mojo/helpers.bzl)) in `<its directory>`, as it
+does in the binary's runnable directory. The runtime libraries in `lib/` are the vendor's
 files, unchanged, and keep the vendor's run paths; [bundle_expected](../tests/functional/bundle_expected)
 lists every run path in the bundle.
 

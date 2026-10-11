@@ -36,6 +36,7 @@ load(
     _test_root = "test_root",
 )
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "capped_prefix", "define_args", "mem_cap_script", "memory_cap")
+load(":helpers.bzl", "HELPER_ATTRS", "helper_files")
 load(":readme.bzl", "readme_kwargs")
 load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_prefix", "with_test_limit")
 
@@ -666,7 +667,7 @@ def _runnable(ctx, tc, exe):
     run_dir = ctx.actions.copied_dir(ctx.label.name + ".runnable", {
         "lib": tc.runtime,
         name: exe,
-    })
+    } | helper_files(ctx, name))  # a mojo_binary's `helpers`, beside it (helpers.bzl)
     # The projection alone would fetch only the binary; the hidden directory
     # brings lib/ along. Nothing here names the compiler, so `buck2 run`
     # downloads the binary and its runtime libraries only.
@@ -703,7 +704,7 @@ def _binary_impl(ctx):
         ),
         RunInfo(args = command),
         MojoRunnableInfo(binary = exe.basename, command = command, run_dir = run_dir),
-        MojoProgramInfo(name = ctx.label.name, shared = shared, runtime = tc.runtime, target_cpu = tc.target_cpu),
+        MojoProgramInfo(name = ctx.label.name, shared = shared, runtime = tc.runtime, target_cpu = tc.target_cpu, helpers = helper_files(ctx, ctx.label.name)),
     ]
 
 _EXECUTABLE_ATTRS = {
@@ -715,7 +716,7 @@ _EXECUTABLE_ATTRS = {
 
 mojo_binary_rule = rule(
     impl = _binary_impl,
-    attrs = _EXECUTABLE_ATTRS | BINARY_DEFINE_ATTRS | {
+    attrs = _EXECUTABLE_ATTRS | BINARY_DEFINE_ATTRS | HELPER_ATTRS | {
         "optimization_level": attrs.string(default = SHIPPED_OPT_LEVEL),
         # When set, `[run_check]` fails unless the binary's stdout equals this.
         "expected_stdout": attrs.option(attrs.string(), default = None),
