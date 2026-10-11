@@ -1243,10 +1243,12 @@ def destroy_graph_owned[
     scope: Optional[List[String]] = None,
 ) raises -> List[UndeletableSkip]:
     """`destroy_graph` in `cell` (the owned scope). Before ANY delete, every
-    node must stamp ownership and every present object must carry this node's
-    identity: a FOREIGN or CONFLICT object refuses the whole teardown
-    (`kci: REFUSED destroy ...`). An adoption is never a reason to delete, so
-    `cell.adopt` is ignored here. The rest is `destroy_graph`."""
+    node this teardown would delete (in `scope`, not UNDELETABLE, not KEEP
+    unless `force_delete_data`) must stamp ownership and its present object
+    must carry this node's identity: a FOREIGN or CONFLICT object refuses the
+    whole teardown (`kci: REFUSED destroy ...`). A node it skips is not read.
+    An adoption is never a reason to delete, so `cell.adopt` is ignored here.
+    The rest is `destroy_graph`."""
     if not cell.owned():
         raise Error(
             String("destroy_graph_owned: the scope names no machine and cell;")

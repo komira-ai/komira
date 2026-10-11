@@ -10,6 +10,8 @@
 #      fault domain for that verb, and the backend text verbatim.
 #   3. A ROLE TURNED OFF WHOSE DELETE FAILS stops the apply naming the delete,
 #      and the store keeps the record (it is retired only on a confirmed gone).
+#      A role turned off whose object is already gone retires the record
+#      with no delete.
 #   4. OWNERSHIP THAT CHANGES BETWEEN THE PRE-FLIGHT AND THE NODE'S OWN READ
 #      stops the apply before any create or adopt.
 #   5. A NON-STEADY PHASE (converging) is refused, never converged.
@@ -351,6 +353,26 @@ def test_a_failed_closed_world_delete_is_named_and_keeps_the_record() raises:
     print("  test_a_failed_closed_world_delete_is_named_and_keeps_the_record: PASS")
 
 
+def test_a_turned_off_role_already_gone_retires_the_record() raises:
+    var w = _world(ResourceStatus.absent())
+    var store = InMemoryStateStore()
+    var g = _graph1(w, String("n"))
+    _ = apply_graph(g, Creds.none(), store)
+    assert_equal(store.physical_id_for(String("n")), "pid-n")
+
+    # Gone out of band, then the file turns the role off.
+    w[].now(ResourceStatus.absent())
+    w[].wanted = False
+    var g2 = _graph1(w, String("n"))
+    var applied = apply_graph(g2, Creds.none(), store)
+    assert_equal(len(applied), 1)
+    assert_equal(applied[0].verb, VERB_NOOP)
+    assert_equal(w[].count(String("delete")), 0, "nothing to delete")
+    assert_equal(store.count_reaped(String("n")), 1, "the record is retired")
+    assert_equal(store.physical_id_for(String("n")), "")
+    print("  test_a_turned_off_role_already_gone_retires_the_record: PASS")
+
+
 # ---- 4. ownership that changes during the run ------------------------------------
 
 
@@ -466,6 +488,7 @@ def main() raises:
     test_a_failed_update_names_the_node_the_verb_and_the_fault()
     test_a_failed_adopt_names_the_node_the_verb_and_the_fault()
     test_a_failed_closed_world_delete_is_named_and_keeps_the_record()
+    test_a_turned_off_role_already_gone_retires_the_record()
     test_ownership_changed_between_preflight_and_read_stops_the_apply()
     test_a_converging_phase_is_refused_not_converged()
     test_an_empty_live_id_keeps_the_confirmed_one()

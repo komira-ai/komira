@@ -9,7 +9,8 @@
 #      `outputs` after a mutation): a not-found is ABSENT (no outputs), a read
 #      that finds nothing is ABSENT, and ANY OTHER RAISE PROPAGATES — an
 #      AccessDenied is never laundered into "absent". `read_presence` reports
-#      a present object with an empty digest and never digests.
+#      a present object with an empty digest and never digests. Both reads
+#      carry the live stamp, endpoint and image the descriptor decodes.
 #   2. THE DELETE ENVELOPE: a not-found is a no-op; any other raise
 #      propagates.
 #   3. THE DESCRIPTOR DEFAULTS reach the driver: no undeletable reason, an
@@ -212,6 +213,20 @@ struct _Stamping(ResourceDescriptor, Movable, Deinitable):
     def stamps_ownership(self) -> Bool:
         return True
 
+    # Each live field answers a distinct non-empty value, so a driver that
+    # drops one (or passes one in another's place) is seen.
+    def endpoint(self, view: _View) -> String:
+        return view.url + String("/serve")
+
+    def live_image(self, view: _View) -> String:
+        return String("registry.example.com/images@sha256:abc")
+
+    def stamp_of(self, view: _View) -> String:
+        return String("kci:v1 owner=shop/blue/images/images/repo")
+
+    def unmanaged(self, spec: _Spec, view: _View) -> String:
+        return String("tags: 1 extra")
+
     def create_owned(mut self, spec: _Spec, stamp: OwnerStamp, token: String) raises -> String:
         self._log[].calls.append(String("create_owned ") + stamp.identity())
         return String("pid-") + spec.name
@@ -391,6 +406,31 @@ def test_the_driver_forwards_each_override() raises:
     print("  test_the_driver_forwards_each_override: PASS")
 
 
+def test_reads_carry_the_live_stamp_endpoint_and_image() raises:
+    # The owned destroy's pre-flight and its mid-run stamp check read the
+    # stamp through `read_presence`: a driver that dropped it would make every
+    # stamped object look unowned. `read_status` carries the same fields.
+    var log = ArcPointer[_Log](_Log())
+    var n = DescribedResource[_Stamping](
+        _Stamping(log), _Spec(String("images")), String("images/repo"), List[String]()
+    )
+    var p = n.read_presence(Creds.none())
+    assert_equal(p.phase, RES_PRESENT_DRIFTED)
+    assert_equal(p.physical_id, "https://images.example.com")
+    assert_equal(p.live_digest, "")
+    assert_equal(p.stamp, "kci:v1 owner=shop/blue/images/images/repo")
+    assert_equal(p.endpoint, "https://images.example.com/serve")
+    assert_equal(p.live_image, "registry.example.com/images@sha256:abc")
+    var s = n.read_status(Creds.none())
+    assert_equal(s.phase, RES_PRESENT_MATCHED)
+    assert_equal(s.live_digest, "images")
+    assert_equal(s.stamp, "kci:v1 owner=shop/blue/images/images/repo")
+    assert_equal(s.endpoint, "https://images.example.com/serve")
+    assert_equal(s.live_image, "registry.example.com/images@sha256:abc")
+    assert_equal(s.unmanaged, "tags: 1 extra")
+    print("  test_reads_carry_the_live_stamp_endpoint_and_image: PASS")
+
+
 def main() raises:
     print("test_described_resource_envelopes:")
     test_read_status_envelope()
@@ -399,5 +439,6 @@ def main() raises:
     test_delete_envelope()
     test_descriptor_defaults_reach_the_driver()
     test_the_driver_forwards_each_override()
+    test_reads_carry_the_live_stamp_endpoint_and_image()
     test_a_descriptor_without_outputs_produces_none()
     print("ALL DESCRIPTOR ENVELOPE TESTS PASSED")

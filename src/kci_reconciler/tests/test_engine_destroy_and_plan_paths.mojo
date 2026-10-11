@@ -18,6 +18,11 @@
 #      stops the teardown before the delete.
 #   6. A CONSUMER WAITING ON TWO PRODUCERS names both in its "known after
 #      apply" reason, in reference order, and is not read.
+#   7. "KNOWN AFTER APPLY" IS TRANSITIVE: in a chain a(create) -> b -> c, b
+#      waits on a, and c waits on b because b is itself waiting; neither is
+#      read, and c is not refused as unbound.
+#   8. A TURNED-OFF PRODUCER PRODUCES NOTHING: its consumer is refused as
+#      UNBOUND by the dry run, never reported as "known after apply".
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -37,6 +42,7 @@ from kci_reconciler import (
     InputRef,
     ResolvedInputs,
     REFUSED_TOKEN,
+    UNBOUND_TOKEN,
     RETAIN_DELETE,
     RETAIN_KEEP,
     RETAIN_UNDELETABLE,
@@ -415,6 +421,67 @@ def test_known_after_apply_names_every_pending_producer() raises:
     print("  test_known_after_apply_names_every_pending_producer: PASS")
 
 
+# ---- 7. a consumer waiting on a producer that is itself waiting ----------------
+
+
+def test_known_after_apply_flows_down_a_chain() raises:
+    var wa = _world(ResourceStatus.absent())
+    var wb = _world(ResourceStatus.absent())
+    var wc = _world(ResourceStatus.absent())
+    var b_refs = List[InputRef]()
+    b_refs.append(InputRef(String("a"), String("URL"), String("env.A")))
+    var c_refs = List[InputRef]()
+    c_refs.append(InputRef(String("b"), String("ADDR"), String("env.B")))
+    var g = ResourceGraph()
+    g.add(ErasedResource.erase(_Scripted(wc, String("c"), String(""), c_refs^)))
+    g.add(ErasedResource.erase(_Scripted(wb, String("b"), String(""), b_refs^)))
+    g.add(ErasedResource.erase(_Scripted(wa, String("a"))))
+    var plan = plan_graph(g, Creds.none())
+    assert_equal(len(plan), 3)
+    assert_equal(plan[0].logical_id, "a")
+    assert_equal(plan[0].verb, VERB_CREATE)
+    assert_equal(plan[1].logical_id, "b")
+    assert_equal(plan[1].verb, VERB_KNOWN_AFTER_APPLY)
+    assert_equal(plan[1].reason, "(known after apply): env.A <- a.URL (create)")
+    assert_equal(plan[2].logical_id, "c")
+    assert_equal(plan[2].verb, VERB_KNOWN_AFTER_APPLY)
+    assert_equal(
+        plan[2].reason,
+        "(known after apply): env.B <- b.ADDR (known after apply)",
+    )
+    assert_equal(len(wb[].calls), 0, "b is not read")
+    assert_equal(len(wc[].calls), 0, "c is not read")
+    print("  test_known_after_apply_flows_down_a_chain: PASS")
+
+
+# ---- 8. a consumer of a turned-off producer --------------------------------------
+
+
+def test_a_consumer_of_a_turned_off_producer_is_refused_as_unbound() raises:
+    var wp = _world(ResourceStatus.absent())
+    wp[].wanted = False
+    var wc = _world(ResourceStatus.absent())
+    var refs = List[InputRef]()
+    refs.append(InputRef(String("p"), String("URL"), String("env.A")))
+    var g = ResourceGraph()
+    g.add(ErasedResource.erase(_Scripted(wc, String("c"), String(""), refs^)))
+    g.add(ErasedResource.erase(_Scripted(wp, String("p"))))
+    var msg = String("")
+    try:
+        _ = plan_graph(g, Creds.none())
+    except e:
+        msg = String(e)
+    assert_true(
+        msg.startswith(
+            String(UNBOUND_TOKEN)
+            + ": node 'c' (field env.A) reads output 'URL' of 'p'"
+        ),
+        msg,
+    )
+    assert_equal(len(wc[].calls), 0, "the consumer is not read")
+    print("  test_a_consumer_of_a_turned_off_producer_is_refused_as_unbound: PASS")
+
+
 def main() raises:
     print("test_engine_destroy_and_plan_paths:")
     test_owned_plan_and_destroy_refuse_the_unowned_scope()
@@ -423,4 +490,6 @@ def main() raises:
     test_destroy_deletes_by_the_confirmed_id_when_the_read_has_none()
     test_a_stamp_changed_during_destroy_stops_before_the_delete()
     test_known_after_apply_names_every_pending_producer()
+    test_known_after_apply_flows_down_a_chain()
+    test_a_consumer_of_a_turned_off_producer_is_refused_as_unbound()
     print("ALL DESTROY AND PLAN PATH TESTS PASSED")
