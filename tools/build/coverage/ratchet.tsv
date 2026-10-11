@@ -206,7 +206,7 @@ src/komira_snapshotter	8823	7857
 src/komira_source_url	9807	-
 src/komira_spsc_ring	8623	7800
 src/komira_sql	9987	-
-src/komira_supervisor	7878	-
+src/komira_supervisor	10000	-
 src/komira_supervisor_proto	0	-
 src/komira_sync	10000	10000
 src/komira_table_store	9981	-

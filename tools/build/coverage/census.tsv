@@ -191,7 +191,7 @@ komira//src/komira_snapshotter:komira_snapshotter	src/komira_snapshotter	library
 komira//src/komira_source_url:komira_source_url	src/komira_source_url	library	OK	102	104	-	-	no	conda	-	-
 komira//src/komira_spsc_ring:komira_spsc_ring	src/komira_spsc_ring	library	OK	119	138	39	50	yes	release	-	-
 komira//src/komira_sql:komira_sql	src/komira_sql	library	OK	3192	3196	-	-	no	conda	-	-
-komira//src/komira_supervisor:komira_supervisor	src/komira_supervisor	library	OK	312	396	-	-	no	conda	src/komira_supervisor/exit_monitor.mojo,src/komira_supervisor/pid1.mojo	-
+komira//src/komira_supervisor:komira_supervisor	src/komira_supervisor	library	OK	435	435	-	-	no	conda	-	-
 komira//src/komira_supervisor_proto:komira_supervisor_proto	src/komira_supervisor_proto	library	OK	0	0	-	-	no	release	-	-
 komira//src/komira_sync:komira_sync	src/komira_sync	library	OK	16	16	4	4	yes	release	-	-
 komira//src/komira_table_store:komira_table_store	src/komira_table_store	library	OK	1051	1053	-	-	no	conda	-	-
