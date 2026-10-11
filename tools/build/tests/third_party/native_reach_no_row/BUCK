@@ -5,5 +5,8 @@
 cxx_library(
     name = "no_row",
     srcs = ["no_row.c"],
-    visibility = ["//negative/native_reach:archive_no_row"],
+    visibility = [
+        "//negative/native_reach:archive_no_row",
+        "//negative/native_reach:needs_no_row",
+    ],
 )

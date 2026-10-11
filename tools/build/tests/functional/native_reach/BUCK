@@ -10,6 +10,7 @@ filegroup(
             "archive_needed_by_c_dep",
             "archive_no_owner",
             "archive_no_row",
+            "archive_no_row_through_c_dep",
             "archive_owner_missing",
             "call_in_comment",
             "call_owner_missing",
@@ -20,5 +21,8 @@ filegroup(
     ] + [
         # A case in a package under src/ (not src/tests/): the check runs.
         "//src/native_reach:shipped_library_checked",
+        # A case in src/tests_native_reach, a sibling of src/tests/ sharing
+        # its prefix but not under it: the check runs.
+        "//src/tests_native_reach:prefix_sibling_checked",
     ],
 )

@@ -109,3 +109,18 @@ native_reach_case(
     srcs = ["comment.mojo"],
     visibility = _PUBLIC,
 )
+
+# A C library of no owner whose link needs an archive with no owner row: the
+# refusal holds for an archive reached through a C dep, not only one named.
+cxx_library(
+    name = "needs_no_row",
+    exported_deps = ["//third_party/native_reach_no_row:no_row"],
+)
+
+native_reach_case(
+    name = "archive_no_row_through_c_dep",
+    srcs = ["plain.mojo"],
+    deps = [":needs_no_row"],
+    expect_archives = ["links tests//third_party/native_reach_no_row:no_row through tests//negative/native_reach:needs_no_row: third_party/native_reach_no_row has no row in THIRD_PARTY_OWNERS"],
+    visibility = _PUBLIC,
+)
