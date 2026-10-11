@@ -1,0 +1,36 @@
+{
+ "name": "scalar_throws_object_without_prototype",
+ "defect": "user code that throws an object String() cannot describe becomes a runtime fault instead of a user error",
+ "run": "call_batch",
+ "entry": "throws_nullproto",
+ "shape": "SCALAR",
+ "args": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "result": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "input": {
+  "length": 2,
+  "columns": [
+   {
+    "type": "int64",
+    "values": [
+     1,
+     2
+    ]
+   }
+  ]
+ },
+ "expect": {
+  "status": "ERR_RAISED",
+  "run_error": "UDF_RAISED",
+  "message": "nonempty"
+ }
+}

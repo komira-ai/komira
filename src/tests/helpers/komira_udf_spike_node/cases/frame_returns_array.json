@@ -1,0 +1,60 @@
+{
+ "name": "frame_returns_array",
+ "defect": "a frame function that returns an array of tables, not a generator, is refused or loses a table",
+ "run": "frame",
+ "entry": "frame_array",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "result": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "result_is_table": true,
+ "inputs": [
+  {
+   "length": 1,
+   "columns": [
+    {
+     "type": "int64",
+     "values": [
+      1
+     ]
+    }
+   ]
+  }
+ ],
+ "expect": {
+  "status": "OK",
+  "batches": [
+   {
+    "length": 1,
+    "columns": [
+     {
+      "type": "int64",
+      "values": [
+       1
+      ]
+     }
+    ]
+   },
+   {
+    "length": 1,
+    "columns": [
+     {
+      "type": "int64",
+      "values": [
+       2
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

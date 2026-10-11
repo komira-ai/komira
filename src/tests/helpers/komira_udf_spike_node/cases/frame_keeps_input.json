@@ -1,0 +1,49 @@
+{
+ "name": "frame_keeps_input",
+ "defect": "a frame's input read after the frame has closed (user code kept it and calls it from a timer) runs against a stream the engine owns",
+ "run": "frame",
+ "entry": "frame_keeps_input",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "result": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "result_is_table": true,
+ "inputs": [
+  {
+   "length": 1,
+   "columns": [
+    {
+     "type": "int64",
+     "values": [
+      1
+     ]
+    }
+   ]
+  }
+ ],
+ "expect": {
+  "status": "OK",
+  "batches": [
+   {
+    "length": 1,
+    "columns": [
+     {
+      "type": "int64",
+      "values": [
+       1
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

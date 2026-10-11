@@ -1,0 +1,54 @@
+{
+ "name": "agg_cancel_set_before_update",
+ "defect": "agg_update and agg_merge ignore a cancel flag set before the batch",
+ "run": "agg_split",
+ "entry": "sum",
+ "shape": "AGG_MERGEABLE",
+ "args": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "result": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "state": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "partials": [
+  {
+   "input": {
+    "length": 2,
+    "columns": [
+     {
+      "type": "int64",
+      "values": [
+       1,
+       2
+      ]
+     }
+    ]
+   },
+   "group_ids": [
+    0,
+    1
+   ],
+   "n_groups": 2
+  }
+ ],
+ "n_groups": 2,
+ "options": {
+  "cancel": true
+ },
+ "expect": {
+  "status": "ERR_CANCELLED",
+  "run_error": "UDF_CANCELLED"
+ }
+}

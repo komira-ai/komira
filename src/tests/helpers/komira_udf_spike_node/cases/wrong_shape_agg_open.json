@@ -1,0 +1,49 @@
+{
+ "name": "wrong_shape_agg_open",
+ "defect": "agg_open on an instance of a scalar UDF is run instead of refused",
+ "run": "agg_split",
+ "entry": "double",
+ "shape": "SCALAR",
+ "args": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "result": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "state": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "partials": [
+  {
+   "input": {
+    "length": 1,
+    "columns": [
+     {
+      "type": "int64",
+      "values": [
+       1
+      ]
+     }
+    ]
+   },
+   "group_ids": [
+    0
+   ],
+   "n_groups": 1
+  }
+ ],
+ "n_groups": 1,
+ "expect": {
+  "status": "ERR_UNSUPPORTED",
+  "run_error": "UDF_RUNTIME_FAULT"
+ }
+}

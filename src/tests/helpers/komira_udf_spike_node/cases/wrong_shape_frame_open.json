@@ -1,0 +1,37 @@
+{
+ "name": "wrong_shape_frame_open",
+ "defect": "frame_open on an instance of a scalar UDF is run instead of refused, or leaks the input stream it refuses",
+ "run": "frame",
+ "entry": "double",
+ "shape": "SCALAR",
+ "args": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "result": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "result_is_table": true,
+ "inputs": [
+  {
+   "length": 1,
+   "columns": [
+    {
+     "type": "int64",
+     "values": [
+      1
+     ]
+    }
+   ]
+  }
+ ],
+ "expect": {
+  "status": "ERR_UNSUPPORTED",
+  "run_error": "UDF_RUNTIME_FAULT"
+ }
+}

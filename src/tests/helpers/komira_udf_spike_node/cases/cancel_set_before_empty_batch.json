@@ -1,0 +1,35 @@
+{
+ "name": "cancel_set_before_empty_batch",
+ "defect": "a cancel flag set before a batch of no rows is not seen (there is no row to poll at)",
+ "run": "call_batch",
+ "entry": "double",
+ "shape": "SCALAR",
+ "args": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "result": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "options": {
+  "cancel": true
+ },
+ "input": {
+  "length": 0,
+  "columns": [
+   {
+    "type": "int64",
+    "values": []
+   }
+  ]
+ },
+ "expect": {
+  "status": "ERR_CANCELLED",
+  "run_error": "UDF_CANCELLED"
+ }
+}

@@ -1,0 +1,35 @@
+{
+ "name": "deadline_passed_before_empty_batch",
+ "defect": "a deadline that passed before a batch of no rows is not seen",
+ "run": "call_batch",
+ "entry": "double",
+ "shape": "SCALAR",
+ "args": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "result": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "options": {
+  "deadline_passed": true
+ },
+ "input": {
+  "length": 0,
+  "columns": [
+   {
+    "type": "int64",
+    "values": []
+   }
+  ]
+ },
+ "expect": {
+  "status": "ERR_DEADLINE",
+  "run_error": "UDF_DEADLINE_EXCEEDED"
+ }
+}
