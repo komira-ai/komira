@@ -71,6 +71,11 @@ mojo_library(
         # empty or unrunnable tool refused by name; a failed map refused
         # naming the report, and the program row it fails
         "tests/test_readme_tool.mojo",
+        # the native install checks (#1363's lib_files rows, `__glibc`):
+        # a sha256 mismatch, a missing file, a mode 644 .so, a dangling
+        # link, an extra .so, a __glibc of 2.38, NEEDED outside the
+        # environment, no DF_SYMBOLIC, the loaded-from record, the ELF reader
+        "tests/test_native_install.mojo",
     ],
     # The README examples tool kci ships, for the tests that make an
     # installed README into programs (the same target bin/kci/BUCK ships).

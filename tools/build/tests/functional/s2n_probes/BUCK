@@ -8,7 +8,9 @@ load(":defs.bzl", "s2n_probe")
 # a red build. The probes that fail on that platform are
 # tests//negative/s2n_probes: a probe that is expected to fail does not
 # belong in a package whose targets are all expected to build.
-# tools/build/tests/c_libs_tests.sh holds features.bzl to both packages.
+# third_party/s2n-tls/BUCK refuses at load a feature with no probe, so each
+# feature listed has its target here; tools/build/tests/c_libs_tests.sh
+# requires every probe of the other package to fail.
 [
     cxx_library(**s2n_probe(name, flags))
     for name, flags in PROBES.items()

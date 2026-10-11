@@ -1,7 +1,8 @@
 load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
 
 # Planted defects for the Rust test weld; each `must fail` target must fail
-# its build, and the `green` ones must build (run_tests.sh, test 35).
+# its build, and the `green` ones must build (run_tests.sh, test 35). The
+# greens that need no red beside them are ../../functional/rust_test.
 
 # One test passes, one fails: red.
 rust_test(
@@ -50,22 +51,6 @@ rust_test(
     crate_root = "src/ignored.rs",
 )
 
-# green: the harness sees only HOME, PATH and TMPDIR.
-rust_test(
-    name = "env_scrubbed",
-    srcs = ["src/env.rs"],
-    crate_root = "src/env.rs",
-)
-
-# green: a binary welded to a passing test builds, and runs (`[run_check]`).
-rust_binary(
-    name = "bin_green",
-    srcs = ["src/main.rs"],
-    crate_root = "src/main.rs",
-    tests = [":env_scrubbed"],
-    expected_stdout = "hello\n",
-)
-
 # must fail: NO VERDICT, the harness is killed at its timeout (exit 142).
 rust_test(
     name = "hang",
@@ -76,22 +61,8 @@ rust_test(
 
 # External tests (`test_srcs`, Cargo's tests/*.rs) gate the library itself:
 # each is compiled against the UNGATED rlib and run (rust_tests.sh, test 35).
-
-# green: the external test passes, so the library builds, and so does a binary
-# linking it.
-rust_library(
-    name = "ext",
-    srcs = ["src/ext_lib.rs"],
-    crate_root = "src/ext_lib.rs",
-    test_srcs = ["tests/ext_pass.rs", "tests/common/mod.rs"],
-)
-
-rust_binary(
-    name = "ext_consumer",
-    srcs = ["src/main.rs"],
-    crate_root = "src/main.rs",
-    deps = [":ext"],
-)
+# The greens, `ext`, `ext_consumer` and `both`, with a check of each
+# library's marker list, are komira//tools/build/examples/rust/ext.
 
 # must fail: one external test fails, so the library cannot be built, nor a
 # binary that links it, though the library and each test crate compile.
@@ -149,16 +120,6 @@ rust_library(
 
 # `tests` and `test_srcs` together: the markers of both gate the library.
 
-# green: the unit test and the external test pass, so the library builds.
-rust_library(
-    name = "both",
-    crate_name = "ext",
-    srcs = ["src/ext_lib.rs"],
-    crate_root = "src/ext_lib.rs",
-    tests = [":env_scrubbed"],
-    test_srcs = ["tests/ext_pass.rs", "tests/common/mod.rs"],
-)
-
 # must fail: the external test passes, but the unit test fails, and it still
 # gates (a gate built from the external markers alone would publish this).
 rust_library(
@@ -177,6 +138,6 @@ rust_library(
     crate_name = "ext",
     srcs = ["src/ext_lib.rs"],
     crate_root = "src/ext_lib.rs",
-    tests = [":env_scrubbed"],
+    tests = ["//functional/rust_test:env_scrubbed"],
     test_srcs = ["tests/ext_pass.rs", "tests/ext_fail.rs", "tests/common/mod.rs"],
 )

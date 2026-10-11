@@ -27,6 +27,7 @@ src/komira_lz4/frame.mojo	liblz4, loaded once per process
 src/komira_morsel/tests/test_vtable_source_failure_paths.mojo	the scan vtable C ABI of a stand-in connector: the connector state and scratch buffers it hands the engine through abi("C") thunks
 src/komira_objectstore/local_fs_conditional_store.mojo	the filesystem C shim (komira_fs_enoent, komira_fs_errno_name)
 src/komira_objectstore/tests/test_cov_in_memory_stores.mojo	the pthread_create and pthread_join FFI of its lock-wait case: the reader thread's heap argument and the C NULLs it passes
+src/komira_simd/tests/test_fast_copy_edges.mojo	_copy_small's raw-pointer signature (a MutUntrackedOrigin destination), as a direct caller of its zero-length guard: a pointer into a List the test owns, borrowed for one call
 src/tests/helpers/komira_plan_harness/door.mojo	the C ABI of a plan-door shared library it dlopens (the handle slot, the context, last_error, the ArrowArrayStream box, Door B's NULL probe buffer)
 src/tests/helpers/komira_plan_harness/tests/door_stub/plan_door_stub.mojo	the C ABI (session, ArrowArrayStream, Door B buffers) of the plan_door_stub shared library
 src/tests/helpers/komira_plan_harness/tests/door_stub/plan_door_tiny.mojo	the C ABI (NULL session, unread plan and out pointers) of the plan_door_null_ctx and plan_door_no_bytes shared libraries

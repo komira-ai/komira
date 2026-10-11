@@ -24,6 +24,10 @@
 #      length in its state (uncompressed and LZ4 forms).
 #   8. serialize_split refuses a negative doc_count/min/max and an L0 posting
 #      region without the footer token total.
+#   9. The three posting decoders refuse a term region whose length is 2^63 - 1
+#      (Int.MAX), whose sum with an in-range offset wraps Int negative, by
+#      their own region check (komira-ai/komira#1203); the region ending one
+#      byte past the source is refused by the same check.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_raises
@@ -373,6 +377,25 @@ def test_08_serialize_split_refusals() raises:
         l0_posting_region=l0b^,
     )
     assert_true(len(ok) > 0, "8: accepted with the total")
+
+
+def test_09_wrapping_term_region_refused() raises:
+    var ids = List[Int]()
+    var tfs = List[Int]()
+    var three: List[UInt8] = [1, 2, 3]
+    with assert_raises(contains="_decode_posting_list: region [1, "):
+        _decode_posting_list(Span(three), 1, Int.MAX, ids, tfs)
+    with assert_raises(contains="_decode_posting_list: region [1, 4) out of bounds [0, 3)"):
+        _decode_posting_list(Span(three), 1, 3, ids, tfs)
+    with assert_raises(contains="_decode_posting_block: term region out of bounds"):
+        _decode_posting_block(Span(three), 1, Int.MAX, 0, 0, 1, ids, tfs)
+    with assert_raises(contains="_decode_posting_block: term region out of bounds"):
+        _decode_posting_block(Span(three), 1, 3, 0, 0, 1, ids, tfs)
+    var only = List[Int]()
+    with assert_raises(contains="_dids_only: term region out of bounds"):
+        _decode_posting_block_dids_only(Span(three), 1, Int.MAX, 0, 0, 1, only)
+    with assert_raises(contains="_dids_only: term region out of bounds"):
+        _decode_posting_block_dids_only(Span(three), 1, 3, 0, 0, 1, only)
 
 
 def main() raises:

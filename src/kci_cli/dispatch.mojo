@@ -80,7 +80,7 @@
 #      result's `set_hash` is then the recomputed one, but NOT on a `--plan`
 #      run, NOT on a run that ended SUPERSEDED, and, for a run that selects validations, only when every one of
 #      them VALIDATED and SUCCEEDED (checked at the run's end): kci.yml hands
-#      the validate job's on to prod, and prod refuses an empty one. Under
+#      the beta_validate job's on to prod, and prod refuses an empty one. Under
 #      GitHub Actions the flag is required (KCI-E-USAGE, exit 2);
 #   4c. THE ADMISSION CHECK (rule R24 of the staged pipeline), right after
 #      4a and before 4b, with `--admission`, on a RELEASE run (4a): a re-run

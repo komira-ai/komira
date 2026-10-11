@@ -37,6 +37,15 @@
 #   container.mojo            the scratch layout, pixi.toml, the script and
 #                             the exact `docker` command lines
 #   readback.mojo             checks 2 to 4: records, payloads, the count
+#   native_install.mojo       `check_native_install`: a library's installed
+#                             `lib_files` (present, sha256, mode, the link,
+#                             nothing extra), the `__glibc` floor, each
+#                             `.so`'s NEEDED inside the environment and
+#                             DF_SYMBOLIC; `loaded_from_findings` and
+#                             `run_loaded_from`, the loader's record. Not
+#                             called by run_install_env (beta's install job
+#                             runs them, slice 11)
+#   elf_dynamic.mojo          an ELF shared object's dynamic section
 #
 # Which validations a step has is the machine file's (kci_release_machine); the
 # result rows are kci_api's; processes start through kci_build's
@@ -102,6 +111,23 @@ from kci_validate.container import (
     run_argv,
 )
 from kci_validate.readback import program_stem
+from kci_validate.elf_dynamic import ElfDynamic, read_dynamic
+from kci_validate.native_install import (
+    CHECK_GLIBC,
+    CHECK_LIB_FILES,
+    CHECK_LOADED_FROM,
+    CHECK_NEEDED,
+    CHECK_SYMBOLIC,
+    check_native_install,
+    glibc_sonames,
+    lib_files_findings,
+    lib_rows_findings,
+    link_name_of,
+    loaded_from_findings,
+    needed_findings,
+    run_loaded_from,
+    symbolic_findings,
+)
 from kci_validate.request import (
     ContainerHost,
     InstallPin,

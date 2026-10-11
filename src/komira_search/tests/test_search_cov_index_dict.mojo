@@ -17,7 +17,12 @@
 #   6. TermInfoStore: get refuses an ordinal out of range; deserialize refuses a
 #      negative count and a store larger than the bytes left.
 #   7. TermDictionary.deserialize refuses bytes too short for the magic, a field
-#      name longer than the bytes left, and stage offsets past the end.
+#      name longer than the bytes left, and stage offsets past the end; a stage
+#      length of 2^63 - 1 (Int.MAX), whose sum with an in-range offset wraps
+#      Int negative, is refused by the same check, for stage a and stage b
+#      (komira-ai/komira#1203). Stage b is bounded by its own offset: with
+#      stage a at [44, 44) and stage b at [46, 49) over 48 bytes, the dictionary
+#      is refused although stage b would fit if measured from stage a's offset.
 #   8. lookup_info returns the term's row for a present term, None for an
 #      absent one.
 # =============================================================================
@@ -252,6 +257,49 @@ def test_07_term_dictionary_deserialize_refusals() raises:
     _u64(stage_b, 24)
     with assert_raises(contains="stage offsets/lengths out of bounds"):
         _ = TermDictionary.deserialize(stage_b^)
+
+
+def test_07b_wrapping_stage_lengths_refused() raises:
+    comptime MAX = UInt64(0x7FFF_FFFF_FFFF_FFFF)
+    var stage_a = _header(0)
+    _u64(stage_a, 44)
+    _u64(stage_a, MAX)
+    _u64(stage_a, 44)
+    _u64(stage_a, 0)
+    with assert_raises(contains="stage offsets/lengths out of bounds"):
+        _ = TermDictionary.deserialize(stage_a^)
+    var stage_b = _header(0)
+    _u64(stage_b, 44)
+    _u64(stage_b, 0)
+    _u64(stage_b, 44)
+    _u64(stage_b, MAX)
+    with assert_raises(contains="stage offsets/lengths out of bounds"):
+        _ = TermDictionary.deserialize(stage_b^)
+    # Stage b one byte past the end: [44, 45) of 44 bytes.
+    var one = _header(0)
+    _u64(one, 44)
+    _u64(one, 0)
+    _u64(one, 44)
+    _u64(one, 1)
+    with assert_raises(contains="stage offsets/lengths out of bounds"):
+        _ = TermDictionary.deserialize(one^)
+
+
+def test_07c_stage_b_bounded_by_its_own_offset() raises:
+    # 44 header bytes plus 4 padding bytes: 48 in all. Stage a is [44, 44);
+    # stage b is [46, 49), one byte past the end. Measured from stage a's
+    # offset (48 - 44 = 4 >= 3) it would pass, so this pins the stage b check
+    # to stage_b_offset.
+    var bytes = _header(0)
+    _u64(bytes, 44)
+    _u64(bytes, 0)
+    _u64(bytes, 46)
+    _u64(bytes, 3)
+    for _ in range(4):
+        bytes.append(0)
+    assert_equal(len(bytes), 48, "the fixture is 48 bytes")
+    with assert_raises(contains="stage offsets/lengths out of bounds"):
+        _ = TermDictionary.deserialize(bytes^)
 
 
 def test_08_lookup_info() raises:

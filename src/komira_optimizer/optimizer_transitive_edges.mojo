@@ -17,8 +17,8 @@
 # suppkey equivalence class {l_suppkey, s_suppkey, ps_suppkey}).
 #
 # This module ADDS the missing derivation: `derive_transitive_edges` appends
-# to a JoinChain's edges in place. komira_optimizer has no driver that orders
-# its passes; `optimizer_dpccp.reorder_joins_with_dp` calls it AFTER
+# to a JoinChain's edges in place. It is not a pass of its own:
+# `optimizer_dpccp.reorder_joins_with_dp` calls it AFTER
 # extraction and BEFORE join enumeration (DPccp).
 #
 # Algorithm (faithful to DuckDB's mechanism, adapted to Komira's
