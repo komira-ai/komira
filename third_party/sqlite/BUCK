@@ -1,6 +1,8 @@
+load("@komira//tools/build/one_definition:libraries.bzl", "THIRD_PARTY_OWNERS")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/native:defs.bzl", "checked_cxx_library", "prefix_header", "prefixed_archive_check")
 
 # SQLite 3.53.4, the amalgamation (one sqlite3.c), public domain. Nothing of
 # it is committed here: the archive is fetched at build time and checked
@@ -26,11 +28,11 @@ archive_files(
     strip_prefix = "sqlite-autoconf-3530400",
 )
 
-# The library, compiled from source and linked statically into each binary
-# that depends on it, so no libsqlite3 is needed on the build or the run
-# machine. Extension loading is compiled out, so it needs no libdl.
-cxx_library(
-    name = "sqlite3",
+# Every argument of the library's compile but the prefix (below). It is
+# compiled from source and linked statically into each binary that depends on
+# it, so no libsqlite3 is needed on the build or the run machine. Extension
+# loading is compiled out, so it needs no libdl.
+_SQLITE3 = dict(
     srcs = [":src[sqlite3.c]"],
     compiler_flags = [
         "-O2",
@@ -40,5 +42,53 @@ cxx_library(
     ],
     exported_headers = {"sqlite3.h": ":src[sqlite3.h]"},
     header_namespace = "",
+)
+
+# The library with upstream's names. Nothing links it: its archive's symbol
+# table is the list of names :prefix_symbols renames.
+cxx_library(
+    name = "sqlite3_unprefixed",
+    **_SQLITE3
+)
+
+# Every global symbol renamed komira_sqlite3_*: sqlite3_X becomes
+# komira_sqlite3_X (any other global X, komira_sqlite3__X). An unprefixed
+# exported sqlite3_open would interpose on a system libsqlite3 in the same
+# process.
+prefix_header(
+    name = "prefix_symbols",
+    archive = ":sqlite3_unprefixed[static-pic]",
+    exec_compatible_with = LINUX_X86_64,
+    header = "sqlite3_prefix_symbols.h",
+    min_symbols = 200,
+    prefix = "komira_sqlite3_",
+    strip = "sqlite3_",
+    style = "strip",
+)
+
+cxx_library(
+    name = "sqlite3_prefixed",
+    exported_preprocessor_flags = ["-include", "$(location :prefix_symbols)"],
+    **_SQLITE3
+)
+
+# Every symbol :sqlite3_prefixed defines is komira_sqlite3_*, and it
+# references none of the library's unprefixed names.
+prefixed_archive_check(
+    name = "sqlite3_symbols",
+    archive = ":sqlite3_prefixed[static-pic]",
+    exec_compatible_with = LINUX_X86_64,
+    min_defined = 200,
+    original_names = [":prefix_symbols[symbols]"],
+    prefix = THIRD_PARTY_OWNERS["third_party/sqlite"].prefix,
+)
+
+# The library as its users take it: its C API is komira_sqlite3_open_v2, ...
+# (C callers that include sqlite3.h get the renamed names), and
+# :sqlite3_symbols gates every build holding it.
+checked_cxx_library(
+    name = "sqlite3",
+    checks = [":sqlite3_symbols"],
+    lib = ":sqlite3_prefixed",
     visibility = ["PUBLIC"],
 )

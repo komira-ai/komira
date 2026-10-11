@@ -24,4 +24,4 @@ building any test builds `:node` and the npm packages it uses, each of which
 fails on a sha256, size, integrity, name or version that differs from its pin.
 The rules' refusals, a failing script failing its `node_test` among them, are
 planted in the `tests` cell
-([test 54](../../../../tools/build/node/README.md#test-54-planted-defects)).
+([planted defects](../../../../tools/build/node/README.md#planted-defects)).

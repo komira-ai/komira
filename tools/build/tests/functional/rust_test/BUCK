@@ -1,0 +1,23 @@
+load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_test")
+
+# The Rust test weld's greens (test 35); its planted defects are
+# ../../negative/rust_test. The pull-request check builds this package.
+
+# The harness sees only HOME, PATH and TMPDIR. Welded, besides bin_green, to
+# two libraries of ../../negative/rust_test (both and both_ext_red).
+rust_test(
+    name = "env_scrubbed",
+    srcs = ["src/env.rs"],
+    crate_root = "src/env.rs",
+    visibility = ["//negative/rust_test:"],
+)
+
+# A binary welded to a passing test builds, and runs: its run check (stdout
+# `hello\n`) is a validation of the binary.
+rust_binary(
+    name = "bin_green",
+    srcs = ["src/main.rs"],
+    crate_root = "src/main.rs",
+    tests = [":env_scrubbed"],
+    expected_stdout = "hello\n",
+)

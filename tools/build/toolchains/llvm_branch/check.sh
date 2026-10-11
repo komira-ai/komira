@@ -6,22 +6,21 @@
 # target). Exits 1 on the first wrong result, naming it; otherwise writes
 # <report_dir>/validation.json, the validation result, and what it measured.
 #
+# What the loader maps for the programs of both directories, read from the
+# ELF files, are the validations :lld24_closure and :llvm23_closure
+# (../loader_closure).
+#
 # `lld`, against <lld_dir> (want: lld=<major>):
 #   1. The directory holds bin/lld, lib/libgcc_s.so.1 and lib/libstdc++.so.6,
 #      regular files, nothing else.
-#   2. With LD_LIBRARY_PATH set to a directory of decoys (a text file named
-#      like each of its libraries, as a test runner sets LD_LIBRARY_PATH),
-#      the loader resolves bin/lld's libraries to its own lib/ and glibc,
-#      nothing else.
-#   3. `lld -flavor gnu --version` prints `LLD <major>.`.
+#   2. `lld -flavor gnu --version` prints `LLD <major>.`.
 # `tools`, against <tools_dir> (want: profdata=<version>,
 # symbols=<name>,<name>...):
 #   1. The directory holds bin/llvm-profdata, bin/llvm-nm, their libraries
 #      under lib/ and runtime/libclang_rt.profile-x86_64.a, regular files,
 #      nothing else.
-#   2. The loader resolves the libraries of both programs as in lld 2.
-#   3. `llvm-profdata --version` prints `LLVM version <version>`.
-#   4. The runtime is an ar archive that defines each of <symbols>
+#   2. `llvm-profdata --version` prints `LLVM version <version>`.
+#   3. The runtime is an ar archive that defines each of <symbols>
 #      (llvm-nm --defined-only).
 # `raw_version`, against both and <fixture_dir> (want: functions=<n>,
 # counts=<function>:<count>,<count>..., raw=<raw>, triple=<zig triple>),
@@ -118,55 +117,12 @@ exactly() {
     [ -z "$links" ] || red "$dir holds symbolic links: $links"
 }
 
-# Status 0 when <path> is a glibc library (by name) at an absolute path
-# outside <dir> and <decoy>.
-glibc_outside() {
-    case "${1##*/}" in
-        libc.so.6 | libm.so.6 | libdl.so.2 | libpthread.so.0 | librt.so.1 | ld-linux-x86-64.so.2) ;;
-        *) return 1 ;;
-    esac
-    case "$1" in
-        "$2"/* | "$3"/*) return 1 ;;
-        /*) return 0 ;;
-    esac
-    return 1
-}
-
-# Fails unless the loader, with LD_LIBRARY_PATH set to decoys named like each
-# <own> library, resolves every library of <dir>/<exe> to <dir>/lib/<own>
-# (through bin/'s $ORIGIN/../lib, possibly with lib/'s own `$ORIGIN/.`) or
-# to a glibc library outside <dir>, and nothing else.
-closure() {
-    dir=$1
-    exe=$2
-    shift 2
-    decoy="$T/decoy"
-    mkdir -p "$decoy"
-    for o in "$@"; do echo "decoy" >"$decoy/$o"; done
-    LD_LIBRARY_PATH="$decoy" LD_TRACE_LOADED_OBJECTS=1 "$dir/$exe" >"$T/log" 2>&1 || red "the loader failed for $exe under a decoy LD_LIBRARY_PATH"
-    cp "$T/log" "$REPORT/$(basename "$exe").loads.txt"
-    while read -r name arrow path _; do
-        case "$name" in linux-vdso.so.1 | /lib64/ld-linux-x86-64.so.2) continue ;; esac
-        if [ "$arrow" = "=>" ]; then
-            rel=${path#"$dir"/bin/../lib/}
-            while [ "${rel#./}" != "$rel" ]; do rel=${rel#./}; done
-            for o in "$@"; do
-                [ "$name" = "$o" ] && [ "$rel" = "$o" ] && continue 2
-            done
-            glibc_outside "$path" "$dir" "$decoy" && continue
-        fi
-        red "$exe loads '$name $arrow $path': neither its own lib/$name nor glibc (README.md, Checks)"
-    done <"$T/log"
-}
-
 # ---- lld -----------------------------------------------------------------------
 
 lld() {
     major=$(want lld)
     exactly "$LLD_DIR" bin/lld lib/libgcc_s.so.1 lib/libstdc++.so.6
     [ -x "$LLD_DIR/bin/lld" ] || red "bin/lld is not executable"
-    pass
-    closure "$LLD_DIR" bin/lld libgcc_s.so.1 libstdc++.so.6
     pass
     "$LLD_DIR/bin/lld" -flavor gnu --version >"$T/log" 2>&1 || red "lld -flavor gnu --version failed"
     cp "$T/log" "$REPORT/lld_version.txt"
@@ -187,11 +143,6 @@ tools() {
     # shellcheck disable=SC2086,SC2046 # LIBS23 is a list of names, which hold no space
     exactly "$TOOLS_DIR" bin/llvm-nm bin/llvm-profdata $RUNTIME $(for l in $LIBS23; do echo "lib/$l"; done)
     [ -x "$TOOLS_DIR/bin/llvm-profdata" ] && [ -x "$TOOLS_DIR/bin/llvm-nm" ] || red "bin/llvm-profdata or bin/llvm-nm is not executable"
-    pass
-    for exe in bin/llvm-profdata bin/llvm-nm; do
-        # shellcheck disable=SC2086 # LIBS23 is a list of names
-        closure "$TOOLS_DIR" "$exe" $LIBS23
-    done
     pass
     "$TOOLS_DIR/bin/llvm-profdata" --version >"$T/log" 2>&1 || red "llvm-profdata --version failed"
     cp "$T/log" "$REPORT/profdata_version.txt"
