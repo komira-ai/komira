@@ -389,6 +389,67 @@ def test_sliding_float_sum_is_the_sum_of_the_frame_alone() raises:
     assert_true(isnan(_getf(out, 5, 10)))
 
 
+def test_sliding_float_sum_over_frames_wider_than_two_rows() raises:
+    # DuckDB's SUM / AVG over ROWS frames of 3 to 11 rows. v holds powers of
+    # two, so every frame sum is exact and names the rows it added:
+    #   g = 1, v = 1, 2, 4, .., 64 (7 rows):
+    #     ROWS BETWEEN 2 PRECEDING AND 2 FOLLOWING (col 3 SUM, col 4 AVG):
+    #       SUM 7, 15, 31, 62, 124, 120, 112 over 3, 4, 5, 5, 5, 4, 3 rows.
+    #     ROWS BETWEEN 3 PRECEDING AND 3 FOLLOWING (col 5 SUM):
+    #       SUM 15, 31, 63, 127, 126, 124, 120.
+    #   g = 2, v = 1, 2, 4, .., 2^15 (16 rows):
+    #     ROWS BETWEEN 5 PRECEDING AND 5 FOLLOWING (col 6 SUM).
+    # A frame of 4 or more rows can need two tree nodes on its right side;
+    # a query that kept only the last of them answers 7, not 15, on g = 1
+    # row 2 of the 2 PRECEDING .. 2 FOLLOWING frame.
+    var g = List[Int64]()
+    var o = List[Int64]()
+    var v = List[Float64]()
+    for i in range(7):
+        g.append(1)
+        o.append(Int64(i))
+        v.append(Float64(1 << i))
+    for i in range(16):
+        g.append(2)
+        o.append(Int64(i))
+        v.append(Float64(1 << i))
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_plain_i64(g))
+    cols.append(_plain_i64(o))
+    cols.append(_f64(v))
+    var names: List[String] = ["g", "o", "v"]
+    var f2 = _rows(FRAME_BOUND_PRECEDING, 2, FRAME_BOUND_FOLLOWING, 2)
+    var exprs = List[PartitionExpr]()
+    exprs.append(PartitionExpr.agg_with_frame(PF_SUM, "v", f2.copy()))
+    exprs.append(PartitionExpr.agg_with_frame(PF_AVG, "v", f2.copy()))
+    exprs.append(
+        PartitionExpr.agg_with_frame(
+            PF_SUM, "v", _rows(FRAME_BOUND_PRECEDING, 3, FRAME_BOUND_FOLLOWING, 3)
+        )
+    )
+    exprs.append(
+        PartitionExpr.agg_with_frame(
+            PF_SUM, "v", _rows(FRAME_BOUND_PRECEDING, 5, FRAME_BOUND_FOLLOWING, 5)
+        )
+    )
+    var pk: List[String] = ["g"]
+    var ok: List[String] = ["o"]
+    var out = _run(_batch(names, cols^), pk, ok, exprs^)
+    var want_sum2: List[Float64] = [7.0, 15.0, 31.0, 62.0, 124.0, 120.0, 112.0]
+    var rows2: List[Float64] = [3.0, 4.0, 5.0, 5.0, 5.0, 4.0, 3.0]
+    var want_sum3: List[Float64] = [15.0, 31.0, 63.0, 127.0, 126.0, 124.0, 120.0]
+    for r in range(7):
+        assert_equal(_getf(out, 3, r), want_sum2[r])
+        assert_equal(_getf(out, 4, r), want_sum2[r] / rows2[r])
+        assert_equal(_getf(out, 5, r), want_sum3[r])
+    var want_sum5: List[Float64] = [
+        63.0, 127.0, 255.0, 511.0, 1023.0, 2047.0, 4094.0, 8188.0,
+        16376.0, 32752.0, 65504.0, 65472.0, 65408.0, 65280.0, 65024.0, 64512.0,
+    ]
+    for r in range(16):
+        assert_equal(_getf(out, 6, 7 + r), want_sum5[r])
+
+
 def test_empty_frame_over_non_null_input_is_null() raises:
     # ROWS BETWEEN 2 PRECEDING AND 1 PRECEDING over a non-nullable v, two
     # partitions (g = 1: v 5, -2, 7; g = 2: v 4, 9): the first row of each
