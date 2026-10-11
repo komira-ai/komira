@@ -112,7 +112,7 @@ COVERAGE_NO_GATE = {
 # unless it passes `coverage_branch_gate = False` (coverage.bzl). A library
 # not on the list keeps BranchNotMeasured. mojo_library looks itself up by
 # its label, so a row whose library moved would be read by nothing:
-# branch_gate.bxl fails unless every row names a mojo_library.
+# :branch_gate_rows (BUCK) fails unless every row names a Mojo library.
 #
 # A raising call in a `try:` body of its function is a decision of two arms
 # (kind `try`: the call returned, it raised into the handler), so a

@@ -12,9 +12,11 @@
 #        and known-answer vectors, //tools/build/examples/aws_lc:test_aws_lc;
 #        an s2n-tls TLS 1.3 handshake,
 #        //tools/build/examples/s2n_tls:test_s2n_handshake);
-#      - s2n-tls's feature defines: every probe named in
-#        third_party/s2n-tls/features.bzl compiles (tests//functional/s2n_probes), and
-#        every other probe fails to (tests//negative/s2n_probes);
+#      - s2n-tls's feature defines: every other probe than those
+#        third_party/s2n-tls/features.bzl names fails to compile
+#        (tests//negative/s2n_probes). (Those it names compile:
+#        tests//functional/s2n_probes, in the gate; a named feature with no
+#        probe is refused at load by third_party/s2n-tls/BUCK.)
 #      - neither test binary exports a dynamic symbol (both libraries are
 #        compiled with hidden visibility, so nothing in them can interpose on
 #        a library the Mojo runtime loads).
@@ -25,9 +27,6 @@ probes=$(cd "$ROOT" && "$BUCK2" uquery 'kind(cxx_library, tests//functional/s2n_
 if [ -z "$probes" ] || [ -z "$features" ]; then
     fail "s2n probes: no probes or no features found (see $LOG/s2n_probes_query.log)"
 else
-    enabled=()
-    for f in $features; do enabled+=("tests//functional/s2n_probes:probe_$f"); done
-    expect_green s2n_probes_enabled "${enabled[@]}"
     for p in $probes; do
         if ! printf '%s\n' "$features" | grep -qx "$p"; then
             expect_red "s2n_probe_disabled_$p" "error:" "tests//negative/s2n_probes:probe_$p"

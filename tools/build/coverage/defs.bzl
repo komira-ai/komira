@@ -4,7 +4,7 @@ tools/build/mojo/coverage.bzl): cov_gate.sh, covcheck and the ratchet. And
 "The coverage workflow")."""
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
-load("@komira//tools/build/mojo:providers.bzl", "MojoRunnableInfo")
+load("@komira//tools/build/mojo:providers.bzl", "MojoInfo", "MojoRunnableInfo")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 def _gate_dir_impl(ctx):
@@ -75,3 +75,14 @@ def coverage_ci_cases(**kwargs):
     _coverage_ci_cases(**kwargs)
 
 coverage_ci_cases = declares_docs(coverage_ci_cases)
+
+def _branch_gate_rows_impl(_ctx):
+    return [DefaultInfo()]
+
+_branch_gate_rows = rule(
+    impl = _branch_gate_rows_impl,
+    doc = "Depends on each library a row of COVERAGE_BRANCH_GATE (policy.bzl) names, and requires its MojoInfo. mojo_library looks itself up in that list by its own label, so a row whose library moved would be read by nothing; here a row naming no target fails the build graph, and one naming a target that is no Mojo library fails analysis. Its build runs no action.",
+    attrs = {"libraries": attrs.list(attrs.dep(providers = [MojoInfo]))},
+)
+
+branch_gate_rows = declares_docs(_branch_gate_rows)
