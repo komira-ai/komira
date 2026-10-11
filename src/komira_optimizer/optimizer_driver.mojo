@@ -294,8 +294,10 @@ def optimize(
         plan = reorder_joins_with_dp(plan^)
         plan = restore_join_reorder_output_columns(plan^, pre_reorder_out^)
         # A Project already above a reordered join can be an identity over the
-        # order-restoring Project, and step 13 has already run. Removing it
-        # here keeps `optimize` idempotent.
+        # order-restoring Project, and step 13 has already run, so identity
+        # Projects are removed again here. (On the corpus of
+        # test_optimizer_driver_corpus, `optimize` stays idempotent without
+        # this call since the build-side rule stopped exchanging operands.)
         plan = eliminate_identity_projects(plan^)
 
     # Build side: recorded on every join, in `JoinData.build_side`; no operand

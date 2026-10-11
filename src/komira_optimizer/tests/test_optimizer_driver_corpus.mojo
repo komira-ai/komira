@@ -336,11 +336,11 @@ def _run(var p: LogicalPlan, config: OptimizerConfig) raises -> LogicalPlan:
 def test_optimize_is_idempotent_on_the_corpus() raises:
     """optimize(optimize(p)) renders exactly as optimize(p), for every plan.
 
-    Defects caught: a gate that reads a stale node-kind scan (a second call
-    then finds work the first skipped), and the identity Project that the
-    reorder / build-side swap leaves above a join when a Project already sat
-    there (removed by the `eliminate_identity_projects` after step 16; without
-    it the second call stacks a second Project on corpus plans 1, 5 and 12)."""
+    Defect caught: a gate that reads a stale node-kind scan (a second call
+    then finds work the first skipped). The identity Project the old
+    build-side operand exchange left above a join is gone with the exchange:
+    removing the `eliminate_identity_projects` after step 16 no longer breaks
+    this property on the corpus."""
     for i in range(CORPUS_SIZE):
         var once = _run(_corpus(i), OptimizerConfig())
         var r1 = _render(once)
