@@ -3,16 +3,17 @@
 # (//src/tests/helpers/komira_udf_spike_native_mojo:native_mojo), through the
 # C ABI only.
 #
-# What it proves: every case of the corpus but LEFT_OUT passes on a native
-# UDF library written in Mojo, behind the native runtime, none skipped. The
-# left-out cases each need a fixture that breaks the ABI on purpose (an input
-# not moved, an error filled on OK or naming a row outside the batch, a
-# malformed output array or table), which the reference runtime has and this
-# library does not; every case user code can produce is run, the legal
-# output layouts (sliced, null_count -1, no data buffer) included. A Mojo
-# package can
-# export the table (design section 6.3), read the arrays the host moves in,
-# return arrays the host releases, and keep a Mojo error from crossing the
+# What it proves: every case of the corpus but _left_out() passes on a
+# native UDF library written in Mojo, behind the native runtime, none
+# skipped. The left-out cases each need a fixture that breaks the ABI on
+# purpose (an input not moved, an error filled on OK or naming a row outside
+# the batch, a malformed output array or table, a child moved out of the
+# argument struct, the schema flags probed, a second group set refused),
+# which the reference runtime has and this library does not; every case user
+# code can produce is run, the legal output layouts (sliced, null_count -1,
+# no data buffer) and the wide argument structs (sum12, sum64) included. A
+# Mojo package can export the table (design section 6.3), read the arrays
+# the host moves in, return arrays the host releases, and keep a Mojo error from crossing the
 # ABI (raise_on_row_3: the fixture raises a Mojo Error; the library returns
 # ERR_RAISED with the row).
 #
@@ -33,7 +34,7 @@ from komira_udf_spike_abi.conform import load_cases, run_suite
 from komira_udf_spike_native.code import code_set
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
-comptime CASE_COUNT = 107
+comptime CASE_COUNT = 117
 
 
 def _left_out() -> List[String]:
@@ -55,7 +56,13 @@ def _left_out() -> List[String]:
         "fault_error_row_below_minus_one",
         "fault_error_row_past_batch",
         "fault_error_row_past_batch_propagate",
+        "fault_error_row_minus_two",
         "error_row_left_unset",
+        # a child moved out of the argument struct, the schema flags as load
+        # saw them, a second group set refused on one instance
+        "child_moved_out",
+        "schema_flags_exported",
+        "agg_partials_on_own_instances",
         # malformed output columns
         "fault_output_buffers_null",
         "fault_output_data_null",
@@ -83,6 +90,7 @@ def _left_out() -> List[String]:
         "fault_table_n_children_2",
         "fault_table_negative_length",
         "fault_table_negative_offset",
+        "fault_table_null_count_below",
         "fault_table_null_count_lies",
         "fault_table_null_count_zero",
         "fault_table_null_rows",

@@ -584,7 +584,7 @@ struct UdfRuntime(Movable):
     def run_frame(mut self, inst: Handle, spec: UdfSpec, inputs: List[Batch], opts: CallOptions) raises -> FrameResult:
         """frame_open over a stream of `inputs`, frame_next until the end,
         frame_close. Records how many input batches the runtime had pulled
-        when it produced its first output."""
+        when it produced its first output (-1 when it produced none)."""
         _need(inst, KIND_INSTANCE)
         var hd = host_data_of(self._host)
         var s = device_stream(self._arena, inputs, hd)

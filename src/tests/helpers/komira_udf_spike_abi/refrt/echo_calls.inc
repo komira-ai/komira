@@ -106,6 +106,21 @@ static int32_t scalar(komira_udf_instance* inst, const komira_udf_call* call, co
     }
     di[r] = 0;
     if (r >= n) continue; /* long_by_one's extra row */
+    if (fx->id == F_CALL_ID || fx->id == F_FLAGS_PROBE) {
+      di[r] = fx->id == F_CALL_ID ? call->call_id : inst->udf->flags[r < 2 ? r : 2];
+      continue;
+    }
+    if (fx->id == F_SUM_WIDE) {
+      int nul = 0;
+      for (int64_t k = 0; k < in->n_children; k++) {
+        if (!is_valid(in->children[k], r))
+          nul = 1;
+        else
+          di[r] += i64_at(in->children[k], r);
+      }
+      if (nul) set_null(o, v, r);
+      continue;
+    }
     if (fx->id == F_CONST7) {
       di[r] = 7;
       continue;
@@ -136,6 +151,9 @@ static int32_t scalar(komira_udf_instance* inst, const komira_udf_call* call, co
         break;
       case F_ADD_MIXED:
         di[r] = i64_at(x, r) + i32_at(y, r);
+        break;
+      case F_NEAR:
+        ((double*)d)[r] = f64_at(x, r) * (1.0 + 5e-10);
         break;
       case F_NARROW:
         ((int32_t*)d)[r] = (int32_t)i64_at(x, r);
@@ -296,7 +314,7 @@ static int32_t echo_call_batch(komira_udf_instance* inst, const komira_udf_call*
         break;
       case F_RAISE_ROW: {
         int v = inst->fx->variant;
-        int64_t row = v == RR_PAST ? mine.array.length : v == RR_BELOW ? -2 : -1;
+        int64_t row = v == RR_PAST ? mine.array.length : v == RR_BELOW ? -3 : v == RR_MINUS_2 ? -2 : -1;
         release_array(&out->array);
         rc = fail(h, e, KOMIRA_UDF_ERR_RAISED, "raise_row: raised naming the row the fixture says", row);
         break;
@@ -320,6 +338,12 @@ static int32_t echo_call_batch(komira_udf_instance* inst, const komira_udf_call*
     void (*rel)(struct ArrowArray*) = mine.array.release;
     rel(&mine.array);
     rel(&mine.array); /* the bug */
+  }
+  if (inst->fx->id == F_CHILD_MOVED_OUT && mine.array.n_children > 0 && mine.array.release != NULL) {
+    struct ArrowArray* slot = mine.array.children[0];
+    struct ArrowArray kid = *slot; /* moved out: the struct's slot is marked released */
+    slot->release = NULL;
+    if (inst->fx->variant != CHILD_LEAKED) release_host(h, &kid); /* child_moved_out_leaked: the bug */
   }
   if (!(BROKEN && rc == KOMIRA_UDF_ERR_RAISED)) release_host(h, &mine.array); /* BROKEN (1) */
   return rc;

@@ -16,8 +16,9 @@
 #     counts there (single-threaded: the harness calls from one thread).
 #   - exported arrays (`args`, `states`, `group_ids`, stream batches): moved
 #     to the runtime, which calls `release` once; _release_array counts the
-#     first call of a root in `released` and any later one in
-#     `double_released`, releases the children still owned, and NULLs the
+#     first call of a root in `released` (of a child, in `children_released`;
+#     a runtime may move a child out and release it on its own) and any later
+#     one in `double_released`, releases the children still owned, and NULLs the
 #     slot.
 #   - exported schemas (spec.args/result/state): borrowed for validate and
 #     load; a runtime must not release them, and _release_schema counts one
@@ -75,6 +76,8 @@ struct _HostData:
     var streams_exported: Int
     var streams_released: Int
     var reserved_bytes: Int
+    var children_exported: Int
+    var children_released: Int
     var cancel_on_clock: Void
     """The cancel flag of the call in flight when it was started with
     cancel_during_call, else NULL: now_ns sets it (arm_cancel_on_clock)."""
@@ -221,6 +224,10 @@ struct Counts(Copyable, Movable):
     var streams_released: Int
     var reserved_bytes: Int
     """Bytes a runtime holds through mem_reserve, net of mem_release."""
+    var children_exported: Int
+    """Children of exported struct arrays (each released once, through its
+    parent's release or on its own after a move)."""
+    var children_released: Int
 
 
 def counts(hd: Word) -> Counts:
@@ -228,6 +235,7 @@ def counts(hd: Word) -> Counts:
     return Counts(
         d[].exported, d[].released, d[].double_released, d[].schemas_released,
         d[].streams_exported, d[].streams_released, d[].reserved_bytes,
+        d[].children_exported, d[].children_released,
     )
 
 
@@ -240,12 +248,13 @@ def counts(hd: Word) -> Counts:
 def _release_array(arr: Void) abi("C"):
     var a = arr.bitcast[CArrowArray]()
     var rec = a[].private_data.bitcast[_ArrRec]()
-    if rec[].is_root == 1:
-        var d = _hd(rec[].hd)
-        if rec[].releases == 0:
-            d[].released += 1
-        else:
-            d[].double_released += 1
+    var d = _hd(rec[].hd)
+    if rec[].releases != 0:
+        d[].double_released += 1
+    elif rec[].is_root == 1:
+        d[].released += 1
+    else:
+        d[].children_released += 1
     rec[].releases += 1
     for i in range(rec[].n_children):
         var c = (rec[].children.bitcast[Void]() + i)[]
@@ -306,6 +315,8 @@ def _fill_column(mut arena: _Arena, dst: Void, col: Column, hd: Void, is_root: B
     a[].private_data = _new_rec(arena, hd, is_root, 0, null_void())
     if is_root:
         _hd(hd)[].exported += 1
+    else:
+        _hd(hd)[].children_exported += 1
 
 
 def _fill_struct(mut arena: _Arena, dst: Void, batch: Batch, hd: Void):
@@ -338,6 +349,10 @@ def _set_cpu(dst: Void):
     d[].device_id = -1
     d[].device_type = ARROW_DEVICE_CPU
     d[].sync_event = null_void()
+    # Arrow C Device: reserved must be zero; a runtime's `out` (the stream's
+    # get_next) arrives with whatever it held.
+    for i in range(3):
+        d[].reserved[i] = 0
 
 
 def device_struct(mut arena: _Arena, batch: Batch, hd: Word) -> Word:
@@ -586,6 +601,8 @@ def import_struct(d: Word, want: List[ColumnType]) raises -> Batch:
     var off = Int(a[].offset)
     if n < 0 or off < 0:
         raise _fault("struct: length " + String(n) + ", offset " + String(off))
+    if a[].null_count < -1:
+        raise _fault("struct: null_count " + String(a[].null_count))
     if is_null(a[].buffers):
         raise _fault("struct: buffers is NULL")
     var validity = a[].buffers.bitcast[Void]()[0]

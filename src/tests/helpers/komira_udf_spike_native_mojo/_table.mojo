@@ -107,6 +107,7 @@ from ._fixtures import (
     F_TABLE_NULL_COUNT_UNKNOWN,
     F_TABLE_SLICED,
     F_TWO_TYPES,
+    F_YIELD_FIRST,
     F_YIELD_TWO_THEN_RAISE,
     Fixture,
     check_spec,
@@ -176,6 +177,7 @@ struct _Frame(Movable):
     var running: Int64
     var group: Int64
     var max: Int64
+    var yielded: Bool
 
 
 def _reserve(host: Void, n: Int):
@@ -467,7 +469,7 @@ def _frame_open(i: Void, call: Void, in_p: Void, out_p: Void, e: Void) abi("C") 
         _stream_release(mine)
         _free_scratch(host, mine, _STREAM)
         return rc
-    _set_out_slot(out_p, _box(host, _Frame(host, inst[].fx.id, mine, False, 0, -1, 0)))
+    _set_out_slot(out_p, _box(host, _Frame(host, inst[].fx.id, mine, False, 0, -1, 0, False)))
     return OK
 
 
@@ -698,7 +700,14 @@ def _frame_next(fr: Void, call: Void, out_p: Void, e: Void) abi("C") -> Int32:
     var f = fr.bitcast[_Frame]()
     if f[].done:
         return OK  # the end: out's release stays NULL
-    if f[].fx == F_RUNNING_SUM:
+    if f[].fx == F_YIELD_FIRST and not f[].yielded:
+        # One output before any pull: a one-row table [0].
+        f[].yielded = True
+        make_struct(out_p, 1, 1)
+        make_col(child(out_p, 0), 1).bitcast[Int64]()[0] = 0
+        set_cpu(out_p)
+        return OK
+    if f[].fx == F_RUNNING_SUM or f[].fx == F_YIELD_FIRST:
         return _next_running_sum(fr, out_p, e)
     if f[].fx == F_GROUP_MAX:
         return _next_group_max(fr, out_p, e)

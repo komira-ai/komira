@@ -100,6 +100,9 @@ comptime F_LEAF_NULL_COUNT_UNKNOWN = 35
 comptime F_LEAF_EMPTY_DATA_NULL = 36
 comptime F_TABLE_SLICED = 37
 comptime F_TABLE_NULL_COUNT_UNKNOWN = 38
+comptime F_SUM_WIDE = 39
+comptime F_NEAR = 40
+comptime F_YIELD_FIRST = 41
 
 comptime ROW_FIELDS_MAX = 8
 comptime SLOW_ROW_NS: Int64 = 100_000_000
@@ -206,6 +209,17 @@ def find_fixture(entry: String) -> Optional[Fixture]:
         return Fixture(F_TABLE_SLICED, SHAPE_MAP_BATCHES_FRAME, "l", "tl", "")
     if entry == "table_null_count_unknown":
         return Fixture(F_TABLE_NULL_COUNT_UNKNOWN, SHAPE_MAP_BATCHES_FRAME, "l", "tl", "")
+    # The sum of twelve, or sixty-four, int64 arguments, null where any is.
+    if entry == "sum12":
+        return Fixture(F_SUM_WIDE, SHAPE_SCALAR, "llllllllllll", "l", "")
+    if entry == "sum64":
+        return Fixture(F_SUM_WIDE, SHAPE_SCALAR, "llllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll", "l", "")
+    # x * (1 + 5e-10): within the runner's relative tolerance; exactly 0 for 0.
+    if entry == "near":
+        return Fixture(F_NEAR, SHAPE_MAP_BATCHES_COLUMN, "g", "g", "")
+    # A one-row table [0] before pulling anything, then running_sum.
+    if entry == "yield_first":
+        return Fixture(F_YIELD_FIRST, SHAPE_MAP_BATCHES_FRAME, "l", "tl", "")
     return None
 
 
@@ -339,6 +353,8 @@ def _value(fx: Int, x: Void, y: Void, r: Int, o: Void, d: Void) raises:
     # SAFETY: `d` is make_col's values block of at least r + 1 rows.
     if fx == F_FAHRENHEIT:
         d.bitcast[Float64]()[r] = f64_at(x, r) * 1.8 + 32.0
+    elif fx == F_NEAR:
+        d.bitcast[Float64]()[r] = f64_at(x, r) * (1.0 + 5e-10)
     elif fx == F_DOUBLE or fx == F_DOUBLE_STRICT or fx == F_NULL_ON_ZERO:
         d.bitcast[Int64]()[r] = 2 * i64_at(x, r)
     elif fx == F_ADD_MIXED:
@@ -386,6 +402,13 @@ def scalar(fx: Int, host: Void, call: Void, a: Void, o: Void, e: Void) -> Int32:
                 continue
             if fx == F_CONST7:
                 d.bitcast[Int64]()[r] = 7
+                continue
+            if fx == F_SUM_WIDE:
+                for k in range(n_children(a)):
+                    if not is_valid(child(a, k), r):
+                        set_null(o, r)
+                        break
+                    d.bitcast[Int64]()[r] += i64_at(child(a, k), r)
                 continue
             _value(fx, x, y, r, o, d)
     except err:
