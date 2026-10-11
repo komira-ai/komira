@@ -379,7 +379,7 @@ The same holds for the packages in no family list of this document
 History: #755 released `komira_collections` and three proto packages
 (merged into `main` on 2026-10-07). #761 declared the four above and one
 shared library for all of komira's C, as a package of its own
-(2026-10-07: `komira_native`); it merged only into #704's branch, not into
+(2026-10-07: `komira_native`); it merged only into #704's branch (closed unmerged), not into
 `main`.
 [Native packaging](native_packaging.md) replaced that package with one
 shared library per owner, in the owner's own package.

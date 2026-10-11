@@ -218,7 +218,7 @@ Each is a question with a recommendation; none is decided by this document.
    installs run those rows (that plan's question 6 is the alternative).
    History: this item recommended landing #763's link flags for one shared
    native package with #761 or before it (2026-10-07: `komira_native`); both
-   merged only into #704's branch, and native packaging replaced that plan.
+   merged only into #704's branch (closed unmerged), and native packaging replaced that plan.
 10. **Format interop in gamma.** *Recommendation:* both: breadth at build
     time with pinned pyarrow, one round trip per format in gamma.
 11. **The `validate` job's hour.** Two index waits of 1800 s can use the

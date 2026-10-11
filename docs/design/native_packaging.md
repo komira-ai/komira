@@ -14,7 +14,7 @@ prefixing ([tools/build/native/README.md](../../tools/build/native/README.md)).
 **Supersedes** the plan of one shared library for all of komira's C, `libkomira_native.so.1` in a
 package `komira_native`: #681 (the library and its checks), #685 (the packer), #695 (kci reads the
 `native` kind) and #704 (kci_validate and the release-set native slot, with #761 and #763 merged
-into it). They stay on hold until this plan is approved and are then closed; what each keeps is in
+into it). All four are closed unmerged; what each kept is in
 "What happens to each open PR".
 
 **Stages**, as the glossary of [staged_pipeline.md](staged_pipeline.md) names them (its follow-up
@@ -73,8 +73,8 @@ on `main` uses; continuous_publish.md already calls it `beta_validate`, the name
 | set hash | **EXISTS:** `src/kci_release_set/set_hash.mojo`: one line per artifact (name, platform, version, build, subdir, type, sha256 of the `.conda`), the revision and the platform; recomputed from the bytes before any publish (`src/kci_cli/dispatch.mojo`, step 4b) | unchanged; it already covers each `.so` because the `.so` is inside a `.conda` (section "Built once") |
 | glibc floor | **EXISTS:** `os_floor` `glibc-2.34` in `tools/build/platforms/table.bzl` (rows `linux-x86_64` and `linux-arm64`; read by `os_floor_version`), the floor zig links against (`zig_triple` `x86_64-linux-gnu.2.34`, `aarch64-linux-gnu.2.34`). The packer writes only the platform guard `__linux` (`guardFor` in `tools/build/package/pack/conda.zig`), no `__glibc` requirement | the packer writes `__glibc >=2.34` from that cell on each library with C (slice 8); per-library check 5 reads the same cell; kci accepts it (slice 9, on `main`: `glibc_requirement_refusals`, against a compiled copy of the floor, `src/kci_release_set/glibc_floor.mojo`, that a welded test holds equal to the cell). No second floor |
 | conda metadata kinds | **EXISTS:** `library` and `metapackage` only (`src/kci_release_set/conda_metadata.mojo`); kci reads `lib_files` rows on `library` (`LibFile`, slice 9) | no new kind. `lib_files`, `native_owns`, `native_links`, `dlopen` fields on `library` (slices 3, 8) |
-| kind `native`, `lib_files`, `native_link_args` | the kind and `native_link_args` on #704 only (#695, which also carried them, closed unmerged); `lib_files` on `library` is on `main` (slice 9) | `lib_files` survives on `library`; the kind goes |
-| dlopen declarations | the packer refuses any `OwnedDLHandle` (above). `mojo_library(dlopen = ...)` and `tools/build/package/system_libs.bzl` on #685 only; kci's acceptance of the requirements (`src/kci_release_set/system_libs.mojo`) on #704 only (from #763) | slice 3, ahead of the shared libraries |
+| kind `native`, `lib_files`, `native_link_args` | the kind and `native_link_args` only on #695 and #704, both closed unmerged; `lib_files` on `library` is on `main` (slice 9) | `lib_files` survives on `library`; the kind goes |
+| dlopen declarations | the packer refuses any `OwnedDLHandle` (above). `mojo_library(dlopen = ...)` and `tools/build/package/system_libs.bzl` only on #685 (closed unmerged); kci's acceptance of the requirements (`src/kci_release_set/system_libs.mojo`) only on #704 (from #763; closed unmerged) | slice 3, ahead of the shared libraries |
 | beta stage, `beta_install` | design only ([staged_pipeline.md](staged_pipeline.md), merged; its follow-up #1184 on gamma merged). `kci.yml` runs `build → beta → beta_validate → prod` (`gamma` and `validate` before M2) | native install checks run only in `beta_install` (section "Built once"); gamma runs none |
 
 ## What each library ships
