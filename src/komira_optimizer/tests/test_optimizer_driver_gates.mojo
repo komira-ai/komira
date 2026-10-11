@@ -25,7 +25,7 @@ from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
 from komira_plan_expr.agg_expr import AggExpr, AGG_SUM
 from komira_plan_expr.col_expr import col
-from komira_plan_expr.expr import Expr, BIN_ADD, BIN_MUL, BIN_EQ, BIN_AND
+from komira_plan_expr.expr import Expr, BIN_ADD, BIN_MUL, BIN_EQ, BIN_GT, BIN_AND
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_ir.logical_plan import LogicalPlan, ExprArray, AggExprArray, SOURCE_PARQUET
 from komira_optimizer.optimizer_config import OptimizerConfig
@@ -114,6 +114,20 @@ def test_a_literal_conjunct_is_simplified_in_a_project_with_no_filter() raises:
     assert_equal(_render(_run(_project_a_and(x^, n))), _want_simp())
 
 
+def test_constants_fold_in_a_filter_under_an_aggregate() raises:
+    """`Aggregate(SUM(a))` over `Filter(a > 1 + 2)` over a scan: step 6 folds
+    `1 + 2`, and the folded `a > 3` is pushed into the scan.
+
+    Defect caught: the `fold_constants` gate narrowed to plans with no
+    Aggregate (the verifier's o11, `if _plan_has_foldable_exprs(plan) and not
+    has_aggregate:`). The Filter then keeps `a > 1 + 2` above the scan."""
+    var n: List[String] = ["a", "b"]
+    var aggs = AggExprArray()
+    aggs.append(AggExpr(AGG_SUM, Optional(_c("a")), Optional(String("s"))))
+    var f = LogicalPlan.filter(Expr.binary(BIN_GT, _c("a"), Expr.binary(BIN_ADD, _lit(1), _lit(2))), _scan("s.parquet", n))
+    assert_equal(_render(_run(LogicalPlan.aggregate(ExprArray(), aggs^, f^))), _want_fold_under_agg())
+
+
 # -----------------------------------------------------------------------------
 # Step 8: CSE on a plan whose only expression-holding node is an Aggregate
 # -----------------------------------------------------------------------------
@@ -166,6 +180,14 @@ def _want_fold() -> String:
     var l: List[String] = [
         "Project(exprs=[ColRef(a), Alias(Literal(ScalarValue(int64, 3)), \"x\")])",
         "  Scan(path=\"s.parquet\", type=PARQUET, source_kind=COLUMNAR, projection=[a])",
+    ]
+    return _lines(l)
+
+
+def _want_fold_under_agg() -> String:
+    var l: List[String] = [
+        "Aggregate(group_by=[], aggs=[SUM(ColRef(a)).alias(\"s\")])",
+        "  Scan(path=\"s.parquet\", type=PARQUET, source_kind=COLUMNAR, projection=[a], filter=BinaryOp(GT, ColRef(a), Literal(ScalarValue(int64, 3))))",
     ]
     return _lines(l)
 
