@@ -5,6 +5,7 @@ load(":conda.bzl", "conda_manifest_kci")
 load(":defs.bzl", "launcher_level_test")
 load(":kcov_guard.bzl", "kcov_guard_cases", "kcov_guard_tool")
 load(":release_set.bzl", "conda_release_set_check", "release_order_test")
+load(":glibc_floor_record.bzl", "glibc_floor_record")
 load(":system_libs_record.bzl", "system_libs_record")
 
 # The launcher's CPU level function against made-up CPUs (tools/build/package/launcher).
@@ -176,7 +177,7 @@ conda_release_set_check(
         ":release_order_passes_a_requirement_listed_earlier",
         ":release_order_passes_another_version_or_build",
         ":release_order_passes_a_longer_name",
-        ":release_order_exempts_komira_native",
+        ":release_order_refuses_a_komira_native_requirement_listed_later",
     ],
 )
 
@@ -222,13 +223,16 @@ release_order_test(
     metadata_files = ["release_order/requires_bb.json", "release_order/leaf.json"],
 )
 
-# a requires komira_native, listed after it: the one exemption.
+# a requires komira_native at the set's version and build string, listed
+# after it: refused like any other member. This proves the old komira_native
+# exemption is gone (the skip in _ORDER_CHECK would let it pass).
 release_order_test(
-    name = "release_order_exempts_komira_native",
+    name = "release_order_refuses_a_komira_native_requirement_listed_later",
     version = "1.0.0",
     build = "hb_1",
     members = ["a", "komira_native"],
     metadata_files = ["release_order/requires_komira_native.json", "release_order/leaf.json"],
+    refuses = "member a requires komira_native, which release_set lists after it",
 )
 
 # The release set file: kci_artifact's welded test holds it equal to
@@ -244,6 +248,14 @@ export_file(
 # closure checks accept) equal to it, so the two cannot drift.
 system_libs_record(
     name = "system_libs",
+    visibility = ["//src/kci_release_set:"],
+)
+
+# The platform table's glibc floor per conda subdir, as `<subdir> <floor>`
+# lines: kci_release_set's welded test holds kci's compiled copy (the one
+# `__glibc >=<floor>` requirement it accepts) equal to it.
+glibc_floor_record(
+    name = "glibc_floor",
     visibility = ["//src/kci_release_set:"],
 )
 

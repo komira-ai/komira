@@ -17,14 +17,14 @@ and on [ci.md](../ci.md), the authority for the workflows. Where this document a
 **Vocabulary.** The words *beta*, *gamma*, *prod*, *beta channel*, *gamma accounts*, the *tiers*
 (fake, emulator, fixture, e2e, real-cloud), *validated hash*, *single flight*, *never backward*,
 *break-glass* and *main red* mean exactly what the glossary of the staged pipeline says
-(`docs/design/staged_pipeline.md`, section "Glossary"; a path, not a link, until #1184 lands: that
-section exists only from #1184 on, and the doc links lint refuses a link to a missing heading).
+([staged_pipeline.md, section "Glossary"](staged_pipeline.md#glossary)).
 This document does not define them again. In short: **beta** builds once, runs this document's
 tiers, publishes to the **beta channel** and installs from it; **gamma** holds only real
-cloud resources and names no channel; **prod** promotes the same bytes. **Today the beta channel is
-named `gamma`**, and today's jobs `gamma` and `validate` are beta's publish and installs under their
-old names; the staged pipeline's migration (M1 to M4, each a go) renames the channel. Where this
-document describes today (**EXISTS**), it uses today's names and says so. `gamma_validation.md` and
+cloud resources and names no channel; **prod** promotes the same bytes. Until the staged pipeline's
+M2 the beta channel was named `gamma`, and beta's publish and installs ran as the jobs `gamma` and
+`validate`; M2 renamed the channel and those jobs to `beta` and `beta_validate`. Where this document
+describes today (**EXISTS**), it uses the post-M2 names, and where it quotes the state before M2 it
+says so. `gamma_validation.md` and
 its decisions predate the ruling: their "gamma" channel and its installs are beta here.
 
 ## What is it for, and what is out of scope?
@@ -68,16 +68,16 @@ Out of scope:
 `.github/workflows/kci.yml` as four jobs:
 
 1. `build` runs on the build farm.
-2. `gamma` publishes to the channel `gamma` (the beta channel under its old name).
-3. `validate` installs what `gamma` published and runs the README examples. It `needs: [build,
-   gamma]`, so it runs after `gamma` has published.
+2. `beta` publishes to the channel `beta` (named `gamma`, as was its job, before M2).
+3. `beta_validate` installs what `beta` published and runs the README examples (the job `validate`
+   before M2). It `needs: [build, beta]`, so it runs after `beta` has published.
 4. `prod` publishes the same release set to `prod`.
 
 In the glossary's words, these are beta's build, publish and installs, then prod: today there is no
 gamma stage of real cloud resources.
 
-`prod` runs automatically when `validate` succeeds. It publishes exactly the set `validate` installed,
-using the `validated_set_hash` that `validate` hands it (the `kci.yml` header, "CONTINUOUS
+`prod` runs automatically when `beta_validate` succeeds. It publishes exactly the set `beta_validate`
+installed, using the `validated_set_hash` that `beta_validate` hands it (the `kci.yml` header, "CONTINUOUS
 AUTO-PROMOTION"; `release/machine.textproto`). It never publishes a lower build number, or a revision
 off `main`'s history (`KCI-E-SUPERSEDED`, [ci.md](../ci.md)). Releases run one at a time, in the
 concurrency group `kci-release-main`. A newer push replaces the pending run, so pushes made during a
@@ -87,30 +87,33 @@ environment ([ci.md](../ci.md#pausing-promotion-to-prod)).
 | piece | today | evidence |
 |---|---|---|
 | trigger | a push to `main` (not `docs/**` or `**.md` only), or a manual run with a `reason` | `kci.yml` `on:` |
-| gate before prod | two `CONDA_INSTALL_ENV` validations: `install-komira-encoding` and `install-set`. Each runs a fresh pixi install from `gamma`, checks the README sha256 and runs every ` ```mojo ` README block. | `release/machine.textproto`; [gamma validation](gamma_validation.md#what-runs-in-gamma-today-exists) |
+| gate before prod | two `CONDA_INSTALL_ENV` validations: `install-komira-encoding` and `install-set`. Each runs a fresh pixi install from `beta`, checks the README sha256 and runs every ` ```mojo ` README block. | `release/machine.textproto`; [gamma validation](gamma_validation.md#what-runs-in-betas-installs-today-exists) |
 | what is released | the libraries in `release/artifacts.textproto` (41 libraries plus `komira_all`: 42 `artifacts {` blocks) | `grep -c '^artifacts {'` |
 | what is not released | 161 libraries: 202 directories under `src/` hold a `BUCK` file (`src/tests` holds none) and 41 are declared | see [What blocks every package?](#what-blocks-every-package) |
 | cloud SDK tests | welded unit tests with `ScriptedConnector`, `AwsEchoConnector`, in-memory fakes and loopback fakes on `komira_http_server`. No emulator anywhere. | [gamma validation](gamma_validation.md#aws), §AWS, §GCP, §Azure |
 | a release on the release revision | builds `<lib>_conda[release]` and those libraries' welded tests. It runs no standalone e2e, conformance or service test. | [gamma validation](gamma_validation.md#where-can-a-check-run); decision item 6 |
-| a failed validate | prod does not start (no `always()`). The bytes stay in the channel `gamma`. | `kci.yml`, job `prod` |
+| a failed `beta_validate` | prod does not start (no `always()`). The bytes stay in the channel `beta`. | `kci.yml`, job `prod` |
 | rollback | "a revert on `main`, released forward as the next build number". There is no yank path. | [ci.md](../ci.md) |
 
 **Measured run time.** These are the last ten releases that ran to the end, all of them after the
-switch to auto-promotion, read from the GitHub jobs API:
+switch to auto-promotion and before M2 (so under the job names `gamma` and `validate`), read from the
+GitHub jobs API:
 
 | part | range | median |
 |---|---|---|
 | push to prod done | 13.5 to 85 min | about 31 min |
 | waiting behind the previous release | 0 to 29 min | |
 | `build` | 4.3 to 54 min | about 8 min |
-| `gamma` + `validate` + `prod` | 8 to 12 min on every run | |
+| `gamma` + `validate` + `prod` (now `beta` + `beta_validate` + `prod`) | 8 to 12 min on every run | |
 
 The slow `build` runs are the ones in which kci's own code changed. The step "build kci" took 16 to
 50 s when it was cached, and 650 to 2509 s when kci's code had changed (#1153). Of the last 200 runs on
 `main`, 162 were pending runs that a newer push replaced. So coalescing already does the batching.
 
 **Where the settings and the docs disagree** (live repository settings, read through the GitHub API
-again for revision 2; unchanged):
+again for revision 2; unchanged). This table and the paragraph after it describe the state before M2,
+which retired the channel `gamma`'s publishing and every name of `gamma-breakglass`; the staged
+pipeline's "M1 and M2 as chosen" says what holds now:
 
 | the docs say | the settings say |
 |---|---|
@@ -143,7 +146,7 @@ step) and the installed-bytes checks in `beta_validate`.
 **PROPOSED: keep the trigger as it is.** Every push to `main` is a release, and pushes made during a
 release coalesce into the next one. That *is* the per-batch trigger. The batch is whatever landed while
 the previous release ran, so there is no clock to tune and no second trigger to keep in step with the
-first. A scheduled batch trigger (nightly, for example) would only add delay: a release that changed
+first. A scheduled batch trigger would only add delay: a release that changed
 nothing is a NOOP that exits 0 (build numbers count first-parent commits, not runs).
 
 "Continuous" therefore means **every push to `main` that touches code reaches `prod` within one release
@@ -161,7 +164,7 @@ independent of this design, and each is its own slice:
 
 ### The gates before the beta channel and before gamma: results, not clicks
 
-**EXISTS:** prod publishes only the set that `validate` (beta's installs) vouched for. **PROPOSED:**
+**EXISTS:** prod publishes only the set that `beta_validate` (beta's installs) vouched for. **PROPOSED:**
 two more inputs, at two different points:
 
 | input | runs in | runs when | a failure stops | slice |
@@ -177,12 +180,12 @@ for, by its validated hash (and, under the staged pipeline, gamma's as well).
    the `TEST` step, `buck2 build` then `buck2 test` over the same targets: the build runs the welded
    `test_srcs`, the test runs the standalone tests a build never runs, and dropping either is a
    planted mutant there (its slice P3). A failure fails `build`, so nothing reaches the beta
-   channel. **The list is derived, not kept by hand**: it is every check `release/ci/derive_checks.py` derives whose targets depend on a declared
+   channel. **The list is derived, not kept by hand**: it is every check `//tools/build/ci:derive_checks` derives whose targets depend on a declared
    library, the emulator and fixture tiers included. A new standalone test of a released library, or a
    newly declared library, joins the gate with no edit. This is decision item 6 of
    [gamma validation decisions](gamma_validation_decisions.md#what-kci-must-add-to-run-service-validations-in-gamma)
    restricted to the released set's reverse dependencies. **That restriction is PROPOSED S10c work:**
-   `derive_checks.py` today groups targets by path and has no reverse-dependency filter; S10c adds one
+   `derive_checks` today groups targets by path and has no reverse-dependency filter; S10c adds one
    through `buck2 cquery "rdeps(<standalone tests>, <declared libraries>)"`. It is sized before it gates: S10c's first
    task measures its wall time and farm cost on a release revision and writes both here. It gates only
    if the measured time plus the 95th-percentile `build` time fits under `build`'s 120 minutes with a
@@ -331,7 +334,7 @@ reason from a closed set: `NATIVE`, `DLOPEN`, `NO_README`, `UNDECLARED_DEP`, `NO
 
 It is not welded into `kci_release_set`: that would make kci's build depend on every library's
 `[conda_status]`, so kci would rebuild whenever any library changed, which is the slowness #1153 is
-about. As a standalone target it is derived by `derive_checks.py`, runs in the pull-request check
+about. As a standalone target it is derived by `derive_checks`, runs in the pull-request check
 whenever `release/` or a library changes, and is a release check (S10c). There is no "the ledger only
 shrinks" rule: a test that sees one tree has no history to compare with. A new library that nobody
 declares or lists turns the check red. The day #835 lands, the `NATIVE` rows become declare work, and
@@ -359,7 +362,7 @@ the defect (an emulator descriptor pointing at a missing file) and the test must
 `src/tests/emulator/<family>/`. Each one starts its emulator as a pinned process inside the test
 action. They run in three places:
 
-- in the pull-request check when they are affected (`release/ci/derive_checks.py` derives them like any
+- in the pull-request check when they are affected (`//tools/build/ci:derive_checks` derives them like any
   other standalone check);
 - on every release revision, as release checks (S10c);
 - on a developer's machine with the same command.
@@ -629,7 +632,7 @@ not reach, could show it.
 2. **No credentials.** The harness passes only fixed dummy values: a dummy AWS key pair, the emulator
    bearer, and Azurite's published development key. The emulator test targets carry no secret
    attribute, and the jobs that run them hold no cloud identity (`build` holds only the farm
-   connection; `beta_validate`, today's `validate`, has no `id-token`). The generated `_no_env_reads` scan covers only the
+   connection; `beta_validate`, `validate` before M2, has no `id-token`). The generated `_no_env_reads` scan covers only the
    generated files and only environment reads; it does **not** stop `komira_aws_core`'s chain from
    reading credential files or the metadata endpoints. Those are kept out by the lint above and by
    rule 3.
@@ -723,8 +726,7 @@ not reach, could show it.
    - **The credential** (defence in depth). If a request escaped both, it would carry a dummy key,
      which any cloud rejects, and a rejected unauthenticated request is not billed.
 4. **No upload and no cluster write from the tier.** Emulators are build inputs. The tier publishes
-   nothing; only the `beta` and `prod` jobs publish (today's `gamma` job is beta's publish under its
-   old name).
+   nothing; only the `beta` and `prod` jobs publish (`beta` was the job `gamma` before M2).
 5. **Third-party code runs unprivileged.** Where the action runs as uid 0, as every farm action
    does, every emulator and its runtime run as `nobody` (harness step 2; a failed drop fails the
    test), inside the namespace, with a state directory as the only place they may write. The pins
@@ -775,7 +777,7 @@ Each has a recommendation. None is decided here.
    `prod`; see above), and no cloud may trust the `gamma` environment.
 2. **Is merging a declare PR the go for its new names?** A merged declare PR publishes names to
    the beta channel and then to `prod`, permanently and with no further click. *Recommendation:* yes,
-   the merge is the go. The publish job's summary (today's `gamma`, beta's after the rename) already
+   the merge is the go. The publish job's summary (`beta`'s; `gamma`'s before M2) already
    lists "NEW NAMES" for `prod`.
 3. **Native packaging (#835).** 139 of the 161 unreleased libraries, and every cloud SDK package,
    wait on it. *Recommendation:* decide #835 next. Nothing else in this document moves the count as

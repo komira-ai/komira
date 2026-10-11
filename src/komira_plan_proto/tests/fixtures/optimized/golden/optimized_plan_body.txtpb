@@ -1,0 +1,41 @@
+# proto-message: komira.plan.v1.OptimizedPlanBody
+plan {
+  output_schema {
+    fields {
+      name: "o_orderkey"
+      arrow_type_id: 5
+    }
+  }
+  cse_ref {
+    canonical_hash: 1234567890123
+  }
+}
+shared {
+  canonical_hash: 1234567890123
+  plan {
+    output_schema {
+      fields {
+        name: "o_orderkey"
+        arrow_type_id: 5
+      }
+    }
+    view_ref {
+      view_name: "orders_v"
+    }
+  }
+}
+scan_pins {
+  binding_key: "orders"
+  data_fingerprint: "#D@M\260\362\331\023\201\327\031x\376\314\360O\222\332\254g)\304L\365\306\037q\352\223\341\333|"
+}
+scan_pins {
+  binding_key: "customers"
+  data_fingerprint: "\205\346\034\346EZL\334rp\"\220\225\3658\036\027\303f\006\372\201\205\177\274<\026\014e\211}l"
+}
+pin_groups {
+  group: "social_graph"
+  lineage: "graph/lineage"
+  commit_seq: 42
+  members: 0
+  members: 1
+}
