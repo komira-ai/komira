@@ -242,6 +242,19 @@ h.watchdog(`external buffers ${variant}`);
     }
     assert.equal(process.env.KOMIRA_TEST_RUNTIME_FILE, prior, 'the test-only runtime-file variable does not outlive the run that needs it');
   }
+  // zero rows: the buffers have no bytes, nothing is wrapped (the values buffer is not NULL)
+  {
+    const { r, d } = await run({ entry: 'fixtures.js#double', rows: 0, check: CHECK.NONE });
+    assert.equal(t0(r, T.BAD_VALUES), 0);
+    assert.equal(d.externalWraps, 0, 'a zero-byte buffer is not wrapped as an external ArrayBuffer');
+    assert.equal(d.copyWraps, 0);
+  }
+  // the result with nulls: the validity bitmap is copied out beside the values
+  {
+    const { r, d, calls } = await run({ entry: 'fixtures.js#nulls_every_third', shape: SHAPE.COLUMN, argFmt: 'l', resultFmt: 'l', rows: 1024, check: CHECK.NONE });
+    assert.equal(t0(r, T.BAD_VALUES), 0);
+    assert.equal(d.outputCopiedBytes, calls * (1024 * 8 + 128), 'a result with nulls is values plus a 128-byte bitmap, counted');
+  }
   // the result is one copy out
   {
     const { r, d, calls } = await run({ entry: 'fixtures.js#fahrenheit_batch', shape: SHAPE.COLUMN, argFmt: 'g', resultFmt: 'g', rows: 1024, check: CHECK.AFFINE, a: 1.8, b: 32 });
@@ -263,6 +276,14 @@ h.watchdog(`external buffers ${variant}`);
     await refused('a child of another length', 3, 'differs in length');
     await refused('a dictionary on a child', 4, 'not a primitive array');
     await refused('three buffers on a child', 5, 'not a primitive array');
+    {
+      const r = h.summary(await engine.run(handle, {
+        shape: SHAPE.SCALAR, nArgs: 2, argFmt: 'l', resultFmt: 'l', threads: 1, warmupMin: 1, warmupCap: 1, batches: 1, rows: 16,
+        entry: 'fixtures.js#add_strict', dupCols: 1, badArg: 6,
+      }));
+      assert.equal(r.run[R.STATUS], h.STATUS.UNSUPPORTED, `one buffer at two lengths: status ${r.run[R.STATUS]} (${r.message})`);
+      assert.ok(r.message.includes('two lengths'), r.message);
+    }
   }
   engine.engineClose(handle);
   if (pinProblem !== null) throw pinProblem;

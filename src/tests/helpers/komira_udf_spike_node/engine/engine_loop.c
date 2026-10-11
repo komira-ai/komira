@@ -244,6 +244,7 @@ static int export_args(const struct run_opts* o, struct ArrowDeviceArray* d, con
     case 3: b->child[0].length = o->rows - 1; break;
     case 4: b->child[0].dictionary = &b->child[0]; break;
     case 5: b->child[0].n_buffers = 3; break;
+    case 6: b->child[1].offset = o->offset + 1; break; /* with dup_cols: one buffer at two lengths */
     default: break;
   }
   d->device_id = -1;
