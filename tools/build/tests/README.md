@@ -577,19 +577,24 @@ the action's directory; and an `--env` after an `--arg` is refused (exit 2).
 
 ## 30. Optimization levels
 
-[`opt_level.sh`](functional/opt_level.sh) reads the `mojo build` command of each target
-it names from `buck2 aquery` (analysis only) and requires its
-`--optimization-level`: `-O1` for `mojo_test`
-(`komira//tools/build/examples:test_hellopkg`), for a library's gated tests
-(`libgate_ok`) and for the aws-lc and s2n-tls test programs, which override
-the binary default; `-O3` for `mojo_binary` (`hello`, `hello_pkg_user`) and
-for every shared library the `hello_bundle` bundle builds; and each override
-in [`functional/opt_level`](functional/opt_level/BUCK) (a test and a library's gated test at
-`-O3`, a binary at `-O1`). `tests//negative/opt_level:bad_level` must fail analysis:
-`fast` is not a level.
+Each `mojo_opt_level_check` target (the rule in
+[`mojo/opt_level.bzl`](../mojo/opt_level.bzl)) reads, at analysis, the level
+each named target's compiles put on the `mojo build` command line
+(`MojoOptLevelInfo`), and fails analysis unless every row holds.
+`komira//tools/build/examples:opt_levels`: `-O1` for `mojo_test`
+(`test_hellopkg`) and for a library's gated tests (`libgate_ok`); `-O3` for
+`mojo_binary` (`hello`, `hello_pkg_user`) and for `hello`'s shared library,
+the one `hello_bundle` ships. `:opt_levels` in `examples/aws_lc` and
+`examples/s2n_tls`: their test programs override the binary default to `-O1`.
+[`tests//functional/opt_level:levels`](functional/opt_level/BUCK): each
+override in that package (a test and a library's gated test at `-O3`, a
+binary and its shared library at `-O1`). All four are in the pull-request
+check's universe, which builds them. `tests//negative/opt_level:bad_level`
+must fail analysis (`fast` is not a level):
+`//tools/build/selftest:analysis_refusals_mojo`.
 
 ```sh
-tools/build/tests/functional/opt_level.sh
+./buck2 build //tools/build/examples:opt_levels tests//functional/opt_level:levels
 ```
 
 ## 31. Lint weld
@@ -977,7 +982,7 @@ With coverage, a library's conda package (what ships), not the library, waits fo
 ## 51. [Python oracles](../python/README.md#test-51-python-oracles)
 ## 52. [API JSON: mojo_doc_json](../mojo/doc.md)
 ## 53. [Surface capability matrix](lint_tests.md#53-the-surface-capability-matrix)
-## 54. [Hermetic Node.js: planted defects](../node/README.md#test-54-planted-defects)
+## 54. [Hermetic Node.js: planted defects](../node/README.md#planted-defects) (self-test scenarios)
 
 ## 49. Assert level, defines and memory cap
 

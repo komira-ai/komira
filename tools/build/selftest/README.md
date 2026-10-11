@@ -1,7 +1,8 @@
 # Build self-test scenarios
 
 The checks of the build system that must drive buck2 from outside: where
-targets execute, analysis-time and load-time refusals, unconfigured queries.
+targets execute, analysis-time and load-time refusals, builds that must go
+red, unconfigured queries.
 Each scenario is one `buck2 test` target, a Zig program built with the helper
 library [`lib/`](lib/lib.zig). The design, and the inventory of the checks of
 `tools/build/tests/run_tests.sh` these replace, is
@@ -40,7 +41,7 @@ given `--nested`, which the guard refuses.
 | [`exec_platforms`](exec_platforms.zig) | Mojo, toolchain, third_party_srcs and C/C++ targets resolve to `linux-x86_64`; the host platform's own `[komira_re]` key decides remote execution; under the inner key `hello` keeps the pinned configuration hash | a second platform registered first; any key selecting remote |
 | [`uquery_select_branches`](uquery_select_branches.zig) | `uquery deps(cshim:cadd_user)` reaches `toolchains//:cxx_no_default_deps` | the alias deleted |
 | [`analysis_refusals_platform_table`](analysis_refusals_platform_table.zig) | the table's load-time cases hold; the platforms declared; `host`; the reserved row's key refused | a pending pin accepted in a registered row |
-| [`analysis_refusals_mojo`](analysis_refusals_mojo.zig) | the gate bypass, empty `exports`, test_data, env, test_deps, assert level, defines and memory cap refusals, a dep of the wrong kind | each `fail()` deleted, `[ungated]` returning MojoInfo |
+| [`analysis_refusals_mojo`](analysis_refusals_mojo.zig) | the gate bypass, empty `exports`, test_data, env, test_deps, assert level, defines and memory cap refusals, a dep of the wrong kind, an optimization level `mojo build` does not accept | each `fail()` deleted, `[ungated]` returning MojoInfo |
 | [`analysis_refusals_aws_client`](analysis_refusals_aws_client.zig) | mojo_aws_client's 11 analysis refusals | the duplicate-operation check deleted |
 | [`analysis_refusals_gcp_client`](analysis_refusals_gcp_client.zig) | mojo_gcp_client's 10 analysis refusals | the roots-or-methods check deleted |
 | [`analysis_refusals_proto`](analysis_refusals_proto.zig) | a `bundle_only` entry outside the closure | the membership check deleted |
@@ -48,6 +49,7 @@ given `--nested`, which the guard refuses.
 | [`analysis_refusals_lint`](analysis_refusals_lint.zig) | the five files-xor refusals of the lints; in a scratch tree, a matrix row naming a missing target or an incompatible test | one xor `fail()` deleted; the matrix's deps made soft |
 | [`analysis_refusals_python_oracle`](analysis_refusals_python_oracle.zig) | inputs built outside third_party/ | the owner check dropped |
 | [`analysis_refusals_node`](analysis_refusals_node.zig) | the Node.js rules' 8 analysis refusals | the staged-twice check deleted |
+| [`planted_red_builds_node`](planted_red_builds_node.zig) | the Node.js rules' 36 planted defects that fail in an action: node_test's verdict, esbuild, npm_package's and node_dist's pins, c_shared_lib's `-Werror` | expect_error matched case-insensitively; `-Werror` dropped |
 | [`analysis_refusals_rust`](analysis_refusals_rust.zig) | rust_library's test_srcs refusals | the `.rs` check deleted |
 | [`analysis_refusals_coverage`](analysis_refusals_coverage.zig) | the coverage rules' analysis refusals | the buck-out, no-args and LLVM_PROFILE_FILE checks deleted |
 | [`config_refusals`](config_refusals.zig) | `komira.coverage`, `komira.mutation`, `komira.test_timeout_s` values refused at load | any value but true read as false; the margin's `<=` made `<` |
@@ -55,7 +57,11 @@ given `--nested`, which the guard refuses.
 A refusal row passes only when `buck2 audit providers <target>` (analysis,
 nothing built) fails and its output holds the row's message exactly, as the
 rule's `fail()` writes it; a message buck2 interrupts with a configuration
-hash is given as its pieces, each required.
+hash is given as its pieces, each required. A planted-red row
+([lib/reds.zig](lib/reds.zig)) passes only when `buck2 build <target>` fails,
+its output holds the row's text, and `buck2 log what-ran` lists the actions
+the build ran, all on the farm: a red that comes from analysis, not from an
+action, belongs in a refusal table.
 
 ## Graph checks
 
@@ -71,7 +77,10 @@ string), so a change to a library does not reach `build_selftests`.
 
 The package is the declared check `build_selftests`
 (`release/artifacts.textproto`): a change to `tools/build/**` widens the check
-to every unit, this one included. On a 28-core client the 14 scenarios ran in
-3.5 s of wall time, all 14 at once, each with its own inner daemon (3.0 GiB
-of resident memory together at the peak). How many run at once on a runner is
-its local test concurrency.
+to every unit, this one included. On a 28-core client the 14 analysis-only
+scenarios ran in 3.5 s of wall time, all 14 at once, each with its own inner
+daemon (3.0 GiB of resident memory together at the peak). How many run at once
+on a runner is its local test concurrency. `planted_red_builds_node` took
+2 min 53 s on its first run and 1 min 46 s on a later one: a failed action is
+never cached, so every run executes each row's failing action on the farm
+again.

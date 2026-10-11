@@ -39,6 +39,7 @@ LIB_SRCS = [
     "lib/lib.zig",
     "lib/lib_test.zig",
     "lib/parse.zig",
+    "lib/reds.zig",
     "lib/refusals.zig",
     "lib/runner.zig",
     "lib/scratch.zig",
