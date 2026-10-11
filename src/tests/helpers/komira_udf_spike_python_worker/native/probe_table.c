@@ -120,8 +120,8 @@ static int open_engine(struct eng* e, const char* lib, struct pj* j) {
 static void no_release_schema(struct ArrowSchema* s) { (void)s; }
 
 struct specb {
-  struct ArrowSchema kid[10], args, result, rkid[2];
-  struct ArrowSchema* kids[10];
+  struct ArrowSchema kid[65], args, result, rkid[2];
+  struct ArrowSchema* kids[65];
   struct ArrowSchema* rkids[2];
   komira_udf_spec spec;
 };
@@ -171,12 +171,12 @@ static void spec_cases(struct eng* e, struct pj* j) {
   b.spec.args = &b.kid[0]; /* one field, not a struct */
   rc = e->t->validate(e->rt, &b.spec, &err);
   rec(j, "spec_args_not_struct", rc, &err, 0);
-  mk(&b, "udf_worker_fixtures:eight", 9, "l");
+  mk(&b, "udf_fixtures:sum64", 65, "l");
   rc = e->t->validate(e->rt, &b.spec, &err);
-  rec(j, "spec_nine_args", rc, &err, 0);
-  mk(&b, "udf_worker_fixtures:eight", 8, "l");
+  rec(j, "spec_65_args", rc, &err, 0);
+  mk(&b, "udf_fixtures:sum64", 64, "l");
   rc = e->t->validate(e->rt, &b.spec, &err);
-  rec(j, "spec_eight_args", rc, &err, 0);
+  rec(j, "spec_64_args", rc, &err, 0);
   mk(&b, "udf_worker_fixtures:pair", 2, "l");
   b.rkid[0] = b.result;
   b.rkids[0] = &b.rkid[0];

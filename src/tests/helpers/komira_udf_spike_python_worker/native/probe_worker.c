@@ -14,8 +14,8 @@
  *            grammar, descriptor, code objects, shape, argument and result
  *            types, a body cut short, schemas that do not parse, a module
  *            that fails at import, VALUE payloads that are not functions or
- *            do not bind), each refused with its status and reason; eight
- *            arguments taken; a batch the worker cannot read refused.
+ *            do not bind), each refused with its status and reason; 64
+ *            arguments and int32 taken; a batch the worker cannot read refused.
  *   frame    HELLO with shared memory but no file; payloads at the edge of
  *            the engine-to-worker heap; a header without the magic ends
  *            the worker (exit 1); end of file before and after HELLO ends
@@ -269,8 +269,8 @@ static void spec_body(struct pyw_buf* b, const struct spec* s) {
     pyw_buf_put(b, "not an IPC schema message", 25);
     return;
   }
-  struct pyw_field f[10];
-  char fmts[10][2];
+  struct pyw_field f[65];
+  char fmts[65][2];
   int n = (int)strlen(s->args);
   for (int i = 0; i < n; i++) {
     fmts[i][0] = s->args[i], fmts[i][1] = 0;
@@ -293,6 +293,10 @@ static int64_t load(struct pj* j, const char* name, struct raw* w, uint32_t op, 
   pyw_buf_free(&b);
   return r;
 }
+
+#define ARGS64 "llllllllllllllllllllllllllllllll"\
+  "llllllllllllllllllllllllllllllll"
+#define ARGS65 "l" ARGS64
 
 static const struct spec PAIR = {KOMIRA_UDF_SHAPE_SCALAR, KOMIRA_UDF_FORM_BUNDLE, 0, "udf_worker_fixtures:pair", NULL,
                                  0, {NULL, NULL}, {{0}}, NULL, "ll", "l", 0, 0};
@@ -370,8 +374,9 @@ static void load_cases(struct pj* j, const char* dir) {
        (s.form = KOMIRA_UDF_FORM_VALUE, s.entry = NULL, s.ncode = 2, s.role[0] = "payload", s.role[1] = "payload"));
   CASE("bundle_with_code", (s.ncode = 1, s.role[0] = "payload"));
   CASE("shape_2", s.shape = 2);
-  CASE("nine_args", (s.entry = "udf_worker_fixtures:eight", s.args = "lllllllll"));
-  CASE("eight_args", (s.entry = "udf_worker_fixtures:eight", s.args = "llllllll"));
+  /* 64 arguments are the most a UDF takes (the adapter's PYRT_MAX_ARGS) */
+  CASE("args_65", (s.entry = "udf_fixtures:sum64", s.args = ARGS65));
+  CASE("args_64", (s.entry = "udf_fixtures:sum64", s.args = ARGS64));
   CASE("arg_int32", s.args = "li");
   CASE("result_int32", s.result = "i");
   CASE("result_two", s.result = "ll");

@@ -397,6 +397,22 @@ static int call_once(struct pyw_chan* c, const uint8_t* head, size_t head_len, i
                      const struct ArrowArray* const* cols, const int* widths, int ncols, struct ArrowArray* args,
                      const komira_udf_call* call, const komira_udf_host* host, struct pyw_reply* rep, int* killed);
 
+/* Once the host's cancel flag is set: the flag in the control page, or
+ * (pipe) SIGUSR1, whose handler sets the worker's local flag; the worker
+ * runs user code on its one thread and reads no message meanwhile. CANCEL
+ * follows for the record. 0, or -1 with the channel dead. */
+static int forward_cancel(struct pyw_chan* c, uint64_t id, const komira_udf_call* call, int* sent, int64_t* at) {
+  if (*sent || call->cancel == NULL || __atomic_load_n(call->cancel, __ATOMIC_ACQUIRE) == 0) return 0;
+  if (c->shm != NULL)
+    __atomic_store_n((volatile int32_t*)(c->shm + PYW_CTRL_CANCEL), 1, __ATOMIC_RELEASE);
+  else
+    kill(c->pid, SIGUSR1);
+  if (send_header(c, KOMIRA_UDF_OP_CANCEL, id, 0, 0, 0, 0, NULL, NULL, 0) != 0) return -1;
+  *sent = 1;
+  *at = mono_ns();
+  return 0;
+}
+
 /* Waits for the call's reply, forwarding clock reads and the cancel flag.
  * A worker that has not answered CANCEL_GRACE_NS after the cancel reached
  * it, or DEADLINE_GRACE_NS past the call's deadline, is killed (section
@@ -415,23 +431,18 @@ static int await_reply(struct pyw_chan* c, uint64_t id, const komira_udf_call* c
     }
     if (c->shm != NULL) {
       uint32_t reads = __atomic_load_n(ctrl_u32(c, PYW_CTRL_CLOCK_READS), __ATOMIC_ACQUIRE);
+      int forwarded = c->clock_seen != reads;
       while (c->clock_seen != reads) {
         c->clock_seen++;
         (void)host->now_ns(host->host_data);
       }
+      /* A host may set the cancel flag inside now_ns: the flag goes to the
+       * worker before the read is acknowledged, so the worker sees it at
+       * its next check (the read is synchronous, as in-process). */
+      if (forward_cancel(c, id, call, &cancel_sent, &cancel_at) != 0) return -1;
+      if (forwarded) __atomic_store_n(ctrl_u32(c, PYW_CTRL_CLOCK_ACK), reads, __ATOMIC_RELEASE);
     }
-    if (!cancel_sent && call->cancel != NULL && __atomic_load_n(call->cancel, __ATOMIC_ACQUIRE) != 0) {
-      /* The worker runs user code on its one thread and reads no message
-       * meanwhile: the flag in the control page, or (pipe) SIGUSR1, whose
-       * handler sets its local flag. CANCEL follows for the record. */
-      if (c->shm != NULL)
-        __atomic_store_n((volatile int32_t*)(c->shm + PYW_CTRL_CANCEL), 1, __ATOMIC_RELEASE);
-      else
-        kill(c->pid, SIGUSR1);
-      if (send_header(c, KOMIRA_UDF_OP_CANCEL, id, 0, 0, 0, 0, NULL, NULL, 0) != 0) return -1;
-      cancel_sent = 1;
-      cancel_at = mono_ns();
-    }
+    if (forward_cancel(c, id, call, &cancel_sent, &cancel_at) != 0) return -1;
     if (cancel_sent && mono_ns() - cancel_at > CANCEL_GRACE_NS) {
       kill(c->pid, SIGKILL);
       *killed = PYW_KILLED_CANCEL;
@@ -448,8 +459,12 @@ static int await_reply(struct pyw_chan* c, uint64_t id, const komira_udf_call* c
     komira_udf_wire_header h;
     if (read_message(c, &h, rep) != 0) return -1;
     if (h.op == PYW_OP_CLOCK) {
+      /* The pipe transport's clock read: forwarded, the cancel flag sent
+       * if the host set it, then acknowledged (the worker waits for it). */
       pyw_reply_free(rep);
       (void)host->now_ns(host->host_data);
+      if (forward_cancel(c, id, call, &cancel_sent, &cancel_at) != 0) return -1;
+      if (send_header(c, PYW_OP_CLOCK, id, 0, 0, 0, 0, NULL, NULL, 0) != 0) return -1;
       continue;
     }
     if (check_reply(c, &h, id, rep) != 0) return -1;

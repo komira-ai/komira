@@ -4,8 +4,8 @@
 # What it proves, and the defect each part catches:
 #   - validate and load refuse a spec before any message: NULL or short
 #     (ERR_ABI), no argument or no result schema, a state type, args not a
-#     struct, nine arguments, a result that is a struct, a type the
-#     transport does not carry (ERR_UNSUPPORTED); eight arguments are
+#     struct, 65 arguments, a result that is a struct, a type the
+#     transport does not carry (ERR_UNSUPPORTED); 64 arguments are
 #     taken; with a NULL error, or one too short to write, only the status
 #     comes back and nothing is written; every refusal's row and group are
 #     -1 (a check deleted or loosened, a bound moved by one, an error
@@ -73,9 +73,9 @@ def main() raises:
     got(r, "spec_no_args", u, "a spec without argument or result schema")
     got(r, "spec_no_result", u, "a spec without argument or result schema")
     got(r, "spec_state", u, "a state type is for aggregates")
-    got(r, "spec_args_not_struct", u, "args is not a struct of at most 8 fields")
-    got(r, "spec_nine_args", u, "args is not a struct of at most 8 fields")
-    got(r, "spec_eight_args", 0, "OK")
+    got(r, "spec_args_not_struct", u, "args is not a struct of at most 64 fields")
+    got(r, "spec_65_args", u, "args is not a struct of at most 64 fields")
+    got(r, "spec_64_args", 0, "OK")
     got(r, "spec_result_struct", u, "the result is not one column")
     got(r, "spec_type_not_carried", u, "the worker transport carries no Arrow type 'tdD' (spike)")
     got(r, "load_result_type_not_carried", u, "the worker transport carries no Arrow type 'tdD' (spike)")

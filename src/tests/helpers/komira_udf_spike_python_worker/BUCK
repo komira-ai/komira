@@ -220,6 +220,7 @@ pyrt_files(
         "komira_udf_pyrt.py",
         "udf_fixtures.py",
         "udf_np.py",
+        "udf_shadow.py",
     ],
     test = "//src/tests/helpers/komira_udf_spike_python:komira_udf_spike_python[tests][test_python_shared_gil]",
 )

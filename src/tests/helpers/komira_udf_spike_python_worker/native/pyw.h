@@ -40,6 +40,7 @@
 /* Words of the control page (byte offsets). */
 #define PYW_CTRL_MAGIC 0u        /* u32, "PYWK" */
 #define PYW_CTRL_CLOCK_READS 16u /* u32: the worker's clock reads */
+#define PYW_CTRL_CLOCK_ACK 24u   /* u32: the reads forwarded to the host, cancel checked */
 #define PYW_CTRL_CANCEL 32u      /* i32: the running call's cancel flag */
 #define PYW_CTRL_RING_HEAD 64u   /* u32, written by the worker */
 #define PYW_CTRL_RING_TAIL 128u  /* u32, written by the engine */

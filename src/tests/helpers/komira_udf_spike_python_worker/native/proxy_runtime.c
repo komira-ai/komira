@@ -51,7 +51,7 @@
 
 #include "pyw.h"
 
-#define MAX_ARGS 8
+#define MAX_ARGS 64 /* the in-process adapter's PYRT_MAX_ARGS; the IPC writer takes 64 columns */
 #define MAX_LOADED 16
 
 enum variant { V_SPAWN = 1, V_ZYGOTE = 2 };
@@ -184,7 +184,7 @@ static int32_t encode_spec(const komira_udf_spec* s, struct pyw_buf* b, komira_u
   int na = fields_of(s->args, af, MAX_ARGS, &a_struct);
   int nr = fields_of(s->result, rf, 1, &r_struct);
   if (na < 0 || !a_struct)
-    return fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "args is not a struct of at most 8 fields", NULL, -1);
+    return fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "args is not a struct of at most 64 fields", NULL, -1);
   if (nr != 1 || r_struct) return fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "the result is not one column", NULL, -1);
   pyw_buf_i32(b, s->shape);
   pyw_buf_i32(b, s->form);

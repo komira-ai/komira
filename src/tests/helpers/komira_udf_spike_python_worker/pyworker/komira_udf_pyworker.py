@@ -52,11 +52,15 @@ ERR_RETURN_TYPE, ERR_INTERNAL = 7, 15
 SHAPE_SCALAR, SHAPE_MAP_BATCHES_COLUMN = 1, 4
 FORM_PACKAGE, FORM_BUNDLE, FORM_VALUE = 1, 2, 3
 CALL_HEAD = 64
-WIDTH = {"l": 8, "g": 8}
+WIDTH = {"l": 8, "i": 4, "g": 8}
+MAX_ARGS = 64  # the adapter's PYRT_MAX_ARGS
 
 # The control page (pyw.h).
 CTRL_BYTES = 4096
-W_CLOCK, W_CANCEL, W_HEAD = 16 // 4, 32 // 4, 64 // 4
+W_CLOCK, W_CLOCK_ACK, W_CANCEL, W_HEAD = 16 // 4, 24 // 4, 32 // 4, 64 // 4
+# How long a clock read waits for the engine's acknowledgement (the engine
+# answers within its 1 ms poll while a call runs).
+CLOCK_ACK_WAIT_NS = 1_000_000_000
 W_RING, RING_SLOTS = 256 // 4, 256
 
 CAPS = ("komira-test/python-worker", "cp313",
@@ -214,13 +218,31 @@ class Worker:
         self.ctrl[W_HEAD] = (head + 1) & 0xFFFFFFFF
 
     def now_shm(self):
-        self.ctrl[W_CLOCK] = (self.ctrl[W_CLOCK] + 1) & 0xFFFFFFFF
+        """A clock read the engine forwards to the host's now_ns: counted in
+        the control page, then waited for. A host may set the cancel flag
+        inside now_ns; the engine writes the flag before it acknowledges, so
+        the next check sees it, as in-process."""
+        n = (self.ctrl[W_CLOCK] + 1) & 0xFFFFFFFF
+        self.ctrl[W_CLOCK] = n
+        give_up = time.monotonic_ns() + CLOCK_ACK_WAIT_NS
+        while self.ctrl[W_CLOCK_ACK] != n and time.monotonic_ns() < give_up:
+            time.sleep(0.00005)
         return time.monotonic_ns()
 
     def now_pipe(self):
-        """The pipe transport's clock read: tells the engine (CLOCK)."""
+        """The pipe transport's clock read: CLOCK to the engine, then its
+        CLOCK back. A CANCEL before it (the host set the flag inside now_ns)
+        sets the local flag; SIGUSR1 has set it too."""
         self.sock.sendall(HEADER.pack(MAGIC, OP["CLOCK"], self.req, 0, 0, 0, 0))
-        return time.monotonic_ns()
+        while True:
+            h = HEADER.unpack(bytes(self.recv_exact(HEADER.size)))
+            if h[0] != MAGIC:
+                os._exit(1)  # the engine never sends this: the channel is broken
+            if h[1] == OP["CANCEL"]:
+                self.local_cancel.cast("i")[0] = 1
+                continue
+            if h[1] == OP["CLOCK"]:
+                return time.monotonic_ns()
 
     def on_cancel_signal(self, signum, frame):
         """The pipe transport's cancel: the engine sends SIGUSR1 while a call
@@ -292,7 +314,7 @@ class Worker:
             fmts = []
             for f in schema:
                 t = f.type
-                fmt = "l" if t == pa.int64() else "g" if t == pa.float64() else "?" + str(t)
+                fmt = "l" if t == pa.int64() else "i" if t == pa.int32() else "g" if t == pa.float64() else "?" + str(t)
                 fmts.append((f.name, fmt, f.nullable))
             out.append(fmts)
         return out[0], out[1]
@@ -320,10 +342,12 @@ class Worker:
             raise Refused(ERR_UNSUPPORTED, "code objects are read only for VALUE (spike)")
         if s["shape"] not in (SHAPE_SCALAR, SHAPE_MAP_BATCHES_COLUMN):
             raise Refused(ERR_UNSUPPORTED, "shape is not SCALAR or MAP_BATCHES_COLUMN")
-        if len(s["args"]) > 8 or any(f[1] not in WIDTH for f in s["args"]):
-            raise Refused(ERR_UNSUPPORTED, "an argument type is not int64 or float64")
+        if len(s["args"]) > MAX_ARGS:
+            raise Refused(ERR_UNSUPPORTED, "args is not a struct of at most {} fields".format(MAX_ARGS))
+        if any(f[1] not in WIDTH for f in s["args"]):
+            raise Refused(ERR_UNSUPPORTED, "an argument type is not int64, int32 or float64")
         if len(s["result"]) != 1 or s["result"][0][1] not in WIDTH:
-            raise Refused(ERR_UNSUPPORTED, "the result type is not int64 or float64")
+            raise Refused(ERR_UNSUPPORTED, "the result type is not int64, int32 or float64")
         s["arg_fmts"] = "".join(f[1] for f in s["args"])
         s["result_fmt"] = s["result"][0][1]
 
@@ -422,10 +446,12 @@ class Worker:
             if self.pa is not None:
                 n, cols, keep = self.pa_columns(base, spec)
             else:
-                n, raw = self.ipc.read_batch(base, CALL_HEAD, len(base) - CALL_HEAD, [8] * len(spec["args"]))
+                n, raw = self.ipc.read_batch(
+                    base, CALL_HEAD, len(base) - CALL_HEAD, [WIDTH[f] for f in spec["arg_fmts"]]
+                )
                 cols = []
                 for fmt, (vat, bat, _nulls) in zip(spec["arg_fmts"], raw):
-                    d = base[vat : vat + 8 * n]
+                    d = base[vat : vat + WIDTH[fmt] * n]
                     v = base[bat : bat + (n + 7) // 8] if bat is not None else None
                     views += [d] if v is None else [d, v]
                     cols.append((fmt, d, v, 0))
@@ -449,7 +475,7 @@ class Worker:
 
     def pa_columns(self, base, spec):
         pa = self.pa
-        types = {"l": pa.int64(), "g": pa.float64()}
+        types = {"l": pa.int64(), "i": pa.int32(), "g": pa.float64()}
         if not hasattr(self, "_pa_schema") or self._pa_schema[0] is not spec:
             self._pa_schema = (spec, pa.schema([(f[0], types[f[1]], f[2]) for f in spec["args"]]))
         batch = pa.ipc.read_record_batch(pa.py_buffer(base[CALL_HEAD:]), self._pa_schema[1])
@@ -466,7 +492,8 @@ class Worker:
         w = self.writer
         rfmt = spec["result_fmt"]
         scalar = spec["shape"] == SHAPE_SCALAR
-        _, voff, body = w.layout(n, 8)
+        rw = WIDTH[rfmt]
+        _, voff, body = w.layout(n, rw)
         size = w.head + body
         in_heap = self.mm is not None and self.pa is None and size <= self.heap
         out = outv = None
@@ -477,7 +504,7 @@ class Worker:
                 dst = bytearray(size)
             dst[w.head : w.head + voff] = b"\xff" * voff
             outv = memoryview(dst)[w.head : w.head + (n + 7) // 8]
-            out = memoryview(dst)[w.head + voff : w.head + voff + 8 * n]
+            out = memoryview(dst)[w.head + voff : w.head + voff + rw * n]
         if self.ctrl is None:
             self.local_cancel.cast("i")[0] = 0  # the engine clears the shared one before each call
         r = inst.call(n, cols, out, outv, self.cancel_view, self.now, deadline)
@@ -491,14 +518,14 @@ class Worker:
         else:
             data, valid, nulls, m = r[1], r[2], r[3], r[4]
             n = m
-            _, voff, body = w.layout(n, 8)
+            _, voff, body = w.layout(n, rw)
             size = w.head + body
             in_heap = self.mm is not None and self.pa is None and size <= self.heap
             dst = self.w2e if in_heap else bytearray(size)
             raw = memoryview(data).cast("B")
-            if len(raw) != 8 * n:
-                raise Refused(ERR_RETURN_TYPE, "the result's values buffer is not 8 bytes per row")
-            dst[w.head + voff : w.head + voff + 8 * n] = raw
+            if len(raw) != rw * n:
+                raise Refused(ERR_RETURN_TYPE, "the result's values buffer is not {} bytes per row".format(rw))
+            dst[w.head + voff : w.head + voff + rw * n] = raw
             raw.release()
             if valid is not None:
                 vb = memoryview(valid).cast("B")
@@ -508,15 +535,15 @@ class Worker:
                 vb.release()
         if self.pa is not None:
             return self.pa_encode(dst, n, voff, nulls, rfmt)
-        w.write(dst, 0, n, 8, nulls)
+        w.write(dst, 0, n, rw, nulls)
         return size if in_heap else bytes(dst[:size])
 
     def pa_encode(self, dst, n, voff, nulls, rfmt):
         pa = self.pa
         w = self.writer
-        typ = pa.int64() if rfmt == "l" else pa.float64()
+        typ = {"l": pa.int64(), "i": pa.int32(), "g": pa.float64()}[rfmt]
         valid = pa.py_buffer(bytes(dst[w.head : w.head + (n + 7) // 8])) if nulls else None
-        values = pa.py_buffer(bytes(dst[w.head + voff : w.head + voff + 8 * n]))
+        values = pa.py_buffer(bytes(dst[w.head + voff : w.head + voff + WIDTH[rfmt] * n]))
         arr = pa.Array.from_buffers(typ, n, [valid, values], null_count=nulls)
         msg = pa.RecordBatch.from_arrays([arr], names=["result"]).serialize()
         if self.mm is not None and msg.size <= self.heap:

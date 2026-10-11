@@ -16,12 +16,13 @@
 #     can break its grammar, a descriptor version over 0 or bytes in
 #     version 0, a VALUE without exactly one payload code object, code
 #     objects for a BUNDLE, a shape outside SCALAR and MAP_BATCHES_COLUMN,
-#     nine arguments, an int32 argument or result, no result or two, a body
+#     65 arguments, no result or two, a body
 #     cut short, schemas that do not parse, a module that fails at import,
 #     VALUE payloads that are not a function, not a pickle, whose hints do
 #     not resolve or do not bind, a payload file missing: each refused with
 #     its status (ERR_DESCRIPTOR, ERR_UNSUPPORTED, ERR_LOAD, ERR_INTERNAL)
-#     and reason; eight arguments and a good VALUE taken; a control worker
+#     and reason; 64 arguments, an int32 argument or result and a good
+#     VALUE taken; a control worker
 #     takes a VALUE without deserializing it (any of these checks deleted,
 #     or a bound moved by one);
 #   - a batch the worker cannot read, and one column for two arguments:
@@ -85,11 +86,11 @@ def main() raises:
         got(r, k, d, "a VALUE needs exactly one code object, role payload")
     got(r, "bundle_with_code", u, "code objects are read only for VALUE")
     got(r, "shape_2", u, "shape is not SCALAR or MAP_BATCHES_COLUMN")
-    for k in ["nine_args", "arg_int32"]:
-        got(r, k, u, "an argument type is not int64 or float64")
-    for k in ["result_int32", "result_two", "result_none"]:
-        got(r, k, u, "the result type is not int64 or float64")
-    got(r, "eight_args", 0, "OK")
+    got(r, "args_65", u, "args is not a struct of at most 64 fields")
+    for k in ["result_two", "result_none"]:
+        got(r, k, u, "the result type is not int64, int32 or float64")
+    for k in ["args_64", "arg_int32", "result_int32"]:
+        got(r, k, 0, "OK")
     got(r, "body_cut", Int(ERR_INTERNAL), "a truncated control body")
     got(r, "body_3_bytes", Int(ERR_INTERNAL), "komira_udf_pyworker: error: unpack_from")
     got(r, "schemas_garbled", Int(ERR_INTERNAL), "the spec's schemas:")
