@@ -13,7 +13,8 @@ one argument. One line per case, tab-separated:
 
     case  entry  input columns  source  read set  recorded  note
 
-with comma-separated column lists. `source` is columns (the user's
+with comma-separated column lists (the read set and the recorded fields
+sorted by UTF-8 bytes; the input columns in the input's order). `source` is columns (the user's
 columns=[...]), static (the scan) or absent (the scan could not bound the
 reads). `read set` is `absent` (no read set: the UDF reads every input
 column) or the present set in brackets: `[price,qty]`, and `[]` for an

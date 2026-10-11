@@ -3,8 +3,10 @@
 # that does not depend on how the UDF runs.
 #
 # What it proves, and the defect each part catches:
-#   - a PRESENT read set becomes the UdfSpec's argument names, in input
-#     order, one typed field each (a read set dropped or reordered);
+#   - a PRESENT read set becomes the UdfSpec's argument names in the read
+#     set's order, sorted by UTF-8 bytes (pick's {flag, a, b} reads a, b,
+#     flag), one typed field each (a read set dropped or left in the
+#     input's order);
 #   - an ABSENT one (the scan could not bound the reads) is told apart and
 #     gives every input column (a reader that takes `absent` for a column
 #     name, or for an empty set);
@@ -42,6 +44,11 @@ def main() raises:
     assert_true(c.present, "constant's read set is present")
     assert_equal(len(c.read_set), 0, "empty: no columns")
     assert_equal(len(row_spec(c.entry, c.read_set, TYPE_FLOAT64, TYPE_FLOAT64).arg_names), 0)
+    # Sorted by UTF-8 bytes, not in the input's order (flag, a, b).
+    var k = read_set_of(sets, "pick")
+    assert_equal(len(k.read_set), 3)
+    assert_true(k.read_set[0] == "a" and k.read_set[1] == "b" and k.read_set[2] == "flag", "pick sorted")
+    assert_equal(k.input[0], "flag")
     var d = read_set_of(sets, "branchy_declared_ab")
     assert_true(d.present and d.source == "columns" and len(d.read_set) == 2, "columns=[a, b]")
     with open("bad_read_sets.tsv", "w") as f:

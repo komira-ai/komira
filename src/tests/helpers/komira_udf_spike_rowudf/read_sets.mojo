@@ -1,7 +1,8 @@
 # The producer's read sets (producer/capture_main.py's table, committed as
 # golden/read_sets.tsv and checked against the capture by the py_test
 # read_sets_golden_test) read back into UDF references: a ROW UdfSpec whose
-# argument struct is the read set, one named field per entry. A PRESENT
+# argument struct is the read set, one named field per entry, in the read
+# set's order (sorted by UTF-8 bytes: arg_types must match it). A PRESENT
 # read set gives its columns (EMPTY: none); an ABSENT one gives every input
 # column, which is what the planner passes a UDF with no read set. The tests and the bench take their
 # read sets from here, so what the runtime is given is what the producer

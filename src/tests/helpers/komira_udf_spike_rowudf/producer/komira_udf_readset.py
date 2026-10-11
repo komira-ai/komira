@@ -7,8 +7,10 @@ A row-shaped function takes one row object and reads its fields by name:
     def f(row) -> float:
         return row.price * row.qty
 
-Its read set is the fields it may read. The plan carries it on the UDF
-call node as `UdfReadSet { repeated string columns }`, presence tracked:
+Its read set is the fields it may read. The plan carries it on the ROW
+UdfRef (`read_set`, beside `arg_types`, which must match it) as
+`UdfReadSet { repeated string columns }`, the columns unique and sorted by
+their UTF-8 bytes, presence tracked:
 ABSENT means the UDF reads every input column; PRESENT means the planner
 projects to exactly those columns (unique names, each in the input schema,
 else refused naming the column); EMPTY (present, no columns) gives the UDF
@@ -63,10 +65,10 @@ class ReadSetError(Exception):
 class ReadSet:
     """The read set of one function over one input, as the plan's UDF call
     node carries it (`UdfReadSet { repeated string columns }`, presence
-    tracked): `names` in input order when PRESENT (EMPTY is present with no
+    tracked): `names` sorted by UTF-8 bytes when PRESENT (EMPTY is present with no
     names), None when ABSENT (the UDF reads every input column). Also where
     it came from (`source`), the fields the sample read (`recorded`, in
-    input order; empty without a sample or when absent) and, for absent,
+    the same order; empty without a sample or when absent) and, for absent,
     why."""
 
     __slots__ = ("names", "source", "recorded", "note")
@@ -229,6 +231,13 @@ def record(f, sample):
     return reads, (whole[0] if whole else "")
 
 
+def _sorted(names):
+    """`names` without repeats, sorted by their UTF-8 bytes: the plan's
+    canonical order for a read set (and for the UdfRef's arg_types, which
+    must match it)."""
+    return sorted(set(names), key=lambda n: n.encode("utf-8"))
+
+
 def read_set(f, input_columns, columns=None, sample=None):
     """The ReadSet of `f` over an input whose columns are `input_columns`
     (names, in order). `columns`: the user's declaration. `sample`: rows
@@ -244,7 +253,7 @@ def read_set(f, input_columns, columns=None, sample=None):
         for c in cols:
             if c not in order:
                 raise ReadSetError("UDF_ROW_COLUMN_UNKNOWN", "columns=[...] names {!r}; the input has {}".format(c, order))
-        names = [c for c in order if c in cols]
+        names = _sorted(cols)
         source = SOURCE_COLUMNS
         note = ""
         _row_param(f)
@@ -260,13 +269,13 @@ def read_set(f, input_columns, columns=None, sample=None):
                     raise ReadSetError(
                         "UDF_ROW_COLUMN_UNKNOWN", "the function reads {!r}; the input has {}".format(c, order)
                     )
-            names = [c for c in order if c in fields]
+            names = _sorted(fields)
             source = SOURCE_STATIC
             note = ""
     recorded = []
     if sample is not None and names is not None:
         reads, _ = record(f, sample)
-        recorded = [c for c in order if c in reads]
+        recorded = _sorted(reads)
         missed = [c for c in reads if c not in names]
         if missed:
             raise ReadSetError(

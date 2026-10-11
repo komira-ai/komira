@@ -101,9 +101,9 @@ def test_scan():
     assert static(udf_rows.price_qty, COLS) == ["price", "qty"]
     assert static(udf_rows.price_qty_keys, COLS) == ["price", "qty"]
     assert static(udf_rows.branchy, ABC) == ["a", "b", "c"]
-    assert static(udf_rows.pick, ["flag", "a", "b"]) == ["flag", "a", "b"]
+    assert static(udf_rows.pick, ["flag", "a", "b"]) == ["a", "b", "flag"]
     assert static(udf_rows.nullable_half, ["x", "y"]) == ["x"]
-    # input order, not the order of reads
+    # sorted by UTF-8 bytes, not in the order of reads or of the input
     assert static(lambda row: row.qty - row.price, COLS) == ["price", "qty"]
     # a field read on two paths is listed once; a value read twice too
     assert static(lambda r: r.qty if r.qty > r.price else r.qty, COLS) == ["price", "qty"]
@@ -230,7 +230,7 @@ def test_shapes():
     ns = {}
     exec("def wide(row):\n    return " + " + ".join("row." + n for n in names) + "\n", ns)
     assert "EXTENDED_ARG" in [i.opname for i in dis.get_instructions(ns["wide"])]
-    assert static(ns["wide"], names) == names
+    assert static(ns["wide"], names) == sorted(names, key=lambda n: n.encode("utf-8"))
 
 
 def test_undetermined():
@@ -328,9 +328,17 @@ def test_presence():
     assert (r.names, r.present) == ([], True), r
     r = rs.read_set(udf_rows.price_qty, COLS, columns=[])
     assert (r.names, r.present, r.source) == ([], True, "columns"), r
-    # PRESENT: input order, whatever the declaration's order.
+    # PRESENT: sorted by UTF-8 bytes, whatever the declaration's or the
+    # input's order (upper case before lower, ASCII before a 2-byte name).
     r = rs.read_set(udf_rows.price_qty, COLS, columns=["qty", "price"])
     assert (r.names, r.present) == (["price", "qty"], True), r
+    cols = ["\u00e9", "b", "a", "B"]
+    r = rs.read_set(udf_rows.price_qty, cols, columns=["b", "\u00e9", "B", "a"])
+    assert r.names == ["B", "a", "b", "\u00e9"], r
+    r = rs.read_set(lambda row: row.b + row["\u00e9"] + row.a + row.B, cols)
+    assert (r.names, r.source) == (["B", "a", "b", "\u00e9"], "static"), r
+    r = rs.read_set(lambda row: row.b + row.a, cols, sample=[{"\u00e9": 0, "b": 1, "a": 2, "B": 3}])
+    assert (r.names, r.recorded) == (["a", "b"], ["a", "b"]), r
     # A repeated declared name is refused naming it.
     msg = expect_error("UDF_ROW_READ_SET_INVALID", rs.read_set, udf_rows.price_qty, COLS, columns=["qty", "price", "qty"])
     assert msg == "UDF_ROW_READ_SET_INVALID: columns=[...] names 'qty' twice", msg
@@ -345,7 +353,7 @@ def test_presence():
 
 def test_any_name():
     assert static(udf_rows.underscored, ["_b", "_i", "x", "_s"]) == ["_b", "_i", "_s"]
-    assert static(lambda row: row.keys + row._values, ["keys", "_values", "z"]) == ["keys", "_values"]
+    assert static(lambda row: row.keys + row._values, ["keys", "_values", "z"]) == ["_values", "keys"]
     absent(lambda row: row.__class__, COLS, "a dunder attribute of the row is read: .__class__ (line")
     absent(lambda row: row.price + row.__dict__, COLS, "a dunder attribute of the row is read: .__dict__")
     names = ["_reads", "_read", "_values", "_whole", "_mark", "keys"]
