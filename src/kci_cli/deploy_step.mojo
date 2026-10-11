@@ -67,8 +67,10 @@
 #      `outputs` stays empty: the engine does not hand its recorded outputs
 #      back to kci yet.
 #
-# `--rollback-on-failure`, and emptying `set_hash` when a DEPLOY step fails,
-# are not here.
+# What follows a failed DEPLOY step is not here: the run stops at it and
+# empties `set_hash` (dispatch.mojo's header, 6 and 4b), and
+# `--rollback-on-failure` is refused before the run starts (args.mojo: this
+# kci has no deployed-revision record).
 #
 # Encapsulation: owned values and generic parameters; no pointer, no
 # wildcard origin.
