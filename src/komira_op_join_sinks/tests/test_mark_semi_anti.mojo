@@ -13,8 +13,8 @@
 #   * Two workers' operators sharing one index, each over its own RIGHT
 #     morsel, mark the union.
 #   * A RIGHT row the morsel's selection mask excludes marks nothing. Without
-#     that check (thorium's operator had none) the masked-out key 5 marks
-#     LEFT rows 0 and 2 and SEMI returns them.
+#     that check (the earlier version of this operator had none) the
+#     masked-out key 5 marks LEFT rows 0 and 2 and SEMI returns them.
 #   * A brute-force nested loop over 2,000 LEFT and 9,000 RIGHT rows with
 #     NULLs on both sides agrees with the marked answer for SEMI and ANTI.
 #   * `execute` empties the morsel and returns NEED_MORE_INPUT; an empty
