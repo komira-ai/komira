@@ -13,8 +13,26 @@
 --   - an aggregate whose answer depends on the order rows reach it has an
 --     ORDER BY of its own, as a plain aggregate or in its OVER clause, and
 --     so does a window function that reads row positions;
+--   - a window whose frame has a ROWS bound (start or end CURRENT_ROW_ROWS,
+--     EXPR_PRECEDING_ROWS or EXPR_FOLLOWING_ROWS) has an ORDER BY in its
+--     OVER clause, whatever the function: a ROWS frame counts rows in the
+--     order they reach the window, and the function's own ORDER BY orders
+--     only the rows inside the frame (a RANGE or GROUPS frame with no ORDER
+--     BY is the whole partition: every row is a peer);
+--   - a LIMIT or an OFFSET (LIMIT_MODIFIER, LIMIT_PERCENT_MODIFIER), and a
+--     DISTINCT ON (a DISTINCT_MODIFIER with distinct_on_targets), has a
+--     non-empty ORDER BY among the modifiers of its own query node; an
+--     ORDER BY of a query around it or below it does not count;
+--   - histogram with one argument takes a CAST to a type other than FLOAT,
+--     DOUBLE or a name the parse leaves UNBOUND (DuckDB keys a float
+--     histogram in a std::map under `<`, where NaN is equivalent to every
+--     key and -0.0 to 0.0, so the answer follows the rows' order);
+--     histogram with bins and histogram_exact take bins that name no column
+--     at any depth (DuckDB fixes a group's bins from its first row);
 --   - json_group_array, json_group_object and json_group_structure, macros
---     over string_agg with no ORDER BY, are refused;
+--     over string_agg with no ORDER BY, are refused, and so are
+--     list_reverse_sort and array_reverse_sort (they always read
+--     default_order);
 --   - no call reads the clock, a random draw or the session: a function in
 --     unstable_functions() (every scalar or aggregate DuckDB v1.5.6 marks
 --     VOLATILE or CONSISTENT_WITHIN_QUERY but error, ICU's clock readers,
@@ -40,6 +58,8 @@ CREATE MACRO order_sensitive_aggregates() AS [
 CREATE MACRO positional_windows() AS [
     'row_number', 'ntile', 'lead', 'lag', 'first_value', 'last_value', 'nth_value', 'fill'];
 CREATE MACRO refused_functions() AS ['json_group_array', 'json_group_object', 'json_group_structure'];
+CREATE MACRO reverse_sorts() AS ['list_reverse_sort', 'array_reverse_sort'];
+CREATE MACRO histograms() AS ['histogram', 'histogram_exact'];
 CREATE MACRO unstable_functions() AS [
     -- CONSISTENT_WITHIN_QUERY: a clock or the session.
     'current_database', 'current_date', 'current_schema', 'current_schemas', 'get_current_time',
@@ -104,8 +124,43 @@ SELECT 'the window function ' || fn || loc || ' has no ORDER BY in its OVER clau
 WHERE class = 'WINDOW' AND (list_contains(order_sensitive_aggregates(), fn) OR list_contains(positional_windows(), fn))
   AND coalesce(json_array_length(v, '$.orders'), 0) = 0 AND coalesce(json_array_length(v, '$.arg_orders'), 0) = 0
 UNION ALL
+SELECT 'the window function ' || fn || loc || ' has a ROWS frame and no ORDER BY in its OVER clause, so the frame counts rows in the order they reach it' FROM located
+WHERE class = 'WINDOW' AND coalesce(json_array_length(v, '$.orders'), 0) = 0
+  AND (json_extract_string(v, '$.start') IN ('CURRENT_ROW_ROWS', 'EXPR_PRECEDING_ROWS', 'EXPR_FOLLOWING_ROWS')
+    OR json_extract_string(v, '$.end') IN ('CURRENT_ROW_ROWS', 'EXPR_PRECEDING_ROWS', 'EXPR_FOLLOWING_ROWS'))
+UNION ALL
+SELECT 'a LIMIT or OFFSET with no ORDER BY in the same query keeps the rows DuckDB reaches first' FROM located
+WHERE json_type(v, '$.modifiers') = 'ARRAY'
+  AND EXISTS (SELECT 1 FROM json_each(json_extract(v, '$.modifiers')) AS m
+    WHERE json_extract_string(m.value, '$.type') IN ('LIMIT_MODIFIER', 'LIMIT_PERCENT_MODIFIER'))
+  AND NOT EXISTS (SELECT 1 FROM json_each(json_extract(v, '$.modifiers')) AS m
+    WHERE json_extract_string(m.value, '$.type') = 'ORDER_MODIFIER' AND json_array_length(m.value, '$.orders') > 0)
+UNION ALL
+SELECT 'DISTINCT ON with no ORDER BY in the same query keeps the row of each key DuckDB reaches first' FROM located
+WHERE json_type(v, '$.modifiers') = 'ARRAY'
+  AND EXISTS (SELECT 1 FROM json_each(json_extract(v, '$.modifiers')) AS m
+    WHERE json_extract_string(m.value, '$.type') = 'DISTINCT_MODIFIER'
+      AND coalesce(json_array_length(m.value, '$.distinct_on_targets'), 0) > 0)
+  AND NOT EXISTS (SELECT 1 FROM json_each(json_extract(v, '$.modifiers')) AS m
+    WHERE json_extract_string(m.value, '$.type') = 'ORDER_MODIFIER' AND json_array_length(m.value, '$.orders') > 0)
+UNION ALL
+SELECT fn || '()' || loc || ' takes an argument that is not a CAST to a type other than FLOAT or DOUBLE ('
+    || CASE WHEN json_extract_string(v, '$.children[0].class') = 'CAST' THEN coalesce(json_extract_string(v, '$.children[0].cast_type.id'), '?') ELSE 'no CAST' END
+    || '); a FLOAT or DOUBLE histogram merges NaN and -0.0 by the order rows reach it' FROM located
+WHERE class IN ('FUNCTION', 'WINDOW') AND list_contains(histograms(), fn) AND json_array_length(v, '$.children') = 1
+  AND (json_extract_string(v, '$.children[0].class') IS DISTINCT FROM 'CAST'
+    OR coalesce(json_extract_string(v, '$.children[0].cast_type.id'), 'UNBOUND') IN ('FLOAT', 'DOUBLE', 'UNBOUND'))
+UNION ALL
+SELECT fn || '()' || loc || ' takes bins that read a column, so each group''s bins are those of the first row that reaches it' FROM located
+WHERE class IN ('FUNCTION', 'WINDOW') AND list_contains(histograms(), fn) AND json_array_length(v, '$.children') >= 2
+  AND EXISTS (SELECT 1 FROM json_tree(json_extract(v, '$.children[1]')) AS c
+    WHERE c.type = 'OBJECT' AND json_extract_string(c.value, '$.class') = 'COLUMN_REF')
+UNION ALL
 SELECT fn || loc || ' is refused: a macro over string_agg with no ORDER BY' FROM located
 WHERE class IN ('FUNCTION', 'WINDOW') AND list_contains(refused_functions(), fn)
+UNION ALL
+SELECT fn || '()' || loc || ' sorts against the session''s default_order' FROM located
+WHERE class = 'FUNCTION' AND list_contains(reverse_sorts(), fn)
 UNION ALL
 SELECT fn || '()' || loc || ' depends on when, where or in which session the query runs' FROM located
 WHERE class IN ('FUNCTION', 'WINDOW') AND list_contains(unstable_functions(), fn)

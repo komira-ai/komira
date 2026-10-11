@@ -109,8 +109,26 @@ lists one:
   its own, plain or in its OVER clause, and so does a window function that
   reads positions (`row_number`, `ntile`, `lead`, `lag`, `first_value`,
   `last_value`, `nth_value`, `fill`);
+- a window whose frame has a ROWS bound (`ROWS BETWEEN UNBOUNDED
+  PRECEDING AND CURRENT ROW`, `ROWS 1 PRECEDING`...) has an ORDER BY in
+  its OVER clause, whatever the function: a ROWS frame counts rows in the
+  order they reach the window, and the function's own ORDER BY orders only
+  the rows inside it (a frame unbounded on both sides, and a RANGE or
+  GROUPS frame with no ORDER BY, is the whole partition and needs none);
+- a LIMIT, an OFFSET, a LIMIT percent and a `DISTINCT ON` have an ORDER BY
+  in the same query node (a subquery's, a CTE's, a set operation's): the
+  rows they keep are otherwise the first DuckDB reaches, and an ORDER BY
+  around or below them does not count. A plain DISTINCT needs none;
+- `histogram` with one argument takes a CAST to a type other than FLOAT or
+  DOUBLE (or a type name the parse leaves unbound): DuckDB keys a float
+  histogram in a map ordered by `<`, under which NaN is equivalent to every
+  key and `-0.0` to `0.0`, so the answer follows the rows' order;
+  `histogram` with bins and `histogram_exact` take bins that name no
+  column at any depth (DuckDB fixes a group's bins from its first row);
 - `json_group_array`, `json_group_object` and `json_group_structure`
-  (macros over `string_agg` with no ORDER BY) are refused;
+  (macros over `string_agg` with no ORDER BY) are refused, and so are
+  `list_reverse_sort` and `array_reverse_sort` (they always read
+  `default_order`);
 - no call reads the clock, a random draw or the session, wherever it
   stands (a select list, a filter, an ORDER BY key, FROM): every scalar or
   aggregate the pinned DuckDB marks VOLATILE or CONSISTENT_WITHIN_QUERY
@@ -137,16 +155,26 @@ holds `oracle_offences` to planted cases, one per rule and arm (and cases
 it must accept), each against the exact offences it must list, and one
 planted case per entry of each of the discipline's name lists, generated
 from a copy of the lists it holds itself (the lists must equal the copies),
-so deleting an entry fails it; its output `discipline.tsv` lists them. The runner's own call of the discipline is
+so deleting an entry fails it; and every scalar or aggregate the pinned
+DuckDB's `duckdb_functions()` marks VOLATILE or CONSISTENT_WITHIN_QUERY
+(but `error` and the `duckdb_*`/`pragma_*` names) to be in
+`unstable_functions()`, so a DuckDB bump that adds one fails it. Its output
+`discipline.tsv` lists the planted cases. The runner's own call of the discipline is
 proved by two planted cases in `tests//negative/sql_oracle`
 (`discipline_unplaced`, `discipline_unordered`), which the self-test
 scenario `sql_oracle` requires to fail with the discipline's message.
 
-Rules of the Python discipline this does not carry: every literal the
-operand of a CAST, FROM limited to the registered tables and CTEs (the
-`sql_oracle` action's `allowed_paths` still confines file reads to the
-case's inputs), COLLATE, list-sort direction, and the run of each case
-over every reordering of its tables' rows with a tie check per ORDER BY.
+Rules and checks of the Python discipline this does not carry: every
+literal the operand of a CAST; FROM limited to the registered tables and
+CTEs (the `sql_oracle` action's `allowed_paths` still confines file reads
+to the case's inputs); COLLATE; `list_sort` and `list_grade_up` naming
+their direction and NULL placement; the `-- order:` header (`total`,
+`none`, `keys=<columns>`) held against the outermost ORDER BY (here every
+case needs one, and its HAND twin's policy decides how rows compare); the
+derivation of the order-sensitive aggregate list and of the built-in macro
+list from the running DuckDB (here they are copies held by
+`:discipline_check`); and the run of each case over every reordering of
+its tables' rows with a tie check per ORDER BY.
 The HAND twin comparison (below) does not stand in for the tie check: a
 tie DuckDB resolved by accident fails it only when the twin's policy
 compares rows in order, not when it compares the tied rows as a multiset.
@@ -158,7 +186,7 @@ compares rows in order, not when it compares the tied rows as a multiset.
 | test | what it proves | the defect it catches |
 |---|---|---|
 | `test_twins` | every `:<shard>/<case>` answer, read by value under its HAND twin's schema and policy (komira_plan_harness's `duckdb_tsv`, then `compare_canon`), equals the twin; no answer lacks a twin, no twin an answer | a wrong HAND file, a wrong oracle query, a DuckDB that answers otherwise |
-| `test_twin_checks` | the check fed planted defects | a check that compares text (`1.50` against `1.5`), misses a wrong cell, a missing row, NULL for a value, `-0.0` for `0.0`, ignores the twin's order policy, or misses an unpaired name |
+| `test_twin_checks` | the check fed planted defects, and a two-shard tree (`tests/data/twin_tree`) whose two pairs must both be compared | a check that compares text (`1.50` against `1.5`), misses a wrong cell, a missing row, NULL for a value, `-0.0` for `0.0`, ignores the twin's order policy, misses an unpaired name, or reads only some shards |
 | `test_duckdb_spellings` | the reader against bytes the pinned DuckDB wrote (`:spellings`) | a reader built on a transcription of DuckDB's output; a DuckDB bump that changes a spelling |
 
 The mutants each test was seen red against are in the pull request that
