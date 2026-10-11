@@ -1,0 +1,34 @@
+{
+ "name": "wrong_shape_call_batch",
+ "defect": "call_batch on an instance of a frame UDF is run instead of refused",
+ "run": "call_batch",
+ "entry": "running_sum",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "result": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "input": {
+  "length": 1,
+  "columns": [
+   {
+    "type": "int64",
+    "values": [
+     1
+    ]
+   }
+  ]
+ },
+ "expect": {
+  "status": "ERR_UNSUPPORTED",
+  "run_error": "UDF_RUNTIME_FAULT"
+ }
+}

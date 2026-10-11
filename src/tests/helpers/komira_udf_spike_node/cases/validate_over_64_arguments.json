@@ -1,0 +1,344 @@
+{
+ "name": "validate_over_64_arguments",
+ "defect": "a UDF of more arguments than the runtime binds is accepted and its arguments are cut",
+ "run": "validate",
+ "entry": "double",
+ "shape": "SCALAR",
+ "args": [
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c0"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c1"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c2"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c3"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c4"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c5"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c6"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c7"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c8"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c9"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c10"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c11"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c12"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c13"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c14"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c15"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c16"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c17"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c18"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c19"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c20"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c21"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c22"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c23"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c24"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c25"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c26"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c27"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c28"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c29"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c30"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c31"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c32"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c33"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c34"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c35"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c36"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c37"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c38"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c39"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c40"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c41"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c42"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c43"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c44"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c45"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c46"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c47"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c48"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c49"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c50"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c51"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c52"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c53"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c54"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c55"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c56"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c57"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c58"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c59"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c60"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c61"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c62"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c63"
+  },
+  {
+   "type": "int64",
+   "nullable": true,
+   "name": "c64"
+  }
+ ],
+ "result": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "expect": {
+  "status": "ERR_UNSUPPORTED",
+  "run_error": "OPTIMIZED_UDF_KIND_UNSUPPORTED"
+ }
+}

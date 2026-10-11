@@ -51,6 +51,7 @@ struct engine {
   int64_t t_open;  /* before dlopen */
   int64_t open_ns; /* dlopen + init */
   int runs;
+  int64_t reserved; /* bytes the runtime holds through host->mem_reserve, net of mem_release (atomic) */
   komira_udf_capabilities caps;
 };
 
@@ -89,13 +90,13 @@ static int64_t now_mono(void) {
 /* ---- host callbacks ------------------------------------------------------ */
 
 static int32_t host_reserve(void* hd, int64_t bytes) {
-  (void)hd;
-  (void)bytes;
+  struct engine* e = hd;
+  __atomic_fetch_add(&e->reserved, bytes, __ATOMIC_ACQ_REL);
   return KOMIRA_UDF_OK;
 }
 static void host_release(void* hd, int64_t bytes) {
-  (void)hd;
-  (void)bytes;
+  struct engine* e = hd;
+  __atomic_fetch_sub(&e->reserved, bytes, __ATOMIC_ACQ_REL);
 }
 static int64_t host_now(void* hd) {
   (void)hd;
@@ -554,6 +555,13 @@ static int32_t call_spec(struct engine* e, const struct run_opts* o, int validat
   result.name = "";
   result.flags = ARROW_FLAG_NULLABLE;
   result.release = no_release;
+  char state_format[2] = {o->state_fmt, 0};
+  struct ArrowSchema state;
+  memset(&state, 0, sizeof(state));
+  state.format = state_format;
+  state.name = "";
+  state.flags = ARROW_FLAG_NULLABLE;
+  state.release = no_release;
   static const char* const roles[1] = {"bundle"};
   static const uint8_t digest[1][32] = {{0}};
   static const uint8_t descriptor[8] = {0};
@@ -567,6 +575,7 @@ static int32_t call_spec(struct engine* e, const struct run_opts* o, int validat
   s->descriptor_len = o->descriptor_len > 8 ? 8 : (size_t)o->descriptor_len;
   s->args = &args;
   s->result = &result;
+  s->state = o->state_fmt != 0 ? &state : NULL;
   s->null_mode = KOMIRA_UDF_NULL_MANUAL;
   s->stability = KOMIRA_UDF_IMMUTABLE;
   s->code_root = "";
@@ -575,7 +584,7 @@ static int32_t call_spec(struct engine* e, const struct run_opts* o, int validat
   s->code_sha256 = digest;
   komira_udf_error err = {sizeof(komira_udf_error), 0, NULL, NULL, -1, -1, NULL, NULL};
   int32_t rc = validate_only ? e->t->validate(e->rt, s, &err) : e->t->load(e->rt, s, udf, &err);
-  s->args = s->result = NULL; /* borrowed for the call only */
+  s->args = s->result = s->state = NULL; /* borrowed for the call only */
   s->entry = NULL;
   if (rc != KOMIRA_UDF_OK) take_error(&err, message);
   return rc;
@@ -618,6 +627,7 @@ struct run* kudf_run(struct engine* e, const struct run_opts* o) {
     snprintf(r->message, ENGINE_MSG, "%s", kudf_engine_message(e));
     return r;
   }
+  int64_t reserved0 = __atomic_load_n(&e->reserved, __ATOMIC_ACQUIRE);
   int64_t t0 = now_mono();
   int32_t rc = load_udf(e, &r->o, &r->spec, &r->udf, r->message);
   r->f[R_LOAD_NS] = now_mono() - t0;
@@ -689,6 +699,13 @@ struct run* kudf_run(struct engine* e, const struct run_opts* o) {
     }
   }
   r->f[R_MEMORY_REPORT] = have_mem ? mem : -1;
+  /* Every byte the runtime reserved through the host for this run (outputs,
+   * errors, handles) is back: the ledger of design section 4.8. */
+  int64_t leaked = __atomic_load_n(&e->reserved, __ATOMIC_ACQUIRE) - reserved0;
+  if (leaked != 0 && r->f[R_STATUS] == 0) {
+    r->f[R_STATUS] = KOMIRA_UDF_ERR_INTERNAL;
+    snprintf(r->message, ENGINE_MSG, "%lld bytes reserved through host->mem_reserve were not returned", (long long)leaked);
+  }
   return r;
 }
 
@@ -736,6 +753,7 @@ void kudf_cancel_probe(struct engine* e, const struct run_opts* o, int32_t cance
   komira_udf_context* ctx = NULL;
   komira_udf_instance* inst = NULL;
   komira_udf_error err = {sizeof(komira_udf_error), 0, NULL, NULL, -1, -1, NULL, NULL};
+  int64_t reserved0 = e != NULL ? __atomic_load_n(&e->reserved, __ATOMIC_ACQUIRE) : 0;
   out[P_STATUS] = KOMIRA_UDF_ERR_INTERNAL;
   out[P_ELAPSED_NS] = 0;
   out[P_ROW] = -1;
@@ -778,6 +796,11 @@ void kudf_cancel_probe(struct engine* e, const struct run_opts* o, int32_t cance
   if (inst != NULL) e->t->close_instance(inst);
   if (ctx != NULL) e->t->close_context(ctx);
   if (udf != NULL) e->t->unload(udf);
+  int64_t leaked = __atomic_load_n(&e->reserved, __ATOMIC_ACQUIRE) - reserved0;
+  if (leaked != 0 && out[P_STATUS] == KOMIRA_UDF_OK) {
+    out[P_STATUS] = KOMIRA_UDF_ERR_INTERNAL;
+    snprintf(message, ENGINE_MSG, "%lld bytes reserved through host->mem_reserve were not returned", (long long)leaked);
+  }
 }
 
 int32_t kudf_open_context_here(struct engine* e, char* message) {

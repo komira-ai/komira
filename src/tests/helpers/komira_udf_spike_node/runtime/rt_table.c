@@ -41,6 +41,32 @@
 
 const komira_udf_host* g_host = NULL;
 
+int32_t rt_reserve(int64_t bytes, const komira_udf_host** host) {
+  const komira_udf_host* h = g_host;
+  *host = NULL;
+  if (h == NULL) return KOMIRA_UDF_OK;
+  int32_t rc = h->mem_reserve(h->host_data, bytes);
+  if (rc == KOMIRA_UDF_OK) *host = h;
+  return rc;
+}
+
+void rt_unreserve(const komira_udf_host* host, int64_t bytes) {
+  if (host != NULL) host->mem_release(host->host_data, bytes);
+}
+
+/* A handle of this file: zeroed, and charged to the host by its size. */
+static void* handle_new(size_t n, const komira_udf_host** acct) {
+  if (rt_reserve((int64_t)n, acct) != KOMIRA_UDF_OK) return NULL;
+  void* p = calloc(1, n);
+  if (p == NULL) rt_unreserve(*acct, (int64_t)n);
+  return p;
+}
+
+static void handle_free(void* p, size_t n, const komira_udf_host* acct) {
+  rt_unreserve(acct, (int64_t)n);
+  free(p);
+}
+
 /* ---- strings and errors -------------------------------------------------- */
 
 static char* dup_str(const char* s) {
@@ -50,7 +76,19 @@ static char* dup_str(const char* s) {
   return d;
 }
 
+/* What an error was charged to the host: returned when its release runs. */
+struct err_acct {
+  const komira_udf_host* host;
+  int64_t bytes;
+};
+
 static void free_error(komira_udf_error* e) {
+  struct err_acct* a = e->private_data;
+  if (a != NULL) {
+    rt_unreserve(a->host, a->bytes);
+    free(a);
+    e->private_data = NULL;
+  }
   free((void*)e->message);
   free((void*)e->user_trace);
   e->message = NULL;
@@ -68,6 +106,13 @@ static int32_t put_error(komira_udf_error* e, int32_t code, char* message, char*
   e->code = code;
   e->message = message != NULL ? message : dup_str("(no message)");
   e->user_trace = trace;
+  e->private_data = NULL;
+  struct err_acct* a = calloc(1, sizeof(*a));
+  if (a != NULL) {
+    a->bytes = (int64_t)(strlen(e->message) + 1 + (trace != NULL ? strlen(trace) + 1 : 0));
+    rt_reserve(a->bytes, &a->host); /* an error is delivered even when the host would refuse the charge */
+    e->private_data = a;
+  }
   e->row = row;
   e->group = group;
   e->release = free_error;
@@ -157,7 +202,11 @@ static void wait_done(struct request* r) {
 }
 
 /* Queue `r` on the environment of context `c`. In the workers build a call
- * that carries a cancel flag is watched: once the flag has been set for
+ * that carries a cancel flag is watched. The watch runs on the calling engine
+ * thread, which is blocked in this function anyway: it wakes every millisecond
+ * from a timed wait on the request's condition variable, reads the flag, and
+ * after the grace period asks the main environment to stop the worker; it is
+ * not a thread of its own and it never touches V8. The call is watched: once the flag has been set for
  * HARD_CANCEL_GRACE_NS and the call has not ended (the user's function does
  * not return, so the cooperative checks between rows never run), the isolate
  * is terminated, the call ends ERR_INSTANCE_LOST and the context is lost: the
@@ -361,6 +410,9 @@ static int32_t check_spec(const komira_udf_spec* s, komira_udf_error* e) {
     return fail(e, KOMIRA_UDF_ERR_DESCRIPTOR, "the bundle exports nothing of this name");
   if (s->args == NULL || s->args->format == NULL || strcmp(s->args->format, "+s") != 0)
     return fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "the argument schema is not a struct");
+  /* rt_pull binds a batch's columns in a fixed array of MAX_ARGS + 1 slots. */
+  if (s->args->n_children > MAX_ARGS)
+    return fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "this runtime reads at most 64 arguments");
   for (int64_t i = 0; i < s->args->n_children; i++)
     if (!fmt_ok(s->args->children[i]))
       return fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "an argument type this runtime does not map (int32, int64, float64 only)");
@@ -396,15 +448,17 @@ static void free_udf(struct komira_udf_udf* u) {
   free_cols(u->args, u->n_args);
   free_cols(u->res, u->n_res);
   free(u->state.name);
-  free(u);
+  handle_free(u, sizeof(*u), u->acct);
 }
 
 static int32_t rt_load(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf_udf** out, komira_udf_error* e) {
   (void)rt;
   int32_t rc = check_spec(s, e);
   if (rc != KOMIRA_UDF_OK) return rc;
-  struct komira_udf_udf* u = calloc(1, sizeof(*u));
+  const komira_udf_host* acct = NULL;
+  struct komira_udf_udf* u = handle_new(sizeof(*u), &acct);
   if (u == NULL) return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "load: out of memory");
+  u->acct = acct;
   u->entry = dup_str(s->entry);
   u->shape = s->shape;
   u->null_mode = s->null_mode;
@@ -473,8 +527,10 @@ static int32_t rt_open_context(komira_udf_rt* rt, uint32_t slot, komira_udf_cont
     if (es == NULL)
       return fail(e, KOMIRA_UDF_ERR_LOAD, g_fail_slot == (int64_t)slot ? g_fail_msg : "the worker of this slot did not attach in time");
   }
-  struct komira_udf_context* c = calloc(1, sizeof(*c));
+  const komira_udf_host* acct = NULL;
+  struct komira_udf_context* c = handle_new(sizeof(*c), &acct);
   if (c == NULL) return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "open_context: out of memory");
+  c->acct = acct;
   c->es = es;
   c->slot = slot;
   struct request r;
@@ -484,7 +540,7 @@ static int32_t rt_open_context(komira_udf_rt* rt, uint32_t slot, komira_udf_cont
   int32_t rc = request_status(&r, e);
   request_destroy(&r);
   if (rc != KOMIRA_UDF_OK) {
-    free(c);
+    handle_free(c, sizeof(*c), c->acct);
     return rc;
   }
   *out = c;
@@ -511,13 +567,15 @@ static void rt_close_context(komira_udf_context* c) {
     pthread_mutex_unlock(&g_mu);
     napi_release_threadsafe_function(c->es->tsfn, napi_tsfn_release);
   }
-  free(c);
+  handle_free(c, sizeof(*c), c->acct);
 }
 
 static int32_t rt_open_instance(komira_udf_context* c, komira_udf_udf* u, komira_udf_instance** out,
                                 komira_udf_error* e) {
-  struct komira_udf_instance* i = calloc(1, sizeof(*i));
+  const komira_udf_host* acct = NULL;
+  struct komira_udf_instance* i = handle_new(sizeof(*i), &acct);
   if (i == NULL) return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "open_instance: out of memory");
+  i->acct = acct;
   i->ctx = c;
   i->udf = u;
   struct request r;
@@ -529,7 +587,7 @@ static int32_t rt_open_instance(komira_udf_context* c, komira_udf_udf* u, komira
   int32_t rc = request_status(&r, e);
   request_destroy(&r);
   if (rc != KOMIRA_UDF_OK) {
-    free(i);
+    handle_free(i, sizeof(*i), i->acct);
     return rc;
   }
   *out = i;
@@ -542,7 +600,7 @@ static void rt_close_instance(komira_udf_instance* i) {
   r.inst = i;
   ctx_submit(i->ctx, &r);
   request_destroy(&r);
-  free(i);
+  handle_free(i, sizeof(*i), i->acct);
 }
 
 /* ---- calls ---------------------------------------------------------------- */
@@ -617,7 +675,9 @@ static int32_t rt_frame_open(komira_udf_instance* i, const komira_udf_call* call
     rc = fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "frame_open on a UDF of another shape");
   if (rc == KOMIRA_UDF_OK) rc = start_call(call, e);
   struct komira_udf_frame* f = NULL;
-  if (rc == KOMIRA_UDF_OK && (f = calloc(1, sizeof(*f))) == NULL) rc = fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "frame_open: out of memory");
+  const komira_udf_host* facct = NULL;
+  if (rc == KOMIRA_UDF_OK && (f = handle_new(sizeof(*f), &facct)) == NULL) rc = fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "frame_open: out of memory");
+  if (f != NULL) f->acct = facct;
   if (rc != KOMIRA_UDF_OK) {
     if (mine.release != NULL) mine.release(&mine);
     return rc;
@@ -634,7 +694,7 @@ static int32_t rt_frame_open(komira_udf_instance* i, const komira_udf_call* call
   rc = finish(&r, e, NULL, NULL);
   if (rc != KOMIRA_UDF_OK) {
     if (f->in.release != NULL) f->in.release(&f->in);
-    free(f);
+    handle_free(f, sizeof(*f), f->acct);
     return rc;
   }
   *out = f;
@@ -666,13 +726,15 @@ static void rt_frame_close(komira_udf_frame* f) {
   ctx_submit(f->inst->ctx, &r);
   request_destroy(&r);
   if (f->in.release != NULL) f->in.release(&f->in);
-  free(f);
+  handle_free(f, sizeof(*f), f->acct);
 }
 
 static int32_t rt_agg_open(komira_udf_instance* i, komira_udf_groups** out, komira_udf_error* e) {
   if (i->udf->shape != KOMIRA_UDF_SHAPE_AGG_MERGEABLE) return fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "agg_open on a UDF of another shape");
-  struct komira_udf_groups* g = calloc(1, sizeof(*g));
+  const komira_udf_host* acct = NULL;
+  struct komira_udf_groups* g = handle_new(sizeof(*g), &acct);
   if (g == NULL) return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "agg_open: out of memory");
+  g->acct = acct;
   g->inst = i;
   struct request r;
   request_init(&r, OP_AGG_OPEN);
@@ -682,7 +744,7 @@ static int32_t rt_agg_open(komira_udf_instance* i, komira_udf_groups** out, komi
   ctx_submit(i->ctx, &r);
   int32_t rc = finish(&r, e, NULL, NULL);
   if (rc != KOMIRA_UDF_OK) {
-    free(g);
+    handle_free(g, sizeof(*g), g->acct);
     return rc;
   }
   *out = g;
@@ -754,7 +816,7 @@ static void rt_agg_close(komira_udf_groups* g) {
   r.groups = g;
   ctx_submit(g->inst->ctx, &r);
   request_destroy(&r);
-  free(g);
+  handle_free(g, sizeof(*g), g->acct);
 }
 
 static int64_t rt_memory_report(komira_udf_context* c) {
@@ -789,6 +851,7 @@ static int32_t rt_describe(komira_udf_rt* rt, komira_udf_capabilities* c) {
 }
 
 static void rt_shutdown(komira_udf_rt* rt) {
+  rt->host->mem_release(rt->host->host_data, (int64_t)sizeof(*rt));
   if (g_host == rt->host) g_host = NULL;
   free(rt);
 }
@@ -830,6 +893,11 @@ RT_EXPORT const komira_udf_runtime* komira_udf_runtime_init_v1(const komira_udf_
   struct komira_udf_rt* r = calloc(1, sizeof(*r));
   if (r == NULL) {
     fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "init: out of memory");
+    return NULL;
+  }
+  if (host->mem_reserve(host->host_data, (int64_t)sizeof(*r)) != KOMIRA_UDF_OK) {
+    free(r);
+    fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "init: the host refused the runtime's handle");
     return NULL;
   }
   r->host = host;

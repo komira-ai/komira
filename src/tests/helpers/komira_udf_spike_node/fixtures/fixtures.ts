@@ -455,3 +455,48 @@ export function* collect_all(input: Iterable<Batch>): Iterable<Array<Array<bigin
   for (const [x] of input) for (let i = 0; i < x.length; i++) total += x.get(i) as bigint;
   yield [[total]];
 }
+
+// Throws an object with no prototype: String() of it throws, so describing the
+// error must not.
+export function throws_nullproto(_x: bigint): bigint {
+  throw Object.create(null);
+}
+
+// The column function that raises without naming a row (the corpus calls this
+// entry raise_row_unset: an error whose row the runtime does not set).
+export const raise_row_unset = raise_no_row;
+
+// A generator that fails before its first output; asked again it is finished.
+export function* raise_again(_input: Iterable<Batch>): Iterable<Batch> {
+  throw new Error("raise_again: raised before any output");
+}
+
+// The first column ragged, the second whole: a table of two columns whose first
+// is shorter than its length.
+export function* table_ragged_first(_input: Iterable<Batch>): Iterable<{ length: number; columns: Array<Array<bigint>> }> {
+  yield { length: 3, columns: [[1n], [1n, 2n, 3n]] };
+}
+
+// Keeps the input of the frame and reads it later, from a timer, after the
+// frame has ended and closed. The read must be refused, not run against a
+// stream the engine owns.
+export function* frame_keeps_input(input: Iterable<Batch>): Iterable<Array<Array<bigint>>> {
+  setTimeout(() => {
+    try {
+      input[Symbol.iterator]().next();
+    } catch {
+      // refused: the input can be read only while the frame is being run
+    }
+  }, 50);
+  yield [[1n]];
+}
+
+// A duck-typed vector whose length exceeds its values.
+export function fake_vector(_x: Vector<Int64>): unknown {
+  return { length: 100, nullCount: 0, isValid: () => true, data: [{ values: new BigInt64Array(2) }], type: "Int64" };
+}
+
+// An int64 column whose first value is not an integer.
+export function bad_first(_x: Vector<Int64>): Array<bigint | number> {
+  return [0.5, 2n, 3n];
+}

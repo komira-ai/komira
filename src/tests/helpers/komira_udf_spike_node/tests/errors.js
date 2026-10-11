@@ -35,6 +35,20 @@ const h = require('./helpers.js');
 
 const variant = process.argv[2];
 
+// ---- child: the addon loaded and the engine opened, but attachMain never called ----
+if (process.argv[3] === 'noattach') {
+  (async () => {
+    const file = require('node:path').join(h.here, `runtime_${variant}.node`);
+    require(file);
+    const engine = h.engineHost();
+    const handle = engine.engineOpen(file);
+    const r = engine.openContextHere(handle);
+    console.log(JSON.stringify({ status: r.status, message: r.message }));
+    process.exit(0);
+  })();
+  return;
+}
+
 h.watchdog(`errors ${variant}`);
 
 (async () => {
@@ -66,6 +80,13 @@ h.watchdog(`errors ${variant}`);
   refuses('code objects', base('fixtures.js#double', { nCode: 1 }), STATUS.UNSUPPORTED, 'code objects');
   refuses('duplicate field', base('fixtures.js#pick', { shape: SHAPE.ROW, nArgs: 2, argNames: 'a,a' }), STATUS.DESCRIPTOR, 'twice');
 
+  // a bundle with no export annotation cannot be checked without running it: validate lets it through
+  assert.equal(engine.validateSpec(handle, base('no_annotation.js#anything')).status, 0, 'a bundle without the annotation validates');
+  refuses('a directory named like a bundle', base('adir.js#anything'), STATUS.DESCRIPTOR, 'bundle');
+  refuses('a ROW field without a name', base('fixtures.js#pick', { shape: SHAPE.ROW, nArgs: 1, argNames: ',' }), STATUS.DESCRIPTOR, 'no name');
+  refuses('a ROW without a read set', base('fixtures.js#pick', { shape: SHAPE.ROW, nArgs: 0 }), STATUS.DESCRIPTOR, 'read set is empty');
+  refuses('a state type not mapped', base('fixtures.js#sum', { shape: SHAPE.AGG_MERGEABLE, stateFmt: 'f' }), STATUS.UNSUPPORTED, 'state type');
+
   // ---- calls ----
   const run = async (o) => h.summary(await engine.run(handle, { threads: 1, warmupMin: 1, warmupCap: 1, batches: 1, rows: 16, ...o }));
   const fails = async (what, o, status, text) => {
@@ -96,12 +117,23 @@ h.watchdog(`errors ${variant}`);
   await fails('a thrown null', base('fixtures.js#throws_null'), STATUS.RAISED, 'null');
   await fails('a string for float64', base('fixtures.js#returns_string', { argFmt: 'g', resultFmt: 'g' }), STATUS.RETURN_TYPE, 'string');
   await fails('a Float64Array for int64', base('fixtures.js#wrong_array', { shape: SHAPE.COLUMN }), STATUS.RETURN_TYPE, 'Float64Array');
+  await fails('a function not found in a bundle without the annotation', base('no_annotation.js#nothing'), STATUS.LOAD, 'is not a function');
   await fails('a thrown string', base('fixtures.js#throws_string'), STATUS.RAISED, 'a thrown string');
   await fails('an aggregate under SCALAR', base('fixtures.js#sum'), STATUS.LOAD, 'is not a function');
   await fails('an aggregate without merge and finish', base('fixtures.js#partial_agg', { shape: SHAPE.AGG_MERGEABLE }), STATUS.LOAD, 'aggregate');
   await fails('a function under AGG_MERGEABLE', base('fixtures.js#double', { shape: SHAPE.AGG_MERGEABLE }), STATUS.LOAD, 'aggregate');
 
   engine.engineClose(handle);
+
+  // open_context before attachMain is a named refusal, not a crash
+  {
+    const { spawnSync } = require('node:child_process');
+    const r = spawnSync(process.execPath, [__filename, variant, 'noattach'], { env: process.env, encoding: 'utf8', timeout: 60000 });
+    assert.equal(r.status, 0, `the child ended ${r.status} ${r.signal}: ${r.stderr}`);
+    const got = JSON.parse(r.stdout.trim().split('\n').pop());
+    assert.equal(got.status, STATUS.LOAD, got.message);
+    assert.ok(got.message.includes('attachMain'), got.message);
+  }
   console.log(`errors ${variant}: ok`);
 })().catch((e) => {
   console.error(e);

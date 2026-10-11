@@ -306,19 +306,33 @@ int32_t rt_columns_to_js(struct request* r, const struct ArrowArray* st, const s
 
 /* ---- frame input ------------------------------------------------------------ */
 
+void rt_pull_finalize(napi_env env, void* data, void* hint) {
+  (void)env;
+  (void)hint;
+  free(data);
+}
+
 /* pull(): the next batch of a frame's input as [length, [columns...]], or
- * null at the end. Its data is the frame (set by the dispatcher). The batch
- * is released by the engine thread when the request ends. */
+ * null at the end. Its data is the frame's pull_ctx (set by the dispatcher).
+ * The batch is released by the engine thread when the request ends. Called
+ * outside the frame's own requests (user code kept the function and calls it
+ * from a timer, after frame_close, or during another context's call) it is
+ * refused with an exception, never run against a stream the engine owns. */
 napi_value rt_pull(napi_env env, napi_callback_info info) {
   void* data = NULL;
   if (napi_get_cb_info(env, info, NULL, NULL, NULL, &data) != napi_ok || data == NULL) return NULL;
-  struct komira_udf_frame* f = data;
+  struct pull_ctx* pc = data;
+  struct komira_udf_frame* f = pc->f;
   void* esd = NULL;
   napi_get_instance_data(env, &esd);
   struct env_state* es = esd;
   struct request* r = es != NULL ? es->cur : NULL;
   if (r == NULL) {
     napi_throw_error(env, NULL, "pull: called outside a request");
+    return NULL;
+  }
+  if (f == NULL || r->frame != f) {
+    napi_throw_error(env, NULL, "pull: the frame's input can be read only while the frame is being run");
     return NULL;
   }
   const struct komira_udf_udf* u = f->inst->udf;
@@ -359,10 +373,10 @@ napi_value rt_pull(napi_env env, napi_callback_info info) {
     return NULL;
   }
   struct rt_col group = {'l', 0, (char*)""};
-  struct rt_col all[65];
+  struct rt_col all[MAX_ARGS + 1];
   int n = 0;
   if (u->shape == KOMIRA_UDF_SHAPE_AGG_PLAIN) all[n++] = group;
-  for (int i = 0; i < u->n_args && n < 65; i++) all[n++] = u->args[i];
+  for (int i = 0; i < u->n_args && n < MAX_ARGS + 1; i++) all[n++] = u->args[i];
   napi_value cols;
   if (rt_columns_to_js(r, &kept->array, all, n, &cols) != KOMIRA_UDF_OK) {
     napi_throw_error(env, NULL, r->message != NULL ? r->message : "pull: the input batch cannot be read");
@@ -380,11 +394,27 @@ napi_value rt_pull(napi_env env, napi_callback_info info) {
 
 struct col_block {
   const void* bufs[2];
+  const komira_udf_host* acct; /* charged for `reserved` bytes (design section 4.8) */
+  int64_t reserved;
 };
 
 static void release_col(struct ArrowArray* a) {
-  free(a->private_data);
+  struct col_block* b = a->private_data;
+  rt_unreserve(b->acct, b->reserved);
+  free(b);
   a->release = NULL;
+}
+
+/* A table's block: blk[0] is the NULL validity slot `buffers` points at, blk[1]
+ * the host charged, blk[2] the bytes charged, then the child pointers. */
+#define TBL_HEADER 3
+static int64_t tbl_bytes(int n_cols) {
+  return (int64_t)(sizeof(void*) * TBL_HEADER + (size_t)n_cols * sizeof(struct ArrowArray*) + (size_t)n_cols * sizeof(struct ArrowArray));
+}
+
+static void tbl_drop(void** blk) {
+  rt_unreserve((const komira_udf_host*)blk[1], (int64_t)(intptr_t)blk[2]);
+  free(blk);
 }
 
 static void release_array(struct ArrowArray* a) {
@@ -396,7 +426,7 @@ static void release_struct(struct ArrowArray* a) {
     release_array(a->children[i]);
     free(a->children[i]);
   }
-  free(a->private_data);
+  tbl_drop(a->private_data);
   a->release = NULL;
 }
 
@@ -443,8 +473,16 @@ int32_t rt_column_from_js(struct request* r, napi_value col, char fmt, struct Ar
   int64_t nulls = valid != NULL ? count_nulls(valid, 0, n) : 0;
   size_t w = width_of(fmt);
   size_t vbytes = nulls != 0 ? (size_t)((n + 7) >> 3) : 0;
-  struct col_block* b = malloc(sizeof(*b) + vbytes + (size_t)n * w + 16);
-  if (b == NULL) return rt_fail(r, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "result: out of memory");
+  int64_t charge = (int64_t)(sizeof(struct col_block) + vbytes + (size_t)n * w + 16);
+  const komira_udf_host* acct = NULL;
+  if (rt_reserve(charge, &acct) != KOMIRA_UDF_OK) return rt_fail(r, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "result: the host refused the memory");
+  struct col_block* b = malloc((size_t)charge);
+  if (b == NULL) {
+    rt_unreserve(acct, charge);
+    return rt_fail(r, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "result: out of memory");
+  }
+  b->acct = acct;
+  b->reserved = charge;
   uint8_t* vcopy = (uint8_t*)(b + 1);
   uint8_t* dcopy = (uint8_t*)(((uintptr_t)(vcopy + vbytes) + 7) & ~(uintptr_t)7);
   if (vbytes != 0) {
@@ -477,10 +515,17 @@ int32_t rt_table_from_js(struct request* r, napi_value table, const struct rt_co
     return rt_fail(r, KOMIRA_UDF_ERR_INTERNAL, "the adapter returned a malformed table");
   if ((int)got != n_cols)
     return rt_fail(r, KOMIRA_UDF_ERR_RETURN_TYPE, "the table has a different number of columns than the declared result");
-  size_t bytes = sizeof(void*) + (size_t)n_cols * sizeof(struct ArrowArray*);
+  size_t bytes = sizeof(void*) * TBL_HEADER + (size_t)n_cols * sizeof(struct ArrowArray*);
+  const komira_udf_host* acct = NULL;
+  if (rt_reserve(tbl_bytes(n_cols), &acct) != KOMIRA_UDF_OK) return rt_fail(r, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "result: the host refused the memory");
   void** blk = calloc(1, bytes);
-  if (blk == NULL) return rt_fail(r, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "result: out of memory");
-  struct ArrowArray** kids = (struct ArrowArray**)(blk + 1);
+  if (blk == NULL) {
+    rt_unreserve(acct, tbl_bytes(n_cols));
+    return rt_fail(r, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "result: out of memory");
+  }
+  blk[1] = (void*)acct;
+  blk[2] = (void*)(intptr_t)tbl_bytes(n_cols);
+  struct ArrowArray** kids = (struct ArrowArray**)(blk + TBL_HEADER);
   for (int i = 0; i < n_cols; i++) {
     kids[i] = calloc(1, sizeof(struct ArrowArray));
     if (kids[i] == NULL) {
@@ -488,7 +533,7 @@ int32_t rt_table_from_js(struct request* r, napi_value table, const struct rt_co
         release_array(kids[k]);
         free(kids[k]);
       }
-      free(blk);
+      tbl_drop(blk);
       return rt_fail(r, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "result: out of memory");
     }
   }
@@ -504,7 +549,7 @@ int32_t rt_table_from_js(struct request* r, napi_value table, const struct rt_co
       release_array(kids[i]);
       free(kids[i]);
     }
-    free(blk);
+    tbl_drop(blk);
     return rc;
   }
   memset(out, 0, sizeof(*out));

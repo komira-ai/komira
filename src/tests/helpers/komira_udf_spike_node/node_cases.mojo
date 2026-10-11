@@ -5,10 +5,10 @@
 # implements in its language (design section 6.3). This runtime's entries are
 # `<bundle>.js#<export>`, so every entry becomes `fixtures.js#<name>`.
 #
-# 64 of the corpus's 117 cases are left out; 53 run. A case is left out for one
+# 62 of the corpus's 117 cases are left out; 55 run. A case is left out for one
 # of three reasons, and a case user code can express is never among them.
 #   - The case needs an ABI-level bug that a TypeScript function cannot
-#     commit (about 55 cases). An output with a wrong layout, a NULL buffer, a
+#     commit (55 cases). An output with a wrong layout, a NULL buffer, a
 #     negative length, a lying null_count, a dictionary, another device, a
 #     released child, a null struct row; an input not moved (also on an
 #     error); OK without an output; `out` left set on an error; an error that
@@ -35,7 +35,9 @@
 # The cases under cases/ beside this file are this runtime's own: frames and
 # tables the shared corpus does not shape (a ragged table, a number yielded,
 # an array for a generator, six batches pulled at once).
-# Everything else runs, the frame that never ends (fault_frame_never_ends)
+# Every case user code can express runs: error_row_left_unset (a column function
+# that throws) and frame_no_next_after_error (a generator that throws) do, and
+# pass. Everything else runs, the frame that never ends (fault_frame_never_ends)
 # included: a generator is user code.
 
 from komira_udf_spike_abi.cases import Case
@@ -53,7 +55,6 @@ def left_out_cases() -> List[String]:
         "bad_output_layout",
         "child_moved_out",
         "error_released_on_ok",
-        "error_row_left_unset",
         "fault_agg_args_not_moved",
         "fault_agg_args_not_moved_on_error",
         "fault_agg_group_ids_not_moved",
@@ -104,7 +105,6 @@ def left_out_cases() -> List[String]:
         "fault_table_out_on_error",
         "frame_error_released_on_ok",
         "frame_fault_then_raise",
-        "frame_no_next_after_error",
         "frame_output_sliced_offset",
         "output_null_count_unknown",
         "output_sliced_offset",

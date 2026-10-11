@@ -257,12 +257,25 @@ static int32_t op_call_batch(struct request* r) {
 static int32_t op_frame_open(struct request* r) {
   napi_env env = r->es->env;
   napi_value pull, res, argv[2];
-  if (napi_create_function(env, "pull", NAPI_AUTO_LENGTH, rt_pull, r->frame, &pull) != napi_ok)
+  struct pull_ctx* pc = calloc(1, sizeof(*pc));
+  if (pc == NULL) return rt_fail(r, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "frame_open: out of memory");
+  pc->f = r->frame;
+  if (napi_create_function(env, "pull", NAPI_AUTO_LENGTH, rt_pull, pc, &pull) != napi_ok) {
+    free(pc);
     return rt_fail(r, KOMIRA_UDF_ERR_INTERNAL, "cannot create the pull function");
+  }
+  if (napi_add_finalizer(env, pull, pc, rt_pull_finalize, NULL, NULL) != napi_ok) {
+    free(pc);
+    return rt_fail(r, KOMIRA_UDF_ERR_INTERNAL, "cannot attach the pull function's finalizer");
+  }
+  r->frame->pctx = pc;
   argv[0] = ref_value(env, r->inst->obj);
   argv[1] = pull;
   int32_t rc = call_adapter(r, argv, 2, &res);
-  if (rc != KOMIRA_UDF_OK) return rc;
+  if (rc != KOMIRA_UDF_OK) {
+    pc->f = NULL; /* the frame is freed by the caller: the kept function must not reach it */
+    return rc;
+  }
   napi_value obj;
   napi_get_element(env, res, 1, &obj);
   napi_create_reference(env, obj, 1, &r->frame->obj);
@@ -366,6 +379,7 @@ static int32_t run_op(struct request* r) {
       argv[0] = ref_value(env, r->frame->obj);
       call_adapter(r, argv, 1, &res);
       drop_ref(env, &r->frame->obj);
+      if (r->frame->pctx != NULL) r->frame->pctx->f = NULL; /* the frame is freed next */
       return KOMIRA_UDF_OK;
     case OP_AGG_OPEN: {
       argv[0] = ref_value(env, r->inst->obj);

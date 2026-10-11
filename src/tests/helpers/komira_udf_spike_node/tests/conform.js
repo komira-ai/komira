@@ -37,10 +37,10 @@ const EXPECT = {
   shared: { id: 'komira-test/node-shared-isolate', globalLock: 1 },
   workers: { id: 'komira-test/node-workers', globalLock: 0 },
 }[variant];
-// The corpus's 117 cases less the 64 the Node runtime does not run (see
+// The corpus's 117 cases less the 62 the Node runtime does not run (see
 // node_cases.mojo), plus the capabilities check.
-const OWN = 5; // this package's own cases (cases/)
-const RUN = 53 + OWN;
+const OWN = 16; // this package's own cases (cases/)
+const RUN = 55 + OWN;
 
 h.watchdog(`conform ${variant}`);
 
@@ -78,6 +78,8 @@ h.watchdog(`conform ${variant}`);
     assert.equal([Number(m[3]), Number(m[4])].join(), '0,0', `${pass.name}: cases failed or skipped`);
     assert.equal(Number(m[2]), RUN + 1, `${pass.name}: every case run and the capabilities check pass`);
     assert.ok(after.pulls - before.pulls > 0, `${pass.name}: the frame cases pulled input batches through the runtime`);
+    // timers user code left behind (frame_keeps_input reads its input 50 ms later) fire now
+    await new Promise((resolve) => setTimeout(resolve, 300));
     const copies = after.copyWraps - before.copyWraps;
     const externals = after.externalWraps - before.externalWraps;
     if (pass.copy) {

@@ -26,6 +26,9 @@
 
 #include "headers/komira_udf_runtime.h" /* the abi package's :headers, staged as headers/ */
 
+/* The most arguments a UDF may have (validate refuses more by name). */
+#define MAX_ARGS 64
+
 #define RT_EXPORT __attribute__((visibility("default")))
 
 /* The two builds of this source (BUCK): KOMIRA_NODE_WORKERS 0 runs every
@@ -45,6 +48,7 @@ struct rt_col {
 };
 
 struct komira_udf_udf { /* load: the part of the spec the instances need */
+  const komira_udf_host* acct; /* the host that was charged for this handle (NULL: none) */
   char* entry;          /* "bundle.js#export" */
   int32_t shape;
   int32_t null_mode;
@@ -63,6 +67,7 @@ struct komira_udf_rt {
 };
 
 struct komira_udf_context {
+  const komira_udf_host* acct;
   struct env_state* es; /* the environment that runs this context */
   uint32_t slot;
   napi_ref obj; /* the JS context object; touched on es's thread only */
@@ -70,12 +75,24 @@ struct komira_udf_context {
 };
 
 struct komira_udf_instance {
+  const komira_udf_host* acct;
   struct komira_udf_context* ctx;
   const struct komira_udf_udf* udf;
   napi_ref obj;
 };
 
+/* What the JavaScript `pull` function of a frame points at. The function can
+ * outlive the frame (user code may keep it and call it from a timer), so it
+ * holds this block, not the frame: the block's `f` is cleared when the frame
+ * closes, and the block is freed by the function's finalizer. JavaScript
+ * thread of the frame's environment only. */
+struct pull_ctx {
+  struct komira_udf_frame* f;
+};
+
 struct komira_udf_frame {
+  struct pull_ctx* pctx;
+  const komira_udf_host* acct;
   struct komira_udf_instance* inst;
   struct ArrowDeviceArrayStream in; /* moved in; released at frame_close */
   napi_ref obj;
@@ -83,6 +100,7 @@ struct komira_udf_frame {
 };
 
 struct komira_udf_groups {
+  const komira_udf_host* acct;
   struct komira_udf_instance* inst;
   napi_ref obj;
 };
@@ -205,6 +223,7 @@ napi_value rt_native_now_ns(napi_env env, napi_callback_info info);
 /* rt_arrow.c: Arrow <-> JavaScript (JavaScript thread only) */
 int32_t rt_columns_to_js(struct request* r, const struct ArrowArray* st, const struct rt_col* cols, int n_cols,
                          napi_value* out);
+void rt_pull_finalize(napi_env env, void* data, void* hint);
 int32_t rt_wrap_buffer(struct request* r, const void* ptr, size_t bytes, napi_value* out);
 void rt_unwrap_all(struct request* r);
 int32_t rt_column_from_js(struct request* r, napi_value col, char fmt, struct ArrowArray* out);
@@ -218,5 +237,12 @@ napi_value rt_probe_finalized(napi_env env, napi_callback_info info);
 
 /* rt_table.c */
 const komira_udf_runtime* rt_table(void);
+/* The host's ledger (design section 4.8): every output array, error and handle
+ * this runtime allocates is charged to the host with mem_reserve and returned
+ * with mem_release when it is freed. rt_reserve returns the host charged in
+ * *host (NULL when nothing was charged) so the matching release goes to the
+ * same host. */
+int32_t rt_reserve(int64_t bytes, const komira_udf_host** host);
+void rt_unreserve(const komira_udf_host* host, int64_t bytes);
 
 #endif

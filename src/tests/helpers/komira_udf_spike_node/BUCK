@@ -172,9 +172,11 @@ mojo_binary(
 # bundle the runtime loads from its code directory, and the engine's pieces.
 _STAGED = {
     "tests/adapter.js": "runtime/adapter.js",
+    "tests/adir.js/keep": "tests/data/keep",
     "tests/engine_host.node": ":engine_host",
     "tests/fixtures.js": ":fixtures",
     "tests/model.js": ":model",
+    "tests/no_annotation.js": "tests/data/no_annotation.js",
     "tests/runtime_shared.node": ":runtime_shared",
     "tests/runtime_workers.node": ":runtime_workers",
     "tests/worker.js": "runtime/worker.js",

@@ -208,4 +208,32 @@ const column = (r) => {
   assert.equal(r[0], 15, `a step that is given no literal: ${r[1]}`);
 }
 
+// ---- a bad value at index 0 of a column result names row 0 ----
+{
+  const spec = { entry: 'fixtures.js#bad_first', shape: SHAPE.COLUMN, args: [['l', 'x']], result: [['l', 'r']] };
+  const r = adapter.callBatch(open(spec), 3, [col(BigInt64Array, [1n, 2n, 3n], 0, 0n)]);
+  assert.equal(r[0], 7, `ERR_RETURN_TYPE: ${r[1]}`);
+  assert.equal(r[3], 0, 'the error names row 0, not -1');
+}
+
+// ---- a duck-typed vector longer than its values is refused ----
+{
+  const spec = { entry: 'fixtures.js#fake_vector', shape: SHAPE.COLUMN, args: [['l', 'x']], result: [['l', 'r']] };
+  const r = adapter.callBatch(open(spec), 3, [col(BigInt64Array, [1n, 2n, 3n], 0, 0n)]);
+  assert.equal(r[0], 7, `ERR_RETURN_TYPE, not an over-read: ${r[1]}`);
+  assert.ok(String(r[1]).includes('values'), r[1]);
+}
+
+// ---- whatever user code throws is a user error ----
+{
+  const scalar = (entry) => ({ entry, shape: SHAPE.SCALAR, args: [['l', 'x']], result: [['l', 'r']] });
+  const one = [col(BigInt64Array, [1n], 0, 0n)];
+  const np = adapter.callBatch(open(scalar('fixtures.js#throws_nullproto')), 1, one);
+  assert.equal(np[0], 6, `an object with no prototype is ERR_RAISED: ${np[1]}`);
+  assert.ok(typeof np[1] === 'string' && np[1].length > 0, 'and has a message');
+  const nul = adapter.callBatch(open(scalar('fixtures.js#throws_null')), 1, one);
+  assert.equal(nul[0], 6);
+  assert.equal(nul[2], null, 'a thrown null has no trace');
+}
+
 console.log('adapter units: ok');

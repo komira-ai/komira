@@ -63,11 +63,33 @@ class FieldNotDeclared extends KErr {
 
 const fail = (status, message, trace = null, row = -1, group = -1) => [status, message, trace, row, group];
 
+// A thrown value as text, whatever it is. User code may throw anything: a
+// string, null, an object with no prototype (String() of it throws), an object
+// whose message or stack is a getter that throws. This never throws.
+function describe(e) {
+  try {
+    return e && e.message !== undefined ? String(e.message) : String(e);
+  } catch {
+    try {
+      return Object.prototype.toString.call(e);
+    } catch {
+      return 'a value that cannot be described was thrown';
+    }
+  }
+}
+
+function traceOf(e) {
+  try {
+    return e && e.stack ? String(e.stack) : null;
+  } catch {
+    return null;
+  }
+}
+
 // An exception from user code (or a KErr) as the answer for `row`.
 function failure(e, row) {
   if (e instanceof KErr) return fail(e.status, e.message, e.status === ERR.RAISED ? e.stack : null, e.row >= 0 ? e.row : row);
-  const message = e && e.message !== undefined ? String(e.message) : String(e);
-  return fail(ERR.RAISED, message || 'the function threw an empty error', e && e.stack ? String(e.stack) : null, row);
+  return fail(ERR.RAISED, describe(e) || 'the function threw an empty error', traceOf(e), row);
 }
 
 // ---- reading a column ------------------------------------------------------
@@ -135,6 +157,7 @@ function normColumn(c, fmt) {
     const n = c.length;
     const vals = c.data.length === 1 ? c.data[0].values.subarray(0, n) : c.toArray();
     if (!(vals instanceof T)) throw new KErr(ERR.RETURN_TYPE, `a vector of ${c.type} was returned for a ${TYPE_NAME[fmt]} result`);
+    if (vals.length < n) throw new KErr(ERR.RETURN_TYPE, `a vector of length ${n} was returned with ${vals.length} values`);
     let valid = null;
     if (c.nullCount > 0) {
       valid = new Uint8Array((n + 7) >> 3).fill(255);
