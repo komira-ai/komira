@@ -28,7 +28,7 @@ src/kci_cli	8988	-
 src/kci_cloud	8538	-
 src/kci_cloud_fake	9710	9101
 src/kci_deploy_model_proto	0	-
-src/kci_logs	8395	-
+src/kci_logs	10000	-
 src/kci_manifest_proto	0	-
 src/kci_params	10000	-
 src/kci_pkg_upload	10000	-
@@ -194,7 +194,7 @@ src/komira_scan_resolver	9596	-
 src/komira_scan_source	6318	-
 src/komira_sdk	9904	-
 src/komira_search	10000	-
-src/komira_search_catalog	8359	-
+src/komira_search_catalog	10000	-
 src/komira_search_scan	8728	-
 src/komira_secret_env	9722	-
 src/komira_secret_registry	9846	8125
