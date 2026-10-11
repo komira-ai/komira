@@ -3,6 +3,7 @@
 # anything.
 load("@komira//tools/build/coverage:census.bzl", "coverage_census")
 load("@komira//tools/build/coverage:defs.bzl", "coverage_ci_cases")
+load("@komira//tools/build/lint:doc_tree.bzl", "doc_tree")
 load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "public_boundary", "retired_names", "shell_lint", "src_layout", "target_suite", "workflow_lint")
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
@@ -26,6 +27,14 @@ export_file(
     name = "pr.yml",
     src = ".github/workflows/pr.yml",
     visibility = ["//src/kci_workflow_check:"],
+)
+
+# The files under .github/, which the root doc_tree's glob skips, at their
+# paths, for the shell budget (//tools/build/lint:shell_budget).
+doc_tree(
+    name = "github_tree",
+    srcs = glob([".github/**"]),
+    visibility = ["//tools/build/lint:shell_budget"],
 )
 
 shell_lint(
@@ -129,7 +138,7 @@ _TESTS_LINTS = [
 ) for _ in _TESTS_LINTS[:1]]
 
 # The greens of the tests cell that no derived unit builds: the pull-request
-# check builds `//...` and `tests//functional/...` (release/ci/derive_checks.py),
+# check builds `//...` and `tests//functional/...` (//tools/build/ci:derive_checks),
 # so a target of tests//negative or tests//src that must build, beside the
 # planted defects it serves, is named here, through its package's
 # target_suite (a package's sub-targets need one too, and a suite in the same
