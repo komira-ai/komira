@@ -24,11 +24,11 @@ target: they are listed for information at the end, with no floor.
 | Libraries (under `src/`, not `src/tests/`) | 209 |
 | Measured | 206 |
 | Not measured (a run or the gate failed; floor 0) | 3 |
-| Line coverage, all measured libraries | 90.21% (180193/199743) |
+| Line coverage, all measured libraries | 90.20% (180193/199749) |
 | Median line coverage (lower middle) | 96.55% |
 | At 100% / 90% to 100% / 50% to 90% / under 50% / no line | 47 / 65 / 45 / 3 / 46 |
 | Branch coverage of the libraries with branch records (40) | 89.78% (6847/7626) |
-| Libraries with files no test compiles | 28 (100 files) |
+| Libraries with files no test compiles | 29 (101 files) |
 | Published: in the release / a conda package only / neither | 54 / 154 / 1 |
 | Measured under their floor | 0 |
 
@@ -143,11 +143,11 @@ branch, `-` for none, *pinned* when set by hand ([Pinned floors](#pinned-floors)
 | 100 | `src/komira_jwks:komira_jwks` | 99.17% (362/365) | 3 | 91.84% (169/184) | 0 | conda | 99.17% / 91.84% |
 | 101 | `src/komira_avro:komira_avro` | 99.29% (3379/3403) | 24 | not gated | 0 | conda | 99.29% / - |
 | 102 | `src/komira_db_postgres:komira_db_postgres` | 99.29% (1128/1136) | 8 | not gated | 0 | conda | 99.29% / - |
-| 103 | `src/komira_jsonl:komira_jsonl` | 99.59% (3706/3721) | 15 | not gated | 0 | conda | 99.59% / - |
-| 104 | `src/komira_git:komira_git` | 99.60% (3252/3265) | 13 | not gated | 0 | conda | 99.60% / - |
-| 105 | `src/komira_plan_wire:komira_plan_wire` | 99.71% (5184/5199) | 15 | not gated | 0 | conda | 99.71% / - |
-| 106 | `src/komira_scalar_arithmetic:komira_scalar_arithmetic` | 99.72% (357/358) | 1 | 99.65% (285/286) | 0 | release | 99.72% / 99.65% |
-| 107 | `src/komira_job_supervisor:komira_job_supervisor` | 99.76% (1259/1262) | 3 | not gated | 0 | conda | 99.76% / - |
+| 103 | `src/komira_job_supervisor:komira_job_supervisor` | 99.29% (1259/1268) | 9 | not gated | 1 | conda | 99.29% / - |
+| 104 | `src/komira_jsonl:komira_jsonl` | 99.59% (3706/3721) | 15 | not gated | 0 | conda | 99.59% / - |
+| 105 | `src/komira_git:komira_git` | 99.60% (3252/3265) | 13 | not gated | 0 | conda | 99.60% / - |
+| 106 | `src/komira_plan_wire:komira_plan_wire` | 99.71% (5184/5199) | 15 | not gated | 0 | conda | 99.71% / - |
+| 107 | `src/komira_scalar_arithmetic:komira_scalar_arithmetic` | 99.72% (357/358) | 1 | 99.65% (285/286) | 0 | release | 99.72% / 99.65% |
 | 108 | `src/kci_release_machine:kci_release_machine` | 99.79% (988/990) | 2 | not gated | 0 | release | 99.79% / - |
 | 109 | `src/komira_parquet:komira_parquet` | 99.86% (5158/5165) | 7 | not gated | 0 | conda | 99.86% / - |
 | 110 | `src/komira_sql:komira_sql` | 99.87% (3192/3196) | 4 | not gated | 0 | conda | 99.87% / - |
@@ -299,6 +299,7 @@ executable lines uncovered (covcheck's UnmeasuredFile).
 - `src/komira_aws_core:komira_aws_core`: `src/komira_aws_core/process_creds.mojo`
 - `src/komira_objectstore_gcs:komira_objectstore_gcs`: `src/komira_objectstore_gcs/backend.mojo`
 - `src/komira_fs:komira_fs`: `src/komira_fs/file_format_capabilities.mojo`
+- `src/komira_job_supervisor:komira_job_supervisor`: `src/komira_job_supervisor/main/job_supervisor_main.mojo`
 
 ## Test packages (information)
 

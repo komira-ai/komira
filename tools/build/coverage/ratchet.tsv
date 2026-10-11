@@ -141,7 +141,7 @@ src/komira_http_core	9188	-
 src/komira_http_server	8494	-
 src/komira_iceberg_catalog	8717	-
 src/komira_job_report_proto	0	-
-src/komira_job_supervisor	9976	-
+src/komira_job_supervisor	9929	-
 src/komira_join_assembly	6474	-
 src/komira_json	10000	10000
 src/komira_json_index	8477	-
