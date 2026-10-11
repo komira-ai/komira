@@ -31,11 +31,11 @@
 #   4. Replace the inner Aggregate subtree with a scan of the bound
 #      `InMemorySource`, so the outer plan does not re-run the group-by.
 #
-# Pass order: komira_optimizer has no driver that orders its passes. The
-# order this pass is designed for is AFTER `push_predicates_down` (so any
-# non-EXPR_AGG_FN predicates have already moved out of the same Filter) and
-# BEFORE an inner-to-semi join conversion (`convert_inner_to_semi`, not in
-# this tree), so the SEMI swap sees the rewritten literal-comparison filter.
+# Pass order: `optimizer_driver.optimize` runs this pass AFTER
+# `push_predicates_down` (so any non-EXPR_AGG_FN predicates have already moved
+# out of the same Filter) and BEFORE the inner-to-semi join conversion
+# (`convert_inner_to_semi`), so the SEMI swap sees the rewritten
+# literal-comparison filter.
 #
 # Failure modes (with explicit error messages):
 #   * Pattern not matched (no EXPR_AGG_FN in any Filter, or Filter not

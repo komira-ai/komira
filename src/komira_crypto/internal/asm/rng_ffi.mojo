@@ -118,4 +118,4 @@ def rand_bytes_ffi[o: Origin[mut=True]](dst: Span[UInt8, o]) raises:
         UInt,
     ](dst_ptr, UInt(len(dst)))
     if rc != 1:
-        raise Error("rand_bytes_ffi: RAND_bytes failed (entropy source failure)")
+        raise Error("rand_bytes_ffi: RAND_bytes failed (entropy source failure)")  # cov: unreachable RAND_bytes fails only when the operating system's entropy source fails

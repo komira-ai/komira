@@ -22,8 +22,7 @@
 #   - reorder_joins
 #
 # **Scope**: this module is the greedy search and the chain types and
-# cost functions it shares with the DPccp enumerator (`optimizer_dpccp`,
-# not in this tree).
+# cost functions it shares with the DPccp enumerator (`optimizer_dpccp`).
 #
 # **Cost model**: greedy ranks candidates with
 # `estimate_join_cardinality_for_reorder`, the conservative fallback
@@ -154,7 +153,7 @@ struct RelationSet(Copyable, Movable):
         Port of v0.3 `RelationSet::iter`. Mojo 0.26 has
         no first-class iterator protocol that composes well with struct
         methods, so the helper materializes a small `List[Int]` instead.
-        For DPccp (not in this tree) n <= 12 means at most 12 entries per
+        For DPccp (`optimizer_dpccp`) n <= 12 means at most 12 entries per
         call — the alloc cost is negligible next to DP hashing, and the explicit list
         sidesteps the `ref` / self-lifetime gymnastics an iterator would
         require.
@@ -621,7 +620,8 @@ def _extract_join_chain_inner(
     # product with no bridging FK anywhere), `extract_join_chain` yields 0
     # edges and returns None (caller keeps the original CROSS), OR greedy's
     # CROSS fallback rebuilds a valid tree. (DPccp's cross-product augmentation
-    # and a guard against an unsafe synthesized top CROSS are not in this tree.)
+    # and its guard against an unsafe synthesized top CROSS live in
+    # `optimizer_dpccp`.)
     # A residual-carrying CROSS (cross+non-equi predicate) is NOT flattened —
     # it falls through to the opaque-leaf path below, preserving the residual.
     if plan.tag == PLAN_JOIN and plan._join.value()[].join_type == JOIN_CROSS \
@@ -796,7 +796,7 @@ def estimate_join_cardinality_with_ndv(
     (L*R)/divisor < R, which is sub-physical for the FK-PK shape
     (a join cannot produce fewer rows than the smaller side's
     matched-key count). That sub-physical estimate would make a
-    cost-based enumerator (DPccp, not in this tree) rank candidate joins
+    cost-based enumerator (DPccp, `optimizer_dpccp`) rank candidate joins
     by the WRONG metric and pick worse plans.
 
     Algorithm:
@@ -963,7 +963,7 @@ def greedy_join_order(var chain: JoinChain) raises -> LogicalPlan:
     Cost model: legacy `max(l, r)` fallback via
     `estimate_join_cardinality_for_reorder`. The NDV-aware path
     (`estimate_join_cardinality_with_ndv`) is the DPccp cost function
-    (`optimizer_dpccp._cost_for_pair`, not in this tree); greedy
+    (`optimizer_dpccp._cost_for_pair`, on its no-TDOM-graph path); greedy
     intentionally does NOT consume it. Multi-way reordering is designed to
     go through DPccp (n>=4 chains); greedy serves the n<4 fallback path,
     where the small chain shape makes the FK-PK cost signal moot.

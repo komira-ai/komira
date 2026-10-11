@@ -118,7 +118,7 @@
 # Pipeline placement
 # ==================
 #
-# komira_optimizer has no driver that orders its passes. The rule is
+# `optimizer_driver.optimize` does not run this rule. It is
 # designed to run AFTER predicate pushdown (so pushed filters shrink the
 # partial agg input) and BEFORE inner->semi conversion and join
 # reordering (so downstream cost models see the reduced cardinality).

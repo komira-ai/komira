@@ -152,8 +152,8 @@ def test_string_filter_descends_to_scan_through_bridging_conjunct() raises:
     var combined = Expr.binary(BIN_AND, bridging^, green^)
     var plan = LogicalPlan.filter(combined^, cross^)
 
-    # The filter/join sequence these passes are designed to run in
-    # (komira_optimizer has no driver that orders its passes).
+    # The filter/join sequence these passes are designed to run in (the
+    # subsequence of `optimizer_driver.optimize` this test exercises).
     plan = decompose_filters(plan^)
     plan = push_predicates_down(plan^)
     plan = eliminate_cross_join(plan^)

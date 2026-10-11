@@ -48,6 +48,7 @@ from kci_cloud import (
     GrantEdge,
     LoweredNode,
     OwnedRecord,
+    ExistingObject,
     Principal,
     apply_resources,
     describe,
@@ -122,6 +123,12 @@ struct _Deep(CloudAdapter, Movable):
 
     def list_owned(mut self, creds: Creds, scope: CellScope) raises -> List[OwnedRecord]:
         return self.inner.list_owned(creds, scope)
+
+    def read_existing(mut self, creds: Creds, node: LoweredNode) raises -> ExistingObject:
+        return self.inner.read_existing(creds, node)
+
+    def release(mut self, creds: Creds, record: OwnedRecord) raises:
+        self.inner.release(creds, record)
 
     def whoami(mut self, creds: Creds) raises -> Principal:
         return self.inner.whoami(creds)

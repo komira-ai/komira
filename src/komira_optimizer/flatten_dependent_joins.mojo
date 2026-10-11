@@ -45,8 +45,8 @@
 #                         maps directly to JOIN_SEMI. `outer_refs` may be
 #                         empty (uncorrelated `IN` whose RHS is a subquery).
 #
-# Pass order: komira_optimizer has no driver that orders its passes. This
-# pass is designed to run BEFORE join structural rewrites.
+# Pass order: `optimizer_driver.optimize` runs this pass after the
+# uncorrelated scalar-subquery passes and BEFORE join structural rewrites.
 #
 # Design constraint:
 #   - SCALAR + parent=Filter (Q17): the agg sink shape implies the parent

@@ -28,7 +28,7 @@
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
 from komira_collections.slab import Slab
-from komira_plan_ir.physical_plan import (
+from komira_physical_plan.physical_plan import (
     KEY_DTYPE_NONE,
     MorselOp,
     PHYSICAL_PLAN_IR_VERSION,

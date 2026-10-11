@@ -22,7 +22,7 @@
 #       -> CorrelatedSubqueryData._plan : ErasedBox (a LogicalPlan)
 #
 # (`segment_cutter` and its `CutResult` are not in this tree; the other four
-# hops are, in komira_plan_ir and komira_plan_expr.)
+# hops are, in komira_physical_plan, komira_plan_expr and komira_plan_ir.)
 #
 # `Expr` is allowed in the physical plan — correctly, `Expr` IS inert data —
 # so a structural inert-IR check by type is GREEN over a type that
@@ -61,7 +61,7 @@
 # ⇒ this walker is EXHAUSTIVE over all `EXPR_TAG_COUNT` tags and **RAISES** on a
 # tag it does not model, exactly as `scan_binding_gate.mojo` does one gate
 # over. An unmodelled tag is a HOLE IN A SAFETY CHECK, not a cosmetic gap, and
-# the falsifier (`komira_plan_ir/tests/test_physical_plan_purity_gate.mojo`)
+# the falsifier (`komira_physical_plan/tests/test_physical_plan_purity_gate.mojo`)
 # instantiates every tag id in `[0, EXPR_TAG_COUNT)` and requires an arm for
 # each — so a new tag cannot be added without this file going red.
 #
@@ -113,7 +113,7 @@ from komira_plan_expr.expr import (
     EXPR_WHEN,
     EXPR_WINDOW_FN,
 )
-from komira_plan_ir.physical_plan import SegmentDescPod
+from komira_physical_plan.physical_plan import SegmentDescPod
 
 
 # -----------------------------------------------------------------------------
@@ -330,7 +330,7 @@ def expr_carries_correlated_subquery(expr: Expr) raises -> Bool:
         " can own a whole LogicalPlan, so a subquery underneath an unmodelled",
         " tag would cross the optimizer/engine .so boundary with the gate",
         " reporting success. Add the arm in",
-        " komira_plan_ir/physical_plan_purity_gate.mojo — descend its child",
+        " komira_physical_plan/physical_plan_purity_gate.mojo — descend its child",
         " expressions, or return False with a comment saying why that tag",
         " cannot carry a plan.",
     )
