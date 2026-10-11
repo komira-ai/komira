@@ -14,6 +14,7 @@ pub const args = @import("args.zig");
 pub const expect = @import("expect.zig");
 pub const guard = @import("guard.zig");
 pub const parse = @import("parse.zig");
+pub const reds = @import("reds.zig");
 pub const refusals = @import("refusals.zig");
 pub const runner = @import("runner.zig");
 pub const scratch = @import("scratch.zig");
@@ -47,6 +48,12 @@ pub const Ctx = struct {
         try refusals_run(&c.r, &c.rep, rows);
     }
 
+    /// Each row's target must fail to build, in an action run on the farm,
+    /// printing the row's text (reds.zig).
+    pub fn reds(c: *Ctx, rows: []const Row) !void {
+        try reds_run(&c.r, &c.rep, rows);
+    }
+
     /// A scratch tree of the checkout (scratch.zig); deleted when the
     /// scenario ends. Fails the scenario (error.Scratch) when it cannot be
     /// made its own project root.
@@ -64,6 +71,7 @@ pub const Ctx = struct {
 };
 
 const refusals_run = refusals.run;
+const reds_run = reds.run;
 
 fn stderr() std.fs.File.Writer {
     return std.io.getStdErr().writer();

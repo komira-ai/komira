@@ -153,12 +153,16 @@ reader reads from it.
 
 Each owner of the design's table has its `<library>_native` target in its
 own BUCK file: komira_crypto, komira_http_core (`NEEDED` komira_crypto's),
-komira_compression and the first-party shims' owners (komira_libc, komira_async, komira_async_api,
-komira_fs, komira_objectstore, komira_metrics, komira_scan_source,
-komira_supervisor). komira_log has none: its holder's accessors are hidden
-by design, one copy per image (the design's question 2), so its holder ships
-as a static archive. Each owner's `mojo_library` names its target
-(`native = ":<library>_native"`; komira_log's says `native_static = True`),
-and its conda package holds the file at lib/ with a `lib_files` row
+komira_compression, komira_parquet_codec (brotli's decoder),
+komira_db_sqlite (SQLite) and the first-party shims' owners (komira_libc,
+komira_async, komira_async_api, komira_fs, komira_objectstore,
+komira_metrics, komira_scan_source, komira_supervisor). komira_log has none:
+its holder's accessors are hidden by design, one copy per image (the design's
+question 2), so its holder ships as a static archive. Every owner's
+`mojo_library` except komira_parquet_codec's and komira_db_sqlite's names its
+target (`native = ":<library>_native"`;
+komira_log's says `native_static = True`), and its conda package holds the
+file at lib/ with a `lib_files` row
 ([packaging/conda/README.md](../../../packaging/conda/README.md), "A library's
-native code in its package").
+native code in its package"). Those two libraries are built and checked, but
+no package ships them yet.
