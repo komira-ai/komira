@@ -29,6 +29,18 @@
 #     verifier, whatever its leeway.
 #   * `advance(seconds)` moves the clock forward and removes every former key
 #     whose time has come. The clock never moves back.
+#   * The token endpoint (token_endpoint.mojo): `register_client(record,
+#     resources)` adds a komira_oauth `ClientMetadata` record and the
+#     audiences the client may ask for; `remove_client` deletes it.
+#     `token_request(form)` answers a `client_credentials` request with
+#     `private_key_jwt` as an RFC 6749 token endpoint does: 200 with
+#     `{access_token, token_type, expires_in, scope?}`, the token signed now
+#     with `sub` and `client_id` the client, `aud` the requested resource,
+#     the max lifetime and a fresh `jti`; or 401 `invalid_client` and 400
+#     for every other error code, with `{"error":"<code>"}`. An HTTP
+#     adapter adds `Cache-Control: no-store`. `token_endpoint_url()` is the
+#     issuer plus `/token`, `jwks_uri()` the issuer plus `/jwks`, and
+#     `metadata_document()` the RFC 8414 document naming both.
 #
 # The leeway is the one its relying parties are configured with
 # (`profile_of`, scenarios.mojo); it does not move a retirement. It must be 0
@@ -56,7 +68,18 @@ from komira_jose import (
     new_jti,
 )
 
+from komira_oauth import (
+    OAUTH_ERROR_INVALID_CLIENT,
+    AuthorizationServerMetadata,
+    ClientMetadata,
+    TokenEndpointReply,
+    parse_client_credentials_request,
+    render_oauth_error,
+    render_token_response,
+)
+
 from komira_test_issuer.keys import derived_key
+from komira_test_issuer.token_endpoint import ClientRegistry
 from komira_test_issuer.under_test import IssuerUnderTest
 from komira_test_issuer.user_token import user_token_claims
 
@@ -87,6 +110,7 @@ struct TestIssuer(IssuerUnderTest, Movable, Deinitable):
     var _next_key: Int
     var _ring: Keyring
     var _retirements: List[_Retirement]
+    var _clients: ClientRegistry
 
     def __init__(
         out self,
@@ -140,6 +164,7 @@ struct TestIssuer(IssuerUnderTest, Movable, Deinitable):
         self._next_key = 1
         self._ring = ring^
         self._retirements = List[_Retirement]()
+        self._clients = ClientRegistry()
 
     def issuer(self) -> String:
         """The `iss` of every token."""
@@ -275,3 +300,76 @@ struct TestIssuer(IssuerUnderTest, Movable, Deinitable):
         """`claims` signed now by the signing key, with header `typ` when
         given (see the file header)."""
         return self._ring.sign(claims, typ, self._now)
+
+    def token_endpoint_url(self) -> String:
+        """The token endpoint: the issuer plus `/token`."""
+        return self._issuer + "/token"
+
+    def jwks_uri(self) -> String:
+        """Where the JWK Set is served: the issuer plus `/jwks`."""
+        return self._issuer + "/jwks"
+
+    def metadata_document(self) raises -> String:
+        """The RFC 8414 metadata document (komira_oauth): the issuer, the
+        token endpoint, the JWK Set URL, `private_key_jwt` with ES256 and
+        EdDSA assertions."""
+        var algs = List[String]()
+        algs.append(JWS_ALG_ES256)
+        algs.append(JWS_ALG_EDDSA)
+        return AuthorizationServerMetadata.for_client_credentials(
+            issuer=self._issuer,
+            token_endpoint=self.token_endpoint_url(),
+            jwks_uri=self.jwks_uri(),
+            signing_algs=algs,
+        ).render()
+
+    def register_client(
+        mut self, record: ClientMetadata, resources: List[String]
+    ) raises:
+        """Add a client that may ask for tokens for `resources` (see
+        token_endpoint.mojo). Raises `TestIssuerError: ...`."""
+        self._clients.register(record, resources)
+
+    def remove_client(mut self, client_id: String) raises:
+        """Delete a client's record. Raises `TestIssuerError: ...` for an
+        unknown client."""
+        self._clients.remove(client_id)
+
+    def token_request(mut self, form: String) raises -> TokenEndpointReply:
+        """Answer a token request body (see the file header). Raises only
+        when signing fails."""
+        var parsed = parse_client_credentials_request(form)
+        if not parsed.ok():
+            return _error_reply(parsed.error)
+        var d = self._clients.authenticate(
+            parsed.request,
+            issuer=self._issuer,
+            token_endpoint=self.token_endpoint_url(),
+            now=self._now,
+            leeway_s=self._leeway_s,
+        )
+        if d.error.byte_length() > 0:
+            return _error_reply(d.error)
+        var claims = user_token_claims(
+            issuer=self._issuer,
+            subject=d.client_id,
+            audience=parsed.request.resource,
+            client_id=d.client_id,
+            scope=d.scope,
+            now=self._now,
+            ttl_s=self._max_ttl_s,
+            jti=new_jti(),
+        )
+        var token = self._ring.sign(
+            claims, Optional[String](self._typ), self._now
+        )
+        return TokenEndpointReply(
+            200, render_token_response(token, self._max_ttl_s, d.scope)
+        )
+
+
+def _error_reply(code: String) -> TokenEndpointReply:
+    var status = 400
+    if code == OAUTH_ERROR_INVALID_CLIENT:
+        status = 401
+    return TokenEndpointReply(status, render_oauth_error(code))
