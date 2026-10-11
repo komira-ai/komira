@@ -39,11 +39,15 @@ static void release_col(struct ArrowArray* a) {
   a->release = NULL;
 }
 
-/* A primitive array of `n` rows of 8-byte values, all valid; the caller
+/* Bytes per value of a format this runtime maps (check_spec admits only
+ * these): int32 4, int64 and float64 8. */
+static int64_t fmt_width(char fmt) { return fmt == 'i' ? 4 : 8; }
+
+/* A primitive array of `n` rows of `w`-byte values, all valid; the caller
  * writes the values and clears validity bits for nulls. */
-static int make_col(struct ArrowArray* a, int64_t n, uint8_t** validity, void** data) {
+static int make_col(struct ArrowArray* a, int64_t n, int64_t w, uint8_t** validity, void** data) {
   size_t vbytes = (size_t)((n + 7) / 8);
-  struct col_block* b = malloc(sizeof(struct col_block) + vbytes + (size_t)n * 8 + 8);
+  struct col_block* b = malloc(sizeof(struct col_block) + vbytes + (size_t)(n * w) + 8);
   if (b == NULL) return 0;
   uint8_t* v = (uint8_t*)(b + 1);
   memset(v, 0xFF, vbytes);
@@ -186,23 +190,23 @@ static PyObject* view(struct pyapi* a, const void* p, int64_t bytes, int writabl
 
 /* Copies a Python result column (values, optional validity) into `o`. */
 static const char* copy_column(struct pyapi* a, PyObject* data, PyObject* valid, int64_t m, int64_t nulls,
-                               struct ArrowArray* o) {
+                               int64_t w, struct ArrowArray* o) {
   uint8_t* v;
   void* d;
   if (m < 0) return "the adapter returned a negative length";
-  if (!make_col(o, m, &v, &d)) return "out of memory";
+  if (!make_col(o, m, w, &v, &d)) return "out of memory";
   Py_buffer b;
   if (a->PyObject_GetBuffer(data, &b, PyBUF_SIMPLE) != 0) {
     a->PyErr_Clear();
     o->release(o);
     return "the result's values have no contiguous buffer";
   }
-  int ok = b.len == m * 8;
-  if (ok && m > 0) memcpy(d, b.buf, (size_t)m * 8);
+  int ok = b.len == m * w;
+  if (ok && m > 0) memcpy(d, b.buf, (size_t)(m * w));
   a->PyBuffer_Release(&b);
   if (!ok) {
     o->release(o);
-    return "the result's values buffer is not 8 bytes per row";
+    return "the result's values buffer is not the result type's width per row";
   }
   if (valid != a->none) {
     if (a->PyObject_GetBuffer(valid, &b, PyBUF_SIMPLE) != 0) {
@@ -262,7 +266,8 @@ int32_t pyrt_call_batch(komira_udf_instance* inst, const komira_udf_call* call, 
   int scalar = u->shape == (int32_t)KOMIRA_UDF_SHAPE_SCALAR;
   uint8_t* ov = NULL;
   void* od = NULL;
-  if (scalar && !make_col(&out->array, n, &ov, &od)) {
+  int64_t rw = fmt_width(u->result_fmt);
+  if (scalar && !make_col(&out->array, n, rw, &ov, &od)) {
     if (in.release != NULL) in.release(&in);
     return pyrt_fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "call_batch: out of memory", NULL, -1);
   }
@@ -283,7 +288,7 @@ int32_t pyrt_call_batch(komira_udf_instance* inst, const komira_udf_call* call, 
   for (int i = 0; cols != NULL && i < u->n_args; i++) {
     const struct ArrowArray* ch = in.children[i];
     char fmt[2] = {u->arg_fmt[i], 0};
-    PyObject* d = owned_view(c, owner, ch->buffers[1], (ch->offset + n) * 8);
+    PyObject* d = owned_view(c, owner, ch->buffers[1], (ch->offset + n) * fmt_width(u->arg_fmt[i]));
     PyObject* v = a->none;
     if (ch->buffers[0] != NULL && ch->null_count != 0) v = owned_view(c, owner, ch->buffers[0], (ch->offset + n + 7) / 8);
     else a->Py_IncRef(v);
@@ -307,7 +312,7 @@ int32_t pyrt_call_batch(komira_udf_instance* inst, const komira_udf_call* call, 
   PyObject* out_d = a->none;
   PyObject* out_v = a->none;
   if (scalar) {
-    out_d = view(a, od, n * 8, 1);
+    out_d = view(a, od, n * rw, 1);
     out_v = view(a, ov, (n + 7) / 8, 1);
     if (out_d != NULL) own_views[n_own++] = out_d;
     if (out_v != NULL) own_views[n_own++] = out_v;
@@ -339,7 +344,7 @@ int32_t pyrt_call_batch(komira_udf_instance* inst, const komira_udf_call* call, 
     } else if (code == KOMIRA_UDF_OK) {
       copy_err = copy_column(a, a->PyTuple_GetItem(r, 1), a->PyTuple_GetItem(r, 2),
                              a->PyLong_AsLongLong(a->PyTuple_GetItem(r, 4)),
-                             a->PyLong_AsLongLong(a->PyTuple_GetItem(r, 3)), &out->array);
+                             a->PyLong_AsLongLong(a->PyTuple_GetItem(r, 3)), rw, &out->array);
       if (copy_err != NULL) code = KOMIRA_UDF_ERR_RETURN_TYPE;
     } else {
       PyObject* m = a->PyTuple_GetItem(r, 1);

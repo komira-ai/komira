@@ -15,7 +15,8 @@ load(":defs.bzl", "runtime_data", "udf_bench")
 #                   contexts; python_call.c: call_batch; pyapi.c: the CPython
 #                   C API through dlsym), its Python adapter
 #                   (komira_udf_pyrt.py) and the user modules the tests load
-#                   (udf_fixtures.py, udf_np.py, probe_<library>.py)
+#                   (udf_fixtures.py, udf_np.py, udf_shadow.py,
+#                   probe_<library>.py)
 #   refrt/          the two builds' one export each (below)
 #   native/         the engine loop: one pthread per engine thread
 #   engine.mojo     Engine, Workload, RunReport: the engine loop's value API
@@ -56,6 +57,7 @@ _PYRT = {"pyrt/" + f: "pyrt/" + f for f in [
     "komira_udf_pyrt.py",
     "udf_fixtures.py",
     "udf_np.py",
+    "udf_shadow.py",
 ]}
 
 _PROBES = {"pyrt/probe_{}.py".format(m): "pyrt/probe_{}.py".format(m) for m in [

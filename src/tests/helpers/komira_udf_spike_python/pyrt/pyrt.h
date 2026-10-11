@@ -13,7 +13,7 @@
 
 #include "komira_udf_runtime.h"
 
-#define PYRT_MAX_ARGS 8
+#define PYRT_MAX_ARGS 64
 
 /* How contexts map to interpreters. */
 enum pyrt_variant {

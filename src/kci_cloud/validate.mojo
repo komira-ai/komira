@@ -6,6 +6,15 @@
 # credentials. It collects EVERY finding in one pass, so an author sees all of
 # their problems at once:
 #
+#   0. EXPANSION first (compose.mojo): every composite instance of the list
+#      becomes its primitives, each with its path id `top/c1/.../ck`, and
+#      every reference names a full path. A finding of the expansion (a
+#      definition, a containment cycle, an instance, a path, the size guard)
+#      is returned alone: the graph below a refused instance is not known,
+#      so nothing after it is judged. Every check below runs on the expanded
+#      list, so it holds at every depth. A produced path id is not held to
+#      the resource id grammar (its segments were checked as component ids);
+#      every authored id is.
 #   1. GRAPH findings, true on every cloud: ids (unique, and of the id
 #      grammar `[a-z][a-z0-9-]{0,23}` with no trailing or doubled `-`, so
 #      never the node-id separator `/`), a type set, every `Ref` naming a
@@ -66,20 +75,26 @@
 #      a graph with no other finding, one cloud name per (kind, name) of the
 #      cloud's lowered primary objects (`metadata.shared_name_findings`).
 #
-#   4. The ROLE LABEL BUDGET (`role_budget_findings`), the check that needs
-#      the whole lowering: every lowered node's role (the node id after its
-#      owner) must fit the 63-byte label value once encoded. It is a GRAPH
-#      finding naming the node, the byte count and every segment's length,
-#      and it runs after lowering (data, nothing realized) and before
-#      anything is created. Nesting is unbounded in the schema; this is its
-#      practical bound.
+#   4. The ROLE LABEL BUDGET (`lowered_budget_findings`), the check that
+#      needs the whole lowering: every lowered node's role (the node id
+#      after its owner) must fit the 63-byte label value once encoded. It is
+#      a GRAPH finding naming the node, the byte count and every segment's
+#      length. Like the names of 3, it runs on a graph with no other
+#      finding: validate lowers every resource on the cloud (data, nothing
+#      realized; a resource whose lowering raises is skipped, and the
+#      lowering contract refuses it at plan). So `validate` reports it, and
+#      plan, apply and destroy, which validate first, refuse it before
+#      anything is listed, realized or created. Nesting is unbounded in the
+#      schema; this is its practical bound.
 #
 # ⛔ A FINDING IS A REFUSAL OF THE WHOLE GRAPH. There is no "skip what the
 # cloud cannot do": that turns "cannot do it yet" into a silently thinner
 # deploy.
 # =============================================================================
 
-from kci_resource_proto.resource import Resource, Ref
+from kci_resource_proto.composite import CompositeDefinition
+from kci_resource_proto.refs import Ref
+from kci_resource_proto.resource import Resource
 
 from kci_cloud.adapter import (
     CloudAdapter,
@@ -105,6 +120,7 @@ from kci_cloud.catalog import (
     FIELD_REGISTRY,
     FIELD_SCHEDULE,
     FIELD_SECRET,
+    FIELD_SERVICE,
     FIELD_SERVICE_ACCOUNT,
     FIELD_SUBNET,
     FIELD_SUBSCRIPTION,
@@ -120,11 +136,11 @@ from kci_cloud.cloud_id import CloudId
 from kci_cloud.clouds import Clouds
 from kci_cloud.compute import V1_IMAGE_PLATFORM, image_platform, workload_findings
 from kci_cloud.data import data_findings
-from kci_cloud.feed import feeds_of
+from kci_cloud.feed import Feed, feeds_of
 from kci_cloud.messaging import messaging_findings
 from kci_cloud.secrets import secret_env_findings, secret_findings
 from kci_cloud.dns import dns_findings
-from kci_cloud.firing import firings_of
+from kci_cloud.firing import Firing, firings_of
 from kci_cloud.triggers import trigger_findings
 from kci_cloud.network import network_findings, service_network_findings
 from kci_cloud.registry import registry_findings
@@ -135,10 +151,13 @@ from kci_cloud.grants import (
     cell_accepted,
     cell_accepts,
     cell_name,
+    edges_for,
     edges_of,
     run_as_of,
 )
 from kci_cloud.labels import LABEL_VALUE_MAX, encoded_label_bytes
+from kci_cloud.compose import expand
+from kci_cloud.compose_refs import id_problem, no_ref, owner_of_node
 
 
 def _index_of_id(resources: List[Resource], id: String) -> Int:
@@ -146,41 +165,6 @@ def _index_of_id(resources: List[Resource], id: String) -> Int:
         if resources[i].id == id:
             return i
     return -1
-
-
-comptime ID_MAX_BYTES = 24
-"""The longest resource id. Narrowing later breaks authors; widening is free."""
-
-def id_problem(id: String) -> String:
-    """Why `id` is not a legal resource id, or empty if it is. The grammar is
-    `[a-z][a-z0-9-]{0,23}`, with no trailing `-` and no `--`: a lowercase
-    letter first, then lowercase letters, digits and single dashes. It keeps
-    every id usable in a cloud name or label after a prefix, and it never
-    contains `/`, the engine's node-id separator."""
-    var b = id.as_bytes()
-    var n = len(b)
-    if n == 0:
-        return String("empty id")
-    if n > ID_MAX_BYTES:
-        return (
-            String("id is ")
-            + String(n)
-            + String(" bytes; at most ")
-            + String(ID_MAX_BYTES)
-        )
-    if Int(b[0]) < ord("a") or Int(b[0]) > ord("z"):
-        return String("an id starts with a lowercase letter (a-z)")
-    for i in range(n):
-        var c = Int(b[i])
-        var lower = c >= ord("a") and c <= ord("z")
-        var digit = c >= ord("0") and c <= ord("9")
-        if not lower and not digit and c != ord("-"):
-            return String("an id is lowercase letters, digits and '-' only")
-        if c == ord("-") and i > 0 and Int(b[i - 1]) == ord("-"):
-            return String("an id may not contain '--'")
-    if Int(b[n - 1]) == ord("-"):
-        return String("an id may not end with '-'")
-    return String("")
 
 
 def _type_of(catalog: Catalog, r: Resource) -> String:
@@ -445,13 +429,24 @@ def edge_findings(resources: List[Resource]) -> List[Finding]:
     return out^
 
 
-def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]:
-    """Every cloud-independent finding of `resources`."""
+def _produced(produced: List[String], id: String) -> Bool:
+    for i in range(len(produced)):
+        if produced[i] == id:
+            return True
+    return False
+
+
+def graph_findings(
+    catalog: Catalog, resources: List[Resource], produced: List[String] = List[String]()
+) -> List[Finding]:
+    """Every cloud-independent finding of `resources`. An id in `produced`
+    is a path an expansion made (compose.mojo), whose segments it already
+    checked; every other id is held to the resource id grammar."""
     var out = List[Finding]()
     for i in range(len(resources)):
         ref r = resources[i]
         var id = r.id.copy()
-        var bad_id = id_problem(id)
+        var bad_id = String("") if _produced(produced, id) else id_problem(id)
         if id.byte_length() == 0:
             out.append(
                 Finding(FINDING_GRAPH, String("#") + String(i), String("id"), bad_id)
@@ -556,7 +551,7 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
                 id,
                 String("grant"),
                 has,
-                g.target.value().copy() if has else Ref(String(""), 0, None, None),
+                g.target.value().copy() if has else no_ref(),
                 g.cell.value,
                 g.access.json_name(),
                 out,
@@ -574,7 +569,7 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
                 id,
                 String("uses[") + String(u) + String("]"),
                 has,
-                use.target.value().copy() if has else Ref(String(""), 0, None, None),
+                use.target.value().copy() if has else no_ref(),
                 use.cell.value,
                 use.access.json_name(),
                 out,
@@ -617,18 +612,40 @@ def _check_platform[
 
 def validate_for[
     S: CloudAdapter
-](clouds: Clouds, cloud: S, resources: List[Resource]) raises -> List[Finding]:
-    """Every finding of `resources` on `cloud`: graph, coverage, limits.
-    Raises only if `cloud` is not one of `clouds` (`main` built an adapter
-    it did not list: a wiring defect, not a property of the graph); the
-    message is `Clouds.resolve`'s."""
+](
+    clouds: Clouds,
+    cloud: S,
+    resources: List[Resource],
+    definitions: List[CompositeDefinition] = List[CompositeDefinition](),
+) raises -> List[Finding]:
+    """Every finding of `resources` on `cloud`: the expansion's (with the
+    composite `definitions` it was given) alone if it has any, else, on
+    the expanded list, graph, coverage, limits, and, on a graph with none
+    of those, the cloud names and the role label budget of `cloud`'s
+    lowering. Raises only if `cloud` is not one of `clouds` (`main` built
+    an adapter it did not list: a wiring defect, not a property of the
+    graph; the message is `Clouds.resolve`'s), or on a defect of the
+    expansion itself (`expand`)."""
+    if clouds.find(cloud.cloud_id()) < 0:
+        _ = clouds.resolve(cloud.cloud_id().text())  # raises, naming the built-in clouds
+    var x = expand(clouds.catalog, definitions, resources)
+    if len(x.findings) > 0:
+        return x.findings.copy()
+    return validate_expanded(clouds, cloud, x.resources, x.produced)
+
+
+def validate_expanded[
+    S: CloudAdapter
+](clouds: Clouds, cloud: S, resources: List[Resource], produced: List[String]) raises -> List[Finding]:
+    """`validate_for` of a list that is already expanded: `produced` names
+    the ids the expansion made (`Expansion.produced`)."""
     var pid = cloud.cloud_id()
     var e = clouds.find(pid)
     if e < 0:
         _ = clouds.resolve(pid.text())  # raises, naming the built-in clouds
         raise Error(String("unreachable: ") + pid.text())
     ref entry = clouds.entries[e]
-    var out = graph_findings(clouds.catalog, resources)
+    var out = graph_findings(clouds.catalog, resources, produced)
     var feeds = feeds_of(resources)
     var firings = firings_of(resources)
     for i in range(len(resources)):
@@ -651,7 +668,7 @@ def validate_for[
             _check_platform(cloud, r, out)
             if (
                 not public_refused
-                and r._oneof0_case == 1
+                and field == FIELD_SERVICE
                 and r.service.value()._oneof0_case == 1
                 and cloud.public_mechanism().byte_length() == 0
             ):
@@ -696,6 +713,7 @@ def validate_for[
         )
     if len(out) == 0:  # lower only a graph with no other finding
         out.extend(shared_name_findings(cloud, clouds.catalog, resources, feeds, firings))
+        out.extend(lowered_budget_findings(cloud, resources, feeds, firings))
     return out^
 
 
@@ -727,6 +745,30 @@ def node_role(node: LoweredNode) -> String:
     if node.owner.byte_length() > 0 and node.id.startswith(prefix):
         return String(node.id[byte = prefix.byte_length() : node.id.byte_length()])
     return node.id.copy()
+
+
+def lowered_budget_findings[
+    S: CloudAdapter
+](cloud: S, resources: List[Resource], feeds: List[Feed], firings: List[Firing]) -> List[Finding]:
+    """`role_budget_findings` of every node `cloud` lowers `resources` to
+    (data, nothing realized), each owned by the first segment of its
+    resource's id as `deploy.lower_data` stamps it, so the role measured is
+    the whole path below the top (`a/b/c/run` of `top/a/b/c`). A resource
+    whose lowering raises is skipped: the lowering contract refuses it at
+    plan."""
+    var nodes = List[LoweredNode]()
+    for i in range(len(resources)):
+        ref r = resources[i]
+        var low: List[LoweredNode]
+        try:
+            low = cloud.lower(r, edges_for(resources, r), feeds, firings)
+        except:
+            continue
+        for k in range(len(low)):
+            var n = low[k].copy()
+            n.owner = owner_of_node(r.id)
+            nodes.append(n^)
+    return role_budget_findings(nodes)
 
 
 def role_budget_findings(nodes: List[LoweredNode]) -> List[Finding]:

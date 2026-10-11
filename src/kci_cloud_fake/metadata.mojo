@@ -64,6 +64,7 @@ from kci_cloud import (
     Firing,
     KCI_LABELS_MAX,
     body_field,
+    body_is,
 )
 from kci_resource_proto.resource import Resource
 
@@ -193,7 +194,7 @@ def fake_physical_name(r: Resource) -> String:
 
 def _folds(r: Resource, firings: List[Firing]) -> Bool:
     """`r` is a schedule whose target is a container job."""
-    if not r.schedule:
+    if not body_is(r, FIELD_SCHEDULE):
         return False
     for i in range(len(firings)):
         if firings[i].schedule == r.id and firings[i].target_field == FIELD_CONTAINER_JOB:

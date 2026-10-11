@@ -250,6 +250,74 @@ def test_row_read_u64_zero_extends_unsigned_cells() raises:
     assert_equal(src.read_u64(2, 10), 0)
 
 
+def test_row_read_u64_reads_signed_cells_at_their_width() raises:
+    """read_u64 on I32/I16/I8 cells reads the cell's own 4/2/1 bytes and
+    sign-extends: the result is the 64-bit two's-complement bit pattern of
+    the value, the same bits `ColumnCellSource.read_u64` gives (it reinterprets
+    the i64 value) and the walker's EXPR_LIT_I64 literal arm gives a negative
+    comparand. Every one of these cells is followed by non-zero bytes in rows 0
+    and 1 (the i32 at 8 by the i16/i8/u8 at 12..15), so an 8-byte load picks
+    them up as high bytes; row 0's set top bits tell sign-extension from
+    zero-extension."""
+    var rb = _row_block()
+    var src = RowCellSource(rb, _offsets(), _dtypes())
+    # I64 reads all 8 bytes: -2 and a value with every byte distinct.
+    assert_equal(src.read_u64(0, 0), UInt64(0xFFFFFFFFFFFFFFFE))
+    assert_equal(src.read_u64(1, 0), UInt64(0x0102030405060708))
+    # Row 0: -2 (i32), -32767 (i16), -127 (i8).
+    assert_equal(src.read_u64(0, 1), UInt64(0xFFFFFFFFFFFFFFFE))
+    assert_equal(src.read_u64(0, 2), UInt64(0xFFFFFFFFFFFF8001))
+    assert_equal(src.read_u64(0, 3), UInt64(0xFFFFFFFFFFFFFF81))
+    # Row 1: positive values read as themselves.
+    assert_equal(src.read_u64(1, 1), 16909060)
+    assert_equal(src.read_u64(1, 2), 258)
+    assert_equal(src.read_u64(1, 3), 127)
+    for c in [0, 1, 2, 3]:
+        assert_equal(src.read_u64(2, c), 0)
+        # The same bits as the signed read, reinterpreted.
+        for r in range(3):
+            assert_equal(
+                src.read_u64(r, c),
+                src.read_i64(r, c).cast[DType.uint64](),
+                "row " + String(r) + " col " + String(c),
+            )
+
+
+def test_row_read_u64_refuses_non_integer_cells() raises:
+    """read_u64 on an F32, F64, DECIMAL128 or STRING cell, or on a tag no
+    CELL_DT names, raises and names the tag and column, in every row. The F32
+    at offset 23 is followed by the F64 at 27, so an 8-byte load there would
+    return bytes of the next cell instead of refusing."""
+    var rb = _row_block()
+    var dts = _dtypes()
+    dts.append(UInt8(99))
+    var offs = _offsets()
+    offs.append(0)
+    var src = RowCellSource(rb, offs^, dts^)
+    var cols: List[Int] = [8, 9, 11, _STR, _N_COLS]
+    var tags: List[Int] = [3, 1, 12, 4, 99]
+    for i in range(len(cols)):
+        var c = cols[i]
+        for r in range(3):
+            var msg = String("")
+            try:
+                var v = src.read_u64(r, c)
+                msg = "returned " + String(v)
+            except e:
+                msg = String(e)
+            var want = (
+                "RowCellSource.read_u64: cell tag "
+                + String(tags[i])
+                + " is not an integer or BOOL cell (col_idx="
+                + String(c)
+                + ")"
+            )
+            assert_true(
+                want in msg,
+                "row " + String(r) + " col " + String(c) + ": " + msg,
+            )
+
+
 def test_row_read_f64_widens_ints_and_f32() raises:
     """read_f64 per tag: I64/I32/BOOL convert the integer value, F32 widens
     the float, F64 reads the 8 IEEE bytes at an odd offset."""
@@ -266,6 +334,27 @@ def test_row_read_f64_widens_ints_and_f32() raises:
     assert_equal(src.read_f64(1, 8), 0.5)
     assert_equal(src.read_f64(1, 9), -3.5)
     assert_equal(src.read_f64(2, 9), 0.0)
+
+
+def test_row_read_f64_widens_narrow_and_unsigned_ints() raises:
+    """read_f64 on I16/I8/U8/U16/U32/U64 cells converts the integer value
+    (the trait's contract: conformers widen int storage to f64): signed
+    cells sign-extend (row 0's set top bits give negatives), unsigned cells
+    stay positive (u64 2^64-1 and 2^63 survive). A raw 8-byte float read of
+    these cells gives some unrelated float or NaN."""
+    var rb = _row_block()
+    var src = RowCellSource(rb, _offsets(), _dtypes())
+    var cols: List[Int] = [2, 3, 4, 5, 6, 10]
+    var row0: List[Float64] = [
+        -32767.0, -127.0, 255.0, 65534.0, 4294967294.0, 18446744073709551615.0
+    ]
+    var row1: List[Float64] = [
+        258.0, 127.0, 1.0, 258.0, 16909060.0, 9223372036854775808.0
+    ]
+    for i in range(len(cols)):
+        assert_equal(src.read_f64(0, cols[i]), row0[i], "row 0 col " + String(cols[i]))
+        assert_equal(src.read_f64(1, cols[i]), row1[i], "row 1 col " + String(cols[i]))
+        assert_equal(src.read_f64(2, cols[i]), 0.0, "row 2 col " + String(cols[i]))
 
 
 def test_row_read_i32_and_f32_read_their_width() raises:
@@ -576,7 +665,10 @@ def main() raises:
     var s = TestSuite()
     s.test[test_row_read_i64_widens_each_storage_width]()
     s.test[test_row_read_u64_zero_extends_unsigned_cells]()
+    s.test[test_row_read_u64_reads_signed_cells_at_their_width]()
+    s.test[test_row_read_u64_refuses_non_integer_cells]()
     s.test[test_row_read_f64_widens_ints_and_f32]()
+    s.test[test_row_read_f64_widens_narrow_and_unsigned_ints]()
     s.test[test_row_read_i32_and_f32_read_their_width]()
     s.test[test_row_read_i128_reads_both_words]()
     s.test[test_row_decimal_scale_of_side_table]()

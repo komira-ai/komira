@@ -273,6 +273,14 @@ comptime SORT_FIELD_SCORE: String = "_score"
 comptime SORT_FIELD_DOC: String = "_doc"
 """The reserved `_doc` sort key (doc-id order)."""
 
+comptime SEARCH_QUERY_FIELD_MISMATCH: StaticString = (
+    "SEARCH_QUERY_FIELD_MISMATCH"
+)
+"""NAMED ERROR -- `SearchCore` was asked a query whose `field_name` is not
+the text field its split indexes (`SplitView.field_name`). A split's term
+dictionary holds one field's terms, so answering would score another field's
+postings. A caller routes each query to the splits of its field."""
+
 # Heap comparison modes (the `_TopKHeap._mode` discriminant).
 comptime SORT_MODE_SCORE: UInt8 = 0
 """BM25-score ordering — the default; BYTE-IDENTICAL to an unsorted query (zero-cost)."""
@@ -796,20 +804,19 @@ def _docstore_blob_extent[
     # uncompressed-lens, then the blob area.
     var off_table_start = 9
     var n_offsets = num_docs + 1
-    var unc_table_start = off_table_start + n_offsets * 8
-    var blob_area_start = unc_table_start + num_docs * 8
-    # The full fixed-size prefix (header + both tables) must be present before we
-    # read any offset (validate the whole index area first).
-    if blob_area_start > len(region):
+    # The full fixed-size prefix (header + both tables, 9 + 16 * num_docs + 8
+    # bytes) must be present before we read any offset (validate the whole index
+    # area first). Bound the count, not that size: the product can wrap Int.
+    if num_docs > (len(region) - off_table_start - 8) // 16:
         raise Error(
-            "_docstore_blob_extent: index area ["
-            + String(off_table_start)
-            + ", "
-            + String(blob_area_start)
-            + ") exceeds region length "
+            "_docstore_blob_extent: index area for num_docs "
+            + String(num_docs)
+            + " exceeds region length "
             + String(len(region))
             + " (corrupt)"
         )
+    var unc_table_start = off_table_start + n_offsets * 8
+    var blob_area_start = unc_table_start + num_docs * 8
 
     var start = _read_u64_le_at(region, off_table_start + slot * 8)
     var end = _read_u64_le_at(region, off_table_start + (slot + 1) * 8)
@@ -825,7 +832,8 @@ def _docstore_blob_extent[
         )
     var blob_len = end - start
     var blob_off = blob_area_start + start
-    if blob_off + blob_len > len(region):
+    # Not blob_off + blob_len > len: start can be near Int max and that wraps.
+    if blob_len > len(region) - blob_area_start - start:
         raise Error(
             "_docstore_blob_extent: blob ["
             + String(blob_off)
@@ -1928,7 +1936,7 @@ def _bmw_read_doc_count(
     Returns (doc_count, post_doc_count_rel) where post_doc_count_rel is the byte
     offset, RELATIVE to `poff`, of the first byte AFTER the doc_count ULEB — the
     base the BLOCKMAX `block_byte_offset` entries are relative to."""
-    if poff < 0 or plen < 0 or poff + plen > len(region):
+    if poff < 0 or plen < 0 or plen > len(region) - poff:  # no wrapping sum
         raise Error("_bmw_read_doc_count: posting region out of bounds")
     var end = poff + plen
     var dc_res = _read_uleb128_span(region, poff, end)
@@ -2098,6 +2106,17 @@ struct SearchCore(Movable, Deinitable):
         a shared borrow (the MorselSourceImpl immutable-borrow contract; the
         single-shot cursor lives on the higher-package reader).
         """
+        # ---- the query must target the field this split indexes: the term
+        # dictionary below holds that field's terms only.
+        if query.field_name != self._view.field_name():
+            raise Error(
+                String(SEARCH_QUERY_FIELD_MISMATCH)
+                + String(": the query targets field '")
+                + query.field_name
+                + String("' but this split indexes field '")
+                + self._view.field_name()
+                + String("'")
+            )
         var big_n = self._view.doc_count()
         var min_id = self._view.min_doc_id()
         var params = Bm25Params()  # modern BM25, Lucene/OpenSearch default b=0.75.

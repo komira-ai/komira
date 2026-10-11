@@ -83,6 +83,7 @@ from komira_objectstore.path import Path
 from komira_objectstore.store import ConditionalWriteStore
 
 from .broker_core import SegmentFooter
+from .chunk_walk import restart_point_after_failed_read
 from .manifest_body import ManifestBody
 # decode_arrow_ipc_stream lives in komira_sdk (the self-describing stream
 # decoder). The broker LIBRARY does NOT depend on the SDK — that would invert
@@ -367,10 +368,11 @@ struct ConsumeCore[Storage: ConditionalWriteStore](Movable, Deinitable):
             chunks — never reads chunk 0 after it's gone);
           * SEEDS `running_base` from the persisted `log_start_offset` so
             survivors keep their CORRECT ABSOLUTE offsets (never renumber);
-          * fail-SOFT skips a chunk that 404s mid-walk (reaped between the
-            log_start read and the chunk read — a benign race; the next live
-            chunk's offsets are still correct because they come from the
-            running sum seeded at log_start).
+          * on a chunk that cannot be read, restarts from a `_LOG_START`
+            that has moved past it (the chunk was reaped between the
+            log_start read and the chunk read) and raises otherwise
+            (`chunk_walk.restart_point_after_failed_read`): it never keeps
+            the running sum past a chunk whose record_count it did not read.
 
         The manifest append IS the offset allocator: live chunk seq
         `k` occupies `[base_k, base_k + record_count_k - 1]`. Returns the
@@ -426,16 +428,15 @@ struct ConsumeCore[Storage: ConditionalWriteStore](Movable, Deinitable):
                 running_base += rc
                 seq += Int64(1)
             except e:
-                if _is_not_found_msg(String(e)):
-                    # Reaped between the log_start read and this read (benign
-                    # race) — skip. The running_base seeded from log_start
-                    # keeps the next live chunk's absolute offset correct: the
-                    # invariant (reaping ALWAYS advances log_start past the
-                    # reaped seq) means a skip here is only ever the boundary
-                    # chunk at log_start, whose bytes are absorbed by the seed.
-                    seq += Int64(1)
-                    continue
-                raise e^
+                # The chunk's record_count is unknown, so the running base
+                # cannot pass it: restart from a `_LOG_START` that moved past
+                # it (reaped after our `_LOG_START` read), or raise.
+                ls = restart_point_after_failed_read(
+                    self._manifest, seq, e^, "ConsumeCore.resolve_index"
+                )
+                index = List[SegmentRef]()
+                running_base = ls.log_start_offset
+                seq = ls.log_start_seq
         return index^
 
     # -------------------------------------------------------------------------

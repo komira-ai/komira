@@ -27,12 +27,20 @@
 # of [off:off + n]: red (sliced case: row 1 not null).
 # python_call.c releasing the argument array when the call returns, whatever
 # views remain: red ("the kept argument array is still the runtime's").
+#
+# Each kind of numpy result (_numpy_results): a raise names no row; a list
+# is converted; two dimensions are refused; int64 for a declared float64 is
+# cast, float64 for a declared int64 refused; a reversed view is made
+# contiguous; a plain result of a masked input has no null (the result's
+# validity is not the input's). The round-2 sweep's survivors in _numpy
+# (komira_udf_pyrt.py lines asarray, ndim, dtype, ascontiguousarray,
+# `valid = None`) go red on these.
 
 from std.testing import assert_equal, assert_true
 
 from komira_udf_spike_abi.conform import same_column
 from komira_udf_spike_abi.contract import *
-from komira_udf_spike_abi.runtime import CallOptions, UdfRuntime
+from komira_udf_spike_abi.runtime import CallOptions, UdfRuntime, UdfSpec
 from komira_udf_spike_abi.values import Column, TYPE_FLOAT64, TYPE_INT64
 from komira_udf_spike_python.calls import call_once, floats, ints, spec1
 
@@ -66,8 +74,83 @@ def main() raises:
     for v in [0.5, 1.0, 1.5]:
         halves.append_float(v)
     assert_equal(same_column(r.column, halves), "")
+    _numpy_results(rt)
     _kept_views(rt)
     print("test_python_shared_gil: ok")
+
+
+def _floats_want(values: List[Float64], null_at: Int = -1) -> Column:
+    var c = Column(TYPE_FLOAT64)
+    for i in range(len(values)):
+        if i == null_at:
+            c.append_null()
+        else:
+            c.append_float(values[i])
+    return c^
+
+
+def _np(entry: String, arg: Int, result: Int) -> UdfSpec:
+    return spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_np:" + entry, arg, result)
+
+
+def _numpy_results(mut rt: UdfRuntime) raises:
+    """What the adapter does with each kind of numpy result."""
+    var r = call_once(rt, _np("np_raise", TYPE_FLOAT64, TYPE_FLOAT64), floats([1.0, 2.0]))
+    assert_equal(status_name(r.outcome.status), "ERR_RAISED", String(r.outcome))
+    assert_equal(r.outcome.row, -1, "a batch function's raise names no row")
+    # A list result is converted.
+    r = call_once(rt, _np("np_list", TYPE_FLOAT64, TYPE_FLOAT64), floats([1.0, 2.5]))
+    assert_true(r.outcome.is_ok(), String(r.outcome))
+    assert_equal(same_column(r.column, _floats_want([2.0, 5.0])), "", "a list result")
+    # Two dimensions: refused for the batch.
+    r = call_once(rt, _np("np_2d", TYPE_FLOAT64, TYPE_FLOAT64), floats([1.0, 2.0]))
+    assert_equal(status_name(r.outcome.status), "ERR_RETURN_TYPE", String(r.outcome))
+    assert_equal(r.outcome.row, -1, String(r.outcome))
+    assert_true("2 dimensions" in r.outcome.message, String(r.outcome))
+    # int64 for a declared float64: cast (safe), values kept.
+    r = call_once(rt, _np("np_int_out", TYPE_INT64, TYPE_FLOAT64), ints([1, 2, 3]))
+    assert_true(r.outcome.is_ok(), String(r.outcome))
+    assert_equal(same_column(r.column, _floats_want([2.0, 4.0, 6.0])), "", "int64 cast to float64")
+    # float64 for a declared int64: refused (unsafe).
+    r = call_once(rt, _np("np_float_out", TYPE_INT64, TYPE_INT64), ints([1, 2, 3]))
+    assert_equal(status_name(r.outcome.status), "ERR_RETURN_TYPE", String(r.outcome))
+    assert_equal(r.outcome.row, -1, String(r.outcome))
+    assert_true("the result is float64, not int64" in r.outcome.message, String(r.outcome))
+    # A view with a negative stride: made contiguous before the copy.
+    r = call_once(rt, _np("np_reversed", TYPE_FLOAT64, TYPE_FLOAT64), floats([1.0, 2.0, 3.0]))
+    assert_true(r.outcome.is_ok(), String(r.outcome))
+    assert_equal(same_column(r.column, _floats_want([3.0, 2.0, 1.0])), "", "a reversed view")
+    # A masked input, a plain result: no null in the result, even though the
+    # input's row 1 was null.
+    r = call_once(rt, _np("np_filled", TYPE_FLOAT64, TYPE_FLOAT64), floats([1.0, 7.0, 3.0], null_at=1))
+    assert_true(r.outcome.is_ok(), String(r.outcome))
+    assert_equal(same_column(r.column, _floats_want([2.0, 1.0, 4.0])), "", "a plain result of a masked input")
+    # A ragged list: no array of it; the user's value, not a runtime failure.
+    r = call_once(rt, _np("np_ragged", TYPE_FLOAT64, TYPE_FLOAT64), floats([1.0, 2.0]))
+    assert_equal(status_name(r.outcome.status), "ERR_RETURN_TYPE", String(r.outcome))
+    assert_true("the result is no array" in r.outcome.message, String(r.outcome))
+    assert_equal(r.outcome.row, -1, "a batch's bad result names no row")
+    # The argument is the engine's buffer, read-only: a write raises.
+    r = call_once(rt, _np("np_writes", TYPE_FLOAT64, TYPE_FLOAT64), floats([1.0, 2.0]))
+    assert_equal(status_name(r.outcome.status), "ERR_RAISED", String(r.outcome))
+    assert_true("read-only" in r.outcome.message, String(r.outcome))
+    # Each ArrowBuffer holds its type once and lets go when it is freed: the
+    # type's reference count is the same on every call of one instance.
+    var refs = _np("buffer_type_refs", TYPE_FLOAT64, TYPE_FLOAT64)
+    var u = rt.load(refs)
+    var c = rt.open_context(0)
+    var i = rt.open_instance(c.handle, u.handle)
+    assert_true(i.outcome.is_ok(), String(i.outcome))
+    var counts = List[Float64]()
+    for _ in range(4):
+        var rr = rt.call_batch(i.handle, refs, floats([1.0, 2.0]), CallOptions.plain())
+        assert_true(rr.outcome.is_ok(), String(rr.outcome))
+        counts.append(rr.column.as_float(0))
+    rt.close_instance(i.handle)
+    rt.close_context(c.handle)
+    rt.unload(u.handle)
+    for k in range(1, len(counts)):
+        assert_equal(counts[k], counts[0], "ArrowBuffer type references call by call")
 
 
 def _unreleased(rt: UdfRuntime) -> Int:

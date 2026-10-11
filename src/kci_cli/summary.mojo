@@ -11,6 +11,10 @@
 #                         publishes says about its channel (`promoted to
 #                         <stage>: ...`, `nothing new`, `PLAN ONLY`), "" for
 #                         any other run
+#   superseded_line       `superseded: <stage> did nothing for <revision>:
+#                         <why>`, the line of a run that ended SUPERSEDED
+#                         (exit 0: something newer is ahead), "" for any
+#                         other run
 #   break_glass_line      `BREAK-GLASS: <ref> <revision> by <actor>:
 #                         <reason>`, the first line of every break-glass
 #                         run's summary
@@ -30,6 +34,7 @@ from kci_api import (
     CREDENTIAL_PROBE_NOT_UNDER_CI,
     OUTCOME_NOOP,
     OUTCOME_SUCCEEDED,
+    OUTCOME_SUPERSEDED,
     SCOPE_SELECTIVE,
     STEP_KIND_PUBLISH,
     credential_probe_note,
@@ -196,6 +201,15 @@ def promotion_line(result: KciRunResult, stage: String, main_only: Bool) -> Stri
     if result.outcome == OUTCOME_NOOP:
         return String("promoted to ") + stage + String(": nothing new (") + build + String(" already there)")
     return String("promoted to ") + stage + String(": ") + String(" ").join(names) + String(" ") + build
+
+
+def superseded_line(result: KciRunResult, stage: String, why: String) -> String:
+    """The file header's `superseded_line`."""
+    if result.outcome != OUTCOME_SUPERSEDED:
+        return String("")
+    var rev = result.revision
+    var short = String(rev[byte = 0 : 8]) if rev.byte_length() >= 8 else rev.copy()
+    return String("superseded: ") + stage + String(" did nothing for ") + short + String(": ") + why
 
 
 def break_glass_line(ref_value: String, revision: String, actor: String, reason: String) -> String:

@@ -48,6 +48,28 @@
 #                 same with no validation run (no run-id label anywhere).
 #                 A caller's scope without a run id cannot let an adapter
 #                 whose create path skips the tag pass.
+#  13. adoption   ADOPTION THROUGH `Resource.adopt`, into the emptied cloud:
+#                 the kit adds to `base` one resource it can adopt
+#                 (`_adoptable`: its type takes a cloud name, and its
+#                 primary node reads no value of another node), a copy of
+#                 the first such resource of `base`, else an empty body of
+#                 its own (a bucket, a queue, a topic, a secret or a service
+#                 account), with id and cloud name `KIT_ADOPTED`, no `uses`,
+#                 writing `adopt` ADOPT, and plants the object its primary
+#                 node declares (`plant_like`). `read_existing` must report that
+#                 object present and unstamped, of the node's kind and
+#                 under its cloud name. The apply that adopts it must not create it,
+#                 and must leave it stamped for the node and carrying the
+#                 adoption mark (`kci_adopted=true`). A modelled field
+#                 changed out of band is then converged by an UPDATE that
+#                 keeps the stamp and the mark (an adapter whose update
+#                 rewrites the label map would drop the mark, and kci would
+#                 then delete an object it did not create). An apply of
+#                 `base` alone RELEASES it: the outcome lists
+#                 it, the object still stands, unstamped, under its name,
+#                 it carries no kci label, and `list_owned` no longer
+#                 reports it. The kit then destroys the rest; the released
+#                 object stays.
 # Every apply that should finish must: one that stops part-way fails the kit
 # with what landed and what is pending.
 #
@@ -75,23 +97,29 @@ from kci_reconciler import (
     VERB_NOOP,
     VERB_UPDATE,
 )
-from kci_resource_proto.resource import Resource
+from komira_proto_codec import decode_json
+from kci_resource_proto.resource import Adoption, Resource
 
 from kci_cloud.adapter import CellContext, CloudAdapter, LoweredNode
+from kci_cloud.catalog import Catalog, body_field, primary_node
 from kci_cloud.deploy import (
     ApplyOutcome,
     apply_resources,
     destroy_resources,
     lower_data,
     plan_resources,
+    refuse_unless_valid,
 )
 from kci_cloud.clouds import Clouds
 from kci_cloud.labels import (
+    adopted_by,
+    is_kci_label_key,
     label_problems,
     retention_label_key,
     retention_label_value,
     validation_run_of,
 )
+from kci_cloud.metadata import PHYSICAL_NAME_FIELD
 
 
 trait ConformanceTarget(CloudAdapter):
@@ -148,6 +176,12 @@ trait ConformanceTarget(CloudAdapter):
         its lifetime (the kit compares counts before and after a step)."""
         ...
 
+    def plant_like(mut self, node: LoweredNode) raises:
+        """Create, out of band and unstamped, the object `node` declares
+        (its kind, its cloud name and its state): what an adoption of it
+        expects to find."""
+        ...
+
 
 def _fail(step: String, msg: String) -> Error:
     return Error(String("conformance [") + step + String("]: ") + msg)
@@ -174,6 +208,13 @@ def _verb_of(actions: List[ChangeAction], lid: String) -> Int:
     for i in range(len(actions)):
         if actions[i].logical_id == lid:
             return actions[i].verb
+    return -1
+
+
+def _verb_of_applied(applied: List[AppliedNode], lid: String) -> Int:
+    for i in range(len(applied)):
+        if applied[i].logical_id == lid:
+            return applied[i].verb
     return -1
 
 
@@ -256,6 +297,81 @@ def _check_labels[
                 lowered[k].id + String(" carries validation run \"") + _shown(run)
                 + String("\", not \"") + _shown(want_run) + String("\""),
             )
+
+
+comptime KIT_ADOPTED = "kitadopt"
+"""The id and the cloud name of the resource step 13 adopts: letters only
+and 8 bytes, inside every shape's name rule."""
+
+
+def _kit_arms() -> List[String]:
+    """The bodies step 13 tries, written empty, when no resource of `base`
+    can be copied: each a standalone type that reads no other resource."""
+    return ["bucket", "queue", "topic", "secret", "serviceAccount"]
+
+
+def _candidate(base: List[Resource], i: Int) raises -> Resource:
+    """Candidate `i` of step 13: a copy of `base[i]` for `i < len(base)`,
+    else an empty body of `_KIT_ARMS`; with id and cloud name
+    `KIT_ADOPTED`, no `uses`, writing `adopt` ADOPT."""
+    var r: Resource
+    if i < len(base):
+        r = base[i].copy()
+    else:
+        r = decode_json[Resource](
+            String('{"id":"x","') + _kit_arms()[i - len(base)] + String('":{}}')
+        )
+    r.id = String(KIT_ADOPTED)
+    r.uses.clear()
+    r.physical_name = String(KIT_ADOPTED)
+    r.adopt = Adoption(Adoption.ADOPT)
+    return r^
+
+
+def _adoptable[
+    S: ConformanceTarget
+](clouds: Clouds, mut cloud: S, ctx: CellContext, base: List[Resource]) raises -> List[Resource]:
+    """`base` and, after it, the first candidate (`_candidate`) step 13 can
+    adopt, or empty: its type takes a cloud name, the list with it is valid
+    on `cloud`, and its primary node is wanted and reads no value of another
+    node (so the object `plant_like` makes is the one the node declares).
+    Nothing in `base` names it, so `base` alone is the list it leaves."""
+    var catalog = Catalog.v1()
+    for i in range(len(base) + len(_kit_arms())):
+        try:
+            var r = _candidate(base, i)
+            var t = catalog.index_of(body_field(r))
+            if t < 0 or not catalog.types[t].takes_name:
+                continue
+            var adopting = base.copy()
+            adopting.append(r^)
+            refuse_unless_valid(clouds, cloud, ctx, adopting)
+            var pid = primary_node(catalog, adopting, String(KIT_ADOPTED))
+            var nodes = lower_data(cloud, adopting)
+            for k in range(len(nodes)):
+                if nodes[k].id == pid and nodes[k].wanted and len(nodes[k].inputs) == 0:
+                    return adopting^
+        except:
+            continue
+    return List[Resource]()
+
+
+def _check_adopted[
+    S: ConformanceTarget
+](step: String, cloud: S, ctx: CellContext, node: LoweredNode, when: String) raises:
+    """The live object of `node` carries the stamp of `node` and the
+    adoption mark."""
+    var labels = cloud.live_labels(node.id)
+    var want = ctx.scope.stamp(node.owner, node.id).identity()
+    var got = cloud.identity_of(labels)
+    if got != want:
+        raise _fail(step, node.id + String(" ") + when + String(" carries \"") + got + String("\", not \"") + want + String("\""))
+    if not adopted_by(labels):
+        raise _fail(
+            step,
+            node.id + String(" ") + when
+            + String(" does not carry the adoption mark kci_adopted=true; without it kci would delete an object it did not create"),
+        )
 
 
 def _wanted(nodes: List[LoweredNode]) -> Int:
@@ -502,3 +618,61 @@ def run_conformance[
         _ = destroy_resources(clouds, cloud, c12, base, creds, store12)
         if cloud.live_count() != 0:
             raise _fail("run tag", String("nodes left after the run-tag destroy"))
+
+    # 13. adoption through the resource's adopt field
+    var adopting = _adoptable(clouds, cloud, ctx, base)
+    if len(adopting) == 0:
+        raise _fail(
+            "adopt",
+            String("no resource of base, and none of the kit's own, can be adopted on this cloud: a type that")
+            + String(" takes a cloud name, whose primary node reads no value of another node"),
+        )
+    var rest = base.copy()
+    var pid = primary_node(Catalog.v1(), adopting, String(KIT_ADOPTED))
+    var low13 = lower_data(cloud, adopting)
+    var pnode = low13[0].copy()
+    for k in range(len(low13)):
+        if low13[k].id == pid:
+            pnode = low13[k].copy()
+    var name13 = pnode.field(String(PHYSICAL_NAME_FIELD))
+    cloud.plant_like(pnode)
+    var seen = cloud.read_existing(creds, pnode)
+    if not seen.present or seen.stamped:
+        raise _fail("adopt", pid + String(": read_existing does not report the planted object, present and unstamped"))
+    if seen.kind != pnode.kind or seen.name != name13:
+        raise _fail(
+            "adopt",
+            pid + String(": read_existing reports kind \"") + seen.kind + String("\" and name \"") + seen.name
+            + String("\"; the object is kind \"") + pnode.kind + String("\" named \"") + name13 + String("\""),
+        )
+    var store13 = InMemoryStateStore()
+    var creates13 = cloud.creates_of(pid)
+    _ = _applied("adopt", apply_resources(clouds, cloud, ctx, adopting, creds, store13))
+    if cloud.creates_of(pid) != creates13:
+        raise _fail("adopt", pid + String(" was created, not adopted"))
+    _check_adopted("adopt", cloud, ctx, pnode, String("after the adoption"))
+    cloud.tamper(pid)
+    var u13 = _applied("adopt", apply_resources(clouds, cloud, ctx, adopting, creds, store13))
+    if _verb_of_applied(u13, pid) != VERB_UPDATE:
+        raise _fail("adopt", pid + String(": a modelled field changed out of band did not update the adopted object"))
+    _check_adopted("adopt", cloud, ctx, pnode, String("after an update"))
+    var r13 = apply_resources(clouds, cloud, ctx, rest, creds, store13)
+    _ = _applied("release", r13)
+    var released = False
+    for i in range(len(r13.released)):
+        if r13.released[i] == pid:
+            released = True
+    if not released:
+        raise _fail("release", pid + String(" left the list but the apply did not release it"))
+    var after = cloud.read_existing(creds, pnode)
+    if not after.present or after.stamped or after.name != name13:
+        raise _fail("release", pid + String(": the released object does not still stand, unstamped, under its name"))
+    var left = cloud.live_labels(pid)
+    for i in range(len(left)):
+        if is_kci_label_key(left[i].key):
+            raise _fail("release", pid + String(" still carries the kci label ") + left[i].key)
+    var owned = cloud.list_owned(creds, ctx.scope)
+    for i in range(len(owned)):
+        if owned[i].owner_node == pid:
+            raise _fail("release", pid + String(" is still listed as kci's"))
+    _ = destroy_resources(clouds, cloud, ctx, rest, creds, store13)

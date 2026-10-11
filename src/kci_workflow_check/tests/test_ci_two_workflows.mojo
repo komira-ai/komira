@@ -125,7 +125,7 @@ comptime _PR_JOB: String = (
     "        with:\n"
     "          fetch-depth: 0\n"
     "      - uses: ./.github/actions/farm-connect\n"
-    "      - run: kci run --stage pr --affected-by ${{ github.event.pull_request.base.sha }} --summary-file x\n"
+    "      - run: kci run --stage pr --affected-by \"$change_base\" --summary-file x\n"
 )
 
 
@@ -221,7 +221,7 @@ def test_the_release_workflow_still_holds_the_rest() raises:
         String("job 'publish-gamma': R4: `permissions: write-all` grants permissions no map names"),
     )
     _reports(
-        _mut(String("kci run --stage build --summary-file"), String("kci run --stage build --affected-by ${{ github.event.pull_request.base.sha }} --summary-file")),
+        _mut(String("kci run --stage build --summary-file"), String("kci run --stage build --affected-by \"$change_base\" --summary-file")),
         String("job 'build': R6: `kci run` carries --affected-by, but stage 'build' is a PUSH stage"),
     )
 
