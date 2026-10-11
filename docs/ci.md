@@ -1111,16 +1111,6 @@ that changes only `docs/**` or `*.md` files starts no `kci.yml` run (rule
 R17), so a README example it breaks is found by the next push's run, whose
 range names it. Cases: `//release/ci/tests:test_main_red`.
 
-## merge-from-live (not yet running)
-
-[`.github/workflows/merge_from_live.yml`](../.github/workflows/merge_from_live.yml)
-is the planned weekly pull request bumping every pin (buck2, the toolchain
-downloads, third-party archives) to its live release, merged only if its own
-`pr / check` run is green. It is a stub: its script,
-[`.github/ci/merge_from_live.sh`](../.github/ci/merge_from_live.sh), states the
-design and exits 1, and the workflow has no schedule until the script opens
-pull requests.
-
 ## Running it yourself
 
 ```sh

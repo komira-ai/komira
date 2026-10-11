@@ -671,7 +671,7 @@ after the slice of its last callee. Slice 11 deletes `run_tests.sh` last.
    - Move the report floors into the case actions.
    - Add the s2n probe `fail()` and the `branch_gate_rows` target.
    - Add the two Rust unit tests (`omit_pruned_field`, `unknown_operation`) and the window-pin check.
-   - Delete the spsc_ring falsifier scripts and their fixtures: `negative/spsc_ring_element.sh`,
+   - Deleted: the spsc_ring falsifier scripts and their fixtures, `negative/spsc_ring_element.sh`,
      `negative/spsc_ring_prefix_layout.sh` and `negative/spsc_ring_prefix_layout/` (two `.mojo`
      files). Nothing calls them. The regression tests they falsified stay in `komira_spsc_ring`
      (`test_consumer_polling_before_the_slot_store_exists`, `test_layout_guards`). What goes is the
@@ -815,7 +815,6 @@ Sourced sections:
 | `node_tests.sh` | 8 |
 | `golden/golden.sh` | 5 (with its call in `platform_table/check.sh`) |
 | `negative/lint_weld.sh` | 9 |
-| `negative/spsc_ring_element.sh`, `negative/spsc_ring_prefix_layout.sh` (with `negative/spsc_ring_prefix_layout/`) | 2 |
 
 The 16 `functional/` drivers the harness calls:
 
