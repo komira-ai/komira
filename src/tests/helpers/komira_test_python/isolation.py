@@ -41,8 +41,6 @@ NATIVE = [
     "numpy",
     "pandas",
     "pyarrow",
-    "scipy",
-    "sklearn",
 ]
 
 
@@ -74,8 +72,6 @@ def mapped_files():
     import pyarrow  # noqa: F401
     import pyarrow.flight  # noqa: F401
     import pyarrow.parquet  # noqa: F401
-    import scipy.linalg  # noqa: F401
-    import sklearn.linear_model  # noqa: F401
 
     paths = set()
     with open("/proc/self/maps") as f:

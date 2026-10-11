@@ -30,6 +30,15 @@ No source distribution is built and pip never runs.
 | grpcio | 1.84.0 | typing-extensions | gRPC interop |
 | typing-extensions | 4.16.0 | | grpcio |
 | tzdata | 2026.5 | | the time-zone database of every `py_test` and `python_oracle` (IANA 2026e) |
+
+The Python UDF runtime spike (`src/tests/helpers/komira_udf_spike_python`)
+has a closure of its own on the same interpreter, `WHEELS_UDF_PYTHON` in
+[`pins.bzl`](pins.bzl), visible to that package only. Nothing that iterates
+`WHEELS` takes it, and the package checks its licences itself (its
+`licenses` test).
+
+| distribution | version | requires | for |
+|---|---|---|---|
 | scikit-learn | 1.9.1 | numpy, scipy, joblib, narwhals, threadpoolctl | which libraries load in a sub-interpreter (the UDF runtime spike) |
 | scipy | 1.18.1 | numpy | scikit-learn |
 | joblib | 1.6.0 | cloudpickle | scikit-learn |

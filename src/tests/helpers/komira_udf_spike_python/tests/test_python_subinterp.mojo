@@ -328,6 +328,12 @@ def _edges(mut rt: UdfRuntime) raises:
     r = call_once_with(rt, dbl, ints([1, 2, 3]), CallOptions(False, False, False, 1_500_000))
     assert_equal(status_name(r.outcome.status), "ERR_DEADLINE", String(r.outcome))
     assert_equal(r.outcome.row, 2, String(r.outcome))
+    assert_true("the deadline passed at row 2" in r.outcome.message, String(r.outcome))
+    # A deadline exactly at a reading has not passed: 2 ms ahead, read after
+    # row 1, the call goes on to row 2 and finishes (the C side compares
+    # `now > deadline` too).
+    r = call_once_with(rt, dbl, ints([1, 2, 3]), CallOptions(False, False, False, 2_000_000))
+    assert_true(r.outcome.is_ok(), "a deadline equal to the clock: " + String(r.outcome))
 
     # Column results of 0 and 1 rows.
     var ident = spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_fixtures:identity", TYPE_INT64, TYPE_INT64)

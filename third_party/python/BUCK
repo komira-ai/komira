@@ -3,7 +3,7 @@ load("@komira//tools/build/mojo:toolchain.bzl", "conda_libs")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
 load("@komira//tools/build/python:defs.bzl", "python_dist", "python_wheel")
-load(":pins.bzl", "PYTHON", "PYTHON_314", "PYTHON_314T", "WHEELS", "WHEELS_314")
+load(":pins.bzl", "PYTHON", "PYTHON_314", "PYTHON_314T", "WHEELS", "WHEELS_314", "WHEELS_UDF_PYTHON")
 
 # The hermetic Python of the tests (README.md): CPython from a
 # python-build-standalone archive and a closure of binary wheels, every file
@@ -15,11 +15,13 @@ load(":pins.bzl", "PYTHON", "PYTHON_314", "PYTHON_314T", "WHEELS", "WHEELS_314")
 _TEST_ONLY = [
     "komira//src/tests/e2e/komira_tls_interop_e2e/...",
     "komira//src/tests/helpers/komira_test_python/...",
-    # The embedded Python UDF runtime of the UDF runtime spike.
-    "komira//src/tests/helpers/komira_udf_spike_python/...",
     # The tests of the CI scripts under release/ci (a py_test alone).
     "komira//release/ci/tests:",
 ]
+
+# The Python UDF runtime spike: the interpreter, WHEELS and its own closure
+# (pins.bzl, WHEELS_UDF_PYTHON), which no other package sees.
+_UDF_PYTHON = ["komira//src/tests/helpers/komira_udf_spike_python/..."]
 
 pinned_file(
     name = PYTHON["archive"],
@@ -44,7 +46,7 @@ conda_libs(
     name = "native_libs",
     exec_compatible_with = LINUX_X86_64,
     # A test that starts a child interpreter loads them in the child too.
-    visibility = _TEST_ONLY,
+    visibility = _TEST_ONLY + _UDF_PYTHON,
     libs = {
         "lib/libgcc_s.so.1": ":" + pinned_kwargs("linux-x86_64", "libgcc")["name"],
         "lib/libstdc++.so.6": ":" + pinned_kwargs("linux-x86_64", "libstdcxx")["name"],
@@ -63,7 +65,7 @@ python_dist(
         "lib/libz.so.1",
     ],
     version = PYTHON["version"],
-    visibility = _TEST_ONLY,
+    visibility = _TEST_ONLY + _UDF_PYTHON,
 )
 
 [pinned_file(
@@ -71,7 +73,7 @@ python_dist(
     url = w["url"],
     sha256 = w["sha256"],
     size_bytes = w["size"],
-) for w in WHEELS]
+) for w in WHEELS + WHEELS_UDF_PYTHON]
 
 # One target per distribution, named by it (`:pyarrow`), with its deps.
 [python_wheel(
@@ -81,14 +83,24 @@ python_dist(
     wheel = ":" + w["file"],
     python = ":" + PYTHON["name"],
     deps = [":" + d for d in w["deps"]],
-    visibility = _TEST_ONLY,
+    visibility = _TEST_ONLY + _UDF_PYTHON,
 ) for w in WHEELS]
+
+[python_wheel(
+    name = w["name"],
+    distribution = w["name"],
+    version = w["version"],
+    wheel = ":" + w["file"],
+    python = ":" + PYTHON["name"],
+    deps = [":" + d for d in w["deps"]],
+    visibility = _UDF_PYTHON,
+) for w in WHEELS_UDF_PYTHON]
 
 # CPython 3.14, with the GIL and free-threaded, each with its own closure
 # (pins.bzl, WHEELS_314): `:cpython314` and `:cpython314t`, and one target per
 # distribution and interpreter, named `<distribution>-<abi>` (`:numpy-cp314t`).
 # A pure-Python wheel is downloaded once and installed for each interpreter.
-_WHEEL_FILES = [w["file"] for w in WHEELS]
+_WHEEL_FILES = [w["file"] for w in WHEELS + WHEELS_UDF_PYTHON]
 
 [pinned_file(
     name = p["archive"],

@@ -3,6 +3,7 @@ load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_shared_lib")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/python:defs.bzl", "py_test")
+load("@komira//third_party/python:pins.bzl", "WHEELS_UDF_PYTHON")
 load(":defs.bzl", "runtime_data", "udf_bench")
 
 # Test-only: a Python UDF runtime that embeds CPython behind the C ABI of
@@ -242,6 +243,27 @@ py_test(
         "$(location :load_gate)",
         "$(location :load_gate_runtime[runnable])/lib",
     ],
+)
+
+# The licences of this package's own wheels (third_party/python/pins.bzl,
+# WHEELS_UDF_PYTHON): each pinned expression declared, no AGPL, and each file
+# naming a GNU licence reviewed (third_party/python/README.md, Licences): the
+# GCC runtime libraries scipy bundles (two builds of each) and the libgomp
+# notice scikit-learn's COPYING carries.
+_REVIEWED = [
+    "scipy:scipy-1.18.1.dist-info/LICENSE.txt",
+    "scipy:scipy.libs/libgfortran-040039e1-0352e75f.so.5.0.0",
+    "scipy:scipy.libs/libgfortran-83c28eba.so.5.0.0",
+    "scipy:scipy.libs/libquadmath-2284e583.so.0.0.0",
+    "scipy:scipy.libs/libquadmath-96973f99-934c22de.so.0.0.0",
+    "scikit-learn:scikit_learn-1.9.1.dist-info/licenses/COPYING",
+]
+
+py_test(
+    name = "licenses",
+    src = "licenses/udf_licenses.py",
+    args = [w["name"] + "=" + w["license"] for w in WHEELS_UDF_PYTHON] + ["allow=" + r for r in _REVIEWED],
+    deps = ["//third_party/python:" + w["name"] for w in WHEELS_UDF_PYTHON],
 )
 
 # The deps above name every komira_* module the library and its tests import
