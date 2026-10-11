@@ -82,6 +82,10 @@ mojo_library(
         "tests/test_conform_runner.mojo": _RUNNER_CASES | {"echo.so": ":echo"},
         "tests/test_harness.mojo": {
             "src/tests/helpers/komira_udf_spike_abi/tests/data/malformed/bad.json": "tests/data/malformed/bad.json",
+            "src/tests/helpers/komira_udf_spike_abi/cases/cancel_set_during_call.json": "cases/cancel_set_during_call.json",
+            "src/tests/helpers/komira_udf_spike_abi/cases/deadline_in_future_not_reached.json": "cases/deadline_in_future_not_reached.json",
+            "src/tests/helpers/komira_udf_spike_abi/cases/deadline_one_ns_ahead.json": "cases/deadline_one_ns_ahead.json",
+            "src/tests/helpers/komira_udf_spike_abi/cases/deadline_reached_during_call.json": "cases/deadline_reached_during_call.json",
             "echo.so": ":echo",
             "echo_global_lock.so": ":echo_global_lock",
             "echo_variant.so": ":echo_variant",

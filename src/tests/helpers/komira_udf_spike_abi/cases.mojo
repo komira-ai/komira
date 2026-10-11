@@ -10,7 +10,8 @@
 #    "result_is_table": false, "state": {"type": ...},
 #    "null_mode": "MANUAL" | "PROPAGATE", "form": "BUNDLE" | ...,
 #    "descriptor_version": 0, "descriptor": [bytes],
-#    "options": {"cancel": false, "cancel_during_call": false, "deadline_passed": false},
+#    "options": {"cancel": false, "cancel_during_call": false, "deadline_passed": false,
+#                "deadline_after_ns": 0},
 #    "input": batch, "inputs": [batch], "split_at": rows,
 #    "partials": [{"input": batch, "group_ids": [...], "n_groups": n}], "n_groups": n,
 #    "expect": {"status": "OK", "run_error": ..., "fault": text, "row": n,
@@ -243,7 +244,10 @@ def parse_case(text: String) raises -> Case:
     c.run = v.get("run").as_string()
     if v.has("options"):
         var o = v.get("options")
-        c.options = CallOptions(_bool(o, "cancel"), _bool(o, "cancel_during_call"), _bool(o, "deadline_passed"))
+        c.options = CallOptions(
+            _bool(o, "cancel"), _bool(o, "cancel_during_call"), _bool(o, "deadline_passed"),
+            Int64(_int(o, "deadline_after_ns", 0)),
+        )
     if v.has("input"):
         c.input = parse_batch(v.get("input"))
     if v.has("inputs"):

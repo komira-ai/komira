@@ -89,6 +89,17 @@ static int32_t scalar(komira_udf_instance* inst, const komira_udf_call* call, co
   if (!make_col(h, o, rows, &v, &d)) return fail(h, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "call_batch: out of memory", -1);
   int64_t* di = (int64_t*)d;
   for (int64_t r = 0; r < rows; r++) {
+    if (fx->id == F_SLOW_ONCE) {
+      if (cancelled(call)) {
+        release_array(o);
+        return fail(h, e, KOMIRA_UDF_ERR_CANCELLED, "slow_loop_once_per_row: cancelled", r);
+      }
+      int64_t now = h->now_ns(h->host_data); /* the row's one clock read */
+      if (call != NULL && call->deadline_ns != 0 && now > call->deadline_ns) {
+        release_array(o);
+        return fail(h, e, KOMIRA_UDF_ERR_DEADLINE, "slow_loop_once_per_row: deadline passed", r);
+      }
+    }
     if (fx->id == F_SLOW_LOOP) {
       if (cancelled(call)) {
         release_array(o);
