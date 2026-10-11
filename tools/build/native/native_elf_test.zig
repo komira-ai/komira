@@ -4,7 +4,8 @@
 //! byte by byte (`fixture`) and read it, so a dynamic tag, a needed or
 //! defined version, or a symbol attribute the reader drops is red here even
 //! when komira_crypto's green library carries none of it (it has no run
-//! path). The object has every dynamic tag the reader keeps, an entry after
+//! path). The object has every dynamic tag the reader keeps (NEEDED and
+//! RUNPATH more than once, a non-glibc NEEDED before the last), an entry after
 //! DT_NULL (which must not be read), version-needed and version-definition
 //! sections, and a local, a hidden, a weak and versioned symbols.
 
@@ -15,7 +16,7 @@ const checks = @import("native_checks.zig");
 const t = std.testing;
 const A = std.heap.page_allocator;
 
-pub const Opts = struct { runpath: bool = true, rpath: bool = true };
+pub const Opts = struct { runpath: bool = true, rpath: bool = true, stray: bool = true };
 
 const Buf = std.ArrayList(u8);
 
@@ -47,14 +48,20 @@ fn sym(b: *Buf, name: u32, bind: u8, vis: u8, shndx: u16) void {
     put(b, u64, 0);
 }
 
-/// A shared object `libkomira_t.so.1` with NEEDED libc.so.6, the run paths
-/// `opts` asks for, DT_SYMBOLIC, DT_FLAGS 0xa and DT_FLAGS_1 0x1.
+/// A shared object `libkomira_t.so.1` with NEEDED libpthread.so.0, a stray
+/// non-glibc libstray.so.1 (if `opts.stray`) and libc.so.6 last, two RUNPATH
+/// entries and one RPATH (as `opts` asks), DT_SYMBOLIC, DT_FLAGS 0xa and
+/// DT_FLAGS_1 0x1. More than one NEEDED and RUNPATH entry, so a reader
+/// keeping only one of each is red.
 pub fn fixture(opts: Opts) []const u8 {
     var s = Buf.init(A);
     s.append(0) catch unreachable;
     const n_soname = str(&s, "libkomira_t.so.1");
     const n_libc = str(&s, "libc.so.6");
+    const n_pthread = str(&s, "libpthread.so.0");
+    const n_stray = str(&s, "libstray.so.1");
     const n_runpath = str(&s, "$ORIGIN/lib");
+    const n_runpath2 = str(&s, "/opt/runpath");
     const n_rpath = str(&s, "/opt/rpath");
     const n_after = str(&s, "libafter_null.so.1");
     const n_g214 = str(&s, "GLIBC_2.14");
@@ -68,9 +75,14 @@ pub fn fixture(opts: Opts) []const u8 {
     const n_hidden = str(&s, "komira_t_hidden");
 
     var d = Buf.init(A);
-    dyn(&d, 1, n_libc); // DT_NEEDED
+    dyn(&d, 1, n_pthread); // DT_NEEDED
+    if (opts.stray) dyn(&d, 1, n_stray);
+    dyn(&d, 1, n_libc);
     dyn(&d, 14, n_soname); // DT_SONAME
-    if (opts.runpath) dyn(&d, 29, n_runpath); // DT_RUNPATH
+    if (opts.runpath) {
+        dyn(&d, 29, n_runpath); // DT_RUNPATH
+        dyn(&d, 29, n_runpath2);
+    }
     if (opts.rpath) dyn(&d, 15, n_rpath); // DT_RPATH
     dyn(&d, 16, 0); // DT_SYMBOLIC
     dyn(&d, 30, 0xa); // DT_FLAGS
@@ -184,8 +196,11 @@ test "reader: every dynamic tag, version and symbol of a built shared object" {
     const so = try elf.readShared(A, fixture(.{}));
     try t.expectEqualStrings(
         \\SONAME libkomira_t.so.1
+        \\NEEDED libpthread.so.0
+        \\NEEDED libstray.so.1
         \\NEEDED libc.so.6
         \\RUNPATH $ORIGIN/lib
+        \\RUNPATH /opt/runpath
         \\RPATH /opt/rpath
         \\SYMBOLIC
         \\FLAGS 0xa
@@ -206,14 +221,21 @@ test "reader: every dynamic tag, version and symbol of a built shared object" {
 
 test "reader + check 4: a RUNPATH and an RPATH read from the object are red; none is green" {
     var red = checks.Red.init(A);
-    _ = try checks.check4(A, try elf.readShared(A, fixture(.{ .runpath = false, .rpath = false })), "libkomira_t.so.1", &red);
+    _ = try checks.check4(A, try elf.readShared(A, fixture(.{ .runpath = false, .rpath = false, .stray = false })), "libkomira_t.so.1", &red);
     try t.expect(red.green());
     red = checks.Red.init(A);
-    _ = try checks.check4(A, try elf.readShared(A, fixture(.{ .rpath = false })), "libkomira_t.so.1", &red);
+    _ = try checks.check4(A, try elf.readShared(A, fixture(.{ .rpath = false, .stray = false })), "libkomira_t.so.1", &red);
     try t.expectEqual(@as(usize, 1), red.lines.items.len);
-    try t.expectEqualStrings("RUNPATH entries (no komira owner is NEEDED, so none is wanted) (1): $ORIGIN/lib", red.lines.items[0]);
+    try t.expectEqualStrings("RUNPATH entries (no komira owner is NEEDED, so none is wanted) (2): $ORIGIN/lib /opt/runpath", red.lines.items[0]);
     red = checks.Red.init(A);
-    _ = try checks.check4(A, try elf.readShared(A, fixture(.{ .runpath = false })), "libkomira_t.so.1", &red);
+    _ = try checks.check4(A, try elf.readShared(A, fixture(.{ .runpath = false, .stray = false })), "libkomira_t.so.1", &red);
     try t.expectEqual(@as(usize, 1), red.lines.items.len);
     try t.expectEqualStrings("RPATH entries (1): /opt/rpath", red.lines.items[0]);
+}
+
+test "reader + check 4: a stray non-glibc NEEDED read from the object is red when it is not the last entry" {
+    var red = checks.Red.init(A);
+    _ = try checks.check4(A, try elf.readShared(A, fixture(.{ .runpath = false, .rpath = false })), "libkomira_t.so.1", &red);
+    try t.expectEqual(@as(usize, 1), red.lines.items.len);
+    try t.expectEqualStrings("NEEDED entries that are neither glibc nor a declared owner (1): libstray.so.1", red.lines.items[0]);
 }

@@ -112,8 +112,8 @@ and every dynamic symbol with its version. The unit tests
 komira_crypto's is and red on its defect;
 [`native_elf_test.zig`](native_elf_test.zig) builds a small shared object
 byte by byte, with every dynamic tag and version section the reader keeps
-(a run path among them, which komira_crypto's library lacks), and checks
-what the reader reads from it.
+(several NEEDED and run path entries among them; komira_crypto's library
+has no run path), and checks what the reader reads from it.
 
 Only `//src/komira_crypto:komira_crypto_native` exists so far, and no
 package ships it.
