@@ -4,7 +4,8 @@
 #
 #   * `SharedEngine.maybe_refresh_anchor`: re-anchors when the last anchor is
 #     at least `_ANCHOR_REFRESH_MS` old, and leaves anchor and timestamp alone
-#     when it is not;
+#     when it is not; at the edge, read in one millisecond, 999 ms is not
+#     due and 1000 ms is, and a due refresh stamps the call's clock read;
 #   * `SharedEngine.refresh_anchor`: replaces both, unconditionally;
 #   * `SiteDictionary._register_site`: idempotent on the site id, whichever
 #     entry the id already holds;
@@ -145,6 +146,72 @@ def test_maybe_refresh_anchor_leaves_a_recent_anchor_alone() raises:
     assert_false(eng.maybe_refresh_anchor(), "stamped ahead: no re-anchor")
     _assert_is_sentinel(eng, "stamped ahead")
     assert_equal(eng.last_anchor_ms(), ahead, "stamped ahead: timestamp kept")
+
+
+# How many tries the boundary test makes to find a call that reads the
+# clock in the same millisecond as the plant; a try takes microseconds.
+comptime _SAME_MS_TRIES: Int = 1000
+
+
+def test_maybe_refresh_anchor_boundary_is_exactly_the_interval() raises:
+    """The interval is 1000 ms, pinned at the edge. Each case keeps only a
+    try whose clock reads before and after the call agree, so the call's own
+    read is the plant's millisecond and the elapsed time is exactly the
+    planted age: 999 ms is not due, 1000 ms is, and a due refresh stamps the
+    call's clock read, not the old stamp plus the interval."""
+    var eng = _engine()
+
+    # 999 ms old: not due. Kills any interval under 1000 (and `>=` read as
+    # `>= interval - 1`).
+    var seen = False
+    for _ in range(_SAME_MS_TRIES):
+        var before = now_unix_ms()
+        var stamp = before - Int64(999)
+        _plant_sentinel(eng, stamp)
+        var due = eng.maybe_refresh_anchor()
+        var after = now_unix_ms()
+        if before != after:
+            continue
+        seen = True
+        assert_false(due, "999 ms old, read in the same ms: not due")
+        _assert_is_sentinel(eng, "999 ms old")
+        assert_equal(eng.last_anchor_ms(), stamp, "999 ms old: timestamp kept")
+        break
+    assert_true(seen, "999 ms old: no try read the clock in one ms")
+
+    # Exactly 1000 ms old: due. Kills `>` for `>=` and any interval over 1000.
+    seen = False
+    for _ in range(_SAME_MS_TRIES):
+        var before = now_unix_ms()
+        _plant_sentinel(eng, before - Int64(1000))
+        var due = eng.maybe_refresh_anchor()
+        var after = now_unix_ms()
+        if before != after:
+            continue
+        seen = True
+        assert_true(due, "exactly 1000 ms old, read in the same ms: due")
+        _assert_fresh(eng, before, after, "exactly 1000 ms old")
+        break
+    assert_true(seen, "1000 ms old: no try read the clock in one ms")
+
+    # 1500 ms old: due, and the new stamp is the call's read (`before`), not
+    # the old stamp plus the interval (`before - 500`).
+    seen = False
+    for _ in range(_SAME_MS_TRIES):
+        var before = now_unix_ms()
+        _plant_sentinel(eng, before - Int64(1500))
+        var due = eng.maybe_refresh_anchor()
+        var after = now_unix_ms()
+        if before != after:
+            continue
+        seen = True
+        assert_true(due, "1500 ms old: due")
+        assert_equal(
+            eng.last_anchor_ms(), before, "1500 ms old: stamp is the call's read"
+        )
+        _assert_fresh(eng, before, after, "1500 ms old")
+        break
+    assert_true(seen, "1500 ms old: no try read the clock in one ms")
 
 
 def test_refresh_anchor_replaces_anchor_and_timestamp_unconditionally() raises:
