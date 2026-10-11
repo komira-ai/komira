@@ -38,7 +38,7 @@
 # and handle checks are listed with this file in the pull request's sweep
 # table.
 
-from std.os import setenv
+from std.os import setenv, unsetenv
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_udf_spike_abi.cases import Case, parse_case
@@ -298,6 +298,7 @@ def _oracle_edges() raises:
     var abi = List[Case]()
     abi.append(parse_case('{"name": "abi", "defect": "d", "run": "init_abi", "expect": {"status": "ERR_ABI"}}'))
     var r = run_suite(VARIANT, abi).result("abi")
+    _ = unsetenv("KOMIRA_UDF_ECHO_VARIANT")  # no variant left selected for what runs next
     assert_equal(r.verdict, "FAIL", "a runtime accepting major 2 passed init_abi")
     assert_true("init accepted ABI major 2" in r.reason, r.reason)
 
