@@ -267,8 +267,6 @@ goes with the last row that uses it.
 | 52 golden_differs, missing_symbol | doc JSON checker | 2 | doc JSON checker unit tests | walk only top-level symbols | 6 |
 | 53 surface_capability_matrix | 19 reds, 5 the only finding | del + 2 | matrix checker unit tests, facts fed as input | refuse no longer-named package | 6 |
 | 53 dangling, incompatible | unknown target; incompatible test under a pattern | 3 | `analysis_refusals_lint` (scratch tree, not an in-place copy) | make the deps soft | 3 |
-| 55 refused_imports | 25 spellings | gone | nothing: test 55 and the `refused_imports` attribute of `mojo_deps` were deleted on main when komira_physical_plan moved out of komira_plan_ir | n/a | 6 |
-| 55 bad_entry | non-dotted entry refused | gone | nothing: deleted on main with test 55 (the row above) | n/a | 3 |
 | order switches | `--no-run`, `--no-umbrella`, local SKIPs | del | each scenario runs alone | n/a | 11 |
 | harness mode | local/remote mode detection | 2 | helper lib farm guard, unit-tested | accept a mixed list | 11 |
 | harness silence | a sub-script that reports nothing, or SKIPs on CI, is red | 2 | helper lib: a scenario that asserts nothing or SKIPs fails, and so does a build command whose what-ran lists no action | return early with no assertion | 11 |
@@ -696,7 +694,7 @@ after the slice of its last callee. Slice 11 deletes `run_tests.sh` last.
    - Move the report floors into the case actions.
    - Add the s2n probe `fail()` and the `branch_gate_rows` target.
    - Add the two Rust unit tests (`omit_pruned_field`, `unknown_operation`) and the window-pin check.
-   - Delete the spsc_ring falsifier scripts and their fixtures: `negative/spsc_ring_element.sh`,
+   - Deleted: the spsc_ring falsifier scripts and their fixtures, `negative/spsc_ring_element.sh`,
      `negative/spsc_ring_prefix_layout.sh` and `negative/spsc_ring_prefix_layout/` (two `.mojo`
      files). Nothing calls them. The regression tests they falsified stay in `komira_spsc_ring`
      (`test_consumer_polling_before_the_slot_store_exists`, `test_layout_guards`). What goes is the
@@ -723,7 +721,7 @@ after the slice of its last callee. Slice 11 deletes `run_tests.sh` last.
      `aquery_host_paths`, `docs_package_coverage`, `config_hash_pin`, `test_weld_real_graph` and
      `golden_linux_x86_64`. golden.sh goes with them.
 6. **Lints and checkers, with unit tests.**
-   - The Zig ports: test_weld, pointer_lint, src_layout, refused_imports, readme_api_coverage,
+   - The Zig ports: test_weld, pointer_lint, src_layout, readme_api_coverage,
      surface_capability_matrix, public_boundary, the shared lint runner and the limits checker.
    - The Zig `doc_links` port (below), and the unit tests of the doc JSON checker.
    - The new file lints (17, 19) with the toolchains-cell file list, the readme marker check, and the
@@ -840,7 +838,6 @@ Sourced sections:
 | `node_tests.sh` | 8 |
 | `golden/golden.sh` | 5 (with its call in `platform_table/check.sh`) |
 | `negative/lint_weld.sh` | 9 |
-| `negative/spsc_ring_element.sh`, `negative/spsc_ring_prefix_layout.sh` (with `negative/spsc_ring_prefix_layout/`) | 2 |
 
 The 16 `functional/` drivers the harness calls:
 
