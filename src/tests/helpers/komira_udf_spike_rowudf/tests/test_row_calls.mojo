@@ -1,6 +1,7 @@
 # The row runtime python_row.so (komira-test/python-row) through the C ABI
 # only (komira_udf_spike_abi's harness), with the read sets the producer
-# determined (read_sets.tsv, the read_sets oracle).
+# determined (read_sets.tsv: the committed golden/read_sets.tsv, which
+# read_sets_golden_test requires the capture to reproduce).
 #
 # What it proves, and the defect each part catches:
 #   - describe declares ROW only, one sub-interpreter per context, no global

@@ -1,5 +1,6 @@
-# The producer's read sets (producer/capture_main.py, run as the read_sets
-# python_oracle) read back into UDF references: a ROW UdfSpec whose argument
+# The producer's read sets (producer/capture_main.py's table, committed as
+# golden/read_sets.tsv and checked against the capture by the py_test
+# read_sets_golden_test) read back into UDF references: a ROW UdfSpec whose argument
 # struct is the read set, one named field per entry (design section 3.1:
 # for a ROW, arg_types is the read set). The tests and the bench take their
 # read sets from here, so what the runtime is given is what the producer
@@ -10,7 +11,7 @@ from komira_udf_spike_abi.runtime import UdfSpec
 from komira_udf_spike_abi.values import ColumnType
 
 comptime READ_SETS = "read_sets.tsv"
-"""Where each test and the bench find the oracle's output."""
+"""Where each test and the bench find golden/read_sets.tsv (staged here)."""
 
 
 @fieldwise_init

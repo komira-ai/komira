@@ -5,7 +5,8 @@ ROW). Test-only spike code.
 - producer/: the read-set capture a Python SDK runs when the plan is built
   (komira_udf_readset.py: bytecode scan, `columns=[...]`, a sample run as a
   cross-check), and the step that writes the read sets of the functions the
-  tests load (capture_main.py, run as a python_oracle).
+  tests load (capture_main.py; its table is committed as
+  golden/read_sets.tsv, which the tests read).
 - rowrt/ and pyrt/komira_udf_rowrt.py: komira-test/python-row, a runtime that
   embeds CPython (one sub-interpreter with its own GIL per context) and
   builds each row from the read set's columns only.

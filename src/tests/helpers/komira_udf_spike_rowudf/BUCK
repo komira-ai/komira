@@ -2,7 +2,7 @@ load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_shared_lib")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load("@komira//tools/build/python:defs.bzl", "py_test", "python_oracle")
+load("@komira//tools/build/python:defs.bzl", "py_test")
 load("//src/tests/helpers/komira_udf_spike_python:defs.bzl", "udf_bench")
 
 # Test-only: row-shaped UDFs (`df.map_rows(f)`) with a declared read set, the
@@ -11,7 +11,8 @@ load("//src/tests/helpers/komira_udf_spike_python:defs.bzl", "udf_bench")
 #
 #   producer/   the read-set capture a Python SDK runs when the plan is built
 #               (komira_udf_readset.py) and the step that writes the read
-#               sets of the functions below (capture_main.py, :read_sets)
+#               sets of the functions below (capture_main.py), whose
+#               table is committed as golden/read_sets.tsv
 #   rowrt/      komira-test/python-row: a runtime embedding CPython, one
 #               sub-interpreter with its own GIL per context, that builds
 #               rows from the read set's columns only (row_runtime.c: life
@@ -29,7 +30,7 @@ load("//src/tests/helpers/komira_udf_spike_python:defs.bzl", "udf_bench")
 #
 # The runtime finds what it needs beside its own library file: python/ (the
 # CPython install) and pyrt/ (the Python modules). Each test and the bench
-# stage that layout, with the producer's read_sets.tsv.
+# stage that layout, with the committed golden/read_sets.tsv.
 #
 # The welded tests (each file's header says what it proves and names the
 # mutant planted by hand to see it go red): test_row_calls (values, the
@@ -42,7 +43,8 @@ load("//src/tests/helpers/komira_udf_spike_python:defs.bzl", "udf_bench")
 # threads, through the engine's probe), test_row_init (layouts init
 # refuses), test_row_conform (the shared corpus's ROW cases),
 # test_row_threads (4 engine threads, bytes crossed per read set). And the
-# py_test readset_test (the capture).
+# py_tests readset_test (the capture) and read_sets_golden_test (the
+# committed read sets equal the capture's).
 
 _CASES = {"src/tests/helpers/komira_udf_spike_abi": "//src/tests/helpers/komira_udf_spike_abi:cases"}
 
@@ -61,7 +63,7 @@ _PYRT = [
 _RUNTIME = {f: f for f in _PYRT} | {
     "python": "//third_party/python:cpython",
     "python_row.so": ":python_row",
-    "read_sets.tsv": ":read_sets[read_sets.tsv]",
+    "read_sets.tsv": "golden/read_sets.tsv",
 }
 
 mojo_library(
@@ -174,17 +176,19 @@ mojo_shared_lib(
     visibility = ["PUBLIC"],
 )
 
-# The producer step: the read set of each row function the tests and the
-# bench load, as the SDK determines it when the plan is built, written to
-# read_sets.tsv (producer/capture_main.py). Run twice; both runs must agree.
-python_oracle(
-    name = "read_sets",
-    src = "producer/capture_main.py",
+# The producer step's table, committed: the read set of each row function
+# the tests and the bench load, as the SDK determines it when the plan is
+# built (producer/capture_main.py), in golden/read_sets.tsv. The Mojo tests
+# read that file; a py_test requires the capture to reproduce it exactly.
+py_test(
+    name = "read_sets_golden_test",
+    src = "tests/test_read_sets_golden.py",
     srcs = [
+        "golden/read_sets.tsv",
+        "producer/capture_main.py",
         "producer/komira_udf_readset.py",
         "pyrt/udf_rows.py",
     ],
-    outs = ["read_sets.tsv"],
 )
 
 # The capture's own tests: the scan, the undetermined cases, columns=[...],

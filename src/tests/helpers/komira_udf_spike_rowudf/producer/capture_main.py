@@ -4,8 +4,12 @@ plan is built (komira_udf_readset.read_set), written as one table the Mojo
 side reads into its UDF references (UdfSpec.arg_names: the ROW UdfRef's
 arg_types, one named field each).
 
-Run by the python_oracle rule: argv is [script, output directory, data
-directory]. Writes read_sets.tsv, one line per case, tab-separated:
+Its output is committed as golden/read_sets.tsv, which the Mojo tests
+read; tests/test_read_sets_golden.py (a py_test) requires table() to equal
+that file byte for byte, so a change to the capture that alters a read set
+fails there until the golden is regenerated and reviewed. To regenerate:
+run this script with the pinned interpreter and an output directory as its
+one argument. One line per case, tab-separated:
 
     case  entry  input columns  source  read set  recorded  note
 
@@ -17,7 +21,7 @@ empty without a sample.
 import os
 import sys
 
-# The oracle's interpreter puts no script directory on sys.path (-P).
+# The pinned interpreter runs with -P: no script directory on sys.path.
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "pyrt"))
@@ -56,8 +60,8 @@ def cases():
     return out
 
 
-def main():
-    out_dir = sys.argv[1]
+def table():
+    """read_sets.tsv's text: one line per case, each ending in a newline."""
     lines = []
     for case, name, cols, columns, sample in cases():
         r = rs.read_set(getattr(udf_rows, name), cols, columns=columns, sample=sample)
@@ -66,9 +70,11 @@ def main():
                 [case, "udf_rows:" + name, ",".join(cols), r.source, ",".join(r.names), ",".join(r.recorded), r.note]
             )
         )
-    with open(os.path.join(out_dir, "read_sets.tsv"), "w") as f:
-        f.write("\n".join(lines) + "\n")
-    print("\n".join(lines))
+    return "\n".join(lines) + "\n"
 
 
-main()
+if __name__ == "__main__":
+    text = table()
+    with open(os.path.join(sys.argv[1], "read_sets.tsv"), "w") as f:
+        f.write(text)
+    print(text, end="")
