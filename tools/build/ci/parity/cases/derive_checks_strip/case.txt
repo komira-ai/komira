@@ -1,0 +1,6 @@
+# cquery lines carrying CR, \x1c-\x1e, tab, VT, FF and spaces around the
+# label: what is stripped is what Mojo's strip() strips, and a line that
+# strips to nothing is no target.
+arg "{units_file}"
+input units_file "lib_a\t//src/a:a\n"
+exit 0
