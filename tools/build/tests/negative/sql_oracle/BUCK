@@ -278,16 +278,20 @@ sql_oracle(
     outputs = ["out.tsv"],
 )
 
-# REFUSED: `version ... is not a release number (^[0-9.]+$)`, one row per
-# kind of character the pattern must not admit, each the only bad character
-# of its row, so a class widened to admit that kind passes exactly that row:
-# a version that would end the version check's SQL string and comment out
-# the rest (`injection`), a bare quote, a letter (`leading_v`, which the
-# anchor `^` dropped also passes), a space, a semicolon, `/` and `:` (the
-# characters next to `0` and `9`, which a range bound moved by one admits)
-# and an empty one (`+` as `*` passes it). The bad character is never first,
-# so the anchor `$` dropped passes `quote`, `space`, `semicolon`, `slash` and
-# `colon`. A version holding 0 and 9 is accepted:
+# REFUSED: `version ... is not a release number (^[0-9.]+$)`. `injection` is
+# the attack itself: a version that would end the version check's SQL string
+# and comment out the rest; it holds a quote, spaces, letters, a semicolon
+# and hyphens. Each per-kind row holds one bad character and nothing else
+# bad, so a class widened to admit that kind passes exactly that row: a
+# quote, a lowercase letter (`leading_v`), an uppercase letter (`upper`), a
+# space, a semicolon, `/` and `:` (the characters next to `0` and `9`, which
+# a range bound moved by one admits) and a newline (`newline`, which the
+# multi-line flag `(?m)` passes: `^` and `$` then match at the line break).
+# The bad character is never first, except in `leading_v`, whose `v` is
+# first so that the anchor `^` dropped passes it; so the anchor `$` dropped
+# passes `quote`, `upper`, `space`, `semicolon`, `slash`, `colon` and
+# `newline`. `empty` holds no character at all (`+` as `*` passes it). A
+# version holding 0 and 9 is accepted:
 # tests//functional/sql_oracle:dist_version_digit_bounds. The binary and lib
 # directory are never read: the version is refused first.
 [duckdb_dist(
@@ -299,9 +303,11 @@ sql_oracle(
     ("injection", "1.5.6' AND false THEN NULL END; --"),
     ("quote", "1.5.6'"),
     ("leading_v", "v1.5.6"),
+    ("upper", "1.5.6V"),
     ("space", "1.5 6"),
     ("semicolon", "1.5;6"),
     ("slash", "1.5/6"),
     ("colon", "1.5:6"),
+    ("newline", "1.5\n6"),
     ("empty", ""),
 ]]

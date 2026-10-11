@@ -127,8 +127,10 @@ nothing checks it yet.
   the other settings and allowed paths, the version and environment
   checks, `.safe_mode` before the first src, `:memory:` last), then each
   analysis refusal's message (for `duckdb_dist`, one version per kind of
-  character the version pattern must not admit: a quote, a letter, a space,
-  a semicolon, `/` and `:` next to the digit range, and empty; and
+  character the version pattern must not admit: a quote, a lowercase and an
+  uppercase letter, a space, a semicolon, `/` and `:` next to the digit
+  range, a newline (which the multi-line flag `(?m)` admits), and empty,
+  besides the injection itself; and
   `tests//functional/sql_oracle:dist_version_digit_bounds`, version `0.9`,
   must build) and each build's failure in its `sql_oracle`
   action with its message: an undeclared output, a missing output (the

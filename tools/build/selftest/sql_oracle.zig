@@ -26,9 +26,10 @@
 //! LD_LIBRARY_PATH with that pinned lib path. aquery prints no env, so the
 //! env entry is checked only by that comparison at run time), a
 //! duckdb_dist version that is not digits and dots (the dist_version_*
-//! refusals, one per kind of character the pattern must not admit: a quote,
-//! a letter, a space, a semicolon, `/` and `:` next to the digit range, and
-//! empty; a version of 0 and 9, DIST_BOUNDS, must build, so a narrowed digit
+//! refusals: the injection itself, then one per kind of character the
+//! pattern must not admit: a quote, a lowercase and an uppercase letter, a
+//! space, a semicolon, `/` and `:` next to the digit range, a newline (which
+//! the multi-line flag `(?m)` admits), and empty; a version of 0 and 9, DIST_BOUNDS, must build, so a narrowed digit
 //! range fails too), and each of the sql_oracle analysis `fail()` calls deleted, or
 //! one arm of a condition that no other arm covers: the empty, absolute and
 //! trailing-`/` input paths each fall through to the segment message, a `*`
@@ -167,6 +168,11 @@ const REFUSALS = [_]lib.Row{
         .text = PKG ++ "dist_version_leading_v: version \"v1.5.6\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
     },
     .{
+        .name = "dist_version_upper",
+        .target = PKG ++ "dist_version_upper",
+        .text = PKG ++ "dist_version_upper: version \"1.5.6V\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
+    },
+    .{
         .name = "dist_version_space",
         .target = PKG ++ "dist_version_space",
         .text = PKG ++ "dist_version_space: version \"1.5 6\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
@@ -185,6 +191,11 @@ const REFUSALS = [_]lib.Row{
         .name = "dist_version_colon",
         .target = PKG ++ "dist_version_colon",
         .text = PKG ++ "dist_version_colon: version \"1.5:6\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
+    },
+    .{
+        .name = "dist_version_newline",
+        .target = PKG ++ "dist_version_newline",
+        .text = PKG ++ "dist_version_newline: version \"1.5\\n6\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
     },
     .{
         .name = "dist_version_empty",
