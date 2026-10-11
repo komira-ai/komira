@@ -27,6 +27,7 @@ Libraries under src/tests/ are exempt: no package ships them.
 """
 
 load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo")
+load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/one_definition:libraries.bzl", "THIRD_PARTY_OWNERS")
 load(":providers.bzl", "MojoInfo", "mojo_pkg_children")
 
@@ -222,7 +223,11 @@ _native_reach_case_rule = rule(
     } | NATIVE_REACH_ATTRS,
 )
 
-def native_reach_case(**kwargs):
+def _native_reach_case(**kwargs):
     """A case of the check (above): `srcs`, `deps`, `expect_archives`, `expect_calls`."""
     native_reach_kwargs(kwargs)
     _native_reach_case_rule(**kwargs)
+
+# Through declares_docs, as every komira rule a BUCK file calls: a package
+# holding only cases (tests//src/native_reach) still declares its doc_tree.
+native_reach_case = declares_docs(_native_reach_case)
