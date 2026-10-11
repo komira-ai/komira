@@ -51,6 +51,7 @@ given `--nested`, which the guard refuses.
 | [`analysis_refusals_rust`](analysis_refusals_rust.zig) | rust_library's test_srcs refusals | the `.rs` check deleted |
 | [`analysis_refusals_coverage`](analysis_refusals_coverage.zig) | the coverage rules' analysis refusals | the buck-out, no-args and LLVM_PROFILE_FILE checks deleted |
 | [`config_refusals`](config_refusals.zig) | `komira.coverage`, `komira.mutation`, `komira.test_timeout_s` values refused at load | any value but true read as false; the margin's `<=` made `<` |
+| [`sql_oracle`](sql_oracle.zig) | `tests//functional/sql_oracle:check` builds; sql_oracle's 7 analysis refusals; 7 planted defects of `tests//negative/sql_oracle` each fail in their `sql_oracle` action with DuckDB's or the rule's message (undeclared output, missing output, SQL error, a file outside `inputs`, an absolute path, a changed setting, a dot command), each a fresh farm execution | `.safe_mode` dropped; the output existence check dropped |
 
 A refusal row passes only when `buck2 audit providers <target>` (analysis,
 nothing built) fails and its output holds the row's message exactly, as the

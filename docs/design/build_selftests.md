@@ -397,7 +397,8 @@ All under `//tools/build/selftest/`, one Zig test target each:
   `analysis_refusals_mojo`, `_aws_client`, `_gcp_client`, `_proto`, `_readme`, `_lint`,
   `_python_oracle`, `_node`, `_rust`, `_coverage`, `_platform_table`, `_zig`, and `config_refusals`.
 - Builds that must go red: `gate_wiring`, `shared_lib_gate`, `compile_isolation`, `planted_red_builds`,
-  `assert_level_reds`, `test_limits`, `coverage_gate_reds`.
+  `assert_level_reds`, `test_limits`, `coverage_gate_reds`, `sql_oracle` (with its analysis refusals;
+  a rule added after this inventory, so it has no row in the tables above).
 - aquery diffs: `assert_level_commands`, `aquery_opt_levels`, `coverage_platforms`, `coverage_keys`,
   `coverage_analysis`, `coverage_switch`.
 - Scratch trees and clones: `consumer_cell_cache`, `buck2_run_fresh_clone`, `fresh_clone_local_default`,
