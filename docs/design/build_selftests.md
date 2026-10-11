@@ -8,7 +8,7 @@ tests are Zig too. The script is not ported as one runner with a table of cases.
 check moves to the cheapest place that can still fail. This doc lists every check, says where it goes and
 which planted defect proves it can go red. The conversion then lands in slices (the last section).
 
-Status: slices 1 and 2 have landed; the rest is design. Today the script runs on a schedule in the build-system
+Status: slices 1 to 3 have landed; the rest is design. Today the script runs on a schedule in the build-system
 self-test workflow ([ci.md](../ci.md#build-system-self-tests)) and is not the gate. When the conversion is done, every
 check runs in `pr / check`, and nothing runs on a schedule.
 
@@ -267,8 +267,8 @@ goes with the last row that uses it.
 | 52 golden_differs, missing_symbol | doc JSON checker | 2 | doc JSON checker unit tests | walk only top-level symbols | 6 |
 | 53 surface_capability_matrix | 19 reds, 5 the only finding | del + 2 | matrix checker unit tests, facts fed as input | refuse no longer-named package | 6 |
 | 53 dangling, incompatible | unknown target; incompatible test under a pattern | 3 | `analysis_refusals_lint` (scratch tree, not an in-place copy) | make the deps soft | 3 |
-| 55 refused_imports | 25 spellings | del + 2 | scanner unit tests | stop following continuations | 6 |
-| 55 bad_entry | non-dotted entry refused | 3 | `analysis_refusals_lint` | drop the dotted-name check | 3 |
+| 55 refused_imports | 25 spellings | gone | nothing: test 55 and the `refused_imports` attribute of `mojo_deps` were deleted on main when komira_physical_plan moved out of komira_plan_ir | n/a | 6 |
+| 55 bad_entry | non-dotted entry refused | gone | nothing: deleted on main with test 55 (the row above) | n/a | 3 |
 | order switches | `--no-run`, `--no-umbrella`, local SKIPs | del | each scenario runs alone | n/a | 11 |
 | harness mode | local/remote mode detection | 2 | helper lib farm guard, unit-tested | accept a mixed list | 11 |
 | harness silence | a sub-script that reports nothing, or SKIPs on CI, is red | 2 | helper lib: a scenario that asserts nothing or SKIPs fails, and so does a build command whose what-ran lists no action | return early with no assertion | 11 |
@@ -427,9 +427,13 @@ filters them. The one change to `build_targets.sh` is for the graph checks, not 
   platform, so the `cquery` of `//...` in `derive_checks.py` sees it like any other target.
 - **They are one declared check.** Slice 3 adds one check, `build_selftests`, to
   `release/artifacts.textproto`, with the `buck2` build system and the one target pattern
-  `//tools/build/selftest/...`. No check is declared there today. A target a declared unit matches is
-  not derived again, so the package leaves the derived check `tools_build`.
-  It has to leave it. `tools_build` is reached through reverse dependencies by changes far outside
+  `//tools/build/selftest/...`. A target a declared unit matches is not derived again: no derived
+  check is made for it. **Open (found in slice 3):** that does not take the package out of
+  `tools_build`. A derived check names its group's pattern, and `tools_build`'s is `//tools/build/...`,
+  which still matches `//tools/build/selftest/...`; kci builds and tests a unit by its patterns
+  (`build_targets.sh`), so a change that reaches `tools_build` runs the scenarios there too. Slice 3's
+  `--plan` of a change to `src/komira_json` lists `tools_build` and not `build_selftests`. The
+  package has to leave `tools_build`. `tools_build` is reached through reverse dependencies by changes far outside
   `tools/build`: targets under `tools/build` depend on libraries under `src/` (`tools/build/coverage`
   on `komira_json`, `tools/build/examples/shared_lib_mid` on seven libraries; `git grep '"//src/'
   -- 'tools/build/**/BUCK'` lists them). In `tools_build`, a change to one of those libraries would run
@@ -466,7 +470,7 @@ buckconfig (`$HOME/.buckconfig.d/farm.buckconfig`: the `[buck2_re_client]` addre
 `[komira_re] linux_x86_64_properties`), and the step after it fails the job when that key is empty.
 Every buck2 daemon on the runner reads that file, whatever its project root or isolation dir. So a
 scenario's inner daemon, in the checkout under its own isolation dir or in a scratch tree under
-`$TMPDIR`, executes on the same farm as the outer build. The scenario needs no flag, variable or
+`buck-out/selftest_tmp`, executes on the same farm as the outer build. The scenario needs no flag, variable or
 secret of its own for that. On a developer's machine the farm configuration is the root's
 `.buckconfig.local`, which the scratch-tree snapshot copies.
 
@@ -519,9 +523,11 @@ A scenario is a `buck2 test` target that runs buck2. Four things make that work.
    `ExternalRunnerTestInfo`. Its command is the scenario's Zig binary itself, with no shell around it.
    The rule takes that binary as an `exec_dep`, so it is configured as the gate configures it and is a
    cache hit from the gate. That assumes the execution configuration hashes the same as the gate's
-   target configuration (one execution platform per OS); slice 3 confirms it. Its other inputs:
+   target configuration (one execution platform per OS); slice 3 confirmed it (a `buck2 test` of the
+   scenarios after a `buck2 build` of their package ran no action). Its other inputs:
    - The pinned buck2 release, also an `exec_dep`: a `pinned_file` of the asset `tools/buck2` names,
-     unpacked by a Zig tool. The `./buck2` script is used only by the `bootstrap_pin` scenario, as the
+     unpacked by a Zig tool. The guard refuses a run whose asset's sha256 is not the digest
+     `tools/buck2` pins, so the second statement of the pin cannot drift. The `./buck2` script is used only by the `bootstrap_pin` scenario, as the
      program under test.
    - Fixtures as source files only, never as targets (see "Only a widened change reaches
      `build_selftests`").
@@ -609,7 +615,8 @@ they run in `pr / check`). Files stay under 1000 lines. It offers only what the 
   project root or a scratch tree), `-c` pairs, `--target-platforms` and a timeout. It always adds the
   scenario's `--isolation-dir` in the checkout, and `-c komira_selftest.inner=true` everywhere. After
   every command that executes actions it reads what-ran and fails on a local action (local: 0). It
-  captures exit, stdout and stderr into a per-scenario log directory under the test's `$TMPDIR`. Every
+  captures exit, stdout and stderr into a per-scenario log directory,
+  `buck-out/selftest_tmp/<scenario>/logs` (`buck2 test` gives a local test no `$TMPDIR`). Every
   failure names its log file. Every daemon it started is stopped with `buck2 kill` under the same
   isolation dir.
 - **Expectations.**
@@ -632,18 +639,27 @@ they run in `pr / check`). Files stay under 1000 lines. It offers only what the 
     configs and an absolute-path scanner.
   - cquery configurations, `audit execution-platform-resolution`, uquery label sets, `audit config`
     values, and a BXL runner.
-- **Scratch tree.** It snapshots the committed tree, plus the local farm config if present, under
-  `$TMPDIR`. A test's `$TMPDIR` can lie inside the checkout (under `buck-out`). Without a `.buckroot`,
+- **Scratch tree.** It snapshots the tracked files (`git ls-files`), plus the local farm config if
+  present, under `buck-out/selftest_tmp/<scenario>`, inside the checkout. Without a `.buckroot`,
   buck2 takes the topmost directory holding a `.buckconfig` as the project root, so such a tree would
   resolve to the checkout. The helper therefore writes a `.buckroot` at the root of every scratch tree.
   It plants a file or BUCK edit, runs the tree's own daemon, and always kills that daemon and deletes
   the tree, even on failure (`--keep-scratch` keeps it). Slice 3 confirms the project root: in a scratch
   tree, `buck2 root --kind project` prints the scratch tree, and with the `.buckroot` left out (the
-  mutant) it prints the checkout and the helper's unit test fails.
+  mutant) it prints the checkout and the scenario fails, because the helper checks the root before
+  it uses the tree. It tracks the tree's daemon only after that check: a `buck2 kill` in a tree that
+  resolves to the checkout stops the checkout's own daemon, the one running the test (slice 3 saw
+  it).
 - **Digests.** A sorted file-hash manifest of output trees, and a diff that names the files that differ
   (determinism).
 - **Golden I/O.** It compares the scenario output to a committed golden line by line, and supports
   `--regen`.
+
+Slice 3 lands the guard, the runner (with the what-ran check, read from the tabulated
+`buck2 log what-ran`), the refusal table, the parsers of `audit execution-platform-resolution`,
+`audit config`, `audit providers`, `targets` and `cquery` output, and the scratch tree. The build
+and test expectations, the aquery and digest parts and golden I/O come with the slices whose
+scenarios use them.
 
 ## How CI runs it
 
