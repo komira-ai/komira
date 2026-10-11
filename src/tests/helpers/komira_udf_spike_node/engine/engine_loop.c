@@ -238,6 +238,14 @@ static int export_args(const struct run_opts* o, struct ArrowDeviceArray* d, con
   /* The struct was copied into `d`: its children pointer still points into
    * the block, which the copy's release frees. */
   d->array.private_data = b;
+  switch (o->bad_arg) {
+    case 1: d->array.offset = 1; break;
+    case 2: d->array.n_children = o->n_args + 1; break;
+    case 3: b->child[0].length = o->rows - 1; break;
+    case 4: b->child[0].dictionary = &b->child[0]; break;
+    case 5: b->child[0].n_buffers = 3; break;
+    default: break;
+  }
   d->device_id = -1;
   d->device_type = ARROW_DEVICE_CPU;
   return 1;
@@ -275,6 +283,10 @@ static int make_inputs(const struct run_opts* o, struct inputs* in) {
       int64_t at = o->offset + r;
       in->valid[at >> 3] &= (uint8_t)~(1u << (at & 7));
       in->nulls++;
+    }
+    if (o->null_beyond) {
+      int64_t at = o->offset + o->rows;
+      in->valid[at >> 3] &= (uint8_t)~(1u << (at & 7));
     }
   }
   return 1;

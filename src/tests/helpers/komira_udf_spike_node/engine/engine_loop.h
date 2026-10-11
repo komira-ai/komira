@@ -28,6 +28,8 @@ struct run_opts {
   int64_t offset;     /* the arrays are sliced: this offset into buffers of offset + rows values */
   int32_t null_every; /* every k-th row is null (0: none) */
   int32_t valid_bitmap; /* a validity bitmap is present even when no row is null (null_every 0) */
+  int32_t null_beyond; /* the validity bit just past the slice is a null (with valid_bitmap) */
+  int32_t bad_arg;    /* the host breaks the argument contract: 1 struct at an offset, 2 an extra child, 3 a short child, 4 a dictionary, 5 three buffers */
   int32_t null_count_unknown; /* the arguments declare null_count -1 (unknown), whatever they hold */
   int32_t form;       /* the spec's CodeForm (2, BUNDLE, by default) */
   int32_t descriptor_version, descriptor_len; /* the spec's descriptor (version 0, empty: the only canonical one) */

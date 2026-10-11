@@ -115,6 +115,13 @@ esbuild_bundle(
     out = "model.js",
 )
 
+# This runtime's own conformance cases, run beside the shared corpus.
+filegroup(
+    name = "cases",
+    srcs = glob(["cases/*.json"]),
+    visibility = ["PUBLIC"],
+)
+
 mojo_library(
     name = "komira_udf_spike_node",
     srcs = glob(["*.mojo"]),
@@ -125,7 +132,10 @@ mojo_library(
     ],
     test_srcs = ["tests/test_node_cases.mojo"],
     test_data = {
-        "tests/test_node_cases.mojo": {"src/tests/helpers/komira_udf_spike_abi": _ABI + ":cases"},
+        "tests/test_node_cases.mojo": {
+            "src/tests/helpers/komira_udf_spike_abi": _ABI + ":cases",
+            "src/tests/helpers/komira_udf_spike_node": ":cases",
+        },
     },
     visibility = ["PUBLIC"],
 )
@@ -176,7 +186,10 @@ _MOJO = {
     "tests/mojo_runtime": ":mojo_runtime_dir[runnable]",
 }
 
-_CASES = {"src/tests/helpers/komira_udf_spike_abi": _ABI + ":cases"}
+_CASES = {
+    "src/tests/helpers/komira_udf_spike_abi": _ABI + ":cases",
+    "src/tests/helpers/komira_udf_spike_node": ":cases",
+}
 
 udf_node_test("test_load_gate", "load_gate.js", data = _STAGED | _MOJO)
 

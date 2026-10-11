@@ -372,3 +372,86 @@ export function remember(c: Vector<Float64>): Float64Array {
   kept = c.toArray();
   return new Float64Array(c.length).fill(previous);
 }
+
+// ---- fixtures of this runtime's own tests (cases/, tests/) ---------------------
+
+// Throws null: no message, no stack.
+export function throws_null(_x: bigint): bigint {
+  throw null;
+}
+
+// A number where the declared type is int64: an integer number is converted.
+export function number_for_int64(x: bigint): number {
+  return Number(x) * 2;
+}
+
+// A fractional number where the declared type is int32.
+export function float_into_int32(_x: number): number {
+  return 0.5;
+}
+
+// An aggregate missing two of its four methods.
+export const partial_agg = {
+  init: (): bigint => 0n,
+  update: (s: bigint, _x: bigint | null): bigint => s,
+};
+
+// A column function returning an array with several nulls (every third row).
+export function nulls_every_third(x: Vector<Int64>): Array<bigint | null> {
+  const out: Array<bigint | null> = [];
+  for (let i = 0; i < x.length; i++) out.push(i % 3 === 0 ? null : (x.get(i) as bigint) * 2n);
+  return out;
+}
+
+// A ROW function that returns null when its flag is 0.
+export function pick_null(r: Pick): bigint | null {
+  return r.flag !== 0n ? r.a : null;
+}
+
+// A ROW function that looks at the record the way a debugger or a coercion does.
+export function touch_record(r: Pick): bigint {
+  return typeof (r as any)[Symbol.iterator] === "undefined" && typeof (r as any)[Symbol.toPrimitive] === "undefined" ? 1n : 0n;
+}
+
+// A mergeable aggregate that fails when it is handed a row past the end.
+export const sum_checked = {
+  init: (): bigint => 0n,
+  update: (s: bigint, x: bigint | null): bigint => {
+    if (x === undefined) throw new Error("update read a row past the end");
+    return x === null ? s : s + x;
+  },
+  merge: (a: bigint, b: bigint | null): bigint => {
+    if (b === undefined) throw new Error("merge read a row past the end");
+    return b === null ? a : a + b;
+  },
+  finish: (s: bigint): bigint => s,
+};
+
+// ---- frames of cases/ ---------------------------------------------------------------
+
+// A table whose columns are shorter than its length.
+export function* table_ragged(_input: Iterable<Batch>): Iterable<{ length: number; columns: Array<Array<bigint>> }> {
+  yield { length: 3, columns: [[1n, 2n]] };
+}
+
+// Yields something that is not a table.
+export function* yield_number(_input: Iterable<Batch>): Iterable<number> {
+  yield 5;
+}
+
+// Returns an array of tables, not a generator.
+export function frame_array(_input: Iterable<Batch>): Array<Array<Array<bigint>>> {
+  return [[[1n]], [[2n]]];
+}
+
+// Returns something that is neither an iterator nor an iterable.
+export function frame_number(_input: Iterable<Batch>): number {
+  return 5;
+}
+
+// Reads every input batch before it yields, once: the total.
+export function* collect_all(input: Iterable<Batch>): Iterable<Array<Array<bigint>>> {
+  let total = 0n;
+  for (const [x] of input) for (let i = 0; i < x.length; i++) total += x.get(i) as bigint;
+  yield [[total]];
+}

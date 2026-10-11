@@ -58,6 +58,8 @@ h.watchdog(`errors ${variant}`);
   refuses('not .js', base('fixtures.ts#double'), STATUS.DESCRIPTOR, 'entry');
   refuses('no bundle', base('nope.js#double'), STATUS.DESCRIPTOR, 'bundle');
   refuses('no export', base('fixtures.js#nothing_of_this_name'), STATUS.DESCRIPTOR, 'exports nothing');
+  // a name that appears in the bundle's text near the export annotation, but is not an export
+  refuses('a word of the comment before the annotation', base('fixtures.js#in'), STATUS.DESCRIPTOR, 'exports nothing');
   refuses('float32', base('fixtures.js#double', { argFmt: 'f' }), STATUS.UNSUPPORTED, 'argument type');
   refuses('grouped', base('fixtures.js#double', { shape: SHAPE.FRAME_GROUPED }), STATUS.UNSUPPORTED, 'shape');
   refuses('two bits', base('fixtures.js#double', { shape: SHAPE.SCALAR | SHAPE.COLUMN }), STATUS.UNSUPPORTED, 'shape');
@@ -84,10 +86,19 @@ h.watchdog(`errors ${variant}`);
     const r64 = await run(base('fixtures.js#int64_edges'));
     assert.equal(r64.run[R.STATUS], 0, `int64 edges: ${r64.message}`);
   }
+  {
+    // an integer number is a valid int64 result; a fractional number is not a valid int32 one
+    const ok = await run(base('fixtures.js#number_for_int64', { check: h.CHECK.AFFINE, a: 2, b: 0 }));
+    assert.equal(ok.run[R.STATUS], 0, `an integer number for int64: ${ok.message}`);
+    assert.equal(ok.threads[0][h.T.BAD_VALUES], 0);
+  }
+  await fails('0.5 for int32', base('fixtures.js#float_into_int32', i32), STATUS.RETURN_TYPE, 'int32');
+  await fails('a thrown null', base('fixtures.js#throws_null'), STATUS.RAISED, 'null');
   await fails('a string for float64', base('fixtures.js#returns_string', { argFmt: 'g', resultFmt: 'g' }), STATUS.RETURN_TYPE, 'string');
   await fails('a Float64Array for int64', base('fixtures.js#wrong_array', { shape: SHAPE.COLUMN }), STATUS.RETURN_TYPE, 'Float64Array');
   await fails('a thrown string', base('fixtures.js#throws_string'), STATUS.RAISED, 'a thrown string');
   await fails('an aggregate under SCALAR', base('fixtures.js#sum'), STATUS.LOAD, 'is not a function');
+  await fails('an aggregate without merge and finish', base('fixtures.js#partial_agg', { shape: SHAPE.AGG_MERGEABLE }), STATUS.LOAD, 'aggregate');
   await fails('a function under AGG_MERGEABLE', base('fixtures.js#double', { shape: SHAPE.AGG_MERGEABLE }), STATUS.LOAD, 'aggregate');
 
   engine.engineClose(handle);

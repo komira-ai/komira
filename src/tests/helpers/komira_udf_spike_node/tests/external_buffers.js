@@ -77,6 +77,14 @@ if (process.argv[3] === 'probe') {
     await new Promise((resolve) => setTimeout(resolve, 200));
     out.finalizedAfterGc = addon.probeFinalized();
     if (mode === 2) out.statuses3 = addon.probeWrap(3); // wrapped again, the first long collected
+    if (mode === 5) {
+      // 50 distinct blocks wrapped and dropped: each is finalized (and freed) once
+      out.made = addon.probeWrapMany(50, 4096);
+      out.refusedBytes = addon.probeWrapMany(3, 0);
+      gc();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      out.finalizedMany = addon.probeFinalized() - out.finalizedAfterGc;
+    }
     console.log(JSON.stringify(out));
     process.exit(0);
   })();
@@ -87,11 +95,12 @@ if (process.argv[3] === 'probe') {
 // finalized once its ArrayBuffer is collected, so two wraps of one block are
 // two finalizers (two releases of the engine's array, if that is what a
 // finalizer does).
+// The statuses are the Node-API status of each step (0: napi_ok).
 const PINNED = {
-  0: { status: 0, finalized: 2 },
-  1: { status: 0, finalized: 2 },
-  2: { status: 0, finalized: 1 },
-  4: { status: 0, finalized: 2 },
+  0: { status: 0, finalized: 2, statuses: [0, 0] },
+  1: { status: 0, finalized: 2, statuses: [0, 0, 0, 0] },
+  2: { status: 0, finalized: 1, statuses: [0], statuses3: [0] },
+  4: { status: 0, finalized: 2, statuses: [0, 0] },
 };
 
 h.watchdog(`external buffers ${variant}`);
@@ -103,8 +112,18 @@ h.watchdog(`external buffers ${variant}`);
     const r = spawnSync(process.execPath, [__filename, variant, 'probe', String(mode)], { env: process.env, encoding: 'utf8', timeout: 60000 });
     let got = {};
     try { got = JSON.parse((r.stdout || '').trim().split('\n').pop()); } catch { /* no answer: the process died */ }
-    outcome[mode] = { status: r.status === null ? `signal ${r.signal}` : r.status, finalized: got.finalizedAfterGc };
+    outcome[mode] = { status: r.status === null ? `signal ${r.signal}` : r.status, finalized: got.finalizedAfterGc, statuses: got.statuses };
+    if (mode === 2) outcome[mode].statuses3 = got.statuses3;
     console.log(`probe ${mode}: exit ${outcome[mode].status} ${(r.stdout || '').trim()} ${(r.stderr || '').trim().split('\n')[0] || ''}`);
+  }
+  {
+    const r = spawnSync(process.execPath, [__filename, variant, 'probe', '5'], { env: process.env, encoding: 'utf8', timeout: 60000 });
+    const got = JSON.parse((r.stdout || '').trim().split('\n').pop());
+    assert.equal(r.status, 0);
+    assert.equal(got.made, 50, 'probeWrapMany wraps every block it is asked for');
+    assert.equal(got.refusedBytes, undefined, 'probeWrapMany with no bytes is refused (it answers nothing)');
+    assert.equal(got.finalizedMany, 50, 'every wrapped block is finalized once after a collection');
+    assert.deepEqual(got.statuses, [], 'mode 5 probes no wrap');
   }
   let pinProblem = null;
   try {
@@ -179,6 +198,11 @@ h.watchdog(`external buffers ${variant}`);
     assert.equal(t0(long.r, T.LAST_VALUE), 143, 'the runtime counts the unknown nulls of a 1000-row slice from its offset');
     const short = await colRun({ rows: 3 });
     assert.equal(t0(short.r, T.LAST_VALUE), 1, 'the runtime counts the unknown nulls of a 3-row slice from its offset');
+    // the validity bit just past the slice is a null that is not the slice's: it is not counted
+    const beyond = await colRun({ rows: 1000, validBitmap: 1, nullBeyond: 1 });
+    assert.equal(t0(beyond.r, T.LAST_VALUE), 143, 'a null just past the slice is not counted');
+    const beyondNone = await colRun({ rows: 1000, nullEvery: 0, validBitmap: 1, nullBeyond: 1 });
+    assert.equal(t0(beyondNone.r, T.LAST_VALUE), 0, 'a null just past an otherwise all-valid slice is not counted');
     // and a known count is passed through as it is
     const known = await colRun({ rows: 1000, nullCountUnknown: 0 });
     assert.equal(t0(known.r, T.LAST_VALUE), 143, 'a declared null count is passed through');
@@ -223,6 +247,22 @@ h.watchdog(`external buffers ${variant}`);
     const { r, d, calls } = await run({ entry: 'fixtures.js#fahrenheit_batch', shape: SHAPE.COLUMN, argFmt: 'g', resultFmt: 'g', rows: 1024, check: CHECK.AFFINE, a: 1.8, b: 32 });
     assert.equal(t0(r, T.BAD_VALUES), 0);
     assert.equal(d.outputCopiedBytes, calls * 1024 * 8, 'the result is copied out of V8 once, and counted');
+  }
+  // a host that breaks the argument contract is refused by name (the engine loop is the host)
+  {
+    const refused = async (what, badArg, text) => {
+      const r = h.summary(await engine.run(handle, {
+        shape: SHAPE.SCALAR, nArgs: 1, argFmt: 'l', resultFmt: 'l', threads: 1, warmupMin: 1, warmupCap: 1, batches: 1, rows: 16,
+        entry: 'fixtures.js#double', badArg,
+      }));
+      assert.equal(r.run[R.STATUS], h.STATUS.INTERNAL, `${what}: status ${r.run[R.STATUS]} (${r.message})`);
+      assert.ok(r.message.includes(text), `${what}: '${r.message}' lacks '${text}'`);
+    };
+    await refused('an argument struct at an offset', 1, 'non-zero offset');
+    await refused('an extra child', 2, 'different number of children');
+    await refused('a child of another length', 3, 'differs in length');
+    await refused('a dictionary on a child', 4, 'not a primitive array');
+    await refused('three buffers on a child', 5, 'not a primitive array');
   }
   engine.engineClose(handle);
   if (pinProblem !== null) throw pinProblem;

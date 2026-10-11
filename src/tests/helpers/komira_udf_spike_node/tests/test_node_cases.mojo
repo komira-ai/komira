@@ -17,18 +17,20 @@
 from std.testing import assert_equal, assert_true
 
 from komira_udf_spike_abi.conform import load_cases
-from komira_udf_spike_node.node_cases import left_out_cases, node_cases, select_cases
+from komira_udf_spike_node.node_cases import left_out_cases, local_cases, node_cases, select_cases
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
 comptime CORPUS = 117
 comptime RUN = 53
+comptime OWN = 5
 
 
 def main() raises:
     var corpus = load_cases(CASES)
     assert_equal(len(corpus), CORPUS, "cases in the corpus")
     var cases = node_cases(CASES)
-    assert_equal(len(cases), RUN, "cases the Node runtime runs")
+    assert_equal(len(cases), RUN + OWN, "cases the Node runtime runs: the corpus's and its own")
+    assert_equal(len(local_cases(CASES)), OWN, "cases of this package")
     assert_equal(len(left_out_cases()), CORPUS - RUN, "cases left out")
     var seen_never_ends = False
     for i in range(len(cases)):

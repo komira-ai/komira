@@ -39,7 +39,8 @@ const EXPECT = {
 }[variant];
 // The corpus's 117 cases less the 64 the Node runtime does not run (see
 // node_cases.mojo), plus the capabilities check.
-const RUN = 53;
+const OWN = 5; // this package's own cases (cases/)
+const RUN = 53 + OWN;
 
 h.watchdog(`conform ${variant}`);
 
@@ -76,6 +77,7 @@ h.watchdog(`conform ${variant}`);
     assert.equal(m[1], EXPECT.id);
     assert.equal([Number(m[3]), Number(m[4])].join(), '0,0', `${pass.name}: cases failed or skipped`);
     assert.equal(Number(m[2]), RUN + 1, `${pass.name}: every case run and the capabilities check pass`);
+    assert.ok(after.pulls - before.pulls > 0, `${pass.name}: the frame cases pulled input batches through the runtime`);
     const copies = after.copyWraps - before.copyWraps;
     const externals = after.externalWraps - before.externalWraps;
     if (pass.copy) {

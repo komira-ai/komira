@@ -1,0 +1,104 @@
+{
+ "name": "frame_pulls_all_at_once",
+ "defect": "a frame that reads six input batches in one frame_next loses one of them, or overruns the runtime's list of pulled batches",
+ "run": "frame",
+ "entry": "collect_all",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "result": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "result_is_table": true,
+ "inputs": [
+  {
+   "length": 1,
+   "columns": [
+    {
+     "type": "int64",
+     "values": [
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "length": 1,
+   "columns": [
+    {
+     "type": "int64",
+     "values": [
+      2
+     ]
+    }
+   ]
+  },
+  {
+   "length": 1,
+   "columns": [
+    {
+     "type": "int64",
+     "values": [
+      3
+     ]
+    }
+   ]
+  },
+  {
+   "length": 1,
+   "columns": [
+    {
+     "type": "int64",
+     "values": [
+      4
+     ]
+    }
+   ]
+  },
+  {
+   "length": 1,
+   "columns": [
+    {
+     "type": "int64",
+     "values": [
+      5
+     ]
+    }
+   ]
+  },
+  {
+   "length": 1,
+   "columns": [
+    {
+     "type": "int64",
+     "values": [
+      6
+     ]
+    }
+   ]
+  }
+ ],
+ "expect": {
+  "status": "OK",
+  "batches": [
+   {
+    "length": 1,
+    "columns": [
+     {
+      "type": "int64",
+      "values": [
+       21
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

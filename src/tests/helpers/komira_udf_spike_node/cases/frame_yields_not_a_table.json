@@ -1,0 +1,38 @@
+{
+ "name": "frame_yields_not_a_table",
+ "defect": "a frame that yields a number is read as a table",
+ "run": "frame",
+ "entry": "yield_number",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "result": [
+  {
+   "type": "int64",
+   "nullable": true
+  }
+ ],
+ "result_is_table": true,
+ "inputs": [
+  {
+   "length": 1,
+   "columns": [
+    {
+     "type": "int64",
+     "values": [
+      1
+     ]
+    }
+   ]
+  }
+ ],
+ "expect": {
+  "status": "ERR_RETURN_TYPE",
+  "run_error": "UDF_RETURN_TYPE_MISMATCH",
+  "message": "nonempty"
+ }
+}

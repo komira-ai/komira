@@ -32,6 +32,9 @@
 #     written for int64, and a TypeScript function declares nothing at run
 #     time (its types are erased), so the plan's types are the only signature
 #     and nothing can contradict them before a call.
+# The cases under cases/ beside this file are this runtime's own: frames and
+# tables the shared corpus does not shape (a ragged table, a number yielded,
+# an array for a generator, six batches pulled at once).
 # Everything else runs, the frame that never ends (fault_frame_never_ends)
 # included: a generator is user code.
 
@@ -133,6 +136,26 @@ def select_cases(all: List[Case], left_out: List[String]) raises -> List[Case]:
     return out^
 
 
+def local_cases(dir: String) raises -> List[Case]:
+    """The cases of this package (`cases/` beside this file), for the paths of
+    this runtime the shared corpus does not reach. `dir` is the corpus
+    directory; the package's own sits next to its package directory."""
+    var marker = "komira_udf_spike_abi/cases"
+    if not dir.endswith(marker):
+        raise Error("UDF_CASES_CHANGED: the corpus directory " + dir + " does not end in " + marker)
+    var own = String(dir[byte = 0 : dir.byte_length() - marker.byte_length()]) + "komira_udf_spike_node/cases"
+    var out = load_cases(own)
+    for i in range(len(out)):
+        if out[i].spec.entry != "":
+            out[i].spec.entry = BUNDLE + "#" + out[i].spec.entry
+    return out^
+
+
 def node_cases(dir: String) raises -> List[Case]:
-    """The cases under `dir` the Node runtime runs, entries rewritten."""
-    return select_cases(load_cases(dir), left_out_cases())
+    """The cases under `dir` the Node runtime runs, entries rewritten, and the
+    cases of this package."""
+    var out = select_cases(load_cases(dir), left_out_cases())
+    var own = local_cases(dir)
+    for i in range(len(own)):
+        out.append(own[i].copy())
+    return out^

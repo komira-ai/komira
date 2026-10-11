@@ -16,7 +16,10 @@
 // Defects caught: a group-id column read from row 0 instead of offset + row
 // (aggUpdate, aggMerge), a group column read the same way (plain aggregate).
 //
-// Mutants planted (adapter.js): aggUpdate reading idv.vals[row]; aggMerge
+// Also: the group ids against n_groups, a row past the end never read, one
+// evaluation of the bundle per context, a symbol read of a ROW record, a ROW's
+// and an array result's nulls in the bitmap, the polling of the cancel flag in
+// every shape, a step with no literal. Mutants planted (adapter.js): aggUpdate reading idv.vals[row]; aggMerge
 // reading idv.vals[row]; nextPlain reading group.vals[r]; aggEmit slicing
 // instead of splicing; its over-large check removed; a raw function's
 // subarray from 0; a raw function handed vectors; a result read as its first chunk only: each red.
@@ -36,9 +39,14 @@ function col(Type, values, off, junk) {
   return [values.length, off, 0, null, a.buffer];
 }
 
-const native = { interrupted: () => 0, workerFailed: () => {} };
+let interruptedCalls = 0;
+let interruptedAnswer = 0;
+const native = { interrupted: () => { interruptedCalls++; return interruptedAnswer; }, workerFailed: () => {} };
 const adapter = require('./adapter.js').create(native, { codeDir: h.here });
 const { SHAPE } = h;
+const cols3 = (flags) => [
+  col(BigInt64Array, flags, 0, 0n), col(BigInt64Array, flags.map(() => 5n), 0, 0n), col(BigInt64Array, flags.map(() => 6n), 0, 0n),
+];
 
 const ctx = adapter.openContext(0)[1];
 const open = (spec) => {
@@ -104,6 +112,100 @@ const column = (r) => {
   assert.deepEqual(column(adapter.callBatch(open(colSpec('fixtures.js#is_typed_array_raw')), 3, [slice])), [1, 1, 1], 'a raw function is handed typed arrays, not vectors');
   const chunked = adapter.callBatch(open(colSpec('fixtures.js#chunked_twice')), 3, [slice]);
   assert.deepEqual(column(chunked), [1.5, 2.5, 3.5, 1.5, 2.5, 3.5], 'a result vector of two chunks is read whole');
+}
+
+// ---- the group ids of an update or a merge are checked against n_groups ----
+{
+  const spec = { entry: 'fixtures.js#sum', shape: SHAPE.AGG_MERGEABLE, args: [['l', 'x']], state: [['l', 's']], result: [['l', 'r']] };
+  const vals = col(BigInt64Array, [1n, 2n], 0, 0n);
+  for (const [what, ids] of [['an id equal to n_groups', [0, 2]], ['a negative id', [0, -1]]]) {
+    const g = adapter.aggOpen(open(spec))[1];
+    const r = adapter.aggUpdate(g, 2, [vals], col(Int32Array, ids, 0, 0), 2);
+    assert.equal(r[0], 15, `update with ${what} is ERR_INTERNAL`);
+    assert.equal(r[3], 1, `update with ${what} names row 1`);
+    const m = adapter.aggMerge(g, 2, col(BigInt64Array, [1n, 2n], 0, 0n), col(Int32Array, ids, 0, 0), 2);
+    assert.equal(m[0], 15, `merge with ${what} is ERR_INTERNAL`);
+  }
+}
+
+// ---- no row past the end is read by an update or a merge ----
+{
+  const spec = { entry: 'fixtures.js#sum_checked', shape: SHAPE.AGG_MERGEABLE, args: [['l', 'x']], state: [['l', 's']], result: [['l', 'r']] };
+  const g = adapter.aggOpen(open(spec))[1];
+  assert.deepEqual(adapter.aggUpdate(g, 3, [col(BigInt64Array, [1n, 2n, 3n], 0, 0n)], col(Int32Array, [0, 1, 0], 0, 0), 2), [0], 'update reads exactly its rows');
+  assert.deepEqual(adapter.aggMerge(g, 2, col(BigInt64Array, [10n, 20n], 0, 0n), col(Int32Array, [1, 0], 0, 0), 2), [0], 'merge reads exactly its rows');
+  assert.deepEqual(column(adapter.aggFinish(g, 2)), [24n, 12n]);
+}
+
+// ---- two instances of one context share its evaluation of the bundle ----
+{
+  const spec = { entry: 'fixtures.js#call_counter', shape: SHAPE.SCALAR, args: [['l', 'x']], result: [['l', 'r']] };
+  const a = open(spec);
+  const b = open(spec);
+  const one = col(BigInt64Array, [0n], 0, 0n);
+  assert.deepEqual(Array.from(adapter.callBatch(a, 1, [one])[1][1]), [1n]);
+  assert.deepEqual(Array.from(adapter.callBatch(b, 1, [one])[1][1]), [2n], 'a second instance of the context counts on from the first: one evaluation of the bundle per context');
+  const other = adapter.openContext(1)[1];
+  const c = adapter.openInstance(other, spec)[1];
+  assert.deepEqual(Array.from(adapter.callBatch(c, 1, [one])[1][1]), [1n], 'another context has an evaluation of its own');
+}
+
+// ---- a ROW record answers a symbol read as undefined; a ROW's nulls reach the bitmap ----
+{
+  const rowSpec = (entry) => ({ entry, shape: SHAPE.ROW, args: [['l', 'flag'], ['l', 'a'], ['l', 'b']], result: [['l', 'r']] });
+  const touched = adapter.callBatch(open(rowSpec('fixtures.js#touch_record')), 2, cols3([1n, 0n]));
+  assert.equal(touched[0], 0, `a symbol read is not a field read: ${touched[1]}`);
+  assert.deepEqual(Array.from(touched[1][1]), [1n, 1n]);
+  const flags = [1n, 0n, 1n, 0n, 0n, 1n, 1n, 1n, 0n, 1n, 1n, 0n];
+  const nulls = adapter.callBatch(open(rowSpec('fixtures.js#pick_null')), 12, cols3(flags));
+  assert.equal(nulls[0], 0, nulls[1]);
+  const valid = Array.from(nulls[1][2]);
+  assert.equal(valid.length, 2, 'a validity bitmap of 12 rows is 2 bytes');
+  flags.forEach((f, i) => assert.equal((valid[i >> 3] >> (i & 7)) & 1, f !== 0n ? 1 : 0, `row ${i} validity`));
+}
+
+// ---- an array result with several nulls keeps each of them ----
+{
+  const spec = { entry: 'fixtures.js#nulls_every_third', shape: SHAPE.COLUMN, args: [['l', 'x']], result: [['l', 'r']] };
+  const r = adapter.callBatch(open(spec), 10, [col(BigInt64Array, [1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 9n, 10n], 0, 0n)]);
+  assert.equal(r[0], 0, r[1]);
+  const valid = Array.from(r[1][2]);
+  for (let i = 0; i < 10; i++) assert.equal((valid[i >> 3] >> (i & 7)) & 1, i % 3 === 0 ? 0 : 1, `row ${i} validity`);
+}
+
+// ---- the cancel flag is polled at every row of the first 64, then every 64th, in every shape ----
+{
+  const scalar = { entry: 'fixtures.js#double', shape: SHAPE.SCALAR, args: [['l', 'x']], result: [['l', 'r']] };
+  const vals = col(BigInt64Array, new Array(300).fill(1n), 0, 0n);
+  interruptedCalls = 0;
+  adapter.callBatch(open(scalar), 300, [vals]);
+  assert.equal(interruptedCalls, 64 + 4, 'rows 0 to 63, then 64, 128, 192, 256');
+  interruptedCalls = 0;
+  adapter.callBatch(open({ ...scalar, shape: SHAPE.ROW, entry: 'fixtures.js#pick', args: [['l', 'flag'], ['l', 'a'], ['l', 'b']] }), 300, [vals, vals, vals]);
+  assert.equal(interruptedCalls, 64 + 4, 'ROW: the same polling');
+  // a stop seen at row 0 ends each shape's call with that status
+  interruptedAnswer = 11;
+  try {
+    assert.equal(adapter.callBatch(open(scalar), 3, [col(BigInt64Array, [1n, 2n, 3n], 0, 0n)])[0], 11, 'SCALAR stops');
+    const row = adapter.callBatch(open({ ...scalar, shape: SHAPE.ROW, entry: 'fixtures.js#pick', args: [['l', 'flag'], ['l', 'a'], ['l', 'b']] }), 2, cols3([1n, 0n]));
+    assert.equal(row[0], 11, 'ROW stops');
+    assert.equal(adapter.callBatch(open({ ...scalar, shape: SHAPE.COLUMN, entry: 'fixtures.js#identity' }), 3, [col(BigInt64Array, [1n, 2n, 3n], 0, 0n)])[0], 11, 'COLUMN stops');
+    const agg = { entry: 'fixtures.js#sum', shape: SHAPE.AGG_MERGEABLE, args: [['l', 'x']], state: [['l', 's']], result: [['l', 'r']] };
+    const g = adapter.aggOpen(open(agg))[1];
+    assert.equal(adapter.aggUpdate(g, 2, [col(BigInt64Array, [1n, 2n], 0, 0n)], col(Int32Array, [0, 0], 0, 0), 1)[0], 11, 'update stops');
+    assert.equal(adapter.aggMerge(g, 2, col(BigInt64Array, [1n, 2n], 0, 0n), col(Int32Array, [0, 0], 0, 0), 1)[0], 11, 'merge stops');
+    const f = adapter.frameOpen(open({ entry: 'fixtures.js#running_sum', shape: SHAPE.FRAME, args: [['l', 'x']], result: [['l', 'r']] }), () => null)[1];
+    assert.equal(adapter.frameNext(f)[0], 11, 'a frame stops');
+  } finally {
+    interruptedAnswer = 0;
+  }
+}
+
+// ---- a step with no literal batch is ERR_INTERNAL ----
+{
+  const step = { entry: 'fixtures.js#empty_table', shape: SHAPE.STEP, args: [['l', 'rows']], result: [] };
+  const r = adapter.frameOpen(open(step), () => null);
+  assert.equal(r[0], 15, `a step that is given no literal: ${r[1]}`);
 }
 
 console.log('adapter units: ok');
