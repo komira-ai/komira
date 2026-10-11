@@ -153,7 +153,8 @@ image`. `oci_image_check`
 ([`oci_check.bzl`](oci_check.bzl), running
 [`komira_oci check`](oci/README.md)) reads the
 built image back in a build action and is that image with the check's output
-added to its default output and each sub-target, so the image cannot be built
+added to its default output, each sub-target and each sub-target of those
+(`[release][manifest]`), so the image cannot be built
 through it unless: the config's Entrypoint is exactly the one named; it and
 each of `executables` is a regular file with mode 0755 in the image's
 filesystem (layers applied in order; a whiteout removes its path and
