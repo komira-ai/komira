@@ -2,8 +2,10 @@ load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The part of the HTTP layer a client and a server share: the h1 and h2 codecs
-# (HPACK included), TLS over s2n-tls (which carries aws-lc's libcrypto; the TLS
-# layer declares its functions itself, so s2n is a dep), and the transport seam:
+# (HPACK included), TLS over s2n-tls (the TLS layer declares its functions
+# itself, so s2n is a dep; s2n needs aws-lc's libcrypto, which komira_crypto
+# ships, so komira_crypto is a dep too: tools/build/mojo/README.md, "Native
+# reach"), and the transport seam:
 # the IO stream traits, plain TCP, a scripted fake, stream parking and gRPC
 # trailer emission. komira_http_client and komira_http_server depend on it and
 # on nothing of each other.
@@ -19,6 +21,7 @@ mojo_library(
         "//src/komira_async:komira_async",
         "//src/komira_clock:komira_clock",
         "//src/komira_collections:komira_collections",
+        "//src/komira_crypto:komira_crypto",
         "//src/komira_libc:komira_libc",
         "//third_party/s2n-tls:s2n",
     ],
