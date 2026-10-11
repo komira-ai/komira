@@ -37,9 +37,9 @@ const EXPECT = {
   shared: { id: 'komira-test/node-shared-isolate', globalLock: 1 },
   workers: { id: 'komira-test/node-workers', globalLock: 0 },
 }[variant];
-// The corpus's 107 cases less the 59 the Node runtime does not run (see
+// The corpus's 117 cases less the 64 the Node runtime does not run (see
 // node_cases.mojo), plus the capabilities check.
-const RUN = 48;
+const RUN = 53;
 
 h.watchdog(`conform ${variant}`);
 

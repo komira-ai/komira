@@ -5,17 +5,20 @@
 # implements in its language (design section 6.3). This runtime's entries are
 # `<bundle>.js#<export>`, so every entry becomes `fixtures.js#<name>`.
 #
-# 59 of the corpus's 107 cases are left out; 48 run. A case is left out for one
+# 64 of the corpus's 117 cases are left out; 53 run. A case is left out for one
 # of three reasons, and a case user code can express is never among them.
 #   - The case needs an ABI-level bug that a TypeScript function cannot
-#     commit (about 50 cases). An output with a wrong layout, a NULL buffer, a
+#     commit (about 55 cases). An output with a wrong layout, a NULL buffer, a
 #     negative length, a lying null_count, a dictionary, another device, a
 #     released child, a null struct row; an input not moved (also on an
 #     error); OK without an output; `out` left set on an error; an error that
 #     is filled and then OK is returned; an error row the runtime did not see;
 #     a frame that answers after its error. The runtime builds every output
 #     and every error itself, so only a runtime written to break the ABI can
-#     commit them: that is what komira-test/echo-broken is for.
+#     commit them: that is what komira-test/echo-broken is for. A child array
+#     a runtime moves out (child_moved_out), schema flags it exports
+#     (schema_flags_exported) and a second group set per instance
+#     (agg_partials_on_own_instances) are of this kind too.
 #   - The case needs a layout this runtime never produces and the user cannot
 #     choose: an output at a non-zero offset (output_sliced_offset,
 #     frame_output_sliced_offset) or with null_count -1 (output_null_count_unknown,
@@ -42,8 +45,10 @@ def left_out_cases() -> List[String]:
     """The cases the Node runtime does not run (above)."""
     return [
         "agg_finish_short_by_one",
+        "agg_partials_on_own_instances",
         "agg_state_long_by_one",
         "bad_output_layout",
+        "child_moved_out",
         "error_released_on_ok",
         "error_row_left_unset",
         "fault_agg_args_not_moved",
@@ -55,6 +60,7 @@ def left_out_cases() -> List[String]:
         "fault_args_not_moved",
         "fault_args_not_moved_on_error",
         "fault_error_row_below_minus_one",
+        "fault_error_row_minus_two",
         "fault_error_row_past_batch",
         "fault_error_row_past_batch_propagate",
         "fault_frame_input_not_moved",
@@ -88,6 +94,7 @@ def left_out_cases() -> List[String]:
         "fault_table_n_children_2",
         "fault_table_negative_length",
         "fault_table_negative_offset",
+        "fault_table_null_count_below",
         "fault_table_null_count_lies",
         "fault_table_null_count_zero",
         "fault_table_null_rows",
@@ -98,6 +105,7 @@ def left_out_cases() -> List[String]:
         "frame_output_sliced_offset",
         "output_null_count_unknown",
         "output_sliced_offset",
+        "schema_flags_exported",
         "table_null_count_unknown",
         "validate_wrong_signature",
     ]

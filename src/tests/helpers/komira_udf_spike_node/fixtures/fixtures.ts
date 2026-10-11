@@ -39,6 +39,23 @@ export function raise_on_row_3(x: bigint): bigint {
   return x;
 }
 
+// Twelve and sixty-four int64 arguments: a struct and a schema with many
+// children. A null in any argument is a null result.
+function sumAll(a: Array<bigint | null>): bigint | null {
+  let t = 0n;
+  for (const v of a) {
+    if (v === null) return null;
+    t += v;
+  }
+  return t;
+}
+export function sum12(...a: Array<bigint | null>): bigint | null {
+  return sumAll(a);
+}
+export function sum64(...a: Array<bigint | null>): bigint | null {
+  return sumAll(a);
+}
+
 export function const7(): bigint {
   return 7n;
 }
@@ -70,6 +87,14 @@ export function null_on_zero(x: bigint): bigint | null {
 }
 
 // ---- MAP_BATCHES_COLUMN: one call per batch, over Arrow vectors ---------------
+
+// Each value a relative 5e-10 off, so a result is within the runner's
+// tolerance without being equal; 0 stays exactly 0.
+export function near(c: Vector<Float64>): Float64Array {
+  const out = new Float64Array(c.length);
+  for (let i = 0; i < c.length; i++) out[i] = (c.get(i) as number) * (1 + 5e-10);
+  return out;
+}
 
 // An int64 column as an int32 one, nulls kept.
 export function narrow(x: Vector<Int64>): Array<number | null> {
@@ -193,6 +218,13 @@ export function* table_two_types(input: Iterable<Batch>): Iterable<Array<Array<b
     }
     yield [a, b];
   }
+}
+
+// Yields a one-row table holding 0 before it reads any input, then the
+// running sums of the input.
+export function* yield_first(input: Iterable<Batch>): Iterable<Array<Array<bigint | null>>> {
+  yield [[0n]];
+  yield* running_sum(input);
 }
 
 // Never ends.
