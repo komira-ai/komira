@@ -16,7 +16,8 @@
 //! the recorder thread could not be made, uv could not be started, failed
 //! or timed out, the recorder failed or saw not exactly one request, the
 //! request is not the expected shape, or any other error (reading the
-//! committed fixtures, writing the output). A check that did not measure is
+//! committed fixtures, writing the output). A fixture the capture writes but
+//! that is not committed is DIFFERENT (1). A check that did not measure is
 //! never a pass.
 //!
 //! Both run as Buck2 build actions (BUCK, `uv_fidelity_capture` and
@@ -318,10 +319,15 @@ fn runMain() !void {
     var committed_dir = try std.fs.cwd().openDir(fixtures.?, .{});
     defer committed_dir.close();
     for (fresh.items) |f| {
-        const committed = committed_dir.readFileAlloc(a, f.name, 1 << 24) catch |e| {
-            try report.writer().print("  {s}: not committed ({s})\n", .{ f.name, @errorName(e) });
-            same = false;
-            continue;
+        const committed = committed_dir.readFileAlloc(a, f.name, 1 << 24) catch |e| switch (e) {
+            // A fixture the capture writes but nobody committed is a difference.
+            error.FileNotFound => {
+                try report.writer().print("  {s}: not committed\n", .{f.name});
+                same = false;
+                continue;
+            },
+            // Any other read failure means nothing was compared.
+            else => cannotMeasure("reading committed fixture {s}: {s}", .{ f.name, @errorName(e) }),
         };
         if (!try fid.compareFile(a, report.writer(), f.name, committed, f.data)) same = false;
     }
