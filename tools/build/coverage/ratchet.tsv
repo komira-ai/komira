@@ -34,7 +34,7 @@ src/kci_params	10000	-
 src/kci_pkg_upload	8905	-
 src/kci_publish	9215	-
 src/kci_publish_oci	9775	-
-src/kci_reconciler	8798	-
+src/kci_reconciler	10000	-
 src/kci_release_channel	10000	-
 src/kci_release_machine	9979	-
 src/kci_release_set	9892	-

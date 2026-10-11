@@ -309,7 +309,7 @@ struct _RunOutputs(Movable):
         for i in range(len(self._ids)):
             if self._ids[i] == logical_id:
                 return self._outs[i].get(output)
-        return None
+        return None  # cov: unreachable topo order records every producer (put or pending) before a consumer resolves
 
 
 def _resolve_inputs(
