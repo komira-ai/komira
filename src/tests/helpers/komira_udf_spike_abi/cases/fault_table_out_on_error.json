@@ -8,5 +8,5 @@
  "result": [{"type": "int64", "nullable": true}],
  "result_is_table": true,
  "inputs": [{"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]}],
- "expect": {"status": "ERR_RAISED", "run_error": "UDF_RUNTIME_FAULT", "message": "nonempty"}
+ "expect": {"status": "ERR_RAISED", "run_error": "UDF_RUNTIME_FAULT", "message": "nonempty", "max_pulls_before_first_output": 0}
 }

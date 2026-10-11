@@ -8,8 +8,14 @@
 /* ---- mergeable aggregate: sum ------------------------------------------ */
 
 static int32_t echo_agg_open(komira_udf_instance* inst, komira_udf_groups** out, komira_udf_error* e) {
+  komira_udf_rt* rt = inst->ctx->rt;
+  int64_t nth = rt->agg_opens++;
   if (inst->fx->shape != KOMIRA_UDF_SHAPE_AGG_MERGEABLE)
     return fail(host_of(inst), e, KOMIRA_UDF_ERR_UNSUPPORTED, "agg_open on a fixture of another shape", -1);
+  if ((rt->variant == RT_AGG_OPEN_REFUSED_FIRST && nth == 0) || (rt->variant == RT_AGG_OPEN_REFUSED_SECOND && nth == 1))
+    return fail(host_of(inst), e, KOMIRA_UDF_ERR_INTERNAL, "agg_open_refused: agg_open refused", -1);
+  if (inst->fx->variant == ONE_GROUP_SET_PER_INSTANCE && inst->group_sets++ > 0)
+    return fail(host_of(inst), e, KOMIRA_UDF_ERR_INTERNAL, "this instance already opened its group set", -1);
   komira_udf_groups* g = calloc(1, sizeof(*g));
   if (g == NULL) return fail(host_of(inst), e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "agg_open: out of memory", -1);
   g->fx = inst->fx;
@@ -73,7 +79,7 @@ static int32_t fold(komira_udf_groups* g, const komira_udf_call* call, struct Ar
       g->st[gid] += i64_at(x, r);
   }
   release_host(g->host, &v.array);
-  if (g->fx->variant != GIDS_LEAKED) release_host(g->host, &ids.array); /* sum_gids_leaked: the bug */
+  if (!(g->fx->id == F_SUM_GIDS_KEPT && g->fx->variant == GIDS_LEAKED)) release_host(g->host, &ids.array); /* sum_gids_leaked */
   return rc;
 }
 
@@ -153,6 +159,13 @@ static int32_t echo_frame_open(komira_udf_instance* inst, const komira_udf_call*
     rc = fail(host_of(inst), e, KOMIRA_UDF_ERR_UNSUPPORTED, "frame_open on a fixture of another shape", -1);
   if (rc == KOMIRA_UDF_OK && mine.device_type != ARROW_DEVICE_CPU)
     rc = fail(host_of(inst), e, KOMIRA_UDF_ERR_UNSUPPORTED, "only CPU streams are read here", -1);
+  /* No schema travels per call (design 4.4): get_schema must fail, and
+   * get_last_error must be callable. */
+  struct ArrowSchema none;
+  memset(&none, 0, sizeof(none));
+  if (rc == KOMIRA_UDF_OK && (mine.get_schema(&mine, &none) == 0 || none.release != NULL))
+    rc = fail(host_of(inst), e, KOMIRA_UDF_ERR_INTERNAL, "the input stream answered get_schema", -1);
+  if (rc == KOMIRA_UDF_OK) (void)mine.get_last_error(&mine);
   if (rc == KOMIRA_UDF_OK) rc = start_call(inst->ctx->rt, call, e);
   if (rc == KOMIRA_UDF_OK && inst->fx->id == F_FRAME_IN_KEPT && inst->fx->variant == KEPT_THEN_RAISE)
     rc = fail(host_of(inst), e, KOMIRA_UDF_ERR_RAISED, "frame_in_kept_raise: raised with `in` never moved", -1);
@@ -183,6 +196,8 @@ static int pull(komira_udf_frame* fr, struct ArrowDeviceArray* b) {
   memset(b, 0, sizeof(*b));
   b->array.release = unwritten;
   b->device_id = 77;
+  b->sync_event = &b->device_id; /* not NULL: the host must write it */
+  b->reserved[0] = b->reserved[1] = b->reserved[2] = 77; /* the host must zero them */
   int rc = fr->in.get_next(&fr->in, b);
   if (rc != 0 || b->array.release == unwritten) {
     b->array.release = NULL;
@@ -424,6 +439,9 @@ static int32_t next_table(komira_udf_frame* fr, struct ArrowDeviceArray* out, ko
       blk->bufs[0] = blk->validity;
       out->array.null_count = 0;
       break;
+    case TS_NULL_COUNT_BELOW:
+      out->array.null_count = -2;
+      break;
     case TS_NULL_COUNT_UNKNOWN:
       memset(blk->validity, 0xFF, sizeof(blk->validity));
       blk->bufs[0] = blk->validity;
@@ -448,6 +466,8 @@ static int32_t next_table(komira_udf_frame* fr, struct ArrowDeviceArray* out, ko
       out->array.dictionary = &NOT_A_DICTIONARY;
       break;
     case TS_OUT_ON_ERROR:
+      fr->kept = out->array;
+      out->array.release = release_leaves_slot;
       fr->done = 1;
       return fail(h, e, KOMIRA_UDF_ERR_RAISED, "table_out_on_error: raised with out still set", -1);
     default:
@@ -507,6 +527,18 @@ static int32_t frame_next(komira_udf_frame* fr, const komira_udf_call* call, str
   if (cancelled(call)) return fail(host_of(fr->inst), e, KOMIRA_UDF_ERR_CANCELLED, "cancelled between batches", -1);
   if (fr->done) return KOMIRA_UDF_OK; /* the end: out->array.release stays NULL */
   switch (fr->inst->fx->id) {
+    case F_YIELD_FIRST:
+      if (!fr->yielded) {
+        uint8_t* v;
+        void* d;
+        fr->yielded = 1;
+        if (!one_column_table(host_of(fr->inst), out, 1, &v, &d))
+          return fail(host_of(fr->inst), e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "yield_first: out of memory", -1);
+        ((int64_t*)d)[0] = 0;
+        set_cpu(out);
+        return KOMIRA_UDF_OK;
+      }
+      return next_running_sum(fr, out, e);
     case F_RUNNING_SUM:
     case F_FRAME_IN_KEPT:
     case F_STREAM_KEPT:
@@ -536,6 +568,10 @@ static void echo_frame_close(komira_udf_frame* fr) {
   if (fr->in.release != NULL && fr->inst->fx->id != F_STREAM_KEPT) {
     fr->in.release(&fr->in);
     if (fr->in.release != NULL) charge_host(h);
+  }
+  if (fr->kept.release != NULL) { /* table_out_on_error's table: the host must have released it once */
+    if (!((struct table_block*)fr->kept.private_data)->host_released) charge_host(h);
+    release_struct(&fr->kept);
   }
   drop(h, sizeof(*fr));
   free(fr);
