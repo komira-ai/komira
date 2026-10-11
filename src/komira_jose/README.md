@@ -43,30 +43,38 @@ trusts two issuers with different algorithms builds two verifiers.
 - `JwsSigner.es256(d)`, `JwsSigner.eddsa(seed)` and `JwsSigner.rs256(der)`
   take the private key as a zeroizing `SecretValue` (`komira_secret_store`):
   the 32-byte P-256 scalar (1 to n - 1), the 32-byte Ed25519 seed, or an RSA
-  PKCS#8 DER key of 2048 to 4096 bits (as `komira_crypto`'s
-  `rsa_pkcs8_der_from_pem` returns it). The `kid` is the RFC 7638 thumbprint
-  of the public key (`jwk_thumbprint`); `public_jwk()` is the key to publish,
-  with `kid`, `alg` and `use` `sig`.
+  PKCS#8 DER key of 2048 to 4096 bits, counted in bits (as `komira_crypto`'s
+  `rsa_pkcs8_der_from_pem` returns it). `JwsSigner(alg=, private_key=)` is the
+  same with the algorithm named. Every constructor derives the public key from
+  the private key, so the `kid` is always the RFC 7638 thumbprint of the
+  signer's own key (`jwk_thumbprint`); `public_jwk()` is the key to publish,
+  with `kid`, `alg` and `use` `sig`. A `komira_crypto` failure is raised as a
+  `JoseError` too.
 - `signer.sign(payload, typ)` returns `b64url(header).b64url(payload).b64url(sig)`
   with the header `{"alg":..,"kid":..,"typ":..}` (no `typ` when none is given).
   ES256 uses RFC 6979 deterministic nonces.
-- `Keyring(alg=, max_token_ttl_s=, leeway_s=, publish_lead_s=, now=)` holds one
+- `Keyring(alg=, max_token_ttl_s=, publish_lead_s=, now=)` holds one
   algorithm's keys over time. `rotate(signer, now)` stages a key;
   `render_jwks(now)` returns the JWK Set to publish (signing key, staged key,
   retiring keys) and records the staged key's first publication;
   `promote(kid, now)` lets the staged key sign only once it has been in a
   rendered set for `publish_lead_s`, and the old signing key starts retiring
   (its private key is dropped); `retire(kid, now)` removes a retiring key only
-  after `max_token_ttl_s + leeway_s`, and a staged key at once.
-  `sign(payload, typ, now)` refuses a payload whose `exp` is after
-  `now + max_token_ttl_s`, so no token outlives its key's publication. Time
-  never moves backwards.
+  after `max_token_ttl_s + JOSE_MAX_LEEWAY_S` (60 s, the largest leeway any
+  `ClaimPolicy` may have, so no verifier still accepts a token of a key that
+  left the set), and a staged key at once. `sign(payload, typ, now)` refuses a
+  payload without integer `exp` and `iat` (as `verify_jwt` does) or whose
+  `exp` is after `now + max_token_ttl_s`, so no token outlives its key's
+  publication. Time never moves backwards.
 - RFC 7523 assertions: `mint_assertion(signer, issuer=, subject=, audience=,
   now=, ttl_s=)` and `mint_client_assertion(signer, client_id=, audience=,
   now=, ttl_s=)` (where `iss` and `sub` are the client id) sign
   `{"iss","sub","aud","iat","exp","jti"}` with `typ` `JWT`, a lifetime of 1 to
   300 s and a `jti` of 128 random bits the caller cannot omit.
-  `verify_assertion(token, verifier, policy)` is `verify_jwt` plus a required
+  `verify_assertion(token, verifier, policy)` is `verify_jwt` plus
+  `exp - iat` of at most 300 s (whatever the policy's max TTL; a token
+  verifies from `iat - leeway` to `exp + leeway`, so a replay cache holds a
+  `jti` for at most 300 s plus twice the leeway) and a required
   non-empty `jti`; `verify_client_assertion` also requires `sub == iss`.
   Refusing a replayed `jti` is the caller's: it is the one that sees every
   assertion.

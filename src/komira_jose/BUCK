@@ -33,11 +33,14 @@ _RSA_KEY = {
 #   boundaries.
 # - test_signer: RFC 7638 and RFC 8037 thumbprint vectors, each key form's
 #   refusals, the exact header and token bytes, and every algorithm's tokens
-#   through the verify half with near-miss kid, alg, iss, aud and typ.
+#   through the verify half with near-miss kid, alg, iss, aud and typ; the
+#   RSA modulus counted in bits; komira_crypto failures as JoseError.
 # - test_keyring: publish before sign, retire after the max token TTL plus
-#   the leeway, the lifetime bound on what it signs, and its refusals.
+#   the largest verifier leeway, the lifetime bound and the required iat on
+#   what it signs, and its refusals.
 # - test_assertion: RFC 7523 assertions minted and verified for each
-#   algorithm; the jti is random, required, and never omitted.
+#   algorithm; the jti is random, required, never omitted, and taken by no
+#   public function; what verifies lives at most 300 s.
 # - test_no_product_vocabulary: the sources name no product concept and hold
 #   no early date (komira_test_vocabulary).
 mojo_library(
@@ -63,8 +66,17 @@ mojo_library(
     ],
     test_deps = ["//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary"],
     test_data = {
-        "tests/test_assertion.mojo": _RSA_KEY,
-        "tests/test_signer.mojo": _RSA_KEY,
+        # The public-surface test reads assertion.mojo and __init__.mojo,
+        # staged at their repository paths.
+        "tests/test_assertion.mojo": _RSA_KEY | {
+            "src/komira_jose/__init__.mojo": "__init__.mojo",
+            "src/komira_jose/assertion.mojo": "assertion.mojo",
+        },
+        # The constructor test reads signer.mojo, staged at its repository
+        # path.
+        "tests/test_signer.mojo": _RSA_KEY | {
+            "src/komira_jose/signer.mojo": "signer.mojo",
+        },
         # The vocabulary test reads the library's own sources, staged at their
         # repository paths.
         "tests/test_no_product_vocabulary.mojo": glob(

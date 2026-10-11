@@ -27,13 +27,18 @@
 #      is the one that starts signing;
 #   2. retire only after the max token TTL. `promote` makes the old signing
 #      key a retiring key at `now`. `retire(kid, now)` removes it from the
-#      document only when `now >= since + max_token_ttl_s + leeway_s`: by
-#      then every token it signed has expired, leeway included. A staged key
-#      has signed nothing and is removed at once. The signing key cannot be
-#      retired (promote a successor first);
+#      document only when
+#      `now >= since + max_token_ttl_s + JOSE_MAX_LEEWAY_S`: by then every
+#      token it signed has expired for every verifier. The leeway is the
+#      largest a `ClaimPolicy` accepts (60 s), not a keyring setting: a
+#      verifier at any leeway accepts a token until `exp + leeway`, so a
+#      smaller keyring leeway would drop a key while its tokens still verify
+#      somewhere. A staged key has signed nothing and is removed at once.
+#      The signing key cannot be retired (promote a successor first);
 #   3. no token outlives the retirement rule. `sign(payload, typ, now)` reads
-#      the payload as a JWT claims object and refuses it unless `exp` is a
-#      non-negative integer with `exp - now <= max_token_ttl_s`;
+#      the payload as a JWT claims object and refuses it unless `exp` and
+#      `iat` are non-negative integers (as `verify_jwt` requires) and
+#      `exp - now <= max_token_ttl_s`;
 #   4. time only moves forward: every call takes `now` (seconds since the
 #      epoch), and a `now` earlier than one already seen is refused, so a
 #      clock step back cannot shorten a retirement;
@@ -92,7 +97,6 @@ struct Keyring(Movable):
 
     var _alg: String
     var _max_token_ttl_s: Int64
-    var _leeway_s: Int64
     var _publish_lead_s: Int64
     var _now: Int64
     var _active: Optional[JwsSigner]
@@ -105,27 +109,22 @@ struct Keyring(Movable):
         *,
         alg: String,
         max_token_ttl_s: Int64,
-        leeway_s: Int64,
         publish_lead_s: Int64,
         now: Int64,
     ) raises:
         """An empty keyring. Raises `JoseError: ...` for an algorithm other
         than ES256, EdDSA and RS256, a max token TTL outside 1 to
-        `JOSE_MAX_TTL_S`, a leeway outside 0 to `JOSE_MAX_LEEWAY_S`, a publish
-        lead outside 0 to `JOSE_MAX_PUBLISH_LEAD_S`, or a negative time."""
+        `JOSE_MAX_TTL_S`, a publish lead outside 0 to `JOSE_MAX_PUBLISH_LEAD_S`, or a negative time."""
         if alg != JWS_ALG_ES256 and alg != JWS_ALG_EDDSA and alg != JWS_ALG_RS256:
             _refuse("the keyring algorithm must be ES256, EdDSA or RS256")
         if max_token_ttl_s < 1 or max_token_ttl_s > JOSE_MAX_TTL_S:
             _refuse("the keyring max token TTL must be 1 to 86400 seconds")
-        if leeway_s < 0 or leeway_s > JOSE_MAX_LEEWAY_S:
-            _refuse("the keyring leeway must be 0 to 60 seconds")
         if publish_lead_s < 0 or publish_lead_s > JOSE_MAX_PUBLISH_LEAD_S:
             _refuse("the keyring publish lead must be 0 to 86400 seconds")
         if now < 0:
             _refuse("the keyring time is negative")
         self._alg = alg.copy()
         self._max_token_ttl_s = max_token_ttl_s
-        self._leeway_s = leeway_s
         self._publish_lead_s = publish_lead_s
         self._now = now
         self._active = Optional[JwsSigner]()
@@ -224,7 +223,8 @@ struct Keyring(Movable):
 
     def retire(mut self, kid: String, now: Int64) raises:
         """Remove the key `kid` from the published set: a retiring key once
-        `max_token_ttl_s + leeway_s` has passed since it stopped signing, the
+        `max_token_ttl_s + JOSE_MAX_LEEWAY_S` has passed since it stopped
+        signing (every verifier's leeway included), the
         staged key at once. Raises for the signing key, too early, or for a
         `kid` the keyring does not hold."""
         self._tick(now)
@@ -236,7 +236,7 @@ struct Keyring(Movable):
         for i in range(len(self._retiring)):
             if _kid_of(self._retiring[i].jwk) == kid:
                 var since = self._retiring[i].since
-                if now - since < self._max_token_ttl_s + self._leeway_s:
+                if now - since < self._max_token_ttl_s + JOSE_MAX_LEEWAY_S:
                     _refuse(
                         "a retiring key stays published for the max token TTL"
                         " plus the leeway"
@@ -250,7 +250,8 @@ struct Keyring(Movable):
     ) raises -> String:
         """`payload` signed by the signing key (`JwsSigner.sign`). Raises when
         there is no signing key, or the payload is not a JWT claims object
-        whose `exp` is at most `now + max_token_ttl_s`."""
+        with integer `exp` and `iat` whose `exp` is at most
+        `now + max_token_ttl_s`."""
         self._tick(now)
         if not self._active:
             _refuse("the keyring has no signing key")
@@ -268,6 +269,7 @@ struct Keyring(Movable):
         except:
             _refuse("the payload names a member twice")
         var exp = _required_int(claims, "exp")
+        _ = _required_int(claims, "iat")
         if exp - now > self._max_token_ttl_s:
             _refuse("the token would outlive the keyring's max token TTL")
         return self._active.value().sign(payload.as_bytes(), typ)
