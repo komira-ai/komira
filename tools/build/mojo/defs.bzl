@@ -42,6 +42,7 @@ load(":native_reach.bzl", "NATIVE_REACH_ATTRS", "native_reach", "native_reach_kw
 load(":readme.bzl", "readme_kwargs")
 load(":run_check.bzl", "run_check_validation")
 load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_flags", "with_test_limit")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
@@ -425,6 +426,7 @@ def _library_impl(ctx):
                 gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), t.short_path), staged, marker.as_output(), cap_flags(cap), env_args, struct(mem_cap = mem_cap_script(ctx), test_deadline = None)),
                 hidden = test_dir,
             ),
+            env = rerun_env(ctx),
             category = "mojo_gated_test",
             identifier = stem,
         )
@@ -503,6 +505,7 @@ def _library_impl(ctx):
             readme = ctx.attrs.readme,
         ),
         welded_tests_info(ctx.attrs.test_srcs),
+        rerun_info(ctx),
     ] + cov_providers + reach[0]
 
 # ---- README examples ----------------------------------------------------------
@@ -569,10 +572,11 @@ def _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args, ships):
         opt_level = ctx.attrs.test_optimization_level,
         link_tail = _link_tail(c_link),
         env_args = env_args,
+        rerun = rerun_env(ctx),
     ))
     return marker, program, count
 
-def _readme_test_impl(actions, label, gate_label, count, program, marker, tc, closure, opt_level, link_tail, env_args):
+def _readme_test_impl(actions, label, gate_label, count, program, marker, tc, closure, opt_level, link_tail, env_args, rerun):
     n = int(count.read_string().strip())
     if n == 0:
         actions.write(marker, "NO EXAMPLE {}: no ```mojo example, so nothing was compiled or run\n".format(gate_label))
@@ -586,6 +590,7 @@ def _readme_test_impl(actions, label, gate_label, count, program, marker, tc, cl
             gate_mojo(tc, gate_label, staged, marker, [], env_args),
             hidden = root,
         ),
+        env = rerun,
         category = "mojo_gated_test",
         identifier = "readme",
     )
@@ -603,6 +608,7 @@ _readme_test = dynamic_actions(
         "marker": dynattrs.output(),
         "opt_level": dynattrs.value(str),
         "program": dynattrs.value(Artifact),
+        "rerun": dynattrs.value(dict[str, str]),
         "tc": dynattrs.value(typing.Any),
     },
 )
@@ -644,7 +650,7 @@ mojo_library_rule = rule(
         # itself built from a mojo_library, so a default would be a cycle.
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
-    } | COVERAGE_ATTRS | MUTATION_ATTRS | NATIVE_REACH_ATTRS | LIBRARY_DEFINE_ATTRS | _TOOLCHAIN_ATTR,
+    } | COVERAGE_ATTRS | MUTATION_ATTRS | NATIVE_REACH_ATTRS | LIBRARY_DEFINE_ATTRS | RERUN_ATTRS | _TOOLCHAIN_ATTR,
 )
 
 # ---- mojo_binary / mojo_test ----------------------------------------------
@@ -693,10 +699,10 @@ def _run_check(ctx, tc, command):
     out = ctx.actions.declare_output(ctx.label.name + ".stdout")
     args = [tc.busybox, "sh", tc.run_check, tc.busybox, command, out.as_output()]
     if ctx.attrs.expected_stdout == None:
-        ctx.actions.run(cmd_args(args), category = "mojo_run_check")
+        ctx.actions.run(cmd_args(args), env = rerun_env(ctx), category = "mojo_run_check")
         return out, []
     args.append(ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout))
-    ctx.actions.run(cmd_args(args), category = "mojo_run_check")
+    ctx.actions.run(cmd_args(args), env = rerun_env(ctx), category = "mojo_run_check")
     return out, run_check_validation(ctx, out, ctx.attrs.expected_stdout)
 
 def _shared(ctx, tc):
@@ -721,6 +727,7 @@ def _binary_impl(ctx):
         RunInfo(args = command),
         MojoRunnableInfo(binary = exe.basename, command = command, run_dir = run_dir),
         MojoProgramInfo(name = ctx.label.name, shared = shared, runtime = tc.runtime, target_cpu = tc.target_cpu),
+        rerun_info(ctx),
     ] + validation
 
 _EXECUTABLE_ATTRS = {
@@ -728,7 +735,7 @@ _EXECUTABLE_ATTRS = {
     "deps": attrs.list(attrs.dep(), default = []),
     "main": attrs.option(attrs.source(), default = None),
     "srcs": attrs.list(attrs.source()),
-} | _TOOLCHAIN_ATTR
+} | RERUN_ATTRS | _TOOLCHAIN_ATTR
 
 mojo_binary_rule = rule(
     impl = _binary_impl,
@@ -776,9 +783,11 @@ def _test_impl(ctx):
         ExternalRunnerTestInfo(
             type = "mojo",
             command = [command],
+            env = rerun_env(ctx),
             labels = ctx.attrs.labels,
         ),
         welded_tests_info([_main_src(ctx)]),
+        rerun_info(ctx),
     ] + cov_info
 
 mojo_test_rule = rule(
@@ -935,6 +944,7 @@ def _shared_lib_impl(ctx):
                 gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), stem), staged, marker.as_output()),
                 hidden = root,
             ),
+            env = rerun_env(ctx),
             category = "mojo_shared_lib_gate",
             identifier = stem,
         )
@@ -953,7 +963,7 @@ def _shared_lib_impl(ctx):
             # Files only: the library before its gate ran.
             "ungated": [DefaultInfo(default_output = ungated)],
         } | coverage_shared_lib(ctx, tc, _build_executable, srcs, main, _dep_closure(ctx), _c_link(ctx), link_extra, so_file),
-    )]
+    ), rerun_info(ctx)]
 
 mojo_shared_lib_rule = rule(
     impl = _shared_lib_impl,
@@ -968,7 +978,7 @@ mojo_shared_lib_rule = rule(
         "optimization_level": attrs.string(default = SHIPPED_OPT_LEVEL),
         "out_name": attrs.option(attrs.string(), default = None),
         "srcs": attrs.list(attrs.source()),
-    } | _TOOLCHAIN_ATTR | COVERAGE_SHARED_LIB_ATTRS,
+    } | _TOOLCHAIN_ATTR | COVERAGE_SHARED_LIB_ATTRS | RERUN_ATTRS,
 )
 
 def _mojo_library(**kwargs):

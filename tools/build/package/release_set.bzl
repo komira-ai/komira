@@ -84,6 +84,7 @@ load(
     "conda_package_test_stamped",
 )
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 # Copied from release/artifacts.textproto's metapackage `--summary`; the stamp
 # check holds it equal to release_set.txt's.
@@ -392,9 +393,10 @@ def _release_order_test_impl(ctx):
             ctx.attrs.build,
             [cmd_args(n, m) for n, m in zip(ctx.attrs.members, ctx.attrs.metadata_files)],
         ),
+        env = rerun_env(ctx),
         category = "release_order_test",
     )
-    return [DefaultInfo(default_output = out)]
+    return [DefaultInfo(default_output = out), rerun_info(ctx)]
 
 _release_order_test = rule(
     impl = _release_order_test_impl,
@@ -406,7 +408,7 @@ _release_order_test = rule(
         "refuses": attrs.string(default = ""),
         "version": attrs.string(),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
-    },
+    } | RERUN_ATTRS,
 )
 
 def _release_order_test_macro(**kwargs):

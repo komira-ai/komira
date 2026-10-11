@@ -8,6 +8,7 @@ Actions never search the worker's PATH.
 
 load(":providers.bzl", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 def busybox_sh(busybox, script, *args):
     """argv running `script` under the declared busybox shell.
@@ -187,9 +188,10 @@ rm -rf "$T"
 """
     ctx.actions.run(
         cmd_args(busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output()), hidden = ctx.attrs.imports),
+        env = rerun_env(ctx),
         category = "zig_test",
     )
-    return [DefaultInfo(default_output = out)]
+    return [DefaultInfo(default_output = out), rerun_info(ctx)]
 
 # `zig test` of `src` (and the `test` blocks of the files it imports, the
 # `imports`), run as a build action: the target exists only if every test
@@ -203,7 +205,7 @@ zig_test_rule = rule(
         "imports": attrs.list(attrs.source(), default = []),
         "src": attrs.source(),
         "zig": attrs.dep(),
-    },
+    } | RERUN_ATTRS,
 )
 
 def _conda_closure_impl(ctx):
