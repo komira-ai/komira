@@ -3,6 +3,7 @@
 # anything.
 load("@komira//tools/build/coverage:census.bzl", "coverage_census")
 load("@komira//tools/build/coverage:defs.bzl", "coverage_ci_cases")
+load("@komira//tools/build/lint:doc_tree.bzl", "doc_tree")
 load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "public_boundary", "retired_names", "shell_lint", "src_layout", "target_suite", "workflow_lint")
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
@@ -26,6 +27,14 @@ export_file(
     name = "pr.yml",
     src = ".github/workflows/pr.yml",
     visibility = ["//src/kci_workflow_check:"],
+)
+
+# The files under .github/, which the root doc_tree's glob skips, at their
+# paths, for the shell budget (//tools/build/lint:shell_budget).
+doc_tree(
+    name = "github_tree",
+    srcs = glob([".github/**"]),
+    visibility = ["//tools/build/lint:shell_budget"],
 )
 
 shell_lint(
@@ -108,8 +117,7 @@ src_layout(
 # script as in any other. A repository using komira as a cell has no
 # `tests` cell, so there the list is empty and the target is not declared.
 # A package of the tests cell that holds a shell script declares its
-# shell_lint and is named here. The `deps_lint` of a package whose deps are
-# checked against its imports (mojo_deps) is named here too.
+# shell_lint and is named here.
 _TESTS_LINTS = [
     "tests//:shell_lint",
     "tests//functional/aws_codegen:shell_lint",
@@ -123,39 +131,6 @@ _TESTS_LINTS = [
     "tests//functional/test_deadline:shell_lint",
     "tests//functional/watchdog:shell_lint",
     "tests//golden:shell_lint",
-    # The deps of a package that names its imports (tools/build/lint, mojo_deps).
-    "//src/kci_cell:deps_lint",
-    "//src/komira_authz_api:deps_lint",
-    "//src/komira_aws_lambda_http:deps_lint",
-    "//src/komira_calendar_ics:deps_lint",
-    "//src/komira_contacts:deps_lint",
-    "//src/komira_http_auth:deps_lint",
-    "//src/komira_http_client:deps_lint",
-    "//src/komira_http_core:deps_lint",
-    "//src/komira_http_server:deps_lint",
-    "//src/komira_optimizer:deps_lint",
-    "//src/tests/conformance/komira_calendar_ics_conformance:deps_lint",
-    "//src/tests/conformance/komira_connect_conformance:deps_lint",
-    "//src/tests/conformance/komira_contacts_store_conformance:deps_lint",
-    "//src/tests/conformance/komira_db_conformance:deps_lint",
-    "//src/tests/conformance/komira_git_conformance:deps_lint",
-    "//src/tests/conformance/komira_git_pack_conformance:deps_lint",
-    "//src/tests/conformance/komira_git_protocol_conformance:deps_lint",
-    "//src/tests/conformance/komira_http_conformance:deps_lint",
-    "//src/tests/conformance/komira_datetime_conformance:deps_lint",
-    "//src/tests/conformance/komira_json_conformance:deps_lint",
-    "//src/tests/conformance/komira_plan_conformance:deps_lint",
-    "//src/tests/conformance/komira_xml_conformance:deps_lint",
-    "//src/tests/e2e/komira_azure_blob_e2e:deps_lint",
-    "//src/tests/e2e/komira_formats_e2e:deps_lint",
-    "//src/tests/e2e/komira_http_tls_e2e:deps_lint",
-    "//src/tests/e2e/komira_job_supervisor_loopback:deps_lint",
-    "//src/tests/e2e/komira_pandas_door_e2e:deps_lint",
-    "//src/tests/e2e/komira_secrets_e2e:deps_lint",
-    "//src/tests/e2e/komira_shuffle_e2e:deps_lint",
-    "//src/tests/e2e/komira_tls_interop_e2e:deps_lint",
-    "//src/tests/e2e/komira_udf_e2e:deps_lint",
-    "//src/tests/helpers/komira_plan_harness:deps_lint",
 ] if read_root_config("cells", "tests") else []
 
 [lint_suite(
@@ -164,7 +139,7 @@ _TESTS_LINTS = [
 ) for _ in _TESTS_LINTS[:1]]
 
 # The greens of the tests cell that no derived unit builds: the pull-request
-# check builds `//...` and `tests//functional/...` (release/ci/derive_checks.py),
+# check builds `//...` and `tests//functional/...` (//tools/build/ci:derive_checks),
 # so a target of tests//negative or tests//src that must build, beside the
 # planted defects it serves, is named here, through its package's
 # target_suite (a package's sub-targets need one too, and a suite in the same

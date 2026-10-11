@@ -279,6 +279,13 @@ the table for the welded test that holds kci's compiled copy equal to it. The
 packer does not write them yet: it still refuses a library that opens a shared
 library by name.
 
+The target `:glibc_floor` ([`glibc_floor_record.bzl`](glibc_floor_record.bzl))
+writes the platform table's glibc floor of each subdir the packer writes
+(`linux-64 2.34`, from `os_floor_version`) for the welded test that holds kci's
+compiled copy (`src/kci_release_set/glibc_floor.mojo`) equal to it: kci accepts
+`__glibc >=<floor>` on a library shipping native files, and no other `__glibc`
+requirement.
+
 With coverage on (`-c komira.coverage=true`), both copies of a conda package
 (its default output and `[release]`) also wait for the library's coverage runs
 and its coverage gate, which the library hands over in its
@@ -314,9 +321,9 @@ fails the build in these cases:
 - the metapackage does not require a member at its version and build string; the
   message names the member;
 - a member's metadata.json requires, at the set's version and build string, a
-  member listed after it (the native package `komira_native` excepted); the
-  message names both. The `release_order_*` targets in [`BUCK`](BUCK) run this
-  check over the fixtures in `release_order/` and must pass first;
+  member listed after it; the message names both. The `release_order_*`
+  targets in [`BUCK`](BUCK) run this check over the fixtures in
+  `release_order/` and must pass first;
 - `komira_pack conda-check --kind metapackage --require-stamped true` refuses the
   metapackage;
 - its `libs`, its metapackage name, or the `--license`, `--summary` and `--home`

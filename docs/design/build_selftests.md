@@ -45,18 +45,18 @@ This follows the build-architecture ruling:
 
 Every action this design adds runs a Zig-built tool, and every check it adds is a Buck2 target. It adds
 no CI step, no workflow logic and no shell: a scenario is a `buck2 test` target that `pr / check`
-already runs through its existing commands (`derive_checks.py`, `build_targets.sh`). The design
-changes `derive_checks.py` not at all and `build_targets.sh` in one place: its BXL step, which runs the
+already runs through its existing commands (`derive_checks`, `build_targets.sh`). The design
+changes `derive_checks` not at all and `build_targets.sh` in one place: its BXL step, which runs the
 test_weld check today, also runs the graph checks (see "Graph checks in the gate"). Existing rule scripts that the rows below lean on (`run_check.sh`, the
 `cases.sh` actions) keep running until their own Zig port. Rows 28, 29 and 49 schedule the ports of the
-case scripts. The rest, and the port of `derive_checks.py` and `build_targets.sh`, belong to the
+case scripts. The rest, and the port of `build_targets.sh` (`derive_checks` is now the Mojo `//tools/build/ci:derive_checks`), belong to the
 build-architecture ruling's own work, not to this design.
 
 A fourth outcome is **delete**: the check repeats what `pr / check` already builds. Every converted check
 has a planted mutant that turns it red, and each slice deletes its shell part in the same pull request.
 
 "Already in the gate" has a precise meaning here. `pr / check` builds the derived units the change
-reaches. Its universe is `//...` and `tests//functional/...` (`release/ci/derive_checks.py`); it is not
+reaches. Its universe is `//...` and `tests//functional/...` (`//tools/build/ci:derive_checks`); it is not
 a whole `//...` build. It runs `buck2 test` only on targets outside `tests//`
 (`release/ci/build_targets.sh`). It does not build sub-targets such as `[run_check]`. It never builds
 `tests//negative`. The universe is a `cquery` for the default target platform, so a target that is
@@ -170,7 +170,7 @@ Bucket: `1` target, `1 (BXL)` a graph check run in the gate, `2` Zig (or tool-la
 `3` scenario, `del` delete, `open` needs a ruling. Numbers are the test numbers in `run_tests.sh`. Scenario names are under `//tools/build/selftest:`.
 **Slice** is the one pull request that deletes the row's shell lines (see "Slice plan"). A mixed row
 (`3 + 2`) is deleted in the slice of its last part. Its earlier parts land in earlier slices, and the
-shell lines stay until then. Each of the 188 rows names exactly one slice. A fixture under `negative/`
+shell lines stay until then. Each of the 186 rows names exactly one slice. A fixture under `negative/`
 goes with the last row that uses it.
 
 ### run_tests.sh, its own tests
@@ -267,8 +267,6 @@ goes with the last row that uses it.
 | 52 golden_differs, missing_symbol | doc JSON checker | 2 | doc JSON checker unit tests | walk only top-level symbols | 6 |
 | 53 surface_capability_matrix | 19 reds, 5 the only finding | del + 2 | matrix checker unit tests, facts fed as input | refuse no longer-named package | 6 |
 | 53 dangling, incompatible | unknown target; incompatible test under a pattern | 3 | `analysis_refusals_lint` (scratch tree, not an in-place copy) | make the deps soft | 3 |
-| 55 refused_imports | 25 spellings | gone | nothing: test 55 and the `refused_imports` attribute of `mojo_deps` were deleted on main when komira_physical_plan moved out of komira_plan_ir | n/a | 6 |
-| 55 bad_entry | non-dotted entry refused | gone | nothing: deleted on main with test 55 (the row above) | n/a | 3 |
 | order switches | `--no-run`, `--no-umbrella`, local SKIPs | del | each scenario runs alone | n/a | 11 |
 | harness mode | local/remote mode detection | 2 | helper lib farm guard, unit-tested | accept a mixed list | 11 |
 | harness silence | a sub-script that reports nothing, or SKIPs on CI, is red | 2 | helper lib: a scenario that asserts nothing or SKIPs fails, and so does a build command whose what-ran lists no action | return early with no assertion | 11 |
@@ -381,7 +379,7 @@ goes with the last row that uses it.
 The shared Zig markdown module adds a `zig_module` rule and a `deps` attribute on `zig_exe` and
 `zig_test` (`tools/build/mojo/toolchain.bzl`). Its refusals and its weld have no `run_tests.sh` lines
 to delete, so these rows add cases to existing scenarios. They land in the named slice, or after
-#1295 merges if that is later. They are not counted among the 188 rows above.
+#1295 merges if that is later. They are not counted among the 186 rows above.
 
 | id | what | bucket | lands in | mutant | slice |
 |---|---|---|---|---|---|
@@ -400,7 +398,9 @@ All under `//tools/build/selftest/`, one Zig test target each:
   `_python_oracle`, `_node`, `_rust`, `_coverage`, `_platform_table`, `_zig`, and `config_refusals`.
 - Builds that must go red: `gate_wiring`, `shared_lib_gate`, `compile_isolation`, `planted_red_builds`,
   `planted_red_builds_node`,
-  `assert_level_reds`, `test_limits`, `coverage_gate_reds`.
+  `assert_level_reds`, `test_limits`, `coverage_gate_reds`, `sql_oracle` (with its analysis refusals
+  and an aquery pin of its invocation; a rule added after this inventory, so it has no row in the
+  tables above).
 - aquery diffs: `assert_level_commands`, `coverage_platforms`, `coverage_keys`,
   `coverage_analysis`, `coverage_switch`.
 - Scratch trees and clones: `consumer_cell_cache`, `buck2_run_fresh_clone`, `fresh_clone_local_default`,
@@ -420,12 +420,12 @@ passed through an attribute, say) is not caught on that pull request; every list
 ## Scenarios run in pr / check
 
 The scenarios run in `pr / check` whenever a pull request touches `tools/build/**`. They are selected
-by the derivation that already exists. Nothing in `pr.yml` or `derive_checks.py` changes, and nothing
+by the derivation that already exists. Nothing in `pr.yml` or the derive_checks tool changes, and nothing
 filters them. The one change to `build_targets.sh` is for the graph checks, not for the scenarios (see
 "Graph checks in the gate").
 
 - **They are in the universe.** A scenario test target is compatible with the default target
-  platform, so the `cquery` of `//...` in `derive_checks.py` sees it like any other target.
+  platform, so the `cquery` of `//...` in `//tools/build/ci:derive_checks` sees it like any other target.
 - **They are one declared check.** Slice 3 adds one check, `build_selftests`, to
   `release/artifacts.textproto`, with the `buck2` build system and the one target pattern
   `//tools/build/selftest/...`. A target a declared unit matches is not derived again: no derived
@@ -697,7 +697,7 @@ after the slice of its last callee. Slice 11 deletes `run_tests.sh` last.
    - Move the report floors into the case actions.
    - Add the s2n probe `fail()` and the `branch_gate_rows` target.
    - Add the two Rust unit tests (`omit_pruned_field`, `unknown_operation`) and the window-pin check.
-   - Delete the spsc_ring falsifier scripts and their fixtures: `negative/spsc_ring_element.sh`,
+   - Deleted: the spsc_ring falsifier scripts and their fixtures, `negative/spsc_ring_element.sh`,
      `negative/spsc_ring_prefix_layout.sh` and `negative/spsc_ring_prefix_layout/` (two `.mojo`
      files). Nothing calls them. The regression tests they falsified stay in `komira_spsc_ring`
      (`test_consumer_polling_before_the_slot_store_exists`, `test_layout_guards`). What goes is the
@@ -727,7 +727,7 @@ after the slice of its last callee. Slice 11 deletes `run_tests.sh` last.
      `aquery_host_paths`, `docs_package_coverage`, `config_hash_pin`, `test_weld_real_graph` and
      `golden_linux_x86_64`. golden.sh goes with them.
 6. **Lints and checkers, with unit tests.**
-   - The Zig ports: test_weld, pointer_lint, src_layout, refused_imports, readme_api_coverage,
+   - The Zig ports: test_weld, pointer_lint, src_layout, readme_api_coverage,
      surface_capability_matrix, public_boundary, the shared lint runner and the limits checker.
    - The Zig `doc_links` port (below), and the unit tests of the doc JSON checker.
    - The new file lints (17, 19) with the toolchains-cell file list, the readme marker check, and the
@@ -844,7 +844,6 @@ Sourced sections:
 | `node_tests.sh` | 4 |
 | `golden/golden.sh` | 5 (with its call in `platform_table/check.sh`) |
 | `negative/lint_weld.sh` | 9 |
-| `negative/spsc_ring_element.sh`, `negative/spsc_ring_prefix_layout.sh` (with `negative/spsc_ring_prefix_layout/`) | 2 |
 
 The 16 `functional/` drivers the harness calls:
 

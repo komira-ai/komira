@@ -110,3 +110,5 @@ selftest_scenario(name = "analysis_refusals_rust")
 selftest_scenario(name = "analysis_refusals_coverage")
 
 selftest_scenario(name = "config_refusals")
+
+selftest_scenario(name = "sql_oracle")
