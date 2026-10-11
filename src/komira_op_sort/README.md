@@ -39,6 +39,25 @@ batch by it.
   per DType; its cell codec is `sort_buffer_cells`.
 - `sort_loser_tree`: `LoserTree`, a tournament tree for the k-way merge of
   sorted runs, driven by a caller's `LoserTreeComparator`.
+- `sort_parallel`: `parallel_sort_single_key`, the single-key sort over an
+  INT64 / INT32 / FLOAT64 key on the engine's fork-join runtime (a stable
+  sort per slice, then a parallel co-rank merge of the slices), and
+  `merge_sorted_partitions_single_key`, the k-way merge of batches that are
+  each already sorted. `can_parallel_sort_single_key` is the gate (one key
+  of those types, `MIN_PARALLEL_SORT_ROWS` rows unless forced).
+- `sort_parallel_string`: the same for one STRING / BINARY key
+  (`parallel_sort_single_key_string`), and the merges of sorted STRING
+  partitions: `merge_sorted_partitions_single_key_string_parallel` (a
+  parallel pairwise tree) and `merge_sorted_partitions_single_key_string`
+  (its serial oracle). The per-slice string sort and its comparators are
+  `sort_parallel_string_kernels`; the pairwise-tree merge is
+  `sort_parallel_string_merge`.
+
+Each parallel entry takes a `SharedForkJoinHandle` (the engine's dispatcher,
+or `serial_fork_join_handle()` to run the same chunks inline; the `*_serial`
+entries do that) and gives exactly the rows of the serial kernel, ties in
+input order. `num_workers` sets the slice count; 0 means one per physical
+core.
 
 Every sort is stable: rows with equal keys keep their input order, in both
 directions. Float keys are totally ordered the way DuckDB orders them: NaN
@@ -83,6 +102,30 @@ assert_equal(Int(perm.get(3)), 2)
 var top = topn_indices_int64(keys, 2, descending=True)
 assert_equal(top.length, 2)
 assert_equal(Int(keys.get(Int(top.get(0)))), 7)
+```
+
+The parallel sort of a FLOAT64 column, cut into three slices, gives the
+serial sort's rows, NaN last:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, Schema
+from komira_op_sort.sort_parallel import parallel_sort_single_key_serial
+
+var nan = Float64(0.0) / Float64(0.0)
+var keys = PrimitiveArray[DType.float64].from_list([2.0, nan, -1.0, 2.0, 0.5])
+var schema = Schema.from_fields_1(Field("x", DType.float64, True))
+var batch = RecordBatch.from_typed_columns_1(
+    schema^, Column.from_primitive[DType.float64](keys^)
+)
+var out = parallel_sort_single_key_serial(batch^, "x", False, num_workers=3)
+var col = out.column_at(0).as_primitive[DType.float64]()
+assert_equal(col.get(0), -1.0)
+assert_equal(col.get(3), 2.0)
+assert_true(col.get(4) != col.get(4))  # NaN sorts last
 ```
 
 A string column ascending, and the two string algorithms agreeing:
