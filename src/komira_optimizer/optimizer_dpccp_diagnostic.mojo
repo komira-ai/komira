@@ -3,7 +3,7 @@
 # land on a target subset, and the final DP table
 # =============================================================================
 #
-# `solve_dpccp_with_dp_trace` runs the solver core (`optimizer_dpccp.
+# `solve_dpccp_with_dp_trace` runs the solver core (`optimizer_dpccp_solve.
 # solve_dpccp_observed`) with a recording observer, `DPccpTrace`, and returns
 # the plan `solve_dpccp_with_cost` would return for the same chain and cost
 # override. The trace answers questions a plan alone cannot: which partitions
@@ -37,7 +37,8 @@ from std.collections import Dict
 
 from komira_plan_ir.logical_plan import LogicalPlan
 from .optimizer_reorder import JoinChain
-from .optimizer_dpccp import DPNode, solve_dpccp_observed
+from .optimizer_dpccp_cost import DPNode
+from .optimizer_dpccp_solve import solve_dpccp_observed
 from .optimizer_dpccp_observer import DPCandidate, DPccpObserver
 
 

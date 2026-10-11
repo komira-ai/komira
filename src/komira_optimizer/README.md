@@ -40,6 +40,10 @@ here executes a plan.
 | `optimizer_tdom_cost` | join cardinality from TDOMs over the bridging edges of a (left, right) split |
 | `optimizer_tdom_card` | order-independent cardinality of a combined relation set |
 | `optimizer_dpccp` | DPccp join enumeration over a join chain (with a cross-product fallback for disconnected graphs) and `reorder_joins_with_dp`, the inner-join reorder driver that picks DPccp or greedy per chain |
+| `optimizer_dpccp_cost` | the DPccp bounds (`DPCCP_MIN_RELATIONS`, `DPCCP_MAX_RELATIONS`, `DPCCP_MAX_ITERATIONS`), `DPNode` (one DP table entry) and the cost of one candidate pair; `optimizer_dpccp` re-exports its names |
+| `optimizer_dpccp_graph` | the DPccp relation graph: the adjacency list, connectivity, and the cross-product augmentation for disconnected graphs; `optimizer_dpccp` re-exports its names |
+| `optimizer_dpccp_enum` | `emit_pair`, the three DPccp enumerators and `reconstruct_plan_from_dp`; `optimizer_dpccp` re-exports its names |
+| `optimizer_dpccp_solve` | `solve_dpccp`, `solve_dpccp_with_cost` and `solve_dpccp_observed`: the literal-edge pass, the cross-product pass and the top-level synthesized-cross guard; `optimizer_dpccp` re-exports its names |
 | `optimizer_dpccp_observer` | `DPccpObserver`, what the DPccp enumerators report each pass and every scored pair to; `DPCandidate`, one scored pair; `NoDPccpObserver`, the empty observer the solver uses |
 | `optimizer_dpccp_diagnostic` | `solve_dpccp_with_dp_trace`: one DPccp solve recorded in a `DPccpTrace` (a report per pass, every scored partition of a target subset with the enumerator's repeats counted, the final DP table) |
 | `order_advisory` | `advise_join_order`: comparing a plan's join order with the reorderer's and reporting a written order estimated costlier, without changing the plan |

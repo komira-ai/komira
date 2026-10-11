@@ -2,9 +2,10 @@
 # Optimizer DPccp -- the observer the enumerators report each pass and pair to
 # =============================================================================
 #
-# `optimizer_dpccp`'s enumerators (`emit_pair`, the three recursive
-# enumerators, `_run_dpccp_passes`) and its solver core
-# (`solve_dpccp_observed`) take an observer conforming to `DPccpObserver`.
+# The DPccp enumerators (`emit_pair` and the three recursive enumerators in
+# `optimizer_dpccp_enum`, `_run_dpccp_passes` in `optimizer_dpccp_solve`) and
+# the solver core (`solve_dpccp_observed`) take an observer conforming to
+# `DPccpObserver`.
 # They call it at three points:
 #
 #   - `on_pass_begin(allow_cross)` when an enumeration pass starts (the
