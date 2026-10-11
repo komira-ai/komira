@@ -1,0 +1,133 @@
+# N > 1 engine threads on python_subinterp.so, through the engine loop
+# (native/engine_loop.c: one pthread per engine thread, each opening its own
+# context and instance and calling only those).
+#
+# What it proves, and the defect each part catches:
+#   - 4 threads x 20 batches of 1024 rows of the per-row function: every
+#     output value right, calls == batches (no per-row crossing), every
+#     exported argument array released (a race between contexts; a context
+#     entered from the wrong thread; a leak);
+#   - state per context: a module-global row counter counts 1..K on every
+#     thread, so each thread's interpreter has its own copy of the module (a
+#     runtime that shares one interpreter, or one module, across contexts);
+#   - parallelism (design section 6.3): 4 threads each spin 200 ms of CPU in
+#     user code; process CPU time over the wall time of that phase must be at
+#     least 0.6 x min(4, CPUs) (a lock shared across engine threads: under
+#     one GIL the ratio is about 1);
+#   - the engine loop names no runtime and no language (it drives any
+#     runtime library through the table);
+#   - misuse (calls.check_misuse): open_instance and call_batch from a
+#     thread other than the context's refused, close_instance and
+#     close_context from it logged and ignored, an argument struct at a
+#     nonzero offset refused (a sub-interpreter entered off its thread; a
+#     context freed under its owner; an offset read as 0); each malformed
+#     call of engine_loop.c's mangle_args refused with its reason and its
+#     args moved, zero rows without a values buffer accepted (a layout
+#     check dropped or weakened in python_call.c's args_layout_error);
+#   - the engine hands over an output slot filled with a pattern, and checks
+#     each field of an OK output (device, sync event, reserved words,
+#     dictionary, offset, null count) and that a failure leaves release
+#     NULL (a field the runtime does not write);
+#   - leaks: 20000 one-row batches grow the heap (mallinfo2) by under
+#     256 KB, and 5000 failing calls by under 64 KB (an output block, an
+#     argument owner record, an error message or trace never freed).
+#
+# Mutant planted: python_runtime.c's open_context and close_context treating
+# every context of the sub-interpreter build as a thread state of the main
+# interpreter (one interpreter for all, describe unchanged): red (a
+# thread's counter starts past 1 or ends past K: other threads' rows are
+# counted in the same module).
+# The shared conformance suite stays green under it: its cases are
+# stateless, so this case is where a shared interpreter shows.
+# Mutants planted: python_runtime.c's off_owner_thread always answering
+# "owner" (closes entered off their thread): red (foreign_close_logs 0);
+# python_call.c's args_layout_error without its offset check: red
+# (offset_call OK).
+
+from std.testing import assert_equal, assert_false, assert_true
+
+from komira_udf_spike_python.calls import check_misuse
+from komira_udf_spike_abi.contract import ERR_RAISED, SHAPE_SCALAR, status_name
+from komira_udf_spike_python.engine import CAP_GLOBAL_LOCK, CHECK_NONE, Engine, RunReport, Workload
+from komira_udf_spike_python.workloads import call_counter, fahrenheit_rows, spin
+
+
+def _all_ok(r: RunReport, what: String) raises:
+    assert_equal(r.status, 0, what + ": " + r.message)
+    for i in range(len(r.threads)):
+        ref t = r.threads[i]
+        assert_equal(t.status, 0, what + ": thread " + String(i) + ": " + t.message)
+        assert_equal(t.exported, t.released, what + ": thread " + String(i) + " arrays exported vs released")
+
+
+def _neutral() raises:
+    for path in ["native/engine_loop.c", "engine.mojo"]:
+        var text = String("")
+        with open(path, "r") as f:
+            text = f.read().lower()
+        for word in ["python", "numpy", "komira-test/", "node"]:
+            assert_false(word in text, path + " names '" + word + "'")
+
+
+def main() raises:
+    _neutral()
+    var e = Engine("./python_subinterp.so")
+    assert_equal(e.status(), 0, e.message())
+    assert_equal(e.cap(CAP_GLOBAL_LOCK), 0)
+    check_misuse(e)
+
+    var r = e.run(fahrenheit_rows(4, 1024, 2, 20))
+    _all_ok(r, "fahrenheit_rows")
+    for t in r.threads:
+        assert_equal(t.calls, 22)
+        assert_equal(t.bad_values, 0)
+        assert_equal(t.rows, 22 * 1024)
+
+    var k = 50
+    r = e.run(call_counter(4, k))
+    _all_ok(r, "call_counter")
+    for i in range(len(r.threads)):
+        ref t = r.threads[i]
+        assert_equal(t.first_value, 1, "thread " + String(i) + ": its interpreter's first row")
+        assert_equal(t.last_value, Int64(k + 1), "thread " + String(i) + ": rows its own interpreter saw")
+        assert_true(t.increasing)
+
+    r = e.run(spin(4, 200))
+    _all_ok(r, "spin")
+    var cpu = Float64(r.cpu_user_ns + r.cpu_sys_ns)
+    var ratio = cpu / Float64(r.wall_ns)
+    var lanes = Float64(min(Int64(4), r.cpus))
+    print("spin: cpus", r.cpus, "wall ms", r.wall_ns // 1_000_000, "cpu ms", Int(cpu) // 1_000_000, "ratio", ratio)
+    assert_true(r.cpus >= 2, "the parallelism case needs 2 CPUs; this action has " + String(r.cpus))
+    assert_true(ratio >= 0.6 * lanes, "CPU/wall " + String(ratio) + " below 0.6 x " + String(lanes))
+
+    # The runtime frees what each call allocates (the output block when the
+    # host releases it, the moved argument's owner record when its last
+    # reference goes): one thread, 20000 measured batches of one row. A
+    # missing free keeps at least 96 bytes a batch, about 1.9 MB; the heap
+    # (mallinfo2, every arena) must grow by less than 256 KB.
+    r = e.run(fahrenheit_rows(1, 1, 100, 20000))
+    _all_ok(r, "fahrenheit_rows, 20000 batches of 1 row")
+    var grew = r.heap_measured - r.heap_warm
+    print("heap growth over 20000 batches:", grew, "bytes")
+    assert_true(grew < Int64(256 << 10), "the heap grew " + String(grew) + " bytes over 20000 batches")
+
+    var raising = Workload(
+        "udf_fixtures:raise_type_error", SHAPE_SCALAR, "l", "l", 1, 1, 0, 1, CHECK_NONE, 0.0, 0.0, 0.0, 0.0
+    )
+    var eh = e.error_heap(raising, 5000)
+    assert_equal(eh.status, 0, eh.message)
+    assert_equal(eh.open_status, 0)
+    assert_equal(status_name(eh.last_status), status_name(ERR_RAISED), eh.last_message)
+    assert_equal(eh.exported, eh.released, "every argument array of the failing calls released")
+    print("heap growth over 5000 failing calls:", eh.heap_growth, "bytes")
+    assert_true(eh.heap_growth < Int64(64 << 10), "the heap grew " + String(eh.heap_growth) + " bytes")
+    # The same over calls that fail inside the adapter (ERR_INTERNAL).
+    var internal = Workload(
+        "udf_fixtures:bad_index", SHAPE_SCALAR, "l", "l", 1, 1, 0, 1, CHECK_NONE, 0.0, 0.0, 0.0, 0.0
+    )
+    eh = e.error_heap(internal, 5000)
+    assert_equal(status_name(eh.last_status), "ERR_INTERNAL", eh.last_message)
+    print("heap growth over 5000 adapter failures:", eh.heap_growth, "bytes")
+    assert_true(eh.heap_growth < Int64(64 << 10), "the heap grew " + String(eh.heap_growth) + " bytes")
+    print("test_threads_subinterp: ok")

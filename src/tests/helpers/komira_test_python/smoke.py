@@ -15,8 +15,11 @@ import sys
 # distribution -> the module it installs, and whether that module carries
 # `__version__`.
 MODULES = {
+    "cloudpickle": ("cloudpickle", True),
     "duckdb": ("duckdb", True),
     "grpcio": ("grpc", True),
+    "joblib": ("joblib", True),
+    "narwhals": ("narwhals", True),
     "numpy": ("numpy", True),
     "pandas": ("pandas", True),
     "polars": ("polars", True),
@@ -24,7 +27,10 @@ MODULES = {
     "protobuf": ("google.protobuf", True),
     "pyarrow": ("pyarrow", True),
     "python-dateutil": ("dateutil", True),
+    "scikit-learn": ("sklearn", True),
+    "scipy": ("scipy", True),
     "six": ("six", True),
+    "threadpoolctl": ("threadpoolctl", True),
     "typing-extensions": ("typing_extensions", False),
     "tzdata": ("tzdata", True),
 }
