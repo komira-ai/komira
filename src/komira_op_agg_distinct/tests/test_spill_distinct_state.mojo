@@ -61,16 +61,12 @@ from komira_libc.posix import _read_env
 # ---------------------------------------------------------------------------
 # ⚠ $TEST_TMPDIR, NOT A HARD-CODED `/tmp` PATH.
 #
-# A gated test is executed by MORE THAN ONE build action at a time (its
-# library's own gate and //tools/release_gates each declare a marker, and
-# `test_gate.bzl`'s dedup is package-scoped), on one worker, with `no-sandbox`.
-# A fixed `/tmp` path is shared by every one of those executions and no
-# `TMPDIR`/`TEST_TMPDIR` the runner sets can redirect it. `TEST_TMPDIR` is
-# unique per action under both `bazel test` and `test_gate_runner.sh`, which is
-# what makes them disjoint.
-#
-# Written by `scripts/check_gated_test_scratch_paths.py --fix`; that script is
-# the single definition and `pixi run lint` keeps the literal from coming back.
+# More than one execution of a welded test can run on one worker at a time,
+# and a fixed `/tmp` path would be shared by all of them. The gate runner
+# (`tools/build/mojo/gate_runner.sh`) gives each execution its own empty
+# `TEST_TMPDIR` (equal to `TMPDIR`), which keeps their spill files disjoint.
+# The `TMPDIR` and `/tmp` fallbacks below are reached only when the binary is
+# run by hand outside the gate runner.
 #
 # ⚠ `_read_env`, NOT `std.os.getenv` — Mojo's MLIR FFI legalization allows at
 # most ONE `getenv` declaration per link unit and `komira_libc.posix` is
