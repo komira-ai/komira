@@ -254,14 +254,12 @@ def is_literal_output_expr(imm e: Expr) -> Bool:
     return False
 
 
-def _literal_under_aliases(imm e: Expr) raises -> ScalarValue:
+def _literal_under_aliases(imm e: Expr) -> ScalarValue:
     """The value of the literal `e` is, under any number of aliases. Requires
-    `is_literal_output_expr(e)`; raises on any other shape."""
-    if e.tag == EXPR_LITERAL:
-        return e.literal_value()
+    `is_literal_output_expr(e)`, as `Expr.literal_value` requires its tag."""
     if e.tag == EXPR_ALIAS:
         return _literal_under_aliases(e.alias_child_ref())
-    raise Error("_literal_under_aliases: the expression is not a literal")
+    return e.literal_value()
 
 
 def _is_regexp_output(imm e: Expr) -> Bool:
