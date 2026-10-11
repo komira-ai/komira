@@ -23,9 +23,10 @@
 #      read, and c is not refused as unbound.
 #   8. A TURNED-OFF PRODUCER PRODUCES NOTHING: its consumer is refused as
 #      UNBOUND by the dry run, never reported as "known after apply". That
-#      holds for a producer that is absent and for one that is present and
-#      would report outputs: the consumer is never bound to the outputs of an
-#      object the file turned off.
+#      holds for a producer that is absent, for one that is present and
+#      would report outputs (left alone), and for one the plan deletes because
+#      the store and the stamp prove it ours: the consumer is never bound to
+#      the outputs of an object the file turned off.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -54,6 +55,7 @@ from kci_reconciler import (
     VERB_CREATE,
     VERB_NOOP,
     VERB_UPDATE,
+    VERB_DELETE,
     VERB_KNOWN_AFTER_APPLY,
     FAULT_UNSET,
     apply_graph,
@@ -523,6 +525,49 @@ def test_a_present_turned_off_producer_with_outputs_binds_nothing() raises:
     print("  test_a_present_turned_off_producer_with_outputs_binds_nothing: PASS")
 
 
+def test_a_turned_off_producer_the_plan_deletes_binds_nothing() raises:
+    # The producer is live, stamped as ours, and recorded and confirmed in the
+    # store under this cell, so the owned dry run plans its delete. Its
+    # conformer would report a URL; the consumer must still be UNBOUND.
+    var store = InMemoryStateStore()
+    var ticket = store.record_or_adopt_intent(
+        _cell().key(String("pp")), _ours(String("pp"), String(""))
+    )
+    store.confirm(ticket, String("pid-pp"))
+
+    # The producer alone: the plan deletes it (the arm under test is reached).
+    var wa = _world(_stamped(String("pid-pp"), _ours(String("pp"), String(""))))
+    wa[].wanted = False
+    var ga = _graph1(wa, String("pp"))
+    var alone = plan_graph_owned(ga, Creds.none(), _cell(), store)
+    assert_equal(len(alone), 1)
+    assert_equal(alone[0].verb, VERB_DELETE, alone[0].reason)
+
+    var wp = _world(_stamped(String("pid-pp"), _ours(String("pp"), String(""))))
+    wp[].wanted = False
+    wp[].out_url = String("https://pp.example.com")
+    var wc = _world(ResourceStatus.absent())
+    var refs = List[InputRef]()
+    refs.append(InputRef(String("pp"), String("URL"), String("env.A")))
+    var g = ResourceGraph()
+    g.add(ErasedResource.erase(_Scripted(wc, String("c"), String(""), refs^)))
+    g.add(ErasedResource.erase(_Scripted(wp, String("pp"))))
+    var msg = String("")
+    try:
+        _ = plan_graph_owned(g, Creds.none(), _cell(), store)
+    except e:
+        msg = String(e)
+    assert_true(
+        msg.startswith(
+            String(UNBOUND_TOKEN)
+            + ": node 'c' (field env.A) reads output 'URL' of 'pp'"
+        ),
+        msg,
+    )
+    assert_equal(wp[].count(String("delete")), 0, "a plan deletes nothing")
+    print("  test_a_turned_off_producer_the_plan_deletes_binds_nothing: PASS")
+
+
 def main() raises:
     print("test_engine_destroy_and_plan_paths:")
     test_owned_plan_and_destroy_refuse_the_unowned_scope()
@@ -534,4 +579,5 @@ def main() raises:
     test_known_after_apply_flows_down_a_chain()
     test_a_consumer_of_a_turned_off_producer_is_refused_as_unbound()
     test_a_present_turned_off_producer_with_outputs_binds_nothing()
+    test_a_turned_off_producer_the_plan_deletes_binds_nothing()
     print("ALL DESTROY AND PLAN PATH TESTS PASSED")
