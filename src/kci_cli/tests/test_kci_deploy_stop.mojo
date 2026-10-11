@@ -1,8 +1,8 @@
 # =============================================================================
 # src/kci_cli/tests/test_kci_deploy_stop.mojo -- a failed DEPLOY step stops
 #   the run (D7 of deploy_step.md, "After a failed deploy"), end to end
-#   through `kci_main_with`, on two `CloudDeploys[FakeCloud,
-#   InMemoryStateStore]`, one per cell.
+#   through `kci_main_with`, on three `CloudDeploys[FakeCloud,
+#   InMemoryStateStore, NoRegistryClient]`, one per cell.
 # =============================================================================
 #
 # The machine file is named `shop`. Its `build` stage holds the BUILD step
@@ -10,10 +10,11 @@
 # step into cell `a`, then a DEPLOY step into cell `a`, then one into cell
 # `b`, then one into cell `c`, and is run with `--release-set-hash` and no
 # validation. The PUBLISH step is there so the `set_hash` assertions can fail: the start checks set
-# `set_hash` from it. The test's `Steps` answers it (it runs a PUBLISH step
-# into a cell, `runs_publish_into_cell`) and pushes nothing. `Cells`
-# hands each DEPLOY step to its cell's own fake and records which cells it
-# was asked for.
+# `set_hash` from it. A PUBLISH step into a cell goes through the
+# `CellDeploys` seam (dispatch.mojo's header, 6): `Cells` answers it with
+# `push_outcome` and pushes nothing, hands each DEPLOY step to its cell's
+# own fake, and records the PUBLISH steps it answered and the cells each
+# DEPLOY step was asked for.
 #
 #   1. No fault (the control): SUCCEEDED, `set_hash` is the given hash, all
 #      three cells applied, the record names the machine file. A second run, every step a NOOP: NOOP, exit 0, and
@@ -58,9 +59,11 @@ from kci_reconciler import Creds, InMemoryStateStore
 from kci_cloud_fake import FakeCloud
 from kci_cli import (
     CellDeploys,
+    CellPublishRequest,
     CliRecorder,
     CloudDeploys,
     DeployRequest,
+    NoRegistryClient,
     SecretStoreChoice,
     StageSteps,
     StepEnd,
@@ -83,26 +86,19 @@ comptime _ROLLBACK_REFUSAL: String = (
 
 
 struct Steps(StageSteps, Movable):
-    """Answers every BUILD and PUBLISH step with `outcome` and pushes
-    nothing; records each call; says it changed something outside when
-    `uploads`. Runs a PUBLISH step into a cell. Every run is handed
-    `_SET_HASH`. Layout: owned values only."""
+    """Answers every BUILD step and PUBLISH step to a channel SUCCEEDED and
+    pushes nothing; records each call. Every run is handed `_SET_HASH`.
+    Layout: owned values only."""
 
     var calls: List[String]
-    var outcome: String
-    var uploads: Bool
 
     def __init__(out self):
         self.calls = List[String]()
-        self.outcome = String("SUCCEEDED")
-        self.uploads = False
 
     def _answer(mut self, call: String, name: String, kind: String, platform: String, mut result: KciRunResult) -> StepEnd:
         self.calls.append(call.copy())
-        result.steps.append(ResultStep(name.copy(), kind.copy(), platform.copy(), self.outcome.copy()))
-        var end = StepEnd(self.outcome.copy(), String(""), String(""))
-        end.changed_outside = self.uploads
-        return end^
+        result.steps.append(ResultStep(name.copy(), kind.copy(), platform.copy(), String("SUCCEEDED")))
+        return StepEnd(String("SUCCEEDED"), String(""), String(""))
 
     def build(mut self, req: BuildRequest, mut result: KciRunResult, mut recorder: CliRecorder) -> StepEnd:
         return self._answer(String("build ") + req.step_name, req.step_name, String("BUILD"), req.platform, result)
@@ -110,7 +106,8 @@ struct Steps(StageSteps, Movable):
     def publish(
         mut self, req: PublishRequest, mut result: KciRunResult, mut recorder: CliRecorder, store: SecretStoreChoice
     ) -> StepEnd:
-        # a PUBLISH into a cell names no channel
+        # no PUBLISH step to a channel is in this machine file: a call here
+        # is a PUBLISH into a cell routed to the wrong seam
         return self._answer(
             String("publish ") + req.step_name + String(" channel=") + req.channel, req.step_name, String("PUBLISH"),
             req.platform, result,
@@ -139,25 +136,46 @@ struct Steps(StageSteps, Movable):
     def release_set_hash(mut self, artifacts_file: String, platform_dir: String) raises -> String:
         return String(_SET_HASH)
 
-    def runs_publish_into_cell(self) -> Bool:
-        return True
+
+def _cell(var cloud: FakeCloud) raises -> CloudDeploys[FakeCloud, InMemoryStateStore, NoRegistryClient]:
+    return CloudDeploys[FakeCloud, InMemoryStateStore, NoRegistryClient](
+        cloud^, InMemoryStateStore(), Creds.none(), NoRegistryClient()
+    )
 
 
 struct Cells(CellDeploys, Movable):
     """Cell `a`'s fake cloud and store, cell `b`'s, cell `c`'s (always
     unfaulted), and the cells each DEPLOY step was handed for, in order.
-    Layout: owned values only."""
+    Answers every PUBLISH step into a cell with `push_outcome`, pushes
+    nothing, records it in `pushed` and says it changed something outside
+    when `uploads`. Layout: owned values only."""
 
-    var a: CloudDeploys[FakeCloud, InMemoryStateStore]
-    var b: CloudDeploys[FakeCloud, InMemoryStateStore]
-    var c: CloudDeploys[FakeCloud, InMemoryStateStore]
+    var a: CloudDeploys[FakeCloud, InMemoryStateStore, NoRegistryClient]
+    var b: CloudDeploys[FakeCloud, InMemoryStateStore, NoRegistryClient]
+    var c: CloudDeploys[FakeCloud, InMemoryStateStore, NoRegistryClient]
     var asked: List[String]
+    var pushed: List[String]
+    var push_outcome: String
+    var uploads: Bool
 
     def __init__(out self, var a: FakeCloud, var b: FakeCloud) raises:
-        self.a = CloudDeploys[FakeCloud, InMemoryStateStore](a^, InMemoryStateStore(), Creds.none())
-        self.b = CloudDeploys[FakeCloud, InMemoryStateStore](b^, InMemoryStateStore(), Creds.none())
-        self.c = CloudDeploys[FakeCloud, InMemoryStateStore](FakeCloud(), InMemoryStateStore(), Creds.none())
+        self.a = _cell(a^)
+        self.b = _cell(b^)
+        self.c = _cell(FakeCloud())
         self.asked = List[String]()
+        self.pushed = List[String]()
+        self.push_outcome = String("SUCCEEDED")
+        self.uploads = False
+
+    def publish(mut self, req: CellPublishRequest, mut result: KciRunResult) -> StepEnd:
+        self.pushed.append(req.step_name + String(" cell=") + req.cell)
+        result.steps.append(ResultStep(req.step_name.copy(), String("PUBLISH"), req.platform.copy(), self.push_outcome.copy()))
+        var end = StepEnd(self.push_outcome.copy(), String(""), String(""))
+        if not end.ok():
+            end.error_id = String("KCI-E-INTERNAL")
+            end.message = String("the planted PUBLISH outcome ") + self.push_outcome
+        end.changed_outside = self.uploads
+        return end^
 
     def deploy(mut self, req: DeployRequest, mut result: KciRunResult) -> StepEnd:
         self.asked.append(req.cell.copy())
@@ -247,7 +265,7 @@ def _last(rec: CliRecorder) raises -> KciRunResult:
     return parse_result(rec.records[len(rec.records) - 1], String("record"))
 
 
-def _live(deploys: CloudDeploys[FakeCloud, InMemoryStateStore]) -> List[String]:
+def _live(deploys: CloudDeploys[FakeCloud, InMemoryStateStore, NoRegistryClient]) -> List[String]:
     return deploys.cloud.store[].ids.copy()
 
 
@@ -258,7 +276,7 @@ def _has(xs: List[String], x: String) -> Bool:
     return False
 
 
-def _live_is_landed(deploys: CloudDeploys[FakeCloud, InMemoryStateStore], row: ResultStep) raises:
+def _live_is_landed(deploys: CloudDeploys[FakeCloud, InMemoryStateStore, NoRegistryClient], row: ResultStep) raises:
     """The cell's live objects are exactly the row's `landed` nodes."""
     var live = _live(deploys)
     assert_equal(len(live), len(row.deploy.landed), "as many live objects as landed nodes")
@@ -288,8 +306,9 @@ def test_no_fault_hands_on_the_set() raises:
     assert_equal(len(r.steps), 4)
     assert_equal(r.machine_path, m, "a run that read the machine file records it")
     assert_true(r.machine_sha256.byte_length() > 0)
-    assert_equal(len(steps.calls), 1)
-    assert_equal(steps.calls[0], String("publish push-a channel="))
+    assert_equal(len(steps.calls), 0)
+    assert_equal(len(deploys.pushed), 1)
+    assert_equal(deploys.pushed[0], String("push-a cell=a"))
     assert_equal(len(deploys.asked), 3)
     assert_equal(deploys.asked[0], String("a"))
     assert_equal(deploys.asked[1], String("b"))
@@ -298,7 +317,7 @@ def test_no_fault_hands_on_the_set() raises:
     assert_equal(deploys.b.cloud.mutations(), 3)
     assert_equal(deploys.c.cloud.mutations(), 3)
     # every step a NOOP: the run is NOOP and still hands its set on
-    steps.outcome = String("NOOP")
+    deploys.push_outcome = String("NOOP")
     var rec2 = CliRecorder.memory(String(""))
     var rc2 = kci_main_with(_run(m, d + String("/summary2.md")), steps, deploys, rec2)
     var r2 = _last(rec2)
@@ -348,7 +367,7 @@ def test_a_fault_mid_graph_in_a_stops_the_run() raises:
     assert_equal(deploys.c.cloud.mutations(), 0, "c's fake records zero calls")
     assert_equal(deploys.c.cloud.live_count(), 0)
     _no_row(r, String("apply-c"))
-    assert_equal(len(steps.calls), 1)
+    assert_equal(len(deploys.pushed), 1)
     var summary = Path(d + String("/summary.md")).read_text()
     assert_true(summary.find(String("- set hash: `")) < 0, summary)
 
@@ -420,6 +439,7 @@ def _refused_before_anything(
     assert_equal(rec.statuses[0], String("FINISHED"))
     assert_equal(len(r.steps), 0)
     assert_equal(len(steps.calls), 0)
+    assert_equal(len(deploys.pushed), 0)
     assert_equal(len(deploys.asked), 0)
     assert_equal(deploys.a.cloud.mutations(), 0)
     assert_equal(deploys.b.cloud.mutations(), 0)
@@ -487,15 +507,15 @@ def test_a_superseded_publish_before_the_deploys_wins() raises:
     var d = _root(String("superseded"))
     var m = _machine(d)
     var steps = Steps()
-    steps.outcome = String("SUPERSEDED")
     var deploys = Cells(FakeCloud(), FakeCloud())
+    deploys.push_outcome = String("SUPERSEDED")
     var rec = CliRecorder.memory(String(""))
     var rc = kci_main_with(_run(m, d + String("/summary.md")), steps, deploys, rec)
     var r = _last(rec)
     assert_equal(rc, 0, r.error.message)
     assert_equal(r.outcome, String("SUPERSEDED"))
     assert_equal(r.set_hash, String(""), "a SUPERSEDED run hands on no set")
-    assert_equal(len(steps.calls), 1)
+    assert_equal(len(deploys.pushed), 1)
     assert_equal(len(deploys.asked), 0, "no DEPLOY step runs after a SUPERSEDED step")
     assert_equal(deploys.a.cloud.mutations(), 0)
     assert_equal(deploys.b.cloud.mutations(), 0)
@@ -511,8 +531,8 @@ def test_a_failed_deploy_after_an_upload_is_partial() raises:
     var d = _root(String("upload-then-failed"))
     var m = _machine(d)
     var steps = Steps()
-    steps.uploads = True
     var deploys = Cells(FakeCloud(trust_check_raises=True), FakeCloud())
+    deploys.uploads = True
     var rec = CliRecorder.memory(String(""))
     var rc = kci_main_with(_run(m, d + String("/summary.md")), steps, deploys, rec)
     var r = _last(rec)

@@ -75,6 +75,7 @@ from kci_cloud import decode_label_value
 from kci_cloud_fake import FakeCloud
 from kci_cli import (
     CellDeploys,
+    CellPublishRequest,
     CliRecorder,
     CloudDeploys,
     DeployRequest,
@@ -619,7 +620,7 @@ struct CountedDeploys(CellDeploys, Movable):
     """`CloudDeploys` on the fake cloud, counting the DEPLOY steps handed to
     it (`calls`). Layout: owned values only. No pointer field."""
 
-    var inner: CloudDeploys[FakeCloud, InMemoryStateStore]
+    var inner: CloudDeploys[FakeCloud, InMemoryStateStore, NoRegistryClient]
     var calls: Int
 
     def __init__(out self) raises:
@@ -629,6 +630,10 @@ struct CountedDeploys(CellDeploys, Movable):
     def deploy(mut self, req: DeployRequest, mut result: KciRunResult) -> StepEnd:
         self.calls += 1
         return self.inner.deploy(req, result)
+
+    def publish(mut self, req: CellPublishRequest, mut result: KciRunResult) -> StepEnd:
+        # no PUBLISH into a cell runs here (file header)
+        return self.inner.publish(req, result)
 
 
 def _first_stage_machine(dir: String) raises -> String:
