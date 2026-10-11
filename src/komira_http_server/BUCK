@@ -48,6 +48,12 @@ mojo_library(
         "tests/test_L4_routing_basic.mojo",
         "tests/test_chunked_request_body_dispatch.mojo",
         "tests/test_claims_principal.mojo",
+        "tests/test_cov_dispatch_bodies.mojo",
+        "tests/test_cov_dispatch_round_parks.mojo",
+        "tests/test_cov_h2_guards.mojo",
+        "tests/test_cov_middleware_edges.mojo",
+        "tests/test_cov_server_parking.mojo",
+        "tests/test_cov_server_tls.mojo",
         "tests/test_cloudrun_bind_before_warmup.mojo",
         "tests/test_custom_middleware.mojo",
         "tests/test_e2e_bind_any_addr.mojo",
@@ -71,6 +77,10 @@ mojo_library(
             "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
         },
         "tests/test_L2_h2_serve_read_round.mojo": {
+            "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+            "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+        },
+        "tests/test_cov_server_tls.mojo": {
             "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
             "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
         },

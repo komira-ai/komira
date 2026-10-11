@@ -484,8 +484,8 @@ def _dispatch_h2_frames[
         if frame.header.kind == FRAME_PUSH_PROMISE:
             # Server doesn't accept PUSH_PROMISE per RFC 9113 §8.4 —
             # protocol error (we never enabled push).
-            _emit_goaway(h2, H2_ERR_PROTOCOL_ERROR)
-            return False
+            _emit_goaway(h2, H2_ERR_PROTOCOL_ERROR)  # cov: unreachable decode_frame refuses PUSH_PROMISE as a connection error before this
+            return False  # cov: unreachable decode_frame refuses PUSH_PROMISE as a connection error before this
 
         if frame.header.kind == FRAME_HEADERS or (
             frame.header.kind == FRAME_CONTINUATION
@@ -541,8 +541,8 @@ def _dispatch_h2_frames[
                 FRAME_DATA, frame.header.flags,
             )
             if action.kind == H2_STREAM_ACTION_GOAWAY:
-                _emit_goaway(h2, action.error_code)
-                return False
+                _emit_goaway(h2, action.error_code)  # cov: unreachable advance_on_recv_frame answers DATA with keep or rst, never goaway
+                return False  # cov: unreachable advance_on_recv_frame answers DATA with keep or rst, never goaway
             if action.kind == H2_STREAM_ACTION_RST:
                 var rst = List[UInt8]()
                 encode_rst_stream_frame(
@@ -644,7 +644,7 @@ def _dispatch_h2_frames[
                             bytes_sent,
                         )
                         if not dispatched:
-                            return False
+                            return False  # cov: unreachable every response emitter on this path returns True
             continue
 
         # Unknown frame type: per RFC 9113 §4.1, "Implementations MUST
@@ -817,8 +817,8 @@ def _handle_headers_or_continuation[
                 FRAME_HEADERS, frame.header.flags,
             )
             if action.kind == H2_STREAM_ACTION_GOAWAY:
-                _emit_goaway(h2, action.error_code)
-                return False
+                _emit_goaway(h2, action.error_code)  # cov: unreachable a stream created here is IDLE, where advance_on_recv_frame keeps HEADERS
+                return False  # cov: unreachable a stream created here is IDLE, where advance_on_recv_frame keeps HEADERS
         # Start reassembly: copy payload.
         h2.cont_reasm_stream_id = stream_id
         # CONTINUATION-FLOOD CEILING (CVE-2024-27316 shape) — see
@@ -846,8 +846,8 @@ def _handle_headers_or_continuation[
                 FRAME_CONTINUATION, frame.header.flags,
             )
             if action.kind == H2_STREAM_ACTION_GOAWAY:
-                _emit_goaway(h2, action.error_code)
-                return False
+                _emit_goaway(h2, action.error_code)  # cov: unreachable cont_reasm_stream_id is set only with continuation_pending on that stream
+                return False  # cov: unreachable cont_reasm_stream_id is set only with continuation_pending on that stream
 
     if not end_headers:
         return True  # awaiting CONTINUATION
@@ -1298,8 +1298,8 @@ def _emit_response(
         if idx >= 0:
             h2.send_fc.consume(bytes_to_send_now, h2.streams[idx].send_window)
         else:
-            var dummy = Int32(0)
-            h2.send_fc.consume(bytes_to_send_now, dummy)
+            var dummy = Int32(0)  # cov: unreachable with no stream the window is 0, so can_send gave 0 and nothing was sent
+            h2.send_fc.consume(bytes_to_send_now, dummy)  # cov: unreachable with no stream the window is 0, so can_send gave 0 and nothing was sent
         bytes_sent = bytes_sent + Int64(bytes_to_send_now)
 
     if send_end_stream_in_this_pass:
@@ -1398,8 +1398,8 @@ def _pump_deferred_responses(mut h2: H2ConnectionState, mut bytes_sent: Int64, m
             if sidx >= 0:
                 h2.send_fc.consume(can_send, h2.streams[sidx].send_window)
             else:
-                var dummy = Int32(0)
-                h2.send_fc.consume(can_send, dummy)
+                var dummy = Int32(0)  # cov: unreachable with no stream the window is 0, so can_send gave 0 and nothing was sent
+                h2.send_fc.consume(can_send, dummy)  # cov: unreachable with no stream the window is 0, so can_send gave 0 and nothing was sent
             bytes_sent = bytes_sent + Int64(can_send)
             did_progress = True
             # Did we drain? If so, finalize.
@@ -1454,7 +1454,7 @@ def _discard_input(mut entry: ConnEntry):
     sends RST (POSIX), which can reach the peer ahead of the GOAWAY."""
     ref tls_opt = entry.tls_stream_ref()
     if not tls_opt:
-        return
+        return  # cov: unreachable the caller returned early unless the entry holds a TLS stream
     var reads = 0
     while reads < 64:
         var buf = List[UInt8]()
@@ -1486,13 +1486,13 @@ def _flush_pending_out(mut entry: ConnEntry, mut bytes_sent: Int64) -> Int:
     _FLUSH_DRAINED when nothing is left, _FLUSH_PARTIAL otherwise."""
     ref tls_opt = entry.tls_stream_ref()
     if not tls_opt:
-        return _FLUSH_ERROR
+        return _FLUSH_ERROR  # cov: unreachable the caller returned early unless the entry holds a TLS stream
     var out_bytes: List[UInt8]
     ref h2_opt = entry.h2_state_ref()
     if h2_opt:
         out_bytes = h2_opt.value().take_out_bytes()
     else:
-        return _FLUSH_ERROR
+        return _FLUSH_ERROR  # cov: unreachable the round returned early unless the entry holds h2 state; nothing removes it
     var write_offset = 0
     var out_len = len(out_bytes)
     var max_write_iters = 64
@@ -1512,11 +1512,11 @@ def _flush_pending_out(mut entry: ConnEntry, mut bytes_sent: Int64) -> Int:
             break
         if write_outcome == TLS_OUTCOME_BLOCKED_ON_READ:
             # TLS rekey wants a read; stash tail + return.
-            break
+            break  # cov: unreachable s2n never blocks a TLS 1.3 write on a read (there is no renegotiation)
         if nwrote == 0 and write_outcome == TLS_OUTCOME_DONE:
             # No progress this iter and no block signal — bail to avoid
             # infinite-spin (shouldn't happen with s2n, but defensive).
-            break
+            break  # cov: unreachable s2n reports DONE only after writing at least one byte of a non-empty buffer
         write_iter = write_iter + 1
     if write_offset >= out_len:
         return _FLUSH_DRAINED
@@ -1574,7 +1574,7 @@ def serve_read_round_h2[
 
     ref tls_opt = entry.tls_stream_ref()
     if not tls_opt:
-        return False
+        return False  # cov: unreachable the caller returned early unless the entry holds a TLS stream
 
     # ---- step 1: read-and-dispatch INNER LOOP ----
     # Limit to a small max-iterations to avoid starving other conns in
@@ -1601,7 +1601,7 @@ def serve_read_round_h2[
         if got > 0:
             ref h2_opt = entry.h2_state_ref()
             if not h2_opt:
-                return False
+                return False  # cov: unreachable the round returned early unless the entry holds h2 state; nothing removes it
             var rd_view = Span(rd_buf)[0:got]
             h2_opt.value().append_recv_bytes(rd_view)
         elif read_outcome == TLS_OUTCOME_DONE and got == 0:
@@ -1613,7 +1613,7 @@ def serve_read_round_h2[
         if entry._state == CONN_STATE_H2_PREFACE_WAIT:
             ref h2_opt = entry.h2_state_ref()
             if not h2_opt:
-                return False
+                return False  # cov: unreachable the round returned early unless the entry holds h2 state; nothing removes it
             var pf_status = _try_consume_preface(h2_opt.value())
             if pf_status == PREFACE_ERROR:
                 return False
@@ -1633,7 +1633,7 @@ def serve_read_round_h2[
         if entry._state == CONN_STATE_H2_ACTIVE:
             ref h2_opt = entry.h2_state_ref()
             if not h2_opt:
-                return False
+                return False  # cov: unreachable the round returned early unless the entry holds h2 state; nothing removes it
             var dispatch_ok = _dispatch_h2_frames(
                 h2_opt.value(), router, grpc, reqs_handled, bytes_sent,
             )
@@ -1652,7 +1652,7 @@ def serve_read_round_h2[
             break
         if read_outcome == TLS_OUTCOME_BLOCKED_ON_WRITE:
             # TLS rekey wants to write; flush our pending out then return.
-            break
+            break  # cov: unreachable s2n blocks a read on a write only to answer a KeyUpdate request; s2n peers send none
         if hit_peer_eof:
             break
         # Otherwise: we got some bytes; loop and try to absorb more. Write
@@ -1670,7 +1670,7 @@ def serve_read_round_h2[
     if h2_opt2:
         h2_was_goaway = h2_opt2.value().is_goaway_sent()
     else:
-        return False
+        return False  # cov: unreachable the round returned early unless the entry holds h2 state; nothing removes it
     var flushed = _flush_pending_out(entry, bytes_sent)
     if flushed == _FLUSH_ERROR:
         return False

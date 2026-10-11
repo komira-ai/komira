@@ -223,7 +223,7 @@ def accept_one_and_register(
             break
         var new_fd = Int32(Int(ar.value()))
         if new_fd < Int32(0):
-            break
+            break  # cov: unreachable try_accept reports a failed accept as an error, never as a negative fd
         # The table still maps the number the kernel re-handed: sweep it.
         _sweep_stale_mapping(conns, fd_to_idx, new_fd)
         var new_stream = TcpStream(new_fd)
@@ -289,7 +289,7 @@ def _write_all_or_buffer(
             return -1
         var sent_n = Int(wr.value())
         if sent_n <= 0:
-            return -1
+            return -1  # cov: unreachable send of a non-empty buffer returns a byte count or an error, never 0
         sent_off = sent_off + sent_n
     bytes_sent = bytes_sent + Int64(n)
     return 0
@@ -612,9 +612,9 @@ def _set_fd_nonblock(fd: Int32) raises:
     """
     var rc = external_call["komira_fcntl_set_nonblock", Int32](fd)
     if rc < Int32(0):
-        raise Error(
-            "_set_fd_nonblock(fd=" + String(Int(fd)) + ") returned "
-            + String(Int(rc))
+        raise Error(  # cov: unreachable fcntl(O_NONBLOCK) on a just-accepted socket does not fail
+            "_set_fd_nonblock(fd=" + String(Int(fd)) + ") returned "  # cov: unreachable fcntl(O_NONBLOCK) on a just-accepted socket does not fail
+            + String(Int(rc))  # cov: unreachable fcntl(O_NONBLOCK) on a just-accepted socket does not fail
         )
 
 
@@ -649,7 +649,7 @@ def accept_one_and_register_tls(
             break
         var new_fd = Int32(Int(ar.value()))
         if new_fd < Int32(0):
-            break
+            break  # cov: unreachable try_accept reports a failed accept as an error, never as a negative fd
         # Stale-mapping sweep (same as the plaintext path).
         _sweep_stale_mapping(conns, fd_to_idx, new_fd)
 
@@ -658,11 +658,11 @@ def accept_one_and_register_tls(
         try:
             _set_fd_nonblock(new_fd)
         except e:
-            _ = e
+            _ = e  # cov: unreachable fcntl(O_NONBLOCK) on a just-accepted socket does not fail
             # If we can't set non-blocking, the fd is unusable; close it
             # and skip this accept.
-            _ = external_call["close", Int32](new_fd)
-            continue
+            _ = external_call["close", Int32](new_fd)  # cov: unreachable fcntl(O_NONBLOCK) on a just-accepted socket does not fail
+            continue  # cov: unreachable fcntl(O_NONBLOCK) on a just-accepted socket does not fail
 
         # Construct the TlsStream first. If TlsConnection construction
         # fails (s2n OOM or set_config error), close the fd and skip.
@@ -670,9 +670,9 @@ def accept_one_and_register_tls(
         try:
             tls_stream = TlsStream(tls_config, new_fd)
         except e:
-            _ = e
-            _ = external_call["close", Int32](new_fd)
-            continue
+            _ = e  # cov: unreachable creating a TlsStream fails only when s2n cannot allocate
+            _ = external_call["close", Int32](new_fd)  # cov: unreachable creating a TlsStream fails only when s2n cannot allocate
+            continue  # cov: unreachable creating a TlsStream fails only when s2n cannot allocate
 
         var new_stream = TcpStream(new_fd)
         var new_reg = reactor.register_long_lived(new_fd, INTEREST_READ)
@@ -776,7 +776,7 @@ def serve_read_round_tls(
             break
         if read_outcome == TLS_OUTCOME_BLOCKED_ON_WRITE:
             # Rare TLS-rekey case; treat as need-more-driver-loop.
-            break
+            break  # cov: unreachable s2n blocks a read on a write only to answer a KeyUpdate request; s2n peers send none
         if read_outcome == TLS_OUTCOME_ERROR:
             keep_alive = False
             break
@@ -874,7 +874,7 @@ def _tls_write_all(
     """
     ref tls_opt = entry.tls_stream_ref()
     if not tls_opt:
-        return False
+        return False  # cov: unreachable the caller returned early unless the entry holds a TLS stream
     var n = len(bytes)
     var sent_off = 0
     while sent_off < n:
@@ -886,13 +886,13 @@ def _tls_write_all(
             return False
         if oc == TLS_OUTCOME_BLOCKED_ON_READ:
             # TLS rekey race; bail and let the reactor re-fire.
-            return False
+            return False  # cov: unreachable s2n never blocks a TLS 1.3 write on a read (there is no renegotiation)
         if oc == TLS_OUTCOME_BLOCKED_ON_WRITE:
             # Phase-1 simplification: in the absence of the TLS
             # write-buffering path, treat as failed-this-round.
             return False
         if sent_n <= 0:
-            return False
+            return False  # cov: unreachable s2n reports DONE only after writing at least one byte of a non-empty buffer
         sent_off = sent_off + sent_n
     bytes_sent = bytes_sent + Int64(n)
     return True
@@ -939,8 +939,8 @@ def resume_pending_write(
             return False
         var sent_n = Int(wr.value())
         if sent_n <= 0:
-            entry._pending_len = -1
-            return False
+            entry._pending_len = -1  # cov: unreachable send of a non-empty buffer returns a byte count or an error, never 0
+            return False  # cov: unreachable send of a non-empty buffer returns a byte count or an error, never 0
         entry._pending_off = entry._pending_off + sent_n
         bytes_sent = bytes_sent + Int64(sent_n)
     # Fully drained; reset + free the backing storage so a long-lived

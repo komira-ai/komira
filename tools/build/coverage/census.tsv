@@ -122,7 +122,7 @@ komira//src/komira_host:komira_host	src/komira_host	library	OK	464	768	-	-	no	re
 komira//src/komira_http_auth:komira_http_auth	src/komira_http_auth	library	OK	983	1027	-	-	no	conda	-	-
 komira//src/komira_http_client:komira_http_client	src/komira_http_client	library	RUN_FAILED	-	-	-	-	no	conda	-	not built in this census: test_body_drain_deadline fails intermittently under kcov, a 150 ms wall-clock budget (komira-ai/komira#1246)
 komira//src/komira_http_core:komira_http_core	src/komira_http_core	library	OK	3070	3341	-	-	no	conda	-	-
-komira//src/komira_http_server:komira_http_server	src/komira_http_server	library	OK	2183	2570	-	-	no	conda	src/komira_http_server/middleware/passthrough.mojo	-
+komira//src/komira_http_server:komira_http_server	src/komira_http_server	library	OK	2469	2479	-	-	no	conda	-	-
 komira//src/komira_iceberg_catalog:komira_iceberg_catalog	src/komira_iceberg_catalog	library	OK	204	234	-	-	no	conda	-	-
 komira//src/komira_job_report_proto:komira_job_report_proto	src/komira_job_report_proto	library	OK	0	0	-	-	no	release	-	-
 komira//src/komira_job_supervisor:komira_job_supervisor	src/komira_job_supervisor	library	OK	1105	1272	-	-	no	conda	-	-

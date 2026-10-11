@@ -732,7 +732,7 @@ def serve_read_round_dispatch[
                     # M-2 accumulation above this branch is unreachable for
                     # content_length > 0, since any shortfall set body_split.)
                     keep_alive = False
-                    break
+                    break  # cov: unreachable a body short of its length in the buffer set body_split above and stopped
 
             off = off + advance
 
