@@ -7,6 +7,9 @@
 # (`combine_partition_from` over every partition) equals the serial `combine`.
 # MEDIAN: the parallel drain equals the serial one, and a group of only NULLs
 # is NULL on both.
+# Integer SUM: the parallel drain refuses a total outside INT64 with the
+# shared `int_sum_overflow_message`, as the serial drain does, and answers a
+# total back inside INT64 exactly.
 
 from std.collections import List
 from std.math import isnan
@@ -30,6 +33,8 @@ from komira_agg.hash_agg_op_dt import (
     MedianOp,
     SumOp,
 )
+
+from komira_op_agg_state.int_sum_overflow import int_sum_overflow_message
 
 from komira_op_agg_stage.agg_column import AggBlock, AggSlot
 from komira_op_agg_stage.hash_agg import HashAggTable
@@ -345,6 +350,51 @@ def test_median_parallel_drain_equals_serial() raises:
 
 def test_median_with_a_null_group_is_null_on_both_drains() raises:
     _check_median_parallel_equals_serial(True)
+
+
+def _sum_parallel(imm vals: List[Int64]) raises -> Int64:
+    """SUM(v) over one group (k = 0), drained with
+    `drain_to_record_batch_parallel`; raises what the drain raises."""
+    var t = _SumT(AggBlock[_Sum](_Sum()))
+    var b = _batch(_zeros(len(vals)), vals)
+    var bv = BatchView(b)
+    for r in range(len(vals)):
+        t.feed_row(bv, r)
+    var rt = PerCoreAsyncRuntime[NoopSink](placement=PLACEMENT_FIXED)
+    rt.attach_workers(2, _noop_sink, BACKEND_MOCK)
+    rt.start()
+    ref disp = rt.dispatcher()
+    var got = Int64(0)
+    var err = Optional[String]()
+    try:
+        var res = t.drain_to_record_batch_parallel(
+            Pointer(to=disp), CancellationToken.never()
+        )
+        got = res.value().column_at(1).as_primitive[I64]().get(0)
+    except e:
+        err = String(e)
+    rt.shutdown()
+    if err:
+        raise Error(err.value())
+    return got
+
+
+def test_int_sum_parallel_drain_refuses_outside_int64() raises:
+    # SUM over [MAX, 1] is 2^63, outside INT64: the parallel drain must
+    # refuse with the shared message (agg0 is the column), never wrap to MIN.
+    var raised = False
+    try:
+        _ = _sum_parallel(_li(Int64.MAX, 1))
+    except e:
+        raised = True
+        assert_equal(String(e), int_sum_overflow_message("agg0"))
+    assert_true(raised, "SUM past INT64 on the parallel drain must refuse")
+
+
+def test_int_sum_parallel_drain_answers_a_total_inside_int64() raises:
+    # [MAX, 1, -7]: a partial leaves INT64, the total MAX - 6 does not; DuckDB
+    # answers MAX - 6, so the refusal must look at the total only.
+    assert_equal(_sum_parallel(_li(Int64.MAX, 1, -7)), Int64.MAX - 6)
 
 
 def main() raises:
