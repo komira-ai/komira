@@ -19,10 +19,13 @@
 //!               they are (relative to the working directory)
 //!
 //! Steps:
-//!   0. lld, the runtime, the compiler's libKGENCompilerRTShared.so, zig and
-//!      the bitcode are files that are not empty (as `[ -s ]`: a symbolic
-//!      link is followed), else a usage error; the bitcode starts with the
-//!      bitcode magic `BC 0xC0DE`.
+//!   0. The scratch directories bin, home and tmp are made (each is tried,
+//!      as `mkdir -p` tries each, and the first that cannot be made is
+//!      named), and the busybox applets installed in bin. Then lld, the
+//!      runtime, the compiler's libKGENCompilerRTShared.so, zig and the
+//!      bitcode, in this order, are files that are not empty (as `[ -s ]`: a
+//!      symbolic link is followed), else a usage error; the bitcode starts
+//!      with the bitcode magic `BC 0xC0DE`.
 //!   1. lld instruments the bitcode, as an LTO link with -r at -O0 whose pass
 //!      pipeline is `pgo-instr-gen,instrprof,default<O0>`: a relocatable
 //!      object with IR profile counters. lld is the LLVM the Mojo compiler is
@@ -35,7 +38,10 @@
 //!      tests//functional/coverage:link_line records both lines and fails
 //!      when they differ by more than the profile runtime.
 //!   3. The binary must be an ELF file and hold no path of this action (its
-//!      working directory or its scratch directory).
+//!      working directory, then its scratch directory).
+//!
+//! When one input has several faults, the first check above that refuses
+//! it is the one named.
 //!
 //! lld and zig run with this tool's environment but for PATH (a directory
 //! of the busybox applets, `<busybox> --install -s`), HOME, TMPDIR,
@@ -52,7 +58,8 @@
 //!
 //! The scratch directory is $BUCK_SCRATCH_PATH/cov_branch_link (relative to
 //! the working directory when it is relative), or .cov_branch_link in the
-//! working directory without one; it is removed after a success.
+//! working directory without one; it is removed after a success and kept
+//! after a failure.
 //!
 //! Exit status: 1 when a step fails, naming it; 2 for a usage error, a
 //! missing or empty input, or a scratch directory or program this tool
@@ -255,23 +262,25 @@ pub fn linkAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: 
     const zig = try std.fmt.allocPrint(alloc, "{s}/zig", .{try run_cmd.abs(alloc, cwd, a.zig)});
     const bc = try run_cmd.abs(alloc, cwd, a.bitcode);
     const out = try run_cmd.abs(alloc, cwd, a.out);
-
-    // 0. The inputs, each a file that is not empty (`[ -s ]`; else a usage
-    // error), before the scratch directory exists.
-    for ([_][]const u8{ lld, rt, kgen, zig, bc }) |f| {
-        if (!nonEmpty(f)) {
-            try err.writer().print("cov_branch link: {s} is missing or empty\n", .{f});
-            return 2;
-        }
-    }
-
     const bin = try std.fmt.allocPrint(alloc, "{s}/bin", .{k});
+    const env = try childEnv(alloc, where.env, k);
+    const log = try std.fmt.allocPrint(alloc, "{s}/log", .{k});
+    var magic: [4]u8 = undefined;
+
+    // 0a. The scratch directories, as `mkdir -p` makes them: each one is
+    // tried, and the first that cannot be made is named.
+    var cannot: ?[]const u8 = null;
     for ([_][]const u8{ bin, try std.fmt.allocPrint(alloc, "{s}/home", .{k}), try std.fmt.allocPrint(alloc, "{s}/tmp", .{k}) }) |d| {
         std.fs.cwd().makePath(d) catch |e| {
-            try err.writer().print("cov_branch link: cannot make {s}: {s}\n", .{ d, @errorName(e) });
-            return 2;
+            if (cannot == null) cannot = try std.fmt.allocPrint(alloc, "{s}: {s}", .{ d, @errorName(e) });
         };
     }
+    if (cannot) |c| {
+        try err.writer().print("cov_branch link: cannot make {s}\n", .{c});
+        return 2;
+    }
+
+    // 0b. The busybox applets, in this tool's environment.
     const inst = runner.runFn(runner.ptr, alloc, .{ .argv = &.{ bb, "--install", "-s", bin }, .env = where.env }) catch |e| {
         try err.writer().print("cov_branch link: cannot run {s}: {s}\n", .{ bb, @errorName(e) });
         return 2;
@@ -280,10 +289,17 @@ pub fn linkAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: 
         try err.writer().print("cov_branch link: {s} --install -s {s} failed (exit {d})\n", .{ bb, bin, inst.shellStatus() });
         return 2;
     }
-    const env = try childEnv(alloc, where.env, k);
-    const log = try std.fmt.allocPrint(alloc, "{s}/log", .{k});
 
-    var magic: [4]u8 = undefined;
+    // 0c. The inputs, each a file that is not empty (`[ -s ]`; else a usage
+    // error), in this order.
+    for ([_][]const u8{ lld, rt, kgen, zig, bc }) |f| {
+        if (!nonEmpty(f)) {
+            try err.writer().print("cov_branch link: {s} is missing or empty\n", .{f});
+            return 2;
+        }
+    }
+
+    // 0d. The bitcode magic.
     if (!std.mem.eql(u8, head4(bc, &magic), &BITCODE_MAGIC)) {
         return red(alloc, err, k, try std.fmt.allocPrint(alloc, "{s} is not LLVM bitcode", .{a.bitcode}));
     }
@@ -306,10 +322,12 @@ pub fn linkAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: 
         return red(alloc, err, k, "zig could not link the instrumented test with the profile runtime");
     }
 
-    // 3. An ELF file holding no path of this action.
+    // 3a. An ELF file.
     if (!std.mem.eql(u8, head4(out, &magic), &ELF_MAGIC)) {
         return red(alloc, err, k, "the link wrote no ELF file");
     }
+
+    // 3b. Holding no path of this action: the working directory first.
     const bytes = std.fs.cwd().readFileAlloc(alloc, out, 1 << 32) catch |e| {
         return red(alloc, err, k, try std.fmt.allocPrint(alloc, "cannot read the binary {s}: {s}", .{ out, @errorName(e) }));
     };
@@ -318,6 +336,8 @@ pub fn linkAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: 
             return red(alloc, err, k, try std.fmt.allocPrint(alloc, "the binary holds this action's directory {s}: {s}", .{ d, try stringsWith(alloc, bytes, d) }));
         }
     }
+
+    // A success removes the scratch directory; a failure keeps it.
     std.fs.cwd().deleteTree(k) catch {};
     return 0;
 }

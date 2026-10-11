@@ -68,9 +68,11 @@ for what the script it replaced took as positions or found beside itself:
 (`llvm/runtime/libclang_rt.profile-x86_64.a` of `[link]`), `--bitcode`,
 `--out`, and after `--` the C libraries of the test's closure.
 
-0. lld, the runtime, the compiler's `lib/libKGENCompilerRTShared.so`, zig
-   and the bitcode must be files that are not empty (a usage error, exit
-   2), and the bitcode must start with the bitcode magic `BC 0xC0DE`.
+0. The scratch directory's `bin`, `home` and `tmp` are made and the busybox
+   applets installed in `bin` (exit 2 if not). Then lld, the runtime, the
+   compiler's `lib/libKGENCompilerRTShared.so`, zig and the bitcode, in
+   this order, must be files that are not empty (a usage error, exit 2),
+   and the bitcode must start with the bitcode magic `BC 0xC0DE`.
 1. `lld/bin/lld` reads the bitcode as an LTO link with `-r`, `--lto-O0` and
    the pass pipeline `pgo-instr-gen,instrprof,default<O0>`: a relocatable
    object whose code counts its edges. Only this LLVM 24 reads the bitcode
@@ -85,7 +87,10 @@ for what the script it replaced took as positions or found beside itself:
    profile runtime, so a Mojo release that links with another library, or
    another flag, is caught there.
 3. The binary must be an ELF file holding no path of the action (its
-   working directory or scratch directory, `$BUCK_SCRATCH_PATH/cov_branch_link`).
+   working directory, then its scratch directory, `$BUCK_SCRATCH_PATH/cov_branch_link`).
+
+When an input has several faults, the first of these checks that refuses it
+is the one named, in the order the script it replaced checked them.
 
 lld and zig run with the tool's environment but for `PATH` (the busybox
 applets, installed in the scratch directory), `HOME`, `TMPDIR` and zig's

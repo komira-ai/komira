@@ -226,7 +226,7 @@ test "no link tail: zig's line ends with the profile runtime" {
     try testing.expectEqualStrings("-Wl,--no-whole-archive", argv[argv.len - 1]);
 }
 
-test "each input missing or empty is a usage error naming it, before any process runs" {
+test "each input missing or empty is a usage error naming it, after the install and before lld runs" {
     const inputs = [_][]const u8{
         "link/lld/bin/lld",
         "link/llvm/runtime/libclang_rt.profile-x86_64.a",
@@ -242,7 +242,9 @@ test "each input missing or empty is a usage error naming it, before any process
             var fake = Fake.init(c.a());
             try testing.expectEqual(@as(u8, 2), try c.link(&fake));
             try c.has(try std.fmt.allocPrint(c.a(), "cov_branch link: {s} is missing or empty", .{c.p(f)}));
-            try testing.expectEqual(@as(usize, 0), fake.calls.items.len);
+            // The script made the scratch and installed the applets first.
+            try testing.expectEqual(@as(usize, 1), fake.calls.items.len);
+            try testing.expectEqualStrings("--install", fake.calls.items[0].argv[1]);
         }
     }
 }

@@ -283,7 +283,9 @@ test "usage errors and missing inputs: exit 2" {
     try b.tmp.dir.deleteFile("tc/lib/libKGENCompilerRTShared.so");
     const r = try b.run(try b.linkArgs(&.{}), &ENV);
     try expect("missing input", r, 2, try std.fmt.allocPrint(b.a(), "cov_branch link: {s} is missing or empty\n", .{b.p("tc/lib/libKGENCompilerRTShared.so")}));
-    try testing.expect(!b.exists("bb/argv"));
+    // The applets are installed before the inputs are checked; lld never runs.
+    try testing.expect(b.exists("bb/argv"));
+    try testing.expect(!b.exists("link/lld/bin/argv"));
 }
 
 test "stderr that cannot be written: the exit status is the link's all the same" {
