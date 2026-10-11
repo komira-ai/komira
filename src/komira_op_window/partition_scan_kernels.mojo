@@ -16,7 +16,8 @@
 #
 # Running aggregates are the frame `ROWS BETWEEN UNBOUNDED PRECEDING AND
 # CURRENT ROW`, folded once per partition; `partition_scan_sink` turns them
-# into the RANGE spelling by its peer closure. NULLs follow
+# into the RANGE spelling by its peer closure. An INT64 SUM / AVG sums
+# exactly (128 bits; a SUM outside INT64 raises). NULLs follow
 # `partition_null_policy`. MIN and MAX over floats use DuckDB's order (§2.7):
 # NaN is greater than every number, so MAX is NaN once a NaN has been seen and
 # MIN is NaN only while every value seen is NaN.
@@ -31,10 +32,13 @@ from komira_op_sort.sort import sort_key_lt
 
 from .partition_keys import _peer_bounds, _segment_ends
 from .partition_null_policy import (
+    I128,
     alloc_out_f64,
     alloc_out_i64,
     cell_is_null,
     count_is_star,
+    i64_mean,
+    i64_sum_result,
     store_f64_or_null,
     store_i64_or_null,
 )
@@ -227,17 +231,20 @@ def _eval_running_sum_i64(batch: RecordBatch, bounds: List[Int], col_name: Strin
     var arr = alloc_out_i64(n, nulls)
     # NOT-VECTORIZABLE: each output depends on the previous one.
     var b_idx = 0
-    var total: Int64 = 0
+    var total = I128(0)
     var cnt = 0
     for row in range(n):
         if b_idx < len(bounds) and bounds[b_idx] == row:
-            total = 0
+            total = I128(0)
             cnt = 0
             b_idx += 1
         if not (nulls and cell_is_null(col, row)):
-            total += _col_i64(col, row)
+            total += I128(_col_i64(col, row))
             cnt += 1
-        store_i64_or_null(arr, row, total, cnt)
+        if cnt == 0:
+            store_i64_or_null(arr, row, Int64(0), 0)
+        else:
+            store_i64_or_null(arr, row, i64_sum_result(total), cnt)
     return Column.from_primitive[DType.int64](arr)
 
 
@@ -292,25 +299,36 @@ def _eval_running_count(
 
 
 def _eval_running_avg(batch: RecordBatch, bounds: List[Int], col_name: String) raises -> Column[HeapRegion]:
-    """Running AVG, always FLOAT64; the denominator is the non-NULL count."""
+    """Running AVG, always FLOAT64; the denominator is the non-NULL count.
+    An INT64 column sums exactly (128 bits) and divides once (§2.12): a
+    DOUBLE running sum would drop digits past 2^53."""
     var n = batch.num_rows()
     ref col = batch.column_at(batch.schema.column_index(col_name))
     var nulls = col.has_validity_buffer()
     var arr = alloc_out_f64(n, nulls)
+    var is_i64 = col.arrow_type == ArrowType.INT64
     var b_idx = 0
     var total: Float64 = 0.0
+    var total_i = I128(0)
     var cnt = 0
     for row in range(n):
         if b_idx < len(bounds) and bounds[b_idx] == row:
             total = 0.0
+            total_i = I128(0)
             cnt = 0
             b_idx += 1
         if not (nulls and cell_is_null(col, row)):
-            total += _col_as_f64(col, row)
+            if is_i64:
+                total_i += I128(_col_i64(col, row))
+            else:
+                total += _col_as_f64(col, row)
             cnt += 1
         var mean: Float64 = 0.0
         if cnt > 0:
-            mean = total / Float64(cnt)
+            if is_i64:
+                mean = i64_mean(total_i, cnt)
+            else:
+                mean = total / Float64(cnt)
         store_f64_or_null(arr, row, mean, cnt)
     return Column.from_primitive[DType.float64](arr)
 
