@@ -6,14 +6,16 @@ what kci must add before gamma can run a service validation, and the
 questions left to the project owner. Section names and item numbers are
 referred to from that document.
 
-**Vocabulary.** This note and [gamma validation](gamma_validation.md)
-predate the staged pipeline's [glossary](staged_pipeline.md#glossary). Here
+**Vocabulary.** This note predates the staged pipeline's [glossary](staged_pipeline.md#glossary). Here
 "gamma" means the stage that publishes to a test conda channel and installs
 from it, which since the rename (M2, [staged_pipeline.md](staged_pipeline.md)
 section e3) is the stage **`beta`**: the channel `komira-ai/beta`, the jobs
-`beta` and `beta_validate` (the `validate` job below). The glossary's gamma holds only real cloud
+`beta` and `beta_validate` (the `validate` job below, its name before M2). The glossary's gamma holds only real cloud
 resources and publishes nothing.
-Open decision 4 below already uses the glossary's words.
+Open decision 4 below already uses the glossary's words, and
+[gamma validation](gamma_validation.md) uses them throughout. Every check
+of an installed native package is [native packaging](native_packaging.md)'s,
+in beta's installs; item 8 of each list below points there.
 
 ## What kci must add to run service validations in gamma
 
@@ -99,13 +101,14 @@ whose rules `kci run` applies to the workflow it runs under (item 7).
    prod line` (`src/kci_workflow_check/auto_promotion.mojo`). The
    amendments, or a ruling that the job does not run `kci run` and how it
    is then gated, come before any of these jobs.
-8. For an installed native package: a check of the `.so` the channel
-   serves, by the same rules as `tools/build/native/native_check.sh` (on the
-   native stack's branches) plus the highest `GLIBC_` symbol version against
-   the declared `__glibc` floor. Either a new `smoke` word that
-   `kci_validate` runs on the installed file, or a `CONDA_INSTALL_SMOKE`
-   program, which needs an ELF dynamic-symbol reader in Mojo (none exists)
-   and a pinned image. Loading it beside OpenSSL also needs item 3.
+8. For installed native code: the install checks of
+   [native packaging](native_packaging.md#built-once-promoted-unchanged)
+   (each library that owns C ships its own `.so` in its own package). kci
+   reads each package's `lib_files` rows and runs those checks in beta's
+   installs: that plan's slices 9 and 11, which it specifies; nothing here
+   adds to them. Part of slice 9 is on `main`: `check_native_install`
+   (`src/kci_validate/native_install.mojo`) reads the `lib_files` rows, the
+   `__glibc` floor, `NEEDED` and `DF_SYMBOLIC`, and nothing calls it yet.
 
 ## Open decisions (for the project owner)
 
@@ -137,7 +140,7 @@ Each is a question with a recommendation; none is decided by this document.
    [ECS](https://docs.localstack.cloud/aws/services/ecs/) service pages.) A
    token is a secret: it cannot reach the `validate` job without weakening
    its isolation
-   ([What constrains gamma?](gamma_validation.md#what-constrains-gamma)),
+   ([What constrains the checks before prod?](gamma_validation.md#what-constrains-the-checks-before-prod)),
    and a contributor without an account cannot reproduce a run locally. (A
    fork's pull request is not the argument: it gets no check whichever
    emulator is chosen.) *Recommendation:* do not adopt it for the public
@@ -200,23 +203,22 @@ Each is a question with a recommendation; none is decided by this document.
    in-process self-signed certificate helper in `komira_crypto` (none
    exists), or plaintext-only loopback examples. *Recommendation:* plaintext
    loopback in the README now; the certificate helper as follow-up work.
-8. **The per-library archive.** *Recommendation:* add the build-mode README
-   check before `komira_log`, or any library above it, is declared for
-   release; otherwise `install-set` fails on the first such release.
-9. **Codec origin and native link flags.** *Recommendation:* land open PR
-   #763's native link flags with #761 or before it, never after: #761
-   declares `komira_libc`, `komira_buffer`, `komira_async_api` and
-   `komira_native`, and only #763 adds `-Xlinker -lkomira_native` to
-   `kci_validate`'s README runs. If #761 merges and a push releases before
-   #763, `install-set`'s `mojo run` of those READMEs cannot resolve the
-   native symbols: gamma fails and prod is blocked (closed, not silent).
-   So: merge the two together, or land #763's `kci_validate` change first.
-   Add the codec load-origin check (a `CONDA_INSTALL_SMOKE` program; see
-   the formats table of [gamma validation](gamma_validation.md)) in the same
-   release that first ships `komira_compression`. That release first needs
-   a ` ```mojo ` example in `komira_compression`'s README, which has none,
-   a digest-pinned image for the kind, and the validation named in the
-   `validate` job's `--only` list (R9).
+8. **The per-library archive.** Decided elsewhere: how `komira_log`'s
+   holder ships is open question 2 of
+   [native packaging](native_packaging.md#per-library-state-komira_logs-holder),
+   and its install check 6 builds every installed README with `mojo build`.
+9. **Codec origin and native link flags.** Decided elsewhere: the link
+   flags an installed README needs come from each package's `lib_files`
+   rows and README link commands ([native packaging](native_packaging.md),
+   slices 9 and 10), and codec origin is its install check 5, the
+   loaded-from row ([System codecs](native_packaging.md#system-codecs-dlopened)),
+   which `komira_lz4` and `komira_zlib` bring in first (slices 3 and 4)
+   and which `komira_compression` needs before it is released. No library
+   with native code or a dlopened codec is declared for release before beta's
+   installs run those rows (that plan's question 6 is the alternative).
+   History: this item recommended landing #763's link flags for one shared
+   native package with #761 or before it (2026-10-07: `komira_native`); both
+   merged only into #704's branch (closed unmerged), and native packaging replaced that plan.
 10. **Format interop in gamma.** *Recommendation:* both: breadth at build
     time with pinned pyarrow, one round trip per format in gamma.
 11. **The `validate` job's hour.** Two index waits of 1800 s can use the
