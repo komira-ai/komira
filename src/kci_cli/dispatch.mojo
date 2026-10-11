@@ -6,7 +6,12 @@
 #
 # `kci run --stage S`:
 #
-#   0. every `--only` parsed (args.mojo `selectors_of`): a malformed or
+#   0. `--rollback-on-failure` is REFUSED (args.mojo
+#      `refuse_rollback_on_failure`, KCI-E-USAGE, exit 2) for every stage,
+#      with or without `--plan`, before anything is read and before the
+#      RUNNING record: re-applying a failed DEPLOY step's cell needs a
+#      per-cell deployed-revision record, which this kci does not have.
+#      Then every `--only` parsed (args.mojo `selectors_of`): a malformed or
 #      repeated selector is KCI-E-SELECTOR, exit 2, before anything is read.
 #      `--affected-by <base>` makes the run SELECTIVE and records
 #      `affected_by` (its base) from the first record on; each BUILD step
@@ -18,7 +23,9 @@
 #      whose schema_version this kci does not read is REFUSED
 #      (KCI-E-FORMAT-VERSION); any other refusal of the file is REFUSED
 #      (KCI-E-FORMAT), and so is a file holding a PUBLISH step into a cell,
-#      which this kci parses and does not run; then every cells file a step
+#      which this kci parses and does not run (unless the seam's steps say
+#      they run one, `StageSteps.runs_publish_into_cell`: the kci binary's
+#      `LibrarySteps` do not, a test's may); then every cells file a step
 #      names is read (kci_cell) and a step naming a cell its cells file does
 #      not declare, or a cells file that cannot be read or parsed, is
 #      REFUSED (KCI-E-FORMAT) before any step runs;
@@ -86,7 +93,11 @@
 #      GitHub Actions the flag is required (KCI-E-USAGE, exit 2). A run
 #      that selects a DEPLOY step always takes the flag (args.mojo), and its
 #      release is recomputed the same way (deploy_step.mojo
-#      `check_deploy_set_hash`);
+#      `check_deploy_set_hash`). Whatever set it, a run that ends neither
+#      SUCCEEDED nor NOOP hands on no set: on every exit path its
+#      `set_hash` is "" (start_checks.mojo `keep_set_hash_only_if_passed`,
+#      in `_finish`), so a failed DEPLOY step never promotes its release,
+#      and neither does a run that ends SUPERSEDED (4c, 6);
 #   4c. THE ADMISSION CHECK (rule R24 of the staged pipeline), right after
 #      4a and before 4b, with `--admission`, on a RELEASE run (4a): a re-run
 #      (the platform-set `GITHUB_RUN_ATTEMPT` above 1) at any stage, or the
@@ -128,7 +139,21 @@
 #      INDETERMINATE with a skip_reason, exit 5, never a pass, its reason the
 #      run's error message); a selected validation after that point gets a
 #      NOT_REACHED row. Under `--plan` a validation runs nothing and its row
-#      is WOULD_VALIDATE;
+#      is WOULD_VALIDATE. A DEPLOY step that ends FAILED or PARTIAL stops
+#      the run the same way, and that is all kci does about it: its cell is
+#      left exactly as the failed apply left it (no rollback, no unwind), a
+#      later step has no row (a DEPLOY step into another cell later in the
+#      stage never runs), and the job exits non-zero with no set handed on
+#      (4b), so no later stage starts (deploy_step.md, "After a failed
+#      deploy"). WHICH OUTCOME WINS when a stop meets SUPERSEDED: the
+#      admission check (4c) stops the run SUPERSEDED before the RUNNING
+#      record, so no step, DEPLOY included, runs. In the step loop only the
+#      first step that does not pass ends the run, so a failed DEPLOY step
+#      and a SUPERSEDED PUBLISH step never both end one run: whichever comes
+#      first in the stage stops it with its own outcome. Either one after a
+#      step that changed something outside (an upload, or a DEPLOY step
+#      that landed or released an object) makes the run PARTIAL, exit 6.
+#      None of these hands on a set (4b);
 #   7. NEW NAMES AHEAD: when the run ended SUCCEEDED or NOOP, every PUBLISH
 #      step of each stage whose `after` is S is read through `steps.lookahead`
 #      (anonymous reads of that stage's channel, kci_publish
@@ -262,6 +287,7 @@ from .args import (
     find_result_file,
     find_summary_file,
     parse_kci_args,
+    refuse_rollback_on_failure,
     require_stage_flags,
     selectors_of,
 )
@@ -281,6 +307,7 @@ from .start_checks import (
     check_ref_at_start,
     check_set_hash_at_start,
     check_workflow_at_start,
+    keep_set_hash_only_if_passed,
     keep_set_hash_only_if_validated,
     workflow_path_of,
 )
@@ -299,7 +326,9 @@ def _now() -> Int:
 def _finish(mut result: KciRunResult, mut recorder: CliRecorder, outcome: String, retry: String = String("")) -> Int:
     """Write the FINISHED record with `outcome`; return its exit number. A
     record that cannot be made or written is said on stderr; the number
-    stands."""
+    stands. A run that ends neither SUCCEEDED nor NOOP hands on no set
+    (file header, 4b), on every exit path."""
+    keep_set_hash_only_if_passed(outcome, result)
     var rec: KciRunResult
     try:
         rec = result.finish_record(outcome.copy(), _now(), retry.copy())
@@ -338,8 +367,10 @@ def _read(path: String) raises -> String:
     return Path(path).read_text()
 
 
-def _load_graph(cmd: KciCommand, mut result: KciRunResult) raises -> ReleaseMachine:
-    """Step 1 of the file header; raises `<error id>\\n<message>`."""
+def _load_graph(cmd: KciCommand, mut result: KciRunResult, publish_into_cell: Bool) raises -> ReleaseMachine:
+    """Step 1 of the file header; raises `<error id>\\n<message>`.
+    `publish_into_cell`: the steps run a PUBLISH step into a cell
+    (`StageSteps.runs_publish_into_cell`)."""
     if not isfile(cmd.machine):
         raise Error(
             String(ERROR_USAGE) + String("\nthe machine file '") + cmd.machine
@@ -358,7 +389,7 @@ def _load_graph(cmd: KciCommand, mut result: KciRunResult) raises -> ReleaseMach
     for i in range(len(g.stages)):
         for k in range(len(g.stages[i].steps)):
             ref step = g.stages[i].steps[k]
-            if step.is_publish() and step.names_cell():
+            if step.is_publish() and step.names_cell() and not publish_into_cell:
                 raise Error(
                     String(ERROR_FORMAT) + String("\n") + cmd.machine + String(": line ") + String(step.line)
                     + String(": step '") + step.name + String("' of stage '") + g.stages[i].name
@@ -603,7 +634,11 @@ def _run_stage[S: StageSteps, D: CellDeploys](
         result.set_run(cmd.run_identity())
     except e:
         return _stop(result, recorder, String(OUTCOME_REFUSED), String(ERROR_USAGE), String(e))
-    # 0. the selectors, before anything is read
+    # 0. --rollback-on-failure, then the selectors, before anything is read
+    try:
+        refuse_rollback_on_failure(cmd)
+    except e:
+        return _stop(result, recorder, String(OUTCOME_REFUSED), String(ERROR_USAGE), String(e))
     var selectors: List[Selector]
     try:
         selectors = selectors_of(cmd)
@@ -619,7 +654,7 @@ def _run_stage[S: StageSteps, D: CellDeploys](
         result.affected_base = cmd.affected_by.copy()
     var g: ReleaseMachine
     try:
-        g = _load_graph(cmd, result)
+        g = _load_graph(cmd, result, steps.runs_publish_into_cell())
     except e:
         var p = _split(e)
         return _stop_run(result, recorder, String(OUTCOME_REFUSED), p[0], p[1])
@@ -758,7 +793,8 @@ def _run_stage[S: StageSteps, D: CellDeploys](
                         _say(String("kci: ") + String(e))
                     stopped = True
             result.validations.append(row^)
-    # 4b, at the end: only a validated set is handed on
+    # 4b, at the end: only a validated set is handed on (and only by a run
+    # that passed: `_finish`)
     keep_set_hash_only_if_validated(sel, result)
     # a superseded run hands nothing on (file header, 4b)
     if outcome == OUTCOME_SUPERSEDED:

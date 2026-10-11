@@ -10,7 +10,7 @@ komira//src/kci_cli:kci_cli	src/kci_cli	library	OK	1360	1513	-	-	no	conda	-	-
 komira//src/kci_cloud:kci_cloud	src/kci_cloud	library	OK	2758	3230	-	-	no	conda	src/kci_cloud/conformance.mojo	-
 komira//src/kci_cloud_fake:kci_cloud_fake	src/kci_cloud_fake	library	OK	1979	2038	699	768	yes	conda	-	-
 komira//src/kci_deploy_model_proto:kci_deploy_model_proto	src/kci_deploy_model_proto	library	OK	0	0	-	-	no	conda	-	-
-komira//src/kci_logs:kci_logs	src/kci_logs	library	OK	905	1078	-	-	no	release	-	-
+komira//src/kci_logs:kci_logs	src/kci_logs	library	OK	1086	1086	-	-	no	release	-	-
 komira//src/kci_manifest_proto:kci_manifest_proto	src/kci_manifest_proto	library	OK	0	0	-	-	no	conda	-	-
 komira//src/kci_params:kci_params	src/kci_params	library	OK	407	407	-	-	no	release	-	-
 komira//src/kci_pkg_upload:kci_pkg_upload	src/kci_pkg_upload	library	OK	2207	2207	-	-	no	conda	-	-
@@ -125,7 +125,7 @@ komira//src/komira_http_core:komira_http_core	src/komira_http_core	library	OK	34
 komira//src/komira_http_server:komira_http_server	src/komira_http_server	library	OK	2183	2570	-	-	no	conda	src/komira_http_server/middleware/passthrough.mojo	-
 komira//src/komira_iceberg_catalog:komira_iceberg_catalog	src/komira_iceberg_catalog	library	OK	204	234	-	-	no	conda	-	-
 komira//src/komira_job_report_proto:komira_job_report_proto	src/komira_job_report_proto	library	OK	0	0	-	-	no	release	-	-
-komira//src/komira_job_supervisor:komira_job_supervisor	src/komira_job_supervisor	library	OK	1105	1272	-	-	no	conda	-	-
+komira//src/komira_job_supervisor:komira_job_supervisor	src/komira_job_supervisor	library	OK	1259	1262	-	-	no	conda	-	-
 komira//src/komira_join_assembly:komira_join_assembly	src/komira_join_assembly	library	OK	540	834	-	-	no	conda	-	-
 komira//src/komira_json:komira_json	src/komira_json	library	OK	656	656	580	580	yes	release	-	-
 komira//src/komira_json_index:komira_json_index	src/komira_json_index	library	OK	462	545	-	-	no	conda	-	-

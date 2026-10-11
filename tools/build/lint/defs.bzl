@@ -140,16 +140,25 @@ def _retired_names_impl(ctx):
         fail("retired_names {}: names is empty, so it would check nothing".format(ctx.label))
     staged, copy = _stage(ctx, ctx.attrs.srcs)
     tree = ctx.attrs.tree[DefaultInfo].default_outputs[0]
+    if ctx.attrs.unchecked:
+        files = dict(ctx.attrs.tree[DocTreeInfo].files)
+        for path in ctx.attrs.unchecked:
+            if path not in files:
+                # An exemption must not outlive the file it was written for.
+                fail("retired_names {}: unchecked names {}, which is not in the tree; delete the entry".format(ctx.label, path))
+            files.pop(path)
+        tree = ctx.actions.copied_dir("checked_tree", files)
     args = [tree, "{}//".format(ctx.label.cell)] + ctx.attrs.names + ["--"] + [copy[s.short_path] for s in ctx.attrs.srcs]
     return _lint(ctx, "retired_names", [], args, staged)
 
 retired_names_rule = rule(
     impl = _retired_names_impl,
-    doc = "No file of `tree` (a doc_tree target: the root one holds every file of the cell) and no file in `srcs` (the dotfiles a glob skips) holds one of `names`, fixed strings, on a line without a YYYY-MM-DD date: a renamed package or type survives only in a dated history note. Spell each name in parts (`\"kci\" + \"_old\"`) so the BUCK file naming it does not hold it.",
+    doc = "No file of `tree` (a doc_tree target: the root one holds every file of the cell) and no file in `srcs` (the dotfiles a glob skips) holds one of `names`, fixed strings, on a line without a YYYY-MM-DD date: a renamed package or type survives only in a dated history note. Spell each name in parts (`\"kci\" + \"_old\"`) so the BUCK file naming it does not hold it. `unchecked` names files of `tree` (paths in the cell) left out: a fixture that must hold a retired name and cannot carry a date (JSON); an entry naming no file of `tree` is refused.",
     attrs = _COMMON | {
         "names": attrs.list(attrs.string()),
         "srcs": attrs.list(attrs.source(), default = []),
         "tree": attrs.dep(providers = [DocTreeInfo]),
+        "unchecked": attrs.list(attrs.string(), default = []),
     },
 )
 

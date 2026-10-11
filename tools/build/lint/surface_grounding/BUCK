@@ -1,0 +1,45 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The surface capability matrix lint's file-reading half (src/grounding.zig
+# says what it checks), run by //:surface_capability_matrix and its fixtures
+# (tools/build/lint/surface_capability_matrix.bzl, whose analysis checks the
+# rows).
+
+_SRCS = [
+    "src/grounding.zig",
+    "src/main.zig",
+]
+
+# One target per scenario: which lines declare a constant (declare_test), the
+# vocabulary against the grounding files (check_test), and a fixture's census
+# against its expected files (compare_test).
+_TESTS = [
+    "declare_test",
+    "check_test",
+    "compare_test",
+]
+
+[
+    zig_test(
+        name = t,
+        exec_compatible_with = LINUX_X86_64,
+        imports = _SRCS,
+        src = "src/{}.zig".format(t),
+        busybox = "komira//tools/build/toolchains:busybox",
+        zig = "komira//tools/build/toolchains:zig",
+    )
+    for t in _TESTS
+]
+
+# Built only behind its unit tests.
+zig_exe(
+    name = "surface_grounding",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/main.zig",
+    unit_tests = [":" + t for t in _TESTS],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
