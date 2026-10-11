@@ -17,6 +17,8 @@ _TEST_ONLY = [
     "komira//src/tests/helpers/komira_test_python/...",
     # The embedded Python UDF runtime of the UDF runtime spike.
     "komira//src/tests/helpers/komira_udf_spike_python/...",
+    # The Python UDF runtime of the UDF runtime spike behind its worker transport.
+    "komira//src/tests/helpers/komira_udf_spike_python_worker/...",
     # The tests of the CI scripts under release/ci (a py_test alone).
     "komira//release/ci/tests:",
 ]
