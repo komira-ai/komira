@@ -1,0 +1,12 @@
+{
+ "name": "cancel_set_before_call",
+ "defect": "the cancel flag is ignored",
+ "run": "call_batch",
+ "entry": "slow_loop",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "options": {"cancel": true},
+ "input": {"length": 8, "columns": [{"type": "int64", "values": [0], "repeat": 8}]},
+ "expect": {"status": "ERR_CANCELLED", "run_error": "UDF_CANCELLED"}
+}

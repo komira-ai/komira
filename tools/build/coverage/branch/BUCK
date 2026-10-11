@@ -1,6 +1,7 @@
 # Branch coverage of a mojo_library's welded tests (README.md): the scripts
-# that link a test's LLVM bitcode with profile counters, run it and apply its
-# profile, and the classifier that turns the annotated IR into lcov records.
+# that link a test's LLVM bitcode with profile counters and apply its profile,
+# cov_branch (whose `run` runs the test and merges its profile), and the
+# classifier that turns the annotated IR into lcov records.
 # linux-x86_64 only, like the coverage builds that use it.
 load("@komira//tools/build/coverage/kcov:defs.bzl", "kcov_tool")
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
@@ -15,6 +16,49 @@ cov_branch_dir(
     exec_compatible_with = LINUX_X86_64,
     visibility = ["PUBLIC"],
 )
+
+# cov_branch: the tool of the branch coverage actions, one subcommand each
+# (cov_branch.zig; README.md, "cov_branch_run"); `run` runs a test through
+# the release gate's runner with bounded_run.zig (a command waited for with
+# an optional limit; with one, in a session of its own, and the survivors of
+# the limit's kill), the module the coverage runs share.
+_COV_BRANCH_SRCS = [
+    "bounded_run.zig",
+    "cov_branch_run.zig",
+    "cov_branch_run_test.zig",
+]
+
+# Its unit tests (cov_branch_run_test.zig and the test blocks of
+# bounded_run.zig and cov_branch.zig), run by `zig test` as a build action.
+zig_test(
+    name = "cov_branch_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _COV_BRANCH_SRCS,
+    src = "cov_branch.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# Welded: no branch coverage run has the tool unless its unit tests passed.
+zig_exe(
+    name = "cov_branch_exe",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _COV_BRANCH_SRCS,
+    src = "cov_branch.zig",
+    unit_tests = [":cov_branch_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
+# Its sources, for the tests cell's planted copies (test 47).
+[
+    export_file(
+        name = f,
+        visibility = ["PUBLIC"],
+    )
+    for f in ["cov_branch.zig"] + _COV_BRANCH_SRCS
+]
 
 # cov_branch_classify: the branches of a test's annotated IR in the library's
 # measured sources, each a source decision or a known compiler-made branch,
@@ -35,10 +79,11 @@ zig_exe(
 )
 
 # Its cases (README.md#tests): `zig test` of each file, run as a build
-# action, runs the shipped executable (`exes`) as a child process on the
-# fixtures. They run the executable, so they cannot be inputs of it; they
-# are validations of the public target `:cov_branch_classify`, which no
-# build gets unless every case passes.
+# action, runs the shipped executable as a child process on the fixtures;
+# its path reaches the test in the environment (`env_tools`,
+# COV_BRANCH_CLASSIFY). They run the executable, so they cannot be inputs
+# of it; they are validations of the public target `:cov_branch_classify`,
+# which no build gets unless every case passes.
 _CLASSIFY_CASE_INPUTS = [
     "cov_branch_classify_harness.zig",
     "fixtures/a.src",
@@ -61,7 +106,7 @@ _CLASSIFY_CASES = ["andor", "case", "files", "main", "rules", "try"]
     zig_test(
         name = "cov_branch_classify_{}_test".format(group),
         exec_compatible_with = LINUX_X86_64,
-        exes = {"cov_branch_classify": ":cov_branch_classify_exe"},
+        env_tools = {"COV_BRANCH_CLASSIFY": ":cov_branch_classify_exe"},
         imports = _CLASSIFY_CASE_INPUTS,
         src = "cov_branch_classify_{}_test.zig".format(group),
         busybox = "komira//tools/build/toolchains:busybox",
@@ -86,11 +131,6 @@ export_file(
 )
 
 export_file(
-    name = "cov_branch_run.sh",
-    visibility = ["PUBLIC"],
-)
-
-export_file(
     name = "cov_branch_annotate.sh",
     visibility = ["PUBLIC"],
 )
@@ -100,6 +140,5 @@ shell_lint(
     srcs = [
         "cov_branch_annotate.sh",
         "cov_branch_link.sh",
-        "cov_branch_run.sh",
     ],
 )

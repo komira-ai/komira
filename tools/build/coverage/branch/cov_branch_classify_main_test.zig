@@ -7,7 +7,6 @@
 //! empty environment.
 
 const std = @import("std");
-const exes = @import("exes");
 const h = @import("cov_branch_classify_harness.zig");
 
 const OUT = h.OUT;
@@ -57,7 +56,7 @@ fn runLimited(c: *h.Case, args: []const []const u8) !h.Run {
     const posix = std.posix;
     const linux = std.os.linux;
     const al = c.a();
-    const exe = try std.fs.cwd().realpathAlloc(al, exes.cov_branch_classify);
+    const exe = try h.tool(al);
     const argv = try al.allocSentinel(?[*:0]const u8, args.len + 1, null);
     argv[0] = try al.dupeZ(u8, exe);
     for (args, 1..) |arg, i| argv[i] = try al.dupeZ(u8, arg);

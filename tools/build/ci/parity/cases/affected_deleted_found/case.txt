@@ -1,0 +1,16 @@
+# A deleted file whose package the base tree holds and the tree still has.
+arg "--files"
+arg "{changed_files}"
+arg "--base"
+arg "parity-base"
+arg "--units-file"
+arg "{units_file}"
+input units_file %units
+input changed_files "src/a/old.mojo\n"
+file ".buckconfig" %buckconfig
+file "tools/build/ci/rules.txt" %rules.txt
+file "src/a/BUCK"
+file "src/a/a.mojo"
+file "src/b/BUCK"
+file "src/c/BUCK"
+exit 0

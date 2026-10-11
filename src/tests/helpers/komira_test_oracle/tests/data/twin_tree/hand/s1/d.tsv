@@ -1,0 +1,6 @@
+#! komira-plan-conformance v1
+#  order: total
+#  float: ulps=0
+# derivation: planted
+k:int64?	f:float64?
+1	1.5

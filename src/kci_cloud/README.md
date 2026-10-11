@@ -103,3 +103,19 @@ assert_equal(
     "label value \"api_run\" holds '_', which the rule writes for '/'; a segment may not hold it",
 )
 ```
+
+An object with a description and no labels (a GCP service account) carries
+every label kci writes as lines of its description, and reads them back:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from kci_cloud import create_labels, description_labels, description_lines, released_description, retained_by
+from kci_reconciler import OwnerStamp, RETAIN_KEEP
+
+var stamp = OwnerStamp("shop", "staging", "peer", "identity")
+var text = description_lines(create_labels(stamp, RETAIN_KEEP))
+assert_equal(text, "kci:v1 owner=shop/staging/peer/identity\nkci-retention=retain")
+assert_true(retained_by(description_labels(text)))
+assert_equal(len(description_labels(text + "\na line a person wrote")), 0)  # kci's whole, or not stamped
+assert_equal(released_description(text), "")
+```

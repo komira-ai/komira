@@ -1,8 +1,11 @@
 //! The harness of cov_branch_classify's cases (README.md#tests), imported by
 //! the cov_branch_classify_*_test.zig files, each `zig test` of one run as a
-//! build action by a `zig_test` that names the shipped executable in `exes`
-//! (a validation of `:cov_branch_classify`). A case runs that executable as
-//! a child process, with an empty environment, in a directory of its own:
+//! build action by a `zig_test` that names the shipped executable in
+//! `env_tools` (its path in the environment as COV_BRANCH_CLASSIFY; a
+//! validation of `:cov_branch_classify`). Without COV_BRANCH_CLASSIFY every
+//! case fails: none passes without running the executable. A case runs that
+//! executable as a child process, with an empty environment (it does not
+//! inherit COV_BRANCH_CLASSIFY), in a directory of its own:
 //! the library's sources (fixtures/{a,b,c,d,gen,t}.src) staged as
 //! `<SRC>/<name>.mojo`, the made-up [src] the fixtures' IR names, and the IR
 //! of the case in `v.ll`. It reads back the exit status, stdout, stderr and
@@ -12,7 +15,6 @@
 //! when it changes nothing, so no case checks an unedited fixture.
 
 const std = @import("std");
-const exes = @import("exes");
 const Alloc = std.mem.Allocator;
 
 pub const case_ll = @embedFile("fixtures/case.ll");
@@ -34,6 +36,17 @@ const sources = [_]Source{
     .{ .name = "gen", .bytes = @embedFile("fixtures/gen.src") },
     .{ .name = "t", .bytes = t_src },
 };
+
+/// The path of the executable under test: COV_BRANCH_CLASSIFY, which the
+/// zig_test's `env_tools` sets. A run without it fails loudly; it never
+/// passes unchecked.
+pub fn tool(al: Alloc) ![]const u8 {
+    const v = std.process.getEnvVarOwned(al, "COV_BRANCH_CLASSIFY") catch {
+        std.debug.print("the test target does not pass COV_BRANCH_CLASSIFY (env_tools), so the executable cannot be run\n", .{});
+        return error.TestToolMissing;
+    };
+    return std.fs.cwd().realpathAlloc(al, v);
+}
 
 /// The library's [src] as the fixtures' IR names it, relative to the
 /// directory the classifier runs in.
@@ -180,10 +193,11 @@ pub const Case = struct {
             error.FileNotFound => {},
             else => return e,
         };
-        const exe = try std.fs.cwd().realpathAlloc(al, exes.cov_branch_classify);
+        const exe = try tool(al);
         var argv = std.ArrayList([]const u8).init(al);
         try argv.append(exe);
         try argv.appendSlice(args);
+        // The child's environment is built here, empty.
         var env = std.process.EnvMap.init(al);
         const r = try std.ChildProcess.run(.{
             .allocator = al,

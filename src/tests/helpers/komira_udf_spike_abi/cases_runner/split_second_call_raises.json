@@ -1,0 +1,13 @@
+{
+ "name": "split_second_call_raises",
+ "defect": "a deliberate mismatch: the runner must fail this case",
+ "run": "split",
+ "entry": "raise_on_second_call",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 4, "columns": [{"type": "int64", "values": [1, 2, 3, 4]}]},
+ "split_at": 2,
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [1, 2, 3, 4]}},
+ "runner_fails_with": "status ERR_RAISED"
+}

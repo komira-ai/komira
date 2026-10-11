@@ -34,3 +34,21 @@ load("//functional/test_weld:fixture.bzl", "TEST_WELD_FILES", "TEST_WELD_LEDGER"
         ("empty", None, "nosuch"),
     ]
 ]
+
+# Neither `tree` nor `files`, and both: refused at analysis
+# (//tools/build/selftest:analysis_refusals_lint).
+test_weld(
+    name = "no_tree",
+    known_untested = TEST_WELD_LEDGER,
+    root = TEST_WELD_ROOT,
+    welds = TEST_WELD_WELDS,
+)
+
+test_weld(
+    name = "both_tree_and_files",
+    files = TEST_WELD_FILES,
+    known_untested = TEST_WELD_LEDGER,
+    root = TEST_WELD_ROOT,
+    tree = ":doc_tree",
+    welds = TEST_WELD_WELDS,
+)
