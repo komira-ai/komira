@@ -1,7 +1,7 @@
 # =============================================================================
 # src/kci_workflow_check/auto_promotion.mojo -- rules R15 to R22 (and R4's
 #   permission allow-list): continuous auto-promotion, where a push to main
-#   IS the release (build -> gamma -> validate -> prod), held to the machine
+#   IS the release (build -> beta -> beta_validate -> prod), held to the machine
 #   file.
 # =============================================================================
 #
@@ -70,7 +70,7 @@
 #       when A has validations, J is the job that runs them (A's part job,
 #       or A's own job when A is not split) and O is `validated_set_hash`;
 #       otherwise J is A's job and O is `set_hash`. So prod publishes the set
-#       validate installed, never build's or gamma's word for it, and no
+#       beta_validate installed, never build's or beta's word for it, and no
 #       literal stands in for it. Job J declares the output O.
 #   R20 THE PROD LINE. Every job of a PUSH stage, and every part job of one,
 #       ends with a step named `the prod line` whose `if:` is `always()`: one
@@ -729,7 +729,7 @@ def check_workflow_dry_run(doc: WorkflowDoc, mut findings: List[String]):
         findings.append(
             _at(doc, env) + String("workflow: R22: the workflow-level `env:` sets ") + String(DRY_RUN_ENV)
             + String(" to exactly `${{ ") + String(DRY_RUN_EXPRESSION)
-            + String(" }}` (a push is never a dry run: validate would run `--plan` while prod publishes); it has ")
+            + String(" }}` (a push is never a dry run: beta_validate would run `--plan` while prod publishes); it has ")
             + got
         )
     var jobs = doc.child(0, String("jobs"))

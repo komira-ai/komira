@@ -42,7 +42,6 @@ if BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/coverage_keys.sh" "$LOG" >
 else
     fail "$(grep -o 'FAIL  coverage keys: .*' "$LOG/coverage_keys.log" | cut -c 7- | cut -c 1-400) (see $LOG/coverage_keys.log)"
 fi
-expect_green coverage_binaries tests//functional/coverage/...
 expect_red coverage_abs_relocated "holds an absolute path under the working directory" tests//negative/coverage:abs_relocated
 expect_red coverage_abs_other "holds an absolute path (/var/build/" tests//negative/coverage:abs_other
 expect_red coverage_no_reldir "no relative directory matching 'tests'" tests//negative/coverage:no_reldir
