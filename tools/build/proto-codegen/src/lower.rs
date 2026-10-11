@@ -1514,3 +1514,77 @@ mod omitted_fields {
         assert!(!scope.is_everything());
     }
 }
+
+#[cfg(test)]
+mod omitted_fields_of_the_scope {
+    //! `omit_fields` against what the scope generates (`lower_scoped`): a
+    //! field of a message the roots prune leaves out nothing, so it is
+    //! refused rather than reported as omitted.
+    use super::*;
+
+    fn string_field(name: &str, number: i32) -> FieldDescriptorProto {
+        FieldDescriptorProto {
+            name: Some(name.to_string()),
+            number: Some(number),
+            label: Some(PbLabel::Optional as i32),
+            r#type: Some(PbType::String as i32),
+            json_name: Some(name.to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn message(name: &str) -> DescriptorProto {
+        DescriptorProto {
+            name: Some(name.to_string()),
+            field: vec![string_field("name", 1), string_field("note", 2)],
+            ..Default::default()
+        }
+    }
+
+    /// `Item` and `ItemTombstone`, neither reaching the other.
+    fn lower(scope: &Scope) -> Result<IrModel, String> {
+        let file = FileDescriptorProto {
+            name: Some("t/shop.proto".to_string()),
+            package: Some("t".to_string()),
+            message_type: vec![message("Item"), message("ItemTombstone")],
+            syntax: Some("proto3".to_string()),
+            ..Default::default()
+        };
+        lower_scoped(
+            &[file],
+            &["t/shop.proto".to_string()],
+            "shop",
+            HttpRuleTable::default(),
+            RoutingRuleTable::default(),
+            scope,
+            &ModuleNames::new(),
+        )
+    }
+
+    fn scope(omit: &str) -> Scope {
+        Scope { roots: vec!["Item".to_string()], omit_fields: vec![omit.to_string()], ..Default::default() }
+    }
+
+    #[test]
+    fn a_field_of_a_message_the_roots_prune_is_refused() {
+        let err = lower(&scope("t.ItemTombstone.name")).unwrap_err();
+        assert!(
+            err.contains(
+                "omit_fields: `t.ItemTombstone.name` is a field of `.t.ItemTombstone`, which this \
+                 scope does not generate, so it leaves out nothing"
+            ),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_field_of_a_generated_message_is_left_out_and_the_pruned_message_is_gone() {
+        let model = lower(&scope("t.Item.note")).unwrap();
+        let messages: Vec<(&str, Vec<&str>)> = model.files[0]
+            .messages
+            .iter()
+            .map(|m| (m.name.as_str(), m.fields.iter().map(|f| f.name.as_str()).collect()))
+            .collect();
+        assert_eq!(messages, [("Item", vec!["name"])]);
+    }
+}
