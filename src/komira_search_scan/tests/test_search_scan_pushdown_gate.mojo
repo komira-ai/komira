@@ -289,7 +289,7 @@ def test_a_date_field_takes_an_int_a_date32_or_a_timestamp() raises:
             )
             assert_false(
                 g.supports_filter_pushdown(
-                    _cmp(op, cols[c], ScalarValue.from_string("2022-01-01"))
+                    _cmp(op, cols[c], ScalarValue.from_string("2026-10-01"))
                 ),
                 what + " string",
             )
