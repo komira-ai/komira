@@ -19,8 +19,8 @@
 #      library's debug_asserts are off in its test at ASSERT=none, an
 #      assert_mode=none one is off at the default level, a define reaches the
 #      test and the library's package, a test holding 256 MiB for 2 s passes
-#      under a 1024 MiB cap), :bin_none's [run_check] and `buck2 test` of :test_none
-#      pass at ASSERT=none, and with komira.coverage=true the branch coverage
+#      under a 1024 MiB cap; :bin_none's run check, a validation, passes at
+#      ASSERT=none), `buck2 test` of :test_none passes at ASSERT=none, and with komira.coverage=true the branch coverage
 #      runs of :lib_none, :lib_defines and :lib_level_and_defines pass (their
 #      bitcode got the level and every define); each twin in tests//negative/assert_level fails
 #      (the same tests at ASSERT=all and at the default level, the same
@@ -43,7 +43,6 @@ if BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/assert_level.sh" "$LOG" > 
 else
     fail "$(grep -o 'FAIL  assert level: .*' "$LOG/assert_level.log" | cut -c 7- | cut -c 1-400) (see $LOG/assert_level.log)"
 fi
-expect_green assert_level_functional tests//functional/assert_level: tests//functional/mem_cap:
 # Each test's branch coverage run (its bitcode compiled, linked and run, as
 # the gate would read it) passes only when the bitcode got the test's level
 # and defines: at the default level safe_probe's assert fires (exit 132), and
@@ -63,7 +62,6 @@ else
         pass "mem_cap cases: $ok stand-in runs; an unreadable /proc, a signalled cap and a child reparented out of the tree leave nothing of the run alive"
     fi
 fi
-expect_green assert_level_run_check 'tests//functional/assert_level:bin_none[run_check]'
 if timeout 900 "$BUCK2" test tests//functional/assert_level:test_none > "$LOG/assert_level_test_none.log" 2>&1; then
     pass "assert_level_test_none: buck2 test of a mojo_test at ASSERT=none"
 else

@@ -23,6 +23,7 @@ rustc as one `-Ldependency=<dir>` per crate, and direct dependencies as
 
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/mojo:run_check.bzl", "run_check_validation")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 RustToolchainInfo = provider(fields = {
@@ -466,9 +467,11 @@ def _binary_impl(ctx):
         sub_targets = _tests_sub_target(_gate(ctx, tc, ungated, exe, markers))
     else:
         _compile(ctx, "bin", exe)
+    validation = []
     if ctx.attrs.expected_stdout != None:
         # Runs the binary in a remote action and fails unless its stdout is
-        # exactly `expected_stdout`.
+        # exactly `expected_stdout`: `[run_check]`, and a validation of the
+        # binary (tools/build/mojo/run_check.bzl).
         out = ctx.actions.declare_output(ctx.label.name + ".stdout")
         expected = ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout)
         ctx.actions.run(
@@ -476,15 +479,50 @@ def _binary_impl(ctx):
             category = "rust_run_check",
         )
         sub_targets["run_check"] = [DefaultInfo(default_output = out)]
+        validation = run_check_validation(ctx, out, ctx.attrs.expected_stdout)
     return [
         DefaultInfo(default_output = exe, sub_targets = sub_targets),
         RunInfo(args = cmd_args(exe)),
-    ]
+    ] + validation
 
 rust_binary_rule = rule(
     impl = _binary_impl,
     attrs = _COMMON_ATTRS | _WELD_ATTRS | {
         "expected_stdout": attrs.option(attrs.string(), default = None),
+    },
+)
+
+# ---- the weld's marker list -------------------------------------------------
+#
+# A library or binary with `tests` or `test_srcs` is published behind the
+# markers of its tests (`[tests]`). A weld that drops one still builds green,
+# its test simply not run, so building the target cannot show it. This check
+# reads the target's `[tests]` sub-target at analysis, the marker list _gate
+# returns, and fails unless it is exactly `markers` (each a marker's path in
+# its target's outputs: `<test>.passed` of a rust_test,
+# `test_srcs/<crate>.passed` of an external test). It reads that list, not
+# the publishing copy action's inputs: a _gate that kept a marker in the list
+# but dropped it from the action's hidden inputs passes here.
+
+def _rust_weld_check_impl(ctx):
+    tests = ctx.attrs.target[DefaultInfo].sub_targets.get("tests")
+    got = sorted([m.short_path for m in tests[DefaultInfo].default_outputs]) if tests else []
+    want = sorted(ctx.attrs.markers)
+    if got != want:
+        fail("rust_weld_check {}: the [tests] markers of {} are {}, not {}".format(
+            ctx.label.raw_target(),
+            ctx.attrs.target.label.raw_target(),
+            got,
+            want,
+        ))
+    return [DefaultInfo()]
+
+rust_weld_check_rule = rule(
+    impl = _rust_weld_check_impl,
+    doc = "Fails analysis unless the `[tests]` sub-target of `target` (a rust_library or rust_binary), the marker list its rule hands the publishing copy action, is exactly `markers`. It reads that list, not the action's inputs.",
+    attrs = {
+        "markers": attrs.list(attrs.string()),
+        "target": attrs.dep(),
     },
 )
 
@@ -578,3 +616,4 @@ rust_binary = declares_docs(_welded(rust_binary_rule))
 rust_library = declares_docs(_welded(rust_library_rule))
 rust_sysroot = declares_docs(rust_sysroot_rule)
 rust_test = declares_docs(rust_test_rule)
+rust_weld_check = declares_docs(rust_weld_check_rule)
