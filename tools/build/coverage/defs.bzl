@@ -4,7 +4,7 @@ tools/build/mojo/coverage.bzl): cov_gate.sh, covcheck and the ratchet. And
 "The coverage workflow")."""
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
-load("@komira//tools/build/mojo:providers.bzl", "MojoRunnableInfo")
+load("@komira//tools/build/mojo:providers.bzl", "MojoInfo", "MojoRunnableInfo")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 def _gate_dir_impl(ctx):
@@ -75,3 +75,20 @@ def coverage_ci_cases(**kwargs):
     _coverage_ci_cases(**kwargs)
 
 coverage_ci_cases = declares_docs(coverage_ci_cases)
+
+def _branch_gate_rows_impl(ctx):
+    for row, lib in ctx.attrs.libraries.items():
+        # The spelling mojo_library compares with the list (coverage.bzl):
+        # a row resolving to the library under another spelling is read by
+        # nothing.
+        if str(lib.label.raw_target()) != row:
+            fail("COVERAGE_BRANCH_GATE row {} (tools/build/coverage/policy.bzl) is not spelled {}: mojo_library finds its row by that exact string, so this row gates nothing".format(row, lib.label.raw_target()))
+    return [DefaultInfo()]
+
+_branch_gate_rows = rule(
+    impl = _branch_gate_rows_impl,
+    doc = "Depends on each library a row of COVERAGE_BRANCH_GATE (policy.bzl) names, and requires its MojoInfo. mojo_library looks itself up in that list by the exact string of its own label, so a row whose library moved, or a row spelled another way (`//src/x:x` for `komira//src/x:x`), would be read by nothing; here a row naming no target fails the build graph, one naming a target that is no Mojo library fails analysis, and one whose string differs from the label of the target it names fails analysis. Its build runs no action.",
+    attrs = {"libraries": attrs.dict(attrs.string(), attrs.dep(providers = [MojoInfo]), doc = "Each row, by its string, to the target it names.")},
+)
+
+branch_gate_rows = declares_docs(_branch_gate_rows)
