@@ -1,7 +1,9 @@
 # =============================================================================
 # Integer division in the BatchView walkers of `ExpressionExecutor`: a zero
-# divisor answers NULL (docs/design/query_semantics.md §5.3) and signed
-# MIN / -1 raises an overflow error (§5.4) unless an operand is NULL (§5.0).
+# divisor answers NULL (docs/design/query_semantics.md §5.3), and in the
+# Int64 and Int32 walkers signed MIN / -1 raises an overflow error (§5.4)
+# unless an operand is NULL (§5.0). The Float64 walker answers MIN / -1 with
+# 2^63 (komira-ai/komira#1478; its section below says why).
 #
 # The numeric project walkers return values only. A NULL row holds a
 # placeholder value there, and `_mark_value_nulls_from_view` (the channel the
@@ -60,11 +62,14 @@ from komira_kernels.runtime_expr import (
     EXPR_DIV_I32,
     EXPR_DIV_I64,
     EXPR_EQ_F64_MIXED,
+    EXPR_EQ_I64,
     EXPR_GE_F64_MIXED,
     EXPR_GE_I64,
+    EXPR_GT_F64_MIXED,
     EXPR_LT_F64_MIXED,
     EXPR_SUB_I64,
     RuntimeExpr,
+    make_case_f64,
     make_case_i64,
     make_col,
     make_i64_to_f64,
@@ -72,6 +77,7 @@ from komira_kernels.runtime_expr import (
     make_lit_i32,
     make_lit_i64,
     make_not_bool,
+    make_or,
 )
 
 
@@ -323,16 +329,6 @@ def test_i64_min_over_minus_one_raises() raises:
     _expect_bools(_nulls(_div(EXPR_DIV_I64, A, Z), batch, [3, 4, 1, 2], False), want, "rows 1, 2 are NULL")
 
 
-def test_f64_walker_min_over_minus_one_raises() raises:
-    var batch = _min_batch()
-    with assert_raises(contains="Out of Range Error: Overflow in division of INT64 (-9223372036854775808 / -1)!"):
-        _ = _f64(_div(EXPR_DIV_I64, A, Z), batch, [0])
-    var got = _f64(_div(EXPR_DIV_I64, A, Z), batch, [3, 4, 1, 2])
-    assert_equal(len(got), 4)
-    assert_equal(got[0], Float64(I64_MIN), "MIN / 1")
-    assert_equal(got[1], -6.0, "6 / -1")
-
-
 def test_i32_min_over_minus_one_raises() raises:
     var batch = _min_batch()
     with assert_raises(contains="Out of Range Error: Overflow in division of INT32 (-2147483648 / -1)!"):
@@ -355,72 +351,79 @@ def test_i32_min_over_minus_one_raises() raises:
     assert_equal(got_nested[0], -6, "(6 / -1) + 0")
 
 
+def test_i64_walker_min_over_minus_one_of_a_wide_quotient_raises() raises:
+    """`(MIN / (a - z)) / -1` through the Int64 walker, a = 2^62 + 1, z = 2^62:
+    a - z is 1, so the inner quotient is MIN and the outer division is
+    MIN / -1, which raises. The operand NULL check reads the inner division's
+    divisor through the Int64 walker; read through the Float64 one, a - z
+    widens to 0.0, the inner quotient looks NULL and the raise is lost."""
+    var pool = List[RuntimeExpr]()
+    pool.append(make_lit_i64(I64_MIN))        # 0
+    pool.append(make_col(A))                  # 1
+    pool.append(make_col(Z))                  # 2
+    pool.append(_node(EXPR_SUB_I64, 1, 2))    # 3: a - z
+    pool.append(_node(EXPR_DIV_I64, 0, 3))    # 4: MIN / (a - z)
+    pool.append(make_lit_i64(-1))             # 5
+    pool.append(_node(EXPR_DIV_I64, 4, 5))    # 6: (MIN / (a - z)) / -1
+    var exec = _exec(pool^)
+    with assert_raises(contains="Out of Range Error: Overflow in division of INT64 (-9223372036854775808 / -1)!"):
+        _ = _i64(exec, _wide_batch(), [0])
+
+
 # -----------------------------------------------------------------------------
-# Operands past 2^53: each check reads the value the division used
+# The Float64 walker's EXPR_DIV_I64 answers MIN / -1 as it did before
+# (komira-ai/komira#1478). CASE branches and the right side of an OR are
+# evaluated over every selected row, so a raise there would fire on rows that
+# never use the quotient. Fixture: a = [MIN, 6], z = [-1, -2].
 # -----------------------------------------------------------------------------
+
+
+def _untaken_min_batch() raises -> RecordBatch:
+    return _build([Int(I64_MIN), 6], [-1, -2], [0, 0], [1, 1], -1, -1)
+
+
+def test_f64_case_with_min_over_minus_one_in_the_untaken_branch_answers() raises:
+    """`CASE WHEN z = -1 THEN 0.5 ELSE a / z END` is [0.5, -3.0]: row 0 takes
+    the THEN branch, so MIN / -1 is not part of the answer."""
+    var pool = List[RuntimeExpr]()
+    pool.append(make_col(A))                  # 0
+    pool.append(make_col(Z))                  # 1
+    pool.append(make_lit_i64(-1))             # 2
+    pool.append(_node(EXPR_EQ_I64, 1, 2))     # 3: z = -1
+    pool.append(make_lit_f64(0.5))            # 4
+    pool.append(_node(EXPR_DIV_I64, 0, 1))    # 5: a / z
+    pool.append(make_case_f64(0))             # 6
+    var slots: List[Int] = [3, 4, 5]
+    var when = List[List[Int]]()
+    when.append(slots^)
+    var got = _f64(_exec(pool^, when^), _untaken_min_batch(), [0, 1])
+    assert_equal(len(got), 2)
+    assert_equal(got[0], 0.5)
+    assert_equal(got[1], -3.0)
+
+
+def test_f64_or_with_min_over_minus_one_on_a_true_row_keeps_it() raises:
+    """`z = -1 OR (a / z) > 0.5` keeps row 0 (TRUE from the left side) and
+    drops row 1 (-3 > 0.5 is FALSE)."""
+    var pool = List[RuntimeExpr]()
+    pool.append(make_col(A))                       # 0
+    pool.append(make_col(Z))                       # 1
+    pool.append(make_lit_i64(-1))                  # 2
+    pool.append(_node(EXPR_EQ_I64, 1, 2))          # 3: z = -1
+    pool.append(_node(EXPR_DIV_I64, 0, 1))         # 4: a / z
+    pool.append(make_lit_f64(0.5))                 # 5
+    pool.append(_node(EXPR_GT_F64_MIXED, 4, 5))    # 6: (a / z) > 0.5
+    pool.append(make_or(3, 6))                     # 7
+    _expect(_run(_exec(pool^), _untaken_min_batch()), [0], "z = -1 OR (a / z) > 0.5")
 
 
 def test_probe_f64_walker_min_plus_one_over_minus_one_no_raise() raises:
     """(MIN + 1) / -1 is MAX, which fits: §5.4 refuses only MIN / -1. The
-    Float64 walker widens MIN + 1 to -2^63, the same Float64 as MIN, so its
-    overflow check must look at the Int64 dividend. MAX widens to 2^63."""
+    Float64 walker widens MIN + 1 to -2^63, the same Float64 as MIN, so a
+    MIN / -1 check there must look at the Int64 dividend. MAX widens to
+    2^63."""
     var batch = _build([Int(I64_MIN) + 1], [-1], [0], [-1], -1, -1)
     var got = _f64(_div(EXPR_DIV_I64, A, Z), batch, [0])
-    assert_equal(len(got), 1)
-    assert_equal(got[0], Float64(Int64.MAX))
-
-
-def _minus_one_over_z() -> ExpressionExecutor:
-    """Pool [col a, 1, a - 1, col z, (a - 1) / z]."""
-    var pool = List[RuntimeExpr]()
-    pool.append(make_col(A))
-    pool.append(make_lit_i64(1))
-    pool.append(_node(EXPR_SUB_I64, 0, 1))
-    pool.append(make_col(Z))
-    pool.append(_node(EXPR_DIV_I64, 2, 3))
-    return _exec(pool^)
-
-
-def test_vprobe_null_row_overflow_in_reread_dividend() raises:
-    """`(a - 1) / z` with a = [MIN + 2, NULL storing MIN], z = [-1, 5]. Row 0
-    widens to -2^63 / -1, so the Float64 walker re-reads its dividend as
-    Int64: MIN + 1, which divides to MAX. Row 1 is NULL (§5.0), so its stored
-    MIN - 1 must not be computed: the re-read covers only the flagged valid
-    rows, not the whole selection."""
-    var batch = _build([Int(I64_MIN) + 2, Int(I64_MIN)], [-1, 5], [0, 0], [1, 1], 1, -1)
-    var got = _f64(_minus_one_over_z(), batch, [0, 1])
-    assert_equal(len(got), 2)
-    assert_equal(got[0], Float64(Int64.MAX))
-
-
-def test_null_flagged_row_is_not_reread() raises:
-    """`(a - 1) / z` with a = [MIN + 2, NULL storing MIN], z = [-1, -1]. Both
-    rows widen to -2^63 / -1. Row 1 is NULL, so it is not re-read (its stored
-    MIN - 1 would overflow) and the NULL channel reports it; row 0 is MAX."""
-    var batch = _build([Int(I64_MIN) + 2, Int(I64_MIN)], [-1, -1], [0, 0], [1, 1], 1, -1)
-    var got = _f64(_minus_one_over_z(), batch, [1, 0])
-    assert_equal(len(got), 2)
-    assert_equal(got[1], Float64(Int64.MAX))
-    var want: List[Bool] = [True, False]
-    _expect_bools(_nulls(_minus_one_over_z(), batch, [1, 0], True), want, "row 1 is NULL")
-
-
-def test_vprobe_min_in_second_position_raises() raises:
-    """a = [MIN + 1, MIN], z = [-1, -1]: both rows widen to -2^63 / -1, and
-    only row 1 is MIN. Whichever selection position it sits at, it raises."""
-    var batch = _build([Int(I64_MIN) + 1, Int(I64_MIN)], [-1, -1], [0, 0], [1, 1], -1, -1)
-    with assert_raises(contains="Out of Range Error: Overflow in division of INT64 (-9223372036854775808 / -1)!"):
-        _ = _f64(_div(EXPR_DIV_I64, A, Z), batch, [0, 1])
-    with assert_raises(contains="Out of Range Error: Overflow in division of INT64 (-9223372036854775808 / -1)!"):
-        _ = _f64(_div(EXPR_DIV_I64, A, Z), batch, [1, 0])
-
-
-def test_reread_reads_the_selected_row() raises:
-    """a = [MIN, MIN + 1], z = [2, -1], sel [1]: selection position 0 is row
-    1, (MIN + 1) / -1 = MAX. Row 0 holds MIN but is not selected and its
-    divisor is 2, so a re-read that used the position as the row would raise."""
-    var batch = _build([Int(I64_MIN), Int(I64_MIN) + 1], [2, -1], [0, 0], [1, 1], -1, -1)
-    var got = _f64(_div(EXPR_DIV_I64, A, Z), batch, [1])
     assert_equal(len(got), 1)
     assert_equal(got[0], Float64(Int64.MAX))
 
@@ -488,13 +491,11 @@ def main() raises:
     suite.test[test_filter_over_a_zero_divisor_quotient_is_unknown]()
     suite.test[test_filter_over_a_cast_zero_divisor_quotient_is_unknown]()
     suite.test[test_i64_min_over_minus_one_raises]()
-    suite.test[test_f64_walker_min_over_minus_one_raises]()
     suite.test[test_i32_min_over_minus_one_raises]()
+    suite.test[test_i64_walker_min_over_minus_one_of_a_wide_quotient_raises]()
+    suite.test[test_f64_case_with_min_over_minus_one_in_the_untaken_branch_answers]()
+    suite.test[test_f64_or_with_min_over_minus_one_on_a_true_row_keeps_it]()
     suite.test[test_probe_f64_walker_min_plus_one_over_minus_one_no_raise]()
-    suite.test[test_vprobe_null_row_overflow_in_reread_dividend]()
-    suite.test[test_null_flagged_row_is_not_reread]()
-    suite.test[test_vprobe_min_in_second_position_raises]()
-    suite.test[test_reread_reads_the_selected_row]()
     suite.test[test_cast_quotient_null_channel_reads_the_int64_divisor]()
     suite.test[test_int64_case_branch_null_channel_reads_the_int64_divisor]()
     suite^.run()

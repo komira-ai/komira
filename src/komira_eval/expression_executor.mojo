@@ -3309,8 +3309,9 @@ struct ExpressionExecutor(Movable, Deinitable):
             Error on unsupported Expr kind.
             Error on Float64 DType mismatch when the EXPR_COL operand
             resolves to a non-Float64 column.
-            Error on an integer division of MIN / -1 with no NULL operand
-            (§5.4). A zero divisor is NULL (§5.3), not an error.
+            The EXPR_DIV_I64 arm does not raise for its own division: a
+            zero divisor is NULL (§5.3), and MIN / -1 answers 2^63, not the
+            §5.4 error (komira-ai/komira#1478).
         """
         ref batch = batch_view._batch[]
         var node = self.expression_pool[expr_idx]
@@ -3623,45 +3624,11 @@ struct ExpressionExecutor(Movable, Deinitable):
             )
             # A zero divisor answers NULL (§5.3): the row holds the
             # placeholder 0.0 and `_mark_value_nulls_from_view` reports it.
-            # MIN / -1 raises (§5.4) unless an operand is NULL. Every Int64
-            # from MIN to MIN + 2^9 widens to -2^63, so a row whose dividend
-            # does over a -1 divisor is flagged, and only MIN itself raises:
-            # (MIN + 1) / -1 is MAX, which fits. Only -1 widens to -1.0, so
-            # the divisor test is exact. The flagged rows whose operands are
-            # all valid are re-read through the Int64 walker as their own
-            # sub-selection: that walker raises on overflow in any row it
-            # reads, NULL rows included, so it must read neither a NULL row
-            # nor a row outside the flagged set.
-            var operand_nulls = List[Bool]()
+            # MIN / -1 is not refused here (§5.4 departure,
+            # komira-ai/komira#1478): it widens to 2^63. CASE branches
+            # and the right side of an OR are evaluated over every selected
+            # row, so a raise would fire on rows that never use the quotient.
             var k = 0
-            while k < n_sel:
-                if rhs_vals[k] == -1.0 and lhs_vals[k] == Float64(Int64.MIN):
-                    operand_nulls = self._operand_nulls_from_view[bo](
-                        batch, node, sel, True
-                    )
-                    break
-                k = k + 1
-            if len(operand_nulls) > 0:
-                var reread_sel = RowSelectionVector(n_sel)
-                while k < n_sel:
-                    if (
-                        rhs_vals[k] == -1.0
-                        and lhs_vals[k] == Float64(Int64.MIN)
-                        and not operand_nulls[k]
-                    ):
-                        reread_sel.append(sel.get(k))
-                    k = k + 1
-                if reread_sel.len() > 0:
-                    var lhs_i64 = List[Scalar[DType.int64]](
-                        capacity=reread_sel.len()
-                    )
-                    self.eval_to_list_i64_from_view[bo](
-                        batch_view, node.left, reread_sel, lhs_i64
-                    )
-                    for j in range(len(lhs_i64)):
-                        if lhs_i64[j] == Int64.MIN:
-                            raise _ee_div_overflow_error[DType.int64]()
-            k = 0
             while k < n_sel:
                 var d = rhs_vals[k]
                 if d == 0.0:

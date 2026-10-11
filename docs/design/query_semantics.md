@@ -457,7 +457,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** `MIN / -1` for a signed integer type is an error ("Out of Range"), since the quotient is not representable.
 - **DuckDB.** Measured on 1.5.3: `(-9223372036854775808) // (-1)` raises an Out of Range Error (`src/komira_column_kernels/arithmetic.mojo:74-80`).
-- **Current behaviour.** `src/komira_column_kernels/arithmetic.mojo:111-130` raises when both operands of such a pair are valid. So do the expression executor's division arms (`_ee_div_overflows` in `src/komira_eval/expression_executor.mojo`).
+- **Current behaviour.** `src/komira_column_kernels/arithmetic.mojo:111-130` raises when both operands of such a pair are valid. So do the expression executor's Int64, Int32 and per-cell division arms (`_ee_div_overflows` in `src/komira_eval/expression_executor.mojo`). Its Float64 walker answers 2^63 ("Code that does not follow", item 1).
 - **Mark.** MATCHES.
 
 ### 5.5 Integer overflow
