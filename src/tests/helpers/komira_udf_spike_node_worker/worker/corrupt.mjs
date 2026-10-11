@@ -1,8 +1,8 @@
 // Replies that break the worker transport's contract, for the test of the
 // engine's validation of everything a worker sends (--corrupt-output;
-// tests/test_node_worker.mojo). A call_batch of one row whose value is a
-// case number below gets that case's reply instead of its output; any other
-// batch is answered normally. The first five DESCRIBEs of a test run get
+// tests/test_node_worker.mojo). A call_batch whose rows all hold one case
+// number below gets that case's reply instead of its output (after the
+// user's function ran on it); any other batch is answered normally. The first five DESCRIBEs of a test run get
 // malformed replies (describeCorrupt).
 //
 // The RecordBatch messages are written by hand, not by apache-arrow, so a
@@ -158,10 +158,12 @@ const one = (rows, nulls, regions, more = {}) => message({ rows, nodes: [[rows, 
 // Each case's RecordBatch reply, by number; the reason the proxy gives is
 // beside it (proxy/ipc.c, kudfw_ipc_decode). The buffer check is six
 // conditions, each refused alone by one case: 1 (values past the body), 18
-// to 22. Cases 23, 24 and 33 are not corrupt, and the proxy must accept
-// them: 23 and 24 each end one buffer exactly at the end of the body, and 33's
-// RecordBatch vtable stops before the compression slot (absent, as a
-// flatbuffer reader must read it). Case 25's payload is 7 bytes.
+// to 22. Cases 23, 24, 33, 36, 37 and 39 are not corrupt, and the proxy must
+// accept them: 23, 24, 36 and 37 each end one buffer exactly at the end of
+// the body, 33's RecordBatch vtable stops before the compression slot
+// (absent, as a flatbuffer reader must read it), 36 and 37 size their bitmaps
+// at (rows + 7) / 8 bytes for 9 and 8 rows, and 39 places int32 values at
+// offset 4. Case 25's payload is 7 bytes.
 const BATCHES = {
   1: () => one(1, 0, [[0, 0], [1 << 20, 8]]), // a buffer lies outside the body: values past it
   2: () => one(2, 0, [[0, 0], [0, 8]]), // a values buffer is shorter than the column
@@ -197,6 +199,14 @@ const BATCHES = {
   32: () => one(1, 0, [[0, 0], [0, 8]], { rbVtableBefore: true }), // malformed: a vtable before the metadata
   33: () => one(1, 0, [[0, 0], [0, 8]], { rbSlots: 3 }), // accepted: a vtable too short for slot 3 (one 0)
   34: () => one(1, 0, [[0, 0], [0, 8]], { typeAt: 32 }), // not a RecordBatch: the type field is past the metadata
+  // The bitmap's rounding, (rows + 7) / 8: 9 rows need 2 bytes, 8 rows 1.
+  35: () => one(9, 1, [[0, 1], [64, 72]], { body: 192 }), // a validity bitmap is shorter: 1 byte for 9 rows
+  36: () => one(9, 1, [[126, 2], [0, 72]], { body: 128, fill: [[126, 0xfe], [127, 0x01]] }), // accepted: 2 bytes, at the body's end
+  37: () => one(8, 1, [[127, 1], [0, 64]], { body: 128, fill: [[127, 0xfe]] }), // accepted: 1 byte for 8 rows, at the body's end
+  // Alignment to the type's width: 4 is misaligned for int64 and aligned
+  // for int32 (case 39 answers a call whose result is int32).
+  38: () => one(1, 0, [[0, 0], [4, 8]]), // a values buffer is not aligned: int64 at 4
+  39: () => one(1, 0, [[0, 0], [4, 4]]), // accepted: int32 at 4
 };
 
 function header({ magic = MAGIC, op = OP.OK, id, flags = FLAG_INLINE, len }) {
@@ -299,8 +309,12 @@ export function describeCorrupt(id, fixed, good) {
 // Answer request `id` with corrupt case `batch`'s reply, if the batch names
 // one: true when it did.
 export function replyCorrupt(id, batch) {
-  if (batch.length !== 1 || batch.cols.length !== 1 || batch.cols[0].nullCount !== 0) return false;
-  const k = Number(batch.cols[0].values[0]);
+  if (batch.length < 1 || batch.cols.length !== 1 || batch.cols[0].nullCount !== 0) return false;
+  const v = batch.cols[0].values;
+  // A batch names a case when every row holds its number: one row for most
+  // cases, as many rows as the reply has for an accepted multi-row case.
+  for (let r = 1; r < batch.length; r++) if (v[r] !== v[0]) return false;
+  const k = Number(v[0]);
   if (BATCHES[k] !== undefined) {
     const parts = BATCHES[k]();
     let len = 0;

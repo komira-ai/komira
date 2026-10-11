@@ -12,6 +12,9 @@
 #   - open_instance refuses an export that is not a function (ERR_LOAD);
 #   - a float returned for int64, and an Int32Array returned for float64,
 #     are ERR_RETURN_TYPE with the row (an unsafe cast accepted);
+#   - under PROPAGATE, a raise names the row of the compacted batch the
+#     worker saw, which the host maps to the caller's (a row reported twice
+#     mapped, or dropped);
 #   - state per context: a module-global counter counts 1, 2, 3 in one
 #     context and starts at 1 in another (contexts sharing one process);
 #   - a worker that exits mid-batch, and one killed by a signal, are
@@ -34,7 +37,11 @@
 #     validity bitmap or a values buffer past the body) is refused alone,
 #     including a row count whose byte size wraps int64; a values buffer and
 #     a validity bitmap that each end exactly at the body's end are accepted
-#     (a bound check off by one); malformed ERROR replies and ERROR codes
+#     (a bound check off by one); the bitmap's (rows + 7) / 8 and the
+#     alignment to the type's width each have a refused case and an
+#     accepted one beside the bound (9 rows with 1 byte refused, 9 with 2
+#     and 8 with 1 accepted; int64 at offset 4 refused, int32 at 4
+#     accepted); malformed ERROR replies and ERROR codes
 #     that are not errors (the worker stays usable); five malformed DESCRIBE
 #     replies, one per length check, each failing the runtime's open (a
 #     runtime id or ABI copied past its buffer); and each break of the
@@ -59,7 +66,9 @@
 # check (33, and every reply apache-arrow writes) or its field-past-the-
 # metadata check (34), and the buffer vector's half of the past-the-metadata
 # check (17); the values check back to `dl < nlen * w` (8, the wrapping row
-# count); channel.c without the request id check of the framing (102), the
+# count); the bitmap bound as `nlen / 8` (35, where the host then reads
+# row 8's bit past the bitmap) or `(nlen + 8) / 8` (37), the alignment as
+# `% 4` (38) or `% 8` (39); channel.c without the request id check of the framing (102), the
 # payload limit (105), the bound of an ERROR string's length (115), the
 # trace's read (116), or keeping an ERROR code of 0 (113); proxy.c's
 # t_describe accepting a runtime id of 128 bytes (DESCRIBE 1), a runtime ABI
@@ -78,7 +87,7 @@ from std.testing import assert_equal, assert_true
 
 from komira_udf_spike_abi.contract import *
 from komira_udf_spike_abi.runtime import CallOptions, Handle, Outcome, UdfRuntime, UdfSpec
-from komira_udf_spike_abi.values import Batch, Column, ColumnType, TYPE_FLOAT64, TYPE_INT64
+from komira_udf_spike_abi.values import Batch, Column, ColumnType, TYPE_FLOAT64, TYPE_INT32, TYPE_INT64
 
 comptime LIB = "./node_worker.so"
 comptime CORRUPT_LIB = "./node_worker_corrupt.so"
@@ -208,6 +217,30 @@ def _state_per_context(mut rt: UdfRuntime) raises:
     _unbind(rt, a)
 
 
+def _propagate_error_row(mut rt: UdfRuntime) raises:
+    # Under PROPAGATE the host drops the null rows, the worker sees the
+    # compacted batch, and the error names a row of that batch, which the
+    # host maps back (design section 3.4, rule 2). raise_on_row_3 raises on
+    # the value 3: compacted row 1 here, caller row 3. A proxy or worker
+    # that reported the caller's row would make the host map it again (to
+    # row 5); one that dropped the row would report -1.
+    var s = _spec(SHAPE_SCALAR, "fixtures.mjs#raise_on_row_3", TYPE_INT64)
+    s.null_mode = NULL_PROPAGATE
+    var b = _bind(rt, s, 0)
+    var batch = Batch(5)
+    var c = Column(TYPE_INT64)
+    c.append_null()
+    c.append_int(2)
+    c.append_null()
+    c.append_int(3)
+    c.append_int(4)
+    batch.columns.append(c^)
+    var r = rt.call_batch(b.inst, s, batch, CallOptions.plain())
+    _expect(r.outcome, ERR_RAISED, "raise_on_row_3", "a raise under PROPAGATE")
+    assert_equal(r.outcome.row, 3, "the caller's row of the value 3")
+    _unbind(rt, b)
+
+
 def _crashes(mut rt: UdfRuntime) raises:
     var s = _spec(SHAPE_SCALAR, "fixtures.mjs#exit_on_row_2", TYPE_INT64)
     var b = _bind(rt, s, 0)
@@ -284,6 +317,44 @@ def _corrupt_describes() raises:
         assert_true("describe returned ERR_INTERNAL" in why, "corrupt DESCRIBE " + String(i) + ": " + why)
 
 
+def _same(k: Int, n: Int) -> Batch:
+    var vals = List[Int]()
+    for _ in range(n):
+        vals.append(k)
+    return _ints(vals)
+
+
+def _bitmap_and_alignment(mut rt: UdfRuntime, b: Bound, s: UdfSpec) raises:
+    # The arithmetic inside two refusals, each with a case on both sides of
+    # its bound (worker/corrupt.mjs, cases 35 to 39). The bitmap's rounding
+    # (rows + 7) / 8: 9 rows with a 1-byte bitmap are refused (a bound of
+    # rows / 8 accepts them, and the host reads row 8's bit past the
+    # bitmap), 9 rows with 2 bytes and 8 rows with 1 byte, each bitmap ending
+    # at the body's end, are accepted (a bound rounded up once too often
+    # refuses 37). The alignment to the type's width: int64 values at offset
+    # 4 are refused (an alignment of 4 for every type accepts them), int32
+    # values at offset 4 are accepted (an alignment of 8 refuses them).
+    var r35 = rt.call_batch(b.inst, s, _ints([35]), CallOptions.plain())
+    _expect(r35.outcome, ERR_INTERNAL, "failed validation: a validity bitmap is shorter than the column", "corrupt case 35")
+    for k in range(36, 38):
+        var n = 9 if k == 36 else 8
+        var r = rt.call_batch(b.inst, s, _same(k, n), CallOptions.plain())
+        assert_true(r.outcome.is_ok(), "corrupt case " + String(k) + " is valid: " + String(r.outcome))
+        assert_equal(len(r.column), n, "corrupt case " + String(k))
+        for i in range(n):
+            assert_equal(r.column.valid[i], i != 0, "corrupt case " + String(k) + ": row " + String(i) + " null")
+            assert_equal(r.column.bits[i], 0, "corrupt case " + String(k) + ": row " + String(i))
+    var r38 = rt.call_batch(b.inst, s, _ints([38]), CallOptions.plain())
+    _expect(r38.outcome, ERR_INTERNAL, "failed validation: a values buffer is not aligned to its type", "corrupt case 38")
+    var n32 = UdfSpec(SHAPE_MAP_BATCHES_COLUMN, "fixtures.mjs#narrow", [ColumnType(TYPE_INT64, True)], [ColumnType(TYPE_INT32, True)])
+    var nb = _bind(rt, n32, 0)
+    var r39 = rt.call_batch(nb.inst, n32, _ints([39]), CallOptions.plain())
+    assert_true(r39.outcome.is_ok(), "corrupt case 39 is valid: " + String(r39.outcome))
+    assert_equal(len(r39.column), 1, "corrupt case 39")
+    assert_equal(r39.column.bits[0], 0, "corrupt case 39")
+    _unbind(rt, nb)
+
+
 def _corrupt_outputs() raises:
     _corrupt_describes()
     var rt = UdfRuntime.open(CORRUPT_LIB)
@@ -344,6 +415,7 @@ def _corrupt_outputs() raises:
         assert_equal(len(r.column), 1, "corrupt case " + String(k))
         assert_equal(r.column.valid[0], k != 24, "corrupt case " + String(k) + ": null")
         assert_equal(r.column.bits[0], 0, "corrupt case " + String(k))
+    _bitmap_and_alignment(rt, b, s)
     # Malformed ERROR replies and ERROR codes that are not errors (cases 111
     # to 116: too short, a message longer than the payload, codes 0 and -5,
     # no message length, a trace longer than the payload): the framing
@@ -381,6 +453,7 @@ def main() raises:
     _validate(rt)
     _load_refusals(rt)
     _return_types(rt)
+    _propagate_error_row(rt)
     _state_per_context(rt)
     _crashes(rt)
     _hard_cancel(rt)

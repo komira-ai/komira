@@ -133,6 +133,79 @@ export function* endless(_batches: Iterable<RecordBatch>): Generator<Table> {
   for (;;) yield { numRows: 1, columns: [[1n]] };
 }
 
+// 2x, and a null for 0: a null the function returns for a valid input.
+export function null_on_zero(x: I64): I64 {
+  return x === null || x === 0n ? null : 2n * x;
+}
+
+// a (int64) + b (int32), null where either is null.
+export function add_mixed(a: I64, b: number | null): I64 {
+  return a === null || b === null ? null : a + BigInt(b);
+}
+
+function sumOrNull(xs: I64[]): I64 {
+  let s = 0n;
+  for (const x of xs) {
+    if (x === null) return null;
+    s += x;
+  }
+  return s;
+}
+
+// The sum of twelve and of sixty-four int64 arguments, null where any is.
+export function sum12(...xs: I64[]): I64 {
+  return sumOrNull(xs);
+}
+
+export function sum64(...xs: I64[]): I64 {
+  return sumOrNull(xs);
+}
+
+// int64 in, the same values as int32 out, nulls kept.
+export function narrow(x: Vector<Int64>): Array<number | null> {
+  const out: Array<number | null> = [];
+  for (let i = 0; i < x.length; i++) {
+    const v = x.get(i);
+    out.push(v === null ? null : Number(v));
+  }
+  return out;
+}
+
+// x * (1 + 5e-10): within the runner's relative tolerance of 1e-9, and
+// exactly 0 for 0.
+export function near(x: Vector<Float64>): Float64Array {
+  const out = new Float64Array(x.length);
+  for (let i = 0; i < x.length; i++) out[i] = (x.get(i) ?? NaN) * (1 + 5e-10);
+  return out;
+}
+
+// A batch function that raises naming no row.
+export function raise_no_row(_x: Vector<Int64>): Vector<Int64> {
+  throw new Error('raise_no_row: the batch as a whole');
+}
+
+// A one-row table [0] before pulling any input, then running_sum.
+export function* yield_first(batches: Iterable<RecordBatch>): Generator<Table> {
+  yield { numRows: 1, columns: [[0n]] };
+  yield* running_sum(batches);
+}
+
+// Each input batch's column as an int64 column and, times ten, an int32
+// column, nulls kept.
+export function* table_two_types(batches: Iterable<RecordBatch>): Generator<Table> {
+  for (const b of batches) {
+    const x = b.getChildAt(0) as Vector<Int64>;
+    const wide: I64[] = [];
+    const small: Array<number | null> = [];
+    for (let i = 0; i < b.numRows; i++) {
+      const v = x.get(i);
+      wide.push(v);
+      small.push(v === null ? null : Number(v) * 10);
+    }
+    yield { numRows: b.numRows, columns: [wide, small] };
+  }
+}
+
 // ---- this runtime's own cases --------------------------------------------------
 
 // Rows seen by this module in this process: a module global, so each worker
