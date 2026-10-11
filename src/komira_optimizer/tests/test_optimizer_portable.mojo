@@ -7,7 +7,8 @@
 #
 #   * It runs the driver's pass order: on plans where payload narrowing has
 #     nothing to stamp and no scalar needs binding, its output renders exactly
-#     as `optimize`'s.
+#     as `optimize`'s (seven plans here; `test_optimizer_portable_parity.mojo`
+#     has one plan for each pass these seven do not reach).
 #   * It turns off payload narrowing (a host-local rule) and folds no value
 #     from an execution; a plan that needs one is refused by name with its
 #     site count, and the decorrelated broadcast shape (which needs none) is
@@ -412,8 +413,12 @@ def test_portable_output_renders_as_optimize_where_no_host_rule_applies() raises
     subquery, a DPccp star) where `optimize` stamps no narrowing and records no
     request, `optimize_portable` renders byte for byte as `optimize`.
 
-    Defect caught: a portable path that runs a different pass list (a pass
-    dropped or moved) instead of the driver's one function."""
+    Defect caught: one of these passes made conditional on `narrow_payload`,
+    so the portable entry skips it: scalar decorrelation (step 2), the join
+    residual to side, the first OR factoring and the IN-list rewrite (steps
+    5-8), eager aggregation, SEMI reducer pushdown, the join reorder,
+    build-side selection and the order restore (steps 14-16).
+    `test_optimizer_portable_parity.mojo` covers the other passes."""
     for i in range(_N_FIXTURES):
         var deps = ScalarDepTable()
         var want = optimize(_plan_at(i), OptimizerConfig(), deps)
