@@ -246,6 +246,8 @@ static const struct fixture FIXTURES[] = {
     {"bad_layout", F_BAD_LAYOUT, SC, "l", "l", "", 0},
     {"null_out", F_NULL_OUT, SC, "l", "l", "", 0},
     {"const7", F_CONST7, SC, "", "l", "", 0},
+    /* raises where the argument is 3, naming that row (a value rule: user
+     * code in any language can follow it; the adapter reports the row) */
     {"raise_on_row_3", F_RAISE_ON_ROW_3, SC, "l", "l", "", 0},
     {"slow_loop", F_SLOW_LOOP, SC, "l", "l", "", 0},
     {"sum", F_SUM, AM, "l", "l", "l", 0},
