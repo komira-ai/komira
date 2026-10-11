@@ -6,11 +6,10 @@
 # are `<bundle>#<export>`, so every entry becomes `fixtures.mjs#<name>`: the
 # esbuild bundle of udf/fixtures.ts.
 #
-# Sixty-five cases are left out (runtime_fault_cases): each one's fixture
-# is an act at the C ABI, which only a runtime library can commit, or a
-# per-row function that raises by its row's position. In this runtime the
-# proxy, not user code, builds every array the host sees, moves and
-# releases the inputs, and fills the error, so a TypeScript function cannot
+# Sixty-three cases are left out (runtime_fault_cases): each one's fixture
+# is an act at the C ABI, which only a runtime library can commit. In this
+# runtime the proxy, not user code, builds every array the host sees, moves
+# and releases the inputs, and fills the error, so a TypeScript function cannot
 # leave an input unmoved, fill an error on OK, name a row outside its batch,
 # hand back a malformed or sliced output array or table, move a child out
 # of the argument struct, read the schema flags, or refuse a second group
@@ -95,13 +94,6 @@ def runtime_fault_cases() -> List[String]:
         # the proxy refuses the input, and user code cannot yield a table of
         # another width (worker/frames.mjs, outputOf)
         "frame_fault_then_raise",
-        # a per-row function that raises by its row's position, not its
-        # value: a per-row result may not depend on where it sits in the
-        # batch (design section 3.4, rule 3), and a TypeScript function sees
-        # only its arguments; raise_on_row_3 here raises on the value 3, and
-        # test_node_worker checks the error row under PROPAGATE with it
-        "error_row_at_least_edge",
-        "scalar_propagate_error_row",
         # aggregate outputs the proxy sizes: a state column one row long, a
         # result one row short
         "agg_state_long_by_one",
