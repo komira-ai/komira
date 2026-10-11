@@ -194,7 +194,7 @@ def keyword_only(x: int, *, y: int) -> int:
 
 class _BadInt:
     """An int-like value whose conversion raises something other than the
-    TypeError, ValueError or OverflowError the adapter maps to a bad value."""
+    TypeError, ValueError or OverflowError of a plain wrong value."""
 
     def __index__(self):
         raise RuntimeError("_BadInt: no int")
@@ -202,6 +202,93 @@ class _BadInt:
 
 def bad_index(x: int) -> int:
     return _BadInt()
+
+
+class _BadFloat:
+    def __float__(self):
+        raise RuntimeError("_BadFloat: no float")
+
+
+def bad_float(x: float) -> float:
+    return _BadFloat()
+
+
+class _BadBool:
+    """Converts to 7; asking its truth raises (the adapter never should)."""
+
+    def __index__(self):
+        return 7
+
+    def __bool__(self):
+        raise RuntimeError("_BadBool: no truth")
+
+
+def bad_bool(x: int) -> int:
+    return _BadBool()
+
+
+class _BadLen(list):
+    def __len__(self):
+        raise RuntimeError("_BadLen: no length")
+
+
+def bad_len(x: list[int]) -> list[int]:
+    return _BadLen(x)
+
+
+class _BadIter(list):
+    def __iter__(self):
+        raise RuntimeError("_BadIter: no iteration")
+
+
+def bad_iter(x: list[int]) -> list[int]:
+    return _BadIter(x)
+
+
+class _BadRepr:
+    """A wrong value (no int) whose repr raises: the refusal's message must
+    still be made."""
+
+    def __index__(self):
+        raise TypeError("_BadRepr: no int")
+
+    def __repr__(self):
+        raise RuntimeError("_BadRepr: no repr")
+
+
+def bad_repr_value(x: int) -> int:
+    return _BadRepr()
+
+
+class _Unprintable(Exception):
+    def __str__(self):
+        raise RuntimeError("_Unprintable: no str")
+
+
+def raise_unprintable(x: int) -> int:
+    raise _Unprintable()
+
+
+class _NonStrMessage(Exception):
+    def __str__(self):
+        return 42
+
+
+def raise_non_str(x: int) -> int:
+    raise _NonStrMessage()
+
+
+class _NotAnException(BaseException):
+    """Derives from BaseException, not Exception."""
+
+
+def raise_base(x: int) -> int:
+    raise _NotAnException("raise_base: a BaseException")
+
+
+def raise_surrogate(x: int) -> int:
+    """A message that is not valid UTF-8 (a lone surrogate)."""
+    raise ValueError("raise_surrogate: \udc80")
 
 
 def allocated_blocks(x: int) -> int:

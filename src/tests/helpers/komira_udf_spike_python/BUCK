@@ -44,6 +44,9 @@ load(":defs.bzl", "runtime_data", "udf_bench")
 #   test_imports_subinterp, test_imports_shared_gil
 #                    which of numpy, pandas, pyarrow, sklearn, cloudpickle
 #                    import in each mode, pinned.
+#   test_user_errors every exception user code causes, in the function or
+#                    in converting its result, reported as the user's, with
+#                    a message whatever the exception object does.
 #   test_threads_subinterp, test_threads_shared_gil
 #                    4 engine threads: values, calls == batches, releases,
 #                    state per context, and the CPU/wall parallelism case;
@@ -104,6 +107,7 @@ mojo_library(
         "tests/test_python_subinterp.mojo",
         "tests/test_threads_shared_gil.mojo",
         "tests/test_threads_subinterp.mojo",
+        "tests/test_user_errors.mojo",
     ],
     test_data = {
         "tests/test_conform_shared_gil.mojo": runtime_data("shared_gil", _PYRT) | _CASES,
@@ -113,6 +117,7 @@ mojo_library(
         "tests/test_python_shared_gil.mojo": runtime_data("shared_gil", _PYRT | _NUMPY),
         "tests/test_python_subinterp.mojo": runtime_data("subinterp", _PYRT | _NUMPY),
         "tests/test_threads_shared_gil.mojo": runtime_data("shared_gil", _PYRT | _NUMPY),
+        "tests/test_user_errors.mojo": runtime_data("subinterp", _PYRT),
         "tests/test_threads_subinterp.mojo": runtime_data("subinterp", _PYRT | _NUMPY) | {
             # read by its check that the engine names no runtime or language
             "engine.mojo": "engine.mojo",

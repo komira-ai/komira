@@ -184,8 +184,34 @@ def validate(entry, shape, arg_fmts, result_fmt):
     return (ERR_UNSUPPORTED, why) if why else (OK, "")
 
 
+def _text(s):
+    """`s` as text the C side can encode: invalid UTF-8 (a lone surrogate)
+    escaped."""
+    return s.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
+def _type_name(x):
+    try:
+        return _text(str(type(x).__name__))
+    except BaseException:
+        return "?"
+
+
 def _exception_text(exc):
-    return "{}: {}".format(type(exc).__name__, exc)
+    """'Type: message' for any exception object; its str() may raise or not
+    return a str (user code's), so the message falls back to a placeholder."""
+    try:
+        msg = str(exc)
+    except BaseException:
+        msg = "<the exception's str() failed>"
+    return _text("{}: {}".format(_type_name(exc), msg))
+
+
+def _safe_repr(y):
+    try:
+        return _text(repr(y))
+    except BaseException:
+        return "<the value's repr() failed>"
 
 
 def open_instance(entry, shape, arg_fmts, result_fmt, null_mode):
@@ -256,7 +282,12 @@ class Instance:
         return res
 
     def _raised(self, exc, row):
-        trace = "".join(traceback.format_exception(exc))
+        """User code's exception, raised in the function or while its result
+        was converted: ERR_RAISED at `row` (design section 4.5)."""
+        try:
+            trace = _text("".join(traceback.format_exception(exc)))
+        except BaseException:
+            trace = None
         tb = exc.__traceback__
         if tb is not None:
             traceback.clear_frames(tb)
@@ -265,7 +296,7 @@ class Instance:
     def _bad_value(self, y, row):
         return (
             ERR_RETURN_TYPE,
-            "row {}: {} {!r} is not {}".format(row, type(y).__name__, y, TYPE[self.result_fmt]),
+            "row {}: {} {} is not {}".format(row, _type_name(y), _safe_repr(y), TYPE[self.result_fmt]),
             None,
             row,
         )
@@ -305,6 +336,9 @@ class Instance:
                     o[i] = y
                 except (TypeError, ValueError, OverflowError):
                     return self._bad_value(y, i)
+                except BaseException as exc:
+                    # The value's own conversion code raised: user code's.
+                    return self._raised(exc, i)
             if i == 0 or not i % CLOCK_EVERY:
                 t = now()
                 if deadline and t > deadline:
@@ -326,13 +360,26 @@ class Instance:
         except BaseException as exc:
             return self._raised(exc, -1)
         if not isinstance(res, (list, tuple)):
-            return (ERR_RETURN_TYPE, "the result is a {}, not a list".format(type(res).__name__), None, -1)
-        m = len(res)
+            return (ERR_RETURN_TYPE, "the result is a {}, not a list".format(_type_name(res)), None, -1)
+        try:
+            # A list subclass's own __len__ or __iter__ is user code.
+            m = len(res)
+            it = iter(res)
+        except BaseException as exc:
+            return self._raised(exc, -1)
         buf = bytearray(WIDTH[self.result_fmt] * m)
         o = memoryview(buf).cast(CODE[self.result_fmt])
         valid = None
         nulls = 0
-        for i, y in enumerate(res):
+        i = -1
+        while True:
+            try:
+                y = next(it)
+            except StopIteration:
+                break
+            except BaseException as exc:
+                return self._raised(exc, -1)
+            i += 1
             if y is None:
                 if valid is None:
                     valid = bytearray(b"\xff" * ((m + 7) // 8))
@@ -341,8 +388,10 @@ class Instance:
                 continue
             try:
                 o[i] = y
-            except (TypeError, ValueError, OverflowError):
+            except (TypeError, ValueError, OverflowError, IndexError):
                 return self._bad_value(y, i)
+            except BaseException as exc:
+                return self._raised(exc, i)
         o.release()
         return (OK, buf, valid, nulls, m)
 
@@ -360,6 +409,14 @@ class Instance:
         except BaseException as exc:
             return self._raised(exc, -1)
         del arrays
+        try:
+            return self._numpy_result(np, res)
+        except BaseException as exc:
+            # A result object's own conversion code (__array__, a masked
+            # array subclass, ...) raised: user code's, for the batch.
+            return self._raised(exc, -1)
+
+    def _numpy_result(self, np, res):
         mask = None
         if isinstance(res, np.ma.MaskedArray):
             mask = np.ma.getmaskarray(res)

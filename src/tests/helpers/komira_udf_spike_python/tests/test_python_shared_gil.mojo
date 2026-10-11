@@ -130,6 +130,12 @@ def _numpy_results(mut rt: UdfRuntime) raises:
     assert_equal(status_name(r.outcome.status), "ERR_RETURN_TYPE", String(r.outcome))
     assert_true("the result is no array" in r.outcome.message, String(r.outcome))
     assert_equal(r.outcome.row, -1, "a batch's bad result names no row")
+    # A result whose conversion to an array raises RuntimeError: the user's
+    # error, ERR_RAISED for the batch (it was ERR_INTERNAL).
+    r = call_once(rt, _np("np_bad_array", TYPE_FLOAT64, TYPE_FLOAT64), floats([1.0, 2.0]))
+    assert_equal(status_name(r.outcome.status), "ERR_RAISED", String(r.outcome))
+    assert_equal(r.outcome.row, -1, String(r.outcome))
+    assert_true("RuntimeError: _BadArray: no array" in r.outcome.message, String(r.outcome))
     # The argument is the engine's buffer, read-only: a write raises.
     r = call_once(rt, _np("np_writes", TYPE_FLOAT64, TYPE_FLOAT64), floats([1.0, 2.0]))
     assert_equal(status_name(r.outcome.status), "ERR_RAISED", String(r.outcome))

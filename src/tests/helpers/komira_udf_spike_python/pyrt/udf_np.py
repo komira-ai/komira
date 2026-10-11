@@ -91,3 +91,13 @@ def buffer_type_refs(x: np.ndarray) -> np.ndarray:
 def np_ragged(x: np.ndarray) -> np.ndarray:
     """A ragged list: no array numpy can make of it."""
     return [[1.0], [1.0, 2.0]]
+
+
+class _BadArray:
+    def __array__(self, dtype=None, copy=None):
+        raise RuntimeError("_BadArray: no array")
+
+
+def np_bad_array(x: np.ndarray) -> np.ndarray:
+    """A result whose conversion to an array raises RuntimeError."""
+    return _BadArray()
