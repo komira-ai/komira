@@ -6,12 +6,13 @@
 #
 #   test_a_job_that_ends_between_beats_is_noticed_within_seconds
 #       With a 30 s heartbeat interval, a job that exits after 2 s ends the
-#       run in seconds (the loop checks for the exit every second between
-#       beats), COMPLETED, after two RUNNING beats.
+#       run in at most 5 s (the loop checks for the exit every second
+#       between beats; a loop that checked every 10 s would take about 10 s),
+#       COMPLETED, after two RUNNING beats.
 #   test_a_stop_signal_between_beats_ends_the_run_at_once
 #       With a 30 s interval, a SIGTERM that arrives 1 s into the interval
 #       stops the job then, not at the next beat: CANCELLED, naming SIGTERM,
-#       in seconds.
+#       in at most 5 s.
 #
 # No store and no heartbeat endpoint: the reporter records each beat.
 # =============================================================================
@@ -79,7 +80,9 @@ def test_a_job_that_ends_between_beats_is_noticed_within_seconds() raises:
     )
     var took_s = Int((now_ns() - t0) // _SEC)
     assert_true(phase == JobSupervisorPhase.completed(), "COMPLETED")
-    assert_true(took_s < 15, "noticed long before the 30 s beat: " + String(took_s))
+    assert_true(
+        took_s <= 5, "noticed within a second of the 2 s exit: " + String(took_s)
+    )
     assert_equal(_count(beats[], String("RUNNING|")), 2, "the first two beats only")
     assert_equal(beats[][len(beats[]) - 1], String("COMPLETED|"))
     print("  test_a_job_that_ends_between_beats_is_noticed_within_seconds: PASS")
@@ -100,7 +103,9 @@ def test_a_stop_signal_between_beats_ends_the_run_at_once() raises:
     )
     var took_s = Int((now_ns() - t0) // _SEC)
     assert_true(phase == JobSupervisorPhase.cancelled(), "CANCELLED")
-    assert_true(took_s < 15, "stopped long before the 30 s beat: " + String(took_s))
+    assert_true(
+        took_s <= 5, "stopped within a second of the 1 s signal: " + String(took_s)
+    )
     var last = beats[][len(beats[]) - 1]
     assert_equal(
         last, String("CANCELLED|the supervisor received SIGTERM; the job was stopped")

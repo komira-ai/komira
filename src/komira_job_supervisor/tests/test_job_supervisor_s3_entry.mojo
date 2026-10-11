@@ -5,9 +5,11 @@
 # =============================================================================
 #
 #   test_the_s3_entry_point_runs_without_stores
-#       `run_job_supervisor_on_s3` with no bucket flag over each transport
-#       (no endpoint: TLS; an http:// endpoint: plain TCP) runs the job to
-#       COMPLETED; nothing is fetched or written.
+#       `run_job_supervisor_on_s3` with no bucket flag, through each
+#       transport arm (no endpoint: TLS; an http:// endpoint: plain TCP),
+#       runs the job to COMPLETED; nothing is fetched, written or dialled.
+#       Which transport an endpoint gets is read from the wire in
+#       test_s3_transport_first_byte.
 #   test_the_s3_entry_point_builds_the_stores_it_is_given
 #       A binary bucket with no --binary-key and an unreachable log bucket:
 #       the stores are built (the credential chain's environment arm), the

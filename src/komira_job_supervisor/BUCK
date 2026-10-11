@@ -94,6 +94,7 @@ mojo_library(
         "tests/test_job_supervisor_s3_entry.mojo",
         "tests/test_heartbeat_delivery_edges.mojo",
         "tests/test_entrypoint_and_boot_edges.mojo",
+        "tests/test_s3_transport_first_byte.mojo",
     ],
     test_env = {
         "KOMIRA_JOB_SUPERVISOR_TEST_CREDENTIAL": "tok-env-0123456789",

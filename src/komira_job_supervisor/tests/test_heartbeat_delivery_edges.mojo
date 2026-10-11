@@ -25,8 +25,10 @@
 #       holding no credential refuses to produce headers.
 #   test_the_credential_transport_dials_only_http_and_https
 #       S3CredentialTransport refuses any scheme but http and https, naming
-#       it; an http and an https request each go to their transport (a closed
-#       loopback port: the error is the dial's, not the scheme refusal).
+#       it; an http and an https request are each dialled (a closed loopback
+#       port: the error is the dial's, not the scheme refusal). Which
+#       transport each takes is read from the wire in
+#       test_s3_transport_first_byte.
 # =============================================================================
 
 from std.ffi import external_call

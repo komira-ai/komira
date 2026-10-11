@@ -27,15 +27,20 @@
 #       line appear; stderr lines are comma-separated; no exit_code when the
 #       job did not exit.
 #   test_a_slow_write_cannot_buy_the_job_another_beat
-#       The stream timer's write stalls 2 s, carrying the loop past a 3 s
+#       The stream timer's write stalls 3 s, carrying the loop past a 3 s
 #       maximum runtime: the limit check at the top of the next iteration
-#       stops the job before any further RUNNING beat.
+#       stops the job before any further RUNNING beat. Read from each beat's
+#       time, not a beat count: every RUNNING beat is sent less than 3 s after
+#       the first beat after the spawn (the spawn precedes it, so this holds
+#       however a loaded host shifts the schedule), where a loop that beat
+#       once more after the stall would beat about 5 s after it.
 # =============================================================================
 
 from std.ffi import external_call
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 
+from komira_clock import now_ns
 from komira_objectstore import SharedInMemoryConditionalStore
 from komira_objectstore.path import Path
 from komira_objectstore.store import ConditionalWriteStore, ObjectStore
@@ -278,14 +283,35 @@ struct Recorder(HeartbeatReporter):
         return HeartbeatOutcome(True, False, 200)
 
 
+struct TimedRecorder(HeartbeatReporter):
+    """A Recorder that also keeps each beat's monotonic time."""
+
+    var beats: ArcPointer[List[String]]
+    var at_ns: ArcPointer[List[UInt64]]
+
+    def __init__(
+        out self, beats: ArcPointer[List[String]], at_ns: ArcPointer[List[UInt64]]
+    ):
+        self.beats = beats
+        self.at_ns = at_ns
+
+    def report(mut self, hb: SupervisorHeartbeat) -> HeartbeatOutcome:
+        var line = String(hb.phase.wire_str()) + String("|")
+        if hb.message:
+            line += hb.message.value()
+        self.beats[].append(line^)
+        self.at_ns[].append(now_ns())
+        return HeartbeatOutcome(True, False, 200)
+
+
 def test_a_slow_write_cannot_buy_the_job_another_beat() raises:
     # Interval 1 s, flush interval 2 s, limit 3 s; the job prints "x" at once.
     # Beats: RUNNING before the spawn, RUNNING at t~0 and t~1.
     # t~1: "x" is buffered; the stream is 1 s old, so the timer writes nothing.
     # t~2: the inner limit check passes (2 s < 3 s); the timer writes the
-    #      chunk and the write stalls 2 s.
-    # t~4: the next iteration's limit check stops the job before its RUNNING
-    #      beat: three RUNNING beats, then FAILED.
+    #      chunk and the write stalls 3 s.
+    # t~5: the next iteration's limit check stops the job before its RUNNING
+    #      beat, then FAILED. A loop without that check beats RUNNING at t~5.
     var argv = List[String]()
     argv.append(String("-c"))
     argv.append(String("printf x; exec sleep 30"))
@@ -303,17 +329,25 @@ def test_a_slow_write_cannot_buy_the_job_another_beat() raises:
     )
     var inner = SharedInMemoryConditionalStore()
     var view = inner.clone()
-    var slow = FaultyStore(inner^, ArcPointer[Knobs](Knobs(0, 2000)))
+    var slow = FaultyStore(inner^, ArcPointer[Knobs](Knobs(0, 3000)))
     var beats = ArcPointer[List[String]](List[String]())
-    var phase = run_job_supervisor[Recorder, FaultyStore](
-        config^, Recorder(beats), None, Optional[FaultyStore](slow^)
+    var at_ns = ArcPointer[List[UInt64]](List[UInt64]())
+    var phase = run_job_supervisor[TimedRecorder, FaultyStore](
+        config^, TimedRecorder(beats, at_ns), None, Optional[FaultyStore](slow^)
     )
     assert_true(phase == JobSupervisorPhase.failed(), "the limit stopped it")
-    var running = 0
-    for i in range(len(beats[])):
+    # Beat 0 is sent before the spawn, beat 1 after it.
+    assert_true(len(beats[]) >= 3, "two RUNNING beats and the terminal one")
+    assert_true(beats[][1].startswith(String("RUNNING|")), beats[][1])
+    var after_spawn = at_ns[][1]
+    for i in range(1, len(beats[])):
         if beats[][i].startswith(String("RUNNING|")):
-            running += 1
-    assert_equal(running, 3, "no RUNNING beat after the limit passed")
+            var ms = Int((at_ns[][i] - after_spawn) // 1_000_000)
+            assert_true(
+                ms < 3000,
+                "a RUNNING beat " + String(ms) + " ms after the spawn's beat,"
+                " past the 3 s limit",
+            )
     var last = beats[][len(beats[]) - 1]
     assert_true(last.startswith(String("FAILED|max runtime of 3 s exceeded")), last)
     assert_equal(_text_at(view, String("logs/slow/chunks/0.log")), String("x"))
