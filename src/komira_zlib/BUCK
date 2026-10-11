@@ -25,6 +25,9 @@ mojo_library(
             "golden/zlib-1.3.1.tar.gz": "//third_party/zlib:zlib-1.3.1.tar.gz",
         },
     },
+    # Opened at run time (OwnedDLHandle): the conda package requires the
+    # conda-forge package tools/build/package/system_libs.bzl names for it.
+    dlopen = ["libz.so.1"],
     test_srcs = ["tests/test_zlib_into.mojo"],
     visibility = ["PUBLIC"],
 )

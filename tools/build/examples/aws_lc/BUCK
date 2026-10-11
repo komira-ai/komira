@@ -1,4 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+load("@komira//tools/build/mojo:opt_level.bzl", "mojo_opt_level_check")
 
 # aws-lc's libcrypto called from Mojo: its own self tests, then SHA-256,
 # AES-128 and ChaCha20 known-answer vectors. Building `[run_check]` runs it
@@ -10,4 +11,14 @@ mojo_binary(
     # A test program, not shipped: tests compile at -O1.
     optimization_level = "1",
     expected_stdout = "BORINGSSL_self_test: ok\nSHA-256: ok\nAES-128: ok\nChaCha20: ok\n",
+)
+
+# test_aws_lc overrides the binary default: its compiles are at -O1 (read at
+# analysis from its `mojo build` command line, mojo/opt_level.bzl).
+mojo_opt_level_check(
+    name = "opt_levels",
+    rows = [
+        (":test_aws_lc", "mojo_build", "1"),
+        (":test_aws_lc", "mojo_build_shared", "1"),
+    ],
 )
