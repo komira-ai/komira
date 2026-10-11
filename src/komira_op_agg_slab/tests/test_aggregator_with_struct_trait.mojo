@@ -14,6 +14,9 @@
 #     finalized stddev matches the closed-form reference to 1e-9. Catches a
 #     MISS that drops or zeroes the donor's state, and a HIT that keeps only
 #     one side.
+#   T8: `finalize_aggregator_with_struct` given an output span shorter than
+#     num_groups * 8 bytes raises and writes nothing; without the length
+#     check it would write the second group's result past the span's end.
 # =============================================================================
 
 from std.collections import Array
@@ -440,6 +443,46 @@ def test_T7_combine_donor_keys_with_struct_single_pass() raises:
 
 
 # -----------------------------------------------------------------------------
+# T8 - a short output span is refused
+# -----------------------------------------------------------------------------
+
+
+def test_T8_finalize_short_output_span_raises() raises:
+    """Two groups need 16 output bytes. The span covers only the first 8
+    bytes of a 16-byte buffer filled with 0xAB, so a missing length check
+    shows up as a call that does not raise and overwrites the bytes past
+    the span (still inside the buffer, so the test itself stays in
+    bounds)."""
+    var strides = List[Int]()
+    strides.append(StddevSampAggregator.STATE_BYTES)
+    var storage = SlabStorage(
+        num_keys=1,
+        num_aggs=1,
+        initial_capacity=64,
+        agg_state_strides_in=Optional[List[Int]](strides^),
+    )
+    var keys = List[Int64]()
+    var vals = List[Float64]()
+    for i in range(4):
+        keys.append(Int64(1 + i % 2))
+        vals.append(Float64(i))
+    _commit_chunk[StddevSampAggregator](storage, keys, vals)
+    assert_equal(storage.num_groups(), 2)
+
+    var buf = List[UInt8](length=16, fill=0xAB)
+    var raised = False
+    try:
+        storage.finalize_aggregator_with_struct[0, StddevSampAggregator](
+            Span(buf)[0:8]
+        )
+    except:
+        raised = True
+    assert_true(raised, "an 8-byte output span for two groups must raise")
+    for i in range(16):
+        assert_equal(buf[i], UInt8(0xAB), "no byte may be written")
+
+
+# -----------------------------------------------------------------------------
 # Test runner
 # -----------------------------------------------------------------------------
 
@@ -455,4 +498,5 @@ def main() raises:
     suite.test[test_T4b_finalize_count_zero_returns_nan]()
     suite.test[test_T4c_finalize_count_one_returns_nan]()
     suite.test[test_T7_combine_donor_keys_with_struct_single_pass]()
+    suite.test[test_T8_finalize_short_output_span_raises]()
     suite^.run()

@@ -34,6 +34,7 @@
 from std.collections import Array
 from std.collections.optional import Optional
 from std.memory import UnsafePointer
+from std.sys import size_of
 
 from komira_collections.slab import Slab
 from komira_counters.keyeq_census import (
@@ -491,10 +492,14 @@ struct SlabStorage(Movable, Deinitable):
     ](mut self, out_buf: Span[UInt8, o]) raises:
         """Write `Agg.finalize(state)` of every group, in entry-id order,
         into `out_buf` as `Scalar[Agg.OutputDType]`s. `out_buf` must hold
-        `num_groups() * size_of[Scalar[Agg.OutputDType]]()` bytes."""
+        `num_groups() * size_of[Scalar[Agg.OutputDType]]()` bytes; a
+        shorter span raises before anything is written."""
         var n_groups = self._num_groups
         if n_groups == 0:
             return
+        _check_key_len(
+            out_buf, n_groups * size_of[Scalar[Agg.OutputDType]](), exact=False
+        )
         var out_ptr = out_buf.unsafe_ptr().bitcast[
             Scalar[Agg.OutputDType]
         ]()
