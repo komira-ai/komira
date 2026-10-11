@@ -1,12 +1,11 @@
-# The linters run by the lint rules (defs.bzl), as pinned downloads, the
-# lint action script, and the Zig lint tools. linux x86_64 static binaries.
+# The linters run by the lint rules (defs.bzl), as pinned downloads, and the
+# Zig lint tools: pointer_lint here, and in tool/ the lint action every other
+# lint rule runs. linux x86_64 static binaries.
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
 load(":defs.bzl", "shell_lint", "tar_member")
-
-export_file(name = "lint.sh", visibility = ["PUBLIC"])
 
 export_file(name = "readme_api_coverage.sh", visibility = ["PUBLIC"])
 
@@ -14,8 +13,7 @@ export_file(name = "surface_capability_matrix.sh", visibility = ["PUBLIC"])
 
 export_file(name = "test_weld.sh", visibility = ["PUBLIC"])
 
-
-# The reader of lint kind public_boundary (lint.sh; the rule is public_boundary in defs.bzl).
+# The reader of lint kind public_boundary (tool/src/readers.zig; the rule is public_boundary in defs.bzl).
 export_file(name = "public_boundary.awk", visibility = ["PUBLIC"])
 
 pinned_file(**pinned_kwargs("linux-x86_64", "shellcheck"))
@@ -39,7 +37,7 @@ tar_member(
 # The lint actions' own scripts.
 shell_lint(
     name = "shell_lint",
-    srcs = ["lint.sh", "readme_api_coverage.sh", "surface_capability_matrix.sh", "test_weld.sh"],
+    srcs = ["readme_api_coverage.sh", "surface_capability_matrix.sh", "test_weld.sh"],
     visibility = ["PUBLIC"],
 )
 

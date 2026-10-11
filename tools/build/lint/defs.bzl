@@ -12,10 +12,13 @@ target builds while a script the rules run has a finding.
 A validation is not an input of the targets it guards: adding or fixing a
 lint changes no other action's digest.
 
-The lint action is lint.sh, under the pinned busybox; the linters are pinned
-downloads (tools/build/lint/BUCK). pointer_lint's action is a Zig tool built
-there (pointer_lint.zig). Each rule's default output is the validation
-result, a JSON file whose message holds the findings.
+The lint action is the Zig tool //tools/build/lint/tool:lint (its
+src/main.zig says each kind), run with no shell; the linters are pinned
+downloads (tools/build/lint/BUCK), and public_boundary's text reader
+(public_boundary.awk) runs under the pinned busybox's awk. pointer_lint's
+action is a Zig tool of its own, built there (pointer_lint.zig). Each rule's
+default output is the validation result, a JSON file whose message holds the
+findings.
 """
 
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
@@ -23,7 +26,7 @@ load(":doc_tree.bzl", "DocTreeInfo", "collect_docs", "declares_docs")
 
 _COMMON = {
     "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
-    "_script": attrs.source(default = "komira//tools/build/lint:lint.sh"),
+    "_lint": attrs.exec_dep(default = "komira//tools/build/lint/tool:lint", providers = [RunInfo]),
 }
 
 def _stage(ctx, files):
@@ -44,7 +47,7 @@ def _lint(ctx, kind, tools, args, staged):
     bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     package = ctx.label.package + "/" if ctx.label.package else ""
     ctx.actions.run(
-        cmd_args(bb, "sh", ctx.attrs._script, bb, result.as_output(), kind, staged, "{}//{}".format(ctx.label.cell, package), tools, "--", args),
+        cmd_args(ctx.attrs._lint[RunInfo], bb, result.as_output(), kind, staged, "{}//{}".format(ctx.label.cell, package), tools, "--", args),
         category = "lint_" + kind,
     )
     return _validation(kind, result)
@@ -224,7 +227,7 @@ def _public_boundary_impl(ctx):
 
 public_boundary_rule = rule(
     impl = _public_boundary_impl,
-    doc = "What a public repository may not hold, over every file of `tree` (a doc_tree target: the root one holds every file of the cell) or, for a fixture, of `files` ({path in the tree: source}), never both, plus `srcs` (the dotfiles a glob skips), the doc_tree of each other cell in `cells` (at its path), and `paths` ({path in the tree: source}, a file another cell exports, such as its dotfiles): no date from the year `window_from` up to `public_from` (the first day of the public history, YYYY-MM-01), home directory naming a person, private or written-out network address, URL host outside the reserved example names and the domains of `hosts`, email address outside the reserved example domains, or commit id in prose; binary data is not read (its path is), and the path of every file is read for dates, home directories and deny-list words. `holds` holds the findings a file must keep, per rule and file at an exact count, and only shrinks. `deny`, absent by default, is a list of words kept outside the repository (a private consumer's), one per line: a finding no row can hold. lint.sh (kind public_boundary) says the formats; public_boundary.awk, the reader, says what each rule matches.",
+    doc = "What a public repository may not hold, over every file of `tree` (a doc_tree target: the root one holds every file of the cell) or, for a fixture, of `files` ({path in the tree: source}), never both, plus `srcs` (the dotfiles a glob skips), the doc_tree of each other cell in `cells` (at its path), and `paths` ({path in the tree: source}, a file another cell exports, such as its dotfiles): no date from the year `window_from` up to `public_from` (the first day of the public history, YYYY-MM-01), home directory naming a person, private or written-out network address, URL host outside the reserved example names and the domains of `hosts`, email address outside the reserved example domains, or commit id in prose; binary data is not read (its path is), and the path of every file is read for dates, home directories and deny-list words. `holds` holds the findings a file must keep, per rule and file at an exact count, and only shrinks. `deny`, absent by default, is a list of words kept outside the repository (a private consumer's), one per line: a finding no row can hold. The lint tool (tool/src/readers.zig, kind public_boundary) says the formats; public_boundary.awk, the reader, says what each rule matches.",
     attrs = _COMMON | {
         "cells": attrs.dict(attrs.string(), attrs.dep(providers = [DocTreeInfo]), default = {}),
         "deny": attrs.option(attrs.source(), default = None),
@@ -309,7 +312,7 @@ def _linux(kwargs):
     kwargs.setdefault("exec_compatible_with", LINUX_X86_64)
     return kwargs
 
-# Every lint runs linux x86_64 tools (busybox, shellcheck): it reads a few files.
+# Every lint runs linux x86_64 tools (the lint tool, busybox, shellcheck): it reads a few files.
 def shell_lint(**kwargs):
     shell_lint_rule(**_linux(kwargs))
 

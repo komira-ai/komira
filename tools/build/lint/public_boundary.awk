@@ -1,4 +1,4 @@
-# public_boundary.awk -- the reader behind lint kind "public_boundary" (lint.sh).
+# public_boundary.awk -- the reader behind lint kind "public_boundary" (tool/src/readers.zig).
 #
 # usage: busybox awk -F '\t' -v HN=<holds name> -v AN=<hosts name> -v P=<prefix>
 #            -v FROM=<year> -v PUBLIC=<YYYY-MM-01>
@@ -128,7 +128,7 @@
 # - "Only shrinks" is held by exact counts: a site more or one fewer fails.
 #   A row added or a count raised in the same change as the site passes the
 #   build, so review of the ledger's diff is the other half of the rule.
-# - Binary data is skipped by suffix (lint.sh says which); its path is read.
+# - Binary data is skipped by suffix (tool/src/readers.zig says which); its path is read.
 
 # A regular expression with a `/` or a backslash in a bracket expression is a
 # string, so no awk reads the escape its own way; a backslash or `]` is found

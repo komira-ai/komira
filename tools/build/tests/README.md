@@ -936,7 +936,7 @@ path is; nothing committed is upstream bytes, so `third_party/` is read whole.
 Its reader is
 [`public_boundary.awk`](../lint/public_boundary.awk), which says what each rule
 matches and what it cannot see (vocabulary is no shape); its action is
-[`lint.sh`](../lint/lint.sh) (kind `public_boundary`). The findings a file must
+the lint tool ([`readers.zig`](../lint/tool/src/readers.zig), kind `public_boundary`). The findings a file must
 keep are held per rule and file at an exact count in
 [`tests/public_boundary_holds.tsv`](../../../tests/public_boundary_holds.tsv),
 which only shrinks, and every row of the hosts list must be used. A
