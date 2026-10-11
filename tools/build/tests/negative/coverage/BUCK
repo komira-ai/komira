@@ -871,6 +871,7 @@ _TOOL_SRCS = [
     "bounded_run",
     "cov_branch_annotate",
     "cov_branch_annotate_fixture",
+    "cov_branch_annotate_order_test",
     "cov_branch_annotate_test",
     "cov_branch_run",
     "cov_branch_run_test",
