@@ -801,128 +801,113 @@ mojo_library(
     test_srcs = ["tests/test_profile_env.mojo"],
 )
 
-# Copies of cov_branch's `run` (cov_branch_run.zig), each with one planted
-# defect (name, cov_plant's sed expression): the copy is :<name>_run_zig,
-# the tool's sources with it in place of the original :<name>_run_src, the
-# tool built from them (without its unit tests, which the defect would
-# fail) :<name>_cov_branch, its directory :<name>_branch, and the library
-# below of the same name runs tests/test_one.mojo's branch coverage through it.
-_RUN_PLANTS = [
+# The annotation's bitcode replaced, before it reads it, by that bitcode
+# with the profile applied (lld's emit-llvm): a sed expression over
+# cov_branch_annotate.zig.
+_WEIGHTS_FIRST = "s|const bc = try run_cmd.abs(alloc, where.cwd, a.bitcode);|const bc = blk: { const bc0 = try run_cmd.abs(alloc, where.cwd, a.bitcode); const w = try std.fmt.allocPrint(alloc, \"{s}/w.bc\", .{k}); _ = try step(runner, alloc, .{ .argv = \\&.{ lld, \"-flavor\", \"gnu\", \"-r\", \"-m\", \"elf_x86_64\", bc0, \"-o\", w, \"--lto-O0\", \"--plugin-opt=emit-llvm\", \"--lto-newpm-passes=pgo-instr-use\", \"-mllvm\", try std.fmt.allocPrint(alloc, \"-pgo-test-profile-file={s}\", .{prof}) }, .env = env }); break :blk w; };|"
+
+# Copies of the cov_branch tool, each with one planted defect in one of its
+# subcommands (name, the subcommand's source cov_branch_<file>.zig, cov_plant's
+# sed expression): the copy is :<name>_<file>_zig, the tool's sources with it
+# in place of the original :<name>_src, the tool built from them (without its
+# unit tests, which the defect would fail) :<name>_cov_branch, its directory
+# :<name>_branch, and the library below of the same name runs
+# tests/test_one.mojo's branch coverage through it.
+_TOOL_PLANTS = [
     # A run that gives the test LLVM_PROFILE_FILE_OFF in place of
     # LLVM_PROFILE_FILE: the profile runtime writes its default
     # (default.profraw in the test's working directory), or nothing, and never
     # where the run reads. RED:
     # tests//negative/coverage:branchnoprof[coverage][branch][test_one], "wrote
     # no .profraw".
-    ("branchnoprof", "s|\"LLVM_PROFILE_FILE={s}/prof/|\"LLVM_PROFILE_FILE_OFF={s}/prof/|"),
+    ("branchnoprof", "run", "s|\"LLVM_PROFILE_FILE={s}/prof/|\"LLVM_PROFILE_FILE_OFF={s}/prof/|"),
     # A run that reads each raw profile's version as 12, not 11 (the low byte
     # of the version field, byte 8, raised), as a runtime and instrumenter of
     # another LLVM would write it. RED:
     # tests//negative/coverage:branchversion[coverage][branch][test_one], "has
     # raw profile version 12, not 11".
-    ("branchversion", "s|const head = readHead(alloc, f) catch \"\";|var hb = [_]u8{0} ** 16; const h0 = readHead(alloc, f) catch \"\"; const hn = @min(h0.len, 16); @memcpy(hb[0..hn], h0[0..hn]); hb[8] = 12; const head = hb[0..hn];|"),
+    ("branchversion", "run", "s|const head = readHead(alloc, f) catch \"\";|var hb = [_]u8{0} ** 16; const h0 = readHead(alloc, f) catch \"\"; const hn = @min(h0.len, 16); @memcpy(hb[0..hn], h0[0..hn]); hb[8] = 12; const head = hb[0..hn];|"),
     # A run whose merge leaves out the test's `main`: the profile holds no
     # record of a function the instrumented binary links (a run writes one
     # for each, ran or not), as a profile of another binary would not, and
     # applying it would read that function as never run. RED:
     # tests//negative/coverage:branchmissing[coverage][branch_ir][test_one],
     # "a run writes the record of every function its binary links".
-    ("branchmissing", "s|\"merge\", \"-o\", out|\"merge\", \"--no-function=main\", \"-o\", out|"),
-]
-
-_BRANCH_SRC = "komira//tools/build/coverage/branch:"
-
-[
-    (
-        cov_plant(
-            name = "{}_run_zig".format(name),
-            expr = expr,
-            out = "cov_branch_run.zig",
-            src = _BRANCH_SRC + "cov_branch_run.zig",
-        ),
-        cov_zig_tree(
-            name = "{}_run_src".format(name),
-            files = {
-                "bounded_run.zig": _BRANCH_SRC + "bounded_run.zig",
-                "cov_branch.zig": _BRANCH_SRC + "cov_branch.zig",
-                "cov_branch_run.zig": ":{}_run_zig".format(name),
-                "cov_branch_run_test.zig": _BRANCH_SRC + "cov_branch_run_test.zig",
-            },
-        ),
-        zig_exe(
-            name = "{}_cov_branch".format(name),
-            exec_compatible_with = LINUX_X86_64,
-            imports = [":{}_run_src[{}]".format(name, f) for f in ("bounded_run", "cov_branch_run", "cov_branch_run_test")],
-            src = ":{}_run_src[cov_branch]".format(name),
-            busybox = "komira//tools/build/toolchains:busybox",
-            zig = "komira//tools/build/toolchains:zig",
-        ),
-        cov_branch_dir(
-            name = "{}_branch".format(name),
-            exec_compatible_with = LINUX_X86_64,
-            run_tool = ":{}_cov_branch".format(name),
-        ),
-    )
-    for name, expr in _RUN_PLANTS
-]
-
-# Copies of the branch coverage scripts, each with one planted defect
-# (name, the script it copies, cov_plant's sed expression): the copy is
-# :<name>_<script>_sh, its directory :<name>_branch, and the library below
-# of the same name runs tests/test_one.mojo's branch coverage through it.
-_BRANCH_PLANTS = [
-    # A cov_branch_annotate.sh copy that runs `simplifycfg` before applying the
-    # profile: the control flow the profile is applied to is no longer the one
-    # that was instrumented, as with a profile of other bitcode, and LLVM drops
-    # those functions' counts with a warning. RED:
+    ("branchmissing", "run", "s|\"merge\", \"-o\", out|\"merge\", \"--no-function=main\", \"-o\", out|"),
+    # An annotation that runs `simplifycfg` before applying the profile: the
+    # control flow the profile is applied to is no longer the one that was
+    # instrumented, as with a profile of other bitcode, and LLVM drops those
+    # functions' counts with a warning. RED:
     # tests//negative/coverage:branchannotate[coverage][branch_ir][test_one],
     # "diagnostic(s) applying the profile".
     ("branchannotate", "annotate", "s|\"--lto-newpm-passes=pgo-instr-use\"|\"--lto-newpm-passes=function(simplifycfg),pgo-instr-use\"|"),
-    # A cov_branch_annotate.sh copy that internalizes the bitcode before applying
-    # the profile: `main` becomes a local function, whose profile name is not
-    # the one the binary's run wrote, so the bitcode the profile is applied to
-    # is not the one the binary was made from (as other bitcode would be), and
+    # An annotation that internalizes the bitcode before applying the
+    # profile: `main` becomes a local function, whose profile name is not the
+    # one the binary's run wrote, so the bitcode the profile is applied to is
+    # not the one the binary was made from (as other bitcode would be), and
     # LLVM finds one function of the profile fewer in it. RED:
     # tests//negative/coverage:branchinternal[coverage][branch_ir][test_one],
     # "the binary that wrote it was not made from this bitcode".
     ("branchinternal", "annotate", "s|\"--lto-newpm-passes=pgo-instr-use\"|\"--lto-newpm-passes=internalize,pgo-instr-use\"|"),
-    # A cov_branch_annotate.sh copy whose section-name pipeline carries about
-    # 1 MB more after each name: the reader that cuts the name must read all of
-    # it, or its writer dies of SIGPIPE (exit 141 under pipefail; a race at 16
-    # bytes, as seen in remote runs with `head -n 1`, certain here). GREEN:
-    # tests//negative/coverage:branchwide[coverage][branch_ir][test_one].
-    ("branchwide", "annotate", "s#count=16 2>/dev/null |#count=16 2>/dev/null | { cat; awk 'BEGIN { while (n++ < 40000) print \"padding padding padding\" }'; } |#"),
     # The branchweights copy with its branch-weights check reading for a string
     # no bitcode holds: the bitcode the annotation reads holds entry counts
     # (`function_entry_count`) before the profile is applied, which the
     # entry-count check would count as functions found in the profile. RED:
     # tests//negative/coverage:branchentry[coverage][branch_ir][test_one],
     # "already holds function entry counts".
-    ("branchentry", "annotate", "s|^# 0\\. No branch weights before.*$|\"$LLD\" -flavor gnu -r -m elf_x86_64 \"$BC\" -o \"$K/w.bc\" --lto-O0 --plugin-opt=emit-llvm --lto-newpm-passes=pgo-instr-use -mllvm \"-pgo-test-profile-file=$PROF\" \\&\\& BC=\"$K/w.bc\"|; s|grep -q -F branch_weights \"$BC\"|grep -q -F branch_weights_unread \"$BC\"|"),
-    # A cov_branch_annotate.sh copy that first applies the profile and writes
-    # the module back as bitcode (lld's emit-llvm), then reads that: a bitcode
-    # that holds branch weights before the profile is applied, which
-    # pgo-instr-use would keep on the branches that never ran. RED:
+    ("branchentry", "annotate", _WEIGHTS_FIRST + "; s|WEIGHTS = \"branch_weights\"|WEIGHTS = \"branch_weights_unread\"|"),
+    # An annotation that first applies the profile and writes the module back
+    # as bitcode (lld's emit-llvm), then reads that: a bitcode that holds
+    # branch weights before the profile is applied, which pgo-instr-use would
+    # keep on the branches that never ran. RED:
     # tests//negative/coverage:branchweights[coverage][branch_ir][test_one],
     # "already holds branch weights".
-    ("branchweights", "annotate", "s|^# 0\\. No branch weights before.*$|\"$LLD\" -flavor gnu -r -m elf_x86_64 \"$BC\" -o \"$K/w.bc\" --lto-O0 --plugin-opt=emit-llvm --lto-newpm-passes=pgo-instr-use -mllvm \"-pgo-test-profile-file=$PROF\" \\&\\& BC=\"$K/w.bc\"|"),
+    ("branchweights", "annotate", _WEIGHTS_FIRST),
+]
+
+_BRANCH_SRC = "komira//tools/build/coverage/branch:"
+
+# The tool's sources, by the stem zig_exe's `src` and `imports` name.
+_TOOL_SRCS = [
+    "bounded_run",
+    "cov_branch_annotate",
+    "cov_branch_annotate_fixture",
+    "cov_branch_annotate_order_test",
+    "cov_branch_annotate_test",
+    "cov_branch_run",
+    "cov_branch_run_test",
 ]
 
 [
     (
         cov_plant(
-            name = "{}_{}_sh".format(name, script),
+            name = "{}_{}_zig".format(name, sub),
             expr = expr,
-            out = "cov_branch_{}.sh".format(script),
-            src = "komira//tools/build/coverage/branch:cov_branch_{}.sh".format(script),
+            out = "cov_branch_{}.zig".format(sub),
+            src = _BRANCH_SRC + "cov_branch_{}.zig".format(sub),
+        ),
+        cov_zig_tree(
+            name = "{}_src".format(name),
+            files = {
+                f + ".zig": (":{}_{}_zig".format(name, sub) if f == "cov_branch_" + sub else _BRANCH_SRC + f + ".zig")
+                for f in ["cov_branch"] + _TOOL_SRCS
+            },
+        ),
+        zig_exe(
+            name = "{}_cov_branch".format(name),
+            exec_compatible_with = LINUX_X86_64,
+            imports = [":{}_src[{}]".format(name, f) for f in _TOOL_SRCS],
+            src = ":{}_src[cov_branch]".format(name),
+            busybox = "komira//tools/build/toolchains:busybox",
+            zig = "komira//tools/build/toolchains:zig",
         ),
         cov_branch_dir(
             name = "{}_branch".format(name),
             exec_compatible_with = LINUX_X86_64,
-            **{script + "_script": ":{}_{}_sh".format(name, script)}
+            tool = ":{}_cov_branch".format(name),
         ),
     )
-    for name, script, expr in _BRANCH_PLANTS
+    for name, sub, expr in _TOOL_PLANTS
 ]
 
 [
@@ -938,7 +923,7 @@ _BRANCH_PLANTS = [
         import_name = "noop",
         test_srcs = ["tests/test_one.mojo"],
     )
-    for name in [n for n, _expr in _RUN_PLANTS] + [n for n, _script, _expr in _BRANCH_PLANTS]
+    for name, _sub, _expr in _TOOL_PLANTS
 ]
 
 # A helper declared @always_inline("nodebug"): its `while` carries the
@@ -1098,8 +1083,7 @@ mojo_library(
 # twins of the enforce fixtures and the enforce gates every arm of whose
 # decisions is taken; the census check over what census.sh renders; the
 # release gates of the mojo_test coverage fixture; and the release gates of
-# the branch-run fixtures, with branchwide's annotation (1 MB through the
-# section-name pipeline, read whole).
+# the branch-run fixtures.
 target_suite(
     name = "greens",
     targets = [
@@ -1133,8 +1117,6 @@ target_suite(
         ":branchmissing",
         ":branchweights",
         ":branchinternal",
-        ":branchwide",
-        ":branchwide[coverage][branch_ir][test_one]",
         ":branchentry",
         ":branchnodebug",
     ],

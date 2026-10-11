@@ -3,7 +3,7 @@
 # `cov_branch_classify_cases` target (kcov/defs.bzl, kcov_tool_cases):
 #   sh cov_branch_classify_cases.sh <busybox> <result.json> <cov_branch_classify> <dir>
 # <dir> holds fixtures/case.ll, fixtures/rules.ll and fixtures/try.ll,
-# annotated IR made by hand in the form cov_branch_annotate.sh writes it
+# annotated IR made by hand in the form `cov_branch annotate` writes it
 # (made-up paths and counts; rules.ll holds the shapes of README.md's String
 # lifetime, raising call, loop head and short-circuit rules, each excerpted
 # from a library's IR; try.ll those of a `try:` body), their outputs

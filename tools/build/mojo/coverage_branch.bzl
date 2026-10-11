@@ -18,7 +18,7 @@ linux-x86_64), per `test_srcs` entry that is a source file:
   `cov/branch/<test>.profdata`;
 - `[coverage][branch_ir][<test>]` (category `mojo_cov_branch_annotate`): the
   bitcode with that profile applied by Mojo's lld, as IR text whose branches
-  carry their counts (cov_branch_annotate.sh, which also reads the binary:
+  carry their counts (`cov_branch annotate`, which also reads the binary:
   the profile must hold exactly the functions it links), `cov/branch/<test>.ll`;
 - `[coverage][branch_info][<test>]` (category `mojo_cov_branch_classify`):
   the branches of the library's measured sources in that IR, each a source
@@ -138,13 +138,19 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
     ir = ctx.actions.declare_output("cov/branch/{}.ll".format(stem))
     ctx.actions.run(
         cmd_args(
-            tc.busybox,
-            "sh",
-            annotate_dir.project("cov_branch_annotate.sh"),
-            tc.busybox,
+            annotate_dir.project("cov_branch"),
+            "annotate",
+            "--lld",
+            annotate_dir.project("lld/bin/lld"),
+            "--profdata",
+            annotate_dir.project("llvm/bin/llvm-profdata"),
+            "--bitcode",
             bc,
+            "--profile",
             profdata,
+            "--binary",
             exe,
+            "--out",
             ir.as_output(),
             hidden = annotate_dir,
         ),

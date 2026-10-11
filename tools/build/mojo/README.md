@@ -15,7 +15,7 @@ the compiler sees. Worked uses of each rule are in
 | rule | produces | example |
 |---|---|---|
 | `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level, readme)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run, and so are the ```` ```mojo ```` examples of the package's `README.md` (see [README examples](#readme-examples)); the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
-| `mojo_binary(srcs, deps, main, optimization_level, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
+| `mojo_binary(srcs, deps, main, optimization_level, expected_stdout, helpers)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries and its `helpers` (programs it runs, beside it: [helpers.bzl](helpers.bzl)). `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
 | `mojo_test(srcs, deps, main, optimization_level, data, env, args, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
 | `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
 | `mojo_doc_json(lib, golden, symbols)` ([`doc.bzl`](doc.bzl)) | `<name>.json`: the `mojo doc` JSON of the `mojo_library` `lib`, optionally checked against a golden file and for named declarations (see [API JSON](doc.md)). | [`hellopkg_doc`](../examples/BUCK) |
@@ -68,6 +68,13 @@ mojo_library(
   refused; one that depends on the library is a cycle buck2 refuses
   ([`tests//functional/test_deps`](../tests/functional/test_deps/BUCK),
   [`tests//negative/test_deps`](../tests/negative/test_deps/BUCK)).
+- **`dlopen`** (optional) lists the sonames the library opens at run time
+  (`OwnedDLHandle`), each a row of
+  [`system_libs.bzl`](../package/system_libs.bzl) ([`dlopen.bzl`](dlopen.bzl)).
+  Only its conda package reads it: the package requires each row's
+  conda-forge package, and the packer refuses it unless the sources open
+  exactly those sonames
+  ([Conda packages](../../../packaging/conda/README.md#a-library-that-opens-a-shared-library-at-run-time)).
 
 Output layout of a library `L` with import name `I`:
 
@@ -83,40 +90,62 @@ L/tests/readme/...  the README's generated program, binary and marker
 
 A library whose package holds a `README.md` runs the README's examples as one
 more welded test, `[tests][readme]`, so the documentation cannot rot. Nothing
-declares it: the README is declared by existing. The reader and the program
-generator are [`//tools/build/readme_examples`](../readme_examples/BUCK)
-(pure Mojo; `buildtools.doc_links` reads code through the same CommonMark
-fence reader, so the link check and the examples agree on what is code).
+declares it: the README is declared by existing. The program generator is
+the Zig tool [`//tools/build/readme_examples:tool`](../readme_examples/BUCK)
+(`generate`, and `map` for a report's lines; its unit tests are welded). It
+reads Markdown through the shared Zig module
+[`//tools/build/markdown`](../markdown/BUCK) (CommonMark fences, code spans,
+links). kci ships the same tool beside its executable (`bin/kci` `helpers`)
+and runs it on an installed README, so the programs an ENV validation runs
+are the ones `[tests][readme]` ran (`src/kci_validate`, whose test compares
+them with `[tests][readme][generated]`, made from `[tests][readme][file]`). Only
+`buildtools.doc_links` (the link check) still reads Markdown through a Mojo
+reader, the `markdown` of the package's Mojo library `readme_examples`,
+until it moves to the Zig module.
 
-- **An example** is a fenced block whose info string is exactly `mojo`
-  (```` ``` ```` or `~~~`; a closing fence is the same character, at least as
-  long, so a ```` ```` ```` fence may quote ```` ``` ````). Every example
-  runs: there is no skip word. A sketch that cannot run is fenced ```` ```text ````.
-  Any word after `mojo` (`mojo skip`) and any near miss (`Mojo`, `mojo,`,
-  `.mojo`) is refused, naming `README.md:<line>`.
-- **A fragment**, as a Rust doctest: its column-0 `from`/`import` lines are
-  hoisted (deduplicated) and so are its column-0 declarations (`def`,
-  `struct`, `trait`, `comptime`, a decorator); the rest becomes
-  `def _example_<line>() raises:`. Assertions are visible `std.testing`
-  calls. Examples share one module, so two declaring the same name collide.
+- **An example** is a fenced block whose info string is `mojo` or
+  `mojo module` (```` ``` ```` or `~~~`; a closing fence is the same
+  character, at least as long, so a ```` ```` ```` fence may quote
+  ```` ``` ````). Every example runs: there is no skip word. A sketch that
+  cannot run is fenced ```` ```text ````. Any other word after `mojo`
+  (`mojo skip`) and any near miss (`Mojo`, `mojo,`, `.mojo`) is refused,
+  naming `README.md:<line>`.
+- **One program per example**, `readme_<I>_<line>.mojo` (`<line>`: its
+  opening fence's README line), compiled and run on its own as a gated test
+  labelled `<target>:README.md:<line>`. Examples share nothing: two may
+  import the same names and declare the same ones, and a failure names one
+  example. The fence tag is the mode; nothing is inferred from the code:
+  - ```` ```mojo ````: statements. The lines are pasted as they are, each
+    indented four spaces, into `def main() raises:`. Every line is indented,
+    the continuation lines of a triple-quoted string too, so such a string's
+    content gains those four spaces. Mojo allows an import inside a
+    function, so nothing is hoisted or parsed. Assertions are visible
+    `std.testing` calls.
+  - ```` ```mojo module ````: a whole program, copied as it is, with its own
+    `def main()`. Fence an example that declares a `struct` or `trait` (or
+    anything else that must be module-level) this way.
 - **Hidden lines**: an HTML comment `<!-- mojo-hidden ... -->` ending on the
   line just before an example's fence is prepended to it, and one starting on
   the line just after is appended (one line, or `<!-- mojo-hidden`, the code,
   then `-->`). GitHub's page does not render it; every raw view, and the
-  installed copy, shows it. A `mojo-hidden` comment next to no example, or a
-  misspelled marker, is refused.
-- **The program** is `readme_<I>.mojo` (never `<I>.mojo`: a file named like the
-  package beside the program would shadow it). It runs every example inside
-  `try`, prints `<package>/README.md:<line>: FAILED: <error>` for each that
-  raises, then `readme_<I> validation: P of E checks passed`, and fails if any
-  failed. Each line copied from the README ends with `# README.md:<n>`, so a
-  compile error, which quotes the line, names the README line too.
+  installed copy, shows it. A `mojo-hidden` comment next to no example, one
+  that would attach to two (it ends just before one fence and starts just
+  after another: a blank line on one side says which), one inside another
+  HTML comment, or a misspelled marker, is refused.
+- **Lines**: line n of an example's program is README line n (the lines
+  around the copied ones are blank, but for a header comment and the
+  `def main() raises:` of a ```` ```mojo ```` example), so a compile error
+  or an assertion at `readme_<I>_<line>.mojo:<n>` names README line n. The
+  generator also writes `readme_<I>.mojo` (never `<I>.mojo`: a file named
+  like the package beside the programs would shadow it), a runner that
+  imports every example's program and runs each inside `try`, printing
+  `<package>/README.md:<line>: FAILED: <error>` for each that raises, then
+  `readme_<I> validation: P of E checks passed`: what a coverage build and
+  an installed README's validation run, in one process.
 - **No example**: whether a README holds one is in its bytes, which analysis
-  cannot read, so a dynamic action reads the count. With none, nothing is
+  cannot read, so a dynamic action reads the examples' lines. With none, nothing is
   compiled or run and the marker reads `NO EXAMPLE <label>`, never `PASS`. A
   README's examples do not count as the tests a conda package needs.
-- The tool's own package, `tools/build/readme_examples`, may hold no README:
-  the tool would depend on itself.
 - **Which library**: a BUCK file of one library says nothing. Every library
   of a BUCK file takes the directory's `README.md` unless it says otherwise,
   so a BUCK file of several libraries names the one the README is about with
@@ -133,9 +162,12 @@ fence reader, so the link check and the examples agree on what is code).
   refuses a relative link outside code, naming `README.md:<line>`: the
   installed copy has no neighbours. Link an absolute URL or an `#anchor`.
 
-Test 38 ([`tests/README.md`](../tests/README.md#38-readme-examples)) builds
-a README that uses every form, and requires a raising example, a compile
-error and a `mojo skip` fence each to fail naming its README line; it also
+Test 38 ([`tests/README.md`](../tests/README.md#38-readme-examples); its
+`run_tests.sh` case is stale until komira-ai/komira#1281 replaces it) builds
+a README that uses every form and two whose examples declare the same names,
+and requires a raising example (and no other), a compile error, a struct in
+a plain ```` ```mojo ```` example and a `mojo skip` fence each to fail
+naming its README line; it also
 builds a two-library package whose README is one library's, and requires
 the same package without `readme = False` to fail.
 
@@ -243,7 +275,12 @@ A built binary loads a few shared libraries from the toolchain
 (`komira//tools/build/toolchains:mojo_runtime`: the Mojo runtime and the pinned C++ runtime,
 about 24 MB). The runnable directory of a binary (`[runnable]`) holds the
 binary and a copy of those libraries in `lib/`, where its run path finds them,
-so it starts from anywhere with no environment. `RunInfo` points at it.
+so it starts from anywhere with no environment. `RunInfo` points at it. A
+binary's `helpers` (`{file name: target}`, e.g. a `zig_exe`) sit beside it
+there, and in `bin/` of its bundle, where it finds them next to its own
+executable ([helpers.bzl](helpers.bzl)). A `mojo_helper_check` (same file)
+runs a helper's copy in `[runnable]` as a build action, so a binary that lost
+it, or a copy that does not start, is red (`//bin/kci:runnable_readme_examples`).
 ([`launch.sh`](launch.sh) starts a binary from outside its runnable
 directory, pointing the loader at the toolchain's `lib/`.) The list of
 libraries is checked against what the loader actually maps during a run
@@ -281,9 +318,16 @@ level of its own and is compiled into each binary at that binary's level. A
 `mojo_binary` (for `expected_stdout`) states `optimization_level = "1"`
 itself, as [`examples/aws_lc`](../examples/aws_lc/BUCK) and
 [`examples/s2n_tls`](../examples/s2n_tls/BUCK) do. Levels are `0` to `3`;
-anything else is refused at analysis. Test 30
-([`tests/functional/opt_level.sh`](../tests/functional/opt_level.sh)) reads the levels from the
-compile commands.
+anything else is refused at analysis. Each compile records the level it
+puts on its command line, and the rules return the record as
+`MojoOptLevelInfo` ([`opt_level.bzl`](opt_level.bzl)). A
+`mojo_opt_level_check` target fails analysis unless each of its rows
+(target, action category, level) holds: `:opt_levels` in
+[`examples`](../examples/BUCK), [`examples/aws_lc`](../examples/aws_lc/BUCK)
+and [`examples/s2n_tls`](../examples/s2n_tls/BUCK) hold the defaults and the
+test programs' `-O1`, and
+[`tests//functional/opt_level:levels`](../tests/functional/opt_level/BUCK)
+the overrides.
 
 ## Assert level, defines and memory cap
 

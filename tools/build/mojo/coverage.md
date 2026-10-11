@@ -57,10 +57,10 @@ and, per library, with tests or without:
 and, as its tests for coverage (line coverage only: no branch coverage action):
 
 - its README's examples (`[tests][readme]`), built and run as a test:
-  `[coverage][bin][readme]`, `[coverage][tests][readme]`. A README with no
-  example gives a program that runs nothing (`mojo_cov_readme_source`
-  chooses). The report names the program under `buck-out/readme/`, which
-  covcheck counts outside the repository;
+  `[coverage][bin][readme]`, `[coverage][tests][readme]`: the generated
+  runner, which runs every example's program in one process (with no
+  example it runs nothing). The report names the programs under
+  `buck-out/readme/`, which covcheck counts outside the repository;
 - the `mojo_test` targets it names in `coverage_tests` (none by default; one
   test may be named by several libraries), each depending on it, with a
   source main and no `args`. It cannot depend on them, so its gate is the
@@ -80,7 +80,7 @@ nothing else. A library with no test still has a gate (`NotMeasured`: it
 fails in enforce mode), which its conda package waits for, as does a
 library whose sources are all generated (a cloud SDK client). The libraries
 the gate's own tool depends on are the ledger `COVERAGE_NO_GATE` of
-`policy.bzl` (`covcheck`, `komira_json`, `readme_examples`): they have no
+`policy.bzl` (`covcheck`, `komira_json`): they have no
 gate of their own (the library would depend on the gate's tool, which
 depends on it), and their gate is `<name>_cov_gate`, which their conda
 package waits for too. `[coverage]` is the binaries, the reports and the
