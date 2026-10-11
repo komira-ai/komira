@@ -58,8 +58,7 @@
 #   10 eliminate_cross_join                       [join]
 #   11 push_projections_down, prune_columns
 #   12 elide_functionally_dependent_group_keys    [aggregate and project]
-#   13 merge_projects, eliminate_identity_projects, detect_bypass_columns,
-#      late_materialize                           [project]
+#   13 merge_projects, eliminate_identity_projects        [project]
 #   14 eager_aggregate_pushdown [join, config.eager_agg],
 #      absorb_expression_into_aggregate, convert_inner_to_semi   [join]
 #   15 materialize_agg_input
@@ -73,7 +72,30 @@
 #   19 fuse_partition_topn          [PartitionBy in the current plan]
 #   20 narrow_join_payload                                   (last)
 #
-# The reasons the positions are load-bearing are stated at each call below.
+# Each call below says what its position does.
+#
+# WHAT THE TESTS PIN. `tests/test_optimizer_driver_passes.mojo` (steps 1-10)
+# and `tests/test_optimizer_driver_passes_late.mojo` (steps 10-19) show each
+# pass changing some plan at its step, so dropping a pass fails a test, as
+# do fourteen named moves of a pass out of its stated position.
+# `tests/test_optimizer_driver_order.mojo` and `tests/test_optimizer_driver_
+# order_steps.mojo` hold one plan per reorder that changes the plan, for
+# these reorders only: two adjacent calls inside a step swapped; the last call
+# of a step swapped with the first call of the next; a whole step swapped with
+# the whole next step; and step 6 moved after step 8.
+# `tests/test_optimizer_driver_gates.mojo` pins the gate arms a plan with a
+# Filter cannot reach. komira#1297 lists every mutant; a reorder in these
+# families whose two orders gave the same plan on every plan tried is argued
+# there, not tested. Any other move of a pass is not pinned.
+#
+# NOT IN THIS ORDER, though the reference pipeline ran them at step 13:
+#
+#   * `detect_bypass_columns` returns its input unchanged (the column set it
+#     collects is discarded), so calling it changes nothing.
+#   * `late_materialize` narrows a scan under a Filter to the Filter's own
+#     columns. The one Filter-over-scan this order leaves for it is the
+#     scalar-broadcast fold over an in-memory scan (step 9), and there it
+#     dropped columns the Filter outputs (komira#1292).
 #
 # ERRORS. A pass that raises stops the driver; `optimize` re-raises the pass's
 # own `Error` unchanged. `optimize_status` is the non-raising twin: a `try` /
@@ -130,8 +152,6 @@ from .optimizer_projection import (
     prune_columns,
     merge_projects,
     eliminate_identity_projects,
-    detect_bypass_columns,
-    late_materialize,
 )
 from .optimizer_agg_group_fd import elide_functionally_dependent_group_keys
 from .optimizer_eager_agg import eager_aggregate_pushdown
@@ -173,7 +193,9 @@ def optimize(
     # partitioned scan (the shape before pushdown rewrites it), and a smaller
     # path list means less work for everything after. `attach_hive_predicate`
     # handles the lazy dir-scanning Hive shape `partition_prune_scans` declines,
-    # so the two never both act on one scan.
+    # so the two never both act on one scan. Both run before decorrelation,
+    # so a scan inside a scalar subquery gets no Hive predicate; the other
+    # order would attach one (the reference order, kept and pinned).
     plan = partition_prune_scans(plan^)
     plan = attach_hive_predicate(plan^)
 
@@ -208,7 +230,16 @@ def optimize(
         plan = push_join_residual_to_side(plan^)
         has_filter = _plan_has_tag(plan, PLAN_FILTER)
 
-    # 6. Expression simplification, each only when the plan has work for it.
+    # 6. Expression simplification, each pass behind a precheck. Folding
+    # first: it turns `NOT ((1 = 1) AND NOT x)` into `NOT NOT x`, which
+    # simplification then removes. The prechecks read Filter predicates,
+    # Project expressions and scan filters only, so a plan whose one foldable
+    # or simplifiable expression is an aggregate argument or a join residual
+    # skips the pass, although the pass rewrites those slots (komira#1306).
+    # Both run after step 5, so a residual step 5 moved into a Filter folds,
+    # and before steps 7-8, which read their output: a removed double
+    # negation exposes an OR to factoring, and a folded constant makes two
+    # expressions equal for CSE.
     if _plan_has_foldable_exprs(plan):
         plan = fold_constants(plan^)
     if _plan_has_simplifiable_exprs(plan):
@@ -220,20 +251,28 @@ def optimize(
     # can no longer be pushed into a scan. Factoring first leaves C once, as a
     # top-level conjunct (`C AND (rest)`), which CSE leaves alone and pushdown
     # can route. CSE's gate includes Aggregate so its aggregate-argument axis
-    # runs on plans with no Filter or Project.
+    # runs on plans with no Filter or Project. CSE runs before the IN rewrite,
+    # which collapses an OR of equalities on one column: `(a + b) = 1 OR
+    # (a + b) = 2` is one only after CSE has named `a + b`.
     if has_filter:
         plan = factor_or_conjuncts(plan^)
     if has_filter or has_project or has_aggregate:
         plan = eliminate_common_subexpressions(plan^)
         plan = rewrite_in_clauses(plan^)
 
-    # 9. Filters. Symmetric-OR inference and OR factoring run before pushdown so
-    # the conjuncts they expose are pushdown candidates (the second factoring
-    # catches ORs that fusion exposed). Splitting AND-trees into nested Filters
-    # lets pushdown move each conjunct to its own join side; without a join
-    # there is nowhere to push, so it is gated on one. The scalar-broadcast
-    # fold runs after pushdown (other conjuncts have left its Filter) and before
-    # `convert_inner_to_semi` (step 14), which reads the folded comparison.
+    # 9. Filters. Symmetric-OR inference runs before pushdown so the
+    # single-column ORs it infers are pushed to their join side. The second OR
+    # factoring catches an OR the first one skipped: a branch holding a
+    # CASE/WHEN halts factoring, and once CSE has replaced a repeated WHEN with
+    # a synthesized column the shared conjuncts factor out. It runs after
+    # symmetric-OR inference, so an OR it reduces to a swap pattern gets no
+    # inferred IN lists (the reference order, kept and pinned). Splitting
+    # AND-trees into nested Filters lets pushdown move each conjunct to its own
+    # join side; without a join there is nowhere to push, so it is gated on
+    # one. The scalar-broadcast fold runs where the reference ran it, after
+    # pushdown and before step 10, so a binding keyed on an Aggregate over a
+    # cross join still matches it; a bound site becomes a Filter over an
+    # in-memory scan, which is why `late_materialize` is not in this order.
     if has_filter:
         if _plan_has_consecutive_filters(plan):
             plan = fuse_filters(plan^)
@@ -252,21 +291,29 @@ def optimize(
     plan = prune_columns(plan^)
 
     # 12. A GROUP BY key that is a function of the other keys is elided and
-    # recomputed above the aggregate. After `prune_columns` (it reads the
-    # narrowed shape) and BEFORE `eliminate_identity_projects`: dropping the
-    # computed key usually leaves the aggregate's child Project an identity,
-    # and step 13 is what removes it.
+    # recomputed above the aggregate. After step 11 as in the reference order
+    # (on every plan tried, running it before step 11 gave the same plan),
+    # and BEFORE step 13: dropping the computed key usually leaves the
+    # aggregate's child Project an identity, and step 13 is what removes it.
     if has_aggregate and has_project:
         plan = elide_functionally_dependent_group_keys(plan^)
 
+    # 13. Adjacent Projects merge, then identity Projects go.
     if has_project:
         plan = merge_projects(plan^)
         plan = eliminate_identity_projects(plan^)
-        plan = detect_bypass_columns(plan^)
-        plan = late_materialize(plan^)
 
-    # 14. Joins and aggregates. Eager aggregation runs first so the passes after
-    # it see the aggregate-below-join shape. `config.eager_agg` False skips it.
+    # 14. Joins and aggregates, in the reference order: eager aggregation, then
+    # absorb, then inner-to-semi. Eager aggregation therefore sees an
+    # Aggregate over a computed-input Project (which absorb would remove) and
+    # declines it (komira#1293). Inner-to-semi runs after step 10, which turns
+    # a Filter of equalities over a cross join into the INNER join it converts.
+    # `config.eager_agg` False skips eager aggregation. Absorb runs before
+    # inner-to-semi, and step 15 after it, so a join over a unique side under
+    # an Aggregate stays INNER where either other order would make it SEMI
+    # (the reference order, kept and pinned). Step 13 runs first: eager
+    # aggregation declines an Aggregate over two stacked Projects, which
+    # `merge_projects` makes one.
     if has_join:
         if config.eager_agg:
             plan = eager_aggregate_pushdown(plan^)
@@ -277,15 +324,17 @@ def optimize(
     # AFTER `absorb_expression_into_aggregate`, which produces that shape.
     plan = materialize_agg_input(plan^)
 
-    # 16. Join order. Pushdown and cross-join elimination run again first: on a
-    # FROM list of nested cross joins, a bridging equality can settle one join
-    # level too high in step 9, leaving a relation with no join edge for the
-    # reorder; re-running drives it down to the join it bridges and folds it
-    # into that join's keys. The SEMI/ANTI reducer pushdown runs AFTER
+    # 16. Join order. Pushdown and cross-join elimination run again first. A
+    # conjunct the second OR factoring hoisted above a CSE-introduced Project
+    # stays above that Project in step 9; the re-run here moves it to its join
+    # side and, when it is an equality over a cross join, folds it into that
+    # join's keys. The SEMI/ANTI reducer pushdown runs AFTER
     # `convert_inner_to_semi` (whose placement it corrects) and BEFORE the
-    # reorder (which must see an ordinary INNER chain). Reordering exchanges
-    # join operands, which permutes the output columns; the output order is
-    # the query's, so it is captured before the reorder and restored after it.
+    # reorder: on a SEMI over a chain of INNER joins it can decline on the
+    # chain as written where, after the reorder, it would push the SEMI into
+    # the reordered chain. Reordering exchanges join operands, which permutes
+    # the output columns; the output order is the query's, so it is captured
+    # before the reorder and restored after it.
     if has_join:
         plan = push_predicates_down(plan^)
         plan = eliminate_cross_join(plan^)
@@ -308,7 +357,8 @@ def optimize(
     # pass after this one carries the field when it rebuilds a join.
     plan = select_join_build_side(plan^)
 
-    # 17. Limits: push down, then Sort over Limit becomes TopN.
+    # 17. Limits: push down, then Sort over Limit becomes TopN. After step 16,
+    # so a Limit goes below the Project that restores the join's column order.
     if has_limit:
         plan = push_limit_down(plan^)
         if _plan_has_sort_above_limit(plan):
@@ -316,8 +366,11 @@ def optimize(
 
     # 18-19. Windows: co-locate and fuse PartitionBy nodes, elide a Sort the
     # PartitionBy already satisfies, then fuse PartitionBy + Filter into
-    # PartitionTopN. Window rewriting first, so a PartitionBy it fused is a
-    # PartitionTopN candidate. Both gates read the current plan.
+    # PartitionTopN, in the reference order. A fused PartitionBy carries more
+    # than one function, which `fuse_partition_topn` declines, so on
+    # Filter(rn <= K) over two same-window PartitionBys this order keeps the
+    # Filter where the opposite order would fuse (komira#1293). Both gates
+    # read the current plan.
     if _plan_has_tag(plan, PLAN_PARTITION_BY) or _plan_has_tag(plan, PLAN_PROJECT):
         plan = optimize_window_rewrite(plan^)
     if _plan_has_tag(plan, PLAN_PARTITION_BY):
