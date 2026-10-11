@@ -70,8 +70,12 @@ are values (`shape/`):
                        kci creates or adopts, and the `kci-run-id=<id>`
                        label of an object created in a scope with a
                        validation run id (no kci verb sets one yet);
-                       `create_labels` is every label a create writes; and
-                       kci's adoption mark `kci_adopted=true`.
+                       `create_labels` is every label a create writes;
+                       kci's adoption mark `kci_adopted=true`; and the
+                       lines a description carrier (an object with a
+                       description and no labels) holds every label in
+                       (`description_lines`, `description_labels`,
+                       `released_description`, `description_carrier_bytes`).
   * metadata.mojo    — the rules of every resource's metadata (`labels`,
                        `physical_name`, `adopt`): their
                        graph findings, the label fields kci lowers, the
@@ -113,6 +117,15 @@ are values (`shape/`):
                        findings, collected in one pass; on a graph with
                        no other finding, the role label budget over the
                        cloud's lowering; the refusal text.
+  * cycles.mojo      — the graph finding for a reference cycle between
+                       resources (two services each reading the other's
+                       URL), which no order can create.
+  * refusal.mojo     — the typed refusal (`Refusal`): a refused run as a
+                       value carrying its findings, so a caller tells a
+                       refusal from a failed read without reading text.
+  * outcome.mojo     — `ApplyOutcome`: what an apply did, whether or not
+                       it finished, with the engine's refusal and a failed
+                       release typed apart from an engine error.
   * deploy.mojo      — plan / apply / destroy in a cell: configure and
                        validate first, lower to data with the lowering
                        contract checked (`lowering_json` for golden tests),
@@ -257,6 +270,7 @@ from kci_cloud.adapter import (
     FINDING_LIMIT,
     FINDING_CELL,
     FINDING_ADOPTION,
+    FINDING_OWNERSHIP,
     absence_word,
 )
 from kci_cloud.data import (
@@ -296,6 +310,7 @@ from kci_cloud.network import (
 from kci_cloud.registry import FORMAT_OCI, format_word, registry_findings, registry_format
 from kci_cloud.workload import Workload, is_workload, workload_of
 from kci_cloud.compute import (
+    ARTIFACT_TYPE_OCI,
     V1_IMAGE_PLATFORM,
     WORKER_REPLICAS_DEFAULT,
     image_platform,
@@ -349,6 +364,11 @@ from kci_cloud.labels import (
     adoption_labels,
     adopted_by,
     is_kci_label_key,
+    DESCRIPTION_LINE_SEPARATOR,
+    description_lines,
+    description_labels,
+    released_description,
+    description_carrier_bytes,
 )
 from kci_cloud.clouds import (
     Clouds,
@@ -402,8 +422,10 @@ from kci_cloud.validate import (
     lowered_budget_findings,
     role_budget_findings,
 )
+from kci_cloud.cycles import reference_cycle_findings
+from kci_cloud.refusal import Refusal, engine_refusal, graph_refusal
+from kci_cloud.outcome import ApplyOutcome
 from kci_cloud.deploy import (
-    ApplyOutcome,
     Removals,
     engine_retention,
     refuse_unless_valid,
