@@ -103,7 +103,7 @@ abs() { case "$1" in /* | -) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "$1" ;
 BB=$(abs "$BB") TOOL=$(abs "$TOOL") FINDINGS=$(abs "$FINDINGS") PACKAGES=$(abs "$PACKAGES")
 SYMBOLS=$(abs "$SYMBOLS") REPORT=$(abs "$REPORT") LEDGER=$(abs "$LEDGER")
 EXP_PK=$(abs "$EXP_PK") EXP_SY=$(abs "$EXP_SY") EXP_RP=$(abs "$EXP_RP")
-# Scratch is per action, as in lint.sh: BUCK_SCRATCH_PATH, unset on a remote
+# Scratch is per action, as in the lint tool (tool/src/main.zig): BUCK_SCRATCH_PATH, unset on a remote
 # worker, whose root is the action's own.
 case "${BUCK_SCRATCH_PATH:-}" in
     "") T="$PWD/.komira_action" ;;

@@ -153,8 +153,9 @@ reader reads from it.
 
 Each owner of the design's table has its `<library>_native` target in its
 own BUCK file: komira_crypto, komira_http_core (`NEEDED` komira_crypto's),
-komira_compression and the first-party shims' owners (komira_libc, komira_async, komira_async_api,
-komira_fs, komira_objectstore, komira_metrics, komira_scan_source,
-komira_supervisor). komira_log has none: its holder's accessors are hidden
+komira_compression, komira_parquet_codec (brotli's decoder),
+komira_db_sqlite (SQLite) and the first-party shims' owners (komira_libc,
+komira_async, komira_async_api, komira_fs, komira_objectstore,
+komira_metrics, komira_scan_source, komira_supervisor). komira_log has none: its holder's accessors are hidden
 by design, one copy per image (the design's question 2). No package ships
 any of them yet.

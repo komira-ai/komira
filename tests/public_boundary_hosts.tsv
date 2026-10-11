@@ -1,7 +1,7 @@
 # The domains a URL of this repository may name a host of, besides the names reserved
 # for examples and tests (localhost, example, test, invalid and their subdomains;
 # example.com, example.net, example.org): the public lint's allow-list
-# (//:public_boundary, tools/build/lint/public_boundary.awk, rule host). One row per
+# (//:public_boundary, tools/build/lint/public_boundary/src/rules.zig, rule host). One row per
 # domain, tab-separated: <domain> <reason>. A host is allowed when it is the domain or
 # ends in `.<domain>`. Every row must be used by some URL of the tree: a row no host is
 # under fails the build, so the list names only what the tree uses. A domain here is a
@@ -59,6 +59,8 @@ turbopuffer.com	turbopuffer documentation cited by docs/design/storage_stack.md
 daft.ai	Daft documentation cited by docs/design/optimized_plan_udfs.md
 pulumi.com	Pulumi documentation of closure serialization cited by docs/design/optimized_plan_udfs.md
 idl.uw.edu	the Arquero documentation (a University of Washington lab site) cited by docs/design/optimized_plan_udfs.md
+neo4j.com	Neo4j's store-format documentation (data_graph_storage.md)
+puppygraph.com	PuppyGraph's documentation (data_graph_storage.md)
 grpc.io	gRPC specifications
 connectrpc.com	the Connect protocol specification
 flatbuffers.dev	FlatBuffers documentation
@@ -72,6 +74,8 @@ sourceforge.net	an upstream project's home
 xxhash.com	the xxHash specification
 lemire.me	a cited paper's author page
 semanticscholar.org	a cited paper
+arxiv.org	papers cited by design docs (data_graph_storage.md)
+cidrdb.org	the CIDR paper on Kuzu's storage (data_graph_storage.md)
 isthe.com	the FNV hash specification
 dotslash-cli.com	the DotSlash launcher's documentation
 kernel.org	git release archives (third_party/git)
