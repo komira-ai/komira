@@ -82,12 +82,12 @@ test "the fence tag is the mode" {
     var arena = Arena.init(t.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const exs = try examplesOf(a, "```mojo\nstruct T:\n    pass\n```\n<!-- mojo-hidden x = 1 -->\n```mojo module\ndef main():\n    pass\n```\n" ++
+    const exs = try examplesOf(a, "```mojo\nstruct T:\n    pass\n```\n\n<!-- mojo-hidden x = 1 -->\n```mojo module\ndef main():\n    pass\n```\n" ++
         "~~~mojo  module\n~~~\n");
     try t.expectEqual(@as(usize, 3), exs.len);
     try t.expect(!exs[0].module);
     try t.expect(exs[1].module);
-    try t.expectEqualStrings("5|x = 1\n7|def main():\n8|    pass\n", try join(a, exs[1]));
+    try t.expectEqualStrings("6|x = 1\n8|def main():\n9|    pass\n", try join(a, exs[1]));
     try t.expect(exs[2].module);
     try t.expect((try ex.infoRefusal(a, "mojo module")) == null);
 }
@@ -167,6 +167,32 @@ test "a hidden comment must touch an example" {
     );
     // Next to a fence that is not an example.
     try t.expect(std.mem.startsWith(u8, try refusal(a, "<!-- mojo-hidden x = 1 -->\n```text\nx\n```\n", false), "R.md:1: a mojo-hidden"));
+}
+
+test "a hidden comment between two examples is refused" {
+    // Ending on the line before one fence and starting on the line after
+    // another, it would attach to both; which one it was written for is a
+    // guess, so the README must say with a blank line.
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectEqualStrings(
+        "R.md:4: a mojo-hidden comment both follows one example and precedes another; put a blank line on one side",
+        try refusal(a, "```mojo\nvar x = 1\n```\n<!-- mojo-hidden assert_equal(x, 1) -->\n```mojo\nprint(2)\n```\n", false),
+    );
+    // Multi-line, between a plain example and a module one.
+    try t.expect(std.mem.startsWith(
+        u8,
+        try refusal(a, "```mojo\nvar x = 1\n```\n<!-- mojo-hidden\nx = 2\n-->\n```mojo module\ndef main():\n    pass\n```\n", false),
+        "R.md:4: a mojo-hidden comment both follows",
+    ));
+    // A blank line on either side says which example it belongs to.
+    const after = try examplesOf(a, "```mojo\nvar x = 1\n```\n<!-- mojo-hidden x = 2 -->\n\n```mojo\nprint(2)\n```\n");
+    try t.expectEqualStrings("2|var x = 1\n4|x = 2\n", try join(a, after[0]));
+    try t.expectEqualStrings("7|print(2)\n", try join(a, after[1]));
+    const before = try examplesOf(a, "```mojo\nvar x = 1\n```\n\n<!-- mojo-hidden x = 2 -->\n```mojo\nprint(2)\n```\n");
+    try t.expectEqualStrings("2|var x = 1\n", try join(a, before[0]));
+    try t.expectEqualStrings("5|x = 2\n7|print(2)\n", try join(a, before[1]));
 }
 
 test "a misspelled marker is refused" {

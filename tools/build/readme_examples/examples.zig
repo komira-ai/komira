@@ -17,7 +17,9 @@
 //! whole comment on one line (`<!-- mojo-hidden assert_equal(x, 1) -->`) or
 //! the opening on its own line, code lines, and `-->` on the last. GitHub does
 //! not render an HTML comment, so the page shows the example clean; every raw
-//! view shows the hidden lines. A `mojo-hidden` comment next to no example,
+//! view shows the hidden lines. A comment that ends just before one example
+//! and starts just after another is refused (a blank line on one side says
+//! which it belongs to). A `mojo-hidden` comment next to no example,
 //! and a comment that spells the marker differently (`mojo_hidden`,
 //! `Mojo-hidden`), are refused: hidden code that never runs is the defect
 //! this guards. A comment is the Markdown module's HTML comment block (it
@@ -245,6 +247,12 @@ pub fn extract(alloc: Allocator, text: []const u8, display: []const u8, refuse_r
         var code_lines = std.ArrayList(usize).init(alloc);
         for (hidden, 0..) |h, k| {
             if (f.open_line > 0 and h.last == f.open_line - 1) {
+                // Fences are read in document order, so a comment that
+                // already follows an earlier example is used by now.
+                if (used[k]) {
+                    try refuse(alloc, &refusals, display, h.first + 1, "a mojo-hidden comment both follows one example and precedes another;" ++
+                        " put a blank line on one side", .{});
+                }
                 used[k] = true;
                 try code.appendSlice(h.code.items);
                 try code_lines.appendSlice(h.code_lines.items);
@@ -256,10 +264,6 @@ pub fn extract(alloc: Allocator, text: []const u8, display: []const u8, refuse_r
         }
         for (hidden, 0..) |h, k| {
             if (h.first == close + 1) {
-                if (used[k]) {
-                    try refuse(alloc, &refusals, display, h.first + 1, "a mojo-hidden comment both follows one example and precedes another;" ++
-                        " put a blank line on one side", .{});
-                }
                 used[k] = true;
                 try code.appendSlice(h.code.items);
                 try code_lines.appendSlice(h.code_lines.items);
