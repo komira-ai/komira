@@ -23,8 +23,9 @@
 #       (a zero-copy `Column.slice`);
 #   §5  an out-of-range code read out of bounds instead of refused by name.
 #
-# The ROUTE (the driver's DICTIONARY key goes through this encode, seen by its
-# witness counter) is tested with the driver.
+#   §6  through the grouped COUNT(DISTINCT) driver: a DICTIONARY key (alone,
+#       and beside an INT key) emits the STRING key's batch row for row, and
+#       goes through this encode (its witness counter moves).
 
 from std.collections import Dict, List, Optional, Set
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -43,6 +44,14 @@ from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_MOCK
 from komira_async.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
+from komira_physical_plan.physical_plan import AggSinkData
+from komira_plan_expr.agg_expr import count_distinct
+from komira_plan_expr.col_expr import col
+from komira_plan_ir.logical_plan import AggExprArray, ExprArray
+from komira_op_agg_distinct.agg_count_distinct_parallel import (
+    _execute_count_distinct_agg_parallel,
+    _should_use_parallel_count_distinct,
+)
 
 from komira_op_agg_distinct.agg_cd_dictkey_encode import (
     cd_dictkey_encode_count,
@@ -259,6 +268,122 @@ def test_out_of_range_code_is_refused_by_name() raises:
             "the refusal must name the defect, got: " + String(e),
         )
     assert_true(raised, "an out-of-range code must raise")
+
+
+
+# =============================================================================
+# §6 — the driver: a DICTIONARY key emits the STRING key's batch, byte for byte
+# =============================================================================
+
+
+def _driver_batch(
+    imm key_col: Column[HeapRegion],
+    imm ints: List[Int64],
+    imm vals: List[Int64],
+    two_keys: Bool,
+    key_type: ArrowType,
+) raises -> RecordBatch:
+    var rbb = RecordBatchBuilder.with_capacity(3)
+    var sb = SchemaBuilder()
+    if two_keys:
+        rbb.add_column(
+            Column.from_primitive[DType.int64](
+                PrimitiveArray[DType.int64].from_list(ints)
+            )
+        )
+        sb.add_field(Field("p", ArrowType.INT64, False))
+    rbb.add_column(key_col.share())
+    sb.add_field(Field("k", key_type, False))
+    rbb.add_column(
+        Column.from_primitive[DType.int64](
+            PrimitiveArray[DType.int64].from_list(vals)
+        )
+    )
+    sb.add_field(Field("v", ArrowType.INT64, False))
+    return rbb.build(sb.build())
+
+
+def _driver_sink(two_keys: Bool) raises -> AggSinkData:
+    var group_by = ExprArray()
+    var osb = SchemaBuilder()
+    if two_keys:
+        group_by.append(col("p").copy_expr())
+        osb.add_field(Field("p", ArrowType.INT64, False))
+    group_by.append(col("k").copy_expr())
+    osb.add_field(Field("k", ArrowType.STRING, False))
+    var aggs = AggExprArray()
+    aggs.append(count_distinct(col("v")))
+    osb.add_field(Field("u", ArrowType.INT64, False))
+    return AggSinkData(group_by^, aggs^, osb.build())
+
+
+def _run_driver(imm batch: RecordBatch, two_keys: Bool) raises -> RecordBatch:
+    var sink = _driver_sink(two_keys)
+    var rt = PerCoreAsyncRuntime[NoopSink](placement=PLACEMENT_FIXED)
+    rt.attach_workers(_WORKERS, _noop_sink_factory, BACKEND_MOCK)
+    rt.start()
+    ref disp = rt.dispatcher()
+    var ct = CancellationToken.new()
+    var nk = 2 if two_keys else 1
+    return _execute_count_distinct_agg_parallel(
+        disp, ct.clone(), batch, sink, nk, 1, batch.num_rows()
+    )
+
+
+def _check_driver_equivalence(two_keys: Bool) raises:
+    var n = _N
+    var keys = _rows(n)
+    var fx = _DictFixture(keys)
+    var ints = List[Int64](capacity=n)
+    var vals = List[Int64](capacity=n)
+    for r in range(n):
+        ints.append(Int64(r % 3))
+        vals.append(Int64((r * 7_919) % 5_003))
+    assert_true(
+        _should_use_parallel_count_distinct(n, _WORKERS),
+        "PRECONDITION: the parallel CD driver must be chosen",
+    )
+    var str_col = Column.from_string(StringArray.from_strings(keys))
+    var str_batch = _driver_batch(str_col, ints, vals, two_keys, ArrowType.STRING)
+    var dict_batch = _driver_batch(
+        fx.column(), ints, vals, two_keys, ArrowType.DICTIONARY
+    )
+    var want = _run_driver(str_batch, two_keys)
+    reset_cd_dictkey_encode_count()
+    var got = _run_driver(dict_batch, two_keys)
+    assert_equal(
+        cd_dictkey_encode_count(), 1,
+        "ROUTE: the DICTIONARY key must go through the first-seen encode",
+    )
+    assert_equal(got.num_rows(), want.num_rows(), "group count")
+    assert_equal(got.num_columns(), want.num_columns(), "column count")
+    var kcol = 1 if two_keys else 0
+    var gs = got.column_at(kcol).as_string()
+    var ws = want.column_at(kcol).as_string()
+    var gu = got.column_at(kcol + 1).as_primitive[DType.int64]()
+    var wu = want.column_at(kcol + 1).as_primitive[DType.int64]()
+    for i in range(want.num_rows()):
+        # Same key, same count, in the SAME ROW — the emit order is part of
+        # the answer (it is the Top-K tie order).
+        assert_equal(gs.get(i), ws.get(i), "row " + String(i) + ": key")
+        assert_equal(
+            Int(gu.get(i)), Int(wu.get(i)), "row " + String(i) + ": count"
+        )
+        if two_keys:
+            var gp = got.column_at(0).as_primitive[DType.int64]()
+            var wp = want.column_at(0).as_primitive[DType.int64]()
+            assert_equal(
+                Int(gp.get(i)), Int(wp.get(i)), "row " + String(i) + ": p"
+            )
+
+
+def test_driver_dict_key_emits_the_string_keys_batch() raises:
+    _check_driver_equivalence(False)
+
+
+def test_driver_int_and_dict_key_emits_the_string_keys_batch() raises:
+    _check_driver_equivalence(True)
+
 
 
 def main() raises:
