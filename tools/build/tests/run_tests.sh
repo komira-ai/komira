@@ -149,11 +149,9 @@
 #  29. The test runtime contract (tests//functional/test_data): a gated test opens a
 #      declared fixture by its repository path from its staged share/, and a
 #      fixture it did not declare is absent (the gate goes red); TEST_TMPDIR
-#      is private, empty and not /tmp in each of two actions; test_env and a
-#      mojo_test's data and env arrive under `buck2 test`, and so do its
-#      args, each $(location) an absolute path the test opens and an
-#      $(exe_target) a binary with its lib/ (also as a build action,
-#      mojo_test_args_action, which is what a pull request builds); a mojo_test
+#      is private, empty and not /tmp in each of two actions; test_env
+#      arrives (a mojo_test's data, env and args under `buck2 test` are
+#      komira//tools/build/mojo/mojo_test_testdata, in the gate); a mojo_test
 #      exiting 77 (SKIP to some harnesses) fails; a red test stays
 #      red with test_env {BIN: true} (library) and env {BIN: true} (mojo_test);
 #      the runner itself, run twice in ONE action directory
@@ -228,8 +226,8 @@
 #      makes the test, a binary welded to it, and a binary linking a library
 #      welded to it unbuildable (GATED TEST FAILED, with the harness's
 #      `1 passed; 1 failed`: the panic unwound), while the test executable
-#      itself compiles; a binary welded to a passing test builds and runs;
-#      the harness sees only HOME, PATH and TMPDIR; a target with no tests
+#      itself compiles (a binary welded to a passing test, whose harness sees
+#      only HOME, PATH and TMPDIR, is tests//functional/rust_test); a target with no tests
 #      and an #[ignore]d test are each refused; a hanging test is NO VERDICT
 #      at its timeout. There are no holds: every welded test must pass.
 #      `buck2 test` of a binary welded to a red test fails.
@@ -312,8 +310,8 @@
 #      compile fails; `readme = True` with no README.md and a non-bool
 #      `readme` are refused at load (.../readme_keyword, per -c case).
 #  39. Test welding (tools/build/lint/test_weld.bzl), each lint checked by
-#      its BXL script: //:test_weld (every package under src/) and
-#      tests//functional/test_weld:ok (a planted tree with its ledger) pass;
+#      its BXL script (the greens, //:test_weld, tests//functional/test_weld:ok
+#      and tests//functional/test_weld/real:ok, are in the gate):
 #      each target of tests//negative/test_weld fails
 #      naming its one planted finding: an unwelded test file (named only in a
 #      comment of a test_srcs list), a package with no welded test, a ledger
@@ -964,16 +962,6 @@ fi
 # 29
 expect_red td_undeclared "No such file or directory" tests//negative/test_data:undeclared
 expect_red td_undeclared_gate "GATED TEST FAILED: tests//negative/test_data:undeclared:" tests//negative/test_data:undeclared
-if timeout 900 "$BUCK2" test tests//functional/test_data:mojo_test_data > "$LOG/td_mojo_test.log" 2>&1; then
-    pass "td_mojo_test: buck2 test of a mojo_test with data and env"
-else
-    fail "td_mojo_test: buck2 test tests//functional/test_data:mojo_test_data failed (see $LOG/td_mojo_test.log)"
-fi
-if timeout 900 "$BUCK2" test tests//functional/test_data:mojo_test_args > "$LOG/td_mojo_test_args.log" 2>&1; then
-    pass "td_mojo_test_args: buck2 test of a mojo_test with args, \$(location) and \$(exe_target) expanded to files it opens"
-else
-    fail "td_mojo_test_args: buck2 test tests//functional/test_data:mojo_test_args failed (see $LOG/td_mojo_test_args.log)"
-fi
 if timeout 900 "$BUCK2" test tests//negative/test_data:skip_77 > "$LOG/td_skip_77.log" 2>&1; then
     fail "td_skip_77: buck2 test tests//negative/test_data:skip_77 passed, but its test exits 77 (see $LOG/td_skip_77.log)"
 elif ! grep -qE "GATED TEST FAILED: [a-z]*//([a-z/]*/)?negative/test_data:skip_77 \(exit 77\)" "$LOG/td_skip_77.log"; then
@@ -1107,10 +1095,8 @@ expect_red rust_test_red "GATED TEST FAILED: tests//negative/rust_test:red" "$RT
 expect_red rust_test_unwinds "1 passed; 1 failed" "$RT:red"
 expect_red rust_test_bin_red "GATED TEST FAILED" "$RT:bin"
 expect_red rust_test_lib_consumer_red "GATED TEST FAILED" "$RT:lib_consumer"
-expect_green rust_test_bin_green "$RT:bin_green" "$RT:bin_green[run_check]"
 expect_red rust_test_empty "EMPTY GATE" "$RT:empty"
 expect_red rust_test_ignored "#[ignore]d test(s) did not run" "$RT:ignored"
-expect_green rust_test_env_scrubbed "$RT:env_scrubbed"
 expect_red rust_test_hang "timed out after 3s (exit 142)" "$RT:hang"
 if "$BUCK2" test "$RT:bin" > "$LOG/rust_test_buck2_test_red.log" 2>&1; then
     fail "rust_test_buck2_test_red: buck2 test $RT:bin passed, but its welded test fails"
@@ -1221,10 +1207,6 @@ done
 test_weld_check() { # name, lint target: the check's exit status, its log in $LOG
     "$BUCK2" bxl //tools/build/lint/test_weld.bxl:check -- --lint "$2" > "$LOG/$1.log" 2>&1
 }
-for lint in //:test_weld tests//functional/test_weld:ok tests//negative/test_weld/real:ok; do
-    name="test_weld_green_$(printf '%s' "${lint#*//}" | tr '/:' '__')"
-    if test_weld_check "$name" "$lint"; then pass "$name"; else fail "$name: $lint (see $LOG/$name.log)"; fi
-done
 tw_tree=tests//functional/test_weld/src
 for want in \
     "unwelded|$tw_tree/komira_a/tests/test_dead.mojo: a test file no target welds" \

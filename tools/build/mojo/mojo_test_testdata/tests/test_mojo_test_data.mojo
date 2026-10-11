@@ -8,7 +8,7 @@ from std.testing import assert_equal, assert_false
 def main() raises:
     with open("staged/as.txt", "r") as f:
         assert_equal(f.read(), "declared bytes\n")
-    assert_false(exists("functional/test_data/fixtures/undeclared.txt"))
-    assert_false(exists("functional/test_data/fixtures/declared.txt"))
+    assert_false(exists("tools/build/mojo/mojo_test_testdata/fixtures/undeclared.txt"))
+    assert_false(exists("tools/build/mojo/mojo_test_testdata/fixtures/declared.txt"))
     assert_equal(getenv("TD_MODE"), "mojo_test")
     print("test_mojo_test_data: PASS")

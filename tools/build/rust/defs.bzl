@@ -491,6 +491,37 @@ rust_binary_rule = rule(
     },
 )
 
+# ---- the weld's marker list -------------------------------------------------
+#
+# A library or binary with `tests` or `test_srcs` is published behind the
+# markers of its tests (`[tests]`). A weld that drops one still builds green,
+# its test simply not run, so building the target cannot show it. This check
+# reads the target's marker list at analysis and fails unless it is exactly
+# `markers` (each a marker's path in its target's outputs: `<test>.passed` of
+# a rust_test, `test_srcs/<crate>.passed` of an external test).
+
+def _rust_weld_check_impl(ctx):
+    tests = ctx.attrs.target[DefaultInfo].sub_targets.get("tests")
+    got = sorted([m.short_path for m in tests[DefaultInfo].default_outputs]) if tests else []
+    want = sorted(ctx.attrs.markers)
+    if got != want:
+        fail("rust_weld_check {}: {} is published behind the markers {}, not {}".format(
+            ctx.label.raw_target(),
+            ctx.attrs.target.label.raw_target(),
+            got,
+            want,
+        ))
+    return [DefaultInfo()]
+
+rust_weld_check_rule = rule(
+    impl = _rust_weld_check_impl,
+    doc = "Fails analysis unless `target` (a rust_library or rust_binary) is published behind exactly the test markers `markers`.",
+    attrs = {
+        "markers": attrs.list(attrs.string()),
+        "target": attrs.dep(),
+    },
+)
+
 # ---- registry crates ---------------------------------------------------------
 
 def _crate_source_impl(ctx):
@@ -581,3 +612,4 @@ rust_binary = declares_docs(_welded(rust_binary_rule))
 rust_library = declares_docs(_welded(rust_library_rule))
 rust_sysroot = declares_docs(rust_sysroot_rule)
 rust_test = declares_docs(rust_test_rule)
+rust_weld_check = declares_docs(rust_weld_check_rule)
