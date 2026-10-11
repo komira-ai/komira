@@ -1,0 +1,18 @@
+# libkomira_log_holder_jit.so.1 (design option A): the twelve holder accessors.
+{
+  global:
+    komira_log_holder_set;
+    komira_log_holder_get;
+    komira_log_holder_get_engine;
+    komira_log_holder_clear;
+    komira_log_config_holder_set;
+    komira_log_config_holder_get;
+    komira_log_holder_get_config;
+    komira_log_layout_set;
+    komira_log_layout_get;
+    komira_log_tls_key_create;
+    komira_log_tls_set;
+    komira_log_tls_get;
+  local:
+    *;
+};

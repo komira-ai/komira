@@ -19,6 +19,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 staged_files(
     name = "log_holder_files",
     srcs = ["engine/_log_holder_shim.c"],
+    visibility = ["komira//tests/native_probe3:"],
 )
 
 cxx_library(

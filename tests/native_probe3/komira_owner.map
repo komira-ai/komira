@@ -1,0 +1,9 @@
+# Probe 3 only: every komira_ symbol of the owner is exported, everything else
+# (vendored internals, the C++ runtime) is local. The design generates the
+# exact list from the callers (slice 5); a wildcard is wider, never narrower.
+{
+  global:
+    komira_*;
+  local:
+    *;
+};
