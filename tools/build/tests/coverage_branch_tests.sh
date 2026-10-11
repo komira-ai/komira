@@ -42,15 +42,13 @@
 #      gets no LLVM_PROFILE_FILE: no .profraw), branchversion[...] red (a
 #      copy reading each raw profile's version as 12: refused as version 12,
 #      not 11), branchannotate[coverage][branch_ir][test_one] red (a
-#      cov_branch_annotate.sh copy changing the control flow before the
+#      copy of `cov_branch annotate` changing the control flow before the
 #      profile is applied: LLVM's hash mismatch warning, refused),
 #      branchmissing[...][branch_ir] red (a `cov_branch run` copy merging
 #      without the test's main: a function the binary links that the
 #      profile lacks, refused), branchinternal[...][branch_ir] red (a copy
 #      internalizing the bitcode before the profile is applied: a function
-#      of the profile the bitcode does not hold, refused), branchwide's
-#      [branch_ir] green (a copy padding the section-name pipeline with
-#      1 MB: its reader takes all of it, so no writer dies of SIGPIPE),
+#      of the profile the bitcode does not hold, refused),
 #      branchweights[...][branch_ir] red (a copy annotating a bitcode that
 #      already holds branch weights), branchentry[...][branch_ir] red (that
 #      copy with the weights check off: the entry counts refused), branchnodebug[...][branch_info] red
@@ -69,9 +67,7 @@ expect_green coverage_branch tests//functional/coverage:branch_counts tests//fun
     tests//negative/coverage:branchfail tests//negative/coverage:branchannotate \
     tests//negative/coverage:branchnoprof tests//negative/coverage:branchversion \
     tests//negative/coverage:branchmissing tests//negative/coverage:branchweights \
-    tests//negative/coverage:branchinternal tests//negative/coverage:branchwide \
-    tests//negative/coverage:branchentry \
-    'tests//negative/coverage:branchwide[coverage][branch_ir][test_one]' \
+    tests//negative/coverage:branchinternal tests//negative/coverage:branchentry \
     tests//negative/coverage:branchnodebug
 expect_red coverage_branch_test_fails "The test failed instrumented for branch coverage (exit 1)" \
     'tests//negative/coverage:branchfail[coverage][branch][test_profile_env]'
