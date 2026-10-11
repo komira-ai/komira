@@ -286,5 +286,84 @@ def test_a_root_cast_goes_to_the_column_evaluator() raises:
     _declined(Expr.cast(_c("k"), DType.float64), ArrowType.INT64)
 
 
+# =============================================================================
+# Every arm under two aliases
+# =============================================================================
+
+
+def _a2(var e: Expr) -> Expr:
+    """`e` under two aliases, as a binder leaves an output that a subquery
+    named and the outer query named again."""
+    return Expr.alias(Expr.alias(e^, String("inner")), String("o"))
+
+
+def _case_v() -> Expr:
+    """`CASE WHEN k > 2 THEN v ELSE 0 END`: row 2 (k = 3) takes `v`, which is
+    NULL there."""
+    var cases = List[WhenCaseData]()
+    cases.append(
+        WhenCaseData(
+            Expr.binary(BIN_GT, _c("k"), Expr.literal(ScalarValue.from_int(2))),
+            _c("v"),
+        )
+    )
+    return Expr.when(cases^, Expr.literal(ScalarValue.from_int(0)))
+
+
+def test_a_case_under_two_aliases_keeps_its_null() raises:
+    """DuckDB answers `SELECT o FROM (SELECT CASE WHEN k > 2 THEN v ELSE 0
+    END AS inner FROM t) AS q(o)` over this batch with 0, 0, NULL, 40: an
+    alias is a name, so row 2 takes `v`, which is NULL. One alias was served
+    by the CASE evaluator; two aliases went to the walkers, which read
+    values only and answered row 2 as a valid 0. Mutant (red): the route
+    predicates and the arms unwrap one alias level only, as before the
+    fix."""
+    var out = _served(_a2(_case_v()), ArrowType.INT64)
+    var col = out.column_as_primitive_int64(0)
+    assert_equal(Int(col.get(0)), 0)
+    assert_equal(Int(col.get(1)), 0)
+    assert_true(col.is_null(2), "row 2 takes v, which is NULL")
+    assert_equal(Int(col.get(3)), 40)
+    assert_true(out.schema.field_nullable(0), "the field states the NULL")
+    # One alias gives the same answer.
+    var one = _served(_a(_case_v()), ArrowType.INT64)
+    assert_true(one.column_as_primitive_int64(0).is_null(2))
+
+
+def test_every_column_arm_serves_its_output_under_two_aliases() raises:
+    """Each family the walkers cannot build, under two aliases, is served
+    with the value it has at the top. Mutant (red): any one of the
+    `_is_*_output` predicates matching one alias level only (that output
+    then reaches the walkers, which decline it)."""
+    var out = _served(_a2(Expr.regexp_like(_c("s"), String("^[a-z]"))), ArrowType.BOOL)
+    assert_false(out.column_as_boolean(0).get(1))
+    out = _served(_a2(Expr.substring(_c("s"), 1, 1)), ArrowType.STRING)
+    assert_equal(out.column_as_string(0).get(1), String("C"))
+    out = _served(_a2(Expr.upper(_c("s"))), ArrowType.STRING)
+    assert_equal(out.column_as_string(0).get(1), String("CD"))
+    out = _served(_a2(Expr.concat(_two_s())), ArrowType.STRING)
+    assert_equal(out.column_as_string(0).get(0), String("abab"))
+    out = _served(_a2(Expr.unary(UN_ABS, _c("v"))), ArrowType.INT64)
+    assert_equal(Int(out.column_as_primitive_int64(0).get(1)), 20)
+    assert_true(out.column_as_primitive_int64(0).is_null(2), "abs(NULL) is NULL")
+    out = _served(_a2(_udf()), ArrowType.FLOAT64)
+    assert_equal(out.column_as_primitive_float64(0).get(3), 4.5)
+    out = _served(_a2(Expr.year(_c("dt"))), ArrowType.INT64)
+    assert_equal(Int(out.column_as_primitive_int64(0).get(3)), 1995)
+    out = _served(_a2(Expr.unary(UN_IS_NULL, _c("v"))), ArrowType.BOOL)
+    assert_true(out.column_as_boolean(0).get(2))
+    assert_false(out.column_as_boolean(0).get(0))
+    out = _served(_a2(Expr.json_extract_string(_c("j"), String("$.a"))), ArrowType.STRING)
+    assert_equal(out.column_as_string(0).get(2), String("v2"))
+    out = _served(_a2(Expr.cast(_c("k"), DType.int32)), ArrowType.INT32)
+    assert_equal(Int(out.column_as_primitive_int32(0).get(3)), 4)
+    out = _served(
+        _a2(Expr.literal(ScalarValue.from_string(String("lit")))), ArrowType.STRING
+    )
+    assert_equal(out.column_as_string(0).get(3), String("lit"))
+    # A NULL literal declines under two aliases, as it does at the top.
+    _declined(_a2(Expr.literal(ScalarValue.null(DType.int64))), ArrowType.INT64)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

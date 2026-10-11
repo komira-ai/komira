@@ -6,8 +6,8 @@
 # SUBJECT: every function of `compute_project_routes`, called directly: the
 # column type to runtime family map, the passthrough storage checks, the
 # column maps, the `_is_*_output` predicates (each at the top of the
-# expression, one alias down, and not deeper), the strict-arithmetic
-# predicates and the input scan.
+# expression, under one and two aliases, and under no other node), the
+# strict-arithmetic predicates and the input scan.
 #
 # The oracle is the predicate's answer for an expression built to sit on
 # each side of each of its tests. Each test names the mutant that turns it
@@ -72,6 +72,7 @@ from komira_dispatch_project.compute_project_routes import (
     _passthrough_storage_compatible,
     _strict_overlay_input_scan,
     _varlen_offset_width_alias,
+    _literal_under_aliases,
     _when_expr_ref,
     is_literal_output_expr,
 )
@@ -226,7 +227,8 @@ def _case() -> Expr:
 
 def test_case_and_literal_outputs() raises:
     """A CASE and an alias of one are matched by `_when_expr_ref`; a literal
-    and an alias of one by `is_literal_output_expr`; neither matches deeper.
+    and an alias of one by `is_literal_output_expr`; neither matches under
+    another node.
     Mutant: the alias arm of `_when_expr_ref` removed."""
     assert_true(Bool(_when_expr_ref(_case())))
     assert_true(Bool(_when_expr_ref(_a(_case()))))
@@ -238,8 +240,8 @@ def test_case_and_literal_outputs() raises:
 
 def test_regexp_substring_and_string_function_outputs() raises:
     """Each at the top and one alias down, both string function tags, and not
-    deeper. Mutant: the alias arm of `_is_string_fn_output` for
-    EXPR_STRING_FN_N removed."""
+    over a plain column. Mutant: EXPR_STRING_FN_N dropped from the
+    tag test of `_is_string_fn_output`."""
     var rx = Expr.regexp_like(_c("s"), String("a"))
     assert_true(_is_regexp_output(rx))
     assert_true(_is_regexp_output(_a(Expr.regexp_like(_c("s"), String("a")))))
@@ -257,7 +259,7 @@ def test_regexp_substring_and_string_function_outputs() raises:
 def test_null_test_cast_and_numeric_function_outputs() raises:
     """IS [NOT] NULL (not NOT); CAST; abs, sign, trunc, round and bit_count
     (not negation); each at the top and one alias down. Mutant: UN_BIT_COUNT
-    removed from the alias arm of `_is_num_typepres_output`."""
+    removed from the op list of `_is_num_typepres_output`."""
     assert_true(_is_null_test_output(Expr.unary(UN_IS_NULL, _c("k"))))
     assert_true(_is_null_test_output(_a(Expr.unary(UN_IS_NOT_NULL, _c("k")))))
     assert_false(_is_null_test_output(Expr.unary(UN_NOT, _c("k"))))
@@ -283,7 +285,7 @@ def test_null_test_cast_and_numeric_function_outputs() raises:
 def test_nested_and_temporal_extract_outputs() raises:
     """The four nested extracts at the top and one alias down, EXTRACT at the
     top and one alias down, and neither over a plain column. Mutant:
-    EXPR_MAP_GET removed from the alias arm of `_is_nested_extract_output`."""
+    EXPR_MAP_GET removed from the tag list of `_is_nested_extract_output`."""
     var nested = List[Expr]()
     nested.append(Expr.struct_field(_c("s"), String("a")))
     nested.append(Expr.struct_field_idx(_c("s"), 0))
@@ -405,6 +407,32 @@ def test_the_input_scan() raises:
     assert_false(_strict_overlay_input_scan(Expr.math_fn2(MATH2_POW, _c("n"), _c("k")), b, saw))
     assert_false(_strict_overlay_input_scan(Expr.math_fn2(MATH2_POW, _c("k"), _c("n")), b, saw))
     assert_false(saw, "no refused scan reported a NULL")
+
+
+def test_every_output_predicate_matches_under_two_aliases() raises:
+    """An alias is a name, so each `_is_*_output` predicate, `_when_expr_ref`
+    and `is_literal_output_expr` answer the same under two aliases as under
+    one, and `_literal_under_aliases` reads the literal through both.
+    Mutant (red): any of them matching one alias level only, as before the
+    fix (a two-alias output then left the column evaluator for the walkers,
+    which answered a CASE's NULL row as a valid value)."""
+    assert_true(Bool(_when_expr_ref(_a(_a(_case())))))
+    assert_true(is_literal_output_expr(_a(_a(_li(7)))))
+    assert_true(_literal_under_aliases(_a(_a(_li(7)))) == ScalarValue.from_int(7))
+    assert_true(_is_regexp_output(_a(_a(Expr.regexp_like(_c("s"), String("a"))))))
+    assert_true(_is_substring_output(_a(_a(Expr.substring(_c("s"), 1, 2)))))
+    assert_true(_is_string_fn_output(_a(_a(Expr.upper(_c("s"))))))
+    assert_true(_is_string_fn_output(_a(_a(Expr.concat(_two_s())))))
+    assert_true(_is_null_test_output(_a(_a(Expr.unary(UN_IS_NULL, _c("k"))))))
+    assert_true(_is_cast_output(_a(_a(Expr.cast(_c("k"), DType.float64)))))
+    assert_true(_is_num_typepres_output(_a(_a(Expr.unary(UN_ABS, _c("k"))))))
+    assert_true(_is_nested_extract_output(_a(_a(Expr.map_get(_c("s"), _li(1))))))
+    assert_true(_is_extract_output(_a(_a(Expr.year(_c("k"))))))
+    # Two aliases over a node outside each family still do not match.
+    assert_false(Bool(_when_expr_ref(_a(_a(_c("k"))))))
+    assert_false(is_literal_output_expr(_a(_a(_c("k")))))
+    assert_false(_is_num_typepres_output(_a(_a(Expr.unary(UN_NEGATE, _c("k"))))))
+    assert_false(_is_null_test_output(_a(_a(Expr.unary(UN_NOT, _c("k"))))))
 
 
 def main() raises:

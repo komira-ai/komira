@@ -20,15 +20,17 @@
 #     the per-DType `ExpressionExecutor` walkers.
 #
 # The `_is_*_output` predicates match their tag at the top of the expression
-# or one alias down, and nowhere deeper: `abs(x) + 1` is not matched and goes
-# to the walkers, which decline it. Nesting the other way (`abs(trunc(x))`)
-# is matched, and the column evaluator recurses.
+# or under any number of aliases (an alias is a name, so two aliases route
+# the same as one), and under no other node: `abs(x) + 1` is not matched and
+# goes to the walkers, which decline it. Nesting the other way
+# (`abs(trunc(x))`) is matched, and the column evaluator recurses.
 # =============================================================================
 
 from std.collections import Optional, Dict
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.record_batch import RecordBatch
+from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_expr.expr import (
     Expr,
     EXPR_COL_REF,
@@ -221,18 +223,19 @@ def _passthrough_col_index(imm batch: RecordBatch, imm e: Expr) raises -> Int:
 
 
 def _when_expr_ref(imm e: Expr) -> Optional[Int]:
-    """`Some(0)` when `e` is a CASE (`EXPR_WHEN`) or an alias of one, None
-    otherwise. The caller unwraps the alias itself."""
+    """`Some(0)` when `e` is a CASE (`EXPR_WHEN`) under any number of aliases
+    (none included), None otherwise. The caller unwraps the aliases itself
+    (`compute_project._eval_when_under_aliases`)."""
     if e.tag == EXPR_WHEN:
         return Optional[Int](0)
-    if e.tag == EXPR_ALIAS and e.alias_child_ref().tag == EXPR_WHEN:
-        return Optional[Int](0)
+    if e.tag == EXPR_ALIAS:
+        return _when_expr_ref(e.alias_child_ref())
     return None
 
 
 def is_literal_output_expr(imm e: Expr) -> Bool:
-    """True iff the output expression `e` is a literal (`EXPR_LITERAL`) or an
-    alias of one.
+    """True iff the output expression `e` is a literal (`EXPR_LITERAL`) under
+    any number of aliases (none included).
 
     Public so that every caller asking "is this projected output a
     constant?" asks it the same way: a binder names each projected literal
@@ -246,50 +249,58 @@ def is_literal_output_expr(imm e: Expr) -> Bool:
     and keeps the walker route."""
     if e.tag == EXPR_LITERAL:
         return True
-    return e.tag == EXPR_ALIAS and e.alias_child_ref().tag == EXPR_LITERAL
+    if e.tag == EXPR_ALIAS:
+        return is_literal_output_expr(e.alias_child_ref())
+    return False
+
+
+def _literal_under_aliases(imm e: Expr) raises -> ScalarValue:
+    """The value of the literal `e` is, under any number of aliases. Requires
+    `is_literal_output_expr(e)`; raises on any other shape."""
+    if e.tag == EXPR_LITERAL:
+        return e.literal_value()
+    if e.tag == EXPR_ALIAS:
+        return _literal_under_aliases(e.alias_child_ref())
+    raise Error("_literal_under_aliases: the expression is not a literal")
 
 
 def _is_regexp_output(imm e: Expr) -> Bool:
-    """True iff `e` is an `EXPR_REGEXP` or an alias of one. The walkers have
-    no regexp node; the column evaluator serves both the BOOL `regexp_like`
-    and the STRING-valued forms."""
+    """True iff `e` is an `EXPR_REGEXP` under any number of aliases. The
+    walkers have no regexp node; the column evaluator serves both the BOOL
+    `regexp_like` and the STRING-valued forms."""
     if e.tag == EXPR_REGEXP:
         return True
-    if e.tag == EXPR_ALIAS and e.alias_child_ref().tag == EXPR_REGEXP:
-        return True
+    if e.tag == EXPR_ALIAS:
+        return _is_regexp_output(e.alias_child_ref())
     return False
 
 
 def _is_substring_output(imm e: Expr) -> Bool:
-    """True iff `e` is an `EXPR_SUBSTRING` or an alias of one: a string
-    result, which the walkers cannot build."""
+    """True iff `e` is an `EXPR_SUBSTRING` under any number of aliases: a
+    string result, which the walkers cannot build."""
     if e.tag == EXPR_SUBSTRING:
         return True
-    if e.tag == EXPR_ALIAS and e.alias_child_ref().tag == EXPR_SUBSTRING:
-        return True
+    if e.tag == EXPR_ALIAS:
+        return _is_substring_output(e.alias_child_ref())
     return False
 
 
 def _is_string_fn_output(imm e: Expr) -> Bool:
     """True iff `e` is an `EXPR_STRING_FN` (`upper(s)`) or an
-    `EXPR_STRING_FN_N` (`concat(a, b)` and the other variadic functions), or
-    an alias of either. One predicate for both tags: the evaluator's arm for
-    them is the same, and it checks the result type per op against the
-    declared type, so it does not assume STRING."""
-    if e.tag == EXPR_STRING_FN:
+    `EXPR_STRING_FN_N` (`concat(a, b)` and the other variadic functions),
+    under any number of aliases. One predicate for both tags: the
+    evaluator's arm for them is the same, and it checks the result type per
+    op against the declared type, so it does not assume STRING."""
+    if e.tag == EXPR_STRING_FN or e.tag == EXPR_STRING_FN_N:
         return True
-    if e.tag == EXPR_ALIAS and e.alias_child_ref().tag == EXPR_STRING_FN:
-        return True
-    if e.tag == EXPR_STRING_FN_N:
-        return True
-    if e.tag == EXPR_ALIAS and e.alias_child_ref().tag == EXPR_STRING_FN_N:
-        return True
+    if e.tag == EXPR_ALIAS:
+        return _is_string_fn_output(e.alias_child_ref())
     return False
 
 
 def _is_null_test_output(imm e: Expr) -> Bool:
     """True iff `e` is `x IS NULL` or `x IS NOT NULL` (the two BOOL-valued
-    `EXPR_UNARY_OP` members), or an alias of one.
+    `EXPR_UNARY_OP` members), under any number of aliases.
 
     The translator's null tests take a STRING operand only; the column
     evaluator reads any column's validity bitmap, so these outputs go there
@@ -297,26 +308,28 @@ def _is_null_test_output(imm e: Expr) -> Bool:
     if e.tag == EXPR_UNARY_OP:
         var op = e.unary_op()
         return op == UN_IS_NULL or op == UN_IS_NOT_NULL
-    if e.tag == EXPR_ALIAS and e.alias_child_ref().tag == EXPR_UNARY_OP:
-        var aop = e.alias_child_ref().unary_op()
-        return aop == UN_IS_NULL or aop == UN_IS_NOT_NULL
+    if e.tag == EXPR_ALIAS:
+        return _is_null_test_output(e.alias_child_ref())
     return False
 
 
 def _is_cast_output(imm e: Expr) -> Bool:
-    """True iff `e` is an `EXPR_CAST` or an alias of one.
+    """True iff `e` is an `EXPR_CAST` under any number of aliases.
 
     The walkers have only the widening I64 -> F64 cast; the column evaluator
     has the full cast ladder, including a cast to DECIMAL128, whose precision
     and scale the evaluator carries from the declared output field."""
     if e.tag == EXPR_CAST:
         return True
-    return e.tag == EXPR_ALIAS and e.alias_child_ref().tag == EXPR_CAST
+    if e.tag == EXPR_ALIAS:
+        return _is_cast_output(e.alias_child_ref())
+    return False
 
 
 def _is_num_typepres_output(imm e: Expr) -> Bool:
     """True iff `e` is `abs`, `sign`, `trunc`, `round` or `bit_count` (the
-    `EXPR_UNARY_OP` members the walkers have no node for), or an alias of one.
+    `EXPR_UNARY_OP` members the walkers have no node for), under any number
+    of aliases.
 
     Not every unary op: negation has walker nodes and keeps that route, and
     NOT and the null tests are BOOL-valued. The result type varies per op and
@@ -328,13 +341,8 @@ def _is_num_typepres_output(imm e: Expr) -> Bool:
             op == UN_ABS or op == UN_SIGN or op == UN_TRUNC or op == UN_ROUND
             or op == UN_BIT_COUNT
         )
-    if e.tag == EXPR_ALIAS and e.alias_child_ref().tag == EXPR_UNARY_OP:
-        var aop = e.alias_child_ref().unary_op()
-        return (
-            aop == UN_ABS or aop == UN_SIGN
-            or aop == UN_TRUNC or aop == UN_ROUND
-            or aop == UN_BIT_COUNT
-        )
+    if e.tag == EXPR_ALIAS:
+        return _is_num_typepres_output(e.alias_child_ref())
     return False
 
 
@@ -498,7 +506,7 @@ def _strict_overlay_input_scan(
 def _is_nested_extract_output(imm e: Expr) -> Bool:
     """True iff `e` reads one value out of a nested or JSON cell
     (`EXPR_STRUCT_FIELD`, `EXPR_STRUCT_FIELD_IDX`, `EXPR_MAP_GET`,
-    `EXPR_JSON_EXTRACT`), or is an alias of one.
+    `EXPR_JSON_EXTRACT`), under any number of aliases.
 
     A nested extract inside a family that has its own arm
     (`upper(struct_extract(s, 'city'))`) is served through that family's
@@ -513,20 +521,13 @@ def _is_nested_extract_output(imm e: Expr) -> Bool:
     ):
         return True
     if e.tag == EXPR_ALIAS:
-        var c = e.alias_child_ref().tag
-        if (
-            c == EXPR_STRUCT_FIELD
-            or c == EXPR_STRUCT_FIELD_IDX
-            or c == EXPR_MAP_GET
-            or c == EXPR_JSON_EXTRACT
-        ):
-            return True
+        return _is_nested_extract_output(e.alias_child_ref())
     return False
 
 
 def _is_extract_output(imm e: Expr) -> Bool:
     """True iff `e` is an `EXPR_EXTRACT` (`extract(<field> FROM x)`, `year(x)`,
-    the `date_trunc(<unit>, x)` family) or an alias of one.
+    the `date_trunc(<unit>, x)` family) under any number of aliases.
 
     The walkers' extract node needs the operand's tick unit, and the
     translator's family map answers only "I64" for DATE32 and every TIMESTAMP
@@ -535,6 +536,6 @@ def _is_extract_output(imm e: Expr) -> Bool:
     declined."""
     if e.tag == EXPR_EXTRACT:
         return True
-    if e.tag == EXPR_ALIAS and e.alias_child_ref().tag == EXPR_EXTRACT:
-        return True
+    if e.tag == EXPR_ALIAS:
+        return _is_extract_output(e.alias_child_ref())
     return False

@@ -6,8 +6,10 @@
 # output `Schema`, the payload of a physical plan's project operator) over a
 # `RecordBatch` already in memory, and returns the projected batch.
 #
-# Each output expression takes one route (`compute_project_routes`):
-#   * a column reference, under any number of aliases, is copied;
+# Each output expression takes one route (`compute_project_routes`). An
+# alias is a name only, so an expression under any number of aliases takes
+# the route of the expression itself:
+#   * a column reference is copied;
 #   * a literal is broadcast to the batch's row count;
 #   * CASE goes to `komira_batch_eval._eval_when_expr`;
 #   * REGEXP, SUBSTRING, the string functions, the type-preserving numeric
@@ -63,15 +65,6 @@ from komira_kernels.runtime_expr import RuntimeExpr
 from komira_plan_expr.expr import (
     Expr,
     EXPR_ALIAS,
-    EXPR_CAST,
-    EXPR_EXTRACT,
-    EXPR_LITERAL,
-    EXPR_REGEXP,
-    EXPR_STRING_FN,
-    EXPR_STRING_FN_N,
-    EXPR_SUBSTRING,
-    EXPR_UNARY_OP,
-    EXPR_WHEN,
 )
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_ir.expr_udf_sites import expr_carries_udf_call
@@ -94,6 +87,7 @@ from .compute_project_routes import (
     _passthrough_storage_compatible,
     _strict_overlay_input_scan,
     _varlen_offset_width_alias,
+    _literal_under_aliases,
     _when_expr_ref,
     is_literal_output_expr,
 )
@@ -118,6 +112,17 @@ def _infer_computed_family(
         return _infer_runtime_dtype(e, name_to_dtype)
     except:
         return RUNTIME_DTYPE_UNSUPPORTED  # cov: unreachable every Dict read in _infer_runtime_dtype is guarded by a membership test
+
+
+def _eval_when_under_aliases(
+    imm e: Expr, imm batch: RecordBatch
+) raises -> Column[HeapRegion]:
+    """`_eval_when_expr` of the CASE `e` is under any number of aliases.
+    Requires `_when_expr_ref(e)`. The CASE evaluator has no alias arm, so
+    every alias level is unwrapped here."""
+    if e.tag == EXPR_ALIAS:
+        return _eval_when_under_aliases(e.alias_child_ref(), batch)
+    return _eval_when_expr(e, batch)
 
 
 def _column_conforms(
@@ -393,11 +398,7 @@ def _eval_project_exprs_impl[
         # zone); nullability follows the broadcast column, which has no
         # validity bitmap.
         if is_literal_output_expr(e):
-            var lit_sv: ScalarValue
-            if e.tag == EXPR_LITERAL:
-                lit_sv = e.literal_value()
-            else:
-                lit_sv = e.alias_child_ref().literal_value()
+            var lit_sv = _literal_under_aliases(e)
             if lit_sv.is_null():
                 return None
             var lit_col = broadcast_scalar(lit_sv, n_rows)
@@ -413,11 +414,7 @@ def _eval_project_exprs_impl[
         # CASE: `_eval_when_expr` keeps validity, builds STRING results and
         # raises on a THEN/ELSE type mismatch (that raise propagates).
         if _when_expr_ref(e):
-            var case_col: Column[HeapRegion]
-            if e.tag == EXPR_WHEN:
-                case_col = _eval_when_expr(e, batch)
-            else:
-                case_col = _eval_when_expr(e.alias_child_ref(), batch)
+            var case_col = _eval_when_under_aliases(e, batch)
             if not _column_conforms(case_col, declared_at, n_rows):
                 return None
             var case_nullable = Bool(case_col._validity)
@@ -428,11 +425,7 @@ def _eval_project_exprs_impl[
         # REGEXP: BOOL for `regexp_like`, STRING for the value forms. An
         # evaluation error (an unknown named group) propagates.
         if _is_regexp_output(e):
-            var rx_col: Column[HeapRegion]
-            if e.tag == EXPR_REGEXP:
-                rx_col = _eval_column_expr(e, batch)
-            else:
-                rx_col = _eval_column_expr(e.alias_child_ref(), batch)
+            var rx_col = _eval_column_expr(e, batch)
             if not _column_conforms(rx_col, declared_at, n_rows):
                 return None
             var rx_nullable = Bool(rx_col._validity)
@@ -441,11 +434,7 @@ def _eval_project_exprs_impl[
             continue
 
         if _is_substring_output(e):
-            var sub_col: Column[HeapRegion]
-            if e.tag == EXPR_SUBSTRING:
-                sub_col = _eval_column_expr(e, batch)
-            else:
-                sub_col = _eval_column_expr(e.alias_child_ref(), batch)
+            var sub_col = _eval_column_expr(e, batch)
             if not _column_conforms(sub_col, declared_at, n_rows):
                 return None
             var sub_nullable = Bool(sub_col._validity)
@@ -456,11 +445,7 @@ def _eval_project_exprs_impl[
         # The string functions: the result type is per op, so the column is
         # checked against whatever the projection declared.
         if _is_string_fn_output(e):
-            var sfn_col: Column[HeapRegion]
-            if e.tag == EXPR_STRING_FN or e.tag == EXPR_STRING_FN_N:
-                sfn_col = _eval_column_expr(e, batch)
-            else:
-                sfn_col = _eval_column_expr(e.alias_child_ref(), batch)
+            var sfn_col = _eval_column_expr(e, batch)
             if not _column_conforms(sfn_col, declared_at, n_rows):
                 return None
             var sfn_nullable = Bool(sfn_col._validity)
@@ -472,11 +457,7 @@ def _eval_project_exprs_impl[
         # op and per operand, so the declared-type check is what stops a
         # kernel result of another width from reaching a consumer.
         if _is_num_typepres_output(e):
-            var num_col: Column[HeapRegion]
-            if e.tag == EXPR_UNARY_OP:
-                num_col = _eval_column_expr(e, batch)
-            else:
-                num_col = _eval_column_expr(e.alias_child_ref(), batch)
+            var num_col = _eval_column_expr(e, batch)
             if not _column_conforms(num_col, declared_at, n_rows):
                 return None
             var num_nullable = Bool(num_col._validity)
@@ -489,11 +470,7 @@ def _eval_project_exprs_impl[
         # column evaluator reads the call's output column off `batch`; it
         # calls nothing, and a batch without that column raises by name.
         if expr_carries_udf_call(e):
-            var udf_col: Column[HeapRegion]
-            if e.tag == EXPR_ALIAS:
-                udf_col = _eval_column_expr(e.alias_child_ref(), batch)
-            else:
-                udf_col = _eval_column_expr(e, batch)
+            var udf_col = _eval_column_expr(e, batch)
             if not _column_conforms(udf_col, declared_at, n_rows):
                 return None
             var udf_nullable = Bool(udf_col._validity)
@@ -506,11 +483,7 @@ def _eval_project_exprs_impl[
         # time zone); nullability follows the produced column, whose kernel
         # keeps the operand's validity.
         if _is_extract_output(e):
-            var tm_col: Column[HeapRegion]
-            if e.tag == EXPR_EXTRACT:
-                tm_col = _eval_column_expr(e, batch)
-            else:
-                tm_col = _eval_column_expr(e.alias_child_ref(), batch)
+            var tm_col = _eval_column_expr(e, batch)
             if not _column_conforms(tm_col, declared_at, n_rows):
                 return None
             var tm_field = out_schema.field_at(i)
@@ -524,11 +497,7 @@ def _eval_project_exprs_impl[
         # validity bitmap, so the field's nullability is read off it: the
         # schema then describes the buffer that was produced.
         if _is_null_test_output(e):
-            var nt_col: Column[HeapRegion]
-            if e.tag == EXPR_UNARY_OP:
-                nt_col = _eval_column_expr(e, batch)
-            else:
-                nt_col = _eval_column_expr(e.alias_child_ref(), batch)
+            var nt_col = _eval_column_expr(e, batch)
             if not _column_conforms(nt_col, declared_at, n_rows):
                 return None
             var nt_nullable = Bool(nt_col._validity)
@@ -541,11 +510,7 @@ def _eval_project_exprs_impl[
         # children); nullability follows the produced column (a missing map
         # key is NULL).
         if _is_nested_extract_output(e):
-            var ne_col: Column[HeapRegion]
-            if e.tag == EXPR_ALIAS:
-                ne_col = _eval_column_expr(e.alias_child_ref(), batch)
-            else:
-                ne_col = _eval_column_expr(e, batch)
+            var ne_col = _eval_column_expr(e, batch)
             if not _column_conforms(ne_col, declared_at, n_rows):
                 return None
             var ne_field = out_schema.field_at(i)
@@ -558,11 +523,7 @@ def _eval_project_exprs_impl[
         # CAST. The field is carried from `out_schema`: a cast to
         # DECIMAL(p, s) keeps p and s, which the three-argument ctor zeroes.
         if _is_cast_output(e):
-            var cast_col: Column[HeapRegion]
-            if e.tag == EXPR_CAST:
-                cast_col = _eval_column_expr(e, batch)
-            else:
-                cast_col = _eval_column_expr(e.alias_child_ref(), batch)
+            var cast_col = _eval_column_expr(e, batch)
             if not _column_conforms(cast_col, declared_at, n_rows):
                 return None
             var cast_field = out_schema.field_at(i)
