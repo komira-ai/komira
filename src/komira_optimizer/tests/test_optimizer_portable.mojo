@@ -9,8 +9,11 @@
 #     nothing to stamp and no scalar needs binding, its output renders exactly
 #     as `optimize`'s.
 #   * It turns off payload narrowing (a host-local rule) and folds no value
-#     from an execution; a plan that needs one is refused by name, and the
-#     decorrelated broadcast shape (which needs none) is kept.
+#     from an execution; a plan that needs one is refused by name with its
+#     site count, and the decorrelated broadcast shape (which needs none) is
+#     kept. A pass's own refusal is raised unchanged.
+#   * It refuses a profile version it does not implement before any pass
+#     runs.
 #   * It reads `OptimizerConfig` from its argument only.
 #   * Its output is the same bytes for the same input: across repeated runs on
 #     separately built copies of one plan, and when the order of the columns
@@ -127,14 +130,15 @@ def _global_agg() -> LogicalPlan:
     return LogicalPlan.aggregate(ExprArray(), aggs^, _scan("orders.parquet", on))
 
 
-def _grouped_agg() -> LogicalPlan:
-    """Project [v] over SUM(o_total) AS v GROUP BY o_total: one row per group."""
+def _grouped_agg(path: String = "orders.parquet") -> LogicalPlan:
+    """Project [v] over SUM(o_total) AS v GROUP BY o_total over `path`: one
+    row per group."""
     var on: List[String] = ["o_total"]
     var aggs = AggExprArray()
     aggs.append(AggExpr(AGG_SUM, Optional(Expr.col_ref("o_total")), Optional(String("v"))))
     var gb = ExprArray()
     gb.append(Expr.col_ref("o_total"))
-    var agg = LogicalPlan.aggregate(gb^, aggs^, _scan("orders.parquet", on))
+    var agg = LogicalPlan.aggregate(gb^, aggs^, _scan(path, on))
     var pe = ExprArray()
     pe.append(Expr.col_ref("v"))
     return LogicalPlan.project(pe^, agg^)
@@ -149,6 +153,45 @@ def _scalar_subquery_filter(var inner: LogicalPlan) -> LogicalPlan:
         Expr.correlated_subquery(inner^, List[String](), CORR_KIND_SCALAR),
     )
     return LogicalPlan.filter(pred^, _scan("customer.parquet", cn))
+
+
+def _two_scalar_subquery_filters() -> LogicalPlan:
+    """Filter(c_custkey > (scalar subquery over grouped lineitem)) over
+    Filter(c_acctbal > (scalar subquery over grouped orders)) over customer:
+    two sites, each needing an executed sub-plan. The inner plans differ, so
+    the two requests are not de-duplicated into one. (One Filter ANDing the
+    two comparisons is refused by `flatten_dependent_joins` instead: it lowers
+    no scalar comparison from an AND chain.)"""
+    var cn: List[String] = ["c_custkey", "c_acctbal"]
+    var lower = Expr.binary(
+        BIN_GT,
+        Expr.col_ref("c_acctbal"),
+        Expr.correlated_subquery(
+            _grouped_agg("orders.parquet"), List[String](), CORR_KIND_SCALAR
+        ),
+    )
+    var upper = Expr.binary(
+        BIN_GT,
+        Expr.col_ref("c_custkey"),
+        Expr.correlated_subquery(
+            _grouped_agg("lineitem.parquet"), List[String](), CORR_KIND_SCALAR
+        ),
+    )
+    return LogicalPlan.filter(
+        upper^, LogicalPlan.filter(lower^, _scan("customer.parquet", cn))
+    )
+
+
+def _correlated_subquery_in_project() -> LogicalPlan:
+    """Project [c_custkey, (correlated scalar subquery on c_custkey) AS s]:
+    a shape `flatten_dependent_joins` refuses."""
+    var cn: List[String] = ["c_custkey", "c_acctbal"]
+    var pe = ExprArray()
+    pe.append(Expr.col_ref("c_custkey"))
+    pe.append(Expr.alias(
+        Expr.correlated_subquery(_global_agg(), _l1("c_custkey"), CORR_KIND_SCALAR), "s"
+    ))
+    return LogicalPlan.project(pe^, _scan("customer.parquet", cn))
 
 
 def _broadcast_site() -> LogicalPlan:
@@ -446,20 +489,59 @@ def test_portable_refuses_a_scalar_broadcast_site() raises:
     )
 
 
+def test_portable_refusal_counts_every_site_that_needs_execution() raises:
+    """Two scalar subqueries over different grouped aggregates, in two
+    stacked Filters: the refusal says 2 sites.
+
+    Defect caught: a refusal that reports a fixed or wrong count (a constant
+    1, a Bool) instead of `deps.num_requests()`; every other refusal fixture
+    has exactly one site."""
+    var msg = _refusal(_two_scalar_subquery_filters(), _v1())
+    assert_equal(
+        msg,
+        PORTABLE_REFUSAL_NEEDS_EXECUTION + ": 2 scalar site(s) need an executed sub-plan",
+    )
+
+
+def test_portable_raises_a_refusing_pass_error_unchanged() raises:
+    """`flatten_dependent_joins` refuses a correlated subquery in a Project;
+    under the v1 profile `optimize_portable` raises that pass's own message.
+
+    Defect caught: a portable entry that swallows a pass's refusal or
+    rewords it (as a needs-execution refusal, say)."""
+    assert_equal(
+        _refusal(_correlated_subquery_in_project(), _v1()),
+        "correlated subquery in Project not yet supported",
+    )
+
+
 def test_portable_refuses_a_profile_version_it_does_not_implement() raises:
-    """Versions 0 and 2 are refused by name before any pass runs; the plan
-    is one every pass accepts.
+    """Versions 0 and 2 are refused by name before any pass runs: on a plan
+    every pass accepts, on two plans whose passes record a request (which
+    would otherwise be refused as needing execution), and on a plan a pass
+    refuses (which would otherwise raise that pass's message).
 
     Defect caught: a portable entry that ignores the profile version and runs
-    the v1 pass set for any version a producer asks for."""
-    var zero = _refusal(_big_small_join(), PortableProfile(0))
-    assert_equal(
-        zero, PORTABLE_REFUSAL_UNKNOWN_PROFILE + ": version 0, this build implements 1"
-    )
-    var two = _refusal(_big_small_join(), PortableProfile(2))
-    assert_equal(
-        two, PORTABLE_REFUSAL_UNKNOWN_PROFILE + ": version 2, this build implements 1"
-    )
+    the v1 pass set for any version a producer asks for; and a version check
+    that runs after the passes (before or after the needs-execution check),
+    so an unknown profile still runs the v1 passes and is reported as
+    whatever they raise."""
+    for v in range(0, 3, 2):
+        var want = (
+            PORTABLE_REFUSAL_UNKNOWN_PROFILE + ": version " + String(v)
+            + ", this build implements 1"
+        )
+        var tag = "version " + String(v)
+        assert_equal(_refusal(_big_small_join(), PortableProfile(v)), want, tag)
+        assert_equal(_refusal(_broadcast_site(), PortableProfile(v)), want, tag)
+        assert_equal(
+            _refusal(_scalar_subquery_filter(_grouped_agg()), PortableProfile(v)),
+            want,
+            tag,
+        )
+        assert_equal(
+            _refusal(_correlated_subquery_in_project(), PortableProfile(v)), want, tag
+        )
 
 
 # -----------------------------------------------------------------------------
