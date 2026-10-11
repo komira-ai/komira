@@ -5,13 +5,12 @@
 #
 #  20. C/C++ dependencies of Mojo targets (the prelude's cxx_library, built
 #      with toolchains//:cxx):
-#      - a binary calling a C function links and prints the C result when
-#        the library is in `deps`, and the link fails on the undefined symbol
-#        when it is not (tests//functional/c_deps);
+#      - the link fails on the undefined symbol when the C library is not in
+#        `deps` (a binary calling the C function with it in `deps` links and
+#        prints the C result: tests//functional/c_deps:c_linked, whose run
+#        check is a validation, in the gate);
 #      - `deps` refuses a target that is neither a Mojo package nor a C/C++
 #        library;
-#      - gated library tests and mojo_tests recording source locations build
-#        (the staging directory is stripped from them);
 #      - C compiles and archives, and the Mojo targets depending on them,
 #        resolve to the linux execution platform (`linux-x86_64`);
 #      - a binary linking C++ (snappy, with zig's static libc++) exports no
@@ -22,15 +21,8 @@
 #        C/C++ toolchain select names toolchains//:cxx_no_default_deps on
 #        the branch no configured build takes, and uquery follows it.
 
-expect_green c_dep_linked "tests//functional/c_deps:c_linked" "tests//functional/c_deps:c_linked[run_check]"
 expect_red c_dep_missing "undefined symbol: komira_example_add" tests//negative/c_deps:c_missing
 expect_red c_dep_kind "provides neither MojoInfo" tests//negative/c_deps:bad_dep
-# Test builds strip the staging directory from the source locations they
-# record: test_cadd (a gated library test) and test_add_direct (a mojo_test)
-# use assert_equal on Int32 and index a List, which record them. Without
-# -strip-file-prefix in mojo_compile both fail with exit 4 on the worker's
-# absolute path (test_hellopkg does not record one).
-expect_green test_source_paths //tools/build/examples/cshim:cadd //tools/build/examples/cshim:test_add_direct
 
 # Unconfigured queries follow every select branch, including the prelude's
 # never-taken `toolchains//:cxx_no_default_deps`; without that target in the

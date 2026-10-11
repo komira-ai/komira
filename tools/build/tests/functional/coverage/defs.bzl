@@ -1,8 +1,9 @@
 """Checks of coverage builds, as build actions: check.sh over the binaries
 (test 41), with debug_relocate, which refuses a file holding a compressed
 section; report.sh over the per-test reports of the coverage runs (test 43);
-cov_plant, a copy of a script with one planted defect, and kcov_stub_dir,
-a kcov distribution whose bin/kcov is a stand-in (test 43); and
+cov_plant, a copy of a script (or a Zig source) with one planted defect,
+cov_zig_tree, a Zig tool's sources with such a copy among them, and
+kcov_stub_dir, a kcov distribution whose bin/kcov is a stand-in (test 43); and
 cov_branch_check, branch_check.sh over a branch coverage run's profile,
 and cov_link_line_check, link_line.sh over a branch coverage link
 (test 47); cov_conda_gate_check, at analysis, that a conda package's joins
@@ -154,6 +155,25 @@ cov_plant = rule(
         "out": attrs.string(),
         "src": attrs.source(),
         "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
+    },
+)
+
+def _zig_tree_impl(ctx):
+    out = ctx.actions.copied_dir(ctx.label.name, ctx.attrs.files)
+    return [DefaultInfo(default_output = out, sub_targets = {
+        f.removesuffix(".zig"): [DefaultInfo(default_output = out.project(f))]
+        for f in ctx.attrs.files
+    })]
+
+# The sources of a Zig tool in one directory (`files`: path -> source), one
+# of them a cov_plant copy: zig resolves a relative @import beside the
+# importing file, so a planted copy is built with the others next to it. Each
+# file is the sub-target of its name without `.zig`, for zig_exe's `src`
+# and `imports`.
+cov_zig_tree = rule(
+    impl = _zig_tree_impl,
+    attrs = {
+        "files": attrs.dict(attrs.string(), attrs.source()),
     },
 )
 

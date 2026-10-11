@@ -1,7 +1,7 @@
 //! cases: runs the real compile wrapper (tools/build/mojo/tools/mojo_compile.zig)
 //! against the stand-in toolchain (standin.zig) and requires each verdict.
 //! Writes one line per case to <report> ("ok <case>" or "BAD <case>: <why>")
-//! and exits 1 if any case is BAD.
+//! and exits 1 if any case is BAD or fewer cases than its floor say ok.
 //!
 //! usage: cases <mojo_compile> <standin> <report>
 //!
@@ -428,6 +428,22 @@ pub fn main() void {
     expect(.{ .name = "manifest", .tc = "tc_missing", .flags = knobs, .mojo = &([_][]const u8{"nap2"} ++ o) }, 2, "toolchain member 'lib/libmissing.so' is missing or empty");
     expect(.{ .name = "noexec", .tc = "tc_noexec", .flags = knobs, .mojo = &([_][]const u8{"nap2"} ++ o) }, 127, "cannot run");
     expect(.{ .name = "noexec_plain", .tc = "tc_noexec", .flags = &.{"--watchdog-idle-secs=0"}, .mojo = &([_][]const u8{"nap2"} ++ o) }, 127, "cannot run");
+
+    // The floor: a run that wrote fewer ok cases than this (a case deleted,
+    // a case that never says ok) is refused here in the action, so the
+    // report cannot pass with less in it. Raise it when a case is added.
+    const floor = 29;
+    var ok_lines: usize = 0;
+    var report_lines = std.mem.splitScalar(u8, report.items, '\n');
+    while (report_lines.next()) |l| {
+        if (std.mem.startsWith(u8, l, "ok ")) ok_lines += 1;
+    }
+    if (ok_lines < floor) {
+        const line = str("BAD floor: {d} ok case(s), fewer than the {d} cases of this runner\n", .{ ok_lines, floor });
+        std.debug.print("{s}", .{line});
+        report.appendSlice(line) catch unreachable;
+        bad = true;
+    }
 
     writeFile(argv[3], report.items);
     std.fs.deleteTreeAbsolute(root) catch {};
