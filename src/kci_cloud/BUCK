@@ -49,6 +49,9 @@ mojo_library(
         "tests/test_cloud_compose_size.mojo",
         "tests/test_cloud_compose_bind.mojo",
         "tests/test_cloud_compose_bind_refusals.mojo",
+        "tests/test_cloud_conformance_kit.mojo",
+        "tests/test_cloud_conformance_kit_late.mojo",
+        "tests/test_cloud_deploy_kit.mojo",
     ],
     visibility = ["PUBLIC"],
 )

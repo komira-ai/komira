@@ -18,7 +18,8 @@
 #    the image rules, `run_as`, `env`, `secret_env` and `command[0]` on a
 #    worker or a container job as on a service; a worker's explicit
 #    `replicas: 0`; retention on a worker; CALL on a worker; a worker with
-#    `run_as` named as a grant's principal.
+#    `run_as` named as a grant's principal. A `run_as` naming a resource
+#    with no type adds nothing: the missing type is reported on it.
 # 3. A GOOD COMPUTE GRAPH IS CLEAN: a worker with every field (command, env
 #    by literal and by a queue's ADDRESS, a secret by name, three replicas,
 #    a `run_as` account that RECEIVEs from the queue), a worker with its own
@@ -154,6 +155,8 @@ def test_every_compute_refusal_in_one_pass() raises:
         + String('{"id":"w-asout","worker":{') + String(IMG)
         + String(',"runAs":{"resource":"runner","standard":"NAME"}}},')
         + String('{"id":"w-asgone","worker":{') + String(IMG) + String(',"runAs":{"resource":"nobody"}}},')
+        + String('{"id":"bare"},')
+        + String('{"id":"w-asbare","worker":{') + String(IMG) + String(',"runAs":{"resource":"bare"}}},')
         + String('{"id":"w-env","worker":{') + String(IMG)
         + String(',"env":{"P":{"param":"region"},"R":{"ref":{"resource":"ghost","standard":"URL"}}}}},')
         + String('{"id":"w-dup","worker":{') + String(IMG)
@@ -177,6 +180,7 @@ def test_every_compute_refusal_in_one_pass() raises:
     _expect(l, "w-asbkt|worker.run_as|", 'run_as must name a service_account; "store" is a bucket')
     _expect(l, "w-asout|worker.run_as|", "run_as names an identity, not one of its outputs")
     _expect(l, "w-asgone|worker.run_as|", 'ref to missing resource "nobody"')
+    _expect(l, "bare|", "")  # an account with no type is reported on itself, once
     _expect(l, "w-env|worker.env.P|", 'release parameter "region" is unresolved')
     _expect(l, "w-env|worker.env.R|", 'ref to missing resource "ghost"')
     _expect(l, "w-dup|worker.secret_env.K|", "the variable is set by env and by secret_env; set it in one")
@@ -185,7 +189,7 @@ def test_every_compute_refusal_in_one_pass() raises:
     _expect(
         l, "g|grant.principal|", '"w-asacct" runs as "runner" and has no identity of its own; name "runner"'
     )
-    assert_equal(len(l), 16, "no other finding")
+    assert_equal(len(l), 17, "no other finding (none on w-asbare's run_as)")
     print("  test_every_compute_refusal_in_one_pass: PASS")
 
 

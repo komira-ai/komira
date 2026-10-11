@@ -643,7 +643,7 @@ def validate_expanded[
     var e = clouds.find(pid)
     if e < 0:
         _ = clouds.resolve(pid.text())  # raises, naming the built-in clouds
-        raise Error(String("unreachable: ") + pid.text())
+        raise Error(String("unreachable: ") + pid.text())  # cov: unreachable resolve raises for every id find did not find
     ref entry = clouds.entries[e]
     var out = graph_findings(clouds.catalog, resources, produced)
     var feeds = feeds_of(resources)
