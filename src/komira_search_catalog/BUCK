@@ -29,7 +29,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # generation record it can build and sees each refused. The two fault tests
 # wrap the in-memory store so a chosen read, write or LIST fails, loses its
 # race or deletes a key on cue: a failure that does not prove absence reaches
-# the caller, a lost compare-and-swap is retried 64 times, a torn head
+# the caller, a lost compare-and-swap is tried at most 64 times, a torn head
 # recovery is retried while the log start moves, and the reaper's listing is
 # checked on a store whose LIST folds sub-directories.
 mojo_library(

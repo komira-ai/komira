@@ -13,9 +13,17 @@
 #      looping or answering from a short lineage.
 #   3. test_a_failed_listing_is_not_retried_as_torn: a LIST failure that is
 #      not a torn lineage reaches a cold reader after exactly one LIST.
+#      test_a_torn_recovery_is_tried_exactly_twice_at_log_start_0: with the
+#      log start at 0 and not moving, publish, the live listing and
+#      generation() each recover the head twice (the unconditional retry),
+#      then raise without a third try.
 #   4. test_publish_past_a_stale_head_below_the_log_start_is_refused: a cold
 #      writer that trusts a `_HEAD` below `_LOG_START` wins a slot no reader
 #      replays; the publish raises instead of reporting success.
+#      test_cold_publish_into_a_fully_reaped_lineage_wins_the_log_start: the
+#      boundary of that refusal: every chunk reaped, the recovered head is
+#      log start - 1, and the publish that wins exactly the log-start slot
+#      succeeds and is visible.
 #   5. test_retirement_check_steps_over_an_absent_chunk_to_a_seal: the
 #      check reads down past a chunk the store proves absent, finds the seal
 #      and refuses the publish.
@@ -402,6 +410,61 @@ def test_a_failed_listing_is_not_retried_as_torn() raises:
     _ = inner^
 
 
+def _torn_at_log_start_0(inner: _Inner) raises:
+    """`_three_chunks_without_head` with chunk 0 deleted: no `_LOG_START`
+    object, so the log start reads 0, and recovery finds chunk 0 missing."""
+    _three_chunks_without_head(inner)
+    inner.delete(chunk_key(_L, Int64(0)))
+
+
+def _error_of_op(mut meta: SearchMetastore[_FaultStore], op: Int) -> String:
+    try:
+        if op == 0:
+            _ = meta.publish(_summary(3))
+        elif op == 1:
+            _ = meta.list_live_splits()
+        else:
+            _ = meta.generation()
+    except e:
+        return String(e)
+    return String("")
+
+
+def test_a_torn_recovery_is_tried_exactly_twice_at_log_start_0() raises:
+    # Each head recovery GETs chunk 0 once and finds it missing. A rule that
+    # lets the first `skip` GETs through and fails the next one with
+    # UNAVAILABLE counts the recoveries: with skip 1 the second recovery
+    # meets it, so there was a retry although the log start (0) never
+    # moved; with skip 2 nothing meets it, so there was no third try.
+    var chunk0 = chunk_key(_L, Int64(0)).raw()
+    var names = List[String]()
+    names.append("publish")
+    names.append("list_live_splits")
+    names.append("generation")
+    for op in range(3):
+        var inner = _Inner()
+        _torn_at_log_start_0(inner)
+        _arm(inner, "get", chunk0, _UNAVAILABLE, skip=1, count=1)
+        var cold = _meta(_plain(inner), _L)
+        var msg = _error_of_op(cold, op)
+        assert_true(
+            msg.find("UNAVAILABLE") >= 0,
+            names[op] + ": the second recovery reads chunk 0: " + msg,
+        )
+        assert_equal(_fired(inner, "get", chunk0), 1, names[op])
+        _ = inner^
+        var inner2 = _Inner()
+        _torn_at_log_start_0(inner2)
+        _arm(inner2, "get", chunk0, _UNAVAILABLE, skip=2, count=1)
+        var cold2 = _meta(_plain(inner2), _L)
+        var msg2 = _error_of_op(cold2, op)
+        assert_true(msg2.find(_TORN) >= 0, names[op] + ": " + msg2)
+        assert_equal(
+            _fired(inner2, "get", chunk0), 0, names[op] + ": no third try"
+        )
+        _ = inner2^
+
+
 # =============================================================================
 # 4-6. The publish retirement check.
 # =============================================================================
@@ -429,6 +492,30 @@ def test_publish_past_a_stale_head_below_the_log_start_is_refused() raises:
         0,
         "the refused chunk is not visible to a reader",
     )
+    _ = inner^
+
+
+def test_cold_publish_into_a_fully_reaped_lineage_wins_the_log_start() raises:
+    var inner = _Inner()
+    var w = _meta(_plain(inner), _L)
+    _ = w.publish(_summary(1))
+    _ = w.publish(_summary(2))
+    w.retire_at(Int64(0), Int64(0))
+    w.retire_at(Int64(1), Int64(0))
+    inner.delete(head_key(_L))
+    assert_true(w.reap_chunk(Int64(0), Int64(1000), Int64(1000)), "reap 0")
+    assert_true(w.reap_chunk(Int64(1), Int64(1000), Int64(1000)), "reap 1")
+    assert_equal(
+        read_log_start_seq(inner, _L), Int64(2), "both chunks are reaped"
+    )
+    # A cold writer recovers head = log start - 1 = 1 from an empty listing
+    # and wins slot 2, exactly the log start: a slot every reader replays.
+    var cold = _meta(_plain(inner), _L)
+    var r = cold.publish(_summary(3))
+    assert_equal(r.chunk_seq, Int64(2), "the publish wins the log-start slot")
+    var live = _meta(_plain(inner), _L).list_live_splits()
+    assert_equal(len(live), 1, "a cold reader sees the new split only")
+    assert_true(_has_uuid(live, _uuid(3)), "the publish is visible")
     _ = inner^
 
 

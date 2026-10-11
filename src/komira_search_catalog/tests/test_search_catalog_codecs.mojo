@@ -7,8 +7,8 @@
 #   1. test_split_summary_round_trips_every_slot: a merged summary with every
 #      reserved slot filled decodes field for field, and an ingest summary
 #      encodes without the compaction slot.
-#   2. test_merge_input_at_refuses_out_of_range: -1, n and n + 1 raise; every
-#      index in range returns its own 16 bytes.
+#   2. test_merge_input_at_refuses_out_of_range: -1, -3, n and n + 1 raise;
+#      every index in range returns its own 16 bytes.
 #   3. test_decode_refuses_a_short_header: bodies of 0 to 16 bytes raise the
 #      header error; 17 bytes reach the first i64 and raise its truncation.
 #   4. test_decode_refuses_truncation_at_every_offset: a merged body cut at
