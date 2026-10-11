@@ -49,7 +49,7 @@ The rewrite has to satisfy two things at once:
 So a directory of length L becomes `/` and L-1 `_`. A name under the
 placeholder could be mapped with `--replace-src-path='^/_+:<source root>'`
 (the expression matches the placeholder of any length, so no length needs to
-agree between actions), as kcov's own check 8 does
+agree between actions), as kcov's own check 6 does
 ([kcov](../../toolchains/kcov/README.md)); in a Mojo binary that is only the
 C runtime, which is not measured, and the Mojo names are relative (see the
 table below), so [cov_run](#cov_run) uses the one replacement kcov allows
@@ -421,29 +421,32 @@ executable is built behind them (`unit_tests`), so it does not exist unless
 they pass. They build the tool from source in `zig test`'s own mode, so they
 are not the shipped bytes. `cov_zig`'s unit tests take a stand-in zig
 ([cov_zig_stub.zig](cov_zig_stub.zig), `:cov_zig_stub`) and
-`:debug_relocate` through `exes`, and run what `entry` says to exec as
-`main` would. The process cases
+`:debug_relocate` through `env_tools` (`COV_ZIG_STUB`, `DEBUG_RELOCATE`),
+and run what `entry` says to exec as `main` would. The process cases
 ([cov_normalize_exe_test.zig](cov_normalize_exe_test.zig),
 `:cov_normalize_exe_test`; [cov_zig_exe_test.zig](cov_zig_exe_test.zig),
-`:cov_zig_exe_test`) take the shipped executable (`exes`) and run it as a
-child process. `cov_normalize`'s: exit 0 with the golden output, exit 1 with
-a refusal and exit 2 with the usage line, each message on stderr and nothing
-on stdout. `cov_zig`'s run it from a link directory holding it,
-`:debug_relocate` and the pinned zig (`exes` takes the toolchain's
-directory): a C program compiled and linked through it, a release level
-refused (exit 1) and a link directory with no `real/zig` (exit 2); and with
-the stand-in as `real/zig`, the logical-directory cases again with `$PWD`
-and `$BUCK_SCRATCH_PATH` in the process's environment, which `main` reads
-(the ELF fixture both sets share: [cov_zig_elf.zig](cov_zig_elf.zig)). They are
-a validation of the public target (`:cov_normalize`, `:cov_zig`). The cases
-of `debug_relocate` are a script (`kcov_tool_cases` in [defs.bzl](defs.bzl)),
-and its public target depends on them. `:cov_link` and `:cov_run` take the
-public targets, so a coverage build is gated by their cases. Buck2 runs a
-dependency's validations with any build that uses it, so the tool cannot be
-built, or used, unless its cases pass. The public target and its script or
-process cases take the executable as an `exec_dep` on the same execution
-platform, so those cases test the very binary the public target hands out;
-the unit tests do not.
+`:cov_zig_exe_test`) take the shipped executable (`env_tools`: its path is in
+the test's environment, and the test fails, never passes, without it) and run
+it as a child process with an environment the test builds. `cov_normalize`'s
+(`COV_NORMALIZE`, an empty environment): exit 0 with the golden output, exit
+1 with a refusal, exit 1 with no output when a file size limit cuts the write
+short, and exit 2 with the usage line, each message on stderr and nothing on
+stdout. `cov_zig`'s run it (`COV_ZIG`) from a link directory holding it,
+`:debug_relocate` (`DEBUG_RELOCATE`) and the pinned zig (`PINNED_ZIG`, the
+toolchain's directory): a C program compiled and linked through it, a release
+level refused (exit 1) and a link directory with no `real/zig` (exit 2); and
+with the stand-in (`COV_ZIG_STUB`) as `real/zig`, the logical-directory cases
+again with `$PWD` and `$BUCK_SCRATCH_PATH` in the process's environment,
+which `main` reads (the ELF fixture both sets share:
+[cov_zig_elf.zig](cov_zig_elf.zig)). They are a validation of the public
+target (`:cov_normalize`, `:cov_zig`). The cases of `debug_relocate` are a
+script (`kcov_tool_cases` in [defs.bzl](defs.bzl)), and its public target
+depends on them. `:cov_link` and `:cov_run` take the public targets, so a
+coverage build is gated by their cases. Buck2 runs a dependency's validations
+with any build that uses it, so the tool cannot be built, or used, unless its
+cases pass. The public target and its script or process cases take the
+executable as an `exec_dep` on the same execution platform, so those cases
+test the very binary the public target hands out; the unit tests do not.
 
 The cases that need a write to fail set a file size limit (`ulimit -f` in a
 script, `setrlimit` in a unit test, with `SIGXFSZ` ignored), so the write

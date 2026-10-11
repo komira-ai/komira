@@ -65,6 +65,11 @@ mojo_library(
         # the child's whole environment, the pixi argv, the manifest, and
         # the installed README's program byte-equal to SOURCE mode's, golden
         "tests/test_install_env_golden.mojo",
+        # the native install checks (#1363's lib_files rows, `__glibc`):
+        # a sha256 mismatch, a missing file, a mode 644 .so, a dangling
+        # link, an extra .so, a __glibc of 2.38, NEEDED outside the
+        # environment, no DF_SYMBOLIC, the loaded-from record, the ELF reader
+        "tests/test_native_install.mojo",
     ],
     visibility = ["PUBLIC"],
 )

@@ -3,8 +3,10 @@
 # (//third_party/aws-lc:crypto). Each name becomes -D<name> on every s2n-tls
 # compile, as CMake's feature_probe does.
 #
-# Not a guess: tools/build/tests/c_libs_tests.sh compiles every probe
-# (tests//functional/s2n_probes) and fails unless exactly the probes named here pass.
+# Not a guess: tests//functional/s2n_probes compiles the probe of each name
+# here (third_party/s2n-tls/BUCK refuses a name with no probe at load), and
+# tools/build/tests/c_libs_tests.sh requires every other probe to fail
+# (tests//negative/s2n_probes).
 S2N_FEATURES = [
     "S2N_ATOMIC_SUPPORTED",
     "S2N_CLOEXEC_SUPPORTED",

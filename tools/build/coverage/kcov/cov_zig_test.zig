@@ -7,18 +7,30 @@
 //! directory `shim` of its own: `shim/real/zig` is the stand-in
 //! cov_zig_stub.zig (it records its arguments in `shim/real/argv` and copies
 //! a given ELF file to the `-o` output) and `shim/debug_relocate` the real
-//! one, both from module `exes`. When `entry` says to exec a command line,
-//! the case runs that command line as main's exec would. The fixtures put the
+//! one, their paths in the environment as COV_ZIG_STUB and DEBUG_RELOCATE
+//! (the zig_test's `env_tools`; without them every case fails). When `entry`
+//! says to exec a command line, the case runs that command line as main's
+//! exec would. The fixtures put the
 //! working directory where a C runtime unit's DW_AT_comp_dir would be. The
 //! cases over the pinned zig run the shipped executable: cov_zig_exe_test.zig.
 
 const std = @import("std");
 const Z = @import("cov_zig.zig");
 const elf = @import("cov_zig_elf.zig").elf;
-const exes = @import("exes");
 
 const TGT = "x86_64-linux-gnu.2.34";
 const Args = []const []const u8;
+
+/// The path of a tool the test runs, from the environment variable `name`,
+/// which the zig_test's `env_tools` sets. A run without it fails loudly; it
+/// never passes unchecked.
+fn tool(a: std.mem.Allocator, name: []const u8) ![]const u8 {
+    const v = std.process.getEnvVarOwned(a, name) catch {
+        std.debug.print("the test target does not pass {s} (env_tools), so the tool cannot be run\n", .{name});
+        return error.TestToolMissing;
+    };
+    return std.fs.cwd().realpathAlloc(a, v);
+}
 
 const Result = struct {
     status: u8,
@@ -54,8 +66,8 @@ const Case = struct {
         const a = c.alloc();
         c.root = try c.tmp.dir.realpathAlloc(a, ".");
         try c.tmp.dir.makePath("shim/real");
-        try c.tmp.dir.symLink(try std.fs.cwd().realpathAlloc(a, exes.stub), "shim/real/zig", .{});
-        try c.tmp.dir.symLink(try std.fs.cwd().realpathAlloc(a, exes.debug_relocate), "shim/debug_relocate", .{});
+        try c.tmp.dir.symLink(try tool(a, "COV_ZIG_STUB"), "shim/real/zig", .{});
+        try c.tmp.dir.symLink(try tool(a, "DEBUG_RELOCATE"), "shim/debug_relocate", .{});
         c.shim = try c.path("shim");
         try c.tmp.dir.makePath(name);
         c.dir = try c.tmp.dir.openDir(name, .{});

@@ -2,20 +2,31 @@
 //! of this file, run as a build action by `:cov_zig_exe_test`, a validation
 //! of `:cov_zig`. The cases in cov_zig_test.zig call the program's `entry`
 //! in-process over a stand-in zig; these run the executable the public
-//! target hands out (module `exes`: `cov_zig`, `debug_relocate` and `zig`,
-//! the pinned zig's directory; `stub`, the stand-in zig of
-//! cov_zig_test.zig) as a child process from a link directory like
-//! `:cov_link`'s, and check what `main` adds (the command line taken from
-//! argv[1..] and getcwd, $PWD and $BUCK_SCRATCH_PATH read from the process's
-//! environment, the exec of a command that does not link, the messages on
-//! stderr and none on stdout, `entry`'s status as the exit status) and the
-//! pinned zig end to end.
+//! target hands out (the zig_test's `env_tools`, paths in the environment:
+//! COV_ZIG, DEBUG_RELOCATE, PINNED_ZIG the pinned zig's directory, and
+//! COV_ZIG_STUB the stand-in zig of cov_zig_test.zig; without them every
+//! case fails) as a child process, with an environment built here, from a
+//! link directory like `:cov_link`'s, and check what `main` adds (the
+//! command line taken from argv[1..] and getcwd, $PWD and $BUCK_SCRATCH_PATH
+//! read from the process's environment, the exec of a command that does not
+//! link, the messages on stderr and none on stdout, `entry`'s status as the
+//! exit status) and the pinned zig end to end.
 
 const std = @import("std");
-const exes = @import("exes");
 const elf = @import("cov_zig_elf.zig").elf;
 
 const TGT = "x86_64-linux-gnu.2.34";
+
+/// The path of a tool the test runs, from the environment variable `name`,
+/// which the zig_test's `env_tools` sets. A run without it fails loudly; it
+/// never passes unchecked.
+fn tool(a: std.mem.Allocator, name: []const u8) ![]const u8 {
+    const v = std.process.getEnvVarOwned(a, name) catch {
+        std.debug.print("the test target does not pass {s} (env_tools), so the tool cannot be run\n", .{name});
+        return error.TestToolMissing;
+    };
+    return std.fs.cwd().realpathAlloc(a, v);
+}
 const HELLO = "int value(int x) {\n    return x + 1;\n}\nint main(void) {\n    return value(-1);\n}\n";
 
 const Run = struct {
@@ -44,13 +55,13 @@ const Dir = struct {
         const a = d.arena.allocator();
         d.root = try d.tmp.dir.realpathAlloc(a, ".");
         try d.tmp.dir.makePath("link");
-        try d.tmp.dir.symLink(try std.fs.cwd().realpathAlloc(a, exes.cov_zig), "link/zig", .{});
-        try d.tmp.dir.symLink(try std.fs.cwd().realpathAlloc(a, exes.debug_relocate), "link/debug_relocate", .{});
+        try d.tmp.dir.symLink(try tool(a, "COV_ZIG"), "link/zig", .{});
+        try d.tmp.dir.symLink(try tool(a, "DEBUG_RELOCATE"), "link/debug_relocate", .{});
         switch (real) {
-            .zig => try d.tmp.dir.symLink(try std.fs.cwd().realpathAlloc(a, exes.zig), "link/real", .{}),
+            .zig => try d.tmp.dir.symLink(try tool(a, "PINNED_ZIG"), "link/real", .{}),
             .stub => {
                 try d.tmp.dir.makePath("link/real");
-                try d.tmp.dir.symLink(try std.fs.cwd().realpathAlloc(a, exes.stub), "link/real/zig", .{});
+                try d.tmp.dir.symLink(try tool(a, "COV_ZIG_STUB"), "link/real/zig", .{});
             },
             .none => {},
         }
