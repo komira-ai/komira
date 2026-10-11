@@ -25,8 +25,11 @@
 //! the green fixture in the environment check, which compares
 //! LD_LIBRARY_PATH with that pinned lib path. aquery prints no env, so the
 //! env entry is checked only by that comparison at run time), a
-//! duckdb_dist version that is not digits and dots (three dist_version_*
-//! refusals), and each of the sql_oracle analysis `fail()` calls deleted, or
+//! duckdb_dist version that is not digits and dots (the dist_version_*
+//! refusals, one per kind of character the pattern must not admit: a quote,
+//! a letter, a space, a semicolon, `/` and `:` next to the digit range, and
+//! empty; a version of 0 and 9, DIST_BOUNDS, must build, so a narrowed digit
+//! range fails too), and each of the sql_oracle analysis `fail()` calls deleted, or
 //! one arm of a condition that no other arm covers: the empty, absolute and
 //! trailing-`/` input paths each fall through to the segment message, a `*`
 //! segment or output name passes once the name pattern is dropped or
@@ -44,6 +47,8 @@ const lib = @import("lib/lib.zig");
 const PKG = "tests//negative/sql_oracle:";
 const GREEN = "tests//functional/sql_oracle:check";
 const WRITE = "tests//functional/sql_oracle:write";
+/// A duckdb_dist whose version is "0.9": both ends of the digit range.
+const DIST_BOUNDS = "tests//functional/sql_oracle:dist_version_digit_bounds";
 
 const REFUSALS = [_]lib.Row{
     .{
@@ -147,14 +152,39 @@ const REFUSALS = [_]lib.Row{
         .text = PKG ++ "input_glob_segment: input \"data/*.csv\" holds a segment that is not a plain name (^[A-Za-z0-9_][A-Za-z0-9_.-]*$)",
     },
     .{
+        .name = "dist_version_injection",
+        .target = PKG ++ "dist_version_injection",
+        .text = PKG ++ "dist_version_injection: version \"1.5.6' AND false THEN NULL END; --\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
+    },
+    .{
         .name = "dist_version_quote",
         .target = PKG ++ "dist_version_quote",
-        .text = PKG ++ "dist_version_quote: version \"1.5.6' AND false THEN NULL END; --\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
+        .text = PKG ++ "dist_version_quote: version \"1.5.6'\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
     },
     .{
         .name = "dist_version_leading_v",
         .target = PKG ++ "dist_version_leading_v",
         .text = PKG ++ "dist_version_leading_v: version \"v1.5.6\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
+    },
+    .{
+        .name = "dist_version_space",
+        .target = PKG ++ "dist_version_space",
+        .text = PKG ++ "dist_version_space: version \"1.5 6\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
+    },
+    .{
+        .name = "dist_version_semicolon",
+        .target = PKG ++ "dist_version_semicolon",
+        .text = PKG ++ "dist_version_semicolon: version \"1.5;6\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
+    },
+    .{
+        .name = "dist_version_slash",
+        .target = PKG ++ "dist_version_slash",
+        .text = PKG ++ "dist_version_slash: version \"1.5/6\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
+    },
+    .{
+        .name = "dist_version_colon",
+        .target = PKG ++ "dist_version_colon",
+        .text = PKG ++ "dist_version_colon: version \"1.5:6\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
     },
     .{
         .name = "dist_version_empty",
@@ -385,6 +415,12 @@ fn body(c: *lib.Ctx) !void {
     try farmOnly(c, "precondition");
     try invocation(c);
     try c.refusals(&REFUSALS);
+    const bounds = try c.run(&.{ "build", DIST_BOUNDS }, .{});
+    if (!bounds.ok()) {
+        c.fail("dist_version_digit_bounds: {s} (version \"0.9\") does not build, but a version of digits and dots must be accepted (see {s}); its last lines:\n{s}", .{ DIST_BOUNDS, bounds.log, lib.text.tail(bounds.stderr, 12) });
+    } else {
+        c.pass("dist_version_digit_bounds: {s} (version \"0.9\") builds", .{DIST_BOUNDS});
+    }
     for (REDS) |row| try red(c, row);
 }
 

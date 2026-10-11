@@ -278,19 +278,30 @@ sql_oracle(
     outputs = ["out.tsv"],
 )
 
-# REFUSED: `version ... is not a release number (^[0-9.]+$)`, for a
-# duckdb_dist whose version would end the version check's SQL string and
-# comment out the rest (the anchor `$` dropped passes it), one with a
-# leading `v` (the anchor `^` dropped passes it) and an empty one (`+` as
-# `*` passes it). The binary and lib directory are never read: the version
-# is refused first.
+# REFUSED: `version ... is not a release number (^[0-9.]+$)`, one row per
+# kind of character the pattern must not admit, each the only bad character
+# of its row, so a class widened to admit that kind passes exactly that row:
+# a version that would end the version check's SQL string and comment out
+# the rest (`injection`), a bare quote, a letter (`leading_v`, which the
+# anchor `^` dropped also passes), a space, a semicolon, `/` and `:` (the
+# characters next to `0` and `9`, which a range bound moved by one admits)
+# and an empty one (`+` as `*` passes it). The bad character is never first,
+# so the anchor `$` dropped passes `quote`, `space`, `semicolon`, `slash` and
+# `colon`. A version holding 0 and 9 is accepted:
+# tests//functional/sql_oracle:dist_version_digit_bounds. The binary and lib
+# directory are never read: the version is refused first.
 [duckdb_dist(
     name = "dist_version_{}".format(name),
     binary = ":sql_error",
     native_libs = ":sql_error",
     version = version,
 ) for name, version in [
-    ("quote", "1.5.6' AND false THEN NULL END; --"),
+    ("injection", "1.5.6' AND false THEN NULL END; --"),
+    ("quote", "1.5.6'"),
     ("leading_v", "v1.5.6"),
+    ("space", "1.5 6"),
+    ("semicolon", "1.5;6"),
+    ("slash", "1.5/6"),
+    ("colon", "1.5:6"),
     ("empty", ""),
 ]]
