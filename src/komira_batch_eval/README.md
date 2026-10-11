@@ -9,11 +9,9 @@ and predicate evaluators an executor host runs inside its operators.
 | --- | --- | --- |
 | `evaluate_column(expr, batch)` | `evaluate` | the projection: one value per row, as a `Column` |
 | `evaluate_predicate(expr, batch)` | `evaluate` | the predicate: one bit per row; UNKNOWN is data 0 with validity 0 |
-| `evaluate_filter_narrowed(batch, predicate)` | `conjunction` | the surviving rows of a filter, as a `SelectionVector` |
 
-`evaluate_filter_narrowed` narrows a selection vector conjunct by conjunct and
-applies three-valued logic at the filter boundary: an UNKNOWN row is dropped,
-and `TRUE OR NULL` is kept.
+`evaluate_predicate` reports UNKNOWN; turning UNKNOWN into FALSE at a filter
+boundary is the caller's step.
 
 The evaluator only evaluates. It rewrites no plan and registers no expression:
 the plan an executor host lowers arrives optimized, and this package is called
@@ -22,7 +20,7 @@ with the expressions that plan carries.
 ## Dependency direction
 
 ```
-komira_batch_eval -> komira_arrow, komira_buffer, komira_collections  (batches, columns, selection vectors)
+komira_batch_eval -> komira_arrow, komira_buffer   (batches, columns, bitmaps)
 komira_batch_eval -> komira_plan_expr     (Expr, ScalarValue)
 komira_batch_eval -> komira_plan_ir       (udf_call_column_key)
 komira_batch_eval -> komira_column_kernels, komira_kernels, komira_scalar_arithmetic  (the kernels)
@@ -53,7 +51,6 @@ onto the batch first, and a call whose column is missing is refused by name.
 | `predicate_binary`, `predicate_compare`, `predicate_numeric_dict`, `predicate_logic` | its binary arm, comparison kernels, dictionary-encoded numeric predicates, AND/OR short-circuit |
 | `eval_case` | CASE/WHEN, each arm evaluated over the rows it answers |
 | `eval_in_list`, `eval_dict` | IN lists; dictionary-to-string materialization |
-| `conjunction`, `predicate_null_scope` | selection-vector narrowing with three-valued logic; which columns' NULLs reach a predicate |
 | `arm_rows`, `literal_arm_domain`, `integer_literal_value`, `temporal_literal_value`, `numeric_dict_lut_scan`, `dict_mat_counter` | shared helpers |
 
 `eval_column`, `eval_predicate` and `eval_case` (with the `project_*` and
