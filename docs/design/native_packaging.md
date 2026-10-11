@@ -1,7 +1,7 @@
 # Native code in conda packages: each library ships its own
 
-Status: plan, not built. Each item is marked **EXISTS** (with the path on `main` that does it) or
-**PROPOSED**. "On #NNN" means the code is on that open pull request and not on `main`. Scope:
+Status: plan, built in part (part of slice 9, #1391). Each item is marked **EXISTS** (with the
+path on `main` that does it) or **PROPOSED**. "On #NNN" means the code is on that open pull request and not on `main`. Scope:
 linux-64 (ELF) only; Mach-O (osx-arm64: install names, `@rpath`, exported-symbol lists, the two-level
 namespace) is a later design. Related: [the staged pipeline](staged_pipeline.md) (build once, then
 beta, gamma and prod), [gamma validation](gamma_validation.md) (its `komira_native` rows are
@@ -17,14 +17,15 @@ package `komira_native`: #681 (the library and its checks), #685 (the packer), #
 into it). They stay on hold until this plan is approved and are then closed; what each keeps is in
 "What happens to each open PR".
 
-**Stages**, as the glossary of [staged_pipeline.md](staged_pipeline.md) names them (#1184, merged,
-wrote the glossary): **beta** builds once, publishes the packages to the `beta` conda channel,
-installs from it and runs the README examples and the package test tiers; **gamma** is only real
-resources in the gamma cloud accounts (deploys and real-cloud validations) and names no conda
+**Stages**, as the glossary of [staged_pipeline.md](staged_pipeline.md) names them (its follow-up
+#1184, merged, holds the [glossary](staged_pipeline.md#glossary)): **beta** builds once, publishes
+the packages to the `beta` conda channel, installs from it and runs the README examples and the
+package test tiers; **gamma** is only real resources in the gamma cloud accounts (deploys and
+real-cloud validations) and names no conda
 channel; **prod** promotes the same bytes to the prod channel. Every check of an installed native
 package below is therefore beta's, in its install job `beta_validate` (staged_pipeline.md and
-continuous_publish.md both use that name; the job is today's `validate`, renamed by the staged
-pipeline's switch M2).
+continuous_publish.md both use that name; `kci.yml` runs it since the staged pipeline's switch M2,
+#1296, which renamed the job `validate`).
 
 ## Why: what `main` refuses today
 
@@ -69,13 +70,13 @@ pipeline's switch M2).
 | symbol prefixing | **EXISTS** for aws-lc (`komira_awslc_`), s2n-tls (`komira_s2n_`), snappy (`komira_snappy_`): `tools/build/native/defs.bzl` (`prefix_header`, `prefixed_archive_check`), `elfsyms.c`, `archive_check.sh` | brotli and SQLite prefixed the same way before their owners ship |
 | one-definition gate | **EXISTS:** `tools/build/one_definition/` (`:one_definition`, a `mojo_shared_lib` that links every library of `SRC_C_LIBRARIES` and `THIRD_PARTY_C_LIBRARIES` in `libraries.bzl` whole-archive, so a strong symbol defined twice fails the link; then dlopens it and resolves every name in `exports`). `tools/build/lint/includes.bzl` refuses a `cxx_library` under `src/` that the list omits | kept as is. Its limits stand: a weak or common second definition links silently; a library whose symbols are all hidden (`komira_log_holder`) cannot be seen by the exports check; a `cxx_library` declared through a `.bzl` macro or the prelude's own `load` escapes the list; `THIRD_PARTY_C_LIBRARIES` has no completeness check. The completeness lint below covers the weak/common pair |
 | owner table | partial: `tools/core_split/c_symbols.tsv` maps 24 first-party C symbols to their owning package | the `callers` attribute and the completeness lint, generated from the build graph, not a hand table |
-| release-set check | **EXISTS:** `conda_release_set_check` (`tools/build/package/release_set.bzl`, target `//tools/build/package:release_set_check`): stamped packages, the metapackage, the stamp check, and an order check refusing a member that requires a member listed after it, with **one exemption for `komira_native`** (`_ORDER_CHECK`, fixture `release_order_exempts_komira_native` in `tools/build/package/BUCK`). It does not refuse a requirement on a package the set omits: the `install-set` validation (`CONDA_INSTALL_ENV` of `komira_all`, `release/machine.textproto`; on `main` it runs after gamma's publish, and staged_pipeline.md moves it to `beta_validate`, whose channel holds only the build's packages) fails to install such a set before anything promotes, so no build-time duplicate is planned | the `komira_native` exemption goes now (slice 2), since it serves only the superseded plan: each library's `.so` is in its own package, ordered like any member |
+| release-set check | **EXISTS:** `conda_release_set_check` (`tools/build/package/release_set.bzl`, target `//tools/build/package:release_set_check`): stamped packages, the metapackage, the stamp check, and an order check refusing a member that requires a member listed after it, with **one exemption for `komira_native`** (`_ORDER_CHECK`, fixture `release_order_exempts_komira_native` in `tools/build/package/BUCK`). It does not refuse a requirement on a package the set omits: the `install-set` validation (`CONDA_INSTALL_ENV` of `komira_all`, `release/machine.textproto`; on `main` it runs in `beta_validate` after beta's publish (since M2, #1296), and the `beta` channel holds only the build's packages) fails to install such a set before anything promotes, so no build-time duplicate is planned | the `komira_native` exemption goes now (slice 2), since it serves only the superseded plan: each library's `.so` is in its own package, ordered like any member |
 | set hash | **EXISTS:** `src/kci_release_set/set_hash.mojo`: one line per artifact (name, platform, version, build, subdir, type, sha256 of the `.conda`), the revision and the platform; recomputed from the bytes before any publish (`src/kci_cli/dispatch.mojo`, step 4b) | unchanged; it already covers each `.so` because the `.so` is inside a `.conda` (section "Built once") |
-| glibc floor | **EXISTS:** `os_floor` `glibc-2.34` in `tools/build/platforms/table.bzl` (rows `linux-x86_64` and `linux-arm64`; read by `os_floor_version`), the floor zig links against (`zig_triple` `x86_64-linux-gnu.2.34`, `aarch64-linux-gnu.2.34`). The packer writes only the platform guard `__linux` (`guardFor` in `tools/build/package/pack/conda.zig`), no `__glibc` requirement | the packer writes `__glibc >=2.34` from that cell on each library with C (slice 8); per-library check 5 reads the same cell; kci accepts it (slice 9). No second floor |
-| conda metadata kinds | **EXISTS:** `library` and `metapackage` only (`src/kci_release_set/conda_metadata.mojo`) | no new kind. `lib_files`, `native_owns`, `native_links`, `dlopen` fields on `library` (slices 3, 8) |
-| kind `native`, `lib_files`, `native_link_args` | on #695 and #704 only | `lib_files` survives on `library`; the kind goes |
+| glibc floor | **EXISTS:** `os_floor` `glibc-2.34` in `tools/build/platforms/table.bzl` (rows `linux-x86_64` and `linux-arm64`; read by `os_floor_version`), the floor zig links against (`zig_triple` `x86_64-linux-gnu.2.34`, `aarch64-linux-gnu.2.34`). The packer writes only the platform guard `__linux` (`guardFor` in `tools/build/package/pack/conda.zig`), no `__glibc` requirement | the packer writes `__glibc >=2.34` from that cell on each library with C (slice 8); per-library check 5 reads the same cell; kci accepts it (**EXISTS** since #1391, slice 9: `src/kci_release_set/glibc_floor.mojo`). No second floor |
+| conda metadata kinds | **EXISTS:** `library` and `metapackage` only (`src/kci_release_set/conda_metadata.mojo`); kci reads `lib_files` on a `library` since #1391 (slice 9, the reader side) | no new kind. The packer writes `lib_files`, `native_owns`, `native_links`, `dlopen` fields on `library` (slices 3, 8) |
+| kind `native`, `native_link_args` | on #695 and #704 only (`lib_files` on `library` is on `main`, above) | `lib_files` survives on `library`; the kind goes |
 | dlopen declarations | the packer refuses any `OwnedDLHandle` (above). `mojo_library(dlopen = ...)` and `tools/build/package/system_libs.bzl` on #685 only; kci's acceptance of the requirements (`src/kci_release_set/system_libs.mojo`) on #704 only (from #763) | slice 3, ahead of the shared libraries |
-| beta stage, `beta_validate` | design only ([staged_pipeline.md](staged_pipeline.md), merged, with its glossary from #1184). `kci.yml` runs `build → gamma → validate → prod` | native install checks run only in `beta_validate` (section "Built once"); gamma runs none |
+| beta stage, `beta_validate` | **EXISTS** since the switch M2 (#1296): `kci.yml` runs `build → beta → beta_validate → prod` (`gamma` and `validate` before M2); the rest of [staged_pipeline.md](staged_pipeline.md) (merged, with its [glossary](staged_pipeline.md#glossary) from #1184) is design only | native install checks run only in `beta_validate` (section "Built once"); gamma runs none |
 
 ## What each library ships
 
@@ -351,8 +352,8 @@ no exception:
   static archives, so its payload comparison (each library's buck2 payload sha256 against
   `payload_sha256`, which is the `.mojoc`) **does not reach any `.so`**. The `.so` files are
   exercised by `beta_validate`, the hosted job that installs the built files with the pinned pixi
-  from the `beta` conda channel (staged_pipeline.md's glossary; the channel in that role is named
-  `gamma` until the switch M2). Every row runs with `LD_LIBRARY_PATH` unset:
+  from the `beta` conda channel (staged_pipeline.md's glossary; the channel in that role was named
+  `gamma` before the switch M2, #1296). Every row runs with `LD_LIBRARY_PATH` unset:
   1. install pinned to the release's version, build string and `.conda` sha256 (**EXISTS:**
      `src/kci_validate/readback.mojo`, check 2);
   2. each installed `lib_files` row's sha256 equals the row (extends check 3, payload);
@@ -485,11 +486,11 @@ channel, a new package name, or a change to what a release publishes.
 | 6 | the rule over every owner in the table above, including http_core's `NEEDED` and `DT_RUNPATH` | planted: http_core without `DT_RUNPATH` (B3's check at build time), a caller dropped from `callers`, snappy's `.so` without its C++ runtime (check 7's real case: `_Znwm` undefined) | none |
 | 7 | **completeness lint** at the root; the three missing Mojo dependencies (komira_uuid and komira_http_core on komira_crypto, komira_objectstore on komira_fs) | red on `main`: those three libraries; planted: a weak pair across two owners, a new `external_call` with no `callers` entry, a library depending on another owner's `cxx_library` | none |
 | 8 | **the packer**: `lib_files` (`shared`, `link`, `static`), `native_owns`, `native_links`; the `.so` into the library's `.conda`; `__glibc >=2.34` written from the platform row's `os_floor` beside `__linux`; every `NEEDED` owner in the library's closure; `_conda_facts` stops refusing a library whose every linked archive has an owner in its closure; komira_log's holder archive and (with 2A) JIT object; brotli prefixed before komira_parquet_codec is packaged (question 4) | `_conda_facts` refuses komira_crypto today; planted: a `.so` whose `lib_files` sha256 differs, an archive with no owner in the closure, a holder JIT object named in a built `.so`'s `NEEDED`, komira_http_core packed with its crypto dependency removed; mutant: the packer writes a constant `__glibc` instead of reading `os_floor` (a fixture platform row with another floor goes red) | none (builds only; nothing declared) |
-| 9 | **kci reads `lib_files`**: the generalised `native_link_args` (every pin, dependency order, or the README's flags with 5a), readback of `lib_files` sha256, install checks 3, 4, 6 and 7 (the generated load program, whole set and per package alone; the `mojo build` README row; the system OpenSSL row), and install check 5 extended from slice 4's `dlopen` packages to every package; kci accepts the one `__glibc` requirement, equal on every package of the set; the `native` kind and `_native_depends` never land | kci fixtures, each refused, with a mutant per check: a missing owner flag, a `.so` with an unresolved `NEEDED`, a `lib_files` sha256 mismatch, a JIT object in a built image's `NEEDED`, a `.so` with an unresolved symbol, linked without `-z now` (red only under `RTLD_NOW`), a package missing an owner requirement installed alone, two different `__glibc` values in one set, an unprefixed export planted in crypto's `.so` (install check 7: the system OpenSSL's `SSL_CTX_new` crashes, as in probe 2's leaky control) | none |
+| 9 | **kci reads `lib_files`** (in part on `main`, #1391: the `lib_files` reader, the `__glibc` acceptance in PUBLISH, and in `src/kci_validate/native_install.mojo` install checks 2, 3 and 5 and a `DF_SYMBOLIC` row (per-library check 6 on the installed bytes), run by no job yet; the rest of this row is open): the generalised `native_link_args` (every pin, dependency order, or the README's flags with 5a), readback of `lib_files` sha256, install checks 3, 4, 6 and 7 (the generated load program, whole set and per package alone; the `mojo build` README row; the system OpenSSL row), and install check 5 extended from slice 4's `dlopen` packages to every package; kci accepts the one `__glibc` requirement, equal on every package of the set; the `native` kind and `_native_depends` never land | kci fixtures, each refused, with a mutant per check: a missing owner flag, a `.so` with an unresolved `NEEDED`, a `lib_files` sha256 mismatch, a JIT object in a built image's `NEEDED`, a `.so` with an unresolved symbol, linked without `-z now` (red only under `RTLD_NOW`), a package missing an owner requirement installed alone, two different `__glibc` values in one set, an unprefixed export planted in crypto's `.so` (install check 7: the system OpenSSL's `SSL_CTX_new` crashes, as in probe 2's leaky control) | none |
 | 10 | **README link commands and every owner called** (question 5a): the packer writes the `sh` block; the readme tool parses it; the install validation uses it or refuses a difference; the build refuses an owner whose README program references none of its exports; komira_metrics's and komira_scan_source's READMEs gain an example reaching their C | planted: a README without an owner's `-l` (install validation red); komira_metrics's README without its new example (build red) | none |
-| 11 | **beta wiring**: install checks 3 to 7 run in `beta_validate` for every package (install check 5 is already there for slice 4's `dlopen` packages; this slice runs the rows slice 9 adds; needs the staged pipeline's P4, which creates the job) | nothing on `main` can be red (the job does not exist); shown by mutants on the new job: a `.so` changed after `build` is refused by step 4b (mutant: skip step 4b in `beta_validate`), and a planted `.so` with an unresolved symbol makes row 4 red | **Go**: it changes the release (inherits P4's go) |
+| 11 | **beta wiring**: install checks 3 to 7 run in `beta_validate` for every package (install check 5 is already there for slice 4's `dlopen` packages; this slice runs the rows slice 9 adds; needs the staged pipeline's P4, which rewrites the job; the job itself exists since M2, #1296) | nothing on `main` can be red (`beta_validate` runs none of these rows); shown by mutants on the new job: a `.so` changed after `build` is refused by step 4b (mutant: skip step 4b in `beta_validate`), and a planted `.so` with an unresolved symbol makes row 4 red | **Go**: it changes the release (inherits P4's go) |
 | 12 | **the release set**: declare the first native batch (the owners and their dependents up to the cloud SDKs, question 9) in `release/artifacts.textproto` and `release_set.txt` | `release_set_check` red on a batch member listed before an owner it requires | **Go**: new package names on the channel, a change to what beta and prod publish |
-| 13 | **gamma_validation.md** rewritten: its `komira_native` rows are replaced by a pointer to this doc's beta install checks, and `gamma_validation_decisions.md` likewise; its stage and channel text (gamma publishing to and installing from a `gamma` conda channel, which is today's `kci.yml`) is rewritten to #1184's glossary, replacing its "Vocabulary" note, since #1184 does not edit this file | `komira_native` joins the root `retired_names` lint (root `BUCK`), which refuses a retired name outside a dated history note: red while either doc still carries it (the doc links lint cannot go red on a content rewrite); every mention left in this doc moves onto a dated history line | none |
+| 13 | **gamma_validation.md** rewritten: its `komira_native` rows are replaced by a pointer to this doc's beta install checks, and `gamma_validation_decisions.md` likewise; its stage and channel text (gamma publishing to and installing from a `gamma` conda channel, which was `kci.yml`'s before M2) is rewritten to #1184's glossary, replacing its "Vocabulary" note, since #1184 does not edit this file | `komira_native` joins the root `retired_names` lint (root `BUCK`), which refuses a retired name outside a dated history note: red while either doc still carries it (the doc links lint cannot go red on a content rewrite); every mention left in this doc moves onto a dated history line | none |
 
 Slices 1, 2 and 3 are independent; 4 needs 1, 3 and P4; 5 to 10 are a chain (5 needs nothing
 earlier); 11 needs 9, 10 and P4; 12 needs 11; 13 needs 2. **No library with native code or a
@@ -522,7 +523,7 @@ until it has welded tests).
 5. **Where a user gets the link flags:** (a), (b) or (c) in "Linking from Mojo". Recommended: (a).
 6. **komira_lz4 and komira_zlib: wait for beta's install job, or accept the risk.** Recommended:
    wait. Their go (slice 4) needs probe 3's DL case green and the loaded-from row running in
-   `beta_validate`, which exists only after the staged pipeline's P4. The alternative is to declare
+   `beta_validate` (the job exists since M2, #1296; slice 11 wires the rows after the staged pipeline's P4). The alternative is to declare
    them after slice 3 with only probe 3's evidence: today's installed README run would pass even if
    the runner's own `liblz4.so.1` or `libz.so.1` were the copy loaded, so a package missing its
    conda-forge requirement could ship. Choosing it means accepting that risk until P4.
@@ -530,8 +531,8 @@ until it has welded tests).
    nowhere in a release; they run only in beta's install job (slice 11, after P4), and no library
    with native code or a dlopened codec is declared (slices 4 and 12) before then. Gamma no longer
    installs packages, so the earlier draft's interim home (gamma's `validate`) is gone. The
-   alternative is an interim run in today's `validate` job, which the staged pipeline then moves to
-   `beta_validate`: earlier releases, and a job that P4 rewrites.
+   alternative is an interim run in today's `beta_validate` job (EXISTS since M2, #1296) before P4:
+   earlier releases, and a job that P4 rewrites.
 8. **Keep the glibc floor at 2.34?** The floor already exists: `os_floor` `glibc-2.34` in
    `tools/build/platforms/table.bzl`, which zig links against. Recommended: keep it; the packer
    writes it as `__glibc >=2.34` (slice 8) and per-library check 5 reads the same cell. Changing it is a change
