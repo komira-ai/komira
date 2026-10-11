@@ -14,6 +14,8 @@
 # MIN source: k = [MIN, N/MIN, 6, MIN, MIN], d = [-1, -1, -1, 1, N/-1] (k row
 # 1 and d row 4 NULL when the source carries validity).
 #
+# The probe sections build their own sources; each says what it holds.
+#
 # Refs komira-ai/komira#1276.
 # =============================================================================
 
@@ -21,16 +23,21 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_raises, as
 
 from komira_eval.expression_executor import ExpressionExecutor
 from komira_kernels.runtime_expr import (
+    EXPR_ADD_I64,
     EXPR_DIV_I64,
     EXPR_EQ_F64_MIXED,
     EXPR_GE_I64,
+    EXPR_GT_I64,
+    EXPR_MUL_I64,
     RuntimeExpr,
+    make_and,
     make_case_i64,
     make_col,
     make_i64_to_f64,
     make_lit_f64,
     make_lit_i64,
     make_not_bool,
+    make_null,
 )
 from komira_row_format.cell_source import CellSource
 
@@ -231,6 +238,125 @@ def test_min_over_minus_one_raises() raises:
         _ = exec._eval_i64_from_source(_min_cells(False), 2, 1)
 
 
+def test_min_over_minus_two_and_two_answers() raises:
+    """MIN / -2 is 2^62 and MIN / 2 is -2^62: only -1 overflows."""
+    var ints: List[List[Int]] = [[I64_MIN, I64_MIN], [-2, 2]]
+    var nulls: List[List[Bool]] = [[False, False], [False, False]]
+    var c = _Cells(ints^, nulls^, True)
+    var exec = _exec(_div_pool())
+    assert_equal(Int(exec._eval_i64_from_source(c, 2, 0)), 1 << 62, "MIN / -2")
+    assert_equal(Int(exec._eval_i64_from_source(c, 2, 1)), -(1 << 62), "MIN / 2")
+
+
+# -----------------------------------------------------------------------------
+# A divisor is evaluated only once no operand of the compare is NULL
+#
+# Source with validity, one row: k = 7, m = 4 (or MIN), n = 2^62 (or -1),
+# x = N/0. Each compare has the NULL x as an operand, so it is UNKNOWN and the
+# row is dropped. The other operand divides by a divisor whose evaluation
+# raises (4 * 2^62 overflows; MIN / -1 overflows): evaluating it before the
+# NULL x is seen would raise on a row whose answer is UNKNOWN.
+# -----------------------------------------------------------------------------
+
+
+comptime PK = 0
+comptime PM = 1
+comptime PN = 2
+comptime PX = 3
+
+
+def _probe_names() -> List[String]:
+    var names: List[String] = ["k", "m", "n", "x"]
+    return names^
+
+
+def _probe_filter(var pool: List[RuntimeExpr], m: Int, n: Int) raises -> List[Int]:
+    var ints: List[List[Int]] = [[7], [m], [n], [0]]
+    var nulls: List[List[Bool]] = [[False], [False], [False], [True]]
+    var root = len(pool) - 1
+    var exec = ExpressionExecutor(pool^, root, _probe_names())
+    var sel = exec.select_filter_from_source(_Cells(ints^, nulls^, True))
+    var out = List[Int]()
+    for k in range(sel.len()):
+        out.append(Int(sel.get(k)))
+    return out^
+
+
+def _k_over(divisor_kind: Int) -> List[RuntimeExpr]:
+    """[k, m, n, x, m <op> n, k / (m <op> n)]."""
+    var pool = List[RuntimeExpr]()
+    pool.append(make_col(PK))                     # 0
+    pool.append(make_col(PM))                     # 1
+    pool.append(make_col(PN))                     # 2
+    pool.append(make_col(PX))                     # 3
+    pool.append(_node(divisor_kind, 1, 2))        # 4: m <op> n
+    pool.append(_node(EXPR_DIV_I64, 0, 4))        # 5: k / (m <op> n)
+    return pool^
+
+
+def test_probe_quotient_of_an_overflowing_divisor_over_a_null_compare_is_unknown() raises:
+    """`(k / (m * n)) > x`: x is NULL, so the row is dropped; m * n is not
+    evaluated."""
+    var pool = _k_over(EXPR_MUL_I64)
+    pool.append(_node(EXPR_GT_I64, 5, 3))         # 6
+    _expect(_probe_filter(pool^, 4, 1 << 62), List[Int](), "(k / (m * n)) > x")
+
+
+def test_probe_sum_with_a_null_over_an_overflowing_divisor_is_unknown() raises:
+    """`((k / (m * n)) + x) > 0`: the sum has a NULL operand."""
+    var pool = _k_over(EXPR_MUL_I64)
+    pool.append(_node(EXPR_ADD_I64, 5, 3))        # 6: (k / (m * n)) + x
+    pool.append(make_lit_i64(0))                  # 7
+    pool.append(_node(EXPR_GT_I64, 6, 7))         # 8
+    _expect(_probe_filter(pool^, 4, 1 << 62), List[Int](), "((k / (m * n)) + x) > 0")
+
+
+def test_probe_min_over_minus_one_divisor_over_a_null_compare_is_unknown() raises:
+    """`(k / (m / n)) > x` with m = MIN, n = -1: m / n is not evaluated."""
+    var pool = _k_over(EXPR_DIV_I64)
+    pool.append(_node(EXPR_GT_I64, 5, 3))         # 6
+    _expect(_probe_filter(pool^, I64_MIN, -1), List[Int](), "(k / (m / n)) > x")
+
+
+# -----------------------------------------------------------------------------
+# A division in the pool keeps the answers of a source without validity
+#
+# k = [-5, 1], d = [1, 1], no validity region.
+# `(k > CASE WHEN k > 100 THEN k ELSE NULL END) AND (((k * 2^62) / d) > 0)`.
+# Without validity EXPR_NULL reads as 0, as the two-valued walker reads it:
+# row 0's left side is -5 > 0, FALSE, so its right side, where -5 * 2^62
+# overflows, is not evaluated; row 1 is 1 > 0 AND 2^62 > 0 and is kept.
+# -----------------------------------------------------------------------------
+
+
+def test_probe_and_over_a_null_case_without_validity_keeps_the_two_valued_answer() raises:
+    var pool = List[RuntimeExpr]()
+    pool.append(make_col(K))                      # 0: k
+    pool.append(make_col(D))                      # 1: d
+    pool.append(make_lit_i64(100))                # 2
+    pool.append(_node(EXPR_GT_I64, 0, 2))         # 3: k > 100
+    pool.append(make_null())                      # 4: NULL
+    pool.append(make_case_i64(0))                 # 5: CASE WHEN k > 100 THEN k ELSE NULL END
+    pool.append(_node(EXPR_GT_I64, 0, 5))         # 6: k > CASE
+    pool.append(make_lit_i64(Int64(1 << 62)))    # 7
+    pool.append(_node(EXPR_MUL_I64, 0, 7))        # 8: k * 2^62
+    pool.append(_node(EXPR_DIV_I64, 8, 1))        # 9: (k * 2^62) / d
+    pool.append(make_lit_i64(0))                  # 10
+    pool.append(_node(EXPR_GT_I64, 9, 10))        # 11
+    pool.append(make_and(6, 11))                  # 12
+    var slots: List[Int] = [3, 0, 4]
+    var when = List[List[Int]]()
+    when.append(slots^)
+    var exec = _exec(pool^, when^)
+    var ints: List[List[Int]] = [[-5, 1], [1, 1]]
+    var nulls: List[List[Bool]] = [[False, False], [False, False]]
+    var sel = exec.select_filter_from_source(_Cells(ints^, nulls^, False))
+    var got = List[Int]()
+    for k in range(sel.len()):
+        got.append(Int(sel.get(k)))
+    _expect(got, [1], "(k > CASE ... ELSE NULL) AND (((k * 2^62) / d) > 0)")
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_zero_divisor_is_null_not_a_raise]()
@@ -238,4 +364,9 @@ def main() raises:
     suite.test[test_filter_over_a_cast_zero_divisor_quotient_is_unknown]()
     suite.test[test_case_condition_over_a_zero_divisor_takes_the_else]()
     suite.test[test_min_over_minus_one_raises]()
+    suite.test[test_min_over_minus_two_and_two_answers]()
+    suite.test[test_probe_quotient_of_an_overflowing_divisor_over_a_null_compare_is_unknown]()
+    suite.test[test_probe_sum_with_a_null_over_an_overflowing_divisor_is_unknown]()
+    suite.test[test_probe_min_over_minus_one_divisor_over_a_null_compare_is_unknown]()
+    suite.test[test_probe_and_over_a_null_case_without_validity_keeps_the_two_valued_answer]()
     suite^.run()

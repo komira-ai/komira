@@ -5041,6 +5041,17 @@ struct ExpressionExecutor(Movable, Deinitable):
         """
         var n = src.num_rows()
         var out = RowSelectionVector(n if n > 0 else 1)
+        # On a source without validity a division takes the three-valued
+        # path, which evaluates an AND's right side when its left is UNKNOWN
+        # (and an OR's when its left is UNKNOWN), so an UNKNOWN that the
+        # two-valued path read as a value could expose a raise in the right
+        # side on a row the two-valued path answered. On such a source the
+        # three-valued path therefore reads EXPR_NULL as the two-valued path
+        # does, as the placeholder 0 (`_value_has_null_input_from_source`):
+        # its only UNKNOWN is a zero divisor, on a row where the two-valued
+        # path raised. Short-circuiting AND on an UNKNOWN left instead would
+        # be wrong under NOT, and would turn EXPR_NULL into UNKNOWN on this
+        # path only, changing answers the two-valued path gives.
         var nullable = src.has_validity() or self.has_int_division
         var row = 0
         while row < n:
@@ -5310,10 +5321,20 @@ struct ExpressionExecutor(Movable, Deinitable):
         FALSE left side and OR at a TRUE one, since the right side cannot
         change the answer. IS NULL / IS NOT NULL are never UNKNOWN. A
         comparison, LIKE or REGEXP leaf is UNKNOWN when one of its value
-        operands is NULL (`_value_is_null_from_source`); otherwise its operands
-        are present and `_eval_bool_present_from_source` gives its value. A
-        leaf with a NULL operand is not evaluated, so arithmetic over a NULL
-        cell's stored bytes (a zero divisor, say) never runs."""
+        operands is NULL; otherwise its operands are present and
+        `_eval_bool_present_from_source` gives its value.
+
+        A leaf decides NULL in two steps. First, for every operand, whether a
+        NULL cell or EXPR_NULL reaches it (`_value_has_null_input_from_source`),
+        which evaluates nothing but CASE conditions. Only when no operand has
+        one does it evaluate the divisors of the operands' integer divisions
+        (`_value_has_zero_divisor_from_source`, §5.3). Evaluating a divisor can
+        raise (an overflow in it, or MIN / -1); without the first step it would
+        raise on a row whose other operand is NULL, which is UNKNOWN. With it,
+        a divisor is evaluated only on rows whose leaf the two-valued walker
+        evaluates too, so the check raises only where that evaluation raises.
+        A leaf with a NULL operand is not evaluated, so arithmetic over a NULL
+        cell's stored bytes never runs."""
         var node = self.expression_pool[idx]
         var kind = node.kind
 
@@ -5342,9 +5363,19 @@ struct ExpressionExecutor(Movable, Deinitable):
             if self._value_is_null_from_source[CS](src, node.left, row):
                 return _KLEENE_NULL
         elif _is_binary_bool_leaf(kind):
-            if self._value_is_null_from_source[CS](
+            # Both operands' NULL inputs before either operand's divisors:
+            # see the docstring.
+            if self._value_has_null_input_from_source[CS](
                 src, node.left, row
-            ) or self._value_is_null_from_source[CS](src, node.right, row):
+            ) or self._value_has_null_input_from_source[CS](
+                src, node.right, row
+            ):
+                return _KLEENE_NULL
+            if self._value_has_zero_divisor_from_source[CS](
+                src, node.left, row
+            ) or self._value_has_zero_divisor_from_source[CS](
+                src, node.right, row
+            ):
                 return _KLEENE_NULL
         # IS NULL / IS NOT NULL read validity and are never UNKNOWN; any other
         # kind reaches `_eval_bool_present_from_source`, which raises on a kind
@@ -5356,16 +5387,33 @@ struct ExpressionExecutor(Movable, Deinitable):
     def _value_is_null_from_source[
         CS: CellSource
     ](imm self, src: CS, idx: Int, row: Int) raises -> Bool:
-        """True iff the value sub-tree at `idx` is SQL NULL for `row`.
+        """True iff the value sub-tree at `idx` is SQL NULL for `row`: a NULL
+        input reaches it (`_value_has_null_input_from_source`), or, with none,
+        one of its integer divisions has a zero divisor (§5.3,
+        `_value_has_zero_divisor_from_source`). The first test runs to the end
+        before the second evaluates any divisor."""
+        return self._value_has_null_input_from_source[CS](
+            src, idx, row
+        ) or self._value_has_zero_divisor_from_source[CS](src, idx, row)
+
+    def _value_has_null_input_from_source[
+        CS: CellSource
+    ](imm self, src: CS, idx: Int, row: Int) raises -> Bool:
+        """True iff a NULL input reaches the value sub-tree at `idx` for
+        `row`. Evaluates no value, only the WHEN conditions of a CASE.
 
         A column leaf (EXPR_COL / EXPR_COL_STRING / EXPR_COL_DECIMAL128) is
-        NULL when its cell is (never on a source without validity); EXPR_NULL
-        always is; a literal never is. Arithmetic, casts, EXTRACT, date_trunc
-        and the math functions are NULL when an operand is; an integer
-        division also when its divisor is zero (§5.3). A CASE is NULL when the branch it takes is: the
-        first WHEN that is TRUE (`_eval_bool_from_source`), else the ELSE.
-        Kinds outside this list answer False; the value walkers raise on
-        them."""
+        NULL when its cell is (never on a source without validity). EXPR_NULL
+        is NULL on a source with validity; on one without, it answers False,
+        and the value walkers read it as the placeholder 0, as the two-valued
+        walker `select_filter_from_source` ran there before integer division
+        could yield NULL. So an integer division in the pool, which sends such
+        a source down the three-valued path, changes no answer other than a
+        zero divisor's. A literal is never NULL. Arithmetic (integer division
+        included), casts, EXTRACT, date_trunc and the math functions are NULL
+        when an operand is. A CASE is when the branch it takes is: the first
+        WHEN that is TRUE (`_eval_bool_from_source`), else the ELSE. Kinds
+        outside this list answer False; the value walkers raise on them."""
         var node = self.expression_pool[idx]
         var kind = node.kind
         if (
@@ -5375,11 +5423,55 @@ struct ExpressionExecutor(Movable, Deinitable):
         ):
             return src.has_validity() and src.is_null(row, node.col_idx)
         if kind == EXPR_NULL:
-            return True
+            return src.has_validity()
+        if (
+            kind == EXPR_ADD_I64
+            or kind == EXPR_SUB_I64
+            or kind == EXPR_MUL_I64
+            or kind == EXPR_DIV_I64
+            or kind == EXPR_ADD_F64
+            or kind == EXPR_SUB_F64
+            or kind == EXPR_MUL_F64
+            or kind == EXPR_DIV_F64
+            or kind == EXPR_ATAN2_F64
+            or kind == EXPR_POW_F64
+        ):
+            return self._value_has_null_input_from_source[CS](
+                src, node.left, row
+            ) or self._value_has_null_input_from_source[CS](
+                src, node.right, row
+            )
+        if _is_unary_value_kind(kind):
+            return self._value_has_null_input_from_source[CS](
+                src, node.left, row
+            )
+        if kind == EXPR_CASE_I64 or kind == EXPR_CASE_F64:
+            return self._value_has_null_input_from_source[CS](
+                src, self._case_branch_from_source[CS](src, node, row), row
+            )
+        return False
+
+    def _value_has_zero_divisor_from_source[
+        CS: CellSource
+    ](imm self, src: CS, idx: Int, row: Int) raises -> Bool:
+        """True iff an EXPR_DIV_I64 that the value sub-tree at `idx` evaluates
+        for `row` has a zero divisor (§5.3: its quotient is NULL). Walks the
+        kinds `_value_has_null_input_from_source` walks, and only the branch a
+        CASE takes. Evaluates each divisor through the Int64 walker.
+
+        Callers first check that no NULL input reaches the sub-tree; the
+        divisors evaluated here are then ones the value walker evaluates for
+        the same row."""
+        var node = self.expression_pool[idx]
+        var kind = node.kind
         if kind == EXPR_DIV_I64:
             return (
-                self._value_is_null_from_source[CS](src, node.left, row)
-                or self._value_is_null_from_source[CS](src, node.right, row)
+                self._value_has_zero_divisor_from_source[CS](
+                    src, node.left, row
+                )
+                or self._value_has_zero_divisor_from_source[CS](
+                    src, node.right, row
+                )
                 or self._eval_i64_from_source[CS](src, node.right, row) == 0
             )
         if (
@@ -5393,34 +5485,32 @@ struct ExpressionExecutor(Movable, Deinitable):
             or kind == EXPR_ATAN2_F64
             or kind == EXPR_POW_F64
         ):
-            return self._value_is_null_from_source[CS](
+            return self._value_has_zero_divisor_from_source[CS](
                 src, node.left, row
-            ) or self._value_is_null_from_source[CS](src, node.right, row)
-        if (
-            kind == EXPR_F64_TO_I64
-            or kind == EXPR_I64_TO_F64
-            or kind == EXPR_EXTRACT_I64
-            or kind == EXPR_DATE_TRUNC_I64
-            or kind == EXPR_SQRT_F64
-            or kind == EXPR_SIN_F64
-            or kind == EXPR_COS_F64
-            or kind == EXPR_ASIN_F64
-            or kind == EXPR_RADIANS_F64
-            or kind == EXPR_MATH_UNARY_F64
-        ):
-            return self._value_is_null_from_source[CS](src, node.left, row)
+            ) or self._value_has_zero_divisor_from_source[CS](
+                src, node.right, row
+            )
+        if _is_unary_value_kind(kind):
+            return self._value_has_zero_divisor_from_source[CS](
+                src, node.left, row
+            )
         if kind == EXPR_CASE_I64 or kind == EXPR_CASE_F64:
-            ref slots = self.when_pool[node.col_idx]
-            var n_pairs = (len(slots) - 1) // 2
-            for c in range(n_pairs):
-                if self._eval_bool_from_source[CS](src, slots[2 * c], row):
-                    return self._value_is_null_from_source[CS](
-                        src, slots[2 * c + 1], row
-                    )
-            return self._value_is_null_from_source[CS](
-                src, slots[len(slots) - 1], row
+            return self._value_has_zero_divisor_from_source[CS](
+                src, self._case_branch_from_source[CS](src, node, row), row
             )
         return False
+
+    def _case_branch_from_source[
+        CS: CellSource
+    ](imm self, src: CS, node: RuntimeExpr, row: Int) raises -> Int:
+        """The pool slot of the branch the CASE `node` takes for `row`: the
+        THEN of the first WHEN that is TRUE, else the ELSE."""
+        ref slots = self.when_pool[node.col_idx]
+        var n_pairs = (len(slots) - 1) // 2
+        for c in range(n_pairs):
+            if self._eval_bool_from_source[CS](src, slots[2 * c], row):
+                return slots[2 * c + 1]
+        return slots[len(slots) - 1]
 
     def _eval_string_from_source[
         CS: CellSource
@@ -5961,6 +6051,24 @@ def _kleene_not(a: UInt8) -> UInt8:
     if a == _KLEENE_FALSE:
         return _KLEENE_TRUE
     return _KLEENE_NULL
+
+
+def _is_unary_value_kind(kind: Int) -> Bool:
+    """Whether `kind` is a one-operand value kind (operand in `left`) whose
+    value is NULL when its operand is: a cast, EXTRACT, date_trunc or a math
+    function."""
+    return (
+        kind == EXPR_F64_TO_I64
+        or kind == EXPR_I64_TO_F64
+        or kind == EXPR_EXTRACT_I64
+        or kind == EXPR_DATE_TRUNC_I64
+        or kind == EXPR_SQRT_F64
+        or kind == EXPR_SIN_F64
+        or kind == EXPR_COS_F64
+        or kind == EXPR_ASIN_F64
+        or kind == EXPR_RADIANS_F64
+        or kind == EXPR_MATH_UNARY_F64
+    )
 
 
 def _is_binary_bool_leaf(kind: Int) -> Bool:

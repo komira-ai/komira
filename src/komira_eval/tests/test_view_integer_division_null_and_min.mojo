@@ -32,6 +32,9 @@
 # | 3   | MIN      | 1       | MIN      | 1       |
 # | 4   | 6        | -1      | 6        | -1      |
 #
+# MIN-by-two fixture: a = c = MIN of the column's type in both rows; z = y =
+# [-2, 2]; no NULL.
+#
 # Wide fixture (values the Float64 walker cannot hold exactly):
 #
 # | row | a (i64)  | z (i64) |
@@ -139,6 +142,12 @@ def _min_batch() raises -> RecordBatch:
     return _build(
         [m64, m64, m64, m64, 6], [-1, -1, -1, 1, -1], [m32, m32, m32, m32, 6], [-1, -1, -1, 1, -1], 1, 2
     )
+
+
+def _min_by_two_batch() raises -> RecordBatch:
+    var m64 = Int(I64_MIN)
+    var m32 = Int(I32_MIN)
+    return _build([m64, m64], [-2, 2], [m32, m32], [-2, 2], -1, -1)
 
 
 def _wide_batch() raises -> RecordBatch:
@@ -293,6 +302,13 @@ def test_i32_zero_divisor_is_null_not_a_raise() raises:
     _expect_bools(_nulls(_div(EXPR_DIV_I32, C, Y), batch, [0, 1, 2, 3, 4], False), want, "c / y nulls")
 
 
+def test_i32_null_channel_marks_a_zero_divisor_at_position_zero() raises:
+    """c / y over the selection [1, 0]: row 1 (y = 0) sits at position 0 of
+    the selection, so the NULL marks are [True, False]."""
+    var want: List[Bool] = [True, False]
+    _expect_bools(_nulls(_div(EXPR_DIV_I32, C, Y), _zero_batch(), [1, 0], False), want, "c / y nulls over [1, 0]")
+
+
 def test_filter_over_a_zero_divisor_quotient_is_unknown() raises:
     """`(a / z) < 0` keeps nothing: -7 / 0 is NULL, not -Inf. `NOT ((a / z)
     >= 0)` keeps nothing: rows 1-3 are UNKNOWN and rows 0, 4 are FALSE.
@@ -349,6 +365,29 @@ def test_i32_min_over_minus_one_raises() raises:
     var got_nested = _i32(nested, batch, [4, 1, 2])
     assert_equal(len(got_nested), 3, "NULL rows do not raise")
     assert_equal(got_nested[0], -6, "(6 / -1) + 0")
+
+
+def test_i64_min_over_minus_two_and_two_answers() raises:
+    """MIN / -2 and MIN / 2 answer 2^62 and -2^62 in the Int64 walker: only
+    -1 overflows."""
+    _expect(_i64(_div(EXPR_DIV_I64, A, Z), _min_by_two_batch(), [0, 1]), [1 << 62, -(1 << 62)], "Int64 MIN / -2, MIN / 2")
+
+
+def test_i32_min_over_minus_two_and_two_answers() raises:
+    """MIN / -2 and MIN / 2 answer 2^30 and -2^30 at the Int32 root."""
+    _expect(_i32(_div(EXPR_DIV_I32, C, Y), _min_by_two_batch(), [0, 1]), [1 << 30, -(1 << 30)], "Int32 MIN / -2, MIN / 2")
+
+
+def test_i32_nested_min_over_minus_two_and_two_answers() raises:
+    """The same through `(c / y) + 0` (the Int32 scalar helper)."""
+    var batch = _min_by_two_batch()
+    var pool = List[RuntimeExpr]()
+    pool.append(make_col(C))                  # 0
+    pool.append(make_col(Y))                  # 1
+    pool.append(_node(EXPR_DIV_I32, 0, 1))    # 2: c / y
+    pool.append(make_lit_i32(0))              # 3
+    pool.append(_node(EXPR_ADD_I32, 2, 3))    # 4: (c / y) + 0
+    _expect(_i32(_exec(pool^), batch, [0, 1]), [1 << 30, -(1 << 30)], "(c / y) + 0")
 
 
 def test_i64_walker_min_over_minus_one_of_a_wide_quotient_raises() raises:
@@ -488,10 +527,14 @@ def main() raises:
     suite.test[test_i64_zero_divisor_is_null_not_a_raise]()
     suite.test[test_f64_walker_zero_divisor_is_null_not_inf]()
     suite.test[test_i32_zero_divisor_is_null_not_a_raise]()
+    suite.test[test_i32_null_channel_marks_a_zero_divisor_at_position_zero]()
     suite.test[test_filter_over_a_zero_divisor_quotient_is_unknown]()
     suite.test[test_filter_over_a_cast_zero_divisor_quotient_is_unknown]()
     suite.test[test_i64_min_over_minus_one_raises]()
     suite.test[test_i32_min_over_minus_one_raises]()
+    suite.test[test_i64_min_over_minus_two_and_two_answers]()
+    suite.test[test_i32_min_over_minus_two_and_two_answers]()
+    suite.test[test_i32_nested_min_over_minus_two_and_two_answers]()
     suite.test[test_i64_walker_min_over_minus_one_of_a_wide_quotient_raises]()
     suite.test[test_f64_case_with_min_over_minus_one_in_the_untaken_branch_answers]()
     suite.test[test_f64_or_with_min_over_minus_one_on_a_true_row_keeps_it]()
