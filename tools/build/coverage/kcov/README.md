@@ -431,7 +431,10 @@ a refusal and exit 2 with the usage line, each message on stderr and nothing
 on stdout. `cov_zig`'s run it from a link directory holding it,
 `:debug_relocate` and the pinned zig (`exes` takes the toolchain's
 directory): a C program compiled and linked through it, a release level
-refused (exit 1) and a link directory with no `real/zig` (exit 2). They are
+refused (exit 1) and a link directory with no `real/zig` (exit 2); and with
+the stand-in as `real/zig`, the logical-directory cases again with `$PWD`
+and `$BUCK_SCRATCH_PATH` in the process's environment, which `main` reads
+(the ELF fixture both sets share: [cov_zig_elf.zig](cov_zig_elf.zig)). They are
 a validation of the public target (`:cov_normalize`, `:cov_zig`). The cases
 of `debug_relocate` are a script (`kcov_tool_cases` in [defs.bzl](defs.bzl)),
 and its public target depends on them. `:cov_link` and `:cov_run` take the
@@ -476,7 +479,8 @@ plain write.
 records its arguments and copies a given ELF file to the `-o` output; the
 arguments; a working directory of the test's own; `$PWD` and
 `$BUCK_SCRATCH_PATH`), and [cov_zig_exe_test.zig](cov_zig_exe_test.zig) runs
-the shipped executable over the pinned zig itself in the last two cases. The
+the shipped executable: over the pinned zig itself in the two pinned zig
+cases, and over the stand-in in the `process` cases. The
 fixtures put the working directory where a C runtime unit's `DW_AT_comp_dir`
 would be:
 
@@ -495,9 +499,13 @@ would be:
 | logical directory | reached through a symbolic link: `$PWD` and an absolute `$BUCK_SCRATCH_PATH` outside it are relocated too | `$PWD` ignored |
 | logical only | the output names only `$PWD`, not `getcwd`: relocated, exit 0 | a zero count of `getcwd` alone failing the link (red-first: it did) |
 | scratch only | the output names only an absolute `$BUCK_SCRATCH_PATH` outside the working directory, given: it is relocated, and the link fails with `has debug sections but holds the working directory`, exit 1 | the zero count summing every directory given, not only the working directory's spellings (planted: red) |
+| relative directories | a relative `$PWD` and `$BUCK_SCRATCH_PATH`: neither given to debug_relocate, exit 0, the relative strings in the output unchanged | a relative directory accepted (planted: red, debug_relocate refuses it) |
 | release level | `-O1` to `-O4`, `-Ofast`, `-Os`, `-Oz` on a link: exit 1 naming the level, `real/zig` not run; `-O0`, `-Og`, `-O` and a `-c -O2` compile pass | no refusal (red-first); refusing a Debug level (red-first: `-Og` was refused) |
 | pinned zig | a C file compiled with `-g` and linked through `cov_zig` with `-Wl,--strip-debug`: `.debug_line` kept, the placeholder present, the directory absent, no compressed section | the flags rejected by zig 0.12 |
 | pinned zig, release | the same link through zig directly has no `.debug_line`, so the previous case's line tables are `cov_zig`'s doing | |
+| process: logical | the shipped executable, its working directory reached through a symbolic link: `$PWD` (that path) and `$BUCK_SCRATCH_PATH` (outside it) from its environment, and the physical path, all gone from the output, exit 0 | `main` not reading `$PWD`, or not reading `$BUCK_SCRATCH_PATH` (planted: red) |
+| process: logical only | the output names only `$PWD`: exit 0, its placeholder present | `main` not reading `$PWD`; the two variables swapped (planted: red) |
+| process: scratch only | the output names only `$BUCK_SCRATCH_PATH`: relocated, exit 1 | `main` not reading `$BUCK_SCRATCH_PATH`; the two variables swapped (planted: red) |
 | process: refusal | the shipped executable linking at `-O2`: exit 1, the refusal on stderr, nothing on stdout, no output | `main` dropping `entry`'s status |
 | process: bad usage | a link directory with no `real/zig`: exit 2, `cannot run` on stderr | |
 

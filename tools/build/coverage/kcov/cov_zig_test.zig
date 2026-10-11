@@ -14,6 +14,7 @@
 
 const std = @import("std");
 const Z = @import("cov_zig.zig");
+const elf = @import("cov_zig_elf.zig").elf;
 const exes = @import("exes");
 
 const TGT = "x86_64-linux-gnu.2.34";
@@ -128,54 +129,6 @@ const Case = struct {
         return self.dir.readFileAlloc(self.alloc(), name, 1 << 20);
     }
 };
-
-fn le(w: anytype, comptime T: type, v: u64) !void {
-    try w.writeInt(T, @intCast(v), .little);
-}
-
-fn shdr(w: anytype, name: u32, typ: u32, flags: u64, off: u64, size: u64) !void {
-    try le(w, u32, name);
-    try le(w, u32, typ);
-    try le(w, u64, flags);
-    try le(w, u64, 0);
-    try le(w, u64, off);
-    try le(w, u64, size);
-    try le(w, u32, 0);
-    try le(w, u32, 0);
-    try le(w, u64, 1);
-    try le(w, u64, 0);
-}
-
-/// An ELF64 file with three sections: null, .shstrtab, and `name` holding
-/// `payload`.
-fn elf(a: std.mem.Allocator, name: []const u8, flags: u64, payload: []const u8) ![]const u8 {
-    var b = std.ArrayList(u8).init(a);
-    const w = b.writer();
-    const sl = 1 + 10 + name.len + 1;
-    try b.appendSlice("\x7fELF\x02\x01\x01");
-    try b.appendNTimes(0, 9);
-    try le(w, u16, 2);
-    try le(w, u16, 62);
-    try le(w, u32, 1);
-    try le(w, u64, 0);
-    try le(w, u64, 0);
-    try le(w, u64, 64 + sl + payload.len);
-    try le(w, u32, 0);
-    try le(w, u16, 64);
-    try le(w, u16, 0);
-    try le(w, u16, 0);
-    try le(w, u16, 64);
-    try le(w, u16, 3);
-    try le(w, u16, 1);
-    try b.appendSlice("\x00.shstrtab\x00");
-    try b.appendSlice(name);
-    try b.append(0);
-    try b.appendSlice(payload);
-    try b.appendNTimes(0, 64);
-    try shdr(w, 1, 3, 0, 64, sl);
-    try shdr(w, 11, 1, flags, 64 + sl, payload.len);
-    return b.items;
-}
 
 /// The placeholder debug_relocate writes over `dir`: '/' then '_'.
 fn placeholder(a: std.mem.Allocator, dir: []const u8) ![]const u8 {
@@ -377,6 +330,23 @@ test "13. scratch only: relocated, and the link fails, exit 1" {
     const r = try c.run(&.{ "cc", "a.o", "-o", "out" }, .{ .scratch = s });
     try check(r.status == 1 and has(r.err, "has debug sections but holds the working directory"), "scratch only: want exit 1 saying so", r);
     try check(!has(try c.file("out"), s), "scratch only: the output still holds the scratch directory (not relocated)", r);
+}
+
+// A relative $PWD or $BUCK_SCRATCH_PATH is not a directory of the action:
+// neither is given to debug_relocate (which would refuse it, so the link
+// would fail), and the relative strings in the output stay as they are.
+test "relative: a relative $PWD and $BUCK_SCRATCH_PATH are not relocated, exit 0" {
+    var c = try Case.init("relative");
+    defer c.deinit();
+    const a = c.alloc();
+    const l = "relative/logical/dir";
+    const s = "relative/scratch/dir";
+    try c.fixture(".debug_line", 0, c.cwd, try std.mem.concat(a, u8, &.{ l, "/b.mojo\x00", s, "/zig/crt.c\x00" }));
+    const r = try c.run(&.{ "cc", "a.o", "-o", "out" }, .{ .pwd = l, .scratch = s });
+    try check(r.status == 0, "relative: want exit 0", r);
+    const out = try c.file("out");
+    try check(!has(out, c.cwd), "relative: the output still holds the working directory", r);
+    try check(has(out, l) and has(out, s), "relative: a relative $PWD or $BUCK_SCRATCH_PATH was rewritten", r);
 }
 
 // 14. A link at a release optimization level is refused before real/zig

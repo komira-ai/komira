@@ -3,14 +3,17 @@
 //! of `:cov_zig`. The cases in cov_zig_test.zig call the program's `entry`
 //! in-process over a stand-in zig; these run the executable the public
 //! target hands out (module `exes`: `cov_zig`, `debug_relocate` and `zig`,
-//! the pinned zig's directory) as a child process from a link directory
-//! like `:cov_link`'s, and check what `main` adds (the command line taken
-//! from argv[1..] and getcwd, $PWD and $BUCK_SCRATCH_PATH read, the exec of
-//! a command that does not link, the messages on stderr and none on stdout,
-//! `entry`'s status as the exit status) and the pinned zig end to end.
+//! the pinned zig's directory; `stub`, the stand-in zig of
+//! cov_zig_test.zig) as a child process from a link directory like
+//! `:cov_link`'s, and check what `main` adds (the command line taken from
+//! argv[1..] and getcwd, $PWD and $BUCK_SCRATCH_PATH read from the process's
+//! environment, the exec of a command that does not link, the messages on
+//! stderr and none on stdout, `entry`'s status as the exit status) and the
+//! pinned zig end to end.
 
 const std = @import("std");
 const exes = @import("exes");
+const elf = @import("cov_zig_elf.zig").elf;
 
 const TGT = "x86_64-linux-gnu.2.34";
 const HELLO = "int value(int x) {\n    return x + 1;\n}\nint main(void) {\n    return value(-1);\n}\n";
@@ -21,9 +24,13 @@ const Run = struct {
     stderr: []const u8,
 };
 
+/// What `link/real` is: the pinned zig's directory, a directory whose `zig`
+/// is the stand-in (cov_zig_stub.zig), or nothing.
+const Real = enum { zig, stub, none };
+
 /// A temporary directory holding `link/` (zig: the shipped cov_zig;
-/// debug_relocate; real/: the pinned zig's directory, unless `real` is
-/// false), the zig caches under `scratch/`, and the working directory `wd/`.
+/// debug_relocate; real/ as `real` says), the zig caches under `scratch/`,
+/// and the working directory `wd/`.
 const Dir = struct {
     arena: std.heap.ArenaAllocator,
     tmp: std.testing.TmpDir,
@@ -32,21 +39,30 @@ const Dir = struct {
     cwd: []const u8,
     env: std.process.EnvMap,
 
-    fn init(real: bool) !Dir {
+    fn init(real: Real) !Dir {
         var d = Dir{ .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator), .tmp = std.testing.tmpDir(.{}), .root = "", .wd = undefined, .cwd = "", .env = undefined };
         const a = d.arena.allocator();
         d.root = try d.tmp.dir.realpathAlloc(a, ".");
         try d.tmp.dir.makePath("link");
         try d.tmp.dir.symLink(try std.fs.cwd().realpathAlloc(a, exes.cov_zig), "link/zig", .{});
         try d.tmp.dir.symLink(try std.fs.cwd().realpathAlloc(a, exes.debug_relocate), "link/debug_relocate", .{});
-        if (real) try d.tmp.dir.symLink(try std.fs.cwd().realpathAlloc(a, exes.zig), "link/real", .{});
+        switch (real) {
+            .zig => try d.tmp.dir.symLink(try std.fs.cwd().realpathAlloc(a, exes.zig), "link/real", .{}),
+            .stub => {
+                try d.tmp.dir.makePath("link/real");
+                try d.tmp.dir.symLink(try std.fs.cwd().realpathAlloc(a, exes.stub), "link/real/zig", .{});
+            },
+            .none => {},
+        }
         try d.tmp.dir.makePath("wd");
         try d.tmp.dir.makePath("scratch/home");
         d.wd = try d.tmp.dir.openDir("wd", .{});
         d.cwd = try d.wd.realpathAlloc(a, ".");
         // The zig caches live in the scratch directory, outside the working
         // directory, as in a build action, and $PWD is the working directory.
-        d.env = std.process.EnvMap.init(a);
+        // Not the arena's allocator: `d` is returned by value, and the map
+        // would keep a pointer to this frame's copy of the arena.
+        d.env = std.process.EnvMap.init(std.heap.page_allocator);
         const scratch = try d.path("scratch");
         try d.env.put("BUCK_SCRATCH_PATH", scratch);
         try d.env.put("ZIG_GLOBAL_CACHE_DIR", try d.path("scratch/zig-global"));
@@ -57,6 +73,7 @@ const Dir = struct {
     }
 
     fn deinit(self: *Dir) void {
+        self.env.deinit();
         self.wd.close();
         self.tmp.cleanup();
         self.arena.deinit();
@@ -93,6 +110,24 @@ const Dir = struct {
     fn file(self: *Dir, name: []const u8) ![]const u8 {
         return self.wd.readFileAlloc(self.arena.allocator(), name, 1 << 26);
     }
+
+    /// An ELF file with a .debug_line section holding `payload` and a NUL,
+    /// then `tail`, as what the stand-in copies to the link's output.
+    fn fixture(self: *Dir, payload: []const u8, tail: []const u8) !void {
+        const a = self.arena.allocator();
+        const p = try std.mem.concat(a, u8, &.{ payload, "\x00" });
+        try self.tmp.dir.writeFile("fx", try std.mem.concat(a, u8, &.{ try elf(a, ".debug_line", 0, p), tail }));
+        try self.tmp.dir.writeFile("link/real/stub_out", try self.path("fx"));
+    }
+
+    /// `name`, a symbolic link to the working directory, as an absolute path
+    /// that is not the working directory's own (the logical spelling).
+    fn viaLink(self: *Dir, name: []const u8) ![]const u8 {
+        try self.tmp.dir.symLink(self.cwd, name, .{});
+        const l = try self.path(name);
+        try std.testing.expect(!std.mem.eql(u8, l, self.cwd));
+        return l;
+    }
 };
 
 fn expect(name: []const u8, r: Run, code: u8, msg: []const u8) !void {
@@ -122,7 +157,7 @@ fn placeholder(a: std.mem.Allocator, dir: []const u8) ![]const u8 {
 // 16. The same link through the pinned zig directly, as a release build
 // runs it: no .debug_line. So case 15's line tables are cov_zig's doing.
 test "15, 16. pinned zig: the link keeps .debug_line, relocated; zig alone strips it" {
-    var d = try Dir.init(true);
+    var d = try Dir.init(.zig);
     defer d.deinit();
     const a = d.arena.allocator();
     try d.wd.writeFile("hello.c", HELLO);
@@ -144,7 +179,7 @@ test "15, 16. pinned zig: the link keeps .debug_line, relocated; zig alone strip
 }
 
 test "refusal: exit 1, the refusal on stderr, nothing on stdout" {
-    var d = try Dir.init(true);
+    var d = try Dir.init(.zig);
     defer d.deinit();
     const r = try d.run("link/zig", &.{ "cc", "hello.o", "-O2", "-o", "hello" });
     try expect("refusal", r, 1, "cov_zig: a link with the optimization level -O2 is refused");
@@ -155,8 +190,59 @@ test "refusal: exit 1, the refusal on stderr, nothing on stdout" {
 }
 
 test "bad usage: real/zig cannot be run, exit 2" {
-    var d = try Dir.init(false);
+    var d = try Dir.init(.none);
     defer d.deinit();
     const r = try d.run("link/zig", &.{ "ar", "rcs", "lib.a" });
     try expect("bad usage", r, 2, "cov_zig: cannot run ");
+}
+
+// The process cases over the stand-in zig: the shipped executable reads
+// $PWD and $BUCK_SCRATCH_PATH from its own environment (the unit cases hand
+// them to `entry`). The working directory is the physical `wd/`; $PWD is a
+// path to it through a symbolic link, as a shell that changed into it by
+// that path sets it; $BUCK_SCRATCH_PATH is `scratch/`, outside it.
+
+// 11, as a process: the output names the physical path, $PWD and the
+// scratch directory; all three are relocated, exit 0.
+test "process 11. logical: $PWD and $BUCK_SCRATCH_PATH from the environment relocated" {
+    var d = try Dir.init(.stub);
+    defer d.deinit();
+    const a = d.arena.allocator();
+    const l = try d.viaLink("via_link");
+    const s = d.env.get("BUCK_SCRATCH_PATH").?;
+    try std.testing.expect(!std.mem.startsWith(u8, s, try std.mem.concat(a, u8, &.{ d.cwd, "/" })));
+    try d.env.put("PWD", l);
+    try d.fixture(d.cwd, try std.mem.concat(a, u8, &.{ l, "/b.mojo\x00", s, "/zig/crt.c\x00" }));
+    try expect("process logical", try d.run("link/zig", &.{ "cc", "a.o", "-o", "out" }), 0, "");
+    const out = try d.file("out");
+    for ([_][]const u8{ d.cwd, l, s }) |dir| {
+        if (has(out, dir)) std.debug.print("process logical: the output still holds {s}\n", .{dir});
+        try std.testing.expect(!has(out, dir));
+    }
+}
+
+// 12, as a process: the output names only $PWD, never the physical path. It
+// counts as the working directory, so the link passes: exit 0.
+test "process 12. logical only: $PWD from the environment counts as the working directory" {
+    var d = try Dir.init(.stub);
+    defer d.deinit();
+    const l = try d.viaLink("via_link2");
+    try d.env.put("PWD", l);
+    try d.fixture(l, "");
+    try expect("process logical only", try d.run("link/zig", &.{ "cc", "a.o", "-o", "out" }), 0, "");
+    const out = try d.file("out");
+    try std.testing.expect(!has(out, l));
+    try std.testing.expect(has(out, try placeholder(d.arena.allocator(), l)));
+}
+
+// 13, as a process: the output names only $BUCK_SCRATCH_PATH ($PWD is the
+// physical path). It is relocated, but it is not the working directory, so
+// the link fails: exit 1.
+test "process 13. scratch only: $BUCK_SCRATCH_PATH from the environment relocated, exit 1" {
+    var d = try Dir.init(.stub);
+    defer d.deinit();
+    const s = d.env.get("BUCK_SCRATCH_PATH").?;
+    try d.fixture(try std.mem.concat(d.arena.allocator(), u8, &.{ s, "/zig/crt.c" }), "");
+    try expect("process scratch only", try d.run("link/zig", &.{ "cc", "a.o", "-o", "out" }), 1, "has debug sections but holds the working directory");
+    try std.testing.expect(!has(try d.file("out"), s));
 }

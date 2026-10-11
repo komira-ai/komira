@@ -101,7 +101,10 @@ zig_test(
         "debug_relocate": ":debug_relocate",
         "stub": ":cov_zig_stub",
     },
-    imports = ["cov_zig.zig"],
+    imports = [
+        "cov_zig.zig",
+        "cov_zig_elf.zig",
+    ],
     src = "cov_zig_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
@@ -118,17 +121,20 @@ zig_exe(
 
 # The shipped executable run as a process (cov_zig_exe_test.zig) from a link
 # directory like :cov_link's, over the pinned zig: a C program compiled and
-# linked through it, a refusal (exit 1) and bad usage (exit 2). It runs the
-# executable, so it cannot be an input of it; it is a validation of the
-# public target instead.
+# linked through it, a refusal (exit 1) and bad usage (exit 2); over the
+# stand-in zig: $PWD and $BUCK_SCRATCH_PATH read from its environment. It
+# runs the executable, so it cannot be an input of it; it is a validation of
+# the public target instead.
 zig_test(
     name = "cov_zig_exe_test",
     exec_compatible_with = LINUX_X86_64,
     exes = {
         "cov_zig": ":cov_zig_exe",
         "debug_relocate": ":debug_relocate",
+        "stub": ":cov_zig_stub",
         "zig": "komira//tools/build/toolchains:zig",
     },
+    imports = ["cov_zig_elf.zig"],
     src = "cov_zig_exe_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
