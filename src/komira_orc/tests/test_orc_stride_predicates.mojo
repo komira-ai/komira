@@ -287,6 +287,11 @@ def test_stride_predicates() raises:
         var file = write_orc_bytes(batch, opts)
         _stats_cases(file, label)
         _bloom_cases(file, label)
+        # The same statistics cases on a file with a ROW_INDEX and no bloom
+        # filters: every skip and every kept stride is the statistics
+        # leaf's answer alone, with no bloom probe to mask a wrong one.
+        var plain = write_orc_bytes(batch, OrcWriterOptions.with_stride(codec, STRIDE, N, True))
+        _stats_cases(plain, label + " nobloom")
 
 
 # -----------------------------------------------------------------------------
