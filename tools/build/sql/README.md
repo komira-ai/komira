@@ -131,10 +131,12 @@ DuckDB's parse of each case (`json_serialize_sql`) before the case runs
   analysis refusal's message and each build's failure in its `sql_oracle`
   action with its message: an undeclared output, a missing output (the
   first, the middle and the last of three), a SQL error, a read of a
-  package file that is not an input, a read of an absolute path, a changed
-  setting, a dot command, and two cases the oracle discipline of
-  komira_test_oracle refuses when its case runner calls it (a key with no
-  NULL placement, no outer ORDER BY). The farm's workers run in UTC, so `SET
+  package file that is not an input, a read of an absolute path, a read by
+  glob pattern, a changed setting, each dot command listed above, and two
+  cases the oracle discipline of komira_test_oracle refuses when its case
+  runner calls it (a key with no NULL placement, no outer ORDER BY). The
+  version and environment checks are pinned in the invocation from
+  `SELECT` to `END`, so a condition that can no longer fire fails it. The farm's workers run in UTC, so `SET
   TimeZone` is pinned by the invocation, not by a fixture's bytes. A failed
   action is never cached, so each red is a fresh run on the farm.
 
