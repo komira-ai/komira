@@ -22,7 +22,8 @@
 #                             checkout and system-config refusals
 #   network.mojo              whether any declared host answers at all
 #   readme_installed.mojo     an installed README as the programs it runs,
-#                             byte-equal to the welded SOURCE-mode programs
+#                             made by the tool that makes the welded
+#                             SOURCE-mode programs, which kci ships
 #   request.mojo              `ValidateRequest`, `ContainerHost`; the release
 #                             and the pins, read the PUBLISH step's way; a
 #                             metapackage's members from its own depends
@@ -38,10 +39,11 @@
 # Which validations a step has is the machine file's (kci_release_machine); the
 # result rows are kci_api's; processes start through kci_build's
 # ProcessRunner seam and the channel is read through kci_pkg_upload's
-# PkgTransport. The README examples become programs through the Mojo
-# library of //tools/build/readme_examples, which makes the bytes the
-# package's Zig tool makes for the welded `[tests][readme]` test. The command
-# line is the kci binary's (`kci run`).
+# PkgTransport. The README examples become programs through the Zig tool
+# //tools/build/readme_examples:tool, the program the welded
+# `[tests][readme]` test runs; kci ships it beside its executable and runs it
+# as a child process (readme_installed.mojo). The command line is the kci
+# binary's (`kci run`).
 # =============================================================================
 
 from kci_validate.channel_index import (
@@ -70,7 +72,16 @@ from kci_validate.env import (
     system_configs,
 )
 from kci_validate.network import declared_hosts
-from kci_validate.readme_installed import ReadmeProgram, installed_readme, package_dir_of, readme_program_of
+from kci_validate.readme_installed import (
+    README_TOOL_NAME,
+    ReadmeModule,
+    ReadmeProgram,
+    installed_readme,
+    map_report_file,
+    package_dir_of,
+    readme_program_of,
+    shipped_readme_tool,
+)
 from kci_validate.container import (
     COMPILER_PACKAGE,
     CONDA_FORGE_URL,

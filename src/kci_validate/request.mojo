@@ -9,8 +9,10 @@
 # CONDA_INSTALL_SMOKE program is read from, and what an ENV scratch directory
 # must not be inside; --plan; for CONDA_INSTALL_ENV, --pixi and
 # --pixi-sha256; `channel_override`, --channel: a LOCAL `file:///<dir>`
-# channel read and installed from instead of the step's, "" for the step's)
-# and the validation itself (kci_release_machine's `StageValidation`).
+# channel read and installed from instead of the step's, "" for the step's;
+# for CONDA_INSTALL_ENV, `readme_tool`, the README examples tool kci ships
+# beside its executable, readme_installed.mojo `shipped_readme_tool`) and
+# the validation itself (kci_release_machine's `StageValidation`).
 #
 # `ContainerHost` is how this machine starts the container: the docker
 # program, the PATH the docker CLI gets, and the `uid:gid` the container runs
@@ -82,6 +84,7 @@ struct ValidateRequest(Copyable, Movable):
     var pixi: String
     var pixi_sha256: String
     var channel_override: String
+    var readme_tool: String
 
     def __init__(out self, var validation: StageValidation):
         self.stage = String("")
@@ -99,6 +102,7 @@ struct ValidateRequest(Copyable, Movable):
         self.pixi = String("")
         self.pixi_sha256 = String("")
         self.channel_override = String("")
+        self.readme_tool = String("")
 
 
 struct ContainerHost(Copyable, Movable):

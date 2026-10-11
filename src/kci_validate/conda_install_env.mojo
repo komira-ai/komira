@@ -35,7 +35,9 @@
 #                must be <w>/.pixi/envs/default itself (not a link
 #                elsewhere), and every conda-meta record is read back
 #   -  readme    for each LIBRARY pin: its installed README, its sha256
-#                against metadata.json `doc_files`, made into the runner
+#                against metadata.json `doc_files`, made by the README
+#                examples tool kci ships (`req.readme_tool`, under
+#                <scratch>/<validation>/readme/<import>) into the runner
 #                <w>/readme_<import>.mojo and one program per example beside
 #                it, <w>/readme_<import>_<line>.mojo; refused when there is none, when
 #                the bytes differ, or when it holds no example. No library
@@ -49,8 +51,9 @@
 #                its stdout in .out and its stderr in .err, each with every
 #                `readme_<import>_<line>.mojo:<n>` (an example's program,
 #                whose line n is README line n) rewritten to the README line
-#                (an assertion reports its place on stdout, a compile error
-#                on stderr); then readback.mojo's count check
+#                by the tool's `map` (an assertion reports its place on
+#                stdout, a compile error on stderr; a report the tool cannot
+#                map fails the row); then readback.mojo's count check
 #
 # FAIL CLOSED: every failure is VALIDATION_FAILED with a named row, apart
 # from no network (above). Under `--plan` nothing runs and the row says
@@ -81,7 +84,6 @@ from std.os import listdir, makedirs, symlink
 from std.os.path import exists, isdir, islink
 
 from komira_retry import Sleeper
-from readme_examples.program import map_report
 
 from kci_build.runner import ProcessRunner, RunResult, RunSpec
 from kci_api import (
@@ -117,7 +119,7 @@ from .env import (
 )
 from .network import CHECK_NETWORK, answered_count, declared_hosts, describe_answers, probe_hosts
 from .readback import CHECK_INSTALL, check_installed, check_payloads, check_program, install_exited_zero, read_or_empty
-from .readme_installed import ReadmeProgram, installed_readme
+from .readme_installed import ReadmeProgram, installed_readme, map_report_file
 from .request import InstallPin, ValidateRequest, install_pins, load_validated_release, mojo_pin_of, with_members
 
 comptime CHECK_HOST: String = "host"
@@ -404,7 +406,7 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
             + String(" holding at least one ```mojo example")
         )
         try:
-            var p = installed_readme(pin, env_dir)
+            var p = installed_readme(pin, env_dir, req.readme_tool, join_path(dir, String("readme/") + pin.import_name))
             _write(join_path(work, p.file), p.text)
             for m in range(len(p.modules)):
                 _write(join_path(work, p.modules[m].name), p.modules[m].text)
@@ -465,20 +467,30 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
         except e:
             started = False
             _write(join_path(out_dir, record + String(".err")), String("not started: ") + String(e) + String("\n"))
+        var unmapped = String("")
         if started:
             # an assertion reports `At <w>/readme_<import>_<line>.mojo:L:C` on
             # stdout, a compile error on stderr: both name the README line
-            _write(
-                join_path(out_dir, record + String(".out")),
-                map_report(read_or_empty(raw_out), p.package, p.display),
-            )
-            _write(
-                join_path(out_dir, record + String(".err")),
-                map_report(read_or_empty(raw_err), p.package, p.display),
-            )
+            # (the tool's `map`; a report it cannot map is kept as it was,
+            # and the row fails naming why)
+            var raws = [raw_out.copy(), raw_err.copy()]
+            var kinds = [String(".out"), String(".err")]
+            for k in range(2):
+                var dest = join_path(out_dir, record + kinds[k])
+                try:
+                    map_report_file(
+                        req.readme_tool, raws[k], p.package, p.display, dest,
+                        join_path(dir, String("readme/") + p.package),
+                    )
+                except e:
+                    _write(dest, read_or_empty(raws[k]))
+                    unmapped = String(e)
         if not check_program(out_dir, p.file, checks, record):
             checks[len(checks) - 1].got += (
                 String(" (") + p.installed + String(" is the installed copy of ") + p.display
                 + String(": the same bytes, so the same lines)")
             )
+        if unmapped.byte_length() > 0:
+            checks[len(checks) - 1].ok = False
+            checks[len(checks) - 1].got += String(" (its report names program lines, not README lines: ") + unmapped + String(")")
     return _finish(row^, checks^)

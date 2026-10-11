@@ -7,8 +7,11 @@ The validations a kci stage runs on its steps. Two kinds:
   cleared environment, and runs each installed library's README examples
   against the installed package. The programs (one per example, and a
   runner that runs them all) are made from the installed
-  `share/doc/<name>/README.md` by the same generator as the build's
-  `[tests][readme]` test, so the two are byte-equal for the same README. A
+  `share/doc/<name>/README.md` by the program that makes them for the
+  build's `[tests][readme]` test, the README examples tool, so the two are
+  byte-equal for the same README. kci ships the tool beside its executable
+  (`shipped_readme_tool`) and runs it as a child process; without it the
+  README is refused, naming the path. A
   library that ships no README, a README with other bytes than its
   `metadata.json` records, or one with no example is refused. No network at
   all is `INDETERMINATE` (exit 5) with a skip reason, never a pass.
@@ -31,38 +34,27 @@ Processes, the channel and waits go through seams (`ProcessRunner`,
 
 ## Examples
 
-An installed README becomes the same programs the build runs, and the runner:
+An installed README's programs are made by the README examples tool, which
+kci ships beside its own executable; a tool that is not there is refused by
+name before anything is written:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo
-from kci_validate import package_dir_of, readme_doc_path, readme_program_of
+from kci_validate import package_dir_of, readme_doc_path, readme_program_of, shipped_readme_tool
 
-var fence = "`" * 3
-var readme = (
-    "# komira_encoding\n\nBase64.\n\n" + fence + "mojo\n"
-    + "from komira_encoding import base64_encode\n"
-    + "print(base64_encode(\"foobar\".as_bytes()))\n" + fence + "\n"
-)
 var dir = package_dir_of("komira//src/komira_encoding:komira_encoding_conda")
 assert_equal(dir, "src/komira_encoding")
 assert_equal(readme_doc_path("komira_encoding"), "share/doc/komira_encoding/README.md")
+assert_true(shipped_readme_tool().endswith("/readme_examples"))
 
-var program = readme_program_of(readme, "komira_encoding", dir + "/README.md")
-assert_equal(program.examples, 1)
-assert_equal(program.file, "readme_komira_encoding.mojo")  # never komira_encoding.mojo
-assert_true("readme_komira_encoding validation: " in program.text)
-assert_equal(program.modules[0].name, "readme_komira_encoding_5.mojo")  # the example at line 5
-assert_true("import readme_komira_encoding_5" in program.text)
-
+var fence = "`" * 3
+var readme = "# komira_encoding\n\n" + fence + "mojo\nprint(1)\n" + fence + "\n"
 var refused = String()
 try:
-    _ = readme_program_of("# empty\n", "komira_encoding", dir + "/README.md")
+    _ = readme_program_of(readme, "komira_encoding", dir + "/README.md", "/nonexistent/readme_examples", "/nonexistent/scratch")
 except e:
     refused = String(e)
-assert_equal(
-    refused,
-    "src/komira_encoding/README.md holds no " + fence + "mojo example, so the validation would run nothing; add one",
-)
+assert_true(refused.startswith("the README examples tool /nonexistent/readme_examples is missing"))
 ```
 
 The environment's `pixi.toml` pins every library to its version, build and

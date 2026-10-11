@@ -15,7 +15,7 @@ the compiler sees. Worked uses of each rule are in
 | rule | produces | example |
 |---|---|---|
 | `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level, readme)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run, and so are the ```` ```mojo ```` examples of the package's `README.md` (see [README examples](#readme-examples)); the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
-| `mojo_binary(srcs, deps, main, optimization_level, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
+| `mojo_binary(srcs, deps, main, optimization_level, expected_stdout, helpers)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries and its `helpers` (programs it runs, beside it: [helpers.bzl](helpers.bzl)). `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
 | `mojo_test(srcs, deps, main, optimization_level, data, env, args, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
 | `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
 | `mojo_doc_json(lib, golden, symbols)` ([`doc.bzl`](doc.bzl)) | `<name>.json`: the `mojo doc` JSON of the `mojo_library` `lib`, optionally checked against a golden file and for named declarations (see [API JSON](doc.md)). | [`hellopkg_doc`](../examples/BUCK) |
@@ -88,10 +88,12 @@ the Zig tool [`//tools/build/readme_examples:tool`](../readme_examples/BUCK)
 (`generate`, and `map` for a report's lines; its unit tests are welded). It
 reads Markdown through the shared Zig module
 [`//tools/build/markdown`](../markdown/BUCK) (CommonMark fences, code spans,
-links). Two Mojo programs read Markdown in process through the Mojo library
-of the same package, `readme_examples`, until they move to the Zig tool and
-module: `buildtools.doc_links` (the link check) and `kci_validate`, which
-makes an installed README into the programs `generate` makes for it.
+links). kci ships the same tool beside its executable (`bin/kci` `helpers`)
+and runs it on an installed README, so the programs an ENV validation runs
+are the ones `[tests][readme]` ran (`src/kci_validate`). Only
+`buildtools.doc_links` (the link check) still reads Markdown through a Mojo
+reader, the `markdown` of the package's Mojo library `readme_examples`,
+until it moves to the Zig module.
 
 - **An example** is a fenced block whose info string is `mojo` or
   `mojo module` (```` ``` ```` or `~~~`; a closing fence is the same
@@ -118,8 +120,10 @@ makes an installed README into the programs `generate` makes for it.
   line just before an example's fence is prepended to it, and one starting on
   the line just after is appended (one line, or `<!-- mojo-hidden`, the code,
   then `-->`). GitHub's page does not render it; every raw view, and the
-  installed copy, shows it. A `mojo-hidden` comment next to no example, or a
-  misspelled marker, is refused.
+  installed copy, shows it. A `mojo-hidden` comment next to no example, one
+  that would attach to two (it ends just before one fence and starts just
+  after another: a blank line on one side says which), one inside another
+  HTML comment, or a misspelled marker, is refused.
 - **Lines**: line n of an example's program is README line n (the lines
   around the copied ones are blank, but for a header comment and the
   `def main() raises:` of a ```` ```mojo ```` example), so a compile error
@@ -250,7 +254,10 @@ A built binary loads a few shared libraries from the toolchain
 (`komira//tools/build/toolchains:mojo_runtime`: the Mojo runtime and the pinned C++ runtime,
 about 24 MB). The runnable directory of a binary (`[runnable]`) holds the
 binary and a copy of those libraries in `lib/`, where its run path finds them,
-so it starts from anywhere with no environment. `RunInfo` points at it.
+so it starts from anywhere with no environment. `RunInfo` points at it. A
+binary's `helpers` (`{file name: target}`, e.g. a `zig_exe`) sit beside it
+there, and in `bin/` of its bundle, where it finds them next to its own
+executable ([helpers.bzl](helpers.bzl)).
 ([`launch.sh`](launch.sh) starts a binary from outside its runnable
 directory, pointing the loader at the toolchain's `lib/`.) The list of
 libraries is checked against what the loader actually maps during a run

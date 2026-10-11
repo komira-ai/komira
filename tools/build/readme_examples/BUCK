@@ -8,8 +8,9 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 # line n, plus the runner of them all; `map` rewrites a report's program
 # lines to README lines (cli.zig). mojo_library runs it on its package's
 # README.md as an action, and so do the coverage build and the README API
-# census. Zig, as every build tool under tools/build is; what is code, a
-# fence and a link is the shared Markdown reader's
+# census; kci ships it beside its executable and runs it on an installed
+# README (src/kci_validate). Zig, as every build tool under tools/build is;
+# what is code, a fence and a link is the shared Markdown reader's
 # (//tools/build/markdown:markdown).
 
 _SRCS = glob(["*.zig"])
@@ -40,25 +41,19 @@ zig_exe(
     visibility = ["PUBLIC"],
 )
 
-# The same reading in Mojo, as a library, for the two Mojo programs that
-# read Markdown in process: kci_validate makes an installed README into the
-# programs `generate` makes for it (byte-equal; src/kci_validate), and
-# buildtools.doc_links reads what is code and what is a link through its
-# `markdown` (tools/build/inspect). Its unit tests are welded. It goes when
-# both read through the Zig tool and module.
+# What is left in Mojo: the Markdown reader `buildtools.doc_links`
+# (tools/build/inspect) imports, `markdown` and `text`, with their welded
+# unit tests. The README examples are the Zig tool's alone; kci ships the
+# tool (bin/kci/BUCK `helpers`) and runs it on an installed README. This
+# library is deleted by the doc_links port of komira-ai/komira#1281, which
+# moves doc_links onto //tools/build/markdown.
 mojo_library(
     name = "readme_examples",
     srcs = [
         "readme_examples/__init__.mojo",
-        "readme_examples/examples.mojo",
         "readme_examples/markdown.mojo",
-        "readme_examples/program.mojo",
         "readme_examples/text.mojo",
     ],
-    test_srcs = [
-        "tests/test_examples.mojo",
-        "tests/test_markdown.mojo",
-        "tests/test_program.mojo",
-    ],
-    visibility = ["PUBLIC"],
+    test_srcs = ["tests/test_markdown.mojo"],
+    visibility = ["//tools/build/inspect:", "//tools/build/tests/..."],
 )

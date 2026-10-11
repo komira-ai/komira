@@ -56,6 +56,7 @@ from kci_pkg_upload import PkgRequest, PkgResponse, ScriptedPkgTransport, conten
 from kci_publish import NoWaitSleeper
 from kci_publish.release_fixture import ExampleRelease, write_example_inputs, write_text_file
 from kci_release_machine import StageValidation
+from komira_runtime_paths import data_path
 from kci_validate import (
     EnvHost,
     FileChannelTransport,
@@ -178,6 +179,7 @@ struct Fixture(Movable):
         req.repo_root = root + String("/repo")
         req.pixi = root + String("/tools/pixi")
         req.pixi_sha256 = _sha(String(PIXI_BYTES))
+        req.readme_tool = data_path(String("readme_examples"))
         self.host = EnvHost(root + String("/etc_pixi"))
         self.root = root^
         self.release = release^
@@ -918,7 +920,7 @@ def test_a_compile_error_is_mapped_to_the_readme_line() raises:
     var fx = Fixture(String("compile"))
     # README line 13 is `assert_equal(alpha(2), 4)`; the played compiler
     # names line 13 of the second example's program, where it was copied
-    var p = readme_program_of(String(README), String("komira_alpha"), String("src/komira_alpha/README.md"))
+    var p = readme_program_of(String(README), String("komira_alpha"), String("src/komira_alpha/README.md"), fx.req.readme_tool, fx.root + String("/readme"))
     assert_equal(len(p.modules), 2)
     assert_equal(p.modules[1].name, String("readme_komira_alpha_12.mojo"))
     assert_equal(String(p.modules[1].text.split(String("\n"))[12]), String("    assert_equal(alpha(2), 4)"))

@@ -7,8 +7,10 @@
 #   install pinned to version AND build on the step's channel), and the
 #   installed README's programs: byte-equal to the programs SOURCE mode
 #   generates for the welded `[tests][readme]` test of the same README
-#   (tools/build/mojo/defs.bzl `_readme_gate`: display `<package dir>/
-#   README.md`, the import name, relative links refused), the runner named
+#   (tools/build/mojo/defs.bzl `_readme_gate` runs the README examples tool
+#   with display `<package dir>/README.md`, the import name, relative links
+#   refused; this test runs the same tool, the one kci ships, with that
+#   argv, and kci's run of it must give the same bytes), the runner named
 #   `readme_<import>.mojo`, never `<import>.mojo`, and each example's
 #   `readme_<import>_<line>.mojo`. A change to any of them is a visible
 #   edit of this file.
@@ -17,10 +19,9 @@
 from std.os import setenv
 from std.testing import TestSuite, assert_equal, assert_true
 
-from readme_examples.examples import extract_examples
-from readme_examples.program import generate_programs
-
+from kci_build import RunSpec, SupervisorRunner
 from kci_release_machine import StageValidation
+from komira_runtime_paths import data_path, test_tmpdir
 from kci_validate import (
     AUTH_FILE_TEXT,
     InstallPin,
@@ -166,20 +167,36 @@ def test_installed_program_is_byte_equal_to_source_mode() raises:
     # SOURCE mode, as defs.bzl `_readme_gate` runs the tool for
     # //src/komira_encoding:komira_encoding: display = <package>/README.md,
     # --package = the import name, --links refuse (the README ships)
-    var display = String("src/komira_encoding/README.md")
-    var source = generate_programs(extract_examples(String(README), display, True), String("komira_encoding"), display)
+    var tool = data_path(String("readme_examples"))
+    var tmp = test_tmpdir()
+    var readme = tmp + String("/README.md")
+    var f = open(readme, "w")
+    f.write_bytes(String(README).as_bytes())
+    f.close()
+    var src = tmp + String("/source")
+    var spec = RunSpec(
+        tool.copy(),
+        [
+            String("generate"), String("--readme"), readme, String("--display"), String("src/komira_encoding/README.md"),
+            String("--package"), String("komira_encoding"), String("--links"), String("refuse"),
+            String("--out-dir"), src, String("--examples"), tmp + String("/examples"),
+        ],
+        tmp.copy(), 120, tmp + String("/source.stdout"), tmp + String("/source.stderr"),
+    )
+    var runner = SupervisorRunner()
+    assert_true(runner.run(spec).ok(), open(tmp + String("/source.stdout"), "r").read())
+    assert_equal(open(tmp + String("/examples"), "r").read(), String("5\n15\n"))
     # INSTALLED mode: the display comes from the package's build label, the
     # package from its import name
     var dir = package_dir_of(String("komira//src/komira_encoding:komira_encoding_conda"))
     assert_equal(dir, String("src/komira_encoding"))
-    var installed = readme_program_of(String(README), String("komira_encoding"), dir + String("/README.md"))
-    assert_equal(len(source), 3)
-    assert_equal(installed.text, source[2].text)
-    assert_equal(installed.file, source[2].name)
+    var installed = readme_program_of(
+        String(README), String("komira_encoding"), dir + String("/README.md"), tool, tmp + String("/installed")
+    )
+    assert_equal(installed.text, open(src + String("/readme_komira_encoding.mojo"), "r").read())
     assert_equal(len(installed.modules), 2)
     for i in range(2):
-        assert_equal(installed.modules[i].name, source[i].name)
-        assert_equal(installed.modules[i].text, source[i].text)
+        assert_equal(installed.modules[i].text, open(src + String("/") + installed.modules[i].name, "r").read())
     assert_equal(installed.modules[0].name, String("readme_komira_encoding_5.mojo"))
     assert_equal(installed.modules[1].name, String("readme_komira_encoding_15.mojo"))
     assert_equal(installed.examples, 2)

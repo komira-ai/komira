@@ -228,7 +228,7 @@ from kci_api import (
 )
 from kci_api import RunResult as KciRunResult
 from kci_publish import NewNamesReport, PublishRequest, new_names_markdown
-from kci_validate import ValidateRequest
+from kci_validate import ValidateRequest, shipped_readme_tool
 from kci_release_set.member import file_sha256_hex
 from kci_release_machine import (
     Selection,
@@ -463,6 +463,8 @@ def _validate_request(cmd: KciCommand, stage: Stage, step: StageStep, v: StageVa
     req.pixi = cmd.pixi.copy()
     req.pixi_sha256 = cmd.pixi_sha256.copy()
     req.channel_override = cmd.channel.copy()
+    # the README examples tool kci ships beside its executable
+    req.readme_tool = shipped_readme_tool()
     return req^
 
 
