@@ -357,8 +357,7 @@ def optimize(
     # pass after this one carries the field when it rebuilds a join.
     plan = select_join_build_side(plan^)
 
-    # 17. Limits: push down, then Sort over Limit becomes TopN. After step 16,
-    # so a Limit goes below the Project that restores the join's column order.
+    # 17. Limits: push down, then Sort over Limit becomes TopN.
     if has_limit:
         plan = push_limit_down(plan^)
         if _plan_has_sort_above_limit(plan):
