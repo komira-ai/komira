@@ -135,9 +135,10 @@ def _admitted(imm pool: List[RuntimeExpr], root: Int, imm batch: RecordBatch) ra
 
 
 def test_each_admission_failure_declines() raises:
-    """Mutant: the `col.is_numeric_dict()` operand of `_leaf_kind` removed
-    (the dictionary's codes are then read as values, and the `dc` case is
-    admitted)."""
+    """Mutant: the `if lk == 0: return False` check removed (the INT32 leaf is
+    then admitted). (The `is_numeric_dict()` operand of `_leaf_kind` is
+    subsumed by its type test: a numeric dictionary's tag is DICTIONARY, which
+    is not a dense leaf type, so removing the operand changes no answer.)"""
     var b = _batch(_N)
     var pool = List[RuntimeExpr]()
     pool.append(make_col(0))
