@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 
 # The async runtime: the per-core reactor (epoll on Linux, kqueue on macOS),
 # the worker pool and fork-join dispatcher, channels, timers, cancellation,
@@ -175,6 +176,29 @@ mojo_library(
         "tests/test_worker_observability_integration.mojo",
         "tests/test_worker_shutdown_park_race.mojo",
         "tests/test_worker_spin_kevent_frequency.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# libkomira_async_native.so.1: the C this library owns, as its own
+# shared library exporting the names its callers call
+# (tools/build/native/README.md, "Each library's shared library"). Built and
+# checked here; no package ships it yet.
+native_shared_library(
+    name = "komira_async_native",
+    archives = [
+        ":komira_async_posix",
+    ],
+    callers = [
+        ":komira_async",
+        "//src/komira_objectstore:komira_objectstore",
+    ],
+    library = "komira_async",
+    # Every weak undefined symbol of the library, recorded from its first
+    # green link (checks 3 and 7 hold it to exactly this list):
+    weak_undefined = [
+        # zig's C runtime (crti.o): the profiling hook, absent unless -pg.
+        "__gmon_start__",
     ],
     visibility = ["PUBLIC"],
 )
