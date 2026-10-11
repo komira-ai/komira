@@ -1,0 +1,5 @@
+# proto-message: komira.plan.v1.ProducerStamp
+engine_build: "Oo\306\003\220<\223n\375SY\347\244.\020;\3121\215\360aN\337k\037,B\023nE;\304"
+optimizer_contract_version: 1
+optimizer_config_digest: "\205Z\354\310\367]\353b\227\\T\260\366\242\324Zi\377\334+a\241\254\214\207\331:\257h\333\2473"
+kind: "komira/python-sdk"

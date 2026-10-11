@@ -1,0 +1,50 @@
+# The proto3 canonical JSON of one value of every komira.managed_mail.v1
+# message, one message per line: the message name, one space, the JSON.
+# Every field of every message has a key here: each is set to a value other
+# than its default, except the `optional` field `seen` of UpdateEmailRequest,
+# which is present at its default to show that a present field is written.
+# RawBodyReply has no fields. The values exercise the codec and need not be
+# ones a server would send together. The lines are in the order mail.proto
+# declares the messages. The same values, written as protoc text, are
+# tests/fixtures/corpus.txtpb (one field of MailCorpus per message, in the
+# order of this file). tests/test_mail_goldens.mojo reads both.
+EmailAddress {"address":"ada@example.com","displayName":"Ada Lovelace"}
+Mailbox {"mailboxId":"mb-ada","address":"ada@example.com","displayName":"Ada Lovelace","kind":"MAILBOX_KIND_PERSONAL","createdAtMs":"1790000000000","owner":{"iss":"https://id.example.com","sub":"user-ada"}}
+Email {"emailId":"em-0001","mailboxId":"mb-ada","threadId":"th-0001","folder":"FOLDER_INBOX","from":{"address":"bob@example.org","displayName":"Bob"},"to":[{"address":"ada@example.com","displayName":"Ada Lovelace"}],"cc":[{"address":"support@example.com","displayName":"Support"}],"subject":"Lunch on Friday?","snippet":"Are you free at noon","sentAtMs":"1790000100000","receivedAtMs":"1790000100500","sizeBytes":"2048","hasAttachments":true,"seen":true,"flagged":true,"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","headerMessageId":"<m1@example.org>"}
+EmailPart {"partIndex":2,"contentType":"application/pdf","filename":"menu.pdf","sizeBytes":"1024","isAttachment":true,"contentId":"<part2@example.org>"}
+Thread {"threadId":"th-0001","mailboxId":"mb-ada","subject":"Lunch on Friday?","emailCount":3,"lastReceivedAtMs":"1790000200000"}
+Envelope {"mailFrom":"ada@example.com","rcptTo":["bob@example.org","carol@example.net"]}
+Submission {"submissionId":"sub-0001","mailboxId":"mb-ada","emailId":"em-0002","envelope":{"mailFrom":"ada@example.com","rcptTo":["bob@example.org","carol@example.net"]},"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","state":"SUBMISSION_STATE_QUEUED","attempts":2,"nextAttemptAtMs":"1790000300000","providerMessageId":"pm-0001","lastError":"451 4.7.1 try again later","createdAtMs":"1790000250000"}
+Attachment {"filename":"menu.pdf","contentType":"application/pdf","content":"JVBERi0xLjc="}
+ApiError {"code":"invalid_argument","message":"The field to must name at least one address.","field":"to","incidentId":"inc-0001"}
+RawBodyReply {}
+ListMailboxesRequest {"cursor":"c-0002","limit":25}
+ListMailboxesResponse {"mailboxes":[{"mailboxId":"mb-ada","address":"ada@example.com","displayName":"Ada Lovelace","kind":"MAILBOX_KIND_PERSONAL","createdAtMs":"1790000000000","owner":{"iss":"https://id.example.com","sub":"user-ada"}}],"nextCursor":"c-0003"}
+CreateMailboxRequest {"address":"ada@example.com","displayName":"Ada Lovelace","kind":"MAILBOX_KIND_PERSONAL","owner":{"iss":"https://id.example.com","sub":"user-ada"}}
+CreateMailboxResponse {"mailbox":{"mailboxId":"mb-ada","address":"ada@example.com","displayName":"Ada Lovelace","kind":"MAILBOX_KIND_PERSONAL","createdAtMs":"1790000000000","owner":{"iss":"https://id.example.com","sub":"user-ada"}}}
+DeleteMailboxRequest {"mailboxId":"mb-ada"}
+DeleteMailboxResponse {"mailboxId":"mb-ada","emailsDeleted":"17"}
+ListEmailsRequest {"mailboxId":"mb-ada","folder":"FOLDER_SENT","cursor":"c-0004","limit":50}
+ListEmailsResponse {"emails":[{"emailId":"em-0001","mailboxId":"mb-ada","threadId":"th-0001","folder":"FOLDER_INBOX","from":{"address":"bob@example.org","displayName":"Bob"},"to":[{"address":"ada@example.com","displayName":"Ada Lovelace"}],"cc":[{"address":"support@example.com","displayName":"Support"}],"subject":"Lunch on Friday?","snippet":"Are you free at noon","sentAtMs":"1790000100000","receivedAtMs":"1790000100500","sizeBytes":"2048","hasAttachments":true,"seen":true,"flagged":true,"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","headerMessageId":"<m1@example.org>"}],"nextCursor":"c-0005"}
+GetEmailRequest {"emailId":"em-0001"}
+GetEmailResponse {"email":{"emailId":"em-0001","mailboxId":"mb-ada","threadId":"th-0001","folder":"FOLDER_INBOX","from":{"address":"bob@example.org","displayName":"Bob"},"to":[{"address":"ada@example.com","displayName":"Ada Lovelace"}],"cc":[{"address":"support@example.com","displayName":"Support"}],"subject":"Lunch on Friday?","snippet":"Are you free at noon","sentAtMs":"1790000100000","receivedAtMs":"1790000100500","sizeBytes":"2048","hasAttachments":true,"seen":true,"flagged":true,"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","headerMessageId":"<m1@example.org>"},"textBody":"Are you free at noon on Friday?","htmlBody":"<p>Are you free at noon on Friday?</p>","parts":[{"partIndex":2,"contentType":"application/pdf","filename":"menu.pdf","sizeBytes":"1024","isAttachment":true,"contentId":"<part2@example.org>"}]}
+GetEmailRawRequest {"emailId":"em-0001"}
+GetEmailPartRequest {"emailId":"em-0001","partIndex":2}
+UpdateEmailRequest {"emailId":"em-0001","seen":false,"flagged":true,"folder":"FOLDER_ARCHIVE"}
+UpdateEmailResponse {"email":{"emailId":"em-0001","mailboxId":"mb-ada","threadId":"th-0001","folder":"FOLDER_INBOX","from":{"address":"bob@example.org","displayName":"Bob"},"to":[{"address":"ada@example.com","displayName":"Ada Lovelace"}],"cc":[{"address":"support@example.com","displayName":"Support"}],"subject":"Lunch on Friday?","snippet":"Are you free at noon","sentAtMs":"1790000100000","receivedAtMs":"1790000100500","sizeBytes":"2048","hasAttachments":true,"seen":true,"flagged":true,"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","headerMessageId":"<m1@example.org>"}}
+GetThreadRequest {"threadId":"th-0001"}
+GetThreadResponse {"thread":{"threadId":"th-0001","mailboxId":"mb-ada","subject":"Lunch on Friday?","emailCount":3,"lastReceivedAtMs":"1790000200000"},"emails":[{"emailId":"em-0001","mailboxId":"mb-ada","threadId":"th-0001","folder":"FOLDER_INBOX","from":{"address":"bob@example.org","displayName":"Bob"},"to":[{"address":"ada@example.com","displayName":"Ada Lovelace"}],"cc":[{"address":"support@example.com","displayName":"Support"}],"subject":"Lunch on Friday?","snippet":"Are you free at noon","sentAtMs":"1790000100000","receivedAtMs":"1790000100500","sizeBytes":"2048","hasAttachments":true,"seen":true,"flagged":true,"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","headerMessageId":"<m1@example.org>"}]}
+SendEmailRequest {"mailboxId":"mb-ada","to":[{"address":"bob@example.org","displayName":"Bob"}],"cc":[{"address":"support@example.com","displayName":"Support"}],"bcc":[{"address":"carol@example.net","displayName":"Carol"}],"subject":"Re: Lunch on Friday?","textBody":"Noon works.","htmlBody":"<p>Noon works.</p>","attachments":[{"filename":"menu.pdf","contentType":"application/pdf","content":"JVBERi0xLjc="}],"inReplyToEmailId":"em-0001"}
+SendEmailResponse {"emailId":"em-0002","submissionId":"sub-0001"}
+GetSubmissionRequest {"submissionId":"sub-0001"}
+GetSubmissionResponse {"submission":{"submissionId":"sub-0001","mailboxId":"mb-ada","emailId":"em-0002","envelope":{"mailFrom":"ada@example.com","rcptTo":["bob@example.org","carol@example.net"]},"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","state":"SUBMISSION_STATE_QUEUED","attempts":2,"nextAttemptAtMs":"1790000300000","providerMessageId":"pm-0001","lastError":"451 4.7.1 try again later","createdAtMs":"1790000250000"}}
+ExportMailboxRequest {"mailboxId":"mb-ada"}
+InboundEnvelope {"mailFrom":"bob@example.org","rcptTo":["ada@example.com","nobody@example.com"],"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+InboundDelivery {"recipient":"ada@example.com","mailboxId":"mb-ada","emailId":"em-0001","duplicate":true}
+InboundDeliveryResponse {"deliveries":[{"recipient":"ada@example.com","mailboxId":"mb-ada","emailId":"em-0001","duplicate":true}],"unknownRecipients":["nobody@example.com"]}
+RawMessageRequest {"envelopeFrom":"ada@example.com","recipients":["bob@example.org","carol@example.net"],"raw":"RnJvbTogQWRhIExvdmVsYWNlIDxhZGFAZXhhbXBsZS5jb20+DQpUbzogYm9iQGV4YW1wbGUub3JnDQpTdWJqZWN0OiBIZWxsbw0KDQpIZWxsbywgQm9iLg0K"}
+RawMessageResponse {"messageId":"0100018f-msg-0001","suppressed":["carol@example.net"]}
+ErrorResponse {"error":{"code":"internal","message":"The server failed to answer.","field":"to","incidentId":"inc-0002"}}
+Subject {"iss":"https://id.example.com","sub":"user-ada"}
+EraseSubjectRequest {"subject":{"iss":"https://id.example.com","sub":"user-ada"}}
+EraseSubjectResponse {"mailboxesDeleted":"1","emailsDeleted":"17","submissionsDeleted":"3","blobsDeleted":"12"}

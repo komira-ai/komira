@@ -6,7 +6,8 @@ The records are what cov_branch_classify writes for one test
 is `<col>:<kind>:<n>/<N>` instead of a block number. A file holds records
 `SF:<path>`, then `BRDA:<line>,<col>:<kind>:<n>/<N>,<arm>,<taken|->` lines,
 then `end_of_record`; an empty file (a test that ran none of the library's
-code) holds none. `<kind>` is `br`, `select`, `switch` or `rhs`; `<N>` is how
+code) holds none. `<kind>` is `br`, `select`, `switch`, `try` (a raising
+call in a `try:` body: returned, raised into the handler) or `rhs`; `<N>` is how
 many decisions of that kind one copy of the code holds at that line and
 column, `<n>` which one (0 to N-1); `<arm>` numbers the decision's outcomes
 from 0. `-` means the decision's code never ran: the arm counts, not taken,
@@ -24,7 +25,7 @@ second time, a `BRDA` without exactly four fields, a block field that is not
 `<col>:<kind>:<n>/<N>`, an unknown kind, a column or line of 0 or above
 10^9, `<n>` not below `<N>`, a malformed arm or count, the same arm twice,
 and a last record without `end_of_record`. At each `end_of_record`: every
-decision has arms 0 to k-1 (two for `br`, `select` and `rhs`, at least two
+decision has arms 0 to k-1 (two for `br`, `select`, `try` and `rhs`, at least two
 for `switch`), and every location has each of its `N` decisions.
 
 Across reports (`DecisionShapes`): one test's classifier sees only its own
@@ -44,7 +45,13 @@ def _fail(origin: String, line_no: Int, why: String) raises:
 
 
 def _kind_ok(kind: String) -> Bool:
-    return kind == String("br") or kind == String("select") or kind == String("switch") or kind == String("rhs")
+    return (
+        kind == String("br")
+        or kind == String("select")
+        or kind == String("switch")
+        or kind == String("try")
+        or kind == String("rhs")
+    )
 
 
 def _num(origin: String, n: Int, field: String, what: String, lo: Int) raises -> Int:
@@ -122,7 +129,7 @@ def _brda(origin: String, n: Int, body: String, mut f: FileCov, mut r: _Record) 
     var col = _num(origin, n, parts[0], String("BRDA column"), 1)
     var kind = parts[1]
     if not _kind_ok(kind):
-        _fail(origin, n, String("BRDA kind '") + kind + String("' is not br, select, switch or rhs"))
+        _fail(origin, n, String("BRDA kind '") + kind + String("' is not br, select, switch, try or rhs"))
     var nn = split_on(parts[2], 47)
     if len(nn) != 2:
         _fail(origin, n, String("BRDA decision '") + parts[2] + String("' is not <n>/<N>"))

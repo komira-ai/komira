@@ -3,10 +3,14 @@
 Cloud Run Admin v2 clients, generated at build time from the googleapis
 protos (`google/cloud/run/v2`) over REST/JSON:
 
-- `ServicesClient`: create, get, list, update in place and delete a service;
+- `ServicesClient`: create, get, list, update in place and delete a service,
+  and read and write its IAM policy (who may invoke it);
 - `RevisionsClient`: list and delete revisions (a keep-last-N prune);
 - `JobsClient`: create, get, list, update, delete and run a job, a run
-  taking per-run argument and environment overrides;
+  taking per-run argument and environment overrides, and read and write its
+  IAM policy (who may run it);
+- `WorkerPoolsClient`: create, get, list, update in place and delete a
+  worker pool (a background worker: containers with no ingress);
 - `ExecutionsClient`: read and cancel the execution a run started;
 - `OperationsClient`: read or wait on the long-running operation every
   mutating method returns, at Run's own operation paths.

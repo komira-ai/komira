@@ -310,7 +310,7 @@ def _gcp_client(
         test_srcs = [],
         visibility = None,
         **kwargs):
-    """See the module docstring. `kwargs` go to the mojo_library (test_data, test_env)."""
+    """See the module docstring. `kwargs` go to the mojo_library (test_data, test_env, readme)."""
     gen = name + "_gen"
     vis = {"visibility": visibility} if visibility != None else {}
     _gcp_client_gen(

@@ -130,6 +130,7 @@ from komira_async.reactor.reactor import Reactor
 # {the core packages and the small leaf packages} only — never reaches back into komira_objectstore.
 from komira_metrics.metrics_set import MetricsSet, new_owned_metrics_set
 
+from komira_objectstore.cas_backoff_probe import record_cas_backoff
 from komira_objectstore.path import Path
 
 # Reclamation never touches a live chunk (at or above `_LOG_START`):
@@ -657,6 +658,14 @@ struct _LocalHeadCache(Copyable, Movable, Deinitable):
 # -----------------------------------------------------------------------------
 
 
+comptime CAS_LIST_ESCALATE_AFTER: Int = 3
+"""Consecutive 412s after which `CasManifestStore.append` re-anchors on the
+bucket's authoritative tail (the LIST escalation) instead of probing one slot
+forward. Public so a test can state what its bound relies on: a call whose
+budget (`max_retries + 1` attempts) exceeds this many attempts makes at least
+one attempt past a re-anchor."""
+
+
 @fieldwise_init
 struct RetryPolicy(
     Copyable, ImplicitlyCopyable, Movable, Deinitable
@@ -761,24 +770,32 @@ def _xorshift64(var x: UInt64) -> UInt64:
 
 
 @always_inline
-def _jittered_sleep_us(upper_us: Int64, salt: UInt64) raises:
+def _jittered_sleep_us(upper_us: Int64, attempt: Int):
     """Sleep a uniform-random duration in [0, upper_us] microseconds.
 
     Full jitter. Seeds an xorshift from the high-resolution
-    clock XORed with a per-call `salt` (the attempt count) so two threads
+    clock XORed with a per-call salt (the attempt count) so two threads
     entering backoff at nearly the same instant still draw different waits.
+    Every backoff is counted (`cas_backoff_probe`), a zero bound included:
+    the attempt, its bound, the draw and the time the sleep took, so a test
+    can hold them to the policy.
     """
     if upper_us <= Int64(0):
+        record_cas_backoff(attempt, upper_us, Int64(0), Int64(0))
         return
+    var salt = UInt64(attempt)
     var seed = UInt64(perf_counter_ns()) ^ (salt * UInt64(0x9E3779B97F4A7C15))
     var r = _xorshift64(seed | UInt64(1))
     var draw_us = r % UInt64(upper_us + 1)
+    var t0 = perf_counter_ns()
     # Use `usleep` (microsecond, distinct symbol) instead of stdlib
     # `time.sleep` → `nanosleep`: an AOT binary that links komira_async (whose
     # reactor declares its OWN `external_call["nanosleep", ...]`) hits a
     # "conflicting nanosleep signature" legalization failure. Same fix as
     # komira_job_supervisor._sleep_secs / komira_supervisor._sleep_ms.
     _ = external_call["usleep", Int32](UInt32(draw_us))
+    var slept_us = Int64((perf_counter_ns() - t0) // 1000)
+    record_cas_backoff(attempt, upper_us, Int64(draw_us), slept_us)
 
 
 # =============================================================================
@@ -1920,8 +1937,8 @@ struct CasManifestStore[Store: ConditionalWriteStore](
     def _read_dedup_sentinel_inner(
         self, producer_id: Int64, first_seq: Int64
     ) raises -> Optional[DedupSentinel]:
-        # UNLOCKED sentinel read (the gate is held by the caller — the public
-        # `read_dedup_sentinel` rdlock, or `append_idempotent`'s wrlock).
+        # UNLOCKED sentinel read: the public `read_dedup_sentinel` holds the
+        # gate's rdlock; `append_idempotent` calls this without the gate.
         var key = dedup_sentinel_key(self._prefix, producer_id, first_seq)
         try:
             var raw = self._store.get(key)
@@ -2277,20 +2294,18 @@ struct CasManifestStore[Store: ConditionalWriteStore](
     def _scan_tail_for_batch(
         self, producer_id: Int64, first_seq: Int64
     ) raises -> Optional[AppendResult]:
-        # EXACT phantom-detect: walk the authoritative tail DOWNWARD from the
-        # bucket's true head and stop at the first chunk whose body carries
-        # `(producer_id, first_seq)` (the broker's producer trailer is in
-        # every chunk body). A chunk with that
+        # EXACT phantom-detect: walk the live chunks FORWARD from `_LOG_START`
+        # up to the bucket's true top and stop at the first chunk whose body
+        # carries `(producer_id, first_seq)` (the broker's producer trailer is
+        # in every chunk body). A chunk with that
         # identity exists IFF the append committed — no false positive (the
         # identity is exact), no false negative (the log-start-aware
-        # authoritative tail sees every live committed chunk). Bounded: the
-        # latest batch of an idempotent producer is near the tail (early-exit),
-        # reusing `recover_last_committed_seq`'s top-down early-exit walk.
+        # authoritative tail sees every live committed chunk).
         #
         # Returns the committed `AppendResult{chunk_seq, base_offset, last_offset}`
         # (etag/attempts unused by the caller) when found, else None.
         #
-        # This is UNLOCKED (the gate is held by `append_idempotent`'s wrlock).
+        # This takes no gate (`append_idempotent` runs lock-free).
         # We decode the manifest body via this module's chunk codec, then read
         # the broker's producer trailer directly off the consumer body bytes
         # (the trailer offsets are stable; see the broker manifest body's wire layout).
@@ -2319,15 +2334,28 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             try:
                 c = self._store.get(ck)
             except e:
-                if _is_not_found(String(e)):
-                    # A hole at/above log_start is a torn lineage; but here we
-                    # are only probing for the batch identity — treat a missing
-                    # chunk as "not this one" and continue (the authoritative
-                    # `_recover_head_by_list` already fail-louds on a real torn
-                    # tail before we get here).
-                    seq += Int64(1)
-                    continue
-                raise e^
+                # Skipping an unreadable chunk would number every later chunk
+                # (and the ack) too low. A 404 here is a chunk reaped after the
+                # `_LOG_START` read (it moved past `seq`: restart from it, seq
+                # strictly forward) or a torn lineage (refuse, as
+                # `_recover_head_by_list` does).
+                if not _is_not_found(String(e)):
+                    raise e^
+                var now = self._read_log_start_inner()
+                if now.log_start_seq <= seq:
+                    raise Error(
+                        "CasManifestStore: batch scan found a MISSING committed"
+                        " chunk at seq "
+                        + String(seq)
+                        + " (>= log_start_seq "
+                        + String(now.log_start_seq)
+                        + ") — torn manifest lineage, refusing to renumber."
+                        " prefix="
+                        + self._prefix
+                    )
+                next_off = now.log_start_offset
+                seq = now.log_start_seq
+                continue
             var rc = decode_chunk_record_count(c)
             var consumer_body = decode_chunk_body(c)
             var hit = _body_matches_producer_batch(
@@ -2544,7 +2572,7 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         # `candidate_seq` from a stale-low _HEAD instead computes a fresh seq
         # beyond ALL taken slots. We re-escalate every N 412s so a writer that
         # is still losing keeps re-anchoring on the true tail.
-        comptime LIST_ESCALATE_AFTER = 3
+        comptime LIST_ESCALATE_AFTER = CAS_LIST_ESCALATE_AFTER
         var consecutive_412 = 0
         while True:
             attempt += 1
@@ -2619,7 +2647,7 @@ struct CasManifestStore[Store: ConditionalWriteStore](
                     + self._prefix
                 )
             var upper = self._retry.backoff_us_for_attempt(attempt)
-            _jittered_sleep_us(upper, UInt64(attempt))
+            _jittered_sleep_us(upper, attempt)
             # FORWARD-PROBE re-anchor: the slot we just tried
             # (`head.chunk_seq + 1`) is TAKEN — read THAT chunk directly (one GET
             # of a known key, NOT a LIST, NOT the lagging cached `_HEAD`) to learn
@@ -2691,7 +2719,7 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         # is recoverable by LIST). On return the deferred counter is reset; if the
         # persist failed transiently it simply tries again on the next cadence.
         if not self._head_cache.present:
-            return
+            return  # cov: unreachable the only caller checks _head_cache.present first
         var seq = self._head_cache.chunk_seq
         var next_off = self._head_cache.next_offset
         # `_try_advance_head` with empty `expected_head_etag` takes the monotone
@@ -3125,11 +3153,11 @@ struct CasManifestStore[Store: ConditionalWriteStore](
             var new_encoded = encode_chunk(new_body, old_rc)
             var check_rc = decode_chunk_record_count(new_encoded)
             if check_rc != old_rc:
-                _cas_gate_unlock()
-                raise Error(
-                    "CasManifestStore.rewrite_chunk_body: record_count guard"
+                # The `except` below releases the gate (once).
+                raise Error(  # cov: unreachable encode_chunk(body, old_rc) always decodes back to old_rc
+                    "CasManifestStore.rewrite_chunk_body: record_count guard"  # cov: unreachable see the line above
                     " — refusing to renumber chunk "
-                    + String(chunk_seq)
+                    + String(chunk_seq)  # cov: unreachable see the line above
                 )
             try:
                 _ = self._store.conditional_put(
@@ -3485,25 +3513,16 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         `LogStart.zero()` (offset 0, seq 0, empty etag) if the partition has
         never been truncated (the object is absent). The empty etag signals
         the next advance must CREATE (If-None-Match), not CAS."""
-        # READ verb -> SHARED (read) lock.
+        # READ verb -> SHARED lock, released exactly once on every path (a
+        # second release wedges every later write-locked verb in the process).
         _cas_gate_rdlock()
         try:
-            var lk = log_start_key(self._prefix)
-            try:
-                var raw = self._store.get(lk)
-                var meta = self._store.head(lk)
-                var ls = decode_log_start(raw, meta.etag)
-                _cas_gate_unlock()
-                return ls^
-            except e:
-                if _is_not_found(String(e)):
-                    _cas_gate_unlock()
-                    return LogStart.zero()
-                _cas_gate_unlock()
-                raise e^
-        except e2:
+            var ls = self._read_log_start_inner()
             _cas_gate_unlock()
-            raise e2^
+            return ls^
+        except e:
+            _cas_gate_unlock()
+            raise e^
 
     def advance_log_start(
         mut self,
@@ -3568,25 +3587,20 @@ struct CasManifestStore[Store: ConditionalWriteStore](
         `cas_catalog_sidecar` then CREATEs it via If-None-Match. The blob is
         the OPAQUE consumer payload (the table store's serialized TableCatalog); the
         CAS substrate round-trips it verbatim. READ verb -> SHARED (read)
-        lock; exception-safe unlock (no `finally` in 1.0.0b1)."""
+        lock, released exactly once on every path (no `finally` in 1.0.0b1)."""
         _cas_gate_rdlock()
         try:
             var ck = catalog_key(self._prefix)
-            try:
-                var raw = self._store.get(ck)
-                var meta = self._store.head(ck)
-                var sc = CatalogSidecar(True, raw^, String(meta.etag))
-                _cas_gate_unlock()
-                return sc^
-            except e:
-                if _is_not_found(String(e)):
-                    _cas_gate_unlock()
-                    return CatalogSidecar.absent()
-                _cas_gate_unlock()
-                raise e^
-        except e2:
+            var raw = self._store.get(ck)
+            var meta = self._store.head(ck)
+            var sc = CatalogSidecar(True, raw^, String(meta.etag))
             _cas_gate_unlock()
-            raise e2^
+            return sc^
+        except e:
+            _cas_gate_unlock()
+            if _is_not_found(String(e)):
+                return CatalogSidecar.absent()
+            raise e^
 
     def cas_catalog_sidecar(
         self, blob: List[UInt8], expected_etag: String

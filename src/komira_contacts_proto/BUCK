@@ -1,0 +1,22 @@
+load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
+
+# The resources of a simple contacts service's JSON API
+# (`komira/contacts/v1/contacts.proto`, package `komira.contacts.v1`):
+# AddressBook, Card and its parts, the change feed, the vCard import summary
+# and the error envelope. Generated into the Mojo package
+# `komira_contacts_proto`:
+#
+#   from komira_contacts_proto.contacts import Card
+#
+# The `.proto` sits at its import path so the path matches the proto package.
+# The generated message structs conform to the `komira_proto_codec` codec
+# runtime. `test_srcs` welds the package to its field-number census, and
+# README.md's examples run as one more welded test. `komira_contacts` stores
+# these messages.
+mojo_proto_library(
+    name = "komira_contacts_proto",
+    srcs = ["komira/contacts/v1/contacts.proto"],
+    deps = ["//src/komira_proto_codec:komira_proto_codec"],
+    test_srcs = ["tests/test_contacts_field_numbers.mojo"],
+    visibility = ["PUBLIC"],
+)

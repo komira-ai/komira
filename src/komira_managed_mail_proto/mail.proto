@@ -1,0 +1,456 @@
+syntax = "proto3";
+package komira.managed_mail.v1;
+
+// The managed mail API: a simple mail app with mailboxes, a fixed set of
+// folders, threads, a send queue, idempotent inbound delivery, and the raw
+// RFC 5322 bytes of every message in and out. It is its own JSON API and
+// deliberately not IMAP or JMAP.
+//
+// The messages travel as proto3 canonical JSON over HTTP, one request message
+// as the body (or the query, for a GET) and one response message as the reply,
+// except where mail_service.proto says a route carries raw bytes. No field has
+// a `json_name` option: every JSON key is the proto3 lowerCamel form of the
+// field name.
+//
+// This file also holds the two wire contracts between the app and a submission
+// service that sends and receives mail for it over HTTP:
+//   - HTTP submission (RawMessageRequest, RawMessageResponse): the app sends a
+//     message it built by POSTing its raw bytes;
+//   - inbound delivery (InboundEnvelope, InboundDeliveryResponse): the service
+//     hands the app a received message.
+//
+// One deployment holds one dataset: no message carries a scope id.
+// Times are milliseconds since the Unix epoch (UTC).
+// A `sha256` field is the lowercase hex SHA-256 of the raw message bytes, 64
+// characters: the app stores each raw message once under it.
+
+// Who a mailbox is for.
+enum MailboxKind {
+  // Never sent.
+  MAILBOX_KIND_UNSPECIFIED = 0;
+  // One person's address.
+  MAILBOX_KIND_PERSONAL = 1;
+  // An address several people read and send from (support@, sales@).
+  MAILBOX_KIND_SHARED = 2;
+}
+
+// The folder an email is in. The set is fixed: there are no user folders.
+enum Folder {
+  // Never stored. In a request it means "any folder" (ListEmailsRequest).
+  FOLDER_UNSPECIFIED = 0;
+  // Delivered inbound mail.
+  FOLDER_INBOX = 1;
+  // Mail this mailbox sent.
+  FOLDER_SENT = 2;
+  FOLDER_ARCHIVE = 3;
+  FOLDER_TRASH = 4;
+}
+
+// Where an outbound submission is in its life.
+enum SubmissionState {
+  // Never sent.
+  SUBMISSION_STATE_UNSPECIFIED = 0;
+  // Waiting for its next attempt (`next_attempt_at_ms`).
+  SUBMISSION_STATE_QUEUED = 1;
+  // The outbound path accepted the message (`provider_message_id`).
+  SUBMISSION_STATE_SENT = 2;
+  // Permanently refused, or out of attempts (`last_error`).
+  SUBMISSION_STATE_FAILED = 3;
+}
+
+// ---- the resources -----------------------------------------------------------
+
+// One address of a header field: an RFC 5322 `addr-spec` and, if the header
+// gave one, its display name.
+message EmailAddress {
+  // The `addr-spec`, `local-part@domain`.
+  string address = 1;
+  // Decoded text (RFC 2047 encoded words are decoded); empty when absent.
+  string display_name = 2;
+}
+
+// A mailbox: one address with a display name (the RFC 5321/5322 sense of the
+// word), not a folder.
+message Mailbox {
+  // Assigned by the server; stable for the life of the mailbox.
+  string mailbox_id = 1;
+  // The `addr-spec`. Unique in the deployment, compared case-insensitively.
+  string address = 2;
+  string display_name = 3;
+  MailboxKind kind = 4;
+  int64 created_at_ms = 5;
+  // The person a MAILBOX_KIND_PERSONAL mailbox is for; unset for a
+  // MAILBOX_KIND_SHARED one. EraseSubject deletes the personal mailboxes of
+  // its subject.
+  Subject owner = 6;
+}
+
+// One stored message of a mailbox, as listed. The raw bytes are
+// `GET /v1/emails/{email_id}/raw`.
+message Email {
+  string email_id = 1;
+  string mailbox_id = 2;
+  string thread_id = 3;
+  Folder folder = 4;
+  EmailAddress from = 5;
+  repeated EmailAddress to = 6;
+  repeated EmailAddress cc = 7;
+  // Decoded text.
+  string subject = 8;
+  // The first characters of the text body, for a list view.
+  string snippet = 9;
+  // The `Date` header field; 0 when it is absent or unreadable.
+  int64 sent_at_ms = 10;
+  // When the app stored the message.
+  int64 received_at_ms = 11;
+  // The size of the raw message in bytes.
+  int64 size_bytes = 12;
+  bool has_attachments = 13;
+  bool seen = 14;
+  bool flagged = 15;
+  // The raw message's key in the blob store.
+  string sha256 = 16;
+  // The `Message-ID` header field's value, angle brackets included; empty
+  // when absent.
+  string header_message_id = 17;
+}
+
+// One MIME part of a message, in depth-first order. Its bytes, transfer
+// encoding removed, are `GET /v1/emails/{email_id}/parts/{part_index}`.
+message EmailPart {
+  // 0 is the first part in depth-first order.
+  int32 part_index = 1;
+  // The media type and subtype, lower case (`text/plain`, `image/png`).
+  string content_type = 2;
+  // From `Content-Disposition` or `Content-Type` parameters (RFC 2183, RFC
+  // 2231), decoded; empty when absent.
+  string filename = 3;
+  // The decoded size in bytes.
+  int64 size_bytes = 4;
+  // `Content-Disposition: attachment`, or a part with a filename that is not
+  // the message's text or html body.
+  bool is_attachment = 5;
+  // The `Content-ID` header field's value, for an inline image; empty when
+  // absent.
+  string content_id = 6;
+}
+
+// A conversation: the emails of one mailbox linked by `Message-ID`,
+// `In-Reply-To` and `References`.
+message Thread {
+  string thread_id = 1;
+  string mailbox_id = 2;
+  // The subject of the thread's first email.
+  string subject = 3;
+  int32 email_count = 4;
+  // The newest email's `received_at_ms`.
+  int64 last_received_at_ms = 5;
+}
+
+// The SMTP envelope of a message: who bounces go to and who it is delivered
+// to. The recipients include Bcc recipients, which appear in no header.
+message Envelope {
+  // The `MAIL FROM` reverse path, an `addr-spec`.
+  string mail_from = 1;
+  // The `RCPT TO` forward paths, each an `addr-spec`.
+  repeated string rcpt_to = 2;
+}
+
+// One outbound message's trip through the send queue.
+message Submission {
+  string submission_id = 1;
+  string mailbox_id = 2;
+  // The copy in the mailbox's SENT folder.
+  string email_id = 3;
+  Envelope envelope = 4;
+  // The raw message sent.
+  string sha256 = 5;
+  SubmissionState state = 6;
+  // Attempts made so far.
+  int32 attempts = 7;
+  // When a QUEUED submission is tried next; 0 in any other state.
+  int64 next_attempt_at_ms = 8;
+  // The outbound path's id for the accepted message; empty until SENT.
+  string provider_message_id = 9;
+  // The last attempt's refusal, as the outbound path reported it; empty
+  // when there was none.
+  string last_error = 10;
+  int64 created_at_ms = 11;
+}
+
+// A file to attach to an outbound message.
+message Attachment {
+  string filename = 1;
+  // The media type and subtype (`application/pdf`).
+  string content_type = 2;
+  // The file's bytes (base64 in JSON).
+  bytes content = 3;
+}
+
+// The error an error reply carries, as the `error` member of its body
+// (ErrorResponse).
+message ApiError {
+  // A stable machine-readable code (`not_found`, `invalid_argument`).
+  string code = 1;
+  // A sentence for a person.
+  string message = 2;
+  // For a refused request: the JSON name of the request field at fault;
+  // empty when no one field is.
+  string field = 3;
+  // For a fault (an error the server did not mean to send): the id it was
+  // logged under; empty otherwise.
+  string incident_id = 4;
+}
+
+// The response a method names when its reply body is raw bytes, not JSON
+// (mail_service.proto says which). It has no fields and is never sent.
+message RawBodyReply {
+}
+
+// ---- mailboxes ---------------------------------------------------------------
+
+message ListMailboxesRequest {
+  // The `next_cursor` of the previous page; empty for the first.
+  string cursor = 1;
+  // At most this many; 0 means the server's default.
+  int32 limit = 2;
+}
+
+message ListMailboxesResponse {
+  repeated Mailbox mailboxes = 1;
+  // Empty on the last page.
+  string next_cursor = 2;
+}
+
+message CreateMailboxRequest {
+  string address = 1;
+  string display_name = 2;
+  MailboxKind kind = 3;
+  // Required for MAILBOX_KIND_PERSONAL; must be unset for
+  // MAILBOX_KIND_SHARED.
+  Subject owner = 4;
+}
+
+message CreateMailboxResponse {
+  Mailbox mailbox = 1;
+}
+
+// Deletes the mailbox with its emails, threads and submissions.
+message DeleteMailboxRequest {
+  string mailbox_id = 1;
+}
+
+message DeleteMailboxResponse {
+  string mailbox_id = 1;
+  // How many emails were deleted with it.
+  int64 emails_deleted = 2;
+}
+
+// ---- emails and threads ------------------------------------------------------
+
+// A mailbox's emails, newest first.
+message ListEmailsRequest {
+  string mailbox_id = 1;
+  // FOLDER_UNSPECIFIED lists every folder.
+  Folder folder = 2;
+  // The `next_cursor` of the previous page; empty for the first.
+  string cursor = 3;
+  // At most this many; 0 means the server's default.
+  int32 limit = 4;
+}
+
+message ListEmailsResponse {
+  repeated Email emails = 1;
+  // Empty on the last page.
+  string next_cursor = 2;
+}
+
+message GetEmailRequest {
+  string email_id = 1;
+}
+
+// The parsed view of one email.
+message GetEmailResponse {
+  Email email = 1;
+  // The first `text/plain` body, decoded to UTF-8; empty when there is none.
+  string text_body = 2;
+  // The first `text/html` body, decoded to UTF-8; empty when there is none.
+  string html_body = 3;
+  repeated EmailPart parts = 4;
+}
+
+// The raw message (`message/rfc822`) is the reply body, not JSON.
+message GetEmailRawRequest {
+  string email_id = 1;
+}
+
+// One part's decoded bytes are the reply body, not JSON, with the part's
+// `Content-Type`.
+message GetEmailPartRequest {
+  string email_id = 1;
+  int32 part_index = 2;
+}
+
+// Changes the given fields of one email; an absent field is unchanged.
+message UpdateEmailRequest {
+  string email_id = 1;
+  optional bool seen = 2;
+  optional bool flagged = 3;
+  // FOLDER_UNSPECIFIED is refused.
+  optional Folder folder = 4;
+}
+
+message UpdateEmailResponse {
+  Email email = 1;
+}
+
+message GetThreadRequest {
+  string thread_id = 1;
+}
+
+message GetThreadResponse {
+  Thread thread = 1;
+  // Oldest first.
+  repeated Email emails = 2;
+}
+
+// ---- sending -----------------------------------------------------------------
+
+// Builds a message from the mailbox's address and queues it. The envelope's
+// recipients are every address of `to`, `cc` and `bcc`; `bcc` appears in no
+// header.
+message SendEmailRequest {
+  string mailbox_id = 1;
+  repeated EmailAddress to = 2;
+  repeated EmailAddress cc = 3;
+  repeated EmailAddress bcc = 4;
+  string subject = 5;
+  // At least one of `text_body` and `html_body` is set; both make a
+  // `multipart/alternative` message.
+  string text_body = 6;
+  string html_body = 7;
+  repeated Attachment attachments = 8;
+  // A reply: the email of this mailbox it answers. The message gets its
+  // `In-Reply-To` and `References` and joins its thread. Empty otherwise.
+  string in_reply_to_email_id = 9;
+}
+
+// The reply is 202 Accepted: the message is stored and queued, not yet sent.
+message SendEmailResponse {
+  // The copy in the mailbox's SENT folder.
+  string email_id = 1;
+  string submission_id = 2;
+}
+
+message GetSubmissionRequest {
+  string submission_id = 1;
+}
+
+message GetSubmissionResponse {
+  Submission submission = 1;
+}
+
+// The mailbox's emails as one RFC 4155 mbox file are the reply body, not JSON.
+message ExportMailboxRequest {
+  string mailbox_id = 1;
+}
+
+// ---- inbound delivery (submission service -> app) ----------------------------
+
+// The envelope of a delivered message. `POST /v1/inbound` carries the raw
+// message as its body (`Content-Type: message/rfc822`), and this message, as
+// proto3 canonical JSON, in its `Komira-Mail-Envelope` header field: the body
+// is never base64-inflated and the envelope is never in an undocumented
+// header. The app refuses a delivery whose body's SHA-256 is not `sha256`.
+message InboundEnvelope {
+  // The `MAIL FROM` reverse path; empty for a null reverse path (a bounce).
+  string mail_from = 1;
+  // The `RCPT TO` forward paths, each an `addr-spec` at a domain the app
+  // serves. A recipient that names no mailbox of the app is listed in the
+  // reply's `unknown_recipients`, and the reply is still 2xx.
+  repeated string rcpt_to = 2;
+  string sha256 = 3;
+}
+
+// What the app did for one recipient of a delivery.
+message InboundDelivery {
+  // One `rcpt_to` of the envelope.
+  string recipient = 1;
+  string mailbox_id = 2;
+  string email_id = 3;
+  // The app already held this message for this recipient: delivery is
+  // idempotent on (sha256, recipient), so a repeat stores nothing and names
+  // the first delivery's email.
+  bool duplicate = 4;
+}
+
+// The reply to `POST /v1/inbound`. A 2xx reply, duplicates included, means
+// the app holds the message for every recipient it delivered to; the sender
+// may then discard its copy. When no recipient names a mailbox of the app the
+// reply is still 2xx, with no `deliveries` and every recipient in
+// `unknown_recipients`: the app never answers an unknown recipient with 4xx,
+// which the sender would take as a permanent refusal of the whole message.
+message InboundDeliveryResponse {
+  repeated InboundDelivery deliveries = 1;
+  // Recipients that name no mailbox of the app; nothing was stored for them.
+  repeated string unknown_recipients = 2;
+}
+
+// ---- HTTP submission (app -> submission service) -----------------------------
+
+// `POST {base}/v1/raw-messages`: sends a message the caller built. The
+// request may carry an `Idempotency-Key` header field: a repeat with the same
+// key and the same `raw` returns the first reply and sends nothing.
+message RawMessageRequest {
+  // The `MAIL FROM` reverse path, an `addr-spec`.
+  string envelope_from = 1;
+  // The `RCPT TO` forward paths: 1 to 50 `addr-spec`s.
+  repeated string recipients = 2;
+  // The RFC 5322 message, at most 4 MiB (4194304 bytes); base64 in JSON.
+  bytes raw = 3;
+}
+
+message RawMessageResponse {
+  // The submission service's id for the accepted message.
+  string message_id = 1;
+  // Recipients the service did not send to because they are on its
+  // suppression list (earlier bounces or complaints).
+  repeated string suppressed = 2;
+}
+
+// ---- errors ------------------------------------------------------------------
+
+// The body of every error reply (4xx and 5xx):
+// `{"error":{"code":...,"message":...}}`. komira_http_server writes a fault
+// (an uncaught error) in this shape too, with `incidentId`, so a refusal and
+// a fault decode the same way.
+message ErrorResponse {
+  ApiError error = 1;
+}
+
+// ---- erasure -----------------------------------------------------------------
+
+// The identity a bearer token carries: its `iss` and `sub` claims.
+message Subject {
+  string iss = 1;
+  string sub = 2;
+}
+
+// Erases what the deployment holds about one subject: every
+// MAILBOX_KIND_PERSONAL mailbox whose `owner` is the subject, with its emails,
+// threads and submissions (a QUEUED submission is never sent), and every raw
+// message that no remaining mailbox holds. A MAILBOX_KIND_SHARED mailbox has
+// no owner and is kept, including mail the subject sent from it. Idempotent:
+// a repeat finds nothing and returns zeros.
+message EraseSubjectRequest {
+  Subject subject = 1;
+}
+
+// What the erasure removed; all zero when nothing was left.
+message EraseSubjectResponse {
+  int64 mailboxes_deleted = 1;
+  int64 emails_deleted = 2;
+  int64 submissions_deleted = 3;
+  // Raw messages removed from the blob store.
+  int64 blobs_deleted = 4;
+}

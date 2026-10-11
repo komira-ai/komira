@@ -1,0 +1,9 @@
+{"id": 1, "a": true, "b": true}
+{"id": 2, "a": true, "b": false}
+{"id": 3, "a": true, "b": null}
+{"id": 4, "a": false, "b": true}
+{"id": 5, "a": false, "b": false}
+{"id": 6, "a": false, "b": null}
+{"id": 7, "a": null, "b": true}
+{"id": 8, "a": null, "b": false}
+{"id": 9, "a": null, "b": null}

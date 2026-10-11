@@ -16,6 +16,7 @@
 #   reason                 nothing landed       an upload landed   error id
 #   PUBLISHED              SUCCEEDED            SUCCEEDED          -
 #   ALREADY_PUBLISHED      NOOP                 (cannot happen)    -
+#   SUPERSEDED             SUPERSEDED (exit 0)  (cannot happen)    -
 #   REFUSED                REFUSED              (cannot happen)    the check's
 #   STOP_DIFFERENT_BYTES   REFUSED              PARTIAL            KCI-E-PUBLISH-DIFFERENT-BYTES
 #   FAILED                 FAILED               PARTIAL            KCI-E-PUBLISH-UPLOAD, or
@@ -61,6 +62,7 @@ from kci_api import (
     OUTCOME_PARTIAL,
     OUTCOME_REFUSED,
     OUTCOME_SUCCEEDED,
+    OUTCOME_SUPERSEDED,
     RETRY_NEEDS_HUMAN,
     ResultNewName,
     ResultStep,
@@ -82,6 +84,9 @@ comptime REASON_CANNOT_TELL: String = "CANNOT_TELL"
 comptime REASON_STOP_DIFFERENT_BYTES: String = "STOP_DIFFERENT_BYTES"
 comptime REASON_PARTIAL: String = "PARTIAL"
 comptime REASON_READ_BACK_MISMATCH: String = "READ_BACK_MISMATCH"
+comptime REASON_SUPERSEDED: String = "SUPERSEDED"
+"""A never-backward run whose channel's newest build descends from the
+release (run.mojo, THE SPLIT): nothing uploaded, exit 0."""
 
 comptime EFFECT_WORD_UPLOADED: String = "uploaded"
 """A file row's `effect` when this run's upload of it landed."""
@@ -206,6 +211,8 @@ struct PublishReport(Copyable, Movable):
             return String(OUTCOME_SUCCEEDED)
         if self.reason == REASON_ALREADY_PUBLISHED:
             return String(OUTCOME_NOOP)
+        if self.reason == REASON_SUPERSEDED and not self.landed():
+            return String(OUTCOME_SUPERSEDED)
         if self.reason == REASON_CANNOT_TELL:
             return String(OUTCOME_INDETERMINATE)
         if self.reason == REASON_PARTIAL or self.reason == REASON_READ_BACK_MISMATCH:

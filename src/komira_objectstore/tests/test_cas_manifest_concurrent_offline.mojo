@@ -16,10 +16,18 @@
 #       ordering. The union of claimed chunk_seqs across all K*M appends is
 #       {0 .. K*M-1}, each once; base offsets contiguous.
 #   (2) CHARACTERIZE — per-K 412-retry-rate + p50/p99/p999 commit latency +
-#       terminal-fail-rate (printed for the record).
-#   (3) LIVELOCK BOUND — no writer exceeds max_retries+1; terminal-fail-rate
-#       stays at 0 (the in-memory backend has no transport flake, so any
-#       terminal fail would be a real livelock — the bound must hold).
+#       exhausted (re-issued) calls (printed for the record).
+#   (3) LIVELOCK BOUND — no append call exceeds max_retries+1 attempts, and
+#       the CAS loop is lock-free: an append that exhausts its retries raises
+#       the RETRYABLE error the contract names, and a writer that re-issues
+#       it (as a caller must) fails no more often than the OTHER writers
+#       commit. See "THE LOCK-FREEDOM BOUND" below for why that bound holds at
+#       any speed, and why "zero exhausted calls" was not the property.
+#       And every retried 412 is followed by exactly one full-jitter backoff:
+#       the k-th 412 of a call draws within THIS test's
+#       `RetryPolicy.fast_test().backoff_us_for_attempt(k)` and sleeps at
+#       least the draw, counted per attempt by the product
+#       (`cas_backoff_probe`): full jitter may draw 0, so no time floor can.
 #
 # This is the offline contention gate. A live S3-compatible stress run
 # additionally exercises the real S3 transport; this test guarantees the
@@ -33,7 +41,17 @@ from std.testing import assert_equal, assert_true
 
 from komira_collections.slab import Slab
 
-from komira_objectstore.cas_manifest import CasManifestStore, RetryPolicy
+from komira_objectstore.cas_backoff_probe import (
+    CAS_BACKOFF_PROBE_MAX_ATTEMPT,
+    cas_backoff_counts,
+    reset_cas_backoff_counts,
+)
+from komira_objectstore.cas_manifest import (
+    CAS_LIST_ESCALATE_AFTER,
+    CasManifestStore,
+    RetryPolicy,
+    is_retryable_contention,
+)
 from komira_objectstore.shared_in_memory_conditional_store import (
 
 
@@ -71,9 +89,53 @@ struct _AppendRecord(Copyable, Movable, Deinitable):
 
 struct _WriterResults(Movable, Deinitable):
     var records: List[_AppendRecord]
+    # Calls that raised the retryable "exhausted N retries" error and were
+    # re-issued by this writer.
+    var exhausted_calls: Int64
+    # Calls that raised anything else (the backend has no transport flake, so
+    # there must be none).
+    var hard_errors: Int64
 
     def __init__(out self):
         self.records = List[_AppendRecord]()
+        self.exhausted_calls = Int64(0)
+        self.hard_errors = Int64(0)
+
+
+# =============================================================================
+# THE LOCK-FREEDOM BOUND
+# =============================================================================
+#
+# What "no livelock" means for a CAS loop is that the SYSTEM makes progress: a
+# writer loses only because another writer won. It does not mean no writer
+# ever runs out of retries: `RetryPolicy` bounds the attempts of one call, and
+# `append` then raises a RETRYABLE error by contract (`cas_manifest.mojo`,
+# "After `max_retries` 412s, RAISES a retryable error"). How many writers run
+# out depends on how long one attempt takes against the backoff window, which
+# is wall-clock. Measured on the build farm, the most attempts any call
+# needed at K = 8 / K = 16 was 7 / 7 in the release build, and under
+# instrumentation, where an attempt is far slower and the `fast_test` window
+# (100 us .. 5 ms) no longer spreads the writers out, 7-10 / 13 under -O0 +
+# kcov (a call ran out at K = 16 in every kcov run observed) and 13 / 13 in the
+# branch-coverage (PGO-instrumented) build, where 14 calls at K = 16 ran out,
+# at most 2 of one writer. Asserting "zero exhausted calls" asserted that the
+# machine was fast, not that the loop was livelock-free.
+#
+# The bound that holds at any speed. Within one call, after
+# `LIST_ESCALATE_AFTER` (3) consecutive 412s the loop re-anchors on the
+# bucket's true tail, and every later attempt targets a slot past it; a 412
+# there is a slot some OTHER writer committed after the re-anchor (this one
+# committed nothing during the call). A call that exhausts all
+# `max_retries + 1` attempts therefore saw at least one commit by another
+# writer while it ran, and two calls of one writer never overlap, so they saw
+# different commits. Hence, per writer:
+#
+#     exhausted calls <= commits by the other writers = (K - 1) * M
+#
+# A loop that livelocks (retries a taken slot without re-anchoring, or gives
+# up before spending its budget) fails on and on after the others are done;
+# the writer stops re-issuing past the bound, so such a build goes RED here
+# rather than hanging.
 
 
 # =============================================================================
@@ -86,6 +148,9 @@ struct _WriterArg(Movable, Deinitable):
     var prefix: String
     var num_appends: Int64
     var records_per_append: Int64
+    # The lock-freedom bound on this writer's exhausted calls: the number of
+    # appends the other writers make, (K - 1) * M.
+    var exhausted_bound: Int64
     # # SAFETY: address of a heap-stable `_WriterResults` owned by the main
     # thread (kept alive until the join). Plain Int — no wildcard field.
     var results_addr: Int
@@ -96,12 +161,14 @@ struct _WriterArg(Movable, Deinitable):
         var prefix: String,
         num_appends: Int64,
         records_per_append: Int64,
+        exhausted_bound: Int64,
         results_addr: Int,
     ):
         self.store = store^
         self.prefix = prefix^
         self.num_appends = num_appends
         self.records_per_append = records_per_append
+        self.exhausted_bound = exhausted_bound
         self.results_addr = results_addr
 
 
@@ -144,14 +211,25 @@ def _run_writer(mut arg: _WriterArg) raises:
         var seq = Int64(-1)
         var base = Int64(-1)
         var attempts = Int64(0)
-        try:
-            var res = manifest.append(body, arg.records_per_append)
-            seq = res.chunk_seq
-            base = res.base_offset
-            attempts = Int64(res.attempts)
-        except e:
-            failed = Int64(1)
-            _ = e
+        # Re-issue a call that ran out of retries, as the contract tells a
+        # caller to, up to the lock-freedom bound (see above); past it, this
+        # append is recorded as a terminal fail.
+        while True:
+            try:
+                var res = manifest.append(body, arg.records_per_append)
+                seq = res.chunk_seq
+                base = res.base_offset
+                attempts = Int64(res.attempts)
+                break
+            except e:
+                if is_retryable_contention(String(e)):
+                    results_ptr[].exhausted_calls += Int64(1)
+                    if results_ptr[].exhausted_calls <= arg.exhausted_bound:
+                        continue
+                else:
+                    results_ptr[].hard_errors += Int64(1)
+                failed = Int64(1)
+                break
         var t1 = Int64(perf_counter_ns())
         results_ptr[].records.append(
             _AppendRecord(seq, base, attempts, t1 - t0, failed)
@@ -235,6 +313,7 @@ def _run_k_writers(
     # ONE shared store; every writer gets a clone() that SHARES the map.
     var shared = SharedInMemoryConditionalStore()
     var prefix = String("offline/k") + String(k)
+    reset_cas_backoff_counts()
 
     var results = Slab[OwnedPointer[_WriterResults]]()
     for _w in range(k):
@@ -251,6 +330,7 @@ def _run_k_writers(
             prefix=prefix.copy(),
             num_appends=appends_per_writer,
             records_per_append=records_per_append,
+            exhausted_bound=Int64(k - 1) * appends_per_writer,
             results_addr=addr,
         )
         var rc = _spawn_writer(arg^, tids[w])
@@ -271,8 +351,19 @@ def _run_k_writers(
     var total_commits = Int64(0)
     var terminal_fails = Int64(0)
     var max_attempts_seen = Int64(0)
+    var exhausted_calls = Int64(0)
+    var retried_412s = Int64(0)
+    # expected_at[k - 1]: retried k-th 412s, i.e. calls that made more than k
+    # attempts (an exhausted call's last 412 raises instead of backing off).
+    var expected_at = List[Int](length=CAS_BACKOFF_PROBE_MAX_ATTEMPT, fill=0)
+    var max_exhausted_one_writer = Int64(0)
+    var hard_errors = Int64(0)
 
     for wi in range(k):
+        exhausted_calls += results[wi][].exhausted_calls
+        hard_errors += results[wi][].hard_errors
+        if results[wi][].exhausted_calls > max_exhausted_one_writer:
+            max_exhausted_one_writer = results[wi][].exhausted_calls
         ref recs = results[wi][].records
         for ri in range(len(recs)):
             ref r = recs[ri]
@@ -281,19 +372,49 @@ def _run_k_writers(
                 continue
             total_commits += Int64(1)
             total_attempts += r.attempts
+            retried_412s += r.attempts - Int64(1)
+            for a in range(1, Int(r.attempts)):
+                expected_at[min(a, CAS_BACKOFF_PROBE_MAX_ATTEMPT) - 1] += 1
             if r.attempts > max_attempts_seen:
                 max_attempts_seen = r.attempts
             all_seqs.append(r.chunk_seq)
             all_bases.append(r.base_offset)
             latencies.append(r.latency_ns)
+    # An exhausted call retried `max_retries` 412s (its last one raised).
+    retried_412s += exhausted_calls * Int64(RetryPolicy.fast_test().max_retries)
+    for a in range(1, RetryPolicy.fast_test().max_retries + 1):
+        expected_at[min(a, CAS_BACKOFF_PROBE_MAX_ATTEMPT) - 1] += Int(exhausted_calls)
 
     # ---- (1) no-gap, one-winner-per-slot, contiguous ----
     var expected = Int64(k) * appends_per_writer
+    var exhausted_bound = Int64(k - 1) * appends_per_writer
+    var policy = RetryPolicy.fast_test()
+    # The bound's argument needs an exhausted call to make at least one
+    # attempt past its first re-anchor (see THE LOCK-FREEDOM BOUND).
+    assert_true(
+        policy.max_retries + 1 > CAS_LIST_ESCALATE_AFTER + 1,
+        "the retry budget must outlast the LIST escalation, or the"
+        " lock-freedom bound below does not follow",
+    )
+    assert_equal(
+        hard_errors,
+        Int64(0),
+        "offline backend has no transport flake — no append raised anything"
+        " but the retryable exhausted-retries error",
+    )
+    assert_true(
+        max_exhausted_one_writer <= exhausted_bound,
+        "lock-freedom bound: a writer ran out of retries "
+        + String(Int(max_exhausted_one_writer))
+        + " times, more than the "
+        + String(Int(exhausted_bound))
+        + " appends the other writers made — a call that exhausts its budget"
+        " must have lost to a commit made while it ran (livelock)",
+    )
     assert_equal(
         terminal_fails,
         Int64(0),
-        "offline backend has no transport flake — zero terminal fails"
-        " (livelock bound)",
+        "every append commits once re-issued within the lock-freedom bound",
     )
     assert_equal(
         total_commits, expected, "every append commits (K*M)"
@@ -335,6 +456,14 @@ def _run_k_writers(
         + String(Int(retry_rate_milli))
         + "/1000  max_attempts="
         + String(Int(max_attempts_seen))
+        + "  exhausted-calls="
+        + String(Int(exhausted_calls))
+        + " (max one writer "
+        + String(Int(max_exhausted_one_writer))
+        + ", bound "
+        + String(Int(exhausted_bound))
+        + ")  backoff-draws="
+        + String(Int(retried_412s))
         + "  terminal-fails="
         + String(Int(terminal_fails))
     )
@@ -349,7 +478,50 @@ def _run_k_writers(
     )
 
     # ---- (3) livelock bound ----
-    var policy = RetryPolicy.fast_test()
+    # BACKOFF. Every retried 412 is followed by one full-jitter backoff: a
+    # committed call that took `a` attempts retried its 412s 1 .. a - 1, an
+    # exhausted call 1 .. max_retries (its last 412 raises instead). The
+    # product counts each backoff by attempt (cas_backoff_probe), because full
+    # jitter may draw 0 and no wall-clock floor can see a missing sleep; the
+    # bound is computed HERE, from this test's own policy, so a call site that
+    # passes a looser bound than the policy's is caught too. Without backoff
+    # the writers re-collide in lockstep.
+    var backoff = cas_backoff_counts()
+    assert_equal(
+        Int64(backoff.draws()),
+        retried_412s,
+        "each retried 412 must be followed by exactly one backoff draw",
+    )
+    for a in range(1, CAS_BACKOFF_PROBE_MAX_ATTEMPT + 1):
+        assert_equal(
+            backoff.draws_at[a - 1],
+            expected_at[a - 1],
+            "backoffs after the " + String(a) + "-th 412 of a call",
+        )
+        assert_equal(
+            backoff.upper_sum_at[a - 1],
+            expected_at[a - 1] * Int(policy.backoff_us_for_attempt(a)),
+            "the backoff bound after the "
+            + String(a)
+            + "-th 412 is not RetryPolicy.backoff_us_for_attempt("
+            + String(a)
+            + ") = "
+            + String(Int(policy.backoff_us_for_attempt(a)))
+            + " us",
+        )
+    assert_equal(
+        backoff.draws_over_upper,
+        0,
+        "a backoff draw exceeded the bound it was drawn under",
+    )
+    assert_true(
+        backoff.slept_us >= backoff.drawn_us,
+        "the backoffs slept "
+        + String(backoff.slept_us)
+        + " us in all, less than the "
+        + String(backoff.drawn_us)
+        + " us drawn: a draw was not slept",
+    )
     assert_true(
         max_attempts_seen <= Int64(policy.max_retries + 1),
         "no writer exceeded max_retries+1 (livelock bound held)",

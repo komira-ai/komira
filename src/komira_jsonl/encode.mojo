@@ -293,9 +293,7 @@ def write_record[T: JsonCompatible](mut buf: List[UInt8], rec: T) raises:
       rec: the record to encode. Borrowed.
     """
     var s = rec.to_json()
-    var n = s.byte_length()
-    for i in range(n):
-        buf.append(UInt8(ord(s[byte=i])))
+    buf.extend(Span(s.as_bytes()))
     buf.append(UInt8(0x0A))  # '\n'
 
 
@@ -484,7 +482,7 @@ def write_batch_jsonl(mut buf: List[UInt8], batch: RecordBatch) raises:
     """
     var num_rows = batch.num_rows()
     var num_cols = batch.num_columns()
-    if num_cols == 0 or num_rows == 0:
+    if num_rows == 0:
         return
 
     # Pre-render column-name JSON-key strings (escaped) once.
@@ -513,7 +511,5 @@ def write_batch_jsonl(mut buf: List[UInt8], batch: RecordBatch) raises:
             line += columns[c][r]
         line += String("}")
         # Append bytes of this line + \n.
-        var ln = line.byte_length()
-        for i in range(ln):
-            buf.append(UInt8(ord(line[byte=i])))
+        buf.extend(Span(line.as_bytes()))
         buf.append(UInt8(0x0A))

@@ -1,7 +1,7 @@
 # Where the generated Cloud Run clients send.
 #
 # The default: each of Run's services (`Services`, `Revisions`, `Jobs`,
-# `Executions`) declares `option (google.api.default_host) =
+# `Executions`, `WorkerPools`) declares `option (google.api.default_host) =
 # "run.googleapis.com"`, and the operations client starts at run_v2.yaml's
 # `name`, the same host, so a client whose caller names no host starts there
 # and its bearer token goes to the service it was minted for. Run Admin v2
@@ -25,6 +25,7 @@ from komira_gcp_run.job import GetJobRequest, JobsClient
 from komira_gcp_run.operations import OperationsClient
 from komira_gcp_run.revision import RevisionsClient
 from komira_gcp_run.service import ServicesClient
+from komira_gcp_run.worker_pool import WorkerPoolsClient
 from komira_http_client.client import HttpClient
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 from komira_proto_codec.codec import decode_json
@@ -70,11 +71,15 @@ def test_every_fresh_client_starts_at_the_default_host() raises:
     var operations = OperationsClient[ScriptedConnector, StaticTokenSource](
         _http(), _token()
     )
+    var worker_pools = WorkerPoolsClient[ScriptedConnector, StaticTokenSource](
+        _http(), _token()
+    )
     assert_equal(services._rest_host, "run.googleapis.com")
     assert_equal(revisions._rest_host, "run.googleapis.com")
     assert_equal(jobs._rest_host, "run.googleapis.com")
     assert_equal(executions._rest_host, "run.googleapis.com")
     assert_equal(operations._rest_host, "run.googleapis.com")
+    assert_equal(worker_pools._rest_host, "run.googleapis.com")
     assert_equal(jobs._client._connector.connect_call_count(), 0)
 
 

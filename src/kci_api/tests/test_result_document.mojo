@@ -211,11 +211,13 @@ def _golden() raises -> String:
 
 def test_unknown_keys_ignored_reserved_absent() raises:
     var g = _golden()
-    var t = g.replace(String('"verb":"run",'), String('"verb":"run","landed":[],'))
+    # a reserved name is still an ignored key (a deploy key of a step row at
+    # the top level is refused instead: test_result_deploy_keys.mojo)
+    var t = g.replace(String('"verb":"run",'), String('"verb":"run","security_relevant_changes":[],'))
     t = t.replace(String('"indexed":true,'), String('"indexed":true,"later":1,'))
     var p = parse_result(t, String("r.json"))
     assert_equal(len(p.ignored_keys), 2)
-    assert_equal(p.ignored_keys[0], String("landed"))
+    assert_equal(p.ignored_keys[0], String("security_relevant_changes"))
     assert_equal(p.ignored_keys[1], String("artifacts[0].later"))
     # a re-render drops what was ignored
     assert_equal(render_result(p), g)

@@ -1,0 +1,20 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Two libraries in one BUCK file and one README.md, about :owner (test 38;
+# tools/build/mojo/readme.bzl). The README imports `owner` only, so it is
+# attached to :owner (`readme = True`) and refused by :owner_base
+# (`readme = False`), which does not reach `owner`. Both must build;
+# :owner_base has no `[tests][readme]`. ../../../negative/readme_examples/unowned
+# is the same package without `readme = False`, and fails.
+mojo_library(
+    name = "owner_base",
+    srcs = ["base/__init__.mojo"],
+    readme = False,
+)
+
+mojo_library(
+    name = "owner",
+    srcs = ["top/__init__.mojo"],
+    readme = True,
+    deps = [":owner_base"],
+)

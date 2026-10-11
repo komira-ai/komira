@@ -1,0 +1,11 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §2.4: for grouping, NULL equals NULL, so ids 3, 4 and 7 (k NULL)
+# form one group of three rows; k = 1 and k = 2 hold two rows each.
+# COUNT(*) counts rows (§2.1). Types: k keeps its scanned type; COUNT is
+# INT64 and never NULL (§8.6).
+k:int64?	n:int64
+1	2
+\N	3
+2	2

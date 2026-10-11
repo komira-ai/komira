@@ -5,7 +5,9 @@
 # entry where there are several); a multiset compare that cascades after one
 # missing row; key ties compared positionally; a schema or row-count
 # difference going unreported; a malformed expected file being read
-# anyway.
+# anyway; a `\xHH` escape of well-formed UTF-8 or a nested float in
+# lower-case or short bits accepted (cells no result can match); the
+# first-fit search run when the sorted walk is already exact.
 
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
 
@@ -239,6 +241,94 @@ def test_unordered_pairs_what_the_sorted_walk_misses() raises:
     var report = compare_canon(e, a)
     if not report.ok():
         raise Error(String(report))
+
+
+def test_hex_escapes_of_well_formed_utf8_are_refused() raises:
+    """Canon writes a byte >= 0x80 as `\\xHH` only when the bytes from it on
+    are not well-formed UTF-8; `\\xc3\\xa9` is the text of `é`, which canon
+    writes raw, so a file that escapes it holds a cell no result can match."""
+    var s = String("s:string")
+    var refused: List[String] = ["\\xc3\\xa9", "a\\xe2\\x82\\xacb", "\\xf0\\x9f\\x98\\x80"]
+    for cell in refused:
+        with assert_raises(contains="escape canon does not write"):
+            _ = parse_canon(_doc("total", s, cell + "\n"))
+    with assert_raises(contains="escape canon does not write"):
+        _ = parse_canon(_doc("total", "l:list<string>", "[\\xc3\\xa9]\n"))
+    # Escapes canon does write: a lead byte without its continuation, a lone
+    # continuation byte, a lead byte followed by a raw character.
+    var kept: List[String] = ["\\xc3A", "\\xc3\\xc3", "\\xa9", "\\xe2\\x82A", "\\xc3é", "\\xed\\xa0\\x80"]
+    for cell in kept:
+        assert_equal(parse_canon(_doc("total", s, cell + "\n")).num_rows(), 1)
+
+
+def test_nested_float_bits_are_canons_spelling() raises:
+    """A float inside a nested value is `0x` and upper-case hex digits of its
+    width (or NaN); `0x3ff0...` is never canon's text, so it is refused, in
+    every nested layout. A string leaf that reads like bits is not a float."""
+    var bad: List[List[String]] = [
+        ["l:list<float64>", "[0x3ff0000000000000]"],
+        ["l:list<float64>", "[0x3FF0]"],
+        ["l:fixed_size_list(2)<float32>", "[\\N,0x3f800000]"],
+        ["st:struct<a:string,b:float32>", "{a:0xab,b:0x3f800000}"],
+        ["m:map<string,float16>", "{0xab:0x3c00}"],
+        ["u:union_sparse(5,7)<float64,string>", "(5:0x3ff0000000000000)"],
+        ["l:list<dictionary<int32,float32>>", "[0x3f800000]"],
+        ["l:list<list<float64>>", "[[0x3FF0000000000000],[0x3ff0000000000000]]"],
+    ]
+    for c in bad:
+        with assert_raises(contains="nested float"):
+            _ = parse_canon(_doc("total", c[0], c[1] + "\n"))
+    var good: List[List[String]] = [
+        ["l:list<float64>", "[0x3FF0000000000000,NaN,\\N]"],
+        ["l:list<string>", "[0x3ff0]"],
+        ["st:struct<a:string,b:float32>", "{a:0xab,b:0x3F800000}"],
+        ["m:map<string,float16>", "{0xab:0x3C00}"],
+        ["u:union_sparse(5,7)<float64,string>", "(7:0xab)"],
+        ["l:list<list<float64>>?", "[[0x3FF0000000000000],[]]"],
+    ]
+    for c in good:
+        assert_equal(parse_canon(_doc("total", c[0], c[1] + "\n")).num_rows(), 1)
+
+
+def test_exact_multiset_skips_the_first_fit_search() raises:
+    """With no tolerance and no bare NaN the sorted walk is exact, so the
+    first-fit search (O(missing x extra)) must not run: 40 missing and 40
+    extra rows are 80 reports and zero probes. Under a tolerance it runs."""
+    var e_rows = String()
+    var a_rows = String()
+    for r in range(40):
+        e_rows += String(r) + "\n"
+        a_rows += String(r + 100) + "\n"
+    var e = parse_canon(_doc("none", "k:int32", e_rows))
+    var a = parse_canon(_doc("none", "k:int32", a_rows))
+    var report = compare_canon(e, a)
+    assert_equal(report.count(), 80)
+    assert_equal(report.first_fit_probes, 0)
+    # ulps=1: the walk leaves 1.0 and 2.0 unpaired and the search must run
+    # (a tolerance can make rows match that sort apart).
+    var tol = String(
+        "#! komira-plan-conformance v1\n#  order: none\n#  float: ulps=1\nx:float64\n"
+    )
+    var tr = compare_canon(parse_canon(tol + "1.0\n"), parse_canon(tol + "2.0\n"))
+    assert_equal(tr.count(), 2)
+    assert_true(tr.first_fit_probes > 0)
+
+
+def test_rel_tolerance_runs_the_first_fit_search() raises:
+    """A `rel=` tolerance (ulps stays 0) also makes the walk inexact. Sorted,
+    expected is (1.0,b),(1.0625,a) and actual (1.0,a),(1.0625,b): the walk
+    pairs (1.0,b) with (1.0625,b) under rel=0.1 and leaves (1.0625,a) and
+    (1.0,a) unpaired, which match only under the tolerance. The search must
+    pair them; skipping it reports a missing and an extra row."""
+    var head = String(
+        "#! komira-plan-conformance v1\n#  order: none\n#  float: rel=0.1\nx:float64\ts:string\n"
+    )
+    var e = parse_canon(head + "1.0\tb\n1.0625\ta\n")
+    var a = parse_canon(head + "1.0625\tb\n1.0\ta\n")
+    var report = compare_canon(e, a)
+    if not report.ok():
+        raise Error(String(report))
+    assert_true(report.first_fit_probes > 0)
 
 
 def test_check_batch_end_to_end() raises:

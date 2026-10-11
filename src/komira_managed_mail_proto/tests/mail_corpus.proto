@@ -1,0 +1,51 @@
+syntax = "proto3";
+package komira.managed_mail.v1.corpus;
+
+import "komira/managed_mail/v1/mail.proto";
+
+// Test only: one field per message of mail.proto, numbered in the order the
+// messages are declared there, so one protoc encoding
+// (fixtures/corpus.txtpb, fixtures/corpus.canonical.hex) carries one value of
+// every message. Field k's bytes are the k-th message's encoding.
+message MailCorpus {
+  komira.managed_mail.v1.EmailAddress email_address = 1;
+  komira.managed_mail.v1.Mailbox mailbox = 2;
+  komira.managed_mail.v1.Email email = 3;
+  komira.managed_mail.v1.EmailPart email_part = 4;
+  komira.managed_mail.v1.Thread thread = 5;
+  komira.managed_mail.v1.Envelope envelope = 6;
+  komira.managed_mail.v1.Submission submission = 7;
+  komira.managed_mail.v1.Attachment attachment = 8;
+  komira.managed_mail.v1.ApiError api_error = 9;
+  komira.managed_mail.v1.RawBodyReply raw_body_reply = 10;
+  komira.managed_mail.v1.ListMailboxesRequest list_mailboxes_request = 11;
+  komira.managed_mail.v1.ListMailboxesResponse list_mailboxes_response = 12;
+  komira.managed_mail.v1.CreateMailboxRequest create_mailbox_request = 13;
+  komira.managed_mail.v1.CreateMailboxResponse create_mailbox_response = 14;
+  komira.managed_mail.v1.DeleteMailboxRequest delete_mailbox_request = 15;
+  komira.managed_mail.v1.DeleteMailboxResponse delete_mailbox_response = 16;
+  komira.managed_mail.v1.ListEmailsRequest list_emails_request = 17;
+  komira.managed_mail.v1.ListEmailsResponse list_emails_response = 18;
+  komira.managed_mail.v1.GetEmailRequest get_email_request = 19;
+  komira.managed_mail.v1.GetEmailResponse get_email_response = 20;
+  komira.managed_mail.v1.GetEmailRawRequest get_email_raw_request = 21;
+  komira.managed_mail.v1.GetEmailPartRequest get_email_part_request = 22;
+  komira.managed_mail.v1.UpdateEmailRequest update_email_request = 23;
+  komira.managed_mail.v1.UpdateEmailResponse update_email_response = 24;
+  komira.managed_mail.v1.GetThreadRequest get_thread_request = 25;
+  komira.managed_mail.v1.GetThreadResponse get_thread_response = 26;
+  komira.managed_mail.v1.SendEmailRequest send_email_request = 27;
+  komira.managed_mail.v1.SendEmailResponse send_email_response = 28;
+  komira.managed_mail.v1.GetSubmissionRequest get_submission_request = 29;
+  komira.managed_mail.v1.GetSubmissionResponse get_submission_response = 30;
+  komira.managed_mail.v1.ExportMailboxRequest export_mailbox_request = 31;
+  komira.managed_mail.v1.InboundEnvelope inbound_envelope = 32;
+  komira.managed_mail.v1.InboundDelivery inbound_delivery = 33;
+  komira.managed_mail.v1.InboundDeliveryResponse inbound_delivery_response = 34;
+  komira.managed_mail.v1.RawMessageRequest raw_message_request = 35;
+  komira.managed_mail.v1.RawMessageResponse raw_message_response = 36;
+  komira.managed_mail.v1.ErrorResponse error_response = 37;
+  komira.managed_mail.v1.Subject subject = 38;
+  komira.managed_mail.v1.EraseSubjectRequest erase_subject_request = 39;
+  komira.managed_mail.v1.EraseSubjectResponse erase_subject_response = 40;
+}

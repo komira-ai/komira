@@ -1,0 +1,68 @@
+# main-red: when a release run of main fails, find the pull requests that
+# could have broken it and open an issue `main red: <target>`; when a later
+# run of main is green, close it (docs/ci.md, "main_red.yml"). There is no
+# merge queue: a red main is fixed forward or the culprit reverted within
+# the hour, and this issue is what starts that clock.
+#
+# It runs on `workflow_run` of kci.yml completing on main, so it runs once
+# per kci run that ends, whatever its conclusion; the script reads the run
+# back and acts only on a run started by a PUSH to main (a manual run may
+# build another revision):
+#   failure, timed_out, startup_failure  open the issue, or comment on the
+#                                        open one, with the run, the head,
+#                                        the last green commit, the culprit
+#                                        pull requests, the failing targets
+#                                        and the key log lines
+#   success                              close every open `main-red` issue
+#                                        whose recorded heads it contains
+#   cancelled, skipped                   nothing
+# The logic is release/ci/main_red.py (its header is the issue contract);
+# its cases are //release/ci/tests:test_main_red, which every build runs.
+#
+# WHY NO RED IS HIDDEN. kci.yml's push runs share the concurrency group
+# `kci-release-main` with cancel-in-progress false: a running release is
+# never cancelled, and a newer push replaces only a PENDING run, which never
+# started. The run that replaces it builds main at a later commit, which
+# carries every change of the replaced one, and the culprits are read from
+# the whole range since the last green commit, so a replaced commit's pull
+# request is still named. This workflow has NO concurrency group: no run of
+# it is ever replaced or cancelled by another, so every kci run that ends is
+# seen; if two red runs race, the script closes the newer issue as a
+# duplicate of the older. A run of this workflow that fails (an API error)
+# is itself red in the Actions tab.
+#
+# It runs no code from any pull request: `workflow_run` runs this file and
+# the script as they are on main, the checkout is main's, and it runs
+# nothing kci-related, so kci_workflow_check holds it to no rule. Token:
+# `issues: write` (the issue, its comments and the label), `actions: read`
+# (the run, its jobs and their logs), `contents: read` (the checkout, the
+# compare and the commits' pull requests). Every action is pinned.
+name: main-red
+
+on:
+  workflow_run:
+    workflows: [kci]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  alert:
+    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      issues: write
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: release/ci
+      - name: release/ci/main_red.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: python3 -I release/ci/main_red.py --repo "$GITHUB_REPOSITORY" --run-id "$RUN_ID"

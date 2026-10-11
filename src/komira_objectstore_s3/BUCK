@@ -50,7 +50,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the pruned partition), test_s3_fs_clone (an S3Fs clone builds its own
 # store), test_s3_fs_inflight (the in-flight bounds kept and never passed:
 # a prefetch, one capped by S3Config's max_inflight, and a multipart write
-# timed over a slow, stateless fake S3; every request of a prefetch, on any
+# over a slow fake S3 that counts its requests in flight; every request of a prefetch, on any
 # worker's store, carrying the handle's ETag; and run_bounded_inflight over
 # a fake that counts requests in flight),
 # test_s3_fs_one_version (a handle reads one object version: after an
@@ -80,7 +80,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # environment).
 #
 # test_s3_conditional_store and test_s3_fs share one fake S3,
-# komira_test_fake_s3 (src/tests/helpers), named in `test_deps`: it reaches
+# komira_test_fake_s3 (src/tests/helpers), named in `test_deps` with
+# komira_counters (test_s3_fs_inflight's fake counts requests in flight in a
+# process-wide GlobalCounterTable): they reach
 # the welded tests only, never this library's package, closure or conda
 # package (tools/build/mojo/test_deps.bzl).
 mojo_library(
@@ -102,7 +104,10 @@ mojo_library(
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_retry:komira_retry",
     ],
-    test_deps = ["//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3"],
+    test_deps = [
+        "//src/komira_counters:komira_counters",
+        "//src/tests/helpers/komira_test_fake_s3:komira_test_fake_s3",
+    ],
     test_data = {
         "tests/test_no_env_reads.mojo": {
             "src/" + f: f

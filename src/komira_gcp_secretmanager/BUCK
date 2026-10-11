@@ -13,15 +13,19 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # (AccessSecretVersion), a secret is created (CreateSecret) and given a new
 # value (AddSecretVersion), its versions are listed to tell whether it holds
 # one (ListSecretVersions), and secrets are listed and deleted when an
-# environment is torn down (ListSecrets, DeleteSecret). The service's other
-# methods are not generated. A method joins the list with its own rows in
-# the tests below. None of these requests has a request-id field; a retry
+# environment is torn down (ListSecrets, DeleteSecret); a secret is read
+# (GetSecret) and its labels changed in place (UpdateSecret), and its IAM
+# policy is read and written back to grant a workload read (GetIamPolicy,
+# SetIamPolicy). The service's other methods are not generated. A method
+# joins the list with its own rows in the tests below. None of these requests has a request-id field; a retry
 # of CreateSecret or AddSecretVersion is the caller's decision (a second
 # AddSecretVersion adds a second version).
 #
 # `bundle_only` is the part of the secretmanager_v1 closure those methods
 # reach: the requests (service), the Secret and SecretVersion resources,
-# their policy member, and google.rpc.Status (a managed rotation's error).
+# their policy member, google.rpc.Status (a managed rotation's error), and
+# the IAM policy requests (iam_policy), GetPolicyOptions (options), the
+# Policy (policy) and a binding's condition (expr).
 #
 # The client starts at secretmanager.googleapis.com, the
 # `google.api.default_host` of the pinned proto. Regional secrets
@@ -36,9 +40,12 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # copied), each sending through the generated client over komira_http_core's
 # ScriptedConnector (no socket, no DNS: the wire tests send to localhost):
 # test_secretmanager_methods (each method's request line, headers and JSON
-# body byte for byte, and its response decoded), test_secretmanager_errors
-# (one google.rpc.Status envelope per method mapped to its code, the body
-# never quoted), test_secretmanager_endpoint (the default host read without
+# body byte for byte, and its response decoded),
+# test_secretmanager_secret_policy (the same for GetSecret, UpdateSecret,
+# GetIamPolicy and SetIamPolicy), test_secretmanager_errors (one
+# google.rpc.Status envelope per method of test_secretmanager_methods mapped
+# to its code, the body never quoted; the mapping is generator code every
+# method shares), test_secretmanager_endpoint (the default host read without
 # sending, an override dialled, a regional secret name sent at its regional
 # path, a name no binding matches refused before the token is asked) and
 # test_no_env_reads (no generated module reads the environment, and only
@@ -50,8 +57,12 @@ mojo_gcp_client(
     bundle_only = [
         "google/cloud/secretmanager/v1/resources.proto",
         "google/cloud/secretmanager/v1/service.proto",
+        "google/iam/v1/iam_policy.proto",
+        "google/iam/v1/options.proto",
+        "google/iam/v1/policy.proto",
         "google/iam/v1/resource_policy_member.proto",
         "google/rpc/status.proto",
+        "google/type/expr.proto",
     ],
     bundle_proto_deps = True,
     methods = [
@@ -59,8 +70,12 @@ mojo_gcp_client(
         "SecretManagerService.AddSecretVersion",
         "SecretManagerService.CreateSecret",
         "SecretManagerService.DeleteSecret",
+        "SecretManagerService.GetIamPolicy",
+        "SecretManagerService.GetSecret",
         "SecretManagerService.ListSecretVersions",
         "SecretManagerService.ListSecrets",
+        "SecretManagerService.SetIamPolicy",
+        "SecretManagerService.UpdateSecret",
     ],
     proto_deps = ["//tools/vendor/googleapis:secretmanager_v1"],
     protocol = "rest",
@@ -75,6 +90,7 @@ mojo_gcp_client(
         "tests/test_secretmanager_endpoint.mojo",
         "tests/test_secretmanager_errors.mojo",
         "tests/test_secretmanager_methods.mojo",
+        "tests/test_secretmanager_secret_policy.mojo",
     ],
     visibility = ["PUBLIC"],
     deps = [

@@ -26,7 +26,7 @@
 # 7. THE MESSAGING ROWS: a queue (field 15, the sixth arm) and a topic (21,
 #    the tenth) are PORTABLE, expose NAME and ADDRESS, take retention with
 #    the default DELETE, and land on `queue` / `topic`; a queue accepts SEND
-#    and RECEIVE, a topic SEND only. A subscription (28, the sixteenth) exposes
+#    and RECEIVE, a topic SEND only. A subscription (28, the seventeenth) exposes
 #    and accepts nothing, takes no retention, and lands on `sub` (a role
 #    word is 8 bytes at most).
 #    SEND and RECEIVE are values of the generated `Access`.
@@ -35,7 +35,8 @@
 from std.testing import assert_equal, assert_true, assert_false
 
 from komira_proto_codec import decode_json, decode_proto
-from kci_resource_proto.resource import Access, Output, Resource, ResourceList
+from kci_resource_proto.refs import Access, Output
+from kci_resource_proto.resource import Resource, ResourceList
 
 from kci_cloud import (
     Absence,
@@ -49,6 +50,7 @@ from kci_cloud import (
     PORTABLE,
     CLOUD_BOUND,
     FIELD_SERVICE,
+    FIELD_COMPOSITE,
     FIELD_CONTAINER_JOB,
     FIELD_TABLE,
     FIELD_BUCKET,
@@ -99,16 +101,16 @@ def test_catalog_arms_match_the_wire() raises:
     var c = Catalog.v1()
     assert_equal(
         len(c.types),
-        19,
+        20,
         "v1 declares service, container_job, worker, table, bucket, queue, secret, dns_zone, service_account,"
-        + " topic, schedule, network, grant, dns_record, certificate, subscription, subnet, ip_address and"
-        + " event_trigger",
+        + " topic, schedule, network, registry, grant, dns_record, certificate, subscription, subnet, ip_address"
+        + " and event_trigger",
     )
     for i in range(len(c.types)):
         var field = c.types[i].field
         var r = decode_proto[Resource](_resource_with_body(field))
         assert_equal(body_field(r), field, c.types[i].name + " maps back to its field")
-    var none = decode_proto[Resource](_resource_with_body(24))
+    var none = decode_proto[Resource](_resource_with_body(32))
     var raised = False
     try:
         _ = body_field(none)
@@ -117,11 +119,17 @@ def test_catalog_arms_match_the_wire() raises:
         assert_true(_has(String(e), "has no type"), String(e))
     assert_true(raised, "a held, undeclared arm decodes to no type and is refused")
 
-    # The position -> field table: one row per catalog type, same names, and
-    # a position beyond it is refused, never mapped to some other type.
+    # The position -> field table: one row per catalog type, same names,
+    # then the composite instance (an arm, never a catalog type), and a
+    # position beyond it is refused, never mapped to some other type.
     var arms = body_arms()
-    assert_equal(len(arms), len(c.types), "one arm row per catalog type")
-    for k in range(len(arms)):
+    assert_equal(len(arms), len(c.types) + 1, "one arm row per catalog type, and the composite")
+    assert_equal(arms[len(arms) - 1].field, FIELD_COMPOSITE, "the composite is the last arm")
+    assert_equal(arms[len(arms) - 1].name, "composite")
+    assert_true(c.index_of(FIELD_COMPOSITE) < 0, "and not a catalog type")
+    var inst = decode_proto[Resource](_resource_with_body(FIELD_COMPOSITE))
+    assert_equal(body_field(inst), FIELD_COMPOSITE, "an instance maps back to arm 80")
+    for k in range(len(arms) - 1):
         var at = c.index_of(arms[k].field)
         assert_true(at >= 0, String("arm field ") + String(arms[k].field) + " is a catalog type")
         assert_equal(arms[k].name, c.types[at].name, "the arm row and the catalog row agree")
@@ -194,9 +202,9 @@ def _ints(
     """The fields given, then the messaging fields (15 queue, 21 topic, 28
     subscription), 16 secret, the name fields (18 DNS zone, 26 DNS record,
     27 certificate), 12 worker, the triggers (22 schedule, 31 event
-    trigger) and the networks (23 network, 29 subnet, 30 IP address), which
-    every entry in these tests implements."""
-    var l: List[Int] = [15, 21, 28, 16, 18, 26, 27, 12, 22, 31, 23, 29, 30]
+    trigger), the networks (23 network, 29 subnet, 30 IP address) and 24
+    registry, which every entry in these tests implements."""
+    var l: List[Int] = [15, 21, 28, 16, 18, 26, 27, 12, 22, 31, 23, 29, 30, 24]
     l.append(a)
     if b >= 0:
         l.append(b)
@@ -450,7 +458,7 @@ def test_the_messaging_rows() raises:
     var arms = body_arms()
     var fields = [FIELD_QUEUE, FIELD_TOPIC, FIELD_SUBSCRIPTION]
     var names = ["queue", "topic", "subscription"]
-    var positions = [5, 9, 15]
+    var positions = [5, 9, 16]
     for i in range(3):
         ref t = c.types[c.index_of(fields[i])]
         assert_equal(t.name, String(names[i]))

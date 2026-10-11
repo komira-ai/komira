@@ -6,13 +6,22 @@
 # One row per `Resource.body` arm of `kci.resource.v1`: the arm's field
 # number (the key every cloud adapter reports coverage by), the type's name,
 # its portability marker, the outputs it exposes to a `Ref`, the access
-# verbs a `Uses` line may ask of it, its retention default, and its primary
-# role.
+# verbs a `Uses` line may ask of it, its retention default, its primary
+# role, and whether its primary object has a cloud name an author may write.
+#
+# THE CLOUD NAME (`takes_name`). `Resource.physical_name` names the primary
+# object, and `Resource.adopt` takes over an existing object of that name
+# (metadata.mojo). A `grant` (an edge: its objects are bindings, named by
+# the principal and the target) and a `dns_record` (named by the DNS name
+# and type it already writes) have no name of their own, on any cloud, so
+# both are refused there at validate. A kind that has no name of its own on
+# ONE cloud only (an IP address on one cloud is an allocation id) is that
+# cloud's limit, not a row here.
 #
 # RETENTION. A data primitive has a VERSIONED retention default, used while
-# `Resource.retention` is unset (KEEP for a table, a bucket and a secret,
-# DELETE for a queue, a topic, a DNS zone, a DNS record, a certificate, a
-# network, a subnet and an IP address). A type whose default is
+# `Resource.retention` is unset (KEEP for a table, a bucket, a secret and a
+# registry, DELETE for a queue, a topic, a DNS zone, a DNS record, a
+# certificate, a network, a subnet and an IP address). A type whose default is
 # `RETENTION_NONE` takes no retention: it is deleted with its resource, and
 # writing `retention` on it is refused at validate. Changing a default is a
 # behaviour change for every stored list, so a default is never edited in
@@ -26,7 +35,7 @@
 # grant, `zone` for a DNS zone, `record` for a DNS record, `cert` for a
 # certificate, `schedule` for a schedule, `trigger` for an event trigger,
 # `network` for a network, `subnet` for a subnet, `address` for an IP
-# address. A cloud adapter
+# address, `registry` for a registry. A cloud adapter
 # writes a dependency or an input on ANOTHER resource as that resource's id
 # alone, and kci resolves it to `<id>/<primary role>` (deploy.lower_data), so
 # an adapter lowers one resource without reading the others.
@@ -34,8 +43,8 @@
 # ⚠ HAND-KEPT, BECAUSE THE GENERATED MOJO CANNOT ANSWER IT. The proto states
 # portability and `exposes` as message options; the Mojo the codec emits does
 # not surface message options (spike S3 of the catalog plan failed). So the
-# two option columns are copied here from `resource.proto`, and the copy is
-# the one thing in this package that can drift from the schema. What IS
+# two option columns are copied here from the catalog's `.proto` files, and
+# the copy is the one thing in this package that can drift from the schema. What IS
 # checked against generated code: the arm numbers (a body decoded from wire
 # field N must map back to N, `test_catalog_arms_match_the_wire`), the output
 # names (each must be a value of the generated `Output` enum) and the access
@@ -78,6 +87,8 @@ comptime FIELD_SCHEDULE: Int = 22
 """`Resource.body` field number of `schedule`."""
 comptime FIELD_NETWORK: Int = 23
 """`Resource.body` field number of `network`."""
+comptime FIELD_REGISTRY: Int = 24
+"""`Resource.body` field number of `registry`."""
 comptime FIELD_GRANT: Int = 25
 """`Resource.body` field number of `grant`."""
 comptime FIELD_DNS_RECORD: Int = 26
@@ -92,6 +103,10 @@ comptime FIELD_IP_ADDRESS: Int = 30
 """`Resource.body` field number of `ip_address`."""
 comptime FIELD_EVENT_TRIGGER: Int = 31
 """`Resource.body` field number of `event_trigger`."""
+comptime FIELD_COMPOSITE: Int = 80
+"""`Resource.composite`: an instance of a composite. An arm of the body, not
+a catalog type: expansion (compose.mojo) replaces it with primitives before
+any type is looked up, so no catalog row and no cloud ever names it."""
 
 comptime OUTPUT_URL = "URL"
 comptime OUTPUT_HOST = "HOST"
@@ -144,6 +159,8 @@ comptime ROLE_SUBNET = "subnet"
 """A subnet's one role: the subnet object."""
 comptime ROLE_ADDRESS = "address"
 """An IP address's one role: the reserved address."""
+comptime ROLE_REGISTRY = "registry"
+"""A registry's one role: the registry (or repository) object."""
 
 
 def retention_word(r: Int) -> String:
@@ -174,6 +191,9 @@ struct CatalogType(Copyable, Movable, Deinitable):
     var accepts: List[String]
     var retention_default: Int
     var primary_role: String
+    var takes_name: Bool
+    """Its primary object has a cloud name an author may write
+    (`Resource.physical_name`, and so `Resource.adopt`)."""
 
     def __init__(
         out self,
@@ -184,6 +204,7 @@ struct CatalogType(Copyable, Movable, Deinitable):
         var accepts: List[String],
         retention_default: Int = RETENTION_NONE,
         primary_role: String = String(ROLE_RUN),
+        takes_name: Bool = True,
     ):
         self.field = field
         self.name = name
@@ -192,6 +213,7 @@ struct CatalogType(Copyable, Movable, Deinitable):
         self.accepts = accepts^
         self.retention_default = retention_default
         self.primary_role = primary_role
+        self.takes_name = takes_name
 
     def __init__(out self, *, copy: Self):
         # Explicit: a struct with String and List fields that lives in a List
@@ -203,6 +225,7 @@ struct CatalogType(Copyable, Movable, Deinitable):
         self.accepts = copy.accepts.copy()
         self.retention_default = copy.retention_default
         self.primary_role = copy.primary_role.copy()
+        self.takes_name = copy.takes_name
 
     def takes_retention(self) -> Bool:
         """True iff `Resource.retention` may be written on this type."""
@@ -261,9 +284,9 @@ struct Catalog(Copyable, Movable, Deinitable):
     def v1() raises -> Catalog:
         """`kci.resource.v1` as declared today: `service`, `container_job`,
         `worker`, `table`, `bucket`, `queue`, `secret`, `dns_zone`,
-        `service_account`, `topic`, `schedule`, `network`, `grant`,
-        `dns_record`, `certificate`, `subscription`, `subnet`, `ip_address`
-        and `event_trigger`."""
+        `service_account`, `topic`, `schedule`, `network`, `registry`,
+        `grant`, `dns_record`, `certificate`, `subscription`, `subnet`,
+        `ip_address` and `event_trigger`."""
         var c = Catalog()
         var svc_out = List[String]()
         svc_out.append(String(OUTPUT_URL))
@@ -333,7 +356,8 @@ struct Catalog(Copyable, Movable, Deinitable):
                 primary_role=String(ROLE_IDENTITY),
             )
         )
-        # A grant is an edge: it exposes nothing and accepts nothing.
+        # A grant is an edge: it exposes nothing, accepts nothing, and has
+        # no cloud name of its own (its objects are bindings).
         c.add(
             CatalogType(
                 FIELD_GRANT,
@@ -342,6 +366,7 @@ struct Catalog(Copyable, Movable, Deinitable):
                 List[String](),
                 List[String](),
                 primary_role=String(ROLE_GRANT),
+                takes_name=False,
             )
         )
         # Messaging. A queue and a topic expose their cloud name and address
@@ -440,6 +465,8 @@ struct Catalog(Copyable, Movable, Deinitable):
                 List[String](),
                 retention_default=RETENTION_DELETE,
                 primary_role=String(ROLE_RECORD),
+                # A record set is named by its DNS name and type.
+                takes_name=False,
             )
         )
         c.add(
@@ -519,6 +546,27 @@ struct Catalog(Copyable, Movable, Deinitable):
                 primary_role=String(ROLE_ADDRESS),
             )
         )
+        # A registry exposes its ADDRESS (the name a client pushes and pulls
+        # an image as). Its artifacts are pulled (READ) and pushed (WRITE).
+        # Deleting it deletes every artifact in it, so it is kept by
+        # default, as a bucket.
+        var registry_out = List[String]()
+        registry_out.append(String(OUTPUT_ADDRESS))
+        var registry_access = List[String]()
+        registry_access.append(String(ACCESS_READ))
+        registry_access.append(String(ACCESS_WRITE))
+        registry_access.append(String(ACCESS_READ_WRITE))
+        c.add(
+            CatalogType(
+                FIELD_REGISTRY,
+                String("registry"),
+                PORTABLE,
+                registry_out^,
+                registry_access^,
+                retention_default=RETENTION_KEEP,
+                primary_role=String(ROLE_REGISTRY),
+            )
+        )
         return c^
 
 
@@ -533,7 +581,8 @@ struct BodyArm(Copyable, Movable, Deinitable):
 def body_arms() -> List[BodyArm]:
     """The `Resource.body` arms, in DECLARATION ORDER: entry `k` is the arm
     the generated struct records as position `k + 1`. One row per declared
-    arm; a new arm is one new row here, at its declaration position, pinned
+    arm (every catalog type, then the composite instance, which is not one);
+    a new arm is one new row here, at its declaration position, pinned
     against wire bytes by `test_catalog_arms_match_the_wire`."""
     var l = List[BodyArm]()
     l.append(BodyArm(FIELD_SERVICE, String("service")))
@@ -548,6 +597,7 @@ def body_arms() -> List[BodyArm]:
     l.append(BodyArm(FIELD_TOPIC, String("topic")))
     l.append(BodyArm(FIELD_SCHEDULE, String("schedule")))
     l.append(BodyArm(FIELD_NETWORK, String("network")))
+    l.append(BodyArm(FIELD_REGISTRY, String("registry")))
     l.append(BodyArm(FIELD_GRANT, String("grant")))
     l.append(BodyArm(FIELD_DNS_RECORD, String("dns_record")))
     l.append(BodyArm(FIELD_CERTIFICATE, String("certificate")))
@@ -555,6 +605,7 @@ def body_arms() -> List[BodyArm]:
     l.append(BodyArm(FIELD_SUBNET, String("subnet")))
     l.append(BodyArm(FIELD_IP_ADDRESS, String("ip_address")))
     l.append(BodyArm(FIELD_EVENT_TRIGGER, String("event_trigger")))
+    l.append(BodyArm(FIELD_COMPOSITE, String("composite")))
     return l^
 
 
@@ -588,6 +639,19 @@ def body_field(r: Resource) raises -> Int:
             + String(" is not in this kci's catalog table")
         )
     return arms[arm - 1].field
+
+
+def body_is(r: Resource, field: Int) -> Bool:
+    """True iff `r`'s set arm is the `Resource.body` field `field`, read
+    through `body_field`. Never raises: no arm, or an arm beyond the table,
+    is no type. This, not an arm's `Optional`, is the type test: a message
+    merged from two bodies (protobuf's last arm wins) decodes with the
+    earlier arm's `Optional` still populated, and only the case says which
+    arm is set."""
+    try:
+        return body_field(r) == field
+    except:
+        return False
 
 
 def effective_retention(catalog: Catalog, r: Resource) raises -> Int:

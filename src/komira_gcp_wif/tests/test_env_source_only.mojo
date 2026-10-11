@@ -45,6 +45,7 @@ def test_scan() raises:
         "__init__.mojo",
         "_post.mojo",
         "aws_subject.mojo",
+        "external_account.mojo",
         "sign_jwt.mojo",
         "sts.mojo",
     ]

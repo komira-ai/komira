@@ -11,13 +11,15 @@
 # `ObjectKind` numbers are git's own type codes (commit 1, tree 2, blob 3,
 # tag 4), the numbers a pack entry header carries.
 #
-# SHA-1 here is plain SHA-1 (komira_crypto's `Sha1`). Collision detection is
-# not part of this module.
+# SHA-1 ids are computed with collision detection (sha1dc.mojo, the SHA-1
+# git uses): an object holding a block of a detected SHA-1 collision has no
+# id, and `hash_object` raises the error OBJECT_ID_COLLISION names.
 # =============================================================================
 
-from komira_crypto import Sha1, Sha256
+from komira_crypto import Sha256
 
 from .bytes_util import _append_decimal, _append_str, _hex_digit, _hex_value
+from .sha1dc import Sha1dc, _collision_error
 
 comptime _FORMAT_SHA1: Int = 1
 comptime _FORMAT_SHA256: Int = 2
@@ -313,20 +315,36 @@ def object_header(kind: ObjectKind, size: Int) -> List[UInt8]:
     return out^
 
 
+def _sha1_object_digest(
+    h: Sha1dc, kind: ObjectKind, size: Int
+) raises -> InlineArray[UInt8, 20]:
+    """The digest of the object stream `h` absorbed (the header of a `kind`
+    object of `size` payload bytes, then the payload), or the
+    OBJECT_ID_COLLISION error naming that object when `h` detected a
+    collision."""
+    var d = InlineArray[UInt8, 20](fill=0)
+    if h.finalize_into(d):
+        raise _collision_error(
+            "the " + kind.name() + " of " + String(size) + " bytes"
+        )
+    return d^
+
+
 def hash_object(
     format: ObjectFormat, kind: ObjectKind, payload: Span[UInt8, _]
-) -> ObjectId:
+) raises -> ObjectId:
     """The id of the object of `kind` whose payload is `payload`: the
     format's hash of `object_header(kind, len(payload))` then `payload`
-    (what `git hash-object -t <kind>` prints)."""
+    (what `git hash-object -t <kind>` prints). Under SHA-1 the hash detects
+    collisions: an object holding a block of one raises the
+    OBJECT_ID_COLLISION error, as git refuses it."""
     var header = object_header(kind, len(payload))
     var id = ObjectId(format)
     if format == ObjectFormat.sha1():
-        var h = Sha1()
+        var h = Sha1dc()
         h.update(Span(header))
         h.update(payload)
-        var d = InlineArray[UInt8, 20](fill=0)
-        h.finalize_into(d)
+        var d = _sha1_object_digest(h, kind, len(payload))
         for i in range(20):
             id._set_byte(i, d[i])
     else:

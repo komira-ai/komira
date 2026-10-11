@@ -1,0 +1,23 @@
+2026-10-05T12:05:47.7832114Z   REVISION: a60b8646c8465f72760ed229269e252b32e24945
+2026-10-05T12:05:47.7832427Z ##[endgroup]
+2026-10-05T12:05:47.8148966Z [2026-10-05T12:05:47.812+00:00] Build ID: 67acc171-8778-42ef-b3b2-d3684129eb9a
+2026-10-05T12:05:53.4100353Z [2026-10-05T12:05:53.408+00:00] [2m2026-10-05T12:05:53.326067Z[0m [33m WARN[0m [2mbuck2_http::retries[0m[2m:[0m Retrying a HTTP error after 2 seconds: Error performing http_head request: HTTP: Timed out while making request to URI: https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox after 5 seconds.
+2026-10-05T12:06:00.4099449Z [2026-10-05T12:06:00.409+00:00] Waiting on komira//tools/build/toolchains:busybox (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) -- download_file
+2026-10-05T12:06:00.4102895Z [2026-10-05T12:06:00.409+00:00] [2m2026-10-05T12:06:00.328269Z[0m [33m WARN[0m [2mbuck2_http::retries[0m[2m:[0m Retrying a HTTP error after 4 seconds: Error performing http_head request: HTTP: Timed out while making request to URI: https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox after 5 seconds.
+2026-10-05T12:06:07.5098211Z [2026-10-05T12:06:07.509+00:00] Waiting on komira//tools/build/toolchains:busybox (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) -- download_file
+2026-10-05T12:06:09.4100163Z [2026-10-05T12:06:09.409+00:00] [2m2026-10-05T12:06:09.330255Z[0m [33m WARN[0m [2mbuck2_http::retries[0m[2m:[0m Retrying a HTTP error after 8 seconds: Error performing http_head request: HTTP: Timed out while making request to URI: https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox after 5 seconds.
+2026-10-05T12:06:16.4100150Z [2026-10-05T12:06:16.409+00:00] Waiting on komira//tools/build/toolchains:busybox (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) -- download_file
+2026-10-05T12:06:22.3345183Z [2026-10-05T12:06:22.334+00:00] Action failed: komira//tools/build/toolchains:busybox (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (download_file busybox)
+2026-10-05T12:06:22.3350174Z [2026-10-05T12:06:22.334+00:00] Error performing http_head request: HTTP: Timed out while making request to URI: https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox after 5 seconds.
+2026-10-05T12:06:22.3372796Z 
+2026-10-05T12:06:22.3485566Z [2026-10-05T12:06:22.348+00:00] Network: up 0B  down 114MiB
+2026-10-05T12:06:22.3488425Z [2026-10-05T12:06:22.348+00:00]
+2026-10-05T12:06:22.3489234Z [2026-10-05T12:06:22.348+00:00] BUILD ERRORS (1)
+2026-10-05T12:06:22.3490210Z [2026-10-05T12:06:22.348+00:00] The following actions failed during the execution of this command:
+2026-10-05T12:06:22.3492117Z [2026-10-05T12:06:22.348+00:00] Action failed: komira//tools/build/toolchains:busybox (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (download_file busybox)
+2026-10-05T12:06:22.3494686Z [2026-10-05T12:06:22.348+00:00] Error performing http_head request: HTTP: Timed out while making request to URI: https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox after 5 seconds.
+2026-10-05T12:06:22.3497655Z 
+2026-10-05T12:06:22.3497876Z [2026-10-05T12:06:22.348+00:00]
+2026-10-05T12:06:22.3499089Z BUILD FAILED
+2026-10-05T12:06:22.3500191Z Failed to build 'komira//tools/build/toolchains:busybox (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)'
+2026-10-05T12:06:22.3565986Z ##[error]Process completed with exit code 2.

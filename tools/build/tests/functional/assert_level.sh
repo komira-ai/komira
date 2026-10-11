@@ -27,6 +27,7 @@ tests//functional/assert_level:lib_default mojo_build_test !, -D,
 tests//functional/assert_level:lib_default mojo_gated_test !mem_cap
 tests//functional/assert_level:lib_defines mojo_build_test --target-cpu, [^,]*, -D, KOMIRA_PROBE_DEFINE=on,
 tests//functional/assert_level:lib_defines mojo_gated_test !mem_cap
+tests//functional/assert_level:lib_level_and_defines mojo_build_test --target-cpu, [^,]*, -D, ASSERT=none, -D, KOMIRA_PROBE_DEFINE=on, -D, KOMIRA_PROBE_SECOND=2, -I
 tests//functional/assert_level:bin_none mojo_build , -D, ASSERT=none,
 tests//functional/assert_level:bin_none mojo_build_shared , -D, ASSERT=none,
 tests//functional/assert_level:test_none mojo_build_test , -D, ASSERT=none,
@@ -39,34 +40,48 @@ komira//tools/build/examples:test_hellopkg mojo_build_test !, -D,
 '
 
 # With -c komira.coverage=true: a library's coverage build of each test
-# (mojo_build_cov_test) gets the level and the defines its test build gets.
+# (mojo_build_cov_test) and its branch coverage bitcode (mojo_emit_cov_bc)
+# get the level and the defines its test build gets. Beyond these rows, every
+# library's bitcode has exactly the -D list (all of them, in order) of its
+# coverage build (same_defines below).
 COV_EXPECT='
 tests//functional/assert_level:lib_none mojo_build_cov_test , -D, ASSERT=none,
 tests//functional/assert_level:lib_defines mojo_build_cov_test --target-cpu, [^,]*, -D, KOMIRA_PROBE_DEFINE=on,
 tests//functional/assert_level:lib_default mojo_build_cov_test !, -D,
+tests//functional/assert_level:lib_none mojo_emit_cov_bc , -D, ASSERT=none,
+tests//functional/assert_level:lib_defines mojo_emit_cov_bc --target-cpu, [^,]*, -D, KOMIRA_PROBE_DEFINE=on,
+tests//functional/assert_level:lib_default mojo_emit_cov_bc !, -D,
+tests//functional/assert_level:lib_level_and_defines mojo_build_cov_test --target-cpu, [^,]*, -D, ASSERT=none, -D, KOMIRA_PROBE_DEFINE=on, -D, KOMIRA_PROBE_SECOND=2, --debug-level,
+tests//functional/assert_level:lib_level_and_defines mojo_emit_cov_bc --target-cpu, [^,]*, -D, ASSERT=none, -D, KOMIRA_PROBE_DEFINE=on, -D, KOMIRA_PROBE_SECOND=2, --debug-level,
 '
 
 # label want: the command a mojo_test gives `buck2 test` (its
 # ExternalRunnerTestInfo, each artifact written as its short path), as
 # EXPECT's `want`.
 TEST_EXPECT='
-tests//functional/assert_level:test_none ^busybox, "sh", mem_cap\.sh, busybox, "4096", "tests//functional/assert_level:test_none", "--", busybox, "sh", gate_runner\.sh,
-tests//negative/assert_level:test_default !mem_cap
+tests//functional/assert_level:test_none ^busybox, "sh", test_deadline\.sh, busybox, "[0-9]+", "[0-9]+", "tests//functional/assert_level:test_none", "--", busybox, "sh", mem_cap\.sh, busybox, "4096", "tests//functional/assert_level:test_none", "--", busybox, "sh", gate_runner\.sh,
+tests//negative/assert_level:test_default ^busybox, "sh", test_deadline\.sh, busybox, "[0-9]+", "[0-9]+", "tests//negative/assert_level:test_default", "--", busybox, "sh", gate_runner\.sh,
 komira//tools/build/examples:test_hellopkg !mem_cap
 '
 
 bad=""
 ok=0
 
-# aquery_tsv <out> <expect> <sub-target> [buck2 options...]: one line per
-# action of the expectation's targets' <sub-target> ("" for the default
-# outputs) and their deps, in <out>.tsv: label <TAB> category <TAB> command.
+# aquery_tsv <out> <expect> <query function> [buck2 options...]: one line per
+# action of the expectation's targets, in <out>.tsv: label <TAB> category <TAB>
+# command. <query function> `deps`: the actions of each target's default
+# outputs and of their deps; `all_actions`: every action each target's own
+# analysis declares, and no dep's. The coverage query is all_actions: with the
+# switch on, a library's deps reach the coverage gate's tool, covcheck, a
+# library with a README, whose examples' actions come from a dynamic action
+# aquery cannot traverse (it fails, refusing to run the README's generate
+# step), and the expectations name only the targets' own actions.
 aquery_tsv() {
-    local o=$1 e=$2 sub=$3 targets query t
+    local o=$1 e=$2 fn=$3 targets query t
     shift 3
     targets=$(printf '%s\n' "$e" | awk 'NF { print $1 }' | LC_ALL=C sort -u)
     query=""
-    for t in $targets; do query="${query:+$query + }deps('$t$sub')"; done
+    for t in $targets; do query="${query:+$query + }$fn('$t')"; done
     # A binary's [shared] library is built only for that sub-target.
     case "$e" in *bin_none*) query="$query + deps('tests//functional/assert_level:bin_none[shared]')" ;; esac
     if ! "$BUCK2" aquery "$query" "$@" --output-attribute cmd --output-attribute category > "$o" 2> "$o.err"; then
@@ -110,10 +125,39 @@ check() {
     done <<< "$e"
 }
 
-aquery_tsv "$out" "$EXPECT" ""
+aquery_tsv "$out" "$EXPECT" deps
 check "$out.tsv" "$EXPECT" ""
-aquery_tsv "$out.cov" "$COV_EXPECT" "[coverage]" -c komira.coverage=true
+aquery_tsv "$out.cov" "$COV_EXPECT" all_actions -c komira.coverage=true
 check "$out.cov.tsv" "$COV_EXPECT" "with komira.coverage=true: "
+
+# same_defines <tsv>: for each library with a mojo_emit_cov_bc, the `-D`
+# arguments of its bitcode commands, each in order, are those of its
+# mojo_build_cov_test commands (one test each here, so one list each).
+same_defines() {
+    local diffs
+    diffs=$(awk -F '\t' '
+        $2 == "mojo_build_cov_test" || $2 == "mojo_emit_cov_bc" {
+            n = split($3, a, ", "); d = ""
+            for (i = 1; i < n; i++) if (a[i] == "-D") d = d " -D " a[i + 1]
+            key = $1 SUBSEP $2
+            if (!(key in list)) list[key] = "[" d "]"; else if (index(list[key], "[" d "]") == 0) list[key] = list[key] "[" d "]"
+            if ($2 == "mojo_emit_cov_bc") bc[$1] = 1
+        }
+        END {
+            for (l in bc) {
+                b = list[l SUBSEP "mojo_emit_cov_bc"]; c = list[l SUBSEP "mojo_build_cov_test"]
+                if (b != c) printf "%s mojo_emit_cov_bc -D %s, its mojo_build_cov_test %s; ", l, b, (c == "" ? "none" : c)
+                else ok++
+            }
+            if (ok == 0) printf "no library has both a mojo_emit_cov_bc and a mojo_build_cov_test; "
+        }' "$1")
+    if [ -n "$diffs" ]; then
+        bad="$bad; with komira.coverage=true: ${diffs%; }"
+    else
+        ok=$((ok + 1))
+    fi
+}
+same_defines "$out.cov.tsv"
 
 # The provider dump's ExternalRunnerTestInfo command, on one line, as the
 # rows of an aquery tsv (category `test_command`).
@@ -137,4 +181,4 @@ if [ -n "$bad" ]; then
     echo "FAIL  assert level: ${bad#; }"
     exit 1
 fi
-echo "PASS  assert level: $ok expectations over the compile, gated-test, coverage-build and buck2-test commands (-D ASSERT and defines where set, the memory cap at 4096 MiB by default at ASSERT=none and as set, none of either where unset)"
+echo "PASS  assert level: $ok expectations over the compile, gated-test, coverage-build (the bitcode's -D list that of the coverage binary) and buck2-test commands (-D ASSERT and defines where set, the memory cap at 4096 MiB by default at ASSERT=none and as set, none of either where unset)"

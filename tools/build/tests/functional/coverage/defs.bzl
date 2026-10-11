@@ -1,13 +1,17 @@
 """Checks of coverage builds, as build actions: check.sh over the binaries
 (test 41), with debug_relocate, which refuses a file holding a compressed
 section; report.sh over the per-test reports of the coverage runs (test 43);
-cov_plant, a copy of a script with one planted defect, and kcov_stub_dir,
-a kcov distribution whose bin/kcov is a stand-in (test 43); and
+cov_plant, a copy of a script (or a Zig source) with one planted defect,
+cov_zig_tree, a Zig tool's sources with such a copy among them, and
+kcov_stub_dir, a kcov distribution whose bin/kcov is a stand-in (test 43); and
 cov_branch_check, branch_check.sh over a branch coverage run's profile,
 and cov_link_line_check, link_line.sh over a branch coverage link
-(test 47)."""
+(test 47); cov_conda_gate_check, at analysis, that a conda package's joins
+wait for the library's coverage markers."""
 
+load("@komira//tools/build/mojo:coverage.bzl", "MojoCoverageGateInfo")
 load("@komira//tools/build/mojo:providers.bzl", "MojoInfo", "MojoToolchainInfo")
+load("@komira//tools/build/package:conda.bzl", "CondaJoinInfo")
 load("@komira//tools/build/toolchains/llvm_branch:defs.bzl", "LlvmBranchInfo")
 
 def _impl(ctx):
@@ -154,6 +158,25 @@ cov_plant = rule(
     },
 )
 
+def _zig_tree_impl(ctx):
+    out = ctx.actions.copied_dir(ctx.label.name, ctx.attrs.files)
+    return [DefaultInfo(default_output = out, sub_targets = {
+        f.removesuffix(".zig"): [DefaultInfo(default_output = out.project(f))]
+        for f in ctx.attrs.files
+    })]
+
+# The sources of a Zig tool in one directory (`files`: path -> source), one
+# of them a cov_plant copy: zig resolves a relative @import beside the
+# importing file, so a planted copy is built with the others next to it. Each
+# file is the sub-target of its name without `.zig`, for zig_exe's `src`
+# and `imports`.
+cov_zig_tree = rule(
+    impl = _zig_tree_impl,
+    attrs = {
+        "files": attrs.dict(attrs.string(), attrs.source()),
+    },
+)
+
 def _stub_impl(ctx):
     keep = ctx.actions.write("lib/.keep", "")
     out = ctx.actions.copied_dir("kcov", {
@@ -243,5 +266,50 @@ cov_link_line_check = rule(
         "script": attrs.source(),
         "src": attrs.source(),
         "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
+    },
+)
+
+def _waits_for(cmd, artifact):
+    # Whether the command line `cmd` has `artifact` among its inputs (hidden
+    # ones too): its inputs are a set, so adding one already there leaves
+    # their number unchanged.
+    return len(cmd_args(cmd, hidden = [artifact]).inputs) == len(cmd.inputs)
+
+def _conda_gate_impl(ctx):
+    where = ctx.label.raw_target()
+    lib = ctx.attrs.lib
+    if MojoCoverageGateInfo not in lib:
+        fail("{}: {} has no coverage builds (no MojoCoverageGateInfo): the check needs a library with coverage forced on".format(where, lib.label))
+    markers = lib[MojoCoverageGateInfo].markers
+    if len(markers) != ctx.attrs.markers:
+        fail("{}: {} has {} coverage markers (one per coverage run, and its gate's), want {}".format(where, lib.label, len(markers), ctx.attrs.markers))
+    gate = list(markers)
+    if ctx.attrs.coverage_gate != None:
+        gate += ctx.attrs.coverage_gate[DefaultInfo].default_outputs
+    info = ctx.attrs.conda[CondaJoinInfo]
+    if info.lib.raw_target() != lib.label.raw_target():
+        fail("{}: {} packages {}, not {}".format(where, ctx.attrs.conda.label, info.lib, lib.label))
+    lines = []
+    for category, cmd in (("conda_join", info.join), ("conda_release_join", info.release_join)):
+        for a in gate:
+            if not _waits_for(cmd, a):
+                fail("{}: the {} of {} does not wait for {}: the package would exist before the library's coverage runs and gate passed (tools/build/package/conda.bzl, `gate`)".format(where, category, ctx.attrs.conda.label, a.short_path))
+            lines.append("ok: {} waits for {}".format(category, a.short_path))
+    out = ctx.actions.write(ctx.label.name + ".txt", lines)
+    return [DefaultInfo(default_output = out)]
+
+# Fails at analysis unless both joins of `conda` (a conda package of `lib`)
+# wait for every coverage marker of `lib` (its MojoCoverageGateInfo, of which
+# there must be `markers`) and for the default outputs of `coverage_gate`, the
+# `coverage_gate` the package was given (a library of the ledger's
+# `<name>_cov_gate`). No action runs: a build without
+# `-c komira.coverage=true` checks the wiring.
+cov_conda_gate_check = rule(
+    impl = _conda_gate_impl,
+    attrs = {
+        "conda": attrs.dep(providers = [CondaJoinInfo]),
+        "coverage_gate": attrs.option(attrs.dep(), default = None),
+        "lib": attrs.dep(),
+        "markers": attrs.int(),
     },
 )

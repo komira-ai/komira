@@ -16,6 +16,7 @@ from kci_release_channel import (
     ARTIFACT_TYPE_OCI,
     ARTIFACT_TYPE_PYTHON,
     CREDENTIAL_KIND_API_TOKEN,
+    CREDENTIAL_KIND_OIDC_TRUSTED_PUBLISHING,
     ChannelCredential,
     Channel,
     ChannelRepository,
@@ -535,6 +536,64 @@ def test_break_glass_push_identity() raises:
         String("    credential"), String("    break_glass_push_identity: \"repo:o/r:environment:b\"\n    credential")
     )
     _assert_refused(twice, String("break_glass_push_identity"))
+
+
+# ── Both environment readers need an OIDC credential. ───────────────────────
+
+
+def _constructed(var credential: Optional[ChannelCredential]) -> ChannelRepository:
+    """A repository built without the parser (which refuses a break-glass
+    identity on an API token and a missing credential), whose push and
+    break-glass identities each name an environment."""
+    var r = ChannelRepository(
+        String(ARTIFACT_TYPE_CONDA),
+        String("registry.example.invalid/beta"),
+        String("repo:o/r:environment:stable"),
+        credential^,
+    )
+    r.break_glass_push_identity = String("repo:o/r:environment:stable-bg")
+    return r^
+
+
+def test_identity_environments_need_an_oidc_credential() raises:
+    # control: with an OIDC credential the same identities name environments
+    var oidc = _constructed(
+        ChannelCredential(String(CREDENTIAL_KIND_OIDC_TRUSTED_PUBLISHING), String(""))
+    )
+    assert_equal(push_identity_environment(oidc), String("stable"))
+    assert_equal(break_glass_push_identity_environment(oidc), String("stable-bg"))
+    # no credential: neither identity is a token subject
+    var none = _constructed(None)
+    assert_equal(push_identity_environment(none), String(""))
+    assert_equal(break_glass_push_identity_environment(none), String(""))
+    # an API token: the break-glass identity is not a token subject either
+    var token = _constructed(
+        ChannelCredential(String(CREDENTIAL_KIND_API_TOKEN), String("T"))
+    )
+    assert_equal(push_identity_environment(token), String(""))
+    assert_equal(break_glass_push_identity_environment(token), String(""))
+
+
+def test_a_structural_token_as_a_credential_value() raises:
+    """A `{`, `}` or `:` where a credential value belongs is malformed, and
+    the reworded refusal still names the field and its line."""
+    var kinds = List[String]()
+    kinds.append(String("{"))
+    kinds.append(String("}"))
+    kinds.append(String(":"))
+    for i in range(len(kinds)):
+        var text = _file(
+            String("CONDA"),
+            String("    credential {\n      kind: ") + kinds[i] + String(" }\n"),
+        )
+        assert_equal(
+            _refusal(text),
+            String(
+                "channels file: line 9: malformed kind in the credential"
+                " of a repository of channel 'beta' (expected `kind:"
+                " <value>`; value not quoted)"
+            ),
+        )
 
 
 def main() raises:

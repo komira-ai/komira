@@ -1,0 +1,11 @@
+#! komira-plan-conformance v1
+#  order: none
+#  float: ulps=0
+# derivation: §1.2 over x = 1, 2, NULL, 5 (ints_nullable): x = 2 is FALSE,
+# TRUE, NULL, FALSE; x <> 2 is TRUE, FALSE, NULL, TRUE; x > 1 is FALSE, TRUE,
+# NULL, TRUE. A NULL x answers NULL, never a value. Types: §8.8.
+id:int64	eq_2:bool?	ne_2:bool?	gt_1:bool?
+1	false	true	false
+2	true	false	true
+3	\N	\N	\N
+4	false	true	true

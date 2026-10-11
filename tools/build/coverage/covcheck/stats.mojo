@@ -22,6 +22,7 @@ comptime EXEMPTION_WITHOUT_REASON = "ExemptionWithoutReason"
 comptime STALE_EXEMPTION = "StaleExemption"
 comptime UNMEASURED_FILE = "UnmeasuredFile"
 comptime BRANCH_UNMEASURED_FILE = "BranchUnmeasuredFile"
+comptime DECLARATION_ONLY_FILE = "DeclarationOnlyFile"
 
 comptime NO_FLOOR: Int = -1
 
@@ -94,7 +95,8 @@ struct Finding(Copyable, Movable):
     points (the target or the floor) or -1 when they do not apply; `path`
     and `line` place the finding in a file (line 0: the whole file), or are
     empty and 0; `count` is the number of lines an `UnmeasuredFile` counts
-    uncovered, -1 for every other finding."""
+    uncovered, or a `DeclarationOnlyFile` would have counted, -1 for every
+    other finding."""
 
     var kind: String
     var package: String
@@ -129,14 +131,27 @@ struct Finding(Copyable, Movable):
         self.count = count
 
 
+def is_info_package(package: String, dirs: List[String]) -> Bool:
+    """Whether `package` is one of `dirs` (`--info-package`, a test-only
+    package's directory) or under one, at a path-segment boundary: `src/tests`
+    covers `src/tests/e2e/x`, not `src/testsuite`."""
+    for i in range(len(dirs)):
+        if package == dirs[i] or package.startswith(dirs[i] + String("/")):
+            return True
+    return False
+
+
 def valid_mode(mode: String) -> Bool:
     return mode == String(MODE_CENSUS) or mode == String(MODE_NEUTRAL) or mode == String(MODE_ENFORCE)
 
 
-def conclusion_of(mode: String, findings: Int) -> String:
-    """The check run's conclusion: `neutral` in census and neutral mode
-    whatever was found; in enforce mode `failure` with any finding, else
-    `success`."""
+def conclusion_of(mode: String, findings: Int, regressions: Int) -> String:
+    """The check run's conclusion: `failure` with any `Regression` (a
+    ratchet floor holds in every mode, so coverage can only go up);
+    otherwise `neutral` in census and neutral mode whatever was found, and
+    in enforce mode `failure` with any finding, else `success`."""
+    if regressions > 0:
+        return String("failure")
     if mode != String(MODE_ENFORCE):
         return String("neutral")
     if findings > 0:

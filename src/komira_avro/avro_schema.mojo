@@ -31,7 +31,7 @@ from .avro_names import (
     check_avro_namespace,
     latin1_default_bytes,
 )
-from .json_number import scan_json_number
+from .json_number import parse_json_int, scan_json_number
 from .json_string import decode_json_string
 
 
@@ -68,12 +68,6 @@ comptime MAX_FIXED_SIZE: Int = 1 << 26
 # deepest schema anyone writes by hand is single-digit; 256 is not a
 # constraint on legitimate files.
 comptime MAX_SCHEMA_DEPTH: Int = 256
-
-# Max digits accepted in a JSON integer literal. `_parse_number` accumulates
-# `acc = acc * 10 + digit` in a signed Int with no cap, so a long enough digit
-# run silently WRAPS to any 64-bit value the attacker chooses — including one
-# inside the overflow window of a downstream `pos + n` bounds check.
-comptime MAX_JSON_INT_DIGITS: Int = 19
 
 comptime AVRO_KIND_NULL: Int = 0
 comptime AVRO_KIND_BOOLEAN: Int = 1
@@ -748,18 +742,25 @@ def _default_matches(kind: Int, tag: Int) -> Bool:
     return False
 
 
-def _default_target(nodes: List[AvroNode], type_idx: Int, tag: Int) -> Int:
+def _default_target(
+    nodes: List[AvroNode], type_idx: Int, tag: Int, fname: String
+) raises -> Int:
     """The arena index of the type a field default of JSON `tag` is read as.
     For a non-union field it is the field's type. For a union it is the first
     branch the default matches (Avro spec: "Default values for union fields
     correspond to the first schema that matches in the union"), or the first
     branch when none matches. By-name references to a fixed or an enum are
-    resolved to that node."""
+    resolved to that node. The empty union `[]` has no branch, so a default
+    on it is refused (INVALID_DEFAULT naming field `fname`)."""
     if nodes[type_idx].kind != AVRO_KIND_UNION:
         return _resolve_named_ref(nodes, type_idx)
     var n = len(nodes[type_idx].children)
     if n == 0:
-        return type_idx
+        raise Error(
+            String("AvroSchemaError.INVALID_DEFAULT: field '") + fname
+            + "' has a default, but its type is the empty union, which has"
+            " no branch to read it as"
+        )
     for i in range(n):
         var b = _resolve_named_ref(nodes, nodes[type_idx].children[i])
         if _default_matches(nodes[b].kind, tag):
@@ -790,7 +791,7 @@ def _capture_default(
     if not found:
         return AvroDefault.none()
     var v = _obj_get(fobj, "default")
-    var target = _default_target(nodes, type_idx, v.tag)
+    var target = _default_target(nodes, type_idx, v.tag, fname)
     var tkind = nodes[target].kind
     if tkind == AVRO_KIND_BYTES or tkind == AVRO_KIND_FIXED:
         if v.tag != _JSON_STRING:
@@ -1367,39 +1368,8 @@ struct _JsonParser:
             # the _JSON_INT path below.
             v.float_val = _parse_decimal_f64(self.data, start, self.pos)
             return v^
-        # Integer: parse the consumed digits.
         v.tag = _JSON_INT
-        var acc = 0
-        var neg = False
-        var i = start
-        if self.data[i] == UInt8(ord("-")):
-            neg = True
-            i += 1
-        # UNTRUSTED INPUT. `acc = acc * 10 + digit` in a
-        # signed Int SILENTLY WRAPS, so an arbitrarily long digit run in the
-        # header's schema JSON can name ANY 64-bit value -- including one inside
-        # the overflow window of a downstream `pos + n` bounds check. The values
-        # this parser feeds (`fixed.size`, `precision`, `scale`) are all small;
-        # refusing a literal that cannot be represented is strictly better than
-        # returning a wrapped one.
-        if self.pos - i > MAX_JSON_INT_DIGITS:
-            raise Error(
-                String("AvroSchemaError.MALFORMED_JSON: integer literal has ")
-                + String(self.pos - i)
-                + " digits, which cannot be represented (max "
-                + String(MAX_JSON_INT_DIGITS)
-                + ")"
-            )
-        while i < self.pos:
-            var next_acc = acc * 10 + Int(self.data[i] - UInt8(ord("0")))
-            if next_acc < acc:
-                raise Error(
-                    "AvroSchemaError.MALFORMED_JSON: integer literal overflows"
-                    " a 64-bit signed integer"
-                )
-            acc = next_acc
-            i += 1
-        v.int_val = -acc if neg else acc
+        v.int_val = parse_json_int(Span(self.data), start, self.pos)
         return v^
 
     def _match_literal(mut self, lit: String) -> Bool:

@@ -5,8 +5,8 @@
 # policy's mode (tools/build/coverage/policy.bzl). README.md, "The build gate".
 #
 # usage: busybox sh <gate_dir>/cov_gate.sh <busybox> <label> <package> <mode> <target_bp>
-#            <root> <tests> <result_out> <summary_out> <marker_out> [<report>...]
-#            [--branch-lcov <branch_info>...]
+#            <root> <tests> <result_out> <summary_out> <marker_out>
+#            [--info-package <package>] [<report>...] [--branch-lcov <branch_info>...]
 #
 #   <gate_dir>   the cov_gate_dir: this script, covcheck/ (the covcheck binary
 #                and the runtime libraries it loads) and ratchet.tsv
@@ -20,6 +20,11 @@
 #   <tests>      a file naming the repository path of each test source the
 #                library welds, one per line: each is covcheck's
 #                --test-source, set aside wherever it is in the package
+#   --info-package <package>  the library's package is test-only
+#                (COVERAGE_INFO_ONLY_DIRS, policy.bzl): covcheck reports its
+#                findings as information, so it has none and the gate
+#                never fails on a finding (covcheck --info-package; exits
+#                1 and 2 still fail it)
 #   <report>     a test's Cobertura report, in repository paths (cov_run.sh)
 #   <branch_info> after the argument `--branch-lcov` (given at most once:
 #                every argument after it is a branch record file): a
@@ -34,10 +39,12 @@
 # with no test) the package is NotMeasured.
 #
 # Exit status: 0 when covcheck wrote its outputs and found nothing fatal in
-# the mode (census and neutral never fail on a finding): <result_out> (JSON)
-# and <summary_out> (Markdown) are covcheck's, and <marker_out> says PASS.
-# 1 when covcheck exits 3 (enforce mode and a finding: the summary is
-# printed under `COVERAGE GATE FAILED (enforce): <package>`), when covcheck
+# the mode (census and neutral fail on no finding but a Regression, a
+# ratchet floor not held): <result_out> (JSON) and <summary_out> (Markdown)
+# are covcheck's, and <marker_out> says PASS.
+# 1 when covcheck exits 3 (a finding in enforce mode, or a Regression in any
+# mode: the summary is printed under `COVERAGE GATE FAILED (<mode>):
+# <package>`), when covcheck
 # exits 1 (an input it refuses: an unmapped report path, a source it cannot
 # read) or 2 (bad usage), each with covcheck's message, in every mode; 2 for
 # a usage error of this script.
@@ -59,6 +66,12 @@ RESULT=$(abs "$8")
 SUMMARY=$(abs "${9}")
 MARKER=$(abs "${10}")
 shift 10
+INFO=""
+if [ "${1:-}" = --info-package ]; then
+    [ "$#" -ge 2 ] && [ "$2" = "$PACKAGE" ] || { echo "cov_gate: --info-package must name the package $PACKAGE" >&2; exit 2; }
+    INFO=$2
+    shift 2
+fi
 case "$MODE" in census | neutral | enforce) ;; *) echo "cov_gate: mode '$MODE' is not census, neutral or enforce" >&2; exit 2 ;; esac
 case "$TARGET" in "" | *[!0-9]*) echo "cov_gate: target '$TARGET' is not a number of basis points" >&2; exit 2 ;; esac
 case "$PACKAGE" in "" | /* | */ | *//*) echo "cov_gate: package '$PACKAGE' is not a repository directory" >&2; exit 2 ;; esac
@@ -105,6 +118,7 @@ done
 while IFS= read -r t; do
     set -- "$@" --test-source "$t"
 done <"$TESTS"
+if [ -n "$INFO" ]; then set -- "$@" --info-package "$INFO"; fi
 
 rc=0
 "$HERE/covcheck/covcheck" gate --package "$PACKAGE" --repo-files "$K/repo_files" --source-root "$ROOT" \
@@ -115,13 +129,10 @@ case "$rc" in
         printf 'PASS %s (%s)\n' "$LABEL" "$MODE" >"$MARKER"
         ;;
     3)
-        if [ "$MODE" != enforce ]; then
-            cat "$K/out" >&2
-            echo "cov_gate: $LABEL: covcheck exited 3 (a finding in enforce mode) in $MODE mode" >&2
-            exit 1
-        fi
+        # enforce: any finding; every mode: a Regression (a floor of
+        # ratchet.tsv not held; README.md, "The ratchet").
         echo "==================================================================" >&2
-        echo "COVERAGE GATE FAILED (enforce): $PACKAGE ($LABEL): covcheck gate exited 3" >&2
+        echo "COVERAGE GATE FAILED ($MODE): $PACKAGE ($LABEL): covcheck gate exited 3" >&2
         name=${LABEL%% *}
         name=${name##*:}
         echo "The conda package (${name}_conda) is not produced until its coverage meets the policy;" >&2

@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
 
-# Planted defects for the per-target assert level and defines (test 45;
+# Planted defects for the per-target assert level and defines (test 49;
 # tools/build/mojo/defines.bzl). Every target here must fail;
 # tools/build/tests/assert_level_tests.sh requires the failure written above
 # it. What works is in ../../functional/assert_level.

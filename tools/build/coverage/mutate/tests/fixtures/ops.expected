@@ -1,0 +1,38 @@
+# mutate list: 33 mutants, 33 sampled, seed s
+# suppressed	equivalent	ops.mojo:34:10:cmp_negate	x is never 0 here
+# suppressed	unreachable	ops.mojo:42:14:arith_swap	no caller
+# suppressed	unreachable	ops.mojo:42:16:const_inc	no caller
+# suppressed	unreachable	ops.mojo:42:16:const_dec	no caller
+ops.mojo:2:23:const_inc	ops.mojo	2	23	const_inc	10 -> 11
+ops.mojo:2:23:const_dec	ops.mojo	2	23	const_dec	10 -> 9
+ops.mojo:7:10:cmp_negate	ops.mojo	7	10	cmp_negate	< -> >=
+ops.mojo:7:12:const_inc	ops.mojo	7	12	const_inc	0 -> 1
+ops.mojo:7:14:bool_swap	ops.mojo	7	14	bool_swap	or -> and
+ops.mojo:7:17:not_delete	ops.mojo	7	17	not_delete	delete `not`
+ops.mojo:7:24:cmp_negate	ops.mojo	7	24	cmp_negate	>= -> <
+ops.mojo:7:27:const_inc	ops.mojo	7	27	const_inc	2 -> 3
+ops.mojo:7:27:const_dec	ops.mojo	7	27	const_dec	2 -> 1
+ops.mojo:8:9:raise_delete	ops.mojo	8	9	raise_delete	raise ... -> pass
+ops.mojo:10:14:arith_swap	ops.mojo	10	14	arith_swap	+ -> -
+ops.mojo:10:18:arith_swap	ops.mojo	10	18	arith_swap	- -> +
+ops.mojo:10:20:const_inc	ops.mojo	10	20	const_inc	1 -> 2
+ops.mojo:10:20:const_dec	ops.mojo	10	20	const_dec	1 -> 0
+ops.mojo:15:5:return_true	ops.mojo	15	5	return_true	insert `return True`
+ops.mojo:15:5:return_false	ops.mojo	15	5	return_false	insert `return False`
+ops.mojo:15:14:cmp_negate	ops.mojo	15	14	cmp_negate	!= -> ==
+ops.mojo:15:18:const_inc	ops.mojo	15	18	const_inc	1 -> 2
+ops.mojo:15:18:const_dec	ops.mojo	15	18	const_dec	1 -> 0
+ops.mojo:15:20:bool_swap	ops.mojo	15	20	bool_swap	and -> or
+ops.mojo:15:26:cmp_negate	ops.mojo	15	26	cmp_negate	== -> !=
+ops.mojo:15:32:const_inc	ops.mojo	15	32	const_inc	2 -> 3
+ops.mojo:15:32:const_dec	ops.mojo	15	32	const_dec	2 -> 1
+ops.mojo:19:5:return_early	ops.mojo	19	5	return_early	insert `return`
+ops.mojo:19:8:const_inc	ops.mojo	19	8	const_inc	0 -> 1
+ops.mojo:19:11:arith_swap	ops.mojo	19	11	arith_swap	+= -> -=
+ops.mojo:19:14:const_inc	ops.mojo	19	14	const_inc	3 -> 4
+ops.mojo:19:14:const_dec	ops.mojo	19	14	const_dec	3 -> 2
+ops.mojo:22:20:const_inc	ops.mojo	22	20	const_inc	1 -> 2
+ops.mojo:22:20:const_dec	ops.mojo	22	20	const_dec	1 -> 0
+ops.mojo:34:5:return_early	ops.mojo	34	5	return_early	insert `return`
+ops.mojo:34:13:const_inc	ops.mojo	34	13	const_inc	0 -> 1
+ops.mojo:35:9:raise_delete	ops.mojo	35	9	raise_delete	raise ... -> pass

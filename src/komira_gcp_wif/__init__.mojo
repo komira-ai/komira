@@ -28,7 +28,11 @@ komira_gcp_core's `parse_gcp_status`, which never echoes a body.
 Configuration is by parameter. The package reads no environment: the AWS
 credential comes from a komira_aws_core `AwsCredsSource` (bind
 `DefaultChainCredsSource` for the AWS SDK's standard chain), and the region,
-the provider audience and the service account are arguments.
+the provider audience and the service account are arguments. An
+`external_account` file (external_account.mojo) is given as its text: the
+caller reads the file, from the path the provider-standard credentials
+variable names or a flag; a file-sourced subject token is read through a
+komira_gcp_core `FileSource`.
 
 Modules:
   - aws_subject.mojo : `aws1_signed_request`, `aws1_subject_token`,
@@ -36,6 +40,13 @@ Modules:
   - sts.mojo         : `AwsWifTokenFetcher`, `sts_exchange_form`,
                        `parse_sts_token_response`, `oauth_error_code`,
                        `is_oauth_error_code`.
+  - external_account.mojo : `parse_external_account`,
+                       `ExternalAccountConfig`, `ExternalAccountFetcher`
+                       (an `external_account` file's flow: the subject from
+                       a file or URL, the exchange, and impersonation when
+                       the file names it), `subject_token_from`,
+                       `generate_access_token_body`,
+                       `parse_generate_access_token_response`.
   - sign_jwt.mojo    : `WifTokenMinter`, `sign_jwt_claims`,
                        `sign_jwt_request_body`, `sign_jwt_path`,
                        `parse_sign_jwt_response`.
@@ -65,6 +76,17 @@ from .sts import (
     oauth_error_code,
     parse_sts_token_response,
     sts_exchange_form,
+)
+from .external_account import (
+    EXTERNAL_ACCOUNT_TYPE,
+    IMPERSONATION_LIFETIME_SECONDS,
+    JWT_SUBJECT_TOKEN_TYPE,
+    ExternalAccountConfig,
+    ExternalAccountFetcher,
+    generate_access_token_body,
+    parse_external_account,
+    parse_generate_access_token_response,
+    subject_token_from,
 )
 from .sign_jwt import (
     IAMCREDENTIALS_HOST,

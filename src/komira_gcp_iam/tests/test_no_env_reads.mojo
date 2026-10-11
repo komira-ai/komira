@@ -14,7 +14,9 @@
 # uploaded, listed or deleted, nothing is signed (SignBlob and SignJwt are
 # deprecated here in favour of IAM Credentials), no account is patched,
 # enabled, disabled or undeleted, and no role is listed, queried or
-# undeleted.
+# undeleted. Of the workload
+# identity pools, only a provider is read (GetWorkloadIdentityPoolProvider);
+# no pool or provider is listed, created, changed, deleted or undeleted.
 from std.os import listdir
 from std.testing import assert_equal, assert_true
 
@@ -97,6 +99,11 @@ def test_only_the_methods_callers_use_are_generated() raises:
         "def undelete_",
         "def patch_",
         "def upload_",
+        "def list_workload",
+        "def create_workload",
+        "def update_workload",
+        "def delete_workload",
+        "def get_workload_identity_pool[",
         "def enable_",
         "def disable_",
         "def query_",
@@ -140,6 +147,19 @@ def test_the_scan_saw_the_client() raises:
         )
     # And no other method: ten in all.
     assert_equal(_count(text, "[RT: Runtime]("), 10)
+    # The workload identity pools client holds the provider read alone.
+    var wif = _read("workload_identity_pool.mojo")
+    assert_equal(
+        _count(
+            wif,
+            "\nstruct WorkloadIdentityPoolsClient[C: Connector, T: GcpTokenSource]",
+        ),
+        1,
+    )
+    assert_equal(
+        _count(wif, "    def get_workload_identity_pool_provider[RT: Runtime]("), 1
+    )
+    assert_equal(_count(wif, "[RT: Runtime]("), 1)
     assert_equal(_count(_read("policy.mojo"), "\nstruct Policy("), 1)
 
 

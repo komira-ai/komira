@@ -1,12 +1,14 @@
 load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 
-# IAM v1: a REST/JSON client generated at build time from the googleapis
-# protos //tools/vendor/googleapis:iam_admin_v1 extracts from its pinned
-# archive (nothing of them is copied here). `IAMClient` sends through
-# komira_http_client's `HttpClient` over the komira_http_core `Connector` it
-# is given, takes each request's bearer token from a komira_gcp_core
-# `GcpTokenSource`, and raises a non-2xx answer through komira_gcp_core's
-# `gcp_status_error`. It reads no environment.
+# IAM v1, and IAM v1beta's workload identity pools: REST/JSON clients
+# generated at build time from the googleapis protos
+# //tools/vendor/googleapis:iam_admin_v1 extracts from its pinned archive
+# (nothing of them is copied here). `IAMClient` and
+# `WorkloadIdentityPoolsClient` each send through komira_http_client's
+# `HttpClient` over the komira_http_core `Connector` it is given, take each
+# request's bearer token from a komira_gcp_core `GcpTokenSource`, and raise a
+# non-2xx answer through komira_gcp_core's `gcp_status_error`. They read no
+# environment.
 #
 # `methods` is what komira's deploy side and its validators call, each for:
 #
@@ -26,6 +28,16 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 #   CreateRole            it creates the role
 #   UpdateRole            it replaces the role's permissions
 #   DeleteRole            it deletes the role
+#   WorkloadIdentityPools.GetWorkloadIdentityPoolProvider
+#                         a trust check reads back the workload identity
+#                         provider a cell's deploy identity is reached
+#                         through (its issuer, audiences and attribute
+#                         condition)
+#
+# The workload identity pools are at v1beta in the pinned googleapis (there
+# is no google/iam/v1 file for them), so the provider read is sent to
+# `/v1beta/projects/*/locations/*/workloadIdentityPools/*/providers/*` on
+# iam.googleapis.com, the host the file declares.
 #
 # Not generated, so not reachable through this package: the service-account
 # keys (List, Get, Create, Upload, Delete, Disable and
@@ -33,8 +45,16 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # SignBlob and SignJwt (deprecated in favour of IAM Credentials), Update,
 # Patch, Enable, Disable and UndeleteServiceAccount, ListRoles, UndeleteRole,
 # QueryGrantableRoles, QueryTestablePermissions, QueryAuditableServices,
-# LintPolicy and TestIamPermissions. A method joins the list with its own
+# LintPolicy and TestIamPermissions; and every workload identity pool and
+# provider method but the provider read. A method joins the list with its own
 # rows in the tests below.
+#
+# PatchServiceAccount (an account's description changed in place) is not
+# generated because the generator refuses it: its binding is
+# `patch: "/v1/{service_account.name=...}"` with `body: "*"`, and the
+# generator drops a path-bound field from a whole body only at the top
+# level, so it refuses a dotted path variable with `body: "*"` rather than
+# send the name twice.
 #
 # IAM Credentials (iamcredentials.googleapis.com) has no client here. Its
 # callers mint credentials: komira_gcp_core's token sources call
@@ -70,7 +90,8 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # `bundle_only` is the files the methods reach, each generated into this
 # package: iam (the service, accounts and roles), iam_policy (the policy
 # requests), options (GetPolicyOptions), policy (Policy, Binding,
-# AuditConfig) and expr (a binding's condition).
+# AuditConfig), expr (a binding's condition) and workload_identity_pool
+# (the pools service, the provider and its request).
 #
 # The library is gated by its layout probe and these tests, hand-written
 # against the IAM v1 REST reference (no upstream test body is copied), each
@@ -83,7 +104,9 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # before the dial), test_iam_roles (each binding chosen by the name, a name
 # matching none refused before the dial, the create body, an update with
 # and without a mask, a delete with and without an etag),
-# test_iam_policy (the version asked for in the query, a policy with a
+# test_iam_wif_provider (the provider read's request line on the v1beta
+# path, the provider decoded, a name outside the pattern refused before the
+# dial), test_iam_policy (the version asked for in the query, a policy with a
 # conditional binding read, the read-modify-write sending the etag it read
 # byte for byte), test_iam_errors (the google.rpc.Status envelope mapped to
 # its code, a stale etag's ABORTED among them, the body never quoted) and
@@ -99,6 +122,7 @@ mojo_gcp_client(
         "google/iam/v1/iam_policy.proto",
         "google/iam/v1/options.proto",
         "google/iam/v1/policy.proto",
+        "google/iam/v1beta/workload_identity_pool.proto",
         "google/type/expr.proto",
     ],
     bundle_proto_deps = True,
@@ -113,6 +137,7 @@ mojo_gcp_client(
         "IAM.CreateRole",
         "IAM.UpdateRole",
         "IAM.DeleteRole",
+        "WorkloadIdentityPools.GetWorkloadIdentityPoolProvider",
     ],
     proto_deps = ["//tools/vendor/googleapis:iam_admin_v1"],
     protocol = "rest",
@@ -126,6 +151,7 @@ mojo_gcp_client(
         "tests/test_iam_policy.mojo",
         "tests/test_iam_roles.mojo",
         "tests/test_iam_service_accounts.mojo",
+        "tests/test_iam_wif_provider.mojo",
         "tests/test_no_env_reads.mojo",
     ],
     visibility = ["PUBLIC"],

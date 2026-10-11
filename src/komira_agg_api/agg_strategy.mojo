@@ -120,7 +120,7 @@ struct HyperLogLog(Copyable, Movable):
                 r += 1
                 mask = mask >> UInt64(1)
                 if r > 64:
-                    break
+                    break  # cov: unreachable w != 0 has a set bit, so the loop exits with r <= 64
             rank = UInt8(r)
         if rank > self.registers[idx]:
             self.registers[idx] = rank

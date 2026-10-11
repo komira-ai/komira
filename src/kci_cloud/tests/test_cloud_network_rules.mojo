@@ -31,7 +31,7 @@
 # 4. THE CATALOG ROWS: `network` (23), `subnet` (29) and `ip_address` (30)
 #    are PORTABLE, expose NAME, NAME and ADDRESS, accept no verb, take
 #    retention with the default DELETE, land on `network`, `subnet` and
-#    `address`, and are the twelfth, seventeenth and eighteenth arms.
+#    `address`, and are the twelfth, eighteenth and nineteenth arms.
 # Each test names the defect it catches in its docstring.
 # =============================================================================
 
@@ -315,7 +315,7 @@ def test_the_network_rows() raises:
     var names = ["network", "subnet", "ip_address"]
     var roles = ["network", "subnet", "address"]
     var outputs = ["NAME", "NAME", "ADDRESS"]
-    var positions = [11, 16, 17]
+    var positions = [11, 17, 18]
     for i in range(3):
         ref t = c.types[c.index_of(fields[i])]
         assert_equal(t.name, String(names[i]))

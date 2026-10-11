@@ -20,7 +20,8 @@
 # `point_job_supervisor_at()` makes the AWS default chain the supervisor's S3
 # store builds find the embedded server's credential: AWS_SHARED_CREDENTIALS_FILE
 # names its credentials file, AWS_CONFIG_FILE an empty file, and every
-# variable that would win over the file is removed. The supervisor is the
+# variable that would win over the file (several hold credentials) is
+# removed through komira_libc's `_unset_env`. The supervisor is the
 # code under test, so its credential takes the path any other caller's takes.
 # `supervisor_store()` is that store (s3_store.mojo's `make_s3_store`), and
 # `SilentReporter` stands in for a heartbeat endpoint: these tests drive the
@@ -32,6 +33,7 @@ from std.os import remove
 from std.os.path import exists
 
 from komira_http_core.transport.kernel_tcp import KernelTcpConnector
+from komira_libc.posix import _unset_env
 from komira_job_supervisor import (
     HeartbeatOutcome,
     HeartbeatReporter,
@@ -96,15 +98,7 @@ def _setenv(name: String, value: String):
     _ = v
 
 
-def _unsetenv(name: String):
-    var n = name
-    # FFI-BOUNDARY: unsetenv borrows `n`'s NUL-terminated buffer for the
-    # call; nothing is retained or freed. `_ = n` keeps it alive until then.
-    _ = external_call["unsetenv", Int32](n.as_c_string_slice().unsafe_ptr())
-    _ = n
-
-
-def point_job_supervisor_at(bucket: JobSupervisorTestBucket):
+def point_job_supervisor_at(bucket: JobSupervisorTestBucket) raises:
     """Make the AWS default chain the supervisor's store builds find the
     embedded server's credential, and nothing else (module header)."""
     var gone: List[String] = [
@@ -121,7 +115,7 @@ def point_job_supervisor_at(bucket: JobSupervisorTestBucket):
         "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
     ]
     for i in range(len(gone)):
-        _unsetenv(gone[i])
+        _unset_env(gone[i])
     _setenv("AWS_SHARED_CREDENTIALS_FILE", bucket.credentials_file())
     _setenv("AWS_CONFIG_FILE", "/dev/null")
     _setenv("AWS_EC2_METADATA_DISABLED", "true")
