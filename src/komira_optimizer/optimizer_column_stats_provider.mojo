@@ -280,7 +280,7 @@ struct DefaultColumnStatsProvider[origin: Origin[mut=False]](
             ref ts = relation.table_stats.value()
             # STATS_SOURCE_SYNTHETIC_ROW_COUNT carries a synthesized
             # distinct_count derived from row_count (the
-            # `_synth_row_count_table_stats` fallback of `optimizer_dpccp`).
+            # `_synth_row_count_table_stats` fallback of `optimizer_dpccp_cost`).
             # Treat that as Tier 2 — it's
             # the row-count heuristic in a different wrapper.
             if ts.source != STATS_SOURCE_SYNTHETIC_ROW_COUNT:
