@@ -351,9 +351,15 @@ class RowInstance:
         """ERR_RAISED for user code's exception at row i, with its trace. The
         trace's frames are cleared: what they held (rows, column views) goes
         now, even when user code kept the exception."""
-        trace = "".join(traceback.format_exception(exc))
+        try:
+            msg = "{}: {}".format(type(exc).__name__, exc)
+            trace = "".join(traceback.format_exception(exc))
+        except BaseException:
+            # The exception's own text raised: still the user's error.
+            msg = "{}: (its message raised when read)".format(type(exc).__name__)
+            trace = None
         traceback.clear_frames(exc.__traceback__)
-        return (ERR_RAISED, "{}: {}".format(type(exc).__name__, exc), trace, i)
+        return (ERR_RAISED, msg, trace, i)
 
     def _not_declared(self):
         name, row = self.seen[0]

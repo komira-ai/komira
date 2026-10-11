@@ -3,6 +3,9 @@
 # (komira_udf_spike_abi's harness; fixtures in pyrt/udf_checks.py).
 #
 # What it proves, and the defect each part catches:
+#   - an exception whose own message raises is still the user's error
+#     (ERR_RAISED naming its type, no trace), never the runtime's
+#     (ERR_INTERNAL, as when the adapter's formatting let it escape);
 #   - a user exception is ERR_RAISED at its row with the message on one line
 #     (runs of spaces, newlines, carriage returns and tabs each become one
 #     space) and the user's traceback (a message that keeps a newline; a
@@ -12,8 +15,8 @@
 #   - a dunder the language probes for is not a field read, while `__x`
 #     and `x__` are (a guard that takes either end alone); a field with no
 #     attribute fast path (a name starting with "_", one that is not an
-#     identifier) is still read by attribute, and one named like the row's
-#     own slot (`_i`) by subscript; a row refuses assignment, iteration
+#     identifier) is still read by attribute, and one named `_i` reads the
+#     same by subscript and by attribute; a row refuses assignment, iteration
 #     (TypeError, not a field error) and has the runtime's repr;
 #   - a row another instance kept, read by a field outside its read set,
 #     raises RowExpired (not a field error charged to an idle instance);
@@ -74,6 +77,8 @@ def test_errors(mut rt: UdfRuntime) raises:
     expect(r, "ERR_RAISED", "ValueError: a b c", 0, "raises_spaced")
     assert_true("Traceback (most recent call last)" in r.outcome.trace, r.outcome.trace)
     assert_true("in raises_spaced" in r.outcome.trace, r.outcome.trace)
+    r = call_once(rt, spec_of("udf_checks:raises_unprintable", price()), col(one))
+    expect(r, "ERR_RAISED", "Unprintable: (its message raised when read)", 0, "raises_unprintable")
     r = call_once(rt, spec_of("udf_checks:bad_float", price()), col(one))
     expect(r, "ERR_RAISED", "RuntimeError: no float", 0, "bad_float")
     assert_true("in __float__" in r.outcome.trace, r.outcome.trace)

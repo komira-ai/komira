@@ -12,7 +12,9 @@
 #     or argument a call makes and never drops), and after 50 open_instance
 #     and close_instance cycles no RowInstance but the counting one, and no
 #     read-set list, is alive (a reference open_instance takes and close
-#     never drops).
+#     never drops); the ArrowBuffer type's reference count is the same
+#     after 400 more calls (a buffer that does not give back the reference
+#     each instance of a heap type holds).
 #
 # Every single-point mutant of the runtime and the adapter was run against
 # the runtime tests (the PR's mutation scorecard). One that this file kills:
@@ -72,6 +74,23 @@ def test_leaks(mut rt: UdfRuntime) raises:
         if i == 499:
             assert_true(r.column.bits[0] - b0 < 100, "blocks grew by " + String(r.column.bits[0] - b0) + " over 400 calls")
     rt.close_instance(inst.handle)
+    # ArrowBuffer: each one gives its type's reference back when it goes
+    # (a heap type), so 400 calls leave the type's count where it was.
+    var refs = row_spec("udf_checks:buffer_type_refs", p, TYPE_FLOAT64, TYPE_INT64)
+    var ur = rt.load(refs)
+    var ir = rt.open_instance(ctx.handle, ur.handle)
+    assert_true(ir.outcome.is_ok(), String(ir.outcome))
+    var t0 = Int64(0)
+    for i in range(500):
+        var r = rt.call_batch(ir.handle, refs, one(), CallOptions.plain())
+        assert_true(r.outcome.is_ok(), String(r.outcome))
+        if i == 99:
+            t0 = r.column.bits[0]
+        if i == 499:
+            var d = r.column.bits[0] - t0
+            assert_true(d < 10, "the ArrowBuffer type's references grew by " + String(d) + " over 400 calls")
+    rt.close_instance(ir.handle)
+    rt.unload(ur.handle)
     # Instances: every RowInstance and read-set list the C side made for an
     # instance goes when it closes. Counted by type, not by blocks: opening
     # an instance runs library code (typing, inspect) whose caches grow.

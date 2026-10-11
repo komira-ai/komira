@@ -84,6 +84,7 @@ comptime PROBE_STRUCT_NO_BUFFERS: Int32 = 15
 comptime PROBE_STRUCT_BUFFERS: Int32 = 16
 comptime PROBE_CALL_LEAK: Int32 = 17
 comptime PROBE_UNKNOWN_NO_BITMAP: Int32 = 18
+comptime PROBE_FAIL_LEAK: Int32 = 19
 
 # Misuse kinds: the order of native/row_probe.c's MU_* enum.
 comptime MISUSE_CAPS_SMALL: Int32 = 0
@@ -295,6 +296,11 @@ struct ProbeResult(Copyable, Movable):
     """The first (at most 8) output values; NaN for a null."""
     var heap: Int64
     """PROBE_CALL_LEAK: heap bytes left by 2000 good calls after 20."""
+    var leak_values: List[Float64]
+    """PROBE_CALL_LEAK: row 0's result of call 20 and of call 2019."""
+    var out_cleared: Bool
+    """A failed call set the output's release to NULL (the probe set it to
+    a function of its own before the call)."""
 
 
 @fieldwise_init
@@ -432,6 +438,8 @@ struct RowEngine(Movable):
             _pget(h, 2) != 0, _pget(h, 3) != 0, _pget(h, 4), _pget(h, 5), Int32(_pget(h, 6)),
             read_cstr(external_call["rowe_probe_message", Void](h.p, Int32(1))), _pget(h, 9), _pget(h, 10) != 0,
             Int32(_pget(h, 11)), _pget(h, 7), _pget(h, 8), out^, _pget(h, 12),
+            [external_call["rowe_probe_value", Float64](h.p, Int32(8)), external_call["rowe_probe_value", Float64](h.p, Int32(9))],
+            _pget(h, 13) != 0,
         )
         external_call["rowe_probe_free", NoneType](h.p)
         return r^

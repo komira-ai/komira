@@ -56,7 +56,8 @@ enum {
   PK_STRUCT_NO_BUFFERS, /* the struct's buffer list is NULL */
   PK_STRUCT_BUFFERS,   /* the struct's n_buffers is 0 */
   PK_CALL_LEAK,        /* 2020 good calls first, the heap measured over the last 2000 (heap) */
-  PK_UNKNOWN_NO_BITMAP /* the field has null_count -1 and no validity buffer: every row valid */
+  PK_UNKNOWN_NO_BITMAP, /* the field has null_count -1 and no validity buffer: every row valid */
+  PK_FAIL_LEAK         /* PK_CALL_LEAK over calls that fail (any status but OK) */
 };
 
 struct probe {
@@ -71,6 +72,8 @@ struct probe {
   int32_t reserved_zero; /* an OK output's every word set: reserved 0, CPU, a primitive with no children */
   int32_t last_level;   /* the last log line's level */
   int64_t out_len, out_nulls;
+  double leak_values[2]; /* PK_CALL_LEAK: row 0's result of call 20 and of call 2019 */
+  int32_t out_cleared; /* a failed call left the output's release NULL */
   int64_t heap; /* PK_CALL_LEAK: heap bytes (mallinfo2 uordblks) left by 2000 calls after 20 */
   double out[8]; /* the first values; NaN for a null */
   char message[MSG];
@@ -187,9 +190,10 @@ static void* helper_thread(void* arg) {
 }
 
 /* PK_CALL_LEAK: 20 good calls, then 2000 more over which the heap is
- * measured; every output released. 0 when a call fails. */
+ * measured; every output and error released. 0 when a call fails (with
+ * `fail`, PK_FAIL_LEAK: when a call succeeds). */
 static int leak_calls(const komira_udf_runtime* t, komira_udf_instance* inst, const komira_udf_call* call,
-                      int64_t rows, int64_t* heap) {
+                      int64_t rows, int64_t* heap, double* first_last, int fail) {
   struct mallinfo2 before = {0};
   for (int k = 0; k < 2020; k++) {
     if (k == 20) before = mallinfo2();
@@ -199,15 +203,21 @@ static int leak_calls(const komira_udf_runtime* t, komira_udf_instance* inst, co
     komira_udf_error err = {sizeof(komira_udf_error), 0, NULL, NULL, -1, -1, NULL, NULL};
     if (!probe_args(&a, PK_GOOD, 0, rows, &released)) return 0;
     int32_t rc = t->call_batch(inst, call, &a, &o, &err);
+    if (rc == KOMIRA_UDF_OK && o.array.length > 0 && (k == 20 || k == 2019))
+      first_last[k == 20 ? 0 : 1] = ((const double*)o.array.buffers[1])[o.array.offset];
     if (a.array.release != NULL) a.array.release(&a.array);
     if (o.array.release != NULL) o.array.release(&o.array);
     if (err.release != NULL) err.release(&err);
-    if (rc != KOMIRA_UDF_OK) return 0;
+    if ((rc != KOMIRA_UDF_OK) != fail) return 0;
   }
   struct mallinfo2 after = mallinfo2();
   *heap = (int64_t)after.uordblks - (int64_t)before.uordblks;
   return 1;
 }
+
+/* The output slot's release before the call: a runtime that leaves it on a
+ * failed call hands the host a release it never set. Never called. */
+static void poison_release(struct ArrowArray* a) { (void)a; }
 
 static void probe_output(struct probe* p, const struct ArrowDeviceArray* d) {
   const struct ArrowArray* o = &d->array;
@@ -285,13 +295,14 @@ struct probe* rowe_probe(struct engine* e, const char* entry, const char* read_c
 
   struct ArrowDeviceArray args, out;
   memset(&out, 0xFF, sizeof(out)); /* the runtime must set every word it hands back */
-  out.array.release = NULL;
+  out.array.release = poison_release; /* and the release on every return: NULL on failure */
   int32_t cancel = cancel_now;
   komira_udf_call call = {sizeof(komira_udf_call), deadline, 1, kind == PK_NULL_CANCEL ? NULL : &cancel};
   if (kind == PK_CALL_SIZE) call.struct_size = sizeof(komira_udf_call) - 1;
   if (h.inst == NULL) {
     /* PK_OTHER_THREAD's open failed: no call */
-  } else if (kind == PK_CALL_LEAK && !leak_calls(t, h.inst, &call, rows, &p->heap)) {
+  } else if ((kind == PK_CALL_LEAK || kind == PK_FAIL_LEAK) &&
+             !leak_calls(t, h.inst, &call, rows, &p->heap, p->leak_values, kind == PK_FAIL_LEAK)) {
     p->status = KOMIRA_UDF_ERR_OUT_OF_MEMORY;
   } else if (!probe_args(&args, kind, field, rows, &p->released)) {
     p->status = KOMIRA_UDF_ERR_OUT_OF_MEMORY;
@@ -310,7 +321,8 @@ struct probe* rowe_probe(struct engine* e, const char* entry, const char* read_c
     if (p->status != KOMIRA_UDF_OK) {
       p->row = err.row;
       rowe_take_error(&err, p->message);
-      if (out.array.release != NULL) out.array.release(&out.array);
+      p->out_cleared = out.array.release == NULL;
+      if (out.array.release != NULL && out.array.release != poison_release) out.array.release(&out.array);
     } else if (out.array.release != NULL) {
       probe_output(p, &out);
       out.array.release(&out.array);
@@ -334,7 +346,7 @@ struct probe* rowe_probe(struct engine* e, const char* entry, const char* read_c
 
 /* rowe_probe's fields: 0 status, 1 row, 2 moved, 3 released, 4 clock reads,
  * 5 log lines, 6 open_status, 7 output rows, 8 output nulls, 9 open_row,
- * 10 reserved_zero, 11 last log level, 12 heap (PK_CALL_LEAK). */
+ * 10 reserved_zero, 11 last log level, 12 heap (PK_CALL_LEAK), 13 out_cleared. */
 int64_t rowe_probe_get(const struct probe* p, int32_t field) {
   switch (field) {
     case 0: return p->status;
@@ -350,11 +362,15 @@ int64_t rowe_probe_get(const struct probe* p, int32_t field) {
     case 10: return p->reserved_zero;
     case 11: return p->last_level;
     case 12: return p->heap;
+    case 13: return p->out_cleared;
     default: return 0;
   }
 }
 
-double rowe_probe_value(const struct probe* p, int32_t i) { return i >= 0 && i < 8 ? p->out[i] : 0.0; }
+/* 0..7: the output's first values; 8, 9: PK_CALL_LEAK's row 0 of call 20 and of call 2019. */
+double rowe_probe_value(const struct probe* p, int32_t i) {
+  return i >= 0 && i < 8 ? p->out[i] : i == 8 || i == 9 ? p->leak_values[i - 8] : 0.0;
+}
 
 /* 0: the call's message; 1: open_instance's (PK_OTHER_THREAD). */
 const char* rowe_probe_message(const struct probe* p, int32_t which) {

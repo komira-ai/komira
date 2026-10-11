@@ -78,6 +78,20 @@ def blocks(row) -> int:
     return sys.getallocatedblocks()
 
 
+def blocks_now(row) -> float:
+    """The memory blocks this interpreter has allocated, with no collection
+    (cheap enough for every row of 2000 calls)."""
+    return float(sys.getallocatedblocks())
+
+
+def buffer_type_refs(row) -> int:
+    """The reference count of the ArrowBuffer type behind this call's first
+    column view, found through the adapter's _rows frame (its `self`): each
+    live ArrowBuffer holds one, and gives it back when it goes."""
+    inst = sys._getframe(1).f_locals["self"]
+    return sys.getrefcount(type(inst.slots[0][0].obj))
+
+
 def _write_through(e):
     """Writes through the column view held by the innermost frame of e's
     traceback (the adapter's field read, local `c`): 2.0 when refused, 3.0
@@ -188,6 +202,18 @@ def bad_float(row) -> float:
     return _BadFloat()
 
 
+class Unprintable(Exception):
+    """An exception whose text raises."""
+
+    def __str__(self):
+        raise RuntimeError("no text")
+
+
+def raises_unprintable(row) -> float:
+    """Raises an exception whose message raises when read."""
+    raise Unprintable()
+
+
 def raises_spaced(row) -> float:
     """Raises with a message spread over lines, tabs and runs of spaces."""
     raise ValueError("  a\n\tb\r\n  c  ")
@@ -230,8 +256,9 @@ def odd_names(row) -> float:
 
 
 def reserved(row) -> float:
-    """A field named like the row's own slot, read by subscript."""
-    return row["_i"]
+    """A field named like the row's own slot once was, read by subscript
+    and by attribute (the two must agree)."""
+    return row["_i"] if row["_i"] == row._i else -1.0
 
 
 def assigns(row) -> float:

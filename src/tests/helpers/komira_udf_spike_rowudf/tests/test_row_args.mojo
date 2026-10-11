@@ -98,6 +98,7 @@ from komira_udf_spike_rowudf.engine import (
     MISUSE_SPEC_SMALL,
     PROBE_CALL_LEAK,
     PROBE_CALL_SIZE,
+    PROBE_FAIL_LEAK,
     PROBE_CHILD_BUFFERS,
     PROBE_FOREIGN_CLOSE,
     PROBE_GOOD,
@@ -134,6 +135,7 @@ def expect(r: ProbeResult, status: String, words: String, row: Int64, what: Stri
     assert_equal(r.row, row, w)
     assert_true(r.moved, what + ": args not moved")
     assert_true(r.released, what + ": args not released")
+    assert_true(r.out_cleared, what + ": the output's release not set to NULL")
 
 
 def expect_ok(r: ProbeResult, rows: Int, what: String) raises:
@@ -227,6 +229,20 @@ def test_call_leak(mut e: RowEngine) raises:
     var r = e.probe(Probe.of(ENTRY, pq(), PROBE_CALL_LEAK, 1000))
     expect_ok(r, 1000, "after 2020 calls")
     assert_true(r.heap < 65536, "2000 calls left " + String(r.heap) + " heap bytes")
+    # The Python side: 300-row calls (300 is no cached small int) under a
+    # far deadline leave the interpreter's blocks where they were (a row
+    # count or deadline object call_batch makes and never drops).
+    var p = Probe.of("udf_checks:blocks_now", pq(), PROBE_CALL_LEAK, 300)
+    p.deadline = Int64(1) << 60
+    var b = e.probe(p)
+    assert_equal(status_name(b.status), "OK", b.message)
+    var grew = b.leak_values[1] - b.leak_values[0]
+    assert_true(grew < 100.0, "blocks grew by " + String(grew) + " over 2000 calls of 300 rows")
+    # 2000 failed calls (a user error with a trace) leave the C heap within
+    # 64 KiB: the message and trace copied out for the error are freed.
+    var f = e.probe(Probe.of("udf_checks:raises_spaced", pq(), PROBE_FAIL_LEAK, 10))
+    assert_equal(status_name(f.status), "ERR_RAISED", f.message)
+    assert_true(f.heap < 65536, "2000 failed calls left " + String(f.heap) + " heap bytes")
 
 
 def test_cancel(mut e: RowEngine) raises:
