@@ -59,3 +59,28 @@ def one_definition_listed(name):
     label = "//{}:{}".format(package_name(), name)
     if label not in SRC_C_LIBRARIES:
         fail("cxx_library {}: not in SRC_C_LIBRARIES (tools/build/one_definition/libraries.bzl), the C libraries the one-definition gate links whole-archive; add it there".format(label))
+
+# The owner of each vendored C library of THIRD_PARTY_C_LIBRARIES, by the
+# third_party package that declares it: the mojo_library that ships its
+# archives (docs/design/native_packaging.md, "What each library ships"), and
+# the prefix its prefixed build gives every symbol it defines ("" when it is
+# not prefixed). `owner` None: no library ships it, so no library outside
+# src/tests/ may link it. A `cxx_library` under src/ needs no row: the
+# library of its own package (`//src/<name>:<name>`) owns it.
+#
+# The Mojo-closure check of mojo_library (tools/build/mojo/native_reach.bzl)
+# reads this: a library that links one of these archives, or calls one of
+# their prefixed names, has the owner in its Mojo deps closure. An archive of
+# a third_party package with no row here is refused, so a new vendored
+# library is given its owner before anything links it. The symbol check of
+# each prefixed library (`prefixed_archive_check` in its BUCK file) reads its
+# `prefix` here, so the prefix refused is the one every symbol is proved to
+# carry.
+THIRD_PARTY_OWNERS = {
+    "third_party/aws-lc": struct(owner = "//src/komira_crypto:komira_crypto", prefix = "komira_awslc_"),
+    "third_party/brotli": struct(owner = "//src/komira_parquet_codec:komira_parquet_codec", prefix = ""),
+    "third_party/s2n-tls": struct(owner = "//src/komira_http_core:komira_http_core", prefix = "komira_s2n_"),
+    "third_party/sha1collisiondetection": struct(owner = None, prefix = ""),
+    "third_party/snappy": struct(owner = "//src/komira_compression:komira_compression", prefix = "komira_snappy_"),
+    "third_party/sqlite": struct(owner = "//src/komira_db_sqlite:komira_db_sqlite", prefix = ""),
+}
