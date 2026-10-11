@@ -59,8 +59,11 @@ Every item is something the shell does today, with the test (see "Tests") that p
 ### Scratch, closure and configuration
 
 8. Scratch directory: `$BUCK_SCRATCH_PATH/komira` (absolute, or relative to the working directory),
-   else `<cwd>/.komira_action`. It holds `cc/`, `home/`, `tmp/`, `cache/`, `modular/`, and is removed on
-   every exit path: success, failure, watchdog, signal.
+   else `<cwd>/.komira_action`. It holds `cc/`, `home/`, `tmp/`, `cache/`, `modular/`. The shell removes it
+   after the compiler ran (statuses 0, 3, 4 and the compiler's own), on the watchdog's 124 and on a caught
+   signal with the watchdog on. It does not remove it on the exit-2 refusals that come after it is made
+   (closure check, `modular.cfg`, macOS host identity), on a `set -e` failure, or on a signal with idle 0
+   (no traps then). See "Deliberate differences".
 9. Closure check: `<compiler>/CLOSURE_MANIFEST` must exist and be non-empty; every non-empty line must
    name a non-empty file under the compiler dir. Every missing member is reported, then exit 2. Linux also
    requires an executable `<zig_dir>/zig` (exit 2).
@@ -70,7 +73,9 @@ Every item is something the shell does today, with the test (see "Tests") that p
     `shared_libs = -Xlinker,-rpath,-Xlinker,<compiler>/lib;`, and rewrites it to
     `shared_libs = -Xlinker,-rpath,-Xlinker,@loader_path/lib,-Xlinker,-S;`; anything else is exit 2.
 11. macOS host identity: the compile refuses (exit 2, printing the host's fields) on a host whose identity
-    is not among `darwin_macos_hosts`. The identity is `<sdk version>-<first 16 hex of md5>` over six
+    is not among `darwin_macos_hosts`; an empty hosts list is itself exit 2 (`darwin/mojo_wrapper.sh`
+    refuses a link directory whose `macos_hosts` is empty), so the port refuses when no `--macos-host` is
+    given. The identity is `<sdk version>-<first 16 hex of md5>` over six
     `name=value` lines (developer dir, SDK version, SDK build, first line of `cc --version`, first line of
     `ld -v` with stderr, OS build), each read from an absolute host path; an empty field is a refusal. The
     port must print the same bytes, or every configured `darwin_macos_hosts` value goes stale.
@@ -94,6 +99,10 @@ Every item is something the shell does today, with the test (see "Tests") that p
     - `-Xlinker -rpath|--rpath|-R` drops that pair and the next value (bare or as a `-Xlinker` pair);
       `-Xlinker -rpath=*|--rpath=*` is dropped;
     - any other `-Xlinker -<opt>` passes through and its following `-Xlinker <value>` pair passes verbatim;
+      that "value expected" state survives arguments that are not `-Xlinker` and ends only at the next
+      `-Xlinker` pair, whatever it holds;
+    - a `-Xlinker <value not starting with ->` that does not follow a `-Xlinker -<opt>` loses its `-Xlinker`
+      and passes as a bare argument;
     - `-rpath|--rpath <p>`, `-Wl,-rpath <p>`, `-Wl,--rpath <p>` drop both; `-Wl,-rpath,*`, `-Wl,-rpath=*`,
       `-Wl,--rpath,*`, `-Wl,--rpath=*`, `-Wl,-R,*` are dropped; `-Wl,-L*`/`-Wl,-l*` lose the `-Wl,`;
     - a trailing `-Xlinker` with nothing after it passes through.
@@ -126,19 +135,37 @@ Every item is something the shell does today, with the test (see "Tests") that p
     pipe whose only writer is the wrapper; when the kernel closes it, the tether kills the session.
 27. On a normal exit the tether is stopped and processes the compiler orphaned are left alone (the shell
     kills the tether, not the session). The port keeps this; changing it is a separate decision.
-28. With idle 0: no session, no tether, no signal handling; the compiler runs as a plain child.
+28. With idle 0: no session, no tether, no signal handling; the compiler runs as a plain child and
+    inherits the wrapper's stdin and signal dispositions.
+29. With idle > 0 the shell starts the compiler as a background job (`"$@" &`) of a non-interactive shell,
+    so the compiler's stdin is `/dev/null` and SIGINT and SIGQUIT are ignored, and both survive the exec.
+    The port keeps this: in the root, before `execve`, it opens `/dev/null` onto fd 0 and sets SIGINT and
+    SIGQUIT to `SIG_IGN`. With idle 0 it changes neither, as item 28 says.
 
 ### Exit statuses and output checks
 
-29. The compiler's status; `128+N` when signal N killed it; 124 watchdog; 129/130/143 wrapper signalled;
+30. The compiler's status; `128+N` when signal N killed it; 124 watchdog; 129/130/143 wrapper signalled;
     2 refusal; 3 compiler exited 0 but the output is missing or empty; 4 the output contains the working
-    directory, printing up to five printable runs (4 bytes or more) that hold it. `mutation.bzl`'s
+    directory. What exit 4 prints differs today: Linux prints up to five printable runs (`strings -n 4`)
+    that hold `$PWD`; macOS prints up to five matches of `$PWD` alone (`grep -aoF`). The port prints the
+    Linux form on both platforms; nothing parses this text. `mutation.bzl`'s
     `_INFRA_EXITS` (2, 3, 4, 124, 129, 130, 143) reads these numbers: they are a contract, not a detail.
-30. The exit-4 search uses the shell's `$PWD`. The port searches both `$PWD` and `getcwd()` when they
+31. The exit-4 search uses the shell's `$PWD`. The port searches both `$PWD` and `getcwd()` when they
     differ (the spelling question `cov_zig` already handles), so it can only refuse more, never less.
 
 ## Deliberate differences
 
+- **Process shape.** In the shell the root is an intermediate `sh`: on Linux it leads the session (via
+  `setsid(1)`), starts the compiler and the tether as its two children, waits for the compiler and then
+  kills the tether; on macOS the same `sh` runs without a session. In the port the root is the compiler
+  itself: it calls `setsid()`, forks the tether as its own child, then `execve`s the compiler, so the
+  compiler is the session leader and the tether's parent. The tree (items 21 and 22) and the kill (item 24)
+  are unchanged in effect, because both select by session and by descendants of the root; a case pins
+  that the compiler's pid is the session id.
+- **Scratch removed on every exit the wrapper makes.** The port also removes scratch on the exit-2
+  refusals after it exists and on any internal failure (item 8). A signal with idle 0 (no handlers, item 28)
+  and a SIGKILLed wrapper still leave it, as today; buck2 owns `BUCK_SCRATCH_PATH` either way.
+- **One exit-4 report.** macOS prints the Linux form (item 30).
 - **Exact environment.** The port builds the compiler's environment from nothing, like
   `zig_cc_launcher.zig`: the variables of items 12 and 13, plus `PWD` and `BUCK_SCRATCH_PATH` passed through
   because `cov_zig` reads them, plus one shim variable (below). Anything else buck2 or a worker put in the
@@ -196,9 +223,9 @@ reverse, is exit 2, so one source cannot be run with the other platform's contra
 
 The wrapper forks the root. In the root: `setsid()`, then fork the tether (it reads the tether pipe; on
 EOF it sends SIGKILL to process group 0, its own, which is the session's), report the tether's pid on a
-close-on-exec status pipe, then `execve` the compiler with the built environment. Exec failure is written
-to the same pipe (errno), and the wrapper exits 127 for `ENOENT` and 126 otherwise, the statuses the shell
-gives. The wrapper holds the only write end of the tether pipe.
+close-on-exec status pipe, put `/dev/null` on fd 0 and ignore SIGINT and SIGQUIT (item 29), then `execve`
+the compiler with the built environment. Exec failure is written to the same pipe (errno), and the
+wrapper exits 127 for `ENOENT` and 126 otherwise, the statuses the shell gives. The wrapper holds the only write end of the tether pipe.
 
 Watchdog loop: `nanosleep` one second, interrupted early by a signal; `waitpid(root, WNOHANG)` decides
 "gone" before a tree read, so the wrapper never reads a reaped pid. HUP, INT and TERM handlers only set a
@@ -246,7 +273,7 @@ Three things must hold, each already checked:
   the two. `link_line.sh` takes the wrapper as an argument; its rule passes the new executable.
 
 The negative coverage target (`tests//negative/coverage`, the no-op relocator) must still fail with exit 4:
-it proves item 29 through a real `cov_zig` link.
+it proves item 30 through a real `cov_zig` link.
 
 ## Cache impact
 
@@ -287,7 +314,7 @@ The bar: every test says which defect it catches and names the mutant planted to
 ### Process cases (a Buck2 target on Linux, replacing `watchdog/cases.sh`)
 
 A Zig stand-in compiler (`zig_exe`, modes `hang`, `hangpid`, `treehang`, `orphan`, `orphanspin`, `spin`,
-`childspin`, `nap2`, `nap5`, `fail`, plus `envdump`, `link`, `empty`, `cwd`, `noout`) and a Zig cases
+`childspin`, `nap2`, `nap5`, `fail`, plus `envdump`, `sigstate`, `link`, `empty`, `cwd`, `noout`) and a Zig cases
 runner that runs the real wrapper against it, each case under its own deadline so a dead watchdog is a red
 case, never a hung action:
 
@@ -297,11 +324,15 @@ case, never a hung action:
 - `envdump`: the environment is exactly item 12's list plus the pass-throughs;
 - `link`: the stand-in execs `cc` from `PATH` with item 15's inputs; a stand-in zig records its argv; the
   runner compares it to item 16;
-- `empty` 3, `cwd` 4 (output holds the working directory), `noout` 2, a manifest member missing 2.
+- `sigstate`: with idle > 0 the stand-in reports stdin is `/dev/null`, SIGINT and SIGQUIT ignored, and its
+  pid equal to its session id; with idle 0 it reports the runner's stdin and dispositions (items 28, 29);
+- `empty` 3, `cwd` 4 (output holds the working directory), `noout` 2, a manifest member missing 2, each
+  with the scratch directory gone afterwards.
 
 Mutants, each run once on the farm and named in the pull request: no tether (KILL case red); no signal
 flag handling (TERM, HUP, INT red); session rule dropped (`orphan` red, and `orphanspin` killed); post
-checks skipped (`empty`, `cwd` red); a leaked variable added (`envdump` red).
+checks skipped (`empty`, `cwd` red); a leaked variable added (`envdump` red); stdin
+left inherited (`sigstate` red); scratch kept on a refusal (manifest case red).
 
 ### macOS
 
@@ -318,14 +349,20 @@ The `host-identity` value is checked on each macOS worker by the census target a
    stand-in and cases runner; switch the Linux toolchain's `wrapper`; add `mojo_compile_cmd` and move the
    three rule files to it; point the runtime-libs and link-line rules at the executable; regenerate the
    golden. Delete
-   `tools/build/mojo/mojo_wrapper.sh` and `functional/watchdog/cases.sh`; update the docs that name the
-   script (`mojo_rules_and_toolchain.md`, the Mojo, coverage and toolchain READMEs, `cov_zig.zig`'s header).
+   `tools/build/mojo/mojo_wrapper.sh` and `functional/watchdog/cases.sh`, then run `git grep mojo_wrapper.sh`
+   and update every hit that means the Linux script. That is more than the docs (`mojo_rules_and_toolchain.md`,
+   the Mojo, coverage and toolchain READMEs, `cov_zig.zig`'s header): comments in `defs.bzl`, `doc.bzl`,
+   `coverage.bzl`, `coverage_branch.bzl`, `coverage/kcov/defs.bzl`, `mutation.bzl`, `providers.bzl`,
+   `toolchain.bzl`, `gate_runner.sh`, `tests/cxx_tests.sh`, `cov_branch_link.sh`, `functional/coverage/BUCK`,
+   `link_line.sh` and `tests/coverage_runs.md` name it too. The pull request lists the hits it leaves and why
+   (each names the darwin script, which the macOS pull request removes).
    The darwin toolchain still names its own shell wrapper, so macOS is untouched. Proof: unit tests and
    cases green with each mutant red once; the compile-ran, tests-cached report of "Cache impact";
    test 47 and the negative coverage target unchanged.
 2. **macOS.** Darwin `mojo_compile` target; `mojo_darwin_toolchain` and `census.bzl` changes; delete
    `darwin/mojo_wrapper.sh`, `darwin/cc`, `darwin/host_identity.sh`, `mojo_darwin_link`; update
-   `DEVELOPMENT.md` ("macOS workers") and `functional/darwin/check.sh` sections that drove the scripts.
+   `DEVELOPMENT.md` ("macOS workers") and `functional/darwin/check.sh` sections that drove the scripts;
+   `git grep mojo_wrapper.sh` then returns only design notes that describe the replacement.
    Proof on the macOS workers, as above.
 3. **Rust** (follow-on, below).
 4. `busybox.sh` and `dyld_prelude.sh` leave with the runner ports named under "What it replaces".
