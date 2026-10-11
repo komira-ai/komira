@@ -170,7 +170,7 @@ Bucket: `1` target, `1 (BXL)` a graph check run in the gate, `2` Zig (or tool-la
 `3` scenario, `del` delete, `open` needs a ruling. Numbers are the test numbers in `run_tests.sh`. Scenario names are under `//tools/build/selftest:`.
 **Slice** is the one pull request that deletes the row's shell lines (see "Slice plan"). A mixed row
 (`3 + 2`) is deleted in the slice of its last part. Its earlier parts land in earlier slices, and the
-shell lines stay until then. Each of the 188 rows names exactly one slice. A fixture under `negative/`
+shell lines stay until then. Each of the 186 rows names exactly one slice. A fixture under `negative/`
 goes with the last row that uses it.
 
 ### run_tests.sh, its own tests
@@ -379,7 +379,7 @@ goes with the last row that uses it.
 The shared Zig markdown module adds a `zig_module` rule and a `deps` attribute on `zig_exe` and
 `zig_test` (`tools/build/mojo/toolchain.bzl`). Its refusals and its weld have no `run_tests.sh` lines
 to delete, so these rows add cases to existing scenarios. They land in the named slice, or after
-#1295 merges if that is later. They are not counted among the 188 rows above.
+#1295 merges if that is later. They are not counted among the 186 rows above.
 
 | id | what | bucket | lands in | mutant | slice |
 |---|---|---|---|---|---|
