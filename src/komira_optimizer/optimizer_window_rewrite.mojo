@@ -796,12 +796,18 @@ def _recurse_into_children(var plan: LogicalPlan) raises -> LogicalPlan:
         var child = optimize_window_rewrite(_copy_plan(plan._aggregate.value()[].child[]))
         var gb = _copy_expr_array(plan._aggregate.value()[].group_by)
         var aggs = AggExprArrayCopyHelper.copy(plan._aggregate.value()[].agg_exprs)
-        return LogicalPlan.aggregate(gb^, aggs^, child^)
+        # The recorded mode is a decision; the rebuild carries it.
+        return LogicalPlan.aggregate(
+            gb^, aggs^, child^, plan._aggregate.value()[].mode
+        )
 
     if plan.tag == PLAN_JOIN:
         var left = optimize_window_rewrite(_copy_plan(plan._join.value()[].left[]))
         var right = optimize_window_rewrite(_copy_plan(plan._join.value()[].right[]))
-        # Preserve `residual` across this recurse-rebuild.
+        # Preserve `residual` across this recurse-rebuild, and the recorded
+        # build side and `adaptive_allowed`: this pass runs after
+        # `select_join_build_side`, so a rebuild that dropped them would hand
+        # on a join with no decision.
         var join_resid: Optional[OwnedPointer[Expr]] = None
         ref jd = plan._join.value()[]
         if jd.has_residual():
@@ -813,6 +819,8 @@ def _recurse_into_children(var plan: LogicalPlan) raises -> LogicalPlan:
             jd.join_type,
             jd.algo_hint,
             join_resid^,
+            jd.build_side,
+            jd.adaptive_allowed,
         )
 
     if plan.tag == PLAN_SORT:

@@ -30,6 +30,14 @@ from komira_plan_ir.logical_plan import (
     PLAN_DISTINCT,
     PLAN_TOPN,
     PLAN_SCAN,
+    PLAN_PARTITION_BY,
+    PLAN_PARTITION_TOPN,
+    PLAN_ASOF_JOIN,
+    PLAN_UNION,
+    PLAN_VIEW_REF,
+    PLAN_CSE_REF,
+    PLAN_CAST_TO_VARCHAR,
+    PLAN_EXCHANGE,
     SOURCE_PARQUET,
     JOIN_INNER,
     JOIN_RIGHT,
@@ -594,6 +602,12 @@ def select_join_build_side_inplace(mut plan: LogicalPlan) raises:
 
     Recurses into children first, then sets `build_side` on the join node
     through a mutable reference. No node is rebuilt, copied or replaced.
+
+    ⛔ TOTAL OVER PLAN TAGS. Every node that has children is descended, and a
+    tag with no arm raises: a join this walk does not reach keeps
+    `JOIN_BUILD_SIDE_UNSET`, which an OPTIMIZED plan may not carry. A join
+    inside an expression's subquery plan is not a plan child and is not
+    reached.
     """
     if plan.tag == PLAN_JOIN:
         select_join_build_side_inplace(plan._join.value()[].left[])
@@ -624,8 +638,41 @@ def select_join_build_side_inplace(mut plan: LogicalPlan) raises:
 
     elif plan.tag == PLAN_TOPN:
         select_join_build_side_inplace(plan._topn.value()[].child[])
-    # PLAN_SCAN, PLAN_PARTITION_BY, PLAN_PARTITION_TOPN, PLAN_ASOF_JOIN:
-    # not affected. Leave unchanged.
+
+    elif plan.tag == PLAN_PARTITION_BY:
+        select_join_build_side_inplace(plan._partition_by.value()[].child[])
+
+    elif plan.tag == PLAN_PARTITION_TOPN:
+        select_join_build_side_inplace(plan._partition_topn.value()[].child[])
+
+    elif plan.tag == PLAN_ASOF_JOIN:
+        # The as-of join itself has no build side to record; its inputs may
+        # hold joins that do.
+        select_join_build_side_inplace(plan._asof_join.value()[].left[])
+        select_join_build_side_inplace(plan._asof_join.value()[].right[])
+
+    elif plan.tag == PLAN_UNION:
+        for i in range(plan._union.value()[].num_children()):
+            select_join_build_side_inplace(plan._union.value()[].children[i][])
+
+    elif plan.tag == PLAN_CAST_TO_VARCHAR:
+        select_join_build_side_inplace(plan._cast_to_varchar.value()[].child[])
+
+    elif plan.tag == PLAN_EXCHANGE:
+        select_join_build_side_inplace(plan._exchange.value()[].child[])
+
+    elif (
+        plan.tag == PLAN_SCAN
+        or plan.tag == PLAN_VIEW_REF
+        or plan.tag == PLAN_CSE_REF
+    ):
+        pass
+
+    else:
+        raise Error(
+            "select_join_build_side: no arm for plan tag "
+            + String(Int(plan.tag))
+        )
 
 
 # =============================================================================

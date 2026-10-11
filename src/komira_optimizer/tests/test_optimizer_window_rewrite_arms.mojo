@@ -60,6 +60,8 @@ from komira_plan_ir.logical_plan import (
     PLAN_UNION,
     JOIN_INNER,
     JOIN_ALGO_HASH,
+    JOIN_BUILD_SIDE_LEFT,
+    AGG_MODE_PARTIAL,
     ASOF_FORWARD,
     ASOF_TOL_INT64,
 )
@@ -292,7 +294,8 @@ def test_filter_arm_descends_and_keeps_the_predicate() raises:
 def test_aggregate_arm_keeps_every_agg_child_slot() raises:
     """Catches an Aggregate rebuild that drops the group keys, or that copies
     an AggExpr through its 3-argument constructor and loses `child1` (the
-    second argument of a bivariate aggregate such as corr)."""
+    second argument of a bivariate aggregate such as corr), or that drops the
+    recorded mode (PARTIAL here; the rebuild would reset it to UNSET)."""
     var gb = ExprArray()
     gb.append(Expr.col_ref("g"))
     var aggs = AggExprArray()
@@ -302,10 +305,13 @@ def test_aggregate_arm_keeps_every_agg_child_slot() raises:
         Optional(Expr.col_ref("rk")),
         Optional(String("c")),
     ))
-    var plan = LogicalPlan.aggregate(gb^, aggs^, _window_project("g", "v", "rk"))
+    var plan = LogicalPlan.aggregate(
+        gb^, aggs^, _window_project("g", "v", "rk"), AGG_MODE_PARTIAL
+    )
     var out = optimize_window_rewrite(plan^)
     assert_equal(Int(out.tag), Int(PLAN_AGGREGATE))
     ref ad = out._aggregate.value()[]
+    assert_equal(Int(ad.mode), Int(AGG_MODE_PARTIAL))
     assert_equal(len(ad.group_by), 1)
     assert_equal(ad.group_by[0].col_ref_name(), String("g"))
     assert_equal(len(ad.agg_exprs), 1)
@@ -317,7 +323,9 @@ def test_aggregate_arm_keeps_every_agg_child_slot() raises:
 
 def test_join_arm_descends_both_sides_and_keeps_the_residual() raises:
     """Catches a Join arm that descends one side only, or drops the keys, the
-    join type, the algorithm hint or the residual predicate on rebuild."""
+    join type, the algorithm hint, the residual predicate, the recorded build
+    side or `adaptive_allowed` on rebuild. This pass runs after the driver
+    records build sides, so a dropped side reaches the optimizer's output."""
     var lo: List[String] = ["g"]
     var ro: List[String] = ["k"]
     var resid = Optional[OwnedPointer[Expr]](OwnedPointer(
@@ -327,10 +335,13 @@ def test_join_arm_descends_both_sides_and_keeps_the_residual() raises:
         _window_project("g", "v", "rk"),
         _window_project("k", "w", "rk2"),
         lo^, ro^, JOIN_INNER, JOIN_ALGO_HASH, resid^,
+        JOIN_BUILD_SIDE_LEFT, True,
     )
     var out = optimize_window_rewrite(plan^)
     assert_equal(Int(out.tag), Int(PLAN_JOIN))
     ref jd = out.join_data_ref()
+    assert_equal(Int(jd.build_side), Int(JOIN_BUILD_SIDE_LEFT))
+    assert_true(jd.adaptive_allowed, "adaptive_allowed survives the rebuild")
     assert_equal(Int(jd.join_type), Int(JOIN_INNER))
     assert_equal(Int(jd.algo_hint), Int(JOIN_ALGO_HASH))
     assert_equal(jd.left_on[0], String("g"))

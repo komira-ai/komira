@@ -60,11 +60,13 @@ def _scan() -> LogicalPlan:
     return LogicalPlan.scan("t.parquet", SOURCE_PARQUET, _schema())
 
 
-def _hash_exchange(partitions: Int, adaptive: Bool) raises -> LogicalPlan:
+def _hash_exchange(
+    partitions: Int, adaptive: Bool, key_groups: Int = 0
+) raises -> LogicalPlan:
     var keys: List[String] = ["k"]
     return LogicalPlan.exchange(
         _scan(), EXCHANGE_KIND_HASH, keys^, partitions=partitions,
-        adaptive_allowed=adaptive,
+        adaptive_allowed=adaptive, key_groups=key_groups,
     )
 
 
@@ -82,11 +84,11 @@ def _render(p: LogicalPlan) -> String:
     return s^
 
 
-def _refusal(var child: LogicalPlan, kind: UInt8, var keys: List[String], var order_keys: List[String], var descending: List[Bool], partitions: Int) -> String:
+def _refusal(var child: LogicalPlan, kind: UInt8, var keys: List[String], var order_keys: List[String], var descending: List[Bool], partitions: Int, key_groups: Int = 0) -> String:
     try:
         _ = LogicalPlan.exchange(
             child^, kind, keys^, order_keys=order_keys^, descending=descending^,
-            partitions=partitions,
+            partitions=partitions, key_groups=key_groups,
         )
     except e:
         return String(e)
@@ -166,6 +168,9 @@ def test_the_factory_stores_every_field_and_keeps_the_child_schema() raises:
     assert_equal(Int(d.key_encoding), Int(EXCHANGE_KEY_ENCODING_UNSET))
     assert_equal(d.partitions, 0)
     assert_true(d.adaptive_allowed)
+    assert_equal(d.key_groups, 0)
+    var grouped = _hash_exchange(0, False, 128)
+    assert_equal(grouped.exchange_data_ref().key_groups, 128)
     assert_equal(Int(d.child[].tag), Int(PLAN_SCAN))
     assert_equal(e.output_schema.num_columns(), 2)
     assert_equal(e.output_schema.field_name(0), "k")
@@ -201,6 +206,7 @@ def _assert_same_exchange(q: LogicalPlan, p: LogicalPlan) raises:
     assert_equal(len(a.nulls_first), len(b.nulls_first))
     assert_equal(a.partitions, b.partitions)
     assert_equal(a.adaptive_allowed, b.adaptive_allowed)
+    assert_equal(a.key_groups, b.key_groups)
     assert_equal(_render(q), _render(p))
     assert_equal(q.structural_hash(), p.structural_hash())
 
@@ -216,6 +222,7 @@ def test_every_field_survives_both_copies() raises:
     the same render and the same hash. Catches `_copy_plan` with no exchange
     arm (it raises) and a `copy()` that drops the payload (a shell node)."""
     _assert_both_copies_keep(_hash_exchange(8, True))
+    _assert_both_copies_keep(_hash_exchange(0, False, 128))
     _assert_both_copies_keep(_range_exchange(False))
     _assert_both_copies_keep(
         LogicalPlan.exchange(_scan(), EXCHANGE_KIND_BROADCAST, partitions=3)
@@ -224,14 +231,15 @@ def test_every_field_survives_both_copies() raises:
 
 def test_every_field_enters_plan_identity() raises:
     """Exchanges differing in one field each hash apart: kind, keys,
-    partitions, adaptive, the ordering's direction. Catches a render that
-    omits any of them (two different redistributions would share a compiled
-    plan)."""
+    partitions, adaptive, key groups, the ordering's direction. Catches a
+    render that omits any of them (two different redistributions would share
+    a compiled plan; two key-group counts lay state out differently)."""
     var keys_v: List[String] = ["v"]
     var hashes = List[UInt64]()
     hashes.append(_hash_exchange(0, False).structural_hash())
     hashes.append(_hash_exchange(4, False).structural_hash())
     hashes.append(_hash_exchange(0, True).structural_hash())
+    hashes.append(_hash_exchange(0, False, 128).structural_hash())
     hashes.append(
         LogicalPlan.exchange(_scan(), EXCHANGE_KIND_HASH, keys_v^).structural_hash()
     )
@@ -246,8 +254,14 @@ def test_every_field_enters_plan_identity() raises:
     var text = _render(_hash_exchange(4, True))
     assert_true(
         String(text.split("\n")[0])
-        == 'Exchange(kind=HASH, keys=["k"], key_encoding=255, order=[]/[]/[], partitions=4, adaptive)',
+        == 'Exchange(kind=HASH, keys=["k"], key_encoding=255, order=[]/[]/[], partitions=4, key_groups=0, adaptive)',
         text,
+    )
+    var grouped = _render(_hash_exchange(0, False, 128))
+    assert_true(
+        String(grouped.split("\n")[0])
+        == 'Exchange(kind=HASH, keys=["k"], key_encoding=255, order=[]/[]/[], partitions=0, key_groups=128)',
+        grouped,
     )
 
 
@@ -255,7 +269,7 @@ def test_the_factory_refuses_every_malformed_shape() raises:
     """Catches each guard dropped: a kind outside the space, HASH without
     keys, keys on a non-HASH exchange, RANGE without order keys, a key the
     child does not have, a direction list of the wrong length, negative
-    partitions."""
+    partitions, negative key groups, key groups on a non-HASH exchange."""
     var none = List[String]()
     var k: List[String] = ["k"]
     var bad: List[String] = ["nope"]
@@ -268,7 +282,11 @@ def test_the_factory_refuses_every_malformed_shape() raises:
     assert_true("'nope' is not a column" in _refusal(_scan(), EXCHANGE_KIND_HASH, bad.copy(), none.copy(), nd.copy(), 0))
     assert_true("'nope' is not a column" in _refusal(_scan(), EXCHANGE_KIND_RANGE, none.copy(), bad.copy(), one.copy(), 0))
     assert_true("descending flags" in _refusal(_scan(), EXCHANGE_KIND_RANGE, none.copy(), k.copy(), nd.copy(), 0))
-    assert_true("negative" in _refusal(_scan(), EXCHANGE_KIND_GATHER, none.copy(), none.copy(), nd.copy(), -1))
+    assert_true("partitions -1 is negative" in _refusal(_scan(), EXCHANGE_KIND_GATHER, none.copy(), none.copy(), nd.copy(), -1))
+    assert_true("key_groups -1 is negative" in _refusal(_scan(), EXCHANGE_KIND_HASH, k.copy(), none.copy(), nd.copy(), 0, -1))
+    assert_true("only a HASH exchange has key groups" in _refusal(_scan(), EXCHANGE_KIND_BROADCAST, none.copy(), none.copy(), nd.copy(), 0, 16))
+    # A HASH exchange with key groups is well-formed.
+    assert_equal(_refusal(_scan(), EXCHANGE_KIND_HASH, k.copy(), none.copy(), nd.copy(), 0, 16), "")
     # And a well-formed one is not refused.
     assert_equal(_refusal(_scan(), EXCHANGE_KIND_GATHER, none.copy(), none.copy(), nd.copy(), 0), "")
 

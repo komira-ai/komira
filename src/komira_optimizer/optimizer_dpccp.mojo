@@ -1523,13 +1523,12 @@ def solve_dpccp_with_cost(
 #
 # The pierce is worth keeping — it is what lets a chain reorder through an
 # intermediate column-narrowing Project — so the fix is not to stop piercing, it is to put the
-# narrow back. Same shape as `select_join_build_side`'s
-# `_swap_outer_join_with_reprojection`: a rewrite that changes the shape restores
-# the user-visible columns above it.
+# narrow back: a rewrite that changes the shape restores the user-visible
+# columns above it.
 #
-# ⚠ BY NAME IS EXACT HERE, AND ONLY HERE. `_swap_outer_join_with_reprojection`
-# had to derive POSITIONALLY because an operand exchange MIGRATES the `_right`
-# collision suffix, so a by-name projection cannot undo it. This site is
+# ⚠ BY NAME IS EXACT HERE, AND ONLY HERE. In general an operand exchange
+# MIGRATES the `_right` collision suffix, so a by-name projection cannot undo
+# it; a restore would have to be derived POSITIONALLY. This site is
 # downstream of the `_chain_relations_share_column_name` barrier — a chain whose
 # relations share ANY column name is NOT reordered at all — so within a
 # reorderable chain every leaf column name is unique, `LogicalPlan.join` never
@@ -1774,8 +1773,8 @@ def reorder_joins_with_dp(var plan: LogicalPlan) raises -> LogicalPlan:
         # in an INNER join whose sides both carry `val`, putting the right
         # side first makes `val` name the right side's column.
         # Treat it as a barrier, the same way a residual-carrying join is one.
-        # `select_join_build_side` still orients such a join and CAN restore,
-        # because its exchange is a single swap it derives positionally.
+        # `select_join_build_side` still records a build side on such a join;
+        # it moves no operand, so no name is reassigned.
         var _shares = _chain_relations_share_column_name(plan)
         if jt == JOIN_INNER and not has_resid and not _shares:
             var left = _take_join_left(plan)

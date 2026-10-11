@@ -1225,6 +1225,7 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         var nulls_first: Optional[List[Bool]] = None,
         partitions: Int = 0,
         adaptive_allowed: Bool = False,
+        key_groups: Int = 0,
     ) raises -> LogicalPlan:
         """Create an Exchange node over `child`. Output schema = child's.
 
@@ -1236,7 +1237,9 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
           * a key or order key the child's schema does not name;
           * `descending` (or a stated `nulls_first`) not one entry per order
             key;
-          * negative `partitions` (0 means "filled in at the cut").
+          * negative `partitions` (0 means "filled in at the cut");
+          * negative `key_groups`, or `key_groups` on any kind but HASH
+            (only a HASH exchange feeds keyed state; 0 means none).
 
         `nulls_first` defaults per key from `descending`, as `sort` does.
         """
@@ -1266,6 +1269,15 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
                 "LogicalPlan.exchange: partitions " + String(partitions)
                 + " is negative"
             )
+        if key_groups < 0:
+            raise Error(
+                "LogicalPlan.exchange: key_groups " + String(key_groups)
+                + " is negative"
+            )
+        if key_groups != 0 and kind != EXCHANGE_KIND_HASH:
+            raise Error(
+                "LogicalPlan.exchange: only a HASH exchange has key groups"
+            )
         for i in range(len(keys)):
             if not _name_in_schema(child.output_schema, keys[i]):
                 raise Error(
@@ -1294,7 +1306,7 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         plan._exchange = OwnedPointer(
             ExchangeData(
                 child^, kind, keys^, key_encoding, order_keys^, descending^,
-                nf^, partitions, adaptive_allowed,
+                nf^, partitions, adaptive_allowed, key_groups,
             )
         )
         return plan^

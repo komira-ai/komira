@@ -809,6 +809,7 @@ def _write_plan_node[
                 writer.write(", ")
             writer.write("T" if ex.nulls_first[i] else "F")
         writer.write("], partitions=", ex.partitions)
+        writer.write(", key_groups=", ex.key_groups)
         if ex.adaptive_allowed:
             writer.write(", adaptive")
         writer.write(")\n")

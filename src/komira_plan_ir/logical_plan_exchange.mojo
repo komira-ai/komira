@@ -40,6 +40,10 @@ struct ExchangeData(Movable):
         partitions: the fan-out. 0 means "filled in at the cut".
         adaptive_allowed: the host may coalesce reducers and split skewed
             partitions at a sealed stage boundary.
+        key_groups: the number of buckets the keys hash into when the
+            exchange feeds keyed state (docs/design/optimized_plan.md §8.4):
+            fixed for the plan's life, so state can be moved group by group.
+            Greater than 0 only on a HASH exchange; 0 everywhere else.
     """
 
     var child: OwnedPointer[LogicalPlan]
@@ -51,6 +55,7 @@ struct ExchangeData(Movable):
     var nulls_first: List[Bool]
     var partitions: Int
     var adaptive_allowed: Bool
+    var key_groups: Int
 
     def __init__(
         out self,
@@ -63,6 +68,7 @@ struct ExchangeData(Movable):
         var nulls_first: List[Bool] = List[Bool](),
         partitions: Int = 0,
         adaptive_allowed: Bool = False,
+        key_groups: Int = 0,
     ):
         self.child = OwnedPointer(child^)
         self.kind = kind
@@ -73,6 +79,7 @@ struct ExchangeData(Movable):
         self.nulls_first = nulls_first^
         self.partitions = partitions
         self.adaptive_allowed = adaptive_allowed
+        self.key_groups = key_groups
 
     def copy(self) -> Self:
         """Deep-clone the ExchangeData (recurses into the child plan)."""
@@ -86,6 +93,7 @@ struct ExchangeData(Movable):
             self.nulls_first.copy(),
             self.partitions,
             self.adaptive_allowed,
+            self.key_groups,
         )
 
     # PORT(1.0.0): explicit destructor breaks the non-co-inductive

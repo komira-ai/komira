@@ -28,10 +28,22 @@ from komira_plan_expr.expr import (
     BIN_ADD,
 )
 from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.partition_expr import PartitionExpr
 from komira_plan_ir.logical_plan import (
     LogicalPlan,
     ExprArray,
     AggExprArray,
+    AsofTolerance,
+    ASOF_BACKWARD,
+    EXCHANGE_KIND_GATHER,
+    PLAN_PARTITION_BY,
+    PLAN_PARTITION_TOPN,
+    PLAN_ASOF_JOIN,
+    PLAN_UNION,
+    PLAN_VIEW_REF,
+    PLAN_CSE_REF,
+    PLAN_CAST_TO_VARCHAR,
+    PLAN_EXCHANGE,
     PLAN_FILTER,
     PLAN_PROJECT,
     PLAN_AGGREGATE,
@@ -140,8 +152,9 @@ def _assert_only_build_side_changed(
 
 def _count_undecided_joins(p: LogicalPlan) raises -> Int:
     """How many PLAN_JOIN nodes in `p` still carry `JOIN_BUILD_SIDE_UNSET`.
-    Walks every node kind these fixtures build and RAISES on any other, so a
-    fixture that grows a new node kind cannot hide a join from the check."""
+    Walks every node kind that has children, and RAISES on a tag it has no
+    arm for, so a fixture that grows a new node kind cannot hide a join from
+    the check."""
     if p.tag == PLAN_JOIN:
         var n = 0
         if p._join.value()[].build_side == JOIN_BUILD_SIDE_UNSET:
@@ -167,15 +180,35 @@ def _count_undecided_joins(p: LogicalPlan) raises -> Int:
         return _count_undecided_joins(p._distinct.value()[].child[])
     if p.tag == PLAN_TOPN:
         return _count_undecided_joins(p._topn.value()[].child[])
+    if p.tag == PLAN_PARTITION_BY:
+        return _count_undecided_joins(p._partition_by.value()[].child[])
+    if p.tag == PLAN_PARTITION_TOPN:
+        return _count_undecided_joins(p._partition_topn.value()[].child[])
+    if p.tag == PLAN_ASOF_JOIN:
+        return (
+            _count_undecided_joins(p._asof_join.value()[].left[])
+            + _count_undecided_joins(p._asof_join.value()[].right[])
+        )
+    if p.tag == PLAN_UNION:
+        var n = 0
+        for i in range(p._union.value()[].num_children()):
+            n += _count_undecided_joins(p._union.value()[].children[i][])
+        return n
+    if p.tag == PLAN_CAST_TO_VARCHAR:
+        return _count_undecided_joins(p._cast_to_varchar.value()[].child[])
+    if p.tag == PLAN_EXCHANGE:
+        return _count_undecided_joins(p._exchange.value()[].child[])
+    if p.tag == PLAN_VIEW_REF or p.tag == PLAN_CSE_REF:
+        return 0
     raise Error("_count_undecided_joins: no arm for plan tag " + String(Int(p.tag)))
 
 
 def _assert_every_join_decided(p: LogicalPlan, what: String) raises:
     """EVERY JOIN HAS A BUILD SIDE AFTER RULE 17. UNSET is acceptable only in
-    a RAW plan; OPTIMIZED admission refuses it
-    (`OPTIMIZED_JOIN_BUILD_SIDE_MISSING`). This is the fixture-level form of
-    that check; the post-optimize check over the whole corpus comes with the
-    optimizer driver, which must run rule 17 last."""
+    a RAW plan; an OPTIMIZED plan must carry a decision on every join
+    (docs/design/optimized_plan.md §5.2: `build_side` is required). This is
+    the fixture-level form of that check; the post-optimize form over the
+    driver's corpus is in `test_optimizer_driver_corpus`."""
     var n = _count_undecided_joins(p)
     assert_equal(n, 0, what + ": " + String(n) + " join(s) left UNSET")
 
@@ -482,6 +515,90 @@ def test_every_wrapper_reaches_a_join_below_it() raises:
     _assert_every_join_decided(l, "limit")
     _assert_every_join_decided(d, "distinct")
     _assert_every_join_decided(t, "topn")
+
+
+def _two_joins_union() -> LogicalPlan:
+    var a = _small_left_inner()
+    var schema = a.output_schema.copy()
+    var kids = List[OwnedPointer[LogicalPlan]]()
+    kids.append(OwnedPointer(a^))
+    kids.append(OwnedPointer(_small_left_inner()))
+    return LogicalPlan.union(kids^, schema^)
+
+
+def test_every_node_with_children_reaches_a_join_below_it() raises:
+    """PartitionBy, PartitionTopN, an as-of join (both inputs), a Union (every
+    branch), CastToVarchar and an Exchange each recurse into their children,
+    whose joins get LEFT recorded. Catches a recursion arm missing: the join
+    below it keeps UNSET, which an OPTIMIZED plan may not carry (the walk
+    reached none of these six before this arm list; a window over a join was
+    left undecided)."""
+    var pk: List[String] = ["a"]
+    var ok: List[String] = ["a"]
+    var desc: List[Bool] = [False]
+    var pe = List[PartitionExpr]()
+    pe.append(PartitionExpr.row_number())
+    var pb = select_join_build_side(
+        LogicalPlan.partition_by(pk^, ok^, desc^, pe^, _small_left_inner())
+    )
+    assert_equal(Int(pb.tag), Int(PLAN_PARTITION_BY))
+    assert_equal(_side(pb._partition_by.value()[].child[]), Int(JOIN_BUILD_SIDE_LEFT))
+    _assert_every_join_decided(pb, "partition_by")
+
+    var tpk: List[String] = ["a"]
+    var tsk: List[String] = ["a"]
+    var tdesc: List[Bool] = [False]
+    var pt = select_join_build_side(
+        LogicalPlan.partition_topn(tpk^, tsk^, tdesc^, 1, _small_left_inner())
+    )
+    assert_equal(_side(pt._partition_topn.value()[].child[]), Int(JOIN_BUILD_SIDE_LEFT))
+    _assert_every_join_decided(pt, "partition_topn")
+
+    var aj = select_join_build_side(
+        LogicalPlan.asof_join(
+            _small_left_inner(), _small_left_inner(), List[String](),
+            List[String](), String("a"), String("a"), ASOF_BACKWARD,
+            AsofTolerance.none(),
+        )
+    )
+    assert_equal(Int(aj.tag), Int(PLAN_ASOF_JOIN))
+    assert_equal(_side(aj._asof_join.value()[].left[]), Int(JOIN_BUILD_SIDE_LEFT))
+    assert_equal(_side(aj._asof_join.value()[].right[]), Int(JOIN_BUILD_SIDE_LEFT))
+    _assert_every_join_decided(aj, "asof_join")
+
+    var u = select_join_build_side(_two_joins_union())
+    assert_equal(_side(u._union.value()[].children[0][]), Int(JOIN_BUILD_SIDE_LEFT))
+    assert_equal(_side(u._union.value()[].children[1][]), Int(JOIN_BUILD_SIDE_LEFT))
+    _assert_every_join_decided(u, "union")
+
+    var c = select_join_build_side(LogicalPlan.cast_to_varchar(_small_left_inner()))
+    assert_equal(_side(c._cast_to_varchar.value()[].child[]), Int(JOIN_BUILD_SIDE_LEFT))
+    _assert_every_join_decided(c, "cast_to_varchar")
+
+    var x = select_join_build_side(
+        LogicalPlan.exchange(_small_left_inner(), EXCHANGE_KIND_GATHER)
+    )
+    assert_equal(_side(x._exchange.value()[].child[]), Int(JOIN_BUILD_SIDE_LEFT))
+    _assert_every_join_decided(x, "exchange")
+
+
+def test_leaves_pass_and_an_unknown_tag_is_refused() raises:
+    """A view reference and a CSE reference are leaves: returned with their
+    tag. A tag with no arm (the retired id 16) raises, naming the tag, rather
+    than being passed over. Catches the leaf arm dropped (the leaves would
+    raise) and a fall-through `else` (a join below an unknown node would be
+    silently left UNSET)."""
+    var n: List[String] = ["a"]
+    var v = select_join_build_side(LogicalPlan(PLAN_VIEW_REF, _int_schema(n)))
+    assert_equal(Int(v.tag), Int(PLAN_VIEW_REF))
+    var c = select_join_build_side(LogicalPlan(PLAN_CSE_REF, _int_schema(n)))
+    assert_equal(Int(c.tag), Int(PLAN_CSE_REF))
+    var msg = String("")
+    try:
+        _ = select_join_build_side(LogicalPlan(UInt8(16), _int_schema(n)))
+    except e:
+        msg = String(e)
+    assert_equal(msg, "select_join_build_side: no arm for plan tag 16")
 
 
 def test_join_children_are_decided_as_well_as_the_parent() raises:

@@ -440,6 +440,9 @@ def push_predicates_down(var plan: LogicalPlan) raises -> LogicalPlan:
             # reset it to its default, `SOURCE_KIND_UNSET`, and the rewritten
             # scan would lose its source-decode annotation.
             var src_kind = child._scan.value()[].source_kind
+            # And its boundedness: a stated property of the source, which the
+            # rebuild would otherwise reset to BOUNDED.
+            var bounded = child._scan.value()[].boundedness
             var new_scan = LogicalPlan.scan_from_source(
                 src_copy^,
                 _copy_schema(child.output_schema),
@@ -448,6 +451,7 @@ def push_predicates_down(var plan: LogicalPlan) raises -> LogicalPlan:
                 rc_opt^,
                 ts_opt^,
                 src_kind,
+                boundedness=bounded,
             )
             if len(kept) == 0:
                 return new_scan^
