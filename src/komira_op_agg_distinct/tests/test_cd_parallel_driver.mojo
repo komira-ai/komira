@@ -21,7 +21,9 @@
 #     `test_ungrouped_skips_nulls`: the same over a column that is all NULL
 #     (every worker sees only NULLs) and without GROUP BY;
 #   * `test_null_int_key_is_one_group_apart_from_zero`: a NULL key merged into
-#     the real key 0 (its data word), or one group per NULL row;
+#     a real key, or split by the data word under it (the NULL rows carry
+#     word r, so a key read without its NULL-to-0 normalization makes
+#     thousands of NULL groups);
 #   * `test_null_string_key_is_one_group_apart_from_empty`: the same for a
 #     STRING key, whose NULL cell has the bytes of '';
 #   * `test_large_string_key_groups_by_value`: a LARGE_STRING key read with
@@ -32,6 +34,13 @@
 #     (2^53 + 1 is not a Float64);
 #   * `test_int32_outputs_keep_their_type`: an INT32 key or MIN emitted as an
 #     INT64 column under an INT32 field;
+#   * `test_int_sum_past_int64_is_refused_not_wrapped`: an integer SUM
+#     accumulated in 64 bits (70,000 rows of 2^62 wrap to exactly 0), or a
+#     128-bit total narrowed to INT64 without the range check;
+#   * `test_int_avg_past_int64_divides_the_exact_total`: AVG over a wrapped
+#     or refused total (DuckDB answers 2^62);
+#   * `test_int_sum_that_fits_answers_whatever_the_order`: a per-row overflow
+#     check, which refuses MAX, 1, -2 although the total fits;
 #   * `test_sliced_int_key_and_value_columns`: a key, value or validity read
 #     at row r instead of the column's offset + r;
 #   * `test_ungrouped_aggregate_and_empty_input`: no row, or a crash, for an
@@ -45,7 +54,12 @@
 #   * the fixed-aggregate fold without its NULL skip and with MIN / MAX by bare
 #     `<` / `>` (the fold before): the fixed-aggregate test;
 #   * the COUNT(DISTINCT) column read through worker 0 for every output row:
-#     every multi-worker test in this file.
+#     every multi-worker test in this file;
+#   * the integer fold as a wrapping 64-bit add: the two 2^62 tests;
+#   * the INT64 range check at emit removed: the SUM refusal test;
+#   * a running total past INT64 poisoned (a per-row check): the order test
+#     and the AVG test;
+#   * `_cd_key_at` reading the data word of a NULL key: the NULL int-key test.
 # =============================================================================
 
 from std.collections import Dict, List, Optional, Set
@@ -259,8 +273,10 @@ def test_ungrouped_skips_nulls() raises:
 
 
 def test_null_int_key_is_one_group_apart_from_zero() raises:
-    """k = r % 5 with every 4th row's key NULL (data word 0, and 0 is a real
-    key); v = r % 9. DuckDB: keys 0..4 plus one NULL group."""
+    """k = r % 5 with every 4th row's key NULL; v = r % 9. Under a NULL key the
+    data word is r (Arrow allows any bytes there), so it takes thousands of
+    values, the real keys 0..4 among them. DuckDB: keys 0..4 plus one NULL
+    group."""
     var ks = List[Int]()
     var knulls = List[Bool]()
     var vs = List[Int]()
@@ -268,7 +284,7 @@ def test_null_int_key_is_one_group_apart_from_zero() raises:
     var null_vals = Set[Int]()
     for r in range(_BIG):
         var kn = r % 4 == 1
-        var k = 0 if kn else r % 5
+        var k = r if kn else r % 5
         ks.append(k)
         knulls.append(kn)
         vs.append(r % 9 if kn else r % 3)
@@ -518,6 +534,92 @@ def test_int32_outputs_keep_their_type() raises:
     var mc = rb.column_at(2).as_primitive[DType.int32]()
     for r in range(rb.num_rows()):
         assert_equal(Int(mc.get(r)), mins[Int(kc.get(r))], "min per key")
+
+
+def _sum_probe_batch(first: List[Int], fill: Int) raises -> RecordBatch:
+    """k = r % 4 over 70,000 rows; v = first[i] on row i, `fill` after."""
+    var ks = List[Int]()
+    var vs = List[Int]()
+    for r in range(_BIG):
+        ks.append(r % 4)
+        vs.append(first[r] if r < len(first) else fill)
+    return _batch2(
+        _i64_col(ks, List[Bool]()), ArrowType.INT64,
+        _i64_col(vs, List[Bool]()), ArrowType.INT64,
+    )
+
+
+def _cd_and(var second: AggExpr) -> AggExprArray:
+    """count(DISTINCT v) and `second`."""
+    var aggs = AggExprArray()
+    aggs.append(count_distinct(col("v")))
+    aggs.append(second^)
+    return aggs^
+
+
+def _cd_and_out(second_at: ArrowType) -> List[Field]:
+    var out = List[Field]()
+    out.append(Field("k", ArrowType.INT64, False))
+    out.append(Field("cd", ArrowType.INT64, False))
+    out.append(Field("x", second_at, True))
+    return out^
+
+
+def test_int_sum_past_int64_is_refused_not_wrapped() raises:
+    """70,000 rows of v = 2^62, k = r % 4: each group's SUM is 17,500 * 2^62,
+    about 8.07e22. DuckDB answers it as HUGEINT; this engine's SUM column is
+    INT64, so the shared rule is to refuse with `int_sum_overflow_message`.
+    A 64-bit accumulator wraps it to exactly 0 (17,500 * 2^62 = 4,375 * 2^64)
+    and would answer 0 with no error."""
+    with assert_raises(contains="integer sum() overflowed INT64"):
+        _ = _run(
+            _sum_probe_batch(List[Int](), 1 << 62), ["k"],
+            _cd_and(sum(col("v"))), _cd_and_out(ArrowType.INT64),
+        )
+
+
+def test_int_avg_past_int64_divides_the_exact_total() raises:
+    """The same rows under AVG: DuckDB divides the exact total and answers
+    2^62 (4.611686018427388e18) for every key. A wrapped total answers 0."""
+    var rb = _run(
+        _sum_probe_batch(List[Int](), 1 << 62), ["k"],
+        _cd_and(mean(col("v"))), _cd_and_out(ArrowType.FLOAT64),
+    )
+    assert_equal(rb.num_rows(), 4)
+    for r in range(4):
+        assert_equal(Int(rb.column_at(1).as_primitive[DType.int64]().get(r)), 1, "one distinct value")
+        assert_equal(
+            Float64(rb.column_at(2).as_primitive[DType.float64]().get(r)),
+            Float64(1 << 62),
+            "avg is 2^62",
+        )
+
+
+def test_int_sum_that_fits_answers_whatever_the_order() raises:
+    """Key 0 sees INT64 max, then 1, then -2, then zeros: its running total
+    leaves INT64 on the second row but the total is max - 1, which DuckDB
+    answers. A per-row overflow check would refuse this query; only the order
+    of the rows would differ from a query it answers."""
+    var mx = Int(Int64.MAX)
+    var first = List[Int]()
+    first.append(mx)
+    first.append(0)
+    first.append(0)
+    first.append(0)
+    first.append(1)
+    first.append(0)
+    first.append(0)
+    first.append(0)
+    first.append(-2)
+    var rb = _run(
+        _sum_probe_batch(first, 0), ["k"],
+        _cd_and(sum(col("v"))), _cd_and_out(ArrowType.INT64),
+    )
+    var kc = rb.column_at(0).as_primitive[DType.int64]()
+    var sc = rb.column_at(2).as_primitive[DType.int64]()
+    for r in range(rb.num_rows()):
+        var want = mx - 1 if Int(kc.get(r)) == 0 else 0
+        assert_equal(Int(sc.get(r)), want, "key " + String(Int(kc.get(r))))
 
 
 def test_sliced_int_key_and_value_columns() raises:

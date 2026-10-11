@@ -103,6 +103,8 @@ from komira_op_agg_distinct.agg_count_distinct_strenc import (
     _should_use_parallel_strenc,
 )
 from komira_op_agg_distinct.cd_parallel_emit import (
+    CDFixedCell,
+    cd_fixed_cell_identity,
     cd_fixed_column,
     cd_int_key_column,
     cd_stamp_nulls,
@@ -118,7 +120,6 @@ from komira_op_agg_distinct.cd_parallel_state import (
     _PerWorkerCDState,
     _cd_group_hash_at,
 )
-from komira_op_agg_distinct.streaming_agg_count_distinct import FixedAggCell
 
 
 @always_inline
@@ -512,10 +513,10 @@ def _execute_count_distinct_agg_parallel(
                 arr.set(g, Int64(c))
             agg_cols.append(Column.from_primitive[DType.int64](arr^))
             continue
-        var cells = List[FixedAggCell](capacity=num_groups)
+        var cells = List[CDFixedCell](capacity=num_groups)
         for g in range(num_groups):
             if mg_gid[g] < 0:
-                cells.append(FixedAggCell(Int64(0), Float64(0.0), Int64(0)))
+                cells.append(cd_fixed_cell_identity())
             else:
                 cells.append(ws_slab.get_mut_interior(mg_w[g]).fx[a][mg_gid[g]])
         var any_null = False
@@ -526,6 +527,7 @@ def _execute_count_distinct_agg_parallel(
                 out_schema.field_arrow_type(num_keys + a),
                 state.val_ptrs[].kind_at(a) == AGG_KIND_I32
                 or state.val_ptrs[].kind_at(a) == AGG_KIND_I64,
+                "integer column of aggregate " + String(a),
                 any_null,
             )
         )
