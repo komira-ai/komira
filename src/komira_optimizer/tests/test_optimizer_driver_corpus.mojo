@@ -9,13 +9,16 @@
 # scalar subqueries, a correlated EXISTS, a window with a rank filter,
 # consecutive filters under Sort + Limit, and joins in both size orders.
 #
-# Five properties, each the design's promise:
+# Six properties, each the design's promise:
 #   * idempotence: optimize(optimize(p)) renders exactly as optimize(p);
 #   * the output schema (names, order, types) is the input's;
 #   * the config fields the driver does not read do not change the result;
 #   * every join in the output carries a recorded build side, on the corpus
 #     and on joins below a window, a Union, a CastToVarchar and an as-of join
 #     (docs/design/optimized_plan.md §5.2: `build_side` is required);
+#   * each recorded build side is the one `select_join_build_side` decides
+#     for the output plan, and no join is marked `adaptive_allowed` (nothing
+#     in the driver sets it);
 #   * an UNBOUNDED scan is still UNBOUNDED in the output (§5.2: boundedness
 #     is a stated property of the source, and it selects streaming).
 # =============================================================================
@@ -69,6 +72,7 @@ from komira_plan_ir.logical_plan import (
 from komira_optimizer.optimizer_config import OptimizerConfig
 from komira_optimizer.optimizer_scalar_deps import ScalarDepTable
 from komira_optimizer.optimizer_driver import optimize
+from komira_optimizer.optimizer_join import select_join_build_side
 
 
 # -----------------------------------------------------------------------------
@@ -537,6 +541,50 @@ def test_a_join_below_any_node_is_decided() raises:
         var out = _run(_join_below(k), OptimizerConfig())
         assert_true(_count(out, 0) >= 1, "kind " + String(k) + "\n" + _render(out))
         assert_equal(_count(out, 1), 0, "kind " + String(k) + "\n" + _render(out))
+
+
+def _projected_join(small_first: Bool) -> LogicalPlan:
+    """A Project over a two-way join: the shape on which
+    `optimize_window_rewrite` (steps 17-20, after the decision) rebuilds the
+    join below it."""
+    var names: List[String] = ["s_k", "b_v"]
+    return LogicalPlan.project(_cols(names^), _two_way_join(small_first))
+
+
+def test_every_recorded_build_side_is_the_rules_own_decision() raises:
+    """On every corpus plan, every below-a-node plan and a Project over a join
+    in each size order, the output of `optimize` renders exactly as
+    `select_join_build_side` run once more on that output: each recorded side
+    is the one the rule decides for the plan the driver returns. Across them
+    both sides occur (`build=left` and `build=right` each render at least
+    once), so a check that holds only for one side cannot pass.
+
+    Defects caught: a pass after the decision that rebuilds a join with a
+    constant side or `adaptive_allowed` (an `optimize_window_rewrite` Join
+    arm writing LEFT, or `adaptive_allowed = True`, on every join it
+    recursed through), and a pass after it that changes a join's inputs
+    without re-deciding."""
+    var lefts = 0
+    var rights = 0
+    for i in range(CORPUS_SIZE + BELOW_KINDS + 2):
+        var p: LogicalPlan
+        if i < CORPUS_SIZE:
+            p = _corpus(i)
+        elif i < CORPUS_SIZE + BELOW_KINDS:
+            p = _join_below(i - CORPUS_SIZE)
+        else:
+            p = _projected_join(i == CORPUS_SIZE + BELOW_KINDS)
+        var out = _run(p^, OptimizerConfig())
+        var got = _render(out)
+        var again = _render(select_join_build_side(out.copy()))
+        assert_equal(got, again, "plan " + String(i))
+        if "build=left" in got:
+            lefts += 1
+        if "build=right" in got:
+            rights += 1
+        assert_true("adaptive" not in got, "plan " + String(i) + "\n" + got)
+    assert_true(lefts >= 1, "no plan built left")
+    assert_true(rights >= 1, "no plan built right")
 
 
 def test_an_unbounded_scan_stays_unbounded() raises:

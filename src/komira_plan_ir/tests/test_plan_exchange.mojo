@@ -266,7 +266,8 @@ def test_every_field_enters_plan_identity() raises:
 
 
 def test_the_factory_refuses_every_malformed_shape() raises:
-    """Catches each guard dropped: a kind outside the space, HASH without
+    """Catches each guard dropped: a kind outside the space (9, and 4, the
+    first value past RANGE, which a check widened by one accepts), HASH without
     keys, keys on a non-HASH exchange, RANGE without order keys, a key the
     child does not have, a direction list of the wrong length, negative
     partitions, negative key groups, key groups on a non-HASH exchange."""
@@ -276,6 +277,8 @@ def test_the_factory_refuses_every_malformed_shape() raises:
     var nd = List[Bool]()
     var one: List[Bool] = [False]
     assert_true("kind 9" in _refusal(_scan(), UInt8(9), none.copy(), none.copy(), nd.copy(), 0))
+    # The first value past RANGE: a validity check widened by one accepts it.
+    assert_true("kind 4" in _refusal(_scan(), UInt8(4), none.copy(), none.copy(), nd.copy(), 0))
     assert_true("needs keys" in _refusal(_scan(), EXCHANGE_KIND_HASH, none.copy(), none.copy(), nd.copy(), 0))
     assert_true("only a HASH" in _refusal(_scan(), EXCHANGE_KIND_GATHER, k.copy(), none.copy(), nd.copy(), 0))
     assert_true("needs order keys" in _refusal(_scan(), EXCHANGE_KIND_RANGE, none.copy(), none.copy(), nd.copy(), 0))

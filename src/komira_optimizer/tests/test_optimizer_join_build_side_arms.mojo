@@ -1,13 +1,14 @@
 # =============================================================================
-# Rule 17, `select_join_build_side`: every build-side decision, the
-# STRING-payload override and the HAVING selectivity heuristic.
+# Rule 17, `select_join_build_side`: every build-side decision and the
+# STRING-payload override.
 # =============================================================================
 #
 # The rule RECORDS its decision in `JoinData.build_side` and changes nothing
-# else: it builds LEFT on an INNER join whose left side is cheaper, a SEMI
-# whose left side is an aggressive HAVING, and a RIGHT join whose left side is
-# cheaper; every other join it reaches builds RIGHT. The operands, join type,
-# keys and output schema stay as they came in.
+# else: it builds LEFT on an INNER join whose left side is strictly cheaper
+# (subject to the STRING-payload override); every other join it reaches,
+# of every other join type, builds RIGHT (docs/design/optimized_plan.md §5.2
+# admits LEFT with RIGHT, FULL, SEMI or ANTI in no contract version yet). The
+# operands, join type, keys and output schema stay as they came in.
 #
 # THE NO-REWRITE PIN. `_assert_only_build_side_changed` clears `build_side`
 # on the rule's output and requires the result to hash exactly like the
@@ -23,10 +24,7 @@ from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
-from komira_plan_expr.expr import (
-    Expr, BIN_EQ, BIN_NE, BIN_LT, BIN_LE, BIN_GT, BIN_GE, BIN_AND, BIN_OR,
-    BIN_ADD,
-)
+from komira_plan_expr.expr import Expr, BIN_LT, BIN_GT, BIN_OR
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_expr.partition_expr import PartitionExpr
 from komira_plan_ir.logical_plan import (
@@ -57,8 +55,10 @@ from komira_plan_ir.logical_plan import (
     JOIN_INNER,
     JOIN_LEFT,
     JOIN_RIGHT,
+    JOIN_FULL,
     JOIN_SEMI,
     JOIN_ANTI,
+    JOIN_CROSS,
     JOIN_ALGO_AUTO,
     JOIN_BUILD_SIDE_LEFT,
     JOIN_BUILD_SIDE_RIGHT,
@@ -67,8 +67,6 @@ from komira_plan_ir.logical_plan import (
 from komira_optimizer.optimizer_join import (
     select_join_build_side,
     _side_has_wide_string_build_payload,
-    _estimate_having_selectivity,
-    _estimate_predicate_selectivity_from_plan,
 )
 
 
@@ -114,8 +112,8 @@ def _join(
 
 
 def _small_left_inner() -> LogicalPlan:
-    """INNER(L 10 rows, R 1000 rows): the probe side is the cheap one, so the
-    rule swaps."""
+    """INNER(L 10 rows, R 1000 rows): the left side is the cheap one, so the
+    rule records LEFT."""
     var ln: List[String] = ["a", "lv"]
     var rn: List[String] = ["b", "rv"]
     return _join(_ints("l", ln, 10), _ints("r", rn, 1000), "a", "b", JOIN_INNER)
@@ -295,6 +293,18 @@ def test_inner_builds_right_when_the_right_side_is_cheaper() raises:
     _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_RIGHT)
 
 
+def test_an_equal_cost_inner_join_builds_right() raises:
+    """L and R both 100 rows of two INT64 columns: the costs are equal, and
+    only a strictly cheaper left side builds left, so RIGHT. Catches the
+    cost comparison `<` widened to `<=`."""
+    var ln: List[String] = ["a", "lv"]
+    var rn: List[String] = ["b", "rv"]
+    var j = _join(_ints("l", ln, 100), _ints("r", rn, 100), "a", "b", JOIN_INNER)
+    var before = j.structural_hash()
+    var out = select_join_build_side(j^)
+    _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_RIGHT)
+
+
 def test_a_residual_join_builds_right() raises:
     """The residual guard keeps the convention even where the cost would say
     LEFT. Catches the residual guard dropped."""
@@ -391,16 +401,58 @@ def test_multi_key_join_skips_the_string_override() raises:
     _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_RIGHT)
 
 
+def test_keyless_inner_join_skips_the_string_override() raises:
+    """The other side of the single-key gate: an INNER join with no keys and
+    a cheaper wide-STRING right side keeps the cost decision (RIGHT). Catches
+    the `len(left_on) == 1` guard widened to `<= 1` (the override would then
+    build LEFT)."""
+    var ln: List[String] = ["a", "lv"]
+    var j = LogicalPlan.join(
+        _ints("l", ln, 1000), _wide_string("r", "b", 10), List[String](),
+        List[String](), JOIN_INNER,
+    )
+    var before = j.structural_hash()
+    var out = select_join_build_side(j^)
+    _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_RIGHT)
+
+
 # -----------------------------------------------------------------------------
-# SEMI, ANTI, LEFT, RIGHT
+# Every other join type builds RIGHT
 # -----------------------------------------------------------------------------
 
 
-def test_semi_with_an_aggressive_having_on_the_left_builds_left() raises:
-    """A HAVING on the left (5%) and none on the right: the HAVING side
-    builds. The node stays SEMI(having, r) and still emits the having side's
-    columns. Catches the SEMI arm dropped, and the old exchange, which turned
-    SEMI(A, B) into SEMI(B, A) and so emitted B's columns instead of A's."""
+def test_every_non_inner_join_with_a_cheaper_left_side_builds_right() raises:
+    """LEFT, RIGHT, FULL, SEMI, ANTI and CROSS over (L 10 rows, R 1000 rows):
+    the cost favours L for each, and each builds RIGHT, keeping its type and
+    operands. Catches any join type other than INNER admitted to the cost
+    decision (a RIGHT join building its NULL-supplying left side, a LEFT
+    join building its preserved side, ...): the design admits LEFT with
+    RIGHT, FULL, SEMI or ANTI in no contract version yet."""
+    var types: List[UInt8] = [
+        JOIN_LEFT, JOIN_RIGHT, JOIN_FULL, JOIN_SEMI, JOIN_ANTI, JOIN_CROSS
+    ]
+    var ln: List[String] = ["a", "lv"]
+    var rn: List[String] = ["b", "rv"]
+    for i in range(len(types)):
+        var j = _join(_ints("l", ln, 10), _ints("r", rn, 1000), "a", "b", types[i])
+        var before = j.structural_hash()
+        var out = select_join_build_side(j^)
+        assert_equal(Int(out._join.value()[].join_type), Int(types[i]))
+        assert_equal(
+            _side(out), Int(JOIN_BUILD_SIDE_RIGHT),
+            "join type " + String(Int(types[i])),
+        )
+        _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_RIGHT)
+
+
+def test_semi_with_a_having_on_the_left_builds_right() raises:
+    """SEMI(HAVING, r): an aggressive HAVING (a comparison) and an OR HAVING
+    on the left each build RIGHT, against a plain scan and against each
+    other, and the node stays SEMI(having, r) emitting the having side's
+    columns. The operand exchange this rule replaced built such a left side
+    (turning SEMI(A, B) into SEMI(B, A), which emitted B's columns); a
+    recorded LEFT needs a right-semi operator no contract version admits.
+    Catches the HAVING-selectivity SEMI arm restored."""
     var rn: List[String] = ["b", "rv"]
     var j = _join(_having(BIN_GT), _ints("r", rn, 10), "g", "b", JOIN_SEMI)
     var before = j.structural_hash()
@@ -409,56 +461,15 @@ def test_semi_with_an_aggressive_having_on_the_left_builds_left() raises:
     assert_equal(Int(out._join.value()[].left[].tag), Int(PLAN_FILTER))
     assert_equal(_scan_path(out._join.value()[].right[]), "r")
     assert_equal(_names(out)[0], "g")
-    _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_LEFT)
-
-
-def test_semi_with_having_on_both_sides_builds_right() raises:
-    """Both sides at 5%: the right side is not `>= 0.10`, so RIGHT. Catches
-    the second half of the SEMI condition dropped."""
-    var j = _join(_having(BIN_GT), _having(BIN_LT), "g", "g", JOIN_SEMI)
-    var before = j.structural_hash()
-    var out = select_join_build_side(j^)
     _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_RIGHT)
 
+    var o = _join(_having(BIN_OR), _ints("r", rn, 10), "g", "b", JOIN_SEMI)
+    var ob = o.structural_hash()
+    _assert_only_build_side_changed(select_join_build_side(o^), ob, JOIN_BUILD_SIDE_RIGHT)
 
-def test_right_join_with_a_cheaper_left_side_builds_left() raises:
-    """RIGHT(L 10, R 1000) stays a RIGHT join over (L, R) and builds on L,
-    the NULL-supplying side. Catches the RIGHT arm dropped and the old
-    RIGHT->LEFT flip (a LEFT join over (R, L) under a restoring Project)."""
-    var ln: List[String] = ["a", "lv"]
-    var rn: List[String] = ["b", "rv"]
-    var j = _join(_ints("l", ln, 10), _ints("r", rn, 1000), "a", "b", JOIN_RIGHT)
-    var before = j.structural_hash()
-    var out = select_join_build_side(j^)
-    assert_equal(Int(out._join.value()[].join_type), Int(JOIN_RIGHT))
-    assert_equal(_scan_path(out._join.value()[].left[]), "l")
-    _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_LEFT)
-
-
-def test_left_join_never_builds_its_preserved_side() raises:
-    """LEFT(L 10, R 1000): the cost favours L, but the rule never builds a
-    LEFT join's preserved side, so RIGHT. Catches the RIGHT-only gate
-    widened to LEFT joins."""
-    var ln: List[String] = ["a", "lv"]
-    var rn: List[String] = ["b", "rv"]
-    var j = _join(_ints("l", ln, 10), _ints("r", rn, 1000), "a", "b", JOIN_LEFT)
-    var before = j.structural_hash()
-    var out = select_join_build_side(j^)
-    _assert_only_build_side_changed(out^, before, JOIN_BUILD_SIDE_RIGHT)
-
-
-def test_right_join_with_a_cheaper_right_side_and_anti_join_build_right() raises:
-    """RIGHT(L 1000, R 10): no cost reason to build left. ANTI(L 10, R 1000):
-    ANTI always builds right. Catches the outer cost test inverted and ANTI
-    admitted to a LEFT arm."""
-    var ln: List[String] = ["a", "lv"]
-    var rn: List[String] = ["b", "rv"]
-    var rj = _join(_ints("l", ln, 1000), _ints("r", rn, 10), "a", "b", JOIN_RIGHT)
-    var rb = rj.structural_hash()
-    _assert_only_build_side_changed(select_join_build_side(rj^), rb, JOIN_BUILD_SIDE_RIGHT)
-    var aj = _join(_ints("l", ln, 10), _ints("r", rn, 1000), "a", "b", JOIN_ANTI)
-    var ab = aj.structural_hash()
-    _assert_only_build_side_changed(select_join_build_side(aj^), ab, JOIN_BUILD_SIDE_RIGHT)
+    var g = _join(_having(BIN_GT), _having(BIN_OR), "g", "g", JOIN_SEMI)
+    var gb = g.structural_hash()
+    _assert_only_build_side_changed(select_join_build_side(g^), gb, JOIN_BUILD_SIDE_RIGHT)
 
 
 def test_the_rule_is_idempotent() raises:
@@ -638,47 +649,6 @@ def test_a_scan_root_is_returned_unchanged() raises:
     var n: List[String] = ["a"]
     var out = select_join_build_side(_ints("l", n, 5))
     assert_equal(Int(out.tag), Int(PLAN_SCAN))
-
-
-# -----------------------------------------------------------------------------
-# The HAVING selectivity heuristic
-# -----------------------------------------------------------------------------
-
-
-def test_having_selectivity_needs_a_filter_over_an_aggregate() raises:
-    """A scan and a filter over a scan are not HAVING: 1.0. Catches either
-    shape test dropped (a WHERE filter would then count as a HAVING)."""
-    var n: List[String] = ["g"]
-    assert_equal(_estimate_having_selectivity(_ints("s", n, 5)), 1.0)
-    var f = LogicalPlan.filter(
-        Expr.binary(BIN_GT, Expr.col_ref("g"), Expr.literal(ScalarValue.from_int64(Int64(1)))),
-        _ints("s", n, 5),
-    )
-    assert_equal(_estimate_having_selectivity(f), 1.0)
-
-
-def test_having_selectivity_per_operator() raises:
-    """Each comparison is 0.05, AND 0.0025, OR 0.10, another binary op 0.5.
-    Catches a comparison operator missing from the list and the AND/OR values
-    exchanged."""
-    var cmp_ops: List[UInt8] = [BIN_EQ, BIN_NE, BIN_LT, BIN_LE, BIN_GT, BIN_GE]
-    for i in range(len(cmp_ops)):
-        assert_equal(_estimate_having_selectivity(_having(cmp_ops[i])), 0.05)
-    assert_equal(_estimate_having_selectivity(_having(BIN_AND)), 0.05 * 0.05)
-    assert_equal(_estimate_having_selectivity(_having(BIN_OR)), 0.10)
-    assert_equal(_estimate_having_selectivity(_having(BIN_ADD)), 0.5)
-
-
-def test_having_selectivity_of_a_non_binary_predicate_and_a_non_filter() raises:
-    """A bare column predicate gives no signal: 0.5. The predicate estimator
-    called on a non-filter answers 1.0. Catches both fallbacks."""
-    var n: List[String] = ["g", "x"]
-    var keys = ExprArray()
-    keys.append(Expr.col_ref("g"))
-    var agg = LogicalPlan.aggregate(keys^, AggExprArray(), _ints("h", n, 10))
-    var f = LogicalPlan.filter(Expr.col_ref("g"), agg^)
-    assert_equal(_estimate_having_selectivity(f), 0.5)
-    assert_equal(_estimate_predicate_selectivity_from_plan(_ints("h", n, 10)), 1.0)
 
 
 def main() raises:

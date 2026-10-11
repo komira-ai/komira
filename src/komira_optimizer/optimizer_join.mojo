@@ -14,8 +14,7 @@ from std.memory import OwnedPointer
 from komira_arrow.schema import Schema
 from komira_arrow.arrow_types import ArrowType
 from komira_plan_expr.expr import (
-    Expr, EXPR_COL_REF, EXPR_ALIAS, EXPR_BINARY_OP, EXPR_UNARY_OP, EXPR_CAST,
-    BIN_EQ, BIN_NE, BIN_LT, BIN_LE, BIN_GT, BIN_GE, BIN_AND, BIN_OR,
+    Expr, EXPR_COL_REF, EXPR_ALIAS, EXPR_UNARY_OP, EXPR_CAST,
 )
 from komira_plan_ir.logical_plan import (
     LogicalPlan,
@@ -40,7 +39,6 @@ from komira_plan_ir.logical_plan import (
     PLAN_EXCHANGE,
     SOURCE_PARQUET,
     JOIN_INNER,
-    JOIN_RIGHT,
     JOIN_SEMI,
     JOIN_ANTI,
     JOIN_BUILD_SIDE_LEFT,
@@ -474,24 +472,16 @@ def select_join_build_side(var plan: LogicalPlan) raises -> LogicalPlan:
     """Record on every join which side the host builds its hash table on.
 
     =========================================================================
-    PERF-CRITICAL: Join build/probe side selection (INNER, SEMI, RIGHT)
+    PERF-CRITICAL: Join build/probe side selection (INNER)
     =========================================================================
     Regression if removed: Any INNER join where the larger table is on
                            the right regresses by a factor proportional
                            to the size ratio (bigger HT, more probes).
-    Non-obvious part:      The SEMI decision is not by base cardinality: it
-                           puts a side whose HAVING filter (Filter over
-                           Aggregate) is estimated below 10% selectivity
-                           on the build side. ANTI always builds right.
-                           A RIGHT join builds left when its left side is
-                           the cheaper one.
+    Non-obvious part:      A single-key join whose cheaper side carries a
+                           wide STRING payload builds on the other side.
     DuckDB equivalent:     DuckDB's build_probe_side_optimizer does the
-                           INNER flip by cardinality*row_width; the
-                           HAVING-driven SEMI choice is our own
-                           extension.
-    Do NOT delete without: 1) re-measuring the inner and semi joins
-                           2) any TPC-H query with Filter(Agg(...)) on
-                              one side of a SEMI join
+                           INNER flip by cardinality*row_width.
+    Do NOT delete without: re-measuring the inner joins.
     =========================================================================
 
     ⭐ THE RULE RECORDS; IT DOES NOT REWRITE. Every join it reaches gets
@@ -503,23 +493,22 @@ def select_join_build_side(var plan: LogicalPlan) raises -> LogicalPlan:
     is one the lowering obeys, a later pass cannot undo by reordering, and a
     serialized plan can carry (docs/design/optimized_plan.md §5.1).
 
-    The decisions are the ones the exchange made:
+    The decisions:
       * INNER: build on the left when the left side's cardinality * row width
-        is the smaller, unless the single-key STRING-payload override says
-        otherwise (`_side_has_wide_string_build_payload`).
-      * SEMI: build on the left when the left side is an aggressive HAVING
-        (< 10%) and the right is not.
-      * RIGHT: build on the left (the NULL-supplying side) when it is the
-        cheaper side. A LEFT join keeps building right: the rule never chose
-        to build a LEFT join's preserved side.
-      * every other join — ANTI, FULL, CROSS, any residual-carrying join, an
-        INNER/SEMI/RIGHT with no reason to move — builds right, the
-        convention.
+        is strictly the smaller (a tie builds right), unless the single-key
+        STRING-payload override says otherwise
+        (`_side_has_wide_string_build_payload`).
+      * every other join — LEFT, RIGHT, FULL, SEMI, ANTI, CROSS, and any
+        residual-carrying join — builds right, the convention.
 
-    ⚠ A LEFT BUILD SIDE ON A SEMI JOIN needs a lowering that builds the
-    probe-output side (a right-semi operator). The exchange this replaces
-    turned SEMI(A, B) into SEMI(B, A), which also changed the node's output
-    from A's columns to B's.
+    ⚠ ONLY INNER JOINS ARE EVER RECORDED LEFT. The optimized-plan design
+    (§5.2, "Not every (join type, build side) pair can be lowered") admits
+    `build_side = LEFT` with RIGHT, FULL, SEMI or ANTI in no contract version
+    yet, and says no correct producer emits one. The operand exchange this
+    rule replaced also built the left side of a SEMI join whose left side was
+    a HAVING estimated below 10% selectivity, and of a RIGHT join whose left
+    side was the cheaper one; neither is recorded until a contract version
+    admits the pair.
     """
     select_join_build_side_inplace(plan)
     return plan^
@@ -566,33 +555,6 @@ def _decide_build_left(plan: LogicalPlan) -> Bool:
             elif left_wide_str and not right_wide_str:
                 build_left = False
         return build_left
-
-    if jt == JOIN_SEMI:
-        var left_having = _estimate_having_selectivity(jd.left[])
-        var right_having = _estimate_having_selectivity(jd.right[])
-        return left_having < 0.10 and right_having >= 0.10
-
-    # =====================================================================
-    # RIGHT: build on the left (the NULL-supplying side) when it is cheaper.
-    #
-    # A LEFT JOIN B ≡ B RIGHT JOIN A: an outer join's two forms differ in
-    # which side is preserved, and DuckDB's build_probe_side_optimizer
-    # (FlipChildren / TryFlipJoinChildren) picks the one whose build side is
-    # smaller. Recording the side keeps the user's form and its column
-    # order, so no restoring projection is needed.
-    #
-    # Only RIGHT is decided this way. Building a LEFT join on its left
-    # (preserved) side was never chosen by this rule, and is not now.
-    # FULL OUTER keeps the convention; ANTI is asymmetric and keeps it too.
-    # =====================================================================
-    if jt == JOIN_RIGHT:
-        var left_cost = estimate_cardinality(jd.left[]) * estimate_row_width(
-            jd.left[].output_schema
-        )
-        var right_cost = estimate_cardinality(jd.right[]) * estimate_row_width(
-            jd.right[].output_schema
-        )
-        return left_cost < right_cost
 
     return False
 
@@ -842,69 +804,6 @@ def join_operands_share_column_name(plan: LogicalPlan) raises -> Bool:
         if jd.right[].output_schema.field_name(j) in left_names:
             return True
     return False
-
-
-def _estimate_having_selectivity(plan: LogicalPlan) -> Float64:
-    """Estimate the selectivity of a HAVING clause (Filter above Aggregate).
-
-    Returns a value in [0.0, 1.0]. Lower means more aggressive filtering.
-    Returns 1.0 (no filtering) if the plan is not a HAVING pattern.
-
-    A HAVING clause is a Filter whose child is an Aggregate. The heuristic:
-      - Comparison operators (>, <, >=, <=, ==, !=): 0.05 (5% selectivity)
-      - AND of comparisons: product of child selectivities
-      - OR of comparisons: sum of child selectivities (capped at 1.0)
-      - Anything else: 0.5 (no strong signal)
-
-    These are rough heuristics — the point is to detect patterns like
-    "HAVING count(*) > 100" which typically filter out 90%+ of groups.
-    """
-    if plan.tag != PLAN_FILTER:
-        return 1.0
-
-    # Check if child is an Aggregate (HAVING pattern).
-    if plan._filter.value()[].child[].tag != PLAN_AGGREGATE:
-        return 1.0
-
-    # It is a HAVING pattern. Estimate selectivity from the predicate tag+op.
-    return _estimate_predicate_selectivity_from_plan(plan)
-
-
-def _estimate_predicate_selectivity_from_plan(plan: LogicalPlan) -> Float64:
-    """Estimate selectivity of a HAVING clause from a Filter plan node.
-
-    Inspects the predicate's tag and binary operator to estimate selectivity.
-    Uses the plan reference directly to avoid Expr copy issues.
-
-    Returns a value in [0.0, 1.0]:
-      - Comparison operators (>, <, >=, <=, ==, !=): 0.05
-      - AND: product of child selectivities (approximated at 0.05 * 0.05)
-      - OR: 0.10 (two comparisons ORed)
-      - Anything else: 0.5
-    """
-    if plan.tag != PLAN_FILTER:
-        return 1.0
-
-    var pred_tag = plan._filter.value()[].predicate.tag
-    if pred_tag != EXPR_BINARY_OP:
-        return 0.5
-
-    var op = plan._filter.value()[].predicate._binary.value().op
-
-    # Comparison operators: highly selective HAVING predicates
-    if (op == BIN_EQ or op == BIN_NE or op == BIN_LT
-            or op == BIN_LE or op == BIN_GT or op == BIN_GE):
-        return 0.05
-
-    # AND: product of child selectivities (heuristic: each child is a comparison)
-    if op == BIN_AND:
-        return 0.05 * 0.05
-
-    # OR: sum of two comparison selectivities
-    if op == BIN_OR:
-        return 0.10
-
-    return 0.5
 
 
 # =============================================================================

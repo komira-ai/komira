@@ -61,6 +61,7 @@ from komira_plan_ir.logical_plan import (
     JOIN_INNER,
     JOIN_ALGO_HASH,
     JOIN_BUILD_SIDE_LEFT,
+    JOIN_BUILD_SIDE_RIGHT,
     AGG_MODE_PARTIAL,
     ASOF_FORWARD,
     ASOF_TOL_INT64,
@@ -350,6 +351,25 @@ def test_join_arm_descends_both_sides_and_keeps_the_residual() raises:
     assert_equal(Int(jd.residual.value()[].binary_op()), Int(BIN_LT))
     _assert_lowered(jd.left[], "join left")
     _assert_lowered(jd.right[], "join right")
+
+
+def test_join_arm_keeps_a_right_build_side_and_no_adaptive_mark() raises:
+    """The other polarity of both fields: a join recorded RIGHT and not
+    adaptive comes back RIGHT and not adaptive. Catches a Join arm that
+    writes a constant LEFT or a constant `adaptive_allowed = True` (the LEFT,
+    adaptive test above passes on both)."""
+    var lo: List[String] = ["g"]
+    var ro: List[String] = ["k"]
+    var plan = LogicalPlan.join(
+        _window_project("g", "v", "rk"), _scan2("k", "w"), lo^, ro^,
+        JOIN_INNER, JOIN_ALGO_HASH, None, JOIN_BUILD_SIDE_RIGHT, False,
+    )
+    var out = optimize_window_rewrite(plan^)
+    assert_equal(Int(out.tag), Int(PLAN_JOIN))
+    ref jd = out.join_data_ref()
+    assert_equal(Int(jd.build_side), Int(JOIN_BUILD_SIDE_RIGHT))
+    assert_false(jd.adaptive_allowed, "adaptive_allowed stays False")
+    _assert_lowered(jd.left[], "join left")
 
 
 def test_join_arm_without_a_residual_adds_none() raises:

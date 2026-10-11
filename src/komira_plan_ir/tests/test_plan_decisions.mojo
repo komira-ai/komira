@@ -173,11 +173,19 @@ def test_an_undecided_join_renders_as_before_the_fields_existed() raises:
 
 
 def test_integrity_refuses_a_build_side_outside_the_space() raises:
-    """Catches `validate_plan_integrity` not checking the value."""
+    """LEFT, RIGHT and UNSET pass; 2 (the first value past RIGHT), 254 (the
+    last before UNSET) and 7 are refused. Catches `validate_plan_integrity`
+    not checking the value, and the check widened by one at either edge."""
     var j = _join(JOIN_BUILD_SIDE_LEFT, False)
     assert_true(validate_plan_integrity(j))
-    j._join.value()[].build_side = UInt8(7)
-    assert_false(validate_plan_integrity(j))
+    j._join.value()[].build_side = JOIN_BUILD_SIDE_RIGHT
+    assert_true(validate_plan_integrity(j))
+    j._join.value()[].build_side = JOIN_BUILD_SIDE_UNSET
+    assert_true(validate_plan_integrity(j))
+    var bad: List[UInt8] = [UInt8(2), UInt8(254), UInt8(7)]
+    for i in range(len(bad)):
+        j._join.value()[].build_side = bad[i]
+        assert_false(validate_plan_integrity(j), String(Int(bad[i])))
 
 
 # =============================================================================
@@ -235,9 +243,18 @@ def test_mode_does_not_change_the_aggregate_output_schema() raises:
 
 
 def test_integrity_refuses_a_mode_outside_the_space() raises:
+    """FINAL and UNSET pass; 3 (the first value past FINAL) and 254 (the last
+    before UNSET) are refused. Catches the mode check missing or widened by
+    one at either edge."""
     var a = _agg(AGG_MODE_PARTIAL)
     assert_true(validate_plan_integrity(a))
+    a._aggregate.value()[].mode = AGG_MODE_FINAL
+    assert_true(validate_plan_integrity(a))
+    a._aggregate.value()[].mode = AGG_MODE_UNSET
+    assert_true(validate_plan_integrity(a))
     a._aggregate.value()[].mode = UInt8(3)
+    assert_false(validate_plan_integrity(a))
+    a._aggregate.value()[].mode = UInt8(254)
     assert_false(validate_plan_integrity(a))
 
 
@@ -292,8 +309,14 @@ def test_scan_from_source_refuses_a_boundedness_outside_the_space() raises:
 
 
 def test_integrity_refuses_a_boundedness_outside_the_space() raises:
+    """UNBOUNDED passes; 2 (the first value past it) and 9 are refused.
+    Catches the boundedness check missing or widened by one."""
     var s = _scan("t.parquet", "a", "b")
     assert_true(validate_plan_integrity(s))
+    s._scan.value()[].boundedness = SCAN_UNBOUNDED
+    assert_true(validate_plan_integrity(s))
+    s._scan.value()[].boundedness = UInt8(2)
+    assert_false(validate_plan_integrity(s))
     s._scan.value()[].boundedness = UInt8(9)
     assert_false(validate_plan_integrity(s))
 
@@ -326,25 +349,33 @@ def test_every_writer_names_every_value_and_shows_an_unnamed_one() raises:
     """Each decision writer names every constant of its space (including
     UNSET) and writes `<space>#<n>` for a value no constant names, so a
     corrupt value is visible in a render instead of aliasing a neighbour.
-    Catches an arm dropped (its value would print as `#<n>`) and a fallback
-    that names a real value."""
+    Catches an arm dropped (its value would print as `#<n>`), a fallback
+    that names a real value, and an arm widened to the adjacent value (2 or
+    254 printed as a side, 3 or 254 as a mode, 2 as a boundedness, 4 as a
+    kind)."""
     assert_equal(_side_text(JOIN_BUILD_SIDE_LEFT), "left")
     assert_equal(_side_text(JOIN_BUILD_SIDE_RIGHT), "right")
     assert_equal(_side_text(JOIN_BUILD_SIDE_UNSET), "unset")
     assert_equal(_side_text(UInt8(7)), "build_side#7")
+    assert_equal(_side_text(UInt8(2)), "build_side#2")
+    assert_equal(_side_text(UInt8(254)), "build_side#254")
     assert_equal(_mode_text(AGG_MODE_SINGLE), "single")
     assert_equal(_mode_text(AGG_MODE_PARTIAL), "partial")
     assert_equal(_mode_text(AGG_MODE_FINAL), "final")
     assert_equal(_mode_text(AGG_MODE_UNSET), "unset")
     assert_equal(_mode_text(UInt8(9)), "agg_mode#9")
+    assert_equal(_mode_text(UInt8(3)), "agg_mode#3")
+    assert_equal(_mode_text(UInt8(254)), "agg_mode#254")
     assert_equal(_bound_text(SCAN_BOUNDED), "bounded")
     assert_equal(_bound_text(SCAN_UNBOUNDED), "unbounded")
     assert_equal(_bound_text(UInt8(5)), "boundedness#5")
+    assert_equal(_bound_text(UInt8(2)), "boundedness#2")
     assert_equal(_kind_text(EXCHANGE_KIND_GATHER), "GATHER")
     assert_equal(_kind_text(EXCHANGE_KIND_BROADCAST), "BROADCAST")
     assert_equal(_kind_text(EXCHANGE_KIND_HASH), "HASH")
     assert_equal(_kind_text(EXCHANGE_KIND_RANGE), "RANGE")
     assert_equal(_kind_text(UInt8(9)), "exchange_kind#9")
+    assert_equal(_kind_text(UInt8(4)), "exchange_kind#4")
 
 
 def main() raises:
