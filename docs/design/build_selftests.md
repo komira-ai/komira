@@ -139,8 +139,10 @@ rules. Graph checks are BXL scripts that the gate runs, following the test_weld 
 `build_targets.sh`. They are not scenarios.
 
 - **The target.** Each graph check is a `graph_check` target under `//tools/build/selftest/graph/`, in
-  the declared check `build_selftests`. It names the check and the targets it queries as strings, never
-  as dependencies. Its only dependencies are its BXL source and its Zig checker.
+  the declared check `build_selftests`, except `//:python_closure`, in the root package so that the
+  unit `repo_root`, which nearly every change reaches, runs it. It names the check and the targets it queries as strings, never
+  as dependencies. Its only dependencies are its BXL source and its Zig checker (and, for `python_closure`,
+  the dotfiles of the root package it reads).
 - **How the gate runs it.** `build_targets.sh` runs `buck2 bxl //tools/build/lint/test_weld.bxl:check`
   for every `test_weld_rule` target of the batch today. That step also queries the batch for
   `graph_check` targets and runs `buck2 bxl //tools/build/selftest/graph/checks.bxl:check -- --check
@@ -161,6 +163,12 @@ rules. Graph checks are BXL scripts that the gate runs, following the test_weld 
     label. It keeps true what slice 3's `--plan` proof shows once (see "Only a widened change reaches
     `build_selftests`"). Mutant: the same one as the `--plan` proof, a library under `src/` added as a
     dependency of one scenario target.
+  - `python_closure` (no row): no Python outside the Python surface. The facts are the configured
+    closure of `//...` and `tests//functional/...` as a graph (each node's kind, direct dependencies of
+    every kind and sources), every file of the trees, and the kci textprotos and workflows themselves;
+    `graph/python_closure.zig` says what is refused. Its allowlist, `tests/python_closure_allowlist.bzl`,
+    holds the Python surface (empty) and a ceiling of today's findings that only shrinks. Its fixtures
+    are `tests//negative/python_closure`, run by the scenario `graph_check_refusals`.
 - A graph query that needs its own `-c` overrides, such as the aquery diffs across coverage and
   optimization switches, stays a scenario: a BXL script runs in the gate's own configuration.
 

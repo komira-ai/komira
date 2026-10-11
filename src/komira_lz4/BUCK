@@ -30,6 +30,9 @@ mojo_library(
             "golden/gettysburg.txt.lz4": "//third_party/pierrec-lz4:gettysburg.txt.lz4",
         },
     },
+    # Opened at run time (OwnedDLHandle): the conda package requires the
+    # conda-forge package tools/build/package/system_libs.bzl names for it.
+    dlopen = ["liblz4.so.1"],
     test_srcs = [
         "tests/test_codec.mojo",
         "tests/test_codec_into.mojo",
