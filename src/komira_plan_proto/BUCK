@@ -1,6 +1,12 @@
 load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
+load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixture_case", "proto_fixture_check")
 
 # The plan IR on the wire: `komira.plan.v1`.
+#
+# `optimized_plan.proto` is the optimized plan (docs/design/optimized_plan.md,
+# komira-ai/komira#1094, stage 4): the `OptimizedPlan` header and body, the
+# declared needs, snapshot pins and advice, and the segments of a cut plan. It
+# imports `plan.proto` for the plan body. No codec reads it yet (stage 5).
 #
 # `plan_vocabulary.proto` is the language-agnostic half of the plan wire: every
 # enumerated tag space a plan or expression node can name. It mirrors the
@@ -38,9 +44,29 @@ _CENSUS = [
     "tests/test_plan_field_numbers_plan.mojo",
     "tests/test_plan_enum_numbers_nodes.mojo",
     "tests/test_plan_enum_numbers_functions.mojo",
+    "tests/test_optimized_plan_field_numbers.mojo",
 ]
 
+# One golden per message of optimized_plan.proto, each named for its message
+# (`optimized_plan` is `OptimizedPlan`), under tests/fixtures/optimized/golden.
+_OPTIMIZED_GOLDEN = {
+    "declared_needs": "DeclaredNeeds",
+    "exchange_edge": "ExchangeEdge",
+    "optimized_plan": "OptimizedPlan",
+    "optimized_plan_body": "OptimizedPlanBody",
+    "optimized_segment": "OptimizedSegment",
+    "optimized_segment_dag": "OptimizedSegmentDag",
+    "pin_group": "PinGroup",
+    "plan_advice": "PlanAdvice",
+    "producer_stamp": "ProducerStamp",
+    "runtime_need": "RuntimeNeed",
+    "scan_pin": "ScanPin",
+    "scan_stats": "ScanStats",
+    "shared_subplan": "SharedSubplan",
+}
+
 _PROTOS = [
+    "optimized_plan.proto",
     "plan.proto",
     "plan_vocabulary.proto",
 ]
@@ -50,8 +76,17 @@ mojo_proto_library(
     srcs = _PROTOS,
     import_prefix = "komira/plan/v1",
     deps = ["//src/komira_proto_codec:komira_proto_codec"],
-    test_srcs = _CENSUS + ["tests/test_plan_census_complete.mojo"],
+    test_srcs = _CENSUS + [
+        "tests/test_plan_census_complete.mojo",
+        "tests/test_optimized_plan_goldens.mojo",
+    ],
     test_data = {
+        # Each golden's protoc bytes and this package's own encoding of them.
+        "tests/test_optimized_plan_goldens.mojo": {
+            "fixtures/optimized/golden/{}{}".format(s, ext): "tests/fixtures/optimized/golden/{}{}".format(s, ext)
+            for s in _OPTIMIZED_GOLDEN
+            for ext in [".hex", ".canonical.hex"]
+        },
         # Every .proto of `srcs` is staged under protos/, and the test scans
         # every file there, so a .proto added to `srcs` cannot be skipped.
         "tests/test_plan_census_complete.mojo": {"protos/" + p: p for p in _PROTOS} | {
@@ -60,4 +95,83 @@ mojo_proto_library(
         },
     },
     visibility = ["PUBLIC"],
+)
+
+# protoc, the reference implementation, reading the optimized-plan goldens
+# (tools/build/mojo/README.md, "Wire fixtures"). Each `<stem>.txtpb` was
+# written by hand; `<stem>.canonical.hex` is protoc's encoding of it, made by
+# the `optimized_golden_<stem>_canonical` targets below:
+#   ./buck2 build //src/komira_plan_proto:optimized_golden_<stem>_canonical \
+#       --out src/komira_plan_proto/tests/fixtures/optimized/golden/<stem>.canonical.hex
+# and `<stem>.hex` is this package's generated encoder re-encoding those
+# bytes, which tests/test_optimized_plan_goldens.mojo requires byte for byte.
+# The digests in the
+# goldens are sha256 of fixed strings, not digests computed from the body:
+# computing them is stage 5. `optimized_plan`'s `body` is the bytes of a
+# small `OptimizedPlanBody`, which the Mojo test decodes.
+_OPTIMIZED_PROTO = [":komira_plan_proto_gen"]
+
+# Five goldens set no field to its default, and for them the generated
+# encoder writes exactly protoc's bytes, so their `.hex` and `.canonical.hex`
+# are equal and leg 0 can tell no producer there: they are declared
+# `canonical_producer`. The Mojo test still holds the generated encoder to
+# each `.hex`. The other eight hold a default scalar or a repeated scalar,
+# which the generated encoder writes (unpacked) and protoc does not.
+_OPTIMIZED_SAME_BYTES = [
+    "declared_needs",
+    "producer_stamp",
+    "runtime_need",
+    "scan_pin",
+    "scan_stats",
+]
+
+proto_fixture_check(
+    name = "optimized_plan_golden_fixtures",
+    canonical_producer = _OPTIMIZED_SAME_BYTES,
+    dir = "tests/fixtures/optimized/golden",
+    fixtures = {s: "komira.plan.v1." + m for s, m in _OPTIMIZED_GOLDEN.items()},
+    proto_deps = _OPTIMIZED_PROTO,
+)
+
+[
+    proto_encode(
+        name = "optimized_golden_{}_canonical".format(s),
+        proto_deps = _OPTIMIZED_PROTO,
+        root = "komira.plan.v1." + m,
+        txtpb = "tests/fixtures/optimized/golden/{}.txtpb".format(s),
+    )
+    for s, m in _OPTIMIZED_GOLDEN.items()
+]
+
+# An undeclared enum value inside an `OptimizedPlan`: `write_target.format`
+# is 9, which `WriteFormat` does not declare. Proto3 enums are open, so protoc
+# decodes it, prints it as a number and parses it back, and legs 1 to 4 pass
+# it; leg 5 must refuse it, walking from the `OptimizedPlan` root through the
+# imported `WireWriteTarget`. Two cases on the one fixture: the first fails
+# unless leg 5 refuses it, the second unless that is the only failure (": 1
+# failure(s)" does not match "11 failure(s)"), so legs 0 to 4 still hold the
+# fixture's three files to each other. The `.hex` is protoc's own bytes
+# (`canonical_producer`), made by `optimized_hostile_undeclared_write_format_canonical`.
+_UNDECLARED = "optimized_plan_undeclared_write_format"
+
+[
+    proto_fixture_case(
+        name = name,
+        canonical_producer = [_UNDECLARED],
+        dir = "tests/fixtures/optimized/hostile",
+        expect = expect,
+        fixtures = {_UNDECLARED: "komira.plan.v1.OptimizedPlan"},
+        proto_deps = _OPTIMIZED_PROTO,
+    )
+    for name, expect in [
+        ("optimized_plan_undeclared_enum", _UNDECLARED + ": LEG 5: " + _UNDECLARED + ".hex carries enum values the schema does not name"),
+        ("optimized_plan_undeclared_enum_only", "proto_fixture: FAILED: 1 failure(s)"),
+    ]
+]
+
+proto_encode(
+    name = "optimized_hostile_undeclared_write_format_canonical",
+    proto_deps = _OPTIMIZED_PROTO,
+    root = "komira.plan.v1.OptimizedPlan",
+    txtpb = "tests/fixtures/optimized/hostile/{}.txtpb".format(_UNDECLARED),
 )
