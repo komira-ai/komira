@@ -7,8 +7,9 @@
 #
 # Besides each case's own expectation, every case checks what the contract
 # promises for any call:
-#   - every array and stream the host exported was released exactly once by
-#     the end of the case, and no borrowed schema was released;
+#   - every array, child array and stream the host exported was released
+#     exactly once by the end of the case, and no borrowed schema was
+#     released (checked on a failed case too, and added to its reason);
 #   - every byte the runtime reserved through mem_reserve was returned by the
 #     end of the case (a runtime that reserves its outputs and error strings,
 #     as the reference runtime does, shows a host that never released one);
@@ -37,6 +38,7 @@ from .contract import (
     TRANSPORT_IN_PROCESS,
     status_name,
 )
+from ._host import Counts
 from .runtime import CallOptions, Handle, Opened, Outcome, UdfRuntime
 from .values import Batch, Column, TYPE_FLOAT64, TYPE_INT32
 
@@ -358,22 +360,28 @@ def run_case(mut rt: UdfRuntime, c: Case) raises -> String:
     raise Error("UDF_CASE_MALFORMED: " + c.name + ": run " + c.run)
 
 
-def _ledger_check(rt: UdfRuntime, before_exported: Int, before_released: Int, before_double: Int, before_schemas: Int, before_streams: Int, before_streams_released: Int, before_reserved: Int) -> String:
+def _ledger_check(rt: UdfRuntime, b: Counts) -> String:
+    """"" when every array, child, stream and reservation of the case since
+    `b` was released exactly once, and no borrowed schema was released."""
     var a = rt.ledger()
-    var exported = a.exported - before_exported
-    var released = a.released - before_released
+    var exported = a.exported - b.exported
+    var released = a.released - b.released
     if released != exported:
         return String(exported) + " arrays exported to the runtime, " + String(released) + " released"
-    if a.double_released != before_double:
+    var kids = a.children_exported - b.children_exported
+    var kids_released = a.children_released - b.children_released
+    if kids_released != kids:
+        return String(kids) + " child arrays exported to the runtime, " + String(kids_released) + " released"
+    if a.double_released != b.double_released:
         return "an array was released twice"
-    if a.schemas_released != before_schemas:
+    if a.schemas_released != b.schemas_released:
         return "a borrowed schema was released by the runtime"
-    if a.streams_released - before_streams_released != a.streams_exported - before_streams:
+    if a.streams_released - b.streams_released != a.streams_exported - b.streams_exported:
         return "an input stream was not released"
-    if a.reserved_bytes != before_reserved:
+    if a.reserved_bytes != b.reserved_bytes:
         return (
-            String(a.reserved_bytes - before_reserved) + " bytes the runtime reserved are still held:"
-            + " an output or an error the host never released, or a runtime leak"
+            String(a.reserved_bytes - b.reserved_bytes) + " bytes the runtime reserved are still held:"
+            + " an output or an error the host never released, a handle never closed, or a runtime leak"
         )
     return ""
 
@@ -421,11 +429,13 @@ def run_suite(runtime_path: String, cases: List[Case]) raises -> Report:
             why = run_case(rt, c)
         except e:
             why = String(e)
+        # The ledger is checked on a failed case too: a failure path that
+        # leaks (a handle left open) is a failure of its own.
+        var leak = _ledger_check(rt, l)
         if why == "":
-            why = _ledger_check(
-                rt, l.exported, l.released, l.double_released, l.schemas_released, l.streams_exported,
-                l.streams_released, l.reserved_bytes,
-            )
+            why = leak
+        elif leak != "":
+            why += "; and " + leak
         if why != "":
             why += " [defect caught: " + c.defect + "]"
         report.results.append(CaseResult(c.name, "PASS" if why == "" else "FAIL", why))
