@@ -14,7 +14,7 @@ komira//src/kci_logs:kci_logs	src/kci_logs	library	OK	905	1078	-	-	no	release	-	
 komira//src/kci_manifest_proto:kci_manifest_proto	src/kci_manifest_proto	library	OK	0	0	-	-	no	conda	-	-
 komira//src/kci_params:kci_params	src/kci_params	library	OK	407	407	-	-	no	release	-	-
 komira//src/kci_pkg_upload:kci_pkg_upload	src/kci_pkg_upload	library	OK	1953	2193	-	-	no	conda	-	-
-komira//src/kci_publish:kci_publish_lib	src/kci_publish	library	OK	2102	2281	-	-	no	conda	src/kci_publish/workers.mojo	-
+komira//src/kci_publish:kci_publish_lib	src/kci_publish	library	OK	2265	2265	-	-	no	conda	-	-
 komira//src/kci_publish_oci:kci_publish_oci	src/kci_publish_oci	library	OK	87	89	-	-	no	conda	-	-
 komira//src/kci_reconciler:kci_reconciler	src/kci_reconciler	library	OK	1238	1407	-	-	no	conda	-	-
 komira//src/kci_release_channel:kci_release_channel	src/kci_release_channel	library	OK	460	460	-	-	no	release	-	-
