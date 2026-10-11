@@ -17,7 +17,7 @@
 #   * SHA-256: FIPS 180-2 appendix B.1 ("abc") and B.2 (the 448-bit message).
 #   * One million 'a' (8,000,000 bits, so the bit length needs more than 16
 #     bits): SHA-1 from RFC 3174 TEST3 / FIPS 180 (RFC 3174's printed result
-#     has a known typo, "CD C4"; the FIPS value is 34aa973c d4c4daa4 ...),
+#     has a known typo, "CD C4"; the FIPS value is 34AA973C D4C4DAA4 ...),
 #     SHA-256 from FIPS 180-2 appendix B.3, MD5 from the NESSIE project's MD5
 #     test vectors, Set 1, vector #8.
 # The CAVP messages are arbitrary bytes, not UTF-8: the kernels digest the
