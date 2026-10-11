@@ -28,14 +28,9 @@ load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":coverage.bzl", "COVERAGE_ATTRS", "COVERAGE_SHARED_LIB_ATTRS", "COVERAGE_TEST_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_readme", "coverage_run", "coverage_branch_of", "coverage_shared_lib", "coverage_shared_lib_macro", "coverage_sub_targets", "coverage_test", "coverage_test_kwargs")
 load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
 load(":mutation.bzl", "MUTATION_ATTRS", "mutation_kwargs", "mutation_sub_targets")
+load(":native_reach.bzl", "NATIVE_REACH_ATTRS", "native_reach", "native_reach_kwargs")
 load(":precompile.bzl", "precompile_cmd")
-load(
-    ":test_runtime.bzl",
-    _arg_args = "arg_args",
-    _data_map = "data_map",
-    _env_args = "env_args",
-    _test_root = "test_root",
-)
+load(":test_runtime.bzl", _arg_args = "arg_args", _data_map = "data_map", _env_args = "env_args", _test_root = "test_root")
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "capped_prefix", "define_args", "mem_cap_script", "memory_cap")
 load(":readme.bzl", "readme_kwargs")
 load(":run_check.bzl", "run_check_validation")
@@ -427,6 +422,7 @@ def _library_impl(ctx):
     # With coverage on, the README's run (above) and the gate (coverage.bzl);
     # only the conda package waits for them and the runs, never this package.
     cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs, cov_branch, src_dir, import_name, root) if cov_link else (None, [])
+    reach = native_reach(ctx, src_dir, deps)  # native_reach.bzl: (providers, sub-targets)
     mutation = mutation_sub_targets(ctx, tc, _mojo_cmd, src_dir, root, deps, tests_closure[1:], _link_tail(tests_c_link), test_data, env_args, test_defines, cap, mem_cap_script(ctx))  # mutation.bzl
     if markers:
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
@@ -454,7 +450,7 @@ def _library_impl(ctx):
                 # gated package. The tests above use the ungated package
                 # in-rule, never through a label.
                 "ungated": [DefaultInfo(default_output = ungated)],
-            } | ({"gen": [ctx.attrs.gen[DefaultInfo]]} if ctx.attrs.gen else {}) | (coverage_sub_targets(cov_bins, cov_runs, cov_gate, cov_branch) if cov_link else {}) | mutation,
+            } | ({"gen": [ctx.attrs.gen[DefaultInfo]]} if ctx.attrs.gen else {}) | (coverage_sub_targets(cov_bins, cov_runs, cov_gate, cov_branch) if cov_link else {}) | mutation | reach[1],
         ),
         MojoInfo(
             c_link = c_link,
@@ -472,7 +468,7 @@ def _library_impl(ctx):
             readme = ctx.attrs.readme,
         ),
         welded_tests_info(ctx.attrs.test_srcs),
-    ] + cov_providers
+    ] + cov_providers + reach[0]
 
 # ---- README examples ----------------------------------------------------------
 #
@@ -621,7 +617,7 @@ mojo_library_rule = rule(
         # itself built from a mojo_library, so a default would be a cycle.
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
-    } | COVERAGE_ATTRS | MUTATION_ATTRS | LIBRARY_DEFINE_ATTRS | _TOOLCHAIN_ATTR,
+    } | COVERAGE_ATTRS | MUTATION_ATTRS | NATIVE_REACH_ATTRS | LIBRARY_DEFINE_ATTRS | _TOOLCHAIN_ATTR,
 )
 
 # ---- mojo_binary / mojo_test ----------------------------------------------
@@ -971,6 +967,7 @@ def _mojo_library(**kwargs):
     readme_kwargs(kwargs)
     cov_gate = coverage_kwargs(kwargs)
     mutation_kwargs(kwargs)
+    native_reach_kwargs(kwargs)
     mojo_library_rule(**kwargs)
     if kwargs.get("conda", True):
         name = kwargs["name"]
