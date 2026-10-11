@@ -17,7 +17,9 @@
 # of the shared fields are compute.mojo's.
 # =============================================================================
 
-from kci_resource_proto.resource import Image, Ref, Resource, SecretRef, Size, Value
+from kci_resource_proto.compute import Size
+from kci_resource_proto.refs import Image, Ref, SecretRef, Value
+from kci_resource_proto.resource import Resource
 
 from kci_cloud.catalog import FIELD_CONTAINER_JOB, FIELD_SERVICE, FIELD_WORKER, body_field
 

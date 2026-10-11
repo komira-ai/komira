@@ -10,7 +10,8 @@ interface. This package names no cloud:
 
   * catalog.mojo     — the catalog's types as data (arm number, portability,
                        exposed outputs, accepted access, retention default,
-                       primary role).
+                       primary role) and a resource's type, read from its
+                       set arm (`body_field`, `body_is`).
   * cloud_id.mojo    — the opaque `CloudId` (equality and printing only).
   * adapter.mojo     — the `CloudAdapter` trait every built-in cloud
                        implements (an internal module boundary, not frozen):
@@ -68,28 +69,63 @@ interface. This package names no cloud:
                        kci creates or adopts, and the `kci-run-id=<id>`
                        label of an object created in a scope with a
                        validation run id (no kci verb sets one yet);
-                       `create_labels` is every label a create writes.
+                       `create_labels` is every label a create writes; and
+                       kci's adoption mark `kci_adopted=true`.
   * metadata.mojo    — the rules of every resource's metadata (`labels`,
-                       `physical_name`, `adopt`): their graph findings, the
-                       label fields kci lowers, the adopted primary nodes,
-                       and the refusal of a changed cloud name.
+                       `physical_name`, `adopt`): their
+                       graph findings, the label fields kci lowers, the
+                       adopted primary nodes, and the refusal of a changed
+                       cloud name.
+  * adoption.mojo    — safe adoption: an adopted object read and checked
+                       before planning, the adoption mark, the refusal of
+                       a replace of an adopted object and of a delete its
+                       resource does not allow, the release of one whose
+                       resource left the list, and the plan that says so
+                       (`PlanReport`).
   * clouds.mojo      — `Clouds`, the closed list of built-in clouds:
                        `resolve` (with a typo suggestion), and the rule that
                        every cloud declares every catalog type.
-  * validate.mojo    — the validate phase: graph, coverage and limit
-                       findings, collected in one pass; the role label
-                       budget over a lowering; the refusal text.
+  * compose_refs.mojo — the one walk over every reference of a resource
+                       (`ref_sites`, `with_sites`), the guard that none of
+                       the composite form is left (`unrewritten`), the id
+                       and name grammars of resources and composites, and
+                       the owner of a node or path (`owner_of_node`, its
+                       first segment at any depth).
+  * compose_bind.mojo — the input types of a composite, and BINDINGS: an
+                       input written into a field of a primitive component
+                       through its proto3 JSON (`bind_field`), the load
+                       rules of bindings and presences.
+  * compose_kci.mojo — the `kci` namespace: the definitions kci ships, by
+                       name, version and digest.
+  * compose_load.mojo — LOADING definitions: their checks, containment
+                       cycles, the instances at the top of a list, and the
+                       count the size guard reads (`Loader`).
+  * compose.mojo     — EXPANSION: a list with composite instances -> a list
+                       of primitives with path ids `top/c1/.../ck`
+                       (`expand`): after a load with no finding and the
+                       size guard, every reference rewritten to a full path
+                       through exports and declared outputs, every binding
+                       written, every absent component left out, and the
+                       tree a plan prints (`Expansion`).
+  * validate.mojo    — the validate phase: expansion first, then graph,
+                       coverage and limit
+                       findings, collected in one pass; on a graph with
+                       no other finding, the role label budget over the
+                       cloud's lowering; the refusal text.
   * deploy.mojo      — plan / apply / destroy in a cell: configure and
                        validate first, lower to data with the lowering
                        contract checked (`lowering_json` for golden tests),
                        add the roles `list_owned` says the file turned off,
                        realize, then the engine's owned scope; an apply
                        returns an `ApplyOutcome` (applied, landed, pending,
-                       error, leftover); and the plan grouped by authored
-                       resource.
-  * conformance.mojo — the conformance kit every cloud runs (twelve steps,
-                       from label stamping to two interleaved applies and
-                       the validation-run tag under the kit's own run id).
+                       error, leftover, left behind, released); and the
+                       plan grouped by authored resource, adopted nodes and
+                       releases marked (`render_plan`).
+  * conformance.mojo — the conformance kit every cloud runs (thirteen
+                       steps, from label stamping to two interleaved
+                       applies, the validation-run tag under the kit's own
+                       run id, and an adoption through `Resource.adopt`:
+                       the mark kept on update, then the release).
 
 The fake clouds (working in-memory clouds, not mocks) that exercise all of it live in
 `kci_cloud_fake`.
@@ -117,6 +153,7 @@ from kci_cloud.catalog import (
     FIELD_SUBSCRIPTION,
     FIELD_SCHEDULE,
     FIELD_EVENT_TRIGGER,
+    FIELD_COMPOSITE,
     FIELD_NETWORK,
     FIELD_SUBNET,
     FIELD_IP_ADDRESS,
@@ -156,6 +193,7 @@ from kci_cloud.catalog import (
     BodyArm,
     body_arms,
     body_field,
+    body_is,
     effective_retention,
     portability_word,
     primary_node,
@@ -194,6 +232,7 @@ from kci_cloud.adapter import (
     ArtifactNeed,
     BootstrapItem,
     OwnedRecord,
+    ExistingObject,
     Principal,
     LoweredNode,
     retention_name,
@@ -204,6 +243,7 @@ from kci_cloud.adapter import (
     FINDING_COVERAGE,
     FINDING_LIMIT,
     FINDING_CELL,
+    FINDING_ADOPTION,
     absence_word,
 )
 from kci_cloud.data import (
@@ -291,6 +331,11 @@ from kci_cloud.labels import (
     validation_run_labels,
     validation_run_of,
     validation_run_problem,
+    ADOPTED_LABEL_KEY,
+    ADOPTED_LABEL_VALUE,
+    adoption_labels,
+    adopted_by,
+    is_kci_label_key,
 )
 from kci_cloud.clouds import (
     Clouds,
@@ -298,32 +343,82 @@ from kci_cloud.clouds import (
     describe,
     artifact_problems,
 )
+from kci_cloud.compose_refs import (
+    COMPONENT_ID_MAX_BYTES,
+    ID_MAX_BYTES,
+    RefSite,
+    SITE_REF,
+    SITE_VALUE,
+    component_id_problem,
+    definition_name_problem,
+    id_problem,
+    literal_value,
+    no_ref,
+    owner_of_node,
+    ref_sites,
+    ref_value,
+    unrewritten,
+    with_sites,
+)
+from kci_cloud.compose_bind import (
+    BindValue,
+    INPUT_BOOL,
+    INPUT_IMAGE,
+    INPUT_INT,
+    INPUT_REF,
+    INPUT_STRING,
+    INPUT_VALUE_MAP,
+    bind_field,
+    binding_problem,
+)
+from kci_cloud.compose_kci import KCI_NAMESPACE, ShippedDefinition, kci_definition_problem, shipped_definitions
+from kci_cloud.compose_load import (
+    MAX_EXPANDED_PRIMITIVES,
+    definition_digest,
+    definition_key,
+    is_composite,
+)
+from kci_cloud.compose import Expansion, expand
 from kci_cloud.validate import (
     graph_findings,
     edge_findings,
     validate_for,
+    validate_expanded,
     refusal_text,
-    id_problem,
     node_role,
+    lowered_budget_findings,
     role_budget_findings,
-    ID_MAX_BYTES,
 )
 from kci_cloud.deploy import (
     ApplyOutcome,
     Removals,
     engine_retention,
     refuse_unless_valid,
+    valid_expansion,
     lower_data,
     lowering_json,
     realize_graph,
     removals,
-    owner_of_node,
     lower_resources,
     plan_resources,
+    plan_report,
     apply_resources,
     destroy_resources,
     group_plan,
+    render_plan,
     with_adopted,
+)
+from kci_cloud.adoption import (
+    AdoptionCheck,
+    PlanReport,
+    adopted_nodes_of,
+    adoption_check,
+    delete_findings,
+    deletable,
+    existing_mismatches,
+    replace_findings,
+    resource_of_node,
+    unadopted_findings,
 )
 from kci_cloud.metadata import (
     KCI_LABELS_MAX,
@@ -332,6 +427,7 @@ from kci_cloud.metadata import (
     NAME_MAX_BYTES,
     PHYSICAL_NAME_FIELD,
     adopted_nodes,
+    adopts,
     label_fields,
     label_key_problem,
     label_value_problem,

@@ -147,7 +147,7 @@ struct RowExprBoolEvaluator[
 
 
 def selected_row_indices(mask: List[Bool], n: Int) -> List[Int]:
-    """Collect the indices of the first `n` set bits in `mask`.
+    """Collect the indices `i < n` with `mask[i]` set.
 
     Companion to `RowExprBoolEvaluator.eval_batch`: turns a boolean
     selection mask into the dense list of surviving row indices (the input

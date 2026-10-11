@@ -86,6 +86,17 @@ def _byte_mask_eq_newline_u8x16(chunk: SIMD[DType.uint8, 16]) -> UInt8:
     return hadd_u8x16(hit)
 
 
+def _line_text(bytes: Span[UInt8, _], start: Int, end: Int) raises -> String:
+    """`bytes[start:end]` as a String, byte for byte; refused when the line
+    is not UTF-8 (RFC 8259 section 8.1), which a String must be."""
+    try:
+        return String(StringSlice(from_utf8=bytes[start:end]))
+    except:
+        raise Error(
+            "split_lines: the line at byte " + String(start) + " is not UTF-8"
+        )
+
+
 def split_lines(bytes: Span[UInt8, _]) raises -> List[String]:
     """Split a JSONL byte stream into per-line String records.
 
@@ -104,7 +115,8 @@ def split_lines(bytes: Span[UInt8, _]) raises -> List[String]:
     path. x86_64: stdlib fallback via the same primitive interface.
 
     Returns: owned List of per-line Strings (each line is the JSON
-    object without the trailing newline).
+    object without the trailing newline), byte for byte. Raises when a
+    line is not UTF-8.
     """
     var out = List[String]()
     var n = len(bytes)
@@ -133,10 +145,7 @@ def split_lines(bytes: Span[UInt8, _]) raises -> List[String]:
             if bytes[i] == UInt8(0x0A):
                 # Emit [line_start, i).
                 if i > line_start:
-                    var line = String()
-                    for j in range(line_start, i):
-                        line += chr(Int(bytes[j]))
-                    out.append(line^)
+                    out.append(_line_text(bytes, line_start, i))
                 line_start = i + 1
             i += 1
 
@@ -144,19 +153,13 @@ def split_lines(bytes: Span[UInt8, _]) raises -> List[String]:
     while i < n:
         if bytes[i] == UInt8(0x0A):
             if i > line_start:
-                var line = String()
-                for j in range(line_start, i):
-                    line += chr(Int(bytes[j]))
-                out.append(line^)
+                out.append(_line_text(bytes, line_start, i))
             line_start = i + 1
         i += 1
 
     # Final record without trailing newline?
     if line_start < n:
-        var line = String()
-        for j in range(line_start, n):
-            line += chr(Int(bytes[j]))
-        out.append(line^)
+        out.append(_line_text(bytes, line_start, n))
 
     return out^
 

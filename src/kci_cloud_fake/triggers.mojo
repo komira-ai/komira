@@ -50,6 +50,7 @@ from kci_cloud import (
     Setting,
     TIMEZONE_DEFAULT,
     body_field,
+    body_is,
     cron_fields,
     firing_of,
     firings_into,
@@ -68,7 +69,7 @@ comptime _DAY_OF_WEEK: Int = 4
 def folds(r: Resource, edges: List[GrantEdge], shape: ProviderShape) -> Bool:
     """True iff `r` is a schedule whose target is a container job on a shape
     that folds it into the job (its target's type is on its CALL edge)."""
-    if not shape.schedule_folds or not r.schedule:
+    if not shape.schedule_folds or not body_is(r, FIELD_SCHEDULE):
         return False
     for i in range(len(edges)):
         if edges[i].implicit and edges[i].target_field == FIELD_CONTAINER_JOB:
@@ -132,7 +133,7 @@ def folded_fields(r: Resource, firings: List[Firing], shape: ProviderShape, mut 
     its run node: `schedule`, `cron`, `timezone` (the first firing; a second
     is a limit). Nothing elsewhere, and nothing for a job no schedule
     starts."""
-    if not shape.schedule_folds or not r.container_job:
+    if not shape.schedule_folds or not body_is(r, FIELD_CONTAINER_JOB):
         return
     var into = firings_into(firings, r.id)
     if len(into) == 0:
@@ -155,7 +156,7 @@ def _limit(r: Resource, path: String, cloud: String, why: String) -> Finding:
 def trigger_limits(r: Resource, firings: List[Firing], shape: ProviderShape, cloud: String, mut out: List[Finding]):
     """The shape's trigger limits (file header) on `r`; nothing for any other
     type."""
-    if not r.schedule:
+    if not body_is(r, FIELD_SCHEDULE):
         return
     var cron = cron_fields(r.schedule.value().cron)
     if (

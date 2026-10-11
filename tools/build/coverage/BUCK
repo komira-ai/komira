@@ -14,6 +14,19 @@ export_file(
     visibility = ["PUBLIC"],
 )
 
+# The coverage census (census.md): census.sh renders
+# docs/coverage_census.md and the rows of ratchet.tsv from census.tsv, and
+# the root BUCK's :coverage_census holds the three to each other.
+export_file(
+    name = "census.tsv",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "census.sh",
+    visibility = ["PUBLIC"],
+)
+
 # The policy, as data for the coverage workflow's cases (the root BUCK's
 # coverage_ci_cases), which parse it the way .github/ci/coverage_measure.sh does.
 export_file(
@@ -60,7 +73,8 @@ mojo_library(
         "tests/test_exempt_mutants.mojo",
         # the source lexer: markers recognised only in a real comment (not
         # in a string, a docstring or another comment's text), CRLF, and the
-        # executable-line heuristic over every kind of line
+        # executable-line heuristic over every kind of line, trait
+        # requirements (no code) left out
         "tests/test_lexer.mojo",
         # declaration reachability (report only): the functions a source
         # declares (methods, multi-line and generic signatures, one-line
@@ -155,5 +169,8 @@ export_file(
 
 shell_lint(
     name = "shell_lint",
-    srcs = ["cov_gate.sh"],
+    srcs = [
+        "census.sh",
+        "cov_gate.sh",
+    ],
 )

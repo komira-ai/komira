@@ -310,6 +310,10 @@ def test_null_value_enum_surface() raises:
     assert_equal(n.number(), 0)
     assert_equal(n.json_name(), String("NULL_VALUE"))
     assert_equal(NullValue.from_number(3).number(), 3)
+    # An undeclared number's name is its decimal text, as a generated enum
+    # gives (komira-ai/komira#990).
+    assert_equal(NullValue.from_number(1).json_name(), String("1"))
+    assert_equal(NullValue.from_number(-7).json_name(), String("-7"))
     assert_equal(NullValue.from_json_name(String("NULL_VALUE")).number(), 0)
     assert_true(NullValue.is_known_json_name(String("NULL_VALUE")))
     assert_false(NullValue.is_known_json_name(String("null")))

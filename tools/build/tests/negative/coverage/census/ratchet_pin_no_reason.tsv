@@ -1,0 +1,8 @@
+# The floors of tests//negative/coverage:census_pin_no_reason (test 46): census_ok's, with the pinned row of src/g given no reason.
+src/a	5000	2500
+src/b	0	-
+src/c	5000	2500
+src/d	9000	-
+src/e	5000	-
+src/f	7500	5000
+src/g	5000	-	
