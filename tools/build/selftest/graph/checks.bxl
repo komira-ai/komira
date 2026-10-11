@@ -1,0 +1,66 @@
+# The graph checks (docs/design/build_selftests.md, "Graph checks in the gate").
+#
+#   buck2 bxl //tools/build/selftest/graph/checks.bxl:check -- --check //tools/build/selftest/graph:selftest_closure
+#
+# Reads the graph_check target's GraphCheckInfo, collects the facts its
+# check names from the build graph into a file, and runs the check's Zig
+# checker over that file as a build action on the check's execution
+# platform. A finding fails that action, so `buck2 bxl` exits non-zero;
+# release/ci/build_targets.sh runs this for every graph_check of a batch.
+#
+# The checks:
+#   selftest_closure  the unconfigured labels of the configured closure
+#                     (`deps()`, every kind of dependency) of the check's
+#                     target patterns; the checker refuses a label of the
+#                     check's cell under src/.
+
+load("@komira//tools/build/selftest/graph:graph_check_info.bzl", "GraphCheckInfo")
+
+def _closure_labels(ctx, patterns):
+    universe = " + ".join(patterns)
+    closure = ctx.cquery().eval("deps({})".format(universe))
+    return sorted({str(t.label.raw_target()): True for t in closure}.keys())
+
+_COLLECT = {
+    "selftest_closure": _closure_labels,
+}
+
+def _check_impl(ctx):
+    target = ctx.configured_targets(ctx.cli_args.check)
+    info = ctx.analysis(target).providers()[GraphCheckInfo]
+    if info.check not in _COLLECT:
+        fail("graph_check {}: no check named `{}` in checks.bxl (checks: {})".format(info.label, info.check, ", ".join(sorted(_COLLECT.keys()))))
+    facts = _COLLECT[info.check](ctx, info.targets)
+    actions = ctx.bxl_actions(exec_compatible_with = info.exec_compatible_with).actions
+    facts_file = actions.write("graph_check/{}.facts".format(info.check), facts + [""])
+    result = actions.declare_output("graph_check/{}.ok".format(info.check))
+    actions.run(
+        cmd_args(
+            info.checker,
+            "--check",
+            info.check,
+            "--cell",
+            info.cell,
+            "--label",
+            info.label,
+            "--facts",
+            facts_file,
+            "--out",
+            result.as_output(),
+        ),
+        category = "graph_check",
+        identifier = info.check,
+    )
+    ctx.output.print("graph_check {}: {} facts of {}; checked: {}".format(
+        info.label,
+        len(facts),
+        " + ".join(info.targets),
+        ctx.output.ensure(result),
+    ))
+
+check = bxl_main(
+    impl = _check_impl,
+    cli_args = {
+        "check": cli_args.string(doc = "A graph_check target, e.g. //tools/build/selftest/graph:selftest_closure"),
+    },
+)
