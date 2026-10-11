@@ -3,6 +3,7 @@
 # anything.
 load("@komira//tools/build/coverage:census.bzl", "coverage_census")
 load("@komira//tools/build/coverage:defs.bzl", "coverage_ci_cases")
+load("@komira//tools/build/lint:doc_tree.bzl", "doc_tree")
 load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "public_boundary", "retired_names", "shell_lint", "src_layout", "workflow_lint")
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
@@ -26,6 +27,14 @@ export_file(
     name = "pr.yml",
     src = ".github/workflows/pr.yml",
     visibility = ["//src/kci_workflow_check:"],
+)
+
+# The files under .github/, which the root doc_tree's glob skips, at their
+# paths, for the shell budget (//tools/build/lint:shell_budget).
+doc_tree(
+    name = "github_tree",
+    srcs = glob([".github/**"]),
+    visibility = ["//tools/build/lint:shell_budget"],
 )
 
 shell_lint(

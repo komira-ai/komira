@@ -3,6 +3,7 @@
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
 load(":defs.bzl", "shell_lint", "tar_member")
+load(":shell_budget.bzl", "shell_budget")
 
 export_file(name = "lint.sh", visibility = ["PUBLIC"])
 
@@ -43,4 +44,19 @@ shell_lint(
     name = "shell_lint",
     srcs = ["lint.sh", "readme_api_coverage.sh", "retired_names.sh", "surface_capability_matrix.sh", "test_weld.sh"],
     visibility = ["PUBLIC"],
+)
+
+# The shell regrowth guard (shell_budget.bzl): every shell script of the
+# repository (`.sh`, `.bash`, or a `#!` line naming a shell) has a row in
+# shell_allowlist.tsv (path, max_lines, reason) at exactly its line count, and
+# every row names one. The tree is every file of the cell (`//:doc_tree`),
+# the files under .github/ (`//:github_tree`) and the tests cell's tree. A
+# script comes out of the allowlist when it is written in Zig; a row is added
+# only with a reason review accepts, and a cap is never raised.
+shell_budget(
+    name = "shell_budget",
+    allowlist = "tools/build/lint/shell_allowlist.tsv",
+    cells = {"tools/build/tests": "tests//:doc_tree"},
+    dotfiles = ["//:github_tree"],
+    tree = "//:doc_tree",
 )
