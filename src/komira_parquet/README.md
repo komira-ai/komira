@@ -143,6 +143,42 @@ pages:
   (`komira_plan_expr.partition_pred_pod`) and the form the Hive discovery
   prunes with (`komira_fs.pruned_hive_discovery`).
 
+And it decodes column chunks a chunk of rows at a time, and nested leaves:
+
+- `subrg_column_cursor`: `ResumableColumnCursor`, a page cursor over one
+  column chunk that keeps its page walk across calls and fills a caller's
+  fixed buffer: dictionary codes (`fill_next_codes`, exactly
+  `min(max_rows, rows left)` per call, with the dictionary held as Int64,
+  Float64 or offsets plus bytes) or flat values (`fill_next_flat`, PLAIN
+  copied, DELTA_BINARY_PACKED decoded with the running value carried across
+  calls). PLAIN pages can be read in place (`open_next_plain_grain` and
+  `load_grain`, or `ensure_plain_page`, `commit_plain_grain` and
+  `grain_view_ro`); `seek_to_row(lo, hi)` limits it to a row range. It
+  decodes V1 pages only, and OPTIONAL columns only without an actual null;
+  `try_open` reads the first data page and walks every page header
+  (`subrg_cursor_pages._admit_all_pages`), so a chunk it cannot finish (a
+  dictionary spill to PLAIN, a DATA_PAGE_V2 page, an encoding change, a
+  malformed header) is refused before it emits a row. A page holding a null
+  refuses mid-decode, and the caller checks `supported()` and
+  `rows_emitted()`.
+- `subrg_dbp_trace`, `subrg_scan_route_trace`: the cursor's counters. The DBP
+  arm counts chunks admitted and refused at open, pages, values and stalls,
+  and prints them only when `set_subrg_dbp_trace_enabled(True)`; the scan
+  route counts rows and chunks streamed, rows and row groups that fell back
+  to a whole decode, chunks refused at open and rows retracted.
+- `column_decode_context`: `ColumnDecodeContext`, a worker's decode buffers
+  reused across chunks and row groups (the decompression scratch, the
+  dictionary codes, the cursor's fixed buffers, the band slots and cursors of
+  a multi-column band). Its two decode choices are construction arguments.
+- `nested_decoder`: `decode_column_with_levels`, a leaf column chunk's
+  present values with its definition and repetition levels, at any maximum
+  level, for the Dremel rebuild in `nested`. V1 and V2 pages, PLAIN and
+  dictionary-encoded, each page by its own encoding; a BYTE_ARRAY chunk that
+  mixes the two is refused.
+- `column_reader`: one PLAIN INT32, INT64, FLOAT or DOUBLE page read from its
+  file byte range and aliased as the array (decompressed into it when
+  compressed).
+
 Every example below runs as a test when the package is built.
 
 ## The footer
