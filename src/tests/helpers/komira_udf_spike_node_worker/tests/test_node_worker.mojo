@@ -558,6 +558,10 @@ def _corrupt_outputs() raises:
         "a malformed ERROR reply",
         "an ERROR reply with code 999",
     ]
+    # Case 118: code 1 (ERR_ABI), the status table's first code, is passed
+    # on as it is (a bound one too high maps it to ERR_INTERNAL).
+    var abi = rt.call_batch(b.inst, s, _ints([118]), CallOptions.plain())
+    _expect(abi.outcome, ERR_ABI, "an ERROR reply with code 1", "corrupt case 118")
     for i in range(len(errors)):
         var r = rt.call_batch(b.inst, s, _ints([111 + i]), CallOptions.plain())
         _expect(r.outcome, ERR_INTERNAL, errors[i], "corrupt case " + String(111 + i))

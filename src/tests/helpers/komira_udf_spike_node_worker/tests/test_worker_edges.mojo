@@ -232,6 +232,14 @@ def _thrown_values(mut rt: UdfRuntime, ctx: Handle) raises:
     _expect(r.outcome, ERR_RAISED, "a thrown value", "a bare object thrown")
     assert_equal(r.outcome.row, 1, "the row of the bare object")
     _unbind(rt, b)
+    # A Proxy whose instanceof throws: still ERR_RAISED at its row, named by
+    # Object.prototype.toString.
+    var t = _spec(SHAPE_SCALAR, "fixtures.mjs#throws_trap")
+    var tb = _bind(rt, ctx, t)
+    var tr = rt.call_batch(tb.inst, t, _ints([1, 2, 3]), CallOptions.plain())
+    _expect(tr.outcome, ERR_RAISED, "a thrown value: [object Object]", "a Proxy thrown")
+    assert_equal(tr.outcome.row, 1, "the row of the Proxy")
+    _unbind(rt, tb)
 
 
 def _cancel_between_batches(mut rt: UdfRuntime, ctx: Handle) raises:

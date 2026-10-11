@@ -359,6 +359,18 @@ export function throws_bare(x: I64): I64 {
   return x;
 }
 
+// Throws, at the value 2, a Proxy whose prototype cannot be read: every
+// instanceof on it throws, and it has no toString.
+export function throws_trap(x: I64): I64 {
+  if (x === 2n)
+    throw new Proxy(Object.create(null), {
+      getPrototypeOf() {
+        throw new Error('throws_trap: no prototype');
+      },
+    });
+  return x;
+}
+
 // running_sum after 30 ms of work before it reads any input: a cancel
 // raised during that work is seen between batches.
 export function* sleepy_running_sum(batches: Iterable<RecordBatch>): Generator<Table> {

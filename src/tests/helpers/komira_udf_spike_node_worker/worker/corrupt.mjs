@@ -340,6 +340,10 @@ const FRAMES = {
     return [header({ id, op: OP.ERROR, len: b.length }), b];
   },
   115: (id) => [header({ id, op: OP.ERROR, len: 20 }), errorBody(ERR_RAISED, '').subarray(0, 20)], // no message length
+  118: (id) => {
+    const b = errorBody(1, 'an ERROR reply with code 1'); // ERR_ABI, the table's first code
+    return [header({ id, op: OP.ERROR, len: b.length }), b];
+  },
   117: (id) => {
     const b = errorBody(999, 'an ERROR reply with code 999'); // past the status table
     return [header({ id, op: OP.ERROR, len: b.length }), b];
