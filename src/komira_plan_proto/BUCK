@@ -37,7 +37,12 @@ load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixtu
 # fixtures cannot turn them green. tests/test_plan_census_complete.mojo
 # holds those ledgers to every field and value protoc declares, so a field
 # added without a census row fails too; it reads the .proto files and the
-# census files as data. README.md's examples run as one more welded test.
+# census files as data. A `reserved` line is invisible to bytes (a number
+# nothing declares decodes to nothing either way), so
+# tests/test_plan_reservations.mojo reads every `reserved` number and name
+# from the .proto text and holds them to its own table, and holds
+# optimized_plan.proto's HELD rows to them: a held number must stay free.
+# README.md's examples run as one more welded test.
 _CENSUS = [
     "tests/test_plan_field_numbers_scan.mojo",
     "tests/test_plan_field_numbers_expr.mojo",
@@ -78,6 +83,7 @@ mojo_proto_library(
     deps = ["//src/komira_proto_codec:komira_proto_codec"],
     test_srcs = _CENSUS + [
         "tests/test_plan_census_complete.mojo",
+        "tests/test_plan_reservations.mojo",
         "tests/test_optimized_plan_goldens.mojo",
     ],
     test_data = {
@@ -92,6 +98,11 @@ mojo_proto_library(
         "tests/test_plan_census_complete.mojo": {"protos/" + p: p for p in _PROTOS} | {
             "census/" + t.removeprefix("tests/"): t
             for t in _CENSUS
+        },
+        # The same .proto files, and the census whose HELD table names
+        # optimized_plan.proto's held and reserved numbers.
+        "tests/test_plan_reservations.mojo": {"protos/" + p: p for p in _PROTOS} | {
+            "census/test_optimized_plan_field_numbers.mojo": "tests/test_optimized_plan_field_numbers.mojo",
         },
     },
     visibility = ["PUBLIC"],

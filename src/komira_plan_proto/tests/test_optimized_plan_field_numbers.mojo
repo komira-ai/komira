@@ -30,7 +30,9 @@
 # have, and requires that the message decodes and re-encodes to nothing: no
 # declared field took the number. So a field declared at a held number (or a
 # reserved one, once its `reserved` line is gone) fails here until its row
-# moves from HELD to LEDGER, with a byte test, in the same change.
+# moves from HELD to LEDGER, with a byte test, in the same change. Bytes
+# cannot tell a held number from a reserved one; test_plan_reservations.mojo
+# reads HELD's last column against the .proto's `reserved` statements.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -674,7 +676,9 @@ ExchangeEdge.key_groups 7
 # ---- HELD: `<Message> <number> <varint|len> <held|reserved>` -------------------------
 # `held`: a number the design gives a field this stage cannot declare (the
 # field and its stage are in the `held:` comment at that number in
-# optimized_plan.proto). `reserved`: a draft field never released.
+# optimized_plan.proto), never in a `reserved` statement. `reserved`: a
+# draft field never released, in its message's `reserved` statement
+# (test_plan_reservations.mojo holds both to the .proto).
 
 comptime HELD = """
 ProducerStamp 4 varint reserved

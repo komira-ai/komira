@@ -41,7 +41,10 @@ protoc declares a field or value no ledger lists. A new field or value
 therefore needs a ledger row and a byte test in the same change, and a
 shipped number never changes. `optimized_plan.proto` has its own ledger,
 `tests/test_optimized_plan_field_numbers.mojo`, which also requires that no
-declared field takes a number the file holds free or reserves. Its goldens
+declared field takes a number the file holds free or reserves.
+`tests/test_plan_reservations.mojo` reads every `reserved` number and name
+of the three files against its own table, and requires that a number held
+free for a later field is not reserved. Its goldens
 (`tests/fixtures/optimized/golden/`, one per message) are read by protoc
 (the `optimized_plan_golden_fixtures` target) and by the generated codec
 (`tests/test_optimized_plan_goldens.mojo`).
