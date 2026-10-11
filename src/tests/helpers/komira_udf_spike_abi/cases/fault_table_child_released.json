@@ -1,0 +1,12 @@
+{
+ "name": "fault_table_child_released",
+ "defect": "a table output with a released child is read (no import validation, design 4.4)",
+ "run": "frame",
+ "entry": "table_child_released",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]}],
+ "expect": {"status": "OK", "run_error": "UDF_RUNTIME_FAULT"}
+}
