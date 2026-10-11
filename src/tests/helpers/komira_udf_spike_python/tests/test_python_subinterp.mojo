@@ -347,6 +347,16 @@ def _edges(mut rt: UdfRuntime) raises:
     want9.append_null()
     assert_equal(same_column(r.column, want9), "", "per row, row 8 of 9 null")
 
+    # A returned value whose conversion raises RuntimeError escapes the
+    # adapter: the C side reports it as ERR_INTERNAL, row -1, naming the
+    # exception, with no output (the runtime's failure path, not the user's).
+    var bad = spec1(SHAPE_SCALAR, "udf_fixtures:bad_index", TYPE_INT64, TYPE_INT64)
+    r = call_once(rt, bad, ints([1, 2]))
+    assert_equal(status_name(r.outcome.status), "ERR_INTERNAL", String(r.outcome))
+    assert_equal(r.outcome.row, -1, String(r.outcome))
+    assert_true("RuntimeError: _BadInt: no int" in r.outcome.message, String(r.outcome))
+    assert_equal(r.outcome.fault, "", String(r.outcome))
+
     # What a call leaves behind in the interpreter: 300 rows (so the row
     # count is not a cached small int), 8 calls on one instance; from the
     # fourth call on, the allocated blocks are the same (a view, a result

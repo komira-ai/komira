@@ -122,4 +122,12 @@ def main() raises:
     assert_equal(eh.exported, eh.released, "every argument array of the failing calls released")
     print("heap growth over 5000 failing calls:", eh.heap_growth, "bytes")
     assert_true(eh.heap_growth < Int64(64 << 10), "the heap grew " + String(eh.heap_growth) + " bytes")
+    # The same over calls that fail inside the adapter (ERR_INTERNAL).
+    var internal = Workload(
+        "udf_fixtures:bad_index", SHAPE_SCALAR, "l", "l", 1, 1, 0, 1, CHECK_NONE, 0.0, 0.0, 0.0, 0.0
+    )
+    eh = e.error_heap(internal, 5000)
+    assert_equal(status_name(eh.last_status), "ERR_INTERNAL", eh.last_message)
+    print("heap growth over 5000 adapter failures:", eh.heap_growth, "bytes")
+    assert_true(eh.heap_growth < Int64(64 << 10), "the heap grew " + String(eh.heap_growth) + " bytes")
     print("test_threads_subinterp: ok")

@@ -192,6 +192,18 @@ def keyword_only(x: int, *, y: int) -> int:
     return x
 
 
+class _BadInt:
+    """An int-like value whose conversion raises something other than the
+    TypeError, ValueError or OverflowError the adapter maps to a bad value."""
+
+    def __index__(self):
+        raise RuntimeError("_BadInt: no int")
+
+
+def bad_index(x: int) -> int:
+    return _BadInt()
+
+
 def allocated_blocks(x: int) -> int:
     """The interpreter's allocated memory blocks when this row runs: what
     the previous calls left behind shows here."""

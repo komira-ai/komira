@@ -129,6 +129,7 @@ def _numpy_results(mut rt: UdfRuntime) raises:
     r = call_once(rt, _np("np_ragged", TYPE_FLOAT64, TYPE_FLOAT64), floats([1.0, 2.0]))
     assert_equal(status_name(r.outcome.status), "ERR_RETURN_TYPE", String(r.outcome))
     assert_true("the result is no array" in r.outcome.message, String(r.outcome))
+    assert_equal(r.outcome.row, -1, "a batch's bad result names no row")
     # The argument is the engine's buffer, read-only: a write raises.
     r = call_once(rt, _np("np_writes", TYPE_FLOAT64, TYPE_FLOAT64), floats([1.0, 2.0]))
     assert_equal(status_name(r.outcome.status), "ERR_RAISED", String(r.outcome))
