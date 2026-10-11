@@ -26,6 +26,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_flat_agg_output.mojo",
+        "tests/test_grow_fixed_width_buffers.mojo",
         "tests/test_join_chunked_gather.mojo",
         "tests/test_join_fused_gather.mojo",
         "tests/test_join_fused_route.mojo",
