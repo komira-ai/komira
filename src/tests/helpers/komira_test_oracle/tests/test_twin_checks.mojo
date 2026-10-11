@@ -4,11 +4,11 @@
 # (`1.50` against `1.5` would be a false difference), that misses a wrong
 # cell, a missing row or a NULL where the twin has a value, that ignores the
 # twin's row-order policy, or that does not report an answer with no twin
-# and a twin with no answer.
+# and a twin with no answer, or that reads only some shards of the tree.
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_test_oracle import check_twin, pair_names
+from komira_test_oracle import check_twin, check_twins, pair_names
 
 
 def _hand(order: String, rows: String) -> String:
@@ -53,6 +53,17 @@ def test_unpaired_names() raises:
     assert_equal(len(p), 2)
     assert_equal(p[0], "a/x: a DuckDB answer with no HAND twin")
     assert_equal(p[1], "a/z: a HAND twin with no DuckDB answer")
+
+
+def test_every_shard_of_the_tree() raises:
+    # BUCK stages tests/data/twin_tree at twin_tree/: shard s1 holds a pair
+    # that agrees, shard s2 a pair that differs. check_twins must compare
+    # both pairs and report the second, whichever shard listdir returns
+    # first: a walk that stops after one shard compares one pair.
+    var report = check_twins(String("twin_tree"))
+    assert_equal(report.compared, 2)
+    assert_equal(len(report.problems), 1)
+    assert_true(report.problems[0].startswith("s2/b: the DuckDB answer and its HAND twin differ: 1 mismatch"))
 
 
 def main() raises:

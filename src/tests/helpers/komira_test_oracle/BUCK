@@ -106,7 +106,9 @@ sql_oracle(
 #   test_twin_checks       the twin check fed planted defects: a wrong cell, a
 #                          missing row, NULL for a value, -0.0 for 0.0, the
 #                          twin's order policy, an unreadable answer, an
-#                          unpaired name.
+#                          unpaired name, and a two-shard tree
+#                          (tests/data/twin_tree) whose pairs must all be
+#                          compared.
 #   test_duckdb_spellings  the reader against bytes the pinned DuckDB wrote
 #                          (:spellings): a reader built on a transcription,
 #                          or a DuckDB bump that changes a spelling.
@@ -128,6 +130,11 @@ mojo_library(
     ],
     test_data = {
         "tests/test_duckdb_spellings.mojo": {"spellings.tsv": ":spellings"},
+        # A two-shard tree for check_twins, staged at twin_tree/.
+        "tests/test_twin_checks.mojo": {
+            f[len("tests/data/"):]: f
+            for f in glob(["tests/data/twin_tree/**/*.tsv"])
+        },
         "tests/test_twins.mojo": dict(
             [("oracle/" + c + ".tsv", ":" + c) for c in _CASES] +
             # Each case's HAND twin: twins/<shard>/<case>.tsv for a shard
