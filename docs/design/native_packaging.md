@@ -4,8 +4,8 @@ Status: plan, not built. Each item is marked **EXISTS** (with the path on `main`
 **PROPOSED**. "On #NNN" means the code is on that open pull request and not on `main`. Scope:
 linux-64 (ELF) only; Mach-O (osx-arm64: install names, `@rpath`, exported-symbol lists, the two-level
 namespace) is a later design. Related: [the staged pipeline](staged_pipeline.md) (build once, then
-beta, gamma and prod), [gamma validation](gamma_validation.md) (its `komira_native` rows are
-superseded by this doc), [continuous publish](continuous_publish.md) (its slice S12 also plans an
+beta, gamma and prod), [gamma validation](gamma_validation.md) (its native rows point to this
+doc's checks), [continuous publish](continuous_publish.md) (its slice S12 also plans an
 installed `.so` check in beta's install job; slice 11 below wires this doc's install checks into
 that job, so the two land as one set of rows), [release machines](release_machine.md),
 the conda packaging README ([packaging/conda/README.md](../../packaging/conda/README.md)), symbol

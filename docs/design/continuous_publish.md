@@ -87,7 +87,7 @@ environment ([ci.md](../ci.md#pausing-promotion-to-prod)).
 | piece | today | evidence |
 |---|---|---|
 | trigger | a push to `main` (not `docs/**` or `**.md` only), or a manual run with a `reason` | `kci.yml` `on:` |
-| gate before prod | two `CONDA_INSTALL_ENV` validations: `install-komira-encoding` and `install-set`. Each runs a fresh pixi install from `gamma`, checks the README sha256 and runs every ` ```mojo ` README block. | `release/machine.textproto`; [gamma validation](gamma_validation.md#what-runs-in-gamma-today-exists) |
+| gate before prod | two `CONDA_INSTALL_ENV` validations: `install-komira-encoding` and `install-set`. Each runs a fresh pixi install from `gamma`, checks the README sha256 and runs every ` ```mojo ` README block. | `release/machine.textproto`; [gamma validation](gamma_validation.md#what-runs-in-betas-installs-today-exists) |
 | what is released | the libraries in `release/artifacts.textproto` (41 libraries plus `komira_all`: 42 `artifacts {` blocks) | `grep -c '^artifacts {'` |
 | what is not released | 161 libraries: 202 directories under `src/` hold a `BUCK` file (`src/tests` holds none) and 41 are declared | see [What blocks every package?](#what-blocks-every-package) |
 | cloud SDK tests | welded unit tests with `ScriptedConnector`, `AwsEchoConnector`, in-memory fakes and loopback fakes on `komira_http_server`. No emulator anywhere. | [gamma validation](gamma_validation.md#aws), §AWS, §GCP, §Azure |
