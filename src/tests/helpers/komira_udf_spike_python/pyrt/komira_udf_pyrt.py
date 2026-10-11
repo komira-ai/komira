@@ -364,7 +364,10 @@ class Instance:
         if isinstance(res, np.ma.MaskedArray):
             mask = np.ma.getmaskarray(res)
             res = res.filled(0)
-        res = np.asarray(res)
+        try:
+            res = np.asarray(res)
+        except (TypeError, ValueError) as exc:
+            return (ERR_RETURN_TYPE, "the result is no array: " + _exception_text(exc), None, -1)
         want = np.dtype(DTYPE[self.result_fmt])
         if res.ndim != 1:
             return (ERR_RETURN_TYPE, "the result has {} dimensions, not 1".format(res.ndim), None, -1)

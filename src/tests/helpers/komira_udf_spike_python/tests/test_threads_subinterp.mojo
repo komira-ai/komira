@@ -20,7 +20,17 @@
 #     thread other than the context's refused, close_instance and
 #     close_context from it logged and ignored, an argument struct at a
 #     nonzero offset refused (a sub-interpreter entered off its thread; a
-#     context freed under its owner; an offset read as 0).
+#     context freed under its owner; an offset read as 0); each malformed
+#     call of engine_loop.c's mangle_args refused with its reason and its
+#     args moved, zero rows without a values buffer accepted (a layout
+#     check dropped or weakened in python_call.c's args_layout_error);
+#   - the engine hands over an output slot filled with a pattern, and checks
+#     each field of an OK output (device, sync event, reserved words,
+#     dictionary, offset, null count) and that a failure leaves release
+#     NULL (a field the runtime does not write);
+#   - leaks: 20000 one-row batches grow the heap (mallinfo2) by under
+#     256 KB, and 5000 failing calls by under 64 KB (an output block, an
+#     argument owner record, an error message or trace never freed).
 #
 # Mutant planted: python_runtime.c's open_context and close_context treating
 # every context of the sub-interpreter build as a thread state of the main
@@ -37,7 +47,8 @@
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_udf_spike_python.calls import check_misuse
-from komira_udf_spike_python.engine import CAP_GLOBAL_LOCK, Engine, RunReport
+from komira_udf_spike_abi.contract import ERR_RAISED, SHAPE_SCALAR, status_name
+from komira_udf_spike_python.engine import CAP_GLOBAL_LOCK, CHECK_NONE, Engine, RunReport, Workload
 from komira_udf_spike_python.workloads import call_counter, fahrenheit_rows, spin
 
 
@@ -89,4 +100,26 @@ def main() raises:
     print("spin: cpus", r.cpus, "wall ms", r.wall_ns // 1_000_000, "cpu ms", Int(cpu) // 1_000_000, "ratio", ratio)
     assert_true(r.cpus >= 2, "the parallelism case needs 2 CPUs; this action has " + String(r.cpus))
     assert_true(ratio >= 0.6 * lanes, "CPU/wall " + String(ratio) + " below 0.6 x " + String(lanes))
+
+    # The runtime frees what each call allocates (the output block when the
+    # host releases it, the moved argument's owner record when its last
+    # reference goes): one thread, 20000 measured batches of one row. A
+    # missing free keeps at least 96 bytes a batch, about 1.9 MB; the heap
+    # (mallinfo2, every arena) must grow by less than 256 KB.
+    r = e.run(fahrenheit_rows(1, 1, 100, 20000))
+    _all_ok(r, "fahrenheit_rows, 20000 batches of 1 row")
+    var grew = r.heap_measured - r.heap_warm
+    print("heap growth over 20000 batches:", grew, "bytes")
+    assert_true(grew < Int64(256 << 10), "the heap grew " + String(grew) + " bytes over 20000 batches")
+
+    var raising = Workload(
+        "udf_fixtures:raise_type_error", SHAPE_SCALAR, "l", "l", 1, 1, 0, 1, CHECK_NONE, 0.0, 0.0, 0.0, 0.0
+    )
+    var eh = e.error_heap(raising, 5000)
+    assert_equal(eh.status, 0, eh.message)
+    assert_equal(eh.open_status, 0)
+    assert_equal(status_name(eh.last_status), status_name(ERR_RAISED), eh.last_message)
+    assert_equal(eh.exported, eh.released, "every argument array of the failing calls released")
+    print("heap growth over 5000 failing calls:", eh.heap_growth, "bytes")
+    assert_true(eh.heap_growth < Int64(64 << 10), "the heap grew " + String(eh.heap_growth) + " bytes")
     print("test_threads_subinterp: ok")

@@ -37,6 +37,8 @@ comptime _R_CPUS: Int32 = 7
 comptime _R_COLD_NS: Int32 = 8
 comptime _R_THREADS: Int32 = 9
 comptime _R_INVOLUNTARY: Int32 = 10
+comptime _R_HEAP_WARM: Int32 = 11
+comptime _R_HEAP_MEASURED: Int32 = 12
 # per thread
 comptime _T_STATUS: Int32 = 0
 comptime _T_OPEN_CONTEXT_NS: Int32 = 1
@@ -64,6 +66,13 @@ comptime _M_AFTER_CALL: Int32 = 7
 comptime _M_AFTER_BAD_VALUES: Int32 = 8
 comptime _M_EXPORTED: Int32 = 9
 comptime _M_RELEASED: Int32 = 10
+comptime _M_BAD_ARGS: Int32 = 11
+comptime _BAD_ARGS = 9
+comptime _M_BAD_ARGS_MOVED: Int32 = 20
+comptime _M_EMPTY_CALL: Int32 = 21
+comptime _M_EMPTY_CALL_MOVED: Int32 = 22
+comptime _M_ERRORS_LAST: Int32 = 23
+comptime _M_ERRORS_HEAP: Int32 = 24
 
 comptime CHECK_NONE: Int32 = 0
 """Outputs are checked for their row count and layout only."""
@@ -155,6 +164,10 @@ struct RunReport(Copyable, Movable):
     the engine's first run; -1 on later runs."""
     var threads: List[ThreadReport]
     var involuntary_switches: Int64
+    var heap_warm: Int64
+    """malloc'd bytes in use (mallinfo2) once every thread is warm."""
+    var heap_measured: Int64
+    """The same after every measured batch, every context still open."""
 
     def measured_rows(self) -> Int64:
         var n: Int64 = 0
@@ -204,6 +217,36 @@ struct MisuseReport(Copyable, Movable):
     """A valid call_batch on the owner thread after all of the above."""
     var after_call_message: String
     var after_bad_values: Int64
+    var exported: Int64
+    var released: Int64
+    var bad_args: List[Int32]
+    """call_batch on the owner thread with malformed args, in the order of
+    engine_loop.c's mangle_args: no children, a negative length, three
+    buffers, a NULL child, a child at offset -1, a child one row short, one
+    row without a values buffer, args on a device other than the CPU, a call
+    struct of 8 bytes."""
+    var bad_args_messages: List[String]
+    var bad_args_moved: Int64
+    """How many of those calls moved their args in."""
+    var empty_call: Int32
+    """call_batch of zero rows without a values buffer: legal Arrow."""
+    var empty_call_message: String
+    var empty_call_moved: Bool
+
+
+@fieldwise_init
+struct ErrorHeapReport(Copyable, Movable):
+    """Engine.error_heap: failing calls, and what they left on the heap."""
+
+    var status: Int32
+    """load's status, or -1."""
+    var message: String
+    var open_status: Int32
+    var last_status: Int32
+    """The last failing call's status."""
+    var last_message: String
+    var heap_growth: Int64
+    """Heap bytes (mallinfo2, every arena) grown over the failing calls."""
     var exported: Int64
     var released: Int64
 
@@ -273,7 +316,8 @@ struct Engine(Movable):
             Int32(_get(r, -1, _R_STATUS)), read_cstr(external_call["kudf_run_message", Void](r.p, Int32(-1))),
             _get(r, -1, _R_LOAD_NS), _get(r, -1, _R_WALL_NS), _get(r, -1, _R_CPU_USER_NS),
             _get(r, -1, _R_CPU_SYS_NS), _get(r, -1, _R_RSS_BEFORE), _get(r, -1, _R_RSS_OPEN), _get(r, -1, _R_CPUS),
-            _get(r, -1, _R_COLD_NS), threads^, _get(r, -1, _R_INVOLUNTARY),
+            _get(r, -1, _R_COLD_NS), threads^, _get(r, -1, _R_INVOLUNTARY), _get(r, -1, _R_HEAP_WARM),
+            _get(r, -1, _R_HEAP_MEASURED),
         )
         external_call["kudf_run_free", NoneType](r.p)
         return out^
@@ -292,6 +336,11 @@ struct Engine(Movable):
             )
         )
         free_zeroed(entry)
+        var bad = List[Int32]()
+        var bad_messages = List[String]()
+        for k in range(_BAD_ARGS):
+            bad.append(Int32(_m(r, _M_BAD_ARGS + Int32(k))))
+            bad_messages.append(_m_message(r, _M_BAD_ARGS + Int32(k)))
         var out = MisuseReport(
             Int32(_get(r, -1, _R_STATUS)), read_cstr(external_call["kudf_run_message", Void](r.p, Int32(-1))),
             Int32(_m(r, _M_OPEN)), _m_message(r, _M_OPEN),
@@ -300,7 +349,28 @@ struct Engine(Movable):
             _m(r, _M_FOREIGN_CLOSE_LOGS),
             Int32(_m(r, _M_OFFSET_CALL)), _m_message(r, _M_OFFSET_CALL), _m(r, _M_OFFSET_CALL_MOVED) == 1,
             Int32(_m(r, _M_AFTER_CALL)), _m_message(r, _M_AFTER_CALL), _m(r, _M_AFTER_BAD_VALUES),
-            _m(r, _M_EXPORTED), _m(r, _M_RELEASED),
+            _m(r, _M_EXPORTED), _m(r, _M_RELEASED), bad^, bad_messages^, _m(r, _M_BAD_ARGS_MOVED),
+            Int32(_m(r, _M_EMPTY_CALL)), _m_message(r, _M_EMPTY_CALL), _m(r, _M_EMPTY_CALL_MOVED) == 1,
+        )
+        external_call["kudf_run_free", NoneType](r.p)
+        return out^
+
+    def error_heap(mut self, w: Workload, calls: Int) -> ErrorHeapReport:
+        """`calls` calls of `w`'s UDF, which must fail, on one context and
+        instance of this thread, after 20 warm-up calls; how much the heap
+        grew over them."""
+        var entry = _cstr(w.entry)
+        var r = Word(
+            external_call["kudf_error_heap", Void](
+                self._e.p, entry, Int32(w.shape), Int8(Int(w.arg_fmt.as_bytes()[0])),
+                Int8(Int(w.result_fmt.as_bytes()[0])), Int64(w.rows), Int32(calls),
+            )
+        )
+        free_zeroed(entry)
+        var out = ErrorHeapReport(
+            Int32(_get(r, -1, _R_STATUS)), read_cstr(external_call["kudf_run_message", Void](r.p, Int32(-1))),
+            Int32(_m(r, _M_OPEN)), Int32(_m(r, _M_ERRORS_LAST)), _m_message(r, _M_ERRORS_LAST),
+            _m(r, _M_ERRORS_HEAP), _m(r, _M_EXPORTED), _m(r, _M_RELEASED),
         )
         external_call["kudf_run_free", NoneType](r.p)
         return out^

@@ -192,6 +192,23 @@ def keyword_only(x: int, *, y: int) -> int:
     return x
 
 
+def allocated_blocks(x: int) -> int:
+    """The interpreter's allocated memory blocks when this row runs: what
+    the previous calls left behind shows here."""
+    import sys
+
+    return sys.getallocatedblocks()
+
+
+def allocated_blocks_list(x: list[int]) -> list[int]:
+    """The same for a column; the last row is null, so the result has a
+    validity bitmap too."""
+    import sys
+
+    n = sys.getallocatedblocks()
+    return [n] * (len(x) - 1) + [None]
+
+
 def spin(ms: int) -> int:
     """Spins on this thread's CPU for `ms` milliseconds of CPU time."""
     end = time.thread_time_ns() + ms * 1_000_000

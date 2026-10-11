@@ -99,7 +99,9 @@ def check_misuse(mut e: Engine) raises:
     (ERR_INTERNAL, naming the other thread) and the call's args are still
     moved and released; close_instance and close_context from that thread
     are logged and leave the handles alone (the owner's later calls and
-    closes work); an argument struct at offset 1 is refused; every exported
+    closes work); an argument struct at offset 1 is refused; so is each
+    malformed argument array of engine_loop.c's mangle_args, its args still
+    moved; zero rows without a values buffer is accepted; every exported
     array is released."""
     var m = e.misuse(fahrenheit_rows(1, 64, 1, 0))
     assert_equal(m.load_status, OK, m.load_message)
@@ -113,7 +115,36 @@ def check_misuse(mut e: Engine) raises:
     assert_equal(status_name(m.offset_call), status_name(ERR_INTERNAL), m.offset_call_message)
     assert_true("nonzero offset" in m.offset_call_message, m.offset_call_message)
     assert_true(m.offset_call_moved, "a refused call_batch still moves its args")
+    var why: List[String] = [
+        "child count",
+        "negative length",
+        "not a primitive array",
+        "not a primitive array",
+        "shorter than the batch",
+        "shorter than the batch",
+        "no values buffer",
+        "not on the CPU",
+        "call struct_size",
+    ]
+    var want: List[String] = [
+        "ERR_INTERNAL",
+        "ERR_INTERNAL",
+        "ERR_INTERNAL",
+        "ERR_INTERNAL",
+        "ERR_INTERNAL",
+        "ERR_INTERNAL",
+        "ERR_INTERNAL",
+        "ERR_UNSUPPORTED",
+        "ERR_ABI",
+    ]
+    for k in range(len(why)):
+        var at = "malformed call " + String(k) + ": " + m.bad_args_messages[k]
+        assert_equal(status_name(m.bad_args[k]), want[k], at)
+        assert_true(why[k] in m.bad_args_messages[k], at)
+    assert_equal(m.bad_args_moved, Int64(len(why)), "every refused call_batch moves its args")
+    assert_equal(m.empty_call, OK, "zero rows without a values buffer: " + m.empty_call_message)
+    assert_true(m.empty_call_moved)
     assert_equal(m.after_call, OK, "the owner's call after the misuse: " + m.after_call_message)
     assert_equal(m.after_bad_values, 0)
-    assert_equal(m.exported, 3)
+    assert_equal(m.exported, 13)
     assert_equal(m.released, m.exported, "every exported argument array released")

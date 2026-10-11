@@ -66,3 +66,28 @@ def np_reversed(x: np.ndarray) -> np.ndarray:
 def np_filled(x: np.ndarray) -> np.ndarray:
     """A masked input in, a plain array out: no row of the result is null."""
     return x.filled(0.0) + 1.0
+
+
+def np_writes(x: np.ndarray) -> np.ndarray:
+    """Writes into its argument, the engine's buffer: refused, read-only."""
+    x[0] = 99.0
+    return x
+
+
+def buffer_type_refs(x: np.ndarray) -> np.ndarray:
+    """The reference count of the runtime's buffer exporter type, found
+    from the argument's base chain: each exporter holds one while it lives,
+    so the count is the same on every call once each call's go."""
+    import sys
+
+    b = x
+    for _ in range(8):
+        if type(b).__name__ == "ArrowBuffer":
+            return np.full(len(x), float(sys.getrefcount(type(b))))
+        b = b.obj if isinstance(b, memoryview) else b.base
+    raise RuntimeError("no ArrowBuffer under the argument")
+
+
+def np_ragged(x: np.ndarray) -> np.ndarray:
+    """A ragged list: no array numpy can make of it."""
+    return [[1.0], [1.0, 2.0]]

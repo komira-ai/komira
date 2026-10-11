@@ -125,6 +125,31 @@ def _numpy_results(mut rt: UdfRuntime) raises:
     r = call_once(rt, _np("np_filled", TYPE_FLOAT64, TYPE_FLOAT64), floats([1.0, 7.0, 3.0], null_at=1))
     assert_true(r.outcome.is_ok(), String(r.outcome))
     assert_equal(same_column(r.column, _floats_want([2.0, 1.0, 4.0])), "", "a plain result of a masked input")
+    # A ragged list: no array of it; the user's value, not a runtime failure.
+    r = call_once(rt, _np("np_ragged", TYPE_FLOAT64, TYPE_FLOAT64), floats([1.0, 2.0]))
+    assert_equal(status_name(r.outcome.status), "ERR_RETURN_TYPE", String(r.outcome))
+    assert_true("the result is no array" in r.outcome.message, String(r.outcome))
+    # The argument is the engine's buffer, read-only: a write raises.
+    r = call_once(rt, _np("np_writes", TYPE_FLOAT64, TYPE_FLOAT64), floats([1.0, 2.0]))
+    assert_equal(status_name(r.outcome.status), "ERR_RAISED", String(r.outcome))
+    assert_true("read-only" in r.outcome.message, String(r.outcome))
+    # Each ArrowBuffer holds its type once and lets go when it is freed: the
+    # type's reference count is the same on every call of one instance.
+    var refs = _np("buffer_type_refs", TYPE_FLOAT64, TYPE_FLOAT64)
+    var u = rt.load(refs)
+    var c = rt.open_context(0)
+    var i = rt.open_instance(c.handle, u.handle)
+    assert_true(i.outcome.is_ok(), String(i.outcome))
+    var counts = List[Float64]()
+    for _ in range(4):
+        var rr = rt.call_batch(i.handle, refs, floats([1.0, 2.0]), CallOptions.plain())
+        assert_true(rr.outcome.is_ok(), String(rr.outcome))
+        counts.append(rr.column.as_float(0))
+    rt.close_instance(i.handle)
+    rt.close_context(c.handle)
+    rt.unload(u.handle)
+    for k in range(1, len(counts)):
+        assert_equal(counts[k], counts[0], "ArrowBuffer type references call by call")
 
 
 def _unreleased(rt: UdfRuntime) -> Int:

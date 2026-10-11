@@ -279,6 +279,87 @@ def _values_and_refusals(mut rt: UdfRuntime) raises:
     assert_equal(r.outcome.row, 0, String(r.outcome))
 
 
+def _repeated(mut rt: UdfRuntime, spec: UdfSpec, args: Batch, calls: Int) raises -> List[Int64]:
+    """`calls` calls on one context and instance; row 0 of each output."""
+    var u = rt.load(spec)
+    var c = rt.open_context(0)
+    var i = rt.open_instance(c.handle, u.handle)
+    assert_true(i.outcome.is_ok(), spec.entry + ": " + String(i.outcome))
+    var out = List[Int64]()
+    for _ in range(calls):
+        var r = rt.call_batch(i.handle, spec, args, CallOptions.plain())
+        assert_true(r.outcome.is_ok(), spec.entry + ": " + String(r.outcome))
+        out.append(r.column.bits[0])
+    rt.close_instance(i.handle)
+    rt.close_context(c.handle)
+    rt.unload(u.handle)
+    return out^
+
+
+def _steady(values: List[Int64], what: String) raises:
+    # The first calls warm the interpreter's caches; from the fourth on,
+    # every call must find the same number of allocated blocks.
+    for k in range(4, len(values)):
+        assert_equal(values[k], values[3], what + ": allocated blocks call by call " + String(values.copy()))
+
+
+def _edges(mut rt: UdfRuntime) raises:
+    # Cancelled or past the deadline before the call: the C side refuses the
+    # whole batch, row -1, before any row runs.
+    var dbl = spec1(SHAPE_SCALAR, "udf_fixtures:double", TYPE_INT64, TYPE_INT64)
+    var r = call_once_with(rt, dbl, ints([1, 2, 3]), CallOptions(True, False, False))
+    assert_equal(status_name(r.outcome.status), "ERR_CANCELLED", String(r.outcome))
+    assert_equal(r.outcome.row, -1, String(r.outcome))
+    assert_true("cancelled before the batch" in r.outcome.message, String(r.outcome))
+    r = call_once_with(rt, dbl, ints([1, 2, 3]), CallOptions(False, False, True))
+    assert_equal(status_name(r.outcome.status), "ERR_DEADLINE", String(r.outcome))
+    assert_equal(r.outcome.row, -1, String(r.outcome))
+    assert_true("the deadline passed before the batch" in r.outcome.message, String(r.outcome))
+
+    # Column results of 0 and 1 rows.
+    var ident = spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_fixtures:identity", TYPE_INT64, TYPE_INT64)
+    r = call_once(rt, ident, ints(List[Int64]()))
+    assert_true(r.outcome.is_ok(), "0 rows: " + String(r.outcome))
+    assert_equal(len(r.column), 0)
+    r = call_once(rt, ident, ints([5]))
+    assert_true(r.outcome.is_ok(), "1 row: " + String(r.outcome))
+    assert_equal(same_column(r.column, _ints_want([5])), "", "a one-row column")
+
+    # Column nulls at the bitmap's edges: 1 row, row 7 of 8, row 63 of 64
+    # (the bitmap fills its 8 bytes; the values start right after them).
+    var nzl = spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_fixtures:none_on_zero_list", TYPE_INT64, TYPE_INT64)
+    for n in [1, 8, 64]:
+        var xs = List[Int64]()
+        var want = Column(TYPE_INT64)
+        for k in range(n - 1):
+            xs.append(Int64(k + 1))
+            want.append_int(Int64(k + 1))
+        xs.append(0)
+        want.append_null()
+        r = call_once(rt, nzl, ints(xs))
+        assert_true(r.outcome.is_ok(), String(n) + " rows: " + String(r.outcome))
+        assert_equal(same_column(r.column, want), "", "column, last of " + String(n) + " rows null")
+    # A per-row null at row 8 of 9: the bitmap's second byte.
+    var nz = spec1(SHAPE_SCALAR, "udf_fixtures:null_on_zero", TYPE_INT64, TYPE_INT64)
+    r = call_once(rt, nz, ints([1, 2, 3, 4, 5, 6, 7, 8, 0]))
+    assert_true(r.outcome.is_ok(), String(r.outcome))
+    var want9 = _ints_want([2, 4, 6, 8, 10, 12, 14, 16])
+    want9.append_null()
+    assert_equal(same_column(r.column, want9), "", "per row, row 8 of 9 null")
+
+    # What a call leaves behind in the interpreter: 300 rows (so the row
+    # count is not a cached small int), 8 calls on one instance; from the
+    # fourth call on, the allocated blocks are the same (a view, a result
+    # tuple, a result buffer or an int never let go).
+    var rows = List[Int64]()
+    for k in range(300):
+        rows.append(Int64(k))
+    var blocks = spec1(SHAPE_SCALAR, "udf_fixtures:allocated_blocks", TYPE_INT64, TYPE_INT64)
+    _steady(_repeated(rt, blocks, ints(rows), 8), "per row")
+    var blocks_list = spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_fixtures:allocated_blocks_list", TYPE_INT64, TYPE_INT64)
+    _steady(_repeated(rt, blocks_list, ints(rows), 8), "column")
+
+
 def _numpy_fails_here(mut rt: UdfRuntime) raises:
     var np = spec1(SHAPE_MAP_BATCHES_COLUMN, "udf_np:fahrenheit_np", TYPE_FLOAT64, TYPE_FLOAT64)
     assert_equal(rt.validate(np).status, OK, "validate reads the source; numpy is never imported")
@@ -295,6 +376,7 @@ def main() raises:
     _calls(rt)
     _two_args_and_int32(rt)
     _values_and_refusals(rt)
+    _edges(rt)
     _numpy_fails_here(rt)
     rt.shutdown()
     print("test_python_subinterp: ok")

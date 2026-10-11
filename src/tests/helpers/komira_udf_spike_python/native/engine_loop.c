@@ -23,6 +23,7 @@
  * until close, after shutdown returns. Handles are the runtime's.
  */
 #define _GNU_SOURCE
+#include <malloc.h>
 #include <dlfcn.h>
 #include <pthread.h>
 #include <sched.h>
@@ -53,7 +54,9 @@ enum {
   R_CPUS,       /* this process's CPU affinity count */
   R_COLD_NS,    /* engine open (before dlopen) to the end of the first batch; first run only, else -1 */
   R_THREADS,
-  R_INVOLUNTARY_SWITCHES /* during the measured phase */
+  R_INVOLUNTARY_SWITCHES, /* during the measured phase */
+  R_HEAP_WARM,            /* malloc'd bytes in use (mallinfo2), every thread warm */
+  R_HEAP_MEASURED         /* the same, after every measured batch, every context still open */
 };
 enum {
   T_STATUS = 0,
@@ -84,6 +87,12 @@ enum {
   M_AFTER_BAD_VALUES,       /* its wrong output values */
   M_EXPORTED,               /* argument arrays exported */
   M_RELEASED,               /* of those, released by the end */
+  M_BAD_ARGS,               /* the first of 9 malformed calls (mangle_args 1..9) */
+  M_BAD_ARGS_MOVED = M_BAD_ARGS + 9, /* how many of them moved their args in */
+  M_EMPTY_CALL,             /* call_batch of zero rows without a values buffer (legal) */
+  M_EMPTY_CALL_MOVED,
+  M_ERRORS_LAST,            /* kudf_error_heap: the last failing call's status */
+  M_ERRORS_HEAP,            /* kudf_error_heap: heap bytes grown over its failing calls */
   M_FIELDS
 };
 
@@ -122,8 +131,8 @@ struct run {
   int64_t rows;
   int check;
   double a, b, base, step;
-  pthread_barrier_t opened, warmed, measured;
-  int64_t f[R_INVOLUNTARY_SWITCHES + 1];
+  pthread_barrier_t opened, warmed, measured, closing;
+  int64_t f[R_HEAP_MEASURED + 1];
   char message[MSG];
   int64_t m[M_FIELDS];      /* kudf_misuse only */
   char m_message[M_FIELDS][MSG];
@@ -290,6 +299,8 @@ static const char* check_output(struct thread_state* s, const struct ArrowArray*
   struct run* r = s->run;
   if (o->length != rows) return "an output with another row count";
   if (o->n_buffers != 2 || o->buffers[1] == NULL || o->n_children != 0) return "an output that is not one column";
+  if (o->dictionary != NULL) return "an output with a dictionary";
+  if (o->offset < 0 || o->null_count != 0) return "an output with a negative offset or a null (no workload has one)";
   const int64_t* vi = (const int64_t*)o->buffers[1] + o->offset;
   const double* vf = (const double*)o->buffers[1] + o->offset;
   for (int64_t i = 0; i < rows; i++) {
@@ -321,13 +332,26 @@ static void fail_thread(struct thread_state* s, int32_t code, const char* msg) {
   }
 }
 
+/* The output slot as the host hands it over: every byte a pattern, so a
+ * field the runtime does not write is not zero by luck. A runtime writes
+ * release on every return: NULL on a failure (no output), its own on OK. */
+#define OUT_PATTERN 0xA5
+static void out_slot(struct ArrowDeviceArray* out) { memset(out, OUT_PATTERN, sizeof(*out)); }
+
+/* Whether the runtime left `out`'s release as out_slot wrote it. */
+static int out_unwritten(const struct ArrowDeviceArray* out) {
+  struct ArrowDeviceArray p;
+  out_slot(&p);
+  return memcmp(&out->array.release, &p.array.release, sizeof(p.array.release)) == 0;
+}
+
 /* One call: export, call_batch (timed), check, release. Returns the ns. */
 static int64_t one_call(struct thread_state* s, komira_udf_instance* inst, const void* values, int64_t* prev,
                         int* have_prev) {
   struct run* r = s->run;
   const komira_udf_runtime* t = r->e->t;
   struct ArrowDeviceArray args, out;
-  memset(&out, 0, sizeof(out));
+  out_slot(&out);
   if (!export_args(&args, values, r->rows, &s->f[T_RELEASED])) {
     fail_thread(s, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "export: out of memory");
     return 0;
@@ -349,15 +373,23 @@ static int64_t one_call(struct thread_state* s, komira_udf_instance* inst, const
     char m[MSG];
     take_error(&err, m);
     fail_thread(s, rc, m);
-    if (out.array.release != NULL) out.array.release(&out.array);
+    if (out.array.release != NULL) {
+      if (!out_unwritten(&out)) out.array.release(&out.array);
+      fail_thread(s, KOMIRA_UDF_ERR_INTERNAL, "UDF_RUNTIME_FAULT: out's release not NULL on a failure");
+    }
     return ns;
   }
-  if (out.array.release == NULL) {
+  if (out.array.release == NULL || out_unwritten(&out)) {
     fail_thread(s, KOMIRA_UDF_ERR_INTERNAL, "UDF_RUNTIME_FAULT: OK without an output");
     return ns;
   }
-  const char* bad = out.device_type == ARROW_DEVICE_CPU ? check_output(s, &out.array, values, r->rows, prev, have_prev)
-                                                         : "an output not on the CPU";
+  const char* bad = NULL;
+  if (out.device_type != ARROW_DEVICE_CPU || out.device_id != -1)
+    bad = "an output not on the CPU";
+  else if (out.sync_event != NULL || out.reserved[0] != 0 || out.reserved[1] != 0 || out.reserved[2] != 0)
+    bad = "an output with a sync event or nonzero reserved words";
+  else
+    bad = check_output(s, &out.array, values, r->rows, prev, have_prev);
   if (bad != NULL) fail_thread(s, KOMIRA_UDF_ERR_INTERNAL, bad);
   s->f[T_ROWS] += r->rows;
   out.array.release(&out.array);
@@ -411,6 +443,7 @@ static void* engine_thread(void* p) {
   for (int i = 0; ok && i < r->batches && s->f[T_STATUS] == 0; i++)
     s->samples[s->f[T_SAMPLES]++] = one_call(s, inst, values, &prev, &have_prev);
   pthread_barrier_wait(&r->measured);
+  pthread_barrier_wait(&r->closing); /* the run has read the heap with every context open */
   if (inst != NULL) t->close_instance(inst);
   if (ctx != NULL) t->close_context(ctx);
   free(values);
@@ -427,6 +460,9 @@ static int64_t rss_bytes(void) {
   fclose(f);
   return resident < 0 ? -1 : (int64_t)resident * sysconf(_SC_PAGESIZE);
 }
+
+/* Bytes the process has malloc'd and not freed, over every arena. */
+static int64_t heap_bytes(void) { return (int64_t)mallinfo2().uordblks; }
 
 static int64_t tv_ns(struct timeval tv) { return (int64_t)tv.tv_sec * 1000000000LL + (int64_t)tv.tv_usec * 1000; }
 
@@ -502,6 +538,7 @@ struct run* kudf_run(struct engine* e, const char* entry, int32_t shape, char ar
   pthread_barrier_init(&r->opened, NULL, (unsigned)r->threads + 1);
   pthread_barrier_init(&r->warmed, NULL, (unsigned)r->threads + 1);
   pthread_barrier_init(&r->measured, NULL, (unsigned)r->threads + 1);
+  pthread_barrier_init(&r->closing, NULL, (unsigned)r->threads + 1);
   for (int i = 0; i < r->threads; i++) {
     struct thread_state* th = &r->th[i];
     th->run = r;
@@ -514,18 +551,22 @@ struct run* kudf_run(struct engine* e, const char* entry, int32_t shape, char ar
   if (e->runs == 0 && r->th[0].first_batch_end != 0) r->f[R_COLD_NS] = r->th[0].first_batch_end - e->t_open;
   struct rusage u0, u1;
   pthread_barrier_wait(&r->warmed);
+  r->f[R_HEAP_WARM] = heap_bytes();
   getrusage(RUSAGE_SELF, &u0);
   int64_t w0 = now_mono();
   pthread_barrier_wait(&r->measured);
   r->f[R_WALL_NS] = now_mono() - w0;
+  r->f[R_HEAP_MEASURED] = heap_bytes();
   getrusage(RUSAGE_SELF, &u1);
   r->f[R_CPU_USER_NS] = tv_ns(u1.ru_utime) - tv_ns(u0.ru_utime);
   r->f[R_CPU_SYS_NS] = tv_ns(u1.ru_stime) - tv_ns(u0.ru_stime);
   r->f[R_INVOLUNTARY_SWITCHES] = u1.ru_nivcsw - u0.ru_nivcsw;
+  pthread_barrier_wait(&r->closing);
   for (int i = 0; i < r->threads; i++) pthread_join(r->th[i].tid, NULL);
   pthread_barrier_destroy(&r->opened);
   pthread_barrier_destroy(&r->warmed);
   pthread_barrier_destroy(&r->measured);
+  pthread_barrier_destroy(&r->closing);
   e->t->unload(r->udf);
   r->udf = NULL;
   e->runs++;
@@ -555,23 +596,71 @@ static void values_fill(struct run* r, void* values) {
   }
 }
 
+/* The malformed argument arrays of the misuse probe, each a host contract
+ * violation a runtime must refuse before it reads the array (1..7), and one
+ * legal edge it must accept (8). */
+enum {
+  MANGLE_NONE = 0,
+  MANGLE_CHILD_COUNT,   /* the struct with no children for a one-argument UDF */
+  MANGLE_NEGATIVE_LENGTH,
+  MANGLE_THREE_BUFFERS, /* the argument is not a primitive array */
+  MANGLE_NULL_CHILD,
+  MANGLE_CHILD_OFFSET,  /* the argument at offset -1 */
+  MANGLE_SHORT_CHILD,   /* the argument one row shorter than the struct */
+  MANGLE_NO_VALUES,     /* one row, no values buffer */
+  MANGLE_DEVICE,        /* the args on a device other than the CPU */
+  MANGLE_SMALL_CALL,    /* the call struct's struct_size 8, below any runtime's */
+  MANGLE_EMPTY_NO_VALUES /* zero rows, no values buffer: legal */
+};
+
+static void mangle_args(struct ArrowDeviceArray* d, int mangle) {
+  struct export_block* b = d->array.private_data;
+  switch (mangle) {
+    case MANGLE_CHILD_COUNT: d->array.n_children = 0; break;
+    case MANGLE_NEGATIVE_LENGTH: d->array.length = -1; break;
+    case MANGLE_THREE_BUFFERS: b->child.n_buffers = 3; break;
+    case MANGLE_NULL_CHILD: b->kids[0] = NULL; break;
+    case MANGLE_CHILD_OFFSET: b->child.offset = -1; break;
+    case MANGLE_SHORT_CHILD: b->child.length = d->array.length - 1; break;
+    case MANGLE_NO_VALUES:
+      d->array.length = b->child.length = 1;
+      b->cbufs[1] = NULL;
+      break;
+    case MANGLE_DEVICE: d->device_type = 2; break; /* ARROW_DEVICE_CUDA */
+    case MANGLE_EMPTY_NO_VALUES:
+      d->array.length = b->child.length = 0;
+      b->cbufs[1] = NULL;
+      break;
+    default: break;
+  }
+}
+
 /* One call_batch whose output is released unread. Returns its status; the
  * error message goes to m_message[field]; *moved is 1 when args were moved. */
 static int32_t raw_call(struct run* r, komira_udf_instance* inst, const void* values, int64_t parent_offset,
-                        int field, int64_t* moved) {
+                        int mangle, int field, int64_t* moved) {
   struct thread_state* s = &r->th[0];
   struct ArrowDeviceArray args, out;
-  memset(&out, 0, sizeof(out));
+  out_slot(&out);
   if (!export_args(&args, values, r->rows, &s->f[T_RELEASED])) return KOMIRA_UDF_ERR_OUT_OF_MEMORY;
   args.array.offset = parent_offset;
+  mangle_args(&args, mangle);
   s->f[T_EXPORTED]++;
-  komira_udf_call call = {sizeof(komira_udf_call), 0, 1, NULL};
+  komira_udf_call call = {mangle == MANGLE_SMALL_CALL ? (size_t)8 : sizeof(komira_udf_call), 0, 1, NULL};
   komira_udf_error err = {sizeof(komira_udf_error), 0, NULL, NULL, -1, -1, NULL, NULL};
   int32_t rc = r->e->t->call_batch(inst, &call, &args, &out, &err);
   *moved = args.array.release == NULL;
   if (args.array.release != NULL) args.array.release(&args.array);
   if (rc != KOMIRA_UDF_OK) take_error(&err, r->m_message[field]);
-  if (out.array.release != NULL) out.array.release(&out.array);
+  if (out.array.release != NULL && !out_unwritten(&out)) out.array.release(&out.array);
+  if (rc != KOMIRA_UDF_OK && out.array.release != NULL) {
+    snprintf(r->m_message[field], MSG, "UDF_RUNTIME_FAULT: out's release not NULL on a failure");
+    return KOMIRA_UDF_ERR_INTERNAL;
+  }
+  if (rc == KOMIRA_UDF_OK && out_unwritten(&out)) {
+    snprintf(r->m_message[field], MSG, "UDF_RUNTIME_FAULT: OK without writing out");
+    return KOMIRA_UDF_ERR_INTERNAL;
+  }
   return rc;
 }
 
@@ -594,7 +683,8 @@ static void* foreign_thread(void* p) {
     take_error(&err, r->m_message[M_FOREIGN_OPEN_INSTANCE]);
   else
     t->close_instance(other); /* the runtime accepted it: undo as it allows */
-  r->m[M_FOREIGN_CALL] = raw_call(r, f->inst, f->values, 0, M_FOREIGN_CALL, &r->m[M_FOREIGN_CALL_MOVED]);
+  r->m[M_FOREIGN_CALL] =
+      raw_call(r, f->inst, f->values, 0, MANGLE_NONE, M_FOREIGN_CALL, &r->m[M_FOREIGN_CALL_MOVED]);
   int64_t logs = __atomic_load_n(&r->e->logs, __ATOMIC_ACQUIRE);
   t->close_instance(f->inst);
   t->close_context(f->ctx);
@@ -629,13 +719,59 @@ struct run* kudf_misuse(struct engine* e, const char* entry, int32_t shape, char
     struct foreign f = {r, ctx, inst, values};
     pthread_t tid;
     if (pthread_create(&tid, NULL, foreign_thread, &f) == 0) pthread_join(tid, NULL);
-    r->m[M_OFFSET_CALL] = raw_call(r, inst, values, 1, M_OFFSET_CALL, &r->m[M_OFFSET_CALL_MOVED]);
+    r->m[M_OFFSET_CALL] = raw_call(r, inst, values, 1, MANGLE_NONE, M_OFFSET_CALL, &r->m[M_OFFSET_CALL_MOVED]);
+    r->m[M_BAD_ARGS_MOVED] = 0;
+    for (int k = 0; k < 9; k++) {
+      int64_t moved = 0;
+      r->m[M_BAD_ARGS + k] = raw_call(r, inst, values, 0, MANGLE_CHILD_COUNT + k, M_BAD_ARGS + k, &moved);
+      r->m[M_BAD_ARGS_MOVED] += moved;
+    }
+    r->m[M_EMPTY_CALL] = raw_call(r, inst, values, 0, MANGLE_EMPTY_NO_VALUES, M_EMPTY_CALL, &r->m[M_EMPTY_CALL_MOVED]);
     int64_t prev = 0;
     int have_prev = 0;
     one_call(s, inst, values, &prev, &have_prev);
     r->m[M_AFTER_CALL] = s->f[T_STATUS];
     snprintf(r->m_message[M_AFTER_CALL], MSG, "%s", s->message);
     r->m[M_AFTER_BAD_VALUES] = s->f[T_BAD_VALUES];
+    t->close_instance(inst);
+  }
+  if (ctx != NULL) t->close_context(ctx);
+  t->unload(r->udf);
+  r->udf = NULL;
+  free(values);
+  r->m[M_EXPORTED] = s->f[T_EXPORTED];
+  r->m[M_RELEASED] = __atomic_load_n(&s->f[T_RELEASED], __ATOMIC_ACQUIRE);
+  return r;
+}
+
+/* kudf_error_heap: `calls` call_batch calls of `entry` that fail (a UDF that
+ * raises), on one context and instance of the calling thread, after 20
+ * warm-up calls; M_ERRORS_HEAP is how much the heap (mallinfo2, every
+ * arena) grew over them. A runtime that does not free what a failing call
+ * allocates (its message, its trace) grows it by at least that. */
+struct run* kudf_error_heap(struct engine* e, const char* entry, int32_t shape, char arg_fmt, char result_fmt,
+                            int64_t rows, int32_t calls) {
+  struct run* r = run_load(e, entry, shape, arg_fmt, result_fmt, 1, 1, 0, rows, CHECK_NONE, 0, 0, 0, 0);
+  if (r == NULL || r->udf == NULL) return r;
+  const komira_udf_runtime* t = e->t;
+  struct thread_state* s = &r->th[0];
+  s->run = r;
+  void* values = malloc((size_t)(r->rows > 0 ? r->rows : 1) * 8);
+  komira_udf_context* ctx = NULL;
+  komira_udf_instance* inst = NULL;
+  komira_udf_error err = {sizeof(komira_udf_error), 0, NULL, NULL, -1, -1, NULL, NULL};
+  int32_t rc = values == NULL ? KOMIRA_UDF_ERR_OUT_OF_MEMORY : t->open_context(e->rt, 0, &ctx, &err);
+  if (rc == KOMIRA_UDF_OK) rc = t->open_instance(ctx, r->udf, &inst, &err);
+  if (rc != KOMIRA_UDF_OK) take_error(&err, r->m_message[M_OPEN]);
+  r->m[M_OPEN] = rc;
+  if (inst != NULL) {
+    values_fill(r, values);
+    int64_t moved = 0;
+    for (int i = 0; i < 20; i++) raw_call(r, inst, values, 0, MANGLE_NONE, M_ERRORS_LAST, &moved);
+    int64_t h0 = heap_bytes();
+    for (int i = 0; i < calls; i++)
+      r->m[M_ERRORS_LAST] = raw_call(r, inst, values, 0, MANGLE_NONE, M_ERRORS_LAST, &moved);
+    r->m[M_ERRORS_HEAP] = heap_bytes() - h0;
     t->close_instance(inst);
   }
   if (ctx != NULL) t->close_context(ctx);
@@ -656,7 +792,7 @@ const char* kudf_misuse_message(const struct run* r, int32_t field) {
 }
 
 int64_t kudf_run_get(const struct run* r, int32_t thread, int32_t field) {
-  if (thread < 0) return field >= 0 && field <= R_INVOLUNTARY_SWITCHES ? r->f[field] : 0;
+  if (thread < 0) return field >= 0 && field <= R_HEAP_MEASURED ? r->f[field] : 0;
   if (thread >= r->threads || field < 0 || field > T_SAMPLES) return 0;
   return r->th[thread].f[field];
 }
