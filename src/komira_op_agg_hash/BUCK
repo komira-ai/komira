@@ -28,6 +28,7 @@ mojo_library(
         "tests/test_agg_commit_cross_realloc.mojo",
         "tests/test_agg_commit_double_free.mojo",
         "tests/test_agg_commit_lifetime.mojo",
+        "tests/test_agg_commit_minmax_float_order.mojo",
         "tests/test_agg_commit_partitioned.mojo",
         "tests/test_agg_commit_view_bounds.mojo",
         "tests/test_flat_hash_agg.mojo",
