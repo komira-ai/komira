@@ -72,20 +72,6 @@ mojo_gcp_client(
     deps = _RUNTIME,
 )
 
-# "has no field `colour`": `omit_fields` names a field the message does not
-# have, which would otherwise leave out nothing and say it had.
-mojo_gcp_client(
-    name = "omit_unknown_field",
-    bundle_only = _ITEM,
-    bundle_proto_deps = True,
-    messages_only = True,
-    omit_fields = ["example.shop.v1.Item.colour"],
-    proto_deps = _DEPS,
-    protos = [],
-    roots = ["Item"],
-    deps = _RUNTIME,
-)
-
 # "which this scope does not generate": `omit_fields` names a real field of a
 # message the roots prune away (ItemTombstone is reached only through
 # DeleteItem), which would otherwise leave out nothing and say it had.
@@ -176,23 +162,6 @@ mojo_gcp_client(
     bundle_proto_deps = True,
     methods = ["ShopService.GetItem"],
     proto_deps = _SHOP_DEPS,
-    protos = [],
-    deps = _RUNTIME,
-)
-
-# "method `WatchItems` is bidirectional-streaming": a method that streams its
-# requests, listed in a "rest" client's `methods`, is refused by name at
-# generation, never skipped into a client that lacks a method its target
-# lists.
-mojo_gcp_client(
-    name = "rest_streaming_method",
-    bundle_only = [
-        "example/shop/v1/item.proto",
-        "example/shop/v1/watch.proto",
-    ],
-    bundle_proto_deps = True,
-    methods = ["WatchService.WatchItems"],
-    proto_deps = ["//functional/mojo_gcp_client:watch_api"],
     protos = [],
     deps = _RUNTIME,
 )

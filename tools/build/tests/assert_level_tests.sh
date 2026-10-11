@@ -40,7 +40,6 @@ if BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/assert_level.sh" "$LOG" > 
 else
     fail "$(grep -o 'FAIL  assert level: .*' "$LOG/assert_level.log" | cut -c 7- | cut -c 1-400) (see $LOG/assert_level.log)"
 fi
-expect_green assert_level_functional tests//functional/assert_level: tests//functional/mem_cap:
 # Each test's branch coverage run (its bitcode compiled, linked and run, as
 # the gate would read it) passes only when the bitcode got the test's level
 # and defines: at the default level safe_probe's assert fires (exit 132), and

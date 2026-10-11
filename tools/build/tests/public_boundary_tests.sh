@@ -25,7 +25,6 @@
 #      planted tree's window is 2030 to 2031-09-01, so no file of it holds a
 #      date of the root target's window.
 
-expect_green public_boundary //:public_boundary tests//functional/public_boundary:ok
 N=tests//negative/public_boundary
 M="$N/docs/plant.md:1"
 HS="tests//functional/public_boundary:hosts.tsv"

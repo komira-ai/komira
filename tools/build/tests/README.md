@@ -432,29 +432,22 @@ fixtures, one of them a producer's bytes that are not protoc's serialization
 (the fields in reverse order, a packed field unpacked; a `bytes` value holding
 0x00 and 0xff); `selftest_encoded` reads `proto_encode`'s output back as the
 `.hex` (declared in `canonical_producer`, since it checks no producer).
-[`negative/proto_fixture`](negative/proto_fixture/BUCK) builds the welded
-cases' fixtures end to end, one defect per refusal, each a fixture one change
-away from the self-test's, and each must fail naming its leg: `leg0_identical`
-(the `.hex` is protoc's own bytes), `leg0_duplicate` (`id` written twice,
-which the decode shows once), `leg0_duplicate_message` (the string `name`
-written twice, so the walk must step over a length-delimited value), `leg1_value` (the `.txtpb` says `id: 151` where
-the bytes hold 150; its `.canonical.hex` is protoc's encoding of that text, so
-only leg 1 fires), `leg2_unknown`, `leg2_nested` and `leg2_group` (field 99 at
-the top level, field 9 inside `inner`, and an empty group 99, which protoc
-prints as `99: 1`, `  9: 1` and `99 {`; the `.txtpb` holds them, so leg 1
-passes, and protoc's text parser refuses the numbers, so leg 3 fires too),
+Each planted defect is one of those welded cases, `refuses_<defect>`, a
+fixture one change away from the self-test's that must be refused naming its
+leg: `leg0_identical` (the `.hex` is protoc's own bytes), `leg0_duplicate`
+(`id` written twice, which the decode shows once), `leg0_duplicate_message`
+(the string `name` written twice, so the walk must step over a
+length-delimited value), `leg1_value` (the `.txtpb` says `id: 151` where the
+bytes hold 150), `leg2_unknown`, `leg2_nested` and `leg2_group` (field 99 at
+the top level, field 9 inside `inner`, and an empty group 99),
 `leg3_noncanonical` (the `.canonical.hex` is a second non-protoc form of the
-message), `leg4_root` (a `Meters` fixture checked as a `Feet`, the same wire
-and text form), `leg5_enum` (`kind: 99`, a value `Kind` does not declare,
-which protoc decodes and encodes back as a number) and `hex_odd` (a `.hex`
-with three digits). These twins are `expect_red` lines of `proto_tests.sh`,
-so they run only in `build_system_selftests.yml` (nightly and on demand), not
-in the pull-request check; per pull request the same defects are gated by the
-welded cases, through `tests//functional/proto_fixture`.
+message), `leg4_root` (a `Meters` fixture checked as a `Feet`), `leg5_enum`
+(`kind: 99`, a value `Kind` does not declare) and `hex_odd` (a `.hex` with
+three digits). A case whose check stops refusing its defect fails every build
+that checks a fixture.
 
 ```sh
 ./buck2 build tests//functional/proto_fixture:
-./buck2 build tests//negative/proto_fixture:leg4_root   # must fail: LEG 4: leg4_root.txtpb names example.fixture.v1.Meters ...
 ```
 
 Generation is deterministic: two uncached builds (an isolated daemon,

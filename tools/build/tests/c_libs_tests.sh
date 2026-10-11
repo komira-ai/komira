@@ -5,10 +5,9 @@
 # expect_green and expect_red); not run on its own.
 #
 #  26. aws-lc and s2n-tls:
-#      - drift: third_party/<lib>/srcs.bzl is what //third_party/<lib>:srcs_gen
-#        (tools/build/third_party_srcs, a Mojo tool) reads out of the pinned
-#        archive's CMake lists today (the test //third_party/<lib>:srcs_drift,
-#        which `./buck2 test //...` also runs);
+#      - (in the gate: //third_party/<lib>:srcs_drift, the test that
+#        third_party/<lib>/srcs.bzl is what //third_party/<lib>:srcs_gen reads
+#        out of the pinned archive's CMake lists today);
 #      - (in the gate, each a validation of its binary: aws-lc's self tests
 #        and known-answer vectors, //tools/build/examples/aws_lc:test_aws_lc;
 #        an s2n-tls TLS 1.3 handshake,
@@ -19,14 +18,6 @@
 #      - neither test binary exports a dynamic symbol (both libraries are
 #        compiled with hidden visibility, so nothing in them can interpose on
 #        a library the Mojo runtime loads).
-
-for lib in aws-lc s2n-tls; do
-    if (cd "$ROOT" && timeout 900 "$BUCK2" test "//third_party/$lib:srcs_drift") > "$LOG/drift_$lib.log" 2>&1; then
-        pass "drift $lib: third_party/$lib/srcs.bzl is what //third_party/$lib:srcs_gen reads out of the pinned archive"
-    else
-        fail "drift $lib: //third_party/$lib:srcs_drift failed (see $LOG/drift_$lib.log)"
-    fi
-done
 
 features=$(grep -o '"S2N_[A-Z0-9_]*"' "$ROOT/third_party/s2n-tls/features.bzl" | tr -d '"')
 probes=$(cd "$ROOT" && "$BUCK2" uquery 'kind(cxx_library, tests//functional/s2n_probes: + tests//negative/s2n_probes:)' 2> "$LOG/s2n_probes_query.log" |
