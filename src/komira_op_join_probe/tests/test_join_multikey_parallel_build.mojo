@@ -380,10 +380,8 @@ def test_varied_two_key_fixture() raises:
 
 
 def test_negative_and_extreme_keys() raises:
-    """Negative narrow-int keys — a join returning 0 of 80 rows on negative keys
-    was found this week and NO corpus cell uses them, so the corpus cannot see
-    this. Includes INT64 min/max and 0/-0 boundaries.
-    """
+    """Negative keys (a build that mishandles the sign of a key hash returns
+    no rows for them), INT64 min and max, and 0 / -0."""
     join_parallel_build_configure(JOIN_PARALLEL_BUILD_FORCE)
     var k0 = List[Int64]()
     var k1 = List[Int64]()
