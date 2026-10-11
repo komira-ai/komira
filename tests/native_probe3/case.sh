@@ -2,7 +2,7 @@
 #
 # usage: busybox sh case.sh <busybox> <mojo_wrapper.sh> <compiler_dir> <zig_dir> \
 #            <cc_target> <target_cpu> <wd_idle> <wd_sample> <env> <src_dir> \
-#            <runtime_dir> <elfsyms> <case> <expect> <log>
+#            <runtime_dir> <elfsyms> <case> <expect> <log> <fail_rc> [<ERE>...]
 #
 # <env> holds lib/ (the owners' libkomira_<lib>_native.so.1, the holder archive
 # and JIT object), lib/mojo/*.mojoc, nort/ and codecs/. Each case assembles a
@@ -16,8 +16,15 @@
 # `mojo run` runs E/bin/mojo itself. Every program and every `mojo run` runs with
 # LD_LIBRARY_PATH unset. The log holds each command, MOJO_RC= / RUN_RC=, the
 # programs' CHECK/RESULT lines, and CASE_RESULT. The exit status is the
-# expectation: <expect> "pass" needs CASE_RESULT PASS; "fail:<ERE>" needs
-# CASE_RESULT FAIL and a log line matching <ERE>.
+# expectation: <expect> "pass" needs CASE_RESULT PASS; "fail" needs CASE_RESULT
+# FAIL, the run phase's exit status equal to <fail_rc> ("any": not checked),
+# and, for each <ERE>, a line of the run phase matching it.
+#
+# The run phase is what the case's last `mojo run` or program run printed
+# (stdout and stderr, scrubbed) plus the LOADED_FROM verdicts (DL). It holds
+# none of the lines printed before the program runs (commands, NEEDED
+# listings, compile output of `mojo build`), so a must-fail signature cannot
+# match text every log carries.
 
 set -u
 
@@ -44,6 +51,10 @@ ELFSYMS=$(abspath "$3")
 CASE=$4
 EXPECT=$5
 LOG=$(abspath "$6")
+FAIL_RC=$7
+shift 7
+# The signature EREs, one per line (the cases reuse "$@").
+SIGS=$(printf '%s\n' "$@")
 
 case "${BUCK_SCRATCH_PATH:-}" in
     "") W=$PWD/_probe3/$CASE ;;
@@ -57,10 +68,19 @@ export PATH
 
 exec 3>&2
 exec > "$LOG" 2>&1
-echo "=================== CASE $CASE (expect $EXPECT)"
+echo "=================== CASE $CASE (expect $EXPECT, run-phase exit $FAIL_RC)"
+printf '%s\n' "$SIGS" | grep -v '^$' | sed 's|.*|SIGNATURE /&/|'
 
 scrub() {
     sed "s|$E|<env>|g; s|$SRC|<src>|g; s|$TC|<compiler>|g"
+}
+
+PHASE=$W/phase.txt
+: > "$PHASE"
+PHASE_RC=none
+# to_phase: copy stdin to stdout and to the run phase.
+to_phase() {
+    tee -a "$PHASE"
 }
 
 OK=1
@@ -115,25 +135,29 @@ RUN_RC=0
 
 # mojo_run <args...>: E/bin/mojo run, LD_LIBRARY_PATH unset, from $W/run.
 # With DEBUG=1 the loader's record (LD_DEBUG=libs) goes to $W/ld.txt.
+# PRE: an LD_PRELOAD value (it applies to the mojo process, which the JIT runs in).
 DEBUG=0
+PRE=""
 mojo_run() {
-    echo "CMD: <env>/bin/mojo run $*" | scrub
+    echo "CMD: <env>/bin/mojo run $*${PRE:+ (LD_PRELOAD=$PRE)}" | scrub
+    : > "$PHASE"
     MOJO_RC=0
     (
         cd "$W/run" || exit 2
         if [ "$DEBUG" = 1 ]; then
-            exec env -u LD_LIBRARY_PATH LD_DEBUG=libs LD_DEBUG_OUTPUT="$W/ld" PATH="$E/bin:$W/bin" \
+            exec env -u LD_LIBRARY_PATH ${PRE:+LD_PRELOAD="$PRE"} LD_DEBUG=libs LD_DEBUG_OUTPUT="$W/ld" PATH="$E/bin:$W/bin" \
                 MODULAR_HOME="$W/mh" MODULAR_CACHE_DIR="$W/mc" XDG_CACHE_HOME="$W/mc" TMPDIR="$W/tmp" HOME="$W/home" \
                 KGEN_CompilerRT_AsyncRT_ParallelismLevel=1 MODULAR_CRASH_REPORTING_ENABLED=false \
                 timeout 420 "$E/bin/mojo" run "$@" < /dev/null
         fi
-        exec env -u LD_LIBRARY_PATH PATH="$E/bin:$W/bin" \
+        exec env -u LD_LIBRARY_PATH ${PRE:+LD_PRELOAD="$PRE"} PATH="$E/bin:$W/bin" \
             MODULAR_HOME="$W/mh" MODULAR_CACHE_DIR="$W/mc" XDG_CACHE_HOME="$W/mc" TMPDIR="$W/tmp" HOME="$W/home" \
             KGEN_CompilerRT_AsyncRT_ParallelismLevel=1 MODULAR_CRASH_REPORTING_ENABLED=false \
             timeout 420 "$E/bin/mojo" run "$@" < /dev/null
     ) > "$W/mr.txt" 2>&1 || MOJO_RC=$?
-    scrub < "$W/mr.txt" | head -c 20000
+    scrub < "$W/mr.txt" | head -c 20000 | to_phase
     echo "MOJO_RC=$MOJO_RC"
+    PHASE_RC=$MOJO_RC
     [ "$MOJO_RC" = 0 ] || fail "mojo run exited $MOJO_RC"
 }
 
@@ -174,7 +198,6 @@ dyn() {
 
 # run_bin <name> <args...>: E/bin/<name>, LD_LIBRARY_PATH unset, from $W/run.
 # PRE: an LD_PRELOAD value. DEBUG=1: the loader's record to $W/ld.*.
-PRE=""
 run_bin() {
     exe=$E/bin/$1
     shift
@@ -184,6 +207,7 @@ run_bin() {
     fi
     echo "EXE: $(dyn "$exe")"
     echo "RUN: <env>/bin/$(basename "$exe") $* (LD_LIBRARY_PATH unset${PRE:+, LD_PRELOAD=$PRE})" | scrub
+    : > "$PHASE"
     RUN_RC=0
     (
         cd "$W/run" || exit 2
@@ -192,8 +216,9 @@ run_bin() {
         fi
         exec env -u LD_LIBRARY_PATH ${PRE:+LD_PRELOAD="$PRE"} "$exe" "$@" < /dev/null
     ) > "$W/run.txt" 2>&1 || RUN_RC=$?
-    scrub < "$W/run.txt" | head -c 20000
+    scrub < "$W/run.txt" | head -c 20000 | to_phase
     echo "RUN_RC=$RUN_RC"
+    PHASE_RC=$RUN_RC
 }
 
 # result_of <file>: the program's own verdict.
@@ -219,9 +244,9 @@ loaded_from() {
         [ -n "$p" ] && [ -e "$p" ] && p=$(realpath "$p")
         grep -E "(find library=$s|trying file=.*/$s\$|search path=)" "$W/ld.all" | grep -B1 -A3 "$s" | scrub | sed "s/^ *[0-9]*: */  /" | head -12
         case "$p" in
-            "") echo "LOADED_FROM $s NONE"; fail "$s: not in the loader's record" ;;
-            "$E/lib/"*) echo "LOADED_FROM $s INSIDE $(echo "$p" | scrub)" ;;
-            *) echo "LOADED_FROM $s OUTSIDE $(echo "$p" | scrub)"; fail "$s loaded from outside the environment" ;;
+            "") echo "LOADED_FROM $s NONE" | to_phase; fail "$s: not in the loader's record" ;;
+            "$E/lib/"*) echo "LOADED_FROM $s INSIDE $(echo "$p" | scrub)" | to_phase ;;
+            *) echo "LOADED_FROM $s OUTSIDE $(echo "$p" | scrub)" | to_phase; fail "$s loaded from outside the environment" ;;
         esac
     done
 }
@@ -239,7 +264,7 @@ WITHOUT_ASYNC="http_core crypto compression async_api metrics scan_source libc"
 
 # shellcheck disable=SC2046 # one flag per line, no spaces in them
 case "$CASE" in
-    R1 | R2 | R1_MISS | IR1)
+    R1 | R2 | R1_MISS | IR1 | IR4)
         install_mojo
         case "$CASE" in
             R2) set -- $(lflags $REVERSED) ;;
@@ -247,15 +272,19 @@ case "$CASE" in
             *) set -- $(lflags $OWNERS) ;;
         esac
         ARG=""
-        [ "$CASE" = IR1 ] && ARG=ir
+        case "$CASE" in
+            IR1) ARG=ir ;;
+            IR4) ARG=ir; PRE="libcrypto.so.3:libssl.so.3" ;;
+        esac
         mojo_run -I "$E/lib/mojo" "$@" -Xlinker -lkomira_log_holder_jit "$SRC/r1.mojo" $ARG > "$W/r.txt"
         cat "$W/r.txt"
         program_passed "$W/r.txt" || fail "the program did not print RESULT PASS"
         ;;
-    B1 | IR2 | ONE)
+    B1 | IR2 | IR3 | ONE)
         mojo_build r1 $(lflags $OWNERS) -Xlinker -lkomira_log_holder "$SRC/r1.mojo"
         case "$CASE" in
             IR2) PRE="libcrypto.so.3:libssl.so.3"; run_bin r1 ir ;;
+            IR3) run_bin r1 ir ;;
             ONE) run_bin r1 one ;;
             *) run_bin r1 ;;
         esac
@@ -321,6 +350,16 @@ case "$CASE" in
         ;;
 esac
 
+# IR: the order the case is about is the order the program saw.
+case "$CASE" in
+    IR1 | IR3) want=after ;;
+    IR2 | IR4) want=before ;;
+    *) want="" ;;
+esac
+if [ -n "$want" ]; then
+    grep -q "^ORDER system_openssl $want " "$PHASE" || fail "the system OpenSSL was not loaded $want the komira libraries"
+fi
+
 if [ "$OK" = 1 ]; then
     echo "CASE_RESULT $CASE PASS"
 else
@@ -336,12 +375,21 @@ case "$EXPECT" in
         tail -c 6000 "$LOG"
         exit 1
         ;;
-    fail:*)
-        re=${EXPECT#fail:}
-        if [ "$OK" = 0 ] && grep -Eq "$re" "$LOG"; then
-            exit 0
+    fail)
+        why=""
+        [ "$OK" = 0 ] || why="$why; the case passed"
+        if [ "$FAIL_RC" != any ] && [ "$PHASE_RC" != "$FAIL_RC" ]; then
+            why="$why; the run phase exited $PHASE_RC, not $FAIL_RC"
         fi
-        echo "native_probe3: $CASE expected to fail with /$re/ and did not; its log:"
+        [ -n "$SIGS" ] || why="$why; no signature"
+        while IFS= read -r re; do
+            [ -n "$re" ] || continue
+            grep -Eq -- "$re" "$PHASE" || why="$why; no run-phase line matches /$re/"
+        done << EOS
+$SIGS
+EOS
+        [ -z "$why" ] && exit 0
+        echo "native_probe3: $CASE did not fail with its signature${why}; its log:"
         tail -c 6000 "$LOG"
         exit 1
         ;;

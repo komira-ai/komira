@@ -15,8 +15,9 @@ load(":probe.bzl", "elf_report", "log_jit", "native_so", "probe_case", "probe_en
 # its JIT object (option A), the conda-forge codec libraries, and the .mojoc
 # closure of every consumer: one installed environment (:env). Each case is
 # one target; its action FAILS unless the case met its expectation:
-#   expect "pass"         the case passed;
-#   expect "fail:<ERE>"   the case failed and its log matches <ERE>.
+#   expect "pass"   the case passed;
+#   expect "fail"   the case failed with its signature (_FAIL below): the
+#                   run phase's exit status and EREs over the run phase only.
 # A must-fail case also has a `<case>_raw` target that expects "pass": its
 # build is RED, which is the must-fail case shown failing.
 #
@@ -152,25 +153,41 @@ _CONSUMERS = glob(["consumers/*.mojo"]) + [
     "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
 ]
 
-# case -> expectation. The must-fail ones name the text the failure must show.
-_CASES = {
-    "B1": "pass",
-    "B2": "pass",
-    "B3": "fail:libkomira_crypto_native\\.so\\.1",
-    "DL_B": "pass",
-    "DL_R": "pass",
-    "DL_MISS_B": "fail:LOADED_FROM liblz4\\.so\\.1 OUTSIDE",
-    "DL_MISS_R": "fail:LOADED_FROM liblz4\\.so\\.1 OUTSIDE",
-    "IR1": "pass",
-    "IR2": "pass",
-    "LOG1_B": "pass",
-    "LOG1_R": "pass",
-    "LOG2": "pass",
-    "ONE": "pass",
-    "R1": "pass",
-    "R1_MISS": "fail:komira_ignore_sigpipe",
-    "R2": "pass",
+# case -> expectation. "pass", or a must-fail case's precise failure signature:
+# the run phase's exit status ("any": unchecked) and EREs that must each match
+# a line of the run phase (what the program or `mojo run` printed, and the
+# LOADED_FROM verdicts), never the NEEDED listings or CHECK lines printed
+# before or beside it (case.sh).
+_FAIL = {
+    # The loader cannot find crypto's library for http_core (no DT_RUNPATH).
+    "B3": ("127", [
+        "^<env>/bin/b2: error while loading shared libraries: libkomira_crypto_native\\.so\\.1: cannot open shared object file",
+    ]),
+    # The program itself passes on the image's codecs; each one is loaded from
+    # outside the environment.
+    "DL_MISS_B": ("0", [
+        "^RESULT PASS$",
+        "^LOADED_FROM liblz4\\.so\\.1 OUTSIDE ",
+        "^LOADED_FROM libz\\.so\\.1 OUTSIDE ",
+        "^LOADED_FROM libzstd\\.so\\.1 OUTSIDE ",
+    ]),
+    "DL_MISS_R": ("0", [
+        "^RESULT PASS$",
+        "^LOADED_FROM liblz4\\.so\\.1 OUTSIDE ",
+        "^LOADED_FROM libz\\.so\\.1 OUTSIDE ",
+        "^LOADED_FROM libzstd\\.so\\.1 OUTSIDE ",
+    ]),
+    # The JIT misses komira_async's symbol, and only it.
+    "R1_MISS": ("1", [
+        "^JIT session error: Symbols not found: \\[ komira_ignore_sigpipe \\]$",
+    ]),
 }
+
+# IR: the system OpenSSL with ours, both orders under both consumers (the
+# program prints ORDER, case.sh checks it): IR1 `mojo run`, system after
+# (dlopen RTLD_GLOBAL in main); IR2 built, system before (LD_PRELOAD); IR3
+# built, system after; IR4 `mojo run`, system before (LD_PRELOAD on mojo).
+_CASES = ["B1", "B2", "DL_B", "DL_R", "IR1", "IR2", "IR3", "IR4", "LOG1_B", "LOG1_R", "LOG2", "ONE", "R1", "R2"] + sorted(_FAIL.keys())
 
 [
     probe_case(
@@ -178,13 +195,16 @@ _CASES = {
         case = case,
         consumers = _CONSUMERS,
         env = ":env",
-        expect = expect,
+        expect = "fail" if case in _FAIL else "pass",
+        fail_rc = _FAIL[case][0] if case in _FAIL else "any",
+        fail_signature = _FAIL[case][1] if case in _FAIL else [],
         script = "case.sh",
         tool = ":elfsyms",
     )
-    for case, expect in _CASES.items()
+    for case in _CASES
 ]
 
+# A must-fail case run as must-pass: its build is RED, the failure shown.
 [
     probe_case(
         name = case + "_raw",
@@ -195,11 +215,10 @@ _CASES = {
         script = "case.sh",
         tool = ":elfsyms",
     )
-    for case, expect in _CASES.items()
-    if expect != "pass"
+    for case in sorted(_FAIL.keys())
 ]
 
 probe_report(
     name = "report",
-    logs = [":elf"] + [":" + c for c in sorted(_CASES.keys())],
+    logs = [":elf"] + [":" + c for c in sorted(_CASES)],
 )

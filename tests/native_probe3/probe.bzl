@@ -155,6 +155,8 @@ probe_env = declares_docs(_env)
 
 def _case_impl(ctx):
     tc = ctx.attrs.toolchain[MojoToolchainInfo]
+    if ctx.attrs.expect == "fail" and not ctx.attrs.fail_signature:
+        fail("{}: a must-fail case names its failure signature".format(ctx.label.name))
     srcs = ctx.actions.copied_dir("consumers", {s.basename: s for s in ctx.attrs.consumers})
     log = ctx.actions.declare_output(ctx.label.name + ".log")
     wd_idle = str(tc.watchdog_idle_secs) if tc.watchdog_idle_secs != None else "300"
@@ -179,6 +181,8 @@ def _case_impl(ctx):
             ctx.attrs.case,
             ctx.attrs.expect,
             log.as_output(),
+            ctx.attrs.fail_rc,
+            ctx.attrs.fail_signature,
         ),
         category = "native_probe3",
         identifier = ctx.label.name,
@@ -190,8 +194,13 @@ _case = rule(impl = _case_impl, attrs = {
     "consumers": attrs.list(attrs.source()),
     "env": attrs.source(),
     # pass: the action fails unless the case passed.
-    # fail:<ERE>: the action fails unless the case failed AND its log matches <ERE>.
-    "expect": attrs.string(),
+    # fail: the action fails unless the case failed, its run phase exited
+    # fail_rc ("any": unchecked) and every fail_signature ERE matches a line of
+    # the run phase (what the program or `mojo run` printed, and the
+    # LOADED_FROM verdicts; never the pre-run listings). See case.sh.
+    "expect": attrs.enum(["pass", "fail"]),
+    "fail_rc": attrs.string(default = "any"),
+    "fail_signature": attrs.list(attrs.string(), default = []),
     "script": attrs.source(),
     "tool": attrs.exec_dep(providers = [RunInfo]),
     "toolchain": _TC,

@@ -5,8 +5,9 @@
 #   Mojo-to-C edge no DT_NEEDED carries);
 #   a full TLS 1.3 handshake, client against server over a socketpair, with
 #   the client verifying the server's chain against the test root.
-# Arguments: `ir` loads the system OpenSSL RTLD_GLOBAL first (in a built
-# program it may already be preloaded) and checks no interposition; `one`
+# Arguments: `ir` prints whether the system OpenSSL is already loaded (ORDER:
+# preloaded = before ours), loads it RTLD_GLOBAL (a no-op when preloaded) and
+# checks no interposition; `one`
 # checks that aws-lc is one copy, reached from crypto and from http_core.
 # The certificates are read from the working directory.
 from std.ffi import external_call
@@ -23,6 +24,7 @@ from komira_http_core.tls import (
     tls_init,
 )
 from p3dl import (
+    LIBCRYPTO,
     RTLD_NOLOAD,
     RTLD_NOW,
     check_no_interposition,
@@ -145,6 +147,10 @@ def main() raises:
             one = True
     var ok = True
     if ir:
+        # The order: whether the system libcrypto is already in the process
+        # before main (preloaded) or arrives only through the dlopen below.
+        var before = dlopen(LIBCRYPTO, RTLD_NOW | RTLD_NOLOAD) != 0
+        print("ORDER system_openssl", "before" if before else "after", "the komira libraries", flush=True)
         ok = load_system_openssl() and ok
     ok = check_sha256() and ok
     ok = check_aead() and ok
