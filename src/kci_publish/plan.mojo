@@ -69,7 +69,8 @@
 #   a numbered build and `history` is empty (it was not read).
 #
 # `main_line_files(listed_files, main_commits)` -- THE MAIN-LINE FILTER of a
-#   stage whose channel also takes break-glass builds (gamma): the listed
+#   break_glass stage, whose channel also takes break-glass builds (no such
+#   stage publishes today): the listed
 #   files whose `h<8 hex>` is a prefix of some commit on main's history
 #   (`main_commits`, `git rev-list refs/remotes/origin/main` after a fetch,
 #   kci_cli). A prefix that main's history holds counts as main-line even
