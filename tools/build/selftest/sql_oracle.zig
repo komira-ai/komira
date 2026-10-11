@@ -27,7 +27,9 @@
 //! env entry is checked only by that comparison at run time), a
 //! duckdb_dist version that is not digits and dots (the dist_version_*
 //! refusals: the injection itself, then one per kind of character the
-//! pattern must not admit: a quote, a lowercase and an uppercase letter, a
+//! pattern must not admit: a quote, `v` and `V` (so the class widened to
+//! `a-z` or `A-Z`, or any range holding `v` or `V`, fails; a letter range
+//! without them, such as `a-f`, is not pinned and admits no quote), a
 //! space, a semicolon, `/` and `:` next to the digit range, a newline (which
 //! the multi-line flag `(?m)` admits), and empty; a version of 0 and 9, DIST_BOUNDS, must build, so a narrowed digit
 //! range fails too), and each of the sql_oracle analysis `fail()` calls deleted, or

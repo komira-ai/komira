@@ -282,11 +282,14 @@ sql_oracle(
 # the attack itself: a version that would end the version check's SQL string
 # and comment out the rest; it holds a quote, spaces, letters, a semicolon
 # and hyphens. Each per-kind row holds one bad character and nothing else
-# bad, so a class widened to admit that kind passes exactly that row: a
-# quote, a lowercase letter (`leading_v`), an uppercase letter (`upper`), a
-# space, a semicolon, `/` and `:` (the characters next to `0` and `9`, which
-# a range bound moved by one admits) and a newline (`newline`, which the
-# multi-line flag `(?m)` passes: `^` and `$` then match at the line break).
+# bad, so a class widened to admit that character passes exactly that row:
+# a quote, `v` (`leading_v`: the class widened to `a-z`, or any range
+# holding `v`), `V` (`upper`: `A-Z`, or any range holding `V`), a space, a
+# semicolon, `/` and `:` (the characters next to `0` and `9`, which a range
+# bound moved by one admits) and a newline (`newline`, which the multi-line
+# flag `(?m)` passes: `^` and `$` then match at the line break). A letter
+# range without `v` or `V` (`a-f`, `A-F`) is not pinned: it passes every
+# row, and it admits no quote, so no SQL can be added through it.
 # The bad character is never first, except in `leading_v`, whose `v` is
 # first so that the anchor `^` dropped passes it; so the anchor `$` dropped
 # passes `quote`, `upper`, `space`, `semicolon`, `slash`, `colon` and
