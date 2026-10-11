@@ -18,7 +18,10 @@ mojo_library(
         "//src/komira_json:komira_json",
     ],
     test_srcs = [
+        "tests/test_iceberg_catalog_values.mojo",
         "tests/test_iceberg_rest_catalog.mojo",
+        "tests/test_iceberg_rest_errors.mojo",
+        "tests/test_iceberg_rest_http_transport.mojo",
     ],
     visibility = ["PUBLIC"],
 )
