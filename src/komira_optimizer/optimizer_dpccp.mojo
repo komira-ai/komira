@@ -53,6 +53,12 @@
 #   empty dict. Tests pass a hand-built dict to steer DPccp towards a known
 #   optimum on synthetic chains.
 #
+# Observation:
+#   The enumerators and `solve_dpccp_observed` report each pass and every
+#   scored pair to a `DPccpObserver` (`optimizer_dpccp_observer`). The
+#   solver passes `NoDPccpObserver`, whose methods are empty;
+#   `optimizer_dpccp_diagnostic` passes one that records a trace.
+#
 # v0.3 divergences:
 #
 #   (1) Cost model: v0.3 calls `estimate_join_cardinality_for_reorder`
@@ -134,6 +140,11 @@ from .optimizer_column_stats_provider import DefaultColumnStatsProvider
 from .optimizer_tdom import TdomGraph, build_tdom_graph
 from .optimizer_tdom_cost import estimate_with_tdom, has_classes_for
 from .optimizer_tdom_card import estimate_cardinality_with_set
+from .optimizer_dpccp_observer import (
+    DPCandidate,
+    DPccpObserver,
+    NoDPccpObserver,
+)
 from komira_plan_stats.table_stats import (
     TableStats,
     ColumnStats,
@@ -764,7 +775,7 @@ def _synth_row_count_table_stats(
     )
 
 
-def emit_pair(
+def emit_pair[O: DPccpObserver](
     left_set: RelationSet,
     right_set: RelationSet,
     imm chain: JoinChain,
@@ -772,6 +783,7 @@ def emit_pair(
     cost_override: Dict[UInt64, Int],
     imm tdom_opt: Optional[TdomGraph],
     mut card_cache: Dict[UInt64, Int],
+    mut observer: O,
     allow_cross: Bool = False,
 ):
     """Score the candidate join (left_set, right_set) and update DP table.
@@ -799,6 +811,10 @@ def emit_pair(
     (TDOM-clamped cost when a graph is set, else the Cartesian product
     `join_card = left_card * right_card`). Each pass gets its own
     card_cache.
+
+    `observer` receives every pair that passes the entry and edge guards
+    (`DPccpObserver.on_pair_scored`), after it is costed and before the
+    table update, repeats of the same pair included.
     """
     var left_entry = dp.get(left_set.bits)
     if not left_entry:
@@ -861,6 +877,10 @@ def emit_pair(
         )
     var pair_cost = Float64(join_card) + left_cost + right_cost
     var combined = left_set.union(right_set)
+    observer.on_pair_scored(DPCandidate(
+        left_set.bits, right_set.bits, pair_cost, join_card,
+        left_cost, right_cost, left_card, right_card, allow_cross,
+    ))
 
     # Manual "entry or insert" (divergence #5).
     var existing = dp.get(combined.bits)
@@ -880,7 +900,7 @@ def emit_pair(
 # The three mutually recursive enumerators
 # =============================================================================
 
-def emit_csg_complements(
+def emit_csg_complements[O: DPccpObserver](
     csg: RelationSet,
     exclusion: RelationSet,
     neighbors: List[List[Int]],
@@ -890,6 +910,7 @@ def emit_csg_complements(
     cost_override: Dict[UInt64, Int],
     imm tdom_opt: Optional[TdomGraph],
     mut card_cache: Dict[UInt64, Int],
+    mut observer: O,
     allow_cross: Bool = False,
 ):
     """For a connected subgraph `csg`, enumerate its connected complements.
@@ -939,7 +960,7 @@ def emit_csg_complements(
         counter.bump()
         emit_pair(
             csg, complement, chain, dp, cost_override, tdom_opt,
-            card_cache, allow_cross,
+            card_cache, observer, allow_cross,
         )
         if counter.is_over():
             return
@@ -947,13 +968,13 @@ def emit_csg_complements(
         enumerate_complement_rec(
             complement, csg, compl_excl,
             neighbors, chain, dp, counter, cost_override, tdom_opt,
-            card_cache, allow_cross,
+            card_cache, observer, allow_cross,
         )
         if counter.is_over():
             return
 
 
-def enumerate_csg_rec(
+def enumerate_csg_rec[O: DPccpObserver](
     csg: RelationSet,
     exclusion: RelationSet,
     neighbors: List[List[Int]],
@@ -963,6 +984,7 @@ def enumerate_csg_rec(
     cost_override: Dict[UInt64, Int],
     imm tdom_opt: Optional[TdomGraph],
     mut card_cache: Dict[UInt64, Int],
+    mut observer: O,
     allow_cross: Bool = False,
 ):
     """Grow a connected subgraph by one neighbor, recursively.
@@ -1011,7 +1033,7 @@ def enumerate_csg_rec(
         emit_csg_complements(
             new_csg, exclusion,
             neighbors, chain, dp, counter, cost_override, tdom_opt,
-            card_cache, allow_cross,
+            card_cache, observer, allow_cross,
         )
         if counter.is_over():
             return
@@ -1019,13 +1041,13 @@ def enumerate_csg_rec(
         enumerate_csg_rec(
             new_csg, further_excl,
             neighbors, chain, dp, counter, cost_override, tdom_opt,
-            card_cache, allow_cross,
+            card_cache, observer, allow_cross,
         )
         if counter.is_over():
             return
 
 
-def enumerate_complement_rec(
+def enumerate_complement_rec[O: DPccpObserver](
     complement: RelationSet,
     csg: RelationSet,
     exclusion: RelationSet,
@@ -1036,6 +1058,7 @@ def enumerate_complement_rec(
     cost_override: Dict[UInt64, Int],
     imm tdom_opt: Optional[TdomGraph],
     mut card_cache: Dict[UInt64, Int],
+    mut observer: O,
     allow_cross: Bool = False,
 ):
     """Grow a connected complement by one neighbor, recursively.
@@ -1082,7 +1105,7 @@ def enumerate_complement_rec(
         counter.bump()
         emit_pair(
             csg, new_compl, chain, dp, cost_override, tdom_opt,
-            card_cache, allow_cross,
+            card_cache, observer, allow_cross,
         )
         if counter.is_over():
             return
@@ -1090,7 +1113,7 @@ def enumerate_complement_rec(
         enumerate_complement_rec(
             new_compl, csg, new_excl,
             neighbors, chain, dp, counter, cost_override, tdom_opt,
-            card_cache, allow_cross,
+            card_cache, observer, allow_cross,
         )
         if counter.is_over():
             return
@@ -1205,7 +1228,7 @@ def _seed_dp_base_relations(
         )
 
 
-def _run_dpccp_passes(
+def _run_dpccp_passes[O: DPccpObserver](
     n: Int,
     imm chain: JoinChain,
     neighbors: List[List[Int]],
@@ -1215,6 +1238,7 @@ def _run_dpccp_passes(
     imm tdom_opt: Optional[TdomGraph],
     mut card_cache: Dict[UInt64, Int],
     allow_cross: Bool,
+    mut observer: O,
 ) -> Bool:
     """Run the three nested DPccp enumerators i from n-1 down to 0.
 
@@ -1223,7 +1247,12 @@ def _run_dpccp_passes(
     enumerator stack — when True, cross-product pairs (no real edge
     connecting the two halves) are admitted (costed by `_cost_for_pair`
     when a TDOM graph is set, by the Cartesian product otherwise).
+
+    `observer` is told when the pass begins and when it ends, with the
+    counter's value (the `emit_pair` calls this counter has seen) and
+    whether the pass completed.
     """
+    observer.on_pass_begin(allow_cross)
     var i = n - 1
     while i >= 0:
         var start = RelationSet.singleton(i)
@@ -1238,20 +1267,23 @@ def _run_dpccp_passes(
         emit_csg_complements(
             start, exclusion,
             neighbors, chain, dp, counter, cost_override, tdom_opt,
-            card_cache, allow_cross,
+            card_cache, observer, allow_cross,
         )
         if counter.is_over():
+            observer.on_pass_end(counter.n, False)
             return False
 
         enumerate_csg_rec(
             start, exclusion,
             neighbors, chain, dp, counter, cost_override, tdom_opt,
-            card_cache, allow_cross,
+            card_cache, observer, allow_cross,
         )
         if counter.is_over():
+            observer.on_pass_end(counter.n, False)
             return False
 
         i -= 1
+    observer.on_pass_end(counter.n, True)
     return True
 
 
@@ -1364,13 +1396,35 @@ def solve_dpccp_with_cost(
     top join is a synthesized cross, this returns None and the caller
     falls back to greedy. A synthesized cross below the root is kept.
     """
+    var dp = Dict[UInt64, DPNode]()
+    var observer = NoDPccpObserver()
+    return solve_dpccp_observed(chain, cost_override, dp, observer)
+
+
+def solve_dpccp_observed[O: DPccpObserver](
+    chain: JoinChain,
+    cost_override: Dict[UInt64, Int],
+    mut dp: Dict[UInt64, DPNode],
+    mut observer: O,
+) raises -> Optional[LogicalPlan]:
+    """`solve_dpccp_with_cost` with the DP table and the observer supplied
+    by the caller (`optimizer_dpccp_diagnostic` passes a recording one).
+
+    `dp` is cleared first. When the chain is enumerated, it holds on return
+    the table the solver read: the literal-edge pass's table, or the
+    cross-product pass's when that pass supplied the full-set entry. On an
+    iteration-cap overflow it holds the partial table of the pass that
+    overflowed (the first pass), or the first pass's table (the cross pass).
+    The observer sees each pass begin and end and every scored pair
+    (`DPccpObserver`). The return value is `solve_dpccp_with_cost`'s.
+    """
+    dp.clear()
     var n = len(chain.relations)
     if n < 2:
         return None
     if n > DPCCP_MAX_RELATIONS:
         return None
 
-    var dp = Dict[UInt64, DPNode]()
     _seed_dp_base_relations(n, chain, dp)
 
     var neighbors = _build_neighbors(n, chain.edges)
@@ -1413,7 +1467,7 @@ def solve_dpccp_with_cost(
     # augmentation).
     var ok = _run_dpccp_passes(
         n, chain, neighbors, dp, counter, cost_override, tdom_opt,
-        card_cache, False,
+        card_cache, False, observer,
     )
     if not ok:
         return None
@@ -1452,7 +1506,7 @@ def solve_dpccp_with_cost(
         var counter_aug = _IterCounter(UInt64(DPCCP_MAX_ITERATIONS))
         var ok_aug = _run_dpccp_passes(
             n, chain, aug_neighbors, dp_aug, counter_aug, cost_override,
-            tdom_opt, card_cache_aug, True,
+            tdom_opt, card_cache_aug, True, observer,
         )
         if ok_aug:
             var aug_full_hit = dp_aug.get(full_set.bits)
