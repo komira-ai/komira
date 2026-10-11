@@ -4,7 +4,7 @@
 #
 # A two-card cost function for a DP join enumerator's (left_set, right_set)
 # cost lookups. In this tree only tests call `estimate_with_tdom`: DPccp
-# (`optimizer_dpccp._cost_for_pair`) uses the one-set
+# (`optimizer_dpccp_cost._cost_for_pair`) uses the one-set
 # `optimizer_tdom_card.estimate_cardinality_with_set` instead. The `TdomGraph`
 # data structure + `build_tdom_graph` live in sibling file `optimizer_tdom.mojo`.
 # This module closes the loop: given a `TdomGraph` + the candidate joining pair,
