@@ -20,67 +20,75 @@ The optimized-plan design says what a plan carries and how it is admitted. This 
 **Goals.**
 
 1. **Each language implements one interface, once.** To gain UDF support, a language ships three things:
-   - a *runtime* that implements one contract (§4); a native language (§1.2) ships none, because its UDFs implement the contract themselves and the one `komira/native` runtime loads them;
+   - a *runtime* that implements one contract, the C ABI (§4); a native language (§1.2) ships none, because its UDFs implement the contract themselves and the one `komira/native` runtime loads them;
    - a *producer* in its SDK that emits UDF references (§6);
    - a pass of the shared conformance corpus (§6.3).
 
    Nothing else in komira changes.
 2. **The plan formats never change per language.** Adding a language adds no field, no `oneof` arm and no enum value to any plan message. Language identity lives in one open, namespaced string (§3.1). The optimizer and the plan validator never branch on it, and a test holds them to that (§3.2).
 3. **Plans stay backward compatible forever.** Every later engine decodes, admits and lowers every released plan that contains a UDF (§9.1, §10.12). Each runtime keeps its own runtime-specific bytes readable forever (§8.2).
-4. **One contract, two transports.** The same operations run either in-process, through a C ABI over the Arrow C Data Interface, or in a worker process, over Arrow IPC on shared memory. Each language runs in exactly one mode, which fixes its transport: native code in-process, managed code in worker processes (§1.2). The plan never names the transport (§4.1, §5.3).
-5. **The engine crosses into a runtime once per batch, never once per row and never once per group,** with no copy wherever the transport and the trust boundary allow it (§4.4, §5.2).
-6. **A row-shaped UDF stays columnar.** A function that takes a whole row (`df.map_rows(f)`, pandas `apply(axis=1)`) reads only the columns it declares, and every other column is pruned down to the scan (`ROW`, §3.1).
+4. **The C ABI is the abstraction.** The engine loads every runtime as a library, in its own process, and calls it through one C ABI over the Arrow C Data Interface (§4). How a runtime executes user code is the runtime's own business: native libraries run in-process; the Python and Node runtimes run user code in worker processes that they start and manage themselves (§1.2, §5). The engine and the plan never name a transport.
+5. **The engine crosses into a runtime once per batch, never once per row and never once per group,** with no copy at the C ABI (§4.4).
+6. **A row-shaped UDF stays columnar when its SDK can say what it reads.** A function that takes a whole row (`df.map_rows(f)`, pandas `apply(axis=1)`) reads only the columns of the call's `read_set` when the SDK fills it, and every other column is pruned down to the scan (§3.1).
 
 **Non-goals.**
 - GPU UDFs. The ABI reserves their shape (§4.2), but §10.2 defers them.
-- Remote UDF servers. §5.3 shows how they would fit later.
+- Remote UDF servers. §5 notes how one would fit later.
 - A "register" step visible to users. §10.13 rejects it.
 - An optimizer cost model per language.
 
-### 1.2 One mode per language: native in-process, managed in worker processes
+### 1.2 One mode per language: native in-process, managed in worker processes the runtime owns
 
-A UDF belongs to one of two classes, and each class has exactly one mode. The mode decides how a runtime runs user code on several engine threads at once and which transport carries the calls. It decides nothing that a plan carries. **In every mode, no lock is shared across engine threads**: no engine thread ever waits on another engine thread's UDF call. There are no alternative modes for a language: a host does not choose between an in-process and a worker form of a managed language, and a run cannot ask for one.
+A UDF belongs to one of two classes, and each language has exactly one mode. The mode is how that language's runtime executes user code; it is chosen by the runtime, not by the engine, a host or the plan. **In every mode, no lock is shared across engine threads**: no engine thread ever waits on another engine thread's UDF call.
 
 | | Native | Managed |
 |---|---|---|
 | Languages | Languages that compile to native code and speak the C ABI directly: C and Mojo at the first release; Rust, C++ and Zig later | Languages whose code runs in an interpreter or virtual machine: Python and Node/TypeScript at the first release |
 | What the code object is | A shared library compiled for the host platform (OS and CPU) that implements the UDF runtime C ABI (§4.3) itself | Source, bytecode or a serialized value that the language's runtime executes |
-| Interpreter | None | One per worker process, embedded in the runtime library or provided by the runtime's launcher (§4.1) |
 | Runtime id | `komira/native`, one id for every native language | One per language runtime: `komira/python`, `komira/node` |
-| Where user code runs | **In-process**, in the engine. The worker transport is opt-in, for crash isolation (below) | **In worker processes only**, on every host, the producer's machine included: one worker process per engine thread. Python's workers are forked from a single-threaded zygote; Node's are started by `node` (§5.2) |
-| How a batch reaches user code | `komira/native` loads the library and calls it through the C ABI over Arrow C Data, without a copy | The engine writes the batch into the worker's shared memory; the worker decodes it in place and the runtime converts it to the language's values or columns (§5.2) |
-| Contexts (§3.3) | One per engine thread, in one process | One per worker process; each worker serves one engine thread |
-| Capabilities (§4.2) | `udf_class` `NATIVE` | `udf_class` `MANAGED` |
-| Conformance (§6.3) | The shared corpus on both transports, plus the native cases | The shared corpus on the worker transport, plus the managed cases |
+| How the runtime executes user code | In the engine's process: `komira/native` loads the library and calls it through the C ABI over Arrow C Data, without a copy | In worker processes the runtime library starts and manages: `komira/python` forks its workers from a single-threaded zygote; `komira/node` starts `node` processes. One worker serves one context (§5, informative) |
+| Capabilities (§4.2) | `udf_class` `NATIVE` | `udf_class` `MANAGED`; `features` `CONTAINS_CRASHES` and `FORCED_STOP` |
 
-**The mode is a runtime capability, not a plan property.** A runtime reports its class, `udf_class` (§4.2); the class gives the mode and the transport. No other capability states the mode, so nothing can disagree with it. `optimized_plan_udfs.md` §10.1 [#1094] still describes three modes; on modes this document supersedes it, and no plan field depends on the difference.
+**The C ABI is the only interface between the engine and a runtime.** The engine loads every runtime library in-process, opens one context per engine thread, and makes the same calls for every runtime (§4.3). It never starts a worker, never speaks a worker protocol and never chooses a transport. A runtime that runs user code elsewhere does so behind the table, and reports what it guarantees (a crash in user code is contained; user code that ignores a cancel can be stopped) as capabilities (§4.2), never how it achieves it. The class is not a plan field. The optimizer and plan validation never read it, and the runtime-swap invariance test holds them to that (§3.2). Only the conformance harness reads it, to select the class-specific cases.
 
-**Later managed runtimes take the managed mode.** A JVM, .NET or Go runtime is managed. Go compiles to native code, but a Go shared library carries the Go runtime: its scheduler, its garbage collector and its own signal handlers, one per process *(inferred: two Go shared libraries built separately each carry one)*. So Go is not native: it runs, like every managed runtime, in worker processes.
+**Later managed runtimes take the managed mode.** A JVM, .NET or Go runtime is managed. Go compiles to native code, but a Go shared library carries the Go runtime: its scheduler, its garbage collector and its own signal handlers, one per process *(inferred: two Go shared libraries built separately each carry one)*. So Go is not native.
 
-**Mojo is native, although its libraries need a runtime library.** Every `mojo_shared_lib` output has `DT_NEEDED libKGENCompilerRTShared.so`, which holds the Mojo allocator, async runtime and globals (`tools/build/mojo/README.md`). Unlike Go's runtime, it is a support library in the way `libstdc++` is for C++: it does not own the threads that call into it and does not take over the process's signals, so several Mojo libraries and the engine can share one process *(inferred; a native case checks it with two Mojo fixture libraries called from several engine threads in one process, §6.3)*. If that check fails, Mojo libraries run only on the worker transport; the mode and the plan do not change.
-
-**What is the same for both classes.**
-- **The plan reference.** Every UDF is a `UdfRef` like any other: an open runtime id, explicit Arrow types and a kind (§3.1). A native UDF's code form is `BUNDLE`.
-- **The runtime contract.** Both classes use the C ABI (§4). A managed runtime implements the C ABI table around its interpreter, inside a worker; a native UDF library implements the same table directly.
-- **The plan levels.** Logical, optimized and physical plans carry both classes identically. No plan field names the class. The optimizer and plan validation never read it, and the runtime-swap invariance test holds them to that (§3.2). Only the host reads the class, to choose the transport, and the conformance harness reads it, to select the class-specific cases.
+**Mojo is native, although its libraries need a runtime library.** Every `mojo_shared_lib` output has `DT_NEEDED libKGENCompilerRTShared.so`, which holds the Mojo allocator, async runtime and globals (`tools/build/mojo/README.md`). Unlike Go's runtime, it is a support library in the way `libstdc++` is for C++: it does not own the threads that call into it and does not take over the process's signals, so several Mojo libraries and the engine can share one process *(inferred; a native case checks it with two Mojo fixture libraries called from several engine threads in one process, §6.3)*. What happens if that check fails is open (§1.3).
 
 **The native runtime, `komira/native`.** It is a base runtime with no interpreter: a loader that forwards the C ABI to user libraries.
 - **Code.** `form` is `BUNDLE`. `code` lists one shared library per target platform, with the role `lib:<os>-<cpu>` (for example `lib:linux-x86_64`, `lib:linux-aarch64`). `entry` names the UDF inside the library, since one library may hold many UDFs. The descriptor records the entry's shapes and signature (§3.1, *Descriptor rules*), and the source language and toolchain, for diagnostics only; the runtime never dispatches on the language.
-- **Platform.** `validate` refuses a spec with no library for the host's platform (`ERR_UNSUPPORTED`). So a plan whose native code was not built for the host is refused at admission, by name, never in the middle of a run.
+- **Platform.** `validate` refuses a spec with no library for the host's platform (`ERR_UNSUPPORTED`, §4.5). So a plan whose native code was not built for the host is refused at admission, by name, never in the middle of a run.
 - **Validation without the library.** `validate` compares the spec with the descriptor: the entry, its shapes and its signature. It opens no library, so no library constructor runs at admission.
 - **Loading.** `load` verifies the library's sha256 *before* `dlopen` (`RTLD_LOCAL | RTLD_NOW`, never `dlclose`d, as §4.3 states for runtimes). It resolves the library's one exported symbol, `komira_udf_native_init_v1`, which has the signature of `komira_udf_runtime_init_v1` and returns a `komira_udf_runtime` table. It negotiates that table's minor as §8.1 does, checks the library's `describe` (next item), calls the library's own `validate` with the spec, so that the library confirms the signature the descriptor recorded, and forwards every later entry to the table. A library that disagrees with the descriptor is refused with `ERR_LOAD` (`OPTIMIZED_UDF_CODE_UNLOADABLE`). The distinct symbol name keeps a user library from being registered as a runtime, and a runtime from being loaded as a user library.
-- **Capabilities.** The host chooses the transport from `komira/native`'s own `describe`, never from a library's: `runtime_id` `komira/native` and `udf_class` `NATIVE`. A library's own `describe` must report `runtime_id` `komira/native`, `udf_class` `NATIVE` and the spec's shape in `shapes`; `load` refuses any other library with `ERR_LOAD`, naming the capability (`OPTIMIZED_UDF_CODE_UNLOADABLE`). Every native library must allow what the host does with it: the host opens one context per engine thread, never calls one context from two threads at once, and may call a context from different threads over its life. A library that cannot be called from two threads, even in two contexts, or that serializes its calls behind one lock, is not supported at ABI 1.0; the parallelism case (§6.3) catches it.
+- **Capabilities.** A library's own `describe` must report `runtime_id` `komira/native`, `udf_class` `NATIVE` and the spec's shape in `shapes`; `load` refuses any other library with `ERR_LOAD`, naming the capability (`OPTIMIZED_UDF_CODE_UNLOADABLE`). Every native library must allow what the host does with it: the host opens one context per engine thread, never calls one context from two threads at once, and may call a context from different threads over its life. A library that cannot be called from two threads, even in two contexts, or that serializes its calls behind one lock, is not supported at ABI 1.0 (a decision, §1.3); the parallelism case (§6.3) catches it.
 - **ABI tag.** The `runtime_abi` of `komira/native` in `needs.runtimes` is the C ABI major its libraries target (`abi1`).
 - **One id for every native language.** Every native language speaks the same C ABI, so the language is not part of dispatch. A new native language adds an SDK: helpers that export the table from a function's signature (an `extern "C"` Rust function, a `noexcept` C++ function, an exported Mojo function), a typed view of Arrow C Data in that language, and capture of the library into the code layer. It adds no runtime id and no change to the base.
 
-**Native UDFs ship at the first release, in-process.** In-process, a native UDF is machine code inside the engine's address space, with the engine's privileges. It has the lowest cost per batch (no copy, no interpreter, no process boundary), and a fault in the library ends the engine and fails the run.
-- **What in-process code could reach.** The engine holds only what the run itself may use, which is the user's own. The one secret a run must not reach is the supervisor's heartbeat token. The supervisor holds no long-lived credential and none that meters usage: it holds a run-scoped id and token used only to authenticate its heartbeats, and the party that receives the heartbeats meters the run's usage by accumulating them (`optimized_plan_udfs.md` §10.10 [#1094]).
-- **The in-process mode rests on one rule: the heartbeat token stays in the supervisor.** The supervisor runs as its own process under its own user id, distinct from the engine's, and never passes the token to the engine: not in its arguments, its environment, a file the engine's user id can read, or an inherited descriptor. So native code in the engine cannot read the token, forge or suppress a heartbeat, or trace or signal the supervisor (§7). A host that cannot meet this rule runs native UDFs in workers.
-- **The worker transport is opt-in, for crash isolation:** a fault ends a worker, not the engine (§5.1). A host enables it by policy, or a run by an option outside the plan; the transport is never in the plan (§10.13), so the plan does not change.
-- **Three conformance cases are launch gates** (§6.3). Native UDFs do not ship until all three pass on the release's hosts:
-  1. **The heartbeat-token case:** in-process native code cannot find the token or reach the supervisor.
-  2. **The NULL-dereference case on the opt-in worker path:** a library that dereferences NULL ends its worker and the run reports `UDF_WORKER_CRASHED`, while the engine survives.
-  3. **The `RTLD_GLOBAL` interposition case:** two libraries that define the same internal symbol each resolve their own, so one user library cannot interpose on another or on the engine.
+**Native UDFs ship at the first release, in-process.** A native UDF is machine code inside the engine's address space, with the engine's privileges. It has the lowest cost per batch (no copy, no interpreter, no process boundary), and a fault in the library ends the engine and fails the run.
+- **What in-process code could reach.** The engine holds only what the run itself may use, which is the user's own. The one secret a run must not reach is the supervisor's run token: a token scoped to one run, which the supervisor uses only to report that the run is alive. The supervisor holds no long-lived credential (`optimized_plan_udfs.md` §10.10 [#1094]).
+- **The rule: the run token stays in the supervisor.** The supervisor runs as its own process under its own user id, distinct from the engine's, and never passes the token to the engine: not in its arguments, its environment, a file the engine's user id can read, or an inherited descriptor. So code in the engine cannot read the token, forge or suppress a liveness report, or trace or signal the supervisor (§7).
+- **Launch gates** (§6.3). Native UDFs do not ship until these pass on the release's hosts:
+  1. **The run-token case:** in-process native code cannot find the token or reach the supervisor.
+  2. **The `RTLD_GLOBAL` interposition case:** two libraries that define the same internal symbol each resolve their own, so one user library cannot interpose on another or on the engine.
+  3. **The NULL-dereference case.** It was defined on an opt-in worker path for native libraries, which this design no longer has, because the engine binds no transport. What replaces it is open (§1.3).
+
+### 1.3 Open questions and decisions to confirm
+
+Open, to be settled before the stages they name:
+1. **The NULL-dereference launch gate (S3b).** With native libraries always in-process, a NULL dereference ends the engine. Either the gate becomes "the run fails by name, with the faulting library reported" (§7), or `komira/native` gains an isolated form of its own behind the C ABI, or the gate is dropped.
+2. **A failed Mojo shared-process check (S3b).** If two Mojo libraries cannot share one process, Mojo has no mode at the first release unless one of the forms in item 1 exists.
+3. **Runtimes from an added image layer (later; §8.3).** The engine loads every runtime in-process, so an added runtime library runs inside the engine, with the standing of a native UDF library. Whether added runtimes are allowed on that basis is open.
+4. **WASM** has no mode yet; it gets one when it is added.
+5. **`optimized_plan_udfs.md` [#1094] (S0)** still describes three modes in §10.1; aligning it with §1.2, and with the call-site `read_set` of §3.1, is an S0 item.
+6. **`read_set` on a `WireStepNode` (S0).** A step is a source node whose input is its literal arguments, so what projecting it means is not yet defined.
+
+Decisions this document makes that go beyond the language rulings it implements:
+- A native library that serializes its calls behind one lock is not supported (§1.2).
+- A base carries one managed runtime besides `komira/native`, so a plan that needs both `komira/python` and `komira/node` is refused (§3.2). This predates the one-mode rule.
+- The capability fields that described a transport (`threading`, `global_lock`, `thread_affine`, `hosting`, `transports`) are removed, not split, because a transport is no longer the engine's (§4.2, §10).
+- A call whose user code was stopped by force returns its own status, `ERR_KILLED` (§4.5, §4.7).
+- A `read_set` is refused on a `WireUdfApply` whose target is not `ROW`, and a projected frame input must still match the frame's `arg_types` (§3.1).
+- A crash is retried once; a stop for memory is not retried (§4.5).
 
 ## 2. What exists today, and why the shape must change now
 
@@ -135,7 +143,7 @@ A `UdfRef` describes one UDF. In a RAW (bound, logical) plan, the list of `UdfRe
 message UdfRef {
   UdfKind      kind        = 2;   // a shape, never a language (below)
   UdfCode      code        = 16;  // which runtime, which entry, which code bytes
-  repeated WireField arg_types = 17; // declared argument types, in call order; for ROW, the declared read set (*Types*, below)
+  repeated WireField arg_types = 17; // declared argument types, in call order; empty for ROW (*Types*, below)
   WireField    return_type = 8;   // required; nested to any depth (WireField.children, §10.3)
   WireField    state_type  = 15;  // AGGREGATE only; set iff the mergeable form (§10.2)
   UdfStability stability   = 10;  // IMMUTABLE | STABLE | VOLATILE: this is the determinism declaration
@@ -155,7 +163,7 @@ enum UdfKind {
   AGGREGATE            = 3;   // plain or mergeable, decided by state_type
   STEP                 = 4;   // source node, runs once per run
   MAP_BATCHES_FRAME    = 5;   // target of a WireMapBatchesNode; any number of output rows
-  ROW                  = 6;   // target of a WireUdfApply; one row object per input row, built from arg_types only
+  ROW                  = 6;   // target of a WireUdfApply; one row object per input row, over the call's projected input
 }
 
 message UdfCode {
@@ -178,6 +186,11 @@ enum CodeForm {
   BUNDLE  = 2;  // by reference into a code-layer bundle (source or compiled artifact); `entry` is inside it
   VALUE   = 3;  // by value: a serialized function object in the code layer
 }
+
+message UdfReadSet {               // a field `read_set` of the call-site node, not of UdfRef (below)
+  repeated string columns = 1;     // the input columns the UDF reads; may be empty
+}
+// WireUdfApply, WireMapBatchesNode, WireStepNode: UdfReadSet read_set (presence-tracked)
 ```
 
 **A runtime id is an open string with a grammar, not an enum value.**
@@ -204,22 +217,24 @@ enum CodeForm {
 **Types.**
 - `arg_types` makes each `UdfRef` a self-contained signature. A runtime binds the argument schema once, at `load`, before it sees the plan body.
 - At each call site, the argument types must equal `arg_types` exactly. A producer that wants a conversion inserts an explicit cast (`OPTIMIZED_UDF_ARGUMENT_TYPE_MISMATCH`).
-- For `MAP_BATCHES_FRAME`, and for an `AGGREGATE` over several columns, each column is one entry, in input order. For a `STEP`, `arg_types` lists the types of the literal arguments. For a `ROW`, `arg_types` is the declared read set: one entry per field, whose `name` is the field name user code reads and whose type is that column's Arrow type (below).
+- For `MAP_BATCHES_FRAME`, and for an `AGGREGATE` over several columns, each column is one entry, in input order. For a `STEP`, `arg_types` lists the types of the literal arguments. A `ROW` `UdfRef` lists none (`OPTIMIZED_UDF_ROW_ARG_TYPES_SET` otherwise): its fields are the call's input after projection by the call's `read_set` (below), because the same function may be applied to different inputs.
 - Arrow is the single source of truth for every type (§6.2).
 
 **Determinism is `stability`.** `IMMUTABLE`, `STABLE` and `VOLATILE` already state what the optimizer and the host may assume about repeated calls and retries (§10.7). A separate determinism field would state the same fact twice.
 
 **`STEP` is a shape, not a language.** A step is a shape: a source node with literal arguments that runs once per run. Whether a runtime supports steps is a runtime capability (§4.2), checked at admission; it is not a plan rule. Its arm is `WireStepNode` (`optimized_plan_udfs.md` §10.4 [#1094]). A `STEP` `UdfRef` must be `VOLATILE` (`OPTIMIZED_UDF_STEP_NOT_VOLATILE`): §10.7 lists a step as always `VOLATILE` (the `VOLATILE` row of the stability table), and plan validation enforces it (§7.2 step 8).
 
-**`ROW`: a row-shaped UDF with a declared read set.** A row-shaped function receives one row object per input row and reads its fields by name (`df.map_rows(f)`, pandas `DataFrame.apply(f, axis=1)`). Handed the whole row, it would make every column of its input live and defeat projection pushdown. So every `ROW` `UdfRef` carries an explicit read set, the list of columns it reads, and nothing else reaches it. There is no `ROW` UDF without one.
-- **The read set is `arg_types`.** Each entry names one field and gives its explicit Arrow type. The call site's `WireUdfApply` passes one argument per entry, in the same order, usually a column reference. Names are non-empty and unique (`OPTIMIZED_UDF_ROW_READ_SET_INVALID`). The field name is what user code reads; the argument binds it by position, so a rename below the call does not change the `UdfRef`.
-- **The producer determines it when the plan is built** (§6.1), never a host, from one of two sources:
-  1. `columns=[...]` on the verb, when the user declares it;
-  2. otherwise the SDK's static scan of the function's field accesses (for Python, a scan of the function's bytecode for attribute and subscript reads on the row parameter). The scan counts every access it finds, on every branch, taken or not. A function that iterates the row, converts it to a dict or tuple, unpacks it or passes it whole to other code cannot be bounded by the scan; the scan's result is then every input column, listed explicitly. This is correct and slower; the SDK says so in its local diagnostics, with the fix-it to declare `columns=[...]`.
+**The read set is a property of the call, not of the UDF.** The same code may be applied to different inputs, so the columns a call reads are carried by the call-site node, in an optional `read_set` (`UdfReadSet`), never by `UdfRef`. The field is presence-tracked, so absent and empty are different:
+- **Absent:** the UDF reads every input column; nothing is projected.
+- **Present:** the planner projects the call's input to exactly those columns, in the listed order. Names must be unique and each must be a column of the input; otherwise plan validation refuses the plan, naming the column (`OPTIMIZED_UDF_READ_SET_INVALID`).
+- **Present and empty:** allowed, for a constant or row-count UDF. The planner passes a zero-column batch that carries the row count (§3.4 rule 5).
+- **Who fills it:** the producer's SDK, by inspecting the function where the language allows it, or from an explicit declaration by the user (§6.1). The engine never infers it, and no host re-derives it.
+- **Where it applies:** to a `ROW` target of a `WireUdfApply`, whose other targets take explicit argument expressions instead (plan validation refuses a `read_set` on them, `OPTIMIZED_UDF_READ_SET_INVALID`); to the input of a `WireMapBatchesNode`, where the projected input must still match the `UdfRef`'s `arg_types` (`OPTIMIZED_UDF_ARGUMENT_TYPE_MISMATCH`); and to a `WireStepNode`, whose meaning for a source node is open (§1.3).
+- **The optimizer prunes everything else.** A present `read_set` is a projection, so pushdown needs no rule of its own: only its columns stay live, down to the scan.
 
-  A local run never adds to the read set: a field read only on a branch the local run happened to take would otherwise hide a scan defect.
-- **The optimizer prunes everything else.** Because the call site's arguments are ordinary expressions, projection pushdown through the UDF needs no rule of its own: only the read set's columns stay live, down to the scan. No host re-derives the read set.
-- **The runtime builds rows from those columns only**, per batch, inside the runtime (§4.3). A read of an undeclared field fails the batch with `ERR_FIELD_NOT_DECLARED` (`UDF_FIELD_NOT_DECLARED`), naming the field and the read set, with a fix-it: add the field to `columns=[...]`. It never yields a null. A read outside a `columns=[...]` list that the user made too short, or one a defective scan missed, is the case this catches, and the error makes it safe.
+**`ROW`: a row-shaped UDF.** A row-shaped function receives one row object per input row and reads its fields by name (`df.map_rows(f)`, pandas `DataFrame.apply(f, axis=1)`).
+- **Its fields are the call's projected input:** the `read_set` columns when the SDK filled it, every input column when it did not. The host passes them as the children of the argument struct, named as in the input (§3.4 rule 5).
+- **The runtime builds rows from those columns only**, per batch, inside the runtime (§4.3). A read of any other field fails the batch with `ERR_FIELD_NOT_DECLARED` (`UDF_FIELD_NOT_DECLARED`), naming the field and the fields the call passed; when a `read_set` was present, the host adds the fix-it: declare the field. It never yields a null. A declaration the user made too short, or an inspection that missed a read, is the case this catches.
 - **A `ROW` UDF is `MANUAL`** (`OPTIMIZED_UDF_ROW_NULL_MODE`). Under `PROPAGATE`, a null in a field read only on some branches would drop rows the function would have computed.
 - **Output.** One value of `return_type` per row, as for `SCALAR`. A function returning several values per row (`map_rows` returning a tuple) declares a struct, which the producer unpacks into columns with ordinary field access.
 
@@ -246,9 +261,9 @@ Every digest the runtime will read is listed in `code.code` with a role. So admi
 **Every descriptor records the signature, so `validate` stays pure.** Whatever else it holds, each runtime's descriptor records what the producer found when it captured the function:
 - **the entry** it captured, which must equal `code.entry`;
 - **the shapes** the entry supports, as `UdfKind` values (`MAP_BATCHES_FRAME` grouped or not, `AGGREGATE` plain or mergeable, as the capability bits of §4.2 distinguish them);
-- **the signature**: the argument types in call order, the return type and, for a mergeable aggregate, the state type, each as a `WireField` (an Arrow type, nested to any depth).
+- **the signature**: the argument types in call order (none for `ROW`, whose fields come from the call), the return type and, for a mergeable aggregate, the state type, each as a `WireField` (an Arrow type, nested to any depth).
 
-Where the signature comes from depends on the language, and in every case it is read at capture, on the producer's machine (§6.1): a native library's export helper records each entry's signature and shapes in the library when it is built, and capture reads them from there; a TypeScript function's types are the type values given on the verb; a Python function's types come from its type hints or the verb's `return_dtype=`/`schema=`, read before a `VALUE` is serialized. `validate` compares the spec (the kind, `arg_types`, `return_type`, `state_type`) with what the descriptor records, and refuses a difference: a shape the entry does not support with `ERR_UNSUPPORTED` (`OPTIMIZED_UDF_KIND_UNSUPPORTED`), any other difference with `ERR_DESCRIPTOR` (`OPTIMIZED_UDF_DESCRIPTOR_INVALID`), naming the field and both types. It never opens a code object: it loads no library, imports no module and deserializes no value. `load`, which does open the code, checks that the code agrees with the descriptor and refuses a disagreement with `ERR_LOAD` (§4.3). The signature duplicates nothing in the plan: `arg_types` and `return_type` are what the plan binds at the call; the descriptor's signature is what the function was captured as, and `validate` is where the two meet.
+Where the signature comes from depends on the language, and in every case it is read at capture, on the producer's machine (§6.1): a native library's export helper records each entry's signature and shapes in the library when it is built, and capture reads them from there; a TypeScript function's types are the type values given on the verb; a Python function's types come from its type hints or the verb's `return_dtype=`/`schema=`, read before a `VALUE` is serialized. `validate` compares the spec (the kind, `arg_types`, `return_type`, `state_type`) with what the descriptor records, and refuses any difference, a shape the entry does not support included, with `ERR_DESCRIPTOR` (`OPTIMIZED_UDF_DESCRIPTOR_INVALID`), naming the field and both values. (A shape the runtime as a whole lacks never reaches `validate`: the host refuses it from `describe` first, `OPTIMIZED_UDF_KIND_UNSUPPORTED`.) It never opens a code object: it loads no library, imports no module and deserializes no value. `load`, which does open the code, checks that the code agrees with the descriptor and refuses a disagreement with `ERR_LOAD` (§4.3). The signature duplicates nothing in the plan: `arg_types` and `return_type` are what the plan binds at the call; the descriptor's signature is what the function was captured as, and `validate` is where the two meet.
 
 Each runtime:
 
@@ -292,7 +307,7 @@ message RuntimeNeed {            // in DeclaredNeeds (optimized_plan.md §6.1)
   - CSE of calls that are not `VOLATILE`.
 
   None of these decisions reads the runtime.
-- **What the optimizer may read:** `kind`, the types, `stability`, `null_mode` and `resources`. It must not read `code`. A `ROW` call's columns are its arguments, so pruning treats it as any other call (§3.1).
+- **What the optimizer may read:** `kind`, the types, `stability`, `null_mode` and `resources`. It must not read `code`. It reads a call's `read_set` as a projection: present, only its columns stay live; absent, every input column does (§3.1).
 - **Host observations never change shape.** The optimizer runs on the producer, before any run, and an optimized plan is never re-optimized (§10.9). Latency the host observes changes only host-local choices: batch size and pool size (§3.3). An optional producer-side cost hint on the verb (a relative per-row cost class, an expected selectivity) may be added later to order several UDF conjuncts. It would live in `PlanAdvice`, not in `UdfRef`, because `UdfRef` bytes are identity. This document does not add it.
 - **The runtime-swap invariance test.**
   - Plan every query in the UDF corpus twice. The second time, replace every `code` with `{runtime: "komira-test/null"}` and empty fields, and every `needs.runtimes` entry likewise.
@@ -315,57 +330,48 @@ The physical plan is the host's lowering of the optimized plan. It is not a wire
 At lowering, the host binds the following for each runtime. None of it is recorded in the plan.
 
 - **The runtime handle**, taken from the image's runtime registry (§8.3), together with the runtime's capabilities (§4.2).
-- **The transport**: in-process or worker (§5), fixed by the runtime's class (§1.2, §4.2): a `MANAGED` runtime always runs on the worker transport; `komira/native` runs in-process unless the host or the run opts into the worker transport (§1.2, §5.3).
-- **Contexts and instances.** A *context* is what one engine thread calls: a native library's per-thread state, or one worker process's interpreter. An *instance* is one loaded UDF inside one context. Each engine thread that runs a UDF operator has its own context, holding an instance of each UDF that thread runs, and no context is called by two engine threads at once.
-  - In-process (`komira/native`): independent contexts in the engine process, one per engine thread.
-  - Worker transport (every `MANAGED` runtime, and `komira/native` when opted in): one worker process per engine thread, as many as the pool size, each holding one context. Inside a worker, `komira_udf_worker` calls every entry of the runtime on one thread (§5.2).
-- **Pool size**: the number of contexts. It is set from the CPU count, `max_workers`, and the memory a context uses *with its UDFs loaded* (`worker_mem_bytes`), as §10.10 states. A worker forked from a zygote (§5.2) shares, copy-on-write, the code and captured values the zygote loaded, so a captured model is counted once per runtime until a worker writes to it; anything a UDF loads after the fork is counted once per worker.
+- **Contexts and instances.** A *context* is what one engine thread calls; an *instance* is one loaded UDF inside one context. Each engine thread that runs a UDF operator opens its own context in each runtime it uses, holding an instance of each UDF that thread runs, and no context is called by two engine threads at once. What a context is inside the runtime is the runtime's business: a native library's per-thread state, or, in the Python and Node runtimes, one worker process (§5).
+- **One loaded UDF per distinct input.** A `ROW` call's argument schema is its projected input (§3.1), so the host builds one `komira_udf_spec` per pair of `UdfRef` and argument schema, and loads each once.
+- **Pool size**: the number of contexts. It is set from the CPU count, `max_workers`, and the memory a context uses *with its UDFs loaded* (`worker_mem_bytes`), as §10.10 states, counting what the runtime reports through `memory_report` (§4.8).
 - **Batch rows**: adapted at run time, below `max_batch_rows` (§10.8).
 
-These are host-local choices (`optimized_plan.md` §5.3). Two hosts may bind one plan differently. The results are still equal, because the contract (§4), the call semantics (§3.4) and the post-conditions (§4.6) are the same on both transports.
+These are host-local choices (`optimized_plan.md` §5.3). Two hosts may bind one plan differently. The results are still equal, because the contract (§4), the call semantics (§3.4) and the post-conditions (§4.6) are the same for every runtime.
 
 ### 3.4 Call semantics the format fixes
 
-These rules are part of the plan's meaning, so they hold on every host, for every runtime and both transports. Each has a conformance case (§6.3).
+These rules are part of the plan's meaning, so they hold on every host and for every runtime. Each has a conformance case (§6.3).
 
 1. **Conditional evaluation.** A UDF call is evaluated only on rows for which every enclosing conditional selects its branch (`CASE`, `coalesce`, the right-hand side of `AND`/`OR`), and only on rows that survive earlier conjuncts of the same filter. So `CASE WHEN x > 0 THEN f(x) END` never calls `f` on a row with `x <= 0`. The ordering of UDF conjuncts last (`optimized_plan_udfs.md` §10.9, the conjunct-order row) depends on this rule.
 2. **Compaction.** The host compacts the selected rows (a `take`) before the call and scatters the result after it. Under `PROPAGATE` it also removes rows with a null argument. The arrays a runtime receives contain only rows it must compute.
 3. **Independence from instances and batch boundaries.** The result of a `SCALAR`, `ROW` or `MAP_BATCHES_COLUMN` call on a row does not depend on which instance serves it or on where batches were split. A function may cache (a loaded model, a memo table); a function whose per-row result depends on earlier calls (a row counter) is not expressible at the first format version. This replaces the `SERIAL_ORDERED` parallelism contract, which `UdfRef` does not carry. A frame-form function already sees batch boundaries; #1094 states its rule in §10.8 ("Declared resources"): a `MAP_BATCHES_FRAME` function must not depend on batch boundaries unless the node is grouped.
 4. **Exact argument encoding.** The host hands the runtime arrays in exactly the `arg_types` encoding: no dictionary or view encoding unless the declared type is one; the host casts first. Arrays may have a non-zero `offset`, including bit offsets that are not multiples of 8.
-5. **The argument struct.** Arguments arrive as one struct array, one child per `arg_types` entry, with no validity buffer and offset 0. For a `ROW`, the children are exactly the read set, named as in `arg_types`; the host passes no other column. Its `length` is the row count and is authoritative: a zero-argument `SCALAR` such as `uuid()` receives a struct with no children and `length` rows.
+5. **The argument struct.** Arguments arrive as one struct array, one child per `arg_types` entry, with no validity buffer and offset 0. For a `ROW`, the children are the call's projected input (§3.1), named as in the input: the `read_set` columns in their listed order when it is present, every input column when it is absent; the host passes no other column. Its `length` is the row count and is authoritative. A struct with no children carries only the row count: a zero-argument `SCALAR` such as `uuid()`, and a `ROW` call with an empty `read_set`, receive a struct with no children and `length` rows. The input batches of a frame whose `read_set` is empty are likewise struct arrays with no children and a `length` per batch.
 6. **Delivery.** A call to a non-`VOLATILE` UDF is at-least-once, as §10.7 states; a `VOLATILE` batch is never called twice.
 
 ## 4. The runtime interface
 
-### 4.1 One contract, two transports
+### 4.1 One contract; the runtime decides how it executes
 
-A runtime is a shared library that exports one symbol, `komira_udf_runtime_init_v1`. That symbol returns a table of functions (§4.3). The engine uses the table in one of two ways:
+A runtime is a shared library that exports one symbol, `komira_udf_runtime_init_v1`. That symbol returns a table of functions (§4.3). The engine loads the library into its own process and calls the table directly; Arrow data crosses as C Data structs, with no copy. That is the only way the engine reaches user code.
 
-- **In-process** (native UDFs, §1.2). The engine loads the library and calls the table directly. Arrow data crosses as C Data structs, with no copy.
-- **Worker** (every managed runtime, and native UDFs by opt-in). A worker process loads *the same library* and serves the same table over the protocol in §5. On the engine side, a proxy implements the table and talks to the worker.
+Behind the table, a runtime runs user code wherever is best for its language: `komira/native` calls a native library on the calling thread; `komira/python` and `komira/node` run user code in worker processes that they start and manage (§5, informative). Whatever a runtime does, the table's semantics (§4.3-§4.7) hold at the C ABI. The engine never starts a process for a runtime and never speaks to a runtime's worker. A native UDF library (§1.2) is not a runtime: `komira/native` loads it.
 
-komira writes the worker protocol once, as a C library, `komira_udf_worker`, that serves any runtime's table. Each runtime's manifest (§8.3) names its *launcher*, the program that starts a worker:
+So each language is implemented once, behind one interface. This is also the shape of DuckDB's C extension API, whose function struct is only appended to ([duckdb#14992](https://github.com/duckdb/duckdb/pull/14992)).
 
-- For a runtime that runs in any process (`komira-test/echo`, `komira/native`, CPython embedded in the worker), the launcher is the generic `komira-udf-worker` executable, which links the library and `dlopen`s the runtime.
-- For a runtime that needs a particular host program, the launcher is that program. Node-API symbols are exported by the `node` executable, and embedding Node uses its C++ embedder API, which is not ABI-stable; so the `komira/node` launcher is `node` running a small script that loads the runtime as an addon, and the addon links `komira_udf_worker`.
-- A native UDF library (§1.2) is not a runtime and has no launcher. `komira/native` loads it, in the engine or in a generic `komira-udf-worker`, and the bytes of the library are the same on both transports.
+### 4.2 Capabilities: what a runtime can do
 
-So each language is implemented once, and the protocol is written once, not once per language. This is also the shape of DuckDB's C extension API, whose function struct is only appended to ([duckdb#14992](https://github.com/duckdb/duckdb/pull/14992)).
-
-### 4.2 Capabilities: runtime facts only
-
-`describe` returns what the runtime is and can do, and nothing about the transport that serves it. The answer is the same whether the runtime was loaded into the engine or into a worker: on the worker transport, the engine's proxy forwards the worker's answer unchanged and adds nothing to it. When a plan needs a capability the runtime lacks, the host refuses the plan by name.
+`describe` returns what the runtime is and what its UDFs can do. It says nothing about how the runtime executes them. When a plan needs a capability the runtime lacks, the host refuses the plan by name.
 
 | Capability | Values | Used for |
 |---|---|---|
 | `runtime_id`, `runtime_abi` | strings | Matched against `needs.runtimes` |
 | `max_descriptor_version` | the highest version the runtime reads | `validate` refuses any newer version |
-| `shapes` | bitmask of SCALAR, ROW, MAP_BATCHES_COLUMN, MAP_BATCHES_FRAME, MAP_BATCHES_FRAME_GROUPED, AGG_PLAIN, AGG_MERGEABLE, STEP | `OPTIMIZED_UDF_KIND_UNSUPPORTED` |
-| `udf_class` | `NATIVE` or `MANAGED` (§1.2) | The mode, and so the transport: `NATIVE` in-process (the worker transport by opt-in), `MANAGED` on the worker transport only (§5.3); the class-specific conformance cases (§6.3). Never read by the optimizer or by plan validation |
+| `shapes` | bitmask of SCALAR, ROW, MAP_BATCHES_COLUMN, MAP_BATCHES_FRAME, MAP_BATCHES_FRAME_GROUPED, AGG_PLAIN, AGG_MERGEABLE, STEP | Refusing a shape the runtime lacks before `validate` (`OPTIMIZED_UDF_KIND_UNSUPPORTED`) |
+| `udf_class` | `NATIVE` or `MANAGED` (§1.2) | The class-specific conformance cases (§6.3), and `komira/native`'s check of a library. Never read by the optimizer, by plan validation or by the host's binding |
 | `devices` | bitmask; CPU only at the first release | GPU UDFs later, with no change of signature |
-| `features` | `MEMORY_REPORT`: the optional `memory_report` entry is present. `FORK_WORKERS`: the runtime's process stays single-threaded through `init` and `load`, so its control worker may fork context workers (§5.2) | Which optional entries are present; how the worker transport starts this runtime's workers |
+| `features` | `MEMORY_REPORT`: the optional `memory_report` entry is present. `CONTAINS_CRASHES`: a crash of user code fails the call with `ERR_WORKER_CRASHED` (or `ERR_OUT_OF_MEMORY`) and leaves the engine running. `FORCED_STOP`: the runtime stops user code that ignores a cancel or a deadline, and returns `ERR_KILLED` (§4.7) | Which optional entries are present; which cooperative or forced guarantees the host may rely on; the crash and kill conformance cases |
 
-**What the transport decides is not a capability.** Where a context lives (the engine process, or a worker process of its own), which thread calls it, whether a call can be stopped by force and whether a crash is contained are facts of the transport, stated once in §5.3, and the host knows them because the host chose the transport. The runtime learns which transport serves it from the host at `init` (`komira_udf_host.transport`, §4.3), never by reporting it. A `MANAGED` runtime that `init` finds on `IN_PROCESS` fails with `ERR_UNSUPPORTED`, so a managed runtime cannot be loaded into the engine even by a host defect.
+**How a runtime executes is not a capability.** No field says where user code runs, how many processes a runtime starts, or which thread runs user code; those are the runtime's own business (§5). An earlier draft reported them (`threading`, `global_lock`, `thread_affine`, `hosting`, `transports`); they are removed, because the engine binds nothing from them (§10).
 
 ### 4.3 The C ABI: `komira_udf_runtime.h`
 
@@ -401,12 +407,29 @@ typedef enum {                        /* 0 is success; values are never reused *
   KOMIRA_UDF_ERR_INSTANCE_LOST = 14,  /* the context cannot be used again; the host closes and reopens it */
   KOMIRA_UDF_ERR_INTERNAL = 15,       /* a runtime bug; never user code */
   KOMIRA_UDF_ERR_FIELD_NOT_DECLARED = 16, /* ROW: user code read a field outside the read set; message names it */
-  KOMIRA_UDF_ERR_WORKER_CRASHED = 17, /* the worker died without being killed by the host; worker proxy only */
-  KOMIRA_UDF_ERR_HOST_CONTRACT = 18   /* the host broke this ABI (§4.5); message names the rule */
+  KOMIRA_UDF_ERR_WORKER_CRASHED = 17, /* the process running user code died, not by the runtime's own stop; context lost */
+  KOMIRA_UDF_ERR_HOST_CONTRACT = 18,  /* the host broke this ABI (§4.5); message names the rule */
+  KOMIRA_UDF_ERR_KILLED = 19          /* user code ignored a cancel or deadline and was stopped by force; context lost */
 } komira_udf_status;
 
-#define KOMIRA_UDF_TRANSPORT_IN_PROCESS 1  /* komira_udf_host.transport (§4.2) */
-#define KOMIRA_UDF_TRANSPORT_WORKER     2
+/* capabilities.udf_class (0 reserved, refused) */
+#define KOMIRA_UDF_CLASS_NATIVE   1u
+#define KOMIRA_UDF_CLASS_MANAGED  2u
+/* capabilities.shapes and spec.shape: one bit per shape (0: none) */
+#define KOMIRA_UDF_SHAPE_SCALAR                    (1u << 0)
+#define KOMIRA_UDF_SHAPE_ROW                       (1u << 1)
+#define KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN        (1u << 2)
+#define KOMIRA_UDF_SHAPE_MAP_BATCHES_FRAME         (1u << 3)
+#define KOMIRA_UDF_SHAPE_MAP_BATCHES_FRAME_GROUPED (1u << 4)
+#define KOMIRA_UDF_SHAPE_AGG_PLAIN                 (1u << 5)
+#define KOMIRA_UDF_SHAPE_AGG_MERGEABLE             (1u << 6)
+#define KOMIRA_UDF_SHAPE_STEP                      (1u << 7)
+/* capabilities.devices (0: none) */
+#define KOMIRA_UDF_DEVICE_CPU                      (1u << 0)
+/* capabilities.features (0: none) */
+#define KOMIRA_UDF_FEATURE_MEMORY_REPORT           (1u << 0)
+#define KOMIRA_UDF_FEATURE_CONTAINS_CRASHES        (1u << 1)
+#define KOMIRA_UDF_FEATURE_FORCED_STOP             (1u << 2)
 
 typedef struct komira_udf_error {     /* allocated by the host per call; filled by the runtime on failure */
   size_t      struct_size;
@@ -419,7 +442,7 @@ typedef struct komira_udf_error {     /* allocated by the host per call; filled 
   void*       private_data;
 } komira_udf_error;
 
-typedef struct komira_udf_host {      /* provided by the host: the engine, or komira_udf_worker in a worker; valid until shutdown returns */
+typedef struct komira_udf_host {      /* provided by the engine; valid until shutdown returns */
   size_t   struct_size;
   uint32_t abi_major, abi_minor;
   void*    host_data;                 /* every callback below is thread-safe; none from a signal handler */
@@ -427,7 +450,6 @@ typedef struct komira_udf_host {      /* provided by the host: the engine, or ko
   void     (*mem_release)(void* host_data, int64_t bytes);
   int64_t  (*now_ns)(void* host_data);                      /* monotonic clock deadlines are read against */
   void     (*log)(void* host_data, int32_t level, const char* utf8);
-  uint32_t transport;                 /* IN_PROCESS (the engine) or WORKER (komira_udf_worker) */
 } komira_udf_host;
 
 typedef struct komira_udf_capabilities {
@@ -436,8 +458,8 @@ typedef struct komira_udf_capabilities {
   const char* runtime_abi;            /* "cp312" */
   uint32_t    max_descriptor_version;
   uint32_t    shapes, devices, features;  /* §4.2 */
-  uint32_t    udf_class;              /* NATIVE or MANAGED (§1.2); gives the mode and the transport */
-} komira_udf_capabilities;               /* runtime facts only: nothing here depends on the transport */
+  uint32_t    udf_class;              /* NATIVE or MANAGED (§1.2) */
+} komira_udf_capabilities;               /* what the runtime can do; nothing about how it executes */
 
 typedef struct komira_udf_spec {      /* the UdfRef, decoded by the host; borrowed for the call */
   size_t             struct_size;
@@ -446,7 +468,7 @@ typedef struct komira_udf_spec {      /* the UdfRef, decoded by the host; borrow
   const char*        entry;
   uint32_t           descriptor_version;
   const uint8_t*     descriptor;  size_t descriptor_len;   /* records entry, shapes and signature (§3.1) */
-  const struct ArrowSchema* args;     /* a struct schema, one child per arg_types entry; for ROW, the read set by name */
+  const struct ArrowSchema* args;     /* a struct schema, one child per arg_types entry; for ROW, the projected input */
   const struct ArrowSchema* result;   /* return_type; a struct for a table */
   const struct ArrowSchema* state;    /* state_type, or NULL */
   int32_t            null_mode, stability;
@@ -464,7 +486,7 @@ typedef struct komira_udf_call {
 
 typedef struct komira_udf_rt       komira_udf_rt;        /* the runtime, once per process */
 typedef struct komira_udf_udf      komira_udf_udf;       /* a validated, loaded UDF: process-wide part */
-typedef struct komira_udf_context  komira_udf_context;   /* a native library's per-thread state, or a worker's interpreter (§3.3) */
+typedef struct komira_udf_context  komira_udf_context;   /* what one engine thread calls (§3.3) */
 typedef struct komira_udf_instance komira_udf_instance;  /* one UDF inside one context */
 typedef struct komira_udf_frame    komira_udf_frame;     /* one frame, plain-aggregate or step call */
 typedef struct komira_udf_groups   komira_udf_groups;    /* the accumulators of many groups */
@@ -510,18 +532,18 @@ const komira_udf_runtime* komira_udf_runtime_init_v1(const komira_udf_host* host
 
 **The operations, in lifecycle order.**
 
-1. **`init`** negotiates the version (§8.1) and creates the runtime handle. It runs once per process. The host loads the library with `RTLD_LOCAL | RTLD_NOW` and never `dlclose`s it, because runtimes start threads and register exit handlers. Runtimes are built with hidden symbol visibility except for the one exported symbol. `komira_udf_host.transport` tells the runtime which transport serves it; a `MANAGED` runtime refuses `IN_PROCESS` with `ERR_UNSUPPORTED` (§4.2). Inside a worker, `komira_udf_worker` is the host: it calls `init` with `WORKER`, and every later entry, `shutdown` included, on the same thread.
-2. **`describe`** returns the capabilities (§4.2). It is cheap and pure, and its answer does not depend on the transport.
+1. **`init`** negotiates the version (§8.1) and creates the runtime handle. It runs once per process. The host loads the library with `RTLD_LOCAL | RTLD_NOW` and never `dlclose`s it, because runtimes start threads and register exit handlers. Runtimes are built with hidden symbol visibility except for the one exported symbol. A runtime that runs user code in worker processes starts them when and how it chooses (§5).
+2. **`describe`** returns the capabilities (§4.2). It is cheap and pure.
 3. **`validate(spec)`** compares the spec with the descriptor: the entry, the shape and the signature the producer recorded at capture (§3.1, *Descriptor rules*).
    - It is pure: it opens no code object, loads no library, imports nothing and deserializes nothing, so no user code and no library constructor runs.
    - It plays the role of PostgreSQL's validator function ([plhandler](https://www.postgresql.org/docs/current/plhandler.html)).
    - It runs at host admission, and in the producer's local check.
-4. **`load(spec)`** verifies each code object's sha256, opens the code, checks that it agrees with the descriptor's entry, shapes and signature (`ERR_LOAD` otherwise), and binds the argument, result and state schemas. It runs once per UDF per process, before any data is read (§7.2 step 9). On the worker transport it runs in the runtime's control worker; a runtime with `FORK_WORKERS` loads there once and its context workers inherit the loaded code at the fork, and any other runtime's context workers each run `load` again (§5.2).
-5. **`open_context(slot)`** creates one context (§3.3): a native library's per-thread state in the engine, or the one context of a worker process. `slot` is a dense index.
+4. **`load(spec)`** verifies each code object's sha256, opens the code, checks that it agrees with the descriptor's entry, shapes and signature (`ERR_LOAD` otherwise), and binds the argument, result and state schemas. It runs once per UDF and argument schema (§3.3), before any data is read (§7.2 step 9). Where the code is actually loaded (the engine's process, or the runtime's workers) is the runtime's choice (§5).
+5. **`open_context(slot)`** creates one context for one engine thread (§3.3). `slot` is a dense index.
 6. **`open_instance(context, udf)`** makes a UDF callable in a context. A plan with 10 UDFs on 32 engine threads has 32 contexts and 320 instances, not 320 interpreters. This is the counterpart of DuckDB's `local_init`.
 7. **Calls**, by shape:
    - **`SCALAR` and `MAP_BATCHES_COLUMN`: `call_batch`.** A `SCALAR` runtime loops over the rows *inside* the runtime, in its own language. An `async` function is awaited inside the runtime, with at most `max_concurrent_calls` calls in flight (§10.8). The output has the same length as the input.
-   - **`ROW`: `call_batch`, rows built inside the runtime.** At `load` the runtime binds the field names from `spec->args`, the read set. Per batch it builds one row object per row over the `args` children only, in its own language: a lazy view that reads child *i* at row *r* when a field is read (a Python row proxy or a pandas `Series` holding only the read set, a JavaScript object with getters, a typed row view in a native SDK). A read of any other name fails with `ERR_FIELD_NOT_DECLARED`, with `row` set. If user code catches the language's exception, the runtime still fails the batch: the proxy records the violation and `call_batch` checks it before it returns. A native SDK whose row view exposes only the declared fields rejects other names when the library is built.
+   - **`ROW`: `call_batch`, rows built inside the runtime.** At `load` the runtime binds the field names from `spec->args`, the call's projected input (§3.1). Per batch it builds one row object per row over the `args` children only, in its own language: a lazy view that reads child *i* at row *r* when a field is read (a Python row proxy or a pandas `Series` holding only those fields, a JavaScript object with getters, a typed row view in a native SDK). With an empty `read_set` the struct has no children and the row objects have no fields. A read of any other name fails with `ERR_FIELD_NOT_DECLARED`, with `row` set. If user code catches the language's exception, the runtime still fails the batch: the proxy records the violation and `call_batch` checks it before it returns.
    - **`MAP_BATCHES_FRAME`, ungrouped: `frame_open`, then `frame_next` until the end.** The runtime pulls input batches from `in` when it needs them; the host pulls output batches, so a generator yields as it goes, before it has read all its input.
    - **`MAP_BATCHES_FRAME`, grouped, and plain `AGGREGATE`: the same entries, with a group column.** Each input batch's first child is a non-null `int64` group ordinal. Rows of one group are contiguous and ordinals increase; a group may span batches. The runtime collects a group's rows and calls the user function once per group, in its own language. A grouped frame returns the user's tables (which carry their own key columns, §10.4); a plain aggregate returns one row per completed group, in ordinal order, so the host pairs results with keys by position. One crossing serves many groups.
    - **Mergeable `AGGREGATE`: the `agg_*` entries, vectorized over groups** (the shape of DataFusion's `GroupsAccumulator`, [docs](https://docs.rs/datafusion/latest/datafusion/logical_expr/trait.GroupsAccumulator.html)):
@@ -544,7 +566,7 @@ Every pointer that crosses the ABI has exactly one named owner. The Mojo binding
 | Object | Owner | Rule |
 |---|---|---|
 | `args`, `states`, `group_ids` of every call | **Moved to the runtime on entry, whatever status it returns** | The struct itself belongs to the host (often on its stack). Before returning, the runtime moves it into its own storage (`*mine = *args; args->array.release = NULL;`) and later calls `release` only on its own copy, exactly once. It may release after returning, when user code kept a view. The host exports without copying: each buffer is kept alive by a shared reference that the release drops, as the stream exporter already does (`c_data_stream.mojo:385-395`), not with the borrowing exporter of `c_data_interface.mojo:17-20`. |
-| `out` of every call | **Moved to the host on success** | The runtime produces it with its own release callback. On any status other than OK, `out->array.release == NULL` and the host never calls it. The host imports it **without copying**, after validating it (below), and calls release when its last reference goes away. A runtime may return its input buffers in its output. |
+| `out` of every call | **Moved to the host on success** | The runtime produces it with its own release callback. On any status other than OK, `out->array.release == NULL` and the host never calls it. The host imports it **without copying**, after validating it (below), and calls release when its last reference goes away. A runtime may return its input buffers in its output. Its buffers must not change while the host holds them: a runtime whose user code produced them in another process copies them out of any memory that process can still write before it returns. |
 | `in` stream of `frame_open` | **Moved to the runtime** | Same move rule as `args`. The runtime releases it after the end of the stream, at `frame_close`, or on failure. |
 | `komira_udf_spec`, with its strings and schemas | Borrowed for the call | `validate` and `load` copy whatever they keep. |
 | `komira_udf_error` | The host owns the struct; the runtime owns the strings | The host allocates one per call, so concurrent calls never share one. The host calls `release` once when it is non-NULL. An unknown `code` from a newer minor is treated as `ERR_INTERNAL`. |
@@ -552,41 +574,43 @@ Every pointer that crosses the ABI has exactly one named owner. The Mojo binding
 | Handles (`rt`, `udf`, `context`, `instance`, `frame`, `groups`) | The runtime | Created and freed only through the table. |
 | Callbacks into a language (a C callback object, a Node-API reference) | The runtime, inside its context or instance | Freed in `close_instance` or `close_context`. The host never holds a reference into a language. |
 
-**Release runs on any thread, at any time.** The Arrow specification does not say which thread may call `release`, so this ABI does: the host (the engine, or `komira_udf_worker` inside a worker) calls release on whatever thread drops the last reference, possibly after `close_instance` and `close_context`, until `shutdown` begins. Release must not block on an interpreter lock or an event loop:
-- In Python, freeing a buffer backed by a numpy or pyarrow object needs `Py_DECREF`, which needs the GIL; taking the GIL from an engine thread while the interpreter's thread waits on the engine deadlocks.
-- In Node, `napi_delete_reference` must run on the env's JavaScript thread.
+**Release runs on any thread, at any time.** The Arrow specification does not say which thread may call `release`, so this ABI does: the host calls release on whatever engine thread drops the last reference, possibly after `close_instance` and `close_context`, until `shutdown` begins. Release must not wait for anything that another thread may hold while it waits on the engine, such as an interpreter lock or an event loop, and must not need the thread that created the array.
 
 A runtime therefore implements release with an atomic reference count and a deferred-free queue, which the owning context's thread drains on its next call or at close. `shutdown` drains every queue; the host releases everything before calling it, and keeps `komira_udf_host` alive until it returns.
 
-**The host validates every imported array.** The runtime returns exactly the bound result or state schema and does any cast itself (`ERR_RETURN_TYPE` is the runtime's report). Because no schema travels with `out`, a wrong layout would be read through the declared type, and int64 and float64 have identical layouts. So on import the host checks the layout against the bound schema before any kernel reads it: `n_buffers` and `n_children` per format, each buffer's size against `length + offset`, offsets monotonic and within the data, a dictionary exactly where the type has one, and device CPU. A failure is `UDF_RUNTIME_FAULT`, naming the runtime. In-process this guards against runtime bugs; across the worker boundary it is a security check, which is why the engine validates its own copy (§5.2).
+**The host validates every imported array.** The runtime returns exactly the bound result or state schema and does any cast itself (`ERR_RETURN_TYPE` is the runtime's report). Because no schema travels with `out`, a wrong layout would be read through the declared type, and int64 and float64 have identical layouts. So on import the host checks the layout against the bound schema before any kernel reads it: `n_buffers` and `n_children` per format, each buffer's size against `length + offset`, offsets monotonic and within the data, a dictionary exactly where the type has one, and device CPU. A failure is `UDF_RUNTIME_FAULT`, naming the runtime. It guards against runtime bugs, and against a runtime that hands on a layout its user code chose.
 
 - **One batch at a time; schemas once.** Schemas are bound at `load` and never sent per call; `args` carries only arrays.
-- **Importing without a copy is new work.** Today's importers copy (`c_data_stream.mojo:3083-3087`, `:3264-3278`). The in-process transport needs an importer that validates foreign buffers and wraps them in reference-counted storage whose last reference calls the producer's `release`.
+- **Importing without a copy is new work.** Today's importers copy (`c_data_stream.mojo:3083-3087`, `:3264-3278`). The C ABI needs an importer that validates foreign buffers and wraps them in reference-counted storage whose last reference calls the producer's `release`.
 - **Device arrays.** At the first release, `device_type` is CPU, `device_id` is -1 and `sync_event` is NULL. A runtime that receives any other device returns `ERR_UNSUPPORTED`.
 
 ### 4.5 Errors
 
-Every entry returns a `komira_udf_status` and on failure fills the host's `komira_udf_error`. The host maps status codes to the run's named errors through one table, so every language reports a raised exception the same way. A runtime returns the user's message and trace, not only a code.
+Every entry returns a `komira_udf_status` and on failure fills the host's `komira_udf_error`. Each status says what failed: user code (`ERR_RAISED`, `ERR_RETURN_TYPE`, `ERR_LENGTH`, `ERR_FIELD_NOT_DECLARED`, the size limits), the code or the plan (`ERR_LOAD`, `ERR_CODE_DIGEST`, `ERR_DESCRIPTOR`, `ERR_UNSUPPORTED`), a stop (`ERR_CANCELLED`, `ERR_DEADLINE`, `ERR_KILLED`), the process running user code (`ERR_WORKER_CRASHED`, `ERR_OUT_OF_MEMORY`), the host (`ERR_HOST_CONTRACT`) or the runtime itself (`ERR_ABI`, `ERR_INTERNAL`). The host maps status codes to the run's named errors through one table, so every language reports a failure the same way. A runtime returns the user's message and trace, not only a code.
 
 | `komira_udf_status` | Run error |
 |---|---|
 | `ERR_RAISED` | `UDF_RAISED`, with `user_trace` and the row (per §10.7, the host bisects a batch that is not `VOLATILE`) |
 | `ERR_RETURN_TYPE`, `ERR_LENGTH` | `UDF_RETURN_TYPE_MISMATCH`, `UDF_BATCH_LENGTH_MISMATCH` |
-| `ERR_FIELD_NOT_DECLARED` | `UDF_FIELD_NOT_DECLARED`, naming the field, the read set and the row, with the fix-it "add it to `columns=[...]`". Never retried: the same batch fails the same way |
+| `ERR_FIELD_NOT_DECLARED` | `UDF_FIELD_NOT_DECLARED`, naming the field, the fields the call passed and the row; when the call carried a `read_set`, with the fix-it "declare the field" (§6.1). Never retried: the same batch fails the same way |
 | `ERR_STATE_TOO_LARGE`, `ERR_GROUP_TOO_LARGE` | `UDF_STATE_TOO_LARGE`, `UDF_GROUP_TOO_LARGE` (the host names the key from `group`; `UDF_STATE_TOO_LARGE` also names the cap, a fixed 64 MiB of Arrow state per group at the first release, §10.2) |
 | `ERR_LOAD`, `ERR_CODE_DIGEST`, `ERR_DESCRIPTOR` | `OPTIMIZED_UDF_CODE_UNLOADABLE`, `OPTIMIZED_UDF_CODE_DIGEST_MISMATCH`, `OPTIMIZED_UDF_DESCRIPTOR_INVALID` |
-| `ERR_CANCELLED`, `ERR_DEADLINE` | The run's cancel, or `UDF_DEADLINE_EXCEEDED` (`UDF_STEP_TIMED_OUT` for a step). Also what a call returns when the host killed its worker for that reason (§4.7). Never retried |
+| `ERR_UNSUPPORTED` from `validate` or `load` | `OPTIMIZED_UDF_UNSUPPORTED`, naming the runtime and carrying its message, which says what is unsupported: no library for the host's platform (`komira/native`, §1.2) or a type the language cannot represent (§6.2). A shape the runtime lacks is refused earlier, from `describe`, as `OPTIMIZED_UDF_KIND_UNSUPPORTED` (§4.2), and a shape the entry lacks is `ERR_DESCRIPTOR` (§3.1). One status serves both remaining uses because the host does the same thing for each: it refuses the plan at admission |
+| `ERR_ABI` | `UDF_RUNTIME_ABI_MISMATCH`, naming the runtime and both versions (§8.1) |
+| `ERR_CANCELLED` | The run's cancel |
+| `ERR_DEADLINE` | `UDF_DEADLINE_EXCEEDED` (`UDF_STEP_TIMED_OUT` for a step) |
+| `ERR_KILLED` | The run's cancel when the host had set the call's cancel flag; otherwise `UDF_DEADLINE_EXCEEDED` (`UDF_STEP_TIMED_OUT`), saying that user code was stopped by force. Never retried. The context is lost: the host closes it and opens a new one before the slot's next call (§4.7) |
 | `ERR_INSTANCE_LOST` | Not an error by itself: the host closes the context, opens a new one, and retries the batch under the delivery rule (§3.4) |
-| `ERR_WORKER_CRASHED` | `UDF_WORKER_CRASHED`, naming the runtime and the signal or exit status. Returned only by the engine's worker proxy, when a worker's control channel reaches end of file or the worker exits, and the host had not killed it. The host starts a new worker and retries the batch when the UDF is not `VOLATILE` (§5.2); a `VOLATILE` batch fails the run |
-| `ERR_HOST_CONTRACT` | `UDF_HOST_CONTRACT_VIOLATION`, naming the runtime and the rule the host broke; a defect in the engine, never blamed on user code or on the runtime, and never retried. A runtime returns it when the host breaks a rule of this ABI that the runtime can see: an `args` struct whose children differ from the bound schema (for a `ROW`, a child outside the read set), an argument struct with a validity buffer or a non-zero offset (§3.4 rule 5), a call on a handle already closed, or two calls at once on one context, frame or groups object |
-| `ERR_OUT_OF_MEMORY` | `UDF_OUT_OF_MEMORY` |
-| `ERR_INTERNAL`, `ERR_ABI`, an unknown code, `ERR_UNSUPPORTED` at call time, `ERR_WORKER_CRASHED` from a runtime rather than the proxy, or a failed import validation | `UDF_RUNTIME_FAULT`, naming the runtime; never blamed on user code |
+| `ERR_WORKER_CRASHED` | `UDF_WORKER_CRASHED`, naming the runtime and the signal or exit status it reports. The context is lost. The host opens a new one and retries the batch **once** when the UDF is not `VOLATILE`; a second crash on the same batch, or any crash on a `VOLATILE` batch, fails the run. A runtime that cannot tell a crash from a stop for memory reports a crash |
+| `ERR_OUT_OF_MEMORY` | `UDF_OUT_OF_MEMORY`. Also what a runtime returns when it knows the process running user code was ended for memory (its own per-process cap, or the kernel's out-of-memory killer). Never retried |
+| `ERR_HOST_CONTRACT` | `UDF_HOST_CONTRACT_VIOLATION`, naming the runtime and the rule the host broke; a defect in the engine, never blamed on user code or on the runtime, and never retried. A runtime returns it when an `args` struct's children differ from the bound schema (for a `ROW`, a child the projection excluded), or when the argument struct has a validity buffer or a non-zero offset (§3.4 rule 5) |
+| `ERR_INTERNAL`, an unknown code, `ERR_UNSUPPORTED` at call time, or a failed import validation | `UDF_RUNTIME_FAULT`, naming the runtime; never blamed on user code |
 
 Per-row errors for a TRY form, like Velox's `errorPayload` ([RemoteFunction.thrift](https://github.com/facebookincubator/velox/blob/main/velox/functions/remote/if/RemoteFunction.thrift)), are not in ABI 1.0. They would be added later as a new entry.
 
 ### 4.6 Post-conditions belong to the host
 
-After every call, the host checks the output in one shared library, `komira_udf_host`, for every runtime and both transports. The conformance harness (§6.3) and the engine's operators (§9, S6) link the same library.
+After every call, the host checks the output in one shared library, `komira_udf_host`, for every runtime. The conformance harness (§6.3) and the engine's operators (§9, S6) link the same library.
 
 - the output passes import validation against the bound schema (§4.4), so its type is exactly `return_type` or `state_type`;
 - a column-form output has the same length as the input;
@@ -595,106 +619,63 @@ After every call, the host checks the output in one shared library, `komira_udf_
 
 The same library holds compaction and scatter (§3.4 rules 1-2) and the error table (§4.5). A runtime may check its outputs too, but the host never relies on it.
 
-### 4.7 Cancellation and deadlines
+### 4.7 Cancellation, deadlines and forced stops
 
 - **Cancel is a per-call flag**, `komira_udf_call.cancel`. It applies to one call, cannot outlive it, and so cannot race with closing an instance or land on the next call. The runtime checks it between rows and between batches, and returns `ERR_CANCELLED`. There is no cancel entry, and nothing in the ABI runs in a signal handler.
-- **A runtime watches the flag with its own thread when user code is busy.** Interrupting user code is runtime-specific:
-  - CPython: `PyErr_SetInterrupt` acts only on the main thread of the main interpreter, and `PyThreadState_SetAsyncExc` needs the GIL; neither interrupts a long C loop. A watchdog thread in the runtime, started by `open_context` (after the fork, §5.2), uses `PyThreadState_SetAsyncExc` on the context's thread.
-  - Node: Node-API has no call that stops running JavaScript; the engine stops it by killing the worker (below).
-- **Deadlines** arrive with each call, in `deadline_ns`. A runtime that notices one has passed returns `ERR_DEADLINE`. This is cooperative.
-- **Hard limits** (`max_runtime_ms` for a step, a host's limit per batch, and a cancel the runtime has not answered within the host's grace period) are enforced only on the worker transport, by killing the worker. In-process, there is no safe way to stop code that ignores the flag, which is why a native UDF that must be stoppable opts into the worker transport.
-- **What a killed call returns.** A call whose worker the host killed returns the reason it was killed: `ERR_CANCELLED` after a cancel, `ERR_DEADLINE` after a deadline or a hard limit. It never returns `ERR_INSTANCE_LOST` or `ERR_WORKER_CRASHED`, so a cancelled batch is never retried and a kill is never reported as a crash. The context, its instances and their frames and groups objects are lost with the worker: a later call on any of them returns `ERR_INSTANCE_LOST` without running user code, and closing them succeeds. The host closes the context and opens a new one before it calls that slot again. The same rule holds when a runtime's own interrupt leaves a context unusable: the interrupted call returns the reason, and later calls return `ERR_INSTANCE_LOST`.
+- **Deadlines** arrive with each call, in `deadline_ns`, against `host->now_ns`. A runtime that notices one has passed returns `ERR_DEADLINE`. A step's `max_runtime_ms` and a host's limit per batch reach the runtime this way.
+- **Forced stops.** A runtime with `FORCED_STOP` (§4.2) stops user code that has not honoured a cancel within the runtime's grace period, or that runs past its deadline, by force (the Python and Node runtimes kill the worker, §5), and returns `ERR_KILLED`, with a message that says whether a cancel or a deadline caused it. The context, its instances and their frames and groups objects are then lost: a later call on any of them returns `ERR_INSTANCE_LOST` without running user code, and closing them succeeds. The host closes the context and opens a new one before it calls that slot again.
+- **Why a status of its own.** The stop happens inside the runtime, so the status is the only way the host learns that user code did not return and that the context is gone. `ERR_CANCELLED` and `ERR_DEADLINE` stay the statuses of user code that honoured the request, after which the context is still usable.
+- **Without `FORCED_STOP`** (`komira/native`), cancel and deadlines are cooperative: there is no safe way to stop in-process code that ignores the flag.
 
 ### 4.8 Memory accounting
 
 - The host counts the Arrow buffers a runtime produces when it imports them.
-- A runtime with the `MEMORY_REPORT` feature reports, through `memory_report`, the memory a context holds outside Arrow (an interpreter heap, a loaded model).
+- A runtime with the `MEMORY_REPORT` feature reports, through `memory_report`, the memory a context holds outside Arrow buffers: an interpreter heap, a loaded model, and the resident memory of any process the runtime runs for that context.
 - Large allocations that a runtime controls go through `host->mem_reserve` and `mem_release`. The host may refuse them with `ERR_OUT_OF_MEMORY`.
-- In the worker transport, the process's resident memory, under its own memory limit, is the authoritative number. The hooks are only advisory there.
+- A runtime that runs user code in its own processes may cap each one; a process ended at its cap is `ERR_OUT_OF_MEMORY` (§4.5).
 
-## 5. The worker transport
+## 5. How the Python and Node runtimes execute user code (informative)
+
+This section is not part of the contract. It records how komira's two managed runtimes are built behind the C ABI. Either may change in any release without a change to the engine, the plan or the ABI, and nothing in the engine depends on it. Their conformance is the shared corpus plus the managed cases, through the C ABI (§6.3).
 
 ### 5.1 Why workers
 
-Workers give four things:
+Both runtimes run user code in worker processes, one per context, because that is what serves their languages best:
+- **Python:** the common data libraries (numpy, pandas, pyarrow, scikit-learn) refuse to load in a sub-interpreter, so the only way to run Python UDFs on several cores at once is one interpreter per process.
+- **Node:** Node-API is exported by the `node` executable and embedding Node is not ABI-stable, so JavaScript runs in `node` processes, not in the engine.
+- **Both:** a crash in user code or in a native extension ends a worker, not the engine (`CONTAINS_CRASHES`); user code that ignores a cancel can be stopped by killing its worker (`FORCED_STOP`); each worker can have its own memory cap.
 
-- **Crash containment.** A segfault in a user's native extension ends a worker, not the engine.
-- **Isolation.** A separate user id, so a worker cannot trace or signal the engine, and no access to the supervisor's heartbeat token or channel (§10.10).
-- **Hard limits.** The worker is killed on a deadline, and each process has its own memory limit.
-- **Scaling per core** for a runtime whose contexts cannot run in parallel in one process, such as CPython with a global interpreter lock.
+### 5.2 How they are built
 
-### 5.2 The protocol
+- **The library the engine loads is thin.** Per context it owns one worker process and forwards each call to it over a protocol private to that runtime. The two runtimes may share one private C library for this (`komira_udf_worker`); the engine does not link it.
+- **Starting workers.** The library starts processes with `posix_spawn`, never `fork`, because the engine is multi-threaded.
+  - `komira/python` spawns one *zygote* per runtime: a single-threaded process that initializes the interpreter, limits native thread pools (BLAS, OpenMP) to one thread, and loads user code at `load`. It then forks one worker per context, so the loaded code and captured values are shared copy-on-write.
+  - `komira/node` spawns one `node` process per context, running a small script that loads the runtime as an addon; a `node` process cannot fork safely.
+- **Channels.** A Unix socket pair per worker for control messages, and a shared-memory region per worker for payloads, which are Arrow IPC encapsulated messages with 64-byte aligned bodies (`ipc_decoder_dispatch.mojo:4088`).
+  - **Slots, not rings.** Either side may hold a payload for an arbitrary time (user code may keep a view of its input, §4.4), so payloads free out of order, and a ring would fill and deadlock. Each direction is a slot heap with a bound on the bytes pinned.
+  - **Into the worker: no copy beyond serialization;** the worker decodes in place.
+  - **Out of the worker: one copy.** The worker can still write its half of the region, so the library copies each result out before it returns it to the engine (§4.4, the `out` rule).
+- **Frames.** The library grants input credits as the engine pulls outputs, and the worker answers a pull with "needs input" when its frame must read before it can yield.
+- **Cancel and deadlines.** The library watches the call's cancel flag and the deadline on the engine's clock, and tells the worker; if the worker has not answered within the grace period, it kills the worker and returns `ERR_KILLED` (§4.7).
+- **Crashes.** End of file on a worker's channel, or an exit the library did not cause, is `ERR_WORKER_CRASHED`; an exit the library can attribute to memory is `ERR_OUT_OF_MEMORY` (§4.5).
+- **User ids.** Workers run under the engine's user id. They hold what the engine holds and nothing more; the rule that keeps the supervisor's run token out of the engine keeps it out of the workers too (§7).
 
-The worker protocol carries **the same operations** as §4.3: one message per call and one per reply. It is private to a base release, because the engine and the worker always come from the same image (§8.1).
+### 5.3 Language notes
 
-- **Two kinds of worker.** The engine itself never calls `fork`, because it is multi-threaded; it starts processes only with `posix_spawn`.
-  - **The control worker.** For each runtime a run uses, the engine spawns one control worker from the runtime's launcher (§4.1). It serves the runtime-level entries that need a process before any context exists: `HELLO`, `DESCRIBE`, `VALIDATE` and `LOAD`. It never opens a context and never calls user code beyond what `load` runs.
-  - **Context workers**, one per engine thread (§3.3), each holding one context. For a runtime with `FORK_WORKERS` (§4.2; `komira/python`), the control worker is a *zygote*: the engine sends it `FORK`, and it forks a context worker that inherits the loaded code and captured values copy-on-write. The zygote limits native thread pools to one thread before it loads user code, and checks before each fork that it has one thread; if an import started another, `FORK` fails with `ERR_LOAD` naming the thread count (`OPTIMIZED_UDF_CODE_UNLOADABLE`). For any other runtime (`komira/node`, and `komira/native` when opted in), the engine spawns each context worker from the launcher, and the worker runs `HELLO` and `LOAD` itself.
-- **Channels.** There are two:
-  - a control channel: a Unix socket pair the engine creates for each worker. For a forked context worker, the engine passes the new worker's end of the pair, and its memory file, to the zygote with `FORK`;
-  - a shared-memory region: an anonymous memory file, created per worker and passed over that socket. It holds two *slot heaps*, engine-to-worker and worker-to-engine.
+**Python** (the `komira/python` runtime, stage S4):
+- **Embedding.** The worker embeds CPython. Extension modules built to the manylinux policy do not link `libpython`, so the worker loads `libpython` with `RTLD_GLOBAL` (or `dlopen(..., RTLD_NOLOAD | RTLD_GLOBAL)` once loaded), so `import numpy` finds the `Py*` symbols. This is the worker's own loading of its interpreter; user libraries loaded by `komira/native` are never loaded `RTLD_GLOBAL`.
+- **ABI tag.** The runtime reports the CPython tag of its worker interpreter as `runtime_abi`, matched against `needs.runtimes`.
+- **Finalization.** A worker drains its release queues before it finalizes the interpreter.
 
-  Where shared memory is not available, payloads travel over the control channel itself, as a pipe. The messages are the same.
-- **Framing.**
-  - Each message is a fixed little-endian header on the control channel: `{magic, op, request_id, flags, slot, payload_offset, payload_len}`.
-  - An optional payload sits in a slot.
-  - A payload is **Arrow IPC encapsulated messages**: a record batch or, for `LOAD` and `OPEN`, the schemas. Body buffers are 64-byte aligned, so the reader can borrow them in place (`ipc_decoder_dispatch.mojo:4088`).
-- **Slots, not rings.** Either side may hold a payload for an arbitrary time: user code may keep a view of its input (§4.4), and the engine keeps imported outputs alive, for example inside a hash build. So payloads free out of order, and a ring would fill and deadlock (the worker blocked writing output while the engine waits for it). Each heap is a slot allocator with a bound on the bytes pinned per direction; past the bound, the holder copies the payload out and frees its slot.
-- **Copies, by direction.**
-  - **Engine to worker: no copy beyond serialization.** The engine writes a batch's IPC body directly into a slot; the worker decodes it in place (`ipc_decoder_dispatch.mojo:4088`, `shared_aligned_buffer.mojo:467`) and hands it to the runtime as a C Data array whose release frees the slot.
-  - **Worker to engine: one copy.** The worker is the boundary for untrusted code, and it can still write its half of the region after the engine has validated a payload. So the engine copies each worker-to-engine payload out of its slot once, frees the slot, and validates and decodes its own copy (§4.4). Sealed per-payload memory files would avoid the copy and are not chosen for the first release (§10).
-- **Flow control for frames.** The engine grants `FRAME_IN` credits as it pulls `FRAME_OUT` results. A worker whose frame needs another input batch before it can yield answers a `FRAME_OUT` with `NEED_INPUT`, and the engine sends the next `FRAME_IN` (or its end). So a frame that yields before reading its input and a frame that reads all its input before yielding both make progress without filling a heap.
-- **Operations.**
-  - `HELLO` exchanges the protocol and C ABI versions. Since both sides come from one image, any difference is refused.
-  - Then `DESCRIBE`, `VALIDATE`, `LOAD`, `OPEN_CONTEXT`, `OPEN_INSTANCE` and `CALL_BATCH`.
-  - Frames: `FRAME_OPEN`, `FRAME_IN`, `FRAME_OUT`, `FRAME_CLOSE`.
-  - Aggregates: `AGG_OPEN`, `AGG_UPDATE`, `AGG_MERGE`, `AGG_STATE`, `AGG_FINISH`, `AGG_CLOSE`.
-  - `FORK`, to a zygote only: fork one context worker on the channel and memory file it carries.
-  - `CANCEL` (for one `request_id`), the closes, and `SHUTDOWN`.
-  - Replies: `OK`; `NEED_INPUT`, to `FRAME_OUT` only; and `ERROR`, which carries a `komira_udf_error` with its strings.
-- **Schemas are sent once.** `LOAD` sends the argument, result and state schemas; batches carry only their bodies.
-- **Cancellation.** `CANCEL` is sent out of band on the control channel; the worker sets that call's flag. If the worker has not answered after a grace period, the engine kills it, and the call returns `ERR_CANCELLED` (§4.7).
-- **Crashes.**
-  - End of file on the control channel, or an exit, of a worker the host did not kill is `ERR_WORKER_CRASHED` (`UDF_WORKER_CRASHED`, §4.5). The engine's proxy returns it; the worker never does.
-  - The host retries the batch on a new worker only when the UDF is not `VOLATILE` (§10.10).
-  - A crashed zygote is replaced by a new control worker, which loads again; context workers already forked keep running.
-  - State already merged in the crashed worker is lost with it. The host restarts the groups' accumulators from their input, or, in a streaming run, from the last checkpoint.
-
-### 5.3 Which runtime uses which transport
-
-The runtime's class fixes the transport (§1.2); host policy decides only whether a native UDF opts into workers. These are the runtimes komira ships, with the facts each transport brings:
-
-| Runtime | Class (§1.2) | Transport, on every host and on the producer's machine | Workers start by | Contexts | Calls stopped by force | A crash ends |
-|---|---|---|---|---|---|---|
-| `komira/python` (CPython, embedded in the worker) | `MANAGED`; `features` `FORK_WORKERS` | Worker processes only, one per engine thread | `FORK` from a zygote control worker (§5.2) | One per worker | Yes: kill after the grace period (§4.7) | The worker |
-| `komira/node` | `MANAGED` | Worker processes only, one per engine thread; launcher `node` | `posix_spawn` of `node`, after a control worker | One per worker | Yes: kill after the grace period | The worker |
-| `komira/native` (C and Mojo at the first release; Rust, C++ and Zig later; stages S3b, S3c) | `NATIVE` | In-process, when the heartbeat token stays in the supervisor (§1.2); the worker transport by opt-in, for crash isolation, and on a host that cannot keep the token out of the engine | In-process: none. Workers: `posix_spawn` of `komira-udf-worker` | In-process: one per engine thread, in the engine. Workers: one per worker | In-process: no (cooperative only). Workers: yes | In-process: the engine and the run. Workers: the worker |
-
-On the producer's machine the same transports run (§10.10's "same path"): a local run of a Python or Node UDF starts the same workers a remote host would.
-
-**Python requirements** (the `komira/python` runtime, stage S4):
-- **Embedded in the worker.** The runtime embeds CPython and runs only in workers. The host checks the worker interpreter's ABI tag against `needs.runtimes` at `HELLO`.
-- **The zygote.** The control worker initializes the interpreter, limits native thread pools (BLAS and OpenMP) to one thread, runs `load` (importing a `PACKAGE` or `BUNDLE` entry, or deserializing a `VALUE`) and stays single-threaded, so that `FORK` is safe (§5.2). Each forked worker then opens its context: the interpreter's thread state for that worker, and the cancel watchdog thread (§4.7). A captured model loaded in the zygote is shared copy-on-write by every worker until one writes to it.
-- **Finalization.** `shutdown` runs on the thread that ran `init`, the worker's one thread, and drains the release queues (§4.4) before it finalizes the interpreter.
-- **Embedding in a worker.** Extension modules built to the manylinux policy do not link `libpython`. The embedded runtime loads `libpython` with `RTLD_GLOBAL` (or `dlopen(..., RTLD_NOLOAD | RTLD_GLOBAL)` once loaded), so `import numpy` finds the `Py*` symbols. This is the worker process's own loading of the interpreter; user libraries loaded by `komira/native` are never loaded `RTLD_GLOBAL` (§6.3).
-
-**Node requirements** (the `komira/node` runtime, stage S5):
-- **Workers are `node` processes.** Node-API symbols are exported by the `node` executable, and embedding Node is not ABI-stable, so each worker is `node` running a small script that loads the runtime as an addon; `komira_udf_worker` serves the table on the JavaScript main thread. A `node` process cannot fork safely, so the runtime does not set `FORK_WORKERS`, and each context worker is spawned (§5.2).
-- **External buffers, with a copy fallback.** Buffers are wrapped as external `ArrayBuffer`s whose finalizer queues the Arrow release (§4.4). `napi_create_external_arraybuffer` may return `napi_no_external_buffers_allowed` on runtimes built with the V8 sandbox, so the runtime has a copy path, and the conformance harness forces it.
+**Node** (the `komira/node` runtime, stage S5):
+- **External buffers, with a copy fallback.** In the worker, buffers are wrapped as external `ArrayBuffer`s whose finalizer queues the Arrow release. `napi_create_external_arraybuffer` may return `napi_no_external_buffers_allowed` on runtimes built with the V8 sandbox, so the runtime has a copy path, and its tests force it.
 - **Release `args` at return unless user code kept a view.** Garbage-collection finalizers may not run until the env is torn down, so relying on them would pin memory for an unpredictable time.
-- **Cancel kills the worker.** Node-API cannot stop running JavaScript, so a call that does not return after a cancel is ended by the kill of §4.7, and returns `ERR_CANCELLED`; the host opens a new context in a new worker.
+- **Cancel kills the worker.** Node-API cannot stop running JavaScript, so a call that does not return after a cancel ends with the forced stop of §4.7.
 
-Notes:
-
-- **WASM is a runtime, not the interface.**
-  - The component model's canonical ABI copies values into linear memory ([Canonical ABI](https://github.com/WebAssembly/component-model/blob/main/design/mvp/CanonicalABI.md)), so it cannot share Arrow buffers.
-  - One Arrow UDF project that runs several runtimes reports these costs per 1024-row batch ([arrow-udf](https://github.com/arrow-udf/arrow-udf)): native about 1.5 µs, WASM about 15.5 µs, JS about 85 µs, Python about 175 µs.
-  - WASM may earn a place later as a sandbox for compiled languages, with no interpreter in the image. Its one mode is chosen when it is added.
-- **A remote transport can come later.**
-  - It would carry the same messages over Arrow Flight `DoExchange`, and needs no plan change.
-  - Delivery would become at-least-once: BigQuery remote functions document duplicate requests ([docs](https://cloud.google.com/bigquery/docs/remote-functions)).
-  - So the host would allow it only for UDFs that are not `VOLATILE`.
-- **Native code must not unwind across the ABI.** C++ entries are `noexcept` and catch everything, returning `ERR_RAISED`; Rust entries catch panics with `catch_unwind` and return `ERR_RAISED`, and an uncaught panic in an `extern "C"` entry aborts the process. Each native SDK's export helper does this, so user code cannot forget it. A Go runtime (managed, later) needs every signal handler in its process installed with `SA_ONSTACK`, one more reason it runs in workers.
+**Other notes.**
+- **WASM is a runtime, not the interface.** The component model's canonical ABI copies values into linear memory ([Canonical ABI](https://github.com/WebAssembly/component-model/blob/main/design/mvp/CanonicalABI.md)), so it cannot share Arrow buffers. One Arrow UDF project that runs several runtimes reports these costs per 1024-row batch ([arrow-udf](https://github.com/arrow-udf/arrow-udf)): native about 1.5 µs, WASM about 15.5 µs, JS about 85 µs, Python about 175 µs. WASM may earn a place later as a sandbox for compiled languages; its mode is chosen when it is added.
+- **A remote runtime can come later.** It would be one more runtime behind the C ABI, forwarding calls over Arrow Flight `DoExchange`, and needs no plan change. Delivery would become at-least-once (BigQuery remote functions document duplicate requests, [docs](https://cloud.google.com/bigquery/docs/remote-functions)), so it would serve only UDFs that are not `VOLATILE`.
+- **Native code must not unwind across the ABI.** C++ entries are `noexcept` and catch everything, returning `ERR_RAISED`; Rust entries catch panics with `catch_unwind` and return `ERR_RAISED`, and an uncaught panic in an `extern "C"` entry aborts the process. Each native SDK's export helper does this, so user code cannot forget it. A Go runtime (managed, later) needs every signal handler in its process installed with `SA_ONSTACK`.
 
 ## 6. Language SDKs: the producer side
 
@@ -707,7 +688,7 @@ Notes:
    - How the type is declared depends on the language:
      - A language whose types survive to run time (Python) may read them, from type hints or from a `return_dtype=` or `schema=` argument on the verb (§10.5).
      - A language whose types are erased (TypeScript) takes the type as a **value** on the verb. The static type is derived from that value, so the compiler still checks the function (§10.5).
-     - For a `ROW` verb, the read set's types are the input columns' types, which the SDK knows when the plan is built (item 6).
+     - A `ROW` verb declares only its return type; its fields are the call's input (item 6).
      - A native language (Mojo, Rust, C++, Zig; §1.2) derives the types from the function's signature when the library is built, through its SDK's mapping table (§6.2); the export helper records them in the library, and capture checks them against the verb's declared types. C, whose signatures cannot carry Arrow types, takes them as a value on the verb. A managed compiled language (Go) does the same as the native ones, in its own SDK.
 3. **Capture.** The SDK:
    - chooses a `CodeForm`;
@@ -727,11 +708,12 @@ Notes:
    - each runtime's installed dependencies go in its environment directory, `/opt/env/<runtime>/` (for `komira/python`, a virtual environment at `/opt/env/komira/python/`; the older name `/opt/venv/` is retired and no layer uses it);
    - a JavaScript bundle includes its pure-JavaScript dependencies and goes in the code layer under `/komira-code/`;
    - a JavaScript package with a native addon stays outside the bundle; the SDK records its name and exact version, and the image builder installs it for the host's platform into `/opt/env/komira/node/`, where the runtime resolves the bundle's external imports (§10.6).
-5. **A local run through the same runtime and transport** (§10.10's "same path"): a managed UDF runs in the same worker processes a remote host would start, so that a capture error or a type error fails on the user's machine first.
-6. **The read set of each `ROW` UDF** (§3.1), before the plan is optimized, always as an explicit list of columns: `columns=[...]`, else the SDK's static scan, which counts accesses on every branch and returns every input column, listed, when whole-row operations (iteration, length, conversion to a dict or tuple, unpacking, passing the row on) leave the reads unbounded. A local run never adds to it. The SDK refuses, by name, on the user's machine:
-   - `UDF_ROW_SIGNATURE`: the function does not take exactly one positional parameter, the row;
-   - `UDF_ROW_READ_SET_INVALID`: `columns=[...]` names a column twice (the producer-side form of `OPTIMIZED_UDF_ROW_READ_SET_INVALID`);
-   - `UDF_ROW_COLUMN_UNKNOWN`: a name in `columns=[...]`, or a field the scan finds, that the input lacks, even on a branch no row would take, naming the field and the input's columns.
+5. **A local run through the same runtime** (§10.10's "same path"), so that a capture error or a type error fails on the user's machine first.
+6. **The `read_set` of each call that takes an input** (§3.1), when the SDK can determine it. It comes from inspection, where the language allows it, or from an explicit declaration by the user (in Python, `columns=[...]` on the verb or an annotation on the function). When the SDK cannot determine it, it leaves `read_set` absent and the call reads every input column; this is correct and slower, and the SDK says so in its local diagnostics. An SDK emits only names the input has and never repeats one; plan validation refuses anything else, naming the column (`OPTIMIZED_UDF_READ_SET_INVALID`). The SDK also refuses, by name, on the user's machine:
+   - `UDF_ROW_SIGNATURE`: a `ROW` function that does not take exactly one positional parameter, the row;
+   - `UDF_READ_SET_INVALID`: an explicit declaration that names a column twice or a column the input lacks, naming the column.
+
+   *Informative: the Python SDK's inspection.* It scans the function's bytecode for attribute and subscript reads with constant names on the row parameter, on every branch. It leaves `read_set` absent when it cannot bound the reads: the row is iterated, measured, converted to a dict or tuple, unpacked or passed to other code; a key is not a constant (`r[name]`, `getattr(r, name)`); or a name is also a pandas `Series` attribute (`r.name`, `r.index`, `r.values`, `r.get`), which it cannot tell from a field. A scanned name the input lacks also leaves `read_set` absent, so a read on a branch no row takes never refuses a plan. A local run never adds to the read set.
 
 A language may ship a producer without a runtime, for plans that reference only runtimes in the base image. It may also ship a runtime without a producer: a runtime that executes code another SDK captured, such as WASM components built by any toolchain.
 
@@ -769,7 +751,7 @@ A new runtime is done when it passes the **shared conformance corpus** as welded
   - **ABI cases** (stages S1-S5): Arrow IPC input files, a shape and declared types, and either an expected Arrow IPC output or a named error. The harness drives the C table directly.
   - **Plan cases** (stage S6): small optimized plans that run through lowering and the engine's UDF operators.
   - Each runtime adds a *fixture* for each case: the function, in its language, that the case expects. Examples: `double(x)`, `raise_on_row(3)`, `p95(v)`, a mergeable `sum`, a generator that yields three tables.
-  - Every case runs on **each transport the runtime's class allows** (§1.2): a native runtime on both, and the results are compared; a managed runtime on the worker transport. The harness takes the transport from the class, never from `describe`, and checks that `describe` answers the same on every transport it drives.
+  - Every case runs through the C ABI against each runtime, whatever it does behind the table. There is no transport harness: the harness loads the runtime library and calls it, as the engine does.
 - **The harness and the operators share the host library** (`komira_udf_host`, §4.6): post-conditions, compaction, import validation and the error table. A test asserts that the S6 operators link that library; its mutant is an operator with its own length check that skips the shared one. So a runtime cannot pass by special-casing the harness.
 - **Each case names the defect it catches, and the planted mutant that proves the case can fail.**
 
@@ -789,35 +771,33 @@ A new runtime is done when it passes the **shared conformance corpus** as welded
 | A frame generator yields before reading all its input; yields three tables, then raises | A borrowed input stream; lost batches; the wrong error row | Drain all input before the first output; buffer all output |
 | `raise` on row 3 of 8 | An error code without a message; the wrong row | Return `ERR_RAISED` with a NULL message |
 | Every array is released exactly once, including `args` on an error path | A leak or a double release | Count release callbacks; release `args` in both the runtime and the host on error |
-| A UDF holds a view of every input batch (worker) | A full slot heap deadlocks | No copy-out fallback |
+| A UDF holds a view of every input batch | Input that must outlive the call is released early, or a runtime that runs user code elsewhere stalls when its buffers fill | Release `args` at return regardless of views |
 | Cancel flag set during a long call; a context that must be reopened | Cancel is ignored; a lost context is reused | Ignore the flag; reuse the context after `ERR_INSTANCE_LOST` |
-| Worker: a fixture that ignores the cancel flag and spins; the host kills it after the grace period | A killed call is retried, reported as a crash, or never ends; the dead context is reused | The proxy returns `ERR_INSTANCE_LOST` or `ERR_WORKER_CRASHED` for a kill; no kill after the grace period. The case asserts `ERR_CANCELLED`, no retry, `ERR_INSTANCE_LOST` from a later call on that context, and a successful close |
-| The same with a deadline instead of a cancel | A hard limit reported as a cancel | The proxy returns `ERR_CANCELLED` for every kill |
-| Worker calls `abort()` mid-batch; a worker that exits with status 0 mid-batch | The crash is not mapped, or a `VOLATILE` batch is retried | Retry a `VOLATILE` batch; map end of file to `ERR_INSTANCE_LOST`. The case asserts `ERR_WORKER_CRASHED`, `UDF_WORKER_CRASHED` naming the signal or status, one retry when not `VOLATILE`, none when `VOLATILE` |
-| A runtime that returns `ERR_WORKER_CRASHED` itself | A runtime can disguise its own fault as a crash and earn a retry | The host error table maps the status without asking who returned it; the case asserts `UDF_RUNTIME_FAULT` |
-| The host breaks a rule the runtime can see: an `args` struct with one child more than the bound schema; an argument struct with a non-zero offset; a call on a closed instance | A host defect blamed on the runtime or on user code | The runtime returns `ERR_INTERNAL`; the error table maps `ERR_HOST_CONTRACT` to `UDF_RUNTIME_FAULT`. The case asserts `UDF_HOST_CONTRACT_VIOLATION` and no retry |
+| A fixture that ignores the cancel flag and spins (runtimes with `FORCED_STOP`) | A stopped call is retried, reported as a crash, or never ends; the dead context is reused | The runtime returns `ERR_INSTANCE_LOST` or `ERR_WORKER_CRASHED` for a forced stop, or never stops. The case asserts `ERR_KILLED`, the run's cancel, no retry, `ERR_INSTANCE_LOST` from a later call on that context, and a successful close |
+| The same with a deadline instead of a cancel | A deadline reported as a cancel | The host maps every `ERR_KILLED` to the run's cancel. The case asserts `UDF_DEADLINE_EXCEEDED` |
+| A fixture that calls `abort()` mid-batch, and one that exits with status 0 mid-batch (runtimes with `CONTAINS_CRASHES`) | The crash is not reported, or is retried without bound, or a `VOLATILE` batch is retried | Retry until success; retry a `VOLATILE` batch; report end of file as `ERR_INSTANCE_LOST`. The case asserts `ERR_WORKER_CRASHED`, `UDF_WORKER_CRASHED` naming the signal or status, exactly one retry when not `VOLATILE` and none when `VOLATILE` |
+| A fixture that allocates past its process's memory cap (runtimes with `CONTAINS_CRASHES`) | A memory stop retried as a crash | The runtime reports every exit as a crash. The case asserts `ERR_OUT_OF_MEMORY` and no retry |
+| The host breaks a rule the runtime can see: an `args` struct with one child more than the bound schema; an argument struct with a non-zero offset | A host defect blamed on the runtime or on user code | The runtime returns `ERR_INTERNAL`; the error table maps `ERR_HOST_CONTRACT` to `UDF_RUNTIME_FAULT`. The case asserts `UDF_HOST_CONTRACT_VIOLATION` and no retry |
 | Two contexts in parallel | Mutable state shared across contexts | A global accumulator in the runtime |
 | Node with external buffers disallowed | No copy fallback | Always create external buffers |
 | A descriptor with a trailing unknown field; non-canonical bytes; a newer `descriptor_version` | The validator is too lax | `validate` always returns OK |
 | A spec whose `arg_types` or `return_type` differ from the descriptor's signature; a shape the descriptor does not list; a descriptor entry other than `code.entry` | `validate` accepts declared types the function was not captured with | `validate` checks only the descriptor's encoding. The case asserts `ERR_DESCRIPTOR` naming the field and both types, and `ERR_UNSUPPORTED` for the shape |
 | `validate` with `code_root` pointing at an empty directory, then at code objects whose constructor or top-level code writes a marker file | `validate` opens the code, so admission runs user code or library constructors | `validate` loads the code to read the signature. The case asserts OK and no marker |
 | Code that disagrees with its descriptor: a native library whose export table gives another signature; a Python entry whose hints differ from the recorded ones | The descriptor is trusted and the code is never checked | `load` skips the comparison. The case asserts `ERR_LOAD` |
-| `describe` called through the worker proxy and in-process (native) | Capabilities that depend on the transport | The proxy rewrites any field of the worker's answer |
-| A `MANAGED` runtime initialized with `komira_udf_host.transport` `IN_PROCESS` | A managed runtime loaded into the engine | The runtime ignores `transport`. The case asserts `ERR_UNSUPPORTED` from `init` |
 | A `STEP` returning a table with no columns | An empty table is mistaken for an error | Treat zero columns as failure |
 | Round trip of every type in the runtime's mapping table | A silent loss beyond the stated ones | Truncate microseconds in Python |
-| `ROW` with a conditionally read field: `f(r) = r.a if r.flag else r.b`, read set `{flag, a}` (a `columns=[...]` the user made too short), over a batch where row 3 has `flag` false | An undeclared read returns null or a wrong value | The row proxy returns null for an unknown name. The case asserts `ERR_FIELD_NOT_DECLARED` with `row` 3, naming `b` |
-| The same case with the read set `{flag, a, b}` (the scan, or `columns=[...]`) | A correct read set still fails | The proxy checks names against the input schema instead of the read set |
+| `ROW` with a conditionally read field: `f(r) = r.a if r.flag else r.b`, `read_set` `{flag, a}` (a declaration the user made too short), over a batch where row 3 has `flag` false | An undeclared read returns null or a wrong value | The row proxy returns null for an unknown name. The case asserts `ERR_FIELD_NOT_DECLARED` with `row` 3, naming `b` |
+| The same case with `read_set` `{flag, a, b}`, and with `read_set` absent | A correct or absent read set still fails | The proxy checks names against the descriptor instead of `spec->args` |
 | `ROW` whose function catches the language's exception around the undeclared read | A caught violation passes silently | `call_batch` reports only uncaught errors |
-| `ROW` reading 2 fields of a 100-column scan (plan case) | The row UDF keeps every column live | Lowering passes the whole input row; the case asserts the scan's projection and the `args` children equal the read set |
-| Producer: `f(r) = r.a if r.flag else r.b` with no `columns=`, captured after a local run where `flag` was always true | The read set misses a field on an untaken branch | The scan follows only the branch the local run took; the read set is taken from the local run. The case asserts `{flag, a, b}` |
-| Producer: a function that iterates its row, converts it to a dict, or passes it to another function | A guessed read set too small | The scan ignores whole-row operations. The case asserts every input column, listed |
-| Producer: a branch that reads a field the input lacks; `columns=` with a repeated name; a function of two parameters | A bad read set reaches the plan | Drop each refusal. The case asserts `UDF_ROW_COLUMN_UNKNOWN`, `UDF_ROW_READ_SET_INVALID`, `UDF_ROW_SIGNATURE` |
+| `ROW` with `read_set` of 2 columns over a 100-column scan, and with `read_set` absent (plan cases) | A declared read set keeps every column live, or an absent one drops columns | Lowering ignores `read_set`; lowering treats absent as empty. The cases assert the scan's projection and the `args` children: 2 columns, then 100 |
+| `ROW` and `MAP_BATCHES_FRAME` calls with an empty `read_set` over 5 rows, in batches of 2, 2 and 1 | The row count is lost with the columns, or a zero-column batch is dropped | Take the length from the first child; skip batches with no columns. The case asserts 5 output rows from a row-count UDF and three input batches of lengths 2, 2, 1 |
+| Plan validation: a `read_set` that repeats a name, or names a column the input lacks; a `read_set` on a `SCALAR` target | A bad read set reaches the host | Drop each check. The case asserts `OPTIMIZED_UDF_READ_SET_INVALID` naming the column |
+| Python SDK (S4): a branch that reads a field; a row that is iterated; `r[name]`; `r.index`; a scanned name the input lacks; an explicit declaration with a repeated name; a function of two parameters | A read set that is too small, or one that refuses a valid plan | The scan follows only constant reads it reached in a local run; treats `r.index` as a field. The case asserts `{flag, a, b}`, then `read_set` absent for the next four, then `UDF_READ_SET_INVALID` and `UDF_ROW_SIGNATURE` |
 
 - **Reference runtimes ship with the harness.**
-  - `komira-test/echo`, written in C, implements every entry trivially, with no user code and no code objects. It proves the harness and the transports independently of any language, and it is the template a new managed runtime copies: the C table it implements is the part every managed runtime writes around its interpreter. It reports `NATIVE` by default, so it runs on both transports; a test-only setting makes it report `MANAGED` (and then refuse `IN_PROCESS` at `init`), set `FORK_WORKERS`, or take one process-wide mutex around every call, so the class cases below can plant their mutants without a language.
+  - `komira-test/echo`, written in C, implements every entry trivially, in the calling thread, with no user code and no code objects. It proves the harness and the host library independently of any language, and it is the template a new runtime copies: the C table it implements is the part every runtime writes around its interpreter or its workers. A test-only setting makes it report `MANAGED` or any feature bit, return `ERR_WORKER_CRASHED`, `ERR_KILLED` or `ERR_OUT_OF_MEMORY` on a chosen call, or take one process-wide mutex around every call, so the host's handling of each status and the class cases below can plant their mutants without a language.
   - `komira/native` with fixture libraries next to echo, one per native language: C (`komira-test/native-c`) and Mojo (`komira-test/native-mojo`) at the first release, then Rust (`komira-test/native-rust`), C++ (`komira-test/native-cpp`) and Zig (`komira-test/native-zig`). Each implements the corpus fixtures as exported native UDFs. The C library is the template a new native language's SDK copies; the Mojo library proves that a Mojo package can export the table. It builds with the existing `mojo_shared_lib` rule, which emits a C-ABI shared library from `@export` functions and can check that the library exports exactly the named symbols (`tools/build/mojo/README.md:20`, `:704-722`).
-- **Cases per class.** The harness takes the class from `describe` (§1.2) and runs these in addition to the shared corpus, on each transport the class allows. The three cases marked **launch gate** must pass before native UDFs ship (§1.2).
+- **Cases per class.** The harness takes the class and the features from `describe` (§4.2) and runs these in addition to the shared corpus. The cases marked **launch gate** must pass before native UDFs ship (§1.2).
 
 | Class | Case | Defect caught | Planted mutant |
 |---|---|---|---|
@@ -828,43 +808,32 @@ A new runtime is done when it passes the **shared conformance corpus** as welded
 | native | A fixture that raises on row 3: a Mojo function declared `raises`, behind the Mojo export helper (S3b); a C++ fixture that throws and a Rust fixture that panics, behind their helpers (S3c) | An error escaping the export helper: unwinding across the ABI, or a Mojo error with no `ERR_RAISED` | An export helper without the catch |
 | native | A library whose `describe` reports `MANAGED`, another `runtime_id`, or lacks the spec's shape | The host loads a library it cannot drive | `load` forwards without checking the library's capabilities |
 | native | Two Mojo fixture libraries loaded in one process, called from several engine threads | The Mojo runtime library cannot be shared in one process | None: it tests an assumption (§1.2), not host code. Red means Mojo libraries run on workers only |
-| native, **launch gate** | A fixture that dereferences NULL, with the worker transport opted into | The engine dies with the library | Ignore the opt-in and run the library in-process. The case asserts `UDF_WORKER_CRASHED` and a live engine |
-| native, **launch gate** | In-process, a fixture that looks for the heartbeat token: its environment and arguments, `/proc/<supervisor pid>/environ` and `mem`, files the engine's user id can read, every inherited descriptor; then `ptrace` and a signal to the supervisor | The token, or the supervisor, is reachable from the engine, so in-process native code could forge or suppress heartbeats | The supervisor passes the token to the engine in an environment variable; the supervisor and the engine share one user id |
+| native, **open** (§1.3) | A fixture that dereferences NULL | What the run reports when a native library ends the engine | To be fixed with the gate |
+| native, **launch gate** | In-process, a fixture that looks for the supervisor's run token: its environment and arguments, `/proc/<supervisor pid>/environ` and `mem`, files the engine's user id can read, every inherited descriptor; then `ptrace` and a signal to the supervisor | The token, or the supervisor, is reachable from the engine, so code in the engine could forge or suppress liveness reports | The supervisor passes the token to the engine in an environment variable; the supervisor and the engine share one user id |
 | native | Parallelism in-process: N engine threads (N ≥ 4, each on a reserved core) each call a fixture that spins on the CPU for 200 ms; the harness compares the process's CPU time with the wall time | A lock shared across engine threads in the loader or the library. The case requires CPU time ≥ 0.75 × N × wall time; under one lock it is about 1 × wall time | Echo with the process-wide mutex; `komira/native` taking one mutex around every forwarded call |
-| managed | Parallelism: N engine threads each call a spinning fixture | One worker serving every engine thread | The host binds one worker to all engine threads. The case asserts N distinct worker processes and CPU time ≥ 0.75 × N × wall time summed over them |
-| managed | Two contexts in parallel, each with a cached model | State shared across workers | One worker, or one UDF state, shared by all contexts |
-| managed | A runtime with `FORK_WORKERS`: N context workers after one `load` | Each worker loads the code again, or a worker starts from a zygote that never loaded | Forked workers run `load` themselves. The case asserts one `load` in the zygote and N workers that answer calls |
-| managed | A `FORK_WORKERS` fixture whose import starts a thread | A fork from a multi-threaded zygote | Fork without the thread check. The case asserts `ERR_LOAD` naming the thread count |
-| managed | A runtime without `FORK_WORKERS` | A fork of a process that cannot fork safely | The host sends `FORK` to every control worker. The case asserts spawned workers and no `FORK` sent |
+| managed | Parallelism: N engine threads (N ≥ 4) each call a spinning fixture through N contexts | One interpreter serving every context | The runtime serves every context from one worker. The case asserts CPU time ≥ 0.75 × N × wall time, summed over the runtime's processes |
+| managed | Two contexts in parallel, each with a cached model | State shared across contexts | One interpreter, or one UDF state, shared by all contexts |
 | managed | Runtime shutdown with arrays still held by the host | A release that needs the interpreter after it is gone | Finalize the interpreter before draining the release queues |
 | plan case | A mergeable aggregate whose state for one group grows to 64 MiB, then one byte past it | The fixed cap is not enforced, is off by one, or is read from the plan | Accept a state equal to the cap plus one byte; take the cap from `max_state_bytes`. The case asserts `UDF_STATE_TOO_LARGE` naming the group key and the 64 MiB cap, and success at exactly 64 MiB |
 
-- **The coverage assertion** covers each native language's fixture library, every value of `UdfKind`, `CodeForm`, `UdfStability`, `UdfNullMode`, each capability bit, each class on each transport it allows, and each `komira_udf_status`.
+- **The coverage assertion** covers each native language's fixture library, every value of `UdfKind`, `CodeForm`, `UdfStability`, `UdfNullMode`, each capability bit, each class, a present, an absent and an empty `read_set`, and each `komira_udf_status`.
+- **A runtime's own tests** cover what it does behind the table (§5): for `komira/python`, that forked workers share what the zygote loaded and that the zygote is single-threaded when it forks; for `komira/node`, the forced copy path. They are welded to the runtime's package like the corpus, and are not part of it.
 
 ## 7. Security, isolation, resource limits, crash containment
 
-- **The engine treats user code as untrusted.**
-  - In-process execution puts user code inside the engine's address space, with the engine's privileges and memory. Those are the run's own: the engine holds only what the run itself may use.
-  - **The heartbeat token stays in the supervisor.** The supervisor holds no long-lived credential and none that meters usage, only a run-scoped id and token that authenticate its heartbeats; usage is metered from the accumulated heartbeats. It runs as its own process under its own user id, and the token never reaches the engine: not in its arguments, its environment, a readable file or an inherited descriptor (`optimized_plan_udfs.md` §10.10 [#1094]). So no user code, in the engine or in a worker, can read the token, forge or suppress a heartbeat, or trace or signal the supervisor. A conformance case holds the host to this (§6.3).
-  - **Managed runtimes run only in workers,** on every host, the producer's machine included, for crash containment, hard limits and per-worker memory. No host policy loads one into the engine, and the runtime itself refuses it at `init` (§4.2).
-  - **Native code (§1.2) runs in-process,** on every host that keeps the heartbeat token in the supervisor; a host that cannot runs it in workers. The worker transport is opt-in for crash isolation, by host policy or a run option outside the plan. The heartbeat-token, NULL-dereference and `RTLD_GLOBAL` cases are launch gates for it (§6.3).
-- **Workers are isolated.**
-  - They run as a further user id of their own, distinct from the engine's and the supervisor's.
-  - They cannot read the supervisor's heartbeat token or channel, and cannot trace or signal the engine or the supervisor (§10.10).
-  - The shared-memory region is created per worker and passed only to that worker.
-  - The engine copies every worker-to-engine payload out of shared memory before it validates it (§5.2), so a worker cannot change bytes the engine has already checked.
-  - Each worker has its own memory and CPU limit.
-- **Only `komira/native` runs in-process.** A runtime library supplied by an added image layer (§8.3) runs only in workers, whatever its class. It is never loaded into the engine or the supervisor, so an added layer cannot place code in the engine. `komira/native` is a base runtime; the libraries it loads are user code from the code layer and follow the native default above (in-process, with the worker transport opt-in).
-- **Code integrity.** On both transports, `load` verifies every code object against its sha256 before use (`OPTIMIZED_UDF_CODE_DIGEST_MISMATCH`). Admission already checks that the code is present (§10.11 check 4).
+- **The engine treats user code as untrusted, and holds only what the run may use.** Every runtime library is loaded into the engine (§4.1), and a native UDF runs there, with the engine's privileges and memory. Those are the run's own.
+- **The run token stays in the supervisor.** The supervisor holds no long-lived credential, only a token scoped to one run that it uses to report that the run is alive. It runs as its own process under its own user id, and the token never reaches the engine: not in its arguments, its environment, a readable file or an inherited descriptor (`optimized_plan_udfs.md` §10.10 [#1094]). So no user code, in the engine or in a process a runtime starts, can read the token, forge or suppress a liveness report, or trace or signal the supervisor. A launch-gate case holds the host to this (§6.3); a host that fails it does not ship native UDFs.
+- **Processes a runtime starts** (the Python and Node workers, §5) run under the engine's user id and hold nothing the engine does not; they add crash containment and forced stops, not a privilege boundary. A runtime that runs user code in another process hands the engine only buffers that process can no longer write (§4.4).
+- **Runtimes from an added image layer** would be loaded into the engine like any runtime; whether they are allowed is open (§1.3, §8.3).
+- **Code integrity.** `load` verifies every code object against its sha256 before use (`OPTIMIZED_UDF_CODE_DIGEST_MISMATCH`). Admission already checks that the code is present (§10.11 check 4).
 - **Resource limits.**
-  - Memory per worker, from `worker_mem_bytes` or the observed footprint.
-  - Native thread pools set to each worker's share of the CPUs (§10.10).
+  - Memory per context, from `worker_mem_bytes` and `memory_report` (§4.8); a runtime that runs user code in its own processes may cap each one.
+  - Native thread pools set to each context's share of the CPUs (§10.10).
   - State per group capped at a fixed 64 MiB at the first release, the same on every host and not settable by a plan; a group over it fails the run with `UDF_STATE_TOO_LARGE`, naming the group key (§10.2). Making the cap tunable is tracked in komira-ai/komira#1148, and `max_state_bytes` (§10.8) is reserved for it.
-  - Hard deadlines only in workers (§4.7).
+  - Forced stops only in runtimes with `FORCED_STOP` (§4.7).
 - **Crash containment.**
-  - A worker crash is `UDF_WORKER_CRASHED`; the batch is retried if the UDF is not `VOLATILE`, and the engine survives. A worker the host killed is not a crash (§4.7).
-  - An in-process crash kills the engine process and fails the run. The supervisor reports it as a UDF fault when the runtime library is on the faulting stack *(inferred: this needs the supervisor's crash reporter)*.
-  - This asymmetry is one reason managed runtimes run only in workers, and why a native UDF that must not fail the run on a fault opts into the worker transport.
+  - In a runtime with `CONTAINS_CRASHES`, a crash of user code is `UDF_WORKER_CRASHED`; the batch is retried once if the UDF is not `VOLATILE`, and the engine survives. A forced stop is not a crash (§4.7).
+  - A crash of in-process native code kills the engine process and fails the run. The supervisor reports it as a UDF fault when the runtime library is on the faulting stack *(inferred: this needs the supervisor's crash reporter)*. What the launch gate for this case is, is open (§1.3).
 - **Captured data is data** (§10.6). Whoever can pull the image can read it, so the producer lists large captures before upload.
 
 ## 8. Versioning
@@ -876,7 +845,7 @@ A new runtime is done when it passes the **shared conformance corpus** as welded
 | The plan format: `UdfRef`, `UdfCode`, `RuntimeNeed`, the arms | **Backward compatible forever** (§9) | Plans are stored and replayed |
 | A runtime's descriptor schema | **Readable forever by that runtime**, in every base that ships the runtime | The descriptor is part of the plan's identity |
 | The C ABI, `komira_udf_runtime.h` | Entries and struct fields are only appended within a major version; a base accepts every minor of each major it lists | Needed only for runtimes built outside the base release (§8.3) |
-| The worker protocol | **None across releases**; `HELLO` refuses any difference | The engine and the worker come from the same image |
+| A runtime's own worker protocol (§5) | **None**: private to that runtime | Only the runtime speaks it; the engine never does |
 
 **Negotiation.**
 1. The engine calls `komira_udf_runtime_init_v1` with its `komira_udf_host`, whose `struct_size`, `abi_major` and `abi_minor` describe the engine.
@@ -907,11 +876,11 @@ This follows two precedents: DuckDB's C extension API, whose function struct is 
 
 ### 8.3 Runtimes outside the base
 
-- **Packaging.** A third-party runtime ships as an added image layer, under the reserved prefix `/komira-runtimes/<namespace>/<name>/`. The layer holds the library and a manifest: `runtime_id`, `runtime_abi`, the C ABI major and minor, the library's sha256, and its launcher (§4.1).
+- **Packaging.** A third-party runtime ships as an added image layer, under the reserved prefix `/komira-runtimes/<namespace>/<name>/`. The layer holds the library and a manifest: `runtime_id`, `runtime_abi`, the C ABI major and minor, and the library's sha256.
 - **The registry.** The image's runtime registry is the base's release record plus these manifests.
 - **Header-only admission (§10.11 check 3)** accepts a `needs.runtimes` pair that the base lists, or that an added runtime manifest layer declares. The layer is identified by its digest in the image manifest *(inferred: the scheduler cannot read layer contents, so the base release record must name the form of the manifest digest; the detail is left to the image design)*.
 - **Host admission** re-checks the manifest and the library's digest once the layers are in hand.
-- **Execution.** Such a runtime always runs in workers (§7).
+- **Execution.** Such a runtime would be loaded into the engine like any runtime (§4.1). Whether added runtimes are allowed on that basis is open (§1.3).
 
 ## 9. Implementation stages
 
@@ -919,14 +888,14 @@ Each stage lands with its tests welded and its testing plan stated: what each te
 
 | Stage | Work | Owner area | Done when |
 |---|---|---|---|
-| S0 | This document, and the optimized-plan UDF section aligned to it before any `format_version` ships [#1094]: open runtime ids, `CodeForm`, `needs.runtimes`, `STEP`, the two `MAP_BATCHES` kinds and the `ROW` kind (`DataFrame.apply(f, axis=1)` and `map_rows` map to `ROW`) | design | Both merged |
-| S1 | `komira_udf_runtime.h`; a Mojo binding package, with private pointers behind a safe API; the Arrow C Device structs; an args exporter on the stream path's shared-reference model, and C Data import without copying, with layout validation and release ownership, in `komira_arrow_ipc`; the host library `komira_udf_host` (post-conditions, compaction and scatter, error table); the reference runtime `komira-test/echo`, in C | engine, Arrow | Echo passes every ABI case in-process; the leak, double-release and skip-validation mutants go red |
+| S0 | This document, and the optimized-plan UDF section aligned to it before any `format_version` ships [#1094]: open runtime ids, `CodeForm`, `needs.runtimes`, `STEP`, the two `MAP_BATCHES` kinds and the `ROW` kind (`DataFrame.apply(f, axis=1)` and `map_rows` map to `ROW`); the call-site `read_set` replacing the `ROW` read set in `arg_types`; one mode per language in place of #1094's three modes (§1.3) | design | Both merged |
+| S1 | `komira_udf_runtime.h`; a Mojo binding package, with private pointers behind a safe API; the Arrow C Device structs; an args exporter on the stream path's shared-reference model, and C Data import without copying, with layout validation and release ownership, in `komira_arrow_ipc`; the host library `komira_udf_host` (post-conditions, compaction and scatter, error table); the reference runtime `komira-test/echo`, in C | engine, Arrow | Echo passes every ABI case, and the host maps each status echo can be set to return; the leak, double-release and skip-validation mutants go red |
 | S2 | The conformance corpus package (ABI cases), the harness and the coverage assertion; the runtime-swap invariance test for the optimizer (§3.2) | tests, optimizer | The corpus runs against echo; the invariance mutant goes red |
-| S3 | The worker transport: `komira_udf_worker` and `komira-udf-worker`, the control worker, `FORK` from a zygote for `FORK_WORKERS` runtimes, slot heaps, worker-to-engine copy-out, IPC framing, frame credits with `NEED_INPUT`, `HELLO`, cancel and the kill result (§4.7), crash mapping to `ERR_WORKER_CRASHED`; supervisor integration (user id, limits, `posix_spawn`) | engine, supervisor | Echo passes the corpus on both transports, and as `MANAGED` on the worker transport with and without `FORK_WORKERS`; the worker-abort, kill, held-views, cancel and fork cases pass |
-| S3b | The `komira/native` runtime (§1.2): `validate` against the descriptor, digest check before `dlopen`, library choice per platform, `komira_udf_native_init_v1`, the library's own `validate` at `load`, forwarding; the fixture libraries `komira-test/native-c` and `komira-test/native-mojo`; export helpers for C and Mojo that record each entry's shapes and signature; the native cases (§6.3) | engine, Mojo | Both fixture libraries pass the corpus and the native cases on both transports; the digest-after-`dlopen`, unchecked-capabilities and missing-catch mutants go red (the catch case uses the Mojo fixture's raising function; C cannot raise); **the three launch gates pass: the heartbeat-token case in-process, the NULL-dereference case on the opt-in worker transport, and the `RTLD_GLOBAL` case.** Native UDFs do not ship before all three are green |
-| S3c | Native SDKs for Rust, C++ and Zig, after the first release: export helpers (Rust catches panics, C++ is `noexcept`, §5.3), typed views of Arrow C Data, capture of the library into the code layer; fixture libraries `komira-test/native-rust`, `komira-test/native-cpp`, `komira-test/native-zig` | engine, SDKs | Each fixture library passes the corpus and the native cases on both transports; the C++ throw and Rust panic cases go red without the catch |
-| S4 | The `komira/python` runtime, in worker processes only: CPython embedded in the worker, the zygote (§5.3); batch formats, entry, shapes and signature in the descriptor; the `ROW` proxy, and the producer's scan, read set and `ROW` refusals (§6.1) | Python | Python fixtures pass the corpus, `ROW` and managed cases included, on the worker transport |
-| S5 | The `komira/node` runtime, in worker processes only: `node` workers spawned after a control worker, external `ArrayBuffer`s with a copy fallback; entry, shapes and signature in the descriptor | Node | Node fixtures pass the corpus and the managed cases on the worker transport |
+| S3 | `komira_udf_worker`: a private C library the Python and Node runtimes link to run user code in worker processes (§5, informative): spawning, slot heaps, copy-out, frame credits, cancel and forced stop, crash and memory reporting. The engine does not link it | engine | A test runtime built on it passes the corpus through the C ABI, with the forced-stop, crash, out-of-memory, held-views and cancel cases |
+| S3b | The `komira/native` runtime (§1.2): `validate` against the descriptor, digest check before `dlopen`, library choice per platform, `komira_udf_native_init_v1`, the library's own `validate` at `load`, forwarding; the fixture libraries `komira-test/native-c` and `komira-test/native-mojo`; export helpers for C and Mojo that record each entry's shapes and signature; the native cases (§6.3) | engine, Mojo | Both fixture libraries pass the corpus and the native cases; the digest-after-`dlopen`, unchecked-capabilities and missing-catch mutants go red (the catch case uses the Mojo fixture's raising function; C cannot raise); **the launch gates pass: the run-token case and the `RTLD_GLOBAL` case**, and the NULL-dereference gate as settled (§1.3). Native UDFs do not ship before they are green |
+| S3c | Native SDKs for Rust, C++ and Zig, after the first release: export helpers (Rust catches panics, C++ is `noexcept`, §5.3), typed views of Arrow C Data, capture of the library into the code layer; fixture libraries `komira-test/native-rust`, `komira-test/native-cpp`, `komira-test/native-zig` | engine, SDKs | Each fixture library passes the corpus and the native cases; the C++ throw and Rust panic cases go red without the catch |
+| S4 | The `komira/python` runtime: a C-ABI library that runs user code in workers forked from a zygote (§5); batch formats, entry, shapes and signature in the descriptor; the `ROW` proxy; the SDK's inspection, `read_set` and refusals (§6.1) | Python | Python fixtures pass the corpus, `ROW`, crash, forced-stop and managed cases included, through the C ABI |
+| S5 | The `komira/node` runtime: a C-ABI library that runs user code in `node` worker processes (§5); external `ArrayBuffer`s with a copy fallback; entry, shapes and signature in the descriptor | Node | Node fixtures pass the corpus, crash, forced-stop and managed cases included, through the C ABI |
 | S6 | Physical operators (`UdfProject`, `UdfFrame`, `UdfAggregate`, the groups accumulator, `UdfStep`) in lowering, linking `komira_udf_host`; the plan cases. They replace the SDK-side walk that works around the package cycle (`expr_udf_sites.mojo:1-30`) | engine | UDF plan cases run through lowering, not through the SDK |
 | Later | ABI 1.1 candidates (§8.1); third-party runtime layers (§8.3); further native languages (each adds an SDK and fixtures, no runtime id); a tunable per-group state cap (komira-ai/komira#1148); managed runtimes for JVM, .NET and Go; WASM, with its one mode chosen when it is added; GPU devices; remote transport | — | Each native SDK adds corpus fixtures; each managed runtime adds a runtime id and fixtures; neither changes the format |
 
@@ -941,27 +910,25 @@ Each stage lands with its tests welded and its testing plan stated: what each te
 | An opaque descriptor only, with no neutral `form`, `entry` or digest list | Rejected. Admission could not check that code is present without the runtime, and diagnostics could not name the entry. |
 | The runtime's ABI tag in `UdfCode` | Rejected. It would change a reference's identity on every interpreter upgrade, and allow plans that name two ABIs of one runtime. It lives only in `needs.runtimes`. |
 | The `MAP_BATCHES` form derived from the arm that targets it | Rejected. One `UdfRef` could then be bound with two schemas; the shape is in the kind. |
-| The transport chosen in the plan | Rejected. The transport is a host-local decision (§5.3). Putting it in the plan would only cause refusals on hosts whose policies differ. |
+| The transport chosen in the plan, or bound by the engine (an engine-side proxy for each runtime's workers, a transport field in the host struct; an earlier draft) | Rejected. How a runtime executes is its own business, and each language knows what serves it best. An engine-side transport would add a second protocol to the engine and capabilities that describe the proxy, not the runtime. The C ABI is the one interface (§4.1). |
 | An ABI that mirrors one engine's traits (DataFusion's FFI crate, written for Rust libraries, [README](https://github.com/apache/datafusion/blob/main/datafusion/ffi/README.md)) | Rejected. Plain C over Arrow is the only ABI every language can implement. |
 | The WASM component model as the outer ABI | Rejected. The canonical ABI copies values, and Python in WASM loses native packages. Kept as one runtime. |
 | Calls per row (PostgreSQL's Datum convention; Trino's invocation per position, [trino#30301](https://github.com/trinodb/trino/pull/30301)) | Rejected. Calls are one batch at a time, and a scalar runtime loops in its own language. |
 | Aggregate calls per group, with an opaque handle per group | Rejected. A high-cardinality group-by would cross the ABI once per group per batch. Aggregates are vectorized over groups, as DataFusion's `GroupsAccumulator` is. |
 | Aggregate state that is pickled or private to the language | Rejected. `state_type` is Arrow: it crosses exchanges and checkpoints, and it has a size the host can cap. |
 | A separate determinism field | Rejected. `stability` is the determinism declaration. |
-| A row-shaped UDF as a `SCALAR` over the whole row, or a host that infers the fields read | Rejected. The whole row keeps every column live; a host cannot re-derive what the producer knew, and two hosts could disagree. `ROW` declares the read set in `arg_types` (§3.1). |
-| A separate `read_set` field beside `arg_types` in a `ROW` | Rejected. It would state the bound argument schema twice. |
+| A row-shaped UDF as a `SCALAR` over the whole row, or a host that infers the fields read | Rejected. A `ROW` call carries an optional `read_set` that its SDK fills; absent means every column, and the engine never infers one, because a host cannot re-derive what the producer knew and two hosts could disagree (§3.1). |
+| The read set on `UdfRef`, as a `ROW`'s `arg_types` (an earlier draft) | Rejected. The same code may be applied to different inputs, so the columns read belong to the call: `read_set` on the call-site node (§3.1). |
 | A `cancel` entry callable from any thread or a signal handler | Rejected. It races with close and cannot be built for CPython or Node-API. Cancel is a per-call flag (§4.7). |
-| Zero-copy decode of worker-to-engine payloads, with sealed per-payload memory files (`F_SEAL_WRITE`) | Not chosen for the first release. It removes one copy but adds a file per payload; the copy-out is simpler and P2 measures its cost. |
-| A mode field in `UdfRef`, or a plan rule per mode | Rejected. The mode is how a runtime executes code, which is a host fact like the transport. It follows from the runtime's class (§4.2), and the plan carries both classes identically (§1.2). |
-| Capabilities that state the mode or the transport: `threading`, `global_lock`, `thread_affine`, `hosting` and `transports` (an earlier draft) | Rejected. Through a worker proxy they described the proxy rather than the runtime, so a worker runtime could not answer `describe` truthfully, and each restated what the class already fixes. `describe` reports runtime facts only; the transport's facts are the host's (§4.2, §5.3). |
-| Managed code in-process, with one interpreter or isolate per engine thread (Python sub-interpreters, Node `worker_threads` isolates), or in one shared parallel virtual machine (free-threaded Python) | Rejected. Both were prototyped before this revision. Python's common data libraries (numpy, pandas, pyarrow, scikit-learn) refuse to load in a sub-interpreter; in-process Node needs `node` to host the engine; nothing measured for the free-threaded build justified a second Python mode. One mode per language leaves one path to build, certify and support (§1.2). |
+| Zero-copy decode of worker-to-engine payloads, with sealed per-payload memory files (`F_SEAL_WRITE`) | Not chosen for the Python and Node runtimes at the first release (§5, informative). It removes one copy but adds a file per payload; the copy-out is simpler. |
+| A mode field in `UdfRef`, or a plan rule per mode | Rejected. The mode is how a runtime executes code, which is the runtime's own business (§4.1). No plan field names the class, and the plan carries both classes identically (§1.2). |
+| Capabilities that state the mode or the transport: `threading`, `global_lock`, `thread_affine`, `hosting` and `transports` (an earlier draft) | Rejected. They describe how a runtime executes, which is its own business; through a worker proxy they described the proxy, not the runtime. `describe` reports what a runtime can do (§4.2). |
+| Managed user code in the engine's process, with one interpreter or isolate per engine thread (Python sub-interpreters, Node `worker_threads` isolates), or in one shared parallel virtual machine (free-threaded Python) | Rejected. Both were prototyped before this revision. Python's common data libraries (numpy, pandas, pyarrow, scikit-learn) refuse to load in a sub-interpreter; Node in the engine needs `node` to host the engine; nothing measured for the free-threaded build justified a second Python mode. One mode per language leaves one path to build, certify and support (§1.2). |
 | `validate` that opens the code (a `dlopen`, an import, an unpickle) to check entries, shapes and signatures | Rejected. It would run library constructors and user code at admission, and TypeScript keeps no types at run time to check. The producer records them in the descriptor at capture; `validate` compares, and `load` confirms (§3.1, §4.3). |
 | One runtime id per native language (`komira/rust`, `komira/mojo`) | Rejected. Native languages share one ABI, so one loader serves all; the language is in the descriptor for diagnostics. A new native language adds an SDK, not a runtime. |
-| Native UDFs in workers by default, until a host shows in-process native code cannot reach privileged credentials (an earlier draft) | Rejected. The supervisor holds no credential that meters usage, only a run-scoped heartbeat token, kept in its own process and user id and never passed to the engine, so in-process native code reaches only the run's own privileges. Native UDFs run in-process by default, and the worker transport is opt-in for crash isolation (§1.2, §7). |
+| Native UDFs in workers by default, until a host shows in-process native code cannot reach privileged credentials (an earlier draft) | Rejected. The supervisor holds no long-lived credential, only a run-scoped token for liveness reports, kept in its own process and user id and never passed to the engine, so in-process native code reaches only the run's own privileges. Native UDFs run in-process (§1.2, §7). |
 | A per-group state cap set per host or per plan at the first release | Not chosen. A fixed 64 MiB cap is the same on every host, so a plan that runs on one runs on all; tuning it is komira-ai/komira#1148, with `max_state_bytes` reserved. |
 | One base carrying several CPython minors or Node majors, or both a Python and a Node runtime | Rejected. A release ships one base per CPython minor and one per Node major, each with one managed runtime, and a remote run follows the client's version; a plan that needs two managed runtimes is refused with `OPTIMIZED_ENV_RUNTIME_MISSING` (§3.2). |
 | Go as a native language | Rejected. A Go shared library carries the Go runtime (scheduler, collector, signal handlers, one per process), so it is managed, and runs in worker processes like every managed runtime (§1.2). |
-| One generic worker executable for every runtime | Rejected. Node-API is exported by `node`, and embedding Node is not ABI-stable. Each manifest names its launcher; the protocol library is shared. |
 | No ABI promise at all (internal to the image only) | Rejected. Third-party runtimes would need a rebuild for every base release. The promise costs only a header and a version check. |
-| A status of its own for a call whose worker was killed | Rejected. The call returns the reason it was killed (`ERR_CANCELLED`, `ERR_DEADLINE`), which the run already reports, and later calls on the lost context return `ERR_INSTANCE_LOST` (§4.7). A third status would add a case every host must map without adding a fact. |
-| A local run (a recording row proxy) as a source of a `ROW` read set | Rejected. A field read only on a branch the run took would hide a field the scan missed, and a run that saw no rows would decide nothing. The read set comes from `columns=[...]` or the scan (§3.1). |
+| A status that reports a forced stop as its reason (`ERR_CANCELLED`, `ERR_DEADLINE`; an earlier draft) | Rejected. The runtime stops user code itself, so the host learns only from the status that the context is gone; `ERR_KILLED` says so, and its message gives the reason (§4.7). |
