@@ -319,7 +319,7 @@ goes with the last row that uses it.
 | 46 mojo_test_conda | the conda waits for a named mojo_test's run | 3 | `coverage_keys` row | drop coverage_tests runs from the join | 5 |
 | 46 mojo_test refusals, test_path, shared_lib_enforce | analysis refusals | 3 | `analysis_refusals_coverage` | delete the no-args check | 3 |
 | 46 codegen, coverage_tests_analysis, no_gate | gate counts under the switch; ledger | 3 | `coverage_analysis` | add a gate to a coverage_tests library | 5 |
-| 46 branch_gate_rows | each row names a library under src/ | 1 | target depending on each row, requiring MojoInfo (drops the rule-kind check) | a row naming nothing | 2 |
+| 46 branch_gate_rows | each row names a library under src/ | 1 | target depending on each row, requiring MojoInfo and the row string equal to the library's label (drops the rule-kind check) | a row naming nothing; a row spelled `//src/x:x` | 2 |
 | 47 test_fails, banner, no_profile, raw_version | cov_branch_run decisions | 2 | Zig port unit tests | skip the version check | 7 |
 | 47 annotate refusals, branchwide | cov_branch_annotate refuses; reads its whole input | 2 | Zig port unit tests on captured fixtures | drop the branch-weights scan | 7 |
 | 47 nodebug | classify refuses a nodebug call site | 2 | existing classify cases plus a captured Mojo IR fixture | accept the call site | 7 |

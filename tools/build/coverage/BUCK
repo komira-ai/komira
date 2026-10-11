@@ -176,9 +176,10 @@ shell_lint(
     ],
 )
 
-# Every row of COVERAGE_BRANCH_GATE (policy.bzl) names a Mojo library: a row
-# naming none fails this target, which the pull-request check builds.
+# Every row of COVERAGE_BRANCH_GATE (policy.bzl) names a Mojo library by the
+# exact label string mojo_library looks itself up by: a row naming none, or
+# spelled another way, fails this target, which the pull-request check builds.
 branch_gate_rows(
     name = "branch_gate_rows",
-    libraries = sorted(COVERAGE_BRANCH_GATE.keys()),
+    libraries = {row: row for row in sorted(COVERAGE_BRANCH_GATE.keys())},
 )
