@@ -58,8 +58,11 @@ MojoToolchainInfo = provider(fields = {
     # is the CPU of the machine the action runs on, which is not part of the
     # action key.
     "target_cpu": provider_field(str),
+    # The compile wrapper every Mojo compile runs through (defs.bzl,
+    # mojo_compile_cmd): on Linux the mojo_compile executable
+    # (tools/mojo_compile.zig), on macOS darwin/mojo_wrapper.sh.
     "wrapper": provider_field(typing.Any),
-    # The compile watchdog of the wrapper (mojo_wrapper.sh): kill a compile
+    # The compile watchdog of the wrapper: kill a compile
     # whose process tree used no CPU for this long (0: off), sampling every
     # `watchdog_sample_secs`. None where the wrapper has no watchdog.
     "watchdog_idle_secs": provider_field(typing.Any, default = None),

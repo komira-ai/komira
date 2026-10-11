@@ -1,7 +1,8 @@
 """Mojo rules for Buck2: mojo_library, mojo_binary, mojo_test.
 
-Every action runs the hermetic toolchain from `toolchains//:mojo` through
-`mojo_wrapper.sh`; see that file for the environment the compiler sees.
+Every compile runs the hermetic toolchain from `toolchains//:mojo` through the
+toolchain's compile wrapper (`mojo_compile_cmd` below; on Linux
+tools/mojo_compile.zig, whose header states the environment the compiler sees).
 
 Output layout of a library `L` with import name `I`:
 
@@ -54,22 +55,50 @@ def _watchdog_flags(tc):
         "--watchdog-sample-secs={}".format(tc.watchdog_sample_secs),
     ]
 
-def _mojo_cmd(tc, args, runpath = None, source_root = None, link_tail = None, link = None):
-    # `link` replaces the toolchain's link directory: a coverage build's
-    # (coverage.bzl), whose `zig` keeps and relocates the debug info.
+def mojo_compile_cmd(tc, args, runpath = None, source_root = None, link_tail = None, link = None, darwin_knobs = True):
+    """The command line of one Mojo compile (`mojo precompile`, `build`, `doc`).
+
+    Every rule that runs the compiler builds its command here: mojo_library,
+    mojo_binary, mojo_test and their coverage and mutation actions,
+    mojo_doc_json (doc.bzl) and the proto packages (proto.bzl).
+
+    `link` replaces the toolchain's link directory: a coverage build's
+    (coverage.bzl), whose `zig` keeps and relocates the debug info.
+    `link_tail` is appended by the wrapper's `cc` shim to the END of every
+    link line, after the compiler's own objects and archive.
+
+    On Linux the wrapper is komira//tools/build/mojo:mojo_compile, a Zig
+    program (tools/mojo_compile.zig), and the toolchain's watchdog knobs are
+    always passed. The macOS toolchain still runs its shell wrapper
+    (darwin/mojo_wrapper.sh) under the toolchain's busybox, with the
+    command line it always had: `darwin_knobs = False` where that line had
+    no knobs (doc.bzl, proto.bzl).
+    """
+    tail = [cmd_args(link_tail, format = "--link-tail={}")] if link_tail else []
+    if tc.os == "darwin":
+        return cmd_args(
+            tc.busybox,
+            "sh",
+            tc.wrapper,
+            tc.busybox,
+            tc.compiler,
+            link or tc.link,
+            tc.cc_target,
+            ["--runpath=" + runpath] if runpath else [],
+            [cmd_args(source_root, format = "--source-root={}")] if source_root else [],
+            tail,
+            _watchdog_flags(tc) if darwin_knobs else [],
+            "--",
+            args,
+        )
     return cmd_args(
-        tc.busybox,
-        "sh",
         tc.wrapper,
-        tc.busybox,
-        tc.compiler,
-        link or tc.link,
-        tc.cc_target,
+        cmd_args(tc.compiler, format = "--compiler={}"),
+        cmd_args(link or tc.link, format = "--zig={}"),
+        "--cc-target=" + tc.cc_target,
         ["--runpath=" + runpath] if runpath else [],
         [cmd_args(source_root, format = "--source-root={}")] if source_root else [],
-        # Appended by the wrapper's `cc` shim to the END of the link line, after
-        # the compiler's own objects and archive (see mojo_wrapper.sh).
-        [cmd_args(link_tail, format = "--link-tail={}")] if link_tail else [],
+        tail,
         _watchdog_flags(tc),
         "--",
         args,
@@ -247,7 +276,7 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
     if link_extra:
         tail = cmd_args(tail, link_extra) if tail else cmd_args(link_extra)
     ctx.actions.run(
-        _mojo_cmd(tc, [
+        mojo_compile_cmd(tc, [
             "build",
             emit,
             "--optimization-level",
@@ -337,7 +366,7 @@ def _library_impl(ctx):
     ungated = ctx.actions.declare_output("ungated/" + import_name + ".mojoc")
     dep_closure = ctx.actions.tset(MojoPkgTSet, children = deps)
     ctx.actions.run(
-        _mojo_cmd(tc, [
+        mojo_compile_cmd(tc, [
             # No `--target-cpu`: `mojo precompile` rejects it ("unrecognized
             # argument"). A `.mojoc` holds no machine code; the CPU is fixed
             # where code is generated, in `mojo build`.
@@ -410,7 +439,7 @@ def _library_impl(ctx):
         if cov_link:
             cov_bins[stem] = _build_executable(ctx, tc, "cov/tests/{}/{}".format(stem, stem), [t], t, tests_closure, "0", "mojo_build_cov_test", stem, tests_c_link, debug_link = cov_link, defines = test_defines)
             cov_runs[stem] = coverage_run(ctx, tc, t, stem, cov_bins[stem], src_dir, import_name, root, test_data.get(key, {}), env_args)
-            cov_branch.update(coverage_branch_of(ctx, tc, t, stem, tests_closure, _mojo_cmd, _link_tail(tests_c_link), test_data.get(key, {}), env_args, src_dir, root, test_defines))
+            cov_branch.update(coverage_branch_of(ctx, tc, t, stem, tests_closure, mojo_compile_cmd, _link_tail(tests_c_link), test_data.get(key, {}), env_args, src_dir, root, test_defines))
 
     # Whether the conda package is gated by a test: the test_srcs only. A
     # README's examples are not counted, since analysis cannot tell whether
@@ -434,7 +463,7 @@ def _library_impl(ctx):
     # With coverage on, the README's run (above) and the gate (coverage.bzl);
     # only the conda package waits for them and the runs, never this package.
     cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs, cov_branch, src_dir, import_name, root) if cov_link else (None, [])
-    mutation = mutation_sub_targets(ctx, tc, _mojo_cmd, src_dir, root, deps, tests_closure[1:], _link_tail(tests_c_link), test_data, env_args, test_defines, cap, mem_cap_script(ctx))  # mutation.bzl
+    mutation = mutation_sub_targets(ctx, tc, mojo_compile_cmd, src_dir, root, deps, tests_closure[1:], _link_tail(tests_c_link), test_data, env_args, test_defines, cap, mem_cap_script(ctx))  # mutation.bzl
     if markers:
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
         ctx.actions.run(

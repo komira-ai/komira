@@ -8,7 +8,7 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("//functional/coverage:defs.bzl", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "kcov_stub_dir")
 
 # A coverage link whose relocator rewrites nothing (test 41). Its [coverage]
-# must fail with mojo_wrapper.sh's exit 4, "contains this action's working
+# must fail with mojo_compile's exit 4, "contains this action's working
 # directory": the wrapper's check of every output stays on for coverage
 # builds, and a relocation that does not happen cannot pass it.
 zig_exe(

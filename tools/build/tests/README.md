@@ -521,20 +521,31 @@ binary exports a dynamic symbol.
 
 ## 28. Compile watchdog
 
-[`watchdog/cases.sh`](functional/watchdog/cases.sh), a remote action
-(`tests//functional/watchdog:cases`), runs [`mojo_wrapper.sh`](../mojo/mojo_wrapper.sh)
-on a stand-in toolchain whose `mojo` sleeps, spins, or spawns children. A
+[`watchdog/cases.zig`](functional/watchdog/cases.zig), a remote action
+(`tests//functional/watchdog:cases`), runs the compile wrapper
+(`komira//tools/build/mojo:mojo_compile`, [`mojo_compile.zig`](../mojo/tools/mojo_compile.zig))
+on a stand-in toolchain ([`standin.zig`](functional/watchdog/standin.zig)) whose `mojo` sleeps, spins, or spawns children. A
 tree using no CPU is killed with exit 124 and the message, and so are its
 child and an orphaned grandchild (a child left in any state but zombie fails
-the case); a tree spinning itself or through a child, a short idle and a
+the case); a tree spinning itself or through a child (which the stand-in
+waits for as `wait(2)` does, for every child it has), a short idle and a
 disabled watchdog run to completion; a compiler error keeps its status;
-malformed knobs exit 2. Every case runs under `timeout 60`, so a watchdog
-that never fires is a failed case, not a hung action. Two more signal the
-wrapper while its compiler and the compiler's child hang: after TERM the
-wrapper must exit 143 with both gone, and after KILL, which it cannot catch,
+malformed knobs exit 2. Every case runs under a 60 s deadline of its own, so a watchdog
+that never fires is a failed case, not a hung action. Four more signal the
+wrapper while its compiler and the compiler's child hang: after TERM, HUP or
+INT the wrapper must exit 143, 129 or 130 with both gone and its scratch
+directory removed, and after KILL, which it cannot catch,
 both must be gone within 5 s (the tether in the compiler's session, a read
-of a FIFO only the wrapper holds open, returns when the wrapper dies and
-kills the session). The macOS wrapper has the same watchdog, sampling
+of a pipe only the wrapper holds open, returns when the wrapper dies and
+kills the session). The rest pin what the compiler is given: exactly the
+environment the wrapper's header lists (a variable of the action does not
+reach it), the link line zig receives from the `cc` shim for every row of
+its rewrite table, stdin `/dev/null`, SIGINT and SIGQUIT ignored and its pid
+the session id with the watchdog on (and the wrapper's own stdin and
+dispositions with it off); and the output checks and refusals: an empty
+output 3, one holding the working directory 4, no `-o` 2, a manifest member
+missing 2, no compiler 127. After every case but KILL the scratch directory
+is gone. The macOS wrapper has the same watchdog, sampling
 `ps` rather than `/proc`; test 24 ([`darwin/check.sh`](functional/darwin/check.sh)) runs it on this client
 against a stand-in compiler: a hang is killed (124), a spin is not, a killed
 wrapper takes its compiler with it, a malformed knob is refused.

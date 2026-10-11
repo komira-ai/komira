@@ -14,7 +14,7 @@
 #   <zig_dir>       the Mojo toolchain's link directory (zig), the one a
 #                   release test links through
 #   <bitcode>       the test's LLVM bitcode ([coverage][bc][<test>])
-#   <link tail>     the C libraries of the test's closure, as mojo_wrapper.sh
+#   <link tail>     the C libraries of the test's closure, as mojo_compile
 #                   appends them to the end of a link line
 #
 # Steps:
@@ -23,7 +23,7 @@
 #      object with IR profile counters. lld is the LLVM the Mojo compiler is
 #      built on, so the bitcode is read by its own LLVM.
 #   2. zig links that object as a release test is linked (the line zig is
-#      given when `mojo build` links through mojo_wrapper.sh's `cc` shim:
+#      given when `mojo build` links through mojo_compile's `cc` shim:
 #      the compiler's runtime library, `--gc-sections`, `-lm`,
 #      `--strip-debug`, the one run path `$ORIGIN/lib` as DT_RUNPATH, then
 #      the link tail), with the profile runtime as a whole archive. Test 47's
@@ -89,7 +89,7 @@ done
     "--lto-newpm-passes=pgo-instr-gen,instrprof,default<O0>" >"$K/log" 2>&1 ||
     red "lld could not instrument $5 (pgo-instr-gen)"
 
-# 2. Link, as mojo_wrapper.sh's cc shim links a release test.
+# 2. Link, as mojo_compile's cc shim links a release test.
 # shellcheck disable=SC2016 # $ORIGIN is the loader's, not the shell's
 "$ZIG/zig" cc -target "$TARGET" -Wl,--strip-debug -Wl,--enable-new-dtags '-Wl,-rpath,$ORIGIN/lib' \
     "$K/pg.o" "$KGEN" -o "$OUT" -Wl,--gc-sections -lm \

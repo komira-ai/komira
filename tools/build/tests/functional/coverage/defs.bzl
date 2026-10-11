@@ -234,7 +234,7 @@ def _link_line_impl(ctx):
     return [DefaultInfo(default_output = out)]
 
 # Test 47: the branch coverage link of `src` (its bitcode `bc`, linked by
-# the link directory of `branch`) is the link mojo_wrapper.sh gives `mojo
+# the link directory of `branch`) is the link mojo_compile gives `mojo
 # build` of `src` against `lib`'s closure, plus the profile runtime
 # (link_line.sh).
 cov_link_line_check = rule(

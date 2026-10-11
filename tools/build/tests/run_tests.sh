@@ -142,16 +142,18 @@
 #  26. The vendored aws-lc and s2n-tls: source lists against their archives,
 #      known-answer tests, a TLS handshake, the s2n-tls feature probes: see
 #      tools/build/tests/c_libs_tests.sh.
-#  28. The compile watchdog of mojo_wrapper.sh on stand-in compilers
+#  28. The compile watchdog of the compile wrapper (mojo_compile) on stand-in compilers
 #      (tests//functional/watchdog:cases, a remote action): a process tree using no CPU
 #      is killed with exit 124 and the message, its children and an orphaned
 #      grandchild with it; a tree using CPU (itself, through a child, or
 #      through an orphaned member of its session while it waits), a
 #      short idle and a disabled watchdog are not killed; a compiler error
 #      keeps its exit status; malformed knobs are refused (exit 2); and the
-#      compiler dies with the wrapper: TERM to the wrapper kills compiler and
-#      child before it exits 143, and after a KILL the tether in the
-#      compiler's session kills them within 5 s. The macOS wrapper's
+#      compiler dies with the wrapper: TERM, HUP or INT to the wrapper kills
+#      compiler and child before it exits 143, 129 or 130, and after a KILL
+#      the tether in the compiler's session kills them within 5 s; the
+#      compiler's environment, link line, stdin and signal dispositions, and
+#      the output checks (tests/README.md, 28). The macOS wrapper's
 #      watchdog (ps rather than /proc) is part of test 24.
 #  29. The test runtime contract (tests//functional/test_data): a gated test opens a
 #      declared fixture by its repository path from its staged share/, and a
@@ -973,10 +975,10 @@ if ! "$BUCK2" build tests//functional/watchdog:cases --show-full-simple-output >
 else
     report=$(tail -n 1 "$LOG/watchdog_cases.txt")
     ok=$(grep -c '^ok ' "$report" || true)
-    if grep -q '^BAD ' "$report" || [ "$ok" -lt 15 ]; then
+    if grep -q '^BAD ' "$report" || [ "$ok" -lt 27 ]; then
         fail "compile watchdog cases: $(grep -v '^ok ' "$report" | tr '\n' ' ') ($ok ok; see $report)"
     else
-        pass "compile watchdog: $ok stand-in compilers, each killed (124) or left alone as required"
+        pass "compile wrapper: $ok cases on a stand-in toolchain, each killed (124), left alone or refused as required"
     fi
 fi
 

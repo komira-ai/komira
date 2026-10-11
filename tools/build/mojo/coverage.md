@@ -30,7 +30,7 @@ it feeds is [The build gate](../coverage/README.md#the-build-gate).
   that does not pass `coverage_branch_gate = False`), and nothing waits
   for otherwise: the test emitted as
   LLVM bitcode at `-O0` with line tables (`[coverage][bc][<test>]`,
-  `mojo_emit_cov_bc`, through the same `mojo_wrapper.sh`), instrumented
+  `mojo_emit_cov_bc`, through the same `mojo_compile`), instrumented
   with IR profile counters by the Mojo package's lld and linked with the
   LLVM profile runtime (`[coverage][pgo_bin][<test>]`, `mojo_cov_pgo_link`),
   and run through the same `gate_runner.sh` with `LLVM_PROFILE_FILE` set,
@@ -122,7 +122,7 @@ cell only: in a repository that mounts komira as the cell `komira`, setting it
 in the root cell's file leaves komira's libraries without `[coverage]`
 ("unknown subtarget").
 
-A coverage build runs the same `mojo_wrapper.sh` as every compile, byte for
+A coverage build runs the same `mojo_compile` as every compile, byte for
 byte, with one argument changed: its link directory (`<zig_dir>`) is
 `cov_link` instead of the toolchain's zig. That directory holds the
 toolchain's zig as `real/` and, as `zig`, `cov_zig`

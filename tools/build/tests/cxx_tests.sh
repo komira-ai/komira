@@ -28,7 +28,7 @@ expect_red c_dep_kind "provides neither MojoInfo" tests//negative/c_deps:bad_dep
 # Test builds strip the staging directory from the source locations they
 # record: test_cadd (a gated library test) and test_add_direct (a mojo_test)
 # use assert_equal on Int32 and index a List, which record them. Without
-# -strip-file-prefix in mojo_wrapper.sh both fail with exit 4 on the worker's
+# -strip-file-prefix in mojo_compile both fail with exit 4 on the worker's
 # absolute path (test_hellopkg does not record one).
 expect_green test_source_paths //tools/build/examples/cshim:cadd //tools/build/examples/cshim:test_add_direct
 

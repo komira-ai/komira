@@ -1,7 +1,41 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":toolchain.bzl", "zig_exe", "zig_test")
 
 # Scripts and tool sources used by the Mojo rules.
-export_file(name = "mojo_wrapper.sh", visibility = ["PUBLIC"])
+# The compile wrapper (tools/mojo_compile.zig; docs/design/zig_compile_wrapper.md):
+# every Mojo compile on Linux runs through it, and it is the `cc` the
+# compiler links with. Its unit tests (`zig test` of mojo_compile.zig, whose
+# test block imports every module) run as a build action; the executable
+# is not built unless they passed. Its process cases are
+# tests//functional/watchdog:cases.
+_MOJO_COMPILE_SRCS = [
+    "tools/cc_shim.zig",
+    "tools/compile_args.zig",
+    "tools/modular_cfg.zig",
+    "tools/mojo_compile.zig",
+    "tools/proc_tree.zig",
+]
+
+zig_test(
+    name = "mojo_compile_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _MOJO_COMPILE_SRCS,
+    src = "tools/mojo_compile.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "mojo_compile",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _MOJO_COMPILE_SRCS,
+    src = "tools/mojo_compile.zig",
+    unit_tests = [":mojo_compile_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
 
 export_file(name = "gate_runner.sh", visibility = ["PUBLIC"])
 
