@@ -19,7 +19,11 @@
 #     2^53 + 1 and every NULL. Planting that copy reds it.
 #   * `test_table_grows_and_keeps_rows`: 300 rows from 64 slots; every key
 #     still finds its own payload after the rehashes (a rehash that moves keys
-#     and payloads apart pairs keys with other rows' payloads).
+#     and payloads apart pairs keys with other rows' payloads). Every fifth
+#     row has NULL INT64, FLOAT64, INT32 and STRING payloads, and they are
+#     still NULL after the rehashes (planting `fresh_nulls[dst] = False` in
+#     `PayloadSlot.rehash_in_place` or in `PayloadCol_JoinString.
+#     rehash_in_place` reds it).
 #   * `test_single_take_and_stubs`: the table moves out once; feeding,
 #     taking or combining after that raises; the drain is None and the probe
 #     entry points raise.
@@ -105,9 +109,11 @@ struct Rows(Movable):
     var k: List[Int64]
     var k_null: List[Bool]
     var p0: List[Int64]
+    var p0_null: List[Bool]
     var p1: List[Float64]
     var p1_null: List[Bool]
     var p2: List[Int32]
+    var p2_null: List[Bool]
     var p3: List[String]
     var p3_null: List[Bool]
 
@@ -115,9 +121,11 @@ struct Rows(Movable):
         self.k = []
         self.k_null = []
         self.p0 = []
+        self.p0_null = []
         self.p1 = []
         self.p1_null = []
         self.p2 = []
+        self.p2_null = []
         self.p3 = []
         self.p3_null = []
 
@@ -131,20 +139,21 @@ struct Rows(Movable):
         k_null: Bool = False,
         p1_null: Bool = False,
         p3_null: Bool = False,
+        p0_null: Bool = False,
+        p2_null: Bool = False,
     ):
         self.k.append(k)
         self.k_null.append(k_null)
         self.p0.append(p0)
+        self.p0_null.append(p0_null)
         self.p1.append(p1)
         self.p1_null.append(p1_null)
         self.p2.append(p2)
+        self.p2_null.append(p2_null)
         self.p3.append(p3)
         self.p3_null.append(p3_null)
 
     def batch(self) raises -> RecordBatch:
-        var no_nulls = List[Bool]()
-        for _ in range(len(self.k)):
-            no_nulls.append(False)
         var sb = SchemaBuilder()
         sb.add_field(Field(String("k"), ArrowType.INT64, True))
         sb.add_field(Field(String("p0"), ArrowType.INT64, True))
@@ -153,9 +162,9 @@ struct Rows(Movable):
         sb.add_field(Field(String("p3"), ArrowType.STRING, True))
         var rbb = RecordBatchBuilder.with_capacity(5)
         rbb.add_column(_col[I64](self.k, self.k_null))
-        rbb.add_column(_col[I64](self.p0, no_nulls))
+        rbb.add_column(_col[I64](self.p0, self.p0_null))
         rbb.add_column(_col[F64](self.p1, self.p1_null))
-        rbb.add_column(_col[I32](self.p2, no_nulls))
+        rbb.add_column(_col[I32](self.p2, self.p2_null))
         rbb.add_column(_str_col(self.p3, self.p3_null))
         return rbb.build(sb.build())
 
@@ -238,6 +247,8 @@ def _copy_row(src: Rows, i: Int, mut dst: Rows):
         src.k_null[i],
         src.p1_null[i],
         src.p3_null[i],
+        src.p0_null[i],
+        src.p2_null[i],
     )
 
 
@@ -260,9 +271,22 @@ def test_combine_carries_exact_payloads_and_nulls() raises:
 
 
 def test_table_grows_and_keeps_rows() raises:
+    # Every fifth row (from row 1, which lives through every growth) has all
+    # four payloads NULL: INT64, FLOAT64, INT32 and STRING.
     var rows = Rows()
     for i in range(300):
-        rows.add(Int64(i * 7), BIG + Int64(i), Float64(i) + 0.5, Int32(-i), String(i))
+        var n = i % 5 == 1
+        rows.add(
+            Int64(i * 7),
+            BIG + Int64(i),
+            Float64(i) + 0.5,
+            Int32(-i),
+            String(i),
+            p1_null=n,
+            p3_null=n,
+            p0_null=n,
+            p2_null=n,
+        )
     var st = _fed(rows)
     var t = _taken(st)
     assert_equal(t.n_rows(), 300)
@@ -271,6 +295,16 @@ def test_table_grows_and_keeps_rows() raises:
     for i in range(300):
         var s = join_build_probe_1(t, Int64(i * 7))
         assert_true(s >= 0)
+        if i % 5 == 1:
+            assert_true(t.payload_is_null[0](s), "INT64 NULL survives rehash")
+            assert_true(t.payload_is_null[1](s), "FLOAT64 NULL survives rehash")
+            assert_true(t.payload_is_null[2](s), "INT32 NULL survives rehash")
+            assert_true(t.payload_is_null[3](s), "STRING NULL survives rehash")
+            continue
+        assert_false(t.payload_is_null[0](s))
+        assert_false(t.payload_is_null[1](s))
+        assert_false(t.payload_is_null[2](s))
+        assert_false(t.payload_is_null[3](s))
         assert_equal(t.payload[0].read_slot(s), BIG + Int64(i))
         assert_equal(t.payload[1].read_slot(s), Float64(i) + 0.5)
         assert_equal(t.payload[2].read_slot(s), Int32(-i))
