@@ -18,7 +18,6 @@ tools/build/coverage/branch/cov_branch_classify_cases.sh	coverage and mutation t
 tools/build/coverage/branch/cov_branch_link.sh	coverage and mutation tooling: to port to Zig
 tools/build/coverage/census.sh	coverage and mutation tooling: to port to Zig
 tools/build/coverage/cov_gate.sh	coverage and mutation tooling: to port to Zig
-tools/build/coverage/kcov/cov_normalize_cases.sh	coverage and mutation tooling: to port to Zig
 tools/build/coverage/kcov/cov_run.sh	coverage and mutation tooling: to port to Zig
 tools/build/coverage/kcov/cov_zig_cases.sh	coverage and mutation tooling: to port to Zig
 tools/build/coverage/kcov/debug_relocate_cases.sh	coverage and mutation tooling: to port to Zig
