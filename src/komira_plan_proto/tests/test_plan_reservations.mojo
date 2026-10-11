@@ -24,9 +24,11 @@
 #      under each one.
 #
 # A statement it cannot read (`reserved` with `max`, a bare identifier, a
-# range over 1000 numbers, a `reserved` outside a message or enum body (in a
-# `oneof`, say), a `/* */`
-# comment) is refused rather than skipped. The checks are run over planted
+# malformed number or name, an empty range or one over 1000 numbers, a
+# `reserved` outside a message or enum body (in a `oneof`, say), a `/* */`
+# comment, a `}` with no `{`) is refused rather than skipped. `reserved` is
+# read as the keyword only where a statement starts (after `{`, `}` or `;`),
+# so a field named `reserved` is a field. The checks are run over planted
 # defects as well (a deleted number, a deleted name, a reserved held number,
 # an added reservation, each unreadable form), and each must be reported.
 # =============================================================================
@@ -88,8 +90,10 @@ def _item(owner: String, words: List[String], mut out: List[String]) raises:
     if len(words) == 3 and _is_number(words[0]) and words[1] == "to" and _is_number(words[2]):
         var lo = Int(words[0])
         var hi = Int(words[2])
-        if hi < lo or hi - lo >= 1000:
-            raise Error(what + ": the range " + words[0] + " to " + words[2] + " is empty or over 1000 numbers")
+        if hi < lo:
+            raise Error(what + ": the range " + words[0] + " to " + words[2] + " is empty")
+        if hi - lo >= 1000:
+            raise Error(what + ": the range " + words[0] + " to " + words[2] + " is over 1000 numbers")
         for n in range(lo, hi + 1):
             out.append(owner + " " + String(n))
         return
@@ -342,6 +346,33 @@ def main() raises:
     assert_true(_refuses("message A {\n  reserved 5 to max;\n}\n", "cannot read: `5 to max`"), "`max` is refused")
     assert_true(_refuses("message A {\n  reserved foo;\n}\n", "cannot read: `foo`"), "a bare identifier is refused")
     assert_true(_refuses("message A {\n  reserved 1 to 5000;\n}\n", "over 1000"), "a huge range is refused")
+    assert_true(_refuses("message A {\n  reserved 1 to 1001;\n}\n", "over 1000"), "1001 numbers is over the limit")
+    var thousand = _reserved("message A {\n  reserved 1 to 1000;\n}\n")
+    assert_equal(len(thousand), 1000, "a range of exactly 1000 numbers is read in full")
+    assert_equal(thousand[999], "A 1000", "the 1000-number range ends at its last number")
+    assert_true(_refuses("message A {\n  reserved 5 to 3;\n}\n", "is empty"), "an inverted range is refused, not read as nothing")
+    var single = _reserved("message A {\n  reserved 4 to 4;\n}\n")
+    assert_equal(len(single), 1, "a one-number range `4 to 4` is not empty")
+    var field = _reserved("message A {\n  int32 reserved = 1;\n  reserved 2;\n}\n")
+    assert_equal(len(field), 1, "a field named `reserved` is not a reserved statement")
+    assert_equal(field[0], "A 2", "the statement after a `;` is read")
+    var packed = _reserved('message A{reserved 2;}enum E{reserved "X";}')
+    assert_equal(len(packed), 2, "`{`, `}` and `;` split tokens with no spaces round them")
+    assert_equal(packed[1], 'E "X"', "a `{` with no space before it still opens the named type's body")
+    var spaced = _reserved("message A {\n  reserved 1\t,2\r,3\f,4\v,5;\n}\n")
+    assert_equal(len(spaced), 5, "tab, carriage return, form feed and vertical tab separate tokens")
+    var commented = _reserved("message A {\n  // reserved 9;\n  reserved 2; // reserved 8;\n}\n")
+    assert_equal(len(commented), 1, "a `//` comment is not read")
+    assert_equal(commented[0], "A 2", "the code before a `//` comment is read")
+    assert_true(_refuses("message A {\n  reserved -1;\n}\n", "cannot read: `-1`"), "a signed number is refused")
+    assert_true(_refuses('message A {\n  reserved "";\n}\n', 'cannot read: `""`'), "an empty name is refused")
+    assert_true(_refuses('message A {\n  reserved "ab;\n}\n', 'cannot read: `"ab`'), "a name with no closing quote is refused")
+    assert_true(_refuses('message A {\n  reserved ab";\n}\n', 'cannot read: `ab"`'), "a name with no opening quote is refused")
+    assert_true(_refuses('message A {\n  reserved "a"b";\n}\n', 'cannot read: `"a"b"`'), "a name with a quote inside is refused")
+    assert_true(_refuses("message A {\n  reserved 1 2;\n}\n", "cannot read: `1 2`"), "two numbers with no comma are refused")
+    assert_true(_refuses("message A {\n  reserved 1 too 5;\n}\n", "cannot read: `1 too 5`"), "a range without `to` is refused")
+    assert_true(_refuses("message A {\n  reserved 1,,2;\n}\n", "cannot read: ``"), "an empty item is refused")
+    assert_true(_refuses("}\n", "never opened"), "a `}` with no `{` is refused")
     assert_true(_refuses("reserved 1;\n", "outside a message"), "a top-level reserved is refused")
     assert_true(
         _refuses("message A {\n  oneof c {\n    reserved 1;\n  }\n}\n", "outside a message"),
