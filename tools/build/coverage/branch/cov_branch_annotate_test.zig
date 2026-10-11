@@ -21,6 +21,8 @@ const Fake = struct {
     lld_err: []const u8 = "",
     lld_out: []const u8 = "",
     lld_status: br.Status = .{ .exited = 0 },
+    /// The step (`show` or `-flavor`) whose process cannot be created.
+    fail: ?[]const u8 = null,
     calls: std.ArrayList(br.Spec),
 
     fn runner(self: *Fake) run_cmd.Runner {
@@ -37,6 +39,7 @@ const Fake = struct {
         copy.argv = try alloc.dupe([]const u8, spec.argv);
         copy.env = try alloc.dupe([]const u8, spec.env);
         try self.calls.append(copy);
+        if (self.fail) |f| if (std.mem.eql(u8, spec.argv[1], f)) return error.SystemResources;
         var status: br.Status = .{ .exited = 0 };
         if (std.mem.eql(u8, spec.argv[1], "show")) {
             try write(spec.stdout_path.?, self.show_text);
@@ -102,7 +105,7 @@ const Case = struct {
         return .{
             .cwd = self.root,
             .k = try self.k(),
-            .env = &.{ "HOME=/home/user", "LC_ALL=fr_FR.UTF-8", "PATH=/usr/bin:/bin", "TMPDIR=/tmp", "ZED=1" },
+            .env = &.{ "HOME=/home/user", "LC_ALL=fr_FR.UTF-8", "PATH=/usr/bin:/bin", "TMPDIR=/tmp", "TMPDIR_OLD=keep", "ZED=1" },
         };
     }
 
@@ -191,6 +194,8 @@ test "a passing annotation: show's and lld's command lines and environment, the 
         try testing.expect(hasEntry(s.env, "LC_ALL=C"));
         try testing.expect(hasEntry(s.env, "HOME=/home/user"));
         try testing.expect(hasEntry(s.env, "ZED=1"));
+        // Only TMPDIR itself is replaced, not a variable whose name starts with it.
+        try testing.expect(hasEntry(s.env, "TMPDIR_OLD=keep"));
         try testing.expectEqual(@as(usize, 1), countPrefix(s.env, "PATH="));
         try testing.expectEqual(@as(usize, 1), countPrefix(s.env, "TMPDIR="));
         try testing.expectEqual(@as(usize, 1), countPrefix(s.env, "LC_ALL="));
@@ -224,6 +229,8 @@ test "usage errors: a missing, repeated, empty or unknown flag, a flag without a
         .{ .args = &.{ "--lld", "a", "--lld", "b" }, .msg = "--lld given twice" },
         .{ .args = &.{ "--out", "" }, .msg = "--out is empty" },
         .{ .args = &.{ "--busybox", "bb" }, .msg = "unknown argument --busybox" },
+        // A flag is matched whole: one that only starts with a known flag is unknown.
+        .{ .args = &.{ "--lldx", "l" }, .msg = "unknown argument --lldx" },
         .{ .args = &.{"--binary"}, .msg = "--binary needs a value" },
         .{ .args = &.{ "--lld", "l", "--profdata", "p", "--bitcode", "b", "--profile", "f", "--binary", "x" }, .msg = "--out is missing" },
     };
@@ -258,6 +265,9 @@ test "step 0: a bitcode without the magic is refused" {
     try c.put("in/test_one.bc", "BC\xc0\xdf rest");
     try c.refused("in/test_one.bc is not LLVM bitcode");
     try testing.expectEqual(@as(usize, 0), c.fake.calls.items.len);
+    // The magic alone is enough, as the script's `od -N 4` read it.
+    try c.put("in/test_one.bc", "BC\xc0\xde");
+    try testing.expectEqual(@as(u8, 0), try c.go());
 }
 
 test "step 0: branch weights or entry counts in the bitcode are refused, each alone" {
@@ -302,6 +312,9 @@ test "step 1: a section header table the tool does not read is refused" {
         .{ .shentsize = 40 },
         .{ .shnum = 0 },
         .{ .shstrndx = 5 },
+        // Off by one each way: the names index equal to the count, an entry of 65 bytes.
+        .{ .shstrndx = 3 },
+        .{ .shentsize = 65 },
         .{ .shoff = 1 << 40 },
         .{ .cut = 60 },
     };
@@ -331,6 +344,9 @@ test "step 1: two data or counter sections, or none, are refused" {
         // Names compared whole: neither a longer name nor a prefix is the section.
         .{ .s = &.{ .{ .name = "__llvm_prf_datax", .bytes = data }, .{ .name = "__llvm_prf_cnts", .size = cnts } }, .msg = "no __llvm_prf_data or no __llvm_prf_cnts section" },
         .{ .s = &.{ .{ .name = "__llvm_prf_dat", .bytes = data }, .{ .name = "__llvm_prf_cnts", .size = cnts } }, .msg = "no __llvm_prf_data or no __llvm_prf_cnts section" },
+        .{ .s = &.{ .{ .name = "__llvm_prf_data", .bytes = data }, .{ .name = "__llvm_prf_cntsx", .size = cnts } }, .msg = "no __llvm_prf_data or no __llvm_prf_cnts section" },
+        // A name ends at a NUL or a newline only, not at a space.
+        .{ .s = &.{ .{ .name = "__llvm_prf_data x", .bytes = data }, .{ .name = "__llvm_prf_cnts", .size = cnts } }, .msg = "no __llvm_prf_data or no __llvm_prf_cnts section" },
     };
     for (cases) |cs| {
         var c = try Case.init();
@@ -358,6 +374,7 @@ test "step 1: a data section that is not whole 72-byte records, or whose counter
     const cases = [_]struct { s: []const fx.Section, msg: []const u8 }{
         .{ .s = &.{ .{ .name = "__llvm_prf_data", .bytes = "" }, .{ .name = "__llvm_prf_cnts", .size = 0 } }, .msg = "in/test_one's __llvm_prf_data is 0 bytes, not a whole number of 72-byte records" },
         .{ .s = &.{ .{ .name = "__llvm_prf_data", .bytes = data[0..73] }, .{ .name = "__llvm_prf_cnts", .size = cnts } }, .msg = "in/test_one's __llvm_prf_data is 73 bytes, not a whole number of 72-byte records" },
+        .{ .s = &.{ .{ .name = "__llvm_prf_data", .bytes = data[0..80] }, .{ .name = "__llvm_prf_cnts", .size = cnts } }, .msg = "in/test_one's __llvm_prf_data is 80 bytes, not a whole number of 72-byte records" },
         .{ .s = &.{ .{ .name = "__llvm_prf_data", .bytes = data }, .{ .name = "__llvm_prf_cnts", .size = cnts + 8 } }, .msg = "in/test_one's 3 profile data records count 6 counters, but its __llvm_prf_cnts is 56 bytes: not the 72-byte record this tool reads" },
         .{ .s = &.{ .{ .name = "__llvm_prf_data", .bytes = data }, .{ .name = "__llvm_prf_cnts", .size = cnts - 8 } }, .msg = "count 6 counters, but its __llvm_prf_cnts is 40 bytes" },
     };
@@ -397,6 +414,26 @@ test "step 1: llvm-profdata show failing is refused with its first two lines" {
     c.fake.show_err = "error: in/test_one.profdata: bad magic\nline two\nline three\n";
     try c.refused("llvm-profdata show failed on in/test_one.profdata: error: in/test_one.profdata: bad magic line two \n");
     try testing.expect(!c.has("line three"));
+    // Its lines are not cut (the script's `head -n 2 | tr`).
+    c.fake.show_err = "e" ** 400 ++ "\n";
+    try c.refused("llvm-profdata show failed on in/test_one.profdata: " ++ "e" ** 400 ++ " \n");
+    // Any other status fails too, a signal among them, its listing written or not.
+    c.fake.show_err = "";
+    c.fake.show_status = .{ .exited = 2 };
+    try c.refused("llvm-profdata show failed on in/test_one.profdata: \n");
+    c.fake.show_status = .{ .signaled = 9 };
+    try c.refused("llvm-profdata show failed on in/test_one.profdata: \n");
+}
+
+test "a process that cannot be created is exit 2, naming the program" {
+    for ([_][]const u8{ "show", "-flavor" }, [_][]const u8{ "tc/llvm/bin/llvm-profdata", "tc/lld/bin/lld" }) |step, prog| {
+        var c = try Case.init();
+        defer c.deinit();
+        c.fake.fail = step;
+        try testing.expectEqual(@as(u8, 2), try c.go());
+        try testing.expect(c.has(try std.fmt.allocPrint(c.a(), "cov_branch annotate: cannot run {s}: SystemResources\n", .{prog})));
+        try testing.expectError(error.FileNotFound, c.tmp.dir.access("out/test_one.ll", .{}));
+    }
 }
 
 test "step 1: a listing the tool cannot read is refused with its line" {
@@ -408,6 +445,8 @@ test "step 1: a listing the tool cannot read is refused with its line" {
         .{ .text = "Counters:\n  main:\n    Hash: 0x\nTotal functions: 1\n", .line = "line 3" },
         // A hash with a letter past f.
         .{ .text = "Counters:\n  main:\n    Hash: 0x1g\nTotal functions: 1\n", .line = "line 3" },
+        // The hash line starts the line: five spaces before it are not four.
+        .{ .text = "Counters:\n  main:\n     Hash: 0x01\nTotal functions: 1\n", .line = "line 3" },
         // Two names in a row.
         .{ .text = "  a:\n  b:\n    Hash: 0x1\nTotal functions: 1\n", .line = "line 2" },
     };
@@ -428,6 +467,35 @@ test "step 1: a line of three spaces before its text is not a function name" {
     try testing.expectEqualStrings("", c.err.items);
 }
 
+test "step 1: a name line is two spaces, then a name ending in a colon; the name may be empty" {
+    // One space, or no colon at the end: not a name line, so not read.
+    for ([_][]const u8{ "Counters:\n x:\n", "Counters:\n  x\n" }) |odd| {
+        var c = try Case.init();
+        defer c.deinit();
+        c.fake.show_text = try std.mem.replaceOwned(u8, c.a(), try fx.show(c.a(), &fx.FNS), "Counters:\n", odd);
+        try testing.expectEqual(@as(u8, 0), try c.go());
+        try testing.expectEqualStrings("", c.err.items);
+    }
+    // `  :` names a function whose name is empty (its MD5 is that of no bytes).
+    var c = try Case.init();
+    defer c.deinit();
+    const four = fx.FNS ++ [_]fx.Fn{.{ .name = "", .hash = 5 }};
+    try c.put("in/test_one", try fx.binary(c.a(), &four));
+    c.fake.show_text = try fx.show(c.a(), &four);
+    try testing.expect(std.mem.indexOf(u8, c.fake.show_text, "\n  :\n") != null);
+    c.fake.lld_err = try fx.dump(c.a(), &four);
+    try testing.expectEqual(@as(u8, 0), try c.go());
+    try testing.expectEqualStrings("", c.err.items);
+}
+
+test "step 1: only a line that starts `Total functions: ` gives the count" {
+    var c = try Case.init();
+    defer c.deinit();
+    c.fake.show_text = try std.mem.concat(c.a(), u8, &.{ try fx.show(c.a(), &fx.FNS), "x Total functions: 3\n" });
+    try testing.expectEqual(@as(u8, 0), try c.go());
+    try testing.expectEqualStrings("", c.err.items);
+}
+
 test "step 1: the functions read must be the count show reports, given once" {
     const a = std.heap.page_allocator;
     const base = try fx.show(a, &fx.FNS);
@@ -436,6 +504,10 @@ test "step 1: the functions read must be the count show reports, given once" {
         .{ .text = try std.mem.replaceOwned(u8, a, base, "Total functions: 3", "Total: 3"), .msg = "but llvm-profdata show reports 'none'" },
         .{ .text = try std.mem.concat(a, u8, &.{ base, "Total functions: 3\n" }), .msg = "but llvm-profdata show reports '3\n3'" },
         .{ .text = try std.mem.replaceOwned(u8, a, base, "Total functions: 3", "Total functions: 3x"), .msg = "reports 'none'" },
+        // Decimal digits only, at least one; compared as the string show printed.
+        .{ .text = try std.mem.replaceOwned(u8, a, base, "Total functions: 3", "Total functions: 3a"), .msg = "reports 'none'" },
+        .{ .text = try std.mem.replaceOwned(u8, a, base, "Total functions: 3", "Total functions: "), .msg = "reports 'none'" },
+        .{ .text = try std.mem.replaceOwned(u8, a, base, "Total functions: 3", "Total functions: 03"), .msg = "read 3 functions from in/test_one.profdata, but llvm-profdata show reports '03'" },
         // A name at the end with no hash line is not a function read.
         .{ .text = try std.mem.concat(a, u8, &.{ try std.mem.replaceOwned(u8, a, base, "Total functions: 3", "Total functions: 4"), "  late:\n" }), .msg = "read 3 functions" },
     };
@@ -459,6 +531,18 @@ test "step 1: a function the binary links that the profile lacks is refused, wit
     try testing.expect(c.has(try std.fmt.allocPrint(c.a(), "{s} 123456789abcdef0", .{std.fmt.fmtSliceHexLower(md5[0..8])})));
     try testing.expect(c.has(" 0000000000000042 "));
     try testing.expectEqual(@as(usize, 1), c.fake.calls.items.len);
+}
+
+test "step 1: of four or more lost records, three are named" {
+    var c = try Case.init();
+    defer c.deinit();
+    try c.put("in/test_one", try fx.binary(c.a(), &(fx.FNS ++ [_]fx.Fn{ .{ .name = "e1", .hash = 1 }, .{ .name = "e2", .hash = 2 } })));
+    c.fake.show_text = try fx.show(c.a(), &.{fx.HELPER});
+    try c.refused("holds no record of 4 of the 5 functions in/test_one links (name MD5 prefix, hash: ");
+    const from = std.mem.indexOf(u8, c.err.items, "hash: ").? + "hash: ".len;
+    const to = std.mem.indexOf(u8, c.err.items, "): a run").?;
+    // Three "<md5 prefix> <hash> " pairs: six spaces.
+    try testing.expectEqual(@as(usize, 6), std.mem.count(u8, c.err.items[from..to], " "));
 }
 
 test "step 1: the same function hash with another name, or the same name with another hash, is a lost record" {
@@ -511,6 +595,11 @@ test "step 1: a hash of fewer than 16 digits is read with leading zeros" {
     c.fake.show_text = try std.mem.replaceOwned(u8, c.a(), s, "Hash: 0x0000000000000042", "Hash: 0x42");
     try testing.expect(!std.mem.eql(u8, s, c.fake.show_text));
     try testing.expectEqual(@as(u8, 0), try c.go());
+    // Fifteen digits get one zero.
+    const t = c.fake.show_text;
+    c.fake.show_text = try std.mem.replaceOwned(u8, c.a(), t, "Hash: 0x0102030405060708", "Hash: 0x102030405060708");
+    try testing.expect(!std.mem.eql(u8, t, c.fake.show_text));
+    try testing.expectEqual(@as(u8, 0), try c.go());
 }
 
 test "step 2: lld failing is refused, after the last 20 lines it printed, each cut to 300 bytes" {
@@ -525,8 +614,12 @@ test "step 2: lld failing is refused, after the last 20 lines it printed, each c
     try testing.expect(!c.has("line 5\n"));
     try testing.expect(c.has("line 6\nline 7\n"));
     try testing.expect(c.has("y" ** 300 ++ "\nBRANCH COVERAGE ANNOTATE FAILED"));
-    // A signal is a failure too.
+    // Cut to 300 bytes exactly.
+    try testing.expect(c.has("line 24\n" ++ "y" ** 300 ++ "\n"));
+    // A signal is a failure too, and so is any other exit status.
     c.fake.lld_status = .{ .signaled = 9 };
+    try c.refused("lld could not apply the profile");
+    c.fake.lld_status = .{ .exited = 2 };
     try c.refused("lld could not apply the profile");
 }
 
@@ -539,6 +632,11 @@ test "step 3: a diagnostic of lld before the dump is refused, a missing-function
         .{ .pre = "lld: warning: ld-temp.o: no profile data available for function f Hash = 12 up to 0 count discarded!\n", .n = "1", .first = "count discarded!" },
         .{ .pre = "lld: warning: ld-temp.o: no profile data available for function f Hash = up to 0 count discarded\n", .n = "1", .first = "Hash = up to" },
         .{ .pre = "lld: warning: ld-temp.o: no profile data available for function f Hash = 1x up to 0 count discarded\n", .n = "1", .first = "1x up" },
+        // The hash is decimal digits, at least one, after ` Hash = ` with both its spaces.
+        .{ .pre = "lld: warning: ld-temp.o: no profile data available for function f Hash =  up to 0 count discarded\n", .n = "1", .first = "Hash =  up" },
+        .{ .pre = "lld: warning: ld-temp.o: no profile data available for function f Hash = 1a up to 0 count discarded\n", .n = "1", .first = "1a up" },
+        .{ .pre = "lld: warning: ld-temp.o: no profile data available for function fHash = 1 up to 0 count discarded\n", .n = "1", .first = "fHash" },
+        .{ .pre = "lld: warning: ld-temp.o: no profile data available for function f Hash =1 up to 0 count discarded\n", .n = "1", .first = "Hash =1 up" },
         .{ .pre = "lld: warning: ld temp.o: no profile data available for function f Hash = 1 up to 0 count discarded\n", .n = "1", .first = "ld temp.o" },
         .{ .pre = "x lld: warning: ld-temp.o: no profile data available for function f Hash = 1 up to 0 count discarded\n", .n = "1", .first = "x lld" },
         .{ .pre = "lld: error: ld-temp.o: no profile data available for function f Hash = 1 up to 0 count discarded\n", .n = "1", .first = "lld: error" },
@@ -557,6 +655,14 @@ test "step 3: a diagnostic of lld before the dump is refused, a missing-function
     defer c.deinit();
     c.fake.lld_err = try std.mem.concat(c.a(), u8, &.{ "/x/ld.lld: warning: ld-temp.o: no profile data available for function g Hash = 9 up to 0 count discarded\n", try fx.missing(c.a(), "h"), d });
     try testing.expectEqual(@as(u8, 0), try c.go());
+    // The word before `: no profile` is any word without a space, an empty one too.
+    c.fake.lld_err = try std.mem.concat(c.a(), u8, &.{
+        "lld: warning: other.o: no profile data available for function g Hash = 9 up to 0 count discarded\n",
+        "lld: warning: : no profile data available for function k Hash = 9 up to 0 count discarded\n",
+        d,
+    });
+    try testing.expectEqual(@as(u8, 0), try c.go());
+    try testing.expectEqualStrings("", c.err.items);
 }
 
 test "step 3: a line of lld's own inside the dump is refused; the first five named, each cut to 300 bytes" {
@@ -578,8 +684,11 @@ test "step 3: a line of lld's own inside the dump is refused; the first five nam
     try testing.expect(c.has("warning: 4"));
     try testing.expect(!c.has("warning: 5"));
     try testing.expect(!c.has("z" ** 300));
-    // A word that only contains `warning: ` or `lld: ` later in its line is IR.
-    c.fake.lld_err = try std.mem.concat(c.a(), u8, &.{ d, "  ; warning: in a comment\n  call void @f() ; lld: no\n" });
+    // Each cut to 300 bytes exactly: "warning: 0" and 290 of its z's.
+    try testing.expect(c.has("warning: 0" ++ "z" ** 290 ++ " warning: 1"));
+    // A line that only holds `warning: `, `error: ` or `lld: ` later in it is
+    // IR, and so is one that starts `warning:` or `error:` without the space.
+    c.fake.lld_err = try std.mem.concat(c.a(), u8, &.{ d, "  ; warning: in a comment\n  call void @f() ; lld: no\n  ; error: in a comment\nwarning:x\nerror:x\n" });
     try testing.expectEqual(@as(u8, 0), try c.go());
 }
 
@@ -588,6 +697,11 @@ test "step 3: lld writing to its standard output is refused" {
     defer c.deinit();
     c.fake.lld_out = "one\ntwo\nthree\nfour\n";
     try c.refused("lld wrote to its standard output: one two three \n");
+    // One byte is enough; lines are not cut (the script's `head -n 3 | tr`).
+    c.fake.lld_out = "x";
+    try c.refused("lld wrote to its standard output: x \n");
+    c.fake.lld_out = "o" ** 400 ++ "\n";
+    try c.refused("lld wrote to its standard output: " ++ "o" ** 400 ++ " \n");
 }
 
 test "step 3: no dump, or two, is refused" {
@@ -620,6 +734,21 @@ test "step 3: no dump, or two, is refused" {
         c.fake.lld_err = try std.mem.concat(c.a(), u8, &.{ d, "  ; *** IR Dump After Other on [module] ***\n" });
         try c.refused("lld printed 2 IR dumps, expected exactly one");
     }
+    {
+        // The dump starts at the first header: a second whole dump is a second dump.
+        var c = try Case.init();
+        defer c.deinit();
+        const d = try fx.dump(c.a(), &fx.FNS);
+        c.fake.lld_err = try std.mem.concat(c.a(), u8, &.{ try fx.missing(c.a(), "unrun"), d, d });
+        try c.refused("lld printed 2 IR dumps, expected exactly one");
+    }
+    {
+        // `; *** IR Dump` not followed by a space is no header.
+        var c = try Case.init();
+        defer c.deinit();
+        c.fake.lld_err = try std.mem.concat(c.a(), u8, &.{ try fx.dump(c.a(), &fx.FNS), "; *** IR Dumps\n" });
+        try testing.expectEqual(@as(u8, 0), try c.go());
+    }
 }
 
 test "step 3: an entry count for fewer or more functions than the profile holds is refused" {
@@ -641,6 +770,11 @@ test "isCountedDefine: a define with !prof !<digit> after its name" {
     try testing.expect(!an.isCountedDefine(" define void @f() !prof !7 {"));
     try testing.expect(!an.isCountedDefine("define !prof !7"));
     try testing.expect(an.isCountedDefine("define  !prof !7"));
+    // ` !prof !` with its space, a digit after it, at any of its places.
+    try testing.expect(!an.isCountedDefine("define void @f()!prof !7 {"));
+    try testing.expect(!an.isCountedDefine("defined void @f() !prof !7 {"));
+    try testing.expect(!an.isCountedDefine("define void @f() !prof !"));
+    try testing.expect(an.isCountedDefine("define void @f() !prof !x !prof !7 {"));
 }
 
 test "the dump cannot be written: exit 1, naming it" {
