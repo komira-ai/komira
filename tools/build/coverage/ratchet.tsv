@@ -137,7 +137,7 @@ src/komira_hash	10000	10000
 src/komira_host	6041	-
 src/komira_http_auth	9571	-
 src/komira_http_client	8140	-
-src/komira_http_core	9188	-
+src/komira_http_core	10000	-
 src/komira_http_server	8494	-
 src/komira_iceberg_catalog	8717	-
 src/komira_job_report_proto	0	-
