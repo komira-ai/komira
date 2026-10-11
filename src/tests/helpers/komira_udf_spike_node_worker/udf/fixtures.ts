@@ -260,6 +260,88 @@ export const sum_finish_raises = {
   },
 };
 
+// Returned values of the wrong type or range, each ERR_RETURN_TYPE: a
+// string for float64, a bigint past int64, a number past int32. A safe
+// integer number for int64 is accepted.
+export function returns_text(_x: I64): string {
+  return 'x';
+}
+
+export function returns_huge(_x: I64): bigint {
+  return 2n ** 64n;
+}
+
+export function returns_number(x: I64): number {
+  return Number(x) + 1;
+}
+
+export function returns_big_int32(_x: I64): number {
+  return 2147483648;
+}
+
+// slow_loop with no argument, two arguments and as a ROW function: the
+// cancel check of each per-row loop.
+export function slow_zero(): bigint {
+  sleepMs(100);
+  return 7n;
+}
+
+export function slow_pair(a: I64, b: I64): I64 {
+  sleepMs(100);
+  return a === null || b === null ? null : a + b;
+}
+
+export function slow_row(r: { a: bigint | null }): I64 {
+  sleepMs(100);
+  return r.a;
+}
+
+// A symbol read on a row is not a field read.
+export function row_symbol_probe(r: { a: bigint | null }): I64 {
+  return (r as unknown as Record<symbol, unknown>)[Symbol.iterator] === undefined ? r.a : 0n;
+}
+
+// Frames that yield tables of the wrong shape, and one that returns no
+// iterator.
+export function* frame_rb_one_col(batches: Iterable<RecordBatch>): Generator<RecordBatch> {
+  for (const b of batches) yield b;
+}
+
+export function* frame_one_column(batches: Iterable<RecordBatch>): Generator<Table> {
+  for (const b of batches) yield { numRows: b.numRows, columns: [BigInt64Array.of(1n)] };
+}
+
+export function* frame_short_column(batches: Iterable<RecordBatch>): Generator<Table> {
+  for (const _b of batches) yield { numRows: 2, columns: [[1n]] };
+}
+
+export function not_an_iterator(_batches: Iterable<RecordBatch>): number {
+  return 42;
+}
+
+// An endless frame that counts how often its generator was closed, and the
+// count, read by a per-row call in the same worker.
+let closedFrames = 0;
+export function* endless_counted(_batches: Iterable<RecordBatch>): Generator<Table> {
+  try {
+    for (;;) yield { numRows: 1, columns: [[1n]] };
+  } finally {
+    closedFrames++;
+  }
+}
+
+export function closed_frames(_x: I64): bigint {
+  return BigInt(closedFrames);
+}
+
+// An aggregate whose merge is not its update: count rows, merge by adding.
+export const count = {
+  init: (): bigint => 0n,
+  update: (s: bigint, _x: I64): bigint => s + 1n,
+  merge: (s: bigint, t: I64): bigint => (t === null ? s : s + t),
+  finish: (s: bigint): bigint => s,
+};
+
 export const not_a_function = 42;
 
 export function* not_a_table(_batches: Iterable<RecordBatch>): Generator<number> {

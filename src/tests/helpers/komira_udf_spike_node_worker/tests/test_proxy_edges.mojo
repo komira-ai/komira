@@ -23,7 +23,9 @@
 #   - an aggregate whose finish raises is ERR_RAISED with the worker's
 #     message (an error reply decoded as an output);
 #   - after shutdown no descriptor and no child process of the runtime is
-#     left (the channel or the cancel word not closed, a worker not reaped).
+#     left (the channel or the cancel word not closed, a worker not reaped);
+#   - a frame abandoned by the proxy leaves its worker usable;
+#   - the library opened by its absolute path finds the worker beside it.
 #
 # Mutants planted (the sweep's ids in the pull request): ipc.c without the
 # 64-field bound (m0547) or the name-length bound (m0539); proxy.c without
@@ -34,9 +36,12 @@
 # (m1168), frame_next going on after a failed input (m1219), agg_send's
 # width check (m1242), agg_emit decoding an ERROR reply (m1258); channel.c
 # kudfw_stop not closing the channel (m0915) or the cancel word (m0917), or
-# not reaping (m0919). Each red on the farm.
+# not reaping (m0919); frames.mjs answering the abandoned FRAME_OUT
+# (m1561); node_launcher.c resolving an absolute path as relative (m1279).
+# Each red on the farm.
 
 from std.os import listdir
+from std.os.path import realpath
 from std.testing import assert_equal, assert_true
 
 from komira_udf_spike_abi.contract import *
@@ -164,6 +169,12 @@ def _cancelled_before(mut rt: UdfRuntime) raises:
     # an input of two columns for one bound argument
     var w = rt.run_frame(fi.handle, f, [_two_columns()], CallOptions.plain())
     _expect(w.outcome, ERR_INTERNAL, "the host passed a struct of 2 children", "a frame input of two columns")
+    # The worker, whose frame waited for that input, takes the FRAME_CLOSE
+    # that came instead and stays usable (an answer to the abandoned
+    # FRAME_OUT would break the framing, and the worker would be killed).
+    var again = rt.run_frame(fi.handle, f, [_ints([1, 2])], CallOptions.plain())
+    assert_true(again.outcome.is_ok(), "a frame after the refused input: " + String(again.outcome))
+    assert_equal(again.outputs[0].columns[0].bits[1], 3, "running sum")
     rt.close_instance(fi.handle)
     rt.close_context(c.handle)
     rt.unload(u.handle)
@@ -217,7 +228,9 @@ def _children() raises -> String:
 def main() raises:
     arm_watchdog()
     var fds0 = _fds()
-    var rt = UdfRuntime.open(LIB)
+    # By its absolute path: the library finds node_worker/ beside the path
+    # dladdr reports, absolute here and relative in the other tests.
+    var rt = UdfRuntime.open(realpath(".") + "/" + LIB)
     _spec_refusals(rt)
     _load_refusal(rt)
     _udfs_per_context(rt)
