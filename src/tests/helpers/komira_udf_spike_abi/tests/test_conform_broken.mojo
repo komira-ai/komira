@@ -44,6 +44,7 @@ def _expected() -> List[String]:
         "error_row_at_least_edge|released",
         "error_row_left_unset|released",
         "fault_error_row_below_minus_one|released",
+        "fault_error_row_minus_two|released",
         "fault_error_row_past_batch|released",
         "fault_error_row_past_batch_propagate|released",
         "fault_out_set_on_error|released",
@@ -59,7 +60,7 @@ def _expected() -> List[String]:
 
 def main() raises:
     var cases = load_cases(CASES)
-    assert_equal(len(cases), 116, "cases loaded from " + CASES)
+    assert_equal(len(cases), 117, "cases loaded from " + CASES)
     var report = run_suite("./echo_broken.so", cases)
     print(report)
     assert_equal(report.runtime_id, "komira-test/echo-broken")

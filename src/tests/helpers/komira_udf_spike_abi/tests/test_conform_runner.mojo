@@ -25,7 +25,7 @@ from std.testing import assert_equal, assert_false, assert_true
 from komira_udf_spike_abi.conform import load_cases, run_suite
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases_runner"
-comptime CASE_COUNT = 35
+comptime CASE_COUNT = 36
 """The JSON files under cases_runner/: an empty or partial staging cannot
 pass."""
 

@@ -157,6 +157,10 @@ enum fixture_id {
 #define RT_AGG_OPEN_REFUSED_FIRST 103
 #define RT_AGG_OPEN_REFUSED_SECOND 104
 #define RT_ONE_LIVE 105 /* one runtime at a time, as an embedded interpreter */
+#define RT_MAX_CONTEXTS_1 106 /* at most 1, 2 or 3 contexts open at once */
+#define RT_MAX_CONTEXTS_2 107
+#define RT_MAX_CONTEXTS_3 108
+#define RT_ACCEPTS_MAJOR_2 109 /* init also accepts a host of ABI major 2 */
 
 /* one_live: whether a runtime of that variant is up (init to shutdown). */
 static int one_live_up;
@@ -166,7 +170,8 @@ static int one_live_up;
 enum raise_row {
   RR_NONE = 1, /* -1 */
   RR_PAST,     /* n */
-  RR_BELOW     /* -2 */
+  RR_BELOW,    /* -3: below the runner's own "unset" sentinel, -2 */
+  RR_MINUS_2   /* -2 */
 };
 
 /* F_LEAF: what is done to the identity's output column. The first three are
@@ -341,6 +346,7 @@ static const struct fixture FIXTURES[] = {
     {"raise_no_row", F_RAISE_ROW, MC, "l", "l", "", RR_NONE},
     {"raise_row_past_batch", F_RAISE_ROW, MC, "l", "l", "", RR_PAST},
     {"raise_row_below_minus_one", F_RAISE_ROW, MC, "l", "l", "", RR_BELOW},
+    {"raise_row_minus_two", F_RAISE_ROW, MC, "l", "l", "", RR_MINUS_2},
     /* a (int64) + b (int32), null where either is null */
     {"add_mixed", F_ADD_MIXED, SC, "li", "l", "", 0},
     /* an error with its code and message set and its row left as the host
@@ -386,6 +392,7 @@ struct komira_udf_rt {
   uint32_t global_lock;
   int variant; /* echo_variants.inc; 0 in every other init */
   int64_t agg_opens;
+  int64_t open_contexts;
 };
 #define ROW_FIELDS_MAX 8
 
@@ -424,6 +431,7 @@ struct komira_udf_frame {
   int64_t group;   /* group_max: current ordinal, -1 before the first row */
   int64_t max;
   int yielded; /* yield_first */
+  struct ArrowArray kept; /* table_out_on_error: the table, freed at frame_close */
 };
 
 static const komira_udf_host* host_of(const komira_udf_instance* i) { return i->ctx->rt->host; }
@@ -637,6 +645,7 @@ static void set_null(struct ArrowArray* a, uint8_t* v, int64_t r) {
 struct table_block {
   const void* bufs[2];
   uint8_t validity[8]; /* a bitmap for table_null_rows and table_sliced */
+  int host_released;   /* table_out_on_error: the host called its release */
   int64_t k;
   struct ArrowArray** view;
   struct ArrowArray* kids[];
@@ -652,15 +661,10 @@ static void release_struct(struct ArrowArray* a) {
   a->release = NULL;
 }
 
-/* table_out_on_error's release: frees the table once and leaves `release`
- * set (a second call does nothing), so a host that keeps reading the slot
- * after an error sees a table that looks unreleased. */
-static void release_struct_keeps_slot(struct ArrowArray* a) {
-  if (a->private_data == NULL) return;
-  release_struct(a);
-  a->private_data = NULL;
-  a->release = release_struct_keeps_slot;
-}
+/* table_out_on_error's release: leaves `release` set and frees nothing (the
+ * frame frees the table at frame_close), so a host that keeps reading the
+ * slot after an error reads a live table that looks unreleased. */
+static void release_leaves_slot(struct ArrowArray* a) { ((struct table_block*)a->private_data)->host_released = 1; }
 
 /* A struct array of `n` rows whose `k` children the caller fills with
  * make_col (one spare view slot, for a reshaped table). */
@@ -815,16 +819,21 @@ static int32_t echo_open_context(komira_udf_rt* rt, uint32_t slot, komira_udf_co
                                  komira_udf_error* e) {
   if (rt->variant == RT_CONTEXT_REFUSED)
     return fail(rt->host, e, KOMIRA_UDF_ERR_INTERNAL, "context_refused: open_context refused", -1);
+  if (rt->variant >= RT_MAX_CONTEXTS_1 && rt->variant <= RT_MAX_CONTEXTS_3 &&
+      rt->open_contexts >= rt->variant - RT_MAX_CONTEXTS_1 + 1)
+    return fail(rt->host, e, KOMIRA_UDF_ERR_INTERNAL, "max_contexts: too many contexts open", -1);
   komira_udf_context* c = malloc(sizeof(*c));
   if (c == NULL) return fail(rt->host, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "open_context: out of memory", -1);
   c->rt = rt;
   c->slot = slot;
+  rt->open_contexts++;
   hold(rt->host, sizeof(*c));
   *out = c;
   return KOMIRA_UDF_OK;
 }
 
 static void echo_close_context(komira_udf_context* c) {
+  c->rt->open_contexts--;
   drop(c->rt->host, sizeof(*c));
   free(c);
 }

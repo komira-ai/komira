@@ -466,7 +466,8 @@ static int32_t next_table(komira_udf_frame* fr, struct ArrowDeviceArray* out, ko
       out->array.dictionary = &NOT_A_DICTIONARY;
       break;
     case TS_OUT_ON_ERROR:
-      out->array.release = release_struct_keeps_slot;
+      fr->kept = out->array;
+      out->array.release = release_leaves_slot;
       fr->done = 1;
       return fail(h, e, KOMIRA_UDF_ERR_RAISED, "table_out_on_error: raised with out still set", -1);
     default:
@@ -567,6 +568,10 @@ static void echo_frame_close(komira_udf_frame* fr) {
   if (fr->in.release != NULL && fr->inst->fx->id != F_STREAM_KEPT) {
     fr->in.release(&fr->in);
     if (fr->in.release != NULL) charge_host(h);
+  }
+  if (fr->kept.release != NULL) { /* table_out_on_error's table: the host must have released it once */
+    if (!((struct table_block*)fr->kept.private_data)->host_released) charge_host(h);
+    release_struct(&fr->kept);
   }
   drop(h, sizeof(*fr));
   free(fr);

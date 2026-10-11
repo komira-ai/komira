@@ -314,7 +314,7 @@ static int32_t echo_call_batch(komira_udf_instance* inst, const komira_udf_call*
         break;
       case F_RAISE_ROW: {
         int v = inst->fx->variant;
-        int64_t row = v == RR_PAST ? mine.array.length : v == RR_BELOW ? -2 : -1;
+        int64_t row = v == RR_PAST ? mine.array.length : v == RR_BELOW ? -3 : v == RR_MINUS_2 ? -2 : -1;
         release_array(&out->array);
         rc = fail(h, e, KOMIRA_UDF_ERR_RAISED, "raise_row: raised naming the row the fixture says", row);
         break;

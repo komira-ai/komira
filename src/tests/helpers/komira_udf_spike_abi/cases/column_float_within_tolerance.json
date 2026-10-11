@@ -1,11 +1,11 @@
 {
  "name": "column_float_within_tolerance",
- "defect": "float64 results within the runner's relative tolerance of 1e-9 are refused (here 5e-10 off)",
+ "defect": "float64 results within the runner's relative tolerance of 1e-9 are refused (here 5e-10 off, and 0 against 1e-9: a difference of exactly the tolerance)",
  "run": "call_batch",
  "entry": "near",
  "shape": "MAP_BATCHES_COLUMN",
  "args": [{"type": "float64", "nullable": true}],
  "result": [{"type": "float64", "nullable": true}],
- "input": {"length": 2, "columns": [{"type": "float64", "values": [1000.0, 3.0]}]},
- "expect": {"status": "OK", "column": {"type": "float64", "values": [1000.0, 3.0]}}
+ "input": {"length": 3, "columns": [{"type": "float64", "values": [1000.0, 3.0, 0.0]}]},
+ "expect": {"status": "OK", "column": {"type": "float64", "values": [1000.0, 3.0, 1e-09]}}
 }

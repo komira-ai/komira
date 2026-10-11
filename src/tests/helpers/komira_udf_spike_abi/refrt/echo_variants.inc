@@ -68,6 +68,10 @@ static const struct {
     {"agg_open_refused_first", (enum variant_id)RT_AGG_OPEN_REFUSED_FIRST},
     {"agg_open_refused_second", (enum variant_id)RT_AGG_OPEN_REFUSED_SECOND},
     {"one_live", (enum variant_id)RT_ONE_LIVE},
+    {"max_contexts_1", (enum variant_id)RT_MAX_CONTEXTS_1},
+    {"max_contexts_2", (enum variant_id)RT_MAX_CONTEXTS_2},
+    {"max_contexts_3", (enum variant_id)RT_MAX_CONTEXTS_3},
+    {"accepts_major_2", (enum variant_id)RT_ACCEPTS_MAJOR_2},
 };
 
 static const komira_udf_runtime TABLE_MAJOR_2 = {
@@ -155,7 +159,9 @@ const komira_udf_runtime* ECHO_INIT_VARIANT(const komira_udf_host* host, komira_
     fail(host, e, KOMIRA_UDF_ERR_INTERNAL, "one_live: a runtime is still up", -1);
     return NULL;
   }
-  komira_udf_rt* r = new_rt(host, e, 0, id == V_ANY_MAJOR || id == V_ERROR_ON_OK_INIT);
+  int other_major = id == V_ANY_MAJOR || id == V_ERROR_ON_OK_INIT ||
+                    (id == RT_ACCEPTS_MAJOR_2 && host != NULL && host->abi_major == 2);
+  komira_udf_rt* r = new_rt(host, e, 0, other_major);
   if (r == NULL) return NULL;
   if (id == RT_ONE_LIVE) one_live_up = 1;
   r->variant = id;

@@ -260,6 +260,48 @@ def _destructor_shuts_down() raises:
     again.shutdown()
 
 
+def _oracle_edges() raises:
+    """The runner's own counts at their edge: each run binds exactly the
+    instances it uses (a runtime that allows that many contexts and no more
+    passes), and the init_abi run asks for major 2 (a runtime that accepts
+    exactly major 2 fails it)."""
+    var call = _call_case("identity", "MAP_BATCHES_COLUMN", 2)
+    var split = parse_case(
+        '{"name": "split", "defect": "d", "run": "split", "entry": "identity", "shape": "MAP_BATCHES_COLUMN",'
+        + ' "args": [{"type": "int64"}], "result": [{"type": "int64"}], "split_at": 1,'
+        + ' "input": {"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]},'
+        + ' "expect": {"status": "OK", "column": {"type": "int64", "values": [1, 2]}}}'
+    )
+    var frame = parse_case(
+        '{"name": "frame", "defect": "d", "run": "frame", "entry": "running_sum", "shape": "MAP_BATCHES_FRAME",'
+        + ' "args": [{"type": "int64"}], "result": [{"type": "int64"}], "result_is_table": true,'
+        + ' "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [4]}]}],'
+        + ' "expect": {"status": "OK", "batches": [{"length": 1, "columns": [{"type": "int64", "values": [4]}]}]}}'
+    )
+    var agg = parse_case(
+        '{"name": "agg", "defect": "d", "run": "agg_split", "entry": "sum", "shape": "AGG_MERGEABLE",'
+        + ' "args": [{"type": "int64"}], "result": [{"type": "int64"}], "state": [{"type": "int64"}],'
+        + ' "partials": [{"input": {"length": 1, "columns": [{"type": "int64", "values": [1]}]},'
+        + ' "group_ids": [0], "n_groups": 1}, {"input": {"length": 1, "columns": [{"type": "int64",'
+        + ' "values": [2]}]}, "group_ids": [0], "n_groups": 1}], "n_groups": 1,'
+        + ' "expect": {"status": "OK", "column": {"type": "int64", "values": [3]}}}'
+    )
+    var runs: List[Case] = [call.copy(), frame.copy(), split.copy(), agg.copy()]
+    var caps: List[String] = ["max_contexts_1", "max_contexts_1", "max_contexts_2", "max_contexts_3"]
+    for k in range(len(runs)):
+        _ = setenv("KOMIRA_UDF_ECHO_VARIANT", caps[k])
+        var cases = List[Case]()
+        cases.append(runs[k].copy())
+        var r = run_suite(VARIANT, cases).result(runs[k].name)
+        assert_equal(r.verdict, "PASS", caps[k] + " " + runs[k].name + ": " + r.reason)
+    _ = setenv("KOMIRA_UDF_ECHO_VARIANT", "accepts_major_2")
+    var abi = List[Case]()
+    abi.append(parse_case('{"name": "abi", "defect": "d", "run": "init_abi", "expect": {"status": "ERR_ABI"}}'))
+    var r = run_suite(VARIANT, abi).result("abi")
+    assert_equal(r.verdict, "FAIL", "a runtime accepting major 2 passed init_abi")
+    assert_true("init accepted ABI major 2" in r.reason, r.reason)
+
+
 def _refusing_variants() raises:
     """The runner on a runtime that refuses open_context, open_instance, or
     its first or second agg_open: each case fails for that refusal, and the
@@ -565,4 +607,5 @@ def main() raises:
     _host_values()
     _refusing_variants()
     _destructor_shuts_down()
+    _oracle_edges()
     print("test_harness: ok")
