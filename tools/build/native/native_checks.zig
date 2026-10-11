@@ -18,8 +18,13 @@ const Shared = elf.Shared;
 /// A static archive of the owner: its label (for messages) and its symbols.
 pub const Archive = struct { label: []const u8, syms: []const Sym };
 
-/// A Mojo library calling into the owner: its label and its call-site names.
+/// A caller of the owner: a Mojo library (its call-site names) or a
+/// dependent owner's archive (`archiveCalls`: the names it references).
 pub const Caller = struct { label: []const u8, calls: []const []const u8 };
+
+/// A declared NEEDED owner: another komira library's shared library, by its
+/// SONAME, with the names it exports.
+pub const Owner = struct { soname: []const u8, exports: []const []const u8 };
 
 /// The findings of one check.
 pub const Red = struct {
@@ -114,6 +119,18 @@ fn undefinedOf(alloc: Alloc, so: Shared, weak: bool) ![]Sym {
         if ((s.bind == .weak) == weak) try out.append(s);
     }
     return out.toOwnedSlice();
+}
+
+/// A dependent owner's archive as a caller: every name it references (an
+/// undefined symbol of one of its members) that none of its members defines.
+/// s2n-tls's archive, so, calls the aws-lc functions it needs, which the
+/// owner of aws-lc exports though no Mojo library calls them.
+pub fn archiveCalls(alloc: Alloc, label: []const u8, syms: []const Sym) !Caller {
+    var defs = Set.init(alloc);
+    for (syms) |s| if (s.defined and s.bind != .local) try defs.put(s.name, {});
+    var out = std.ArrayList([]const u8).init(alloc);
+    for (syms) |s| if (!s.defined and !defs.contains(s.name)) try out.append(s.name);
+    return .{ .label = label, .calls = try sorted(alloc, out.items) };
 }
 
 // ---- the export list --------------------------------------------------------
@@ -254,13 +271,30 @@ pub fn check2(alloc: Alloc, so: Shared, archives: []const Archive, callers: []co
     return std.fmt.allocPrint(alloc, "all {d} names the callers call from the archives are exported", .{wanted.len});
 }
 
-/// 3. No strong undefined komira_ symbol: no komira owner is declared as
-/// NEEDED (owners come with the libraries that need one), so none can
-/// define it. A weak undefined komira_ symbol must be on `weak`.
-pub fn check3(alloc: Alloc, so: Shared, weak: []const []const u8, red: *Red) ![]const u8 {
+/// 3. Every strong undefined komira_ symbol is exported by a declared NEEDED
+/// owner (`owners`), and every declared owner exports at least one of them
+/// (an owner bound by nothing is not this library's owner). A weak undefined
+/// komira_ symbol must be on `weak`.
+pub fn check3(alloc: Alloc, so: Shared, weak: []const []const u8, owners: []const Owner, red: *Red) ![]const u8 {
+    var by = std.StringHashMap([]const u8).init(alloc);
+    for (owners) |o| {
+        for (o.exports) |e| if (!by.contains(e)) try by.put(e, o.soname);
+    }
+    var bound = std.StringHashMap(usize).init(alloc);
     var strong = std.ArrayList([]const u8).init(alloc);
-    for (try undefinedOf(alloc, so, false)) |s| if (std.mem.startsWith(u8, s.name, komira)) try strong.append(s.name);
+    var strong_n: usize = 0;
+    for (try undefinedOf(alloc, so, false)) |s| {
+        if (!std.mem.startsWith(u8, s.name, komira)) continue;
+        strong_n += 1;
+        if (by.get(s.name)) |o| {
+            const g = try bound.getOrPut(o);
+            g.value_ptr.* = if (g.found_existing) g.value_ptr.* + 1 else 1;
+        } else try strong.append(s.name);
+    }
     try red.names("strong undefined komira_ symbols no declared NEEDED owner exports", try sorted(alloc, strong.items));
+    var idle = std.ArrayList([]const u8).init(alloc);
+    for (owners) |o| if (!bound.contains(o.soname)) try idle.append(o.soname);
+    try red.names("declared NEEDED owners exporting none of the library's undefined komira_ symbols", idle.items);
     const ws = try setOf(alloc, weak);
     var unlisted = std.ArrayList([]const u8).init(alloc);
     var n: usize = 0;
@@ -270,7 +304,27 @@ pub fn check3(alloc: Alloc, so: Shared, weak: []const []const u8, red: *Red) ![]
         if (!ws.contains(s.name)) try unlisted.append(s.name);
     }
     try red.names("weak undefined komira_ symbols not on the weak list", try sorted(alloc, unlisted.items));
-    return std.fmt.allocPrint(alloc, "no strong undefined komira_ symbol; {d} weak undefined komira_ symbols, all listed", .{n});
+    var b = std.ArrayList(u8).init(alloc);
+    try b.writer().print("{d} strong undefined komira_ symbols", .{strong_n});
+    if (owners.len == 0) {
+        try b.appendSlice(" (no declared owner)");
+    } else {
+        try b.appendSlice(", each exported by a declared NEEDED owner:");
+        for (owners) |o| try b.writer().print(" {s} {d}", .{ o.soname, bound.get(o.soname) orelse 0 });
+    }
+    try b.writer().print("; {d} weak undefined komira_ symbols, all listed", .{n});
+    return b.items;
+}
+
+/// Whether the library calls outside komira at all: a strong undefined symbol
+/// without the komira_ prefix. A shim of atomics alone (komira_async_api's
+/// pool depth) needs nothing of glibc, so the link records no libc.so.6 and
+/// no GLIBC_ version, and that is green.
+pub fn callsGlibc(so: Shared) bool {
+    for (so.syms) |s| {
+        if (!s.defined and s.bind != .weak and !std.mem.startsWith(u8, s.name, komira)) return true;
+    }
+    return false;
 }
 
 fn isGlibc(name: []const u8) bool {
@@ -278,9 +332,20 @@ fn isGlibc(name: []const u8) bool {
     return false;
 }
 
-/// 4. SONAME is `soname`; NEEDED is glibc only (libc.so.6 among them; no
-/// komira owner is declared); no run path.
-pub fn check4(alloc: Alloc, so: Shared, soname: []const u8, red: *Red) ![]const u8 {
+/// The run path a library with a komira NEEDED owner carries: the owner is
+/// installed next to it, and a program's own run path is not searched for
+/// its dependencies' dependencies.
+pub const origin = "$ORIGIN";
+
+fn contains(list: []const []const u8, x: []const u8) bool {
+    for (list) |y| if (std.mem.eql(u8, x, y)) return true;
+    return false;
+}
+
+/// 4. SONAME is `soname`; NEEDED is glibc (libc.so.6 among it whenever the
+/// library calls outside komira, `callsGlibc`) and exactly the declared owners (`owners`, their SONAMEs); DT_RUNPATH is `$ORIGIN`
+/// alone when an owner is declared, and absent otherwise; no DT_RPATH.
+pub fn check4(alloc: Alloc, so: Shared, soname: []const u8, owners: []const []const u8, red: *Red) ![]const u8 {
     if (so.soname) |s| {
         if (!std.mem.eql(u8, s, soname)) try red.add("SONAME is {s}, not {s}", .{ s, soname });
     } else try red.add("no SONAME (want {s})", .{soname});
@@ -288,16 +353,28 @@ pub fn check4(alloc: Alloc, so: Shared, soname: []const u8, red: *Red) ![]const 
     var libc = false;
     for (so.needed) |n| {
         if (std.mem.eql(u8, n, "libc.so.6")) libc = true;
-        if (!isGlibc(n)) try other.append(n);
+        if (!isGlibc(n) and !contains(owners, n)) try other.append(n);
     }
     try red.names("NEEDED entries that are neither glibc nor a declared owner", other.items);
-    if (!libc) try red.add("libc.so.6 is not NEEDED (not linked against glibc?)", .{});
-    try red.names("RUNPATH entries (no komira owner is NEEDED, so none is wanted)", so.runpath);
+    var absent = std.ArrayList([]const u8).init(alloc);
+    for (owners) |o| if (!contains(so.needed, o)) try absent.append(o);
+    try red.names("declared owners not NEEDED", absent.items);
+    if (!libc and callsGlibc(so)) try red.add("libc.so.6 is not NEEDED, but the library has undefined symbols outside komira_ (not linked against glibc?)", .{});
+    if (owners.len == 0) {
+        try red.names("RUNPATH entries (no komira owner is NEEDED, so none is wanted)", so.runpath);
+    } else if (so.runpath.len == 0) {
+        try red.add("no RUNPATH, but a komira owner is NEEDED: the loader would not find {s} next to this library (want RUNPATH {s})", .{ owners[0], origin });
+    } else {
+        var extra = std.ArrayList([]const u8).init(alloc);
+        for (so.runpath) |r| if (!std.mem.eql(u8, r, origin)) try extra.append(r);
+        try red.names("RUNPATH entries other than $ORIGIN", extra.items);
+        if (so.runpath.len > 1 and extra.items.len == 0) try red.add("RUNPATH lists $ORIGIN {d} times", .{so.runpath.len});
+    }
     try red.names("RPATH entries", so.rpath);
     var b = std.ArrayList(u8).init(alloc);
     try b.writer().print("SONAME {s}; NEEDED", .{soname});
     for (so.needed) |n| try b.writer().print(" {s}", .{n});
-    try b.appendSlice("; no run path");
+    try b.appendSlice(if (owners.len == 0) "; no run path" else "; RUNPATH $ORIGIN");
     return b.items;
 }
 
@@ -358,7 +435,11 @@ pub fn check5(alloc: Alloc, so: Shared, floor: []const u8, red: *Red) ![]const u
             } else try red.names(try std.fmt.allocPrint(alloc, "needs {s} from {s}, above the floor glibc {s}; symbols", .{ need.version, need.file, floor }), try sorted(alloc, users.items));
         }
     }
-    if (seen == 0) try red.add("needs no GLIBC_ version at all (not linked against glibc?)", .{});
+    if (seen == 0) {
+        if (callsGlibc(so)) {
+            try red.add("needs no GLIBC_ version at all, but has undefined symbols outside komira_ (not linked against glibc?)", .{});
+        } else return std.fmt.allocPrint(alloc, "needs nothing of glibc (no undefined symbol outside komira_), at or below the floor {s}", .{floor});
+    }
     return std.fmt.allocPrint(alloc, "highest glibc version needed {s}, at or below the floor {s}", .{ highest, floor });
 }
 
