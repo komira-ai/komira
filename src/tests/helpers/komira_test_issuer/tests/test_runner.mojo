@@ -41,6 +41,11 @@
 #   short_jti       -> passes claims and jti_unique: 32 distinct one-byte
 #                      jtis are non-empty strings, so a check stricter than
 #                      "non-empty" would wrongly fail a conforming issuer;
+#   ascending_jti / descending_jti -> pass jti_unique: jti-1 ... jti-32, and
+#                      jti-32 ... jti-1, are distinct although jti-1 is a
+#                      prefix of jti-10 ... jti-19, so a uniqueness check
+#                      that compares by prefix (either way round) instead
+#                      of equality would wrongly fail a counter issuer;
 #   empty_subject_ok -> subject_required.
 #
 # main runs every test and reports every failure.
@@ -97,6 +102,8 @@ comptime F_KID_SWAP = 16
 comptime F_LONG_LIFE = 17
 comptime F_LATE_REPEAT_JTI = 18
 comptime F_SHORT_JTI = 19
+comptime F_ASCENDING_JTI = 20
+comptime F_DESCENDING_JTI = 21
 
 # The sample count the scenarios header documents for jti_unique, written
 # out here: a fault built from the library's own constant would shrink with
@@ -314,6 +321,10 @@ struct Faulty(IssuerUnderTest, Movable, Deinitable):
             var at = self.minted - 1
             var all = String(SHORT_JTIS)
             jti = Optional[String](String(all[byte = at : at + 1]))
+        if self.fault == F_DESCENDING_JTI:
+            # jti-32 ... jti-1 (the ascending fault keeps jti-1 ... jti-32).
+            var k = DOCUMENTED_JTI_SAMPLES + 1 - self.minted
+            jti = Optional[String](String("jti-") + String(k))
         var exp = now + TTL - 1
         return self.inner.sign_claims(_claims(sub, iat, exp, jti, cid, sc), typ)
 
@@ -464,6 +475,11 @@ def test_claim_faults() raises:
     # One-byte jtis, all distinct, are non-empty strings: both scenarios pass.
     _claims_fault(misses, F_SHORT_JTI, None, SCENARIO_CLAIMS, "")
     _claims_fault(misses, F_SHORT_JTI, None, SCENARIO_JTI_UNIQUE, "")
+    # Counter jtis share prefixes (jti-1 / jti-10) but are distinct: both
+    # orders pass, so neither a prefix match nor its reverse stands in for
+    # equality.
+    _claims_fault(misses, F_ASCENDING_JTI, None, SCENARIO_JTI_UNIQUE, "")
+    _claims_fault(misses, F_DESCENDING_JTI, None, SCENARIO_JTI_UNIQUE, "")
     assert_equal(misses, "")
 
 
