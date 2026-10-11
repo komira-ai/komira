@@ -44,10 +44,10 @@ from komira_jose import (
     ClaimPolicy,
     JwsSigner,
     JwsVerifier,
-    assertion_claims,
     mint_client_assertion,
     verify_jwt,
 )
+from komira_json import write_i64_dec, write_json_string
 from komira_jwks import Jwk, parse_jwk_set, render_jwk_set
 from komira_oauth import (
     ClientCredentialsRequest,
@@ -115,6 +115,35 @@ def _ready() raises -> TestIssuer:
     return i^
 
 
+def _claims(
+    *,
+    issuer: String,
+    subject: String,
+    audience: String,
+    now: Int64,
+    ttl_s: Int64,
+    jti: String,
+) -> String:
+    """An assertion's claims with a chosen `jti`, in the member order
+    komira_jose's `mint_assertion` writes (its claims writer is private:
+    a caller of the package cannot choose a `jti`, a test of replay must)."""
+    var buf = List[UInt8]()
+    buf.extend(Span(String('{"iss":').as_bytes()))
+    write_json_string(buf, issuer)
+    buf.extend(Span(String(',"sub":').as_bytes()))
+    write_json_string(buf, subject)
+    buf.extend(Span(String(',"aud":').as_bytes()))
+    write_json_string(buf, audience)
+    buf.extend(Span(String(',"iat":').as_bytes()))
+    write_i64_dec(buf, now)
+    buf.extend(Span(String(',"exp":').as_bytes()))
+    write_i64_dec(buf, now + ttl_s)
+    buf.extend(Span(String(',"jti":').as_bytes()))
+    write_json_string(buf, jti)
+    buf.append(0x7D)  # '}'
+    return String(unsafe_from_utf8=Span(buf))
+
+
 def _assertion(
     client: String,
     now: Int64,
@@ -124,7 +153,7 @@ def _assertion(
     jti: String = "jti-0001",
     alg: String = "ES256",
 ) raises -> String:
-    var claims = assertion_claims(
+    var claims = _claims(
         issuer=client, subject=client, audience=audience, now=now, ttl_s=ttl_s, jti=jti
     )
     return _client_key(client, alg).sign(claims.as_bytes(), String("JWT"))
@@ -253,9 +282,9 @@ def test_assertion_refusals() raises:
         forms.append(_form(_assertion(CLIENT, NOW, audience=aud_near[k], jti=String("aud-") + String(k))))
     cases.append("signed by another key")
     var other = derived_key("ES256", "someone else", 0)
-    forms.append(_form(other.sign(assertion_claims(issuer=CLIENT, subject=CLIENT, audience=ISS, now=NOW, ttl_s=60, jti="j3").as_bytes(), String("JWT"))))
+    forms.append(_form(other.sign(_claims(issuer=CLIENT, subject=CLIENT, audience=ISS, now=NOW, ttl_s=60, jti="j3").as_bytes(), String("JWT"))))
     cases.append("typ at+jwt")
-    forms.append(_form(_signed(CLIENT, assertion_claims(issuer=CLIENT, subject=CLIENT, audience=ISS, now=NOW, ttl_s=60, jti="j4"), "at+jwt")))
+    forms.append(_form(_signed(CLIENT, _claims(issuer=CLIENT, subject=CLIENT, audience=ISS, now=NOW, ttl_s=60, jti="j4"), "at+jwt")))
     cases.append("not a JWS")
     forms.append(_form("a.b.c"))
     cases.append("one segment")
@@ -374,7 +403,7 @@ def test_refusal_order() raises:
         early_name.append("a record with only a jwks_uri")
         early.append(_assertion("client-u", NOW, jti=String("w") + tag))
         early_name.append("signed by another key")
-        early.append(other.sign(assertion_claims(issuer=CLIENT, subject=CLIENT, audience=ISS, now=NOW, ttl_s=60, jti=String("x") + tag).as_bytes(), String("JWT")))
+        early.append(other.sign(_claims(issuer=CLIENT, subject=CLIENT, audience=ISS, now=NOW, ttl_s=60, jti=String("x") + tag).as_bytes(), String("JWT")))
         early_name.append("expired")
         early.append(_assertion(CLIENT, NOW - 200, jti=String("e") + tag))
         early_name.append("replayed jti")
