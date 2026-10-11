@@ -379,6 +379,59 @@ test "scanSource: an escaped quote inside a triple-quoted string does not end it
     try expectOpensZlibAndRefusedUndeclared("\"\"\"x \\\"\"\" y\"\"\"\nh = OwnedDLHandle(\"libz.so.1\")\n\"\"\"end\"\"\"\n");
 }
 
+test "scanSource: an empty string literal does not open a triple-quoted string" {
+    // `""` is two quotes, not the start of `"""`. A reader that opened a
+    // triple-quoted string on two quotes would swallow the rest of the file
+    // (sweep mutant M1, fix round 4).
+    try expectOpensZlibAndRefusedUndeclared("x = \"\"\nh = OwnedDLHandle(\"libz.so.1\")\n");
+}
+
+test "scanSource: an escaped backslash ends a one-line string at its quote" {
+    // In `"a\\"` the backslash escapes the backslash, so the next quote ends
+    // the literal. A reader that let a backslash escape only a quote would
+    // read `\"` as an escaped quote and swallow the call on the same line
+    // (sweep mutant M2, fix round 4).
+    try expectOpensZlibAndRefusedUndeclared("x = \"a\\\\\"; h = OwnedDLHandle(\"libz.so.1\")\n");
+}
+
+test "scanSource: a triple-single-quoted string holding a quote ends at its triple" {
+    // `'''it's'''` is one string. A reader that knew only `"""` would pair
+    // the quotes two by two, be left inside a literal at the odd one, and
+    // swallow the call on the same line; `'''a'''` (an even count) would
+    // not show it (sweep mutant M3, fix round 4).
+    try expectOpensZlibAndRefusedUndeclared("d = '''it's'''; h = OwnedDLHandle(\"libz.so.1\")\n");
+}
+
+/// A `[src]` tree with a module at its top that opens nothing and the
+/// opener one directory down, at sub/opener.mojo; `dlopenReasonDir` over it
+/// with `declared`. The top module keeps a reader that skipped
+/// subdirectories from stopping at "no .mojo file": it would read the tree
+/// as opening nothing (sweep mutant X2, fix round 4).
+fn reasonForSubdirOpener(a: Alloc, declared: []const Dlopen) !?[]const u8 {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile("top.mojo", "def f() -> Int:\n    return 1\n");
+    try tmp.dir.makeDir("sub");
+    try tmp.dir.writeFile("sub/opener.mojo", "h = OwnedDLHandle(\"libz.so.1\")\n");
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    return dlopenReasonDir(a, root, declared);
+}
+
+test "dlopenReasonDir: an opener in a subdirectory, undeclared, is refused" {
+    var arena = testAlloc();
+    defer arena.deinit();
+    const a = arena.allocator();
+    const why = try refusal(try reasonForSubdirOpener(a, &.{}));
+    try testing.expect(std.mem.indexOf(u8, why, "sub/opener.mojo: opens a shared library at run time (OwnedDLHandle); its sources name [libz.so.1] and the library declares `dlopen` []") != null);
+}
+
+test "dlopenReasonDir: an opener in a subdirectory, declared, is accepted" {
+    var arena = testAlloc();
+    defer arena.deinit();
+    const a = arena.allocator();
+    try testing.expectEqual(@as(?[]const u8, null), try reasonForSubdirOpener(a, &.{zlib}));
+}
+
 test "isSoname: a version of several multi-digit parts" {
     try testing.expect(isSoname("libz.so.1.2.13"));
     try testing.expect(isSoname("libfoo.so.10"));
