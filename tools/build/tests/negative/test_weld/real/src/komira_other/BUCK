@@ -3,5 +3,8 @@
 export_file(
     name = "tests/test_shared.mojo",
     mode = "reference",
-    visibility = ["tests//negative/test_weld/real:"],
+    visibility = [
+        "tests//functional/test_weld/real:",
+        "tests//negative/test_weld/real:",
+    ],
 )
