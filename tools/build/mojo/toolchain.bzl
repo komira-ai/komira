@@ -98,30 +98,64 @@ zig_exe_rule = rule(
 def _zig_test_impl(ctx):
     bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
     zig = ctx.attrs.zig[DefaultInfo].default_outputs[0]
-    out = ctx.actions.declare_output(ctx.label.name + ".passed")
+    out = ctx.actions.declare_output(ctx.label.name + (".json" if ctx.attrs.exes else ".passed"))
+    args = [zig, ctx.attrs.src, out.as_output()]
+    hidden = list(ctx.attrs.imports)
+
     # The tests run with the busybox applets as their PATH and a TMPDIR of
     # their own, inside the action's scratch directory.
     script = _PRELUDE + """
 ZIG_GLOBAL_CACHE_DIR="$T/zig-global"; ZIG_LOCAL_CACHE_DIR="$T/zig-local"; HOME="$T/home"; TMPDIR="$T/tmp"
 export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME TMPDIR
 mkdir -p "$TMPDIR"
-"$1/zig" test -target x86_64-linux-musl "$2"
+"""
+    if ctx.attrs.exes:
+        # The executables under test reach the tests as the module `exes`:
+        # one `pub const <name> = "<path>";` per entry, the path relative to
+        # the action's working directory, where `zig test` runs the tests.
+        lines = []
+        for name, exe in sorted(ctx.attrs.exes.items()):
+            if not name.replace("_", "x").isalnum() or name[0].isdigit():
+                fail("{}: exes key '{}' is not a Zig identifier".format(ctx.label.raw_target(), name))
+            path = exe[DefaultInfo].default_outputs[0]
+            lines.append(cmd_args(path, format = "pub const " + name + " = \"{}\";"))
+            hidden.append(path)
+        exes = ctx.actions.write(ctx.label.name + "_exes.zig", lines)
+        args.append(exes)
+        script += """"$1/zig" test -target x86_64-linux-musl --dep exes "-Mroot=$2" "-Mexes=$4"
+printf '{"version": 1, "data": {"status": "success", "message": "zig test passed"}}\\n' > "$3"
+rm -rf "$T"
+"""
+    else:
+        script += """"$1/zig" test -target x86_64-linux-musl "$2"
 echo passed > "$3"
 rm -rf "$T"
 """
     ctx.actions.run(
-        cmd_args(busybox_sh(bb, script, zig, ctx.attrs.src, out.as_output()), hidden = ctx.attrs.imports),
+        cmd_args(busybox_sh(bb, script, *args), hidden = hidden),
         category = "zig_test",
     )
+    if ctx.attrs.exes:
+        return [
+            DefaultInfo(default_output = out),
+            ValidationInfo(validations = [ValidationSpec(name = ctx.label.name, validation_result = out)]),
+        ]
     return [DefaultInfo(default_output = out)]
 
 # `zig test` of `src` (and the `test` blocks of the files it imports, the
 # `imports`), run as a build action: the target exists only if every test
-# passed. A `zig_exe` names it in `unit_tests` to be built behind it.
+# passed. A `zig_exe` names it in `unit_tests` to be built behind it. A test
+# of built executables names them in `exes`; it is then a validation, which a
+# target that hands the executables out lists (`kcov_tool`'s `cases`), as it
+# cannot be an input of the executable it runs.
 zig_test_rule = rule(
     impl = _zig_test_impl,
     attrs = {
         "busybox": attrs.dep(),
+        # Executables the tests run, configured for the execution platform
+        # like the target that hands them out, so the same bytes: module
+        # `exes`, `pub const <key>` = its path.
+        "exes": attrs.dict(attrs.string(), attrs.exec_dep(providers = [RunInfo]), default = {}),
         "imports": attrs.list(attrs.source(), default = []),
         "src": attrs.source(),
         "zig": attrs.dep(),
