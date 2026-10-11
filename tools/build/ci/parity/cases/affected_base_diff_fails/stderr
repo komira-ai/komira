@@ -1,0 +1,2 @@
+affected: cannot tell: git diff parity-base...HEAD failed: fatal: ambiguous argument 'parity-base...HEAD': unknown revision or path not in the working tree.
+

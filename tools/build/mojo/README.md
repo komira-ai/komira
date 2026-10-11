@@ -312,9 +312,16 @@ level of its own and is compiled into each binary at that binary's level. A
 `mojo_binary` (for `expected_stdout`) states `optimization_level = "1"`
 itself, as [`examples/aws_lc`](../examples/aws_lc/BUCK) and
 [`examples/s2n_tls`](../examples/s2n_tls/BUCK) do. Levels are `0` to `3`;
-anything else is refused at analysis. Test 30
-([`tests/functional/opt_level.sh`](../tests/functional/opt_level.sh)) reads the levels from the
-compile commands.
+anything else is refused at analysis. Each compile records the level it
+puts on its command line, and the rules return the record as
+`MojoOptLevelInfo` ([`opt_level.bzl`](opt_level.bzl)). A
+`mojo_opt_level_check` target fails analysis unless each of its rows
+(target, action category, level) holds: `:opt_levels` in
+[`examples`](../examples/BUCK), [`examples/aws_lc`](../examples/aws_lc/BUCK)
+and [`examples/s2n_tls`](../examples/s2n_tls/BUCK) hold the defaults and the
+test programs' `-O1`, and
+[`tests//functional/opt_level:levels`](../tests/functional/opt_level/BUCK)
+the overrides.
 
 ## Assert level, defines and memory cap
 

@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 
 # Fixed-arity C wrappers over the POSIX file and memory-map calls (19 symbols,
 # the only definition of each) and the two memory-map counters.
@@ -31,6 +32,32 @@ mojo_library(
         "tests/test_posix_unset_env.mojo",
         "tests/test_pwrite_at.mojo",
         "tests/test_thread_self_discriminates.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# libkomira_libc_native.so.1: the C this library owns, as its own
+# shared library exporting the names its callers call
+# (tools/build/native/README.md, "Each library's shared library"). Built and
+# checked here; no package ships it yet.
+native_shared_library(
+    name = "komira_libc_native",
+    archives = [
+        ":komira_libc_posix",
+    ],
+    callers = [
+        ":komira_libc",
+        "//src/komira_async:komira_async",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_http_server:komira_http_server",
+        "//src/komira_log:komira_log",
+    ],
+    library = "komira_libc",
+    # Every weak undefined symbol of the library, recorded from its first
+    # green link (checks 3 and 7 hold it to exactly this list):
+    weak_undefined = [
+        # zig's C runtime (crti.o): the profiling hook, absent unless -pg.
+        "__gmon_start__",
     ],
     visibility = ["PUBLIC"],
 )

@@ -31,6 +31,7 @@ load(":mutation.bzl", "MUTATION_ATTRS", "mutation_kwargs", "mutation_sub_targets
 load(":native_reach.bzl", "NATIVE_REACH_ATTRS", "native_reach", "native_reach_kwargs")
 load(":test_runtime.bzl", _arg_args = "arg_args", _data_map = "data_map", _env_args = "env_args", _test_root = "test_root")
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "capped_prefix", "define_args", "mem_cap_script", "memory_cap")
+load(":opt_level.bzl", "MojoOptLevelInfo", "SHIPPED_OPT_LEVEL", "TEST_OPT_LEVEL", "opt_level_args")
 load(":dlopen.bzl", "DLOPEN_ATTRS", "dlopen_refusal", "dlopen_rows")
 load(":helpers.bzl", "HELPER_ATTRS", "helper_files")
 load(":readme.bzl", "readme_gate", "readme_kwargs")
@@ -160,17 +161,7 @@ def komira_main(
     return __wrap_and_execute_raising_main[_komira_program_main](argc, argv)
 """
 
-# `mojo build --optimization-level`. Tests compile at 1 and shipped code at 3:
-# a test is built, run once and thrown away, so its compile time is most of
-# its cost, while a binary or shared library runs in production. Each rule
-# states its default below; `optimization_level` / `test_optimization_level`
-# override it per target. The level is the compiling target's own: a test
-# linking a shared library links that library as its own target built it.
-_OPT_LEVELS = ["0", "1", "2", "3"]
-TEST_OPT_LEVEL = "1"
-SHIPPED_OPT_LEVEL = "3"
-
-def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None, debug_link = None, defines = []):
+def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None, debug_link = None, defines = [], levels = None):
     """`mojo build` of `main` (one of `srcs`) against the packages in closure_tsets, linking c_link.
 
     Reads only `ctx.actions` and `ctx.label`, so a dynamic action passes
@@ -192,10 +183,9 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
     that directory instead of the toolchain's.
 
     `defines`: `-D` arguments from defines.bzl's define_args, after
-    `--target-cpu`; none are written when it is empty.
+    `--target-cpu`; none are written when it is empty. `levels`: see opt_level.bzl.
     """
-    if opt_level not in _OPT_LEVELS:
-        fail("{}: optimization level `{}` is not one of {}".format(ctx.label, opt_level, ", ".join(_OPT_LEVELS)))
+    opt_args = opt_level_args(ctx.label, opt_level, category, levels)
     mapping = {s.short_path: s for s in srcs}
     entry = main.short_path
     if shared and abi_lib:
@@ -248,8 +238,7 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
         _mojo_cmd(tc, [
             "build",
             emit,
-            "--optimization-level",
-            opt_level,
+            opt_args,
             "--target-cpu",
             tc.target_cpu,
             defines,
@@ -363,6 +352,7 @@ def _library_impl(ctx):
     # The gate: one build + one run per test, against the UNGATED package.
     markers = []
     test_subtargets = {}
+    levels = {}
     # A coverage build (coverage.bzl): per test, written or generated, a
     # second binary at -O0 with line tables and its run under kcov, under
     # cov/. None when coverage is off.
@@ -384,6 +374,7 @@ def _library_impl(ctx):
             stem,
             tests_c_link,
             defines = test_defines,
+            levels = levels,
         )
         marker = ctx.actions.declare_output("tests/{}.passed".format(stem))
         key = _test_key(ctx, t)
@@ -482,6 +473,7 @@ def _library_impl(ctx):
             readme = ctx.attrs.readme,
         ),
         welded_tests_info(ctx.attrs.test_srcs),
+        MojoOptLevelInfo(levels = levels),
     ] + cov_providers + reach[0]
 
 # ---- README examples ----------------------------------------------------------
@@ -581,12 +573,12 @@ def _main_src(ctx):
         fail("{}: set `main` when srcs has more than one file".format(ctx.label))
     return ctx.attrs.srcs[0]
 
-def _executable(ctx, category):
+def _executable(ctx, category, levels):
     tc = _toolchain(ctx)
     main = _main_src(ctx)
     srcs = ctx.attrs.srcs if main in ctx.attrs.srcs else ctx.attrs.srcs + [main]
     _check_deps(ctx)
-    exe = _build_executable(ctx, tc, ctx.label.name, srcs, main, _dep_closure(ctx), ctx.attrs.optimization_level, category, None, _c_link(ctx), defines = _exe_defines(ctx))
+    exe = _build_executable(ctx, tc, ctx.label.name, srcs, main, _dep_closure(ctx), ctx.attrs.optimization_level, category, None, _c_link(ctx), defines = _exe_defines(ctx), levels = levels)
     return tc, exe
 
 def _exe_defines(ctx):
@@ -624,15 +616,16 @@ def _run_check(ctx, tc, command):
     ctx.actions.run(cmd_args(args), category = "mojo_run_check")
     return out, run_check_validation(ctx, out, ctx.attrs.expected_stdout)
 
-def _shared(ctx, tc):
+def _shared(ctx, tc, levels):
     main = _main_src(ctx)
     srcs = ctx.attrs.srcs if main in ctx.attrs.srcs else ctx.attrs.srcs + [main]
-    return _build_executable(ctx, tc, "shared/lib{}.so".format(ctx.label.name), srcs, main, _dep_closure(ctx), ctx.attrs.optimization_level, "mojo_build_shared", None, _c_link(ctx), shared = True, defines = _exe_defines(ctx))
+    return _build_executable(ctx, tc, "shared/lib{}.so".format(ctx.label.name), srcs, main, _dep_closure(ctx), ctx.attrs.optimization_level, "mojo_build_shared", None, _c_link(ctx), shared = True, defines = _exe_defines(ctx), levels = levels)
 
 def _binary_impl(ctx):
-    tc, exe = _executable(ctx, "mojo_build")
+    levels = {}
+    tc, exe = _executable(ctx, "mojo_build", levels)
     run_dir, command = _runnable(ctx, tc, exe)
-    shared = _shared(ctx, tc)
+    shared = _shared(ctx, tc, levels)
     run_check, validation = _run_check(ctx, tc, command)
     return [
         DefaultInfo(
@@ -646,6 +639,7 @@ def _binary_impl(ctx):
         RunInfo(args = command),
         MojoRunnableInfo(binary = exe.basename, command = command, run_dir = run_dir),
         MojoProgramInfo(name = ctx.label.name, shared = shared, runtime = tc.runtime, target_cpu = tc.target_cpu, helpers = helper_files(ctx, ctx.label.name)),
+        MojoOptLevelInfo(levels = levels),
     ] + validation
 
 _EXECUTABLE_ATTRS = {
@@ -666,7 +660,8 @@ mojo_binary_rule = rule(
 )
 
 def _test_impl(ctx):
-    tc, exe = _executable(ctx, "mojo_build_test")
+    levels = {}
+    tc, exe = _executable(ctx, "mojo_build_test", levels)
     where = str(ctx.label.raw_target())
     data = _data_map(ctx, where + ": data", ctx.attrs.data)
     env_args = _env_args(where + ": env", ctx.attrs.env)
@@ -707,6 +702,7 @@ def _test_impl(ctx):
             labels = ctx.attrs.labels,
         ),
         welded_tests_info([_main_src(ctx)]),
+        MojoOptLevelInfo(levels = levels),
     ] + cov_info
 
 mojo_test_rule = rule(
