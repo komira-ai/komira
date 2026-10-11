@@ -12,12 +12,37 @@
 const std = @import("std");
 
 const Good = enum { base, stray };
+const Mode = enum { bisect, flake };
+
+/// What one target's measurement must show (flake.zig).
+const FlakeTarget = struct {
+    target: []const u8,
+    runs: i64,
+    failures: i64,
+    /// Builds, retries included; also what fake_buck2 must have seen.
+    attempts: i64,
+    /// Exact failing n; null when the base is the tool's own.
+    failing_runs: ?[]const i64 = null,
+    infra_runs: []const i64 = &.{},
+    /// The excerpt groups, with the runs of the first.
+    excerpts: usize = 0,
+    first_excerpt_runs: ?[]const i64 = null,
+};
 
 const Spec = struct {
     /// Fixture of each candidate, oldest first; the last is bad.
     states: []const []const u8,
     targets: []const []const u8 = &.{"//t:a"},
     good: Good = .base,
+    mode: Mode = .bisect,
+    /// `bisect flake --runs`.
+    runs: u32 = 0,
+    /// `--flake-runs` of bisect; null passes none (its default).
+    flake_runs: ?u32 = null,
+    /// `--rerun-base`; null passes none (the tool picks one).
+    rerun_base: ?u64 = null,
+    /// `bisect flake` runs this many times, each with a work dir of its own.
+    invocations: u32 = 1,
     expect: Expect,
 };
 
@@ -42,6 +67,11 @@ const Expect = struct {
     /// bisect's stdout is a file opened read-only, so writing the verdict
     /// fails: a tool error, exit 5, never the flake code 1.
     tool_error: bool = false,
+    /// The verdict of `bisect flake`.
+    flake_verdict: ?[]const u8 = null,
+    /// The measurement, per target: `flake_runs` of a bisect verdict,
+    /// `measurement` of a `bisect flake` one.
+    flake: ?[]const FlakeTarget = null,
 };
 
 fn culpritAt(comptime n: usize, comptime k: usize) [n][]const u8 {
@@ -54,7 +84,14 @@ const middle = culpritAt(9, 5);
 const first = culpritAt(5, 0);
 const last = culpritAt(5, 4);
 const two = [_][]const u8{ "pass", "pass", "pass", "fail //t:a", "fail //t:a", "fail //t:a", "fail //t:a //t:b", "fail //t:a //t:b" };
-const flake = [_][]const u8{ "pass", "pass", "pass", "pass" };
+// bad passes the recheck (no rerun flag: n is 0) and fails one run in
+// every 5 consecutive n, so 1 in its 5 measured runs whatever the base.
+const flake = [_][]const u8{ "pass", "pass", "pass", "flaky 5 3 //t:a" };
+const flaky_a = [_][]const u8{ "pass", "flaky 5 3 //t:a" };
+const steady = [_][]const u8{ "pass", "pass" };
+// Run 4 is INFRA once (retried, counted); run 8, a failing one, stays
+// INFRA (not counted, as a failure or as a run).
+const flaky_infra = [_][]const u8{ "pass", "infra-run 4\ninfra-run-always 8\nflaky 5 3 //t:a" };
 const retried = [_][]const u8{ "pass", "pass", "pass", "infra-once\npass", "pass", "fail //t:a", "fail //t:a", "fail //t:a", "fail //t:a" };
 const boundary = [_][]const u8{ "pass", "pass", "pass", "pass", "pass", "infra-always\nfail //t:a", "fail //t:a", "fail //t:a", "fail //t:a" };
 const single = [_][]const u8{"fail //t:a"};
@@ -65,12 +102,19 @@ fn spec(name: []const u8) ?Spec {
         .{ "culprit_first", Spec{ .states = &first, .expect = .{ .exit = 0, .verdict = "culprit", .first_bad = 0, .last_good = -1, .pr = 100 } } },
         .{ "culprit_last", Spec{ .states = &last, .expect = .{ .exit = 0, .verdict = "culprit", .first_bad = 4, .last_good = 3, .pr = 104 } } },
         .{ "two_culprits", Spec{ .states = &two, .targets = &.{ "//t:a", "//t:b" }, .expect = .{ .exit = 0, .verdict = "culprit", .first_bad = 3, .last_good = 2, .pr = 103, .failure_target = "//t:a" } } },
-        .{ "flake", Spec{ .states = &flake, .expect = .{ .exit = 1, .verdict = "flake", .exact_probes = 1 } } },
+        .{ "flake", Spec{ .states = &flake, .expect = .{ .exit = 1, .verdict = "flake", .exact_probes = 1, .flake = &.{.{ .target = "//t:a", .runs = 5, .failures = 1, .attempts = 5, .excerpts = 1 }} } } },
         .{ "infra_retried", Spec{ .states = &retried, .expect = .{ .exit = 0, .verdict = "culprit", .first_bad = 5, .last_good = 4, .pr = 105, .retried_at = 3 } } },
         .{ "infra_boundary", Spec{ .states = &boundary, .expect = .{ .exit = 3, .verdict = "inconclusive", .last_good = 4, .candidates = &.{ 5, 6 }, .infra_at = 5 } } },
         .{ "good_not_ancestor", Spec{ .states = &middle, .good = .stray, .expect = .{ .exit = 2, .no_buck2 = true } } },
         .{ "single_commit", Spec{ .states = &single, .expect = .{ .exit = 0, .verdict = "culprit", .first_bad = 0, .last_good = -1, .pr = 100, .exact_probes = 1 } } },
         .{ "stdout_unwritable", Spec{ .states = &last, .expect = .{ .exit = 5, .tool_error = true } } },
+        .{ "flake_rate", Spec{ .states = &flaky_a, .mode = .flake, .runs = 15, .rerun_base = 0, .targets = &.{ "//t:a", "//t:b" }, .expect = .{ .exit = 1, .flake_verdict = "flake", .flake = &.{
+            .{ .target = "//t:a", .runs = 15, .failures = 3, .attempts = 15, .failing_runs = &.{ 3, 8, 13 }, .excerpts = 1, .first_excerpt_runs = &.{ 3, 8, 13 } },
+            .{ .target = "//t:b", .runs = 15, .failures = 0, .attempts = 15, .failing_runs = &.{} },
+        } } } },
+        .{ "flake_never", Spec{ .states = &steady, .mode = .flake, .runs = 5, .expect = .{ .exit = 0, .flake_verdict = "never_failed", .flake = &.{.{ .target = "//t:a", .runs = 5, .failures = 0, .attempts = 5, .failing_runs = &.{} }} } } },
+        .{ "flake_infra", Spec{ .states = &flaky_infra, .mode = .flake, .runs = 10, .rerun_base = 0, .expect = .{ .exit = 1, .flake_verdict = "flake", .flake = &.{.{ .target = "//t:a", .runs = 9, .failures = 1, .attempts = 12, .failing_runs = &.{3}, .infra_runs = &.{8}, .excerpts = 1 }} } } },
+        .{ "flake_fresh_base", Spec{ .states = &flaky_a, .mode = .flake, .runs = 5, .invocations = 2, .expect = .{ .exit = 1, .flake_verdict = "flake", .flake = &.{.{ .target = "//t:a", .runs = 5, .failures = 1, .attempts = 5, .excerpts = 1 }} } } },
     };
     inline for (table) |row| {
         if (std.mem.eql(u8, row[0], name)) return row[1];
@@ -161,6 +205,142 @@ fn jstr(v: ?std.json.Value) ?[]const u8 {
     return if (x == .string) x.string else null;
 }
 
+/// A build line of fake_buck2's log that carried a rerun flag.
+const RerunBuild = struct { label: []const u8, n: u64, value: []const u8, targets: []const u8 };
+
+fn rerunBuilds(a: std.mem.Allocator, log: []const u8) ![]const RerunBuild {
+    var out = std.ArrayList(RerunBuild).init(a);
+    var lines = std.mem.tokenizeScalar(u8, log, '\n');
+    while (lines.next()) |line| {
+        var w = std.mem.tokenizeScalar(u8, line, ' ');
+        const verb = w.next() orelse continue;
+        _ = w.next() orelse continue;
+        _ = w.next() orelse continue;
+        const rerun = w.next() orelse continue;
+        const targets = w.next() orelse "-";
+        if (!std.mem.eql(u8, verb, "build") or std.mem.eql(u8, rerun, "-")) continue;
+        const hash = std.mem.lastIndexOfScalar(u8, rerun, '#') orelse {
+            check(false, "a rerun value without #: {s}", .{rerun});
+            continue;
+        };
+        const n = std.fmt.parseInt(u64, rerun[hash + 1 ..], 10) catch {
+            check(false, "a rerun value whose n is not a number: {s}", .{rerun});
+            continue;
+        };
+        try out.append(.{ .label = rerun[0..hash], .n = n, .value = rerun, .targets = targets });
+    }
+    return out.items;
+}
+
+fn hasRerun(log: []const u8) bool {
+    const got = rerunBuilds(std.heap.page_allocator, log) catch return true;
+    return got.len > 0;
+}
+
+fn jint(v: ?std.json.Value) ?i64 {
+    const x = v orelse return null;
+    return if (x == .integer) x.integer else null;
+}
+
+fn jarr(v: ?std.json.Value) []const std.json.Value {
+    const x = v orelse return &.{};
+    return if (x == .array) x.array.items else &.{};
+}
+
+fn intsEqual(got: []const std.json.Value, want: []const i64) bool {
+    if (got.len != want.len) return false;
+    for (got, want) |g, w| {
+        if (g != .integer or g.integer != w) return false;
+    }
+    return true;
+}
+
+/// One invocation's measurement against `want`, and the rerun builds of its
+/// log segment: each names one target, the one its flag names; each target
+/// saw exactly K distinct n, base+1..base+K, in as many builds as its
+/// attempts.
+fn checkFlake(a: std.mem.Allocator, s: Spec, want: []const FlakeTarget, stdout: []const u8, seg: []const u8, inv: usize) !void {
+    const parsed = std.json.parseFromSlice(std.json.Value, a, stdout, .{}) catch {
+        check(false, "invocation {d}: stdout is not JSON", .{inv});
+        return;
+    };
+    const v = parsed.value;
+    const k: i64 = if (s.mode == .flake) s.runs else (s.flake_runs orelse 5);
+    var m: std.json.Value = .null;
+    if (s.mode == .flake) {
+        check(std.mem.eql(u8, jstr(jget(v, "mode")) orelse "", "flake"), "invocation {d}: mode is not flake", .{inv});
+        if (s.expect.flake_verdict) |fv| check(std.mem.eql(u8, jstr(jget(v, "verdict")) orelse "", fv), "invocation {d}: verdict {?s}, expected {s}", .{ inv, jstr(jget(v, "verdict")), fv });
+        m = jget(v, "measurement") orelse .null;
+    } else m = jget(v, "flake_runs") orelse .null;
+    check(m == .object, "invocation {d}: no measurement in the verdict", .{inv});
+    if (m != .object) return;
+    check(jint(jget(m, "runs_requested")) == k, "invocation {d}: runs_requested {?d}, expected {d}", .{ inv, jint(jget(m, "runs_requested")), k });
+    const base = jint(jget(m, "rerun_base")) orelse {
+        check(false, "invocation {d}: no rerun_base", .{inv});
+        return;
+    };
+    if (s.rerun_base) |b| check(base == @as(i64, @intCast(b)), "invocation {d}: rerun_base {d}, expected {d}", .{ inv, base, b });
+    const ts = jarr(jget(m, "targets"));
+    check(ts.len == want.len, "invocation {d}: {d} measured targets, expected {d}", .{ inv, ts.len, want.len });
+    const builds = try rerunBuilds(a, seg);
+    for (builds) |b| check(std.mem.eql(u8, b.targets, b.label), "a rerun build of {s} carries the flag of {s}: one target a build, the flag naming it", .{ b.targets, b.label });
+    for (want, 0..) |wt, j| {
+        if (j >= ts.len) break;
+        const o = ts[j];
+        check(std.mem.eql(u8, jstr(jget(o, "target")) orelse "", wt.target), "target {d} is {?s}, expected {s}", .{ j, jstr(jget(o, "target")), wt.target });
+        check(jint(jget(o, "runs")) == wt.runs, "{s}: runs {?d}, expected {d}", .{ wt.target, jint(jget(o, "runs")), wt.runs });
+        check(jint(jget(o, "failures")) == wt.failures, "{s}: failures {?d}, expected {d}", .{ wt.target, jint(jget(o, "failures")), wt.failures });
+        check(jint(jget(o, "attempts")) == wt.attempts, "{s}: attempts {?d}, expected {d}", .{ wt.target, jint(jget(o, "attempts")), wt.attempts });
+        const fr = jget(o, "failure_rate") orelse .null;
+        const want_rate: f64 = if (wt.runs == 0) 0 else @as(f64, @floatFromInt(wt.failures)) / @as(f64, @floatFromInt(wt.runs));
+        const got_rate: f64 = switch (fr) {
+            .float => |f| f,
+            .integer => |x| @floatFromInt(x),
+            else => -1,
+        };
+        check(@abs(got_rate - want_rate) < 1e-9, "{s}: failure_rate {d}, expected {d}", .{ wt.target, got_rate, want_rate });
+        const failing = jarr(jget(o, "failing_runs"));
+        check(failing.len == @as(usize, @intCast(wt.failures)), "{s}: {d} failing runs listed, {d} failures", .{ wt.target, failing.len, wt.failures });
+        if (wt.failing_runs) |fr_want| check(intsEqual(failing, fr_want), "{s}: failing_runs differ", .{wt.target});
+        const infra = jarr(jget(o, "infra"));
+        check(infra.len == wt.infra_runs.len, "{s}: {d} infra runs, expected {d}", .{ wt.target, infra.len, wt.infra_runs.len });
+        for (infra, 0..) |x, q| {
+            if (q < wt.infra_runs.len) check(jint(jget(x, "run")) == wt.infra_runs[q], "{s}: infra run {d} differs", .{ wt.target, q });
+            check(std.mem.indexOf(u8, jstr(jget(x, "excerpt")) orelse "", "planted infrastructure failure") != null, "{s}: the infra excerpt lacks buck2's stderr", .{wt.target});
+        }
+        const ex = jarr(jget(o, "excerpts"));
+        check(ex.len == wt.excerpts, "{s}: {d} excerpt groups, expected {d}", .{ wt.target, ex.len, wt.excerpts });
+        if (ex.len > 0) {
+            const line = try std.fmt.allocPrint(a, "assertion failed: planted flake of {s}", .{wt.target});
+            check(std.mem.eql(u8, jstr(jget(ex[0], "first_failing_line")) orelse "", line), "{s}: first_failing_line {?s}", .{ wt.target, jstr(jget(ex[0], "first_failing_line")) });
+            check(std.mem.indexOf(u8, jstr(jget(ex[0], "excerpt")) orelse "", line) != null, "{s}: the excerpt is not the failing run's stderr", .{wt.target});
+            if (wt.first_excerpt_runs) |er| check(intsEqual(jarr(jget(ex[0], "runs")), er), "{s}: the first group's runs differ", .{wt.target});
+        }
+        // What fake_buck2 saw for this target.
+        var count: i64 = 0;
+        var seen = std.AutoHashMap(u64, void).init(a);
+        for (builds) |b| {
+            if (!std.mem.eql(u8, b.label, wt.target)) continue;
+            count += 1;
+            try seen.put(b.n, {});
+            check(@as(i64, @intCast(b.n)) > base and @as(i64, @intCast(b.n)) <= base + k, "{s}: run n {d} outside base+1..base+K ({d}..{d})", .{ wt.target, b.n, base + 1, base + k });
+        }
+        check(count == wt.attempts, "{s}: fake_buck2 saw {d} rerun builds, expected {d}", .{ wt.target, count, wt.attempts });
+        check(seen.count() == @as(u32, @intCast(k)), "{s}: fake_buck2 saw {d} distinct n, expected {d}: runs sharing an n would replay the cache", .{ wt.target, seen.count(), k });
+    }
+}
+
+/// No rerun value of one invocation recurs in another: a second measurement
+/// must not replay the first's cache entries.
+fn checkDisjoint(a: std.mem.Allocator, log: []const u8, marks: []const usize) void {
+    const one = rerunBuilds(a, log[marks[0]..marks[1]]) catch return;
+    const second = rerunBuilds(a, log[marks[1]..]) catch return;
+    check(one.len > 0 and second.len > 0, "an invocation ran no rerun build", .{});
+    for (one) |x| {
+        for (second) |y| check(!std.mem.eql(u8, x.value, y.value), "{s} ran in two invocations: the second replays the first's cache", .{x.value});
+    }
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const a = arena.allocator();
@@ -241,16 +421,37 @@ pub fn main() !void {
     const bad = merges[n - 1];
     const before = snapshot(c);
 
-    // The run.
-    var cmd = std.ArrayList([]const u8).init(a);
-    try cmd.appendSlice(&.{ bisect_abs, "--good", good, "--bad", bad, "--work-dir", work, "--repo", repo, "--buck2", fake_abs, "--git", git, "--timeout-s", "120", "--" });
-    try cmd.appendSlice(s.targets);
-    const r = if (s.expect.tool_error) try runUnwritable(a, root, &env, cmd.items) else try c.run(root, cmd.items);
+    // The run (`invocations` of them for `bisect flake`, each with a work
+    // dir of its own; the checks below read the last, and the log segment
+    // and verdict of each).
+    const log_path = try std.fs.path.join(a, &.{ repo, ".git", "fake_buck2.log" });
     const stderr = std.io.getStdErr().writer();
-    try stderr.print("---- bisect stdout\n{s}---- bisect stderr\n{s}----\n", .{ r.stdout, r.stderr });
+    var marks = std.ArrayList(usize).init(a);
+    var outs = std.ArrayList([]const u8).init(a);
+    var r: std.ChildProcess.RunResult = undefined;
+    var inv: u32 = 0;
+    while (inv < s.invocations) : (inv += 1) {
+        const wd = if (inv == 0) work else try std.fmt.allocPrint(a, "{s}{d}", .{ work, inv });
+        var cmd = std.ArrayList([]const u8).init(a);
+        try cmd.append(bisect_abs);
+        switch (s.mode) {
+            .bisect => try cmd.appendSlice(&.{ "--good", good, "--bad", bad }),
+            .flake => try cmd.appendSlice(&.{ "flake", "--rev", bad, "--runs", try std.fmt.allocPrint(a, "{d}", .{s.runs}) }),
+        }
+        try cmd.appendSlice(&.{ "--work-dir", wd, "--repo", repo, "--buck2", fake_abs, "--git", git, "--timeout-s", "120" });
+        if (s.flake_runs) |k| try cmd.appendSlice(&.{ "--flake-runs", try std.fmt.allocPrint(a, "{d}", .{k}) });
+        if (s.rerun_base) |b| try cmd.appendSlice(&.{ "--rerun-base", try std.fmt.allocPrint(a, "{d}", .{b}) });
+        try cmd.append("--");
+        try cmd.appendSlice(s.targets);
+        try marks.append((std.fs.cwd().readFileAlloc(a, log_path, 1 << 24) catch "").len);
+        r = if (s.expect.tool_error) try runUnwritable(a, root, &env, cmd.items) else try c.run(root, cmd.items);
+        try stderr.print("---- bisect stdout\n{s}---- bisect stderr\n{s}----\n", .{ r.stdout, r.stderr });
+        try outs.append(r.stdout);
+        const code_i: ?u8 = if (r.term == .Exited) r.term.Exited else null;
+        check(code_i != null and code_i.? == s.expect.exit, "invocation {d}: exit {?d}, expected {d}", .{ inv, code_i, s.expect.exit });
+    }
     const code: ?u8 = if (r.term == .Exited) r.term.Exited else null;
     const e = s.expect;
-    check(code != null and code.? == e.exit, "exit {?d}, expected {d}", .{ code, e.exit });
 
     // Nothing outside the probe worktrees changed.
     const after = snapshot(c);
@@ -259,17 +460,21 @@ pub fn main() !void {
     check(std.mem.eql(u8, before.status, after.status), "status changed:\n{s}\n----\n{s}", .{ before.status, after.status });
     const wl = c.git_(&.{ "worktree", "list", "--porcelain" });
     check(std.mem.count(u8, wl, "worktree ") == 1, "worktrees left:\n{s}", .{wl});
-    if (std.fs.openDirAbsolute(work, .{ .iterate = true })) |d_| {
-        var d = d_;
-        defer d.close();
-        var it = d.iterate();
-        while (try it.next()) |ent| check(!std.mem.startsWith(u8, ent.name, "probe-"), "{s} left in the work dir", .{ent.name});
-    } else |_| {}
+    for (0..s.invocations) |k| {
+        const wd = if (k == 0) work else try std.fmt.allocPrint(a, "{s}{d}", .{ work, k });
+        if (std.fs.openDirAbsolute(wd, .{ .iterate = true })) |d_| {
+            var d = d_;
+            defer d.close();
+            var it = d.iterate();
+            while (try it.next()) |ent| check(!std.mem.startsWith(u8, ent.name, "probe-"), "{s} left in the work dir", .{ent.name});
+        } else |_| {}
+    }
 
     // What fake_buck2 saw.
-    const log_path = try std.fs.path.join(a, &.{ repo, ".git", "fake_buck2.log" });
     const log = std.fs.cwd().readFileAlloc(a, log_path, 1 << 24) catch "";
     var builds: usize = 0;
+    // Builds without a rerun flag: the probes' attempts.
+    var plain_builds: usize = 0;
     var kills: usize = 0;
     var lines = std.mem.tokenizeScalar(u8, log, '\n');
     var build_cwds = std.ArrayList([]const u8).init(a);
@@ -279,8 +484,10 @@ pub fn main() !void {
         const verb = w.next() orelse continue;
         const commit = w.next() orelse continue;
         const where = w.next() orelse continue;
+        const rerun = w.next() orelse "-";
         if (std.mem.eql(u8, verb, "build")) {
             builds += 1;
+            if (std.mem.eql(u8, rerun, "-")) plain_builds += 1;
             try build_cwds.append(where);
             var merge = false;
             for (merges) |m| {
@@ -368,7 +575,7 @@ pub fn main() !void {
                 }
             }
         }
-        check(attempts_total == @as(i64, @intCast(builds)), "the probes count {d} attempts, fake_buck2 saw {d} builds", .{ attempts_total, builds });
+        check(attempts_total == @as(i64, @intCast(plain_builds)), "the probes count {d} attempts, fake_buck2 saw {d} builds without a rerun flag", .{ attempts_total, plain_builds });
         if (e.infra_at) |k| {
             const infra = if (jget(v, "infra")) |x| (if (x == .array) x.array.items else &[_]std.json.Value{}) else &[_]std.json.Value{};
             check(infra.len == 1 and std.mem.eql(u8, jstr(jget(infra[0], "commit")) orelse "", merges[k]), "infra does not list c{d} alone", .{k});
@@ -390,6 +597,14 @@ pub fn main() !void {
             if (s.targets.len > 1) check(fs.len == 1, "failures lists a target that did not fail at first_bad", .{});
         }
     }
+
+    if (e.flake) |want| {
+        for (outs.items, 0..) |o, k| {
+            const seg_end = if (k + 1 < marks.items.len) marks.items[k + 1] else log.len;
+            try checkFlake(a, s, want, o, log[marks.items[k]..seg_end], k);
+        }
+        if (s.invocations > 1) checkDisjoint(a, log, marks.items);
+    } else check(!hasRerun(log), "a rerun build ran in a scenario with no measurement", .{});
 
     if (failed_check) std.process.exit(1);
     std.fs.deleteTreeAbsolute(root) catch {};

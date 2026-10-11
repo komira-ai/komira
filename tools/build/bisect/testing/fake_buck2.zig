@@ -3,15 +3,27 @@
 //!
 //! - `root --kind project` prints the working directory.
 //! - `kill` exits 0.
-//! - `build|test --build-report <file> <targets>...` reads the fixture:
-//!   an optional first line `infra-once` (the first build of this commit
-//!   exits 2 with no report) or `infra-always` (every build does), then
-//!   `pass` (exit 0) or `fail <target>...` (those of the given targets fail:
-//!   a report in buck2's shape naming them, exit 3).
+//! - `build|test --build-report <file> [-c komira.rerun=<label>#<n>] <targets>...`
+//!   reads the fixture: optional infra lines first, each of which can make
+//!   the build exit 2 with no report:
+//!   - `infra-once`: the first build of this commit (with this rerun value);
+//!   - `infra-always`: every build;
+//!   - `infra-run <n>`: the first build whose rerun n is <n>;
+//!   - `infra-run-always <n>`: every build whose rerun n is <n>;
 //!
-//! Every call appends `<command> <commit> <cwd>` to `fake_buck2.log` in the
-//! repository's git directory (read from the worktree's `.git` file, so no
-//! git runs), where the scenario counts builds, retries and kills.
+//!   then one of
+//!   - `pass` (exit 0);
+//!   - `fail <target>...`: those of the given targets fail, a report in
+//!     buck2's shape naming them, exit 3;
+//!   - `flaky <period> <phase> <target>...`: a listed target fails when the
+//!     rerun flag names it with an n where n % period == phase (so without
+//!     the flag, n is 0 and it passes), its stderr a first line naming the
+//!     run and then the same assertion line every run.
+//!
+//! Every call appends `<command> <commit> <cwd> <rerun value or -> <targets
+//! joined by , or ->` to `fake_buck2.log` in the repository's git directory
+//! (read from the worktree's `.git` file, so no git runs), where the
+//! scenario counts builds, retries, kills and the rerun values it saw.
 const std = @import("std");
 
 const Paths = struct { commit: []const u8, log: []const u8 };
@@ -39,8 +51,9 @@ fn appendLog(path: []const u8, line: []const u8) !void {
     try f.writeAll(line);
 }
 
-/// How many builds of `commit` the log holds already.
-fn priorBuilds(a: std.mem.Allocator, log: []const u8, commit: []const u8) !usize {
+/// How many builds of `commit` with the rerun value `rerun` the log holds
+/// already.
+fn priorBuilds(a: std.mem.Allocator, log: []const u8, commit: []const u8, rerun: []const u8) !usize {
     const bytes = std.fs.cwd().readFileAlloc(a, log, 1 << 24) catch return 0;
     var n: usize = 0;
     var it = std.mem.splitScalar(u8, bytes, '\n');
@@ -48,12 +61,21 @@ fn priorBuilds(a: std.mem.Allocator, log: []const u8, commit: []const u8) !usize
         var w = std.mem.tokenizeScalar(u8, line, ' ');
         const cmd = w.next() orelse continue;
         const c = w.next() orelse continue;
-        if ((std.mem.eql(u8, cmd, "build") or std.mem.eql(u8, cmd, "test")) and std.mem.eql(u8, c, commit)) n += 1;
+        _ = w.next() orelse continue;
+        const r = w.next() orelse continue;
+        if ((std.mem.eql(u8, cmd, "build") or std.mem.eql(u8, cmd, "test")) and std.mem.eql(u8, c, commit) and std.mem.eql(u8, r, rerun)) n += 1;
     }
     return n;
 }
 
-fn writeReport(a: std.mem.Allocator, path: []const u8, cwd: []const u8, commit: []const u8, targets: []const []const u8, failing: []const []const u8) !bool {
+/// The stderr of a failing target: a flaky one's names its run on the first
+/// line and then always the same assertion line.
+fn failureText(a: std.mem.Allocator, t: []const u8, commit: []const u8, flaky_n: ?u64) ![]const u8 {
+    if (flaky_n) |n| return std.fmt.allocPrint(a, "running {s}, run {d}\nassertion failed: planted flake of {s}\nthird line", .{ t, n, t });
+    return std.fmt.allocPrint(a, "planted failure of {s} at {s}\nsecond line", .{ t, commit });
+}
+
+fn writeReport(a: std.mem.Allocator, path: []const u8, cwd: []const u8, commit: []const u8, targets: []const []const u8, failing: []const []const u8, flaky_n: ?u64) !bool {
     var buf = std.ArrayList(u8).init(a);
     var w = std.json.writeStream(buf.writer(), .{ .whitespace = .indent_2 });
     var any = false;
@@ -84,7 +106,7 @@ fn writeReport(a: std.mem.Allocator, path: []const u8, cwd: []const u8, commit: 
             const msg_id = try std.fmt.allocPrint(a, "{d}", .{strings.items.len * 2 + 1});
             const err_id = try std.fmt.allocPrint(a, "{d}", .{strings.items.len * 2 + 2});
             try strings.append(.{ msg_id, try std.fmt.allocPrint(a, "Action failed: root{s} (genrule)", .{t}) });
-            try strings.append(.{ err_id, try std.fmt.allocPrint(a, "planted failure of {s} at {s}\nsecond line", .{ t, commit }) });
+            try strings.append(.{ err_id, try failureText(a, t, commit, flaky_n) });
             try w.beginObject();
             try w.objectField("message_content");
             try w.write(msg_id);
@@ -140,8 +162,23 @@ pub fn main() !void {
         std.io.getStdErr().writer().print("fake_buck2: {s} is not a probe worktree: {s}\n", .{ cwd, @errorName(e) }) catch {};
         std.process.exit(64);
     };
-    const prior = try priorBuilds(a, p.log, p.commit);
-    try appendLog(p.log, try std.fmt.allocPrint(a, "{s} {s} {s}\n", .{ cmd, p.commit, cwd }));
+
+    // The rerun flag and the targets of a build.
+    var rerun: []const u8 = "-";
+    var targets = std.ArrayList([]const u8).init(a);
+    if (argv.len >= 4) {
+        var k: usize = 4;
+        while (k < argv.len) : (k += 1) {
+            const x = argv[k];
+            if (std.mem.eql(u8, x, "-c") and k + 1 < argv.len and std.mem.startsWith(u8, argv[k + 1], "komira.rerun=")) {
+                rerun = argv[k + 1]["komira.rerun=".len..];
+                k += 1;
+            } else if (std.mem.startsWith(u8, x, "//")) try targets.append(x);
+        }
+    }
+    const joined = if (targets.items.len == 0) "-" else try std.mem.join(a, ",", targets.items);
+    const prior = try priorBuilds(a, p.log, p.commit, rerun);
+    try appendLog(p.log, try std.fmt.allocPrint(a, "{s} {s} {s} {s} {s}\n", .{ cmd, p.commit, cwd, rerun, joined }));
 
     if (std.mem.eql(u8, cmd, "kill")) return;
     if (std.mem.eql(u8, cmd, "root")) {
@@ -151,24 +188,57 @@ pub fn main() !void {
     if (!std.mem.eql(u8, cmd, "build") and !std.mem.eql(u8, cmd, "test")) std.process.exit(64);
     if (argv.len < 4 or !std.mem.eql(u8, argv[2], "--build-report")) std.process.exit(64);
     const report = argv[3];
-    var targets = std.ArrayList([]const u8).init(a);
-    for (argv[4..]) |x| if (std.mem.startsWith(u8, x, "//")) try targets.append(x);
+    // The rerun's label and n; n is 0 without the flag.
+    var rerun_label: []const u8 = "";
+    var rerun_n: u64 = 0;
+    if (!std.mem.eql(u8, rerun, "-")) {
+        const hash = std.mem.lastIndexOfScalar(u8, rerun, '#') orelse std.process.exit(64);
+        rerun_label = rerun[0..hash];
+        rerun_n = std.fmt.parseInt(u64, rerun[hash + 1 ..], 10) catch std.process.exit(64);
+    }
 
     const fixture = try std.fs.cwd().readFileAlloc(a, "bisect_fixture.txt", 1 << 16);
     var lines = std.mem.tokenizeScalar(u8, fixture, '\n');
-    var state = lines.next() orelse std.process.exit(64);
-    if (std.mem.eql(u8, state, "infra-always") or (std.mem.eql(u8, state, "infra-once") and prior == 0)) {
-        std.io.getStdErr().writer().writeAll("Remote execution error: planted infrastructure failure\n") catch {};
-        std.process.exit(2);
+    var state: []const u8 = "";
+    while (lines.next()) |line| {
+        var infra = false;
+        if (std.mem.eql(u8, line, "infra-always")) {
+            infra = true;
+        } else if (std.mem.eql(u8, line, "infra-once")) {
+            infra = prior == 0;
+        } else if (std.mem.startsWith(u8, line, "infra-run ")) {
+            const n = std.fmt.parseInt(u64, line["infra-run ".len..], 10) catch std.process.exit(64);
+            infra = rerun_n == n and prior == 0;
+        } else if (std.mem.startsWith(u8, line, "infra-run-always ")) {
+            const n = std.fmt.parseInt(u64, line["infra-run-always ".len..], 10) catch std.process.exit(64);
+            infra = rerun_n == n;
+        } else {
+            state = line;
+            break;
+        }
+        if (infra) {
+            std.io.getStdErr().writer().writeAll("Remote execution error: planted infrastructure failure\n") catch {};
+            std.process.exit(2);
+        }
     }
-    if (std.mem.startsWith(u8, state, "infra-")) state = lines.next() orelse std.process.exit(64);
     var failing = std.ArrayList([]const u8).init(a);
+    var flaky_n: ?u64 = null;
     var words = std.mem.tokenizeScalar(u8, state, ' ');
     const kind = words.next() orelse std.process.exit(64);
     if (std.mem.eql(u8, kind, "fail")) {
         while (words.next()) |t| try failing.append(t);
+    } else if (std.mem.eql(u8, kind, "flaky")) {
+        const period = std.fmt.parseInt(u64, words.next() orelse std.process.exit(64), 10) catch std.process.exit(64);
+        const phase = std.fmt.parseInt(u64, words.next() orelse std.process.exit(64), 10) catch std.process.exit(64);
+        if (period == 0) std.process.exit(64);
+        while (words.next()) |t| {
+            if (std.mem.eql(u8, t, rerun_label) and rerun_n % period == phase) {
+                try failing.append(t);
+                flaky_n = rerun_n;
+            }
+        }
     } else if (!std.mem.eql(u8, kind, "pass")) std.process.exit(64);
-    const any = try writeReport(a, report, cwd, p.commit, targets.items, failing.items);
+    const any = try writeReport(a, report, cwd, p.commit, targets.items, failing.items, flaky_n);
     if (any) {
         std.io.getStdErr().writer().writeAll("BUILD FAILED\n") catch {};
         std.process.exit(3);

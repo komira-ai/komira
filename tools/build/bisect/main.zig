@@ -2,11 +2,15 @@
 //! Buck2 targets stop building (README.md).
 //!
 //! 1. Check the inputs (usage error, exit 2, before any buck2 call).
-//! 2. Build the targets at bad again: if they pass, the verdict is `flake`.
+//! 2. Build the targets at bad again: if they pass, the verdict is `flake`,
+//!    and each target is measured `--flake-runs` times at bad (flake.zig).
 //! 3. List the first-parent commits after good up to bad.
 //! 4. Binary-search them (search.zig), one probe per commit (probe.zig),
 //!    an infra outcome retried once and never counted as a failure.
 //! 5. Print the verdict as JSON (report.zig).
+//!
+//! `bisect flake --rev <r> --runs <K> ... -- <targets>` only measures: each
+//! target K times at one commit (flake.zig), its verdict as JSON.
 //!
 //! Any other error (out of memory, a filesystem call, a stdout that cannot
 //! be written) is a tool error, exit 5: never 1, which is the flake verdict.
@@ -15,6 +19,7 @@ const classify = @import("classify.zig");
 const search = @import("search.zig");
 const report = @import("report.zig");
 const prober = @import("probe.zig");
+const flake = @import("flake.zig");
 const Git = @import("git.zig").Git;
 
 pub const EXIT_CULPRIT = 0;
@@ -24,18 +29,37 @@ pub const EXIT_INCONCLUSIVE = 3;
 pub const EXIT_GIT = 4;
 /// An error bisect did not expect; stdout holds no verdict (or a cut one).
 pub const EXIT_TOOL = 5;
+/// `bisect flake`: no target failed in any of its K runs.
+pub const EXIT_NEVER_FAILED = 0;
 
 const USAGE =
     \\usage: bisect --good <rev> --bad <rev> --work-dir <dir> [--repo <dir>]
     \\              [--verb build|test] [--buck2 <path>] [--git <path>]
     \\              [--copy <relpath>]... [--submodules] [--buck2-arg <arg>]...
-    \\              [--timeout-s <n>] -- <target>...
+    \\              [--timeout-s <n>] [--flake-runs <k>] [--rerun-base <n>]
+    \\              -- <target>...
+    \\       bisect flake --rev <rev> --runs <k> --work-dir <dir> [--repo <dir>]
+    \\              [--verb ...] [--buck2 ...] [--git ...] [--copy ...]...
+    \\              [--submodules] [--buck2-arg ...]... [--timeout-s <n>]
+    \\              [--rerun-base <n>] -- <target>...
     \\
 ;
 
+pub const Mode = enum { bisect, flake };
+
 pub const Args = struct {
+    mode: Mode = .bisect,
     good: []const u8 = "",
     bad: []const u8 = "",
+    /// `bisect flake`: the commit measured.
+    rev: []const u8 = "",
+    /// `bisect flake`: K.
+    runs: u32 = 0,
+    /// bisect: K for the measurement at bad after a `flake` verdict; 0 skips it.
+    flake_runs: u32 = 5,
+    /// n of run i is base + i; null: the time in milliseconds at start, so
+    /// that no two measurements share an n (a shared n is a cache hit).
+    rerun_base: ?u64 = null,
     work_dir: []const u8 = "",
     repo: []const u8 = ".",
     verb: classify.Verb = .build,
@@ -48,10 +72,15 @@ pub const Args = struct {
     targets: []const []const u8 = &.{},
 };
 
-pub const ArgError = error{ MissingValue, UnknownArgument, BadVerb, BadTimeout, MissingGood, MissingBad, MissingWorkDir, NoTargets, BadCopy };
+pub const ArgError = error{ MissingValue, UnknownArgument, BadVerb, BadTimeout, MissingGood, MissingBad, MissingWorkDir, NoTargets, BadCopy, MissingRev, BadRuns, BadRerunBase, PatternTarget };
 
-pub fn parseArgs(a: std.mem.Allocator, argv: []const []const u8) !Args {
+pub fn parseArgs(a: std.mem.Allocator, argv_in: []const []const u8) !Args {
     var r = Args{};
+    var argv = argv_in;
+    if (argv.len > 0 and std.mem.eql(u8, argv[0], "flake")) {
+        r.mode = .flake;
+        argv = argv[1..];
+    }
     var copies = std.ArrayList([]const u8).init(a);
     var bargs = std.ArrayList([]const u8).init(a);
     var i: usize = 0;
@@ -65,12 +94,17 @@ pub fn parseArgs(a: std.mem.Allocator, argv: []const []const u8) !Args {
             r.submodules = true;
             continue;
         }
-        const names = [_][]const u8{ "--good", "--bad", "--work-dir", "--repo", "--verb", "--buck2", "--git", "--copy", "--buck2-arg", "--timeout-s" };
+        const names = [_][]const u8{ "--good", "--bad", "--work-dir", "--repo", "--verb", "--buck2", "--git", "--copy", "--buck2-arg", "--timeout-s", "--rev", "--runs", "--flake-runs", "--rerun-base" };
+        // The flags of the other mode are unknown in this one.
+        const only_bisect = [_]usize{ 0, 1, 12 };
+        const only_flake = [_]usize{ 10, 11 };
         var which: ?usize = null;
         for (names, 0..) |n, k| {
             if (std.mem.eql(u8, arg, n)) which = k;
         }
         const k = which orelse return error.UnknownArgument;
+        const foreign: []const usize = if (r.mode == .flake) &only_bisect else &only_flake;
+        if (std.mem.indexOfScalar(usize, foreign, k) != null) return error.UnknownArgument;
         if (i + 1 >= argv.len) return error.MissingValue;
         i += 1;
         const v = argv[i];
@@ -88,14 +122,35 @@ pub fn parseArgs(a: std.mem.Allocator, argv: []const []const u8) !Args {
             },
             8 => try bargs.append(v),
             9 => r.timeout_s = std.fmt.parseInt(u32, v, 10) catch return error.BadTimeout,
+            10 => r.rev = v,
+            11 => r.runs = std.fmt.parseInt(u32, v, 10) catch return error.BadRuns,
+            12 => r.flake_runs = std.fmt.parseInt(u32, v, 10) catch return error.BadRuns,
+            13 => r.rerun_base = std.fmt.parseInt(u64, v, 10) catch return error.BadRerunBase,
             else => unreachable,
         }
     }
-    if (r.good.len == 0) return error.MissingGood;
-    if (r.bad.len == 0) return error.MissingBad;
+    switch (r.mode) {
+        .bisect => {
+            if (r.good.len == 0) return error.MissingGood;
+            if (r.bad.len == 0) return error.MissingBad;
+        },
+        .flake => {
+            if (r.rev.len == 0) return error.MissingRev;
+            if (r.runs == 0) return error.BadRuns;
+        },
+    }
     if (r.work_dir.len == 0) return error.MissingWorkDir;
     if (r.targets.len == 0) return error.NoTargets;
     if (r.timeout_s == 0) return error.BadTimeout;
+    // A rerun names one target; a pattern would match no test action, and
+    // every run would replay the cache.
+    if (r.mode == .flake or r.flake_runs > 0) {
+        for (r.targets) |t| if (!flake.isLabel(t)) return error.PatternTarget;
+    }
+    if (r.rerun_base) |b| {
+        const k: u64 = if (r.mode == .flake) r.runs else r.flake_runs;
+        if (b > std.math.maxInt(u64) - k) return error.BadRerunBase;
+    }
     r.copies = try copies.toOwnedSlice();
     r.buck2_args = try bargs.toOwnedSlice();
     return r;
@@ -201,12 +256,22 @@ fn run() !void {
     const top = git.output(&.{ "rev-parse", "--show-toplevel" }) catch fail(EXIT_USAGE, "--repo {s} is not a git working tree: {s}", .{ repo, git.last_err });
     const root = std.mem.trim(u8, top, " \r\n");
 
+    const rerun_base: u64 = args.rerun_base orelse @intCast(std.time.milliTimestamp());
+
     // 1. The inputs.
-    const good = (try git.commit(args.good)) orelse fail(EXIT_USAGE, "--good {s} names no commit", .{args.good});
-    const bad = (try git.commit(args.bad)) orelse fail(EXIT_USAGE, "--bad {s} names no commit", .{args.bad});
-    if (std.mem.eql(u8, good, bad)) fail(EXIT_USAGE, "--good and --bad are the same commit {s}", .{good});
-    const ancestor = git.isAncestor(good, bad) catch fail(EXIT_GIT, "{s}", .{git.last_err});
-    if (!ancestor) fail(EXIT_USAGE, "--good {s} is not an ancestor of --bad {s}", .{ good, bad });
+    var good: []const u8 = "";
+    var bad: []const u8 = "";
+    var rev: []const u8 = "";
+    switch (args.mode) {
+        .bisect => {
+            good = (try git.commit(args.good)) orelse fail(EXIT_USAGE, "--good {s} names no commit", .{args.good});
+            bad = (try git.commit(args.bad)) orelse fail(EXIT_USAGE, "--bad {s} names no commit", .{args.bad});
+            if (std.mem.eql(u8, good, bad)) fail(EXIT_USAGE, "--good and --bad are the same commit {s}", .{good});
+            const ancestor = git.isAncestor(good, bad) catch fail(EXIT_GIT, "{s}", .{git.last_err});
+            if (!ancestor) fail(EXIT_USAGE, "--good {s} is not an ancestor of --bad {s}", .{ good, bad });
+        },
+        .flake => rev = (try git.commit(args.rev)) orelse fail(EXIT_USAGE, "--rev {s} names no commit", .{args.rev}),
+    }
     for (args.copies) |rel| {
         const p = try std.fs.path.join(a, &.{ root, rel });
         std.fs.accessAbsolute(p, .{}) catch fail(EXIT_USAGE, "--copy {s}: no such file in {s}", .{ rel, root });
@@ -243,6 +308,23 @@ fn run() !void {
         .failures = std.StringHashMap([]const classify.Failure).init(a),
     };
 
+    if (args.mode == .flake) {
+        var why: []const u8 = "";
+        const m = flake.measure(st.cfg, rev, args.runs, rerun_base, &why) catch |e| switch (e) {
+            error.Git => fail(EXIT_GIT, "{s}", .{why}),
+            error.NotOwnProject => fail(EXIT_USAGE, "{s}", .{why}),
+            else => return e,
+        };
+        const out = std.io.getStdOut().writer();
+        try flake.writeVerdict(m, out);
+        try out.writeAll("\n");
+        std.process.exit(switch (flake.verdict(m)) {
+            .flake => EXIT_FLAKE,
+            .never_failed => EXIT_NEVER_FAILED,
+            .inconclusive => EXIT_INCONCLUSIVE,
+        });
+    }
+
     // 3. The candidates (listed before the recheck so a git failure costs no build).
     const cands = git.firstParents(good, bad) catch fail(EXIT_GIT, "{s}", .{git.last_err});
     if (cands.len == 0 or !std.mem.eql(u8, cands[cands.len - 1], bad))
@@ -267,6 +349,14 @@ fn run() !void {
         .pass => {
             r.verdict = .flake;
             code = EXIT_FLAKE;
+            if (args.flake_runs > 0) {
+                var why: []const u8 = "";
+                r.flake_runs = flake.measure(st.cfg, bad, args.flake_runs, rerun_base, &why) catch |e| switch (e) {
+                    error.Git => fail(EXIT_GIT, "{s}", .{why}),
+                    error.NotOwnProject => fail(EXIT_USAGE, "{s}", .{why}),
+                    else => return e,
+                };
+            }
         },
         .infra => {
             r.verdict = .inconclusive;
