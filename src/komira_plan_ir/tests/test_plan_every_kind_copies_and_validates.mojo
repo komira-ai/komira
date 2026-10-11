@@ -10,7 +10,8 @@
 #
 #   * a well-formed node of every kind, with its optional fields set, copies
 #     to a node with the same render and hash both ways, keeps the fields the
-#     render does not show (asserted directly), and passes integrity;
+#     render does not show (asserted directly), and passes integrity; a UDF
+#     carrier keeps its function through `_copy_plan`;
 #   * a node of every kind whose payload is missing is refused by integrity
 #     and by `_copy_plan` (which says the payload is MISSING), and so are a
 #     consumed plan (sentinel tag 255) and a retired tag;
@@ -30,6 +31,19 @@ from komira_plan_expr.expr import Expr, BIN_GT, BIN_LT
 from komira_plan_expr.partition_expr import PartitionExpr
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_stats.table_stats import TableStats, ColumnStats
+from komira_plan_expr.udf_data import (
+    UdfData,
+    UDF_KIND_MAP,
+    UDF_KIND_FILTER,
+    UDF_KIND_AGG,
+    UDF_NULL_PROPAGATE,
+    UDF_STABILITY_IMMUTABLE,
+    UDF_PAR_STATELESS,
+    UDF_PAR_MERGEABLE,
+    DTAG_I64,
+    DTAG_BOOL,
+    DTAG_F64,
+)
 
 from komira_plan_ir.logical_plan import (
     LogicalPlan,
@@ -272,6 +286,57 @@ def test_a_scan_fingerprint_sees_projection_filter_and_row_count() raises:
             assert_true(fps[x] != fps[y], String(x) + " vs " + String(y))
     var c = full.copy()
     assert_equal(c.scan_data_ref().fingerprint(), fp)
+
+
+def _udf(kind: UInt8, par: UInt8, out_name: String, out_tag: UInt8) -> OwnedPointer[UdfData]:
+    var in_cols = List[Tuple[String, UInt8]]()
+    in_cols.append(("a", DTAG_I64))
+    var out_cols = List[Tuple[String, UInt8]]()
+    out_cols.append((out_name, out_tag))
+    return OwnedPointer(UdfData(
+        kind=kind,
+        name=String("u"),
+        input_columns=in_cols^,
+        output_columns=out_cols^,
+        operator_factory_id=UInt32(9001),
+        call_site_salt=UInt32(0),
+        null_mode=UDF_NULL_PROPAGATE,
+        stability=UDF_STABILITY_IMMUTABLE,
+        parallelism_tag=par,
+    ))
+
+
+def test_a_udf_carrier_keeps_its_function_through_copy_plan() raises:
+    """A Filter, a Project and an Aggregate carrying a UDF snapshot each come
+    out of `_copy_plan` still carrying it, with the same render and hash.
+    Catches an arm that rebuilds through the plain factory (the copy would
+    run the placeholder predicate or columns instead of the function;
+    `_copy_plan`'s post-check raises on it)."""
+    var f = LogicalPlan.filter_with_udf(
+        Expr.literal(ScalarValue.from_bool(True)), _scan(),
+        _udf(UDF_KIND_FILTER, UDF_PAR_STATELESS, "p", DTAG_BOOL),
+    )
+    var e = ExprArray()
+    e.append(Expr.col_ref("a"))
+    var p = LogicalPlan.project_with_udf(
+        e^, _scan(), _udf(UDF_KIND_MAP, UDF_PAR_STATELESS, "r", DTAG_F64)
+    )
+    var gb = ExprArray()
+    gb.append(Expr.col_ref("a"))
+    var g = LogicalPlan.aggregate_with_udf(
+        gb^, AggExprArray(), _scan(), _udf(UDF_KIND_AGG, UDF_PAR_MERGEABLE, "o", DTAG_F64)
+    )
+    _assert_udf_copy(f, "filter")
+    _assert_udf_copy(p, "project")
+    _assert_udf_copy(g, "aggregate")
+
+
+def _assert_udf_copy(p: LogicalPlan, what: String) raises:
+    assert_true(p.has_udf(), what + " fixture carries no udf")
+    var c = _copy_plan(p)
+    assert_true(c.has_udf(), what)
+    assert_equal(_render(c), _render(p), what)
+    assert_equal(c.structural_hash(), p.structural_hash(), what)
 
 
 # =============================================================================
