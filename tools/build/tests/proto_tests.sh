@@ -36,7 +36,8 @@ expect_red proto_db_undeclared "protoc-gen-mojo_db wrote no code (or an empty fi
 # bundle_only: roster.proto imports person.proto (used) and the db options
 # (annotation only). The selected package holds exactly roster and person
 # and compiles; bundling the whole closure also generates options.mojo, which
-# the package cannot compile; a selection outside the closure is refused.
+# the package cannot compile. (A selection outside the closure is refused at
+# analysis: //tools/build/selftest:analysis_refusals_proto.)
 if ! "$BUCK2" build tests//functional/proto:roster_proto 'tests//functional/proto:roster_proto[gen]' --show-full-output \
     > "$LOG/proto_select.out" 2> "$LOG/proto_select.log"; then
     fail "proto: bundle_only package roster_proto (see $LOG/proto_select.log)"
@@ -47,29 +48,19 @@ else
     fail "proto: bundle_only package holds: ${got:-nothing} (see $LOG/proto_select.out)"
 fi
 expect_red proto_full_bundle "roster_proto/options.mojo" tests//negative/proto:roster_full_bundle
-expect_red proto_bad_selection "which is not a .proto of the proto_deps closure" tests//negative/proto:roster_bad_selection
 
-# 23, mojo_gcp_client (tools/build/cloud/gcp.bzl): the refusals of the rule,
-# and each check of tests//functional/mojo_gcp_client going red, are
-# expect_reds (the plugin's own refusals of `omit_fields` and of a streaming
-# REST method are unit tests of tools/build/proto-codegen: lower.rs and
-# emit_rest.rs). The clients that build (tests//functional/mojo_gcp_client and
+# 23, mojo_gcp_client (tools/build/cloud/gcp.bzl): each check of
+# tests//functional/mojo_gcp_client going red is an expect_red, and the
+# rule's analysis refusals are
+# //tools/build/selftest:analysis_refusals_gcp_client (the plugin's own
+# refusals of `omit_fields` and of a streaming REST method are unit tests of
+# tools/build/proto-codegen: lower.rs and emit_rest.rs). The clients that build (tests//functional/mojo_gcp_client and
 # komira//tools/build/proto-codegen/gcp_grpc and gcp_rest, each with its
 # welded tests, gen_check and tests_check) are in the gate.
-expect_red gcp_client_unscoped 'neither `roots` nor `methods` is set' tests//negative/mojo_gcp_client:unscoped
-expect_red gcp_client_joined_items 'is not a proto name' tests//negative/mojo_gcp_client:joined_items
-expect_red gcp_client_no_runtime '`deps` is empty' tests//negative/mojo_gcp_client:no_runtime
-expect_red gcp_client_whole_closure 'with an empty `bundle_only`' tests//negative/mojo_gcp_client:whole_closure
-expect_red gcp_client_label_in_protos 'is not a source path of a `.proto` file' tests//negative/mojo_gcp_client:label_in_protos
 expect_red gcp_client_caller_test_red 'GATED TEST FAILED' tests//negative/mojo_gcp_client:caller_test_red
 expect_red gcp_client_absence_check 'which must be absent' tests//negative/mojo_gcp_client:absence_check_can_fail
 expect_red gcp_client_tests_check 'expected exactly:' tests//negative/mojo_gcp_client:tests_check_can_fail
-expect_red gcp_client_unknown_protocol '`protocol` `connect` is not one of "rest", "grpc"' tests//negative/mojo_gcp_client:unknown_protocol
 expect_red gcp_client_rest_reaches_plugin 'no `(google.api.http)` annotation' tests//negative/mojo_gcp_client:rest_reaches_plugin
-expect_red gcp_client_module_names_stray 'which this target does not generate' tests//negative/mojo_gcp_client:module_names_stray
-expect_red gcp_client_module_names_not_a_module 'is not a Mojo module name the generated package can hold' tests//negative/mojo_gcp_client:module_names_not_a_module
-expect_red gcp_client_module_names_keyword 'gives `example/shop/v1/item.proto` the module `import`, which is not a Mojo module name the generated package can hold' tests//negative/mojo_gcp_client:module_names_keyword
-expect_red gcp_client_module_names_unrenamed 'would be generated as module `thing.min`, which is not a Mojo module name: give it one in `module_names`' tests//negative/mojo_gcp_client:module_names_unrenamed_stem
 
 # 23, protoc-gen-mojo's options and text goldens (tests//functional/proto_codegen)
 # and proto_fixture_check (tests//functional/proto_fixture, with the welded
