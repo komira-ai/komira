@@ -30,7 +30,7 @@ go stale.
 The body holds a `Pointer` to an atomic the caller owns. The borrow checker
 keeps the atomic alive for the whole call.
 
-```mojo
+```mojo module
 from komira_atomic_alias import AtomicI64
 from komira_fork_join import ForkJoinBody, fork_join
 from std.memory import Pointer
@@ -46,13 +46,15 @@ struct SumOfTids[o: MutOrigin](ForkJoinBody):
     def run(self, tid: Int) raises:
         _ = self.total[].fetch_add(Int64(tid))
 
-var total = AtomicI64(Int64(0))
-var body = SumOfTids(Pointer(to=total))
-fork_join(body, 8)
-assert_equal(total.load(), Int64(0 + 1 + 2 + 3 + 4 + 5 + 6 + 7))
 
-fork_join(body, 0)  # runs nothing
-assert_equal(total.load(), Int64(28))
+def main() raises:
+    var total = AtomicI64(Int64(0))
+    var body = SumOfTids(Pointer(to=total))
+    fork_join(body, 8)
+    assert_equal(total.load(), Int64(0 + 1 + 2 + 3 + 4 + 5 + 6 + 7))
+
+    fork_join(body, 0)  # runs nothing
+    assert_equal(total.load(), Int64(28))
 ```
 
 ## When bodies raise
@@ -60,7 +62,7 @@ assert_equal(total.load(), Int64(28))
 Every thread still runs to the end; the lowest failing `tid` names the
 error.
 
-```mojo
+```mojo module
 from komira_fork_join import ForkJoinBody, fork_join
 from std.testing import assert_equal
 
@@ -75,24 +77,26 @@ struct FailFrom(ForkJoinBody):
         if tid >= self.first_failing_tid:
             raise Error("tid " + String(tid) + " failed")
 
-var two_fail = FailFrom(2)
-var message = String()
-try:
-    fork_join(two_fail, 4)  # tids 2 and 3 raise
-except e:
-    message = String(e)
-assert_equal(message, "tid 2 failed (2 of 4 workers failed)")
 
-var one_fails = FailFrom(3)
-try:
-    fork_join(one_fails, 4)  # only tid 3 raises
-except e:
-    message = String(e)
-assert_equal(message, "tid 3 failed")
+def main() raises:
+    var two_fail = FailFrom(2)
+    var message = String()
+    try:
+        fork_join(two_fail, 4)  # tids 2 and 3 raise
+    except e:
+        message = String(e)
+    assert_equal(message, "tid 2 failed (2 of 4 workers failed)")
 
-try:
-    fork_join(one_fails, -1)
-except e:
-    message = String(e)
-assert_equal(message, "fork_join: n must be >= 0, got -1")
+    var one_fails = FailFrom(3)
+    try:
+        fork_join(one_fails, 4)  # only tid 3 raises
+    except e:
+        message = String(e)
+    assert_equal(message, "tid 3 failed")
+
+    try:
+        fork_join(one_fails, -1)
+    except e:
+        message = String(e)
+    assert_equal(message, "fork_join: n must be >= 0, got -1")
 ```

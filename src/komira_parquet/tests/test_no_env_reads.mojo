@@ -35,6 +35,15 @@ comptime _FILES: List[String] = [
     "bloom_pruner.mojo",
     "bloom_reader.mojo",
     "byte_stream_split.mojo",
+    "column_decode_context.mojo",
+    "column_decoder.mojo",
+    "column_decoder_assemble.mojo",
+    "column_decoder_finish.mojo",
+    "column_decoder_pages.mojo",
+    "column_decoder_state.mojo",
+    "column_decoder_strings.mojo",
+    "column_decoder_values.mojo",
+    "column_reader.mojo",
     "decimal_decode.mojo",
     "decode_arm_trace.mojo",
     "decode_helpers.mojo",
@@ -42,6 +51,7 @@ comptime _FILES: List[String] = [
     "delta.mojo",
     "delta_byte_array.mojo",
     "dict_gather_fused.mojo",
+    "dict_mat_counter.mojo",
     "dictionary.mojo",
     "dictionary_resolve.mojo",
     "file_reader.mojo",
@@ -52,6 +62,7 @@ comptime _FILES: List[String] = [
     "gather_dict.mojo",
     "metadata_parser.mojo",
     "nested.mojo",
+    "nested_decoder.mojo",
     "null_expand.mojo",
     "num_rows_cache.mojo",
     "page_header_parser.mojo",
@@ -64,6 +75,10 @@ comptime _FILES: List[String] = [
     "scan_copy_trace.mojo",
     "selection_vector.mojo",
     "staged_filter_trace.mojo",
+    "subrg_column_cursor.mojo",
+    "subrg_cursor_pages.mojo",
+    "subrg_dbp_trace.mojo",
+    "subrg_scan_route_trace.mojo",
     "thrift_compact.mojo",
 ]
 
@@ -207,6 +222,7 @@ def test_imports_only_its_deps() raises:
         "komira_parquet_codec",
         "komira_plan_expr",
         "komira_simd",
+        "komira_zlib",
     ]
     var banned: List[String] = ["komira_obs", "komira_serde", "komira_" + "core"]
     var files = materialize[_FILES]()

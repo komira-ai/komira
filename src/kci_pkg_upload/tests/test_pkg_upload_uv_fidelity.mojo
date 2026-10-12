@@ -3,10 +3,14 @@
 #   upload this client sends IS the upload `uv publish` sends, byte for byte.
 # =============================================================================
 #
-# THE EVIDENCE. `tests/fidelity/capture_uv_publish.py` ran the real `uv publish`
-# at a recorder bound to 127.0.0.1 (no registry anywhere) for three probe
-# wheels and committed what arrived: the wheel, its METADATA, and the request
-# (method, path, Content-Type, Accept, and the RAW body). This test builds the
+# THE EVIDENCE. `uv_fidelity` (`tests/fidelity/main.zig`, a Zig tool run as a
+# Buck2 build action, `:uv_fidelity_capture`; tests/fidelity/README.md) ran
+# the pinned `uv publish` (third_party/uv) at a recorder bound to 127.0.0.1
+# (no registry anywhere) for three probe wheels; what arrived is committed:
+# the wheel, its METADATA, and the request (method, path, Content-Type,
+# Accept, and the RAW body). `:uv_fidelity_check` re-captures and compares
+# with these files on request; `:uv_fidelity_unit` proves the committed wheels
+# and METADATA are the tool's generator output. This test builds the
 # same upload with `kci_pkg_upload` — through `RegistrySet`, the path a real
 # publish takes — and compares.
 #
@@ -192,7 +196,7 @@ def _check_case_pypi(which: String) raises:
         which + String(": Content-Type"),
     )
     assert_equal(req.header_value(String("Accept")), golden.accept, which + String(": Accept"))
-    # uv's header was asserted by the capture script to be exactly this
+    # uv's header was asserted by the capture (uv_fidelity) to be exactly this
     # function of the same placeholder.
     assert_equal(
         req.header_value(String("Authorization")),

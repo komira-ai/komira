@@ -5,8 +5,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # ENV kind, CONDA_INSTALL_ENV, installs on the machine that runs kci with no
 # container (a pinned pixi linked into a scratch directory outside the
 # checkout, a cleared environment) and runs each installed library's README
-# examples, made into a program by //tools/build/readme_examples exactly as
-# the welded `[tests][readme]` test is; no network at all is INDETERMINATE
+# examples, made into programs by the README examples tool
+# (//tools/build/readme_examples:tool, which kci ships beside its executable:
+# bin/kci/BUCK `helpers`) exactly as the welded `[tests][readme]` test makes
+# them; no network at all is INDETERMINATE
 # (exit 5) with a skip_reason, never a pass. The CONTAINER kind,
 # CONDA_INSTALL_SMOKE: after a PUBLISH step, read the step's channel
 # ANONYMOUSLY (the index lists each pinned file with the build's sha256 and
@@ -42,7 +44,7 @@ mojo_library(
         "//src/komira_http_core:komira_http_core",
         "//src/komira_json:komira_json",
         "//src/komira_retry:komira_retry",
-        "//tools/build/readme_examples:readme_examples",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
         # the pass; every row of checks 0 to 4 failing on its own, each
@@ -65,6 +67,28 @@ mojo_library(
         # the child's whole environment, the pixi argv, the manifest, and
         # the installed README's program byte-equal to SOURCE mode's, golden
         "tests/test_install_env_golden.mojo",
+        # the README examples tool: where kci looks for it, and a missing,
+        # empty or unrunnable tool refused by name; a failed map refused
+        # naming the report, and the program row it fails
+        "tests/test_readme_tool.mojo",
+        # the native install checks (#1363's lib_files rows, `__glibc`):
+        # a sha256 mismatch, a missing file, a mode 644 .so, a dangling
+        # link, an extra .so, a __glibc of 2.38, NEEDED outside the
+        # environment, no DF_SYMBOLIC, the loaded-from record, the ELF reader
+        "tests/test_native_install.mojo",
     ],
+    # The README examples tool kci ships, for the tests that make an
+    # installed README into programs (the same target bin/kci/BUCK ships).
+    test_data = {
+        "tests/test_conda_install_env.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
+        # and the README and programs of komira_encoding's welded README
+        # test, to compare kci's programs with
+        "tests/test_install_env_golden.mojo": {
+            "readme_examples": "//tools/build/readme_examples:tool",
+            "encoding_readme": "//src/komira_encoding:komira_encoding[tests][readme][file]",
+            "encoding_generated": "//src/komira_encoding:komira_encoding[tests][readme][generated]",
+        },
+        "tests/test_readme_tool.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
+    },
     visibility = ["PUBLIC"],
 )
