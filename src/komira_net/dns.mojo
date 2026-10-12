@@ -418,13 +418,40 @@ def _getaddrinfo_collect(host: String, port: UInt16) raises -> List[IpAddr]:
                 + "') failed (EAI=" + String(Int(rc)) + ")"
             )
 
-    if len(out) == 0:
-        raise Error(  # cov: unreachable getaddrinfo with ai_family=AF_INET returns 0 only with at least one AF_INET node
-            "DnsError[NO_IPV4_RECORD]: host '" + host  # cov: unreachable see the line above
-            + "' has no IPv4 (A) record"  # cov: unreachable see the line above
+    _raise_if_no_a_record(len(out), host)
+    return out^
+
+
+def _raise_if_no_a_record(count: Int, host: String) raises:
+    """Raise NO_IPV4_RECORD when a lookup that succeeded gave `count` == 0 A
+    records. With the AF_INET hint getaddrinfo does not succeed with an empty
+    list, so this is a guard; it is a function of its own so a test can drive
+    the raise."""
+    if count == 0:
+        raise Error(
+            "DnsError[NO_IPV4_RECORD]: host '" + host
+            + "' has no IPv4 (A) record"
         )
 
-    return out^
+
+def _connect_targets(addrs: List[IpAddr], port: UInt16) -> List[SockAddr]:
+    """One SockAddr per address, in the order given, each with `port`."""
+    var targets = List[SockAddr]()
+    for i in range(len(addrs)):
+        targets.append(SockAddr(addrs[i], port))
+    return targets^
+
+
+def _first_ip_be(targets: List[SockAddr], host: String) raises -> UInt32:
+    """The first target's network-byte-order IPv4; raises NO_IPV4_RECORD on
+    an empty list. resolve_host never returns one, so this is a guard; it is
+    a function of its own so a test can drive the raise."""
+    if len(targets) == 0:
+        raise Error(
+            "DnsError[NO_IPV4_RECORD]: host '" + host
+            + "' produced no connect target"
+        )
+    return targets[0].ip.v4_be
 
 
 # -----------------------------------------------------------------------------
@@ -450,11 +477,7 @@ def resolve_host(host: String, port: UInt16) raises -> List[SockAddr]:
         out.append(SockAddr(lit.value(), port))
         return out^
 
-    var addrs = _getaddrinfo_collect(host, port)
-    var targets = List[SockAddr]()
-    for i in range(len(addrs)):
-        targets.append(SockAddr(addrs[i], port))
-    return targets^
+    return _connect_targets(_getaddrinfo_collect(host, port), port)
 
 
 def resolve_host_be(host: String, port: UInt16) raises -> UInt32:
@@ -465,12 +488,6 @@ def resolve_host_be(host: String, port: UInt16) raises -> UInt32:
     same return type (UInt32), same call shape.
 
     Raises if no IPv4 (A) record is available."""
-    var targets = resolve_host(host, port)
     # resolve_host raises before returning an empty list (literal always Some;
-    # getaddrinfo raises NO_IPV4_RECORD on empty) — but guard defensively.
-    if len(targets) == 0:
-        raise Error(  # cov: unreachable resolve_host returns one target for a literal and raises on an empty getaddrinfo list
-            "DnsError[NO_IPV4_RECORD]: host '" + host  # cov: unreachable see the line above
-            + "' produced no connect target"  # cov: unreachable see the line above
-        )
-    return targets[0].ip.v4_be
+    # getaddrinfo raises NO_IPV4_RECORD on empty); _first_ip_be guards anyway.
+    return _first_ip_be(resolve_host(host, port), host)

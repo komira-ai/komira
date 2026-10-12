@@ -64,6 +64,17 @@ def test_octet_range_boundaries() raises:
         )
 
 
+def test_an_octet_that_wraps_negative_is_out_of_range() raises:
+    """2^63 does not fit an Int and wraps to a negative value while the
+    octet is read; the range check's `< 0` arm reports it as out of range
+    instead of packing it. (A wrap that lands in 0..255 is komira-ai/komira#1497.)"""
+    var host = String("9223372036854775808.1.1.1")
+    assert_equal(
+        _raised(host),
+        String("dns: IPv4 octet out of range in '") + host + "'",
+    )
+
+
 def test_a_letter_wins_over_a_malformed_shape() raises:
     """A host with a letter AND an empty octet is a DNS name: the
     digit-or-dot classification runs before any shape check, so it returns
@@ -97,6 +108,7 @@ def main() raises:
     test_aliases_match_exactly_not_as_prefixes()
     test_one_digit_host_is_no_alias()
     test_octet_range_boundaries()
+    test_an_octet_that_wraps_negative_is_out_of_range()
     test_a_letter_wins_over_a_malformed_shape()
     test_wrong_count_reported_before_octet_range()
     test_empty_octet_reported_before_count()

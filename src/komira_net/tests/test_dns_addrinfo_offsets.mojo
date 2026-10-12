@@ -154,26 +154,29 @@ def test_canonname_offset_not_mistaken_for_addr() raises:
 
 
 def test_skips_non_inet_and_walks_next() raises:
-    """A 3-node list: node[0] is a non-AF_INET record with a NULL ai_addr,
-    node[1] a non-AF_INET record whose ai_addr points at a real sockaddr, and
-    node[2] AF_INET with a real IP. Proves (a) family filtering by the family
-    alone (node[1] would parse to 192.0.2.99 if the family were not checked;
-    node[0]'s NULL ai_addr would hide that), (b) ai_next traversal at +40,
-    (c) a NULL ai_addr is tolerated."""
-    # node[0] and node[1] share one buffer (node[1] at +_ADDRINFO_SIZE); the
-    # two sockaddrs share another (node[1]'s at +_SOCKADDR_IN_SIZE).
+    """A 4-node list: node[0] is an AF_INET record with a NULL ai_addr,
+    node[1] a non-AF_INET record whose ai_addr points at a real sockaddr,
+    node[2] AF_INET with 8.8.4.4 and node[3] AF_INET with 192.0.2.42. Proves
+    (a) family filtering by the family alone (node[1] would parse to
+    192.0.2.99 if the family were not checked), (b) ai_next traversal at +40
+    past the first A record (one IpAddr per A record, in list order), (c) a
+    NULL ai_addr on an AF_INET record is skipped, not read."""
+    # node[0] and node[1] share one buffer (node[1] at +_ADDRINFO_SIZE), as do
+    # node[2] and node[3]; the three sockaddrs share a third buffer.
     var n0 = Array[UInt8, 2 * _ADDRINFO_SIZE](fill=UInt8(0))
-    var n1 = Array[UInt8, _ADDRINFO_SIZE](fill=UInt8(0))
-    var sa = Array[UInt8, 2 * _SOCKADDR_IN_SIZE](fill=UInt8(0))
+    var n1 = Array[UInt8, 2 * _ADDRINFO_SIZE](fill=UInt8(0))
+    var sa = Array[UInt8, 3 * _SOCKADDR_IN_SIZE](fill=UInt8(0))
 
     var n0_p = n0.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
     var n1_p = n1.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
     var sa_p = sa.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
     var mid_p = n0_p + _ADDRINFO_SIZE
     var mid_sa_p = sa_p + _SOCKADDR_IN_SIZE
+    var last_p = n1_p + _ADDRINFO_SIZE
+    var last_sa_p = sa_p + 2 * _SOCKADDR_IN_SIZE
 
-    # node[0]: non-INET family, NULL ai_addr, ai_next -> node[1].
-    _write_i32_at(n0_p, _AI_OFF_FAMILY, _AF_INET6)
+    # node[0]: AF_INET, NULL ai_addr, ai_next -> node[1].
+    _write_i32_at(n0_p, _AI_OFF_FAMILY, _AF_INET)
     _write_ptr_at(n0_p, _AI_OFF_ADDR, _null_ptr())
     _write_ptr_at(n0_p, _AI_OFF_NEXT, mid_p)
 
@@ -187,7 +190,7 @@ def test_skips_non_inet_and_walks_next() raises:
     _write_ptr_at(mid_p, _AI_OFF_ADDR, mid_sa_p)
     _write_ptr_at(mid_p, _AI_OFF_NEXT, n1_p)
 
-    # node[2]: AF_INET -> 8.8.4.4, ai_next -> NULL.
+    # node[2]: AF_INET -> 8.8.4.4, ai_next -> node[3].
     (sa_p + _SIN_OFF_ADDR + 0)[0] = UInt8(8)
     (sa_p + _SIN_OFF_ADDR + 1)[0] = UInt8(8)
     (sa_p + _SIN_OFF_ADDR + 2)[0] = UInt8(4)
@@ -195,12 +198,25 @@ def test_skips_non_inet_and_walks_next() raises:
     var expect = 8 | (8 << 8) | (4 << 16) | (4 << 24)
     _write_i32_at(n1_p, _AI_OFF_FAMILY, _AF_INET)
     _write_ptr_at(n1_p, _AI_OFF_ADDR, sa_p)
-    _write_ptr_at(n1_p, _AI_OFF_NEXT, _null_ptr())
+    _write_ptr_at(n1_p, _AI_OFF_NEXT, last_p)
+
+    # node[3]: AF_INET -> 192.0.2.42, ai_next -> NULL.
+    (last_sa_p + _SIN_OFF_ADDR + 0)[0] = UInt8(192)
+    (last_sa_p + _SIN_OFF_ADDR + 1)[0] = UInt8(0)
+    (last_sa_p + _SIN_OFF_ADDR + 2)[0] = UInt8(2)
+    (last_sa_p + _SIN_OFF_ADDR + 3)[0] = UInt8(42)
+    var expect_last = 192 | (0 << 8) | (2 << 16) | (42 << 24)
+    _write_i32_at(last_p, _AI_OFF_FAMILY, _AF_INET)
+    _write_ptr_at(last_p, _AI_OFF_ADDR, last_sa_p)
+    _write_ptr_at(last_p, _AI_OFF_NEXT, _null_ptr())
 
     var out = _collect_a_records_from_addrinfo_list(n0_p)
-    # Exactly ONE A record (node[0] and node[1] skipped), with node[2]'s IP.
-    assert_equal(len(out), 1)
+    # node[0] (no address) and node[1] (not AF_INET) skipped; node[2] and
+    # node[3] in list order.
+    assert_equal(len(out), 2)
     assert_equal(Int(out[0].v4_be), expect)
+    assert_equal(Int(out[1].v4_be), expect_last)
+    assert_equal(Int(out[1].family), Int(_AF_INET))
 
     _ = n0
     _ = n1

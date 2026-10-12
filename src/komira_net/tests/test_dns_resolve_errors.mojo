@@ -3,7 +3,8 @@
 # =============================================================================
 # resolve_host past the literal fast path: a name getaddrinfo resolves
 # (one target per A record, each with the caller's port), one record per
-# address (the SOCK_STREAM hint), the DnsError class of each getaddrinfo
+# address (the SOCK_STREAM hint), the list freed after every successful
+# lookup (the main heap does not grow over many lookups), the DnsError class of each getaddrinfo
 # failure the test can cause, and the fast path never reaching getaddrinfo. Linux only, like test_dns_resolve.mojo: the failures
 # are glibc's codes, and on another platform these tests do nothing.
 #
@@ -125,6 +126,31 @@ def test_a_numeric_host_gives_one_record() raises:
         assert_equal(Int(addrs[0].v4_be), 0x070200C0)
 
 
+def _program_break() -> Int:
+    """The end of the main heap (sbrk(0)); it moves only when the main
+    arena grows or shrinks."""
+    return external_call["sbrk", Int](Int(0))
+
+
+def test_a_resolved_list_is_freed() raises:
+    """Every successful lookup frees getaddrinfo's list: 20000 resolutions of
+    a hosts-file name leave the main heap where it was. A leaked list (at
+    least 64 bytes per lookup) would grow it by more than 1 MiB; the bound
+    is 256 KiB. The lookups run on the main thread, so glibc serves them from
+    the main arena, whose top is the program break."""
+    comptime if CompilationTarget.is_linux():
+        for _ in range(1000):
+            _ = resolve_host(String("LOCALHOST"), UInt16(80))
+        var before = _program_break()
+        for _ in range(20000):
+            _ = resolve_host(String("LOCALHOST"), UInt16(80))
+        var grown = _program_break() - before
+        assert_true(
+            grown < 256 * 1024,
+            String("the heap grew by ") + String(grown) + " bytes",
+        )
+
+
 def test_nxdomain_is_classified_as_nxdomain() raises:
     """EAI_NONAME raises the NXDOMAIN class (not a later check's class, and
     not the generic failure)."""
@@ -182,6 +208,7 @@ def test_the_literal_fast_path_never_calls_getaddrinfo() raises:
 def main() raises:
     test_a_resolved_name_gives_one_target_per_a_record()
     test_a_numeric_host_gives_one_record()
+    test_a_resolved_list_is_freed()
     test_nxdomain_is_classified_as_nxdomain()
     test_a_system_error_is_resolve_failed_with_its_code()
     test_the_literal_fast_path_never_calls_getaddrinfo()
