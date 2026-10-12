@@ -137,6 +137,7 @@ from .optimizer_transitive_edges import derive_transitive_edges
 from .optimizer_join import (
     join_reorder_output_names,
     narrow_reordered_join_to_declared_columns,
+    restore_join_reorder_output_columns,
 )
 from komira_plan_ir.plan_helpers import (
     _copy_plan,
@@ -602,7 +603,7 @@ def reorder_joins_with_dp(var plan: LogicalPlan) raises -> LogicalPlan:
 
     elif tag == PLAN_FILTER:
         var child_in = _copy_plan(plan._filter.value()[].child[])
-        var new_child = reorder_joins_with_dp(child_in^)
+        var new_child = _reorder_joins_with_dp_keeping_order(child_in^)
         plan._filter.value()[].child = OwnedPointer(new_child^)
 
     elif tag == PLAN_PROJECT:
@@ -617,22 +618,44 @@ def reorder_joins_with_dp(var plan: LogicalPlan) raises -> LogicalPlan:
 
     elif tag == PLAN_SORT:
         var child_in = _copy_plan(plan._sort.value()[].child[])
-        var new_child = reorder_joins_with_dp(child_in^)
+        var new_child = _reorder_joins_with_dp_keeping_order(child_in^)
         plan._sort.value()[].child = OwnedPointer(new_child^)
 
     elif tag == PLAN_LIMIT:
         var child_in = _copy_plan(plan._limit.value()[].child[])
-        var new_child = reorder_joins_with_dp(child_in^)
+        var new_child = _reorder_joins_with_dp_keeping_order(child_in^)
         plan._limit.value()[].child = OwnedPointer(new_child^)
 
     elif tag == PLAN_DISTINCT:
         var child_in = _copy_plan(plan._distinct.value()[].child[])
-        var new_child = reorder_joins_with_dp(child_in^)
+        var new_child = _reorder_joins_with_dp_keeping_order(child_in^)
         plan._distinct.value()[].child = OwnedPointer(new_child^)
 
     elif tag == PLAN_TOPN:
         var child_in = _copy_plan(plan._topn.value()[].child[])
-        var new_child = reorder_joins_with_dp(child_in^)
+        var new_child = _reorder_joins_with_dp_keeping_order(child_in^)
         plan._topn.value()[].child = OwnedPointer(new_child^)
 
     return plan^
+
+
+def _reorder_joins_with_dp_keeping_order(
+    var child: LogicalPlan,
+) raises -> LogicalPlan:
+    """Reorder `child` for a parent that emits its child's columns in the
+    child's order (Filter, Sort, Limit, Distinct, TopN), and put back the
+    order `child` had before the walk.
+
+    The walker replaces such a parent's child without recomputing the
+    parent's cached schema, so the parent keeps reporting the old order. The
+    driver's guard around the reorder reads only the root's cached schema and
+    cannot see a permutation below one of these parents; this restores it at
+    the boundary, where the old order is still known. A Project or Aggregate
+    parent reads its child by name and needs no restore; a join parent is
+    rebuilt with a recomputed schema, so its order moves up to here or to the
+    root guard. `restore_join_reorder_output_columns` adds a Project only for
+    a permutation and declines anything else."""
+    var before = join_reorder_output_names(child)
+    return restore_join_reorder_output_columns(
+        reorder_joins_with_dp(child^), before^
+    )

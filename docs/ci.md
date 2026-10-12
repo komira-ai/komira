@@ -214,7 +214,7 @@ other run.
 | `tmpdir_outside_checkout` (reported): no directory from `TEST_TMPDIR` up to `/` holds `.git` or `.buckconfig` | outside: six levels walked to `/`, no marker | the install-path test, whose scratch must be outside any checkout |
 
 `tmpdir_outside_checkout` is reported, not required: the gate runner
-([`gate_runner.sh`](../tools/build/mojo/gate_runner.sh)) makes `TEST_TMPDIR`
+([`gate mojo`](../tools/build/run/README.md)) makes `TEST_TMPDIR`
 under the action's working directory, which for an action run on the client
 (no farm configured) is inside the checkout, so a required check would fail
 there for that reason rather than for a missing capability (derived from the
@@ -938,7 +938,9 @@ retries ran out of budget is not called interference. Without the flag,
 each run has its `--build-timeout-s` and there is no total.
 
 `pr.yml` passes the time its job has left: its first step writes the job's
-deadline, 115 of the job's 120 minutes (`timeout-minutes`), and the
+deadline, 325 of the job's 330 minutes (`timeout-minutes`, under the 360 a
+GitHub-hosted job may run, so that a change that rebuilds most of the tree
+on the farm finishes), and the
 `kci run` step stops with an error if that file is missing, then passes the
 seconds left until it. The time `build kci` took is therefore not taken from
 a wide change's build, and kci reports which units it did not build about 5
@@ -948,7 +950,9 @@ those 5 minutes). `build kci` itself takes from seconds (a cached kci) to most
 of an hour (a change to kci or to what it depends on), so a fixed per-batch
 number either wasted the job's time or overran it. The welded test
 `src/kci_workflow_check/tests/test_repo_kci_yml.mojo` holds `pr.yml` to these
-steps and numbers.
+steps and numbers: `timeout-minutes` within 300 to 360, and the deadline
+step's minutes exactly `timeout-minutes` less 5, so the two cannot drift
+apart. `coverage.yml`'s `measure` job has the same 330 minutes.
 
 Whatever the outcome, a `BUILT <unit>` line names exactly the units a
 successful run covered. The result document's `affected_by.units` is the set

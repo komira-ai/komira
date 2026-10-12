@@ -33,7 +33,9 @@
 # its file name, and for a library its payload path and payload sha256, its
 # import name and build label, and the sha256 its `doc_files` records for
 # share/doc/<name>/README.md ("" when it records none) from its
-# metadata.json. `mojo_pin_of` is the compiler version every library of
+# metadata.json, and the link arguments its closure needs (readme_link.mojo
+# `closure_link_args`, over every library member's depends and lib_files).
+# `mojo_pin_of` is the compiler version every library of
 # the set was built with (they must agree). A name that is not a member, a
 # member that is not a conda package, or a value that could not be put in a
 # shell word safely RAISES.
@@ -62,6 +64,8 @@ from kci_release_channel import ARTIFACT_TYPE_CONDA, find_channel, parse_channel
 from kci_release_set.conda_metadata import KIND_LIBRARY, KIND_METAPACKAGE, LibFile
 from kci_release_set.release_manifest import RELEASE_MANIFEST_NAME, read_release_manifest
 from kci_release_machine import StageValidation
+
+from .readme_link import LinkArgs, closure_link_args, link_nodes
 
 
 struct ValidateRequest(Copyable, Movable):
@@ -185,6 +189,9 @@ struct InstallPin(Copyable, Movable):
     var lib_files: List[LibFile]
     var has_lib_files: Bool
     var depends: List[String]
+    # a library: the link arguments its closure needs (readme_link.mojo),
+    # which its installed README's `sh komira-link` block must say
+    var link: LinkArgs
 
     def __init__(out self, var name: String):
         self.name = name^
@@ -202,6 +209,7 @@ struct InstallPin(Copyable, Movable):
         self.lib_files = List[LibFile]()
         self.has_lib_files = False
         self.depends = List[String]()
+        self.link = LinkArgs()
 
     def file_name(self) -> String:
         """`<name>-<version>-<build>.conda`: the file the channel serves."""
@@ -266,6 +274,7 @@ def install_pins(release: LoadedRelease, names: List[String]) raises -> List[Ins
                     pin.lib_files = mem.conda.lib_files.copy()
                     pin.has_lib_files = mem.conda.has_lib_files
                     pin.depends = mem.conda.depends.copy()
+                    pin.link = closure_link_args(link_nodes(release), name)
                     var readme = readme_doc_path(name)
                     for d in range(len(mem.conda.doc_files)):
                         if mem.conda.doc_files[d].path == readme:
