@@ -93,7 +93,7 @@ def _link_dir_impl(ctx):
 
 _cov_link_dir = rule(
     impl = _link_dir_impl,
-    doc = "The link directory of a coverage build: what mojo_wrapper.sh takes as <zig_dir>. It holds `zig` (cov_zig), `debug_relocate`, and `real/`, the Mojo toolchain's own link directory (the pinned zig), so a coverage link uses the zig a release link uses.",
+    doc = "The link directory of a coverage build: what mojo_compile takes as --zig=<dir>. It holds `zig` (cov_zig), `debug_relocate`, and `real/`, the Mojo toolchain's own link directory (the pinned zig), so a coverage link uses the zig a release link uses.",
     attrs = {
         "relocate": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/coverage/kcov:debug_relocate"),
         "zig": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/coverage/kcov:cov_zig"),

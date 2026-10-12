@@ -958,7 +958,8 @@ def _cse_rewrite_aggregate_axis3(mut plan: LogicalPlan, mut counter: _CseNameCou
     # lets us reassign `plan` at the end without holding any live `ref`
     # into `plan`'s internals (Mojo lifetime rule). The copy is a 1-time
     # cost in the rare-CSE-hit case; the no-op path bails before this.
-    if len(plan._aggregate.value()[].agg_exprs) == 0:
+    # A UDF Aggregate is left alone, as Axis 1 leaves a UDF Project.
+    if len(plan._aggregate.value()[].agg_exprs) == 0 or plan.has_udf():
         return
 
     # Phase 1: tally fingerprints from a brief borrow. ExprArray for
@@ -1046,8 +1047,8 @@ def _cse_rewrite_aggregate_axis3(mut plan: LogicalPlan, mut counter: _CseNameCou
     for i in range(len(ad_copy.group_by)):
         new_gb.append(ad_copy.group_by[i].copy())
 
-    # UDF aggs / chain_id preservation
-    # removed — AggregateData no longer carries those fields.
+    # A UDF Aggregate returned at the top, so the non-UDF factory drops
+    # nothing here.
     plan = LogicalPlan.aggregate(
         new_gb^, new_aggs^, below_project^
     )
