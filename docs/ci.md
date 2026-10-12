@@ -866,19 +866,13 @@ stderr whole up to 8 KiB, else the first and last 4 KiB), and kci FAILS the
 check (`KCI-E-BUILD-FAILED`). The decision is the failure, not buck2's text:
 the target buck2 names, when it names one, only leads the message. So a
 change that plants a target buck2 cannot configure fails its own check,
-widened or not. **A coverage floor only rises:** before it asks buck2
-anything, `affected` reads each changed `<package>/coverage_floor.tsv` at the
-base commit (`git cat-file`) and in the checkout, and a change that lowers a
-floor (a line or branch floor under the base's, a branch floor dropped to
-`-`, a pinned floor lowered, or the file deleted while its package stays)
-answers `BROKEN`, naming each floor, so kci FAILS the check
-(`KCI-E-BUILD-FAILED`; kci's message then says the query failed, the reason
-after it names the floors). A new floor file, a raised floor, and a file
-deleted with its package are no refusal
-([`tools/build/coverage/README.md`](../tools/build/coverage/README.md#the-ratchet)).
-A coverage change touches only its package's directory (its
-`coverage_floor.tsv` and `coverage_census.tsv`), so it reaches that
-package's units, not a widening. A
+widened or not. **A coverage floor only rises:** with the base commit,
+`affected` first reads each changed `<package>/coverage_floor.tsv` there and
+in the checkout, and answers `BROKEN`, naming each floor, when one went down
+([The ratchet](../tools/build/coverage/README.md#the-ratchet)): kci FAILS the
+check. A coverage change touches only its package's directory: it reaches
+that package's unit and those of the checks that read every file
+(`repo_root`, `tools_build`), never a widening. A
 non-empty change that reaches no unit answers `AFFECTED 0`, which kci refuses
 (`KCI-E-AFFECTED-VACUOUS`): never a pass. The job's checkout has the full
 history, so the base commit is there. In `pr.yml` the base is the first parent
