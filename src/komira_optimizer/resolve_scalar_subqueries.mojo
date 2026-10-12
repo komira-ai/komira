@@ -102,6 +102,7 @@ from komira_plan_ir.logical_plan import (
 )
 from komira_plan_ir.corr_subquery import corr_data_inner_plan_ref
 from komira_plan_expr.scalar_value import ScalarValue
+from .optimizer_udf_carry import filter_like, project_like
 
 
 # Public error-name prefix for the >1-row HALT-condition. The caller that
@@ -422,14 +423,14 @@ def _rewrite_scalar_subquery_sites(
         var new_child = _rewrite_scalar_subquery_sites(
             fd.child[].copy(), scalars, next_idx
         )
-        return LogicalPlan.filter(new_pred^, new_child^)
+        return filter_like(fd, new_pred^, new_child^)
     if plan.tag == PLAN_PROJECT:
         ref pj = plan.project_data_ref()
         var new_exprs = _rewrite_exprs_in_array(pj.exprs, scalars, next_idx)
         var new_child = _rewrite_scalar_subquery_sites(
             pj.child[].copy(), scalars, next_idx
         )
-        return LogicalPlan.project(new_exprs^, new_child^)
+        return project_like(pj, new_exprs^, new_child^)
     if plan.tag == PLAN_SORT:
         ref sd = plan.sort_data_ref()
         var new_child = _rewrite_scalar_subquery_sites(

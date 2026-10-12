@@ -9,7 +9,7 @@ The rules are in [`defs.bzl`](defs.bzl); their providers in
 ([`toolchains//:mojo`](../toolchains/README.md)) through the compile wrapper,
 [`tools/mojo_compile.zig`](tools/mojo_compile.zig) on Linux (its header is
 where to read the environment the compiler sees) and
-[`darwin/mojo_wrapper.sh`](darwin/mojo_wrapper.sh) on macOS. Worked uses of each rule are in
+[`tools/mojo_compile_macos.zig`](tools/mojo_compile_macos.zig) on macOS. Worked uses of each rule are in
 [`../examples/BUCK`](../examples/BUCK), and fixtures that must fail are in
 [`../tests/`](../tests/README.md).
 
@@ -205,11 +205,12 @@ kills the session. The tether is not the compiler's child, so a compiler
 that waits for all its children never waits for it. With the watchdog on,
 the compiler's stdin is `/dev/null` and it ignores SIGINT and SIGQUIT. The
 macOS wrapper
-([`darwin/mojo_wrapper.sh`](darwin/mojo_wrapper.sh)) has the same watchdog
-and knobs (`mojo_darwin_toolchain`), sampling `ps` instead of `/proc` and,
-with no `setsid` on macOS, the compiler's tree by parent pid instead of a
-session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.zig),
-[`tests/functional/darwin`](../tests/functional/darwin/check.sh)).
+([`tools/mojo_compile_macos.zig`](tools/mojo_compile_macos.zig)) has the same
+watchdog, session and tether and the same knobs (`mojo_darwin_toolchain`),
+reading the tree through libproc instead of `/proc`; a child already reaped
+no longer counts there, since macOS keeps no CPU time of reaped children
+([`tests/functional/watchdog`](../tests/functional/watchdog/cases.zig):
+`cases` on Linux, `cases_darwin` on a macOS worker).
 
 ## Binaries and tests
 

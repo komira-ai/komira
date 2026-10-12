@@ -18,21 +18,16 @@
 #      is refused at load, and so (tests//functional/darwin:BUCK, cases.bzl) are an
 #      empty set and malformed host identities. Unset, a wildcard over
 #      tools/build/toolchains/darwin skips the darwin-only targets.
-#   3. The darwin compile command lines (aquery): the macOS wrapper and
-#      busybox, the osx-arm64 compiler closure, --target-cpu apple-m1, the
-#      deployment target, no zig, no absolute path.
+#   3. The darwin compile command lines (aquery): the macOS compile wrapper
+#      (mojo_compile_darwin) with the deployment target and host list, the
+#      osx-arm64 compiler closure, --target-cpu apple-m1, no zig, no absolute
+#      path.
 #   4. The linux actions are the same with and without the darwin key.
 #   5. The osx-arm64 closure, unpacked and cut on the farm (linux
 #      actions): its Mach-O load commands, read by tools/build/inspect (`inspect macho`), and the
 #      DYLD scripts are the shared scripts behind dyld_prelude.sh.
 #   6. The macOS scripts, run on this machine against stand-ins: busybox.sh
-#      (applets only from /bin and /usr/bin, anything else refused), the cc
-#      shim (run paths replaced by the wrapper's, link tail appended),
-#      host_identity.sh (every field in the digest; an unreadable field
-#      refused), the wrapper (incomplete closure, unexpected shared_libs, a
-#      shared-lib build, a non-$ORIGIN run path and a host whose identity is
-#      not listed are refused, a listed host is accepted; modular.cfg is
-#      rendered with the one run path @loader_path/lib), and run_check.sh
+#      (applets only from /bin and /usr/bin, anything else refused), and run_check.sh
 #      (clears DYLD_* as well as LD_*), and gate_runner.sh (the test sees
 #      DYLD_LIBRARY_PATH although the `env` applet prunes it, as on macOS).
 #   7. Live, on the macOS workers (SKIP unless both `[komira_re]
@@ -44,8 +39,10 @@
 #      path is @loader_path/lib and which loads only the runtime library and
 #      the system; the mojo_shared_lib examples and their gates, and
 #      libgate_ok's welded test, pass there (both start through
-#      gate_runner.sh and need DYLD_LIBRARY_PATH); and a compile whose
-#      host list names no worker is refused (exit 2) on the worker.
+#      gate_runner.sh and need DYLD_LIBRARY_PATH); the compile wrapper's
+#      process cases (tests//functional/watchdog:cases_darwin) pass there; and
+#      a compile whose host list names no worker is refused (exit 2) on the
+#      worker.
 
 set -u
 mkdir -p "$1" && LOG=$(cd "$1" && pwd) || { echo "usage: $0 <log_dir>" >&2; exit 2; }
@@ -81,7 +78,7 @@ compile_verdict() { # aquery --json: the Mojo compile commands use the macOS too
     bad=$(printf '%s\n' "$rows" | awk -F '\t' '
         NF < 2 { next }
         {
-            n = split("darwin/__busybox.sh__/busybox.sh|darwin/__mojo_wrapper.sh__/mojo_wrapper.sh|toolchains/darwin/__mojo_compiler__/|toolchains/darwin/__link__/| 11.0, |--watchdog-idle-secs=300, --watchdog-sample-secs=30, ", need, "|")
+            n = split("mojo/__mojo_compile_darwin__/|toolchains/darwin/__mojo_compiler__/|--deployment-target=11.0, |--macos-host=0.0-check, |--watchdog-idle-secs=300, --watchdog-sample-secs=30, ", need, "|")
             for (i = 1; i <= n; i++) if (index($2, need[i]) == 0) print $1 " lacks \047" need[i] "\047"
             if (index($2, "zig") > 0) print $1 " names zig"
             if ($1 != "mojo_precompile" && index($2, "--target-cpu, apple-m1") == 0) print $1 " does not target apple-m1"
@@ -265,11 +262,11 @@ fi
 # ---- 2. set: resolution and load-time refusals --------------------------------
 want=$(printf '%s komira//tools/build/platforms:darwin-arm64\n' "${MOJO_TARGETS[@]/#\/\//komira//}"
        printf '%s komira//tools/build/platforms:linux-x86_64\n' komira//tools/build/toolchains/darwin:mojo_compiler komira//tools/build/toolchains/darwin:mojo_runtime \
-           komira//tools/build/toolchains/darwin:gate_runner komira//tools/build/toolchains/darwin:launcher komira//tools/build/toolchains/darwin:link)
+           komira//tools/build/toolchains/darwin:gate_runner komira//tools/build/toolchains/darwin:launcher)
 want=$(printf '%s\n' "$want" | LC_ALL=C sort)
 if ! got=$(resolve darwin_set "${PLACEHOLDER[@]}" "${DARWIN[@]}" "${MOJO_TARGETS[@]}" \
         komira//tools/build/toolchains/darwin:mojo_compiler komira//tools/build/toolchains/darwin:mojo_runtime komira//tools/build/toolchains/darwin:gate_runner \
-        komira//tools/build/toolchains/darwin:launcher komira//tools/build/toolchains/darwin:link); then
+        komira//tools/build/toolchains/darwin:launcher); then
     fail "set: audit failed (see $LOG/darwin_set.txt)"
 elif [ "$(printf '%s\n' "$got" | LC_ALL=C sort)" != "$want" ]; then
     fail "set: resolution differs: $(diff <(printf '%s\n' "$want") <(printf '%s\n' "$got" | LC_ALL=C sort) | grep '^[<>]' | tr '\n' ' ')"
@@ -301,7 +298,7 @@ else
 fi
 if ! "$BUCK2" build "${UNSET[@]}" 'komira//tools/build/toolchains/darwin/...' > "$LOG/darwin_wildcard.txt" 2>&1; then
     fail "unset: a wildcard over tools/build/toolchains/darwin fails without a macOS platform (see $LOG/darwin_wildcard.txt)"
-elif ! grep -q 'komira//tools/build/toolchains/darwin:link ' "$LOG/darwin_wildcard.txt" ||
+elif ! grep -q 'komira//tools/build/toolchains/darwin:gate_runner ' "$LOG/darwin_wildcard.txt" ||
     ! grep -q 'komira//tools/build/toolchains/darwin:mojo ' "$LOG/darwin_wildcard.txt"; then
     fail "unset: the wildcard did not report the darwin-only targets as skipped (see $LOG/darwin_wildcard.txt)"
 else
@@ -319,7 +316,7 @@ elif ! verdict=$(compile_verdict "$LOG/darwin_aquery.json"); then
 elif grep -oE "$abs_path_re" "$LOG/darwin_aquery.json" > "$LOG/darwin_abs_paths.txt"; then
     fail "commands: absolute paths in darwin action commands: $(sort -u "$LOG/darwin_abs_paths.txt" | tr '\n' ' ')"
 else
-    pass "commands: $verdict use the macOS wrapper, the osx-arm64 closure and apple-m1; no zig, no absolute path"
+    pass "commands: $verdict use the macOS wrapper (mojo_compile_darwin) with the deployment target and host list, the osx-arm64 closure and apple-m1; no zig, no absolute path"
 fi
 
 # ---- 4. linux actions unchanged by the darwin key -----------------------------
@@ -349,7 +346,7 @@ else
     fi
     cfg="$(out mojo_compiler)/share/max/modular.cfg"
     if ! grep -qxF 'shared_libs = -Xlinker,-rpath,-Xlinker,@@MOJO_TOOLCHAIN_ROOT@@/lib;' "$cfg"; then
-        fail "closure: modular.cfg's shared_libs is not what tools/build/mojo/darwin/mojo_wrapper.sh expects (see $cfg)"
+        fail "closure: modular.cfg's shared_libs is not what the macOS compile wrapper (mojo_compile_macos.zig) expects (see $cfg)"
     elif [ -e "$(out mojo_compiler)/bin/lld" ]; then
         fail "closure: bin/lld is in the closure, but links go through the cc on PATH"
     else
@@ -380,212 +377,13 @@ elif [ "$(readlink "$U/bin/sh")" != "$BB" ] || [ -e "$U/bin/curl" ]; then
 else
     pass "busybox.sh: applets run from /bin and /usr/bin, anything else refused (127)"
 fi
-sed 's|^exec /usr/bin/cc |printf "[%s]" |' tools/build/mojo/darwin/cc > "$U/cc"
-got=$(sh "$U/cc" -o out -Xlinker -rpath -Xlinker /sandbox/lib x.o -Xlinker -L/l -Wl,-rpath,/q -rpath /z -lm)
-printf 'libc.a\n-lc++\n' > "$U/tail"
-got2=$(KOMIRA_CC_RUNPATH=@loader_path/../.. KOMIRA_CC_LINK_TAIL="$U/tail" sh "$U/cc" -o out x.o)
-if ! grep -q '^exec /usr/bin/cc ' tools/build/mojo/darwin/cc; then
-    fail "cc shim: it no longer ends in exec /usr/bin/cc (update this check)"
-elif [ "$got" != "[-Wl,-S][-Wl,-rpath,@loader_path/lib][-o][out][x.o][-Xlinker][-L/l][-lm]" ]; then
-    fail "cc shim: rewrote the command line to $got"
-elif [ "$got2" != "[-Wl,-S][-Wl,-rpath,@loader_path/../..][-o][out][x.o][libc.a][-lc++]" ]; then
-    fail "cc shim: with a run path and a link tail, rewrote the command line to $got2"
-else
-    pass "cc shim: every run path replaced by the wrapper's (@loader_path/lib by default); the link tail goes last"
-fi
-# host_identity.sh against stand-ins for the host tools it runs: every tool is
-# named by absolute path, so a copy with those paths rewritten runs here.
-H="$U/host"
-mkdir -p "$H"
-stub() { printf '#!/bin/sh\n%s\n' "$2" > "$H/$1"; chmod +x "$H/$1"; }
-stub xcode-select 'echo /Library/Developer/CommandLineTools'
-stub xcrun 'case "$1" in --show-sdk-version) echo 26.5 ;; --show-sdk-build-version) echo 25F71 ;; *) exit 1 ;; esac'
-stub cc 'echo "Apple clang version 17.0.0 (clang-1700.3.19.1)"; echo "Target: arm64-apple-darwin25.5.0"'
-stub ld 'echo "@(#)PROGRAM:ld PROJECT:ld-1167.5" >&2; echo "BUILD 08:00:00 Jan  1 2026" >&2'
-stub sw_vers '[ "$1" = -buildVersion ] && echo 25F80'
-stub md5 '[ "$1" = -q ] && /usr/bin/md5sum | /usr/bin/cut -c1-32'
-stub sed 'exec /usr/bin/sed "$@"'
-sed -e "s|/usr/bin/xcode-select|$H/xcode-select|; s|/usr/bin/xcrun|$H/xcrun|g; s|/usr/bin/cc|$H/cc|" \
-    -e "s|/usr/bin/ld|$H/ld|; s|/usr/bin/sw_vers|$H/sw_vers|; s|/sbin/md5|$H/md5|; s|/usr/bin/sed|$H/sed|" \
-    tools/build/mojo/darwin/host_identity.sh > "$U/host_identity.sh"
-hid() { (PATH="$U/bin" sh "$U/host_identity.sh" "$@"); }
-fields_want=$(printf '%s\n' developer_dir=/Library/Developer/CommandLineTools sdk_version=26.5 sdk_build=25F71 \
-    'cc=Apple clang version 17.0.0 (clang-1700.3.19.1)' 'ld=@(#)PROGRAM:ld PROJECT:ld-1167.5' os_build=25F80)
-host_want="26.5-$(printf '%s\n' "$fields_want" | md5sum | cut -c1-16)"
-if grep -E '/(usr/)?s?bin/' "$U/host_identity.sh" | grep -v "$H/" | grep -vq '^#'; then
-    fail "host_identity.sh: it runs a host tool this check does not stand in for: $(grep -nE '/(usr/)?s?bin/' "$U/host_identity.sh" | grep -v "$H/" | grep -v ':#' | tr '\n' ' ')"
-elif [ "$(hid --fields)" != "$fields_want" ]; then
-    fail "host_identity.sh: --fields printed $(hid --fields | tr '\n' '|')"
-elif [ "$(hid)" != "$host_want" ]; then
-    fail "host_identity.sh: printed '$(hid)', expected '$host_want'"
-else
-    bad=""
-    for f in xcode-select xcrun cc ld sw_vers; do
-        cp "$H/$f" "$H/$f.good"
-        stub "$f" 'echo other-build-99 ; echo other-build-99 >&2'
-        [ "$(hid 2> /dev/null)" != "$host_want" ] || bad="$bad $f"
-        mv "$H/$f.good" "$H/$f"
-    done
-    cp "$H/sw_vers" "$H/sw_vers.good"
-    stub sw_vers 'exit 1'
-    hid > /dev/null 2> "$U/hid_err.txt"
-    rc=$?
-    mv "$H/sw_vers.good" "$H/sw_vers"
-    if [ -n "$bad" ]; then
-        fail "host_identity.sh: the value does not change with the output of:$bad"
-    elif [ "$rc" != 2 ] || ! grep -q "cannot read 'os_build'" "$U/hid_err.txt"; then
-        fail "host_identity.sh: an unreadable field was not refused (rc=$rc)"
-    else
-        pass "host_identity.sh: the value covers developer dir, SDK version and build, cc, ld and OS build; an unreadable field is refused"
-    fi
-fi
-
+# The compile wrapper's macOS behaviours (the cc shim, the host identity,
+# modular.cfg, the refusals, the watchdog) are no longer shell scripts to run
+# here: the unit tests of komira//tools/build/mojo:mojo_compile_darwin pin
+# them on the farm (linux actions), and its process cases,
+# tests//functional/watchdog:cases_darwin, run on the macOS workers (section 7).
 TC="$U/tc"
-mkdir -p "$TC/bin" "$TC/lib" "$TC/share/max" "$U/link" "$U/run"
-printf '#!/bin/sh\nexit 0\n' > "$TC/bin/mojo"
-chmod +x "$TC/bin/mojo"
-printf 'x' > "$TC/lib/libKGENCompilerRTShared.dylib"
-printf 'bin/mojo\nlib/libKGENCompilerRTShared.dylib\nshare/max/modular.cfg\n' > "$TC/CLOSURE_MANIFEST"
-cfg='[mojo-max]\ndriver_path = @@MOJO_TOOLCHAIN_ROOT@@/bin/mojo\nshared_libs = -Xlinker,-rpath,-Xlinker,@@MOJO_TOOLCHAIN_ROOT@@/lib;\n'
-printf "$cfg" > "$TC/share/max/modular.cfg"
-cp tools/build/mojo/darwin/cc "$U/link/cc"
-cp "$U/host_identity.sh" "$U/link/host_identity.sh"
-printf '0.0-check\n' > "$U/link/macos_hosts"
-wrap() { (cd "$U/run" && rm -rf .komira_action && sh "$OLDPWD/tools/build/mojo/darwin/mojo_wrapper.sh" "$BB" "$TC" "$U/link" 11.0 "$@" -- build x.mojo -o out > "$U/wrap.txt" 2>&1); }
-wrap
-rc=$?
-rendered="$U/run/.komira_action/modular/modular.cfg"
-if [ "$rc" != 2 ] || ! grep -q "this host's identity is '$host_want', not one of \\[0.0-check \\]" "$U/wrap.txt" ||
-    ! grep -qxF 'sdk_build=25F71' "$U/wrap.txt"; then
-    fail "wrapper: an unlisted host was not refused with its fields (rc=$rc, see $U/wrap.txt)"
-elif ! grep -qxF 'shared_libs = -Xlinker,-rpath,-Xlinker,@loader_path/lib,-Xlinker,-S;' "$rendered" ||
-    grep -qF '@@MOJO' "$rendered" || ! grep -qxF "driver_path = $TC/bin/mojo" "$rendered"; then
-    fail "wrapper: modular.cfg rendered wrongly (see $rendered)"
-else
-    # Same SDK version, another toolchain: refused, not matched on the version.
-    printf '26.5-ffffffffffffffff\n' > "$U/link/macos_hosts"
-    wrap
-    rc_same_sdk=$?
-    printf '26.5-ffffffffffffffff\n%s\n' "$host_want" > "$U/link/macos_hosts"
-    wrap --runpath='$ORIGIN/x' --shared-lib-probe 2> /dev/null
-    rc_bad_opt=$?
-    wrap --runpath=/abs
-    rc_abs=$?
-    grep -q 'is not \$ORIGIN-relative' "$U/wrap.txt" || rc_abs=x
-    (cd "$U/run" && rm -rf .komira_action && sh "$OLDPWD/tools/build/mojo/darwin/mojo_wrapper.sh" "$BB" "$TC" "$U/link" 11.0 -- \
-        build --emit shared-lib x.mojo -o out > "$U/wrap.txt" 2>&1)
-    rc_shared=$?
-    grep -q 'bundles are linux only' "$U/wrap.txt" || rc_shared=x
-    # A C-ABI library names itself for dyld (mojo_shared_lib) and is let through to
-    # the compile; the bundle's `-soname` spelling is still refused.
-    (cd "$U/run" && rm -rf .komira_action && sh "$OLDPWD/tools/build/mojo/darwin/mojo_wrapper.sh" "$BB" "$TC" "$U/link" 11.0 -- \
-        build --emit shared-lib -Xlinker -soname -Xlinker x.so x.mojo -o out > "$U/wrap.txt" 2>&1)
-    rc_soname=$?
-    grep -q 'bundles are linux only' "$U/wrap.txt" || rc_soname=x
-    (cd "$U/run" && rm -rf .komira_action && sh "$OLDPWD/tools/build/mojo/darwin/mojo_wrapper.sh" "$BB" "$TC" "$U/link" 11.0 -- \
-        build --emit shared-lib -Xlinker -install_name -Xlinker @rpath/x.dylib x.mojo -o out > "$U/wrap.txt" 2>&1)
-    rc_dylib=$?
-    grep -q "compiler exited 0 but out is missing" "$U/wrap.txt" || rc_dylib=x
-    wrap --runpath='$ORIGIN/../..' --source-root=src
-    rc=$?
-    # The stand-in compiler writes nothing, so a host that passes the identity
-    # check reaches the output check (exit 3).
-    if [ "$rc_same_sdk" != 2 ]; then
-        fail "wrapper: a host with a listed SDK version but another toolchain digest was accepted (rc=$rc_same_sdk)"
-    elif [ "$rc_bad_opt" != 2 ] || [ "$rc_abs" != 2 ] || [ "$rc_shared" != 2 ] || [ "$rc_soname" != 2 ]; then
-        fail "wrapper: an unknown option, an absolute run path or a bundle shared-lib build was not refused ($rc_bad_opt $rc_abs $rc_shared $rc_soname)"
-    elif [ "$rc_dylib" != 3 ]; then
-        fail "wrapper: a self-named (install_name) shared-lib build was refused, or did not reach the compile (rc=$rc_dylib, see $U/wrap.txt)"
-    elif [ "$rc" != 3 ] || ! grep -q "compiler exited 0 but out is missing" "$U/wrap.txt"; then
-        fail "wrapper: a listed host was not accepted (rc=$rc, see $U/wrap.txt)"
-    else
-        printf "$cfg" | sed 's|@@MOJO_TOOLCHAIN_ROOT@@/lib;|/opt/lib;|' > "$TC/share/max/modular.cfg"
-        wrap
-        rc=$?
-        if [ "$rc" != 2 ] || ! grep -q "shared_libs is not the one run path" "$U/wrap.txt"; then
-            fail "wrapper: an unexpected shared_libs was not refused (rc=$rc, see $U/wrap.txt)"
-        else
-            printf "$cfg" > "$TC/share/max/modular.cfg"
-            : > "$TC/lib/libKGENCompilerRTShared.dylib"
-            wrap
-            rc=$?
-            if [ "$rc" != 2 ] || ! grep -q "REFUSING: toolchain member 'lib/libKGENCompilerRTShared.dylib'" "$U/wrap.txt"; then
-                fail "wrapper: an incomplete closure was not refused (rc=$rc, see $U/wrap.txt)"
-            else
-                pass "wrapper: refuses an incomplete closure, an unexpected shared_libs, a shared-lib build, a non-\$ORIGIN run path and an unlisted host; accepts a listed one; renders @loader_path/lib"
-            fi
-        fi
-    fi
-fi
-
-# The compile watchdog, on this client (ps(1) here is procps, on the workers
-# macOS's; the wrapper reads only fields both print). The stand-in compiler
-# reads its behaviour from run/mode: `hang` parks itself and a child for 30 s
-# (a watchdog that does not fire fails the case, it does not hang it), `spin`
-# uses CPU for 5 s in the shell itself (a loop of forks would put its CPU in
-# children reaped between samples, which ps(1) does not count).
-printf 'x' > "$TC/lib/libKGENCompilerRTShared.dylib"
-printf "$cfg" > "$TC/share/max/modular.cfg"
-printf '%s\n' "$host_want" > "$U/link/macos_hosts"
-cat > "$TC/bin/mojo" <<'MOJO'
-#!/bin/sh
-out=""; prev=""
-for a in "$@"; do [ "$prev" = -o ] && out=$a; prev=$a; done
-case "$(cat mode)" in
-    hang) echo $$ > compiler.pid; /bin/sleep 30 & echo $! > child.pid; wait ;;
-    spin) end=$(($(/bin/date +%s) + 5)); while [ "$(/bin/date +%s)" -lt "$end" ]; do i=0; while [ $i -lt 20000 ]; do i=$((i + 1)); done; done ;;
-esac
-echo compiled > "$out"
-MOJO
-chmod +x "$TC/bin/mojo"
-alive() { # pid: a live process, not a zombie
-    case "$(sed -n 's/.*) \([A-Za-z]\).*/\1/p' "/proc/$1/stat" 2> /dev/null)" in "" | Z | X) return 1 ;; *) return 0 ;; esac
-}
-survivors() { # the stand-in compiler and its child, if still alive
-    for p in $(cat "$U/run/compiler.pid" "$U/run/child.pid" 2> /dev/null); do alive "$p" && printf ' %s' "$p"; done
-}
-reap() { for p in $(cat "$U/run/compiler.pid" "$U/run/child.pid" 2> /dev/null); do kill -9 "$p" 2> /dev/null; done; rm -f "$U/run/compiler.pid" "$U/run/child.pid"; }
-KNOBS="--watchdog-idle-secs=3 --watchdog-sample-secs=1"
-echo hang > "$U/run/mode"
-# shellcheck disable=SC2086 # KNOBS is two flags
-wrap $KNOBS
-wd_hang=$?
-cp "$U/wrap.txt" "$U/wrap_hang.txt"
-sleep 1
-wd_hang_left=$(survivors)
-grep -q 'mojo-watchdog: killed deadlocked compiler' "$U/wrap.txt" || wd_hang="$wd_hang(no message)"
-reap
-echo spin > "$U/run/mode"
-# shellcheck disable=SC2086 # KNOBS is two flags
-wrap $KNOBS
-wd_spin=$?
-cp "$U/wrap.txt" "$U/wrap_spin.txt"
-echo hang > "$U/run/mode"
-(cd "$U/run" && rm -rf .komira_action && exec sh "$OLDPWD/tools/build/mojo/darwin/mojo_wrapper.sh" "$BB" "$TC" "$U/link" 11.0 \
-    --watchdog-idle-secs=600 --watchdog-sample-secs=1 -- build x.mojo -o out > "$U/wrap_killed.txt" 2>&1) &
-w=$!
-n=0
-while [ ! -s "$U/run/child.pid" ] && [ "$n" -lt 20 ]; do sleep 1; n=$((n + 1)); done
-kill -s KILL "$w"
-wait "$w" 2> /dev/null
-n=0
-while [ -n "$(survivors)" ] && [ "$n" -lt 5 ]; do sleep 1; n=$((n + 1)); done
-wd_kill_left=$(survivors)
-[ -s "$U/run/child.pid" ] || wd_kill_left=" (the stand-in did not start)"
-reap
-wrap --watchdog-idle-secs=5m
-wd_bad=$?
-if [ "$wd_hang" != 124 ] || [ -n "$wd_hang_left" ]; then
-    fail "wrapper watchdog: a hung compile was not killed with 124 and the message (rc=$wd_hang, alive:${wd_hang_left:- none}; see $U/wrap_hang.txt)"
-elif [ "$wd_spin" != 0 ]; then
-    fail "wrapper watchdog: a compile using CPU for 5 s did not finish (rc=$wd_spin, see $U/wrap_spin.txt)"
-elif [ -n "$wd_kill_left" ]; then
-    fail "wrapper watchdog: SIGKILL to the wrapper left its compiler running:$wd_kill_left (see $U/wrap_killed.txt)"
-elif [ "$wd_bad" != 2 ]; then
-    fail "wrapper watchdog: a malformed knob was not refused (rc=$wd_bad)"
-else
-    pass "wrapper watchdog: a hung compile is killed (124), one using CPU is not, a killed wrapper takes its compiler with it, a malformed knob is refused"
-fi
+mkdir -p "$TC/lib"
 
 # run_check.sh starts the binary with no library path of any loader.
 printf '#!/bin/sh\necho "[${LD_LIBRARY_PATH-}${LD_PRELOAD-}${DYLD_LIBRARY_PATH-}${DYLD_FALLBACK_LIBRARY_PATH-}${DYLD_INSERT_LIBRARIES-}]"\n' > "$U/envbin"
@@ -689,6 +487,14 @@ else
         fail "live: the welded test of //tools/build/examples/libgate_ok failed on macOS (see $LOG/darwin_welded.log)"
     else
         pass "live: a mojo_library's welded test passes on macOS (libgate_ok)"
+    fi
+    # The compile wrapper's process cases: its watchdog (session, tether,
+    # libproc tree), exact environment and refusals, on a macOS worker.
+    if ! timeout 900 "$BUCK2" --isolation-dir "$ISO" build "${DARWIN[@]}" \
+            tests//functional/watchdog:cases_darwin > "$LOG/darwin_watchdog_cases.log" 2>&1; then
+        fail "live: the macOS compile wrapper's process cases failed (see $LOG/darwin_watchdog_cases.log)"
+    else
+        pass "live: the macOS compile wrapper's process cases pass on macOS (tests//functional/watchdog:cases_darwin)"
     fi
     for t in missing_export:'MISSING EXPORT: neg_missing' failing_driver:'GATED TEST FAILED' plain_leaks:'plain_hidden leaked into the dynamic symbol table'; do
         if timeout 900 "$BUCK2" --isolation-dir "$ISO" build --no-remote-cache "${DARWIN[@]}" "tests//negative/shared_lib:${t%%:*}" > "$LOG/darwin_neg_${t%%:*}.log" 2>&1; then
