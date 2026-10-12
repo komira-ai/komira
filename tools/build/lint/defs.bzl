@@ -12,17 +12,19 @@ target builds while a script the rules run has a finding.
 A validation is not an input of the targets it guards: adding or fixing a
 lint changes no other action's digest.
 
-The lint action is lint.sh, under the pinned busybox; the linters are pinned
-downloads (tools/build/lint/BUCK). Each rule's default output is the validation
-result, a JSON file whose message holds the findings.
+The lint action is the Zig tool //tools/build/lint/tool:lint (its
+src/main.zig says each kind), run with no shell; the linters are pinned
+downloads (tools/build/lint/BUCK). pointer_lint and public_boundary each run
+a Zig tool of their own (pointer_lint.zig there, and
+//tools/build/lint/public_boundary). Each rule's default output is the
+validation result, a JSON file whose message holds the findings.
 """
 
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":doc_tree.bzl", "DocTreeInfo", "collect_docs", "declares_docs")
 
 _COMMON = {
-    "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
-    "_script": attrs.source(default = "komira//tools/build/lint:lint.sh"),
+    "_lint": attrs.exec_dep(default = "komira//tools/build/lint/tool:lint", providers = [RunInfo]),
 }
 
 def _stage(ctx, files):
@@ -40,12 +42,14 @@ def _stage(ctx, files):
 
 def _lint(ctx, kind, tools, args, staged):
     result = ctx.actions.declare_output("validation.json")
-    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     package = ctx.label.package + "/" if ctx.label.package else ""
     ctx.actions.run(
-        cmd_args(bb, "sh", ctx.attrs._script, bb, result.as_output(), kind, staged, "{}//{}".format(ctx.label.cell, package), tools, "--", args),
+        cmd_args(ctx.attrs._lint[RunInfo], result.as_output(), kind, staged, "{}//{}".format(ctx.label.cell, package), tools, "--", args),
         category = "lint_" + kind,
     )
+    return _validation(kind, result)
+
+def _validation(kind, result):
     return [
         DefaultInfo(default_output = result),
         ValidationInfo(validations = [ValidationSpec(name = kind, validation_result = result)]),
@@ -140,16 +144,25 @@ def _retired_names_impl(ctx):
         fail("retired_names {}: names is empty, so it would check nothing".format(ctx.label))
     staged, copy = _stage(ctx, ctx.attrs.srcs)
     tree = ctx.attrs.tree[DefaultInfo].default_outputs[0]
+    if ctx.attrs.unchecked:
+        files = dict(ctx.attrs.tree[DocTreeInfo].files)
+        for path in ctx.attrs.unchecked:
+            if path not in files:
+                # An exemption must not outlive the file it was written for.
+                fail("retired_names {}: unchecked names {}, which is not in the tree; delete the entry".format(ctx.label, path))
+            files.pop(path)
+        tree = ctx.actions.copied_dir("checked_tree", files)
     args = [tree, "{}//".format(ctx.label.cell)] + ctx.attrs.names + ["--"] + [copy[s.short_path] for s in ctx.attrs.srcs]
     return _lint(ctx, "retired_names", [], args, staged)
 
 retired_names_rule = rule(
     impl = _retired_names_impl,
-    doc = "No file of `tree` (a doc_tree target: the root one holds every file of the cell) and no file in `srcs` (the dotfiles a glob skips) holds one of `names`, fixed strings, on a line without a YYYY-MM-DD date: a renamed package or type survives only in a dated history note. Spell each name in parts (`\"kci\" + \"_old\"`) so the BUCK file naming it does not hold it.",
+    doc = "No file of `tree` (a doc_tree target: the root one holds every file of the cell) and no file in `srcs` (the dotfiles a glob skips) holds one of `names`, fixed strings, on a line without a YYYY-MM-DD date: a renamed package or type survives only in a dated history note. Spell each name in parts (`\"kci\" + \"_old\"`) so the BUCK file naming it does not hold it. `unchecked` names files of `tree` (paths in the cell) left out: a fixture that must hold a retired name and cannot carry a date (JSON); an entry naming no file of `tree` is refused.",
     attrs = _COMMON | {
         "names": attrs.list(attrs.string()),
         "srcs": attrs.list(attrs.source(), default = []),
         "tree": attrs.dep(providers = [DocTreeInfo]),
+        "unchecked": attrs.list(attrs.string(), default = []),
     },
 )
 
@@ -178,23 +191,25 @@ def _pointer_lint_impl(ctx):
     else:
         staged = ctx.actions.copied_dir("tree", ctx.attrs.files)
     package = "{}//{}".format(ctx.label.cell, ctx.label.package + "/" if ctx.label.package else "")
-    args = [ctx.attrs.public_root]
+    result = ctx.actions.declare_output("validation.json")
+    args = [result.as_output(), staged, package, ctx.attrs.public_root]
     for ledger in [ctx.attrs.ffi, ctx.attrs.holds]:
         # Findings name a source of this package by its path in the cell, and a
         # file another package exports by its target.
         args += [ledger, str(ledger.owner.raw_target()) if ledger.owner != None else package + ledger.short_path]
-    return _lint(ctx, "pointer_lint", [ctx.attrs._reader], args, staged)
+    ctx.actions.run(cmd_args(ctx.attrs._tool[RunInfo], args), category = "lint_pointer_lint")
+    return _validation("pointer_lint", result)
 
 pointer_lint_rule = rule(
     impl = _pointer_lint_impl,
-    doc = "The Mojo pointer rules (docs/design/mojo_safety_and_idioms.md) over every .mojo file of `tree` (a doc_tree target: the root one holds every file of the cell) or, for a fixture, of `files` ({path in the tree: source}), never both: no wildcard origin outside the FFI modules `ffi` lists, no `unsafe_from_address=`, no partial move through a pointer, no `parallelize[`, no second declaration of libc read/open, and no public function of a library file under `public_root` taking or returning a pointer. `holds` lists the sites that predate the lint, per rule and file with an exact count, and only shrinks. lint.sh (kind pointer_lint) says the ledger formats; pointer_lint.awk, the reader, says what each rule matches.",
-    attrs = _COMMON | {
+    doc = "The Mojo pointer rules (docs/design/mojo_safety_and_idioms.md) over every .mojo file of `tree` (a doc_tree target: the root one holds every file of the cell) or, for a fixture, of `files` ({path in the tree: source}), never both: no wildcard origin outside the FFI modules `ffi` lists, no `unsafe_from_address=`, no partial move through a pointer, no `parallelize[`, no second declaration of libc read/open, and no public function of a library file under `public_root` taking or returning a pointer. `holds` lists the sites that predate the lint, per rule and file with an exact count, and only shrinks. The action is the Zig tool pointer_lint.zig, which says what each rule matches and the ledger formats; it reads Mojo through mojo_tokens.zig.",
+    attrs = {
         "ffi": attrs.source(),
         "files": attrs.dict(attrs.string(), attrs.source(), default = {}),
         "holds": attrs.source(),
         "public_root": attrs.string(default = "src"),
         "tree": attrs.option(attrs.dep(providers = [DocTreeInfo]), default = None),
-        "_reader": attrs.source(default = "komira//tools/build/lint:pointer_lint.awk"),
+        "_tool": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/lint:pointer_lint"),
     },
 )
 
@@ -209,17 +224,25 @@ def _public_boundary_impl(ctx):
     files.update(ctx.attrs.paths)
     staged = ctx.actions.copied_dir("tree", files)
     package = "{}//{}".format(ctx.label.cell, ctx.label.package + "/" if ctx.label.package else "")
-    args = []
-    for ledger in [ctx.attrs.holds, ctx.attrs.hosts]:
-        args += [ledger, str(ledger.owner.raw_target()) if ledger.owner != None else package + ledger.short_path]
-    args.append(ctx.attrs.deny if ctx.attrs.deny != None else "-")
-    args += [str(ctx.attrs.window_from), ctx.attrs.public_from]
-    return _lint(ctx, "public_boundary", [ctx.attrs._reader], args, staged)
+    args = [ctx.attrs._tool[RunInfo], "--tree", staged, "--prefix", package]
+    for flag, ledger in [("--holds", ctx.attrs.holds), ("--hosts", ctx.attrs.hosts)]:
+        # Findings name a ledger of this package by its path in the cell, and
+        # one another package exports by its target.
+        args += [flag, ledger, flag + "-name", str(ledger.owner.raw_target()) if ledger.owner != None else package + ledger.short_path]
+    if ctx.attrs.deny != None:
+        args += ["--deny", ctx.attrs.deny]
+    result = ctx.actions.declare_output("validation.json")
+    args += ["--from", str(ctx.attrs.window_from), "--public", ctx.attrs.public_from, "--out", result.as_output()]
+    ctx.actions.run(cmd_args(args), category = "lint_public_boundary")
+    return [
+        DefaultInfo(default_output = result),
+        ValidationInfo(validations = [ValidationSpec(name = "public_boundary", validation_result = result)]),
+    ]
 
 public_boundary_rule = rule(
     impl = _public_boundary_impl,
-    doc = "What a public repository may not hold, over every file of `tree` (a doc_tree target: the root one holds every file of the cell) or, for a fixture, of `files` ({path in the tree: source}), never both, plus `srcs` (the dotfiles a glob skips), the doc_tree of each other cell in `cells` (at its path), and `paths` ({path in the tree: source}, a file another cell exports, such as its dotfiles): no date from the year `window_from` up to `public_from` (the first day of the public history, YYYY-MM-01), home directory naming a person, private or written-out network address, URL host outside the reserved example names and the domains of `hosts`, email address outside the reserved example domains, or commit id in prose; binary data is not read (its path is), and the path of every file is read for dates, home directories and deny-list words. `holds` holds the findings a file must keep, per rule and file at an exact count, and only shrinks. `deny`, absent by default, is a list of words kept outside the repository (a private consumer's), one per line: a finding no row can hold. lint.sh (kind public_boundary) says the formats; public_boundary.awk, the reader, says what each rule matches.",
-    attrs = _COMMON | {
+    doc = "What a public repository may not hold, over every file of `tree` (a doc_tree target: the root one holds every file of the cell) or, for a fixture, of `files` ({path in the tree: source}), never both, plus `srcs` (the dotfiles a glob skips), the doc_tree of each other cell in `cells` (at its path), and `paths` ({path in the tree: source}, a file another cell exports, such as its dotfiles): no date from the year `window_from` up to `public_from` (the first day of the public history, YYYY-MM-01), home directory naming a person, private or written-out network address, URL host outside the reserved example names and the domains of `hosts`, email address outside the reserved example domains, or commit id in prose; binary data is not read (its path is), and the path of every file is read for dates, home directories and deny-list words. `holds` holds the findings a file must keep, per rule and file at an exact count, and only shrinks. `deny`, absent by default, is a list of words kept outside the repository (a private consumer's), one per line: a finding no row can hold. The check is the Zig tool //tools/build/lint/public_boundary (src/check.zig says what is read and the ledger formats, src/rules.zig what each rule matches), run with no shell.",
+    attrs = {
         "cells": attrs.dict(attrs.string(), attrs.dep(providers = [DocTreeInfo]), default = {}),
         "deny": attrs.option(attrs.source(), default = None),
         "files": attrs.dict(attrs.string(), attrs.source(), default = {}),
@@ -230,7 +253,7 @@ public_boundary_rule = rule(
         "public_from": attrs.string(),
         "tree": attrs.option(attrs.dep(providers = [DocTreeInfo]), default = None),
         "window_from": attrs.int(),
-        "_reader": attrs.source(default = "komira//tools/build/lint:public_boundary.awk"),
+        "_tool": attrs.exec_dep(default = "komira//tools/build/lint/public_boundary:public_boundary", providers = [RunInfo]),
     },
 )
 
@@ -317,7 +340,7 @@ def _linux(kwargs):
     kwargs.setdefault("exec_compatible_with", LINUX_X86_64)
     return kwargs
 
-# Every lint runs linux x86_64 tools (busybox, shellcheck): it reads a few files.
+# Every lint runs linux x86_64 tools (the lint tool, shellcheck): it reads a few files.
 def shell_lint(**kwargs):
     shell_lint_rule(**_linux(kwargs))
 

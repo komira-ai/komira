@@ -8,9 +8,6 @@ platform_table_cases()
 
 shell_lint(
     name = "shell_lint",
-    srcs = [
-        "check.sh",
-        "limits_retired.sh",
-    ],
+    srcs = ["check.sh"],
     visibility = ["komira//:tests_lints"],
 )

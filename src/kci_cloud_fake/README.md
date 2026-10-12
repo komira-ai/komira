@@ -20,7 +20,9 @@ Both deploy into a `FakeStore` that keeps every object's state, labels as
 written and a call log. Every object is stamped by the standard label rule
 and carries the `kci-retention` mark. Constructor arguments give a faulty
 variant: the k-th mutating call refused once, reads that lag, objects made
-outside kci before it ran. Nothing here talks to a real cloud.
+outside kci before it ran; and, on `FakeCloud`, a `trust_check` that raises,
+live reads of chosen nodes that raise, a lowering that hands a node to
+another resource, and a `realize` that raises. Nothing here talks to a real cloud.
 
 ## Examples
 
@@ -78,7 +80,33 @@ The same graph on `"fake-limited"` is refused by validate, with every reason
 at once (the service's public ingress, and the job it has no runner for), and
 the cloud serves no call:
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+from kci_cloud import Catalog, CellContext, Clouds, describe
+from kci_cloud_fake import FakeCloud, FakeLimitedCloud
+from kci_reconciler import CellScope, Provenance
+from kci_resource_proto.resource import ResourceList
+from komira_proto_codec import decode_json
+
+def shop_graph() raises -> ResourceList:
+    return decode_json[ResourceList](
+        '{"resource":['
+        '{"id":"api","service":{"image":{"digest":"sha256:a1"},"port":8080,"public":{}},'
+        '"uses":[{"target":{"resource":"nightly"},"access":"CALL"}]},'
+        '{"id":"nightly","containerJob":{"image":{"digest":"sha256:b2"}}},'
+        '{"id":"tick","schedule":{"cron":"0 3 * * *","timezone":"UTC","target":{"resource":"nightly"}}}'
+        ']}'
+    )
+
+def builtin_clouds() raises -> Clouds:
+    var clouds = Clouds(Catalog.v1())
+    clouds.add(describe(FakeCloud()))
+    clouds.add(describe(FakeLimitedCloud()))
+    return clouds^
+
+def cell() -> CellContext:
+    return CellContext(CellScope("shop", "blue", Provenance("run-1", "rev-1")))
+-->
 ```mojo
 from kci_cloud import apply_resources
 from kci_cloud_fake import FakeLimitedCloud

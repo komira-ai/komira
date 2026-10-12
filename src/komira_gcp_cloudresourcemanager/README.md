@@ -94,7 +94,39 @@ assert_equal(p.labels["team"], "data")
 A name outside the method's path pattern (`projects/*`) is refused before
 anything is written:
 
-<!-- mojo-hidden from std.testing import assert_equal -->
+<!-- mojo-hidden
+from std.testing import assert_equal
+from std.memory import ArcPointer
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_gcp_cloudresourcemanager.projects import GetProjectRequest, ProjectsClient
+from komira_gcp_core import StaticTokenSource
+from komira_http_client.client import HttpClient
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+comptime Client = ProjectsClient[ScriptedConnector, StaticTokenSource]
+
+def http_answer(status: String, body: String) -> List[UInt8]:
+    var text = (
+        String("HTTP/1.1 ") + status + "\r\nContent-Type: application/json\r\n"
+        + "Content-Length: " + String(body.byte_length())
+        + "\r\nConnection: close\r\n\r\n" + body
+    )
+    var out = List[UInt8]()
+    out.extend(Span(text.as_bytes()))
+    return out^
+
+def scripted_client(answer: List[UInt8], sent: ArcPointer[List[UInt8]]) raises -> Client:
+    var stream = ScriptedStream.from_read_script_with_capture(answer.copy(), sent)
+    var c = Client(
+        HttpClient[ScriptedConnector].with_defaults(ScriptedConnector.with_stream_tls(stream^)),
+        StaticTokenSource(String("test-access-token")),
+    )
+    c.set_rest_host(String("localhost"))
+    return c^
+-->
 ```mojo
 var sent = ArcPointer[List[UInt8]](List[UInt8]())
 var c = scripted_client(http_answer("200 OK", "{}"), sent)
@@ -113,7 +145,48 @@ The read-modify-write: read the policy (the options ride in the body), drop
 the first binding, and write it back; the write carries the etag the read
 gave, byte for byte:
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+from std.memory import ArcPointer
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_gcp_cloudresourcemanager.iam_policy import GetIamPolicyRequest, SetIamPolicyRequest
+from komira_gcp_cloudresourcemanager.options import GetPolicyOptions
+from komira_gcp_cloudresourcemanager.projects import ProjectsClient
+from komira_gcp_core import StaticTokenSource
+from komira_http_client.client import HttpClient
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+comptime Client = ProjectsClient[ScriptedConnector, StaticTokenSource]
+
+def http_answer(status: String, body: String) -> List[UInt8]:
+    var text = (
+        String("HTTP/1.1 ") + status + "\r\nContent-Type: application/json\r\n"
+        + "Content-Length: " + String(body.byte_length())
+        + "\r\nConnection: close\r\n\r\n" + body
+    )
+    var out = List[UInt8]()
+    out.extend(Span(text.as_bytes()))
+    return out^
+
+def scripted_client(answer: List[UInt8], sent: ArcPointer[List[UInt8]]) raises -> Client:
+    var stream = ScriptedStream.from_read_script_with_capture(answer.copy(), sent)
+    var c = Client(
+        HttpClient[ScriptedConnector].with_defaults(ScriptedConnector.with_stream_tls(stream^)),
+        StaticTokenSource(String("test-access-token")),
+    )
+    c.set_rest_host(String("localhost"))
+    return c^
+
+def policy_json() -> String:
+    return (
+        String('{"version":1,"etag":"BwXhqDuVJ8g=","bindings":[')
+        + '{"role":"roles/run.invoker","members":["serviceAccount:caller@example.com"]},'
+        + '{"role":"roles/viewer","members":["group:readers@example.com"]}]}'
+    )
+-->
 ```mojo
 var read_sent = ArcPointer[List[UInt8]](List[UInt8]())
 var reader = scripted_client(http_answer("200 OK", policy_json()), read_sent)
@@ -147,7 +220,49 @@ verb, the method, the HTTP status and the canonical code, and quotes no byte
 of the body (here, neither etag); `gcp_status_error_code` reads the code
 back, so a caller knows to read again:
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+from std.memory import ArcPointer
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_gcp_cloudresourcemanager.iam_policy import SetIamPolicyRequest
+from komira_gcp_cloudresourcemanager.policy import Policy
+from komira_gcp_cloudresourcemanager.projects import ProjectsClient
+from komira_gcp_core import CODE_ABORTED, StaticTokenSource, gcp_status_error_code
+from komira_http_client.client import HttpClient
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+from komira_proto_codec.codec import decode_json_lenient
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+comptime Client = ProjectsClient[ScriptedConnector, StaticTokenSource]
+
+def http_answer(status: String, body: String) -> List[UInt8]:
+    var text = (
+        String("HTTP/1.1 ") + status + "\r\nContent-Type: application/json\r\n"
+        + "Content-Length: " + String(body.byte_length())
+        + "\r\nConnection: close\r\n\r\n" + body
+    )
+    var out = List[UInt8]()
+    out.extend(Span(text.as_bytes()))
+    return out^
+
+def scripted_client(answer: List[UInt8], sent: ArcPointer[List[UInt8]]) raises -> Client:
+    var stream = ScriptedStream.from_read_script_with_capture(answer.copy(), sent)
+    var c = Client(
+        HttpClient[ScriptedConnector].with_defaults(ScriptedConnector.with_stream_tls(stream^)),
+        StaticTokenSource(String("test-access-token")),
+    )
+    c.set_rest_host(String("localhost"))
+    return c^
+
+def policy_json() -> String:
+    return (
+        String('{"version":1,"etag":"BwXhqDuVJ8g=","bindings":[')
+        + '{"role":"roles/run.invoker","members":["serviceAccount:caller@example.com"]},'
+        + '{"role":"roles/viewer","members":["group:readers@example.com"]}]}'
+    )
+-->
 ```mojo
 var sent = ArcPointer[List[UInt8]](List[UInt8]())
 var c = scripted_client(
