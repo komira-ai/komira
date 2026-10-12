@@ -3,6 +3,7 @@
 const std = @import("std");
 const Outcome = @import("search.zig").Outcome;
 const Failure = @import("classify.zig").Failure;
+const flake = @import("flake.zig");
 
 pub const Verdict = enum { culprit, flake, inconclusive };
 pub const Role = enum { recheck, search };
@@ -46,6 +47,9 @@ pub const Report = struct {
     probes: []const Probe,
     failures: []const Failure,
     infra: []const Infra,
+    /// Set for `flake` when bisect measured it (`--flake-runs`): each target
+    /// built K times at bad (flake.zig).
+    flake_runs: ?flake.Measurement = null,
 };
 
 /// N of a subject `Merge pull request #N ...`, the subject GitHub gives a
@@ -144,5 +148,7 @@ pub fn write(r: Report, out: anytype) !void {
         try w.endObject();
     }
     try w.endArray();
+    try w.objectField("flake_runs");
+    if (r.flake_runs) |m| try flake.write(m, &w) else try w.write(null);
     try w.endObject();
 }

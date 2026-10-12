@@ -118,7 +118,4 @@ PYTHON_CEILING = [
     "file src/komira_arrow_ipc/tests/fixtures/arrow_ipc/gen_pyarrow_interop_fixtures.py",
     "file src/komira_parquet_codec/tests/fixtures/parquet/gen_pyarrow_fixtures.py",
     "file src/tests/e2e/komira_formats_e2e/tests/fixtures/orc/gen_pyarrow_orc_fixtures.py",
-
-    # The uv publish capture of kci_pkg_upload fidelity fixtures.
-    "file src/kci_pkg_upload/tests/fidelity/capture_uv_publish.py",
 ]

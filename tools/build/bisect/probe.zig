@@ -9,6 +9,10 @@
 //! then `kill`, and the worktree is removed. No `--isolation-dir`: each
 //! worktree is its own project, and the default isolation dir keeps output
 //! paths, and so cache hits, the same across worktrees.
+//!
+//! The steps are `add`, `prepare`, `build` and `remove`; `attempt` runs them
+//! once, and flake.zig runs many builds (and `bxl`, its check) in one
+//! prepared worktree.
 const std = @import("std");
 const classify = @import("classify.zig");
 const Git = @import("git.zig").Git;
@@ -116,37 +120,56 @@ pub fn buck2For(a: std.mem.Allocator, buck2: []const u8, worktree: []const u8) !
 
 pub const ProbeError = error{ Git, NotOwnProject };
 
-/// Builds the targets at `commit` once. error.Git: the worktree could not be
-/// made or removed (bisect stops). error.NotOwnProject: buck2 takes the
-/// worktree for part of another project (bisect stops; nothing was killed).
-/// `why` says which.
-pub fn attempt(cfg: Config, commit: []const u8, n: usize, why: *[]const u8) !Attempt {
-    const a = cfg.a;
-    const id = commit[0..@min(12, commit.len)];
-    const wt = try std.fmt.allocPrint(a, "{s}/probe-{s}", .{ cfg.work_dir, id });
-    const logs = try std.fmt.allocPrint(a, "{s}/logs", .{cfg.work_dir});
-    try std.fs.cwd().makePath(logs);
-    const report_path = try std.fmt.allocPrint(a, "{s}/{s}-{d}.build_report.json", .{ logs, id, n });
-    const log_path = try std.fmt.allocPrint(a, "{s}/{s}-{d}.buck2.log", .{ logs, id, n });
-    std.fs.deleteFileAbsolute(report_path) catch {};
+/// The worktree of `commit` under the work dir: `<work-dir>/probe-<id12>`.
+pub fn worktreePath(cfg: Config, commit: []const u8) ![]const u8 {
+    return std.fmt.allocPrint(cfg.a, "{s}/probe-{s}", .{ cfg.work_dir, commit[0..@min(12, commit.len)] });
+}
 
-    const started = std.time.milliTimestamp();
+/// `git worktree add --detach` of `commit`; error.Git with `why` set.
+pub fn add(cfg: Config, commit: []const u8, why: *[]const u8) ![]const u8 {
+    const wt = try worktreePath(cfg, commit);
     cfg.git.worktreeAdd(wt, commit) catch {
         why.* = cfg.git.last_err;
         return error.Git;
     };
-    const res = run(cfg, wt, report_path, log_path, why);
-    // The worktree goes whatever happened in it.
+    return wt;
+}
+
+/// `git worktree remove --force`; error.Git with `why` set.
+pub fn remove(cfg: Config, wt: []const u8, why: *[]const u8) !void {
     cfg.git.worktreeRemove(wt) catch {
         why.* = cfg.git.last_err;
         return error.Git;
     };
+}
+
+/// Builds the targets at `commit` once, in a worktree made for it and
+/// removed after. error.Git: the worktree could not be made or removed
+/// (bisect stops). error.NotOwnProject: buck2 takes the worktree for part of
+/// another project (bisect stops; nothing was killed). `why` says which.
+pub fn attempt(cfg: Config, commit: []const u8, n: usize, why: *[]const u8) !Attempt {
+    const started = std.time.milliTimestamp();
+    const wt = try add(cfg, commit, why);
+    const tag = try std.fmt.allocPrint(cfg.a, "{s}-{d}", .{ commit[0..@min(12, commit.len)], n });
+    const res = prepareAndBuild(cfg, wt, tag, why);
+    // The worktree goes whatever happened in it.
+    try remove(cfg, wt, why);
     var at = try res;
     at.seconds = @intCast(@divTrunc(std.time.milliTimestamp() - started, 1000));
     return at;
 }
 
-fn run(cfg: Config, wt: []const u8, report_path: []const u8, log_path: []const u8, why: *[]const u8) !Attempt {
+fn prepareAndBuild(cfg: Config, wt: []const u8, tag: []const u8, why: *[]const u8) !Attempt {
+    if (try prepare(cfg, wt, why)) |infra| return infra;
+    return build(cfg, wt, cfg.targets, &.{}, tag);
+}
+
+/// Readies a worktree for builds: the `--copy` files copied in, the
+/// submodules with `--submodules`, and buck2 checked to take the worktree
+/// for its own project. Null when it is ready; an infra attempt when a
+/// submodule update or `buck2 root` failed. error.NotOwnProject as for
+/// `attempt`.
+pub fn prepare(cfg: Config, wt: []const u8, why: *[]const u8) !?Attempt {
     const a = cfg.a;
     for (cfg.copies) |rel| {
         const from = try std.fs.path.join(a, &.{ cfg.repo, rel });
@@ -156,7 +179,7 @@ fn run(cfg: Config, wt: []const u8, report_path: []const u8, log_path: []const u
     }
     if (cfg.submodules) {
         cfg.git.submodules(wt) catch {
-            return infraAttempt(a, null, cfg.git.last_err);
+            return infraAttempt(null, cfg.git.last_err);
         };
     }
     const buck2 = try buck2For(a, cfg.buck2, wt);
@@ -164,37 +187,75 @@ fn run(cfg: Config, wt: []const u8, report_path: []const u8, log_path: []const u
     // The worktree must be its own project root: otherwise buck2 would build
     // (and `kill` would stop) the daemon of the project around it.
     const root = exec(a, &.{ buck2, "root", "--kind", "project" }, wt, cfg.env, 120) catch |e| {
-        return infraAttempt(a, null, try std.fmt.allocPrint(a, "cannot run {s}: {s}", .{ buck2, @errorName(e) }));
+        return infraAttempt(null, try std.fmt.allocPrint(a, "cannot run {s}: {s}", .{ buck2, @errorName(e) }));
     };
-    if (root.exit == null or root.exit.? != 0) return infraAttempt(a, root.exit, tail(root.stderr, 20));
+    if (root.exit == null or root.exit.? != 0) return infraAttempt(root.exit, tail(root.stderr, 20));
     const real = try std.fs.realpathAlloc(a, wt);
     const got = std.mem.trim(u8, root.stdout, " \r\n");
     if (!std.mem.eql(u8, got, real)) {
         why.* = try std.fmt.allocPrint(a, "buck2 takes the probe worktree {s} for part of the project at {s}; give a --work-dir outside any buck2 project", .{ real, got });
         return error.NotOwnProject;
     }
+    return null;
+}
+
+/// One `<verb> --build-report` of `targets` in a prepared worktree, with
+/// `extra` arguments after the `--buck2-arg`s, then `kill`. Its build
+/// report and output go to `<work-dir>/logs/<tag>.*`.
+pub fn build(cfg: Config, wt: []const u8, targets: []const []const u8, extra: []const []const u8, tag: []const u8) !Attempt {
+    const a = cfg.a;
+    const started = std.time.milliTimestamp();
+    const logs = try std.fmt.allocPrint(a, "{s}/logs", .{cfg.work_dir});
+    try std.fs.cwd().makePath(logs);
+    const report_path = try std.fmt.allocPrint(a, "{s}/{s}.build_report.json", .{ logs, tag });
+    const log_path = try std.fmt.allocPrint(a, "{s}/{s}.buck2.log", .{ logs, tag });
+    std.fs.deleteFileAbsolute(report_path) catch {};
+    const buck2 = try buck2For(a, cfg.buck2, wt);
 
     var argv = std.ArrayList([]const u8).init(a);
     try argv.appendSlice(&.{ buck2, @tagName(cfg.verb), "--build-report", report_path });
     try argv.appendSlice(cfg.buck2_args);
-    try argv.appendSlice(cfg.targets);
+    try argv.appendSlice(extra);
+    try argv.appendSlice(targets);
     const b = exec(a, argv.items, wt, cfg.env, cfg.timeout_s) catch |e| {
         _ = exec(a, &.{ buck2, "kill" }, wt, cfg.env, 120) catch {};
-        return infraAttempt(a, null, try std.fmt.allocPrint(a, "cannot run {s}: {s}", .{ buck2, @errorName(e) }));
+        return infraAttempt(null, try std.fmt.allocPrint(a, "cannot run {s}: {s}", .{ buck2, @errorName(e) }));
     };
     _ = exec(a, &.{ buck2, "kill" }, wt, cfg.env, 120) catch {};
     writeLog(log_path, argv.items, b) catch {};
 
     const report_bytes: ?[]const u8 = std.fs.cwd().readFileAlloc(a, report_path, 1 << 28) catch null;
-    const c = try classify.classify(a, b.exit, cfg.verb, report_bytes, cfg.targets);
+    const c = try classify.classify(a, b.exit, cfg.verb, report_bytes, targets);
     var t = tail(b.stderr, 20);
     if (b.timed_out) t = try std.fmt.allocPrint(a, "killed at --timeout-s {d}\n{s}", .{ cfg.timeout_s, t });
     if (c.outcome == .infra and c.reason.len > 0) t = try std.fmt.allocPrint(a, "{s}\n{s}", .{ c.reason, t });
-    return .{ .classified = c, .exit = b.exit, .seconds = 0, .tail = t };
+    return .{ .classified = c, .exit = b.exit, .seconds = @intCast(@divTrunc(std.time.milliTimestamp() - started, 1000)), .tail = t };
 }
 
-fn infraAttempt(a: std.mem.Allocator, exit: ?u8, msg: []const u8) !Attempt {
-    _ = a;
+/// `bxl <script> <--buck2-arg>... <extra>` in a prepared worktree, then
+/// `kill`; its output goes to `<work-dir>/logs/<tag>.buck2.log`. A buck2 that
+/// cannot be started is an Exec with exit null and the reason as stderr.
+pub fn bxl(cfg: Config, wt: []const u8, script: []const u8, extra: []const []const u8, tag: []const u8) !Exec {
+    const a = cfg.a;
+    const logs = try std.fmt.allocPrint(a, "{s}/logs", .{cfg.work_dir});
+    try std.fs.cwd().makePath(logs);
+    const log_path = try std.fmt.allocPrint(a, "{s}/{s}.buck2.log", .{ logs, tag });
+    const buck2 = try buck2For(a, cfg.buck2, wt);
+    var argv = std.ArrayList([]const u8).init(a);
+    try argv.appendSlice(&.{ buck2, "bxl" });
+    try argv.appendSlice(cfg.buck2_args);
+    try argv.appendSlice(extra);
+    try argv.append(script);
+    const b = exec(a, argv.items, wt, cfg.env, cfg.timeout_s) catch |e| {
+        _ = exec(a, &.{ buck2, "kill" }, wt, cfg.env, 120) catch {};
+        return .{ .exit = null, .timed_out = false, .stdout = "", .stderr = try std.fmt.allocPrint(a, "cannot run {s}: {s}", .{ buck2, @errorName(e) }) };
+    };
+    _ = exec(a, &.{ buck2, "kill" }, wt, cfg.env, 120) catch {};
+    writeLog(log_path, argv.items, b) catch {};
+    return b;
+}
+
+fn infraAttempt(exit: ?u8, msg: []const u8) Attempt {
     return .{ .classified = .{ .outcome = .infra, .reason = msg }, .exit = exit, .seconds = 0, .tail = msg };
 }
 

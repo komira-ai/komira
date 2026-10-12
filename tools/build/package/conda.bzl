@@ -23,11 +23,13 @@ library:
 
   * the name is `conda_name` of the library, else its import name (the `.mojoc`
     basename): lowercase letters, digits and `_`, starting with a letter;
-  * the run requirements are the platform guard, the exact Mojo compiler pin,
-    and each DIRECT dependency of the library, by its published name, at the
-    same version AND the same build string (`name ==V BUILD`: every package of a
-    release is lockstep, so the solver's closure is the build's, and a second
-    build of a dependency in the channel cannot be chosen); then, for each
+  * the run requirements are the platform guard, the glibc floor of a
+    library shipping native files (`__glibc >=<os_floor>` of the platform
+    table), the exact Mojo compiler pin, and each DIRECT dependency of the
+    library, by its published name, at the same version AND the same build
+    string (`name ==V BUILD`: every package of a release is lockstep, so the
+    solver's closure is the build's, and a second build of a dependency in
+    the channel cannot be chosen); then, for each
     soname the library opens at run time (`mojo_library(dlopen = [...])`,
     tools/build/mojo/dlopen.bzl), the conda-forge requirement
     tools/build/package/system_libs.bzl names for it, byte for byte, in
@@ -41,6 +43,11 @@ library:
     coverage gate held either (tools/build/coverage/README.md, "The build
     gate"): the conda package is the one target a library's coverage
     blocks, never the library or its dependents;
+  * a library's own C (`native` or `native_static` on the mojo_library;
+    native_facts.bzl) is packed at lib/: its shared library with its link
+    name, or its static archives, each with a `lib_files` row of
+    metadata.json; a shared library whose NEEDED names a komira owner
+    outside the Mojo deps closure is refused by the packer;
   * the library's README.md, when its package holds one, is installed at
     `share/doc/<name>/README.md` (a file of the package, listed in
     info/paths.json): what a user reads is inside what they installed, and
@@ -58,7 +65,8 @@ library:
     `tools/build/package/release_version.sh` prints all of them and the
     timestamp.
 
-A library that CANNOT be packaged (it links native code, has no tests, depends on
+A library that CANNOT be packaged (it links native code no library of its
+closure ships, has no tests, depends on
 a library with no package, declares in `dlopen` a soname system_libs.bzl does
 not name, opens a shared library at run time by a soname its `dlopen` does not
 declare or declares one no source opens, or its name is not a conda name) keeps
@@ -92,7 +100,9 @@ nothing else:
                                payload_sha256, doc_files (`[{path, sha256}]`,
                                [] without a README), dlopen
                                (`[{requirement, soname}]`, only when the
-                               library declares one) (sorted compact JSON)
+                               library declares one), lib_files
+                               (`[{kind, path, sha256}]`, only with native
+                               files) (sorted compact JSON)
 
 Sub-targets:
 
@@ -121,6 +131,7 @@ load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:coverage.bzl", "MojoCoverageGateInfo")
 load("@komira//tools/build/mojo:providers.bzl", "MojoInfo")
 load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
+load("@komira//tools/build/native:shared.bzl", "NativeSharedInfo", "linux_glibc_floor")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "asset")
 load(":kcov_guard.bzl", "KcovGuardInfo", "kcov_guard")
@@ -205,6 +216,42 @@ def _doc_args(info):
         return []
     return ["--doc-file", cmd_args(info.readme, format = "README.md={}")]
 
+def _native_args(ctx, info):
+    """(packer arguments, check arguments, [path, file] packed) of the
+    library's native files: its shared library (`native`, whose archives must
+    be exactly the library's C deps) or its static archives (`native_static`),
+    the glibc floor of the platform table they are held to, and, for the
+    packer only, the SONAME of every shared library the Mojo closure ships
+    (the komira owners a packed `.so` may name in NEEDED)."""
+    facts = info.native
+    native = ctx.attrs.native
+    soname = facts.soname if facts != None else None
+    if soname == None:
+        if native != None:
+            fail("{}: `native` is {}, but {} declares no `native`".format(ctx.label, native.label, ctx.attrs.lib.label))
+        if facts == None or not facts.static:
+            return [], [], []
+    files = []
+    packed = []
+    if soname != None:
+        if native == None:
+            fail("{}: {} declares `native`, but its package is not given it".format(ctx.label, ctx.attrs.lib.label))
+        ni = native[NativeSharedInfo]
+        if ni.library != info.import_name or ni.soname != soname:
+            fail("{}: {} is the shared library of {} ({}), not of {}".format(ctx.label, native.label, ni.library, ni.soname, info.import_name))
+        if ni.archives != facts.c_direct:
+            fail("{}: {} links {} whole, but the C deps of {} are {}: a library ships exactly its own C".format(ctx.label, native.label, ni.archives, ctx.attrs.lib.label, facts.c_direct))
+        if ni.glibc_floor != linux_glibc_floor():
+            fail("{}: {} was checked against glibc {}, the table's floor is {}".format(ctx.label, native.label, ni.glibc_floor, linux_glibc_floor()))
+        files.append(cmd_args("--lib-shared", cmd_args(ni.so, format = soname + "={}")))
+        packed.append(["lib/" + soname, ni.so])
+    for path, archive in facts.static:
+        files.append(cmd_args("--lib-static", cmd_args(archive, format = path[len("lib/"):] + "={}")))
+        packed.append([path, archive])
+    files += ["--glibc-floor", linux_glibc_floor()]
+    owners = [cmd_args("--closure-owner", o) for o in sorted(facts.sonames)]
+    return files + owners, files, packed
+
 def _conda_package_impl(ctx):
     lib = ctx.attrs.lib
     info = lib[MojoInfo]
@@ -225,6 +272,7 @@ def _conda_package_impl(ctx):
     if refusal != None:
         cmd = cmd_args(pack, "conda", "--name", name, "--refuse", refusal, "--out-dir", raw.as_output())
         payload = None
+        native_check = []
     else:
         tests = lib[DefaultInfo].sub_targets.get("tests")
         if tests == None or not tests[DefaultInfo].default_outputs:
@@ -233,7 +281,9 @@ def _conda_package_impl(ctx):
         sources = lib[DefaultInfo].sub_targets["src"][DefaultInfo].default_outputs[0]
         deps = [info.direct_conda[d].name for d in info.direct]
         extra_files = [["info/licenses/LICENSE", ctx.attrs._license_file]]
+        native_pack, native_check, native_packed = _native_args(ctx, info)
         packed.append(["lib/mojo/{}.mojoc".format(info.import_name), payload])
+        packed.extend(native_packed)
         packed.extend(extra_files)
         if info.readme != None:
             packed.append(["share/doc/{}/README.md".format(name), info.readme])
@@ -269,6 +319,7 @@ def _conda_package_impl(ctx):
             [cmd_args("--dep", d) for d in deps],
             _dlopen_args(info),
             _doc_args(info),
+            native_pack,
             "--out-dir",
             raw.as_output(),
         )
@@ -297,6 +348,7 @@ def _conda_package_impl(ctx):
             args += [cmd_args("--dep", info.direct_conda[d].name) for d in info.direct]
             args.append(_doc_args(info))
             args.append(_dlopen_args(info))
+            args.append(native_check)
         ctx.actions.run(
             cmd_args(args, extra, "--out", marker.as_output()),
             category = "conda_check",
@@ -363,6 +415,9 @@ _conda_package = rule(
         # MojoCoverageGateInfo says it has one and this is not set.
         "coverage_gate": attrs.option(attrs.dep(), default = None),
         "lib": attrs.dep(providers = [MojoInfo]),
+        # The library's own shared library (`native` of the mojo_library),
+        # packed at lib/<soname> with its link name; set by the macro.
+        "native": attrs.option(attrs.dep(providers = [NativeSharedInfo]), default = None),
         "stamp": attrs.string(),
         "subdir": attrs.string(),
         "summary": attrs.string(),
