@@ -11,8 +11,8 @@ projection pushdown, project merge, identity-project elimination and late
 materialization; materializing derived aggregate inputs; subquery
 decorrelation and scalar-subquery resolution through a `ScalarDepTable`
 of engine-supplied bindings; join-predicate decomposition,
-transitive edges and greedy join reordering with TDOM-based cardinality and
-per-column NDV providers; aggregate rewrites (functionally dependent group keys,
+transitive edges, greedy and DPccp join reordering with TDOM-based
+cardinality and per-column NDV providers; aggregate rewrites (functionally dependent group keys,
 eager and partial aggregation below joins, the SUM-of-offset rewrite,
 duplicate aggregate folding and common-aggregate dedup); join payload
 narrowing; limit and TopN rules, partition TopN fusion and window rewrites;
@@ -20,12 +20,23 @@ scan-share planning; the `OptimizerConfig` options value; and the non-raising
 `OptimizeResult`. Every rule takes a `LogicalPlan` and returns the rewritten
 plan (the duplicate-aggregate collect and find walks return hash counts and a
 subtree copy, and scan-share planning returns a `ScanSharePlan` descriptor);
-none executes anything. komira_optimizer has no driver that orders its passes.
+none executes anything. `optimizer_driver.optimize` runs the rules in their
+fixed order over one plan (`optimize_status` is its non-raising twin).
+
+Three read-only helpers sit beside the rules and are not run by the driver:
+`optimizer_dpccp_diagnostic` records one DPccp solve (each pass, every
+scored partition of a target subset with repeated emits counted, the final
+DP table) through the `optimizer_dpccp_observer` hooks in the enumerator;
+`optimizer_count_distinct` decides whether an aggregate is the streaming
+COUNT(DISTINCT) shape over a Parquet scan; `order_advisory` compares a
+plan's join order with the reorderer's and reports a written order
+estimated costlier.
 
 It depends on `komira_plan_ir`, `komira_plan_expr`, `komira_plan_stats`,
 `komira_arrow`, `komira_kernels`, `komira_collections`, `komira_exec_types`,
-`komira_scan_source`, `komira_scan_planning`, `komira_counters` and
-`komira_libc`.
+`komira_scan_source`, `komira_scan_planning`, `komira_counters`, `komira_libc`,
+`komira_agg_api` (the COUNT(DISTINCT) column-type gates) and `komira_async`
+(the join-reorder and order-advisory fire counters).
 
 Public API: import directly from sub-modules. No facade.
 """

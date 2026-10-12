@@ -1,0 +1,13 @@
+{
+ "name": "frame_cancelled_at_open",
+ "defect": "frame_open ignores the cancel flag, or leaks its input stream when it refuses",
+ "run": "frame",
+ "entry": "running_sum",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "options": {"cancel": true},
+ "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}],
+ "expect": {"status": "ERR_CANCELLED", "run_error": "UDF_CANCELLED"}
+}

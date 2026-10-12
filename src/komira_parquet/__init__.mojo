@@ -21,6 +21,31 @@ parser (`page_header_parser`), bloom filters and the row-group bloom pruner
 the partition-predicate mapping (`partition_pred_bridge`). The column
 chunk page walk in front of the selection gathers (`gather`) reads the
 selected rows of a chunk.
+
+It decodes a column chunk a chunk of rows at a time into a reused buffer
+(`subrg_column_cursor`, with `subrg_cursor_pages`, `subrg_dbp_trace` and
+`subrg_scan_route_trace`), holds a worker's reusable decode buffers
+(`column_decode_context`), decodes a nested leaf with its levels
+(`nested_decoder`) and reads one PLAIN page from a file range
+(`column_reader`).
+
+It decodes a whole flat column chunk into one column (`column_decoder`, with
+its steps in `column_decoder_state`, `column_decoder_pages`,
+`column_decoder_values`, `column_decoder_assemble`, `column_decoder_finish`
+and `column_decoder_strings`, and the dense-string rebuild counter in
+`dict_mat_counter`).
+
+It decides from a footer what a scan reads: the min/max row-group pruner
+and its all-match dual (`rg_pruner`), row selections (`row_selection`), the
+row groups a row window overlaps (`row_window`) and the Arrow types an
+`ARROW:schema` key names (`arrow_schema_hint`); and it reads a column chunk
+as stored (`bypass`). It keeps a session's parsed footers
+(`runtime_footer_cache`, with the pin budget in `footer_pin_budget`) and
+serves a footer's statistics to a planner (`table_stats`).
+
+It reads a local file a row group or a morsel at a time (`morsel_reader`,
+with its morsel windows in `morsel_slice`), and decodes a row group from
+bytes the caller already holds, with no I/O (`bytes_decode`).
 """
 
 from .byte_stream_split import (
@@ -93,3 +118,23 @@ from .bloom_reader import BloomFilterHeaderInfo, load_bloom_filter, parse_bloom_
 from .bloom_pruner import can_prune_row_group_by_bloom
 from .num_rows_cache import ParquetNumRowsCache
 from .partition_pred_bridge import pod_from_predicate, predicate_from_pod
+from .column_decoder import (
+    NumericDictCodes,
+    NumericDictCodesHolder,
+    decode_column_pages,
+)
+from .rg_pruner import all_match_row_count, can_prune_row_group, rg_all_match_row_group
+from .row_selection import IntervalCursor, RowInterval, RowSelection
+from .row_window import ParquetRowWindowResolution, resolve_row_group_window
+from .arrow_schema_hint import ArrowSchemaHint, arrow_schema_hint_from_metadata, refine_from_hint
+from .bypass import RawColumnChunk, read_raw_column_chunk
+from .footer_pin_budget import mmap_pin_budget_from_ram, resolve_mmap_pin_byte_cap
+from .runtime_footer_cache import ParquetMetadataCache, SharedParquetFooter
+from .table_stats import ParquetStatsProvider, collect_table_stats, read_parquet_table_stats
+from .morsel_reader import ColumnProjection, ParquetMorselReader
+from .bytes_decode import (
+    ByteRange,
+    decode_column_chunk_from_bytes,
+    decode_row_group_from_bytes,
+    row_group_byte_range,
+)

@@ -4,8 +4,8 @@ load(":stand_in.bzl", "stand_in_tzdata")
 # Planted defects for python_oracle's independence check (test 51): an
 # oracle's input that an action built must come from a target under
 # third_party/. Every target here must fail analysis;
-# tools/build/tests/run_tests.sh requires the failure written above it. The
-# oracles that work are in src/tests/helpers/komira_test_python.
+# tools/build/tests/run_tests.sh requires the failure written above it. No
+# test builds an oracle that works.
 #
 # The real interpreter (komira//third_party/python:cpython) is visible only to
 # the test-only packages, so these oracles name a stand-in python_dist over a

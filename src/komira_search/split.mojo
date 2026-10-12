@@ -125,8 +125,41 @@ def _min_bit_width(max_value: Int) -> Int:
 @always_inline
 def _packed_byte_count(count: Int, bit_width: Int) -> Int:
     """Number of bytes a `count`-value bitpacked run at `bit_width` occupies:
-    ceil(count * bit_width / 8). Zero when bit_width == 0 (the width-0 case)."""
+    ceil(count * bit_width / 8). Zero when bit_width == 0 (the width-0 case).
+    The product wraps for a large count: a reader bounds `count` first
+    (`_packed_run_fits`)."""
     return (count * bit_width + 7) >> 3
+
+
+@always_inline
+def _packed_run_fits(
+    src_len: Int, src_off: Int, count: Int, bit_width: Int
+) -> Bool:
+    """True iff `count` values of `bit_width` (1..64) bits starting at byte
+    `src_off` end within `src_len` bytes. Bounds the count against the bits
+    left, never computing `count * bit_width`, which wraps for an untrusted
+    count (2^61 values at width 8 is 2^64 bits, which wraps to 0)."""
+    if src_off < 0 or src_off > src_len:
+        return False
+    return count <= (src_len - src_off) * 8 // bit_width
+
+
+def _packed_run_error(
+    who: StaticString, src_len: Int, src_off: Int, count: Int, bit_width: Int
+) -> Error:
+    """The refusal both unpackers raise when `_packed_run_fits` is False."""
+    return Error(
+        String(who)
+        + ": packed run of "
+        + String(count)
+        + " values at width "
+        + String(bit_width)
+        + " from offset "
+        + String(src_off)
+        + " exceeds source length "
+        + String(src_len)
+        + " (corrupt)"
+    )
 
 
 def _pack_bits_lsb_first(
@@ -198,16 +231,9 @@ def _unpack_bits_lsb_first(
             + String(bit_width)
             + " out of range [0, 64]"
         )
-    var total_bytes = _packed_byte_count(count, bit_width)
-    if src_off < 0 or src_off + total_bytes > len(src):
-        raise Error(
-            "_unpack_bits_lsb_first: packed run ["
-            + String(src_off)
-            + ", "
-            + String(src_off + total_bytes)
-            + ") exceeds source length "
-            + String(len(src))
-            + " (corrupt)"
+    if not _packed_run_fits(len(src), src_off, count, bit_width):
+        raise _packed_run_error(
+            "_unpack_bits_lsb_first", len(src), src_off, count, bit_width
         )
     var bit_pos = 0
     for _ in range(count):
@@ -474,7 +500,7 @@ def _decode_posting_list(
     of `_encode_posting_list` — the reusable SearchCore decode helper + the split writer
     round-trip test. Fail-loud bounds validation throughout.
     """
-    if region_off < 0 or region_len < 0 or region_off + region_len > len(src):
+    if region_off < 0 or region_len < 0 or region_len > len(src) - region_off:
         raise Error(
             "_decode_posting_list: region ["
             + String(region_off)
@@ -557,7 +583,7 @@ def _decode_posting_block(
     which pays O(bytes-to-landing)). The decoded doc-ids/tfs are byte-identical to
     the corresponding slice of a full _decode_posting_list. Fail-loud bounds.
     """
-    if region_off < 0 or region_len < 0 or region_off + region_len > len(src):
+    if region_off < 0 or region_len < 0 or region_len > len(src) - region_off:
         raise Error("_decode_posting_block: term region out of bounds")
     var end = region_off + region_len
     var cur = region_off + block_data_base_rel + block_byte_off
@@ -609,7 +635,7 @@ def _decode_posting_block_dids_only(
     blocks whose docs are never scored. A scored block re-decodes (doc-ids + tfs)
     via `_decode_posting_block` — paid only for the few above-theta blocks, so on
     long posting lists the bulk of the TF unpack work is skipped. Fail-loud."""
-    if region_off < 0 or region_len < 0 or region_off + region_len > len(src):
+    if region_off < 0 or region_len < 0 or region_len > len(src) - region_off:
         raise Error("_decode_posting_block_dids_only: term region out of bounds")
     var end = region_off + region_len
     var cur = region_off + block_data_base_rel + block_byte_off

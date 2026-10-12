@@ -35,7 +35,8 @@
 from std.testing import assert_equal, assert_true, assert_false
 
 from komira_proto_codec import decode_json, decode_proto
-from kci_resource_proto.resource import Access, Output, Resource, ResourceList
+from kci_resource_proto.refs import Access, Output
+from kci_resource_proto.resource import Resource, ResourceList
 
 from kci_cloud import (
     Absence,
@@ -49,6 +50,7 @@ from kci_cloud import (
     PORTABLE,
     CLOUD_BOUND,
     FIELD_SERVICE,
+    FIELD_COMPOSITE,
     FIELD_CONTAINER_JOB,
     FIELD_TABLE,
     FIELD_BUCKET,
@@ -117,11 +119,17 @@ def test_catalog_arms_match_the_wire() raises:
         assert_true(_has(String(e), "has no type"), String(e))
     assert_true(raised, "a held, undeclared arm decodes to no type and is refused")
 
-    # The position -> field table: one row per catalog type, same names, and
-    # a position beyond it is refused, never mapped to some other type.
+    # The position -> field table: one row per catalog type, same names,
+    # then the composite instance (an arm, never a catalog type), and a
+    # position beyond it is refused, never mapped to some other type.
     var arms = body_arms()
-    assert_equal(len(arms), len(c.types), "one arm row per catalog type")
-    for k in range(len(arms)):
+    assert_equal(len(arms), len(c.types) + 1, "one arm row per catalog type, and the composite")
+    assert_equal(arms[len(arms) - 1].field, FIELD_COMPOSITE, "the composite is the last arm")
+    assert_equal(arms[len(arms) - 1].name, "composite")
+    assert_true(c.index_of(FIELD_COMPOSITE) < 0, "and not a catalog type")
+    var inst = decode_proto[Resource](_resource_with_body(FIELD_COMPOSITE))
+    assert_equal(body_field(inst), FIELD_COMPOSITE, "an instance maps back to arm 80")
+    for k in range(len(arms) - 1):
         var at = c.index_of(arms[k].field)
         assert_true(at >= 0, String("arm field ") + String(arms[k].field) + " is a catalog type")
         assert_equal(arms[k].name, c.types[at].name, "the arm row and the catalog row agree")

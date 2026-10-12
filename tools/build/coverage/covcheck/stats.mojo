@@ -145,10 +145,13 @@ def valid_mode(mode: String) -> Bool:
     return mode == String(MODE_CENSUS) or mode == String(MODE_NEUTRAL) or mode == String(MODE_ENFORCE)
 
 
-def conclusion_of(mode: String, findings: Int) -> String:
-    """The check run's conclusion: `neutral` in census and neutral mode
-    whatever was found; in enforce mode `failure` with any finding, else
-    `success`."""
+def conclusion_of(mode: String, findings: Int, regressions: Int) -> String:
+    """The check run's conclusion: `failure` with any `Regression` (a
+    ratchet floor holds in every mode, so coverage can only go up);
+    otherwise `neutral` in census and neutral mode whatever was found, and
+    in enforce mode `failure` with any finding, else `success`."""
+    if regressions > 0:
+        return String("failure")
     if mode != String(MODE_ENFORCE):
         return String("neutral")
     if findings > 0:

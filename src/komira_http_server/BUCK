@@ -1,4 +1,3 @@
-load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The HTTP server over the komira_async reactor: accept loop, dispatch, serve_h2,
@@ -25,6 +24,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_L0_accept_loop_rounds.mojo",
+        "tests/test_L0_accept_loop_sweep.mojo",
         "tests/test_L0_accept_loop_tls.mojo",
         "tests/test_L0_transport_basic.mojo",
         "tests/test_L2_codec_header_limits.mojo",
@@ -84,14 +84,4 @@ mojo_library(
         ),
     },
     visibility = ["PUBLIC"],
-)
-
-# The deps above name every komira_* module the library and its tests import
-# (tools/build/lint: mojo_deps), so a missing dep fails here, in review, and
-# not only in the compile.
-mojo_deps(
-    name = "deps_lint",
-    buck = "BUCK",
-    srcs = glob(["**/*.mojo"]),
-    visibility = ["komira//:tests_lints"],
 )

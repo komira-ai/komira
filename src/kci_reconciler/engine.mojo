@@ -73,7 +73,7 @@
 #     destroy never deletes one;
 #   * the write-ahead intent carries the identity, and a create is
 #     `create_owned(stamp)`: the object is born stamped, in the same call;
-#   * `--adopt <id>` (`CellScope.adopt`) stamps an unstamped object of a wanted
+#   * a resource's `adopt` (in `CellScope.adopt`) stamps an unstamped object of a wanted
 #     name and records it, instead of refusing it.
 # In either scope, a node the file no longer wants (`Resource.wanted` False, the
 # closed world) is deleted when the store recorded it (and, owned,
@@ -309,7 +309,7 @@ struct _RunOutputs(Movable):
         for i in range(len(self._ids)):
             if self._ids[i] == logical_id:
                 return self._outs[i].get(output)
-        return None
+        return None  # cov: unreachable topo order records every producer (put or pending) before a consumer resolves
 
 
 def _resolve_inputs(
@@ -1243,10 +1243,12 @@ def destroy_graph_owned[
     scope: Optional[List[String]] = None,
 ) raises -> List[UndeletableSkip]:
     """`destroy_graph` in `cell` (the owned scope). Before ANY delete, every
-    node must stamp ownership and every present object must carry this node's
-    identity: a FOREIGN or CONFLICT object refuses the whole teardown
-    (`kci: REFUSED destroy ...`). An adoption is never a reason to delete, so
-    `cell.adopt` is ignored here. The rest is `destroy_graph`."""
+    node this teardown would delete (in `scope`, not UNDELETABLE, not KEEP
+    unless `force_delete_data`) must stamp ownership and its present object
+    must carry this node's identity: a FOREIGN or CONFLICT object refuses the
+    whole teardown (`kci: REFUSED destroy ...`). A node it skips is not read.
+    An adoption is never a reason to delete, so `cell.adopt` is ignored here.
+    The rest is `destroy_graph`."""
     if not cell.owned():
         raise Error(
             String("destroy_graph_owned: the scope names no machine and cell;")

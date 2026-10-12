@@ -5,7 +5,7 @@
 #
 # WHY A POD (the layering rule):
 #   The plan node that must carry FS identity — `ParquetSourceData`
-#   (`komira_plan_ir.physical_plan`) — lives in `komira_plan_expr`, the package
+#   (`komira_physical_plan.physical_plan`) — lives in `komira_plan_expr`, the package
 #   every FS package DEPENDS ON. Core therefore CANNOT name a concrete FS type
 #   (`LocalFs` / `S3Fs[C]` / `GcsFs[C]` / `AzureFs[C]`) without inverting the
 #   dependency graph. So the plan node carries an FS-DESCRIPTOR POD: a pure

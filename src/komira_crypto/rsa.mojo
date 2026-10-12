@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # `rsa_sha256_sign` is a thin re-export of rsa_sha256_sign_ffi (AWS-LC
-# d2i_PrivateKey + EVP_DigestSign).
+# EVP_parse_private_key + EVP_DigestSign).
 #
 # Public surface:
 #   * rsa_sha256_sign(pkcs8_der_key, message) raises -> List[UInt8]
@@ -20,8 +20,10 @@ def rsa_sha256_sign(
 ) raises -> List[UInt8]:
     """RSA-SHA256 (PKCS#1 v1.5) sign `message` with a PKCS#8-DER private key.
 
-    Uses AWS-LC's d2i_PrivateKey + EVP_DigestSign* path. RFC 7518 §3.3
-    RS256 algorithm signing for GCP OAuth2 JWTs.
+    Uses AWS-LC's EVP_parse_private_key + EVP_DigestSign* path. RFC 7518
+    §3.3 RS256 algorithm signing for GCP OAuth2 JWTs. Raises when the DER
+    does not parse or holds a key that is not RSA (an EC or Ed25519
+    PKCS#8 key is refused).
     """
     return rsa_sha256_sign_ffi(pkcs8_der_key, message)
 
@@ -34,9 +36,9 @@ def rsa_sha256_sign(
 # Google metadata-server ID token stands on this primitive.
 #
 # ⛔ THIS IS NOT A KEY-TYPE WIDENING OF ANY EXISTING VERIFIER. It is the
-# primitive under a SEPARATE third-party-token verifier with a SEPARATE trust
-# anchor (`komira_crypto/rs256_jwks.mojo`). A service's own identity tokens
-# stay behind that service's own (e.g. ES256-only) allowlist.
+# primitive under komira_jose's RS256 `JwsVerifier`, one pinned algorithm per
+# verifier and per trust anchor. A service's own identity tokens stay behind
+# that service's own (e.g. ES256-only) verifier.
 # =============================================================================
 
 from komira_crypto.sha256 import sha256
@@ -61,7 +63,7 @@ def rsa_pkcs1_sha256_verify(
     by whoever holds the private half of `(n_be, e_value)`. It says NOTHING about
     whether that key should be trusted; establishing that is the caller's job
     (for a platform attestation: fetching the JWKS from the issuer's own
-    well-known URL over TLS, and selecting by `kid` — see `rs256_jwks.mojo`).
+    well-known URL over TLS, and selecting by `kid`, as komira_jose does).
 
     Args:
         n_be: The RSA modulus, big-endian, unpadded-to-its-own-length (256 bytes

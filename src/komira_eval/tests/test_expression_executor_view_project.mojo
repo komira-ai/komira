@@ -4,11 +4,12 @@
 # arm, over a selection that skips rows, so a walker that read row k instead
 # of the k-th selected row gives a different list.
 #
-# Integer division is checked only where truncation and flooring agree (no
-# negative quotient): SQL integer division truncates toward zero (DuckDB:
-# -7 // 2 is -3), and this walker's `//` floors (-4). A zero divisor raises
-# here, as standard SQL does (a division-by-zero exception), where DuckDB
-# answers NULL; the tests pin the raise as what the code does today. Decimal result types follow the code's rules
+# Integer division truncates toward zero (docs/design/query_semantics.md
+# §5.1, DuckDB's `//`: -7 // 2 is -3), over negative quotients too, in the
+# Float64 walker as well. A zero divisor answers NULL (§5.3): these walkers
+# return values only, so the row holds the placeholder 0, and
+# tests/test_view_integer_division_null_and_min.mojo checks the NULL and
+# MIN / -1 (§5.4). Decimal result types follow the code's rules
 # (`decimal_*_result_ps`).
 # =============================================================================
 
@@ -259,9 +260,25 @@ def test_i64_arithmetic() raises:
     _ints(_i64(_binary(EXPR_DIV_I64, make_col(A), make_col(C)), [0, 2, 3]), [7, 0, 2], "a / c")
 
 
-def test_i64_division_by_zero_raises() raises:
-    with assert_raises(contains="eval_to_list_i64_from_view: EXPR_DIV_I64 division by zero at sel index 0"):
-        _ = _i64(_binary(EXPR_DIV_I64, make_col(A), make_lit_i64(0)), [0, 2, 3])
+def test_integer_division_truncates_toward_zero() raises:
+    """BIN_DIV on integers truncates (§5.1): a / b over rows [0, 1, 3] is
+    7 / 2, -7 / 2, 10 / -3 = [3, -3, -3]; a floor gives [3, -4, -4].
+    c / -2 over c = [1, 2, 3, 4] is [0, -1, -1, -2] (floor: [-1, -1, -2, -2]),
+    at the I32 root and nested under `+ 0` (komira-ai/komira#932)."""
+    _ints(_i64(_binary(EXPR_DIV_I64, make_col(A), make_col(B)), [0, 1, 3]), [3, -3, -3], "a / b")
+    _ints(_i32(_binary(EXPR_DIV_I32, make_col(C), make_lit_i32(-2)), [0, 1, 2, 3]), [0, -1, -1, -2], "c / -2")
+    var pool = List[RuntimeExpr]()
+    pool.append(make_col(C))                 # 0
+    pool.append(make_lit_i32(-2))            # 1
+    pool.append(_node(EXPR_DIV_I32, 0, 1))   # 2: c / -2
+    pool.append(make_lit_i32(0))             # 3
+    pool.append(_node(EXPR_ADD_I32, 2, 3))   # 4: (c / -2) + 0
+    _ints(_i32(_exec(pool^), [0, 1, 2, 3]), [0, -1, -1, -2], "(c / -2) + 0")
+
+
+def test_i64_division_by_zero_is_the_null_placeholder() raises:
+    """a / 0 is NULL (§5.3), no raise: every row holds the placeholder 0."""
+    _ints(_i64(_binary(EXPR_DIV_I64, make_col(A), make_lit_i64(0)), [0, 2, 3]), [0, 0, 0], "a / 0")
 
 
 def test_i64_from_whole_float64() raises:
@@ -338,6 +355,19 @@ def test_f64_integer_arithmetic_widens() raises:
     _floats(_f64(_unary(make_i64_to_f64(0), make_col(A)), [0, 1, 3]), [7.0, -7.0, 10.0], "CAST(a AS DOUBLE)")
 
 
+def test_f64_integer_division_truncates_toward_zero() raises:
+    """An Int64 division read through the Float64 walker (the value of a
+    `*_F64_MIXED` compare side) is still integer division (§5.1): a / b over
+    rows [0, 1, 3] is 7 / 2, -7 / 2, 10 / -3 = [3.0, -3.0, -3.0], not the
+    true quotients [3.5, -3.5, -3.33...]. 7 / -20 truncates to the integer 0,
+    which widens to +0.0, not the -0.0 that truncating -0.35 gives
+    (komira-ai/komira#932)."""
+    _floats(_f64(_binary(EXPR_DIV_I64, make_col(A), make_col(B)), [0, 1, 3]), [3.0, -3.0, -3.0], "a / b")
+    var zero = _f64(_binary(EXPR_DIV_I64, make_col(A), make_lit_i64(-20)), [0])
+    _floats(zero, [0.0], "a / -20")
+    assert_true(1.0 / zero[0] > 0.0, "a / -20 is +0.0, not -0.0")
+
+
 def test_f64_math_functions() raises:
     _floats(_f64(_unary(make_sqrt_f64(0), make_col(X)), [2]), [2.0], "sqrt(4.0)")
     _floats(_f64(_unary(_node(EXPR_SIN_F64, 0, 0), make_lit_f64(0.0)), [0]), [0.0], "sin(0)")
@@ -407,8 +437,9 @@ def test_i32_nested_refusals() raises:
     pool.append(_node(EXPR_DIV_I32, 0, 1))
     pool.append(make_lit_i32(1))
     pool.append(_node(EXPR_ADD_I32, 2, 3))
-    with assert_raises(contains="_eval_scalar_i32_from_view: EXPR_DIV_I32 division by zero at row 2"):
-        _ = _i32(_exec(pool^), [2])
+    # (c / 0) + 1: the zero divisor is NULL (§5.3), so the nested quotient
+    # is the placeholder 0, not a raise.
+    _ints(_i32(_exec(pool^), [2]), [1], "(c / 0) + 1")
     var p2 = List[RuntimeExpr]()
     p2.append(make_lit_f64(1.0))
     p2.append(make_lit_i32(1))
@@ -588,13 +619,15 @@ def main() raises:
     var suite = TestSuite()
     suite.test[test_i64_leaves]()
     suite.test[test_i64_arithmetic]()
-    suite.test[test_i64_division_by_zero_raises]()
+    suite.test[test_integer_division_truncates_toward_zero]()
+    suite.test[test_i64_division_by_zero_is_the_null_placeholder]()
     suite.test[test_i64_from_whole_float64]()
     suite.test[test_i64_case_takes_the_first_true_branch]()
     suite.test[test_i64_unsupported_kind_raises]()
     suite.test[test_f64_leaves]()
     suite.test[test_f64_arithmetic]()
     suite.test[test_f64_integer_arithmetic_widens]()
+    suite.test[test_f64_integer_division_truncates_toward_zero]()
     suite.test[test_f64_math_functions]()
     suite.test[test_f64_case_takes_the_first_true_branch]()
     suite.test[test_f64_unsupported_kind_raises]()

@@ -24,6 +24,14 @@
 #      length in its state (uncompressed and LZ4 forms).
 #   8. serialize_split refuses a negative doc_count/min/max and an L0 posting
 #      region without the footer token total.
+#   9. The three posting decoders refuse a term region whose length is 2^63 - 1
+#      (Int.MAX), whose sum with an in-range offset wraps Int negative, by
+#      their own region check (komira-ai/komira#1203); the region ending one
+#      byte past the source is refused by the same check.
+#  10. The unpacker refuses a run whose count times width wraps Int (2^61
+#      values at width 8 is 2^64 bits, which wraps to 0; 2^60 values wraps
+#      negative) by its own check before it reads (komira-ai/komira#1260); a
+#      run that ends exactly at the source end is read, one value more is not.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_raises
@@ -81,9 +89,15 @@ def test_01_bitpack_refusals() raises:
     with assert_raises(contains="_unpack_bits_lsb_first: bit_width -3 out of range"):
         _unpack_bits_lsb_first(Span(src), 0, 1, -3, got)
     # 3 values at 8 bits need 3 bytes; 2 are present.
-    with assert_raises(contains="packed run [0, 3) exceeds source length 2"):
+    with assert_raises(
+        contains="packed run of 3 values at width 8 from offset 0"
+        " exceeds source length 2"
+    ):
         _unpack_bits_lsb_first(Span(src), 0, 3, 8, got)
-    with assert_raises(contains="packed run [-1, 0) exceeds source length 2"):
+    with assert_raises(
+        contains="packed run of 1 values at width 8 from offset -1"
+        " exceeds source length 2"
+    ):
         _unpack_bits_lsb_first(Span(src), -1, 1, 8, got)
     # Width 64 is in range on both sides and round-trips.
     var wide: List[Int] = [Int(0x7FFF_FFFF_FFFF_FFFF), 5]
@@ -373,6 +387,49 @@ def test_08_serialize_split_refusals() raises:
         l0_posting_region=l0b^,
     )
     assert_true(len(ok) > 0, "8: accepted with the total")
+
+
+def test_09_wrapping_term_region_refused() raises:
+    var ids = List[Int]()
+    var tfs = List[Int]()
+    var three: List[UInt8] = [1, 2, 3]
+    with assert_raises(contains="_decode_posting_list: region [1, "):
+        _decode_posting_list(Span(three), 1, Int.MAX, ids, tfs)
+    with assert_raises(contains="_decode_posting_list: region [1, 4) out of bounds [0, 3)"):
+        _decode_posting_list(Span(three), 1, 3, ids, tfs)
+    with assert_raises(contains="_decode_posting_block: term region out of bounds"):
+        _decode_posting_block(Span(three), 1, Int.MAX, 0, 0, 1, ids, tfs)
+    with assert_raises(contains="_decode_posting_block: term region out of bounds"):
+        _decode_posting_block(Span(three), 1, 3, 0, 0, 1, ids, tfs)
+    var only = List[Int]()
+    with assert_raises(contains="_dids_only: term region out of bounds"):
+        _decode_posting_block_dids_only(Span(three), 1, Int.MAX, 0, 0, 1, only)
+    with assert_raises(contains="_dids_only: term region out of bounds"):
+        _decode_posting_block_dids_only(Span(three), 1, 3, 0, 0, 1, only)
+
+
+def test_10_wrapping_packed_count_refused() raises:
+    var src: List[UInt8] = [0xAB, 0xCD]
+    var got = List[Int]()
+    with assert_raises(
+        contains="_unpack_bits_lsb_first: packed run of 2305843009213693952"
+        " values at width 8 from offset 0 exceeds source length 2"
+    ):
+        _unpack_bits_lsb_first(Span(src), 0, 1 << 61, 8, got)
+    with assert_raises(contains="packed run of 1152921504606846976 values"):
+        _unpack_bits_lsb_first(Span(src), 1, 1 << 60, 8, got)
+    assert_equal(len(got), 0, "10: a refused run appends nothing")
+    # One byte after offset 1: two 3-bit values (6 bits) fit, three (9) do not.
+    _unpack_bits_lsb_first(Span(src), 1, 2, 3, got)
+    assert_equal(len(got), 2, "10: two 3-bit values from the last byte")
+    assert_equal(got[0], 0xCD & 7, "10: the low three bits")
+    with assert_raises(contains="packed run of 3 values at width 3 from offset 1"):
+        _unpack_bits_lsb_first(Span(src), 1, 3, 3, got)
+    with assert_raises(contains="packed run of 17 values at width 1 from offset 0"):
+        _unpack_bits_lsb_first(Span(src), 0, 17, 1, got)
+    # Past the end, an empty run is refused too.
+    with assert_raises(contains="packed run of 0 values at width 64 from offset 3"):
+        _unpack_bits_lsb_first(Span(src), 3, 0, 64, got)
 
 
 def main() raises:

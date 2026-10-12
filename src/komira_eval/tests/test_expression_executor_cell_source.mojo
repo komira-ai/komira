@@ -414,10 +414,28 @@ def test_int64_arithmetic() raises:
     assert_equal(Int(exec._eval_i64_from_source(c, 3, 0)), 30)
     assert_equal(Int(exec._eval_i64_from_source(c, 4, 0)), 3)
     assert_equal(Int(exec._eval_i64_from_source(c, 2, 1)), -6)
-    with assert_raises(contains="_eval_i64_from_source: EXPR_DIV_I64 division by zero at row 2"):
-        _ = exec._eval_i64_from_source(c, 6, 2)
+    # k / 0 is NULL (§5.3): the placeholder 0, no raise.
+    assert_equal(Int(exec._eval_i64_from_source(c, 6, 2)), 0)
     with assert_raises(contains="_eval_i64_from_source: unsupported node kind 31 at pool slot 7"):
         _ = exec._eval_i64_from_source(c, 7, 0)
+
+
+def test_int64_division_truncates_toward_zero() raises:
+    """k = [10, -3, 7, 0]: k / -3 is [-3, 1, -2] on rows 0..2 and k / 2 on
+    row 1 is -1 (§5.1, DuckDB's `//`); a floor gives -4, 1, -3 and -2
+    (komira-ai/komira#932)."""
+    var pool = List[RuntimeExpr]()
+    pool.append(make_col(K))                  # 0
+    pool.append(make_lit_i64(-3))             # 1
+    pool.append(_node(EXPR_DIV_I64, 0, 1))    # 2: k / -3
+    pool.append(make_lit_i64(2))              # 3
+    pool.append(_node(EXPR_DIV_I64, 0, 3))    # 4: k / 2
+    var exec = _exec(pool^)
+    var c = _cells()
+    assert_equal(Int(exec._eval_i64_from_source(c, 2, 0)), -3, "10 / -3")
+    assert_equal(Int(exec._eval_i64_from_source(c, 2, 1)), 1, "-3 / -3")
+    assert_equal(Int(exec._eval_i64_from_source(c, 2, 2)), -2, "7 / -3")
+    assert_equal(Int(exec._eval_i64_from_source(c, 4, 1)), -1, "-3 / 2")
 
 
 # -----------------------------------------------------------------------------
@@ -477,6 +495,7 @@ def main() raises:
     suite.test[test_filter_over_no_rows]()
     suite.test[test_sub_second_trunc_per_tick_width]()
     suite.test[test_int64_arithmetic]()
+    suite.test[test_int64_division_truncates_toward_zero]()
     suite.test[test_float64_arithmetic_and_functions]()
     suite.test[test_null_literal_is_a_null_cell]()
     suite^.run()

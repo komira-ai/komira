@@ -395,7 +395,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
             var p = self._erased_home()
             return self._vtable.logical_id_fn(p)
         except e:
-            return String("")
+            return String("")  # cov: unreachable the trampoline calls a non-raising trait method
 
     def depends_on(mut self) -> List[String]:
         """The IN-edges. `mut self` (see `logical_id`). SAFETY: R read in-place."""
@@ -403,7 +403,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
             var p = self._erased_home()
             return self._vtable.depends_on_fn(p)
         except e:
-            return List[String]()
+            return List[String]()  # cov: unreachable the trampoline calls a non-raising trait method
 
     def retention(mut self) -> Int:
         """The RETAIN_* policy. `mut self` (see `logical_id`). SAFETY: R read
@@ -412,7 +412,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
             var p = self._erased_home()
             return self._vtable.retention_fn(p)
         except e:
-            return 0  # RETAIN_DELETE default (never reached for a valid conformer)
+            return 0  # cov: unreachable the trampoline calls a non-raising trait method (RETAIN_DELETE)
 
     def undeletable_reason(mut self) -> String:
         """WHY the erased R is RETAIN_UNDELETABLE — FORWARDED to the concrete R
@@ -434,7 +434,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
             var p = self._erased_home()
             return self._vtable.undeletable_reason_fn(p)
         except e:
-            return String("")
+            return String("")  # cov: unreachable the trampoline calls a non-raising trait method
 
     def read_status(mut self, creds: Creds) raises -> ResourceStatus:
         """Read the live status AS `creds`. SAFETY: `_home` owns R's heap home for
@@ -517,7 +517,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
             var p = self._erased_home()
             return self._vtable.input_refs_fn(p)
         except e:
-            return List[InputRef]()
+            return List[InputRef]()  # cov: unreachable the trampoline calls a non-raising trait method
 
     def bind_inputs(mut self, resolved: ResolvedInputs) raises:
         """FORWARDED to the concrete R."""
@@ -536,7 +536,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
             var p = self._erased_home()
             return self._vtable.owner_fn(p)
         except e:
-            return String("")
+            return String("")  # cov: unreachable the trampoline calls a non-raising trait method
 
     def read_presence(mut self, creds: Creds) raises -> ResourceStatus:
         """FORWARDED to the concrete R (the teardown read). Without the
@@ -556,7 +556,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
             var p = self._erased_home()
             return self._vtable.stamps_ownership_fn(p)
         except e:
-            return False
+            return False  # cov: unreachable the trampoline calls a non-raising trait method
 
     def create_owned(mut self, stamp: OwnerStamp, creds: Creds) raises -> String:
         """FORWARDED to the concrete R (the create that carries the stamp).
@@ -567,7 +567,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
     def adopt_owned(
         mut self, stamp: OwnerStamp, physical_id: String, creds: Creds
     ) raises:
-        """FORWARDED to the concrete R (the explicit `--adopt` takeover).
+        """FORWARDED to the concrete R (the explicit `adopt` takeover).
         SAFETY: see `read_status`."""
         var p = self._erased_home()
         self._vtable.adopt_owned_fn(p, stamp, physical_id, creds)
@@ -581,7 +581,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
             var p = self._erased_home()
             return self._vtable.wanted_fn(p)
         except e:
-            return True
+            return True  # cov: unreachable the trampoline calls a non-raising trait method
 
     def __deinit__(deinit self):
         """Destroy the erased R AND free its home in ONE shot via `drop_fn`. We
