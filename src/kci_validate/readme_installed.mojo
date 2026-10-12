@@ -92,9 +92,12 @@ struct ReadmeProgram(Copyable, Movable):
     imports from beside it) and `examples` (how many it runs, > 0).
     `run_args`: the `mojo run` arguments of the README's link block, the
     environment in place of `$CONDA_PREFIX` (readme_link.mojo); empty when
-    the README has none.
+    the README has none. `block`: the block itself as the tool read it
+    (`$CONDA_PREFIX` kept), for a run in another environment and for the
+    `mojo build` arguments (native_rows.mojo).
 
-    Layout: owned Strings, a List of owned Programs and an Int. No pointer field."""
+    Layout: owned Strings, a List of owned Programs, an Int and a LinkArgs.
+    No pointer field."""
 
     var display: String
     var installed: String
@@ -104,6 +107,7 @@ struct ReadmeProgram(Copyable, Movable):
     var modules: List[ReadmeModule]
     var examples: Int
     var run_args: List[String]
+    var block: LinkArgs
 
     def __init__(out self):
         self.display = String("")
@@ -114,6 +118,7 @@ struct ReadmeProgram(Copyable, Movable):
         self.modules = List[ReadmeModule]()
         self.examples = 0
         self.run_args = List[String]()
+        self.block = LinkArgs()
 
 
 def package_dir_of(label: String) raises -> String:
@@ -328,5 +333,6 @@ def installed_readme(pin: InstallPin, env_dir: String, tool: String, scratch: St
     if why.byte_length() > 0:
         raise Error(why)
     p.run_args = run_link_args(block, env_dir)
+    p.block = block^
     p.installed = rel^
     return p^
