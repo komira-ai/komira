@@ -14,14 +14,28 @@ batch by it.
   whose byte is the same for every key.
 - `sort_topn`: `topn_indices_int64` / `_float64`, the first K rows in order
   by bounded-heap selection, O(N log K).
+- `sort_string`: `sort_indices_string`, STRING/BINARY columns in byte-wise
+  order (the shorter string first on a shared prefix), nulls first or last.
+  By default a prefix-key radix sort; `prefix_key=False` runs the
+  byte-compare merge sort, which gives the same permutation.
+- `sort_nested`: `sort_indices_nested`, STRUCT / LIST / UNION keys
+  (field by field, element by element, type id then value). MAP refuses.
+- `sort_multi`: `sort_batch_by_keys`, a stable multi-key sort of a
+  `RecordBatch` (one stable pass per key, last key first).
+- `sort_lex`: `sort_batch_lex`, the single-pass multi-key sort that
+  `sort_batch_by_keys` uses when every key is INT32 / INT64 / STRING: keys
+  are encoded as Int64 ranks and, when the ranks fit in 62 bits, packed into
+  one Int64 and radix-sorted.
 - `sort_loser_tree`: `LoserTree`, a tournament tree for the k-way merge of
   sorted runs, driven by a caller's `LoserTreeComparator`.
 
 Every sort is stable: rows with equal keys keep their input order, in both
 directions. Float keys are totally ordered the way DuckDB orders them: NaN
 sorts above +inf (last ascending, first descending), every NaN equals every
-other NaN, and -0.0 equals +0.0. These kernels read values only; nulls are
-placed by the caller. Import from the sub-modules; there is no facade.
+other NaN, and -0.0 equals +0.0. The numeric kernels read values only;
+`sort_indices_string`, `sort_indices_nested` and the BOOL arm of
+`sort_batch_by_keys` place nulls (first ascending, last descending, unless
+told otherwise). Import from the sub-modules; there is no facade.
 
 ## Examples
 
@@ -58,4 +72,23 @@ assert_equal(Int(perm.get(3)), 2)
 var top = topn_indices_int64(keys, 2, descending=True)
 assert_equal(top.length, 2)
 assert_equal(Int(keys.get(Int(top.get(0)))), 7)
+```
+
+A string column ascending, and the two string algorithms agreeing:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from komira_arrow.column import Column
+from komira_arrow.string_array import StringArray
+from komira_op_sort.sort_string import sort_indices_string
+
+var words: List[String] = ["pear", "apple", "pea", "apple"]
+var col = Column.from_string(StringArray.from_strings(words))
+var asc = sort_indices_string(col)
+assert_equal(Int(asc.get(0)), 1)  # "apple" (row 1 before row 3: stable)
+assert_equal(Int(asc.get(1)), 3)
+assert_equal(Int(asc.get(2)), 2)  # "pea" before "pear": a prefix sorts first
+var oracle = sort_indices_string(col, prefix_key=False)
+for i in range(4):
+    assert_equal(Int(asc.get(i)), Int(oracle.get(i)))
 ```

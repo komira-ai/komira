@@ -29,11 +29,17 @@ package komira.plan.v1;
 // partially execute.
 
 // ----------------------------------------------------------------------
-// LogicalPlan node kind. ONE declaration site, logical_plan.mojo (0-15).
+// LogicalPlan node kind. ONE declaration site, logical_plan.mojo (0-15, 18).
 // 16-17 were the ROW<->COLUMN converts and are DELETED; their numbers
 // stay burned.
 // Derived from: src/komira_plan_ir/logical_plan.mojo
 // Engine prefix: PLAN_
+//
+// EXEMPT — declared by the engine, deliberately NOT on the wire.
+// The number is RESERVED so nothing can take it; the reason is
+// the debt, and the row disappears when the debt is paid.
+//   PLAN_EXCHANGE: plan.proto has no `exchange` message arm yet, so no
+//     plan bytes can carry the node
 // ----------------------------------------------------------------------
 enum PlanTag {
   PLAN_WIRE_UNSPECIFIED = 0;
@@ -55,6 +61,7 @@ enum PlanTag {
   PLAN_CAST_TO_VARCHAR = 16;
   reserved 17;  // PLAN_CONVERT_COLUMN_TO_ROW
   reserved 18;  // PLAN_CONVERT_ROW_TO_COLUMN
+  reserved 19;  // PLAN_EXCHANGE (EXEMPT, above)
 }
 
 // ----------------------------------------------------------------------

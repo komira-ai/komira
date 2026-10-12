@@ -85,6 +85,7 @@ CAPABILITIES = [
 NOT_CAPABILITIES = [
     ("PLAN_CSE_REF", "made only by the optimizer's common-subexpression rewrite; no surface builds it"),
     ("PLAN_CAST_TO_VARCHAR", "inserted above a text sink by a rewrite; no surface builds it"),
+    ("PLAN_EXCHANGE", "an optimized plan's data exchange between hosts; no surface builds it, and nothing in this tree places or lowers it yet"),
     ("EXPR_AGG_FN", "an aggregate inside an expression, made and consumed by the optimizer's scalar-broadcast rewrite; a surface's aggregates are the aggregate and group_by capabilities"),
     ("SOURCE_BINDING", "the open arm: a source kind named by its binding, not by this enum; a kind gets a capability when a surface reaches it"),
     ("SOURCE_KIND_COLUMNAR,SOURCE_KIND_ROW,SOURCE_KIND_UNSET", "the layout a source format derives, which picks a reader; not something a query asks for"),

@@ -8,6 +8,7 @@ Actions never search the worker's PATH.
 
 load(":providers.bzl", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 def busybox_sh(busybox, script, *args):
     """argv running `script` under the declared busybox shell.
@@ -194,6 +195,7 @@ mkdir -p "$TMPDIR"
     # The pinned tools a test runs, as environment variables naming their
     # paths.
     env = {name: dep[DefaultInfo].default_outputs[0] for name, dep in ctx.attrs.env_tools.items()}
+    env.update(rerun_env(ctx))
     ctx.actions.run(
         cmd_args(busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output()), hidden = ctx.attrs.imports),
         category = "zig_test",
@@ -203,8 +205,9 @@ mkdir -p "$TMPDIR"
         return [
             DefaultInfo(default_output = out),
             ValidationInfo(validations = [ValidationSpec(name = ctx.label.name, validation_result = out)]),
+            rerun_info(ctx),
         ]
-    return [DefaultInfo(default_output = out)]
+    return [DefaultInfo(default_output = out), rerun_info(ctx)]
 
 # `zig test` of `src` (and the `test` blocks of the files it imports, the
 # `imports`), run as a build action: the target exists only if every test
@@ -229,7 +232,7 @@ zig_test_rule = rule(
         "imports": attrs.list(attrs.source(), default = []),
         "src": attrs.source(),
         "zig": attrs.dep(),
-    },
+    } | RERUN_ATTRS,
 )
 
 def _zig_test_binary_impl(ctx):
