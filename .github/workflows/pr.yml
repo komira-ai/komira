@@ -1,7 +1,7 @@
 # The pull request's check (docs/ci.md, "pr.yml"): the machine file's `pr` stage
 # (release/machine.textproto) as the ONE job of this workflow, so the required
 # status check is `pr / check` (workflow name `pr`, job id `check`) and a pull
-# request never shows a skipped gamma, validate, prod or build job. The release
+# request never shows a skipped beta, beta_validate, prod or build job. The release
 # is .github/workflows/kci.yml, which has no `pull_request` trigger.
 #
 # HAND-WRITTEN, and held to the machine file the way kci.yml is: `kci run`
@@ -42,7 +42,7 @@ jobs:
     # fork's pull request runs nothing (R6).
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 330
     # No environment: no approval, and no environment secret reaches a pull
     # request's code.
     permissions:
@@ -51,15 +51,16 @@ jobs:
       # farm-connected; it publishes nothing)
       id-token: write
     steps:
-      # The job's deadline, taken first: 115 of the job's 120 minutes
-      # (timeout-minutes above). kci gets what is left of it
-      # (--build-budget-s below), so a wide change has all the time a slow
+      # The job's deadline, taken first: 325 of the job's 330 minutes
+      # (timeout-minutes above, under the 360 a GitHub-hosted job may run;
+      # the welded test holds the 325 to timeout-minutes less 5). kci gets
+      # what is left of it (--build-budget-s below), so a wide change has all the time a slow
       # `build kci` did not use, and kci still reports which units it did not
       # build before GitHub would cancel the job. The 5 minutes
       # left cover the steps after it (the logs, the upload, buck2's stop).
       - name: the job's deadline
         run: |
-          echo "$(( $(date +%s) + 115 * 60 ))" > "$RUNNER_TEMP/job_deadline_s"
+          echo "$(( $(date +%s) + 325 * 60 ))" > "$RUNNER_TEMP/job_deadline_s"
       # The merge commit, with the full history: kci reads the change from
       # git (`<base>...<revision>`) and refuses a shallow clone.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -94,7 +95,7 @@ jobs:
       # kci first holds this workflow (as committed) to the machine file, then
       # builds the units the change reaches: the artifacts of
       # release/artifacts.textproto and the checks its buck2 build system
-      # derives from the live graph (release/ci/derive_checks.py), so every
+      # derives from the live graph (//tools/build/ci:derive_checks), so every
       # target of the graph is in some unit. The change base is the first
       # parent of the merge commit checked out (kci holds HEAD to
       # $REVISION): exactly the main the pull request is merged into, so the

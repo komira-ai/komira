@@ -227,10 +227,8 @@ def test_e2e_time_s_inferred() raises:
 
 def test_e2e_duration_s_inferred() raises:
     """T7: Duration_S column — ISO 8601 PT...S cells. The wide lattice
-    picks Duration_S (the coarsest unit) because every Duration_*
-    parser accepts the same input grammar and rounds toward zero. The
-    narrower units (Duration_NS) are reachable only via direct dispatch,
-    covered by the test_direct_duration_* cases below."""
+    picks Duration_S, the coarsest unit, because every cell is a whole
+    number of seconds."""
     var buf = _bytes(String(
         "d\n"
         "PT3600S\n"
@@ -286,6 +284,41 @@ def test_e2e_wide_with_nulls() raises:
     assert_true(arr.is_null(1), "row 1 (empty) is null")
     assert_true(arr.is_null(2), "row 2 (NA token) is null")
     assert_false(arr.is_null(3), "row 3 timestamp valid")
+
+
+def test_e2e_wide_plain_decimals_infer_float64() raises:
+    """Under the wide lattice a column of plain decimals is FLOAT64 with its
+    fractions intact, as with the inference off (and as DuckDB reads it).
+    Catches the Duration arms accepting a bare number during inference:
+    the column then came back DURATION_S holding 1 and 2."""
+    var buf = _bytes(String("x\n1.5\n2.5\n-0.25\n"))
+    var opts = CsvReadOptions()
+    opts.with_temporal_inference(True)
+    var rb = read_csv_bytes_to_batch[Rfc4180](Span(buf), opts)
+    assert_true(rb.schema.field_at(0).arrow_type == ArrowType.FLOAT64,
+                "plain decimals -> FLOAT64 under wide inference")
+    ref col = rb.column_at(0)
+    var arr = col.as_primitive[DType.float64]()
+    assert_equal(arr.get(0), 1.5)
+    assert_equal(arr.get(1), 2.5)
+    assert_equal(arr.get(2), -0.25)
+
+
+def test_e2e_iso_subsecond_duration_keeps_fraction() raises:
+    """An ISO duration column with sub-second parts infers the coarsest
+    unit that holds every cell exactly (here DURATION_MS), not DURATION_S.
+    Catches the Duration_S arm accepting a cell it would truncate: the
+    column then came back DURATION_S holding 0 and 1."""
+    var buf = _bytes(String("d\nPT0.5S\nPT1.25S\n"))
+    var opts = CsvReadOptions()
+    opts.with_temporal_inference(True)
+    var rb = read_csv_bytes_to_batch[Rfc4180](Span(buf), opts)
+    assert_true(rb.schema.field_at(0).arrow_type == ArrowType.DURATION_MS,
+                "ms-exact ISO durations -> DURATION_MS")
+    ref col = rb.column_at(0)
+    var arr = col.as_primitive[DType.int64]()
+    assert_equal(Int(arr.get(0)), 500)
+    assert_equal(Int(arr.get(1)), 1250)
 
 
 # =============================================================================
@@ -799,6 +832,8 @@ def main() raises:
     test_e2e_duration_s_inferred()
     test_e2e_backward_compat_default_off()
     test_e2e_wide_with_nulls()
+    test_e2e_wide_plain_decimals_infer_float64()
+    test_e2e_iso_subsecond_duration_keeps_fraction()
     # Direct dispatch (non-inferable widened types)
     test_direct_uint8_builder()
     test_direct_uint16_builder()
@@ -821,4 +856,4 @@ def main() raises:
     test_e2e_phase_a_5type_lattice_unchanged()
     test_e2e_with_temporal_inference_int_passthrough()
     test_with_decimal_precision_scale_validation()
-    print("test_csv_cell_parsers_wire_to_builders: 30/30 PASS")
+    print("test_csv_cell_parsers_wire_to_builders: 32/32 PASS")

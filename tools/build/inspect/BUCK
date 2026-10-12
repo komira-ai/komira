@@ -15,8 +15,9 @@ mojo_library(
         "buildtools/sha256.mojo",
         "buildtools/tar.mojo",
     ],
-    # doc_links reads code and links through the README examples' CommonMark
-    # reader, so the two agree on what is code.
+    # doc_links reads code and links through the Mojo Markdown reader kept
+    # for it alone (tools/build/readme_examples) until komira-ai/komira#1281
+    # ports it to the Zig module the README examples tool reads with.
     deps = ["//tools/build/readme_examples:readme_examples"],
     test_srcs = ["tests/test_buildtools.mojo"],
     visibility = ["PUBLIC"],

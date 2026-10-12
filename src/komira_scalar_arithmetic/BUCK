@@ -11,6 +11,7 @@ mojo_library(
         "tests/test_decimal_cast.mojo",
         "tests/test_decimal_compare.mojo",
         "tests/test_decimal_parse.mojo",
+        "tests/test_decimal_wrap_and_refusals.mojo",
         "tests/test_int_overflow.mojo",
     ],
     visibility = ["PUBLIC"],

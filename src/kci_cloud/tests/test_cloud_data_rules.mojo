@@ -26,9 +26,10 @@
 #    a role to remove; an object of a resource gone from the file is
 #    leftover. An apply reports what it left behind.
 # 6. THE TABLE REFUSALS, in one pass: no key; an access path with no
-#    partition; an untyped field; an order with no field; an index with no
-#    name; two access paths with one name; an empty `ttl_field`; `uses` on a
-#    table. A good table graph (a key with an order, two indexes, a TTL, a
+#    partition; an untyped field; an order with no field; a partition with
+#    no name; an index with no name; two access paths with one name; an
+#    empty `ttl_field`; `uses` on a table. A table with no key renders an
+#    empty key, and a type that holds no data has no data finding. A good table graph (a key with an order, two indexes, a TTL, a
 #    service that reads its NAME and uses it READ_WRITE, another that
 #    DESCRIBEs it) is clean, and a table lowers KEEP by default.
 # 7. A TABLE'S KEY IS IMMUTABLE: with `list_owned` reporting the stored key,
@@ -63,6 +64,9 @@ from kci_resource_proto.refs import Retention
 from kci_resource_proto.resource import Resource, ResourceList
 
 from kci_cloud import (
+    data_findings,
+    table_key_text,
+    RegistryLogin,
     GrantEdge,
     CloudAdapter,
     Absence,
@@ -266,7 +270,7 @@ struct _Data(CloudAdapter, Movable):
         return List[Finding]()
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
-        return ArtifactNeed(String("oci-image"), String("linux/amd64"))
+        return ArtifactNeed(String("OCI"), String("linux/amd64"))
 
     def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]) raises -> List[LoweredNode]:
         var out = List[LoweredNode]()
@@ -332,6 +336,12 @@ struct _Data(CloudAdapter, Movable):
 
     def trust_check(mut self, creds: Creds, scope: CellScope) raises -> List[Finding]:
         return List[Finding]()
+
+    def image_registry(self, ctx: CellContext) -> String:
+        return String("")
+
+    def registry_login(mut self, creds: Creds) raises -> RegistryLogin:
+        return RegistryLogin(String(""), String(""))
 
 
 def _owned(node: String, retained: Bool) -> OwnedRecord:
@@ -517,6 +527,7 @@ def test_the_table_refusals_in_one_pass() raises:
         + String('{"id":"nopart","table":{"key":{"name":"k"}}},')
         + String('{"id":"untyped","table":{"key":{"partition":{"name":"customer"}}}},')
         + String('{"id":"noorder","table":{"key":{"partition":{"name":"c","type":"STRING"},"order":{"type":"NUMBER"}}}},')
+        + String('{"id":"unnamed","table":{"key":{"partition":{"type":"STRING"}}}},')
         + String('{"id":"noname","table":{') + String(_KEY)
         + String(',"indexes":[{"partition":{"name":"s","type":"STRING"}}]}},')
         + String('{"id":"dup","table":{') + String(_KEY)
@@ -534,15 +545,20 @@ def test_the_table_refusals_in_one_pass() raises:
         "nopart|table.key.partition|no partition field",
         'untyped|table.key.partition.type|an untyped field ("customer"): its type is STRING, NUMBER or BYTES',
         "noorder|table.key.order|an order with no field",
+        "unnamed|table.key.partition.name|the partition has no name: name the item attribute it reads",
         "noname|table.indexes[0].name|an index has no name",
         'dup|table.indexes[1].name|duplicate access path name "by-s"',
         "ttl|table.ttl_field|an empty ttl_field",
         "granting|uses|a table runs as no identity, so it cannot use another resource",
     ]:
         assert_true(_has(t, String(want)), String("missing: ") + String(want) + "\n" + t)
-    assert_equal(len(f), 8, "exactly the findings above, each once:\n" + t)
+    assert_equal(len(f), 9, "exactly the findings above, each once:\n" + t)
     for i in range(len(f)):
         assert_equal(f[i].kind, FINDING_GRAPH)
+    # A table with no key renders none; a type that is not data has no data finding.
+    var l = _list(String('{"resource":[{"id":"t","table":{}},{"id":"j","containerJob":{}}]}'))
+    assert_equal(table_key_text(l[0].table.value()), "")
+    assert_equal(len(data_findings(FIELD_CONTAINER_JOB, l[1])), 0)
     print("  test_the_table_refusals_in_one_pass: PASS")
 
 

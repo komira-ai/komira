@@ -935,7 +935,7 @@ struct EndpointRuleSet(Copyable, Movable):
             return JsonValue.from_bool(
                 self._virtual_hostable(args[0].text, _flag(args[1], name))
             )
-        raise _fault("unknown function '" + name + "'")
+        raise _fault("unknown function '" + name + "'")  # cov: unreachable _check_call refuses an unknown function when the ruleset loads
 
     def _virtual_hostable(self, value: String, allow_subdomains: Bool) -> Bool:
         """`aws.isVirtualHostableS3Bucket`, as botocore evaluates it: at least

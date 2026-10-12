@@ -1,0 +1,2 @@
+call buck2 "cquery" "//... + tests//functional/..."
+signal 9

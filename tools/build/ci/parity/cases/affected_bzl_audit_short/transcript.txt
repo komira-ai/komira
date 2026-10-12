@@ -1,0 +1,9 @@
+call git "ls-files" "--cached" "--others" "--exclude-standard" "--" ":(glob)**/BUCK"
+exit 0
+stdout "BUCK\nsrc/a/BUCK\nsrc/b/BUCK\n"
+call buck2 "root" "--kind" "project"
+exit 0
+stdout "/work/repo\n"
+call buck2 "audit" "includes" "BUCK" "src/a/BUCK" "src/b/BUCK"
+exit 0
+stdout "# BUCK\n# src/a/BUCK\n/work/repo/src/a/defs.bzl\n"

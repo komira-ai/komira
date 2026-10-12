@@ -1,0 +1,11 @@
+{
+ "name": "validate_status_mismatch",
+ "defect": "a deliberate mismatch: the runner must fail this case",
+ "run": "validate",
+ "entry": "no_such_function",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "expect": {"status": "OK"},
+ "runner_fails_with": "expected OK"
+}
