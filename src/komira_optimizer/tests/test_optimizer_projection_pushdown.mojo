@@ -121,19 +121,23 @@ def test_project_keeps_only_needed_exprs_and_their_columns() raises:
     assert_equal(_proj(_under_project(inner)), String("a,b"))
 
 
-def test_project_needed_by_nothing_keeps_every_expr() raises:
+def test_project_needed_by_nothing_prunes_to_zero_exprs() raises:
     """COUNT(*) over Project(a, b) over Scan(a,b,c): the aggregate needs no
-    column, so the Project keeps both exprs and the scan reads [a,b].
+    column, so the Project is pruned to zero exprs (a zero-column output
+    whose rows still carry the row count) and the scan, asked for nothing,
+    keeps `*` (a scan cannot express a zero-column read).
 
-    Catches: the empty-`needed` case taking the narrowing branch (an empty
-    Project)."""
+    Catches: an empty `needed` set treated as keep-every-expr (the Project
+    keeps a, b)."""
     var aggs = AggExprArray()
     aggs.append(AggExpr(AGG_COUNT, None, Optional(String("n"))))
     var plan = LogicalPlan.aggregate(ExprArray(), aggs^, LogicalPlan.project(_cols("a", "b"), _scan("a,b,c")))
     var out = push_projections_down(plan^)
     ref proj = out._aggregate.value()[].child[]
-    assert_equal(len(proj._project.value()[].exprs), 2)
-    assert_equal(_proj(proj._project.value()[].child[]), String("a,b"))
+    assert_equal(proj.tag, PLAN_PROJECT)
+    assert_equal(len(proj._project.value()[].exprs), 0)
+    assert_equal(proj.output_schema.num_columns(), 0)
+    assert_equal(_proj(proj._project.value()[].child[]), String("*"))
 
 
 def test_filter_keeps_its_predicate_columns() raises:
@@ -399,7 +403,7 @@ def test_collect_referenced_columns_walks_every_node() raises:
 
 def main() raises:
     test_project_keeps_only_needed_exprs_and_their_columns()
-    test_project_needed_by_nothing_keeps_every_expr()
+    test_project_needed_by_nothing_prunes_to_zero_exprs()
     test_filter_keeps_its_predicate_columns()
     test_scan_keeps_its_pushed_filter_columns_and_fields()
     test_scan_left_alone_when_all_or_none_needed()

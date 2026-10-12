@@ -92,6 +92,7 @@ mojo_library(
         "tests/test_optimizer_portable_parity.mojo",
         "tests/test_optimizer_projection_merge_identity.mojo",
         "tests/test_optimizer_projection_pushdown.mojo",
+        "tests/test_optimizer_projection_udf.mojo",
         "tests/test_optimizer_reorder_bk7_decompose_d2_equivalence.mojo",
         "tests/test_optimizer_reorder_multi_key.mojo",
         "tests/test_optimizer_reorder_multi_key_fallback.mojo",
