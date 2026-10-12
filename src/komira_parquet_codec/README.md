@@ -45,6 +45,21 @@ var out = List[UInt8](length=len(data), fill=0)
 _ = decompress(CompressionCodec.ZSTD, Span(packed)[0:n], Span(out))
 ```
 
+BROTLI is read only, through the Brotli decoder this package owns (its C):
+here `hello` as one uncompressed meta-block, then the empty last one.
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from komira_parquet_api import CompressionCodec
+from komira_parquet_codec import decompress
+
+var stream: List[UInt8] = [0x40, 0x00, 0x10, 0x68, 0x65, 0x6C, 0x6C, 0x6F, 0x03]
+var text = List[UInt8](length=5, fill=0)
+assert_equal(decompress(CompressionCodec.BROTLI, Span(stream), Span(text)), 5)
+assert_equal(text[0], 0x68)  # h
+assert_equal(text[4], 0x6F)  # o
+```
+
 ## Native libraries
 
 snappy and the Brotli decoder are linked statically, from
