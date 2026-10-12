@@ -14,8 +14,7 @@ from std.memory import OwnedPointer
 from komira_arrow.schema import Schema
 from komira_arrow.arrow_types import ArrowType
 from komira_plan_expr.expr import (
-    Expr, EXPR_COL_REF, EXPR_ALIAS, EXPR_BINARY_OP, EXPR_UNARY_OP, EXPR_CAST,
-    BIN_EQ, BIN_NE, BIN_LT, BIN_LE, BIN_GT, BIN_GE, BIN_AND, BIN_OR,
+    Expr, EXPR_COL_REF, EXPR_ALIAS, EXPR_UNARY_OP, EXPR_CAST,
 )
 from komira_plan_ir.logical_plan import (
     LogicalPlan,
@@ -30,12 +29,20 @@ from komira_plan_ir.logical_plan import (
     PLAN_DISTINCT,
     PLAN_TOPN,
     PLAN_SCAN,
+    PLAN_PARTITION_BY,
+    PLAN_PARTITION_TOPN,
+    PLAN_ASOF_JOIN,
+    PLAN_UNION,
+    PLAN_VIEW_REF,
+    PLAN_CSE_REF,
+    PLAN_CAST_TO_VARCHAR,
+    PLAN_EXCHANGE,
     SOURCE_PARQUET,
     JOIN_INNER,
-    JOIN_LEFT,
-    JOIN_RIGHT,
     JOIN_SEMI,
     JOIN_ANTI,
+    JOIN_BUILD_SIDE_LEFT,
+    JOIN_BUILD_SIDE_RIGHT,
 )
 from komira_plan_expr.agg_expr import AggExpr
 from komira_plan_ir.plan_helpers import (
@@ -432,18 +439,24 @@ def _side_has_wide_string_build_payload(
     STRING build payload.
 
     `select_join_build_side` uses this on single-key (`n_keys == 1`)
-    INNER joins to keep such a side off the build (right) side, overriding
-    its cost heuristic, so the STRING-carrying wide side stays on the
-    PROBE (left) side.
+    INNER joins to keep such a side off the build side, overriding its
+    cost heuristic: the other side builds, so the STRING-carrying wide side
+    is probed.
 
     This predicate counts the plan's output-schema columns that are NOT a
     join key (a "build payload"), and reports True when:
       - there are MORE THAN 3 such payload columns, AND
-      - at least one payload column is STRING.
+      - at least one payload column is Arrow STRING (BINARY, LARGE_STRING
+        and LARGE_BINARY do not count).
 
-    Key columns are matched by name against `keys` (the side's `*_on` list).
-    The override fires only on this exact condition, so every other join
-    keeps the cost decision.
+    A column is a key column when its name equals an entry of `keys`, the
+    side's own `*_on` list (`left_on` for the left input, `right_on` for the
+    right): exact, case-sensitive whole-name equality, so a column whose name
+    starts with, ends with or contains a key, is a prefix, suffix or part of
+    a key, or differs from a key only in letter case is payload. A key
+    column of any type, STRING included, is not payload.
+    The override fires only when exactly one side of a single-key INNER
+    join meets this condition; every other join keeps the cost decision.
     """
     ref schema = plan.output_schema
     var n = schema.num_columns()
@@ -465,213 +478,117 @@ def _side_has_wide_string_build_payload(
 
 
 def select_join_build_side(var plan: LogicalPlan) raises -> LogicalPlan:
-    """Swap join sides so the smaller table is on the build (right) side.
+    """Record on every join which side the host builds its hash table on.
 
     =========================================================================
-    PERF-CRITICAL: Join build/probe side selection (INNER, SEMI, RIGHT)
+    PERF-CRITICAL: Join build/probe side selection (INNER)
     =========================================================================
     Regression if removed: Any INNER join where the larger table is on
                            the right regresses by a factor proportional
                            to the size ratio (bigger HT, more probes).
-    Non-obvious part:      The SEMI swap is not by base cardinality: it
-                           puts a side whose HAVING filter (Filter over
-                           Aggregate) is estimated below 10% selectivity
-                           on the build side. ANTI is never swapped
-                           (ANTI(A,B) != ANTI(B,A)).
-                           A RIGHT join becomes a LEFT join when its
-                           probe side is the cheaper one.
+    Non-obvious part:      A single-key INNER join where exactly one side
+                           carries a wide STRING payload builds on the
+                           other side, whatever the cost says.
     DuckDB equivalent:     DuckDB's build_probe_side_optimizer does the
-                           INNER swap by cardinality*row_width; the
-                           HAVING-driven SEMI swap is our own
-                           extension.
-    Do NOT delete without: 1) re-measuring the inner and semi joins
-                           2) any TPC-H query with Filter(Agg(...)) on
-                              one side of a SEMI join
+                           INNER flip by cardinality*row_width.
+    Do NOT delete without: re-measuring the inner joins.
     =========================================================================
 
-    For semi-joins, also considers post-aggregate cardinality: if one side
-    has a HAVING clause (Filter above Aggregate) with estimated low
-    selectivity (< 10%), that side should be the build side because the
-    aggressive filter produces a small hash table.
+    ⭐ THE RULE RECORDS; IT DOES NOT REWRITE. Every join it reaches gets
+    `JoinData.build_side` set — `JOIN_BUILD_SIDE_LEFT` where the decision is
+    to build on the left input, `JOIN_BUILD_SIDE_RIGHT` everywhere else — and
+    keeps its operands, its join type, its keys and its output schema exactly
+    as they came in. The rule used to EXCHANGE the operands instead (and add a
+    restoring Project, or flip RIGHT to LEFT); a decision recorded as a field
+    is one the lowering obeys, a later pass cannot undo by reordering, and a
+    serialized plan can carry (docs/design/optimized_plan.md §5.1).
+
+    The decisions:
+      * INNER: build on the left when the left side's cardinality * row width
+        is strictly the smaller (a tie builds right), unless the single-key
+        STRING-payload override says otherwise
+        (`_side_has_wide_string_build_payload`).
+      * every other join — LEFT, RIGHT, FULL, SEMI, ANTI, CROSS, and any
+        residual-carrying join — builds right, the convention.
+
+    ⚠ ONLY INNER JOINS ARE EVER RECORDED LEFT. The optimized-plan design
+    (§5.2, "Not every (join type, build side) pair can be lowered") admits
+    `build_side = LEFT` with RIGHT, FULL, SEMI or ANTI in no contract version
+    yet, and says no correct producer emits one. The operand exchange this
+    rule replaced also built the left side of a SEMI join whose left side was
+    a HAVING estimated below 10% selectivity, and of a RIGHT join whose left
+    side was the cheaper one; neither is recorded until a contract version
+    admits the pair.
     """
     select_join_build_side_inplace(plan)
     return plan^
 
 
-def select_join_build_side_inplace(mut plan: LogicalPlan) raises:
-    """In-place build-side selection.
+def _decide_build_left(plan: LogicalPlan) -> Bool:
+    """The rule's decision for one PLAN_JOIN node: True to build on the LEFT
+    input, False to build on the right. Reads the node; changes nothing."""
+    ref jd = plan._join.value()[]
+    var jt = jd.join_type
+    # A residual-carrying join keeps the convention: the decision rules below
+    # were tuned on equi-joins only.
+    if jd.has_residual():
+        return False
 
-    Recurses children IN PLACE. The swap path on a JOIN_INNER (or
-    aggressive-HAVING JOIN_SEMI) still rebuilds because swapping the
-    `left` and `right` OwnedPointer fields of JoinData would require
-    partial-moving Movable fields out of the variant Data struct, which
-    the pointer rules forbid. The non-swap walk skips the
-    rebuild entirely.
+    if jt == JOIN_INNER:
+        ref left_p = jd.left[]
+        ref right_p = jd.right[]
+        var left_card = estimate_cardinality(left_p)
+        var right_card = estimate_cardinality(right_p)
+        var left_width = estimate_row_width(left_p.output_schema)
+        var right_width = estimate_row_width(right_p.output_schema)
+        var build_left = left_card * left_width < right_card * right_width
+
+        # =================================================================
+        # STRING-aware side selection: override the cost heuristic when a
+        # side carries a wide STRING build payload (more than 3 non-key
+        # columns, at least one of them STRING). When exactly one side has
+        # one, the OTHER side builds, overriding the smaller-table cost
+        # heuristic. When BOTH sides have one, the cost decides.
+        #
+        # Single-key-only: the override is gated on `len(left_on) == 1`;
+        # a multi-key join keeps the cost decision.
+        # =================================================================
+        if len(jd.left_on) == 1:
+            var right_wide_str = _side_has_wide_string_build_payload(
+                right_p, jd.right_on
+            )
+            var left_wide_str = _side_has_wide_string_build_payload(
+                left_p, jd.left_on
+            )
+            if right_wide_str and not left_wide_str:
+                build_left = True
+            elif left_wide_str and not right_wide_str:
+                build_left = False
+        return build_left
+
+    return False
+
+
+def select_join_build_side_inplace(mut plan: LogicalPlan) raises:
+    """In-place build-side recording.
+
+    Recurses into children first, then sets `build_side` on the join node
+    through a mutable reference. No node is rebuilt, copied or replaced.
+
+    ⛔ TOTAL OVER PLAN TAGS. Every node that has children is descended, and a
+    tag with no arm raises: a join this walk does not reach keeps
+    `JOIN_BUILD_SIDE_UNSET`, which an OPTIMIZED plan may not carry. A join
+    inside an expression's subquery plan is not a plan child and is not
+    reached.
     """
     if plan.tag == PLAN_JOIN:
-        # Recurse into both children IN PLACE first.
         select_join_build_side_inplace(plan._join.value()[].left[])
         select_join_build_side_inplace(plan._join.value()[].right[])
-        var jt = plan._join.value()[].join_type
-
-        # Decide whether to swap. Both branches need the schemas of the
-        # post-recursion children.
-        var should_swap = False
-
-        # Never swap a residual-carrying join — the residual's
-        # col-refs are named against the joined-row layout (left cols, then
-        # right cols with `_right` collision rename), so flipping sides
-        # would require rewriting every residual col-ref. Leave it as is.
-        # MOJO 1.0.0: `left_p` / `right_p` are projections of ONE walk of the
-        # JoinData. Every later `plan._join` walk in this block would form a
-        # second origin and invalidate them, so the block goes through `jd`.
-        ref jd = plan._join.value()[]
-        if jd.has_residual():
-            return
-
-        if jt == JOIN_INNER:
-            ref left_p = jd.left[]
-            ref right_p = jd.right[]
-            var left_card = estimate_cardinality(left_p)
-            var right_card = estimate_cardinality(right_p)
-            var left_width = estimate_row_width(left_p.output_schema)
-            var right_width = estimate_row_width(right_p.output_schema)
-            var left_cost = left_card * left_width
-            var right_cost = right_card * right_width
-            if left_cost < right_cost:
-                should_swap = True
-
-            # =================================================================
-            # STRING-aware side selection: override the cost heuristic when
-            # the chosen build
-            # side carries a wide STRING build payload.
-            #
-            # The build side is the RIGHT child (the plan's
-            # build=right invariant). If we DON'T swap, build == right; if we
-            # DO swap, build == left (the old left becomes the new right).
-            #
-            # A wide STRING build payload is more than 3 non-key columns,
-            # at least one of them STRING
-            # (`_side_has_wide_string_build_payload`).
-            # So when exactly one side has one, force the OTHER side onto
-            # build (keep the STRING-carrying wide side on PROBE), overriding
-            # the smaller-table cost heuristic. When BOTH sides have one,
-            # swapping cannot help
-            # — leave the cost decision unchanged.
-            #
-            # Single-key-only: the override is gated on `len(left_on) == 1`;
-            # a multi-key join keeps the cost decision.
-            # =================================================================
-            if len(jd.left_on) == 1:
-                var right_wide_str = _side_has_wide_string_build_payload(
-                    right_p, jd.right_on
-                )
-                var left_wide_str = _side_has_wide_string_build_payload(
-                    left_p, jd.left_on
-                )
-                if right_wide_str and not left_wide_str:
-                    # Only the right (build) side is wide-STRING -> swap so
-                    # the STRING-carrying right side becomes the PROBE side.
-                    should_swap = True
-                elif left_wide_str and not right_wide_str:
-                    # Swapping would put the STRING-carrying left side on
-                    # build. Keep left on PROBE (do not swap), overriding
-                    # any cost-driven swap.
-                    should_swap = False
-
-        if jt == JOIN_SEMI:
-            ref left_p = jd.left[]
-            ref right_p = jd.right[]
-            var left_having = _estimate_having_selectivity(left_p)
-            var right_having = _estimate_having_selectivity(right_p)
-            if left_having < 0.10 and right_having >= 0.10:
-                should_swap = True
-
-        # =====================================================================
-        # LEFT/RIGHT
-        # canonical-form swap.
-        #
-        # Design principle:
-        #     A LEFT JOIN B  ≡  B RIGHT JOIN A
-        # Outer joins are canonical-form-equivalent under operand swap + type
-        # flip. Pick whichever form puts the SMALLER side on build, regardless
-        # of which user-written form came in.
-        #
-        # Reference: DuckDB src/optimizer/build_probe_side_optimizer.cpp
-        # (FlipChildren, TryFlipJoinChildren). DuckDB swaps
-        # operand pointers + applies `InverseJoinType` (LEFT↔RIGHT, SEMI↔
-        # RIGHT_SEMI) + swaps `left_projection_map` / `right_projection_map`.
-        # Our Mojo IR has no projection-map equivalent, so we emit an explicit
-        # `Project` wrapper above the swapped join to restore the user-visible
-        # output column order.
-        #
-        # Cost rule: same `left_cost < right_cost` heuristic as INNER — fire
-        # when the PROBE-side is the smaller side (anti-pattern; we want
-        # build to be smaller). FULL OUTER has no inverse (DuckDB's
-        # `HasInverseJoinType` returns False) — not handled here. ANTI is
-        # asymmetric (ANTI(A,B) != ANTI(B,A)) — out of scope.
-        #
-        # Only the RIGHT→LEFT direction fires: the LEFT→RIGHT direction is
-        # gated off below, so this rule never produces a JOIN_RIGHT plan.
-        # =====================================================================
-        var outer_swap_needed = False
-        var flipped_jt: UInt8 = jt
-        if jt == JOIN_LEFT or jt == JOIN_RIGHT:
-            ref left_p = jd.left[]
-            ref right_p = jd.right[]
-            var left_card = estimate_cardinality(left_p)
-            var right_card = estimate_cardinality(right_p)
-            var left_width = estimate_row_width(left_p.output_schema)
-            var right_width = estimate_row_width(right_p.output_schema)
-            var left_cost = left_card * left_width
-            var right_cost = right_card * right_width
-            # `left` is the probe side (per the plan's
-            # build=right invariant). Swap fires when probe is smaller than
-            # build (the anti-pattern — we want build to be the small side).
-            #
-            # This rule emits only the join types {INNER, LEFT, SEMI, ANTI}
-            # (it never turns a LEFT input into a JOIN_RIGHT plan). So the
-            # LEFT→RIGHT direction is gated off here, and the
-            # RIGHT→LEFT direction (which produces a LEFT join) is kept. The
-            # cost benefit of the LEFT→RIGHT case is given up.
-            if left_cost < right_cost:
-                if jt == JOIN_RIGHT:
-                    outer_swap_needed = True
-                    flipped_jt = JOIN_LEFT
-
-        if outer_swap_needed:
-            _swap_outer_join_with_reprojection(plan, flipped_jt)
-            return
-
-        if should_swap:
-            # ⛔ AN OPERAND EXCHANGE REASSIGNS NAMES. RESTORE FROM PROVENANCE.
-            # An INNER join's output is `left cols ++ right cols` with `_right`
-            # appended on a name collision, so exchanging the operands both
-            # PERMUTES the output and MIGRATES the suffix — after the exchange
-            # the name `val` denotes the OTHER relation's column. A by-name
-            # projection therefore cannot undo it; only the positional
-            # derivation in `_swap_outer_join_with_reprojection` can, which is
-            # why the INNER arm uses the OUTER arm's helper.
-            #
-            # Example: for `SELECT l.skey, l.val, r.skey AS skey_right,
-            # r.val AS val_right`, a by-name projection over the exchanged
-            # join would emit the RIGHT relation's `val` in the column named
-            # `val`, under a schema whose names are exactly the ones the query
-            # asked for (test_inner_swap_with_colliding_names_restores_by_position).
-            # A silent wrong ANSWER, not merely a wrong column order.
-            #
-            # ⚠ INNER ONLY. `should_swap` is also set for JOIN_SEMI above,
-            # whose output is the PROBE side alone and not `left ++ right`, so
-            # the helper's output model does not describe it; SEMI keeps the
-            # bare rebuild.
-            if jt == JOIN_INNER:
-                _swap_outer_join_with_reprojection(plan, jt)
-                return
-            var new_left = _copy_plan(plan._join.value()[].left[])
-            var new_right = _copy_plan(plan._join.value()[].right[])
-            var lk = plan._join.value()[].left_on.copy()
-            var rk = plan._join.value()[].right_on.copy()
-            plan = LogicalPlan.join(new_right^, new_left^, rk^, lk^, jt)
+        var build_left = _decide_build_left(plan)
+        if build_left:
+            plan._join.value()[].build_side = JOIN_BUILD_SIDE_LEFT
+        else:
+            plan._join.value()[].build_side = JOIN_BUILD_SIDE_RIGHT
 
     elif plan.tag == PLAN_FILTER:
         select_join_build_side_inplace(plan._filter.value()[].child[])
@@ -693,122 +610,41 @@ def select_join_build_side_inplace(mut plan: LogicalPlan) raises:
 
     elif plan.tag == PLAN_TOPN:
         select_join_build_side_inplace(plan._topn.value()[].child[])
-    # PLAN_SCAN, PLAN_PARTITION_BY, PLAN_PARTITION_TOPN, PLAN_ASOF_JOIN:
-    # not affected. Leave unchanged.
 
+    elif plan.tag == PLAN_PARTITION_BY:
+        select_join_build_side_inplace(plan._partition_by.value()[].child[])
 
-def _swap_outer_join_with_reprojection(mut plan: LogicalPlan, flipped_jt: UInt8) raises:
-    """Operand swap that restores the user-visible output columns.
+    elif plan.tag == PLAN_PARTITION_TOPN:
+        select_join_build_side_inplace(plan._partition_topn.value()[].child[])
 
-    In-place LEFT↔RIGHT canonical-form swap:
-      JOIN_LEFT(A, B, on l_keys, r_keys)
-        →  PROJECT(<restore-user-cols>, JOIN_RIGHT(B, A, on r_keys, l_keys))
-      JOIN_RIGHT(A, B, on l_keys, r_keys)
-        →  PROJECT(<restore-user-cols>, JOIN_LEFT(B, A, on r_keys, l_keys))
+    elif plan.tag == PLAN_ASOF_JOIN:
+        # The as-of join itself has no build side to record; its inputs may
+        # hold joins that do.
+        select_join_build_side_inplace(plan._asof_join.value()[].left[])
+        select_join_build_side_inplace(plan._asof_join.value()[].right[])
 
-    Mojo IR has no `left_projection_map` / `right_projection_map`
-    equivalent to DuckDB's projection-map swap. Instead we emit an
-    explicit `Project` wrapper above the swapped join to restore the
-    user-visible output column order + names. The Project's exprs are
-    `Expr.alias(Expr.col_ref(<post-swap-name>), <original-name>)` per
-    original output column.
+    elif plan.tag == PLAN_UNION:
+        for i in range(plan._union.value()[].num_children()):
+            select_join_build_side_inplace(plan._union.value()[].children[i][])
 
-    Assumes caller has already validated:
-      - plan.tag == PLAN_JOIN
-      - flipped_jt is JOIN_LEFT or JOIN_RIGHT (the inverse of plan's jt),
-        or JOIN_INNER for the INNER operand exchange
-      - has_residual() is False (residual flip out of scope; mirrors
-        the existing INNER swap-blocker)
-      - the caller decided to swap (the cost rule, or for INNER the
-        STRING-payload override, which swaps against the cost)
+    elif plan.tag == PLAN_CAST_TO_VARCHAR:
+        select_join_build_side_inplace(plan._cast_to_varchar.value()[].child[])
 
-    NOTE: this helper alone does not raise, and it can build a JOIN_RIGHT
-    plan; `select_join_build_side` never asks for one (the LEFT→RIGHT
-    direction is gated off).
-    """
-    # Snapshot orig output column metadata BEFORE any mutation.
-    var orig_left_n = plan._join.value()[].left[].output_schema.num_columns()
-    var orig_right_n = plan._join.value()[].right[].output_schema.num_columns()
+    elif plan.tag == PLAN_EXCHANGE:
+        select_join_build_side_inplace(plan._exchange.value()[].child[])
 
-    var orig_out_names = List[String]()
-    var orig_out_n = plan.output_schema.num_columns()
-    for i in range(orig_out_n):
-        orig_out_names.append(plan.output_schema.field_name(i))
+    elif (
+        plan.tag == PLAN_SCAN
+        or plan.tag == PLAN_VIEW_REF
+        or plan.tag == PLAN_CSE_REF
+    ):
+        pass
 
-    # Snapshot un-renamed source names per side. The original join's
-    # left child gives the un-renamed first `orig_left_n` output cols;
-    # the right child gives the un-renamed next `orig_right_n` output
-    # cols (which may have been suffixed `_right` by the original join's
-    # collision-rename logic in `LogicalPlan.join`).
-    var orig_left_names = List[String]()
-    for i in range(orig_left_n):
-        orig_left_names.append(
-            plan._join.value()[].left[].output_schema.field_name(i)
+    else:
+        raise Error(
+            "select_join_build_side: no arm for plan tag "
+            + String(Int(plan.tag))
         )
-    var orig_right_names = List[String]()
-    for i in range(orig_right_n):
-        orig_right_names.append(
-            plan._join.value()[].right[].output_schema.field_name(i)
-        )
-
-    # Deep-copy each child (same partial-move-ban-driven copy as the
-    # bare SEMI swap in `select_join_build_side_inplace`).
-    var new_left = _copy_plan(plan._join.value()[].right[])
-    var new_right = _copy_plan(plan._join.value()[].left[])
-    var new_lk = plan._join.value()[].right_on.copy()
-    var new_rk = plan._join.value()[].left_on.copy()
-
-    # Build the post-swap join. LogicalPlan.join() computes the new
-    # output schema with collision-rename on the new right side (= orig
-    # left). The new left side (= orig right) keeps its un-renamed names.
-    var swapped_join = LogicalPlan.join(
-        new_left^, new_right^, new_lk^, new_rk^, flipped_jt
-    )
-
-    # Build the re-projection ExprArray. For each ORIGINAL output column
-    # at position i:
-    #   - If i < orig_left_n: this column came from orig-left = new-right.
-    #     In the swapped join's output schema, it sits at index
-    #     `orig_right_n + i`. Its post-swap name = orig_left_names[i] +
-    #     ("_right" if that name collides with any orig-right name, else
-    #     no suffix).
-    #   - Else: this column came from orig-right = new-left. In the
-    #     swapped join's output, it sits at index `i - orig_left_n` with
-    #     its un-renamed orig_right_names[i - orig_left_n] (no collision
-    #     possible since it's the new left side).
-    var reprojection_exprs = ExprArray()
-    for i in range(orig_out_n):
-        var orig_name = orig_out_names[i]
-        var post_swap_name: String
-        if i < orig_left_n:
-            var src = orig_left_names[i]
-            # Detect collision against new-left's names.
-            var has_collision = False
-            for j in range(orig_right_n):
-                if orig_right_names[j] == src:
-                    has_collision = True
-                    break
-            if has_collision:
-                post_swap_name = src + "_right"
-            else:
-                post_swap_name = src
-        else:
-            post_swap_name = orig_right_names[i - orig_left_n]
-
-        if post_swap_name == orig_name:
-            # Identity passthrough — emit a bare col_ref. The Project's
-            # `_infer_expr_field` derives the field from the source col,
-            # preserving name + ArrowType + nullability.
-            reprojection_exprs.append(Expr.col_ref(post_swap_name))
-        else:
-            # Renaming required (collision flip handling). Alias from
-            # post-swap-name to original-name.
-            reprojection_exprs.append(
-                Expr.alias(Expr.col_ref(post_swap_name), orig_name)
-            )
-
-    # Replace plan with Project(reprojection, swapped_join).
-    plan = LogicalPlan.project(reprojection_exprs^, swapped_join^)
 
 
 # =============================================================================
@@ -820,7 +656,8 @@ def _swap_outer_join_with_reprojection(mut plan: LogicalPlan, flipped_jt: UInt8)
 #    and does not put them back, and `extract_join_chain`'s PROJECT PIERCE drops
 #    a column-narrowing projection it flattens through (a WIDENING — see
 #    `narrow_reordered_join_to_declared_columns`). `select_join_build_side`
-#    also exchanges operands, but re-projects to ITS INPUT's order.
+#    exchanges no operands: it records `build_side` and leaves child order,
+#    and so the output order, as it found it.
 #
 # An INNER join's output schema is `left cols ++ right cols` (with `_right`
 # appended on a name collision), so exchanging the operands PERMUTES the
@@ -834,8 +671,7 @@ def _swap_outer_join_with_reprojection(mut plan: LogicalPlan, flipped_jt: UInt8)
 #   capture with `join_reorder_output_names` before them and restore with
 #   `restore_join_reorder_output_columns` after them. A rule that restores in
 #   isolation faithfully preserves the order its already-reordered input
-#   handed it, so a permutation made by an earlier rule passes through it
-#   (`select_join_build_side`'s re-projection does exactly that).
+#   handed it, so a permutation made by an earlier rule passes through it.
 #
 # ⚠ SCOPE. The guard restores the plan ROOT's column order against the names
 # captured before the rules. Below the root, the reorder walkers restore at
@@ -980,69 +816,6 @@ def join_operands_share_column_name(plan: LogicalPlan) raises -> Bool:
         if jd.right[].output_schema.field_name(j) in left_names:
             return True
     return False
-
-
-def _estimate_having_selectivity(plan: LogicalPlan) -> Float64:
-    """Estimate the selectivity of a HAVING clause (Filter above Aggregate).
-
-    Returns a value in [0.0, 1.0]. Lower means more aggressive filtering.
-    Returns 1.0 (no filtering) if the plan is not a HAVING pattern.
-
-    A HAVING clause is a Filter whose child is an Aggregate. The heuristic:
-      - Comparison operators (>, <, >=, <=, ==, !=): 0.05 (5% selectivity)
-      - AND of comparisons: product of child selectivities
-      - OR of comparisons: sum of child selectivities (capped at 1.0)
-      - Anything else: 0.5 (no strong signal)
-
-    These are rough heuristics — the point is to detect patterns like
-    "HAVING count(*) > 100" which typically filter out 90%+ of groups.
-    """
-    if plan.tag != PLAN_FILTER:
-        return 1.0
-
-    # Check if child is an Aggregate (HAVING pattern).
-    if plan._filter.value()[].child[].tag != PLAN_AGGREGATE:
-        return 1.0
-
-    # It is a HAVING pattern. Estimate selectivity from the predicate tag+op.
-    return _estimate_predicate_selectivity_from_plan(plan)
-
-
-def _estimate_predicate_selectivity_from_plan(plan: LogicalPlan) -> Float64:
-    """Estimate selectivity of a HAVING clause from a Filter plan node.
-
-    Inspects the predicate's tag and binary operator to estimate selectivity.
-    Uses the plan reference directly to avoid Expr copy issues.
-
-    Returns a value in [0.0, 1.0]:
-      - Comparison operators (>, <, >=, <=, ==, !=): 0.05
-      - AND: product of child selectivities (approximated at 0.05 * 0.05)
-      - OR: 0.10 (two comparisons ORed)
-      - Anything else: 0.5
-    """
-    if plan.tag != PLAN_FILTER:
-        return 1.0
-
-    var pred_tag = plan._filter.value()[].predicate.tag
-    if pred_tag != EXPR_BINARY_OP:
-        return 0.5
-
-    var op = plan._filter.value()[].predicate._binary.value().op
-
-    # Comparison operators: highly selective HAVING predicates
-    if (op == BIN_EQ or op == BIN_NE or op == BIN_LT
-            or op == BIN_LE or op == BIN_GT or op == BIN_GE):
-        return 0.05
-
-    # AND: product of child selectivities (heuristic: each child is a comparison)
-    if op == BIN_AND:
-        return 0.05 * 0.05
-
-    # OR: sum of two comparison selectivities
-    if op == BIN_OR:
-        return 0.10
-
-    return 0.5
 
 
 # =============================================================================

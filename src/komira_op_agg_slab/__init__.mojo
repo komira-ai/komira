@@ -13,10 +13,19 @@ group is new; `init_state_with_struct`, `commit_aggregator_with_struct`,
 `finalize_aggregator_with_struct` run the aggregates over it; the
 `finalize_keys_*` methods emit the keys in group order.
 
-It depends on `komira_op_agg_hash` (the hash functions and `EntryHandle`),
-`komira_op_agg_state` (the aggregates) and the core packages.
+`SlabHashAggSinkStruct[INPUT_COLS, *Ss]` is the `MorselSink` over it for a
+pack of `AggregatorWithStruct` kernels, and `SlabHashAggSinkStructCorr` the
+one for CORR(x, y): one or two Int64 group keys, each worker's groups split
+64 ways by hash (`SlabHashAggGlobal`), workers merged partition by partition,
+one RecordBatch out.
 
-Modules: `slab_storage` (with `slab_storage_ck_helpers`, package-private).
+It depends on `komira_op_agg_hash` (the hash functions and `EntryHandle`),
+`komira_op_agg_state` (the aggregates), `komira_operator_api` (the sink
+trait) and the core packages.
+
+Modules: `slab_storage` (with `slab_storage_ck_helpers`, package-private),
+`slab_hash_agg_sink_struct`, `slab_hash_agg_sink_struct_corr`,
+`slab_hash_agg_sink_struct_state`.
 
 Public API: import directly from sub-modules. No facade.
 """

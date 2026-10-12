@@ -53,9 +53,6 @@ def with_test_limit(test_rule):
 TEST_LIMIT_ATTRS = {
     # Set by the mojo_test macro; see with_test_limit.
     "test_timeout_s": attrs.int(),
-    # The darwin-arm64 toolchain's time limit (test_runtime.bzl, gate_mojo);
-    # linux uses the gate's.
-    "_test_deadline": attrs.dep(default = "komira//tools/build/mojo:test_deadline.sh"),
 }
 
 def deadline_flags(ctx, label):
