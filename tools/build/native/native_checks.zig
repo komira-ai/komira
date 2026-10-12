@@ -477,3 +477,45 @@ pub fn check7(alloc: Alloc, so: Shared, weak: []const []const u8, red: *Red) ![]
     try red.names("recorded weak names the library no longer references (update the list)", try minus(alloc, ws, have.items));
     return std.fmt.allocPrint(alloc, "{d} strong undefined symbols, all GLIBC_ or komira_; weak undefined exactly the {d} recorded", .{ strong_n, ws.len });
 }
+
+// ---- the README program calls the library's C (slice 10) ---------------------
+
+/// One program of the library's welded README gate, compiled to an object:
+/// its file name and its symbols (elf.readProgram).
+pub const Program = struct { name: []const u8, syms: []const Sym };
+
+/// docs/design/native_packaging.md, "Every owner is called, not only
+/// loaded": some README program of the owning library references (or
+/// defines) one of the owner's `exports`. Compiled to an object, a program
+/// has every C function it reaches through `external_call` as an undefined
+/// symbol (a `.mojoc` holds no machine code, so the library's Mojo is
+/// compiled into the program); a README that never reaches the C names no
+/// export, and the installed README run would pass with a broken shared
+/// library or without its `-l`.
+pub fn checkReadme(alloc: Alloc, exports: []const []const u8, programs: []const Program, red: *Red) ![]const u8 {
+    if (exports.len == 0) {
+        try red.add("the library exports nothing, so no README program can call it", .{});
+        return "";
+    }
+    if (programs.len == 0) {
+        try red.add("the library's README holds no ```mojo example, so no README program calls its C: add an example that does", .{});
+        return "";
+    }
+    const ex = try setOf(alloc, exports);
+    var hits = std.ArrayList([]const u8).init(alloc);
+    var names = std.ArrayList([]const u8).init(alloc);
+    var calling: usize = 0;
+    for (programs) |p| {
+        try names.append(p.name);
+        const before = hits.items.len;
+        for (p.syms) |s| if (ex.contains(s.name)) try hits.append(try std.fmt.allocPrint(alloc, "{s} in {s}", .{ s.name, p.name }));
+        if (hits.items.len > before) calling += 1;
+    }
+    if (hits.items.len == 0) {
+        try red.names("no README program references any export of the library (add a README example that calls its C, so the installed README run calls its shared library); the programs", names.items);
+        try red.names("the exports", exports);
+        return "";
+    }
+    const h = try sorted(alloc, hits.items);
+    return std.fmt.allocPrint(alloc, "{d} of {d} README programs reference an export: {s}{s}", .{ calling, programs.len, h[0], if (h.len > 1) " and more" else "" });
+}
