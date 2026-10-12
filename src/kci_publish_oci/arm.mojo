@@ -3,8 +3,8 @@
 #   built OCI layout to a registry repository, tagged with the revision.
 # =============================================================================
 #
-# `publish_layout(pusher, layout_dir, registry, repository, revision,
-# platform, plan) -> ImagePublish` is a THIN arm over komira_oci's
+# `publish_layout(pusher, layout_dir, expected_digest, registry, repository,
+# revision, platform, plan) -> ImagePublish` is a THIN arm over komira_oci's
 # `LayoutPusher`: it states kci's checks and maps the push's end state onto
 # kci_api's outcome words and error ids. The push itself (tag read
 # first, blobs, manifest by digest, tag, read back, the bounded retries) is
@@ -18,12 +18,18 @@
 #   3. the layout at `layout_dir` reads and verifies (`read_oci_layout`
 #      hashes every blob); a layout that does not is REFUSED
 #      (KCI-E-IMAGE-PUSH).
-#   4. the layout's own platform (its config's `os/arch`) is the step's
+#   4. the layout's image manifest digest is `expected_digest`, the digest
+#      the release set names for this member (`sha256:` + its artifact
+#      manifest's `sha256`), else REFUSED (KCI-E-MEMBER). Loading the
+#      release directory verified the member (`verify_member`), but this arm
+#      reads the layout from disk a second time: a layout that changed
+#      between that verify and this push is never sent.
+#   5. the layout's own platform (its config's `os/arch`) is the step's
 #      platform in OCI spelling (kci_api `oci_platform_of`), else
 #      REFUSED (KCI-E-IMAGE-PLATFORM): an image for another CPU is never
 #      tagged with this release's revision.
-# Under `plan` the arm stops after these checks and sends NOTHING: the row is
-# WOULD_UPLOAD and the outcome SUCCEEDED.
+# Under `plan` the arm makes the same checks and then stops, sending
+# NOTHING: the row is WOULD_UPLOAD and the outcome SUCCEEDED.
 #
 # The push's end state (komira_oci `PUSH_*`) maps onto kci's one exit table:
 #
@@ -41,10 +47,9 @@
 # The error message carries `PushResult.detail`, which by komira_oci's
 # contract holds no credential.
 #
-# NOT WIRED into `kci run`: an image step needs a cell (the repository a cell
-# pushes to is derived when the cell is bootstrapped), which is the deploy
-# side. A step kind for images, and the dispatch that calls this arm, come
-# with it.
+# `kci run` calls this arm for a PUBLISH step into a cell (kci_cli
+# cell_publish.mojo), once per image of the release set, with the cell's
+# registry and the set's digest.
 #
 # Encapsulation: owned values; the pusher is borrowed `mut` for one call; no
 # pointer, no wildcard origin.
@@ -72,6 +77,7 @@ from kci_api import (
     ARTIFACT_WOULD_UPLOAD,
     ERROR_IMAGE_PLATFORM,
     ERROR_IMAGE_PUSH,
+    ERROR_MEMBER,
     ERROR_PLATFORM,
     ERROR_REVISION,
     OUTCOME_FAILED,
@@ -168,14 +174,16 @@ def _row(
 def publish_layout[T: OciTransport](
     mut pusher: LayoutPusher[T],
     layout_dir: String,
+    expected_digest: String,
     registry: String,
     repository: String,
     revision: String,
     platform: String,
     plan: Bool,
 ) -> ImagePublish:
-    """Push the OCI layout at `layout_dir` to `registry`/`repository`, tagged
-    `revision` (file header). Never raises."""
+    """Push the OCI layout at `layout_dir`, whose image manifest digest must
+    be `expected_digest` (the release set's), to `registry`/`repository`,
+    tagged `revision` (file header). Never raises."""
     try:
         require_full_commit_id(String("--revision-id"), revision)
     except e:
@@ -194,6 +202,14 @@ def publish_layout[T: OciTransport](
         layout = read_oci_layout(layout_dir)
     except e:
         return _refused(String(ERROR_IMAGE_PUSH), String("the image layout is refused: ") + String(e))
+    if layout.manifest_digest != expected_digest:
+        return _refused(
+            String(ERROR_MEMBER),
+            String("the image layout '") + layout_dir + String("' is ") + layout.manifest_digest
+            + String(", not ") + expected_digest
+            + String(", the digest the release set names for it: the layout changed after the set was verified.")
+            + String(" Nothing was sent."),
+        )
     if layout.platform() != want:
         return _refused(
             String(ERROR_IMAGE_PLATFORM),

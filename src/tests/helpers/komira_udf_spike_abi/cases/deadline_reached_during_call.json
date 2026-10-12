@@ -1,6 +1,6 @@
 {
  "name": "deadline_reached_during_call",
- "defect": "a deadline in the future is not checked during the call, or is checked inverted (design 4.7: a runtime that notices the deadline has passed returns ERR_DEADLINE; this is cooperative). The host's clock is virtual for this call: 1 ms per read of host->now_ns, deadline 2.5 ms ahead, so a runtime that reads the host's clock at least once per row and checks the deadline against it reaches it within the 8 rows, whatever the wall clock does",
+ "defect": "a deadline in the future is not checked during the call, or is checked inverted (design 4.7: a runtime that notices the deadline has passed returns ERR_DEADLINE; this is cooperative). The host's clock is virtual for this call: 1 ms per read of host->now_ns, deadline 2.5 ms ahead, so a runtime that reads the host's clock at least once per row and checks the deadline against it reaches it within the 8 rows, whatever the wall clock does. row_at_least 0: a deadline refused before row 0 (at the start) reports row -1 and fails",
  "run": "call_batch",
  "entry": "slow_loop",
  "shape": "SCALAR",
@@ -8,5 +8,5 @@
  "result": [{"type": "int64", "nullable": true}],
  "options": {"deadline_after_ns": 2500000},
  "input": {"length": 8, "columns": [{"type": "int64", "values": [0], "repeat": 8}]},
- "expect": {"status": "ERR_DEADLINE", "run_error": "UDF_DEADLINE_EXCEEDED", "row_at_least": 1, "message": "nonempty"}
+ "expect": {"status": "ERR_DEADLINE", "run_error": "UDF_DEADLINE_EXCEEDED", "row_at_least": 0, "message": "nonempty"}
 }

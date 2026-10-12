@@ -392,8 +392,10 @@ def _host_clock() raises:
         CLOCK_READ, 5_000_000,  # 5_000_000
         CLOCK_ARM, 10,  # 5_000_000
         CLOCK_ARM, 9_000_000,  # 9_000_000: the wall, above the last reading
+        CLOCK_DISARM, 0,  # 0
+        CLOCK_READ, 0,  # 5_000_000: floored at the last reading (an arm's start is not a reading)
     ]
-    var want: List[Int64] = [100, 100, 0, 100, 1, 100, 1_000_100, 0, 0, 1_000_100, 5_000_000, 5_000_000, 9_000_000]
+    var want: List[Int64] = [100, 100, 0, 100, 1, 100, 1_000_100, 0, 0, 1_000_100, 5_000_000, 5_000_000, 9_000_000, 0, 5_000_000]
     var got = clock_probe(script)
     assert_equal(len(got), len(want))
     for k in range(len(want)):

@@ -165,7 +165,14 @@ zig_exe_rule = rule(
 def _zig_test_impl(ctx):
     bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
     zig = ctx.attrs.zig[DefaultInfo].default_outputs[0]
-    out = ctx.actions.declare_output(ctx.label.name + ".passed")
+    # A test that runs tools (`env_tools`) is also a validation: a target
+    # that hands a tool out lists the test that runs it (`kcov_tool`'s
+    # `cases`), as the test cannot be an input of the tool it runs. Its
+    # result is then a validation result; a test without tools writes
+    # `passed`, as it always did.
+    validation = bool(ctx.attrs.env_tools)
+    out = ctx.actions.declare_output(ctx.label.name + (".json" if validation else ".passed"))
+    passed = """printf '{"version": 1, "data": {"status": "success", "message": "zig test passed"}}\\n' > "$3"\n""" if validation else "echo passed > \"$3\"\n"
     # The tests run with the busybox applets as their PATH and a TMPDIR of
     # their own, inside the action's scratch directory.
     script = _PRELUDE + """
@@ -173,24 +180,38 @@ ZIG_GLOBAL_CACHE_DIR="$T/zig-global"; ZIG_LOCAL_CACHE_DIR="$T/zig-local"; HOME="
 export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME TMPDIR
 mkdir -p "$TMPDIR"
 "$1/zig" test -target x86_64-linux-musl "$2"
-echo passed > "$3"
-rm -rf "$T"
+""" + passed + """rm -rf "$T"
 """
+    # The pinned tools a test runs, as environment variables naming their
+    # paths.
+    env = {name: dep[DefaultInfo].default_outputs[0] for name, dep in ctx.attrs.env_tools.items()}
     ctx.actions.run(
         cmd_args(busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output()), hidden = ctx.attrs.imports),
         category = "zig_test",
+        env = env,
     )
+    if validation:
+        return [
+            DefaultInfo(default_output = out),
+            ValidationInfo(validations = [ValidationSpec(name = ctx.label.name, validation_result = out)]),
+        ]
     return [DefaultInfo(default_output = out)]
 
 # `zig test` of `src` (and the `test` blocks of the files it imports, the
 # `imports`), run as a build action: the target exists only if every test
-# passed. A `zig_exe` names it in `unit_tests` to be built behind it.
+# passed. A `zig_exe` names it in `unit_tests` to be built behind it. A test
+# that runs tools names them in `env_tools`; it is then also a validation,
+# which a target that hands a tool out lists (`kcov_tool`'s `cases`), as it
+# cannot be an input of the executable it runs.
 zig_test_rule = rule(
     impl = _zig_test_impl,
     attrs = {
         "busybox": attrs.dep(),
         # `zig_module` targets `src` imports by name.
         "deps": attrs.list(attrs.dep(providers = [ZigModuleInfo]), default = []),
+        # name -> a tool the tests run (its default output), in the
+        # environment as its path.
+        "env_tools": attrs.dict(attrs.string(), attrs.exec_dep(), default = {}),
         "imports": attrs.list(attrs.source(), default = []),
         "src": attrs.source(),
         "zig": attrs.dep(),
