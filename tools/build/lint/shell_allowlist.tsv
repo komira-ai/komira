@@ -28,7 +28,6 @@ tools/build/mojo/darwin/mojo_wrapper.sh	action runtime of the rules: to port to 
 tools/build/mojo/gate_runner.sh	action runtime of the rules: to port to Zig
 tools/build/mojo/launch.sh	a thin wrapper: sets the loader path and execs the binary
 tools/build/mojo/mem_cap.sh	action runtime of the rules: to port to Zig
-tools/build/mojo/mojo_wrapper.sh	action runtime of the rules: to port to Zig
 tools/build/mojo/proto_fixture.sh	action runtime of the rules: to port to Zig
 tools/build/mojo/run_check.sh	a thin wrapper: runs a binary in a clean environment and compares its stdout
 tools/build/mojo/test_deadline.sh	action runtime of the rules: to port to Zig
@@ -71,7 +70,6 @@ tools/build/tests/functional/test_data/runner_cases.sh	build system self-tests: 
 tools/build/tests/functional/test_data/test_command_case.sh	a thin wrapper of one test run
 tools/build/tests/functional/test_deadline/cases.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/umbrella_cache.sh	build system self-tests: to port to Zig
-tools/build/tests/functional/watchdog/cases.sh	build system self-tests: to port to Zig
 tools/build/tests/golden/golden.sh	build system self-tests: to port to Zig
 tools/build/tests/negative/lint_weld.sh	build system self-tests: to port to Zig
 tools/build/tests/proto_tests.sh	build system self-tests: to port to Zig

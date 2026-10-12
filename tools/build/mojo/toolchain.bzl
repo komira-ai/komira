@@ -345,7 +345,7 @@ mojo_toolchain_rule = rule(
         # its own os and cpu, so the compiler's runtime is the target's.
         "runtime": attrs.exec_dep(),
         "target_cpu": attrs.string(),
-        # The compile watchdog (mojo_wrapper.sh): a compile whose whole process
+        # The compile watchdog (tools/mojo_compile.zig): a compile whose whole process
         # tree uses no CPU for `watchdog_idle_secs` is a deadlocked compiler; it
         # is killed and the action fails with exit 124 instead of holding a
         # worker until the executor's action timeout. 0 turns it off. A slow
@@ -364,7 +364,9 @@ mojo_toolchain_rule = rule(
             "komira//tools/build/mojo:shell_lint",
             "komira//tools/build/mojo/darwin:shell_lint",
         ]),
-        "_wrapper": attrs.dep(default = "komira//tools/build/mojo:mojo_wrapper.sh"),
+        # The compile wrapper (tools/mojo_compile.zig), an executable built
+        # behind its unit tests; defs.bzl's mojo_compile_cmd runs it.
+        "_wrapper": attrs.exec_dep(default = "komira//tools/build/mojo:mojo_compile"),
     },
 )
 

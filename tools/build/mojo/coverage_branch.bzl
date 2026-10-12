@@ -5,7 +5,7 @@ With `coverage_branch` set (coverage.bzl, coverage_kwargs: the switch on,
 linux-x86_64), per `test_srcs` entry that is a source file:
 
 - `[coverage][bc][<test>]` (category `mojo_emit_cov_bc`): the test compiled
-  by mojo_wrapper.sh as its coverage binary is (`[coverage][bin]`: -O0, line
+  by mojo_compile as its coverage binary is (`[coverage][bin]`: -O0, line
   tables, the same `-D` assert level and `test_defines`, the same closure,
   `test_deps` included, and source root), but
   emitted as LLVM bitcode, `cov/branch/<test>.bc`;
@@ -105,7 +105,7 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
             bc,
             "--out",
             exe.as_output(),
-            # The C libraries of the test's link, as mojo_wrapper.sh's
+            # The C libraries of the test's link, as mojo_compile's
             # --link-tail appends them.
             ["--", link_tail] if link_tail else [],
             hidden = link_dir,

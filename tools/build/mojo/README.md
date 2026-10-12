@@ -6,9 +6,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_binary", "mojo_
 
 The rules are in [`defs.bzl`](defs.bzl); their providers in
 [`providers.bzl`](providers.bzl). Every action runs the hermetic toolchain
-([`toolchains//:mojo`](../toolchains/README.md)) through
-[`mojo_wrapper.sh`](mojo_wrapper.sh), which is where to read the environment
-the compiler sees. Worked uses of each rule are in
+([`toolchains//:mojo`](../toolchains/README.md)) through the compile wrapper,
+[`tools/mojo_compile.zig`](tools/mojo_compile.zig) on Linux (its header is
+where to read the environment the compiler sees) and
+[`darwin/mojo_wrapper.sh`](darwin/mojo_wrapper.sh) on macOS. Worked uses of each rule are in
 [`../examples/BUCK`](../examples/BUCK), and fixtures that must fail are in
 [`../tests/`](../tests/README.md).
 
@@ -182,7 +183,8 @@ the same package without `readme = False` to fail.
 
 The compiler can deadlock (every thread parked, the process tree using no
 CPU) and then never exits, which would hold a remote worker until the
-executor's action timeout. [`mojo_wrapper.sh`](mojo_wrapper.sh) runs it in a
+executor's action timeout. The compile wrapper
+([`tools/mojo_compile.zig`](tools/mojo_compile.zig)) runs it in a
 session of its own and samples the CPU time of that session and the
 compiler's whole process tree from `/proc` (a helper reparented away from the
 compiler is still in the session, and counts; what is sampled is what is
@@ -197,13 +199,16 @@ in a toolchains cell); `watchdog_idle_secs = 0` turns the watchdog off.
 
 The compiler dies with the wrapper. A HUP, INT or TERM to the wrapper kills
 the tree before the wrapper exits (129, 130, 143). A KILL cannot be caught,
-so a tether in the compiler's session blocks reading a FIFO whose only
+so a tether in the compiler's session blocks reading a pipe whose only
 writer is the wrapper; when the wrapper dies the read returns and the tether
-kills the session. The macOS wrapper
+kills the session. The tether is not the compiler's child, so a compiler
+that waits for all its children never waits for it. With the watchdog on,
+the compiler's stdin is `/dev/null` and it ignores SIGINT and SIGQUIT. The
+macOS wrapper
 ([`darwin/mojo_wrapper.sh`](darwin/mojo_wrapper.sh)) has the same watchdog
 and knobs (`mojo_darwin_toolchain`), sampling `ps` instead of `/proc` and,
 with no `setsid` on macOS, the compiler's tree by parent pid instead of a
-session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.sh),
+session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.zig),
 [`tests/functional/darwin`](../tests/functional/darwin/check.sh)).
 
 ## Binaries and tests
@@ -951,10 +956,10 @@ rules, sub-targets, scope and fixtures are in [coverage.md](coverage.md).
 | `<target>: test_data[<entry>]: not a test_srcs entry` | [`defs.bzl`](defs.bzl) | a `test_data` key names no test; fix the path or delete the key |
 | `<target>: ... data destination <d> ...` | [`test_runtime.bzl`](test_runtime.bzl) | a data destination is absolute, has an empty, `.` or `..` segment, or is also the directory of another destination |
 | `<target>: ... env sets <NAME>, which the test runner sets itself` | [`test_runtime.bzl`](test_runtime.bzl) | `test_env`/`env` names a variable the runner owns |
-| `mojo-watchdog: killed deadlocked compiler after <n>s of zero process-tree CPU` (exit 124) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the compile's process tree used no CPU for `watchdog_idle_secs`; retry the action |
-| `mojo_wrapper: REFUSING: toolchain member '<m>' is missing or empty` (exit 2) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the unpacked toolchain lacks a file its `CLOSURE_MANIFEST` lists; nothing falls back to the worker ([test 4](../tests/README.md#4-closure-refusal)) |
-| `mojo_wrapper: <output> contains this action's working directory` (exit 4) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | a compile output embeds a machine-specific path |
-| `mojo_wrapper: compiler exited 0 but <output> is missing or empty` (exit 3) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the compiler reported success without writing its output |
+| `mojo-watchdog: killed deadlocked compiler after <n>s of zero process-tree CPU` (exit 124) | [`mojo_compile.zig`](tools/mojo_compile.zig) | the compile's process tree used no CPU for `watchdog_idle_secs`; retry the action |
+| `mojo_compile: REFUSING: toolchain member '<m>' is missing or empty` (exit 2) | [`mojo_compile.zig`](tools/mojo_compile.zig) | the unpacked toolchain lacks a file its `CLOSURE_MANIFEST` lists; nothing falls back to the worker ([test 4](../tests/README.md#4-closure-refusal)) |
+| `mojo_compile: <output> contains this action's working directory` (exit 4) | [`mojo_compile.zig`](tools/mojo_compile.zig) | a compile output embeds a machine-specific path |
+| `mojo_compile: compiler exited 0 but <output> is missing or empty` (exit 3) | [`mojo_compile.zig`](tools/mojo_compile.zig) | the compiler reported success without writing its output |
 | ``[komira] coverage = "<v>": it must be `true` or `false` (default false)`` | [`coverage.bzl`](coverage.bzl) | the coverage switch has another value; it fails at load rather than reading a typo as off |
 | `cov_zig: ... has debug sections but holds the working directory (...) nowhere` | [`cov_zig.zig`](../coverage/kcov/cov_zig.zig) | a coverage link's debug info holds neither spelling of the working directory: zig's C runtime units (the only ones that record a directory) record one the relocation was not given, so the binary would differ by machine, or have no debug info |
 | `cov_zig: a link with the optimization level <level> is refused` | [`cov_zig.zig`](../coverage/kcov/cov_zig.zig) | a coverage link at a release level, where lld would merge string tails the relocation cannot see |
