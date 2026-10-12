@@ -23,7 +23,8 @@ pub fn fail(comptime fmt: []const u8, args: anytype) noreturn {
 pub const Entry = struct {
     path: []const u8, // directories end with '/'
     mode: u32,
-    data: []const u8, // empty for directories
+    data: []const u8, // empty for directories and links
+    link: []const u8 = "", // a symbolic link's target; "" for any other entry
 };
 
 pub fn lessEntry(_: void, a: Entry, b: Entry) bool {
@@ -43,9 +44,11 @@ fn octal(field: []u8, value: u64) void {
     field[field.len - 1] = 0;
 }
 
-fn header(out: *std.ArrayList(u8), name: []const u8, typeflag: u8, mode: u32, size: u64) !void {
+fn header(out: *std.ArrayList(u8), name: []const u8, typeflag: u8, mode: u32, size: u64, link: []const u8) !void {
     var h = [_]u8{0} ** 512;
     @memcpy(h[0..name.len], name);
+    if (link.len > 100) fail("link target `{s}` does not fit a tar header", .{link});
+    @memcpy(h[157 .. 157 + link.len], link);
     octal(h[100..108], mode);
     octal(h[108..116], 0);
     octal(h[116..124], 0);
@@ -73,6 +76,8 @@ pub fn writeTar(alloc: Alloc, entries: []Entry) ![]u8 {
     for (entries, 0..) |e, i| {
         if (i > 0 and std.mem.eql(u8, e.path, entries[i - 1].path)) fail("duplicate path {s}", .{e.path});
         const is_dir = e.path[e.path.len - 1] == '/';
+        const typeflag: u8 = if (is_dir) '5' else if (e.link.len != 0) '2' else '0';
+        if (e.link.len != 0 and (is_dir or e.data.len != 0)) fail("{s}: a link holds no data", .{e.path});
         if (e.path.len > 100) {
             // A PAX extended header carries the full path.
             var rec_len: usize = " path=\n".len + e.path.len;
@@ -84,12 +89,12 @@ pub fn writeTar(alloc: Alloc, entries: []Entry) ![]u8 {
             }
             rec_len += digits;
             const rec = try std.fmt.allocPrint(alloc, "{d} path={s}\n", .{ rec_len, e.path });
-            try header(&out, "././@PaxHeader", 'x', 0o644, rec.len);
+            try header(&out, "././@PaxHeader", 'x', 0o644, rec.len, "");
             try out.appendSlice(rec);
             try pad(&out, rec.len);
-            try header(&out, e.path[0..100], if (is_dir) '5' else '0', e.mode, e.data.len);
+            try header(&out, e.path[0..100], typeflag, e.mode, e.data.len, e.link);
         } else {
-            try header(&out, e.path, if (is_dir) '5' else '0', e.mode, e.data.len);
+            try header(&out, e.path, typeflag, e.mode, e.data.len, e.link);
         }
         try out.appendSlice(e.data);
         try pad(&out, e.data.len);

@@ -20,7 +20,11 @@ A dry run (`plan`) writes nothing.
 The channel is reached through the `ChannelTransport` seam: the
 `HttpChannelTransport` for a real channel, or `ScriptedChannel`, an
 in-memory channel. The package names no channel, account or organisation;
-those come from the files and flags it is given. `kci_publish.release_fixture`
+those come from the files and flags it is given. For a PUBLISH step into a
+cell, `load_cell_release` makes the same load (every member re-verified,
+`release.json` naming the revision and platform, the set hash equal to the
+one the run was handed) and returns the set's images, each with the digest
+the set names for it (`CellImage`); `kci_cli` pushes them. `kci_publish.release_fixture`
 writes a complete example release (three members, an artifacts file, a
 channels file and a release-version file) for tests and examples.
 
