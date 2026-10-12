@@ -37,7 +37,7 @@ from komira_udf_spike_abi.conform import load_cases, run_suite
 from komira_udf_spike_native.code import code_set, with_batch_twins
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
-comptime CASE_COUNT = 117
+comptime CASE_COUNT = 121
 comptime BATCH_TWINS = 9
 """The corpus cases on double or fahrenheit, each run again on its batch-loop
 fixture (code.with_batch_twins)."""
@@ -94,6 +94,9 @@ def _left_out() -> List[String]:
         "fault_table_null_count_zero",
         "fault_table_null_rows",
         "fault_table_out_on_error",
+        # a table output whose release leaves its slot set (the release
+        # callback is the library's, not user code's)
+        "fault_table_release_keeps_slot",
     ]
 
 

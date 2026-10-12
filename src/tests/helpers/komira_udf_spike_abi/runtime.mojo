@@ -284,7 +284,6 @@ struct ThreadTimes(Copyable, Movable):
     var calls_ns_max_thread: Int64
 
 
-@fieldwise_init
 struct CallOptions(Copyable, Movable):
     """`cancel`: the cancel flag is set before the call. `cancel_during_call`:
     the host's now_ns callback sets the flag (a release store,
