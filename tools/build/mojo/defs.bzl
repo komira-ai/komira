@@ -162,7 +162,7 @@ def komira_main(
     return __wrap_and_execute_raising_main[_komira_program_main](argc, argv)
 """
 
-def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None, debug_link = None, defines = [], levels = None):
+def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None, debug_link = None, defines = [], levels = None, emit_object = False):
     """`mojo build` of `main` (one of `srcs`) against the packages in closure_tsets, linking c_link.
 
     Reads only `ctx.actions` and `ctx.label`, so a dynamic action passes
@@ -185,6 +185,10 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
 
     `defines`: `-D` arguments from defines.bzl's define_args, after
     `--target-cpu`; none are written when it is empty. `levels`: see opt_level.bzl.
+
+    With `emit_object`, emits the program's object file instead (`--emit
+    object`), linked to nothing: every `external_call` the program reaches
+    is an undefined symbol of it (the README check, shared.bzl).
     """
     opt_args = opt_level_args(ctx.label, opt_level, category, levels)
     mapping = {s.short_path: s for s in srcs}
@@ -235,6 +239,8 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
     tail = _link_tail(c_link)
     if link_extra:
         tail = cmd_args(tail, link_extra) if tail else cmd_args(link_extra)
+    if emit_object:
+        emit, tail = ["--emit", "object"], None
     ctx.actions.run(
         _mojo_cmd(tc, [
             "build",
@@ -416,12 +422,13 @@ def _library_impl(ctx):
     # which installs it at share/doc/<conda name>/README.md) refuses relative
     # links: the installed copy has no neighbours.
     ships = conda_name != None and conda_refusal == None
-    readme_marker = readme_gate(ctx, tc, import_name, ungated_tset, _link_tail(c_link), env_args, ships, _readme_test)
+    readme_marker = readme_gate(ctx, tc, import_name, ungated_tset, _link_tail(c_link), env_args, ships, _readme_test, owner = bool(native.c_direct))
     if readme_marker != None:
         if "readme" in test_subtargets:
             fail("{}: a test_srcs file is named `readme.mojo`; `[tests][readme]` is the README's examples".format(ctx.label))
-        # [generated] and [file]: the programs and README.md the gate ran, for kci_validate's golden test.
-        test_subtargets["readme"] = [DefaultInfo(default_output = readme_marker[0], other_outputs = [readme_marker[1]], sub_targets = {"file": [DefaultInfo(default_output = ctx.attrs.readme)], "generated": [DefaultInfo(default_output = readme_marker[1])]})]
+        # [generated] and [file]: the programs and README.md the gate ran, for kci_validate's golden test;
+        # [objects]: an owner's README programs as objects, for its shared library's README check (shared.bzl).
+        test_subtargets["readme"] = [DefaultInfo(default_output = readme_marker[0], other_outputs = [readme_marker[1]], sub_targets = {"file": [DefaultInfo(default_output = ctx.attrs.readme)], "generated": [DefaultInfo(default_output = readme_marker[1])], "objects": [DefaultInfo(default_output = readme_marker[3])]})]
         markers.append(readme_marker[0])
         if cov_link:
             coverage_readme(ctx, tc, _build_executable, readme_marker, ungated_tset, _link_tail(c_link), src_dir, import_name, root, env_args, cov_bins, cov_runs)
@@ -486,17 +493,21 @@ def _library_impl(ctx):
 # dynamic action, which compiles and runs each example (the convention and
 # the gate are described there).
 
-def _readme_test_impl(actions, label, gate_label, examples, package, src, marker, tc, closure, opt_level, link_tail, env_args):
+def _readme_test_impl(actions, label, gate_label, examples, package, src, marker, objects, owner, tc, closure, opt_level, link_tail, env_args):
     lines = [x.strip() for x in examples.read_string().split("\n") if x.strip()]
     if not lines:
         actions.write(marker, "NO EXAMPLE {}: no ```mojo example, so nothing was compiled or run\n".format(gate_label))
+        actions.copied_dir(objects, {})
         return []
     shim = struct(actions = actions, label = label)
     markers = []
+    built = {}
     for line in lines:
         stem = "readme_{}_{}".format(package, line)
         program = src.project(stem + ".mojo")
         exe = _build_executable(shim, tc, "tests/readme/bin/" + stem, [program], program, [closure], opt_level, "mojo_build_test", "readme_" + line, None, link_extra = link_tail)
+        if owner:
+            built[stem + ".o"] = _build_executable(shim, tc, "tests/readme/obj/" + stem + ".o", [program], program, [closure], opt_level, "mojo_readme_object", "readme_" + line, None, emit_object = True)
         root, staged = _test_root(shim, "tests/readme/root/" + line, exe, {})
         m = actions.declare_output("tests/readme/{}.passed".format(line))
         actions.run(
@@ -509,6 +520,7 @@ def _readme_test_impl(actions, label, gate_label, examples, package, src, marker
         cmd_args(tc.busybox, "sh", "-c", 'b=$1; shift; "$b" cat "$@" >"$0"', marker, tc.busybox, markers),
         category = "mojo_readme_join",
     )
+    actions.copied_dir(objects, built)
     return []
 
 _readme_test = dynamic_actions(
@@ -523,6 +535,8 @@ _readme_test = dynamic_actions(
         "marker": dynattrs.output(),
         "opt_level": dynattrs.value(str),
         "package": dynattrs.value(str),
+        "objects": dynattrs.output(),
+        "owner": dynattrs.value(bool),
         "src": dynattrs.value(Artifact),
         "tc": dynattrs.value(typing.Any),
     },

@@ -76,6 +76,12 @@ mojo_library(
         # link, an extra .so, a __glibc of 2.38, NEEDED outside the
         # environment, no DF_SYMBOLIC, the loaded-from record, the ELF reader
         "tests/test_native_install.mojo",
+        # the link commands of an installed README (slice 10): the closure's
+        # arguments (every shared library dependents first, the static
+        # archive on the build line), the real tool reading the block, and
+        # the `readme` row refusing a README without an owner's -l, a
+        # missing or unwanted block, and the same words in another order
+        "tests/test_readme_link.mojo",
     ],
     # The README examples tool kci ships, for the tests that make an
     # installed README into programs (the same target bin/kci/BUCK ships).
@@ -89,6 +95,7 @@ mojo_library(
             "encoding_generated": "//src/komira_encoding:komira_encoding[tests][readme][generated]",
         },
         "tests/test_readme_tool.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
+        "tests/test_readme_link.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
     },
     visibility = ["PUBLIC"],
 )
