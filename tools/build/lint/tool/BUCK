@@ -1,0 +1,54 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The lint action (src/main.zig): every lint rule of tools/build/lint/defs.bzl
+# but pointer_lint and public_boundary (each a Zig tool of its own) runs it.
+# Each kind it checks is written in Zig.
+
+_SRCS = glob(["src/*.zig"])
+
+_ZIG = {
+    "busybox": "komira//tools/build/toolchains:busybox",
+    "exec_compatible_with": LINUX_X86_64,
+    "imports": _SRCS,
+    "zig": "komira//tools/build/toolchains:zig",
+}
+
+# One `zig test` per lint kind, each run as a build action: the kind refuses
+# a planted violation and passes a clean input. The pinned tools a kind runs
+# reach its test in the environment.
+_SHELLCHECK = "//tools/build/lint:shellcheck"
+
+_UNITS = {
+    "action_pins": {},
+    "actionlint": {"LINT_ACTIONLINT": "//tools/build/lint:actionlint", "LINT_SHELLCHECK": _SHELLCHECK},
+    "doc_links": {"LINT_INSPECT": "//tools/build/inspect:inspect[runnable]"},
+    "no_endpoint": {},
+    "push_verdicts": {},
+    "result": {},
+    "retired_names": {},
+    "shellcheck": {"LINT_SHELLCHECK": _SHELLCHECK},
+    "src_layout": {},
+}
+
+[
+    zig_test(
+        name = "lint_unit_" + kind,
+        src = "src/{}_test.zig".format(kind),
+        env_tools = tools,
+        **_ZIG
+    )
+    for kind, tools in _UNITS.items()
+]
+
+# Built only behind every kind's unit tests but doc_links's: inspect is a
+# Mojo binary, and the Mojo toolchain depends on the lint of its scripts, so
+# the lint tool cannot wait for a Mojo build. lint_unit_doc_links is a target
+# of its own, which the pull request's check builds when this package changes.
+zig_exe(
+    name = "lint",
+    src = "src/main.zig",
+    unit_tests = [":lint_unit_" + kind for kind in _UNITS if kind != "doc_links"],
+    visibility = ["PUBLIC"],
+    **_ZIG
+)

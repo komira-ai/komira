@@ -6,6 +6,7 @@ const Alloc = std.mem.Allocator;
 const pack_common = @import("common.zig");
 const pack_conda = @import("conda.zig");
 const pack_conda_meta = @import("conda_meta.zig");
+const pack_conda_lib = @import("conda_lib.zig");
 const Args = pack_common.Args;
 const all = pack_common.all;
 const allow = pack_common.allow;
@@ -43,6 +44,46 @@ const memberBool = pack_conda_meta.memberBool;
 const readContractManifest = pack_conda_meta.readContractManifest;
 const readMembers = pack_conda_meta.readMembers;
 
+// ---- the declared shared libraries --------------------------------------
+
+const Declared = struct { soname: []const u8, requirement: []const u8 };
+
+/// The --dlopen values as given, split at the first `=`.
+fn declaredDlopens(alloc: Alloc, a: Args) ![]Declared {
+    var list = std.ArrayList(Declared).init(alloc);
+    for (try all(alloc, a, "--dlopen")) |v| {
+        const eq = std.mem.indexOfScalar(u8, v, '=') orelse fail("--dlopen `{s}` is not <soname>=<requirement>", .{v});
+        try list.append(.{ .soname = v[0..eq], .requirement = v[eq + 1 ..] });
+    }
+    return list.toOwnedSlice();
+}
+
+/// `base`, then each declared requirement not already listed after it.
+fn withDeclared(alloc: Alloc, base: []const []const u8, declared: []const Declared) ![][]const u8 {
+    var list = std.ArrayList([]const u8).init(alloc);
+    try list.appendSlice(base);
+    for (declared) |d| {
+        var listed = false;
+        for (list.items[base.len..]) |r| listed = listed or std.mem.eql(u8, r, d.requirement);
+        if (!listed) try list.append(d.requirement);
+    }
+    return list.toOwnedSlice();
+}
+
+fn expectDlopenRows(md: json.Value, declared: []const Declared) void {
+    const rows = md.object.get("dlopen") orelse {
+        if (declared.len != 0) fail("metadata has no `dlopen`, but the library declares {d} shared librar{s} it opens", .{ declared.len, @as([]const u8, if (declared.len == 1) "y" else "ies") });
+        return;
+    };
+    if (declared.len == 0) fail("metadata has `dlopen`, but the library declares no shared library it opens", .{});
+    if (rows != .array or rows.array.items.len != declared.len) fail("metadata `dlopen` must hold exactly the {d} declared row(s)", .{declared.len});
+    for (declared, rows.array.items) |d, r| {
+        if (r != .object or r.object.count() != 2) fail("metadata `dlopen` rows are {{requirement, soname}}", .{});
+        expectEq("metadata dlopen soname", memberStr(r, "soname", "dlopen row"), d.soname);
+        expectEq("metadata dlopen requirement", memberStr(r, "requirement", "dlopen row"), d.requirement);
+    }
+}
+
 // ---- reading a package back ----------------------------------------------
 
 const Parts = struct { stem: []const u8, info: []TarFile, pkg: []TarFile };
@@ -79,7 +120,7 @@ fn sortedNames(alloc: Alloc, dir_path: []const u8) ![][]const u8 {
 /// komira_pack conda-check --dir D --kind library|metapackage --name N
 ///     --expect-subdir S [--require-stamped true] --out MARKER
 ///   library:     --import-name I --mojo-pin V --payload F.mojoc [--dep NAME]...
-///                [--doc-file REL=FILE]...
+///                [--doc-file REL=FILE]... [--dlopen SONAME=REQUIREMENT]...
 ///   metapackage: --member-manifest M.json... [--mojo-pin V]
 ///
 /// V is the Mojo compiler version: the package's version must BE it (a package
@@ -98,12 +139,28 @@ fn sortedNames(alloc: Alloc, dir_path: []const u8) ![][]const u8 {
 /// docs with their sha256, so a doc in the info tar, a missing row or a
 /// changed byte is refused. A metapackage carries no doc.
 ///
+/// A library owning C also states [--lib-shared SONAME=FILE]
+/// [--lib-static NAME=FILE]... --glibc-floor V (conda_lib.zig): the pkg tar
+/// holds each file at lib/ byte-equal (the shared library's link name as a
+/// symbolic link to it), paths.json lists each (the link as a softlink with
+/// its target's sha256), the requirements carry `__glibc >=V` after the
+/// platform guard, and metadata.json's `lib_files` names exactly those files
+/// with their sha256, so a missing row or a changed byte is refused.
+///
+/// Each --dlopen (the build gives them in soname order) is a shared library
+/// the library declares it opens: its requirement must follow the other run
+/// requirements, in that order, each once, in info/index.json and in
+/// metadata.json, and metadata.json's `dlopen` must be exactly one
+/// `{requirement, soname}` row per --dlopen, in that order (no `dlopen` key
+/// without one). Derived here from the arguments, not by the packer's code
+/// (conda_dlopen.zig), so a packer that drops the requirement is refused.
+///
 /// A directory holding only REFUSED (the package could not be made) is a valid
 /// refusal and writes MARKER saying so, except under --require-stamped, where
 /// it is the failure, naming the reason: that is what asking for a release
 /// of a library with no package does.
 pub fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
-    allow(a, &.{ "--dir", "--kind", "--expect-subdir", "--import-name", "--mojo-pin", "--payload", "--dep", "--doc-file", "--member-manifest", "--require-stamped" });
+    allow(a, &.{ "--dir", "--kind", "--expect-subdir", "--import-name", "--mojo-pin", "--payload", "--dep", "--doc-file", "--member-manifest", "--require-stamped", "--dlopen", "--lib-shared", "--lib-static", "--glibc-floor" });
     const dir = need(one(a, "--dir"), "--dir");
     const name = need(a.name, "--name");
     const kind = need(one(a, "--kind"), "--kind");
@@ -197,6 +254,11 @@ pub fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
         if (timestamp <= 0) fail("version {s} is stamped but its index timestamp is not positive: a release carries its commit's time", .{version});
     }
 
+    // The native files the caller states (conda_lib.zig), and their glibc floor.
+    const libs = try pack_conda_lib.libFiles(alloc, a);
+    if (is_meta and libs.len != 0) fail("--lib-shared or --lib-static is given for a metapackage, which ships no file", .{});
+    const glibc = try pack_conda_lib.glibcOf(alloc, a, libs);
+
     // The run requirements are re-derived from what the caller states.
     var members: []const Member = &.{};
     if (is_meta) {
@@ -209,10 +271,12 @@ pub fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
             expectEq("member subdir", m.subdir, subdir);
         }
     }
+    const declared = try declaredDlopens(alloc, a);
+    if (is_meta and declared.len != 0) fail("--dlopen is given for a metapackage, which opens nothing", .{});
     const want = if (is_meta)
         try metaRequirements(alloc, subdir, members)
     else
-        try runRequirements(alloc, subdir, need(one(a, "--mojo-pin"), "--mojo-pin"), version, build, try all(alloc, a, "--dep"));
+        try withDeclared(alloc, try runRequirements(alloc, subdir, glibc, need(one(a, "--mojo-pin"), "--mojo-pin"), version, build, try all(alloc, a, "--dep")), declared);
     const depends = member(index, "depends", "index");
     if (depends != .array or depends.array.items.len != want.len) fail("index depends has {d} entries, must be {d} (the platform guard{s} and each requirement at its version)", .{ if (depends == .array) depends.array.items.len else 0, want.len, @as([]const u8, if (is_meta) "" else ", the exact compiler pin") });
     for (depends.array.items, want) |got, w| {
@@ -238,23 +302,35 @@ pub fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
         payload = readAll(alloc, need(one(a, "--payload"), "--payload"));
         want_path = try std.fmt.allocPrint(alloc, "{s}{s}.mojoc", .{ payload_dir, import_name });
         if (payload.len == 0) fail("--payload is empty", .{});
-        // What the pkg tar must hold: the payload and the stated docs, in path order.
+        // What the pkg tar must hold: the payload, the stated docs and the
+        // stated native files, in path order.
         var want_list = std.ArrayList(DocFile).init(alloc);
         try want_list.append(.{ .path = want_path, .data = payload });
         for (docs) |d| try want_list.append(d);
+        for (libs) |l| try want_list.append(.{ .path = l.path, .data = l.data });
         const want_files = try want_list.toOwnedSlice();
         std.mem.sort(DocFile, want_files, {}, lessDoc);
-        if (pkg.len != want_files.len) fail("pkg tar: {d} files, must be exactly the .mojoc and the {d} declared doc file(s)", .{ pkg.len, docs.len });
-        if (rows.array.items.len != want_files.len) fail("info/paths.json lists {d} files, must list exactly the .mojoc and the {d} declared doc file(s)", .{ rows.array.items.len, docs.len });
+        if (pkg.len != want_files.len) fail("pkg tar: {d} files, must be exactly the .mojoc, the {d} declared doc file(s) and the {d} native file(s)", .{ pkg.len, docs.len, libs.len });
+        if (rows.array.items.len != want_files.len) fail("info/paths.json lists {d} files, must list exactly the .mojoc, the {d} declared doc file(s) and the {d} native file(s)", .{ rows.array.items.len, docs.len, libs.len });
         for (want_files, pkg, rows.array.items) |w, f, row| {
             expectEq("pkg tar member", f.name, w.path);
-            if (f.mode != 0o644) fail("pkg tar: {s} has mode {o}, must be 644", .{ f.name, f.mode });
-            if (!std.mem.eql(u8, f.data, w.data)) {
+            const lib = pack_conda_lib.find(libs, w.path);
+            const target: []const u8 = if (lib) |l| l.target else "";
+            if (lib) |l| {
+                pack_conda_lib.checkMember(alloc, f.mode, f.link, f.data, l) catch |err| switch (err) {
+                    error.Refused => fail("{s}", .{pack_conda_lib.why}),
+                    else => return err,
+                };
+            } else {
+                if (f.mode != 0o644) fail("pkg tar: {s} has mode {o}, must be 644", .{ f.name, f.mode });
+                expectEq("pkg tar link target", f.link, "");
+            }
+            if (lib == null and !std.mem.eql(u8, f.data, w.data)) {
                 if (std.mem.eql(u8, w.path, want_path)) fail("pkg tar: the payload differs from the library's .mojoc ({d} bytes against {d})", .{ f.data.len, w.data.len });
                 fail("pkg tar: {s} differs from the declared doc file ({d} bytes against {d})", .{ f.name, f.data.len, w.data.len });
             }
             expectEq("paths _path", memberStr(row, "_path", "paths row"), w.path);
-            expectEq("paths path_type", memberStr(row, "path_type", "paths row"), "hardlink");
+            expectEq("paths path_type", memberStr(row, "path_type", "paths row"), if (target.len != 0) "softlink" else "hardlink");
             expectEq("paths sha256", memberStr(row, "sha256", "paths row"), &sha256Hex(w.data));
             if (memberInt(row, "size_in_bytes", "paths row") != @as(i64, @intCast(w.data.len))) fail("paths size_in_bytes of {s} differs", .{w.path});
         }
@@ -287,6 +363,7 @@ pub fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
     for (want, mdeps.array.items) |x, y| if (y != .string or !std.mem.eql(u8, x, y.string)) fail("metadata depends differ from info/index.json", .{});
     if (is_meta) {
         if (md.object.get("doc_files") != null) fail("metadata doc_files on a metapackage, which ships no doc", .{});
+        if (md.object.get("lib_files") != null) fail("metadata lib_files on a metapackage, which ships no file", .{});
         for (members) |m| {
             expectEq("member source commit", m.commit, commit);
             if (m.timestamp != timestamp) fail("member {s} has another commit time", .{m.name});
@@ -300,6 +377,7 @@ pub fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
             expectEq("metadata member sha256", memberStr(r, "sha256", "member row"), m.sha256);
         }
     } else {
+        expectDlopenRows(md, declared);
         expectEq("metadata import_name", memberStr(md, "import_name", "metadata"), need(one(a, "--import-name"), "--import-name"));
         expectEq("metadata mojo_pin", memberStr(md, "mojo_pin", "metadata"), need(one(a, "--mojo-pin"), "--mojo-pin"));
         expectEq("metadata payload_path", memberStr(md, "payload_path", "metadata"), want_path);
@@ -311,8 +389,55 @@ pub fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
             expectEq("metadata doc_files path", memberStr(r, "path", "doc_files row"), d.path);
             expectEq("metadata doc_files sha256", memberStr(r, "sha256", "doc_files row"), &sha256Hex(d.data));
         }
+        // lib_files: one {kind, path, sha256} row per stated native file.
+        pack_conda_lib.checkRows(alloc, md.object.get("lib_files"), libs) catch |err| switch (err) {
+            error.Refused => fail("{s}", .{pack_conda_lib.why}),
+            else => return err,
+        };
     }
 
     std.debug.print("komira_pack conda-check: {s} {s} ({s}, {s}) ok\n", .{ name, version, subdir, kind });
-    try writeFile(std.fs.cwd(), need(a.out, "--out"), "ok\n");
+    // A package shipping native files names each, as checked, after `ok`.
+    var marker = std.ArrayList(u8).init(alloc);
+    try marker.appendSlice("ok\n");
+    for (libs) |l| try marker.writer().print("lib_files {s} {s} {s} (pkg tar member and metadata row equal)\n", .{ @tagName(l.kind), l.path, &sha256Hex(l.data) });
+    try writeFile(std.fs.cwd(), need(a.out, "--out"), marker.items);
+}
+
+/// komira_pack conda-expect --dir D (--refused TEXT | --depend REQ...) --out MARKER
+///
+/// A test's expectation of a package directory D (a conda package target's
+/// default output), for the fixtures of tests//negative/conda: with
+/// --refused, D holds only REFUSED and its reason contains TEXT; with
+/// --depend, D holds a package (no REFUSED) whose metadata.json `depends`
+/// lists each REQ exactly. conda-check holds the package itself; this only
+/// says which outcome a fixture must have. Writes MARKER only when it holds;
+/// exit 2 naming what does not.
+pub fn cmdCondaExpect(alloc: Alloc, a: Args) !void {
+    allow(a, &.{ "--dir", "--refused", "--depend" });
+    const dir = need(one(a, "--dir"), "--dir");
+    const listing = try sortedNames(alloc, dir);
+    const refused = listing.len == 1 and std.mem.eql(u8, listing[0], "REFUSED");
+    const depends = try all(alloc, a, "--depend");
+    if (one(a, "--refused")) |text| {
+        if (depends.len != 0) fail("give --refused or --depend, not both", .{});
+        if (text.len == 0) fail("--refused needs the text the reason must contain", .{});
+        if (!refused) fail("{s} holds a package, not a refusal containing `{s}`", .{ dir, text });
+        const why = readAll(alloc, try std.fmt.allocPrint(alloc, "{s}/REFUSED", .{dir}));
+        if (std.mem.indexOf(u8, why, text) == null) fail("{s}/REFUSED says `{s}`, which does not contain `{s}`", .{ dir, std.mem.trim(u8, why, " \t\r\n"), text });
+    } else {
+        if (depends.len == 0) fail("give --refused TEXT or at least one --depend REQ", .{});
+        if (refused) fail("{s} is refused, not a package: {s}", .{ dir, std.mem.trim(u8, readAll(alloc, try std.fmt.allocPrint(alloc, "{s}/REFUSED", .{dir})), " \t\r\n") });
+        const md = try json.parseFromSliceLeaky(json.Value, alloc, readAll(alloc, try std.fmt.allocPrint(alloc, "{s}/metadata.json", .{dir})), .{});
+        const got = member(md, "depends", "metadata");
+        if (got != .array) fail("metadata depends is not a list", .{});
+        for (depends) |d| {
+            var n: usize = 0;
+            for (got.array.items) |g| {
+                if (g == .string and std.mem.eql(u8, g.string, d)) n += 1;
+            }
+            if (n != 1) fail("metadata depends lists `{s}` {d} time(s), not once", .{ d, n });
+        }
+    }
+    try writeFile(std.fs.cwd(), need(a.out, "--out"), "expected\n");
 }

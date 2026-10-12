@@ -46,6 +46,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # dispositions, the terminal beat is retried) is test_pid1_stop_and_reap's.
 # The crash report's UTC stamp (clock_helper.mojo) gives the proleptic
 # Gregorian date before year 0 too (test_clock_helper_negative_era).
+# The edges: the stepping methods (test_job_supervisor_steps), a log store
+# that refuses or stalls (test_job_supervisor_store_faults), the loop between
+# two beats (test_job_supervisor_run_loop), the S3 entry point with no store
+# and with stores it never reaches (test_job_supervisor_s3_entry), how a reply
+# is read and the auth and credential-transport refusals
+# (test_heartbeat_delivery_edges), and the start refusals at their bounds
+# (test_entrypoint_and_boot_edges).
 mojo_library(
     name = "komira_job_supervisor",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "main/**/*.mojo"]),
@@ -81,6 +88,13 @@ mojo_library(
         "tests/test_heartbeat_no_credential_in_clear.mojo",
         "tests/test_heartbeat_proto_roundtrip.mojo",
         "tests/test_pid1_stop_and_reap.mojo",
+        "tests/test_job_supervisor_steps.mojo",
+        "tests/test_job_supervisor_store_faults.mojo",
+        "tests/test_job_supervisor_run_loop.mojo",
+        "tests/test_job_supervisor_s3_entry.mojo",
+        "tests/test_heartbeat_delivery_edges.mojo",
+        "tests/test_entrypoint_and_boot_edges.mojo",
+        "tests/test_s3_transport_first_byte.mojo",
     ],
     test_env = {
         "KOMIRA_JOB_SUPERVISOR_TEST_CREDENTIAL": "tok-env-0123456789",
