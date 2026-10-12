@@ -81,7 +81,9 @@ assert_true(refused.startswith("the README examples tool /nonexistent/readme_exa
 ```
 
 The environment's `pixi.toml` pins every library to its version, build and
-channel, and the compiler to the release's pin:
+channel, the compiler to the release's pin, and on linux-64 declares the
+platform's glibc floor (pixi otherwise assumes glibc 2.28, and no library
+requiring `__glibc >=2.34` resolves):
 
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
@@ -110,7 +112,8 @@ assert_equal(
     "# Written by kci for validation 'install-env': installs the release from its channel only.\n"
     + "[workspace]\nname = \"kci-install-env\"\n"
     + "channels = [\"https://conda.example.invalid/example/gamma\", \"https://conda.example.invalid/max\","
-    + " \"conda-forge\"]\nplatforms = [\"linux-64\"]\n\n[dependencies]\n"
+    + " \"conda-forge\"]\nplatforms = [\"linux-64\"]\n\n[system-requirements]\n"
+    + "libc = { family = \"glibc\", version = \"2.34\" }\n\n[dependencies]\n"
     + "komira_encoding = { version = \"==1.0.0\", build = \"h0a1b2c3d_7\","
     + " channel = \"https://conda.example.invalid/example/gamma\" }\n"
     + "mojo-compiler = { version = \"==1.0.0\", channel = \"https://conda.example.invalid/max\" }\n",
