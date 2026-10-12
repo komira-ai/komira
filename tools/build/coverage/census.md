@@ -31,7 +31,7 @@ nothing else, and git merges two such changes, of any two packages, without
 a conflict. `//:coverage_census` (`census.bzl`) finds the files with no list
 to keep: its `tree` is the root package's doc_tree, which holds every file
 of the cell, and it takes each file under `src/` with one of those two
-names. Three build actions:
+names. Two build actions:
 
 1. `census_files assemble` (`census_files.zig`) checks each file and puts
    them together as one census (`[census]`: every row, sorted by label; one
@@ -42,8 +42,8 @@ names. Three build actions:
    file's, a floor outside 0 to 10000, a pinned row with no reason, a census
    file without its census line or a library row, a carriage return or an
    empty line, each naming the file and line.
-2. `census.sh render` writes the doc, the target's default output.
-3. `census.sh check`, a validation: the build fails unless the floors are
+2. `census.sh check` writes the doc, the target's default output, and is a
+   validation: the build fails unless the floors are
    byte for byte what `render` writes from the census and them. So every
    floor is at least what the census measured, every library package of the
    census has a floor, and no package without a library in the census has

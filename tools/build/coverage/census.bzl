@@ -6,21 +6,22 @@ libraries). `tree` is the root package's doc_tree, which holds every file of
 the cell at its path (tools/build/lint/doc_tree.bzl), so the target finds
 every package's two files with no list to keep: each file under `src/` with
 one of those two names. A fixture names its files in `files` instead
-({repository path: file}). Three actions:
+({repository path: file}). Two actions:
 
 - `census_files assemble` (census_files.zig) checks each file (a floor file
   holds exactly one row, of its own directory; a census file's rows are of
   its own directory) and writes the census and the floors as two files,
   `[census]` and `[floors]`.
-- `census.sh render` writes the doc (the ranked table, `<name>.md`), the
+- `census.sh check` renders the doc (the ranked table, `<name>.md`), the
   target's default output: `./buck2 build //:coverage_census --show-output`.
   The doc is a build output and is never committed, so a change to one
-  package's coverage touches nothing outside its directory.
-- `census.sh check` renders the floors into scratch and fails the build (a
-  validation) unless the floors are exactly what it renders: every floor is
-  at least what the census measured, every library package of the census
-  has a floor and no other package has one. A refusal of `assemble` fails
-  the build too.
+  package's coverage touches nothing outside its directory. It renders the
+  floors into scratch and fails the build (a validation) unless the floors
+  are exactly what it renders: every floor is at least what the census
+  measured, every library package of the census has a floor and no other
+  package has one. A validation result must be the one output of its
+  action, so the result is a copy of what check wrote. A refusal of
+  `assemble` fails the build too.
 
 census.md.
 """
@@ -48,16 +49,12 @@ def _coverage_census_impl(ctx):
         category = "coverage_census_assemble",
     )
     doc = ctx.actions.declare_output(ctx.label.name + ".md")
-    floors = ctx.actions.declare_output("render/ratchet.tsv")
+    checked = ctx.actions.declare_output("check/validation.json")
     ctx.actions.run(
-        cmd_args(bb, "sh", ctx.attrs._script, "render", bb, census, ratchet, doc.as_output(), floors.as_output()),
-        category = "coverage_census_render",
-    )
-    result = ctx.actions.declare_output("validation.json")
-    ctx.actions.run(
-        cmd_args(bb, "sh", ctx.attrs._script, "check", bb, census, ratchet, result.as_output()),
+        cmd_args(bb, "sh", ctx.attrs._script, "check", bb, census, ratchet, checked.as_output(), doc.as_output()),
         category = "coverage_census",
     )
+    result = ctx.actions.copy_file("validation.json", checked)
     return [
         DefaultInfo(default_output = doc, sub_targets = {
             "census": [DefaultInfo(default_output = census)],

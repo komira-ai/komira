@@ -7,12 +7,12 @@
 # usage: census.sh run     --out <dir> [--cap <seconds>] [--attempts <n>] [--batch <n>] [--skip <file>]
 #        census.sh collect --out <dir> [--skip <file>] [--source <commit>] [--note <text>]
 #        census.sh render  <busybox> <census.tsv> <ratchet.tsv> <doc out> <ratchet out>
-#        census.sh check   <busybox> <census.tsv> <ratchet.tsv> <result.json>
+#        census.sh check   <busybox> <census.tsv> <ratchet.tsv> <result.json> <doc out>
 #
 # run and collect are run by hand at the top of a checkout (they call
 # ./buck2, so the coverage build runs where the build runs); render and
 # check use only the busybox given, and are the build actions of
-# //:coverage_census (render writes its doc, check its validation).
+# //:coverage_census (check writes its doc and its validation).
 #
 #   run      lists the libraries under src/ (`kind(mojo_library_rule,
 #            //src/...)`, into <dir>/libraries.txt unless it exists) and
@@ -59,12 +59,12 @@
 #            package the census has no library row for is dropped. Each
 #            floor raised, row dropped and package under its floor is said
 #            on stderr. Its comment lines are kept.
-#   check    renders into scratch and compares: <ratchet.tsv> (every
-#            package's coverage_floor.tsv, census_files assembles it) must be
-#            exactly what render writes from <census.tsv> and it (every
-#            floor at least what was measured, one per library package).
-#            Writes the validation result; exits 0 unless its usage is
-#            wrong.
+#   check    renders the doc to <doc out> and the floors into scratch:
+#            <ratchet.tsv> (every package's coverage_floor.tsv, census_files
+#            assembles it) must be exactly what render writes from
+#            <census.tsv> and it (every floor at least what was measured,
+#            one per library package). Writes the validation result; exits
+#            0 unless its usage is wrong.
 #
 # census.tsv: comment lines start with '#'; then the line
 # `census<TAB><date YYYY-MM-DD><TAB><source commit, 40 hex, or -><TAB><note or ->`; then one
@@ -314,12 +314,12 @@ render)
     exit $?
     ;;
 check)
-    [ "$#" -eq 4 ] || usage "check takes 4 arguments"
-    BB=$1 RESULT=$4
+    [ "$#" -eq 5 ] || usage "check takes 5 arguments"
+    BB=$1 RESULT=$4 DOC_OUT=$5
     S=${BUCK_SCRATCH_PATH:-.}/census_check
-    "$BB" mkdir -p "$S"
+    "$BB" mkdir -p "$S" && : > "$DOC_OUT"
     msg=""
-    if ! render "$BB" "$2" "$3" "$S/doc.md" "$S/ratchet.tsv" 2> "$S/err"; then
+    if ! render "$BB" "$2" "$3" "$DOC_OUT" "$S/ratchet.tsv" 2> "$S/err"; then
         msg="the census or the floors are not ones census.sh renders: $("$BB" grep '^census.sh: error' "$S/err" | "$BB" head -5)"
     elif ! "$BB" cmp -s "$S/ratchet.tsv" "$3"; then
         msg="the floors are not what census.sh render writes from the census and them (a coverage_floor.tsv under what its package's coverage_census.tsv measured, a floor of a package with no library in the census, or a library package with no floor): $("$BB" diff "$3" "$S/ratchet.tsv" | "$BB" grep '^[-+][^-+]' | "$BB" head -10)"

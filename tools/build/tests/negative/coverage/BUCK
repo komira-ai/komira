@@ -1100,6 +1100,7 @@ target_suite(
         ":covbranch_census_result",
         ":covtry_census_result",
         ":covandor_census_result",
+        "//negative/coverage/floorfile:covfile_result",
         ":covbranch_both[coverage][gate]",
         ":covtry_both[coverage][gate]",
         ":covandor_both[coverage][gate]",

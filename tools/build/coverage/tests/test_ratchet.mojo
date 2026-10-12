@@ -69,6 +69,8 @@ def test_lowered_floors_are_named() raises:
     assert_equal(_lowered(String("src/a\t5000\t0\n"), String("src/a\t5000\t-\n")), "")
     # A row gone; one with floors 0 gone is none lost.
     assert_equal(_lowered(String("src/a\t5000\t-\nsrc/b\t0\t-\n"), String("# none\n")), "src/a: the row is gone (line floor 50.00%, branch floor none)")
+    # A row gone whose only floor above 0 is its branch floor.
+    assert_equal(_lowered(String("src/a\t0\t2500\n"), String("# none\n")), "src/a: the row is gone (line floor 0.00%, branch floor 25.00%)")
     # A pinned row is held too, and so is an unpinned one pinned lower.
     assert_equal(_lowered(String("src/a\t5000\t-\tflaky\n"), String("src/a\t4000\t-\tflakier\n")), "src/a: line floor 50.00% -> 40.00%")
     assert_equal(_lowered(String("src/a\t5000\t-\n"), String("src/a\t4000\t-\tflaky\n")), "src/a: line floor 50.00% -> 40.00%")

@@ -33,13 +33,11 @@
 #      (:covinfo_result), while covlow's stays red, and so does its copy
 #      in tests//src/testsuite/coverage (covnotinfo: not under src/tests); covtop_census_result: a library whose welded
 #      tests are outside its package's tests/ analyzes with coverage, and
-#      its gate leaves both tests out of its numbers (--test-source); covbad:
-#      a census gate over a malformed floor file is red (covcheck exit 1
-#      fails the gate in every mode); covfloor: a census gate under a floor
-#      it does not hold is red, a Regression, and so is its conda package,
-#      while covfloor_held at its floors is green; the census check
-#      (census.bzl) over per-package files is green on the doc and floors
-#      census.sh renders and red on each defect below; what a red gate blocks: the libraries above
+#      its gate leaves both tests out of its numbers (--test-source); covbad: a census gate over a
+#      malformed floor file is red (covcheck exit 1 fails the gate in every mode); covfloor: a census
+#      gate under a floor it does not hold is red, a Regression, and so is its conda package, while
+#      covfloor_held at its floors is green; the census check (census.bzl) over per-package files is
+#      green on the doc and floors census.sh renders and red on each defect below; what a red gate blocks: the libraries above
 #      and covlow_user (which depends on covlow and runs its test against
 #      covlow's package) are green, and covlow_conda and covnotests_conda
 #      (a REFUSED package: no test) are red with their gate's failure; a
@@ -130,8 +128,7 @@ expect_green coverage_gate_library "$N:covlow" "$N:covnotests" "$N:covun" "$N:co
     "$N:covbranch" "$N:covtry" "$N:covandor" "$N:covbad" "$N:covlow_user"
 expect_red coverage_gate_conda "COVERAGE GATE FAILED (enforce): $P ($N:covlow [coverage gate]): covcheck gate exited 3" "$N:covlow_conda"
 expect_red coverage_gate_conda_notests "- **NotMeasured** \`$P\`: no line of this package was measured" "$N:covnotests_conda"
-# A floor holds in census mode: covfloor (line 50.00%, floor 50.01%) is a Regression,
-# its census gate and conda package red, the library green; covfloor_held green.
+# Census mode: covfloor (line 50.00% < floor 50.01%) is a Regression, gate and conda red; covfloor_held green.
 expect_red coverage_gate_floor "COVERAGE GATE FAILED (census): $P ($N:covfloor [coverage gate]): covcheck gate exited 3" "$N:covfloor[coverage][gate]"
 if grep -qF -- "- **Regression** \`$P\`: line 50.00% is below its floor 50.01%" "$LOG/coverage_gate_floor.log"; then
     pass coverage_gate_floor_finding
