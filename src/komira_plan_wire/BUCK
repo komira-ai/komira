@@ -33,6 +33,7 @@ mojo_library(
         "tests/test_plan_wire_udf_tier.mojo",
         "tests/test_plan_wire_udf_args.mojo",
         "tests/test_plan_wire_udf_plans.mojo",
+        "tests/test_plan_wire_udf_position_sweeps.mojo",
         "tests/test_plan_wire_udf_ref.mojo",
         "tests/test_plan_wire_udf_walk.mojo",
         "tests/test_plan_wire_values_gate_arms.mojo",
