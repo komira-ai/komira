@@ -216,15 +216,13 @@ def _defused_form(tok: String) -> String:
 
     A human reads `4[0]4` as 404 and `P[r]econdition` as Precondition; a
     `find()` for either token does not match. Every classifier token is at
-    least 3 bytes, so this is always well-defined."""
-    var tb = tok.as_bytes()
-    var out = String("")
-    out += chr(Int(tb[0]))
+    least 3 bytes, so this is always well-defined. Every token is ASCII, so
+    each cut below is a char boundary."""
+    var out = String(tok[byte=0:1])
     out += String("[")
-    out += chr(Int(tb[1]))
+    out += String(tok[byte=1:2])
     out += String("]")
-    for i in range(2, len(tb)):
-        out += chr(Int(tb[i]))
+    out += String(tok[byte=2 : tok.byte_length()])
     return out^
 
 
@@ -234,12 +232,18 @@ def defuse_classifier_tokens(s: String) -> String:
 
     This is what lets the emitted error carry Google's own diagnostic prose —
     the sentence naming the missing index and the console URL that creates it —
-    without that prose being able to change the message's CLASS."""
+    without that prose being able to change the message's CLASS.
+
+    The text between token matches is copied as byte slices of `s`, so the
+    caller's key, prefix or URI keeps its UTF-8 bytes. Every token is ASCII,
+    so a match starts and ends on a char boundary and no cut splits a
+    multi-byte character."""
     var bs = s.as_bytes()
     var buf = List[UInt8](capacity=len(bs))
     for i in range(len(bs)):
         buf.append(bs[i])
     var out = String("")
+    var start = 0  # the first byte of `s` not yet copied to `out`
     var i = 0
     while i < len(buf):
         var hit = -1
@@ -249,11 +253,13 @@ def defuse_classifier_tokens(s: String) -> String:
                 break
         if hit >= 0:
             var tok = String(_token(hit))
+            out += String(s[byte=start:i])
             out += _defused_form(tok)
             i += tok.byte_length()
+            start = i
         else:
-            out += chr(Int(buf[i]))
             i += 1
+    out += String(s[byte=start : len(buf)])
     return out^
 
 
