@@ -130,9 +130,15 @@ def _zig_exe_impl(ctx):
     script = _PRELUDE + """
 ZIG_GLOBAL_CACHE_DIR="$T/zig-global"; ZIG_LOCAL_CACHE_DIR="$T/zig-local"; HOME="$T/home"
 export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME
-"$1/zig" build-exe -OReleaseSafe -target x86_64-linux-musl -fstrip "$2" "-femit-bin=$3"
+"$1/zig" build-exe -OReleaseSafe -target TARGET -fstrip "$2" "-femit-bin=$3"
 rm -rf "$T"
 """
+    # The target is written into the script, so that with the default the
+    # command (and the action key) of every zig_exe is what it was before
+    # the attribute existed.
+    if not regex_match("^[a-z0-9_.-]+$", ctx.attrs.target):
+        fail("{}: target {} is not a zig target triple".format(ctx.label, repr(ctx.attrs.target)))
+    script = script.replace("-target TARGET ", "-target {} ".format(ctx.attrs.target))
     cmd = busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output())
     if ctx.attrs.imports:
         # Files `src` imports by a relative name: inputs at their paths, so
@@ -156,6 +162,9 @@ zig_exe_rule = rule(
         "deps": attrs.list(attrs.dep(providers = [ZigModuleInfo]), default = []),
         "imports": attrs.list(attrs.source(), default = []),
         "src": attrs.source(),
+        # zig's -target: what the executable runs on (it is built on the
+        # linux execution platform whatever this says).
+        "target": attrs.string(default = "x86_64-linux-musl"),
         # `zig_test` targets the executable waits for.
         "unit_tests": attrs.list(attrs.dep(), default = []),
         "zig": attrs.dep(),
@@ -326,7 +335,7 @@ def _mojo_toolchain_impl(ctx):
             wrapper = ctx.attrs._wrapper[DefaultInfo].default_outputs[0],
             watchdog_idle_secs = ctx.attrs.watchdog_idle_secs,
             watchdog_sample_secs = ctx.attrs.watchdog_sample_secs,
-            gate_runner = ctx.attrs._gate_runner[DefaultInfo].default_outputs[0],
+            gate = ctx.attrs._gate[DefaultInfo].default_outputs[0],
             run_check = ctx.attrs._run_check[DefaultInfo].default_outputs[0],
             launcher = ctx.attrs._launcher[DefaultInfo].default_outputs[0],
             runtime = ctx.attrs.runtime[DefaultInfo].default_outputs[0],
@@ -345,7 +354,7 @@ mojo_toolchain_rule = rule(
         # its own os and cpu, so the compiler's runtime is the target's.
         "runtime": attrs.exec_dep(),
         "target_cpu": attrs.string(),
-        # The compile watchdog (mojo_wrapper.sh): a compile whose whole process
+        # The compile watchdog (tools/mojo_compile.zig): a compile whose whole process
         # tree uses no CPU for `watchdog_idle_secs` is a deadlocked compiler; it
         # is killed and the action fails with exit 124 instead of holding a
         # worker until the executor's action timeout. 0 turns it off. A slow
@@ -353,7 +362,9 @@ mojo_toolchain_rule = rule(
         "watchdog_idle_secs": attrs.int(default = 300),
         "watchdog_sample_secs": attrs.int(default = 30),
         "zig": attrs.exec_dep(),
-        "_gate_runner": attrs.dep(default = "komira//tools/build/mojo:gate_runner.sh"),
+        # The gate (tools/build/run): runs every gated test and mutation
+        # step. An exec dep: it runs in the actions, on the execution platform.
+        "_gate": attrs.exec_dep(default = "komira//tools/build/run:gate"),
         "_launcher": attrs.dep(default = "komira//tools/build/mojo:launch.sh"),
         "_run_check": attrs.dep(default = "komira//tools/build/mojo:run_check.sh"),
         # The lint of every script the Mojo rules run (tools/build/lint): a
@@ -364,7 +375,9 @@ mojo_toolchain_rule = rule(
             "komira//tools/build/mojo:shell_lint",
             "komira//tools/build/mojo/darwin:shell_lint",
         ]),
-        "_wrapper": attrs.dep(default = "komira//tools/build/mojo:mojo_wrapper.sh"),
+        # The compile wrapper (tools/mojo_compile.zig), an executable built
+        # behind its unit tests; defs.bzl's mojo_compile_cmd runs it.
+        "_wrapper": attrs.exec_dep(default = "komira//tools/build/mojo:mojo_compile"),
     },
 )
 

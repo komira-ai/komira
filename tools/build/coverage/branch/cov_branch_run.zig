@@ -4,29 +4,30 @@
 //! the raw profiles it writes into an indexed profile (README.md,
 //! "cov_branch_run").
 //!
-//! usage: cov_branch run --busybox <busybox> --gate-runner <gate_runner.sh>
+//! usage: cov_branch run --busybox <busybox> --gate <gate>
 //!            --compiler <compiler_dir> --label <label> --profdata <llvm-profdata>
 //!            --raw-version <N> --binary <test_binary> --out <profdata_out>
 //!            [--env NAME=VALUE]...
 //!
-//!   --gate-runner  tools/build/mojo/gate_runner.sh, run as the release gate
-//!                  runs it: `<busybox> sh <gate_runner.sh> <busybox>
-//!                  <compiler_dir> <label> <test_binary> <marker> --env ...`
-//!                  (it is a shell script of the mojo rules, not of this tool)
+//!   --gate         the gate (tools/build/run), run as the release gate runs
+//!                  it: `<gate> mojo --busybox <busybox> --runtime-lib
+//!                  <compiler_dir>/lib --label <label> --test <test_binary>
+//!                  --marker <marker> --env ...`, with no limit flag (no
+//!                  memory cap, no time limit: see below)
 //!   --profdata     the pinned llvm-profdata (toolchains/llvm_branch)
 //!   --raw-version  the raw profile version every profile must have
 //!   --binary       <root>/bin/<test> of the test's staged tree (the release
 //!                  gate's: <root>/share holds its declared data)
-//!   --env          the test's environment, passed to gate_runner as given
+//!   --env          the test's environment, passed to the gate as given
 //!
 //! Steps:
-//!   1. gate_runner runs the test in the gate's environment (this tool's own
+//!   1. `gate mojo` runs the test in the gate's environment (this tool's own
 //!      environment, PATH replaced by an empty directory of its scratch: it
-//!      sets nothing else, and gate_runner sets PATH itself) with one more
+//!      sets nothing else, and the gate sets PATH itself) with one more
 //!      --env, LLVM_PROFILE_FILE=<scratch>/prof/%p.profraw (an absolute path;
 //!      %p is the pid, so a child the test starts writes a profile of its
 //!      own). The test must pass: when it fails, so does this action, with
-//!      the test's output and this tool's message, not gate_runner's banner
+//!      the test's output and this tool's message, not the gate's banner
 //!      (which says the release gate's test failed: that one passed).
 //!   2. At least one raw profile was written there; none (the runtime was not
 //!      linked, the variable did not reach the test, the test left without
@@ -53,7 +54,7 @@
 //! the working directory when it is relative), or .cov_branch_run in the
 //! working directory without one; it is removed after a success.
 //!
-//! Exit status: the test's when it fails (gate_runner's, 128 + N when signal
+//! Exit status: the test's when it fails (the gate's, 128 + N when signal
 //! N killed it); 1 when no profile was written or one is refused; 2 for a
 //! usage error, or a program this tool cannot start.
 
@@ -64,7 +65,7 @@ const RULE = "==================================================================
 
 pub const Args = struct {
     busybox: []const u8,
-    gate_runner: []const u8,
+    gate: []const u8,
     compiler: []const u8,
     label: []const u8,
     profdata: []const u8,
@@ -75,11 +76,11 @@ pub const Args = struct {
     env: []const []const u8,
 };
 
-pub const USAGE = "usage: cov_branch run --busybox B --gate-runner G --compiler DIR --label L --profdata P --raw-version N --binary F --out F [--env NAME=VALUE]...";
+pub const USAGE = "usage: cov_branch run --busybox B --gate G --compiler DIR --label L --profdata P --raw-version N --binary F --out F [--env NAME=VALUE]...";
 
 /// The arguments after `run`, or the reason they are refused (a usage error).
 pub fn parseArgs(alloc: std.mem.Allocator, argv: []const []const u8, why: *[]const u8) !?Args {
-    const names = [_][]const u8{ "--busybox", "--gate-runner", "--compiler", "--label", "--profdata", "--raw-version", "--binary", "--out" };
+    const names = [_][]const u8{ "--busybox", "--gate", "--compiler", "--label", "--profdata", "--raw-version", "--binary", "--out" };
     var vals = [_]?[]const u8{null} ** names.len;
     var env = std.ArrayList([]const u8).init(alloc);
     var i: usize = 0;
@@ -123,7 +124,7 @@ pub fn parseArgs(alloc: std.mem.Allocator, argv: []const []const u8, why: *[]con
     };
     return .{
         .busybox = vals[0].?,
-        .gate_runner = vals[1].?,
+        .gate = vals[1].?,
         .compiler = vals[2].?,
         .label = vals[3].?,
         .profdata = vals[4].?,
@@ -155,13 +156,16 @@ pub fn scratchDir(alloc: std.mem.Allocator, cwd: []const u8, buck_scratch: ?[]co
     return std.fmt.allocPrint(alloc, "{s}/{s}/cov_branch_run", .{ cwd, s });
 }
 
-/// gate_runner's command line: the release gate's, with the test's --env
-/// and then LLVM_PROFILE_FILE. Paths are absolute (`k` is).
+/// The gate's command line: the release gate's (`gate mojo`, as
+/// tools/build/mojo/test_runtime.bzl `gate_mojo` writes it, without a limit
+/// flag), with the test's --env and then LLVM_PROFILE_FILE. Paths are
+/// absolute (`k` is).
 pub fn gateArgv(alloc: std.mem.Allocator, a: Args, cwd: []const u8, k: []const u8) ![]const []const u8 {
     var v = std.ArrayList([]const u8).init(alloc);
-    const bb = try abs(alloc, cwd, a.busybox);
-    try v.appendSlice(&.{ bb, "sh", try abs(alloc, cwd, a.gate_runner), bb, a.compiler, a.label, try abs(alloc, cwd, a.binary) });
-    try v.append(try std.fmt.allocPrint(alloc, "{s}/gate.passed", .{k}));
+    try v.appendSlice(&.{ try abs(alloc, cwd, a.gate), "mojo", "--busybox", try abs(alloc, cwd, a.busybox) });
+    try v.appendSlice(&.{ "--runtime-lib", try std.fmt.allocPrint(alloc, "{s}/lib", .{try abs(alloc, cwd, a.compiler)}) });
+    try v.appendSlice(&.{ "--label", a.label, "--test", try abs(alloc, cwd, a.binary) });
+    try v.appendSlice(&.{ "--marker", try std.fmt.allocPrint(alloc, "{s}/gate.passed", .{k}) });
     for (a.env) |e| try v.appendSlice(&.{ "--env", e });
     try v.appendSlice(&.{ "--env", try std.fmt.allocPrint(alloc, "LLVM_PROFILE_FILE={s}/prof/%p.profraw", .{k}) });
     return v.toOwnedSlice();
@@ -186,7 +190,7 @@ fn banner(out: *std.ArrayList(u8), label: []const u8, msg: []const u8) !void {
     try w.print("{s}\nBRANCH COVERAGE RUN FAILED: {s}\n{s}\n{s}\n", .{ RULE, label, msg, RULE });
 }
 
-/// What a failed gate run prints: gate_runner's stderr without its banner's
+/// What a failed gate run prints: the gate's stderr without its banner's
 /// first two lines (the first `GATED TEST FAILED: <label> (exit <rc>)` that
 /// is followed by `The library's package is not produced until this test
 /// passes.`; the rest, the test's output among it, is kept), then this
@@ -393,7 +397,7 @@ pub fn runAll(alloc: std.mem.Allocator, a: Args, where: Where, runner: Runner, e
         .env = try childEnv(alloc, where.env, bin, false),
         .stderr_path = gate_err,
     }) catch |e| {
-        try err.writer().print("cov_branch run: cannot run {s}: {s}\n", .{ a.busybox, @errorName(e) });
+        try err.writer().print("cov_branch run: cannot run {s}: {s}\n", .{ a.gate, @errorName(e) });
         return 2;
     };
     const rc = gate.shellStatus();

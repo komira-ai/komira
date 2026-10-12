@@ -14,7 +14,7 @@ mojo_doc_json(
 ```
 
 - **What runs.** The pinned compiler's `mojo doc`, through
-  [`mojo_wrapper.sh`](mojo_wrapper.sh) like every compile (the same
+  [`mojo_compile`](tools/mojo_compile.zig) like every compile (the same
   environment, the watchdog, and the refusal of an empty output or one
   holding the action's working directory), on the library's staged sources
   (its `[src]`), with the packages of its `deps` on `-I`. The library's own
