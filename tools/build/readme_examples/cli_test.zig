@@ -116,7 +116,7 @@ test "usage: every flag required, none unknown or twice, a value for each; exit 
         const o = cli.run(a, tmp.dir, c.argv);
         try t.expectEqual(@as(u8, 2), o.code);
         try t.expect(std.mem.startsWith(u8, o.stdout, c.first));
-        try t.expect(std.mem.endsWith(u8, o.stdout, "       tool map --package NAME --display NAME --report F\n"));
+        try t.expect(std.mem.endsWith(u8, o.stdout, "       tool link-check --readme F --display NAME --expect F --out F\n"));
     }
     // A README it cannot read.
     const args = generateArgs("missing.md", "allow");
@@ -135,4 +135,63 @@ test "map prints the report with each example's line mapped to the README" {
     const o = cli.run(a, tmp.dir, &.{ "tool", "map", "--package=p", "--display", "src/p/README.md", "--report", "report" });
     try t.expectEqual(@as(u8, 0), o.code);
     try t.expectEqualStrings("src/p/README.md:9:3: error: e\nreadme_p.mojo:4\n", o.stdout);
+}
+
+const LINKED = "# L\n\n```mojo\nprint(1)\n```\n\n## Linking\n\n```sh komira-link\n" ++
+    "mojo run -Xlinker -L$CONDA_PREFIX/lib -Xlinker -lkomira_metrics_native prog.mojo\n" ++
+    "mojo build -Xlinker -L$CONDA_PREFIX/lib -Xlinker -lkomira_metrics_native -Xlinker -rpath -Xlinker '$ORIGIN/../lib' prog.mojo -o $CONDA_PREFIX/bin/prog\n```\n";
+
+const LINKED_ARGS = "run\t-Xlinker\nrun\t-L$CONDA_PREFIX/lib\nrun\t-Xlinker\nrun\t-lkomira_metrics_native\n" ++
+    "build\t-Xlinker\nbuild\t-L$CONDA_PREFIX/lib\nbuild\t-Xlinker\nbuild\t-lkomira_metrics_native\n" ++
+    "build\t-Xlinker\nbuild\t-rpath\nbuild\t-Xlinker\nbuild\t$ORIGIN/../lib\n";
+
+test "link writes the block's arguments, one per line; no block is an empty file" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "link");
+    defer tmp.done();
+    try tmp.dir.writeFile("README.md", LINKED);
+    const o = cli.run(a, tmp.dir, &.{ "tool", "link", "--readme", "README.md", "--display", "src/l/README.md", "--out", "args" });
+    try t.expectEqual(@as(u8, 0), o.code);
+    try t.expectEqualStrings(LINKED_ARGS, try tmp.dir.readFileAlloc(a, "args", 1 << 20));
+    try tmp.dir.writeFile("plain.md", "# P\n\n```sh\nmojo run x.mojo\n```\n");
+    const o2 = cli.run(a, tmp.dir, &.{ "tool", "link", "--readme", "plain.md", "--display", "d", "--out", "none" });
+    try t.expectEqual(@as(u8, 0), o2.code);
+    try t.expectEqualStrings("", try tmp.dir.readFileAlloc(a, "none", 1 << 20));
+}
+
+test "link refuses a block it cannot read as words, exit 1, naming the line, and writes nothing" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "link_refused");
+    defer tmp.done();
+    try tmp.dir.writeFile("README.md", "# L\n\n```sh komira-link\nmojo run -lx;y prog.mojo\nmojo build prog.mojo -o p\n```\n");
+    const o = cli.run(a, tmp.dir, &.{ "tool", "link", "--readme", "README.md", "--display", "src/l/README.md", "--out", "args" });
+    try t.expectEqual(@as(u8, 1), o.code);
+    try t.expect(std.mem.startsWith(u8, o.stdout, "src/l/README.md:4: `;`"));
+    try t.expectError(error.FileNotFound, tmp.dir.access("args", .{}));
+}
+
+test "link-check: equal arguments pass; a README without an owner's -l is exit 1, printing both" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "link_check");
+    defer tmp.done();
+    try tmp.dir.writeFile("README.md", LINKED);
+    try tmp.dir.writeFile("want", LINKED_ARGS);
+    const argv = [_][]const u8{ "tool", "link-check", "--readme", "README.md", "--display", "src/l/README.md", "--expect", "want", "--out", "ok" };
+    try t.expectEqual(@as(u8, 0), cli.run(a, tmp.dir, &argv).code);
+    try t.expectEqualStrings(LINKED_ARGS, try tmp.dir.readFileAlloc(a, "ok", 1 << 20));
+    try tmp.dir.deleteFile("ok");
+    // The planted defect: the run line without -lkomira_metrics_native.
+    const dropped = try std.mem.replaceOwned(u8, a, LINKED, "-Xlinker -lkomira_metrics_native prog.mojo\n", "prog.mojo\n");
+    try t.expect(!std.mem.eql(u8, dropped, LINKED));
+    try tmp.dir.writeFile("README.md", dropped);
+    const o = cli.run(a, tmp.dir, &argv);
+    try t.expectEqual(@as(u8, 1), o.code);
+    try t.expect(std.mem.startsWith(u8, o.stdout, "src/l/README.md: its link block parses to\nrun\t-Xlinker\nrun\t-L$CONDA_PREFIX/lib\nbuild\t"));
+    try t.expectError(error.FileNotFound, tmp.dir.access("ok", .{}));
 }
