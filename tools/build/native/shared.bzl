@@ -23,8 +23,11 @@ NativeSharedInfo = provider(
     doc = "A komira library's own shared library, for the libraries that declare it a NEEDED owner and for its library's conda package.",
     # so: the shared library, lib<library>_native.so.1; soname: its SONAME;
     # library: the Mojo library's import name; archives: the labels of the
-    # archives linked whole, sorted; glibc_floor: the floor check 5 held it to.
-    fields = ["archives", "glibc_floor", "library", "so", "soname"],
+    # archives linked whole, sorted; glibc_floor: the floor check 5 held it to;
+    # closure: {SONAME: shared library} of this one and every owner it NEEDs,
+    # transitively (`needed_owners`), for the order check of a packaged
+    # README's link commands (komira_pack readme-link --needed-of).
+    fields = ["archives", "closure", "glibc_floor", "library", "so", "soname"],
 )
 
 # What each check reads besides the shared object (native_so.zig, `check`).
@@ -109,6 +112,9 @@ def _native_shared_library_impl(ctx):
     # A C++ archive takes zig's libc++ and libc++abi, linked statically; the
     # version script keeps their symbols local.
     so = ctx.actions.declare_output(soname)
+    closure = {soname: so}
+    for d in ctx.attrs.needed_owners:
+        closure.update(d[NativeSharedInfo].closure)
     ctx.actions.run(
         cmd_args(
             ctx.attrs._launcher[RunInfo],
@@ -187,6 +193,7 @@ def _native_shared_library_impl(ctx):
         ValidationInfo(validations = specs),
         NativeSharedInfo(
             archives = sorted([str(d.label.raw_target()) for d in ctx.attrs.archives]),
+            closure = closure,
             glibc_floor = ctx.attrs.glibc_floor,
             library = ctx.attrs.library,
             so = so,

@@ -21,7 +21,8 @@ launcher_level_test(
 # declared requirement written after the others, once) and a library's
 # native files in its package (pack/conda_lib.zig: lib_files rows, the
 # __glibc floor, NEEDED owners) and the link commands of a packaged README
-# (pack/readme_link.zig: every owner in the order given, the static archive
+# (pack/readme_link.zig: every owner in the order given, an owner a
+# shared library NEEDs refused before it, the static archive
 # on the build line only, the source's bytes kept, a source naming the
 # marker refused).
 zig_test(

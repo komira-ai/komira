@@ -242,6 +242,14 @@ def _packaged_readme(ctx, lib, info):
     owners, statics = readme_link_names(info.native) if info.native != None else ([], [])
     if not owners and not statics:
         return info.readme, None
+    # The order is checked against the objects: each shared library the
+    # package has (its own, and through `needed_owners` every owner it NEEDs)
+    # is read for DT_NEEDED, and an owner it NEEDs must come after it
+    # (komira_pack readme-link `--needed-of`), so a reversed
+    # `readme_link_names` is red here, not only different from kci.
+    needed_of = []
+    if ctx.attrs.native != None:
+        needed_of = [cmd_args("--needed-of", cmd_args(so, format = s + "={}")) for s, so in ctx.attrs.native[NativeSharedInfo].closure.items()]
     readme = ctx.actions.declare_output("readme/README.md")
     written = ctx.actions.declare_output("readme/link_args.txt")
     ctx.actions.run(
@@ -252,6 +260,7 @@ def _packaged_readme(ctx, lib, info):
             info.readme,
             [cmd_args("--owner", o) for o in owners],
             [cmd_args("--static", s) for s in statics],
+            needed_of,
             "--out",
             readme.as_output(),
             "--args",
