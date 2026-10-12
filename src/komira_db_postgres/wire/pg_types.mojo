@@ -311,6 +311,67 @@ def _parse_int64_text(s: String) raises -> Int64:
     return -acc if neg else acc
 
 
+def _is_pg_space(c: UInt8) -> Bool:
+    # C isspace in the "C" locale: space, \t, \n, \v, \f, \r.
+    return c == UInt8(ord(" ")) or (c >= UInt8(9) and c <= UInt8(13))
+
+
+def _ascii_lower(c: UInt8) -> UInt8:
+    if c >= UInt8(ord("A")) and c <= UInt8(ord("Z")):
+        return c + UInt8(32)
+    return c
+
+
+def _is_ci_prefix(b: Span[UInt8, _], start: Int, end: Int, word: String) -> Bool:
+    """True when b[start:end] is a non-empty, case-insensitive prefix of the
+    lower-case ASCII `word`."""
+    var w = word.as_bytes()
+    var n = end - start
+    if n <= 0 or n > len(w):
+        return False
+    for i in range(n):
+        if _ascii_lower(b[start + i]) != w[i]:
+            return False
+    return True
+
+
+def _parse_bool_text(s: String) raises -> Bool:
+    """PostgreSQL's boolin: leading and trailing whitespace is ignored; then a
+    case-insensitive unique prefix of "true"/"yes" is true and of
+    "false"/"no" is false, "on" is true, "off" or its prefix "of" is false
+    (boolin compares at least two letters, so a lone "o" is rejected), and
+    exactly "1"/"0" are true/false. Anything
+    else (including an empty cell) raises, as boolin does."""
+    var b = s.as_bytes()
+    var start = 0
+    var end = len(b)
+    while start < end and _is_pg_space(b[start]):
+        start += 1
+    while end > start and _is_pg_space(b[end - 1]):
+        end -= 1
+    var n = end - start
+    if n > 0:
+        var c = _ascii_lower(b[start])
+        if c == UInt8(ord("t")) and _is_ci_prefix(b, start, end, "true"):
+            return True
+        if c == UInt8(ord("f")) and _is_ci_prefix(b, start, end, "false"):
+            return False
+        if c == UInt8(ord("y")) and _is_ci_prefix(b, start, end, "yes"):
+            return True
+        if c == UInt8(ord("n")) and _is_ci_prefix(b, start, end, "no"):
+            return False
+        if c == UInt8(ord("o")):
+            if n == 2 and _is_ci_prefix(b, start, end, "on"):
+                return True
+            if n >= 2 and _is_ci_prefix(b, start, end, "off"):
+                return False
+        if n == 1 and c == UInt8(ord("1")):
+            return True
+        if n == 1 and c == UInt8(ord("0")):
+            return False
+    raise Error("PgRow: invalid boolean text")
+
+
 def _hex_nibble(c: UInt8) raises -> UInt8:
     if c >= UInt8(ord("0")) and c <= UInt8(ord("9")):
         return c - UInt8(ord("0"))
@@ -451,13 +512,16 @@ struct PgRow(Movable, Copyable):
         return self._col_text(col)
 
     def get_bool(self, col: Int) raises -> Bool:
-        # BOOLEAN: binary wire is 1 byte (0x01 true / 0x00 false); text wire is
-        # 't'/'f' (pg's bool text output). Both decode to the canonical Bool.
+        # BOOLEAN: binary wire is exactly 1 byte (boolrecv: 0 false, any other
+        # value true); text wire is 't'/'f' (pg's bool text output), parsed
+        # with boolin's rules. A body of any other width, or text boolin
+        # rejects, raises rather than reading as false.
         if self._binary:
             var b = self._col_bytes(col)
-            return len(b) > 0 and b[0] != UInt8(0)
-        var t = self._col_text(col)
-        return t == String("t") or t == String("true") or t == String("1")
+            if len(b) != 1:
+                raise Error("PgRow: BOOLEAN binary body is not 1 byte")
+            return b[0] != UInt8(0)
+        return _parse_bool_text(self._col_text(col))
 
     def get_int4(self, col: Int) raises -> Int32:
         if self._binary:
