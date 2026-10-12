@@ -70,9 +70,9 @@ COVERAGE_INFO_ONLY_DIRS = ["src/tests"]
 # The ledger of libraries that cannot have a coverage gate of their own, by
 # label, each with why and where it is gated instead.
 # tools/build/coverage/no_gate.bxl holds this list equal to the Mojo
-# libraries the gate depends on (covcheck_bin's, and through komira_json's
-# README the README tool's), so a row whose library leaves that closure
-# fails the check until it is deleted, and a library that joins it fails
+# libraries the gate depends on (covcheck_bin's; the README tool that
+# komira_json's README runs through is Zig and adds none), so a row whose
+# library leaves that closure fails the check until it is deleted, and a library that joins it fails
 # until it has a row (without one, the library would depend on its own
 # gate's directory, which depends on the library: a cycle of configured
 # targets, whatever waits for the gate). It only shrinks: the check also holds it within the
@@ -87,7 +87,6 @@ _CLOSURE = "covcheck_bin, the gate's tool, depends on it"
 COVERAGE_NO_GATE = {
     "komira//src/komira_json:komira_json": _CLOSURE + " (covcheck reads and writes JSON with it)",
     "komira//tools/build/coverage:covcheck": _CLOSURE + " (the library covcheck_bin runs)",
-    "komira//tools/build/readme_examples:readme_examples": _CLOSURE + " (komira_json and covcheck have a README.md, whose examples its tool turns into a test)",
 }
 
 # The libraries whose coverage gate reads their tests' branch records
