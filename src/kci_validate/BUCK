@@ -88,6 +88,12 @@ mojo_library(
         # before alpha), a link row of another shape refused; and the
         # CONDA_INSTALL_ENV README run given the block's run arguments
         "tests/test_readme_link_release.mojo",
+        # beta's native install checks as a CONDA_INSTALL_ENV validation
+        # runs them (native_rows.mojo, slice 11): every row over a played
+        # pixi and an installed .so; row 4 red on an unresolved symbol, row
+        # 5 on a komira .so loaded from /usr/lib, row 7 on a failing
+        # OpenSSL program; which packages are installed alone
+        "tests/test_native_rows.mojo",
     ],
     # The README examples tool kci ships, for the tests that make an
     # installed README into programs (the same target bin/kci/BUCK ships).
@@ -103,6 +109,7 @@ mojo_library(
         "tests/test_readme_tool.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
         "tests/test_readme_link.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
         "tests/test_readme_link_release.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
+        "tests/test_native_rows.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
     },
     visibility = ["PUBLIC"],
 )

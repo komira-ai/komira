@@ -43,7 +43,13 @@ archive 644), the `link` a symbolic link resolving to the `.so`, nothing
 extra under `lib/`; the one `__glibc >=2.34` requirement; each `.so`'s
 `NEEDED` resolving inside the environment with `LD_LIBRARY_PATH` unset, and
 `DF_SYMBOLIC`. `loaded_from_findings` reads the loader's `LD_DEBUG=libs`
-record. Nothing calls them yet: beta's install job will.
+record. A CONDA_INSTALL_ENV validation that installs a native library (one
+with `lib_files`, or requiring a system codec) runs them, and the rest of
+the design's install checks (`native_rows.mojo`): each README program under
+the loader's record, the README built with `mojo build` and run, a
+generated program opening every installed `.so` with `RTLD_NOW`, each native
+package installed alone, and each `.so` loaded before a system OpenSSL. A
+release with no native library gets none of these rows.
 
 Processes, the channel and waits go through seams (`ProcessRunner`,
 `PkgTransport`, `Sleeper`); the pure pieces (the generated program, the
