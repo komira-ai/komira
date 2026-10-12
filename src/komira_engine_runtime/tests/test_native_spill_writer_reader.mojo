@@ -115,7 +115,7 @@ def _mixed_batch(
 
 
 def _tmp_dir(tag: String) raises -> String:
-    return (_scratch_dir() + String("/komira_native_spill_test_")) + tag + String("_") + String(
+    return (_scratch_dir() + String("/komira_spill_test_")) + tag + String("_") + String(
         Int(perf_counter_ns())
     )
 
