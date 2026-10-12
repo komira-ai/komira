@@ -249,9 +249,12 @@ def byte_find_in_set_u8x32(
 #   lo_lut[l] has bit rank(h) iff (h << 4 | l) is a needle
 #
 # so `lo_lut[l] & hi_lut[h]` is non-zero iff `(h << 4 | l)` is a needle.
-# Grouping by low nibble is the mirror image. A set with more than 8
-# distinct high nibbles AND more than 8 distinct low nibbles has no exact
-# encoding in 8-bit entries, and the builder raises.
+# Grouping by low nibble is the mirror image. This builder does not
+# encode a set with more than 8 distinct high nibbles AND more than 8
+# distinct low nibbles, and raises. That is a limit of this builder, not
+# of the LUT format: some such sets have an exact encoding (all 256
+# bytes, or any 9x9 block of high by low nibbles), others do not (the
+# 9-byte diagonal 0x00, 0x11, ..., 0x88).
 
 
 def _nibble_ranks(
@@ -283,7 +286,9 @@ def build_byte_set_nibble_luts(
     Duplicate needles are allowed; an empty set matches nothing.
 
     Raises if the needles span more than 8 distinct high nibbles and
-    more than 8 distinct low nibbles (no exact 8-bit encoding exists).
+    more than 8 distinct low nibbles: this builder does not encode such
+    a set, although some of them (e.g. all 256 bytes) have an exact
+    encoding.
     Any set of at most 8 bytes is accepted, as is any set confined to 8
     high-nibble rows (e.g. ASCII 0x00-0x7F) or to 8 low-nibble columns.
     """

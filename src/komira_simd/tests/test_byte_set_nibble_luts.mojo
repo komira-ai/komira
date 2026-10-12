@@ -18,12 +18,16 @@
 #   - full_high_nibble_rows / full_low_nibble_columns: sets that need
 #     more than 8 distinct nibbles on one side, so the builder must group
 #     by the other side.
-#   - unrepresentable_set_raises: more than 8 distinct high nibbles AND
-#     more than 8 distinct low nibbles cannot be encoded exactly in 8-bit
-#     LUT entries; the builder must refuse rather than return LUTs that
-#     give false positives or misses.
-#   - random_sets: 2000 seeded sets of 0..24 bytes; representable sets
-#     must match the oracle exactly, the others must raise.
+#   - unrepresentable_set_raises: the builder does not encode a set with
+#     more than 8 distinct high nibbles AND more than 8 distinct low
+#     nibbles; it must refuse rather than return LUTs that give false
+#     positives or misses. The set used, the 9-byte diagonal 0x00, 0x11,
+#     ..., 0x88, has no exact encoding at all (one bit can cover at most
+#     one diagonal byte without a false positive); other such sets do
+#     (e.g. all 256 bytes), and this builder refuses them too.
+#   - random_sets: 2000 seeded sets of 0..24 bytes; sets the builder
+#     accepts (at most 8 distinct nibbles on one side) must match the
+#     oracle exactly, the others must raise.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -54,6 +58,8 @@ def _distinct_nibbles(needles: List[UInt8], shift: UInt8) -> Int:
 
 
 def _representable(needles: List[UInt8]) -> Bool:
+    # True iff the builder accepts the set: at most 8 distinct nibbles on
+    # one side. Not the same as "has an exact 8-bit encoding".
     return (
         _distinct_nibbles(needles, UInt8(4)) <= 8
         or _distinct_nibbles(needles, UInt8(0)) <= 8
@@ -163,7 +169,7 @@ def test_unrepresentable_set_raises() raises:
         "more than 8 distinct" in err,
         String("9-byte diagonal: want a refusal, got: ", err),
     )
-    # One fewer is representable and exact.
+    # One fewer is accepted by the builder and exact.
     _ = needles.pop()
     _check_exact(needles, "8-byte diagonal")
 
