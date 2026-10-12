@@ -13,7 +13,7 @@ both `kcov_tool` and the cases take it as an `exec_dep`: with the same
 `exec_compatible_with` on both, they resolve the same execution platform, so
 the binary the cases test and the binary `kcov_tool` hands out are one
 configured target, the same bytes. A tool whose cases are `zig_test` unit
-tests (cov_normalize) has its `zig_exe` built behind them (`unit_tests`), so
+tests (debug_relocate, cov_normalize) has its `zig_exe` built behind them (`unit_tests`), so
 the executable does not exist unless they pass; those tests build the tool
 from source, so they do not test the shipped bytes. Its process cases are a
 `zig_test` that names the executable in `env_tools` (the same configured
