@@ -153,16 +153,16 @@ struct BearerHeartbeatAuth(HeartbeatAuth):
         try:
             _unset_env(name)
         except:
-            raise Error(
-                String("job supervisor: cannot remove ")
-                + name
-                + String(" from the environment")
+            raise Error(  # cov: unreachable check_secret_env_name refused every name unsetenv rejects
+                String("job supervisor: cannot remove ")  # cov: unreachable check_secret_env_name refused every name unsetenv rejects
+                + name  # cov: unreachable check_secret_env_name refused every name unsetenv rejects
+                + String(" from the environment")  # cov: unreachable check_secret_env_name refused every name unsetenv rejects
             )
         if env.lookup(name):
-            raise Error(
-                String("job supervisor: ")
-                + name
-                + String(" is still in the environment after unsetenv")
+            raise Error(  # cov: unreachable a removed variable cannot be found
+                String("job supervisor: ")  # cov: unreachable a removed variable cannot be found
+                + name  # cov: unreachable a removed variable cannot be found
+                + String(" is still in the environment after unsetenv")  # cov: unreachable a removed variable cannot be found
             )
         return BearerHeartbeatAuth(String(""), Optional[SecretValue](token^))
 

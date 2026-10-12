@@ -41,7 +41,9 @@ places every one on the linux x86_64 execution platform).
    `_SIZE` of `duckdb_cli-linux-amd64.zip`, downloaded twice from the new
    release URL; `_LICENSE_SHA256` and `_LICENSE_SIZE` of the `LICENSE` at
    that commit.
-2. `sql_oracle` refuses a binary that reports another version than
+2. `duckdb_dist` refuses a `_VERSION` that is not digits and dots (it is
+   written into the SQL of every oracle), and `sql_oracle` refuses a
+   binary that reports another version than
    `_VERSION`, so a stale `_VERSION` fails every oracle.
 3. Build `tests//functional/sql_oracle:check`: its CSV and TSV goldens show
    a change in how the new release writes them (a Parquet file also names

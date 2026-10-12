@@ -221,21 +221,21 @@ test "reader: every dynamic tag, version and symbol of a built shared object" {
 
 test "reader + check 4: a RUNPATH and an RPATH read from the object are red; none is green" {
     var red = checks.Red.init(A);
-    _ = try checks.check4(A, try elf.readShared(A, fixture(.{ .runpath = false, .rpath = false, .stray = false })), "libkomira_t.so.1", &red);
+    _ = try checks.check4(A, try elf.readShared(A, fixture(.{ .runpath = false, .rpath = false, .stray = false })), "libkomira_t.so.1", &.{}, &red);
     try t.expect(red.green());
     red = checks.Red.init(A);
-    _ = try checks.check4(A, try elf.readShared(A, fixture(.{ .rpath = false, .stray = false })), "libkomira_t.so.1", &red);
+    _ = try checks.check4(A, try elf.readShared(A, fixture(.{ .rpath = false, .stray = false })), "libkomira_t.so.1", &.{}, &red);
     try t.expectEqual(@as(usize, 1), red.lines.items.len);
     try t.expectEqualStrings("RUNPATH entries (no komira owner is NEEDED, so none is wanted) (2): $ORIGIN/lib /opt/runpath", red.lines.items[0]);
     red = checks.Red.init(A);
-    _ = try checks.check4(A, try elf.readShared(A, fixture(.{ .runpath = false, .stray = false })), "libkomira_t.so.1", &red);
+    _ = try checks.check4(A, try elf.readShared(A, fixture(.{ .runpath = false, .stray = false })), "libkomira_t.so.1", &.{}, &red);
     try t.expectEqual(@as(usize, 1), red.lines.items.len);
     try t.expectEqualStrings("RPATH entries (1): /opt/rpath", red.lines.items[0]);
 }
 
 test "reader + check 4: a stray non-glibc NEEDED read from the object is red when it is not the last entry" {
     var red = checks.Red.init(A);
-    _ = try checks.check4(A, try elf.readShared(A, fixture(.{ .runpath = false, .rpath = false })), "libkomira_t.so.1", &red);
+    _ = try checks.check4(A, try elf.readShared(A, fixture(.{ .runpath = false, .rpath = false })), "libkomira_t.so.1", &.{}, &red);
     try t.expectEqual(@as(usize, 1), red.lines.items.len);
     try t.expectEqualStrings("NEEDED entries that are neither glibc nor a declared owner (1): libstray.so.1", red.lines.items[0]);
 }

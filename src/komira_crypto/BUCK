@@ -19,13 +19,15 @@ cxx_library(
 
 # Cryptographic primitives: SHA-1 / SHA-2 / BLAKE2b-256, HMAC, HKDF, PBKDF2,
 # AES-GCM and ChaCha20-Poly1305, X25519, Ed25519, ECDSA P-256 / P-384, RSA
-# (PKCS#1 v1.5 and PSS verify, RS256 sign from a PKCS#8 DER or PEM key), an
-# RS256 JWS/JWKS verifier, a health-tested system entropy source and a
-# ChaCha20 DRBG, hex encoding, and X.509 chain validation with an embedded
-# root store. The heavy primitives call AWS-LC's libcrypto; base64, base64url,
-# base32 and PEM armor come from komira_encoding.
+# (PKCS#1 v1.5 and PSS verify, RS256 sign from a PKCS#8 DER or PEM key), a
+# health-tested system entropy source and a ChaCha20 DRBG, hex encoding, and
+# X.509 chain validation with an embedded root store. The heavy primitives call
+# AWS-LC's libcrypto; base64, base64url, base32 and PEM armor come from
+# komira_encoding.
 mojo_library(
     name = "komira_crypto",
+    # Its C ships in its package as komira_crypto_native below (lib/libkomira_crypto_native.so.1).
+    native = ":komira_crypto_native",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         ":komira_crypto_sha256_hw",
@@ -73,7 +75,6 @@ mojo_library(
         "tests/test_rng_system_entropy_smoke.mojo",
         "tests/test_root_store.mojo",
         "tests/test_root_store_data_bytes.mojo",
-        "tests/test_rs256_jwks_verify.mojo",
         "tests/test_rsa_pem_key.mojo",
         "tests/test_rsa_pkcs1_verify.mojo",
         "tests/test_rsa_pss_verify.mojo",
@@ -103,7 +104,6 @@ mojo_library(
         "tests/test_ecdsa_p256_edges.mojo",
         "tests/test_ecdsa_p384_edges.mojo",
         "tests/test_small_edges.mojo",
-        "tests/test_rs256_jwks_parser_edges.mojo",
         "tests/test_name_matcher_edges.mojo",
         "tests/test_asn1_edges.mojo",
         "tests/test_x509_malformed.mojo",
@@ -115,13 +115,17 @@ mojo_library(
 # libkomira_crypto_native.so.1: the C this library owns (prefixed aws-lc and
 # the SHA-256 wrapper) as its own shared library, exporting the names its
 # sources call (tools/build/native/README.md, "Each library's shared
-# library"). Built and checked here; no package ships it yet.
+# library"). Built and checked here, and packed into the library's conda
+# package (`native`).
 native_shared_library(
     name = "komira_crypto_native",
     archives = [
         ":komira_crypto_sha256_hw",
         "//third_party/aws-lc:crypto",
     ],
+    # s2n-tls's archive (komira_http_core's) calls aws-lc functions no Mojo
+    # library calls; the library exports them to it.
+    caller_archives = ["//third_party/s2n-tls:s2n"],
     callers = [":komira_crypto"],
     library = "komira_crypto",
     # Every weak undefined symbol of the library, recorded from its first

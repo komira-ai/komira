@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 
 # The native process supervisor: spawn a child with two capture pipes,
 # drain its output byte-for-byte, observe its exit through the reactor
@@ -26,6 +27,8 @@ cxx_library(
 
 mojo_library(
     name = "komira_supervisor",
+    # Its C ships in its package as komira_supervisor_native below (lib/libkomira_supervisor_native.so.1).
+    native = ":komira_supervisor_native",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         ":komira_supervisor_proc",
@@ -35,6 +38,28 @@ mojo_library(
         "tests/test_child_probe.mojo",
         "tests/test_process_group.mojo",
         "tests/test_supervisor_scenarios.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# libkomira_supervisor_native.so.1: the C this library owns, as its own
+# shared library exporting the names its callers call
+# (tools/build/native/README.md, "Each library's shared library"). Built and
+# checked here, and packed into the library's conda package (`native`).
+native_shared_library(
+    name = "komira_supervisor_native",
+    archives = [
+        ":komira_supervisor_proc",
+    ],
+    callers = [
+        ":komira_supervisor",
+    ],
+    library = "komira_supervisor",
+    # Every weak undefined symbol of the library, recorded from its first
+    # green link (checks 3 and 7 hold it to exactly this list):
+    weak_undefined = [
+        # zig's C runtime (crti.o): the profiling hook, absent unless -pg.
+        "__gmon_start__",
     ],
     visibility = ["PUBLIC"],
 )

@@ -98,12 +98,16 @@ A Mojo library that owns C ships it as its own shared library,
 `lib<library>_native.so.1`
 ([the design](../../../docs/design/native_packaging.md)).
 `native_shared_library` ([`shared.bzl`](shared.bzl)) builds one from the
-C archives the library owns (`archives`) and the Mojo libraries that call
-them (`callers`). Every action runs a Zig-built tool: `native_so`
+C archives the library owns (`archives`), the Mojo libraries that call
+them (`callers`), the dependent owners' archives that call them
+(`caller_archives`: komira_crypto's lists s2n-tls, whose needs from aws-lc no
+Mojo library calls) and the owners whose C its own archives call
+(`needed_owners`: komira_http_core's lists komira_crypto's library). Every action runs a Zig-built tool: `native_so`
 ([`native_so.zig`](native_so.zig)), or the Mojo toolchain's zig through
 `zig_cc_launcher` for the link.
 
-1. `native_so exports` reads every `external_call` name in the callers'
+1. `native_so exports` reads every name a caller archive references and
+   does not define, and every `external_call` name in the callers'
    library sources ([`native_callsites.zig`](native_callsites.zig), which
    skips comments and string literals and refuses a call whose name is not
    a literal) and every symbol of the archives
@@ -117,7 +121,12 @@ them (`callers`). Every action runs a Zig-built tool: `native_so`
 2. The link: every archive whole, `-Bsymbolic`, `--gc-sections`,
    `-z defs`, the version script, `--strip-debug`, SONAME
    `lib<library>_native.so.1`, for the toolchain's target (the platform
-   row's `zig_triple`). `[link]` is the unversioned link name.
+   row's `zig_triple`). Then `-lc++` when `cxx_runtime` is set (snappy is
+   C++: zig's libc++ and libc++abi, static, made local by the version
+   script), and each of `needed_owners`' shared libraries, with
+   `DT_RUNPATH` `$ORIGIN`: a program's run path is not searched for its
+   libraries' needs, so the owner is found beside this library. `[link]` is
+   the unversioned link name.
 3. Seven checks read the result back with `native_so check <n>`, each its
    own build action and a validation of the target, so no build of the
    target succeeds while one is red:
@@ -125,12 +134,26 @@ them (`callers`). Every action runs a Zig-built tool: `native_so`
 | check | fails when |
 |---|---|
 | 1 | an export lacks the `komira_` prefix, or the exports differ from the list or the version script |
-| 2 | a name a caller calls that an archive defines is not exported (read from the sources and archives again, so a name the list or the link dropped is caught) |
-| 3 | a strong undefined `komira_` symbol (no komira owner is a declared `NEEDED` yet), or a weak one not in `weak_undefined` |
-| 4 | the SONAME differs, a `NEEDED` is not glibc (`libc.so.6`, `libpthread.so.0`, `ld-linux-*`), `libc.so.6` is not `NEEDED`, or there is a run path |
-| 5 | a `GLIBC_` version needed is above `glibc_floor` (the platform row's `os_floor`), or is not a release version |
+| 2 | a name a caller (or caller archive) calls that an archive defines is not exported (read from the sources and archives again, so a name the list or the link dropped is caught) |
+| 3 | a strong undefined `komira_` symbol no declared `NEEDED` owner's library exports, a declared owner exporting none of them, or a weak undefined `komira_` symbol not in `weak_undefined` |
+| 4 | the SONAME differs; a `NEEDED` is neither glibc (`libc.so.6`, `libpthread.so.0`, `ld-linux-*`) nor a declared owner; a declared owner is not `NEEDED`; `libc.so.6` is not `NEEDED` though the library has an undefined symbol outside `komira_`; `DT_RUNPATH` is not exactly `$ORIGIN` when an owner is declared, or present when none is; any `DT_RPATH` |
+| 5 | a `GLIBC_` version needed is above `glibc_floor` (the platform row's `os_floor`), or is not a release version, or none is needed though the library has an undefined symbol outside `komira_` (a shim of atomics alone needs nothing of glibc) |
 | 6 | `DT_FLAGS` lacks `DF_SYMBOLIC` (0x2); zig links with `-z now`, so the value is 0xa |
 | 7 | a strong undefined symbol is neither `GLIBC_`-versioned nor `komira_`, or the weak undefined symbols differ from `weak_undefined` |
+
+4. The README check, `native_so readme` (`[readme_calls]`, a validation of
+   the target too): the owning library's welded README gate compiles each
+   README example's program a second time to an object
+   (`[tests][readme][objects]` of the library, for every library listing a
+   C library among its `deps`; [`../mojo/readme.bzl`](../mojo/readme.bzl)).
+   A `.mojoc` holds no machine code, so the library's Mojo is compiled into
+   that object, and every C function the example reaches is an undefined
+   symbol of it. The check fails when no object references one of the
+   exports, or the README has no example: an installed README run that
+   calls none of the library's C passes with a broken shared library or
+   without its `-l` (the design's "Every owner is called, not only
+   loaded"). The linked README programs cannot be read for this: `mojo
+   build` strips their symbol tables.
 
 `[dynsym]` is `native_so dynsym`: the dynamic section, the versions needed
 and every dynamic symbol with its version. The unit tests
@@ -139,8 +162,21 @@ and every dynamic symbol with its version. The unit tests
 komira_crypto's is and red on its defect;
 [`native_elf_test.zig`](native_elf_test.zig) builds a small shared object
 byte by byte, with every dynamic tag and version section the reader keeps
-(several NEEDED and run path entries among them; komira_crypto's library
-has no run path), and checks what the reader reads from it.
+(several NEEDED and run path entries among them), and checks what the
+reader reads from it.
 
-Only `//src/komira_crypto:komira_crypto_native` exists so far, and no
-package ships it.
+Each owner of the design's table has its `<library>_native` target in its
+own BUCK file: komira_crypto, komira_http_core (`NEEDED` komira_crypto's),
+komira_compression, komira_parquet_codec (brotli's decoder),
+komira_db_sqlite (SQLite) and the first-party shims' owners (komira_libc,
+komira_async, komira_async_api, komira_fs, komira_objectstore,
+komira_metrics, komira_scan_source, komira_supervisor). komira_log has none:
+its holder's accessors are hidden by design, one copy per image (the design's
+question 2), so its holder ships as a static archive. Every owner's
+`mojo_library` except komira_parquet_codec's and komira_db_sqlite's names its
+target (`native = ":<library>_native"`;
+komira_log's says `native_static = True`), and its conda package holds the
+file at lib/ with a `lib_files` row
+([packaging/conda/README.md](../../../packaging/conda/README.md), "A library's
+native code in its package"). Those two libraries are built and checked, but
+no package ships them yet.

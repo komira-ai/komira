@@ -17,7 +17,7 @@ Nothing built with these rules is shipped.
 | rule | what it builds |
 |---|---|
 | `sql_oracle(name, srcs, inputs, outputs)` | runs `srcs` (one `.sql` file, or a list run in order in one session) with the pinned DuckDB. `inputs` are the files the SQL reads: a list of sources, each staged at its path in the package, or `{path: source}`, where a build output is allowed (`{"a/rows.csv": ":write[rows.csv]"}`). `outputs` are the file names the SQL writes with `COPY ... TO '<name>'`, each ending in `.parquet`, `.csv` or `.tsv`; each is a sub-target `[<name>]`, and all of them are the default outputs. |
-| `duckdb_dist(name, binary, native_libs, version)` | the pinned binary, the directory whose `lib/` holds the C++ runtime it links (`libstdc++.so.6`, `libgcc_s.so.1`), and the version it must report. `sql_oracle` takes `komira//third_party/duckdb:duckdb`. |
+| `duckdb_dist(name, binary, native_libs, version)` | the pinned binary, the directory whose `lib/` holds the C++ runtime it links (`libstdc++.so.6`, `libgcc_s.so.1`), and the version it must report, digits and dots only (anything else, which would be written into the version check's SQL, is refused at analysis). `sql_oracle` takes `komira//third_party/duckdb:duckdb`. |
 
 The macro sets `exec_compatible_with` to the linux x86_64 execution
 platform: the pinned binary is the linux amd64 build.
@@ -106,8 +106,10 @@ TO 'expected.tsv' (FORMAT csv, DELIMITER '\t', HEADER true);
 The rule does not read the SQL, so it cannot see whether a copied query has
 an `ORDER BY`, or whether that `ORDER BY` decides every row's place. One
 thread makes an unordered result repeat from run to run, which hides the
-gap instead of closing it. Ordering is the fixture author's duty, and
-nothing checks it yet.
+gap instead of closing it. Ordering is the fixture author's duty; the
+plan conformance oracle enforces it with a discipline of its own, run on
+DuckDB's parse of each case (`json_serialize_sql`) before the case runs
+([komira_test_oracle](../../../src/tests/helpers/komira_test_oracle/README.md#the-oracle-discipline)).
 
 ## Tests
 
@@ -126,15 +128,30 @@ nothing checks it yet.
   above piece by piece (the flags, `SET threads = 1; SET TimeZone = 'UTC'`,
   the other settings and allowed paths, the version and environment
   checks, `.safe_mode` before the first src, `:memory:` last), then each
-  analysis refusal's message and each build's failure in its `sql_oracle`
+  analysis refusal's message (for `duckdb_dist`, one version per kind of
+  character the version pattern must not admit: a quote, `v` and `V` (the
+  class widened to `a-z` or `A-Z`, or any range holding `v` or `V`; a
+  letter range without them, such as `a-f`, is not pinned and admits no
+  quote), a space, a semicolon, `/` and `:` next to the digit
+  range, a newline (which the multi-line flag `(?m)` admits), and empty,
+  besides the injection itself; and
+  `tests//functional/sql_oracle:dist_version_digit_bounds`, version `0.9`,
+  must build) and each build's failure in its `sql_oracle`
   action with its message: an undeclared output, a missing output (the
   first, the middle and the last of three), a SQL error, a read of a
   package file that is not an input, a read of an absolute path, a read by
-  glob pattern, a changed setting and each dot command listed above. The
+  glob pattern, a changed setting, each dot command listed above, and two
+  cases the oracle discipline of komira_test_oracle refuses when its case
+  runner calls it (a key with no NULL placement, no outer ORDER BY). The
   version and environment checks are pinned in the invocation from
   `SELECT` to `END`, and so is what stands between the pinned pieces (the
-  version `buck2 uquery` reads from the dist, a path with no quote, or
-  nothing), so a condition added to make a check unable to fire fails it. The farm's workers run in UTC, so `SET
+  version `buck2 uquery` reads from the dist, itself required to be digits
+  and dots; the output of `komira//third_party/duckdb:native_libs`, read
+  with `buck2 targets --show-output`; a path with no quote; or nothing), so
+  a condition added to make a check unable to fire fails it, and so does a
+  rule that wires another directory into the getenv() check (and with it
+  into `LD_LIBRARY_PATH`, which that check compares at run time: aquery
+  prints no environment). The farm's workers run in UTC, so `SET
   TimeZone` is pinned by the invocation, not by a fixture's bytes. A failed
   action is never cached, so each red is a fresh run on the farm.
 
@@ -154,4 +171,8 @@ itself still ran without its `lib/`); the environment check dropped (the
 invocation check fails); the existence check narrowed to the last output
 (`missing_first_output` and `missing_middle_output` fail with buck2's
 message) or to the first (`missing_middle_output` and `missing_last_output`
-do).
+do). Later still: the dist's lib directory wired from its binary instead
+(the green fixture still built; the invocation check fails on the lib
+path); a dist `version` with a quote that comments out the rest of the
+version check (refused at analysis; with that refusal deleted the green
+fixture still built, and the invocation check fails on the version).

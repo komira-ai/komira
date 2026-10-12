@@ -8,6 +8,7 @@ load(":defs.bzl", "bisect_scenario")
 
 _SRCS = [
     "classify.zig",
+    "flake.zig",
     "git.zig",
     "main.zig",
     "probe.zig",
@@ -34,6 +35,7 @@ _FIXTURES = [
     )
     for name in [
         "classify",
+        "flake",
         "main",
         "report",
         "search",
@@ -42,6 +44,7 @@ _FIXTURES = [
 
 _UNIT = [
     ":classify_unit",
+    ":flake_unit",
     ":main_unit",
     ":report_unit",
     ":search_unit",
@@ -82,6 +85,13 @@ _SCENARIOS = [
     "culprit_last",
     "culprit_middle",
     "flake",
+    "flake_check_infra",
+    "flake_fresh_base",
+    "flake_infra",
+    "flake_never",
+    "flake_no_cell",
+    "flake_not_measurable",
+    "flake_rate",
     "good_not_ancestor",
     "infra_boundary",
     "infra_retried",

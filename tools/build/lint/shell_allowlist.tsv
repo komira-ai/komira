@@ -13,18 +13,10 @@ src/tests/conformance/komira_git_pack_conformance/gen_packs.sh	conformance fixtu
 src/tests/conformance/komira_git_protocol_conformance/capture.sh	conformance fixture generator: to port to Zig
 third_party/git/git_build.sh	toolchain or vendored-source builder or check: to port to Zig
 third_party/git/git_check.sh	toolchain or vendored-source builder or check: to port to Zig
-tools/build/coverage/branch/cov_branch_annotate.sh	coverage and mutation tooling: to port to Zig
-tools/build/coverage/branch/cov_branch_classify_cases.sh	coverage and mutation tooling: to port to Zig
-tools/build/coverage/branch/cov_branch_link.sh	coverage and mutation tooling: to port to Zig
 tools/build/coverage/census.sh	coverage and mutation tooling: to port to Zig
 tools/build/coverage/cov_gate.sh	coverage and mutation tooling: to port to Zig
-tools/build/coverage/kcov/cov_normalize_cases.sh	coverage and mutation tooling: to port to Zig
 tools/build/coverage/kcov/cov_run.sh	coverage and mutation tooling: to port to Zig
-tools/build/coverage/kcov/cov_zig_cases.sh	coverage and mutation tooling: to port to Zig
-tools/build/coverage/kcov/debug_relocate_cases.sh	coverage and mutation tooling: to port to Zig
-tools/build/lint/lint.sh	lint or validation: to port to Zig
 tools/build/lint/readme_api_coverage.sh	lint or validation: to port to Zig
-tools/build/lint/surface_capability_matrix.sh	lint or validation: to port to Zig
 tools/build/lint/test_weld.sh	lint or validation: to port to Zig
 tools/build/mojo/darwin/busybox.sh	a thin wrapper: the darwin applet allowlist
 tools/build/mojo/darwin/cc	a thin wrapper: the C driver a darwin Mojo compile finds on PATH
@@ -70,18 +62,14 @@ tools/build/tests/functional/install_gate/cases.sh	dead: to be deleted
 tools/build/tests/functional/install_gate/install_gate.sh	dead: to be deleted
 tools/build/tests/functional/local_default.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/mem_cap/cases.sh	build system self-tests: to port to Zig
-tools/build/tests/functional/opt_level.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/platform_table/check.sh	build system self-tests: to port to Zig
-tools/build/tests/functional/platform_table/limits_retired.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/test_data/runner_cases.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/test_data/test_command_case.sh	a thin wrapper of one test run
 tools/build/tests/functional/test_deadline/cases.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/umbrella_cache.sh	build system self-tests: to port to Zig
 tools/build/tests/golden/golden.sh	build system self-tests: to port to Zig
 tools/build/tests/negative/lint_weld.sh	build system self-tests: to port to Zig
-tools/build/tests/node_tests.sh	build system self-tests: to port to Zig
 tools/build/tests/proto_tests.sh	build system self-tests: to port to Zig
-tools/build/tests/public_boundary_tests.sh	build system self-tests: to port to Zig
 tools/build/tests/run_tests.sh	build system self-tests: to port to Zig
 tools/build/tests/rust_tests.sh	build system self-tests: to port to Zig
 tools/build/tests/tool_lib.sh	build system self-tests: to port to Zig

@@ -1,0 +1,4 @@
+# buck2 killed by a signal: BROKEN, with the exit the shell reports.
+arg "{units_file}"
+input units_file "lib_a\t//src/a:a\n"
+exit 0

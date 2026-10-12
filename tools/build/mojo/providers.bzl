@@ -39,6 +39,10 @@ MojoInfo = provider(fields = {
     # soname order. Its conda package requires each requirement.
     "dlopen": provider_field(typing.Any, default = []),
     "import_name": provider_field(str),
+    # The native code of the library and its closure, a struct from
+    # native_facts (tools/build/mojo/native_facts.bzl); None for a rule that
+    # is not a mojo_library.
+    "native": provider_field(typing.Any, default = None),
     "pkgs": provider_field(typing.Any),  # MojoPkgTSet
     # The package's README.md (the source artifact), None without one. Its
     # conda package installs it at share/doc/<conda name>/README.md
@@ -63,7 +67,7 @@ MojoToolchainInfo = provider(fields = {
     # is the CPU of the machine the action runs on, which is not part of the
     # action key.
     "target_cpu": provider_field(str),
-    # The compile wrapper every Mojo compile runs through (compile.bzl,
+    # The compile wrapper every Mojo compile runs through (defs.bzl,
     # mojo_compile_cmd): on Linux the mojo_compile executable
     # (tools/mojo_compile.zig), on macOS darwin/mojo_wrapper.sh.
     "wrapper": provider_field(typing.Any),
@@ -107,6 +111,7 @@ MojoProgramInfo = provider(fields = {
     "shared": provider_field(typing.Any),  # artifact lib<name>.so
     "runtime": provider_field(typing.Any),  # artifact: directory of runtime libraries
     "target_cpu": provider_field(str),  # the CPU the program was compiled for
+    "helpers": provider_field(typing.Any, default = {}),  # {file name: artifact}, bin/<name> in a bundle (helpers.bzl)
 })
 
 

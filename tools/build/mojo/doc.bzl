@@ -24,7 +24,7 @@ strings. It holds no source location, and no declaration whose name starts
 with `_` (a struct's dunder methods excepted).
 """
 
-load(":compile.bzl", "mojo_compile_cmd")
+load(":defs.bzl", "mojo_compile_cmd")
 load(":providers.bzl", "MojoInfo", "MojoToolchainInfo")
 load(":toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
