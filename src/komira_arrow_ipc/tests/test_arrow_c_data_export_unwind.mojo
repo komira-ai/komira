@@ -1,4 +1,9 @@
 # =============================================================================
+# FFI-BOUNDARY: a consumer of the Arrow C Stream Interface structs this
+# library exports. The stream and schema boxes are allocated here with
+# `alloc` and freed here; the exported schema is freed by its own release
+# callback (`release_c_schema`) and the stream by `release_c_stream`.
+#
 # Arrow C Data Interface export: a refused nested column frees what was
 # built before the refusal.
 #
@@ -18,7 +23,8 @@
 # heap blocks and leaves the resident set flat. The rounds are chosen so a
 # leak grows it by at least 4 MiB, well past the 1.5 MiB bound. The root
 # schema builder is driven the same way through `get_schema`, over a stream of
-# 64 such columns and one it refuses.
+# 64 such columns and one it refuses. The record batch array builder is driven
+# with one refused column, whose heap box for the child struct it must free.
 #
 # Linux only: `/proc/self/status` is the measurement.
 # =============================================================================
@@ -31,7 +37,7 @@ from komira_arrow.arrow_types import ArrowType
 from komira_arrow.column import Column
 from komira_arrow.dictionary_array import StringDictionaryArray
 from komira_arrow.primitive_array import PrimitiveArray
-from komira_arrow.schema import Field, RecordBatch, SchemaBuilder
+from komira_arrow.schema import Field, RecordBatch, Schema, SchemaBuilder
 from komira_arrow.string_array import StringArray
 from komira_arrow_ipc.c_data_stream import (
     CArrowArrayStream,
@@ -40,6 +46,7 @@ from komira_arrow_ipc.c_data_stream import (
     release_c_schema,
     release_c_stream,
     _build_column_array,
+    _build_record_batch_array,
     _build_column_schema_from_column,
     _build_column_schema_from_field_and_column,
 )
@@ -50,6 +57,7 @@ from komira_collections.slab import Slab
 comptime _KIDS = 64
 comptime _SCHEMA_ROUNDS = 30
 comptime _ARRAY_ROUNDS = 600
+comptime _BATCH_ROUNDS = 100_000
 comptime _BOUND_BYTES = 3 * 512 * 1024
 
 
@@ -215,6 +223,42 @@ def test_a_refused_root_schema_frees_the_columns_before_it() raises:
     release_c_stream(sp)
     sp.free()
     assert_true(g < _BOUND_BYTES, "root schema builder grew by " + String(g))
+
+
+def _refuse_batch(ref batch: RecordBatch, schema: Schema) -> String:
+    try:
+        _ = _build_record_batch_array(batch, schema)
+    except e:
+        return String(e)
+    return String("(built)")
+
+
+def test_a_refused_batch_array_frees_the_child_box() raises:
+    """`_build_record_batch_array` boxes each child `CArrowArray` on the
+    heap. A box allocated for a child whose build then raises was not yet in
+    the children array, so the unwind did not free it: one box per refused
+    `get_next`. The batch is one column the array builder refuses at once
+    (FIXED_SIZE_BINARY), checked against an empty schema so the refusal comes
+    from the column build. `_BATCH_ROUNDS` refusals that each leak a box grow
+    the resident set by about 9 MiB."""
+    var cols = Slab[Column[HeapRegion]].with_capacity(1)
+    var bad = _i64(1)
+    bad.arrow_type = ArrowType.FIXED_SIZE_BINARY
+    cols.append(bad^)
+    var b = RecordBatch()
+    b._columns = cols^
+    b._num_rows = 1
+    var sb = SchemaBuilder()
+    var empty = sb.build()
+    var first = _refuse_batch(b, empty)
+    assert_true(
+        first.startswith("UnsupportedArrowCABIType: Arrow type 'fixed_size_binary'"), first
+    )
+    var before = _resident_bytes()
+    for _ in range(_BATCH_ROUNDS):
+        _ = _refuse_batch(b, empty)
+    var g = _resident_bytes() - before
+    assert_true(g < _BOUND_BYTES, "record batch array builder grew by " + String(g))
 
 
 def main() raises:

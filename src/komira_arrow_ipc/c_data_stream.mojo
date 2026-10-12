@@ -1664,8 +1664,10 @@ def _build_record_batch_array(ref batch: RecordBatch, schema: Schema) raises -> 
     var built_n = 0
     try:
         for i in range(ncols):
-            var ca = alloc[CArrowArray](1).unsafe_origin_cast[MutUntrackedOrigin]()
+            # Build before boxing: a box allocated ahead of a build that
+            # raises is in no slot the unwind below walks.
             var built = _build_column_array(shared[i])
+            var ca = alloc[CArrowArray](1).unsafe_origin_cast[MutUntrackedOrigin]()
             ca.unsafe_write(built^)
             (child_arr + i).unsafe_write(ca)
             built_n += 1
