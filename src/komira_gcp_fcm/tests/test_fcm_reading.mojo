@@ -18,18 +18,26 @@
 #     an unknown kind printed as a real one.
 #   * test_error_code_token: the errorCode kept only as a bare `[A-Z_]` token
 #     of 1 to 64 bytes: `A`, `Z`, `_` and 64 bytes kept; empty, 65 bytes, `@`
-#     (just below `A`) and `[` (just above `Z`) turned down. Catches an
-#     off-by-one on the length cap or either end of the letter range, and a
-#     lost `_`.
+#     (just below `A`) and `[` (just above `Z`) turned down, and so are a
+#     digit, `-`, `.`, a space and a lower-case letter. Catches an off-by-one
+#     on the length cap or either end of the letter range, a lost `_`, and a
+#     widened byte set (body text reaching `fcm_error`).
 #   * test_error_code_envelope_shapes: no code from a document that is not
 #     an object, has no `error`, whose `error` is not an object, has no
 #     `details`, or whose `details` is not an array; the walk passes over
-#     entries that are not objects, have no `@type`, or whose `@type` is not
-#     a string; the first FcmError decides (one with no `errorCode`, or a
-#     non-string one, yields "" even when a later FcmError names
+#     entries that are not objects, have no `@type`, whose `@type` is not a
+#     string, or whose string `@type` names another type (BadRequest,
+#     RetryInfo, the FcmError type with a byte added or its prefix cut); the
+#     first FcmError decides (one with no `errorCode`, a non-string one, or
+#     one that is not a bare token yields "" even when a later FcmError names
 #     UNREGISTERED; of two codes the first is kept). Catches a walk that
-#     stops at the first odd entry, and one that reads past the first
-#     FcmError (a later entry would make a live token DEAD).
+#     stops at the first entry of another type (a dead token behind a
+#     BadRequest would not be deleted), a prefix or suffix match on the
+#     type, and one that reads past the first FcmError (a later entry would
+#     make a live token DEAD).
+#   * test_unregistered_exact: only the errorCode UNREGISTERED makes a token
+#     DEAD at 400; UNREGISTERED_X, XUNREGISTERED and UNREGISTERE are REFUSED
+#     with the code kept. Catches a prefix, suffix or substring match.
 #   * test_parse_size_bound: a body of exactly 65536 bytes is read (errorCode
 #     and accepted `name`), one of 65537 is not. Catches an off-by-one on
 #     either reader's cap, and a cap that was dropped.
@@ -136,6 +144,11 @@ def test_error_code_token() raises:
     _eq(bad, _code_of(String()), "", "an empty errorCode")
     _eq(bad, _code_of(String("A@")), "", "@ sits just below A")
     _eq(bad, _code_of(String("Z[")), "", "[ sits just above Z")
+    _eq(bad, _code_of(String("A-B")), "", "a hyphen")
+    _eq(bad, _code_of(String("A1")), "", "a digit")
+    _eq(bad, _code_of(String("A.B")), "", "a dot")
+    _eq(bad, _code_of(String("A B")), "", "a space")
+    _eq(bad, _code_of(String("Ab")), "", "a lower-case letter")
     _done(bad)
 
 
@@ -178,6 +191,49 @@ def test_error_code_envelope_shapes() raises:
         "UNREGISTERED",
         "entries that are not FcmError are passed over",
     )
+    # A string `@type` naming another type is passed over too.
+    var bad_request = String(
+        '{"@type":"type.googleapis.com/google.rpc.BadRequest",'
+        '"fieldViolations":[{"field":"message.token"}]}'
+    )
+    var retry_info = String(
+        '{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"4s"}'
+    )
+    _eq(bad,
+        fcm_error_code(_with_details(bad_request + "," + unreg)),
+        "UNREGISTERED",
+        "a BadRequest before the FcmError",
+    )
+    _eq(bad,
+        _kind_of_body(400, _with_details(bad_request + "," + unreg)),
+        "DEAD",
+        "a dead token behind a BadRequest is DEAD",
+    )
+    _eq(bad,
+        fcm_error_code(_with_details(retry_info + "," + unreg)),
+        "UNREGISTERED",
+        "a RetryInfo before the FcmError",
+    )
+    _eq(bad,
+        fcm_error_code(
+            _with_details(
+                String('{"@type":"') + String(FCM_ERROR_TYPE)
+                + 'X","errorCode":"QUOTA_EXCEEDED"},' + unreg
+            )
+        ),
+        "UNREGISTERED",
+        "the FcmError type with a byte added is another type",
+    )
+    _eq(bad,
+        fcm_error_code(
+            _with_details(
+                String('{"@type":"google.firebase.fcm.v1.FcmError",')
+                + '"errorCode":"QUOTA_EXCEEDED"},' + unreg
+            )
+        ),
+        "UNREGISTERED",
+        "the FcmError type without its type.googleapis.com/ prefix is another type",
+    )
     # The first FcmError decides.
     _eq(bad,
         fcm_error_code(_with_details(String('{"@type":"') + String(FCM_ERROR_TYPE) + '"},' + unreg)),
@@ -188,6 +244,16 @@ def test_error_code_envelope_shapes() raises:
         fcm_error_code(_with_details(_fcm(String("7")) + "," + unreg)),
         "",
         "a first FcmError whose errorCode is not a string",
+    )
+    _eq(bad,
+        fcm_error_code(_with_details(_fcm(String('"bad code"')) + "," + unreg)),
+        "",
+        "a first FcmError whose errorCode is not a bare token",
+    )
+    _eq(bad,
+        _kind_of_body(400, _with_details(_fcm(String('"bad code"')) + "," + unreg)),
+        "REFUSED",
+        "a later UNREGISTERED behind a non-token code does not make the token DEAD",
     )
     _eq(bad,
         fcm_error_code(_with_details(_fcm(String('"QUOTA_EXCEEDED"')) + "," + unreg)),
@@ -204,6 +270,23 @@ def test_error_code_envelope_shapes() raises:
 
 def _kind_of_body(status: Int, body: List[UInt8]) -> String:
     return fcm_outcome_name(classify_fcm_response(status, -1, body).kind)
+
+
+def test_unregistered_exact() raises:
+    var bad = List[String]()
+    for code in [
+        String("UNREGISTERED_X"), String("XUNREGISTERED"), String("UNREGISTERE")
+    ]:
+        var o = classify_fcm_response(
+            400, -1, _with_details(_fcm(String('"') + code + '"'))
+        )
+        _eq(bad, fcm_outcome_name(o.kind), "REFUSED", code)
+        _eq(bad, o.fcm_error, code, code + ": the code is kept")
+    var dead = classify_fcm_response(
+        400, -1, _with_details(_fcm(String('"UNREGISTERED"')))
+    )
+    _eq(bad, fcm_outcome_name(dead.kind), "DEAD", "UNREGISTERED itself")
+    _done(bad)
 
 
 def _padded(core: String, total: Int) -> List[UInt8]:
@@ -326,6 +409,10 @@ def main() raises:
         test_error_code_envelope_shapes()
     except e:
         failed.append(String("test_error_code_envelope_shapes: ") + String(e))
+    try:
+        test_unregistered_exact()
+    except e:
+        failed.append(String("test_unregistered_exact: ") + String(e))
     try:
         test_parse_size_bound()
     except e:

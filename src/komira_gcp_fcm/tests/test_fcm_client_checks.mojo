@@ -5,9 +5,10 @@
 # =============================================================================
 #
 # No request reaches a server here. Where a client is built, its endpoint is
-# 127.0.0.1 on a port that was just bound and released, so a client that
-# sent anyway would come back with a TRANSIENT outcome (connection refused)
-# instead of the raise each test asserts.
+# 127.0.0.1 on a port held by a socket that is bound and never listens, for
+# the whole test (`_RefusingPort`): no other process can take the port, and
+# a connection to it is refused, so a client that sent anyway comes back
+# with a TRANSIENT outcome instead of the raise each test asserts.
 #
 # Each test is run by `main` on its own and every failure is printed before
 # the run fails, and each case of a test is checked even after another case
@@ -15,18 +16,18 @@
 #
 # What each test proves, and the defect it catches:
 #   * test_https_host_bytes: `FcmEndpoint.https` keeps a host of `a`, `z`,
-#     `0`, `9`, `.` and `-` and turns down an empty host and each byte just
+#     `0`, `9`, and `.` and `-` between letters, and turns down an empty host and each byte just
 #     outside a range (`` ` `` `{` `/` `:`) and an upper-case letter.
 #     Catches an off-by-one at either end of a range and a lost `.` or `-`
 #     (a host check that let `:` or `/` through would let the endpoint name
 #     another host or port, to which the bearer token is sent).
 #   * test_endpoint_ports_and_urls: port 0 is refused by `https` and
-#     `loopback_plaintext`, port 1 is not; an empty host with port 0 is
+#     `loopback_plaintext`, port 1 is not (by either); an empty host with port 0 is
 #     refused for the host first; `url` gives https for a TLS endpoint and
 #     http for 127.0.0.1, and refuses a plaintext endpoint for 192.0.2.1.
 #   * test_token_status_reading: `token_mint_error` keeps only three digits
 #     after the first `HTTP `: `HTTP 409` is 409 (both digit ends),
-#     `HTTP 4031` is 403, `HTTP 4x3`, `HTTP 40/` and `HTTP 40:` (bytes
+#     `HTTP 4031` is 403 (the first three digits), `HTTP 4x3`, `HTTP 40/` and `HTTP 40:` (bytes
 #     just outside 0-9) and a bare `HTTP ` have no status, `http 403` has
 #     none, and of two statuses the first is named.
 #   * test_transport_kind_bounds: `send_failure_outcome` keeps a tag of 54
@@ -40,19 +41,25 @@
 #     one that raises names only its status. Catches a token asked for a
 #     request that was going to be refused, and an empty bearer sent.
 #   * test_accessors: `tokens()` is the client's own source (its ask count
-#     moves) and `endpoint()` is a copy of the client's endpoint.
+#     moves) and `endpoint()` is a copy of the client's endpoint: host, port
+#     and TLS flag, for a TLS client and a plaintext one. Catches an accessor
+#     that reports a fixed scheme, host or port.
 #   * test_constructor_refusal: `FcmClient` refuses a project id holding a
 #     `/` when it is built, not at the first send.
 # =============================================================================
 
 from std.testing import assert_equal
 
+from komira_async.reactor.socket_setup import (
+    bind_inet,
+    close_fd,
+    getsockname_port,
+    inet_loopback_be,
+    socket_tcp_nonblocking,
+)
 from komira_gcp_core import GcpTokenSource
 from komira_http_client.client import HttpClient
-from komira_http_core.codec import HttpMethod
 from komira_http_core.transport.kernel_tcp import KernelTcpConnector
-from komira_http_server.routing import Router
-from komira_http_server.server import HttpServer, HttpServerConfig
 
 from komira_gcp_fcm import (
     FcmClient,
@@ -86,14 +93,26 @@ struct _CountingSource(GcpTokenSource, Movable, Deinitable):
 comptime _Client = FcmClient[KernelTcpConnector, _CountingSource]
 
 
-def _closed_port() raises -> UInt16:
-    """A loopback port that was just bound and released."""
-    var router = Router()
-    router.add(HttpMethod.post(), "/", 0)
-    var s = HttpServer(config=HttpServerConfig.default_ephemeral(), router=router^)
-    var port = s.local_port()
-    _ = s^
-    return port
+struct _RefusingPort(Movable, Deinitable):
+    """A loopback port held by a TCP socket that is bound and never listens,
+    until this value is dropped. The socket sets neither SO_REUSEADDR nor
+    SO_REUSEPORT, so no other socket can bind the port while it is held, and
+    the kernel refuses every connection to it."""
+
+    var fd: Int32
+    var port: UInt16
+
+    def __init__(out self) raises:
+        self.fd = socket_tcp_nonblocking()
+        try:
+            bind_inet(self.fd, inet_loopback_be(), UInt16(0))
+            self.port = getsockname_port(self.fd)
+        except e:
+            close_fd(self.fd)
+            raise e^
+
+    def __del__(deinit self):
+        close_fd(self.fd)
 
 
 def _client(var source: _CountingSource, var endpoint: FcmEndpoint) raises -> _Client:
@@ -173,8 +192,8 @@ def test_https_host_bytes() raises:
     _eq(bad, _https_refusal(String("z"), 443), "<kept z:443>", "z")
     _eq(bad, _https_refusal(String("0"), 443), "<kept 0:443>", "0")
     _eq(bad, _https_refusal(String("9"), 443), "<kept 9:443>", "9")
-    _eq(bad, _https_refusal(String("."), 443), "<kept .:443>", ".")
-    _eq(bad, _https_refusal(String("-"), 443), "<kept -:443>", "-")
+    _eq(bad, _https_refusal(String("a.b"), 443), "<kept a.b:443>", ".")
+    _eq(bad, _https_refusal(String("a-b"), 443), "<kept a-b:443>", "-")
     _eq(bad,
         _https_refusal(String(), 443), "komira_gcp_fcm: the FCM host is empty"
     )
@@ -201,6 +220,12 @@ def test_endpoint_ports_and_urls() raises:
         "komira_gcp_fcm: the FCM host is empty",
         "the host is checked before the port",
     )
+    var lo0 = String("<not refused>")
+    try:
+        _ = FcmEndpoint.loopback_plaintext(0)
+    except e:
+        lo0 = String(e)
+    _eq(bad, lo0, "komira_gcp_fcm: the FCM port is 0", "loopback_plaintext(0)")
     var lo = FcmEndpoint.loopback_plaintext(1)
     _eq(bad, lo.host, "127.0.0.1")
     _eq(bad, Int(lo.port), 1)
@@ -231,7 +256,7 @@ def test_endpoint_ports_and_urls() raises:
 def test_token_status_reading() raises:
     var bad = List[String]()
     _eq(bad, _mint(String("answered HTTP 409")), "HTTP 409", "both digit ends")
-    _eq(bad, _mint(String("answered HTTP 4031 x")), "HTTP 403", "three digits at most")
+    _eq(bad, _mint(String("answered HTTP 4031 x")), "HTTP 403", "the first three digits")
     _eq(bad, _mint(String("answered HTTP 4x3")), "no HTTP status", "a letter")
     _eq(bad, _mint(String("answered HTTP 40/")), "no HTTP status", "/ sits below 0")
     _eq(bad, _mint(String("answered HTTP 40:")), "no HTTP status", ": sits above 9")
@@ -285,7 +310,8 @@ def _rep(c: String, n: Int) -> String:
 
 def test_send_one_order() raises:
     var bad = List[String]()
-    var port = _closed_port()
+    var refusing = _RefusingPort()
+    var port = refusing.port
     # The body is checked first: an empty device token is refused with the
     # URL also bad and the token source failing.
     var c1 = _client(
@@ -326,6 +352,7 @@ def test_send_one_order() raises:
     var sent = _send_refusal(c3, String("tok-ok"))
     _eq(bad, sent.startswith("<an outcome: TRANSIENT "), True, sent)
     _eq(bad, c3.tokens().asks, 2)
+    _ = refusing^
     _done(bad)
 
 
@@ -341,6 +368,15 @@ def test_accessors() raises:
     _eq(bad, e.host, "proxy.example.com")
     _eq(bad, Int(e.port), 8443)
     _eq(bad, e.tls, True, "the copy is TLS")
+    # Nothing is sent, so the plaintext client's port need not be held.
+    var cp = _client(
+        _CountingSource(String("ya29.T"), String(), 0),
+        FcmEndpoint.loopback_plaintext(8081),
+    )
+    var ep = cp.endpoint()
+    _eq(bad, ep.host, "127.0.0.1", "the plaintext copy's host")
+    _eq(bad, Int(ep.port), 8081, "the plaintext copy's port")
+    _eq(bad, ep.tls, False, "the plaintext copy is not TLS")
     _done(bad)
 
 
