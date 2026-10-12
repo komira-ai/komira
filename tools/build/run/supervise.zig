@@ -39,8 +39,9 @@ pub const Platform = struct {
     read_table: *const fn (alloc: std.mem.Allocator) ?proctab.Table = proctab.read,
     group_members: *const fn (alloc: std.mem.Allocator, pgid: i32) ?[]proctab.Member = proctab.groupMembers,
     self_seen: *const fn () [2]i64 = proctab.selfSeen,
-    /// Whether this platform has a /proc to read resident memory from.
-    has_proc: bool = sys.is_linux,
+    /// Whether this platform has a process table to read resident memory
+    /// from: /proc on Linux, libproc on macOS (proctab.zig).
+    has_proc: bool = sys.is_linux or sys.is_darwin,
 };
 
 /// The platform every mode uses; tests replace fields of it.
@@ -57,7 +58,7 @@ pub fn realExec(path: [*:0]const u8, argv: [*:null]const ?[*:0]const u8, envp: [
 /// What the loop does when the time limit passes.
 pub const Limit = union(enum) {
     none,
-    /// A test's limit (test_deadline.sh's): SIGSTOP, then SIGKILL, C and
+    /// A test's limit (D1-D6): SIGSTOP, then SIGKILL, C and
     /// every process below it; where /proc cannot be read, or when C is
     /// still alive 10 s later, its whole group.
     deadline_ms: u64,

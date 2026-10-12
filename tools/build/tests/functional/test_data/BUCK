@@ -1,6 +1,6 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
-load(":runner_cases.bzl", "mojo_gate_runner_cases", "mojo_test_command_case")
+load(":runner_cases.bzl", "mojo_test_command_case")
 
 # The tests of the test runtime contract. They use only the standard library:
 # komira_runtime_paths is exercised by its own gate test in the komira cell,
@@ -45,24 +45,9 @@ mojo_test_command_case(
     test = "komira//tools/build/mojo/mojo_test_testdata:mojo_test_args",
 )
 
-# The darwin-arm64 toolchain's runner, gate_runner.sh (linux runs the gate,
-# whose unit tests hold the same cases), in one action directory (runner_cases.sh): two runs get
-# two TEST_TMPDIRs, each empty, under the action directory and gone after the
-# run; --env BIN / rc / MARKER cannot turn a red test green; a test killed
-# by a signal is red with its own status; --arg values arrive in order,
-# unexported, with @KOMIRA_ACTION_DIR@ replaced; an --env after an --arg is
-# refused; exit 77 is red like any other status; the macOS runner
-# (dyld_prelude.sh + gate_runner.sh) hands the test DYLD_LIBRARY_PATH although
-# every busybox applet drops DYLD_*, as macOS does for its protected binaries.
-mojo_gate_runner_cases(
-    name = "runner_cases",
-    script = "runner_cases.sh",
-)
-
 shell_lint(
     name = "shell_lint",
     srcs = [
-        "runner_cases.sh",
         "test_command_case.sh",
     ],
     visibility = ["komira//:tests_lints"],
