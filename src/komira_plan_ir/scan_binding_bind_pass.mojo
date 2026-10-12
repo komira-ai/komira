@@ -224,6 +224,7 @@ from komira_plan_ir.logical_plan import (
     PLAN_VIEW_REF,
     PLAN_CSE_REF,
     PLAN_CAST_TO_VARCHAR,
+    PLAN_EXCHANGE,
     plan_tag_name,
 )
 from komira_plan_ir.corr_subquery import corr_data_inner_plan_ref
@@ -422,6 +423,13 @@ def bind_plan_inmem_payloads(
             return 0
         return bind_plan_inmem_payloads(
             registry, plan._cast_to_varchar.value()[].child[]
+        )
+    if tag == PLAN_EXCHANGE:
+        # Keys and ordering are column NAMES; no expression site.
+        if not plan._exchange:
+            return 0
+        return bind_plan_inmem_payloads(
+            registry, plan._exchange.value()[].child[]
         )
 
     # ---- TWO-CHILD ---------------------------------------------------------

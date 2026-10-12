@@ -36,7 +36,9 @@
 # create the first PartitionBy, and `fuse_partition_topn` fires on two
 # patterns: a Filter directly over a PartitionBy, and an identity Project
 # directly over a PartitionTopN, including one already in the input that
-# steps 5-17 leave in place (they do not descend into a PartitionTopN). So
+# steps 5-17 leave in place (step 16's build-side walk descends into a
+# PartitionTopN but only records join sides and moves no node; the other
+# steps do not descend into it). So
 # `identity_project_under_a_partition_topn` catches a step-19 gate that
 # reads PartitionBy from a scan after step 4. The opposite case, a
 # PartitionBy at step 4 and none at steps 18-19, does not occur under

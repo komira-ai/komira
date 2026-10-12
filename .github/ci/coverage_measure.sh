@@ -7,15 +7,14 @@
 # workflow's `post` job sends. It never fails on what it measures.
 #
 # usage: coverage_measure.sh --base <sha> --head <sha> --covcheck <path> --out <dir>
-#            [--buck2 <path>] [--git <path>] [--policy <file>] [--ratchet <file>]
-#            [--buckconfig <file>] [--name <check run name>] [--max-annotations <n>]
+#            [--buck2 <path>] [--git <path>] [--policy <file>] [--buckconfig <file>]
+#            [--name <check run name>] [--max-annotations <n>]
 #
 # Run from the repository root with <head> checked out (the pull request's
 # head commit, so the annotations land on the lines of its "Files changed"
 # view). <base> is the pull request's base commit. Defaults: --buck2 ./buck2,
-# --git git, --policy tools/build/coverage/policy.bzl, --ratchet
-# tools/build/coverage/ratchet.tsv, --buckconfig .buckconfig, --name coverage,
-# --max-annotations 1000.
+# --git git, --policy tools/build/coverage/policy.bzl, --buckconfig
+# .buckconfig, --name coverage, --max-annotations 1000.
 #
 #  1. The change: <merge base> = `git merge-base <base> <head>`; the diff
 #     covcheck reads (`git diff --unified=0 -M` with explicit a/ b/ prefixes,
@@ -69,9 +68,10 @@
 #     COVERAGE_INFO_ONLY_DIRS (test-only packages, relative to the root
 #     cell's root, which is the repository's) an `--info-package`, so what
 #     covcheck finds in a package under one is information: no finding, no
-#     failure conclusion, its annotations notices; with the ratchet's rows of
-#     the measured libraries' packages only (every other row would read as
-#     a Regression: nothing of it was measured here). When there is no
+#     failure conclusion, its annotations notices; with the floors of the
+#     measured libraries' packages only, each package's coverage_floor.tsv
+#     at <head> (any other floor would read as a Regression: nothing of it
+#     was measured here). When there is no
 #     report (no library touched, none built, none has a test, or the
 #     libraries could not be listed) this script writes the summary and a
 #     neutral check run itself, in covcheck's shape (000.json the POST,
@@ -100,13 +100,13 @@ say() { echo "coverage_measure: $*"; }
 die() { echo "coverage_measure: $*" >&2; exit 1; }
 usage() {
     echo "coverage_measure: $*" >&2
-    echo "usage: coverage_measure.sh --base <sha> --head <sha> --covcheck <path> --out <dir> [--buck2 <path>] [--git <path>] [--policy <file>] [--ratchet <file>] [--buckconfig <file>] [--name <name>] [--max-annotations <n>]" >&2
+    echo "usage: coverage_measure.sh --base <sha> --head <sha> --covcheck <path> --out <dir> [--buck2 <path>] [--git <path>] [--policy <file>] [--buckconfig <file>] [--name <name>] [--max-annotations <n>]" >&2
     exit 2
 }
 
 BASE="" HEAD="" COVCHECK="" OUT=""
 BUCK2=./buck2 GIT=git
-POLICY=tools/build/coverage/policy.bzl RATCHET=tools/build/coverage/ratchet.tsv
+POLICY=tools/build/coverage/policy.bzl
 BUCKCONFIG=.buckconfig NAME=coverage MAXANN=1000
 while [ $# -gt 0 ]; do
     [ $# -ge 2 ] || usage "$1 has no value"
@@ -118,7 +118,6 @@ while [ $# -gt 0 ]; do
         --buck2) BUCK2=$2 ;;
         --git) GIT=$2 ;;
         --policy) POLICY=$2 ;;
-        --ratchet) RATCHET=$2 ;;
         --buckconfig) BUCKCONFIG=$2 ;;
         --name) NAME=$2 ;;
         --max-annotations) MAXANN=$2 ;;
@@ -398,13 +397,11 @@ if [ -s "$PUB/libraries.txt" ]; then
     fi
 fi
 
-# The ratchet covcheck reads: its comment lines and the rows of the measured
-# libraries' packages (a label's path: komira//src/x:x is src/x).
+# The floors covcheck reads: the row of each measured library's package's
+# coverage_floor.tsv, if it has one (a label's path: komira//src/x:x is src/x).
 sed 's|^[A-Za-z0-9_]*//\([^:]*\):.*$|\1|' "$OUT/measured.txt" | sort -u >"$OUT/measured_packages.txt"
-awk -F '\t' -v keepf="$OUT/measured_packages.txt" '
-    BEGIN { while ((getline l < keepf) > 0) keep[l] = 1 }
-    /^#/ || ($1 in keep)
-' "$RATCHET" >"$OUT/ratchet.tsv" || die "cannot read $RATCHET"
+{ echo "# the floors of the measured packages"; while IFS= read -r p; do
+    [ ! -f "$p/coverage_floor.tsv" ] || sed '/^#/d' "$p/coverage_floor.tsv"; done <"$OUT/measured_packages.txt"; } >"$OUT/ratchet.tsv" || die "cannot read the floors"
 
 # The text of a JSON string from stdin: lines joined with \n. The texts
 # written here hold no quote or backslash (checked by json_safe).
