@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-A `SecretStore` (see [komira_secret_store](../komira_secret_store/__init__.mojo))
+A `SecretStore` (see [komira_secret_store](https://github.com/komira-ai/komira/blob/main/src/komira_secret_store/__init__.mojo))
 whose handle is the NAME of an environment variable. `resolve("PYPI_TOKEN")`
 returns the value of `PYPI_TOKEN` as a zeroizing, redacted `SecretValue`.
 It is the store a binary composes for local runs and for CI jobs that receive
@@ -22,11 +22,11 @@ The value goes from the environ block straight into the `SecretValue`; no
 
 | name | file | what it is |
 |---|---|---|
-| `EnvSecretStore[E]` | [env_secret_store.mojo](env_secret_store.mojo) | the `SecretStore` conformer |
-| `EnvReader` | [env_secret_store.mojo](env_secret_store.mojo) | the lookup seam: `None` = unset |
-| `ProcessEnv` | [process_env.mojo](process_env.mojo) | the reader over this process (`getenv(3)`) |
-| `MapEnv` | [map_env.mojo](map_env.mojo) | the hermetic test double, with a lookup count |
-| `is_secret_env_name`, `check_secret_env_name`, `MAX_SECRET_NAME_LEN` | [env_name.mojo](env_name.mojo) | the handle grammar |
+| `EnvSecretStore[E]` | [env_secret_store.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_secret_env/env_secret_store.mojo) | the `SecretStore` conformer |
+| `EnvReader` | [env_secret_store.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_secret_env/env_secret_store.mojo) | the lookup seam: `None` = unset |
+| `ProcessEnv` | [process_env.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_secret_env/process_env.mojo) | the reader over this process (`getenv(3)`) |
+| `MapEnv` | [map_env.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_secret_env/map_env.mojo) | the hermetic test double, with a lookup count |
+| `is_secret_env_name`, `check_secret_env_name`, `MAX_SECRET_NAME_LEN` | [env_name.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_secret_env/env_name.mojo) | the handle grammar |
 
 ## Dependencies
 

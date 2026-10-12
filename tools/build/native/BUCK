@@ -3,6 +3,7 @@
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "c_exe")
+load(":shared.bzl", "glibc_floor_test")
 
 # elfsyms: an archive's symbol table and its members' symbols (elfsyms.c).
 c_exe(
@@ -70,4 +71,12 @@ zig_exe(
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
+)
+
+# The glibc floor is read from a platform row: a fixture row with a floor no
+# real row has (glibc 2.17) must give 2.17, so a constant floor is red here.
+glibc_floor_test(
+    name = "glibc_floor_fixture_row",
+    expect = "2.17",
+    os_floor = "glibc-2.17",
 )
