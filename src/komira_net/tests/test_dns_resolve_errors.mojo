@@ -32,25 +32,17 @@ comptime _EAI_AGAIN_GLIBC: Int32 = -3
 comptime _ADDRINFO_SIZE: Int = 48
 
 
-def _null_ptr() -> UnsafePointer[UInt8, MutUntrackedOrigin]:
-    # The null UnsafePointer ctor is gone; build NULL via an Optional-None
-    # reinterpret (layout-compatible, all-zero bit pattern).
-    var none: Optional[UnsafePointer[UInt8, MutUntrackedOrigin]] = None
-    return UnsafePointer(to=none).bitcast[
-        UnsafePointer[UInt8, MutUntrackedOrigin]
-    ]()[]
-
-
-def _raw_getaddrinfo_rc(host: String) -> Int32:
-    """getaddrinfo's own return code for `host`, called directly (zeroed
-    hints, service "80"), independent of the komira_net code under test. Frees
-    any list it gets."""
+def _raw_getaddrinfo_rc(host: String) raises -> Int32:
+    """getaddrinfo's own nonzero return code for `host`, called directly
+    (zeroed hints, service "80"), independent of the komira_net code under
+    test. Raises if the name resolves: a `.invalid` name must not, and the
+    process then exits red without freeing the list."""
     var host_local = host.copy()
     var service = String("80")
     var hints = InlineArray[UInt8, _ADDRINFO_SIZE](fill=UInt8(0))
-    var res_slot = InlineArray[UnsafePointer[UInt8, MutUntrackedOrigin], 1](
-        fill=_null_ptr()
-    )
+    # The list head is kept as a pointer-sized word: the probe never reads
+    # the list, it only learns whether one came back.
+    var res_slot = InlineArray[UInt64, 1](fill=UInt64(0))
     # SAFETY: the C strings, the hints and the out-slot are locals that outlive
     # the call; getaddrinfo reads the first three and writes res_slot[0].
     var rc = external_call["getaddrinfo", Int32](
@@ -59,10 +51,8 @@ def _raw_getaddrinfo_rc(host: String) -> Int32:
         hints.unsafe_ptr(),
         res_slot.unsafe_ptr(),
     )
-    # FFI-BOUNDARY: glibc owns the list in res_slot[0] (set only when rc == 0);
-    # freeaddrinfo returns it.
-    if rc == Int32(0) and Int(res_slot[0]) != 0:
-        external_call["freeaddrinfo", NoneType](res_slot[0])
+    if rc == Int32(0):
+        raise Error("getaddrinfo resolved the reserved name '" + host + "'")
     return rc
 
 
