@@ -22,8 +22,13 @@ both, with a stamp that no release carries:
 For each library it declares `<name>_<lib>_conda` with
 conda_package_test_stamped (conda.bzl: the same rule as `<lib>_conda`, with
 build number `TEST_STAMP`, source commit `TEST_COMMIT` and commit time
-`TEST_TIMESTAMP_MS` given instead of read from the configuration). Then, as
-build actions:
+`TEST_TIMESTAMP_MS` given instead of read from the configuration). A library
+whose mojo_library declares `native` is given it through `native`, a dict
+from the library's label in `libs` to that same `native` target, as the
+mojo_library macro gives it to `<lib>_conda`: the package rule refuses a
+library declaring `native` whose package is not given it (and one given
+another library's), so a native library missing from the dict is red; a key
+not in `libs` is refused here. Then, as build actions:
 
   * `komira_pack conda-meta --name <metapackage>` over each member's
     `[release]/manifest.json`. Its `--license`, `--summary` and `--home` are
@@ -325,14 +330,18 @@ _conda_release_set_check = rule(
     },
 )
 
-def _release_set_check(name, metapackage, libs, release_set, **kwargs):
+def _release_set_check(name, metapackage, libs, release_set, native = {}, **kwargs):
     """See the module documentation."""
+    for lib in native:
+        if lib not in libs:
+            fail("{}: `native` names {}, which is not in `libs`".format(name, lib))
     packages = []
     for lib in libs:
         pkg = "{}_{}_conda".format(name, lib.split(":")[-1])
         conda_package_test_stamped(
             name = pkg,
             lib = lib,
+            native = native.get(lib),
             summary = "{} with the test stamp of {}; a build-time check only.".format(lib, name),
         )
         packages.append(":" + pkg)
