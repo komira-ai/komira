@@ -312,6 +312,39 @@ def test_a_grouped_frame_reads_its_keys() raises:
     )
 
 
+def _abc_frame() raises -> LogicalPlan:
+    """A frame over (a, b, c), all INT64, grouped by (a, b, c)."""
+    var sb = SchemaBuilder()
+    sb.add_field(Field("a", ArrowType.INT64, True))
+    sb.add_field(Field("b", ArrowType.INT64, True))
+    sb.add_field(Field("c", ArrowType.INT64, True))
+    return LogicalPlan.map_batches(_scan_of(sb.build()), 0, _cols("a", "b", "c"), _frame_schema())
+
+
+def _int_read_set(names: List[String]) -> UdfRef:
+    """A frame `UdfRef` whose read set is `names`, each declared INT64."""
+    var args = List[UdfType]()
+    for i in range(len(names)):
+        args.append(_leaf(names[i], ArrowType.INT64))
+    return _frame_ref(args^, Optional(names.copy()))
+
+
+def test_every_group_key_position_is_read() raises:
+    """Defect: a check that skips a group key by position (the first only,
+    the last only, or any one key). Over group by (a, b, c), a read set that
+    omits only key i's column is refused for each i; the read set {a, b, c}
+    is admitted."""
+    var keys: List[String] = ["a", "b", "c"]
+    _decodes(_abc_frame(), _list(_int_read_set(keys)), "read set {a, b, c}, group by (a, b, c)")
+    for i in range(len(keys)):
+        var rest = List[String]()
+        for j in range(len(keys)):
+            if j != i:
+                rest.append(keys[j])
+        var what = "group by (a, b, c) with key " + String(i) + " ('" + keys[i] + "') unread"
+        _starts(_refusal(_abc_frame(), _list(_int_read_set(rest))), OPTIMIZED_UDF_READ_SET_GROUP_KEY, what)
+
+
 def test_an_ambiguous_input_is_refused() raises:
     """Defect: a ROW call, or a frame read set, over an input with two columns
     of one name: a field read by name would be ambiguous."""
@@ -530,6 +563,7 @@ def main() raises:
     suite.test[test_step_literal_types_are_exact]()
     suite.test[test_a_frame_read_set_names_child_columns]()
     suite.test[test_a_grouped_frame_reads_its_keys]()
+    suite.test[test_every_group_key_position_is_read]()
     suite.test[test_an_ambiguous_input_is_refused]()
     suite.test[test_a_node_schema_follows_its_return_type]()
     suite.test[test_a_column_holds_one_level_of_children]()

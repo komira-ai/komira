@@ -323,7 +323,7 @@ def _sweep_refuses(id: String, what: String) raises:
 def test_runtime_malformed() raises:
     """Defects: a grammar check that admits an id outside
     `<namespace>/<name>` or refuses one inside it (a boundary sweep of the
-    part alphabet at each byte position), a missing form, an empty PACKAGE entry, a digest that
+    part alphabet at each byte position, and of one-byte parts), a missing form, an empty PACKAGE entry, a digest that
     is not 32 bytes, or no `code` at all. Each control shape is admitted."""
     var ok = _scalar(_leaf("y", ArrowType.FLOAT64))
     _ = _admitted(ok, "komira/python")
@@ -379,9 +379,25 @@ def test_runtime_malformed() raises:
         _sweep_refuses("x/" + c + "y", "first name byte '" + c + "'")
         _sweep_refuses("x" + c + "/y", "later namespace byte '" + c + "'")
         _sweep_refuses("x/y" + c, "later name byte '" + c + "'")
+    # A one-byte part: its only byte is the first byte, so it is judged by
+    # the first-byte rule. A check that applies that rule only to parts
+    # longer than one byte admits '-/y' and 'x/_'.
+    for i in range(len(edges)):
+        var c = edges[i].copy()
+        _sweep_admits(c + "/y", "one-byte namespace '" + c + "'")
+        _sweep_admits("x/" + c, "one-byte name '" + c + "'")
+    for i in range(len(later_only)):
+        var c = later_only[i].copy()
+        _sweep_refuses(c + "/y", "one-byte namespace '" + c + "'")
+        _sweep_refuses("x/" + c, "one-byte name '" + c + "'")
+    for i in range(1, len(outside)):  # outside[0] is '/', which splits the id
+        var c = outside[i].copy()
+        _sweep_refuses(c + "/y", "one-byte namespace '" + c + "'")
+        _sweep_refuses("x/" + c, "one-byte name '" + c + "'")
     # Whole ids made of edges only, digit first.
     _sweep_admits("0az9/9za0", "every edge, digit first")
     _sweep_admits("9/z", "one-byte parts at the edges")
+    _sweep_admits("a/0", "one-byte parts at the edges, digit last")
 
     var pkg = _scalar(_leaf("y", ArrowType.FLOAT64))
     pkg.code.form = CODE_FORM_PACKAGE
