@@ -327,11 +327,13 @@ def decode_split_summary(body: List[UInt8]) raises -> SplitSummary:
     var delete_gen_ref = _get_lp_str(body, off)
     var bloom_sketch = _get_lp_bytes(body, off)
     var minmax_sketch = _get_lp_bytes(body, off)
-    # The compaction slot is present iff bytes remain; it needs at least the
-    # 8-byte merge_ops.
+    # The compaction slot is present iff any byte remains. 1 to 7 remaining
+    # bytes are a merge_ops field cut short: `_get_i64_le` raises on them,
+    # so a truncated merged split never decodes as an ingest split
+    # (komira-ai/komira#1372).
     var merge_ops = Int64(0)
     var merge_input_uuids = List[UInt8]()
-    if off + 8 <= len(body):
+    if off < len(body):
         merge_ops = _get_i64_le(body, off)
         off += 8
         merge_input_uuids = _get_lp_bytes(body, off)
