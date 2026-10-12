@@ -27,6 +27,7 @@ from komira_host.cpu_topology import (
     _read_small_file,
     _read_thread_siblings,
     _siblings_for,
+    _unified_cgroup_path_of,
     _sorted_unique,
     derive_driver_reservation,
     derive_io_placement,
@@ -206,6 +207,36 @@ def test_small_file_reader() raises:
         assert_equal(_read_small_file(over).byte_length(), 1024, "the cap")
     else:
         assert_equal(_read_small_file(list), "")
+
+
+def test_small_file_reader_keeps_bytes_above_0x7f() raises:
+    # "/é\n" is the 4 bytes 2F C3 A9 0A. A reader that appends `chr(byte)`
+    # re-encodes C3 and A9 as 2-byte sequences and returns 6 bytes; the
+    # cgroup path then names a directory that does not exist.
+    var path = _scratch("ct_non_ascii")
+    _write(path, "/é\n")
+    comptime if CompilationTarget.is_linux():
+        var got = _read_small_file(path)
+        assert_equal(got.byte_length(), 4, "one byte out per byte in")
+        assert_equal(got, "/é\n")
+    else:
+        assert_equal(_read_small_file(path), "")
+
+
+def test_unified_cgroup_path_of() raises:
+    assert_equal(_unified_cgroup_path_of(""), "")
+    assert_equal(_unified_cgroup_path_of("1:cpu:/x\n"), "", "no 0:: line")
+    assert_equal(_unified_cgroup_path_of("0::/a/b\n"), "/a/b")
+    assert_equal(_unified_cgroup_path_of("0::/a/b"), "/a/b", "no newline")
+    assert_equal(
+        _unified_cgroup_path_of("1:cpu:/x\n0::/user.slice/s.scope\n"),
+        "/user.slice/s.scope",
+        "hybrid file",
+    )
+    # "/é" is 3 bytes (é is C3 A9); `chr(byte)` per byte would give 5.
+    var got = _unified_cgroup_path_of("0::/é\n")
+    assert_equal(got.byte_length(), 3, "one byte out per byte in")
+    assert_equal(got, "/é")
 
 
 def test_unreadable_sysfs_entries_read_empty() raises:
