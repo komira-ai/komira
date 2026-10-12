@@ -63,7 +63,7 @@ src/komira_aws_ecr	0	-
 src/komira_aws_ecs	0	-
 src/komira_aws_iam	0	-
 src/komira_aws_lambda	0	-
-src/komira_aws_lambda_http	9400	-
+src/komira_aws_lambda_http	10000	-
 src/komira_aws_logs	0	-
 src/komira_aws_metrics	9651	-
 src/komira_aws_route53	0	-
