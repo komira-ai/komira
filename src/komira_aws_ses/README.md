@@ -67,6 +67,7 @@ assert_equal(
 Decode a DescribeActiveReceiptRuleSet answer, and read an `<ErrorResponse>`
 with komira_aws_core's `aws_query_error`:
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_false -->
 ```mojo
 from komira_aws_core import AwsResponse, aws_query_error
 from komira_aws_ses.komira_aws_ses import parse_describe_active_receipt_rule_set_response
@@ -105,6 +106,7 @@ assert_equal(e.message, "Rule set does not exist: inbound-rules")
 
 Resolve the endpoint a call goes to:
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_aws_ses.komira_aws_ses import SESDescribeActiveReceiptRuleSetRequest, SESEndpointConfig
 from komira_aws_ses.komira_aws_ses import komira_aws_ses_endpoint_rules
