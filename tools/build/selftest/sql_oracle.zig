@@ -16,10 +16,23 @@
 //! buck2's message, not the rule's), `SET TimeZone = 'UTC'`, the version
 //! check or the environment check dropped or made unable to fire (the
 //! invocation pins each statement from SELECT to END, and what stands
-//! between the pinned pieces: the pinned version exactly, a path with no
-//! quote, or nothing, so no SQL can be added there; a dropped TZ, LC_ALL
-//! or LD_LIBRARY_PATH entry fails the green fixture in the environment
-//! check), and each of the sql_oracle analysis `fail()` calls deleted, or
+//! between the pinned pieces: the version `buck2 uquery` reads from the
+//! dist exactly, itself required to be digits and dots; the output of
+//! komira//third_party/duckdb:native_libs exactly, read with `buck2
+//! targets --show-output`, so the getenv() check names that directory and
+//! no other; a path with no quote; or nothing, so no SQL can be added
+//! there; a dropped or changed TZ, LC_ALL or LD_LIBRARY_PATH entry fails
+//! the green fixture in the environment check, which compares
+//! LD_LIBRARY_PATH with that pinned lib path. aquery prints no env, so the
+//! env entry is checked only by that comparison at run time), a
+//! duckdb_dist version that is not digits and dots (the dist_version_*
+//! refusals: the injection itself, then one per kind of character the
+//! pattern must not admit: a quote, `v` and `V` (so the class widened to
+//! `a-z` or `A-Z`, or any range holding `v` or `V`, fails; a letter range
+//! without them, such as `a-f`, is not pinned and admits no quote), a
+//! space, a semicolon, `/` and `:` next to the digit range, a newline (which
+//! the multi-line flag `(?m)` admits), and empty; a version of 0 and 9, DIST_BOUNDS, must build, so a narrowed digit
+//! range fails too), and each of the sql_oracle analysis `fail()` calls deleted, or
 //! one arm of a condition that no other arm covers: the empty, absolute and
 //! trailing-`/` input paths each fall through to the segment message, a `*`
 //! segment or output name passes once the name pattern is dropped or
@@ -39,6 +52,8 @@ const lib = @import("lib/lib.zig");
 const PKG = "tests//negative/sql_oracle:";
 const GREEN = "tests//functional/sql_oracle:check";
 const WRITE = "tests//functional/sql_oracle:write";
+/// A duckdb_dist whose version is "0.9": both ends of the digit range.
+const DIST_BOUNDS = "tests//functional/sql_oracle:dist_version_digit_bounds";
 
 const REFUSALS = [_]lib.Row{
     .{
@@ -141,6 +156,56 @@ const REFUSALS = [_]lib.Row{
         .target = PKG ++ "input_glob_segment",
         .text = PKG ++ "input_glob_segment: input \"data/*.csv\" holds a segment that is not a plain name (^[A-Za-z0-9_][A-Za-z0-9_.-]*$)",
     },
+    .{
+        .name = "dist_version_injection",
+        .target = PKG ++ "dist_version_injection",
+        .text = PKG ++ "dist_version_injection: version \"1.5.6' AND false THEN NULL END; --\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
+    },
+    .{
+        .name = "dist_version_quote",
+        .target = PKG ++ "dist_version_quote",
+        .text = PKG ++ "dist_version_quote: version \"1.5.6'\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
+    },
+    .{
+        .name = "dist_version_leading_v",
+        .target = PKG ++ "dist_version_leading_v",
+        .text = PKG ++ "dist_version_leading_v: version \"v1.5.6\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
+    },
+    .{
+        .name = "dist_version_upper",
+        .target = PKG ++ "dist_version_upper",
+        .text = PKG ++ "dist_version_upper: version \"1.5.6V\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
+    },
+    .{
+        .name = "dist_version_space",
+        .target = PKG ++ "dist_version_space",
+        .text = PKG ++ "dist_version_space: version \"1.5 6\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
+    },
+    .{
+        .name = "dist_version_semicolon",
+        .target = PKG ++ "dist_version_semicolon",
+        .text = PKG ++ "dist_version_semicolon: version \"1.5;6\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
+    },
+    .{
+        .name = "dist_version_slash",
+        .target = PKG ++ "dist_version_slash",
+        .text = PKG ++ "dist_version_slash: version \"1.5/6\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
+    },
+    .{
+        .name = "dist_version_colon",
+        .target = PKG ++ "dist_version_colon",
+        .text = PKG ++ "dist_version_colon: version \"1.5:6\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
+    },
+    .{
+        .name = "dist_version_newline",
+        .target = PKG ++ "dist_version_newline",
+        .text = PKG ++ "dist_version_newline: version \"1.5\\n6\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
+    },
+    .{
+        .name = "dist_version_empty",
+        .target = PKG ++ "dist_version_empty",
+        .text = PKG ++ "dist_version_empty: version \"\" is not a release number (^[0-9.]+$): it is written into the SQL of every sql_oracle action",
+    },
 };
 
 const Red = struct {
@@ -183,13 +248,22 @@ const Gap = enum {
     any,
     /// Nothing: the piece follows the one before it directly.
     none,
-    /// The version of `komira//third_party/duckdb:duckdb`, exactly.
+    /// The version of `komira//third_party/duckdb:duckdb`, exactly (read
+    /// with `buck2 uquery`, and required to be digits and dots).
     version,
+    /// The output of `komira//third_party/duckdb:native_libs`, exactly (read
+    /// with `buck2 targets --show-output`, in aquery's form): the directory
+    /// the getenv() check names, so a rule that wires another directory
+    /// into DuckdbInfo fails here.
+    native_libs,
     /// A buck-out path: letters, digits, `_`, `-` and `/` only, so it holds
     /// no quote that could close the SQL string it sits in and no `, ` that
     /// could add an argv word.
     path,
 };
+
+/// What the `.version` and `.native_libs` gaps must equal.
+const Want = struct { version: []const u8, native_libs: []const u8 };
 
 const Pin = struct { what: []const u8, gap: Gap, text: []const u8 };
 
@@ -200,14 +274,17 @@ const INVOCATION = [_]Pin{
     .{ .what = "the version check's error, right after the pinned version", .gap = .version, .text = "' THEN error('sql_oracle: this duckdb is ' || version() || ', the pin says v" },
     .{ .what = "the version check's end, right after the pinned version", .gap = .version, .text = "') END, -cmd, " },
     .{ .what = "the environment check (TZ=UTC, LC_ALL=C, the dist's lib/), right after the version check", .gap = .none, .text = "SELECT CASE WHEN getenv('TZ') IS DISTINCT FROM 'UTC' OR getenv('LC_ALL') IS DISTINCT FROM 'C' OR getenv('LD_LIBRARY_PATH') IS DISTINCT FROM '" },
-    .{ .what = "the environment check's error, right after the dist's lib/", .gap = .path, .text = "/lib' THEN error('sql_oracle: the action environment is TZ=' || coalesce(getenv('TZ'), '(unset)') || ' LC_ALL=' || coalesce(getenv('LC_ALL'), '(unset)') || ' LD_LIBRARY_PATH=' || coalesce(getenv('LD_LIBRARY_PATH'), '(unset)') || ', the rule sets TZ=UTC LC_ALL=C and the dist''s lib/') END" },
+    .{ .what = "the environment check's error, right after the output of " ++ NATIVE_LIBS, .gap = .native_libs, .text = "/lib' THEN error('sql_oracle: the action environment is TZ=' || coalesce(getenv('TZ'), '(unset)') || ' LC_ALL=' || coalesce(getenv('LC_ALL'), '(unset)') || ' LD_LIBRARY_PATH=' || coalesce(getenv('LD_LIBRARY_PATH'), '(unset)') || ', the rule sets TZ=UTC LC_ALL=C and the dist''s lib/') END" },
     .{ .what = ".safe_mode before the first src, right after the environment check", .gap = .none, .text = ", -cmd, .safe_mode, -cmd, .mode duckbox, -f, ../sql/0_write.sql, -cmd, .mode trash, -cmd, " },
     .{ .what = "the in-memory database, last", .gap = .any, .text = ", :memory:]\"" },
 };
 
 const DIST = "komira//third_party/duckdb:duckdb";
+const NATIVE_LIBS = "komira//third_party/duckdb:native_libs";
 
-/// The `version` attribute of DIST, from `buck2 uquery`.
+/// The `version` attribute of DIST, from `buck2 uquery`: digits and dots
+/// only. The rule writes the same attribute into the version check, so a
+/// value with a quote in it would match its own gaps byte for byte.
 fn pinnedVersion(c: *lib.Ctx) !?[]const u8 {
     const res = try c.run(&.{ "uquery", DIST, "--output-attribute", "version", "--json" }, .{});
     if (!res.ok()) {
@@ -221,7 +298,40 @@ fn pinnedVersion(c: *lib.Ctx) !?[]const u8 {
         c.fail("invocation: buck2 uquery {s} does not show one version (see {s})", .{ DIST, res.log });
         return null;
     }
-    return res.stdout[at.? + key.len .. end.?];
+    const version = res.stdout[at.? + key.len .. end.?];
+    if (!isRelease(version)) {
+        c.fail("invocation: the version of {s} is `{s}`, not digits and dots (see {s})", .{ DIST, version, res.log });
+        return null;
+    }
+    return version;
+}
+
+fn isRelease(v: []const u8) bool {
+    for (v) |b| if (!std.ascii.isDigit(b) and b != '.') return false;
+    return true;
+}
+
+/// The output of NATIVE_LIBS, from `buck2 targets --show-output`, in the
+/// form `buck2 aquery` prints a content-based output in an argv. The first
+/// is `<buck-out>/art/<cell>/<configuration>/<package>/__<name>__/<path>`;
+/// aquery drops the configuration and puts `aquery_placeholder/` after
+/// `__<name>__/`. A form that does not parse this way gives a path no gap
+/// equals, so the scenario fails rather than passes.
+fn nativeLibs(c: *lib.Ctx) !?[]const u8 {
+    const res = try c.run(&.{ "targets", "--show-output", NATIVE_LIBS }, .{});
+    if (!res.ok()) {
+        c.fail("invocation: buck2 targets --show-output {s} failed (see {s}); its last lines:\n{s}", .{ NATIVE_LIBS, res.log, lib.text.tail(res.stderr, 12) });
+        return null;
+    }
+    // `<target> <path>`: the path follows the last space.
+    const line = std.mem.trimRight(u8, res.stdout, "\n");
+    const out = if (std.mem.lastIndexOfScalar(u8, line, ' ')) |i| line[i + 1 ..] else line;
+    const art = std.mem.indexOf(u8, out, "/art/") orelse return out;
+    const cell_end = std.mem.indexOfScalarPos(u8, out, art + "/art/".len, '/') orelse return out;
+    const cfg_end = std.mem.indexOfScalarPos(u8, out, cell_end + 1, '/') orelse return out;
+    const rest = out[cfg_end..];
+    const name_end = (std.mem.lastIndexOf(u8, rest, "__/") orelse return out) + "__/".len;
+    return try std.fmt.allocPrint(c.a, "{s}{s}aquery_placeholder/{s}", .{ out[0..cell_end], rest[0..name_end], rest[name_end..] });
 }
 
 fn isPathByte(b: u8) bool {
@@ -230,11 +340,12 @@ fn isPathByte(b: u8) bool {
 
 /// Why `gap`, the argv text before a piece, is not what `kind` allows, or
 /// null when it is.
-fn badGap(kind: Gap, gap: []const u8, version: []const u8) ?[]const u8 {
+fn badGap(kind: Gap, gap: []const u8, want: Want) ?[]const u8 {
     switch (kind) {
         .any => return null,
         .none => return if (gap.len == 0) null else "nothing may stand there",
-        .version => return if (std.mem.eql(u8, gap, version)) null else "only the pinned version may stand there",
+        .version => return if (std.mem.eql(u8, gap, want.version)) null else "only the pinned version may stand there",
+        .native_libs => return if (std.mem.eql(u8, gap, want.native_libs)) null else "only the output of " ++ NATIVE_LIBS ++ " may stand there",
         .path => {
             for (gap) |b| if (!isPathByte(b)) return "only a path of letters, digits, _, - and / may stand there";
             return null;
@@ -247,6 +358,7 @@ fn badGap(kind: Gap, gap: []const u8, version: []const u8) ?[]const u8 {
 /// src before `.safe_mode`).
 fn invocation(c: *lib.Ctx) !void {
     const version = try pinnedVersion(c) orelse return;
+    const native_libs = try nativeLibs(c) orelse return;
     const res = try c.run(&.{ "aquery", WRITE, "--output-attribute", "cmd", "--output-attribute", "category", "--json" }, .{});
     if (!res.ok()) {
         c.fail("invocation: buck2 aquery {s} failed (see {s}); its last lines:\n{s}", .{ WRITE, res.log, lib.text.tail(res.stderr, 12) });
@@ -262,8 +374,8 @@ fn invocation(c: *lib.Ctx) !void {
             c.fail("invocation: the sql_oracle action of {s} lacks {s}: no `{s}` after byte {d} of its argv (see {s})", .{ WRITE, pin.what, pin.text, pos, res.log });
             return;
         };
-        if (badGap(pin.gap, res.stdout[pos..at], version)) |why| {
-            c.fail("invocation: the sql_oracle action of {s} holds `{s}` before {s}: {s} (see {s})", .{ WRITE, res.stdout[pos..at], pin.what, why, res.log });
+        if (badGap(pin.gap, res.stdout[pos..at], .{ .version = version, .native_libs = native_libs })) |why| {
+            c.fail("invocation: the sql_oracle action of {s} holds `{s}` before {s}: {s} (the pinned version is {s}, the output of {s} is {s}; see {s})", .{ WRITE, res.stdout[pos..at], pin.what, why, version, NATIVE_LIBS, native_libs, res.log });
             return;
         }
         pos = at + pin.text.len;
@@ -272,7 +384,7 @@ fn invocation(c: *lib.Ctx) !void {
         c.fail("invocation: the sql_oracle action of {s} runs -f {d} times, not once (see {s})", .{ WRITE, lib.text.count(res.stdout, ", -f, "), res.log });
         return;
     }
-    c.pass("invocation: the sql_oracle action of {s} runs with all {d} pinned pieces in order, duckdb v{s}", .{ WRITE, INVOCATION.len, version });
+    c.pass("invocation: the sql_oracle action of {s} runs with all {d} pinned pieces in order, duckdb v{s}, {s}/lib", .{ WRITE, INVOCATION.len, version, native_libs });
 }
 
 fn holds(r: anytype, want: []const u8) bool {
@@ -320,6 +432,12 @@ fn body(c: *lib.Ctx) !void {
     try farmOnly(c, "precondition");
     try invocation(c);
     try c.refusals(&REFUSALS);
+    const bounds = try c.run(&.{ "build", DIST_BOUNDS }, .{});
+    if (!bounds.ok()) {
+        c.fail("dist_version_digit_bounds: {s} (version \"0.9\") does not build, but a version of digits and dots must be accepted (see {s}); its last lines:\n{s}", .{ DIST_BOUNDS, bounds.log, lib.text.tail(bounds.stderr, 12) });
+    } else {
+        c.pass("dist_version_digit_bounds: {s} (version \"0.9\") builds", .{DIST_BOUNDS});
+    }
     for (REDS) |row| try red(c, row);
 }
 
