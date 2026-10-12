@@ -29,16 +29,23 @@ load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":coverage.bzl", "COVERAGE_ATTRS", "COVERAGE_SHARED_LIB_ATTRS", "COVERAGE_TEST_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_readme", "coverage_run", "coverage_branch_of", "coverage_shared_lib", "coverage_shared_lib_macro", "coverage_sub_targets", "coverage_test", "coverage_test_kwargs")
 load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
 load(":mutation.bzl", "MUTATION_ATTRS", "mutation_kwargs", "mutation_sub_targets")
+load(
+    ":test_runtime.bzl",
+    _arg_args = "arg_args",
+    _data_map = "data_map",
+    _env_args = "env_args",
+    _test_root = "test_root",
+    gate_mojo = "gate_mojo",
+)
+load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "cap_flags", "define_args", "mem_cap_script", "memory_cap")
 load(":native_facts.bzl", "NATIVE_ATTRS", "native_facts", "native_refusal")
 load(":native_reach.bzl", "NATIVE_REACH_ATTRS", "native_reach", "native_reach_kwargs")
-load(":test_runtime.bzl", _arg_args = "arg_args", _data_map = "data_map", _env_args = "env_args", _test_root = "test_root")
-load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "capped_prefix", "define_args", "mem_cap_script", "memory_cap")
 load(":opt_level.bzl", "MojoOptLevelInfo", "SHIPPED_OPT_LEVEL", "TEST_OPT_LEVEL", "opt_level_args")
 load(":dlopen.bzl", "DLOPEN_ATTRS", "dlopen_refusal", "dlopen_rows")
 load(":helpers.bzl", "HELPER_ATTRS", "helper_files")
 load(":readme.bzl", "readme_gate", "readme_kwargs")
 load(":run_check.bzl", "run_check_validation")
-load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_prefix", "with_test_limit")
+load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_flags", "with_test_limit")
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
@@ -419,16 +426,7 @@ def _library_impl(ctx):
         test_dir, staged = _test_root(ctx, "tests/{}/root".format(stem), exe, test_data.get(key, {}))
         ctx.actions.run(
             cmd_args(
-                capped_prefix(tc, mem_cap_script(ctx), "{}:{}".format(ctx.label.raw_target(), t.short_path), cap),
-                tc.busybox,
-                "sh",
-                tc.gate_runner,
-                tc.busybox,
-                tc.compiler,
-                "{}:{}".format(ctx.label.raw_target(), t.short_path),
-                staged,
-                marker.as_output(),
-                env_args,
+                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), t.short_path), staged, marker.as_output(), cap_flags(cap), env_args, struct(mem_cap = mem_cap_script(ctx), test_deadline = None)),
                 hidden = test_dir,
             ),
             category = "mojo_gated_test",
@@ -466,7 +464,7 @@ def _library_impl(ctx):
     # only the conda package waits for them and the runs, never this package.
     cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs, cov_branch, src_dir, import_name, root) if cov_link else (None, [])
     reach = native_reach(ctx, src_dir, deps)  # native_reach.bzl: (providers, sub-targets)
-    mutation = mutation_sub_targets(ctx, tc, mojo_compile_cmd, src_dir, root, deps, tests_closure[1:], _link_tail(tests_c_link), test_data, env_args, test_defines, cap, mem_cap_script(ctx))  # mutation.bzl
+    mutation = mutation_sub_targets(ctx, tc, mojo_compile_cmd, src_dir, root, deps, tests_closure[1:], _link_tail(tests_c_link), test_data, env_args, test_defines, cap)  # mutation.bzl
     if markers:
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
         ctx.actions.run(
@@ -540,7 +538,10 @@ def _readme_test_impl(actions, label, gate_label, examples, package, src, marker
         root, staged = _test_root(shim, "tests/readme/root/" + line, exe, {})
         m = actions.declare_output("tests/readme/{}.passed".format(line))
         actions.run(
-            cmd_args(tc.busybox, "sh", tc.gate_runner, tc.busybox, tc.compiler, "{}:{}".format(gate_label, line), staged, m.as_output(), env_args, hidden = root),
+            cmd_args(
+                gate_mojo(tc, "{}:{}".format(gate_label, line), staged, m.as_output(), [], env_args),
+                hidden = root,
+            ),
             category = "mojo_gated_test",
             identifier = "readme_" + line,
         )
@@ -715,18 +716,15 @@ def _test_impl(ctx):
     root, staged = _test_root(ctx, ctx.label.name + ".testroot", exe, data)
     cap = memory_cap(where, "memory_cap_mib", ctx.attrs.memory_cap_mib, ctx.attrs.assert_level)
     command = cmd_args(
-        deadline_prefix(ctx, tc.busybox, where),
-        capped_prefix(tc, mem_cap_script(ctx), where, cap),
-        tc.busybox,
-        "sh",
-        tc.gate_runner,
-        tc.busybox,
-        tc.compiler,
-        where,
-        staged,
-        "/dev/null",
-        env_args,
-        _arg_args(ctx.attrs.args),
+        gate_mojo(
+            tc,
+            where,
+            staged,
+            "/dev/null",
+            deadline_flags(ctx, where) + cap_flags(cap),
+            [env_args, _arg_args(ctx.attrs.args)],
+            struct(mem_cap = mem_cap_script(ctx), test_deadline = ctx.attrs._test_deadline[DefaultInfo].default_outputs[0]),
+        ),
         hidden = root,
     )
     run_dir, run_command = _runnable(ctx, tc, exe)
@@ -903,14 +901,7 @@ def _shared_lib_impl(ctx):
         marker = ctx.actions.declare_output("gate/{}.passed".format(stem))
         ctx.actions.run(
             cmd_args(
-                tc.busybox,
-                "sh",
-                tc.gate_runner,
-                tc.busybox,
-                tc.compiler,
-                "{}:{}".format(ctx.label.raw_target(), stem),
-                staged,
-                marker.as_output(),
+                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), stem), staged, marker.as_output()),
                 hidden = root,
             ),
             category = "mojo_shared_lib_gate",

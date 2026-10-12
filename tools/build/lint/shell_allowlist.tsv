@@ -16,8 +16,6 @@ third_party/git/git_check.sh	toolchain or vendored-source builder or check: to p
 tools/build/coverage/census.sh	coverage and mutation tooling: to port to Zig
 tools/build/coverage/cov_gate.sh	coverage and mutation tooling: to port to Zig
 tools/build/coverage/kcov/cov_run.sh	coverage and mutation tooling: to port to Zig
-tools/build/coverage/mutate/mut_step.sh	coverage and mutation tooling: to port to Zig
-tools/build/coverage/mutate/mut_step_cases.sh	coverage and mutation tooling: to port to Zig
 tools/build/lint/readme_api_coverage.sh	lint or validation: to port to Zig
 tools/build/lint/test_weld.sh	lint or validation: to port to Zig
 tools/build/mojo/darwin/busybox.sh	a thin wrapper: the darwin applet allowlist
@@ -35,7 +33,6 @@ tools/build/package/kcov_guard.sh	packaging: to port to Zig
 tools/build/package/list_conda_targets.sh	packaging: to port to Zig
 tools/build/package/release_version.sh	dead: to be deleted
 tools/build/rust/rustc_wrapper.sh	action runtime of the rules: to port to Zig
-tools/build/rust/test_runner.sh	action runtime of the rules: to port to Zig
 tools/build/tests/assert_level_tests.sh	build system self-tests: to port to Zig
 tools/build/tests/c_libs_tests.sh	build system self-tests: to port to Zig
 tools/build/tests/coverage_branch_tests.sh	build system self-tests: to port to Zig

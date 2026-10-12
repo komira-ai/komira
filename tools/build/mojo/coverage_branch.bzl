@@ -122,10 +122,10 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
             "run",
             "--busybox",
             tc.busybox,
-            # gate_runner.sh, the release gate's runner (the mojo rules'),
-            # which cov_branch runs as `<busybox> sh <gate_runner.sh> ...`.
-            "--gate-runner",
-            tc.gate_runner,
+            # The gate (tools/build/run), the release gate's runner, which
+            # cov_branch runs as `<gate> mojo ...` (test_runtime.bzl, gate_mojo).
+            "--gate",
+            tc.gate,
             "--compiler",
             tc.compiler,
             "--label",
