@@ -10,9 +10,11 @@
 # Offline: "LOCALHOST" is not an exact loopback alias, so it goes to
 # getaddrinfo, and glibc's hosts-file lookup matches names case-insensitively
 # ("localhost" is in every hosts file). The `.invalid` TLD is reserved
-# (RFC 2606), but glibc still asks the configured resolver, so the NXDOMAIN
-# test accepts a TRANSIENT answer from a resolver that does not reply and says
-# so; the TRANSIENT class itself is pinned hermetically by
+# (RFC 2606), but glibc still asks the configured resolver. So the NXDOMAIN
+# test first asks getaddrinfo itself (a direct call, not through resolve_host)
+# and skips, with a printed reason, only when that raw call returns EAI_AGAIN
+# (the resolver did not answer); the decision never reads resolve_host's own
+# output. Both classes are also pinned hermetically by
 # test_dns_transient.mojo. A system error is caused by lowering RLIMIT_NOFILE to the lowest
 # free descriptor, so the resolver cannot open the hosts file; the limit is
 # restored before any assertion can raise.
@@ -26,6 +28,42 @@ from komira_net.dns import _getaddrinfo_collect, resolve_host
 
 
 comptime _RLIMIT_NOFILE_LINUX: Int32 = 7
+comptime _EAI_AGAIN_GLIBC: Int32 = -3
+comptime _ADDRINFO_SIZE: Int = 48
+
+
+def _null_ptr() -> UnsafePointer[UInt8, MutUntrackedOrigin]:
+    # The null UnsafePointer ctor is gone; build NULL via an Optional-None
+    # reinterpret (layout-compatible, all-zero bit pattern).
+    var none: Optional[UnsafePointer[UInt8, MutUntrackedOrigin]] = None
+    return UnsafePointer(to=none).bitcast[
+        UnsafePointer[UInt8, MutUntrackedOrigin]
+    ]()[]
+
+
+def _raw_getaddrinfo_rc(host: String) -> Int32:
+    """getaddrinfo's own return code for `host`, called directly (zeroed
+    hints, service "80"), independent of the komira_net code under test. Frees
+    any list it gets."""
+    var host_local = host.copy()
+    var service = String("80")
+    var hints = InlineArray[UInt8, _ADDRINFO_SIZE](fill=UInt8(0))
+    var res_slot = InlineArray[UnsafePointer[UInt8, MutUntrackedOrigin], 1](
+        fill=_null_ptr()
+    )
+    # SAFETY: the C strings, the hints and the out-slot are locals that outlive
+    # the call; getaddrinfo reads the first three and writes res_slot[0].
+    var rc = external_call["getaddrinfo", Int32](
+        host_local.as_c_string_slice().unsafe_ptr(),
+        service.as_c_string_slice().unsafe_ptr(),
+        hints.unsafe_ptr(),
+        res_slot.unsafe_ptr(),
+    )
+    # FFI-BOUNDARY: glibc owns the list in res_slot[0] (set only when rc == 0);
+    # freeaddrinfo returns it.
+    if rc == Int32(0) and Int(res_slot[0]) != 0:
+        external_call["freeaddrinfo", NoneType](res_slot[0])
+    return rc
 
 
 def _message(host: String, port: UInt16) -> String:
@@ -102,18 +140,14 @@ def test_nxdomain_is_classified_as_nxdomain() raises:
     not the generic failure)."""
     comptime if CompilationTarget.is_linux():
         var host = String("komira-nonexistent.invalid")
-        var msg = _message(host, UInt16(80))
-        var transient = (
-            String("DnsError[TRANSIENT]: temporary failure resolving '")
-            + host
-            + "' (EAI_AGAIN)"
-        )
-        if msg == transient:
+        if _raw_getaddrinfo_rc(host) == _EAI_AGAIN_GLIBC:
             print(
                 "SKIP test_nxdomain_is_classified_as_nxdomain: the build"
-                " machine's resolver did not answer (EAI_AGAIN)"
+                " machine's resolver did not answer (a direct getaddrinfo"
+                " returned EAI_AGAIN)"
             )
             return
+        var msg = _message(host, UInt16(80))
         assert_equal(
             msg,
             String("DnsError[NXDOMAIN]: no such host '")

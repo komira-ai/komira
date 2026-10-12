@@ -190,6 +190,50 @@ def test_skips_non_inet_and_walks_next() raises:
     _ = sa
 
 
+def test_skips_non_inet_with_a_real_sockaddr() raises:
+    """A non-AF_INET node whose ai_addr points at a real sockaddr is skipped
+    by its family alone. (In test_skips_non_inet_and_walks_next the non-INET
+    node's ai_addr is NULL, so the NULL guard would skip it even without the
+    family check; here only the family check can.)"""
+    var n0 = Array[UInt8, _ADDRINFO_SIZE](fill=UInt8(0))
+    var n1 = Array[UInt8, _ADDRINFO_SIZE](fill=UInt8(0))
+    var sa0 = Array[UInt8, _SOCKADDR_IN_SIZE](fill=UInt8(0))
+    var sa1 = Array[UInt8, _SOCKADDR_IN_SIZE](fill=UInt8(0))
+
+    var n0_p = n0.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
+    var n1_p = n1.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
+    var sa0_p = sa0.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
+    var sa1_p = sa1.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
+
+    # node[0]: non-INET family, ai_addr -> a sockaddr holding 192.0.2.99.
+    (sa0_p + _SIN_OFF_ADDR + 0)[0] = UInt8(192)
+    (sa0_p + _SIN_OFF_ADDR + 1)[0] = UInt8(0)
+    (sa0_p + _SIN_OFF_ADDR + 2)[0] = UInt8(2)
+    (sa0_p + _SIN_OFF_ADDR + 3)[0] = UInt8(99)
+    _write_i32_at(n0_p, _AI_OFF_FAMILY, _AF_INET6)
+    _write_ptr_at(n0_p, _AI_OFF_ADDR, sa0_p)
+    _write_ptr_at(n0_p, _AI_OFF_NEXT, n1_p)
+
+    # node[1]: AF_INET -> 192.0.2.1, ai_next -> NULL.
+    (sa1_p + _SIN_OFF_ADDR + 0)[0] = UInt8(192)
+    (sa1_p + _SIN_OFF_ADDR + 1)[0] = UInt8(0)
+    (sa1_p + _SIN_OFF_ADDR + 2)[0] = UInt8(2)
+    (sa1_p + _SIN_OFF_ADDR + 3)[0] = UInt8(1)
+    var expect = 192 | (0 << 8) | (2 << 16) | (1 << 24)
+    _write_i32_at(n1_p, _AI_OFF_FAMILY, _AF_INET)
+    _write_ptr_at(n1_p, _AI_OFF_ADDR, sa1_p)
+    _write_ptr_at(n1_p, _AI_OFF_NEXT, _null_ptr())
+
+    var out = _collect_a_records_from_addrinfo_list(n0_p)
+    assert_equal(len(out), 1)
+    assert_equal(Int(out[0].v4_be), expect)
+
+    _ = n0
+    _ = n1
+    _ = sa0
+    _ = sa1
+
+
 def test_empty_list_null_head() raises:
     """A NULL list head → empty result (no crash, no spurious record)."""
     var out = _collect_a_records_from_addrinfo_list(_null_ptr())
@@ -200,5 +244,6 @@ def main() raises:
     test_single_a_record_parses_to_expected_ip()
     test_canonname_offset_not_mistaken_for_addr()
     test_skips_non_inet_and_walks_next()
+    test_skips_non_inet_with_a_real_sockaddr()
     test_empty_list_null_head()
     print("PASS komira_net.dns addrinfo field-offset parser")
