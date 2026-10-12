@@ -8,17 +8,21 @@
 # (for the IN rewrite: when the plan holds a site at all). A site the precheck
 # skipped would leave the pass unrun on a plan whose only work sits there, so
 # each test puts the one piece of work at one site and asks all three.
+# `_answers` also checks that each precheck left the plan as it found it
+# (the prechecks take `mut` only to share the walk with the passes), so
+# every fixture checks that nothing changed at the site it reaches.
 #
 # `F` is a foldable expression (`a + (1 + 2)`), `S` a simplifiable one
-# (`(a > 1) AND true`), `C` neither (`a > 1`).
+# (`(a > 1) AND true`), `C` neither (`a > 1`), `O` an OR chain
+# `rewrite_in_clauses` turns into an IN list (`a = 1 OR a = 2`).
 # =============================================================================
 
 from std.memory import OwnedPointer
-from std.testing import TestSuite, assert_equal, assert_true, assert_false
+from std.testing import TestSuite, assert_equal
 
 from komira_arrow.schema import Schema, SchemaBuilder, Field
 from komira_arrow.arrow_types import ArrowType
-from komira_plan_expr.expr import Expr, BIN_ADD, BIN_GT, BIN_AND
+from komira_plan_expr.expr import Expr, BIN_ADD, BIN_GT, BIN_AND, BIN_EQ, BIN_OR
 from komira_plan_expr.agg_expr import AggExpr, AGG_SUM, AGG_COUNT, AGG_CORR
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_ir.logical_plan import (
@@ -60,6 +64,10 @@ def _C() -> Expr:
     return Expr.binary(BIN_GT, _c("a"), _i(1))
 
 
+def _O() -> Expr:
+    return Expr.binary(BIN_OR, Expr.binary(BIN_EQ, _c("a"), _i(1)), Expr.binary(BIN_EQ, _c("a"), _i(2)))
+
+
 def _schema() -> Schema:
     var sb = SchemaBuilder()
     sb.add_field(Field("a", ArrowType.INT64, False))
@@ -71,12 +79,26 @@ def _scan(var filter: Optional[Expr] = None) -> LogicalPlan:
     return LogicalPlan.scan("s.parquet", SOURCE_PARQUET, _schema(), None, filter^)
 
 
-def _answers(var p: LogicalPlan) -> String:
-    """The three prechecks on `p`, as `fold simplify in` with 1 for True."""
+def _render(p: LogicalPlan) -> String:
+    var s = String("")
+    p.write_to(s)
+    return s^
+
+
+def _answers(var p: LogicalPlan) raises -> String:
+    """The three prechecks on `p`, as `fold simplify in` with 1 for True.
+
+    Raises if a precheck changed the plan: the render is compared after
+    each precheck, so the one that rewrote is named and a rewrite by one
+    cannot alter the next one's answer before it is caught."""
+    var before = _render(p)
     var s = String("")
     s += "1" if _plan_has_foldable_exprs(p) else "0"
+    assert_equal(_render(p), before, "the fold precheck changed the plan")
     s += " 1" if _plan_has_simplifiable_exprs(p) else " 0"
+    assert_equal(_render(p), before, "the simplify precheck changed the plan")
     s += " 1" if _plan_has_in_sites(p) else " 0"
+    assert_equal(_render(p), before, "the IN precheck changed the plan")
     return s^
 
 
@@ -150,12 +172,6 @@ def _join(var left: LogicalPlan, var right: LogicalPlan, var residual: Optional[
     return LogicalPlan.join(left^, right^, lon^, ron^, JOIN_INNER, residual=r^)
 
 
-def _render(p: LogicalPlan) -> String:
-    var s = String("")
-    p.write_to(s)
-    return s^
-
-
 # -----------------------------------------------------------------------------
 # One site at a time
 # -----------------------------------------------------------------------------
@@ -174,10 +190,13 @@ def test_a_scan_filter_is_a_site_for_fold_and_simplify_only() raises:
 
 def test_a_filter_predicate_is_a_site() raises:
     """Catches: the Filter predicate skipped by a precheck (mutant: the
-    predicate visited only when rewriting)."""
+    predicate visited only when rewriting), and a precheck that rewrites the
+    site it found (mutants: the predicate rewritten after a True answer, for
+    each rule; `_answers` names the precheck that changed the plan)."""
     assert_equal(_answers(LogicalPlan.filter(_F(), _scan())), "1 0 1")
     assert_equal(_answers(LogicalPlan.filter(_S(), _scan())), "0 1 1")
     assert_equal(_answers(LogicalPlan.filter(_C(), _scan())), "0 0 1")
+    assert_equal(_answers(LogicalPlan.filter(_O(), _scan())), "0 0 1")
 
 
 def test_every_project_expression_is_a_site() raises:
@@ -216,7 +235,8 @@ def test_a_site_below_a_filter_project_or_aggregate_is_read() raises:
 def test_every_aggregate_argument_slot_is_a_site() raises:
     """Catches: komira#1306's Aggregate half, a precheck skipping an
     aggregate function's argument slot 0, 1, 2 or 3 (mutant per slot: the
-    slot visited only when rewriting)."""
+    slot visited only when rewriting), and a precheck that rewrites the slot
+    it found (mutant per slot: the slot rewritten after a True answer)."""
     for k in range(4):
         assert_equal(_answers(_agg_slot(k, _F())), "1 0 1", "slot " + String(k))
         assert_equal(_answers(_agg_slot(k, _S())), "0 1 1", "slot " + String(k))
@@ -232,8 +252,10 @@ def test_group_by_keys_and_count_star_hold_no_site() raises:
 
 def test_a_join_residual_is_a_site() raises:
     """Catches: komira#1306's Join half, a precheck skipping the residual
-    condition (mutant: the residual visited only when rewriting), and a
-    precheck reading a residual the Join does not have."""
+    condition (mutant: the residual visited only when rewriting), a
+    precheck reading a residual the Join does not have, and a precheck that
+    rewrites the residual it found (mutant: the residual rewritten after a
+    True answer)."""
     assert_equal(_answers(_join(_scan(), _scan(), Optional(_F()))), "1 0 1")
     assert_equal(_answers(_join(_scan(), _scan(), Optional(_S()))), "0 1 1")
     assert_equal(_answers(_join(_scan(), _scan(), Optional(_C()))), "0 0 1")
@@ -260,22 +282,6 @@ def test_the_walk_descends_sort_limit_distinct_topn_and_stops_at_union() raises:
     var children = List[OwnedPointer[LogicalPlan]]()
     children.append(OwnedPointer(LogicalPlan.filter(_F(), _scan(_S()))))
     assert_equal(_answers(LogicalPlan.union(children^, _schema())), "0 0 0")
-
-
-def test_a_precheck_changes_nothing() raises:
-    """Catches: a precheck that rewrites while it reads (mutant: the check
-    walk instantiated with `rewrite` True). Every site of this plan holds
-    work, and its render is the same after all three prechecks."""
-    var p = _join(
-        LogicalPlan.filter(_F(), _project(_S(), _F(), _scan(_S()))),
-        _agg_slot(0, _F()),
-        Optional(_S()),
-    )
-    var before = _render(p)
-    assert_true(_plan_has_foldable_exprs(p))
-    assert_true(_plan_has_simplifiable_exprs(p))
-    assert_true(_plan_has_in_sites(p))
-    assert_equal(_render(p), before)
 
 
 def main() raises:
