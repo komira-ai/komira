@@ -130,7 +130,7 @@ src/komira_gcp_run	0	-
 src/komira_gcp_secretmanager	0	-
 src/komira_gcp_serviceusage	0	-
 src/komira_gcp_storage	0	-
-src/komira_gcp_wif	9239	-
+src/komira_gcp_wif	10000	-
 src/komira_git	9960	-
 src/komira_grpc	9217	-
 src/komira_hash	10000	10000
