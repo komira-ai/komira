@@ -3,8 +3,7 @@
 # `run` runs the test and merges its profile, and whose `annotate` applies the
 # profile), and the classifier that turns the annotated IR into lcov records.
 # linux-x86_64 only, like the coverage builds that use it.
-load("@komira//tools/build/coverage/kcov:defs.bzl", "kcov_tool", "kcov_tool_cases")
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/coverage/kcov:defs.bzl", "kcov_tool")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "cov_branch_dir")
@@ -145,7 +144,7 @@ kcov_tool(
 # cov_branch_classify: the branches of a test's annotated IR in the library's
 # measured sources, each a source decision or a known compiler-made branch,
 # as lcov BRDA records (README.md, "cov_branch_classify"); a static
-# executable built with the pinned zig, gated by its cases.
+# executable built with the pinned zig, gated by its cases (below).
 zig_exe(
     name = "cov_branch_classify_exe",
     exec_compatible_with = LINUX_X86_64,
@@ -160,38 +159,47 @@ zig_exe(
     zig = "komira//tools/build/toolchains:zig",
 )
 
-kcov_tool_cases(
-    name = "cov_branch_classify_cases",
-    exec_compatible_with = LINUX_X86_64,
-    data = [
-        "fixtures/a.src",
-        "fixtures/b.src",
-        "fixtures/c.src",
-        "fixtures/case.golden.info",
-        "fixtures/case.ll",
-        "fixtures/d.src",
-        "fixtures/gen.src",
-        "fixtures/rules.golden.info",
-        "fixtures/rules.ll",
-        "fixtures/t.src",
-        "fixtures/try.golden.info",
-        "fixtures/try.ll",
-    ],
-    script = "cov_branch_classify_cases.sh",
-    tool = ":cov_branch_classify_exe",
-)
+# Its cases (README.md#tests): `zig test` of each file, run as a build
+# action, runs the shipped executable as a child process on the fixtures;
+# its path reaches the test in the environment (`env_tools`,
+# COV_BRANCH_CLASSIFY). They run the executable, so they cannot be inputs
+# of it; they are validations of the public target `:cov_branch_classify`,
+# which no build gets unless every case passes.
+_CLASSIFY_CASE_INPUTS = [
+    "cov_branch_classify_harness.zig",
+    "fixtures/a.src",
+    "fixtures/b.src",
+    "fixtures/c.src",
+    "fixtures/case.golden.info",
+    "fixtures/case.ll",
+    "fixtures/d.src",
+    "fixtures/gen.src",
+    "fixtures/rules.golden.info",
+    "fixtures/rules.ll",
+    "fixtures/t.src",
+    "fixtures/try.golden.info",
+    "fixtures/try.ll",
+]
+
+_CLASSIFY_CASES = ["andor", "case", "files", "main", "rules", "try"]
+
+[
+    zig_test(
+        name = "cov_branch_classify_{}_test".format(group),
+        exec_compatible_with = LINUX_X86_64,
+        env_tools = {"COV_BRANCH_CLASSIFY": ":cov_branch_classify_exe"},
+        imports = _CLASSIFY_CASE_INPUTS,
+        src = "cov_branch_classify_{}_test.zig".format(group),
+        busybox = "komira//tools/build/toolchains:busybox",
+        zig = "komira//tools/build/toolchains:zig",
+    )
+    for group in _CLASSIFY_CASES
+]
 
 kcov_tool(
     name = "cov_branch_classify",
-    cases = [":cov_branch_classify_cases"],
+    cases = [":cov_branch_classify_{}_test".format(group) for group in _CLASSIFY_CASES],
     exec_compatible_with = LINUX_X86_64,
     exe = ":cov_branch_classify_exe",
     visibility = ["PUBLIC"],
-)
-
-shell_lint(
-    name = "shell_lint",
-    srcs = [
-        "cov_branch_classify_cases.sh",
-    ],
 )
