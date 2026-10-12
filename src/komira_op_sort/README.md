@@ -14,14 +14,88 @@ batch by it.
   whose byte is the same for every key.
 - `sort_topn`: `topn_indices_int64` / `_float64`, the first K rows in order
   by bounded-heap selection, O(N log K).
+- `sort_string`: `sort_indices_string`, STRING/BINARY columns in byte-wise
+  order (the shorter string first on a shared prefix), nulls first or last.
+  By default a prefix-key radix sort; `prefix_key=False` runs the
+  byte-compare merge sort, which gives the same permutation.
+- `sort_nested`: `sort_indices_nested`, STRUCT / LIST / UNION keys
+  (field by field, element by element, type id then value). MAP refuses.
+- `sort_multi`: `sort_batch_by_keys`, a stable multi-key sort of a
+  `RecordBatch` (one stable pass per key, last key first).
+- `sort_lex`: `sort_batch_lex`, the single-pass multi-key sort that
+  `sort_batch_by_keys` uses when every key is INT32 / INT64 / STRING: keys
+  are encoded as Int64 ranks and, when the ranks fit in 62 bits, packed into
+  one Int64 and radix-sorted.
+- `sort_topn_sink`: the sort and top-N sink kernels (`_execute_sort_sink`,
+  `_execute_topn_sink` over `SortSinkData` / `TopNSinkData` of
+  `komira_physical_plan`), and `append_deterministic_tiebreak[_schema]`,
+  the one rule that makes a tied top-N cut deterministic.
+- `sort_topn_heap`: `topn_heap_select`, multi-key top-K over a
+  `RecordBatch` by a bounded heap, O(N log K), for INT64 / INT32 / FLOAT64 /
+  STRING keys.
+- `sort_buffer_untyped`: `SortBuffer_Untyped`, a multi-key sort buffer
+  whose column types are known only at run time (a `ColDescriptor` layout
+  over `komira_column_format` storage), fed from `BatchView`s and read back
+  per DType; its cell codec is `sort_buffer_cells`.
 - `sort_loser_tree`: `LoserTree`, a tournament tree for the k-way merge of
   sorted runs, driven by a caller's `LoserTreeComparator`.
+- `sort_parallel`: `parallel_sort_single_key`, the single-key sort over an
+  INT64 / INT32 / FLOAT64 key on the engine's fork-join runtime (a stable
+  sort per slice, then a parallel co-rank merge of the slices), and
+  `merge_sorted_partitions_single_key`, the k-way merge of batches that are
+  each already sorted. `can_parallel_sort_single_key` is the gate (one key
+  of those types, `MIN_PARALLEL_SORT_ROWS` rows unless forced).
+- `sort_parallel_string`: the same for one STRING / BINARY key
+  (`parallel_sort_single_key_string`), and the merges of sorted STRING
+  partitions: `merge_sorted_partitions_single_key_string_parallel` (a
+  parallel pairwise tree) and `merge_sorted_partitions_single_key_string`
+  (its serial oracle). The per-slice string sort and its comparators are
+  `sort_parallel_string_kernels`; the pairwise-tree merge is
+  `sort_parallel_string_merge`.
+
+- `sort_dictrank`: `parallel_dictrank_sort_string`, the sort of one
+  low-cardinality STRING / BINARY key by dense ranks and a parallel stable
+  counting sort (no comparison merge), and its gate
+  `can_dictrank_sort_single_key_string` (a strided sampled distinct count
+  under a ceiling). Above the ceiling after the exact build it falls back to
+  `parallel_sort_single_key_string`. The dictionary build and the ranks are
+  `sort_dictrank_build`.
+- `sort_sink`: `SortSink`, the sort as a `MorselSink` of
+  `komira_operator_api`: per-worker batches, and a route chosen once in
+  `combine` (partitioned parallel sort and merge, the counting sort, or the
+  serial kernel) that changes the cost and never the rows. The switches are
+  a value, `SortSinkRoutes`.
+
+- `sort_external`: `ExternalSorter`, a sort past a memory budget: buffered
+  batches are sorted into runs, runs over the budget are spilled to the local
+  disk (`komira_engine_runtime` spill), and `finish` merges every run. The
+  output is one stable `sort_batch_by_keys` of the input in absorb order. The
+  merge (`k_way_merge_cursors`, the loser tree and
+  `komira_column_kernels.cross_batch_gather`) is `sort_external_merge`; its
+  comparator orders a key as the run sort does (floats by `sort_key_lt`).
+
+- `sort_stage_buffer`: `SortBuffer[KB, *Payloads]`, the stage sort buffer
+  typed at compile time (a key block `SortKeyBlock[*Keys]` and a variadic
+  payload pack, stored column-wise), a `BreakerStateCombinable` and a
+  `SpillableOp`; its key and payload column types are `sort_stage_columns`,
+  `sort_stage_string_key` and `sort_stage_payloads`. Float keys compare by
+  `sort_key_lt` everywhere, the top-N SIMD reject mask included.
+- `sort_stage`: `Stage_Sort[KB, *Payloads]`, the sort breaker as a
+  `FusedMorselOp`: feed every row, drain sorted in `finalize`.
+
+Each parallel entry takes a `SharedForkJoinHandle` (the engine's dispatcher,
+or `serial_fork_join_handle()` to run the same chunks inline; the `*_serial`
+entries do that) and gives exactly the rows of the serial kernel, ties in
+input order. `num_workers` sets the slice count; 0 means one per physical
+core.
 
 Every sort is stable: rows with equal keys keep their input order, in both
 directions. Float keys are totally ordered the way DuckDB orders them: NaN
 sorts above +inf (last ascending, first descending), every NaN equals every
-other NaN, and -0.0 equals +0.0. These kernels read values only; nulls are
-placed by the caller. Import from the sub-modules; there is no facade.
+other NaN, and -0.0 equals +0.0. The numeric kernels read values only;
+`sort_indices_string`, `sort_indices_nested` and the BOOL arm of
+`sort_batch_by_keys` place nulls (first ascending, last descending, unless
+told otherwise). Import from the sub-modules; there is no facade.
 
 ## Examples
 
@@ -58,4 +132,47 @@ assert_equal(Int(perm.get(3)), 2)
 var top = topn_indices_int64(keys, 2, descending=True)
 assert_equal(top.length, 2)
 assert_equal(Int(keys.get(Int(top.get(0)))), 7)
+```
+
+The parallel sort of a FLOAT64 column, cut into three slices, gives the
+serial sort's rows, NaN last:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch
+from komira_arrow.schema import Field, Schema
+from komira_op_sort.sort_parallel import parallel_sort_single_key_serial
+
+var nan = Float64(0.0) / Float64(0.0)
+var keys = PrimitiveArray[DType.float64].from_list([2.0, nan, -1.0, 2.0, 0.5])
+var schema = Schema.from_fields_1(Field("x", DType.float64, True))
+var batch = RecordBatch.from_typed_columns_1(
+    schema^, Column.from_primitive[DType.float64](keys^)
+)
+var out = parallel_sort_single_key_serial(batch^, "x", False, num_workers=3)
+var col = out.column_at(0).as_primitive[DType.float64]()
+assert_equal(col.get(0), -1.0)
+assert_equal(col.get(3), 2.0)
+assert_true(col.get(4) != col.get(4))  # NaN sorts last
+```
+
+A string column ascending, and the two string algorithms agreeing:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from komira_arrow.column import Column
+from komira_arrow.string_array import StringArray
+from komira_op_sort.sort_string import sort_indices_string
+
+var words: List[String] = ["pear", "apple", "pea", "apple"]
+var col = Column.from_string(StringArray.from_strings(words))
+var asc = sort_indices_string(col)
+assert_equal(Int(asc.get(0)), 1)  # "apple" (row 1 before row 3: stable)
+assert_equal(Int(asc.get(1)), 3)
+assert_equal(Int(asc.get(2)), 2)  # "pea" before "pear": a prefix sorts first
+var oracle = sort_indices_string(col, prefix_key=False)
+for i in range(4):
+    assert_equal(Int(asc.get(i)), Int(oracle.get(i)))
 ```
