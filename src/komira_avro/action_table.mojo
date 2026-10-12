@@ -12,9 +12,10 @@
 #   - `FieldAction` is a runtime tagged-union (explicit Int8 tag + Optional
 #     payload-per-arm), matching the core packages' logical-plan
 #     tagged-union precedent. NO byte-erased fn-ptr dispatch (no
-#     trampolines). Identity resolution emits only the `ReadField` arm; full
-#     resolution adds the 6 resolution arms (SynthesizeDefault / ReadAndPromote /
-#     SkipBytes / SelectBranch / RemapEnumSymbol / ReadAndReorder).
+#     trampolines). Identity resolution emits the `ReadField` arm, and the
+#     `UnionRoute` arm for a general union field; full resolution adds the
+#     resolution arms (SynthesizeDefault / ReadAndPromote / SkipBytes /
+#     SelectBranch / RemapEnumSymbol / ReadAndReorder).
 #   - `ResolutionTable.identity(schema)` walks the top-level record's fields
 #     once and emits one `FieldAction` per field.
 #   - `ActionTableInterpreter` walks the action list per record, dispatching
@@ -91,6 +92,26 @@ from .json_string import utf8_to_string
 # The mapper falls back silently to the standard mapping on a missing /
 # physical-mismatched annotation, so non-annotated schemas are unaffected.
 from .avro_logical_arrow import avro_node_to_arrow_with_override
+from .avro_skip import SkipProgram
+from .union_route import (
+    BranchRoute,
+    UnionRouteData,
+    ROUTE_NULL,
+    ROUTE_NO_MATCH,
+    ROUTE_UNSUPPORTED,
+    PROMOTE_NONE,
+    PROMOTE_TO_LONG,
+    PROMOTE_TO_FLOAT,
+    PROMOTE_TO_DOUBLE,
+    PROMOTE_STRING_TO_BYTES,
+    PROMOTE_BYTES_TO_STRING,
+    _promotion_tag,
+    _named_types_match,
+    build_union_route,
+    is_general_union,
+    union_branch_name,
+)
+from komira_arrow.union_array import UnionArray
 
 
 # =============================================================================
@@ -104,6 +125,7 @@ comptime FA_SKIP_BYTES: Int8 = 3  # full resolution
 comptime FA_SELECT_BRANCH: Int8 = 4  # full resolution
 comptime FA_REMAP_ENUM_SYMBOL: Int8 = 5  # full resolution
 comptime FA_READ_AND_REORDER: Int8 = 6  # full resolution
+comptime FA_UNION_ROUTE: Int8 = 7  # a general union on either side
 
 
 # =============================================================================
@@ -145,21 +167,6 @@ struct ReadFieldData(Copyable, Movable):
     var promote_to: Int8
 
 
-# =============================================================================
-# Type-promotion tags (type-promotion rule). The reader's target *physical*
-# accumulator family; the value is read as `ReadFieldData.avro_kind` then
-# widened. string↔bytes is a reinterpret (UTF-8 round-trip), not a numeric
-# widen.
-# =============================================================================
-
-comptime PROMOTE_NONE: Int8 = 0
-comptime PROMOTE_TO_LONG: Int8 = 1     # int → long
-comptime PROMOTE_TO_FLOAT: Int8 = 2    # int/long → float
-comptime PROMOTE_TO_DOUBLE: Int8 = 3   # int/long/float → double
-comptime PROMOTE_STRING_TO_BYTES: Int8 = 4
-comptime PROMOTE_BYTES_TO_STRING: Int8 = 5
-
-
 @fieldwise_init
 struct SynthesizeDefaultData(Copyable, Movable):
     """Defaults rule. The reader field is absent in
@@ -178,6 +185,9 @@ struct SkipBytesData(Copyable, Movable):
     var avro_kind: Int  # WIRE kind to skip
     var nullability: Int8  # the writer field's nullable-union ordering
     var fixed_size: Int  # for AVRO_KIND_FIXED
+    # The writer field's type node. A record, enum, array, map or general
+    # union is skipped by walking it (`ResolutionTable.writer_skip`).
+    var type_idx: Int
 
 
 @fieldwise_init
@@ -232,6 +242,8 @@ struct FieldAction(Copyable, Movable):
       6. FA_READ_AND_REORDER   — reorder is handled by emitting actions in
                                  READER order while reading writer fields by
                                  wire position; see ResolutionTable.resolve.
+      7. FA_UNION_ROUTE        — a general union (not union[null, T]) on the
+                                 writer or reader side; see union_route.mojo.
     """
 
     var kind: Int8
@@ -241,6 +253,7 @@ struct FieldAction(Copyable, Movable):
     var skip_bytes: Optional[SkipBytesData]
     var select_branch: Optional[SelectBranchData]
     var remap_enum_symbol: Optional[RemapEnumSymbolData]
+    var union_route: Optional[UnionRouteData]
     # The OUTPUT column index this action writes to (for reorder + skip:
     # FA_SKIP_BYTES has out_index == -1 because it produces no column).
     var out_index: Int
@@ -255,6 +268,7 @@ struct FieldAction(Copyable, Movable):
             skip_bytes=None,
             select_branch=None,
             remap_enum_symbol=None,
+            union_route=None,
             out_index=out_index,
         )
 
@@ -294,19 +308,25 @@ struct FieldAction(Copyable, Movable):
         fa.remap_enum_symbol = Optional(data^)
         return fa^
 
+    @staticmethod
+    def route_union(name: String, var data: UnionRouteData, out_index: Int) -> FieldAction:
+        var fa = FieldAction._base(FA_UNION_ROUTE, name, out_index)
+        fa.union_route = Optional(data^)
+        return fa^
+
 
 # =============================================================================
 # ResolutionTable — the action list for a (writer, reader) schema pair.
 # =============================================================================
 
-@fieldwise_init
 struct ResolutionTable(Movable):
     """Holds one FieldAction per reader-field + the Arrow output schema.
 
     Identity resolution: `identity(schema)` walks the top-level
-    record's fields and emits one FA_READ_FIELD action per field. The output
-    Arrow Schema is derived from the same walk so the RecordBatch builder has a
-    matching field list.
+    record's fields and emits one FA_READ_FIELD action per field (an
+    FA_UNION_ROUTE action for a general union). The output Arrow Schema is
+    derived from the same walk so the RecordBatch builder has a matching
+    field list.
     """
 
     var actions: List[FieldAction]
@@ -317,6 +337,35 @@ struct ResolutionTable(Movable):
     # for full resolution the action list may be longer than out_specs (skips
     # produce no column) or shorter (defaults add columns with no wire read).
     var out_specs: List[ReadFieldData]
+    # Per output column: the child specs of a dense-union column (one per
+    # union branch, type id = branch index); empty for every other column.
+    # Either empty (no union column) or parallel to `out_specs`.
+    var union_branches: List[List[ReadFieldData]]
+    # The writer schema's skip program, present when some writer-only field
+    # needs a walk to skip (FA_SKIP_BYTES with a nested or general-union type).
+    var writer_skip: Optional[SkipProgram]
+
+    def __init__(
+        out self,
+        *,
+        var actions: List[FieldAction],
+        var out_schema: Schema,
+        var out_specs: List[ReadFieldData],
+        var union_branches: List[List[ReadFieldData]] = List[List[ReadFieldData]](),
+        var writer_skip: Optional[SkipProgram] = None,
+    ):
+        self.actions = actions^
+        self.out_schema = out_schema^
+        self.out_specs = out_specs^
+        self.union_branches = union_branches^
+        self.writer_skip = writer_skip^
+
+    def branches_of(self, col: Int) -> Int:
+        """Number of dense-union children of output column `col` (0 if the
+        column is not a dense union)."""
+        if col < len(self.union_branches):
+            return len(self.union_branches[col])
+        return 0
 
     @staticmethod
     def identity(schema: AvroSchema) raises -> ResolutionTable:
@@ -331,19 +380,31 @@ struct ResolutionTable(Movable):
             )
         var actions = List[FieldAction]()
         var out_specs = List[ReadFieldData]()
+        var union_branches = List[List[ReadFieldData]]()
         var sb = SchemaBuilder()
         for i in range(len(root.children)):
             var fname = root.field_names[i]
             var child_idx = root.children[i]
             var rfd = _build_read_field(schema, child_idx)
-            var arrow_type = rfd.arrow_type
-            var nullable = rfd.nullability != NULL_NONE
-            sb.add_field(Field(fname, arrow_type, nullable))
+            sb.add_field(_output_field(schema, child_idx, fname, rfd))
             out_specs.append(rfd.copy())
+            union_branches.append(_union_branch_specs(schema, child_idx))
             # Identity: action i writes output column i, read in wire order.
-            actions.append(FieldAction.read(fname, rfd^, i))
+            if is_general_union(schema, child_idx):
+                actions.append(
+                    FieldAction.route_union(
+                        fname,
+                        build_union_route(schema, child_idx, schema, child_idx),
+                        i,
+                    )
+                )
+            else:
+                actions.append(FieldAction.read(fname, rfd^, i))
         return ResolutionTable(
-            actions=actions^, out_schema=sb.build(), out_specs=out_specs^
+            actions=actions^,
+            out_schema=sb.build(),
+            out_specs=out_specs^,
+            union_branches=union_branches^,
         )
 
     @staticmethod
@@ -373,24 +434,28 @@ def _build_read_field(schema: AvroSchema, idx: Int) raises -> ReadFieldData:
     descriptor; otherwise the field is NULL_NONE.
     """
     var n = schema.node(idx)
-    if n.kind == AVRO_KIND_UNION:
-        # Nullable union collapse (the only union shape identity resolution handles).
-        if len(n.children) == 2:
-            var c0 = schema.node(n.children[0])
-            var c1 = schema.node(n.children[1])
-            if c0.kind == AVRO_KIND_NULL:
-                var inner = _build_read_field(schema, n.children[1])
-                inner.nullability = NULL_FIRST
-                return inner^
-            elif c1.kind == AVRO_KIND_NULL:
-                var inner = _build_read_field(schema, n.children[0])
-                inner.nullability = NULL_SECOND
-                return inner^
-        raise Error(
-            "AvroDecodeError.UNSUPPORTED_UNION: identity resolution handles only"
-            " union[null, T] / union[T, null] (n>=3 / no-null unions are"
-            " not supported)"
+    if is_general_union(schema, idx):
+        # A dense-union column; its children are `_union_branch_specs`.
+        return ReadFieldData(
+            avro_kind=AVRO_KIND_UNION,
+            arrow_type=ArrowType.UNION_DENSE,
+            nullability=NULL_NONE,
+            fixed_size=0,
+            precision=0,
+            scale=0,
+            logical_type=String(""),
+            promote_to=PROMOTE_NONE,
         )
+    if n.kind == AVRO_KIND_UNION:
+        # union[null, T] / union[T, null] (the only union `is_general_union`
+        # leaves here) collapses to a nullable T.
+        if schema.nodes[n.children[0]].kind == AVRO_KIND_NULL:
+            var inner = _build_read_field(schema, n.children[1])
+            inner.nullability = NULL_FIRST
+            return inner^
+        var inner = _build_read_field(schema, n.children[0])
+        inner.nullability = NULL_SECOND
+        return inner^
 
     # Non-union scalar / fixed / logical. The override-aware mapper consults
     # the arrow.* table first (so arrow.date64 over `long` -> DATE64, etc.) and
@@ -423,6 +488,59 @@ def _build_read_field(schema: AvroSchema, idx: Int) raises -> ReadFieldData:
         logical_type=n.logical_type,
         promote_to=PROMOTE_NONE,
     )
+
+
+# Arrow dense-union type ids are Int8; branch b has type id b.
+comptime _MAX_UNION_BRANCHES: Int = 127
+
+
+def _union_branch_specs(
+    schema: AvroSchema, idx: Int
+) raises -> List[ReadFieldData]:
+    """The child column specs of a general union at `idx`, one per branch in
+    branch order; empty for any other type."""
+    var out = List[ReadFieldData]()
+    if not is_general_union(schema, idx):
+        return out^
+    var branches = schema.nodes[idx].children.copy()
+    if len(branches) > _MAX_UNION_BRANCHES:
+        raise Error(
+            "AvroDecodeError.UNSUPPORTED_UNION: a union of "
+            + String(len(branches))
+            + " branches exceeds the 127 an Arrow union can hold"
+        )
+    for b in range(len(branches)):
+        out.append(_build_read_field(schema, branches[b]))
+    return out^
+
+
+def _output_field(
+    schema: AvroSchema, idx: Int, name: String, rfd: ReadFieldData
+) raises -> Field:
+    """The output Arrow field of a record field whose type node is `idx`. A
+    general union is a dense union with one child per branch; a `null` type is
+    a nullable NULL column."""
+    if not is_general_union(schema, idx):
+        var nullable = (
+            rfd.nullability != NULL_NONE or rfd.arrow_type == ArrowType.NULL
+        )
+        return Field(name, rfd.arrow_type, nullable)
+    var branches = schema.nodes[idx].children.copy()
+    var specs = _union_branch_specs(schema, idx)
+    var type_ids = List[Int]()
+    var has_null = False
+    for b in range(len(branches)):
+        type_ids.append(b)
+        if specs[b].arrow_type == ArrowType.NULL:
+            has_null = True
+    var f = Field.union(name, ArrowType.UNION_DENSE, type_ids, has_null)
+    for b in range(len(branches)):
+        f.add_child(
+            union_branch_name(schema, branches[b]),
+            specs[b].arrow_type,
+            specs[b].arrow_type == ArrowType.NULL,
+        )
+    return f^
 
 
 # =============================================================================
@@ -1195,6 +1313,34 @@ comptime ACC_BOOL: Int8 = 4
 comptime ACC_STRING: Int8 = 5
 comptime ACC_BINARY: Int8 = 6
 comptime ACC_DECIMAL: Int8 = 7
+comptime ACC_NULL: Int8 = 8
+comptime ACC_UNION: Int8 = 9
+
+
+@fieldwise_init
+struct _UnionAcc(Copyable, Movable):
+    """Dense-union rows: the branch (type id) and the offset into that
+    branch's child column, per row."""
+
+    var types: List[Int8]
+    var offsets: List[Int32]
+
+    def reserve(mut self, n: Int):
+        self.types.reserve(n)
+        self.offsets.reserve(n)
+
+
+def _null_column(n: Int) -> Column[HeapRegion]:
+    """An Arrow NULL column of `n` rows: no buffers, null_count == length."""
+    return Column[HeapRegion](
+        arrow_type=ArrowType.NULL,
+        data=OwnedAlignedBuffer(0),
+        offsets=None,
+        validity=None,
+        length=n,
+        null_count=n,
+        offset=0,
+    )
 
 
 @fieldwise_init
@@ -1208,6 +1354,11 @@ struct ColumnAccVariant(Movable):
     var string: Optional[_StringAcc]
     var binary: Optional[_BinaryAcc]
     var decimal: Optional[_DecimalAcc]
+    # ACC_NULL: the row count of a NULL column (nothing else is stored).
+    var null_rows: Int
+    # ACC_UNION: the type ids and child offsets of a dense-union column; the
+    # children are separate accumulators (`ActionTableInterpreter`).
+    var union_acc: Optional[_UnionAcc]
 
     @staticmethod
     def create(rfd: ReadFieldData) raises -> ColumnAccVariant:
@@ -1257,6 +1408,10 @@ struct ColumnAccVariant(Movable):
             return ColumnAccVariant._with_string(_StringAcc.create())
         elif at == ArrowType.BINARY:
             return ColumnAccVariant._with_binary(_BinaryAcc())
+        elif at == ArrowType.NULL:
+            return ColumnAccVariant._with_tag(ACC_NULL)
+        elif at == ArrowType.UNION_DENSE:
+            return ColumnAccVariant._with_tag(ACC_UNION)
         elif at == ArrowType.DECIMAL128:
             return ColumnAccVariant._with_decimal(
                 _DecimalAcc(
@@ -1274,10 +1429,55 @@ struct ColumnAccVariant(Movable):
         )
 
     @staticmethod
+    def _with_tag(tag: Int8) -> ColumnAccVariant:
+        """ACC_NULL or ACC_UNION: no typed arm."""
+        var u = Optional[_UnionAcc](None)
+        if tag == ACC_UNION:
+            u = Optional(_UnionAcc(List[Int8](), List[Int32]()))
+        return ColumnAccVariant(
+            tag=tag, i32=None, i64=None, f32=None, f64=None,
+            boolean=None, string=None, binary=None, decimal=None,
+            null_rows=0, union_acc=u^,
+        )
+
+    def union_push(mut self, type_id: Int, child_offset: Int) raises:
+        """Append one dense-union row: branch `type_id`, at `child_offset` in
+        that branch's child column."""
+        if child_offset > _INT32_OFFSET_MAX:
+            raise Error(
+                "AvroDecodeError.UNION_TOO_LARGE: a union branch holds more"
+                " than 2^31-1 values"
+            )
+        self.union_acc.value().types.append(Int8(type_id))
+        self.union_acc.value().offsets.append(Int32(child_offset))
+
+    def build_union(
+        mut self, var children: Slab[Column[HeapRegion]]
+    ) raises -> Column[HeapRegion]:
+        """Build an ACC_UNION column over its built `children` (branch order)."""
+        var acc = self.union_acc.take()
+        var n = len(acc.types)
+        var type_ids = List[Int]()
+        for b in range(len(children)):
+            type_ids.append(b)
+        var types_buf = OwnedAlignedBuffer(max(n, 1))
+        var offsets_buf = OwnedAlignedBuffer(max(n * size_of[Int32](), 1))
+        for i in range(n):
+            types_buf.set_typed[Int8](i, acc.types[i])
+            offsets_buf.set_typed[Int32](i, acc.offsets[i])
+        types_buf.set_length(Int64(n))
+        offsets_buf.set_length(Int64(n * size_of[Int32]()))
+        var ua = UnionArray._build_dense(
+            type_ids, types_buf^, offsets_buf^, children^, n
+        )
+        return Column.from_union(ua^)
+
+    @staticmethod
     def _with_i32(var a: _I32Acc) -> ColumnAccVariant:
         return ColumnAccVariant(
             tag=ACC_I32, i32=Optional(a^), i64=None, f32=None, f64=None,
             boolean=None, string=None, binary=None, decimal=None,
+            null_rows=0, union_acc=None,
         )
 
     @staticmethod
@@ -1285,6 +1485,7 @@ struct ColumnAccVariant(Movable):
         return ColumnAccVariant(
             tag=ACC_I64, i32=None, i64=Optional(a^), f32=None, f64=None,
             boolean=None, string=None, binary=None, decimal=None,
+            null_rows=0, union_acc=None,
         )
 
     @staticmethod
@@ -1292,6 +1493,7 @@ struct ColumnAccVariant(Movable):
         return ColumnAccVariant(
             tag=ACC_F32, i32=None, i64=None, f32=Optional(a^), f64=None,
             boolean=None, string=None, binary=None, decimal=None,
+            null_rows=0, union_acc=None,
         )
 
     @staticmethod
@@ -1299,6 +1501,7 @@ struct ColumnAccVariant(Movable):
         return ColumnAccVariant(
             tag=ACC_F64, i32=None, i64=None, f32=None, f64=Optional(a^),
             boolean=None, string=None, binary=None, decimal=None,
+            null_rows=0, union_acc=None,
         )
 
     @staticmethod
@@ -1306,6 +1509,7 @@ struct ColumnAccVariant(Movable):
         return ColumnAccVariant(
             tag=ACC_BOOL, i32=None, i64=None, f32=None, f64=None,
             boolean=Optional(a^), string=None, binary=None, decimal=None,
+            null_rows=0, union_acc=None,
         )
 
     @staticmethod
@@ -1313,6 +1517,7 @@ struct ColumnAccVariant(Movable):
         return ColumnAccVariant(
             tag=ACC_STRING, i32=None, i64=None, f32=None, f64=None,
             boolean=None, string=Optional(a^), binary=None, decimal=None,
+            null_rows=0, union_acc=None,
         )
 
     @staticmethod
@@ -1320,6 +1525,7 @@ struct ColumnAccVariant(Movable):
         return ColumnAccVariant(
             tag=ACC_BINARY, i32=None, i64=None, f32=None, f64=None,
             boolean=None, string=None, binary=Optional(a^), decimal=None,
+            null_rows=0, union_acc=None,
         )
 
     @staticmethod
@@ -1327,6 +1533,7 @@ struct ColumnAccVariant(Movable):
         return ColumnAccVariant(
             tag=ACC_DECIMAL, i32=None, i64=None, f32=None, f64=None,
             boolean=None, string=None, binary=None, decimal=Optional(a^),
+            null_rows=0, union_acc=None,
         )
 
     def push_null(mut self) raises:
@@ -1346,6 +1553,13 @@ struct ColumnAccVariant(Movable):
             self.binary.value().push_null()
         elif self.tag == ACC_DECIMAL:
             self.decimal.value().push_null()
+        elif self.tag == ACC_NULL:
+            self.null_rows += 1
+        elif self.tag == ACC_UNION:
+            raise Error(
+                "AvroDecodeError.INTERNAL: a null in a dense-union column is"
+                " a row of its null branch"
+            )
 
     def reserve(mut self, n: Int) raises:
         """Pre-allocate at least `n` TOTAL element slots in the active arm.
@@ -1373,6 +1587,8 @@ struct ColumnAccVariant(Movable):
             self.binary.value().reserve(n)
         elif self.tag == ACC_DECIMAL:
             self.decimal.value().reserve(n)
+        elif self.tag == ACC_UNION:
+            self.union_acc.value().reserve(n)
 
     def current_len(self) -> Int:
         """Return the active arm's current logical element count. Used by
@@ -1393,6 +1609,10 @@ struct ColumnAccVariant(Movable):
             return self.binary.value().n_values()
         elif self.tag == ACC_DECIMAL:
             return len(self.decimal.value().lows)
+        elif self.tag == ACC_NULL:
+            return self.null_rows
+        elif self.tag == ACC_UNION:
+            return len(self.union_acc.value().types)
         return 0
 
     # Typed push helpers used by the resolution interpreter (promotion +
@@ -1442,6 +1662,13 @@ struct ColumnAccVariant(Movable):
             return self.binary.take().build()
         elif self.tag == ACC_DECIMAL:
             return self.decimal.take().build()
+        elif self.tag == ACC_NULL:
+            return _null_column(self.null_rows)
+        elif self.tag == ACC_UNION:
+            raise Error(
+                "AvroDecodeError.INTERNAL: a dense-union column is built from"
+                " its children (ColumnAccVariant.build_union)"
+            )
         raise Error("AvroDecodeError.INTERNAL: unknown accumulator tag")
 
 
@@ -1466,6 +1693,7 @@ comptime _PK_SYNTH: Int8 = 2      # FA_SYNTHESIZE_DEFAULT
 comptime _PK_SKIP: Int8 = 3       # FA_SKIP_BYTES
 comptime _PK_SELECT: Int8 = 4     # FA_SELECT_BRANCH
 comptime _PK_ENUM: Int8 = 5       # FA_REMAP_ENUM_SYMBOL
+comptime _PK_UNION: Int8 = 6      # FA_UNION_ROUTE
 
 
 @fieldwise_init
@@ -1548,6 +1776,14 @@ def _build_action_plan(table: ResolutionTable) raises -> List[_ActionPlan]:
                     promote_to=PROMOTE_NONE, writer_is_union=False,
                 )
             )
+        elif kind == FA_UNION_ROUTE:
+            plan.append(
+                _ActionPlan(
+                    plan_kind=_PK_UNION, out_index=oi, avro_kind=0,
+                    nullability=NULL_NONE, is_decimal=False, fixed_size=0,
+                    promote_to=PROMOTE_NONE, writer_is_union=False,
+                )
+            )
         else:
             raise Error(
                 "AvroDecodeError.INTERNAL: unknown FieldAction kind "
@@ -1573,12 +1809,27 @@ struct ActionTableInterpreter(Movable):
     # hot loop dispatches off this, never touching the String-bearing
     # ReadFieldData / Optional arms of `table.actions`.
     var _plan: List[_ActionPlan]
+    # Per output column: the index in `accs` of its first dense-union child
+    # (children are contiguous, in branch order, after the output columns),
+    # or -1 for a column that is not a dense union.
+    var _union_base: List[Int]
 
     def __init__(out self, var table: ResolutionTable) raises:
         self.accs = Slab[ColumnAccVariant]()
-        for i in range(len(table.out_specs)):
+        var ncols = len(table.out_specs)
+        for i in range(ncols):
             var rfd = table.out_specs[i].copy()
             self.accs.append(ColumnAccVariant.create(rfd))
+        self._union_base = List[Int]()
+        for i in range(ncols):
+            var nb = table.branches_of(i)
+            if nb == 0:
+                self._union_base.append(-1)
+                continue
+            self._union_base.append(len(self.accs))
+            for b in range(nb):
+                var child = table.union_branches[i][b].copy()
+                self.accs.append(ColumnAccVariant.create(child))
         self._plan = _build_action_plan(table)
         self.table = table^
 
@@ -1601,13 +1852,14 @@ struct ActionTableInterpreter(Movable):
         # geometrically on push regardless — so the right response to a lying
         # count is not to trust it and not to reject the file here, but to stop
         # letting it size an allocation. A record occupies at least one payload
-        # byte in every schema this decoder supports (each of the seven scalar
-        # arms reads >= 1 byte, and a nullable field spends a byte on its union
-        # tag), so `len(payload)` is a sound upper bound on the records this
-        # block can actually yield. A file claiming 2^40 records in a 100-byte
-        # block now pre-reserves 100, decodes what is really there, and raises
+        # byte unless every field is zero-width (`null`, an empty record), so
+        # `len(payload)` bounds the records this block can actually yield and
+        # is a sound reserve. A file claiming 2^40 records in a 100-byte block
+        # pre-reserves 100, decodes what is really there, and raises
         # `TRUNCATED` when the payload runs out — instead of asking for 8 TiB
         # or wrapping the `length * elem_size` multiply into a 64-byte buffer.
+        # (A zero-width record reads no byte, so its count is not bounded by
+        # the payload; its rows still grow the accumulators only on push.)
         var reserve_hint = object_count
         if reserve_hint > len(payload):
             reserve_hint = len(payload)
@@ -1647,6 +1899,8 @@ struct ActionTableInterpreter(Movable):
             self._decode_select_branch(reader, f)
         elif pk == _PK_ENUM:
             self._decode_remap_enum(reader, f)
+        elif pk == _PK_UNION:
+            self._decode_union_route(reader, f)
         else:
             raise Error(
                 "AvroDecodeError.INTERNAL: unknown plan kind "
@@ -1734,8 +1988,23 @@ struct ActionTableInterpreter(Movable):
         oi: Int,
         rfd: ReadFieldData,
     ) raises:
-        var k = rfd.avro_kind
-        var at = rfd.arrow_type
+        self._read_wire(
+            reader,
+            oi,
+            rfd.avro_kind,
+            rfd.arrow_type == ArrowType.DECIMAL128,
+            rfd.fixed_size,
+        )
+
+    def _read_wire(
+        mut self,
+        mut reader: AvroByteReader[_],
+        oi: Int,
+        k: Int,
+        is_decimal: Bool,
+        fixed_size: Int,
+    ) raises:
+        """Read one value of WIRE kind `k` into accumulator `oi` as is."""
         if k == AVRO_KIND_BOOLEAN:
             self.accs[oi].boolean.value().push(reader.read_boolean())
         elif k == AVRO_KIND_INT:
@@ -1750,7 +2019,7 @@ struct ActionTableInterpreter(Movable):
         elif k == AVRO_KIND_STRING:
             self.accs[oi].string.value().push_bytes(reader.read_string_span())
         elif k == AVRO_KIND_BYTES:
-            if at == ArrowType.DECIMAL128:
+            if is_decimal:
                 # decimal over bytes: BE two's-complement → (low, high).
                 var raw = reader.read_bytes()
                 var dec = _decode_decimal_be(raw)
@@ -1758,13 +2027,13 @@ struct ActionTableInterpreter(Movable):
             else:
                 self.accs[oi].binary.value().push_bytes(reader.read_bytes_span())
         elif k == AVRO_KIND_FIXED:
-            if at == ArrowType.DECIMAL128:
-                var raw = reader.read_fixed(rfd.fixed_size)
+            if is_decimal:
+                var raw = reader.read_fixed(fixed_size)
                 var dec = _decode_decimal_be(raw)
                 self.accs[oi].decimal.value().push(dec.low, dec.high)
             else:
                 self.accs[oi].binary.value().push_bytes(
-                    reader.read_fixed_span(rfd.fixed_size)
+                    reader.read_fixed_span(fixed_size)
                 )
         elif k == AVRO_KIND_NULL:
             # A bare null field — nothing on the wire; push a null marker.
@@ -1775,6 +2044,75 @@ struct ActionTableInterpreter(Movable):
                 + String(k)
                 + " (record / enum / array / map nested decode is not supported)"
             )
+
+    # -------------------------------------------------------------------------
+    # FA_UNION_ROUTE — a general union on the writer or reader side.
+    # -------------------------------------------------------------------------
+    def _decode_union_route(
+        mut self, mut reader: AvroByteReader[_], f: Int
+    ) raises:
+        var oi = self.table.actions[f].out_index
+        var nroutes = len(self.table.actions[f].union_route.value().routes)
+        var b = 0
+        if self.table.actions[f].union_route.value().writer_is_union:
+            var tag = reader.read_long()
+            if tag < 0 or tag >= Int64(nroutes):
+                raise Error(
+                    "AvroDecodeError.MALFORMED: union branch "
+                    + String(tag)
+                    + " out of range for the "
+                    + String(nroutes)
+                    + "-branch writer union of field '"
+                    + self.table.actions[f].field_name
+                    + "'"
+                )
+            b = Int(tag)
+        var route = self.table.actions[f].union_route.value().routes[b].copy()
+        if route.status == ROUTE_NO_MATCH:
+            raise Error(
+                "AvroResolutionError.UNION_NO_MATCHING_BRANCH: writer branch "
+                + String(b)
+                + " ("
+                + avro_kind_name(route.wire_kind)
+                + ") of field '"
+                + self.table.actions[f].field_name
+                + "' matches no reader type"
+            )
+        if route.status == ROUTE_UNSUPPORTED:
+            raise Error(
+                "AvroDecodeError.UNSUPPORTED_FIELD_KIND: a "
+                + avro_kind_name(route.wire_kind)
+                + " value in union field '"
+                + self.table.actions[f].field_name
+                + "' is not decoded into a column"
+            )
+        var dest = oi
+        var base = self._union_base[oi]
+        if base >= 0:
+            dest = base + route.target
+            var child_len = self.accs[dest].current_len()
+            self.accs[oi].union_push(route.target, child_len)
+        if route.status == ROUTE_NULL:
+            self.accs[dest].push_null()
+            return
+        if not _acc_accepts(self.accs[dest].tag, route.wire_kind, route.promote_to):
+            raise Error(
+                "AvroResolutionError.INCOMPATIBLE_TYPE_PROMOTION: writer "
+                + avro_kind_name(route.wire_kind)
+                + " value of field '"
+                + self.table.actions[f].field_name
+                + "' does not fit the reader column"
+            )
+        if route.promote_to == PROMOTE_NONE:
+            self._read_wire(
+                reader,
+                dest,
+                route.wire_kind,
+                self.accs[dest].tag == ACC_DECIMAL,
+                route.fixed_size,
+            )
+        else:
+            self._promote_wire(reader, dest, route.wire_kind, route.promote_to)
 
     # -------------------------------------------------------------------------
     # FA_READ_AND_PROMOTE — read the writer value, widen to the reader's type.
@@ -1794,8 +2132,17 @@ struct ActionTableInterpreter(Movable):
             if is_null:
                 self.accs[oi].push_null()
                 return
-        var promo = rfd.promote_to
-        var k = rfd.avro_kind  # WIRE kind
+        self._promote_wire(reader, oi, rfd.avro_kind, rfd.promote_to)
+
+    def _promote_wire(
+        mut self,
+        mut reader: AvroByteReader[_],
+        oi: Int,
+        k: Int,
+        promo: Int8,
+    ) raises:
+        """Read one value of WIRE kind `k` and widen it by `promo` into
+        accumulator `oi`."""
         if promo == PROMOTE_TO_LONG:
             # int → long
             self.accs[oi].push_i64(Int64(reader.read_int()))
@@ -1843,30 +2190,48 @@ struct ActionTableInterpreter(Movable):
         var sd = self.table.actions[f].synthesize_default.value().copy()
         var oi = self.table.actions[f].out_index
         var dk = sd.default.kind
+        # A dense-union column takes the default in the first branch it fits
+        # (`_check_default_fits` refused the table if there is none).
+        var dest = oi
+        var base = self._union_base[oi]
+        if base >= 0:
+            var nb = self.table.branches_of(oi)
+            var b = 0
+            while b < nb and not _default_fits_tag(dk, self.accs[base + b].tag):
+                b += 1
+            if b == nb:
+                raise Error(
+                    "AvroResolutionError.INVALID_DEFAULT: the default of field '"
+                    + self.table.actions[f].field_name
+                    + "' fits no branch of its union"
+                )
+            dest = base + b
+            var child_len = self.accs[dest].current_len()
+            self.accs[oi].union_push(b, child_len)
         if dk == AVRO_DEFAULT_NULL:
-            self.accs[oi].push_null()
+            self.accs[dest].push_null()
         elif dk == AVRO_DEFAULT_BOOL:
-            self.accs[oi].push_bool(sd.default.bool_val)
+            self.accs[dest].push_bool(sd.default.bool_val)
         elif dk == AVRO_DEFAULT_INT:
-            if self.accs[oi].tag == ACC_I32:
-                self.accs[oi].push_i32(Int32(Int(sd.default.int_val)))
-            elif self.accs[oi].tag == ACC_I64:
-                self.accs[oi].push_i64(sd.default.int_val)
-            elif self.accs[oi].tag == ACC_F32:
-                self.accs[oi].push_f32(Float32(Int(sd.default.int_val)))
-            elif self.accs[oi].tag == ACC_F64:
-                self.accs[oi].push_f64(Float64(Int(sd.default.int_val)))
+            if self.accs[dest].tag == ACC_I32:
+                self.accs[dest].push_i32(Int32(Int(sd.default.int_val)))
+            elif self.accs[dest].tag == ACC_I64:
+                self.accs[dest].push_i64(sd.default.int_val)
+            elif self.accs[dest].tag == ACC_F32:
+                self.accs[dest].push_f32(Float32(Int(sd.default.int_val)))
+            elif self.accs[dest].tag == ACC_F64:
+                self.accs[dest].push_f64(Float64(Int(sd.default.int_val)))
             else:
-                self.accs[oi].push_i64(sd.default.int_val)  # cov: unreachable _check_default_fits admits an int default only for i32/i64/f32/f64
+                self.accs[dest].push_i64(sd.default.int_val)  # cov: unreachable _check_default_fits admits an int default only for i32/i64/f32/f64
         elif dk == AVRO_DEFAULT_DOUBLE:
-            if self.accs[oi].tag == ACC_F32:
-                self.accs[oi].push_f32(Float32(sd.default.double_val))
+            if self.accs[dest].tag == ACC_F32:
+                self.accs[dest].push_f32(Float32(sd.default.double_val))
             else:
-                self.accs[oi].push_f64(sd.default.double_val)
+                self.accs[dest].push_f64(sd.default.double_val)
         elif dk == AVRO_DEFAULT_STRING:
-            self.accs[oi].push_string(sd.default.str_val)
+            self.accs[dest].push_string(sd.default.str_val)
         elif dk == AVRO_DEFAULT_BYTES:
-            self.accs[oi].push_binary(sd.default.bytes_val.copy())
+            self.accs[dest].push_binary(sd.default.bytes_val.copy())
         else:
             raise Error(
                 "AvroResolutionError.NO_DEFAULT_FOR_MISSING_FIELD: field '"
@@ -1879,6 +2244,10 @@ struct ActionTableInterpreter(Movable):
     # -------------------------------------------------------------------------
     def _skip_field(mut self, mut reader: AvroByteReader[_], f: Int) raises:
         var sk = self.table.actions[f].skip_bytes.value().copy()
+        if _skip_needs_walk(sk.avro_kind):
+            # The resolver sets `writer_skip` whenever it emits such a skip.
+            self.table.writer_skip.value().skip(reader, sk.type_idx)
+            return
         if sk.nullability != NULL_NONE:
             var tag = reader.read_long()
             var is_null: Bool
@@ -1979,10 +2348,18 @@ struct ActionTableInterpreter(Movable):
     def build_batch(mut self) raises -> RecordBatch:
         """Emit the accumulated columns as a RecordBatch with the table's
         derived output schema."""
-        var ncols = len(self.accs)
+        var ncols = len(self.table.out_specs)
         var builder = RecordBatchBuilder.with_capacity(ncols)
         for i in range(ncols):
-            builder.add_column(self.accs[i].build())
+            var base = self._union_base[i]
+            if base < 0:
+                builder.add_column(self.accs[i].build())
+                continue
+            var nb = self.table.branches_of(i)
+            var kids = Slab[Column[HeapRegion]].create(max(nb, 1))
+            for b in range(nb):
+                kids.append(self.accs[base + b].build())
+            builder.add_column(self.accs[i].build_union(kids^))
         return builder.build(self.table.out_schema.copy())
 
 
@@ -2015,8 +2392,76 @@ def _skip_value(mut reader: AvroByteReader[_], k: Int, fixed_size: Int) raises:
     else:
         raise Error(
             "AvroDecodeError.UNSUPPORTED_FIELD_KIND: cannot skip kind "
-            + String(k) + " (nested skip is not supported)"
+            + String(k) + " (a nested or union type is skipped by SkipProgram)"
         )
+
+
+def _skip_needs_walk(kind: Int) -> Bool:
+    """True iff a writer-only field of (un-unioned) kind `kind` is skipped by
+    walking its type (`SkipProgram`) rather than by `_skip_value`. `kind` is
+    AVRO_KIND_UNION for a general union."""
+    return (
+        kind == AVRO_KIND_RECORD
+        or kind == AVRO_KIND_ENUM
+        or kind == AVRO_KIND_ARRAY
+        or kind == AVRO_KIND_MAP
+        or kind == AVRO_KIND_UNION
+    )
+
+
+def _acc_accepts(tag: Int8, wire_kind: Int, promo: Int8) -> Bool:
+    """True iff accumulator arm `tag` takes a value of `wire_kind` widened by
+    `promo`. A union route lands a writer value in a reader column whose arm
+    was picked from the READER type; the typed push reads that arm's Optional,
+    so a mismatch must be refused here rather than reach an empty arm."""
+    if promo == PROMOTE_TO_LONG:
+        return tag == ACC_I64
+    if promo == PROMOTE_TO_FLOAT:
+        return tag == ACC_F32
+    if promo == PROMOTE_TO_DOUBLE:
+        return tag == ACC_F64
+    if promo == PROMOTE_STRING_TO_BYTES:
+        return tag == ACC_BINARY
+    if promo == PROMOTE_BYTES_TO_STRING:
+        return tag == ACC_STRING
+    if promo != PROMOTE_NONE:
+        return False
+    if wire_kind == AVRO_KIND_BOOLEAN:
+        return tag == ACC_BOOL
+    if wire_kind == AVRO_KIND_INT:
+        return tag == ACC_I32
+    if wire_kind == AVRO_KIND_LONG:
+        return tag == ACC_I64
+    if wire_kind == AVRO_KIND_FLOAT:
+        return tag == ACC_F32
+    if wire_kind == AVRO_KIND_DOUBLE:
+        return tag == ACC_F64
+    if wire_kind == AVRO_KIND_STRING:
+        return tag == ACC_STRING
+    if wire_kind == AVRO_KIND_BYTES or wire_kind == AVRO_KIND_FIXED:
+        return tag == ACC_BINARY or tag == ACC_DECIMAL
+    return False
+
+
+def _default_fits_tag(dk: Int, tag: Int8) -> Bool:
+    """True iff `_synthesize_default` can push a default of kind `dk` into
+    accumulator arm `tag` (a null default needs a NULL arm here; a nullable
+    scalar column is checked by `_check_default_fits`)."""
+    if dk == AVRO_DEFAULT_NULL:
+        return tag == ACC_NULL
+    if dk == AVRO_DEFAULT_BOOL:
+        return tag == ACC_BOOL
+    if dk == AVRO_DEFAULT_INT:
+        return (
+            tag == ACC_I32 or tag == ACC_I64 or tag == ACC_F32 or tag == ACC_F64
+        )
+    if dk == AVRO_DEFAULT_DOUBLE:
+        return tag == ACC_F32 or tag == ACC_F64
+    if dk == AVRO_DEFAULT_STRING:
+        return tag == ACC_STRING
+    if dk == AVRO_DEFAULT_BYTES:
+        return tag == ACC_BINARY
+    return False
 
 
 @fieldwise_init
@@ -2091,9 +2536,8 @@ def _field_type_info(schema: AvroSchema, type_idx: Int) raises -> _FieldTypeInfo
             elif c1.kind == AVRO_KIND_NULL:
                 return _FieldTypeInfo(n.children[0], NULL_SECOND, True)
         raise Error(
-            "AvroResolutionError.UNION_NO_MATCHING_BRANCH: only nullable"
-            " 2-branch unions are resolvable (n>=3 / no-null"
-            " unions are not supported)"
+            "AvroDecodeError.INTERNAL: a general union reached"
+            " _field_type_info (it is routed by FA_UNION_ROUTE)"
         )
     return _FieldTypeInfo(type_idx, NULL_NONE, False)
 
@@ -2110,48 +2554,6 @@ def _names_match(
         return True
     for i in range(len(reader_aliases)):
         if reader_aliases[i] == writer_name:
-            return True
-    return False
-
-
-def _promotion_tag(writer_kind: Int, reader_kind: Int) -> Int8:
-    """Return the PROMOTE_* tag for a writer→reader scalar promotion, or
-    PROMOTE_NONE if the kinds are identical, or -1 (PROMOTE_NONE sentinel via
-    a separate caller check) if not a legal promotion. The 6 numeric promotions
-    + string↔bytes (type-promotion rule)."""
-    if writer_kind == reader_kind:
-        return PROMOTE_NONE
-    if writer_kind == AVRO_KIND_INT and reader_kind == AVRO_KIND_LONG:
-        return PROMOTE_TO_LONG
-    if (
-        (writer_kind == AVRO_KIND_INT or writer_kind == AVRO_KIND_LONG)
-        and reader_kind == AVRO_KIND_FLOAT
-    ):
-        return PROMOTE_TO_FLOAT
-    if (
-        (
-            writer_kind == AVRO_KIND_INT
-            or writer_kind == AVRO_KIND_LONG
-            or writer_kind == AVRO_KIND_FLOAT
-        )
-        and reader_kind == AVRO_KIND_DOUBLE
-    ):
-        return PROMOTE_TO_DOUBLE
-    if writer_kind == AVRO_KIND_STRING and reader_kind == AVRO_KIND_BYTES:
-        return PROMOTE_STRING_TO_BYTES
-    if writer_kind == AVRO_KIND_BYTES and reader_kind == AVRO_KIND_STRING:
-        return PROMOTE_BYTES_TO_STRING
-    return -1  # illegal promotion
-
-
-def _named_types_match(writer: AvroNode, reader: AvroNode) -> Bool:
-    """For named types (record / enum / fixed): the writer type matches the
-    reader type if their fullnames are equal OR the writer's fullname is one of
-    the reader type's aliases (named-type by-fullname matching)."""
-    if writer.name == reader.name:
-        return True
-    for i in range(len(reader.aliases)):
-        if reader.aliases[i] == writer.name:
             return True
     return False
 
@@ -2174,16 +2576,26 @@ def _default_kind_name(dk: Int) -> String:
 
 
 def _check_default_fits(
-    fname: String, dk: Int, rfd: ReadFieldData
+    fname: String,
+    dk: Int,
+    rfd: ReadFieldData,
+    branches: List[ReadFieldData] = List[ReadFieldData](),
 ) raises:
     """Refuse a reader default that `_synthesize_default` cannot push into
     the column accumulator `rfd` selects: null needs a nullable column; a
     boolean needs a boolean column; an int needs an int/long/float/double
     column; a double needs a float/double column; a string needs a string
-    column; bytes need a binary column."""
+    column; bytes need a binary column. A dense-union column (`branches`
+    non-empty) needs one branch the default fits."""
     var fits: Bool
-    if dk == AVRO_DEFAULT_NULL:
-        fits = rfd.nullability != NULL_NONE
+    if len(branches) > 0:
+        fits = False
+        for b in range(len(branches)):
+            if _default_fits_tag(dk, ColumnAccVariant.create(branches[b]).tag):
+                fits = True
+                break
+    elif dk == AVRO_DEFAULT_NULL:
+        fits = rfd.nullability != NULL_NONE or rfd.arrow_type == ArrowType.NULL
     else:
         var tag = ColumnAccVariant.create(rfd).tag
         if dk == AVRO_DEFAULT_BOOL:
@@ -2239,16 +2651,18 @@ def _resolve_schemas(
     # Build reader output schema + out_specs (one per reader field, in order).
     var sb = SchemaBuilder()
     var out_specs = List[ReadFieldData]()
+    var union_branches = List[List[ReadFieldData]]()
     var reader_matched = List[Bool]()
     for ri in range(n_reader):
-        var rfd = _build_read_field(reader, rroot.children[ri])
-        sb.add_field(
-            Field(rroot.field_names[ri], rfd.arrow_type, rfd.nullability != NULL_NONE)
-        )
+        var rtype = rroot.children[ri]
+        var rfd = _build_read_field(reader, rtype)
+        sb.add_field(_output_field(reader, rtype, rroot.field_names[ri], rfd))
         out_specs.append(rfd^)
+        union_branches.append(_union_branch_specs(reader, rtype))
         reader_matched.append(False)
 
     var actions = List[FieldAction]()
+    var needs_walk = False
 
     # ---- Pass 1: walk WRITER fields in wire order. ----
     for wi in range(n_writer):
@@ -2265,16 +2679,26 @@ def _resolve_schemas(
                 break
 
         if match_ri < 0:
-            # Writer-only field: decode-and-skip (field-skip rule).
-            var winfo = _field_type_info(writer, wtype_idx)
-            var wnode = writer.node(winfo.inner_idx)
+            # Writer-only field: decode-and-skip (field-skip rule). A general
+            # union, or a nested type behind any union, is walked.
+            var skip_kind = AVRO_KIND_UNION
+            var skip_null = NULL_NONE
+            var skip_size = 0
+            if not is_general_union(writer, wtype_idx):
+                var winfo = _field_type_info(writer, wtype_idx)
+                skip_kind = writer.nodes[winfo.inner_idx].kind
+                skip_null = winfo.nullability
+                skip_size = writer.nodes[winfo.inner_idx].size
+            if _skip_needs_walk(skip_kind):
+                needs_walk = True
             actions.append(
                 FieldAction.skip(
                     wname,
                     SkipBytesData(
-                        avro_kind=wnode.kind,
-                        nullability=winfo.nullability,
-                        fixed_size=wnode.size,
+                        avro_kind=skip_kind,
+                        nullability=skip_null,
+                        fixed_size=skip_size,
+                        type_idx=wtype_idx,
                     ),
                 )
             )
@@ -2282,6 +2706,18 @@ def _resolve_schemas(
 
         reader_matched[match_ri] = True
         var rtype_idx = rroot.children[match_ri]
+        # ---- General unions (union rule): route each writer value. ----
+        if is_general_union(writer, wtype_idx) or is_general_union(
+            reader, rtype_idx
+        ):
+            actions.append(
+                FieldAction.route_union(
+                    wname,
+                    build_union_route(writer, wtype_idx, reader, rtype_idx),
+                    match_ri,
+                )
+            )
+            continue
         var winfo = _field_type_info(writer, wtype_idx)
         var rinfo = _field_type_info(reader, rtype_idx)
         var wnode = writer.node(winfo.inner_idx)
@@ -2392,7 +2828,7 @@ def _resolve_schemas(
                 " declared default"
             )
         var rfd = out_specs[ri].copy()
-        _check_default_fits(rname, rdefault.kind, rfd)
+        _check_default_fits(rname, rdefault.kind, rfd, union_branches[ri])
         actions.append(
             FieldAction.synth_default(
                 rname,
@@ -2401,6 +2837,13 @@ def _resolve_schemas(
             )
         )
 
+    var writer_skip = Optional[SkipProgram](None)
+    if needs_walk:
+        writer_skip = Optional(SkipProgram(writer))
     return ResolutionTable(
-        actions=actions^, out_schema=sb.build(), out_specs=out_specs^
+        actions=actions^,
+        out_schema=sb.build(),
+        out_specs=out_specs^,
+        union_branches=union_branches^,
+        writer_skip=writer_skip^,
     )
