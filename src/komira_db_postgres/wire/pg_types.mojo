@@ -338,8 +338,9 @@ def _is_ci_prefix(b: Span[UInt8, _], start: Int, end: Int, word: String) -> Bool
 def _parse_bool_text(s: String) raises -> Bool:
     """PostgreSQL's boolin: leading and trailing whitespace is ignored; then a
     case-insensitive unique prefix of "true"/"yes" is true and of
-    "false"/"no" is false, "on" is true and "off" false (no shorter prefix:
-    "o" and "of" are rejected), and exactly "1"/"0" are true/false. Anything
+    "false"/"no" is false, "on" is true, "off" or its prefix "of" is false
+    (boolin compares at least two letters, so a lone "o" is rejected), and
+    exactly "1"/"0" are true/false. Anything
     else (including an empty cell) raises, as boolin does."""
     var b = s.as_bytes()
     var start = 0
@@ -362,7 +363,7 @@ def _parse_bool_text(s: String) raises -> Bool:
         if c == UInt8(ord("o")):
             if n == 2 and _is_ci_prefix(b, start, end, "on"):
                 return True
-            if n == 3 and _is_ci_prefix(b, start, end, "off"):
+            if n >= 2 and _is_ci_prefix(b, start, end, "off"):
                 return False
         if n == 1 and c == UInt8(ord("1")):
             return True

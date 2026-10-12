@@ -329,19 +329,20 @@ def _one_binary_row(body: List[UInt8]) -> PgRow:
 
 def test_bool_decoding() raises:
     # PostgreSQL boolin: a case-insensitive unique prefix of true/false/yes/no,
-    # exactly on/off, or exactly 1/0, with surrounding whitespace ignored.
+    # exactly "on", "off" or its two-letter prefix "of" (bool.c compares at
+    # least two letters), or exactly 1/0, with surrounding whitespace ignored.
     # Each spelling here is what `SELECT '<s>'::boolean` returns.
     for t in ["t", "T", "true", "TRUE", "True", "tr", "y", "Y", "yes", "YES",
               "on", "ON", "On", "1", " t", "true ", "\t\nyes\r\n"]:
         assert_true(_one_text_row(String(t)).get_bool(0), String(t))
     for f in ["f", "F", "false", "FALSE", "fa", "n", "N", "no", "NO",
-              "off", "OFF", "Off", "0", "  f  ", "\tno\n"]:
+              "off", "OFF", "Off", "of", "OF", " Of ", "0", "  f  ", "\tno\n"]:
         assert_false(_one_text_row(String(f)).get_bool(0), String(f))
     # What boolin rejects ("invalid input syntax for type boolean") must
     # raise here, never read back as false: an empty non-NULL cell, blanks,
-    # the ambiguous "o", the non-unique "of", a word with trailing junk,
+    # the ambiguous lone "o" (on or off), a word with trailing junk,
     # a multi-digit number and an unrelated word.
-    for bad in ["", "   ", "o", "of", "onx", "offf", "truex", "yess", "nope",
+    for bad in ["", "   ", "o", "O", " o ", "onx", "offf", "truex", "yess", "nope",
                 "2", "10", "01", "x", "t f"]:
         with assert_raises(contains="PgRow: invalid boolean text"):
             _ = _one_text_row(String(bad)).get_bool(0)
