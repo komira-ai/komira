@@ -203,7 +203,7 @@ def test_values_of_the_wrong_kind() raises:
     )
     assert_equal(
         _out(
-            '{"conditions": [], "endpoint": {"url": "https://x", "headers":'
+            '{"conditions": [], "endpoint": {"url": "https://x.test", "headers":'
             ' {"h": ["a", {"fn": "isSet", "argv": [{"ref": "In"}]}]}},'
             ' "type": "endpoint"}'
         ),
@@ -217,11 +217,11 @@ def _tmpl(url: String) raises -> String:
         '{"conditions": [{"fn": "parseURL", "argv": ["https://example.com"], "assign": "u"}],'
         + _url(url) + "}," + _NONE,
     )
-    return _one(rs, "v")
+    return _one(rs, "v.test")
 
 
 def test_template_faults() raises:
-    assert_equal(_tmpl("https://{In}"), "url:https://v")
+    assert_equal(_tmpl("https://{In}"), "url:https://v.test")
     assert_equal(_tmpl("https://{In}/{x"), _F + "template 'https://{In}/{x' has an unclosed '{'")
     assert_equal(_tmpl("https://{In}/x}"), _F + "template 'https://{In}/x}' has a single '}'")
     assert_equal(_tmpl("https://{Nope}"), _F + "template 'https://{Nope}' names 'Nope', which is not in scope")
@@ -244,7 +244,7 @@ def _parse(value: String) raises -> String:
 def test_parse_url_cleaning() raises:
     # urlsplit drops leading C0 controls and spaces, and every tab, CR, LF.
     assert_equal(_parse(" " + chr(1) + "https://example.com/x"), "url:https|example.com|/x|/x/")
-    assert_equal(_parse("https://exa\tmple.com/a\nb\r"), "url:https|example.com|/ab|/ab/")
+    assert_equal(_parse("https://example\t.com/a\nb\r"), "url:https|example.com|/ab|/ab/")
     # A scheme with a byte outside [A-Za-z0-9+-.] is no scheme.
     assert_equal(_parse("h_ttps://example.com"), "error:none")
     # `;params` split off the last segment only, at its first ';'.

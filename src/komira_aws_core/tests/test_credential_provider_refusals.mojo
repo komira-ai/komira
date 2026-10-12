@@ -77,14 +77,14 @@ def test_container_full_uri() raises:
     _full_refused("http://128.0.0.1/", plain)
     # The URL's own shape.
     _full_refused("http://127.0.0.1:/", _FULL + " has an invalid port")
-    _full_refused("http://a b/", _FULL + " holds whitespace or control bytes")
+    _full_refused("http://a.test b/", _FULL + " holds whitespace or control bytes")
     _full_refused("https://[::1/x", _FULL + " has an unterminated IPv6 literal")
     _full_refused("https://[::1]x/", _FULL + " has text after its IPv6 literal")
     _full_refused("https://[::1]x", _FULL + " has text after its IPv6 literal")
     _full_refused("https:///x", _FULL + " has no host")
     _full_refused("https://:443/x", _FULL + " has no host")
-    var v6 = container_endpoint_full("https://[fd00::1]:8443/c")
-    assert_equal(v6.host, "[fd00::1]")
+    var v6 = container_endpoint_full("https://[fd00:ec2::254]:8443/c")
+    assert_equal(v6.host, "[fd00:ec2::254]")
     assert_equal(v6.port, 8443)
 
 
