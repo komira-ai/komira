@@ -1,0 +1,12 @@
+{
+ "name": "error_row_mismatch",
+ "defect": "a deliberate mismatch: the runner must fail this case",
+ "run": "call_batch",
+ "entry": "raise_on_row_3",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 5, "columns": [{"type": "int64", "values": [0, 1, 2, 3, 4]}]},
+ "expect": {"status": "ERR_RAISED", "row": 2},
+ "runner_fails_with": "error row 3, expected 2"
+}

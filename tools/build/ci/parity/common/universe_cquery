@@ -1,0 +1,5 @@
+komira//src/a:a (prelude//platforms:default#abcdef0123456789)
+komira//src/a:a_test (prelude//platforms:default#abcdef0123456789)
+komira//src/b:b (prelude//platforms:default#abcdef0123456789)
+komira//src/c:c (prelude//platforms:default#abcdef0123456789)
+tests//functional/x:x (prelude//platforms:default#abcdef0123456789)

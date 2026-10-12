@@ -35,6 +35,16 @@ mojo_library(
         # query_rows' client-side split, a SET term of an unknown kind, an
         # empty IN list, a JSON-key predicate outside query_rows on pgstore
         "tests/test_sql_split_and_binds.mojo",
+        # the single-shot blocking helpers and the typed Store surface over a
+        # recording SqlDatabase and a hand-written DbStorable
+        "tests/test_store_blocking.mojo",
+        # the value carriers' edges: logical-type names, DbRow / DbRows bounds
+        # and NULL refusals, integer-text refusals, INT4 and BYTES reads, the
+        # RAW_EXPR literal shapes
+        "tests/test_db_row_value.mojo",
+        # the generic Pool[T]'s refusals (every lease method at -1 and size,
+        # exhaustion, double return / take / vacate, size <= 0) and close()
+        "tests/test_pool_refusals.mojo",
     ],
     visibility = ["PUBLIC"],
 )

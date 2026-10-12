@@ -7,7 +7,7 @@
 # legacy upload repeats the core metadata as form fields. Which fields, in what
 # order, with what value transformations, is not something to invent: it is
 # what `uv publish` sends, MEASURED by recording its request against a loopback
-# server (`tests/fidelity/capture_uv_publish.py`) and pinned byte for byte by
+# server (`uv_fidelity`, `tests/fidelity/main.zig`) and pinned byte for byte by
 # `tests/test_pkg_upload_uv_fidelity.mojo`. The order below is uv's:
 #
 #   :action, sha256_digest, blake2_256_digest, protocol_version,

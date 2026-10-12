@@ -109,6 +109,41 @@ Run it with a per-run argument and environment override. The path field
 (`name`) is not repeated in the body, and the answer is the long-running
 operation, whose metadata names the execution the run started:
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+from std.memory import ArcPointer
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_gcp_core import StaticTokenSource
+from komira_gcp_run.job import JobsClient, RunJobRequest
+from komira_http_client.client import HttpClient
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+from komira_proto_codec.codec import decode_json
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+comptime JOB = "projects/demo-project/locations/us-central1/jobs/build"
+
+def jobs_answering(body: String, sent: ArcPointer[List[UInt8]]) raises -> JobsClient[ScriptedConnector, StaticTokenSource]:
+    """A JobsClient whose one request is answered 200 with `body`."""
+    var text = (
+        String("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n")
+        + "Content-Length: " + String(body.byte_length())
+        + "\r\nConnection: close\r\n\r\n" + body
+    )
+    var reply = List[UInt8]()
+    reply.extend(Span(text.as_bytes()))
+    var client = JobsClient[ScriptedConnector, StaticTokenSource](
+        HttpClient[ScriptedConnector].with_defaults(
+            ScriptedConnector.with_stream_tls(
+                ScriptedStream.from_read_script_with_capture(reply^, sent)
+            )
+        ),
+        StaticTokenSource(String("a-token")),
+    )
+    client.set_rest_host(String("localhost"))
+    return client^
+-->
 ```mojo
 var run_sent = ArcPointer[List[UInt8]](List[UInt8]())
 var runner = jobs_answering(

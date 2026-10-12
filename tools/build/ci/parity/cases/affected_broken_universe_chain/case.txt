@@ -1,0 +1,9 @@
+# The same with a dependency chain, without --units-file: exit 13.
+arg "--files"
+arg "{changed_files}"
+arg "--base"
+arg "parity-base"
+input changed_files "buck2\n"
+file ".buckconfig" %buckconfig
+file "tools/build/ci/rules.txt" %rules.txt
+exit 13
