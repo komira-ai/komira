@@ -5,13 +5,13 @@ With `coverage_branch` set (coverage.bzl, coverage_kwargs: the switch on,
 linux-x86_64), per `test_srcs` entry that is a source file:
 
 - `[coverage][bc][<test>]` (category `mojo_emit_cov_bc`): the test compiled
-  by mojo_wrapper.sh as its coverage binary is (`[coverage][bin]`: -O0, line
+  by mojo_compile as its coverage binary is (`[coverage][bin]`: -O0, line
   tables, the same `-D` assert level and `test_defines`, the same closure,
   `test_deps` included, and source root), but
   emitted as LLVM bitcode, `cov/branch/<test>.bc`;
 - `[coverage][pgo_bin][<test>]` (category `mojo_cov_pgo_link`): that
   bitcode instrumented with IR profile counters by Mojo's lld and linked as a
-  release test is, with the profile runtime (cov_branch_link.sh),
+  release test is, with the profile runtime (`cov_branch link`),
   `cov/branch/<test>`;
 - `[coverage][branch][<test>]` (category `mojo_cov_branch_run`): the merged
   profile of its run through the release gate's runner (`cov_branch run`),
@@ -87,16 +87,27 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
     exe = ctx.actions.declare_output("cov/branch/{}".format(stem))
     ctx.actions.run(
         cmd_args(
+            link_dir.project("cov_branch"),
+            "link",
+            "--busybox",
             tc.busybox,
-            "sh",
-            link_dir.project("cov_branch_link.sh"),
-            tc.busybox,
+            "--compiler",
             tc.compiler,
+            "--zig",
             tc.link,
+            "--target",
             tc.cc_target,
+            "--lld",
+            link_dir.project("lld/bin/lld"),
+            "--runtime",
+            link_dir.project("llvm/runtime/libclang_rt.profile-x86_64.a"),
+            "--bitcode",
             bc,
+            "--out",
             exe.as_output(),
-            link_tail if link_tail else [],
+            # The C libraries of the test's link, as mojo_compile's
+            # --link-tail appends them.
+            ["--", link_tail] if link_tail else [],
             hidden = link_dir,
         ),
         category = "mojo_cov_pgo_link",
@@ -111,10 +122,10 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
             "run",
             "--busybox",
             tc.busybox,
-            # gate_runner.sh, the release gate's runner (the mojo rules'),
-            # which cov_branch runs as `<busybox> sh <gate_runner.sh> ...`.
-            "--gate-runner",
-            tc.gate_runner,
+            # The gate (tools/build/run), the release gate's runner, which
+            # cov_branch runs as `<gate> mojo ...` (test_runtime.bzl, gate_mojo).
+            "--gate",
+            tc.gate,
             "--compiler",
             tc.compiler,
             "--label",

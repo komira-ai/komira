@@ -24,6 +24,7 @@ here executes a plan.
 | `partition_prune_scans` | Hive-partition pruning of a partitioned scan's path list from Filter conjuncts on partition columns |
 | `attach_hive_predicate` | attaching the partition predicate of a Filter (or an empty one) to a lazy dir-scanning Hive scan, leaving the data residual on the Filter |
 | `flatten_dependent_joins` | lowering correlated subquery expressions into joins |
+| `flatten_hoist` | the outer-reference hoist of `flatten_dependent_joins`: splitting a correlated subquery's inner Filter into join keys, join residual and inner-only conjuncts, and refusing a conjunct it cannot place |
 | `join_predicate_decompose` | splitting a raw join predicate into equi keys and a residual |
 | `scalar_subquery_decorrelate` | lowering an uncorrelated scalar subquery with a provably single-row inner plan into a broadcast cross join |
 | `resolve_scalar_subqueries` | finding uncorrelated scalar subqueries and inlining bound values as literals |

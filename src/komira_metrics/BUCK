@@ -25,6 +25,8 @@ cxx_library(
 
 mojo_library(
     name = "komira_metrics",
+    # Its C ships in its package as komira_metrics_native below (lib/libkomira_metrics_native.so.1).
+    native = ":komira_metrics_native",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         ":komira_metrics_ea_flag",
@@ -37,6 +39,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_explain_analyze.mojo",
+        "tests/test_explain_analyze_collect.mojo",
         "tests/test_explain_analyze_disarmed_cost.mojo",
         "tests/test_histogram.mojo",
         "tests/test_metric_point_and_attr_set.mojo",
@@ -53,7 +56,7 @@ mojo_library(
 # libkomira_metrics_native.so.1: the C this library owns, as its own
 # shared library exporting the names its callers call
 # (tools/build/native/README.md, "Each library's shared library"). Built and
-# checked here; no package ships it yet.
+# checked here, and packed into the library's conda package (`native`).
 native_shared_library(
     name = "komira_metrics_native",
     archives = [

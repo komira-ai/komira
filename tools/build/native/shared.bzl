@@ -16,13 +16,18 @@ is linked", is the design; the checks are its "Checks, per library".
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
-load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
+load("@komira//tools/build/mojo:providers.bzl", "MojoInfo", "MojoToolchainInfo")
 load("@komira//tools/build/platforms:table.bzl", "os_floor_version", "row")
 
 NativeSharedInfo = provider(
-    doc = "A komira library's own shared library, for the libraries that declare it a NEEDED owner.",
-    # so: the shared library, lib<library>_native.so.1; soname: its SONAME.
-    fields = ["so", "soname"],
+    doc = "A komira library's own shared library, for the libraries that declare it a NEEDED owner and for its library's conda package.",
+    # so: the shared library, lib<library>_native.so.1; soname: its SONAME;
+    # library: the Mojo library's import name; archives: the labels of the
+    # archives linked whole, sorted; glibc_floor: the floor check 5 held it to;
+    # closure: {SONAME: shared library} of this one and every owner it NEEDs,
+    # transitively (`needed_owners`), for the order check of a packaged
+    # README's link commands (komira_pack readme-link --needed-of).
+    fields = ["archives", "closure", "glibc_floor", "library", "so", "soname"],
 )
 
 # What each check reads besides the shared object (native_so.zig, `check`).
@@ -47,6 +52,20 @@ def _caller_src(ctx, dep):
     if "src" not in subs:
         fail("{}: caller {} has no [src] sub-target (not a mojo_library?)".format(ctx.label, dep.label.raw_target()))
     return subs["src"][DefaultInfo].default_outputs[0]
+
+def _readme_objects(ctx):
+    """The owning library's README programs as object files
+    (`[tests][readme][objects]`, tools/build/mojo/readme.bzl): the library is
+    the one of `callers` whose import name is `library`. An owner whose
+    library has no README, or is not among its callers, is refused here."""
+    own = [d for d in ctx.attrs.callers if MojoInfo in d and d[MojoInfo].import_name == ctx.attrs.library]
+    if not own:
+        fail("{}: no caller is the Mojo library {}, whose README must call this library's C".format(ctx.label, ctx.attrs.library))
+    tests = own[0][DefaultInfo].sub_targets.get("tests")
+    readme = tests[DefaultInfo].sub_targets.get("readme") if tests != None else None
+    if readme == None:
+        fail("{}: {} has no README.md, so no README program calls this library's C (docs/design/native_packaging.md, \"Every owner is called, not only loaded\")".format(ctx.label, own[0].label.raw_target()))
+    return readme[DefaultInfo].sub_targets["objects"][DefaultInfo].default_outputs[0]
 
 def _native_shared_library_impl(ctx):
     tc = ctx.attrs._toolchain[MojoToolchainInfo]
@@ -93,6 +112,9 @@ def _native_shared_library_impl(ctx):
     # A C++ archive takes zig's libc++ and libc++abi, linked statically; the
     # version script keeps their symbols local.
     so = ctx.actions.declare_output(soname)
+    closure = {soname: so}
+    for d in ctx.attrs.needed_owners:
+        closure.update(d[NativeSharedInfo].closure)
     ctx.actions.run(
         cmd_args(
             ctx.attrs._launcher[RunInfo],
@@ -145,6 +167,17 @@ def _native_shared_library_impl(ctx):
         )
         specs.append(ValidationSpec(name = "check_{}_{}".format(n, name), validation_result = result))
         subs["check_{}_{}".format(n, name)] = [DefaultInfo(default_output = result)]
+
+    # Every owner is called, not only loaded (docs/design/native_packaging.md,
+    # slice 10): some program of the library's README gate links one export.
+    readme_result = ctx.actions.declare_output("checks/readme_calls.json")
+    ctx.actions.run(
+        cmd_args(tool, "readme", "--result", readme_result.as_output(), "--soname", soname, "--list", exports, "--objects", _readme_objects(ctx)),
+        category = "native_check",
+        identifier = "readme_calls",
+    )
+    specs.append(ValidationSpec(name = "readme_calls", validation_result = readme_result))
+    subs["readme_calls"] = [DefaultInfo(default_output = readme_result)]
     return [
         DefaultInfo(
             default_output = so,
@@ -158,12 +191,19 @@ def _native_shared_library_impl(ctx):
             },
         ),
         ValidationInfo(validations = specs),
-        NativeSharedInfo(so = so, soname = soname),
+        NativeSharedInfo(
+            archives = sorted([str(d.label.raw_target()) for d in ctx.attrs.archives]),
+            closure = closure,
+            glibc_floor = ctx.attrs.glibc_floor,
+            library = ctx.attrs.library,
+            so = so,
+            soname = soname,
+        ),
     ]
 
 _native_shared_library = rule(
     impl = _native_shared_library_impl,
-    doc = "lib<library>_native.so.1, the shared library of the C `archives` a Mojo library owns, and its link name `[link]`: every archive linked whole, exporting exactly the `external_call` names of the `callers`' sources, and the names the `caller_archives` reference, that those archives define; NEEDED on each of `needed_owners`, with RUNPATH $ORIGIN (`[exports]`, `[version_script]`, `[report]`; `[dynsym]` reads the result). Checks 1 to 7 of docs/design/native_packaging.md are validations of this target, one action each (`[check_<n>_<name>]`).",
+    doc = "lib<library>_native.so.1, the shared library of the C `archives` a Mojo library owns, and its link name `[link]`: every archive linked whole, exporting exactly the `external_call` names of the `callers`' sources, and the names the `caller_archives` reference, that those archives define; NEEDED on each of `needed_owners`, with RUNPATH $ORIGIN (`[exports]`, `[version_script]`, `[report]`; `[dynsym]` reads the result). Checks 1 to 7 of docs/design/native_packaging.md are validations of this target, one action each (`[check_<n>_<name>]`), and so is the README check (`[readme_calls]`): some program of the library's welded README gate, compiled to an object, references one of the exports.",
     attrs = {
         "archives": attrs.list(attrs.dep(), doc = "The C libraries (cxx_library targets) the library owns; each one's `[static-pic]` archive is linked whole."),
         "caller_archives": attrs.list(attrs.dep(), default = [], doc = "Dependent owners' C archives (cxx_library targets, each `[static-pic]`): every name one references and does not define is exported when this library's archives define it (s2n-tls's needs from aws-lc)."),
@@ -179,18 +219,50 @@ _native_shared_library = rule(
     },
 )
 
-def _glibc_floor(name):
-    floor = row(name)["os_floor"]
-    if not floor.startswith("glibc-"):
-        fail("platform row {}: os_floor {} is not a glibc floor".format(name, floor))
-    return os_floor_version(name)
+def glibc_floor_of(platform_row):
+    """The glibc version of a platform row's `os_floor` (`glibc-2.34` -> `2.34`).
 
-def native_shared_library(**kwargs):
-    """`_native_shared_library` with `glibc_floor` read from the platform table.
+    Takes the row itself, so a test can hand it a fixture row with another
+    floor (`:glibc_floor_test` in BUCK)."""
+    floor = platform_row["os_floor"]
+    if not floor.startswith("glibc-"):
+        fail("platform row {}: os_floor {} is not a glibc floor".format(platform_row.get("name", "?"), floor))
+    return floor[len("glibc-"):]
+
+def linux_glibc_floor():
+    """The glibc floor every library's shared library and conda package carry.
 
     The Mojo toolchain links for row linux-x86_64 only (its `zig_triple`;
-    komira-limit:mojo-toolchain-x86-64), so that row's `os_floor` is the floor.
+    komira-limit:mojo-toolchain-x86-64), so that row's `os_floor` is the
+    floor: check 5 holds each shared library to it, and the packer writes it
+    as the `__glibc >=<floor>` requirement (tools/build/package/conda.bzl).
     """
-    _rule(glibc_floor = _glibc_floor("linux-x86_64"), **kwargs)
+    floor = glibc_floor_of(row("linux-x86_64"))
+    if floor != os_floor_version("linux-x86_64"):
+        fail("glibc floor {} is not the table's os_floor_version {}".format(floor, os_floor_version("linux-x86_64")))
+    return floor
+
+def native_shared_library(**kwargs):
+    """`_native_shared_library` with `glibc_floor` read from the platform table."""
+    _rule(glibc_floor = linux_glibc_floor(), **kwargs)
+
+def _glibc_floor_test_impl(ctx):
+    got = glibc_floor_of({"name": "fixture", "os_floor": ctx.attrs.os_floor})
+    if got != ctx.attrs.expect:
+        fail("{}: glibc_floor_of a fixture row with os_floor {} gives {}, not {}: the floor is not read from the row".format(ctx.label, ctx.attrs.os_floor, got, ctx.attrs.expect))
+    out = ctx.actions.write(ctx.label.name + ".passed", "glibc_floor_of({}) = {}\n".format(ctx.attrs.os_floor, got))
+    return [DefaultInfo(default_output = out)]
+
+# glibc_floor_of over a fixture platform row (a floor no real row has): fails
+# at analysis unless the floor comes from the row, so a constant floor is red.
+_glibc_floor_test = rule(
+    impl = _glibc_floor_test_impl,
+    attrs = {
+        "expect": attrs.string(),
+        "os_floor": attrs.string(),
+    },
+)
+
+glibc_floor_test = declares_docs(_glibc_floor_test)
 
 _rule = declares_docs(_native_shared_library)
