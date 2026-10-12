@@ -3,9 +3,10 @@
 Status: draft for review. It builds on these specs, each on its own open pull request, and does not repeat them:
 
 - `optimized_plan.md` (#1094): the `OptimizedPlan` header and body, pins, admission, segments, versioning;
-- `optimized_plan_udfs.md` (#1094): UDF kinds, arms and the environment image;
+- `optimized_plan_udfs.md` and `optimized_plan_udf_runtime.md` (#1094): UDF kinds, arms, host execution and the
+  environment image;
 - `optimized_plan_sources.md` (#1094): typed pins, source kinds, index and graph operators;
-- `udf_runtime_interface.md` (#1132): the three UDF modes and the runtime ABI;
+- `udf_runtime_interface.md` (#1132): one UDF execution mode per language, and the runtime ABI;
 - `storage_stack.md` (#1134): Iceberg tables, tails and the roll into tables;
 - `data_graph_storage.md` (#833): graph facts as tables.
 
@@ -108,9 +109,12 @@ metadata. `optimized_plan.md` §5.2 adds recursive `children` for nested types.
 (§15.7). In-memory sources are refused on the wire.
 
 **UDFs.** `optimized_plan_udfs.md` §10.2 defines six kinds: SCALAR, ROW, MAP_BATCHES_COLUMN, MAP_BATCHES_FRAME,
-AGGREGATE (plain or mergeable) and STEP. A UDF runs in one of three modes: native, one interpreter per engine thread,
-or one shared parallel virtual machine (`udf_runtime_interface.md` §1.2). **No plan field names the mode, at any
-level**, and streaming changes none of this.
+AGGREGATE (plain or mergeable) and STEP. A ROW or MAP_BATCHES_FRAME `UdfRef` may carry a read set, the input columns
+it reads (`UdfRef.read_set`, `optimized_plan_udfs.md` §10.2): unset, the UDF reads every input column and the optimizer
+keeps them all; set, possibly empty, the optimizer projects the input to it. Each language has one mode,
+chosen by its runtime: native UDFs run in the engine's process, and the Python and Node runtimes run user code in
+worker processes they manage; the engine calls every runtime through one C ABI and chooses no transport
+(`udf_runtime_interface.md` §1.2). **No plan field names the mode, at any level**, and streaming changes none of this.
 
 **Boundedness.** RAW admits `WireScanNode.boundedness` and reads an unset value as `BOUNDED` (`optimized_plan.md` §5.2).
 
@@ -360,14 +364,14 @@ Watermarks move **out of band, at epoch barriers**, never on a morsel (`streamin
 
 `optimized_plan.md` §5.2 refuses "an operator that must read all of an unbounded input before it emits" unless the
 contract version admits a streaming form. The first streaming contract version admits the forms below. Every refusal
-uses the token `OPTIMIZED_UNBOUNDED_INPUT_UNSUPPORTED` (as `optimized_plan_udfs.md` §10.10 does) with a **reason** in
-its detail, listed in the last column, so a test asserts on the reason.
+uses the token `OPTIMIZED_UNBOUNDED_INPUT_UNSUPPORTED` (as `optimized_plan_udf_runtime.md` §10.10 does) with a
+**reason** in its detail, listed in the last column, so a test asserts on the reason.
 
 | Logical node over unbounded input | Streaming form (`StreamForm`) | State | Output kind | Refusal reason |
 |---|---|---|---|---|
 | Scan, filter, project, window assign | `STATELESS` | none | the input's | — |
 | Union | `STATELESS` | none | §3.4 rule 3 | — |
-| SCALAR, ROW, MAP_BATCHES_COLUMN UDF; ungrouped MAP_BATCHES_FRAME over `INSERT_ONLY` | `STATELESS` | none (worker state is not checkpointed, `optimized_plan_udfs.md` §10.10) | the input's | `UNBOUNDED_FRAME_ON_CHANGELOG` |
+| SCALAR, ROW, MAP_BATCHES_COLUMN UDF; ungrouped MAP_BATCHES_FRAME over `INSERT_ONLY` | `STATELESS` | none (context state is not checkpointed, `optimized_plan_udf_runtime.md` §10.10) | the input's | `UNBOUNDED_FRAME_ON_CHANGELOG` |
 | PARTIAL aggregate below a FINAL | `EPOCH_PARTIAL`: pre-aggregates one epoch, flushes at its barrier | none across epochs | the input's | — |
 | Aggregate grouped by `window_start, window_end` (plus keys), input with a watermark | `WINDOW_AGG` | per (key, window); evicted at `W ≥ window_end + L` | §2.2.5 | — |
 | Aggregate with no window | `UPDATING_AGG` | per key | `UPSERT(group keys)` | `UNBOUNDED_AGG_NO_WINDOW` unless a retention is declared (§3.5) |
@@ -450,8 +454,9 @@ message StateSpec {
 - **Default:** the SDK derives it from the node's **logical path**: the digest of the stateful node's kind, its group
   or join keys, and the source bindings and logical operators below it. Optimizer decisions (build side, pins,
   exchanges) are left out, so the same query optimized again gets the same ids. A UDF below the node contributes its
-  name, kind and signature, **not its code digest**, so a new environment image does not move the id; a changed state
-  layout is caught by `schema_digest` instead.
+  name, kind and signature (`arg_types`, `return_type`, `state_type`), **not its code digest**, so a new environment
+  image does not move the id; a changed state layout is caught by `schema_digest` instead. Whether the UDF's
+  `read_set` is also part of that signature is open (D16).
 - **Nodes with no logical node of their own** take the logical anchor plus a role: the FINAL of an aggregate split and
   an eager aggregate below a join anchor on the logical aggregate (roles `FINAL`, `EAGER`); `NORMALIZE` anchors on its
   input's path (role `NORMALIZE`); the upsert materializer anchors on the sink's identity (role `MATERIALIZE`).
@@ -678,8 +683,8 @@ same case a **loud plan-time downgrade**, "ALO as downgrade, NOT a mode" (`strea
 `streaming_source.mojo:270-276`). This document reverses that: at-least-once becomes a declared mode, so a plan shows
 its guarantee before it runs. Decision D11.
 
-**UDF state.** Under ABI 1.0 a worker's state does not survive a restart; a mergeable `AGG_UDF`'s Arrow state is
-checkpointed (`optimized_plan_udfs.md` §10.10). Snapshotting a callable's own state needs the ABI 1.1 entries
+**UDF state.** Under ABI 1.0 a context's state does not survive a restart; a mergeable `AGG_UDF`'s Arrow state is
+checkpointed (`optimized_plan_udf_runtime.md` §10.10). Snapshotting a callable's own state needs the ABI 1.1 entries
 `snapshot` and `restore` (`udf_runtime_interface.md` §8.1, "Candidates for ABI 1.1").
 
 ### 4.5 Recovery and rescale
@@ -841,8 +846,8 @@ sink, with the committer on the coordinator.
 **Streaming form, epoch `E`.**
 
 1. **Ingest and barrier.** S1 polls events to its budget, probes the resident items table, calls `fx` through the
-   Python runtime in any of the three modes with no plan field changing, flushes its epoch-partial state into the
-   exchange and seals `E`.
+   Python runtime (its one mode is the runtime's own, and no plan field names it), flushes its epoch-partial state
+   into the exchange and seals `E`.
 2. **Log.** The coordinator logs each partition's offsets, idle flags and watermark; `W_E` is their minimum.
 3. **Combine, fire, evict.** S2 reads `E` once both producers sealed it, combines thread-local state, fires every
    `(category, minute)` window with `W_E ≥ window_end`, writes those rows as Parquet, evicts their state, snapshots the
@@ -862,7 +867,7 @@ open windows it discards.
 |---|---|---|
 | Logical relations, expressions, Arrow types | `komira_plan_ir`, `komira_plan_proto`, `komira_plan_wire` | Recursive `children`; the fix for `payload_narrow` and `group_topk`, dropped silently today (`optimized_plan.md` §5.4) |
 | RAW / OPTIMIZED contexts, `OptimizedPlan`, pins, admission, cut | Specified (#1094) | `optimized_plan.md` §12 |
-| UDF arms, three modes, runtime ABI | Specified (#1094, #1132) | Their stages; ABI 1.1 `snapshot`/`restore` |
+| UDF arms, one mode per language, runtime ABI | Specified (#1094, #1132) | Their stages; ABI 1.1 `snapshot`/`restore` |
 | Topic tail plus Iceberg history as one scan; Iceberg commits; upsert tails | Specified (#1094 §15.4.3; #1134) | The reader, the commit client, the tail |
 | Boundedness, `needs.unbounded`, refusal of blocking operators | Specified (#1094 §5.2, §6.1) | Implementation |
 | Event time, watermark, window assign, emit policy, typed sinks, `delivery` | **This document** | Proto fields, codec, SDK verbs, SQL `WATERMARK FOR` and window TVFs |
@@ -912,6 +917,7 @@ open windows it discards.
 | A1 | `storage_stack.md` | Rename the per-partition "watermark" and the property `komira.tail.<lineage>.watermarks` to "rolled offsets" (`komira.tail.<lineage>.rolled-offsets`) before it lands; `optimized_plan_sources.md` §15.4.3 renames `wm(p)` to match. |
 | A2 | `optimized_plan.md` §8 | `key_groups` on `WireExchangeNode` and `ExchangeEdge`; a keyed stateful node's `HASH` exchange is placed even when `host_count_max = 1`, and the cut elides it. |
 | A3 | `optimized_plan_udfs.md` §10.3 ("`UdfRef`") | `preserves_event_time` on `UdfRef`. |
+| A4 | `optimized_plan_udfs.md` §10.2-§10.4, §10.7, §10.9; `optimized_plan_udf_runtime.md` §10.10, §10.13; `optimized_plan.md` §7.1, §7.2, §9.4, §12 | An optional read set on ROW and MAP_BATCHES_FRAME, `UdfRef.read_set = 19` (`UdfReadSet`): unset means every input column; set, possibly empty, means exactly those columns. Replaces "the read set is `arg_types`". No UDF batch is retried at the first release (`udf_runtime_interface.md` §4.5). |
 
 ---
 
@@ -934,6 +940,7 @@ open windows it discards.
 | D13 | Lookup build side across snapshot expiry | Copy the build side into every savepoint; rebuild from the pin when it is live | Tag the pinned snapshot (impossible on tables komira did not create and on S3 Tables) | Recovery must not depend on someone else's expiry policy. |
 | D14 | An added measure in a roll | `RESET` of that state in the first version; a "new measure is null for open windows" `MAP` later | Define the `MAP` now | Its meaning for open windows is a product choice; `RESET` is explicit and correct. |
 | D15 | A roll's audit step on tables where branches are unavailable | Held pre-commits with a shadow sink for output checks | Let v2 commit directly, so a failed roll can only roll forward | Keeps "a failed roll parks v2 and keeps v1" true on every table. |
+| D16 | Whether a change of a UDF's `read_set` moves the `state_id` of a stateful node above it (open; `udf_runtime_interface.md` §1.3) | Yes: the read set joins the signature the logical path digests | No: only `arg_types`, `return_type` and `state_type` count | The state was computed from different inputs, and `schema_digest` would not catch a change that keeps the state layout. When set, `arg_types` already lists the read set's columns, so most read-set changes move the id through `arg_types`; what D16 decides is whether presence itself counts (unset against a read set naming every input column). |
 
 ---
 

@@ -1,7 +1,8 @@
 # Design: `OptimizedPlan`, a serializable optimized plan
 
 Status: proposed, not built. Scope: komira's plan wire, optimizer, plan cutter, executor admission, user code in
-plans (UDF nodes and the environment image, §10, specified in [`optimized_plan_udfs.md`](optimized_plan_udfs.md)),
+plans (UDF nodes and the environment image, §10, specified in [`optimized_plan_udfs.md`](optimized_plan_udfs.md) and
+[`optimized_plan_udf_runtime.md`](optimized_plan_udf_runtime.md)),
 and sources, index access paths and graph operators (§15, specified in
 [`optimized_plan_sources.md`](optimized_plan_sources.md)).
 
@@ -71,7 +72,7 @@ one host, it is cut into **optimized segments**, a second defined type built fro
 | **Producer** | Parses SQL (or takes a dataframe expression, including the user functions it calls), binds, gathers statistics, optimizes, captures user code (§10.6), and emits an `OptimizedPlan`. It is a program that links the engine and the producer library: the Mojo, TypeScript or Python SDK, or a notebook built on one. A **service that re-optimizes a stored query** on each run (for example a scheduler running a recurring job) is a producer too: it starts from a bound plan that an SDK produced and stored, links the same library, and stamps `kind = "komira/server"`. When the stored query has an environment image, the service runs the producer library from that image's base (§10.11). It is not a path for clients without an engine; there is none. For identical inputs every producer yields the same `plan_digest` (§7.1). The stamps differ, so the header bytes do not. |
 | **Scheduler** | Any system that places work. It is not part of komira. It accepts plan work only as an `OptimizedPlan`, never as SQL text or a bound plan, so it never runs the optimizer. It reads only the header, through the header-only library (§4.1), and never decodes the body. When the plan travels with an environment image, it checks that pair against the release records it is given, from the image manifest alone (§10.11). |
 | **Coordinator** | Learns the host count once placement is done. It verifies `plan_digest`, then **cuts** the plan into `OptimizedSegment`s (§8). The cut is mechanical and changes no decision. |
-| **Executor host** | Admits a segment or a plan (§7), lowers it, and applies only the named host-local rules (§5.3). It never re-optimizes. It runs user code in worker processes started from the plan's environment image (§10.10). |
+| **Executor host** | Admits a segment or a plan (§7), lowers it, and applies only the named host-local rules (§5.3). It never re-optimizes. It loads every UDF runtime from the plan's environment image into its own process and calls each through the runtime C ABI; how a runtime executes user code (native in-process, Python and Node in worker processes the runtime manages) is the runtime's (§10.10, `udf_runtime_interface.md` §1.2). |
 
 The producer optimizes, the scheduler places, the coordinator cuts and the host lowers. Each step runs once.
 
@@ -314,7 +315,7 @@ in-process use keeps that default.
 | Payload narrowing (`optimizer_payload_narrow.mojo`) | Off | Derives it from footers it opened after the pin check (§7.2) |
 | Scan sharing and its dynamic-filter slot (`optimizer_scan_share.mojo`) | Off | Derives it at lowering; the filter direction follows the recorded `build_side`; row-count thresholds read the host's own verified footers, never a producer number |
 | Where each UDF is evaluated; conjunct order around UDF predicates; CSE of non-`VOLATILE` UDFs | Decides; expressed as shape (§10.9) | Obeys it |
-| UDF worker count, threads, batch slicing | Records the bounds (`UdfResources`) and every return type (§10.5) | Chooses within the bounds |
+| UDF context count, threads, batch slicing | Records the bounds (`UdfResources`) and every return type (§10.5) | Chooses within the bounds |
 | Batch or streaming execution | Marks each scan's boundedness (§5.2) | Runs a plan with an `UNBOUNDED` scan under the streaming driver; this follows from the plan and is not a host choice |
 
 All paths in this table are under `src/komira_optimizer/` at the pinned commit.
@@ -329,7 +330,7 @@ The **complete list of host-local rules**:
 6. choice of morsel size, and of operator variant within a node's recorded algorithm;
 7. spill;
 8. the adaptive changes of §8.3, only where `adaptive_allowed` is set;
-9. UDF worker count, thread limits and batch slicing, within `UdfResources` (§10.8, §10.10);
+9. UDF context count, thread limits and batch slicing, within `UdfResources` (§10.8, §10.10);
 10. the three source rules of §15.8.3 (numbered 10-12 there): a reaped topic span read from a descendant snapshot,
     top-k per split, and the uncovered-file overlay of an `EXACT` index read.
 
@@ -471,6 +472,8 @@ defines **canonical form** for every message reachable from `OptimizedPlanBody` 
 
 - fields in ascending field-number order;
 - default-valued scalars omitted, including the `has_*` booleans when false;
+- a set message-typed field emitted even when every field inside it has its default (its tag and a zero length), and
+  an unset one omitted, so a set, empty `UdfRef.read_set` is not an unset one (`optimized_plan_udfs.md` §10.3);
 - repeated scalars packed;
 - no unknown fields (a body with one is refused, never re-emitted);
 - minimal varints;
@@ -542,14 +545,17 @@ The host, or the coordinator before a cut, runs steps 1-12:
    - `OPTIMIZED_UDF_RETURN_TYPE_MISSING`, `OPTIMIZED_UDF_STATE_TYPE_MISSING`, `OPTIMIZED_UDF_SCHEMA_DISAGREES`
    - `OPTIMIZED_UDF_AGGREGATE_OUTSIDE_AGGREGATE`, `OPTIMIZED_UDF_AGGREGATE_NOT_DECOMPOSABLE`,
      `OPTIMIZED_UDF_AGGREGATE_UNBOUNDED_GROUP`
-   - `OPTIMIZED_UDF_ROW_READ_SET_INVALID`, `OPTIMIZED_UDF_ROW_NULL_MODE`
+   - `OPTIMIZED_UDF_READ_SET_INVALID`, `OPTIMIZED_UDF_READ_SET_KIND`, `OPTIMIZED_UDF_READ_SET_ARG_MISMATCH`,
+     `OPTIMIZED_UDF_READ_SET_COLUMN_UNKNOWN`, `OPTIMIZED_UDF_READ_SET_GROUP_KEY`, `OPTIMIZED_UDF_ROW_NULL_MODE`
    - `OPTIMIZED_FIELD_UNSUPPORTED` (a statistics field on a node, §5.2)
    - on a segment only: `OPTIMIZED_EXCHANGE_PARTITIONS_UNSET`
    - the structural refusals of §15.10.1 (its pin refusals run in step 9)
 9. **Pins and environment.** Resolve and verify every pin (`OPTIMIZED_PLAN_SNAPSHOT_STALE`). Repeat §10.11 checks 1-3
    and run checks 4-7 against the image this host runs (`OPTIMIZED_ENV_CODE_MISSING`, `OPTIMIZED_ENV_PACKAGE_MISSING`,
-   `OPTIMIZED_ENV_RESERVED_PATH`, `OPTIMIZED_UDF_DESCRIPTOR_INVALID`, `OPTIMIZED_UDF_KIND_UNSUPPORTED`). Bind each
-   runtime and its transport, and load every `UdfRef` and data blob before any data is read
+   `OPTIMIZED_ENV_RESERVED_PATH`, `OPTIMIZED_UDF_DESCRIPTOR_INVALID`, `OPTIMIZED_UDF_READ_SET_DESCRIPTOR_MISMATCH`,
+   `OPTIMIZED_UDF_KIND_UNSUPPORTED`). Bind each runtime (its handle and capabilities; no transport,
+   `udf_runtime_interface.md` §1.2, §3.3), and load every `UdfRef` and data blob
+   before any data is read
    (`OPTIMIZED_UDF_CODE_DIGEST_MISMATCH`, `OPTIMIZED_UDF_CODE_UNLOADABLE`).
 10. **Lower**, applying only the §5.3 rules, with footers from the verified open.
 11. **Post-condition.** `OPTIMIZED_LOWERING_DIVERGED` (§7.3).
@@ -777,12 +783,24 @@ every `CodeForm`, `UdfStability`, `UdfNullMode` and `Boundedness` value, and eac
 lowering that treats `PROPAGATE` as `MANUAL` for the first contract version; a corpus runner that executes a UDF plan
 on the newest base regardless of its runtime ABI (the payload fails to load).
 
-**`ROW` cases** (`udf_runtime_interface.md` §6.3). A plan case reads 2 fields of a 100-column scan through a `ROW`
-UDF and asserts that the scan's `projection` and the call's arguments equal the read set (mutant: lowering passes
-the whole input row). Run cases: `f(r) = r.a if r.flag else r.b` with read set `{flag, a}`, over a batch where some
-row has `flag` false, fails with `UDF_FIELD_NOT_DECLARED` naming `b` and never returns null (mutant: the row proxy
-returns null for an unknown name); the same function with read set `{flag, a, b}` passes; one that catches the
-exception around the undeclared read still fails.
+**Read-set cases** (`optimized_plan_udfs.md` §10.2, `udf_runtime_interface.md` §6.3). Plan cases, each over a
+100-column scan:
+- a `ROW` UDF with read set `{a, b}`: the scan's `projection` and the call's arguments equal the read set (mutants:
+  lowering passes the whole input row; a planner that ignores a present read set);
+- the same function with `read_set` unset: all 100 columns reach the call, in input order (mutant: a planner that
+  treats unset as empty);
+- a `MAP_BATCHES_FRAME` with read set `{a}`: the scan's `projection` is `{a}` (mutant: pushdown stops at the frame, as
+  for an unset read set); grouped by `k` with read set `{a, k}`, the scan keeps `{a, k}` and the function receives
+  both (mutant: the planner prunes the group key);
+- a frame with an empty read set that returns each batch's row count: the scan projects no column and the counts are
+  right (mutants: a planner that treats empty as unset; a host that takes the batch length from its first child);
+- encoding: a `UdfRef` with an empty `read_set` and one without it encode to different canonical bytes and
+  `plan_digest`s (mutant: an encoder that drops an empty `read_set`, so the two plans hash the same).
+
+Run cases: `f(r) = r.a if r.flag else r.b` with read set `{a, flag}`, over a batch where some row has `flag` false,
+fails with `UDF_FIELD_NOT_DECLARED` naming `b` and never returns null (mutant: the row view returns null for an
+unknown name); the same function with read set `{a, b, flag}`, and with `read_set` unset, passes; one that catches
+the exception around the undeclared read still fails.
 
 **Runtime-swap invariance** (`udf_runtime_interface.md` §3.2). Every query in the UDF corpus is planned twice; the
 second time every `UdfRef.code` is replaced by `{runtime: "komira-test/null"}` with its other fields empty, and every
@@ -864,7 +882,8 @@ The remedy for a revoked plan is to produce it again with a good build.
 
 ## 10. User code: UDF nodes and the environment image
 
-Specified in [`optimized_plan_udfs.md`](optimized_plan_udfs.md), §10.1-§10.14. In brief:
+Specified in [`optimized_plan_udfs.md`](optimized_plan_udfs.md) (§10.1-§10.9) and
+[`optimized_plan_udf_runtime.md`](optimized_plan_udf_runtime.md) (§10.10-§10.14). In brief:
 
 - A plain Python or TypeScript function becomes a `UdfRef` in `needs.udfs`, referenced by index from three new arms
   (`WireUdfApply`, an n-ary expression; `WireMapBatchesNode`; `WireStepNode`) and from the `AGG_UDF` aggregate
@@ -872,6 +891,10 @@ Specified in [`optimized_plan_udfs.md`](optimized_plan_udfs.md), §10.1-§10.14.
   over a group, or a mergeable accumulator) and step. A `UdfRef` names its runtime by an open string, so native and
   managed UDFs in any language use the same reference (`udf_runtime_interface.md`, komira-ai/komira#1132). GPU
   UDFs come later.
+- A row (`ROW`) or frame (`MAP_BATCHES_FRAME`) UDF may carry the input columns it reads (`UdfRef.read_set`). Unset
+  means every input column; set, the optimizer projects the input to it. Each SDK fills it from an explicit
+  declaration or a static scan, and leaves it unset when it cannot bound the reads.
+- Nothing is retried at the first release: a lost context or a crash of user code fails the run.
 - Every return type is explicit in the plan: a Python type hint or a `return_dtype=`/`schema=` argument, or in
   TypeScript a type value on the verb. A function with no type is refused by name on the user's machine.
 - The plan identifies code by content digest only, through a neutral `CodeForm` (`PACKAGE`, `BUNDLE`, `VALUE`) and a
@@ -913,9 +936,9 @@ Each stage is independently reviewable and leaves `main` green. Every stage ship
 | 8 | `komira_optimized_plan`, `komira_shuffle` | `WireSinkBinding`, the shuffle-partition scan source, and the cutter (§8) with its "no decision changed" assertion. | Mutants: a cutter that reorders a join; one that flips a build side. |
 | 9 | the host lowering target | The post-condition (§7.3) and the closure lint excluding `komira_optimizer`. | A planted dependency goes red; each §7.3 mutant is refused. |
 | 10 | `komira_optimized_plan`, the host lowering target, the release machine | The golden corpus (§9.4): emitted at each release that ships this type, append-only, welded into the header, admission and lowering targets, with the coverage assertion and the stored-cut key test (§9.6). | Each §9.4 mutant goes red; editing or deleting a corpus file is refused by the CI check. |
-| 11 | `komira_plan_proto`, `komira_plan_wire`, `komira_plan_ir`, `komira_plan_expr` | `UdfRef`, `UdfCode`, `CodeDigest`, `UdfKind` (with `ROW`), `CodeForm`, `RuntimeNeed`; `WireUdfApply`, `WireMapBatchesNode`, `WireStepNode`, `AggFn.AGG_UDF`, `WireField.children`, `WirePlanEnvelope.udfs`; engine tags 19, 20, expression tag 27 and aggregate tag 37; the OPTIMIZED refusal of the legacy forms. | Every §10.4 refusal by name. Mutants: a decoder that accepts `WireUdfCall` in OPTIMIZED; a `udf_index` off by one; a `WireField` that drops a grandchild; an admission that accepts a `UdfRef` with no `return_type`; one that accepts a `PARTIAL` node with a plain-form aggregate; one that accepts a `ROW` under `PROPAGATE` or with a repeated read-set name. |
-| 12 | `komira_optimized_plan_header`, `komira_optimized_plan` | §10.11 checks 1-3 in the header library (the release record and the manifest bytes are arguments, never fetched), checks 4-7 and step 9's code load in the host. | One hostile test per `OPTIMIZED_ENV_*` token. Mutants: a prefix check that compares layer sets instead of an ordered prefix; a path check that ignores whiteouts; a manifest whose sha256 is not the digest. |
-| 13 | the host lowering target, new Python and Node UDF worker packages, the `komira/native` loader | Native UDFs in-process by default and in workers on request; the supervisor's heartbeat token kept out of the engine; worker processes under their own user id, Arrow over shared memory, load-once caching, thread limits, the §10.10 errors, the per-batch return-type check, both aggregate forms, and the §10.9 optimizer rules in the portable profile. | Mutants: a worker that reloads the payload per batch (a load counter goes red); a host that retries a `VOLATILE` batch; a float batch accepted into an int64 return type; a Node worker that accepts an unsafe integer into int64; a mergeable aggregate whose partial state is dropped at the exchange; a group state over 64 MiB that does not fail `UDF_STATE_TOO_LARGE`; a supervisor that passes its heartbeat token to the engine (a native fixture that searches its own process's arguments, environment, readable files and descriptors finds it). |
+| 11 | `komira_plan_proto`, `komira_plan_wire`, `komira_plan_ir`, `komira_plan_expr` | `UdfRef` (with `read_set`), `UdfReadSet`, `UdfCode`, `CodeDigest`, `UdfKind` (with `ROW`), `CodeForm`, `RuntimeNeed`; `RecordedFields`, beside `WireField`, the runtime descriptors' recorded-fields schema; `WireUdfApply`, `WireMapBatchesNode`, `WireStepNode`, `AggFn.AGG_UDF`, `WireField.children`, `WirePlanEnvelope.udfs`; engine tags 19, 20, expression tag 27 and aggregate tag 37; the OPTIMIZED refusal of the legacy forms. The IR holds the read set as an optional value, never as a list whose emptiness means "unset". | Every §10.4 refusal by name, the read-set refusals included. Mutants: a decoder that accepts `WireUdfCall` in OPTIMIZED; a `udf_index` off by one; a `WireField` that drops a grandchild; an admission that accepts a `UdfRef` with no `return_type`; one that accepts a `PARTIAL` node with a plain-form aggregate; one that accepts a `ROW` under `PROPAGATE`; one that accepts a read set with a repeated, empty or unsorted name; one that accepts a read set on a `SCALAR` or a `STEP`; one that accepts `arg_types` names that differ from the read set's; one that accepts a grouped frame whose read set omits a `group_by` column; one that accepts an unset read set on a `MAP_BATCHES_FRAME` whose `arg_types` lists fewer columns than its child outputs (unset read as "whatever `arg_types` says"). Presence: a `UdfRef` with an empty `read_set` and one without it decode to different IR values and encode to different canonical bytes (mutants: a decoder that maps empty to unset; an encoder that drops an empty `read_set`, so two plans hash the same); the same for an empty `RecordedFields`. |
+| 12 | `komira_optimized_plan_header`, `komira_optimized_plan` | §10.11 checks 1-3 in the header library (the release record and the manifest bytes are arguments, never fetched), checks 4-7 and step 9's code load in the host. | One hostile test per `OPTIMIZED_ENV_*` token. Mutants: a prefix check that compares layer sets instead of an ordered prefix; a path check that ignores whiteouts; a manifest whose sha256 is not the digest. Read set at admission (check 7): a `ROW` `UdfRef` with `read_set` `{a}` against a descriptor that records `{a, b}`, one with `read_set` `{}` against `{a}`, and one with `read_set` `{a}` against a recorded, empty `{}` each refuse with `OPTIMIZED_UDF_READ_SET_DESCRIPTOR_MISMATCH` naming both lists; a `ROW` `UdfRef` with `read_set` unset over a child whose output is `(b, a)`, so `arg_types` lists `(b, a)`, against a descriptor that records `{a, b}` is admitted, because the names are compared as sorted sets; a descriptor whose `RecordedFields.fields` records `{b, a}` out of order is not canonical and is refused with `OPTIMIZED_UDF_DESCRIPTOR_INVALID` (`ERR_DESCRIPTOR`), never admitted. Mutants: a host that maps `ERR_READ_SET_MISMATCH` to `OPTIMIZED_UDF_DESCRIPTOR_INVALID`; a `validate` that compares the names as an ordered list rather than a sorted set (the unset-read-set case over the `(b, a)` child goes red); a `validate` that accepts an out-of-order `RecordedFields` (the recorded `{b, a}` case goes red); one that treats a recorded, empty field list as absent and skips the comparison (the `{a}`-against-`{}` case goes red). The runtime side of the same comparison is `udf_runtime_conformance.md` (the native read-set cases). |
+| 13 | the host lowering target, the `komira/native`, `komira/python` and `komira/node` runtime packages | Every runtime loaded in-process and called through the C ABI, with no engine-side transport (`udf_runtime_interface.md` §1.2); native UDFs in-process; the supervisor's heartbeat token kept out of the engine; the Python and Node runtimes' worker processes under the engine's user id (`udf_runtime_interface.md` §1.3, §5, §7); load-once caching per context, thread limits, the §10.10 errors, the per-batch return-type check, both aggregate forms, and the §10.9 optimizer rules in the portable profile. | Mutants: a context that reloads the payload per batch (a load counter goes red); a host that retries a batch, of any stability, after `ERR_WORKER_CRASHED` or `ERR_INSTANCE_LOST` (the run must fail with `UDF_WORKER_CRASHED` naming the UDF, and a call counter must show no second call); a float batch accepted into an int64 return type; a Node worker that accepts an unsafe integer into int64; a mergeable aggregate whose partial state is dropped at the exchange; a group state over 64 MiB that does not fail `UDF_STATE_TOO_LARGE`; a supervisor that passes its heartbeat token to the engine (a native fixture that searches its own process's arguments, environment, readable files and descriptors finds it). Read set (§9.4): a planner that treats an unset read set as empty (a `MAP_BATCHES_FRAME` with no `read_set` over a 5-column child must keep all 5, and its output must equal the unpruned run); one that treats an empty read set as unset (a row-count frame with an empty `read_set` over a 100-column scan must project the scan to no column); one that ignores a present read set (read set `{a}` over a 100-column scan must leave the scan's projection `{a}`); one that prunes a grouped frame's key (`group_by k`, read set `{k, v}`: the scan keeps `{k, v}`); a host that passes a frame the whole child when a read set is set (the runtime returns `ERR_HOST_CONTRACT`). Nesting: a frame whose input comes from a scalar UDF of the same runtime in the same pipeline runs on one context with no pipeline break (mutant: a host that refuses the nested call or deadlocks waiting for it). |
 | 14 | the host lowering target, `komira_shuffle_streaming` | The streaming driver: a plan with an `UNBOUNDED` scan runs over `StreamingMorselSource`, with the §5.2 boundedness checks and the §10.10 streaming rules for UDFs. | Mutants: a host that runs an `UNBOUNDED` plan under the batch driver (an `Idle` fixture is taken for end of input and the output is short); an admission that takes the mode from `needs.unbounded` instead of the body; a plain aggregate admitted over an unbounded input. |
 
 **Critical path.** komira has no optimizer driver at the pinned commit: no `def optimize` exists under `src/`, and
@@ -926,10 +949,11 @@ the driver and stage 9 on the lowering.
 
 UDFs and streaming add three items to the critical path:
 
-- Python and Node worker runtimes, the `komira/native` loader, and the bases: one per supported CPython minor and one
-  per supported Node major (§10.11). Today the base image has no engine, no Python and no Node
+- The `komira/python` and `komira/node` runtimes, the `komira/native` loader, and the bases: one per supported
+  CPython minor and one per supported Node major (§10.11). Today the base image has no engine, no Python and no Node
   (`packaging/images/base/README.md` in komira-ai/komira#1070).
-- The engine's UDF executor: an in-process call (native UDFs' default) and a worker transport.
+- The engine's UDF executor: one in-process path that calls every runtime through the C ABI (`udf_runtime_interface.md`
+  §1.2, §4); the engine has no worker transport.
 - The streaming driver. The streaming source contract exists (`src/komira_morsel/streaming_source.mojo`), but
   `git grep -l StreamingMorselSource` finds only the contract, its tests and the streaming shuffle
   (`src/komira_shuffle_streaming`); no driver runs a plan over it.
