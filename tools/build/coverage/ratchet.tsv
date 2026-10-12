@@ -106,7 +106,7 @@ src/komira_dispatch_agg_exec	9902	-
 src/komira_dispatch_agg_folds	10000	-
 src/komira_dispatch_join_kernels	10000	-
 src/komira_dispatch_scan	10000	-
-src/komira_dynamic_filter	9406	8076
+src/komira_dynamic_filter	10000	10000
 src/komira_encoding	10000	-
 src/komira_eval	9915	-
 src/komira_exec_types	4729	6206

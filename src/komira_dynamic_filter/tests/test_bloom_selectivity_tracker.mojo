@@ -146,5 +146,146 @@ def test_multiplier_saturates_at_64() raises:
     assert_equal(skipped, 640)
 
 
+# -----------------------------------------------------------------------------
+# A 100% pass batch that is not the first of its window takes no fast path:
+# only the window evaluation can pause the filter.
+# -----------------------------------------------------------------------------
+def test_full_pass_after_first_batch_is_no_fast_path() raises:
+    var tracker = SelectivityTracker(0.50)
+    tracker.record(100, 0)
+    for _ in range(4):
+        tracker.record(100, 100)
+        assert_false(tracker.is_paused(), "batches 2..5 do not pause")
+        assert_true(tracker.should_apply())
+    # Batch 6 closes the window: 400 of 600 passed, 0.67 >= 0.50.
+    tracker.record(100, 100)
+    assert_true(tracker.is_paused())
+    var skipped = 0
+    while not tracker.should_apply():
+        skipped += 1
+    assert_equal(skipped, 10)
+
+
+# -----------------------------------------------------------------------------
+# The window closes on its sixth batch, not before; a pass rate exactly at the
+# threshold pauses; one row under it does not.
+# -----------------------------------------------------------------------------
+def test_window_boundary_and_threshold_equality() raises:
+    var at = SelectivityTracker(0.50)
+    for b in range(6):
+        assert_false(at.is_paused(), "not paused before batch " + String(b + 1))
+        at.record(100, 50)
+    assert_true(at.is_paused(), "pass rate 0.50 equals the threshold")
+
+    var under = SelectivityTracker(0.50)
+    for _ in range(5):
+        under.record(100, 50)
+    under.record(100, 49)
+    assert_false(under.is_paused(), "pass rate 299/600 is under 0.50")
+
+    var custom = SelectivityTracker(0.90)
+    for _ in range(6):
+        custom.record(100, 89)
+    assert_false(custom.is_paused(), "0.89 is under the 0.90 threshold")
+
+
+# -----------------------------------------------------------------------------
+# After a window is evaluated its counters start again from zero: the next
+# window is judged on its own six batches.
+# -----------------------------------------------------------------------------
+def test_window_counters_reset_after_evaluation() raises:
+    var tracker = SelectivityTracker(0.50)
+    for _ in range(6):
+        tracker.record(100, 0)
+    assert_false(tracker.is_paused())
+    # Second window: 99% pass. With stale counters it would close after one
+    # batch, or average down to 594/1200 and stay active.
+    tracker.record(100, 99)
+    for b in range(4):
+        assert_false(tracker.is_paused(), "second window batch " + String(b + 2))
+        tracker.record(100, 99)
+    assert_false(tracker.is_paused())
+    tracker.record(100, 99)
+    assert_true(tracker.is_paused(), "second window alone: 0.99")
+
+
+# -----------------------------------------------------------------------------
+# A selective window resets the backoff: the next pause is the base 10
+# batches again, not the doubled 20.
+# -----------------------------------------------------------------------------
+def test_selective_window_resets_backoff() raises:
+    var tracker = SelectivityTracker(0.50)
+    tracker.record(100, 100)  # fast path: pause 10, multiplier 2
+    while not tracker.should_apply():
+        pass
+    for _ in range(6):
+        tracker.record(100, 10)  # selective: multiplier back to 1
+    assert_false(tracker.is_paused())
+    tracker.record(100, 100)  # first batch of a new window: fast path
+    var skipped = 0
+    while not tracker.should_apply():
+        skipped += 1
+    assert_equal(skipped, 10)
+
+
+# -----------------------------------------------------------------------------
+# A pause from the window evaluation (not the fast path) lasts BACKOFF_BASE
+# batches at multiplier 1; the selective window after it closes on its sixth
+# batch, stays active and leaves the multiplier at 1.
+# -----------------------------------------------------------------------------
+def test_window_pause_then_selective_window() raises:
+    var tracker = SelectivityTracker(0.50)
+    for _ in range(5):
+        tracker.record(100, 60)
+    tracker.record(100, 60)  # window closes at 0.60: pause 10
+    assert_true(tracker.is_paused())
+    var skipped = 0
+    while not tracker.should_apply():
+        skipped += 1
+    assert_equal(skipped, 10)
+    assert_false(tracker.is_paused())
+    # A window of 0.10 must stay active, and needs all six batches to close.
+    tracker.record(100, 10)
+    for _ in range(4):
+        tracker.record(100, 10)
+        assert_false(tracker.is_paused())
+    tracker.record(100, 10)
+    assert_false(tracker.is_paused())
+    assert_equal(tracker.pause_multiplier, 1)
+
+
+# -----------------------------------------------------------------------------
+# The passed-row count starts again from zero with each window: a selective
+# window after a near-threshold one is judged on its own rows.
+# -----------------------------------------------------------------------------
+def test_window_passed_rows_reset_after_evaluation() raises:
+    var tracker = SelectivityTracker(0.50)
+    for _ in range(6):
+        tracker.record(100, 45)
+    assert_false(tracker.is_paused(), "0.45 is selective")
+    # With 270 stale passed rows this window would read 330/600 = 0.55.
+    for _ in range(6):
+        tracker.record(100, 10)
+    assert_false(tracker.is_paused(), "second window alone: 0.10")
+
+
+# -----------------------------------------------------------------------------
+# Pauses decided by the window evaluation back off too: 10, 20, then 40
+# batches for three unselective windows in a row.
+# -----------------------------------------------------------------------------
+def test_window_pauses_back_off() raises:
+    var tracker = SelectivityTracker(0.50)
+    var want: List[Int] = [10, 20, 40]
+    for p in range(3):
+        for _ in range(6):
+            assert_true(tracker.should_apply())
+            tracker.record(100, 60)
+        assert_true(tracker.is_paused(), "window " + String(p + 1))
+        var skipped = 0
+        while not tracker.should_apply():
+            skipped += 1
+        assert_equal(skipped, want[p], "pause after window " + String(p + 1))
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

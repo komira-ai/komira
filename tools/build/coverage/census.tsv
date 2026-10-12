@@ -88,7 +88,7 @@ komira//src/komira_dispatch_agg_exec:komira_dispatch_agg_exec	src/komira_dispatc
 komira//src/komira_dispatch_agg_folds:komira_dispatch_agg_folds	src/komira_dispatch_agg_folds	library	OK	1616	1616	-	-	no	conda	-	-
 komira//src/komira_dispatch_join_kernels:komira_dispatch_join_kernels	src/komira_dispatch_join_kernels	library	OK	709	709	-	-	no	conda	-	-
 komira//src/komira_dispatch_scan:komira_dispatch_scan	src/komira_dispatch_scan	library	OK	1002	1002	-	-	no	conda	-	-
-komira//src/komira_dynamic_filter:komira_dynamic_filter	src/komira_dynamic_filter	library	OK	206	219	42	52	yes	conda	-	-
+komira//src/komira_dynamic_filter:komira_dynamic_filter	src/komira_dynamic_filter	library	OK	276	276	70	70	yes	conda	-	-
 komira//src/komira_encoding:komira_encoding	src/komira_encoding	library	OK	321	321	-	-	no	release	-	-
 komira//src/komira_eval:komira_eval	src/komira_eval	library	OK	2816	2840	-	-	no	conda	-	-
 komira//src/komira_exec_types:komira_exec_types	src/komira_exec_types	library	OK	105	222	36	58	yes	conda	src/komira_exec_types/byte_size.mojo,src/komira_exec_types/exec_result.mojo,src/komira_exec_types/process_result.mojo,src/komira_exec_types/query_context.mojo	-
