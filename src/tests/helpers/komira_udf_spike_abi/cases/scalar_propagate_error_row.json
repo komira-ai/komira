@@ -7,6 +7,6 @@
  "null_mode": "PROPAGATE",
  "args": [{"type": "int64", "nullable": true}],
  "result": [{"type": "int64", "nullable": true}],
- "input": {"length": 6, "columns": [{"type": "int64", "values": [1, null, 2, 3, 4, 5]}]},
+ "input": {"length": 6, "columns": [{"type": "int64", "values": [0, null, 1, 2, 3, 4]}]},
  "expect": {"status": "ERR_RAISED", "run_error": "UDF_RAISED", "row": 4, "message": "nonempty"}
 }

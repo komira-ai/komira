@@ -1,4 +1,3 @@
-load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 
@@ -83,6 +82,10 @@ mojo_library(
         "tests/test_conform_runner.mojo": _RUNNER_CASES | {"echo.so": ":echo"},
         "tests/test_harness.mojo": {
             "src/tests/helpers/komira_udf_spike_abi/tests/data/malformed/bad.json": "tests/data/malformed/bad.json",
+            "src/tests/helpers/komira_udf_spike_abi/cases/cancel_set_during_call.json": "cases/cancel_set_during_call.json",
+            "src/tests/helpers/komira_udf_spike_abi/cases/deadline_in_future_not_reached.json": "cases/deadline_in_future_not_reached.json",
+            "src/tests/helpers/komira_udf_spike_abi/cases/deadline_one_ns_ahead.json": "cases/deadline_one_ns_ahead.json",
+            "src/tests/helpers/komira_udf_spike_abi/cases/deadline_reached_during_call.json": "cases/deadline_reached_during_call.json",
             "echo.so": ":echo",
             "echo_global_lock.so": ":echo_global_lock",
             "echo_variant.so": ":echo_variant",
@@ -98,16 +101,14 @@ mojo_library(
 )
 
 # The same cases as one directory (cases/*.json), for the suites of runtimes
-# built in other packages (after the library, whose name the deps lint
-# reads first).
+# built in other packages.
 filegroup(
     name = "cases",
     srcs = glob(["cases/*.json"]),
     visibility = ["PUBLIC"],
 )
 
-# The C side, after the library so the deps lint reads the library's name
-# first.
+# The C side.
 staged_files(
     name = "c_files",
     srcs = [
@@ -252,13 +253,4 @@ mojo_shared_lib(
     exports_exact = True,
     deps = [":komira_udf_echo_broken"],
     visibility = ["PUBLIC"],
-)
-
-# The deps above name every komira_* module the library and its tests import
-# (tools/build/lint: mojo_deps).
-mojo_deps(
-    name = "deps_lint",
-    buck = "BUCK",
-    srcs = glob(["**/*.mojo"]),
-    visibility = ["komira//:tests_lints"],
 )

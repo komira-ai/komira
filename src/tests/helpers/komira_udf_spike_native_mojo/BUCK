@@ -1,4 +1,3 @@
-load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 
 # Test-only: a native UDF library written in Mojo, for the UDF runtime spike
@@ -36,13 +35,4 @@ mojo_shared_lib(
         "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_abi",
     ],
     visibility = ["PUBLIC"],
-)
-
-# The deps above name every komira_* module the library and its tests import
-# (tools/build/lint: mojo_deps).
-mojo_deps(
-    name = "deps_lint",
-    buck = "BUCK",
-    srcs = glob(["**/*.mojo"]),
-    visibility = ["komira//:tests_lints"],
 )

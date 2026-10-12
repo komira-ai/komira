@@ -1,0 +1,44 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The limits check's tool (src/limits.zig says what it checks): `tree` is the
+# validation //:limits runs (limits.bzl), `merged` is run by the platform
+# table's check (tests//functional/platform_table:check.sh) over the commit
+# subjects of main, which no build action can read.
+
+_SRCS = [
+    "src/limits.zig",
+    "src/main.zig",
+]
+
+# One target per scenario: the rows of limits.tsv (rule 1), the sites in a
+# tree and which files are read (rules 2 and 3), and the merged PRs (rule 4).
+_TESTS = [
+    "rows_test",
+    "sites_test",
+    "merged_test",
+]
+
+[
+    zig_test(
+        name = t,
+        exec_compatible_with = LINUX_X86_64,
+        imports = _SRCS + ["src/testkit.zig"],
+        src = "src/{}.zig".format(t),
+        busybox = "komira//tools/build/toolchains:busybox",
+        zig = "komira//tools/build/toolchains:zig",
+    )
+    for t in _TESTS
+]
+
+# Built only behind its unit tests.
+zig_exe(
+    name = "limits_check",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/main.zig",
+    unit_tests = [":" + t for t in _TESTS],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)

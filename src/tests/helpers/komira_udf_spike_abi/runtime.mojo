@@ -18,6 +18,9 @@
 from ._cabi import Word
 from ._host import (
     Counts,
+    arm_virtual_clock,
+    disarm_virtual_clock,
+    virtual_clock_on,
     _Arena,
     arm_cancel_on_clock,
     array_released,
@@ -289,11 +292,23 @@ struct CallOptions(Copyable, Movable):
     the call, so the flag goes up inside the call at the runtime's first
     clock read, never before the call starts, and no clock or thread decides
     when. `deadline_passed`: the deadline is one nanosecond after the host
-    clock's zero, long past."""
+    clock's zero, long past. `deadline_after_ns` (0: none): the deadline is
+    that far in the future, on a virtual clock the host's now_ns answers
+    during the call (1 ms per read, _host.arm_virtual_clock), so the runtime
+    reaches it after a fixed number of its own clock reads."""
 
     var cancel: Bool
     var cancel_during_call: Bool
     var deadline_passed: Bool
+    var deadline_after_ns: Int64
+
+    def __init__(
+        out self, cancel: Bool, cancel_during_call: Bool, deadline_passed: Bool, deadline_after_ns: Int64 = 0
+    ):
+        self.cancel = cancel
+        self.cancel_during_call = cancel_during_call
+        self.deadline_passed = deadline_passed
+        self.deadline_after_ns = deadline_after_ns
 
     @staticmethod
     def plain() -> CallOptions:
@@ -311,10 +326,12 @@ struct _Call(Copyable, Movable):
 
     var call: Word
     var armed: Bool
+    var virtual: Bool
 
-    def __init__(out self, call: Word, armed: Bool):
+    def __init__(out self, call: Word, armed: Bool, virtual: Bool):
         self.call = call
         self.armed = armed
+        self.virtual = virtual
 
 
 struct UdfRuntime(Movable):
@@ -485,14 +502,21 @@ struct UdfRuntime(Movable):
 
     def _begin(mut self, opts: CallOptions) -> _Call:
         self._calls += 1
-        var call = new_call(self._arena, Int64(1) if opts.deadline_passed else Int64(0), self._calls, opts.cancel)
+        var deadline = Int64(0)
+        if opts.deadline_passed:
+            deadline = 1
+        elif opts.deadline_after_ns > 0:
+            deadline = arm_virtual_clock(host_data_of(self._host)) + opts.deadline_after_ns
+        var call = new_call(self._arena, deadline, self._calls, opts.cancel)
         if opts.cancel_during_call:
             arm_cancel_on_clock(host_data_of(self._host), cancel_flag_of(call))
-        return _Call(call, opts.cancel_during_call)
+        return _Call(call, opts.cancel_during_call, opts.deadline_after_ns > 0 and not opts.deadline_passed)
 
     def _end(mut self, c: _Call):
         if c.armed:
             disarm_cancel_on_clock(host_data_of(self._host))
+        if c.virtual:
+            disarm_virtual_clock(host_data_of(self._host))
 
     def call_batch(mut self, inst: Handle, spec: UdfSpec, args: Batch, opts: CallOptions) raises -> CallResult:
         """One call_batch. Under PROPAGATE the host drops every row with a null
@@ -633,7 +657,8 @@ struct UdfRuntime(Movable):
                         outputs.append(b^)
                 except e:
                     out.fault = String(e)
-                _ = release_out(d_out)
+                if not release_out(d_out) and out.fault == "":
+                    out.fault = "UDF_RUNTIME_FAULT: release left its slot set"
                 if out.fault != "":
                     ended = True
                     break
@@ -746,6 +771,11 @@ struct UdfRuntime(Movable):
             raise Error("UDF_HARNESS_ALLOC: the timed loop could not start its threads")
         var w = read_words(out, 9)
         return ThreadTimes(w[0], w[1], w[2], Int(w[3]), Int(w[4]), Int(w[5]), w[6], w[7], w[8])
+
+    def clock_is_virtual(self) -> Bool:
+        """Whether the host's clock answers the virtual clock now (only
+        while a call with a future deadline runs)."""
+        return virtual_clock_on(host_data_of(self._host))
 
     def ledger(self) -> Counts:
         """Arrays and streams the host exported and their release counts."""

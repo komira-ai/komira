@@ -136,6 +136,7 @@ enum fixture_id {
   F_FLAGS_PROBE,
   F_NEAR,
   F_YIELD_FIRST,
+  F_SLOW_ONCE,
   F_DOUBLE_BATCH, /* double, written as a batch loop (echo_calls.inc) */
   F_FAHRENHEIT_BATCH
 };
@@ -226,7 +227,8 @@ enum table_shape {
   TS_DICTIONARY,   /* a dictionary on the struct, whose type has none */
   TS_NULL_COUNT_ZERO,   /* rows 1 and 10 null in the bitmap, null_count 0 */
   TS_NULL_COUNT_UNKNOWN, /* a bitmap with no null row, null_count -1: legal */
-  TS_NULL_COUNT_BELOW    /* null_count -2 */
+  TS_NULL_COUNT_BELOW,   /* null_count -2 */
+  TS_RELEASE_KEEPS_SLOT  /* its release frees the table but leaves `release` set */
 };
 
 /* args: one format per argument ('*' for ROW: any number of int64 fields,
@@ -256,6 +258,8 @@ static const struct fixture FIXTURES[] = {
     {"bad_layout", F_BAD_LAYOUT, SC, "l", "l", "", 0},
     {"null_out", F_NULL_OUT, SC, "l", "l", "", 0},
     {"const7", F_CONST7, SC, "", "l", "", 0},
+    /* raises where the argument is 3, naming that row (a value rule: user
+     * code in any language can follow it; the adapter reports the row) */
     {"raise_on_row_3", F_RAISE_ON_ROW_3, SC, "l", "l", "", 0},
     {"slow_loop", F_SLOW_LOOP, SC, "l", "l", "", 0},
     {"sum", F_SUM, AM, "l", "l", "l", 0},
@@ -327,6 +331,7 @@ static const struct fixture FIXTURES[] = {
      * column */
     {"table_two_types", F_TWO_TYPES, MF, "l", "tli", "", 0},
     {"table_null_count_below", F_TABLE, MF, "l", "tl", "", TS_NULL_COUNT_BELOW},
+    {"table_release_keeps_slot", F_TABLE, MF, "l", "tl", "", TS_RELEASE_KEEPS_SLOT},
     /* sum, with a state column one row too long; with a result one row
      * short; with agg_update not moving group_ids; with agg_merge not moving
      * the states. */
@@ -384,6 +389,10 @@ static const struct fixture FIXTURES[] = {
     {"sum64", F_SUM_WIDE, SC, "llllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll", "l", "", 0},
     /* each row: the call's call_id */
     {"call_id", F_CALL_ID, MC, "l", "l", "", 0},
+    /* slow_loop as a runtime that reads the host's clock exactly once per
+     * row (after its cancel check) and checks the deadline against that
+     * read: the read pattern the virtual-clock cases are calibrated for */
+    {"slow_loop_once_per_row", F_SLOW_ONCE, SC, "l", "l", "", 0},
     /* rows 0, 1, 2: the flags of the argument struct's schema, of its first
      * field, of the result schema, as load saw them */
     {"flags_probe", F_FLAGS_PROBE, MC, "l", "l", "", 0},
@@ -680,6 +689,15 @@ static void release_struct(struct ArrowArray* a) {
 /* table_out_on_error's release: leaves `release` set and frees nothing (the
  * frame frees the table at frame_close), so a host that keeps reading the
  * slot after an error reads a live table that looks unreleased. */
+/* table_release_keeps_slot's release: frees the table (once) and leaves
+ * `release` set. */
+static void release_struct_keeps_slot(struct ArrowArray* a) {
+  if (a->private_data == NULL) return;
+  release_struct(a);
+  a->private_data = NULL;
+  a->release = release_struct_keeps_slot;
+}
+
 static void release_leaves_slot(struct ArrowArray* a) { ((struct table_block*)a->private_data)->host_released = 1; }
 
 /* A struct array of `n` rows whose `k` children the caller fills with

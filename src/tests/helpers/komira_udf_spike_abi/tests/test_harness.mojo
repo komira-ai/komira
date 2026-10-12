@@ -45,8 +45,9 @@ from komira_udf_spike_abi.cases import Case, parse_case
 from komira_udf_spike_abi.conform import CaseResult, Report, load_cases, run_case, run_suite, runtime_id_ok
 from komira_udf_spike_abi.contract import *
 from komira_udf_spike_abi.runtime import CallOptions, Outcome, UdfRuntime, UdfSpec
+from komira_udf_spike_abi._host import CLOCK_ARM, CLOCK_DISARM, CLOCK_IS_VIRTUAL, CLOCK_READ, clock_probe
 from komira_udf_spike_abi.runtime import Handle
-from komira_udf_spike_abi.values import Batch, Column, ColumnType, TYPE_INT32
+from komira_udf_spike_abi.values import Batch, Column, ColumnType, TYPE_INT32, TYPE_INT64
 
 comptime VARIANT = "./echo_variant.so"
 comptime MALFORMED = "src/tests/helpers/komira_udf_spike_abi/tests/data/malformed"
@@ -301,6 +302,125 @@ def _oracle_edges() raises:
     _ = unsetenv("KOMIRA_UDF_ECHO_VARIANT")  # no variant left selected for what runs next
     assert_equal(r.verdict, "FAIL", "a runtime accepting major 2 passed init_abi")
     assert_true("init accepted ABI major 2" in r.reason, r.reason)
+
+
+def _clock_is_wall(rt: UdfRuntime, after: String) raises:
+    """The host's clock is in its wall mode (the virtual clock is off)."""
+    assert_false(rt.clock_is_virtual(), "the virtual clock outlived its " + after)
+
+
+def _virtual_clock_ends_with_its_call() raises:
+    """The virtual clock of a call with a future deadline is the host's
+    clock for that call only: it is off again after call_batch, run_frame,
+    agg_update and agg_merge, each when the entry returns OK and when it
+    fails."""
+    var rt = UdfRuntime.open("./echo.so")
+    var d = parse_case(
+        '{"name": "n", "defect": "d", "run": "call_batch", "entry": "slow_loop", "shape": "SCALAR",'
+        + ' "args": [{"type": "int64"}], "result": [{"type": "int64"}], "options": {"deadline_after_ns": 1},'
+        + ' "input": {"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]}, "expect": {}}'
+    )
+    var h = _bound(rt, d)
+    var res = rt.call_batch(h[2], d.spec, d.input, d.options)
+    assert_equal(res.outcome.status, ERR_DEADLINE, String(res.outcome))
+    _clock_is_wall(rt, "failed call_batch")
+    var later = CallOptions(False, False, False, 1_000_000_000_000)
+    res = rt.call_batch(h[2], d.spec, d.input, later)
+    assert_true(res.outcome.is_ok(), String(res.outcome))
+    _clock_is_wall(rt, "call_batch")
+    _unbound(rt, h)
+    var f = parse_case(
+        '{"name": "n", "defect": "d", "run": "frame", "entry": "running_sum", "shape": "MAP_BATCHES_FRAME",'
+        + ' "args": [{"type": "int64"}], "result": [{"type": "int64"}], "result_is_table": true, "expect": {}}'
+    )
+    h = _bound(rt, f)
+    var fr = rt.run_frame(h[2], f.spec, List[Batch](), later)
+    assert_true(fr.outcome.is_ok(), String(fr.outcome))
+    _clock_is_wall(rt, "frame")
+    # the same when the entry fails (cancelled before it starts)
+    var later_cancelled = CallOptions(True, False, False, 1_000_000_000_000)
+    fr = rt.run_frame(h[2], f.spec, List[Batch](), later_cancelled)
+    assert_equal(fr.outcome.status, ERR_CANCELLED, String(fr.outcome))
+    _unbound(rt, h)
+    _clock_is_wall(rt, "failed frame")
+    var a = parse_case(
+        '{"name": "n", "defect": "d", "run": "agg_split", "entry": "sum", "shape": "AGG_MERGEABLE",'
+        + ' "args": [{"type": "int64"}], "result": [{"type": "int64"}], "state": [{"type": "int64"}], "expect": {}}'
+    )
+    h = _bound(rt, a)
+    var g = rt.agg_open(h[2])
+    var one = Column(TYPE_INT64)
+    one.append_int(5)
+    var b = Batch(1)
+    b.columns.append(one.copy())
+    var up = rt.agg_update(g.handle, b, [Int32(0)], 1, later)
+    assert_true(up.is_ok(), String(up))
+    _clock_is_wall(rt, "agg_update")
+    var mg = rt.agg_merge(g.handle, one, [Int32(0)], 1, later)
+    assert_true(mg.is_ok(), String(mg))
+    _clock_is_wall(rt, "agg_merge")
+    up = rt.agg_update(g.handle, b, [Int32(0)], 1, later_cancelled)
+    assert_equal(up.status, ERR_CANCELLED, String(up))
+    _clock_is_wall(rt, "failed agg_update")
+    mg = rt.agg_merge(g.handle, one, [Int32(0)], 1, later_cancelled)
+    assert_equal(mg.status, ERR_CANCELLED, String(mg))
+    _clock_is_wall(rt, "failed agg_merge")
+    rt.agg_close(g.handle)
+    _unbound(rt, h)
+    rt.shutdown()
+
+
+comptime CASES_DIR = "src/tests/helpers/komira_udf_spike_abi/cases/"
+
+
+def _host_clock() raises:
+    """now_ns is monotonic across modes and calls: floored at its last
+    reading; the virtual clock starts at max(wall, last reading), moves 1 ms
+    per read, and is on exactly while armed."""
+    # (op, wall) -> the answer expected
+    var script: List[Int64] = [
+        CLOCK_READ, 100,  # 100
+        CLOCK_READ, 50,  # 100: floored
+        CLOCK_IS_VIRTUAL, 0,  # 0
+        CLOCK_ARM, 70,  # 100: the last reading, above the wall
+        CLOCK_IS_VIRTUAL, 0,  # 1
+        CLOCK_READ, 0,  # 100: the virtual clock's start
+        CLOCK_READ, 0,  # 1_000_100: one step
+        CLOCK_DISARM, 0,  # 0
+        CLOCK_IS_VIRTUAL, 0,  # 0
+        CLOCK_READ, 200,  # 1_000_100: floored
+        CLOCK_READ, 5_000_000,  # 5_000_000
+        CLOCK_ARM, 10,  # 5_000_000
+        CLOCK_ARM, 9_000_000,  # 9_000_000: the wall, above the last reading
+        CLOCK_DISARM, 0,  # 0
+        CLOCK_READ, 0,  # 5_000_000: floored at the last reading (an arm's start is not a reading)
+    ]
+    var want: List[Int64] = [100, 100, 0, 100, 1, 100, 1_000_100, 0, 0, 1_000_100, 5_000_000, 5_000_000, 9_000_000, 0, 5_000_000]
+    var got = clock_probe(script)
+    assert_equal(len(got), len(want))
+    for k in range(len(want)):
+        assert_equal(got[k], want[k], "clock script step " + String(k))
+
+
+def _once_per_row_reader() raises:
+    """The clock-driven cases hold for a runtime that reads the host's clock
+    exactly once per row (slow_loop_once_per_row), not only for echo's
+    slow_loop, which reads it about a hundred times per row: the virtual
+    clock's deadlines are calibrated to the read pattern, not assumed."""
+    var names: List[String] = [
+        "cancel_set_during_call", "deadline_reached_during_call", "deadline_in_future_not_reached",
+        "deadline_one_ns_ahead",
+    ]
+    var cases = List[Case]()
+    for k in range(len(names)):
+        with open(CASES_DIR + names[k] + ".json", "r") as f:
+            var c = parse_case(f.read())
+            c.spec.entry = "slow_loop_once_per_row"
+            cases.append(c^)
+    var report = run_suite("./echo.so", cases)
+    for k in range(len(names)):
+        var r = report.result(names[k])
+        assert_equal(r.verdict, "PASS", names[k] + " on a once-per-row reader: " + r.reason)
 
 
 def _refusing_variants() raises:
@@ -609,4 +729,7 @@ def main() raises:
     _refusing_variants()
     _destructor_shuts_down()
     _oracle_edges()
+    _virtual_clock_ends_with_its_call()
+    _once_per_row_reader()
+    _host_clock()
     print("test_harness: ok")

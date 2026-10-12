@@ -1,3 +1,4 @@
+load("@komira//tools/build/one_definition:libraries.bzl", "THIRD_PARTY_OWNERS")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
@@ -53,6 +54,14 @@ _C_FLAGS = [
     "-Wa,--noexecstack",
     "-w",
 ]
+
+# Each feature defined for the compile is one a probe of tests/features/ has
+# shown to compile here (tests//functional/s2n_probes builds the probe of
+# every feature listed, and tests//negative/s2n_probes the rest), so a
+# feature with no probe of that name was never shown and is refused.
+_UNPROBED = [f for f in S2N_FEATURES if f not in PROBES]
+
+[fail("third_party/s2n-tls/features.bzl: {} name(s) no probe of srcs.bzl's PROBES (tests/features/<name>.c), so nothing shows they compile here: {}".format(len(_UNPROBED), ", ".join(_UNPROBED))) for _ in _UNPROBED[:1]]
 
 _DEFINES = [
     "-DNDEBUG",
@@ -126,7 +135,7 @@ prefixed_archive_check(
         ":prefix_symbols[symbols]",
         "//third_party/aws-lc:prefix_symbols[symbols]",
     ],
-    prefix = "komira_s2n_",
+    prefix = THIRD_PARTY_OWNERS["third_party/s2n-tls"].prefix,
 )
 
 # libs2n as its users take it: every global symbol is komira_s2n_* (C

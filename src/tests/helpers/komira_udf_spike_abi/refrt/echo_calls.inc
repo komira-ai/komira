@@ -114,7 +114,9 @@ static int32_t scalar(komira_udf_instance* inst, const komira_udf_call* call, co
     for (int64_t r = 0; r < n; r++)
       if (!is_valid(x, r) || (y != NULL && !is_valid(y, r)))
         return fail(h, e, KOMIRA_UDF_ERR_RAISED, "a strict fixture got a null argument", r);
-  if (fx->id == F_RAISE_ON_ROW_3 && n > 3) return fail(h, e, KOMIRA_UDF_ERR_RAISED, "raise_on_row_3: row 3", 3);
+  if (fx->id == F_RAISE_ON_ROW_3) /* raises on the value 3, reporting the row it is on */
+    for (int64_t r = 0; r < n; r++)
+      if (is_valid(x, r) && i64_at(x, r) == 3) return fail(h, e, KOMIRA_UDF_ERR_RAISED, "raise_on_row_3: the value 3", r);
   if (fx->id == F_RAISE_ON_SECOND_CALL && inst->calls == 1)
     return fail(h, e, KOMIRA_UDF_ERR_RAISED, "raise_on_second_call: this instance's second call", -1);
   uint8_t* v;
@@ -122,6 +124,17 @@ static int32_t scalar(komira_udf_instance* inst, const komira_udf_call* call, co
   if (!make_col(h, o, rows, &v, &d)) return fail(h, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "call_batch: out of memory", -1);
   int64_t* di = (int64_t*)d;
   for (int64_t r = 0; r < rows; r++) {
+    if (fx->id == F_SLOW_ONCE) {
+      if (cancelled(call)) {
+        release_array(o);
+        return fail(h, e, KOMIRA_UDF_ERR_CANCELLED, "slow_loop_once_per_row: cancelled", r);
+      }
+      int64_t now = h->now_ns(h->host_data); /* the row's one clock read */
+      if (call != NULL && call->deadline_ns != 0 && now > call->deadline_ns) {
+        release_array(o);
+        return fail(h, e, KOMIRA_UDF_ERR_DEADLINE, "slow_loop_once_per_row: deadline passed", r);
+      }
+    }
     if (fx->id == F_SLOW_LOOP) {
       if (cancelled(call)) {
         release_array(o);

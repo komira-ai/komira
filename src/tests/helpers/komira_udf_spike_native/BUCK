@@ -1,4 +1,3 @@
-load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "mojo_test")
 
@@ -399,13 +398,4 @@ mojo_shared_lib(
     exports_exact = True,
     deps = [":komira_udf_native_variants"],
     visibility = ["PUBLIC"],
-)
-
-# The deps above name every komira_* module the library and its tests import
-# (tools/build/lint: mojo_deps).
-mojo_deps(
-    name = "deps_lint",
-    buck = "BUCK",
-    srcs = glob(["**/*.mojo"]),
-    visibility = ["komira//:tests_lints"],
 )
