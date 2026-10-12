@@ -43,7 +43,7 @@ case "$RESULT" in /*) ;; *) RESULT="$PWD/$RESULT" ;; esac
 case "$LEDGER" in /*) ;; *) LEDGER="$PWD/$LEDGER" ;; esac
 case "$MOJO" in /*) ;; *) MOJO="$PWD/$MOJO" ;; esac
 case "$WELDED" in /*) ;; *) WELDED="$PWD/$WELDED" ;; esac
-# Scratch is per action, as in lint.sh: BUCK_SCRATCH_PATH, unset on a remote
+# Scratch is per action, as in the lint tool (tool/src/main.zig): BUCK_SCRATCH_PATH, unset on a remote
 # worker, whose root is the action's own.
 case "${BUCK_SCRATCH_PATH:-}" in
     "") T="$PWD/.komira_action" ;;

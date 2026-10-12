@@ -13,7 +13,9 @@
 //!     is no package or is also in deps): catches the shell-name check of
 //!     test_runtime.bzl deleted;
 //!   - assert level, defines and memory cap refusals: catches the
-//!     define-twice `fail()` deleted.
+//!     define-twice `fail()` deleted;
+//!   - an optimization level `mojo build` does not accept (opt_level.bzl):
+//!     catches the level check of opt_level_args deleted.
 const std = @import("std");
 const lib = @import("lib/lib.zig");
 
@@ -94,6 +96,11 @@ const ROWS = [_]lib.Row{
         .name = "assert_level_bad_cap",
         .target = "tests//negative/assert_level:bad_cap",
         .text = "tests//negative/assert_level:bad_cap: test_memory_cap_mib is -1; it must be a number of MiB, or 0 for no cap",
+    },
+    .{
+        .name = "opt_bad_level",
+        .target = "tests//negative/opt_level:bad_level",
+        .text = "tests//negative/opt_level:bad_level: optimization level `fast` is not one of 0, 1, 2, 3",
     },
     .{
         .name = "c_dep_kind",
