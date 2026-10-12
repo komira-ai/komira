@@ -68,7 +68,16 @@ An abbreviated revision, a platform kci does not release, or a layout built
 for another CPU is refused before any request; `plan` checks the layout and
 sends nothing:
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+
+def bytes_of(s: String) -> List[UInt8]:
+    var out = List[UInt8]()
+    var src = s.as_bytes()
+    for i in range(len(src)):
+        out.append(src[i])
+    return out^
+-->
 ```mojo
 from std.tempfile import mkdtemp
 from komira_oci.oci_auth import OciAuth

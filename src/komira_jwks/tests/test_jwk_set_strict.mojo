@@ -372,7 +372,7 @@ def test_rsa_ranges_skipped() raises:
 
 def test_unknown_members_ignored() raises:
     var doc = _set(
-        String('{"x5c":["MIIB"],"key_ops":["verify"],"ext":{"a":1},')
+        String('{"x5c":["MIIB"],"x5t":"AA","ext":{"a":1},')
         + '"kty":"OKP","crv":"Ed25519","x":"'
         + _b64(32, 9)
         + '","kid":"k"}'

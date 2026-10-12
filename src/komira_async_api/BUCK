@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 
 # The pool-depth counter: three C functions over one process-global static.
 staged_files(
@@ -23,6 +24,30 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_spawn_drop.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# libkomira_async_api_native.so.1: the C this library owns, as its own
+# shared library exporting the names its callers call
+# (tools/build/native/README.md, "Each library's shared library"). Built and
+# checked here; no package ships it yet.
+native_shared_library(
+    name = "komira_async_api_native",
+    archives = [
+        ":komira_concurrency_pool_depth",
+    ],
+    callers = [
+        ":komira_async_api",
+        "//src/komira_async:komira_async",
+        "//src/komira_column_kernels:komira_column_kernels",
+    ],
+    library = "komira_async_api",
+    # Every weak undefined symbol of the library, recorded from its first
+    # green link (checks 3 and 7 hold it to exactly this list):
+    weak_undefined = [
+        # zig's C runtime (crti.o): the profiling hook, absent unless -pg.
+        "__gmon_start__",
     ],
     visibility = ["PUBLIC"],
 )

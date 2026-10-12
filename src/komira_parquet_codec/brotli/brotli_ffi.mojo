@@ -3,7 +3,9 @@
 # =============================================================================
 #
 # Brotli DECOMPRESSION (read path only) — FFI wrapper to the Brotli decoder's
-# one-shot `BrotliDecoderDecompress` symbol.
+# one-shot `BrotliDecoderDecompress`, built with every global symbol renamed
+# komira_brotli_* (//third_party/brotli): the symbol called is
+# `komira_brotli_DecoderDecompress`.
 #
 # Parquet supports a BROTLI compression codec. This package reads it through
 # the Brotli decoder built from //third_party/brotli and linked statically
@@ -79,7 +81,7 @@ def _brotli_decompress_into[
     # declared Int32, so the upper half of the 64-bit return register (left
     # unspecified for a 32-bit return) is never read.
     var result = external_call[
-        "BrotliDecoderDecompress",
+        "komira_brotli_DecoderDecompress",
         Int32,
         UInt64,
         UnsafePointer[UInt8, MutUntrackedOrigin],

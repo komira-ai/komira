@@ -1,0 +1,6 @@
+# Directory names kci would refuse become names it accepts: upper case
+# lowered, each non-ASCII code point and other byte one _, pkg_ before a
+# name that does not start with a letter.
+arg "{units_file}"
+input units_file "lib_a\t//src/a:a\n"
+exit 0

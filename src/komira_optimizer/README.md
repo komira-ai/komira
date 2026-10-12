@@ -35,6 +35,7 @@ here executes a plan.
 | `optimizer_stats` | cardinality and row-width estimates |
 | `optimizer_column_stats_provider` | per-column NDV providers (Parquet-metadata tier, row-count heuristic tier) |
 | `optimizer_reorder` | join-chain extraction and greedy cost-based reordering of inner joins |
+| `optimizer_cost_order` | `dp_pair_beats`: the total order on DPccp candidates for one relation set (lower cost, then lower relation-set bits), so an equal-cost tie does not depend on emission order |
 | `optimizer_transitive_edges` | deriving transitive equi-join edges from column equivalence classes in a join chain |
 | `optimizer_tdom` | the TDOM equivalence-class graph and composite NDV |
 | `optimizer_tdom_cost` | join cardinality from TDOMs over the bridging edges of a (left, right) split |
@@ -54,7 +55,7 @@ here executes a plan.
 | `optimizer_agg_cse` | finding a duplicated grouped aggregate subtree and replacing it with one shared in-memory source, and collapsing identical aggregate expressions within one Aggregate |
 | `optimizer_scan_share` | deciding which Parquet scans share one read (`plan_scan_shares`), the dynamic-filter slot, and which scans stay Parquet sources |
 | `optimizer_config` | `OptimizerConfig`: the optimizer's options and their defaults, as one value |
-| `optimizer_driver` | `optimize(plan, config, deps)`: the rules above run over one logical plan in a fixed order, returning the optimized logical plan; `optimize_status`, its non-raising twin returning an `OptimizeResult` |
+| `optimizer_driver` | `optimize(plan, config, deps)`: the rules above run over one logical plan in a fixed order, returning the optimized logical plan; `optimize_status`, its non-raising twin returning an `OptimizeResult`; `optimize_portable(plan, config, profile)`, the same order under a `PortableProfile` (no scalar bindings, a plan that needs an executed sub-plan refused) |
 | `optimizer_partition_topn` | fusing a row_number / rank, a `<= K` filter and the column drop into one PartitionTopN |
 | `optimizer_count_distinct` | whether an aggregate is the streaming COUNT(DISTINCT) shape over a Parquet scan (a decision for the caller that executes it; no rewrite) |
 | `optimizer_window_rewrite` | window co-location and fusion of matching PartitionBy nodes, and eliding a Sort the PartitionBy already satisfies |
