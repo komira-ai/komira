@@ -212,6 +212,11 @@ names is missing or is not the one it declares; a planned change would
 replace an adopted object (always refused) or delete one whose resource is
 not ADOPT_DELETABLE; or an object carries kci's stamp and adoption mark while
 its resource no longer writes adopt."""
+comptime FINDING_OWNERSHIP: Int = 6
+"""The engine refused a node before any change (refusal.mojo): an object of
+the node's name that is foreign, or a conflict (stamped for another owner, or
+its stamp stripped while the ledger records it), or a node that cannot stamp.
+`resource_id` is the node's owner and `field_path` the node id."""
 
 
 struct Finding(Copyable, Movable, Deinitable):
@@ -311,8 +316,9 @@ struct CellContext(Copyable, Movable, Deinitable):
 
 @fieldwise_init
 struct ArtifactNeed(Copyable, Movable, Deinitable):
-    """The artifact a resource needs on a cloud: its type (`oci-image`) and
-    platform (OS + CPU, `linux/amd64`)."""
+    """The artifact a resource needs on a cloud: its type (`OCI`, the
+    `ARTIFACT_TYPE_OCI` word, for an image) and platform (OS + CPU,
+    `linux/amd64`)."""
 
     var kind: String
     var platform: String

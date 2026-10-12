@@ -1,8 +1,12 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 
 # The part of the HTTP layer a client and a server share: the h1 and h2 codecs
-# (HPACK included), TLS over s2n-tls (which carries aws-lc's libcrypto; the TLS
-# layer declares its functions itself, so s2n is a dep), and the transport seam:
+# (HPACK included), TLS over s2n-tls (the TLS layer declares its functions
+# itself, so s2n is a dep; s2n needs aws-lc's libcrypto, which komira_crypto
+# ships, and s2n's shared library has NEEDED on komira_crypto's, so
+# komira_crypto is a dep too and its package a requirement:
+# tools/build/mojo/README.md, "Native reach"), and the transport seam:
 # the IO stream traits, plain TCP, a scripted fake, stream parking and gRPC
 # trailer emission. komira_http_client and komira_http_server depend on it and
 # on nothing of each other.
@@ -13,11 +17,14 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 mojo_library(
     name = "komira_http_core",
+    # Its C ships in its package as komira_http_core_native below (lib/libkomira_http_core_native.so.1).
+    native = ":komira_http_core_native",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_clock:komira_clock",
         "//src/komira_collections:komira_collections",
+        "//src/komira_crypto:komira_crypto",
         "//src/komira_libc:komira_libc",
         "//third_party/s2n-tls:s2n",
     ],
@@ -150,3 +157,29 @@ export_file(name = "tests/fixtures/tls/leaf_cert.pem", visibility = ["PUBLIC"])
 export_file(name = "tests/fixtures/tls/leaf_key.pem", visibility = ["PUBLIC"])
 export_file(name = "tests/fixtures/tls/root_ca.pem", visibility = ["PUBLIC"])
 export_file(name = "tests/fixtures/smoke_cert.pem", visibility = ["PUBLIC"])
+
+# libkomira_http_core_native.so.1: the C this library owns, as its own
+# shared library exporting the names its callers call
+# (tools/build/native/README.md, "Each library's shared library"). Built and
+# checked here, and packed into the library's conda package (`native`).
+native_shared_library(
+    name = "komira_http_core_native",
+    archives = [
+        "//third_party/s2n-tls:s2n",
+    ],
+    callers = [
+        ":komira_http_core",
+        "//src/komira_http_client:komira_http_client",
+    ],
+    library = "komira_http_core",
+    # s2n-tls calls aws-lc, which komira_crypto's library exports to it
+    # (its caller_archives): NEEDED, found through RUNPATH $ORIGIN.
+    needed_owners = ["//src/komira_crypto:komira_crypto_native"],
+    # Every weak undefined symbol of the library, recorded from its first
+    # green link (checks 3 and 7 hold it to exactly this list):
+    weak_undefined = [
+        # zig's C runtime (crti.o): the profiling hook, absent unless -pg.
+        "__gmon_start__",
+    ],
+    visibility = ["PUBLIC"],
+)
