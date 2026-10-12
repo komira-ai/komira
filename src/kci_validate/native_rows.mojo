@@ -57,7 +57,7 @@
 # The alone and openssl environments share the whole set's pixi cache
 # (PIXI_CACHE_DIR), so the compiler and the release download once.
 #
-# The generated programs compile on every build: generated/ holds one of
+# The generated programs compile on every build: tests/generated/ holds one of
 # each, built by this package's BUCK (`native_load_example`,
 # `openssl_example`) and held byte-equal to what the two functions write by
 # tests/test_native_rows.mojo.

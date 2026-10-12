@@ -25,13 +25,18 @@
 #   (5) a README run whose loader record names the komira .so from
 #       /usr/lib: `loaded_from` fails;
 #   (7) the openssl program failing: `openssl` fails naming the owner;
+#   (set) `run_native_rows` for a set (the metapackage named, komira_alpha a
+#       member): komira_alpha is installed alone (its own manifest, the
+#       whole set's pixi cache), its .so loaded there and its README run
+#       under the loader's record; a validation without conda-forge gets a
+#       failed `openssl` row naming it and runs no openssl install;
 #   (alone) `alone_pins`: a metapackage's native members each get an
 #       environment of their own (a `lib_files` library, and a library
 #       requiring a system codec), a plain library does not; a validation
 #       installing one native package by itself needs none;
 #   (load) `load_findings`: every path LOADED passes; a path not reported
 #       and a run that failed with no line are findings.
-#   (gen) the two generated programs equal generated/'s copies, which the
+#   (gen) the two generated programs equal tests/generated/'s copies, which the
 #       package's BUCK compiles; the extra environments share the whole
 #       set's pixi cache.
 #   A release with no native pin gets none of these rows and no extra run:
@@ -48,17 +53,19 @@ from std.os import getenv, makedirs, symlink
 from std.os.path import exists
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_api import OUTCOME_SUCCEEDED, OUTCOME_VALIDATION_FAILED, VALIDATION_KIND_CONDA_INSTALL_ENV, ResultValidation
+from kci_api import OUTCOME_SUCCEEDED, OUTCOME_VALIDATION_FAILED, VALIDATION_KIND_CONDA_INSTALL_ENV, ResultValidation, ResultValidationCheck
 from kci_build import ProcessRunner, RunResult, RunSpec, ScriptedRunner, ScriptedStep
 from kci_pkg_upload import PkgResponse, ScriptedPkgTransport, content_identity_of
 from kci_publish import NoWaitSleeper
 from kci_publish.release_fixture import ExampleRelease, write_example_inputs, write_text_file
 from kci_release_machine import StageValidation
+from kci_release_set.conda_metadata import LibFile
 from kci_release_set.member import file_sha256_hex
 from komira_runtime_paths import data_path
 from kci_validate import (
     EnvHost,
     InstallPin,
+    ReadmeProgram,
     RecordingIndexPollLog,
     ValidateRequest,
     alone_pins,
@@ -68,6 +75,7 @@ from kci_validate import (
     load_program_text,
     openssl_program_text,
     run_install_env,
+    run_native_rows,
     run_program_argv,
 )
 
@@ -587,7 +595,7 @@ def test_each_native_member_of_a_set_is_installed_alone() raises:
 
 
 def test_the_generated_programs_are_the_ones_the_build_compiles() raises:
-    # generated/ holds one of each; BUCK builds them (native_load_example,
+    # tests/generated/ holds one of each; BUCK builds them (native_load_example,
     # openssl_example), so what kci writes is held to compiling Mojo
     var owner = String("/env/lib/libkomira_example_native.so.1")
     var paths: List[String] = [owner.copy()]
@@ -596,6 +604,107 @@ def test_the_generated_programs_are_the_ones_the_build_compiles() raises:
         open(data_path(String("openssl_example.mojo")), "r").read(),
         openssl_program_text(owner, String("/env/lib/libssl.so.3")),
     )
+
+
+def _lf(kind: String, path: String, sha: String) -> LibFile:
+    var f = LibFile()
+    f.kind = kind.copy()
+    f.path = path.copy()
+    f.sha256_hex = sha.copy()
+    return f^
+
+
+def _plain_record() -> String:
+    return (
+        String('{"name":"komira_alpha","version":"1.0.0","build":"h0_1","files":["') + String(LINK) + String('","')
+        + String(SO) + String('"]}')
+    )
+
+
+def test_a_native_member_of_a_set_is_checked_alone() raises:
+    var root = _tmp(String("set"))
+    var so = _elf()
+    _write_bytes(root + String("/so"), so)
+    var sha = file_sha256_hex(root + String("/so"))
+    var alpha = InstallPin(String("komira_alpha"))
+    alpha.version = String("1.0.0")
+    alpha.build = String("h0_1")
+    alpha.subdir = String("linux-64")
+    alpha.is_library = True
+    alpha.import_name = String("komira_alpha")
+    alpha.has_lib_files = True
+    alpha.lib_files.append(_lf(String("link"), String(LINK), sha))
+    alpha.lib_files.append(_lf(String("shared"), String(SO), sha))
+    alpha.depends.append(String("__glibc >=2.34"))
+    var meta = InstallPin(String("komira"))
+    meta.version = String("1.0.0")
+    meta.build = String("h0_1")
+    meta.subdir = String("linux-64")
+    var named = List[InstallPin]()
+    named.append(meta.copy())
+    var pins = List[InstallPin]()
+    pins.append(meta.copy())
+    pins.append(alpha.copy())
+    # the whole set's environment, as its install left it
+    var dir = root + String("/install-set")
+    var work = dir + String("/work")
+    var env = work + String("/") + String(ENV)
+    makedirs(env + String("/conda-meta"), exist_ok=True)
+    makedirs(env + String("/lib"), exist_ok=True)
+    makedirs(work + String("/out"), exist_ok=True)
+    write_text_file(env + String("/conda-meta/komira_alpha-1.0.0-h0_1.json"), _plain_record())
+    _write_bytes(env + String("/") + String(SO), so)
+    _chmod(env + String("/") + String(SO), Int32(0o755))
+    symlink(String("libkomira_alpha_native.so.1"), env + String("/") + String(LINK))
+    var program = ReadmeProgram()
+    program.file = String(PROGRAM)
+    program.text = String("the README runner, played\n")
+    program.package = String("komira_alpha")
+    program.display = String("src/komira_alpha/README.md")
+    var programs = List[ReadmeProgram]()
+    programs.append(program^)
+    # no conda-forge: row 7 has nowhere to get the system OpenSSL from
+    var v = StageValidation(7)
+    v.name = String("install-set")
+    v.kind = String(VALIDATION_KIND_CONDA_INSTALL_ENV)
+    v.installs.append(String("komira"))
+    v.compiler_channel = String(COMPILER)
+    var p = Played(so.copy())
+    p.inner.expect(
+        ScriptedStep(run_program_argv(work, String("native_load.mojo")), stdout_text=String("LOADED ") + env + String("/") + String(SO) + String("\n"))
+    )
+    var awork = dir + String("/alone/komira_alpha/work")
+    var aenv = awork + String("/") + String(ENV)
+    var install = ScriptedStep(install_env_argv(awork))
+    install.writes(String(ENV) + String("/conda-meta/komira_alpha-1.0.0-h0_1.json"), _plain_record())
+    p.inner.expect(install^)
+    p.inner.expect(
+        ScriptedStep(run_program_argv(awork, String("native_load.mojo")), stdout_text=String("LOADED ") + aenv + String("/") + String(SO) + String("\n"))
+    )
+    var readme = ScriptedStep(run_program_argv(awork, String(PROGRAM), List[String]()), stdout_text=String(COUNT))
+    readme.writes(String("out/readme_komira_alpha.ld.102"), _trace(aenv + String("/lib")))
+    p.inner.expect(readme^)
+    var checks = List[ResultValidationCheck]()
+    run_native_rows(p, v, String(CHANNEL), String("1.0.0"), dir, named, pins, programs, checks)
+    assert_equal(p.inner.remaining(), 0)
+    var order = String("")
+    var failed = String("")
+    for i in range(len(checks)):
+        if i > 0:
+            order += String(" ")
+        order += checks[i].check
+        if not checks[i].ok:
+            failed += checks[i].got
+    assert_equal(order, String("lib_files glibc needed symbolic load alone load loaded_from openssl"))
+    assert_true(failed.startswith(String("openssl: the validation declares no conda-forge channel")), failed)
+    assert_true(checks[len(checks) - 1].got == failed)
+    # alone: its own manifest, naming komira_alpha and not the metapackage;
+    # the whole set's pixi cache
+    var manifest = open(awork + String("/pixi.toml"), "r").read()
+    assert_true(manifest.find(String("komira_alpha = {")) >= 0, manifest)
+    assert_true(manifest.find(String("komira = {")) < 0, manifest)
+    assert_true(_env_has(p.inner.calls[1], String("PIXI_CACHE_DIR=") + work + String("/cache")))
+    assert_true(_env_has(p.inner.calls[3], String("LD_DEBUG_OUTPUT=") + awork + String("/out/readme_komira_alpha.ld")))
 
 
 def test_load_findings() raises:
