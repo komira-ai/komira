@@ -438,7 +438,7 @@ test "__glibc is the floor given, never a constant" {
 
 /// A minimal ELF64 shared object: a null section, a dynamic section holding
 /// one NEEDED per name, and its string table.
-fn testElf(alloc: Alloc, names: []const []const u8) ![]u8 {
+pub fn testElf(alloc: Alloc, names: []const []const u8) ![]u8 {
     var strtab = std.ArrayList(u8).init(alloc);
     try strtab.append(0);
     var dyn = std.ArrayList(u8).init(alloc);
