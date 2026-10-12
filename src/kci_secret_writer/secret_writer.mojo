@@ -318,9 +318,9 @@ struct StaticSecretWriter(SecretWriter, Movable):
         try:
             if secret_ref not in self._p[].version_counts:
                 return 0
-            return self._p[].version_counts[secret_ref]
+            return self._p[].version_counts[secret_ref]  # cov: unreachable its raising arm: the membership check above holds the key
         except:
-            return 0
+            return 0  # cov: unreachable the lookup above follows a membership check of the same key, so it cannot raise
 
     def define_count(self) -> Int:
         """How many `define_container` (empty-slot) calls were recorded — the

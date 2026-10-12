@@ -21,7 +21,7 @@ komira//src/kci_release_channel:kci_release_channel	src/kci_release_channel	libr
 komira//src/kci_release_machine:kci_release_machine	src/kci_release_machine	library	OK	988	990	-	-	no	release	-	-
 komira//src/kci_release_set:kci_release_set	src/kci_release_set	library	OK	738	746	-	-	no	conda	-	-
 komira//src/kci_resource_proto:kci_resource_proto	src/kci_resource_proto	library	OK	0	0	-	-	no	release	-	-
-komira//src/kci_secret_writer:kci_secret_writer	src/kci_secret_writer	library	OK	61	65	13	16	yes	conda	-	-
+komira//src/kci_secret_writer:kci_secret_writer	src/kci_secret_writer	library	OK	69	69	20	20	yes	conda	-	-
 komira//src/kci_validate:kci_validate	src/kci_validate	library	OK	1229	1347	-	-	no	conda	-	-
 komira//src/kci_validator_report:kci_validator_report	src/kci_validator_report	library	OK	746	746	-	-	no	release	-	-
 komira//src/kci_validator_rows:kci_validator_rows	src/kci_validator_rows	library	OK	117	117	40	40	yes	release	-	-

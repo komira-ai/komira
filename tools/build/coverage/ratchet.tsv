@@ -39,7 +39,7 @@ src/kci_release_channel	10000	-
 src/kci_release_machine	9979	-
 src/kci_release_set	9892	-
 src/kci_resource_proto	0	-
-src/kci_secret_writer	9384	8125
+src/kci_secret_writer	10000	10000
 src/kci_validate	9123	-
 src/kci_validator_report	10000	-
 src/kci_validator_rows	10000	10000
