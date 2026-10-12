@@ -32,7 +32,7 @@ A kind serving a fixed in-memory table as two splits of 3 and 2 rows, the
 second read after the first, drained directly and through the erased set:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
-```mojo
+```mojo module
 from komira_arrow.column import Column
 from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.record_batch import RecordBatch
@@ -45,15 +45,19 @@ from komira_scan_resolver.drain_scan import drain_scan
 from komira_scan_resolver.scan_source_resolver import ErasedScanSourceResolver, ScanRequest, ScanSourceResolver, ScanSourceResolvers, SCAN_KIND_NOT_EXECUTABLE, refuse_discover_splits
 from komira_scan_resolver.scan_split import ScanSplit, ScanSplitPlan, SplitDelta, SplitPoll, SplitPosition, SplitReader
 
+
 comptime NUMBERS_KIND = "example.numbers"
+
 
 def numbers_schema() -> Schema:
     return Schema.from_fields_1(Field("n", DType.int64, True))
+
 
 def numbers_position(batches_read: Int) -> SplitPosition:
     var b = List[UInt8]()
     b.append(UInt8(batches_read))
     return SplitPosition(scan_kind_id(NUMBERS_KIND), UInt8(1), b^)
+
 
 struct NumbersReader(SplitReader, Movable, Deinitable):
     """Reads one batch of `rows` rows, then answers END."""
@@ -76,6 +80,7 @@ struct NumbersReader(SplitReader, Movable, Deinitable):
         )
         var batch = RecordBatch.from_typed_columns_1(numbers_schema(), column^)
         return SplitPoll.rows(batch^, numbers_position(1))
+
 
 struct NumbersKind(ScanSourceResolver, Movable, Deinitable):
     comptime Reader = NumbersReader
@@ -142,35 +147,37 @@ struct NumbersKind(ScanSourceResolver, Movable, Deinitable):
             rows = 2
         return NumbersReader(rows, Int(split.start.bytes[0]))
 
-var kind = NumbersKind()
-var params = ScanParams()
-params.put_str("table", "numbers")
-var binding = kind.build_binding(params)
-assert_equal(binding.name, "numbers")
 
-var opened = drain_scan(kind, ScanRequest(binding.copy()))
-assert_equal(opened.num_batches(), 2)
-assert_equal(opened.num_rows(), 5)
-assert_equal(opened.resolved.get_i64("rows_planned"), Int64(5))
+def main() raises:
+    var kind = NumbersKind()
+    var params = ScanParams()
+    params.put_str("table", "numbers")
+    var binding = kind.build_binding(params)
+    assert_equal(binding.name, "numbers")
 
-# A row limit stops the drain between polls.
-var limited = drain_scan(kind, ScanRequest(binding.copy(), limit=Int64(3)))
-assert_equal(limited.num_rows(), 3)
+    var opened = drain_scan(kind, ScanRequest(binding.copy()))
+    assert_equal(opened.num_batches(), 2)
+    assert_equal(opened.num_rows(), 5)
+    assert_equal(opened.resolved.get_i64("rows_planned"), Int64(5))
 
-# The same kind, erased and looked up by kind id.
-var resolvers = ScanSourceResolvers()
-resolvers.register(ErasedScanSourceResolver.erase(NumbersKind()))
-assert_true(resolvers.contains(scan_kind_id(NUMBERS_KIND)))
-var via_set = drain_scan(resolvers.get(scan_kind_id(NUMBERS_KIND)), ScanRequest(binding^))
-assert_equal(via_set.num_rows(), 5)
+    # A row limit stops the drain between polls.
+    var limited = drain_scan(kind, ScanRequest(binding.copy(), limit=Int64(3)))
+    assert_equal(limited.num_rows(), 3)
 
-var refused = String()
-try:
-    _ = resolvers.get(scan_kind_id("example.other")).kind_name()
-except e:
-    refused = String(e)
-assert_true(String(SCAN_KIND_NOT_EXECUTABLE) in refused)
-assert_true(NUMBERS_KIND in refused)  # the message names what is registered
+    # The same kind, erased and looked up by kind id.
+    var resolvers = ScanSourceResolvers()
+    resolvers.register(ErasedScanSourceResolver.erase(NumbersKind()))
+    assert_true(resolvers.contains(scan_kind_id(NUMBERS_KIND)))
+    var via_set = drain_scan(resolvers.get(scan_kind_id(NUMBERS_KIND)), ScanRequest(binding^))
+    assert_equal(via_set.num_rows(), 5)
+
+    var refused = String()
+    try:
+        _ = resolvers.get(scan_kind_id("example.other")).kind_name()
+    except e:
+        refused = String(e)
+    assert_true(String(SCAN_KIND_NOT_EXECUTABLE) in refused)
+    assert_true(NUMBERS_KIND in refused)  # the message names what is registered
 ```
 
 The read order of a plan, and the checks on it, without any kind:
