@@ -33,6 +33,7 @@ from komira_json_index.simd_primitives import (
     TAG_CLOSE_BRACE,
     TAG_OPEN_BRACKET,
     TAG_COLON,
+    TAG_COMMA,
     TAG_QUOTE_OPEN,
     TAG_QUOTE_CLOSE,
 )
@@ -233,11 +234,11 @@ def test_scalar_whitespace_is_trimmed_on_both_sides() raises:
 
 def test_an_empty_scalar_is_missing() raises:
     """A key whose value is nothing (or only whitespace) has no value: null,
-    for `->` too (it is malformed, not the JSON literal `null`)."""
+    for `->` too (it is malformed, not the JSON literal `null`). A key AFTER
+    the empty value is not here: it is answered today, komira-ai/komira#1514."""
     _both(String("{\"a\":,\"b\":1}"), String("a"), String(NULL))
     _both(String("{\"a\": \t }"), String("a"), String(NULL))
     _both(String("{\"a\":}"), String("a"), String(NULL))
-    _both(String("{\"a\":,\"b\":1}"), String("b"), String("1"))
 
 
 # =============================================================================
@@ -388,6 +389,12 @@ def test_extract_value_at_guards() raises:
     var s = _bytes("1:")
     var head = _tape([1], [TAG_COLON])
     assert_false(_extract_value_at(Span(s), head, 0, True, len(s)).found)
+    # Position 0 is refused before any offset is read: the tape below is not
+    # monotone, so reading "the entry before 0" as the last entry (offset 0)
+    # would find the scalar `9` between bytes 1 and 3.
+    var x = _bytes("x9 ,")
+    var back = _tape([3, 0], [TAG_COMMA, TAG_COLON])
+    assert_false(_extract_value_at(Span(x), back, 0, True, len(x)).found)
     # Control: the string value at position 4 is found.
     var r = _extract_value_at(Span(b), full, 4, False, len(b))
     assert_true(r.found)

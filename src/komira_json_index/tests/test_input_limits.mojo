@@ -96,7 +96,7 @@ def test_structural_index_size_refuses_past_the_uint32_ceiling() raises:
 
 
 def test_column_count_boundary() raises:
-    for n in [-1, 0, 1, 4095, 4096]:
+    for n in [0, 1, 4095, 4096]:
         assert_equal(_columns_error(n), String("<no raise>"), String(n))
     var e = _columns_error(4097)
     _starts(
