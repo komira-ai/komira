@@ -76,6 +76,7 @@ _AFFECTED = [
     "files_missing",
     "floor_deleted",
     "floor_lowered",
+    "floor_package_deleted",
     "floor_raised",
     "help",
     "invalid_utf8",
