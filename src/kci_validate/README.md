@@ -43,7 +43,13 @@ archive 644), the `link` a symbolic link resolving to the `.so`, nothing
 extra under `lib/`; the one `__glibc >=2.34` requirement; each `.so`'s
 `NEEDED` resolving inside the environment with `LD_LIBRARY_PATH` unset, and
 `DF_SYMBOLIC`. `loaded_from_findings` reads the loader's `LD_DEBUG=libs`
-record. Nothing calls them yet: beta's install job will.
+record. A CONDA_INSTALL_ENV validation that installs a native library (one
+with `lib_files`, or requiring a system codec) runs them, and the rest of
+the design's install checks (`native_rows.mojo`): each README program under
+the loader's record, the README built with `mojo build` and run, a
+generated program opening every installed `.so` with `RTLD_NOW`, each native
+package installed alone, and each `.so` loaded before a system OpenSSL. A
+release with no native library gets none of these rows.
 
 Processes, the channel and waits go through seams (`ProcessRunner`,
 `PkgTransport`, `Sleeper`); the pure pieces (the generated program, the
@@ -75,7 +81,9 @@ assert_true(refused.startswith("the README examples tool /nonexistent/readme_exa
 ```
 
 The environment's `pixi.toml` pins every library to its version, build and
-channel, and the compiler to the release's pin:
+channel, the compiler to the release's pin, and on linux-64 declares the
+platform's glibc floor (pixi otherwise assumes glibc 2.28, and no library
+requiring `__glibc >=2.34` resolves):
 
 <!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
@@ -104,7 +112,8 @@ assert_equal(
     "# Written by kci for validation 'install-env': installs the release from its channel only.\n"
     + "[workspace]\nname = \"kci-install-env\"\n"
     + "channels = [\"https://conda.example.invalid/example/gamma\", \"https://conda.example.invalid/max\","
-    + " \"conda-forge\"]\nplatforms = [\"linux-64\"]\n\n[dependencies]\n"
+    + " \"conda-forge\"]\nplatforms = [\"linux-64\"]\n\n[system-requirements]\n"
+    + "libc = { family = \"glibc\", version = \"2.34\" }\n\n[dependencies]\n"
     + "komira_encoding = { version = \"==1.0.0\", build = \"h0a1b2c3d_7\","
     + " channel = \"https://conda.example.invalid/example/gamma\" }\n"
     + "mojo-compiler = { version = \"==1.0.0\", channel = \"https://conda.example.invalid/max\" }\n",

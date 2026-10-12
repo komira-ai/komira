@@ -4,20 +4,34 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # a SwissTable-style hash table over packed composite keys (one to eight
 # fixed-width columns) with one columnar state slab per aggregate, each read
 # as that aggregate's AggregatorWithStruct state struct. Groups are probed,
-# initialized, committed, merged across workers and finalized here; the
-# sinks that drive it are in this package too.
+# initialized, committed, merged across workers and finalized here. The
+# struct-state MorselSinks on top of it, SlabHashAggSinkStruct (variadic
+# over AggregatorWithStruct kernels) and SlabHashAggSinkStructCorr (CORR),
+# partition each worker's groups 64 ways and merge workers per partition.
 mojo_library(
     name = "komira_op_agg_slab",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_collections:komira_collections",
         "//src/komira_counters:komira_counters",
+        "//src/komira_morsel:komira_morsel",
         "//src/komira_op_agg_hash:komira_op_agg_hash",
         "//src/komira_op_agg_state:komira_op_agg_state",
+        "//src/komira_operator_api:komira_operator_api",
+        "//src/komira_physical_plan:komira_physical_plan",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
     ],
     test_srcs = [
         "tests/test_aggregator_with_struct_trait.mojo",
         "tests/test_corr_aggregator.mojo",
+        "tests/test_slab_hash_agg_sink_struct_consume.mojo",
+        "tests/test_slab_hash_agg_sink_struct_corr.mojo",
+        "tests/test_slab_hash_agg_sink_struct_two_keys.mojo",
         "tests/test_slab_storage_multikey_comprehensive.mojo",
     ],
     visibility = ["PUBLIC"],

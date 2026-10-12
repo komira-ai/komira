@@ -9,7 +9,7 @@ The rules are in [`defs.bzl`](defs.bzl); their providers in
 ([`toolchains//:mojo`](../toolchains/README.md)) through the compile wrapper,
 [`tools/mojo_compile.zig`](tools/mojo_compile.zig) on Linux (its header is
 where to read the environment the compiler sees) and
-[`darwin/mojo_wrapper.sh`](darwin/mojo_wrapper.sh) on macOS. Worked uses of each rule are in
+[`tools/mojo_compile_macos.zig`](tools/mojo_compile_macos.zig) on macOS. Worked uses of each rule are in
 [`../examples/BUCK`](../examples/BUCK), and fixtures that must fail are in
 [`../tests/`](../tests/README.md).
 
@@ -44,6 +44,13 @@ mojo_library(
   staged source directory can never shadow a package. A package reaches the
   compiler only through `deps`
   ([`tests/negative/missing_dep`](../tests/negative/missing_dep/BUCK) fails to compile).
+- **`closure_excludes`** (optional) lists import names of packages that
+  must not be in the closure of `deps`, directly or through another
+  package. Analysis fails when one is, so neither the library nor anything
+  depending on it builds: a boundary the build graph holds, such as
+  `komira_optimized_plan_header`'s exclusion of `komira_plan_wire`
+  (docs/design/optimized_plan.md §4.1). It reads `deps` only; `test_deps`
+  reach the welded tests, not consumers.
 - **The gate.** Each file in `test_srcs` is built from that one file against
   the ungated package (at `test_optimization_level`, default `-O1`; see [Optimization levels](#optimization-levels)) and run;
   a failing test prints `GATED TEST FAILED: <label> (exit N)`. The public
@@ -205,11 +212,12 @@ kills the session. The tether is not the compiler's child, so a compiler
 that waits for all its children never waits for it. With the watchdog on,
 the compiler's stdin is `/dev/null` and it ignores SIGINT and SIGQUIT. The
 macOS wrapper
-([`darwin/mojo_wrapper.sh`](darwin/mojo_wrapper.sh)) has the same watchdog
-and knobs (`mojo_darwin_toolchain`), sampling `ps` instead of `/proc` and,
-with no `setsid` on macOS, the compiler's tree by parent pid instead of a
-session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.zig),
-[`tests/functional/darwin`](../tests/functional/darwin/check.sh)).
+([`tools/mojo_compile_macos.zig`](tools/mojo_compile_macos.zig)) has the same
+watchdog, session and tether and the same knobs (`mojo_darwin_toolchain`),
+reading the tree through libproc instead of `/proc`; a child already reaped
+no longer counts there, since macOS keeps no CPU time of reaped children
+([`tests/functional/watchdog`](../tests/functional/watchdog/cases.zig):
+`cases` on Linux, `cases_darwin` on a macOS worker).
 
 ## Binaries and tests
 
@@ -232,10 +240,8 @@ session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.zig),
   and its runtime libraries, never the compiler
   ([test 9](../tests/README.md#9-buck2-run)).
 - **`buck2 test <mojo_test>`**: runs the test binary remotely through
-  the gate ([`gate mojo`](../run/README.md); on darwin-arm64,
-  [`gate_runner.sh`](gate_runner.sh) behind
-  [`dyld_prelude.sh`](darwin/dyld_prelude.sh), until the gate's macOS form is
-  proven on the macOS workers). `buck2 run` of a `mojo_test` runs its
+  the gate ([`gate mojo`](../run/README.md); on darwin-arm64 its macOS build,
+  `run:gate_darwin`). `buck2 run` of a `mojo_test` runs its
   binary directly, from the runnable directory.
 - **Exit status.** A test passes only by exiting 0. Every other status fails,
   77 included: 77 means SKIP to automake and some test harnesses, but here
@@ -252,8 +258,8 @@ session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.zig),
   other kind of test provider.) A remote executor stops the action there, and
   buck2 reports a plain `Fail` with `Timeout 0`: no word of the timeout, and
   a `mojo_test`'s output, which its runner holds until the test exits, is
-  lost. So the gate ([`gate mojo --deadline-s`](../run/README.md); on
-  darwin-arm64, [`test_deadline.sh`](test_deadline.sh)) kills a
+  lost. So the gate ([`gate mojo --deadline-s`](../run/README.md), on linux
+  and on darwin-arm64) kills a
   `mojo_test` 60 s earlier ([`test_limit.bzl`](test_limit.bzl)), reports it
   (`GATED TEST FAILED: <label> (exit 137)` with its output), and prints `TEST TIME LIMIT: killed <label> after <n> s, under the
   test runner's timeout of <m> s (komira.test_timeout_s)`. No rule can read
@@ -397,8 +403,8 @@ keys, it had before they existed.
   which the cap's kill (by parent pid) misses, as long as it is still in the
   group. It does not reach a reparented process that has left the group (a
   new session, or `setpgid` into another group).
-  Linux only: on macOS a capped test is refused (by
-  [`mem_cap.sh`](mem_cap.sh), which the darwin-arm64 toolchain keeps).
+  On macOS the resident memory is read from libproc instead of /proc
+  ([`proctab_darwin.zig`](../run/proctab_darwin.zig) says what differs).
 
 The `mojo_library` attributes apply to each `test_srcs` build and run, and
 the assert level and defines to its coverage builds (the coverage binary and
