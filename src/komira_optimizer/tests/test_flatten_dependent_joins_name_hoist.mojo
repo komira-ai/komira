@@ -11,9 +11,11 @@ route and check where the conjunct lands, or that the shape is refused:
   * the plain-name (`Expr.col_ref`) path: a non-equality correlation becomes
     the residual (EXISTS, NOT EXISTS, and through `optimize`); an equality of
     two outer columns is a residual, not a key; with no equality the join has
-    no keys; a name both sides produce is refused; a correlation under an
-    expression kind the hoist does not descend is refused; a scalar subquery
-    with a non-equality correlation is refused;
+    no keys; a name both sides produce is refused (also after an outer-only
+    name in the same conjunct); an outer reference inside a CASE is marked
+    LEFT in the residual; a correlation under an expression kind the hoist
+    does not descend is refused; a scalar subquery with a non-equality
+    correlation is refused;
   * the side-qualified (`Expr.left`) path: an outer reference under a CASE
     becomes the residual (with and without a side-qualified sibling), and one
     under a kind the hoist does not descend is refused.
@@ -259,6 +261,58 @@ def test_plain_name_on_both_sides_is_refused() raises:
     var corr = Expr.correlated_subquery(inner^, refs^, CORR_KIND_EXISTS)
     var plan = LogicalPlan.filter(corr^, _scan("l1.parquet", ln, 100))
     assert_true(_raises_with(plan^, "FlattenAmbiguousOuterRef: l_suppkey"))
+
+
+def test_plain_name_ambiguous_after_an_outer_only_name_is_refused() raises:
+    """`c_v > o_custkey` correlated on [c_v, o_custkey], with the outer side
+    also producing `o_custkey`: `c_v` is outer-only, `o_custkey` is produced
+    by both sides. The conjunct reads the outer-only name first and the
+    ambiguous one second; it is refused with FlattenAmbiguousOuterRef.
+
+    Catches: the name scan stopping at the first outer-only name, so the
+    conjunct reaches the residual with `o_custkey` guessed RIGHT (the guess
+    the refusal exists to prevent). `l_suppkey <> l_suppkey` above reads the
+    ambiguous name first and cannot see this."""
+    var cn: List[String] = ["c_custkey", "c_v", "o_custkey"]
+    var inner = LogicalPlan.filter(Expr.binary(BIN_GT, _c("c_v"), _c("o_custkey")), _orders())
+    var refs: List[String] = ["c_v", "o_custkey"]
+    var corr = Expr.correlated_subquery(inner^, refs^, CORR_KIND_EXISTS)
+    var plan = LogicalPlan.filter(corr^, _scan("customer.parquet", cn, 10))
+    assert_true(_raises_with(plan^, "FlattenAmbiguousOuterRef: o_custkey"))
+
+
+def test_plain_name_outer_ref_in_a_case_condition_is_marked_left() raises:
+    """`o_custkey = c_custkey AND CASE WHEN c_v > 0 THEN o_v ELSE c_v END >
+    1` with plain names: the CASE conjunct becomes the residual with `c_v`
+    LEFT in the condition and the default and `o_v` RIGHT in the result;
+    the orders scan has no Filter.
+
+    Catches: the CASE arm of `_rewrite_sides` dropping the outer names for a
+    slot, which marks `c_v` RIGHT and has the residual read a column the
+    orders side does not produce (komira-ai/komira#1354 on the residual
+    instead of the inner Filter)."""
+    var cases = List[WhenCaseData]()
+    cases.append(WhenCaseData(Expr.binary(BIN_GT, _c("c_v"), _lit(0)), _c("o_v")))
+    var pred = _and(
+        Expr.binary(BIN_EQ, _c("o_custkey"), _c("c_custkey")),
+        Expr.binary(BIN_GT, Expr.when(cases^, _c("c_v")), _lit(1)),
+    )
+    var out = flatten_dependent_joins(_exists_over_customer(pred^, CORR_KIND_EXISTS, _both_refs()))
+    ref j = out._join.value()[]
+    assert_equal(len(j.left_on), 1)
+    assert_equal(j.left_on[0], String("c_custkey"))
+    assert_equal(j.right[].tag, PLAN_SCAN)
+    assert_true(j.has_residual())
+    ref r = j.residual.value()[]
+    assert_equal(r.binary_op(), BIN_GT)
+    ref wd = r.binary_left_ref()._when.value()
+    ref cond = wd.cases[0].condition[]
+    assert_equal(cond.binary_left_ref().col_ref_name(), String("c_v"))
+    assert_equal(cond.binary_left_ref().col_ref_side(), COL_SIDE_LEFT)
+    assert_equal(wd.cases[0].result[].col_ref_name(), String("o_v"))
+    assert_equal(wd.cases[0].result[].col_ref_side(), COL_SIDE_RIGHT)
+    assert_equal(wd.default[].col_ref_name(), String("c_v"))
+    assert_equal(wd.default[].col_ref_side(), COL_SIDE_LEFT)
 
 
 def test_plain_name_correlation_under_an_undescended_kind_is_refused() raises:

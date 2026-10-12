@@ -751,6 +751,50 @@ def test_rewrite_sides_marks_outer_names_left() raises:
     assert_equal(_rewrite_sides(Expr.left("z"), outer).col_ref_side(), COL_SIDE_LEFT)
 
 
+def _wrapped_child(kind: Int, e: Expr) -> Expr:
+    """The child `_wrap_expr(kind, ..)` put under `e`."""
+    if kind == 0:
+        return e.unary_child_ref().copy()
+    if kind == 1:
+        return e.cast_child_ref().copy()
+    if kind == 2:
+        return e.alias_child_ref().copy()
+    if kind == 3:
+        return e.string_op_child_ref().copy()
+    if kind == 4:
+        return e._in_list.value().child[].copy()
+    return e.agg_fn_child_ref().copy()
+
+
+def test_rewrite_sides_passes_outer_names_through_every_kind() raises:
+    """`_rewrite_sides(e, ["a"])` marks a plain `a` LEFT under each of unary,
+    cast, alias, string op, IN list and aggregate, and in a CASE condition,
+    result and default; a plain `b` in the same CASE comes out RIGHT.
+
+    Catches: any one recursion arm calling itself with an empty name list
+    instead of `outer_names` (the plain-name residual then marks the outer
+    column RIGHT and compares a column the inner side does not produce,
+    komira-ai/komira#1354). `_rewrite_inner_none_to_right` passes no names,
+    so its per-kind tests cannot see this."""
+    var outer: List[String] = ["a"]
+    for kind in range(6):
+        var r = _rewrite_sides(_wrap_expr(kind, Expr.col_ref("a")), outer)
+        var child = _wrapped_child(kind, r)
+        assert_equal(child.col_ref_name(), String("a"))
+        assert_equal(child.col_ref_side(), COL_SIDE_LEFT)
+    var cases = List[WhenCaseData]()
+    cases.append(WhenCaseData(
+        Expr.binary(BIN_GT, Expr.col_ref("a"), Expr.col_ref("b")), Expr.col_ref("a")
+    ))
+    var w = _rewrite_sides(Expr.when(cases^, Expr.col_ref("a")), outer)
+    ref wd = w._when.value()
+    ref cond = wd.cases[0].condition[]
+    assert_equal(cond.binary_left_ref().col_ref_side(), COL_SIDE_LEFT)
+    assert_equal(cond.binary_right_ref().col_ref_side(), COL_SIDE_RIGHT)
+    assert_equal(wd.cases[0].result[].col_ref_side(), COL_SIDE_LEFT)
+    assert_equal(wd.default[].col_ref_side(), COL_SIDE_LEFT)
+
+
 def test_try_lift_name_equi_shapes() raises:
     """`_try_lift_name_equi` with outer refs [c, d] where `d` is outer-only:
     lifts `c = x` and `x = d` (outer name first); refuses `d = d2` (two
@@ -803,5 +847,6 @@ def main() raises:
     test_hoist_visible_per_expression_kind()
     test_side_walkers_descend_every_case_slot()
     test_rewrite_sides_marks_outer_names_left()
+    test_rewrite_sides_passes_outer_names_through_every_kind()
     test_try_lift_name_equi_shapes()
     print("All flatten_dependent_joins branch tests passed.")
