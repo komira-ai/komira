@@ -2,8 +2,8 @@
 # komira_crypto/tests/test_sha512_kat.mojo — boundary KAT
 # =============================================================================
 #
-# KAT corpus for SHA-512. Each vector
-# cross-verified against Python `hashlib.sha512(msg).hexdigest()`.
+# KAT corpus for SHA-512 (FIPS 180-4). Each vector is cross-verified against
+# GNU coreutils `sha512sum` over a file of the same bytes.
 # See test_sha384_kat.mojo for the boundary-coverage rationale.
 # =============================================================================
 
