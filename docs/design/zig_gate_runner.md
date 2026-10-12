@@ -4,12 +4,12 @@ This is the design for replacing five shell scripts that run and supervise welde
 tool:
 
 - [tools/build/mojo/gate_runner.sh](../../tools/build/mojo/gate_runner.sh) runs one gated Mojo test.
-- [tools/build/rust/test_runner.sh](../../tools/build/rust/test_runner.sh) runs one gated Rust test.
+- `tools/build/rust/test_runner.sh` ran one gated Rust test (deleted; `gate rust` replaces it).
 - [tools/build/mojo/mem_cap.sh](../../tools/build/mojo/mem_cap.sh) enforces a memory cap.
 - [tools/build/mojo/test_deadline.sh](../../tools/build/mojo/test_deadline.sh) enforces the time limit of a
   `mojo_test`.
 - The time bound of [cov_run.sh](../../tools/build/coverage/kcov/cov_run.sh) (its step 2) and of
-  [mut_step.sh](../../tools/build/coverage/mutate/mut_step.sh).
+  `mut_step.sh` (deleted; `gate step` replaces it).
 
 Status: design only, nothing is built. Every gate in the build depends on these scripts, and their
 behaviour is timing- and signal-sensitive, so this note lists every behaviour the port must keep before any

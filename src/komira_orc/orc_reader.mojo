@@ -67,9 +67,12 @@ from .column_decoder import (
     make_accumulator,
     decode_stripe_column,
 )
-from .nested_decoder import decode_column_subtree
+from .nested_decoder import (
+    NestedStripes,
+    decode_column_subtree_stripes,
+    nested_output_schema,
+)
 from .orc_logical_arrow import (
-    stamp_arrow_orc_metadata,
     is_acid_schema,
     acid_output_columns,
 )
@@ -931,7 +934,7 @@ def _read_orc_bytes_core[
     var block_size = tail.post_script.compression_block_size
 
     if _schema_needs_nested_path(schema, with_acid_columns):
-        # The nested / ACID path decodes recursively (single-stripe);
+        # The nested / ACID path decodes recursively over every stripe;
         # it does not use the column-decode fork-join, so drop the cancel_token.
         _ = cancel_token^
         if len(projection) != 0:
@@ -1210,31 +1213,13 @@ def read_orc_file_with_dispatcher[
 
 
 # =============================================================================
-# Nested / ACID read path (single-stripe, recursive descent).
+# Nested / ACID read path (every stripe, recursive descent).
 # =============================================================================
 #
 # The flat fast path accumulates PRIMITIVE columns across stripes into a flat
 # ColumnAcc. The nested path materializes each top-level output column (which
-# may be a compound subtree) via `decode_column_subtree`. Multi-stripe
-# concatenation of nested columns is not supported yet: a stripe count other
-# than 1 (zero stripes included) raises UNSUPPORTED (komira-ai/komira#1449).
-
-
-def _build_nested_output_schema(
-    schema: OrcSchema,
-    col_node_idxs: List[Int],
-    col_names: List[String],
-) raises -> Schema:
-    """Build the Arrow output Schema from the resolved output-column node
-    indices + names, stamping arrow.orc.* extension metadata per leaf."""
-    var sb = SchemaBuilder()
-    for c in range(len(col_node_idxs)):
-        var node_idx = col_node_idxs[c]
-        var at = orc_node_to_arrow(schema, node_idx)
-        var f = Field(col_names[c], at, True)
-        stamp_arrow_orc_metadata(f, schema, node_idx)
-        sb.add_field(f^)
-    return sb.build()
+# may be a compound subtree) via `decode_column_subtree_stripes`, which
+# decodes every stripe into one Column per output column.
 
 
 def _read_orc_nested(
@@ -1269,52 +1254,61 @@ def _read_orc_nested(
             else:
                 col_names.append(String("_col") + String(i))
 
-    var out_schema = _build_nested_output_schema(
+    var out_schema = nested_output_schema(
         schema, col_node_idxs, col_names
     )
 
-    var n_stripes = tail.footer.num_stripes()
-    if n_stripes != 1:
-        raise Error(
-            "OrcDecodeError.UNSUPPORTED: nested / ACID ORC read is single-"
-            "stripe (got "
-            + String(n_stripes)
-            + " stripes); multi-stripe nested concat is not supported"
+    # Every stripe's footer and located streams, in file order. Zero stripes
+    # is an empty table: each column decodes to zero rows of its type.
+    var stripes = NestedStripes()
+    var rows = List[Int]()
+    for s in range(tail.footer.num_stripes()):
+        var stripe = tail.footer.stripes[s].copy()
+        _checked_file_span(
+            len(file_bytes),
+            stripe.stripe_footer_start(),
+            stripe.stripe_footer_end(),
+            "stripe " + String(s) + " footer",
         )
-
-    var stripe = tail.footer.stripes[0].copy()
-    var n_rows = stripe.number_of_rows
-    _checked_file_span(
-        len(file_bytes),
-        stripe.stripe_footer_start(),
-        stripe.stripe_footer_end(),
-        "stripe 0 footer",
-    )
-    var sf_raw = file_bytes[
-        stripe.stripe_footer_start() : stripe.stripe_footer_end()
-    ]
-    var sf_bytes = decompress_stream(sf_raw, codec, block_size)
-    var sf = StripeFooter.parse(sf_bytes)
-    var locs = _locate_streams(sf, stripe, len(file_bytes))
-
-    # Flatten located streams into the parallel-list form the recursive
-    # decoder consumes (no _StreamLoc back-import cycle).
-    var lk = List[Int]()
-    var lc = List[Int]()
-    var ls = List[Int]()
-    var le = List[Int]()
-    for i in range(len(locs)):
-        var loc = locs[i].copy()
-        lk.append(loc.kind)
-        lc.append(loc.column)
-        ls.append(loc.start)
-        le.append(loc.end)
+        var sf_raw = file_bytes[
+            stripe.stripe_footer_start() : stripe.stripe_footer_end()
+        ]
+        var sf_bytes = decompress_stream(sf_raw, codec, block_size)
+        var sf = StripeFooter.parse(sf_bytes)
+        # A stripe's row count sizes every PRESENT list and accumulator of
+        # its subtree; refuse one the file's bytes cannot back (as the flat
+        # path does) before anything is decoded for it.
+        var s_rows = stripe.number_of_rows
+        if s_rows < 0 or s_rows > len(file_bytes) * 8:
+            raise Error(
+                String("OrcDecodeError.BAD_ROW_COUNT: stripe ")
+                + String(s)
+                + " declares "
+                + String(s_rows)
+                + " rows, which a "
+                + String(len(file_bytes))
+                + "-byte file cannot back"
+            )
+        rows.append(s_rows)
+        # Flatten located streams into the parallel-list form the recursive
+        # decoder consumes (no _StreamLoc back-import cycle).
+        var locs = _locate_streams(sf, stripe, len(file_bytes))
+        var lk = List[Int]()
+        var lc = List[Int]()
+        var ls = List[Int]()
+        var le = List[Int]()
+        for i in range(len(locs)):
+            lk.append(locs[i].kind)
+            lc.append(locs[i].column)
+            ls.append(locs[i].start)
+            le.append(locs[i].end)
+        stripes.add_stripe(sf, lk, lc, ls, le)
 
     var builder = RecordBatchBuilder.with_capacity(len(col_node_idxs))
     for c in range(len(col_node_idxs)):
-        var col = decode_column_subtree(
-            schema, col_node_idxs[c], sf, lk, lc, ls, le, file_bytes,
-            codec, block_size, n_rows,
+        var col = decode_column_subtree_stripes(
+            schema, col_node_idxs[c], stripes, file_bytes, codec, block_size,
+            rows,
         )
         builder.add_column(col^)
     return builder.build(out_schema.copy())

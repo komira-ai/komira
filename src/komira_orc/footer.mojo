@@ -33,26 +33,33 @@
 # protobuf reader walks a `Span[UInt8]` view with index arithmetic, no raw
 # pointers.
 #
-# ⚠ KNOWN, UNFIXED, AND DELIBERATELY NAMED HERE — SUB-MESSAGE BOUNDARY
-# ESCAPE.
-#
-# Every `parse`/`_parse_*` helper below walks a sub-message as
-# `var pos = start; while pos < end:` and then reads with `pb_read_tag` /
-# `pb_read_varint` / `pb_read_len_field` / `pb_skip_field`. Those free
-# primitives bound themselves against `len(bytes)` — the WHOLE footer buffer
-# — and NOT against this loop's `end`. So a nested field inside e.g.
-# StripeInformation or ColumnStatistics can declare a length that runs past
-# its parent's declared payload and read the SIBLING/PARENT bytes, which the
-# loop then attributes to the inner message. Memory-safe (the buffer bound
-# still holds) but it is field confusion on attacker-supplied ORC files.
-#
-# This is the SAME shape that `komira_protobuf`'s `PbFieldCursor._bound`
-# closes (unbounded, a 2-byte sub-message can return a 20-byte string from
-# its parent). It is not fixed here because these are ~12 hand-rolled loops
-# whose repair is a per-loop `end` threading plus a per-loop falsifier — not
-# because it is judged harmless. Do not read the absence of a fix as an
-# absence of the defect.
+# SUB-MESSAGE BOUNDS. Every `parse(bytes, start, end)` / `_parse_*` helper
+# below walks one sub-message `bytes[start:end)`. The `pb_*` primitives bound
+# their reads by `len(span)`, so each helper first checks the range
+# (`_check_sub_message`) and then reads only through `b = bytes[:end]`. A tag,
+# varint, fixed64 or LEN field that starts inside the sub-message and runs past
+# `end` raises MALFORMED instead of decoding the parent's next field as the
+# inner message's value (komira-ai/komira#1259). Nested sub-messages receive
+# `b`, so each level is bounded by its own end. A new sub-message loop must do
+# the same: `tests/test_orc_sub_message_bound.mojo` has one case per loop.
 # =============================================================================
+
+
+@always_inline
+def _check_sub_message(bytes: Span[UInt8, _], start: Int, end: Int) raises:
+    """Refuse a sub-message range that is not inside `bytes`.
+
+    Slicing would clamp an `end` past the buffer instead of refusing it."""
+    if start < 0 or end < start or end > len(bytes):
+        raise Error(
+            String("ProtobufError.MALFORMED: sub-message range [")
+            + String(start)
+            + ", "
+            + String(end)
+            + ") is not inside the "
+            + String(len(bytes))
+            + "-byte buffer"
+        )
 
 
 # =============================================================================
@@ -369,48 +376,50 @@ struct OrcRawType(Copyable, Movable):
         var precision = 0
         var scale = 0
 
+        _check_sub_message(bytes, start, end)
+        var b = bytes[:end]
         var pos = start
         while pos < end:
-            var tag = pb_read_tag(bytes, pos)
+            var tag = pb_read_tag(b, pos)
             pos = tag.new_pos
             if tag.field_number == 1 and tag.wire_type == PB_WIRE_VARINT:
-                var v = pb_read_varint(bytes, pos)
+                var v = pb_read_varint(b, pos)
                 kind = Int(v.value)
                 pos = v.new_pos
             elif tag.field_number == 2 and tag.wire_type == PB_WIRE_VARINT:
                 # subtypes as an individual (non-packed) varint.
-                var v = pb_read_varint(bytes, pos)
+                var v = pb_read_varint(b, pos)
                 subtypes.append(Int(v.value))
                 pos = v.new_pos
             elif tag.field_number == 2 and tag.wire_type == PB_WIRE_LEN:
                 # packed subtypes; each varint is bounded by the block end.
-                var f = pb_read_len_field(bytes, pos)
+                var f = pb_read_len_field(b, pos)
                 var ip = f.payload_start
                 while ip < f.payload_end:
-                    var iv = pb_read_varint(bytes[: f.payload_end], ip)
+                    var iv = pb_read_varint(b[: f.payload_end], ip)
                     subtypes.append(Int(iv.value))
                     ip = iv.new_pos
                 pos = f.new_pos
             elif tag.field_number == 3 and tag.wire_type == PB_WIRE_LEN:
-                var f = pb_read_len_field(bytes, pos)
+                var f = pb_read_len_field(b, pos)
                 field_names.append(
-                    pb_read_string(bytes, f.payload_start, f.payload_end)
+                    pb_read_string(b, f.payload_start, f.payload_end)
                 )
                 pos = f.new_pos
             elif tag.field_number == 4 and tag.wire_type == PB_WIRE_VARINT:
-                var v = pb_read_varint(bytes, pos)
+                var v = pb_read_varint(b, pos)
                 maximum_length = Int(v.value)
                 pos = v.new_pos
             elif tag.field_number == 5 and tag.wire_type == PB_WIRE_VARINT:
-                var v = pb_read_varint(bytes, pos)
+                var v = pb_read_varint(b, pos)
                 precision = Int(v.value)
                 pos = v.new_pos
             elif tag.field_number == 6 and tag.wire_type == PB_WIRE_VARINT:
-                var v = pb_read_varint(bytes, pos)
+                var v = pb_read_varint(b, pos)
                 scale = Int(v.value)
                 pos = v.new_pos
             else:
-                pos = pb_skip_field(bytes, pos, tag.wire_type)
+                pos = pb_skip_field(b, pos, tag.wire_type)
 
         return OrcRawType(
             kind, subtypes^, field_names^, maximum_length, precision, scale
@@ -449,14 +458,16 @@ struct StripeInformation(Copyable, Movable):
         var footer_length = 0
         var number_of_rows = 0
 
+        _check_sub_message(bytes, start, end)
+        var b = bytes[:end]
         var pos = start
         while pos < end:
-            var tag = pb_read_tag(bytes, pos)
+            var tag = pb_read_tag(b, pos)
             pos = tag.new_pos
             if tag.wire_type != PB_WIRE_VARINT:
-                pos = pb_skip_field(bytes, pos, tag.wire_type)
+                pos = pb_skip_field(b, pos, tag.wire_type)
                 continue
-            var v = pb_read_varint(bytes, pos)
+            var v = pb_read_varint(b, pos)
             pos = v.new_pos
             if tag.field_number == 1:
                 offset = orc_checked_extent(v.value, "StripeInformation.offset")
@@ -606,20 +617,22 @@ struct OrcStripeStatistics(Copyable, Movable):
     @staticmethod
     def parse(bytes: Span[UInt8, _], start: Int, end: Int) raises -> OrcStripeStatistics:
         var s = OrcStripeStatistics()
+        _check_sub_message(bytes, start, end)
+        var b = bytes[:end]
         var pos = start
         while pos < end:
-            var tag = pb_read_tag(bytes, pos)
+            var tag = pb_read_tag(b, pos)
             pos = tag.new_pos
             if tag.field_number == 1 and tag.wire_type == PB_WIRE_LEN:
-                var f = pb_read_len_field(bytes, pos)
+                var f = pb_read_len_field(b, pos)
                 s.col_stats.append(
                     OrcColumnStatistics.parse(
-                        bytes, f.payload_start, f.payload_end
+                        b, f.payload_start, f.payload_end
                     )
                 )
                 pos = f.new_pos
             else:
-                pos = pb_skip_field(bytes, pos, tag.wire_type)
+                pos = pb_skip_field(b, pos, tag.wire_type)
         return s^
 
 
@@ -731,50 +744,54 @@ struct OrcColumnStatistics(Copyable, Movable):
         bytes: Span[UInt8, _], start: Int, end: Int
     ) raises -> OrcColumnStatistics:
         var s = OrcColumnStatistics()
+        _check_sub_message(bytes, start, end)
+        var b = bytes[:end]
         var pos = start
         while pos < end:
-            var tag = pb_read_tag(bytes, pos)
+            var tag = pb_read_tag(b, pos)
             pos = tag.new_pos
             if tag.field_number == 1 and tag.wire_type == PB_WIRE_VARINT:
-                var v = pb_read_varint(bytes, pos)
+                var v = pb_read_varint(b, pos)
                 s.number_of_values = Int(v.value)
                 pos = v.new_pos
             elif tag.field_number == 10 and tag.wire_type == PB_WIRE_VARINT:
-                var v = pb_read_varint(bytes, pos)
+                var v = pb_read_varint(b, pos)
                 s.has_null = v.value != 0
                 pos = v.new_pos
             elif tag.field_number == 2 and tag.wire_type == PB_WIRE_LEN:
-                var f = pb_read_len_field(bytes, pos)
-                _parse_int_statistics(bytes, f.payload_start, f.payload_end, s)
+                var f = pb_read_len_field(b, pos)
+                _parse_int_statistics(b, f.payload_start, f.payload_end, s)
                 pos = f.new_pos
             elif tag.field_number == 3 and tag.wire_type == PB_WIRE_LEN:
-                var f = pb_read_len_field(bytes, pos)
+                var f = pb_read_len_field(b, pos)
                 _parse_double_statistics(
-                    bytes, f.payload_start, f.payload_end, s
+                    b, f.payload_start, f.payload_end, s
                 )
                 pos = f.new_pos
             elif tag.field_number == 4 and tag.wire_type == PB_WIRE_LEN:
-                var f = pb_read_len_field(bytes, pos)
+                var f = pb_read_len_field(b, pos)
                 _parse_string_statistics(
-                    bytes, f.payload_start, f.payload_end, s
+                    b, f.payload_start, f.payload_end, s
                 )
                 pos = f.new_pos
             else:
-                pos = pb_skip_field(bytes, pos, tag.wire_type)
+                pos = pb_skip_field(b, pos, tag.wire_type)
         return s^
 
 
 def _parse_int_statistics(
     bytes: Span[UInt8, _], start: Int, end: Int, mut s: OrcColumnStatistics
 ) raises:
+    _check_sub_message(bytes, start, end)
+    var b = bytes[:end]
     var pos = start
     while pos < end:
-        var tag = pb_read_tag(bytes, pos)
+        var tag = pb_read_tag(b, pos)
         pos = tag.new_pos
         if tag.wire_type != PB_WIRE_VARINT:
-            pos = pb_skip_field(bytes, pos, tag.wire_type)
+            pos = pb_skip_field(b, pos, tag.wire_type)
             continue
-        var v = pb_read_varint(bytes, pos)
+        var v = pb_read_varint(b, pos)
         pos = v.new_pos
         if tag.field_number == 1:
             s.int_min = _orc_zigzag_decode(v.value)
@@ -798,40 +815,44 @@ def _read_fixed64_double(bytes: Span[UInt8, _], pos: Int) raises -> Float64:
 def _parse_double_statistics(
     bytes: Span[UInt8, _], start: Int, end: Int, mut s: OrcColumnStatistics
 ) raises:
+    _check_sub_message(bytes, start, end)
+    var b = bytes[:end]
     var pos = start
     while pos < end:
-        var tag = pb_read_tag(bytes, pos)
+        var tag = pb_read_tag(b, pos)
         pos = tag.new_pos
         if tag.wire_type == PB_WIRE_FIXED64:
             if tag.field_number == 1:
-                s.dbl_min = _read_fixed64_double(bytes, pos)
+                s.dbl_min = _read_fixed64_double(b, pos)
                 s.has_double = True
             elif tag.field_number == 2:
-                s.dbl_max = _read_fixed64_double(bytes, pos)
+                s.dbl_max = _read_fixed64_double(b, pos)
                 s.has_double = True
-            pos += 8
-        else:
-            pos = pb_skip_field(bytes, pos, tag.wire_type)
+        # Every field, read or not, is stepped over by the bounds-checked
+        # skip, so an unread fixed64 crossing `end` is refused too.
+        pos = pb_skip_field(b, pos, tag.wire_type)
 
 
 def _parse_string_statistics(
     bytes: Span[UInt8, _], start: Int, end: Int, mut s: OrcColumnStatistics
 ) raises:
+    _check_sub_message(bytes, start, end)
+    var b = bytes[:end]
     var pos = start
     while pos < end:
-        var tag = pb_read_tag(bytes, pos)
+        var tag = pb_read_tag(b, pos)
         pos = tag.new_pos
         if tag.wire_type == PB_WIRE_LEN:
-            var f = pb_read_len_field(bytes, pos)
+            var f = pb_read_len_field(b, pos)
             if tag.field_number == 1:
-                s.str_min = pb_read_string(bytes, f.payload_start, f.payload_end)
+                s.str_min = pb_read_string(b, f.payload_start, f.payload_end)
                 s.has_string = True
             elif tag.field_number == 2:
-                s.str_max = pb_read_string(bytes, f.payload_start, f.payload_end)
+                s.str_max = pb_read_string(b, f.payload_start, f.payload_end)
                 s.has_string = True
             pos = f.new_pos
         else:
-            pos = pb_skip_field(bytes, pos, tag.wire_type)
+            pos = pb_skip_field(b, pos, tag.wire_type)
 
 
 # =============================================================================
@@ -867,32 +888,34 @@ struct OrcRowIndexEntry(Copyable, Movable):
         bytes: Span[UInt8, _], start: Int, end: Int
     ) raises -> OrcRowIndexEntry:
         var e = OrcRowIndexEntry()
+        _check_sub_message(bytes, start, end)
+        var b = bytes[:end]
         var pos = start
         while pos < end:
-            var tag = pb_read_tag(bytes, pos)
+            var tag = pb_read_tag(b, pos)
             pos = tag.new_pos
             if tag.field_number == 1 and tag.wire_type == PB_WIRE_LEN:
                 # packed positions; each varint is bounded by the block end.
-                var f = pb_read_len_field(bytes, pos)
+                var f = pb_read_len_field(b, pos)
                 var pp = f.payload_start
                 while pp < f.payload_end:
-                    var pv = pb_read_varint(bytes[: f.payload_end], pp)
+                    var pv = pb_read_varint(b[: f.payload_end], pp)
                     e.positions.append(Int(pv.value))
                     pp = pv.new_pos
                 pos = f.new_pos
             elif tag.field_number == 1 and tag.wire_type == PB_WIRE_VARINT:
                 # non-packed positions (each as its own varint field)
-                var pv = pb_read_varint(bytes, pos)
+                var pv = pb_read_varint(b, pos)
                 e.positions.append(Int(pv.value))
                 pos = pv.new_pos
             elif tag.field_number == 2 and tag.wire_type == PB_WIRE_LEN:
-                var f = pb_read_len_field(bytes, pos)
+                var f = pb_read_len_field(b, pos)
                 e.statistics = OrcColumnStatistics.parse(
-                    bytes, f.payload_start, f.payload_end
+                    b, f.payload_start, f.payload_end
                 )
                 pos = f.new_pos
             else:
-                pos = pb_skip_field(bytes, pos, tag.wire_type)
+                pos = pb_skip_field(b, pos, tag.wire_type)
         return e^
 
 
@@ -970,12 +993,14 @@ struct OrcBloomFilterEntry(Copyable, Movable):
         bytes: Span[UInt8, _], start: Int, end: Int
     ) raises -> OrcBloomFilterEntry:
         var e = OrcBloomFilterEntry()
+        _check_sub_message(bytes, start, end)
+        var b = bytes[:end]
         var pos = start
         while pos < end:
-            var tag = pb_read_tag(bytes, pos)
+            var tag = pb_read_tag(b, pos)
             pos = tag.new_pos
             if tag.field_number == 1 and tag.wire_type == PB_WIRE_VARINT:
-                var v = pb_read_varint(bytes, pos)
+                var v = pb_read_varint(b, pos)
                 # `numHashFunctions` is the iteration count of the
                 # Kirsch-Mitzenmacher probe loop in `bloom_filter._add_hash` /
                 # `_test_hash`, run once per stride-prune probe. The bit
@@ -996,15 +1021,15 @@ struct OrcBloomFilterEntry(Copyable, Movable):
                 e.num_hash_functions = Int(v.value)
                 pos = v.new_pos
             elif tag.field_number == 3 and tag.wire_type == PB_WIRE_LEN:
-                var f = pb_read_len_field(bytes, pos)
+                var f = pb_read_len_field(b, pos)
                 e.utf8bitset = List[UInt8]()
                 for i in range(f.payload_start, f.payload_end):
-                    e.utf8bitset.append(bytes[i])
+                    e.utf8bitset.append(b[i])
                 e.has_utf8bitset = True
                 pos = f.new_pos
             else:
                 # field 2 (legacy fixed64 bitset) + unknown fields are skipped.
-                pos = pb_skip_field(bytes, pos, tag.wire_type)
+                pos = pb_skip_field(b, pos, tag.wire_type)
         return e^
 
 
@@ -1069,14 +1094,16 @@ struct OrcStream(Copyable, Movable):
         var kind = 0
         var column = 0
         var length = 0
+        _check_sub_message(bytes, start, end)
+        var b = bytes[:end]
         var pos = start
         while pos < end:
-            var tag = pb_read_tag(bytes, pos)
+            var tag = pb_read_tag(b, pos)
             pos = tag.new_pos
             if tag.wire_type != PB_WIRE_VARINT:
-                pos = pb_skip_field(bytes, pos, tag.wire_type)
+                pos = pb_skip_field(b, pos, tag.wire_type)
                 continue
-            var v = pb_read_varint(bytes, pos)
+            var v = pb_read_varint(b, pos)
             pos = v.new_pos
             if tag.field_number == 1:
                 kind = Int(v.value)
@@ -1100,14 +1127,16 @@ struct OrcColumnEncoding(Copyable, Movable):
     ) raises -> OrcColumnEncoding:
         var kind = 0
         var dictionary_size = 0
+        _check_sub_message(bytes, start, end)
+        var b = bytes[:end]
         var pos = start
         while pos < end:
-            var tag = pb_read_tag(bytes, pos)
+            var tag = pb_read_tag(b, pos)
             pos = tag.new_pos
             if tag.wire_type != PB_WIRE_VARINT:
-                pos = pb_skip_field(bytes, pos, tag.wire_type)
+                pos = pb_skip_field(b, pos, tag.wire_type)
                 continue
-            var v = pb_read_varint(bytes, pos)
+            var v = pb_read_varint(b, pos)
             pos = v.new_pos
             if tag.field_number == 1:
                 kind = Int(v.value)

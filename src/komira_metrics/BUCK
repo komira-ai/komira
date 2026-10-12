@@ -39,6 +39,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_explain_analyze.mojo",
+        "tests/test_explain_analyze_collect.mojo",
         "tests/test_explain_analyze_disarmed_cost.mojo",
         "tests/test_histogram.mojo",
         "tests/test_metric_point_and_attr_set.mojo",

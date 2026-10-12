@@ -27,7 +27,8 @@
 #       reads); a column whose DATA stream does not decode (the column's
 #       error is re-raised naming it).
 #   T6  Nested files: a projection is refused; a non-struct root; a
-#       zero-stripe nested file.
+#       zero-stripe nested file reads as an empty batch; two stripes
+#       concatenate.
 #   T7  Stride-skip without a stride size (Footer.rowIndexStride 0) and with
 #       ROW_INDEX entries for one column only: the missing statistics keep the
 #       stride; a bloom entry with an empty bitset keeps it. Pruned read with a Metadata blob missing a column's
@@ -444,12 +445,21 @@ def test_nested_files() raises:
     var unnamed = _assemble(s, _nested_types(List[String]()), 2, 0, List[UInt8]())
     assert_equal(read_orc_bytes(Span(unnamed)).schema.field_name(0), "_col0")
 
-    # A zero-stripe file is valid ORC. Refusing it is a known gap of the
-    # single-stripe nested path (komira-ai/komira#1449), not the right answer:
-    # this pins today's refusal, and fixing the gap changes it to an empty batch.
+    # A zero-stripe file is valid ORC (an empty table): it reads as a 0-row
+    # batch that keeps the nested schema.
     var zero = _assemble(List[_S](), _nested_types(_names("x")), 0, 0, List[UInt8]())
-    with assert_raises(contains="nested / ACID ORC read is single-stripe (got 0 stripes)"):
-        _ = read_orc_bytes(Span(zero))
+    var zrb = read_orc_bytes(Span(zero))
+    assert_equal(zrb.num_rows(), 0, "zero stripes: zero rows")
+    assert_equal(zrb.num_columns(), 1, "zero stripes: the nested column is kept")
+    assert_equal(zrb.schema.field_name(0), "x")
+
+    # Two stripes (2 rows, then 3) concatenate into one 5-row batch.
+    var two = List[_S]()
+    two.append(_empty_stripe(2, 2))
+    two.append(_empty_stripe(3, 2))
+    var two_f = _assemble(two, _nested_types(_names("x")), 5, 0, List[UInt8]())
+    var trb = read_orc_bytes(Span(two_f))
+    assert_equal(trb.num_rows(), 5, "two stripes: 2 + 3 rows")
 
     # A LIST root whose child is a struct takes the nested path, which needs
     # a struct root.
