@@ -18,7 +18,7 @@
 # =============================================================================
 
 from std.io import FileHandle
-from std.testing import assert_equal
+from std.testing import assert_equal, assert_true
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.column import Column
@@ -112,7 +112,80 @@ def test_tab_delimiter_quotes_tab_not_comma() raises:
     assert_equal(text, want)
 
 
+# komira-ai/komira#1130: with `quote=""` there is no way to enclose a field, so
+# a field holding the delimiter, LF or CR must be refused (Python's csv raises
+# "need to escape" for QUOTE_NONE without an escapechar). Before the fix the
+# sink wrote `a,b` bare, and the file read back with one field too many.
+# Mutant that turns these red: drop the `quote.byte_length() == 0` refusal from
+# `_write_string_cell_to_bytes` (data rows) or `_write_string_cell` (header).
+
+
+def _refused(var sink: CsvSink, var rb: RecordBatch) raises -> String:
+    """Write `rb` through `sink`; return the error text, or "" if it wrote."""
+    try:
+        _ = _write_and_read(sink^, rb^)
+    except e:
+        return String(e)
+    return String()
+
+
+def test_empty_quote_writes_plain_fields_bare() raises:
+    var k = List[String]()
+    var v = List[String]()
+    k.append(String("plain"))
+    v.append(String("x y"))
+    k.append(String("quote"))
+    v.append(String('say "x"'))
+    var rb = _batch(String("k"), k^, String("v"), v^)
+    var text = _write_and_read(
+        CsvSink(test_tmpdir() + "/sink_quoting_none_ok.csv", quote=""), rb^
+    )
+    assert_equal(text, String('k,v\nplain,x y\nquote,say "x"\n'))
+
+
+def test_empty_quote_refuses_data_field_that_needs_quoting() raises:
+    var values = List[String]()
+    values.append(String("a,b"))
+    values.append(String("x\ny"))
+    values.append(String("x\ry"))
+    for i in range(len(values)):
+        var k = List[String]()
+        var v = List[String]()
+        k.append(String("row"))
+        v.append(values[i])
+        var rb = _batch(String("k"), k^, String("v"), v^)
+        var err = _refused(
+            CsvSink(
+                test_tmpdir() + "/sink_quoting_none_data_" + String(i) + ".csv",
+                quote="",
+            ),
+            rb^,
+        )
+        assert_true(
+            err.find("quote is empty") >= 0,
+            String("value ") + String(i) + String(" not refused: ") + err,
+        )
+
+
+def test_empty_quote_refuses_header_name_that_needs_quoting() raises:
+    var k = List[String]()
+    var v = List[String]()
+    k.append(String("row"))
+    v.append(String("plain"))
+    var rb = _batch(String("k"), k^, String("v,w"), v^)
+    var err = _refused(
+        CsvSink(test_tmpdir() + "/sink_quoting_none_header.csv", quote=""),
+        rb^,
+    )
+    assert_true(
+        err.find("quote is empty") >= 0, String("header not refused: ") + err
+    )
+
+
 def main() raises:
     test_comma_delimiter_every_trigger()
     test_tab_delimiter_quotes_tab_not_comma()
-    print("test_csv_sink_quoting: 2/2 PASS")
+    test_empty_quote_writes_plain_fields_bare()
+    test_empty_quote_refuses_data_field_that_needs_quoting()
+    test_empty_quote_refuses_header_name_that_needs_quoting()
+    print("test_csv_sink_quoting: 5/5 PASS")
