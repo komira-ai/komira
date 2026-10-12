@@ -21,7 +21,16 @@
 #     foreign binding by name, naming the verb and the kind; `open_split`
 #     refuses it before looking at the split's position;
 #   * a tier-2 resolver is unbound: `epoch` is `SCAN_EPOCH_NONE` and
-#     `is_bound` is False.
+#     `is_bound` is False;
+#   * `analyzer_config_fingerprint` changes when any ONE of field_class,
+#     lowercase, ascii_fold, remove_stopwords or stopword_set changes, and
+#     `build_binding` refuses by name a plan built against the index's
+#     analyzer with only ascii_fold flipped;
+#   * on a generation of 11 splits (so ordinal 10 is in range), `logs/0`,
+#     `logs/9` and `logs/10` open, while `logs/:` (':' is one past '9', read
+#     as digit 10 it would be ordinal 10) and `logs/1/` ('/' is one below '0',
+#     read as digit -1 it would be ordinal 9) are refused as
+#     SEARCH_SPLIT_KEY_INVALID.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -55,6 +64,7 @@ from komira_search_scan.search_scan_kind import (
     InMemorySearchIndexCatalog,
     SEARCH_ANALYZER_MISMATCH,
     SEARCH_GENERATION_NOT_AVAILABLE,
+    SEARCH_SPLIT_KEY_INVALID,
     SearchScanResolver,
     search_scan_binding,
     search_scan_descriptor,
@@ -378,6 +388,95 @@ def test_open_split_refuses_a_foreign_binding_before_the_position() raises:
         raised = True
         _assert_foreign(String(err), String("open_split"))
     assert_true(raised, "foreign binding and a foreign, short position")
+
+
+# =============================================================================
+# The analyzer fingerprint: every discriminating field is folded.
+# =============================================================================
+
+
+def _assert_fp_differs(base: AnalyzerConfig, var other: AnalyzerConfig, what: String) raises:
+    assert_true(
+        analyzer_config_fingerprint(base) != analyzer_config_fingerprint(other),
+        what + String(" changes the fingerprint"),
+    )
+
+
+def test_each_discriminating_analyzer_field_changes_the_fingerprint() raises:
+    var base = AnalyzerConfig.text("body")
+    var c = base.copy()
+    c.field_class = base.field_class + 1
+    _assert_fp_differs(base, c^, String("field_class"))
+    c = base.copy()
+    c.lowercase = False
+    _assert_fp_differs(base, c^, String("lowercase"))
+    c = base.copy()
+    c.ascii_fold = False
+    _assert_fp_differs(base, c^, String("ascii_fold"))
+    c = base.copy()
+    c.remove_stopwords = False
+    _assert_fp_differs(base, c^, String("remove_stopwords"))
+    c = base.copy()
+    c.stopword_set = String("none")
+    _assert_fp_differs(base, c^, String("stopword_set"))
+
+
+def test_build_binding_refuses_an_ascii_fold_change_by_name() raises:
+    var rt = _resolver()
+    var p = _params(String("alpha"))
+    p.put_u64(
+        String("analyzer_fp"),
+        analyzer_config_fingerprint(AnalyzerConfig.text("body")),
+    )
+    _ = rt.build_binding(p)  # control: the index's own analyzer binds.
+    var unfolded = AnalyzerConfig.text("body")
+    unfolded.ascii_fold = False
+    p = _params(String("alpha"))
+    p.put_u64(String("analyzer_fp"), analyzer_config_fingerprint(unfolded))
+    var raised = False
+    try:
+        _ = rt.build_binding(p)
+    except err:
+        raised = True
+        assert_true(String(SEARCH_ANALYZER_MISMATCH) in String(err), String(err))
+    assert_true(raised, "a plan built without ascii folding is refused")
+
+
+# =============================================================================
+# Split keys at the edges of the digit range.
+# =============================================================================
+
+
+def _key_split(key: String) -> ScanSplit:
+    var id = search_scan_kind_id()
+    return ScanSplit(
+        key,
+        search_split_position(id, False, 0),
+        Optional(search_split_position(id, True, 0)),
+    )
+
+
+def test_a_split_key_just_outside_the_digit_range_is_refused() raises:
+    var c = InMemorySearchIndexCatalog()
+    c.create_index(String("logs"), String("body"), AnalyzerConfig.text("body"))
+    for _ in range(11):
+        _ = c.publish(String("logs"), _split_a())
+    var rt = _Resolver(c^)
+    var req = ScanRequest(resolve_for_execution(rt, rt.build_binding(_params(String("alpha")))))
+    # Controls: the first, a one-digit and a two-digit ordinal open, so a
+    # refusal below comes from the key, not from an ordinal out of range.
+    var good: List[String] = [String("logs/0"), String("logs/9"), String("logs/10")]
+    for i in range(len(good)):
+        _ = rt.open_split(req, _key_split(good[i]))
+    var bad: List[String] = [String("logs/:"), String("logs/1/")]
+    for i in range(len(bad)):
+        var raised = False
+        try:
+            _ = rt.open_split(req, _key_split(bad[i]))
+        except err:
+            raised = True
+            assert_true(String(SEARCH_SPLIT_KEY_INVALID) in String(err), String(err))
+        assert_true(raised, String("split key '") + bad[i] + String("' is refused"))
 
 
 # =============================================================================
