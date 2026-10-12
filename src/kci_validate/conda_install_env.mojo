@@ -40,14 +40,17 @@
 #                <scratch>/<validation>/readme/<import>) into the runner
 #                <w>/readme_<import>.mojo and one program per example beside
 #                it, <w>/readme_<import>_<line>.mojo; refused when there is none, when
-#                the bytes differ, or when it holds no example. No library
+#                the bytes differ, or when it holds no example. Its link block
+#                must say, word for word, what kci computes for the
+#                library's closure (a missing `-l` is a failed row) No library
 #                among the pins is refused too (a README that runs nothing
 #                is not a pass)
 #   3  payload   kci hashes each library's installed payload itself and
 #                writes out/payload.<name>, the record the container script
 #                wrote; then readback.mojo's check
-#   4  program   `pixi run --as-is mojo run <w>/readme_<import>.mojo` (cwd
-#                <w>) for each README; its exit in out/readme_<import>.exit,
+#   4  program   `pixi run --as-is mojo run [<link args>] <w>/readme_<import>.mojo`
+#                (cwd <w>) for each README, the link args being its `sh
+#                komira-link` block's (readme_link.mojo); its exit in out/readme_<import>.exit,
 #                its stdout in .out and its stderr in .err, each with every
 #                `readme_<import>_<line>.mojo:<n>` (an example's program,
 #                whose line n is README line n) rewritten to the README line
@@ -489,7 +492,7 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
         var raw_out = join_path(out_dir, record + String(".stdout"))
         var raw_err = join_path(out_dir, record + String(".stderr"))
         var run = RunSpec(
-            pixi.copy(), run_program_argv(work, p.file), work.copy(), ENV_RUN_TIMEOUT_S, raw_out.copy(), raw_err.copy()
+            pixi.copy(), run_program_argv(work, p.file, p.run_args), work.copy(), ENV_RUN_TIMEOUT_S, raw_out.copy(), raw_err.copy()
         )
         run.set_env(env.copy())
         var started = True
