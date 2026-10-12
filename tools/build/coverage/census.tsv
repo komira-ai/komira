@@ -1,4 +1,4 @@
-# The coverage census: the data docs/coverage_census.md is rendered from (census.sh; census.md).
+# The coverage census: the data //:coverage_census renders its doc from (census.sh; census.md).
 census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
 komira//src/kci_api:kci_api	src/kci_api	library	OK	1560	1560	-	-	no	release	-	-
 komira//src/kci_artifact:kci_artifact	src/kci_artifact	library	OK	910	935	-	-	no	conda	-	-

@@ -3,16 +3,26 @@
 A part of [covcheck](README.md): the census of every library, the floors of
 [The ratchet](README.md#the-ratchet) it sets, and how to refresh them.
 
-`docs/coverage_census.md` is the census of every library under `src/`: one
+The census doc is the census of every library under `src/`: one
 coverage build of each library's gate, ranked by line coverage, with its
 branch coverage (the libraries of `COVERAGE_BRANCH_GATE`; the others show
 *not gated*), uncovered lines, files no test compiles, whether it is
 published (in `release/artifacts.textproto`, or a conda package only), its
 package's floors, and the libraries a run or the gate failed for, with why.
 The libraries under `src/tests/` are test code, outside the target: listed
-for information, with no floor. `census.sh` makes it in three steps, the
-first two at the top of a checkout with the coverage build's remote
-execution configured (they run `./buck2`):
+for information, with no floor. It is a build output, never committed:
+
+```sh
+./buck2 build //:coverage_census --show-output   # prints the path of coverage_census.md
+```
+
+renders it from the committed `census.tsv` and `ratchet.tsv`, and the same
+build fails unless the floors of `ratchet.tsv` are what the census sets
+(the check below). So a change to one library's rows of the two files
+touches no other line, and git merges two such changes without a conflict
+unless their rows are next to each other. `census.sh` refreshes
+the two files in three steps, the first two at the top of a checkout with
+the coverage build's remote execution configured (they run `./buck2`):
 
 ```sh
 tools/build/coverage/census.sh run --out <dir>      # every gate, --keep-going; rerun until one finishes
@@ -20,7 +30,7 @@ tools/build/coverage/census.sh collect --out <dir>  # <dir>/census.tsv from the 
 cp <dir>/census.tsv tools/build/coverage/census.tsv
 BB=$(./buck2 build komira//tools/build/toolchains:busybox --show-full-simple-output | tail -1)
 tools/build/coverage/census.sh render "$BB" tools/build/coverage/census.tsv \
-    tools/build/coverage/ratchet.tsv docs/coverage_census.md <dir>/ratchet.tsv
+    tools/build/coverage/ratchet.tsv <dir>/coverage_census.md <dir>/ratchet.tsv
 cp <dir>/ratchet.tsv tools/build/coverage/ratchet.tsv
 ```
 
@@ -47,12 +57,13 @@ one: a floor is
 
 **The check.** `//:coverage_census` (`census.bzl`) renders from the
 committed census.tsv and ratchet.tsv in a build action and fails unless
-`docs/coverage_census.md` and `ratchet.tsv` are byte for byte what it
-renders. So the doc is never edited by hand, every floor is at least what
-the census measured, and every library package of the census has a row
-and no other row is there.
+`ratchet.tsv` is byte for byte what it renders. So every floor is at least
+what the census measured, and every library package of the census has a
+row and no other row is there. A census.tsv `render` refuses (a malformed
+or duplicate row, rows out of order, a pinned row with no reason) fails it
+too.
 
-**Updating** (weekly, or on demand, as one pull request of the three files):
+**Updating** (weekly, or on demand, as one pull request of the two files):
 
 - *Raising* is the regenerated files: `render` raises a floor to what the
   census measured, and the diff of `ratchet.tsv` lists every raise for the
@@ -69,8 +80,8 @@ and no other row is there.
   the doc lists it under "Pinned floors" with what the census measured. A
   pinned row with an empty reason is refused (covcheck and `render`). Unpin
   (drop the reason) when the test is fixed; the next `render` raises it.
-- *Lowering* an unpinned floor is a hand edit of its row, then `render` again
-  for the doc: `render` never lowers one, and the check refuses an unpinned
+- *Lowering* an unpinned floor is a hand edit of its row: `render` never
+  lowers one, and the check refuses an unpinned
   floor under what census.tsv measured, so it needs a census that measured
   no more (the change that lowered the coverage, or a new census of it); a
   floor that must stay under the measurement is a pinned row.

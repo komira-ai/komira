@@ -1,12 +1,11 @@
 # Coverage census
 
-Generated: `tools/build/coverage/census.sh render` writes this file from
-[census.tsv](../tools/build/coverage/census.tsv), the numbers of one coverage
-build of every library under `src/`, and from the floors of
-[ratchet.tsv](../tools/build/coverage/ratchet.tsv), which it raises to them.
-The build holds this file, census.tsv and ratchet.tsv to each other
-(`//:coverage_census`), so edit none of them by hand except to lower a floor;
-[The census](../tools/build/coverage/census.md) says how to refresh
+Generated: `./buck2 build //:coverage_census` renders this file from
+tools/build/coverage/census.tsv, the numbers of one coverage build of every
+library under `src/`, and from the floors of tools/build/coverage/ratchet.tsv,
+which it raises to them. The same build fails unless ratchet.tsv is what it
+renders (no floor under what census.tsv measured). This file is not committed;
+tools/build/coverage/census.md says how to refresh
 them and what a floor does: a library measured under its package's floor
 fails its coverage gate in every mode, so its conda package is not built.
 

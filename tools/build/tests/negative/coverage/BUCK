@@ -661,27 +661,43 @@ mojo_library(
     for name in ("covfloor", "covfloor_held")
 ]
 
-# Test 46. The census check (tools/build/coverage/census.bzl): a doc and
-# floors exactly as census.sh renders them from census/census.tsv are GREEN
-# (:census_ok: a package floor is its lowest library, an old floor above the
-# measurement survives, a 0/0 library sets nothing, a pinned row is kept as
-# written); a doc edited by hand (doc_edited.txt: one percentage changed), a
-# floor lowered under what the census measured (ratchet_lowered.tsv) and a
-# pinned row with no reason (ratchet_pin_no_reason.tsv) are RED
-# (:census_doc_edited, :census_floor_lowered, :census_pin_no_reason). The docs are .txt so
-# the Markdown checks of this cell do not read their links.
+# Test 46. The census (tools/build/coverage/census.bzl): floors exactly as
+# census.sh renders them from census/census.tsv are GREEN (:census_ok), and
+# the doc it renders is census/doc.txt byte for byte (:census_ok_doc: a
+# package floor is its lowest library, an old floor above the measurement
+# survives, a 0/0 library sets nothing, a pinned row is kept as written). A
+# floor lowered under what the census measured (ratchet_lowered.tsv), a
+# pinned row with no reason (ratchet_pin_no_reason.tsv) and a census with a
+# library's row twice (census_dup_row.tsv) are RED (:census_floor_lowered,
+# :census_pin_no_reason, :census_dup_row), and so is the doc compared with
+# doc_edited.txt (one percentage changed: :census_doc_edited), so the golden
+# comparison can fail. The docs are .txt so the Markdown checks of this cell
+# do not read their links.
 [
     coverage_census(
         name = name,
-        census = "census/census.tsv",
-        doc = "census/" + doc,
+        census = "census/" + census,
         ratchet = "census/" + ratchet,
     )
-    for name, doc, ratchet in (
-        ("census_ok", "doc.txt", "ratchet.tsv"),
-        ("census_doc_edited", "doc_edited.txt", "ratchet.tsv"),
-        ("census_floor_lowered", "doc.txt", "ratchet_lowered.tsv"),
-        ("census_pin_no_reason", "doc.txt", "ratchet_pin_no_reason.tsv"),
+    for name, census, ratchet in (
+        ("census_ok", "census.tsv", "ratchet.tsv"),
+        ("census_floor_lowered", "census.tsv", "ratchet_lowered.tsv"),
+        ("census_pin_no_reason", "census.tsv", "ratchet_pin_no_reason.tsv"),
+        ("census_dup_row", "census_dup_row.tsv", "ratchet.tsv"),
+    )
+]
+
+[
+    cov_report_check(
+        name = name,
+        goldens = ["census/" + golden],
+        mode = "golden",
+        reports = [":census_ok"],
+        script = "//functional/coverage:report.sh",
+    )
+    for name, golden in (
+        ("census_ok_doc", "doc.txt"),
+        ("census_doc_edited", "doc_edited.txt"),
     )
 ]
 
@@ -1127,6 +1143,7 @@ target_suite(
         ":covandor_both[coverage][gate]",
         ":covfull[coverage][gate]",
         ":census_ok",
+        ":census_ok_doc",
         ":tracer_mt",
         ":test_tracer_mt",
         ":branchfail",

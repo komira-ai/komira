@@ -269,13 +269,14 @@ _TESTS_LINTS = [
     tree = ":doc_tree",
 ) for _ in _TESTS_LINTS[:1]]
 
-# The coverage census (tools/build/coverage/census.md):
-# docs/coverage_census.md and the floors of tools/build/coverage/ratchet.tsv
-# are exactly what tools/build/coverage/census.sh renders from census.tsv, so
-# the doc is never edited by hand and no floor is under what was measured.
+# The coverage census (tools/build/coverage/census.md): its default output,
+# coverage_census.md, is the doc tools/build/coverage/census.sh renders from
+# census.tsv and ratchet.tsv (`--show-output` prints its path; it is not
+# committed), and the build fails unless the floors of
+# tools/build/coverage/ratchet.tsv are exactly what census.sh renders, so no
+# floor is under what was measured.
 [coverage_census(
     name = "coverage_census",
-    doc = "docs/coverage_census.md",
 ) for _ in _TESTS_LINTS[:1]]
 
 # The Mojo pointer rules (docs/design/mojo_safety_and_idioms.md, "What must

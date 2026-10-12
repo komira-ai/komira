@@ -25,7 +25,7 @@ runs included ([The coverage workflow](#the-coverage-workflow), step 4).
 | `:covcheck_bin` | the command line (`main.mojo`, dispatching to `covcheck/cli.mojo`) |
 | `:ratchet.tsv` | the floors (`ratchet.tsv`) |
 | `:cov_gate` | the directory every mojo_library's coverage gate runs from: `cov_gate.sh`, `covcheck_bin`, `ratchet.tsv` ([The build gate](#the-build-gate)) |
-| `:census.tsv`, `:census.sh`, `census.bzl` | the census: every library's numbers, the script that measures them and renders `docs/coverage_census.md` and the floors, and the rule of the root's `:coverage_census` check ([The census](#the-census)) |
+| `:census.tsv`, `:census.sh`, `census.bzl` | the census: every library's numbers, the script that measures them and renders the census doc and the floors, and the rule of the root's `:coverage_census`, which builds the doc and checks the floors ([The census](#the-census)) |
 | `policy.bzl` | the gate's mode and target, and the ledger of libraries that cannot have a gate of their own |
 | `no_gate.bxl` | the check that holds that ledger equal to the libraries the gate depends on |
 | `:branch_gate_rows` (`BUCK`, `defs.bzl`) | the check that every row of `COVERAGE_BRANCH_GATE` (`policy.bzl`) names a Mojo library and is spelled exactly as that library's label (`komira//src/<p>:<p>`, the string `mojo_library` looks itself up by): a row naming none, or spelled another way, is read by nothing, so it fails this target's build |

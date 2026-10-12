@@ -142,12 +142,15 @@ else
 fi
 expect_red coverage_gate_floor_conda "COVERAGE GATE FAILED (census): $P ($N:covfloor [coverage gate]): covcheck gate exited 3" "$N:covfloor_conda"
 expect_green coverage_gate_floor_held "$N:covfloor" "$N:covfloor_held[coverage][gate]"
-# The census check: a doc edited by hand, or a floor under what the census
-# measured, is red (the doc and floors census.sh renders, :census_ok, are
-# green: tests//negative/coverage:greens, in the gate).
-expect_red coverage_census_doc_edited "docs/coverage_census.md is not what census.sh render writes" "$N:census_doc_edited"
+# The census check: a floor under what the census measured, a pinned row
+# with no reason or a library's row twice is red, and so is the rendered doc
+# against a golden edited by hand (the floors census.sh renders, :census_ok,
+# and its doc, :census_ok_doc, are green: tests//negative/coverage:greens,
+# in the gate).
+expect_red coverage_census_doc_edited "census_ok.md is not doc_edited.txt byte for byte" "$N:census_doc_edited"
 expect_red coverage_census_floor_lowered "ratchet.tsv is not what census.sh render writes" "$N:census_floor_lowered"
 expect_red coverage_census_pin_no_reason "has an empty reason" "$N:census_pin_no_reason"
+expect_red coverage_census_dup_row "rows are not sorted by label: komira//src/c:c2 after komira//src/c:c2" "$N:census_dup_row"
 # README examples and the mojo_test targets a library names in
 # coverage_tests are its tests for coverage: their runs reach its gate, and
 # what ships waits for them.
