@@ -737,6 +737,7 @@ export_file(
     name = "report.sh",
     visibility = [
         "//negative/coverage:",
+        "//negative/coverage/floorfile:",
         "//src/tests/coverage:",
     ],
 )

@@ -118,7 +118,7 @@ struct OrcIntReader[origin: Origin[mut=False]]:
                 break
             shift += 7
             if count >= 10:
-                raise Error("OrcRleError.MALFORMED_VARINT: vulong > 10 bytes")
+                raise Error("OrcRleError.MALFORMED_VARINT: vulong > 10 bytes")  # cov: unreachable this path runs with under 10 bytes left, so no 10th byte is read
         return acc
 
     # -------------------------------------------------------------------------

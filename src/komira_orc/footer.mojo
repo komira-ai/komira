@@ -1362,17 +1362,17 @@ struct OrcFileTail(Copyable, Movable):
         # malformed tail and `Footer.parse`, and it is one compare on a path
         # that runs ONCE per file.
         if footer_end < footer_start or metadata_end < metadata_start:
-            raise Error(
-                String("OrcSchemaError.MALFORMED_PROTOBUF: inverted tail byte")
-                + " range — footer ["
-                + String(footer_start)
-                + ", "
-                + String(footer_end)
-                + "), metadata ["
-                + String(metadata_start)
-                + ", "
-                + String(metadata_end)
-                + ")"
+            raise Error(  # cov: unreachable orc_checked_extent bounds both lengths to [0, 2^48], so neither range can invert
+                String("OrcSchemaError.MALFORMED_PROTOBUF: inverted tail byte")  # cov: unreachable part of the raise above
+                + " range — footer ["  # cov: unreachable part of the raise above
+                + String(footer_start)  # cov: unreachable part of the raise above
+                + ", "  # cov: unreachable part of the raise above
+                + String(footer_end)  # cov: unreachable part of the raise above
+                + "), metadata ["  # cov: unreachable part of the raise above
+                + String(metadata_start)  # cov: unreachable part of the raise above
+                + ", "  # cov: unreachable part of the raise above
+                + String(metadata_end)  # cov: unreachable part of the raise above
+                + ")"  # cov: unreachable part of the raise above
             )
         var footer = Footer.parse(bytes[footer_start:footer_end])
 

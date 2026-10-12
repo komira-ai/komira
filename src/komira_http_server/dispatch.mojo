@@ -84,7 +84,7 @@ from komira_http_server.middleware.fault_report import (
     trace_header_of,
 )
 from komira_http_server.middleware.middleware import Middleware, RequestContext
-from komira_http_server.accept_loop import _write_all_or_buffer
+from komira_http_server.accept_loop import _write_all_or_buffer, _write_last
 from komira_http_server.connection import (
     ConnEntry,
     REQ_BUF_BYTES,
@@ -522,7 +522,7 @@ def serve_read_round_dispatch[
             if not outcome.err.is_ok():
                 var err_buf = List[UInt8]()
                 build_error_response_bytes(outcome.err.status, err_buf)
-                var w = _write_all_or_buffer(entry, err_buf, bytes_sent)
+                var w = _write_last(entry, err_buf, bytes_sent)
                 if w == 1:
                     return True
                 keep_alive = False
@@ -532,7 +532,7 @@ def serve_read_round_dispatch[
                 if not enable_expect_continue:
                     var err_buf = List[UInt8]()
                     build_error_response_bytes(UInt16(417), err_buf)
-                    var ew = _write_all_or_buffer(entry, err_buf, bytes_sent)
+                    var ew = _write_last(entry, err_buf, bytes_sent)
                     if ew == 1:
                         return True
                     keep_alive = False
@@ -634,7 +634,7 @@ def serve_read_round_dispatch[
                     # have forced.
                     var cerr_buf = List[UInt8]()
                     build_error_response_bytes(UInt16(400), cerr_buf)
-                    var cw = _write_all_or_buffer(entry, cerr_buf, bytes_sent)
+                    var cw = _write_last(entry, cerr_buf, bytes_sent)
                     if cw == 1:
                         return True
                     keep_alive = False
@@ -914,7 +914,7 @@ def serve_read_round_dispatch_chained[
             if not outcome.err.is_ok():
                 var err_buf = List[UInt8]()
                 build_error_response_bytes(outcome.err.status, err_buf)
-                var w = _write_all_or_buffer(entry, err_buf, bytes_sent)
+                var w = _write_last(entry, err_buf, bytes_sent)
                 if w == 1:
                     return True
                 keep_alive = False
@@ -924,7 +924,7 @@ def serve_read_round_dispatch_chained[
                 if not enable_expect_continue:
                     var err_buf = List[UInt8]()
                     build_error_response_bytes(UInt16(417), err_buf)
-                    var ew = _write_all_or_buffer(entry, err_buf, bytes_sent)
+                    var ew = _write_last(entry, err_buf, bytes_sent)
                     if ew == 1:
                         return True
                     keep_alive = False
@@ -988,7 +988,7 @@ def serve_read_round_dispatch_chained[
                 if chunk_rc == CHUNKED_BODY_MALFORMED:
                     var cerr_buf = List[UInt8]()
                     build_error_response_bytes(UInt16(400), cerr_buf)
-                    var cw = _write_all_or_buffer(entry, cerr_buf, bytes_sent)
+                    var cw = _write_last(entry, cerr_buf, bytes_sent)
                     if cw == 1:
                         return True
                     keep_alive = False
@@ -1206,14 +1206,14 @@ def serve_read_round_suspendable[
     if not outcome.err.is_ok():
         var err_buf = List[UInt8]()
         build_error_response_bytes(outcome.err.status, err_buf)
-        var w = _write_all_or_buffer(entry, err_buf, bytes_sent)
+        var w = _write_last(entry, err_buf, bytes_sent)
         return w == 1
 
     if outcome.expects_continue:
         if not enable_expect_continue:
             var err_buf = List[UInt8]()
             build_error_response_bytes(UInt16(417), err_buf)
-            var ew = _write_all_or_buffer(entry, err_buf, bytes_sent)
+            var ew = _write_last(entry, err_buf, bytes_sent)
             return ew == 1
         var interim_buf = List[UInt8]()
         build_100_continue_bytes(interim_buf)
@@ -1264,7 +1264,7 @@ def serve_read_round_suspendable[
             # `accumulate_chunked_body` returns a code instead of a Bool.
             var cerr_buf = List[UInt8]()
             build_error_response_bytes(UInt16(400), cerr_buf)
-            var cw = _write_all_or_buffer(entry, cerr_buf, bytes_sent)
+            var cw = _write_last(entry, cerr_buf, bytes_sent)
             return cw == 1
         if chunk_rc == CHUNKED_BODY_TRANSPORT_FAILED:
             return False
@@ -1406,14 +1406,14 @@ def serve_read_round_erased[
     if not outcome.err.is_ok():
         var err_buf = List[UInt8]()
         build_error_response_bytes(outcome.err.status, err_buf)
-        var w = _write_all_or_buffer(entry, err_buf, bytes_sent)
+        var w = _write_last(entry, err_buf, bytes_sent)
         return w == 1
 
     if outcome.expects_continue:
         if not enable_expect_continue:
             var err_buf = List[UInt8]()
             build_error_response_bytes(UInt16(417), err_buf)
-            var ew = _write_all_or_buffer(entry, err_buf, bytes_sent)
+            var ew = _write_last(entry, err_buf, bytes_sent)
             return ew == 1
         var interim_buf = List[UInt8]()
         build_100_continue_bytes(interim_buf)
@@ -1457,7 +1457,7 @@ def serve_read_round_erased[
         if chunk_rc == CHUNKED_BODY_MALFORMED:
             var cerr_buf = List[UInt8]()
             build_error_response_bytes(UInt16(400), cerr_buf)
-            var cw = _write_all_or_buffer(entry, cerr_buf, bytes_sent)
+            var cw = _write_last(entry, cerr_buf, bytes_sent)
             return cw == 1
         if chunk_rc == CHUNKED_BODY_TRANSPORT_FAILED:
             return False
