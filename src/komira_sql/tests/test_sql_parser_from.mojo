@@ -17,8 +17,9 @@
 #      table called `lateral`; LATERAL (...) refused. (catches: the alias
 #      grab eating a structural keyword)
 #   4. read_parquet / read_csv[_auto] / read_json[_auto] / read_ndjson /
-#      read_avro bind their kind, path and alias; read_avro refuses any
-#      option. (catches: avro bound as JSON through the default arm)
+#      read_avro bind their kind, path and alias (the function name when
+#      unaliased); read_avro refuses any option. (catches: avro bound as JSON
+#      through the default arm; an unaliased one left without a qualifier)
 #   5. Every table-function option: recorded (all_varchar, header, delim),
 #      accepted as neutral (quote, escape, auto_detect, parallel, compression,
 #      format) or refused by name, per kind. (catches: a CSV dialect option
@@ -186,6 +187,10 @@ def test_table_functions_bind_kind_path_and_alias() raises:
         assert_equal(rel.tvf_path.value(), "dir/f.x")
         assert_equal(rel.rel_alias, "r")
         assert_equal(rel.name, "")
+        # Unaliased, it answers to the function name (DuckDB's alias for a
+        # table function). (mutant: no default alias, which leaves "")
+        var bare = _tvf(names[i] + "('dir/f.x')")
+        assert_equal(bare.query.from_tables[0].rel_alias, names[i])
     # Without `(` the name is an ordinary table.
     var plain = _tvf("read_csv")
     assert_equal(plain.query.from_tables[0].name, "read_csv")
