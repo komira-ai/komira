@@ -2,10 +2,12 @@
 # komira_crypto/tests/test_pbkdf2_ct_eq.mojo
 #
 # Two modules no other welded test compiled:
-#   * pbkdf2.mojo: PBKDF2-HMAC-SHA256 against values from Python's
-#     hashlib.pbkdf2_hmac (an independent implementation), across one and two
-#     iterations, one block, two full blocks, a partial second block, the
-#     31/32/33-byte edges and a non-positive length.
+#   * pbkdf2.mojo: PBKDF2-HMAC-SHA256 (RFC 8018 section 5.2) across one and
+#     two iterations, one block, two full blocks, a partial second block, the
+#     31/32/33-byte edges and a non-positive length. The two-full-blocks value
+#     is RFC 7914 section 11; the others were checked by PBKDF2 over the RFC
+#     2104 HMAC construction computed with GNU coreutils `sha256sum` (the same
+#     composition reproduces the RFC 7914 value).
 #   * aead.mojo: constant_time_eq_n on equal, unequal at the first or last
 #     byte, prefix-equal spans of different lengths, and two empty spans.
 # =============================================================================

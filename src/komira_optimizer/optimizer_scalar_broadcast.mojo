@@ -33,9 +33,9 @@
 #
 # Pass order: `optimizer_driver.optimize` runs this pass AFTER
 # `push_predicates_down` (so any non-EXPR_AGG_FN predicates have already moved
-# out of the same Filter) and BEFORE the inner-to-semi join conversion
-# (`convert_inner_to_semi`), so the SEMI swap sees the rewritten
-# literal-comparison filter.
+# out of the same Filter). A bound site leaves a Filter over an in-memory
+# scan behind it; the driver runs no pass after this one that narrows such a
+# scan to the Filter's columns (komira#1292).
 #
 # Failure modes (with explicit error messages):
 #   * Pattern not matched (no EXPR_AGG_FN in any Filter, or Filter not

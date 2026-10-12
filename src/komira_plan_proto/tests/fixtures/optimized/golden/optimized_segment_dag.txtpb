@@ -1,0 +1,37 @@
+# proto-message: komira.plan.v1.OptimizedSegmentDag
+segments {
+  segment_id: 1
+  logical {
+    output_schema {
+      fields {
+        name: "o_orderkey"
+        arrow_type_id: 5
+      }
+    }
+    view_ref {
+      view_name: "orders_v"
+    }
+  }
+}
+segments {
+  segment_id: 2
+  logical {
+    output_schema {
+      fields {
+        name: "o_orderkey"
+        arrow_type_id: 5
+      }
+    }
+    cse_ref {
+      canonical_hash: 1234567890123
+    }
+  }
+}
+edges {
+  producer_segment: 1
+  consumer_segment: 2
+  keys: 0
+  keys: 3
+  partitions: 8
+  key_groups: 128
+}

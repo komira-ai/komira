@@ -1,3 +1,0 @@
-# This repository's BUCK file for an upstream project: read.
-# Source: https://github.com/upstream/project
-# Built on 2031-08-31.

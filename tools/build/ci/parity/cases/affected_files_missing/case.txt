@@ -1,0 +1,8 @@
+# A --files file that is not there: cannot tell, exit 5.
+arg "--files"
+arg "no-such-changed-files"
+arg "--base"
+arg "parity-base"
+file ".buckconfig" %buckconfig
+file "tools/build/ci/rules.txt" %rules.txt
+exit 5

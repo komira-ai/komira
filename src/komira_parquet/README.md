@@ -223,6 +223,28 @@ stored:
   per-row-group and per-file bounds, counts, and an NDV estimate that merges
   the row groups' HyperLogLog registers when every one has them).
 
+And it reads a file's rows:
+
+- `morsel_reader`: `ParquetMorselReader`, a local file decoded a row group at
+  a time and handed out in morsels of at most `morsel_size` rows
+  (`next_morsel`; each morsel's columns are windows of the row group's,
+  copied by `morsel_slice`, a kept dictionary shared), under a
+  `ColumnProjection`. `decode_row_group_shared` and `decode_columns_for_rg`
+  decode one row group without touching the iterator, so workers can decode
+  distinct row groups at once; `try_decode_column_with_selection` decodes only
+  a selection's rows of one chunk in one pass, or returns None when the
+  selection gather does not take the chunk; `read_raw_chunks_for_rg` reads
+  chunks as stored.
+- `bytes_decode`: the same decode with no I/O, out of bytes the caller
+  fetched: `row_group_byte_range` (the bytes to fetch),
+  `decode_row_group_from_bytes`, `decode_row_group_columns_subset`,
+  `decode_column_chunk_from_bytes`, and `decode_numeric_dict_codes_from_bytes`
+  (an INT32 / INT64 dictionary chunk as codes and entries, for a count that
+  never gathers the values). A chunk outside the given range is refused.
+- Every column chunk these decode is counted
+  (`komira_counters.parquet_column_chunks_decoded`), so a test can see which
+  columns a scan read.
+
 Every example below runs as a test when the package is built.
 
 ## The footer
