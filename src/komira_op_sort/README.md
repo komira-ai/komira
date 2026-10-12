@@ -66,6 +66,14 @@ batch by it.
   serial kernel) that changes the cost and never the rows. The switches are
   a value, `SortSinkRoutes`.
 
+- `sort_external`: `ExternalSorter`, a sort past a memory budget: buffered
+  batches are sorted into runs, runs over the budget are spilled to the local
+  disk (`komira_engine_runtime` spill), and `finish` merges every run. The
+  output is one stable `sort_batch_by_keys` of the input in absorb order. The
+  merge (`k_way_merge_cursors`, the loser tree and
+  `komira_column_kernels.cross_batch_gather`) is `sort_external_merge`; its
+  comparator orders a key as the run sort does (floats by `sort_key_lt`).
+
 Each parallel entry takes a `SharedForkJoinHandle` (the engine's dispatcher,
 or `serial_fork_join_handle()` to run the same chunks inline; the `*_serial`
 entries do that) and gives exactly the rows of the serial kernel, ties in
