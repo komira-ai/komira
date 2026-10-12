@@ -8,6 +8,7 @@ Actions never search the worker's PATH.
 
 load(":providers.bzl", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 def busybox_sh(busybox, script, *args):
     """argv running `script` under the declared busybox shell.
@@ -130,9 +131,15 @@ def _zig_exe_impl(ctx):
     script = _PRELUDE + """
 ZIG_GLOBAL_CACHE_DIR="$T/zig-global"; ZIG_LOCAL_CACHE_DIR="$T/zig-local"; HOME="$T/home"
 export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME
-"$1/zig" build-exe -OReleaseSafe -target x86_64-linux-musl -fstrip "$2" "-femit-bin=$3"
+"$1/zig" build-exe -OReleaseSafe -target TARGET -fstrip "$2" "-femit-bin=$3"
 rm -rf "$T"
 """
+    # The target is written into the script, so that with the default the
+    # command (and the action key) of every zig_exe is what it was before
+    # the attribute existed.
+    if not regex_match("^[a-z0-9_.-]+$", ctx.attrs.target):
+        fail("{}: target {} is not a zig target triple".format(ctx.label, repr(ctx.attrs.target)))
+    script = script.replace("-target TARGET ", "-target {} ".format(ctx.attrs.target))
     cmd = busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output())
     if ctx.attrs.imports:
         # Files `src` imports by a relative name: inputs at their paths, so
@@ -156,6 +163,9 @@ zig_exe_rule = rule(
         "deps": attrs.list(attrs.dep(providers = [ZigModuleInfo]), default = []),
         "imports": attrs.list(attrs.source(), default = []),
         "src": attrs.source(),
+        # zig's -target: what the executable runs on (it is built on the
+        # linux execution platform whatever this says).
+        "target": attrs.string(default = "x86_64-linux-musl"),
         # `zig_test` targets the executable waits for.
         "unit_tests": attrs.list(attrs.dep(), default = []),
         "zig": attrs.dep(),
@@ -185,6 +195,7 @@ mkdir -p "$TMPDIR"
     # The pinned tools a test runs, as environment variables naming their
     # paths.
     env = {name: dep[DefaultInfo].default_outputs[0] for name, dep in ctx.attrs.env_tools.items()}
+    env.update(rerun_env(ctx))
     ctx.actions.run(
         cmd_args(busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output()), hidden = ctx.attrs.imports),
         category = "zig_test",
@@ -194,8 +205,9 @@ mkdir -p "$TMPDIR"
         return [
             DefaultInfo(default_output = out),
             ValidationInfo(validations = [ValidationSpec(name = ctx.label.name, validation_result = out)]),
+            rerun_info(ctx),
         ]
-    return [DefaultInfo(default_output = out)]
+    return [DefaultInfo(default_output = out), rerun_info(ctx)]
 
 # `zig test` of `src` (and the `test` blocks of the files it imports, the
 # `imports`), run as a build action: the target exists only if every test
@@ -220,6 +232,70 @@ zig_test_rule = rule(
         "imports": attrs.list(attrs.source(), default = []),
         "src": attrs.source(),
         "zig": attrs.dep(),
+    } | RERUN_ATTRS,
+)
+
+def _zig_test_binary_impl(ctx):
+    bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
+    zig = ctx.attrs.zig[DefaultInfo].default_outputs[0]
+    out = ctx.actions.declare_output(ctx.label.name)
+    if not regex_match("^[a-z0-9_.-]+$", ctx.attrs.target):
+        fail("{}: target {} is not a zig target triple".format(ctx.label, repr(ctx.attrs.target)))
+    script = _PRELUDE + """
+ZIG_GLOBAL_CACHE_DIR="$T/zig-global"; ZIG_LOCAL_CACHE_DIR="$T/zig-local"; HOME="$T/home"
+export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME
+"$1/zig" test -target TARGET --test-no-exec "-femit-bin=$3" "$2"
+rm -rf "$T"
+""".replace("-target TARGET ", "-target {} ".format(ctx.attrs.target))
+    ctx.actions.run(
+        cmd_args(busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output()), hidden = ctx.attrs.imports),
+        category = "zig_test_binary",
+    )
+    return [DefaultInfo(default_output = out)]
+
+# The `zig test` executable of `src` for another platform (`target`), built
+# on the linux execution platform and not run: a `zig_test_run` on that
+# platform runs it.
+zig_test_binary_rule = rule(
+    impl = _zig_test_binary_impl,
+    attrs = {
+        "busybox": attrs.dep(),
+        "deps": attrs.list(attrs.dep(providers = [ZigModuleInfo]), default = []),
+        "imports": attrs.list(attrs.source(), default = []),
+        "src": attrs.source(),
+        "target": attrs.string(),
+        "zig": attrs.dep(),
+    },
+)
+
+def _zig_test_run_impl(ctx):
+    bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
+    out = ctx.actions.declare_output(ctx.label.name + ".passed")
+    # As zig_test's run: the applets as PATH, a TMPDIR of its own.
+    script = _PRELUDE + """
+HOME="$T/home"; TMPDIR="$T/tmp"
+export HOME TMPDIR
+mkdir -p "$TMPDIR" "$HOME"
+"$1" > "$T/out" 2>&1 || { cat "$T/out" >&2; exit 1; }
+# The marker is the runner's summary (`All N tests passed.`, or its
+# count of passed and skipped tests).
+tail -n 1 "$T/out" > "$2"
+rm -rf "$T"
+"""
+    ctx.actions.run(
+        busybox_sh(bb, script, ctx.attrs.binary[DefaultInfo].default_outputs[0], out.as_output()),
+        category = "zig_test_run",
+    )
+    return [DefaultInfo(default_output = out)]
+
+# Runs a `zig_test_binary` as a build action on this target's execution
+# platform, with `busybox` (that platform's) for the applets: the target
+# exists only if every test passed. A `zig_exe` names it in `unit_tests`.
+zig_test_run_rule = rule(
+    impl = _zig_test_run_impl,
+    attrs = {
+        "binary": attrs.dep(),
+        "busybox": attrs.dep(),
     },
 )
 
@@ -326,7 +402,7 @@ def _mojo_toolchain_impl(ctx):
             wrapper = ctx.attrs._wrapper[DefaultInfo].default_outputs[0],
             watchdog_idle_secs = ctx.attrs.watchdog_idle_secs,
             watchdog_sample_secs = ctx.attrs.watchdog_sample_secs,
-            gate_runner = ctx.attrs._gate_runner[DefaultInfo].default_outputs[0],
+            gate = ctx.attrs._gate[DefaultInfo].default_outputs[0],
             run_check = ctx.attrs._run_check[DefaultInfo].default_outputs[0],
             launcher = ctx.attrs._launcher[DefaultInfo].default_outputs[0],
             runtime = ctx.attrs.runtime[DefaultInfo].default_outputs[0],
@@ -345,7 +421,7 @@ mojo_toolchain_rule = rule(
         # its own os and cpu, so the compiler's runtime is the target's.
         "runtime": attrs.exec_dep(),
         "target_cpu": attrs.string(),
-        # The compile watchdog (mojo_wrapper.sh): a compile whose whole process
+        # The compile watchdog (tools/mojo_compile.zig): a compile whose whole process
         # tree uses no CPU for `watchdog_idle_secs` is a deadlocked compiler; it
         # is killed and the action fails with exit 124 instead of holding a
         # worker until the executor's action timeout. 0 turns it off. A slow
@@ -353,7 +429,9 @@ mojo_toolchain_rule = rule(
         "watchdog_idle_secs": attrs.int(default = 300),
         "watchdog_sample_secs": attrs.int(default = 30),
         "zig": attrs.exec_dep(),
-        "_gate_runner": attrs.dep(default = "komira//tools/build/mojo:gate_runner.sh"),
+        # The gate (tools/build/run): runs every gated test and mutation
+        # step. An exec dep: it runs in the actions, on the execution platform.
+        "_gate": attrs.exec_dep(default = "komira//tools/build/run:gate"),
         "_launcher": attrs.dep(default = "komira//tools/build/mojo:launch.sh"),
         "_run_check": attrs.dep(default = "komira//tools/build/mojo:run_check.sh"),
         # The lint of every script the Mojo rules run (tools/build/lint): a
@@ -364,7 +442,9 @@ mojo_toolchain_rule = rule(
             "komira//tools/build/mojo:shell_lint",
             "komira//tools/build/mojo/darwin:shell_lint",
         ]),
-        "_wrapper": attrs.dep(default = "komira//tools/build/mojo:mojo_wrapper.sh"),
+        # The compile wrapper (tools/mojo_compile.zig), an executable built
+        # behind its unit tests; defs.bzl's mojo_compile_cmd runs it.
+        "_wrapper": attrs.exec_dep(default = "komira//tools/build/mojo:mojo_compile"),
     },
 )
 
@@ -377,4 +457,6 @@ mojo_toolchain = declares_docs(mojo_toolchain_rule)
 zig_dist = declares_docs(zig_dist_rule)
 zig_exe = declares_docs(zig_exe_rule)
 zig_test = declares_docs(zig_test_rule)
+zig_test_binary = declares_docs(zig_test_binary_rule)
+zig_test_run = declares_docs(zig_test_run_rule)
 zig_module = declares_docs(zig_module_rule)
