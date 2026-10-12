@@ -21,9 +21,10 @@
 #   4. test_decode_refuses_truncation_at_every_offset: a merged body cut at
 #      every length from 17 up raises, except the cuts that end exactly at a
 #      slot boundary before the compaction slot (a body of that length is a
-#      valid ingest body). Cuts that leave 1 to 7 bytes of the compaction slot
-#      are not asserted: they decode today, which is
-#      komira-ai/komira#1372.
+#      valid ingest body). A cut that leaves 1 to 7 bytes of merge_ops raises
+#      the truncated-i64 error at the start of the compaction slot, so a
+#      merged split never decodes as an ingest split (komira-ai/komira#1372).
+#      An ingest body with 1 to 7 bytes appended raises the same error.
 #   5. test_decode_refuses_bad_length_prefixes: a length prefix with its top
 #      bit set is negative and raises; one with a high byte set but no sign bit
 #      runs past the body and raises. A prefix near Int64.max is not tested
@@ -383,10 +384,18 @@ def test_decode_refuses_truncation_at_every_offset() raises:
         ends.append(off)
     var ingest_end = ends[len(ends) - 1]
     var refused = 0
+    var cut_in_merge_ops = 0
     for n in range(17, len(b)):
-        if n > ingest_end and n < ingest_end + 8:
-            continue  # komira-ai/komira#1372: not asserted
         var msg = _raise_message(_prefix(b, n))
+        if n > ingest_end and n < ingest_end + 8:
+            # komira-ai/komira#1372: 1 to 7 bytes of merge_ops must not
+            # decode as an ingest split that lost its merge inputs.
+            assert_true(
+                msg.find("truncated i64 at offset " + String(ingest_end))
+                >= 0,
+                "cut at " + String(n) + " inside merge_ops: " + msg,
+            )
+            cut_in_merge_ops += 1
         if n == ingest_end:
             assert_equal(msg, String(""), "the ingest prefix decodes")
             continue
@@ -395,9 +404,22 @@ def test_decode_refuses_truncation_at_every_offset() raises:
             "cut at " + String(n) + " of " + String(len(b)) + ": " + msg,
         )
         refused += 1
-    # Every cut from 17 to len - 1 refused but the ingest prefix and the
-    # seven cuts inside merge_ops.
-    assert_equal(refused, len(b) - 17 - 1 - 7)
+    # Every cut from 17 to len - 1 refused but the ingest prefix, and the
+    # seven cuts inside merge_ops among them.
+    assert_equal(refused, len(b) - 17 - 1)
+    assert_equal(cut_in_merge_ops, 7)
+    # An ingest body followed by 1 to 7 stray bytes is refused, not decoded
+    # with the bytes ignored.
+    var ib = encode_split_summary(_ingest())
+    var ingest_len = len(ib)
+    for extra in range(1, 8):
+        ib.append(UInt8(9))
+        var m_extra = _raise_message(ib)
+        assert_true(
+            m_extra.find("truncated i64 at offset " + String(ingest_len))
+            >= 0,
+            "ingest body + " + String(extra) + " bytes: " + m_extra,
+        )
     # The cut that leaves the merge_ops field but not its inputs' length.
     var msg = _raise_message(_prefix(b, ingest_end + 8))
     assert_true(
