@@ -21,3 +21,10 @@ Until then, the build graph itself answers what the graph would:
 ./buck2 cquery 'rdeps(//..., //tools/build/examples:hellopkg)'   # what depends on a target
 ./buck2 uquery 'owner(tools/build/examples/hello.mojo)'          # which target lists a file
 ```
+
+The code graph described above needs no change to the search index format. How
+a graph over data (nodes, edges and episodes) would be stored, as Iceberg tables
+with a delta tail and derived indexes rather than as `komira_search` splits, is
+proposed in [design/data_graph_storage.md](design/data_graph_storage.md);
+the search format changes it could need are proposed in
+[design/search_index_format.md](design/search_index_format.md).

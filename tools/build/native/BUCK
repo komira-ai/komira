@@ -1,6 +1,6 @@
 # Symbol prefixing of the vendored C libraries (README.md): the symbol reader
-# and the scripts of the rules in defs.bzl.
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+# and the tool of the rules in defs.bzl.
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "c_exe")
 
@@ -12,20 +12,62 @@ c_exe(
     visibility = ["PUBLIC"],
 )
 
-export_file(
-    name = "prefix_header.sh",
+# native_so: a library's shared library, its export list and checks 1 to 7
+# (README.md, "Each library's shared library"; shared.bzl), in Zig.
+_NATIVE_SO = [
+    "native_callsites.zig",
+    "native_checks.zig",
+    "native_elf.zig",
+    "native_elf_test.zig",
+    "native_so_test.zig",
+]
+
+# The unit tests (native_so_test.zig: each check green, and red on its
+# planted defect), run as a build action.
+zig_test(
+    name = "native_so_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _NATIVE_SO,
+    src = "native_so.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# Built behind its unit tests: no shared library is checked unless they pass.
+zig_exe(
+    name = "native_so",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _NATIVE_SO,
+    src = "native_so.zig",
+    unit_tests = [":native_so_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )
 
-export_file(
-    name = "archive_check.sh",
-    visibility = ["PUBLIC"],
+_SRCS = glob(["src/*.zig"])
+
+# The unit tests of prefix_tool: `zig test` of main.zig, whose test block
+# imports prefix_test.zig and cli_test.zig, run as a build action.
+zig_test(
+    name = "prefix_tool_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/main.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
-shell_lint(
-    name = "shell_lint",
-    srcs = [
-        "archive_check.sh",
-        "prefix_header.sh",
-    ],
+# prefix_tool (Zig): `header` writes a prefix_header's header, `check` is a
+# prefixed_archive_check. Built behind its unit tests: no header or check
+# runs unless they pass.
+zig_exe(
+    name = "prefix_tool",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/main.zig",
+    unit_tests = [":prefix_tool_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
 )

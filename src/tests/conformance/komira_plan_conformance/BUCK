@@ -1,4 +1,3 @@
-load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Test-only: the logical-plan conformance corpus. A case is a plan built with
@@ -53,11 +52,10 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
-# The deps above name every komira_* module the library and its tests import
-# (tools/build/lint: mojo_deps).
-mojo_deps(
-    name = "deps_lint",
-    buck = "BUCK",
-    srcs = glob(["**/*.mojo"]),
-    visibility = ["komira//:tests_lints"],
-)
+# The datasets and expectations, for komira_test_oracle: its sql_oracle
+# targets read the same JSON Lines files the HAND cases derive from, and its
+# twin test holds each DuckDB answer to the HAND expectation by value.
+[export_file(
+    name = f,
+    visibility = ["//src/tests/helpers/komira_test_oracle:"],
+) for f in glob(["expect/**/*.tsv", "datasets/*.jsonl"])]

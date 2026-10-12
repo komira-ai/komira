@@ -6,6 +6,7 @@ const json = std.json;
 const Alloc = std.mem.Allocator;
 const pack_common = @import("common.zig");
 const pack_conda_meta = @import("conda_meta.zig");
+const pack_conda_dlopen = @import("conda_dlopen.zig");
 const Args = pack_common.Args;
 const Entry = pack_common.Entry;
 const all = pack_common.all;
@@ -341,29 +342,6 @@ pub fn jsonLine(alloc: Alloc, v: json.Value) ![]u8 {
     return out.toOwnedSlice();
 }
 
-/// Null if no source under `dir_path` opens a shared library by name at run
-/// time; otherwise why this tool cannot package the library. Such a package
-/// needs the conda package that ships the shared library in its run
-/// requirements, and this tool does not derive that yet, so it says so instead
-/// of publishing a package that fails on a clean machine.
-fn dlopenReason(alloc: Alloc, dir_path: []const u8) !?[]const u8 {
-    var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch |err|
-        fail("cannot open sources {s}: {s}", .{ dir_path, @errorName(err) });
-    defer dir.close();
-    var walker = try dir.walk(alloc);
-    defer walker.deinit();
-    var files: usize = 0;
-    while (try walker.next()) |w| {
-        if (w.kind != .file or !std.mem.endsWith(u8, w.path, ".mojo")) continue;
-        files += 1;
-        const text = try dir.readFileAlloc(alloc, w.path, 1 << 28);
-        if (std.mem.indexOf(u8, text, "OwnedDLHandle") != null)
-            return try std.fmt.allocPrint(alloc, "{s}: opens a shared library at run time (OwnedDLHandle); its conda package must depend on the package shipping that library, which this tool does not derive yet", .{w.path});
-    }
-    if (files == 0) fail("sources {s} hold no .mojo file", .{dir_path});
-    return null;
-}
-
 /// The source commit of a stamp (--commit): empty only for an unstamped build.
 fn commitOf(a: Args, stamp: []const u8) []const u8 {
     const commit = one(a, "--commit") orelse "";
@@ -490,10 +468,11 @@ pub fn assembleConda(alloc: Alloc, stem: []const u8, pkg_entries: []Entry, info_
 // over a package this tool wrote, so the two cannot drift apart.
 //
 // A library the tool cannot package (native code, no tests, a dependency with
-// no package, a run-time shared library) is written as a directory holding one
-// file, REFUSED, whose text is the reason. That is a value, not an error, so a
-// build of every target in the repository still succeeds; asking for the
-// package's release is what fails (`conda-check --require-stamped`).
+// no package, a run-time shared library its `dlopen` does not declare) is
+// written as a directory holding one file, REFUSED, whose text is the reason.
+// That is a value, not an error, so a build of every target in the repository
+// still succeeds; asking for the package's release is what fails
+// (`conda-check --require-stamped`).
 
 fn openOut(a: Args) std.fs.Dir {
     const p = need(one(a, "--out-dir"), "--out-dir");
@@ -556,7 +535,8 @@ pub fn emitPackage(alloc: Alloc, a: Args, stem: []const u8, conda: []const u8, n
 /// komira_pack conda --name N --import-name I --stamp N
 ///     --timestamp-ms T [--commit SHA] --subdir linux-64 --mojo-pin V
 ///     --license SPDX --summary S --home URL --payload F.mojoc [--dep NAME]...
-///     --sources DIR --extra-file info/licenses/LICENSE=FILE --label L
+///     [--dlopen SONAME=REQUIREMENT]... --sources DIR
+///     --extra-file info/licenses/LICENSE=FILE --label L
 ///     [--doc-file REL=FILE]... --out-dir D
 /// komira_pack conda --name N --refuse REASON --out-dir D
 ///
@@ -568,12 +548,19 @@ pub fn emitPackage(alloc: Alloc, a: Args, stem: []const u8, conda: []const u8, n
 /// conda name of a direct dependency. With --refuse, the package is not made
 /// and D holds REFUSED instead.
 ///
+/// Each --dlopen is a shared library the library opens at run time and the
+/// conda requirement of the package shipping it (system_libs.bzl, through
+/// the build). The sources (--sources) must open exactly those sonames
+/// (conda_dlopen.zig), else D holds REFUSED naming both lists; each
+/// requirement is a run requirement after the others, and metadata.json
+/// carries `dlopen` ([{requirement, soname}], written only when there is one).
+///
 /// Each --doc-file is installed at share/doc/N/REL (docFiles): a file in the
 /// pkg tar, one paths.json row, and one `doc_files` row ({path, sha256}) of
 /// metadata.json. A library's README.md is passed as REL README.md
 /// (conda.bzl). metadata.json carries `doc_files` always, [] when none.
 pub fn cmdConda(alloc: Alloc, a: Args) !void {
-    allow(a, &.{ "--stamp", "--timestamp-ms", "--subdir", "--mojo-pin", "--license", "--summary", "--home", "--payload", "--dep", "--sources", "--import-name", "--extra-file", "--doc-file", "--label", "--commit", "--refuse", "--out-dir" });
+    allow(a, &.{ "--stamp", "--timestamp-ms", "--subdir", "--mojo-pin", "--license", "--summary", "--home", "--payload", "--dep", "--sources", "--import-name", "--extra-file", "--doc-file", "--label", "--commit", "--refuse", "--out-dir", "--dlopen" });
     const name = need(a.name, "--name");
     if (one(a, "--refuse")) |why| {
         try writeRefusal(alloc, a, why);
@@ -606,7 +593,8 @@ pub fn cmdConda(alloc: Alloc, a: Args) !void {
     const commit = commitOf(a, stamp);
     const build = try buildString(alloc, commit, number);
 
-    if (try dlopenReason(alloc, need(one(a, "--sources"), "--sources"))) |why| {
+    const dl = try pack_conda_dlopen.parseDlopens(alloc, try all(alloc, a, "--dlopen"));
+    if (try pack_conda_dlopen.dlopenReasonDir(alloc, need(one(a, "--sources"), "--sources"), dl)) |why| {
         try writeRefusal(alloc, a, why);
         return;
     }
@@ -618,7 +606,7 @@ pub fn cmdConda(alloc: Alloc, a: Args) !void {
     const docs = try docFiles(alloc, a, name);
 
     // info/
-    const depends = try runRequirements(alloc, subdir, pin, version, build, deps);
+    const depends = try pack_conda_dlopen.withSystemRequirements(alloc, try runRequirements(alloc, subdir, pin, version, build, deps), dl);
     var index = newObject(alloc);
     try index.object.put("arch", str("x86_64"));
     try index.object.put("build", str(build));
@@ -661,6 +649,7 @@ pub fn cmdConda(alloc: Alloc, a: Args) !void {
     }
     var m = newObject(alloc);
     try m.object.put("depends", try strArray(alloc, depends));
+    if (dl.len != 0) try m.object.put("dlopen", try pack_conda_dlopen.dlopenRows(alloc, dl));
     try m.object.put("doc_files", doc_rows);
     try m.object.put("import_name", str(import_name));
     try m.object.put("kind", str("library"));

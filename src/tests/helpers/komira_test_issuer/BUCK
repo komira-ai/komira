@@ -1,0 +1,61 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# An in-process token issuer for tests, in the shape the HTTP auth design
+# describes (docs/design/http_auth.md): `TestIssuer` serves a JWK Set
+# document and mints user access tokens over komira_jose's `Keyring`, with a
+# key rotation that publishes a key before it signs and keeps a former key
+# published until the max token lifetime plus komira_jose's largest leeway
+# (60 s, `JOSE_MAX_LEEWAY_S`) have passed. Beside
+# it, the scenario table every issuer in the design must pass, and a runner
+# that drives any issuer through the `IssuerUnderTest` trait. Test-only, so
+# no conda package: a library names it in `test_deps`, which reaches that
+# library's welded tests and nothing it ships (tools/build/mojo/test_deps.bzl).
+#
+# Deps: komira_jose (the keyring, the signer and the verify half the
+# scenarios check with) and its closure: komira_crypto, komira_encoding,
+# komira_json, komira_jwks, komira_secret_store.
+#
+# The welded tests:
+# - test_user_token: the exact claims bytes and every refusal at its
+#   boundary; the derived keys (the exact digest, determinism, refusals).
+# - test_issuer: a minted token verifies under komira_jose's verifier with
+#   the document the issuer serves; the rotation (publish before sign, a
+#   token in flight across a rotation verifies until its exp plus the leeway,
+#   the former key leaves the document at exactly the switch plus the max
+#   lifetime plus 60 s, whatever the issuer's leeway); the jti's 128 random
+#   bits; every refusal.
+# - test_scenarios: the scenario table passes on ES256 and EdDSA issuers.
+# - test_runner: the runner on scripted faulty issuers, each failing the
+#   scenario that names its fault.
+# - test_no_product_vocabulary: the sources name no product concept and hold
+#   no early date (komira_test_vocabulary).
+mojo_library(
+    name = "komira_test_issuer",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    deps = [
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_jose:komira_jose",
+        "//src/komira_json:komira_json",
+        "//src/komira_jwks:komira_jwks",
+        "//src/komira_secret_store:komira_secret_store",
+    ],
+    test_srcs = [
+        "tests/test_issuer.mojo",
+        "tests/test_no_product_vocabulary.mojo",
+        "tests/test_runner.mojo",
+        "tests/test_scenarios.mojo",
+        "tests/test_user_token.mojo",
+    ],
+    test_deps = ["//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary"],
+    test_data = {
+        # The vocabulary test reads the library's own sources, staged at their
+        # repository paths.
+        "tests/test_no_product_vocabulary.mojo": glob(
+            ["**/*.mojo"],
+            exclude = ["tests/**/*.mojo"],
+        ),
+    },
+    visibility = ["PUBLIC"],
+)
