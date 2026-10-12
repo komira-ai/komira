@@ -245,7 +245,11 @@ def _extract_one_row(
     didn't match (row should be null in output); `value_str` is empty.
 
     Walker semantics:
-      - At depth 0, find the outer OPEN_BRACE.
+      - The document must be an object: its first structural token is
+        the outer OPEN_BRACE. A top-level array or string has no members,
+        so the path misses (DuckDB answers NULL for `$.a` on
+        `[{"a":1}]`). A bare scalar puts nothing on the tape and misses
+        on the empty-tape check.
       - Inside an object, walk key-value pairs:
         - KEY: TAG_QUOTE_OPEN ... TAG_QUOTE_CLOSE -> compare bytes to
           path_segments[depth].
@@ -269,10 +273,10 @@ def _extract_one_row(
     if tape_len == 0:
         return _RowResult.miss()
     var t: Int = 0
-    # Find first OPEN_BRACE at depth 0.
-    while t < tape_len and idx.tags[t] != TAG_OPEN_BRACE:
-        t += 1
-    if t >= tape_len:
+    # The top level must be an object: the first structural token is its
+    # OPEN_BRACE. A brace further along belongs to a nested value (an
+    # element of a top-level array), not to the document.
+    if idx.tags[t] != TAG_OPEN_BRACE:
         return _RowResult.miss()
     t += 1  # consume OPEN_BRACE
     return _walk_object(bytes, idx, t, path_segments, 0, preserve_extension_metadata, input_len)
