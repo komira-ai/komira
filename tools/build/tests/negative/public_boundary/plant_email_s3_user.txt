@@ -1,1 +1,0 @@
-The bucket s3://jdoe@corp.zz/k has a user before a host no ledger row names.

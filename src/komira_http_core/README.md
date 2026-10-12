@@ -103,3 +103,19 @@ var get = fresh.decode_block(Span(indexed))
 assert_equal(get[0].name, ":method")
 assert_equal(get[0].value, "GET")
 ```
+
+A TLS client connection over s2n-tls, the C this package links (its shared
+library, from an installed package). The first `TlsConfig` initialises
+s2n-tls once for the process; nothing is sent before `handshake`:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from komira_http_core.tls import TlsConfig, TlsConnection
+
+var config = TlsConfig()
+var protocols: List[String] = ["h2", "http/1.1"]
+config.set_alpn_protocols(protocols)
+var conn = TlsConnection.new_client(config)
+conn.set_server_name("example.com")
+assert_equal(conn.bytes_buffered(), 0)
+```

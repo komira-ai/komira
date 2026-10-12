@@ -1,0 +1,3 @@
+# proto-message: komira.plan.v1.RuntimeNeed
+runtime: "komira/python"
+runtime_abi: "cp312"
