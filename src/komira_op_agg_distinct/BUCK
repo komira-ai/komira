@@ -1,0 +1,26 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The COUNT(DISTINCT) kernels of grouped aggregation. This part holds the
+# STRING-key encode of the grouped COUNT(DISTINCT) driver: the parallel
+# FNV-1a hash pass and the three bodies that number dict ids in first-seen
+# row order (per row range, per hash shard with an order-preserving parallel
+# merge, and serial). The driver and the sinks that use it are added by the
+# changes that follow.
+mojo_library(
+    name = "komira_op_agg_distinct",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_counters:komira_counters",
+    ],
+    test_srcs = [
+        "tests/test_cd_parb_parallel_merge_and_source_keys.mojo",
+        "tests/test_cd_phaseb_parallel_equals_serial.mojo",
+        "tests/test_cd_strenc_rowdict.mojo",
+        "tests/test_cd_strenc_span_reverse_map.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

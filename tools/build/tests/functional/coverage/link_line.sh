@@ -7,7 +7,7 @@
 #
 # Both links run with a stand-in <zig_dir> whose `zig` records its argument
 # list and runs the toolchain's zig:
-#   1. mojo_wrapper.sh (the release build's, unchanged) builds <test.mojo>
+#   1. <wrapper> (mojo_compile, the release build's, unchanged) builds <test.mojo>
 #      against the -I closure, as the test's [coverage][bin] is built; `mojo
 #      build` links through the wrapper's `cc` shim, so what zig is given is
 #      the release link line;
@@ -68,10 +68,10 @@ done
 
 # 1. The release build of the test, through the wrapper.
 cp "$SRC" "$K/src/tests/${SRC##*/}"
-"$BB" sh "$WRAPPER" "$BB" "$TC" "$K/zig_mojo" "$TARGET" "--source-root=$K/src" -- \
+"$WRAPPER" "--compiler=$TC" "--zig=$K/zig_mojo" "--cc-target=$TARGET" "--source-root=$K/src" -- \
     build --optimization-level 0 --target-cpu "$CPU" --debug-level line-tables "$@" \
     "$K/src/tests/${SRC##*/}" -o "$K/mojo.exe" >"$K/mojo.log" 2>&1 ||
-    red "mojo_wrapper.sh could not build ${SRC##*/}: $(tail -n 5 "$K/mojo.log" | tr '\n' ' ')"
+    red "mojo_compile could not build ${SRC##*/}: $(tail -n 5 "$K/mojo.log" | tr '\n' ' ')"
 
 # 2. The branch coverage link of its bitcode.
 "$LINK/cov_branch" link --busybox "$BB" --compiler "$TC" --zig "$K/zig_branch" --target "$TARGET" \
@@ -105,7 +105,7 @@ if ! cmp -s "$K/mojo.line" "$K/branch.line"; then
     red "the branch coverage link is not the release link plus the profile runtime: release: $(tr '\n' ' ' <"$K/mojo.line")| branch: $(tr '\n' ' ' <"$K/branch.line")"
 fi
 {
-    echo "release (mojo build through mojo_wrapper.sh's cc shim):"
+    echo "release (mojo build through mojo_compile's cc shim):"
     cat "$K/mojo.line"
     echo "branch coverage (cov_branch link):"
     cat "$K/branch.full"
