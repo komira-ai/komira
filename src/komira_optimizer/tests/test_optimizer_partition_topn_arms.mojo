@@ -245,12 +245,20 @@ def test_a_filter_over_the_fused_filter_keeps_itself() raises:
     """A Filter whose child is a Filter (not a PartitionBy): the ancestor walk
     passes through it and the fuse descends first, so the inner Filter fuses
     and the outer one stays. Catches the Filter arm checking its child before
-    descending, or returning without descending."""
+    descending, or returning without descending. A Project over both drops
+    the window column, so nothing reads it and it is not emitted."""
     var pred = _cmp(BIN_GT, "val", ScalarValue.from_int(0))
-    var plan = LogicalPlan.filter(pred^, _fused_filter(_rn_pb(), 3))
+    var inner = LogicalPlan.filter(pred^, _fused_filter(_rn_pb(), 3))
+    var keep = ExprArray()
+    keep.append(Expr.col_ref("pid"))
+    keep.append(Expr.col_ref("score"))
+    keep.append(Expr.col_ref("val"))
+    var plan = LogicalPlan.project(keep^, inner^)
     var out = fuse_partition_topn(plan^)
-    assert_equal(Int(out.tag), Int(PLAN_FILTER))
-    _assert_fused(out._filter.value()[].child[], False, "inner filter")
+    assert_equal(Int(out.tag), Int(PLAN_PROJECT))
+    ref outer = out._project.value()[].child[]
+    assert_equal(Int(outer.tag), Int(PLAN_FILTER))
+    _assert_fused(outer._filter.value()[].child[], False, "inner filter")
 
 
 # =============================================================================
@@ -356,7 +364,8 @@ def test_a_project_over_a_scan_is_untouched() raises:
 
 
 def _fuse_with(var pred: Expr) raises -> LogicalPlan:
-    """fuse(Filter(pred) over PartitionBy(ROW_NUMBER))."""
+    """fuse(Filter(pred) over PartitionBy(ROW_NUMBER)). The Filter is the
+    root, so the root outputs the window column and a fused node emits it."""
     var plan = LogicalPlan.filter(pred^, _rn_pb())
     return fuse_partition_topn(plan^)
 
@@ -393,7 +402,7 @@ def test_an_int32_literal_fuses() raises:
     `rn <= 5::int32` fuses with K=5."""
     var name = _win(_rn_pb())
     var out = _fuse_with(_cmp(BIN_LE, name, ScalarValue.from_int32(5)))
-    _assert_fused(out, False, "int32 K")
+    _assert_fused(out, True, "int32 K")
     assert_equal(out._partition_topn.value()[].k, 5)
 
 
@@ -402,7 +411,7 @@ def test_less_than_bounds() raises:
     `< K` -> `K - 1` mapping being off by one in either direction."""
     var name = _win(_rn_pb())
     var two = _fuse_with(_cmp(BIN_LT, name, ScalarValue.from_int(2)))
-    _assert_fused(two, False, "rn < 2")
+    _assert_fused(two, True, "rn < 2")
     assert_equal(two._partition_topn.value()[].k, 1)
     var one = _fuse_with(_cmp(BIN_LT, name, ScalarValue.from_int(1)))
     assert_equal(Int(one.tag), Int(PLAN_FILTER))
@@ -413,7 +422,7 @@ def test_k_upper_bound() raises:
     dropped (an unbounded per-partition heap) or made exclusive."""
     var name = _win(_rn_pb())
     var at = _fuse_with(_le(name, 1_000_000))
-    _assert_fused(at, False, "K at the cap")
+    _assert_fused(at, True, "K at the cap")
     assert_equal(at._partition_topn.value()[].k, 1_000_000)
     var over = _fuse_with(_le(name, 1_000_001))
     assert_equal(Int(over.tag), Int(PLAN_FILTER))
