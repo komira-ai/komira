@@ -77,7 +77,7 @@ src/komira_aws_sqs	0	-
 src/komira_azure_blob	0	-
 src/komira_azure_core	9878	-
 src/komira_broker	9890	-
-src/komira_broker_coordinator	8396	-
+src/komira_broker_coordinator	10000	-
 src/komira_broker_proto	0	-
 src/komira_buffer	9560	8636
 src/komira_calendar	10000	-

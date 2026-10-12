@@ -59,7 +59,7 @@ komira//src/komira_aws_sqs:komira_aws_sqs	src/komira_aws_sqs	library	OK	0	0	-	-	
 komira//src/komira_azure_blob:komira_azure_blob	src/komira_azure_blob	library	RUN_FAILED	-	-	-	-	no	conda	-	not built in this census: test_azure_store_fs takes longer than the 450 s run limit under kcov (sharding it is pending)
 komira//src/komira_azure_core:komira_azure_core	src/komira_azure_core	library	OK	325	329	-	-	no	conda	-	-
 komira//src/komira_broker:komira_broker	src/komira_broker	library	OK	5759	5823	-	-	no	conda	-	-
-komira//src/komira_broker_coordinator:komira_broker_coordinator	src/komira_broker_coordinator	library	OK	440	524	-	-	no	conda	-	-
+komira//src/komira_broker_coordinator:komira_broker_coordinator	src/komira_broker_coordinator	library	OK	580	580	-	-	no	conda	-	-
 komira//src/komira_broker_proto:komira_broker_proto	src/komira_broker_proto	library	OK	0	0	-	-	no	release	-	-
 komira//src/komira_buffer:komira_buffer	src/komira_buffer	library	OK	478	500	133	154	yes	conda	-	-
 komira//src/komira_calendar:komira_calendar	src/komira_calendar	library	OK	630	630	-	-	no	conda	-	-
