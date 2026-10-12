@@ -245,7 +245,11 @@ def _extract_one_row(
     didn't match (row should be null in output); `value_str` is empty.
 
     Walker semantics:
-      - At depth 0, find the outer OPEN_BRACE.
+      - The document must be an object: its first structural token is
+        the outer OPEN_BRACE. A top-level array or string has no members,
+        so the path misses (DuckDB answers NULL for `$.a` on
+        `[{"a":1}]`). A bare scalar puts nothing on the tape and misses
+        on the empty-tape check.
       - Inside an object, walk key-value pairs:
         - KEY: TAG_QUOTE_OPEN ... TAG_QUOTE_CLOSE -> compare bytes to
           path_segments[depth].
@@ -269,10 +273,10 @@ def _extract_one_row(
     if tape_len == 0:
         return _RowResult.miss()
     var t: Int = 0
-    # Find first OPEN_BRACE at depth 0.
-    while t < tape_len and idx.tags[t] != TAG_OPEN_BRACE:
-        t += 1
-    if t >= tape_len:
+    # The top level must be an object: the first structural token is its
+    # OPEN_BRACE. A brace further along belongs to a nested value (an
+    # element of a top-level array), not to the document.
+    if idx.tags[t] != TAG_OPEN_BRACE:
         return _RowResult.miss()
     t += 1  # consume OPEN_BRACE
     return _walk_object(bytes, idx, t, path_segments, 0, preserve_extension_metadata, input_len)
@@ -578,21 +582,19 @@ def _skip_value_at(idx: StructuralIndex, value_t: Int, input_len: Int) raises ->
 
 def _find_close_for(idx: StructuralIndex, open_t: Int, input_len: Int) -> Int:
     """Given a tape position of an OPEN_BRACE / OPEN_BRACKET, return the
-    tape position of the matching CLOSE token. Returns -1 if mismatched.
+    tape position of the matching CLOSE token. Returns -1 if no close
+    brings the depth back to zero.
+
+    The depth moves on BOTH kinds of bracket, up on `{` / `[` and down on
+    `}` / `]`, as in `_skip_value_at`: an object that holds an array (or an
+    array that holds an object) closes the inner value with the other kind.
+    The kind of each close is not checked against its open.
     """
     var tape_len = idx.size()
     if open_t >= tape_len:
         return -1
     var open_tag = idx.tags[open_t]
-    var close_target_a: UInt8
-    var close_target_b: UInt8
-    if open_tag == TAG_OPEN_BRACE:
-        close_target_a = TAG_CLOSE_BRACE
-        close_target_b = TAG_CLOSE_BRACE
-    elif open_tag == TAG_OPEN_BRACKET:
-        close_target_a = TAG_CLOSE_BRACKET
-        close_target_b = TAG_CLOSE_BRACKET
-    else:
+    if open_tag != TAG_OPEN_BRACE and open_tag != TAG_OPEN_BRACKET:
         return -1
     var depth: Int = 1
     var t = open_t + 1
@@ -600,7 +602,7 @@ def _find_close_for(idx: StructuralIndex, open_t: Int, input_len: Int) -> Int:
         var tg = idx.tags[t]
         if tg == TAG_OPEN_BRACE or tg == TAG_OPEN_BRACKET:
             depth += 1
-        elif tg == close_target_a or tg == close_target_b:
+        elif tg == TAG_CLOSE_BRACE or tg == TAG_CLOSE_BRACKET:
             depth -= 1
             if depth == 0:
                 return t
@@ -609,22 +611,18 @@ def _find_close_for(idx: StructuralIndex, open_t: Int, input_len: Int) -> Int:
 
 
 def _slice_to_string(bytes: Span[UInt8, _], start: Int, end: Int) raises -> String:
-    """Build a String from bytes[start..end). Mirrors
-    parse_string._string_from_bytes pattern — NUL-terminate + ctor.
+    """Build a String holding exactly bytes[start..end), built from the
+    length (not a NUL-terminated pointer), so a 0x00 byte does not end it.
     Raises `_slice_to_string: invalid UTF-8 at byte <i>: <reason>` when the
     range is not well-formed UTF-8."""
     if end < start:
         raise Error("_slice_to_string: end < start")
     check_utf8(bytes, start, end, "_slice_to_string")
-    var n = end - start
-    var buf = List[UInt8](capacity=n + 1)
+    var buf = List[UInt8](capacity=end - start)
     for i in range(start, end):
         buf.append(bytes[i])
-    buf.append(UInt8(0))
-    # SAFETY: buf is alive through the ctor call; the ptr it passes is
-    # a NUL-terminated buffer, checked well-formed UTF-8 above, that String
-    # copies out immediately.
-    return String(unsafe_from_utf8_ptr=buf.unsafe_ptr())
+    # Checked well-formed UTF-8 above, which `unsafe_from_utf8` assumes.
+    return String(unsafe_from_utf8=Span(buf))
 
 
 @always_inline

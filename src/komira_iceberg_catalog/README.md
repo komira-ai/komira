@@ -5,8 +5,10 @@ object-store location of the table's current `metadata.json`, through one seam,
 `IcebergCatalog.load_table(namespace, table) -> ResolvedTable`, with two
 implementations:
 
-- `StorageBasedCatalog`: an in-memory map from `namespace.table` to a
-  metadata location the caller registered. No network.
+- `StorageBasedCatalog`: an in-memory map from a (namespace, table) pair to
+  the metadata location the caller registered last for it. Namespace and table
+  are compared separately, so `a.b`/`c` and `a`/`b.c` are different tables. No
+  network.
 - `IcebergRestCatalog[T, P]`: the standard Iceberg REST protocol. On the first
   resolve it reads `GET /v1/config` once and caches the merged `defaults` and
   `overrides` (overrides win), including the catalog `prefix`; each resolve then

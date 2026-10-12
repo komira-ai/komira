@@ -181,7 +181,7 @@ komira//src/komira_scan_source:komira_scan_source	src/komira_scan_source	library
 komira//src/komira_sdk:komira_sdk	src/komira_sdk	library	OK	1347	1360	-	-	no	conda	-	-
 komira//src/komira_search:komira_search	src/komira_search	library	OK	4158	4158	-	-	no	conda	-	-
 komira//src/komira_search_catalog:komira_search_catalog	src/komira_search_catalog	library	OK	724	724	-	-	no	conda	-	-
-komira//src/komira_search_scan:komira_search_scan	src/komira_search_scan	library	OK	501	574	-	-	no	conda	-	-
+komira//src/komira_search_scan:komira_search_scan	src/komira_search_scan	library	OK	591	591	-	-	no	conda	-	-
 komira//src/komira_secret_env:komira_secret_env	src/komira_secret_env	library	OK	105	108	-	-	no	conda	-	-
 komira//src/komira_secret_registry:komira_secret_registry	src/komira_secret_registry	library	OK	64	65	13	16	yes	conda	-	-
 komira//src/komira_secret_store:komira_secret_store	src/komira_secret_store	library	OK	49	49	9	10	yes	conda	-	-
@@ -190,7 +190,7 @@ komira//src/komira_shuffle_streaming:komira_shuffle_streaming	src/komira_shuffle
 komira//src/komira_simd:komira_simd	src/komira_simd	library	OK	632	758	-	-	no	release	src/komira_simd/byte_class/broadcast_iota.mojo,src/komira_simd/byte_class/prefix_xor.mojo,src/komira_simd/width_policy.mojo	-
 komira//src/komira_snapshotter:komira_snapshotter	src/komira_snapshotter	library	OK	60	68	22	28	yes	release	-	-
 komira//src/komira_source_url:komira_source_url	src/komira_source_url	library	OK	102	104	-	-	no	conda	-	-
-komira//src/komira_spsc_ring:komira_spsc_ring	src/komira_spsc_ring	library	OK	119	138	39	50	yes	release	-	-
+komira//src/komira_spsc_ring:komira_spsc_ring	src/komira_spsc_ring	library	OK	138	138	50	50	yes	release	-	-
 komira//src/komira_sql:komira_sql	src/komira_sql	library	OK	3192	3196	-	-	no	conda	-	-
 komira//src/komira_supervisor:komira_supervisor	src/komira_supervisor	library	OK	312	396	-	-	no	conda	src/komira_supervisor/exit_monitor.mojo,src/komira_supervisor/pid1.mojo	-
 komira//src/komira_supervisor_proto:komira_supervisor_proto	src/komira_supervisor_proto	library	OK	0	0	-	-	no	release	-	-

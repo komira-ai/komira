@@ -196,7 +196,7 @@ src/komira_scan_source	6318	-
 src/komira_sdk	9904	-
 src/komira_search	10000	-
 src/komira_search_catalog	10000	-
-src/komira_search_scan	8728	-
+src/komira_search_scan	10000	-
 src/komira_secret_env	9722	-
 src/komira_secret_registry	9846	8125
 src/komira_secret_store	10000	9000
@@ -205,7 +205,7 @@ src/komira_shuffle_streaming	10000	-
 src/komira_simd	8337	-
 src/komira_snapshotter	8823	7857
 src/komira_source_url	9807	-
-src/komira_spsc_ring	8623	7800
+src/komira_spsc_ring	10000	10000
 src/komira_sql	9987	-
 src/komira_supervisor	7878	-
 src/komira_supervisor_proto	0	-
