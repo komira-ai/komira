@@ -37,6 +37,7 @@ from komira_simd.byte_class.quote_region_mask import (
 )
 
 from .quote_styles import QuoteStyle
+from .csv_posix_escape_mask import cancel_posix_escaped_quotes_u64
 from .csv_state_machine import (
     CSV_STATE_STANDARD,
     CSV_STATE_QUOTED,
@@ -815,6 +816,10 @@ def scan_csv_phase2_movemask[
 # remaining `1` bits are unambiguous open / close quotes that toggle
 # the quote-region state correctly via PCLMULQDQ.
 #
+# Posix escaped-quote pre-cancellation: a `\\"` inside a quoted field is a
+# literal quote; `cancel_posix_escaped_quotes_u64` (csv_posix_escape_mask)
+# clears its bit, carrying an escape in byte 63 into the next chunk.
+#
 # Per-arch dispatch is fully encapsulated in `quote_region_mask_u64`:
 #   - x86 with PCLMULQDQ: `vpcmpeqb` + `vpmovmskb` + `pclmulqdq`
 #   - ARM with PMULL64: `cmeq.16b` + `pmull` (in-tree precedent: crc32)
@@ -991,8 +996,11 @@ def scan_csv_phase3_pclmulqdq[
     # `doubled_quote_tail_carry`: True iff the prior chunk's last byte
     # was a quote AND was NOT consumed as the HIGH bit of a doubled-
     # quote pair (only meaningful when Q.DOUBLE_QUOTE_ESCAPES is True).
+    # `posix_escape_carry`: True iff the prior chunk's last byte was an
+    # active Posix escape, so this chunk's byte 0 is escaped (Posix only).
     var quote_region_carry: Bool = False
     var doubled_quote_tail_carry: Bool = False
+    var posix_escape_carry: Bool = False
 
     # Pending candidate-special bitmask from the current 64-byte chunk.
     # When non-zero, we consume set bits from low to high via tzcnt +
@@ -1013,12 +1021,27 @@ def scan_csv_phase3_pclmulqdq[
                 var quote_bm = byte_eq_to_bytemask_u8x64(chunk, quote)
                 var quote_bits = movemask_to_uint_u8x64(quote_bm)
 
-                # RFC-4180 doubled-quote pre-cancellation: clear adjacent
-                # `""` pair bits so they don't fire two region-toggle
-                # transitions via clmul.  Posix dialects skip this step
-                # (escape is `\\"`, a different byte; pairs of `""`
-                # in Posix are TWO consecutive open/close events that
-                # PCLMULQDQ handles correctly without preprocessing).
+                # Escape bitmask (Posix only): bit k = 1 iff byte k is
+                # the Posix escape byte (typically `\\`).
+                var escape_bits: UInt64
+                comptime if Q.DOUBLE_QUOTE_ESCAPES:
+                    escape_bits = UInt64(0)
+                else:
+                    if posix_escape_byte != UInt8(0):
+                        var esc_bm = byte_eq_to_bytemask_u8x64(
+                            chunk, posix_escape_byte
+                        )
+                        escape_bits = movemask_to_uint_u8x64(esc_bm)
+                    else:
+                        escape_bits = UInt64(0)
+
+                # Quote-bit canonicalization: clear every quote that does
+                # not open or close a quoted field, so the prefix XOR below
+                # toggles only on real region boundaries.
+                #   - RFC-4180 / Excel: adjacent `""` pairs.
+                #   - Posix: a quote escaped by `\\` inside a quoted field
+                #     (komira-ai/komira#1129); `""` in Posix is a close then
+                #     an open, which the prefix XOR handles as is.
                 var quote_bits_canon: UInt64
                 comptime if Q.DOUBLE_QUOTE_ESCAPES:
                     # One-byte lookahead so a `""` pair straddling this
@@ -1030,7 +1053,12 @@ def scan_csv_phase3_pclmulqdq[
                         quote_bits, doubled_quote_tail_carry, next_is_quote
                     )
                 else:
-                    quote_bits_canon = quote_bits
+                    quote_bits_canon = cancel_posix_escaped_quotes_u64(
+                        quote_bits,
+                        escape_bits,
+                        quote_region_carry,
+                        posix_escape_carry,
+                    )
 
                 # Quote-region mask: bit k = 1 iff byte k is INSIDE a
                 # quoted region.  PCLMULQDQ on x86, PMULL64 on ARM,
@@ -1054,20 +1082,6 @@ def scan_csv_phase3_pclmulqdq[
                     delimiter,    # duplicate (no 3-needle u8x64 helper)
                 )
                 var specials_bits = movemask_to_uint_u8x64(specials_bm)
-
-                # Escape bitmask (Posix only): bit k = 1 iff byte k is
-                # the Posix escape byte (typically `\\`).
-                var escape_bits: UInt64
-                comptime if Q.DOUBLE_QUOTE_ESCAPES:
-                    escape_bits = UInt64(0)
-                else:
-                    if posix_escape_byte != UInt8(0):
-                        var esc_bm = byte_eq_to_bytemask_u8x64(
-                            chunk, posix_escape_byte
-                        )
-                        escape_bits = movemask_to_uint_u8x64(esc_bm)
-                    else:
-                        escape_bits = UInt64(0)
 
                 # Candidate-special bitmask:
                 #   - delim / nl / cr OUTSIDE quoted regions
@@ -2169,6 +2183,7 @@ def scan_csv_phase3_pclmulqdq_into_cells[
 
     var quote_region_carry: Bool = False
     var doubled_quote_tail_carry: Bool = False
+    var posix_escape_carry: Bool = False
 
     var chunk_base: Int = -1
     var chunk_valid: Bool = False
@@ -2181,6 +2196,19 @@ def scan_csv_phase3_pclmulqdq_into_cells[
                 var quote_bm = byte_eq_to_bytemask_u8x64(chunk, quote)
                 var quote_bits = movemask_to_uint_u8x64(quote_bm)
 
+                var escape_bits: UInt64
+                comptime if Q.DOUBLE_QUOTE_ESCAPES:
+                    escape_bits = UInt64(0)
+                else:
+                    if posix_escape_byte != UInt8(0):
+                        var esc_bm = byte_eq_to_bytemask_u8x64(
+                            chunk, posix_escape_byte
+                        )
+                        escape_bits = movemask_to_uint_u8x64(esc_bm)
+                    else:
+                        escape_bits = UInt64(0)
+
+                # Same canonicalization as `scan_csv_phase3_pclmulqdq`.
                 var quote_bits_canon: UInt64
                 comptime if Q.DOUBLE_QUOTE_ESCAPES:
                     # One-byte lookahead so a `""` pair straddling this
@@ -2192,7 +2220,12 @@ def scan_csv_phase3_pclmulqdq_into_cells[
                         quote_bits, doubled_quote_tail_carry, next_is_quote
                     )
                 else:
-                    quote_bits_canon = quote_bits
+                    quote_bits_canon = cancel_posix_escaped_quotes_u64(
+                        quote_bits,
+                        escape_bits,
+                        quote_region_carry,
+                        posix_escape_carry,
+                    )
 
                 var quote_region = quote_region_mask_u64(
                     quote_bits_canon, quote_region_carry
@@ -2209,18 +2242,6 @@ def scan_csv_phase3_pclmulqdq_into_cells[
                     delimiter,
                 )
                 var specials_bits = movemask_to_uint_u8x64(specials_bm)
-
-                var escape_bits: UInt64
-                comptime if Q.DOUBLE_QUOTE_ESCAPES:
-                    escape_bits = UInt64(0)
-                else:
-                    if posix_escape_byte != UInt8(0):
-                        var esc_bm = byte_eq_to_bytemask_u8x64(
-                            chunk, posix_escape_byte
-                        )
-                        escape_bits = movemask_to_uint_u8x64(esc_bm)
-                    else:
-                        escape_bits = UInt64(0)
 
                 var candidates = (specials_bits & ~quote_region) | quote_bits
                 comptime if not Q.DOUBLE_QUOTE_ESCAPES:
