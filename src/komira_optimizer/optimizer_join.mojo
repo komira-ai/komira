@@ -835,7 +835,9 @@ def _swap_outer_join_with_reprojection(mut plan: LogicalPlan, flipped_jt: UInt8)
 #   (`select_join_build_side`'s re-projection does exactly that).
 #
 # ⚠ SCOPE. The guard restores the plan ROOT's column order against the names
-# captured before the rules, and nothing else.
+# captured before the rules. Below the root, the reorder walkers restore at
+# each Filter, Sort, Limit, Distinct and TopN they pass through, whose cached
+# schema they do not recompute (`_reorder_joins_with_dp_keeping_order`).
 
 
 def join_reorder_output_names(plan: LogicalPlan) raises -> List[String]:

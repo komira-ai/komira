@@ -97,6 +97,7 @@ mojo_library(
         "tests/test_optimizer_reorder_multi_key.mojo",
         "tests/test_optimizer_reorder_multi_key_fallback.mojo",
         "tests/test_optimizer_reorder_multi_key_insertion_order.mojo",
+        "tests/test_optimizer_reorder_output_order.mojo",
         "tests/test_optimizer_reorder_paths.mojo",
         "tests/test_optimizer_reorder_primitives.mojo",
         "tests/test_optimizer_resolve_scalar_subqueries.mojo",
