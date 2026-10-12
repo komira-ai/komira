@@ -189,7 +189,7 @@ def test_plain_name_correlation_through_optimize_matches_the_side_qualified_plan
     Catches: `Filter(o_v > c_v)` over `orders.parquet` with projection
     `[o_custkey, o_v]` (the plan the issue reports)."""
     var want: List[String] = [
-        "Join(type=SEMI, on=[c_custkey=o_custkey], residual=BinaryOp(GT, ColRef(o_v), ColRef(c_v)))",
+        "Join(type=SEMI, on=[c_custkey=o_custkey], residual=BinaryOp(GT, ColRef(o_v), ColRef(c_v)), build=right)",
         "  Scan(path=\"customer.parquet\", type=PARQUET, source_kind=COLUMNAR)",
         "  Scan(path=\"orders.parquet\", type=PARQUET, source_kind=COLUMNAR, projection=[o_custkey, o_v])",
     ]
