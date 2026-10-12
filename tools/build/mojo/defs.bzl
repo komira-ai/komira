@@ -124,6 +124,20 @@ def _check_deps(ctx):
 def _dep_closure(ctx):
     return mojo_pkg_children(ctx, [d[MojoInfo] for d in ctx.attrs.deps if MojoInfo in d])
 
+def _check_closure_excludes(ctx, dep_closure):
+    """Fail analysis when a package `closure_excludes` names is in the closure of `deps`.
+
+    A closure holds one `<import name>.mojoc` per package, so the file name is
+    the package's import name. Direct and transitive dependencies are refused
+    alike: the closure is what a consumer of this library compiles and links.
+    """
+    if not ctx.attrs.closure_excludes:
+        return
+    refused = {n + ".mojoc": n for n in ctx.attrs.closure_excludes}
+    for pkg in dep_closure.traverse():
+        if pkg.basename in refused:
+            fail("{}: `{}` is in the closure of `deps`, which `closure_excludes` refuses; remove the dependency that brings it".format(ctx.label.raw_target(), refused[pkg.basename]))
+
 def _c_link(ctx):
     """MergedLinkInfo of every C/C++ library this target's code may call, or None."""
     infos = []
@@ -369,6 +383,7 @@ def _library_impl(ctx):
 
     ungated = ctx.actions.declare_output("ungated/" + import_name + ".mojoc")
     dep_closure = ctx.actions.tset(MojoPkgTSet, children = deps)
+    _check_closure_excludes(ctx, dep_closure)
     ctx.actions.run(
         mojo_compile_cmd(tc, [
             # No `--target-cpu`: `mojo precompile` rejects it ("unrecognized
@@ -588,6 +603,9 @@ mojo_library_rule = rule(
         # that a dependent's package can name this one by its published name.
         "conda": attrs.bool(default = True),
         "conda_name": attrs.option(attrs.string(), default = None),
+        # Import names of packages that must not be in the closure of `deps`;
+        # see _check_closure_excludes.
+        "closure_excludes": attrs.list(attrs.string(), default = []),
         # Mojo packages and C/C++ libraries; see _check_deps.
         "deps": attrs.list(attrs.dep(), default = []),
         # Optional: the target that generated `srcs` (mojo_gcp_client, for example).

@@ -154,6 +154,7 @@ komira//src/komira_objectstore_s3:komira_objectstore_s3	src/komira_objectstore_s
 komira//src/komira_oci:komira_oci	src/komira_oci	library	OK	1678	1678	-	-	no	conda	-	-
 komira//src/komira_op_agg_row_api:komira_op_agg_row_api	src/komira_op_agg_row_api	library	OK	41	55	-	-	no	conda	src/komira_op_agg_row_api/agg_chunk_rows.mojo	-
 komira//src/komira_op_agg_state:komira_op_agg_state	src/komira_op_agg_state	library	OK	3439	3441	-	-	no	conda	-	-
+komira//src/komira_optimized_plan_header:komira_optimized_plan_header	src/komira_optimized_plan_header	library	OK	366	366	-	-	no	conda	-	-
 komira//src/komira_optimizer:komira_optimizer	src/komira_optimizer	library	OK	9302	9306	-	-	no	conda	-	-
 komira//src/komira_orc:komira_orc	src/komira_orc	library	OK	3943	4729	-	-	no	conda	-	-
 komira//src/komira_parquet:komira_parquet	src/komira_parquet	library	OK	5158	5165	-	-	no	conda	-	-

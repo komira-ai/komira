@@ -170,6 +170,7 @@ src/komira_objectstore_s3	9530	-
 src/komira_oci	10000	-
 src/komira_op_agg_row_api	7454	-
 src/komira_op_agg_state	9994	-
+src/komira_optimized_plan_header	10000	-
 src/komira_optimizer	9995	-
 src/komira_orc	8337	-
 src/komira_parquet	9986	-
