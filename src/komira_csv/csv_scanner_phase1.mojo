@@ -97,15 +97,31 @@ struct Row(Copyable, Movable, Deinitable):
     `read_csv_bytes_to_schema`, the parallel reader) refuse such a record via
     `record_shape.check_csv_record_shape`, which raises naming the record,
     line and field, before any column is built.
+
+    `quote_violation_at` is the byte offset of the first byte in this record
+    that follows a closing quote and is not the delimiter, CR or LF (`"ab"x`),
+    or -1 when there is none. Such a record is malformed under every dialect;
+    the scanners start the next field at that byte (so `"ab"x,c` holds the
+    fields `ab`, `x`, `c`) and record the offset here, as the `ScannedCells`
+    scanners do with `ScannedCells.note_quote_violation`. A caller that wants
+    the readers' behaviour refuses a row whose `quote_violation_at >= 0`.
     """
 
     var cells: List[CellRange]
+    var quote_violation_at: Int
 
     def __init__(out self):
         self.cells = List[CellRange]()
+        self.quote_violation_at = -1
+
+    def note_quote_violation(mut self, byte_pos: Int):
+        """Record `byte_pos` as this record's quote violation; the first wins."""
+        if self.quote_violation_at < 0:
+            self.quote_violation_at = byte_pos
 
     def copy(self) -> Self:
         var out = Self()
+        out.quote_violation_at = self.quote_violation_at
         var i = 0
         while i < len(self.cells):
             out.cells.append(self.cells[i])
@@ -362,6 +378,13 @@ def scan_csv_phase1[
                             pos = pos + 1
                             cell_start = pos
                             continue
+                        # A byte after the closing quote that is not the
+                        # delimiter or a line end: record it and start the
+                        # next field there, as the doubled-quote dialects do.
+                        cur_row.note_quote_violation(pos)
+                        cell_start = pos
+                        pos = pos + 1
+                        continue
                     else:
                         # The closing quote was the last byte: the record
                         # ends here. Close the row so the end-of-input
@@ -406,11 +429,10 @@ def scan_csv_phase1[
                 pos = pos + 1
                 cell_start = pos
                 continue
-            # Otherwise it's a stray byte after a closed quote --
-            # tolerant behavior: treat as field-body bytes of a new
-            # un-quoted region. cell_start stays at the now-stale value
-            # so the field will start with whatever bytes came after the
-            # close-quote -- mirrors DuckDB's strict_mode=false MAYBE_QUOTED.
+            # A byte after the closing quote that is not the delimiter or a
+            # line end: malformed under every dialect. Record it on the row
+            # and start the next field at it.
+            cur_row.note_quote_violation(pos)
             cell_start = pos
             pos = pos + 1
             continue
@@ -695,6 +717,13 @@ def scan_csv_phase2_movemask[
                             pos = pos + 1
                             cell_start = pos
                             continue
+                        # A byte after the closing quote that is not the
+                        # delimiter or a line end: record it and start the
+                        # next field there, as the doubled-quote dialects do.
+                        cur_row.note_quote_violation(pos)
+                        cell_start = pos
+                        pos = pos + 1
+                        continue
                     else:
                         # The closing quote was the last byte: the record
                         # ends here. Close the row so the end-of-input
@@ -734,6 +763,10 @@ def scan_csv_phase2_movemask[
                 pos = pos + 1
                 cell_start = pos
                 continue
+            # A byte after the closing quote that is not the delimiter or a
+            # line end: malformed under every dialect. Record it on the row
+            # and start the next field at it.
+            cur_row.note_quote_violation(pos)
             cell_start = pos
             pos = pos + 1
             continue
@@ -1240,6 +1273,13 @@ def scan_csv_phase3_pclmulqdq[
                             pos = pos + 1
                             cell_start = pos
                             continue
+                        # A byte after the closing quote that is not the
+                        # delimiter or a line end: record it and start the
+                        # next field there, as the doubled-quote dialects do.
+                        cur_row.note_quote_violation(pos)
+                        cell_start = pos
+                        pos = pos + 1
+                        continue
                     else:
                         # The closing quote was the last byte: the record
                         # ends here. Close the row so the end-of-input
@@ -1279,6 +1319,10 @@ def scan_csv_phase3_pclmulqdq[
                 pos = pos + 1
                 cell_start = pos
                 continue
+            # A byte after the closing quote that is not the delimiter or a
+            # line end: malformed under every dialect. Record it on the row
+            # and start the next field at it.
+            cur_row.note_quote_violation(pos)
             cell_start = pos
             pos = pos + 1
             continue

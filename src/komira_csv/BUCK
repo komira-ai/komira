@@ -54,6 +54,7 @@ mojo_library(
         "tests/test_csv_scanner_phase1.mojo",
         "tests/test_csv_scanner_phase2_movemask.mojo",
         "tests/test_csv_scanner_phase3_pclmulqdq.mojo",
+        "tests/test_csv_scanner_rows_quote_violation.mojo",
         "tests/test_csv_schema_sample_inference.mojo",
         "tests/test_csv_simd_cell_parsers.mojo",
         "tests/test_csv_simd_int_column.mojo",
