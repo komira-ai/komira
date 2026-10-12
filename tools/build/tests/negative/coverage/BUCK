@@ -873,6 +873,8 @@ _TOOL_SRCS = [
     "cov_branch_annotate_fixture",
     "cov_branch_annotate_order_test",
     "cov_branch_annotate_test",
+    "cov_branch_link",
+    "cov_branch_link_test",
     "cov_branch_run",
     "cov_branch_run_test",
 ]
@@ -954,21 +956,39 @@ mojo_library(
     test_srcs = ["tests/test_one.mojo"],
 )
 
-# A cov_branch_link.sh copy whose zig line drops `-lm`: the branch coverage
-# link is no longer the release link plus the profile runtime. RED:
-# tests//negative/coverage:branchlinkline, "the branch coverage link is not
-# the release link".
+# A copy of cov_branch's `link` (cov_branch_link.zig) whose zig line drops
+# `-lm`, built as the tool plants above are (without its unit tests, which
+# the defect would fail): the branch coverage link is no longer the release
+# link plus the profile runtime. RED: tests//negative/coverage:branchlinkline,
+# "the branch coverage link is not the release link".
 cov_plant(
-    name = "branchlinkline_link_sh",
-    expr = "s|-Wl,--gc-sections -lm|-Wl,--gc-sections|",
-    out = "cov_branch_link.sh",
-    src = "komira//tools/build/coverage/branch:cov_branch_link.sh",
+    name = "branchlinkline_link_zig",
+    expr = "s|\"-Wl,--gc-sections\", \"-lm\",|\"-Wl,--gc-sections\",|",
+    out = "cov_branch_link.zig",
+    src = _BRANCH_SRC + "cov_branch_link.zig",
+)
+
+cov_zig_tree(
+    name = "branchlinkline_link_src",
+    files = {
+        f + ".zig": (":branchlinkline_link_zig" if f == "cov_branch_link" else _BRANCH_SRC + f + ".zig")
+        for f in ["cov_branch"] + _TOOL_SRCS
+    },
+)
+
+zig_exe(
+    name = "branchlinkline_cov_branch",
+    exec_compatible_with = LINUX_X86_64,
+    imports = [":branchlinkline_link_src[{}]".format(f) for f in _TOOL_SRCS],
+    src = ":branchlinkline_link_src[cov_branch]",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 cov_branch_dir(
     name = "branchlinkline_branch",
     exec_compatible_with = LINUX_X86_64,
-    link_script = ":branchlinkline_link_sh",
+    link_tool = ":branchlinkline_cov_branch",
 )
 
 cov_link_line_check(

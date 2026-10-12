@@ -1,8 +1,9 @@
 # Design: sources, index operators and graph operators in an `OptimizedPlan`
 
 Status: proposed, not built. This is §15 of [`optimized_plan.md`](optimized_plan.md), kept in its own file so each
-file stays under 1,000 lines. Section numbers continue that document's: `§15.x` is here, `§10.x` is in
-[`optimized_plan_udfs.md`](optimized_plan_udfs.md), and every other `§n` is in `optimized_plan.md`.
+file stays under 1,000 lines. Section numbers continue that document's: `§15.x` is here, `§10.1`-`§10.9` are in
+[`optimized_plan_udfs.md`](optimized_plan_udfs.md), `§10.10`-`§10.14` in
+[`optimized_plan_udf_runtime.md`](optimized_plan_udf_runtime.md), and every other `§n` is in `optimized_plan.md`.
 
 Citations are to komira `main` as of 2026-10-09 unless marked otherwise. The storage rules cited as
 "storage stack" are `storage_stack.md` revision 2 (komira-ai/komira#1134, at the head of branch

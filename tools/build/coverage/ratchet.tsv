@@ -99,7 +99,7 @@ src/komira_counters	8338	9750
 src/komira_crypto	8356	-
 src/komira_csv	0	-
 src/komira_datetime	10000	-
-src/komira_db	8241	-
+src/komira_db	10000	-
 src/komira_db_postgres	9929	-
 src/komira_db_sqlite	9402	-
 src/komira_dispatch_agg_exec	9902	-
