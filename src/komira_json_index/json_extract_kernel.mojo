@@ -578,21 +578,19 @@ def _skip_value_at(idx: StructuralIndex, value_t: Int, input_len: Int) raises ->
 
 def _find_close_for(idx: StructuralIndex, open_t: Int, input_len: Int) -> Int:
     """Given a tape position of an OPEN_BRACE / OPEN_BRACKET, return the
-    tape position of the matching CLOSE token. Returns -1 if mismatched.
+    tape position of the matching CLOSE token. Returns -1 if no close
+    brings the depth back to zero.
+
+    The depth moves on BOTH kinds of bracket, up on `{` / `[` and down on
+    `}` / `]`, as in `_skip_value_at`: an object that holds an array (or an
+    array that holds an object) closes the inner value with the other kind.
+    The kind of each close is not checked against its open.
     """
     var tape_len = idx.size()
     if open_t >= tape_len:
         return -1
     var open_tag = idx.tags[open_t]
-    var close_target_a: UInt8
-    var close_target_b: UInt8
-    if open_tag == TAG_OPEN_BRACE:
-        close_target_a = TAG_CLOSE_BRACE
-        close_target_b = TAG_CLOSE_BRACE
-    elif open_tag == TAG_OPEN_BRACKET:
-        close_target_a = TAG_CLOSE_BRACKET
-        close_target_b = TAG_CLOSE_BRACKET
-    else:
+    if open_tag != TAG_OPEN_BRACE and open_tag != TAG_OPEN_BRACKET:
         return -1
     var depth: Int = 1
     var t = open_t + 1
@@ -600,7 +598,7 @@ def _find_close_for(idx: StructuralIndex, open_t: Int, input_len: Int) -> Int:
         var tg = idx.tags[t]
         if tg == TAG_OPEN_BRACE or tg == TAG_OPEN_BRACKET:
             depth += 1
-        elif tg == close_target_a or tg == close_target_b:
+        elif tg == TAG_CLOSE_BRACE or tg == TAG_CLOSE_BRACKET:
             depth -= 1
             if depth == 0:
                 return t
