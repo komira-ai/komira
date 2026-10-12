@@ -25,12 +25,20 @@
 #   * `analyzer_config_fingerprint` changes when any ONE of field_class,
 #     lowercase, ascii_fold, remove_stopwords or stopword_set changes, and
 #     `build_binding` refuses by name a plan built against the index's
-#     analyzer with only ascii_fold flipped;
+#     analyzer with only ascii_fold flipped; two configs with two flags
+#     swapped differ, and so do stopword set tags differing only in their
+#     first byte, only in their last byte, or only in byte order;
 #   * on a generation of 11 splits (so ordinal 10 is in range), `logs/0`,
 #     `logs/9` and `logs/10` open, while `logs/:` (':' is one past '9', read
-#     as digit 10 it would be ordinal 10) and `logs/1/` ('/' is one below '0',
-#     read as digit -1 it would be ordinal 9) are refused as
-#     SEARCH_SPLIT_KEY_INVALID.
+#     as digit 10 it would be ordinal 10), `logs/1/` ('/' is one below '0',
+#     read as digit -1 it would be ordinal 9), `logs_0` and `Logs/0` (the
+#     prefix wrong in its last or first byte) and `logs/` + 16 zeros + `1`
+#     (17 digits, one past the cap) are refused as SEARCH_SPLIT_KEY_INVALID
+#     with the parser's message naming the key, the index and the wanted
+#     form;
+#   * `logs/11` and `logs/1000000000000000` (16 digits) parse to their
+#     ordinals and are refused as out of range, the message naming 11 splits
+#     and that ordinal.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -421,6 +429,40 @@ def test_each_discriminating_analyzer_field_changes_the_fingerprint() raises:
     _assert_fp_differs(base, c^, String("stopword_set"))
 
 
+def test_the_fingerprint_folds_in_order_and_every_stopword_set_byte() raises:
+    # Two flags swapped: a fold that ignored order (xor alone) or read one
+    # flag in place of the other would give these one value.
+    var a = AnalyzerConfig.text("body")
+    a.lowercase = True
+    a.ascii_fold = False
+    var b = AnalyzerConfig.text("body")
+    b.lowercase = False
+    b.ascii_fold = True
+    _assert_fp_differs(a, b^, String("lowercase/ascii_fold swapped"))
+    a = AnalyzerConfig.text("body")
+    a.ascii_fold = True
+    a.remove_stopwords = False
+    b = AnalyzerConfig.text("body")
+    b.ascii_fold = False
+    b.remove_stopwords = True
+    _assert_fp_differs(a, b^, String("ascii_fold/remove_stopwords swapped"))
+    # Stopword set tags of one length that differ in only the first or only
+    # the last byte, or only in byte order.
+    a = AnalyzerConfig.text("body")
+    a.stopword_set = String("abc")
+    b = a.copy()
+    b.stopword_set = String("xbc")
+    _assert_fp_differs(a, b^, String("stopword_set first byte"))
+    b = a.copy()
+    b.stopword_set = String("abd")
+    _assert_fp_differs(a, b^, String("stopword_set last byte"))
+    # The same bytes in another order: a byte fold that only adds or xors
+    # would give one value.
+    b = a.copy()
+    b.stopword_set = String("acb")
+    _assert_fp_differs(a, b^, String("stopword_set bytes reordered"))
+
+
 def test_build_binding_refuses_an_ascii_fold_change_by_name() raises:
     var rt = _resolver()
     var p = _params(String("alpha"))
@@ -468,15 +510,60 @@ def test_a_split_key_just_outside_the_digit_range_is_refused() raises:
     var good: List[String] = [String("logs/0"), String("logs/9"), String("logs/10")]
     for i in range(len(good)):
         _ = rt.open_split(req, _key_split(good[i]))
-    var bad: List[String] = [String("logs/:"), String("logs/1/")]
+    # Refused by the key parser, not by the ordinal range: just outside the
+    # digit range, a prefix wrong only in its last byte ('/') or only in its
+    # first, and 17 digits (one past the 16-digit cap; read whole it would
+    # be ordinal 1).
+    var bad: List[String] = [
+        String("logs/:"),
+        String("logs/1/"),
+        String("logs_0"),
+        String("Logs/0"),
+        String("logs/") + String("0") * 16 + String("1"),
+    ]
     for i in range(len(bad)):
         var raised = False
         try:
             _ = rt.open_split(req, _key_split(bad[i]))
         except err:
             raised = True
-            assert_true(String(SEARCH_SPLIT_KEY_INVALID) in String(err), String(err))
+            var msg = String(err)
+            assert_true(String(SEARCH_SPLIT_KEY_INVALID) in msg, msg)
+            assert_true(
+                String("'")
+                + bad[i]
+                + String("' is not a split key of index 'logs' (want 'logs/<ordinal>')")
+                in msg,
+                msg,
+            )
         assert_true(raised, String("split key '") + bad[i] + String("' is refused"))
+
+
+def test_a_well_formed_key_past_the_splits_is_refused_with_its_ordinal() raises:
+    # `search_split_key` writes these keys, so each parses to its ordinal
+    # (two digits; sixteen, the most the parser reads) and is refused as out
+    # of range, naming that ordinal.
+    var c = InMemorySearchIndexCatalog()
+    c.create_index(String("logs"), String("body"), AnalyzerConfig.text("body"))
+    for _ in range(11):
+        _ = c.publish(String("logs"), _split_a())
+    var rt = _Resolver(c^)
+    var req = ScanRequest(resolve_for_execution(rt, rt.build_binding(_params(String("alpha")))))
+    var ordinals: List[String] = [String("11"), String("1000000000000000")]
+    for i in range(len(ordinals)):
+        var raised = False
+        try:
+            _ = rt.open_split(req, _key_split(String("logs/") + ordinals[i]))
+        except err:
+            raised = True
+            var msg = String(err)
+            assert_true(String(SEARCH_SPLIT_KEY_INVALID) in msg, msg)
+            assert_true(String("has 11 splits") in msg, msg)
+            assert_true(
+                String("; split ") + ordinals[i] + String(" is not one of them") in msg,
+                msg,
+            )
+        assert_true(raised, String("ordinal ") + ordinals[i] + String(" is refused"))
 
 
 # =============================================================================
