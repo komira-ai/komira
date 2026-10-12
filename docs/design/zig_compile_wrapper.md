@@ -25,8 +25,8 @@ and the order of the pull requests.
 
 **Scope, stated exactly.** `busybox.sh` and `dyld_prelude.sh` are not the compile wrapper's alone:
 
-- `dyld_prelude.sh` is prepended to `gate_runner.sh` and `launch.sh` (the `dyld_script` rule in
-  `darwin.bzl`); the compile never reads it. It goes when the Zig gate runner and launcher take a
+- `dyld_prelude.sh` is prepended to `launch.sh` (the `dyld_script` rule in `darwin.bzl`; it was
+  prepended to `gate_runner.sh` too until the macOS gate replaced that); the compile never reads it. It goes when the Zig gate runner and launcher take a
   loader-variable flag (`--library-path-var=DYLD_LIBRARY_PATH`), which is the gate-runner port, not this one.
 - `busybox.sh` is the darwin toolchain's `busybox` field, run by every darwin action that starts
   `tc.busybox`: the compile today, and also the gate runner, `run_check.sh`, the memory cap and deadline

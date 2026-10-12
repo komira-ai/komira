@@ -37,7 +37,7 @@ load(
     _test_root = "test_root",
     gate_mojo = "gate_mojo",
 )
-load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "cap_flags", "define_args", "mem_cap_script", "memory_cap")
+load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "cap_flags", "define_args", "memory_cap")
 load(":native_facts.bzl", "NATIVE_ATTRS", "native_facts", "native_refusal")
 load(":native_reach.bzl", "NATIVE_REACH_ATTRS", "native_reach", "native_reach_kwargs")
 load(":opt_level.bzl", "MojoOptLevelInfo", "SHIPPED_OPT_LEVEL", "TEST_OPT_LEVEL", "opt_level_args")
@@ -62,7 +62,7 @@ def _watchdog_flags(tc):
         "--watchdog-sample-secs={}".format(tc.watchdog_sample_secs),
     ]
 
-def mojo_compile_cmd(tc, args, runpath = None, source_root = None, link_tail = None, link = None, darwin_knobs = True):
+def mojo_compile_cmd(tc, args, runpath = None, source_root = None, link_tail = None, link = None):
     """The command line of one Mojo compile (`mojo precompile`, `build`, `doc`).
 
     Every rule that runs the compiler builds its command here: mojo_library,
@@ -70,31 +70,29 @@ def mojo_compile_cmd(tc, args, runpath = None, source_root = None, link_tail = N
     mojo_doc_json (doc.bzl) and the proto packages (proto.bzl).
 
     `link` replaces the toolchain's link directory: a coverage build's
-    (coverage.bzl), whose `zig` keeps and relocates the debug info.
-    `link_tail` is appended by the wrapper's `cc` shim to the END of every
-    link line, after the compiler's own objects and archive.
+    (coverage.bzl), whose `zig` keeps and relocates the debug info. Linux
+    only. `link_tail` is appended by the wrapper's `cc` shim to the END of
+    every link line, after the compiler's own objects and archive.
 
-    On Linux the wrapper is komira//tools/build/mojo:mojo_compile, a Zig
-    program (tools/mojo_compile.zig), and the toolchain's watchdog knobs are
-    always passed. The macOS toolchain still runs its shell wrapper
-    (darwin/mojo_wrapper.sh) under the toolchain's busybox, with the
-    command line it always had: `darwin_knobs = False` where that line had
-    no knobs (doc.bzl, proto.bzl).
+    The wrapper is the Zig program mojo_compile (tools/mojo_compile.zig on
+    Linux, tools/mojo_compile_macos.zig on macOS), and the toolchain's
+    watchdog knobs are always passed. On macOS the deployment target and the
+    host identities a compile may run on (`macos_hosts`) take the place of
+    the zig directory and target.
     """
     tail = [cmd_args(link_tail, format = "--link-tail={}")] if link_tail else []
     if tc.os == "darwin":
+        if link:
+            fail("mojo_compile_cmd: `link` (a coverage link directory) is Linux only")
         return cmd_args(
-            tc.busybox,
-            "sh",
             tc.wrapper,
-            tc.busybox,
-            tc.compiler,
-            link or tc.link,
-            tc.cc_target,
+            cmd_args(tc.compiler, format = "--compiler={}"),
+            "--deployment-target=" + tc.cc_target,
+            ["--macos-host=" + h for h in tc.macos_hosts],
             ["--runpath=" + runpath] if runpath else [],
             [cmd_args(source_root, format = "--source-root={}")] if source_root else [],
             tail,
-            _watchdog_flags(tc) if darwin_knobs else [],
+            _watchdog_flags(tc),
             "--",
             args,
         )
@@ -426,7 +424,7 @@ def _library_impl(ctx):
         test_dir, staged = _test_root(ctx, "tests/{}/root".format(stem), exe, test_data.get(key, {}))
         ctx.actions.run(
             cmd_args(
-                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), t.short_path), staged, marker.as_output(), cap_flags(cap), env_args, struct(mem_cap = mem_cap_script(ctx), test_deadline = None)),
+                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), t.short_path), staged, marker.as_output(), cap_flags(cap), env_args),
                 hidden = test_dir,
             ),
             category = "mojo_gated_test",
@@ -723,7 +721,6 @@ def _test_impl(ctx):
             "/dev/null",
             deadline_flags(ctx, where) + cap_flags(cap),
             [env_args, _arg_args(ctx.attrs.args)],
-            struct(mem_cap = mem_cap_script(ctx), test_deadline = ctx.attrs._test_deadline[DefaultInfo].default_outputs[0]),
         ),
         hidden = root,
     )

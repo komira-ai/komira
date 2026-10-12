@@ -1,0 +1,25 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The build side of the engine's joins. So far: the untyped hash-join table
+# (`JoinBuildTable_Untyped`) with its packed `HashDirectory`, its per-column
+# cell kernels and the key hashes the untyped tables share.
+mojo_library(
+    name = "komira_op_join_build",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_column_format:komira_column_format",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_udf:komira_udf",
+    ],
+    test_srcs = [
+        "tests/test_hash_directory.mojo",
+        "tests/test_join_build_table_untyped.mojo",
+        "tests/test_join_composite_f64_key_kerneldirect.mojo",
+        "tests/test_join_hash_store_grow.mojo",
+        "tests/test_join_untyped_float_key_model.mojo",
+        "tests/test_strkey_bulk_join_byte_equiv.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

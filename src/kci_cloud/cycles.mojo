@@ -58,7 +58,7 @@ def _named(site: RefSite) -> String:
     if site.kind == SITE_REF:
         if Bool(site.ref_):
             return site.ref_.value().resource.copy()
-        return String("")
+        return String("")  # cov: unreachable ref_sites records a reference position only when it is set
     if Bool(site.value) and site.value.value()._oneof0_case == 3:
         return site.value.value().ref_.value().resource.copy()
     return String("")
@@ -97,7 +97,7 @@ struct _Graph(Movable):
                 try:
                     sites = ref_sites(r)
                 except:
-                    sites = List[RefSite]()  # a shape the walk refuses is a finding of its own
+                    sites = List[RefSite]()  # cov: unreachable ref_sites only reads, and only a write walk raises
                 for k in range(len(sites)):
                     var name = _named(sites[k])
                     if name.byte_length() == 0 or not _is_edge(sites[k].path):
@@ -116,7 +116,7 @@ struct _Graph(Movable):
         for k in range(len(self.to[i])):
             if self.to[i][k] == j:
                 return self.path[i][k].copy()
-        return String("")
+        return String("")  # cov: unreachable _report asks only for an edge the walk just followed
 
 
 def _report(resources: List[Resource], mut g: _Graph, at: Int, mut out: List[Finding]):
@@ -130,7 +130,7 @@ def _report(resources: List[Resource], mut g: _Graph, at: Int, mut out: List[Fin
         if started:
             cyc.append(g.stack[k])
     if len(cyc) < 2:
-        return
+        return  # cov: unreachable _visit reports an edge to a grey resource other than itself (no self edge is kept), so two or more
     var lo = 0
     for k in range(1, len(cyc)):
         if resources[cyc[k]].id < resources[cyc[lo]].id:
