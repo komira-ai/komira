@@ -6,10 +6,11 @@
 #
 # Integer division truncates toward zero (docs/design/query_semantics.md
 # §5.1, DuckDB's `//`: -7 // 2 is -3), over negative quotients too, in the
-# Float64 walker as well. A zero divisor raises here, as standard SQL does (a
-# division-by-zero exception), where DuckDB answers NULL; the tests pin the
-# raise as what the code does today. Decimal result types follow the code's
-# rules (`decimal_*_result_ps`).
+# Float64 walker as well. A zero divisor answers NULL (§5.3): these walkers
+# return values only, so the row holds the placeholder 0, and
+# tests/test_view_integer_division_null_and_min.mojo checks the NULL and
+# MIN / -1 (§5.4). Decimal result types follow the code's rules
+# (`decimal_*_result_ps`).
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_raises, assert_true
@@ -275,9 +276,9 @@ def test_integer_division_truncates_toward_zero() raises:
     _ints(_i32(_exec(pool^), [0, 1, 2, 3]), [0, -1, -1, -2], "(c / -2) + 0")
 
 
-def test_i64_division_by_zero_raises() raises:
-    with assert_raises(contains="eval_to_list_i64_from_view: EXPR_DIV_I64 division by zero at sel index 0"):
-        _ = _i64(_binary(EXPR_DIV_I64, make_col(A), make_lit_i64(0)), [0, 2, 3])
+def test_i64_division_by_zero_is_the_null_placeholder() raises:
+    """a / 0 is NULL (§5.3), no raise: every row holds the placeholder 0."""
+    _ints(_i64(_binary(EXPR_DIV_I64, make_col(A), make_lit_i64(0)), [0, 2, 3]), [0, 0, 0], "a / 0")
 
 
 def test_i64_from_whole_float64() raises:
@@ -436,8 +437,9 @@ def test_i32_nested_refusals() raises:
     pool.append(_node(EXPR_DIV_I32, 0, 1))
     pool.append(make_lit_i32(1))
     pool.append(_node(EXPR_ADD_I32, 2, 3))
-    with assert_raises(contains="_eval_scalar_i32_from_view: EXPR_DIV_I32 division by zero at row 2"):
-        _ = _i32(_exec(pool^), [2])
+    # (c / 0) + 1: the zero divisor is NULL (§5.3), so the nested quotient
+    # is the placeholder 0, not a raise.
+    _ints(_i32(_exec(pool^), [2]), [1], "(c / 0) + 1")
     var p2 = List[RuntimeExpr]()
     p2.append(make_lit_f64(1.0))
     p2.append(make_lit_i32(1))
@@ -618,7 +620,7 @@ def main() raises:
     suite.test[test_i64_leaves]()
     suite.test[test_i64_arithmetic]()
     suite.test[test_integer_division_truncates_toward_zero]()
-    suite.test[test_i64_division_by_zero_raises]()
+    suite.test[test_i64_division_by_zero_is_the_null_placeholder]()
     suite.test[test_i64_from_whole_float64]()
     suite.test[test_i64_case_takes_the_first_true_branch]()
     suite.test[test_i64_unsupported_kind_raises]()
