@@ -76,7 +76,31 @@ assert_equal(back.output_schema.field_name(1), "qty")
 A plan whose filter names a column the scan does not have, and bytes that are
 not a whole message, are refused when decoded:
 
-<!-- mojo-hidden from std.testing import assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_true
+from komira_arrow.schema import Field
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.schema import Schema, SchemaBuilder
+from komira_plan_expr.expr import BIN_GT, Expr
+from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_ir.logical_plan import LogicalPlan
+from komira_scan_source.parquet_source import ParquetSource
+from komira_scan_source.source_variant import SourceVariant
+
+def orders_schema() raises -> Schema:
+    var sb = SchemaBuilder()
+    sb.add_field(Field("id", ArrowType.INT64, False))
+    sb.add_field(Field("qty", ArrowType.INT64, True))
+    sb.add_field(Field("note", ArrowType.STRING, True))
+    return sb.build()
+
+def orders_plan(column: String) raises -> LogicalPlan:
+    var scan = LogicalPlan.scan_from_source(
+        SourceVariant(ParquetSource("orders.parquet", orders_schema())), orders_schema()
+    )
+    var over_25 = Expr.binary(BIN_GT, Expr.col_ref(column), Expr.literal(ScalarValue.from_int64(25)))
+    return LogicalPlan.limit(10, LogicalPlan.filter(over_25^, scan^))
+-->
 ```mojo
 from komira_plan_wire import PLAN_WIRE_UNRESOLVED_COLUMN, plan_from_bytes, plan_to_bytes
 

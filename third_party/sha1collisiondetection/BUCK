@@ -84,5 +84,7 @@ cxx_library(
     visibility = [
         "//src/tests/conformance/komira_git_conformance/...",
         "//tools/build/one_definition/...",
+        # The native-reach case refusing an archive no library ships.
+        "tests//negative/native_reach:archive_no_owner",
     ],
 )
