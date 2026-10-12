@@ -23,9 +23,16 @@ operator or a sink consumes but does not implement belongs here.
   optional timeout), counters, the FNV-1a hash (`spill.fnv1a`), and the small
   shared row and column helpers (`row`, `group_ref`, `scan_source`,
   `streaming_morsel`, `dynamic_filter`, `band_sink`).
+- The THSPLC column codec (`spill.thsplc`, `spill.thsplc_header`): a
+  RecordBatch to one contiguous chunk and back, with a zero-copy restore; and
+  the RecordBatch <-> ColumnNativeBatch bridges (`spill.column_native_shims`).
+- Filter by predicate (`column_filter_predicate`): a RecordBatch or a
+  ColumnNativeBatch filtered by a predicate `Expr` with the evaluator a FILTER
+  operator uses (`komira_batch_eval.conjunction.evaluate_filter_narrowed`), so
+  a scan can filter without depending on an operator package.
 
-It depends on `komira_arrow`, `komira_async`, `komira_host`, `komira_morsel`,
-`komira_physical_plan` and the other core packages listed in `BUCK`, and on no
-operator package. Import from the defining module, for example
+It depends on `komira_arrow`, `komira_async`, `komira_batch_eval`,
+`komira_host`, `komira_morsel`, `komira_physical_plan` and the other packages
+listed in `BUCK`, and on no operator package. Import from the defining module, for example
 `from komira_engine_runtime.morsel_sizing_policy import ...`; the package has
 no facade.
