@@ -1,0 +1,45 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The contract of the engine's typed sources: the `TypedSource` and
+# `SourceReader` traits, the `FlatContribution` a source contributes to a
+# flattened plan, and the leaf aggregation's RADIX-by-rows decision
+# (typed_source); and the row-format conformers for CSV (csv_typed_source),
+# JSONL (jsonl_typed_source) and Avro OCF (avro_typed_source). The parquet
+# conformer is not here. The traits' signatures name the parquet footer cache,
+# the physical-plan scan types, the morsel sizing policy and the dynamic join
+# filter, so this is the lowest package that can hold them.
+#
+# The welded test:
+# - test_leaf_agg_radix_by_rows_pin: the by-rows RADIX decision at its default
+#   thresholds, the low-cardinality decline, and both boundaries (rows ==
+#   min_rows engages, estimate == min_groups admits, -1 admits) with the
+#   thresholds passed as parameters.
+mojo_library(
+    name = "komira_op_typed_source_api",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_avro:komira_avro",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_format:komira_column_format",
+        "//src/komira_csv:komira_csv",
+        "//src/komira_engine_runtime:komira_engine_runtime",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_jsonl:komira_jsonl",
+        "//src/komira_morsel:komira_morsel",
+        "//src/komira_op_agg_row_api:komira_op_agg_row_api",
+        "//src/komira_parquet:komira_parquet",
+        "//src/komira_parquet_codec:komira_parquet_codec",
+        "//src/komira_physical_plan:komira_physical_plan",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_scan_source:komira_scan_source",
+    ],
+    test_srcs = [
+        "tests/test_leaf_agg_radix_by_rows_pin.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
