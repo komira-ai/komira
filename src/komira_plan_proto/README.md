@@ -28,8 +28,10 @@ the Mojo structs generated from it. Three files:
   `plan.proto` for the plan itself. The design is
   `docs/design/optimized_plan.md` (komira-ai/komira#1094); this is its
   schema stage, and fields whose types later stages add are left free at
-  the numbers the design gives them (the file's header lists them). No codec
-  reads these messages yet.
+  the numbers the design gives them (the file's header lists them).
+  `komira_optimized_plan_header` decodes and encodes the `OptimizedPlan`
+  header and runs its admission checks; no codec reads the body or the
+  segments yet.
 
 This package is the schema, not the codec. `komira_plan_wire` converts a
 `LogicalPlan` to and from these messages and checks sizes, versions and

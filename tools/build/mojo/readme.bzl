@@ -59,20 +59,28 @@ def readme_kwargs(kwargs):
 # Whether a README holds an example is in its bytes, which analysis cannot
 # read, so a dynamic action reads `examples`: for each example it compiles
 # that example's program alone against the UNGATED package and runs it
-# through gate_runner.sh exactly as a `test_srcs` entry, labelled
+# through the gate (gate_mojo) exactly as a `test_srcs` entry, labelled
 # `<target>:README.md:<line>`, and the marker joins their markers; with none
 # it compiles and runs nothing, and the marker records that no example
 # exists (never a PASS line). A refused README (an info string such as
 # `mojo skip`, a stray hidden-lines comment) fails `generate`, naming
 # README.md:<line>.
 
-def readme_gate(ctx, tc, import_name, ungated_tset, link_tail, env_args, ships, readme_test):
-    """(marker, generated directory, examples file) of the README's
-    examples, or None without a README. `ships`: the library's conda
-    package installs the README, so a relative link in it is refused.
+def readme_gate(ctx, tc, import_name, ungated_tset, link_tail, env_args, ships, readme_test, owner = False, rerun = {}):
+    """(marker, generated directory, examples file, objects directory) of
+    the README's examples, or None without a README. With `owner` (the library
+    lists a C library among its `deps`: native_facts.bzl `c_direct`), the
+    objects directory holds each example's program as an
+    object file, `readme_<import name>_<line>.o`, whose undefined symbols
+    are the C it calls: `[tests][readme][objects]`, which the library's own
+    shared library reads for its README check (tools/build/native/shared.bzl,
+    `readme_calls`). It is empty for any other library and with no example.
+    `ships`: the library's conda package installs the README, so a
+    relative link in it is refused.
     `link_tail`: the link arguments of the library's C closure (defs.bzl's
     _link_tail); `readme_test`: defs.bzl's dynamic action that builds and
-    runs each example (it needs defs.bzl's _build_executable)."""
+    runs each example (it needs defs.bzl's _build_executable); `rerun`: the
+    environment each example's run adds (rerun.bzl's rerun_env)."""
     readme = ctx.attrs.readme
     if readme == None:
         if ctx.attrs.readme_tool != None:
@@ -102,6 +110,7 @@ def readme_gate(ctx, tc, import_name, ungated_tset, link_tail, env_args, ships, 
         category = "mojo_readme_generate",
     )
     marker = ctx.actions.declare_output("tests/readme.passed")
+    objects = ctx.actions.declare_output("tests/readme/objects", dir = True)
     ctx.actions.dynamic_output_new(readme_test(
         label = ctx.label,
         gate_label = "{}:{}".format(ctx.label.raw_target(), readme.short_path),
@@ -109,10 +118,13 @@ def readme_gate(ctx, tc, import_name, ungated_tset, link_tail, env_args, ships, 
         package = import_name,
         src = src,
         marker = marker.as_output(),
+        objects = objects.as_output(),
+        owner = owner,
         tc = tc,
         closure = ungated_tset,
         opt_level = ctx.attrs.test_optimization_level,
         link_tail = link_tail,
         env_args = env_args,
+        rerun = rerun,
     ))
-    return marker, src, examples
+    return marker, src, examples, objects

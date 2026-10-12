@@ -1,5 +1,5 @@
 # test_command_case.sh -- runs the command a mojo_test gives `buck2 test`
-# (its ExternalRunnerTestInfo command: gate_runner.sh, the staged test, its
+# (its ExternalRunnerTestInfo command: `gate mojo` of the staged test, its
 # --env and --arg options) inside a build action, and requires it to pass.
 # Writes `ok <label>` to <report>.
 #

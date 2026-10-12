@@ -3,28 +3,47 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load(":defs.bzl", "cov_link_dir", "cov_run_dir", "kcov_tool", "kcov_tool_cases")
+load(":defs.bzl", "cov_link_dir", "cov_run_dir", "kcov_tool")
 
 # debug_relocate: a directory path in a file overwritten by a placeholder of
-# the same length.
-zig_exe(
-    name = "debug_relocate_exe",
+# the same length. Its cases (debug_relocate_test.zig, which imports the tool)
+# run as a build action, `zig test`; the executable is built behind them, so
+# it does not exist unless they pass.
+zig_test(
+    name = "debug_relocate_unit",
     exec_compatible_with = LINUX_X86_64,
-    src = "debug_relocate.zig",
+    imports = ["debug_relocate.zig"],
+    src = "debug_relocate_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
 )
 
-kcov_tool_cases(
-    name = "debug_relocate_cases",
+zig_exe(
+    name = "debug_relocate_exe",
     exec_compatible_with = LINUX_X86_64,
-    script = "debug_relocate_cases.sh",
-    tool = ":debug_relocate_exe",
+    src = "debug_relocate.zig",
+    unit_tests = [":debug_relocate_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# The shipped executable run as a process (debug_relocate_exe_test.zig): exit
+# 0, 1 and 2, the counts on stdout and the messages on stderr, and a stdout
+# whose writes fail. Its path reaches the test in the environment
+# (`env_tools`, DEBUG_RELOCATE). It runs the executable, so it cannot be an
+# input of it; it is a validation of the public target instead.
+zig_test(
+    name = "debug_relocate_exe_test",
+    exec_compatible_with = LINUX_X86_64,
+    env_tools = {"DEBUG_RELOCATE": ":debug_relocate_exe"},
+    src = "debug_relocate_exe_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 kcov_tool(
     name = "debug_relocate",
-    cases = [":debug_relocate_cases"],
+    cases = [":debug_relocate_exe_test"],
     exec_compatible_with = LINUX_X86_64,
     exe = ":debug_relocate_exe",
     visibility = ["PUBLIC"],
@@ -84,30 +103,67 @@ kcov_tool(
 
 # cov_zig: the `zig` of a coverage build's link directory (tools/build/mojo/
 # coverage.bzl). It keeps the debug info of a link and relocates the action's
-# directories out of it with debug_relocate. Its cases run it over a
-# stand-in zig and over the pinned one.
+# directories out of it with debug_relocate. Its cases (cov_zig_test.zig,
+# which imports the tool) run as a build action, `zig test`, over a stand-in
+# zig (cov_zig_stub.zig) and the real debug_relocate; the executable is built
+# behind them, so it does not exist unless they pass.
 zig_exe(
-    name = "cov_zig_exe",
+    name = "cov_zig_stub",
     exec_compatible_with = LINUX_X86_64,
-    src = "cov_zig.zig",
+    src = "cov_zig_stub.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
 )
 
-kcov_tool_cases(
-    name = "cov_zig_cases",
+zig_test(
+    name = "cov_zig_unit",
     exec_compatible_with = LINUX_X86_64,
-    helpers = [
-        ":debug_relocate",
-        "komira//tools/build/toolchains:zig",
+    env_tools = {
+        "COV_ZIG_STUB": ":cov_zig_stub",
+        "DEBUG_RELOCATE": ":debug_relocate",
+    },
+    imports = [
+        "cov_zig.zig",
+        "cov_zig_elf.zig",
     ],
-    script = "cov_zig_cases.sh",
-    tool = ":cov_zig_exe",
+    src = "cov_zig_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "cov_zig_exe",
+    exec_compatible_with = LINUX_X86_64,
+    src = "cov_zig.zig",
+    unit_tests = [":cov_zig_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# The shipped executable run as a process (cov_zig_exe_test.zig) from a link
+# directory like :cov_link's, over the pinned zig: a C program compiled and
+# linked through it, a refusal (exit 1) and bad usage (exit 2); over the
+# stand-in zig: $PWD and $BUCK_SCRATCH_PATH read from its environment. It
+# runs the executable, so it cannot be an input of it; it is a validation of
+# the public target instead.
+zig_test(
+    name = "cov_zig_exe_test",
+    exec_compatible_with = LINUX_X86_64,
+    env_tools = {
+        "COV_ZIG": ":cov_zig_exe",
+        "COV_ZIG_STUB": ":cov_zig_stub",
+        "DEBUG_RELOCATE": ":debug_relocate",
+        "PINNED_ZIG": "komira//tools/build/toolchains:zig",
+    },
+    imports = ["cov_zig_elf.zig"],
+    src = "cov_zig_exe_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 kcov_tool(
     name = "cov_zig",
-    cases = [":cov_zig_cases"],
+    cases = [":cov_zig_exe_test"],
     exec_compatible_with = LINUX_X86_64,
     exe = ":cov_zig_exe",
     visibility = ["PUBLIC"],
@@ -144,7 +200,5 @@ shell_lint(
     name = "shell_lint",
     srcs = [
         "cov_run.sh",
-        "cov_zig_cases.sh",
-        "debug_relocate_cases.sh",
     ],
 )

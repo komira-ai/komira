@@ -279,14 +279,25 @@ def test_pr_yml_agrees_with_the_machine_file() raises:
     assert_equal(runs, 1)
     assert_equal(farm, 1)
     assert_true(doc.child(doc.items(jobs)[0], String("environment")) < 0)
-    # the build budget: the FIRST step takes the job's deadline, 5 of its
-    # 120 minutes before GitHub would cancel it, and the one `kci run` gets
-    # the seconds left of it as --build-budget-s (kci_build THE BUDGET)
-    assert_equal(doc.text(doc.child(doc.items(jobs)[0], String("timeout-minutes"))), String("120"))
+    # the build budget: the job has about 5 hours (at least 300 minutes, so a
+    # change that rebuilds most of the tree on the farm finishes; at most the
+    # 360 a GitHub-hosted job may run). The FIRST step takes the job's
+    # deadline, 5 minutes before GitHub would cancel it, read off
+    # `timeout-minutes` here so the two numbers cannot drift apart, and the one
+    # `kci run` gets the seconds left of it as --build-budget-s (kci_build THE
+    # BUDGET)
+    var job_minutes = Int(doc.text(doc.child(doc.items(jobs)[0], String("timeout-minutes"))))
+    assert_true(
+        job_minutes >= 300 and job_minutes <= 360,
+        String("pr.yml's timeout-minutes is ") + String(job_minutes) + String(", not within 300..360"),
+    )
     var first = doc.child(steps[0], String("run"))
     assert_true(first >= 0, String("pr.yml's first step runs nothing"))
     assert_equal(
-        doc.text(first), String('echo "$(( $(date +%s) + 115 * 60 ))" > "$RUNNER_TEMP/job_deadline_s"\n')
+        doc.text(first),
+        String('echo "$(( $(date +%s) + ')
+        + String(job_minutes - 5)
+        + String(' * 60 ))" > "$RUNNER_TEMP/job_deadline_s"\n'),
     )
     var budgeted = 0
     for i in range(len(steps)):

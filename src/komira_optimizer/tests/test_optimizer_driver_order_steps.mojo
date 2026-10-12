@@ -157,7 +157,7 @@ def test_constants_fold_before_cse_compares_expressions() raises:
 
 
 # -----------------------------------------------------------------------------
-# Steps 13-14
+# Steps 13-17
 # -----------------------------------------------------------------------------
 
 
@@ -181,6 +181,23 @@ def test_projects_merge_before_eager_aggregation() raises:
     var aggs = AggExprArray()
     aggs.append(AggExpr(AGG_SUM, Optional(_c("measure")), Optional(String("total"))))
     assert_equal(_render(_run(LogicalPlan.aggregate(gb^, aggs^, p^))), _want_merged_then_eager())
+
+
+def test_a_limit_is_pushed_below_the_join_order_restoring_project() raises:
+    """`Limit 5` over (a(100000 rows) JOIN b(10) ON ak = bk) JOIN d(1000) ON
+    bk = dk: step 16 reorders the joins and puts a Project restoring the
+    query's column order under the Limit; step 17 then pushes the Limit below
+    that Project, onto the reordered join.
+
+    Defect caught: step 17 before step 16. The Limit is still directly on the
+    join when step 17 runs, so it is not moved, and the Project step 16 adds
+    afterwards stays under it."""
+    var an: List[String] = ["ak", "av"]
+    var bn: List[String] = ["bk", "bv"]
+    var dn: List[String] = ["dk", "dv"]
+    var ab = LogicalPlan.join(_scan("a", an, 100000), _scan("b", bn, 10), _l1("ak"), _l1("bk"), JOIN_INNER)
+    var abd = LogicalPlan.join(ab^, _scan("d", dn, 1000), _l1("bk"), _l1("dk"), JOIN_INNER)
+    assert_equal(_render(_run(LogicalPlan.limit(5, abd^))), _want_limit_under_restore())
 
 
 # -----------------------------------------------------------------------------
@@ -220,6 +237,19 @@ def _want_merged_then_eager() -> String:
         "    Aggregate(group_by=[ColRef(fk_id)], aggs=[SUM(ColRef(measure)).alias(\"__eager_sum_total\")])",
         "      Scan(path=\"fact.parquet\", type=PARQUET, source_kind=COLUMNAR)",
         "    Scan(path=\"dim.parquet\", type=PARQUET, source_kind=COLUMNAR)",
+    ]
+    return _lines(l)
+
+
+def _want_limit_under_restore() -> String:
+    var l: List[String] = [
+        "Project(exprs=[ColRef(ak), ColRef(av), ColRef(bk), ColRef(bv), ColRef(dk), ColRef(dv)])",
+        "  Limit(n=5)",
+        "    Join(type=INNER, on=[bk=ak, dk=ak], build=left)",
+        "      Join(type=INNER, on=[bk=dk], build=left)",
+        "        Scan(path=\"b\", type=PARQUET, source_kind=COLUMNAR)",
+        "        Scan(path=\"d\", type=PARQUET, source_kind=COLUMNAR)",
+        "      Scan(path=\"a\", type=PARQUET, source_kind=COLUMNAR)",
     ]
     return _lines(l)
 
