@@ -42,7 +42,7 @@ from komira_iceberg_catalog.iceberg_rest_transport import (
 )
 
 
-comptime _HOST: String = "127.0.0.1"
+comptime _HOST: String = "192.0.2.1"
 comptime _STALL_PENDING_READS: Int = 200_000
 comptime _BUDGET_US: Int = 150_000
 
@@ -216,7 +216,7 @@ def test_plaintext_get_sends_path_headers_and_returns_body() raises:
     var resp = tr.get(_request(String("/v1/p/namespaces/db/tables/t"), 8181))
     assert_equal(resp.status, 200)
     _assert_echoed_request(
-        resp.body, String("/v1/p/namespaces/db/tables/t"), String("127.0.0.1:8181")
+        resp.body, String("/v1/p/namespaces/db/tables/t"), String("192.0.2.1:8181")
     )
 
 
@@ -227,8 +227,8 @@ def test_tls_get_uses_https() raises:
     var tr = HttpIcebergRestTransport[_EchoConnector](_echo_200_tls)
     var resp = tr.get(_request(String("/v1/config"), 443))
     assert_equal(resp.status, 200)
-    _assert_echoed_request(resp.body, String("/v1/config"), String("127.0.0.1"))
-    assert_true(not _has(resp.body, String("127.0.0.1:")), resp.body)
+    _assert_echoed_request(resp.body, String("/v1/config"), String("192.0.2.1"))
+    assert_true(not _has(resp.body, String("192.0.2.1:")), resp.body)
 
 
 def test_non_200_is_returned_not_raised() raises:
@@ -239,8 +239,8 @@ def test_non_200_is_returned_not_raised() raises:
     var plain = HttpIcebergRestTransport[_EchoConnector](_echo_503_plain)
     var r503 = plain.get(_request(String("/v1/x"), 80))
     assert_equal(r503.status, 503)
-    assert_true(_has(r503.body, String(" | Host: 127.0.0.1")), r503.body)
-    assert_true(not _has(r503.body, String("127.0.0.1:")), r503.body)
+    assert_true(_has(r503.body, String(" | Host: 192.0.2.1")), r503.body)
+    assert_true(not _has(r503.body, String("192.0.2.1:")), r503.body)
 
 
 def test_each_call_dials_a_fresh_connector() raises:

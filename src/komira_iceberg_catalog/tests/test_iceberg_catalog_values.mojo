@@ -246,16 +246,18 @@ def _path_for(prefix_cfg: String, namespace: String, table: String) raises -> St
 
 
 def test_path_encoding_fixed_vectors() raises:
-    # A prefix with a slash and a space, a multi-level namespace joined by the
-    # unit separator, a table with a reserved character and a non-ASCII one.
+    # A prefix with a space, a multi-level namespace joined by the unit
+    # separator, a table with a reserved character and a non-ASCII one. The
+    # prefix holds no `/`: the client encodes it as %2F, while the reference
+    # client keeps it (komira-ai/komira#1508), so no test pins either answer.
     var path = _path_for(
-        String('{"overrides":{"prefix":"ten ant/1"}}'),
+        String('{"overrides":{"prefix":"ten ant1"}}'),
         String("a") + chr(0x1F) + String("b"),
         String("t%1é"),
     )
     assert_equal(
         path,
-        String("/v1/ten%20ant%2F1/namespaces/a%1Fb/tables/t%251%C3%A9"),
+        String("/v1/ten%20ant1/namespaces/a%1Fb/tables/t%251%C3%A9"),
     )
 
 
