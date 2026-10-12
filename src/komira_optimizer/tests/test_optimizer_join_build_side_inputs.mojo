@@ -56,11 +56,13 @@ def _ints(path: String, names: List[String], rows: Int) -> LogicalPlan:
     return _scan(path, names, types, rows)
 
 
-def _decides(var l: LogicalPlan, var r: LogicalPlan, want: UInt8, what: String) raises:
-    """INNER(l, r) on keys `a` = `b` records `want`, and nothing else changes:
-    with the build side cleared the output hashes like the input."""
-    var lo: List[String] = ["a"]
-    var ro: List[String] = ["b"]
+def _decides_on(
+    var l: LogicalPlan, var r: LogicalPlan, lkey: String, rkey: String,
+    want: UInt8, what: String,
+) raises:
+    """`_decides` with the join keys `lkey` = `rkey`."""
+    var lo: List[String] = [lkey]
+    var ro: List[String] = [rkey]
     var j = LogicalPlan.join(l^, r^, lo^, ro^, JOIN_INNER)
     var before = j.structural_hash()
     var out = select_join_build_side(j^)
@@ -68,6 +70,12 @@ def _decides(var l: LogicalPlan, var r: LogicalPlan, want: UInt8, what: String) 
     assert_equal(Int(out._join.value()[].build_side), Int(want), what)
     out._join.value()[].build_side = JOIN_BUILD_SIDE_UNSET
     assert_equal(out.structural_hash(), before, what + ": plan changed")
+
+
+def _decides(var l: LogicalPlan, var r: LogicalPlan, want: UInt8, what: String) raises:
+    """INNER(l, r) on keys `a` = `b` records `want`, and nothing else changes:
+    with the build side cleared the output hashes like the input."""
+    _decides_on(l^, r^, "a", "b", want, what)
 
 
 # -----------------------------------------------------------------------------
@@ -239,6 +247,53 @@ def test_only_a_column_named_exactly_as_the_key_is_a_key() raises:
     _decides(
         _scan("l", l[0], l[1], 10), _ints("r", rn, 1000),
         JOIN_BUILD_SIDE_RIGHT, "left payload shares key name",
+    )
+
+
+def _key_cased_and_cut_payload(
+    key: String, cut: String, cased: String
+) -> Tuple[List[String], List[ArrowType]]:
+    """[key, cut STRING, cased, key_y, key_z], where `cut` is the key less its
+    last letter and `cased` is the key upper-cased. Matched exactly, the key
+    is the one key column and the other four are payload, one STRING: wide.
+    Matched ignoring case, `cased` is a key too; matched with the key
+    starting with (or containing) the column name, `cut` is a key too. Either
+    leaves three payload columns: not wide."""
+    var n: List[String] = [key, cut, cased, key + "_y", key + "_z"]
+    var t: List[ArrowType] = [
+        ArrowType.INT64, ArrowType.STRING, ArrowType.INT64, ArrowType.INT64,
+        ArrowType.INT64,
+    ]
+    return (n^, t^)
+
+
+def test_a_key_match_is_case_sensitive_and_whole_name() raises:
+    """Keys `ak` = `bk`. R: 10 rows of [bk, b STRING, BK, bk_y, bk_z]; L:
+    1000 rows of [ak, lv]. Matched exactly, R's payload is b, BK, bk_y, bk_z:
+    four columns, one STRING, so R is wide and the override builds LEFT where
+    the cost says RIGHT. The mirror (the wide side on the left, keyed `ak`)
+    builds RIGHT where the cost says LEFT, and the predicate says True
+    directly. Catches the name match made case-insensitive (BK would be a
+    key, leaving three payload columns) and the match reversed to the key
+    starting with, or containing, the column's name (b would be a key,
+    leaving three INT64 payload columns)."""
+    var keys: List[String] = ["sk"]
+    var s = _key_cased_and_cut_payload("sk", "s", "SK")
+    assert_true(
+        _side_has_wide_string_build_payload(_scan("s", s[0], s[1], 1), keys),
+        "payload names differ from the key in case or length",
+    )
+    var ln: List[String] = ["ak", "lv"]
+    var r = _key_cased_and_cut_payload("bk", "b", "BK")
+    _decides_on(
+        _ints("l", ln, 1000), _scan("r", r[0], r[1], 10), "ak", "bk",
+        JOIN_BUILD_SIDE_LEFT, "right payload differs from key in case or length",
+    )
+    var rn: List[String] = ["bk", "rv"]
+    var l = _key_cased_and_cut_payload("ak", "a", "AK")
+    _decides_on(
+        _scan("l", l[0], l[1], 10), _ints("r", rn, 1000), "ak", "bk",
+        JOIN_BUILD_SIDE_RIGHT, "left payload differs from key in case or length",
     )
 
 
