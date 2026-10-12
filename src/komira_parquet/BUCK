@@ -34,6 +34,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # page headers, decompresses the selected pages (komira_parquet_codec) and
 # gathers their selected rows.
 #
+# It also decodes column chunks a chunk of rows at a time into a reused
+# buffer (subrg_column_cursor, with its page helpers in subrg_cursor_pages and
+# its counters in subrg_dbp_trace and subrg_scan_route_trace), holds a
+# worker's reusable decode buffers (column_decode_context), decodes a nested
+# leaf with its levels (nested_decoder) and reads one PLAIN page from a file
+# range (column_reader).
+#
 # The welded tests:
 # - test_rle_simd, test_rle_simd_bw_small: bit-packed runs at every bit width
 #   the SIMD kernels specialize, and the dedicated bw=1/2/4 byte paths, at
@@ -82,6 +89,30 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   annotation), with page headers written from parquet.thrift.
 # - test_gather_column_fallbacks_direct: the chunks it hands back (None) and
 #   the refusals it raises.
+# - test_subrg_cursor_dict_direct: ResumableColumnCursor on dictionary chunks:
+#   codes in fills of every size equal the codes written, exactly
+#   min(max_rows, rows left) per call, a long RLE run split across calls,
+#   numeric and string dictionaries, OPTIONAL pages with and without a null,
+#   a bit-width-0 page, seek_to_row ranges, the data-pages-only open, and the
+#   chunks refused at open (counted) or mid-decode.
+# - test_subrg_cursor_flat_direct: the cursor on flat chunks: PLAIN values
+#   copied in fills or read in place by grains that stop at page ends,
+#   DELTA_BINARY_PACKED values carried across fills of every size, row-range
+#   seeks by byte offset and by decode-skip, the DBP counters, and refusals
+#   (V2, BYTE_STREAM_SPLIT, a short PLAIN page, a small buffer).
+# - test_subrg_admit_all_pages_direct: the cursor's whole-chunk page header
+#   walk, one test per refusal case against an admitted control.
+# - test_subrg_traces_direct: the DBP and scan route counters, grains, the
+#   power-of-two milestones and the print gate.
+# - test_column_decode_context_direct: the reusable buffers grow and never
+#   shrink, band slots and row-group dictionaries, the band resolve refusing
+#   a code outside its dictionary, band cursors and the in-place grain view.
+# - test_nested_decoder_direct: decode_column_with_levels: list<int32>
+#   levels and values over V1 and V2 pages, every codec and type, dictionary
+#   codes at their bit width, strings across pages, a numeric dictionary
+#   spill, and the malformed chunks it refuses.
+# - test_column_reader_local: PLAIN pages read from a local file, stored and
+#   SNAPPY, and the reader's refusals.
 # - test_no_env_reads: the package's sources read no environment, import no
 #   komira package outside the deps below (and never komira_core), hold no
 #   raw pointer in a public signature, rebuild no address from an integer
@@ -116,6 +147,8 @@ mojo_library(
         "tests/test_bloom_pruner_direct.mojo",
         "tests/test_bloom_reader_direct.mojo",
         "tests/test_bss_direct.mojo",
+        "tests/test_column_decode_context_direct.mojo",
+        "tests/test_column_reader_local.mojo",
         "tests/test_decimal_decode_direct.mojo",
         "tests/test_decode_arm_trace_direct.mojo",
         "tests/test_decode_helpers_direct.mojo",
@@ -149,6 +182,7 @@ mojo_library(
         "tests/test_int96_decode.mojo",
         "tests/test_metadata_parser_direct.mojo",
         "tests/test_neon_bss_decode.mojo",
+        "tests/test_nested_decoder_direct.mojo",
         "tests/test_nested_direct.mojo",
         "tests/test_nested_types.mojo",
         "tests/test_no_env_reads.mojo",
@@ -170,6 +204,10 @@ mojo_library(
         "tests/test_selection_interval.mojo",
         "tests/test_selection_vector_direct.mojo",
         "tests/test_string_share_byte_equiv.mojo",
+        "tests/test_subrg_admit_all_pages_direct.mojo",
+        "tests/test_subrg_cursor_dict_direct.mojo",
+        "tests/test_subrg_cursor_flat_direct.mojo",
+        "tests/test_subrg_traces_direct.mojo",
         "tests/test_thrift_compact_direct.mojo",
     ],
     visibility = ["PUBLIC"],
