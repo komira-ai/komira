@@ -1,6 +1,8 @@
 //! mojo_compile: runs the hermetic Mojo compiler inside one build action
 //! (Linux). It replaces tools/build/mojo/mojo_wrapper.sh; the design is
 //! docs/design/zig_compile_wrapper.md, whose numbered behaviours this keeps.
+//! The macOS build is mojo_compile_macos.zig, which reuses the helpers this
+//! file marks `pub` (scratch, refusals, paths, the output checks).
 //!
 //!   mojo_compile --compiler=<dir> --cc-target=<triple> --zig=<dir>
 //!                [--runpath=<$ORIGIN*>] [--source-root=<dir>] [--link-tail=<arg>]...
@@ -73,28 +75,28 @@ test {
 }
 
 /// The scratch directory, once it may exist: removed by `finish`.
-var scratch: ?[]const u8 = null;
+pub var scratch: ?[]const u8 = null;
 /// The signal a handler caught (HUP, INT or TERM), or 0.
 var caught = std.atomic.Value(u32).init(0);
 
-const Envp = [*:null]const ?[*:0]const u8;
-const Argv = [*:null]const ?[*:0]const u8;
+pub const Envp = [*:null]const ?[*:0]const u8;
+pub const Argv = [*:null]const ?[*:0]const u8;
 
-fn finish(code: u8) noreturn {
+pub fn finish(code: u8) noreturn {
     if (scratch) |t| std.fs.deleteTreeAbsolute(t) catch {};
     std.process.exit(code);
 }
 
-fn say(comptime fmt: []const u8, args: anytype) void {
+pub fn say(comptime fmt: []const u8, args: anytype) void {
     std.debug.print("mojo_compile: " ++ fmt ++ "\n", args);
 }
 
-fn refuse(comptime fmt: []const u8, args: anytype) noreturn {
+pub fn refuse(comptime fmt: []const u8, args: anytype) noreturn {
     say(fmt, args);
     finish(2);
 }
 
-fn oom() noreturn {
+pub fn oom() noreturn {
     refuse("out of memory", .{});
 }
 
@@ -134,7 +136,7 @@ fn shimMain(arena: std.mem.Allocator, args: []const []const u8) noreturn {
     std.process.exit(if (err == .NOENT) 127 else 126);
 }
 
-fn toArgv(arena: std.mem.Allocator, items: []const []const u8) !Argv {
+pub fn toArgv(arena: std.mem.Allocator, items: []const []const u8) !Argv {
     const out = try arena.allocSentinel(?[*:0]const u8, items.len, null);
     for (items, 0..) |s, i| out[i] = try arena.dupeZ(u8, s);
     return out;
@@ -144,7 +146,7 @@ fn toArgv(arena: std.mem.Allocator, items: []const []const u8) !Argv {
 
 /// The working directory as a shell spells it: $PWD when it is absolute and
 /// names the working directory, else getcwd().
-fn shellPwd(arena: std.mem.Allocator) []const u8 {
+pub fn shellPwd(arena: std.mem.Allocator) []const u8 {
     const cwd = std.process.getCwdAlloc(arena) catch |e| refuse("cannot read the working directory: {s}", .{@errorName(e)});
     const p = posix.getenv("PWD") orelse return cwd;
     if (p.len == 0 or p[0] != '/') return cwd;
@@ -154,12 +156,12 @@ fn shellPwd(arena: std.mem.Allocator) []const u8 {
     return p;
 }
 
-fn join(arena: std.mem.Allocator, a: []const u8, b: []const u8) []const u8 {
+pub fn join(arena: std.mem.Allocator, a: []const u8, b: []const u8) []const u8 {
     return std.fmt.allocPrint(arena, "{s}/{s}", .{ a, b }) catch oom();
 }
 
 /// Exists (following links) and is not empty: the shell's `test -s`.
-fn nonEmpty(path: []const u8) bool {
+pub fn nonEmpty(path: []const u8) bool {
     const st = posix.fstatat(posix.AT.FDCWD, path, 0) catch return false;
     return st.size > 0;
 }
@@ -286,7 +288,7 @@ fn execChild(path: [*:0]const u8, argv: Argv, envp: Envp, report: i32) noreturn 
 
 /// Everything the child wrote on the report pipe before it closed (by exec
 /// or exit): up to 8 bytes.
-fn readReport(fd: i32, buf: *[8]u8) usize {
+pub fn readReport(fd: i32, buf: *[8]u8) usize {
     var n: usize = 0;
     while (n < buf.len) {
         const r = posix.read(fd, buf[n..]) catch break;
@@ -497,7 +499,7 @@ fn holdsAny(hay: []const u8, needles: []const []const u8) bool {
 /// Exit 3 when the compiler exited 0 but the output is missing or empty; 4
 /// when it holds the working directory, printing up to five printable runs
 /// (4 bytes or longer) that hold it.
-fn postCheck(arena: std.mem.Allocator, rc: u8, out: []const u8, pwd: []const u8) u8 {
+pub fn postCheck(arena: std.mem.Allocator, rc: u8, out: []const u8, pwd: []const u8) u8 {
     if (rc != 0) return rc;
     if (!nonEmpty(out)) {
         say("compiler exited 0 but {s} is missing or empty", .{out});

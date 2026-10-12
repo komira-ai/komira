@@ -560,7 +560,9 @@ def test_blocked_error_response_is_parked() raises:
         assert_equal(rig.entry.state(), CONN_STATE_WAITING_FOR_WRITABLE)
         assert_equal(rig.pending(), _error_bytes(400))
         assert_equal(len(rig.read().data), filler)
-        assert_true(resume_pending_write(rig.entry, rig.sent))
+        # The 400 is the conn's last response: once drained, the resume asks
+        # the caller to close (komira-ai/komira#1285).
+        assert_false(resume_pending_write(rig.entry, rig.sent))
         assert_equal(_text(rig.read().data), _error_bytes(400))
 
 

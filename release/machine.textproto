@@ -29,7 +29,9 @@
 #          installs at this release's version and build from the channel,
 #          with mojo-compiler from Modular's channel, and each installed
 #          library's README examples (share/doc/<name>/README.md, whose
-#          sha256 the release records) run against the install.
+#          sha256 the release records) run against the install. A
+#          native library (shipped `.so` or a system codec) also gets the
+#          native install checks (src/kci_validate/native_rows.mojo).
 #            install-komira-encoding  komira_encoding ALONE: its own
 #                                     requirements must suffice
 #            install-set              komira_all ALONE: kci reads its members
