@@ -21,6 +21,13 @@ parser (`page_header_parser`), bloom filters and the row-group bloom pruner
 the partition-predicate mapping (`partition_pred_bridge`). The column
 chunk page walk in front of the selection gathers (`gather`) reads the
 selected rows of a chunk.
+
+It decodes a column chunk a chunk of rows at a time into a reused buffer
+(`subrg_column_cursor`, with `subrg_cursor_pages`, `subrg_dbp_trace` and
+`subrg_scan_route_trace`), holds a worker's reusable decode buffers
+(`column_decode_context`), decodes a nested leaf with its levels
+(`nested_decoder`) and reads one PLAIN page from a file range
+(`column_reader`).
 """
 
 from .byte_stream_split import (
