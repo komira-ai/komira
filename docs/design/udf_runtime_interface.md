@@ -1,6 +1,6 @@
 # Design: one UDF runtime interface for every language
 
-Status: proposed, not built. Nothing was built or run for this revision; earlier prototypes informed it (§9). Citations are to komira `main` as of 2026-10-09 unless marked **[#1094]**. That mark means the head of branch `docs/optimized-plan` (komira-ai/komira#1094, unmerged; this branch is stacked on it), and covers two files: `docs/design/optimized_plan.md` and `docs/design/optimized_plan_udfs.md`.
+Status: proposed, not built. Nothing was built or run for this revision; earlier prototypes informed it (§9). Citations are to komira `main` as of 2026-10-09, except those to the optimized-plan design, which are to `main` after komira-ai/komira#1094 merged it: `docs/design/optimized_plan.md`, `docs/design/optimized_plan_udfs.md` and `docs/design/optimized_plan_udf_runtime.md` (split from `optimized_plan_udfs.md` by komira-ai/komira#1507).
 
 Section numbers:
 - `§10.1` to `§10.9` refer to `optimized_plan_udfs.md`; `§10.10` to `§10.14` refer to `optimized_plan_udf_runtime.md`.
@@ -111,7 +111,7 @@ Decisions this document makes that go beyond the language rulings it implements:
 **The engine's vocabulary is already language-neutral.**
 - Kinds: `UDF_KIND_MAP/FILTER/AGG` (`udf_data.mojo:143-145`).
 - Null modes (`:154-156`) and stability (`:165-167`).
-- Parallelism contracts: `STATELESS`, `SERIAL_ORDERED`, `MERGEABLE`, `PARTITION_LOCAL` (`:186-189`), carried on the wire as `WireUdf.parallelism_tag` (`plan.proto:1204`). The optimized-plan `UdfRef` [#1094] has no parallelism field; §3.4 states the rule that replaces it.
+- Parallelism contracts: `STATELESS`, `SERIAL_ORDERED`, `MERGEABLE`, `PARTITION_LOCAL` (`:186-189`), carried on the wire as `WireUdf.parallelism_tag` (`plan.proto:1204`). The optimized-plan `UdfRef` has no parallelism field; §3.4 states the rule that replaces it.
 - The Mojo aggregate trait already has the lifecycle every language needs: `init`, `update`, `merge`, `finalize` (`src/komira_udf/agg_fn.mojo:67-140`).
 
 **Part of the data plane exists.**
@@ -128,9 +128,9 @@ Decisions this document makes that go beyond the language rulings it implements:
   - a UDF executor;
   - a UDF operator in the physical plan. `src/komira_plan_ir/physical_plan.mojo:206-209` lists only `OP_FILTER/PROJECT/LIMIT/JOIN_PROBE`. Today the SDK walks the expression and evaluates UDF calls itself, because of a package cycle (`src/komira_plan_ir/expr_udf_sites.mojo:1-30`).
 
-**Why the plan format must not name languages.** A plan format with a per-language shape hard-codes its languages in at least six places. This design keeps the plan language-neutral in each of them, and the optimized-plan UDF section follows it [#1094]:
+**Why the plan format must not name languages.** A plan format with a per-language shape hard-codes its languages in at least six places. This design keeps the plan language-neutral in each of them, and the optimized-plan UDF section follows it:
 
-| Place | A per-language format would carry | This design carries | In the plan spec [#1094] |
+| Place | A per-language format would carry | This design carries | In the plan spec |
 |---|---|---|---|
 | The runtime | A closed enum (`PYTHON \| NODE`); a new runtime is a new value | An open, namespaced string, `UdfCode.runtime` (§3.1) | `optimized_plan_udfs.md` §10.3, `UdfCode` |
 | The code form | A `oneof` with one arm per language's code form | A neutral `CodeForm` (`PACKAGE`, `BUNDLE`, `VALUE`), an `entry`, a digest list and a runtime-owned descriptor (§3.1) | §10.3, `UdfCode` and `CodeForm` |
@@ -212,9 +212,9 @@ enum CodeForm {
 - So a new language adds a string, not a format value.
 - The id is part of the UDF's identity, because it is inside the canonical `UdfRef` bytes. A runtime id is therefore never renamed; a successor gets a new id.
 
-**The runtime's ABI tag is not part of the UDF's identity.** `UdfCode` carries no ABI tag (`cp312`, `node22`). The tag lives only in `needs.runtimes` (§3.2; `optimized_plan_udfs.md` §10.3 [#1094] states the same rule). So a `PACKAGE` or `BUNDLE` reference keeps its digest when it is recaptured under a new interpreter minor. A form whose bytes really are ABI-specific (a pickled payload) records that in its descriptor, and the runtime's `validate` refuses a mismatch.
+**The runtime's ABI tag is not part of the UDF's identity.** `UdfCode` carries no ABI tag (`cp312`, `node22`). The tag lives only in `needs.runtimes` (§3.2; `optimized_plan_udfs.md` §10.3 states the same rule). So a `PACKAGE` or `BUNDLE` reference keeps its digest when it is recaptured under a new interpreter minor. A form whose bytes really are ABI-specific (a pickled payload) records that in its descriptor, and the runtime's `validate` refuses a mismatch.
 
-**The kind is the call shape, fully resolved.** The plan spec records two kinds, `MAP_BATCHES_COLUMN` (the target of a `WireUdfApply`) and `MAP_BATCHES_FRAME` (the target of a `WireMapBatchesNode`), and does not derive the form from the arm (`optimized_plan_udfs.md` §10.2, the kinds table and the bullet "The kind records the call shape" [#1094]). With one `MAP_BATCHES` kind whose form came from the arm, identical `UdfRef` bytes would be one entry, so one index could be the target of both a `WireUdfApply` and a `WireMapBatchesNode`, with two different argument schemas. A runtime binds its schemas once per `UdfRef` at `load` (§4.3), so the shape must be in the `UdfRef`. Plan validation refuses an arm whose target has the wrong kind (`OPTIMIZED_UDF_KIND_ARM_MISMATCH`). Plain versus mergeable `AGGREGATE` is already decided by `state_type`.
+**The kind is the call shape, fully resolved.** The plan spec records two kinds, `MAP_BATCHES_COLUMN` (the target of a `WireUdfApply`) and `MAP_BATCHES_FRAME` (the target of a `WireMapBatchesNode`), and does not derive the form from the arm (`optimized_plan_udfs.md` §10.2, the kinds table and the bullet "The kind records the call shape"). With one `MAP_BATCHES` kind whose form came from the arm, identical `UdfRef` bytes would be one entry, so one index could be the target of both a `WireUdfApply` and a `WireMapBatchesNode`, with two different argument schemas. A runtime binds its schemas once per `UdfRef` at `load` (§4.3), so the shape must be in the `UdfRef`. Plan validation refuses an arm whose target has the wrong kind (`OPTIMIZED_UDF_KIND_ARM_MISMATCH`). Plain versus mergeable `AGGREGATE` is already decided by `state_type`.
 
 **What each field is for, and who reads it.**
 
@@ -223,7 +223,7 @@ enum CodeForm {
 | `kind`, `arg_types`, `return_type`, `state_type` | yes | yes (arms, schemas) | yes (bound at `load`) |
 | `read_set` | yes (projection pushdown, §3.2) | yes: kind, names, agreement with `arg_types` (`optimized_plan_udfs.md` §10.4) | through `args`: exactly the columns it receives |
 | `stability`, `null_mode`, `resources` | yes | yes | `stability`, `null_mode` as facts; the host applies `PROPAGATE` |
-| `preserves_event_time` | yes (the watermark rules of `plan_models.md` §3.2) | false unless `MAP_BATCHES_FRAME` (`optimized_plan_udfs.md` §10.3 [#1094]) | — (not in `komira_udf_spec`) |
+| `preserves_event_time` | yes (the watermark rules of `plan_models.md` §3.2) | false unless `MAP_BATCHES_FRAME` (`optimized_plan_udfs.md` §10.3) | — (not in `komira_udf_spec`) |
 | `code.runtime` | **never** | grammar; declared in `needs.runtimes` (§3.2) | — |
 | `code.form`, `code.code` | never | form set; every digest 32 bytes; `entry` non-empty for `PACKAGE` | yes |
 | `code.entry`, `descriptor_version`, `descriptor` | never | never (opaque) | yes, through `validate` (§4.3) |
@@ -236,7 +236,7 @@ enum CodeForm {
 
 **Determinism is `stability`.** `IMMUTABLE`, `STABLE` and `VOLATILE` already state what the optimizer and the host may assume about repeated calls (§10.7). A separate determinism field would state the same fact twice.
 
-**`STEP` is a shape, not a language.** A step is a shape: a source node with literal arguments that runs once per run. Whether a runtime supports steps is a runtime capability (§4.2), checked at admission; it is not a plan rule. Its arm is `WireStepNode` (`optimized_plan_udfs.md` §10.4 [#1094]). A `STEP` `UdfRef` must be `VOLATILE` (`OPTIMIZED_UDF_STEP_NOT_VOLATILE`): §10.7 lists a step as always `VOLATILE` (the `VOLATILE` row of the stability table), and plan validation enforces it (§7.2 step 8).
+**`STEP` is a shape, not a language.** A step is a shape: a source node with literal arguments that runs once per run. Whether a runtime supports steps is a runtime capability (§4.2), checked at admission; it is not a plan rule. Its arm is `WireStepNode` (`optimized_plan_udfs.md` §10.4). A `STEP` `UdfRef` must be `VOLATILE` (`OPTIMIZED_UDF_STEP_NOT_VOLATILE`): §10.7 lists a step as always `VOLATILE` (the `VOLATILE` row of the stability table), and plan validation enforces it (§7.2 step 8).
 
 **`ROW` and `MAP_BATCHES_FRAME`: an optional read set.** A row-shaped function receives one row object per input row and reads its fields by name (`df.map_rows(f)`, pandas `DataFrame.apply(f, axis=1)`); a frame function receives a table and reads its columns. Neither names its inputs as arguments, so the `UdfRef` may carry a read set, `read_set`: the input columns the function reads.
 - **Unset means every input column.** The function receives every column of its input and the optimizer keeps them all live. This is always correct, and slower on a wide input. A producer leaves it unset whenever it cannot bound the reads.
@@ -255,7 +255,7 @@ enum CodeForm {
 - **A `ROW` UDF is `MANUAL`** (`OPTIMIZED_UDF_ROW_NULL_MODE`). Under `PROPAGATE`, a null in a field read only on some branches would drop rows the function would have computed.
 - **Output.** One value of `return_type` per row, as for `SCALAR`. A function returning several values per row (`map_rows` returning a tuple) declares a struct, which the producer unpacks into columns with ordinary field access.
 
-**Code forms.** Three neutral forms cover every language. §10.6 [#1094] is the Python and TypeScript instance, and §10.3's informative table maps an earlier draft's per-language code messages onto them:
+**Code forms.** Three neutral forms cover every language. §10.6 is the Python and TypeScript instance, and §10.3's informative table maps an earlier draft's per-language code messages onto them:
 
 | Language | The function is | `CodeForm` |
 |---|---|---|
@@ -329,7 +329,7 @@ message RuntimeNeed {            // in DeclaredNeeds (optimized_plan.md §6.1)
 
 - **`needs.runtimes`** lists one entry for each distinct runtime id that `needs.udfs` uses.
   - It is sorted by runtime id.
-  - It has at most one entry per runtime id (`OPTIMIZED_NEEDS_RUNTIME_ABI_CONFLICT`): each base ships one ABI of each runtime it carries (§10.11), so a plan naming two could never be admitted. A release ships several bases, one per supported CPython minor and one per supported Node major, and a remote run uses the base of the client's version. A base carries exactly one managed runtime besides `komira/native`, so a plan that needs two managed runtimes (for example `komira/python` and `komira/node`) has no base and is refused at admission (`OPTIMIZED_ENV_RUNTIME_MISSING`, §10.11 [#1094]).
+  - It has at most one entry per runtime id (`OPTIMIZED_NEEDS_RUNTIME_ABI_CONFLICT`): each base ships one ABI of each runtime it carries (§10.11), so a plan naming two could never be admitted. A release ships several bases, one per supported CPython minor and one per supported Node major, and a remote run uses the base of the client's version. A base carries exactly one managed runtime besides `komira/native`, so a plan that needs two managed runtimes (for example `komira/python` and `komira/node`) has no base and is refused at admission (`OPTIMIZED_ENV_RUNTIME_MISSING`, §10.11).
   - It has no missing and no unused runtime (`OPTIMIZED_UDF_RUNTIME_UNDECLARED`, `OPTIMIZED_NEEDS_RUNTIME_UNUSED`).
   - It is part of the `DigestTrailer` (§7.1).
   - A scheduler can place a plan using this list from the header alone.
@@ -880,7 +880,7 @@ Each stage lands with its tests welded and its testing plan stated: what each te
 
 | Stage | Work | Owner area | Done when |
 |---|---|---|---|
-| S0 | This document, and the optimized-plan UDF section aligned to it before any `format_version` ships [#1094]: open runtime ids, `CodeForm`, `needs.runtimes`, `STEP`, the two `MAP_BATCHES` kinds and the `ROW` kind (`DataFrame.apply(f, axis=1)` and `map_rows` map to `ROW`), and the optional read set on `ROW` and `MAP_BATCHES_FRAME`; one mode per language in place of #1094's three modes (§1.3); a review rule, or a lint if one is written, that no runtime's descriptor schema declares its own copy of `RecordedFields` (§3.1; the message itself is added to `plan.proto` in stage 11 of `optimized_plan.md` §12) | design | Both merged, and the review rule written down |
+| S0 | This document, and the optimized-plan UDF section aligned to it before any `format_version` ships: open runtime ids, `CodeForm`, `needs.runtimes`, `STEP`, the two `MAP_BATCHES` kinds and the `ROW` kind (`DataFrame.apply(f, axis=1)` and `map_rows` map to `ROW`), and the optional read set on `ROW` and `MAP_BATCHES_FRAME`; one mode per language in place of #1094's three modes (§1.3); a review rule, or a lint if one is written, that no runtime's descriptor schema declares its own copy of `RecordedFields` (§3.1; the message itself is added to `plan.proto` in stage 11 of `optimized_plan.md` §12) | design | Both merged, and the review rule written down |
 | S1 | `komira_udf_runtime.h`; a Mojo binding package, with private pointers behind a safe API; the Arrow C Device structs; an args exporter on the stream path's shared-reference model, and C Data import without copying, with layout validation and release ownership, in `komira_arrow_ipc`; the host library `komira_udf_host` (post-conditions, compaction and scatter, error table); the reference runtime `komira-test/echo`, in C | engine, Arrow | Echo passes every ABI case, and the host maps each status echo can be set to return; the leak, double-release and skip-validation mutants go red |
 | S2 | The conformance corpus package (ABI cases), the harness and the coverage assertion; the runtime-swap invariance test for the optimizer (§3.2) | tests, optimizer | The corpus runs against echo; the invariance mutant goes red |
 | S3 | `komira_udf_worker`: a private C library the Python and Node runtimes link to run user code in worker processes (§5, informative): spawning, slot heaps, copy-out, frame credits, cancel and forced stop, crash and memory reporting. The engine does not link it | engine | A test runtime built on it passes the corpus through the C ABI, with the forced-stop, crash, out-of-memory, held-views and cancel cases |
