@@ -609,8 +609,10 @@ def _hoist_outer_eq_predicates(
         default_left_on.append(outer_refs[i])
         default_right_on.append(outer_refs[i])
 
-    if inner_plan.tag != PLAN_FILTER:
-        # Inner plan has no top-level Filter; use defaults.
+    if inner_plan.tag != PLAN_FILTER or inner_plan.has_udf():
+        # Inner plan has no top-level Filter, or a UDF Filter whose
+        # placeholder predicate holds nothing to hoist (splitting it would
+        # rebuild the node without its UDF); use defaults.
         for i in range(len(default_left_on)):
             left_on.append(default_left_on[i])
             right_on.append(default_right_on[i])
