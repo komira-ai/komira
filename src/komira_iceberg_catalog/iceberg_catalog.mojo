@@ -159,17 +159,22 @@ struct StorageBasedCatalog(IcebergCatalog, Movable, Deinitable):
     and behaves identically (it calls `load_table` and consumes the returned
     metadata-location).
 
-    Register `namespace.table -> metadata_location` via `register`. `load_table`
-    resolves the composed `namespace.table` key.
+    Register `(namespace, table) -> metadata_location` via `register`; a later
+    `register` of the same identifier replaces its location (the table's
+    metadata moved). `load_table` matches namespace AND table as two separate
+    strings, so namespace `a.b` + table `c` and namespace `a` + table `b.c` are
+    different tables (Iceberg names may contain `.`).
 
-    a plain owned-field struct — `List[String]` key/value registries, no
+    a plain owned-field struct — three parallel `List[String]` registries, no
     pointer field, no wildcard origin."""
 
-    var _keys: List[String]
+    var _namespaces: List[String]
+    var _tables: List[String]
     var _locations: List[String]
 
     def __init__(out self):
-        self._keys = List[String]()
+        self._namespaces = List[String]()
+        self._tables = List[String]()
         self._locations = List[String]()
 
     def register(
@@ -178,24 +183,36 @@ struct StorageBasedCatalog(IcebergCatalog, Movable, Deinitable):
         table: String,
         var metadata_location: String,
     ):
-        """Register the KNOWN current metadata-location for `namespace.table`.
-        The storage-based resolver's whole job (in the read path the caller
+        """Register the KNOWN current metadata-location for `(namespace,
+        table)`, replacing any location registered for it before. The
+        storage-based resolver's whole job (in the read path the caller
         typically derives this from the version-hint pointer / a fixed prefix)."""
-        self._keys.append(_table_key(namespace, table))
+        var i = self._find(namespace, table)
+        if i >= 0:
+            self._locations[i] = metadata_location^
+            return
+        self._namespaces.append(namespace)
+        self._tables.append(table)
         self._locations.append(metadata_location^)
 
     def load_table(
         mut self, namespace: String, table: String
     ) raises -> ResolvedTable:
-        var key = _table_key(namespace, table)
-        for i in range(len(self._keys)):
-            if self._keys[i] == key:
-                return ResolvedTable.with_location(String(self._locations[i]))
+        var i = self._find(namespace, table)
+        if i >= 0:
+            return ResolvedTable.with_location(String(self._locations[i]))
         raise Error(
             String("IcebergCatalogError: no table registered for '")
-            + key
+            + _table_key(namespace, table)
             + String("' (StorageBasedCatalog)")
         )
+
+    def _find(self, namespace: String, table: String) -> Int:
+        """The index of the `(namespace, table)` registration, or -1."""
+        for i in range(len(self._tables)):
+            if self._namespaces[i] == namespace and self._tables[i] == table:
+                return i
+        return -1
 
 
 # =============================================================================
@@ -204,7 +221,7 @@ struct StorageBasedCatalog(IcebergCatalog, Movable, Deinitable):
 
 
 def _table_key(namespace: String, table: String) -> String:
-    """The `namespace.table` identity key. Pure — used by both the storage-based
-    registry and the REST path segment building (which additionally
-    percent-encodes; see the REST client)."""
+    """The `namespace.table` display name, for error messages only. Not an
+    identity: `a.b`+`c` and `a`+`b.c` render the same, so lookups compare the
+    two parts separately."""
     return namespace + String(".") + table

@@ -64,10 +64,7 @@ action that runs a test, and returns `rerun_info(ctx)` (the provider
 | `proto_fixture_case` | the fixture check over its case (`proto_fixture_case`) |
 | `proto_check_case` | the closure check over its case (`proto_check_case`) |
 | `install_gate_cases` (tests cell) | install_gate.sh's cases (`install_gate_cases`) |
-| `mojo_mem_cap_cases` (tests cell) | mem_cap.sh's cases (`mojo_mem_cap_cases`) |
-| `mojo_gate_runner_cases` (tests cell) | gate_runner.sh's cases (`mojo_gate_runner_cases`) |
 | `mojo_test_command_case` (tests cell) | a mojo_test's `buck2 test` command, run (`mojo_test_command_case`) |
-| `mojo_test_deadline_cases` (tests cell) | test_deadline.sh's cases (`mojo_test_deadline_cases`) |
 | `mojo_watchdog_cases` (tests cell) | the compile watchdog's cases (`mojo_watchdog_cases`) |
 | `git_check` | git_check.sh over the built git and git-lfs (`git_check`) |
 
