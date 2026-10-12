@@ -13,9 +13,20 @@ table through `//tools/build/package:system_libs` (system_libs_record.bzl) and
 fails while the two differ, so a row changed here is changed there in the same
 commit.
 
-Nothing in the build writes these requirements yet: `komira_pack conda` still
-refuses a library that opens a shared library by name (packaging/conda/README.md),
-so no package carries one until the packer declares them.
+A library declares the sonames it opens (`mojo_library(dlopen = [...])`,
+tools/build/mojo/dlopen.bzl); a declaration this table lacks refuses its conda
+package. `komira_pack conda` writes each declared soname's requirement into the
+package's `depends`, byte-equal to its row here, and refuses a library whose
+sources open a soname it does not declare (packaging/conda/README.md).
+
+Each name was checked against conda-forge's channel (linux-64, read on
+2026-10-10): the latest build and the lower bound of each row ship
+`lib/<soname>`. `libzlib` is library-only. conda-forge publishes no
+library-only package for lz4 (`liblz4`), zstd (`libzstd`) or bzip2
+(`libbzip2`), so those rows keep `lz4-c`, `zstd` and `bzip2`, which also
+install command-line tools. For `liblzma.so.5` it publishes the library-only
+`liblzma` (from 5.6.3 on linux-64), which `xz` itself now requires; the row
+still says `xz` until its library (komira_compression) declares it.
 """
 
 SYSTEM_LIBS = {
