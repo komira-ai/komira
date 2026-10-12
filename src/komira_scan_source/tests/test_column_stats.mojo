@@ -17,7 +17,8 @@
 #      definitions, and are non-negative over their whole input domain (the
 #      4097 fractions k/4096 `count` can pass), which is why `count`'s
 #      `e < 0.0` arm cannot run. A saturated or nearly saturated sketch
-#      counts `HLL_COUNT_CAP`.
+#      counts `HLL_COUNT_CAP`, as does a forged one whose estimate is in
+#      [2^63, 2^64); one whose estimate is just below 2^63 is not capped.
 #   3. ColumnStats. `null_only` is all-Absent; `copy` shares the sketch and
 #      bloom Arcs (refcount, no byte copy); `fingerprint` equals the FNV fold
 #      of its summary fields, computed by hand.
@@ -319,6 +320,24 @@ def test_hll_nearly_saturated_count_is_capped() raises:
     h.registers[0] = UInt8(52)
     assert_equal(h.count(), HLL_COUNT_CAP)
     assert_equal(Int(h.count()), Int(Int64.MAX), "converts to Int without wrapping")
+
+
+def test_hll_estimate_between_2_63_and_2_64_is_capped() raises:
+    """One register at 40, the rest at Q + 1: z is about 2^-40 and the
+    estimate about 1.22e19, inside [2^63, 2^64). A UInt64 holds it but an
+    Int would wrap it negative, so `count` must return `HLL_COUNT_CAP`.
+    With that register at 39 the estimate is about 6.38e18, below the cap,
+    and is returned as is."""
+    var h = HyperLogLog()
+    for i in range(4096):
+        h.registers[i] = UInt8(53)
+    h.registers[0] = UInt8(40)
+    assert_equal(h.count(), HLL_COUNT_CAP)
+    assert_true(Int(h.count()) > 0, "converts to a positive Int")
+    h.registers[0] = UInt8(39)
+    var below = h.count()
+    assert_true(below < HLL_COUNT_CAP, "not capped below 2^63")
+    assert_true(below > UInt64(6_300_000_000_000_000_000), "about 6.38e18")
 
 
 def test_hll_sigma_tau_series_and_domain() raises:
