@@ -28,13 +28,13 @@ src/kci_cli	8988	-
 src/kci_cloud	8538	-
 src/kci_cloud_fake	9710	9101
 src/kci_deploy_model_proto	0	-
-src/kci_logs	8395	-
+src/kci_logs	10000	-
 src/kci_manifest_proto	0	-
 src/kci_params	10000	-
-src/kci_pkg_upload	8905	-
+src/kci_pkg_upload	10000	-
 src/kci_publish	9215	-
 src/kci_publish_oci	9775	-
-src/kci_reconciler	8798	-
+src/kci_reconciler	10000	-
 src/kci_release_channel	10000	-
 src/kci_release_machine	9979	-
 src/kci_release_set	9892	-
@@ -141,7 +141,7 @@ src/komira_http_core	9188	-
 src/komira_http_server	8494	-
 src/komira_iceberg_catalog	8717	-
 src/komira_job_report_proto	0	-
-src/komira_job_supervisor	8687	-
+src/komira_job_supervisor	9976	-
 src/komira_join_assembly	6474	-
 src/komira_json	10000	10000
 src/komira_json_index	8477	-
@@ -194,7 +194,7 @@ src/komira_scan_resolver	9596	-
 src/komira_scan_source	6318	-
 src/komira_sdk	9904	-
 src/komira_search	10000	-
-src/komira_search_catalog	8359	-
+src/komira_search_catalog	10000	-
 src/komira_search_scan	8728	-
 src/komira_secret_env	9722	-
 src/komira_secret_registry	9846	8125
@@ -209,7 +209,7 @@ src/komira_sql	9987	-
 src/komira_supervisor	7878	-
 src/komira_supervisor_proto	0	-
 src/komira_sync	10000	10000
-src/komira_table_store	8524	-
+src/komira_table_store	9981	-
 src/komira_test_run_id	10000	10000
 src/komira_test_verdict	10000	-
 src/komira_textproto	10000	-

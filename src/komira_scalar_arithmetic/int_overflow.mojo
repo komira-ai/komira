@@ -37,9 +37,11 @@
 #   Same shape as `komira_engine_operators/int_sum_overflow.i64_add_overflows`,
 #   the integer-`sum()` predicate, which this generalises over every width.
 #
-# ★ MUL IS EXACT BY WIDENING (a 64-bit product in 128 bits, a <=32-bit one in 64
-#   bits). The column kernels do not widen every lane: they SCREEN with a
-#   Float64 product and widen only when the screen says "maybe" (see
+# ★ MUL IS EXACT BY WIDENING (a 128-bit product in 256 bits, a 64-bit one in
+#   128, a <=32-bit one in 64; 256-bit operands, with nothing wider, test by
+#   dividing the wrapped product back). The column kernels do not widen every
+#   lane: they SCREEN with a Float64 product and widen only when the screen
+#   says "maybe" (see
 #   `mul_screen_limit`).
 #
 # ⛔ `is_int_overflow_error` EXISTS FOR ONE KIND OF CALLER: a route that turns a
@@ -200,14 +202,36 @@ def sub_overflows[dtype: DType](a: Scalar[dtype], b: Scalar[dtype]) -> Bool:
 
 
 @always_inline
+def _mul_overflows_by_division[dtype: DType](a: Scalar[dtype], b: Scalar[dtype]) -> Bool:
+    """EXACT for a width with no wider integer type (256 bits): the wrapped
+    product divided back by `a` returns `b` iff nothing wrapped. MIN * -1 is
+    tested first: its quotient MIN / -1 is itself an overflow."""
+    if a == Scalar[dtype](0):
+        return False
+    comptime if dtype.is_signed():
+        if a == Scalar[dtype](-1):
+            return b == Scalar[dtype].MIN
+    return (a * b) / a != b
+
+
+@always_inline
 def mul_overflows[dtype: DType](a: Scalar[dtype], b: Scalar[dtype]) -> Bool:
-    """EXACT: the product in twice the width, compared against the range."""
+    """EXACT: the product in twice the width, compared against the range.
+    ⛔ 128-bit operands widen to 256 bits, not 128 (2^100 * 2^100 read as no
+    overflow); 256-bit ones have no wider type and test by division."""
     comptime if not dtype.is_integral():
         return False
     else:
         comptime bits = bit_width_of[dtype]()
-        comptime if dtype.is_signed():
-            comptime if bits >= 64:
+        comptime if bits > 128:
+            return _mul_overflows_by_division[dtype](a, b)
+        elif dtype.is_signed():
+            comptime if bits == 128:
+                var p = a.cast[DType.int256]() * b.cast[DType.int256]()
+                return p > Scalar[dtype].MAX.cast[DType.int256]() or p < Scalar[
+                    dtype
+                ].MIN.cast[DType.int256]()
+            elif bits >= 64:
                 var p = a.cast[DType.int128]() * b.cast[DType.int128]()
                 return p > Scalar[dtype].MAX.cast[DType.int128]() or p < Scalar[
                     dtype
@@ -218,7 +242,10 @@ def mul_overflows[dtype: DType](a: Scalar[dtype], b: Scalar[dtype]) -> Bool:
                     dtype
                 ].MIN.cast[DType.int64]()
         else:
-            comptime if bits >= 64:
+            comptime if bits == 128:
+                var p = a.cast[DType.uint256]() * b.cast[DType.uint256]()
+                return p > Scalar[dtype].MAX.cast[DType.uint256]()
+            elif bits >= 64:
                 var p = a.cast[DType.uint128]() * b.cast[DType.uint128]()
                 return p > Scalar[dtype].MAX.cast[DType.uint128]()
             else:

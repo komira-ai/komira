@@ -1,0 +1,5 @@
+# --coverage with no --units-file: usage, exit 2.
+arg "--coverage"
+file ".buckconfig" %buckconfig
+file "tools/build/ci/rules.txt" %rules.txt
+exit 2

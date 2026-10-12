@@ -1,0 +1,11 @@
+{
+ "name": "output_empty_without_data",
+ "defect": "a zero-row output without a data buffer (legal Arrow) refused",
+ "run": "call_batch",
+ "entry": "leaf_empty_data_null",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 0, "columns": [{"type": "int64", "values": []}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": []}}
+}

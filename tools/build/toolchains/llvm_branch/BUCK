@@ -5,6 +5,7 @@ load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs", "row")
+load("@komira//tools/build/toolchains/loader_closure:defs.bzl", "loader_closure_check")
 load(":defs.bzl", "RAW_PROFILE_VERSION", "llvm_branch_check", "llvm_branch_tool", "llvm_branch_unpack")
 
 _ROW = "linux-x86_64"
@@ -92,7 +93,29 @@ llvm_branch_unpack(
 
 # ---- Checks: build actions; :llvm_branch exists only when they pass ------------------
 
-# bin/lld: its files, loader closure, and that it is LLVM 24.
+# What the loader maps for each program, read from the ELF files
+# (../loader_closure): the libraries of the directory's own lib/ through the
+# DT_RPATH $ORIGIN/../lib and glibc from the system, nothing else.
+loader_closure_check(
+    name = "lld24_closure",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    prefix = ":lld24",
+    roots = ["bin/lld"],
+)
+
+loader_closure_check(
+    name = "llvm23_closure",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    prefix = ":llvm23",
+    roots = [
+        "bin/llvm-nm",
+        "bin/llvm-profdata",
+    ],
+)
+
+# bin/lld: its files, and that it is LLVM 24.
 llvm_branch_check(
     name = "lld24_check",
     exec_compatible_with = LINUX_X86_64,
@@ -103,7 +126,7 @@ llvm_branch_check(
     want = {"lld": "24"},
 )
 
-# llvm-profdata, llvm-nm and the runtime: files, loader closure, version, and
+# llvm-profdata, llvm-nm and the runtime: files, version, and
 # the runtime's symbols.
 llvm_branch_check(
     name = "llvm23_check",
@@ -154,7 +177,9 @@ llvm_branch_tool(
     target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
     checks = [
         ":lld24_check",
+        ":lld24_closure",
         ":llvm23_check",
+        ":llvm23_closure",
         ":raw_version_check",
         ":shell_lint",
     ],
