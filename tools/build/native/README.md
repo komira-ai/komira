@@ -141,6 +141,20 @@ Mojo library calls) and the owners whose C its own archives call
 | 6 | `DT_FLAGS` lacks `DF_SYMBOLIC` (0x2); zig links with `-z now`, so the value is 0xa |
 | 7 | a strong undefined symbol is neither `GLIBC_`-versioned nor `komira_`, or the weak undefined symbols differ from `weak_undefined` |
 
+4. The README check, `native_so readme` (`[readme_calls]`, a validation of
+   the target too): the owning library's welded README gate compiles each
+   README example's program a second time to an object
+   (`[tests][readme][objects]` of the library, for every library listing a
+   C library among its `deps`; [`../mojo/readme.bzl`](../mojo/readme.bzl)).
+   A `.mojoc` holds no machine code, so the library's Mojo is compiled into
+   that object, and every C function the example reaches is an undefined
+   symbol of it. The check fails when no object references one of the
+   exports, or the README has no example: an installed README run that
+   calls none of the library's C passes with a broken shared library or
+   without its `-l` (the design's "Every owner is called, not only
+   loaded"). The linked README programs cannot be read for this: `mojo
+   build` strips their symbol tables.
+
 `[dynsym]` is `native_so dynsym`: the dynamic section, the versions needed
 and every dynamic symbol with its version. The unit tests
 ([`native_so_test.zig`](native_so_test.zig), `:native_so_unit`, which

@@ -1,6 +1,6 @@
 //! Unit tests of `cov_branch run` (cov_branch_run.zig), run by `zig test`
 //! as a build action (`:cov_branch_unit`). Each process step is a stand-in
-//! (`Fake`, a Runner) that writes what the real program would (gate_runner's
+//! (`Fake`, a Runner) that writes what the real program would (the gate's
 //! stderr and the raw profiles, llvm-profdata's log and output), so every
 //! decision of the subcommand is reached without a test binary or LLVM. What
 //! a real run does end to end is test 47's (tools/build/tests/coverage_runs.md).
@@ -57,7 +57,7 @@ const Fake = struct {
         copy.env = try alloc.dupe([]const u8, spec.env);
         try self.calls.append(copy);
         var status: br.Status = .{ .exited = 0 };
-        if (spec.argv.len > 1 and std.mem.eql(u8, spec.argv[1], "sh")) {
+        if (spec.argv.len > 1 and std.mem.eql(u8, spec.argv[1], "mojo")) {
             try write(spec.stderr_path.?, self.gate_err);
             // Where LLVM_PROFILE_FILE points: <dir>/%p.profraw.
             const last = spec.argv[spec.argv.len - 1];
@@ -112,7 +112,7 @@ const Case = struct {
     fn args(_: *Case) r.Args {
         return .{
             .busybox = "tc/busybox",
-            .gate_runner = "mojo/gate_runner.sh",
+            .gate = "run/gate",
             .compiler = "tc/compiler",
             .label = "//p:lib:tests/test_one.mojo [branch coverage]",
             .profdata = "run/llvm/bin/llvm-profdata",
@@ -162,13 +162,16 @@ test "a passing run: the gate's command line, the environments, the merge of eve
             return std.fmt.allocPrint(cc.a(), "{s}/{s}", .{ cc.root, p }) catch unreachable;
         }
     }.f;
-    // 1. gate_runner, as the release gate runs it, then LLVM_PROFILE_FILE.
+    // 1. `gate mojo`, as the release gate runs it (no limit flag), then
+    // LLVM_PROFILE_FILE.
     const gate = fake.calls.items[0];
     const want = [_][]const u8{
-        ab(&c, "tc/busybox"),                                                         "sh",
-        ab(&c, "mojo/gate_runner.sh"),                                                ab(&c, "tc/busybox"),
-        "tc/compiler",                                                                "//p:lib:tests/test_one.mojo [branch coverage]",
-        ab(&c, "root/bin/test_one"),                                                  try std.fmt.allocPrint(c.a(), "{s}/gate.passed", .{k}),
+        ab(&c, "run/gate"),                                                           "mojo",
+        "--busybox",                                                                  ab(&c, "tc/busybox"),
+        "--runtime-lib",                                                              ab(&c, "tc/compiler/lib"),
+        "--label",                                                                    "//p:lib:tests/test_one.mojo [branch coverage]",
+        "--test",                                                                     ab(&c, "root/bin/test_one"),
+        "--marker",                                                                   try std.fmt.allocPrint(c.a(), "{s}/gate.passed", .{k}),
         "--env",                                                                      "A=1",
         "--env",                                                                      "B=two words",
         "--env",                                                                      try std.fmt.allocPrint(c.a(), "LLVM_PROFILE_FILE={s}/prof/%p.profraw", .{k}),
@@ -204,7 +207,7 @@ test "a passing run: the gate's command line, the environments, the merge of eve
     try testing.expectError(error.FileNotFound, std.fs.cwd().access(k, .{}));
 }
 
-test "a failing test: its exit status, its output without gate_runner's banner, this run's message" {
+test "a failing test: its exit status, its output without the gate's banner, this run's message" {
     var c = try Case.init();
     defer c.deinit();
     var fake = Fake.init(c.a());
@@ -424,7 +427,7 @@ fn expectUsage(argv: []const []const u8, text: []const u8) !void {
     }
 }
 
-const full = [_][]const u8{ "--busybox", "b", "--gate-runner", "g", "--compiler", "c", "--label", "l", "--profdata", "/nonexistent/llvm-profdata", "--raw-version", "11", "--binary", "x", "--out", "o" };
+const full = [_][]const u8{ "--busybox", "b", "--gate", "g", "--compiler", "c", "--label", "l", "--profdata", "/nonexistent/llvm-profdata", "--raw-version", "11", "--binary", "x", "--out", "o" };
 
 test "usage errors: a missing, repeated, empty or unknown flag, a bad version, a missing llvm-profdata" {
     try expectUsage(full[0..14], "usage error: --out is missing");

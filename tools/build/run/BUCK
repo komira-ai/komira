@@ -1,0 +1,49 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# gate (README.md): runs and supervises every welded test, in place of the
+# shell runners (docs/design/zig_gate_runner.md). Built by the pinned zig,
+# statically linked, and published behind its unit tests: no test of any
+# package runs unless these passed.
+
+_SRCS = [
+    "gate.zig",
+    "mojo.zig",
+    "proctab.zig",
+    "rust.zig",
+    "step.zig",
+    "supervise.zig",
+    "sys.zig",
+    "util.zig",
+]
+
+_TESTS = [
+    "mojo_test",
+    "rust_test",
+    "step_test",
+    "supervise_test",
+    "util_test",
+]
+
+[
+    zig_test(
+        name = t,
+        exec_compatible_with = LINUX_X86_64,
+        imports = _SRCS + ["testkit.zig"],
+        src = t + ".zig",
+        busybox = "komira//tools/build/toolchains:busybox",
+        zig = "komira//tools/build/toolchains:zig",
+    )
+    for t in _TESTS
+]
+
+zig_exe(
+    name = "gate",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "gate.zig",
+    unit_tests = [":" + t for t in _TESTS],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)

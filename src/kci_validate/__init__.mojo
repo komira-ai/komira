@@ -26,6 +26,10 @@
 #   readme_installed.mojo     an installed README as the programs it runs,
 #                             made by the tool that makes the welded
 #                             SOURCE-mode programs, which kci ships
+#   readme_link.mojo          the link commands of an installed README: what
+#                             the closure needs, computed from the release,
+#                             against its `sh komira-link` block, whose
+#                             `mojo run` arguments the README run is given
 #   request.mojo              `ValidateRequest`, `ContainerHost`; the release
 #                             and the pins, read the PUBLISH step's way; a
 #                             metapackage's members from its own depends
@@ -90,8 +94,19 @@ from kci_validate.readme_installed import (
     installed_readme,
     map_report_file,
     package_dir_of,
+    readme_link_args_of,
     readme_program_of,
     shipped_readme_tool,
+)
+from kci_validate.readme_link import (
+    CONDA_PREFIX_TEXT,
+    LinkArgs,
+    LinkNode,
+    closure_link_args,
+    link_nodes,
+    link_refusal,
+    parse_link_args,
+    run_link_args,
 )
 from kci_validate.container import (
     COMPILER_PACKAGE,
