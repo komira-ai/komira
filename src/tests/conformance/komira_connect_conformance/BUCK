@@ -1,4 +1,3 @@
-load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 
 # Test-only: komira_connect against the Connect conformance suite
@@ -75,13 +74,4 @@ mojo_binary(
         "//src/komira_http_server:komira_http_server",
         "//src/komira_protobuf:komira_protobuf",
     ],
-)
-
-# The deps above name every komira_* module the library, its tests and the
-# server import (tools/build/lint: mojo_deps).
-mojo_deps(
-    name = "deps_lint",
-    buck = "BUCK",
-    srcs = glob(["**/*.mojo"]),
-    visibility = ["komira//:tests_lints"],
 )

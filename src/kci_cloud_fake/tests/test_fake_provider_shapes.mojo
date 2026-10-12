@@ -194,16 +194,27 @@ def test_the_shape_table() raises:
 # ---- 2. the kit on every shape ---------------------------------------------------------
 
 
-def _full(api_port: String, roles_on: Bool = True) -> String:
+def _full(api_port: String, roles_on: Bool = True, derived: Bool = False) -> String:
     """The graph of test_fake_conformance, plus identity: the job runs as a
     service account, and a grant lets web DESCRIBE that account. `roles_on`
     False makes api internal and removes web's grant on api. Each service
-    keeps one instance (a scale from 1), so the graph is legal on onprem."""
-    var web_uses = String('"uses":[{"target":{"resource":"api"},"access":"CALL"}]},')
+    keeps one instance (a scale from 1), so the graph is legal on onprem.
+    `derived`: the graph a shape whose grants are DERIVED reads: the grant
+    `see` written as the `uses` line it is equivalent to, `uses runner
+    DESCRIBE` on web, kept when the roles are off."""
+    var see = String('{"target":{"resource":"runner"},"access":"DESCRIBE"}')
+    var call = String('{"target":{"resource":"api"},"access":"CALL"}')
+    var web_uses = String('"uses":[') + call + String("]},")
+    if derived:
+        web_uses = String('"uses":[') + call + String(",") + see + String("]},")
     var exposure = String('"public":{}')
     if not roles_on:
-        web_uses = String('"uses":[]},')
+        web_uses = String('"uses":[') + (see if derived else String("")) + String("]},")
         exposure = String('"internal":{}')
+    var grant = String(',{"id":"see","grant":{"principal":{"resource":"web"},')
+    grant += String('"target":{"resource":"runner"},"access":"DESCRIBE"}}')
+    if derived:
+        grant = String("")
     return (
         String('{"resource":[')
         + String('{"id":"web","service":{"image":{"digest":"sha256:c3"},"port":8080,"internal":{},')
@@ -220,9 +231,8 @@ def _full(api_port: String, roles_on: Bool = True) -> String:
         + String('"uses":[{"target":{"resource":"nightly"},"access":"CALL"}]},')
         + String('{"id":"nightly","containerJob":{"image":{"digest":"sha256:b2"},"maxRetries":1,')
         + String('"runAs":{"resource":"runner"}}},')
-        + String('{"id":"runner","serviceAccount":{}},')
-        + String('{"id":"see","grant":{"principal":{"resource":"web"},')
-        + String('"target":{"resource":"runner"},"access":"DESCRIBE"}}')
+        + String('{"id":"runner","serviceAccount":{}}')
+        + grant
         + String("]}")
     )
 
@@ -239,10 +249,11 @@ def test_every_shape_passes_the_kit_under_a_random_id() raises:
         var reg = Clouds(Catalog.v1())
         reg.add(describe(FakeCloud(ids[s], shape=shapes[s].copy())))
         var cloud = FakeCloud(ids[s], shape=shapes[s].copy())
+        var d = shapes[s].grants_derived()
         try:
             run_conformance(
-                reg, cloud, _ctx(), _list(_full("8080")), _list(_full("9090")),
-                _list(_full("9090", False)), String("api/run"),
+                reg, cloud, _ctx(), _list(_full("8080", derived=d)), _list(_full("9090", derived=d)),
+                _list(_full("9090", False, derived=d)), String("api/run"),
             )
         except e:
             raise Error(shapes[s].name + String(" shape: ") + String(e))
@@ -531,7 +542,21 @@ def test_onprem_endpoint_is_always_wanted() raises:
 # ---- 6. identity per shape -------------------------------------------------------------
 
 
-def _identity_graph() -> String:
+def _identity_graph(derived: Bool = False) -> String:
+    """`derived`: the graph a shape whose grants are DERIVED reads: api's
+    `uses store READ` moved onto runner, the account it runs as, and the
+    grant `see` written as `uses runner DESCRIBE` on nightly."""
+    if derived:
+        return String(
+            '{"resource":['
+            '{"id":"runner","serviceAccount":{},"uses":[{"target":{"resource":"store"},"access":"READ"}]},'
+            '{"id":"store","bucket":{}},'
+            '{"id":"api","service":{"image":{"digest":"sha256:a1"},"internal":{},"scale":{"min":1,"max":2},'
+            '"runAs":{"resource":"runner"}}},'
+            '{"id":"nightly","containerJob":{"image":{"digest":"sha256:b2"}},'
+            '"uses":[{"target":{"resource":"runner"},"access":"DESCRIBE"}]}'
+            "]}"
+        )
     return String(
         '{"resource":['
         '{"id":"runner","serviceAccount":{}},'
@@ -652,11 +677,12 @@ def test_the_identity_graph_applies_and_settles_on_every_shape() raises:
         reg.add(describe(FakeCloud(String("p-6k"), shape=shapes[s].copy())))
         var cloud = FakeCloud(String("p-6k"), shape=shapes[s].copy())
         var store = InMemoryStateStore()
+        var d = shapes[s].grants_derived()
         var applied = _done(
-            apply_resources(reg, cloud, _ctx(), _list(_identity_graph()), Creds.none(), store)
+            apply_resources(reg, cloud, _ctx(), _list(_identity_graph(d)), Creds.none(), store)
         )
         var again = _done(
-            apply_resources(reg, cloud, _ctx(), _list(_identity_graph()), Creds.none(), store)
+            apply_resources(reg, cloud, _ctx(), _list(_identity_graph(d)), Creds.none(), store)
         )
         for k in range(len(again)):
             assert_equal(again[k].verb, VERB_NOOP, shapes[s].name + ": " + again[k].logical_id + " settled")

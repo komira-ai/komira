@@ -17,8 +17,9 @@
 #      `backward_files`) stops it REFUSED, KCI-E-SUPERSEDED, with NO write
 #      request (a dry run too). When the channel lists a numbered build and
 #      `history` was not read (empty), it stops CANNOT_TELL (exit 5), never a
-#      pass. With `RunOptions.main_line_only` (a channel that also takes
-#      break-glass builds: gamma) every rule here reads only the channel's
+#      pass. With `RunOptions.main_line_only` (the channel of a break_glass
+#      stage, which also takes break-glass builds; no such stage publishes
+#      today) every rule here reads only the channel's
 #      MAIN-LINE builds (`plan.mojo` `main_line_files`); the others are
 #      reported (`OFF MAIN`) and never counted, and a main history that was
 #      not read stops it CANNOT_TELL. THE SPLIT: a run the rules would refuse

@@ -1,0 +1,10 @@
+# --json of a VACUOUS answer whose warning holds a control byte: \u0001.
+arg "--files"
+arg "{changed_files}"
+arg "--base"
+arg "parity-base"
+arg "--json"
+input changed_files "notes\x01.md\n"
+file ".buckconfig" %buckconfig
+file "tools/build/ci/rules.txt" %rules.txt
+exit 11

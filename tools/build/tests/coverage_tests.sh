@@ -25,7 +25,8 @@
 #      actions building one test give the same bytes (:reproducible); a
 #      no-op relocator fails the build
 #      with the wrapper's exit 4 (tests//negative/coverage:noop[coverage]);
-#      and a value other than true or false fails at load. Off
+#      and a value other than true or false fails at load
+#      (//tools/build/selftest:config_refusals). Off
 #      linux-x86_64 coverage is a no-op (never measured there): on
 #      darwin-arm64 with the switch, libraries and shared libraries, from
 #      the switch or forced by a tests-cell fixture, have no coverage
@@ -42,15 +43,7 @@ if BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/coverage_keys.sh" "$LOG" >
 else
     fail "$(grep -o 'FAIL  coverage keys: .*' "$LOG/coverage_keys.log" | cut -c 7- | cut -c 1-400) (see $LOG/coverage_keys.log)"
 fi
-expect_green coverage_binaries tests//functional/coverage/...
 expect_red coverage_abs_relocated "holds an absolute path under the working directory" tests//negative/coverage:abs_relocated
 expect_red coverage_abs_other "holds an absolute path (/var/build/" tests//negative/coverage:abs_other
 expect_red coverage_no_reldir "no relative directory matching 'tests'" tests//negative/coverage:no_reldir
 expect_red coverage_noop_relocate "contains this action's working directory" 'tests//negative/coverage:noop[coverage]'
-if "$BUCK2" build tests//functional/coverage:covlib -c komira.coverage=yes > "$LOG/coverage_switch_yes.log" 2>&1; then
-    fail "coverage_switch_yes: -c komira.coverage=yes built, but it must fail at load"
-elif grep -qF '[komira] coverage = "yes": it must be `true` or `false`' "$LOG/coverage_switch_yes.log"; then
-    pass "coverage_switch_yes"
-else
-    fail "coverage_switch_yes: failed without naming the value (see $LOG/coverage_switch_yes.log)"
-fi

@@ -1,0 +1,8 @@
+# proto-message: komira.plan.v1.PlanAdvice
+stats_basis {
+  row_count: 150000
+}
+stats_basis {
+  pin_index: 1
+  row_count: 6001215
+}
