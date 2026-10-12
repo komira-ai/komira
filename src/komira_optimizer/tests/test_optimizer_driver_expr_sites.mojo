@@ -116,6 +116,22 @@ def test_a_constant_in_an_aggregate_argument_is_folded() raises:
     assert_equal(_render(_run(_sum_over_scan(arg^))), _want_agg_folded())
 
 
+def test_a_constant_in_the_second_aggregate_function_is_folded() raises:
+    """`Aggregate(SUM(a) AS s0, SUM(b + (1 + 2)) AS s1)` over a scan: the
+    first function holds no work, and step 6 folds the second's argument to
+    `b + 3`.
+
+    Defect caught: the folding precheck reading only the first aggregate
+    function (mutant: the check walk's function loop bounded to
+    `min(len(aggs), 1)`). The second argument then keeps `1 + 2`."""
+    var n: List[String] = ["a", "b"]
+    var aggs = AggExprArray()
+    aggs.append(AggExpr(AGG_SUM, Optional(_c("a")), Optional(String("s0"))))
+    aggs.append(AggExpr(AGG_SUM, Optional(Expr.binary(BIN_ADD, _c("b"), _one_plus_two())), Optional(String("s1"))))
+    var p = LogicalPlan.aggregate(ExprArray(), aggs^, _scan("s.parquet", n))
+    assert_equal(_render(_run(p^)), _want_second_agg_folded())
+
+
 def test_a_constant_in_a_join_residual_is_folded() raises:
     """`t(a, ta) JOIN u(b, ub) ON a = b` with the residual `ta > ub + (1 + 2)`:
     step 6 folds the residual to `ta > ub + 3`.
@@ -239,6 +255,15 @@ def _want_agg_simplified() -> String:
     var l: List[String] = [
         "Aggregate(group_by=[], aggs=[SUM(ColRef(__agg_in_0)).alias(\"s\")])",
         "  Project(exprs=[Alias(BinaryOp(GT, ColRef(a), ColRef(b)), \"__agg_in_0\")])",
+        "    Scan(path=\"s.parquet\", type=PARQUET, source_kind=COLUMNAR)",
+    ]
+    return _lines(l)
+
+
+def _want_second_agg_folded() -> String:
+    var l: List[String] = [
+        "Aggregate(group_by=[], aggs=[SUM(ColRef(a)).alias(\"s0\"), SUM(ColRef(__agg_in_0)).alias(\"s1\")])",
+        "  Project(exprs=[ColRef(a), Alias(BinaryOp(ADD, ColRef(b), Literal(ScalarValue(int64, 3))), \"__agg_in_0\")])",
         "    Scan(path=\"s.parquet\", type=PARQUET, source_kind=COLUMNAR)",
     ]
     return _lines(l)

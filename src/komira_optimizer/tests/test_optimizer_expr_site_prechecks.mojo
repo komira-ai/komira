@@ -87,6 +87,32 @@ def _project(var e0: Expr, var e1: Expr, var child: LogicalPlan) -> LogicalPlan:
     return LogicalPlan.project(pe^, child^)
 
 
+def _project_at(k: Int, var e: Expr) -> LogicalPlan:
+    """`Project(C, C, C)` over a bare scan with expression `k` replaced by
+    `e`."""
+    var pe = ExprArray()
+    for i in range(3):
+        if i == k:
+            pe.append(e.copy())
+        else:
+            pe.append(_C())
+    return LogicalPlan.project(pe^, _scan())
+
+
+def _aggs_at(k: Int, var e: Expr) -> LogicalPlan:
+    """`Aggregate(COUNT(*), COUNT(*), COUNT(*))` over a bare scan with
+    function `k` replaced by `SUM(e)`: the other two functions fill no
+    argument slot, so `SUM(e)` holds the only site of the Aggregate."""
+    var aggs = AggExprArray()
+    for i in range(3):
+        if i == k:
+            aggs.append(AggExpr(AGG_SUM, Optional(e.copy()), Optional(String("s") + String(i))))
+        else:
+            var none: Optional[Expr] = None
+            aggs.append(AggExpr(AGG_COUNT, none^, Optional(String("n") + String(i))))
+    return LogicalPlan.aggregate(ExprArray(), aggs^, _scan())
+
+
 def _agg_slot(k: Int, var e: Expr) -> LogicalPlan:
     """`Aggregate(CORR(a, a))` over a bare scan, with `e` in argument slot
     `k` (slots 2 and 3 are set after construction; no constructor takes four
@@ -155,11 +181,27 @@ def test_a_filter_predicate_is_a_site() raises:
 
 
 def test_every_project_expression_is_a_site() raises:
-    """Catches: a precheck reading only the first Project expression, or
-    none (mutant: the expression loop run only when rewriting)."""
-    assert_equal(_answers(_project(_C(), _F(), _scan())), "1 0 1")
-    assert_equal(_answers(_project(_C(), _S(), _scan())), "0 1 1")
-    assert_equal(_answers(_project(_C(), _C(), _scan())), "0 0 1")
+    """Catches: a precheck reading only the first Project expression, only
+    the last, all but the first, all but the last, or none (mutants: the
+    check walk's expression loop bounded to each of those). The one piece
+    of work sits at each of three positions in turn."""
+    for k in range(3):
+        assert_equal(_answers(_project_at(k, _F())), "1 0 1", "expr " + String(k))
+        assert_equal(_answers(_project_at(k, _S())), "0 1 1", "expr " + String(k))
+        assert_equal(_answers(_project_at(k, _C())), "0 0 1", "expr " + String(k))
+
+
+def test_every_aggregate_function_is_a_site() raises:
+    """Catches: komira#1306's Aggregate half on any function but one, a
+    precheck reading the arguments of only the first aggregate function,
+    only the last, all but the first, or all but the last (mutants: the
+    check walk's function loop bounded to each of those). The one function
+    with an argument sits at each of three positions; the IN answer is 1
+    only if the precheck reaches it, since the COUNT(*)s hold no site."""
+    for k in range(3):
+        assert_equal(_answers(_aggs_at(k, _F())), "1 0 1", "function " + String(k))
+        assert_equal(_answers(_aggs_at(k, _S())), "0 1 1", "function " + String(k))
+        assert_equal(_answers(_aggs_at(k, _C())), "0 0 1", "function " + String(k))
 
 
 def test_a_site_below_a_filter_project_or_aggregate_is_read() raises:
