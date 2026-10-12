@@ -12,7 +12,10 @@
 #     it (Limit, a Filter over a Filter on another column). An ancestor that names
 #     the window column makes the fused node EMIT it; one that does not, does
 #     not. Each case also proves `fuse_partition_topn_inplace` descends through
-#     that node kind (the Filter under it became a PartitionTopN).
+#     that node kind (the Filter under it became a PartitionTopN). The plan's
+#     root output counts as read (komira#1290), so a case whose ancestor would
+#     pass the window column to the root has a Project that drops it on top
+#     (`_drop_rank`): the ancestor under test is then its only reader.
 #   * the node kinds neither walk descends into (ASOF join, Union);
 #   * the Project-over-PartitionTopN identity check, one case per way a
 #     Project fails to be the identity;
@@ -121,6 +124,25 @@ def _assert_fused(plan: LogicalPlan, emits: Bool, what: String) raises:
     )
 
 
+def _drop_rank(var child: LogicalPlan, keep: List[String]) -> LogicalPlan:
+    """`Project(keep...)` over `child`: a root that does not output the
+    window column, so the root's output does not count as a reader of it."""
+    var exprs = ExprArray()
+    for name in keep:
+        exprs.append(Expr.col_ref(name))
+    return LogicalPlan.project(exprs^, child^)
+
+
+def _assert_rank_dropped(plan: LogicalPlan, rk: String) raises:
+    """`plan` is the root Project from `_drop_rank` and does not output
+    `rk`."""
+    assert_equal(Int(plan.tag), Int(PLAN_PROJECT), "root project")
+    for i in range(plan.output_schema.num_columns()):
+        assert_true(
+            plan.output_schema.field_name(i) != rk, "root outputs the rank"
+        )
+
+
 # =============================================================================
 # Ancestors that name the window column, and ones that do not
 # =============================================================================
@@ -129,23 +151,27 @@ def _assert_fused(plan: LogicalPlan, emits: Bool, what: String) raises:
 def test_aggregate_grouping_on_the_rank_emits_it() raises:
     """Catches the Aggregate arm skipping its group keys: GROUP BY rk above
     the Filter needs rk after fusion. The COUNT(*) slot (no argument) takes
-    the no-child branch of the argument loop."""
+    the no-child branch of the argument loop. The root Project keeps `n`
+    only, so the group key is the only reader of rk."""
     var pb = _rank_pb()
     var rk = _win(pb)
     var gb = ExprArray()
     gb.append(Expr.col_ref(rk))
     var aggs = AggExprArray()
     aggs.append(AggExpr(AGG_COUNT, None, Optional(String("n"))))
-    var plan = LogicalPlan.aggregate(gb^, aggs^, _fused_filter(pb^, 3))
-    var out = fuse_partition_topn(plan^)
-    assert_equal(Int(out.tag), Int(PLAN_AGGREGATE))
-    ref fused = out._aggregate.value()[].child[]
+    var agg = LogicalPlan.aggregate(gb^, aggs^, _fused_filter(pb^, 3))
+    var out = fuse_partition_topn(_drop_rank(agg^, ["n"]))
+    _assert_rank_dropped(out, rk)
+    ref top = out._project.value()[].child[]
+    assert_equal(Int(top.tag), Int(PLAN_AGGREGATE))
+    ref fused = top._aggregate.value()[].child[]
     _assert_fused(fused, True, "aggregate child")
     assert_equal(fused._partition_topn.value()[].output_rank_col_name.value(), rk)
 
 
 def test_aggregate_argument_on_the_rank_emits_it() raises:
-    """Catches the Aggregate arm skipping aggregate arguments: SUM(rk)."""
+    """Catches the Aggregate arm skipping aggregate arguments: SUM(rk). The
+    Aggregate outputs `pid, s`, so the root does not read rk."""
     var pb = _rank_pb()
     var rk = _win(pb)
     var gb = ExprArray()
@@ -173,72 +199,91 @@ def test_aggregate_not_naming_the_rank_does_not_emit_it() raises:
 def test_join_keys_on_either_side_emit_and_both_sides_fuse() raises:
     """Catches the Join arm skipping `left_on` or `right_on`, or descending
     into one side only (in either walk): each side has its own fusable
-    Filter, and each side's window column is a join key."""
+    Filter, and each side's window column is a join key. The root Project
+    keeps `pid, rpid` only, so the keys are the only readers."""
     var lpb = _rank_pb()
     var lrk = _win(lpb)
     var rpb = _pb(PF_ROW_NUMBER, _scan3("rpid", "rscore", "rval"), "rpid", "rscore")
     var rrn = _win(rpb)
     var lo: List[String] = [lrk.copy()]
     var ro: List[String] = [rrn.copy()]
-    var plan = LogicalPlan.join(
+    var join = LogicalPlan.join(
         _fused_filter(lpb^, 3), _fused_filter(rpb^, 2), lo^, ro^, JOIN_INNER,
     )
-    var out = fuse_partition_topn(plan^)
-    assert_equal(Int(out.tag), Int(PLAN_JOIN))
-    _assert_fused(out._join.value()[].left[], True, "join left")
-    _assert_fused(out._join.value()[].right[], True, "join right")
+    var out = fuse_partition_topn(_drop_rank(join^, ["pid", "rpid"]))
+    _assert_rank_dropped(out, lrk)
+    _assert_rank_dropped(out, rrn)
+    ref top = out._project.value()[].child[]
+    assert_equal(Int(top.tag), Int(PLAN_JOIN))
+    _assert_fused(top._join.value()[].left[], True, "join left")
+    _assert_fused(top._join.value()[].right[], True, "join right")
 
 
 def test_limit_passes_the_ancestors_down() raises:
     """Catches the Limit arm passing an empty set down (or not descending):
-    Sort(rk) above Limit above the Filter still names rk."""
+    Sort(rk) above Limit above the Filter still names rk, and the root
+    Project drops rk, so the Sort is its only reader."""
     var pb = _rank_pb()
     var rk = _win(pb)
     var keys: List[String] = [rk.copy()]
     var desc: List[Bool] = [False]
-    var plan = LogicalPlan.sort(
+    var sort = LogicalPlan.sort(
         keys^, desc^, LogicalPlan.limit(10, _fused_filter(pb^, 3))
     )
-    var out = fuse_partition_topn(plan^)
-    assert_equal(Int(out.tag), Int(PLAN_SORT))
-    ref lim = out._sort.value()[].child[]
+    var out = fuse_partition_topn(_drop_rank(sort^, ["pid", "val"]))
+    _assert_rank_dropped(out, rk)
+    ref top = out._project.value()[].child[]
+    assert_equal(Int(top.tag), Int(PLAN_SORT))
+    ref lim = top._sort.value()[].child[]
     assert_equal(Int(lim.tag), Int(PLAN_LIMIT))
     _assert_fused(lim._limit.value()[].child[], True, "limit child")
 
 
 def test_distinct_on_the_rank_emits_it() raises:
-    """Catches the Distinct arm skipping its column list: DISTINCT ON (rk)."""
+    """Catches the Distinct arm skipping its column list: DISTINCT ON (rk),
+    under a root Project that drops rk."""
     var pb = _rank_pb()
     var rk = _win(pb)
     var cols: List[String] = [rk.copy()]
-    var plan = LogicalPlan.distinct(
+    var dist = LogicalPlan.distinct(
         Optional[List[String]](cols^), _fused_filter(pb^, 3)
     )
-    var out = fuse_partition_topn(plan^)
-    assert_equal(Int(out.tag), Int(PLAN_DISTINCT))
-    _assert_fused(out._distinct.value()[].child[], True, "distinct child")
+    var out = fuse_partition_topn(_drop_rank(dist^, ["pid", "val"]))
+    _assert_rank_dropped(out, rk)
+    ref top = out._project.value()[].child[]
+    assert_equal(Int(top.tag), Int(PLAN_DISTINCT))
+    _assert_fused(top._distinct.value()[].child[], True, "distinct child")
 
 
 def test_distinct_over_all_columns_emits_it() raises:
     """A Distinct with no column list reads every column of its child, the
     window column included (its own output schema was built over the
     PartitionBy's columns, rank included), so the fused node emits it.
-    Catches the arm adding nothing when `columns` is None."""
-    var plan = LogicalPlan.distinct(None, _fused_filter(_rank_pb(), 3))
-    var out = fuse_partition_topn(plan^)
-    _assert_fused(out._distinct.value()[].child[], True, "distinct child")
+    Catches the arm adding nothing when `columns` is None. The root Project
+    drops rk, so the Distinct is its only reader."""
+    var pb = _rank_pb()
+    var rk = _win(pb)
+    var dist = LogicalPlan.distinct(None, _fused_filter(pb^, 3))
+    var out = fuse_partition_topn(_drop_rank(dist^, ["pid", "val"]))
+    _assert_rank_dropped(out, rk)
+    ref top = out._project.value()[].child[]
+    assert_equal(Int(top.tag), Int(PLAN_DISTINCT))
+    _assert_fused(top._distinct.value()[].child[], True, "distinct child")
 
 
 def test_topn_on_the_rank_emits_it() raises:
-    """Catches the TopN arm skipping its keys (or not descending)."""
+    """Catches the TopN arm skipping its keys (or not descending), under a
+    root Project that drops rk."""
     var pb = _rank_pb()
     var rk = _win(pb)
     var keys: List[String] = [rk.copy()]
     var desc: List[Bool] = [False]
-    var plan = LogicalPlan.topn(keys^, desc^, 5, _fused_filter(pb^, 3))
-    var out = fuse_partition_topn(plan^)
-    assert_equal(Int(out.tag), Int(PLAN_TOPN))
-    _assert_fused(out._topn.value()[].child[], True, "topn child")
+    var topn = LogicalPlan.topn(keys^, desc^, 5, _fused_filter(pb^, 3))
+    var out = fuse_partition_topn(_drop_rank(topn^, ["pid", "val"]))
+    _assert_rank_dropped(out, rk)
+    ref top = out._project.value()[].child[]
+    assert_equal(Int(top.tag), Int(PLAN_TOPN))
+    _assert_fused(top._topn.value()[].child[], True, "topn child")
 
 
 def test_a_filter_over_the_fused_filter_keeps_itself() raises:

@@ -543,8 +543,10 @@ def _hoist_outer_eq_predicates(
     With no Filter at the root, `left_on` / `right_on` default to
     `outer_refs` (assume a same-named inner column).
     """
-    if inner_plan.tag != PLAN_FILTER:
-        # Inner plan has no top-level Filter; use defaults.
+    if inner_plan.tag != PLAN_FILTER or inner_plan.has_udf():
+        # Inner plan has no top-level Filter, or a UDF Filter whose
+        # placeholder predicate holds nothing to hoist (splitting it would
+        # rebuild the node without its UDF); use defaults.
         for i in range(len(outer_refs)):
             left_on.append(outer_refs[i])
             right_on.append(outer_refs[i])
