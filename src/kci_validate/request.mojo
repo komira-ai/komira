@@ -9,8 +9,10 @@
 # CONDA_INSTALL_SMOKE program is read from, and what an ENV scratch directory
 # must not be inside; --plan; for CONDA_INSTALL_ENV, --pixi and
 # --pixi-sha256; `channel_override`, --channel: a LOCAL `file:///<dir>`
-# channel read and installed from instead of the step's, "" for the step's)
-# and the validation itself (kci_release_machine's `StageValidation`).
+# channel read and installed from instead of the step's, "" for the step's;
+# for CONDA_INSTALL_ENV, `readme_tool`, the README examples tool kci ships
+# beside its executable, readme_installed.mojo `shipped_readme_tool`) and
+# the validation itself (kci_release_machine's `StageValidation`).
 #
 # `ContainerHost` is how this machine starts the container: the docker
 # program, the PATH the docker CLI gets, and the `uid:gid` the container runs
@@ -31,7 +33,9 @@
 # its file name, and for a library its payload path and payload sha256, its
 # import name and build label, and the sha256 its `doc_files` records for
 # share/doc/<name>/README.md ("" when it records none) from its
-# metadata.json. `mojo_pin_of` is the compiler version every library of
+# metadata.json, and the link arguments its closure needs (readme_link.mojo
+# `closure_link_args`, over every library member's depends and lib_files).
+# `mojo_pin_of` is the compiler version every library of
 # the set was built with (they must agree). A name that is not a member, a
 # member that is not a conda package, or a value that could not be put in a
 # shell word safely RAISES.
@@ -57,9 +61,11 @@ from kci_artifact import read_artifacts
 from kci_api import release_platform_dir
 from kci_publish.inputs import LoadedRelease, load_release
 from kci_release_channel import ARTIFACT_TYPE_CONDA, find_channel, parse_channels_file
-from kci_release_set.conda_metadata import KIND_LIBRARY, KIND_METAPACKAGE
+from kci_release_set.conda_metadata import KIND_LIBRARY, KIND_METAPACKAGE, LibFile
 from kci_release_set.release_manifest import RELEASE_MANIFEST_NAME, read_release_manifest
 from kci_release_machine import StageValidation
+
+from .readme_link import LinkArgs, closure_link_args, link_nodes
 
 
 struct ValidateRequest(Copyable, Movable):
@@ -82,6 +88,7 @@ struct ValidateRequest(Copyable, Movable):
     var pixi: String
     var pixi_sha256: String
     var channel_override: String
+    var readme_tool: String
 
     def __init__(out self, var validation: StageValidation):
         self.stage = String("")
@@ -99,6 +106,7 @@ struct ValidateRequest(Copyable, Movable):
         self.pixi = String("")
         self.pixi_sha256 = String("")
         self.channel_override = String("")
+        self.readme_tool = String("")
 
 
 struct ContainerHost(Copyable, Movable):
@@ -162,7 +170,7 @@ struct InstallPin(Copyable, Movable):
     (file header). `payload_path` and `payload_sha256` are "" for a
     metapackage.
 
-    Layout: owned Strings and a Bool. No pointer field."""
+    Layout: owned Strings, Lists and Bools. No pointer field."""
 
     var name: String
     var version: String
@@ -176,6 +184,14 @@ struct InstallPin(Copyable, Movable):
     var label: String
     var has_doc_files: Bool
     var readme_sha256: String
+    # a library shipping native files: its metadata.json `lib_files` rows
+    # (`has_lib_files` False when the key is absent) and its run requirements
+    var lib_files: List[LibFile]
+    var has_lib_files: Bool
+    var depends: List[String]
+    # a library: the link arguments its closure needs (readme_link.mojo),
+    # which its installed README's `sh komira-link` block must say
+    var link: LinkArgs
 
     def __init__(out self, var name: String):
         self.name = name^
@@ -190,6 +206,10 @@ struct InstallPin(Copyable, Movable):
         self.label = String("")
         self.has_doc_files = False
         self.readme_sha256 = String("")
+        self.lib_files = List[LibFile]()
+        self.has_lib_files = False
+        self.depends = List[String]()
+        self.link = LinkArgs()
 
     def file_name(self) -> String:
         """`<name>-<version>-<build>.conda`: the file the channel serves."""
@@ -251,6 +271,10 @@ def install_pins(release: LoadedRelease, names: List[String]) raises -> List[Ins
                     pin.import_name = mem.conda.import_name.copy()
                     pin.label = mem.conda.label.copy()
                     pin.has_doc_files = mem.conda.has_doc_files
+                    pin.lib_files = mem.conda.lib_files.copy()
+                    pin.has_lib_files = mem.conda.has_lib_files
+                    pin.depends = mem.conda.depends.copy()
+                    pin.link = closure_link_args(link_nodes(release), name)
                     var readme = readme_doc_path(name)
                     for d in range(len(mem.conda.doc_files)):
                         if mem.conda.doc_files[d].path == readme:

@@ -918,13 +918,11 @@ def test_fires_with_rk_emission_when_rk_referenced_by_downstream_project() raise
 def test_fires_when_rk_only_used_by_filter() raises:
     """RANK + Filter(rk <= 10) with NO downstream consumer of rk — fuses.
 
-    The rk column is only referenced by the filter predicate; no operator
-    above the Filter touches it. The safety pre-pass returns an empty
+    The rk column is only referenced by the filter predicate; the Project
+    above the Filter drops it. The safety pre-pass returns an empty
     unsafe set, so fusion proceeds with `output_rank_col_name = None`
-    (no rk-column emission — saves the kernel one column-clone pass).
-
-    When rk is NOT in unsafe_cols, fusion
-    fires with `output_rank_col_name = None` (current behavior).
+    (no rk-column emission — saves the kernel one column-clone pass), and
+    the Project, now an identity over the fused node, is absorbed.
     """
     var scan = _scan_node()
     var pb = _partition_by_func(
@@ -937,8 +935,14 @@ def test_fires_when_rk_only_used_by_filter() raises:
         Expr.literal(ScalarValue.from_int(10)),
     )
     var filter_plan = LogicalPlan.filter(pred^, pb^)
+    from komira_collections.slab import Slab
+    var keep = Slab[Expr]()
+    keep.append(Expr.col_ref(String("pid")))
+    keep.append(Expr.col_ref(String("score")))
+    keep.append(Expr.col_ref(String("val")))
+    var project = LogicalPlan.project(keep^, filter_plan^)
 
-    var optimized = fuse_partition_topn(filter_plan^)
+    var optimized = fuse_partition_topn(project^)
     comptime if _ENABLE_PF_RANK_FUSE:
         # rk only used by filter → fusion fires; output_rank_col_name stays None.
         assert_equal(Int(optimized.tag), Int(PLAN_PARTITION_TOPN))
@@ -954,7 +958,7 @@ def test_fires_when_rk_only_used_by_filter() raises:
             "referenced by the filter predicate",
         )
     else:
-        assert_equal(Int(optimized.tag), Int(PLAN_FILTER))
+        assert_equal(Int(optimized.tag), Int(PLAN_PROJECT))
     print("PASS test_fires_when_rk_only_used_by_filter")
 
 
