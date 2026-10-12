@@ -299,7 +299,7 @@ struct TableStoreHeadReader[Store: ConditionalWriteStore & AsyncCasStore](
             or msg.find("RETRYABLE") >= 0
         ):
             return READ_ERR_TORN
-        if msg.find("412") >= 0 or msg.find("precondition") >= 0:
+        if msg.find("status=412") >= 0 or msg.find("precondition") >= 0:
             return READ_ERR_CONFLICT
         return READ_ERR_FATAL
 
@@ -653,7 +653,7 @@ struct TableStoreExactSlotAppender[Store: ConditionalWriteStore & AsyncCasStore]
     def classify_append_error(self, msg: String) -> UInt8:
         # The exact-slot mode: a 412/precondition is a REAL lost slot.
         if (
-            msg.find("412") >= 0
+            msg.find("status=412") >= 0
             or msg.find("precondition") >= 0
             or msg.find("If-None-Match") >= 0
             or msg.find("If-Match") >= 0

@@ -218,7 +218,7 @@ def _is_lost_slot_412(msg: String) -> Bool:
     _MAX_ASYNC_COMMIT_ATTEMPTS spurious retries). The 412 / precondition /
     If-None-Match substrings fully cover both conformers' lost-slot wording."""
     return (
-        msg.find("412") >= 0
+        msg.find("status=412") >= 0
         or msg.find("precondition") >= 0
         or msg.find("If-None-Match") >= 0
     )

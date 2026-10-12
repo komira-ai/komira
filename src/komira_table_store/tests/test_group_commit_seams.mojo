@@ -10,13 +10,13 @@
 #     as two little-endian i64 at start, its poll is READY, a second take_read
 #     with nothing staged is refused, and the stage-blob stubs are READY/no-op.
 #   * classify_read_error: each torn/truncated/retryable wording is TORN, a
-#     412/precondition is CONFLICT, anything else FATAL.
+#     status=412 / precondition is CONFLICT, anything else FATAL.
 #   * decode_head: an absent head is (-1, 0); a body shorter than 16 bytes is
 #     refused; every byte of both fields is read (values with all bytes set).
 #   * estimate_bytes sums key + row + 9 per write.
 #   * encode_group_batch: a member whose OCC window reaches a chunk that is not
 #     there raises the RETRYABLE-tagged in-flight error naming the seq.
-#   * classify_append_error: 412 / precondition / If-None-Match are a lost
+#   * classify_append_error: status=412 / precondition / If-None-Match are a lost
 #     slot, anything else an error. "If-Match" is not asserted
 #     (komira-ai/komira#1402).
 # =============================================================================
@@ -154,7 +154,12 @@ def test_classify_read_error() raises:
             Int(reader.classify_read_error(torn[i])), Int(READ_ERR_TORN), torn[i]
         )
     assert_equal(
-        Int(reader.classify_read_error(String("HTTP 412"))), Int(READ_ERR_CONFLICT)
+        Int(
+            reader.classify_read_error(
+                String("StoreError[PRECONDITION] PutObject s3://b/k status=412")
+            )
+        ),
+        Int(READ_ERR_CONFLICT),
     )
     assert_equal(
         Int(reader.classify_read_error(String("precondition failed"))),
@@ -231,7 +236,7 @@ def test_classify_append_error() raises:
     var backing = SharedInMemoryConditionalStore()
     var app = TableStoreExactSlotAppender[_Store](_wal(backing, "gc/app"))
     var lost = List[String]()
-    lost.append(String("HTTP 412"))
+    lost.append(String("StoreError[PRECONDITION] PutObject s3://b/k status=412"))
     lost.append(String("precondition failed"))
     lost.append(String("If-None-Match: *"))
     # "If-Match" is deliberately not asserted either way: the appender matches
