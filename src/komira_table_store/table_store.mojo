@@ -216,7 +216,10 @@ def _is_lost_slot_412(msg: String) -> Bool:
     error never originates here; matching it would risk misclassifying an
     unrelated error as a retryable lost-slot signal (up to
     _MAX_ASYNC_COMMIT_ATTEMPTS spurious retries). The 412 / precondition /
-    If-None-Match substrings fully cover both conformers' lost-slot wording."""
+    If-None-Match substrings fully cover both conformers' lost-slot wording.
+    The group-commit appender (`TableStoreExactSlotAppender.
+    classify_append_error`) does the same create-CAS and calls this function,
+    so both paths agree on what a lost slot is."""
     return (
         msg.find("412") >= 0
         or msg.find("precondition") >= 0
