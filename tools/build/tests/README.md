@@ -865,7 +865,7 @@ Analysis only.
 
 ## 38. README examples
 
-A library's `README.md` examples are a welded test, `[tests][readme]` ([README examples](../mojo/README.md#readme-examples)), and a BUCK file of several libraries names the one its README is about; [`run_tests.sh`](run_tests.sh) runs [these checks](readme_examples.md).
+A library's `README.md` examples are a welded test, `[tests][readme]` ([README examples](../mojo/README.md#readme-examples)), and a BUCK file of several libraries names the one its README is about: [these checks](readme_examples.md). Case 38 of [`run_tests.sh`](run_tests.sh) still asserts the outputs from before each example became its own program, so it is stale until the komira-ai/komira#1281 self-test slice replaces it.
 
 ## 39. Test welding
 

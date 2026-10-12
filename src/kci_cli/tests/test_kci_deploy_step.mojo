@@ -1,6 +1,7 @@
 # =============================================================================
 # src/kci_cli/tests/test_kci_deploy_step.mojo -- a DEPLOY step end to end
-#   through `kci_main_with`, on `CloudDeploys[FakeCloud, InMemoryStateStore]`.
+#   through `kci_main_with`, on `CloudDeploys[FakeCloud, InMemoryStateStore,
+#   NoRegistryClient]` (no PUBLISH into a cell runs here).
 # =============================================================================
 #
 # The machine file is named `shop` and has a `build` stage (the BUILD step
@@ -74,10 +75,12 @@ from kci_cloud import decode_label_value
 from kci_cloud_fake import FakeCloud
 from kci_cli import (
     CellDeploys,
+    CellPublishRequest,
     CliRecorder,
     CloudDeploys,
     DeployRequest,
     NOT_BUILT_WITH,
+    NoRegistryClient,
     SecretStoreChoice,
     StageSteps,
     StepEnd,
@@ -213,8 +216,10 @@ def _last(rec: CliRecorder) raises -> KciRunResult:
     return parse_result(rec.records[len(rec.records) - 1], String("record"))
 
 
-def _deploys(var cloud: FakeCloud) raises -> CloudDeploys[FakeCloud, InMemoryStateStore]:
-    return CloudDeploys[FakeCloud, InMemoryStateStore](cloud^, InMemoryStateStore(), Creds.none())
+def _deploys(var cloud: FakeCloud) raises -> CloudDeploys[FakeCloud, InMemoryStateStore, NoRegistryClient]:
+    return CloudDeploys[FakeCloud, InMemoryStateStore, NoRegistryClient](
+        cloud^, InMemoryStateStore(), Creds.none(), NoRegistryClient()
+    )
 
 
 def _scope() -> CellScope:
@@ -481,7 +486,7 @@ def test_plan_hash_is_over_the_actions_in_node_id_order() raises:
     assert_equal(_last(rec).steps[0].deploy.plan_hash, String(_PLAN_HASH))
 
 
-def _deletes(deploys: CloudDeploys[FakeCloud, InMemoryStateStore]) -> Int:
+def _deletes(deploys: CloudDeploys[FakeCloud, InMemoryStateStore, NoRegistryClient]) -> Int:
     var n = 0
     ref calls = deploys.cloud.store[].calls
     for i in range(len(calls)):
@@ -615,7 +620,7 @@ struct CountedDeploys(CellDeploys, Movable):
     """`CloudDeploys` on the fake cloud, counting the DEPLOY steps handed to
     it (`calls`). Layout: owned values only. No pointer field."""
 
-    var inner: CloudDeploys[FakeCloud, InMemoryStateStore]
+    var inner: CloudDeploys[FakeCloud, InMemoryStateStore, NoRegistryClient]
     var calls: Int
 
     def __init__(out self) raises:
@@ -625,6 +630,10 @@ struct CountedDeploys(CellDeploys, Movable):
     def deploy(mut self, req: DeployRequest, mut result: KciRunResult) -> StepEnd:
         self.calls += 1
         return self.inner.deploy(req, result)
+
+    def publish(mut self, req: CellPublishRequest, mut result: KciRunResult) -> StepEnd:
+        # no PUBLISH into a cell runs here (file header)
+        return self.inner.publish(req, result)
 
 
 def _first_stage_machine(dir: String) raises -> String:
