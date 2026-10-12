@@ -4,8 +4,9 @@ load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 # The part of the HTTP layer a client and a server share: the h1 and h2 codecs
 # (HPACK included), TLS over s2n-tls (the TLS layer declares its functions
 # itself, so s2n is a dep; s2n needs aws-lc's libcrypto, which komira_crypto
-# ships, so komira_crypto is a dep too: tools/build/mojo/README.md, "Native
-# reach"), and the transport seam:
+# ships, and s2n's shared library has NEEDED on komira_crypto's, so
+# komira_crypto is a dep too and its package a requirement:
+# tools/build/mojo/README.md, "Native reach"), and the transport seam:
 # the IO stream traits, plain TCP, a scripted fake, stream parking and gRPC
 # trailer emission. komira_http_client and komira_http_server depend on it and
 # on nothing of each other.
@@ -16,6 +17,8 @@ load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 
 mojo_library(
     name = "komira_http_core",
+    # Its C ships in its package as komira_http_core_native below (lib/libkomira_http_core_native.so.1).
+    native = ":komira_http_core_native",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_async:komira_async",
@@ -168,7 +171,7 @@ export_file(name = "tests/fixtures/smoke_cert.pem", visibility = ["PUBLIC"])
 # libkomira_http_core_native.so.1: the C this library owns, as its own
 # shared library exporting the names its callers call
 # (tools/build/native/README.md, "Each library's shared library"). Built and
-# checked here; no package ships it yet.
+# checked here, and packed into the library's conda package (`native`).
 native_shared_library(
     name = "komira_http_core_native",
     archives = [
