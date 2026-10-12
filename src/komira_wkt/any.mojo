@@ -117,12 +117,21 @@ struct Any(Proto3JsonWkt, Copyable, Movable):
 
     def write_proto3_json(self, mut buf: List[UInt8]) raises:
         """`{"@type": <type_url>, <the opaque members>}`. REFUSES binary
-        payload bytes (rendering them needs the concrete type)."""
+        payload bytes (rendering them needs the concrete type) and members
+        with no type URL (the reader refuses them: no type to read under)."""
         if len(self.value) > 0:
             raise Error(
                 "WktError: Any of type '" + self.type_url
                 + "' holds protobuf-binary payload bytes; writing it as JSON"
                 + " needs a type registry, which komira_wkt does not have"
+            )
+        if self.type_url == "" and self.has_json_payload():
+            # Members with no type URL have no type to be read under: the
+            # reader refuses them, so writing `{<members>}` without `@type`
+            # would emit a document this package's own reader rejects.
+            raise Error(
+                "WktError: Any has JSON members but no type URL; its JSON"
+                + " form needs an '@type' to name them"
             )
         if not self.has_json_payload() and _names_wkt(self.type_url):
             # A WKT payload's canonical JSON is `{"@type": .., "value": <its
@@ -135,17 +144,15 @@ struct Any(Proto3JsonWkt, Copyable, Movable):
                 + " needs a type registry, which komira_wkt does not have"
             )
         buf.append(0x7B)  # '{'
-        var first = True
         if self.type_url != "":
             write_json_string(buf, String("@type"))
             buf.append(0x3A)  # ':'
             write_json_string(buf, self.type_url)
-            first = False
+        # Past the refusal above, members exist only under a type URL, so
+        # `@type` is always written first and every member follows a ','.
         ref m = self.json_members
         for i in range(len(m.obj_keys)):
-            if not first:
-                buf.append(0x2C)  # ','
-            first = False
+            buf.append(0x2C)  # ','
             write_json_string(buf, m.obj_keys[i])
             buf.append(0x3A)  # ':'
             var text = m.children[i].serialize()
@@ -158,7 +165,8 @@ struct Any(Proto3JsonWkt, Copyable, Movable):
     def read_proto3_json(v: JsonValue) raises -> Self:
         """An object with a string `@type` and any other members, which are
         kept opaque. `{}` is the empty `Any`; members without an `@type` are
-        refused (there is no type to carry them under)."""
+        refused, as are members under an empty `@type` (there is no type to
+        carry them under)."""
         if not v.is_object():
             raise Error("WktError: Any JSON must be an object")
         var type_url = String("")
@@ -177,6 +185,11 @@ struct Any(Proto3JsonWkt, Copyable, Movable):
         if not seen_type and len(members.obj_keys) > 0:
             raise Error(
                 "WktError: Any JSON has members but no '@type' to name them"
+            )
+        if type_url == "" and seen_type and len(members.obj_keys) > 0:
+            raise Error(
+                "WktError: Any JSON has members but an empty '@type' to name"
+                + " them"
             )
         return Self(type_url, List[UInt8](), members^)
 
