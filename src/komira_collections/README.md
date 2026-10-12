@@ -19,7 +19,7 @@ union.
 A slab of values that cannot be copied:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
-```mojo
+```mojo module
 from komira_collections.slab import Slab
 
 
@@ -32,27 +32,28 @@ struct Job(Deinitable, Movable):
         self.steps = steps^
 
 
-var jobs = Slab[Job]()
-jobs.append(Job("build", [1, 2, 3]))
-jobs.append(Job("test", [4]))
-jobs.append(Job("ship", [5, 6]))
-assert_equal(len(jobs), 3)
-assert_equal(len(jobs.get(0).steps), 3)
+def main() raises:
+    var jobs = Slab[Job]()
+    jobs.append(Job("build", [1, 2, 3]))
+    jobs.append(Job("test", [4]))
+    jobs.append(Job("ship", [5, 6]))
+    assert_equal(len(jobs), 3)
+    assert_equal(len(jobs.get(0).steps), 3)
 
-var first = jobs.swap_remove(0)  # "ship" moves into slot 0
-assert_equal(first.name, "build")
-assert_equal(jobs.get(0).name, "ship")
-var second = jobs.take_at(1)
-assert_equal(second.name, "test")
-assert_equal(len(jobs), 1)
-assert_true(Bool(jobs.pop()))
-assert_true(not jobs.pop())
+    var first = jobs.swap_remove(0)  # "ship" moves into slot 0
+    assert_equal(first.name, "build")
+    assert_equal(jobs.get(0).name, "ship")
+    var second = jobs.take_at(1)
+    assert_equal(second.name, "test")
+    assert_equal(len(jobs), 1)
+    assert_true(Bool(jobs.pop()))
+    assert_true(not jobs.pop())
 ```
 
 A pack of values of different types, visited at compile time:
 
 <!-- mojo-hidden from std.testing import assert_equal -->
-```mojo
+```mojo module
 from komira_collections.variadic_pack import VariadicElement, VariadicPack
 
 
@@ -79,9 +80,10 @@ def total[*Ts: VariadicElement](pack: VariadicPack[*Ts]) -> Int:
     return sum
 
 
-var pack = VariadicPack[Width, Margin, Width](Width(100), Margin(8), Width(20))
-assert_equal(total(pack), 136)
-assert_equal(pack.get[1]().px, 8)
+def main() raises:
+    var pack = VariadicPack[Width, Margin, Width](Width(100), Margin(8), Width(20))
+    assert_equal(total(pack), 136)
+    assert_equal(pack.get[1]().px, 8)
 ```
 
 Counting distinct values, and merging two sketches:
@@ -116,23 +118,26 @@ the same). `holds[T]()` asks the same question without raising. `create[T]`
 refuses, at compile time, a type larger than `MAX_SIZE`, more aligned than 8
 bytes, or with a move constructor that is not trivial.
 
-```mojo
+```mojo module
 from komira_collections.dyn_value import DynValue
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
+
 
 @fieldwise_init
 struct Point(Movable):
     var x: Int
     var y: Int
 
-var dv = DynValue[32].create[Point](Point(3, 4))
-assert_true(dv.holds[Point]())
-assert_equal(dv.get[Point]().x, 3)
 
-dv.get[Point]().y = 10
-assert_equal(dv.get[Point]().y, 10)
+def main() raises:
+    var dv = DynValue[32].create[Point](Point(3, 4))
+    assert_true(dv.holds[Point]())
+    assert_equal(dv.get[Point]().x, 3)
 
-assert_false(dv.holds[Int]())
-with assert_raises(contains="asked for"):
-    _ = dv.get[Int]()
+    dv.get[Point]().y = 10
+    assert_equal(dv.get[Point]().y, 10)
+
+    assert_false(dv.holds[Int]())
+    with assert_raises(contains="asked for"):
+        _ = dv.get[Int]()
 ```

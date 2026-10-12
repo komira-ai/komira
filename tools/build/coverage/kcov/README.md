@@ -414,20 +414,35 @@ gate's banner, a test leaving a child running stopped at the limit, lost
 sources refused, sources named by another directory refused before kcov
 runs, and kcov refused by the executor named as such.
 
-Each tool's cases run as a build action (`kcov_tool_cases` in
-[defs.bzl](defs.bzl)) that exits non-zero on the first wrong result, and the
-public target (`:debug_relocate`, `:cov_normalize`, `:cov_zig`) depends on
-them; `:cov_link` takes the public targets, so a coverage build is gated by
-their cases. The cases of `cov_zig` also take `:debug_relocate` and the pinned zig
-(`helpers`). Buck2 runs
-a dependency's validations with any build that uses it, so the tool cannot be
-built, or used, unless its cases pass. The public target and the cases both
-take the executable as an `exec_dep` on the same execution platform, so the
-cases test the very binary the public target hands out.
+Each tool's cases run as a build action that fails on the first wrong
+result. `cov_normalize` has two sets, both `zig_test`s. Its unit tests
+([cov_normalize_test.zig](cov_normalize_test.zig), `:cov_normalize_unit`)
+import the tool and call `entry`, the program but for the process; its
+executable is built behind them (`unit_tests`), so it does not exist unless
+they pass. They build the tool from source in `zig test`'s own mode, so they
+are not the shipped bytes. The process cases
+([cov_normalize_exe_test.zig](cov_normalize_exe_test.zig),
+`:cov_normalize_exe_test`) take the shipped executable (`env_tools`: its path
+is in the test's environment as `COV_NORMALIZE`, and the test fails, never
+passes, without it) and run it as a child process with an empty environment:
+exit 0 with the golden output, exit 1 with a refusal, exit 1 with no output
+when a file size limit cuts the write short, and exit 2 with the usage line,
+each message on stderr and nothing on stdout. They are a validation of the
+public target `:cov_normalize`. The other tools'
+cases are scripts (`kcov_tool_cases` in [defs.bzl](defs.bzl)), and the public
+target (`:debug_relocate`, `:cov_zig`) depends on them. `:cov_link` and
+`:cov_run` take the public targets, so a coverage build is gated by their
+cases. The cases of `cov_zig` also take `:debug_relocate` and the pinned zig
+(`helpers`). Buck2 runs a dependency's validations with any build that uses
+it, so the tool cannot be built, or used, unless its cases pass. The public
+target and its script or process cases take the executable as an `exec_dep`
+on the same execution platform, so those cases test the very binary the
+public target hands out; the unit tests do not.
 
-The cases that need a write to fail set a file size limit (`ulimit -f`, with
-`SIGXFSZ` ignored, which the tool inherits), so the write fails with `EFBIG`
-part way; a probe first checks that the shell can do this.
+The cases that need a write to fail set a file size limit (`ulimit -f` in a
+script, `setrlimit` in a unit test, with `SIGXFSZ` ignored), so the write
+fails with `EFBIG` part way; a probe first checks that the limit stops a
+plain write.
 
 `debug_relocate_cases.sh`:
 
@@ -478,8 +493,10 @@ fixtures put the working directory where a C runtime unit's
 | pinned zig | a C file compiled with `-g` and linked through `cov_zig` with `-Wl,--strip-debug`: `.debug_line` kept, the placeholder present, the directory absent, no compressed section | the flags rejected by zig 0.12 |
 | pinned zig, release | the same link through zig directly has no `.debug_line`, so the previous case's line tables are `cov_zig`'s doing | |
 
-`cov_normalize_cases.sh` runs `fixtures/kcov_full_paths.xml` (a made-up kcov
-report with absolute paths, in both the sandbox and the placeholder form):
+[cov_normalize_test.zig](cov_normalize_test.zig) runs `cov_normalize` as its `main` does (`entry`:
+the arguments, a working directory of the test's own, stderr) over
+`fixtures/kcov_full_paths.xml` (a made-up kcov report with absolute paths, in
+both the sandbox and the placeholder form) and small reports of its own:
 
 | case | proves | a defect it catches |
 |---|---|---|

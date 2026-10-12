@@ -250,7 +250,7 @@ metadata and injects them (`native_link_args`), so a README run passes with flag
 shows, and a user who copies the README fails with "Symbols not found". This per-package burden is
 the main usability cost of decision 1. No build-time gate can catch a missing flag: the welded README
 gate compiles the README's Mojo examples into one program linked against the closure's static
-archives (**EXISTS:** `_readme_gate`, `_link_tail` in `tools/build/mojo/defs.bzl`) and runs no shell
+archives (**EXISTS:** `readme_gate` in `tools/build/mojo/readme.bzl`, `_link_tail` in `tools/build/mojo/defs.bzl`) and runs no shell
 command, and the build has no installed `.so`. Only an installed-package README run can.
 
 **(a)** the packer writes the exact commands into each README as a fenced `sh` block, the readme tool
@@ -395,7 +395,7 @@ no exception:
   `histogram` and `metrics_set` (its only `external_call` is in `explain_analyze_collect.mojo`), and
   komira_scan_source's README has no Mojo import, so a broken metrics `.so` or a missing
   `-lkomira_metrics_native` would pass. **PROPOSED (slice 10):** a build rule refuses an owner whose
-  README program (the one the welded README gate links, `_readme_gate`) references none of the
+  README program (the one the welded README gate links, `readme_gate`) references none of the
   owner's own exports, read with `elfsyms` from the linked program; the two READMEs gain an example
   that reaches their C. Planted: komira_metrics's README without that example (build red); the
   installed README run without `-lkomira_metrics_native` (row 6 red); a metrics `.so` with an
