@@ -11,14 +11,14 @@ linux-x86_64), per `test_srcs` entry that is a source file:
   emitted as LLVM bitcode, `cov/branch/<test>.bc`;
 - `[coverage][pgo_bin][<test>]` (category `mojo_cov_pgo_link`): that
   bitcode instrumented with IR profile counters by Mojo's lld and linked as a
-  release test is, with the profile runtime (cov_branch_link.sh),
+  release test is, with the profile runtime (`cov_branch link`),
   `cov/branch/<test>`;
 - `[coverage][branch][<test>]` (category `mojo_cov_branch_run`): the merged
-  profile of its run through the release gate's runner (cov_branch_run.sh),
+  profile of its run through the release gate's runner (`cov_branch run`),
   `cov/branch/<test>.profdata`;
 - `[coverage][branch_ir][<test>]` (category `mojo_cov_branch_annotate`): the
   bitcode with that profile applied by Mojo's lld, as IR text whose branches
-  carry their counts (cov_branch_annotate.sh, which also reads the binary:
+  carry their counts (`cov_branch annotate`, which also reads the binary:
   the profile must hold exactly the functions it links), `cov/branch/<test>.ll`;
 - `[coverage][branch_info][<test>]` (category `mojo_cov_branch_classify`):
   the branches of the library's measured sources in that IR, each a source
@@ -34,6 +34,7 @@ waits for them. No join takes them directly (the library's own package
 waits for no coverage action), and `[coverage]` does not include them.
 """
 
+load("@komira//tools/build/toolchains/llvm_branch:defs.bzl", "RAW_PROFILE_VERSION")
 load(":providers.bzl", "MojoPkgTSet")
 load(":test_runtime.bzl", "test_root")
 
@@ -86,16 +87,27 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
     exe = ctx.actions.declare_output("cov/branch/{}".format(stem))
     ctx.actions.run(
         cmd_args(
+            link_dir.project("cov_branch"),
+            "link",
+            "--busybox",
             tc.busybox,
-            "sh",
-            link_dir.project("cov_branch_link.sh"),
-            tc.busybox,
+            "--compiler",
             tc.compiler,
+            "--zig",
             tc.link,
+            "--target",
             tc.cc_target,
+            "--lld",
+            link_dir.project("lld/bin/lld"),
+            "--runtime",
+            link_dir.project("llvm/runtime/libclang_rt.profile-x86_64.a"),
+            "--bitcode",
             bc,
+            "--out",
             exe.as_output(),
-            link_tail if link_tail else [],
+            # The C libraries of the test's link, as mojo_wrapper.sh's
+            # --link-tail appends them.
+            ["--", link_tail] if link_tail else [],
             hidden = link_dir,
         ),
         category = "mojo_cov_pgo_link",
@@ -106,14 +118,25 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
     profdata = ctx.actions.declare_output("cov/branch/{}.profdata".format(stem))
     ctx.actions.run(
         cmd_args(
+            run_dir.project("cov_branch"),
+            "run",
+            "--busybox",
             tc.busybox,
-            "sh",
-            run_dir.project("cov_branch_run.sh"),
-            tc.busybox,
+            # gate_runner.sh, the release gate's runner (the mojo rules'),
+            # which cov_branch runs as `<busybox> sh <gate_runner.sh> ...`.
+            "--gate-runner",
             tc.gate_runner,
+            "--compiler",
             tc.compiler,
+            "--label",
             "{}:{} [branch coverage]".format(ctx.label.raw_target(), t.short_path),
+            "--profdata",
+            run_dir.project("llvm/bin/llvm-profdata"),
+            "--raw-version",
+            str(RAW_PROFILE_VERSION),
+            "--binary",
             binary,
+            "--out",
             profdata.as_output(),
             env_args,
             hidden = [run_dir, root],
@@ -125,13 +148,19 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
     ir = ctx.actions.declare_output("cov/branch/{}.ll".format(stem))
     ctx.actions.run(
         cmd_args(
-            tc.busybox,
-            "sh",
-            annotate_dir.project("cov_branch_annotate.sh"),
-            tc.busybox,
+            annotate_dir.project("cov_branch"),
+            "annotate",
+            "--lld",
+            annotate_dir.project("lld/bin/lld"),
+            "--profdata",
+            annotate_dir.project("llvm/bin/llvm-profdata"),
+            "--bitcode",
             bc,
+            "--profile",
             profdata,
+            "--binary",
             exe,
+            "--out",
             ir.as_output(),
             hidden = annotate_dir,
         ),

@@ -1,0 +1,12 @@
+{
+ "name": "deadline_in_future_not_reached",
+ "defect": "a deadline still in the future ends the call (the deadline check inverted, or compared with the wrong clock). Virtual clock as in deadline_reached_during_call (1 ms per read), deadline 1000 s ahead",
+ "run": "call_batch",
+ "entry": "slow_loop",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "options": {"deadline_after_ns": 1000000000000},
+ "input": {"length": 3, "columns": [{"type": "int64", "values": [1, 2, 3]}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [1, 2, 3]}}
+}
