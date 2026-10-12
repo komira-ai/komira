@@ -198,6 +198,7 @@ def test_field_bridge_is_exact_to_two_levels() raises:
     assert_equal(Int(back._dict_index_type.type_id), Int(ArrowType.INT8.type_id), "dict index")
     assert_equal(len(back._union_type_ids), 1, "union ids")
     assert_equal(back._flags, 4, "flags")
+    assert_equal(len(back._metadata_values), 1, "metadata values")
     assert_equal(back._metadata_values[0], "v", "metadata")
     assert_equal(len(back._child_names), 2, "flat children")
     assert_equal(back._child_names[1], "b", "flat child name")

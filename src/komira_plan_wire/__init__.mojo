@@ -91,6 +91,7 @@ from .plan_wire_udf_check import (
     OPTIMIZED_UDF_SCHEMA_DISAGREES,
     OPTIMIZED_UDF_IN_SCAN_FILTER,
     OPTIMIZED_UDF_LEGACY_FORM,
+    PLAN_WIRE_UDF_CHECK_UNMODELLED_TAG,
 )
 
 # THE STRUCTURAL GATE. Exported because a caller that receives plan bytes over

@@ -197,6 +197,9 @@ def test_every_field_survives_and_a_grandchild_too() raises:
     kids.append(_deep())
     var blobs = List[List[UInt8]]()
     blobs.append(_sha(0x11))
+    # A dense union carries its type ids, so the state type exercises them.
+    var state = _leaf("state", ArrowType.UNION_DENSE)
+    state.union_type_ids = [0, 5]
     var u = UdfRef(
         UDF_REF_KIND_MAP_BATCHES_FRAME,
         _code(),
@@ -205,7 +208,7 @@ def test_every_field_survives_and_a_grandchild_too() raises:
         UDF_STABILITY_STABLE,
         UDF_NULL_PROPAGATE,
         None,
-        Optional(_leaf("state", ArrowType.BINARY)),
+        Optional(state^),
         blobs^,
         UdfResources(UInt64(1 << 30), UInt32(3), UInt32(256), UInt64(9000), UInt32(4)),
         True,
@@ -224,6 +227,8 @@ def test_every_field_survives_and_a_grandchild_too() raises:
     assert_equal(back.arg_types[0].depth(), 3, "the argument type is three levels deep")
     assert_true(udf_type_same(back.return_type.value(), u.return_type.value(), True), "return_type")
     assert_true(udf_type_same(back.state_type.value(), u.state_type.value(), True), "state_type")
+    assert_equal(len(back.state_type.value().union_type_ids), 2, "state_type union ids")
+    assert_equal(back.state_type.value().union_type_ids[1], 5, "state_type union id 1")
     assert_equal(len(back.data_blobs), 1, "data_blobs")
     assert_equal(Int(back.data_blobs[0][31]), 0x11, "data_blobs[0]")
     assert_equal(Int(back.stability), Int(UDF_STABILITY_STABLE), "stability")
@@ -402,6 +407,9 @@ def test_read_set_arg_mismatch() raises:
     var short = _row(Optional(_names("a", "b")))
     _ = short.arg_types.pop()
     _refused(short, OPTIMIZED_UDF_READ_SET_ARG_MISMATCH, "one arg_types entry for two names")
+    var long = _row(Optional(_names("a", "b")))
+    long.arg_types.append(_leaf("c", ArrowType.INT64))
+    _refused(long, OPTIMIZED_UDF_READ_SET_ARG_MISMATCH, "three arg_types entries for two names")
 
 
 def test_enums_outside_their_values_are_malformed() raises:

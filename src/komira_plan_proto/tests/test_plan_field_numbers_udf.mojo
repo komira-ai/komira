@@ -411,6 +411,13 @@ def test_udf_ref(mut L: _Ledger) raises:
     var b = _udf_ref(L)
     var m = decode_proto[UdfRef](b.copy())
     assert_equal(m.kind.number(), 6, "UdfRef: m.kind")
+    # Every message field is checked present before it is read, so a moved
+    # number fails here by name rather than aborting the binary.
+    assert_true(Bool(m.code), "UdfRef: code present")
+    assert_true(Bool(m.return_type), "UdfRef: return_type present")
+    assert_true(Bool(m.resources), "UdfRef: resources present")
+    assert_true(Bool(m.state_type), "UdfRef: state_type present")
+    assert_true(Bool(m.read_set), "UdfRef: read_set present")
     ref c = m.code.value()
     assert_equal(c.runtime, "komira/python", "UdfCode: c.runtime")
     assert_equal(c.form.number(), 3, "UdfCode: c.form")

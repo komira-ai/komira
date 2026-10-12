@@ -141,6 +141,9 @@ comptime OPTIMIZED_UDF_READ_SET_GROUP_KEY: String = "OPTIMIZED_UDF_READ_SET_GROU
 comptime OPTIMIZED_UDF_SCHEMA_DISAGREES: String = "OPTIMIZED_UDF_SCHEMA_DISAGREES"
 comptime OPTIMIZED_UDF_IN_SCAN_FILTER: String = "OPTIMIZED_UDF_IN_SCAN_FILTER"
 comptime OPTIMIZED_UDF_LEGACY_FORM: String = "OPTIMIZED_UDF_LEGACY_FORM"
+comptime PLAN_WIRE_UDF_CHECK_UNMODELLED_TAG: String = "PLAN_WIRE_UDF_CHECK_UNMODELLED_TAG"
+"""A plan or expression tag this check has no arm for: a bug in this build
+(a tag added without its arm here), never a fault of the plan."""
 
 
 def legacy_form_error(where: String) -> Error:
@@ -540,9 +543,9 @@ def _walk_expr(
         _check_plan(corr_subq_inner_plan_ref(e), udfs)
     else:
         raise Error(
-            OPTIMIZED_UDF_KIND_ARM_MISMATCH + ": " + where + " holds expression"
-            + " tag " + expr_tag_name(tag) + ", which the UDF check has no arm"
-            + " for; a bug in this build, not in the plan"
+            PLAN_WIRE_UDF_CHECK_UNMODELLED_TAG + ": " + where + " holds"
+            + " expression tag " + expr_tag_name(tag) + ", which the UDF check"
+            + " has no arm for; a bug in this build, not in the plan"
         )
 
 
@@ -736,7 +739,7 @@ def _check_plan(plan: LogicalPlan, udfs: List[UdfRef]) raises:
         pass
     else:
         raise Error(
-            OPTIMIZED_UDF_KIND_ARM_MISMATCH + ": plan tag "
+            PLAN_WIRE_UDF_CHECK_UNMODELLED_TAG + ": plan tag "
             + plan_tag_name(tag) + " has no arm in the UDF check; a bug in"
             + " this build, not in the plan"
         )

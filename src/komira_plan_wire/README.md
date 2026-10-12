@@ -23,7 +23,8 @@ column reference, a negative count or empty sort keys. Encoding refuses what
 the format cannot carry rather than dropping it: an in-memory source, a
 Hive-partitioned or non-local Parquet scan, an undescribable user-defined
 function and the other shapes the codec's ledger lists. Every refusal is an
-error whose text starts with one of the exported `PLAN_WIRE_*` names.
+error whose text starts with one of the exported `PLAN_WIRE_*` or
+`OPTIMIZED_UDF_*` names.
 
 The decoder rebuilds every node through its `LogicalPlan` factory and refuses
 a message whose `output_schema` differs from the one the factory derives

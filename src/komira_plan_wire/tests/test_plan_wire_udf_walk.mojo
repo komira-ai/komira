@@ -68,8 +68,8 @@ from komira_plan_wire import (
     plan_wire_check_udfs,
     OPTIMIZED_UDF_ARGUMENT_TYPE_MISMATCH,
     OPTIMIZED_UDF_AGGREGATE_OUTSIDE_AGGREGATE,
-    OPTIMIZED_UDF_KIND_ARM_MISMATCH,
     OPTIMIZED_UDF_UNDECLARED,
+    PLAN_WIRE_UDF_CHECK_UNMODELLED_TAG,
 )
 
 
@@ -246,9 +246,9 @@ def test_leaves_pass_and_an_unknown_tag_is_refused() raises:
     assert_equal(_gate(_project(Expr(EXPR_BETWEEN))), "", "BETWEEN")
     assert_equal(_gate(_project(Expr(EXPR_SORT_KEY))), "", "SORT_KEY")
     var unknown = LogicalPlan.filter(Expr(UInt8(200)), _scan())
-    assert_true(_gate(unknown).startswith(OPTIMIZED_UDF_KIND_ARM_MISMATCH), "expression tag 200")
+    assert_true(_gate(unknown).startswith(PLAN_WIRE_UDF_CHECK_UNMODELLED_TAG), "expression tag 200")
     var shell = LogicalPlan(UInt8(16), _schema())
-    assert_true(_gate(shell).startswith(OPTIMIZED_UDF_KIND_ARM_MISMATCH), "plan tag 16")
+    assert_true(_gate(shell).startswith(PLAN_WIRE_UDF_CHECK_UNMODELLED_TAG), "plan tag 16")
 
 
 # ---- plan nodes ------------------------------------------------------------------------

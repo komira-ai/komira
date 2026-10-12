@@ -233,6 +233,9 @@ def test_every_kind_copies_both_ways_and_passes_integrity() raises:
         assert_equal(Int(p.tag), Int(tags[i]), "kind " + String(i))
         assert_true(validate_plan_integrity(p), "kind " + String(i) + "\n" + _render(p))
         var c = p.copy()
+        # Integrity first: a copy that lost its payload is refused here by
+        # name, before the render reads the payload it does not have.
+        assert_true(validate_plan_integrity(c), "copy() kind " + String(i) + " lost its payload")
         assert_equal(_render(c), _render(p), "copy() kind " + String(i))
         assert_equal(c.structural_hash(), p.structural_hash(), "copy() kind " + String(i))
         var r = _copy_plan(p)

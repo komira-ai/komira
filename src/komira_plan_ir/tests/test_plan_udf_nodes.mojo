@@ -127,6 +127,26 @@ def test_every_field_enters_plan_identity() raises:
     assert_true(_step(5, 9).structural_hash() != sbase, "step index")
     assert_true(_step(4, 8).structural_hash() != sbase, "step argument")
     assert_true("MapBatches(udf=3, group_by=[" in _render(_frame(3, "a")), _render(_frame(3, "a")))
+    # Two keys and two literals, in both orders: the order is identity, and
+    # every element, not only the first, is rendered.
+    var ab = List[Expr]()
+    ab.append(Expr.col_ref("a"))
+    ab.append(Expr.col_ref("b"))
+    var ba = List[Expr]()
+    ba.append(Expr.col_ref("b"))
+    ba.append(Expr.col_ref("a"))
+    var fab = LogicalPlan.map_batches(_scan(), 3, ab^, _schema("k", "v"))
+    var fba = LogicalPlan.map_batches(_scan(), 3, ba^, _schema("k", "v"))
+    assert_true(fab.structural_hash() != fba.structural_hash(), "frame key order")
+    var a78 = List[ScalarValue]()
+    a78.append(ScalarValue.from_int(7))
+    a78.append(ScalarValue.from_int(8))
+    var a87 = List[ScalarValue]()
+    a87.append(ScalarValue.from_int(8))
+    a87.append(ScalarValue.from_int(7))
+    var s78 = LogicalPlan.step(4, a78^, _schema("k", "v"))
+    var s87 = LogicalPlan.step(4, a87^, _schema("k", "v"))
+    assert_true(s78.structural_hash() != s87.structural_hash(), "step argument order")
     assert_true("Step(udf=4, args=[" in _render(_step(4, 9)), _render(_step(4, 9)))
 
 

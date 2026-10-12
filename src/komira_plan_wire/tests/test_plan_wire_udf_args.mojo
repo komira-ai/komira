@@ -201,7 +201,9 @@ def test_scalar_argument_types_are_exact() raises:
     var wrong = _project(Expr.udf_apply(0, u.return_type.value().copy(), _cols("a")), _scan())
     _starts(_refusal(wrong, _list(u.copy())), OPTIMIZED_UDF_ARGUMENT_TYPE_MISMATCH, "int64 into float64")
     var extra = _project(Expr.udf_apply(0, u.return_type.value().copy(), _cols("b", "b")), _scan())
-    _starts(_refusal(extra, _list(u^)), OPTIMIZED_UDF_ARGUMENT_TYPE_MISMATCH, "two arguments for one")
+    _starts(_refusal(extra, _list(u.copy())), OPTIMIZED_UDF_ARGUMENT_TYPE_MISMATCH, "two arguments for one")
+    var none = _project(Expr.udf_apply(0, u.return_type.value().copy(), List[Expr]()), _scan())
+    _starts(_refusal(none, _list(u^)), OPTIMIZED_UDF_ARGUMENT_TYPE_MISMATCH, "no argument for one")
 
 
 def test_an_unset_read_set_means_every_input_column() raises:
@@ -316,7 +318,9 @@ def test_a_node_schema_follows_its_return_type() raises:
     _starts(_refusal_of(env2), OPTIMIZED_UDF_SCHEMA_DISAGREES, "a UDF column made non-nullable on the wire")
 
     var not_struct = _ref(UDF_REF_KIND_MAP_BATCHES_FRAME, _types("a", ArrowType.INT64, "b", ArrowType.FLOAT64), _leaf("y", ArrowType.FLOAT64))
-    _starts(_refusal(_frame(List[Expr]()), _list(not_struct^)), OPTIMIZED_UDF_SCHEMA_DISAGREES, "a frame returning a float64")
+    var not_struct_msg = _refusal(_frame(List[Expr]()), _list(not_struct^))
+    _starts(not_struct_msg, OPTIMIZED_UDF_SCHEMA_DISAGREES, "a frame returning a float64")
+    assert_true("is not a struct" in not_struct_msg, "refused for its return type, not for a schema it never derived: " + not_struct_msg)
 
 
 def _deep() -> UdfType:

@@ -21,7 +21,7 @@
 # raw instead of base64 (the text check).
 # =============================================================================
 
-from std.testing import assert_equal, assert_true
+from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_proto_codec import (
     Serializable,
@@ -102,6 +102,7 @@ def test_json_base64_array() raises:
 
 
 def main() raises:
-    test_binary_records()
-    test_json_base64_array()
-    print("test_proto_codec_repeated_bytes: OK")
+    var suite = TestSuite()
+    suite.test[test_binary_records]()
+    suite.test[test_json_base64_array]()
+    suite^.run()
