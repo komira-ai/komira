@@ -15,6 +15,7 @@ from std.collections import Set
 from std.memory import OwnedPointer
 
 from komira_arrow.schema import Schema
+from komira_arrow.arrow_types import arrow_fixed_byte_width
 from komira_plan_expr.expr import (
     Expr,
     EXPR_COL_REF,
@@ -127,6 +128,28 @@ def _collect_join_residual_side_columns(
 # Rule 3: Projection Pushdown
 # =============================================================================
 
+def _row_count_column(schema: Schema) -> String:
+    """The one column a scan keeps when no consumer reads a column (COUNT(*),
+    a zero-expr Project, a UDF that reads none). A scan cannot express a
+    zero-column read: an absent or empty projection reads every column. So it
+    reads the narrowest fixed-width column, the first of equals, or the first
+    column when none is fixed-width. `schema` has at least one column."""
+    var best = 0
+    var best_width = -1
+    for i in range(schema.num_columns()):
+        var width = -1
+        try:
+            width = arrow_fixed_byte_width(schema.field_arrow_type(i))
+        except:
+            pass
+        if width < 0:
+            continue
+        if best_width < 0 or width < best_width:
+            best = i
+            best_width = width
+    return schema.field_name(best)
+
+
 def push_projections_down(var plan: LogicalPlan) raises -> LogicalPlan:
     """Push projection lists down to Scan nodes.
 
@@ -165,9 +188,10 @@ def _push_projections_impl(
             var col_name = plan.output_schema.field_name(i)
             if col_name in needed or col_name in filter_cols:
                 proj.append(col_name)
+        if len(proj) == 0 and plan.output_schema.num_columns() > 0:
+            # Nothing above reads a column, but the rows must still flow.
+            proj.append(_row_count_column(plan.output_schema))
         if len(proj) == plan.output_schema.num_columns():
-            return plan^
-        if len(proj) == 0:
             return plan^
         var filter_copy: Optional[Expr] = None
         if plan._scan.value()[].filter:
@@ -241,7 +265,8 @@ def _push_projections_impl(
         # Otherwise build the narrowed expr list and rebuild the Project so
         # its output_schema is re-derived. An empty `needed` set narrows to
         # zero exprs: a zero-column output whose rows still carry the row
-        # count (a consumer such as COUNT(*) reads no column).
+        # count (a consumer such as COUNT(*) reads no column). The scan below
+        # then keeps one column (`_row_count_column`).
 
         var num_exprs = len(plan._project.value()[].exprs)
         var has_udf = plan._project.value()[].has_udf()
