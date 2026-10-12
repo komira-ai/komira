@@ -47,9 +47,47 @@ depends on no operator package.
   opts in.
 - `rg_prune_counter`: counters of the row-group statistics prune.
 
+The sub-row-group layer decodes a row group a chunk at a time into fixed
+per-worker buffers through resumable column cursors (`subrg_cursor_feed`;
+`subrg_columns` builds each chunk's flat columns, keeping each column's own
+type for a scan and widening for an aggregate):
+
+- `subrg_scan_executor`: `run_subrg_scan` / `run_subrg_scan_multi`, a
+  SELECT / filter / project scan of one or several leaves in one fork over a
+  `LocalDispatcher`, every row in file order (the collect sink,
+  `scan_chunk_sink`, sorts the chunks back), a predicate applied per chunk
+  (`batch_filter`), row groups the statistics or bloom filters disprove
+  skipped, and a row group the cursors refuse decoded whole, after the chunks
+  it already handed over are retracted.
+- `subrg_split_decode`: one row range of a row group, alone or over
+  dictionaries decoded once per (row group, column).
+- `band_producer`: `run_band_agg`, a grouped aggregate with dictionary
+  string keys folded band by band from reused buffers into a `BandSink`
+  (`komira_engine_runtime`), the band width a function of the host profile.
+- `cursor_grain_feed`: a claimed row group decoded one cache-sized grain per
+  call, with the grain's split into morsels (`cursor_grain_split_emit`) and a
+  move arm for flat columns (`grain_decode_move`).
+
+Every switch is a constructor or call argument or a process setter
+(`set_cursor_grain_enabled`, `set_grain_decode_move_enabled`,
+`set_cursor_grain_split_enabled`); nothing reads the environment.
+
 The package root re-exports nothing; import from the modules.
 
-## Example
+## Examples
+
+The decode grain of the cursor-grain route: half the L3 cache split across
+the workers, bounded by the morsel size, as a power of two:
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from komira_parquet_scan.cursor_grain_feed import cursor_grain_rows
+
+# 16-byte rows, 20 workers, a 16,384-row morsel, a 55 MiB L3.
+assert_equal(cursor_grain_rows(16, 20, 16_384, 55 << 20), 16_384)
+# No morsel bound: the cache bound, rounded down to a power of two.
+assert_equal(cursor_grain_rows(16, 20, 0, 55 << 20), 32_768)
+```
 
 A filter's conjuncts, in the order the staged decode evaluates them, and the
 first one whose new column is worth decoding only for the rows still alive:
