@@ -54,6 +54,14 @@
 #                owners of komira_http_core's closure; every owner is checked,
 #                which includes them.
 #
+# The alone and openssl environments share the whole set's pixi cache
+# (PIXI_CACHE_DIR), so the compiler and the release download once.
+#
+# The generated programs compile on every build: generated/ holds one of
+# each, built by this package's BUCK (`native_load_example`,
+# `openssl_example`) and held byte-equal to what the two functions write by
+# tests/test_native_rows.mojo.
+#
 # A failed install, program or record is a failed row, never a raise, and
 # the rows after it still run.
 #
@@ -320,6 +328,17 @@ def readme_loaded_from_row(record_prefix: String, env_dir: String, who: String, 
     )
 
 
+def _env_sharing_cache(bin: String, work: String, dir: String) -> List[String]:
+    """`env_child_env(bin, work)` with PIXI_CACHE_DIR the whole set's
+    (`<dir>/work/cache`): a second environment reuses what the first
+    downloaded (the compiler, the release) instead of fetching it again."""
+    var env = env_child_env(bin, work)
+    for i in range(len(env)):
+        if env[i].startswith(String("PIXI_CACHE_DIR=")):
+            env[i] = String("PIXI_CACHE_DIR=") + join_path(join_path(dir, String("work")), String("cache"))
+    return env^
+
+
 def _prepare(work: String, manifest: String) -> String:
     """"" when `work` holds its subdirectories, pixi.toml and auth.json."""
     try:
@@ -437,7 +456,7 @@ def _alone_rows[R: ProcessRunner](
     var bin = join_path(dir, String(PIXI_LINK_DIR))
     var pixi = join_path(bin, String(PIXI_NAME))
     var work = join_path(join_path(dir, String("alone/") + pin.name), String("work"))
-    var env = env_child_env(bin, work)
+    var env = _env_sharing_cache(bin, work, dir)
     var one = List[InstallPin]()
     one.append(pin.copy())
     var why = _prepare(work, install_manifest_text(v, channel_url, pin.subdir, one, mojo_pin))
@@ -517,7 +536,7 @@ def _openssl_rows[R: ProcessRunner](
     var bin = join_path(dir, String(PIXI_LINK_DIR))
     var pixi = join_path(bin, String(PIXI_NAME))
     var work = join_path(join_path(dir, String("openssl")), String("work"))
-    var env = env_child_env(bin, work)
+    var env = _env_sharing_cache(bin, work, dir)
     var manifest = install_manifest_text(v, channel_url, named[0].subdir, named, mojo_pin)
     manifest += (
         String(OPENSSL_PACKAGE) + String(' = { version = "') + String(OPENSSL_VERSION) + String('", channel = "')

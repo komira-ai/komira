@@ -31,6 +31,9 @@
 #       installing one native package by itself needs none;
 #   (load) `load_findings`: every path LOADED passes; a path not reported
 #       and a run that failed with no line are findings.
+#   (gen) the two generated programs equal generated/'s copies, which the
+#       package's BUCK compiles; the extra environments share the whole
+#       set's pixi cache.
 #   A release with no native pin gets none of these rows and no extra run:
 #   test_conda_install_env.mojo's pass asserts its rows and its two runs.
 #
@@ -63,6 +66,7 @@ from kci_validate import (
     install_env_argv,
     load_findings,
     load_program_text,
+    openssl_program_text,
     run_install_env,
     run_program_argv,
 )
@@ -493,6 +497,9 @@ def test_every_native_row_runs_and_passes() raises:
     assert_true(ossl.find(String("RTLD.NOW | RTLD.GLOBAL")) >= 0, ossl)
     assert_true(ossl.find(fx.openssl_work() + String("/") + String(ENV) + String("/lib/libssl.so.3")) >= 0, ossl)
     assert_true(ossl.find(String('"SSL_CTX_new"')) >= 0, ossl)
+    # the openssl environment reuses the whole set's pixi cache
+    assert_equal(p.inner.calls[5].cwd, fx.openssl_work())
+    assert_true(_env_has(p.inner.calls[5], String("PIXI_CACHE_DIR=") + fx.work() + String("/cache")))
 
 
 # ---- (b) row 4 red on an unresolved symbol ----------------------------------------
@@ -577,6 +584,18 @@ def test_each_native_member_of_a_set_is_installed_alone() raises:
     var one = List[InstallPin]()
     one.append(_pin(String("komira_alpha"), True, True))
     assert_equal(len(alone_pins(one, one)), 0)
+
+
+def test_the_generated_programs_are_the_ones_the_build_compiles() raises:
+    # generated/ holds one of each; BUCK builds them (native_load_example,
+    # openssl_example), so what kci writes is held to compiling Mojo
+    var owner = String("/env/lib/libkomira_example_native.so.1")
+    var paths: List[String] = [owner.copy()]
+    assert_equal(open(data_path(String("native_load_example.mojo")), "r").read(), load_program_text(paths))
+    assert_equal(
+        open(data_path(String("openssl_example.mojo")), "r").read(),
+        openssl_program_text(owner, String("/env/lib/libssl.so.3")),
+    )
 
 
 def test_load_findings() raises:

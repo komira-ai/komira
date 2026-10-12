@@ -1,4 +1,4 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 
 # The validations of a stage's steps (`kci run --stage S`; the machine file
 # declares them on a step, kci_release_machine parses them). Two kinds. The
@@ -30,7 +30,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # ExampleRelease writes under TEST_TMPDIR: no docker, no network.
 mojo_library(
     name = "kci_validate",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "generated/**/*.mojo"]),
     deps = [
         "//src/kci_artifact:kci_artifact",
         "//src/kci_build:kci_build_lib",
@@ -109,7 +109,27 @@ mojo_library(
         "tests/test_readme_tool.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
         "tests/test_readme_link.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
         "tests/test_readme_link_release.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
-        "tests/test_native_rows.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
+        "tests/test_native_rows.mojo": {
+            "readme_examples": "//tools/build/readme_examples:tool",
+            "native_load_example.mojo": "generated/native_load_example.mojo",
+            "openssl_example.mojo": "generated/openssl_example.mojo",
+        },
     },
     visibility = ["PUBLIC"],
+)
+
+# One of each program the native install checks write (native_rows.mojo
+# `load_program_text`, `openssl_program_text`), built here so that a change
+# breaking what kci generates fails this package's build rather than
+# beta_validate. tests/test_native_rows.mojo holds each byte-equal to its
+# generator. Built, never run: the paths they open exist only in an
+# installed environment.
+mojo_binary(
+    name = "native_load_example",
+    srcs = ["generated/native_load_example.mojo"],
+)
+
+mojo_binary(
+    name = "openssl_example",
+    srcs = ["generated/openssl_example.mojo"],
 )
