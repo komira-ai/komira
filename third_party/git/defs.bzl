@@ -77,7 +77,6 @@ def _check_impl(ctx):
             _out(ctx.attrs.git_lfs),
             ctx.attrs.version,
             ctx.attrs.lfs_version,
-            ctx.attrs.glibc_floor_minor,
         ),
         category = "git_check",
         identifier = ctx.label.name,
@@ -90,11 +89,10 @@ def _check_impl(ctx):
 
 _git_check = rule(
     impl = _check_impl,
-    doc = "Runs git_check.sh against the `git` distribution and the `git_lfs` binary: files and licences, version, glibc floor, loader closure, no host git (decoys on PATH), object ids against sha1sum, clone and push over the pack protocol, the HTTP transport, and git-lfs. Fails the build on a wrong result.",
+    doc = "Runs git_check.sh against the `git` distribution and the `git_lfs` binary: files and licences, version, no host git (decoys on PATH), object ids against sha1sum, clone and push over the pack protocol, the HTTP transport, and git-lfs. Fails the build on a wrong result.",
     attrs = {
         "git": attrs.exec_dep(doc = "The `git` mode output of git_build."),
         "git_lfs": attrs.exec_dep(doc = "The pinned git-lfs binary."),
-        "glibc_floor_minor": attrs.string(doc = "<n> of the floor GLIBC_2.<n>."),
         "lfs_version": attrs.string(doc = "What `git-lfs version` prints after `git-lfs/`, up to the space."),
         "script": attrs.source(doc = "git_check.sh"),
         "version": attrs.string(doc = "What `git --version` prints after `git version `."),

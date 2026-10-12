@@ -52,7 +52,7 @@
 # (and may declare explicit checks, `checks { name targets }`, to group
 # targets its own way). The rest of the units are DERIVED when the check
 # runs: the buck2 build system's `derive_checks` command
-# (release/ci/derive_checks.py) reads `//...` and `tests//functional/...`
+# (//tools/build/ci:derive_checks) reads `//...` and `tests//functional/...`
 # from the live graph (`buck2 cquery`) and answers one check per path group
 # for every target no declared unit names or matches: one per library
 # package `//src/<p>/...` (named `<p>`: a change to one library builds that
@@ -82,11 +82,12 @@
 # The tests cell's must-fail fixtures (`tests//negative`) are not units and
 # not in the graph the tool reads: the build system's self-tests
 # (tools/build/tests/run_tests.sh) build each one and assert its refusal.
-# `python3 release/ci/derive_checks.py --from release/artifacts.textproto`
+# `./buck2 run //tools/build/ci:derive_checks -- --from release/artifacts.textproto`
 # prints the answer for a reader; `kci run --stage pr --affected-by <base>
 # --plan` prints the units a change would build.
 #
-# THE COMMANDS. `derive_checks` (release/ci/derive_checks.py) answers the
+# THE COMMANDS. `derive_checks` runs //tools/build/ci:derive_checks
+# (tools/build/ci/change_map/derive.mojo), which answers the
 # derived checks, above. `build_targets` (release/ci/build_targets.sh) builds
 # a unit's targets (both build systems share it, so kci builds every affected
 # unit in ONE run over the union of their targets, and only when that run
@@ -136,8 +137,10 @@ build_systems {
     args: "release/ci/build_targets.sh"
   }
   derive_checks {
-    executable: "python3"
-    args: "release/ci/derive_checks.py"
+    executable: "buck2"
+    args: "run"
+    args: "//tools/build/ci:derive_checks"
+    args: "--"
     args: "{units_file}"
   }
 }
@@ -867,4 +870,18 @@ artifacts {
   args: "--out-dir"
   args: "{out_dir}"
   targets: "//tools/build/package:komira_pack"
+}
+
+# The build system's self-tests (docs/design/build_selftests.md): the
+# scenarios and graph checks of tools/build/selftest, one declared check.
+# Declared so that the package leaves the derived check `tools_build`,
+# which a change under src/ reaches through the reverse dependencies of
+# targets under tools/build. Nothing in the package depends on a library
+# under src/ (its graph check selftest_closure holds that), so only a
+# widened change (tools/build/ci/rules.txt: tools/build/** among them)
+# reaches this check.
+checks {
+  name: "build_selftests"
+  build_system: "buck2"
+  targets: "//tools/build/selftest/..."
 }
