@@ -36,9 +36,10 @@ Mount the route over an in-memory reader, query it with the right token, and
 see a caller without the token get the same 404 as an unwired route:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
-```mojo
+```mojo module
 from komira_http_core.codec.types import HttpMethod, HttpRequest
 from komira_log_query import ErasedServiceLogSearch, HeaderTokenAccess, ServiceLogHit, ServiceLogPage, ServiceLogQuery, ServiceLogSearch, is_service_log_request, service_log_response
+
 
 struct TwoLines(ServiceLogSearch, Movable, Deinitable):
     """A reader over two fixed records; it honours the term, not the window."""
@@ -54,6 +55,7 @@ struct TwoLines(ServiceLogSearch, Movable, Deinitable):
             hits.append(ServiceLogHit(Int64(2_000), 1.0, '{"msg":"stopped"}'))
         return ServiceLogPage(hits^, len(hits), 2)
 
+
 def log_request(query: String, token: String) -> HttpRequest:
     var r = HttpRequest(HttpMethod.get(), "/logs")
     r.query_string = query
@@ -61,39 +63,42 @@ def log_request(query: String, token: String) -> HttpRequest:
         r.headers["x-log-token"] = token
     return r^
 
-var reader = Optional(ErasedServiceLogSearch.erase(TwoLines()))
-var access = HeaderTokenAccess("x-log-token", "reader-token")
-var now_ns = Int64(5_000_000_000_000_000)  # the service passes its clock in
 
-var req = log_request("q=stopped&limit=10", "reader-token")
-assert_true(is_service_log_request(req, "/logs"))
-var ok = service_log_response(reader, req, access, now_ns)
-assert_equal(ok.status, Int32(200))
-var body = String(unsafe_from_utf8=ok.body.copy())
-assert_true(body.find('"q":"stopped"') >= 0)
-assert_true(body.find('"limit":10') >= 0)
-assert_true(body.find('"returned":1') >= 0)
-assert_true(body.find('"source":{"msg":"stopped"}') >= 0)
+def main() raises:
+    var reader = Optional(ErasedServiceLogSearch.erase(TwoLines()))
+    var access = HeaderTokenAccess("x-log-token", "reader-token")
+    var now_ns = Int64(5_000_000_000_000_000)  # the service passes its clock in
 
-var refused = service_log_response(reader, log_request("", "wrong"), access, now_ns)
-var unwired = Optional[ErasedServiceLogSearch](None)
-var no_reader = service_log_response(unwired, log_request("", "reader-token"), access, now_ns)
-assert_equal(refused.status, Int32(404))
-assert_equal(no_reader.status, Int32(404))
-assert_equal(
-    String(unsafe_from_utf8=refused.body.copy()),
-    String(unsafe_from_utf8=no_reader.body.copy()),
-)
-assert_false(is_service_log_request(HttpRequest(HttpMethod.get(), "/logs/x"), "/logs"))
+    var req = log_request("q=stopped&limit=10", "reader-token")
+    assert_true(is_service_log_request(req, "/logs"))
+    var ok = service_log_response(reader, req, access, now_ns)
+    assert_equal(ok.status, Int32(200))
+    var body = String(unsafe_from_utf8=ok.body.copy())
+    assert_true(body.find('"q":"stopped"') >= 0)
+    assert_true(body.find('"limit":10') >= 0)
+    assert_true(body.find('"returned":1') >= 0)
+    assert_true(body.find('"source":{"msg":"stopped"}') >= 0)
+
+    var refused = service_log_response(reader, log_request("", "wrong"), access, now_ns)
+    var unwired = Optional[ErasedServiceLogSearch](None)
+    var no_reader = service_log_response(unwired, log_request("", "reader-token"), access, now_ns)
+    assert_equal(refused.status, Int32(404))
+    assert_equal(no_reader.status, Int32(404))
+    assert_equal(
+        String(unsafe_from_utf8=refused.body.copy()),
+        String(unsafe_from_utf8=no_reader.body.copy()),
+    )
+    assert_false(is_service_log_request(HttpRequest(HttpMethod.get(), "/logs/x"), "/logs"))
 ```
 
 An allowed caller asking for an inverted window is told so, and the window
 is never swapped:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
-```mojo
+```mojo module
 from komira_http_core.codec.types import HttpMethod, HttpRequest
 from komira_log_query import ErasedServiceLogSearch, HeaderTokenAccess, ServiceLogPage, ServiceLogQuery, ServiceLogSearch, service_log_response
+
 
 struct EmptyLog(ServiceLogSearch, Movable, Deinitable):
     def __init__(out self):
@@ -102,13 +107,15 @@ struct EmptyLog(ServiceLogSearch, Movable, Deinitable):
     def scan(mut self, q: ServiceLogQuery) raises -> ServiceLogPage:
         return ServiceLogPage()
 
-var reader = Optional(ErasedServiceLogSearch.erase(EmptyLog()))
-var req = HttpRequest(HttpMethod.get(), "/logs")
-req.query_string = "since_ms=2000&until_ms=1000"
-req.headers["x-log-token"] = "reader-token"
-var r = service_log_response(
-    reader, req, HeaderTokenAccess("x-log-token", "reader-token"), Int64(0)
-)
-assert_equal(r.status, Int32(400))
-assert_true(String(unsafe_from_utf8=r.body.copy()).find("is after 'until_ms'") >= 0)
+
+def main() raises:
+    var reader = Optional(ErasedServiceLogSearch.erase(EmptyLog()))
+    var req = HttpRequest(HttpMethod.get(), "/logs")
+    req.query_string = "since_ms=2000&until_ms=1000"
+    req.headers["x-log-token"] = "reader-token"
+    var r = service_log_response(
+        reader, req, HeaderTokenAccess("x-log-token", "reader-token"), Int64(0)
+    )
+    assert_equal(r.status, Int32(400))
+    assert_true(String(unsafe_from_utf8=r.body.copy()).find("is after 'until_ms'") >= 0)
 ```

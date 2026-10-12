@@ -431,5 +431,100 @@ def test_read_names_an_unreadable_file() raises:
     assert_true(False, "an absent file was read")
 
 
+comptime _SO = "lib/libkomira_crypto_native.so.1"
+comptime _LN = "lib/libkomira_crypto_native.so"
+comptime _HOLDER = "lib/libkomira_log_holder.a"
+
+
+def _libs(rows: String) raises -> String:
+    return _edit(String(_LIB), String("lib_files"), rows)
+
+
+def _lrow(kind: String, path: String, sha: String = String(_H)) -> String:
+    return String('{"kind":"') + kind + String('","path":"') + path + String('","sha256":"') + sha + String('"}')
+
+
+def test_lib_files_rows_parse() raises:
+    # the shape komira_pack conda writes (pack/conda_lib.zig metadataRows):
+    # {kind, path, sha256}, path order; a link's sha256 is its target's
+    var md = parse_conda_metadata(
+        _libs(
+            String("[") + _lrow(String("link"), String(_LN)) + String(",") + _lrow(String("shared"), String(_SO))
+            + String(",") + _lrow(String("static"), String(_HOLDER)) + String("]")
+        ),
+        String(_SRC),
+    )
+    assert_true(md.has_lib_files)
+    assert_equal(len(md.lib_files), 3)
+    assert_equal(md.lib_files[0].kind, String("link"))
+    assert_equal(md.lib_files[0].path, String(_LN))
+    assert_equal(md.lib_files[1].kind, String("shared"))
+    assert_equal(md.lib_files[1].path, String(_SO))
+    assert_equal(md.lib_files[1].sha256_hex, String(_H))
+    assert_equal(md.lib_files[2].kind, String("static"))
+    assert_equal(md.lib_files[2].path, String(_HOLDER))
+    assert_equal(len(md.ignored_keys), 0)
+    var none = read_conda_metadata(String(_LIB))
+    assert_false(none.has_lib_files)
+    assert_equal(len(none.lib_files), 0)
+
+
+def test_refuses_bad_lib_files() raises:
+    _expect(_libs(String('"lib"')), String("'lib_files' is not an array"))
+    _expect(
+        _libs(String("[]")),
+        String("'lib_files' is empty: a package with no native file has no lib_files key"),
+    )
+    _expect(_libs(String("[1]")), String("lib_files[0]: not an object"))
+    _expect(
+        _libs(String('[{"path":"') + String(_SO) + String('","sha256":"') + String(_H) + String('"}]')),
+        String("lib_files[0]: missing 'kind'"),
+    )
+    _expect(
+        _libs(String("[") + _lrow(String("shared"), String(_SO), String("00")) + String("]")),
+        String("lib_files[0]: 'sha256' is not 64 lowercase hex characters"),
+    )
+    _expect(
+        _libs(String("[") + _lrow(String("native"), String(_SO)) + String("]")),
+        String("lib_files[0]: 'kind' 'native' is not shared, link or static"),
+    )
+    for bad in [String("libx.so.1"), String("lib/"), String("lib/a/b.so"), String("lib/.."), String("share/lib/x.so")]:
+        _expect(
+            _libs(String("[") + _lrow(String("shared"), bad) + String("]")),
+            String("lib_files[0]: 'path' ") + bad + String(" is not lib/<file name>"),
+        )
+    _expect(
+        _libs(
+            String("[") + _lrow(String("shared"), String(_SO)) + String(",") + _lrow(String("static"), String(_SO))
+            + String("]")
+        ),
+        String("lib_files[1]: 'path' ") + String(_SO) + String(" is given twice"),
+    )
+    # rows out of path order, as conda_lib.zig checkRows refuses them: the
+    # shared library before its link name (a prefix sorts first), and a
+    # static archive before both
+    _expect(
+        _libs(
+            String("[") + _lrow(String("shared"), String(_SO)) + String(",") + _lrow(String("link"), String(_LN))
+            + String("]")
+        ),
+        String("lib_files[1]: 'path' ") + String(_LN) + String(" comes after ") + String(_SO)
+        + String(": the rows are in path order"),
+    )
+    _expect(
+        _libs(
+            String("[") + _lrow(String("link"), String(_LN)) + String(",") + _lrow(String("static"), String(_HOLDER))
+            + String(",") + _lrow(String("shared"), String(_SO)) + String("]")
+        ),
+        String("lib_files[2]: 'path' ") + String(_SO) + String(" comes after ") + String(_HOLDER)
+        + String(": the rows are in path order"),
+    )
+    # a metapackage ships no file
+    _expect(
+        _edit(String(_META), String("lib_files"), String("[]")),
+        String("'lib_files' does not belong to a metapackage"),
+    )
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

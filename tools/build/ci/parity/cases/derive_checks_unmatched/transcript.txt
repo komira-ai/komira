@@ -1,0 +1,3 @@
+call buck2 "cquery" "//... + tests//functional/..."
+exit 0
+stdout "komira//src/a:a (prelude//platforms:default#abcdef0123456789)\nkomira//src/a/sub:s (prelude//platforms:default#abcdef0123456789)\nkomira//src/b:b (prelude//platforms:default#abcdef0123456789)\ntests//functional/x:x (prelude//platforms:default#abcdef0123456789)\n"

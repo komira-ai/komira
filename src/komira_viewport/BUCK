@@ -17,6 +17,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_viewport_hostile_ticket: malformed and out-of-allow-list tickets (truncated,
 #   oversized, too deep, disallowed tags and ops, UDFs, duplicate output names)
 #   are rejected with an error, never accepted.
+# - test_viewport_bytes_cursor: the byte cursor by its exact bytes; the UTF-8
+#   gate swept across every sequence length and RFC 3629 boundary; every
+#   truncation and length-cap refusal.
+# - test_viewport_codec_reject: the op-code allow-lists swept over all 256
+#   byte values, the depth cap at its boundary through every recursive site,
+#   scalar wire tags, and every refusal of the response envelope.
+# - test_viewport_ticket_limits: the ticket's count caps, node budget, size and
+#   window bounds at their boundaries, and which refusal wins when two faults
+#   meet.
 mojo_library(
     name = "komira_viewport",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -28,6 +37,9 @@ mojo_library(
     test_srcs = [
         "tests/test_viewport_expr_roundtrip.mojo",
         "tests/test_viewport_hostile_ticket.mojo",
+        "tests/test_viewport_bytes_cursor.mojo",
+        "tests/test_viewport_codec_reject.mojo",
+        "tests/test_viewport_ticket_limits.mojo",
     ],
     visibility = ["PUBLIC"],
 )
