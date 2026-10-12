@@ -48,6 +48,7 @@ mojo_library(
         "tests/test_cloud_compose_expand.mojo",
         "tests/test_cloud_compose_refusals.mojo",
         "tests/test_cloud_compose_paths.mojo",
+        "tests/test_cloud_compose_map_keys.mojo",
         "tests/test_cloud_compose_size.mojo",
         "tests/test_cloud_compose_bind.mojo",
         "tests/test_cloud_compose_bind_refusals.mojo",

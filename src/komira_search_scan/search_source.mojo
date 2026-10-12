@@ -370,18 +370,18 @@ def search_split_hits(core: SearchCore, query: QueryIR) raises -> RecordBatch:
     var want_cols = want.num_columns()
     var got_cols = batch.num_columns()
     if want_cols != got_cols:
-        raise Error(
-            "search_split_hits: hit batch column count "
-            + String(got_cols)
-            + " != hit schema column count "
-            + String(want_cols)
+        raise Error(  # cov: unreachable SearchCore.search builds every hit batch with hit_schema()
+            "search_split_hits: hit batch column count "  # cov: unreachable SearchCore.search builds every hit batch with hit_schema()
+            + String(got_cols)  # cov: unreachable SearchCore.search builds every hit batch with hit_schema()
+            + " != hit schema column count "  # cov: unreachable SearchCore.search builds every hit batch with hit_schema()
+            + String(want_cols)  # cov: unreachable SearchCore.search builds every hit batch with hit_schema()
         )
     for ci in range(want_cols):
         ref col = batch.column_at(ci)
         if want.field_arrow_type(ci) != col.arrow_type:
-            raise Error(
-                "search_split_hits: hit batch column "
-                + String(ci)
-                + " arrow_type does not match the hit schema"
+            raise Error(  # cov: unreachable SearchCore.search builds every hit batch with hit_schema()
+                "search_split_hits: hit batch column "  # cov: unreachable SearchCore.search builds every hit batch with hit_schema()
+                + String(ci)  # cov: unreachable SearchCore.search builds every hit batch with hit_schema()
+                + " arrow_type does not match the hit schema"  # cov: unreachable SearchCore.search builds every hit batch with hit_schema()
             )
     return batch^

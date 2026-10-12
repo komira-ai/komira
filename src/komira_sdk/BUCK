@@ -53,6 +53,7 @@ mojo_library(
         "tests/test_plan_validator_exprs.mojo",
         "tests/test_plan_validator_nodes.mojo",
         "tests/test_row_udf_chain_direct.mojo",
+        "tests/test_sdk_exchange_refusals.mojo",
         "tests/test_select_aggregates_plans.mojo",
         "tests/test_select_aggregates_shapes.mojo",
         "tests/test_table_display_direct.mojo",
