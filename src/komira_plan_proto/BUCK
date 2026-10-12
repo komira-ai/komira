@@ -50,6 +50,7 @@ _CENSUS = [
     "tests/test_plan_enum_numbers_nodes.mojo",
     "tests/test_plan_enum_numbers_functions.mojo",
     "tests/test_optimized_plan_field_numbers.mojo",
+    "tests/test_plan_field_numbers_udf.mojo",
 ]
 
 # One golden per message of optimized_plan.proto, each named for its message

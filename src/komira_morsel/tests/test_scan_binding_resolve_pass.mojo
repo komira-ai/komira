@@ -85,11 +85,13 @@ from komira_plan_ir.logical_plan import (
     PLAN_TAG_COUNT,
     PLAN_VIEW_REF,
     EXCHANGE_KIND_GATHER,
+    PLAN_STEP,
     plan_tag_name,
     plan_tag_is_retired,
 )
 from komira_plan_expr.partition_expr import PartitionExpr
 from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.udf_type import UdfType
 from komira_scan_source.in_memory_source import InMemorySource
 from komira_scan_source.pushdown_gate import PushdownGate
 from komira_scan_source.scan_binding import (
@@ -1799,6 +1801,23 @@ def test_every_child_bearing_plan_arm_descends_to_an_open_leaf() raises:
         "EXCHANGE.child",
         seen,
     )
+    # A frame UDF: its grouping expressions, then its child.
+    var mb_keys = List[Expr]()
+    mb_keys.append(_exists(set))
+    _assert_plan_descends(
+        LogicalPlan.map_batches(_plain(), 0, mb_keys^, _schema_ab()),
+        set,
+        "MAP_BATCHES.group_by",
+        seen,
+    )
+    _assert_plan_descends(
+        LogicalPlan.map_batches(
+            _leaf(set, String("t")), 0, List[Expr](), _schema_ab()
+        ),
+        set,
+        "MAP_BATCHES.child",
+        seen,
+    )
 
     # ---- TWO OR MORE CHILDREN.
     _assert_plan_descends(
@@ -1874,8 +1893,9 @@ def test_every_child_bearing_plan_arm_descends_to_an_open_leaf() raises:
     )
 
     # A new child-bearing tag reds this table, not only the unmodelled-tag test.
+    # A step is a leaf: no child and literal arguments.
     for t in range(PLAN_TAG_COUNT):
-        if t == Int(PLAN_VIEW_REF) or t == Int(PLAN_CSE_REF):
+        if t == Int(PLAN_VIEW_REF) or t == Int(PLAN_CSE_REF) or t == Int(PLAN_STEP):
             continue
         if plan_tag_is_retired(UInt8(t)):
             continue
@@ -1999,6 +2019,17 @@ def test_every_expr_slot_descends_to_an_open_leaf() raises:
         ),
         set,
         "UDF_CALL",
+        seen,
+    )
+    var apply_args = List[Expr]()
+    apply_args.append(_c())
+    apply_args.append(_exists(set))
+    _assert_expr_descends(
+        Expr.udf_apply(
+            0, UdfType("r", ArrowType.INT64, DType.int64, True), apply_args^
+        ),
+        set,
+        "UDF_APPLY.args[1]",
         seen,
     )
 
