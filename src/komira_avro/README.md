@@ -13,6 +13,15 @@ batches (`komira_arrow`).
   schema resolution (field skip and reorder, defaults for missing fields,
   aliases, int/long/float/double promotion, string/bytes, union and enum
   resolution); `read_avro_bytes_parallel` decodes blocks in parallel.
+  A `["null", T]` union reads as a nullable `T` column; any other union reads
+  as an Arrow dense union with one child per branch (type id = branch index),
+  and a `"null"` field as an Arrow NULL column. Under resolution a writer union
+  value lands in the reader type (or reader branch) it matches, its own type
+  before a promotion; a writer branch that matches nothing raises when a value
+  of it is read. A writer field the reader drops is skipped whatever its type.
+  Record, array and map values are not decoded into columns, and an enum
+  value is decoded only by enum-to-enum resolution of a field that is not a
+  general union.
 - **Writing.** `write_avro_bytes(batch, AvroWriterOptions(codec))` and
   `write_avro_file` write a container; Arrow types Avro cannot express are
   annotated (`arrow.*`) so they read back as the same Arrow type, unless

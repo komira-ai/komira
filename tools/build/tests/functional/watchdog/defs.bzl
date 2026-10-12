@@ -1,4 +1,5 @@
-"""Runs the compile wrapper (tools/build/mojo/tools/mojo_compile.zig) against
+"""Runs the compile wrapper (tools/build/mojo/tools/mojo_compile.zig, or
+mojo_compile_macos.zig for `cases_darwin` on a macOS worker) against
 a stand-in toolchain (standin.zig) through the cases runner (cases.zig), in a
 remote action: every verdict of the compile watchdog, the wrapper signalled,
 the compiler's exact environment, its stdin and signal dispositions, the link
@@ -24,7 +25,7 @@ mojo_watchdog_cases = rule(
         "runner": attrs.exec_dep(),
         # The stand-in compiler and link driver (standin.zig).
         "standin": attrs.exec_dep(),
-        # The wrapper under test.
+        # The wrapper under test: the Linux one unless a target names another.
         "wrapper": attrs.exec_dep(default = "komira//tools/build/mojo:mojo_compile"),
     },
 )

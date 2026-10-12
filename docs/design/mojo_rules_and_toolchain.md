@@ -26,7 +26,7 @@ mojo_library:  mojo_compile -> mojo precompile -> <import>.mojoc
 mojo_binary :  mojo_compile -> mojo build      -> executable (+ lib/ of runtime libraries)
 ```
 
-The compile wrapper (`mojo_compile`, a Zig program; `darwin/mojo_wrapper.sh` on macOS until its port) is the single place the compiler's environment is decided. It is built from the pinned zig, gives the compiler an environment built from nothing, never consults the worker's `PATH`, renders `modular.cfg` for the action's own toolchain path, gives the compiler private cache, temporary and home directories, runs it under the watchdog, and checks the output afterwards (exit 3 for a missing or empty output, exit 4 for an output that contains the action's working directory).
+The compile wrapper (`mojo_compile`, a Zig program built for each execution platform: `tools/mojo_compile.zig` on Linux, `tools/mojo_compile_macos.zig` on macOS) is the single place the compiler's environment is decided. It is built from the pinned zig, gives the compiler an environment built from nothing, never consults the worker's `PATH`, renders `modular.cfg` for the action's own toolchain path, gives the compiler private cache, temporary and home directories, runs it under the watchdog, and checks the output afterwards (exit 3 for a missing or empty output, exit 4 for an output that contains the action's working directory).
 
 ## Why is it built this way?
 
