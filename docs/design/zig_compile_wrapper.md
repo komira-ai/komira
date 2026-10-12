@@ -279,8 +279,8 @@ Three things must hold, each already checked:
 
 - the exec line of item 16 stays byte for byte, and `argv[0]` stays absolute;
 - `PWD` and `BUCK_SCRATCH_PATH` reach the link (the exact-environment pass-through);
-- `cov_branch_link.sh` reproduces that line for the branch link, and test 47 (`link_line.sh`) compares
-  the two. `link_line.sh` takes the wrapper as an argument; its rule passes the new executable.
+- `cov_branch link` (`cov_branch_link.zig`) reproduces that line for the branch link, and test 47
+  (`link_line.sh`) compares the two. `link_line.sh` takes the wrapper as an argument; its rule passes the new executable.
 
 The negative coverage target (`tests//negative/coverage`, the no-op relocator) must still fail with exit 4:
 it proves item 30 through a real `cov_zig` link.
@@ -365,7 +365,7 @@ The `host-identity` value is checked on each macOS worker by the census target a
    and update every hit that means the Linux script. That is more than the docs (`mojo_rules_and_toolchain.md`,
    the Mojo, coverage and toolchain READMEs, `cov_zig.zig`'s header): comments in `defs.bzl`, `doc.bzl`,
    `coverage.bzl`, `coverage_branch.bzl`, `coverage/kcov/defs.bzl`, `mutation.bzl`, `providers.bzl`,
-   `toolchain.bzl`, `gate_runner.sh`, `tests/cxx_tests.sh`, `cov_branch_link.sh`, `functional/coverage/BUCK`,
+   `toolchain.bzl`, `gate_runner.sh`, `tests/cxx_tests.sh`, `cov_branch_link.zig`, `functional/coverage/BUCK`,
    `link_line.sh` and `tests/coverage_runs.md` name it too. The pull request lists the hits it leaves and why
    (each names the darwin script, which the macOS pull request removes).
    The darwin toolchain still names its own shell wrapper, so macOS is untouched. Proof: unit tests and

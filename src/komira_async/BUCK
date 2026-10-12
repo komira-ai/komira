@@ -31,6 +31,8 @@ cxx_library(
 
 mojo_library(
     name = "komira_async",
+    # Its C ships in its package as komira_async_native below (lib/libkomira_async_native.so.1).
+    native = ":komira_async_native",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         ":komira_async_posix",
@@ -183,7 +185,7 @@ mojo_library(
 # libkomira_async_native.so.1: the C this library owns, as its own
 # shared library exporting the names its callers call
 # (tools/build/native/README.md, "Each library's shared library"). Built and
-# checked here; no package ships it yet.
+# checked here, and packed into the library's conda package (`native`).
 native_shared_library(
     name = "komira_async_native",
     archives = [

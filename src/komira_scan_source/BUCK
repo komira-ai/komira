@@ -17,6 +17,8 @@ cxx_library(
 # What a scan is: SourceLike, ScanBinding identity, scan params, per-format source descriptors, pushdown gate, Sink trait, in-memory registry.
 mojo_library(
     name = "komira_scan_source",
+    # Its C ships in its package as komira_scan_source_native below (lib/libkomira_scan_source_native.so.1).
+    native = ":komira_scan_source_native",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         ":komira_scan_source_inmem_id",
@@ -49,7 +51,7 @@ mojo_library(
 # libkomira_scan_source_native.so.1: the C this library owns, as its own
 # shared library exporting the names its callers call
 # (tools/build/native/README.md, "Each library's shared library"). Built and
-# checked here; no package ships it yet.
+# checked here, and packed into the library's conda package (`native`).
 native_shared_library(
     name = "komira_scan_source_native",
     archives = [
