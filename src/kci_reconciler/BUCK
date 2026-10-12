@@ -20,6 +20,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The unpinned-plan test checks that an image whose build step has not run
 # yet plans as a placeholder that cannot pass for a digest, only when the
 # caller passes a record of it, and is listed by kind, node and step output.
+# The failure-path tests drive scripted nodes whose reads can change between
+# the owned pre-flight and the node's own read: each failed verb is named with
+# its fault domain, ownership that changes mid-run stops the verb, a
+# converging phase is refused, and the owned destroy reads only its targets.
+# The descriptor tests pin the read and delete envelopes (a not-found is
+# absent, anything else propagates) and every forward; the value-type tests
+# pin the graph's refusals, the Kahn primitive, labels and trait defaults.
 mojo_library(
     name = "kci_reconciler",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -29,8 +36,12 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_deploy_fault_marks.mojo",
+        "tests/test_described_resource_envelopes.mojo",
+        "tests/test_engine_apply_failure_paths.mojo",
+        "tests/test_engine_destroy_and_plan_paths.mojo",
         "tests/test_erased_resource_public_api.mojo",
         "tests/test_fault_domain_defaults_to_ours.mojo",
+        "tests/test_graph_and_value_types.mojo",
         "tests/test_ownership_and_cell_keys.mojo",
         "tests/test_resource_graph_engine.mojo",
         "tests/test_resource_outputs.mojo",

@@ -95,3 +95,24 @@ assert_equal(w0.buckets[1], 1)
 assert_equal(w0.buckets[histogram_bucket_index(40)], 1)  # 40 <= 50
 assert_equal(w0.buckets[HISTOGRAM_BOUNDS], 1)  # +Inf
 ```
+
+EXPLAIN ANALYZE collection is armed around one query; the armed flag lives
+in this package's C (`native/komira_metrics_ea_flag.c`), so this example
+calls the package's shared library when it runs from an installed package:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true, assert_false -->
+```mojo
+from komira_metrics.explain_analyze_collect import EA_F_CALLS, EA_F_ROWS, EA_SORT
+from komira_metrics.explain_analyze_collect import ea_arm, ea_armed, ea_disarm, ea_record, ea_reset, ea_slot
+
+ea_reset()
+assert_false(ea_armed())
+ea_arm()
+assert_true(ea_armed())
+if ea_armed():  # every recording site checks the flag first
+    ea_record(EA_SORT, rows=10, elapsed_ns=1_000)
+ea_disarm()
+assert_false(ea_armed())
+assert_equal(ea_slot(EA_SORT, EA_F_CALLS), 1)
+assert_equal(ea_slot(EA_SORT, EA_F_ROWS), 10)
+```

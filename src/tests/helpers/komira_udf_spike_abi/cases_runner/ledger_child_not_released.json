@@ -1,0 +1,12 @@
+{
+ "name": "ledger_child_not_released",
+ "defect": "a deliberate mismatch: the runner must fail this case",
+ "run": "call_batch",
+ "entry": "child_moved_out_leaked",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 1, "columns": [{"type": "int64", "values": [1]}]},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [1]}},
+ "runner_fails_with": "1 child arrays exported to the runtime, 0 released"
+}
