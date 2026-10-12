@@ -16,7 +16,11 @@
 #       README run's environment carries LD_DEBUG and LD_DEBUG_OUTPUT and no
 #       LD_LIBRARY_PATH; the load program is `load_program_text` of the
 #       installed .so; the openssl environment's manifest requires
-#       `openssl 3.*` from conda-forge;
+#       `openssl 3.*` from conda-forge; the whole set's and the openssl
+#       environment's manifests declare `[system-requirements] libc` at
+#       kci_release_set's glibc floor for linux-64 (without it pixi assumes
+#       glibc 2.28 and no `__glibc >=2.34` package resolves). Mutant: the
+#       `[system-requirements]` block dropped from `install_manifest_text`;
 #   (b) row 4 red: a planted .so with an unresolved symbol, which the load
 #       program reports as `FAILED <path>: ... undefined symbol: ...`: the
 #       `load` row fails naming the .so and the symbol, and only it.
@@ -60,6 +64,7 @@ from kci_publish import NoWaitSleeper
 from kci_publish.release_fixture import ExampleRelease, write_example_inputs, write_text_file
 from kci_release_machine import StageValidation
 from kci_release_set.conda_metadata import LibFile
+from kci_release_set.glibc_floor import glibc_floor_of
 from kci_release_set.member import file_sha256_hex
 from komira_runtime_paths import data_path
 from kci_validate import (
@@ -501,6 +506,16 @@ def test_every_native_row_runs_and_passes() raises:
     # program opens the owner, then the system libssl, both RTLD_GLOBAL
     var manifest = open(fx.openssl_work() + String("/pixi.toml"), "r").read()
     assert_true(manifest.find(String('openssl = { version = "3.*", channel = "conda-forge" }')) >= 0, manifest)
+    # komira_alpha requires `__glibc >=2.34`: every environment pixi solves
+    # declares the platform's glibc floor, or pixi assumes its own default
+    # (2.28 on linux-64) and finds no candidate (kci run 38273977963)
+    var floor = glibc_floor_of(String("linux-64"))
+    assert_true(floor.byte_length() > 0)
+    assert_equal(String("__glibc >=") + floor, String("__glibc >=2.34"))
+    var want = String('\n[system-requirements]\nlibc = { family = "glibc", version = "') + floor + String('" }\n')
+    var whole = open(fx.work() + String("/pixi.toml"), "r").read()
+    assert_true(whole.find(want) >= 0, whole)
+    assert_true(manifest.find(want) >= 0, manifest)
     var ossl = open(fx.openssl_work() + String("/openssl_1.mojo"), "r").read()
     assert_true(ossl.find(String("RTLD.NOW | RTLD.GLOBAL")) >= 0, ossl)
     assert_true(ossl.find(fx.openssl_work() + String("/") + String(ENV) + String("/lib/libssl.so.3")) >= 0, ossl)
@@ -703,6 +718,13 @@ def test_a_native_member_of_a_set_is_checked_alone() raises:
     var manifest = open(awork + String("/pixi.toml"), "r").read()
     assert_true(manifest.find(String("komira_alpha = {")) >= 0, manifest)
     assert_true(manifest.find(String("komira = {")) < 0, manifest)
+    assert_true(
+        manifest.find(
+            String('\n[system-requirements]\nlibc = { family = "glibc", version = "')
+            + glibc_floor_of(String("linux-64")) + String('" }\n')
+        ) >= 0,
+        manifest,
+    )
     assert_true(_env_has(p.inner.calls[1], String("PIXI_CACHE_DIR=") + work + String("/cache")))
     assert_true(_env_has(p.inner.calls[3], String("LD_DEBUG_OUTPUT=") + awork + String("/out/readme_komira_alpha.ld")))
 
