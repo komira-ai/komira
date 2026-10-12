@@ -37,7 +37,6 @@ from komira_async.reactor.completion_queue import (
 )
 from komira_async.reactor.reactor import Reactor
 from komira_async.reactor.socket_io import (
-    try_io_read,
     try_io_write,
 )
 from komira_async.ops.waker_sink import NoopSink
@@ -75,7 +74,9 @@ from komira_http_server.connection import (
     CONN_STATE_WAITING_FOR_WRITABLE,
     ConnEntry,
     REQ_BUF_BYTES,
+    HEAD_READ_BLOCKED,
     RESP_BUF_CAP,
+    read_after_head_carry,
 )
 
 
@@ -303,6 +304,25 @@ def _park_behind(mut entry: ConnEntry, src: List[UInt8]):
     entry._pending_len = entry._pending_len + len(src)
 
 
+comptime HEAD_KEPT: Int = 2
+"""`carry_or_refuse_head`: the partial head is kept; read again."""
+
+
+def carry_or_refuse_head(
+    mut entry: ConnEntry, part: Span[UInt8, _], mut bytes_sent: Int64
+) -> Int:
+    """The parser needs more bytes than `part`, the received start of a
+    request head: keep it on the entry for the next read (`HEAD_KEPT`). A
+    head that already fills the receive buffer cannot complete; it is
+    answered 431 and the result of that write is returned (0, 1 or -1, as
+    `_write_all_or_buffer`)."""
+    if entry.carry_head(part):
+        return HEAD_KEPT
+    var err_buf = List[UInt8]()
+    build_error_response_bytes(UInt16(431), err_buf)
+    return _write_all_or_buffer(entry, err_buf, bytes_sent)
+
+
 # =============================================================================
 # §5 — Drain a read-ready conn (recv → parse → write response/error).
 # =============================================================================
@@ -326,8 +346,9 @@ def serve_read_round(
          the recv buffer.
          a. Parse error → write static error response (status from the
             ParseError) and close the conn. NO client bytes leak.
-         b. Need-more (partial-headers) → for now we drop the conn (no
-            multi-recv buffering on this path).
+         b. Need-more (the head's end has not arrived) → keep the head's
+            start on the entry and read again; the next read lands after
+            it. A head that fills the receive buffer is answered 431.
          c. Expect: 100-continue → write the interim "HTTP/1.1 100 Continue"
             then continue to the canned 200 response.
          d. Success → write the canned 200 response (real handler
@@ -344,20 +365,14 @@ def serve_read_round(
     `CONN_STATE_WAITING_FOR_WRITABLE`. The CALLER then issues
     `reactor.modify(entry.registration(), INTEREST_WRITE)`.
     """
-    var fd = entry._fd
     var keep_alive = True
 
     while keep_alive:
-        var read_span = Span[UInt8](io_buf)
-        var rr = try_io_read(fd, read_span)
-        if rr.is_would_block():
+        var got = read_after_head_carry(entry, io_buf)
+        if got == HEAD_READ_BLOCKED:
             break
-        if rr.is_error():
-            keep_alive = False
-            break
-        var got = Int(rr.value())
         if got <= 0:
-            # Peer closed cleanly (read returned 0).
+            # Peer closed cleanly (read returned 0), or the read failed.
             keep_alive = False
             break
 
@@ -368,10 +383,13 @@ def serve_read_round(
             var outcome = parse_request_head(parse_span, limits)
 
             if outcome.err.is_need_more():
-                # Partial request: This version doesn't yet buffer across recvs.
-                # Drop the conn to keep the design surgical; multi-recv
-                # streaming is not on this path.
-                keep_alive = False
+                # The head's end has not arrived: keep its start and read on.
+                var hk = carry_or_refuse_head(
+                    entry, Span[UInt8](io_buf)[off:got], bytes_sent
+                )
+                if hk == 1:
+                    return True
+                keep_alive = hk == HEAD_KEPT
                 break
 
             if not outcome.err.is_ok():
@@ -489,18 +507,12 @@ def serve_read_round_chained(
       * True  — conn remains in the table (alive)
       * False — caller should drop the conn
     """
-    var fd = entry._fd
     var keep_alive = True
 
     while keep_alive:
-        var read_span = Span[UInt8](io_buf)
-        var rr = try_io_read(fd, read_span)
-        if rr.is_would_block():
+        var got = read_after_head_carry(entry, io_buf)
+        if got == HEAD_READ_BLOCKED:
             break
-        if rr.is_error():
-            keep_alive = False
-            break
-        var got = Int(rr.value())
         if got <= 0:
             keep_alive = False
             break
@@ -511,7 +523,12 @@ def serve_read_round_chained(
             var outcome = parse_request_head(parse_span, limits)
 
             if outcome.err.is_need_more():
-                keep_alive = False
+                var hk = carry_or_refuse_head(
+                    entry, Span[UInt8](io_buf)[off:got], bytes_sent
+                )
+                if hk == 1:
+                    return True
+                keep_alive = hk == HEAD_KEPT
                 break
 
             if not outcome.err.is_ok():
@@ -761,15 +778,16 @@ def serve_read_round_tls(
     var keep_alive = True
 
     while keep_alive:
-        # Reserve buf capacity then call read_app.
+        # Reserve buf capacity then call read_app. The decrypted bytes land
+        # after the head carried from earlier reads.
+        var carried = entry.restore_head_carry(io_buf)
+        var room = REQ_BUF_BYTES - carried
         var rd_buf = List[UInt8]()
-        rd_buf.reserve(REQ_BUF_BYTES)
-        rd_buf.resize(unsafe_uninit_length=REQ_BUF_BYTES)
+        rd_buf.reserve(room)
+        rd_buf.resize(unsafe_uninit_length=room)
         # The recv() helper writes into the List's backing storage and
         # resizes the List to the actual byte count.
-        var read_outcome_and_n = tls_opt.value().read_app(
-            rd_buf, REQ_BUF_BYTES,
-        )
+        var read_outcome_and_n = tls_opt.value().read_app(rd_buf, room)
         var read_outcome = read_outcome_and_n[0]
         var got = read_outcome_and_n[1]
         if read_outcome == TLS_OUTCOME_BLOCKED_ON_READ:
@@ -788,12 +806,14 @@ def serve_read_round_tls(
         # Copy the decrypted bytes into the io_buf scratch (the parser
         # consumes an InlineArray-backed Span).
         var copy_n = got
-        if copy_n > REQ_BUF_BYTES:
-            copy_n = REQ_BUF_BYTES
+        if copy_n > room:
+            copy_n = room
         var cc = 0
         while cc < copy_n:
-            io_buf[cc] = rd_buf[cc]
+            io_buf[carried + cc] = rd_buf[cc]
             cc = cc + 1
+        copy_n = carried + copy_n
+        entry.clear_head_carry()
 
         # Now run the same parse-then-dispatch loop as the plaintext path.
         var off = 0
@@ -802,6 +822,11 @@ def serve_read_round_tls(
             var outcome = parse_request_head(parse_span, limits)
 
             if outcome.err.is_need_more():
+                if entry.carry_head(Span[UInt8](io_buf)[off:copy_n]):
+                    break
+                var big_buf = List[UInt8]()
+                build_error_response_bytes(UInt16(431), big_buf)
+                _ = _tls_write_all(entry, big_buf, bytes_sent)
                 keep_alive = False
                 break
 
