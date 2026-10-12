@@ -914,8 +914,8 @@ def _encode_value(v: DbValue) -> FsValue:
     if lt == LOGICAL_TEXT_ARRAY:
         # arrayValue — a NATIVE Firestore array of stringValues (NOT the pg `{a,b,c}`
         # text literal). This is what makes the server-side `ARRAY_CONTAINS`
-        # fieldFilter work (e.g. a tag filter on `tags`). `_decode_field` reconstructs the `{a,b,c}` literal so the
-        # SQL round-trip (`DbRow.get_text_array` parses `{a,b,c}`) is UNCHANGED.
+        # fieldFilter work (e.g. a tag filter on `tags`). `_decode_field` reconstructs the array literal, so
+        # `DbRow.get_text_array` reads back the same elements.
         var elems = v.text_array_elements()
         var items = List[FsValue]()
         for i in range(len(elems)):
@@ -965,11 +965,11 @@ def _decode_field(doc: FirestoreDocument, col: String) raises -> DbValue:
         # exactly — the inverse of `_encode_value`'s bytesValue arm.
         return DbValue.bytes_list(base64_decode(fv.as_string()))
     if fv.type_tag == FS_T_ARRAY:
-        # arrayValue -> RECONSTRUCT the pg `{a,b,c}` text literal from the native
-        # array's stringValue items, so `DbRow.get_text_array` (which parses
-        # `{a,b,c}`) round-trips EXACTLY. The inverse of `_encode_value`'s
-        # LOGICAL_TEXT_ARRAY arm. A non-string item is read via `as_string()`
-        # (the closed-set contract: simple labels / hyphenated UUIDs).
+        # arrayValue -> RECONSTRUCT the TEXT[] array literal (`DbValue.text_array`
+        # quotes each element as needed) from the native array's stringValue
+        # items, so `DbRow.get_text_array` round-trips EXACTLY. The inverse of
+        # `_encode_value`'s LOGICAL_TEXT_ARRAY arm. A non-string item is read via
+        # `as_string()`.
         var elems = List[String]()
         for i in range(len(fv.list_items)):
             elems.append(fv.list_items[i].as_string())

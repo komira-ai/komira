@@ -36,6 +36,7 @@ from komira_db.db_value import (
     LOGICAL_JSONB,
     LOGICAL_TEXT_ARRAY,
     logical_type_name,
+    parse_text_array_literal,
 )
 from komira_db.timestamptz import Timestamptz
 
@@ -175,7 +176,7 @@ struct DbRow(Movable, Copyable):
         return _parse_i64(self._col_text(col))
 
     def get_text_array(self, col: Int) raises -> List[String]:
-        return _parse_array_literal(self._col_text(col))
+        return parse_text_array_literal(self._col_text(col))
 
     def get_bytes(self, col: Int) raises -> List[UInt8]:
         """The RAW bytes of a binary/blob (LOGICAL_BYTES) column — the inverse of
@@ -345,35 +346,3 @@ def _parse_uuid_text(s: String) raises -> Array[UInt8, 16]:
     if i < n:
         raise Error("DbRow: UUID text continues past 16 bytes")
     return out^
-
-
-def _parse_array_literal(lit: String) -> List[String]:
-    var out = List[String]()
-    var b = lit.as_bytes()
-    var n = len(b)
-    var i = 0
-    if i < n and b[i] == UInt8(ord("{")):
-        i += 1
-    var cur = List[UInt8]()
-    var any = False
-    while i < n:
-        var c = b[i]
-        if c == UInt8(ord("}")):
-            break
-        if c == UInt8(ord(",")):
-            out.append(_owned_utf8(cur))
-            cur = List[UInt8]()
-            any = True
-        else:
-            cur.append(c)
-            any = True
-        i += 1
-    if any or len(cur) > 0:
-        out.append(_owned_utf8(cur))
-    return out^
-
-
-def _owned_utf8(b: List[UInt8]) -> String:
-    # Verbatim raw-UTF-8 -> owned String (copies the bytes). NOT chr()-per-byte:
-    # chr(byte>=0x80) double-encodes (the double-UTF-8 mojibake class).
-    return String(StringSlice(unsafe_from_utf8=Span(b)))

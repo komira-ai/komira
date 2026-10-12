@@ -26,6 +26,7 @@
 # doubly-nested container never exists on the row path. See the PgRow banner.
 # =============================================================================
 
+from komira_db.db_value import parse_text_array_literal, text_array_literal
 from komira_db_postgres.wire.pgwire import (
     ColumnDesc,
     BackendMessage,
@@ -188,16 +189,11 @@ struct PgValue(Movable, Copyable):
 
     @staticmethod
     def text_array(elements: List[String]) -> PgValue:
-        # TEXT[] (OID 1009). Carrier is the pg array literal {a,b,c}; the
-        # binary form re-parses this literal in binary_body(). Elements must
-        # not contain ',' or '}' (simple labels / tags).
-        var lit = String("{")
-        for i in range(len(elements)):
-            if i > 0:
-                lit += ","
-            lit += elements[i]
-        lit += "}"
-        return PgValue(OID_TEXT_ARRAY, False, lit^)
+        # TEXT[] (OID 1009). Carrier is the pg array literal, elements quoted
+        # as pg's array_out quotes them (komira_db `text_array_literal`); the
+        # binary form re-parses this literal in binary_body(), so every String
+        # element round-trips.
+        return PgValue(OID_TEXT_ARRAY, False, text_array_literal(elements))
 
     @staticmethod
     def null(oid: UInt32) -> PgValue:
@@ -237,7 +233,7 @@ def pg_param_binary(oid: UInt32, text: String) raises -> List[UInt8]:
     elif oid == OID_JSONB:
         return encode_jsonb_binary(text)
     elif oid == OID_TEXT_ARRAY:
-        return encode_text_array_binary(_parse_array_literal(text))
+        return encode_text_array_binary(parse_text_array_literal(text))
     elif oid == OID_BYTEA:
         # bytea BINARY value body = the raw bytes with NO header. The `text`
         # carrier holds them verbatim (String is byte-backed), so the body is
@@ -252,37 +248,6 @@ def pg_param_binary(oid: UInt32, text: String) raises -> List[UInt8]:
 # =============================================================================
 def _bytes_to_string(b: List[UInt8]) -> String:
     return owned_utf8_string(b)
-
-
-def _parse_array_literal(lit: String) -> List[String]:
-    """Parse a simple pg text array literal `{a,b,c}` into its elements. The
-    closed-set contract is simple text labels (no embedded ',' / '}' / quoting
-    — simple labels). Used by PgValue.binary_body for TEXT[]."""
-    var out = List[String]()
-    var b = lit.as_bytes()
-    var n = len(b)
-    var i = 0
-    # Skip a leading '{'.
-    if i < n and b[i] == UInt8(ord("{")):
-        i += 1
-    var cur = List[UInt8]()
-    var any = False
-    while i < n:
-        var c = b[i]
-        if c == UInt8(ord("}")):
-            break
-        if c == UInt8(ord(",")):
-            out.append(owned_utf8_string(cur))
-            cur = List[UInt8]()
-            any = True
-        else:
-            cur.append(c)
-            any = True
-        i += 1
-    # Flush the last element (only if the array was non-empty).
-    if any or len(cur) > 0:
-        out.append(owned_utf8_string(cur))
-    return out^
 
 
 def _parse_int64_text(s: String) raises -> Int64:
