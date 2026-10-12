@@ -56,10 +56,14 @@ MojoToolchainInfo = provider(fields = {
     # Directory: the unpacked compiler closure (bin/mojo, lib/, share/max,
     # CLOSURE_MANIFEST).
     "compiler": provider_field(typing.Any),
-    # Directory: what the compile's link step runs. On linux, the unpacked
-    # zig distribution (the C link driver); on macOS, a `mojo_darwin_link`
-    # (the cc shim and the host identity the execution platform promises).
+    # Directory: what the compile's link step runs, on linux: the unpacked
+    # zig distribution (the C link driver). None on macOS, where the wrapper's
+    # own `cc` mode runs the host's /usr/bin/cc.
     "link": provider_field(typing.Any),
+    # macOS only: the host identities a compile may run on (`[komira_re]
+    # darwin_macos_hosts`), each passed as `--macos-host=`; the wrapper
+    # refuses any other host. Empty on linux.
+    "macos_hosts": provider_field(typing.Any, default = []),
     # The link target: a zig -target triple on linux, the deployment target
     # (MACOSX_DEPLOYMENT_TARGET) on macOS.
     "cc_target": provider_field(str),
@@ -68,8 +72,8 @@ MojoToolchainInfo = provider(fields = {
     # action key.
     "target_cpu": provider_field(str),
     # The compile wrapper every Mojo compile runs through (defs.bzl,
-    # mojo_compile_cmd): on Linux the mojo_compile executable
-    # (tools/mojo_compile.zig), on macOS darwin/mojo_wrapper.sh.
+    # mojo_compile_cmd): the mojo_compile executable, tools/mojo_compile.zig
+    # on Linux, tools/mojo_compile_macos.zig on macOS.
     "wrapper": provider_field(typing.Any),
     # The compile watchdog of the wrapper: kill a compile
     # whose process tree used no CPU for this long (0: off), sampling every
@@ -77,14 +81,10 @@ MojoToolchainInfo = provider(fields = {
     "watchdog_idle_secs": provider_field(typing.Any, default = None),
     "watchdog_sample_secs": provider_field(typing.Any, default = None),
     # The gate (tools/build/run): `gate mojo` runs every gated test, `gate
-    # step` every mutation step. A static executable of the execution
-    # platform, built by zig_exe behind its unit tests. None in the
-    # darwin-arm64 toolchain, which keeps `gate_runner`.
+    # step` every mutation step. An executable of the execution platform,
+    # built by zig_exe behind its unit tests: run:gate on linux (static),
+    # run:gate_darwin on darwin-arm64 (libSystem, as every macOS program).
     "gate": provider_field(typing.Any, default = None),
-    # darwin-arm64 only: gate_runner.sh behind dyld_prelude.sh, the shell
-    # runner the macOS toolchain keeps until the gate's macOS form is proven
-    # on the macOS workers (test_runtime.bzl, gate_mojo). None on linux.
-    "gate_runner": provider_field(typing.Any, default = None),
     "run_check": provider_field(typing.Any),
     "launcher": provider_field(typing.Any),
     # Directory: only the shared libraries a built binary loads (a
