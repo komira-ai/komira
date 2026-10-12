@@ -36,6 +36,7 @@ from komira_db.db_value import (
     LOGICAL_JSONB,
     LOGICAL_TEXT_ARRAY,
     logical_type_name,
+    parse_text_array_literal,
 )
 from komira_db.timestamptz import Timestamptz
 
@@ -157,7 +158,7 @@ struct DbRow(Movable, Copyable):
         return self._col_text(col)
 
     def get_int4(self, col: Int) raises -> Int32:
-        return Int32(_parse_i64(self._col_text(col)))
+        return _parse_i32(self._col_text(col))
 
     def get_int8(self, col: Int) raises -> Int64:
         return _parse_i64(self._col_text(col))
@@ -175,7 +176,7 @@ struct DbRow(Movable, Copyable):
         return _parse_i64(self._col_text(col))
 
     def get_text_array(self, col: Int) raises -> List[String]:
-        return _parse_array_literal(self._col_text(col))
+        return parse_text_array_literal(self._col_text(col))
 
     def get_bytes(self, col: Int) raises -> List[UInt8]:
         """The RAW bytes of a binary/blob (LOGICAL_BYTES) column — the inverse of
@@ -265,6 +266,9 @@ struct DbRows(Movable):
 # Local decode helpers (self-contained — no cross-pkg pointer flow).
 # =============================================================================
 def _parse_i64(s: String) raises -> Int64:
+    """Signed decimal text -> Int64. Refuses empty text, a sign with no digits,
+    a non-digit byte, and a value outside [Int64.MIN, Int64.MAX] (the
+    accumulator is checked before each step, so nothing wraps)."""
     var b = s.as_bytes()
     var n = len(b)
     if n == 0:
@@ -276,18 +280,36 @@ def _parse_i64(s: String) raises -> Int64:
         i = 1
     elif b[0] == UInt8(ord("+")):
         i = 1
-    var acc: Int64 = 0
+    # The magnitude is accumulated unsigned: |Int64.MIN| = 2^63 = Int64.MAX + 1.
+    var limit = UInt64(Int64.MAX) + (UInt64(1) if neg else UInt64(0))
+    var acc: UInt64 = 0
     var any = False
     while i < n:
         var c = b[i]
         if c < UInt8(ord("0")) or c > UInt8(ord("9")):
             raise Error("DbRow: non-numeric byte in integer text")
-        acc = acc * Int64(10) + Int64(Int(c) - ord("0"))
+        var d = UInt64(Int(c) - ord("0"))
+        if acc > (limit - d) // UInt64(10):
+            raise Error("DbRow: integer text out of Int64 range")
+        acc = acc * UInt64(10) + d
         any = True
         i += 1
     if not any:
         raise Error("DbRow: integer text had no digits")
-    return -acc if neg else acc
+    if not neg:
+        return Int64(acc)
+    if acc == limit:
+        return Int64.MIN
+    return -Int64(acc)
+
+
+def _parse_i32(s: String) raises -> Int32:
+    """Signed decimal text -> Int32: `_parse_i64`, then refused outside
+    [Int32.MIN, Int32.MAX] rather than narrowed."""
+    var v = _parse_i64(s)
+    if v < Int64(Int32.MIN) or v > Int64(Int32.MAX):
+        raise Error("DbRow: integer text out of Int32 range")
+    return Int32(v)
 
 
 def _hex_nibble(c: UInt8) raises -> UInt8:
@@ -319,36 +341,8 @@ def _parse_uuid_text(s: String) raises -> Array[UInt8, 16]:
         i += 2
     if oi != 16:
         raise Error("DbRow: UUID did not yield 16 bytes")
+    # The loop stops at the 16th byte; anything after it (more hex, a hyphen)
+    # is refused, not dropped.
+    if i < n:
+        raise Error("DbRow: UUID text continues past 16 bytes")
     return out^
-
-
-def _parse_array_literal(lit: String) -> List[String]:
-    var out = List[String]()
-    var b = lit.as_bytes()
-    var n = len(b)
-    var i = 0
-    if i < n and b[i] == UInt8(ord("{")):
-        i += 1
-    var cur = List[UInt8]()
-    var any = False
-    while i < n:
-        var c = b[i]
-        if c == UInt8(ord("}")):
-            break
-        if c == UInt8(ord(",")):
-            out.append(_owned_utf8(cur))
-            cur = List[UInt8]()
-            any = True
-        else:
-            cur.append(c)
-            any = True
-        i += 1
-    if any or len(cur) > 0:
-        out.append(_owned_utf8(cur))
-    return out^
-
-
-def _owned_utf8(b: List[UInt8]) -> String:
-    # Verbatim raw-UTF-8 -> owned String (copies the bytes). NOT chr()-per-byte:
-    # chr(byte>=0x80) double-encodes (the double-UTF-8 mojibake class).
-    return String(StringSlice(unsafe_from_utf8=Span(b)))
