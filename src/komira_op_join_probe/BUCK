@@ -4,8 +4,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # (`MultiKeyHashJoinBuilder`, its INNER / LEFT / SEMI / ANTI / RIGHT / FULL
 # probes, its parallel build and parallel INNER probe over the engine's
 # dispatcher), the extraction of join-key columns into its key slots, the
-# composite join probe operator, and the deferred-output records of the
-# streaming join probe with their deferral rule.
+# composite join probe operator, the deferred-output records of the
+# streaming join probe with their deferral rule and lever witnesses, the
+# radix-partitioned single-key hash join, and the SEMI / ANTI key set.
 mojo_library(
     name = "komira_op_join_probe",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -40,10 +41,14 @@ mojo_library(
         "tests/test_join_multikey_batched_probe_equiv.mojo",
         "tests/test_join_multikey_entry_space_equiv.mojo",
         "tests/test_join_multikey_parallel_build.mojo",
+        "tests/test_join_probe_levers_counters.mojo",
         "tests/test_join_probe_multi_key_op.mojo",
         "tests/test_multi_key_merge_parallel.mojo",
         "tests/test_multi_key_parallel_probe.mojo",
         "tests/test_multi_key_skipindex_compaction.mojo",
+        "tests/test_radix_join.mojo",
+        "tests/test_semi_join_int64_min_key.mojo",
+        "tests/test_semi_salted_count_parallel_byte_equiv.mojo",
     ],
     visibility = ["PUBLIC"],
 )
