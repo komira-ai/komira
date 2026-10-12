@@ -1,0 +1,7 @@
+affected: WARN no target owns (inert): docs/1.md
+affected: WARN no target owns (inert): docs/2.md
+affected: WARN no target owns (inert): docs/3.md
+affected: WARN no target owns (inert): docs/4.md
+affected: WARN no target owns (inert): docs/5.md
+affected: WARN no target owns (inert): docs/6.md
+affected: VACUOUS: 0 target(s) from 6 file(s), 0 seed(s), #.###s -- the 6 changed file(s) reach no target: docs/1.md, docs/2.md, docs/3.md, docs/4.md, docs/5.md ...

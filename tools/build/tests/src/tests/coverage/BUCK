@@ -1,3 +1,4 @@
+load("@komira//tools/build/lint:defs.bzl", "target_suite")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load("//functional/coverage:defs.bzl", "cov_report_check")
 
@@ -40,4 +41,15 @@ cov_report_check(
     mode = "result",
     reports = [":covinfo[coverage][gate][result]"],
     script = "//functional/coverage:report.sh",
+)
+
+# covinfo's gate and its result must build: komira//:tests_greens names
+# this target, so the pull-request check builds them.
+target_suite(
+    name = "greens",
+    targets = [
+        ":covinfo[coverage][gate]",
+        ":covinfo_result",
+    ],
+    visibility = ["komira//:tests_greens"],
 )

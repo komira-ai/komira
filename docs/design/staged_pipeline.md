@@ -36,7 +36,7 @@ implements them. Continuous publish links here; it does not define them again.
 | **single flight** | One run at a time per release job: a job-level group `kci-<job id>-main`, one job running and at most one pending, `cancel-in-progress: false`. |
 | **latest wins, superseded** | A newer arrival replaces the pending job; a revision older than what a stage (or a later one) already holds stops as `SUPERSEDED` (exit 0) and never runs on its own. |
 | **never backward** | A stage refuses to act on a revision older than the newest main-line build its own channel holds (beta, prod); gamma, which has no channel, reads prod's (c). |
-| **break-glass** | A manual run. It reaches **beta only**, from the environment `beta-breakglass`; never gamma, never prod. |
+| **break-glass** | A manual run. As designed it reached **beta only**, from the environment `beta-breakglass`; as chosen in M2 it builds and publishes nothing (e3, "M1 and M2 as chosen"). Never gamma, never prod. |
 | **main red** | A push run of `kci.yml` on `main` that ends red at any stage. `release/ci/main_red.py` opens an issue; the rule is fix forward or revert within the hour ([ci.md](../ci.md)). |
 
 **Stage → jobs → channels → credentials.**
@@ -44,7 +44,7 @@ implements them. Continuous publish links here; it does not define them again.
 | stage | job | runs on | environment | identity token, trusted by | channel |
 |---|---|---|---|---|---|
 | beta | `build` (machine stage `build`: BUILD, then `TEST`) | farm | `build` | the farm's token, trusted by the farm only | none |
-| beta | `beta` (PUBLISH) | hosted | `beta` on a push; `beta-breakglass` on a manual run | OIDC, trusted by the beta channel's publisher only | writes `beta` |
+| beta | `beta` (PUBLISH) | hosted | `beta` on a push (designed: `beta-breakglass` on a manual run; as chosen, a manual run never reaches beta) | OIDC, trusted by the beta channel's publisher only | writes `beta` |
 | beta | `beta_validate` (the installs) | hosted | none | none (`contents: read`) | reads `beta`, anonymously |
 | gamma | `gamma` (DEPLOY once built, then `real-cloud`) | hosted | `gamma`, push only | OIDC, trusted by the gamma accounts' roles only; the role and region as `gamma` secrets | reads `prod`'s listing, anonymously; writes none |
 | prod | `prod` (PUBLISH) | hosted | `prod` | OIDC, trusted by the prod channel's publisher only | writes `prod` |
@@ -77,10 +77,10 @@ its own for the same reason: prod's publish job holds the prod channel's identit
 trusts it. The rename of the channel itself is a migration with the project owner's go at each step
 (e3).
 
-**Today (EXISTS).** One run per push carries `build → gamma → validate → prod`
-(`.github/workflows/kci.yml`); `gamma` publishes to the conda channel `gamma` and `validate` installs
-from it. That is, in this doc's words, **beta under its old name**: today there is no gamma stage in
-the new sense. The **workflow-level** group `kci-release-main` serialises whole runs: the newest
+**Today (EXISTS).** One run per push carries `build → beta → beta_validate → prod`
+(`.github/workflows/kci.yml`); `beta` publishes to the conda channel `beta` and `beta_validate`
+installs from it. Before M2 these were the jobs `gamma` and `validate` and the channel `gamma`
+(beta under its old name); there is no gamma stage in the new sense yet. The **workflow-level** group `kci-release-main` serialises whole runs: the newest
 pending *run* waits for the previous run to finish **prod**. Rule R16 of `src/kci_workflow_check`
 requires that group and refuses a job-level `concurrency:`, for a reason this doc must answer
 (`auto_promotion.mojo`, R16): "a job-level group's pending replacement could drop a prod job". Rules 1
@@ -293,7 +293,7 @@ attempt 1's `build` succeeded and `gamma` was cancelled: exactly one call, to
 **On the farm (the `build` job, machine stage `build`):** after the BUILD step, a `TEST` step `test`
 runs two commands over `checks` and the derived set: **`buck2 build <targets>`, then `buck2 test
 <targets>`**, the order the PR check uses (ci.md), the second only if the first passed. The targets
-are **#1168 S10c's derived release checks** (every standalone check `release/ci/derive_checks.py`
+are **#1168 S10c's derived release checks** (every standalone check `//tools/build/ci:derive_checks`
 derives whose targets depend on a declared library: the fake, emulator and fixture tiers, plus every
 `release_checks` target) and the patterns in `checks`. The e2e suite, `//src/tests/e2e/...`, joins
 `checks` **once the engine port lands**; until then `checks` is empty and the derived set alone runs.
@@ -334,12 +334,12 @@ withdrawn and the claim narrows to "the checks passed on this revision's source;
 checked the built bytes", which returns to the project owner.
 
 **Publish (the `beta` job, hosted, environment `beta`):** `kci run --stage beta`'s PUBLISH step, to
-the beta channel, exactly as today's `gamma` job publishes to the channel `gamma` (EXISTS under the
-old name). Its token is trusted by the beta channel's publisher and by nothing else (section e3).
+the beta channel (EXISTS since M2; before it the `gamma` job published the same way to the channel
+`gamma`). Its token is trusted by the beta channel's publisher and by nothing else (section e3).
 
 **Installs (`beta_validate`, hosted, no environment, no token):** the existing `CONDA_INSTALL_ENV`
 validations install from the beta channel with the pinned pixi and run every installed README, as
-today's `validate` does from the channel `gamma`. An install runs third-party code, so it never sits
+`beta_validate` does today (before M2, `validate` from the channel `gamma`). An install runs third-party code, so it never sits
 beside the publishing token. #1168's S12 installed-bytes checks land here. `beta_validate` outputs
 beta's validated hash.
 
@@ -607,7 +607,8 @@ the environments `build`, `farm`, `farm-pr`, `gamma` and `prod`; `gamma` has no 
 secrets; `gamma-breakglass` and `beta` do not exist; the channels file names `gamma` (trusted
 publishers `environment:gamma` and `environment:gamma-breakglass`) and `prod`.
 
-- **M1, create (go).** On the channel host: a public channel `beta`, with trusted publishers for this
+- **M1, create (go).** (As built, see "M1 and M2 as chosen" below: no `beta-breakglass`, no branch
+  policy on `beta`.) On the channel host: a public channel `beta`, with trusted publishers for this
   repository, `kci.yml` and the environments `beta` and `beta-breakglass`. Two reads are recorded
   here: which subject form the host matches (name or immutable), and a read-back of each publisher
   showing that it pins the repository, the workflow `kci.yml` **and** the environment. A publisher
@@ -617,7 +618,8 @@ publishers `environment:gamma` and `environment:gamma-breakglass`) and `prod`.
   bypass off; **neither holds a secret** (trusted publishing; a settings review, G0, since an
   anonymous read cannot list secrets). Both are locked before anything trusts
   them. Proof: the drift check (G0) reads `beta` and passes; a canned answer with no policy is red.
-- **M2, switch (go: it changes the release).** One PR: `release/channels.textproto` names `beta`
+- **M2, switch (go: it changes the release).** (As built: no break-glass identity or environment;
+  see "M1 and M2 as chosen" below.) One PR: `release/channels.textproto` names `beta`
   (location, `push_identity` and `break_glass_push_identity` **in the form M1 recorded**: the
   immutable form if the host matches it, else the name form today's file uses; environments `beta`
   and `beta-breakglass`) and drops `gamma`; `release/machine.textproto`'s stage `gamma` becomes
@@ -661,7 +663,23 @@ publishers `environment:gamma` and `environment:gamma-breakglass`) and `prod`.
   M3) for a notice period, named in `docs/releases.md`, then deleted with a go; whether the host can
   delete a channel is read first. The environment `gamma-breakglass` is deleted with it.
 
-**Environments and secrets after M4.** `beta` and `beta-breakglass`: no secrets. `gamma`: locked to
+**M1 and M2 as chosen** (the project owner's decision; where the M1 and M2 text above differs, this
+holds). The environment `beta` exists with **no deployment-branch restriction** and no secret, and
+**there is no `beta-breakglass`**: no channel trusts it, the machine file names no
+`break_glass_environment`, and the channels file has no `break_glass_push_identity`. **Break-glass
+does not publish**: `build` is the machine file's only `break_glass` stage, so a manual run builds
+its revision and stops. The main-push guard on `beta` lives in `kci.yml`, not in the environment:
+the `beta` and `beta_validate` jobs' `if:` (R15, which applies because `beta` is not a
+`break_glass` stage), each job's step `only a push to main reaches this job` (R21), and kci's
+`KCI-E-NOT-ON-MAIN`. **Residual:** all three are the copies in the run's own revision, so a manual
+run of a branch whose own `kci.yml` drops the guard (and whose machine file marks `beta`
+`break_glass`, or whose kci skips the check) can still mint a `beta` token and publish to the
+channel `beta`; it cannot reach `prod`, whose environment is locked to `main`. A `main`-only branch
+policy on the environment `beta` would close it; that is the project owner's choice, not taken in
+M2. The rest of this document's `beta-breakglass` (the glossary, the stage table, f's machine file,
+the slice M1) is the design before this choice.
+
+**Environments and secrets after M4.** `beta`: no secrets, and (as chosen) no `beta-breakglass`. `gamma`: locked to
 `main` (G0), no secrets until P9 adds `KCI_GAMMA_AWS_ROLE` and `KCI_GAMMA_AWS_REGION`, trusted by no
 channel. `gamma-breakglass`: created by G0 with a required reviewer (`kci.yml` names it on every
 manual run until M2, and GitHub would otherwise create it unprotected on first use); after M2 no
