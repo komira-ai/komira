@@ -557,11 +557,25 @@ def test_parkable_op_error_is_step_error_and_cache_untouched() raises:
     print("  test_parkable_op_error_is_step_error_and_cache_untouched: PASS")
 
 
+def _prior_two_nodes_body() raises -> List[UInt8]:
+    """A stored assignment over nodes {1, 9}, P = 6: every pid at generation
+    1. Reassigning to {1} keeps node 1's pids at generation 1 and bumps the
+    pids that move from node 9 to generation 2."""
+    var ids = List[String]()
+    ids.append(String("1"))
+    ids.append(String("9"))
+    return assign_partitions(
+        ids^, 6, Optional[Assignment](), REBALANCE_INITIAL
+    ).encode_binary()
+
+
 def test_parkable_one_burst_traces_and_fills_cache() raises:
     var reactor = _new_reactor()
     var cache = ArcPointer[_CoalesceCacheState](_CoalesceCacheState())
+    var data = SharedInMemoryConditionalStore()
+    _ = data.put(Path.parse(String(_KEY)), _prior_two_nodes_body())
     var sm = _SM.parkable(
-        _op(SharedInMemoryConditionalStore(), SharedInMemoryConditionalStore()),
+        _op(data, SharedInMemoryConditionalStore()),
         String("1"),
         _endpoints(),
         cache.copy(),
@@ -596,7 +610,36 @@ def test_parkable_one_burst_traces_and_fills_cache() raises:
     assert_equal(m.nodes[0].host, String("broker-1.example.test"), "host")
     assert_equal(m.nodes[0].port, UInt32(9001), "port")
     assert_equal(len(m.leaders), 6, "a leader per partition")
-    assert_equal(m.leaders[5].leader_node_id, Int32(1), "leader parsed")
+    for i in range(6):
+        assert_equal(
+            m.leaders[i].partition_id, UInt32(i), "leader " + String(i) + " pid"
+        )
+        assert_equal(m.leaders[i].leader_node_id, Int32(1), "leader parsed")
+    # ClusterConfig: P = 6 over one live node (a swap of the two reads 1, 6).
+    assert_equal(resp.cluster.value().total_partitions, UInt32(6), "P")
+    assert_equal(resp.cluster.value().node_count, UInt32(1), "one node")
+    # The lease generations, one per assigned pid, as persisted: node 1's
+    # kept pids stay at 1, the pids it took over from node 9 move to 2.
+    var stored = _stored(data)
+    assert_equal(
+        len(resp.assigned_generations), len(resp.assigned_partitions), "gens"
+    )
+    var kept = 0
+    var moved = 0
+    for i in range(len(resp.assigned_partitions)):
+        var pid = Int(resp.assigned_partitions[i])
+        assert_equal(pid, i, "assigned pids ascend")
+        assert_equal(
+            resp.assigned_generations[i],
+            stored.generation_of(pid),
+            "generation of pid " + String(pid),
+        )
+        if resp.assigned_generations[i] == Int64(1):
+            kept += 1
+        elif resp.assigned_generations[i] == Int64(2):
+            moved += 1
+    assert_equal(kept, 3, "node 1 kept three pids at generation 1")
+    assert_equal(moved, 3, "three pids moved from node 9 to generation 2")
     print("  test_parkable_one_burst_traces_and_fills_cache: PASS")
 
 

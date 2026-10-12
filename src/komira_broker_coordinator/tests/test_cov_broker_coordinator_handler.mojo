@@ -279,16 +279,15 @@ def _leader_ids(resp: PbHeartbeatResponse) -> List[Int32]:
 # §3 — node-id parsing and the membership comparison (pure functions).
 # =============================================================================
 def test_parse_node_id_table() raises:
-    """Digits parse; a leading '-' negates; empty, a lone '-', and any byte
-    outside '0'..'9' (the neighbours '/' and ':' included) give -1."""
+    """Digits parse; empty, a lone '-', and any byte outside '0'..'9' (the
+    neighbours '/' and ':' included) give -1. A signed id ("-12") is not
+    pinned: komira-ai/komira#1503 asks what a negative id should give."""
     assert_equal(_parse_node_id(String("")), Int32(-1), "empty")
     assert_equal(_parse_node_id(String("-")), Int32(-1), "lone minus")
     assert_equal(_parse_node_id(String("0")), Int32(0), "zero (lower bound)")
     assert_equal(_parse_node_id(String("9")), Int32(9), "nine (upper bound)")
     assert_equal(_parse_node_id(String("42")), Int32(42), "two digits")
     assert_equal(_parse_node_id(String("907")), Int32(907), "three digits")
-    assert_equal(_parse_node_id(String("-12")), Int32(-12), "negative")
-    assert_equal(_parse_node_id(String("-0")), Int32(0), "minus zero")
     assert_equal(_parse_node_id(String("/")), Int32(-1), "'/' is below '0'")
     assert_equal(_parse_node_id(String(":")), Int32(-1), "':' is above '9'")
     assert_equal(_parse_node_id(String("1/")), Int32(-1), "trailing '/'")
@@ -299,9 +298,6 @@ def test_parse_node_id_table() raises:
     assert_equal(_parse_node_id(String("1-")), Int32(-1), "minus not first")
     assert_equal(
         _parse_node_id(String("2147483647")), Int32(2147483647), "Int32 max"
-    )
-    assert_equal(
-        _parse_node_id(String("-2147483648")), Int32(-2147483648), "Int32 min"
     )
     print("  test_parse_node_id_table: PASS")
 
@@ -365,12 +361,36 @@ def test_same_size_membership_swap_recomputes() raises:
     assert_equal(nodes[1].node_id, Int32(3), "node 3 joined")
     var leaders = _leader_ids(resp)
     assert_equal(len(leaders), 6, "one leader per partition")
+    var stored = _stored(r.data)
+    ref m = resp.broker_cluster.value()
     for i in range(6):
         assert_true(
             leaders[i] == Int32(2) or leaders[i] == Int32(3),
             "partition " + String(i) + " led by a live node",
         )
+        assert_equal(
+            m.leaders[i].partition_id, UInt32(i), "leader " + String(i) + " pid"
+        )
+        assert_equal(
+            String(leaders[i]), stored.owner_of(i), "leader is the stored owner"
+        )
     assert_equal(len(resp.assigned_partitions), 3, "node 3 gets half")
+    # One lease generation per assigned pid, equal to the persisted one.
+    assert_equal(
+        len(resp.assigned_generations), len(resp.assigned_partitions), "gens"
+    )
+    for i in range(len(resp.assigned_partitions)):
+        var pid = Int(resp.assigned_partitions[i])
+        assert_equal(stored.owner_of(pid), String("3"), "node 3 owns it")
+        assert_equal(
+            resp.assigned_generations[i],
+            stored.generation_of(pid),
+            "generation of pid " + String(pid),
+        )
+        assert_true(
+            resp.assigned_generations[i] >= Int64(2),
+            "a pid node 3 took over is past generation 1",
+        )
     print("  test_same_size_membership_swap_recomputes: PASS")
 
 
