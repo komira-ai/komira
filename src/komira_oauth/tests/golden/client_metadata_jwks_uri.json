@@ -1,0 +1,1 @@
+{"client_id":"service-b","token_endpoint_auth_method":"private_key_jwt","token_endpoint_auth_signing_alg":"EdDSA","grant_types":["client_credentials"],"jwks_uri":"https://service-b.example/keys.json"}

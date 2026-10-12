@@ -1,9 +1,13 @@
 load("@komira//tools/build/lint:defs.bzl", "public_boundary")
 load(":fixture.bzl", "PB_HOLDS", "PB_HOSTS", "PB_TREE", "PB_WINDOW")
 
-# Test 44 (the public boundary lint), the half that must build: the planted
+# Test 44 (the public boundary lint), run end to end by the rule: the planted
 # tree of fixture.bzl, every finding of held.mojo and shim.c held at its exact
-# count, nothing in the near misses found, binary data not read. negative/public_boundary plants one defect each in the same tree.
+# count, nothing in the near misses found, binary data not read, and a file
+# given through `paths` read (its date is held, so the row names no file of
+# the tree unless the rule stages it). Each defect the lint reports is a case
+# of the tool's tests (//tools/build/lint/public_boundary);
+# negative/public_boundary holds the rule's analysis refusals.
 [
     export_file(
         name = f,
@@ -28,5 +32,6 @@ public_boundary(
     files = PB_TREE,
     holds = PB_HOLDS,
     hosts = PB_HOSTS,
+    paths = {"other/.config": "paths_config.txt"},
     **PB_WINDOW
 )

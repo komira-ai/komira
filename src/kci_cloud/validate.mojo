@@ -61,7 +61,10 @@
 #      (a service account, or a workload with no `run_as`); ONE edge per
 #      (principal, target) pair in the whole list, counting `uses` lines,
 #      grants and the implicit `cell LOGS WRITE` alike; and no two edges of
-#      one resource whose `u-<h>` roles collide.
+#      one resource whose `u-<h>` roles collide. And no REFERENCE CYCLE
+#      between resources (cycles.mojo): two services each reading the
+#      other's URL can be created in no order, so the cycle is refused here,
+#      before anything is read, not by the engine's sort after the reads.
 #   2. COVERAGE findings: the chosen cloud has no adapter for a type. The
 #      text carries the cloud's typed absence and the built-in clouds
 #      that do host the type.
@@ -158,6 +161,7 @@ from kci_cloud.grants import (
 from kci_cloud.labels import LABEL_VALUE_MAX, encoded_label_bytes
 from kci_cloud.compose import expand
 from kci_cloud.compose_refs import id_problem, no_ref, owner_of_node
+from kci_cloud.cycles import reference_cycle_findings
 
 
 def _index_of_id(resources: List[Resource], id: String) -> Int:
@@ -577,6 +581,7 @@ def graph_findings(
     var edges = edge_findings(resources)
     for i in range(len(edges)):
         out.append(edges[i].copy())
+    out.extend(reference_cycle_findings(resources))
     return out^
 
 
