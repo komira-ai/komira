@@ -14,7 +14,7 @@
 //!   --runtime   llvm/runtime/libclang_rt.profile-x86_64.a of the link
 //!               directory (the profile runtime)
 //!   --bitcode   the test's LLVM bitcode ([coverage][bc][<test>])
-//!   after `--` the C libraries of the test's closure, as mojo_wrapper.sh
+//!   after `--` the C libraries of the test's closure, as mojo_compile
 //!               appends them to the end of a link line, given to zig as
 //!               they are (relative to the working directory)
 //!
@@ -31,7 +31,7 @@
 //!      object with IR profile counters. lld is the LLVM the Mojo compiler is
 //!      built on, so the bitcode is read by its own LLVM.
 //!   2. zig links that object as a release test is linked (the line zig is
-//!      given when `mojo build` links through mojo_wrapper.sh's `cc` shim:
+//!      given when `mojo build` links through mojo_compile's `cc` shim:
 //!      the compiler's runtime library, `--gc-sections`, `-lm`,
 //!      `--strip-debug`, the one run path `$ORIGIN/lib` as DT_RUNPATH, then
 //!      the link tail), with the profile runtime as a whole archive. Test 47's
@@ -313,7 +313,7 @@ pub fn linkAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: 
         return red(alloc, err, k, try std.fmt.allocPrint(alloc, "lld could not instrument {s} (pgo-instr-gen)", .{a.bitcode}));
     }
 
-    // 2. Link, as mojo_wrapper.sh's cc shim links a release test.
+    // 2. Link, as mojo_compile's cc shim links a release test.
     const z = runner.runFn(runner.ptr, alloc, .{ .argv = try zigArgv(alloc, zig, a.target, k, kgen, out, rt, a.tail), .env = env, .stdout_path = log, .stderr_to_stdout = true }) catch |e| {
         try err.writer().print("cov_branch link: cannot run {s}: {s}\n", .{ zig, @errorName(e) });
         return 2;

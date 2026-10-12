@@ -247,7 +247,10 @@ def read_csv_bytes_to_batch[
         options.has_header, options.delimiter, options.quote,
     )
     var num_rows = cells.num_rows() - data_start  # after blank-line removal
-    if num_rows == 0 or num_cols == 0:
+    # A header with no records (num_rows == 0) still has columns: it falls
+    # through, inference over zero rows gives STRING (DuckDB: VARCHAR) and
+    # every builder makes a zero-length column (komira-ai/komira#1128).
+    if num_cols == 0:
         var sb1 = SchemaBuilder()
         var schema1 = sb1.build()
         var rbb1 = RecordBatchBuilder()
@@ -478,7 +481,9 @@ def read_csv_bytes_to_schema[
         check_last_row=(prefix_end == n),
     )
     var num_rows = cells.num_rows() - data_start  # after blank-line removal
-    if num_rows == 0 or num_cols == 0:
+    # Zero records still keeps the header's fields, as the full decode does
+    # (komira-ai/komira#1128).
+    if num_cols == 0:
         return sb_out.build()
 
     # Per-column type inference over the bounded sample. SAME rules + SAME
