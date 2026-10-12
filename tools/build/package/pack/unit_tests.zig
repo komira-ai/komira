@@ -3,4 +3,5 @@
 test {
     _ = @import("conda_dlopen.zig");
     _ = @import("conda_lib.zig");
+    _ = @import("readme_link.zig");
 }
