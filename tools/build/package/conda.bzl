@@ -51,9 +51,14 @@ library:
   * the library's README.md, when its package holds one, is installed at
     `share/doc/<name>/README.md` (a file of the package, listed in
     info/paths.json): what a user reads is inside what they installed, and
-    the same bytes are the library's welded `[tests][readme]` examples. Both
-    the packer and its check are given it, so the check refuses a package
-    whose copy is missing, elsewhere or not byte-equal;
+    its examples are the library's welded `[tests][readme]` examples. When
+    the closure ships native files, the installed README is the source's
+    bytes followed by the link section `komira_pack readme-link` writes (the
+    `mojo run` and `mojo build` commands with every `-l` the closure needs;
+    `_packaged_readme`), every source line keeping its number, and the
+    README examples tool must parse that block back to what was written.
+    Both the packer and its check are given that file, so the check refuses
+    a package whose copy is missing, elsewhere or not byte-equal;
   * the version is the Mojo compiler version the library is built with
     (`MOJO_COMPILER_VERSION` below, derived from the pinned compiler in the
     platform table and stated nowhere else); the release iteration is the conda
@@ -118,6 +123,8 @@ Sub-targets:
                       unstamped one is build number 0, build string
                       `h00000000_0`, claiming a permanent name if uploaded). Never read by an uploader.
     [check]           the marker of `komira_pack conda-check`
+    [readme]          the README the package installs (`_packaged_readme`),
+                      when the library has one
     [kcov_guard]      the marker of the kcov guard (kcov_guard.bzl) over every
                       file the packer copies in; [default] is also a copy made
                       after it passed
@@ -129,6 +136,7 @@ for each choice: packaging/conda/README.md.
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:coverage.bzl", "MojoCoverageGateInfo")
+load("@komira//tools/build/mojo:native_facts.bzl", "readme_link_names")
 load("@komira//tools/build/mojo:providers.bzl", "MojoInfo")
 load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/native:shared.bzl", "NativeSharedInfo", "linux_glibc_floor")
@@ -208,13 +216,77 @@ def _dlopen_args(info):
     # them without the packer's code.
     return [cmd_args("--dlopen", "{}={}".format(s, r)) for s, r in info.dlopen]
 
-def _doc_args(info):
-    # The package's documentation: its README.md, installed at
-    # share/doc/<name>/README.md. The same argument goes to the packer and to
-    # its check, so the check compares against the source, not the package.
-    if info.readme == None:
+def _doc_args(readme):
+    # The package's documentation: its README.md (`_packaged_readme`),
+    # installed at share/doc/<name>/README.md. The same argument goes to the
+    # packer and to its check, so the check compares against that file, not
+    # the package.
+    if readme == None:
         return []
-    return ["--doc-file", cmd_args(info.readme, format = "README.md={}")]
+    return ["--doc-file", cmd_args(readme, format = "README.md={}")]
+
+def _packaged_readme(ctx, lib, info):
+    """The README the package installs, or None without one: the library's
+    README.md itself when its closure ships no native file; otherwise that
+    file's bytes followed by the link section the packer writes
+    (`komira_pack readme-link`; docs/design/native_packaging.md, "Where a
+    user gets these flags", option (a)): the `mojo run` and `mojo build`
+    commands naming every shared library of the closure, dependents first,
+    and its static archives (native_facts.bzl `readme_link_names`). The README
+    examples tool's `link-check` must parse that block back to exactly the
+    arguments the packer wrote, or no package is made: a block kci's install
+    validation could not read never ships. Returns (the README, the
+    parsed-back marker or None); `[readme]` of the package is the README."""
+    if info.readme == None:
+        return None, None
+    owners, statics = readme_link_names(info.native) if info.native != None else ([], [])
+    if not owners and not statics:
+        return info.readme, None
+    # The order is checked against the objects: each shared library the
+    # package has (its own, and through `needed_owners` every owner it NEEDs)
+    # is read for DT_NEEDED, and an owner it NEEDs must come after it
+    # (komira_pack readme-link `--needed-of`), so a reversed
+    # `readme_link_names` is red here, not only different from kci.
+    needed_of = []
+    if ctx.attrs.native != None:
+        needed_of = [cmd_args("--needed-of", cmd_args(so, format = s + "={}")) for s, so in ctx.attrs.native[NativeSharedInfo].closure.items()]
+    readme = ctx.actions.declare_output("readme/README.md")
+    written = ctx.actions.declare_output("readme/link_args.txt")
+    ctx.actions.run(
+        cmd_args(
+            ctx.attrs._pack[RunInfo],
+            "readme-link",
+            "--readme",
+            info.readme,
+            [cmd_args("--owner", o) for o in owners],
+            [cmd_args("--static", s) for s in statics],
+            needed_of,
+            "--out",
+            readme.as_output(),
+            "--args",
+            written.as_output(),
+        ),
+        category = "conda_readme_link",
+    )
+    parsed = ctx.actions.declare_output("readme/link_args.parsed")
+    ctx.actions.run(
+        cmd_args(
+            ctx.attrs._readme_tool[RunInfo],
+            "link-check",
+            "--readme",
+            readme,
+            "--display",
+            "{}/README.md".format(lib.label.package),
+            "--expect",
+            written,
+            "--out",
+            parsed.as_output(),
+        ),
+        category = "conda_readme_link_check",
+    )
+
+    # The packer reads the README only once the tool parsed it back.
+    return readme, parsed
 
 def _native_args(ctx, info):
     """(packer arguments, check arguments, [path, file] packed) of the
@@ -273,6 +345,8 @@ def _conda_package_impl(ctx):
         cmd = cmd_args(pack, "conda", "--name", name, "--refuse", refusal, "--out-dir", raw.as_output())
         payload = None
         native_check = []
+        readme = None
+        readme_file = None
     else:
         tests = lib[DefaultInfo].sub_targets.get("tests")
         if tests == None or not tests[DefaultInfo].default_outputs:
@@ -282,11 +356,13 @@ def _conda_package_impl(ctx):
         deps = [info.direct_conda[d].name for d in info.direct]
         extra_files = [["info/licenses/LICENSE", ctx.attrs._license_file]]
         native_pack, native_check, native_packed = _native_args(ctx, info)
+        readme_file, parsed = _packaged_readme(ctx, lib, info)
+        readme = cmd_args(readme_file, hidden = parsed) if parsed != None else readme_file
         packed.append(["lib/mojo/{}.mojoc".format(info.import_name), payload])
         packed.extend(native_packed)
         packed.extend(extra_files)
-        if info.readme != None:
-            packed.append(["share/doc/{}/README.md".format(name), info.readme])
+        if readme != None:
+            packed.append(["share/doc/{}/README.md".format(name), readme])
         cmd = cmd_args(
             pack,
             "conda",
@@ -318,7 +394,7 @@ def _conda_package_impl(ctx):
             str(ctx.label.raw_target()),
             [cmd_args("--dep", d) for d in deps],
             _dlopen_args(info),
-            _doc_args(info),
+            _doc_args(readme),
             native_pack,
             "--out-dir",
             raw.as_output(),
@@ -346,7 +422,7 @@ def _conda_package_impl(ctx):
         if payload != None:
             args += ["--payload", payload]
             args += [cmd_args("--dep", info.direct_conda[d].name) for d in info.direct]
-            args.append(_doc_args(info))
+            args.append(_doc_args(readme))
             args.append(_dlopen_args(info))
             args.append(native_check)
         ctx.actions.run(
@@ -401,7 +477,7 @@ def _conda_package_impl(ctx):
                 },
             )],
             "release_check": [DefaultInfo(default_output = release_checked)],
-        },
+        } | ({"readme": [DefaultInfo(default_output = readme_file)]} if readme_file != None else {}),
     )]
 
 _conda_package = rule(
@@ -426,6 +502,7 @@ _conda_package = rule(
         "_kcov_guard": attrs.exec_dep(default = "komira//tools/build/package:kcov_guard", providers = [KcovGuardInfo]),
         "_license_file": attrs.source(default = "komira//:LICENSE"),
         "_pack": attrs.exec_dep(default = "komira//tools/build/package:komira_pack", providers = [RunInfo]),
+        "_readme_tool": attrs.exec_dep(default = "komira//tools/build/readme_examples:tool", providers = [RunInfo]),
     },
 )
 
@@ -561,6 +638,8 @@ def _conda_doc_check_impl(ctx):
     info = lib[MojoInfo]
     if info.readme == None:
         fail("{}: {} has no README.md, so its package ships none".format(ctx.label, lib.label))
+    if info.native != None and (readme_link_names(info.native)[0] or readme_link_names(info.native)[1]):
+        fail("{}: the closure of {} ships native files, so its package's README is the source followed by the link section, not the source byte for byte; check a library without native files".format(ctx.label, lib.label))
     if info.conda_refusal != None:
         fail("{}: {} has no conda package: {}".format(ctx.label, lib.label, info.conda_refusal))
     marker = ctx.actions.declare_output(ctx.label.name + ".checked")
