@@ -36,6 +36,7 @@ case "$ARCHIVE" in
     *.tar.gz | *.tgz) tar -xzf "$ARCHIVE" -C "$T/x" ;;
     *.tar.xz) tar -xJf "$ARCHIVE" -C "$T/x" ;;
     *.tar) tar -xf "$ARCHIVE" -C "$T/x" ;;
+    *.zip) unzip -q "$ARCHIVE" -d "$T/x" ;;
     *) echo "archive_files: unsupported archive type: $ARCHIVE" >&2; exit 2 ;;
 esac
 SRC="$T/x/$PREFIX"

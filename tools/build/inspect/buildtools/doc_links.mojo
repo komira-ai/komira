@@ -5,7 +5,9 @@ file or a directory holding one, stays inside the root, and a `#fragment`
 names a heading of the target Markdown file (GitHub's slugs). Links in code
 spans and fenced blocks, and URLs with a scheme, are not checked. What is
 code, and what is a link, is `readme_examples.markdown`'s CommonMark reading
-(tools/build/readme_examples), the one the README examples are read with.
+(tools/build/readme_examples), a Mojo reader kept for this module alone
+until komira-ai/komira#1281 ports it to the Zig Markdown module the README
+examples tool reads with (tools/build/markdown).
 The input is the root (a real path) and the list of paths under it that count as
 present: `git ls-files -z` output, or every file of a staged tree (the
 markdown_docs validation, tools/build/lint).

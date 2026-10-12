@@ -1,0 +1,6 @@
+call buck2 "uquery" "--output-format" "json" "owner(%s)" "src/a/a.mojo"
+exit 0
+stdout "{\"src/a/a.mojo\": [\"komira//src/a:a\", \"komira//src/a:a_test\"]}\n"
+call buck2 "cquery" "rdeps(//... + tests//..., set(komira//src/a:a komira//src/a:a_test komira//src/b:))"
+signal 9
+stderr "Build ID: parity\n"
