@@ -1,5 +1,4 @@
 load("@komira//tools/build/coverage:census.bzl", "coverage_census")
-load("@komira//tools/build/coverage:defs.bzl", "cov_gate_dir")
 load("@komira//tools/build/coverage/branch:defs.bzl", "cov_branch_dir")
 load("@komira//tools/build/coverage/kcov:defs.bzl", "cov_link_dir", "cov_run_dir")
 load("@komira//tools/build/lint:defs.bzl", "target_suite")
@@ -310,43 +309,37 @@ _LINK = "komira//tools/build/coverage/kcov:cov_link"
 
 _GATE = "komira//tools/build/coverage:cov_gate"
 
-# name: (sources, tests, gate directory)
+# name: (sources, tests, the package's floor file or None)
 _GATED = {
     # covlow/word.mojo: test_word calls word(0) only; three of its six lines
     # run, and one of the four arms of its two `if`s (BelowTarget on both).
-    "covlow": (["covlow/__init__.mojo", "covlow/word.mojo"], ["tests/test_word.mojo"], _GATE),
+    "covlow": (["covlow/__init__.mojo", "covlow/word.mojo"], ["tests/test_word.mojo"], None),
     # No test: no report, so the gate sees nothing measured (NotMeasured).
-    "covnotests": (["covnotests/__init__.mojo", "covnotests/inc.mojo"], [], _GATE),
+    "covnotests": (["covnotests/__init__.mojo", "covnotests/inc.mojo"], [], None),
     # covun/unused.mojo: in the package, compiled into no test binary
     # (UnmeasuredFile).
-    "covun": (["covun/__init__.mojo", "covun/unused.mojo", "covun/used.mojo"], ["tests/test_used.mojo"], _GATE),
+    "covun": (["covun/__init__.mojo", "covun/unused.mojo", "covun/used.mojo"], ["tests/test_used.mojo"], None),
     # Every line covered, a ratchet row at 100% line, and no decision: its
     # branch records name full.mojo with no arm (measured, none to take), so
     # it has no finding and its gate is GREEN in enforce mode too.
-    "covfull": (["covfull/__init__.mojo", "covfull/full.mojo"], ["tests/test_full.mojo"], ":covfull_gate"),
+    "covfull": (["covfull/__init__.mojo", "covfull/full.mojo"], ["tests/test_full.mojo"], "covfull_ratchet.tsv"),
     # Every line covered, a ratchet row at 100% line and branch floor 0, and
     # one `if` whose false arm test_clamp_high never takes: the one finding
     # is BelowTarget on branch (its branch records, not BranchNotMeasured).
-    "covbranch": (["covbranch/__init__.mojo", "covbranch/clamp.mojo"], ["tests/test_clamp_high.mojo"], ":covbranch_gate"),
+    "covbranch": (["covbranch/__init__.mojo", "covbranch/clamp.mojo"], ["tests/test_clamp_high.mojo"], "covbranch_ratchet.tsv"),
     # Every line covered, the `except` body included (the first raising call
     # in its `try:` body raises once), but the second call never raises: the
     # one finding is BelowTarget on branch, a `try` decision's raise arm
     # (tools/build/coverage/branch/README.md, "try"), which line coverage
     # cannot see.
-    "covtry": (["covtry/__init__.mojo", "covtry/total.mojo"], ["tests/test_total_first.mojo"], ":covbranch_gate"),
+    "covtry": (["covtry/__init__.mojo", "covtry/total.mojo"], ["tests/test_total_first.mojo"], "covbranch_ratchet.tsv"),
     # Every line covered, but `return a or b` is only ever decided by its
     # right operand: the one finding is BelowTarget on branch, the `or`'s
     # arm that skips its right operand (tools/build/coverage/branch/README.md,
     # "And, or": an and/or whose result no branch tests is a decision of
     # its own), which line coverage cannot see.
-    "covandor": (["covandor/__init__.mojo", "covandor/either.mojo"], ["tests/test_either_one.mojo"], ":covbranch_gate"),
+    "covandor": (["covandor/__init__.mojo", "covandor/either.mojo"], ["tests/test_either_one.mojo"], "covbranch_ratchet.tsv"),
 }
-
-cov_gate_dir(
-    name = "covbranch_gate",
-    exec_compatible_with = LINUX_X86_64,
-    ratchet = "covbranch_ratchet.tsv",
-)
 
 # GREEN in enforce mode: covbranch with a test taking both arms of its `if`,
 # every line covered: no finding, so its [coverage][gate] is green.
@@ -358,7 +351,8 @@ mojo_library(
     ],
     conda = False,
     coverage_debug = _LINK,
-    coverage_gate = ":covbranch_gate",
+    coverage_floor = "covbranch_ratchet.tsv",
+    coverage_gate = _GATE,
     coverage_mode = "enforce",
     import_name = "covbranch",
     test_srcs = ["tests/test_clamp_both.mojo"],
@@ -374,7 +368,8 @@ mojo_library(
     ],
     conda = False,
     coverage_debug = _LINK,
-    coverage_gate = ":covbranch_gate",
+    coverage_floor = "covbranch_ratchet.tsv",
+    coverage_gate = _GATE,
     coverage_mode = "enforce",
     import_name = "covtry",
     test_srcs = ["tests/test_total_both.mojo"],
@@ -390,16 +385,11 @@ mojo_library(
     ],
     conda = False,
     coverage_debug = _LINK,
-    coverage_gate = ":covbranch_gate",
+    coverage_floor = "covbranch_ratchet.tsv",
+    coverage_gate = _GATE,
     coverage_mode = "enforce",
     import_name = "covandor",
     test_srcs = ["tests/test_either_both.mojo"],
-)
-
-cov_gate_dir(
-    name = "covfull_gate",
-    exec_compatible_with = LINUX_X86_64,
-    ratchet = "covfull_ratchet.tsv",
 )
 
 # covfull with `coverage_branch_gate = False`: its gate reads no branch
@@ -416,7 +406,8 @@ cov_gate_dir(
         conda = False,
         coverage_branch_gate = False,
         coverage_debug = _LINK,
-        coverage_gate = ":covfull_gate",
+        coverage_floor = "covfull_ratchet.tsv",
+        coverage_gate = _GATE,
         coverage_mode = mode,
         import_name = "covfull",
         test_srcs = ["tests/test_full.mojo"],
@@ -441,12 +432,13 @@ cov_gate_dir(
         srcs = srcs,
         conda = suffix == "" and name in ("covlow", "covnotests"),
         coverage_debug = _LINK,
-        coverage_gate = gate,
+        coverage_floor = floor,
+        coverage_gate = _GATE,
         coverage_mode = mode,
         import_name = name,
         test_srcs = tests,
     )
-    for name, (srcs, tests, gate) in _GATED.items()
+    for name, (srcs, tests, floor) in _GATED.items()
     for suffix, mode in (("", "enforce"), ("_census", "census"))
 ]
 
@@ -576,12 +568,6 @@ mojo_library(
 # Test 46. A census gate over a malformed ratchet: covcheck exits 1, which
 # fails the gate in every mode (census never fails on a finding, but does on
 # an input covcheck refuses). RED: tests//negative/coverage:covbad[coverage][gate]
-cov_gate_dir(
-    name = "covbad_gate",
-    exec_compatible_with = LINUX_X86_64,
-    ratchet = "covbad_ratchet.tsv",
-)
-
 mojo_library(
     name = "covbad",
     srcs = [
@@ -590,7 +576,8 @@ mojo_library(
     ],
     conda = False,
     coverage_debug = _LINK,
-    coverage_gate = ":covbad_gate",
+    coverage_floor = "covbad_ratchet.tsv",
+    coverage_gate = _GATE,
     coverage_mode = "census",
     import_name = "covfull",
     test_srcs = ["tests/test_full.mojo"],
@@ -604,15 +591,6 @@ mojo_library(
 # RED: tests//negative/coverage:covfloor[coverage][gate], :covfloor_conda.
 # GREEN: :covfloor, :covfloor_held[coverage][gate].
 [
-    cov_gate_dir(
-        name = name + "_gate",
-        exec_compatible_with = LINUX_X86_64,
-        ratchet = name + "_ratchet.tsv",
-    )
-    for name in ("covfloor", "covfloor_held")
-]
-
-[
     mojo_library(
         name = name,
         srcs = [
@@ -621,7 +599,8 @@ mojo_library(
         ],
         conda = name == "covfloor",
         coverage_debug = _LINK,
-        coverage_gate = ":" + name + "_gate",
+        coverage_floor = name + "_ratchet.tsv",
+        coverage_gate = _GATE,
         coverage_mode = "census",
         import_name = "covlow",
         test_srcs = ["tests/test_word.mojo"],
@@ -629,29 +608,44 @@ mojo_library(
     for name in ("covfloor", "covfloor_held")
 ]
 
-# Test 46. The census (tools/build/coverage/census.bzl): floors exactly as
-# census.sh renders them from census/census.tsv are GREEN (:census_ok), and
-# the doc it renders is census/doc.txt byte for byte (:census_ok_doc: a
-# package floor is its lowest library, an old floor above the measurement
-# survives, a 0/0 library sets nothing, a pinned row is kept as written). A
-# floor lowered under what the census measured (ratchet_lowered.tsv), a
-# pinned row with no reason (ratchet_pin_no_reason.tsv) and a census with a
-# library's row twice (census_dup_row.tsv) are RED (:census_floor_lowered,
-# :census_pin_no_reason, :census_dup_row), and so is the doc compared with
-# doc_edited.txt (one percentage changed: :census_doc_edited), so the golden
-# comparison can fail. The docs are .txt so the Markdown checks of this cell
-# do not read their links.
+# Test 46. The census (tools/build/coverage/census.bzl), over per-package
+# files at their repository paths (census/ok/src/<p>/coverage_floor.tsv and
+# coverage_census.tsv; `files`). src/a: one library; src/b: one failed (line
+# floor 0); src/c: the floor is the lowest library (c1, first); src/d: an old
+# floor above the measurement survives (under floor); src/e: one library
+# without a branch number (no branch floor); src/f: a library with no line
+# (0/0) sets nothing; src/g: a pinned row, whose measured floors (shown)
+# ignore its 0/0 library g2; and a test package with no floor. Floors exactly
+# as census.sh renders them are GREEN (:census_ok), and the doc it renders is
+# census/doc.txt byte for byte (:census_ok_doc). RED, each with one file
+# replaced, added or left out: a floor lowered under what the census
+# measured (:census_floor_lowered), a pinned row with no reason
+# (:census_pin_no_reason), a library's row twice (:census_dup_row), a package
+# of the census with no floor file (:census_floor_missing), a floor file with
+# two rows (:census_floor_two_rows), a floor file naming another package
+# (:census_floor_other_package), a census row in another package's file
+# (:census_row_other_package) and a floor of a package with no library in the
+# census (:census_floor_stray); and so is the doc compared with doc_edited.txt
+# (one percentage changed: :census_doc_edited), so the golden comparison can
+# fail. The docs are .txt so the Markdown checks of this cell do not read
+# their links.
+_CENSUS_OK = {p.removeprefix("census/ok/"): p for p in glob(["census/ok/**/*.tsv"])}
+
 [
     coverage_census(
         name = name,
-        census = "census/" + census,
-        ratchet = "census/" + ratchet,
+        files = {k: v for k, v in (_CENSUS_OK | changed).items() if v},
     )
-    for name, census, ratchet in (
-        ("census_ok", "census.tsv", "ratchet.tsv"),
-        ("census_floor_lowered", "census.tsv", "ratchet_lowered.tsv"),
-        ("census_pin_no_reason", "census.tsv", "ratchet_pin_no_reason.tsv"),
-        ("census_dup_row", "census_dup_row.tsv", "ratchet.tsv"),
+    for name, changed in (
+        ("census_ok", {}),
+        ("census_floor_lowered", {"src/a/coverage_floor.tsv": "census/floor_lowered.tsv"}),
+        ("census_pin_no_reason", {"src/g/coverage_floor.tsv": "census/floor_pin_no_reason.tsv"}),
+        ("census_dup_row", {"src/c/coverage_census.tsv": "census/census_dup_row.tsv"}),
+        ("census_floor_missing", {"src/d/coverage_floor.tsv": None}),
+        ("census_floor_two_rows", {"src/a/coverage_floor.tsv": "census/floor_two_rows.tsv"}),
+        ("census_floor_other_package", {"src/a/coverage_floor.tsv": "census/floor_other_package.tsv"}),
+        ("census_row_other_package", {"src/c/coverage_census.tsv": "census/census_row_other_package.tsv"}),
+        ("census_floor_stray", {"src/z/coverage_floor.tsv": "census/floor_stray.tsv"}),
     )
 ]
 

@@ -16,7 +16,7 @@
 #      BelowTarget (a test covering 3 of 6 lines, and 1 of the 4 arms of its
 #      two `if`s), NotMeasured (a library with no test still has a gate),
 #      UnmeasuredFile (a source no test compiles), BranchNotMeasured alone
-#      (every line covered and a ratchet row, its gate reading no branch
+#      (every line covered and a floor, its gate reading no branch
 #      record: coverage_branch_gate = False), BelowTarget on branch alone
 #      (every line covered, one arm of its `if` never taken: the branch
 #      records reach the gate), BelowTarget on branch alone again (every
@@ -34,12 +34,12 @@
 #      in tests//src/testsuite/coverage (covnotinfo: not under src/tests); covtop_census_result: a library whose welded
 #      tests are outside its package's tests/ analyzes with coverage, and
 #      its gate leaves both tests out of its numbers (--test-source); covbad:
-#      a census gate over a malformed ratchet is red (covcheck exit 1 fails
-#      the gate in every mode); covfloor: a census gate under a ratchet
-#      floor it does not hold is red, a Regression, and so is its conda
-#      package, while covfloor_held at its floors is green; the census
-#      check (census.bzl) is green on the doc and floors census.sh renders
-#      and red on a doc edited by hand or a floor under the census; what a red gate blocks: the libraries above
+#      a census gate over a malformed floor file is red (covcheck exit 1
+#      fails the gate in every mode); covfloor: a census gate under a floor
+#      it does not hold is red, a Regression, and so is its conda package,
+#      while covfloor_held at its floors is green; the census check
+#      (census.bzl) over per-package files is green on the doc and floors
+#      census.sh renders and red on each defect below; what a red gate blocks: the libraries above
 #      and covlow_user (which depends on covlow and runs its test against
 #      covlow's package) are green, and covlow_conda and covnotests_conda
 #      (a REFUSED package: no test) are red with their gate's failure; a
@@ -130,10 +130,8 @@ expect_green coverage_gate_library "$N:covlow" "$N:covnotests" "$N:covun" "$N:co
     "$N:covbranch" "$N:covtry" "$N:covandor" "$N:covbad" "$N:covlow_user"
 expect_red coverage_gate_conda "COVERAGE GATE FAILED (enforce): $P ($N:covlow [coverage gate]): covcheck gate exited 3" "$N:covlow_conda"
 expect_red coverage_gate_conda_notests "- **NotMeasured** \`$P\`: no line of this package was measured" "$N:covnotests_conda"
-# A floor holds in census mode (README.md of tools/build/coverage, "The
-# ratchet"): covfloor measures line 50.00% under a floor of 50.01%, a
-# Regression, so its census gate and its conda package are red and the
-# library green; covfloor_held, at its floors, is green.
+# A floor holds in census mode: covfloor (line 50.00%, floor 50.01%) is a Regression,
+# its census gate and conda package red, the library green; covfloor_held green.
 expect_red coverage_gate_floor "COVERAGE GATE FAILED (census): $P ($N:covfloor [coverage gate]): covcheck gate exited 3" "$N:covfloor[coverage][gate]"
 if grep -qF -- "- **Regression** \`$P\`: line 50.00% is below its floor 50.01%" "$LOG/coverage_gate_floor.log"; then
     pass coverage_gate_floor_finding
@@ -142,15 +140,17 @@ else
 fi
 expect_red coverage_gate_floor_conda "COVERAGE GATE FAILED (census): $P ($N:covfloor [coverage gate]): covcheck gate exited 3" "$N:covfloor_conda"
 expect_green coverage_gate_floor_held "$N:covfloor" "$N:covfloor_held[coverage][gate]"
-# The census check: a floor under what the census measured, a pinned row
-# with no reason or a library's row twice is red, and so is the rendered doc
-# against a golden edited by hand (the floors census.sh renders, :census_ok,
-# and its doc, :census_ok_doc, are green: tests//negative/coverage:greens,
-# in the gate).
+# The census check, each with one per-package file changed (BUCK says how);
+# :census_ok and :census_ok_doc are green (tests//negative/coverage:greens).
 expect_red coverage_census_doc_edited "census_ok.md is not doc_edited.txt byte for byte" "$N:census_doc_edited"
-expect_red coverage_census_floor_lowered "ratchet.tsv is not what census.sh render writes" "$N:census_floor_lowered"
-expect_red coverage_census_pin_no_reason "has an empty reason" "$N:census_pin_no_reason"
+expect_red coverage_census_floor_lowered "the floors are not what census.sh render writes" "$N:census_floor_lowered"
+expect_red coverage_census_pin_no_reason "src/g/coverage_floor.tsv:2: a pinned row has an empty reason" "$N:census_pin_no_reason"
 expect_red coverage_census_dup_row "rows are not sorted by label: komira//src/c:c2 after komira//src/c:c2" "$N:census_dup_row"
+expect_red coverage_census_floor_missing "the floors are not what census.sh render writes" "$N:census_floor_missing"
+expect_red coverage_census_floor_two_rows "src/a/coverage_floor.tsv:3: a second row" "$N:census_floor_two_rows"
+expect_red coverage_census_floor_other_package "src/a/coverage_floor.tsv:2: the row names package src/b, not its directory src/a" "$N:census_floor_other_package"
+expect_red coverage_census_row_other_package "src/c/coverage_census.tsv:5: the row's package is src/b, not its directory src/c" "$N:census_row_other_package"
+expect_red coverage_census_floor_stray "the floors are not what census.sh render writes" "$N:census_floor_stray"
 # README examples and the mojo_test targets a library names in
 # coverage_tests are its tests for coverage: their runs reach its gate, and
 # what ships waits for them.

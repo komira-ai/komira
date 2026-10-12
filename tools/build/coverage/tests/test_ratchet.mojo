@@ -1,14 +1,11 @@
 from std.testing import assert_equal, assert_true
 
 from covcheck.paths import RepoFiles, repo_files_of
-from covcheck.ratchet import Ratchet, compare, parse_ratchet, propose, render_ratchet
+from covcheck.ratchet import Ratchet, compare, lowered, parse_ratchet, propose, render_ratchet
 from covcheck.stats import PackageStats
-from covcheck.text import read_text
 
-# The ratchet file's grammar, the shipped file, every comparison outcome and
-# the proposed file.
-
-comptime SHIPPED = "tools/build/coverage/ratchet.tsv"
+# The ratchet file's grammar, every comparison outcome, the proposed file,
+# and what a change lowers of a base's floors.
 
 
 def _repo() -> RepoFiles:
@@ -50,15 +47,37 @@ def _refused(text: String, want: String) raises:
     assert_true(raised, String("accepted: ") + text)
 
 
-def test_shipped_file_parses() raises:
-    # The rows are the census's (census.sh render): libraries under src/,
-    # never the test packages under src/tests/.
-    var r = parse_ratchet(read_text(String(SHIPPED)), String(SHIPPED))
-    assert_true(len(r.rows) > 0)
-    assert_true(len(r.comments) > 3)
-    for i in range(len(r.rows)):
-        assert_true(r.rows[i].package.startswith("src/"), r.rows[i].package)
-        assert_true(not r.rows[i].package.startswith("src/tests/"), r.rows[i].package)
+def _lowered(base: String, head: String) raises -> String:
+    var l = lowered(parse_ratchet(base, String("base.tsv")), parse_ratchet(head, String("head.tsv")))
+    var s = String("")
+    for i in range(len(l)):
+        if i > 0:
+            s += String(" | ")
+        s += l[i]
+    return s^
+
+
+def test_lowered_floors_are_named() raises:
+    # Raised, equal, and a row only the head has: nothing lowered.
+    assert_equal(_lowered(String("src/a\t5000\t2500\n"), String("# c\nsrc/a\t5001\t2500\nsrc/b\t0\t-\n")), "")
+    assert_equal(_lowered(String("src/a\t5000\t2500\n"), String("src/a\t5000\t2500\n")), "")
+    # One basis point lower, line or branch.
+    assert_equal(_lowered(String("src/a\t5000\t2500\n"), String("src/a\t4999\t2500\n")), "src/a: line floor 50.00% -> 49.99%")
+    assert_equal(_lowered(String("src/a\t5000\t2500\n"), String("src/a\t5000\t2499\n")), "src/a: branch floor 25.00% -> 24.99%")
+    # A branch floor dropped to '-'; one of 0 dropped is no floor lost.
+    assert_equal(_lowered(String("src/a\t5000\t2500\n"), String("src/a\t5000\t-\n")), "src/a: branch floor 25.00% -> none")
+    assert_equal(_lowered(String("src/a\t5000\t0\n"), String("src/a\t5000\t-\n")), "")
+    # A row gone; one with floors 0 gone is none lost.
+    assert_equal(_lowered(String("src/a\t5000\t-\nsrc/b\t0\t-\n"), String("# none\n")), "src/a: the row is gone (line floor 50.00%, branch floor none)")
+    # A pinned row is held too, and so is an unpinned one pinned lower.
+    assert_equal(_lowered(String("src/a\t5000\t-\tflaky\n"), String("src/a\t4000\t-\tflakier\n")), "src/a: line floor 50.00% -> 40.00%")
+    assert_equal(_lowered(String("src/a\t5000\t-\n"), String("src/a\t4000\t-\tflaky\n")), "src/a: line floor 50.00% -> 40.00%")
+    assert_equal(_lowered(String("src/a\t5000\t-\tflaky\n"), String("src/a\t6000\t-\n")), "")
+    # Every floor lowered is named, in the base's order.
+    assert_equal(
+        _lowered(String("src/a\t5000\t2500\nsrc/b\t9000\t-\n"), String("src/a\t1\t-\nsrc/b\t8999\t-\n")),
+        "src/a: line floor 50.00% -> 0.01% | src/a: branch floor 25.00% -> none | src/b: line floor 90.00% -> 89.99%",
+    )
 
 
 def test_rows_parse() raises:
@@ -207,7 +226,7 @@ def test_gate_package_with_no_line_is_no_regression() raises:
 
 
 def main() raises:
-    test_shipped_file_parses()
+    test_lowered_floors_are_named()
     test_rows_parse()
     test_malformed_rows_refused()
     test_unsorted_and_duplicate_rows_refused()

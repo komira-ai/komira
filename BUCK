@@ -60,7 +60,6 @@ coverage_ci_cases(
     ],
     data = {
         "tools/build/coverage/policy.bzl": "//tools/build/coverage:policy.bzl",
-        "tools/build/coverage/ratchet.tsv": "//tools/build/coverage:ratchet.tsv",
         "tools/build/mojo/coverage_branch.bzl": "//tools/build/mojo:coverage_branch.bzl",
     },
 )
@@ -268,12 +267,13 @@ _TESTS_LINTS = [
 
 # The coverage census (tools/build/coverage/census.md): its default output,
 # coverage_census.md, is the doc tools/build/coverage/census.sh renders from
-# census.tsv and ratchet.tsv (`--show-output` prints its path; it is not
-# committed), and the build fails unless the floors of
-# tools/build/coverage/ratchet.tsv are exactly what census.sh renders, so no
-# floor is under what was measured.
+# every package's coverage_census.tsv and coverage_floor.tsv, found in
+# `:doc_tree` (`--show-output` prints its path; it is not committed), and the
+# build fails unless each package's coverage_floor.tsv is exactly what
+# census.sh renders, so no floor is under what was measured.
 [coverage_census(
     name = "coverage_census",
+    tree = ":doc_tree",
 ) for _ in _TESTS_LINTS[:1]]
 
 # The Mojo pointer rules (docs/design/mojo_safety_and_idioms.md, "What must

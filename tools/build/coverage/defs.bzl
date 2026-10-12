@@ -1,5 +1,5 @@
 """The directory a coverage gate runs from (README.md, "The build gate";
-tools/build/mojo/coverage.bzl): cov_gate.sh, covcheck and the ratchet. And
+tools/build/mojo/coverage.bzl): cov_gate.sh and covcheck. And
 `coverage_ci_cases`, the cases of the coverage workflow's scripts (README.md,
 "The coverage workflow")."""
 
@@ -15,16 +15,14 @@ def _gate_dir_impl(ctx):
         "cov_gate.sh": ctx.attrs.script,
         "covcheck/covcheck": exe.run_dir.project(exe.binary),
         "covcheck/lib": exe.run_dir.project("lib"),
-        "ratchet.tsv": ctx.attrs.ratchet,
     })
     return [DefaultInfo(default_output = out)]
 
 _cov_gate_dir = rule(
     impl = _gate_dir_impl,
-    doc = "The directory a mojo_library's coverage gate runs from (tools/build/mojo/coverage.bzl): `cov_gate.sh` (`script`), `covcheck/` (`covcheck`, a mojo_binary, with its runtime libraries) and `ratchet.tsv` (`ratchet`). The script finds the others beside itself.",
+    doc = "The directory a mojo_library's coverage gate runs from (tools/build/mojo/coverage.bzl): `cov_gate.sh` (`script`) and `covcheck/` (`covcheck`, a mojo_binary, with its runtime libraries). The script finds covcheck beside itself; the floor a gate reads is its library's package's (`coverage_floor`, tools/build/mojo/coverage.bzl).",
     attrs = {
         "covcheck": attrs.exec_dep(providers = [MojoRunnableInfo], default = "komira//tools/build/coverage:covcheck_bin"),
-        "ratchet": attrs.source(default = "komira//tools/build/coverage:ratchet.tsv"),
         "script": attrs.source(default = "komira//tools/build/coverage:cov_gate.sh"),
     },
 )
