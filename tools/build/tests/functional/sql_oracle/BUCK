@@ -1,0 +1,57 @@
+load("@komira//tools/build/sql:defs.bzl", "duckdb_dist", "sql_oracle")
+
+# sql_oracle (tools/build/sql) at work: `write` runs write.sql over data.csv
+# and writes a Parquet file, a CSV file and an expected-result TSV; `check`
+# holds them to the committed goldens (golden/) byte for byte, to the twin's
+# outputs byte for byte (the determinism check: `write_twin` is the same SQL
+# over the same input in another target, so another action key and another
+# execution), and the Parquet rows and types to the input. `check` fails its
+# action on any difference, so building it is running the test; the pull
+# request check builds tests//functional/... . The planted defects are in
+# tests//negative/sql_oracle.
+
+[sql_oracle(
+    name = name,
+    srcs = "write.sql",
+    inputs = ["data.csv"],
+    outputs = [
+        "rows.parquet",
+        "rows.csv",
+        "expected.tsv",
+    ],
+) for name in ["write", "write_twin"]]
+
+# Two srcs, run in order in one session (check_rows.sql reads a table
+# check_bytes.sql made); build outputs staged under paths of their own.
+sql_oracle(
+    name = "check",
+    srcs = [
+        "check_bytes.sql",
+        "check_rows.sql",
+    ],
+    inputs = {
+        "a/expected.tsv": ":write[expected.tsv]",
+        "a/rows.csv": ":write[rows.csv]",
+        "a/rows.parquet": ":write[rows.parquet]",
+        "b/expected.tsv": ":write_twin[expected.tsv]",
+        "b/rows.csv": ":write_twin[rows.csv]",
+        "b/rows.parquet": ":write_twin[rows.parquet]",
+        "data.csv": "data.csv",
+        "golden/expected.tsv": "golden/expected.tsv",
+        "golden/rows.csv": "golden/rows.csv",
+    },
+    outputs = ["schema.tsv"],
+)
+
+# A duckdb_dist whose version holds both ends of the digit range, 0 and 9:
+# //tools/build/selftest:sql_oracle builds it, so a version pattern whose
+# range is narrowed by one at either end (`[1-9.]`, `[0-8.]`) fails here.
+# The planted versions it must refuse are in tests//negative/sql_oracle
+# (dist_version_*). Nothing reads its binary or lib directory (`write`'s
+# outputs stand in): no sql_oracle takes it.
+duckdb_dist(
+    name = "dist_version_digit_bounds",
+    binary = ":write",
+    native_libs = ":write",
+    version = "0.9",
+)

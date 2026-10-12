@@ -1,9 +1,11 @@
 #!/bin/sh
 # The checks of the git oracle, one build action of the `git_check`
 # validation (defs.bzl, README.md "Checks"):
-#   sh git_check.sh <busybox> <report_dir> <git_dir> <git-lfs> <version> <lfs_version> <glibc_floor_minor>
+#   sh git_check.sh <busybox> <report_dir> <git_dir> <git-lfs> <version> <lfs_version>
 # Exits 1 on the first wrong result, naming it; otherwise writes
-# <report_dir>/validation.json, the validation result.
+# <report_dir>/validation.json, the validation result. The glibc floor and
+# what the loader maps for each program, read from the ELF files, are the
+# validation :git_closure (//tools/build/toolchains/loader_closure).
 #
 # Every git command runs with PATH set to a directory of decoys ahead of the
 # busybox applets: programs named git, git-upload-pack, git-receive-pack,
@@ -14,23 +16,20 @@
 #   1. The distribution holds bin/git, the programs of libexec/git-core and
 #      the licence files, and no shared library.
 #   2. `git --version` prints `git version <version>`.
-#   3. No GLIBC_2.<n> symbol version above the floor in any of its programs.
-#   4. The loader's list for bin/git, git-remote-http and git-http-fetch
-#      holds glibc's libraries only: libcurl and zlib are linked in.
-#   5. `git --exec-path` is the distribution's libexec/git-core.
-#   6. The object ids git computes are the SHA-1s of the object bytes
+#   3. `git --exec-path` is the distribution's libexec/git-core.
+#   4. The object ids git computes are the SHA-1s of the object bytes
 #      (busybox sha1sum): a blob, the empty tree, and a commit with fixed
 #      identities and dates.
-#   7. Clone over the pack protocol (file://, git-upload-pack) and push
+#   5. Clone over the pack protocol (file://, git-upload-pack) and push
 #      (git-receive-pack) carry that commit; fsck --strict passes on both.
-#   8. The HTTP transport is compiled in and HTTPS is not: ls-remote to a
+#   6. The HTTP transport is compiled in and HTTPS is not: ls-remote to a
 #      closed port on 127.0.0.1 fails in libcurl's connect, and to an https
 #      URL fails as a disabled protocol (libcurl's whole messages).
-#   9. `git-lfs version` prints `git-lfs/<lfs_version> `, and `git lfs
+#   7. `git-lfs version` prints `git-lfs/<lfs_version> `, and `git lfs
 #      version`, which git runs as git-lfs from PATH, prints the same line.
 #      git-lfs runs `git` from PATH, so a test that runs git-lfs itself puts
 #      the distribution's bin/ first on PATH, as this check does.
-#  10. No decoy ran.
+#   8. No decoy ran.
 set -eu
 # shellcheck disable=SC3040 # busybox sh (ash) has pipefail
 set -o pipefail
@@ -42,7 +41,6 @@ DIST=$(abs "$3")
 LFS=$(abs "$4")
 VERSION=$5
 LFS_VERSION=$6
-FLOOR=$7
 
 case "${BUCK_SCRATCH_PATH:-}" in
     "") T="$PWD/.git_check" ;;
@@ -88,36 +86,12 @@ got=$("$GIT" --version 2>&1) || red "git --version failed: $got"
 [ "$got" = "git version $VERSION" ] || red "git --version printed '$got', want 'git version $VERSION'"
 pass
 
-# The regular files of the distribution that are ELF programs.
-find "$DIST" -type f | sort | while read -r f; do
-    if [ "$(head -c 4 "$f" | od -An -c | tr -d ' ')" = '177ELF' ]; then echo "$f"; fi
-done >"$T/elfs"
-[ -s "$T/elfs" ] || red "found no ELF program in the distribution"
-
-# 3. The glibc floor. Version names are strings of the dynamic string table.
-over=$(cat "$T/elfs" | while read -r f; do cat "$f"; done | strings -n 8 |
-    { grep -o 'GLIBC_2\.[0-9][0-9.]*' || [ "$?" = 1 ]; } | sort -u | awk -F. -v f="$FLOOR" '$2 + 0 > f + 0 { print }')
-[ -z "$over" ] || red "the programs need $(echo "$over" | tr '\n' ' ')above the floor GLIBC_2.$FLOOR"
-pass
-
-# 4. What the loader maps: glibc's libraries and nothing else.
-for p in bin/git libexec/git-core/git-remote-http libexec/git-core/git-http-fetch; do
-    LD_TRACE_LOADED_OBJECTS=1 "$DIST/$p" >"$T/log" 2>&1 || red "the loader failed on $p"
-    while read -r name _; do
-        case "$name" in
-            linux-vdso.so.1 | libc.so.6 | libm.so.6 | libpthread.so.0 | libdl.so.2 | librt.so.1 | /lib64/ld-linux-x86-64.so.2) ;;
-            *) red "$p loads $name, which is not glibc's" ;;
-        esac
-    done <"$T/log"
-done
-pass
-
-# 5. The exec path is the distribution's own.
+# 3. The exec path is the distribution's own.
 got=$("$GIT" --exec-path 2>&1) || red "git --exec-path failed: $got"
 [ "$(realpath "$got")" = "$(realpath "$DIST/libexec/git-core")" ] || red "git --exec-path is '$got', not the distribution's libexec/git-core"
 pass
 
-# 6. Object ids against sha1sum of the object bytes.
+# 4. Object ids against sha1sum of the object bytes.
 R="$T/repo"
 "$GIT" init -q -b main "$R" >"$T/log" 2>&1 || red "git init failed"
 sha() { sha1sum | cut -c1-40; }
@@ -138,7 +112,7 @@ want=$({ printf 'commit %s\000' "$(wc -c <"$T/commit" | tr -d ' ')"; cat "$T/com
 "$GIT" -C "$R" update-ref refs/heads/main "$commit" >"$T/log" 2>&1 || red "git update-ref failed"
 pass
 
-# 7. The pack protocol, both ways.
+# 5. The pack protocol, both ways.
 "$GIT" clone -q --no-local "file://$R" "$T/clone" >"$T/log" 2>&1 || red "git clone over file:// failed"
 got=$("$GIT" -C "$T/clone" rev-parse HEAD 2>"$T/log") || red "rev-parse in the clone failed"
 [ "$got" = "$commit" ] || red "the clone's HEAD is $got, want $commit"
@@ -150,7 +124,7 @@ got=$("$GIT" -C "$T/bare.git" rev-parse refs/heads/main 2>"$T/log") || red "rev-
 "$GIT" -C "$T/bare.git" fsck --strict >"$T/log" 2>&1 || red "fsck --strict of the pushed repository failed"
 pass
 
-# 8. The HTTP transport. Port 1 on the loopback has no listener.
+# 6. The HTTP transport. Port 1 on the loopback has no listener.
 if "$GIT" ls-remote http://127.0.0.1:1/r >"$T/log" 2>&1; then red "ls-remote to a closed port succeeded"; fi
 # libcurl's message, with the milliseconds it waited written <ms>.
 got=$(sed -e 's/ after [0-9]* ms: / after <ms> ms: /' "$T/log")
@@ -162,7 +136,7 @@ want="fatal: unable to access 'https://127.0.0.1:1/r/': Protocol \"https\" is di
 [ "$got" = "$want" ] || red "ls-remote https:// printed '$got', want '$want'"
 pass
 
-# 9. git-lfs, alone and through git. git-lfs runs `git` from PATH (`git
+# 7. git-lfs, alone and through git. git-lfs runs `git` from PATH (`git
 # version`, `git rev-parse`, `git remote`), so run alone it gets the
 # distribution's bin/ first on PATH; run by git, it finds git through the
 # exec path git puts first.
@@ -172,7 +146,7 @@ via=$(PATH="$T/lfs:$PATH" "$GIT" lfs version 2>&1) || red "git lfs version faile
 [ "$via" = "$got" ] || red "git lfs version printed '$via', want '$got'"
 pass
 
-# 10. No decoy ran.
+# 8. No decoy ran.
 [ ! -e "$T/decoy_ran" ] || red "a git from PATH ran instead of the distribution's: $(tr '\n' ' ' <"$T/decoy_ran")"
 pass
 

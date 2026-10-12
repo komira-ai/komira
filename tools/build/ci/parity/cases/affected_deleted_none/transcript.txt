@@ -1,0 +1,13 @@
+call git "rev-parse" "--verify" "--quiet" "parity-base^{commit}"
+exit 0
+stdout "1111111111111111111111111111111111111111\n"
+call git "cat-file" "-e" "parity-base:docs/BUCK"
+exit 1
+call git "cat-file" "-e" "parity-base:BUCK"
+exit 1
+call buck2 "cquery" "//... + tests//..."
+exit 0
+stdout %universe_cquery
+call buck2 "targets" "//..." "tests//..."
+exit 0
+stdout %universe_targets

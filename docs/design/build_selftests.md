@@ -8,7 +8,7 @@ tests are Zig too. The script is not ported as one runner with a table of cases.
 check moves to the cheapest place that can still fail. This doc lists every check, says where it goes and
 which planted defect proves it can go red. The conversion then lands in slices (the last section).
 
-Status: design, nothing converted yet. Today the script runs on a schedule in the build-system
+Status: slices 1 to 3 have landed; the rest is design. Today the script runs on a schedule in the build-system
 self-test workflow ([ci.md](../ci.md#build-system-self-tests)) and is not the gate. When the conversion is done, every
 check runs in `pr / check`, and nothing runs on a schedule.
 
@@ -45,18 +45,18 @@ This follows the build-architecture ruling:
 
 Every action this design adds runs a Zig-built tool, and every check it adds is a Buck2 target. It adds
 no CI step, no workflow logic and no shell: a scenario is a `buck2 test` target that `pr / check`
-already runs through its existing commands (`derive_checks.py`, `build_targets.sh`). The design
-changes `derive_checks.py` not at all and `build_targets.sh` in one place: its BXL step, which runs the
+already runs through its existing commands (`derive_checks`, `build_targets.sh`). The design
+changes `derive_checks` not at all and `build_targets.sh` in one place: its BXL step, which runs the
 test_weld check today, also runs the graph checks (see "Graph checks in the gate"). Existing rule scripts that the rows below lean on (`run_check.sh`, the
 `cases.sh` actions) keep running until their own Zig port. Rows 28, 29 and 49 schedule the ports of the
-case scripts. The rest, and the port of `derive_checks.py` and `build_targets.sh`, belong to the
+case scripts. The rest, and the port of `build_targets.sh` (`derive_checks` is now the Mojo `//tools/build/ci:derive_checks`), belong to the
 build-architecture ruling's own work, not to this design.
 
 A fourth outcome is **delete**: the check repeats what `pr / check` already builds. Every converted check
 has a planted mutant that turns it red, and each slice deletes its shell part in the same pull request.
 
 "Already in the gate" has a precise meaning here. `pr / check` builds the derived units the change
-reaches. Its universe is `//...` and `tests//functional/...` (`release/ci/derive_checks.py`); it is not
+reaches. Its universe is `//...` and `tests//functional/...` (`//tools/build/ci:derive_checks`); it is not
 a whole `//...` build. It runs `buck2 test` only on targets outside `tests//`
 (`release/ci/build_targets.sh`). It does not build sub-targets such as `[run_check]`. It never builds
 `tests//negative`. The universe is a `cquery` for the default target platform, so a target that is
@@ -66,7 +66,10 @@ incompatible with that platform is in no derived check.
 
 - **`[run_check]` as a validation.** The `[run_check]` of `mojo_binary` and of `rust_binary`
   (`rust/defs.bzl`) is a sub-target only, so nothing in the gate runs it. Making it a `ValidationInfo`
-  of every binary with `expected_stdout` puts rows 1, 21, 26, 22 and 35 in the gate.
+  of every binary with `expected_stdout` puts rows 1, 20, 21, 22, 26, 35 and 49 in the gate.
+  A validation result must be the one output of its action, so the result is a second action
+  that copies a fixed success result and takes the run check's stdout as an input
+  (`tools/build/mojo/run_check.bzl`).
   Mutant: change `:hello`'s `expected_stdout` to `hello from mojoX\n`. The unit must go red.
 - **Green fixtures parked under `tests//negative`** move to `tests//functional`:
   `rust_test:bin_green`, `rust_test:env_scrubbed`, `test_weld/real:ok`, the external-test greens of 35.
@@ -74,10 +77,14 @@ incompatible with that platform is in no derived check.
   (proto), or move them to the komira cell, where `build_targets.sh` already runs `buck2 test` (slice 2
   does this for `td_mojo_test`), or keep them in the `test_limits` scenario.
 - **Sub-targets and `tests//negative`/`tests//src` greens** need a root alias that names them (like
-  `//:tests_lints`). Plain `tests//functional` targets need no alias.
+  `//:tests_lints`). Plain `tests//functional` targets need no alias. Slice 2 names them per
+  package with a `target_suite` (same-package labels need no visibility):
+  `tests//functional/coverage:greens` is itself a functional target, and `//:tests_greens` names
+  `tests//negative/coverage:greens` and `tests//src/tests/coverage:greens`.
 - **Report floors move into the action.** Today the client counts "ok" lines (watchdog >= 15,
   runner_cases >= 5, mem_cap >= 4, test_deadline >= 6). A count floor is the only guard against a
-  case list that runs nothing. In slice 2 the existing case action refuses a short report. That is an
+  case list that runs nothing. In slice 2 the existing case action refuses a short report, at the
+  number of cases each runs (15, 12, 6, 6). That is an
   edit to a script that already exists, not a new one. In slice 7 each case becomes its own named Zig
   test, and the case script is deleted.
 - **A toolchains-cell file list.** The scans 17 tc_md and 19 exported_cells cover `tools/build/cells`.
@@ -132,8 +139,10 @@ rules. Graph checks are BXL scripts that the gate runs, following the test_weld 
 `build_targets.sh`. They are not scenarios.
 
 - **The target.** Each graph check is a `graph_check` target under `//tools/build/selftest/graph/`, in
-  the declared check `build_selftests`. It names the check and the targets it queries as strings, never
-  as dependencies. Its only dependencies are its BXL source and its Zig checker.
+  the declared check `build_selftests`, except `//:python_closure`, in the root package so that the
+  unit `repo_root`, which nearly every change reaches, runs it. It names the check and the targets it queries as strings, never
+  as dependencies. Its only dependencies are its BXL source and its Zig checker (and, for `python_closure`,
+  the dotfiles of the root package it reads).
 - **How the gate runs it.** `build_targets.sh` runs `buck2 bxl //tools/build/lint/test_weld.bxl:check`
   for every `test_weld_rule` target of the batch today. That step also queries the batch for
   `graph_check` targets and runs `buck2 bxl //tools/build/selftest/graph/checks.bxl:check -- --check
@@ -154,6 +163,12 @@ rules. Graph checks are BXL scripts that the gate runs, following the test_weld 
     label. It keeps true what slice 3's `--plan` proof shows once (see "Only a widened change reaches
     `build_selftests`"). Mutant: the same one as the `--plan` proof, a library under `src/` added as a
     dependency of one scenario target.
+  - `python_closure` (no row): no Python outside the Python surface. The facts are the configured
+    closure of `//...` and `tests//functional/...` as a graph (each node's kind, direct dependencies of
+    every kind and sources), every file of the trees, and the kci textprotos and workflows themselves;
+    `graph/python_closure.zig` says what is refused. Its allowlist, `tests/python_closure_allowlist.bzl`,
+    holds the Python surface (empty) and a ceiling of today's findings that only shrinks. Its fixtures
+    are `tests//negative/python_closure`, run by the scenario `graph_check_refusals`.
 - A graph query that needs its own `-c` overrides, such as the aquery diffs across coverage and
   optimization switches, stays a scenario: a BXL script runs in the gate's own configuration.
 
@@ -163,7 +178,7 @@ Bucket: `1` target, `1 (BXL)` a graph check run in the gate, `2` Zig (or tool-la
 `3` scenario, `del` delete, `open` needs a ruling. Numbers are the test numbers in `run_tests.sh`. Scenario names are under `//tools/build/selftest:`.
 **Slice** is the one pull request that deletes the row's shell lines (see "Slice plan"). A mixed row
 (`3 + 2`) is deleted in the slice of its last part. Its earlier parts land in earlier slices, and the
-shell lines stay until then. Each of the 188 rows names exactly one slice. A fixture under `negative/`
+shell lines stay until then. Each of the 186 rows names exactly one slice. A fixture under `negative/`
 goes with the last row that uses it.
 
 ### run_tests.sh, its own tests
@@ -218,8 +233,8 @@ goes with the last row that uses it.
 | 29 runner_cases | cases build, at least 5 ok | 1 | floor inside the action | reuse one TEST_TMPDIR | 2 |
 | 29 td_bad_*, test_deps refusals | 7 analysis refusals | 3 | `analysis_refusals_mojo` | delete the shell-name check in test_runtime.bzl | 3 |
 | 29 td_test_deps_src/consumer | a library and its consumer cannot import test_deps | 3 | `compile_isolation` | add test_deps to the compile path | 4 |
-| 30 opt_level | per-kind `-O` levels from aquery | 3 | `aquery_opt_levels` | mojo_binary default `-O1` | 5 |
-| 30 opt_bad_level | `fast` refused | 3 | `analysis_refusals_mojo` | remove the level check | 5 |
+| 30 opt_level | per-kind `-O` levels, as each compile puts them on its command line | 1 | `mojo_opt_level_check` targets (`mojo/opt_level.bzl`, rows over `MojoOptLevelInfo`): `examples:opt_levels`, `examples/aws_lc:opt_levels`, `examples/s2n_tls:opt_levels`, `tests//functional/opt_level:levels`; red at analysis | mojo_binary default `-O1` | 4 |
+| 30 opt_bad_level | `fast` refused | 3 | `analysis_refusals_mojo` | remove the level check | 4 |
 | 31 lint_weld (planted) | a planted shellcheck finding reds the Mojo and Rust examples | 3 | `lint_weld` (scratch tree) | drop one target from `_script_lint` | 9 |
 | 31 lint_weld (lists) | the toolchains' lint lists are complete | 3 | `lint_weld` derives the scripts the rules run from the graph, independent of the lists (a shared constant cannot catch a drop) | drop `rust:shell_lint` from the Rust list | 9 |
 | 32 bootstrap | `./buck2` installs only the pinned release, refuses wrong sha/size | 3 (2 if ported) | `bootstrap_pin`: a made-up pin and release in a scratch dir, no network, `./buck2` run as the program under test; unit tests instead if the bootstrap becomes Zig | skip the sha256 check | 9 |
@@ -260,8 +275,6 @@ goes with the last row that uses it.
 | 52 golden_differs, missing_symbol | doc JSON checker | 2 | doc JSON checker unit tests | walk only top-level symbols | 6 |
 | 53 surface_capability_matrix | 19 reds, 5 the only finding | del + 2 | matrix checker unit tests, facts fed as input | refuse no longer-named package | 6 |
 | 53 dangling, incompatible | unknown target; incompatible test under a pattern | 3 | `analysis_refusals_lint` (scratch tree, not an in-place copy) | make the deps soft | 3 |
-| 55 refused_imports | 25 spellings | del + 2 | scanner unit tests | stop following continuations | 6 |
-| 55 bad_entry | non-dotted entry refused | 3 | `analysis_refusals_lint` | drop the dotted-name check | 3 |
 | order switches | `--no-run`, `--no-umbrella`, local SKIPs | del | each scenario runs alone | n/a | 11 |
 | harness mode | local/remote mode detection | 2 | helper lib farm guard, unit-tested | accept a mixed list | 11 |
 | harness silence | a sub-script that reports nothing, or SKIPs on CI, is red | 2 | helper lib: a scenario that asserts nothing or SKIPs fails, and so does a build command whose what-ran lists no action | return early with no assertion | 11 |
@@ -312,7 +325,7 @@ goes with the last row that uses it.
 | 46 mojo_test_conda | the conda waits for a named mojo_test's run | 3 | `coverage_keys` row | drop coverage_tests runs from the join | 5 |
 | 46 mojo_test refusals, test_path, shared_lib_enforce | analysis refusals | 3 | `analysis_refusals_coverage` | delete the no-args check | 3 |
 | 46 codegen, coverage_tests_analysis, no_gate | gate counts under the switch; ledger | 3 | `coverage_analysis` | add a gate to a coverage_tests library | 5 |
-| 46 branch_gate_rows | each row names a library under src/ | 1 | target depending on each row, requiring MojoInfo (drops the rule-kind check) | a row naming nothing | 2 |
+| 46 branch_gate_rows | each row names a library under src/ | 1 | target depending on each row, requiring MojoInfo and the row string equal to the library's label (drops the rule-kind check) | a row naming nothing; a row spelled `//src/x:x` | 2 |
 | 47 test_fails, banner, no_profile, raw_version | cov_branch_run decisions | 2 | Zig port unit tests | skip the version check | 7 |
 | 47 annotate refusals, branchwide | cov_branch_annotate refuses; reads its whole input | 2 | Zig port unit tests on captured fixtures | drop the branch-weights scan | 7 |
 | 47 nodebug | classify refuses a nodebug call site | 2 | existing classify cases plus a captured Mojo IR fixture | accept the call site | 7 |
@@ -323,14 +336,14 @@ goes with the last row that uses it.
 
 | id | what | bucket | lands in | mutant | slice |
 |---|---|---|---|---|---|
-| 54 node_test verdict | stderr-only, fixed-string, case-sensitive expect_error | 2 | node_test runner (Zig port of the embedded script) | match as a regex | 8 |
+| 54 node_test verdict | stderr-only, fixed-string, case-sensitive expect_error | 3 | `planted_red_builds_node` (the node_test runner's Zig port adds its unit tests in slice 8) | match case-insensitively | 4 |
 | 54 node analysis refusals | 8 `fail()`s | 3 | `analysis_refusals_node` | delete the staged-twice check | 3 |
-| 54 unresolved_import | a failing esbuild fails the build | 3 | `planted_red_builds` (no Zig port only for this) | ignore esbuild's exit status | 4 |
-| 54 npm integrity | SRI checks, all 64 bytes | 2 | npm_unpack (Zig port) unit tests | compare a digest prefix | 8 |
-| 54 npm package.json | top-level string name/version compared whole; nested_distractors is a must-accept case | 2 | npm_unpack unit tests, a duplicate-key case decided | take the first `"name"` anywhere | 8 |
-| 54 npm exe | exe runs and prints the pin | 2 | npm_unpack unit tests | skip the version compare | 8 |
-| 54 node_dist | bin/node, node_api.h, exact version | 2 | node_dist check (Zig port) | `-e` for `-f` | 8 |
-| 54 c_warns | `-Wall -Werror` | 3 | `planted_red_builds` (2 only after a Zig launcher) | drop `-Werror` | 4 |
+| 54 unresolved_import | a failing esbuild fails the build | 3 | `planted_red_builds_node` | ignore esbuild's exit status | 4 |
+| 54 npm integrity | SRI checks, all 64 bytes | 3 | `planted_red_builds_node` (npm_unpack's Zig port adds unit tests in slice 8) | compare a digest prefix | 4 |
+| 54 npm package.json | top-level string name/version compared whole; nested_distractors is a must-accept case | 3 | `planted_red_builds_node` (npm_unpack's unit tests, a duplicate-key case decided, in slice 8) | take the first `"name"` anywhere | 4 |
+| 54 npm exe | exe runs and prints the pin | 3 | `planted_red_builds_node` | skip the version compare | 4 |
+| 54 node_dist | bin/node, node_api.h, exact version | 3 | `planted_red_builds_node` (node_dist's Zig port adds unit tests in slice 8) | `-e` for `-f` | 4 |
+| 54 c_warns | `-Wall -Werror` | 3 | `planted_red_builds_node` (2 only after a Zig launcher) | drop `-Werror` | 4 |
 | 23 proto generated tests | test_person, test_team, test_tasks_db pass | 1 | welded as test_srcs (a small library for the bundled team) | wrong field type | 8 |
 | 23 check_executor | proto build ran remotely | 3 | `local_zero` | a local test executor | 5 |
 | 23 id/ident, proto_mismatch | generated struct follows the .proto, old name absent | 1 | gen_check present/absent on both `[gen]` outputs | emit both names | 8 |
@@ -374,7 +387,7 @@ goes with the last row that uses it.
 The shared Zig markdown module adds a `zig_module` rule and a `deps` attribute on `zig_exe` and
 `zig_test` (`tools/build/mojo/toolchain.bzl`). Its refusals and its weld have no `run_tests.sh` lines
 to delete, so these rows add cases to existing scenarios. They land in the named slice, or after
-#1295 merges if that is later. They are not counted among the 188 rows above.
+#1295 merges if that is later. They are not counted among the 186 rows above.
 
 | id | what | bucket | lands in | mutant | slice |
 |---|---|---|---|---|---|
@@ -392,8 +405,11 @@ All under `//tools/build/selftest/`, one Zig test target each:
   `analysis_refusals_mojo`, `_aws_client`, `_gcp_client`, `_proto`, `_readme`, `_lint`,
   `_python_oracle`, `_node`, `_rust`, `_coverage`, `_platform_table`, `_zig`, and `config_refusals`.
 - Builds that must go red: `gate_wiring`, `shared_lib_gate`, `compile_isolation`, `planted_red_builds`,
-  `assert_level_reds`, `test_limits`, `coverage_gate_reds`.
-- aquery diffs: `assert_level_commands`, `aquery_opt_levels`, `coverage_platforms`, `coverage_keys`,
+  `planted_red_builds_node`,
+  `assert_level_reds`, `test_limits`, `coverage_gate_reds`, `sql_oracle` (with its analysis refusals
+  and an aquery pin of its invocation; a rule added after this inventory, so it has no row in the
+  tables above).
+- aquery diffs: `assert_level_commands`, `coverage_platforms`, `coverage_keys`,
   `coverage_analysis`, `coverage_switch`.
 - Scratch trees and clones: `consumer_cell_cache`, `buck2_run_fresh_clone`, `fresh_clone_local_default`,
   `lint_weld`, `bootstrap_pin`, `docker_run`.
@@ -412,17 +428,21 @@ passed through an attribute, say) is not caught on that pull request; every list
 ## Scenarios run in pr / check
 
 The scenarios run in `pr / check` whenever a pull request touches `tools/build/**`. They are selected
-by the derivation that already exists. Nothing in `pr.yml` or `derive_checks.py` changes, and nothing
+by the derivation that already exists. Nothing in `pr.yml` or the derive_checks tool changes, and nothing
 filters them. The one change to `build_targets.sh` is for the graph checks, not for the scenarios (see
 "Graph checks in the gate").
 
 - **They are in the universe.** A scenario test target is compatible with the default target
-  platform, so the `cquery` of `//...` in `derive_checks.py` sees it like any other target.
+  platform, so the `cquery` of `//...` in `//tools/build/ci:derive_checks` sees it like any other target.
 - **They are one declared check.** Slice 3 adds one check, `build_selftests`, to
   `release/artifacts.textproto`, with the `buck2` build system and the one target pattern
-  `//tools/build/selftest/...`. No check is declared there today. A target a declared unit matches is
-  not derived again, so the package leaves the derived check `tools_build`.
-  It has to leave it. `tools_build` is reached through reverse dependencies by changes far outside
+  `//tools/build/selftest/...`. A target a declared unit matches is not derived again: no derived
+  check is made for it. **Open (found in slice 3):** that does not take the package out of
+  `tools_build`. A derived check names its group's pattern, and `tools_build`'s is `//tools/build/...`,
+  which still matches `//tools/build/selftest/...`; kci builds and tests a unit by its patterns
+  (`build_targets.sh`), so a change that reaches `tools_build` runs the scenarios there too. Slice 3's
+  `--plan` of a change to `src/komira_json` lists `tools_build` and not `build_selftests`. The
+  package has to leave `tools_build`. `tools_build` is reached through reverse dependencies by changes far outside
   `tools/build`: targets under `tools/build` depend on libraries under `src/` (`tools/build/coverage`
   on `komira_json`, `tools/build/examples/shared_lib_mid` on seven libraries; `git grep '"//src/'
   -- 'tools/build/**/BUCK'` lists them). In `tools_build`, a change to one of those libraries would run
@@ -459,7 +479,7 @@ buckconfig (`$HOME/.buckconfig.d/farm.buckconfig`: the `[buck2_re_client]` addre
 `[komira_re] linux_x86_64_properties`), and the step after it fails the job when that key is empty.
 Every buck2 daemon on the runner reads that file, whatever its project root or isolation dir. So a
 scenario's inner daemon, in the checkout under its own isolation dir or in a scratch tree under
-`$TMPDIR`, executes on the same farm as the outer build. The scenario needs no flag, variable or
+`buck-out/selftest_tmp`, executes on the same farm as the outer build. The scenario needs no flag, variable or
 secret of its own for that. On a developer's machine the farm configuration is the root's
 `.buckconfig.local`, which the scratch-tree snapshot copies.
 
@@ -512,9 +532,11 @@ A scenario is a `buck2 test` target that runs buck2. Four things make that work.
    `ExternalRunnerTestInfo`. Its command is the scenario's Zig binary itself, with no shell around it.
    The rule takes that binary as an `exec_dep`, so it is configured as the gate configures it and is a
    cache hit from the gate. That assumes the execution configuration hashes the same as the gate's
-   target configuration (one execution platform per OS); slice 3 confirms it. Its other inputs:
+   target configuration (one execution platform per OS); slice 3 confirmed it (a `buck2 test` of the
+   scenarios after a `buck2 build` of their package ran no action). Its other inputs:
    - The pinned buck2 release, also an `exec_dep`: a `pinned_file` of the asset `tools/buck2` names,
-     unpacked by a Zig tool. The `./buck2` script is used only by the `bootstrap_pin` scenario, as the
+     unpacked by a Zig tool. The guard refuses a run whose asset's sha256 is not the digest
+     `tools/buck2` pins, so the second statement of the pin cannot drift. The `./buck2` script is used only by the `bootstrap_pin` scenario, as the
      program under test.
    - Fixtures as source files only, never as targets (see "Only a widened change reaches
      `build_selftests`").
@@ -602,7 +624,8 @@ they run in `pr / check`). Files stay under 1000 lines. It offers only what the 
   project root or a scratch tree), `-c` pairs, `--target-platforms` and a timeout. It always adds the
   scenario's `--isolation-dir` in the checkout, and `-c komira_selftest.inner=true` everywhere. After
   every command that executes actions it reads what-ran and fails on a local action (local: 0). It
-  captures exit, stdout and stderr into a per-scenario log directory under the test's `$TMPDIR`. Every
+  captures exit, stdout and stderr into a per-scenario log directory,
+  `buck-out/selftest_tmp/<scenario>/logs` (`buck2 test` gives a local test no `$TMPDIR`). Every
   failure names its log file. Every daemon it started is stopped with `buck2 kill` under the same
   isolation dir.
 - **Expectations.**
@@ -625,18 +648,27 @@ they run in `pr / check`). Files stay under 1000 lines. It offers only what the 
     configs and an absolute-path scanner.
   - cquery configurations, `audit execution-platform-resolution`, uquery label sets, `audit config`
     values, and a BXL runner.
-- **Scratch tree.** It snapshots the committed tree, plus the local farm config if present, under
-  `$TMPDIR`. A test's `$TMPDIR` can lie inside the checkout (under `buck-out`). Without a `.buckroot`,
+- **Scratch tree.** It snapshots the tracked files (`git ls-files`), plus the local farm config if
+  present, under `buck-out/selftest_tmp/<scenario>`, inside the checkout. Without a `.buckroot`,
   buck2 takes the topmost directory holding a `.buckconfig` as the project root, so such a tree would
   resolve to the checkout. The helper therefore writes a `.buckroot` at the root of every scratch tree.
   It plants a file or BUCK edit, runs the tree's own daemon, and always kills that daemon and deletes
   the tree, even on failure (`--keep-scratch` keeps it). Slice 3 confirms the project root: in a scratch
   tree, `buck2 root --kind project` prints the scratch tree, and with the `.buckroot` left out (the
-  mutant) it prints the checkout and the helper's unit test fails.
+  mutant) it prints the checkout and the scenario fails, because the helper checks the root before
+  it uses the tree. It tracks the tree's daemon only after that check: a `buck2 kill` in a tree that
+  resolves to the checkout stops the checkout's own daemon, the one running the test (slice 3 saw
+  it).
 - **Digests.** A sorted file-hash manifest of output trees, and a diff that names the files that differ
   (determinism).
 - **Golden I/O.** It compares the scenario output to a committed golden line by line, and supports
   `--regen`.
+
+Slice 3 lands the guard, the runner (with the what-ran check, read from the tabulated
+`buck2 log what-ran`), the refusal table, the parsers of `audit execution-platform-resolution`,
+`audit config`, `audit providers`, `targets` and `cquery` output, and the scratch tree. The build
+and test expectations, the aquery and digest parts and golden I/O come with the slices whose
+scenarios use them.
 
 ## How CI runs it
 
@@ -673,7 +705,7 @@ after the slice of its last callee. Slice 11 deletes `run_tests.sh` last.
    - Move the report floors into the case actions.
    - Add the s2n probe `fail()` and the `branch_gate_rows` target.
    - Add the two Rust unit tests (`omit_pruned_field`, `unknown_operation`) and the window-pin check.
-   - Delete the spsc_ring falsifier scripts and their fixtures: `negative/spsc_ring_element.sh`,
+   - Deleted: the spsc_ring falsifier scripts and their fixtures, `negative/spsc_ring_element.sh`,
      `negative/spsc_ring_prefix_layout.sh` and `negative/spsc_ring_prefix_layout/` (two `.mojo`
      files). Nothing calls them. The regression tests they falsified stay in `komira_spsc_ring`
      (`test_consumer_polling_before_the_slot_store_exists`, `test_layout_guards`). What goes is the
@@ -693,14 +725,17 @@ after the slice of its last callee. Slice 11 deletes `run_tests.sh` last.
    - The wall time these scenarios add to a widened check, and the peak number of inner daemons.
 4. **Red builds.** `gate_wiring`, `shared_lib_gate`, `compile_isolation`, `planted_red_builds`,
    `assert_level_reds`, `test_limits`, `coverage_gate_reds`.
+   - First, in a pull request of its own: the helper library's planted-red table (`lib/reds.zig`),
+     `planted_red_builds_node` (row 54, deleting `node_tests.sh`), and row 30 as `mojo_opt_level_check`
+     targets read at analysis (deleting `opt_level.sh`).
 5. **aquery, what-ran and graph checks.**
    - `local_zero`, with its per-run change, red on the hybrid-executor mutant on a warm cache;
-     `assert_level_commands`, `aquery_opt_levels`, and the `coverage_*` aquery scenarios.
+     `assert_level_commands` and the `coverage_*` aquery scenarios.
    - The graph checks, each a BXL script run in the gate, each red on its row's mutant:
      `aquery_host_paths`, `docs_package_coverage`, `config_hash_pin`, `test_weld_real_graph` and
      `golden_linux_x86_64`. golden.sh goes with them.
 6. **Lints and checkers, with unit tests.**
-   - The Zig ports: test_weld, pointer_lint, src_layout, refused_imports, readme_api_coverage,
+   - The Zig ports: test_weld, pointer_lint, src_layout, readme_api_coverage,
      surface_capability_matrix, public_boundary, the shared lint runner and the limits checker.
    - The Zig `doc_links` port (below), and the unit tests of the doc JSON checker.
    - The new file lints (17, 19) with the toolchains-cell file list, the readme marker check, and the
@@ -719,7 +754,7 @@ after the slice of its last callee. Slice 11 deletes `run_tests.sh` last.
      3. **This doc's `doc_links` slice** comes last. It ports `doc_links` to Zig on the shared markdown
         module and writes no second reader. Its welded unit tests carry the link cases of
         `test_buildtools` (row 17 doc_links_dead), each with the planted defect it names. It moves the
-        `doc_links` lint (`tools/build/lint/defs.bzl` passes `inspect` to `lint.sh`, which runs
+        `doc_links` lint (`tools/build/lint/defs.bzl` passes `inspect` to the lint tool, which runs
         `inspect doc-links` today; the slice moves both) to the Zig
         binary. The rest of `tools/build/inspect` is not part of this slice.
    - Rows 38 readme_marker, compile_error (`compile_isolation`) and owner_base_no_readme, readme_keyword
@@ -812,19 +847,18 @@ Sourced sections:
 | `coverage_run_tests.sh` | 7 |
 | `coverage_gate_tests.sh` | 7 |
 | `coverage_branch_tests.sh` | 7 |
-| `public_boundary_tests.sh` | 6 |
+| `public_boundary_tests.sh` | 6 (deleted with the Zig `public_boundary` tool, whose `zig test` rows took its cases) |
 | `assert_level_tests.sh` | 7 |
-| `node_tests.sh` | 8 |
+| `node_tests.sh` | 4 |
 | `golden/golden.sh` | 5 (with its call in `platform_table/check.sh`) |
 | `negative/lint_weld.sh` | 9 |
-| `negative/spsc_ring_element.sh`, `negative/spsc_ring_prefix_layout.sh` (with `negative/spsc_ring_prefix_layout/`) | 2 |
 
 The 16 `functional/` drivers the harness calls:
 
 | driver | slice |
 |---|---|
 | `assert_level.sh` | 5 |
-| `opt_level.sh` | 5 |
+| `opt_level.sh` | 4 |
 | `coverage_keys.sh` | 5 |
 | `coverage_platforms.sh` | 5 |
 | `coverage_shared_lib.sh` | 5 |
@@ -845,9 +879,11 @@ When `conda.sh` and `conda_set.sh` go, slice 10 also drops their argument case f
 
 Action scripts that targets run, not the harness:
 - Replaced by their rows' Zig ports: `functional/aws_codegen/aws_codegen.sh` 8,
-  `platform_table/limits_retired.sh` 6, `coverage/link_line.sh` 7, `mem_cap/cases.sh` 7,
+  `coverage/link_line.sh` 7, `mem_cap/cases.sh` 7,
   `test_deadline/cases.sh` 7, `watchdog/cases.sh` 7, `test_data/runner_cases.sh` and
   `test_command_case.sh` 7.
+- Ported: `platform_table/limits_retired.sh` is the Zig tool `tools/build/platforms/limits` (the
+  validation `//:limits`, and its `merged` mode in `platform_table/check.sh`).
 - Not in this design: `bundle_parity/parity.sh`, `coverage/{check,report,branch_check}.sh` and
   `install_gate/{cases,install_gate}.sh`. They are the actions of green functional targets that are
   already in the gate. Their port is part of the rule-script work under the build-architecture

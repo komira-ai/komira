@@ -1,0 +1,85 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A Parquet writer's encoders and page builders: the Thrift compact
+# serializer for the footer, page headers and page indexes; the PageHeader
+# i32 ceiling; column-chunk statistics (integer, FLOAT / DOUBLE, string); the
+# string and numeric dictionary encoders; the fixed-width bit packer; the
+# page index tracker; page-body compression and the schema builders; and the
+# page builders that turn one Arrow column into one column chunk (PLAIN,
+# DELTA_BINARY_PACKED, BYTE_STREAM_SPLIT, dictionary, Decimal128). It writes
+# no file and does not depend on the reader (komira_parquet).
+#
+# The welded tests (each file's header says which defect it catches):
+# - test_thrift_writer_direct: the serializer's bytes, read back by a
+#   compact-protocol walker in the test: Statistics field 9 is nan_count,
+#   the HLL registers are ColumnMetaData key-value metadata, the page index
+#   and column_orders fields, the page headers.
+# - test_page_size_limit_direct: the i32 ceiling, its error, and the setter
+#   that lowers it for both header serialisers.
+# - test_stats_direct: integer, DOUBLE and string statistics; null slots and
+#   sliced arrays never enter min/max.
+# - test_writer_float_stats_direct: parquet.thrift's floating-point rules
+#   (no NaN in min/max, nan_count, signed zero).
+# - test_writer_page_index_direct: BoundaryOrder in the type-defined order;
+#   ColumnIndex and OffsetIndex bytes.
+# - test_writer_bitpack_direct: the packer against a bit-at-a-time
+#   reference at every width 1..64.
+# - test_writer_helpers_direct: page-body compression round trips through
+#   komira_parquet_codec, the schema builders, integer statistics bytes.
+# - test_dict_encoder_direct: string and numeric dictionaries (first-seen
+#   order, lossless float keys, the cardinality cap).
+# - test_numeric_dict_preestimate: the numeric cardinality pre-estimate
+#   refuses doomed builds and keeps every column the exact build keeps.
+# - test_writer_encode_direct: definition levels of sliced arrays, PLAIN
+#   fixed-width / BYTE_ARRAY / BOOLEAN pages read back by a page reader in
+#   the test, statistics, compression, REQUIRED-with-null refused.
+# - test_writer_delta_direct: DELTA_BINARY_PACKED against a decoder in the
+#   test; deltas wider than the signed range; INT32 widths <= 32.
+# - test_writer_bss_direct: BYTE_STREAM_SPLIT against its definition, and
+#   the page of a sliced nullable column.
+# - test_writer_dict_direct: the RLE index stream (width 0 is a run), string
+#   and numeric dictionary chunks, sliced nullable numeric columns.
+# - test_decimal_encode_direct: big-endian FLBA(16) values, signed-order
+#   statistics, the schema element, invalid precision/scale refused.
+# - test_no_env_reads: the package's sources read no environment, hold no
+#   raw pointer in a public signature, and import only these deps. It is
+#   staged every source `srcs` compiles.
+_SRCS = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"])
+
+mojo_library(
+    name = "komira_parquet_writer",
+    srcs = _SRCS,
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_parquet_codec:komira_parquet_codec",
+        "//src/komira_simd:komira_simd",
+    ],
+    test_data = {
+        "tests/test_no_env_reads.mojo": {
+            "src/" + f: f
+            for f in _SRCS
+        },
+    },
+    test_srcs = [
+        "tests/test_decimal_encode_direct.mojo",
+        "tests/test_dict_encoder_direct.mojo",
+        "tests/test_no_env_reads.mojo",
+        "tests/test_numeric_dict_preestimate.mojo",
+        "tests/test_page_size_limit_direct.mojo",
+        "tests/test_stats_direct.mojo",
+        "tests/test_thrift_writer_direct.mojo",
+        "tests/test_writer_bitpack_direct.mojo",
+        "tests/test_writer_bss_direct.mojo",
+        "tests/test_writer_delta_direct.mojo",
+        "tests/test_writer_dict_direct.mojo",
+        "tests/test_writer_encode_direct.mojo",
+        "tests/test_writer_float_stats_direct.mojo",
+        "tests/test_writer_helpers_direct.mojo",
+        "tests/test_writer_page_index_direct.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
