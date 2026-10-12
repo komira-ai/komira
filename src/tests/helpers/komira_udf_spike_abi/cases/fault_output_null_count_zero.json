@@ -1,0 +1,11 @@
+{
+ "name": "fault_output_null_count_zero",
+ "defect": "an output whose null_count says 0 over a bitmap with a null is read as having no null (design 4.4)",
+ "run": "call_batch",
+ "entry": "leaf_null_count_zero",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 3, "columns": [{"type": "int64", "values": [1, null, 3]}]},
+ "expect": {"status": "OK", "run_error": "UDF_RUNTIME_FAULT", "fault": "null_count 0, validity says 1"}
+}

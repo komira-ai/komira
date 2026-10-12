@@ -7,7 +7,7 @@
 //!            --stdlib <PREFIX> [--gen <REL>]... [--exclude <PREFIX>]...
 //!            [--exclude-file <NAME>]...
 //!
-//! <test.ll> is the module cov_branch_annotate.sh prints after LLVM's
+//! <test.ll> is the module `cov_branch annotate` prints after LLVM's
 //! `pgo-instr-use`: each `br i1`, `select i1` and `switch` that ran carries
 //! `!prof !{!"branch_weights", ...}`, the counts of its arms.
 //!

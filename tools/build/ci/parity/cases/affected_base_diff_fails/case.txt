@@ -1,0 +1,6 @@
+# git diff fails: cannot tell, exit 5.
+arg "--base"
+arg "parity-base"
+file ".buckconfig" %buckconfig
+file "tools/build/ci/rules.txt" %rules.txt
+exit 5

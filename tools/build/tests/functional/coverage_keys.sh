@@ -28,9 +28,8 @@
 #     mojo_cov_branch_run, mojo_cov_branch_annotate or
 #     mojo_cov_branch_classify, or an output under cov/);
 #   - with it on, every new action is a coverage action, and a library has
-#     one mojo_build_cov_test and one mojo_cov_run more and one
-#     mojo_cov_readme_source when it has a README (its examples' run, with
-#     no branch coverage action), a mojo_test one mojo_build_cov_test and
+#     one mojo_build_cov_test and one mojo_cov_run more when it has a
+#     README (its examples' run, with no branch coverage action), a mojo_test one mojo_build_cov_test and
 #     nothing else (its runs are its libraries'), and a library
 #     one mojo_build_cov_test, one mojo_cov_run, one mojo_emit_cov_bc, one
 #     mojo_cov_pgo_link, one mojo_cov_branch_run, one mojo_cov_branch_annotate
@@ -59,8 +58,8 @@
 # each build ran (`buck2 log what-ran`; cache hits included) with its digest.
 # The actions the second build ran under a digest the first did not have
 # must be exactly, for each conda package, one mojo_build_cov_test and one
-# mojo_cov_run per test of its library (its README's included, with its
-# mojo_cov_readme_source), if the library's gate reads its
+# mojo_cov_run per test of its library (its README's included), if the
+# library's gate reads its
 # branch records ("reads" in the table) each test's branch coverage actions
 # (mojo_emit_cov_bc, mojo_cov_pgo_link, mojo_cov_branch_run,
 # mojo_cov_branch_annotate and mojo_cov_branch_classify: the gate reads the
@@ -283,7 +282,6 @@ moved=$(awk -F '\t' -v TARGETS="$TARGETS" '
             if (split(ls[i], f, " ") != 5 || f[3] != "conda") continue
             l = f[1]; sub(/_conda$/, "", l)
             want[l " mojo_build_cov_test"] += f[2] + f[5]; want[l " mojo_cov_run"] += f[2] + f[5]
-            if (f[5] > 0) want[l " mojo_cov_readme_source"] += f[5]
             want[l " mojo_cov_gate"] += 1; want[f[1] " conda_join"] += 1
             # The gate reads the branch record of each test, made by this chain.
             if (f[4] == "reads") for (j = 1; j <= nb; j++) want[l " " bc[j]] += f[2]
@@ -305,7 +303,7 @@ nr=$(grep -c . "$LOG/coverage_keys_ran_true.tsv")
 nm=$(grep -c . "$LOG/coverage_keys_moved.tsv")
 
 awk -F '\t' -v TARGETS="$TARGETS" -v ND="$nd" -v NRAN="$nr" -v NMOVED="$nm" '
-    function cov(k,    p) { split(k, p, "|"); return p[2] == "mojo_build_cov_test" || p[2] == "mojo_cov_run" || p[2] == "mojo_cov_gate" || p[2] == "mojo_cov_readme_source" || p[2] in branchcat || index(p[3], "cov/") == 1 }
+    function cov(k,    p) { split(k, p, "|"); return p[2] == "mojo_build_cov_test" || p[2] == "mojo_cov_run" || p[2] == "mojo_cov_gate" || p[2] in branchcat || index(p[3], "cov/") == 1 }
     function tgt(k) { return substr(k, 1, index(k, "|") - 1) }
     # shipjoin(k): k is a join of a conda package (what ships).
     function shipjoin(k) { return kind[tgt(k)] == "conda" && (index(k, "|conda_join|") || index(k, "|conda_release_join|")) }
@@ -385,7 +383,6 @@ awk -F '\t' -v TARGETS="$TARGETS" -v ND="$nd" -v NRAN="$nr" -v NMOVED="$nm" '
             else if (index(k, "|mojo_build_cov_test|")) builds[tgt(k)]++
             else if (index(k, "|mojo_cov_run|")) runs[tgt(k)]++
             else if (index(k, "|mojo_cov_gate|")) { gates[tgt(k)]++; gate_in(k) }
-            else if (index(k, "|mojo_cov_readme_source|")) readmes[tgt(k)]++
             else if (split(k, q, "|") >= 2 && q[2] in branchcat) branch[tgt(k), q[2]]++
             else other++
         }
@@ -399,7 +396,6 @@ awk -F '\t' -v TARGETS="$TARGETS" -v ND="$nd" -v NRAN="$nr" -v NMOVED="$nm" '
             wrun = f[3] == "test" ? 0 : want + wr
             if (builds[f[1]] + 0 != want + wr) bad = bad "; " f[1] " has " (builds[f[1]] + 0) " mojo_build_cov_test action(s) with coverage on, expected " (want + wr)
             if (runs[f[1]] + 0 != wrun) bad = bad "; " f[1] " has " (runs[f[1]] + 0) " mojo_cov_run action(s) with coverage on, expected " wrun
-            if (readmes[f[1]] + 0 != wr) bad = bad "; " f[1] " has " (readmes[f[1]] + 0) " mojo_cov_readme_source action(s) with coverage on, expected " wr
             if (gates[f[1]] + 0 != (f[3] == "conda" || f[3] == "test" ? 0 : 1)) bad = bad "; " f[1] " has " (gates[f[1]] + 0) " mojo_cov_gate action(s) with coverage on, expected " (f[3] == "conda" || f[3] == "test" ? 0 : 1)
             if (f[3] == "test") want = 0
             for (c in branchcat) {
@@ -410,12 +406,11 @@ awk -F '\t' -v TARGETS="$TARGETS" -v ND="$nd" -v NRAN="$nr" -v NMOVED="$nm" '
             if (f[3] == "conda") nc++
             if (f[2] == 0 && f[3] != "readme" && f[3] != "conda" && ((f[1] "|mojo_gate_join|") in offk || (f[1] "|mojo_gate_join|") in onk)) bad = bad "; " f[1] " (no test, no README) has a join: its package must be the compiler output"
             nb += builds[f[1]]
-            nrd += readmes[f[1]]
             nr += runs[f[1]]
             ng += gates[f[1]]
         }
         if (plats != nt) bad = bad "; the execution platform of " plats " of " nt " targets was compared"
         if (joins != 2 * nc) bad = bad "; " joins " conda join(s) compared, expected " (2 * nc)
         if (bad != "") { print "FAIL  coverage keys: " substr(bad, 3); exit 1 }
-        print "PASS  coverage keys: with -c komira.coverage=true, the " plats " targets keep their execution platform, and the " rel " release actions (" (pkgjoins + 0) " of them package joins) are all there, " cmds " command lines, " ins " input sets and " execs " sets of execution attributes unchanged, but " joins " conda join(s) whose inputs gained one coverage run per test and the gate; the " nb " mojo_build_cov_test, " nr " mojo_cov_run, " ng " mojo_cov_gate, " (nrd + 0) " mojo_cov_readme_source (a README run each), " (nbr + 0) " branch coverage (mojo_emit_cov_bc, mojo_cov_pgo_link, mojo_cov_branch_run, mojo_cov_branch_annotate, mojo_cov_branch_classify, one each per test, none a join input, the " (gins + 0) " mojo_cov_branch_classify inputs of the gates that read them and none of those that do not) and " other " other coverage actions exist only with it; unset is false; on darwin-arm64 none of the " ND " targets has a coverage attribute; a build with it on after one with it off ran " NRAN " action(s) of the built targets, " NMOVED " of them under a new digest, exactly the coverage builds, runs, branch actions (of a gate that reads them) and gate and the conda join"
+        print "PASS  coverage keys: with -c komira.coverage=true, the " plats " targets keep their execution platform, and the " rel " release actions (" (pkgjoins + 0) " of them package joins) are all there, " cmds " command lines, " ins " input sets and " execs " sets of execution attributes unchanged, but " joins " conda join(s) whose inputs gained one coverage run per test and the gate; the " nb " mojo_build_cov_test, " nr " mojo_cov_run, " ng " mojo_cov_gate, " (nbr + 0) " branch coverage (mojo_emit_cov_bc, mojo_cov_pgo_link, mojo_cov_branch_run, mojo_cov_branch_annotate, mojo_cov_branch_classify, one each per test, none a join input, the " (gins + 0) " mojo_cov_branch_classify inputs of the gates that read them and none of those that do not) and " other " other coverage actions exist only with it; unset is false; on darwin-arm64 none of the " ND " targets has a coverage attribute; a build with it on after one with it off ran " NRAN " action(s) of the built targets, " NMOVED " of them under a new digest, exactly the coverage builds, runs, branch actions (of a gate that reads them) and gate and the conda join"
     }' "$LOG/coverage_keys_false.facts" "$LOG/coverage_keys_true.facts"
