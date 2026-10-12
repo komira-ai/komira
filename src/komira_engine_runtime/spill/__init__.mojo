@@ -8,6 +8,10 @@
 - `thsplc_header` / `thsplc`: the column spill format (a 96-byte header,
   per-column descriptors and regions, a trailing magic) and its codec;
   `column_native_shims` bridges it to `ColumnNativeBatch`.
+- `thspill2_header` / `thspill2`: the opaque-body spill format for breaker
+  state (`Spillable`) and its codec.
+- `native_spill`: a writer and reader of record-batch runs (column format) and
+  row bodies (row format) over local-disk spill storage.
 - `fnv1a`: the FNV-1a 64 hash and the partition schema fingerprint the spill
   formats record.
 
