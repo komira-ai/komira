@@ -19,7 +19,6 @@ tools/build/coverage/census.sh	coverage and mutation tooling: to port to Zig
 tools/build/coverage/cov_gate.sh	coverage and mutation tooling: to port to Zig
 tools/build/coverage/kcov/cov_run.sh	coverage and mutation tooling: to port to Zig
 tools/build/coverage/kcov/cov_zig_cases.sh	coverage and mutation tooling: to port to Zig
-tools/build/coverage/kcov/debug_relocate_cases.sh	coverage and mutation tooling: to port to Zig
 tools/build/lint/readme_api_coverage.sh	lint or validation: to port to Zig
 tools/build/lint/test_weld.sh	lint or validation: to port to Zig
 tools/build/mojo/darwin/busybox.sh	a thin wrapper: the darwin applet allowlist
