@@ -4,7 +4,7 @@
 # gate's runner (its environment, with the differences below), and writes the
 # test's report in repository paths (README.md, "cov_run").
 #
-# usage: busybox sh <run_dir>/cov_run.sh <busybox> <gate_runner> <compiler_dir> <label>
+# usage: busybox sh <run_dir>/cov_run.sh <busybox> <gate> <compiler_dir> <label>
 #            <test_binary> <share> <src_dir> <xml_out> <marker_out>
 #            <src_repo> <test> <test_repo> <import> [--solib <file> [--solib-src <path>]...]
 #            [--gen <file>]... [--env NAME=VALUE]...
@@ -34,7 +34,8 @@
 #                  <test>); the report must hold the first. --solib with
 #                  none (every source generated) is refused
 #   --gen <file>   a generated source in <src_dir> (its path there): not measured
-#   --env          passed to gate_runner.sh as given
+#   <gate>         the gate (tools/build/run), which runs kcov as `gate mojo`
+#   --env          passed to the gate as given
 #
 # Steps:
 #   0. Every directory the binary names a source of the library by (a string
@@ -55,7 +56,7 @@
 #      source (--gen) is moved to gen/, outside share/ and lost/, and linked
 #      from both, so its name resolves to gen/ and is outside every
 #      --include-path (not measured, with no argument naming it).
-#   2. gate_runner.sh (unchanged: the release gate's runner) runs bin/kcov as
+#   2. `gate mojo` (the release gate's runner) runs bin/kcov as
 #      the program of the test root: share/ is the working directory, PATH,
 #      LD_LIBRARY_PATH, TMPDIR, TEST_TMPDIR and HOME are the gate's, each
 #      --env is exported to kcov and so reaches the test. kcov's arguments:
@@ -70,20 +71,20 @@
 #      bin/<test>. komira's kcov exits with the test's status (128+N when a
 #      signal N killed it), not another traced process's (the toolchain's
 #      README.md, "Patches"), so a test that fails under kcov (at -O0, or
-#      traced) fails this action, with the test's output from gate_runner
+#      traced) fails this action, with the test's output from the gate
 #      but not its banner (which says the release gate's test failed: that
 #      one passed; this action's own message says what failed). With
 #      coverage on, the conda package (<name>_conda) waits for this action
 #      too, the library does not (tools/build/mojo/coverage.bzl). kcov refused by the executor
 #      (ptrace, personality) is reported as that.
-#      The run is bounded: gate_runner runs in a session of its own (setsid),
-#      and when it has not exited after <limit> seconds, every process of
-#      that session (gate_runner, kcov, the test and any child it left) is
-#      killed and the action fails, saying so; a process of the group still
-#      running (not a zombie) 10 s after the kill fails it with its own
-#      message (survived the kill), and so does a /proc that does not show
-#      this shell under its own pid (another PID namespace's, or one hiding
-#      processes), where that scan would see nothing. kcov waits for every process
+#      The run is bounded: `gate mojo --limit-s <limit> --limit-report
+#      coverage` runs kcov in a session of its own, and when it has not
+#      exited after <limit> seconds, the gate kills every process of that
+#      session (kcov, the test and any child it left), checks that none
+#      survived the kill (a /proc that does not show the gate as its own is
+#      refused, since that scan would see nothing), prints the run's output
+#      and fails the action with `COVERAGE RUN FAILED` (docs/design/zig_gate_runner.md,
+#      C1). kcov waits for every process
 #      the test started, so without the bound a test leaving a child running
 #      would hold the action open.
 #   3. kcov writes exactly one report (<out>/cov.xml); anything else fails.
@@ -124,7 +125,7 @@
 # <share> and <lost> are canonical (realpath) before they are given to kcov
 # and used as a --map ABS: kcov reports realpath'd names (README.md, "Why").
 #
-# Exit status: the test's under kcov when it fails (gate_runner's); 1 when the
+# Exit status: the test's under kcov when it fails (the gate's); 1 when the
 # binary names the sources elsewhere, a kcov argument is too long, the run
 # passed its limit, or the report is missing or refused; 2
 # for a usage error, which includes a `,` or `:` in a path given to kcov (its
@@ -190,7 +191,7 @@ while [ "$#" -gt 0 ] && [ "$1" = --gen ]; do
     GEN="$GEN $2"
     shift 2
 done
-# What is left is gate_runner's (--env NAME=VALUE...); it checks them.
+# What is left is the gate's (--env NAME=VALUE...); it checks them.
 
 # Private scratch (as in tools/build/mojo/toolchain.bzl): a local action runs
 # in the checkout root, so it takes the directory buck2 names for it.
@@ -204,7 +205,7 @@ esac
 PATH="$K/bin"
 # LC_ALL=C is given to this script's own tools: per command before the test
 # runs, exported after it. The test gets the gate's environment, and the gate
-# sets no LC_ALL (gate_runner passes on what it does not set).
+# sets no LC_ALL (the gate passes on what it does not set).
 export PATH
 
 red() {
@@ -213,23 +214,6 @@ red() {
     echo "$*" >&2
     echo "==================================================================" >&2
     exit 1
-}
-
-# The processes of process group $1 that are not zombies (or dead), one
-# "pid state comm" per line, read from /proc/<pid>/stat: the fields after the
-# last ')' (comm may hold one) are state, ppid and pgrp. A process that exits
-# while this reads is skipped.
-group_left() {
-    { find /proc -mindepth 1 -maxdepth 1 -name '[0-9]*' 2>/dev/null || :; } |
-        while read -r d; do cat "$d/stat" 2>/dev/null || :; done |
-        awk -v g="$1" '{
-            i = length($0)
-            while (i > 0 && substr($0, i, 1) != ")") i--
-            if (i == 0) next
-            split(substr($0, i + 2), f, " ")
-            if (f[3] == g && f[1] != "Z" && f[1] != "X")
-                print $1, f[1], substr($0, index($0, "(") + 1, i - index($0, "(") - 1)
-        }'
 }
 
 # A shared library's driver with no source of the library to require in the
@@ -333,70 +317,19 @@ for a in "$@"; do
     fi
     prev=$a
 done
-# gate_runner leads a new session and process group, which kcov, the test
-# and every child it starts join (setsid needs no fork: this shell has no job
-# control, so its background job leads no group, and $! is gate_runner's
-# pid). The watcher kills that whole group once the limit has passed; it
-# stops when gate_runner has exited (and been reaped by the wait below).
+# The gate runs kcov in a session of its own and bounds it (step 2); past
+# the limit it kills the session, prints the run's output and its own
+# COVERAGE RUN FAILED message, and exits 1.
 rc=0
-setsid "$BB" sh "$GATE" "$BB" "$TC" "$LABEL" "$R/bin/kcov" "$K/gate.passed" "$@" 2>"$K/gate.err" &
-gate=$!
-(
-    s=0
-    while kill -0 "$gate" 2>/dev/null; do
-        if [ "$s" -ge "$LIMIT" ]; then
-            : >"$K/timed_out"
-            kill -s KILL "-$gate" 2>/dev/null
-            exit 0
-        fi
-        sleep 1
-        s=$((s + 1))
-    done
-) &
-watch=$!
-wait "$gate" || rc=$?
-kill "$watch" 2>/dev/null || true
-wait "$watch" || true
+"$GATE" mojo --busybox "$BB" --runtime-lib "$TC/lib" --label "$LABEL" --test "$R/bin/kcov" \
+    --marker "$K/gate.passed" --limit-s "$LIMIT" --limit-report coverage "$@" 2>"$K/gate.err" || rc=$?
 export LC_ALL=C
-if [ -e "$K/timed_out" ]; then
-    # The kill must have reached every process of the group, not gate_runner
-    # alone: a process of it that is not a zombie after up to 10 s (SIGKILL
-    # is delivered when a process next runs) survived it. A zombie has
-    # exited (whoever reaps the orphans may not have yet), so it is not one.
-    # The scan reads /proc, so /proc must show this shell under its own pid:
-    # /proc/$$/stat's first field is $$, and so is that of /proc/self/stat,
-    # read by this shell itself (a builtin's redirection, no child). A /proc
-    # of another PID namespace (where /proc/$$ may be another process), or
-    # one hiding processes, would list none of the group, and the scan would
-    # pass without checking.
-    me=$$
-    seen=""
-    self=""
-    { read -r seen _ <"/proc/$me/stat"; } 2>/dev/null || :
-    { read -r self _ </proc/self/stat; } 2>/dev/null || :
-    if [ "$seen" != "$me" ] || [ "$self" != "$me" ]; then
-        red "cov_run: /proc is not readable as this run's own: /proc/$me/stat and /proc/self/stat must both start with this shell's pid $me, and start with '$seen' and '$self'. So whether the time limit's kill reached every process of the run cannot be checked."
-    fi
-    n=0
-    while left=$(group_left "$gate") && [ -n "$left" ] && [ "$n" -lt 10 ]; do
-        sleep 1
-        n=$((n + 1))
-    done
-    if [ -n "$left" ]; then
-        kill -s KILL "-$gate" 2>/dev/null || true
-        red "After the time limit ($LIMIT s), processes of the coverage run survived the kill of its process group $gate (pid state comm: $(printf '%s' "$left" | tr '\n' ';')). The limit must kill the whole group, gate_runner, kcov, the test and every child it left; they are killed now."
-    fi
-    # gate_runner was killed, so its directory (mktemp under this one) and
-    # the test's output in it are still there.
-    find . -maxdepth 2 -path './.komira_test.*/log' -type f >"$K/logs" 2>/dev/null || true
-    while read -r l; do
-        echo "------------------------------------------------------------------ output (last 200 lines)" >&2
-        tail -n 200 "$l" >&2
-    done <"$K/logs"
-    red "The test left processes running or did not finish within $LIMIT s under kcov, and every process of the run was killed: kcov waits for every process the test started, where the release gate waits for the test alone. A test must wait for (or kill) every child it starts."
+if [ "$rc" = 1 ] && grep -qxF "COVERAGE RUN FAILED: $LABEL" "$K/gate.err"; then
+    cat "$K/gate.err" >&2
+    exit 1
 fi
 if [ "$rc" != 0 ]; then
-    # gate_runner's banner says the release gate's test failed, which it did
+    # The gate's banner says the release gate's test failed, which it did
     # not (this is the coverage run). Its other lines, the test's output
     # among them, are kept.
     awk -v H="GATED TEST FAILED: $LABEL (exit $rc)" \
