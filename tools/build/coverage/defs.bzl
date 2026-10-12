@@ -6,6 +6,7 @@ tools/build/mojo/coverage.bzl): cov_gate.sh and covcheck. And
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:providers.bzl", "MojoInfo", "MojoRunnableInfo")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 def _gate_dir_impl(ctx):
     exe = ctx.attrs.covcheck[MojoRunnableInfo]
@@ -48,12 +49,14 @@ def _ci_cases_impl(ctx):
     result = ctx.actions.declare_output("validation.json")
     ctx.actions.run(
         cmd_args(bb, "sh", staged.project(ctx.attrs.script.short_path), bb, result.as_output(), staged, covcheck),
+        env = rerun_env(ctx),
         category = "coverage_ci_cases",
         identifier = ctx.label.name,
     )
     return [
         DefaultInfo(default_output = result),
         ValidationInfo(validations = [ValidationSpec(name = ctx.label.name, validation_result = result)]),
+        rerun_info(ctx),
     ]
 
 _coverage_ci_cases = rule(
@@ -65,7 +68,7 @@ _coverage_ci_cases = rule(
         "script": attrs.source(),
         "srcs": attrs.list(attrs.source(), doc = "The files under test, from the declaring package."),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
-    },
+    } | RERUN_ATTRS,
 )
 
 def coverage_ci_cases(**kwargs):
