@@ -23,18 +23,22 @@
 #     a varint that runs past its submessage, an 11-byte varint, field number
 #     0 and above 2^29-1, wire type 3: OPTIMIZED_PLAN_HEADER_MALFORMED.
 #   test_malformed_fields: a known field under the wrong wire type, a singular
-#     field twice (top level and nested), a uint32 above 2^32-1, a bool of 2.
+#     field twice (top level and nested), a uint32 above 2^32-1, a bool of 2,
+#     and format_version at 2^32 (malformed) and 2^32-1 (a uint32 that is not
+#     an accepted version, OPTIMIZED_PLAN_VERSION_UNSUPPORTED).
 #     Catches the parser differentials proto3 resolves silently.
 #   test_malformed_utf8: a boundary sweep of the Unicode well-formed table:
 #     each lead-byte range at both ends, each second-byte range of E0, ED,
 #     F0 and F4 just inside (accepted) and just outside (refused), a
 #     continuation byte of 7F or C0 in the second, third and fourth place,
-#     and a 2-, 3- and 4-byte lead cut short at the end of the string. Then
+#     and a 2-, 3- and 4-byte lead cut short at the end of the string, then
+#     each followed in the buffer by a continuation byte (80 and BF) and
+#     each as the last bytes of the whole header. Then
 #     one ill-formed value in every `string` field of the header (kind,
 #     path, the second data_scopes entry, runtime, runtime_abi), each
 #     refused naming its field, and a `bytes` field never checked as UTF-8.
 #     Catches a lead range one byte too wide or too narrow, a dropped range,
-#     and a field whose check was dropped.
+#     a length check one byte short, and a field whose check was dropped.
 #   test_body_never_parsed: a body that is not protobuf decodes untouched.
 #     Catches a walk that descends into `body`.
 # =============================================================================
@@ -388,6 +392,14 @@ def test_malformed_fields() raises:
     var wide = List[UInt8]()
     _vf(wide, 1, UInt64(4294967296) + 2)
     _malformed(wide^, "OptimizedPlan.format_version is 4294967298, above the uint32 range", "format_version above uint32")
+    # Both sides of the uint32 bound: 2^32 is malformed, 2^32-1 is a uint32
+    # that is not an accepted version.
+    var just_over = List[UInt8]()
+    _vf(just_over, 1, UInt64(4294967296))
+    _malformed(just_over^, "OptimizedPlan.format_version is 4294967296, above the uint32 range", "format_version 2^32")
+    var max_version = List[UInt8]()
+    _vf(max_version, 1, 4294967295)
+    _understated(max_version^, "format_version 4294967295 is not in", "format_version 2^32-1")
     var contract = List[UInt8]()
     _lf(contract, 1, _bytes(32, 0xAB))
     _vf(contract, 2, UInt64(4294967296))
@@ -439,6 +451,36 @@ def test_malformed_utf8() raises:
     ]
     for i in range(len(bad)):
         _malformed(_kind(bad[i]), "ProducerStamp.kind is not well-formed UTF-8", "ill-formed UTF-8 #" + String(i))
+    # A lead cut short where the string ends, with a continuation byte right
+    # after it in the buffer: 80 and BF, the first byte of a tag for field 16
+    # and field 23 of ProducerStamp. The string's own end refuses it, not the
+    # byte that follows. Then the same leads as the last bytes of the whole
+    # header (`producer` written last), where nothing follows.
+    var cut: List[List[UInt8]] = [
+        [UInt8(0x61), 0xC3],  # a 2-byte lead, one byte short
+        [UInt8(0xE2), 0x82],  # a 3-byte lead, one byte short
+        [UInt8(0x61), 0xF0, 0x9F, 0x98],  # a 4-byte lead, one byte short
+    ]
+    var after: List[List[UInt8]] = [[UInt8(0x80), 0x01, 0x00], [UInt8(0xBF), 0x01]]
+    for i in range(len(cut)):
+        for j in range(len(after)):
+            var m = List[UInt8]()
+            _lf(m, 1, _bytes(32, 0xAB))
+            _lf(m, 5, cut[i])
+            m.extend(after[j].copy())
+            var what = "cut-short lead #" + String(i) + " before byte " + String(Int(after[j][0]))
+            _malformed(_with_stamp(m), "ProducerStamp.kind is not well-formed UTF-8", what)
+        var stamp = List[UInt8]()
+        _lf(stamp, 1, _bytes(32, 0xAB))
+        _lf(stamp, 5, cut[i])
+        var last = List[UInt8]()
+        _vf(last, 1, 1)
+        _lf(last, 3, _bytes(32, 0xCD))
+        _lf(last, 5, _needs(_e(), _runtime(_e())))
+        _lf(last, 8, _bytes(3, 0x01))
+        _lf(last, 2, stamp)
+        assert_equal(last[len(last) - 1], cut[i][len(cut[i]) - 1], "the cut-short lead ends the header")
+        _malformed(last^, "ProducerStamp.kind is not well-formed UTF-8", "cut-short lead #" + String(i) + " at the end")
     var good: List[List[UInt8]] = [
         [UInt8(0x61), 0x01, 0x7F],  # ASCII up to 7F
         [UInt8(0xC2), 0x80],  # U+0080, the first 2-byte lead

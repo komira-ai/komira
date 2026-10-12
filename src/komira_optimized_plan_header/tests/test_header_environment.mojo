@@ -16,12 +16,14 @@
 #     the longer one is the image's base, whatever the release order.
 #     Catches "first match wins".
 #   test_base_unreleased: OPTIMIZED_ENV_BASE_UNRELEASED for a digest that is
-#     not `sha256:` and 64 lower-case hex digits, a digest that is not the
+#     not `sha256:` and 64 lower-case hex digits (each digit range swept at
+#     both ends, inside and outside), a digest that is not the
 #     manifest's sha256, a manifest that is not JSON, names `layers` twice,
 #     has no `layers` array or a layer with no string digest, layers out of
 #     order, fewer layers than the base, and a release with no layers.
-#     Catches an unordered (set) prefix, a check of the first layer only, a
-#     duplicate-key parser differential and an empty prefix that matches all.
+#     Catches a digit range one byte too wide or too narrow, an unordered
+#     (set) prefix, a check of the first layer only, a duplicate-key parser
+#     differential and an empty prefix that matches all.
 #   test_engine_too_old: OPTIMIZED_ENV_ENGINE_TOO_OLD when the base lacks the
 #     plan's format_version or its contract version, naming the base's sets
 #     and the oldest release that accepts both (not one that accepts only
@@ -182,12 +184,18 @@ def test_base_unreleased() raises:
     var other = env.copy()
     other.image_digest = "sha512:" + _rep("a", 64)
     _unreleased(other, "is not sha256: and 64 lower-case hex digits", "another algorithm")
-    var nonhex = env.copy()
-    nonhex.image_digest = _layer("g")
-    _unreleased(nonhex, "is not sha256: and 64 lower-case hex digits", "a non-hex digit")
-    var colon = env.copy()
-    colon.image_digest = _layer("/")
-    _unreleased(colon, "is not sha256: and 64 lower-case hex digits", "a digit below 0")
+    # Both ends of both digit ranges: `/` `:` and `` ` `` `g` are refused as
+    # the wrong form; `0` `9` `a` `f` pass the form and fail the digest.
+    var outside: List[String] = [String("/"), String(":"), String("`"), String("g")]
+    for i in range(len(outside)):
+        var bad = env.copy()
+        bad.image_digest = _layer(outside[i])
+        _unreleased(bad, "is not sha256: and 64 lower-case hex digits", "the digit " + outside[i])
+    var inside: List[String] = [String("0"), String("9"), String("f")]
+    for i in range(len(inside)):
+        var edge = env.copy()
+        edge.image_digest = _layer(inside[i])
+        _unreleased(edge, ", not image_digest", "the digit " + inside[i])
     var mismatch = env.copy()
     mismatch.image_digest = _layer("a")
     _unreleased(mismatch, "the manifest's sha256 is " + env.image_digest + ", not image_digest", "a digest of other bytes")

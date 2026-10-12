@@ -14,8 +14,10 @@
 #     treats an absent stamp as an unrevoked one.
 #   test_producer_revoked: a build in the revocation set is
 #     OPTIMIZED_PLAN_PRODUCER_REVOKED wherever it stands in the set; a set of
-#     other builds, or one holding a prefix of this build, admits it. Catches
-#     a check of the first entry only, and a prefix comparison.
+#     other builds, one holding a prefix of this build, or a 32-byte build
+#     that differs from it only in its first, a middle or its last byte,
+#     admits it. Catches a check of the first entry only, a prefix
+#     comparison, and a comparison that stops before the last byte.
 #   test_digest_malformed: a `plan_digest` of 0, 31 or 33 bytes is
 #     OPTIMIZED_PLAN_DIGEST_MALFORMED. Catches `>=` or `<=` for `==`.
 #   test_needs_missing: no `needs` is OPTIMIZED_PLAN_NEEDS_MISSING.
@@ -136,6 +138,14 @@ def test_producer_revoked() raises:
     _refused(_valid(), last, OPTIMIZED_PLAN_PRODUCER_REVOKED, "is revoked", "revoked, last")
     var others: List[List[UInt8]] = [_bytes(32, 0x01), _bytes(31, 0xAB), _bytes(33, 0xAB)]
     _ = _admit(_valid(), others)
+    # A same-length build that differs from this one in one byte, at the
+    # first, a middle and the last place, is another build: each admits it.
+    var places: List[Int] = [0, 16, 31]
+    for i in range(len(places)):
+        var near = _bytes(32, 0xAB)
+        near[places[i]] = 0xAC
+        var one: List[List[UInt8]] = [near^]
+        _ = _admit(_valid(), one)
 
 
 def test_digest_malformed() raises:
