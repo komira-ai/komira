@@ -12,7 +12,10 @@
 #      present, is exchanged.
 #   §3 ExternalAccountFetcher whose impersonation is refused: the message
 #      names the RPC, the status and the code, and holds neither the
-#      federated token it sent nor a byte of the body.
+#      federated token it sent nor a byte of the body; the 2xx range ends
+#      at 299 (a 300 with a token-shaped body is refused, a 299 accepted),
+#      and PostReply.is_success at 199/200/299/300; a token file's trailing
+#      newline reaches the STS form.
 #   §4 AwsWifTokenFetcher's `audience` and `set_scope`: the scope set is the
 #      one on the wire, the default is not.
 #
@@ -34,6 +37,7 @@ from komira_gcp_core import (
 from komira_http_client.client import HttpClient
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 
+from komira_gcp_wif._post import PostReply
 from komira_gcp_wif import (
     AwsWifTokenFetcher,
     ExternalAccountFetcher,
@@ -324,6 +328,68 @@ def test_a_refused_impersonation_names_the_status_not_the_token() raises:
     assert_false("NOT-A-GRANT" in shaped, shaped)
 
 
+def _impersonation_answer(status_line: String, body: String) raises -> String:
+    """`TOKEN <token> EXPIRES <ms>` for an accepted impersonation answer, the
+    error text for a refused one."""
+    var f = _ea_fetcher(
+        True, _with_token_file(), _capture(), _http(status_line, body), _capture()
+    )
+    try:
+        var t = f.fetch(Int64(NOW_MS))
+        return String("TOKEN ") + t.token + " EXPIRES " + String(t.expires_at_ms)
+    except e:
+        return String(e)
+
+
+def test_the_2xx_range_ends_at_299() raises:
+    """The same body, one that reads as a valid generateAccessToken answer
+    expiring an hour after the wall clock: under `299` it is the token;
+    under `300 Multiple Choices` it is a refusal naming HTTP 300 and not the
+    token (the client follows no redirect, so a 300 is the final answer)."""
+    var shaped = String(
+        '{"accessToken":"ya29.EDGE-FAKE","expireTime":"2026-10-01T13:00:00Z"}'
+    )
+    assert_equal(
+        _impersonation_answer(String("299 Edge"), shaped),
+        String("TOKEN ya29.EDGE-FAKE EXPIRES ") + String(NOW_MS + 3_600_000),
+    )
+    var three = _impersonation_answer(String("300 Multiple Choices"), shaped)
+    assert_true(
+        three.startswith(
+            "komira_gcp_wif: service account impersonation refused: POST"
+            " IAMCredentials.GenerateAccessToken: HTTP 300"
+        ),
+        three,
+    )
+    assert_false("EDGE-FAKE" in three, three)
+
+
+def test_post_reply_success_is_exactly_200_to_299() raises:
+    """`PostReply.is_success` at both edges of the range, on the struct (a
+    1xx never reaches it over the wire: the client reads it as interim)."""
+    var cases: List[Int] = [199, 200, 299, 300]
+    var want: List[Bool] = [False, True, True, False]
+    for i in range(len(cases)):
+        assert_equal(
+            PostReply(cases[i], List[UInt8]()).is_success(), want[i], String(cases[i])
+        )
+
+
+def test_a_trailing_newline_in_the_token_file_is_sent() raises:
+    """A token file written by `echo` ends in a newline. The reference
+    strips nothing, so the newline is part of the subject token on the STS
+    form (`%0A`), not dropped."""
+    var files = MapFiles()
+    files.put(String(TOKEN_FILE), String(OIDC) + "\n")
+    var sts_cap = _capture()
+    var f = _ea_fetcher(False, files^, sts_cap, List[UInt8](), _capture())
+    assert_equal(f.fetch(Int64(NOW_MS)).token, FEDERATED)
+    assert_equal(
+        _form_value(_body_of(_text(sts_cap)), String("subject_token")),
+        String(OIDC) + "%0A",
+    )
+
+
 # =============================================================================
 # §4 — the AWS fetcher's audience and scope.
 # =============================================================================
@@ -375,4 +441,7 @@ def main() raises:
     test_an_empty_bearer_never_dials_signjwt()
     test_an_unreadable_source_file_never_dials_sts()
     test_a_refused_impersonation_names_the_status_not_the_token()
+    test_the_2xx_range_ends_at_299()
+    test_post_reply_success_is_exactly_200_to_299()
+    test_a_trailing_newline_in_the_token_file_is_sent()
     test_the_aws_fetchers_audience_and_scope()

@@ -6,8 +6,9 @@
 #   §1 the STS answer (`parse_sts_token_response`): each refused shape named,
 #      `expires_in` at 0 and -1 refused and 1 accepted (the boundary).
 #   §2 the OAuth error code of a refused exchange (`oauth_error_code`,
-#      `is_oauth_error_code`): every allow-listed code, near misses (a
-#      prefix, a longer word, another case), bodies with no code, and the
+#      `is_oauth_error_code`): every allow-listed code, and for each one five
+#      near misses (a byte added at either end, the last byte cut, a trailing
+#      space, capitals), bodies with no code, and the
 #      body-size cap at exactly 65536 bytes (read) and 65537 (not read).
 #   §3 the signJwt answer (`parse_sign_jwt_response`).
 #   §4 the generateAccessToken answer (`parse_generate_access_token_response`):
@@ -20,8 +21,9 @@
 #      file-flow tests leave out, each with the message whole, and the
 #      lifetime and format defaults.
 #   §6 the subject token (`subject_token_from`): bytes that are not UTF-8, an
-#      empty token, a JSON source that is not JSON, and a token holding
-#      multi-byte UTF-8 returned byte for byte.
+#      empty token, a JSON source that is not JSON, a token holding
+#      multi-byte UTF-8 returned byte for byte, and whitespace at either end
+#      of a token kept (text mode and a JSON field).
 #
 # Every input is SYNTHETIC; the tokens are made up. Every endpoint is an
 # address of 192.0.2.0/24 (RFC 5737) or a name under example.test.
@@ -122,9 +124,22 @@ def test_sts_expires_in_must_be_positive() raises:
 # =============================================================================
 
 
+def _assert_not_a_code(word: String) raises:
+    assert_false(is_oauth_error_code(word), word)
+    assert_equal(
+        oauth_error_code(_bytes(String('{"error":"') + word + '"}')),
+        "OAuth error not a known code",
+        word,
+    )
+
+
 def test_every_listed_oauth_code_and_no_near_miss() raises:
     """The seven codes of RFC 6749 §5.2 and RFC 8693 §2.2.2 are each listed
-    and repeated; a prefix, a longer word, another case and "" are not."""
+    and repeated. For every one of them, the code with a byte appended, with
+    its last byte cut, with a byte put in front, with a trailing space, and
+    in capitals is not a code, and comes back as "not a known code" (so a
+    prefix, suffix, substring, trimming or case-blind match on any listed
+    code would repeat body bytes). "" and "invalid_" are not codes either."""
     var listed: List[String] = [
         "invalid_request",
         "invalid_client",
@@ -135,20 +150,19 @@ def test_every_listed_oauth_code_and_no_near_miss() raises:
         "invalid_target",
     ]
     for i in range(len(listed)):
-        assert_true(is_oauth_error_code(listed[i]), listed[i])
+        var code = listed[i]
+        assert_true(is_oauth_error_code(code), code)
         assert_equal(
-            oauth_error_code(_bytes(String('{"error":"') + listed[i] + '"}')),
-            String("OAuth error ") + listed[i],
+            oauth_error_code(_bytes(String('{"error":"') + code + '"}')),
+            String("OAuth error ") + code,
         )
-    var near: List[String] = [
-        "invalid_gran", "invalid_grants", "INVALID_GRANT", "", "invalid_"
-    ]
-    for i in range(len(near)):
-        assert_false(is_oauth_error_code(near[i]), near[i])
-        assert_equal(
-            oauth_error_code(_bytes(String('{"error":"') + near[i] + '"}')),
-            "OAuth error not a known code",
-        )
+        _assert_not_a_code(code + "s")
+        _assert_not_a_code(String(code[byte = : code.byte_length() - 1]))
+        _assert_not_a_code(String("x") + code)
+        _assert_not_a_code(code + " ")
+        _assert_not_a_code(code.upper())
+    _assert_not_a_code(String(""))
+    _assert_not_a_code(String("invalid_"))
 
 
 def test_a_body_with_no_error_string_has_no_code() raises:
@@ -589,6 +603,23 @@ def test_subject_token_refusals_and_multibyte_text() raises:
     )
 
 
+def test_subject_token_edges_are_kept() raises:
+    """The text is used as given: whitespace at either end of the token (a
+    file written by `echo` ends in a newline) is part of it, in text mode
+    and in a JSON field alike. A reader that strips would send another
+    token than the one the source holds."""
+    var kept: List[String] = [" tok\n", "tok\r\n", "\ttok", "tok "]
+    for i in range(len(kept)):
+        var got = subject_token_from(_bytes(kept[i]), String(""))
+        assert_equal(got, kept[i])
+        assert_equal(got.byte_length(), kept[i].byte_length())
+    var field = subject_token_from(
+        _bytes(String('{"id_token":" abc\\n"}')), String("id_token")
+    )
+    assert_equal(field, " abc\n")
+    assert_equal(field.byte_length(), 5)
+
+
 def main() raises:
     test_sts_answer_refusals_name_the_field()
     test_sts_expires_in_must_be_positive()
@@ -606,3 +637,4 @@ def main() raises:
     test_url_source_refusals()
     test_format_refusals_and_defaults()
     test_subject_token_refusals_and_multibyte_text()
+    test_subject_token_edges_are_kept()
