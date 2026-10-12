@@ -1,0 +1,44 @@
+# proto-message: komira.plan.v1.OptimizedSegment
+engine_build: "Oo\306\003\220<\223n\375SY\347\244.\020;\3121\215\360aN\337k\037,B\023nE;\304"
+parent_plan_digest: "\373\032:\240\336\301L4\226r>\337\353\312\3324\240OHt+\320\336^h\232\024E\230p\205!"
+segment_id: 2
+segment_digest: "y\237I\034}>=\352\356\362\342\305\221 \314mP\311f9\325\223\007\235\354E,\304\244\373\251\275"
+needs {
+  data_scopes: "orders"
+}
+shared {
+  canonical_hash: 1234567890123
+  plan {
+    output_schema {
+      fields {
+        name: "o_orderkey"
+        arrow_type_id: 5
+      }
+    }
+    view_ref {
+      view_name: "orders_v"
+    }
+  }
+}
+scan_pins {
+  binding_key: "orders"
+  data_fingerprint: "#D@M\260\362\331\023\201\327\031x\376\314\360O\222\332\254g)\304L\365\306\037q\352\223\341\333|"
+}
+logical {
+  output_schema {
+    fields {
+      name: "o_orderkey"
+      arrow_type_id: 5
+    }
+  }
+  cse_ref {
+    canonical_hash: 1234567890123
+  }
+}
+pin_groups {
+  group: "social_graph"
+  lineage: "graph/lineage"
+  commit_seq: 42
+  members: 0
+  members: 1
+}

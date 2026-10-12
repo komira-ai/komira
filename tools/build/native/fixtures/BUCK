@@ -1,0 +1,56 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:native_facts.bzl", "native_refusal_test")
+
+# Which libraries the build refuses a conda package for their native code
+# (tools/build/mojo/native_facts.bzl): a library whose Mojo deps closure links
+# a C library that no library of the closure ships. Each test fails at
+# analysis unless the closure's unshipped C is exactly `unshipped` and the
+# refusal says so; building this package runs them all.
+
+# Ships the example C library it links (as a static archive; a fixture has
+# no shared library target). No tests, so its package is refused for that,
+# never for its C.
+mojo_library(
+    name = "fx_native_owner",
+    srcs = ["fx_native_owner/__init__.mojo"],
+    deps = ["//tools/build/examples/cshim:add"],
+    native_static = True,
+)
+
+# Reaches the C only through its owner, which is in its closure.
+mojo_library(
+    name = "fx_native_owner_user",
+    srcs = ["fx_native_owner_user/__init__.mojo"],
+    deps = [":fx_native_owner"],
+)
+
+native_refusal_test(
+    name = "owner_ships_its_c",
+    lib = ":fx_native_owner",
+)
+
+native_refusal_test(
+    name = "owner_in_closure",
+    lib = ":fx_native_owner_user",
+)
+
+# An archive with no owner: cadd links the example C library and nothing
+# ships it, so cadd and every library reaching it are refused.
+native_refusal_test(
+    name = "archive_with_no_owner",
+    lib = "//tools/build/examples/cshim:cadd",
+    unshipped = ["//tools/build/examples/cshim:add"],
+)
+
+# The owners of this slice: each closure's C is shipped (komira_http_core's
+# closure holds komira_log's holder archive, shipped static, and every
+# owner its NEEDED names).
+native_refusal_test(
+    name = "crypto_ships",
+    lib = "//src/komira_crypto:komira_crypto",
+)
+
+native_refusal_test(
+    name = "http_core_ships",
+    lib = "//src/komira_http_core:komira_http_core",
+)

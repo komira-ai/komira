@@ -1,0 +1,12 @@
+{
+ "name": "frame_no_next_after_error",
+ "defect": "the host calls frame_next again after it returned an error, and reports what that call said instead of the error",
+ "run": "frame",
+ "entry": "raise_again",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}],
+ "expect": {"status": "ERR_RAISED", "run_error": "UDF_RAISED", "message": "nonempty"}
+}

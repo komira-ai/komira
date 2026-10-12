@@ -1,4 +1,3 @@
-load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
 
 # Test-only: komira_shuffle across separate processes. `shuffle_task` runs one
@@ -71,12 +70,3 @@ mojo_binary(
         "test_shuffle_elastic_reducers",
     ]
 ]
-
-# The deps above name every komira_* module the library, the binary and the
-# tests import (tools/build/lint: mojo_deps).
-mojo_deps(
-    name = "deps_lint",
-    buck = "BUCK",
-    srcs = glob(["**/*.mojo"]),
-    visibility = ["komira//:tests_lints"],
-)

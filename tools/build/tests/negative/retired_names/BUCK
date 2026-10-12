@@ -1,0 +1,12 @@
+load("@komira//tools/build/lint:defs.bzl", "retired_names")
+
+# An `unchecked` entry naming no file of the tree: refused at analysis
+# (//tools/build/selftest:analysis_refusals_lint), so an exemption cannot
+# outlive the file it was written for. The name is spelt in parts, as the
+# root BUCK's are.
+retired_names(
+    name = "stale_unchecked",
+    names = ["retired" + "_fixture_name"],
+    tree = ":doc_tree",
+    unchecked = ["negative/retired_names/gone.json"],
+)
