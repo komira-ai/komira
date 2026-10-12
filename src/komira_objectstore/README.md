@@ -109,3 +109,20 @@ assert_equal(plan.coalesced[1].start, 10_000)
 assert_equal(plan.total_requested_bytes, 250)
 assert_equal(plan.wasted_bytes(), 100)  # the gap fetched to save a request
 ```
+
+`LocalFsConditionalStore` keeps objects as files under one directory,
+through this package's C file shim; here it opens the working directory
+read-only and asks for an object that is not there:
+
+<!-- mojo-hidden from std.testing import assert_true -->
+```mojo
+from komira_objectstore import LocalFsConditionalStore, Path
+
+var store = LocalFsConditionalStore(".")  # an existing directory is reused as it is
+var missing = False
+try:
+    _ = store.head(Path.parse("no-such-object"))
+except:
+    missing = True  # not found: the file shim's open reported ENOENT
+assert_true(missing)
+```

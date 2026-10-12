@@ -1,0 +1,150 @@
+load("@komira//tools/build/mojo:native_reach.bzl", "native_reach_case")
+
+# The native-reach check of mojo_library (tools/build/mojo/native_reach.bzl):
+# each case below is a library's sources and deps with one planted defect,
+# which the check must refuse with the error named in its `expect_*` (an
+# empty list: that half must pass). A `native_reach_case` builds green only
+# when the check answers so, so these are built, as a gate, by
+# tests//functional/native_reach:cases (the pull request check's
+# functional_tests unit), not by run_tests.sh.
+#
+# The owners these cases name: komira_fs ships //src/komira_fs:komira_fs_posix
+# (its own package), komira_crypto ships aws-lc and its komira_awslc_ names,
+# komira_http_core s2n-tls (komira_s2n_), komira_compression snappy
+# (komira_snappy_).
+
+_PUBLIC = ["//functional/native_reach:"]
+
+# Links an owner's archive with the owner outside its closure: the archive
+# under src/ (closure walk, owner match).
+native_reach_case(
+    name = "archive_owner_missing",
+    srcs = ["plain.mojo"],
+    deps = ["komira//src/komira_fs:komira_fs_posix"],
+    expect_archives = ["links komira//src/komira_fs:komira_fs_posix, which komira//src/komira_fs:komira_fs owns; komira//src/komira_fs:komira_fs is not in its Mojo deps closure"],
+    visibility = _PUBLIC,
+)
+
+# The same with a vendored archive: its owner is its THIRD_PARTY_OWNERS row.
+native_reach_case(
+    name = "vendored_owner_missing",
+    srcs = ["plain.mojo"],
+    deps = ["komira//third_party/aws-lc:crypto"],
+    expect_archives = ["links komira//third_party/aws-lc:crypto_prefixed", "which komira//src/komira_crypto:komira_crypto owns"],
+    visibility = _PUBLIC,
+)
+
+# Links a vendored archive whose THIRD_PARTY_OWNERS row names no owner
+# (sha1dc: only tests and the one-definition gate link it).
+native_reach_case(
+    name = "archive_no_owner",
+    srcs = ["plain.mojo"],
+    deps = ["komira//third_party/sha1collisiondetection:sha1dc"],
+    expect_archives = ["links komira//third_party/sha1collisiondetection:sha1dc: no library ships third_party/sha1collisiondetection (THIRD_PARTY_OWNERS)"],
+    visibility = _PUBLIC,
+)
+
+# Links an archive of a third_party package with no THIRD_PARTY_OWNERS row
+# at all (tests//third_party/native_reach_no_row, a package of this cell).
+native_reach_case(
+    name = "archive_no_row",
+    srcs = ["plain.mojo"],
+    deps = ["//third_party/native_reach_no_row:no_row"],
+    expect_archives = ["links tests//third_party/native_reach_no_row:no_row: third_party/native_reach_no_row has no row in THIRD_PARTY_OWNERS"],
+    visibility = _PUBLIC,
+)
+
+# A C library of no owner (outside src/ and third_party/) whose link needs
+# aws-lc: the archive the library names is not the one refused.
+cxx_library(
+    name = "needs_awslc",
+    exported_deps = ["komira//third_party/aws-lc:crypto"],
+)
+
+native_reach_case(
+    name = "archive_needed_by_c_dep",
+    srcs = ["plain.mojo"],
+    deps = [":needs_awslc"],
+    expect_archives = ["links komira//third_party/aws-lc:crypto_prefixed through ", ":needs_awslc, which komira//src/komira_crypto:komira_crypto owns"],
+    visibility = _PUBLIC,
+)
+
+# The fix: the owner reached only through a Mojo dep (komira_objectstore
+# depends on komira_fs) is in the closure, so both halves pass.
+native_reach_case(
+    name = "owner_through_mojo_dep",
+    srcs = ["plain.mojo"],
+    deps = [
+        "komira//src/komira_fs:komira_fs_posix",
+        "komira//src/komira_objectstore:komira_objectstore",
+    ],
+    visibility = _PUBLIC,
+)
+
+# Calls an owner's prefixed name from Mojo only, with no archive dep at all:
+# the archives half has nothing to refuse, the calls half must.
+native_reach_case(
+    name = "call_owner_missing",
+    srcs = ["calls.mojo"],
+    expect_calls = ["calls.mojo:5: \"komira_awslc_RAND_bytes\" is komira//src/komira_crypto:komira_crypto's (prefix komira_awslc_)"],
+    visibility = _PUBLIC,
+)
+
+# The scanner's reading of a source, end to end: a file in a subdirectory,
+# a single-quoted name after a string holding an escaped quote, and a
+# double-quoted one after a string holding `#`.
+native_reach_case(
+    name = "call_quoting",
+    srcs = ["sub/quoting.mojo"],
+    expect_calls = [
+        "sub/quoting.mojo:2: \"komira_s2n_after_escape\" is komira//src/komira_http_core:komira_http_core's",
+        "sub/quoting.mojo:3: \"komira_snappy_after_hash\" is komira//src/komira_compression:komira_compression's",
+    ],
+    visibility = _PUBLIC,
+)
+
+# Names in comments only, whole-line and trailing: nothing to refuse.
+native_reach_case(
+    name = "call_in_comment",
+    srcs = ["comment.mojo"],
+    visibility = _PUBLIC,
+)
+
+# A C library of no owner whose link needs an archive with no owner row: the
+# refusal holds for an archive reached through a C dep, not only one named.
+cxx_library(
+    name = "needs_no_row",
+    exported_deps = ["//third_party/native_reach_no_row:no_row"],
+)
+
+native_reach_case(
+    name = "archive_no_row_through_c_dep",
+    srcs = ["plain.mojo"],
+    deps = [":needs_no_row"],
+    expect_archives = ["links tests//third_party/native_reach_no_row:no_row through tests//negative/native_reach:needs_no_row: third_party/native_reach_no_row has no row in THIRD_PARTY_OWNERS"],
+    visibility = _PUBLIC,
+)
+
+# Two C deps, the refused archive not first, and a Mojo dep last: every
+# entry of `deps` is checked, not only the first or the last.
+native_reach_case(
+    name = "archive_refused_in_second_dep",
+    srcs = ["plain.mojo"],
+    deps = [
+        "komira//src/komira_fs:komira_fs_posix",
+        "//third_party/native_reach_no_row:no_row",
+        "komira//src/komira_fs:komira_fs",
+    ],
+    expect_archives = ["links tests//third_party/native_reach_no_row:no_row: third_party/native_reach_no_row has no row in THIRD_PARTY_OWNERS"],
+    visibility = _PUBLIC,
+)
+
+# A C library linked as objects, not an archive (use_archive = False): the
+# check reads an ObjectsLinkable's owner too.
+native_reach_case(
+    name = "objects_no_row",
+    srcs = ["plain.mojo"],
+    deps = ["//third_party/native_reach_no_row:no_row_objects"],
+    expect_archives = ["links tests//third_party/native_reach_no_row:no_row_objects: third_party/native_reach_no_row has no row in THIRD_PARTY_OWNERS"],
+    visibility = _PUBLIC,
+)

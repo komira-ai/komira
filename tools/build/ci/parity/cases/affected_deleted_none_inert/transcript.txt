@@ -1,0 +1,11 @@
+call git "rev-parse" "--verify" "--quiet" "parity-base^{commit}"
+exit 0
+stdout "1111111111111111111111111111111111111111\n"
+call git "cat-file" "-e" "parity-base:BUCK"
+exit 1
+call buck2 "uquery" "--output-format" "json" "owner(%s)" "src/a/a.mojo"
+exit 0
+stdout "{\"src/a/a.mojo\": [\"komira//src/a:a\", \"komira//src/a:a_test\"]}\n"
+call buck2 "cquery" "rdeps(//... + tests//..., set(komira//src/a:a komira//src/a:a_test))"
+exit 0
+stdout "komira//src/a:a (prelude//platforms:default#abcdef0123456789)\nkomira//src/a:a_test (prelude//platforms:default#abcdef0123456789)\n"
