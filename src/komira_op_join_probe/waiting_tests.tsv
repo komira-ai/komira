@@ -1,2 +1,2 @@
 # test	gate: a test that imports this package and a package not on main yet; it moves with that package.
-tests/test_join_null_key_all_strategies_differential.mojo	komira_op_join_sinks (the unified join sinks) and komira_op_stage_exec (execute_sink)
+tests/test_join_null_key_all_strategies_differential.mojo	komira_op_stage_exec (execute_sink) and the unified hash and sort-merge join sinks (inner_hash, left_hash, right_hash, inner_smj, left_smj, right_smj), which komira_op_join_sinks deferred
