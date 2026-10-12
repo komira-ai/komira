@@ -219,7 +219,7 @@ src/komira_udf	1750	10000
 src/komira_uuid	9534	8928
 src/komira_validation_run	10000	-
 src/komira_vcard	9500	-
-src/komira_viewport	8831	-
+src/komira_viewport	10000	-
 src/komira_webpush	10000	-
 src/komira_wkt	9987	9910
 src/komira_xml	9575	-
