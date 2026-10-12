@@ -1,0 +1,38 @@
+# proto-message: komira.plan.v1.OptimizedPlan
+format_version: 1
+producer {
+  engine_build: "Oo\306\003\220<\223n\375SY\347\244.\020;\3121\215\360aN\337k\037,B\023nE;\304"
+  optimizer_contract_version: 1
+  optimizer_config_digest: "\205Z\354\310\367]\353b\227\\T\260\366\242\324Zi\377\334+a\241\254\214\207\331:\257h\333\2473"
+  kind: "komira/python-sdk"
+}
+plan_digest: "\373\032:\240\336\301L4\226r>\337\353\312\3324\240OHt+\320\336^h\232\024E\230p\205!"
+recurring_signature: "\354\330\226\326\211\342C\"Z/\321I\376\207\007\313\243\304<\232dy;\210\331\020.\214\336\021Z\245"
+needs {
+  data_scopes: "orders"
+  data_scopes: "customers"
+  unbounded: true
+  runtimes {
+    runtime: "komira/node"
+    runtime_abi: "node22"
+  }
+  runtimes {
+    runtime: "komira/python"
+    runtime_abi: "cp312"
+  }
+}
+write_target {
+  path: "out/orders/"
+  format: WFMT_PARQUET
+  codec: WCOMP_ZSTD
+}
+advice {
+  stats_basis {
+    row_count: 150000
+  }
+  stats_basis {
+    pin_index: 1
+    row_count: 6001215
+  }
+}
+body: "\n\005\222\001\002\010M\022\n\010M\022\006\212\001\003\n\001v"

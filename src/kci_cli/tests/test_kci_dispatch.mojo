@@ -459,17 +459,19 @@ def test_the_machine_file() raises:
     write_whole_file(bad, String("schema_version: 1\nstage { name: \"x\" step { name: \"d\" kind: VALIDATE platform: \"linux-x86_64\" artifacts: \"d\" } }\n"))
     assert_equal(kci_main_with(_run(bad, String("x")), steps, rec), 3)
     assert_equal(_last(rec).error.id, String("KCI-E-FORMAT"))
-    # a valid DEPLOY step, and a valid PUBLISH into a cell: parsed, never run
-    var cell_steps = List[String]()
-    cell_steps.append(String("kind: DEPLOY cells: \"c\" cell: \"s\" resources: \"r.json\""))
-    cell_steps.append(String("kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"a\" cells: \"c\" cell: \"s\""))
-    for i in range(len(cell_steps)):
-        write_whole_file(bad, String("schema_version: 1\nname: \"m\"\nstage { name: \"x\" step { name: \"d\" ") + cell_steps[i] + String(" } }\n"))
-        var a = _run(bad, String("x"))
-        a.extend(_publish_flags())
-        assert_equal(kci_main_with(a, steps, rec), 3)
-        assert_equal(_last(rec).error.id, String("KCI-E-FORMAT"))
-        assert_true(_last(rec).error.message.find(String("writes into cell 's': that needs a newer kci")) >= 0)
+    # a valid PUBLISH into a cell whose cells file is not there: refused at
+    # load, before any step (a PUBLISH into a cell runs:
+    # test_kci_cell_publish.mojo)
+    write_whole_file(
+        bad,
+        String("schema_version: 1\nname: \"m\"\nstage { name: \"x\" step { name: \"d\" ")
+        + String("kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"a\" cells: \"c\" cell: \"s\" } }\n"),
+    )
+    var a = _run(bad, String("x"))
+    a.extend(_publish_flags())
+    assert_equal(kci_main_with(a, steps, rec), 3)
+    assert_equal(_last(rec).error.id, String("KCI-E-FORMAT"))
+    assert_true(_last(rec).error.message.find(String("the cells file 'c'")) >= 0, _last(rec).error.message)
     assert_equal(len(steps.calls), 0)
 
 

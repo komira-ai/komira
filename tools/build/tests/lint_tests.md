@@ -138,8 +138,10 @@ row for a package that is gone, two rows for one package, a misnamed row.
 
 Product coverage is every capability of the plan exercised through every
 surface by an end-to-end test of that surface.
-[`surface_capability_matrix`](../lint/surface_capability_matrix.bzl) is a
-validation over its ledger, one row per (surface, capability) naming the test
+[`surface_capability_matrix`](../lint/surface_capability_matrix.bzl) checks
+its ledger, at analysis what the build graph holds and in a validation (the
+Zig tool [`surface_grounding`](../lint/surface_grounding/src/grounding.zig),
+whose unit tests are its targets) what the grounding files declare: one row per (surface, capability) naming the test
 target that exercises the capability, or `-`. It writes the census
 (`[matrix]`, `[report]`) and never fails on a missing cell. It fails on a row
 that is malformed or lies: an unknown surface or capability, a pair with two
@@ -182,13 +184,13 @@ test, which
 names and which is built by its package pattern. That file and
 [`dangling.BUCK`](negative/surface_capability_matrix/dangling.BUCK) (a row
 naming a target that does not exist) are no BUCK files: either, loadable,
-fails every cquery over `tests//...`, so run_tests.sh copies each into its
-directory for its one build and deletes it. The lint only analyses the
+fails every cquery over `tests//...`, so the scenario
+[`analysis_refusals_lint`](../selftest/analysis_refusals_lint.zig) copies
+each into its directory of a scratch tree and analyses it there. The lint only analyses the
 e2e targets; `tests//functional/...` builds them.
 
 ```sh
 ./buck2 build //:surface_capability_matrix tests//functional/surface_capability_matrix:ok
 ./buck2 build tests//negative/surface_capability_matrix:alias           # must fail: ... stands for a target of tests//functional/surface_capability_matrix
-# after run_tests.sh's copy of incompatible.BUCK to incompatible/BUCK:
-./buck2 build tests//negative/surface_capability_matrix/incompatible:   # must fail: ... because its transitive dep .../pandas_e2e:test_mac
+./buck2 test //tools/build/selftest:analysis_refusals_lint            # dangling and incompatible, in a scratch tree
 ```
