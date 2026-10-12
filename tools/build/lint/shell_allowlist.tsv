@@ -19,10 +19,7 @@ tools/build/coverage/kcov/cov_run.sh	coverage and mutation tooling: to port to Z
 tools/build/lint/readme_api_coverage.sh	lint or validation: to port to Zig
 tools/build/lint/test_weld.sh	lint or validation: to port to Zig
 tools/build/mojo/darwin/busybox.sh	a thin wrapper: the darwin applet allowlist
-tools/build/mojo/darwin/cc	a thin wrapper: the C driver a darwin Mojo compile finds on PATH
 tools/build/mojo/darwin/dyld_prelude.sh	a thin fragment: the darwin loader variables
-tools/build/mojo/darwin/host_identity.sh	run by hand on a macOS host to fill the darwin host table
-tools/build/mojo/darwin/mojo_wrapper.sh	action runtime of the rules: to port to Zig
 tools/build/mojo/gate_runner.sh	action runtime of the rules: to port to Zig
 tools/build/mojo/launch.sh	a thin wrapper: sets the loader path and execs the binary
 tools/build/mojo/mem_cap.sh	action runtime of the rules: to port to Zig

@@ -1,5 +1,6 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:table.bzl", "row")
 load(":toolchain.bzl", "zig_exe", "zig_test")
 
 # Scripts and tool sources used by the Mojo rules.
@@ -32,6 +33,38 @@ zig_exe(
     imports = _MOJO_COMPILE_SRCS,
     src = "tools/mojo_compile.zig",
     unit_tests = [":mojo_compile_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
+# The same wrapper for macOS arm64 (tools/mojo_compile_macos.zig, the macOS
+# main over the same modules), built on a Linux worker for the darwin triple:
+# the darwin-arm64 toolchain's `wrapper` (darwin.bzl). Its unit tests run on
+# Linux (the pure modules, the libproc layouts); its process cases run on the
+# macOS workers (tests//functional/watchdog:cases_darwin).
+_MOJO_COMPILE_MACOS_SRCS = _MOJO_COMPILE_SRCS + [
+    "tools/host_identity.zig",
+    "tools/mojo_compile_macos.zig",
+    "tools/proc_tree_macos.zig",
+]
+
+zig_test(
+    name = "mojo_compile_darwin_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _MOJO_COMPILE_MACOS_SRCS,
+    src = "tools/mojo_compile_macos.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "mojo_compile_darwin",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _MOJO_COMPILE_MACOS_SRCS,
+    src = "tools/mojo_compile_macos.zig",
+    target = row("darwin-arm64")["zig_triple"],
+    unit_tests = [":mojo_compile_darwin_unit"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],

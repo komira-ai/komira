@@ -37,7 +37,7 @@
 # usage error. Every non-zero status is a failure, 77 included: there is no
 # SKIP (77 is "skipped" to automake and some test harnesses, never here). The
 # compile watchdog's 124 is the compiler's action
-# (mojo_wrapper.sh), not this one; a test's own exit 124 is its own verdict.
+# (mojo_compile), not this one; a test's own exit 124 is its own verdict.
 set -eu
 
 abspath() {
