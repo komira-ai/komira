@@ -1479,36 +1479,6 @@ def _expr_has_foldable(expr: Expr) -> Bool:
     return False
 
 
-def _plan_has_foldable_exprs(plan: LogicalPlan) -> Bool:
-    """Check if any expression in the plan tree is constant-foldable."""
-    if plan.tag == PLAN_FILTER:
-        if _expr_has_foldable(plan._filter.value()[].predicate):
-            return True
-        return _plan_has_foldable_exprs(plan._filter.value()[].child[])
-    elif plan.tag == PLAN_PROJECT:
-        for i in range(len(plan._project.value()[].exprs)):
-            if _expr_has_foldable(plan._project.value()[].exprs[i]):
-                return True
-        return _plan_has_foldable_exprs(plan._project.value()[].child[])
-    elif plan.tag == PLAN_SCAN:
-        if plan._scan.value()[].filter:
-            return _expr_has_foldable(plan._scan.value()[].filter.value())
-        return False
-    elif plan.tag == PLAN_AGGREGATE:
-        return _plan_has_foldable_exprs(plan._aggregate.value()[].child[])
-    elif plan.tag == PLAN_JOIN:
-        return _plan_has_foldable_exprs(plan._join.value()[].left[]) or _plan_has_foldable_exprs(plan._join.value()[].right[])
-    elif plan.tag == PLAN_SORT:
-        return _plan_has_foldable_exprs(plan._sort.value()[].child[])
-    elif plan.tag == PLAN_LIMIT:
-        return _plan_has_foldable_exprs(plan._limit.value()[].child[])
-    elif plan.tag == PLAN_DISTINCT:
-        return _plan_has_foldable_exprs(plan._distinct.value()[].child[])
-    elif plan.tag == PLAN_TOPN:
-        return _plan_has_foldable_exprs(plan._topn.value()[].child[])
-    return False
-
-
 def _expr_has_simplifiable(expr: Expr) -> Bool:
     """Check if an expression tree contains a simplifiable pattern."""
     if expr.tag == EXPR_BINARY_OP:
@@ -1526,36 +1496,6 @@ def _expr_has_simplifiable(expr: Expr) -> Bool:
         return _expr_has_simplifiable(expr.cast_child_ref())
     elif expr.tag == EXPR_ALIAS:
         return _expr_has_simplifiable(expr.alias_child_ref())
-    return False
-
-
-def _plan_has_simplifiable_exprs(plan: LogicalPlan) -> Bool:
-    """Check if any expression in the plan tree has simplifiable patterns."""
-    if plan.tag == PLAN_FILTER:
-        if _expr_has_simplifiable(plan._filter.value()[].predicate):
-            return True
-        return _plan_has_simplifiable_exprs(plan._filter.value()[].child[])
-    elif plan.tag == PLAN_PROJECT:
-        for i in range(len(plan._project.value()[].exprs)):
-            if _expr_has_simplifiable(plan._project.value()[].exprs[i]):
-                return True
-        return _plan_has_simplifiable_exprs(plan._project.value()[].child[])
-    elif plan.tag == PLAN_SCAN:
-        if plan._scan.value()[].filter:
-            return _expr_has_simplifiable(plan._scan.value()[].filter.value())
-        return False
-    elif plan.tag == PLAN_AGGREGATE:
-        return _plan_has_simplifiable_exprs(plan._aggregate.value()[].child[])
-    elif plan.tag == PLAN_JOIN:
-        return _plan_has_simplifiable_exprs(plan._join.value()[].left[]) or _plan_has_simplifiable_exprs(plan._join.value()[].right[])
-    elif plan.tag == PLAN_SORT:
-        return _plan_has_simplifiable_exprs(plan._sort.value()[].child[])
-    elif plan.tag == PLAN_LIMIT:
-        return _plan_has_simplifiable_exprs(plan._limit.value()[].child[])
-    elif plan.tag == PLAN_DISTINCT:
-        return _plan_has_simplifiable_exprs(plan._distinct.value()[].child[])
-    elif plan.tag == PLAN_TOPN:
-        return _plan_has_simplifiable_exprs(plan._topn.value()[].child[])
     return False
 
 

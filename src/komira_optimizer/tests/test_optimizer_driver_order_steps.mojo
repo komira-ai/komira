@@ -102,23 +102,26 @@ def _run(var p: LogicalPlan) raises -> LogicalPlan:
 # -----------------------------------------------------------------------------
 
 
-def test_a_residual_moved_to_a_filter_is_then_folded() raises:
-    """`t(a, ta) JOIN u(b, ub) ON a = b` with the residual `ta > 1 + 2`: step 5
-    moves the residual into a Filter on t, step 6's folding precheck then sees
-    that Filter, and the t scan ends with the filter `ta > 3`.
+def test_a_residual_conjunct_is_moved_before_it_is_folded() raises:
+    """`t(a, ta) JOIN u(b, ub) ON a = b` with the residual
+    `ta > 0 AND (ub > 0 OR 1 = 1)`: step 5 moves `ta > 0` into a Filter on t
+    and `ub > 0 OR 1 = 1` into a Filter on u, and step 6 then folds the
+    second to `true`, which stays as `Filter(true)` over the u scan.
 
-    Defect caught: step 6 before step 5, as a whole or as its first call
-    (`fold_constants` before `push_join_residual_to_side`). The precheck does
-    not read join residuals (komira#1306), so folding is skipped and a
-    `Filter(ta > 1 + 2)` stays over the t scan."""
+    Defect caught: step 6 before step 5 (`fold_constants` and
+    `simplify_predicates` before `push_join_residual_to_side`). Folding the
+    residual first turns it into `ta > 0` before step 5 reads it, and no
+    Filter is left over the u scan. The test pins the reference order; the
+    other order's plan is the smaller one (komira#1517)."""
     var jt: List[String] = ["a", "ta"]
     var ju: List[String] = ["b", "ub"]
-    var res = Expr.binary(BIN_GT, _c("ta"), Expr.binary(BIN_ADD, _lit(1), _lit(2)))
+    var u_side = Expr.binary(BIN_OR, _gt("ub", 0), Expr.binary(BIN_EQ, _lit(1), _lit(1)))
+    var res = _and(_gt("ta", 0), u_side^)
     var j = LogicalPlan.join(
         _scan("t.parquet", jt), _scan("u.parquet", ju), _l1("a"), _l1("b"),
         JOIN_INNER, JOIN_ALGO_AUTO, Optional[OwnedPointer[Expr]](OwnedPointer(res^)),
     )
-    assert_equal(_render(_run(j^)), _want_residual_folded())
+    assert_equal(_render(_run(j^)), _want_residual_moved_then_folded())
 
 
 def test_a_double_negation_is_removed_before_the_first_or_factoring() raises:
@@ -201,12 +204,13 @@ def test_a_limit_is_pushed_below_the_join_order_restoring_project() raises:
 # -----------------------------------------------------------------------------
 
 
-def _want_residual_folded() -> String:
+def _want_residual_moved_then_folded() -> String:
     var l: List[String] = [
         "Project(exprs=[ColRef(a), ColRef(ta), ColRef(b), ColRef(ub)])",
         "  Join(type=INNER, on=[b=a])",
-        "    Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR)",
-        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR, filter=BinaryOp(GT, ColRef(ta), Literal(ScalarValue(int64, 3))))",
+        "    Filter(predicate=Literal(ScalarValue(bool, true)))",
+        "      Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR)",
+        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR, filter=BinaryOp(GT, ColRef(ta), Literal(ScalarValue(int64, 0))))",
     ]
     return _lines(l)
 
