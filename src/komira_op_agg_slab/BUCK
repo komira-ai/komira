@@ -1,0 +1,24 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# SlabStorage, the group table of the struct-state hash aggregation sinks:
+# a SwissTable-style hash table over packed composite keys (one to eight
+# fixed-width columns) with one columnar state slab per aggregate, each read
+# as that aggregate's AggregatorWithStruct state struct. Groups are probed,
+# initialized, committed, merged across workers and finalized here; the
+# sinks that drive it are in this package too.
+mojo_library(
+    name = "komira_op_agg_slab",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_collections:komira_collections",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_op_agg_hash:komira_op_agg_hash",
+        "//src/komira_op_agg_state:komira_op_agg_state",
+    ],
+    test_srcs = [
+        "tests/test_aggregator_with_struct_trait.mojo",
+        "tests/test_corr_aggregator.mojo",
+        "tests/test_slab_storage_multikey_comprehensive.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

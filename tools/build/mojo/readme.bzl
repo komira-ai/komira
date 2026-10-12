@@ -59,7 +59,7 @@ def readme_kwargs(kwargs):
 # Whether a README holds an example is in its bytes, which analysis cannot
 # read, so a dynamic action reads `examples`: for each example it compiles
 # that example's program alone against the UNGATED package and runs it
-# through gate_runner.sh exactly as a `test_srcs` entry, labelled
+# through the gate (gate_mojo) exactly as a `test_srcs` entry, labelled
 # `<target>:README.md:<line>`, and the marker joins their markers; with none
 # it compiles and runs nothing, and the marker records that no example
 # exists (never a PASS line). A refused README (an info string such as
