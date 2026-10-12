@@ -326,8 +326,11 @@ fn recordingKill(pid: sys.pid_t, sig: u8) void {
 }
 
 // 2.1 step 4. Mutant: reap C before its group is killed (its /proc entry is
-// gone, so its group id could already be another process's).
+// gone, so its group id could already be another process's). Linux only:
+// macOS has no waitid(WNOWAIT), so there C is reaped (waitpid) and its group
+// killed right after (supervise.zig, `exited`).
 test "no pid reuse: C is still a zombie when its group is killed" {
+    if (!sys.is_linux) return error.SkipZigTest;
     const e = try Env.init();
     defer e.deinit();
     const setup = struct {
@@ -393,9 +396,10 @@ fn noProc(alloc: std.mem.Allocator) ?proctab.Table {
     return null;
 }
 
-// macOS paths, on Linux through the platform interface. Mutant: run a
-// capped test uncapped where there is no /proc.
-test "no /proc (macOS): a cap is refused with exit 2; the deadline group-kills and still prints the banner" {
+// A platform with no process table (neither /proc nor libproc), through
+// the platform interface. Mutant: run a capped test uncapped where there is
+// no table.
+test "no process table: a cap is refused with exit 2; the deadline group-kills and still prints the banner" {
     const e = try Env.init();
     defer e.deinit();
     const setup = struct {
@@ -414,4 +418,59 @@ test "no /proc (macOS): a cap is refused with exit 2; the deadline group-kills a
     try std.testing.expect(r2.ms < 5000);
     try std.testing.expect(before(r2.err, banner137, "TEST TIME LIMIT: killed //x:y after 1 s"));
     try std.testing.expect(kit.goneWithin(try kit.pidsFrom(e.a, f, 2), 2000));
+}
+
+// The real table of this platform (/proc on Linux, libproc on macOS), read
+// as the cap reads it: a forked child holding 32 MiB of touched memory is
+// below this process, the tree's sum counts it, and once it has exited
+// (unreaped) it is a zombie with no tree. Mutants (macOS): the parent pid
+// read from the wrong field (the child is not below this process), the
+// virtual size for the resident one (the sum is gigabytes), or a zombie
+// read as alive.
+test "the process table of this platform: a child's pages count toward its parent's tree; an exited child is a zombie" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const go = try posix.pipe();
+    const pid = try posix.fork();
+    if (pid == 0) {
+        posix.close(go[0]);
+        const mem = std.heap.page_allocator.alloc(u8, 32 << 20) catch posix.exit(99);
+        var i: usize = 0;
+        while (i < mem.len) : (i += 4096) mem[i] = 1;
+        sys.writeAll(go[1], "r");
+        sys.sleepMs(30_000);
+        posix.exit(0);
+    }
+    posix.close(go[1]);
+    var b: [1]u8 = undefined;
+    try std.testing.expectEqual(@as(usize, 1), sys.readFull(go[0], &b));
+    const me = sys.getpid();
+    const t = proctab.read(a).?;
+    try std.testing.expect(t.has(me));
+    try std.testing.expectEqual(me, t.find(pid).?.ppid);
+    const tree = t.tree(a, me).?;
+    try std.testing.expect(std.mem.indexOfScalar(i32, tree, pid) != null);
+    const child_kib = t.rss(&.{pid});
+    try std.testing.expect(child_kib >= 32 * 1024);
+    // Resident, not virtual: well under a gigabyte for a 32 MiB hog.
+    try std.testing.expect(child_kib < 1024 * 1024);
+    try std.testing.expect(t.rss(tree) >= child_kib);
+    try std.testing.expect(kit.alive(pid));
+
+    sys.kill(pid, posix.SIG.KILL);
+    var gone = false;
+    var k: u32 = 0;
+    while (k < 200 and !gone) : (k += 1) {
+        sys.sleepMs(10);
+        const t2 = proctab.read(a).?;
+        gone = if (t2.find(pid)) |p| p.state == 'Z' else true;
+    }
+    try std.testing.expect(gone);
+    try std.testing.expect(!kit.alive(pid));
+    try std.testing.expectEqual(@as(?[]i32, null), proctab.read(a).?.tree(a, pid));
+    const seen = proctab.selfSeen();
+    try std.testing.expectEqual(@as(i64, me), seen[0]);
+    try std.testing.expectEqual(@as(i64, me), seen[1]);
+    try std.testing.expectEqual(@as(?u8, 137), sys.waitpid(pid, false));
 }

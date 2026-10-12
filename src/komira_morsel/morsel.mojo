@@ -653,9 +653,8 @@ def split_into_views(
         A MorselViewArray of zero-copy views covering all rows.
     """
     var total_rows = batch._num_rows
-    var num_cols = batch.num_columns()
 
-    if total_rows == 0 or num_cols == 0:
+    if total_rows == 0:
         var result = MorselViewArray(1)
         result.append(MorselView(0, 0))
         return result^

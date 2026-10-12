@@ -286,7 +286,7 @@ def _generate_package(ctx, plugin, plugin_name, opt, tree, trees, generate, name
     pkg = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
     dep_closure = ctx.actions.tset(MojoPkgTSet, children = deps)
     ctx.actions.run(
-        mojo_precompile_cmd(tc, dep_closure.project_as_args("include"), gen_dir, pkg.as_output(), darwin_knobs = False),
+        mojo_precompile_cmd(tc, dep_closure.project_as_args("include"), gen_dir, pkg.as_output()),
         category = "mojo_precompile",
     )
 

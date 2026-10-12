@@ -13,6 +13,9 @@
 //!
 //! byte for byte: coverage's cov_zig recognises the link by that shape, and
 //! `cov_branch link` (cov_branch_link.zig) reproduces it (test 47, link_line.sh).
+//!
+//! On macOS (mojo_compile_macos.zig) the first line of shim.cfg is the host's C
+//! driver, `/usr/bin/cc`, and the shim runs `execLineMacos`.
 
 const std = @import("std");
 
@@ -162,6 +165,61 @@ pub fn execLineLinux(alloc: std.mem.Allocator, c: Config, args: []const []const 
     return out.toOwnedSlice();
 }
 
+/// The compiler's link arguments as the host's cc gets them (macOS):
+///
+///   -Xlinker -rpath -Xlinker <p>         dropped, all four
+///   -Xlinker -rpath (no -Xlinker pair after it)   dropped, the two
+///   -Xlinker <x>                         passed, the pair
+///   -Wl,-rpath,*                         dropped
+///   -rpath <p>                           dropped, both
+///   a trailing -Xlinker                  passed
+pub fn rewriteMacos(alloc: std.mem.Allocator, args: []const []const u8) ![]const []const u8 {
+    var out = std.ArrayList([]const u8).init(alloc);
+    var i: usize = 0;
+    while (i < args.len) {
+        const a = args[i];
+        i += 1;
+        if (eql(a, "-Xlinker") and i < args.len) {
+            if (eql(args[i], "-rpath")) {
+                i += 1;
+                if (args.len - i >= 2 and eql(args[i], "-Xlinker")) i += 2;
+                continue;
+            }
+            try out.appendSlice(&.{ a, args[i] });
+            i += 1;
+            continue;
+        }
+        if (starts(a, "-Wl,-rpath,")) continue;
+        if (eql(a, "-rpath")) {
+            if (i < args.len) i += 1;
+            continue;
+        }
+        try out.append(a);
+    }
+    return out.toOwnedSlice();
+}
+
+/// The argv the shim executes (macOS). shim.cfg's first line is the C driver
+/// (`/usr/bin/cc`, the host's, which links with the host's ld) and its second
+/// the deployment target, which reaches the link as MACOSX_DEPLOYMENT_TARGET,
+/// not as an argument:
+///
+///   <driver> -Wl,-S -Wl,-rpath,<runpath> <rewritten arguments> <link-tail lines>
+///
+/// `-Wl,-S` keeps debug-map entries (naming object files inside the sandbox)
+/// out of the output.
+pub fn execLineMacos(alloc: std.mem.Allocator, c: Config, args: []const []const u8) ![]const []const u8 {
+    var out = std.ArrayList([]const u8).init(alloc);
+    try out.appendSlice(&.{
+        c.zig,
+        "-Wl,-S",
+        try std.fmt.allocPrint(alloc, "-Wl,-rpath,{s}", .{c.runpath}),
+    });
+    try out.appendSlice(try rewriteMacos(alloc, args));
+    try out.appendSlice(c.tail);
+    return out.toOwnedSlice();
+}
+
 // ---- tests -------------------------------------------------------------------
 
 const testing = std.testing;
@@ -268,4 +326,56 @@ test "shim.cfg: round trip; a newline in a value and a short file are refused" {
     try testing.expectError(error.BadConfig, parseConfig(a, ""));
     const no_tail = try parseConfig(a, "/z/zig\nt\nr\n");
     try testing.expectEqual(@as(usize, 0), no_tail.tail.len);
+}
+
+// ---- macOS -------------------------------------------------------------------
+
+fn expectRewriteMacos(in: []const []const u8, want: []const []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const got = try rewriteMacos(arena.allocator(), in);
+    if (got.len != want.len) {
+        std.debug.print("macOS rewrite gave {d} arguments, want {d}:\n", .{ got.len, want.len });
+        for (got) |g| std.debug.print("  got  {s}\n", .{g});
+        for (want) |w| std.debug.print("  want {s}\n", .{w});
+        return error.TestUnexpectedResult;
+    }
+    for (got, want) |g, w| try testing.expectEqualStrings(w, g);
+}
+
+// Each catches a run path naming the action's sandbox reaching the host's
+// linker (design item 18). Mutant planted: keep `-Wl,-rpath,`.
+test "macOS shim: the three run path forms drop; another -Xlinker pair passes" {
+    try expectRewriteMacos(&.{ "-Xlinker", "-rpath", "-Xlinker", "/sandbox/lib", "x.o" }, &.{"x.o"});
+    try expectRewriteMacos(&.{ "-Wl,-rpath,/sandbox/q", "x.o" }, &.{"x.o"});
+    try expectRewriteMacos(&.{ "-rpath", "/sandbox/z", "x.o" }, &.{"x.o"});
+    try expectRewriteMacos(&.{ "-Xlinker", "-install_name", "-Xlinker", "@rpath/x.dylib" }, &.{ "-Xlinker", "-install_name", "-Xlinker", "@rpath/x.dylib" });
+    try expectRewriteMacos(&.{ "-Xlinker", "-L/l", "-lm" }, &.{ "-Xlinker", "-L/l", "-lm" });
+}
+
+// The shell's edges, kept: an -Xlinker -rpath with no pair after it drops
+// the two; a trailing -Xlinker and a trailing -rpath.
+test "macOS shim: incomplete forms at the end of the line" {
+    try expectRewriteMacos(&.{ "x.o", "-Xlinker", "-rpath" }, &.{"x.o"});
+    try expectRewriteMacos(&.{ "x.o", "-Xlinker", "-rpath", "-Xlinker" }, &.{ "x.o", "-Xlinker" });
+    try expectRewriteMacos(&.{ "x.o", "-Xlinker" }, &.{ "x.o", "-Xlinker" });
+    try expectRewriteMacos(&.{ "x.o", "-rpath" }, &.{"x.o"});
+}
+
+// The line the retired darwin/cc shell shim gave for the same input
+// (functional/darwin/check.sh's golden), byte for byte.
+test "macOS shim: the exact exec line, link tail last in order" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = Config{ .zig = "/usr/bin/cc", .target = "11.0", .runpath = "@loader_path/lib", .tail = &.{} };
+    const got = try execLineMacos(a, c, &.{ "-o", "out", "-Xlinker", "-rpath", "-Xlinker", "/sandbox/lib", "x.o", "-Xlinker", "-L/l", "-Wl,-rpath,/q", "-rpath", "/z", "-lm" });
+    const want = [_][]const u8{ "/usr/bin/cc", "-Wl,-S", "-Wl,-rpath,@loader_path/lib", "-o", "out", "x.o", "-Xlinker", "-L/l", "-lm" };
+    try testing.expectEqual(want.len, got.len);
+    for (got, want) |g, w| try testing.expectEqualStrings(w, g);
+    const c2 = Config{ .zig = "/usr/bin/cc", .target = "11.0", .runpath = "@loader_path/../..", .tail = &.{ "libc.a", "-lc++" } };
+    const got2 = try execLineMacos(a, c2, &.{ "-o", "out", "x.o" });
+    const want2 = [_][]const u8{ "/usr/bin/cc", "-Wl,-S", "-Wl,-rpath,@loader_path/../..", "-o", "out", "x.o", "libc.a", "-lc++" };
+    try testing.expectEqual(want2.len, got2.len);
+    for (got2, want2) |g, w| try testing.expectEqualStrings(w, g);
 }
