@@ -28,7 +28,7 @@
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_proto_codec import decode_json
-from kci_reconciler import CellScope, Label, Provenance, RETAIN_DELETE, RETAIN_KEEP
+from kci_reconciler import CellScope, LABEL_SCHEME, Label, Provenance, RETAIN_DELETE, RETAIN_KEEP
 from kci_resource_proto.resource import Resource
 from kci_cloud import (
     ACCESS_PUBLIC,
@@ -246,6 +246,28 @@ def test_a_member_or_target_kci_does_not_own_is_not_ours() raises:
 # ---- 3. the table is injective --------------------------------------------------------
 
 
+def test_a_stamp_kci_cannot_read_is_not_ours() raises:
+    """Catches: a stamp whose scheme is not a number read as some scheme, a
+    public binding attributed with no stamp on its target, or a target
+    stamped at its resource (no role) given a public node off its path."""
+    var s = _scope()
+    var target = _object(s, String("media"), String("media/bucket"), String(_BUCKET))
+    var odd = create_labels(s.stamp(String("runner"), String("runner/identity")), RETAIN_DELETE)
+    for i in range(len(odd)):
+        if odd[i].key == LABEL_SCHEME:
+            odd[i].value = String("x")
+    assert_true(standard_identity_of(odd).byte_length() > 0, "a complete stamp, its scheme not a number")
+    var member = BindingEnd(String(_SA), odd^)
+    assert_false(Bool(attribute(False, target, False, member, String("roles/storage.objectViewer"), _rows())))
+    var bare = BindingEnd(String(_RUN), List[Label]())
+    assert_false(Bool(attribute(False, bare, True, BindingEnd(), String("roles/run.invoker"), _rows())))
+    var top = _object(s, String("api"), String("api"), String(_RUN))
+    var d = attribute(False, top, True, BindingEnd(), String("roles/run.invoker"), _rows())
+    assert_true(Bool(d), "attributed")
+    assert_equal(d.value().node, "api/public")
+    print("  test_a_stamp_kci_cannot_read_is_not_ours: PASS")
+
+
 def test_the_role_table_must_be_injective() raises:
     """Catches: a check that compares only the first row with the rest (the
     collisions below sit after it)."""
@@ -335,6 +357,7 @@ def main() raises:
     test_an_identity_of_another_machine_is_never_this_cells()
     test_what_the_table_does_not_map_is_not_ours()
     test_a_member_or_target_kci_does_not_own_is_not_ours()
+    test_a_stamp_kci_cannot_read_is_not_ours()
     test_the_role_table_must_be_injective()
     test_a_derived_shape_refuses_a_grant_resource()
     test_a_derived_shape_refuses_uses_on_a_run_as_workload()
