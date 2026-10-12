@@ -37,7 +37,6 @@ const KINDS = [_]Kind{
     .{ .rule = "launcher_level_test", .target = "komira//tools/build/package:level_test" },
     .{ .rule = "release_order_test", .target = "komira//tools/build/package:release_order_passes_a_longer_name" },
     .{ .rule = "kcov_guard_cases", .target = "komira//tools/build/package:kcov_guard_cases" },
-    .{ .rule = "kcov_tool_cases", .target = "komira//tools/build/coverage/kcov:cov_zig_cases" },
     .{ .rule = "coverage_ci_cases", .target = "komira//:coverage_ci_cases" },
     .{ .rule = "proto_fixture_case", .target = "komira//tools/build/mojo/proto_fixture_testdata:accepts" },
     .{ .rule = "proto_check_case", .target = "komira//tools/vendor/googleapis:proto_check_accepts" },

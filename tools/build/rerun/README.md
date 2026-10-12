@@ -60,7 +60,6 @@ action that runs a test, and returns `rerun_info(ctx)` (the provider
 | `launcher_level_test` | the level test (`launcher_level_test`) |
 | `release_order_test` | the order check over its fixtures (`release_order_test`) |
 | `kcov_guard_cases` | the guard's cases (`kcov_guard_cases`) |
-| `kcov_tool_cases` | the tool's cases (`kcov_tool_cases`) |
 | `coverage_ci_cases` | the coverage workflow scripts' cases (`coverage_ci_cases`) |
 | `proto_fixture_case` | the fixture check over its case (`proto_fixture_case`) |
 | `proto_check_case` | the closure check over its case (`proto_check_case`) |
