@@ -28,6 +28,7 @@ load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":coverage.bzl", "COVERAGE_ATTRS", "COVERAGE_SHARED_LIB_ATTRS", "COVERAGE_TEST_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_readme", "coverage_run", "coverage_branch_of", "coverage_shared_lib", "coverage_shared_lib_macro", "coverage_sub_targets", "coverage_test", "coverage_test_kwargs")
 load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
 load(":mutation.bzl", "MUTATION_ATTRS", "mutation_kwargs", "mutation_sub_targets")
+load(":native_facts.bzl", "NATIVE_ATTRS", "native_facts", "native_refusal")
 load(":native_reach.bzl", "NATIVE_REACH_ATTRS", "native_reach", "native_reach_kwargs")
 load(":precompile.bzl", "precompile_cmd")
 load(":test_runtime.bzl", _arg_args = "arg_args", _data_map = "data_map", _env_args = "env_args", _test_root = "test_root")
@@ -285,7 +286,7 @@ def _check_import_name(ctx, name):
     if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", name):
         fail("{}: import name `{}` is not a Mojo identifier; set `import_name`".format(ctx.label, name))
 
-def _conda_facts(ctx, import_name, c_link, has_tests):
+def _conda_facts(ctx, import_name, c_link, has_tests, native):
     """(conda name, refusal) of this library's conda package.
 
     The name is None when the library opted out. The refusal is None when the
@@ -299,8 +300,9 @@ def _conda_facts(ctx, import_name, c_link, has_tests):
     name = ctx.attrs.conda_name or import_name
     if not regex_match("^[a-z][a-z0-9_]*$", name):
         return name, "`{}` is not a conda name (a lowercase letter, then lowercase letters, digits and _); set `conda_name`".format(name)
-    if c_link != None:
-        return name, "{} links native code. A `.mojoc` holds none, so a consumer would fail at its own link; no conda package for it until native code is supported".format(ctx.label.raw_target())
+    native_why = native_refusal(ctx.label, native) if c_link != None else None
+    if native_why != None:
+        return name, native_why
     if dlopen_refusal(ctx) != None:
         return name, dlopen_refusal(ctx)
     if not has_tests:
@@ -323,6 +325,7 @@ def _library_impl(ctx):
     _check_deps(ctx)
     deps = _dep_closure(ctx)
     c_link = _c_link(ctx)
+    native = native_facts(ctx, import_name)  # native_facts.bzl
 
     ungated = ctx.actions.declare_output("ungated/" + import_name + ".mojoc")
     dep_closure = ctx.actions.tset(MojoPkgTSet, children = deps)
@@ -399,7 +402,7 @@ def _library_impl(ctx):
     # README's examples are not counted, since analysis cannot tell whether
     # it holds any (see readme.bzl, readme_gate).
     has_tests = len(markers) > 0
-    conda_name, conda_refusal = _conda_facts(ctx, import_name, c_link, has_tests)
+    conda_name, conda_refusal = _conda_facts(ctx, import_name, c_link, has_tests, native)
 
     # A README that ships (the library has a conda package the build can make,
     # which installs it at share/doc/<conda name>/README.md) refuses relative
@@ -460,6 +463,7 @@ def _library_impl(ctx):
                 if MojoInfo in d
             },
             import_name = import_name,
+            native = native,
             pkgs = ctx.actions.tset(MojoPkgTSet, value = public, children = deps),
             pkgs_def = MojoPkgTSet,
             readme = ctx.attrs.readme,
@@ -553,7 +557,7 @@ mojo_library_rule = rule(
         # itself built from a mojo_library, so a default would be a cycle.
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
-    } | COVERAGE_ATTRS | DLOPEN_ATTRS | MUTATION_ATTRS | NATIVE_REACH_ATTRS | LIBRARY_DEFINE_ATTRS | _TOOLCHAIN_ATTR,
+    } | COVERAGE_ATTRS | DLOPEN_ATTRS | MUTATION_ATTRS | NATIVE_ATTRS | NATIVE_REACH_ATTRS | LIBRARY_DEFINE_ATTRS | _TOOLCHAIN_ATTR,
 )
 
 # ---- mojo_binary / mojo_test ----------------------------------------------
@@ -914,6 +918,7 @@ def _mojo_library(**kwargs):
         conda_package(
             name = name + "_conda",
             lib = ":" + name,
+            native = kwargs.get("native"),
             # A library of the coverage ledger: its gate, `<name>_cov_gate`.
             coverage_gate = cov_gate,
             summary = summary or "The `{}` Mojo library of komira, as a conda package.".format(kwargs.get("import_name") or name),

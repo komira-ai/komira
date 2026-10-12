@@ -692,9 +692,9 @@ cov_report_check(
 # release build plus the profile runtime: mojo_wrapper.sh's `cc` shim gives
 # zig what `mojo build` asks for (the compiler's runtime library,
 # --gc-sections, -lm, the shim's --strip-debug and run path), and
-# cov_branch_link.sh gives zig the same line for the instrumented object
-# (link_line.sh). A Mojo release linking with another library, or a link
-# script that drops one, fails here.
+# `cov_branch link` gives zig the same line for the instrumented object
+# (link_line.sh). A Mojo release linking with another library, or a branch
+# coverage link that drops one, fails here.
 cov_link_line_check(
     name = "link_line",
     bc = ":branchlib[coverage][bc][test_score_arms]",

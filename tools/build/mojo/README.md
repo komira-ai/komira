@@ -842,6 +842,14 @@ digest in every consumer (test 7). A repository's own C code, mounted at one
 place, does not need it.
 [`../examples/cshim`](../examples/cshim) calls C from Mojo.
 
+A library whose closure links C has a conda package only when, for each C
+library a library of its closure lists in `deps`, a library of the closure
+ships it ([`native_facts.bzl`](native_facts.bzl)): `native = ":<name>_native"`
+names the library's own shared library ([`../native`](../native/README.md)),
+which links exactly its C `deps`; `native_static = True` ships them as static
+archives (per-library state only). Otherwise the package is refused for its
+native code.
+
 zig's libc++ and libc++abi are linked statically. The Mojo runtime itself
 loads `libstdc++.so.6`, so a binary may hold both runtimes; it exports no
 dynamic symbol, so neither can interpose on the other (test 20, on the snappy
