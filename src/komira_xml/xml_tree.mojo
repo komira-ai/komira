@@ -340,15 +340,21 @@ def _canon_into(node: XmlNode, mut out: String, depth: Int) raises:
         raise Error("xml: element nesting deeper than " + String(XML_MAX_DEPTH))
     out += "<"
     out += _qualified(node.ns, node.local)
-    # Attributes in a stable order: sorted by (namespace, local name).
+    # Attributes in a stable order: sorted by the pair (namespace name, local
+    # name), compared bytewise, an attribute in no namespace (the empty name)
+    # first, as C14N 2.0 orders them. Not by the `{ns}local` string: that
+    # puts `{urn:ab}c` before `{urn:a}z` and `{urn:x}k` before `é`.
     var order = List[Int]()
     for i in range(len(node.attr_local)):
         order.append(i)
     for a in range(len(order)):
         for b in range(a + 1, len(order)):
-            var ka = _qualified(node.attr_ns[order[a]], node.attr_local[order[a]])
-            var kb = _qualified(node.attr_ns[order[b]], node.attr_local[order[b]])
-            if kb < ka:
+            var na = node.attr_ns[order[a]]
+            var nb = node.attr_ns[order[b]]
+            if nb < na or (
+                nb == na
+                and node.attr_local[order[b]] < node.attr_local[order[a]]
+            ):
                 var t = order[a]
                 order[a] = order[b]
                 order[b] = t
