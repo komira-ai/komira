@@ -331,8 +331,9 @@ def test_a_residual_join_builds_right() raises:
 
 def test_wide_string_payload_predicate() raises:
     """True only for MORE THAN 3 non-key payload columns with a STRING among
-    them; key columns are not payload. Catches `> 3` weakened to `>= 3`, the
-    STRING test dropped and keys counted as payload."""
+    them; key columns, including a STRING key, are not payload. Catches `> 3`
+    weakened to `>= 3`, the STRING test dropped, keys counted as payload and
+    a STRING key counted as a STRING payload."""
     var keys: List[String] = ["k"]
     var none: List[String] = []
     assert_true(_side_has_wide_string_build_payload(_wide_string("w", "k", 1), keys))
@@ -347,6 +348,17 @@ def test_wide_string_payload_predicate() raises:
     assert_true(_side_has_wide_string_build_payload(three, none))
     var n: List[String] = ["k", "a", "b", "c", "d"]
     assert_false(_side_has_wide_string_build_payload(_ints("i", n, 1), keys))
+    # A STRING key with four INT64 payload columns: the key is not payload,
+    # so there is no STRING payload.
+    var sk = SchemaBuilder()
+    sk.add_field(Field("k", ArrowType.STRING, True))
+    sk.add_field(Field("a", ArrowType.INT64, True))
+    sk.add_field(Field("b", ArrowType.INT64, True))
+    sk.add_field(Field("c", ArrowType.INT64, True))
+    sk.add_field(Field("d", ArrowType.INT64, True))
+    assert_false(
+        _side_has_wide_string_build_payload(_scan_rows("sk", sk.build(), 1), keys)
+    )
 
 
 def test_wide_string_right_side_does_not_build_against_the_cost() raises:
@@ -710,8 +722,9 @@ def test_leaves_pass_and_an_unknown_tag_is_refused() raises:
 
 def test_join_children_are_decided_as_well_as_the_parent() raises:
     """A residual parent (RIGHT) still has both child joins decided (LEFT
-    each), and nothing moves. Catches the child recursion moved below the
-    parent's decision or dropped."""
+    each), and nothing moves. Catches the child recursion dropped. (Running
+    it after the parent's decision gives the same plan: the decision reads
+    no child's build side.)"""
     var lo: List[String] = ["a"]
     var ro: List[String] = ["a"]
     var res = Optional[OwnedPointer[Expr]](OwnedPointer(Expr.col_ref("lv")))
