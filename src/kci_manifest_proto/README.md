@@ -85,6 +85,21 @@ The binary encoding is the content-address preimage, so it must not drift
 across a round trip: decoding and encoding again reproduces the bytes, and
 the JSON form decodes to the same bytes:
 
+<!-- mojo-hidden
+from std.testing import assert_equal
+from kci_manifest_proto.full_manifest import FullManifest
+from komira_proto_codec import decode_json, decode_proto, encode_json, encode_proto
+
+def manifest_json() -> String:
+    return (
+        '{"environment":"staging","nodes":['
+        + '{"logicalId":"jobs","kind":"RESOURCE_KIND_QUEUE","retention":"RETENTION_DELETE",'
+        + '"queue":{"name":"jobs"}},'
+        + '{"logicalId":"settings","kind":"RESOURCE_KIND_CONFIG","dependsOn":["jobs"],'
+        + '"retention":"RETENTION_RETAIN_KEEP","configData":{"values":{"QUEUE":"jobs"}}}'
+        + ']}'
+    )
+-->
 ```mojo
 var manifest = decode_json[FullManifest](manifest_json())
 var preimage = encode_proto(manifest)
@@ -95,6 +110,10 @@ assert_equal(encode_proto(decode_json[FullManifest](encode_json(manifest))), pre
 A kind is read by name and stored by number, and the names are the ones the
 `.proto` declares:
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+from kci_manifest_proto.full_manifest import ResourceKind
+-->
 ```mojo
 var bucket = ResourceKind.from_json_name("RESOURCE_KIND_BUCKET")
 assert_equal(bucket.number(), ResourceKind.RESOURCE_KIND_BUCKET)

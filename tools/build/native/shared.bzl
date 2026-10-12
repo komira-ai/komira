@@ -20,9 +20,11 @@ load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
 load("@komira//tools/build/platforms:table.bzl", "os_floor_version", "row")
 
 NativeSharedInfo = provider(
-    doc = "A komira library's own shared library, for the libraries that declare it a NEEDED owner.",
-    # so: the shared library, lib<library>_native.so.1; soname: its SONAME.
-    fields = ["so", "soname"],
+    doc = "A komira library's own shared library, for the libraries that declare it a NEEDED owner and for its library's conda package.",
+    # so: the shared library, lib<library>_native.so.1; soname: its SONAME;
+    # library: the Mojo library's import name; archives: the labels of the
+    # archives linked whole, sorted; glibc_floor: the floor check 5 held it to.
+    fields = ["archives", "glibc_floor", "library", "so", "soname"],
 )
 
 # What each check reads besides the shared object (native_so.zig, `check`).
@@ -158,7 +160,13 @@ def _native_shared_library_impl(ctx):
             },
         ),
         ValidationInfo(validations = specs),
-        NativeSharedInfo(so = so, soname = soname),
+        NativeSharedInfo(
+            archives = sorted([str(d.label.raw_target()) for d in ctx.attrs.archives]),
+            glibc_floor = ctx.attrs.glibc_floor,
+            library = ctx.attrs.library,
+            so = so,
+            soname = soname,
+        ),
     ]
 
 _native_shared_library = rule(
@@ -179,18 +187,50 @@ _native_shared_library = rule(
     },
 )
 
-def _glibc_floor(name):
-    floor = row(name)["os_floor"]
-    if not floor.startswith("glibc-"):
-        fail("platform row {}: os_floor {} is not a glibc floor".format(name, floor))
-    return os_floor_version(name)
+def glibc_floor_of(platform_row):
+    """The glibc version of a platform row's `os_floor` (`glibc-2.34` -> `2.34`).
 
-def native_shared_library(**kwargs):
-    """`_native_shared_library` with `glibc_floor` read from the platform table.
+    Takes the row itself, so a test can hand it a fixture row with another
+    floor (`:glibc_floor_test` in BUCK)."""
+    floor = platform_row["os_floor"]
+    if not floor.startswith("glibc-"):
+        fail("platform row {}: os_floor {} is not a glibc floor".format(platform_row.get("name", "?"), floor))
+    return floor[len("glibc-"):]
+
+def linux_glibc_floor():
+    """The glibc floor every library's shared library and conda package carry.
 
     The Mojo toolchain links for row linux-x86_64 only (its `zig_triple`;
-    komira-limit:mojo-toolchain-x86-64), so that row's `os_floor` is the floor.
+    komira-limit:mojo-toolchain-x86-64), so that row's `os_floor` is the
+    floor: check 5 holds each shared library to it, and the packer writes it
+    as the `__glibc >=<floor>` requirement (tools/build/package/conda.bzl).
     """
-    _rule(glibc_floor = _glibc_floor("linux-x86_64"), **kwargs)
+    floor = glibc_floor_of(row("linux-x86_64"))
+    if floor != os_floor_version("linux-x86_64"):
+        fail("glibc floor {} is not the table's os_floor_version {}".format(floor, os_floor_version("linux-x86_64")))
+    return floor
+
+def native_shared_library(**kwargs):
+    """`_native_shared_library` with `glibc_floor` read from the platform table."""
+    _rule(glibc_floor = linux_glibc_floor(), **kwargs)
+
+def _glibc_floor_test_impl(ctx):
+    got = glibc_floor_of({"name": "fixture", "os_floor": ctx.attrs.os_floor})
+    if got != ctx.attrs.expect:
+        fail("{}: glibc_floor_of a fixture row with os_floor {} gives {}, not {}: the floor is not read from the row".format(ctx.label, ctx.attrs.os_floor, got, ctx.attrs.expect))
+    out = ctx.actions.write(ctx.label.name + ".passed", "glibc_floor_of({}) = {}\n".format(ctx.attrs.os_floor, got))
+    return [DefaultInfo(default_output = out)]
+
+# glibc_floor_of over a fixture platform row (a floor no real row has): fails
+# at analysis unless the floor comes from the row, so a constant floor is red.
+_glibc_floor_test = rule(
+    impl = _glibc_floor_test_impl,
+    attrs = {
+        "expect": attrs.string(),
+        "os_floor": attrs.string(),
+    },
+)
+
+glibc_floor_test = declares_docs(_glibc_floor_test)
 
 _rule = declares_docs(_native_shared_library)
