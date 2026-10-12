@@ -306,9 +306,24 @@ def test_return_type_missing() raises:
     _refused(u, OPTIMIZED_UDF_RETURN_TYPE_MISSING, "no return_type")
 
 
+def _sweep_admits(id: String, what: String) raises:
+    assert_true(udf_runtime_id_is_valid(id), what + ": refused '" + id + "'")
+    var u = _scalar(_leaf("y", ArrowType.FLOAT64))
+    u.code.runtime = id
+    _ = _admitted(u, what + " ('" + id + "')")
+
+
+def _sweep_refuses(id: String, what: String) raises:
+    assert_false(udf_runtime_id_is_valid(id), what + ": admitted '" + id + "'")
+    var u = _scalar(_leaf("y", ArrowType.FLOAT64))
+    u.code.runtime = id
+    _refused(u, OPTIMIZED_UDF_RUNTIME_MALFORMED, what + " ('" + id + "')")
+
+
 def test_runtime_malformed() raises:
     """Defects: a grammar check that admits an id outside
-    `<namespace>/<name>`, a missing form, an empty PACKAGE entry, a digest that
+    `<namespace>/<name>` or refuses one inside it (a boundary sweep of the
+    part alphabet at each byte position), a missing form, an empty PACKAGE entry, a digest that
     is not 32 bytes, or no `code` at all. Each control shape is admitted."""
     var ok = _scalar(_leaf("y", ArrowType.FLOAT64))
     _ = _admitted(ok, "komira/python")
@@ -335,6 +350,38 @@ def test_runtime_malformed() raises:
     for _ in range(62):
         max_part += "b"
     assert_true(udf_runtime_id_is_valid("komira/" + max_part), "a 63-byte part")
+
+    # The alphabet's edges, at each of the four places a byte is judged: the
+    # first byte and a later byte, of the namespace and of the name. Each
+    # edge ('0', '9', 'a', 'z', and '.', '_', '-' after the first byte) is
+    # admitted; each byte just outside a range (':' after '9', '`' before
+    # 'a', '{' after 'z', and ',', '^' beside '-' and '_') is refused, and
+    # so are '.', '_' and '-' as a first byte. '/' (just below '0') cannot
+    # reach the part check: it splits the id into three parts.
+    var edges: List[String] = ["0", "9", "a", "z"]
+    var later_only: List[String] = [".", "_", "-"]
+    var outside: List[String] = ["/", ":", "`", "{", ",", "^", "A", "Z", "@", "["]
+    for i in range(len(edges)):
+        var c = edges[i].copy()
+        _sweep_admits(c + "x/y", "first namespace byte '" + c + "'")
+        _sweep_admits("x/" + c + "y", "first name byte '" + c + "'")
+        _sweep_admits("x" + c + "/y", "later namespace byte '" + c + "'")
+        _sweep_admits("x/y" + c, "later name byte '" + c + "'")
+    for i in range(len(later_only)):
+        var c = later_only[i].copy()
+        _sweep_admits("x" + c + "/y", "later namespace byte '" + c + "'")
+        _sweep_admits("x/y" + c, "later name byte '" + c + "'")
+        _sweep_refuses(c + "x/y", "first namespace byte '" + c + "'")
+        _sweep_refuses("x/" + c + "y", "first name byte '" + c + "'")
+    for i in range(len(outside)):
+        var c = outside[i].copy()
+        _sweep_refuses(c + "x/y", "first namespace byte '" + c + "'")
+        _sweep_refuses("x/" + c + "y", "first name byte '" + c + "'")
+        _sweep_refuses("x" + c + "/y", "later namespace byte '" + c + "'")
+        _sweep_refuses("x/y" + c, "later name byte '" + c + "'")
+    # Whole ids made of edges only, digit first.
+    _sweep_admits("0az9/9za0", "every edge, digit first")
+    _sweep_admits("9/z", "one-byte parts at the edges")
 
     var pkg = _scalar(_leaf("y", ArrowType.FLOAT64))
     pkg.code.form = CODE_FORM_PACKAGE

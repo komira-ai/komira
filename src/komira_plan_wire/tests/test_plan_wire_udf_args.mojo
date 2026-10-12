@@ -15,7 +15,7 @@ from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
-from komira_plan_expr.expr import Expr, BIN_AND
+from komira_plan_expr.expr import Expr, BIN_ADD, BIN_AND
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_expr.udf_data import (
     UDF_NULL_MANUAL,
@@ -210,7 +210,8 @@ def test_an_unset_read_set_means_every_input_column() raises:
     """Defect: an unset read set read as "whatever `arg_types` says". A frame
     with no read set over a 2-column child whose `arg_types` lists 1 column
     is refused; one listing both, in order, decodes; a reordered list is
-    refused. The same for a ROW call."""
+    refused, and so is one with the input's types in order under other
+    names. The same for a ROW call."""
     var gb = List[Expr]()
     _decodes(_frame(List[Expr]()), _list(_frame_ref(_types("a", ArrowType.INT64, "b", ArrowType.FLOAT64), None)), "a frame receiving both columns")
     _starts(
@@ -227,6 +228,15 @@ def test_an_unset_read_set_means_every_input_column() raises:
     var short = _ref(UDF_REF_KIND_ROW, _one("a", ArrowType.INT64), _leaf("r", ArrowType.FLOAT64), null_mode=UDF_NULL_MANUAL)
     var q = _project(Expr.udf_apply(0, short.return_type.value().copy(), _cols("a")), _scan())
     _starts(_refusal(q, _list(short^)), OPTIMIZED_UDF_ARGUMENT_TYPE_MISMATCH, "a ROW listing one of two columns")
+    # Same types in the same order, other names: the names are part of
+    # "exactly" (a check comparing types alone admits both of these).
+    _starts(
+        _refusal(_frame(List[Expr]()), _list(_frame_ref(_types("x", ArrowType.INT64, "y", ArrowType.FLOAT64), None))),
+        OPTIMIZED_UDF_ARGUMENT_TYPE_MISMATCH, "a frame naming (x, y) over (a, b)",
+    )
+    var renamed = _ref(UDF_REF_KIND_ROW, _types("x", ArrowType.INT64, "y", ArrowType.FLOAT64), _leaf("r", ArrowType.FLOAT64), null_mode=UDF_NULL_MANUAL)
+    var r = _project(Expr.udf_apply(0, renamed.return_type.value().copy(), _cols("a", "b")), _scan())
+    _starts(_refusal(r, _list(renamed^)), OPTIMIZED_UDF_ARGUMENT_TYPE_MISMATCH, "a ROW naming (x, y) over (a, b)")
 
 
 def test_step_literal_types_are_exact() raises:
@@ -261,13 +271,44 @@ def test_a_frame_read_set_names_child_columns() raises:
     )
 
 
+def _int_frame(var key: Expr) raises -> LogicalPlan:
+    """A frame over (a INT64, b INT64) grouped by the one key `key`."""
+    var gb = List[Expr]()
+    gb.append(key^)
+    return LogicalPlan.map_batches(
+        _scan_of(_schema2("a", ArrowType.INT64, "b", ArrowType.INT64)), 0, gb^,
+        _frame_schema(),
+    )
+
+
+def _a_plus_b() -> Expr:
+    return Expr.binary(BIN_ADD, Expr.col_ref("a"), Expr.col_ref("b"))
+
+
 def test_a_grouped_frame_reads_its_keys() raises:
-    """Defect: a grouped frame whose read set omits a column its `group_by`
-    reads."""
+    """Defects: a grouped frame whose read set omits a column its `group_by`
+    reads; a check that looks at the first key only (group by (b, a) with
+    read set {b} omits the second key's column); and one that looks at the
+    first column of a key only (the key a + b, with either column named
+    alone)."""
     _decodes(_frame(_cols("a")), _list(_frame_ref(_types("a", ArrowType.INT64, "b", ArrowType.FLOAT64), Optional(_names("a", "b")))), "read set {a, b}, group by a")
     _starts(
         _refusal(_frame(_cols("a")), _list(_frame_ref(_one("b", ArrowType.FLOAT64), Optional(_names("b"))))),
         OPTIMIZED_UDF_READ_SET_GROUP_KEY, "read set {b}, group by a",
+    )
+    _decodes(_frame(_cols("b", "a")), _list(_frame_ref(_types("a", ArrowType.INT64, "b", ArrowType.FLOAT64), Optional(_names("a", "b")))), "read set {a, b}, group by (b, a)")
+    _starts(
+        _refusal(_frame(_cols("b", "a")), _list(_frame_ref(_one("b", ArrowType.FLOAT64), Optional(_names("b"))))),
+        OPTIMIZED_UDF_READ_SET_GROUP_KEY, "read set {b}, group by (b, a)",
+    )
+    _decodes(_int_frame(_a_plus_b()), _list(_frame_ref(_types("a", ArrowType.INT64, "b", ArrowType.INT64), Optional(_names("a", "b")))), "read set {a, b}, group by a + b")
+    _starts(
+        _refusal(_int_frame(_a_plus_b()), _list(_frame_ref(_one("a", ArrowType.INT64), Optional(_names("a"))))),
+        OPTIMIZED_UDF_READ_SET_GROUP_KEY, "read set {a}, group by a + b",
+    )
+    _starts(
+        _refusal(_int_frame(_a_plus_b()), _list(_frame_ref(_one("b", ArrowType.INT64), Optional(_names("b"))))),
+        OPTIMIZED_UDF_READ_SET_GROUP_KEY, "read set {b}, group by a + b",
     )
 
 

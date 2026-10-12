@@ -55,10 +55,12 @@ from komira_plan_wire import (
     plan_envelope_from_bytes,
     optimized_plan_from_bytes,
     optimized_plan_to_bytes,
+    plan_wire_check_udfs,
     OPTIMIZED_UDF_UNDECLARED,
     OPTIMIZED_UDF_KIND_ARM_MISMATCH,
     OPTIMIZED_UDF_AGGREGATE_OUTSIDE_AGGREGATE,
     OPTIMIZED_UDF_LEGACY_FORM,
+    PLAN_WIRE_AGG_ARG_DROPPED,
 )
 
 
@@ -365,6 +367,58 @@ def test_the_optimized_encoder_refuses_what_the_decoder_would() raises:
 # ---- kinds -----------------------------------------------------------------------------
 
 
+def _of_kind(kind: UInt8) -> UdfRef:
+    """An entry of `kind` that is valid on its own: a STEP is VOLATILE, a ROW
+    MANUAL; the struct return type is the one the arm tests' nodes output."""
+    var stability = UDF_STABILITY_VOLATILE if kind == UDF_REF_KIND_STEP else UDF_STABILITY_STABLE
+    var null_mode = UDF_NULL_MANUAL if kind == UDF_REF_KIND_ROW else UDF_NULL_PROPAGATE
+    return _ref(
+        kind, _one(ArrowType.FLOAT64),
+        _struct(_cols("k", ArrowType.INT64, "v", ArrowType.FLOAT64)),
+        stability, null_mode,
+    )
+
+
+def _kind_text(kind: UInt8) -> String:
+    if kind == UDF_REF_KIND_SCALAR:
+        return "SCALAR"
+    if kind == UDF_REF_KIND_ROW:
+        return "ROW"
+    if kind == UDF_REF_KIND_MAP_BATCHES_COLUMN:
+        return "MAP_BATCHES_COLUMN"
+    if kind == UDF_REF_KIND_AGGREGATE:
+        return "AGGREGATE"
+    if kind == UDF_REF_KIND_MAP_BATCHES_FRAME:
+        return "MAP_BATCHES_FRAME"
+    return "STEP"
+
+
+def test_every_arm_refuses_every_kind_outside_its_set() raises:
+    """Defect: an arm whose allowed set holds one kind too many. A sweep of
+    every (arm, kind) pair the design refuses (§10.2): a WireUdfApply naming
+    a MAP_BATCHES_FRAME or a STEP; a WireMapBatchesNode naming anything but a
+    MAP_BATCHES_FRAME; a WireStepNode naming anything but a STEP. The
+    admitted pairs are the round trips above (SCALAR, ROW and
+    MAP_BATCHES_COLUMN calls, a frame node, a step node, an AGGREGATE as an
+    AGG_UDF measure); an AGGREGATE in a WireUdfApply outside a measure has
+    its own refusal (test_an_aggregate_entry_only_as_an_agg_udf_measure)."""
+    var kinds: List[UInt8] = [
+        UDF_REF_KIND_SCALAR, UDF_REF_KIND_ROW, UDF_REF_KIND_MAP_BATCHES_COLUMN,
+        UDF_REF_KIND_AGGREGATE, UDF_REF_KIND_MAP_BATCHES_FRAME, UDF_REF_KIND_STEP,
+    ]
+    for i in range(len(kinds)):
+        var k = kinds[i]
+        var u = _of_kind(k)
+        if k == UDF_REF_KIND_MAP_BATCHES_FRAME or k == UDF_REF_KIND_STEP:
+            var p = _project(_call(0, u.return_type.value(), _col_b()))
+            _starts(_raw_refusal(p, _list(u.copy())), OPTIMIZED_UDF_KIND_ARM_MISMATCH, "a WireUdfApply naming a " + _kind_text(k))
+        if k != UDF_REF_KIND_MAP_BATCHES_FRAME:
+            var mb = LogicalPlan.map_batches(_scan(), 0, List[Expr](), _out_schema())
+            _starts(_raw_refusal(mb, _list(u.copy())), OPTIMIZED_UDF_KIND_ARM_MISMATCH, "a WireMapBatchesNode naming a " + _kind_text(k))
+        if k != UDF_REF_KIND_STEP:
+            _starts(_raw_refusal(_step_plan(0), _list(u.copy())), OPTIMIZED_UDF_KIND_ARM_MISMATCH, "a WireStepNode naming a " + _kind_text(k))
+
+
 def test_each_arm_names_only_its_kinds() raises:
     """Defect: an arm that accepts an entry of another call shape (one entry
     would then be bound to two argument schemas)."""
@@ -406,6 +460,50 @@ def test_an_aggregate_entry_only_as_an_agg_udf_measure() raises:
     _starts(_raw_refusal(n, _list(s^)), OPTIMIZED_UDF_AGGREGATE_OUTSIDE_AGGREGATE, "an AGG_UDF measure that is not a call")
 
 
+def _udf_measure_with_extra(slot: Int) -> AggExpr:
+    """An AGG_UDF measure whose argument is a valid call of entry 0, an
+    AGGREGATE, plus column b in argument slot `slot` (1, 2 or 3)."""
+    var u = _ref(UDF_REF_KIND_AGGREGATE, _one(ArrowType.FLOAT64), _leaf("p95", ArrowType.FLOAT64))
+    var a = AggExpr(AGG_UDF, Optional(_call(0, u.return_type.value(), _col_b())), Optional(String("q")))
+    if slot == 1:
+        a.child1 = Optional(Expr.col_ref("b"))
+    elif slot == 2:
+        a.child2 = Optional(Expr.col_ref("b"))
+    else:
+        a.child3 = Optional(Expr.col_ref("b"))
+    return a^
+
+
+def test_an_agg_udf_measure_carries_one_argument() raises:
+    """Defect: an AGG_UDF measure with a second argument beside its call
+    admitted (§10.4: it carries one argument, child0). The value gate runs
+    first on the wire and refuses the populated slot by its own token
+    (PLAN_WIRE_AGG_ARG_DROPPED: AGG_UDF reads one slot), so the UDF check's
+    own refusal is reached by a plan built in process
+    (`plan_wire_check_udfs`). Each of slots 1, 2 and 3 is refused on its
+    own, and the measure without the extra slot is admitted."""
+    var u = _ref(UDF_REF_KIND_AGGREGATE, _one(ArrowType.FLOAT64), _leaf("p95", ArrowType.FLOAT64))
+    var ok = AggExprArray()
+    ok.append(AggExpr(AGG_UDF, Optional(_call(0, u.return_type.value(), _col_b())), Optional(String("q"))))
+    plan_wire_check_udfs(LogicalPlan.aggregate(ExprArray(), ok^, _scan()), _list(u.copy()))
+    for slot in range(1, 4):
+        var aggs = AggExprArray()
+        aggs.append(_udf_measure_with_extra(slot))
+        var p = LogicalPlan.aggregate(ExprArray(), aggs^, _scan())
+        var msg = String("")
+        try:
+            plan_wire_check_udfs(p, _list(u.copy()))
+        except e:
+            msg = String(e)
+        _starts(msg, OPTIMIZED_UDF_AGGREGATE_OUTSIDE_AGGREGATE, "in process, slot " + String(slot) + " set")
+        msg = String("")
+        try:
+            _ = plan_envelope_from_bytes(plan_to_bytes_with_udfs(p, _list(u.copy())))
+        except e:
+            msg = String(e)
+        _starts(msg, PLAN_WIRE_AGG_ARG_DROPPED, "on the wire, slot " + String(slot) + " set")
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_a_scalar_call_round_trips_in_both_contexts]()
@@ -417,5 +515,7 @@ def main() raises:
     suite.test[test_the_named_forms_are_refused_in_optimized_only]()
     suite.test[test_the_optimized_encoder_refuses_what_the_decoder_would]()
     suite.test[test_each_arm_names_only_its_kinds]()
+    suite.test[test_every_arm_refuses_every_kind_outside_its_set]()
     suite.test[test_an_aggregate_entry_only_as_an_agg_udf_measure]()
+    suite.test[test_an_agg_udf_measure_carries_one_argument]()
     suite^.run()
