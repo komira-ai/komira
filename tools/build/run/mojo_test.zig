@@ -6,6 +6,7 @@
 const std = @import("std");
 const kit = @import("testkit.zig");
 const supervise = @import("supervise.zig");
+const sys = @import("sys.zig");
 const util = @import("util.zig");
 
 const label = "//x:y";
@@ -219,6 +220,9 @@ test "G7 environment: the runner's five variables, the action's others, and each
         }
     }
     try std.testing.expect(hasLine(out, try std.fmt.allocPrint(e.a, "LD_LIBRARY_PATH={s}/rt/lib", .{e.real})));
+    // G12: on macOS dyld reads DYLD_LIBRARY_PATH, set to the same directory.
+    // Mutant (macOS): drop it from the environment the gate builds.
+    try std.testing.expectEqual(sys.is_darwin, hasLine(out, try std.fmt.allocPrint(e.a, "DYLD_LIBRARY_PATH={s}/rt/lib", .{e.real})));
     for ([_][]const u8{ "GATE_INHERITED=yes", "SPACED=a b=c", "EMPTY=", "TWICE=2" }) |l| try std.testing.expect(hasLine(out, l));
     for ([_][]const u8{ "PATH=/nowhere", "HOME=/nohome", "TMPDIR=/notmp", "TWICE=1" }) |l| try std.testing.expect(!hasLine(out, l));
 }
@@ -297,7 +301,12 @@ test "G10 G11 banner: byte golden for exit 1 and 77 and deaths by SIGKILL and SI
 
 // The production exec (execve, no fixture): busybox's printenv as the test,
 // by its applet name, so the environment and the status are the kernel's.
+// Linux only: the macOS busybox front end (darwin/busybox.sh) has no
+// printenv applet. There the welded tests of a darwin-arm64 Mojo library are
+// this case: each is executed by the gate and loads its runtime libraries
+// through DYLD_LIBRARY_PATH.
 test "a real program: execve of the test, its status and the environment it sees" {
+    if (!sys.is_linux) return error.SkipZigTest;
     const e = try Env.init();
     defer e.deinit();
     try std.fs.cwd().makePath(try e.path("root/bin"));

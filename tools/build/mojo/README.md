@@ -233,10 +233,8 @@ no longer counts there, since macOS keeps no CPU time of reaped children
   and its runtime libraries, never the compiler
   ([test 9](../tests/README.md#9-buck2-run)).
 - **`buck2 test <mojo_test>`**: runs the test binary remotely through
-  the gate ([`gate mojo`](../run/README.md); on darwin-arm64,
-  [`gate_runner.sh`](gate_runner.sh) behind
-  [`dyld_prelude.sh`](darwin/dyld_prelude.sh), until the gate's macOS form is
-  proven on the macOS workers). `buck2 run` of a `mojo_test` runs its
+  the gate ([`gate mojo`](../run/README.md); on darwin-arm64 its macOS build,
+  `run:gate_darwin`). `buck2 run` of a `mojo_test` runs its
   binary directly, from the runnable directory.
 - **Exit status.** A test passes only by exiting 0. Every other status fails,
   77 included: 77 means SKIP to automake and some test harnesses, but here
@@ -253,8 +251,8 @@ no longer counts there, since macOS keeps no CPU time of reaped children
   other kind of test provider.) A remote executor stops the action there, and
   buck2 reports a plain `Fail` with `Timeout 0`: no word of the timeout, and
   a `mojo_test`'s output, which its runner holds until the test exits, is
-  lost. So the gate ([`gate mojo --deadline-s`](../run/README.md); on
-  darwin-arm64, [`test_deadline.sh`](test_deadline.sh)) kills a
+  lost. So the gate ([`gate mojo --deadline-s`](../run/README.md), on linux
+  and on darwin-arm64) kills a
   `mojo_test` 60 s earlier ([`test_limit.bzl`](test_limit.bzl)), reports it
   (`GATED TEST FAILED: <label> (exit 137)` with its output), and prints `TEST TIME LIMIT: killed <label> after <n> s, under the
   test runner's timeout of <m> s (komira.test_timeout_s)`. No rule can read
@@ -398,8 +396,8 @@ keys, it had before they existed.
   which the cap's kill (by parent pid) misses, as long as it is still in the
   group. It does not reach a reparented process that has left the group (a
   new session, or `setpgid` into another group).
-  Linux only: on macOS a capped test is refused (by
-  [`mem_cap.sh`](mem_cap.sh), which the darwin-arm64 toolchain keeps).
+  On macOS the resident memory is read from libproc instead of /proc
+  ([`proctab_darwin.zig`](../run/proctab_darwin.zig) says what differs).
 
 The `mojo_library` attributes apply to each `test_srcs` build and run, and
 the assert level and defines to its coverage builds (the coverage binary and

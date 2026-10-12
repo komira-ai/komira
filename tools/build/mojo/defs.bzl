@@ -37,7 +37,7 @@ load(
     _test_root = "test_root",
     gate_mojo = "gate_mojo",
 )
-load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "cap_flags", "define_args", "mem_cap_script", "memory_cap")
+load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "cap_flags", "define_args", "memory_cap")
 load(":native_facts.bzl", "NATIVE_ATTRS", "native_facts", "native_refusal")
 load(":native_reach.bzl", "NATIVE_REACH_ATTRS", "native_reach", "native_reach_kwargs")
 load(":opt_level.bzl", "MojoOptLevelInfo", "SHIPPED_OPT_LEVEL", "TEST_OPT_LEVEL", "opt_level_args")
@@ -424,7 +424,7 @@ def _library_impl(ctx):
         test_dir, staged = _test_root(ctx, "tests/{}/root".format(stem), exe, test_data.get(key, {}))
         ctx.actions.run(
             cmd_args(
-                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), t.short_path), staged, marker.as_output(), cap_flags(cap), env_args, struct(mem_cap = mem_cap_script(ctx), test_deadline = None)),
+                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), t.short_path), staged, marker.as_output(), cap_flags(cap), env_args),
                 hidden = test_dir,
             ),
             category = "mojo_gated_test",
@@ -721,7 +721,6 @@ def _test_impl(ctx):
             "/dev/null",
             deadline_flags(ctx, where) + cap_flags(cap),
             [env_args, _arg_args(ctx.attrs.args)],
-            struct(mem_cap = mem_cap_script(ctx), test_deadline = ctx.attrs._test_deadline[DefaultInfo].default_outputs[0]),
         ),
         hidden = root,
     )

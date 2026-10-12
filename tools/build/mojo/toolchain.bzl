@@ -232,6 +232,70 @@ zig_test_rule = rule(
     },
 )
 
+def _zig_test_binary_impl(ctx):
+    bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
+    zig = ctx.attrs.zig[DefaultInfo].default_outputs[0]
+    out = ctx.actions.declare_output(ctx.label.name)
+    if not regex_match("^[a-z0-9_.-]+$", ctx.attrs.target):
+        fail("{}: target {} is not a zig target triple".format(ctx.label, repr(ctx.attrs.target)))
+    script = _PRELUDE + """
+ZIG_GLOBAL_CACHE_DIR="$T/zig-global"; ZIG_LOCAL_CACHE_DIR="$T/zig-local"; HOME="$T/home"
+export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME
+"$1/zig" test -target TARGET --test-no-exec "-femit-bin=$3" "$2"
+rm -rf "$T"
+""".replace("-target TARGET ", "-target {} ".format(ctx.attrs.target))
+    ctx.actions.run(
+        cmd_args(busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output()), hidden = ctx.attrs.imports),
+        category = "zig_test_binary",
+    )
+    return [DefaultInfo(default_output = out)]
+
+# The `zig test` executable of `src` for another platform (`target`), built
+# on the linux execution platform and not run: a `zig_test_run` on that
+# platform runs it.
+zig_test_binary_rule = rule(
+    impl = _zig_test_binary_impl,
+    attrs = {
+        "busybox": attrs.dep(),
+        "deps": attrs.list(attrs.dep(providers = [ZigModuleInfo]), default = []),
+        "imports": attrs.list(attrs.source(), default = []),
+        "src": attrs.source(),
+        "target": attrs.string(),
+        "zig": attrs.dep(),
+    },
+)
+
+def _zig_test_run_impl(ctx):
+    bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
+    out = ctx.actions.declare_output(ctx.label.name + ".passed")
+    # As zig_test's run: the applets as PATH, a TMPDIR of its own.
+    script = _PRELUDE + """
+HOME="$T/home"; TMPDIR="$T/tmp"
+export HOME TMPDIR
+mkdir -p "$TMPDIR" "$HOME"
+"$1" > "$T/out" 2>&1 || { cat "$T/out" >&2; exit 1; }
+# The marker is the runner's summary (`All N tests passed.`, or its
+# count of passed and skipped tests).
+tail -n 1 "$T/out" > "$2"
+rm -rf "$T"
+"""
+    ctx.actions.run(
+        busybox_sh(bb, script, ctx.attrs.binary[DefaultInfo].default_outputs[0], out.as_output()),
+        category = "zig_test_run",
+    )
+    return [DefaultInfo(default_output = out)]
+
+# Runs a `zig_test_binary` as a build action on this target's execution
+# platform, with `busybox` (that platform's) for the applets: the target
+# exists only if every test passed. A `zig_exe` names it in `unit_tests`.
+zig_test_run_rule = rule(
+    impl = _zig_test_run_impl,
+    attrs = {
+        "binary": attrs.dep(),
+        "busybox": attrs.dep(),
+    },
+)
+
 def _conda_closure_impl(ctx):
     tool = ctx.attrs.unpacker[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output("compiler", dir = True)
@@ -390,4 +454,6 @@ mojo_toolchain = declares_docs(mojo_toolchain_rule)
 zig_dist = declares_docs(zig_dist_rule)
 zig_exe = declares_docs(zig_exe_rule)
 zig_test = declares_docs(zig_test_rule)
+zig_test_binary = declares_docs(zig_test_binary_rule)
+zig_test_run = declares_docs(zig_test_run_rule)
 zig_module = declares_docs(zig_module_rule)
