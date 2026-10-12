@@ -18,7 +18,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_crypto.rs256_jwks import RS256_MAX_JWKS_BYTES
+from komira_jwks import JWKS_MAX_DOCUMENT_BYTES
 from komira_http_auth import HttpsJwksFetcher
 from komira_http_auth.config import DEFAULT_JWKS_FETCH_TIMEOUT_US
 from komira_http_client.tls_connector import (
@@ -79,7 +79,9 @@ def test_the_request_is_bounded_by_the_fetch_timeout() raises:
     assert_equal(f.timeout_us(), 2_500_000)
     var cfg = f.client_config()
     assert_equal(cfg.request_timeout_us, 2_500_000)
-    assert_equal(cfg.max_response_body_bytes, RS256_MAX_JWKS_BYTES)
+    assert_equal(cfg.max_response_body_bytes, JWKS_MAX_DOCUMENT_BYTES)
+    # The bound is 256 KiB, the value it had before it moved to komira_jwks.
+    assert_equal(cfg.max_response_body_bytes, 262144)
 
 
 def main() raises:

@@ -1,0 +1,8 @@
+call git "rev-parse" "--verify" "--quiet" "parity-base^{commit}"
+exit 0
+stdout "1111111111111111111111111111111111111111\n"
+call git "cat-file" "-e" "parity-base:src/a/BUCK"
+exit 0
+call buck2 "cquery" "rdeps(//... + tests//..., set(komira//src/a:))"
+exit 0
+stdout "komira//src/a:a (prelude//platforms:default#abcdef0123456789)\nkomira//src/a:a_test (prelude//platforms:default#abcdef0123456789)\nkomira//src/b:b (prelude//platforms:default#abcdef0123456789)\n"

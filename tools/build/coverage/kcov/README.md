@@ -49,7 +49,7 @@ The rewrite has to satisfy two things at once:
 So a directory of length L becomes `/` and L-1 `_`. A name under the
 placeholder could be mapped with `--replace-src-path='^/_+:<source root>'`
 (the expression matches the placeholder of any length, so no length needs to
-agree between actions), as kcov's own check 8 does
+agree between actions), as kcov's own check 6 does
 ([kcov](../../toolchains/kcov/README.md)); in a Mojo binary that is only the
 C runtime, which is not measured, and the Mojo names are relative (see the
 table below), so [cov_run](#cov_run) uses the one replacement kcov allows
@@ -412,22 +412,46 @@ gate's banner, a test leaving a child running stopped at the limit, lost
 sources refused, sources named by another directory refused before kcov
 runs, and kcov refused by the executor named as such.
 
-Each tool's cases run as a build action (`kcov_tool_cases` in
-[defs.bzl](defs.bzl)) that exits non-zero on the first wrong result, and the
-public target (`:debug_relocate`, `:cov_normalize`, `:cov_zig`) depends on
-them; `:cov_link` takes the public targets, so a coverage build is gated by
-their cases. The cases of `cov_zig` also take `:debug_relocate` and the pinned zig
-(`helpers`). Buck2 runs
-a dependency's validations with any build that uses it, so the tool cannot be
-built, or used, unless its cases pass. The public target and the cases both
-take the executable as an `exec_dep` on the same execution platform, so the
-cases test the very binary the public target hands out.
+Each tool's cases run as a build action that fails on the first wrong
+result. `debug_relocate` and `cov_normalize` each have two sets, both
+`zig_test`s. Their unit tests ([debug_relocate_test.zig](debug_relocate_test.zig),
+`:debug_relocate_unit`; [cov_normalize_test.zig](cov_normalize_test.zig),
+`:cov_normalize_unit`) import the tool and call `entry`, the program but for
+the process; its executable is built behind them (`unit_tests`), so it does
+not exist unless they pass. They build the tool from source in `zig test`'s
+own mode, so they are not the shipped bytes. The process cases
+([debug_relocate_exe_test.zig](debug_relocate_exe_test.zig),
+`:debug_relocate_exe_test`; [cov_normalize_exe_test.zig](cov_normalize_exe_test.zig),
+`:cov_normalize_exe_test`) take the shipped executable (`env_tools`: its path
+is in the test's environment as `DEBUG_RELOCATE` or `COV_NORMALIZE`, and the
+test fails, never passes, without it) and run it as a child process with an
+empty environment: exit 0, exit 1 with a refusal and exit 2 with the usage
+line, each message on stderr and on stdout only what the tool prints there
+(`debug_relocate`'s counts; nothing for `cov_normalize`). Each also has a
+write that fails: for `cov_normalize`, a file size limit cuts the output
+short, which must be exit 1 with no output; for `debug_relocate`, a stdout
+whose writes fail, which must be exit 1 with the file unchanged (a `main`
+that buffers stdout and drops the flush error fails it). They are a
+validation of the public target (`:debug_relocate`, `:cov_normalize`).
+The cases of `cov_zig` are a script (`kcov_tool_cases` in [defs.bzl](defs.bzl)),
+and the public target `:cov_zig` depends on them; they also take
+`:debug_relocate` and the pinned zig (`helpers`). `:cov_link` and `:cov_run`
+take the public targets, so a coverage build is gated by their cases. Buck2
+runs a dependency's validations with any build that uses it, so the tool
+cannot be built, or used, unless its cases pass. The public target and its
+script or process cases take the executable as an `exec_dep` on the same
+execution platform, so those cases test the very binary the public target
+hands out; the unit tests do not.
 
-The cases that need a write to fail set a file size limit (`ulimit -f`, with
-`SIGXFSZ` ignored, which the tool inherits), so the write fails with `EFBIG`
-part way; a probe first checks that the shell can do this.
+The cases that need a write to fail set a file size limit (`ulimit -f` in a
+script, `setrlimit` in a unit test or in the forked child of a process case,
+with `SIGXFSZ` ignored), so the write
+fails with `EFBIG` part way; a probe first checks that the limit stops a
+plain write.
 
-`debug_relocate_cases.sh`:
+[debug_relocate_test.zig](debug_relocate_test.zig) runs `debug_relocate` as
+its `main` does (`entry`: the arguments, a working directory of the test's
+own, stdout, stderr) over small files and ELF files it writes byte by byte:
 
 | case | proves | a defect it catches |
 |---|---|---|
@@ -435,14 +459,14 @@ part way; a probe first checks that the shell can do this.
 | followed by `/` | a path under the directory is rewritten | |
 | followed by `x` | exit 1 naming offset 39, and the file byte for byte unchanged although an earlier occurrence was rewritable | no check on the following byte |
 | at the end of the file | refused the same way | |
-| two directories, several occurrences | each counted and rewritten; permission bits 757 kept (other-write, which umask 022 clears) | stopping after the first occurrence; no `chmod` after the temporary file |
+| two directories, several occurrences | each counted (three and two, so a count printed against the wrong directory shows) and rewritten; permission bits 757 kept (other-write, which the umask 022 the test sets clears) | stopping after the first occurrence; the wrong directory's count printed; no `chmod` after the temporary file |
 | 7-byte, relative, trailing-`/` directory, none | exit 2 with usage, file unchanged | no length floor |
 | 8-byte directory | accepted and rewritten | a floor of 9 (`<=` for `<`) |
 | no occurrence | `0 <dir>`, exit 0, unchanged | |
 | second directory refused | exit 1 naming the second directory's offset, nothing printed, file unchanged although the first had been rewritten in memory | writing after each directory |
 | symbolic link | exit 1, the link still a link, its target unchanged | the link replaced by a regular file |
 | failed write | exit 1, file unchanged, no temporary file left | exiting without removing the temporary file |
-| failed stdout | exit 1 and the file unchanged | printing the counts after the rename |
+| failed stdout | a stdout whose every write fails: exit 1 and the file unchanged | printing the counts after the rename |
 | compressed section | an ELF64 file whose second section has `SHF_COMPRESSED` (0x800) is refused, exit 1 naming the section, nothing printed, untouched, although its directory is rewritable | no check (red-first: it failed before the check existed); a mask other than 0x800 |
 | uncompressed ELF | the same file with flags 0x2 is relocated as any file | refusing every ELF file |
 | idempotent | the relocated file again: `0 <dir>`, exit 0, same bytes, same inode | a placeholder that holds the directory; writing a file with no occurrence |
@@ -450,6 +474,7 @@ part way; a probe first checks that the shell can do this.
 | compressed section, `e_shnum` 0 | an ELF64 file whose `e_shnum` is 0 and whose section 0 `sh_size` holds the count (3): the compressed section is found and refused; with flags 0x2 it is relocated | the count in section 0 not read (planted: red) |
 | compressed section, ELF32 | an ELF32 file (40-byte section headers, 32-bit flags) with a compressed section: refused, untouched; with flags 0x2 it is relocated | ELF32 files not looked at (planted: red) |
 | compressed section, ELF32, `e_shnum` 0 | an ELF32 file whose `e_shnum` is 0 and whose section 0 holds the count (3) in its 32-bit `sh_size` (offset 0x14 of its header): the compressed section is found and refused; with flags 0x2 it is relocated | the ELF32 count in section 0 not read (planted: red) |
+| `e_shnum` 0, a count past the end | an ELF64 file whose section 0 claims 4 section headers where it holds 3: refused, exit 1, untouched | no bounds check on the count read from section 0 |
 
 `cov_zig_cases.sh` runs `cov_zig` from a directory whose `real/zig` is a
 stand-in (a script that records its arguments and copies a given ELF file to
@@ -476,8 +501,10 @@ fixtures put the working directory where a C runtime unit's
 | pinned zig | a C file compiled with `-g` and linked through `cov_zig` with `-Wl,--strip-debug`: `.debug_line` kept, the placeholder present, the directory absent, no compressed section | the flags rejected by zig 0.12 |
 | pinned zig, release | the same link through zig directly has no `.debug_line`, so the previous case's line tables are `cov_zig`'s doing | |
 
-`cov_normalize_cases.sh` runs `fixtures/kcov_full_paths.xml` (a made-up kcov
-report with absolute paths, in both the sandbox and the placeholder form):
+[cov_normalize_test.zig](cov_normalize_test.zig) runs `cov_normalize` as its `main` does (`entry`:
+the arguments, a working directory of the test's own, stderr) over
+`fixtures/kcov_full_paths.xml` (a made-up kcov report with absolute paths, in
+both the sandbox and the placeholder form) and small reports of its own:
 
 | case | proves | a defect it catches |
 |---|---|---|

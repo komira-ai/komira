@@ -1,0 +1,11 @@
+{
+ "name": "zero_argument_scalar",
+ "defect": "the row count of a call with no argument column is lost (length taken from a first child)",
+ "run": "call_batch",
+ "entry": "const7",
+ "shape": "SCALAR",
+ "args": [],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 5, "columns": []},
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [7, 7, 7, 7, 7]}}
+}

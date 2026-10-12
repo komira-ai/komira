@@ -55,11 +55,15 @@ env -i LC_ALL=C TZ=UTC0 HOME=<scratch>/home TMPDIR=<scratch>/tmp \
 What works is tested by
 [`src/tests/helpers/komira_test_node`](../../../src/tests/helpers/komira_test_node/README.md).
 
-### Test 54: planted defects
+### Planted defects
 
 Every target of [`tests//negative/node`](../tests/negative/node/BUCK) must
-fail, and [`node_tests.sh`](../tests/node_tests.sh) (run by
-`tools/build/tests/run_tests.sh`) requires the text written above each:
+fail. The self-test scenario
+[`planted_red_builds_node`](../selftest/planted_red_builds_node.zig) requires
+each build to fail in an action on the farm, printing the text its row holds;
+the analysis refusals (the three rows that say so) are the scenario
+[`analysis_refusals_node`](../selftest/analysis_refusals_node.zig), which
+requires each one's exact message:
 
 | planted defect | what it proves |
 |---|---|
