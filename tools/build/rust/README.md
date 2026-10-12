@@ -75,7 +75,7 @@ runner's `PASS <label>: <n> passed` line); it does not build or publish the
 gated artifact. `buck2 test` of the `rust_test` itself does the same for that
 one target.
 
-The runner ([`test_runner.sh`](test_runner.sh)) lists the tests first and
+The runner ([`gate rust`](../run/README.md)) lists the tests first and
 refuses a target that lists none (`EMPTY GATE`). It then runs every test,
 and refuses an `#[ignore]`d test (a test that does not run is a mute) and a
 harness summary that does not count every listed test as passed. There are
@@ -85,12 +85,13 @@ or deleted. `test_timeout_s` below 1 is refused at analysis.
 The planted defects are in
 [`tests//negative/rust_test`](../tests/negative/rust_test/BUCK) (test 35).
 
-Each harness invocation (the list, then the run) runs under
-`busybox timeout`, `test_timeout_s` seconds (default 600). A test killed at
-its timeout is NO VERDICT, exit 142, as a SIGKILL (exit 137) is: the action
-fails without a verdict, and the executor may retry it. The harness is
-started with `busybox env -i`, so nothing in the action's environment
-(`RUST_TEST_*`, `RUST_MIN_STACK`) reaches it.
+Each harness invocation (the list, then the run) has `test_timeout_s`
+seconds (default 600), after which the gate sends the harness SIGALRM. A test
+killed at its timeout is NO VERDICT, exit 142, as a SIGKILL (exit 137) is: the
+action fails without a verdict, and the executor may retry it. The harness is
+started with exactly `PATH`, `TMPDIR` and `HOME`, so nothing in the action's
+environment (`RUST_TEST_*`, `RUST_MIN_STACK`) reaches it, in a session of its
+own whose process group is killed after each invocation.
 
 A test runs with an empty current directory, `HOME` and `TMPDIR`, so it can
 read only what it compiles in. A file from another package is a label in

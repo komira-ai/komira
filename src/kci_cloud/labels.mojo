@@ -522,7 +522,7 @@ def description_labels(text: String) -> List[Label]:
         keys.append(retention_label_key())
         keys.append(validation_run_label_key())
     except:
-        return none^
+        return none^  # cov: unreachable both keys are built from kci's constant prefix, which the key rule accepts
     keys.append(String(ADOPTED_LABEL_KEY))
     var seen = List[Bool]()
     for _ in range(len(keys)):
