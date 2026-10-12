@@ -119,7 +119,7 @@ src/komira_gcp_cloudresourcemanager	0	-
 src/komira_gcp_cloudscheduler	0	-
 src/komira_gcp_compute	0	-
 src/komira_gcp_core	9604	-
-src/komira_gcp_fcm	9385	-
+src/komira_gcp_fcm	10000	-
 src/komira_gcp_firestore	9379	-
 src/komira_gcp_firestore_db	7650	-
 src/komira_gcp_iam	0	-

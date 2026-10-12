@@ -101,7 +101,7 @@ komira//src/komira_gcp_cloudresourcemanager:komira_gcp_cloudresourcemanager	src/
 komira//src/komira_gcp_cloudscheduler:komira_gcp_cloudscheduler	src/komira_gcp_cloudscheduler	library	OK	0	0	-	-	no	conda	-	-
 komira//src/komira_gcp_compute:komira_gcp_compute	src/komira_gcp_compute	library	OK	0	0	-	-	no	conda	-	-
 komira//src/komira_gcp_core:komira_gcp_core	src/komira_gcp_core	library	OK	1580	1645	-	-	no	conda	-	-
-komira//src/komira_gcp_fcm:komira_gcp_fcm	src/komira_gcp_fcm	library	OK	214	228	-	-	no	conda	-	-
+komira//src/komira_gcp_fcm:komira_gcp_fcm	src/komira_gcp_fcm	library	OK	236	236	-	-	no	conda	-	-
 komira//src/komira_gcp_firestore:komira_gcp_firestore	src/komira_gcp_firestore	library	OK	1829	1950	-	-	no	conda	-	-
 komira//src/komira_gcp_firestore:komira_gcp_firestore_listen	src/komira_gcp_firestore	library	OK	0	0	-	-	no	conda	-	-
 komira//src/komira_gcp_firestore:komira_gcp_firestore_v1	src/komira_gcp_firestore	library	OK	0	0	-	-	no	conda	-	-
