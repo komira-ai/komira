@@ -33,12 +33,11 @@ code with PKCE), token exchange (RFC 8693), DPoP (RFC 9449), mTLS-bound tokens (
 | `AuthzPort`, `AuthzAction`, `AuthzResource{kind, id, attributes}`, the two reference conformers | `komira_authz_api` | #790 replaces `main`'s scope-shaped `AuthzResource` with an opaque `kind` and `id`. |
 | strict JWK and JWK Set parse and render: OKP Ed25519, EC P-256, RSA 2048 to 4096 bits | `komira_jwks` | on `main` |
 | `komira_json.refuse_duplicate_keys` | `komira_json` | on `main` |
-| RS256 JWS verify against a JWK Set | `komira_crypto/rs256_jwks.mojo` | on `main` |
-| `BearerJwtMiddleware[V]`, `Rs256JwksVerifier`, the JWKS cache, the flags | `komira_http_auth` | #810: one RS256 trust anchor per process |
-| ES256, EdDSA and RS256 verify, one pinned algorithm per verifier, the strict JOSE header gate and the claims policy (`ClaimPolicy`) | `komira_jose` | built. `komira_crypto/rs256_jwks.mojo` stays until `komira_http_auth` calls `komira_jose` instead. |
+| `BearerJwtMiddleware[V]`, `Rs256JwksVerifier`, the JWKS cache, the flags | `komira_http_auth` | #810: one RS256 trust anchor per process; the signature checked by `komira_jose` (#1106) |
+| ES256, EdDSA and RS256 verify, one pinned algorithm per verifier, the strict JOSE header gate and the claims policy (`ClaimPolicy`) | `komira_jose` | built; `komira_http_auth` verifies through it |
 | signing, a key ring | `komira_jose` | target |
 | several trust anchors per process, chosen by exact `iss` | `komira_http_auth` | target, after `komira_jose` |
-| `client_credentials` client, RFC 8414 metadata and RFC 7591 registration codecs | `komira_oauth` | target |
+| `client_credentials` client, RFC 8414 metadata and RFC 7591 registration codecs | `komira_oauth` | built: `ClientCredentialSource` over a transport trait; the registration record pins the assertion algorithm (`token_endpoint_auth_signing_alg`). No transport over `komira_http_client` yet. |
 | `RemoteAuthzPort` on AuthZEN, with the decision cache and batch `check_many` | `komira_authz_client` | target |
 | route catalog and deny-by-default gate | `komira_resource_gate` | target |
 | an in-process AuthZEN PDP for tests, and its scenario table | `src/tests/helpers/komira_test_pdp` | built. It verifies tokens through a `TokenVerifier`; the one it ships is a table of issued tokens, and a signed-JWT verifier conforms to the same trait once `komira_jose` exists. |
@@ -94,8 +93,9 @@ Header, before any key work or signature check:
 - `kid` is present and printable ASCII.
 
 Key and signature: the key whose `kid` matches, from the anchor's key set. An unknown `kid` triggers at most one
-refetch per refetch window (see the key set, below) and is then refused. Today the middleware checks the RS256 signature
-with `komira_crypto`'s `verify_rs256_jws`; target, every algorithm through `komira_jose`, which verifies all three.
+refetch per refetch window (see the key set, below) and is then refused. The middleware checks the RS256 signature with
+`komira_jose`'s `JwsVerifier` pinned to RS256 (typ JWT, kid required); target, every algorithm through `komira_jose`,
+which verifies all three.
 
 Claims, only after the signature verifies (the payload is decoded again from its signed segment, with no repeated
 member name, RFC 7519 section 4):
@@ -193,7 +193,7 @@ Target flags for authorization (`komira_authz_client`, `komira_oauth`): `--authz
 PDP's evaluation URL), `--authz-token-url`, `--authz-client-id` and `--authz-client-key` (a secret-store reference,
 never the key itself); or `--authz=allow-authenticated`. With no `--authz`, every governed route is denied.
 
-### Client credentials (target: `komira_oauth`)
+### Client credentials (`komira_oauth`)
 
 A service that calls the PDP, or another service, is an OAuth client. It gets a short-lived token for one audience
 from the issuer's token endpoint and presents it as a bearer token:
@@ -213,8 +213,9 @@ from the issuer's token endpoint and presents it as a bearer token:
   (client, resource), and on failure raises: it never serves a token past its `exp`.
 
 The registration record type and its JSON codec (RFC 7591: `client_id`, `client_name`, `jwks` or `jwks_uri`,
-`token_endpoint_auth_method: "private_key_jwt"`, `grant_types: ["client_credentials"]`, `scope`, and one extension
-member `resource_types`) are in `komira_oauth`. The registry is the issuer's. A client never registers itself; the
+`token_endpoint_auth_method: "private_key_jwt"`, `grant_types: ["client_credentials"]`, `scope`,
+`token_endpoint_auth_signing_alg` (the OpenID Connect registration member: ES256 or EdDSA, the one algorithm the issuer
+verifies the client's assertions with), and one extension member `resource_types`) are in `komira_oauth`. The registry is the issuer's. A client never registers itself; the
 private key stays in the client's secret store and only the public key enters the record.
 
 ### The decision point (target: `komira_authz_client`)
@@ -332,7 +333,7 @@ one JSON error envelope, `{"error": {"code", "message"}}`, for every service.
 ## Where the code is
 
 `src/komira_http_server/middleware/middleware.mojo` (`Principal`), `src/komira_authz_api`, `src/komira_jwks`,
-`src/komira_crypto/rs256_jwks.mojo`, `src/komira_jose`; in review, `src/komira_http_auth` (`middleware.mojo`, `verifier.mojo`,
+`src/komira_jose`; in review, `src/komira_http_auth` (`middleware.mojo`, `verifier.mojo`,
 `claims.mojo`, `jwks_cache.mojo`, `jwks_fetch.mojo`, `flags.mojo`, `config.mojo`, `reasons.mojo`). Targets:
 `src/komira_oauth`, `src/komira_authz_client`, `src/komira_resource_gate`,
 `src/tests/helpers/komira_test_issuer`, `src/tests/helpers/komira_test_pdp`, `src/tests/conformance/jose_rfc_vectors`,
