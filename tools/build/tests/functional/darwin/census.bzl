@@ -1,6 +1,7 @@
 """Which macOS hosts the darwin execution platform's actions land on.
 
-`count` actions, each with its own key, run tools/build/mojo/darwin/host_identity.sh
+`count` actions, each with its own key (its output), run the darwin compile
+wrapper's `host-identity` mode (komira//tools/build/mojo:mojo_compile_darwin)
 on the macOS execution platform and record what it prints. Build with
 `--target-platforms komira//tools/build/platforms:darwin-arm64 --no-remote-cache`
 so every action really runs (tools/build/tests/functional/darwin/check.sh does). Each
@@ -11,20 +12,13 @@ left the pool.
 
 load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
 
-_SCRIPT = """
-BB="$1"; LINK="$2"; OUT="$3"
-case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
-"$BB" sh "$LINK/host_identity.sh" > "$OUT"
-"""
-
 def _impl(ctx):
     tc = ctx.attrs.toolchain[MojoToolchainInfo]
     outs = []
     for i in range(ctx.attrs.count):
         out = ctx.actions.declare_output("host.{}".format(i))
-        script = ctx.actions.write("census.{}.sh".format(i), "# census action {}\n".format(i) + _SCRIPT)
         ctx.actions.run(
-            cmd_args(tc.busybox, "sh", script, tc.busybox, tc.link, out.as_output()),
+            cmd_args(tc.wrapper, "host-identity", cmd_args(out.as_output(), format = "--output={}")),
             category = "darwin_host_census",
             identifier = str(i),
         )

@@ -651,13 +651,11 @@ struct TableStoreExactSlotAppender[Store: ConditionalWriteStore & AsyncCasStore]
         return AppendOutcome.lost_slot()
 
     def classify_append_error(self, msg: String) -> UInt8:
-        # The exact-slot mode: a 412/precondition is a REAL lost slot.
-        if (
-            msg.find("status=412") >= 0
-            or msg.find("precondition") >= 0
-            or msg.find("If-None-Match") >= 0
-            or msg.find("If-Match") >= 0
-        ):
+        # The exact-slot mode: a 412/precondition is a REAL lost slot. The
+        # create-CAS here is the async commit's If-None-Match create, so the
+        # lost-slot wording is the async classifier's (an "If-Match" error is
+        # not a lost slot; see `_is_lost_slot_412`, LOW-2).
+        if _is_lost_slot_412(msg):
             return APPEND_LOST_SLOT
         return APPEND_ERR
 

@@ -57,6 +57,7 @@ comptime API_KEY_METADATA: Int16 = 3
 comptime API_KEY_API_VERSIONS: Int16 = 18
 
 comptime ERROR_NONE: Int16 = 0
+comptime ERROR_LEADER_NOT_AVAILABLE: Int16 = 5
 comptime ERROR_UNSUPPORTED_VERSION: Int16 = 35
 
 # The single-node placeholder broker id (the default leader when no per-partition
@@ -318,9 +319,11 @@ struct MetadataTopic(Copyable, Movable, Deinitable):
     When empty (the single-node path) every partition reports the encoder's
     `leader_node_id` fallback. When non-empty (multi-node assignment), partition `pi`
     reports `partition_leaders[pi]` as its leader (and replica/isr = [that
-    leader]). A pid whose owner is UNASSIGNED (no live node) is encoded as
-    leader `-1` (= NO_LEADER), which a client reads as
-    NOT_LEADER_OR_FOLLOWER-equivalent and refreshes Metadata on (stale-Metadata
+    leader]). A pid whose owner is UNASSIGNED (no live node) has map entry
+    `-1` (= NO_LEADER_NODE_ID); the encoders report it as a broker reports a
+    leaderless partition: error_code LEADER_NOT_AVAILABLE, leader `-1`,
+    leader_epoch `-1`, and empty replica/isr/offline lists (there is no node
+    to list). A client refreshes Metadata on it (stale-Metadata
     self-correction). The list length, when non-empty, MUST equal
     `num_partitions`.
     """
@@ -372,6 +375,49 @@ struct MetadataTopic(Copyable, Movable, Deinitable):
         return fallback
 
 
+def _put_metadata_partition(
+    mut enc: KafkaEncoder,
+    partition_index: Int,
+    leader: Int32,
+    leader_epoch: Bool,
+    offline_replicas: Bool,
+    flexible: Bool,
+):
+    """Write one Metadata response partition entry.
+
+    Field order (MetadataResponse.json): error_code INT16, partition_index
+    INT32, leader_id INT32, leader_epoch INT32 (v7+), replica_nodes,
+    isr_nodes, offline_replicas (v5+), and at v9+ COMPACT arrays plus a
+    TAG_BUFFER.
+
+    A partition with a leader reports error 0, leader_epoch 0 and
+    replica/isr [leader]. A partition with no leader (a negative id, which is
+    never a node id) reports LEADER_NOT_AVAILABLE, leader -1, leader_epoch -1
+    (the schema default) and empty replica/isr lists: those lists hold node
+    ids only, and no node hosts the partition."""
+    var has_leader = leader >= Int32(0)
+    enc.put_int16(ERROR_NONE if has_leader else ERROR_LEADER_NOT_AVAILABLE)
+    enc.put_int32(Int32(partition_index))
+    enc.put_int32(leader if has_leader else NO_LEADER_NODE_ID)
+    if leader_epoch:
+        enc.put_int32(Int32(0) if has_leader else Int32(-1))
+    var n = 1 if has_leader else 0
+    for _ in range(2):  # replica_nodes, then isr_nodes
+        if flexible:
+            enc.put_compact_array_len(n)
+        else:
+            enc.put_array_len(n)
+        if has_leader:
+            enc.put_int32(leader)
+    if offline_replicas:
+        if flexible:
+            enc.put_compact_array_len(0)
+        else:
+            enc.put_array_len(0)
+    if flexible:
+        enc.put_empty_tag_buffer()
+
+
 def encode_metadata_response_v1(
     correlation_id: Int32,
     brokers: List[MetadataBroker],
@@ -393,8 +439,9 @@ def encode_metadata_response_v1(
           leader_id INT32, replica_nodes ARRAY(INT32),
           isr_nodes ARRAY(INT32)}}
 
-    Every partition reports `leader_node_id` as leader + the single-node
-    replica/isr set [leader_node_id] (single-node placeholder).
+    Each partition reports its leader from the topic's map (fallback
+    `leader_node_id`) with replica/isr set [leader]; a leaderless partition
+    is written as `_put_metadata_partition` describes.
     """
     var enc = KafkaEncoder()
     encode_response_header_v0(enc, correlation_id)
@@ -422,15 +469,7 @@ def encode_metadata_response_v1(
         enc.put_array_len(np)
         for pi in range(np):
             var pleader = topics[ti].leader_for(pi, leader_node_id)
-            enc.put_int16(ERROR_NONE)
-            enc.put_int32(Int32(pi))  # partition_index
-            enc.put_int32(pleader)  # leader_id
-            # replica_nodes = [leader]
-            enc.put_array_len(1)
-            enc.put_int32(pleader)
-            # isr_nodes = [leader]
-            enc.put_array_len(1)
-            enc.put_int32(pleader)
+            _put_metadata_partition(enc, pi, pleader, False, False, False)
     return enc.take_bytes()
 
 
@@ -489,13 +528,7 @@ def encode_metadata_response_v4(
         enc.put_array_len(np)
         for pi in range(np):
             var pleader = topics[ti].leader_for(pi, leader_node_id)
-            enc.put_int16(ERROR_NONE)
-            enc.put_int32(Int32(pi))  # partition_index
-            enc.put_int32(pleader)  # leader_id (per-partition)
-            enc.put_array_len(1)  # replica_nodes = [leader]
-            enc.put_int32(pleader)
-            enc.put_array_len(1)  # isr_nodes = [leader]
-            enc.put_int32(pleader)
+            _put_metadata_partition(enc, pi, pleader, False, False, False)
     return enc.take_bytes()
 
 
@@ -522,7 +555,8 @@ def encode_metadata_response_v5_to_v8(
 
     Single-node placement: leader = `leader_node_id`; replicas/isr =
     [leader_node_id]; offline_replicas empty; leader_epoch 0;
-    authorized_operations INT32_MIN ("not requested")."""
+    authorized_operations INT32_MIN ("not requested"). A leaderless partition
+    is written as `_put_metadata_partition` describes."""
     var enc = KafkaEncoder()
     encode_response_header_v0(enc, correlation_id)
 
@@ -552,16 +586,9 @@ def encode_metadata_response_v5_to_v8(
         enc.put_array_len(np)
         for pi in range(np):
             var pleader = topics[ti].leader_for(pi, leader_node_id)
-            enc.put_int16(ERROR_NONE)
-            enc.put_int32(Int32(pi))  # partition_index
-            enc.put_int32(pleader)  # leader_id (per-partition)
-            if has_leader_epoch:
-                enc.put_int32(Int32(0))  # leader_epoch (v7+)
-            enc.put_array_len(1)  # replica_nodes = [leader]
-            enc.put_int32(pleader)
-            enc.put_array_len(1)  # isr_nodes = [leader]
-            enc.put_int32(pleader)
-            enc.put_array_len(0)  # offline_replicas = [] (v5+)
+            _put_metadata_partition(
+                enc, pi, pleader, has_leader_epoch, True, False
+            )
         if has_auth_ops:
             enc.put_int32(Int32(-2147483648))  # topic_authorized_operations (v8)
     if has_auth_ops:
@@ -606,7 +633,8 @@ def encode_metadata_response_v9(
     the single-node replica/isr set [leader_node_id]; offline_replicas empty;
     leader_epoch 0; authorized_operations -2147483648 (INT32_MIN ==
     "not requested", the value a real broker returns when the client did not
-    set include*AuthorizedOperations)."""
+    set include*AuthorizedOperations). A leaderless partition is written as
+    `_put_metadata_partition` describes."""
     var enc = KafkaEncoder()
     encode_response_header_v1(enc, correlation_id)  # flexible header
 
@@ -634,16 +662,7 @@ def encode_metadata_response_v9(
         enc.put_compact_array_len(np)
         for pi in range(np):
             var pleader = topics[ti].leader_for(pi, leader_node_id)
-            enc.put_int16(ERROR_NONE)
-            enc.put_int32(Int32(pi))  # partition_index
-            enc.put_int32(pleader)  # leader_id (per-partition)
-            enc.put_int32(Int32(0))  # leader_epoch (v7+)
-            enc.put_compact_array_len(1)  # replica_nodes = [leader]
-            enc.put_int32(pleader)
-            enc.put_compact_array_len(1)  # isr_nodes = [leader]
-            enc.put_int32(pleader)
-            enc.put_compact_array_len(0)  # offline_replicas = [] (v5+)
-            enc.put_empty_tag_buffer()  # partition tag buffer
+            _put_metadata_partition(enc, pi, pleader, True, True, True)
         # topic_authorized_operations (v8+): INT32_MIN = "not requested".
         enc.put_int32(Int32(-2147483648))
         enc.put_empty_tag_buffer()  # topic tag buffer
