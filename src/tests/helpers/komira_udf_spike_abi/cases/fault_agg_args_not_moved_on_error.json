@@ -1,0 +1,13 @@
+{
+ "name": "fault_agg_args_not_moved_on_error",
+ "defect": "`args` a failing agg_update did not move are leaked, or accepted because the status was an error (design 4.4: moved whatever the status)",
+ "run": "agg_split",
+ "entry": "sum_args_kept_raise",
+ "shape": "AGG_MERGEABLE",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "state": [{"type": "int64", "nullable": true}],
+ "partials": [{"input": {"length": 3, "columns": [{"type": "int64", "values": [1, 2, 3]}]}, "group_ids": [0, 1, 0], "n_groups": 2}],
+ "n_groups": 2,
+ "expect": {"status": "ERR_RAISED", "run_error": "UDF_RUNTIME_FAULT", "message": "nonempty"}
+}

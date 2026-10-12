@@ -123,8 +123,9 @@ struct LogStreamSink(Movable):
         if not self.enabled:
             return
         if len(self.current_chunk) == 0:
-            # Nothing buffered — reset the timer so an idle child doesn't
-            # accumulate "overdue" time and flush an empty chunk later.
+            # Nothing buffered: nothing to write. The timer is not reset, so
+            # the first bytes after an idle spell longer than the flush
+            # interval are written as soon as they are appended.
             return
         var over_size = len(self.current_chunk) >= self.chunk_bytes
         var now = now_unix_ms()

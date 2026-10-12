@@ -3,7 +3,9 @@
 # file's order and float policy, reporting every mismatch). canon_text.mojo
 # holds the format, render.mojo the cells, float_text.mojo the float rules.
 # door.mojo runs a plan through a plan-door shared library (Door A, an Arrow
-# C stream; Door B, Arrow IPC bytes) behind a value-only API.
+# C stream; Door B, Arrow IPC bytes) behind a value-only API. duckdb_tsv.mojo
+# reads an expected result DuckDB wrote (komira_test_oracle) by value into
+# canonical text.
 from .canon_text import (
     CANON_MAGIC,
     ORDER_KEYS,
@@ -33,6 +35,7 @@ from .door import (
     parse_endpoint_refusal,
 )
 from .door_ipc import decode_ipc_stream
+from .duckdb_tsv import DuckdbTsv, duckdb_tsv_canon, parse_duckdb_tsv
 from .float_text import (
     FloatCell,
     FloatTolerance,

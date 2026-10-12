@@ -244,6 +244,7 @@ for f in range(2):
 
 Parse a commit, read its fields, and get the same bytes and id back:
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_git import ObjectFormat, parse_commit
 
@@ -266,6 +267,7 @@ assert_equal(commit.id().to_hex(), "bb0e40b5d718273d8cd5d4806d4913aa21783ef4")
 
 Write a loose object and read it back by id:
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo
 from komira_git import ObjectFormat, ObjectKind, encode_loose, hash_object, loose_path, read_loose
 
@@ -280,6 +282,7 @@ assert_equal(loose_path(id), "f8/7290f8eb2cbbea7857214459a0739927eab154")
 
 Frame and read pkt-lines (the examples of gitprotocol-common):
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_git import PKT_DATA, PKT_FLUSH, PKT_NEED_MORE, append_pkt_flush, append_pkt_text, read_pkt_line
 
@@ -298,6 +301,7 @@ assert_equal(read_pkt_line(Span(half), 0).kind, PKT_NEED_MORE)
 Hash with collision detection (FIPS 180-2's "abc" vector; ordinary input
 is plain SHA-1 and reports no collision):
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_false -->
 ```mojo
 from komira_git import Sha1dc, is_object_id_collision, sha1dc
 
@@ -314,6 +318,7 @@ assert_false(is_object_id_collision("komira_git: loose object: empty file"))
 
 Check ref names as `git check-ref-format` does:
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
 ```mojo
 from komira_git import check_ref_format, is_valid_ref_name, normalize_ref_name
 
@@ -331,6 +336,7 @@ except e:
 
 Apply a delta (a copy of the base's first five bytes, then an insert):
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_git import apply_delta
 
@@ -347,6 +353,7 @@ assert_equal(Int(out[5]), 33)
 A protocol v2 ls-refs exchange, client and server in one process (the
 transport only carries the bytes):
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
 ```mojo
 from komira_git import V2_LS_REFS, AdvertisedRef, FetchV2Client, ObjectFormat, ObjectId
 from komira_git import UploadPackV2Server, append_ls_refs_response
@@ -384,6 +391,7 @@ assert_equal(listed.refs[0].name, "refs/heads/main")
 An atomic push of two deletes, one refused by the server, so the other
 fails too:
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
 ```mojo
 from komira_git import AdvertisedRef, ObjectFormat, ObjectId, PushCommand, PushReport
 from komira_git import ReceivePackConfig, ReceivePackServer, SendPackClient, append_push_report
