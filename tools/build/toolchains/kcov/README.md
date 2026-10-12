@@ -205,7 +205,7 @@ So a run inside a build action's sandbox writes under `<out-dir>` only,
 unless the FIFO cannot be made there; a coverage run should set `TMPDIR` to
 its scratch directory so that the fallback also stays inside it.
 [cov_run](../../coverage/kcov/README.md#cov_run) does: it runs kcov through
-`gate_runner.sh`, whose `TMPDIR` is a directory made for that run under the
+the gate (`gate mojo`), whose `TMPDIR` is a directory made for that run under the
 action's working directory, and its output directory is in the action's
 scratch directory. The other
 fixed `/tmp` paths of v42 (`/tmp/kcov-system.pipe`, `/tmp/kcov-data/`)

@@ -115,8 +115,9 @@ def test_u_escape_hex_digit_classes() raises:
     assert_equal(_esc("\\u004A\\u004F"), String("JO"))
     assert_equal(_esc("\\u00Aa"), String("ª"))
     assert_equal(_esc("\\u00fF"), String("ÿ"))
-    # One-byte UTF-8 form: U+0000..U+007F. U+0000 itself is not here: it
-    # ends the decoded string today, komira-ai/komira#1513.
+    # One-byte UTF-8 form: U+0000..U+007F, both ends. U+0000 decodes to one
+    # 0x00 byte; test_parse_string_nul checks the bytes after it are kept.
+    assert_equal(_one_byte("\\u0000"), 0x00)
     assert_equal(_one_byte("\\u0041"), 0x41)
     assert_equal(_one_byte("\\u007F"), 0x7F)
     assert_equal(_one_byte("\\u0001"), 0x01)

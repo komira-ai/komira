@@ -33,6 +33,7 @@ from komira_json_index.simd_primitives import (
     TAG_OPEN_BRACE,
     TAG_CLOSE_BRACE,
     TAG_OPEN_BRACKET,
+    TAG_CLOSE_BRACKET,
     TAG_COLON,
     TAG_COMMA,
     TAG_QUOTE_OPEN,
@@ -205,14 +206,16 @@ def test_null_parent_rows_stay_null() raises:
 
 
 def test_a_document_that_is_not_an_object_has_no_key() raises:
-    """A bare scalar (no structural at all) and an array of scalars (no brace
-    anywhere) hold no key: null. The object control shows the same key is found.
-    An array holding an object is not here: its first object's keys are found
-    today, komira-ai/komira#1501."""
+    """A bare scalar (no structural at all), an array of scalars (no brace
+    anywhere) and an array whose elements are objects holding the key have no
+    member `a` at the top level: null. The object control shows the same key
+    is found."""
     _both(String("42"), String("a"), String(NULL))
     _both(String("  "), String("a"), String(NULL))
     _both(String("[1,2]"), String("a"), String(NULL))
     _both(String("[[1],[2]]"), String("a"), String(NULL))
+    _both(String("[{\"a\":1}]"), String("a"), String(NULL))
+    _both(String(" [1,{\"a\":2}]"), String("a"), String(NULL))
     _both(String("{\"a\":42}"), String("a"), String("42"))
 
 
@@ -428,17 +431,36 @@ def test_skip_value_at_past_the_end() raises:
 
 
 def test_find_close_for_guards() raises:
+    # `[{}]:{` on the tape: an array holding an object, a colon, and an
+    # object that never closes.
     var t = _tape(
-        [0, 1, 2, 3],
-        [TAG_OPEN_BRACE, TAG_COLON, TAG_OPEN_BRACKET, TAG_CLOSE_BRACE],
+        [0, 1, 2, 3, 4, 5],
+        [
+            TAG_OPEN_BRACKET,
+            TAG_OPEN_BRACE,
+            TAG_CLOSE_BRACE,
+            TAG_CLOSE_BRACKET,
+            TAG_COLON,
+            TAG_OPEN_BRACE,
+        ],
     )
-    assert_equal(_find_close_for(t, 4, 4), -1)
-    assert_equal(_find_close_for(t, 9, 4), -1)
+    assert_equal(_find_close_for(t, 6, 6), -1)
+    assert_equal(_find_close_for(t, 9, 6), -1)
     # A position that is not an opening delimiter.
-    assert_equal(_find_close_for(t, 1, 4), -1)
-    assert_equal(_find_close_for(t, 3, 4), -1)
-    # An array with no close.
-    assert_equal(_find_close_for(t, 2, 4), -1)
+    assert_equal(_find_close_for(t, 4, 6), -1)
+    assert_equal(_find_close_for(t, 3, 6), -1)
+    # An object with no close.
+    assert_equal(_find_close_for(t, 5, 6), -1)
+    # The array's close is found past the object it holds (the depth moves on
+    # both kinds of bracket), and the object's close is its own.
+    assert_equal(_find_close_for(t, 0, 6), 3)
+    assert_equal(_find_close_for(t, 1, 6), 2)
+    # An array with no close: its inner array closes, it does not.
+    var u = _tape(
+        [0, 1, 2], [TAG_OPEN_BRACKET, TAG_OPEN_BRACKET, TAG_CLOSE_BRACKET]
+    )
+    assert_equal(_find_close_for(u, 0, 3), -1)
+    assert_equal(_find_close_for(u, 1, 3), 2)
 
 
 def _inverted_slice() raises:
