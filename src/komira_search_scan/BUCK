@@ -7,7 +7,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # komira_scan_resolver contract, so neither the search core nor this package
 # depends on an engine.
 #
-# Both welded tests are executor-free: they build splits in memory and drive
+# The welded tests are executor-free: they build splits in memory and drive
 # the kind through core's `resolve_for_execution`, its split plan and readers,
 # and `drain_scan`.
 mojo_library(
@@ -25,6 +25,7 @@ mojo_library(
     test_srcs = [
         "tests/test_search_scan_field_routing.mojo",
         "tests/test_search_scan_kind.mojo",
+        "tests/test_search_scan_pushdown_gate.mojo",
         "tests/test_search_source_conformance.mojo",
     ],
     visibility = ["PUBLIC"],

@@ -233,7 +233,7 @@ mojo build -Xlinker -L<env>/lib -lA ... -lH -Xlinker -lkomira_log_holder \
 Proven for one library by #681's run test (2026-10-07: `mojo run -Xlinker -L<prefix>/lib -Xlinker -lkomira_native`)
 and for the eight owners by probe 3's R1, R2 and B1 (#1304): `mojo run` with the `-l` flags in either
 order, and `mojo build` with run path `$ORIGIN/../lib` set through the build wrapper's `--runpath`
-(**EXISTS:** `tools/build/mojo/mojo_wrapper.sh`, which drops every user `-rpath` in any spelling and
+(**EXISTS:** the compile wrapper's `cc` shim, `tools/build/mojo/tools/cc_shim.zig`, which drops every user `-rpath` in any spelling and
 adds its own). So the user-spelled `-Xlinker -rpath` with conda's `mojo` (and whether it writes
 `DT_RUNPATH` or `DT_RPATH`) stays **unproven after probe 3**, which built through the same
 wrapper. The install validations run READMEs with `mojo run` only, so the whole `mojo build` consumer
@@ -452,7 +452,7 @@ installed from `.conda` packages (probe 3 assembled its environment as a build o
 komira_http_core's closure, linked as above (crypto with aws-lc and the SHA-NI wrapper; http_core
 with s2n-tls, `NEEDED` crypto, `DT_RUNPATH` `$ORIGIN`), plus the holder archive and JIT object. R1
 and B1 go through komira_http_core's Mojo API and name every owner. Built cases go through
-`mojo_wrapper.sh`, so their run path is the wrapper's `DT_RUNPATH`, not a user-spelled `-rpath`.
+the compile wrapper (`mojo_compile`), so their run path is the wrapper's `DT_RUNPATH`, not a user-spelled `-rpath`.
 
 | case | what it shows |
 |---|---|
