@@ -308,13 +308,15 @@ def test_the_readme_run_is_given_the_blocks_run_arguments() raises:
     var log = RecordingIndexPollLog()
     var row = run_install_env(runner, t, sl, log, req, EnvHost(root + String("/etc_pixi")))
 
-    # both children ran, the README run with exactly the argv above
+    # both scripted children ran, the README run with exactly the argv
+    # above (the native rows that follow are test_native_rows.mojo's; this
+    # script plays none of them)
     assert_equal(runner.remaining(), 0)
-    assert_equal(len(runner.calls), 2)
+    assert_true(len(runner.calls) >= 2)
     assert_equal(_joined(runner.calls[1].argv), _joined(want))
     assert_equal(runner.calls[1].argv[len(runner.calls[1].argv) - 1], program)
     # the readme and program rows passed (the played environment installs
-    # no .so, so the native rows of the lib_files are not what this proves)
+    # no .so, so the native rows are not what this proves)
     var readme_ok = False
     var program_ok = False
     for i in range(len(row.checks)):
