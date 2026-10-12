@@ -304,7 +304,7 @@ def coverage_kwargs(kwargs):
 
 def coverage_link_dir(ctx):
     """The link directory of this library's coverage builds, what
-    mojo_wrapper.sh takes as <zig_dir>, or None when coverage is off."""
+    mojo_compile takes as --zig=<dir>, or None when coverage is off."""
     link = ctx.attrs.coverage_debug
     return link[DefaultInfo].default_outputs[0] if link != None else None
 
@@ -396,7 +396,7 @@ def _cov_run(actions, tc, facts, label, where, t, name, stem, cov_bin, test_repo
             "sh",
             facts.dir.project("cov_run.sh"),
             tc.busybox,
-            tc.gate_runner,
+            tc.gate,
             tc.compiler,
             label,
             cov_bin,

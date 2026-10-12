@@ -7,7 +7,7 @@ komira//src/kci_artifact_proto:kci_artifact_proto	src/kci_artifact_proto	library
 komira//src/kci_build:kci_build_lib	src/kci_build	library	OK	1129	1202	-	-	no	conda	-	-
 komira//src/kci_cell:kci_cell	src/kci_cell	library	OK	246	246	-	-	no	release	-	-
 komira//src/kci_cli:kci_cli	src/kci_cli	library	OK	1360	1513	-	-	no	conda	-	-
-komira//src/kci_cloud:kci_cloud	src/kci_cloud	library	OK	2758	3230	-	-	no	conda	src/kci_cloud/conformance.mojo	-
+komira//src/kci_cloud:kci_cloud	src/kci_cloud	library	OK	6798	6805	-	-	no	conda	-	-
 komira//src/kci_cloud_fake:kci_cloud_fake	src/kci_cloud_fake	library	OK	1979	2038	699	768	yes	conda	-	-
 komira//src/kci_deploy_model_proto:kci_deploy_model_proto	src/kci_deploy_model_proto	library	OK	0	0	-	-	no	conda	-	-
 komira//src/kci_logs:kci_logs	src/kci_logs	library	OK	1086	1086	-	-	no	release	-	-
@@ -81,7 +81,7 @@ komira//src/komira_counters:komira_counters	src/komira_counters	library	OK	266	3
 komira//src/komira_crypto:komira_crypto	src/komira_crypto	library	OK	2374	2841	-	-	no	conda	src/komira_crypto/aead.mojo,src/komira_crypto/internal/asm/sha256_compress.mojo	-
 komira//src/komira_csv:komira_csv	src/komira_csv	library	RUN_FAILED	-	-	-	-	no	conda	-	not built in this census: test_csv_parallel_reader and test_csv_phase_4_column_parallel_concat take about 450 s under kcov, the run limit (sharding them is pending)
 komira//src/komira_datetime:komira_datetime	src/komira_datetime	library	OK	853	853	-	-	no	release	-	-
-komira//src/komira_db:komira_db	src/komira_db	library	OK	970	1177	-	-	no	conda	src/komira_db/blocking.mojo,src/komira_db/db_storable.mojo	-
+komira//src/komira_db:komira_db	src/komira_db	library	OK	1173	1173	-	-	no	conda	-	-
 komira//src/komira_db_postgres:komira_db_postgres	src/komira_db_postgres	library	OK	1128	1136	-	-	no	conda	-	-
 komira//src/komira_db_sqlite:komira_db_sqlite	src/komira_db_sqlite	library	OK	315	335	-	-	no	conda	-	-
 komira//src/komira_dispatch_agg_exec:komira_dispatch_agg_exec	src/komira_dispatch_agg_exec	library	OK	407	411	-	-	no	conda	-	-
@@ -203,7 +203,7 @@ komira//src/komira_udf:komira_udf	src/komira_udf	library	OK	118	674	36	36	yes	co
 komira//src/komira_uuid:komira_uuid	src/komira_uuid	library	OK	123	129	75	84	yes	conda	-	-
 komira//src/komira_validation_run:komira_validation_run	src/komira_validation_run	library	OK	67	67	-	-	no	release	-	-
 komira//src/komira_vcard:komira_vcard	src/komira_vcard	library	OK	609	641	-	-	no	release	-	-
-komira//src/komira_viewport:komira_viewport	src/komira_viewport	library	OK	461	522	-	-	no	conda	-	-
+komira//src/komira_viewport:komira_viewport	src/komira_viewport	library	OK	531	531	-	-	no	conda	-	-
 komira//src/komira_webpush:komira_webpush	src/komira_webpush	library	OK	321	321	-	-	no	conda	-	-
 komira//src/komira_wkt:komira_wkt	src/komira_wkt	library	OK	809	810	551	556	yes	release	-	-
 komira//src/komira_wkt:value_null_proto	src/komira_wkt	library	OK	0	0	-	-	no	conda	-	-

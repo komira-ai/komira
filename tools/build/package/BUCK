@@ -14,16 +14,27 @@ launcher_level_test(
     exec_compatible_with = LINUX_X86_64,
 )
 
-# The unit tests of the packer's dlopen declarations (pack/conda_dlopen.zig):
-# the soname reader (code, not comments or docstrings), a declared soname
-# accepted, an undeclared one refused, a declaration no source opens refused,
-# and each declared requirement written after the others, once. `zig test`
-# run as a build action.
+# The packer's unit tests, `zig test` of pack/unit_tests.zig run as a build
+# action: the dlopen declarations (pack/conda_dlopen.zig: the soname reader
+# (code, not comments or docstrings), a declared soname accepted, an
+# undeclared one refused, a declaration no source opens refused, and each
+# declared requirement written after the others, once) and a library's
+# native files in its package (pack/conda_lib.zig: lib_files rows, the
+# __glibc floor, NEEDED owners) and the link commands of a packaged README
+# (pack/readme_link.zig: every owner in the order given, an owner a
+# shared library NEEDs refused before it, the static archive
+# on the build line only, the source's bytes kept, a source naming the
+# marker refused).
 zig_test(
     name = "komira_pack_unit",
     exec_compatible_with = LINUX_X86_64,
-    src = "pack/conda_dlopen.zig",
-    imports = ["pack/common.zig"],
+    src = "pack/unit_tests.zig",
+    imports = [
+        "pack/common.zig",
+        "pack/conda_dlopen.zig",
+        "pack/conda_lib.zig",
+        "pack/readme_link.zig",
+    ],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
 )
@@ -41,7 +52,9 @@ zig_exe(
         "pack/conda_check.zig",
         "pack/conda_dlopen.zig",
         "pack/conda_index.zig",
+        "pack/conda_lib.zig",
         "pack/conda_meta.zig",
+        "pack/readme_link.zig",
         "pack/tar_oci.zig",
     ],
     busybox = "komira//tools/build/toolchains:busybox",

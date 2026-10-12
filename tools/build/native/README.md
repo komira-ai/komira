@@ -141,6 +141,20 @@ Mojo library calls) and the owners whose C its own archives call
 | 6 | `DT_FLAGS` lacks `DF_SYMBOLIC` (0x2); zig links with `-z now`, so the value is 0xa |
 | 7 | a strong undefined symbol is neither `GLIBC_`-versioned nor `komira_`, or the weak undefined symbols differ from `weak_undefined` |
 
+4. The README check, `native_so readme` (`[readme_calls]`, a validation of
+   the target too): the owning library's welded README gate compiles each
+   README example's program a second time to an object
+   (`[tests][readme][objects]` of the library, for every library listing a
+   C library among its `deps`; [`../mojo/readme.bzl`](../mojo/readme.bzl)).
+   A `.mojoc` holds no machine code, so the library's Mojo is compiled into
+   that object, and every C function the example reaches is an undefined
+   symbol of it. The check fails when no object references one of the
+   exports, or the README has no example: an installed README run that
+   calls none of the library's C passes with a broken shared library or
+   without its `-l` (the design's "Every owner is called, not only
+   loaded"). The linked README programs cannot be read for this: `mojo
+   build` strips their symbol tables.
+
 `[dynsym]` is `native_so dynsym`: the dynamic section, the versions needed
 and every dynamic symbol with its version. The unit tests
 ([`native_so_test.zig`](native_so_test.zig), `:native_so_unit`, which
@@ -156,6 +170,13 @@ own BUCK file: komira_crypto, komira_http_core (`NEEDED` komira_crypto's),
 komira_compression, komira_parquet_codec (brotli's decoder),
 komira_db_sqlite (SQLite) and the first-party shims' owners (komira_libc,
 komira_async, komira_async_api, komira_fs, komira_objectstore,
-komira_metrics, komira_scan_source, komira_supervisor). komira_log has none: its holder's accessors are hidden
-by design, one copy per image (the design's question 2). No package ships
-any of them yet.
+komira_metrics, komira_scan_source, komira_supervisor). komira_log has none:
+its holder's accessors are hidden by design, one copy per image (the design's
+question 2), so its holder ships as a static archive. Every owner's
+`mojo_library` except komira_parquet_codec's and komira_db_sqlite's names its
+target (`native = ":<library>_native"`;
+komira_log's says `native_static = True`), and its conda package holds the
+file at lib/ with a `lib_files` row
+([packaging/conda/README.md](../../../packaging/conda/README.md), "A library's
+native code in its package"). Those two libraries are built and checked, but
+no package ships them yet.

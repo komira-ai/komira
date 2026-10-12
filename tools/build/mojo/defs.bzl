@@ -1,7 +1,8 @@
 """Mojo rules for Buck2: mojo_library, mojo_binary, mojo_test.
 
-Every action runs the hermetic toolchain from `toolchains//:mojo` through
-`mojo_wrapper.sh`; see that file for the environment the compiler sees.
+Every compile runs the hermetic toolchain from `toolchains//:mojo` through the
+toolchain's compile wrapper (`mojo_compile_cmd` below; on Linux
+tools/mojo_compile.zig, whose header states the environment the compiler sees).
 
 Output layout of a library `L` with import name `I`:
 
@@ -28,15 +29,23 @@ load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":coverage.bzl", "COVERAGE_ATTRS", "COVERAGE_SHARED_LIB_ATTRS", "COVERAGE_TEST_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_readme", "coverage_run", "coverage_branch_of", "coverage_shared_lib", "coverage_shared_lib_macro", "coverage_sub_targets", "coverage_test", "coverage_test_kwargs")
 load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
 load(":mutation.bzl", "MUTATION_ATTRS", "mutation_kwargs", "mutation_sub_targets")
+load(
+    ":test_runtime.bzl",
+    _arg_args = "arg_args",
+    _data_map = "data_map",
+    _env_args = "env_args",
+    _test_root = "test_root",
+    gate_mojo = "gate_mojo",
+)
+load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "cap_flags", "define_args", "memory_cap")
+load(":native_facts.bzl", "NATIVE_ATTRS", "native_facts", "native_refusal")
 load(":native_reach.bzl", "NATIVE_REACH_ATTRS", "native_reach", "native_reach_kwargs")
-load(":test_runtime.bzl", _arg_args = "arg_args", _data_map = "data_map", _env_args = "env_args", _test_root = "test_root")
-load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "capped_prefix", "define_args", "mem_cap_script", "memory_cap")
 load(":opt_level.bzl", "MojoOptLevelInfo", "SHIPPED_OPT_LEVEL", "TEST_OPT_LEVEL", "opt_level_args")
 load(":dlopen.bzl", "DLOPEN_ATTRS", "dlopen_refusal", "dlopen_rows")
 load(":helpers.bzl", "HELPER_ATTRS", "helper_files")
 load(":readme.bzl", "readme_gate", "readme_kwargs")
 load(":run_check.bzl", "run_check_validation")
-load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_prefix", "with_test_limit")
+load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_flags", "with_test_limit")
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
@@ -53,22 +62,48 @@ def _watchdog_flags(tc):
         "--watchdog-sample-secs={}".format(tc.watchdog_sample_secs),
     ]
 
-def _mojo_cmd(tc, args, runpath = None, source_root = None, link_tail = None, link = None):
-    # `link` replaces the toolchain's link directory: a coverage build's
-    # (coverage.bzl), whose `zig` keeps and relocates the debug info.
+def mojo_compile_cmd(tc, args, runpath = None, source_root = None, link_tail = None, link = None):
+    """The command line of one Mojo compile (`mojo precompile`, `build`, `doc`).
+
+    Every rule that runs the compiler builds its command here: mojo_library,
+    mojo_binary, mojo_test and their coverage and mutation actions,
+    mojo_doc_json (doc.bzl) and the proto packages (proto.bzl).
+
+    `link` replaces the toolchain's link directory: a coverage build's
+    (coverage.bzl), whose `zig` keeps and relocates the debug info. Linux
+    only. `link_tail` is appended by the wrapper's `cc` shim to the END of
+    every link line, after the compiler's own objects and archive.
+
+    The wrapper is the Zig program mojo_compile (tools/mojo_compile.zig on
+    Linux, tools/mojo_compile_macos.zig on macOS), and the toolchain's
+    watchdog knobs are always passed. On macOS the deployment target and the
+    host identities a compile may run on (`macos_hosts`) take the place of
+    the zig directory and target.
+    """
+    tail = [cmd_args(link_tail, format = "--link-tail={}")] if link_tail else []
+    if tc.os == "darwin":
+        if link:
+            fail("mojo_compile_cmd: `link` (a coverage link directory) is Linux only")
+        return cmd_args(
+            tc.wrapper,
+            cmd_args(tc.compiler, format = "--compiler={}"),
+            "--deployment-target=" + tc.cc_target,
+            ["--macos-host=" + h for h in tc.macos_hosts],
+            ["--runpath=" + runpath] if runpath else [],
+            [cmd_args(source_root, format = "--source-root={}")] if source_root else [],
+            tail,
+            _watchdog_flags(tc),
+            "--",
+            args,
+        )
     return cmd_args(
-        tc.busybox,
-        "sh",
         tc.wrapper,
-        tc.busybox,
-        tc.compiler,
-        link or tc.link,
-        tc.cc_target,
+        cmd_args(tc.compiler, format = "--compiler={}"),
+        cmd_args(link or tc.link, format = "--zig={}"),
+        "--cc-target=" + tc.cc_target,
         ["--runpath=" + runpath] if runpath else [],
         [cmd_args(source_root, format = "--source-root={}")] if source_root else [],
-        # Appended by the wrapper's `cc` shim to the END of the link line, after
-        # the compiler's own objects and archive (see mojo_wrapper.sh).
-        [cmd_args(link_tail, format = "--link-tail={}")] if link_tail else [],
+        tail,
         _watchdog_flags(tc),
         "--",
         args,
@@ -161,7 +196,7 @@ def komira_main(
     return __wrap_and_execute_raising_main[_komira_program_main](argc, argv)
 """
 
-def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None, debug_link = None, defines = [], levels = None):
+def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None, debug_link = None, defines = [], levels = None, emit_object = False):
     """`mojo build` of `main` (one of `srcs`) against the packages in closure_tsets, linking c_link.
 
     Reads only `ctx.actions` and `ctx.label`, so a dynamic action passes
@@ -184,6 +219,10 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
 
     `defines`: `-D` arguments from defines.bzl's define_args, after
     `--target-cpu`; none are written when it is empty. `levels`: see opt_level.bzl.
+
+    With `emit_object`, emits the program's object file instead (`--emit
+    object`), linked to nothing: every `external_call` the program reaches
+    is an undefined symbol of it (the README check, shared.bzl).
     """
     opt_args = opt_level_args(ctx.label, opt_level, category, levels)
     mapping = {s.short_path: s for s in srcs}
@@ -234,8 +273,10 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
     tail = _link_tail(c_link)
     if link_extra:
         tail = cmd_args(tail, link_extra) if tail else cmd_args(link_extra)
+    if emit_object:
+        emit, tail = ["--emit", "object"], None
     ctx.actions.run(
-        _mojo_cmd(tc, [
+        mojo_compile_cmd(tc, [
             "build",
             emit,
             opt_args,
@@ -284,7 +325,7 @@ def _check_import_name(ctx, name):
     if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", name):
         fail("{}: import name `{}` is not a Mojo identifier; set `import_name`".format(ctx.label, name))
 
-def _conda_facts(ctx, import_name, c_link, has_tests):
+def _conda_facts(ctx, import_name, c_link, has_tests, native):
     """(conda name, refusal) of this library's conda package.
 
     The name is None when the library opted out. The refusal is None when the
@@ -298,8 +339,9 @@ def _conda_facts(ctx, import_name, c_link, has_tests):
     name = ctx.attrs.conda_name or import_name
     if not regex_match("^[a-z][a-z0-9_]*$", name):
         return name, "`{}` is not a conda name (a lowercase letter, then lowercase letters, digits and _); set `conda_name`".format(name)
-    if c_link != None:
-        return name, "{} links native code. A `.mojoc` holds none, so a consumer would fail at its own link; no conda package for it until native code is supported".format(ctx.label.raw_target())
+    native_why = native_refusal(ctx.label, native) if c_link != None else None
+    if native_why != None:
+        return name, native_why
     if dlopen_refusal(ctx) != None:
         return name, dlopen_refusal(ctx)
     if not has_tests:
@@ -322,11 +364,12 @@ def _library_impl(ctx):
     _check_deps(ctx)
     deps = _dep_closure(ctx)
     c_link = _c_link(ctx)
+    native = native_facts(ctx, import_name)  # native_facts.bzl
 
     ungated = ctx.actions.declare_output("ungated/" + import_name + ".mojoc")
     dep_closure = ctx.actions.tset(MojoPkgTSet, children = deps)
     ctx.actions.run(
-        _mojo_cmd(tc, [
+        mojo_compile_cmd(tc, [
             # No `--target-cpu`: `mojo precompile` rejects it ("unrecognized
             # argument"). A `.mojoc` holds no machine code; the CPU is fixed
             # where code is generated, in `mojo build`.
@@ -381,16 +424,7 @@ def _library_impl(ctx):
         test_dir, staged = _test_root(ctx, "tests/{}/root".format(stem), exe, test_data.get(key, {}))
         ctx.actions.run(
             cmd_args(
-                capped_prefix(tc, mem_cap_script(ctx), "{}:{}".format(ctx.label.raw_target(), t.short_path), cap),
-                tc.busybox,
-                "sh",
-                tc.gate_runner,
-                tc.busybox,
-                tc.compiler,
-                "{}:{}".format(ctx.label.raw_target(), t.short_path),
-                staged,
-                marker.as_output(),
-                env_args,
+                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), t.short_path), staged, marker.as_output(), cap_flags(cap), env_args),
                 hidden = test_dir,
             ),
             category = "mojo_gated_test",
@@ -401,24 +435,25 @@ def _library_impl(ctx):
         if cov_link:
             cov_bins[stem] = _build_executable(ctx, tc, "cov/tests/{}/{}".format(stem, stem), [t], t, tests_closure, "0", "mojo_build_cov_test", stem, tests_c_link, debug_link = cov_link, defines = test_defines)
             cov_runs[stem] = coverage_run(ctx, tc, t, stem, cov_bins[stem], src_dir, import_name, root, test_data.get(key, {}), env_args)
-            cov_branch.update(coverage_branch_of(ctx, tc, t, stem, tests_closure, _mojo_cmd, _link_tail(tests_c_link), test_data.get(key, {}), env_args, src_dir, root, test_defines))
+            cov_branch.update(coverage_branch_of(ctx, tc, t, stem, tests_closure, mojo_compile_cmd, _link_tail(tests_c_link), test_data.get(key, {}), env_args, src_dir, root, test_defines))
 
     # Whether the conda package is gated by a test: the test_srcs only. A
     # README's examples are not counted, since analysis cannot tell whether
     # it holds any (see readme.bzl, readme_gate).
     has_tests = len(markers) > 0
-    conda_name, conda_refusal = _conda_facts(ctx, import_name, c_link, has_tests)
+    conda_name, conda_refusal = _conda_facts(ctx, import_name, c_link, has_tests, native)
 
     # A README that ships (the library has a conda package the build can make,
     # which installs it at share/doc/<conda name>/README.md) refuses relative
     # links: the installed copy has no neighbours.
     ships = conda_name != None and conda_refusal == None
-    readme_marker = readme_gate(ctx, tc, import_name, ungated_tset, _link_tail(c_link), env_args, ships, _readme_test)
+    readme_marker = readme_gate(ctx, tc, import_name, ungated_tset, _link_tail(c_link), env_args, ships, _readme_test, owner = bool(native.c_direct))
     if readme_marker != None:
         if "readme" in test_subtargets:
             fail("{}: a test_srcs file is named `readme.mojo`; `[tests][readme]` is the README's examples".format(ctx.label))
-        # [generated] and [file]: the programs and README.md the gate ran, for kci_validate's golden test.
-        test_subtargets["readme"] = [DefaultInfo(default_output = readme_marker[0], other_outputs = [readme_marker[1]], sub_targets = {"file": [DefaultInfo(default_output = ctx.attrs.readme)], "generated": [DefaultInfo(default_output = readme_marker[1])]})]
+        # [generated] and [file]: the programs and README.md the gate ran, for kci_validate's golden test;
+        # [objects]: an owner's README programs as objects, for its shared library's README check (shared.bzl).
+        test_subtargets["readme"] = [DefaultInfo(default_output = readme_marker[0], other_outputs = [readme_marker[1]], sub_targets = {"file": [DefaultInfo(default_output = ctx.attrs.readme)], "generated": [DefaultInfo(default_output = readme_marker[1])], "objects": [DefaultInfo(default_output = readme_marker[3])]})]
         markers.append(readme_marker[0])
         if cov_link:
             coverage_readme(ctx, tc, _build_executable, readme_marker, ungated_tset, _link_tail(c_link), src_dir, import_name, root, env_args, cov_bins, cov_runs)
@@ -427,7 +462,7 @@ def _library_impl(ctx):
     # only the conda package waits for them and the runs, never this package.
     cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs, cov_branch, src_dir, import_name, root) if cov_link else (None, [])
     reach = native_reach(ctx, src_dir, deps)  # native_reach.bzl: (providers, sub-targets)
-    mutation = mutation_sub_targets(ctx, tc, _mojo_cmd, src_dir, root, deps, tests_closure[1:], _link_tail(tests_c_link), test_data, env_args, test_defines, cap, mem_cap_script(ctx))  # mutation.bzl
+    mutation = mutation_sub_targets(ctx, tc, mojo_compile_cmd, src_dir, root, deps, tests_closure[1:], _link_tail(tests_c_link), test_data, env_args, test_defines, cap)  # mutation.bzl
     if markers:
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
         ctx.actions.run(
@@ -468,6 +503,7 @@ def _library_impl(ctx):
                 if MojoInfo in d
             },
             import_name = import_name,
+            native = native,
             pkgs = ctx.actions.tset(MojoPkgTSet, value = public, children = deps),
             pkgs_def = MojoPkgTSet,
             readme = ctx.attrs.readme,
@@ -482,21 +518,28 @@ def _library_impl(ctx):
 # dynamic action, which compiles and runs each example (the convention and
 # the gate are described there).
 
-def _readme_test_impl(actions, label, gate_label, examples, package, src, marker, tc, closure, opt_level, link_tail, env_args):
+def _readme_test_impl(actions, label, gate_label, examples, package, src, marker, objects, owner, tc, closure, opt_level, link_tail, env_args):
     lines = [x.strip() for x in examples.read_string().split("\n") if x.strip()]
     if not lines:
         actions.write(marker, "NO EXAMPLE {}: no ```mojo example, so nothing was compiled or run\n".format(gate_label))
+        actions.copied_dir(objects, {})
         return []
     shim = struct(actions = actions, label = label)
     markers = []
+    built = {}
     for line in lines:
         stem = "readme_{}_{}".format(package, line)
         program = src.project(stem + ".mojo")
         exe = _build_executable(shim, tc, "tests/readme/bin/" + stem, [program], program, [closure], opt_level, "mojo_build_test", "readme_" + line, None, link_extra = link_tail)
+        if owner:
+            built[stem + ".o"] = _build_executable(shim, tc, "tests/readme/obj/" + stem + ".o", [program], program, [closure], opt_level, "mojo_readme_object", "readme_" + line, None, emit_object = True)
         root, staged = _test_root(shim, "tests/readme/root/" + line, exe, {})
         m = actions.declare_output("tests/readme/{}.passed".format(line))
         actions.run(
-            cmd_args(tc.busybox, "sh", tc.gate_runner, tc.busybox, tc.compiler, "{}:{}".format(gate_label, line), staged, m.as_output(), env_args, hidden = root),
+            cmd_args(
+                gate_mojo(tc, "{}:{}".format(gate_label, line), staged, m.as_output(), [], env_args),
+                hidden = root,
+            ),
             category = "mojo_gated_test",
             identifier = "readme_" + line,
         )
@@ -505,6 +548,7 @@ def _readme_test_impl(actions, label, gate_label, examples, package, src, marker
         cmd_args(tc.busybox, "sh", "-c", 'b=$1; shift; "$b" cat "$@" >"$0"', marker, tc.busybox, markers),
         category = "mojo_readme_join",
     )
+    actions.copied_dir(objects, built)
     return []
 
 _readme_test = dynamic_actions(
@@ -519,6 +563,8 @@ _readme_test = dynamic_actions(
         "marker": dynattrs.output(),
         "opt_level": dynattrs.value(str),
         "package": dynattrs.value(str),
+        "objects": dynattrs.output(),
+        "owner": dynattrs.value(bool),
         "src": dynattrs.value(Artifact),
         "tc": dynattrs.value(typing.Any),
     },
@@ -561,7 +607,7 @@ mojo_library_rule = rule(
         # itself built from a mojo_library, so a default would be a cycle.
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
-    } | COVERAGE_ATTRS | DLOPEN_ATTRS | MUTATION_ATTRS | NATIVE_REACH_ATTRS | LIBRARY_DEFINE_ATTRS | _TOOLCHAIN_ATTR,
+    } | COVERAGE_ATTRS | DLOPEN_ATTRS | MUTATION_ATTRS | NATIVE_ATTRS | NATIVE_REACH_ATTRS | LIBRARY_DEFINE_ATTRS | _TOOLCHAIN_ATTR,
 )
 
 # ---- mojo_binary / mojo_test ----------------------------------------------
@@ -668,18 +714,14 @@ def _test_impl(ctx):
     root, staged = _test_root(ctx, ctx.label.name + ".testroot", exe, data)
     cap = memory_cap(where, "memory_cap_mib", ctx.attrs.memory_cap_mib, ctx.attrs.assert_level)
     command = cmd_args(
-        deadline_prefix(ctx, tc.busybox, where),
-        capped_prefix(tc, mem_cap_script(ctx), where, cap),
-        tc.busybox,
-        "sh",
-        tc.gate_runner,
-        tc.busybox,
-        tc.compiler,
-        where,
-        staged,
-        "/dev/null",
-        env_args,
-        _arg_args(ctx.attrs.args),
+        gate_mojo(
+            tc,
+            where,
+            staged,
+            "/dev/null",
+            deadline_flags(ctx, where) + cap_flags(cap),
+            [env_args, _arg_args(ctx.attrs.args)],
+        ),
         hidden = root,
     )
     run_dir, run_command = _runnable(ctx, tc, exe)
@@ -856,14 +898,7 @@ def _shared_lib_impl(ctx):
         marker = ctx.actions.declare_output("gate/{}.passed".format(stem))
         ctx.actions.run(
             cmd_args(
-                tc.busybox,
-                "sh",
-                tc.gate_runner,
-                tc.busybox,
-                tc.compiler,
-                "{}:{}".format(ctx.label.raw_target(), stem),
-                staged,
-                marker.as_output(),
+                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), stem), staged, marker.as_output()),
                 hidden = root,
             ),
             category = "mojo_shared_lib_gate",
@@ -922,6 +957,7 @@ def _mojo_library(**kwargs):
         conda_package(
             name = name + "_conda",
             lib = ":" + name,
+            native = kwargs.get("native"),
             # A library of the coverage ledger: its gate, `<name>_cov_gate`.
             coverage_gate = cov_gate,
             summary = summary or "The `{}` Mojo library of komira, as a conda package.".format(kwargs.get("import_name") or name),
