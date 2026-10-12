@@ -1,0 +1,13 @@
+# A VACUOUS change in kci's protocol: AFFECTED 0, which kci refuses.
+arg "--files"
+arg "{changed_files}"
+arg "--base"
+arg "parity-base"
+arg "--units-file"
+arg "{units_file}"
+input units_file %units
+input changed_files "README.md\n"
+file ".buckconfig" %buckconfig
+file "tools/build/ci/rules.txt" %rules.txt
+file "README.md"
+exit 0

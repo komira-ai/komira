@@ -1,6 +1,6 @@
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
-load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load(":conda.bzl", "conda_manifest_kci")
 load(":defs.bzl", "launcher_level_test")
 load(":kcov_guard.bzl", "kcov_guard_cases", "kcov_guard_tool")
@@ -14,17 +14,47 @@ launcher_level_test(
     exec_compatible_with = LINUX_X86_64,
 )
 
-# The package-format writer (tar, OCI), a static executable.
+# The packer's unit tests, `zig test` of pack/unit_tests.zig run as a build
+# action: the dlopen declarations (pack/conda_dlopen.zig: the soname reader
+# (code, not comments or docstrings), a declared soname accepted, an
+# undeclared one refused, a declaration no source opens refused, and each
+# declared requirement written after the others, once) and a library's
+# native files in its package (pack/conda_lib.zig: lib_files rows, the
+# __glibc floor, NEEDED owners) and the link commands of a packaged README
+# (pack/readme_link.zig: every owner in the order given, an owner a
+# shared library NEEDs refused before it, the static archive
+# on the build line only, the source's bytes kept, a source naming the
+# marker refused).
+zig_test(
+    name = "komira_pack_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "pack/unit_tests.zig",
+    imports = [
+        "pack/common.zig",
+        "pack/conda_dlopen.zig",
+        "pack/conda_lib.zig",
+        "pack/readme_link.zig",
+    ],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# The package-format writer (tar, OCI), a static executable, built only
+# behind its unit tests.
 zig_exe(
     name = "komira_pack",
     exec_compatible_with = LINUX_X86_64,
     src = "pack/komira_pack.zig",
+    unit_tests = [":komira_pack_unit"],
     imports = [
         "pack/common.zig",
         "pack/conda.zig",
         "pack/conda_check.zig",
+        "pack/conda_dlopen.zig",
         "pack/conda_index.zig",
+        "pack/conda_lib.zig",
         "pack/conda_meta.zig",
+        "pack/readme_link.zig",
         "pack/tar_oci.zig",
     ],
     busybox = "komira//tools/build/toolchains:busybox",
@@ -93,6 +123,11 @@ config_setting(
     ],
     visibility = ["PUBLIC"],
 )
+
+# The package of the superseded one-library plan (retired 2026-10-07): the
+# release order fixture below requires it, so that an exemption for it cannot
+# come back. Spelt in parts, as the root BUCK's retired_names lint asks.
+_OLD_NATIVE = "komira" + "_native"
 
 # The stamped release path, before any release runs it (release_set.bzl): each
 # library of the release set packaged with the fixed test stamp of conda.bzl
@@ -177,7 +212,7 @@ conda_release_set_check(
         ":release_order_passes_a_requirement_listed_earlier",
         ":release_order_passes_another_version_or_build",
         ":release_order_passes_a_longer_name",
-        ":release_order_exempts_komira_native",
+        ":release_order_refuses_a_{}_requirement_listed_later".format(_OLD_NATIVE),
     ],
 )
 
@@ -223,13 +258,17 @@ release_order_test(
     metadata_files = ["release_order/requires_bb.json", "release_order/leaf.json"],
 )
 
-# a requires komira_native, listed after it: the one exemption.
+# a requires _OLD_NATIVE at the set's version and build string, listed after
+# it: refused like any other member. This proves the old exemption for that
+# package is gone (the skip in _ORDER_CHECK, deleted 2026-10-11, would let it
+# pass).
 release_order_test(
-    name = "release_order_exempts_komira_native",
+    name = "release_order_refuses_a_{}_requirement_listed_later".format(_OLD_NATIVE),
     version = "1.0.0",
     build = "hb_1",
-    members = ["a", "komira_native"],
-    metadata_files = ["release_order/requires_komira_native.json", "release_order/leaf.json"],
+    members = ["a", _OLD_NATIVE],
+    metadata_files = ["release_order/requires_{}.json".format(_OLD_NATIVE), "release_order/leaf.json"],
+    refuses = "member a requires {}, which release_set lists after it".format(_OLD_NATIVE),
 )
 
 # The release set file: kci_artifact's welded test holds it equal to

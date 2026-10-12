@@ -12,7 +12,7 @@
 //!       -Wl,-rpath,<runpath> <rewritten arguments> <link-tail lines>
 //!
 //! byte for byte: coverage's cov_zig recognises the link by that shape, and
-//! cov_branch_link.sh reproduces it (test 47, link_line.sh).
+//! `cov_branch link` (cov_branch_link.zig) reproduces it (test 47, link_line.sh).
 //!
 //! On macOS (mojo_compile_macos.zig) the first line of shim.cfg is the host's C
 //! driver, `/usr/bin/cc`, and the shim runs `execLineMacos`.
@@ -288,7 +288,7 @@ test "shim: a trailing -Xlinker passes through" {
     try expectRewrite(&.{ "-rpath", "-Xlinker" }, &.{});
 }
 
-// Catches any change to the link line cov_zig and cov_branch_link.sh read.
+// Catches any change to the link line cov_zig and cov_branch_link.zig read.
 // Mutant planted: drop -Wl,--enable-new-dtags.
 test "shim: the exact exec line, link tail last in order" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);

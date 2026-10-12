@@ -70,7 +70,7 @@ any provider: thread the cursor, keep polling through empty batches, stop at
 the end of the segment.
 
 <!-- mojo-hidden from std.testing import assert_equal -->
-```mojo
+```mojo module
 from komira_rowcell import RowCell, make_long_cell
 from komira_snapshotter.change_stream_trait import ChangeBatch, ChangeRecord, ChangeStreamListener
 from komira_snapshotter.change_stream_trait import make_insert_record, make_remove_record
@@ -115,10 +115,11 @@ def drain[L: ChangeStreamListener](mut listener: L) raises -> List[String]:
     return seen^
 
 
-var listener = ReplayListener()
-var seen = drain(listener)
-assert_equal(len(seen), 2)
-assert_equal(seen[0], "INSERT@s1")
-assert_equal(seen[1], "REMOVE@s2")
-assert_equal(listener.polls, 4)  # the empty live poll did not end the loop
+def main() raises:
+    var listener = ReplayListener()
+    var seen = drain(listener)
+    assert_equal(len(seen), 2)
+    assert_equal(seen[0], "INSERT@s1")
+    assert_equal(seen[1], "REMOVE@s2")
+    assert_equal(listener.polls, 4)  # the empty live poll did not end the loop
 ```

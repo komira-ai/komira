@@ -10,11 +10,11 @@
 #        the buck2 binary). Prints PASS/FAIL lines; exits 1 if any failed.
 #
 #   1-5. (The scenarios named above; the legs keep their numbers.)
-#   6. The limits (tools/build/platforms/limits.tsv, limits_retired.sh): the
-#      real tree passes; a limit with no marker, a marker with no row, a row
-#      with no marker, and a row whose retiring PR has merged while its marker
-#      remains are each refused (fixture trees; every real row's PR named as
-#      merged turns the real tree red).
+#   6. The limits (tools/build/platforms/limits.tsv): no row's retiring PR
+#      has merged, by `limits_check merged` over the commit subjects of main
+#      (origin/main, else HEAD), which no build action can read. The rest of
+#      the limits check is the validation //:limits; the tool's unit tests
+#      (tools/build/platforms/limits) hold every case of both modes.
 #   7. The table agrees with the tree: each registered row's golden_config_hash
 #      is the configuration hash buck2 gives its platform, and the macOS row's
 #      applets are those of tools/build/mojo/darwin/busybox.sh.
@@ -31,52 +31,14 @@ pass() { echo "PASS  platform table: $1"; }
 fail() { echo "FAIL  platform table: $1"; rc=1; }
 
 # 6
-LIM=tools/build/tests/functional/platform_table/limits_retired.sh
-if out=$(bash "$LIM" 2>&1); then
-    pass "limits: $(echo "$out" | sed 's/^PASS  limits: //')"
+ref=HEAD
+git rev-parse --verify -q origin/main > /dev/null 2>&1 && ref=origin/main
+if ! git log --format=%s "$ref" > "$LOG/limits_subjects" 2> "$LOG/limits_subjects.err"; then
+    fail "limits: no git history to read the merged PRs from (see $LOG/limits_subjects.err)"
+elif out=$("$BUCK2" run komira//tools/build/platforms/limits:limits_check -- merged --limits "$PWD/tools/build/platforms/limits.tsv" --subjects "$(cd "$LOG" && pwd)/limits_subjects" 2> "$LOG/limits_run.err"); then
+    pass "limits: ${out#PASS  limits: }"
 else
-    fail "limits: the real tree is refused: $out"
-fi
-FX="$LOG/limits_fx"
-rm -rf "$FX"
-mk_fx() { # tsv body, BUCK body
-    rm -rf "$FX"
-    mkdir -p "$FX/tools/build/platforms" "$FX/tools/build/tests/functional/platform_table" "$FX/pkg"
-    printf 'id\tretired_by\treason\n%b' "$1" > "$FX/tools/build/platforms/limits.tsv"
-    printf '%b' "$2" > "$FX/pkg/BUCK"
-    cp "$LIM" "$FX/tools/build/tests/functional/platform_table/limits_retired.sh"
-}
-expect_limits() { # what, want-sentence, subjects-file-or-empty
-    if [ -n "$3" ]; then got=$(bash "$FX/tools/build/tests/functional/platform_table/limits_retired.sh" --subjects "$3" 2>&1); else got=$(bash "$FX/tools/build/tests/functional/platform_table/limits_retired.sh" --subjects /dev/null 2>&1); fi
-    rcx=$?
-    if [ -z "$2" ]; then
-        [ "$rcx" = 0 ] || fail "limits fixture ($1): refused a tree it should pass: $got"
-    elif [ "$rcx" = 0 ] || ! printf '%s' "$got" | grep -qF "$2"; then
-        fail "limits fixture ($1): not refused with \`$2\`: $got"
-    fi
-}
-GOOD_TSV='a-limit\tnative-pr:4\tpkg/BUCK: x only\n'
-GOOD_BUCK='t(\n    target_compatible_with = X,  # komira-limit:a-limit\n)\n'
-mk_fx "$GOOD_TSV" "$GOOD_BUCK"; expect_limits "a declared limit whose PR has not merged" "" ""
-mk_fx "$GOOD_TSV" "$GOOD_BUCK\nt(\n    target_compatible_with = Y,\n)\n"; expect_limits "a limit with no marker" "undeclared limit" ""
-mk_fx "$GOOD_TSV" "$GOOD_BUCK# komira-limit:other-limit\n"; expect_limits "a marker with no row" "marker \`komira-limit:other-limit\`" ""
-mk_fx "$GOOD_TSV" "t(\n)\n"; expect_limits "a row with no marker" "row \`a-limit\` has no marker" ""
-printf 'build: a thing [native-pr:4]\n' > "$LOG/limits_subjects_merged"
-printf 'build: a thing [native-pr:44]\nbuild: [native-pr:4b]\n' > "$LOG/limits_subjects_other"
-mk_fx "$GOOD_TSV" "$GOOD_BUCK"; expect_limits "a limit whose retiring PR has merged" "limit \`a-limit\` is retired by native-pr:4, whose PR has merged" "$LOG/limits_subjects_merged"
-mk_fx "$GOOD_TSV" "$GOOD_BUCK"; expect_limits "a subject naming a different PR (44, 4b) is not PR 4" "" "$LOG/limits_subjects_other"
-mk_fx 'a-limit\tnever\tbecause\n' "$GOOD_BUCK"; expect_limits "never with no product reason" "needs a reason starting" ""
-mk_fx "$GOOD_TSV$GOOD_TSV" "$GOOD_BUCK"; expect_limits "a duplicate row" "appears twice" ""
-rm -rf "$FX"
-# The real rows, each with its PR named as merged: every one that is not `never` must be refused.
-all=$(awk -F'\t' '$2 ~ /^native-pr:/ {print "build: [" $2 "]"}' tools/build/platforms/limits.tsv | sort -u)
-printf '%s\n' "$all" > "$LOG/limits_subjects_all"
-want_n=$(awk -F'\t' '$2 ~ /^native-pr:/ {n++} END {print n + 0}' tools/build/platforms/limits.tsv)
-got_n=$(bash "$LIM" --subjects "$LOG/limits_subjects_all" 2>&1 | grep -c '^FAIL  limits: limit `' || true)
-if [ "$want_n" -gt 0 ] && [ "$got_n" = "$want_n" ]; then
-    pass "limits: with every retiring PR named as merged, all $want_n retirable limits are refused (the check can fail)"
-else
-    fail "limits: with every retiring PR named as merged, $got_n of $want_n retirable limits were refused"
+    fail "limits: $out (see $LOG/limits_run.err)"
 fi
 
 # 7
