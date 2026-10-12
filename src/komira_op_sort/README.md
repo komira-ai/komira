@@ -74,6 +74,15 @@ batch by it.
   `komira_column_kernels.cross_batch_gather`) is `sort_external_merge`; its
   comparator orders a key as the run sort does (floats by `sort_key_lt`).
 
+- `sort_stage_buffer`: `SortBuffer[KB, *Payloads]`, the stage sort buffer
+  typed at compile time (a key block `SortKeyBlock[*Keys]` and a variadic
+  payload pack, stored column-wise), a `BreakerStateCombinable` and a
+  `SpillableOp`; its key and payload column types are `sort_stage_columns`,
+  `sort_stage_string_key` and `sort_stage_payloads`. Float keys compare by
+  `sort_key_lt` everywhere, the top-N SIMD reject mask included.
+- `sort_stage`: `Stage_Sort[KB, *Payloads]`, the sort breaker as a
+  `FusedMorselOp`: feed every row, drain sorted in `finalize`.
+
 Each parallel entry takes a `SharedForkJoinHandle` (the engine's dispatcher,
 or `serial_fork_join_handle()` to run the same chunks inline; the `*_serial`
 entries do that) and gives exactly the rows of the serial kernel, ties in
