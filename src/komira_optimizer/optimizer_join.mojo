@@ -436,18 +436,21 @@ def _side_has_wide_string_build_payload(
     STRING build payload.
 
     `select_join_build_side` uses this on single-key (`n_keys == 1`)
-    INNER joins to keep such a side off the build (right) side, overriding
-    its cost heuristic, so the STRING-carrying wide side stays on the
-    PROBE (left) side.
+    INNER joins to keep such a side off the build side, overriding its
+    cost heuristic: the other side builds, so the STRING-carrying wide side
+    is probed.
 
     This predicate counts the plan's output-schema columns that are NOT a
     join key (a "build payload"), and reports True when:
       - there are MORE THAN 3 such payload columns, AND
-      - at least one payload column is STRING.
+      - at least one payload column is Arrow STRING (BINARY, LARGE_STRING
+        and LARGE_BINARY do not count).
 
-    Key columns are matched by name against `keys` (the side's `*_on` list).
-    The override fires only on this exact condition, so every other join
-    keeps the cost decision.
+    Key columns are matched by name against `keys`, the side's own `*_on`
+    list (`left_on` for the left input, `right_on` for the right); a key
+    column of any type, STRING included, is not payload.
+    The override fires only when exactly one side of a single-key INNER
+    join meets this condition; every other join keeps the cost decision.
     """
     ref schema = plan.output_schema
     var n = schema.num_columns()
@@ -477,8 +480,9 @@ def select_join_build_side(var plan: LogicalPlan) raises -> LogicalPlan:
     Regression if removed: Any INNER join where the larger table is on
                            the right regresses by a factor proportional
                            to the size ratio (bigger HT, more probes).
-    Non-obvious part:      A single-key join whose cheaper side carries a
-                           wide STRING payload builds on the other side.
+    Non-obvious part:      A single-key INNER join where exactly one side
+                           carries a wide STRING payload builds on the
+                           other side, whatever the cost says.
     DuckDB equivalent:     DuckDB's build_probe_side_optimizer does the
                            INNER flip by cardinality*row_width.
     Do NOT delete without: re-measuring the inner joins.
