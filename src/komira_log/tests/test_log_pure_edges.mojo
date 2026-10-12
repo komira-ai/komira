@@ -4,7 +4,8 @@
 # sticky `LineWrite` verdict, the time and composite rotation policies, the
 # trailing partial line of a merged segment file, the constructor refusals,
 # module-only registration, the redaction rules' spacing / auth-scheme /
-# e-mail / UTF-8 cap arms, and the trace header helpers.
+# e-mail / non-ASCII pass-through / UTF-8 cap arms, and the trace header
+# helpers.
 #
 # Each case states the defect it catches; none depends on wall-clock time or
 # on another case's state.
@@ -36,6 +37,8 @@ from komira_log.pattern_layout import interpolate
 from komira_log.structured_log import (
     redact_log_text,
     _truncate_utf8,
+    _redact_keyed_secrets,
+    _redact_emails,
     trace_id_from_header,
     qualified_trace,
     REDACTED,
@@ -215,7 +218,7 @@ def test_list_encoders_of_u64_and_bool() raises:
 
 
 # -----------------------------------------------------------------------------
-# structured_log: redaction and trace helpers (ASCII inputs)
+# structured_log: redaction and trace helpers
 # -----------------------------------------------------------------------------
 
 
@@ -261,6 +264,28 @@ def test_utf8_cap_backs_off_a_split_code_point() raises:
     var got = _truncate_utf8(String("aé"), 2)
     assert_equal(got, String("a") + String(TRUNCATED_SUFFIX))
     assert_equal(_truncate_utf8(String("aé"), 3), String("aé"), "fits")
+
+
+def test_redaction_copies_non_ascii_text_byte_for_byte() raises:
+    """komira-ai/komira#1142: bytes the rules do not rewrite come out
+    unchanged. Each pass is checked on its own, so reverting either pass to
+    a per-byte `chr(Int(byte))` copy (which re-encodes 0xC3 as U+00C3, two
+    bytes) turns its assertion red; the composed call pins the case from the
+    issue (`é` became `ÃÂ©` through both passes). The credential and address
+    after the non-ASCII text are still cut at the right offset."""
+    assert_equal(
+        _redact_keyed_secrets(String("café ok")), String("café ok"), "rule 2"
+    )
+    assert_equal(_redact_emails(String("café ok")), String("café ok"), "rule 3")
+    assert_equal(redact_log_text(String("café ok")), String("café ok"))
+    assert_equal(
+        redact_log_text(String("Grüße 日本 token=abc ünd ann@example.com €")),
+        String("Grüße 日本 token=")
+        + String(REDACTED)
+        + String(" ünd ")
+        + String(REDACTED_EMAIL)
+        + String(" €"),
+    )
 
 
 def test_trace_id_from_header_and_qualified_trace() raises:
