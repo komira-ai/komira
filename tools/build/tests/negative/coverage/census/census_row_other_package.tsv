@@ -1,0 +1,5 @@
+# src/c's census rows of census_ok with a row of src/b (test 46).
+census	2026-10-08	-	-
+komira//src/c:c1	src/c	library	OK	2	4	1	4	yes	no	-	-
+komira//src/c:c2	src/c	library	OK	4	4	3	4	yes	no	-	-
+komira//src/b:b2	src/b	library	RUN_FAILED	-	-	-	-	no	conda	-	mojo_cov_run test_x: boom
