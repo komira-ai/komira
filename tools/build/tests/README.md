@@ -523,21 +523,32 @@ dynamic symbol.
 ## 28. Compile watchdog
 
 In the pull-request check, not `run_tests.sh`:
-[`watchdog/cases.sh`](functional/watchdog/cases.sh), a remote action
+[`watchdog/cases.zig`](functional/watchdog/cases.zig), a remote action
 (`tests//functional/watchdog:cases`) that refuses its own report when it holds
-fewer ok cases than its floor (a case dropped), runs [`mojo_wrapper.sh`](../mojo/mojo_wrapper.sh)
-on a stand-in toolchain whose `mojo` sleeps, spins, or spawns children. A
+fewer ok cases than its floor (a case dropped), runs the compile wrapper
+(`komira//tools/build/mojo:mojo_compile`, [`mojo_compile.zig`](../mojo/tools/mojo_compile.zig))
+on a stand-in toolchain ([`standin.zig`](functional/watchdog/standin.zig)) whose `mojo` sleeps, spins, or spawns children. A
 tree using no CPU is killed with exit 124 and the message, and so are its
 child and an orphaned grandchild (a child left in any state but zombie fails
-the case); a tree spinning itself or through a child, a short idle and a
+the case); a tree spinning itself or through a child (which the stand-in
+waits for as `wait(2)` does, for every child it has), a short idle and a
 disabled watchdog run to completion; a compiler error keeps its status;
-malformed knobs exit 2. Every case runs under `timeout 60`, so a watchdog
-that never fires is a failed case, not a hung action. Two more signal the
-wrapper while its compiler and the compiler's child hang: after TERM the
-wrapper must exit 143 with both gone, and after KILL, which it cannot catch,
+malformed knobs exit 2. Every case runs under a 60 s deadline of its own, so a watchdog
+that never fires is a failed case, not a hung action. Four more signal the
+wrapper while its compiler and the compiler's child hang: after TERM, HUP or
+INT the wrapper must exit 143, 129 or 130 with both gone and its scratch
+directory removed, and after KILL, which it cannot catch,
 both must be gone within 5 s (the tether in the compiler's session, a read
-of a FIFO only the wrapper holds open, returns when the wrapper dies and
-kills the session). The macOS wrapper has the same watchdog, sampling
+of a pipe only the wrapper holds open, returns when the wrapper dies and
+kills the session). The rest pin what the compiler is given: exactly the
+environment the wrapper's header lists (a variable of the action does not
+reach it), the link line zig receives from the `cc` shim for every row of
+its rewrite table, stdin `/dev/null`, SIGINT and SIGQUIT ignored and its pid
+the session id with the watchdog on (and the wrapper's own stdin and
+dispositions with it off); and the output checks and refusals: an empty
+output 3, one holding the working directory 4, no `-o` 2, a manifest member
+missing 2, no compiler 127. After every case but KILL the scratch directory
+is gone. The macOS wrapper has the same watchdog, sampling
 `ps` rather than `/proc`; test 24 ([`darwin/check.sh`](functional/darwin/check.sh)) runs it on this client
 against a stand-in compiler: a hang is killed (124), a spin is not, a killed
 wrapper takes its compiler with it, a malformed knob is refused.
@@ -566,18 +577,22 @@ from the test command, their absolute prefix, or the inputs behind the
 tests//negative/test_data:skip_77` must fail with `GATED TEST FAILED:
 <label> (exit 77)` and count as `Fail 1`: exit 77, "skipped" to automake
 and some harnesses, is a failure. On a pull request that rule is checked
-only by `runner_cases` (below), which runs the runner itself; mapping the
-runner's status to a verdict is Buck2's. The `bad_*` targets and the
-`test_deps` refusals at analysis are the scenario
+by the runner's own unit tests (below); mapping the runner's status to a
+verdict is Buck2's. The `bad_*` targets and the `test_deps` refusals at
+analysis are the scenario
 [`analysis_refusals_mojo`](../selftest/analysis_refusals_mojo.zig). The gate test
 of `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` (built with
 the examples) covers the executable-relative helpers.
+The runner's unit tests ([`tools/build/run/mojo_test.zig`](../run/mojo_test.zig),
+welded to the runner, so a pull request that builds any test runs them) run
+it on a test that kills itself: with SIGKILL it must exit 137 and with SIGABRT
+134, each with no marker; one that exits 77 must exit 77 with no marker;
+`--arg` values must reach the test in order, unexported, with every
+`@KOMIRA_ACTION_DIR@` replaced by the action's directory; and an `--env`
+after an `--arg` is refused (exit 2).
 `runner_cases` (in the pull-request check; its action refuses a report with
-fewer ok cases than its floor) also runs the runner on a stand-in that kills itself: with
-SIGKILL it must exit 137 and with SIGABRT 134, each with no marker; one that
-exits 77 must exit 77 with no marker; `--arg` values must reach the
-stand-in in order, unexported, with every `@KOMIRA_ACTION_DIR@` replaced by
-the action's directory; and an `--env` after an `--arg` is refused (exit 2).
+fewer ok cases than its floor) runs the same cases on `gate_runner.sh`, the
+darwin-arm64 toolchain's runner.
 
 ## 30. Optimization levels
 

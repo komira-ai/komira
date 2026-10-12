@@ -2109,24 +2109,36 @@ struct ExpressionExecutor(Movable, Deinitable):
                 batch, node, idx, input_sel, output_sel
             )
 
-        # Disjunction combinator. Evaluate both children
-        # separately against `input_sel`, then merge their true-sels
-        # via a two-pointer union (both sels are sorted ascending —
-        # the per-child filter kernels preserve input order, so a
-        # linear-time merge suffices). Closes TPC-H Q7's nation-pair
+        # Disjunction combinator. The left child runs over `input_sel`; the
+        # right child runs only over the rows the left did not keep, so an
+        # error in the right side (an overflow, MIN / -1) fires only on rows
+        # whose answer depends on it, as in DuckDB. The two true-sels are
+        # disjoint and each keeps `input_sel`'s order, so a two-pointer union
+        # of ascending sels merges them. Closes TPC-H Q7's nation-pair
         # filter `(n1='FRANCE' AND n2='GERMANY') OR
         # (n1='GERMANY' AND n2='FRANCE')`.
         if kind == EXPR_OR:
             var n_sel = input_sel.len()
-            # Per-child true-sel scratch.
-            var left_true = RowSelectionVector(n_sel if n_sel > 0 else 1)
-            var right_true = RowSelectionVector(n_sel if n_sel > 0 else 1)
+            var n_rows = batch.num_rows()
+            # A child's SIMD fast path can write up to `n_rows` survivors
+            # (see the EXPR_AND arm), so each scratch holds that many.
+            var cap = n_rows if n_rows > n_sel else n_sel
+            var left_true = RowSelectionVector(cap if cap > 0 else 1)
+            var right_true = RowSelectionVector(cap if cap > 0 else 1)
             _ = self._eval_bool_from_view[bo](
                 batch, node.left, input_sel, left_true, temp_false
             )
-            _ = self._eval_bool_from_view[bo](
-                batch, node.right, input_sel, right_true, temp_false
-            )
+            var kept = List[Bool](length=n_rows, fill=False)
+            for j in range(left_true.len()):
+                kept[Int(left_true.get(j))] = True
+            var rest = RowSelectionVector(n_sel if n_sel > 0 else 1)
+            for k in range(n_sel):
+                if not kept[Int(input_sel.get(k))]:
+                    rest.append(input_sel.get(k))
+            if rest.len() > 0:
+                _ = self._eval_bool_from_view[bo](
+                    batch, node.right, rest, right_true, temp_false
+                )
             # Two-pointer union. Both inputs are sorted ascending.
             output_sel.set_len(0)
             var i_l = 0
@@ -2377,11 +2389,26 @@ struct ExpressionExecutor(Movable, Deinitable):
 
         if kind == EXPR_AND or kind == EXPR_OR:
             var l = List[UInt8](capacity=n_sel)
-            var r = List[UInt8](capacity=n_sel)
             self._eval_kleene_from_view[bo](batch, node.left, sel, l, temp_false)
-            self._eval_kleene_from_view[bo](
-                batch, node.right, sel, r, temp_false
-            )
+            # The right side runs only over the rows the left leaves open
+            # (not FALSE under AND, not TRUE under OR), so an error in it
+            # fires only on rows whose answer depends on it, as in DuckDB.
+            # A decided row keeps `decided` on the right, which the Kleene
+            # table ignores there.
+            var decided = _KLEENE_FALSE if kind == EXPR_AND else _KLEENE_TRUE
+            var open_pos = List[Int](capacity=n_sel)
+            for k in range(n_sel):
+                if l[k] != decided:
+                    open_pos.append(k)
+            var r = List[UInt8](length=n_sel, fill=decided)
+            if len(open_pos) > 0:
+                var open_sel = _sel_at(sel, open_pos)
+                var r_open = List[UInt8](capacity=len(open_pos))
+                self._eval_kleene_from_view[bo](
+                    batch, node.right, open_sel, r_open, temp_false
+                )
+                for j in range(len(open_pos)):
+                    r[open_pos[j]] = r_open[j]
             for k in range(n_sel):
                 if kind == EXPR_AND:
                     out.append(_kleene_and(l[k], r[k]))
@@ -2566,34 +2593,26 @@ struct ExpressionExecutor(Movable, Deinitable):
             return
         if kind == EXPR_CASE_I64 or kind == EXPR_CASE_F64:
             ref slots = self.when_pool[node.col_idx]
-            var n_pairs = (len(slots) - 1) // 2
-            var n_rows = batch.num_rows()
-            # `taken[k]` = the WHEN index whose condition first holds, or
-            # `n_pairs` for the ELSE.
-            var taken = List[Int](length=n_sel, fill=n_pairs)
-            for c in range(n_pairs):
-                var cond_mask = List[Scalar[DType.bool]](capacity=n_rows)
-                for _r in range(n_rows):
-                    cond_mask.append(Scalar[DType.bool](False))
-                self._eval_case_cond_mask_from_view[bo](
-                    batch, slots[2 * c], sel, cond_mask
-                )
-                for k in range(n_sel):
-                    if taken[k] == n_pairs and Bool(
-                        cond_mask[Int(sel.get(k))]
-                    ):
-                        taken[k] = c
-            for b in range(n_pairs + 1):
-                var slot = slots[2 * b + 1] if b < n_pairs else slots[
-                    len(slots) - 1
-                ]
-                var branch_null = List[Bool](length=n_sel, fill=False)
+            var n_branches = (len(slots) - 1) // 2 + 1
+            # Each branch's NULLs are read over the rows that take it only,
+            # as the value walkers evaluate it.
+            var taken = self._case_taken_from_view[bo](batch, slots, sel)
+            for b in range(n_branches):
+                var pos = _positions_of(taken, b)
+                if len(pos) == 0:
+                    continue
+                var branch_sel = _sel_at(sel, pos)
+                var branch_null = List[Bool](length=len(pos), fill=False)
                 self._mark_value_nulls_from_view[bo](
-                    batch, slot, sel, branch_null, kind == EXPR_CASE_F64
+                    batch,
+                    _case_branch_slot(slots, b),
+                    branch_sel,
+                    branch_null,
+                    kind == EXPR_CASE_F64,
                 )
-                for k in range(n_sel):
-                    if taken[k] == b and branch_null[k]:
-                        null_at[k] = True
+                for j in range(len(pos)):
+                    if branch_null[j]:
+                        null_at[pos[j]] = True
             return
         raise Error(
             "ExpressionExecutor._mark_value_nulls_from_view: unsupported"
@@ -2948,9 +2967,10 @@ struct ExpressionExecutor(Movable, Deinitable):
     # ELSE 0)`) lowers through the COLUMN view-walkers, which raised on
     # EXPR_CASE_*. This helper produces, for one in-subset condition sub-tree,
     # a per-row Bool membership mask sized to `batch.num_rows()` (mask[row] is
-    # True iff the condition holds for that row). The CASE arm in each column
-    # value-walker then selects the first matching THEN branch (or the ELSE)
-    # per position.
+    # True iff the condition holds for that row). `_case_taken_from_view`
+    # asks it for each WHEN over the rows no earlier WHEN took, and the CASE
+    # arm in each column value-walker evaluates each branch over the rows
+    # that take it.
     #
     # Implementation: `_eval_bool_from_view` filters an input sel into an
     # output sel of surviving ROW indices. We seed it with the CASE's `sel`
@@ -2989,6 +3009,48 @@ struct ExpressionExecutor(Movable, Deinitable):
         while j < n_surv:
             mask[Int(surv.get(j))] = Scalar[DType.bool](True)
             j = j + 1
+
+    def _case_taken_from_view[
+        bo: Origin[mut=False],
+    ](
+        imm self,
+        ref [bo] batch: RecordBatch,
+        ref slots: List[Int],
+        ref sel: RowSelectionVector,
+    ) raises -> List[Int]:
+        """Per position of `sel`, the branch a CASE (`slots`, its `when_pool`
+        entry) takes: the index of the first WHEN whose condition holds, or
+        the number of WHEN pairs for the ELSE. Each condition is evaluated
+        only over the rows no earlier WHEN took, and the caller evaluates
+        each branch only over the rows that take it, so an error in a
+        condition or branch (an overflow, MIN / -1) fires only on rows that
+        reach it, as in DuckDB."""
+        var n_pairs = (len(slots) - 1) // 2
+        var n_sel = sel.len()
+        var n_rows = batch.num_rows()
+        var taken = List[Int](length=n_sel, fill=n_pairs)
+        var open_pos = List[Int](capacity=n_sel)
+        for k in range(n_sel):
+            open_pos.append(k)
+        for c in range(n_pairs):
+            if len(open_pos) == 0:
+                break
+            var open_sel = _sel_at(sel, open_pos)
+            var cond_mask = List[Scalar[DType.bool]](capacity=n_rows)
+            for _r in range(n_rows):
+                cond_mask.append(Scalar[DType.bool](False))
+            self._eval_case_cond_mask_from_view[bo](
+                batch, slots[2 * c], open_sel, cond_mask
+            )
+            var still_open = List[Int](capacity=len(open_pos))
+            for j in range(len(open_pos)):
+                var p = open_pos[j]
+                if Bool(cond_mask[Int(sel.get(p))]):
+                    taken[p] = c
+                else:
+                    still_open.append(p)
+            open_pos = still_open^
+        return taken^
 
     def eval_to_list_i64_from_view[
         bo: Origin[mut=False],
@@ -3232,45 +3294,31 @@ struct ExpressionExecutor(Movable, Deinitable):
         # thenK-1, elseSlot]`. Per row (position k in `sel`) the result is the
         # first THEN whose condition holds, else the ELSE value. THEN/ELSE
         # branches are themselves Int64 value sub-trees evaluated through this
-        # same walker; conditions are in-subset Bool sub-trees evaluated via
-        # `_eval_case_cond_mask_from_view`. Mirrors the per-cell
-        # `_eval_i64_from_source` EXPR_CASE_I64 arm's first-match semantics.
+        # same walker, each over only the rows that take it; conditions are
+        # in-subset Bool sub-trees evaluated via `_case_taken_from_view`.
+        # Mirrors the per-cell `_eval_i64_from_source` EXPR_CASE_I64 arm's
+        # first-match semantics.
         if kind == EXPR_CASE_I64:
             ref slots = self.when_pool[node.col_idx]
-            var n_pairs = (len(slots) - 1) // 2
+            var n_branches = (len(slots) - 1) // 2 + 1
             var n_sel = sel.len()
-            var n_rows = batch.num_rows()
-            # branch_vals[c] holds the THEN list for case c; the last entry is
-            # the ELSE list. Each is one Int64 per position in `sel`.
-            var then_lists = List[List[Scalar[DType.int64]]]()
-            var masks = List[List[Scalar[DType.bool]]]()
-            for c in range(n_pairs):
-                var cond_mask = List[Scalar[DType.bool]](capacity=n_rows)
-                for _r in range(n_rows):
-                    cond_mask.append(Scalar[DType.bool](False))
-                self._eval_case_cond_mask_from_view[bo](
-                    batch, slots[2 * c], sel, cond_mask
-                )
-                masks.append(cond_mask^)
-                var then_vals = List[Scalar[DType.int64]](capacity=n_sel)
+            var taken = self._case_taken_from_view[bo](batch, slots, sel)
+            # Each branch runs over the rows that take it only.
+            var vals = List[Scalar[DType.int64]](length=n_sel, fill=Int64(0))
+            for b in range(n_branches):
+                var pos = _positions_of(taken, b)
+                if len(pos) == 0:
+                    continue
+                var branch_sel = _sel_at(sel, pos)
+                var branch_vals = List[Scalar[DType.int64]](capacity=len(pos))
                 self.eval_to_list_i64_from_view[bo](
-                    batch_view, slots[2 * c + 1], sel, then_vals
+                    batch_view, _case_branch_slot(slots, b), branch_sel,
+                    branch_vals,
                 )
-                then_lists.append(then_vals^)
-            var else_vals = List[Scalar[DType.int64]](capacity=n_sel)
-            self.eval_to_list_i64_from_view[bo](
-                batch_view, slots[len(slots) - 1], sel, else_vals
-            )
-            var k = 0
-            while k < n_sel:
-                var row = Int(sel.get(k))
-                var picked = else_vals[k]
-                for c in range(n_pairs):
-                    if Bool(masks[c][row]):
-                        picked = then_lists[c][k]
-                        break
-                out.append(picked)
-                k = k + 1
+                for j in range(len(pos)):
+                    vals[pos[j]] = branch_vals[j]
+            for k in range(n_sel):
+                out.append(vals[k])
             return
 
         # Unsupported kind.
@@ -3309,9 +3357,8 @@ struct ExpressionExecutor(Movable, Deinitable):
             Error on unsupported Expr kind.
             Error on Float64 DType mismatch when the EXPR_COL operand
             resolves to a non-Float64 column.
-            The EXPR_DIV_I64 arm does not raise for its own division: a
-            zero divisor is NULL (§5.3), and MIN / -1 answers 2^63, not the
-            §5.4 error (komira-ai/komira#1478).
+            Error on an integer division of MIN / -1 with no NULL operand
+            (§5.4). A zero divisor is NULL (§5.3), not an error.
         """
         ref batch = batch_view._batch[]
         var node = self.expression_pool[expr_idx]
@@ -3624,10 +3671,41 @@ struct ExpressionExecutor(Movable, Deinitable):
             )
             # A zero divisor answers NULL (§5.3): the row holds the
             # placeholder 0.0 and `_mark_value_nulls_from_view` reports it.
-            # MIN / -1 is not refused here (§5.4 departure,
-            # komira-ai/komira#1478): it widens to 2^63. CASE branches
-            # and the right side of an OR are evaluated over every selected
-            # row, so a raise would fire on rows that never use the quotient.
+            # MIN / -1 raises (§5.4) unless an operand is NULL. CASE branches
+            # and the right side of an AND / OR run only over the rows that
+            # use them, so `sel` holds only rows whose quotient is used. Every
+            # Int64 from MIN to MIN + 2^9 widens to -2^63, so a row whose
+            # dividend does over a -1 divisor is flagged, and only MIN itself
+            # raises: (MIN + 1) / -1 is MAX, which fits. Only -1 widens to
+            # -1.0, so the divisor test is exact. The flagged rows whose
+            # operands are all valid are re-read through the Int64 walker as
+            # their own sub-selection: that walker raises on overflow in any
+            # row it reads, so it must read neither a NULL row nor a row
+            # outside the flagged set.
+            var flagged = List[Int]()
+            for f in range(n_sel):
+                if rhs_vals[f] == -1.0 and lhs_vals[f] == Float64(Int64.MIN):
+                    flagged.append(f)
+            if len(flagged) > 0:
+                var flagged_sel = _sel_at(sel, flagged)
+                var operand_nulls = self._operand_nulls_from_view[bo](
+                    batch, node, flagged_sel, True
+                )
+                var valid = List[Int]()
+                for j in range(len(flagged)):
+                    if not operand_nulls[j]:
+                        valid.append(flagged[j])
+                if len(valid) > 0:
+                    var reread_sel = _sel_at(sel, valid)
+                    var lhs_i64 = List[Scalar[DType.int64]](
+                        capacity=len(valid)
+                    )
+                    self.eval_to_list_i64_from_view[bo](
+                        batch_view, node.left, reread_sel, lhs_i64
+                    )
+                    for j in range(len(lhs_i64)):
+                        if lhs_i64[j] == Int64.MIN:
+                            raise _ee_div_overflow_error[DType.int64]()
             var k = 0
             while k < n_sel:
                 var d = rhs_vals[k]
@@ -3679,45 +3757,34 @@ struct ExpressionExecutor(Movable, Deinitable):
         # Float64
         # CASE/WHEN (mirror of the EXPR_CASE_I64 arm in
         # `eval_to_list_i64_from_view`). First matching THEN per row, else the
-        # ELSE value; conditions via `_eval_case_cond_mask_from_view`,
-        # THEN/ELSE branches via this same F64 walker (which auto-widens i64
-        # leaves — so `ELSE 0` lowered as EXPR_LIT_I64 widens to 0.0). Unblocks
-        # q8's `sum(CASE WHEN s_nationkey=2 THEN l_disc_price ELSE 0)` bridged
+        # ELSE value; conditions via `_case_taken_from_view`, THEN/ELSE
+        # branches via this same F64 walker over the rows that take them
+        # (it auto-widens i64 leaves, so `ELSE 0` lowered as EXPR_LIT_I64
+        # widens to 0.0). Unblocks q8's `sum(CASE WHEN s_nationkey=2 THEN l_disc_price ELSE 0)` bridged
         # agg tail.
         if kind == EXPR_CASE_F64:
             ref slots = self.when_pool[node.col_idx]
-            var n_pairs = (len(slots) - 1) // 2
+            var n_branches = (len(slots) - 1) // 2 + 1
             var n_sel = sel.len()
-            var n_rows = batch.num_rows()
-            var then_lists = List[List[Scalar[DType.float64]]]()
-            var masks = List[List[Scalar[DType.bool]]]()
-            for c in range(n_pairs):
-                var cond_mask = List[Scalar[DType.bool]](capacity=n_rows)
-                for _r in range(n_rows):
-                    cond_mask.append(Scalar[DType.bool](False))
-                self._eval_case_cond_mask_from_view[bo](
-                    batch, slots[2 * c], sel, cond_mask
+            var taken = self._case_taken_from_view[bo](batch, slots, sel)
+            # Each branch runs over the rows that take it only.
+            var vals = List[Scalar[DType.float64]](length=n_sel, fill=0.0)
+            for b in range(n_branches):
+                var pos = _positions_of(taken, b)
+                if len(pos) == 0:
+                    continue
+                var branch_sel = _sel_at(sel, pos)
+                var branch_vals = List[Scalar[DType.float64]](
+                    capacity=len(pos)
                 )
-                masks.append(cond_mask^)
-                var then_vals = List[Scalar[DType.float64]](capacity=n_sel)
                 self.eval_to_list_f64_from_view[bo](
-                    batch_view, slots[2 * c + 1], sel, then_vals
+                    batch_view, _case_branch_slot(slots, b), branch_sel,
+                    branch_vals,
                 )
-                then_lists.append(then_vals^)
-            var else_vals = List[Scalar[DType.float64]](capacity=n_sel)
-            self.eval_to_list_f64_from_view[bo](
-                batch_view, slots[len(slots) - 1], sel, else_vals
-            )
-            var k = 0
-            while k < n_sel:
-                var row = Int(sel.get(k))
-                var picked = else_vals[k]
-                for c in range(n_pairs):
-                    if Bool(masks[c][row]):
-                        picked = then_lists[c][k]
-                        break
-                out.append(picked)
-                k = k + 1
+                for j in range(len(pos)):
+                    vals[pos[j]] = branch_vals[j]
+            for k in range(n_sel):
+                out.append(vals[k])
             return
 
         raise Error(
@@ -6009,6 +6076,37 @@ struct ExpressionExecutor(Movable, Deinitable):
         branches are outside batch-1 scope — the row gate declines them)."""
         return self.expression_pool[slot].kind == EXPR_NULL
 
+
+def _sel_at(
+    ref sel: RowSelectionVector, positions: List[Int]
+) -> RowSelectionVector:
+    """The rows of `sel` at `positions`, in that order: the sub-selection a
+    CASE branch or the right side of an AND / OR is evaluated over, so that
+    it runs only on the rows that use it."""
+    var n = len(positions)
+    var out = RowSelectionVector(n if n > 0 else 1)
+    for j in range(n):
+        out.append(sel.get(positions[j]))
+    return out^
+
+
+def _positions_of(taken: List[Int], branch: Int) -> List[Int]:
+    """The positions `k` with `taken[k] == branch`, ascending."""
+    var out = List[Int]()
+    for k in range(len(taken)):
+        if taken[k] == branch:
+            out.append(k)
+    return out^
+
+
+def _case_branch_slot(slots: List[Int], branch: Int) -> Int:
+    """The pool slot of a CASE's THEN `branch`, or of its ELSE when `branch`
+    is the number of WHEN pairs. `slots` is the `when_pool` entry
+    `[cond0, then0, ..., condK-1, thenK-1, else]`."""
+    var n_pairs = (len(slots) - 1) // 2
+    if branch < n_pairs:
+        return slots[2 * branch + 1]
+    return slots[len(slots) - 1]
 
 
 # -----------------------------------------------------------------------------

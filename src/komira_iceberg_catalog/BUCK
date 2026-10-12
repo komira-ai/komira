@@ -22,6 +22,7 @@ mojo_library(
         "tests/test_iceberg_rest_catalog.mojo",
         "tests/test_iceberg_rest_errors.mojo",
         "tests/test_iceberg_rest_http_transport.mojo",
+        "tests/test_storage_based_catalog.mojo",
     ],
     visibility = ["PUBLIC"],
 )

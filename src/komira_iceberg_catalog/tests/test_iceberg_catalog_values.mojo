@@ -12,8 +12,8 @@
 #     is absent (a prefix match, or a found-index off by one, returns the
 #     wrong value).
 #   * has_location is False for an empty location only.
-#   * StorageBasedCatalog matches the whole `namespace.table` key, never a
-#     prefix of it, and resolves each of several registered tables.
+#   * StorageBasedCatalog matches the table name whole, never a prefix or an
+#     extension of it, and resolves each of several registered tables.
 #   * StaticBearerToken yields exactly `Bearer <token>`, and "" for "".
 #   * IcebergRestResponse.is_ok is True for 200 only.
 #   * IcebergRestRequest.header_value is an exact, case-sensitive lookup.
@@ -22,6 +22,10 @@
 #     UTF-8 (high bytes in both nibbles). The oracle is computed here by a
 #     different method (membership in a literal unreserved alphabet) plus
 #     fixed vectors, never by calling the encoder under test.
+#   * The catalog prefix is encoded the same way except that `/` is kept as a
+#     path separator, swept over printable ASCII (a prefix encoder that kept
+#     any other reserved byte, or encoded the `/`, differs from the oracle,
+#     which splits on `/` and encodes each piece).
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -247,9 +251,8 @@ def _path_for(prefix_cfg: String, namespace: String, table: String) raises -> St
 
 def test_path_encoding_fixed_vectors() raises:
     # A prefix with a space, a multi-level namespace joined by the unit
-    # separator, a table with a reserved character and a non-ASCII one. The
-    # prefix holds no `/`: the client encodes it as %2F, while the reference
-    # client keeps it (komira-ai/komira#1508), so no test pins either answer.
+    # separator, a table with a reserved character and a non-ASCII one. A `/`
+    # in the prefix is covered by test_prefix_encoding_keeps_only_slash.
     var path = _path_for(
         String('{"overrides":{"prefix":"ten ant1"}}'),
         String("a") + chr(0x1F) + String("b"),
@@ -295,6 +298,46 @@ def test_path_encoding_sweeps_ascii_and_multibyte() raises:
     assert_equal(_oracle_encode(chr(0x1F600)), String("%F0%9F%98%80"))
 
 
+def _oracle_encode_prefix(s: String) -> String:
+    """The prefix oracle: split on `/`, encode each piece as a segment, join
+    the pieces with `/`."""
+    var out = String("")
+    var pieces = s.split("/")
+    for i in range(len(pieces)):
+        if i > 0:
+            out += "/"
+        out += _oracle_encode(String(pieces[i]))
+    return out^
+
+
+def test_prefix_encoding_keeps_only_slash() raises:
+    # Every printable ASCII byte 0x20..0x7E in the prefix, `"` and `\` given
+    # to the config JSON as escapes; `/` (0x2F) lands mid-prefix, so each
+    # side of it is a non-empty piece.
+    var raw = String("")
+    var json = String("")
+    for c in range(0x20, 0x7F):
+        raw += chr(c)
+        if c == 0x22 or c == 0x5C:
+            json += "\\"
+        json += chr(c)
+    var path = _path_for(
+        String('{"overrides":{"prefix":"') + json + String('"}}'),
+        String("db"),
+        String("t"),
+    )
+    assert_equal(
+        path,
+        String("/v1/")
+        + _oracle_encode_prefix(raw)
+        + String("/namespaces/db/tables/t"),
+    )
+    # The oracle itself: one `/` kept, the bytes beside it encoded.
+    assert_equal(
+        _oracle_encode_prefix(String("a b/c:d")), String("a%20b/c%3Ad")
+    )
+
+
 def main() raises:
     test_resolved_table_copy_is_deep_and_complete()
     test_resolved_table_config_value_exact_match_and_absent()
@@ -306,4 +349,5 @@ def main() raises:
     test_request_header_value_exact_lookup()
     test_path_encoding_fixed_vectors()
     test_path_encoding_sweeps_ascii_and_multibyte()
+    test_prefix_encoding_keeps_only_slash()
     print("test_iceberg_catalog_values: ALL PASS")

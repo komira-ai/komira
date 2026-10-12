@@ -490,8 +490,10 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
            the SAFE choice: a clear loud rejection, NEVER a partial
            non-atomic apply that lands rows at uncoordinated commit_lsns and
            silently re-opens the torn cross-keyspace read (invariant #3).
-        3. A read-only txn (empty write-set) routes to shard 0 and commits there
-           (a no-op create-CAS-free read-only result, same as today).
+        3. A read-only txn (empty write-set) commits on the shard it was begun on
+           (its `shard_slot`), or on shard 0 when `shard_slot` is unbound: a
+           no-op read-only result (`did_append == False`, `commit_lsn == -1`),
+           never a cross-shard refusal, since nothing is written.
 
         The begin==commit-shard invariant is STRUCTURALLY ENFORCED (it replaced
         an earlier docstring-only precondition).
@@ -520,9 +522,14 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
         aborts with that shard's own 40001. This router adds routing above and
         the begin==commit assertion; neither edits the commit core."""
         var target = self._route_write_set(txn.write_set)
-        # target == -1 means an empty write-set (read-only); route to shard 0.
+        # target == -1 means an empty write-set (read-only): nothing is written,
+        # so it commits on its own begin shard (shard 0 when unbound) and the
+        # begin==commit check below cannot refuse it. A slot outside this
+        # router (not one it stamped) falls back to 0 and is refused below.
         if target < 0:
             target = 0
+            if txn.shard_slot >= 0 and txn.shard_slot < self.shard_count():
+                target = txn.shard_slot
         # STRUCTURAL begin==commit-shard enforcement. A router-begun
         # txn carries the begin shard on `shard_slot` (>= 0); a mismatch with the
         # routed target is a cross-shard txn -> LOUD reject (never a silent

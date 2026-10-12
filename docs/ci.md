@@ -214,7 +214,7 @@ other run.
 | `tmpdir_outside_checkout` (reported): no directory from `TEST_TMPDIR` up to `/` holds `.git` or `.buckconfig` | outside: six levels walked to `/`, no marker | the install-path test, whose scratch must be outside any checkout |
 
 `tmpdir_outside_checkout` is reported, not required: the gate runner
-([`gate_runner.sh`](../tools/build/mojo/gate_runner.sh)) makes `TEST_TMPDIR`
+([`gate mojo`](../tools/build/run/README.md)) makes `TEST_TMPDIR`
 under the action's working directory, which for an action run on the client
 (no farm configured) is inside the checkout, so a required check would fail
 there for that reason rather than for a missing capability (derived from the

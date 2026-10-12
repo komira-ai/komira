@@ -67,13 +67,24 @@ MojoToolchainInfo = provider(fields = {
     # is the CPU of the machine the action runs on, which is not part of the
     # action key.
     "target_cpu": provider_field(str),
+    # The compile wrapper every Mojo compile runs through (defs.bzl,
+    # mojo_compile_cmd): on Linux the mojo_compile executable
+    # (tools/mojo_compile.zig), on macOS darwin/mojo_wrapper.sh.
     "wrapper": provider_field(typing.Any),
-    # The compile watchdog of the wrapper (mojo_wrapper.sh): kill a compile
+    # The compile watchdog of the wrapper: kill a compile
     # whose process tree used no CPU for this long (0: off), sampling every
     # `watchdog_sample_secs`. None where the wrapper has no watchdog.
     "watchdog_idle_secs": provider_field(typing.Any, default = None),
     "watchdog_sample_secs": provider_field(typing.Any, default = None),
-    "gate_runner": provider_field(typing.Any),
+    # The gate (tools/build/run): `gate mojo` runs every gated test, `gate
+    # step` every mutation step. A static executable of the execution
+    # platform, built by zig_exe behind its unit tests. None in the
+    # darwin-arm64 toolchain, which keeps `gate_runner`.
+    "gate": provider_field(typing.Any, default = None),
+    # darwin-arm64 only: gate_runner.sh behind dyld_prelude.sh, the shell
+    # runner the macOS toolchain keeps until the gate's macOS form is proven
+    # on the macOS workers (test_runtime.bzl, gate_mojo). None on linux.
+    "gate_runner": provider_field(typing.Any, default = None),
     "run_check": provider_field(typing.Any),
     "launcher": provider_field(typing.Any),
     # Directory: only the shared libraries a built binary loads (a
