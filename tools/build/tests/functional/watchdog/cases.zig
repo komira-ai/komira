@@ -11,10 +11,38 @@
 //! a watchdog that never fires is a BAD case, not a hung action. After every
 //! case but the SIGKILL one the scratch directory (<case>/bsp/komira) must be
 //! gone, and a child the stand-in recorded (child.pid) must not be alive.
+//!
+//! Built for macOS (tests//functional/watchdog:cases_darwin) it runs the
+//! macOS wrapper (mojo_compile_macos.zig) on a macOS worker: every case but
+//! `link` (the macOS shim runs the host's /usr/bin/cc, which no stand-in
+//! replaces), with `--deployment-target` and this host's `--macos-host` in
+//! place of the Linux flags and the macOS environment in `envdump`, plus
+//! the macOS refusals: an unlisted host, no host, a bundle-shaped
+//! shared-lib build (a self-named one is accepted), a modular.cfg
+//! shared_libs line other than the compiler's lib/, and a Linux flag.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const linux = std.os.linux;
 const posix = std.posix;
+const SIG = posix.SIG;
+const W = posix.W;
+
+/// Built for macOS (the cases of tests//functional/watchdog:cases_darwin,
+/// against the darwin wrapper on a macOS worker), else Linux.
+const macos = builtin.os.tag == .macos;
+
+/// macOS: the `--macos-host=<id>` every case passes (this host's identity,
+/// from the wrapper's `host-identity` mode), or empty for none.
+var host_flag: [:0]const u8 = "";
+
+fn kill(pid: i32, sig: u6) void {
+    if (macos) {
+        _ = std.c.kill(pid, sig);
+    } else {
+        _ = linux.kill(pid, sig);
+    }
+}
 
 var arena: std.mem.Allocator = undefined;
 var root: []const u8 = undefined; // <cwd>/.komira_watchdog_cases
@@ -48,13 +76,33 @@ fn exists(path: []const u8) bool {
     return true;
 }
 
+/// macOS: modular.cfg with the one `shared_libs` line the wrapper accepts.
+const macos_cfg = "[max]\nroot = @@MOJO_TOOLCHAIN_ROOT@@\nshared_libs = -Xlinker,-rpath,-Xlinker,@@MOJO_TOOLCHAIN_ROOT@@/lib;\n";
+
 fn makeToolchain(name: []const u8, manifest: []const u8, with_mojo: bool, standin_path: []const u8) void {
     const tc = str("{s}/{s}", .{ root, name });
     std.fs.cwd().makePath(str("{s}/bin", .{tc})) catch die("cannot make {s}", .{tc});
     std.fs.cwd().makePath(str("{s}/share/max", .{tc})) catch die("cannot make {s}", .{tc});
     writeFile(str("{s}/CLOSURE_MANIFEST", .{tc}), manifest);
-    writeFile(str("{s}/share/max/modular.cfg", .{tc}), "[max]\nroot = @@MOJO_TOOLCHAIN_ROOT@@\n");
+    writeFile(str("{s}/share/max/modular.cfg", .{tc}), if (macos) macos_cfg else "[max]\nroot = @@MOJO_TOOLCHAIN_ROOT@@\n");
     if (with_mojo) posix.symlink(standin_path, str("{s}/bin/mojo", .{tc})) catch die("cannot link {s}/bin/mojo", .{tc});
+}
+
+/// macOS: this host's identity, from the wrapper's `host-identity` mode, run
+/// with the environment every case gives the wrapper.
+fn hostIdentity() []const u8 {
+    const out = str("{s}/host.txt", .{root});
+    const argv = [_:null]?[*:0]const u8{ wrapper, "host-identity", strZ("--output={s}", .{out}) };
+    const envp = [_:null]?[*:0]const u8{"PATH=/nonexistent"};
+    const pid = posix.fork() catch die("cannot fork", .{});
+    if (pid == 0) {
+        _ = std.c.execve(wrapper, &argv, &envp);
+        std.c._exit(127);
+    }
+    const st = posix.waitpid(pid, 0).status;
+    if (statusOf(st) != 0) die("{s} host-identity exited {d}", .{ wrapper, statusOf(st) });
+    const text = readFile(out) orelse die("{s} host-identity wrote no {s}", .{ wrapper, out });
+    return std.mem.trim(u8, text, " \n");
 }
 
 const Run = struct {
@@ -89,8 +137,13 @@ fn spawn(s: Spec) struct { pid: i32, dir: []const u8 } {
     var argv = std.ArrayList(?[*:0]const u8).init(arena);
     argv.append(wrapper) catch unreachable;
     argv.append(strZ("--compiler={s}/{s}", .{ root, s.tc })) catch unreachable;
-    argv.append(strZ("--zig={s}/zig", .{root})) catch unreachable;
-    argv.append("--cc-target=x86_64-linux-gnu") catch unreachable;
+    if (macos) {
+        argv.append("--deployment-target=11.0") catch unreachable;
+        if (host_flag.len > 0) argv.append(host_flag) catch unreachable;
+    } else {
+        argv.append(strZ("--zig={s}/zig", .{root})) catch unreachable;
+        argv.append("--cc-target=x86_64-linux-gnu") catch unreachable;
+    }
     for (s.flags) |f| argv.append(strZ("{s}", .{f})) catch unreachable;
     argv.append("--") catch unreachable;
     for (s.mojo) |a| argv.append(strZ("{s}", .{a})) catch unreachable;
@@ -106,38 +159,65 @@ fn spawn(s: Spec) struct { pid: i32, dir: []const u8 } {
     const in_z = if (s.stdin_file) |f| strZ("{s}/{s}", .{ dir, f }) else strZ("/dev/null", .{});
     const pid = posix.fork() catch die("cannot fork", .{});
     if (pid == 0) {
-        if (posix.errno(linux.chdir(dir_z)) != .SUCCESS) linux.exit_group(120);
-        const log = linux.open(log_z, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
-        if (posix.errno(log) != .SUCCESS) linux.exit_group(121);
-        _ = linux.dup2(@intCast(log), 1);
-        _ = linux.dup2(@intCast(log), 2);
-        const in = linux.open(in_z, .{ .ACCMODE = .RDONLY }, 0);
-        if (posix.errno(in) != .SUCCESS) linux.exit_group(122);
-        _ = linux.dup2(@intCast(in), 0);
-        for ([_]u6{ linux.SIG.HUP, linux.SIG.INT, linux.SIG.QUIT, linux.SIG.TERM }) |sig| {
-            const sa = linux.Sigaction{ .handler = .{ .handler = linux.SIG.DFL }, .mask = linux.empty_sigset, .flags = 0 };
-            _ = linux.sigaction(sig, &sa, null);
-        }
-        _ = linux.execve(wrapper, @ptrCast(argv.items.ptr), &envp);
-        linux.exit_group(123);
+        const av: Argv = @ptrCast(argv.items.ptr);
+        if (macos) childMacos(dir_z, log_z, in_z, av, &envp) else childLinux(dir_z, log_z, in_z, av, &envp);
     }
     return .{ .pid = pid, .dir = dir };
 }
 
+const Argv = [*:null]const ?[*:0]const u8;
+
+/// In the forked child: the case directory, the log on stdout and stderr,
+/// the case's stdin, default dispositions, then the wrapper.
+fn childLinux(dir_z: [*:0]const u8, log_z: [*:0]const u8, in_z: [*:0]const u8, argv: Argv, envp: Argv) noreturn {
+    if (posix.errno(linux.chdir(dir_z)) != .SUCCESS) linux.exit_group(120);
+    const log = linux.open(log_z, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
+    if (posix.errno(log) != .SUCCESS) linux.exit_group(121);
+    _ = linux.dup2(@intCast(log), 1);
+    _ = linux.dup2(@intCast(log), 2);
+    const in = linux.open(in_z, .{ .ACCMODE = .RDONLY }, 0);
+    if (posix.errno(in) != .SUCCESS) linux.exit_group(122);
+    _ = linux.dup2(@intCast(in), 0);
+    for ([_]u6{ SIG.HUP, SIG.INT, SIG.QUIT, SIG.TERM }) |sig| {
+        const sa = linux.Sigaction{ .handler = .{ .handler = SIG.DFL }, .mask = linux.empty_sigset, .flags = 0 };
+        _ = linux.sigaction(sig, &sa, null);
+    }
+    _ = linux.execve(wrapper, argv, envp);
+    linux.exit_group(123);
+}
+
+fn childMacos(dir_z: [*:0]const u8, log_z: [*:0]const u8, in_z: [*:0]const u8, argv: Argv, envp: Argv) noreturn {
+    const c = std.c;
+    if (c.chdir(dir_z) != 0) c._exit(120);
+    const log = c.open(log_z, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, @as(c_uint, 0o644));
+    if (log < 0) c._exit(121);
+    _ = c.dup2(log, 1);
+    _ = c.dup2(log, 2);
+    const in = c.open(in_z, .{ .ACCMODE = .RDONLY });
+    if (in < 0) c._exit(122);
+    _ = c.dup2(in, 0);
+    for ([_]u6{ SIG.HUP, SIG.INT, SIG.QUIT, SIG.TERM }) |sig| {
+        const sa = posix.Sigaction{ .handler = .{ .handler = SIG.DFL }, .mask = 0, .flags = 0 };
+        posix.sigaction(sig, &sa, null) catch {};
+    }
+    _ = c.execve(wrapper, argv, envp);
+    c._exit(123);
+}
+
 fn statusOf(st: u32) u8 {
-    if (linux.W.IFEXITED(st)) return linux.W.EXITSTATUS(st);
-    return @intCast(128 + (linux.W.TERMSIG(st) & 0x7f));
+    if (W.IFEXITED(st)) return W.EXITSTATUS(st);
+    return @intCast(128 + (W.TERMSIG(st) & 0x7f));
 }
 
 /// Waits for `pid` up to `secs`; kills it and returns null past that.
 fn waitFor(pid: i32, secs: u64) ?u8 {
     const end = std.time.milliTimestamp() + @as(i64, @intCast(secs * 1000));
     while (std.time.milliTimestamp() < end) {
-        const r = posix.waitpid(pid, linux.W.NOHANG);
+        const r = posix.waitpid(pid, W.NOHANG);
         if (r.pid == pid) return statusOf(r.status);
         std.time.sleep(50 * std.time.ns_per_ms);
     }
-    _ = linux.kill(pid, linux.SIG.KILL);
+    kill(pid, SIG.KILL);
     _ = posix.waitpid(pid, 0);
     return null;
 }
@@ -150,6 +230,7 @@ fn run(s: Spec) Run {
 
 /// Running, stopped or sleeping: not a zombie, and not gone.
 fn alive(pid: i32) bool {
+    if (macos) return aliveMacos(pid);
     var buf: [512]u8 = undefined;
     const f = std.fs.cwd().openFile(str("/proc/{d}/stat", .{pid}), .{}) catch return false;
     defer f.close();
@@ -158,6 +239,17 @@ fn alive(pid: i32) bool {
     if (rp + 2 >= n) return false;
     const st = buf[rp + 2];
     return st != 'Z' and st != 'X';
+}
+
+extern "c" fn proc_pidinfo(pid: c_int, flavor: c_int, arg: u64, buffer: ?*anyopaque, buffersize: c_int) c_int;
+
+/// macOS: proc_pidinfo(PROC_PIDTBSDINFO = 3) fills a `struct proc_bsdinfo`
+/// (136 bytes) whose `pbi_status` (a u32 at offset 4) is SZOMB (5) for a
+/// zombie; a pid it cannot read is gone.
+fn aliveMacos(pid: i32) bool {
+    var buf: [136]u8 align(8) = undefined;
+    if (proc_pidinfo(pid, 3, 0, &buf, buf.len) != buf.len) return false;
+    return std.mem.readInt(u32, buf[4..8], .little) != 5;
 }
 
 fn pidIn(dir: []const u8, name: []const u8) ?i32 {
@@ -193,7 +285,7 @@ fn verdict(name: []const u8, why: ?[]const u8, log: []const u8) void {
 fn killLeftovers(dir: []const u8) void {
     for ([_][]const u8{ "child.pid", "compiler.pid" }) |n| {
         if (pidIn(dir, n)) |p| {
-            if (p > 1) _ = linux.kill(p, linux.SIG.KILL);
+            if (p > 1) kill(p, SIG.KILL);
         }
     }
 }
@@ -249,12 +341,12 @@ fn killed(name: []const u8, sig: u6, want: u8) void {
     }
     const why: ?[]const u8 = blk: {
         const child = pidIn(sp.dir, "child.pid") orelse {
-            _ = linux.kill(sp.pid, linux.SIG.KILL);
+            kill(sp.pid, SIG.KILL);
             _ = posix.waitpid(sp.pid, 0);
             break :blk "the stand-in compiler did not start";
         };
         const compiler = pidIn(sp.dir, "compiler.pid").?;
-        _ = linux.kill(sp.pid, sig);
+        kill(sp.pid, sig);
         const rc = waitFor(sp.pid, 30) orelse break :blk "the wrapper outlived the signal by 30 s";
         if (rc != want) break :blk str("the wrapper exited {d}, want {d}", .{ rc, want });
         var left: []const u8 = "";
@@ -267,7 +359,7 @@ fn killed(name: []const u8, sig: u6, want: u8) void {
             std.time.sleep(100 * std.time.ns_per_ms);
         }
         if (left.len > 0) break :blk str("still alive 5 s after signal {d} to the wrapper:{s}", .{ sig, left });
-        if (sig != linux.SIG.KILL and exists(scratchOf(sp.dir))) break :blk "the scratch directory was left";
+        if (sig != SIG.KILL and exists(scratchOf(sp.dir))) break :blk "the scratch directory was left";
         break :blk null;
     };
     verdict(name, why, readFile(str("{s}/log", .{sp.dir})) orelse "");
@@ -329,6 +421,12 @@ pub fn main() void {
     makeToolchain("tc", "bin/mojo\n", true, standin_path);
     makeToolchain("tc_missing", "bin/mojo\nlib/libmissing.so\n", true, standin_path);
     makeToolchain("tc_noexec", "share/max/modular.cfg\n", false, standin_path);
+    if (macos) {
+        // A shared_libs line naming another directory than the compiler's lib/.
+        makeToolchain("tc_badcfg", "bin/mojo\n", true, standin_path);
+        writeFile(str("{s}/tc_badcfg/share/max/modular.cfg", .{root}), "[max]\nshared_libs = -Xlinker,-rpath,-Xlinker,/opt/lib;\n");
+        host_flag = strZ("--macos-host={s}", .{hostIdentity()});
+    }
 
     const knobs: []const []const u8 = &.{ "--watchdog-idle-secs=3", "--watchdog-sample-secs=1" };
     const killed_text = "mojo-watchdog: killed deadlocked compiler";
@@ -347,8 +445,8 @@ pub fn main() void {
     expect(.{ .name = "compiler_error", .flags = knobs, .mojo = &([_][]const u8{"fail"} ++ o) }, 7, null);
     // A compiler killed by signal N gives 128+N (design item 30), through
     // the watchdog's wait and through the plain wait of idle 0.
-    expect(.{ .name = "compiler_signalled", .flags = knobs, .mojo = &([_][]const u8{"selfkill"} ++ o) }, 128 + 10, null);
-    expect(.{ .name = "compiler_signalled_plain", .flags = &.{"--watchdog-idle-secs=0"}, .mojo = &([_][]const u8{"selfkill"} ++ o) }, 128 + 10, null);
+    expect(.{ .name = "compiler_signalled", .flags = knobs, .mojo = &([_][]const u8{"selfkill"} ++ o) }, 128 + @as(u8, SIG.USR1), null);
+    expect(.{ .name = "compiler_signalled_plain", .flags = &.{"--watchdog-idle-secs=0"}, .mojo = &([_][]const u8{"selfkill"} ++ o) }, 128 + @as(u8, SIG.USR1), null);
     expect(.{ .name = "disabled", .flags = &.{ "--watchdog-idle-secs=0", "--watchdog-sample-secs=1" }, .mojo = &([_][]const u8{"nap5"} ++ o) }, 0, null);
     expect(.{ .name = "enabled", .flags = &.{ "--watchdog-idle-secs=2", "--watchdog-sample-secs=1" }, .mojo = &([_][]const u8{"nap5"} ++ o) }, 124, killed_text);
     expect(.{ .name = "default_knobs", .mojo = &([_][]const u8{"nap2"} ++ o) }, 0, null);
@@ -356,13 +454,32 @@ pub fn main() void {
     expect(.{ .name = "bad_idle", .flags = &.{"--watchdog-idle-secs=5m"}, .mojo = &([_][]const u8{"nap2"} ++ o) }, 2, "whole numbers");
 
     // The wrapper signalled.
-    killed("wrapper_term", linux.SIG.TERM, 143);
-    killed("wrapper_hup", linux.SIG.HUP, 129);
-    killed("wrapper_int", linux.SIG.INT, 130);
-    killed("wrapper_kill", linux.SIG.KILL, 137);
+    killed("wrapper_term", SIG.TERM, 143);
+    killed("wrapper_hup", SIG.HUP, 129);
+    killed("wrapper_int", SIG.INT, 130);
+    killed("wrapper_kill", SIG.KILL, 137);
 
     // The environment the compiler sees: exactly these variables.
-    {
+    if (macos) {
+        const dir = caseDir("envdump");
+        const t = scratchOf(dir);
+        const tc = str("{s}/tc", .{root});
+        expectFile(.{ .name = "envdump", .flags = knobs, .mojo = &([_][]const u8{"envdump"} ++ o) }, "env.txt", &.{
+            str("PATH={s}/cc:{s}/bin", .{ t, tc }),
+            str("MODULAR_HOME={s}/modular", .{t}),
+            str("CC={s}/cc/cc", .{t}),
+            "MACOSX_DEPLOYMENT_TARGET=11.0",
+            str("MODULAR_CACHE_DIR={s}/cache", .{t}),
+            str("TMPDIR={s}/tmp", .{t}),
+            str("HOME={s}/home", .{t}),
+            str("XDG_CACHE_HOME={s}/cache", .{t}),
+            "KGEN_CompilerRT_AsyncRT_ParallelismLevel=1",
+            "MODULAR_CRASH_REPORTING_ENABLED=false",
+            str("KOMIRA_CC_SHIM={s}/cc/shim.cfg", .{t}),
+            str("PWD={s}", .{dir}),
+            str("BUCK_SCRATCH_PATH={s}/bsp", .{dir}),
+        }, true);
+    } else {
         const dir = caseDir("envdump");
         const t = scratchOf(dir);
         const tc = str("{s}/tc", .{root});
@@ -388,7 +505,10 @@ pub fn main() void {
 
     // The link: `cc` from PATH is the shim, and zig receives exactly the
     // rewritten line (design items 15, 16, 19) of standin.zig's link_inputs.
-    {
+    // Linux only: the macOS shim runs the host's /usr/bin/cc, which no
+    // stand-in replaces; its line is cc_shim.zig's unit tests, and a real
+    // link on the macOS workers is the build of any darwin Mojo binary.
+    if (!macos) {
         var want = std.ArrayList([]const u8).init(arena);
         want.appendSlice(&.{
             str("{s}/zig/zig", .{root}), "cc",                     "-target",              "x86_64-linux-gnu",
@@ -429,10 +549,26 @@ pub fn main() void {
     expect(.{ .name = "noexec", .tc = "tc_noexec", .flags = knobs, .mojo = &([_][]const u8{"nap2"} ++ o) }, 127, "cannot run");
     expect(.{ .name = "noexec_plain", .tc = "tc_noexec", .flags = &.{"--watchdog-idle-secs=0"}, .mojo = &([_][]const u8{"nap2"} ++ o) }, 127, "cannot run");
 
+    // macOS: the host must be one the action names; the bundle shape is
+    // refused; modular.cfg must ask for the one run path the wrapper
+    // rewrites; a Linux flag is refused.
+    if (macos) {
+        const listed = host_flag;
+        host_flag = "--macos-host=0.0-nohost";
+        expect(.{ .name = "unlisted_host", .flags = knobs, .mojo = &([_][]const u8{"nap2"} ++ o) }, 2, "REFUSING: this host's identity is");
+        host_flag = "";
+        expect(.{ .name = "no_host", .flags = knobs, .mojo = &([_][]const u8{"nap2"} ++ o) }, 2, "no --macos-host");
+        host_flag = listed;
+        expect(.{ .name = "shared_lib_bundle", .flags = knobs, .mojo = &([_][]const u8{ "nap2", "--emit", "shared-lib" } ++ o) }, 2, "bundles are linux only");
+        expect(.{ .name = "shared_lib_dylib", .flags = knobs, .mojo = &([_][]const u8{ "nap2", "--emit", "shared-lib", "-Xlinker", "-install_name", "-Xlinker", "@rpath/x.dylib" } ++ o) }, 0, null);
+        expect(.{ .name = "shared_libs_cfg", .tc = "tc_badcfg", .flags = knobs, .mojo = &([_][]const u8{"nap2"} ++ o) }, 2, "shared_libs is not the one run path");
+        expect(.{ .name = "linux_flag", .flags = &.{"--zig=/z"}, .mojo = &([_][]const u8{"nap2"} ++ o) }, 2, "is a Linux option");
+    }
+
     // The floor: a run that wrote fewer ok cases than this (a case deleted,
     // a case that never says ok) is refused here in the action, so the
     // report cannot pass with less in it. Raise it when a case is added.
-    const floor = 29;
+    const floor = if (macos) 34 else 29;
     var ok_lines: usize = 0;
     var report_lines = std.mem.splitScalar(u8, report.items, '\n');
     while (report_lines.next()) |l| {
