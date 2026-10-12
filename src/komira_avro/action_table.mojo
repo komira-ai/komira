@@ -2471,23 +2471,31 @@ struct _DecimalParts(Copyable, Movable):
 
 
 def _decode_decimal_be(raw: List[UInt8]) raises -> _DecimalParts:
-    """Decode big-endian two's-complement bytes into a LE (low, high) i128."""
+    """Decode big-endian two's-complement bytes into a LE (low, high) i128.
+
+    A value wider than 16 bytes (a `fixed` of any size may carry a decimal)
+    is accepted when its leading n - 16 bytes are pure sign extension of the
+    low 16 (all 0x00 with the next byte's top bit clear, or all 0xFF with it
+    set); any other value does not fit Decimal128 and is refused."""
     var n = len(raw)
     if n == 0:
         return _DecimalParts(Int64(0), Int64(0))
-    if n > 16:
-        raise Error(
-            "AvroDecodeError.DECIMAL_TOO_WIDE: "
-            + String(n)
-            + " bytes > 16 (Decimal128 limit)"
-        )
-    # Sign byte: top bit of the most-significant (first) byte.
-    var negative = (raw[0] & 0x80) != 0
+    # First byte of the low 16 (0 unless the value is wider than 16 bytes).
+    var start = n - 16 if n > 16 else 0
+    # Sign byte: top bit of the most-significant byte of the low 16.
+    var negative = (raw[start] & 0x80) != 0
     var fill: UInt8 = 0xFF if negative else 0x00
+    for i in range(start):
+        if raw[i] != fill:
+            raise Error(
+                "AvroDecodeError.DECIMAL_TOO_WIDE: a "
+                + String(n)
+                + "-byte value does not fit 16 bytes (Decimal128 limit)"
+            )
     # Build a 16-byte little-endian buffer (sign-extended).
     var le = Array[UInt8, 16](fill=fill)
-    # raw is BE: raw[n-1] is least-significant. Place into le[0..n-1].
-    for i in range(n):
+    # raw is BE: raw[n-1] is least-significant. Place into le[0..n-start-1].
+    for i in range(n - start):
         le[i] = raw[n - 1 - i]
     var low: UInt64 = 0
     var high: UInt64 = 0

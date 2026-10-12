@@ -47,6 +47,12 @@
 # 9. AN AUTHORED ID IS STILL HELD TO THE ID GRAMMAR: `graph_findings`
 #    refuses an authored `a/b`, and accepts it only when the expansion says
 #    it produced it.
+# 10. THE GRAMMARS AT THEIR EDGES: a version too long or with a bad byte
+#    (first or later), an input or output name empty, too long or with a
+#    `-`; a component id empty, with a bad byte or ending `-`; an empty
+#    resource id; an instance of a version not given lists every version
+#    given. A shipped `kci.` definition with its own version and digest is
+#    no problem. The loader keeps one copy of a finding made twice.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -56,6 +62,9 @@ from kci_resource_proto.composite import CompositeDefinition
 from kci_resource_proto.resource import Resource, ResourceList
 
 from kci_cloud import Catalog, Finding, definition_digest, expand, graph_findings
+from kci_cloud import component_id_problem, id_problem, kci_definition_problem, shipped_definitions
+from kci_cloud.compose_load import Loader
+from kci_cloud.compose_refs import snake_name_problem, version_problem
 
 
 def _defs(texts: List[String]) raises -> List[CompositeDefinition]:
@@ -455,6 +464,48 @@ def test_an_authored_path_id_is_refused() raises:
     print("  test_an_authored_path_id_is_refused: PASS")
 
 
+def _rep(c: String, n: Int) -> String:
+    var s = String("")
+    for _ in range(n):
+        s += c
+    return s^
+
+
+def test_the_grammars_at_their_edges() raises:
+    assert_equal(version_problem(_rep(String("1"), 32)), "")
+    assert_equal(version_problem(_rep(String("1"), 33)), "a version is at most 32 bytes")
+    var bad_version = String("a version is letters, digits, '.', '_' and '-', starting with a letter or digit")
+    assert_equal(version_problem(String(".1")), bad_version)
+    assert_equal(version_problem(String("1+x")), bad_version)
+    assert_equal(version_problem(String("1.0_rc-2")), "")
+    assert_equal(snake_name_problem(String(""), String("input name")), "empty input name")
+    assert_equal(snake_name_problem(_rep(String("a"), 32), String("input name")), "")
+    assert_equal(snake_name_problem(_rep(String("a"), 33), String("input name")), "input name is 33 bytes; at most 32")
+    assert_equal(
+        snake_name_problem(String("a-b"), String("input name")), "a input name is lowercase letters, digits and '_' only"
+    )
+    assert_equal(component_id_problem(String("")), "empty component id")
+    assert_equal(component_id_problem(String("a_b")), "a component id is lowercase letters, digits and '-' only")
+    assert_equal(component_id_problem(String("ab-")), "a component id may not end with '-'")
+    assert_equal(id_problem(String("")), "empty id")
+    # A version not given: every version given is listed.
+    var two: List[String] = [_x(String('"component":[') + _B + "]"), String('{"name":"acme.x","version":"2","component":[') + _B + "]}"]
+    _one(two, '{"resource":[{"id":"x","composite":{"definition":"acme.x","version":"3"}}]}', "x", "composite.definition", "(given: acme.x@1, acme.x@2)")
+    # An output name is a snake name.
+    var out: List[String] = [_x(String('"component":[') + _B + '],"output":[{"name":"Bad","from":{"local":"b","standard":"NAME"}}]')]
+    _one(out, '{"resource":[]}', "acme.x@1", "output[Bad]", "a output name starts with a lowercase letter")
+    # What kci ships is no problem as shipped.
+    for d in shipped_definitions():
+        assert_equal(kci_definition_problem(d.name, d.version, d.digest), "")
+    # The loader keeps one copy of a finding made twice.
+    var l = Loader(Catalog.v1())
+    l.add(String("a@1"), String("f"), String("why"))
+    l.add(String("a@1"), String("f"), String("why"))
+    l.add(String("a@1"), String("f"), String("another"))
+    assert_equal(len(l.findings), 2)
+    print("  test_the_grammars_at_their_edges: PASS")
+
+
 def main() raises:
     print("test_cloud_compose_refusals: what expansion refuses when it loads")
     test_the_definition_name_and_version()
@@ -466,4 +517,5 @@ def main() raises:
     test_a_containment_cycle_is_refused()
     test_the_top_of_the_list()
     test_an_authored_path_id_is_refused()
+    test_the_grammars_at_their_edges()
     print("ALL kci_cloud COMPOSE REFUSAL TESTS PASSED")
