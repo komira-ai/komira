@@ -180,7 +180,7 @@ komira//src/komira_scan_source:komira_scan_source	src/komira_scan_source	library
 komira//src/komira_sdk:komira_sdk	src/komira_sdk	library	OK	1347	1360	-	-	no	conda	-	-
 komira//src/komira_search:komira_search	src/komira_search	library	OK	4158	4158	-	-	no	conda	-	-
 komira//src/komira_search_catalog:komira_search_catalog	src/komira_search_catalog	library	OK	724	724	-	-	no	conda	-	-
-komira//src/komira_search_scan:komira_search_scan	src/komira_search_scan	library	OK	501	574	-	-	no	conda	-	-
+komira//src/komira_search_scan:komira_search_scan	src/komira_search_scan	library	OK	583	583	-	-	no	conda	-	-
 komira//src/komira_secret_env:komira_secret_env	src/komira_secret_env	library	OK	105	108	-	-	no	conda	-	-
 komira//src/komira_secret_registry:komira_secret_registry	src/komira_secret_registry	library	OK	64	65	13	16	yes	conda	-	-
 komira//src/komira_secret_store:komira_secret_store	src/komira_secret_store	library	OK	49	49	9	10	yes	conda	-	-
