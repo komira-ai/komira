@@ -28,6 +28,12 @@ It decodes a column chunk a chunk of rows at a time into a reused buffer
 (`column_decode_context`), decodes a nested leaf with its levels
 (`nested_decoder`) and reads one PLAIN page from a file range
 (`column_reader`).
+
+It decodes a whole flat column chunk into one column (`column_decoder`, with
+its steps in `column_decoder_state`, `column_decoder_pages`,
+`column_decoder_values`, `column_decoder_assemble`, `column_decoder_finish`
+and `column_decoder_strings`, and the dense-string rebuild counter in
+`dict_mat_counter`).
 """
 
 from .byte_stream_split import (
@@ -100,3 +106,8 @@ from .bloom_reader import BloomFilterHeaderInfo, load_bloom_filter, parse_bloom_
 from .bloom_pruner import can_prune_row_group_by_bloom
 from .num_rows_cache import ParquetNumRowsCache
 from .partition_pred_bridge import pod_from_predicate, predicate_from_pod
+from .column_decoder import (
+    NumericDictCodes,
+    NumericDictCodesHolder,
+    decode_column_pages,
+)

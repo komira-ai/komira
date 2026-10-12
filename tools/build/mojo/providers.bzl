@@ -96,6 +96,7 @@ MojoProgramInfo = provider(fields = {
     "shared": provider_field(typing.Any),  # artifact lib<name>.so
     "runtime": provider_field(typing.Any),  # artifact: directory of runtime libraries
     "target_cpu": provider_field(str),  # the CPU the program was compiled for
+    "helpers": provider_field(typing.Any, default = {}),  # {file name: artifact}, bin/<name> in a bundle (helpers.bzl)
 })
 
 
