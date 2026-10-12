@@ -114,9 +114,13 @@ struct _Body[lazy: Bool, ro: MutOrigin, so: MutOrigin](SpawnJoinBody):
         else:
             var t0 = perf_counter_ns()
             if self.wait_for == 1:
+                # A producer that never blocks fails the caller's assertion
+                # on the blocked count. Drain anyway: raising here would leave
+                # a blocked producer spinning and the join would never return.
                 while self.ring[].overflow_blocked_count() == Int64(0):
                     if Int(perf_counter_ns() - t0) > _WAIT_NS:
-                        raise Error("the producer never blocked")
+                        break
+                t0 = perf_counter_ns()
             var last = -1
             var announced = False
             while True:

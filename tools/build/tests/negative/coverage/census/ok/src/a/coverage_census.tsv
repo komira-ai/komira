@@ -1,0 +1,3 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-08	-	-
+komira//src/a:a	src/a	library	OK	5	10	1	4	yes	release	src/a/x.mojo,src/a/y.mojo	-
