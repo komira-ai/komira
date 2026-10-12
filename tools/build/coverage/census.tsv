@@ -16,7 +16,7 @@ komira//src/kci_params:kci_params	src/kci_params	library	OK	407	407	-	-	no	relea
 komira//src/kci_pkg_upload:kci_pkg_upload	src/kci_pkg_upload	library	OK	2207	2207	-	-	no	conda	-	-
 komira//src/kci_publish:kci_publish_lib	src/kci_publish	library	OK	2102	2281	-	-	no	conda	src/kci_publish/workers.mojo	-
 komira//src/kci_publish_oci:kci_publish_oci	src/kci_publish_oci	library	OK	87	89	-	-	no	conda	-	-
-komira//src/kci_reconciler:kci_reconciler	src/kci_reconciler	library	OK	1238	1407	-	-	no	conda	-	-
+komira//src/kci_reconciler:kci_reconciler	src/kci_reconciler	library	OK	1530	1530	-	-	no	conda	-	-
 komira//src/kci_release_channel:kci_release_channel	src/kci_release_channel	library	OK	460	460	-	-	no	release	-	-
 komira//src/kci_release_machine:kci_release_machine	src/kci_release_machine	library	OK	988	990	-	-	no	release	-	-
 komira//src/kci_release_set:kci_release_set	src/kci_release_set	library	OK	738	746	-	-	no	conda	-	-
@@ -81,7 +81,7 @@ komira//src/komira_counters:komira_counters	src/komira_counters	library	OK	266	3
 komira//src/komira_crypto:komira_crypto	src/komira_crypto	library	OK	2374	2841	-	-	no	conda	src/komira_crypto/aead.mojo,src/komira_crypto/internal/asm/sha256_compress.mojo	-
 komira//src/komira_csv:komira_csv	src/komira_csv	library	RUN_FAILED	-	-	-	-	no	conda	-	not built in this census: test_csv_parallel_reader and test_csv_phase_4_column_parallel_concat take about 450 s under kcov, the run limit (sharding them is pending)
 komira//src/komira_datetime:komira_datetime	src/komira_datetime	library	OK	853	853	-	-	no	release	-	-
-komira//src/komira_db:komira_db	src/komira_db	library	OK	970	1177	-	-	no	conda	src/komira_db/blocking.mojo,src/komira_db/db_storable.mojo	-
+komira//src/komira_db:komira_db	src/komira_db	library	OK	1173	1173	-	-	no	conda	-	-
 komira//src/komira_db_postgres:komira_db_postgres	src/komira_db_postgres	library	OK	1128	1136	-	-	no	conda	-	-
 komira//src/komira_db_sqlite:komira_db_sqlite	src/komira_db_sqlite	library	OK	315	335	-	-	no	conda	-	-
 komira//src/komira_dispatch_agg_exec:komira_dispatch_agg_exec	src/komira_dispatch_agg_exec	library	OK	407	411	-	-	no	conda	-	-
@@ -194,7 +194,7 @@ komira//src/komira_sql:komira_sql	src/komira_sql	library	OK	3192	3196	-	-	no	con
 komira//src/komira_supervisor:komira_supervisor	src/komira_supervisor	library	OK	312	396	-	-	no	conda	src/komira_supervisor/exit_monitor.mojo,src/komira_supervisor/pid1.mojo	-
 komira//src/komira_supervisor_proto:komira_supervisor_proto	src/komira_supervisor_proto	library	OK	0	0	-	-	no	release	-	-
 komira//src/komira_sync:komira_sync	src/komira_sync	library	OK	16	16	4	4	yes	release	-	-
-komira//src/komira_table_store:komira_table_store	src/komira_table_store	library	OK	884	1037	-	-	no	conda	-	-
+komira//src/komira_table_store:komira_table_store	src/komira_table_store	library	OK	1051	1053	-	-	no	conda	-	-
 komira//src/komira_test_run_id:komira_test_run_id	src/komira_test_run_id	library	OK	46	46	8	8	yes	release	-	-
 komira//src/komira_test_verdict:komira_test_verdict	src/komira_test_verdict	library	OK	65	65	-	-	no	release	-	-
 komira//src/komira_textproto:komira_textproto	src/komira_textproto	library	OK	174	174	-	-	no	release	-	-

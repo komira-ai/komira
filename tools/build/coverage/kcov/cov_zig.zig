@@ -59,20 +59,73 @@
 //! cannot be run).
 //!
 //! A static executable: it runs with no shell, no PATH and no network.
+//!
+//! `entry` is the program but for the process: it takes argv[0], the
+//! arguments, the working directory and the two variables, writes every
+//! message to the stderr it is given, and returns what `main` then does:
+//! exit with a status, or exec real/zig with the arguments unchanged. The
+//! tests (cov_zig_test.zig) call it as `main` does.
 
 const std = @import("std");
+const Alloc = std.mem.Allocator;
 
 const max_file = 1 << 34;
 
-fn fail(comptime fmt: []const u8, args: anytype) noreturn {
-    std.debug.print("cov_zig: " ++ fmt ++ "\n", args);
+/// A refusal (exit 1) or bad usage (exit 2); the message is in the Diag.
+pub const Error = error{ Refused, Usage };
+
+/// What the tool writes to stderr, collected, so the tests (cov_zig_test.zig)
+/// read the very messages a run prints.
+pub const Diag = struct {
+    text: std.ArrayList(u8),
+
+    pub fn init(alloc: Alloc) Diag {
+        return .{ .text = std.ArrayList(u8).init(alloc) };
+    }
+
+    fn refuse(self: *Diag, comptime fmt: []const u8, args: anytype) error{Refused} {
+        self.text.writer().print("cov_zig: " ++ fmt ++ "\n", args) catch oom();
+        return error.Refused;
+    }
+
+    fn usageFail(self: *Diag, comptime fmt: []const u8, args: anytype) error{Usage} {
+        self.text.writer().print("cov_zig: " ++ fmt ++ "\n", args) catch oom();
+        return error.Usage;
+    }
+};
+
+/// The exit status of a run that ended in `err`.
+pub fn exitCode(err: Error) u8 {
+    return switch (err) {
+        error.Refused => 1,
+        error.Usage => 2,
+    };
+}
+
+fn oom() noreturn {
+    std.debug.print("cov_zig: out of memory\n", .{});
     std.process.exit(1);
 }
 
-fn usageFail(comptime fmt: []const u8, args: anytype) noreturn {
-    std.debug.print("cov_zig: " ++ fmt ++ "\n", args);
-    std.process.exit(2);
-}
+/// What `main` does once `entry` returns: exit with the status, or exec the
+/// command line in its place (real/zig and the arguments, a command that
+/// does not link).
+pub const Outcome = union(enum) {
+    exit: u8,
+    exec: []const []const u8,
+};
+
+/// What a run reads from its process besides the command line.
+pub const Env = struct {
+    /// The working directory, where real/zig and debug_relocate run and the
+    /// link output is read; null is the process's own.
+    dir: ?std.fs.Dir = null,
+    /// getcwd's answer: the working directory's path, or the error it gave.
+    cwd: anyerror![]const u8,
+    /// $PWD and $BUCK_SCRATCH_PATH, null when unset.
+    pwd: ?[]const u8 = null,
+    scratch: ?[]const u8 = null,
+};
 
 /// The output of a `cc` that links, or null when the command does not link.
 fn linkOutput(args: []const []const u8) ?[]const u8 {
@@ -102,35 +155,35 @@ fn le(comptime T: type, buf: []const u8, at: u64) T {
 }
 
 /// Whether the ELF64 little-endian file in `buf` has a section named
-/// .debug_info or .debug_line. Refuses (exit 1) any other file, or one whose
-/// section headers or names lie outside it.
-fn hasDebugSection(path: []const u8, buf: []const u8) bool {
+/// .debug_info or .debug_line. Refuses any other file, or one whose section
+/// headers or names lie outside it.
+fn hasDebugSection(diag: *Diag, path: []const u8, buf: []const u8) error{Refused}!bool {
     const bad = "{s}: the link output is not an ELF64 little-endian file whose section headers can be read ({s})";
-    if (buf.len < 64 or !std.mem.eql(u8, buf[0..4], "\x7fELF")) fail(bad, .{ path, "no ELF header" });
-    if (buf[4] != 2 or buf[5] != 1) fail(bad, .{ path, "not ELF64 little-endian" });
+    if (buf.len < 64 or !std.mem.eql(u8, buf[0..4], "\x7fELF")) return diag.refuse(bad, .{ path, "no ELF header" });
+    if (buf[4] != 2 or buf[5] != 1) return diag.refuse(bad, .{ path, "not ELF64 little-endian" });
     const shoff = le(u64, buf, 0x28);
     if (shoff == 0) return false;
     const entsize: u64 = le(u16, buf, 0x3a);
     var shnum: u64 = le(u16, buf, 0x3c);
     var strndx: u64 = le(u16, buf, 0x3e);
-    if (entsize < 64) fail(bad, .{ path, "section headers shorter than 64 bytes" });
-    if (shoff > buf.len or buf.len - shoff < entsize) fail(bad, .{ path, "section headers past the end" });
+    if (entsize < 64) return diag.refuse(bad, .{ path, "section headers shorter than 64 bytes" });
+    if (shoff > buf.len or buf.len - shoff < entsize) return diag.refuse(bad, .{ path, "section headers past the end" });
     // Past 0xff00 sections the count and the name table's index are in
     // section 0 (sh_size, sh_link).
     if (shnum == 0) shnum = le(u64, buf, shoff + 0x20);
     if (strndx == 0xffff) strndx = le(u32, buf, shoff + 0x28);
-    if (shnum > (buf.len - shoff) / entsize) fail(bad, .{ path, "section headers past the end" });
-    if (strndx >= shnum) fail(bad, .{ path, "no section name table" });
+    if (shnum > (buf.len - shoff) / entsize) return diag.refuse(bad, .{ path, "section headers past the end" });
+    if (strndx >= shnum) return diag.refuse(bad, .{ path, "no section name table" });
     const names_hdr = shoff + strndx * entsize;
     const names_off = le(u64, buf, names_hdr + 0x18);
     const names_size = le(u64, buf, names_hdr + 0x20);
-    if (names_off > buf.len or buf.len - names_off < names_size) fail(bad, .{ path, "section names past the end" });
+    if (names_off > buf.len or buf.len - names_off < names_size) return diag.refuse(bad, .{ path, "section names past the end" });
     const names = buf[@intCast(names_off)..][0..@intCast(names_size)];
     var i: u64 = 0;
     while (i < shnum) : (i += 1) {
         const at: u64 = le(u32, buf, shoff + i * entsize);
-        if (at >= names.len) fail(bad, .{ path, "a section name past its table" });
-        const end = std.mem.indexOfScalarPos(u8, names, @intCast(at), 0) orelse fail(bad, .{ path, "a section name with no NUL" });
+        if (at >= names.len) return diag.refuse(bad, .{ path, "a section name past its table" });
+        const end = std.mem.indexOfScalarPos(u8, names, @intCast(at), 0) orelse return diag.refuse(bad, .{ path, "a section name with no NUL" });
         const name = names[@intCast(at)..end];
         if (std.mem.eql(u8, name, ".debug_info") or std.mem.eql(u8, name, ".debug_line")) return true;
     }
@@ -147,13 +200,14 @@ fn isReleaseLevel(a: []const u8) bool {
     return false;
 }
 
-/// Exits like a child that ended with `term`, when it did not succeed.
-fn passOn(term: std.ChildProcess.Term) void {
-    switch (term) {
-        .Exited => |c| if (c != 0) std.process.exit(c),
-        .Signal => |s| std.process.exit(@intCast(128 + (s & 0x7f))),
-        else => std.process.exit(1),
-    }
+/// The status to exit with, like a child that ended with `term`, when it
+/// did not succeed; null when it did.
+fn passOn(term: std.ChildProcess.Term) ?u8 {
+    return switch (term) {
+        .Exited => |c| if (c != 0) c else null,
+        .Signal => |s| @intCast(128 + (s & 0x7f)),
+        else => 1,
+    };
 }
 
 /// `d` without trailing '/' when it can be given to debug_relocate as one
@@ -167,79 +221,109 @@ fn extraDir(d: []const u8, cwd: []const u8) ?[]const u8 {
     return t;
 }
 
-pub fn main() void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    const alloc = arena.allocator();
-    const argv = std.process.argsAlloc(alloc) catch fail("out of memory", .{});
-    const dir = std.fs.path.dirname(argv[0]) orelse usageFail("argv[0] '{s}' names no directory; run this program by its path", .{argv[0]});
-    const real = std.fs.path.join(alloc, &.{ dir, "real", "zig" }) catch fail("out of memory", .{});
-    const relocate = std.fs.path.join(alloc, &.{ dir, "debug_relocate" }) catch fail("out of memory", .{});
-    const args = argv[1..];
+fn run(alloc: Alloc, diag: *Diag, argv0: []const u8, args: []const []const u8, env: Env) Error!Outcome {
+    const dir = std.fs.path.dirname(argv0) orelse return diag.usageFail("argv[0] '{s}' names no directory; run this program by its path", .{argv0});
+    const real = std.fs.path.join(alloc, &.{ dir, "real", "zig" }) catch oom();
+    const relocate = std.fs.path.join(alloc, &.{ dir, "debug_relocate" }) catch oom();
 
     const out = linkOutput(args) orelse {
         var same = std.ArrayList([]const u8).init(alloc);
-        same.append(real) catch fail("out of memory", .{});
-        same.appendSlice(args) catch fail("out of memory", .{});
-        const err = std.process.execv(alloc, same.items);
-        usageFail("cannot run {s}: {s}", .{ real, @errorName(err) });
+        same.append(real) catch oom();
+        same.appendSlice(args) catch oom();
+        return .{ .exec = same.items };
     };
 
     var link = std.ArrayList([]const u8).init(alloc);
-    link.append(real) catch fail("out of memory", .{});
+    link.append(real) catch oom();
     for (args) |a| {
         // At these levels zig 0.12 is in a release mode and gives lld -O2 or
         // -O3, which merges string tails in .debug_str: a string that is the
         // tail of the working directory would be overwritten with it.
         if (isReleaseLevel(a)) {
-            fail("a link with the optimization level {s} is refused: zig would have lld merge string tails, and debug_relocate cannot see a string that is the tail of a directory it rewrites", .{a});
+            return diag.refuse("a link with the optimization level {s} is refused: zig would have lld merge string tails, and debug_relocate cannot see a string that is the tail of a directory it rewrites", .{a});
         }
         if (std.mem.eql(u8, a, "-Wl,--strip-debug")) continue;
-        link.append(a) catch fail("out of memory", .{});
+        link.append(a) catch oom();
     }
-    link.appendSlice(&.{ "-Wl,--build-id=none", "-Wl,--compress-debug-sections=none" }) catch fail("out of memory", .{});
+    link.appendSlice(&.{ "-Wl,--build-id=none", "-Wl,--compress-debug-sections=none" }) catch oom();
     var child = std.ChildProcess.init(link.items, alloc);
-    const term = child.spawnAndWait() catch |err| usageFail("cannot run {s}: {s}", .{ real, @errorName(err) });
-    passOn(term);
+    child.cwd_dir = env.dir;
+    const term = child.spawnAndWait() catch |err| return diag.usageFail("cannot run {s}: {s}", .{ real, @errorName(err) });
+    if (passOn(term)) |status| return .{ .exit = status };
 
-    const cwd = std.process.getCwdAlloc(alloc) catch |err| fail("getcwd: {s}", .{@errorName(err)});
+    const cwd = env.cwd catch |err| return diag.refuse("getcwd: {s}", .{@errorName(err)});
     var rel_argv = std.ArrayList([]const u8).init(alloc);
-    rel_argv.appendSlice(&.{ relocate, out, cwd }) catch fail("out of memory", .{});
+    rel_argv.appendSlice(&.{ relocate, out, cwd }) catch oom();
     // The spellings of the working directory: getcwd, and $PWD when it is
     // another path to it.
     var wd_dirs = std.ArrayList([]const u8).init(alloc);
-    wd_dirs.append(cwd) catch fail("out of memory", .{});
-    for ([_][]const u8{ "PWD", "BUCK_SCRATCH_PATH" }) |name| {
-        const v = std.process.getEnvVarOwned(alloc, name) catch continue;
+    wd_dirs.append(cwd) catch oom();
+    for ([_]?[]const u8{ env.pwd, env.scratch }, [_]bool{ true, false }) |value, is_pwd| {
+        const v = value orelse continue;
         if (extraDir(v, cwd)) |d| {
             var seen = false;
             for (rel_argv.items[2..]) |e| seen = seen or std.mem.eql(u8, e, d);
-            if (!seen) rel_argv.append(d) catch fail("out of memory", .{});
-            if (!seen and std.mem.eql(u8, name, "PWD")) wd_dirs.append(d) catch fail("out of memory", .{});
+            if (!seen) rel_argv.append(d) catch oom();
+            if (!seen and is_pwd) wd_dirs.append(d) catch oom();
         }
     }
 
-    const bytes = std.fs.cwd().readFileAlloc(alloc, out, max_file) catch |err| fail("{s}: {s}", .{ out, @errorName(err) });
-    const debug = hasDebugSection(out, bytes);
+    const wd = env.dir orelse std.fs.cwd();
+    const bytes = wd.readFileAlloc(alloc, out, max_file) catch |err| return diag.refuse("{s}: {s}", .{ out, @errorName(err) });
+    const debug = try hasDebugSection(diag, out, bytes);
     alloc.free(bytes);
 
-    const r = std.ChildProcess.run(.{ .allocator = alloc, .argv = rel_argv.items, .max_output_bytes = 1 << 16 }) catch |err| fail("cannot run {s}: {s}", .{ relocate, @errorName(err) });
+    const r = std.ChildProcess.run(.{ .allocator = alloc, .argv = rel_argv.items, .cwd_dir = env.dir, .max_output_bytes = 1 << 16 }) catch |err| return diag.refuse("cannot run {s}: {s}", .{ relocate, @errorName(err) });
     switch (r.term) {
-        .Exited => |c| if (c != 0) fail("debug_relocate refused {s} (exit {d}), so the link fails:\n{s}", .{ out, c, r.stderr }),
-        else => fail("debug_relocate did not exit ({s}), so the link fails:\n{s}", .{ @tagName(r.term), r.stderr }),
+        .Exited => |c| if (c != 0) return diag.refuse("debug_relocate refused {s} (exit {d}), so the link fails:\n{s}", .{ out, c, r.stderr }),
+        else => return diag.refuse("debug_relocate did not exit ({s}), so the link fails:\n{s}", .{ @tagName(r.term), r.stderr }),
     }
     // It prints `<count> <dir>` per directory, in the order given.
     var count: u64 = 0;
     var lines = std.mem.splitScalar(u8, std.mem.trimRight(u8, r.stdout, "\n"), '\n');
     for (rel_argv.items[2..]) |d| {
-        const line = lines.next() orelse fail("debug_relocate printed no count of {s}", .{d});
-        const sp = std.mem.indexOfScalar(u8, line, ' ') orelse fail("debug_relocate printed '{s}', not '<count> <dir>'", .{line});
-        if (!std.mem.eql(u8, line[sp + 1 ..], d)) fail("debug_relocate printed '{s}', not the count of {s}", .{ line, d });
-        const n = std.fmt.parseUnsigned(u64, line[0..sp], 10) catch fail("debug_relocate printed '{s}', not '<count> <dir>'", .{line});
+        const line = lines.next() orelse return diag.refuse("debug_relocate printed no count of {s}", .{d});
+        const sp = std.mem.indexOfScalar(u8, line, ' ') orelse return diag.refuse("debug_relocate printed '{s}', not '<count> <dir>'", .{line});
+        if (!std.mem.eql(u8, line[sp + 1 ..], d)) return diag.refuse("debug_relocate printed '{s}', not the count of {s}", .{ line, d });
+        const n = std.fmt.parseUnsigned(u64, line[0..sp], 10) catch return diag.refuse("debug_relocate printed '{s}', not '<count> <dir>'", .{line});
         for (wd_dirs.items) |w| {
             if (std.mem.eql(u8, w, d)) count += n;
         }
     }
     if (debug and count == 0) {
-        fail("{s} has debug sections but holds the working directory ({s}, or $PWD) nowhere. Only zig's C runtime records a compilation directory (the pinned Mojo writes relative paths and none), so either the runtime's DWARF names a directory debug_relocate was not given (the binary would differ by machine) or the runtime has no debug info; the link fails", .{ out, cwd });
+        return diag.refuse("{s} has debug sections but holds the working directory ({s}, or $PWD) nowhere. Only zig's C runtime records a compilation directory (the pinned Mojo writes relative paths and none), so either the runtime's DWARF names a directory debug_relocate was not given (the binary would differ by machine) or the runtime has no debug info; the link fails", .{ out, cwd });
+    }
+    return .{ .exit = 0 };
+}
+
+/// The whole program but for the process: runs `args` as the program named
+/// `argv0`, in `env`, writes every message to `stderr`, and returns what
+/// `main` does next (exit with a status, or exec a command line). The tests
+/// call it as main does.
+pub fn entry(alloc: Alloc, argv0: []const u8, args: []const []const u8, env: Env, stderr: anytype) Outcome {
+    var diag = Diag.init(alloc);
+    const outcome: Outcome = run(alloc, &diag, argv0, args, env) catch |err| .{ .exit = exitCode(err) };
+    stderr.writeAll(diag.text.items) catch {};
+    return outcome;
+}
+
+pub fn main() u8 {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const alloc = arena.allocator();
+    const argv = std.process.argsAlloc(alloc) catch oom();
+    const args = alloc.alloc([]const u8, argv.len -| 1) catch oom();
+    for (args, 1..) |*a, i| a.* = argv[i];
+    const env = Env{
+        .cwd = std.process.getCwdAlloc(alloc),
+        .pwd = std.posix.getenv("PWD"),
+        .scratch = std.posix.getenv("BUCK_SCRATCH_PATH"),
+    };
+    switch (entry(alloc, argv[0], args, env, std.io.getStdErr().writer())) {
+        .exit => |status| return status,
+        .exec => |same| {
+            const err = std.process.execv(alloc, same);
+            std.debug.print("cov_zig: cannot run {s}: {s}\n", .{ same[0], @errorName(err) });
+            return 2;
+        },
     }
 }

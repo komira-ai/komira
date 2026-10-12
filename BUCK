@@ -293,8 +293,8 @@ _TESTS_LINTS = [
     tree = ":doc_tree",
 ) for _ in _TESTS_LINTS[:1]]
 
-# The public boundary (tools/build/lint/defs.bzl, public_boundary; the reader
-# tools/build/lint/public_boundary.awk says what each rule matches): no file of
+# The public boundary (tools/build/lint/defs.bzl, public_boundary; the tool's
+# tools/build/lint/public_boundary/src/rules.zig says what each rule matches): no file of
 # the repository (the cell's `:doc_tree`, the dotfiles a glob skips, and the
 # tests cell's tree) holds a date from `window_from` up to `public_from`, a
 # home directory naming a person, a private or written-out network address, a

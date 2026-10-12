@@ -54,9 +54,9 @@ continuous_publish.md both use that name; `kci.yml` runs it since the staged pip
 1. A Mojo library that owns C ships it as **its own shared library, in its own conda package**, next
    to its `.mojoc`. No package holds everyone's C.
 2. A library's `.so` has a `DT_NEEDED` on the `.so` of each library whose C it calls.
-3. aws-lc, s2n-tls and snappy are symbol-prefixed so they can share a process with a system copy
-   (**EXISTS:** [tools/build/native/README.md](../../tools/build/native/README.md), #672); brotli and
-   SQLite are not yet (open question 4).
+3. aws-lc, s2n-tls, snappy, brotli and SQLite are symbol-prefixed so they can share a process with
+   a system copy (**EXISTS:** [tools/build/native/README.md](../../tools/build/native/README.md),
+   #672; brotli and SQLite by #1356, open question 4).
 4. Shared libraries only; no static archive in a package except C holding per-library state
    (komira_log's holder). `mojo run` (the JIT) links no static archive, and a README run must pass.
 5. System-library codecs stay out: opened by soname, required from conda-forge.
@@ -69,7 +69,7 @@ continuous_publish.md both use that name; `kci.yml` runs it since the staged pip
 
 | piece | on `main` | proposed here |
 |---|---|---|
-| symbol prefixing | **EXISTS** for aws-lc (`komira_awslc_`), s2n-tls (`komira_s2n_`), snappy (`komira_snappy_`): `tools/build/native/defs.bzl` (`prefix_header`, `prefixed_archive_check`), `elfsyms.c`, `prefix_tool` (Zig) | brotli and SQLite prefixed the same way before their owners ship |
+| symbol prefixing | **EXISTS** for aws-lc (`komira_awslc_`), s2n-tls (`komira_s2n_`), snappy (`komira_snappy_`), brotli (`komira_brotli_`), SQLite (`komira_sqlite3_`): `tools/build/native/defs.bzl` (`prefix_header`, `prefixed_archive_check`), `elfsyms.c`, `prefix_tool` (Zig) | kept as is |
 | one-definition gate | **EXISTS:** `tools/build/one_definition/` (`:one_definition`, a `mojo_shared_lib` that links every library of `SRC_C_LIBRARIES` and `THIRD_PARTY_C_LIBRARIES` in `libraries.bzl` whole-archive, so a strong symbol defined twice fails the link; then dlopens it and resolves every name in `exports`). `tools/build/lint/includes.bzl` refuses a `cxx_library` under `src/` that the list omits | kept as is. Its limits stand: a weak or common second definition links silently; a library whose symbols are all hidden (`komira_log_holder`) cannot be seen by the exports check; a `cxx_library` declared through a `.bzl` macro or the prelude's own `load` escapes the list; `THIRD_PARTY_C_LIBRARIES` has no completeness check. The completeness lint below covers the weak/common pair |
 | owner table | partial: `tools/core_split/c_symbols.tsv` maps 24 first-party C symbols to their owning package | the `callers` attribute and the completeness lint, generated from the build graph, not a hand table |
 | release-set check | **EXISTS:** `conda_release_set_check` (`tools/build/package/release_set.bzl`, target `//tools/build/package:release_set_check`): stamped packages, the metapackage, the stamp check, and an order check refusing a member that requires a member listed after it, with no exemption (the one for the one-library plan's package went with slice 2). It does not refuse a requirement on a package the set omits: the `install-set` validation (`CONDA_INSTALL_ENV` of `komira_all`, `release/machine.textproto`; on `main` it runs in `beta_validate` after beta's publish (since M2, #1296), and the `beta` channel holds only the build's packages) fails to install such a set before anything promotes, so no build-time duplicate is planned | the one-library plan's exemption is gone (slice 2), since it served only the superseded plan: each library's `.so` is in its own package, ordered like any member |
@@ -97,8 +97,8 @@ thread-local storage (async, http_core); async_api, metrics and scan_source had 
 | komira_libc / async / async_api / fs | `komira_libc_posix` / `komira_async_posix` / `komira_concurrency_pool_depth` / `komira_fs_posix` | `libkomira_<lib>_native.so.1` | glibc |
 | komira_objectstore / metrics / scan_source / supervisor | `komira_objectstore_posix` / `komira_metrics_ea_flag` / `komira_scan_source_inmem_id` / `komira_supervisor_proc` | `libkomira_<lib>_native.so.1` | glibc |
 | komira_log | `komira_log_holder` (per-library state) | `libkomira_log_holder.a`; with question 2 (A) also `libkomira_log_holder_jit.so.1` and its link name `libkomira_log_holder_jit.so` | none |
-| komira_parquet_codec | the brotli decoder, **unprefixed** today | once prefixed: `libkomira_parquet_codec_native.so.1` | glibc |
-| komira_db_sqlite | SQLite, **unprefixed** today | none until it has welded tests: its BUCK file has no `test_srcs`, so no conda package | |
+| komira_parquet_codec | the brotli decoder, prefixed `komira_brotli_` | `libkomira_parquet_codec_native.so.1` | glibc |
+| komira_db_sqlite | SQLite, prefixed `komira_sqlite3_` | `libkomira_db_sqlite_native.so.1`, built and checked; shipped by no package until the library has welded tests (its BUCK file has no `test_srcs`, so no conda package) | glibc |
 
 `//third_party/sha1collisiondetection:sha1dc` is in `THIRD_PARTY_C_LIBRARIES` but only a conformance
 test (`src/tests/conformance/komira_git_conformance`) links it; `komira_git` is Mojo, so no package
@@ -250,7 +250,7 @@ metadata and injects them (`native_link_args`), so a README run passes with flag
 shows, and a user who copies the README fails with "Symbols not found". This per-package burden is
 the main usability cost of decision 1. No build-time gate can catch a missing flag: the welded README
 gate compiles the README's Mojo examples into one program linked against the closure's static
-archives (**EXISTS:** `_readme_gate`, `_link_tail` in `tools/build/mojo/defs.bzl`) and runs no shell
+archives (**EXISTS:** `readme_gate` in `tools/build/mojo/readme.bzl`, `_link_tail` in `tools/build/mojo/defs.bzl`) and runs no shell
 command, and the build has no installed `.so`. Only an installed-package README run can.
 
 **(a)** the packer writes the exact commands into each README as a fenced `sh` block, the readme tool
@@ -395,7 +395,7 @@ no exception:
   `histogram` and `metrics_set` (its only `external_call` is in `explain_analyze_collect.mojo`), and
   komira_scan_source's README has no Mojo import, so a broken metrics `.so` or a missing
   `-lkomira_metrics_native` would pass. **PROPOSED (slice 10):** a build rule refuses an owner whose
-  README program (the one the welded README gate links, `_readme_gate`) references none of the
+  README program (the one the welded README gate links, `readme_gate`) references none of the
   owner's own exports, read with `elfsyms` from the linked program; the two READMEs gain an example
   that reaches their C. Planted: komira_metrics's README without that example (build red); the
   installed README run without `-lkomira_metrics_native` (row 6 red); a metrics `.so` with an

@@ -414,8 +414,8 @@ def test_int64_arithmetic() raises:
     assert_equal(Int(exec._eval_i64_from_source(c, 3, 0)), 30)
     assert_equal(Int(exec._eval_i64_from_source(c, 4, 0)), 3)
     assert_equal(Int(exec._eval_i64_from_source(c, 2, 1)), -6)
-    with assert_raises(contains="_eval_i64_from_source: EXPR_DIV_I64 division by zero at row 2"):
-        _ = exec._eval_i64_from_source(c, 6, 2)
+    # k / 0 is NULL (§5.3): the placeholder 0, no raise.
+    assert_equal(Int(exec._eval_i64_from_source(c, 6, 2)), 0)
     with assert_raises(contains="_eval_i64_from_source: unsupported node kind 31 at pool slot 7"):
         _ = exec._eval_i64_from_source(c, 7, 0)
 

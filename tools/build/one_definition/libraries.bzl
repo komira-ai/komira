@@ -38,6 +38,8 @@ SRC_C_LIBRARIES = [
     "//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_c",
     "//src/tests/helpers/komira_udf_spike_abi:komira_udf_echo",
     "//src/tests/helpers/komira_udf_spike_abi:komira_udf_echo_broken",
+    "//src/tests/helpers/komira_udf_spike_node_worker:komira_udf_node_worker_proxy",
+    "//src/tests/helpers/komira_udf_spike_node_worker:komira_udf_spike_node_worker_engine",
 ]
 
 THIRD_PARTY_C_LIBRARIES = [
@@ -76,9 +78,9 @@ def one_definition_listed(name):
 # carry.
 THIRD_PARTY_OWNERS = {
     "third_party/aws-lc": struct(owner = "//src/komira_crypto:komira_crypto", prefix = "komira_awslc_"),
-    "third_party/brotli": struct(owner = "//src/komira_parquet_codec:komira_parquet_codec", prefix = ""),
+    "third_party/brotli": struct(owner = "//src/komira_parquet_codec:komira_parquet_codec", prefix = "komira_brotli_"),
     "third_party/s2n-tls": struct(owner = "//src/komira_http_core:komira_http_core", prefix = "komira_s2n_"),
     "third_party/sha1collisiondetection": struct(owner = None, prefix = ""),
     "third_party/snappy": struct(owner = "//src/komira_compression:komira_compression", prefix = "komira_snappy_"),
-    "third_party/sqlite": struct(owner = "//src/komira_db_sqlite:komira_db_sqlite", prefix = ""),
+    "third_party/sqlite": struct(owner = "//src/komira_db_sqlite:komira_db_sqlite", prefix = "komira_sqlite3_"),
 }
