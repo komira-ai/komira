@@ -413,39 +413,52 @@ sources refused, sources named by another directory refused before kcov
 runs, and kcov refused by the executor named as such.
 
 Each tool's cases run as a build action that fails on the first wrong
-result. `debug_relocate` and `cov_normalize` each have two sets, both
-`zig_test`s. Their unit tests ([debug_relocate_test.zig](debug_relocate_test.zig),
-`:debug_relocate_unit`; [cov_normalize_test.zig](cov_normalize_test.zig),
-`:cov_normalize_unit`) import the tool and call `entry`, the program but for
-the process; its executable is built behind them (`unit_tests`), so it does
-not exist unless they pass. They build the tool from source in `zig test`'s
-own mode, so they are not the shipped bytes. The process cases
+result. `debug_relocate`, `cov_normalize` and `cov_zig` each have two sets,
+all `zig_test`s. Their unit tests
+([debug_relocate_test.zig](debug_relocate_test.zig), `:debug_relocate_unit`;
+[cov_normalize_test.zig](cov_normalize_test.zig), `:cov_normalize_unit`;
+[cov_zig_test.zig](cov_zig_test.zig), `:cov_zig_unit`) import the tool and
+call `entry`, the program but for the process; the executable is built
+behind them (`unit_tests`), so it does not exist unless they pass. They build
+the tool from source in `zig test`'s own mode, so they are not the shipped
+bytes. `cov_zig`'s unit tests take a stand-in zig
+([cov_zig_stub.zig](cov_zig_stub.zig), `:cov_zig_stub`) and
+`:debug_relocate` through `env_tools` (`COV_ZIG_STUB`, `DEBUG_RELOCATE`),
+and run what `entry` says to exec as `main` would. The process cases
 ([debug_relocate_exe_test.zig](debug_relocate_exe_test.zig),
-`:debug_relocate_exe_test`; [cov_normalize_exe_test.zig](cov_normalize_exe_test.zig),
-`:cov_normalize_exe_test`) take the shipped executable (`env_tools`: its path
-is in the test's environment as `DEBUG_RELOCATE` or `COV_NORMALIZE`, and the
-test fails, never passes, without it) and run it as a child process with an
-empty environment: exit 0, exit 1 with a refusal and exit 2 with the usage
-line, each message on stderr and on stdout only what the tool prints there
-(`debug_relocate`'s counts; nothing for `cov_normalize`). Each also has a
-write that fails: for `cov_normalize`, a file size limit cuts the output
+`:debug_relocate_exe_test`;
+[cov_normalize_exe_test.zig](cov_normalize_exe_test.zig),
+`:cov_normalize_exe_test`; [cov_zig_exe_test.zig](cov_zig_exe_test.zig),
+`:cov_zig_exe_test`) take the shipped executable (`env_tools`: its path is in
+the test's environment, and the test fails, never passes, without it) and run
+it as a child process with an environment the test builds.
+`debug_relocate`'s and `cov_normalize`'s (`DEBUG_RELOCATE`, `COV_NORMALIZE`,
+an empty environment): exit 0, exit 1 with a refusal and exit 2 with the
+usage line, each message on stderr and on stdout only what the tool prints
+there (`debug_relocate`'s counts; nothing for `cov_normalize`). Each also has
+a write that fails: for `cov_normalize`, a file size limit cuts the output
 short, which must be exit 1 with no output; for `debug_relocate`, a stdout
 whose writes fail, which must be exit 1 with the file unchanged (a `main`
-that buffers stdout and drops the flush error fails it). They are a
-validation of the public target (`:debug_relocate`, `:cov_normalize`).
-The cases of `cov_zig` are a script (`kcov_tool_cases` in [defs.bzl](defs.bzl)),
-and the public target `:cov_zig` depends on them; they also take
-`:debug_relocate` and the pinned zig (`helpers`). `:cov_link` and `:cov_run`
-take the public targets, so a coverage build is gated by their cases. Buck2
-runs a dependency's validations with any build that uses it, so the tool
-cannot be built, or used, unless its cases pass. The public target and its
-script or process cases take the executable as an `exec_dep` on the same
+that buffers stdout and drops the flush error fails it). `cov_zig`'s run it
+(`COV_ZIG`) from a link directory holding it, `:debug_relocate`
+(`DEBUG_RELOCATE`) and the pinned zig (`PINNED_ZIG`, the toolchain's
+directory): a C program compiled and linked through it, a release level
+refused (exit 1) and a link directory with no `real/zig` (exit 2); and with
+the stand-in (`COV_ZIG_STUB`) as `real/zig`, the logical-directory cases
+again with `$PWD` and `$BUCK_SCRATCH_PATH` in the process's environment,
+which `main` reads (the ELF fixture both sets share:
+[cov_zig_elf.zig](cov_zig_elf.zig)). They are a validation of the public
+target (`:debug_relocate`, `:cov_normalize`, `:cov_zig`). `:cov_link` and
+`:cov_run` take the public targets, so a coverage build is gated by their
+cases. Buck2 runs a dependency's validations with any build that uses it, so
+the tool cannot be built, or used, unless its cases pass. The public target
+and its process cases take the executable as an `exec_dep` on the same
 execution platform, so those cases test the very binary the public target
 hands out; the unit tests do not.
 
-The cases that need a write to fail set a file size limit (`ulimit -f` in a
-script, `setrlimit` in a unit test or in the forked child of a process case,
-with `SIGXFSZ` ignored), so the write
+The cases that need a write to fail set a file size limit (`setrlimit` in a
+unit test or in the forked child of a process case, with `SIGXFSZ` ignored),
+so the write
 fails with `EFBIG` part way; a probe first checks that the limit stops a
 plain write.
 
@@ -476,11 +489,15 @@ own, stdout, stderr) over small files and ELF files it writes byte by byte:
 | compressed section, ELF32, `e_shnum` 0 | an ELF32 file whose `e_shnum` is 0 and whose section 0 holds the count (3) in its 32-bit `sh_size` (offset 0x14 of its header): the compressed section is found and refused; with flags 0x2 it is relocated | the ELF32 count in section 0 not read (planted: red) |
 | `e_shnum` 0, a count past the end | an ELF64 file whose section 0 claims 4 section headers where it holds 3: refused, exit 1, untouched | no bounds check on the count read from section 0 |
 
-`cov_zig_cases.sh` runs `cov_zig` from a directory whose `real/zig` is a
-stand-in (a script that records its arguments and copies a given ELF file to
-the `-o` output) and, in the last two cases, the pinned zig itself. The
-fixtures put the working directory where a C runtime unit's
-`DW_AT_comp_dir` would be:
+[cov_zig_test.zig](cov_zig_test.zig) runs `cov_zig` as its `main` does
+(`entry`: argv[0] in a directory whose `real/zig` is the stand-in, which
+records its arguments and copies a given ELF file to the `-o` output; the
+arguments; a working directory of the test's own; `$PWD` and
+`$BUCK_SCRATCH_PATH`), and [cov_zig_exe_test.zig](cov_zig_exe_test.zig) runs
+the shipped executable: over the pinned zig itself in the two pinned zig
+cases, and over the stand-in in the `process` cases. The
+fixtures put the working directory where a C runtime unit's `DW_AT_comp_dir`
+would be:
 
 | case | proves | a defect it catches |
 |---|---|---|
@@ -497,9 +514,15 @@ fixtures put the working directory where a C runtime unit's
 | logical directory | reached through a symbolic link: `$PWD` and an absolute `$BUCK_SCRATCH_PATH` outside it are relocated too | `$PWD` ignored |
 | logical only | the output names only `$PWD`, not `getcwd`: relocated, exit 0 | a zero count of `getcwd` alone failing the link (red-first: it did) |
 | scratch only | the output names only an absolute `$BUCK_SCRATCH_PATH` outside the working directory, given: it is relocated, and the link fails with `has debug sections but holds the working directory`, exit 1 | the zero count summing every directory given, not only the working directory's spellings (planted: red) |
+| relative directories | a relative `$PWD` and `$BUCK_SCRATCH_PATH`: neither given to debug_relocate, exit 0, the relative strings in the output unchanged | a relative directory accepted (planted: red, debug_relocate refuses it) |
 | release level | `-O1` to `-O4`, `-Ofast`, `-Os`, `-Oz` on a link: exit 1 naming the level, `real/zig` not run; `-O0`, `-Og`, `-O` and a `-c -O2` compile pass | no refusal (red-first); refusing a Debug level (red-first: `-Og` was refused) |
 | pinned zig | a C file compiled with `-g` and linked through `cov_zig` with `-Wl,--strip-debug`: `.debug_line` kept, the placeholder present, the directory absent, no compressed section | the flags rejected by zig 0.12 |
 | pinned zig, release | the same link through zig directly has no `.debug_line`, so the previous case's line tables are `cov_zig`'s doing | |
+| process: logical | the shipped executable, its working directory reached through a symbolic link: `$PWD` (that path) and `$BUCK_SCRATCH_PATH` (outside it) from its environment, and the physical path, all gone from the output, exit 0 | `main` not reading `$PWD`, or not reading `$BUCK_SCRATCH_PATH` (planted: red) |
+| process: logical only | the output names only `$PWD`: exit 0, its placeholder present | `main` not reading `$PWD`; the two variables swapped (planted: red) |
+| process: scratch only | the output names only `$BUCK_SCRATCH_PATH`: relocated, exit 1 | `main` not reading `$BUCK_SCRATCH_PATH`; the two variables swapped (planted: red) |
+| process: refusal | the shipped executable linking at `-O2`: exit 1, the refusal on stderr, nothing on stdout, no output | `main` dropping `entry`'s status |
+| process: bad usage | a link directory with no `real/zig`: exit 2, `cannot run` on stderr | |
 
 [cov_normalize_test.zig](cov_normalize_test.zig) runs `cov_normalize` as its `main` does (`entry`:
 the arguments, a working directory of the test's own, stderr) over

@@ -92,7 +92,8 @@ A library whose package holds a `README.md` runs the README's examples as one
 more welded test, `[tests][readme]`, so the documentation cannot rot. Nothing
 declares it: the README is declared by existing. The program generator is
 the Zig tool [`//tools/build/readme_examples:tool`](../readme_examples/BUCK)
-(`generate`, and `map` for a report's lines; its unit tests are welded). It
+(`generate`, `map` for a report's lines, and `link` and `link-check` for a
+packaged README's `sh komira-link` block; its unit tests are welded). It
 reads Markdown through the shared Zig module
 [`//tools/build/markdown`](../markdown/BUCK) (CommonMark fences, code spans,
 links). kci ships the same tool beside its executable (`bin/kci` `helpers`)
@@ -161,6 +162,12 @@ until it moves to the Zig module.
   [Conda packages](../../../packaging/conda/README.md#the-readme-in-the-package))
   refuses a relative link outside code, naming `README.md:<line>`: the
   installed copy has no neighbours. Link an absolute URL or an `#anchor`.
+- **A library that owns C** (a C library among its `deps`) also compiles
+  each example's program to an object, `[tests][readme][objects]`: its
+  shared library's README check (`[readme_calls]`,
+  [`../native/README.md`](../native/README.md#each-librarys-shared-library))
+  fails unless one of them references the library's C, so the installed
+  README run calls the shared library it ships.
 
 Test 38 ([`tests/README.md`](../tests/README.md#38-readme-examples); its
 `run_tests.sh` case is stale until komira-ai/komira#1281 replaces it) builds
@@ -835,6 +842,14 @@ them into buck-out, so the C actions and the Mojo links using them keep one
 digest in every consumer (test 7). A repository's own C code, mounted at one
 place, does not need it.
 [`../examples/cshim`](../examples/cshim) calls C from Mojo.
+
+A library whose closure links C has a conda package only when, for each C
+library a library of its closure lists in `deps`, a library of the closure
+ships it ([`native_facts.bzl`](native_facts.bzl)): `native = ":<name>_native"`
+names the library's own shared library ([`../native`](../native/README.md)),
+which links exactly its C `deps`; `native_static = True` ships them as static
+archives (per-library state only). Otherwise the package is refused for its
+native code.
 
 zig's libc++ and libc++abi are linked statically. The Mojo runtime itself
 loads `libstdc++.so.6`, so a binary may hold both runtimes; it exports no

@@ -28,6 +28,7 @@ load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":coverage.bzl", "COVERAGE_ATTRS", "COVERAGE_SHARED_LIB_ATTRS", "COVERAGE_TEST_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_readme", "coverage_run", "coverage_branch_of", "coverage_shared_lib", "coverage_shared_lib_macro", "coverage_sub_targets", "coverage_test", "coverage_test_kwargs")
 load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
 load(":mutation.bzl", "MUTATION_ATTRS", "mutation_kwargs", "mutation_sub_targets")
+load(":native_facts.bzl", "NATIVE_ATTRS", "native_facts", "native_refusal")
 load(":native_reach.bzl", "NATIVE_REACH_ATTRS", "native_reach", "native_reach_kwargs")
 load(":test_runtime.bzl", _arg_args = "arg_args", _data_map = "data_map", _env_args = "env_args", _test_root = "test_root")
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "capped_prefix", "define_args", "mem_cap_script", "memory_cap")
@@ -161,7 +162,7 @@ def komira_main(
     return __wrap_and_execute_raising_main[_komira_program_main](argc, argv)
 """
 
-def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None, debug_link = None, defines = [], levels = None):
+def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None, debug_link = None, defines = [], levels = None, emit_object = False):
     """`mojo build` of `main` (one of `srcs`) against the packages in closure_tsets, linking c_link.
 
     Reads only `ctx.actions` and `ctx.label`, so a dynamic action passes
@@ -184,6 +185,10 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
 
     `defines`: `-D` arguments from defines.bzl's define_args, after
     `--target-cpu`; none are written when it is empty. `levels`: see opt_level.bzl.
+
+    With `emit_object`, emits the program's object file instead (`--emit
+    object`), linked to nothing: every `external_call` the program reaches
+    is an undefined symbol of it (the README check, shared.bzl).
     """
     opt_args = opt_level_args(ctx.label, opt_level, category, levels)
     mapping = {s.short_path: s for s in srcs}
@@ -234,6 +239,8 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
     tail = _link_tail(c_link)
     if link_extra:
         tail = cmd_args(tail, link_extra) if tail else cmd_args(link_extra)
+    if emit_object:
+        emit, tail = ["--emit", "object"], None
     ctx.actions.run(
         _mojo_cmd(tc, [
             "build",
@@ -284,7 +291,7 @@ def _check_import_name(ctx, name):
     if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", name):
         fail("{}: import name `{}` is not a Mojo identifier; set `import_name`".format(ctx.label, name))
 
-def _conda_facts(ctx, import_name, c_link, has_tests):
+def _conda_facts(ctx, import_name, c_link, has_tests, native):
     """(conda name, refusal) of this library's conda package.
 
     The name is None when the library opted out. The refusal is None when the
@@ -298,8 +305,9 @@ def _conda_facts(ctx, import_name, c_link, has_tests):
     name = ctx.attrs.conda_name or import_name
     if not regex_match("^[a-z][a-z0-9_]*$", name):
         return name, "`{}` is not a conda name (a lowercase letter, then lowercase letters, digits and _); set `conda_name`".format(name)
-    if c_link != None:
-        return name, "{} links native code. A `.mojoc` holds none, so a consumer would fail at its own link; no conda package for it until native code is supported".format(ctx.label.raw_target())
+    native_why = native_refusal(ctx.label, native) if c_link != None else None
+    if native_why != None:
+        return name, native_why
     if dlopen_refusal(ctx) != None:
         return name, dlopen_refusal(ctx)
     if not has_tests:
@@ -322,6 +330,7 @@ def _library_impl(ctx):
     _check_deps(ctx)
     deps = _dep_closure(ctx)
     c_link = _c_link(ctx)
+    native = native_facts(ctx, import_name)  # native_facts.bzl
 
     ungated = ctx.actions.declare_output("ungated/" + import_name + ".mojoc")
     dep_closure = ctx.actions.tset(MojoPkgTSet, children = deps)
@@ -407,18 +416,19 @@ def _library_impl(ctx):
     # README's examples are not counted, since analysis cannot tell whether
     # it holds any (see readme.bzl, readme_gate).
     has_tests = len(markers) > 0
-    conda_name, conda_refusal = _conda_facts(ctx, import_name, c_link, has_tests)
+    conda_name, conda_refusal = _conda_facts(ctx, import_name, c_link, has_tests, native)
 
     # A README that ships (the library has a conda package the build can make,
     # which installs it at share/doc/<conda name>/README.md) refuses relative
     # links: the installed copy has no neighbours.
     ships = conda_name != None and conda_refusal == None
-    readme_marker = readme_gate(ctx, tc, import_name, ungated_tset, _link_tail(c_link), env_args, ships, _readme_test)
+    readme_marker = readme_gate(ctx, tc, import_name, ungated_tset, _link_tail(c_link), env_args, ships, _readme_test, owner = bool(native.c_direct))
     if readme_marker != None:
         if "readme" in test_subtargets:
             fail("{}: a test_srcs file is named `readme.mojo`; `[tests][readme]` is the README's examples".format(ctx.label))
-        # [generated] and [file]: the programs and README.md the gate ran, for kci_validate's golden test.
-        test_subtargets["readme"] = [DefaultInfo(default_output = readme_marker[0], other_outputs = [readme_marker[1]], sub_targets = {"file": [DefaultInfo(default_output = ctx.attrs.readme)], "generated": [DefaultInfo(default_output = readme_marker[1])]})]
+        # [generated] and [file]: the programs and README.md the gate ran, for kci_validate's golden test;
+        # [objects]: an owner's README programs as objects, for its shared library's README check (shared.bzl).
+        test_subtargets["readme"] = [DefaultInfo(default_output = readme_marker[0], other_outputs = [readme_marker[1]], sub_targets = {"file": [DefaultInfo(default_output = ctx.attrs.readme)], "generated": [DefaultInfo(default_output = readme_marker[1])], "objects": [DefaultInfo(default_output = readme_marker[3])]})]
         markers.append(readme_marker[0])
         if cov_link:
             coverage_readme(ctx, tc, _build_executable, readme_marker, ungated_tset, _link_tail(c_link), src_dir, import_name, root, env_args, cov_bins, cov_runs)
@@ -468,6 +478,7 @@ def _library_impl(ctx):
                 if MojoInfo in d
             },
             import_name = import_name,
+            native = native,
             pkgs = ctx.actions.tset(MojoPkgTSet, value = public, children = deps),
             pkgs_def = MojoPkgTSet,
             readme = ctx.attrs.readme,
@@ -482,17 +493,21 @@ def _library_impl(ctx):
 # dynamic action, which compiles and runs each example (the convention and
 # the gate are described there).
 
-def _readme_test_impl(actions, label, gate_label, examples, package, src, marker, tc, closure, opt_level, link_tail, env_args):
+def _readme_test_impl(actions, label, gate_label, examples, package, src, marker, objects, owner, tc, closure, opt_level, link_tail, env_args):
     lines = [x.strip() for x in examples.read_string().split("\n") if x.strip()]
     if not lines:
         actions.write(marker, "NO EXAMPLE {}: no ```mojo example, so nothing was compiled or run\n".format(gate_label))
+        actions.copied_dir(objects, {})
         return []
     shim = struct(actions = actions, label = label)
     markers = []
+    built = {}
     for line in lines:
         stem = "readme_{}_{}".format(package, line)
         program = src.project(stem + ".mojo")
         exe = _build_executable(shim, tc, "tests/readme/bin/" + stem, [program], program, [closure], opt_level, "mojo_build_test", "readme_" + line, None, link_extra = link_tail)
+        if owner:
+            built[stem + ".o"] = _build_executable(shim, tc, "tests/readme/obj/" + stem + ".o", [program], program, [closure], opt_level, "mojo_readme_object", "readme_" + line, None, emit_object = True)
         root, staged = _test_root(shim, "tests/readme/root/" + line, exe, {})
         m = actions.declare_output("tests/readme/{}.passed".format(line))
         actions.run(
@@ -505,6 +520,7 @@ def _readme_test_impl(actions, label, gate_label, examples, package, src, marker
         cmd_args(tc.busybox, "sh", "-c", 'b=$1; shift; "$b" cat "$@" >"$0"', marker, tc.busybox, markers),
         category = "mojo_readme_join",
     )
+    actions.copied_dir(objects, built)
     return []
 
 _readme_test = dynamic_actions(
@@ -519,6 +535,8 @@ _readme_test = dynamic_actions(
         "marker": dynattrs.output(),
         "opt_level": dynattrs.value(str),
         "package": dynattrs.value(str),
+        "objects": dynattrs.output(),
+        "owner": dynattrs.value(bool),
         "src": dynattrs.value(Artifact),
         "tc": dynattrs.value(typing.Any),
     },
@@ -561,7 +579,7 @@ mojo_library_rule = rule(
         # itself built from a mojo_library, so a default would be a cycle.
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
-    } | COVERAGE_ATTRS | DLOPEN_ATTRS | MUTATION_ATTRS | NATIVE_REACH_ATTRS | LIBRARY_DEFINE_ATTRS | _TOOLCHAIN_ATTR,
+    } | COVERAGE_ATTRS | DLOPEN_ATTRS | MUTATION_ATTRS | NATIVE_ATTRS | NATIVE_REACH_ATTRS | LIBRARY_DEFINE_ATTRS | _TOOLCHAIN_ATTR,
 )
 
 # ---- mojo_binary / mojo_test ----------------------------------------------
@@ -922,6 +940,7 @@ def _mojo_library(**kwargs):
         conda_package(
             name = name + "_conda",
             lib = ":" + name,
+            native = kwargs.get("native"),
             # A library of the coverage ledger: its gate, `<name>_cov_gate`.
             coverage_gate = cov_gate,
             summary = summary or "The `{}` Mojo library of komira, as a conda package.".format(kwargs.get("import_name") or name),

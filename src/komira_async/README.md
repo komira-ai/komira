@@ -119,3 +119,16 @@ assert_true(scan.is_cancelled())
 assert_equal(scan.reason(), "client went away")
 assert_equal(other.reason(), "client went away")  # the outermost reason
 ```
+
+A serve loop's process setup, through this package's C
+(`reactor/graceful_shutdown.mojo` over its signal shim): a write to a peer
+that went away returns `EPIPE` instead of ending the process, and the drain
+flag stays clear until a SIGTERM or SIGINT arrives:
+
+<!-- mojo-hidden from std.testing import assert_false, assert_true -->
+```mojo
+from komira_async.reactor.graceful_shutdown import ignore_sigpipe, shutdown_requested
+
+assert_true(ignore_sigpipe())
+assert_false(shutdown_requested())
+```

@@ -210,6 +210,18 @@ pub fn readArchive(alloc: Alloc, b: []const u8) ![]Sym {
     return out.toOwnedSlice();
 }
 
+/// Every symbol of an object's or a linked program's static symbol table
+/// (.symtab), locals included. A README program compiled to an object
+/// (`mojo build --emit object`) has each C function it reaches as an
+/// undefined symbol there. A file without a .symtab (a stripped program;
+/// the programs `mojo build` links are) is an error, never an empty list:
+/// a check that reads nothing cannot fail.
+pub fn readProgram(alloc: Alloc, b: []const u8) ![]Sym {
+    const e = try Elf.open(alloc, b, &.{ ET_REL, ET_EXEC, ET_DYN });
+    const s = e.find(SHT_SYMTAB) orelse return bad("no .symtab (a stripped program): its symbols cannot be read");
+    return readSyms(alloc, e, s, false);
+}
+
 /// A shared object's (or a dynamically linked program's) dynamic section,
 /// its .dynsym (local symbols left out), and the versions it needs.
 pub fn readShared(alloc: Alloc, b: []const u8) !Shared {
