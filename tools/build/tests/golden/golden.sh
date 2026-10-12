@@ -33,7 +33,7 @@ SAMPLES=(
     komira//tools/build/examples:test_hellopkg
     komira//tools/build/toolchains:conda_unpack
     komira//tools/build/toolchains:zig_cc_launcher
-    komira//tools/build/mojo:gate_runner.sh
+    komira//tools/build/run:gate
     komira//third_party/snappy:snappy
     komira//tools/build/proto-codegen:komira_proto_codegen
 )

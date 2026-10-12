@@ -47,7 +47,7 @@ checkout), so a repository using komira can pass its own compiler
 Every tool an action runs is one of its inputs; actions never search the
 worker's `PATH`. The client's only work is downloading the pinned files
 (`pinned_file`, the only client-side operation) and uploading them to the
-remote cache. The Mojo wrapper ([`mojo/mojo_wrapper.sh`](../mojo/mojo_wrapper.sh))
+remote cache. The Mojo compile wrapper ([`mojo/tools/mojo_compile.zig`](../mojo/tools/mojo_compile.zig))
 refuses (exit 2) to run a toolchain missing a member listed in its
 `CLOSURE_MANIFEST` instead of falling back to anything on the worker
 ([test 4](../tests/README.md#4-closure-refusal)).
@@ -140,8 +140,9 @@ their hosts:
 
 `darwin_arm64_properties` is the exact property set the workers advertise, and
 must differ from the linux one (`linux_x86_64_properties`).
-`darwin_macos_hosts` lists what `sh tools/build/mojo/darwin/host_identity.sh`
-prints on each worker host: the SDK version, then a digest of the developer
+`darwin_macos_hosts` lists what `mojo_compile_darwin host-identity` prints on
+each worker host (build `komira//tools/build/mojo:mojo_compile_darwin`, a Linux
+action whose output is a macOS arm64 executable, and run it there): the SDK version, then a digest of the developer
 dir, the SDK version and build, `cc --version`, `ld -v` and the OS build.
 Unset, no macOS platform exists, a darwin-arm64 Mojo target fails to
 configure, a wildcard over `tools/build/toolchains/darwin` skips its targets,
@@ -157,8 +158,9 @@ What a macOS action takes from the worker, and what keys it:
   refused). They belong to the sealed operating-system volume, whose build
   is part of the host identity.
 * The Command Line Tools or Xcode: `/usr/bin/xcrun`, the SDK, and
-  `/usr/bin/cc` through `tools/build/mojo/darwin/cc`, which links with the
-  host's `ld`. Every compile links this way, measured on the workers: the
+  `/usr/bin/cc` through the compile wrapper's `cc` mode
+  ([`mojo_compile_macos.zig`](../mojo/tools/mojo_compile_macos.zig)), which
+  links with the host's `ld`. Every compile links this way, measured on the workers: the
   compiler does not use the `lld_path` its `modular.cfg` names, and the
   closure has no `bin/lld`.
 * The system libraries a built binary loads (`/usr/lib`, `/System`),

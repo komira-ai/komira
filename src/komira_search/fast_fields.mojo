@@ -979,6 +979,17 @@ struct FastFieldReader(Movable, Deinitable):
         ref e = self._entries[i]
         return (e.name.copy(), e.field_class, e.encoding)
 
+    def entry_arrow_type_id_at(self, i: Int) raises -> UInt8:
+        """The i-th entry's Arrow type id: the unit a DATE-class value is
+        stored in (DATE32 days, TIMESTAMP microseconds, TIMESTAMP_MS ...).
+        Raises if `i` is out of range, as `entry_meta_at` does."""
+        if i < 0 or i >= len(self._entries):
+            raise Error(
+                "FastFieldReader.entry_arrow_type_id_at: index " + String(i)
+                + " out of range [0, " + String(len(self._entries)) + ")"
+            )
+        return self._entries[i].arrow_type_id
+
     def has_field(self, name: String) -> Bool:
         for i in range(len(self._entries)):
             if self._entries[i].name == name:
