@@ -157,7 +157,7 @@ def test_constants_fold_before_cse_compares_expressions() raises:
 
 
 # -----------------------------------------------------------------------------
-# Steps 13-17
+# Steps 13-14
 # -----------------------------------------------------------------------------
 
 
@@ -183,19 +183,6 @@ def test_projects_merge_before_eager_aggregation() raises:
     assert_equal(_render(_run(LogicalPlan.aggregate(gb^, aggs^, p^))), _want_merged_then_eager())
 
 
-def test_a_limit_is_pushed_below_the_join_order_restoring_project() raises:
-    """`Limit 5` over a(10 rows) JOIN b(100000 rows): step 16 swaps the join
-    operands and restores the column order with a Project under the Limit;
-    step 17 then pushes the Limit below that Project, onto the join.
-
-    Defect caught: step 17 before step 16. The Limit is already on the join
-    when it runs, and the Project step 16 adds afterwards stays under it."""
-    var an: List[String] = ["ak", "av"]
-    var bn: List[String] = ["bk", "bv"]
-    var j = LogicalPlan.join(_scan("a", an, 10), _scan("b", bn, 100000), _l1("ak"), _l1("bk"), JOIN_INNER)
-    assert_equal(_render(_run(LogicalPlan.limit(5, j^))), _want_limit_under_restore())
-
-
 # -----------------------------------------------------------------------------
 # Expected renders (taken from the driver's output)
 # -----------------------------------------------------------------------------
@@ -203,10 +190,9 @@ def test_a_limit_is_pushed_below_the_join_order_restoring_project() raises:
 
 def _want_residual_folded() -> String:
     var l: List[String] = [
-        "Project(exprs=[ColRef(a), ColRef(ta), ColRef(b), ColRef(ub)])",
-        "  Join(type=INNER, on=[b=a])",
-        "    Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR)",
-        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR, filter=BinaryOp(GT, ColRef(ta), Literal(ScalarValue(int64, 3))))",
+        "Join(type=INNER, on=[a=b], build=left)",
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR, filter=BinaryOp(GT, ColRef(ta), Literal(ScalarValue(int64, 3))))",
+        "  Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR)",
     ]
     return _lines(l)
 
@@ -230,22 +216,10 @@ def _want_fold_then_cse() -> String:
 def _want_merged_then_eager() -> String:
     var l: List[String] = [
         "Aggregate(group_by=[ColRef(dim_attr)], aggs=[SUM(ColRef(__eager_sum_total)).alias(\"total\")])",
-        "  Project(exprs=[ColRef(fk_id), ColRef(__eager_sum_total), ColRef(dim_id), ColRef(dim_attr)])",
-        "    Join(type=INNER, on=[dim_id=fk_id])",
-        "      Scan(path=\"dim.parquet\", type=PARQUET, source_kind=COLUMNAR)",
-        "      Aggregate(group_by=[ColRef(fk_id)], aggs=[SUM(ColRef(measure)).alias(\"__eager_sum_total\")])",
-        "        Scan(path=\"fact.parquet\", type=PARQUET, source_kind=COLUMNAR)",
-    ]
-    return _lines(l)
-
-
-def _want_limit_under_restore() -> String:
-    var l: List[String] = [
-        "Project(exprs=[ColRef(ak), ColRef(av), ColRef(bk), ColRef(bv)])",
-        "  Limit(n=5)",
-        "    Join(type=INNER, on=[bk=ak])",
-        "      Scan(path=\"b\", type=PARQUET, source_kind=COLUMNAR)",
-        "      Scan(path=\"a\", type=PARQUET, source_kind=COLUMNAR)",
+        "  Join(type=INNER, on=[fk_id=dim_id], build=left)",
+        "    Aggregate(group_by=[ColRef(fk_id)], aggs=[SUM(ColRef(measure)).alias(\"__eager_sum_total\")])",
+        "      Scan(path=\"fact.parquet\", type=PARQUET, source_kind=COLUMNAR)",
+        "    Scan(path=\"dim.parquet\", type=PARQUET, source_kind=COLUMNAR)",
     ]
     return _lines(l)
 
