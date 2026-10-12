@@ -1,9 +1,10 @@
 # Design: `OptimizedPlan`, comparisons and decided questions
 
 Status: proposed, not built. These are §13 and §14 of [`optimized_plan.md`](optimized_plan.md), kept in their own
-file so each file stays under 1,000 lines. Section numbers are that document's: `§10.x` is in
-[`optimized_plan_udfs.md`](optimized_plan_udfs.md), `§15.x` in [`optimized_plan_sources.md`](optimized_plan_sources.md),
-and every other `§n` is in `optimized_plan.md`.
+file so each file stays under 1,000 lines. Section numbers are that document's: `§10.1`-`§10.9` are in
+[`optimized_plan_udfs.md`](optimized_plan_udfs.md), `§10.10`-`§10.14` in
+[`optimized_plan_udf_runtime.md`](optimized_plan_udf_runtime.md), `§15.x` in
+[`optimized_plan_sources.md`](optimized_plan_sources.md), and every other `§n` is in `optimized_plan.md`.
 
 ---
 
@@ -61,6 +62,7 @@ states the decision; the list keeps its numbering so references to it stay valid
    at build time. *(Inferred: not yet tried against real packages.)*
 9. **Aggregate state.** A fixed 64 MiB cap per group at the first release; a group over it fails by name (§10.2).
    Tuning the cap is komira-ai/komira#1148.
-10. **Native UDFs** (Mojo, Rust, C, C++ and Zig, through the C ABI) ship at the first release, in-process by
-    default, with the worker transport opt-in for crash isolation. The default holds because the supervisor's
-    run-scoped heartbeat token never reaches the engine's process or user id (§10.10).
+10. **Native UDFs** (C and Mojo at the first release; Rust, C++ and Zig later, all through the C ABI) ship at the
+    first release, in-process: each language has one mode, chosen by its runtime, and the engine chooses no transport
+    (`udf_runtime_interface.md` §1.2). In-process native code is safe to ship because the supervisor's run-scoped
+    heartbeat token never reaches the engine's process or user id (§10.10).

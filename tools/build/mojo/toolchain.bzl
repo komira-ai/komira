@@ -211,7 +211,9 @@ mkdir -p "$TMPDIR"
 # passed. A `zig_exe` names it in `unit_tests` to be built behind it. A test
 # that runs tools names them in `env_tools`; it is then also a validation,
 # which a target that hands a tool out lists (`kcov_tool`'s `cases`), as it
-# cannot be an input of the executable it runs.
+# cannot be an input of the executable it runs. It can still be in the
+# `unit_tests` of an executable it does not run (cov_zig's unit tests run a
+# stand-in zig and debug_relocate).
 zig_test_rule = rule(
     impl = _zig_test_impl,
     attrs = {
@@ -219,7 +221,10 @@ zig_test_rule = rule(
         # `zig_module` targets `src` imports by name.
         "deps": attrs.list(attrs.dep(providers = [ZigModuleInfo]), default = []),
         # name -> a tool the tests run (its default output), in the
-        # environment as its path.
+        # environment as its path. Configured for the execution platform like
+        # the target that hands it out, so the same bytes. It may be a
+        # directory of executables: the pinned zig
+        # (komira//tools/build/toolchains:zig) is the directory holding `zig`.
         "env_tools": attrs.dict(attrs.string(), attrs.exec_dep(), default = {}),
         "imports": attrs.list(attrs.source(), default = []),
         "src": attrs.source(),
