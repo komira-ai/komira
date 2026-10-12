@@ -40,7 +40,8 @@
 #
 # THE ARGUMENTS RUN: the README's `run` words, with the text `$CONDA_PREFIX`
 # replaced by the environment's directory (the tool keeps it as written; no
-# shell runs, so kci puts in what a shell would).
+# shell runs, so kci puts in what a shell would); the `build` words the same
+# way for the native `built` row (`build_link_args`).
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -312,4 +313,14 @@ def run_link_args(got: LinkArgs, env_dir: String) -> List[String]:
     var out = List[String]()
     for i in range(len(got.run)):
         out.append(got.run[i].replace(String(CONDA_PREFIX_TEXT), env_dir))
+    return out^
+
+
+def build_link_args(got: LinkArgs, env_dir: String) -> List[String]:
+    """The README's `build` arguments with `$CONDA_PREFIX` replaced by
+    `env_dir` (file header): what the native `built` row
+    (native_rows.mojo) gives `mojo build`."""
+    var out = List[String]()
+    for i in range(len(got.build)):
+        out.append(got.build[i].replace(String(CONDA_PREFIX_TEXT), env_dir))
     return out^

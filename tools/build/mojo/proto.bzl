@@ -292,7 +292,7 @@ def _generate_package(ctx, plugin, plugin_name, opt, tree, trees, generate, name
             gen_dir,
             "-o",
             pkg.as_output(),
-        ], darwin_knobs = False),
+        ]),
         category = "mojo_precompile",
     )
 
