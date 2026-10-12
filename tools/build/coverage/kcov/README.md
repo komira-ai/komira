@@ -112,7 +112,7 @@ count above 0.
 <dir>/zig <zig arguments...>
 ```
 
-`mojo_wrapper.sh` runs every link of `mojo build` as `<zig_dir>/zig cc
+`mojo_compile` runs every link of `mojo build` as `<zig_dir>/zig cc
 -target <t> -Wl,--strip-debug ...`. A coverage build passes `:cov_link` as
 `<zig_dir>`, so the wrapper is the same file for every compile; `cov_zig`
 finds its directory from `argv[0]` and runs `real/zig` and `debug_relocate`
@@ -244,7 +244,7 @@ Exit status, both tools: 0 done, 1 refused, 2 bad usage.
 ## cov_run
 
 ```
-busybox sh <cov_run dir>/cov_run.sh <busybox> <gate_runner> <compiler_dir> <label>
+busybox sh <cov_run dir>/cov_run.sh <busybox> <gate> <compiler_dir> <label>
     <test_binary> <share> <src_dir> <xml_out> <marker_out>
     <src_repo> <test> <test_repo> <import> [--solib <file> [--solib-src <path>]...]
     [--gen <file>]... [--env NAME=VALUE]...
@@ -278,12 +278,12 @@ header of [`cov_run.sh`](cov_run.sh) has every argument; in order:
    generated source (`--gen`) is moved to `gen/`, outside `share/` and
    `lost/`, and linked from both, so `realpath` takes its name out of every
    `--include-path` and it is not measured.
-2. **kcov as the gate's program.** `gate_runner.sh`, the release gate's
-   runner byte for byte, runs `bin/kcov` (staged where a test binary would
+2. **kcov as the gate's program.** The gate ([`gate mojo`](../../run/README.md)),
+   the release gate's runner, runs `bin/kcov` (staged where a test binary would
    be, so `share/` is the working directory) with the test binary and kcov's
    flags as its arguments. So the test runs with the gate's PATH,
    LD_LIBRARY_PATH, TMPDIR, TEST_TMPDIR, HOME, `test_env` and data, under
-   kcov, and gate_runner reports a failure as for a gated test (what
+   kcov, and the gate reports a failure as for a gated test (what
    differs is below). The flags:
    `--cobertura-only --skip-solibs --configure=cobertura-full-paths=1`;
    `--include-path` of exactly the staged `[src]` directory and the test
@@ -310,8 +310,8 @@ komira's kcov exits with the test's status, 128+N when signal N killed it,
 as a shell reports it; kcov v42 as released returns the status of the last
 traced process to exit, so a child the test left behind decided it
 ([Patches](../../toolchains/kcov/README.md#patches)). A test that fails under
-kcov fails the action (its output from `gate_runner.sh`, then `COVERAGE RUN
-FAILED`), although its release gate passed. gate_runner's banner is left
+kcov fails the action (its output from the gate, then `COVERAGE RUN
+FAILED`), although its release gate passed. The gate's banner is left
 out: it would say the release gate's test failed. With coverage on, the
 conda package (`<name>_conda`) waits for every coverage run; the library
 and its dependents do not
@@ -349,17 +349,19 @@ report byte for byte.
 
 **The run is bounded.** kcov waits for every process the test started
 before it writes the report, so a test that leaves a child running would
-hold the action open. `gate_runner.sh` runs in a session of its own
-(`setsid`), which kcov, the test and its children join, and a watcher kills
-that whole process group when the run has not ended after the limit, 450 s
+hold the action open. The gate (`gate mojo --limit-s <limit> --limit-report
+coverage`) runs kcov in a session of its own, which the test and its
+children join, and kills that whole process group when the run has not ended
+after the limit, 450 s
 (the file `limit` of the `cov_run_dir`, its `limit_s`): the action fails
 with `The test left processes running or did not finish within 450 s under
 kcov`, after the output the test wrote. A process of the group still
 running (not a zombie) 10 s after that kill fails the action instead with
 `processes of the coverage run survived the kill`, naming it. That scan reads /proc, so it first
-requires /proc to show the run's shell under its own pid (`/proc/$$/stat` and `/proc/self/stat`
-both start with `$$`): a /proc of another PID namespace, or one hiding processes, would list none
-of the group, and the action fails instead with `/proc is not readable as this run's own`. The slowest run measured took
+requires /proc to show the gate under its own pid (`/proc/<pid>/stat` and `/proc/self/stat`
+both start with it): a /proc of another PID namespace, or one hiding processes, would list none
+of the group, and the action fails instead with `/proc is not readable as this run's own`
+(both are the gate's unit tests, [`supervise_test.zig`](../../run/supervise_test.zig)). The slowest run measured took
 119.6 s of worker time; the limit is over three times that and under 600
 s, buck2's default timeout of a test action. Only a fixture of the tests
 cell may set another `limit_s` (test 43 uses 20 s). kcov refused by the executor (a line of
@@ -375,7 +377,7 @@ them relative to it); kcov shares its TMPDIR (kcov writes there only when it
 cannot make its FIFO); its environment also holds `KCOV_SOLIB_PATH`, which
 kcov always sets (with `--skip-solibs` it preloads nothing: no `LD_PRELOAD`),
 and nothing of `cov_run.sh`'s own (its tools get `LC_ALL=C` per command
-before the test and exported after it, since `gate_runner.sh` passes on what
+before the test and exported after it, since the gate passes on what
 it does not set);
 and the run ends when every process the test started has exited, since
 kcov follows each fork, where the gate waits for the test alone (so the run
