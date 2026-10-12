@@ -467,7 +467,7 @@ filters them. The one change to `build_targets.sh` is for the graph checks, not 
   scenario target. The `src/` change then lists `build_selftests`. That proof holds at one commit. The
   graph check `selftest_closure` keeps it true: it fails when the closure of
   `//tools/build/selftest/...` holds a `//src/` label (see "Graph checks in the gate").
-- **The cost.** The scenarios run inside the job's budget: `pr / check` gives kci what is left of 115
+- **The cost.** The scenarios run inside the job's budget: `pr / check` gives kci what is left of 325
   minutes, while the scheduled self-test job has 300 today. Each slice reports the wall time its
   scenarios add to a widened check, and slice 3 measures how many inner daemons the runner holds at
   once (see "How a scenario runs").
