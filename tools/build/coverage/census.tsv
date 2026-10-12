@@ -81,7 +81,7 @@ komira//src/komira_counters:komira_counters	src/komira_counters	library	OK	266	3
 komira//src/komira_crypto:komira_crypto	src/komira_crypto	library	OK	2374	2841	-	-	no	conda	src/komira_crypto/aead.mojo,src/komira_crypto/internal/asm/sha256_compress.mojo	-
 komira//src/komira_csv:komira_csv	src/komira_csv	library	RUN_FAILED	-	-	-	-	no	conda	-	not built in this census: test_csv_parallel_reader and test_csv_phase_4_column_parallel_concat take about 450 s under kcov, the run limit (sharding them is pending)
 komira//src/komira_datetime:komira_datetime	src/komira_datetime	library	OK	853	853	-	-	no	release	-	-
-komira//src/komira_db:komira_db	src/komira_db	library	OK	970	1177	-	-	no	conda	src/komira_db/blocking.mojo,src/komira_db/db_storable.mojo	-
+komira//src/komira_db:komira_db	src/komira_db	library	OK	1173	1173	-	-	no	conda	-	-
 komira//src/komira_db_postgres:komira_db_postgres	src/komira_db_postgres	library	OK	1128	1136	-	-	no	conda	-	-
 komira//src/komira_db_sqlite:komira_db_sqlite	src/komira_db_sqlite	library	OK	315	335	-	-	no	conda	-	-
 komira//src/komira_dispatch_agg_exec:komira_dispatch_agg_exec	src/komira_dispatch_agg_exec	library	OK	407	411	-	-	no	conda	-	-
