@@ -45,6 +45,9 @@ mojo_library(
         # the generic Pool[T]'s refusals (every lease method at -1 and size,
         # exhaustion, double return / take / vacate, size <= 0) and close()
         "tests/test_pool_refusals.mojo",
+        # TEXT[] elements holding , } " \ whitespace, NULL or the empty string
+        # round-trip through the array literal
+        "tests/test_text_array_literal.mojo",
     ],
     visibility = ["PUBLIC"],
 )

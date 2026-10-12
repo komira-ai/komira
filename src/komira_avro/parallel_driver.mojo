@@ -77,6 +77,7 @@ from std.sys import num_physical_cores
 
 from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
 from komira_arrow.concat import concat_record_batches_nway
+from komira_arrow.arrow_types import ArrowType
 from komira_collections.slab import Slab
 from komira_async_api.worker_pool_traits import KeepAlive, Segment
 
@@ -439,6 +440,11 @@ def _read_avro_bytes_parallel_impl[
         # accumulator slab (accumulators are per-worker mutable state — they
         # must NOT be shared).
         var schema = header.parse_schema()
+        # The reassembly concat (`concat_record_batches_nway`) has no kernel
+        # for a NULL or dense-union column: such a file decodes serially.
+        if _has_column_without_concat(schema):
+            _ = cancel_token^
+            return decode_avro_bytes_comptime(bytes, print_timing=print_timing)
         var shape_kind = classify_avro_shape(schema)
         var hot = is_hot_shape(shape_kind)
 
@@ -635,6 +641,17 @@ def _decode_block_range(
 # =============================================================================
 # Reassembly — serial in-order concat over file-ordered worker slots.
 # =============================================================================
+
+
+def _has_column_without_concat(schema: AvroSchema) raises -> Bool:
+    """True iff the identity read of `schema` has a NULL or dense-union output
+    column, which `concat_record_batches_nway` cannot merge across workers."""
+    var table = ResolutionTable.identity(schema)
+    for i in range(len(table.out_specs)):
+        var at = table.out_specs[i].arrow_type
+        if at == ArrowType.NULL or at == ArrowType.UNION_DENSE:
+            return True
+    return False
 
 
 def _reassemble_in_order(

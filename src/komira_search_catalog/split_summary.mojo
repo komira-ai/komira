@@ -79,13 +79,66 @@ def _get_lp_bytes(bytes: List[UInt8], mut off: Int) raises -> List[UInt8]:
     return out^
 
 
-def _get_lp_str(bytes: List[UInt8], mut off: Int) raises -> String:
-    """Read a length-prefixed string slot and advance `off`."""
+def _is_cont(c: UInt8) -> Bool:
+    return (c & UInt8(0xC0)) == UInt8(0x80)
+
+
+def _utf8_valid(b: List[UInt8]) -> Bool:
+    """True when `b` is well-formed UTF-8 (RFC 3629): no overlong form, no
+    surrogate, nothing above U+10FFFF, no truncated sequence."""
+    var i = 0
+    var n = len(b)
+    while i < n:
+        var c = b[i]
+        if c < UInt8(0x80):
+            i += 1
+            continue
+        var need: Int
+        var lo = UInt8(0x80)
+        var hi = UInt8(0xBF)
+        if c >= UInt8(0xC2) and c <= UInt8(0xDF):
+            need = 1
+        elif c >= UInt8(0xE0) and c <= UInt8(0xEF):
+            need = 2
+            if c == UInt8(0xE0):
+                lo = UInt8(0xA0)
+            elif c == UInt8(0xED):
+                hi = UInt8(0x9F)
+        elif c >= UInt8(0xF0) and c <= UInt8(0xF4):
+            need = 3
+            if c == UInt8(0xF0):
+                lo = UInt8(0x90)
+            elif c == UInt8(0xF4):
+                hi = UInt8(0x8F)
+        else:
+            return False
+        if i + need >= n:
+            return False
+        var c1 = b[i + 1]
+        if c1 < lo or c1 > hi:
+            return False
+        for k in range(2, need + 1):
+            if not _is_cont(b[i + k]):
+                return False
+        i += need + 1
+    return True
+
+
+def _get_lp_str(
+    bytes: List[UInt8], mut off: Int, slot: String
+) raises -> String:
+    """Read a length-prefixed string slot and advance `off`. The slot's bytes
+    become the String as they are; bytes that are not well-formed UTF-8 raise,
+    naming `slot`."""
     var raw = _get_lp_bytes(bytes, off)
-    var s = String("")
-    for i in range(len(raw)):
-        s += chr(Int(raw[i]))
-    return s^
+    if not _utf8_valid(raw):
+        raise Error(
+            "decode_split_summary: "
+            + slot
+            + " is not well-formed UTF-8 (corrupt)"
+        )
+    # The bytes were checked to be well-formed UTF-8 just above.
+    return String(unsafe_from_utf8=Span(raw))
 
 
 # -----------------------------------------------------------------------------
@@ -321,17 +374,19 @@ def decode_split_summary(body: List[UInt8]) raises -> SplitSummary:
     off += 8
     var cardinality = _get_i64_le(body, off)
     off += 8
-    var index_name = _get_lp_str(body, off)
-    var field_name = _get_lp_str(body, off)
-    var object_key = _get_lp_str(body, off)
-    var delete_gen_ref = _get_lp_str(body, off)
+    var index_name = _get_lp_str(body, off, "index_name")
+    var field_name = _get_lp_str(body, off, "field_name")
+    var object_key = _get_lp_str(body, off, "object_key")
+    var delete_gen_ref = _get_lp_str(body, off, "delete_gen_ref")
     var bloom_sketch = _get_lp_bytes(body, off)
     var minmax_sketch = _get_lp_bytes(body, off)
-    # The compaction slot is present iff bytes remain; it needs at least the
-    # 8-byte merge_ops.
+    # The compaction slot is present iff any byte remains. 1 to 7 remaining
+    # bytes are a merge_ops field cut short: `_get_i64_le` raises on them,
+    # so a truncated merged split never decodes as an ingest split
+    # (komira-ai/komira#1372).
     var merge_ops = Int64(0)
     var merge_input_uuids = List[UInt8]()
-    if off + 8 <= len(body):
+    if off < len(body):
         merge_ops = _get_i64_le(body, off)
         off += 8
         merge_input_uuids = _get_lp_bytes(body, off)
