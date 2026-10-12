@@ -330,8 +330,11 @@ release set ([`release_set.txt`](release_set.txt)) with the fixed test stamp of
 `conda_package_test_stamped` in [`conda.bzl`](conda.bzl): build number 999999999,
 a made-up source commit whose first 8 hex are `7e57c0de` (no 8-hex slice of it
 repeats another or is `00000000`), commit time 86400000 ms. No release carries
-it. The target builds each package's `[release]` (so its `[release_check]` runs)
-and runs `komira_pack conda-meta --name komira_all` over those manifests. It
+it. A library whose `mojo_library` declares `native` is given that same target
+in the check's `native` dict (library label to `native` target), as the macro
+gives it to `<lib>_conda`; the package rule refuses a native library missing
+from the dict, and the macro refuses a key not in `libs`. The target builds
+each package's `[release]` (so its `[release_check]` runs) and runs `komira_pack conda-meta --name komira_all` over those manifests. It
 fails the build in these cases:
 
 - a member or the metapackage does not carry build string `h7e57c0de_999999999`

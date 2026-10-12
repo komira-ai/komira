@@ -6,7 +6,7 @@
 # <dir> holds .github/workflows/coverage.yml, .github/ci/coverage_measure.sh,
 # .github/ci/tests/build_report_gate_failed.json and
 # build_report_branch_failed.json, and the real
-# tools/build/coverage/policy.bzl, ratchet.tsv and
+# tools/build/coverage/policy.bzl and
 # tools/build/mojo/coverage_branch.bzl; <covcheck dir> the real covcheck
 # with its lib/.
 #
@@ -553,7 +553,7 @@ printf 'def test_f():\n    f()\n' >"$M/src/alpha/tests/test_a.mojo"
 printf 'def g():\n    return 1\n' >"$M/src/beta/beta.mojo"
 printf 'notes\n' >"$M/docs/notes.md"
 printf 'x\n' >"$M/tools/build/tests/functional/x/x.mojo"
-cp "$D/tools/build/coverage/policy.bzl" "$D/tools/build/coverage/ratchet.tsv" "$M/tools/build/coverage/"
+cp "$D/tools/build/coverage/policy.bzl" "$M/tools/build/coverage/"
 (cd "$M" && find . -type f ! -name '.buckconfig' | sed 's|^\./||' | sort) >"$W/git_files"
 echo .buckconfig >>"$W/git_files"
 XA="buck-out/v2/art/komira/0123/src/alpha/__alpha__/cov/tests/test_a.xml"
@@ -716,23 +716,23 @@ rm "$W/build_report_copy"
 [ "$(grep -c -- '^--cobertura$' "$W/covcheck_argv")" -eq 2 ] || red "M10: covcheck did not read the 2 reports of buck2's report"
 pass
 
-# M11. The ratchet covcheck reads holds the rows of the measured packages
-# only (and every comment line): a row of a package this run did not
-# measure (beta, whose build failed; delta, not touched) would read as a
-# Regression in every check run.
+# M11. The floors covcheck reads are the rows of the measured packages'
+# coverage_floor.tsv only: a floor of a package this run did not measure
+# (beta, whose build failed; delta, not touched) would read as a Regression.
 printf 'src/alpha/alpha.mojo\nsrc/beta/beta.mojo\n' >"$W/git_names"
 printf 'komira//src/alpha:alpha\nkomira//src/beta:beta\n' >"$W/uquery_out"
 printf 'komira//src/alpha:alpha SUCCESS - %s\nkomira//src/beta:beta FAIL mojo_cov_run@self\n' "$XA" >"$W/build_table"
-printf '# floors\nsrc/alpha\t6000\t-\nsrc/beta\t5000\t-\nsrc/delta\t5000\t-\n' >"$M/rows.tsv"
+for p in alpha:6000 beta:5000 delta:5000; do printf '# c\nsrc/%s\t%s\t-\n' "${p%:*}" "${p#*:}" >"$M/src/${p%:*}/coverage_floor.tsv"; done
 O="$W/o_M11"
 : >"$W/buck2_calls"
 (cd "$M" && sh "$MEASURE" --base "$BASE_SHA" --head "$HEAD_SHA" --covcheck "$T/stub/covcheck" --out "$O" \
-    --buck2 "$T/stub/buck2" --git "$T/stub/git" --ratchet rows.tsv) >"$W/out" 2>"$W/err" && RC=0 || RC=$?
+    --buck2 "$T/stub/buck2" --git "$T/stub/git") >"$W/out" 2>"$W/err" && RC=0 || RC=$?
 [ "$RC" -eq 0 ] || red "M11: exited $RC"
 rt=$(grep -A1 -x -- --ratchet "$W/covcheck_argv" | tail -n 1)
-[ "$(cd "$M" && cat "$rt")" = "$(printf '# floors\nsrc/alpha\t6000\t-')" ] ||
-    red "M11: covcheck's ratchet is not the comment and alpha's row alone"
+[ "$(cd "$M" && cat "$rt")" = "$(printf '# the floors of the measured packages\nsrc/alpha\t6000\t-')" ] ||
+    red "M11: covcheck's floors are not alpha's row alone"
 ! grep -q '"package":"src/\(delta\|beta\)"' "$O/publish/result.json" || red "M11: the result has a finding for a package this run did not measure"
+rm "$M"/src/*/coverage_floor.tsv
 pass
 
 # The branch records (B cases): a library whose gate reads its tests'

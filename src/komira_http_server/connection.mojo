@@ -105,7 +105,11 @@ struct ConnEntry(Movable, Deinitable):
                         List's capacity (the List can retain capacity
                         across requests for allocation reuse).
       _pending_off    — bytes already drained from _pending_buf
-      _keep_alive     — HTTP/1.1 keep-alive flag
+      _keep_alive     — False once the conn owes its last response: when a
+                        parked write drains, `resume_pending_write` closes it
+      _carry          — request bytes read in the round whose write parked,
+                        after the request it answered: the next round serves
+                        them before it reads the socket (komira-ai/komira#1285)
 
     Movable, NOT Copyable — TcpStream is not Copyable.
     """
@@ -124,6 +128,7 @@ struct ConnEntry(Movable, Deinitable):
     var _pending_len: Int
     var _pending_off: Int
     var _keep_alive: Bool
+    var _carry: List[UInt8]
     # Optional TLS stream. When Some, the conn was
     # accepted on a TLS-enabled listener; the byte transport (read/write)
     # goes through TlsStream.read_app / write_app instead of try_io_read /
@@ -161,6 +166,7 @@ struct ConnEntry(Movable, Deinitable):
         self._pending_len = 0
         self._pending_off = 0
         self._keep_alive = True
+        self._carry = List[UInt8]()
         self._tls = Optional[TlsStream]()
         self._h2 = Optional[H2ConnectionState]()
         self._head_carry = List[UInt8]()
@@ -189,6 +195,7 @@ struct ConnEntry(Movable, Deinitable):
         self._pending_len = 0
         self._pending_off = 0
         self._keep_alive = True
+        self._carry = List[UInt8]()
         self._tls = Optional[TlsStream](tls_stream^)
         self._h2 = Optional[H2ConnectionState]()
         self._head_carry = List[UInt8]()

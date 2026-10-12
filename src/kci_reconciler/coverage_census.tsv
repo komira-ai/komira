@@ -1,0 +1,3 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
+komira//src/kci_reconciler:kci_reconciler	src/kci_reconciler	library	OK	1530	1530	-	-	no	conda	-	-

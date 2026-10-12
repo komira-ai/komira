@@ -1,18 +1,18 @@
 #!/bin/sh
 # census.sh -- the coverage census of every library: one coverage build of
-# each library's gate, its numbers as data (census.tsv), the ranked table
-# rendered from it (docs/coverage_census.md) and the floors of ratchet.tsv
-# raised to it. census.md says how.
+# each library's gate, its numbers as data (census.tsv, which census_files
+# splits into each package's coverage_census.tsv), the ranked table rendered
+# from it (the doc //:coverage_census builds) and the floors raised to it.
 #
 # usage: census.sh run     --out <dir> [--cap <seconds>] [--attempts <n>] [--batch <n>] [--skip <file>]
 #        census.sh collect --out <dir> [--skip <file>] [--source <commit>] [--note <text>]
 #        census.sh render  <busybox> <census.tsv> <ratchet.tsv> <doc out> <ratchet out>
-#        census.sh check   <busybox> <census.tsv> <ratchet.tsv> <doc> <result.json>
+#        census.sh check   <busybox> <census.tsv> <ratchet.tsv> <result.json> <doc out>
 #
 # run and collect are run by hand at the top of a checkout (they call
 # ./buck2, so the coverage build runs where the build runs); render and
-# check use only the busybox given, and check is the build action of
-# //:coverage_census.
+# check use only the busybox given, and are the build actions of
+# //:coverage_census (check writes its doc and its validation).
 #
 #   run      lists the libraries under src/ (`kind(mojo_library_rule,
 #            //src/...)`, into <dir>/libraries.txt unless it exists) and
@@ -44,27 +44,27 @@
 #            release/artifacts.textproto), `conda` (it has a `<name>_conda`)
 #            or `no`. --source names the commit measured (default: HEAD of
 #            the checkout) and --note says anything else the census line
-#            must (a fix applied to it, say). Then copy <dir>/census.tsv over census.tsv here and
-#            run render (census.md says how).
+#            must (a fix applied to it, say). Then run render and split the
+#            files into the packages (census_files; census.md says how).
 #   render   writes the doc and the ratchet from census.tsv and the current
-#            ratchet.tsv. A library row of census.tsv is a library under
+#            floors (ratchet.tsv). A library row of census.tsv is a library under
 #            src/ but not under src/tests/ (`kind` library); its package's
 #            floors are the lowest of its libraries' numbers (line 0 when one
 #            of them was not measured or has no line; no branch floor when one
 #            has no branch number, since its gate would find the floor
 #            unmeasured), never below the current floor: a floor is raised to what
-#            was measured and never lowered (lowering one is a hand edit of
-#            ratchet.tsv, which check accepts only where census.tsv measured
-#            no more than the new floor). A row of the current ratchet whose
+#            was measured and never lowered (lowering one is a hand edit of a
+#            coverage_floor.tsv, which check accepts only where the census
+#            measured no more; the change's check refuses it). A row whose
 #            package the census has no library row for is dropped. Each
 #            floor raised, row dropped and package under its floor is said
 #            on stderr. Its comment lines are kept.
-#   check    renders into scratch and compares: <doc> and <ratchet.tsv> must
-#            be exactly what render writes from <census.tsv> and
-#            <ratchet.tsv> (so every floor is at least what the census
-#            measured, the doc shows today's floors, and nobody edited the
-#            doc by hand). Writes the validation result; exits 0 unless its
-#            usage is wrong.
+#   check    renders the doc to <doc out> and the floors into scratch:
+#            <ratchet.tsv> (every package's coverage_floor.tsv, census_files
+#            assembles it) must be exactly what render writes from
+#            <census.tsv> and it (every floor at least what was measured,
+#            one per library package). Writes the validation result; exits
+#            0 unless its usage is wrong.
 #
 # census.tsv: comment lines start with '#'; then the line
 # `census<TAB><date YYYY-MM-DD><TAB><source commit, 40 hex, or -><TAB><note or ->`; then one
@@ -213,17 +213,16 @@ render() { # busybox census ratchet doc_out ratchet_out
         END {
             print "# Coverage census"
             print ""
-            print "Generated: `tools/build/coverage/census.sh render` writes this file from"
-            print "[census.tsv](../tools/build/coverage/census.tsv), the numbers of one coverage"
-            print "build of every library under `src/`, and from the floors of"
-            print "[ratchet.tsv](../tools/build/coverage/ratchet.tsv), which it raises to them."
-            print "The build holds this file, census.tsv and ratchet.tsv to each other"
-            print "(`//:coverage_census`), so edit none of them by hand except to lower a floor;"
-            print "[The census](../tools/build/coverage/census.md) says how to refresh"
+            print "Generated: `./buck2 build //:coverage_census` renders this file from each"
+            print "package'"'"'s coverage_census.tsv, the numbers of a coverage build of each"
+            print "library under `src/`, and from each package'"'"'s coverage_floor.tsv, which it"
+            print "raises to them. The same build fails unless every floor is what it renders"
+            print "(no floor under what was measured). This file is not committed;"
+            print "tools/build/coverage/census.md says how to refresh"
             print "them and what a floor does: a library measured under its package'"'"'s floor"
             print "fails its coverage gate in every mode, so its conda package is not built."
             print ""
-            # The commit stays in census.tsv: a commit id in this prose would
+            # The commit stays in the census files: a commit id in this prose would
             # be a finding of the public boundary lint.
             print "Census of " date (cnote == "-" ? "" : " (" cnote ")") ", built with"
             print "`-c komira.coverage=true`: line coverage from kcov over every test of the"
@@ -252,7 +251,7 @@ render() { # busybox census ratchet doc_out ratchet_out
             print "## Ranked by line coverage"
             print ""
             print "Lowest first. *Uncovered* counts executable lines no test ran, the lines of"
-            print "files no test compiles included; *Floor* is the package'"'"'s (ratchet.tsv), line /"
+            print "files no test compiles included; *Floor* is the package'"'"'s (coverage_floor.tsv), line /"
             print "branch, `-` for none, *pinned* when set by hand ([Pinned floors](#pinned-floors));"
             print "**under floor** marks a library measured under it."
             print ""
@@ -272,7 +271,7 @@ render() { # busybox census ratchet doc_out ratchet_out
             print ""
             print "## Pinned floors"
             print ""
-            print "A pinned row of ratchet.tsv holds a floor set by hand, with its reason;"
+            print "A pinned floor (coverage_floor.tsv) is set by hand, with its reason;"
             print "render keeps it as written, whatever the census measured (*measured* is"
             print "the package floor the census would give it)."
             print ""
@@ -316,22 +315,20 @@ render)
     ;;
 check)
     [ "$#" -eq 5 ] || usage "check takes 5 arguments"
-    BB=$1 RESULT=$5
+    BB=$1 RESULT=$4 DOC_OUT=$5
     S=${BUCK_SCRATCH_PATH:-.}/census_check
-    "$BB" mkdir -p "$S"
+    "$BB" mkdir -p "$S" && : > "$DOC_OUT"
     msg=""
-    if ! render "$BB" "$2" "$3" "$S/doc.md" "$S/ratchet.tsv" 2> "$S/err"; then
-        msg="census.tsv or ratchet.tsv is not one census.sh renders: $("$BB" grep '^census.sh: error' "$S/err" | "$BB" head -5)"
+    if ! render "$BB" "$2" "$3" "$DOC_OUT" "$S/ratchet.tsv" 2> "$S/err"; then
+        msg="the census or the floors are not ones census.sh renders: $("$BB" grep '^census.sh: error' "$S/err" | "$BB" head -5)"
     elif ! "$BB" cmp -s "$S/ratchet.tsv" "$3"; then
-        msg="ratchet.tsv is not what census.sh render writes from census.tsv and it (a floor under what census.tsv measured, a row of no library of the census, or a package with none): $("$BB" diff "$3" "$S/ratchet.tsv" | "$BB" grep '^[-+][^-+]' | "$BB" head -10)"
-    elif ! "$BB" cmp -s "$S/doc.md" "$4"; then
-        msg="docs/coverage_census.md is not what census.sh render writes from census.tsv and ratchet.tsv (run it; tools/build/coverage/census.md): $("$BB" diff "$4" "$S/doc.md" | "$BB" grep '^[-+][^-+]' | "$BB" head -10)"
+        msg="the floors are not what census.sh render writes from the census and them (a coverage_floor.tsv under what its package's coverage_census.tsv measured, a floor of a package with no library in the census, or a library package with no floor): $("$BB" diff "$3" "$S/ratchet.tsv" | "$BB" grep '^[-+][^-+]' | "$BB" head -10)"
     fi
     if [ -n "$msg" ]; then
         esc=$(printf '%s' "$msg" | "$BB" tr -d '\000-\010\013-\037' | "$BB" awk '{ gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/\t/, "\\t"); printf "%s\\n", $0 }')
         printf '{"version": 1, "data": {"status": "failure", "message": "coverage_census: %s"}}\n' "$esc" > "$RESULT"
     else
-        printf '{"version": 1, "data": {"status": "success", "message": "coverage_census: the doc and the floors are census.sh'"'"'s"}}\n' > "$RESULT"
+        printf '{"version": 1, "data": {"status": "success", "message": "coverage_census: the floors are census.sh'"'"'s"}}\n' > "$RESULT"
     fi
     exit 0
     ;;
@@ -461,7 +458,7 @@ REPORT=$OUT/$(cat "$OUT/last").json
     }
 ' tools/build/coverage/policy.bzl release/artifacts.textproto "$OUT/all_targets.txt" "$OUT/libraries.txt" "$SKIP" "$REPORT" > "$OUT/collected.tsv"
 {
-    echo "# The coverage census: the data docs/coverage_census.md is rendered from (census.sh; census.md)."
+    echo "# The coverage census of every library, for census_files split to write into each package (census.md)."
     printf 'census\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%d)" "$SRC" "$NOTE"
     while IFS="$(printf '\t')" read -r l pkg kind st f bg pub note; do
         if [ "$st" = OK ]; then
