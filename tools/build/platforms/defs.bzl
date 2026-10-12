@@ -198,7 +198,7 @@ _RETIRED_KEYS = {
 }
 
 # `[komira_re]` key naming the macOS hosts those workers run on: the value
-# tools/build/mojo/darwin/host_identity.sh prints on each (the SDK version,
+# `mojo_compile_darwin host-identity` prints on each (the SDK version,
 # then a digest of the developer dir, the SDK version and build, the cc and
 # ld builds, and the OS build), separated by spaces.
 #
@@ -206,7 +206,7 @@ _RETIRED_KEYS = {
 # action key some other way. The workers advertise no property that tells
 # them apart (a worker's property set is its operator's; a pool of macOS
 # hosts is typically one set), so the key cannot come from the platform. The
-# macOS toolchain writes this list into every compile's inputs instead, and
+# macOS toolchain puts this list on every compile's command line instead, and
 # the compile refuses (exit 2) a host whose identity is not in it. A cached
 # result is therefore keyed on the SET of hosts: it was built by one of
 # them, which one is not part of the key. To key on one host, give each its
@@ -233,7 +233,7 @@ def darwin_properties_refusal(props, hosts):
         return "`darwin` must name at least one worker property; got {}".format(props)
     if not hosts:
         return ("`darwin` is set ({}), but `[komira_re] {}` of the root cell names no " +
-                "macOS host. Set it to what tools/build/mojo/darwin/host_identity.sh prints on each " +
+                "macOS host. Set it to what `mojo_compile_darwin host-identity` prints on each " +
                 "worker, separated by spaces.").format(props, DARWIN_HOSTS_KEY)
     for h in hosts:
         if "-" not in h or h.startswith("-") or h.endswith("-"):

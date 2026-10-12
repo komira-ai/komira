@@ -9,9 +9,9 @@ import "komira/plan/v1/plan.proto";
 //
 // The design is docs/design/optimized_plan.md (komira-ai/komira#1094): §4 the
 // header and body, §6 needs, pins and advice, §8 segments. This file is that
-// design's stage 4, the schema. It holds no codec: the header codec, the body
-// and segment codecs, the canonical encoder and both digests are stage 5, and
-// nothing in this repository reads or writes these messages yet.
+// design's stage 4, the schema. It holds no codec. The header codec is
+// `komira_optimized_plan_header`; the body and segment codecs, the canonical
+// encoder and both digests are stage 5 and not written yet.
 //
 // It imports `plan.proto` and restates none of it. The plan body is a
 // `WirePlan`; the write target is `WireWriteTarget`. One node vocabulary

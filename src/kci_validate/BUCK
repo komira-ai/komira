@@ -1,4 +1,4 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 
 # The validations of a stage's steps (`kci run --stage S`; the machine file
 # declares them on a step, kci_release_machine parses them). Two kinds. The
@@ -76,6 +76,24 @@ mojo_library(
         # link, an extra .so, a __glibc of 2.38, NEEDED outside the
         # environment, no DF_SYMBOLIC, the loaded-from record, the ELF reader
         "tests/test_native_install.mojo",
+        # the link commands of an installed README (slice 10): the closure's
+        # arguments (every shared library dependents first, the static
+        # archive on the build line), the real tool reading the block, and
+        # the `readme` row refusing a README without an owner's -l, a
+        # missing or unwanted block, and the same words in another order
+        "tests/test_readme_link.mojo",
+        # the same over a written release: link_nodes reading depends and
+        # lib_files (link and static rows, not shared; the metapackage
+        # skipped), install_pins filling each pin's link (gamma: beta
+        # before alpha), a link row of another shape refused; and the
+        # CONDA_INSTALL_ENV README run given the block's run arguments
+        "tests/test_readme_link_release.mojo",
+        # beta's native install checks as a CONDA_INSTALL_ENV validation
+        # runs them (native_rows.mojo, slice 11): every row over a played
+        # pixi and an installed .so; row 4 red on an unresolved symbol, row
+        # 5 on a komira .so loaded from /usr/lib, row 7 on a failing
+        # OpenSSL program; which packages are installed alone
+        "tests/test_native_rows.mojo",
     ],
     # The README examples tool kci ships, for the tests that make an
     # installed README into programs (the same target bin/kci/BUCK ships).
@@ -89,6 +107,29 @@ mojo_library(
             "encoding_generated": "//src/komira_encoding:komira_encoding[tests][readme][generated]",
         },
         "tests/test_readme_tool.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
+        "tests/test_readme_link.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
+        "tests/test_readme_link_release.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
+        "tests/test_native_rows.mojo": {
+            "readme_examples": "//tools/build/readme_examples:tool",
+            "native_load_example.mojo": "tests/generated/native_load_example.mojo",
+            "openssl_example.mojo": "tests/generated/openssl_example.mojo",
+        },
     },
     visibility = ["PUBLIC"],
+)
+
+# One of each program the native install checks write (native_rows.mojo
+# `load_program_text`, `openssl_program_text`), built here so that a change
+# breaking what kci generates fails this package's build rather than
+# beta_validate. tests/test_native_rows.mojo holds each byte-equal to its
+# generator. Built, never run: the paths they open exist only in an
+# installed environment.
+mojo_binary(
+    name = "native_load_example",
+    srcs = ["tests/generated/native_load_example.mojo"],
+)
+
+mojo_binary(
+    name = "openssl_example",
+    srcs = ["tests/generated/openssl_example.mojo"],
 )

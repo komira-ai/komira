@@ -26,6 +26,10 @@
 #   readme_installed.mojo     an installed README as the programs it runs,
 #                             made by the tool that makes the welded
 #                             SOURCE-mode programs, which kci ships
+#   readme_link.mojo          the link commands of an installed README: what
+#                             the closure needs, computed from the release,
+#                             against its `sh komira-link` block, whose
+#                             `mojo run` arguments the README run is given
 #   request.mojo              `ValidateRequest`, `ContainerHost`; the release
 #                             and the pins, read the PUBLISH step's way; a
 #                             metapackage's members from its own depends
@@ -76,6 +80,7 @@ from kci_validate.env import (
     ENV_SYSTEM_PATH,
     PIXI_SYSTEM_CONFIG_DIR,
     EnvHost,
+    build_program_argv,
     env_child_env,
     install_env_argv,
     run_program_argv,
@@ -90,8 +95,20 @@ from kci_validate.readme_installed import (
     installed_readme,
     map_report_file,
     package_dir_of,
+    readme_link_args_of,
     readme_program_of,
     shipped_readme_tool,
+)
+from kci_validate.readme_link import (
+    CONDA_PREFIX_TEXT,
+    LinkArgs,
+    LinkNode,
+    build_link_args,
+    closure_link_args,
+    link_nodes,
+    link_refusal,
+    parse_link_args,
+    run_link_args,
 )
 from kci_validate.container import (
     COMPILER_PACKAGE,
@@ -124,9 +141,26 @@ from kci_validate.native_install import (
     lib_rows_findings,
     link_name_of,
     loaded_from_findings,
+    loader_env,
+    loader_record,
     needed_findings,
     run_loaded_from,
     symbolic_findings,
+)
+from kci_validate.native_rows import (
+    CHECK_ALONE,
+    CHECK_BUILT,
+    CHECK_LOAD,
+    CHECK_OPENSSL,
+    LOAD_PROGRAM,
+    alone_pins,
+    any_native,
+    is_native,
+    load_findings,
+    load_program_text,
+    openssl_program_text,
+    run_native_rows,
+    shared_paths,
 )
 from kci_validate.request import (
     ContainerHost,

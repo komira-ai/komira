@@ -71,6 +71,7 @@ from .optimizer_project_merge_guard import (
 )
 
 from .optimizer_config import OptimizerConfig
+from .optimizer_udf_carry import collect_udf_input_columns
 
 # =============================================================================
 # Rule 11: Inner -> Semi Join Conversion
@@ -118,6 +119,8 @@ def convert_inner_to_semi_inplace(
             ref proj_exprs = plan._project.value()[].exprs
             for i in range(len(proj_exprs)):
                 _collect_expr_columns(proj_exprs[i], proj_cols)
+            # A UDF reads its input columns, which its placeholders omit.
+            collect_udf_input_columns(plan, proj_cols)
 
             var uses_right = False
             ref left_schema = plan._project.value()[].child[]._join.value()[].left[].output_schema
@@ -446,8 +449,11 @@ def _side_has_wide_string_build_payload(
       - at least one payload column is Arrow STRING (BINARY, LARGE_STRING
         and LARGE_BINARY do not count).
 
-    Key columns are matched by name against `keys`, the side's own `*_on`
-    list (`left_on` for the left input, `right_on` for the right); a key
+    A column is a key column when its name equals an entry of `keys`, the
+    side's own `*_on` list (`left_on` for the left input, `right_on` for the
+    right): exact, case-sensitive whole-name equality, so a column whose name
+    starts with, ends with or contains a key, is a prefix, suffix or part of
+    a key, or differs from a key only in letter case is payload. A key
     column of any type, STRING included, is not payload.
     The override fires only when exactly one side of a single-key INNER
     join meets this condition; every other join keeps the cost decision.
@@ -668,7 +674,9 @@ def select_join_build_side_inplace(mut plan: LogicalPlan) raises:
 #   handed it, so a permutation made by an earlier rule passes through it.
 #
 # ⚠ SCOPE. The guard restores the plan ROOT's column order against the names
-# captured before the rules, and nothing else.
+# captured before the rules. Below the root, the reorder walkers restore at
+# each Filter, Sort, Limit, Distinct and TopN they pass through, whose cached
+# schema they do not recompute (`_reorder_joins_with_dp_keeping_order`).
 
 
 def join_reorder_output_names(plan: LogicalPlan) raises -> List[String]:
@@ -845,7 +853,14 @@ def absorb_expression_into_aggregate_inplace(mut plan: LogicalPlan) raises:
     if plan.tag == PLAN_AGGREGATE:
         absorb_expression_into_aggregate_inplace(plan._aggregate.value()[].child[])
 
-        if plan._aggregate.value()[].child[].tag == PLAN_PROJECT:
+        # Neither node may carry a UDF: absorbing deletes the Project (its
+        # UDF with it), and a UDF Aggregate's input columns name the
+        # Project's outputs.
+        if (
+            plan._aggregate.value()[].child[].tag == PLAN_PROJECT
+            and not plan.has_udf()
+            and not plan._aggregate.value()[].child[].has_udf()
+        ):
             # MOJO 1.0.0: one walk of the AggregateData, projected three ways.
             ref agd = plan._aggregate.value()[]
             ref proj_data = agd.child[]._project.value()[]

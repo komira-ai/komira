@@ -31,9 +31,13 @@
 #       maximum runtime: the limit check at the top of the next iteration
 #       stops the job before any further RUNNING beat. Read from each beat's
 #       time, not a beat count: every RUNNING beat is sent less than 3 s after
-#       the first beat after the spawn (the spawn precedes it, so this holds
-#       however a loaded host shifts the schedule), where a loop that beat
-#       once more after the stall would beat about 5 s after it.
+#       the first beat after the spawn, where a loop that beat once more after
+#       the stall would beat about 5 s after it. The limit is counted from
+#       the spawn, which precedes that first beat, so a beat the limit check
+#       let through is under 3 s after it as long as the time from that
+#       check to the beat's own reading is no longer than the time from the
+#       spawn to the first beat's reading; a host that stalls longer between
+#       a check and its beat can fail it.
 # =============================================================================
 
 from std.ffi import external_call
