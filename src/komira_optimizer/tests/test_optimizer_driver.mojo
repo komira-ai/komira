@@ -361,10 +361,10 @@ def test_fd_key_elision_runs_before_identity_project_elimination() raises:
 
 
 def test_join_reorder_output_order_is_restored() raises:
-    """`big JOIN small`: the reorder puts `small` first and build-side
-    selection swaps it back with its own order-restoring Project, which
-    restores the REORDERED order. The query's order `[b_k, b_v, s_k, s_v]` is
-    put back by the capture taken before both rules.
+    """`big JOIN small`: the reorder puts `small` first; build-side selection
+    then records a side and moves no operand. The query's order
+    `[b_k, b_v, s_k, s_v]` is put back by the restore, from the capture taken
+    before the reorder.
 
     Defect caught: the `restore_join_reorder_output_columns` call dropped (or
     the capture taken after the reorder). The plan answers with

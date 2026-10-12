@@ -13,6 +13,8 @@ mojo_library(
     test_srcs = [
         "tests/test_spsc_ring.mojo",
         "tests/test_ring_variants.mojo",
+        "tests/test_spawn_join.mojo",
+        "tests/test_spawn_join_start_failure.mojo",
     ],
     visibility = ["PUBLIC"],
 )

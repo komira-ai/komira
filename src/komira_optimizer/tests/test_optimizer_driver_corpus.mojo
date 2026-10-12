@@ -10,10 +10,18 @@
 # with a rank filter, consecutive filters under Sort + Limit, and joins in
 # both size orders.
 #
-# Three properties, each the design's promise:
+# Six properties, each the design's promise:
 #   * idempotence: optimize(optimize(p)) renders exactly as optimize(p);
 #   * the output schema (names, order, types) is the input's;
-#   * the config fields the driver does not read do not change the result.
+#   * the config fields the driver does not read do not change the result;
+#   * every join in the output carries a recorded build side, on the corpus
+#     and on joins below a window, a Union, a CastToVarchar and an as-of join
+#     (docs/design/optimized_plan.md §5.2: `build_side` is required);
+#   * each recorded build side is the one `select_join_build_side` decides
+#     for the output plan, and no join is marked `adaptive_allowed` (nothing
+#     in the driver sets it);
+#   * an UNBOUNDED scan is still UNBOUNDED in the output (§5.2: boundedness
+#     is a stated property of the source, and it selects streaming).
 # =============================================================================
 
 from std.memory import OwnedPointer
@@ -33,6 +41,28 @@ from komira_plan_ir.logical_plan import (
     LogicalPlan,
     ExprArray,
     AggExprArray,
+    AsofTolerance,
+    ASOF_BACKWARD,
+    PLAN_SCAN,
+    PLAN_FILTER,
+    PLAN_PROJECT,
+    PLAN_AGGREGATE,
+    PLAN_JOIN,
+    PLAN_SORT,
+    PLAN_LIMIT,
+    PLAN_DISTINCT,
+    PLAN_TOPN,
+    PLAN_PARTITION_BY,
+    PLAN_PARTITION_TOPN,
+    PLAN_ASOF_JOIN,
+    PLAN_UNION,
+    PLAN_VIEW_REF,
+    PLAN_CSE_REF,
+    PLAN_CAST_TO_VARCHAR,
+    PLAN_EXCHANGE,
+    JOIN_BUILD_SIDE_UNSET,
+    SCAN_BOUNDED,
+    SCAN_UNBOUNDED,
     SOURCE_PARQUET,
     CORR_KIND_SCALAR,
     CORR_KIND_EXISTS,
@@ -43,6 +73,7 @@ from komira_plan_ir.logical_plan import (
 from komira_optimizer.optimizer_config import OptimizerConfig
 from komira_optimizer.optimizer_scalar_deps import ScalarDepTable
 from komira_optimizer.optimizer_driver import optimize
+from komira_optimizer.optimizer_join import select_join_build_side
 
 
 # -----------------------------------------------------------------------------
@@ -310,11 +341,11 @@ def _run(var p: LogicalPlan, config: OptimizerConfig) raises -> LogicalPlan:
 def test_optimize_is_idempotent_on_the_corpus() raises:
     """optimize(optimize(p)) renders exactly as optimize(p), for every plan.
 
-    Defects caught: a gate that reads a stale node-kind scan (a second call
-    then finds work the first skipped), and the identity Project that the
-    reorder / build-side swap leaves above a join when a Project already sat
-    there (removed by the `eliminate_identity_projects` after step 16; without
-    it the second call stacks a second Project on corpus plans 1, 5 and 12)."""
+    Defect caught: a gate that reads a stale node-kind scan (a second call
+    then finds work the first skipped). The identity Project the old
+    build-side operand exchange left above a join is gone with the exchange:
+    removing the `eliminate_identity_projects` after step 16 no longer breaks
+    this property on the corpus."""
     for i in range(CORPUS_SIZE):
         var once = _run(_corpus(i), OptimizerConfig())
         var r1 = _render(once)
@@ -361,6 +392,226 @@ def test_config_fields_the_driver_does_not_read_do_not_change_the_plan() raises:
         var want = _render(_run(_corpus(i), OptimizerConfig()))
         var got = _render(_run(_corpus(i), odd))
         assert_equal(got, want, "corpus plan " + String(i))
+
+
+# -----------------------------------------------------------------------------
+# Decisions: every join decided, every UNBOUNDED mark kept
+# -----------------------------------------------------------------------------
+
+
+def _count(p: LogicalPlan, what: Int) raises -> Int:
+    """Over every node reachable through plan children: `what` = 0 counts
+    joins, 1 joins with no recorded build side, 2 scans, 3 scans that are
+    BOUNDED. RAISES on a tag with no arm, so a node kind the corpus grows
+    cannot hide a join or a scan from the count."""
+    var here = 0
+    if p.tag == PLAN_JOIN:
+        if what == 0 or (
+            what == 1 and p._join.value()[].build_side == JOIN_BUILD_SIDE_UNSET
+        ):
+            here = 1
+        return here + _count(p._join.value()[].left[], what) + _count(
+            p._join.value()[].right[], what
+        )
+    if p.tag == PLAN_SCAN:
+        if what == 2 or (
+            what == 3 and p._scan.value()[].boundedness == SCAN_BOUNDED
+        ):
+            here = 1
+        return here
+    if p.tag == PLAN_FILTER:
+        return _count(p._filter.value()[].child[], what)
+    if p.tag == PLAN_PROJECT:
+        return _count(p._project.value()[].child[], what)
+    if p.tag == PLAN_AGGREGATE:
+        return _count(p._aggregate.value()[].child[], what)
+    if p.tag == PLAN_SORT:
+        return _count(p._sort.value()[].child[], what)
+    if p.tag == PLAN_LIMIT:
+        return _count(p._limit.value()[].child[], what)
+    if p.tag == PLAN_DISTINCT:
+        return _count(p._distinct.value()[].child[], what)
+    if p.tag == PLAN_TOPN:
+        return _count(p._topn.value()[].child[], what)
+    if p.tag == PLAN_PARTITION_BY:
+        return _count(p._partition_by.value()[].child[], what)
+    if p.tag == PLAN_PARTITION_TOPN:
+        return _count(p._partition_topn.value()[].child[], what)
+    if p.tag == PLAN_ASOF_JOIN:
+        return _count(p._asof_join.value()[].left[], what) + _count(
+            p._asof_join.value()[].right[], what
+        )
+    if p.tag == PLAN_UNION:
+        var n = 0
+        for i in range(p._union.value()[].num_children()):
+            n += _count(p._union.value()[].children[i][], what)
+        return n
+    if p.tag == PLAN_CAST_TO_VARCHAR:
+        return _count(p._cast_to_varchar.value()[].child[], what)
+    if p.tag == PLAN_EXCHANGE:
+        return _count(p._exchange.value()[].child[], what)
+    if p.tag == PLAN_VIEW_REF or p.tag == PLAN_CSE_REF:
+        return 0
+    raise Error("_count: no arm for plan tag " + String(Int(p.tag)))
+
+
+def _mark_unbounded(mut p: LogicalPlan):
+    """Mark every scan reachable through Filter, Project, Aggregate, Sort,
+    Limit, Join and PartitionBy UNBOUNDED (the node kinds of the corpus plans
+    the boundedness test uses)."""
+    if p.tag == PLAN_SCAN:
+        p._scan.value()[].boundedness = SCAN_UNBOUNDED
+    elif p.tag == PLAN_JOIN:
+        _mark_unbounded(p._join.value()[].left[])
+        _mark_unbounded(p._join.value()[].right[])
+    elif p.tag == PLAN_FILTER:
+        _mark_unbounded(p._filter.value()[].child[])
+    elif p.tag == PLAN_PROJECT:
+        _mark_unbounded(p._project.value()[].child[])
+    elif p.tag == PLAN_AGGREGATE:
+        _mark_unbounded(p._aggregate.value()[].child[])
+    elif p.tag == PLAN_SORT:
+        _mark_unbounded(p._sort.value()[].child[])
+    elif p.tag == PLAN_LIMIT:
+        _mark_unbounded(p._limit.value()[].child[])
+    elif p.tag == PLAN_PARTITION_BY:
+        _mark_unbounded(p._partition_by.value()[].child[])
+
+
+comptime BELOW_KINDS: Int = 4
+
+
+def _join_below(kind: Int) raises -> LogicalPlan:
+    """A join (two, for the Union and the as-of join) below a node the
+    driver's `has_join` scan does or does not descend: 0 a window
+    (PartitionBy, descended), 1 a Union, 2 a CastToVarchar, 3 an as-of join
+    (none of the three descended)."""
+    if kind == 0:
+        var n: List[String] = ["a", "b", "c"]
+        var exprs = List[PartitionExpr]()
+        exprs.append(PartitionExpr.row_number())
+        var desc = List[Bool]()
+        desc.append(True)
+        return LogicalPlan.partition_by(
+            _l1("a"), _l1("b"), desc^, exprs^, _two_way_join(True)
+        )
+    if kind == 1:
+        var a = _two_way_join(True)
+        var schema = a.output_schema.copy()
+        var kids = List[OwnedPointer[LogicalPlan]]()
+        kids.append(OwnedPointer(a^))
+        kids.append(OwnedPointer(_two_way_join(True)))
+        return LogicalPlan.union(kids^, schema^)
+    if kind == 2:
+        return LogicalPlan.cast_to_varchar(_two_way_join(False))
+    return LogicalPlan.asof_join(
+        _two_way_join(True), _two_way_join(False), List[String](),
+        List[String](), String("s_k"), String("s_k"), ASOF_BACKWARD,
+        AsofTolerance.none(),
+    )
+
+
+def test_every_join_is_decided_on_the_corpus() raises:
+    """After `optimize`, no join in any corpus plan carries
+    `JOIN_BUILD_SIDE_UNSET`, and the corpus holds joins to check (at least
+    one per join plan: 1, 2, 4, 5, 6, 9, 12, 13).
+
+    Defects caught: `select_join_build_side` dropped from the driver or
+    gated so that it skips a plan; and a pass after it that rebuilds a join
+    without carrying the field (`optimize_window_rewrite` rebuilt every join
+    it recursed through with none, on any plan holding a Project)."""
+    var joins = 0
+    for i in range(CORPUS_SIZE):
+        var out = _run(_corpus(i), OptimizerConfig())
+        joins += _count(out, 0)
+        assert_equal(
+            _count(out, 1), 0, "corpus plan " + String(i) + "\n" + _render(out)
+        )
+    assert_true(joins >= 8, String(joins))
+
+
+def test_a_join_below_any_node_is_decided() raises:
+    """A join below a window, in each branch of a Union, below a
+    CastToVarchar and on both inputs of an as-of join comes out decided.
+
+    Defects caught: the build-side walk with no arm for a node kind (it had
+    none for PartitionBy, PartitionTopN, AsofJoin, Union, CastToVarchar or
+    Exchange), and the rule gated on the driver's `has_join` scan, which does
+    not descend a Union, a CastToVarchar or an as-of join."""
+    for k in range(BELOW_KINDS):
+        var out = _run(_join_below(k), OptimizerConfig())
+        assert_true(_count(out, 0) >= 1, "kind " + String(k) + "\n" + _render(out))
+        assert_equal(_count(out, 1), 0, "kind " + String(k) + "\n" + _render(out))
+
+
+def _projected_join(small_first: Bool) -> LogicalPlan:
+    """A Project over a two-way join: the shape on which
+    `optimize_window_rewrite` (steps 17-20, after the decision) rebuilds the
+    join below it."""
+    var names: List[String] = ["s_k", "b_v"]
+    return LogicalPlan.project(_cols(names^), _two_way_join(small_first))
+
+
+def test_every_recorded_build_side_is_the_rules_own_decision() raises:
+    """On every corpus plan, every below-a-node plan and a Project over a join
+    in each size order, the output of `optimize` renders exactly as
+    `select_join_build_side` run once more on that output: each recorded side
+    is the one the rule decides for the plan the driver returns. Across them
+    both sides occur (`build=left` and `build=right` each render at least
+    once), so a check that holds only for one side cannot pass.
+
+    Defects caught: a pass after the decision that rebuilds a join with a
+    constant side or `adaptive_allowed` (an `optimize_window_rewrite` Join
+    arm writing LEFT, or `adaptive_allowed = True`, on every join it
+    recursed through), and a pass after it that changes a join's inputs
+    without re-deciding."""
+    var lefts = 0
+    var rights = 0
+    for i in range(CORPUS_SIZE + BELOW_KINDS + 2):
+        var p: LogicalPlan
+        if i < CORPUS_SIZE:
+            p = _corpus(i)
+        elif i < CORPUS_SIZE + BELOW_KINDS:
+            p = _join_below(i - CORPUS_SIZE)
+        else:
+            p = _projected_join(i == CORPUS_SIZE + BELOW_KINDS)
+        var out = _run(p^, OptimizerConfig())
+        var got = _render(out)
+        var again = _render(select_join_build_side(out.copy()))
+        assert_equal(got, again, "plan " + String(i))
+        if "build=left" in got:
+            lefts += 1
+        if "build=right" in got:
+            rights += 1
+        assert_true("adaptive" not in got, "plan " + String(i) + "\n" + got)
+    assert_true(lefts >= 1, "no plan built left")
+    assert_true(rights >= 1, "no plan built right")
+
+
+def test_an_unbounded_scan_stays_unbounded() raises:
+    """Every scan of each corpus plan with no subquery (all but 7, 8, 9,
+    whose inner scans are inside an expression) is marked UNBOUNDED; after
+    `optimize` no scan is BOUNDED, and there are scans to check.
+
+    Defects caught: a pass that rebuilds a scan without carrying the mark.
+    Filter pushdown into a scan (corpus plan 11) and projection pushdown
+    (plan 4) each rebuild the scan through `scan_from_source`, which defaults
+    the mark to BOUNDED: a streaming plan would come out a batch plan."""
+    var scans = 0
+    for i in range(CORPUS_SIZE):
+        if i == 7 or i == 8 or i == 9:
+            continue
+        var p = _corpus(i)
+        _mark_unbounded(p)
+        var before = _count(p, 2)
+        assert_equal(_count(p, 3), 0, "corpus plan " + String(i) + " not marked")
+        var out = _run(p^, OptimizerConfig())
+        scans += _count(out, 2)
+        assert_equal(
+            _count(out, 3), 0, "corpus plan " + String(i) + "\n" + _render(out)
+        )
+        assert_true(before >= 1, String(i))
+    assert_true(scans >= 12, String(scans))
 
 
 def test_the_corpus_reaches_every_gated_pass() raises:

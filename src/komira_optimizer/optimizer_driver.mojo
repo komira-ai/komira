@@ -63,9 +63,10 @@
 #      absorb_expression_into_aggregate, convert_inner_to_semi   [join]
 #   15 materialize_agg_input
 #   16 push_predicates_down, eliminate_cross_join, push_semi_reducers_down
-#      (config.semi_pushdown), reorder_joins_with_dp, select_join_build_side,
+#      (config.semi_pushdown), reorder_joins_with_dp,
 #      restore_join_reorder_output_columns, eliminate_identity_projects
 #                                                 [join]
+#      select_join_build_side                     (always)
 #   17 push_limit_down, fuse_sort_limit (sort above limit only)  [limit]
 #   18 optimize_window_rewrite      [PartitionBy or Project in the current plan]
 #   19 fuse_partition_topn          [PartitionBy in the current plan]
@@ -361,27 +362,32 @@ def _run_pass_order(
     # `convert_inner_to_semi` (whose placement it corrects) and BEFORE the
     # reorder: on a SEMI over a chain of INNER joins it can decline on the
     # chain as written where, after the reorder, it would push the SEMI into
-    # the reordered chain. Reordering and
-    # build-side selection exchange join operands, which permutes the output
-    # columns; the output order is the query's, so it is captured before both
-    # and restored after both.
+    # the reordered chain. Reordering exchanges join operands, which permutes
+    # the output columns; the output order is the query's, so it is captured
+    # before the reorder and restored after it.
     if has_join:
         plan = push_predicates_down(plan^)
         plan = eliminate_cross_join(plan^)
         plan = push_semi_reducers_down(plan^, config)
         var pre_reorder_out = join_reorder_output_names(plan)
         plan = reorder_joins_with_dp(plan^)
-        plan = select_join_build_side(plan^)
         plan = restore_join_reorder_output_columns(plan^, pre_reorder_out^)
-        # The reorder and build-side selection can swap the same join back and
-        # forth (smaller relation first, then smaller relation on the build
-        # side). A Project already above that join is then an identity over
-        # the build-side rule's own order-restoring Project, and step 13 has
-        # already run. Removing it here keeps `optimize` idempotent.
+        # A Project already above a reordered join can be an identity over the
+        # order-restoring Project, and step 13 has already run, so identity
+        # Projects are removed again here. (On the corpus of
+        # test_optimizer_driver_corpus, `optimize` stays idempotent without
+        # this call since the build-side rule stopped exchanging operands.)
         plan = eliminate_identity_projects(plan^)
 
-    # 17. Limits: push down, then Sort over Limit becomes TopN. After step 16,
-    # so a Limit goes below the Project that restores the join's column order.
+    # Build side: recorded on every join, in `JoinData.build_side`; no operand
+    # moves (docs/design/optimized_plan.md §5.1, §5.2). AFTER the reorder,
+    # which builds new join nodes with no decision on them. NOT GATED on
+    # `has_join`: that scan does not descend a Union, an as-of join or a
+    # CastToVarchar, and a join below one of them must be decided too. Every
+    # pass after this one carries the field when it rebuilds a join.
+    plan = select_join_build_side(plan^)
+
+    # 17. Limits: push down, then Sort over Limit becomes TopN.
     if has_limit:
         plan = push_limit_down(plan^)
         if _plan_has_sort_above_limit(plan):
