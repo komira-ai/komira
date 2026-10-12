@@ -57,8 +57,9 @@ Read through a transport; a non-200 answer becomes a `fetch_error` that names
 the status and never the body:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true, assert_false -->
-```mojo
+```mojo module
 from kci_logs import RunLogResponse, RunLogTransport, fetch_run_log_tail
+
 
 struct FixedAnswer(RunLogTransport, Movable, Deinitable):
     var status: Int
@@ -71,21 +72,23 @@ struct FixedAnswer(RunLogTransport, Movable, Deinitable):
     def get(mut self, url: String) raises -> RunLogResponse:
         return RunLogResponse.of(self.status, self.body)
 
-var good = FixedAnswer(
-    200,
-    '{"run_id":"r1","lines":[{"seq":1,"ts":5,"level":"info","step":"build",'
-    + '"message":"compiled"}],"next_cursor":1,"done":true}',
-)
-var tail = fetch_run_log_tail[FixedAnswer](good, "https://runs.example", "r1")
-assert_true(tail.ok())
-assert_equal(tail.records[0].message, "compiled")
-assert_equal(tail.pages, 1)
 
-var denied = FixedAnswer(403, '{"access_token":"leak"}')
-var failed = fetch_run_log_tail[FixedAnswer](denied, "https://runs.example", "r1")
-assert_false(failed.ok())
-assert_true("HTTP 403" in failed.fetch_error)
-assert_false("leak" in failed.fetch_error)
+def main() raises:
+    var good = FixedAnswer(
+        200,
+        '{"run_id":"r1","lines":[{"seq":1,"ts":5,"level":"info","step":"build",'
+        + '"message":"compiled"}],"next_cursor":1,"done":true}',
+    )
+    var tail = fetch_run_log_tail[FixedAnswer](good, "https://runs.example", "r1")
+    assert_true(tail.ok())
+    assert_equal(tail.records[0].message, "compiled")
+    assert_equal(tail.pages, 1)
+
+    var denied = FixedAnswer(403, '{"access_token":"leak"}')
+    var failed = fetch_run_log_tail[FixedAnswer](denied, "https://runs.example", "r1")
+    assert_false(failed.ok())
+    assert_true("HTTP 403" in failed.fetch_error)
+    assert_false("leak" in failed.fetch_error)
 ```
 
 Derive the CloudWatch Logs stream an ECS task writes to; a missing part is a

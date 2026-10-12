@@ -12,7 +12,9 @@
 # on dense graphs the same csg-cmp pair is emitted many times (a clique of
 # n relations: 40, 236, 1,541, 11,327, 93,528, 860,736 emits for n = 4..9,
 # against the canonical (3^n - 2^(n+1) + 1) / 2 = 25..9,330). Plans stay
-# optimal (the DP table keeps the cheaper entry); the cost is time. The
+# optimal (the DP table keeps the cheaper entry, and of two equal-cost
+# entries the one `dp_pair_beats` orders first, whatever the emission order);
+# the cost is time. The
 # relation bound (more than 12 relations fall back to greedy) and the
 # iteration cap keep it bounded; a 9-relation clique already exceeds the
 # cap and falls back to greedy. komira-ai/komira#1176 tracks the fix.

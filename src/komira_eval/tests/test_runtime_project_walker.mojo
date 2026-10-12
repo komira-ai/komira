@@ -584,11 +584,11 @@ def test_i64_div_col_lit_truncates() raises:
         )
 
 
-def test_i64_div_by_zero_raises() raises:
-    """`project(col(c0) // lit(0))` over identity sel MUST raise on the FIRST row.
+def test_i64_div_by_zero_is_null() raises:
+    """`project(col(c0) // lit(0))` over identity sel raises nothing.
 
-    Int division by zero is a hard error (DuckDB
-    integer-divide convention).
+    An integer zero divisor answers NULL (query_semantics.md §5.3); this
+    value walker holds the placeholder 0 for it.
     """
     var pool = List[RuntimeExpr]()
     pool.append(make_col(0))               # 0
@@ -601,12 +601,10 @@ def test_i64_div_by_zero_raises() raises:
     var sel = _make_identity_sel(4)
 
     var out = List[Scalar[DType.int64]]()
-    var raised = False
-    try:
-        exec_.eval_to_list_i64_from_view(view, 2, sel, out)
-    except e:
-        raised = True
-    assert_true(raised, "i64-div-by-zero: expected raise")
+    exec_.eval_to_list_i64_from_view(view, 2, sel, out)
+    assert_equal(len(out), 4, "i64-div-by-zero: 4 outputs (no raise)")
+    for i in range(4):
+        assert_equal(out[i], Scalar[DType.int64](0), "i64-div-by-zero: placeholder")
 
 
 # =============================================================================
@@ -908,11 +906,11 @@ def test_i32_mul_col_col() raises:
         )
 
 
-def test_i32_div_by_zero_raises() raises:
-    """`project(col(c0) // lit(0))` over identity sel MUST raise.
+def test_i32_div_by_zero_is_null() raises:
+    """`project(col(c0) // lit(0))` over identity sel raises nothing.
 
-    Int32 division by zero is a hard error, mirroring Int64 + DuckDB
-    integer-divide convention.
+    An integer zero divisor answers NULL (query_semantics.md §5.3), as for
+    Int64; this value walker holds the placeholder 0 for it.
     """
     var pool = List[RuntimeExpr]()
     pool.append(make_col(0))               # 0
@@ -925,12 +923,10 @@ def test_i32_div_by_zero_raises() raises:
     var sel = _make_identity_sel(4)
 
     var out = List[Scalar[DType.int32]]()
-    var raised = False
-    try:
-        exec_.eval_to_list_i32_from_view(view, 2, sel, out)
-    except e:
-        raised = True
-    assert_true(raised, "i32-div-by-zero: expected raise")
+    exec_.eval_to_list_i32_from_view(view, 2, sel, out)
+    assert_equal(len(out), 4, "i32-div-by-zero: 4 outputs (no raise)")
+    for i in range(4):
+        assert_equal(out[i], Scalar[DType.int32](0), "i32-div-by-zero: placeholder")
 
 
 # =============================================================================
@@ -1392,7 +1388,7 @@ def main() raises:
     suite.test[test_i64_sub_col_lit]()
     suite.test[test_i64_mul_col_col]()
     suite.test[test_i64_div_col_lit_truncates]()
-    suite.test[test_i64_div_by_zero_raises]()
+    suite.test[test_i64_div_by_zero_is_null]()
 
     # F64 arithmetic walker
     suite.test[test_f64_add_lit_lit]()
@@ -1411,7 +1407,7 @@ def main() raises:
     suite.test[test_i32_add_lit_lit]()
     suite.test[test_i32_sub_col_lit]()
     suite.test[test_i32_mul_col_col]()
-    suite.test[test_i32_div_by_zero_raises]()
+    suite.test[test_i32_div_by_zero_is_null]()
 
     # String walker
     suite.test[test_string_passthrough_identity_sel]()
