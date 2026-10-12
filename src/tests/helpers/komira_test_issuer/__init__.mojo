@@ -12,6 +12,10 @@ Test-only (no conda package): a library names it in `test_deps`, never in
   - user_token.mojo : `user_token_claims`, the claims of a user access token.
   - under_test.mojo : `IssuerUnderTest`, the trait a scenario drives, and
                       `IssuerProfile`, what a relying party configures.
+  - token_endpoint.mojo : `ClientRegistry`, the clients and the checks of
+                      the issuer's `client_credentials` token endpoint.
+  - transport.mojo  : `IssuerTokenTransport`, that endpoint as a komira_oauth
+                      `TokenEndpointTransport`.
   - scenarios.mojo  : `issuer_scenarios()`, `run_issuer_scenario[I]`,
                       `run_issuer_scenarios[I]`, `verify_as_relying_party`
                       and `profile_of`.
@@ -23,6 +27,8 @@ from .keys import derived_key
 from .user_token import user_token_claims
 from .under_test import IssuerProfile, IssuerUnderTest
 from .issuer import TestIssuer
+from .token_endpoint import ClientRegistry, EndpointDecision
+from .transport import IssuerTokenTransport
 from .scenarios import (
     SCENARIO_CLAIMS,
     SCENARIO_IN_FLIGHT,

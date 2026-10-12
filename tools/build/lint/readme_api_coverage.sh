@@ -44,10 +44,10 @@
 #   the report names it and counts nothing for it.
 #
 #   Used. The README is <root>/<package>/README.md, read by the readme tool's
-#   `generate`, the program the welded `[tests][readme]` test runs, so hidden
-#   lines are read and prose and non-`mojo` fences are not. The generated
-#   harness (the header, `def _example_<n>() raises:`, and `main`) is
-#   dropped; comments and string literals are blanked; `from`/`import` lines
+#   `generate`, the programs the welded `[tests][readme]` test runs (one per
+#   example), so hidden lines are read and prose and non-`mojo` fences are
+#   not. The generated lines (the header comment, a ```mojo example's
+#   `def main() raises:`) are dropped, and the runner is not read; comments and string literals are blanked; `from`/`import` lines
 #   are not uses (an imported name must also appear in code), nor is the
 #   name a `def`, `fn`, `struct`, `trait`, `comptime`, `alias` or `var`
 #   declares. A name is used when its identifier appears there as a token;
@@ -209,9 +209,11 @@ FNR == 1 { instr = 0; cur = ""; hdr = 0 }
     }
 }'
 
-# The uses in a generated README program's copied code, one per line:
+# The uses in the generated README programs' copied code, one per line:
 # `n<TAB>id` for an identifier, and also `a<TAB>id` when it is an attribute
-# (`.id`). The harness is dropped, comments and string literals are blanked,
+# (`.id`). `def main() raises:` at column 0 is dropped (a ```mojo
+# example's generated line; a ```mojo module example's own `main` declares
+# a name, which is no use either), comments and string literals are blanked,
 # `from`/`import` lines (and a parenthesised import's continuation) are not
 # uses, and neither is the name a `def`, `fn`, `struct`, `trait`, `comptime`,
 # `alias` or `var` declares.
@@ -237,12 +239,10 @@ function scan(s,   i, c, out, d) {
     return out
 }
 function depth(s,   o, c) { o = gsub(/\(/, "(", s); c = gsub(/\)/, ")", s); return o - c }
-{ l[NR] = $0; if ($0 == "def main() raises:") m = NR }
+{ l[NR] = $0 }
 END {
-    if (!m) m = NR + 1
-    for (i = 1; i < m; i++) {
-        if (i <= 2 && l[i] ~ /^# /) continue
-        if (l[i] ~ /^def _example_[0-9]+\(\) raises:$/) continue
+    for (i = 1; i <= NR; i++) {
+        if (l[i] == "def main() raises:") continue
         instr = (q != "")
         s = scan(l[i])
         if (imp > 0) { imp += depth(s); continue }
@@ -314,16 +314,17 @@ while read -r p; do
     if [ -f "$dir/README.md" ]; then
         rc=0
         "$TOOL" generate --readme "$dir/README.md" --display "$dir/README.md" --package "$p" \
-            --links allow --out "$T/gen/$p.mojo" --count "$T/gen/$p.count" > "$T/gen/$p.log" 2>&1 || rc=$?
+            --links allow --out-dir "$T/gen/$p" --examples "$T/gen/$p.examples" > "$T/gen/$p.log" 2>&1 || rc=$?
         if [ "$rc" -ne 0 ]; then
             readme=refused
             printf '%s: the readme tool refused %s/README.md (exit %s): %s\n' "$p" "$dir" "$rc" \
                 "$(head -3 "$T/gen/$p.log" | tr '\n' ' ' | sed 's/ *$//')" >> "$T/notes"
-        elif [ "$(tr -d ' \n' < "$T/gen/$p.count")" = 0 ]; then
+        elif [ ! -s "$T/gen/$p.examples" ]; then
             readme=no-example
         else
-            readme="examples:$(tr -d ' \n' < "$T/gen/$p.count")"
-            awk "$IDS_AWK" "$T/gen/$p.mojo" | sort -u | awk -v p="$p" '{ print p "\t" $0 }' >> "$T/ids"
+            readme="examples:$(grep -c . "$T/gen/$p.examples")"
+            sed "s|.*|$T/gen/$p/readme_${p}_&.mojo|" "$T/gen/$p.examples" | xargs awk "$IDS_AWK" |
+                sort -u | awk -v p="$p" '{ print p "\t" $0 }' >> "$T/ids"
         fi
     fi
     printf '%s\t%s\t%s\n' "$p" "$init" "$readme" >> "$T/pkgs"

@@ -1,59 +1,101 @@
 # The path tools of a kcov coverage run (README.md): static executables built
 # with the pinned zig, each gated by its cases, which run as build actions.
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
-load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "cov_link_dir", "cov_run_dir", "kcov_tool", "kcov_tool_cases")
 
 # debug_relocate: a directory path in a file overwritten by a placeholder of
-# the same length.
-zig_exe(
-    name = "debug_relocate_exe",
+# the same length. Its cases (debug_relocate_test.zig, which imports the tool)
+# run as a build action, `zig test`; the executable is built behind them, so
+# it does not exist unless they pass.
+zig_test(
+    name = "debug_relocate_unit",
     exec_compatible_with = LINUX_X86_64,
-    src = "debug_relocate.zig",
+    imports = ["debug_relocate.zig"],
+    src = "debug_relocate_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
 )
 
-kcov_tool_cases(
-    name = "debug_relocate_cases",
+zig_exe(
+    name = "debug_relocate_exe",
     exec_compatible_with = LINUX_X86_64,
-    script = "debug_relocate_cases.sh",
-    tool = ":debug_relocate_exe",
+    src = "debug_relocate.zig",
+    unit_tests = [":debug_relocate_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# The shipped executable run as a process (debug_relocate_exe_test.zig): exit
+# 0, 1 and 2, the counts on stdout and the messages on stderr, and a stdout
+# whose writes fail. Its path reaches the test in the environment
+# (`env_tools`, DEBUG_RELOCATE). It runs the executable, so it cannot be an
+# input of it; it is a validation of the public target instead.
+zig_test(
+    name = "debug_relocate_exe_test",
+    exec_compatible_with = LINUX_X86_64,
+    env_tools = {"DEBUG_RELOCATE": ":debug_relocate_exe"},
+    src = "debug_relocate_exe_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 kcov_tool(
     name = "debug_relocate",
-    cases = [":debug_relocate_cases"],
+    cases = [":debug_relocate_exe_test"],
     exec_compatible_with = LINUX_X86_64,
     exe = ":debug_relocate_exe",
     visibility = ["PUBLIC"],
 )
 
 # cov_normalize: a kcov Cobertura report rewritten to repository paths, with
-# bytes that do not depend on the run.
-zig_exe(
-    name = "cov_normalize_exe",
+# bytes that do not depend on the run. Its cases (cov_normalize_test.zig,
+# which imports the tool) run as a build action, `zig test`; the executable is
+# built behind them, so it does not exist unless they pass.
+zig_test(
+    name = "cov_normalize_unit",
     exec_compatible_with = LINUX_X86_64,
-    src = "cov_normalize.zig",
+    imports = [
+        "cov_normalize.zig",
+        "fixtures/kcov_full_paths.golden.xml",
+        "fixtures/kcov_full_paths.xml",
+    ],
+    src = "cov_normalize_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
 )
 
-kcov_tool_cases(
-    name = "cov_normalize_cases",
+zig_exe(
+    name = "cov_normalize_exe",
     exec_compatible_with = LINUX_X86_64,
-    data = [
+    src = "cov_normalize.zig",
+    unit_tests = [":cov_normalize_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# The shipped executable run as a process (cov_normalize_exe_test.zig): exit
+# 0, 1 and 2 with their messages on stderr, and a write cut short. Its path
+# reaches the test in the environment (`env_tools`, COV_NORMALIZE). It runs
+# the executable, so it cannot be an input of it; it is a validation of the
+# public target instead.
+zig_test(
+    name = "cov_normalize_exe_test",
+    exec_compatible_with = LINUX_X86_64,
+    env_tools = {"COV_NORMALIZE": ":cov_normalize_exe"},
+    imports = [
         "fixtures/kcov_full_paths.golden.xml",
         "fixtures/kcov_full_paths.xml",
     ],
-    script = "cov_normalize_cases.sh",
-    tool = ":cov_normalize_exe",
+    src = "cov_normalize_exe_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 kcov_tool(
     name = "cov_normalize",
-    cases = [":cov_normalize_cases"],
+    cases = [":cov_normalize_exe_test"],
     exec_compatible_with = LINUX_X86_64,
     exe = ":cov_normalize_exe",
     visibility = ["PUBLIC"],
@@ -120,9 +162,7 @@ export_file(
 shell_lint(
     name = "shell_lint",
     srcs = [
-        "cov_normalize_cases.sh",
         "cov_run.sh",
         "cov_zig_cases.sh",
-        "debug_relocate_cases.sh",
     ],
 )
