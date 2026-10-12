@@ -11,9 +11,12 @@
 #     Catches `>=` for `>`, a smaller budget, and a size check after parsing.
 #   test_format_version_not_accepted: an absent version (0) and version 2 are
 #     refused, OPTIMIZED_PLAN_VERSION_UNSUPPORTED. Catches `>=` membership.
-#   test_understated_fields: a field version 1 does not include, in each of
-#     the seven header messages (held, reserved, never declared), is refused
-#     as understated. Catches a walk that skips unknown fields, proto3-style.
+#   test_understated_fields: the whole version-1 field table. In each of the
+#     seven header messages, every number from 1 to one above the highest
+#     declared or held number that version 1 does not include (held,
+#     reserved, never declared) is refused as understated, naming it.
+#     Catches a walk that skips unknown fields, proto3-style, and any one
+#     held or reserved row made known.
 #   test_understated_enum_values: `write_target.format` 4 and `codec` 6 are
 #     refused, 3 and 5 accepted. Catches an off-by-one or unbounded enum.
 #   test_malformed_framing: truncated varints, lengths and fixed-width values,
@@ -22,9 +25,16 @@
 #   test_malformed_fields: a known field under the wrong wire type, a singular
 #     field twice (top level and nested), a uint32 above 2^32-1, a bool of 2.
 #     Catches the parser differentials proto3 resolves silently.
-#   test_malformed_utf8: every ill-formed UTF-8 class in a `string` field is
-#     refused, every well-formed lead-byte class accepted, and a `bytes`
-#     field is never checked as UTF-8.
+#   test_malformed_utf8: a boundary sweep of the Unicode well-formed table:
+#     each lead-byte range at both ends, each second-byte range of E0, ED,
+#     F0 and F4 just inside (accepted) and just outside (refused), a
+#     continuation byte of 7F or C0 in the second, third and fourth place,
+#     and a 2-, 3- and 4-byte lead cut short at the end of the string. Then
+#     one ill-formed value in every `string` field of the header (kind,
+#     path, the second data_scopes entry, runtime, runtime_abi), each
+#     refused naming its field, and a `bytes` field never checked as UTF-8.
+#     Catches a lead range one byte too wide or too narrow, a dropped range,
+#     and a field whose check was dropped.
 #   test_body_never_parsed: a body that is not protobuf decodes untouched.
 #     Catches a walk that descends into `body`.
 # =============================================================================
@@ -278,19 +288,54 @@ def test_format_version_not_accepted() raises:
     _understated(two_more^, "format_version 2 is not in", "version 2 with field 9")
 
 
+def _in_message(m: String, extra: List[UInt8]) -> List[UInt8]:
+    """A valid header with `extra` appended to header message `m`."""
+    if m == "OptimizedPlan":
+        return _with_extra(extra)
+    if m == "ProducerStamp":
+        return _with_stamp(_stamp(extra))
+    if m == "DeclaredNeeds":
+        return _with_needs(_needs(extra, _runtime(_e())))
+    if m == "RuntimeNeed":
+        return _with_needs(_needs(_e(), _runtime(extra)))
+    if m == "WireWriteTarget":
+        return _with_write(_write(extra, 1, 3))
+    if m == "PlanAdvice":
+        return _with_advice(_advice(extra, _stats(_e())))
+    return _with_advice(_advice(_e(), _stats(extra)))
+
+
 def test_understated_fields() raises:
-    _understated(_with_extra(_one(9, 0)), "OptimizedPlan this field (field 9)", "OptimizedPlan field 9")
+    # Every number version 1 does not include, from 1 to one above the
+    # highest declared or held number of each message (optimized_plan.proto,
+    # plan.proto for WireWriteTarget).
+    var messages: List[String] = [
+        "OptimizedPlan",  # 1-8 declared
+        "ProducerStamp",  # 1, 2, 3, 5 declared; 4 reserved
+        "DeclaredNeeds",  # 1, 2, 4, 10 held; 3, 6, 7 reserved; 5, 8, 9 declared
+        "RuntimeNeed",  # 1, 2 declared
+        "WireWriteTarget",  # 1, 2, 3 declared
+        "PlanAdvice",  # 1, 3, 4 held; 2 declared
+        "ScanStats",  # 3, 4 held; 1, 2 declared
+    ]
+    var numbers: List[List[Int]] = [
+        [9],
+        [4, 6],
+        [1, 2, 3, 4, 6, 7, 10, 11],
+        [3],
+        [4],
+        [1, 3, 4, 5],
+        [3, 4, 5],
+    ]
+    for i in range(len(messages)):
+        for j in range(len(numbers[i])):
+            var n = numbers[i][j]
+            var what = messages[i] + " field " + String(n)
+            var needle = messages[i] + " this field (field " + String(n) + ")"
+            _understated(_in_message(messages[i], _one(n, 0)), needle, what + " as a varint")
+            _understated(_in_message(messages[i], _one(n, 2)), needle, what + " length-delimited")
     _understated(_with_extra(_one(10, 1)), "OptimizedPlan this field (field 10)", "a fixed64 field")
     _understated(_with_extra(_one(11, 5)), "OptimizedPlan this field (field 11)", "a fixed32 field")
-    _understated(_with_stamp(_stamp(_one(4, 0))), "ProducerStamp this field (field 4)", "reserved ProducerStamp 4")
-    _understated(_with_needs(_needs(_one(1, 2), _runtime(_e()))), "DeclaredNeeds this field (field 1)", "held resources")
-    _understated(_with_needs(_needs(_one(2, 2), _runtime(_e()))), "DeclaredNeeds this field (field 2)", "held udfs")
-    _understated(_with_needs(_needs(_one(3, 2), _runtime(_e()))), "DeclaredNeeds this field (field 3)", "reserved images")
-    _understated(_with_needs(_needs(_one(10, 2), _runtime(_e()))), "DeclaredNeeds this field (field 10)", "held scopes")
-    _understated(_with_needs(_needs(_e(), _runtime(_one(3, 2)))), "RuntimeNeed this field (field 3)", "RuntimeNeed 3")
-    _understated(_with_write(_write(_one(4, 0), 1, 3)), "WireWriteTarget this field (field 4)", "WireWriteTarget 4")
-    _understated(_with_advice(_advice(_one(1, 2), _stats(_e()))), "PlanAdvice this field (field 1)", "held estimates")
-    _understated(_with_advice(_advice(_e(), _stats(_one(3, 0)))), "ScanStats this field (field 3)", "held source")
 
 
 def test_understated_enum_values() raises:
@@ -370,31 +415,76 @@ def _kind(raw: List[UInt8]) -> List[UInt8]:
 def test_malformed_utf8() raises:
     var bad: List[List[UInt8]] = [
         [UInt8(0x80)],  # a continuation byte as a lead
+        [UInt8(0xBF)],  # the last continuation byte as a lead
         [UInt8(0xC0), 0x80],  # overlong
+        [UInt8(0xC1), 0xBF],  # overlong, the last 2-byte lead below C2
         [UInt8(0xE0), 0x80, 0x80],  # overlong 3-byte
-        [UInt8(0xED), 0xA0, 0x80],  # an encoded surrogate
+        [UInt8(0xE0), 0x9F, 0xBF],  # overlong 3-byte, just below E0 A0
+        [UInt8(0xED), 0xA0, 0x80],  # an encoded surrogate, just above ED 9F
         [UInt8(0xF0), 0x80, 0x80, 0x80],  # overlong 4-byte
-        [UInt8(0xF4), 0x90, 0x80, 0x80],  # above U+10FFFF
+        [UInt8(0xF0), 0x8F, 0xBF, 0xBF],  # overlong 4-byte, just below F0 90
+        [UInt8(0xF4), 0x90, 0x80, 0x80],  # above U+10FFFF, just above F4 8F
         [UInt8(0xF5), 0x80, 0x80, 0x80],  # no such lead byte
-        [UInt8(0xE2), 0x82],  # cut short
+        [UInt8(0xFF)],  # no such lead byte
+        [UInt8(0xC3), 0x7F],  # a second byte below 80
+        [UInt8(0xC3), 0xC0],  # a second byte above BF
         [UInt8(0xE2), 0x28, 0xA1],  # a bad second byte
-        [UInt8(0xE2), 0x82, 0x28],  # a bad third byte
+        [UInt8(0xE1), 0x80, 0x7F],  # a third byte below 80
+        [UInt8(0xE2), 0x82, 0xC0],  # a third byte above BF
+        [UInt8(0xF1), 0x80, 0x80, 0x7F],  # a fourth byte below 80
+        [UInt8(0xF1), 0x80, 0x80, 0xC0],  # a fourth byte above BF
+        [UInt8(0x61), 0xC3],  # a 2-byte lead at the end
+        [UInt8(0xE2), 0x82],  # a 3-byte lead cut short
+        [UInt8(0x61), 0xF0, 0x9F, 0x98],  # a 4-byte lead cut short at the end
     ]
     for i in range(len(bad)):
         _malformed(_kind(bad[i]), "ProducerStamp.kind is not well-formed UTF-8", "ill-formed UTF-8 #" + String(i))
-    var good: List[UInt8] = [
-        0x61,
-        0xC3, 0xA9,  # U+00E9
-        0xE0, 0xA0, 0x80,  # U+0800
-        0xE2, 0x82, 0xAC,  # U+20AC
-        0xED, 0x9F, 0xBF,  # U+D7FF
-        0xEF, 0xBF, 0xBD,  # U+FFFD
-        0xF0, 0x9F, 0x98, 0x80,  # U+1F600
-        0xF1, 0x80, 0x80, 0x80,  # U+40000
-        0xF4, 0x8F, 0xBF, 0xBF,  # U+10FFFF
+    var good: List[List[UInt8]] = [
+        [UInt8(0x61), 0x01, 0x7F],  # ASCII up to 7F
+        [UInt8(0xC2), 0x80],  # U+0080, the first 2-byte lead
+        [UInt8(0xC3), 0xA9],  # U+00E9
+        [UInt8(0xDF), 0xBF],  # U+07FF, the last 2-byte lead
+        [UInt8(0xE0), 0xA0, 0x80],  # U+0800
+        [UInt8(0xE0), 0xBF, 0xBF],  # U+0FFF
+        [UInt8(0xE1), 0x80, 0x80],  # U+1000, the first of E1..EC
+        [UInt8(0xE2), 0x82, 0xAC],  # U+20AC
+        [UInt8(0xEC), 0xBF, 0xBF],  # U+CFFF, the last of E1..EC
+        [UInt8(0xED), 0x80, 0x80],  # U+D000
+        [UInt8(0xED), 0x9F, 0xBF],  # U+D7FF
+        [UInt8(0xEE), 0x80, 0x80],  # U+E000
+        [UInt8(0xEF), 0xBF, 0xBD],  # U+FFFD
+        [UInt8(0xF0), 0x90, 0x80, 0x80],  # U+10000
+        [UInt8(0xF0), 0x9F, 0x98, 0x80],  # U+1F600
+        [UInt8(0xF1), 0x80, 0x80, 0x80],  # U+40000, the first of F1..F3
+        [UInt8(0xF3), 0xBF, 0xBF, 0xBF],  # U+FFFFF, the last of F1..F3
+        [UInt8(0xF4), 0x80, 0x80, 0x80],  # U+100000
+        [UInt8(0xF4), 0x8F, 0xBF, 0xBF],  # U+10FFFF
     ]
-    var h = decode_optimized_plan_header(_kind(good))
-    assert_equal(h.producer.value().kind.byte_length(), len(good), "well-formed UTF-8 of every lead-byte class")
+    for i in range(len(good)):
+        var h = decode_optimized_plan_header(_kind(good[i]))
+        assert_equal(h.producer.value().kind.byte_length(), len(good[i]), "well-formed UTF-8 #" + String(i))
+
+    # Every `string` field of the header is checked, not only `kind`.
+    var ill: List[UInt8] = [0xC0, 0x80]
+    var path = List[UInt8]()
+    _lf(path, 1, ill)
+    _vf(path, 2, 1)
+    _vf(path, 3, 3)
+    _malformed(_with_write(path), "WireWriteTarget.path is not well-formed UTF-8", "path")
+    var scopes = List[UInt8]()
+    _sf(scopes, 5, "orders")
+    _lf(scopes, 5, ill)
+    _lf(scopes, 9, _runtime(_e()))
+    _malformed(_with_needs(scopes), "DeclaredNeeds.data_scopes is not well-formed UTF-8", "the second data_scopes entry")
+    var runtime = List[UInt8]()
+    _lf(runtime, 1, ill)
+    _sf(runtime, 2, "cp312")
+    _malformed(_with_needs(_needs(_e(), runtime)), "RuntimeNeed.runtime is not well-formed UTF-8", "runtime")
+    var abi = List[UInt8]()
+    _sf(abi, 1, "komira/python")
+    _lf(abi, 2, ill)
+    _malformed(_with_needs(_needs(_e(), abi)), "RuntimeNeed.runtime_abi is not well-formed UTF-8", "runtime_abi")
+
     # `bytes` fields carry any bytes.
     var raw = List[UInt8]()
     _lf(raw, 1, [UInt8(0xFF), 0xC0, 0x80])

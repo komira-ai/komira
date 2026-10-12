@@ -1,8 +1,8 @@
 # =============================================================================
 # header_environment.mojo: the pair (plan, environment image), checks 1-3 of
-# optimized_plan_udfs.md §10.11, which need only the image manifest's bytes,
-# so a scheduler never pulls a layer (docs/design/optimized_plan.md §7.2
-# step 3).
+# optimized_plan_udf_runtime.md §10.11, which need only the image manifest's
+# bytes, so a scheduler never pulls a layer (docs/design/optimized_plan.md
+# §7.2 step 3).
 # =============================================================================
 #
 # The environment travels beside the plan, never inside it, and is not in
@@ -81,7 +81,9 @@ struct BaseRelease(Copyable, Movable):
 
 
 def _unreleased(why: String) -> Error:
-    return Error(OPTIMIZED_ENV_BASE_UNRELEASED + ": " + why + " (optimized_plan_udfs.md §10.11 check 1)")
+    return Error(
+        OPTIMIZED_ENV_BASE_UNRELEASED + ": " + why + " (optimized_plan_udf_runtime.md §10.11 check 1)"
+    )
 
 
 def _is_sha256_digest(s: String) -> Bool:
@@ -173,7 +175,8 @@ def admit_plan_environment(header: OptimizedPlan, env: PlanEnvironment, releases
             + version_set_text(r.contract_versions)
             + "; "
             + oldest
-            + ". Rebuild the environment on a newer base (optimized_plan_udfs.md §10.11 check 2)"
+            + ". Rebuild the environment on a newer base"
+            + " (optimized_plan_udf_runtime.md §10.11 check 2)"
         )
 
     require_header_needs(header)
@@ -194,6 +197,6 @@ def admit_plan_environment(header: OptimizedPlan, env: PlanEnvironment, releases
                 + want.runtime_abi
                 + "`, which the image's base "
                 + r.name
-                + " does not carry (optimized_plan_udfs.md §10.11 check 3)"
+                + " does not carry (optimized_plan_udf_runtime.md §10.11 check 3)"
             )
     return base

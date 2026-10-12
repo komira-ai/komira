@@ -5,8 +5,8 @@
 The `OptimizedPlan` header (`komira_plan_proto`'s `optimized_plan.proto`)
 decoded and encoded with its body left as bytes, and the header library's
 admission checks (`docs/design/optimized_plan.md` §4.1, §4.2, §7.2 steps 1-3;
-`optimized_plan_udfs.md` §10.11 checks 1-3). A scheduler reads fields 1-7
-of a plan through this package and never parses `body`.
+`optimized_plan_udf_runtime.md` §10.11 checks 1-3). A scheduler reads fields
+1-7 of a plan through this package and never parses `body`.
 
 `komira_plan_wire`, the codec of the body, is outside this package's
 dependency closure. The BUCK file says so with `closure_excludes`, and

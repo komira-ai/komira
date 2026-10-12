@@ -2,8 +2,9 @@
 # test_header_environment.mojo
 # =============================================================================
 #
-# The pair (plan, environment image): optimized_plan_udfs.md §10.11 checks
-# 1-3, which need only the manifest bytes, through `admit_plan_environment`.
+# The pair (plan, environment image): optimized_plan_udf_runtime.md §10.11
+# checks 1-3, which need only the manifest bytes, through
+# `admit_plan_environment`.
 # Each manifest is built here and digested with komira_crypto's sha256, so
 # its digest is right unless a test makes it wrong. What each test proves,
 # and the defect it catches:
@@ -24,7 +25,11 @@
 #   test_engine_too_old: OPTIMIZED_ENV_ENGINE_TOO_OLD when the base lacks the
 #     plan's format_version or its contract version, naming the base's sets
 #     and the oldest release that accepts both (not one that accepts only
-#     one), or that none does. Catches `or` for `and`, and `>=` membership.
+#     one), or that none does. With two releases that accept both, then a
+#     newer r3, it names the first in `releases` order. Catches `or` for
+#     `and`, `>=` membership, and a scan that lets the last match win.
+#   Every refusal ends citing its check of optimized_plan_udf_runtime.md
+#     §10.11. Catches a message citing another design file or check.
 #   test_runtime_missing: OPTIMIZED_ENV_RUNTIME_MISSING for a runtime the
 #     base lacks and for a runtime whose ABI tag differs, naming the pair, and
 #     for the second of two needs. Catches a runtime-only comparison and a
@@ -163,7 +168,11 @@ def test_base_unreleased() raises:
     var env = _env(_r1_image())
     var short = env.copy()
     short.image_digest = "sha256:" + _rep("a", 63)
-    _unreleased(short, "is not sha256: and 64 lower-case hex digits", "a 63-digit digest")
+    _unreleased(
+        short,
+        "is not sha256: and 64 lower-case hex digits (optimized_plan_udf_runtime.md §10.11 check 1)",
+        "a 63-digit digest",
+    )
     var long = env.copy()
     long.image_digest = "sha256:" + _rep("a", 65)
     _unreleased(long, "is not sha256: and 64 lower-case hex digits", "a 65-digit digest")
@@ -211,7 +220,7 @@ def test_engine_too_old() raises:
         OPTIMIZED_ENV_ENGINE_TOO_OLD,
         "the plan has format_version 2 and optimizer_contract_version 1; the image's base base-py312 r1 accepts"
         " format_version {1} and optimizer_contract_version {1}; the oldest released base that accepts both is"
-        " base-py312 r2",
+        " base-py312 r2. Rebuild the environment on a newer base (optimized_plan_udf_runtime.md §10.11 check 2)",
         "format_version 2 on r1",
     )
     _refused(
@@ -231,6 +240,21 @@ def test_engine_too_old() raises:
         rs[1].copy(),
     ]
     _refused(_plan(2, 2, _python()), env, three, OPTIMIZED_ENV_ENGINE_TOO_OLD, "accepts both is base-py312 r2", "r1.5 skipped")
+    # Two releases accept both, then a newer r3 that does too: the oldest, the first listed, is named.
+    var oldest_first: List[BaseRelease] = [
+        rs[0].copy(),
+        _release("base-py312 r2", [_layer("1"), _layer("3")], [UInt32(1), 2], [UInt32(1), 2]),
+        _release("base-py312 r2.1", [_layer("1"), _layer("6")], [UInt32(1), 2], [UInt32(1), 2]),
+        _release("base-py312 r3", [_layer("1"), _layer("7")], [UInt32(1), 2, 3], [UInt32(1), 2, 3]),
+    ]
+    _refused(
+        _plan(2, 2, _python()),
+        env,
+        oldest_first,
+        OPTIMIZED_ENV_ENGINE_TOO_OLD,
+        "the oldest released base that accepts both is base-py312 r2. Rebuild",
+        "the first of three that accept both",
+    )
 
 
 def test_runtime_missing() raises:
@@ -241,7 +265,8 @@ def test_runtime_missing() raises:
         env,
         _releases(),
         OPTIMIZED_ENV_RUNTIME_MISSING,
-        "the plan needs runtime `komira/python` with ABI `cp313`, which the image's base base-py312 r1 does not carry",
+        "the plan needs runtime `komira/python` with ABI `cp313`, which the image's base base-py312 r1 does not carry"
+        " (optimized_plan_udf_runtime.md §10.11 check 3)",
         "another ABI tag",
     )
     var second: List[RuntimeNeed] = [RuntimeNeed("komira/python", "cp312"), RuntimeNeed("komira/node", "node22")]

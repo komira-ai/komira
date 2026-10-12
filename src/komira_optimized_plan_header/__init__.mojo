@@ -1,6 +1,6 @@
 """The `OptimizedPlan` header, decoded and encoded without its body, and the
 header library's admission checks (docs/design/optimized_plan.md §4.1, §7.2
-steps 1-3; optimized_plan_udfs.md §10.11 checks 1-3).
+steps 1-3; optimized_plan_udf_runtime.md §10.11 checks 1-3).
 
 A scheduler reads fields 1-7 of an `OptimizedPlan` through this package and
 never parses `body`. Its dependency closure excludes `komira_plan_wire`, and

@@ -2,8 +2,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The `OptimizedPlan` header, decoded and encoded without its body, and the
 # header library's admission checks (docs/design/optimized_plan.md §4.1, §7.2
-# steps 1-3; optimized_plan_udfs.md §10.11 checks 1-3). A scheduler links
-# this package to read fields 1-7 and never parses `body`.
+# steps 1-3; optimized_plan_udf_runtime.md §10.11 checks 1-3). A scheduler
+# links this package to read fields 1-7 and never parses `body`.
 #
 # `closure_excludes` holds the boundary the design states: the plan codec,
 # `komira_plan_wire`, is not in this package's closure, directly or through
