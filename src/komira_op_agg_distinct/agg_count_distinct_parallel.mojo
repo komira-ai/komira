@@ -9,20 +9,23 @@
 # allowed) and INT32 / INT64 / FLOAT64 aggregate inputs.
 #
 # Steps:
-#   1. Encode every string key to dense dict ids numbered in FIRST-SEEN row
+#   1. One STRING key and nothing but COUNT(DISTINCT): try the fused route
+#      (`agg_cd_strkey_fused`), whose dictionary pass is the group-by. It
+#      declines before any parallel work for every other shape.
+#   2. Encode every string key to dense dict ids numbered in FIRST-SEEN row
 #      order (`agg_count_distinct_strenc`, `agg_cd_dictkey_encode`), so a
 #      DICTIONARY key and the plain STRING form of the same rows give the
 #      same groups in the same order.
-#   2. Size each worker's group table from a GROUP bound
+#   3. Size each worker's group table from a GROUP bound
 #      (`agg_cd_group_ht_sizing`) and, when every aggregate is
 #      COUNT(DISTINCT), sample for HEAVY groups (`agg_cd_heavy_split`).
-#   3. Dispatch the OWNER pass, then the AGG pass (`cd_parallel_state`; its
+#   4. Dispatch the OWNER pass, then the AGG pass (`cd_parallel_state`; its
 #      header states the correctness invariant).
-#   4. Merge: the groups are disjoint across workers, so the merge is a
+#   5. Merge: the groups are disjoint across workers, so the merge is a
 #      concatenation into a (worker, gid) index in (worker 0's gid order,
 #      then each later worker's slot order); a heavy group's partials are
 #      folded by FULL key into the first one met.
-#   5. Emit the aggregate columns, then, when a `TOPN(k)` hint is admitted
+#   6. Emit the aggregate columns, then, when a `TOPN(k)` hint is admitted
 #      (`agg_cd_group_topk`), select the k surviving groups, then emit the
 #      group keys of the emitted groups only.
 #
@@ -93,6 +96,7 @@ from komira_op_agg_distinct.agg_cd_heavy_split import (
     cd_worker_scan_note,
 )
 from komira_op_agg_distinct.agg_cd_key_emit import cd_emit_string_key_column
+from komira_op_agg_distinct.agg_cd_strkey_fused import cd_strkey_fused_try
 from komira_op_agg_distinct.agg_count_distinct_strenc import (
     _assign_dict_ids_from_hashes,
     _encode_string_key_parallel,
@@ -210,6 +214,7 @@ def _execute_count_distinct_agg_parallel(
     num_aggs: Int,
     num_rows: Int,
     var topk_hint: Optional[CdGroupTopKHint] = None,
+    allow_fused: Bool = True,
 ) raises -> RecordBatch:
     """The grouped COUNT(DISTINCT) aggregate of `batch` (module header).
 
@@ -223,6 +228,8 @@ def _execute_count_distinct_agg_parallel(
         num_rows: `batch.num_rows()`.
         topk_hint: The `TOPN(k)` above this aggregate, if the plan carries
             one. It changes cost only; `None` emits every group.
+        allow_fused: False skips the fused route, so a test can run this
+            general driver on a shape the fused route would serve.
     """
     if num_keys > 62:
         raise Error(
@@ -236,7 +243,14 @@ def _execute_count_distinct_agg_parallel(
         key_col_indices.append(ki)
         key_types.append(batch.column_at(ki).arrow_type)
 
-    # ---- 1. string keys -> first-seen dict ids ----
+    if allow_fused:
+        var fused = cd_strkey_fused_try(
+            dispatcher, batch, agg_data, num_keys, num_aggs, num_rows, topk_hint
+        )
+        if fused:
+            return fused.take()
+
+    # ---- 2. string keys -> first-seen dict ids ----
     var key_is_string = List[Bool]()
     var any_string_key = False
     var key_rev_bytes = List[List[UInt8]]()
@@ -334,7 +348,7 @@ def _execute_count_distinct_agg_parallel(
     var key_valid = ValidityLanes[bo].from_batch_columns(batch, key_col_indices)
     var keys_nullable = key_valid.any_nullable()
 
-    # ---- 2. K, the group-table capacity, heavy admission ----
+    # ---- 3. K, the group-table capacity, heavy admission ----
     var k = _cd_worker_count(num_rows, dispatcher.worker_count())
     var dict_sizes = List[Int](capacity=num_keys)
     for kk in range(num_keys):
@@ -384,7 +398,7 @@ def _execute_count_distinct_agg_parallel(
     var n_heavy = state.n_heavy
     var heavy_hashes = state.heavy_hashes[].copy()
 
-    # ---- 3. the two dispatches over one state ----
+    # ---- 4. the two dispatches over one state ----
     # PARALLELIZE-BOUNDARY: the state's docstring (`cd_parallel_state`) states
     # disjointness, liveness and no-realloc for both passes.
     state.pass_id = _CDP_PASS_OWNER
@@ -430,7 +444,7 @@ def _execute_count_distinct_agg_parallel(
             own_max = wsx.wk_rows
     cd_group_ht_note(slots_total, resizes_total)
 
-    # ---- 4. merge: a (worker, gid) index, heavy partials folded ----
+    # ---- 5. merge: a (worker, gid) index, heavy partials folded ----
     var mg_w = List[Int]()
     var mg_gid = List[Int]()
     var hf_w = List[Int]()
@@ -479,7 +493,7 @@ def _execute_count_distinct_agg_parallel(
     cd_heavy_note(n_heavy, heavy_merged, own_max, own_sum)
     cd_worker_scan_note(scan_sum)
 
-    # ---- 5. aggregate columns, top-k selection, key columns ----
+    # ---- 6. aggregate columns, top-k selection, key columns ----
     var num_groups = len(mg_w)
     if num_keys == 0 and num_groups == 0:
         # An ungrouped aggregate has one row even over no input.
