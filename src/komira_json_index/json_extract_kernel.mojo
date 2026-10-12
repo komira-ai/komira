@@ -613,22 +613,18 @@ def _find_close_for(idx: StructuralIndex, open_t: Int, input_len: Int) -> Int:
 
 
 def _slice_to_string(bytes: Span[UInt8, _], start: Int, end: Int) raises -> String:
-    """Build a String from bytes[start..end). Mirrors
-    parse_string._string_from_bytes pattern — NUL-terminate + ctor.
+    """Build a String holding exactly bytes[start..end), built from the
+    length (not a NUL-terminated pointer), so a 0x00 byte does not end it.
     Raises `_slice_to_string: invalid UTF-8 at byte <i>: <reason>` when the
     range is not well-formed UTF-8."""
     if end < start:
         raise Error("_slice_to_string: end < start")
     check_utf8(bytes, start, end, "_slice_to_string")
-    var n = end - start
-    var buf = List[UInt8](capacity=n + 1)
+    var buf = List[UInt8](capacity=end - start)
     for i in range(start, end):
         buf.append(bytes[i])
-    buf.append(UInt8(0))
-    # SAFETY: buf is alive through the ctor call; the ptr it passes is
-    # a NUL-terminated buffer, checked well-formed UTF-8 above, that String
-    # copies out immediately.
-    return String(unsafe_from_utf8_ptr=buf.unsafe_ptr())
+    # Checked well-formed UTF-8 above, which `unsafe_from_utf8` assumes.
+    return String(unsafe_from_utf8=Span(buf))
 
 
 @always_inline
