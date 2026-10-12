@@ -34,7 +34,8 @@ load(":test_runtime.bzl", _arg_args = "arg_args", _data_map = "data_map", _env_a
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "capped_prefix", "define_args", "mem_cap_script", "memory_cap")
 load(":opt_level.bzl", "MojoOptLevelInfo", "SHIPPED_OPT_LEVEL", "TEST_OPT_LEVEL", "opt_level_args")
 load(":dlopen.bzl", "DLOPEN_ATTRS", "dlopen_refusal", "dlopen_rows")
-load(":readme.bzl", "readme_kwargs")
+load(":helpers.bzl", "HELPER_ATTRS", "helper_files")
+load(":readme.bzl", "readme_gate", "readme_kwargs")
 load(":run_check.bzl", "run_check_validation")
 load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_prefix", "with_test_limit")
 
@@ -298,16 +299,20 @@ def _conda_facts(ctx, import_name, c_link, has_tests, native):
     name = ctx.attrs.conda_name or import_name
     if not regex_match("^[a-z][a-z0-9_]*$", name):
         return name, "`{}` is not a conda name (a lowercase letter, then lowercase letters, digits and _); set `conda_name`".format(name)
-    refusal = (native_refusal(ctx.label, native) if c_link != None else None) or dlopen_refusal(ctx)
-    if refusal != None:
-        return name, refusal
+    native_why = native_refusal(ctx.label, native) if c_link != None else None
+    if native_why != None:
+        return name, native_why
+    if dlopen_refusal(ctx) != None:
+        return name, dlopen_refusal(ctx)
     if not has_tests:
         return name, "{} has no tests, so its package would not be gated by any; declare test_srcs on the library".format(ctx.label.raw_target())
-    for d in [x for x in ctx.attrs.deps if MojoInfo in x]:
-        if d[MojoInfo].conda_name == None:
-            return name, "it depends on {}, which has no conda package (`conda = False`, or it is not a mojo_library)".format(d.label.raw_target())
-        if d[MojoInfo].conda_refusal != None:
-            return name, "it depends on {}, which has no conda package: {}".format(d.label.raw_target(), d[MojoInfo].conda_refusal)
+    for d in ctx.attrs.deps:
+        if MojoInfo in d:
+            di = d[MojoInfo]
+            if di.conda_name == None:
+                return name, "it depends on {}, which has no conda package (`conda = False`, or it is not a mojo_library)".format(d.label.raw_target())
+            if di.conda_refusal != None:
+                return name, "it depends on {}, which has no conda package: {}".format(d.label.raw_target(), di.conda_refusal)
     return name, None
 
 def _library_impl(ctx):
@@ -401,20 +406,22 @@ def _library_impl(ctx):
             cov_runs[stem] = coverage_run(ctx, tc, t, stem, cov_bins[stem], src_dir, import_name, root, test_data.get(key, {}), env_args)
             cov_branch.update(coverage_branch_of(ctx, tc, t, stem, tests_closure, _mojo_cmd, _link_tail(tests_c_link), test_data.get(key, {}), env_args, src_dir, root, test_defines))
 
-    # Whether the conda package is gated by a test (`has_tests`): the
-    # test_srcs only. A README's examples are not counted, since analysis
-    # cannot tell whether it holds any (see _readme_gate).
-    conda_name, conda_refusal = _conda_facts(ctx, import_name, c_link, len(markers) > 0, native)
+    # Whether the conda package is gated by a test: the test_srcs only. A
+    # README's examples are not counted, since analysis cannot tell whether
+    # it holds any (see readme.bzl, readme_gate).
+    has_tests = len(markers) > 0
+    conda_name, conda_refusal = _conda_facts(ctx, import_name, c_link, has_tests, native)
 
     # A README that ships (the library has a conda package the build can make,
     # which installs it at share/doc/<conda name>/README.md) refuses relative
     # links: the installed copy has no neighbours.
     ships = conda_name != None and conda_refusal == None
-    readme_marker = _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args, ships)
+    readme_marker = readme_gate(ctx, tc, import_name, ungated_tset, _link_tail(c_link), env_args, ships, _readme_test)
     if readme_marker != None:
         if "readme" in test_subtargets:
             fail("{}: a test_srcs file is named `readme.mojo`; `[tests][readme]` is the README's examples".format(ctx.label))
-        test_subtargets["readme"] = [DefaultInfo(default_output = readme_marker[0], other_outputs = [readme_marker[1]])]
+        # [generated] and [file]: the programs and README.md the gate ran, for kci_validate's golden test.
+        test_subtargets["readme"] = [DefaultInfo(default_output = readme_marker[0], other_outputs = [readme_marker[1]], sub_targets = {"file": [DefaultInfo(default_output = ctx.attrs.readme)], "generated": [DefaultInfo(default_output = readme_marker[1])]})]
         markers.append(readme_marker[0])
         if cov_link:
             coverage_readme(ctx, tc, _build_executable, readme_marker, ungated_tset, _link_tail(c_link), src_dir, import_name, root, env_args, cov_bins, cov_runs)
@@ -475,95 +482,32 @@ def _library_impl(ctx):
 
 # ---- README examples ----------------------------------------------------------
 #
-# A library whose package holds a README.md runs the README's ```mojo
-# examples as one more welded test, `[tests][readme]`: the docs cannot rot.
-# The macro passes the README (declaring is gating: a README is declared by
-# existing; a library of a several-library package can refuse it with
-# `readme = False`, readme.bzl) and the tool, //tools/build/readme_examples:tool, whose
-# `generate` writes `readme_<import name>.mojo` and the number of examples.
-# The convention (what an example is, hidden lines, the refusals) is in that
-# package and in README.md here.
-#
-# Whether a README holds an example is in its bytes, which analysis cannot
-# read, so a dynamic action reads the count: with one or more examples it
-# compiles the program against the UNGATED package and runs it through
-# gate_runner.sh exactly as a `test_srcs` entry; with none it compiles and
-# runs nothing, and the marker records that no example exists (never a
-# PASS line). A refused README (an info string such as `mojo skip`, a stray
-# hidden-lines comment) fails `generate`, naming README.md:<line>.
+# readme.bzl's readme_gate declares the README's `generate` action and this
+# dynamic action, which compiles and runs each example (the convention and
+# the gate are described there).
 
-def _readme_gate(ctx, tc, import_name, ungated_tset, c_link, env_args, ships):
-    """(marker, generated program, count) of the README's examples, or None
-    without a README. `ships`: the library's conda package installs the
-    README, so a relative link in it is refused."""
-    readme = ctx.attrs.readme
-    if readme == None:
-        if ctx.attrs.readme_tool != None:
-            fail("{}: readme_tool is set and readme is not".format(ctx.label))
-        return None
-    if ctx.attrs.readme_tool == None:
-        fail("{}: readme is set and readme_tool is not; the mojo_library macro sets both".format(ctx.label))
-    display = _join(ctx.label.package, readme.short_path)
-    program = ctx.actions.declare_output("tests/readme/readme_{}.mojo".format(import_name))
-    count = ctx.actions.declare_output("tests/readme/examples")
-    ctx.actions.run(
-        cmd_args(
-            ctx.attrs.readme_tool[RunInfo],
-            "generate",
-            "--readme",
-            readme,
-            "--display",
-            display,
-            "--package",
-            import_name,
-            "--links",
-            "refuse" if ships else "allow",
-            "--out",
-            program.as_output(),
-            "--count",
-            count.as_output(),
-        ),
-        category = "mojo_readme_generate",
-    )
-    marker = ctx.actions.declare_output("tests/readme.passed")
-    ctx.actions.dynamic_output_new(_readme_test(
-        label = ctx.label,
-        gate_label = "{}:{}".format(ctx.label.raw_target(), readme.short_path),
-        count = count,
-        program = program,
-        marker = marker.as_output(),
-        tc = tc,
-        closure = ungated_tset,
-        opt_level = ctx.attrs.test_optimization_level,
-        link_tail = _link_tail(c_link),
-        env_args = env_args,
-    ))
-    return marker, program, count
-
-def _readme_test_impl(actions, label, gate_label, count, program, marker, tc, closure, opt_level, link_tail, env_args):
-    n = int(count.read_string().strip())
-    if n == 0:
+def _readme_test_impl(actions, label, gate_label, examples, package, src, marker, tc, closure, opt_level, link_tail, env_args):
+    lines = [x.strip() for x in examples.read_string().split("\n") if x.strip()]
+    if not lines:
         actions.write(marker, "NO EXAMPLE {}: no ```mojo example, so nothing was compiled or run\n".format(gate_label))
         return []
     shim = struct(actions = actions, label = label)
-    stem = program.basename[:-len(".mojo")]
-    exe = _build_executable(shim, tc, "tests/readme/bin/" + stem, [program], program, [closure], opt_level, "mojo_build_test", "readme", None, link_extra = link_tail)
-    root, staged = _test_root(shim, "tests/readme/root", exe, {})
+    markers = []
+    for line in lines:
+        stem = "readme_{}_{}".format(package, line)
+        program = src.project(stem + ".mojo")
+        exe = _build_executable(shim, tc, "tests/readme/bin/" + stem, [program], program, [closure], opt_level, "mojo_build_test", "readme_" + line, None, link_extra = link_tail)
+        root, staged = _test_root(shim, "tests/readme/root/" + line, exe, {})
+        m = actions.declare_output("tests/readme/{}.passed".format(line))
+        actions.run(
+            cmd_args(tc.busybox, "sh", tc.gate_runner, tc.busybox, tc.compiler, "{}:{}".format(gate_label, line), staged, m.as_output(), env_args, hidden = root),
+            category = "mojo_gated_test",
+            identifier = "readme_" + line,
+        )
+        markers.append(m)
     actions.run(
-        cmd_args(
-            tc.busybox,
-            "sh",
-            tc.gate_runner,
-            tc.busybox,
-            tc.compiler,
-            gate_label,
-            staged,
-            marker,
-            env_args,
-            hidden = root,
-        ),
-        category = "mojo_gated_test",
-        identifier = "readme",
+        cmd_args(tc.busybox, "sh", "-c", 'b=$1; shift; "$b" cat "$@" >"$0"', marker, tc.busybox, markers),
+        category = "mojo_readme_join",
     )
     return []
 
@@ -571,14 +515,15 @@ _readme_test = dynamic_actions(
     impl = _readme_test_impl,
     attrs = {
         "closure": dynattrs.value(typing.Any),
-        "count": dynattrs.artifact_value(),
         "env_args": dynattrs.value(list[str]),
+        "examples": dynattrs.artifact_value(),
         "gate_label": dynattrs.value(str),
         "label": dynattrs.value(Label),
         "link_tail": dynattrs.value(typing.Any),
         "marker": dynattrs.output(),
         "opt_level": dynattrs.value(str),
-        "program": dynattrs.value(Artifact),
+        "package": dynattrs.value(str),
+        "src": dynattrs.value(Artifact),
         "tc": dynattrs.value(typing.Any),
     },
 )
@@ -616,7 +561,7 @@ mojo_library_rule = rule(
         # Environment for every gated test of this library.
         "test_env": attrs.dict(attrs.string(), attrs.string(), default = {}),
         # The package's README.md and the tool that runs its examples; the
-        # macro sets both, or neither (readme.bzl, _readme_gate). No default tool: the tool is
+        # macro sets both, or neither (readme.bzl, readme_gate). No default tool: the tool is
         # itself built from a mojo_library, so a default would be a cycle.
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
@@ -655,7 +600,7 @@ def _runnable(ctx, tc, exe):
     run_dir = ctx.actions.copied_dir(ctx.label.name + ".runnable", {
         "lib": tc.runtime,
         name: exe,
-    })
+    } | helper_files(ctx, name))  # a mojo_binary's `helpers`, beside it (helpers.bzl)
     # The projection alone would fetch only the binary; the hidden directory
     # brings lib/ along. Nothing here names the compiler, so `buck2 run`
     # downloads the binary and its runtime libraries only.
@@ -697,7 +642,7 @@ def _binary_impl(ctx):
         ),
         RunInfo(args = command),
         MojoRunnableInfo(binary = exe.basename, command = command, run_dir = run_dir),
-        MojoProgramInfo(name = ctx.label.name, shared = shared, runtime = tc.runtime, target_cpu = tc.target_cpu),
+        MojoProgramInfo(name = ctx.label.name, shared = shared, runtime = tc.runtime, target_cpu = tc.target_cpu, helpers = helper_files(ctx, ctx.label.name)),
         MojoOptLevelInfo(levels = levels),
     ] + validation
 
@@ -710,7 +655,7 @@ _EXECUTABLE_ATTRS = {
 
 mojo_binary_rule = rule(
     impl = _binary_impl,
-    attrs = _EXECUTABLE_ATTRS | BINARY_DEFINE_ATTRS | {
+    attrs = _EXECUTABLE_ATTRS | BINARY_DEFINE_ATTRS | HELPER_ATTRS | {
         "optimization_level": attrs.string(default = SHIPPED_OPT_LEVEL),
         # When set, `[run_check]` fails unless the binary's stdout equals this;
         # it is then a validation, run by every build holding the binary.

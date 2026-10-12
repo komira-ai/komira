@@ -27,6 +27,8 @@
 #                     transport, sleeper and poll log; pixi (--pixi, checked against
 #                     --pixi-sha256) gets an environment built from nothing,
 #                     and pixi's system config directory is /etc/pixi;
+#                     the README examples tool is the one kci ships beside
+#                     its executable (dispatch.mojo, `shipped_readme_tool`);
 #                     the transport is `FileChannelTransport` over the
 #                     HTTPS one, so a --channel file:/// directory is read
 #                     from the disk and every host over HTTPS.
