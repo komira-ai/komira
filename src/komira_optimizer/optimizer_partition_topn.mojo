@@ -91,6 +91,7 @@ from komira_plan_ir.plan_helpers import (
     _take_partition_topn_child,
     _collect_expr_columns,
 )
+from .optimizer_udf_carry import collect_udf_input_columns
 
 
 # =============================================================================
@@ -215,6 +216,9 @@ def _collect_unsafe_window_cols(
             )
             if consumed in pred_cols:
                 pred_cols.remove(consumed)
+        # A UDF reads its input columns, which its placeholders omit (each
+        # arm below adds them too).
+        collect_udf_input_columns(plan, pred_cols)
         var new_ancestor = ancestor_cols.copy()
         for c in pred_cols:
             new_ancestor.add(c)
@@ -226,6 +230,7 @@ def _collect_unsafe_window_cols(
         var new_ancestor = ancestor_cols.copy()
         for i in range(len(plan._project.value()[].exprs)):
             _collect_expr_columns(plan._project.value()[].exprs[i], new_ancestor)
+        collect_udf_input_columns(plan, new_ancestor)
         _collect_unsafe_window_cols(
             plan._project.value()[].child[], new_ancestor, unsafe_cols
         )
@@ -242,6 +247,7 @@ def _collect_unsafe_window_cols(
                     plan._aggregate.value()[].agg_exprs[i].child.value(),
                     new_ancestor,
                 )
+        collect_udf_input_columns(plan, new_ancestor)
         _collect_unsafe_window_cols(
             plan._aggregate.value()[].child[], new_ancestor, unsafe_cols
         )

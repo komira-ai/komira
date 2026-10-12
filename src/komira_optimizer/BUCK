@@ -127,6 +127,7 @@ mojo_library(
         "tests/test_optimizer_tdom_estimate_with_tdom.mojo",
         "tests/test_optimizer_topn_below_project_rule.mojo",
         "tests/test_optimizer_transitive_edges.mojo",
+        "tests/test_optimizer_udf_carry.mojo",
         "tests/test_optimizer_udf_node_opacity.mojo",
         "tests/test_optimizer_when_pushdown.mojo",
         "tests/test_optimizer_window_rewrite.mojo",

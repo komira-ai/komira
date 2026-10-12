@@ -204,6 +204,22 @@ def test_narrowed_project_keeps_its_cse_flag() raises:
     assert_true(narrowed._project.value()[].is_cse_introduced, "the narrowing rebuild dropped is_cse_introduced")
 
 
+def test_narrowed_plain_project_stays_not_cse_introduced() raises:
+    """Project(s) over a plain Project(a, b, a + b AS s) over Scan(a,b,c):
+    the narrowed Project keeps `is_cse_introduced` False.
+
+    Catches: the narrowing rebuild setting the flag regardless of the
+    source (every narrowed plain Project would become a predicate-pushdown
+    barrier)."""
+    var exprs = _cols("a", "b")
+    exprs.append(Expr.alias(Expr.binary(BIN_ADD, Expr.col_ref("a"), Expr.col_ref("b")), "s"))
+    var inner = LogicalPlan.project(exprs^, _scan("a,b,c"))
+    var out = push_projections_down(LogicalPlan.project(_cols("s"), inner^))
+    ref narrowed = out._project.value()[].child[]
+    assert_equal(len(narrowed._project.value()[].exprs), 1, "VACUOUS: the narrowing path did not run")
+    assert_false(narrowed._project.value()[].is_cse_introduced, "the narrowing rebuild set is_cse_introduced")
+
+
 # =============================================================================
 # push_projections_down: the Filter and Aggregate arms (same family)
 # =============================================================================
@@ -252,6 +268,20 @@ def test_identity_shaped_udf_project_is_not_eliminated() raises:
     assert_equal(_count_udfs(out), 1, "identity elimination dropped the UDF Project")
 
 
+def test_identity_project_below_a_udf_project_is_eliminated() raises:
+    """Project[udf reads a](a, b) over an identity Project(a, b) over
+    Scan(a,b): the identity Project goes, the UDF Project stays on the scan.
+
+    Catches: the UDF guard returning before the recursion into the child (a
+    UDF Project would stop identity elimination anywhere below it)."""
+    var plan = LogicalPlan.project_with_udf(
+        _cols("a", "b"), LogicalPlan.project(_cols("a", "b"), _scan("a,b")), _udf(UDF_KIND_MAP, "a")
+    )
+    var out = eliminate_identity_projects(plan^)
+    assert_equal(_count_udfs(out), 1)
+    assert_equal(out._project.value()[].child[].tag, PLAN_SCAN, "the identity Project below the UDF stayed")
+
+
 def test_merge_leaves_a_udf_project_below_a_plain_project() raises:
     """Project(a) over Project[udf reads b](a, b) over Scan(a,b): no merge.
 
@@ -275,6 +305,21 @@ def test_merge_leaves_a_udf_project_above_a_plain_project() raises:
     var out = merge_projects(LogicalPlan.project_with_udf(_cols("c"), inner^, _udf(UDF_KIND_MAP, "c")))
     assert_true(out.has_udf())
     assert_equal(out._project.value()[].child[].tag, PLAN_PROJECT, "the merge moved a UDF Project onto the scan")
+
+
+def test_plain_projects_below_a_udf_project_merge() raises:
+    """Project[udf reads a](a) over Project(a, b) over Project(a, b, c) over
+    Scan(a,b,c,d): the two plain Projects merge into one on the scan.
+
+    Catches: the UDF guard returning before the recursion into the child (a
+    UDF Project would stop Project merging anywhere below it)."""
+    var lower = LogicalPlan.project(_cols("a", "b", "c"), _scan("a,b,c,d"))
+    var mid = LogicalPlan.project(_cols("a", "b"), lower^)
+    var out = merge_projects(LogicalPlan.project_with_udf(_cols("a"), mid^, _udf(UDF_KIND_MAP, "a")))
+    assert_true(out.has_udf())
+    ref merged = out._project.value()[].child[]
+    assert_equal(merged.tag, PLAN_PROJECT)
+    assert_equal(merged._project.value()[].child[].tag, PLAN_SCAN, "the plain Projects below the UDF did not merge")
 
 
 def test_late_materialize_keeps_a_udf_filters_read_set() raises:
@@ -317,11 +362,14 @@ def main() raises:
     suite.test[test_udf_project_needed_by_nothing_keeps_its_exprs_and_read_set]()
     suite.test[test_udf_with_an_empty_read_set_takes_zero_columns_from_its_child]()
     suite.test[test_narrowed_project_keeps_its_cse_flag]()
+    suite.test[test_narrowed_plain_project_stays_not_cse_introduced]()
     suite.test[test_udf_filter_read_set_reaches_the_scan]()
     suite.test[test_udf_aggregate_read_set_reaches_the_scan]()
     suite.test[test_identity_shaped_udf_project_is_not_eliminated]()
+    suite.test[test_identity_project_below_a_udf_project_is_eliminated]()
     suite.test[test_merge_leaves_a_udf_project_below_a_plain_project]()
     suite.test[test_merge_leaves_a_udf_project_above_a_plain_project]()
+    suite.test[test_plain_projects_below_a_udf_project_merge]()
     suite.test[test_late_materialize_keeps_a_udf_filters_read_set]()
     suite.test[test_collect_referenced_columns_reads_every_udf_carrier]()
     suite^.run()

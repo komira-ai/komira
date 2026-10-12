@@ -38,7 +38,6 @@ from komira_plan_ir.logical_plan import (
     JOIN_SEMI,
     JOIN_ANTI,
 )
-from komira_plan_expr.udf_data import UdfData
 from komira_plan_stats.table_stats import TableStats
 from komira_plan_ir.plan_helpers import (
     _copy_schema,
@@ -62,6 +61,7 @@ from komira_plan_ir.plan_helpers import (
 from .optimizer_project_merge_guard import (
     projects_merge_safely, substitute_project_refs,
 )
+from .optimizer_udf_carry import collect_udf_input_columns
 
 
 # =============================================================================
@@ -120,35 +120,6 @@ def _collect_join_residual_side_columns(
                 right_cols.add(stripped^)
             else:
                 right_cols.add(name)
-
-
-# =============================================================================
-# Helper: a UDF node's input columns
-# =============================================================================
-#
-# A typed UDF rides on a Filter, Project or Aggregate as a `UdfData` payload.
-# Its `input_columns` are the columns the function reads, its read set
-# (`docs/design/udf_runtime_interface.md` section 3.1). In this IR the read set
-# is present on every UDF and may be empty: an empty list reads no column. The
-# node's own expressions are placeholders, so they do not name these columns,
-# and a rule that keeps only the expressions' columns live below the node
-# prunes what the UDF reads.
-
-
-def _collect_udf_input_columns(plan: LogicalPlan, mut cols: Set[String]):
-    """Add the input columns of the UDF `plan` carries to `cols`; a node with
-    no UDF adds nothing."""
-    if plan.tag == PLAN_FILTER and plan._filter.value()[].udf:
-        _add_input_columns(plan._filter.value()[].udf.value()[], cols)
-    elif plan.tag == PLAN_PROJECT and plan._project.value()[].udf:
-        _add_input_columns(plan._project.value()[].udf.value()[], cols)
-    elif plan.tag == PLAN_AGGREGATE and plan._aggregate.value()[].udf:
-        _add_input_columns(plan._aggregate.value()[].udf.value()[], cols)
-
-
-def _add_input_columns(udf: UdfData, mut cols: Set[String]):
-    for i in range(len(udf.input_columns)):
-        cols.add(udf.input_columns[i][0])
 
 
 
@@ -240,7 +211,7 @@ def _push_projections_impl(
     elif plan.tag == PLAN_FILTER:
         var pred_cols = Set[String]()
         _collect_expr_columns(plan._filter.value()[].predicate, pred_cols)
-        _collect_udf_input_columns(plan, pred_cols)
+        collect_udf_input_columns(plan, pred_cols)
         var combined = _union_sets(needed, pred_cols)
         var child_in = _copy_plan(plan._filter.value()[].child[])
         var new_child = _push_projections_impl(child_in^, combined^)
@@ -284,7 +255,7 @@ def _push_projections_impl(
             var proj_cols = Set[String]()
             for i in range(num_exprs):
                 _collect_expr_columns(plan._project.value()[].exprs[i], proj_cols)
-            _collect_udf_input_columns(plan, proj_cols)
+            collect_udf_input_columns(plan, proj_cols)
             var child_in = _copy_plan(plan._project.value()[].child[])
             var new_child = _push_projections_impl(child_in^, proj_cols^)
             plan._project.value()[].child = OwnedPointer(new_child^)
@@ -322,7 +293,7 @@ def _push_projections_impl(
                 _collect_expr_columns(plan._aggregate.value()[].agg_exprs[i].child2.value(), agg_cols)
             if plan._aggregate.value()[].agg_exprs[i].child3:
                 _collect_expr_columns(plan._aggregate.value()[].agg_exprs[i].child3.value(), agg_cols)
-        _collect_udf_input_columns(plan, agg_cols)
+        collect_udf_input_columns(plan, agg_cols)
         var child_in = _copy_plan(plan._aggregate.value()[].child[])
         var new_child = _push_projections_impl(child_in^, agg_cols^)
         plan._aggregate.value()[].child = OwnedPointer(new_child^)
@@ -495,13 +466,13 @@ def _collect_referenced_columns(plan: LogicalPlan, mut cols: Set[String]):
 
     elif plan.tag == PLAN_FILTER:
         _collect_expr_columns(plan._filter.value()[].predicate, cols)
-        _collect_udf_input_columns(plan, cols)
+        collect_udf_input_columns(plan, cols)
         _collect_referenced_columns(plan._filter.value()[].child[], cols)
 
     elif plan.tag == PLAN_PROJECT:
         for i in range(len(plan._project.value()[].exprs)):
             _collect_expr_columns(plan._project.value()[].exprs[i], cols)
-        _collect_udf_input_columns(plan, cols)
+        collect_udf_input_columns(plan, cols)
         _collect_referenced_columns(plan._project.value()[].child[], cols)
 
     elif plan.tag == PLAN_AGGREGATE:
@@ -518,7 +489,7 @@ def _collect_referenced_columns(plan: LogicalPlan, mut cols: Set[String]):
                 _collect_expr_columns(plan._aggregate.value()[].agg_exprs[i].child2.value(), cols)
             if plan._aggregate.value()[].agg_exprs[i].child3:
                 _collect_expr_columns(plan._aggregate.value()[].agg_exprs[i].child3.value(), cols)
-        _collect_udf_input_columns(plan, cols)
+        collect_udf_input_columns(plan, cols)
         _collect_referenced_columns(plan._aggregate.value()[].child[], cols)
 
     elif plan.tag == PLAN_JOIN:
@@ -861,7 +832,7 @@ def late_materialize_inplace(mut plan: LogicalPlan):
            ):
             var filter_cols = Set[String]()
             _collect_expr_columns(pfd.predicate, filter_cols)
-            _collect_udf_input_columns(plan, filter_cols)
+            collect_udf_input_columns(plan, filter_cols)
 
             # Check if scan already has a restricted projection
             ref scan_data = pfd.child[]._scan.value()[]

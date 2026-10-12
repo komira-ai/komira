@@ -366,6 +366,11 @@ def _maybe_insert_materialize_project(mut plan: LogicalPlan) raises:
     var needed_opt = _agg_referenced_child_columns(
         agg_node.group_by, agg_node.agg_exprs
     )
+    # A UDF Aggregate also reads its UDF's input columns.
+    if needed_opt and agg_node.udf:
+        ref ic = agg_node.udf.value()[].input_columns
+        for i in range(len(ic)):
+            _append_unique(needed_opt.value(), String(ic[i][0]))
 
     ref existing_child = plan._aggregate.value()[].child[]
     ref child_schema = existing_child.output_schema
