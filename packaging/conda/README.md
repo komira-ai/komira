@@ -5,9 +5,11 @@ A Mojo library published as a conda package (a `.conda`) installs
 `share/doc/<name>/README.md`. The Mojo compiler's default import
 path is that prefix's `lib/mojo`, where `std.mojoc` already sits, so a program
 that imports the library compiles with no `-I` flag and no activation script.
-The README is the library's documentation and its examples, the same bytes the
+The README is the library's documentation and its examples, the examples the
 library's welded `[tests][readme]` runs, so what a user reads is inside what
-they installed.
+they installed; when the library's closure ships native files, the packer
+appends the link commands a user needs (below, "The link commands in the
+README").
 Nothing here uploads anything: the build produces files; publishing is a
 separate, gated step that belongs to the release tool (kci).
 
@@ -118,6 +120,36 @@ komira_encoding's package against the README read from the library rather than
 from the package rule, so a package rule that stopped passing it is red. A
 README that ships refuses relative links (`readme_examples generate --links
 refuse`): the installed copy has no neighbours. A metapackage ships no doc.
+
+### The link commands in the README
+
+A `.mojoc` holds no machine code, so a program using a library links every
+native library of the library's closure. When the closure ships any (a
+`lib<owner>_native.so.1`, or komira_log's holder archive), the installed
+README is the library's README.md byte for byte, then a section `## Linking`
+that `komira_pack readme-link`
+([`readme_link.zig`](../../tools/build/package/pack/readme_link.zig)) appends,
+ending in a fenced block whose info string is `sh komira-link`:
+
+```text
+mojo run -Xlinker -L$CONDA_PREFIX/lib -Xlinker -l<owner>... prog.mojo
+mojo build -Xlinker -L$CONDA_PREFIX/lib -Xlinker -l<owner>... [-Xlinker -l<static>...] -Xlinker -rpath -Xlinker '$ORIGIN/../lib' prog.mojo -o $CONDA_PREFIX/bin/prog
+```
+
+The owners are every shared library of the closure, dependents first (by the
+number of shared libraries in each owner's own closure, then by name:
+`readme_link_names` in tools/build/mojo/native_facts.bzl); a static archive is
+named on the `mojo build` line only. Appending keeps every line of the source
+at its number, so a report of the installed README run names the line of the
+repository's README; the source never carries the section (the packer refuses
+one holding a fence that names the marker), since it follows from the build graph. Before the
+packer reads the file, the README examples tool's `link-check` must parse the
+block back to exactly the arguments the packer wrote, and kci's install
+validation runs the README with that block's `mojo run` arguments and refuses a
+block that differs from what it computes from the release
+(src/kci_validate/readme_link.mojo). `conda_ships_readme` checks
+komira_encoding, whose closure ships no native file, so its README is the
+source byte for byte.
 
 ### A library's native code in its package
 

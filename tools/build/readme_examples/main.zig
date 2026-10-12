@@ -24,4 +24,5 @@ test {
     _ = @import("examples_test.zig");
     _ = @import("program_test.zig");
     _ = @import("cli_test.zig");
+    _ = @import("link_test.zig");
 }

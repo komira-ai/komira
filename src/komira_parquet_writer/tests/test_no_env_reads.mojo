@@ -33,12 +33,19 @@ def _read(name: String) raises -> String:
 
 comptime _FILES: List[String] = [
     "__init__.mojo",
+    "column_page.mojo",
+    "decimal_encode.mojo",
     "dict_encoder.mojo",
     "dict_encoder_numeric.mojo",
     "page_size_limit.mojo",
     "stats.mojo",
     "thrift_writer.mojo",
     "writer_bitpack.mojo",
+    "writer_bss.mojo",
+    "writer_delta.mojo",
+    "writer_dict.mojo",
+    "writer_dict_numeric.mojo",
+    "writer_encode.mojo",
     "writer_float_stats.mojo",
     "writer_helpers.mojo",
     "writer_page_index.mojo",
@@ -225,6 +232,8 @@ def test_the_scan_saw_the_package() raises:
     assert_equal(_count(_read("page_size_limit.mojo"), "\ndef set_parquet_page_size_limit("), 1)
     assert_equal(_count(_read("dict_encoder_numeric.mojo"), "\ndef encode_numeric_dict_column["), 1)
     assert_true(_read("stats.mojo").byte_length() > 10000)
+    assert_equal(_count(_read("column_page.mojo"), "\nstruct ColumnPage("), 1)
+    assert_equal(_count(_read("writer_delta.mojo"), "\ndef encode_dbp_column_page["), 1)
 
 
 def main() raises:
