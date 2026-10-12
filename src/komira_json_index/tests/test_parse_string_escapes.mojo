@@ -7,7 +7,8 @@
 #     unknown one or a trailing backslash is refused by name;
 #   * a `\u` escape: every hex-digit class and the bytes just outside each,
 #     a truncated escape (refused as truncated even when a digit is also
-#     bad: the length check comes first), and the one-byte UTF-8 form;
+#     bad: the length check comes first), and each UTF-8 form (one to four
+#     bytes, a surrogate pair for four) at both of its ends;
 #   * an inverted range is refused before any byte is read;
 #   * `check_utf8` refuses a range outside its input, for each bound;
 #   * the private sequence helpers answer for an ASCII lead byte.
@@ -124,6 +125,31 @@ def test_u_escape_hex_digit_classes() raises:
     assert_equal(len(two), 2)
     assert_equal(Int(two[0]), 0xC2)
     assert_equal(Int(two[1]), 0x80)
+
+
+def _utf8_of(s: String, want: List[Int]) raises:
+    """`s` decodes to exactly the bytes `want`."""
+    var got = _esc(s).as_bytes()
+    assert_equal(len(got), len(want), s)
+    for i in range(len(want)):
+        assert_equal(Int(got[i]), want[i], s)
+
+
+def test_u_escape_utf8_form_boundaries() raises:
+    """Each UTF-8 form at both of its ends (RFC 3629 table 3.1): a range
+    check that is off by one encodes the first code point of a form in the
+    form below it, which is an invalid sequence (`E0 80` for U+0800)."""
+    _utf8_of("\\u007F", [0x7F])
+    _utf8_of("\\u0080", [0xC2, 0x80])
+    _utf8_of("\\u07FF", [0xDF, 0xBF])
+    _utf8_of("\\u0800", [0xE0, 0xA0, 0x80])
+    _utf8_of("\\uD7FF", [0xED, 0x9F, 0xBF])
+    _utf8_of("\\uE000", [0xEE, 0x80, 0x80])
+    _utf8_of("\\uFFFF", [0xEF, 0xBF, 0xBF])
+    # A surrogate pair: U+10000, the first four-byte code point, and U+10FFFF,
+    # the last.
+    _utf8_of("\\uD800\\uDC00", [0xF0, 0x90, 0x80, 0x80])
+    _utf8_of("\\uDBFF\\uDFFF", [0xF4, 0x8F, 0xBF, 0xBF])
 
 
 def test_u_escape_refuses_bytes_just_outside_each_hex_class() raises:
@@ -265,6 +291,7 @@ def main() raises:
     _run("test_an_unknown_escape_is_refused", test_an_unknown_escape_is_refused, failed)
     _run("test_a_trailing_backslash_is_refused", test_a_trailing_backslash_is_refused, failed)
     _run("test_u_escape_hex_digit_classes", test_u_escape_hex_digit_classes, failed)
+    _run("test_u_escape_utf8_form_boundaries", test_u_escape_utf8_form_boundaries, failed)
     _run("test_u_escape_refuses_bytes_just_outside_each_hex_class", test_u_escape_refuses_bytes_just_outside_each_hex_class, failed)
     _run("test_a_truncated_u_escape_is_refused", test_a_truncated_u_escape_is_refused, failed)
     _run("test_an_inverted_range_is_refused", test_an_inverted_range_is_refused, failed)

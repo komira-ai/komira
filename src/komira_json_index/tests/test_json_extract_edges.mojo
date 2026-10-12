@@ -4,9 +4,10 @@
 #
 # test_json_extract.mojo covers the happy paths. This file holds the arms the
 # walker reaches only on a refused input, a null parent row, a document that
-# is not an object, a value it must skip or slice through nesting, and the
-# guards of its private helpers, driven over hand-built tapes because no
-# well-formed Stage 1 output reaches them.
+# is not an object, a value it must skip or slice through nesting, a string
+# value escaped in its first or last byte, and the guards of its private
+# helpers, driven over hand-built tapes because no well-formed Stage 1 output
+# reaches them.
 #
 # Every expectation is the answer DuckDB's json_extract / ->> gives on the
 # same document (a malformed document is nulled: this kernel is LENIENT).
@@ -369,6 +370,23 @@ def test_a_key_quote_with_no_closing_quote_is_missing() raises:
     assert_equal(r^.take_value(), String("1"))
 
 
+def test_a_string_value_escaped_at_either_end_is_decoded() raises:
+    """`->>` decodes a string value whose escape sits in its first or last
+    content byte, or fills it; `->` keeps the raw text, backslash included.
+    The escape scan must start at the first content byte: one that starts a
+    byte later reads `\\nx` as plain text and answers the backslash raw."""
+    # The escape is the first content byte, and the string's only one.
+    assert_equal(_one(String("{\"a\":\"\\nx\"}"), String("a"), False), String("\nx"))
+    assert_equal(_one(String("{\"a\":\"\\\"x\"}"), String("a"), False), String("\"x"))
+    assert_equal(_one(String("{\"a\":\"\\u0041x\"}"), String("a"), False), String("Ax"))
+    # The escape fills the string.
+    assert_equal(_one(String("{\"a\":\"\\\\\"}"), String("a"), False), String("\\"))
+    # The escape is the last content bytes.
+    assert_equal(_one(String("{\"a\":\"x\\t\"}"), String("a"), False), String("x\t"))
+    # `->` answers the raw text with its quotes.
+    assert_equal(_one(String("{\"a\":\"\\nx\"}"), String("a"), True), String("\"\\nx\""))
+
+
 def test_extract_value_at_guards() raises:
     var b = _bytes("{\"a\":\"v\"}")
     var full = _tape(
@@ -467,6 +485,7 @@ def main() raises:
     _run("test_an_escaped_key_of_the_same_decoded_length_must_match_byte_for_byte", test_an_escaped_key_of_the_same_decoded_length_must_match_byte_for_byte, failed)
     _run("test_a_key_matches_whole_never_as_a_prefix", test_a_key_matches_whole_never_as_a_prefix, failed)
     _run("test_a_key_quote_with_no_closing_quote_is_missing", test_a_key_quote_with_no_closing_quote_is_missing, failed)
+    _run("test_a_string_value_escaped_at_either_end_is_decoded", test_a_string_value_escaped_at_either_end_is_decoded, failed)
     _run("test_extract_value_at_guards", test_extract_value_at_guards, failed)
     _run("test_skip_value_at_past_the_end", test_skip_value_at_past_the_end, failed)
     _run("test_find_close_for_guards", test_find_close_for_guards, failed)
