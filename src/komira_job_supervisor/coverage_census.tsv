@@ -1,3 +1,3 @@
 # What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
 census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
-komira//src/komira_job_supervisor:komira_job_supervisor	src/komira_job_supervisor	library	OK	1259	1268	-	-	no	conda	src/komira_job_supervisor/main/job_supervisor_main.mojo	-
+komira//src/komira_job_supervisor:komira_job_supervisor	src/komira_job_supervisor	library	OK	1259	1262	-	-	no	conda	-	-
