@@ -1,0 +1,70 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The Parquet scan's engine side, part 1: the per-file reader the scan's
+# morsel source drives (parquet_reader, its page-index-pruned decodes in
+# parquet_reader_prune, the footer offset-width refinement in
+# arrow_hint_refine, the read-ahead hint in prefetch), its factory
+# (parquet_reader_factory), the row-selective decode (payload_sel_decode),
+# the codes feed of a grouped aggregate (parquet_codes_feed), the
+# conjunct-by-conjunct filter decode (staged_filter), the dictionary-select
+# arms of the sub-row-group aggregate (subrg_filter_gather), the top-N
+# row-group bounds and claim order (topn_rg_bounds), the parked sub-morsel
+# pool (parked_morsel_share) and the row-group prune counters
+# (rg_prune_counter).
+#
+# Welded tests (each against files written by komira_test_parquet_file, or
+# hand-built values):
+# - test_staged_filter_direct: conjunct split order, the lead / deferred
+#   plan, definite-TRUE masks (an UNKNOWN row with a set data bit is
+#   dropped), survivor composition, and the staged decode against the
+#   one-shot predicate on a file (selective lead, declined lead handed off,
+#   NULLs), with the emitted projection's rows and column order.
+# - test_subrg_filter_gather_direct: the dict-select shapes, the dictionary
+#   keep-table, the codes compaction (uniform and mixed 16-code blocks, a
+#   tail, an out-of-range code, an empty dictionary, short buffers), the
+#   survivor gather.
+# - test_parquet_reader_direct: the footer-only facts (selection class per
+#   shape, byte range, statistics and all-match prunes), every decode against
+#   the rows written (subset, by name, selected rows, fused dictionary count
+#   and survivors, the codes feed, the hash-aggregate decode, the page-pruned
+#   decodes and their row alignment), the offset-width refinement and the
+#   read-ahead hint's advised bytes per mode.
+# - test_parquet_reader_factory_direct: the footer shared by every worker's
+#   reader, the mapping shared by clones, the footer-only reader.
+# - test_topn_rg_bounds_direct: the claim order both ways with ties, each
+#   decline, and UINT_32 bounds zero-extended.
+# - test_parked_morsel_share_direct: the admission table, and publish / take
+#   / wait exactly once, with the foreign witness.
+mojo_library(
+    name = "komira_parquet_scan",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_batch_eval:komira_batch_eval",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_morsel:komira_morsel",
+        "//src/komira_parquet:komira_parquet",
+        "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_scan_planning:komira_scan_planning",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_parked_morsel_share_direct.mojo",
+        "tests/test_parquet_reader_direct.mojo",
+        "tests/test_parquet_reader_factory_direct.mojo",
+        "tests/test_staged_filter_direct.mojo",
+        "tests/test_subrg_filter_gather_direct.mojo",
+        "tests/test_topn_rg_bounds_direct.mojo",
+    ],
+    test_deps = [
+        "//src/tests/helpers/komira_test_parquet_file:komira_test_parquet_file",
+    ],
+    visibility = ["PUBLIC"],
+)
