@@ -24,7 +24,8 @@ operator or a sink consumes but does not implement belongs here.
   profile (`MemoryReservation.for_host`), and a denied grow is the breaker's
   cue to spill. The spill layer (`spill`) holds the `SpillStorage` trait and
   its storage over any `komira_fs` file system (`filesystem_spill_storage`,
-  and `local_disk` for the local disk). Whether a breaker may spill, and to
+  and `local_disk` for the local disk), and the column spill format
+  (`thsplc`) with its codec. Whether a breaker may spill, and to
   which tiers, is `HostProfile.spill_tiers_for`, recorded in the physical
   plan.
 - Wake primitives (`wake_primitives`: wait on and wake an address, with an
