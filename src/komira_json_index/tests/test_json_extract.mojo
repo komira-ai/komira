@@ -18,7 +18,8 @@
 #   T10 Malformed JSON payload → null row (LENIENT semantics).
 #   T11 `->` returns raw JSON text including quotes for strings.
 #   T12 `->>` returns unquoted strings.
-#   T13 A key after an empty value (`{"a":,"b":1}`) -> null row.
+#   T13 A top-level array is not read as its first object: `$.a` is NULL.
+#   T14 A key after an empty value (`{"a":,"b":1}`) -> null row.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false, assert_raises
@@ -427,6 +428,26 @@ def test_extract_descend_through_scalar_returns_null() raises:
     assert_false(out._validity.value().test(0))
 
 
+def test_extract_top_level_ARRAY_is_not_its_first_object() raises:
+    # $.a addresses a member of the top-level OBJECT. A document whose top
+    # level is an array has no member `a`, so DuckDB's json_extract answers
+    # NULL, even when an element of that array is an object holding `a`.
+    # Row 2 is a top-level object: the control that `a` is still found there.
+    var col = _string_column(_make_payloads(
+        String("[{\"a\":1}]"),
+        String("[1,{\"a\":2}]"),
+        String("{\"a\":3}"),
+    ))
+    var path = parse_json_path(String("$.a"))
+    var out = extract_column(col, path^, ArrowType.STRING, False)
+    assert_equal(out.length(), 3)
+    assert_true(out._validity)
+    assert_false(out._validity.value().test(0), "[{\"a\":1}] $.a must be NULL")
+    assert_false(out._validity.value().test(1), "[1,{\"a\":2}] $.a must be NULL")
+    assert_true(out._validity.value().test(2))
+    assert_equal(out.as_string().get(2), String("3"))
+
+
 def test_extract_key_AFTER_AN_EMPTY_VALUE_is_null() raises:
     # A key with no value (`"a":,`) makes the document not JSON; DuckDB's
     # json_extract refuses it, so the row is null for EVERY path, not only
@@ -526,6 +547,7 @@ def main() raises:
     test_extract_matches_a_key_that_CARRIES_AN_ESCAPE()
     test_extract_malformed_json_row_null()
     test_extract_descend_through_scalar_returns_null()
+    test_extract_top_level_ARRAY_is_not_its_first_object()
     test_extract_key_AFTER_AN_EMPTY_VALUE_is_null()
 
     # Expr factory smoke

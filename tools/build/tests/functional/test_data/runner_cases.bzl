@@ -16,7 +16,7 @@ def _impl(ctx):
     tc = ctx.attrs._toolchain[MojoToolchainInfo]
     report = ctx.actions.declare_output("runner_cases.txt")
     ctx.actions.run(
-        cmd_args(tc.busybox, "sh", ctx.attrs.script, tc.busybox, tc.gate_runner, report.as_output(), ctx.attrs.dyld_prelude),
+        cmd_args(tc.busybox, "sh", ctx.attrs.script, tc.busybox, ctx.attrs.gate_runner, report.as_output(), ctx.attrs.dyld_prelude),
         category = "mojo_gate_runner_cases",
     )
     return [DefaultInfo(default_output = report)]
@@ -25,6 +25,8 @@ mojo_gate_runner_cases = rule(
     impl = _impl,
     attrs = {
         "dyld_prelude": attrs.source(default = "komira//tools/build/mojo/darwin:dyld_prelude.sh"),
+        # The darwin-arm64 toolchain's runner (linux runs the gate).
+        "gate_runner": attrs.source(default = "komira//tools/build/mojo:gate_runner.sh"),
         "script": attrs.source(),
         "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
     },

@@ -1,6 +1,6 @@
 """mojo_doc_json: the `mojo doc` JSON of one Mojo library, as a build output.
 
-The action runs the pinned compiler's `mojo doc` through mojo_wrapper.sh
+The action runs the pinned compiler's `mojo doc` through mojo_compile
 (the hermetic environment, the compile watchdog, and its refusal of a
 missing or empty output, or of one holding the action's working directory)
 on the library's staged sources (`[src]` of the mojo_library), with the
@@ -24,6 +24,7 @@ strings. It holds no source location, and no declaration whose name starts
 with `_` (a struct's dunder methods excepted).
 """
 
+load(":defs.bzl", "mojo_compile_cmd")
 load(":providers.bzl", "MojoInfo", "MojoToolchainInfo")
 load(":toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -95,21 +96,13 @@ def _impl(ctx):
     name = ctx.label.name + ".json"
     raw = ctx.actions.declare_output("raw/" + name if checked else name)
     ctx.actions.run(
-        cmd_args(
-            tc.busybox,
-            "sh",
-            tc.wrapper,
-            tc.busybox,
-            tc.compiler,
-            tc.link,
-            tc.cc_target,
-            "--",
+        mojo_compile_cmd(tc, [
             "doc",
             [cmd_args(p, format = "-I{}", parent = 1) for p in pkgs[1:]],
             src[DefaultInfo].default_outputs[0],
             "-o",
             raw.as_output(),
-        ),
+        ], darwin_knobs = False),
         category = "mojo_doc",
     )
     if not checked:
