@@ -13,7 +13,14 @@ The validations a kci stage runs on its steps. Two kinds:
   (`shipped_readme_tool`) and runs it as a child process; without it the
   README is refused, naming the path. A
   library that ships no README, a README with other bytes than its
-  `metadata.json` records, or one with no example is refused. No network at
+  `metadata.json` records, or one with no example is refused. When the
+  library's closure links native files, its installed README ends in a
+  `sh komira-link` block the packer wrote: kci reads it with the same tool
+  (`link`), runs the README with that block's `mojo run` arguments (the
+  environment in place of `$CONDA_PREFIX`), and refuses a block that is not,
+  word for word, what it computes from the release's `depends` and
+  `lib_files` (`closure_link_args`, `readme_link.mojo`): a README missing an
+  owner's `-l` fails the validation. No network at
   all is `INDETERMINATE` (exit 5) with a skip reason, never a pass.
 - **CONDA_INSTALL_SMOKE** (`run_install_smoke`), after a PUBLISH step, reads
   the step's channel anonymously until its index lists each pinned file with
