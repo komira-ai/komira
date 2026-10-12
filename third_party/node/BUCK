@@ -15,6 +15,8 @@ load(":pins.bzl", "NODE", "NPM", "npm_target")
 # consumer is a new line here.
 _TEST_ONLY = [
     "komira//src/tests/helpers/komira_test_node/...",
+    # The Node.js UDF runtime of the UDF runtime spike (worker transport).
+    "komira//src/tests/helpers/komira_udf_spike_node_worker/...",
 ]
 
 # The planted defects of test 54 (tools/build/tests/negative/node), which must

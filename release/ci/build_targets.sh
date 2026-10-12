@@ -12,7 +12,9 @@
 # lints and the tests.
 # Then each test_weld lint among the targets is checked: building one checks
 # nothing, because what it reads (which test files the graph's targets weld)
-# only a BXL script can query (tools/build/lint/test_weld.bzl). Then
+# only a BXL script can query (tools/build/lint/test_weld.bzl). So is each
+# graph check (graph_check, tools/build/selftest/defs.bzl): a query of the
+# build graph whose checker runs over the facts as a build action. Then
 # `buck2 test` runs over the targets of this cell, so a standalone test
 # target runs as `./buck2 test //...` runs it, and each target's `tests` are
 # followed. The tests cell's targets (`tests//...`) are built only, as
@@ -31,6 +33,10 @@ done
 lints=$(buck2 cquery "kind('^test_weld_rule\$', $universe)")
 for lint in $(printf '%s\n' "$lints" | sed 's/ .*//'); do
   buck2 bxl //tools/build/lint/test_weld.bxl:check -- --lint "$lint"
+done
+checks=$(buck2 cquery "kind('^graph_check_rule\$', $universe)")
+for check in $(printf '%s\n' "$checks" | sed 's/ .*//'); do
+  buck2 bxl //tools/build/selftest/graph/checks.bxl:check -- --check "$check"
 done
 count=$#
 i=0
