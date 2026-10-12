@@ -67,12 +67,45 @@ static int32_t row_call(komira_udf_instance* inst, const struct ArrowArray* in, 
 
 /* ---- the column fixtures ------------------------------------------------- */
 
+/* double_batch and fahrenheit_batch: the same functions as double and
+ * fahrenheit, written as a UDF author writes a batch function. The input's
+ * value and validity pointers are read once per batch, the values computed
+ * in one loop over every row (a null row's value is unspecified), and the
+ * null rows marked in a second loop over the validity bitmap. */
+static int32_t scalar_batch(const komira_udf_host* h, int id, const struct ArrowArray* in, struct ArrowArray* o,
+                            komira_udf_error* e) {
+  int64_t n = in->length;
+  if (in->n_children < 1) return fail(h, e, KOMIRA_UDF_ERR_INTERNAL, "a batch fixture got no argument", -1);
+  const struct ArrowArray* x = in->children[0];
+  uint8_t* v;
+  void* d;
+  if (!make_col(h, o, n, &v, &d)) return fail(h, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "call_batch: out of memory", -1);
+  int64_t off = off_of(x);
+  if (id == F_DOUBLE_BATCH) {
+    const int64_t* xs = (const int64_t*)x->buffers[1] + off;
+    int64_t* ds = (int64_t*)d;
+    for (int64_t r = 0; r < n; r++) ds[r] = 2 * xs[r];
+  } else {
+    const double* xs = (const double*)x->buffers[1] + off;
+    double* ds = (double*)d;
+    for (int64_t r = 0; r < n; r++) ds[r] = xs[r] * 1.8 + 32.0;
+  }
+  const uint8_t* xv = (const uint8_t*)x->buffers[0];
+  if (xv != NULL)
+    for (int64_t r = 0; r < n; r++) {
+      int64_t at = off + r;
+      if (!((xv[at >> 3] >> (at & 7)) & 1)) set_null(o, v, r);
+    }
+  return KOMIRA_UDF_OK;
+}
+
 /* `in` is the argument struct; `o` the result. */
 static int32_t scalar(komira_udf_instance* inst, const komira_udf_call* call, const struct ArrowArray* in,
                       struct ArrowArray* o, komira_udf_error* e) {
   const struct fixture* fx = inst->fx;
   const komira_udf_rt* rt = inst->ctx->rt;
   const komira_udf_host* h = rt->host;
+  if (fx->id == F_DOUBLE_BATCH || fx->id == F_FAHRENHEIT_BATCH) return scalar_batch(h, fx->id, in, o, e);
   int64_t n = in->length;
   const struct ArrowArray* x = in->n_children > 0 ? in->children[0] : NULL;
   const struct ArrowArray* y = in->n_children > 1 ? in->children[1] : NULL;
