@@ -16,7 +16,7 @@
 # an INT8 2, a STRING 17, plus 32 per row; cost = rows * width.
 # =============================================================================
 
-from std.testing import TestSuite, assert_equal, assert_false
+from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
@@ -160,6 +160,85 @@ def test_the_left_side_is_read_against_the_left_keys() raises:
     _decides(
         _scan("l", l[0], l[1], 10), _ints("r", rn, 1000),
         JOIN_BUILD_SIDE_LEFT, "left key named a",
+    )
+
+
+def _string_first_then_key(key: String, p: String) -> Tuple[List[String], List[ArrowType]]:
+    """A STRING payload column first, then the key, then three INT64 payload
+    columns: four payload columns, one STRING, so a wide payload."""
+    var n: List[String] = [p + "_s", key, p + "_x", p + "_y", p + "_z"]
+    var t: List[ArrowType] = [
+        ArrowType.STRING, ArrowType.INT64, ArrowType.INT64, ArrowType.INT64,
+        ArrowType.INT64,
+    ]
+    return (n^, t^)
+
+
+def test_a_key_that_is_not_column_zero_is_matched_by_name() raises:
+    """Keys `a` = `b`. R: 10 rows of [r_s STRING, b, r_x, r_y, r_z] (cost
+    850); L: 1000 rows of [a, lv] (cost 50000). By name, R's payload is r_s,
+    r_x, r_y, r_z: four columns, one STRING, so R is wide and the override
+    builds LEFT where the cost says RIGHT. The mirror (the wide side on the
+    left) builds RIGHT where the cost says LEFT, and the predicate says True
+    directly. Catches the key columns taken by position (the first
+    `len(keys)` columns) instead of by name: r_s would be the "key" and the
+    payload all INT64, so the cost would decide."""
+    var keys: List[String] = ["k"]
+    var s = _string_first_then_key("k", "s")
+    assert_true(
+        _side_has_wide_string_build_payload(_scan("s", s[0], s[1], 1), keys),
+        "key in column 1",
+    )
+    var ln: List[String] = ["a", "lv"]
+    var r = _string_first_then_key("b", "r")
+    _decides(
+        _ints("l", ln, 1000), _scan("r", r[0], r[1], 10),
+        JOIN_BUILD_SIDE_LEFT, "right key in column 1",
+    )
+    var rn: List[String] = ["b", "rv"]
+    var l = _string_first_then_key("a", "l")
+    _decides(
+        _scan("l", l[0], l[1], 10), _ints("r", rn, 1000),
+        JOIN_BUILD_SIDE_RIGHT, "left key in column 1",
+    )
+
+
+def _key_named_payload(key: String) -> Tuple[List[String], List[ArrowType]]:
+    """The key, then four payload columns whose names start or end with the
+    key's name: [key, key_s STRING, xkey, key_y, key_z]."""
+    var n: List[String] = [key, key + "_s", "x" + key, key + "_y", key + "_z"]
+    var t: List[ArrowType] = [
+        ArrowType.INT64, ArrowType.STRING, ArrowType.INT64, ArrowType.INT64,
+        ArrowType.INT64,
+    ]
+    return (n^, t^)
+
+
+def test_only_a_column_named_exactly_as_the_key_is_a_key() raises:
+    """Keys `a` = `b`. R: 10 rows of [b, b_s STRING, xb, b_y, b_z]; L: 1000
+    rows of [a, lv]. Only `b` is the key, so R has four payload columns, one
+    STRING: wide, and the override builds LEFT where the cost says RIGHT. The
+    mirror builds RIGHT, and the predicate says True directly. Catches the
+    name match loosened to a prefix (b_s, b_y, b_z would be keys, leaving one
+    payload column), to a suffix (xb would be a key, leaving three) or to a
+    substring (all five would be keys)."""
+    var keys: List[String] = ["k"]
+    var s = _key_named_payload("k")
+    assert_true(
+        _side_has_wide_string_build_payload(_scan("s", s[0], s[1], 1), keys),
+        "payload names share the key's name",
+    )
+    var ln: List[String] = ["a", "lv"]
+    var r = _key_named_payload("b")
+    _decides(
+        _ints("l", ln, 1000), _scan("r", r[0], r[1], 10),
+        JOIN_BUILD_SIDE_LEFT, "right payload shares key name",
+    )
+    var rn: List[String] = ["b", "rv"]
+    var l = _key_named_payload("a")
+    _decides(
+        _scan("l", l[0], l[1], 10), _ints("r", rn, 1000),
+        JOIN_BUILD_SIDE_RIGHT, "left payload shares key name",
     )
 
 

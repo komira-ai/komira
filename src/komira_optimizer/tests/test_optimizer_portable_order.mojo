@@ -19,7 +19,11 @@
 #
 # The exchanges no plan shows, and why each gives the same plan in both
 # orders on every plan tried, are listed in the pull request that added this
-# file; that is what was measured, not a proof for every plan.
+# file; that is what was measured, not a proof for every plan. Step 16 before
+# step 17 is one of them: step 16's build-side rule records `build_side` and
+# adds no Project for step 17 to push a Limit below, and the reorder's own
+# restoring Project is not added below a non-join root
+# (komira-ai/komira#1439).
 # =============================================================================
 
 from std.memory import OwnedPointer
@@ -373,25 +377,12 @@ def _semi_over_three_way_chain() -> LogicalPlan:
     return LogicalPlan.join(abd^, _scan("c", cn, 10), _l1("ak"), _l1("ck"), JOIN_SEMI)
 
 
-# --- Steps 16-17: join order and limits ---
-
-
-def _limit_over_swapped_join() -> LogicalPlan:
-    """Limit 5 over a(10 rows) JOIN b(100000 rows): step 16 swaps the operands
-    and restores the column order with a Project, which step 17 then pushes
-    the Limit below."""
-    var an: List[String] = ["ak", "av"]
-    var bn: List[String] = ["bk", "bv"]
-    var j = LogicalPlan.join(_scan("a", an, 10), _scan("b", bn, 100000), _l1("ak"), _l1("bk"), JOIN_INNER)
-    return LogicalPlan.limit(5, j^)
-
-
 # -----------------------------------------------------------------------------
 # The table: plan i, and the exchange it shows
 # -----------------------------------------------------------------------------
 
 
-comptime _N_PLANS = 17
+comptime _N_PLANS = 16
 
 
 def _plan_name(i: Int) -> String:
@@ -412,7 +403,6 @@ def _plan_name(i: Int) -> String:
         "eager_aggregate_pushdown before absorb_expression_into_aggregate (14), step 14 before step 15: eager_over_a_computing_project",
         "absorb_expression_into_aggregate before convert_inner_to_semi (14), convert_inner_to_semi before materialize_agg_input (15), step 15 before step 16: sum_of_project_over_unique_join",
         "push_semi_reducers_down before reorder_joins_with_dp (16): semi_over_three_way_chain",
-        "step 16 before step 17: limit_over_swapped_join",
     ]
     return names[i]
 
@@ -448,9 +438,7 @@ def _plan_at(i: Int) raises -> LogicalPlan:
         return _eager_over_a_computing_project()
     if i == 14:
         return _sum_of_project_over_unique_join()
-    if i == 15:
-        return _semi_over_three_way_chain()
-    return _limit_over_swapped_join()
+    return _semi_over_three_way_chain()
 
 
 def test_portable_runs_the_passes_in_the_driver_order() raises:
