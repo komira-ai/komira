@@ -1,1 +1,0 @@
-Clone git+ssh://jdoe@corp.zz/r to build.

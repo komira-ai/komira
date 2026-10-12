@@ -17,8 +17,9 @@ caller puts into its own loop: `GcpRetryClassifier` (for a komira_retry
 `RetryLoop`), `PageCursor`, `next_page_token` and `with_page_token`. This
 package defines no request/response type and no send loop for a generated
 client; the only requests it sends are its own token requests
-(token_http.mojo), because the OAuth 2.0 token endpoint and the metadata
-server have no googleapis proto to generate a client from.
+(token_http.mojo) and the token-information read (token_info.mojo), because
+the OAuth 2.0 token and token-information endpoints and the metadata server
+have no googleapis proto to generate a client from.
 
 Token sources: `application_default_token_source` resolves Application
 Default Credentials in Google's order (adc.mojo) and returns a
@@ -76,6 +77,11 @@ komira_retry):
   - token_sources.mojo : the fetchers: `MetadataServerFetcher`,
                       `ServiceAccountKeyFetcher`, `SelfSignedJwtFetcher`,
                       `AuthorizedUserFetcher`.
+  - token_info.mojo : who an access token belongs to: `token_info_request`
+                      (a POST to Google's token-information endpoint),
+                      `parse_token_info`, `fetch_token_info` over a
+                      `GcpHttpTransport`, and `TokenInfo.principal()`. No
+                      googleapis proto declares the endpoint.
   - adc.mojo        : Application Default Credentials: `resolve_adc`,
                       `AdcFetcher`, `application_default_token_source`
                       (and `_with`, over injected seams).
@@ -85,7 +91,8 @@ komira_retry):
 
 Only sources.mojo reads the environment, and only the variables Google's
 auth libraries read (adc.mojo, `adc_env_names()`). The only connections the
-package opens are the token fetches, over the connectors its caller gives.
+package opens are the token fetches and the token-information read, over
+the connectors its caller gives.
 """
 from .token import (
     DEFAULT_REFRESH_BEFORE_MS,
@@ -172,6 +179,14 @@ from .sources import (
     ProcessFiles,
     SystemWallClock,
     WallClock,
+)
+from .token_info import (
+    TOKEN_INFO_HOST,
+    TOKEN_INFO_PATH,
+    TokenInfo,
+    fetch_token_info,
+    parse_token_info,
+    token_info_request,
 )
 from .token_http import (
     GcpConnectorTransport,

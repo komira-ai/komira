@@ -1,0 +1,7 @@
+Error:
+
+   Error looking up configured node komira//src/b:b (prelude//platforms:default#abcdef0123456789)
+	caused   by
+verticalfile-sep  end
+
+derive_checks: BROKEN: the universe query failed
