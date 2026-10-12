@@ -26,7 +26,8 @@ plan may use several runtimes, and every rule below holds for each.
 
 - **Native UDFs run in-process** (`komira/native`, §10.1): no copy, no interpreter and no process per batch. A fault in
   an in-process native UDF ends the engine and fails the run, naming the library (`udf_runtime_interface.md` §1.2,
-  §7). Native UDFs ship only once the launch gates of `udf_runtime_interface.md` §1.2 pass, the next rule among them.
+  §7). Native UDFs ship only once the launch gates of `udf_runtime_interface.md` §1.2 pass, among them the
+  heartbeat-token rule below (gate 1, the run-token case).
 - **The managed runtimes contain crashes and stop user code by force.** `komira/python` and `komira/node` report
   `CONTAINS_CRASHES` and `FORCED_STOP` (`udf_runtime_interface.md` §1.2, §4.2): a crash in user code fails the call
   with `ERR_WORKER_CRASHED` and leaves the engine running, and user code that ignores a cancel or a deadline is

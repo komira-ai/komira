@@ -917,7 +917,7 @@ open windows it discards.
 | A1 | `storage_stack.md` | Rename the per-partition "watermark" and the property `komira.tail.<lineage>.watermarks` to "rolled offsets" (`komira.tail.<lineage>.rolled-offsets`) before it lands; `optimized_plan_sources.md` §15.4.3 renames `wm(p)` to match. |
 | A2 | `optimized_plan.md` §8 | `key_groups` on `WireExchangeNode` and `ExchangeEdge`; a keyed stateful node's `HASH` exchange is placed even when `host_count_max = 1`, and the cut elides it. |
 | A3 | `optimized_plan_udfs.md` §10.3 ("`UdfRef`") | `preserves_event_time` on `UdfRef`. |
-| A4 | `optimized_plan_udfs.md` §10.2-§10.4, §10.7, §10.9, §10.10, §10.13; `optimized_plan.md` §7.1, §7.2, §9.4, §12 | An optional read set on ROW and MAP_BATCHES_FRAME, `UdfRef.read_set = 19` (`UdfReadSet`): unset means every input column; set, possibly empty, means exactly those columns. Replaces "the read set is `arg_types`". No UDF batch is retried at the first release (`udf_runtime_interface.md` §4.5). |
+| A4 | `optimized_plan_udfs.md` §10.2-§10.4, §10.7, §10.9; `optimized_plan_udf_runtime.md` §10.10, §10.13; `optimized_plan.md` §7.1, §7.2, §9.4, §12 | An optional read set on ROW and MAP_BATCHES_FRAME, `UdfRef.read_set = 19` (`UdfReadSet`): unset means every input column; set, possibly empty, means exactly those columns. Replaces "the read set is `arg_types`". No UDF batch is retried at the first release (`udf_runtime_interface.md` §4.5). |
 
 ---
 
