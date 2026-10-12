@@ -48,6 +48,7 @@
 #     structs; it is never stored in a byte-backed slab.
 # =============================================================================
 
+from komira_arrow.arrow_types import ArrowType
 from komira_arrow.record_batch import RecordBatch
 from komira_plan_expr.expr import (
     Expr,
@@ -156,6 +157,9 @@ struct _FastFieldMeta(Copyable, Movable, Deinitable):
     """FF_ENC_FLOAT_FULL marks a float numeric field (a float literal is
     admitted only against a float field; an int literal only against a non-float
     numeric/date field)."""
+    var arrow_type_id: UInt8
+    """The field's Arrow type id: the unit a DATE-class cell is stored in.
+    A date/timestamp literal is admitted only when it is in that unit."""
 
 
 # =============================================================================
@@ -192,7 +196,11 @@ struct FastFieldPushdownGate(Copyable, Movable, Deinitable):
         var reader = FastFieldReader(view)
         for i in range(reader.num_fields()):
             var m = reader.entry_meta_at(i)
-            self._fastfield_meta.append(_FastFieldMeta(m[0], m[1], m[2]))
+            self._fastfield_meta.append(
+                _FastFieldMeta(
+                    m[0], m[1], m[2], reader.entry_arrow_type_id_at(i)
+                )
+            )
 
     @staticmethod
     def from_split_bytes(split_bytes: List[UInt8]) raises -> Self:
@@ -294,9 +302,18 @@ struct FastFieldPushdownGate(Copyable, Movable, Deinitable):
     def _literal_matches_class(self, name: String, lit: ScalarValue) -> Bool:
         """Reject a conjunct whose literal dtype does not match the resolved
         fast-field class. Matrix: KEYWORD field <- string-sentinel literal;
-        NUMERIC-int / DATE field <- int (or date/timestamp) literal; NUMERIC-float
-        field <- float literal. A STRING literal is the DType.invalid + non-empty
-        string_val SENTINEL (see ScalarValue), NOT a real dtype."""
+        NUMERIC-int / DATE field <- int literal; NUMERIC-float field <- float
+        literal; DATE32 field <- date32 literal; TIMESTAMP / TIMESTAMP_US field
+        <- timestamp (microsecond) literal. A STRING literal is the
+        DType.invalid + non-empty string_val SENTINEL (see ScalarValue), NOT a
+        real dtype.
+
+        SearchCore compares a literal's raw value with the raw stored cell, with
+        no unit conversion. So a date or timestamp literal is admitted only
+        against a field stored in the literal's own unit: a DATE literal against
+        a TIMESTAMP field would compare days with microseconds and drop rows
+        inside the scan (komira-ai/komira#1511). Every other pairing is refused
+        and stays in the engine's filter above the scan, which scales it."""
         var mi = self._meta_index(name)
         if mi < 0:
             return False
@@ -308,12 +325,17 @@ struct FastFieldPushdownGate(Copyable, Movable, Deinitable):
             # float numeric field: only a float literal.
             return lit.is_float()
         # int numeric / date field: an int literal, OR a date32 / timestamp
-        # literal (DATE field). Reject string + float + bool + null.
-        return (
-            lit.is_int()
-            or lit.is_date32()
-            or lit.is_timestamp()
-        )
+        # literal in the field's own unit. Reject string + float + bool + null.
+        if lit.is_int():
+            return True
+        if lit.is_date32():
+            return m.arrow_type_id == ArrowType.DATE32.type_id
+        if lit.is_timestamp():
+            return (
+                m.arrow_type_id == ArrowType.TIMESTAMP.type_id
+                or m.arrow_type_id == ArrowType.TIMESTAMP_US.type_id
+            )
+        return False
 
     def _in_list_values_match_class(self, child: Expr, pred: Expr) -> Bool:
         """The literal-dtype check for IN: every value's dtype must match the
