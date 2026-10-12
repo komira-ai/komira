@@ -16,7 +16,16 @@ SHIPS each C library among its direct `deps`.
     its import name;
   * `sonames`: the SONAME of each shared library the closure ships,
     mapped to its import name: the komira owners a packed `.so` may name in
-    `NEEDED` (`komira_pack conda --closure-owner`).
+    `NEEDED` (`komira_pack conda --closure-owner`);
+  * `owner_rank`: for each of those SONAMEs, how many shared libraries the
+    owning library's own closure ships, itself included. An owner that
+    needs another has the higher rank, so ordering by rank, highest first,
+    then by name names dependents first: the order of the link commands
+    the packer writes into the packaged README (`readme_link_names`), which
+    kci computes the same way from the packages' `depends` and `lib_files`
+    (src/kci_validate, readme_link.mojo);
+  * `statics`: the link name of each static archive the closure ships
+    (`lib<name>.a`, komira_log's holder), mapped to its import name.
 
 A library whose closure links a C library no library of the closure ships has
 no conda package (`native_refusal`, read by `_conda_facts` in defs.bzl): a
@@ -58,12 +67,16 @@ def native_facts(ctx, import_name):
     linked = {}
     shipped = {}
     sonames = {}
+    owner_rank = {}
+    statics = {}
     for d in ctx.attrs.deps:
         if MojoInfo in d and d[MojoInfo].native != None:
             facts = d[MojoInfo].native
             linked.update(facts.linked)
             shipped.update(facts.shipped)
             sonames.update(facts.sonames)
+            owner_rank.update(facts.owner_rank)
+            statics.update(facts.statics)
     for c in c_direct:
         linked[c] = True
         if ships:
@@ -72,6 +85,7 @@ def native_facts(ctx, import_name):
     if ctx.attrs.native != None:
         soname = native_soname(import_name)
         sonames[soname] = import_name
+        owner_rank[soname] = len(sonames)
     static = []
     if ctx.attrs.native_static:
         for d in c_deps:
@@ -79,7 +93,16 @@ def native_facts(ctx, import_name):
             if "static-pic" not in subs:
                 fail("{}: native_static: {} has no [static-pic] archive (not a cxx_library?)".format(ctx.label, d.label.raw_target()))
             static.append(["lib/lib{}.a".format(d.label.name), subs["static-pic"][DefaultInfo].default_outputs[0]])
-    return struct(c_direct = c_direct, linked = linked, shipped = shipped, sonames = sonames, soname = soname, static = static)
+            statics[d.label.name] = import_name
+    return struct(c_direct = c_direct, linked = linked, owner_rank = owner_rank, shipped = shipped, sonames = sonames, soname = soname, static = static, statics = statics)
+
+def readme_link_names(facts):
+    """(owners, statics): the link names (what follows `-l`) of the shared
+    libraries the closure ships, dependents first (by `owner_rank`, highest
+    first, then by name), and of its static archives, by name. What the
+    packer writes into the packaged README (tools/build/package/conda.bzl)."""
+    keyed = sorted([(-facts.owner_rank[s], s[len("lib"):-len(".so.1")]) for s in facts.sonames])
+    return [k[1] for k in keyed], sorted(facts.statics.keys())
 
 def native_unshipped(facts):
     """The C libraries the closure links that no library of it ships, sorted."""
