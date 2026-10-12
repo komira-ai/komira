@@ -10,6 +10,8 @@ cover well-formed input; this file covers what they leave out:
   * UUID hex parsing (both copies: pg_binary for binds and pg_types for
     text-format rows): upper-case hex, a bad nibble, an odd digit count and a
     short UUID;
+  * BOOLEAN decoding: the text spellings PostgreSQL accepts, the text it
+    rejects (raised, never read as false) and the one-byte binary body;
   * the TEXT-format PgRow getters (the simple-query path), the integer text
     parser's refusals, the bounds and NULL refusals, and the binary-only
     getters refusing a text row;
@@ -27,6 +29,7 @@ from komira_db_postgres.wire.pg_types import (
     PgRow,
     PgRows,
     PgValue,
+    OID_BOOL,
     OID_INT4,
     OID_INT8,
     OID_TEXT,
@@ -281,9 +284,8 @@ def test_text_row_getters() raises:
     with assert_raises(contains="PgRow: integer text had no digits"):
         _ = _one_text_row(String("+")).get_int4(0)
 
-    # Text-format bool: pg sends 't'/'f'; "true" and "1" are also true, and
-    # "f", "false", "0" are false. Other text (e.g. "T", or an empty non-NULL
-    # cell) is left unpinned: see komira#1113.
+    # Text-format bool: pg sends 't'/'f'; the full spelling set and the
+    # refusals are in test_bool_decoding.
     for t in ["t", "true", "1"]:
         assert_true(_one_text_row(String(t)).get_bool(0), String(t))
     for f in ["f", "false", "0"]:
@@ -306,6 +308,63 @@ def test_text_row_getters() raises:
     with assert_raises(contains="PgRows: row index out of range"):
         _ = rows.row(-1).get_text(0)
     print("  [4] TEXT row getters + int/bounds/NULL/format refusals OK")
+
+
+# =============================================================================
+# 4b. BOOLEAN decoding (komira#1113): text accepts exactly PostgreSQL's boolin
+#     spellings, binary accepts exactly one byte; anything else raises.
+# =============================================================================
+def _one_binary_row(body: List[UInt8]) -> PgRow:
+    """A BINARY-format PgRow (the extended-protocol shape) with one non-NULL
+    column whose wire body is `body`."""
+    var offsets = List[Int]()
+    offsets.append(0)
+    offsets.append(len(body))
+    var nulls = List[Bool]()
+    nulls.append(False)
+    var oids = List[UInt32]()
+    oids.append(OID_BOOL)
+    return PgRow(body.copy(), offsets^, nulls^, oids^, True)
+
+
+def test_bool_decoding() raises:
+    # PostgreSQL boolin: a case-insensitive unique prefix of true/false/yes/no,
+    # exactly on/off, or exactly 1/0, with surrounding whitespace ignored.
+    # Each spelling here is what `SELECT '<s>'::boolean` returns.
+    for t in ["t", "T", "true", "TRUE", "True", "tr", "y", "Y", "yes", "YES",
+              "on", "ON", "On", "1", " t", "true ", "\t\nyes\r\n"]:
+        assert_true(_one_text_row(String(t)).get_bool(0), String(t))
+    for f in ["f", "F", "false", "FALSE", "fa", "n", "N", "no", "NO",
+              "off", "OFF", "Off", "0", "  f  ", "\tno\n"]:
+        assert_false(_one_text_row(String(f)).get_bool(0), String(f))
+    # What boolin rejects ("invalid input syntax for type boolean") must
+    # raise here, never read back as false: an empty non-NULL cell, blanks,
+    # the ambiguous "o", the non-unique "of", a word with trailing junk,
+    # a multi-digit number and an unrelated word.
+    for bad in ["", "   ", "o", "of", "onx", "offf", "truex", "yess", "nope",
+                "2", "10", "01", "x", "t f"]:
+        with assert_raises(contains="PgRow: invalid boolean text"):
+            _ = _one_text_row(String(bad)).get_bool(0)
+
+    # Binary (boolrecv): one byte, zero is false and any other value true.
+    var one = List[UInt8]()
+    one.append(UInt8(1))
+    assert_true(_one_binary_row(one).get_bool(0), "binary 0x01")
+    var zero = List[UInt8]()
+    zero.append(UInt8(0))
+    assert_false(_one_binary_row(zero).get_bool(0), "binary 0x00")
+    var two = List[UInt8]()
+    two.append(UInt8(2))
+    assert_true(_one_binary_row(two).get_bool(0), "binary 0x02")
+    # An empty body and a two-byte body are not a BOOLEAN.
+    with assert_raises(contains="PgRow: BOOLEAN binary body is not 1 byte"):
+        _ = _one_binary_row(List[UInt8]()).get_bool(0)
+    var long_body = List[UInt8]()
+    long_body.append(UInt8(1))
+    long_body.append(UInt8(0))
+    with assert_raises(contains="PgRow: BOOLEAN binary body is not 1 byte"):
+        _ = _one_binary_row(long_body).get_bool(0)
+    print("  [4b] BOOLEAN text spellings, binary width, refusals OK")
 
 
 # =============================================================================
@@ -380,6 +439,7 @@ def main() raises:
     test_text_array_refusals()
     test_uuid_hex_parsing()
     test_text_row_getters()
+    test_bool_decoding()
     test_bytea_body_and_pg_error()
     test_scram_signature_length()
     print("== PASSED ==")
