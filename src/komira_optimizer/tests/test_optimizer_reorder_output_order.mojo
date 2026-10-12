@@ -15,8 +15,11 @@
 # compares them with the query's order and with the root's cached schema.
 #
 # Fixture: (a(100000) JOIN b(10) ON ak = bk) JOIN d(1000) ON bk = dk. Three
-# relations, so the reorder is greedy: b seeds, d joins, then a, and the
-# reordered join emits bk, bv, dk, dv, ak, av.
+# relations, so the reorder is greedy in both walkers: b seeds, d joins, then
+# a, and the reordered join emits bk, bv, dk, dv, ak, av. A second fixture,
+# the four-relation path `_srqp()`, goes to DPccp in the DP walker and gets a
+# different shape there than greedy gives it, so it shows which reorder ran
+# below a pass-through node.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -76,6 +79,36 @@ def _abd() -> LogicalPlan:
     return LogicalPlan.join(
         ab^, _scan("d", "dk", "dv", 1000), _l1("bk"), _l1("dk"), JOIN_INNER
     )
+
+
+def _scan_cols(path: String, names: List[String], rows: Int) -> LogicalPlan:
+    var sb = SchemaBuilder()
+    for i in range(len(names)):
+        sb.add_field(Field(names[i], ArrowType.INT64, False))
+    return LogicalPlan.scan(path, SOURCE_PARQUET, sb.build(), None, None, rows)
+
+
+def _srqp() -> LogicalPlan:
+    """((s(20) JOIN r(1000000) ON sk = rs) JOIN q(1000000) ON rq = qr)
+    JOIN p(10) ON qp = pk: the path s - r - q - p, every edge on its own
+    key pair. Four relations, so the root goes to DPccp; greedy seeds p and
+    can only build a left-deep tree."""
+    var sr = LogicalPlan.join(
+        _scan_cols("s", ["sk"], 20), _scan_cols("r", ["rs", "rq"], 1000000),
+        _l1("sk"), _l1("rs"), JOIN_INNER,
+    )
+    var srq = LogicalPlan.join(
+        sr^, _scan_cols("q", ["qr", "qp"], 1000000),
+        _l1("rq"), _l1("qr"), JOIN_INNER,
+    )
+    return LogicalPlan.join(
+        srq^, _scan_cols("p", ["pk"], 10), _l1("qp"), _l1("pk"), JOIN_INNER
+    )
+
+
+comptime _SRQP_QUERY = "sk,rs,rq,qr,qp,pk"
+comptime _SRQP_DP_SHAPE = "(s,(r,(q,p)))"
+comptime _SRQP_GREEDY_SHAPE = "(((p,q),r),s)"
 
 
 def _query_order() -> List[String]:
@@ -243,6 +276,29 @@ def test_dp_walker_adds_nothing_under_a_by_name_parent() raises:
     assert_true(_first_leaf(agg) == "b")
 
 
+def test_dp_walker_runs_dpccp_below_each_pass_through_node() raises:
+    """Filter, Sort, Limit, Distinct and TopN over the four-relation chain
+    `_srqp()`: below each, the join has DPccp's shape, not greedy's, and the
+    node still emits the query's order. The same five nodes through the
+    greedy walker give greedy's shape, so the fixture tells the two apart.
+
+    Defect caught: the pass-through arms' reorder handed to the greedy
+    walker (that node's join comes back in greedy's shape)."""
+    var tags = _wrap_tags()
+    for k in range(5):
+        var dp = reorder_joins_with_dp(_wrap(k, _srqp()))
+        assert_equal(dp.tag, tags[k])
+        assert_equal(_shape(dp), _SRQP_DP_SHAPE)
+        assert_equal(_emitted(dp), _SRQP_QUERY)
+        assert_equal(_cached(dp), _SRQP_QUERY)
+        var greedy = reorder_joins(_wrap(k, _srqp()))
+        assert_equal(greedy.tag, tags[k])
+        assert_equal(_shape(greedy), _SRQP_GREEDY_SHAPE)
+        assert_equal(_emitted(greedy), _SRQP_QUERY)
+        assert_equal(_cached(greedy), _SRQP_QUERY)
+    assert_true(_SRQP_DP_SHAPE != _SRQP_GREEDY_SHAPE)
+
+
 # -----------------------------------------------------------------------------
 # reorder_joins (the greedy-only walker)
 # -----------------------------------------------------------------------------
@@ -260,6 +316,27 @@ def test_greedy_walker_keeps_the_order_below_each_pass_through_node() raises:
         assert_equal(_emitted(out), _want())
         assert_equal(_cached(out), _want())
         assert_true(_first_leaf(out) == "b")
+
+
+def test_greedy_walker_adds_nothing_under_a_by_name_parent() raises:
+    """The by-name check, through `reorder_joins`: the reordered join sits
+    directly under a Project and under an Aggregate.
+
+    Defect caught: the greedy walker's Project or Aggregate arm restoring
+    the order (a Project between that parent and the join)."""
+    var pe = ExprArray()
+    pe.append(Expr.col_ref("dv"))
+    var proj = reorder_joins(LogicalPlan.project(pe^, _abd()))
+    assert_equal(proj.project_data_ref().child[].tag, PLAN_JOIN)
+    assert_true(_first_leaf(proj) == "b")
+    var keys = ExprArray()
+    keys.append(Expr.col_ref("ak"))
+    var aggs = AggExprArray()
+    var none_arg: Optional[Expr] = None
+    aggs.append(AggExpr(AGG_COUNT, none_arg^, Optional[String](String("n"))))
+    var agg = reorder_joins(LogicalPlan.aggregate(keys^, aggs^, _abd()))
+    assert_equal(agg.aggregate_data_ref().child[].tag, PLAN_JOIN)
+    assert_true(_first_leaf(agg) == "b")
 
 
 def _first_leaf(plan: LogicalPlan) -> String:
@@ -280,6 +357,29 @@ def _first_leaf(plan: LogicalPlan) -> String:
         return _first_leaf(plan.distinct_data_ref().child[])
     if plan.tag == PLAN_TOPN:
         return _first_leaf(plan.topn_data_ref().child[])
+    return plan.scan_data_ref().source_path
+
+
+def _shape(plan: LogicalPlan) -> String:
+    """The join tree's shape as nested pairs of scan paths, looking through
+    every single-child node."""
+    if plan.tag == PLAN_JOIN:
+        return (
+            "(" + _shape(plan.join_data_ref().left[]) + ","
+            + _shape(plan.join_data_ref().right[]) + ")"
+        )
+    if plan.tag == PLAN_PROJECT:
+        return _shape(plan.project_data_ref().child[])
+    if plan.tag == PLAN_FILTER:
+        return _shape(plan.filter_data_ref().child[])
+    if plan.tag == PLAN_SORT:
+        return _shape(plan.sort_data_ref().child[])
+    if plan.tag == PLAN_LIMIT:
+        return _shape(plan.limit_data_ref().child[])
+    if plan.tag == PLAN_DISTINCT:
+        return _shape(plan.distinct_data_ref().child[])
+    if plan.tag == PLAN_TOPN:
+        return _shape(plan.topn_data_ref().child[])
     return plan.scan_data_ref().source_path
 
 
