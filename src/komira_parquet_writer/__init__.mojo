@@ -1,4 +1,4 @@
-"""`komira_parquet_writer`: the pieces a Parquet writer is built from.
+"""`komira_parquet_writer`: a Parquet writer's encoders and page builders.
 
 The Thrift compact serializer for the footer, page headers and page indexes
 (`thrift_writer`), the PageHeader i32 ceiling (`page_size_limit`), the
@@ -8,8 +8,15 @@ DOUBLE), the dictionary encoders (`dict_encoder` for strings,
 (`writer_bitpack`), the page index tracker (`writer_page_index`) and the
 shared helpers (`writer_helpers`: page-body compression, schema builders).
 
-It writes no file: the record-batch writer that assembles pages into a file
-and returns the file's metadata is a later part of this package. It reads no
+The page builders turn one Arrow column into one column chunk's pages
+(`ColumnPage`, `column_page`): PLAIN (`writer_encode`: fixed-width,
+BYTE_ARRAY, BOOLEAN, and the definition levels), DELTA_BINARY_PACKED
+(`writer_delta`), BYTE_STREAM_SPLIT (`writer_bss`), dictionary pages
+(`writer_dict`, `writer_dict_numeric`) and Decimal128 as
+FIXED_LEN_BYTE_ARRAY(16) (`decimal_encode`).
+
+It writes no file: the writer that assembles column chunks into a file and
+returns the file's metadata is a later part of this package. It reads no
 Parquet file either, and does not depend on the reader (`komira_parquet`).
 """
 
@@ -56,4 +63,40 @@ from .writer_helpers import (
     make_int64_statistics,
     make_schema_elements,
     make_schema_elements_nullable,
+)
+from .column_page import ColumnPage, dtype_to_parquet_type
+from .writer_encode import (
+    encode_boolean_column_page,
+    encode_def_levels_all_valid,
+    encode_def_levels_from_bitmap,
+    encode_large_string_column_page,
+    encode_plain_boolean_data,
+    encode_plain_byte_array_data,
+    encode_plain_byte_array_data_large,
+    encode_plain_column,
+    encode_plain_values,
+    encode_string_column_page,
+)
+from .writer_delta import (
+    encode_dbp_column_page,
+    encode_delta_binary_packed_i32,
+    encode_delta_binary_packed_i64,
+)
+from .writer_bss import encode_bss_column_page, encode_byte_stream_split
+from .writer_dict import (
+    DICT_CARDINALITY_THRESHOLD,
+    encode_dict_indices_rle,
+    encode_dict_large_string_column_page,
+    encode_dict_string_column_page,
+    encode_dict_values_plain,
+    write_dictionary_page_header,
+)
+from .writer_dict_numeric import (
+    encode_dict_numeric_column_page,
+    encode_dict_values_plain_numeric,
+)
+from .decimal_encode import (
+    decimal128_schema_element,
+    encode_decimal128_column_page,
+    patch_decimal_schema_elements,
 )

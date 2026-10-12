@@ -203,7 +203,7 @@ komira//src/komira_udf:komira_udf	src/komira_udf	library	OK	118	674	36	36	yes	co
 komira//src/komira_uuid:komira_uuid	src/komira_uuid	library	OK	123	129	75	84	yes	conda	-	-
 komira//src/komira_validation_run:komira_validation_run	src/komira_validation_run	library	OK	67	67	-	-	no	release	-	-
 komira//src/komira_vcard:komira_vcard	src/komira_vcard	library	OK	609	641	-	-	no	release	-	-
-komira//src/komira_viewport:komira_viewport	src/komira_viewport	library	OK	461	522	-	-	no	conda	-	-
+komira//src/komira_viewport:komira_viewport	src/komira_viewport	library	OK	531	531	-	-	no	conda	-	-
 komira//src/komira_webpush:komira_webpush	src/komira_webpush	library	OK	321	321	-	-	no	conda	-	-
 komira//src/komira_wkt:komira_wkt	src/komira_wkt	library	OK	809	810	551	556	yes	release	-	-
 komira//src/komira_wkt:value_null_proto	src/komira_wkt	library	OK	0	0	-	-	no	conda	-	-
