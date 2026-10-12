@@ -58,7 +58,7 @@ in the generator. A repository lint fails if you do.
 comptime PLAN_WIRE_UNSPECIFIED_VALUE: Int32 = 0
 """Wire 0, in every space. Never a valid tag."""
 
-comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 352
+comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 353
 """Total published members across all 32 spaces. A drift tripwire a test can pin."""
 
 comptime PLAN_WIRE_SPACE_COUNT: Int = 32
@@ -67,25 +67,34 @@ comptime PLAN_WIRE_SPACE_COUNT: Int = 32
 
 # ==========================================================================
 # PlanTag — engine prefix `PLAN_`
-# LogicalPlan node kind. ONE declaration site, logical_plan.mojo (0-15).
+# LogicalPlan node kind. ONE declaration site, logical_plan.mojo (0-15, 18).
 # 16-17 were the ROW<->COLUMN converts and are DELETED; their numbers stay
 # burned.
 # Declared in: src/komira_plan_ir/logical_plan.mojo
+#
+# EXEMPT — declared by the engine and named here, but its wire number
+# is RESERVED in plan_vocabulary.proto, so `plan_tag_to_wire` and
+# `plan_tag_from_wire` both refuse it (`_plan_tag_is_reserved_on_wire`).
+# Each row is a debt with a named blocker; the row disappears when it is
+# paid.
+#   PLAN_EXCHANGE: plan.proto has no `exchange` message arm yet
+#     (docs/design/optimized_plan.md §12, stage 3), so no plan bytes can
+#     carry the node
 # ==========================================================================
 
-comptime PLAN_TAG_WIRE_MEMBERS: Int = 16
+comptime PLAN_TAG_WIRE_MEMBERS: Int = 17
 comptime PLAN_TAG_ENGINE_MIN: UInt8 = 0
-comptime PLAN_TAG_ENGINE_MAX: UInt8 = 15
+comptime PLAN_TAG_ENGINE_MAX: UInt8 = 18
 comptime PLAN_TAG_WIRE_MIN: Int32 = 1
-comptime PLAN_TAG_WIRE_MAX: Int32 = 16
+comptime PLAN_TAG_WIRE_MAX: Int32 = 19
 
 
 def plan_tag_is_declared(engine_tag: UInt8) -> Bool:
     """Does the engine declare this PlanTag value?
 
-    Runs: [(0, 15)]. Total, never raising.
+    Runs: [(0, 15), (18, 18)]. Total, never raising.
     """
-    return engine_tag <= 15
+    return engine_tag <= 15 or engine_tag == 18
 
 
 def plan_tag_to_wire(engine_tag: UInt8) raises -> Int32:
@@ -97,7 +106,20 @@ def plan_tag_to_wire(engine_tag: UInt8) raises -> Int32:
     if not plan_tag_is_declared(engine_tag):
         raise Error("PlanTag: engine tag " + String(Int(engine_tag))
             + " is not in the plan wire vocabulary")
+    if _plan_tag_is_reserved_on_wire(engine_tag):
+        raise Error("PlanTag: engine tag " + String(Int(engine_tag)) + " ("
+            + plan_tag_wire_name(Int32(Int(engine_tag)) + 1)
+            + ") is reserved on the wire: plan_vocabulary.proto keeps it off")
     return Int32(Int(engine_tag)) + 1
+
+
+def _plan_tag_is_reserved_on_wire(engine_tag: UInt8) -> Bool:
+    """The EXEMPT row above: PLAN_EXCHANGE (18).
+
+    The engine declares it, so `plan_tag_is_declared` is true for it;
+    plan_vocabulary.proto reserves its wire number (19), so neither
+    direction may carry it."""
+    return engine_tag == 18
 
 
 def plan_tag_from_wire(wire: Int32) raises -> UInt8:
@@ -119,6 +141,10 @@ def plan_tag_from_wire(wire: Int32) raises -> UInt8:
     if not plan_tag_is_declared(engine_tag):
         raise Error("PlanTag: wire value " + String(Int(wire))
             + " is unknown to this reader")
+    if _plan_tag_is_reserved_on_wire(engine_tag):
+        raise Error("PlanTag: wire value " + String(Int(wire)) + " ("
+            + plan_tag_wire_name(wire)
+            + ") is reserved: plan_vocabulary.proto keeps it off the wire")
     return engine_tag
 
 
@@ -183,6 +209,9 @@ def write_plan_tag_wire_name[W: Writer](mut writer: W, wire: Int32):
         return
     if wire == 16:
         writer.write("PLAN_CAST_TO_VARCHAR")
+        return
+    if wire == 19:
+        writer.write("PLAN_EXCHANGE")
         return
     writer.write("PlanTag#", Int(wire))
 
@@ -4194,7 +4223,7 @@ def plan_wire_space_name(space: Int) -> String:
 def plan_wire_space_member_count(space: Int) raises -> Int:
     """How many members a space publishes. RAISES on a bad index."""
     if space == 0:
-        return 16
+        return 17
     if space == 1:
         return 27
     if space == 2:
@@ -4263,7 +4292,7 @@ def plan_wire_space_member_count(space: Int) raises -> Int:
 def plan_wire_space_engine_max(space: Int) raises -> UInt8:
     """The highest engine value a space declares."""
     if space == 0:
-        return 15
+        return 18
     if space == 1:
         return 26
     if space == 2:

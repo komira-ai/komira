@@ -30,7 +30,8 @@ is `LC_ALL=C` and `TZ=UTC0` (a POSIX rule: local time is UTC and the C
 library reads no zone file for it); a `py_test`'s and a `python_oracle`'s
 also has `TZDIR`, the `zoneinfo` directory of its `tzdata` wheel, which
 `pyrun.py` and `oracle_run.py` make Python's only zone path, so no zone is
-read from the worker. An oracle's script runs in a child interpreter
+read from the worker. A `py_test` that `-c komira.rerun` names also has
+`KOMIRA_RERUN` (tools/build/rerun/README.md). An oracle's script runs in a child interpreter
 `oracle_run.py` starts with `-s -S -P` instead (no user site directory, no
 `site`, no script directory put first by the interpreter) and the
 environment `LC_ALL=C PYTHONHASHSEED=0 TZ=UTC0 TZDIR=<absolute>` and nothing
@@ -45,6 +46,7 @@ load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:test_runtime.bzl", "data_map")
 load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 PythonDistInfo = provider(
     doc = "An unpacked CPython: its root directory and the interpreter's path in it.",
@@ -252,8 +254,9 @@ def _py_test_impl(ctx):
     tzdata = ctx.attrs.tzdata[PythonWheelInfo].closure[ctx.attrs.tzdata[PythonWheelInfo].name][1]
     env = dict(_ENV)
     env["TZDIR"] = cmd_args(tzdata, format = "{}/tzdata/zoneinfo")
+    env.update(rerun_env(ctx))
     ctx.actions.run(cmd, env = env, category = "py_test")
-    return [DefaultInfo(default_output = out, other_outputs = [tmp])]
+    return [DefaultInfo(default_output = out, other_outputs = [tmp]), rerun_info(ctx)]
 
 _py_test = rule(
     impl = _py_test_impl,
@@ -267,7 +270,7 @@ _py_test = rule(
         "srcs": attrs.list(attrs.source(), default = []),
         "tzdata": attrs.exec_dep(providers = [PythonWheelInfo], default = "komira//third_party/python:tzdata"),
         "_runner": attrs.source(default = "komira//tools/build/python:pyrun.py"),
-    },
+    } | RERUN_ATTRS,
 )
 
 # ---- python_oracle -----------------------------------------------------------

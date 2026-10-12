@@ -1,21 +1,28 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The sort kernels of the engine: stable sorts of a key column into a
-# permutation (merge sort per key DType, LSD radix sort over 64-bit keys),
-# top-K heap selection, and the loser tree that k-way merges sorted runs.
-# Float keys sort in DuckDB's total order (NaN above +inf).
+# permutation (merge sort per key DType, LSD radix sort over 64-bit keys,
+# STRING/BINARY, nested types), multi-key sorts of a RecordBatch, top-K heap
+# selection, and the loser tree that k-way merges sorted runs. Float keys
+# sort in DuckDB's total order (NaN above +inf).
 mojo_library(
     name = "komira_op_sort",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_arrow:komira_arrow",
         "//src/komira_buffer:komira_buffer",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_counters:komira_counters",
     ],
     test_srcs = [
         "tests/test_engine_sort.mojo",
         "tests/test_sort_float_total_order.mojo",
+        "tests/test_sort_indices_nested.mojo",
+        "tests/test_sort_lex_multikey.mojo",
         "tests/test_sort_loser_tree.mojo",
+        "tests/test_sort_nested_leaf_order.mojo",
         "tests/test_sort_skip_pass.mojo",
+        "tests/test_sort_string_prefix_key.mojo",
     ],
     visibility = ["PUBLIC"],
 )
