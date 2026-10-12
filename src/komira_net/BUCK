@@ -16,6 +16,7 @@ mojo_library(
         "tests/test_dns_resolve.mojo",
         "tests/test_dns_literal_edges.mojo",
         "tests/test_dns_resolve_errors.mojo",
+        "tests/test_dns_transient.mojo",
     ],
     visibility = ["PUBLIC"],
 )

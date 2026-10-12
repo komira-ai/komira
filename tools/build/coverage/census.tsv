@@ -147,7 +147,7 @@ komira//src/komira_metrics:komira_metrics	src/komira_metrics	library	OK	896	922	
 komira//src/komira_metrics_reader:komira_metrics_reader	src/komira_metrics_reader	library	OK	572	588	-	-	no	conda	-	-
 komira//src/komira_morsel:komira_morsel	src/komira_morsel	library	OK	1515	1575	-	-	no	conda	-	-
 komira//src/komira_name_registry:komira_name_registry	src/komira_name_registry	library	OK	53	63	24	32	yes	release	-	-
-komira//src/komira_net:komira_net	src/komira_net	library	OK	106	106	-	-	no	conda	-	-
+komira//src/komira_net:komira_net	src/komira_net	library	OK	109	109	-	-	no	conda	-	-
 komira//src/komira_objectstore:komira_objectstore	src/komira_objectstore	library	OK	2819	3370	-	-	no	conda	src/komira_objectstore/presign.mojo,src/komira_objectstore/request_core.mojo,src/komira_objectstore/shared_in_memory_latency_store.mojo,src/komira_objectstore/store_readiness.mojo	-
 komira//src/komira_objectstore_gcs:komira_objectstore_gcs	src/komira_objectstore_gcs	library	OK	901	958	-	-	no	conda	src/komira_objectstore_gcs/backend.mojo	-
 komira//src/komira_objectstore_s3:komira_objectstore_s3	src/komira_objectstore_s3	library	OK	1138	1194	-	-	no	conda	-	-

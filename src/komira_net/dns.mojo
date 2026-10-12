@@ -408,9 +408,9 @@ def _getaddrinfo_collect(host: String, port: UInt16) raises -> List[IpAddr]:
                 + "' (EAI_NONAME)"
             )
         elif rc == _EAI_AGAIN:
-            raise Error(  # cov: unreachable EAI_AGAIN needs a resolver that times out; no hermetic test can make getaddrinfo return it
-                "DnsError[TRANSIENT]: temporary failure resolving '" + host  # cov: unreachable see the line above
-                + "' (EAI_AGAIN)"  # cov: unreachable see the line above
+            raise Error(
+                "DnsError[TRANSIENT]: temporary failure resolving '" + host
+                + "' (EAI_AGAIN)"
             )
         else:
             raise Error(

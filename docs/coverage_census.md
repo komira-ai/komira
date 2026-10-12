@@ -24,7 +24,7 @@ target: they are listed for information at the end, with no floor.
 | Libraries (under `src/`, not `src/tests/`) | 209 |
 | Measured | 206 |
 | Not measured (a run or the gate failed; floor 0) | 3 |
-| Line coverage, all measured libraries | 90.29% (180368/199750) |
+| Line coverage, all measured libraries | 90.29% (180371/199753) |
 | Median line coverage (lower middle) | 97.15% |
 | At 100% / 90% to 100% / 50% to 90% / under 50% / no line | 48 / 66 / 43 / 3 / 46 |
 | Branch coverage of the libraries with branch records (40) | 89.78% (6847/7626) |
@@ -184,7 +184,7 @@ branch, `-` for none, *pinned* when set by hand ([Pinned floors](#pinned-floors)
 | 141 | `src/komira_kg_code/tests/fixtures/repo:kgfix` | 100.00% (5/5) | 0 | not gated | 0 | no | 100.00% / - |
 | 142 | `src/komira_kg_code:komira_kg_code` | 100.00% (684/684) | 0 | not gated | 0 | conda | 100.00% / - |
 | 143 | `src/komira_mail_message:komira_mail_message` | 100.00% (1453/1453) | 0 | not gated | 0 | release | 100.00% / - |
-| 144 | `src/komira_net:komira_net` | 100.00% (106/106) | 0 | not gated | 0 | conda | 100.00% / - |
+| 144 | `src/komira_net:komira_net` | 100.00% (109/109) | 0 | not gated | 0 | conda | 100.00% / - |
 | 145 | `src/komira_oci:komira_oci` | 100.00% (1678/1678) | 0 | not gated | 0 | conda | 100.00% / - |
 | 146 | `src/komira_parquet_api:komira_parquet_api` | 100.00% (265/265) | 0 | 100.00% (124/124) | 0 | release | 100.00% / 100.00% |
 | 147 | `src/komira_protobuf:komira_protobuf` | 100.00% (308/308) | 0 | 100.00% (106/106) | 0 | release | 100.00% / 100.00% |

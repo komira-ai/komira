@@ -2,15 +2,18 @@
 # test_dns_resolve_errors.mojo
 # =============================================================================
 # resolve_host past the literal fast path: a name getaddrinfo resolves
-# (one target per A record, each with the caller's port), the DnsError class
-# of each getaddrinfo failure the test can cause, and the fast path never
-# reaching getaddrinfo. Linux only, like test_dns_resolve.mojo: the failures
+# (one target per A record, each with the caller's port), one record per
+# address (the SOCK_STREAM hint), the DnsError class of each getaddrinfo
+# failure the test can cause, and the fast path never reaching getaddrinfo. Linux only, like test_dns_resolve.mojo: the failures
 # are glibc's codes, and on another platform these tests do nothing.
 #
 # Offline: "LOCALHOST" is not an exact loopback alias, so it goes to
 # getaddrinfo, and glibc's hosts-file lookup matches names case-insensitively
 # ("localhost" is in every hosts file). The `.invalid` TLD is reserved
-# (RFC 2606). A system error is caused by lowering RLIMIT_NOFILE to the lowest
+# (RFC 2606), but glibc still asks the configured resolver, so the NXDOMAIN
+# test accepts a TRANSIENT answer from a resolver that does not reply and says
+# so; the TRANSIENT class itself is pinned hermetically by
+# test_dns_transient.mojo. A system error is caused by lowering RLIMIT_NOFILE to the lowest
 # free descriptor, so the resolver cannot open the hosts file; the limit is
 # restored before any assertion can raise.
 # =============================================================================
@@ -20,7 +23,6 @@ from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_true
 
 from komira_net.dns import _getaddrinfo_collect, resolve_host
-from komira_async.reactor.socket_setup import inet_loopback_be
 
 
 comptime _RLIMIT_NOFILE_LINUX: Int32 = 7
@@ -73,13 +75,26 @@ def test_a_resolved_name_gives_one_target_per_a_record() raises:
     comptime if CompilationTarget.is_linux():
         var addrs = _getaddrinfo_collect(String("LOCALHOST"), UInt16(8080))
         assert_true(len(addrs) >= 1)
-        var targets = resolve_host(String("LOCALHOST"), UInt16(8080))
-        assert_equal(len(targets), len(addrs))
-        for i in range(len(targets)):
-            assert_equal(Int(targets[i].ip.v4_be), Int(addrs[i].v4_be))
-            assert_equal(Int(targets[i].ip.v4_be), Int(inet_loopback_be()))
-            assert_true(targets[i].ip.is_ipv4())
-            assert_equal(Int(targets[i].port), 8080)
+        for p in range(2):
+            var port = UInt16(8080) if p == 0 else UInt16(1)
+            var targets = resolve_host(String("LOCALHOST"), port)
+            assert_equal(len(targets), len(addrs))
+            for i in range(len(targets)):
+                assert_equal(Int(targets[i].ip.v4_be), Int(addrs[i].v4_be))
+                # In 127.0.0.0/8: the first octet is the low byte of v4_be.
+                assert_equal(Int(targets[i].ip.v4_be & UInt32(0xFF)), 127)
+                assert_true(targets[i].ip.is_ipv4())
+                assert_equal(Int(targets[i].port), Int(port))
+
+
+def test_a_numeric_host_gives_one_record() raises:
+    """A dotted quad handed straight to getaddrinfo (no hosts file, no DNS)
+    yields exactly one record: the SOCK_STREAM hint keeps the DGRAM and RAW
+    duplicates of the same address out of the list."""
+    comptime if CompilationTarget.is_linux():
+        var addrs = _getaddrinfo_collect(String("192.0.2.7"), UInt16(80))
+        assert_equal(len(addrs), 1)
+        assert_equal(Int(addrs[0].v4_be), 0x070200C0)
 
 
 def test_nxdomain_is_classified_as_nxdomain() raises:
@@ -87,8 +102,20 @@ def test_nxdomain_is_classified_as_nxdomain() raises:
     not the generic failure)."""
     comptime if CompilationTarget.is_linux():
         var host = String("komira-nonexistent.invalid")
+        var msg = _message(host, UInt16(80))
+        var transient = (
+            String("DnsError[TRANSIENT]: temporary failure resolving '")
+            + host
+            + "' (EAI_AGAIN)"
+        )
+        if msg == transient:
+            print(
+                "SKIP test_nxdomain_is_classified_as_nxdomain: the build"
+                " machine's resolver did not answer (EAI_AGAIN)"
+            )
+            return
         assert_equal(
-            _message(host, UInt16(80)),
+            msg,
             String("DnsError[NXDOMAIN]: no such host '")
             + host
             + "' (EAI_NONAME)",
@@ -130,6 +157,7 @@ def test_the_literal_fast_path_never_calls_getaddrinfo() raises:
 
 def main() raises:
     test_a_resolved_name_gives_one_target_per_a_record()
+    test_a_numeric_host_gives_one_record()
     test_nxdomain_is_classified_as_nxdomain()
     test_a_system_error_is_resolve_failed_with_its_code()
     test_the_literal_fast_path_never_calls_getaddrinfo()
