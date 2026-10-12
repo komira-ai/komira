@@ -1,0 +1,69 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# test_client refuses an RS256 client key: komira_http_core's 2048-bit RSA
+# test key (PKCS#8 PEM, exported there).
+_RSA_KEY = {
+    "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+}
+
+# OAuth 2.0 for a service that is a client of an issuer: the
+# `client_credentials` grant (RFC 6749 section 4.4) with `private_key_jwt`
+# client authentication (RFC 7523 section 2.2) and a `resource` (RFC 8707);
+# `ClientCredentialSource`, which fetches a token on first use, refreshes it
+# 60 s before it expires and never serves a token after a failed refresh; the
+# token endpoint's wire (form-encoded request, JSON answer and error); the
+# authorization server metadata (RFC 8414); and the client registration
+# record shaped as RFC 7591 client metadata. The token endpoint is reached
+# through a one-method transport trait, so the package holds no HTTP stack.
+#
+# The welded tests:
+# - test_form: the form encoding byte for byte and every parse refusal at its
+#   boundary.
+# - test_token_wire: the exact request and answer bytes; every refusal of
+#   the request parse with its error code, and of the answer parse; the error
+#   code read from an error body, which never repeats another byte.
+# - test_metadata: the RFC 8414 well-known URL (the RFC's own example), the
+#   document's exact bytes, its round trip, and each refusal.
+# - test_client_metadata: the golden record in the RFC 7591 section 3.1
+#   shape, its round trip, the RFC's own section 3.1 examples (read up to
+#   their auth method), and each refusal.
+# - test_client: over a scripted transport, the exact request on the wire
+#   with an assertion that komira_jose verifies (it has a jti), each failure
+#   message, and the source's refresh rule: a token served until 60 s before
+#   it expires, fetched again from then on, and never served after a failed
+#   refresh.
+# - test_no_product_vocabulary: the sources name no product concept and hold
+#   no early date (komira_test_vocabulary).
+mojo_library(
+    name = "komira_oauth",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_jose:komira_jose",
+        "//src/komira_json:komira_json",
+        "//src/komira_jwks:komira_jwks",
+        "//src/komira_secret_store:komira_secret_store",
+    ],
+    test_srcs = [
+        "tests/test_client.mojo",
+        "tests/test_client_metadata.mojo",
+        "tests/test_form.mojo",
+        "tests/test_metadata.mojo",
+        "tests/test_no_product_vocabulary.mojo",
+        "tests/test_token_wire.mojo",
+    ],
+    test_deps = ["//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary"],
+    test_data = {
+        "tests/test_client.mojo": _RSA_KEY,
+        # The golden records and the RFC 7591 section 3.1 examples.
+        "tests/test_client_metadata.mojo": glob(["tests/golden/*.json"]),
+        # The vocabulary test reads the library's own sources, staged at their
+        # repository paths.
+        "tests/test_no_product_vocabulary.mojo": glob(
+            ["**/*.mojo"],
+            exclude = ["tests/**/*.mojo"],
+        ),
+    },
+    visibility = ["PUBLIC"],
+)

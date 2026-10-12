@@ -1,6 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
 
-# A level `mojo build` does not accept must fail analysis (test 30).
+# A level `mojo build` does not accept must fail analysis
+# (//tools/build/selftest:analysis_refusals_mojo).
 
 # RED at analysis: not a level `mojo build` accepts.
 mojo_binary(

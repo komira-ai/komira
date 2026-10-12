@@ -23,8 +23,9 @@
 #      (validations of the binaries), is the pull-request check's.
 #   2. The gate: tests//negative/libgate_bad fails with GATED TEST FAILED, while its
 #      [ungated] package builds -- the red comes from the test, not the compile.
-#      A binary depending on it fails the same way, and a binary naming its
-#      [ungated] sub-target in `deps` fails analysis (no gate bypass).
+#      A binary depending on it fails the same way. (A binary naming its
+#      [ungated] sub-target in `deps` is refused at analysis:
+#      //tools/build/selftest:analysis_refusals_mojo.)
 #   3. Packages reach the compiler only through `deps`: a binary importing
 #      hellopkg without depending on it fails to compile.
 #   4. The toolchain refuses an incomplete closure (exit 2) instead of falling
@@ -56,10 +57,7 @@
 #      machine from a fresh clone, downloads only the binary and its runtime libraries, and
 #      the runnable directory still starts after it is moved
 #      (tools/build/tests/functional/buck2_run.sh; skipped with --no-run).
-#  10. Execution platforms: Mojo compiles, gated tests and run checks,
-#      toolchain unpack/copy targets, and third_party_srcs generation, drift
-#      test and fixture archive all resolve to the one linux execution
-#      platform, `linux-x86_64`.
+#  10. (A self-test scenario: //tools/build/selftest:exec_platforms.)
 #  12. Every action runs with the one linux property set, read per action:
 #      an uncached build of //tools/build/examples:hello and
 #      //tools/build/third_party_srcs:aws_lc_mini_gen (its own daemon under a
@@ -147,19 +145,15 @@
 #      exiting 77 (SKIP to some harnesses) fails; a red test stays
 #      red with test_env {BIN: true} (library) and env {BIN: true} (mojo_test);
 #      (the runner's own cases, tests//functional/test_data:runner_cases, are
-#      in the gate, its action holding the report to a floor); five
-#      inadmissible data/env
-#      declarations are refused at analysis. A library's `test_deps`
+#      in the gate, its action holding the report to a floor). A library's `test_deps`
 #      (tests//functional/test_deps) reach its welded tests: a test imports a
 #      test-support package the library does not depend on; and nothing else
 #      (tests//negative/test_deps): the library's source and a consumer of
-#      the library importing it fail to compile, and an entry that is not a
-#      mojo_library, or is also in `deps`, is refused at analysis.
-#  30. Optimization levels, read from each compile command (buck2 aquery,
-#      analysis only): mojo_test and a mojo_library's gated tests at -O1,
-#      mojo_binary and the shared libraries of a bundle at -O3, a per-target
-#      override honoured either way; a level mojo build does not accept is
-#      refused at analysis (tools/build/tests/functional/opt_level.sh).
+#      the library importing it fail to compile. (The data, env and test_deps
+#      refusals at analysis are //tools/build/selftest:analysis_refusals_mojo.)
+#  30. (Optimization levels are checked at analysis by the build of
+#      tests//functional/opt_level:levels, the refused level by
+#      //tools/build/selftest:analysis_refusals_mojo.)
 #  31. Lints are part of the build: a planted shellcheck warning in a script
 #      the rules run fails the build of a Mojo and a Rust example
 #      (tools/build/tests/negative/lint_weld.sh).
@@ -254,13 +248,9 @@
 #      the error builder, and builds against the same stubs with their client
 #      half, once its layout probe and a caller test of what its send hands
 #      the transport (the caller's HttpClientConfig included) and of its
-#      error builder pass. Refused at
-#      analysis: empty, joined or repeated `operations`, empty `deps`,
-#      `overrides` without `hand_srcs` and the reverse, a hand_srcs entry
-#      that is a label, not `.mojo`, or named like a generated file, and a
-#      model path the service id cannot be read from, and a caller
-#      `test_data` entry for the environment scan (an operation the model
-#      lacks is refused by the generator: a unit test of
+#      error builder pass. The analysis refusals are
+#      //tools/build/selftest:analysis_refusals_aws_client (an operation the
+#      model lacks is refused by the generator: a unit test of
 #      tools/build/proto-codegen/src/aws_in.rs); a failing caller test reds the client; and so
 #      does a hand-written module of the package that reads HOME, through
 #      the environment scan (tests//negative/mojo_aws_client): by a banned
@@ -276,15 +266,13 @@
 #      the same text in a docstring, a comment or a string is not an import
 #      (the hand_srcs client of tests//functional/mojo_aws_client builds).
 #  37. The platform table (tools/build/platforms/table.bzl, one row per
-#      (os, cpu)) is complete and the default target platform is the client's
-#      own: loading tests//functional/platform_table: runs the load-time
-#      cases (a table missing a pin or a field, with a pending pin in a
-#      registered row, a malformed sha256 or a duplicate key or host is
-#      refused naming the row and the pin; each host_info() selects its row);
-#      `platforms:host` is linux-x86_64 on this client and a target stating no
-#      --target-platforms is configured for it; the reserved linux-arm64 row
-#      has no platform and its `[komira_re]` key is refused
-#      (tools/build/tests/functional/platform_table/check.sh).
+#      (os, cpu)): its limits, the configuration hash of each registered row
+#      and the macOS applets agree with the tree, and the linux-x86_64 golden
+#      holds (tools/build/tests/functional/platform_table/check.sh). Its
+#      load-time cases, the platforms it declares, `host` and the reserved
+#      row's key are //tools/build/selftest:analysis_refusals_platform_table;
+#      the key that decides remote execution is
+#      //tools/build/selftest:exec_platforms.
 #  38. README examples (tools/build/mojo/README.md#readme-examples): the
 #      examples of tests//functional/readme_examples/ok run and its marker is
 #      PASS; a README with no example (.../none) compiles and runs nothing,
@@ -297,8 +285,9 @@
 #      .../owner builds with the README on :owner only (`readme = False` on
 #      :owner_base, which has no [tests][readme]); without the keyword
 #      (tests//negative/readme_examples/unowned) the base library's README
-#      compile fails; `readme = True` with no README.md and a non-bool
-#      `readme` are refused at load (.../readme_keyword, per -c case).
+#      compile fails. (That :owner_base has no [tests][readme], and the
+#      `readme` keyword's load refusals, are
+#      //tools/build/selftest:analysis_refusals_readme.)
 #  39. Test welding (tools/build/lint/test_weld.bzl), each lint checked by
 #      its BXL script (the greens, //:test_weld, tests//functional/test_weld:ok
 #      and tests//functional/test_weld/real:ok, are in the gate):
@@ -330,8 +319,8 @@
 #      public method and __init__.mojo, a library file of a test-only package
 #      under src/tests/<kind>/, one site over a hold, a non-origin
 #      site in an FFI module, an unlisted marked module) or ledger defect,
-#      an empty tree fails as checking nothing, and a target naming no tree
-#      is refused at analysis.
+#      and an empty tree fails as checking nothing. (A target naming no tree,
+#      or both, is refused at analysis: //tools/build/selftest:analysis_refusals_lint.)
 #  43. Coverage runs: see tools/build/tests/coverage_run_tests.sh.
 #  52. API JSON (tools/build/mojo/doc.bzl, mojo_doc_json):
 #      //tools/build/examples:hellopkg_doc (in test 1) equals its golden;
@@ -340,7 +329,8 @@
 #      target of tests//negative/mojo_doc_json fails naming its defect: a
 #      source that does not compile, a golden that differs, and three paths
 #      the JSON does not declare.
-#  44. The public boundary lint: see tools/build/tests/public_boundary_tests.sh.
+#  44. (In the gate: the public boundary tool's zig tests,
+#      //tools/build/lint/public_boundary, and tests//functional/public_boundary:ok.)
 #  45. The layout of src/ (tools/build/lint/defs.bzl, src_layout): //:src_layout
 #      (every package under src/, read from the build graph) and
 #      tests//functional/src_layout:ok (a planted list) build; each target of
@@ -356,13 +346,7 @@
 #  47. Branch coverage runs: tools/build/tests/coverage_branch_tests.sh (sourced by 43's).
 #  49. Assert level, defines and memory cap: see
 #      tools/build/tests/assert_level_tests.sh.
-#  51. Python oracles (tools/build/python/defs.bzl, python_oracle): each
-#      target of tests//negative/python_oracle fails analysis naming the
-#      input an action built outside third_party/ (a komira library's
-#      package as data, a komira binary in srcs or as src, a wheel installed
-#      outside third_party/ as a dep or as the tzdata wheel, an interpreter
-#      unpacked outside third_party/).
-#      What works is in src/tests/helpers/komira_test_python.
+#  51. (A self-test scenario: //tools/build/selftest:analysis_refusals_python_oracle.)
 #  53. The surface capability matrix (tools/build/lint/surface_capability_matrix.bzl;
 #      docs/surface_capability_matrix.md): //:surface_capability_matrix (every
 #      surface and capability of the plan, against tests/surface_capability_matrix.bzl)
@@ -370,22 +354,20 @@
 #      three cells filled by planted surface e2e targets, whose census must
 #      equal its expected files) build; each target of
 #      tests//negative/surface_capability_matrix fails naming its one planted
-#      defect: a target that does not exist, a repeated pair, an unknown
+#      defect: a repeated pair, an unknown
 #      capability or surface, a target in another surface's package, outside
 #      src/tests/e2e, in a subpackage or a longer-named package, an alias of a
 #      test elsewhere, a target that is no test (a file, a mojo_library that
 #      welds none), one test filling two cells of a surface, a pair with no
 #      row, an empty field, a capability grounded in no declared constant, a
 #      family constant no capability names or in a form the lint cannot read,
-#      a repeated capability, fewer filled cells than the floor, no surface,
-#      and (built by package pattern) a test incompatible with the lint's
-#      platform.
-#  54. The hermetic Node.js rules (tools/build/node/defs.bzl): each target of
-#      tests//negative/node and below fails with its planted defect: a failing
-#      script, a wrong expected error or an unexpected pass, a path or package
-#      staged twice, an unresolved import, an empty expect_error or exe, a pin
-#      that differs, a C warning, the test-only runtime named where it is not
-#      visible. See tools/build/tests/node_tests.sh.
+#      a repeated capability, fewer filled cells than the floor, and no
+#      surface. (A row naming a target that does not exist, and one naming a
+#      test incompatible with the lint's platform under a package pattern,
+#      are //tools/build/selftest:analysis_refusals_lint, in a scratch tree.)
+#  54. (The hermetic Node.js rules' planted defects are
+#      //tools/build/selftest:planted_red_builds_node and
+#      //tools/build/selftest:analysis_refusals_node.)
 set -uo pipefail
 
 umbrella=1
@@ -525,7 +507,6 @@ check_executor() { # name
 expect_red gate_red "GATED TEST FAILED" tests//negative/libgate_bad:libgate_bad
 expect_green gate_ungated_green "tests//negative/libgate_bad:libgate_bad[ungated]"
 expect_red gate_consumer_red "GATED TEST FAILED" tests//negative/libgate_bad:gated_consumer
-expect_red gate_bypass_refused "MojoInfo" tests//negative/libgate_bad:bypass_consumer
 
 # 2 (mojo_shared_lib): the gate refuses to publish a library whose compile is green
 for t in missing_export unresolved_symbol failing_driver forced_not_loaded leaks_by_default plain_leaks; do
@@ -537,7 +518,6 @@ expect_red sharedlib_driver_red "GATED TEST FAILED" tests//negative/shared_lib:f
 expect_red sharedlib_force_load_red "MISSING EXPORT: komira_spike_forced" tests//negative/shared_lib:forced_not_loaded
 expect_red sharedlib_leaks_by_default_red "komira_example_add leaked into the dynamic symbol table" tests//negative/shared_lib:leaks_by_default
 expect_red sharedlib_plain_leaks_red "plain_hidden leaked into the dynamic symbol table" tests//negative/shared_lib:plain_leaks
-expect_red sharedlib_empty_exports_refused "exports\` is empty" tests//negative/shared_lib:empty_exports
 expect_red sharedlib_duplicate_definition_red "duplicate symbol: komira_neg_dup" tests//negative/shared_lib:duplicate_definition
 
 # 3
@@ -666,39 +646,6 @@ else
     else
         pass "runtime run paths: all $(wc -l < "$LOG/runtime_runpaths.txt" | tr -d ' ') run path entries in lib/ are \$ORIGIN-relative"
     fi
-fi
-
-# 10
-# `buck2 audit execution-platform-resolution` prints, per target, either
-# "Execution platform: <label>" or "Failed to configure: ...".
-resolve() { # log name, extra args..., targets...: prints "<target> <platform|FAILED>"
-    local name=$1; shift
-    "$BUCK2" audit execution-platform-resolution "$@" > "$LOG/$name.txt" 2>&1 || return 1
-    awk '/^[^ ].* \(.*\):$/ { t = $1; next }
-         t != "" && /^  Execution platform: / { print t, $3; t = "" }
-         t != "" && /^  Failed to configure/ { print t, "FAILED"; t = "" }' "$LOG/$name.txt"
-}
-EXPECT_PLATFORMS="
-komira//tools/build/examples:hello komira//tools/build/platforms:linux-x86_64
-komira//tools/build/examples:hellopkg komira//tools/build/platforms:linux-x86_64
-komira//tools/build/examples/libgate_ok:libgate_ok komira//tools/build/platforms:linux-x86_64
-komira//tools/build/examples:test_hellopkg komira//tools/build/platforms:linux-x86_64
-komira//tools/build/toolchains:zig komira//tools/build/platforms:linux-x86_64
-komira//tools/build/toolchains:conda_unpack komira//tools/build/platforms:linux-x86_64
-komira//tools/build/toolchains:mojo_compiler komira//tools/build/platforms:linux-x86_64
-komira//tools/build/toolchains:mojo_runtime komira//tools/build/platforms:linux-x86_64
-komira//tools/build/third_party_srcs:aws-lc-mini.tar.gz komira//tools/build/platforms:linux-x86_64
-komira//tools/build/third_party_srcs:aws_lc_mini_gen komira//tools/build/platforms:linux-x86_64
-komira//tools/build/third_party_srcs:aws_lc_mini_drift komira//tools/build/platforms:linux-x86_64
-komira//third_party/aws-lc:srcs_gen komira//tools/build/platforms:linux-x86_64"
-want=$(printf '%s\n' "$EXPECT_PLATFORMS" | sed '/^$/d' | LC_ALL=C sort)
-# shellcheck disable=SC2046 # one target label per line, split into arguments on purpose
-if ! got=$(resolve platforms $(printf '%s\n' "$want" | cut -d' ' -f1)); then
-    fail "exec platforms: audit failed (see $LOG/platforms.txt)"
-elif [ "$(printf '%s\n' "$got" | LC_ALL=C sort)" != "$want" ]; then
-    fail "exec platforms: resolution differs: $(diff <(printf '%s\n' "$want") <(printf '%s\n' "$got" | LC_ALL=C sort) | grep '^>' | tr '\n' ' ') (see $LOG/platforms.txt)"
-else
-    pass "exec platforms: $(printf '%s\n' "$want" | grep -c .) Mojo and toolchain targets on linux-x86_64"
 fi
 
 # 12
@@ -956,23 +903,8 @@ elif grep -qF "test_red: DELIBERATE FAILURE" "$LOG/td_env_bin.log"; then
 else
     fail "td_env_bin: failed without the test's own failure (see $LOG/td_env_bin.log)"
 fi
-expect_red td_bad_dest "holds an empty, \`.\` or \`..\` segment" tests//negative/test_data:bad_dest
-expect_red td_bad_dest_clash "is both a file and the directory of" tests//negative/test_data:bad_dest_clash
-expect_red td_bad_data_entry "test_data[\"tests/test_nope.mojo\"]: not a test_srcs entry" tests//negative/test_data:bad_data_entry
-expect_red td_bad_env_owned "env sets TEST_TMPDIR, which the test runner sets itself" tests//negative/test_data:bad_env_owned
 expect_red td_test_deps_src "unable to locate module 'tdhelper'" tests//negative/test_deps:src_imports_test_dep
 expect_red td_test_deps_consumer "unable to locate module 'tdhelper'" tests//negative/test_deps:consumer_of_test_dep
-expect_red td_test_deps_not_mojo "test_deps entry tests//negative/test_deps:not_a_package is not a Mojo package" tests//negative/test_deps:not_mojo
-expect_red td_test_deps_also_in_deps "is in both deps and test_deps" tests//negative/test_deps:also_in_deps
-expect_red td_bad_env_name "is not a shell variable name" tests//negative/test_data:bad_env_name
-
-# 30
-if BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/opt_level.sh" "$LOG" > "$LOG/opt_level.log" 2>&1; then
-    pass "$(grep -o 'PASS  optimization levels: .*' "$LOG/opt_level.log" | cut -c 7-)"
-else
-    fail "$(grep -o 'FAIL  optimization levels: .*' "$LOG/opt_level.log" | cut -c 7-) (see $LOG/opt_level.log)"
-fi
-expect_red opt_bad_level "optimization level \`fast\` is not one of 0, 1, 2, 3" tests//negative/opt_level:bad_level
 
 # 31
 if "$ROOT/tools/build/tests/negative/lint_weld.sh" > "$LOG/lint_weld.log" 2>&1; then
@@ -1073,17 +1005,7 @@ else
 fi
 
 # 36
-expect_red aws_client_no_operations '`operations` is empty' tests//negative/mojo_aws_client:no_operations
-expect_red aws_client_joined_operations 'is not a botocore operation name' tests//negative/mojo_aws_client:joined_operations
-expect_red aws_client_no_runtime '`deps` is empty' tests//negative/mojo_aws_client:no_runtime
 expect_red aws_client_caller_test_red 'GATED TEST FAILED: tests//negative/mojo_aws_client:caller_test_red:test_logs_deliberate_failure.mojo' tests//negative/mojo_aws_client:caller_test_red
-expect_red aws_client_duplicate_operation '`operations` names `GetLogEvents` twice' tests//negative/mojo_aws_client:duplicate_operation
-expect_red aws_client_overrides_without_hand_srcs '`overrides` is set and `hand_srcs` is empty' tests//negative/mojo_aws_client:overrides_without_hand_srcs
-expect_red aws_client_hand_srcs_without_overrides '`hand_srcs` is set and `overrides` is not' tests//negative/mojo_aws_client:hand_srcs_without_overrides
-expect_red aws_client_hand_src_is_label '`hand_srcs` entry `:hand_owner_label` is not a source path of a `.mojo` file' tests//negative/mojo_aws_client:hand_src_is_label
-expect_red aws_client_hand_src_not_mojo '`hand_srcs` entry `hand/notes.txt` is not a source path of a `.mojo` file' tests//negative/mojo_aws_client:hand_src_not_mojo
-expect_red aws_client_hand_src_clashes 'has the name of a generated or another hand-written file, `_layout_probe.mojo`' tests//negative/mojo_aws_client:hand_src_clashes
-expect_red aws_client_service_unreadable 'the botocore service id cannot be read from the model path' tests//negative/mojo_aws_client:service_unreadable
 expect_red aws_client_env_read_hand 'env_reader.mojo names getenv; a mojo_aws_client package takes every input as a parameter' tests//negative/mojo_aws_client:env_read_hand
 expect_red aws_client_env_read_home "env_home.mojo imports std.pathlib, which is not on the environment scan's import allow-list (mojo_aws_client's _ENV_IMPORTS)" tests//negative/mojo_aws_client:env_read_home
 expect_red aws_client_env_read_std_os 'env_std_os.mojo names expanduser; a mojo_aws_client package takes every input as a parameter' tests//negative/mojo_aws_client:env_read_std_os
@@ -1106,7 +1028,6 @@ expect_red aws_client_env_read_cr 'env_cr.mojo has the control byte 0x0D (carria
 expect_red aws_client_env_read_crlf_continuation 'env_crlf_continuation.mojo has the control byte 0x0D (carriage return), which the environment scan does not read' tests//negative/mojo_aws_client:env_read_crlf_continuation
 expect_red aws_client_env_read_ff 'env_ff.mojo has the control byte 0x0C (form feed), which the environment scan does not read' tests//negative/mojo_aws_client:env_read_ff
 expect_red aws_client_env_read_vt 'env_vt.mojo has the control byte 0x0B (vertical tab), which the environment scan does not read' tests//negative/mojo_aws_client:env_read_vt
-expect_red aws_client_env_scan_data_given '`test_data` has an entry for `tests/_no_env_reads.mojo`, the generated environment scan' tests//negative/mojo_aws_client:env_scan_data_given
 
 # 9
 if [ "$MODE" = local ]; then
@@ -1151,20 +1072,7 @@ expect_red readme_example_raises_counted 'readme_raises validation: 1 of 2 check
 expect_red readme_example_compile_error 'print(farewell("a"))  # README.md:9' tests//negative/readme_examples/compile_error:compile_error
 expect_red readme_example_skip_word 'negative/readme_examples/skip_word/README.md:3: `mojo skip`' tests//negative/readme_examples/skip_word:skip_word
 expect_red readme_example_shipped_relative_link 'negative/readme_examples/relative_link/README.md:11: greet.mojo: a relative link in a README that ships' tests//negative/readme_examples/relative_link:relative_link
-expect_red readme_owner_base_no_readme 'requested sub target named `readme`' 'tests//functional/readme_examples/owner:owner_base[tests][readme]'
 expect_red readme_unowned 'from unowned import top_word  # README.md:7' tests//negative/readme_examples/unowned:unowned_base
-# Load-time refusals: the case is a config value, so not expect_red's one target.
-for want in 'true_without_readme|`readme = True` and //negative/readme_examples/readme_keyword holds no README.md' \
-    'not_bool|`readme` takes True, False or nothing'; do
-    c=${want%%|*}
-    if "$BUCK2" build -c "readme_keyword.case=$c" tests//negative/readme_examples/readme_keyword:kw > "$LOG/readme_keyword_$c.log" 2>&1; then
-        fail "readme_keyword_$c: tests//negative/readme_examples/readme_keyword:kw built, but it must fail"
-    elif grep -qF -- "${want#*|}" "$LOG/readme_keyword_$c.log"; then
-        pass "readme_keyword_$c"
-    else
-        fail "readme_keyword_$c: failed without '${want#*|}' (see $LOG/readme_keyword_$c.log)"
-    fi
-done
 
 # 39
 # A test_weld target only declares its lint; its BXL script checks it
@@ -1268,16 +1176,10 @@ for want in \
     "empty|pointer_lint: checked nothing"; do
     expect_red "pointer_lint_${want%%|*}" "${want#*|}" "$N:${want%%|*}"
 done
-expect_red pointer_lint_no_tree "name the files in exactly one of \`tree\` and \`files\`" "$N:no_tree"
-expect_red pointer_lint_both_tree_and_files "name the files in exactly one of \`tree\` and \`files\`" "$N:both_tree_and_files"
 
 # 43
 # shellcheck source=tools/build/tests/coverage_run_tests.sh
 . "$ROOT/tools/build/tests/coverage_run_tests.sh"
-
-# 44
-# shellcheck source=tools/build/tests/public_boundary_tests.sh
-. "$ROOT/tools/build/tests/public_boundary_tests.sh"
 
 # 45
 expect_green src_layout //:src_layout tests//functional/src_layout:ok
@@ -1307,16 +1209,6 @@ done
 # 49
 # shellcheck source=tools/build/tests/assert_level_tests.sh
 . "$ROOT/tools/build/tests/assert_level_tests.sh"
-# 51
-N=tests//negative/python_oracle
-F="which is not under third_party/; an oracle reads checked-in files and third_party/ outputs only"
-expect_red python_oracle_komira_data "the oracle's data \"encoding.mojoc\" is built by komira//src/komira_encoding:komira_encoding, $F" "$N:komira_data"
-expect_red python_oracle_komira_srcs "the oracle's srcs entry \"hello\" is built by komira//tools/build/examples:hello, $F" "$N:komira_srcs"
-expect_red python_oracle_local_wheel "the oracle's wheel local is built by tests//negative/python_oracle:local_wheel, $F" "$N:local_wheel_dep"
-expect_red python_oracle_local_tzdata "the oracle's wheel local is built by tests//negative/python_oracle:local_wheel, $F" "$N:local_tzdata"
-expect_red python_oracle_komira_src "the oracle's src is built by komira//tools/build/examples:hello, $F" "$N:komira_src"
-expect_red python_oracle_local_python "the oracle's python is built by tests//negative/python_oracle:stand_in_python, $F" "$N:local_python"
-
 # 52
 expect_green mojo_doc_json tests//functional/mojo_doc_json:docpkg_doc
 N=tests//negative/mojo_doc_json
@@ -1332,15 +1224,6 @@ done
 expect_green surface_capability_matrix //:surface_capability_matrix tests//functional/surface_capability_matrix:ok
 N=tests//negative/surface_capability_matrix
 E=tests//functional/surface_capability_matrix/src/tests/e2e
-# dangling and incompatible are loadable only for their own build (their .BUCK
-# files say why); both directories are gitignored in case a run is cut short.
-D="$ROOT/tools/build/tests/negative/surface_capability_matrix"
-scm_planted() { # case, required text, target
-    mkdir -p "$D/$1" && cp "$D/$1.BUCK" "$D/$1/BUCK"
-    expect_red "surface_capability_matrix_$1" "$2" "$3"
-    rm -f "$D/$1/BUCK" && rmdir "$D/$1"
-}
-scm_planted dangling "Unknown target \`test_join_left\` from package \`$E/polars_e2e\`" "$N/dangling:dangling"
 for want in \
     "duplicate|matrix row 11 (pandas, filter): a second row for the pair, first at row 2" \
     "unknown_capability|matrix row 11 (pandas, window): unknown capability \`window\`" \
@@ -1368,13 +1251,6 @@ for t in outside_e2e ungrounded empty_field alias shared_target; do
     n=$(grep -o "surface_capability_matrix: [0-9]* finding line(s)" "$LOG/surface_capability_matrix_$t.log" | head -1)
     if [ "$n" = "surface_capability_matrix: 1 finding line(s)" ]; then pass "surface_capability_matrix_${t}_alone"; else fail "surface_capability_matrix_${t}_alone: '$n', want 1 finding (see $LOG/surface_capability_matrix_$t.log)"; fi
 done
-# A row naming a test incompatible with the lint's platform fails the build
-# even under a package pattern, so the lint never drops out of //... silently.
-scm_planted incompatible "because its transitive dep $E/pandas_e2e:test_mac" "$N/incompatible:"
-
-# 54
-# shellcheck source=tools/build/tests/node_tests.sh
-. "$ROOT/tools/build/tests/node_tests.sh"
 
 # 37
 pt_rc=0

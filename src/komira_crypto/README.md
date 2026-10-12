@@ -15,8 +15,8 @@ Byte inputs are `Span[UInt8, _]`; fixed-size outputs are `Array[UInt8, N]`.
   P-256 ECDH, `p256_ecdh`.
 - Signatures: Ed25519 (sign, verify, public key from seed, generate), ECDSA
   P-256 and P-384, RSA-SHA256 PKCS#1 v1.5 sign and verify (with a PEM
-  `PRIVATE KEY` reader), RSA-PSS verify, and RS256 JWS verification against a
-  JWK Set.
+  `PRIVATE KEY` reader), RSA-PSS verify. RS256 JWS verification against a
+  JWK Set is in `komira_jose`.
 - Randomness: `SystemEntropy` / `system_entropy` and a `ChaCha20Drbg`.
 - Helpers: `hex_lower` / `hex_upper`, constant-time comparison
   (`constant_time_eq_32`, `constant_time_eq_n`), zeroizing a buffer.

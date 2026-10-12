@@ -162,5 +162,37 @@ def test_b5_range_at_seven_rows_ceils_to_three() raises:
     assert_equal(card, 3)
 
 
+
+# =============================================================================
+# Test 4 — A selectivity of 1.0 on a row count near Int.MAX keeps every row
+# =============================================================================
+
+
+def _true_filter_scan(rows: Int) -> LogicalPlan:
+    """A scan of `rows` rows whose pushed filter is `true` (selectivity 1.0)."""
+    var rc: Optional[Int] = Optional[Int](rows)
+    var stats: Optional[TableStats] = None
+    var filt: Optional[Expr] = Optional[Expr](Expr.literal(ScalarValue.from_bool(True)))
+    var proj: Optional[List[String]] = None
+    return LogicalPlan.scan(
+        "/x.parquet", SOURCE_PARQUET, _one_col_schema("c"),
+        proj^, filt^, rc^, stats^,
+    )
+
+
+def test_full_selectivity_keeps_a_row_count_near_int_max() raises:
+    """`card = Int.MAX, sel = 1.0` keeps Int.MAX rows, and
+    `card = 2^53 + 1, sel = 1.0` keeps 2^53 + 1 (exact, not the rounded
+    Float64).
+
+    Defect caught: `Int(Float64(card) * sel)` on a product of 2^63, which Int
+    cannot hold. That conversion is undefined: x86-64 answers Int.MIN, which
+    the clamp turned into an estimate of 1 row, and arm64 saturates. Two
+    producer platforms then cost the same plan differently."""
+    assert_equal(estimate_cardinality(_true_filter_scan(Int.MAX)), Int.MAX)
+    var big = (1 << 53) + 1
+    assert_equal(estimate_cardinality(_true_filter_scan(big)), big)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
