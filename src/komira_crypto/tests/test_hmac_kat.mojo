@@ -168,8 +168,9 @@ def test_hmac_kat_rfc4231_case5_truncation() raises:
 
     Full HMAC-SHA-256("Test With Truncation", 20*0x0c) =
         a3b6167473100ee06e0c796c2955552bfa6f7c0a6a8aef8b93f860aab0cd20c5
-    (verified via `python3 -c "import hmac, hashlib;
-    print(hmac.new(b'\\x0c'*20, b'Test With Truncation', hashlib.sha256).hexdigest())"`)
+    (RFC 4231 publishes only the 16-byte prefix; the full MAC was checked
+    by the RFC 2104 HMAC construction computed with GNU coreutils
+    `sha256sum`, the same composition that reproduces RFC 4231 case 1)
     """
     _assert_hmac_kat(
         String("case5_full"),
