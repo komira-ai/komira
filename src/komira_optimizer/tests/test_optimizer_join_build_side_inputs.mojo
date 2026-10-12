@@ -211,10 +211,23 @@ def test_a_key_that_is_not_column_zero_is_matched_by_name() raises:
     )
 
 
-def _key_named_payload(key: String) -> Tuple[List[String], List[ArrowType]]:
-    """The key, then four payload columns whose names start or end with the
-    key's name: [key, key_s STRING, xkey, key_y, key_z]."""
-    var n: List[String] = [key, key + "_s", "x" + key, key + "_y", key + "_z"]
+def _look_alike_vectors() -> Tuple[List[String], List[String]]:
+    """(keys, look-alikes), pairwise: for the key `abc`, a column name that
+    starts with the key (`abc_y`), ends with it (`x_abc`), contains it in the
+    middle (`xabcy`), is a prefix of it (`ab`), a suffix of it (`bc`), lies
+    inside it (`b`), or is the key in upper case (`ABC`); and for the key
+    `ABC`, the key in lower case (`abc`). None of them equals its key."""
+    var keys: List[String] = ["abc", "abc", "abc", "abc", "abc", "abc", "abc", "ABC"]
+    var looks: List[String] = ["abc_y", "x_abc", "xabcy", "ab", "bc", "b", "ABC", "abc"]
+    return (keys^, looks^)
+
+
+def _key_and_look_alike(key: String, look: String) -> Tuple[List[String], List[ArrowType]]:
+    """[key INT64, look STRING, p, q, r INT64]. Matched by exact name, `key`
+    is the one key column and the other four are payload, one of them STRING:
+    a wide payload. If `look` is also taken as a key, three INT64 payload
+    columns remain: not wide."""
+    var n: List[String] = [key, look, "p", "q", "r"]
     var t: List[ArrowType] = [
         ArrowType.INT64, ArrowType.STRING, ArrowType.INT64, ArrowType.INT64,
         ArrowType.INT64,
@@ -222,79 +235,44 @@ def _key_named_payload(key: String) -> Tuple[List[String], List[ArrowType]]:
     return (n^, t^)
 
 
-def test_only_a_column_named_exactly_as_the_key_is_a_key() raises:
-    """Keys `a` = `b`. R: 10 rows of [b, b_s STRING, xb, b_y, b_z]; L: 1000
-    rows of [a, lv]. Only `b` is the key, so R has four payload columns, one
-    STRING: wide, and the override builds LEFT where the cost says RIGHT. The
-    mirror builds RIGHT, and the predicate says True directly. Catches the
-    name match loosened to a prefix (b_s, b_y, b_z would be keys, leaving one
-    payload column), to a suffix (xb would be a key, leaving three) or to a
-    substring (all five would be keys)."""
-    var keys: List[String] = ["k"]
-    var s = _key_named_payload("k")
-    assert_true(
-        _side_has_wide_string_build_payload(_scan("s", s[0], s[1], 1), keys),
-        "payload names share the key's name",
-    )
-    var ln: List[String] = ["a", "lv"]
-    var r = _key_named_payload("b")
-    _decides(
-        _ints("l", ln, 1000), _scan("r", r[0], r[1], 10),
-        JOIN_BUILD_SIDE_LEFT, "right payload shares key name",
-    )
-    var rn: List[String] = ["b", "rv"]
-    var l = _key_named_payload("a")
-    _decides(
-        _scan("l", l[0], l[1], 10), _ints("r", rn, 1000),
-        JOIN_BUILD_SIDE_RIGHT, "left payload shares key name",
-    )
+def test_a_key_column_is_the_one_named_exactly_as_the_key() raises:
+    """For each (key, look-alike) pair of `_look_alike_vectors`, the side
+    [key, look STRING, p, q, r] keyed on `key` has four payload columns, one
+    STRING, so it is wide: the predicate says True, a 10-row such R against
+    a 1000-row [a, lv] L builds LEFT where the cost says RIGHT, and the
+    mirror builds RIGHT where the cost says LEFT.
 
-
-def _key_cased_and_cut_payload(
-    key: String, cut: String, cased: String
-) -> Tuple[List[String], List[ArrowType]]:
-    """[key, cut STRING, cased, key_y, key_z], where `cut` is the key less its
-    last letter and `cased` is the key upper-cased. Matched exactly, the key
-    is the one key column and the other four are payload, one STRING: wide.
-    Matched ignoring case, `cased` is a key too; matched with the key
-    starting with (or containing) the column name, `cut` is a key too. Either
-    leaves three payload columns: not wide."""
-    var n: List[String] = [key, cut, cased, key + "_y", key + "_z"]
-    var t: List[ArrowType] = [
-        ArrowType.INT64, ArrowType.STRING, ArrowType.INT64, ArrowType.INT64,
-        ArrowType.INT64,
-    ]
-    return (n^, t^)
-
-
-def test_a_key_match_is_case_sensitive_and_whole_name() raises:
-    """Keys `ak` = `bk`. R: 10 rows of [bk, b STRING, BK, bk_y, bk_z]; L:
-    1000 rows of [ak, lv]. Matched exactly, R's payload is b, BK, bk_y, bk_z:
-    four columns, one STRING, so R is wide and the override builds LEFT where
-    the cost says RIGHT. The mirror (the wide side on the left, keyed `ak`)
-    builds RIGHT where the cost says LEFT, and the predicate says True
-    directly. Catches the name match made case-insensitive (BK would be a
-    key, leaving three payload columns) and the match reversed to the key
-    starting with, or containing, the column's name (b would be a key,
-    leaving three INT64 payload columns)."""
-    var keys: List[String] = ["sk"]
-    var s = _key_cased_and_cut_payload("sk", "s", "SK")
-    assert_true(
-        _side_has_wide_string_build_payload(_scan("s", s[0], s[1], 1), keys),
-        "payload names differ from the key in case or length",
-    )
-    var ln: List[String] = ["ak", "lv"]
-    var r = _key_cased_and_cut_payload("bk", "b", "BK")
-    _decides_on(
-        _ints("l", ln, 1000), _scan("r", r[0], r[1], 10), "ak", "bk",
-        JOIN_BUILD_SIDE_LEFT, "right payload differs from key in case or length",
-    )
-    var rn: List[String] = ["bk", "rv"]
-    var l = _key_cased_and_cut_payload("ak", "a", "AK")
-    _decides_on(
-        _scan("l", l[0], l[1], 10), _ints("r", rn, 1000), "ak", "bk",
-        JOIN_BUILD_SIDE_RIGHT, "left payload differs from key in case or length",
-    )
+    The key match is exact, case-sensitive whole-name equality. Each of these
+    loosened matches takes some look-alike as a key, leaving three INT64
+    payload columns, so the cost decides and the side builds: the column
+    starting with the key (`abc_y`), the key starting with the column (`ab`),
+    the column ending with the key (`x_abc`), the key ending with the column
+    (`bc`), the key inside the column (`xabcy`), the column inside the key
+    (`b`), the key lower-cased (key `ABC` matches `abc`), the column
+    lower-cased (`ABC` matches key `abc`), and both lower-cased."""
+    var vectors = _look_alike_vectors()
+    for i in range(len(vectors[0])):
+        var key = vectors[0][i].copy()
+        var look = vectors[1][i].copy()
+        var what = "key " + key + ", column " + look
+        var keys: List[String] = [key]
+        var s = _key_and_look_alike(key, look)
+        assert_true(
+            _side_has_wide_string_build_payload(_scan("s", s[0], s[1], 1), keys),
+            what,
+        )
+        var ln: List[String] = ["a", "lv"]
+        var r = _key_and_look_alike(key, look)
+        _decides_on(
+            _ints("l", ln, 1000), _scan("r", r[0], r[1], 10), "a", key,
+            JOIN_BUILD_SIDE_LEFT, "right " + what,
+        )
+        var rn: List[String] = ["b", "rv"]
+        var l = _key_and_look_alike(key, look)
+        _decides_on(
+            _scan("l", l[0], l[1], 10), _ints("r", rn, 1000), key, "b",
+            JOIN_BUILD_SIDE_RIGHT, "left " + what,
+        )
 
 
 # -----------------------------------------------------------------------------

@@ -446,8 +446,11 @@ def _side_has_wide_string_build_payload(
       - at least one payload column is Arrow STRING (BINARY, LARGE_STRING
         and LARGE_BINARY do not count).
 
-    Key columns are matched by name against `keys`, the side's own `*_on`
-    list (`left_on` for the left input, `right_on` for the right); a key
+    A column is a key column when its name equals an entry of `keys`, the
+    side's own `*_on` list (`left_on` for the left input, `right_on` for the
+    right): exact, case-sensitive whole-name equality, so a column whose name
+    starts with, ends with or contains a key, is a prefix, suffix or part of
+    a key, or differs from a key only in letter case is payload. A key
     column of any type, STRING included, is not payload.
     The override fires only when exactly one side of a single-key INNER
     join meets this condition; every other join keeps the cost decision.
