@@ -7,6 +7,13 @@
 #   1. test_split_summary_round_trips_every_slot: a merged summary with every
 #      reserved slot filled decodes field for field, and an ingest summary
 #      encodes without the compaction slot.
+#   1a. test_split_summary_round_trips_non_ascii_strings: 2-, 3- and 4-byte
+#      UTF-8 in all four string slots is encoded as its own bytes and decodes
+#      to the same bytes (komira-ai/komira#1371: "café" came back as 7 bytes).
+#   1b. test_decode_refuses_ill_formed_utf8_in_string_slots: a string slot
+#      holding an invalid byte, a stray continuation, an overlong form, a
+#      surrogate, a code point above U+10FFFF or a truncated sequence raises
+#      naming the slot; the same slot with a well-formed "a€z" decodes to it.
 #   2. test_merge_input_at_refuses_out_of_range: -1, -3, n and n + 1 raise;
 #      every index in range returns its own 16 bytes.
 #   3. test_decode_refuses_a_short_header: bodies of 0 to 16 bytes raise the
@@ -30,8 +37,7 @@
 #   9. test_chunk_seq_of_reads_only_chunk_keys: the reaper's key parser
 #      returns a sequence number only for `<lineage>/manifest/<digits>.chunk`.
 #
-# Strings in these tests are ASCII: a non-ASCII string does not round-trip
-# (komira-ai/komira#1371), and no test here encodes that answer.
+# Strings in the other tests are ASCII; 1a and 1b cover non-ASCII bytes.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -185,6 +191,136 @@ def test_split_summary_round_trips_every_slot() raises:
     assert_false(di.is_merged(), "an ingest split is not merged")
     assert_equal(di.num_merge_inputs(), 0)
     assert_equal(di.object_key, i.object_key)
+
+
+def _lp(mut out: List[UInt8], data: List[UInt8]):
+    """Append one length-prefixed slot: [len i64 LE][bytes]."""
+    var n = UInt64(len(data))
+    for i in range(8):
+        out.append(UInt8((n >> UInt64(8 * i)) & UInt64(0xFF)))
+    for i in range(len(data)):
+        out.append(data[i])
+
+
+def _ascii(s: String) -> List[UInt8]:
+    var out = List[UInt8]()
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        out.append(b[i])
+    return out^
+
+
+def _body_with_string_slot(slot: Int, payload: List[UInt8]) -> List[UInt8]:
+    """A valid ingest body whose string slot `slot` (0 index_name, 1
+    field_name, 2 object_key, 3 delete_gen_ref) holds `payload`, written
+    byte for byte after the encoder's own fixed prefix."""
+    var out = _prefix(encode_split_summary(_ingest()), _FIXED)
+    for k in range(4):
+        if k == slot:
+            _lp(out, payload)
+        else:
+            _lp(out, _ascii(String("s")))
+    _lp(out, List[UInt8]())  # bloom_sketch
+    _lp(out, List[UInt8]())  # minmax_sketch
+    return out^
+
+
+def _string_slot(d: SplitSummary, slot: Int) -> String:
+    if slot == 0:
+        return d.index_name.copy()
+    if slot == 1:
+        return d.field_name.copy()
+    if slot == 2:
+        return d.object_key.copy()
+    return d.delete_gen_ref.copy()
+
+
+def test_split_summary_round_trips_non_ascii_strings() raises:
+    # 2-, 3- and 4-byte UTF-8 sequences in every string slot. Before the fix
+    # of komira-ai/komira#1371 the decoder rebuilt each string one code point
+    # per byte, so "café" (5 bytes) came back as 7 bytes.
+    var s = make_split_summary(
+        _uuid(4),
+        Int64(1),
+        Int64(2),
+        Int64(3),
+        Int64(4),
+        String("café"),
+        String("日本語"),
+        String("index/ñandú/splits/🦀.split"),
+    )
+    s.delete_gen_ref = String("index/ñandú/deletes/g-€")
+    var b = encode_split_summary(s)
+    # The encoder writes each string's UTF-8 bytes as they are.
+    assert_equal(
+        len(b),
+        _FIXED
+        + 6 * 8
+        + 5
+        + 9
+        + s.object_key.byte_length()
+        + s.delete_gen_ref.byte_length(),
+        "encoded length",
+    )
+    var d = decode_split_summary(b)
+    assert_equal(d.index_name.byte_length(), 5, "café is 5 bytes")
+    assert_equal(d.index_name, s.index_name)
+    assert_equal(d.field_name.byte_length(), 9, "日本語 is 9 bytes")
+    assert_equal(d.field_name, s.field_name)
+    assert_equal(d.object_key, s.object_key)
+    assert_equal(d.delete_gen_ref, s.delete_gen_ref)
+    # A re-encode of the decoded summary is the same bytes.
+    assert_true(_same_bytes(encode_split_summary(d), b), "re-encode")
+
+
+def test_decode_refuses_ill_formed_utf8_in_string_slots() raises:
+    # Each ill-formed sequence sits between "a" and "z" in one string slot.
+    var bad = List[List[UInt8]]()
+    bad.append([UInt8(0xFF)])  # never a UTF-8 byte
+    bad.append([UInt8(0x80)])  # stray continuation byte
+    bad.append([UInt8(0xC0), UInt8(0xAF)])  # overlong "/"
+    bad.append([UInt8(0xE0), UInt8(0x80), UInt8(0xAF)])  # overlong 3-byte
+    bad.append([UInt8(0xED), UInt8(0xA0), UInt8(0x80)])  # surrogate D800
+    bad.append([UInt8(0xF4), UInt8(0x90), UInt8(0x80), UInt8(0x80)])  # >10FFFF
+    bad.append([UInt8(0xF5), UInt8(0x80), UInt8(0x80), UInt8(0x80)])  # lead F5
+    bad.append([UInt8(0xE2), UInt8(0x82)])  # truncated 3-byte, then "z"
+    var names: List[String] = [
+        "index_name",
+        "field_name",
+        "object_key",
+        "delete_gen_ref",
+    ]
+    for slot in range(4):
+        for c in range(len(bad)):
+            var payload = _ascii(String("a"))
+            for i in range(len(bad[c])):
+                payload.append(bad[c][i])
+            payload.append(UInt8(ord("z")))
+            var msg = _raise_message(_body_with_string_slot(slot, payload))
+            var what = names[slot] + " case " + String(c) + ": "
+            assert_true(
+                msg.find(names[slot] + " is not well-formed UTF-8") >= 0,
+                what + "got '" + msg + "'",
+            )
+        # The same slot with a well-formed multi-byte sequence decodes to its
+        # exact bytes, so the harness itself is not what raises. A truncated
+        # sequence at the very end of the slot raises too.
+        var good = _ascii(String("a"))
+        good.append(UInt8(0xE2))
+        good.append(UInt8(0x82))
+        good.append(UInt8(0xAC))  # U+20AC
+        good.append(UInt8(ord("z")))
+        var d = decode_split_summary(_body_with_string_slot(slot, good))
+        assert_equal(_string_slot(d, slot), String("a€z"), names[slot])
+        var cut = _ascii(String("a"))
+        cut.append(UInt8(0xF0))
+        cut.append(UInt8(0x9F))
+        cut.append(UInt8(0xA6))
+        var cmsg = _raise_message(_body_with_string_slot(slot, cut))
+        assert_true(
+            cmsg.find(names[slot] + " is not well-formed UTF-8") >= 0,
+            names[slot] + " cut 4-byte at slot end: got '" + cmsg + "'",
+        )
 
 
 def test_merge_input_at_refuses_out_of_range() raises:
