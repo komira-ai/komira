@@ -190,9 +190,11 @@ def _push_projections_impl(
         # inline batch. `SourceVariant.copy()` is a refcount-bump on the
         # ArcPointer payload (no buffer byte-copy).
         var src_copy = plan._scan.value()[].source.copy()
-        # Preserve the scan's `source_kind` across this rebuild: without it,
-        # `scan_from_source` would reset the kind to its default.
+        # Preserve the scan's `source_kind` and boundedness across this
+        # rebuild: without them, `scan_from_source` would reset each to its
+        # default (an UNBOUNDED source would come out BOUNDED).
         var src_kind = plan._scan.value()[].source_kind
+        var bounded = plan._scan.value()[].boundedness
         return LogicalPlan.scan_from_source(
             src_copy^,
             full_schema^,
@@ -201,6 +203,7 @@ def _push_projections_impl(
             rc_opt^,
             ts_opt^,
             src_kind,
+            boundedness=bounded,
         )
 
     # Non-SCAN cases mutate the parent's child OwnedPointer in

@@ -72,6 +72,7 @@ mojo_library(
         "tests/test_optimizer_filter_pushdown_through_replacing_project.mojo",
         "tests/test_optimizer_join_absorb_arms.mojo",
         "tests/test_optimizer_join_build_side_arms.mojo",
+        "tests/test_optimizer_join_build_side_inputs.mojo",
         "tests/test_optimizer_join_output_order_guard.mojo",
         "tests/test_optimizer_join_residual_to_side.mojo",
         "tests/test_optimizer_join_semi_conversion_arms.mojo",
