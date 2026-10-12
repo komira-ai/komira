@@ -54,14 +54,12 @@
 #     intermediate node may invalidate the row order (e.g. a Project that
 #     drops a sort key is fine, but conservatively we don't claim it).
 #
-# Pipeline order: run AFTER `late_materialize` and BEFORE
-# `fuse_partition_topn`. That order guarantees:
-#   * The Project pattern fires after `merge_projects` has had a chance
-#     to consolidate adjacent Projects (so we don't redundantly walk
-#     intermediate Project layers).
-#   * The PartitionBy fusion fires before `fuse_partition_topn`, which
-#     consumes a *single* PartitionBy + Filter shape and would otherwise
-#     miss a fusion opportunity if the rule ran after.
+# Pipeline order: `optimizer_driver.optimize` runs this AFTER `merge_projects`
+# (so the Project pattern sees adjacent Projects already consolidated) and
+# BEFORE `fuse_partition_topn`. A PartitionBy this rule fuses carries more
+# than one function, and `fuse_partition_topn` fuses only a single-function
+# PartitionBy, so on Filter(rn <= K) over two same-window PartitionBys this
+# order keeps the Filter where the opposite order would fuse it (komira#1293).
 #
 # Why a plain recursive walker: this rule is a pure plan transform with NO
 # FileHandle reach (no `execute_plan_on_session`, no `precompute_*`).
@@ -134,6 +132,7 @@ from komira_plan_expr.partition_expr import (
 )
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_ir.plan_helpers import _copy_plan, _copy_schema, _copy_expr_array
+from .optimizer_udf_carry import filter_like, project_like
 
 
 # =============================================================================
@@ -784,13 +783,13 @@ def _recurse_into_children(var plan: LogicalPlan) raises -> LogicalPlan:
     if plan.tag == PLAN_FILTER:
         var child = optimize_window_rewrite(_copy_plan(plan.filter_data_ref().child[]))
         var pred = plan.filter_data_ref().predicate.copy()
-        return LogicalPlan.filter(pred^, child^)
+        return filter_like(plan._filter.value()[], pred^, child^)
 
     if plan.tag == PLAN_PROJECT:
         # Project WITHOUT EXPR_WINDOW_FN -- just descend into its child.
         var child = optimize_window_rewrite(_copy_plan(plan.project_data_ref().child[]))
         var exprs = _copy_expr_array(plan.project_data_ref().exprs)
-        return LogicalPlan.project(exprs^, child^)
+        return project_like(plan._project.value()[], exprs^, child^)
 
     if plan.tag == PLAN_AGGREGATE:
         var child = optimize_window_rewrite(_copy_plan(plan._aggregate.value()[].child[]))

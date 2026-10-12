@@ -67,6 +67,10 @@ from komira_plan_ir.plan_helpers import (
     _take_topn_child,
 )
 from .optimizer_stats import estimate_cardinality
+from .optimizer_join import (
+    join_reorder_output_names,
+    restore_join_reorder_output_columns,
+)
 from .optimizer_filter_selectivity import scale_table_stats_for_selectivity
 
 
@@ -963,7 +967,7 @@ def greedy_join_order(var chain: JoinChain) raises -> LogicalPlan:
     Cost model: legacy `max(l, r)` fallback via
     `estimate_join_cardinality_for_reorder`. The NDV-aware path
     (`estimate_join_cardinality_with_ndv`) is the DPccp cost function
-    (`optimizer_dpccp._cost_for_pair`, on its no-TDOM-graph path); greedy
+    (`optimizer_dpccp_cost._cost_for_pair`, on its no-TDOM-graph path); greedy
     intentionally does NOT consume it. Multi-way reordering is designed to
     go through DPccp (n>=4 chains); greedy serves the n<4 fallback path,
     where the small chain shape makes the FK-PK cost signal moot.
@@ -1113,7 +1117,7 @@ def reorder_joins(var plan: LogicalPlan) raises -> LogicalPlan:
     # greedy_join_order.
     elif tag == PLAN_FILTER:
         var child_in = _copy_plan(plan._filter.value()[].child[])
-        var new_child = reorder_joins(child_in^)
+        var new_child = _reorder_joins_keeping_order(child_in^)
         plan._filter.value()[].child = OwnedPointer(new_child^)
 
     elif tag == PLAN_PROJECT:
@@ -1128,23 +1132,29 @@ def reorder_joins(var plan: LogicalPlan) raises -> LogicalPlan:
 
     elif tag == PLAN_SORT:
         var child_in = _copy_plan(plan._sort.value()[].child[])
-        var new_child = reorder_joins(child_in^)
+        var new_child = _reorder_joins_keeping_order(child_in^)
         plan._sort.value()[].child = OwnedPointer(new_child^)
 
     elif tag == PLAN_LIMIT:
         var child_in = _copy_plan(plan._limit.value()[].child[])
-        var new_child = reorder_joins(child_in^)
+        var new_child = _reorder_joins_keeping_order(child_in^)
         plan._limit.value()[].child = OwnedPointer(new_child^)
 
     elif tag == PLAN_DISTINCT:
         var child_in = _copy_plan(plan._distinct.value()[].child[])
-        var new_child = reorder_joins(child_in^)
+        var new_child = _reorder_joins_keeping_order(child_in^)
         plan._distinct.value()[].child = OwnedPointer(new_child^)
 
     elif tag == PLAN_TOPN:
         var child_in = _copy_plan(plan._topn.value()[].child[])
-        var new_child = reorder_joins(child_in^)
+        var new_child = _reorder_joins_keeping_order(child_in^)
         plan._topn.value()[].child = OwnedPointer(new_child^)
 
     # PLAN_SCAN and unknown tags: no children to recurse into.
     return plan^
+
+
+def _reorder_joins_keeping_order(var child: LogicalPlan) raises -> LogicalPlan:
+    """`optimizer_dpccp._reorder_joins_with_dp_keeping_order`, greedy."""
+    var before = join_reorder_output_names(child)
+    return restore_join_reorder_output_columns(reorder_joins(child^), before^)

@@ -6,16 +6,17 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_binary", "mojo_
 
 The rules are in [`defs.bzl`](defs.bzl); their providers in
 [`providers.bzl`](providers.bzl). Every action runs the hermetic toolchain
-([`toolchains//:mojo`](../toolchains/README.md)) through
-[`mojo_wrapper.sh`](mojo_wrapper.sh), which is where to read the environment
-the compiler sees. Worked uses of each rule are in
+([`toolchains//:mojo`](../toolchains/README.md)) through the compile wrapper,
+[`tools/mojo_compile.zig`](tools/mojo_compile.zig) on Linux (its header is
+where to read the environment the compiler sees) and
+[`darwin/mojo_wrapper.sh`](darwin/mojo_wrapper.sh) on macOS. Worked uses of each rule are in
 [`../examples/BUCK`](../examples/BUCK), and fixtures that must fail are in
 [`../tests/`](../tests/README.md).
 
 | rule | produces | example |
 |---|---|---|
 | `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level, readme)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run, and so are the ```` ```mojo ```` examples of the package's `README.md` (see [README examples](#readme-examples)); the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
-| `mojo_binary(srcs, deps, main, optimization_level, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
+| `mojo_binary(srcs, deps, main, optimization_level, expected_stdout, helpers)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries and its `helpers` (programs it runs, beside it: [helpers.bzl](helpers.bzl)). `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
 | `mojo_test(srcs, deps, main, optimization_level, data, env, args, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
 | `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
 | `mojo_doc_json(lib, golden, symbols)` ([`doc.bzl`](doc.bzl)) | `<name>.json`: the `mojo doc` JSON of the `mojo_library` `lib`, optionally checked against a golden file and for named declarations (see [API JSON](doc.md)). | [`hellopkg_doc`](../examples/BUCK) |
@@ -68,6 +69,13 @@ mojo_library(
   refused; one that depends on the library is a cycle buck2 refuses
   ([`tests//functional/test_deps`](../tests/functional/test_deps/BUCK),
   [`tests//negative/test_deps`](../tests/negative/test_deps/BUCK)).
+- **`dlopen`** (optional) lists the sonames the library opens at run time
+  (`OwnedDLHandle`), each a row of
+  [`system_libs.bzl`](../package/system_libs.bzl) ([`dlopen.bzl`](dlopen.bzl)).
+  Only its conda package reads it: the package requires each row's
+  conda-forge package, and the packer refuses it unless the sources open
+  exactly those sonames
+  ([Conda packages](../../../packaging/conda/README.md#a-library-that-opens-a-shared-library-at-run-time)).
 
 Output layout of a library `L` with import name `I`:
 
@@ -83,40 +91,63 @@ L/tests/readme/...  the README's generated program, binary and marker
 
 A library whose package holds a `README.md` runs the README's examples as one
 more welded test, `[tests][readme]`, so the documentation cannot rot. Nothing
-declares it: the README is declared by existing. The reader and the program
-generator are [`//tools/build/readme_examples`](../readme_examples/BUCK)
-(pure Mojo; `buildtools.doc_links` reads code through the same CommonMark
-fence reader, so the link check and the examples agree on what is code).
+declares it: the README is declared by existing. The program generator is
+the Zig tool [`//tools/build/readme_examples:tool`](../readme_examples/BUCK)
+(`generate`, `map` for a report's lines, and `link` and `link-check` for a
+packaged README's `sh komira-link` block; its unit tests are welded). It
+reads Markdown through the shared Zig module
+[`//tools/build/markdown`](../markdown/BUCK) (CommonMark fences, code spans,
+links). kci ships the same tool beside its executable (`bin/kci` `helpers`)
+and runs it on an installed README, so the programs an ENV validation runs
+are the ones `[tests][readme]` ran (`src/kci_validate`, whose test compares
+them with `[tests][readme][generated]`, made from `[tests][readme][file]`). Only
+`buildtools.doc_links` (the link check) still reads Markdown through a Mojo
+reader, the `markdown` of the package's Mojo library `readme_examples`,
+until it moves to the Zig module.
 
-- **An example** is a fenced block whose info string is exactly `mojo`
-  (```` ``` ```` or `~~~`; a closing fence is the same character, at least as
-  long, so a ```` ```` ```` fence may quote ```` ``` ````). Every example
-  runs: there is no skip word. A sketch that cannot run is fenced ```` ```text ````.
-  Any word after `mojo` (`mojo skip`) and any near miss (`Mojo`, `mojo,`,
-  `.mojo`) is refused, naming `README.md:<line>`.
-- **A fragment**, as a Rust doctest: its column-0 `from`/`import` lines are
-  hoisted (deduplicated) and so are its column-0 declarations (`def`,
-  `struct`, `trait`, `comptime`, a decorator); the rest becomes
-  `def _example_<line>() raises:`. Assertions are visible `std.testing`
-  calls. Examples share one module, so two declaring the same name collide.
+- **An example** is a fenced block whose info string is `mojo` or
+  `mojo module` (```` ``` ```` or `~~~`; a closing fence is the same
+  character, at least as long, so a ```` ```` ```` fence may quote
+  ```` ``` ````). Every example runs: there is no skip word. A sketch that
+  cannot run is fenced ```` ```text ````. Any other word after `mojo`
+  (`mojo skip`) and any near miss (`Mojo`, `mojo,`, `.mojo`) is refused,
+  naming `README.md:<line>`.
+- **One program per example**, `readme_<I>_<line>.mojo` (`<line>`: its
+  opening fence's README line), compiled and run on its own as a gated test
+  labelled `<target>:README.md:<line>`. Examples share nothing: two may
+  import the same names and declare the same ones, and a failure names one
+  example. The fence tag is the mode; nothing is inferred from the code:
+  - ```` ```mojo ````: statements. The lines are pasted as they are, each
+    indented four spaces, into `def main() raises:`. Every line is indented,
+    the continuation lines of a triple-quoted string too, so such a string's
+    content gains those four spaces. Mojo allows an import inside a
+    function, so nothing is hoisted or parsed. Assertions are visible
+    `std.testing` calls.
+  - ```` ```mojo module ````: a whole program, copied as it is, with its own
+    `def main()`. Fence an example that declares a `struct` or `trait` (or
+    anything else that must be module-level) this way.
 - **Hidden lines**: an HTML comment `<!-- mojo-hidden ... -->` ending on the
   line just before an example's fence is prepended to it, and one starting on
   the line just after is appended (one line, or `<!-- mojo-hidden`, the code,
   then `-->`). GitHub's page does not render it; every raw view, and the
-  installed copy, shows it. A `mojo-hidden` comment next to no example, or a
-  misspelled marker, is refused.
-- **The program** is `readme_<I>.mojo` (never `<I>.mojo`: a file named like the
-  package beside the program would shadow it). It runs every example inside
-  `try`, prints `<package>/README.md:<line>: FAILED: <error>` for each that
-  raises, then `readme_<I> validation: P of E checks passed`, and fails if any
-  failed. Each line copied from the README ends with `# README.md:<n>`, so a
-  compile error, which quotes the line, names the README line too.
+  installed copy, shows it. A `mojo-hidden` comment next to no example, one
+  that would attach to two (it ends just before one fence and starts just
+  after another: a blank line on one side says which), one inside another
+  HTML comment, or a misspelled marker, is refused.
+- **Lines**: line n of an example's program is README line n (the lines
+  around the copied ones are blank, but for a header comment and the
+  `def main() raises:` of a ```` ```mojo ```` example), so a compile error
+  or an assertion at `readme_<I>_<line>.mojo:<n>` names README line n. The
+  generator also writes `readme_<I>.mojo` (never `<I>.mojo`: a file named
+  like the package beside the programs would shadow it), a runner that
+  imports every example's program and runs each inside `try`, printing
+  `<package>/README.md:<line>: FAILED: <error>` for each that raises, then
+  `readme_<I> validation: P of E checks passed`: what a coverage build and
+  an installed README's validation run, in one process.
 - **No example**: whether a README holds one is in its bytes, which analysis
-  cannot read, so a dynamic action reads the count. With none, nothing is
+  cannot read, so a dynamic action reads the examples' lines. With none, nothing is
   compiled or run and the marker reads `NO EXAMPLE <label>`, never `PASS`. A
   README's examples do not count as the tests a conda package needs.
-- The tool's own package, `tools/build/readme_examples`, may hold no README:
-  the tool would depend on itself.
 - **Which library**: a BUCK file of one library says nothing. Every library
   of a BUCK file takes the directory's `README.md` unless it says otherwise,
   so a BUCK file of several libraries names the one the README is about with
@@ -132,10 +163,19 @@ fence reader, so the link check and the examples agree on what is code).
   [Conda packages](../../../packaging/conda/README.md#the-readme-in-the-package))
   refuses a relative link outside code, naming `README.md:<line>`: the
   installed copy has no neighbours. Link an absolute URL or an `#anchor`.
+- **A library that owns C** (a C library among its `deps`) also compiles
+  each example's program to an object, `[tests][readme][objects]`: its
+  shared library's README check (`[readme_calls]`,
+  [`../native/README.md`](../native/README.md#each-librarys-shared-library))
+  fails unless one of them references the library's C, so the installed
+  README run calls the shared library it ships.
 
-Test 38 ([`tests/README.md`](../tests/README.md#38-readme-examples)) builds
-a README that uses every form, and requires a raising example, a compile
-error and a `mojo skip` fence each to fail naming its README line; it also
+Test 38 ([`tests/README.md`](../tests/README.md#38-readme-examples); its
+`run_tests.sh` case is stale until komira-ai/komira#1281 replaces it) builds
+a README that uses every form and two whose examples declare the same names,
+and requires a raising example (and no other), a compile error, a struct in
+a plain ```` ```mojo ```` example and a `mojo skip` fence each to fail
+naming its README line; it also
 builds a two-library package whose README is one library's, and requires
 the same package without `readme = False` to fail.
 
@@ -143,7 +183,8 @@ the same package without `readme = False` to fail.
 
 The compiler can deadlock (every thread parked, the process tree using no
 CPU) and then never exits, which would hold a remote worker until the
-executor's action timeout. [`mojo_wrapper.sh`](mojo_wrapper.sh) runs it in a
+executor's action timeout. The compile wrapper
+([`tools/mojo_compile.zig`](tools/mojo_compile.zig)) runs it in a
 session of its own and samples the CPU time of that session and the
 compiler's whole process tree from `/proc` (a helper reparented away from the
 compiler is still in the session, and counts; what is sampled is what is
@@ -158,13 +199,16 @@ in a toolchains cell); `watchdog_idle_secs = 0` turns the watchdog off.
 
 The compiler dies with the wrapper. A HUP, INT or TERM to the wrapper kills
 the tree before the wrapper exits (129, 130, 143). A KILL cannot be caught,
-so a tether in the compiler's session blocks reading a FIFO whose only
+so a tether in the compiler's session blocks reading a pipe whose only
 writer is the wrapper; when the wrapper dies the read returns and the tether
-kills the session. The macOS wrapper
+kills the session. The tether is not the compiler's child, so a compiler
+that waits for all its children never waits for it. With the watchdog on,
+the compiler's stdin is `/dev/null` and it ignores SIGINT and SIGQUIT. The
+macOS wrapper
 ([`darwin/mojo_wrapper.sh`](darwin/mojo_wrapper.sh)) has the same watchdog
 and knobs (`mojo_darwin_toolchain`), sampling `ps` instead of `/proc` and,
 with no `setsid` on macOS, the compiler's tree by parent pid instead of a
-session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.sh),
+session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.zig),
 [`tests/functional/darwin`](../tests/functional/darwin/check.sh)).
 
 ## Binaries and tests
@@ -176,13 +220,22 @@ session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.sh),
 - **`[run_check]`** (`mojo_binary`): runs the binary remotely from its
   runnable directory, with no library path set, and with `expected_stdout`
   compares its stdout byte for byte
-  ([`examples/BUCK`](../examples/BUCK) `hello`, `hello_pkg_user`).
+  ([`examples/BUCK`](../examples/BUCK) `hello`, `hello_pkg_user`). With
+  `expected_stdout` the check is also a validation of the binary
+  ([`run_check.bzl`](run_check.bzl)): every build whose graph holds the
+  binary runs it, and fails when its stdout differs or it exits non-zero.
+  A `run_check_wired` target ([`examples/BUCK`](../examples/BUCK),
+  [`examples/rust/BUCK`](../examples/rust/BUCK)) fails analysis if a
+  binary rule stops returning that validation.
 - **`buck2 run <target>`**: builds remotely and runs the binary on your
   machine (Linux x86_64) from its runnable directory, downloading the binary
   and its runtime libraries, never the compiler
   ([test 9](../tests/README.md#9-buck2-run)).
 - **`buck2 test <mojo_test>`**: runs the test binary remotely through
-  [`gate_runner.sh`](gate_runner.sh). `buck2 run` of a `mojo_test` runs its
+  the gate ([`gate mojo`](../run/README.md); on darwin-arm64,
+  [`gate_runner.sh`](gate_runner.sh) behind
+  [`dyld_prelude.sh`](darwin/dyld_prelude.sh), until the gate's macOS form is
+  proven on the macOS workers). `buck2 run` of a `mojo_test` runs its
   binary directly, from the runnable directory.
 - **Exit status.** A test passes only by exiting 0. Every other status fails,
   77 included: 77 means SKIP to automake and some test harnesses, but here
@@ -199,10 +252,10 @@ session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.sh),
   other kind of test provider.) A remote executor stops the action there, and
   buck2 reports a plain `Fail` with `Timeout 0`: no word of the timeout, and
   a `mojo_test`'s output, which its runner holds until the test exits, is
-  lost. So a `mojo_test` runs under [`test_deadline.sh`](test_deadline.sh),
-  which kills the test 60 s earlier ([`test_limit.bzl`](test_limit.bzl)),
-  lets the runner report it (`GATED TEST FAILED: <label> (exit 137)` with its
-  output), and prints `TEST TIME LIMIT: killed <label> after <n> s, under the
+  lost. So the gate ([`gate mojo --deadline-s`](../run/README.md); on
+  darwin-arm64, [`test_deadline.sh`](test_deadline.sh)) kills a
+  `mojo_test` 60 s earlier ([`test_limit.bzl`](test_limit.bzl)), reports it
+  (`GATED TEST FAILED: <label> (exit 137)` with its output), and prints `TEST TIME LIMIT: killed <label> after <n> s, under the
   test runner's timeout of <m> s (komira.test_timeout_s)`. No rule can read
   the runner's command line, so the root `.buckconfig` states its timeout as
   `[komira] test_timeout_s` (komira's [`.buckconfig`](../../../.buckconfig)
@@ -231,7 +284,12 @@ A built binary loads a few shared libraries from the toolchain
 (`komira//tools/build/toolchains:mojo_runtime`: the Mojo runtime and the pinned C++ runtime,
 about 24 MB). The runnable directory of a binary (`[runnable]`) holds the
 binary and a copy of those libraries in `lib/`, where its run path finds them,
-so it starts from anywhere with no environment. `RunInfo` points at it.
+so it starts from anywhere with no environment. `RunInfo` points at it. A
+binary's `helpers` (`{file name: target}`, e.g. a `zig_exe`) sit beside it
+there, and in `bin/` of its bundle, where it finds them next to its own
+executable ([helpers.bzl](helpers.bzl)). A `mojo_helper_check` (same file)
+runs a helper's copy in `[runnable]` as a build action, so a binary that lost
+it, or a copy that does not start, is red (`//bin/kci:runnable_readme_examples`).
 ([`launch.sh`](launch.sh) starts a binary from outside its runnable
 directory, pointing the loader at the toolchain's `lib/`.) The list of
 libraries is checked against what the loader actually maps during a run
@@ -269,9 +327,16 @@ level of its own and is compiled into each binary at that binary's level. A
 `mojo_binary` (for `expected_stdout`) states `optimization_level = "1"`
 itself, as [`examples/aws_lc`](../examples/aws_lc/BUCK) and
 [`examples/s2n_tls`](../examples/s2n_tls/BUCK) do. Levels are `0` to `3`;
-anything else is refused at analysis. Test 30
-([`tests/functional/opt_level.sh`](../tests/functional/opt_level.sh)) reads the levels from the
-compile commands.
+anything else is refused at analysis. Each compile records the level it
+puts on its command line, and the rules return the record as
+`MojoOptLevelInfo` ([`opt_level.bzl`](opt_level.bzl)). A
+`mojo_opt_level_check` target fails analysis unless each of its rows
+(target, action category, level) holds: `:opt_levels` in
+[`examples`](../examples/BUCK), [`examples/aws_lc`](../examples/aws_lc/BUCK)
+and [`examples/s2n_tls`](../examples/s2n_tls/BUCK) hold the defaults and the
+test programs' `-O1`, and
+[`tests//functional/opt_level:levels`](../tests/functional/opt_level/BUCK)
+the overrides.
 
 ## Assert level, defines and memory cap
 
@@ -311,10 +376,10 @@ keys, it had before they existed.
   function body (`std.sys.defines.get_defined_string`) sees the value in the
   program's file and in a package's code alike.
 - **Memory cap** (`test_memory_cap_mib`, `memory_cap_mib` on `mojo_test`): the
-  test runs under [`mem_cap.sh`](mem_cap.sh), which sums the resident memory
+  gate ([`gate mojo --mem-cap-mib`](../run/README.md)) sums the resident memory
   of the test's process tree from `/proc` every 0.1 s and, past the cap,
-  kills the test; the gate runner then reports it (`GATED TEST FAILED: <label>
-  (exit 137)`) and `mem_cap.sh` adds `MEMORY CAP: killed <label> at <n> MiB
+  kills the test and everything below it, reports it (`GATED TEST FAILED: <label>
+  (exit 137)`) and adds `MEMORY CAP: killed <label> at <n> MiB
   resident, over its cap of <cap> MiB`. A test that allocates without bound
   therefore fails instead of exhausting the worker. Unset, a test at
   `ASSERT=none` (a hostile-input test, whose bounds checks are off) is capped
@@ -323,18 +388,17 @@ keys, it had before they existed.
   resident memory, not address space: the Mojo runtime's allocator reserves
   address space in 1 GiB regions when it starts, and a test under an
   address-space limit of a few GiB (`ulimit -v`) aborts before its first line.
-  The gate runner leads a session and process group of its own, which the
-  test and its children join unless they leave it. `mem_cap.sh` kills that
-  process group (only the group, by number) once the gate runner has exited,
-  if `/proc` cannot be read, and if `mem_cap.sh` is signalled (SIGHUP,
-  SIGINT, SIGTERM) or killed (SIGKILL, through a tether process in the
-  group). That reaches a child reparented out of the test's process tree,
+  The test leads a session and process group of its own, which its children
+  join unless they leave it. The gate kills that process group (only the
+  group, by number) once the test has exited, if `/proc` cannot be read, and
+  if the gate is signalled (SIGHUP, SIGINT, SIGTERM) or killed (SIGKILL,
+  through a tether process outside the group, which the cap's kill does not
+  reach). That reaches a child reparented out of the test's process tree,
   which the cap's kill (by parent pid) misses, as long as it is still in the
   group. It does not reach a reparented process that has left the group (a
-  new session, or `setpgid` into another group), and the cap's kill also
-  kills the tether, so if `mem_cap.sh` is SIGKILLed after the cap's kill and
-  before its own group kill, a reparented child is left running uncapped.
-  Linux only: on macOS a capped test is refused.
+  new session, or `setpgid` into another group).
+  Linux only: on macOS a capped test is refused (by
+  [`mem_cap.sh`](mem_cap.sh), which the darwin-arm64 toolchain keeps).
 
 The `mojo_library` attributes apply to each `test_srcs` build and run, and
 the assert level and defines to its coverage builds (the coverage binary and
@@ -373,7 +437,7 @@ mojo_test(
 )
 ```
 
-- **Current directory.** [`gate_runner.sh`](gate_runner.sh) starts the test
+- **Current directory.** The gate ([`gate mojo`](../run/README.md)) starts the test
   in `root/share` (an empty directory when nothing is declared). A test in
   package `pkg` that declares `fixtures/a.parquet` opens it as
   `pkg/fixtures/a.parquet`, the path it has in the repository. A file the
@@ -389,10 +453,10 @@ mojo_test(
   `PATH`, `LD_LIBRARY_PATH`, `LD_PRELOAD`, `DYLD_LIBRARY_PATH`,
   `DYLD_FALLBACK_LIBRARY_PATH`, `DYLD_INSERT_LIBRARIES`, `TMPDIR`,
   `TEST_TMPDIR`, `HOME` and `PWD`; setting one is refused at analysis.
-  The variables are given to the test process only, never to the runner's
-  own shell, so a name the runner uses internally (`BIN`, `rc`, `MARKER`)
-  reaches the test and cannot change the verdict
-  ([`tests//functional/test_data:runner_cases`](../tests/functional/test_data/runner_cases.sh)).
+  The variables are given to the test process only: the gate builds the
+  test's environment itself and reads none of its own state from it, so a
+  name such as `BIN`, `rc` or `MARKER` reaches the test and cannot change the
+  verdict (the gate's unit tests, [`mojo_test.zig`](../run/mojo_test.zig)).
 - **`args`** (`mojo_test` only) are the test's command-line arguments under
   `buck2 test`, in order. Configuration reaches a test as flags, so a test
   that needs a tool or file is given its path this way rather than through
@@ -413,7 +477,8 @@ mojo_test(
   `buck2 run` and `[runnable]` do not pass `args`. A library's `test_srcs`
   take none: a gated test is a unit test of its package and gets everything
   it reads through `test_data`
-  ([`tests//functional/test_data:mojo_test_args`](../tests/functional/test_data/BUCK)).
+  ([`mojo_test_testdata:mojo_test_args`](mojo_test_testdata/BUCK), run by
+  `buck2 test` in the pull-request check).
 - **Scratch.** `TEST_TMPDIR` (equal to `TMPDIR`) and `HOME` are two empty
   directories the runner makes for this run inside the action's working
   directory, so no two runs share them, and they are removed afterwards.
@@ -785,6 +850,14 @@ digest in every consumer (test 7). A repository's own C code, mounted at one
 place, does not need it.
 [`../examples/cshim`](../examples/cshim) calls C from Mojo.
 
+A library whose closure links C has a conda package only when, for each C
+library a library of its closure lists in `deps`, a library of the closure
+ships it ([`native_facts.bzl`](native_facts.bzl)): `native = ":<name>_native"`
+names the library's own shared library ([`../native`](../native/README.md)),
+which links exactly its C `deps`; `native_static = True` ships them as static
+archives (per-library state only). Otherwise the package is refused for its
+native code.
+
 zig's libc++ and libc++abi are linked statically. The Mojo runtime itself
 loads `libstdc++.so.6`, so a binary may hold both runtimes; it exports no
 dynamic symbol, so neither can interpose on the other (test 20, on the snappy
@@ -819,6 +892,49 @@ Mojo code calls `external_call["komira_awslc_SHA256", ...]`. The renaming is a
 generated header each library force-includes, and a symbol check gates
 every build that links the library; see [`../native`](../native/README.md).
 
+### Native reach
+
+A library's conda package requires the packages of its Mojo `deps` and
+nothing else, so a library reaching another library's native code must have
+that library in its Mojo deps closure. Each C archive has one owner, the
+`mojo_library` that ships it: the library of its own package
+(`//src/<name>:<name>`) for a `cxx_library` under `src/`, and the
+`THIRD_PARTY_OWNERS` row of its package
+([`one_definition/libraries.bzl`](../one_definition/libraries.bzl)) for a
+vendored one, with the symbol prefix of its renamed build (`komira_awslc_`
+for aws-lc, whose owner is `komira_crypto`). Every `mojo_library` outside
+`src/tests/` carries two validations
+([`native_reach.bzl`](native_reach.bzl)), which fail its build and the build
+of every target holding it:
+
+- `native_reach_archives`, decided at analysis: each archive its own C/C++
+  `deps` link, with every archive those need, has its owner in the closure
+  or is its own. A third_party archive with no owner row, or a row with no
+  owner, is refused. So `komira_http_core`, whose `//third_party/s2n-tls:s2n`
+  needs aws-lc, depends on `komira_crypto`, and a library calling
+  `komira_fs`'s shim depends on `komira_fs`, never on `:komira_fs_posix`.
+- `native_reach_calls`, a run of the Zig tool
+  [`native_reach/`](native_reach/README.md): no string literal in its
+  sources (not its tests) starts with the prefix of an owner outside the
+  closure, as `external_call["komira_awslc_RAND_bytes", ...]` does in
+  `komira_uuid`. On a target platform other than linux-x86_64, it is not run.
+
+`<library>[native_reach]` builds the two results without the library's
+tests.
+
+The check's cases are `native_reach_case` targets in
+[`tests//negative/native_reach`](../tests/negative/native_reach/BUCK): each
+runs the same check on a library's sources and deps with one planted defect
+(an archive whose owner is missing, an archive a C dep needs, a third_party
+archive with no owner row, named or reached through a C dep, or a row with no
+owner, an archive in a dep that is not first, an archive linked as objects, a
+prefixed `external_call` with no archive dep, the scanner's quoting)
+and builds only while the check refuses it with the named error, or passes a
+correct tree. Two cases sit outside `src/tests/`, in `tests//src/native_reach`
+and `tests//src/tests_native_reach` (sharing the prefix without the slash), so
+a wider exemption fails them. `tests//functional/native_reach:cases` builds
+them all.
+
 ## Coverage builds
 
 `-c komira.coverage=true` (default `false`) gives every `mojo_library` on
@@ -833,7 +949,7 @@ rules, sub-targets, scope and fixtures are in [coverage.md](coverage.md).
 
 | message | from | meaning |
 |---|---|---|
-| `GATED TEST FAILED: <label> (exit N)` | [`gate_runner.sh`](gate_runner.sh) | a `test_srcs` test (or `buck2 test` of a `mojo_test`) failed |
+| `GATED TEST FAILED: <label> (exit N)` | [`gate mojo`](../run/README.md) | a `test_srcs` test (or `buck2 test` of a `mojo_test`) failed |
 | `COVERAGE GATE FAILED (<mode>): <package> (<label> [coverage gate]): covcheck gate exited 3` | [`cov_gate.sh`](../coverage/cov_gate.sh) | with coverage on, the library's coverage gate in enforce mode found something (its summary follows: below the target, not measured, a file no test compiled, branch not measured, ...), or in any mode the package is under its floor (`Regression`, [The ratchet](../coverage/README.md#the-ratchet)); the conda package (`<name>_conda`) is not produced, while the library and its dependents still build ([The build gate](../coverage/README.md#the-build-gate)) |
 | `COVERAGE GATE ERROR: <package> (<label> [coverage gate]): covcheck exited N` | [`cov_gate.sh`](../coverage/cov_gate.sh) | covcheck refused the gate's inputs (an unmapped report path, a source it cannot read: exit 1) or its command line (exit 2), in any mode; its message is above |
 | `COVERAGE RUN FAILED: <label> [coverage]` | [`cov_run.sh`](../coverage/kcov/cov_run.sh) | a coverage run failed: the test failed under kcov (with its exit status, after its output), it left processes running or did not finish within the run's limit (450 s), kcov could not trace it or failed itself, the binary names the library's sources by another directory than the run stages, or its report was missing or refused by `cov_normalize` ([cov_run](../coverage/kcov/README.md#cov_run)) |
@@ -842,10 +958,10 @@ rules, sub-targets, scope and fixtures are in [coverage.md](coverage.md).
 | `<target>: test_data[<entry>]: not a test_srcs entry` | [`defs.bzl`](defs.bzl) | a `test_data` key names no test; fix the path or delete the key |
 | `<target>: ... data destination <d> ...` | [`test_runtime.bzl`](test_runtime.bzl) | a data destination is absolute, has an empty, `.` or `..` segment, or is also the directory of another destination |
 | `<target>: ... env sets <NAME>, which the test runner sets itself` | [`test_runtime.bzl`](test_runtime.bzl) | `test_env`/`env` names a variable the runner owns |
-| `mojo-watchdog: killed deadlocked compiler after <n>s of zero process-tree CPU` (exit 124) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the compile's process tree used no CPU for `watchdog_idle_secs`; retry the action |
-| `mojo_wrapper: REFUSING: toolchain member '<m>' is missing or empty` (exit 2) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the unpacked toolchain lacks a file its `CLOSURE_MANIFEST` lists; nothing falls back to the worker ([test 4](../tests/README.md#4-closure-refusal)) |
-| `mojo_wrapper: <output> contains this action's working directory` (exit 4) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | a compile output embeds a machine-specific path |
-| `mojo_wrapper: compiler exited 0 but <output> is missing or empty` (exit 3) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the compiler reported success without writing its output |
+| `mojo-watchdog: killed deadlocked compiler after <n>s of zero process-tree CPU` (exit 124) | [`mojo_compile.zig`](tools/mojo_compile.zig) | the compile's process tree used no CPU for `watchdog_idle_secs`; retry the action |
+| `mojo_compile: REFUSING: toolchain member '<m>' is missing or empty` (exit 2) | [`mojo_compile.zig`](tools/mojo_compile.zig) | the unpacked toolchain lacks a file its `CLOSURE_MANIFEST` lists; nothing falls back to the worker ([test 4](../tests/README.md#4-closure-refusal)) |
+| `mojo_compile: <output> contains this action's working directory` (exit 4) | [`mojo_compile.zig`](tools/mojo_compile.zig) | a compile output embeds a machine-specific path |
+| `mojo_compile: compiler exited 0 but <output> is missing or empty` (exit 3) | [`mojo_compile.zig`](tools/mojo_compile.zig) | the compiler reported success without writing its output |
 | ``[komira] coverage = "<v>": it must be `true` or `false` (default false)`` | [`coverage.bzl`](coverage.bzl) | the coverage switch has another value; it fails at load rather than reading a typo as off |
 | `cov_zig: ... has debug sections but holds the working directory (...) nowhere` | [`cov_zig.zig`](../coverage/kcov/cov_zig.zig) | a coverage link's debug info holds neither spelling of the working directory: zig's C runtime units (the only ones that record a directory) record one the relocation was not given, so the binary would differ by machine, or have no debug info |
 | `cov_zig: a link with the optimization level <level> is refused` | [`cov_zig.zig`](../coverage/kcov/cov_zig.zig) | a coverage link at a release level, where lld would merge string tails the relocation cannot see |
@@ -855,8 +971,8 @@ rules, sub-targets, scope and fixtures are in [coverage.md](coverage.md).
 | ``<target>: test_defines sets ASSERT; set `test_assert_level` instead`` (or `defines`, `assert_level`) | [`defines.bzl`](defines.bzl) | the assert level is its own attribute |
 | `<target>: defines entry "<e>" is not NAME or NAME=VALUE with NAME an identifier`, `... sets <NAME> twice` | [`defines.bzl`](defines.bzl) | a define the compiler would misread, or two values for one name |
 | `<target>: test_memory_cap_mib is <n>; it must be a number of MiB, or 0 for no cap` | [`defines.bzl`](defines.bzl) | a negative cap |
-| `MEMORY CAP: killed <label> at <n> MiB resident, over its cap of <cap> MiB` | [`mem_cap.sh`](mem_cap.sh) | the test's resident memory passed its memory cap and it was killed (after `GATED TEST FAILED: <label> (exit 137)`) |
-| `TEST TIME LIMIT: killed <label> after <n> s, under the test runner's timeout of <m> s (komira.test_timeout_s)` | [`test_deadline.sh`](test_deadline.sh) | `buck2 test` of a `mojo_test` ran to 60 s short of the test runner's timeout and was killed (after `GATED TEST FAILED: <label> (exit 137)`); see [Time limits](#time-limits) |
+| `MEMORY CAP: killed <label> at <n> MiB resident, over its cap of <cap> MiB` | [`gate mojo --mem-cap-mib`](../run/README.md) | the test's resident memory passed its memory cap and it was killed (after `GATED TEST FAILED: <label> (exit 137)`) |
+| `TEST TIME LIMIT: killed <label> after <n> s, under the test runner's timeout of <m> s (komira.test_timeout_s)` | [`gate mojo --deadline-s`](../run/README.md) | `buck2 test` of a `mojo_test` ran to 60 s short of the test runner's timeout and was killed (after `GATED TEST FAILED: <label> (exit 137)`); see [Time limits](#time-limits) |
 | `[komira] test_timeout_s = <v> is not a whole number of seconds` / `must be over 60 s` | [`test_limit.bzl`](test_limit.bzl) | the root `.buckconfig` (or `-c`) states a test timeout a `mojo_test` cannot be limited under |
 | `<target>: dep <dep> provides neither MojoInfo (a Mojo package) nor MergedLinkInfo (a C/C++ library)` | [`defs.bzl`](defs.bzl) | a `deps` entry is neither a `mojo_library` nor a C/C++ library |
 | `cxx toolchain: <tool> is not provided` | [`cxx.bzl`](cxx.bzl) | a `cxx_library` reached a prelude feature that needs a host tool the toolchain does not provide |

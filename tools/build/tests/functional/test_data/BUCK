@@ -1,5 +1,5 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
-load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load(":runner_cases.bzl", "mojo_gate_runner_cases", "mojo_test_command_case")
 
 # The tests of the test runtime contract. They use only the standard library:
@@ -7,8 +7,8 @@ load(":runner_cases.bzl", "mojo_gate_runner_cases", "mojo_test_command_case")
 # because a tests-cell target cannot depend on a komira-cell mojo_library
 # (Buck2 gives the MojoPkgTSet a distinct identity per loading cell).
 # The contract is in tools/build/mojo/README.md ("Test data, environment and
-# scratch"). tools/build/tests/run_tests.sh builds each target and requires
-# the verdict written above it.
+# scratch"). The pull-request check builds this package; the verdict of each
+# target is written above it.
 
 _SRCS = [
     "__init__.mojo",
@@ -33,61 +33,20 @@ mojo_library(
     test_env = {"TD_MODE": "tests"},
 )
 
-# GREEN under `buck2 test`: a mojo_test with dict data and env.
-mojo_test(
-    name = "mojo_test_data",
-    srcs = ["tests/test_mojo_test_data.mojo"],
-    data = {"staged/as.txt": "fixtures/declared.txt"},
-    env = {"TD_MODE": "mojo_test"},
-)
-
-# GREEN under `buck2 test`, and built as an action by mojo_test_args_action:
-# a mojo_test with `args`. Each `$(location ...)`, of a build output
-# (args_copied) and of a source (args_referenced), reaches the test as an
-# absolute path it can open from its share/; `$(exe_target :args_helper)`
-# reaches it as the absolute path of the binary in its runnable directory,
-# lib/ beside it; plain arguments arrive verbatim and in order, and a
-# NAME=VALUE argument is not exported.
-export_file(
-    name = "args_copied",
-    src = "fixtures/declared.txt",
-)
-
-export_file(
-    name = "args_referenced",
-    src = "fixtures/declared.txt",
-    mode = "reference",
-)
-
-mojo_binary(
-    name = "args_helper",
-    srcs = ["args_helper.mojo"],
-)
-
-mojo_test(
-    name = "mojo_test_args",
-    srcs = ["tests/test_mojo_test_args.mojo"],
-    args = [
-        "--copied=$(location :args_copied)",
-        "--referenced=$(location :args_referenced)",
-        "--pair=$(location :args_copied),$(location :args_referenced)",
-        "--helper=$(exe_target :args_helper)",
-        "two words",
-        "TD_ARG=exported",
-    ],
-)
+# The mojo_tests run under `buck2 test` (dict data and env; args) are
+# komira//tools/build/mojo/mojo_test_testdata, where the pull-request check
+# runs `buck2 test`.
 
 # mojo_test_args's `buck2 test` command (gate runner, staged test, --arg
-# options and the artifacts they name), run as a build action: the pull-request
-# check builds this package and does not run `buck2 test`, so this is what
-# gates `args` there.
+# options and the artifacts they name), run as a build action.
 mojo_test_command_case(
     name = "mojo_test_args_action",
     script = "test_command_case.sh",
-    test = ":mojo_test_args",
+    test = "komira//tools/build/mojo/mojo_test_testdata:mojo_test_args",
 )
 
-# The runner itself, in one action directory (runner_cases.sh): two runs get
+# The darwin-arm64 toolchain's runner, gate_runner.sh (linux runs the gate,
+# whose unit tests hold the same cases), in one action directory (runner_cases.sh): two runs get
 # two TEST_TMPDIRs, each empty, under the action directory and gone after the
 # run; --env BIN / rc / MARKER cannot turn a red test green; a test killed
 # by a signal is red with its own status; --arg values arrive in order,

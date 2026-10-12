@@ -68,6 +68,10 @@ unlike a write with no precondition. Each oneof of the message is chosen by
 its case number (`_oneof0_case = 2` selects `write_object_spec` over
 `upload_id`; `_oneof1_case = 1` selects `checksummed_data`):
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+from komira_proto_codec.proto_binary import PbDecoder, PbEncoder
+-->
 ```mojo
 from komira_gcp_storage.storage import ChecksummedData, WriteObjectRequest, WriteObjectSpec
 

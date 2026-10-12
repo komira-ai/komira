@@ -28,7 +28,7 @@ runs included ([The coverage workflow](#the-coverage-workflow), step 4).
 | `:census.tsv`, `:census.sh`, `census.bzl` | the census: every library's numbers, the script that measures them and renders `docs/coverage_census.md` and the floors, and the rule of the root's `:coverage_census` check ([The census](#the-census)) |
 | `policy.bzl` | the gate's mode and target, and the ledger of libraries that cannot have a gate of their own |
 | `no_gate.bxl` | the check that holds that ledger equal to the libraries the gate depends on |
-| `branch_gate.bxl` | the check that every row of `COVERAGE_BRANCH_GATE` (`policy.bzl`) names a library: a row naming none is read by nothing (test 46) |
+| `:branch_gate_rows` (`BUCK`, `defs.bzl`) | the check that every row of `COVERAGE_BRANCH_GATE` (`policy.bzl`) names a Mojo library and is spelled exactly as that library's label (`komira//src/<p>:<p>`, the string `mojo_library` looks itself up by): a row naming none, or spelled another way, is read by nothing, so it fails this target's build |
 | `mutate/` | the mutation tool: `:mutate` (the library, its tests welded), `:mutate_bin`, `:mut_dir` (what every library's `[mutation]` runs from) ([Mutation score](#mutation-score)) |
 
 ## What line coverage means here
@@ -640,8 +640,8 @@ is not a one-line change today:
 
 **The ledger** (`COVERAGE_NO_GATE` in `policy.bzl`): the gate
 runs `covcheck_bin`, so the Mojo libraries `covcheck_bin` depends on
-(`covcheck`, `komira_json`, and `readme_examples`, whose tool runs the
-examples of their README) cannot have the gate as an action of their own:
+(`covcheck` and `komira_json`; the tool that runs the examples of their
+README is Zig) cannot have the gate as an action of their own:
 the library would depend on the gate's directory, which depends on
 `covcheck_bin`, which depends on the library. That is a cycle of configured
 targets (a dependency of the rule, whatever waits for the gate's output),

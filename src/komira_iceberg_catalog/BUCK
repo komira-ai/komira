@@ -19,6 +19,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_iceberg_rest_catalog.mojo",
+        "tests/test_storage_based_catalog.mojo",
     ],
     visibility = ["PUBLIC"],
 )

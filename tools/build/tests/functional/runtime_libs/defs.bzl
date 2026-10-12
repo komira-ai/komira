@@ -1,7 +1,9 @@
 """The glibc loader's own record of what the compiler loads.
 
-Runs one real compile through the real wrapper, then the built binary through
-the real `launch.sh`, both with `LD_DEBUG=libs`, and reports every file the
+Runs one real compile through the real wrapper (which gives the compiler
+`LD_DEBUG=libs` through its --ld-debug-output flag: the compiler sees no
+other variable of this action), then the built binary through the real
+`launch.sh` with `LD_DEBUG=libs`, and reports every file the
 loader mapped and initialized in each (`compile init <file>`, `run init
 <file>`), with the toolchain directory written as `<toolchain>`.
 tools/build/tests/run_tests.sh reads the report; it is a diagnostic output, not part of any build.
@@ -18,8 +20,8 @@ D="$PWD/.komira_ldtrace"
 "$BB" mkdir -p "$D/bin"; "$BB" --install -s "$D/bin"; PATH="$D/bin"
 mkdir "$D/compile" "$D/run"
 crc=0
-LD_DEBUG=libs LD_DEBUG_OUTPUT="$D/compile/ld" \\
-    "$BB" sh "$WRAPPER" "$BB" "$TC" "$ZIG" "$CCT" -- build --target-cpu "$CPU" "$SRC" -o "$OUT" || crc=$?
+"$WRAPPER" "--compiler=$TC" "--zig=$ZIG" "--cc-target=$CCT" "--ld-debug-output=$D/compile/ld" \\
+    -- build --target-cpu "$CPU" "$SRC" -o "$OUT" || crc=$?
 rrc=-
 if [ "$crc" = 0 ]; then
     rrc=0
