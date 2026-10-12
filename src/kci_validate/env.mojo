@@ -41,7 +41,10 @@
 #
 #   pixi install --manifest-path <w>/pixi.toml --auth-file <w>/auth.json
 #        --tls-root-certs webpki --no-progress
-#   pixi run --manifest-path <w>/pixi.toml --as-is mojo run <w>/readme_<import>.mojo
+#   pixi run --manifest-path <w>/pixi.toml --as-is mojo run [<link args>] <w>/readme_<import>.mojo
+#
+# `<link args>` are the `mojo run` arguments of the installed README's
+# `sh komira-link` block (readme_link.mojo), none when it has no block.
 #
 # `--manifest-path` is explicit because pixi otherwise finds a workspace by
 # walking up from its working directory. `--as-is` is `--no-install
@@ -130,6 +133,18 @@ def run_program_argv(work_dir: String, program_file: String) -> List[String]:
     a.append(String("mojo"))
     a.append(String("run"))
     a.append(join_path(work_dir, program_file))
+    return a^
+
+
+def run_program_argv(work_dir: String, program_file: String, link_args: List[String]) -> List[String]:
+    """`pixi run ... --as-is mojo run <link_args> <w>/<program_file>`: the
+    README's link block's `mojo run` arguments (readme_link.mojo) between
+    `run` and the program."""
+    var a = run_program_argv(work_dir, program_file)
+    var program = a.pop()
+    for i in range(len(link_args)):
+        a.append(link_args[i].copy())
+    a.append(program^)
     return a^
 
 

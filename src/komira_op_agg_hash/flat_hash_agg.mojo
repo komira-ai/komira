@@ -69,6 +69,11 @@ from .flat_hash_agg_hash import (
 from komira_counters.keyeq_census import keyeq_record, KEYEQ_FLATHASH_KEYS_N
 from komira_agg_api.agg_layout import AggLayout
 
+# `commit_row` takes an AggCommitPlan, and agg_commit.mojo imports this
+# module: the two modules form one cycle, which Mojo resolves inside a
+# package.
+from .agg_commit import AggCommitPlan
+
 
 # =============================================================================
 # EntryHandle -- a register-passable handle to a FlatHashAggregator entry
@@ -862,7 +867,7 @@ struct FlatHashAggregator(Movable, Deinitable):
         _merge_one_entry_impl(self, other, other_entry)
 
     # =========================================================================
-    # Per-row probe for the sinks
+    # Per-row probe and commit for the sinks
     # =========================================================================
 
     @always_inline
@@ -885,3 +890,26 @@ struct FlatHashAggregator(Movable, Deinitable):
         """
         from .flat_hash_agg_probe import _find_or_create_1_prehashed_impl
         return _find_or_create_1_prehashed_impl(self, key, hash)
+
+    @always_inline
+    def commit_row[
+        plan_origin: ImmOrigin, batch_origin: ImmOrigin
+    ](
+        mut self,
+        ref [plan_origin] commit_plan: AggCommitPlan[batch_origin],
+        handle: EntryHandle,
+        row: Int,
+    ):
+        """Per-row commit: fold row `row` of the plan's batch into the
+        entry `handle` names. Forwards to
+        `commit_plan.commit_row(self, handle, row)`; `@always_inline`
+        collapses the shim at the call site.
+
+        Args:
+            commit_plan: Borrowed AggCommitPlan; layout-bound by the caller
+                via `bind_layout(agg._layout, agg._aggs_offset)` BEFORE
+                the per-row loop.
+            handle: EntryHandle from `probe_or_insert_row` (or a batched probe).
+            row: Per-batch row index.
+        """
+        commit_plan.commit_row(self, handle, row)

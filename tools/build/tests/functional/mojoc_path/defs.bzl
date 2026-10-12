@@ -1,5 +1,5 @@
 """Precompiles one package twice, through the command every `.mojoc` is built
-with (tools/build/mojo/precompile.bzl), with its sources and its dependency
+with (mojo_precompile_cmd in tools/build/mojo/defs.bzl), with its sources and its dependency
 staged under different paths each time, and fails unless the two packages
 are byte-identical. The two staging paths stand in for two buck-out
 isolation directories (or two checkouts' working directories): before the
@@ -8,7 +8,7 @@ its buck-out path, so the bytes differed and so did every archive built
 from them.
 """
 
-load("@komira//tools/build/mojo:precompile.bzl", "precompile_cmd")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_precompile_cmd")
 load("@komira//tools/build/mojo:providers.bzl", "MojoInfo", "MojoToolchainInfo")
 
 # Two staging prefixes of different depth and length.
@@ -37,7 +37,7 @@ def _impl(ctx):
         inc = ctx.actions.copied_dir("{}/inc/{}".format(prefix, dep_name), {dep_name + ".mojoc": dep_pkg})
         out = ctx.actions.declare_output("{}/out/{}.mojoc".format(prefix, ctx.attrs.import_name))
         ctx.actions.run(
-            precompile_cmd(tc, cmd_args(inc, format = "-I{}"), src, out.as_output()),
+            mojo_precompile_cmd(tc, cmd_args(inc, format = "-I{}"), src, out.as_output()),
             category = "mojoc_path_precompile",
             identifier = str(i),
         )

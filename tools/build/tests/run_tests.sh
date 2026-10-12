@@ -134,8 +134,8 @@
 #      known-answer tests, a TLS handshake, the s2n-tls feature probes: see
 #      tools/build/tests/c_libs_tests.sh.
 #  28. (In the gate: tests//functional/watchdog:cases, the compile watchdog
-#      of mojo_wrapper.sh on stand-in compilers, whose action refuses a report
-#      with fewer ok cases than its floor.)
+#      of the compile wrapper (mojo_compile) on stand-in compilers, whose
+#      action refuses a report with fewer ok cases than its floor.)
 #  29. The test runtime contract (tests//functional/test_data): a gated test opens a
 #      declared fixture by its repository path from its staged share/, and a
 #      fixture it did not declare is absent (the gate goes red); TEST_TMPDIR

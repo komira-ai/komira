@@ -51,7 +51,11 @@ Every item is something the shell does today, with the test (see "Tests") that p
 4. The output is the value after the last `-o` in the compiler's arguments; none is exit 2.
 5. `--source-root=<dir>`: only when the subcommand is `build`, `-strip-file-prefix=<abs dir>/` is inserted
    right after the subcommand. The absolute path is `$PWD/<dir>` for a relative dir, spelled exactly as
-   the shell spells it (not canonicalised), because the compiler matches the prefix as a string.
+   the shell spells it (not canonicalised), because the compiler matches the prefix as a string. When the
+   subcommand is `precompile` (which ignores `-strip-file-prefix`), the compiler instead runs from the
+   root's parent, the argument naming the root becomes its basename, and `-o` and relative `-I` are made
+   absolute: the `.mojoc` records `<name>/<file>.mojo` under any isolation directory
+   (`compile_args.runDir`; `tests//functional/mojoc_path:same_bytes`).
 6. Input paths (compiler dir, link dir) are made absolute the same way, `$PWD/<path>`.
 7. macOS only: an argument `shared-lib` without an argument `-install_name` is exit 2 (bundles are
    Linux only; a C-ABI library names itself for dyld).
