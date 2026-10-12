@@ -375,6 +375,18 @@ def _walk_object(
             return _RowResult.miss()
         # Peek value.
         var value_tag = idx.tags[t]
+        # ⚠ A KEY WITH NO VALUE (`{"a":,"b":1}`) MAKES THE ROW NOT JSON.
+        #   Scalars carry no tape tag, so an absent value looks like a
+        #   zero-byte scalar; skipping it would answer a LATER key of a
+        #   document DuckDB refuses as malformed. Null the row instead,
+        #   whichever key the value belongs to.
+        if (
+            value_tag != TAG_QUOTE_OPEN
+            and value_tag != TAG_OPEN_BRACE
+            and value_tag != TAG_OPEN_BRACKET
+            and _scalar_is_empty(bytes, idx, t)
+        ):
+            return _RowResult.miss()
         if key_matches:
             # This is the matching key — either recurse or extract.
             if seg_depth + 1 < len(path_segments):
@@ -574,6 +586,20 @@ def _skip_value_at(idx: StructuralIndex, value_t: Int, input_len: Int) raises ->
         # Scalar — no tape entries to skip. The walker's next iteration
         # will consume the COMMA / CLOSE_BRACE structural that follows.
         return value_t
+
+
+def _scalar_is_empty(bytes: Span[UInt8, _], idx: StructuralIndex, value_t: Int) -> Bool:
+    """True when the untagged scalar ending at tape position `value_t` has
+    no bytes but whitespace: the gap between the prior tape entry (the
+    colon) and `idx.offsets[value_t]`. Stops at the first non-whitespace
+    byte, so a present value costs one or two byte reads."""
+    var j = Int(idx.offsets[value_t - 1]) + 1
+    var end = Int(idx.offsets[value_t])
+    while j < end:
+        if not _is_json_ws(bytes[j]):
+            return False
+        j += 1
+    return True
 
 
 def _find_close_for(idx: StructuralIndex, open_t: Int, input_len: Int) -> Int:
