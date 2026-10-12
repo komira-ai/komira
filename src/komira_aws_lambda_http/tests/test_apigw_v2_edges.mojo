@@ -14,7 +14,8 @@
 # overlong one just below each length's floor, both ends of the surrogate
 # range, the first code point above U+10FFFF, lead bytes outside the table,
 # a bad continuation byte, and a sequence cut short at the end of the body
-# (all rejected, sent as base64 and round-tripped to the identical bytes).
+# (all rejected, sent as base64 and round-tripped to the identical bytes),
+# and a valid sequence that is the last thing in the body (sent as text).
 #
 # Every refusal asserts a phrase of ITS OWN message, so a converter that raised
 # for another reason (a JSON accessor on the wrong kind) does not pass.
@@ -190,6 +191,28 @@ def test_non_string_cookies_are_skipped_and_the_rest_joined() raises:
     assert_equal(req.headers[String("cookie")], String("a=1; c=3"))
 
 
+def test_non_string_cookies_first_add_no_leading_separator() raises:
+    """Non-strings BEFORE the first string: the separator goes between joined
+    cookies, so the header starts with the first string, not with `; `."""
+    var req = api_gateway_v2_event_to_request(
+        _event(
+            String('"GET"'),
+            String('"cookies": [7, null, "a=1", "c=3"], '),
+        ),
+        _prefix(),
+    )
+    assert_equal(req.headers[String("cookie")], String("a=1; c=3"))
+
+
+def test_one_string_cookie_after_a_non_string_has_no_separator() raises:
+    """One joinable cookie, not first in the array: no separator at all."""
+    var req = api_gateway_v2_event_to_request(
+        _event(String('"GET"'), String('"cookies": [false, "a=1"], ')),
+        _prefix(),
+    )
+    assert_equal(req.headers[String("cookie")], String("a=1"))
+
+
 def test_a_cookie_array_of_only_non_strings_adds_no_cookie_header() raises:
     """Nothing joinable: no `cookie` header at all, not an empty one."""
     var req = api_gateway_v2_event_to_request(
@@ -331,6 +354,7 @@ def test_valid_utf8_at_every_length_boundary_goes_out_as_text() raises:
     """The smallest and the largest code point of each sequence length, the two
     neighbours of the surrogate range, and the last code point: each is valid
     and must be sent as text, byte for byte."""
+    _text_case(_bytes(0x7F), String("U+007F, largest 1-byte"))
     _text_case(_bytes(0xC2, 0x80), String("U+0080, smallest 2-byte"))
     _text_case(_bytes(0xC3, 0xA9), String("U+00E9"))
     _text_case(_bytes(0xDF, 0xBF), String("U+07FF, largest 2-byte"))
@@ -348,6 +372,31 @@ def test_valid_utf8_at_every_length_boundary_goes_out_as_text() raises:
         _bytes(0xC3, 0xA9, 0xE2, 0x82, 0xAC, 0xF0, 0x9F, 0x98, 0x80),
         String("three lengths back to back"),
     )
+
+
+def _text_body_case(body: List[UInt8], what: String) raises:
+    """`body` as given, NOT framed: a valid sequence may end the body."""
+    if _is_b64(body):
+        raise Error(String("valid UTF-8 sent as base64: ") + what)
+    if not _same(_emit(body), body):
+        raise Error(String("text body did not round-trip: ") + what)
+
+
+def test_valid_utf8_ending_the_body_goes_out_as_text() raises:
+    """A valid multi-byte sequence as the LAST bytes of the body, at each
+    length, after ASCII and alone: its final continuation byte is the body's
+    last byte, so a scan whose end check is one byte too strict says base64."""
+    _text_body_case(_bytes(0x61, 0xC3, 0xA9), String("a + U+00E9 at the end"))
+    _text_body_case(
+        _bytes(0x61, 0xE2, 0x82, 0xAC), String("a + U+20AC at the end")
+    )
+    _text_body_case(
+        _bytes(0x61, 0xF0, 0x9F, 0x98, 0x80), String("a + U+1F600 at the end")
+    )
+    _text_body_case(_bytes(0xC2, 0x80), String("U+0080 alone"))
+    _text_body_case(_bytes(0xE0, 0xA0, 0x80), String("U+0800 alone"))
+    _text_body_case(_bytes(0xF0, 0x9F, 0x98, 0x80), String("U+1F600 alone"))
+    _text_body_case(_bytes(0xF4, 0x8F, 0xBF, 0xBF), String("U+10FFFF alone"))
 
 
 def test_overlong_surrogate_and_out_of_range_go_out_as_base64() raises:
@@ -373,6 +422,7 @@ def test_overlong_surrogate_and_out_of_range_go_out_as_base64() raises:
     _b64_case(_framed(_bytes(0x80)), String("continuation in lead"))
     _b64_case(_framed(_bytes(0xBF)), String("BF in lead"))
     _b64_case(_framed(_bytes(0xC3, 0xC0)), String("C0 as continuation"))
+    _b64_case(_framed(_bytes(0xC3, 0x7F)), String("7F as continuation"))
     _b64_case(
         _framed(_bytes(0xE2, 0x82, 0x7A)), String("ASCII as 3rd byte")
     )
@@ -397,12 +447,15 @@ def main() raises:
     test_a_null_body_is_empty_not_a_refusal()
     test_a_non_boolean_base64_flag_does_not_decode()
     test_non_string_cookies_are_skipped_and_the_rest_joined()
+    test_non_string_cookies_first_add_no_leading_separator()
+    test_one_string_cookie_after_a_non_string_has_no_separator()
     test_a_cookie_array_of_only_non_strings_adds_no_cookie_header()
     test_a_non_object_lambda_authorizer_injects_nothing()
     test_non_string_path_and_method_read_as_empty()
     test_every_verb_of_the_table_maps_to_its_own_code()
 
     test_valid_utf8_at_every_length_boundary_goes_out_as_text()
+    test_valid_utf8_ending_the_body_goes_out_as_text()
     test_overlong_surrogate_and_out_of_range_go_out_as_base64()
     test_a_sequence_cut_short_at_the_end_goes_out_as_base64()
 
