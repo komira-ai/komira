@@ -1,6 +1,8 @@
 """The ratchet: per-package coverage floors that may only rise.
 
-The file (ratchet.tsv): lines starting with `#` are comments; every other
+The file (each package's coverage_floor.tsv holds one row; the coverage
+workflow gives the rows of the packages it measured as one file; `--ratchet`):
+lines starting with `#` are comments; every other
 line is a row `<package>\\t<line floor>\\t<branch floor>`, floors in basis
 points (0 to 10000), the branch floor `-` when the package has none, or a
 pinned row with a fourth field, its reason (`\\t<reason>`): a floor set by
@@ -249,6 +251,36 @@ def propose(r: Ratchet, packages: List[PackageStats], repo: RepoFiles) -> Ratche
             if p.line_bp() >= 0:
                 out.rows.append(Row(p.package, p.line_bp(), p.branch_bp() if p.branch_bp() >= 0 else NO_FLOOR))
             j += 1
+    return out^
+
+
+def _floor_text(bp: Int) -> String:
+    return String("none") if bp == NO_FLOOR else _bp(bp)
+
+
+def lowered(base: Ratchet, head: Ratchet) -> List[String]:
+    """What `head` lowers of `base`'s floors, one message per floor, each
+    `<package>: <metric> floor <base> -> <head>`: a line floor under
+    `base`'s; a branch floor under `base`'s, or none (`-`) where `base`'s
+    is above 0; and a row of `base` with a floor above 0 that `head` has no
+    row for (`the row is gone`). A pinned row is held the same way: a reason
+    never lowers a floor. A row only `head` has, and any floor raised, is
+    no message. Empty when every floor of `base` holds: floors only rise
+    (README.md, "The ratchet")."""
+    var out = List[String]()
+    for i in range(len(base.rows)):
+        ref b = base.rows[i]
+        var k = head.find(b.package)
+        if k < 0:
+            if b.line_floor > 0 or b.branch_floor > 0:
+                out.append(b.package + String(": the row is gone (line floor ") + _bp(b.line_floor)
+                    + String(", branch floor ") + _floor_text(b.branch_floor) + String(")"))
+            continue
+        ref h = head.rows[k]
+        if h.line_floor < b.line_floor:
+            out.append(b.package + String(": line floor ") + _bp(b.line_floor) + String(" -> ") + _bp(h.line_floor))
+        if b.branch_floor > 0 and h.branch_floor < b.branch_floor:
+            out.append(b.package + String(": branch floor ") + _bp(b.branch_floor) + String(" -> ") + _floor_text(h.branch_floor))
     return out^
 
 

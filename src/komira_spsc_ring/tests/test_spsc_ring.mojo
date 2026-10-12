@@ -31,6 +31,12 @@
 #       the two run free.
 #  13.  Layout: the shared block is four SPSC_PAD_BYTES strides and the ring
 #       struct holds no inline atomics (it stays small and Movable).
+#  14.  Moving the shared block carries every cursor, cache, counter and the
+#       slot store with their values; no eager slots means no store.
+#  15.  White box (header, point 5): the producer's head cache and the
+#       consumer's tail cache are refreshed when the ring looks full or empty,
+#       and a push that blocked leaves the head that ended its spin in the
+#       cache. That test runs first (see main).
 # =============================================================================
 
 from std.memory import OwnedPointer, Pointer
@@ -342,13 +348,17 @@ struct _RingBody[ro: MutOrigin, so: MutOrigin](SpawnJoinBody):
     def _consume(self) raises:
         var t0 = perf_counter_ns()
         if self.wait_for == 1:
+            # A producer that never blocks fails the caller's assertion on
+            # the blocked count. Drain anyway: raising here would leave a
+            # blocked producer spinning and the join would never return.
             while self.ring[].overflow_blocked_count() == Int64(0):
                 if Int(perf_counter_ns() - t0) > _WAIT_NS:
-                    raise Error("the producer never blocked on a full ring")
+                    break
         elif self.wait_for == 2:
             while self.shared[].producer_done.load() == Int64(0):
                 if Int(perf_counter_ns() - t0) > _WAIT_NS:
                     raise Error("the producer never finished")
+        t0 = perf_counter_ns()
         var last = -1
         var announced = False
         while True:
@@ -495,9 +505,74 @@ def test_layout_guards() raises:
     print("  test_layout_guards PASS")
 
 
+def test_block_move_carries_every_field() raises:
+    """Moving the shared block re-creates its atomics: every cursor, cache,
+    counter and the slot store must arrive with the values they had."""
+    var block = _RingBlock[Rec](4)
+    block.head.store(Int64(3))
+    block.tail_cache = Int64(4)
+    block.tail.store(Int64(6))
+    block.head_cache = Int64(2)
+    block.dropped.store(Int64(7))
+    block.blocked.store(Int64(9))
+    block.slots.get_mut_interior(1) = Rec(41)
+    var moved = block^
+    assert_equal(moved.head.load(), Int64(3), "head")
+    assert_equal(moved.tail_cache, Int64(4), "tail_cache")
+    assert_equal(moved.tail.load(), Int64(6), "tail")
+    assert_equal(moved.head_cache, Int64(2), "head_cache")
+    assert_equal(moved.dropped.load(), Int64(7), "dropped")
+    assert_equal(moved.blocked.load(), Int64(9), "blocked")
+    assert_equal(len(moved.slots), 4, "the slot store")
+    assert_equal(moved.slots.get_mut_interior(1).id, UInt64(41), "slot contents")
+    var lazy = _RingBlock[Rec](0)
+    assert_equal(len(lazy.slots), 0, "no eager slots: no store")
+    print("  test_block_move_carries_every_field PASS")
+
+
+def test_cursor_caches_refresh_when_the_ring_looks_full_or_empty() raises:
+    """White box (header, point 5): a cache is refreshed from the peer's cursor
+    when it makes the ring look full (producer) or empty (consumer)."""
+    var ring = SpscRing[Rec](2, OVERFLOW_DROP)
+    assert_true(ring.try_push(Rec(0)), "push 0")
+    assert_true(ring.try_push(Rec(1)), "push 1")
+    assert_equal(ring._block[].head_cache, Int64(0), "no refresh while not full")
+    # First pop: the tail cache (0) says empty, so it is refreshed to 2.
+    assert_equal(ring.try_pop().value().id, UInt64(0), "pop 0")
+    assert_equal(ring._block[].tail_cache, Int64(2), "tail cache refreshed")
+    # The head cache (0) says full; the refresh sees head 1 and admits it.
+    assert_true(ring.try_push(Rec(2)), "push 2 after a refresh")
+    assert_equal(ring._block[].head_cache, Int64(1), "head cache refreshed")
+    print("  test_cursor_caches_refresh_when_the_ring_looks_full_or_empty PASS")
+
+
+def test_a_blocked_push_leaves_the_head_it_waited_for_in_the_cache() raises:
+    """BLOCK: the producer that spun on a full ring caches the head that freed
+    a slot. Five pushes into four slots: the fifth finds the ring full, reads
+    head 0 (no change, so no refresh), blocks, and leaves the spin on the
+    consumer's first pop. The consumer can pop at most the four stored
+    records before the fifth is written, so the cached head is 1 to 4; the
+    cache is only refreshed in the spin, so it would still be 0 without it."""
+    var ring = SpscRing[Rec](4, OVERFLOW_BLOCK)
+    var shared = _Shared()
+    var body = _RingBody(Pointer(to=ring), Pointer(to=shared), 5, 1, False)
+    spawn_join(body, 2)
+    assert_equal(ring.overflow_blocked_count(), Int64(1), "one push blocked")
+    assert_equal(shared.delivered.load(), Int64(5), "all five delivered")
+    var hc = ring._block[].head_cache
+    assert_true(
+        hc >= Int64(1) and hc <= Int64(4),
+        "the cache holds the head that ended the spin: " + String(hc),
+    )
+    print("  test_a_blocked_push_leaves_the_head_it_waited_for_in_the_cache PASS")
+
 def main() raises:
     print("test_spsc_ring")
     print("==============")
+    # First: a fault that sends a BLOCK ring down the DROP path makes this
+    # test fail, while it makes the single-thread DROP tests below spin
+    # forever on their first full push (a DROP ring would then block).
+    test_a_blocked_push_leaves_the_head_it_waited_for_in_the_cache()
     test_construct()
     test_default_capacity_and_policy()
     test_capacity_rounds_up_pow2()
@@ -520,5 +595,7 @@ def main() raises:
     test_eager_ring_allocates_in_the_constructor()
     test_refused_push_after_cache_staleness()
     test_layout_guards()
+    test_block_move_carries_every_field()
+    test_cursor_caches_refresh_when_the_ring_looks_full_or_empty()
     print()
     print("ALL TESTS PASS")

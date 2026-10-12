@@ -38,6 +38,7 @@ load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:providers.bzl", "MojoProgramInfo")
 load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 load(":kcov_guard.bzl", "KcovGuardInfo", "kcov_guard")
 
 # x86-64 levels: target_cpu -> the level the launcher requires.
@@ -217,8 +218,8 @@ cat "$OUT" >&2
 rm -rf "$T"
 exit "$rc"
 """
-    ctx.actions.run(busybox_sh(bb, script, zig, src, out.as_output(), exe.as_output()), category = "launcher_level_test")
-    return [DefaultInfo(default_output = out, sub_targets = {"bin": [DefaultInfo(default_output = exe)]})]
+    ctx.actions.run(busybox_sh(bb, script, zig, src, out.as_output(), exe.as_output()), env = rerun_env(ctx), category = "launcher_level_test")
+    return [DefaultInfo(default_output = out, sub_targets = {"bin": [DefaultInfo(default_output = exe)]}), rerun_info(ctx)]
 
 # Builds and runs level_test.c (remotely): the launcher's level function
 # against made-up CPUs. Building it fails on any wrong level. [bin] is the
@@ -232,7 +233,7 @@ launcher_level_test_rule = rule(
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         "_launcher_sources": attrs.dep(default = "komira//tools/build/package/launcher:sources"),
         "_zig": attrs.exec_dep(default = "komira//tools/build/toolchains:zig"),
-    },
+    } | RERUN_ATTRS,
 )
 
 # ---- package formats over a bundle ------------------------------------------
