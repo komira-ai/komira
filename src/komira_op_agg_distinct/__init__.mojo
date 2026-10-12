@@ -13,7 +13,9 @@ COUNT(DISTINCT) of a STRING column (`cd_string_parallel`), the per-worker
 state of the streaming COUNT(DISTINCT) aggregation
 (`streaming_agg_count_distinct`, with its row loop `cd_stream_consume`, the
 global group directory `cd_global_dir` and the route counters
-`cd_passenger_lane_counter`), and the parallel per-group finalize of the stage
+`cd_passenger_lane_counter`), the streaming COUNT(DISTINCT) sink
+(`agg_sink_count_distinct`, with its ungrouped union
+`agg_count_distinct_kernel`), and the parallel per-group finalize of the stage
 MEDIAN drain (`median_parallel_drain`).
 
 Public API: import directly from sub-modules. No facade.
