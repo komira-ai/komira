@@ -1,0 +1,6 @@
+call buck2 "cquery" "//... + tests//functional/..."
+exit 0
+stdout "komira//src/a:a (prelude//platforms:default#abcdef0123456789)\nkomira//src/a:a_test (prelude//platforms:default#abcdef0123456789)\nkomira//src/b:b (prelude//platforms:default#abcdef0123456789)\nkomira//src/b/sub:s (prelude//platforms:default#abcdef0123456789)\n"
+stdout "komira//src/tests/e2e/foo:t (prelude//platforms:default#abcdef0123456789)\nkomira//src/tests/e2e:helper (prelude//platforms:default#abcdef0123456789)\nkomira//src:top (prelude//platforms:default#abcdef0123456789)\n"
+stdout "komira//tools/build/ci:affected (prelude//platforms:default#abcdef0123456789)\nkomira//tools:t (prelude//platforms:default#abcdef0123456789)\nkomira//:docs (prelude//platforms:default#abcdef0123456789)\nkomira//docs/site:site (prelude//platforms:default#abcdef0123456789)\n"
+stdout "tests//functional/x:x (prelude//platforms:default#abcdef0123456789)\n"

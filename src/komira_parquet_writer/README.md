@@ -1,7 +1,7 @@
 # komira_parquet_writer
 
-The pieces a Parquet writer is built from. The record-batch writer that
-assembles them into a file is a later part of this package; what is here
+A Parquet writer's encoders and page builders. The writer that assembles
+column chunks into a file is a later part of this package; what is here
 writes no file, reads no Parquet file and does not depend on the reader,
 `komira_parquet`.
 
@@ -34,6 +34,29 @@ writes no file, reads no Parquet file and does not depend on the reader,
   type-defined order.
 - `writer_helpers`: page-body compression (through `komira_parquet_codec`),
   the flattened schema builders, integer Statistics builders.
+
+- `column_page`: `ColumnPage`, one column chunk's encoded pages (one data
+  page, or a dictionary page then a data page) with the sizes, codec,
+  encodings and statistics its ColumnMetaData needs, and the DataPage V1
+  assembler every page builder uses.
+- `writer_encode`: definition levels (offset-aware, so a sliced array's
+  levels are its own rows'), and PLAIN pages: fixed-width
+  (`encode_plain_column`), BYTE_ARRAY (`encode_string_column_page` and its
+  Int64-offset twin, byte-identical), BOOLEAN.
+- `writer_delta`: DELTA_BINARY_PACKED for INT32 / INT64, deltas in the
+  column type's own wrapping arithmetic (an INT32 miniblock is never wider
+  than 32 bits).
+- `writer_bss`: BYTE_STREAM_SPLIT for FLOAT / DOUBLE.
+- `writer_dict`, `writer_dict_numeric`: dictionary column chunks, None when
+  the column is not worth a dictionary (the caller writes another
+  encoding). A one-entry dictionary's index stream is an RLE run.
+- `decimal_encode`: Decimal128 as FIXED_LEN_BYTE_ARRAY(16), big-endian,
+  ConvertedType DECIMAL; an invalid precision or scale is refused.
+
+Every page builder takes `nullable`: an OPTIONAL column's page holds
+definition levels and the non-null values; a REQUIRED column's page holds
+every value, and a REQUIRED column that holds a null is refused (writing
+the null slot's bytes would publish a value the column does not have).
 
 The package reads no environment. Its tests are welded into the build.
 
@@ -87,4 +110,29 @@ var footer = FileMetaData(
 )
 var thrift = serialize_file_metadata(footer)
 assert_true(len(thrift) > 0)
+```
+
+## A PLAIN page
+
+```mojo
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_parquet_api import Encoding
+from komira_parquet_writer import encode_plain_column
+from std.testing import assert_equal, assert_true
+
+var col = PrimitiveArray[DType.int32].allocate_nullable(3)
+col.set(0, 5)
+col.set(2, 7)
+col._set_null(1)
+var page = encode_plain_column[DType.int32](0, col, "n", nullable=True)
+assert_equal(page.num_values, 3)  # the null row counts
+assert_true(page.encodings[0] == Encoding.RLE)  # definition levels
+assert_equal(page.statistics.value().null_count.value(), 1)
+var other = PrimitiveArray[DType.int32].allocate_nullable(1)
+other._set_null(0)
+try:
+    _ = encode_plain_column[DType.int32](0, other, "n", nullable=False)
+    raise Error("not refused")
+except e:
+    assert_true("is REQUIRED but holds" in String(e))
 ```

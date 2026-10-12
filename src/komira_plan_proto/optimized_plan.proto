@@ -1,0 +1,302 @@
+syntax = "proto3";
+
+package komira.plan.v1;
+
+import "komira/plan/v1/plan.proto";
+
+// THE OPTIMIZED PLAN — what a producer submits, a scheduler places and a host
+// lowers without optimizing it again.
+//
+// The design is docs/design/optimized_plan.md (komira-ai/komira#1094): §4 the
+// header and body, §6 needs, pins and advice, §8 segments. This file is that
+// design's stage 4, the schema. It holds no codec: the header codec, the body
+// and segment codecs, the canonical encoder and both digests are stage 5, and
+// nothing in this repository reads or writes these messages yet.
+//
+// It imports `plan.proto` and restates none of it. The plan body is a
+// `WirePlan`; the write target is `WireWriteTarget`. One node vocabulary
+// serves both a raw plan and an optimized one (§3), and which one a
+// `WirePlan` is comes from the message that encloses it: inside
+// `WirePlanEnvelope` it is RAW, inside `OptimizedPlanBody`, `SharedSubplan`
+// or `OptimizedSegment` it is OPTIMIZED. No flag inside `WirePlan` says so.
+//
+// FIELD NUMBERS ARE PERMANENT once a released `format_version` may carry
+// them (§9.2): add fields only, never renumber, reuse or retype one. A field
+// removed before any release is `reserved`, number and name, as below. The
+// numbers here are the design's, and the census
+// (tests/test_optimized_plan_field_numbers.mojo) pins each one as wire bytes.
+//
+// HELD NUMBERS. Where the design numbers a field whose type this stage cannot
+// declare yet, the number is left free here, with a `held:` comment naming
+// the field, its type and the design section that will add it. A held number
+// is not reserved, because it will be used with exactly that meaning. The
+// census writes a record under every held number and requires that no
+// declared field takes it, so a field added at a held number without moving
+// its census row fails the build. The reasons, in short:
+//   * a type a later stage adds to `plan_vocabulary.proto` or `plan.proto`
+//     (ExchangeKind and KeyEncoding: stage 3; UdfRef: stage 11);
+//   * a message the design names but does not yet number (ResourceNeeds,
+//     Hint, NodeEstimate, UdfOrigin, ColumnStatsWire, SegmentContract);
+//   * an enum whose values the design and the engine do not yet agree on
+//     (StatsSource: the design lists RUNTIME_FEEDBACK, which the engine's
+//     `STATS_SOURCE_*` constants do not have, and the engine has
+//     SYNTHETIC_ROW_COUNT, which the design does not list);
+//   * the source messages of §15 (typed pins, DataScope, IndexCoverage).
+//
+// CANONICAL FORM. `plan.proto` says its encoding is not canonical, and for a
+// `WirePlanEnvelope` that stays true. Every message reachable from
+// `OptimizedPlanBody` and from `OptimizedSegment` has one canonical encoding
+// (§7.1): fields in ascending number order, default scalars omitted, repeated
+// scalars packed, no unknown fields, minimal varints, one NaN bit pattern
+// with -0.0 kept apart from 0.0, and exactly the set arm of a `oneof`. The
+// digests are computed over that form. The encoder that writes it is stage 5;
+// the generated Mojo encoder of this package writes default scalars and is not
+// that encoder.
+
+// ===========================================================================
+// The plan: header and body (§4.1)
+// ===========================================================================
+
+// What a producer submits and a scheduler accepts. A scheduler reads fields
+// 1-7 through the header library (`komira_optimized_plan_header`, stage 5),
+// whose closure excludes the plan codec, and never parses `body`.
+//
+// Invariants (§4.2), checked by the stage 5 libraries, not by this schema:
+// `format_version` is in the reader's set of released versions (set
+// membership, never `>=`, and an understated version is refused);
+// `producer` and `needs` are required; `plan_digest` is exactly 32 bytes;
+// `recurring_signature` is 32 bytes or empty; an empty `write_target.path`
+// is refused, as in `WirePlanEnvelope`; `advice` is never a reason to refuse.
+message OptimizedPlan {
+  // The minimum reader capability (§9.2). Every new body field bumps it.
+  uint32 format_version = 1;
+  ProducerStamp producer = 2;
+  // sha256(body ‖ canonical(DigestTrailer)) (§7.1). 32 bytes.
+  bytes plan_digest = 3;
+  // 32 bytes or empty. Keys history and caches only, never authorization
+  // or limits: it cannot be checked against the body.
+  bytes recurring_signature = 4;
+  // The only input to placement (§6.1).
+  DeclaredNeeds needs = 5;
+  // Same meaning as `WirePlanEnvelope.write_target`. In the header because a
+  // scheduler authorizes the write; bound into `plan_digest` because it
+  // changes the plan's effect.
+  WireWriteTarget write_target = 6;
+  // Advisory, and outside the digest (§6.3).
+  PlanAdvice advice = 7;
+  // A canonical `OptimizedPlanBody`. `bytes`, not the message, so that a
+  // reader of the header does not link the plan codec.
+  bytes body = 8;
+}
+
+// Who produced the plan (§4.1).
+message ProducerStamp {
+  // Digest of the engine build output: provenance, and the key a revocation
+  // set names (§9.7).
+  bytes engine_build = 1;
+  // The meaning, frozen per version, of every decision in the body (§9.3).
+  uint32 optimizer_contract_version = 2;
+  // Digest of the OptimizerConfig values used. Reproduction only.
+  bytes optimizer_config_digest = 3;
+  // A draft's closed ProducerKind enum, never released. Its name is not
+  // reserved: field 5 below took the name `kind` for the open string.
+  reserved 4;
+  // Open and namespaced, in the grammar of a UDF runtime id:
+  // "komira/python-sdk", "komira/typescript-sdk", "komira/mojo-sdk",
+  // "komira/server" (a service re-optimizing a stored query, §2).
+  // Provenance only: neither admission nor the optimizer reads it.
+  string kind = 5;
+}
+
+// The plan itself. The type is the "do not re-optimize" mark (§7.3 says how
+// that is enforced). Decoded in the OPTIMIZED context.
+message OptimizedPlanBody {
+  // One uncut plan. There is no segment form of a plan and no `final` flag:
+  // segments exist only after the cut (§8).
+  WirePlan plan = 1;
+  // The targets of every `cse_ref` in `plan` (§4.3).
+  repeated SharedSubplan shared = 2;
+  // The snapshot each scan was optimized against; a scan names its entry by
+  // index (`WireScanNode.pin_ref`, stage 3) (§6.2).
+  repeated ScanPin scan_pins = 3;
+  // Recorded multi-table snapshot sets (§15.3.4).
+  repeated PinGroup pin_groups = 4;
+}
+
+// Why the plan was chosen, never what it does. No reader refuses a plan for
+// its content, and none of it is in the digest (§6.3).
+message PlanAdvice {
+  // held: repeated NodeEstimate estimates = 1 ({node_ordinal, node_tag,
+  // rows, bytes, source}, preorder ordinal); the design does not number
+  // NodeEstimate's fields yet.
+  // The statistics the optimizer used.
+  repeated ScanStats stats_basis = 2;
+  // held: repeated UdfOrigin udf_origins = 3 (§10.3; {udf_index,
+  // display_name, file, line, captured_version}); added with UdfRef.
+  // held: repeated IndexCoverage index_coverage = 4 (§15.5.2).
+}
+
+// ===========================================================================
+// Shared subplans (§4.3)
+// ===========================================================================
+
+// One materialize-once subplan. Every `cse_ref` in the plan resolves to
+// exactly one entry, and every entry is referenced; the host materializes
+// each entry once and fans it out.
+message SharedSubplan {
+  // Matches `WireCseRefNode.canonical_hash`.
+  uint64 canonical_hash = 1;
+  WirePlan plan = 2;
+}
+
+// ===========================================================================
+// Needs (§6.1)
+// ===========================================================================
+
+// What a scheduler places by, capped by its own limits. The host checks it
+// against the decoded body (§6.1); it is a summary of the body, never a
+// second switch.
+message DeclaredNeeds {
+  // held: ResourceNeeds resources = 1 (cpu_millis, peak_mem_bytes,
+  // scanned_bytes, max_parallelism, spill_ok, host_count_max,
+  // interruptible, accelerators); the design does not number its fields yet.
+  // held: repeated UdfRef udfs = 2 (§10.3, stage 11). The body references
+  // entries by index, so the list order is part of the plan.
+  // The environment image travels beside the plan (§10.11). Never released.
+  reserved 3;
+  reserved "images";
+  // held: repeated Hint hints = 4 (a closed enum key and a typed value; an
+  // unknown key is refused); the design does not define Hint yet.
+  // The scan binding keys the plan reads.
+  repeated string data_scopes = 5;
+  // A draft's per-language ABI fields, never released; see `runtimes`.
+  reserved 6, 7;
+  reserved "python_abi", "node_abi";
+  // True iff some scan in the body, or in `shared`, is UNBOUNDED (§5.2): the
+  // header's statement, for a scheduler that never decodes the body, that
+  // this is a streaming plan. The host refuses a disagreement with the body.
+  bool unbounded = 8;
+  // One entry per runtime id used by `udfs`, sorted by id.
+  repeated RuntimeNeed runtimes = 9;
+  // held: repeated DataScope scopes = 10 (§15.10.2).
+}
+
+// A runtime the plan's UDFs need, and the ABI tag the environment image must
+// provide for it (udf_runtime_interface.md §3.2).
+message RuntimeNeed {
+  // A `UdfCode.runtime` id (§10.3).
+  string runtime = 1;
+  // The runtime's own ABI tag: "cp312", "cp313t", "node22". May be empty.
+  string runtime_abi = 2;
+}
+
+// ===========================================================================
+// Snapshot pins (§6.2, §15.3.4)
+// ===========================================================================
+
+// The data a scan was optimized against. Binding: the host resolves every
+// pin before lowering and refuses a mismatch. Pins are part of the digest.
+message ScanPin {
+  // The scan's binding identity.
+  string binding_key = 1;
+  // sha256 over the sorted (path, size, etag) of the files the scan reads.
+  // An UNBOUNDED scan pins the stream, not its contents.
+  bytes data_fingerprint = 2;
+  // held: oneof resolved { iceberg = 3 .. table_tail = 9 }, indexes = 10,
+  // has_pin_group = 11, pin_group = 12: the typed pins of §15.3.1.
+}
+
+// One consistent snapshot set across tables, as a multi-table commit
+// recorded it (§15.3.4).
+message PinGroup {
+  // A name for the set, for example a graph's name.
+  string group = 1;
+  // The lineage that records the multi-table commits.
+  string lineage = 2;
+  // The recorded commit whose snapshot set this group reads.
+  uint64 commit_seq = 3;
+  // Indexes into `scan_pins`, ascending.
+  repeated uint32 members = 4;
+}
+
+// ===========================================================================
+// Advice: the statistics basis (§6.3)
+// ===========================================================================
+
+// What the optimizer saw for one pinned scan, for reproduction and
+// diagnosis. It mirrors `TableStats` (komira_plan_stats). No host decision
+// reads it.
+message ScanStats {
+  // Which `ScanPin` these describe.
+  uint32 pin_index = 1;
+  uint64 row_count = 2;
+  // held: StatsSource source = 3 (PARQUET_METADATA, FILE_SIZE_HEURISTIC,
+  // RUNTIME_FEEDBACK, UNKNOWN); see HELD NUMBERS above for why.
+  // held: repeated ColumnStatsWire columns = 4 (name, ndv, min, max,
+  // null_count, from_sketch); the design does not number its fields yet.
+}
+
+// ===========================================================================
+// Segments: cross-host splits (§8.1)
+// ===========================================================================
+
+// One piece of a cut plan. Produced and consumed by the SAME engine build,
+// with no cross-build promise: a stored cut does not outlive an engine
+// upgrade, and is re-derived from its stored `OptimizedPlan` (§9.6). Decoded
+// in the OPTIMIZED context.
+message OptimizedSegment {
+  // The coordinator's build; a host of another build refuses the segment.
+  bytes engine_build = 1;
+  // The verified `OptimizedPlan.plan_digest`.
+  bytes parent_plan_digest = 2;
+  uint32 segment_id = 3;
+  // sha256 over the canonical segment with this field cleared.
+  bytes segment_digest = 4;
+  // held: SegmentContract contract = 5 (output schema; partitioning: keys,
+  // key_encoding, partitions; ordering; write_target on the final segment);
+  // the design does not number its fields yet.
+  // The parent's needs; `udfs` is the parent's list unchanged, so every
+  // `udf_index` stays valid.
+  DeclaredNeeds needs = 6;
+  // The shared subplans this segment references.
+  repeated SharedSubplan shared = 7;
+  // The parent's list, unchanged, so every `pin_ref` stays valid.
+  repeated ScanPin scan_pins = 8;
+  // The parent's list, unchanged (§15.3.4).
+  repeated PinGroup pin_groups = 12;
+  // A segment with no arm set, or with an arm this build does not know, is
+  // refused (OPTIMIZED_SEGMENT_BODY_UNKNOWN).
+  oneof body {
+    // Exchange leaves replaced by a sink below and a shuffle-partition scan
+    // above (§8.2; the sink binding is stage 8).
+    WirePlan logical = 10;
+  }
+  // A later self-contained physical form, meaningful only between equal
+  // builds (§11). Reserved now so adding it is not a format break.
+  reserved 11;
+  reserved "physical";
+}
+
+// A cut plan: its segments and the exchanges between them.
+message OptimizedSegmentDag {
+  // Topologically ordered, producers first.
+  repeated OptimizedSegment segments = 1;
+  repeated ExchangeEdge edges = 2;
+}
+
+// One exchange of the uncut plan, as an edge between two segments (§8.2).
+message ExchangeEdge {
+  uint32 producer_segment = 1;
+  uint32 consumer_segment = 2;
+  // held: ExchangeKind kind = 3 (GATHER, BROADCAST, HASH, RANGE); the enum
+  // is added to plan_vocabulary.proto with the exchange arm (stage 3).
+  // The partitioning key columns.
+  repeated uint32 keys = 4;
+  // held: KeyEncoding key_encoding = 5; the enum comes with the exchange
+  // arm (stage 3), and the design does not list its values yet.
+  // Non-zero: the cut fills it in.
+  uint32 partitions = 6;
+  // The exchange's key_groups, copied unchanged; 0 except below keyed state
+  // (§8.4).
+  uint32 key_groups = 7;
+}
