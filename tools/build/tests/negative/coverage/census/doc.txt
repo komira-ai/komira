@@ -1,12 +1,11 @@
 # Coverage census
 
-Generated: `tools/build/coverage/census.sh render` writes this file from
-[census.tsv](../tools/build/coverage/census.tsv), the numbers of one coverage
-build of every library under `src/`, and from the floors of
-[ratchet.tsv](../tools/build/coverage/ratchet.tsv), which it raises to them.
-The build holds this file, census.tsv and ratchet.tsv to each other
-(`//:coverage_census`), so edit none of them by hand except to lower a floor;
-[The census](../tools/build/coverage/census.md) says how to refresh
+Generated: `./buck2 build //:coverage_census` renders this file from each
+package's coverage_census.tsv, the numbers of a coverage build of each
+library under `src/`, and from each package's coverage_floor.tsv, which it
+raises to them. The same build fails unless every floor is what it renders
+(no floor under what was measured). This file is not committed;
+tools/build/coverage/census.md says how to refresh
 them and what a floor does: a library measured under its package's floor
 fails its coverage gate in every mode, so its conda package is not built.
 
@@ -35,7 +34,7 @@ target: they are listed for information at the end, with no floor.
 ## Ranked by line coverage
 
 Lowest first. *Uncovered* counts executable lines no test ran, the lines of
-files no test compiles included; *Floor* is the package's (ratchet.tsv), line /
+files no test compiles included; *Floor* is the package's (coverage_floor.tsv), line /
 branch, `-` for none, *pinned* when set by hand ([Pinned floors](#pinned-floors));
 **under floor** marks a library measured under it.
 
@@ -61,7 +60,7 @@ branch, `-` for none, *pinned* when set by hand ([Pinned floors](#pinned-floors)
 
 ## Pinned floors
 
-A pinned row of ratchet.tsv holds a floor set by hand, with its reason;
+A pinned floor (coverage_floor.tsv) is set by hand, with its reason;
 render keeps it as written, whatever the census measured (*measured* is
 the package floor the census would give it).
 
