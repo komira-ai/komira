@@ -100,6 +100,20 @@ oci_image(name = "hello_image", bundle = ":hello_bundle", repository = "komira/h
   docker run --rm komira/hello:0.1.0
   ```
 
+  `[release]` is the image as a release set holds it: a directory with the
+  layout (`hello_image.oci/`) and kci's artifact manifest, `manifest.json`
+  (type `OCI`, `file` the layout directory, `sha256` the hex of `[digest]`,
+  and as the name the bundle's program for an image of a bundle, or the last
+  segment of `repository` for an image of a tree: one tree can make several
+  images). A BUILD step copies it into the release directory
+  (`--out <release_dir>/<name>`), and kci's `verify_member` hashes every blob
+  of the layout and requires its manifest digest to be the manifest's
+  `sha256` (`src/kci_release_set`, which reads the real `hello_image[release]`
+  and `hello_root_image[release]`, an image of a tree, in a welded test). The
+  name must be a kci artifact name (`[a-z][a-z0-9_]*`): it is never rewritten,
+  so a repository such as `komira/oci-check` (a hyphen) makes a valid image
+  whose `[release]` fails to build, naming the image and its repository.
+
 `[layers]` is the digest of each layer of the image manifest, one per line,
 in order: the base's layers, then the one the build adds. It is read from the
 manifest by [`komira_oci layers`](oci/README.md), which also refuses an
@@ -142,7 +156,8 @@ image`. `oci_image_check`
 ([`oci_check.bzl`](oci_check.bzl), running
 [`komira_oci check`](oci/README.md)) reads the
 built image back in a build action and is that image with the check's output
-added to its default output and each sub-target, so the image cannot be built
+added to its default output, each sub-target and each sub-target of those
+(`[release][manifest]`), so the image cannot be built
 through it unless: the config's Entrypoint is exactly the one named; it and
 each of `executables` is a regular file with mode 0755 in the image's
 filesystem (layers applied in order; a whiteout removes its path and
