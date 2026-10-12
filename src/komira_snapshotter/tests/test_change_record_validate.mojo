@@ -22,7 +22,11 @@
 #   (4) cdc_op_name / op_name() map every tag, an out-of-range tag (above and
 #       below) to "UNKNOWN"; the is_* predicates are false for other tags.
 #   (5) ChangeBatch.copy() carries every record (op, cells, sequence number),
-#       the cursor and the exhausted flag, and owns its own lists.
+#       the cursor and the exhausted flag, and owns its own lists. The flag is
+#       copied as given, also when it disagrees with the cursor (the
+#       constructor allows that), so a copy that derives it from the cursor
+#       goes red. ChangeRecord.copy() keeps every cell of a three-cell key and
+#       of both images in order and on its own side.
 # =============================================================================
 
 from std.testing import assert_true, assert_equal, assert_false
@@ -275,9 +279,47 @@ def test_batch_copy_carries_exhausted_flag() raises:
     assert_true(c.is_exhausted())
     assert_equal(c.next_cursor, String(""))
     assert_equal(c.__len__(), 2)
+    # The flag is copied, not rebuilt from the cursor: the constructor accepts
+    # a flag and a cursor that disagree, and the copy keeps both as given.
+    var odd = ChangeBatch(List[ChangeRecord](), String(""), False).copy()
+    assert_false(odd.is_exhausted())
+    assert_equal(odd.next_cursor, String(""))
+    var odd2 = ChangeBatch(List[ChangeRecord](), String("tok"), True).copy()
+    assert_true(odd2.is_exhausted())
+    assert_equal(odd2.next_cursor, String("tok"))
     var e = ChangeBatch.end_of_segment().copy()
     assert_true(e.is_exhausted())
     assert_equal(e.__len__(), 0)
+    assert_equal(e.next_cursor, String(""))
+
+
+def _three(a: Int64, b: Int64, c: Int64) -> List[RowCell]:
+    var out = List[RowCell]()
+    out.append(make_long_cell(a))
+    out.append(make_long_cell(b))
+    out.append(make_long_cell(c))
+    return out^
+
+
+def test_record_copy_keeps_every_cell_in_order() raises:
+    """A MODIFY with three-cell key and images: the copy keeps each list's
+    length and every cell in place, and keeps the images on their own sides
+    (old before, new after), as make_modify_record placed them."""
+    var r = make_modify_record(
+        _three(1, 2, 3), _three(10, 11, 12), _three(20, 21, 22), String("s-9")
+    )
+    assert_equal(r.old_image[0].as_long(), 10)
+    assert_equal(r.new_image[0].as_long(), 20)
+    var c = r.copy()
+    assert_equal(c.op, CDC_OP_MODIFY)
+    assert_equal(c.sequence_number, String("s-9"))
+    assert_equal(len(c.key), 3)
+    assert_equal(len(c.old_image), 3)
+    assert_equal(len(c.new_image), 3)
+    for i in range(3):
+        assert_equal(c.key[i].as_long(), Int64(1 + i))
+        assert_equal(c.old_image[i].as_long(), Int64(10 + i))
+        assert_equal(c.new_image[i].as_long(), Int64(20 + i))
 
 
 def test_batch_copy_owns_its_lists() raises:
@@ -311,5 +353,6 @@ def main() raises:
     test_record_op_name_and_predicates()
     test_batch_copy_carries_records_cursor_and_live_flag()
     test_batch_copy_carries_exhausted_flag()
+    test_record_copy_keeps_every_cell_in_order()
     test_batch_copy_owns_its_lists()
     print("test_change_record_validate: ALL PASS")
