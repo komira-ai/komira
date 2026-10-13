@@ -5,7 +5,7 @@ load("@komira//tools/build/lint:defs.bzl", "target_suite")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "mojo_shared_lib_rule", "mojo_test")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load("//functional/coverage:defs.bzl", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_zig_tree", "kcov_stub_dir")
+load("//functional/coverage:defs.bzl", "cov_branch_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_zig_tree", "kcov_stub_dir")
 
 # A coverage link whose relocator rewrites nothing (test 41). Its [coverage]
 # must fail with mojo_compile's exit 4, "contains this action's working
@@ -972,6 +972,61 @@ cov_link_line_check(
     src = "tests/test_one.mojo",
 )
 
+# A copy of cov_branch's `link` (cov_branch_link.zig) without atomic counter
+# updates, built as branchlinkline's is: each counter increment is a plain
+# load, add and store, and the eight threads of test_threads (the fixture of
+# tests//functional/coverage:branch_counts_threads, the same sources) lose
+# increments to each other. RED: tests//negative/coverage:branchnonatomic,
+# "the counters of quarter are '...' (sorted), not '0,2000000,2000000,6000000'".
+cov_plant(
+    name = "branchnonatomic_link_zig",
+    expr = "s|try v.appendSlice(&.{ \"-mllvm\", \"-instrprof-atomic-counter-update-all\" });||",
+    out = "cov_branch_link.zig",
+    src = _BRANCH_SRC + "cov_branch_link.zig",
+)
+
+cov_zig_tree(
+    name = "branchnonatomic_link_src",
+    files = {
+        f + ".zig": (":branchnonatomic_link_zig" if f == "cov_branch_link" else _BRANCH_SRC + f + ".zig")
+        for f in ["cov_branch"] + _TOOL_SRCS
+    },
+)
+
+zig_exe(
+    name = "branchnonatomic_cov_branch",
+    exec_compatible_with = LINUX_X86_64,
+    imports = [":branchnonatomic_link_src[{}]".format(f) for f in _TOOL_SRCS],
+    src = ":branchnonatomic_link_src[cov_branch]",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+cov_branch_dir(
+    name = "branchnonatomic_branch",
+    exec_compatible_with = LINUX_X86_64,
+    link_tool = ":branchnonatomic_cov_branch",
+)
+
+mojo_library(
+    name = "branchnonatomic_lib",
+    srcs = ["//functional/coverage:branchmt/__init__.mojo"],
+    conda = False,
+    coverage_branch = ":branchnonatomic_branch",
+    coverage_debug = _LINK,
+    import_name = "branchmt",
+    test_srcs = ["//functional/coverage:tests/test_threads.mojo"],
+)
+
+cov_branch_check(
+    name = "branchnonatomic",
+    counts = [0, 2000000, 2000000, 6000000],
+    exec_compatible_with = LINUX_X86_64,
+    function = "quarter",
+    profdata = ":branchnonatomic_lib[coverage][branch][test_threads]",
+    script = "//functional/coverage:branch_check.sh",
+)
+
 # ---- Shared libraries (mojo_shared_lib) -----------------------------------------
 
 # Test 43. cov_run.sh with kcov told to skip the shared libraries a driver
@@ -1111,6 +1166,7 @@ target_suite(
         ":branchinternal",
         ":branchentry",
         ":branchnodebug",
+        ":branchnonatomic_lib",
     ],
     visibility = ["komira//:tests_greens"],
 )

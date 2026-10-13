@@ -167,6 +167,8 @@ test "a link as a process: argv, BUCK_SCRATCH_PATH, each step's command line and
         \\{s}/pg.o
         \\--lto-O0
         \\--lto-newpm-passes=pgo-instr-gen,instrprof,default<O0>
+        \\-mllvm
+        \\-instrprof-atomic-counter-update-all
         \\
     , .{ b.p("test_one.bc"), k }), b.read("link/lld/bin/argv").?);
     try testing.expectEqualStrings(try std.fmt.allocPrint(b.a(),
