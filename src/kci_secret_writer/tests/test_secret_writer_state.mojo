@@ -302,6 +302,17 @@ def test_max_length_utf8_round_trip() raises:
         w.written_equals(_A, String(StringSlice(from_utf8=Span(flipped)))),
         "the last byte is compared",
     )
+    # A difference in bit 7 alone: e-acute (C3 A9) against "C)" (43 29), both
+    # valid UTF-8; a comparison that dropped the high bit would call them equal.
+    var e_acute = List[UInt8]()
+    e_acute.append(UInt8(0xC3))
+    e_acute.append(UInt8(0xA9))
+    w.write(_B, SecretValue(Span(e_acute)), "tok")
+    assert_true(
+        w.written_equals(_B, String(StringSlice(from_utf8=Span(e_acute)))),
+        "e-acute equals itself",
+    )
+    assert_false(w.written_equals(_B, "C)"), "bit 7 of each byte is compared")
 
     var store = w.as_static_store()
     var r = store.resolve(_A)
