@@ -84,7 +84,7 @@ from komira_http_server.middleware.fault_report import (
     trace_header_of,
 )
 from komira_http_server.middleware.middleware import Middleware, RequestContext
-from komira_http_server.accept_loop import (
+from komira_http_server.round_write import (
     HEAD_KEPT,
     _write_all_or_buffer,
     _write_last,
