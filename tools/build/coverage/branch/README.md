@@ -73,9 +73,11 @@ for what the script it replaced took as positions or found beside itself:
    compiler's `lib/libKGENCompilerRTShared.so`, zig and the bitcode, in
    this order, must be files that are not empty (a usage error, exit 2),
    and the bitcode must start with the bitcode magic `BC 0xC0DE`.
-1. `lld/bin/lld` reads the bitcode as an LTO link with `-r`, `--lto-O0` and
-   the pass pipeline `pgo-instr-gen,instrprof,default<O0>`: a relocatable
-   object whose code counts its edges. Only this LLVM 24 reads the bitcode
+1. `lld/bin/lld` reads the bitcode as an LTO link with `-r`, `--lto-O0`,
+   the pass pipeline `pgo-instr-gen,instrprof,default<O0>` and
+   `-mllvm -instrprof-atomic-counter-update-all`: a relocatable object
+   whose code counts its edges, each counter updated atomically
+   ([Atomic counters](#atomic-counters)). Only this LLVM 24 reads the bitcode
    ([toolchains/llvm_branch](../../toolchains/llvm_branch/README.md#why-llvm-23-tools-are-safe-next-to-llvm-24)).
 2. The Mojo toolchain's zig links it as `mojo_compile`'s `cc` shim links
    a release test (the line `mojo build` gives it: the compiler's
@@ -109,6 +111,38 @@ compilation directory zig's C runtime objects record, so no relocation (the
 kcov binaries' [`cov_zig`](../kcov/README.md#cov_zig)) is needed, and
 step 3 shows it: with `--strip-debug` left out, the link fails with `the
 binary holds this action's directory`.
+
+### Atomic counters
+
+The link asks LLVM's `instrprof` lowering for atomic counter updates
+(`-mllvm -instrprof-atomic-counter-update-all`; lld hands `-mllvm` options
+to its LTO code generation, as `annotate` hands it
+`-pgo-test-profile-file`). Each counter increment is then an `atomicrmw
+add`, which x86-64 emits as a `lock`-prefixed `add` or `inc` on the
+counter; without it, it is the same instruction with no `lock`, a read, an
+add and a write that two threads can interleave, so one thread's increment
+overwrites another's.
+
+A lost increment does more than lower a count. IR profile counters sit on
+the edges outside a spanning tree of each function's control flow, and
+`pgo-instr-use` derives the other edges' counts from them by sums and
+differences, saturating at 0: a counted edge that lost increments can make
+a derived arm that never ran read above 0 (covered), or one that ran read 0
+(not covered). Any test that runs the measured code on several threads at
+once (a `ParallelDispatch`, raw `pthread_create`) could flip an arm of the
+gate's records from one run to the next.
+
+What was measured remotely, on a test calling `quarter` (a function with an
+`if`/`elif`) from eight threads at once, 1000000 times each
+(`tests//functional/coverage:branchmt`, test 47): lld's assembly of that
+test's bitcode (`--lto-emit-asm`) holds 1425 instructions that update a
+`__profc_` counter, all 1425 `lock`-prefixed with the option and none
+without it; the counters of `quarter`, sorted, are exactly
+`0,2000000,2000000,6000000` with it (`:branch_counts_threads`), and without
+it 77% to 87% of the increments are lost (`0,268986,270087,801750` in one
+run; in six runs the largest counter read 0.80 to 1.36 million of 6 million;
+`tests//negative/coverage:branchnonatomic`, a copy of `cov_branch link`
+without the option, must fail). The cost is in [Cost](#cost).
 
 ## cov_branch_run
 
@@ -657,6 +691,14 @@ Remote worker time (`buck2 log show`,
 to 19 s (`buck2 log what-ran` durations, its IR text 9.8 to 12.4 MB). The
 LLVM pieces are unpacked and checked once, by `toolchains/llvm_branch`.
 
+Atomic counters cost run time where a test spends it in instrumented loops.
+`mojo_cov_branch_run` worker time for the 62 tests of `komira_plan_ir`,
+`komira_json`, `komira_row_format`, `komira_wkt` and `komira_fork_join`:
+24.1 s in all without them, 38.3 s with them. Nearly all of it is one test,
+`komira_row_format`'s `test_xxh3` (7.7 and 10.5 s without, 24.7 and 25.2 s
+with, two runs each); every other test stays under 2 s, and its changes are
+within what two runs of the same binary differ by.
+
 ## Tests
 
 [Test 47](../../tests/coverage_runs.md#test-47-branch-coverage-runs) of
@@ -670,10 +712,12 @@ test 46's `covtry`, whose gate is red on a `try` decision's raise arm alone
 (and `covtry_both`, green), and `covandor`, red on the arm of `return a or
 b` that skips its right operand (and `covandor_both`, green); the link line check; a test that the run gives no `LC_ALL`; a
 library with a C library in its closure; one whose test needs a `test_deps`
-package with a C library; and the planted defects that must go red, among
-them an annotation whose profile does not fit the bitcode or lacks a
-function, a bitcode holding branch weights before the profile, and a
-`nodebug` helper's decision at its call.
+package with a C library; one whose test calls it from eight threads at
+once, whose profile's counters must be exact; and the planted defects that
+must go red, among them an annotation whose profile does not fit the
+bitcode or lacks a function, a bitcode holding branch weights before the
+profile, a `nodebug` helper's decision at its call, and a link without
+atomic counter updates.
 
 The classifier's cases gate every build that uses it; each names the
 mutant it kills. Each runs the executable `:cov_branch_classify` hands out
