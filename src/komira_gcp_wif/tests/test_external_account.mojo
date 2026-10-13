@@ -397,6 +397,40 @@ def test_url_subject_with_impersonation_returns_the_impersonated_token() raises:
     assert_equal(tok.token, IMPERSONATED)
 
 
+def test_every_source_header_reaches_the_get_in_the_files_order() raises:
+    """A URL source naming three headers sends each, once, with its own
+    value, in the file's order (not sorted), and nothing else but what the
+    client writes itself (Host, Content-Length, User-Agent). A sender that
+    stops after the first header, skips the last, or pairs a name with
+    another header's value fails here."""
+    var three = (
+        String('{"url":"') + SOURCE_URL + '","headers":{"X-Zeta":"zeta-1",'
+        + '"Authorization":"Bearer ' + SOURCE_BEARER + '","X-Alpha":"alpha-3"},'
+        + '"format":{"type":"json","subject_token_field_name":"value"}}'
+    )
+    var caps = Caps()
+    var f = _fetcher(_file_json(three, False), caps, _source_ok())
+    var tok = f.fetch(Int64(NOW_MS))
+    assert_equal(tok.token, FEDERATED)
+    var req = _text(caps.source)
+    assert_true(req.startswith("GET /oidc?audience=gcp HTTP/1.1\r\n"), req)
+    assert_equal(
+        _header_names(req),
+        "authorization,content-length,host,user-agent,x-alpha,x-zeta",
+    )
+    assert_equal(_header_value(req, String("x-zeta")), "zeta-1")
+    assert_equal(
+        _header_value(req, String("authorization")), String("Bearer ") + SOURCE_BEARER
+    )
+    assert_equal(_header_value(req, String("x-alpha")), "alpha-3")
+    var low = req.lower()
+    var at_zeta = low.find("\r\nx-zeta:")
+    var at_auth = low.find("\r\nauthorization:")
+    var at_alpha = low.find("\r\nx-alpha:")
+    assert_true(at_zeta > 0 and at_zeta < at_auth and at_auth < at_alpha, req)
+    _check_sts(_text(caps.sts))
+
+
 def test_a_refused_source_url_never_dials_sts() raises:
     """A non-2xx source answer raises with its status, quoting no body
     byte, before STS is dialed."""
@@ -765,6 +799,7 @@ def main() raises:
     test_impersonation_sends_the_callers_scope_and_sts_cloud_platform()
     test_url_subject_without_impersonation_is_the_sts_token()
     test_url_subject_with_impersonation_returns_the_impersonated_token()
+    test_every_source_header_reaches_the_get_in_the_files_order()
     test_a_refused_source_url_never_dials_sts()
     test_each_required_field_absent_is_refused_by_name()
     test_other_types_and_sources_are_refused()
