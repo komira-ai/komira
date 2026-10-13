@@ -13,10 +13,7 @@
 # (it owns an fd; copy would double-close).
 # =============================================================================
 
-from komira_async.reactor.completion_queue import (
-    INTEREST_READ,
-    RegistrationHandle,
-)
+from komira_async.reactor.completion_queue import RegistrationHandle
 from komira_async.reactor.socket_io import try_io_read
 from komira_async.runtime.tcp_stream import TcpStream
 
@@ -89,10 +86,11 @@ struct ConnEntry(Movable, Deinitable):
 
     Fields:
       _stream         — owned TcpStream (RAII fd close on drop)
-      _reg            — reactor registration handle (one per conn)
+      _reg            — reactor registration handle (one per conn); the
+                        mask it is armed for is the reactor's record
+                        (`Reactor.interest_set(_reg)`), not a field here
       _fd             — cached fd (== _stream.fd())
       _state          — CONN_STATE_*
-      _interest_set   — currently armed reactor interest mask
       _pending_buf    — buffered tail bytes for EWOULDBLOCK→EPOLLOUT path.
                         Growable List[UInt8] (heap-owning, Movable) so a
                         response of ANY size flushes across multiple
@@ -118,7 +116,6 @@ struct ConnEntry(Movable, Deinitable):
     var _reg: RegistrationHandle
     var _fd: Int32
     var _state: UInt8
-    var _interest_set: UInt8
     # Growable pending-write tail. List[UInt8] is Movable (keeps ConnEntry
     # Movable) and OWNS its bytes, so it correctly outlives the reactor
     # park between EPOLLOUT events. Unlike the prior fixed 1KB InlineArray,
@@ -161,7 +158,6 @@ struct ConnEntry(Movable, Deinitable):
         self._stream = stream^
         self._reg = reg
         self._state = CONN_STATE_READING
-        self._interest_set = INTEREST_READ
         self._pending_buf = List[UInt8]()
         self._pending_len = 0
         self._pending_off = 0
@@ -190,7 +186,6 @@ struct ConnEntry(Movable, Deinitable):
         self._stream = stream^
         self._reg = reg
         self._state = initial_state
-        self._interest_set = INTEREST_READ
         self._pending_buf = List[UInt8]()
         self._pending_len = 0
         self._pending_off = 0
@@ -217,10 +212,6 @@ struct ConnEntry(Movable, Deinitable):
         """Current connection state (CONN_STATE_*)."""
         return self._state
 
-    def interest_set(self) -> UInt8:
-        """Currently armed reactor interest mask."""
-        return self._interest_set
-
     def registration(ref self) -> ref [self._reg] RegistrationHandle:
         """Borrow the reactor registration handle for `reactor.modify` calls."""
         return self._reg
@@ -238,9 +229,6 @@ struct ConnEntry(Movable, Deinitable):
 
     def set_state(mut self, new_state: UInt8):
         self._state = new_state
-
-    def set_interest(mut self, mask: UInt8):
-        self._interest_set = mask
 
     def set_pending(
         mut self,

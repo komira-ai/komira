@@ -198,7 +198,7 @@ struct _Rig(Movable):
         var fds = _socketpair()
         self.entry = ConnEntry(
             stream=TcpStream(fds[0]),
-            reg=RegistrationHandle(_fd=fds[0], _interest_set=INTEREST_READ),
+            reg=RegistrationHandle(_fd=fds[0]),
         )
         self.peer = fds[1]
         self.io = Array[UInt8, REQ_BUF_BYTES](fill=UInt8(0))

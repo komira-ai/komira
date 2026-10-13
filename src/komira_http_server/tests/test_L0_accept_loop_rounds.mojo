@@ -252,7 +252,7 @@ struct _Rig(Movable):
         var fds = _socketpair()
         self.entry = ConnEntry(
             stream=TcpStream(fds[0]),
-            reg=RegistrationHandle(_fd=fds[0], _interest_set=INTEREST_READ),
+            reg=RegistrationHandle(_fd=fds[0]),
         )
         self.peer = fds[1]
         self.io = Array[UInt8, REQ_BUF_BYTES](fill=UInt8(0))
@@ -658,7 +658,7 @@ struct _Table(Movable):
             self.conns.append(
                 ConnEntry(
                     stream=TcpStream(fds[0]),
-                    reg=RegistrationHandle(_fd=fds[0], _interest_set=INTEREST_READ),
+                    reg=RegistrationHandle(_fd=fds[0]),
                 )
             )
             self.fd_to_idx[Int(fds[0])] = i
@@ -789,7 +789,7 @@ def test_accept_registers_each_connection_in_order() raises:
     for i in range(2):
         assert_equal(fd_to_idx[Int(conns[i].fd())], i)
         assert_equal(conns[i].state(), CONN_STATE_READING)
-        assert_equal(conns[i].interest_set(), INTEREST_READ)
+        assert_equal(r.interest_set(conns[i].registration()), INTEREST_READ)
         assert_equal(conns[i].registration().fd(), conns[i].fd())
         assert_false(conns[i].is_tls())
     # The accept queue is first in, first out: closing the first client
@@ -841,7 +841,7 @@ def test_accept_stale_mapping_is_swept() raises:
     conns.append(
         ConnEntry(
             stream=TcpStream(stale),
-            reg=RegistrationHandle(_fd=stale, _interest_set=INTEREST_READ),
+            reg=RegistrationHandle(_fd=stale),
         )
     )
     fd_to_idx[Int(stale)] = 0
@@ -849,7 +849,7 @@ def test_accept_stale_mapping_is_swept() raises:
     conns.append(
         ConnEntry(
             stream=TcpStream(live[0]),
-            reg=RegistrationHandle(_fd=live[0], _interest_set=INTEREST_READ),
+            reg=RegistrationHandle(_fd=live[0]),
         )
     )
     fd_to_idx[Int(live[0])] = 1
@@ -885,7 +885,7 @@ def test_accept_stale_mapping_to_an_orphan_slot_removes_it() raises:
     conns.append(
         ConnEntry(
             stream=TcpStream(Int32(-1)),
-            reg=RegistrationHandle(_fd=Int32(-1), _interest_set=INTEREST_READ),
+            reg=RegistrationHandle(_fd=Int32(-1)),
         )
     )
     fd_to_idx[Int(next)] = 0
@@ -916,7 +916,7 @@ def test_accept_stale_mapping_to_a_live_slot_keeps_it() raises:
     conns.append(
         ConnEntry(
             stream=TcpStream(live[0]),
-            reg=RegistrationHandle(_fd=live[0], _interest_set=INTEREST_READ),
+            reg=RegistrationHandle(_fd=live[0]),
         )
     )
     fd_to_idx[Int(live[0])] = 0
