@@ -1,3 +1,3 @@
 # What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
 census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
-komira//src/komira_gcp_monitoring:komira_gcp_monitoring	src/komira_gcp_monitoring	library	OK	364	370	-	-	no	conda	-	-
+komira//src/komira_gcp_monitoring:komira_gcp_monitoring	src/komira_gcp_monitoring	library	OK	370	370	-	-	no	conda	-	-

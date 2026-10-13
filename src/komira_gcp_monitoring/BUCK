@@ -18,8 +18,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # NaN, point order, malformed bodies never echoed), test_monitoring_reader
 # (the reader against the seam over komira_http_core's ScriptedConnector:
 # the request line as it reached the wire, byte for byte, paging and merging
-# on the whole series identity, the limits, the error shape) and
-# test_no_env_reads (the sources read no environment).
+# on the whole series identity, the limits, the error shape),
+# test_monitoring_adapter_grid (every byte of a project and a label key in
+# every position, quoting, the filter, the whole generated request and the
+# order of its refusals), test_monitoring_response_grid (each series read
+# compared whole, every value kind, a bad point at each position),
+# test_monitoring_reader_edges (the aligner and reducer of every
+# aggregation, the page-size and interval edges, paging, merging, the series
+# identity, the limits, the refusals and their order) and test_no_env_reads
+# (the sources read no environment).
 mojo_library(
     name = "komira_gcp_monitoring",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -37,9 +44,12 @@ mojo_library(
         },
     },
     test_srcs = [
+        "tests/test_monitoring_adapter_grid.mojo",
         "tests/test_monitoring_protos.mojo",
         "tests/test_monitoring_reader.mojo",
+        "tests/test_monitoring_reader_edges.mojo",
         "tests/test_monitoring_requests.mojo",
+        "tests/test_monitoring_response_grid.mojo",
         "tests/test_monitoring_responses.mojo",
         "tests/test_no_env_reads.mojo",
     ],
