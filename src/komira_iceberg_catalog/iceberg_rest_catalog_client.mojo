@@ -311,12 +311,14 @@ struct IcebergRestCatalog[T: IcebergRestTransport, P: CatalogCredentialProvider]
     def _load_table_path(self, namespace: String, table: String) raises -> String:
         """Build the loadTable path: `/v1/{prefix}/namespaces/{ns}/tables/{tbl}`
         (the `{prefix}` segment omitted for an empty prefix). Namespace + table
-        are percent-encoded (a multi-level namespace uses the `%1F`-encoded unit
-        separator per the spec; a single-level namespace percent-encodes only the
-        reserved chars)."""
+        are each percent-encoded as one segment (a multi-level namespace uses the
+        `%1F`-encoded unit separator per the spec). The prefix is joined in with
+        its `/` kept as a path separator, as the Iceberg Java client's
+        ResourcePaths does (a prefix such as `catalogs/<name>` is two segments);
+        each `/`-separated piece of it is percent-encoded."""
         var p = String(ICEBERG_REST_API_ROOT)
         if self._prefix.byte_length() > 0:
-            p += String("/") + _percent_encode(self._prefix)
+            p += String("/") + _percent_encode_prefix(self._prefix)
         p += String("/namespaces/") + _percent_encode(namespace)
         p += String("/tables/") + _percent_encode(table)
         return p^
@@ -408,10 +410,22 @@ def _parse_load_table_response(
 
 
 def _percent_encode(s: String) -> String:
-    """Percent-encode a path segment per RFC 3986 — every byte outside the
+    """Percent-encode one path segment per RFC 3986: every byte outside the
     unreserved set `A-Z a-z 0-9 - _ . ~` is `%XX`-encoded. This keeps a
-    namespace/table/prefix containing `/`, spaces, or the `%1F` multi-level
+    namespace or table containing `/`, spaces, or the `%1F` multi-level
     namespace separator wire-safe in the request path."""
+    return _percent_encode_impl(s, keep_slash=False)
+
+
+def _percent_encode_prefix(s: String) -> String:
+    """Percent-encode the catalog prefix: like `_percent_encode`, except a `/`
+    is kept as a path separator (`ten ant/1` -> `ten%20ant/1`)."""
+    return _percent_encode_impl(s, keep_slash=True)
+
+
+def _percent_encode_impl(s: String, keep_slash: Bool) -> String:
+    """Percent-encode every byte outside the unreserved set; a `/` is kept
+    as-is when `keep_slash` is set."""
     var hexdigits = "0123456789ABCDEF"
     var hb = hexdigits.as_bytes()
     var out = String("")
@@ -426,6 +440,7 @@ def _percent_encode(s: String) -> String:
             or c == 0x5F  # '_'
             or c == 0x2E  # '.'
             or c == 0x7E  # '~'
+            or (keep_slash and c == 0x2F)  # '/' in a prefix
         )
         if unreserved:
             out += chr(Int(c))

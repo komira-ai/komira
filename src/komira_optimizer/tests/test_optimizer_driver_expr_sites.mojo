@@ -194,7 +194,7 @@ def test_an_or_chain_in_a_left_join_residual_becomes_an_in_list() raises:
         BIN_OR, Expr.binary(BIN_EQ, _c("ta"), _lit(1)), Expr.binary(BIN_EQ, _c("ta"), _lit(2))
     )
     var l: List[String] = [
-        "Join(type=LEFT, on=[a=b], residual=InList(ColRef(ta), [ScalarValue(int64, 1), ScalarValue(int64, 2)]))",
+        "Join(type=LEFT, on=[a=b], residual=InList(ColRef(ta), [ScalarValue(int64, 1), ScalarValue(int64, 2)]), build=right)",
         "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)",
         "  Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR)",
     ]
@@ -235,7 +235,7 @@ def _ta_gt_ub_plus_3() -> String:
 
 def _want_join(residual: String) -> String:
     var l: List[String] = [
-        "Join(type=INNER, on=[a=b], residual=" + residual + ")",
+        "Join(type=INNER, on=[a=b], residual=" + residual + ", build=right)",
         "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)",
         "  Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR)",
     ]

@@ -13,6 +13,17 @@
 //!     tool map --package <import name> --display <name> --report <file>
 //!         Prints the report with each `readme_<package>_<line>.mojo:<n>` (an
 //!         example's program) rewritten to `<display>:<n>`.
+//!     tool link --readme <README.md> --display <name> --out <file>
+//!         Writes to --out the arguments of the README's link block
+//!         (link.zig), one `run\t<word>` or `build\t<word>` line each; an
+//!         empty file when the README holds no block. kci's install
+//!         validation reads them (src/kci_validate, readme_link.mojo).
+//!     tool link-check --readme <README.md> --display <name> --expect <file> --out <file>
+//!         When the block's arguments, in `link`'s form, are the bytes of
+//!         --expect, writes them to --out (exit 0); otherwise prints both and
+//!         writes nothing (exit 1). The build
+//!         runs it on each packaged README against the arguments the packer
+//!         wrote (tools/build/package/conda.bzl).
 //!
 //! A flag is `--name value` or `--name=value`. Everything goes to stdout.
 //! Exit status: 0; 1 when the README is refused (each reason on its own line,
@@ -22,6 +33,7 @@
 const std = @import("std");
 const examples = @import("examples.zig");
 const program = @import("program.zig");
+const link = @import("link.zig");
 const Allocator = std.mem.Allocator;
 
 /// What the process does: its exit status and the bytes it prints (main.zig
@@ -29,7 +41,9 @@ const Allocator = std.mem.Allocator;
 pub const Outcome = struct { code: u8, stdout: []const u8 };
 
 const USAGE = "usage: tool generate --readme F --display NAME --package NAME --links allow|refuse --out-dir D --examples F\n" ++
-    "       tool map --package NAME --display NAME --report F\n";
+    "       tool map --package NAME --display NAME --report F\n" ++
+    "       tool link --readme F --display NAME --out F\n" ++
+    "       tool link-check --readme F --display NAME --expect F --out F\n";
 
 fn usage(alloc: Allocator, why: []const u8) Outcome {
     const text = std.mem.concat(alloc, u8, &.{ "readme-examples: ", why, "\n", USAGE }) catch oom();
@@ -129,10 +143,70 @@ fn map(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) Outcome {
     return .{ .code = 0, .stdout = program.mapReport(alloc, report, v[0], v[1]) catch oom() };
 }
 
+fn readReadme(alloc: Allocator, dir: std.fs.Dir, path: []const u8) union(enum) { text: []const u8, failed: Outcome } {
+    const text = dir.readFileAlloc(alloc, path, std.math.maxInt(usize)) catch |e| {
+        return .{ .failed = .{ .code = 2, .stdout = fmt(alloc, "readme-examples: cannot read {s}: {s}\n", .{ path, @errorName(e) }) } };
+    };
+    return .{ .text = text };
+}
+
+/// The README's link block as `run\t<word>`/`build\t<word>` lines (empty
+/// without a block), or the refusal outcome.
+fn linkArgs(alloc: Allocator, dir: std.fs.Dir, readme: []const u8, display: []const u8) union(enum) { args: []const u8, failed: Outcome } {
+    const text = switch (readReadme(alloc, dir, readme)) {
+        .text => |x| x,
+        .failed => |o| return .{ .failed = o },
+    };
+    return switch (link.parse(alloc, text, display) catch oom()) {
+        .none => .{ .args = "" },
+        .commands => |c| .{ .args = link.argsText(alloc, c) catch oom() },
+        .refused => |why| .{ .failed = .{ .code = 1, .stdout = fmt(alloc, "{s}\n", .{why}) } },
+    };
+}
+
+fn linkCmd(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) Outcome {
+    const v = switch (flags(alloc, argv, &.{ "readme", "display", "out" })) {
+        .values => |v| v,
+        .refused => |o| return o,
+    };
+    const args = switch (linkArgs(alloc, dir, v[0], v[1])) {
+        .args => |x| x,
+        .failed => |o| return o,
+    };
+    writeFile(dir, v[2], args) catch |e| {
+        return .{ .code = 2, .stdout = fmt(alloc, "readme-examples: cannot write {s}: {s}\n", .{ v[2], @errorName(e) }) };
+    };
+    return .{ .code = 0, .stdout = "" };
+}
+
+fn linkCheck(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) Outcome {
+    const v = switch (flags(alloc, argv, &.{ "readme", "display", "expect", "out" })) {
+        .values => |v| v,
+        .refused => |o| return o,
+    };
+    const args = switch (linkArgs(alloc, dir, v[0], v[1])) {
+        .args => |x| x,
+        .failed => |o| return o,
+    };
+    const want = switch (readReadme(alloc, dir, v[2])) {
+        .text => |x| x,
+        .failed => |o| return o,
+    };
+    if (std.mem.eql(u8, args, want)) {
+        writeFile(dir, v[3], args) catch |e| {
+            return .{ .code = 2, .stdout = fmt(alloc, "readme-examples: cannot write {s}: {s}\n", .{ v[3], @errorName(e) }) };
+        };
+        return .{ .code = 0, .stdout = "" };
+    }
+    return .{ .code = 1, .stdout = fmt(alloc, "{s}: its link block parses to\n{s}which is not what was written:\n{s}", .{ v[1], args, want }) };
+}
+
 /// What the tool does with `argv`, paths read relative to `dir`.
 pub fn run(alloc: Allocator, dir: std.fs.Dir, argv: []const []const u8) Outcome {
     if (argv.len < 2) return usage(alloc, "no subcommand");
     if (std.mem.eql(u8, argv[1], "generate")) return generate(alloc, dir, argv);
     if (std.mem.eql(u8, argv[1], "map")) return map(alloc, dir, argv);
+    if (std.mem.eql(u8, argv[1], "link")) return linkCmd(alloc, dir, argv);
+    if (std.mem.eql(u8, argv[1], "link-check")) return linkCheck(alloc, dir, argv);
     return usage(alloc, fmt(alloc, "unknown subcommand {s}", .{argv[1]}));
 }

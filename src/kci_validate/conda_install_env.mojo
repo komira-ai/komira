@@ -40,20 +40,31 @@
 #                <scratch>/<validation>/readme/<import>) into the runner
 #                <w>/readme_<import>.mojo and one program per example beside
 #                it, <w>/readme_<import>_<line>.mojo; refused when there is none, when
-#                the bytes differ, or when it holds no example. No library
+#                the bytes differ, or when it holds no example. Its link block
+#                must say, word for word, what kci computes for the
+#                library's closure (a missing `-l` is a failed row) No library
 #                among the pins is refused too (a README that runs nothing
 #                is not a pass)
 #   3  payload   kci hashes each library's installed payload itself and
 #                writes out/payload.<name>, the record the container script
 #                wrote; then readback.mojo's check
-#   4  program   `pixi run --as-is mojo run <w>/readme_<import>.mojo` (cwd
-#                <w>) for each README; its exit in out/readme_<import>.exit,
+#   4  program   `pixi run --as-is mojo run [<link args>] <w>/readme_<import>.mojo`
+#                (cwd <w>) for each README, the link args being its `sh
+#                komira-link` block's (readme_link.mojo); its exit in out/readme_<import>.exit,
 #                its stdout in .out and its stderr in .err, each with every
 #                `readme_<import>_<line>.mojo:<n>` (an example's program,
 #                whose line n is README line n) rewritten to the README line
 #                by the tool's `map` (an assertion reports its place on
 #                stdout, a compile error on stderr; a report the tool cannot
 #                map fails the row); then readback.mojo's count check
+#   5  native    only when an installed library pin is native (it ships
+#                `lib_files` or requires a system codec): each README
+#                program of check 4 runs under the loader's record and is
+#                held to it (`loaded_from`), then native_rows.mojo's rows:
+#                docs/design/native_packaging.md's install checks 2 to 7,
+#                in this environment, per native package alone, and beside
+#                the system OpenSSL. Without a native pin none of this runs
+#                and the rows are the ones above
 #
 # FAIL CLOSED: every failure is VALIDATION_FAILED with a named row, apart
 # from no network (above). Under `--plan` nothing runs and the row says
@@ -117,6 +128,8 @@ from .env import (
     scratch_refusal,
     system_configs,
 )
+from .native_install import loader_env
+from .native_rows import LOADER_RECORD_SUFFIX, any_native, readme_loaded_from_row, run_native_rows
 from .network import CHECK_NETWORK, answered_count, declared_hosts, describe_answers, probe_hosts
 from .readback import CHECK_INSTALL, check_installed, check_payloads, check_program, install_exited_zero, read_or_empty
 from .readme_installed import ReadmeProgram, installed_readme, map_report_file
@@ -482,16 +495,22 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
     if not readme_ok:
         return _finish(row^, checks^)
 
-    # 4. each README program, from the installed package only
+    # 4. each README program, from the installed package only; with a
+    # native pin, under the loader's record (native_rows.mojo, row 5)
+    var native = any_native(pins)
     for i in range(len(programs)):
         ref p = programs[i]
         var record = _record_of(p.file)
         var raw_out = join_path(out_dir, record + String(".stdout"))
         var raw_err = join_path(out_dir, record + String(".stderr"))
         var run = RunSpec(
-            pixi.copy(), run_program_argv(work, p.file), work.copy(), ENV_RUN_TIMEOUT_S, raw_out.copy(), raw_err.copy()
+            pixi.copy(), run_program_argv(work, p.file, p.run_args), work.copy(), ENV_RUN_TIMEOUT_S, raw_out.copy(), raw_err.copy()
         )
-        run.set_env(env.copy())
+        var ld_prefix = join_path(out_dir, record + String(LOADER_RECORD_SUFFIX))
+        if native:
+            run.set_env(loader_env(env, ld_prefix))
+        else:
+            run.set_env(env.copy())
         var started = True
         try:
             var r = runner.run(run)
@@ -502,4 +521,9 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
         check_readme_program(
             req.readme_tool, p, out_dir, record, join_path(dir, String("readme/") + p.package), started, checks
         )
+        if native and started:
+            readme_loaded_from_row(ld_prefix, env_dir, record, checks)
+    # 5. the native install checks (native_rows.mojo): none without a native pin
+    if native:
+        run_native_rows(runner, v, channel_url, mojo_pin, dir, named, pins, programs, checks)
     return _finish(row^, checks^)

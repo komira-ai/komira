@@ -34,9 +34,13 @@
 #                         `append_summary`
 #   * deploy_step.mojo    a DEPLOY step: `deploy_step[S: CloudAdapter, St:
 #                         StateStore]`, the `CellDeploys` seam with
-#                         `CloudDeploys[S, St]` (one built-in cloud) and
-#                         `NoCloudBuilt` (the kci binary: every DEPLOY step
-#                         refused), `check_deploy_set_hash`, `plan_hash_of`
+#                         `CloudDeploys[S, St, T]` (one built-in cloud and
+#                         its registry client) and `NoCloudBuilt` (the kci
+#                         binary: every step into a cell refused), `check_deploy_set_hash`, `plan_hash_of`
+#   * cell_publish.mojo   a PUBLISH step into a cell: `cell_publish_step[S:
+#                         CloudAdapter, T: OciTransport & Copyable]`, the
+#                         release set's images pushed to the cell's
+#                         registry; `NoRegistryClient`
 #   * library_verbs.mojo  `LibrarySteps` (kci_build, kci_publish), the
 #                         composed secret store, `kci_main`
 #
@@ -93,6 +97,14 @@ from kci_cli.summary import (
     promotion_line,
     run_summary_markdown,
     superseded_line,
+)
+from kci_cli.cell_publish import (
+    CellPublishRequest,
+    NoRegistryClient,
+    cell_publish_request,
+    cell_publish_step,
+    cell_publish_without_cloud,
+    registry_host_and_path,
 )
 from kci_cli.deploy_step import (
     NOT_BUILT_WITH,

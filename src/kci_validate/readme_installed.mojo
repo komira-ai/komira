@@ -47,6 +47,9 @@
 #     not a pass);
 #   * anything the tool refuses (a bad fence word, a relative link), in
 #     the tool's words, one line per refusal;
+#   * a `sh komira-link` block that is not, word for word, the link
+#     arguments the package's closure needs (readme_link.mojo), a block
+#     missing where the closure links native files, or one the tool refuses;
 #   * no tool at the path kci was given, or a tool that does not run.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
@@ -61,6 +64,7 @@ from kci_release_set.member import file_sha256_hex
 from komira_runtime_paths import executable_path
 
 from .container import join_path
+from .readme_link import LinkArgs, link_refusal, parse_link_args, run_link_args
 from .request import InstallPin, readme_doc_path
 
 comptime README_TOOL_NAME: String = "readme_examples"
@@ -86,8 +90,14 @@ struct ReadmeProgram(Copyable, Movable):
     `package` (the library's import name), `file` (the runner's file name),
     `text` (the runner), `modules` (each example's program, which the runner
     imports from beside it) and `examples` (how many it runs, > 0).
+    `run_args`: the `mojo run` arguments of the README's link block, the
+    environment in place of `$CONDA_PREFIX` (readme_link.mojo); empty when
+    the README has none. `block`: the block itself as the tool read it
+    (`$CONDA_PREFIX` kept), for a run in another environment and for the
+    `mojo build` arguments (native_rows.mojo).
 
-    Layout: owned Strings, a List of owned Programs and an Int. No pointer field."""
+    Layout: owned Strings, a List of owned Programs, an Int and a LinkArgs.
+    No pointer field."""
 
     var display: String
     var installed: String
@@ -96,6 +106,8 @@ struct ReadmeProgram(Copyable, Movable):
     var text: String
     var modules: List[ReadmeModule]
     var examples: Int
+    var run_args: List[String]
+    var block: LinkArgs
 
     def __init__(out self):
         self.display = String("")
@@ -105,6 +117,8 @@ struct ReadmeProgram(Copyable, Movable):
         self.text = String("")
         self.modules = List[ReadmeModule]()
         self.examples = 0
+        self.run_args = List[String]()
+        self.block = LinkArgs()
 
 
 def package_dir_of(label: String) raises -> String:
@@ -268,6 +282,27 @@ def map_report_file(tool: String, report: String, package: String, display: Stri
         raise _tool_failed(tool, report, r, dest)
 
 
+def readme_link_args_of(tool: String, readme: String, display: String, scratch: String) raises -> LinkArgs:
+    """The arguments of README file `readme`'s `sh komira-link` block, read
+    by the README examples tool's `link` (run under `scratch`), named
+    `display` in its refusals; empty when there is no block. RAISES with the
+    tool's refusal, or when it fails."""
+    makedirs(scratch, exist_ok=True)
+    var out = join_path(scratch, String("link_args"))
+    var stdout_path = join_path(scratch, String("link.stdout"))
+    var r = _run_tool(
+        tool,
+        [String("link"), String("--readme"), readme.copy(), String("--display"), display.copy(), String("--out"), out],
+        scratch,
+        stdout_path,
+    )
+    if r.exit_code == Int32(1) and not r.signaled and not r.timed_out:
+        raise Error(_drop_final_newline(_read(stdout_path)))
+    if not r.ok():
+        raise _tool_failed(tool, display, r, stdout_path)
+    return parse_link_args(_read(out))
+
+
 def installed_readme(pin: InstallPin, env_dir: String, tool: String, scratch: String) raises -> ReadmeProgram:
     """The program for library `pin`'s installed README under the
     environment `env_dir`, made by `tool` under `scratch` (file header).
@@ -291,5 +326,13 @@ def installed_readme(pin: InstallPin, env_dir: String, tool: String, scratch: St
         )
     var text = open(path, "r").read()
     var p = readme_program_of(text, pin.import_name, display, tool, scratch)
+    # The link block: the arguments the README run is given, refused unless
+    # they are exactly what the closure needs (readme_link.mojo).
+    var block = readme_link_args_of(tool, join_path(scratch, String("README.md")), display, scratch)
+    var why = link_refusal(pin.link, block, rel)
+    if why.byte_length() > 0:
+        raise Error(why)
+    p.run_args = run_link_args(block, env_dir)
+    p.block = block^
     p.installed = rel^
     return p^

@@ -143,6 +143,7 @@ from komira_plan_ir.logical_plan import (
     PLAN_VIEW_REF,
     PLAN_CSE_REF,
     PLAN_CAST_TO_VARCHAR,
+    PLAN_EXCHANGE,
     plan_tag_name,
 )
 from komira_plan_ir.scan_binding_bind_pass import bind_plan_inmem_payloads
@@ -982,6 +983,16 @@ def resolve_plan_binding_leaves(
             return 0
         return resolve_plan_binding_leaves(
             plan._cast_to_varchar.value()[].child[],
+            resolvers,
+            scan_registry,
+            snapshots,
+        )
+    if tag == PLAN_EXCHANGE:
+        # Keys and ordering are column NAMES; no expression site.
+        if not plan._exchange:
+            return 0
+        return resolve_plan_binding_leaves(
+            plan._exchange.value()[].child[],
             resolvers,
             scan_registry,
             snapshots,

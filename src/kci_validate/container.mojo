@@ -26,6 +26,17 @@
 # and the compiler channel. Channels, in order: the step's, the compiler
 # channel, the extra channels.
 #
+# THE SYSTEM REQUIREMENTS: pixi solves against the virtual packages the
+# manifest declares, not the host's, and with none declared it assumes
+# `__glibc 2.28` on linux-64 (pixi 0.67.2, docs/workspace/
+# system_requirements.md). A library shipping native files requires
+# `__glibc >=<floor>` (kci_release_set glibc_floor.mojo, the packer), so
+# for a subdir with a glibc floor the manifest declares
+# `[system-requirements] libc = { family = "glibc", version = "<floor>" }`
+# from that same table, never a second copy; a subdir with no floor
+# (osx-arm64) declares nothing. The host must then have that glibc, which
+# pixi checks at install.
+#
 # THE COMMANDS (`pull_argv`, `run_argv`; pinned by a golden test):
 #
 #   docker pull <image>          a digest reference: docker checks the bytes
@@ -55,6 +66,7 @@
 # =============================================================================
 
 from kci_release_machine import EXTRA_CHANNEL_CONDA_FORGE, StageValidation
+from kci_release_set.glibc_floor import glibc_floor_of
 
 from .request import InstallPin
 
@@ -115,7 +127,21 @@ def install_manifest_text(
         String("# Written by kci for validation '") + validation.name
         + String("': installs the release from its channel only.\n[workspace]\nname = \"kci-") + validation.name
         + String("\"\nchannels = [") + channels + String("]\nplatforms = [") + _toml_string(subdir)
-        + String("]\n\n[dependencies]\n") + deps
+        + String("]\n\n") + system_requirements_text(subdir) + String("[dependencies]\n") + deps
+    )
+
+
+def system_requirements_text(subdir: String) -> String:
+    """The manifest's `[system-requirements]` table for `subdir` (file
+    header): `libc` at kci_release_set's glibc floor of the subdir, followed
+    by a blank line; EMPTY for a subdir with no floor (pixi's default
+    holds)."""
+    var floor = glibc_floor_of(subdir)
+    if floor.byte_length() == 0:
+        return String("")
+    return (
+        String("[system-requirements]\nlibc = { family = \"glibc\", version = ") + _toml_string(floor)
+        + String(" }\n\n")
     )
 
 
