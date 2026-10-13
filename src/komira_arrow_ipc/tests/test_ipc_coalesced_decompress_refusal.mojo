@@ -1,24 +1,35 @@
 # =============================================================================
 # test_ipc_coalesced_decompress_refusal.mojo: the coalesced multi-frame
-# decompress refuses a malformed frame without freeing any frame twice
+# decompress refuses a malformed frame and releases each frame exactly once
 # =============================================================================
 #
 # decompress_all_rbs_into_with_dispatcher takes ownership of a slab of
 # compressed RecordBatch frames and builds one context per frame. When a
 # frame is refused (here: a compressed values buffer of 4 bytes, shorter
 # than its 8-byte length prefix), the error must reach the caller and every
-# frame must be freed exactly once: the frames already built into contexts,
-# the refused frame, and the frames not yet reached. A driver that moves
-# frames out of the slab and fixes the slab's length only after the loop
-# frees the moved frames a second time when the refusal unwinds; that is
-# a double free of each frame's region, which corrupts the allocator and
-# crashes the process (or a later allocation).
+# frame must be released exactly once: the frames already built into
+# contexts, the refused frame, and the frames not yet reached.
 #
-# Each case runs many times, allocating between runs, so a double free
-# shows up as a crash or as a corrupted later buffer rather than passing
-# on a quiet heap. Positions covered: the refused frame first (nothing
-# built yet), last (two contexts built), and in the middle (frames after
-# it not yet reached). A control case decompresses the same valid frames.
+# How that is observed: before a frame is handed over, the test keeps a
+# share() of it, which holds one reference to the frame's region
+# (ArcPointer). After the call returns or raises, each region's reference
+# count must be back to 1, the test's own share. A count of 2 means the
+# driver kept or leaked the frame (for example, an unwind that forgets the
+# frames it has not reached yet). A frame released twice drops the count
+# to 0 while the test's share still holds it, so the region is freed under
+# that share: the count check then reads freed memory and the share's own
+# release frees the region again, which crashes the test (SIGSEGV) before
+# or instead of a failed assertion. The old driver did that: it moved
+# frames out of the slab with take_slot_unchecked and fixed the slab's
+# length only after the loop, so a refusal unwound with the moved slots
+# still counted and the slab released them a second time.
+#
+# Each case runs many times, allocating between runs, so a region freed
+# under a live share is also likely to be handed out again and overwritten.
+# Positions covered: the refused frame first (nothing built yet), last
+# (two contexts built), and in the middle (frames after it not yet
+# reached). A control case decompresses the same valid frames and checks
+# the same counts.
 # =============================================================================
 
 from std.memory import Pointer
@@ -92,11 +103,21 @@ def _bad(tag: Int) raises -> SharedAlignedBuffer[HeapRegion]:
 def _run(bad_at: Int, n: Int) raises -> String:
     """Decompress `n` frames, the one at `bad_at` malformed (none if
     bad_at < 0); returns the error text, or "ok" once each output frame
-    has decoded to its own values, in input order."""
+    has decoded to its own values, in input order. Either way, checks
+    afterwards that the decompress released each input frame exactly once
+    (see the header)."""
     var frames = Slab[SharedAlignedBuffer[HeapRegion]]()
+    var kept = List[SharedAlignedBuffer[HeapRegion]]()
     for i in range(n):
-        frames.append(_bad(i) if i == bad_at else _good(i))
+        var f = _bad(i) if i == bad_at else _good(i)
+        kept.append(f.share())
+        frames.append(f^)
+    for i in range(n):
+        assert_equal(
+            Int(kept[i]._region.count()), 2, "frame handed over with 2 refs"
+        )
     var nd = NoDispatch()
+    var result: String
     try:
         var outs = decompress_all_rbs_into_with_dispatcher[Lz4Frame](
             frames^, Pointer(to=nd), CancellationToken.never()
@@ -109,9 +130,20 @@ def _run(bad_at: Int, n: Int) raises -> String:
             var cols = decode_record_batch_message(last.take(), types)
             assert_equal(cols[0]._data.read_i64_le_at(0), Int64(100 * i + 1))
             assert_equal(cols[0]._data.read_i64_le_at(8), Int64(100 * i + 2))
-        return String("ok")
+        result = String("ok")
     except e:
-        return String(e)
+        result = String(e)
+    for i in range(n):
+        assert_equal(
+            Int(kept[i]._region.count()),
+            1,
+            String("input frame ")
+            + String(i)
+            + " not released exactly once (bad_at "
+            + String(bad_at)
+            + ")",
+        )
+    return result^
 
 
 def _churn() raises:
@@ -140,19 +172,19 @@ def _check_refused(bad_at: Int, n: Int) raises:
         _churn()
 
 
-def test_refused_first_frame_frees_each_frame_once() raises:
+def test_refused_first_frame_releases_each_frame_once() raises:
     _check_refused(0, 3)
 
 
-def test_refused_middle_frame_frees_each_frame_once() raises:
+def test_refused_middle_frame_releases_each_frame_once() raises:
     _check_refused(1, 3)
 
 
-def test_refused_last_frame_frees_each_frame_once() raises:
+def test_refused_last_frame_releases_each_frame_once() raises:
     _check_refused(2, 3)
 
 
-def test_refused_only_frame_frees_it_once() raises:
+def test_refused_only_frame_releases_it_once() raises:
     _check_refused(0, 1)
 
 
