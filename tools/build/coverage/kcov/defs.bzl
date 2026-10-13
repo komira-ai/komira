@@ -26,6 +26,7 @@ binaries link through, and the one each test's kcov run runs from.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
 
 def _cases_impl(ctx):
@@ -49,12 +50,14 @@ def _cases_impl(ctx):
             staged,
             [h[DefaultInfo].default_outputs[0] for h in ctx.attrs.helpers],
         ),
+        env = rerun_env(ctx),
         category = "kcov_tool_cases",
         identifier = ctx.label.name,
     )
     return [
         DefaultInfo(default_output = result),
         ValidationInfo(validations = [ValidationSpec(name = ctx.label.name, validation_result = result)]),
+        rerun_info(ctx),
     ]
 
 _kcov_tool_cases = rule(
@@ -66,7 +69,7 @@ _kcov_tool_cases = rule(
         "script": attrs.source(),
         "tool": attrs.exec_dep(providers = [RunInfo]),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
-    },
+    } | RERUN_ATTRS,
 )
 
 def _tool_impl(ctx):

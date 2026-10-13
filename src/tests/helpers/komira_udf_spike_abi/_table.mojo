@@ -15,9 +15,12 @@
 #     created and freed only through the table.
 #   - out-slots (`komira_udf_xxx** out`), capabilities, spec and call
 #     structs, and the cancel flag: arena blocks of _host.mojo.
+#   - the timed call loops (native/bench_loop.c): every array they export and
+#     its shared buffers are C allocations they free themselves; the samples
+#     and results they write are arena blocks.
 # =============================================================================
 
-from std.ffi import OwnedDLHandle, RTLD
+from std.ffi import OwnedDLHandle, RTLD, external_call
 from std.memory import alloc
 from std.sys import size_of
 
@@ -209,12 +212,19 @@ struct CapsText(Copyable, Movable):
     var runtime_id: String
     var runtime_abi: String
     var words: List[UInt32]
-    """max_descriptor_version, shapes, threading, thread_affine, transports,
-    hosting, devices, features, udf_class, global_lock, in that order."""
+    """max_descriptor_version, shapes, devices, features, udf_class, in that
+    order."""
 
 
-def new_caps(mut arena: _Arena) -> Word:
-    var c = arena.bytes(size_of[CUdfCapabilities]()).bitcast[CUdfCapabilities]()
+def new_caps(mut arena: _Arena, fill: UInt8 = 0) -> Word:
+    """A capabilities struct for describe: every byte `fill` (0 by default),
+    then struct_size. A non-zero fill shows a field describe never wrote."""
+    var b = arena.bytes(size_of[CUdfCapabilities]())
+    # SAFETY: a zeroed arena block of the struct's size, written in place.
+    if fill != 0:
+        for i in range(size_of[CUdfCapabilities]()):
+            b.bitcast[UInt8]()[i] = fill
+    var c = b.bitcast[CUdfCapabilities]()
     c[].struct_size = size_of[CUdfCapabilities]()
     return Word(c.bitcast[NoneType]())
 
@@ -222,8 +232,7 @@ def new_caps(mut arena: _Arena) -> Word:
 def read_caps(c: Word) -> CapsText:
     var p = c.p.bitcast[CUdfCapabilities]()
     var w: List[UInt32] = [
-        p[].max_descriptor_version, p[].shapes, p[].threading, p[].thread_affine,
-        p[].transports, p[].hosting, p[].devices, p[].features, p[].udf_class, p[].global_lock,
+        p[].max_descriptor_version, p[].shapes, p[].devices, p[].features, p[].udf_class,
     ]
     return CapsText(read_cstr(p[].runtime_id), read_cstr(p[].runtime_abi), w^)
 
@@ -240,8 +249,12 @@ def new_spec(
     state: Word,
     null_mode: Int32,
     stability: Int32,
+    code_root: String,
+    roles: List[String],
+    digests: List[List[UInt8]],
 ) -> Word:
-    """A komira_udf_spec with no code objects (n_code 0)."""
+    """A komira_udf_spec; its code objects are `roles[i]` with sha256
+    `digests[i]` (32 bytes each) under `code_root`."""
     var s = arena.bytes(size_of[CUdfSpec]()).bitcast[CUdfSpec]()
     s[].struct_size = size_of[CUdfSpec]()
     s[].shape = Int32(shape)
@@ -258,10 +271,21 @@ def new_spec(
     s[].state = state.p
     s[].null_mode = null_mode
     s[].stability = stability
-    s[].code_root = arena.cstr("")
-    s[].n_code = 0
+    s[].code_root = arena.cstr(code_root)
+    var n = len(roles)
+    s[].n_code = n
     s[].code_roles = null_void()
     s[].code_sha256 = null_void()
+    if n > 0:
+        # An array of n string pointers, and n digests of 32 bytes.
+        var r = arena.bytes(8 * n)
+        var d32 = arena.bytes(32 * n)
+        for i in range(n):
+            r.bitcast[Void]()[i] = arena.cstr(roles[i])
+            for k in range(32):
+                d32.bitcast[UInt8]()[32 * i + k] = digests[i][k] if k < len(digests[i]) else 0
+        s[].code_roles = r
+        s[].code_sha256 = d32
     return Word(s.bitcast[NoneType]())
 
 
@@ -277,7 +301,70 @@ def new_call(mut arena: _Arena, deadline_ns: Int64, call_id: Int64, cancel: Bool
     return Word(c.bitcast[NoneType]())
 
 
+def pipe_call(mut arena: _Arena, pipe: Word, outer: Word) -> Word:
+    """A komira_udf_call for a nested call (native/producer.c,
+    komira_udf_spike_pipe_call): the pipe's next call id, and the waiting
+    call `outer`'s deadline and cancel flag."""
+    var c = arena.word(size_of[CUdfCall]())
+    # SAFETY: `pipe` is the live pipe of a nested run, `outer` the waiting
+    # call's block, `c` a fresh arena block of a komira_udf_call.
+    external_call["komira_udf_spike_pipe_call", NoneType](pipe.p, outer.p, c.p)
+    return c
+
+
+def word_array(mut arena: _Arena, words: List[Word]) -> Word:
+    """An arena block holding the pointers of `words`, in order."""
+    # SAFETY: a zeroed arena block of one pointer per word.
+    var p = arena.bytes(8 * len(words))
+    for i in range(len(words)):
+        p.bitcast[Void]()[i] = words[i].p
+    return Word(p)
+
+
+def read_words(p: Word, n: Int) -> List[Int64]:
+    """The `n` Int64s at `p`, an arena block of at least n words."""
+    # SAFETY: `p` is an arena block of n or more Int64s.
+    var out = List[Int64]()
+    for i in range(n):
+        out.append(p.p.bitcast[Int64]()[i])
+    return out^
+
+
+def time_calls(
+    t: Word, inst: Word, rows: Int, is_float: Bool, a: Float64, b: Float64, verify: Bool, iters: Int, samples: Word, stats: Word
+) -> Int64:
+    """native/bench_loop.c's loop on one thread: `samples` gets `iters`
+    Int64s, `stats` three (failures, mismatches, released)."""
+    # SAFETY: `t` and `inst` are the runtime's live table and instance;
+    # `samples` and `stats` are arena blocks of the sizes above.
+    return external_call["komira_udf_spike_time_calls", Int64](
+        t.p, inst.p, Int64(rows), Int32(1 if is_float else 0), a, b, Int32(1 if verify else 0), Int64(iters),
+        samples.p, stats.p,
+    )
+
+
+def time_calls_mt(
+    t: Word, insts: Word, n: Int, rows: Int, is_float: Bool, a: Float64, b: Float64, verify: Bool, iters: Int, out_p: Word
+) -> Int64:
+    """The same loop on `n` threads, thread i on the instance at `insts[i]`
+    (an arena block of n pointers); `out_p` gets nine Int64s."""
+    # SAFETY: as time_calls; `insts` holds n live instances, each in a
+    # context of its own.
+    return external_call["komira_udf_spike_time_calls_mt", Int64](
+        t.p, insts.p, Int32(n), Int64(rows), Int32(1 if is_float else 0), a, b, Int32(1 if verify else 0),
+        Int64(iters), out_p.p,
+    )
+
+
 def cancel_flag_of(call: Word) -> Word:
     """The cancel flag of `call` (an arena block new_call allocated)."""
     # SAFETY: `call` is a CUdfCall block new_call filled.
     return Word(call.p.bitcast[CUdfCall]()[].cancel)
+
+
+def cancel_value(call: Word) -> Bool:
+    """Whether the cancel flag of `call` is set now (the host had set it by
+    the time the call returned)."""
+    # SAFETY: `call` is a CUdfCall block new_call filled; its flag an arena
+    # block of 8 bytes, written by the host's release store only.
+    return Word(call.p.bitcast[CUdfCall]()[].cancel).p.bitcast[Int32]()[] != 0

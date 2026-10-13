@@ -216,6 +216,43 @@ export function* raise_again(_batches: Iterable<RecordBatch>): Generator<Table> 
   throw new Error('raise_again: raised');
 }
 
+// A batch function that raises naming no row when its batch holds the
+// value 5: the host bisects the batch to find the row.
+export function raise_minus_one_if_row5(x: Vector<Int64>): Vector<Int64> {
+  for (let i = 0; i < x.length; i++) if (x.get(i) === 5n) throw new Error('raise_minus_one_if_row5: the batch holds the value 5');
+  return x;
+}
+
+// A VOLATILE batch function that counts the batches it ran (per worker, so
+// per context) and raises naming no row; a batch whose row 0 is -1 returns
+// the count in every row instead.
+let volatileRuns = 0n;
+export function volatile_count_raise(x: Vector<Int64>): BigInt64Array {
+  if (x.length > 0 && x.get(0) === -1n) return new BigInt64Array(x.length).fill(volatileRuns);
+  volatileRuns += 1n;
+  throw new Error('volatile_count_raise: raised after counting this run');
+}
+
+// A frame over no columns: a one-row table of each batch's row count.
+export function* frame_row_counts(batches: Iterable<RecordBatch>): Generator<Table> {
+  for (const b of batches) yield { numRows: 1, columns: [[BigInt(b.numRows)]] };
+}
+
+// ROW over any read set, the empty one included: 7 per row.
+export function row_const(_r: Record<string, unknown>): bigint {
+  return 7n;
+}
+
+// Yields its first three input batches unchanged, then raises.
+export function* yield_three_then_raise(batches: Iterable<RecordBatch>): Generator<RecordBatch> {
+  let n = 0;
+  for (const b of batches) {
+    if (n === 3) throw new Error('yield_three_then_raise: a fourth batch');
+    n++;
+    yield b;
+  }
+}
+
 // ---- this runtime's own cases --------------------------------------------------
 
 // Rows seen by this module in this process: a module global, so each worker

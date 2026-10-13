@@ -25,6 +25,7 @@ from komira_plan_ir.logical_plan import (
     SOURCE_PARQUET,
     SOURCE_IN_MEMORY,
     JOIN_INNER,
+    SCAN_UNBOUNDED,
 )
 from komira_scan_source.parquet_source import ParquetSource
 from komira_scan_source.source_variant import SourceVariant, SOURCE_VARIANT_PARQUET
@@ -165,18 +166,20 @@ def test_second_run_changes_nothing() raises:
 
 
 def test_scan_fields_survive_the_reseat() raises:
-    """A dir-scan Hive scan with a projection, a pushed filter, a row count
-    and table stats keeps all four after the attach.
+    """A dir-scan Hive scan with a projection, a pushed filter, a row count,
+    table stats and an UNBOUNDED mark keeps all five after the attach.
 
-    Catches: the reseat dropping a field."""
+    Catches: the reseat dropping a field (the mark: a streaming scan would
+    come out BOUNDED)."""
     var src = ParquetSource.dir_scan_hive("d/", _data_schema(), _part_cols())
     var stats = TableStats(9, List[String](), List[ColumnStats]())
     var scan = LogicalPlan.scan_from_source(
         SourceVariant(src^), _full_schema(), Optional(_one("v")), Optional(_cmp(BIN_GT, "v", 0)),
-        Optional(9), Optional(stats^),
+        Optional(9), Optional(stats^), boundedness=SCAN_UNBOUNDED,
     )
     var out = attach_hive_predicate(scan^)
     ref sd = out._scan.value()[]
+    assert_equal(Int(sd.boundedness), Int(SCAN_UNBOUNDED))
     assert_equal(sd.projection.value()[0], String("v"))
     assert_true(Bool(sd.filter))
     assert_equal(sd.row_count.value(), 9)
@@ -307,8 +310,8 @@ def _node_id(scan: LogicalPlan) -> Int:
 
 def test_stamp_fs_descriptor_reaches_the_scan_through_project_and_filter() raises:
     """Project over Filter over a Parquet scan with a projection, a pushed
-    filter, a row count and table stats: the scan gets the descriptor and
-    keeps all four fields.
+    filter, a row count, table stats and an UNBOUNDED mark: the scan gets the
+    descriptor and keeps all five fields.
 
     Catches: the Project or Filter descent removed; the reseat dropping a
     field."""
@@ -317,6 +320,7 @@ def test_stamp_fs_descriptor_reaches_the_scan_through_project_and_filter() raise
         "t.parquet", SOURCE_PARQUET, _full_schema(), Optional(_one("v")), Optional(_cmp(BIN_GT, "v", 0)),
         Optional(7), Optional(stats^),
     )
+    scan._scan.value()[].boundedness = SCAN_UNBOUNDED
     var e = ExprArray()
     e.append(Expr.col_ref("v"))
     var plan = LogicalPlan.project(e^, LogicalPlan.filter(_cmp(BIN_GT, "v", 1), scan^))
@@ -324,6 +328,7 @@ def test_stamp_fs_descriptor_reaches_the_scan_through_project_and_filter() raise
     ref s = out._project.value()[].child[]._filter.value()[].child[]
     assert_equal(_node_id(s), 42)
     ref sd = s._scan.value()[]
+    assert_equal(Int(sd.boundedness), Int(SCAN_UNBOUNDED))
     assert_equal(sd.projection.value()[0], String("v"))
     assert_true(Bool(sd.filter))
     assert_equal(sd.row_count.value(), 7)
