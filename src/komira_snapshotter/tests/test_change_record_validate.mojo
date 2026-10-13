@@ -27,6 +27,11 @@
 #       constructor allows that), so a copy that derives it from the cursor
 #       goes red. ChangeRecord.copy() keeps every cell of a three-cell key and
 #       of both images in order and on its own side.
+#   (6) ChangeRecord.copy() keeps a record as given, also one validate()
+#       rejects: an unknown op tag (below INSERT, above REMOVE) and a stray
+#       image survive the copy, so the copy still fails validate() with the
+#       original message. A copy that clamps or remaps the tag, or drops an
+#       image the op does not use, goes red.
 # =============================================================================
 
 from std.testing import assert_true, assert_equal, assert_false
@@ -334,6 +339,49 @@ def test_batch_copy_owns_its_lists() raises:
     assert_equal(c.next_cursor, String("iter-8"))
 
 
+# =============================================================================
+# (6) ChangeRecord.copy() keeps an invalid record as given.
+# =============================================================================
+def test_record_copy_keeps_unknown_op_tag() raises:
+    """Tags below INSERT, just above REMOVE and far above it are copied
+    unchanged; the copy is still unknown to the predicates and to validate()."""
+    var tags = List[Int]()
+    tags.append(-1)
+    tags.append(3)
+    tags.append(5)
+    tags.append(1000)
+    for i in range(len(tags)):
+        var c = _rec(tags[i], _one(1), _one(2), _one(3)).copy()
+        assert_equal(c.op, tags[i])
+        assert_equal(c.op_name(), String("UNKNOWN"))
+        assert_false(c.is_insert())
+        assert_false(c.is_modify())
+        assert_false(c.is_remove())
+        assert_equal(
+            _validate_error(c), String(_P) + "unknown op tag " + String(tags[i])
+        )
+
+
+def test_record_copy_keeps_stray_images() raises:
+    """An image the op does not use is copied, not dropped: the copy fails
+    validate() exactly as the original does."""
+    var ins = _rec(CDC_OP_INSERT, _one(1), _one(2), _one(3)).copy()
+    assert_equal(len(ins.old_image), 1)
+    assert_equal(ins.old_image[0].as_long(), 3)
+    assert_equal(
+        _validate_error(ins), String(_P) + "INSERT with non-empty old_image"
+    )
+    var rem = _rec(CDC_OP_REMOVE, _one(1), _one(2), _one(3)).copy()
+    assert_equal(len(rem.new_image), 1)
+    assert_equal(rem.new_image[0].as_long(), 2)
+    assert_equal(
+        _validate_error(rem), String(_P) + "REMOVE with non-empty new_image"
+    )
+    var keyless = _rec(CDC_OP_INSERT, _none(), _one(2), _none()).copy()
+    assert_equal(len(keyless.key), 0)
+    assert_equal(_validate_error(keyless), String(_KEY_EMPTY))
+
+
 def main() raises:
     test_rejects_insert_without_new_image()
     test_rejects_insert_with_old_image_message()
@@ -355,4 +403,6 @@ def main() raises:
     test_batch_copy_carries_exhausted_flag()
     test_record_copy_keeps_every_cell_in_order()
     test_batch_copy_owns_its_lists()
+    test_record_copy_keeps_unknown_op_tag()
+    test_record_copy_keeps_stray_images()
     print("test_change_record_validate: ALL PASS")
