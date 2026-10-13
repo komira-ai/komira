@@ -186,9 +186,12 @@ struct RegistrationHandle(
       - _fd: the registered file descriptor (the epoll fd key and cookie;
         the kqueue ident).
 
-    Dropping a handle does not deregister: the owner of the fd deregisters
-    (`TcpStream` on drop; `Reactor._deregister_long_lived`) or closes the fd,
-    which removes it from the multiplexer.
+    Dropping a handle does not deregister. `TcpStream`'s drop removes the fd
+    from the multiplexer and closes it through `_tcp_close_helper`, without
+    calling `Reactor._deregister_long_lived`, so the reactor keeps the fd's
+    armed-interest record; `register_long_lived` overwrites that record when
+    the fd number is registered again. Only `_deregister_long_lived` clears
+    it.
     """
 
     var _fd: Int32

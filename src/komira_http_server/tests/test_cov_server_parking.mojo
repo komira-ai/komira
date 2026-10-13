@@ -15,8 +15,10 @@
 # back to read interest was skipped). The loops driven:
 # `serve_one_iteration_dispatch` and `serve_one_iteration_dispatch_chained`
 # (a dispatcher answering a 256 KiB body, the second behind the middleware
-# chain) and `serve_one_iteration` (canned and chained answers to a pipelined
-# burst).
+# chain), `serve_one_iteration_dispatch_suspendable` and
+# `serve_one_iteration_dispatch_erased` (a one-step handler answering the same
+# body through each driver) and `serve_one_iteration` (canned and chained
+# answers to a pipelined burst).
 #
 # What a pipelined burst asserts is chosen not to depend on
 # komira-ai/komira#1285 (requests pipelined behind a parked response are not
@@ -30,7 +32,8 @@
 #      a drain not parked in turn; an end of stream read after a drain not
 #      closing; a reset peer with a parked tail not dropped; a request sent
 #      after the drain never read (read interest not re-armed, #1406), in
-#      the plain and the middleware-chained dispatch loop.
+#      the plain, the middleware-chained, the suspendable and the erased
+#      dispatch loop (each loop has its own re-arm after a drain).
 #   C  canned and chained loops: the same, with the chain's answers; a
 #      client's end of stream queued behind the burst not closing the
 #      connection once the last parked response drains; a request sent
@@ -41,17 +44,33 @@ from std.ffi import external_call
 from std.sys.info import CompilationTarget
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_async.ops.waker_sink import NoopSink
+from komira_async.ops.waker_sink import NoopSink, WakerSink
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.blocking_runtime import BlockingRuntime
 from komira_async.runtime.runtime_trait import Runtime
+from komira_async.runtime.shared_erasure import (
+    ErasedHandlerDriver,
+    ErasedHandlerFrame,
+    make_erased_handler_frame,
+)
+from komira_async.runtime.suspendable_handler import (
+    HandlerStepResult,
+    SuspendableHandler,
+    SuspendableHandlerDriver,
+    SuspendedFrame,
+)
 from komira_http_core.codec import HttpRequest, HttpResponse
 from komira_http_core.transport.grpc_emit import NoopGrpcDispatch
 from komira_http_server.connection import (
     CONN_STATE_READING,
     CONN_STATE_WAITING_FOR_WRITABLE,
 )
-from komira_http_server.dispatch import CtxRequestDispatcher, RequestDispatcher
+from komira_http_server.dispatch import (
+    CtxRequestDispatcher,
+    ErasedDispatcher,
+    RequestDispatcher,
+    SuspendableDispatcher,
+)
 from komira_http_server.middleware import MiddlewareChain
 from komira_http_server.middleware.middleware import RequestContext
 from komira_http_server.middleware.passthrough import PassthroughMiddleware
@@ -101,6 +120,68 @@ struct _Big(CtxRequestDispatcher):
         var r = HttpResponse(status=Int32(200))
         r.body = _pattern(_BIG)
         return r^
+
+
+struct _BigSM(SuspendableHandler):
+    """A one-step handler: its first step is DONE with a 256 KiB patterned
+    body (it never parks, so each loop delivers it in the read round)."""
+
+    comptime Resp = HttpResponse
+
+    def __init__(out self):
+        pass
+
+    def step[
+        S: WakerSink & Movable & Deinitable,
+    ](mut self, mut reactor: Reactor[S]) raises -> HandlerStepResult[Self.Resp]:
+        var r = HttpResponse(status=Int32(200))
+        r.body = _pattern(_BIG)
+        return HandlerStepResult[Self.Resp].done(r^)
+
+
+struct _BigSusp(SuspendableDispatcher):
+    """Frames every request as a `_BigSM` for the suspendable loop."""
+
+    comptime Handler = _BigSM
+    var calls: Int
+
+    def __init__(out self):
+        self.calls = 0
+
+    def make_frame[
+        RT: Runtime,
+    ](
+        mut self,
+        mut reactor: Reactor[RT.Sink],
+        var req: HttpRequest,
+        request_id: Int64,
+    ) raises -> SuspendedFrame[Self.Handler]:
+        self.calls += 1
+        return SuspendedFrame[Self.Handler](_BigSM(), request_id)
+
+
+struct _BigErased(ErasedDispatcher):
+    """Erases every request's `_BigSM` into a frame for the erased loop."""
+
+    comptime Sink = NoopSink
+    comptime Resp = HttpResponse
+    var calls: Int
+
+    def __init__(out self):
+        self.calls = 0
+
+    def make_erased_frame[
+        RT: Runtime,
+    ](
+        mut self,
+        mut reactor: Reactor[RT.Sink],
+        var req: HttpRequest,
+        request_id: Int64,
+    ) raises -> ErasedHandlerFrame[Self.Sink]:
+        self.calls += 1
+        return make_erased_handler_frame[_BigSM, Self.Sink](
+            _BigSM(), request_id
+        )
 
 
 # -----------------------------------------------------------------------------
@@ -217,26 +298,41 @@ def _count(hay: List[UInt8], needle: String) -> Int:
 # -----------------------------------------------------------------------------
 
 
+# The loop `_DLink.step` drives: `serve_one_iteration_dispatch`, `..._chained`
+# (default chain, inert innermost middleware), `..._suspendable` or
+# `..._erased`.
+comptime _PLAIN = 0
+comptime _CHAINED = 1
+comptime _SUSPENDABLE = 2
+comptime _ERASED = 3
+
+
 struct _DLink(Movable):
     var server: HttpServer[NoopGrpcDispatch]
     var d: _Big
     var fd: Int32
-    # Step `serve_one_iteration_dispatch_chained` (default chain, inert
-    # innermost middleware) instead of `serve_one_iteration_dispatch`.
-    var chained: Bool
+    var loop: Int
     var chain: MiddlewareChain
     var mw: PassthroughMiddleware
+    var sd: _BigSusp
+    var sdrv: SuspendableHandlerDriver[NoopSink, _BigSM]
+    var ed: _BigErased
+    var edrv: ErasedHandlerDriver[NoopSink, HttpResponse]
 
-    def __init__(out self, chained: Bool = False) raises:
+    def __init__(out self, loop: Int = _PLAIN) raises:
         self.server = _small_server(
             HttpServer(
                 config=HttpServerConfig.default_ephemeral(), router=Router()
             )
         )
         self.d = _Big()
-        self.chained = chained
+        self.loop = loop
         self.chain = MiddlewareChain.default()
         self.mw = PassthroughMiddleware()
+        self.sd = _BigSusp()
+        self.sdrv = SuspendableHandlerDriver[NoopSink, _BigSM]()
+        self.ed = _BigErased()
+        self.edrv = ErasedHandlerDriver[NoopSink, HttpResponse]()
         self.fd = _connect_small(self.server.local_port())
         for _ in range(50):
             self.step()
@@ -248,11 +344,23 @@ struct _DLink(Movable):
         if self.fd >= 0:
             _ = external_call["close", Int32](self.fd)
 
+    def calls(self) -> Int:
+        """Requests the stepped loop's dispatcher was handed."""
+        return self.d.calls + self.sd.calls + self.ed.calls
+
     def step(mut self) raises:
-        if self.chained:
+        if self.loop == _CHAINED:
             _ = self.server.serve_one_iteration_dispatch_chained[
                 _Big, PassthroughMiddleware, _Rt
             ](self.chain, self.mw, self.d, Int32(20_000))
+        elif self.loop == _SUSPENDABLE:
+            _ = self.server.serve_one_iteration_dispatch_suspendable[
+                _BigSusp, _Rt
+            ](self.sd, self.sdrv, Int32(20_000))
+        elif self.loop == _ERASED:
+            _ = self.server.serve_one_iteration_dispatch_erased[
+                _BigErased, _Rt
+            ](self.ed, self.edrv, Int32(20_000))
         else:
             _ = self.server.serve_one_iteration_dispatch[_Big, _Rt](
                 self.d, Int32(20_000)
@@ -291,11 +399,11 @@ def test_dispatch_parks_a_large_response_and_resumes_it() raises:
     assert_equal(l.server.live_conn_count(), 1)
 
 
-def _reads_a_request_sent_after_the_drain(chained: Bool) raises:
+def _reads_a_request_sent_after_the_drain(loop: Int) raises:
     """komira-ai/komira#1406: once a parked response drains, the connection
     is armed for reads again, so a request the client sends only then (it
     is not buffered when the drain's round reads) is read and answered."""
-    var l = _DLink(chained)
+    var l = _DLink(loop)
     _send_all_now(l.fd, "GET /1 HTTP/1.1\r\nHost: example.com\r\n\r\n")
     l.step()
     l.step()
@@ -323,7 +431,7 @@ def _reads_a_request_sent_after_the_drain(chained: Bool) raises:
         if len(got) >= 2 * one:
             break
         l.step()
-    assert_equal(l.d.calls, 2, "the request sent after the drain was not read")
+    assert_equal(l.calls(), 2, "the request sent after the drain was not read")
     assert_equal(len(got), 2 * one, "the second response is not whole")
     var want = _pattern(_BIG)
     for i in range(_BIG):
@@ -332,11 +440,19 @@ def _reads_a_request_sent_after_the_drain(chained: Bool) raises:
 
 
 def test_dispatch_reads_a_request_sent_after_the_drain() raises:
-    _reads_a_request_sent_after_the_drain(chained=False)
+    _reads_a_request_sent_after_the_drain(_PLAIN)
 
 
 def test_chained_dispatch_reads_a_request_sent_after_the_drain() raises:
-    _reads_a_request_sent_after_the_drain(chained=True)
+    _reads_a_request_sent_after_the_drain(_CHAINED)
+
+
+def test_suspendable_dispatch_reads_a_request_sent_after_the_drain() raises:
+    _reads_a_request_sent_after_the_drain(_SUSPENDABLE)
+
+
+def test_erased_dispatch_reads_a_request_sent_after_the_drain() raises:
+    _reads_a_request_sent_after_the_drain(_ERASED)
 
 
 def test_dispatch_drops_a_reset_peer_with_a_parked_response() raises:
