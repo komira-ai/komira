@@ -10,7 +10,7 @@
 #     with whatever statistics the caller has injected on its scans
 #     (`ScanData.table_stats`, `ScanData.row_count`). The driver reads those
 #     only through the rules that consume them (join reordering, eager
-#     aggregation, payload narrowing); it computes and stores none.
+#     aggregation); it computes and stores none.
 #   * `config`: the `OptimizerConfig` the caller built. The driver reads
 #     `eager_agg` and `semi_pushdown`; the other fields belong to rules that run
 #     outside this pass order (scan-share planning, aggregate CSE) and do not
@@ -70,7 +70,6 @@
 #   17 push_limit_down, fuse_sort_limit (sort above limit only)  [limit]
 #   18 optimize_window_rewrite      [PartitionBy or Project in the current plan]
 #   19 fuse_partition_topn          [PartitionBy in the current plan]
-#   20 narrow_join_payload                                   (last)
 #
 # Each call below says what its position does.
 #
@@ -106,11 +105,10 @@
 # THE PORTABLE PROFILE. `optimize_portable(plan, config, profile)` is the
 # entry a producer calls when its output must be the same plan on every
 # platform that runs it (komira-ai/komira#1094, §5.3). It runs the same
-# pass order through the same function as `optimize`, with three
-# differences:
+# pass order through the same function as `optimize`, with two
+# differences (payload narrowing is not a pass of this order in either entry:
+# the host lowering derives it, `komira_lowering_rules`):
 #
-#   * Step 20 (payload narrowing) does not run. The host derives narrowing
-#     from footers it has verified itself; no producer statistic drives it.
 #   * There is no `deps` argument. Steps 3 and 9 see an empty binding table,
 #     so neither folds a value; a site that needs an executed sub-plan
 #     records a request, and a plan that ends with one is refused with
@@ -190,7 +188,6 @@ from .optimizer_dpccp import reorder_joins_with_dp
 from .optimizer_misc import push_limit_down, fuse_sort_limit
 from .optimizer_window_rewrite import optimize_window_rewrite
 from .optimizer_partition_topn import fuse_partition_topn
-from .optimizer_payload_narrow import narrow_join_payload
 
 
 def optimize(
@@ -211,19 +208,16 @@ def optimize(
     Raises:
         The first pass's `Error` that refuses the plan, unchanged.
     """
-    return _run_pass_order(plan^, config, deps, True)
+    return _run_pass_order(plan^, config, deps)
 
 
 def _run_pass_order(
     var plan: LogicalPlan,
     config: OptimizerConfig,
     mut deps: ScalarDepTable,
-    narrow_payload: Bool,
 ) raises -> LogicalPlan:
-    """The pass order, shared by `optimize` and `optimize_portable`.
-
-    `narrow_payload` False skips step 20; nothing else differs between the two
-    entries.
+    """The pass order, shared by `optimize` and `optimize_portable`: one list,
+    so the two entries cannot run different passes or a different order.
     """
     # 1. Scans. Partition pruning first: it reads a Filter directly over a
     # partitioned scan (the shape before pushdown rewrites it), and a smaller
@@ -411,13 +405,6 @@ def _run_pass_order(
     if _plan_has_tag(plan, PLAN_PARTITION_BY):
         plan = fuse_partition_topn(plan^)
 
-    # 20. Payload narrowing LAST. Its stamp is a `ScanData` field that is not a
-    # constructor argument, so any later pass that rebuilt the scan would start
-    # it empty and drop the stamp. It adds, removes and reorders nothing.
-    # `optimize_portable` skips it: narrowing is a host-local rule.
-    if narrow_payload:
-        plan = narrow_join_payload(plan^)
-
     return plan^
 
 
@@ -441,7 +428,7 @@ def optimize_status(
 
 comptime PORTABLE_PROFILE_V1: Int = 1
 """The one `PortableProfile` version this build implements: the driver's pass
-order without step 20, with no scalar bindings (see the module header)."""
+order with no scalar bindings (see the module header)."""
 
 comptime PORTABLE_REFUSAL_UNKNOWN_PROFILE = "OPTIMIZE_PORTABLE_UNKNOWN_PROFILE"
 """`optimize_portable` was given a profile version this build does not
@@ -478,8 +465,7 @@ def optimize_portable(
 ) raises -> LogicalPlan:
     """Run the driver's pass order under the portable profile.
 
-    The same function `optimize` runs, with step 20 (payload narrowing) off and
-    an empty scalar binding table: no value is folded from an execution, and a
+    The same function `optimize` runs, with an empty scalar binding table: no value is folded from an execution, and a
     plan that would need one is refused.
 
     Args:
@@ -505,7 +491,7 @@ def optimize_portable(
             + String(PORTABLE_PROFILE_V1)
         )
     var deps = ScalarDepTable()
-    var out = _run_pass_order(plan^, config, deps, False)
+    var out = _run_pass_order(plan^, config, deps)
     if deps.has_requests():
         raise Error(
             PORTABLE_REFUSAL_NEEDS_EXECUTION + ": "

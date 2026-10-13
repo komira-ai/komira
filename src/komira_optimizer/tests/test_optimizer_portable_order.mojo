@@ -5,8 +5,8 @@
 #
 # `test_optimizer_portable_parity.mojo` catches a pass the portable entry
 # skips. This file catches a pass the portable entry runs at another place:
-# two adjacent pass calls, or two adjacent steps, exchanged only when
-# `narrow_payload` is False. No pass is skipped by such a change, so the
+# two adjacent pass calls, or two adjacent steps, exchanged only for the
+# portable entry. No pass is skipped by such a change, so the
 # parity file's table need not see it; on each plan below the two orders give
 # different plans, and the portable render then differs from `optimize`'s.
 #
@@ -460,8 +460,8 @@ def test_portable_runs_the_passes_in_the_driver_order() raises:
     byte as `optimize`, and `optimize` records no request on it.
 
     Defect caught: two adjacent pass calls, or two adjacent steps, of the
-    driver's order exchanged only when `narrow_payload` is False, for every
-    exchange the table names."""
+    driver's order exchanged only for the portable entry, for every exchange
+    the table names."""
     for i in range(_N_PLANS):
         var deps = ScalarDepTable()
         var want = optimize(_plan_at(i), OptimizerConfig(), deps)

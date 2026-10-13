@@ -1,51 +1,19 @@
 # =============================================================================
-# test_optimizer_payload_narrow_parity -- the payload narrowing decisions,
-# frozen as a table
+# fixtures: the fixtures of the optimizer's payload-narrowing parity table
 # =============================================================================
 #
-# Runs `narrow_join_payload_inplace` on a set of fixture LogicalPlans and
-# renders, for each fixture, every SCAN in pre-order (node, then children left
-# to right; a UNION's children in order) as
-#
-#     scan#<i>: <column>:<bytes>:<base>,...
-#
-# with nothing after the colon when the scan carries no spec. Scans are joined
-# by ` | `; a plan with no scan renders as the empty string. Each table row is
-#
-#     <fixture> => <rendering>
-#
-# The table (`_expected_table`) records what the rule does today, including
-# the shapes it does not narrow. It is the parity oracle for moving the rule
-# to host lowering: the host rule must reproduce every row from the same
-# fixtures, after which this optimizer pass can be removed without changing
-# a row. Rows are compared one by one and the row count is pinned. Each
-# plan is built from its row's name, in table order, so a dropped row fails
-# the count and a row with no builder fails with `no fixture named`;
-# reordering rows does not fail and is not meant to.
-#
-# Fixture families:
-#   hc4 / ladder_*  the hc4 shape and the width ladder boundaries, as payload
-#                   ranges on the left side, next to a right side that narrows;
-#   multi_* / key_* several payloads on one scan, and key exclusion by THIS
-#                   side's key name only; payload_first_column puts the
-#                   payload at schema and stats index 0;
-#   refuse_*        one reason not to narrow, next to a sibling that narrows
-#                   (on the same scan for a column refusal, on another join
-#                   for a join refusal);
-#   side_*          side shapes (Filter, pure Project, alias, computed, UDF);
-#   walk_* / *_ref_* the walk: a join under every walked node kind, and under
-#                   the kinds it does not walk (UNION, CAST_TO_VARCHAR). VIEW_REF
-#                   and CSE_REF are leaves, so they appear as a leaf and as a
-#                   join side;
-#   nested_*        joins under joins, including an eligible join under a
-#                   refused one (join type, residual, two keys), with the
-#                   eligible join as the left child and as the right child;
-#   multifile_*     stats folded by `merge_table_stats` (two files lose
-#                   min/max and do not narrow; one file passes through).
+# The builders and fixtures below, from `Col` through `_nested_fixture`, were
+# copied verbatim from the parity test of komira_optimizer's payload-narrowing
+# pass (deleted with that pass), whose table is the first block of
+# golden/payload_narrow.txt. Each row of that table names the fixture built
+# here under the same name, so the host rule is checked against the
+# optimizer's table on the optimizer's own plans. Every scan carries its
+# statistics on the plan (`ScanData.table_stats`); `case_footers`
+# (render.mojo) hands them to the host rule as its footer list. The cases this
+# package adds beyond that table are in extra_fixtures.mojo.
 # =============================================================================
 
 from std.memory import OwnedPointer
-from std.testing import TestSuite, assert_equal
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
@@ -69,20 +37,6 @@ from komira_plan_ir.logical_plan import (
     JOIN_SEMI,
     JOIN_ANTI,
     JOIN_CROSS,
-    PLAN_SCAN,
-    PLAN_FILTER,
-    PLAN_PROJECT,
-    PLAN_AGGREGATE,
-    PLAN_JOIN,
-    PLAN_SORT,
-    PLAN_LIMIT,
-    PLAN_TOPN,
-    PLAN_DISTINCT,
-    PLAN_PARTITION_BY,
-    PLAN_PARTITION_TOPN,
-    PLAN_ASOF_JOIN,
-    PLAN_UNION,
-    PLAN_CAST_TO_VARCHAR,
 )
 from komira_plan_stats.cardinality_estimator import merge_table_stats
 from komira_plan_stats.table_stats import (
@@ -90,198 +44,6 @@ from komira_plan_stats.table_stats import (
     TableStats,
     STATS_SOURCE_PARQUET_METADATA,
 )
-
-from komira_optimizer.optimizer_payload_narrow import (
-    narrow_join_payload_inplace,
-)
-
-
-# =============================================================================
-# The table
-# =============================================================================
-
-comptime _ROWS = 83
-
-
-def _expected_table() -> String:
-    return """
-hc4 => scan#0: probe_val:2:1 | scan#1: build_val:2:1
-ladder_0_255 => scan#0: pv:1:0 | scan#1: bv:2:1
-ladder_0_256 => scan#0: pv:2:0 | scan#1: bv:2:1
-ladder_0_65535 => scan#0: pv:2:0 | scan#1: bv:2:1
-ladder_0_65536 => scan#0: pv:4:0 | scan#1: bv:2:1
-ladder_0_4294967295 => scan#0: pv:4:0 | scan#1: bv:2:1
-ladder_0_4294967296 => scan#0: | scan#1: bv:2:1
-ladder_max_below_min => scan#0: | scan#1: bv:2:1
-ladder_point => scan#0: pv:1:7 | scan#1: bv:2:1
-ladder_far_base => scan#0: pv:1:1000000 | scan#1: bv:2:1
-ladder_negative_base => scan#0: pv:2:-300 | scan#1: bv:2:1
-ladder_pos_2p62 => scan#0: pv:1:4611686018427387904 | scan#1: bv:2:1
-ladder_pos_over_2p62 => scan#0: | scan#1: bv:2:1
-ladder_neg_2p62 => scan#0: pv:1:-4611686018427387904 | scan#1: bv:2:1
-ladder_neg_over_2p62 => scan#0: | scan#1: bv:2:1
-multi_payload_widths => scan#0: a:1:0,b:2:0,c:4:0 | scan#1: bv:2:1
-key_names_per_side => scan#0: rk:1:0 | scan#1: x:2:0
-payload_first_column => scan#0: pv:2:1 | scan#1: bv:2:1
-refuse_nullable => scan#0: gv:2:5 | scan#1: bv:2:1
-refuse_stats_entry_missing => scan#0: gv:2:5 | scan#1: bv:2:1
-refuse_no_min => scan#0: gv:2:5 | scan#1: bv:2:1
-refuse_no_max => scan#0: gv:2:5 | scan#1: bv:2:1
-refuse_float_bounds => scan#0: gv:2:5 | scan#1: bv:2:1
-refuse_mixed_bounds_float_max => scan#0: gv:2:5 | scan#1: bv:2:1
-refuse_mixed_bounds_float_min => scan#0: gv:2:5 | scan#1: bv:2:1
-refuse_int32_declared => scan#0: gv:2:5 | scan#1: bv:2:1
-refuse_uint64_declared => scan#0: gv:2:5 | scan#1: bv:2:1
-refuse_float64_declared => scan#0: gv:2:5 | scan#1: bv:2:1
-refuse_no_table_stats => scan#0: | scan#1: bv:2:1
-refuse_non_parquet_side => scan#0: | scan#1: bv:2:1
-refuse_left_join => scan#0: | scan#1: | scan#2: ov:2:1
-refuse_semi_join => scan#0: | scan#1: | scan#2: ov:2:1
-refuse_right_join => scan#0: | scan#1: | scan#2: ov:2:1
-refuse_full_join => scan#0: | scan#1: | scan#2: ov:2:1
-refuse_anti_join => scan#0: | scan#1: | scan#2: ov:2:1
-refuse_cross_join => scan#0: | scan#1: | scan#2: ov:2:1
-refuse_cross_join_no_keys => scan#0: | scan#1: | scan#2: ov:2:1
-refuse_residual => scan#0: | scan#1: | scan#2: ov:2:1
-refuse_two_key => scan#0: | scan#1: | scan#2: ov:2:1
-refuse_two_left_keys => scan#0: | scan#1: | scan#2: ov:2:1
-refuse_two_right_keys => scan#0: | scan#1: | scan#2: ov:2:1
-refuse_no_keys => scan#0: | scan#1: | scan#2: ov:2:1
-side_filter => scan#0: pv:2:1 | scan#1: bv:2:1
-side_pure_project => scan#0: pv:2:1 | scan#1: bv:2:1
-side_alias_same_name => scan#0: pv:2:1 | scan#1: bv:2:1
-side_alias_rename => scan#0: | scan#1: bv:2:1
-side_filter_project_filter => scan#0: pv:2:1 | scan#1: bv:2:1
-side_project_project => scan#0: pv:2:1 | scan#1: bv:2:1
-side_computed_project => scan#0: | scan#1: bv:2:1
-side_computed_project_unaliased => scan#0: | scan#1: bv:2:1
-side_computed_project_first => scan#0: | scan#1: bv:2:1
-side_udf_project => scan#0: | scan#1: bv:2:1
-side_aggregate => scan#0: | scan#1: bv:2:1
-walk_filter => scan#0: pv:2:1 | scan#1: bv:2:1
-walk_project => scan#0: pv:2:1 | scan#1: bv:2:1
-walk_aggregate => scan#0: pv:2:1 | scan#1: bv:2:1
-walk_sort => scan#0: pv:2:1 | scan#1: bv:2:1
-walk_limit => scan#0: pv:2:1 | scan#1: bv:2:1
-walk_topn => scan#0: pv:2:1 | scan#1: bv:2:1
-walk_distinct => scan#0: pv:2:1 | scan#1: bv:2:1
-walk_partition_by => scan#0: pv:2:1 | scan#1: bv:2:1
-walk_partition_topn => scan#0: pv:2:1 | scan#1: bv:2:1
-walk_asof_left => scan#0: pv:2:1 | scan#1: bv:2:1 | scan#2:
-walk_asof_right => scan#0: | scan#1: pv:2:1 | scan#2: bv:2:1
-walk_union => scan#0: | scan#1: | scan#2: | scan#3:
-walk_union_one_branch => scan#0: | scan#1:
-walk_cast_to_varchar => scan#0: | scan#1:
-walk_union_under_join_side => scan#0: | scan#1: bv:2:1
-view_ref_leaf =>
-cse_ref_leaf =>
-view_ref_side => scan#0: bv:2:1
-cse_ref_side => scan#0: pv:2:1
-nested_left => scan#0: pv:2:1 | scan#1: bv:2:1 | scan#2: ov:2:1
-nested_right => scan#0: ov:2:1 | scan#1: pv:2:1 | scan#2: bv:2:1
-nested_both => scan#0: pv:2:1 | scan#1: bv:2:1 | scan#2: qv:1:0 | scan#3: cv:2:0
-nested_three_deep => scan#0: a:2:1 | scan#1: b:2:1 | scan#2: c:2:1 | scan#3: d:2:1
-nested_under_left_join => scan#0: pv:2:1 | scan#1: bv:2:1 | scan#2:
-nested_under_right_join => scan#0: | scan#1: pv:2:1 | scan#2: bv:2:1
-nested_under_residual_join => scan#0: pv:2:1 | scan#1: bv:2:1 | scan#2:
-nested_under_residual_join_right => scan#0: | scan#1: pv:2:1 | scan#2: bv:2:1
-nested_under_two_key_join => scan#0: | scan#1: k2:1:0,pv:2:1 | scan#2: bv:2:1
-multifile_two_merged => scan#0: | scan#1: bv:2:1
-multifile_one_passthrough => scan#0: pv:2:1 | scan#1: bv:2:1
-"""
-
-
-def _table_rows() -> List[String]:
-    var out = List[String]()
-    var parts = _expected_table().split("\n")
-    for i in range(len(parts)):
-        var line = String(parts[i])
-        if line.byte_length() == 0:
-            continue
-        out.append(line^)
-    return out^
-
-
-def _row_name(row: String) raises -> String:
-    var parts = row.split(" =>")
-    if len(parts) != 2:
-        raise Error("table row `" + row + "`: expected exactly one ` =>`")
-    return String(parts[0])
-
-
-# =============================================================================
-# Rendering
-# =============================================================================
-
-
-def _collect(imm node: LogicalPlan, mut out: List[String]) raises:
-    """Append one rendered line per SCAN under `node`, in pre-order."""
-    if node.tag == PLAN_SCAN:
-        var line = String("scan#") + String(len(out)) + String(":")
-        if node._scan:
-            ref pn = node.scan_data_ref().payload_narrow
-            for i in range(len(pn)):
-                line += String(" ") if i == 0 else String(",")
-                line += (
-                    pn[i].column_name + String(":")
-                    + String(Int(pn[i].target_bytes)) + String(":")
-                    + String(pn[i].base)
-                )
-        out.append(line^)
-        return
-    if node.tag == PLAN_FILTER and node._filter:
-        _collect(node.filter_data_ref().child[], out)
-    elif node.tag == PLAN_PROJECT and node._project:
-        _collect(node.project_data_ref().child[], out)
-    elif node.tag == PLAN_AGGREGATE and node._aggregate:
-        _collect(node.aggregate_data_ref().child[], out)
-    elif node.tag == PLAN_JOIN and node._join:
-        _collect(node.join_data_ref().left[], out)
-        _collect(node.join_data_ref().right[], out)
-    elif node.tag == PLAN_SORT and node._sort:
-        _collect(node.sort_data_ref().child[], out)
-    elif node.tag == PLAN_LIMIT and node._limit:
-        _collect(node.limit_data_ref().child[], out)
-    elif node.tag == PLAN_TOPN and node._topn:
-        _collect(node.topn_data_ref().child[], out)
-    elif node.tag == PLAN_DISTINCT and node._distinct:
-        _collect(node.distinct_data_ref().child[], out)
-    elif node.tag == PLAN_PARTITION_BY and node._partition_by:
-        _collect(node.partition_by_data_ref().child[], out)
-    elif node.tag == PLAN_PARTITION_TOPN and node._partition_topn:
-        _collect(node.partition_topn_data_ref().child[], out)
-    elif node.tag == PLAN_ASOF_JOIN and node._asof_join:
-        _collect(node.asof_join_data_ref().left[], out)
-        _collect(node.asof_join_data_ref().right[], out)
-    elif node.tag == PLAN_UNION and node._union:
-        ref ch = node.union_data_ref().children
-        for i in range(len(ch)):
-            _collect(ch[i][], out)
-    elif node.tag == PLAN_CAST_TO_VARCHAR and node._cast_to_varchar:
-        _collect(node.cast_to_varchar_data_ref().child[], out)
-    # VIEW_REF and CSE_REF are leaves with no scan under them.
-
-
-def _render(imm plan: LogicalPlan) raises -> String:
-    var lines = List[String]()
-    _collect(plan, lines)
-    var s = String()
-    for i in range(len(lines)):
-        if i > 0:
-            s += String(" | ")
-        s += lines[i]
-    return s^
-
-
-def _row(name: String, rendering: String) -> String:
-    if rendering.byte_length() == 0:
-        return name + String(" =>")
-    return name + String(" => ") + rendering
-
-
-# =============================================================================
-# Scan builders
-# =============================================================================
 
 
 @fieldwise_init
@@ -783,7 +545,8 @@ def _nested_fixture(name: String) raises -> Optional[LogicalPlan]:
     return None
 
 
-def _build(name: String) raises -> LogicalPlan:
+def parity_fixture(name: String) raises -> Optional[LogicalPlan]:
+    """The optimizer table's fixture named `name`, or None."""
     var p = _ladder_fixture(name)
     if not p:
         p = _refusal_fixture(name)
@@ -793,52 +556,4 @@ def _build(name: String) raises -> LogicalPlan:
         p = _walk_fixture(name)
     if not p:
         p = _nested_fixture(name)
-    if not p:
-        raise Error("no fixture named `" + name + "`")
-    return p.take()
-
-
-# =============================================================================
-# Tests
-# =============================================================================
-
-
-def _check_table(passes: Int) raises:
-    """Build every fixture, run the rule `passes` times, compare to the table."""
-    var rows = _table_rows()
-    assert_equal(len(rows), _ROWS, "the table has a pinned number of rows")
-    var actual = List[String]()
-    for i in range(len(rows)):
-        var name = _row_name(rows[i])
-        var plan = _build(name)
-        for _ in range(passes):
-            _ = narrow_join_payload_inplace(plan)
-        actual.append(_row(name, _render(plan)))
-    # Print the whole actual table first, so a red run shows every row.
-    for i in range(len(actual)):
-        print("actual:", actual[i])
-    for i in range(len(rows)):
-        assert_equal(actual[i], rows[i], "parity row " + String(i))
-
-
-def test_payload_narrow_parity_table() raises:
-    _check_table(1)
-
-
-def test_payload_narrow_parity_table_is_idempotent() raises:
-    # A second pass replaces the stamp with the same verdict: same table.
-    _check_table(2)
-
-
-def test_table_names_are_unique() raises:
-    var rows = _table_rows()
-    for i in range(len(rows)):
-        for j in range(i + 1, len(rows)):
-            assert_equal(
-                _row_name(rows[i]) == _row_name(rows[j]), False,
-                "duplicate fixture name in row " + String(j),
-            )
-
-
-def main() raises:
-    TestSuite.discover_tests[__functions_in_module()]().run()
+    return p^
