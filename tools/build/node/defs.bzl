@@ -32,6 +32,7 @@ load("@komira//tools/build/mojo:test_runtime.bzl", "data_map")
 load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "row")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 NodeDistInfo = provider(
     doc = "An unpacked Node.js: its root directory (`bin/node`, `include/node`) and the libraries `node` loads beyond glibc.",
@@ -301,9 +302,10 @@ def _node_test_impl(ctx):
             ctx.attrs.expect_error if ctx.attrs.expect_error != None else "-",
             ctx.attrs.args,
         ),
+        env = rerun_env(ctx),
         category = "node_test",
     )
-    return [DefaultInfo(default_output = out)]
+    return [DefaultInfo(default_output = out), rerun_info(ctx)]
 
 _node_test = rule(
     impl = _node_test_impl,
@@ -317,7 +319,7 @@ _node_test = rule(
         "src": attrs.source(),
         "srcs": attrs.list(attrs.source(), default = []),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
-    },
+    } | RERUN_ATTRS,
 )
 
 # ---- esbuild_bundle ----------------------------------------------------------

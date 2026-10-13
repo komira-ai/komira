@@ -9,6 +9,7 @@ mojo_library(
         "tests/test_byte_class_iota_prefix_xor.mojo",
         "tests/test_byte_class_movemask.mojo",
         "tests/test_byte_class_shuffle_compress.mojo",
+        "tests/test_byte_class_wide_forms.mojo",
         "tests/test_byte_equal_simd.mojo",
         "tests/test_byte_memmem.mojo",
         "tests/test_byte_set_nibble_luts.mojo",

@@ -392,38 +392,38 @@ def test_b7_a_retry_the_budget_cut_short_is_a_failed_unit_that_says_so() raises:
 
 
 def test_1153_the_one_batch_gets_all_the_budget_left_not_3600() raises:
-    # pr.yml's shape: --build-budget-s 6900 and no --build-timeout-s (the
+    # pr.yml's shape: --build-budget-s 19500 and no --build-timeout-s (the
     # default, 3600, stays in the request); kci's work before the step took
-    # 300 s (the deadline is 6600 s after the step's clock 0). The three
-    # units share a command: ONE run, timed 6900 - 300 = 6600 s, not 3600
-    var req = _request(String("i1"), 6900)
+    # 300 s (the deadline is 19200 s after the step's clock 0). The three
+    # units share a command: ONE run, timed 19500 - 300 = 19200 s, not 3600
+    var req = _request(String("i1"), 19500)
     req.build_timeout_s = DEFAULT_BUILD_TIMEOUT_S
-    req.build_deadline_ns = (6900 - 300) * _NS
+    req.build_deadline_ns = (19500 - 300) * _NS
     var runner = ScriptedRunner()
     runner.expect(_build(_argv(_A, _B, _DOCS), took_s=5000))
     var o = _go(req, _argv("lib_a", "lib_b", "lints"), runner)
     assert_equal(o.outcome, String(OUTCOME_SUCCEEDED), o.message)
     assert_equal(len(runner.calls), 1)
     assert_equal(runner.remaining(), 0)
-    assert_equal(runner.calls[0].timeout_s, 6600)
+    assert_equal(runner.calls[0].timeout_s, 19200)
     assert_equal(_list(o.lines), String("[BUILT lib_a][BUILT lib_b][BUILT lints]"))
 
 
 def test_1153_a_timed_out_batch_is_failed_after_n_min_of_the_budget() raises:
-    # the same batch runs out of its 6600 s (110 min): FAILED, attributed to
+    # the same batch runs out of its 19200 s (320 min): FAILED, attributed to
     # no unit, and the note says how long it was allowed and which budget
     # it ran out of
-    var req = _request(String("i2"), 6900)
+    var req = _request(String("i2"), 19500)
     req.build_timeout_s = DEFAULT_BUILD_TIMEOUT_S
-    req.build_deadline_ns = (6900 - 300) * _NS
+    req.build_deadline_ns = (19500 - 300) * _NS
     var runner = ScriptedRunner()
-    runner.expect(_build(_argv(_A, _B, _DOCS), took_s=6600, timed_out=True))
+    runner.expect(_build(_argv(_A, _B, _DOCS), took_s=19200, timed_out=True))
     var o = _go(req, _argv("lib_a", "lib_b", "lints"), runner)
     assert_equal(o.outcome, String(OUTCOME_FAILED), o.message)
     assert_equal(o.error_id, String(ERROR_BUILD_FAILED))
     assert_equal(len(runner.calls), 1)
     assert_equal(runner.remaining(), 0)
-    assert_equal(runner.calls[0].timeout_s, 6600)
+    assert_equal(runner.calls[0].timeout_s, 19200)
     assert_true(
         _first_line(o.message).startswith(
             String("BUILD step: batch 1 (3 unit(s): lib_a, lib_b, lints): `buck2 build ") + String(_A)
@@ -432,7 +432,7 @@ def test_1153_a_timed_out_batch_is_failed_after_n_min_of_the_budget() raises:
     )
     assert_true(
         o.message.find(
-            String("` timed out after 110 min, all that was left of the build budget (--build-budget-s 6900)")
+            String("` timed out after 320 min, all that was left of the build budget (--build-budget-s 19500)")
             + String(" (stderr: ")
         ) >= 0,
         o.message,

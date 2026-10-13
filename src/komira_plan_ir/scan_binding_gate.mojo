@@ -126,6 +126,7 @@ from komira_plan_ir.logical_plan import (
     PLAN_VIEW_REF,
     PLAN_CSE_REF,
     PLAN_CAST_TO_VARCHAR,
+    PLAN_EXCHANGE,
     plan_tag_name,
 )
 from komira_plan_ir.corr_subquery import corr_subq_inner_plan_ref
@@ -313,6 +314,13 @@ def check_plan_scan_bindings[
             return 0
         return check_plan_scan_bindings(
             resolver, plan.cast_to_varchar_data_ref().child[]
+        )
+    if tag == PLAN_EXCHANGE:
+        # Keys and ordering are column NAMES; no expression site.
+        if not plan._exchange:
+            return 0
+        return check_plan_scan_bindings(
+            resolver, plan.exchange_data_ref().child[]
         )
 
     # ---- TWO-CHILD ---------------------------------------------------------

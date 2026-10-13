@@ -19,16 +19,10 @@ tools/build/coverage/kcov/cov_run.sh	coverage and mutation tooling: to port to Z
 tools/build/lint/readme_api_coverage.sh	lint or validation: to port to Zig
 tools/build/lint/test_weld.sh	lint or validation: to port to Zig
 tools/build/mojo/darwin/busybox.sh	a thin wrapper: the darwin applet allowlist
-tools/build/mojo/darwin/cc	a thin wrapper: the C driver a darwin Mojo compile finds on PATH
 tools/build/mojo/darwin/dyld_prelude.sh	a thin fragment: the darwin loader variables
-tools/build/mojo/darwin/host_identity.sh	run by hand on a macOS host to fill the darwin host table
-tools/build/mojo/darwin/mojo_wrapper.sh	action runtime of the rules: to port to Zig
-tools/build/mojo/gate_runner.sh	action runtime of the rules: to port to Zig
 tools/build/mojo/launch.sh	a thin wrapper: sets the loader path and execs the binary
-tools/build/mojo/mem_cap.sh	action runtime of the rules: to port to Zig
 tools/build/mojo/proto_fixture.sh	action runtime of the rules: to port to Zig
 tools/build/mojo/run_check.sh	a thin wrapper: runs a binary in a clean environment and compares its stdout
-tools/build/mojo/test_deadline.sh	action runtime of the rules: to port to Zig
 tools/build/package/kcov_guard.sh	packaging: to port to Zig
 tools/build/package/list_conda_targets.sh	packaging: to port to Zig
 tools/build/package/release_version.sh	dead: to be deleted
@@ -61,11 +55,8 @@ tools/build/tests/functional/glibc_level.sh	build system self-tests: to port to 
 tools/build/tests/functional/install_gate/cases.sh	dead: to be deleted
 tools/build/tests/functional/install_gate/install_gate.sh	dead: to be deleted
 tools/build/tests/functional/local_default.sh	build system self-tests: to port to Zig
-tools/build/tests/functional/mem_cap/cases.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/platform_table/check.sh	build system self-tests: to port to Zig
-tools/build/tests/functional/test_data/runner_cases.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/test_data/test_command_case.sh	a thin wrapper of one test run
-tools/build/tests/functional/test_deadline/cases.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/umbrella_cache.sh	build system self-tests: to port to Zig
 tools/build/tests/golden/golden.sh	build system self-tests: to port to Zig
 tools/build/tests/negative/lint_weld.sh	build system self-tests: to port to Zig

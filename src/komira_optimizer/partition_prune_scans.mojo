@@ -305,7 +305,7 @@ def _maybe_prune_filter_over_scan(mut plan: LogicalPlan) raises:
 
     # Reseat the scan's source via a fresh ScanData, preserving the other
     # scan fields (projection / pushed filter / row_count / table_stats /
-    # explicit schema). The explicit `schema` on ScanData is the FULL
+    # boundedness / explicit schema). The explicit `schema` on ScanData is the FULL
     # output schema (data + partition cols) — unchanged by pruning.
     var proj_copy: Optional[List[String]] = None
     if scan.projection:
@@ -329,6 +329,7 @@ def _maybe_prune_filter_over_scan(mut plan: LogicalPlan) raises:
         scan_filter_copy^,
         rc_copy^,
         ts_copy^,
+        boundedness=scan.boundedness,
     )
     # Replace the child Scan's ScanData in place.
     plan._filter.value()[].child[]._scan = OwnedPointer(new_scan_data^)

@@ -75,6 +75,7 @@ x86_64, the one platform that toolchain pins protoc for.
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load(":proto.bzl", "MojoProtoToolchainInfo", "ProtoSrcsInfo", "proto_closure", "stage_proto_srcs")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 _STEM = "^[A-Za-z0-9_][A-Za-z0-9_.-]*$"
 _ROOT = "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
@@ -265,15 +266,16 @@ def _proto_fixture_case_impl(ctx):
             "check",
             _check_args(ctx),
         ),
+        env = rerun_env(ctx),
         category = "proto_fixture_case",
     )
-    return [DefaultInfo(default_output = verdict)]
+    return [DefaultInfo(default_output = verdict), rerun_info(ctx)]
 
 proto_fixture_case_rule = rule(
     impl = _proto_fixture_case_impl,
     attrs = _COMMON | _FIXTURES | {
         "expect": attrs.string(default = ""),
-    },
+    } | RERUN_ATTRS,
 )
 
 def _fixture_kwargs(name, fixtures, dir, files, hex):

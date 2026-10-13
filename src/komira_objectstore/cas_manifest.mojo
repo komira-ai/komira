@@ -3778,13 +3778,8 @@ def _is_not_found(msg: String) -> Bool:
     site can newly swallow a real failure. Falsifier:
     `tests/test_cas_manifest_absence_is_anchored.mojo`.
 
-    ⚠ `_is_precondition` BELOW STILL CARRIES THE SAME DEFECT WITH `412`, AND IS
-    DELIBERATELY NOT CHANGED HERE. Chunk sequence 412 spells `412` in its key by
-    the identical arithmetic, so a 403 on it reads as a lost CAS race — but that
-    arm drives the append RETRY LOOP, i.e. a liveness path, and narrowing it
-    needs its own falsifier per call site rather than a ride-along on this one.
-    It is stated here so the omission is a recorded decision and not the silence
-    that produced this defect."""
+    `_is_precondition` below is narrowed the same way: `status=412`, never a
+    bare `412`."""
     return (
         msg.find("StoreError[NOT_FOUND]") >= 0
         or msg.find("status=404") >= 0
@@ -3796,10 +3791,18 @@ def _is_not_found(msg: String) -> Bool:
 
 @always_inline
 def _is_precondition(msg: String) -> Bool:
+    """True iff a raised store Error is a lost conditional write.
+
+    `status=412`, not a bare `412`: store errors carry keys, roots and random
+    temp suffixes, and any of them can spell `412` (chunk sequence 412 does,
+    by `chunk_key`'s arithmetic). The cloud conformers append `status=<http>`
+    to `StoreError[<KIND>] ...`; the in-tree conformers say
+    `precondition (412)`. Falsifier: `tests/test_precondition_is_anchored.mojo`
+    (komira-ai/komira#1275)."""
     return (
         msg.find("precondition") >= 0
         or msg.find("Precondition") >= 0
-        or msg.find("412") >= 0
+        or msg.find("status=412") >= 0
         or msg.find("PreconditionFailed") >= 0
     )
 

@@ -277,6 +277,7 @@ def _stamp_fs_descriptor_inplace(
             filter_copy^,
             rc_copy^,
             ts_copy^,
+            boundedness=scan.boundedness,
         )
         plan._scan = OwnedPointer(new_scan_data^)
     elif plan.tag == PLAN_FILTER and plan._filter:
@@ -294,8 +295,8 @@ def _reseat_scan_with_pod(
 ) raises:
     """Replace `scan_plan`'s (PLAN_SCAN) ParquetSource with a copy carrying
     `hive_predicate = Some(pod)`, preserving every other ScanData field
-    (schema / projection / filter / row_count / table_stats). Mirrors the
-    reseat in `partition_prune_scans._maybe_prune_filter_over_scan`."""
+    (schema / projection / filter / row_count / table_stats / boundedness).
+    Mirrors the reseat in `partition_prune_scans._maybe_prune_filter_over_scan`."""
     ref scan = scan_plan._scan.value()[]
     ref psrc = scan.source._parquet.value()
     var new_psrc = psrc.with_hive_predicate(pod^)
@@ -322,5 +323,6 @@ def _reseat_scan_with_pod(
         filter_copy^,
         rc_copy^,
         ts_copy^,
+        boundedness=scan.boundedness,
     )
     scan_plan._scan = OwnedPointer(new_scan_data^)

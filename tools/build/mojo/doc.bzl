@@ -102,7 +102,7 @@ def _impl(ctx):
             src[DefaultInfo].default_outputs[0],
             "-o",
             raw.as_output(),
-        ], darwin_knobs = False),
+        ]),
         category = "mojo_doc",
     )
     if not checked:
