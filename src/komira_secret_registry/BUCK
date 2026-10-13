@@ -16,6 +16,9 @@ mojo_library(
         "//src/komira_crypto:komira_crypto",
         "//src/komira_secret_store:komira_secret_store",
     ],
-    test_srcs = ["tests/test_secret_registry.mojo"],
+    test_srcs = [
+        "tests/test_secret_bindings.mojo",
+        "tests/test_secret_registry.mojo",
+    ],
     visibility = ["PUBLIC"],
 )
