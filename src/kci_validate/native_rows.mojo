@@ -4,9 +4,10 @@
 # =============================================================================
 #
 # docs/design/native_packaging.md, "Built once, promoted unchanged", rows 2
-# to 7 (slice 11). A library pin is NATIVE when it ships native files
-# (metadata.json `lib_files`) or requires a system codec it dlopens (a
-# requirement of kci_release_set's `system_libs`). `run_install_env`
+# to 7 (slice 11). A library pin is NATIVE when its metadata.json records
+# native files it ships (`lib_files`) or system codecs it opens at run time
+# (`dlopen`), whatever its requirements say: a package missing its codec's
+# requirement is native, so its alone `loaded_from` row can go red. `run_install_env`
 # (conda_install_env.mojo) runs these rows only when some installed pin is
 # native: a release with none gets no row and runs nothing more. Every child
 # runs with the validation's cleared environment (env.mojo), so
@@ -22,7 +23,8 @@
 #                (native_install.mojo `check_native_install`), per pin with
 #                `lib_files`.
 #   built        row 6. For each README whose library's closure links native
-#                files: `mojo build <build args> <w>/readme_<import>.mojo -o
+#                files (a decision, docs/design/native_packaging.md install
+#                check 6: a README with no link block is not built): `mojo build <build args> <w>/readme_<import>.mojo -o
 #                <env>/bin/readme_<import>` (the README block's `build` words,
 #                `$CONDA_PREFIX` replaced), then the built program run
 #                directly, its count read as a README run's is; its loader
@@ -75,7 +77,6 @@ from kci_api import ResultValidationCheck
 from kci_build.runner import ProcessRunner, RunResult, RunSpec
 from kci_release_machine import StageValidation
 from kci_release_set.conda_metadata import LIB_KIND_SHARED
-from kci_release_set.system_libs import is_system_lib_requirement
 
 from .container import MANIFEST_NAME, install_manifest_text, join_path, work_subdirs
 from .env import (
@@ -113,15 +114,11 @@ comptime LOADER_RECORD_SUFFIX: String = ".ld"
 
 
 def is_native(pin: InstallPin) -> Bool:
-    """A library pin shipping native files or requiring a system codec."""
-    if not pin.is_library:
-        return False
-    if pin.has_lib_files:
-        return True
-    for i in range(len(pin.depends)):
-        if is_system_lib_requirement(pin.depends[i]):
-            return True
-    return False
+    """A library pin shipping native files or opening a system codec: its
+    metadata.json has `lib_files` or `dlopen` rows (file header). Never its
+    requirements: the package that forgot its codec's requirement is the
+    one the alone `loaded_from` row is for."""
+    return pin.is_library and (pin.has_lib_files or pin.has_dlopen)
 
 
 def any_native(pins: List[InstallPin]) -> Bool:

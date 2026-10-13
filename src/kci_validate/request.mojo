@@ -189,6 +189,10 @@ struct InstallPin(Copyable, Movable):
     var lib_files: List[LibFile]
     var has_lib_files: Bool
     var depends: List[String]
+    # a library opening a system codec at run time: its metadata.json has
+    # `dlopen` rows (native_rows.mojo `is_native`), whether or not its
+    # depends carry the codec's requirement
+    var has_dlopen: Bool
     # a library: the link arguments its closure needs (readme_link.mojo),
     # which its installed README's `sh komira-link` block must say
     var link: LinkArgs
@@ -209,6 +213,7 @@ struct InstallPin(Copyable, Movable):
         self.lib_files = List[LibFile]()
         self.has_lib_files = False
         self.depends = List[String]()
+        self.has_dlopen = False
         self.link = LinkArgs()
 
     def file_name(self) -> String:
@@ -274,6 +279,7 @@ def install_pins(release: LoadedRelease, names: List[String]) raises -> List[Ins
                     pin.lib_files = mem.conda.lib_files.copy()
                     pin.has_lib_files = mem.conda.has_lib_files
                     pin.depends = mem.conda.depends.copy()
+                    pin.has_dlopen = mem.conda.has_dlopen
                     pin.link = closure_link_args(link_nodes(release), name)
                     var readme = readme_doc_path(name)
                     for d in range(len(mem.conda.doc_files)):
