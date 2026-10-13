@@ -24,6 +24,7 @@ rustc as one `-Ldependency=<dir>` per crate, and direct dependencies as
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:run_check.bzl", "run_check_validation")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 RustToolchainInfo = provider(fields = {
@@ -340,7 +341,7 @@ def _test_impl(ctx):
     def runner(marker_arg):
         return _runner(tc, str(ctx.label.raw_target()), exe, marker_arg, ctx.attrs.test_timeout_s)
 
-    ctx.actions.run(runner(marker.as_output()), category = "rust_gated_test", identifier = ctx.label.name)
+    ctx.actions.run(runner(marker.as_output()), env = rerun_env(ctx), category = "rust_gated_test", identifier = ctx.label.name)
     return [
         # Building the target runs the tests. `[bin]` is the harness itself
         # (a test executable, not a shippable artifact).
@@ -350,12 +351,13 @@ def _test_impl(ctx):
         # harness, outside the build (it writes no marker). So `buck2 test` of
         # a rust_test, or of a rust_library/rust_binary naming it in `tests`,
         # runs its tests rather than reporting NO TESTS RAN.
-        ExternalRunnerTestInfo(type = "custom", command = [runner("/dev/null")], labels = ctx.attrs.labels),
+        ExternalRunnerTestInfo(type = "custom", command = [runner("/dev/null")], env = rerun_env(ctx), labels = ctx.attrs.labels),
+        rerun_info(ctx),
     ]
 
 rust_test_rule = rule(
     impl = _test_impl,
-    attrs = _COMMON_ATTRS | {
+    attrs = _COMMON_ATTRS | RERUN_ATTRS | {
         "labels": attrs.list(attrs.string(), default = []),
         # Each harness invocation (the list, then the run) is killed after
         # this many seconds, and the run is NO VERDICT (exit 142).
@@ -413,6 +415,7 @@ def _external_tests(ctx, tc, crate, ungated, deps_closure):
         marker = ctx.actions.declare_output("test_srcs/" + name + ".passed")
         ctx.actions.run(
             _runner(tc, label + " " + src.short_path, exe, marker.as_output(), _DEFAULT_TEST_TIMEOUT_S),
+            env = rerun_env(ctx),
             category = "rust_gated_test",
             identifier = ident,
         )
@@ -443,11 +446,12 @@ def _library_impl(ctx):
             lib = lib,
             closure = [lib] + deps_closure,
         ),
+        rerun_info(ctx),
     ]
 
 rust_library_rule = rule(
     impl = _library_impl,
-    attrs = _COMMON_ATTRS | _WELD_ATTRS | {
+    attrs = _COMMON_ATTRS | _WELD_ATTRS | RERUN_ATTRS | {
         "proc_macro": attrs.bool(default = False),
         # External tests: each `tests/<name>.rs` is a test crate compiled
         # against the ungated library and run; the library is published
@@ -476,6 +480,7 @@ def _binary_impl(ctx):
         expected = ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout)
         ctx.actions.run(
             cmd_args(tc.busybox, "sh", tc.run_check, tc.busybox, exe, out.as_output(), expected),
+            env = rerun_env(ctx),
             category = "rust_run_check",
         )
         sub_targets["run_check"] = [DefaultInfo(default_output = out)]
@@ -483,11 +488,12 @@ def _binary_impl(ctx):
     return [
         DefaultInfo(default_output = exe, sub_targets = sub_targets),
         RunInfo(args = cmd_args(exe)),
+        rerun_info(ctx),
     ] + validation
 
 rust_binary_rule = rule(
     impl = _binary_impl,
-    attrs = _COMMON_ATTRS | _WELD_ATTRS | {
+    attrs = _COMMON_ATTRS | _WELD_ATTRS | RERUN_ATTRS | {
         "expected_stdout": attrs.option(attrs.string(), default = None),
     },
 )

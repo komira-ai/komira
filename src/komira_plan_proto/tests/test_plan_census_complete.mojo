@@ -4,7 +4,7 @@
 #
 # THE CENSUS IS COMPLETE: every field and every enum value `komira.plan.v1`
 # declares (plan.proto, plan_vocabulary.proto, optimized_plan.proto) has a
-# row in one of the six census ledgers, and every row names one that
+# row in one of the seven census ledgers, and every row names one that
 # exists. A field added to any of them without a census row fails here, so a
 # number no census pins cannot ship.
 #
@@ -66,6 +66,16 @@ from komira_plan_proto.optimized_plan import (
     SharedSubplan,
 )
 from komira_plan_proto.plan import (
+    CodeDigest,
+    CodeForm,
+    RecordedFields,
+    UdfCode,
+    UdfKind,
+    UdfNullMode,
+    UdfReadSet,
+    UdfRef,
+    UdfResources,
+    UdfStability,
     WireAggExpr,
     WireAggFn,
     WireAggregateNode,
@@ -89,6 +99,7 @@ from komira_plan_proto.plan import (
     WireJoinNode,
     WireJsonExtract,
     WireLimitNode,
+    WireMapBatchesNode,
     WireMapGet,
     WireMathFn,
     WireMathFn2,
@@ -110,6 +121,7 @@ from komira_plan_proto.plan import (
     WireSchema,
     WireSortNode,
     WireStringFn,
+    WireStepNode,
     WireStringFnN,
     WireStringOp,
     WireStructField,
@@ -117,6 +129,7 @@ from komira_plan_proto.plan import (
     WireSubstring,
     WireTopNNode,
     WireUdf,
+    WireUdfApply,
     WireUdfCall,
     WireUdfColumn,
     WireUnaryOp,
@@ -171,6 +184,7 @@ comptime _CENSUS = (
     "test_plan_field_numbers_scan.mojo test_plan_field_numbers_expr.mojo"
     + " test_plan_field_numbers_plan.mojo test_plan_enum_numbers_nodes.mojo"
     + " test_plan_enum_numbers_functions.mojo test_optimized_plan_field_numbers.mojo"
+    + " test_plan_field_numbers_udf.mojo"
 )
 
 
@@ -282,6 +296,9 @@ struct _Vocab(WireDecoder):
         return M.decode[_Vocab](d)
 
     def read_into_repeated_string(mut self, mut out: List[String]) raises:
+        pass
+
+    def read_into_repeated_bytes(mut self, mut out: List[List[UInt8]]) raises:
         pass
 
     def read_into_repeated_i64(mut self, mut out: List[Int64]) raises:
@@ -475,6 +492,24 @@ def _fields_of(message: String) raises -> _Shape:
         return _vocabulary[WireCseRefNode]()
     elif message == "WireCastToVarcharNode":
         return _vocabulary[WireCastToVarcharNode]()
+    elif message == "WireUdfApply":
+        return _vocabulary[WireUdfApply]()
+    elif message == "WireMapBatchesNode":
+        return _vocabulary[WireMapBatchesNode]()
+    elif message == "WireStepNode":
+        return _vocabulary[WireStepNode]()
+    elif message == "RecordedFields":
+        return _vocabulary[RecordedFields]()
+    elif message == "UdfRef":
+        return _vocabulary[UdfRef]()
+    elif message == "UdfReadSet":
+        return _vocabulary[UdfReadSet]()
+    elif message == "UdfCode":
+        return _vocabulary[UdfCode]()
+    elif message == "CodeDigest":
+        return _vocabulary[CodeDigest]()
+    elif message == "UdfResources":
+        return _vocabulary[UdfResources]()
     elif message == "WirePlan":
         return _vocabulary[WirePlan]()
     elif message == "WireWriteTarget":
@@ -579,6 +614,14 @@ def _values_of(enum: String) raises -> String:
         return SnapshotPolicy.known_json_names()
     elif enum == "DTypeCode":
         return DTypeCode.known_json_names()
+    elif enum == "UdfKind":
+        return UdfKind.known_json_names()
+    elif enum == "CodeForm":
+        return CodeForm.known_json_names()
+    elif enum == "UdfStability":
+        return UdfStability.known_json_names()
+    elif enum == "UdfNullMode":
+        return UdfNullMode.known_json_names()
     raise Error("the census has no enum " + enum)
 
 

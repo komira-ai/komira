@@ -12,6 +12,7 @@ const posix = std.posix;
 const sys = @import("sys.zig");
 const gate = @import("gate.zig");
 const supervise = @import("supervise.zig");
+const proctab_darwin = if (sys.is_darwin) @import("proctab_darwin.zig") else struct {};
 
 pub const Result = struct {
     status: u8,
@@ -126,6 +127,7 @@ pub fn runGate(alloc: std.mem.Allocator, cwd: []const u8, argv: []const []const 
 
 /// Whether `pid` is alive and not a zombie (a zombie has exited).
 pub fn alive(pid: i32) bool {
+    if (sys.is_darwin) return proctab_darwin.alive(pid);
     var buf: [64]u8 = undefined;
     const p = std.fmt.bufPrint(&buf, "/proc/{d}/stat", .{pid}) catch return false;
     const f = std.fs.cwd().openFile(p, .{}) catch return false;

@@ -18,6 +18,7 @@ checked bytes and the handed-out bytes are one configured target.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 def _stage(ctx, name, files):
     # Sources are copied under buck-out first: a source's path in an action
@@ -78,6 +79,7 @@ def _check_impl(ctx):
             ctx.attrs.version,
             ctx.attrs.lfs_version,
         ),
+        env = rerun_env(ctx),
         category = "git_check",
         identifier = ctx.label.name,
     )
@@ -85,12 +87,13 @@ def _check_impl(ctx):
     return [
         DefaultInfo(default_output = result),
         ValidationInfo(validations = [ValidationSpec(name = ctx.label.name, validation_result = result)]),
+        rerun_info(ctx),
     ]
 
 _git_check = rule(
     impl = _check_impl,
     doc = "Runs git_check.sh against the `git` distribution and the `git_lfs` binary: files and licences, version, no host git (decoys on PATH), object ids against sha1sum, clone and push over the pack protocol, the HTTP transport, and git-lfs. Fails the build on a wrong result.",
-    attrs = {
+    attrs = RERUN_ATTRS | {
         "git": attrs.exec_dep(doc = "The `git` mode output of git_build."),
         "git_lfs": attrs.exec_dep(doc = "The pinned git-lfs binary."),
         "lfs_version": attrs.string(doc = "What `git-lfs version` prints after `git-lfs/`, up to the space."),

@@ -19,9 +19,6 @@ from komira_plan_expr.agg_expr import AggExpr, AGG_COUNT, AGG_SUM, sum as agg_su
 from komira_plan_expr.col_expr import col
 from komira_plan_expr.expr import Expr, BIN_ADD, BIN_SUB, BIN_EQ, BIN_GT, BIN_AND, BIN_OR, UN_NOT
 from komira_plan_expr.scalar_value import ScalarValue
-from komira_plan_stats.table_stats import (
-    ColumnStats, TableStats, STATS_SOURCE_PARQUET_METADATA,
-)
 from komira_plan_ir.logical_plan import (
     LogicalPlan,
     ExprArray,
@@ -187,79 +184,6 @@ def _fd_group_keys() -> LogicalPlan:
     outer.append(Expr.alias(Expr.col_ref("k1"), "c2"))
     outer.append(Expr.col_ref("c"))
     return LogicalPlan.project(outer^, agg^)
-
-
-def _side_stats(key: String, payload: String, extra: String, hi: Int64) raises -> TableStats:
-    """Footer statistics: key in [0, 24999999], payload in [1, hi], extra in [0, 7]."""
-    var names = List[String]()
-    var stats = List[ColumnStats]()
-    names.append(key)
-    stats.append(ColumnStats(
-        None,
-        Optional[ScalarValue](ScalarValue.from_int64(0)),
-        Optional[ScalarValue](ScalarValue.from_int64(24999999)),
-        Optional[Int](0),
-    ))
-    names.append(payload)
-    stats.append(ColumnStats(
-        None,
-        Optional[ScalarValue](ScalarValue.from_int64(1)),
-        Optional[ScalarValue](ScalarValue.from_int64(hi)),
-        Optional[Int](0),
-    ))
-    names.append(extra)
-    stats.append(ColumnStats(
-        None,
-        Optional[ScalarValue](ScalarValue.from_int64(0)),
-        Optional[ScalarValue](ScalarValue.from_int64(7)),
-        Optional[Int](0),
-    ))
-    return TableStats(1000, names^, stats^, STATS_SOURCE_PARQUET_METADATA)
-
-
-def _stamped_side(path: String, payload: String, extra: String, hi: Int64) raises -> LogicalPlan:
-    var n = List[String]()
-    n.append("key")
-    n.append(payload)
-    n.append(extra)
-    return LogicalPlan.scan(
-        path, SOURCE_PARQUET, _schema(n), None, None, None,
-        Optional[TableStats](_side_stats("key", payload, extra, hi)),
-    )
-
-
-def _narrowable_join() raises -> LogicalPlan:
-    """Project [key, probe_val, build_val] over
-    probe(key, probe_val, p_extra) INNER JOIN build(key, build_val, b_extra).
-    The unused `*_extra` columns make projection pushdown rewrite both scans."""
-    var j = LogicalPlan.join(
-        _stamped_side("probe.parquet", "probe_val", "p_extra", 999),
-        _stamped_side("build.parquet", "build_val", "b_extra", 9999),
-        _l1("key"),
-        _l1("key"),
-        JOIN_INNER,
-    )
-    var pe = ExprArray()
-    pe.append(Expr.col_ref("key"))
-    pe.append(Expr.col_ref("probe_val"))
-    pe.append(Expr.col_ref("build_val"))
-    return LogicalPlan.project(pe^, j^)
-
-
-def _narrow_specs(p: LogicalPlan) -> String:
-    """`path:column:bytes;` for every payload-narrow stamp, depth first."""
-    var out = String("")
-    if p.tag == PLAN_SCAN:
-        ref sd = p._scan.value()[]
-        for i in range(len(sd.payload_narrow)):
-            out += sd.source_path + ":" + sd.payload_narrow[i].column_name + ":"
-            out += String(Int(sd.payload_narrow[i].target_bytes)) + ";"
-    elif p.tag == PLAN_JOIN:
-        out += _narrow_specs(p._join.value()[].left[])
-        out += _narrow_specs(p._join.value()[].right[])
-    elif p.tag == PLAN_PROJECT:
-        out += _narrow_specs(p._project.value()[].child[])
-    return out^
 
 
 def _big_small_join() -> LogicalPlan:
@@ -436,26 +360,11 @@ def test_fd_key_elision_runs_before_identity_project_elimination() raises:
     assert_equal(_names(out), "ip,c1,c2,c,", r)
 
 
-def test_payload_narrowing_runs_last() raises:
-    """Both payload columns fit in two bytes and both scans are rewritten by
-    projection pushdown (each drops its unused `*_extra` column). The stamps
-    survive only because narrowing runs after every pass that rebuilds a scan.
-
-    Defect caught: `narrow_join_payload` moved earlier. A later scan rebuild
-    starts the stamp list empty and the rule looks wired but stamps nothing."""
-    var out = _run(_narrowable_join())
-    var r = _render(out)
-    var specs = _narrow_specs(out)
-    assert_true(specs.find("probe.parquet:probe_val:2;") >= 0, specs + "\n" + r)
-    assert_true(specs.find("build.parquet:build_val:2;") >= 0, specs + "\n" + r)
-    assert_true(r.find("projection=[") >= 0, r)
-
-
 def test_join_reorder_output_order_is_restored() raises:
-    """`big JOIN small`: the reorder puts `small` first and build-side
-    selection swaps it back with its own order-restoring Project, which
-    restores the REORDERED order. The query's order `[b_k, b_v, s_k, s_v]` is
-    put back by the capture taken before both rules.
+    """`big JOIN small`: the reorder puts `small` first; build-side selection
+    then records a side and moves no operand. The query's order
+    `[b_k, b_v, s_k, s_v]` is put back by the restore, from the capture taken
+    before the reorder.
 
     Defect caught: the `restore_join_reorder_output_columns` call dropped (or
     the capture taken after the reorder). The plan answers with

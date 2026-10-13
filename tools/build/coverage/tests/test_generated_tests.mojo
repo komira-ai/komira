@@ -2,7 +2,7 @@ from std.testing import assert_equal, assert_true
 
 from covcheck.analyze import FORMAT_COBERTURA, Analysis, Input, Options, Sources, analyze
 from covcheck.paths import RepoFiles, generated_test_main, report_test_main, repo_files_of
-from covcheck.ratchet import Ratchet
+from covcheck.held import Held
 
 # A welded test's generated main (the layout probe a mojo_gcp_client or
 # mojo_aws_client generates) is named in its report by its output path in
@@ -47,7 +47,7 @@ def _report(origin: String, path: String) -> Input:
 
 
 def _run(reports: List[Input], opts: Options) raises -> Analysis:
-    return analyze(reports, List[Input](), _repo(), Ratchet(), _sources(), opts)
+    return analyze(reports, List[Input](), _repo(), Held(), _sources(), opts)
 
 
 def _error_of(origin: String, path: String) raises -> String:

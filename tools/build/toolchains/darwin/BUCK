@@ -48,15 +48,6 @@ mojo_runtime(
     visibility = ["PUBLIC"],
 )
 
-dyld_script(
-    name = "gate_runner",
-    exec_compatible_with = LINUX_X86_64,
-    busybox = "komira//tools/build/toolchains:busybox",
-    prelude = "komira//tools/build/mojo/darwin:dyld_prelude.sh",
-    src = "komira//tools/build/mojo:gate_runner.sh",
-    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-gate-runner
-)
-
 # MojoToolchainInfo requires a `launcher` (launch.sh: starts a built binary
 # from outside its runnable directory, pointing the loader at the compiler's
 # lib/). No rule in this repository consumes it yet, on either platform; the
@@ -81,7 +72,7 @@ mojo_darwin_toolchain(
     compiler = ":mojo_compiler",
     # Matches the compiler's own minimum OS.
     deployment_target = os_floor_version("darwin-arm64"),
-    gate_runner = ":gate_runner",
+    gate = "komira//tools/build/run:gate_darwin",
     launcher = ":launcher",
     # The host identities a compile may run on (`[komira_re] darwin_macos_hosts`
     # of the root cell; see DARWIN_HOSTS_KEY in platforms/defs.bzl). Unset,

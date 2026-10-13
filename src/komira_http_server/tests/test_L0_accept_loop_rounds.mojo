@@ -22,7 +22,8 @@
 # Groups (and the defect each would catch):
 #   R  a round: a request not answered, answered twice, a pipelined request
 #      skipped or read from the wrong offset, a connection kept after
-#      `Connection: close`, an incomplete head or request kept waiting, a
+#      `Connection: close`, a request whose body the read cut kept waiting
+#      (a head cut across reads: test_h1_head_across_reads.mojo), a
 #      malformed request answered with anything but its static error, an
 #      expectation answered wrong for either setting, end of stream or a
 #      reset not closing.
@@ -396,25 +397,6 @@ def test_http10_request_closes_after_its_response() raises:
         assert_equal(_text(rig.read().data), rig.ok())
 
 
-def test_incomplete_head_closes_without_a_response() raises:
-    for v in range(2):
-        var rig = _Rig(chained=v == 1)
-        _send(rig.peer, "GET / HTTP/1.1\r\nHost: exa")
-        assert_false(rig.round())
-        assert_equal(rig.reqs, Int64(0))
-        assert_equal(rig.sent, Int64(0))
-        assert_equal(len(rig.read().data), 0)
-
-
-def test_incomplete_second_request_closes_after_the_first() raises:
-    for v in range(2):
-        var rig = _Rig(chained=v == 1)
-        _send(rig.peer, String(GET) + "GET / HTTP/1.1\r\n")
-        assert_false(rig.round())
-        assert_equal(rig.reqs, Int64(1))
-        assert_equal(_text(rig.read().data), rig.ok())
-
-
 def test_malformed_request_gets_400_and_close() raises:
     """The request after the malformed one is not answered."""
     for v in range(2):
@@ -560,7 +542,9 @@ def test_blocked_error_response_is_parked() raises:
         assert_equal(rig.entry.state(), CONN_STATE_WAITING_FOR_WRITABLE)
         assert_equal(rig.pending(), _error_bytes(400))
         assert_equal(len(rig.read().data), filler)
-        assert_true(resume_pending_write(rig.entry, rig.sent))
+        # The 400 is the conn's last response: once drained, the resume asks
+        # the caller to close (komira-ai/komira#1285).
+        assert_false(resume_pending_write(rig.entry, rig.sent))
         assert_equal(_text(rig.read().data), _error_bytes(400))
 
 

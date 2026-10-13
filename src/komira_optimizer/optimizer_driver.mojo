@@ -10,7 +10,7 @@
 #     with whatever statistics the caller has injected on its scans
 #     (`ScanData.table_stats`, `ScanData.row_count`). The driver reads those
 #     only through the rules that consume them (join reordering, eager
-#     aggregation, payload narrowing); it computes and stores none.
+#     aggregation); it computes and stores none.
 #   * `config`: the `OptimizerConfig` the caller built. The driver reads
 #     `eager_agg` and `semi_pushdown`; the other fields belong to rules that run
 #     outside this pass order (scan-share planning, aggregate CSE) and do not
@@ -50,8 +50,8 @@
 #   5  push_join_residual_to_side                 [join]   then re-scan Filter
 #   6  fold_constants, simplify_predicates                 (when there is work)
 #   7  factor_or_conjuncts                        [filter] BEFORE 8
-#   8  eliminate_common_subexpressions, rewrite_in_clauses
-#                                     [filter or project or aggregate]
+#   8  eliminate_common_subexpressions  [filter or project or aggregate],
+#      rewrite_in_clauses                                  (when there is a site)
 #   9  fuse_filters (consecutive filters only), decompose_symmetric_or,
 #      factor_or_conjuncts, decompose_filters [join], push_predicates_down,
 #      scalar_broadcast_rewrite(deps)             [filter]
@@ -63,13 +63,13 @@
 #      absorb_expression_into_aggregate, convert_inner_to_semi   [join]
 #   15 materialize_agg_input
 #   16 push_predicates_down, eliminate_cross_join, push_semi_reducers_down
-#      (config.semi_pushdown), reorder_joins_with_dp, select_join_build_side,
+#      (config.semi_pushdown), reorder_joins_with_dp,
 #      restore_join_reorder_output_columns, eliminate_identity_projects
 #                                                 [join]
+#      select_join_build_side                     (always)
 #   17 push_limit_down, fuse_sort_limit (sort above limit only)  [limit]
 #   18 optimize_window_rewrite      [PartitionBy or Project in the current plan]
 #   19 fuse_partition_topn          [PartitionBy in the current plan]
-#   20 narrow_join_payload                                   (last)
 #
 # Each call below says what its position does.
 #
@@ -105,11 +105,10 @@
 # THE PORTABLE PROFILE. `optimize_portable(plan, config, profile)` is the
 # entry a producer calls when its output must be the same plan on every
 # platform that runs it (komira-ai/komira#1094, §5.3). It runs the same
-# pass order through the same function as `optimize`, with three
-# differences:
+# pass order through the same function as `optimize`, with two
+# differences (payload narrowing is not a pass of this order in either entry:
+# the host lowering derives it, `komira_lowering_rules`):
 #
-#   * Step 20 (payload narrowing) does not run. The host derives narrowing
-#     from footers it has verified itself; no producer statistic drives it.
 #   * There is no `deps` argument. Steps 3 and 9 see an empty binding table,
 #     so neither folds a value; a site that needs an executed sub-plan
 #     records a request, and a plan that ends with one is refused with
@@ -138,8 +137,6 @@ from komira_plan_ir.plan_helpers import (
     _plan_has_tag,
     _plan_has_consecutive_filters,
     _plan_has_sort_above_limit,
-    _plan_has_foldable_exprs,
-    _plan_has_simplifiable_exprs,
 )
 
 from .optimizer_config import OptimizerConfig
@@ -164,6 +161,9 @@ from .optimizer_expr import (
     simplify_predicates,
     eliminate_common_subexpressions,
     rewrite_in_clauses,
+    _plan_has_foldable_exprs,
+    _plan_has_simplifiable_exprs,
+    _plan_has_in_sites,
 )
 from .optimizer_or_factoring import factor_or_conjuncts
 from .optimizer_symmetric_or import decompose_symmetric_or
@@ -189,7 +189,6 @@ from .optimizer_dpccp import reorder_joins_with_dp
 from .optimizer_misc import push_limit_down, fuse_sort_limit
 from .optimizer_window_rewrite import optimize_window_rewrite
 from .optimizer_partition_topn import fuse_partition_topn
-from .optimizer_payload_narrow import narrow_join_payload
 
 
 def optimize(
@@ -210,19 +209,16 @@ def optimize(
     Raises:
         The first pass's `Error` that refuses the plan, unchanged.
     """
-    return _run_pass_order(plan^, config, deps, True)
+    return _run_pass_order(plan^, config, deps)
 
 
 def _run_pass_order(
     var plan: LogicalPlan,
     config: OptimizerConfig,
     mut deps: ScalarDepTable,
-    narrow_payload: Bool,
 ) raises -> LogicalPlan:
-    """The pass order, shared by `optimize` and `optimize_portable`.
-
-    `narrow_payload` False skips step 20; nothing else differs between the two
-    entries.
+    """The pass order, shared by `optimize` and `optimize_portable`: one list,
+    so the two entries cannot run different passes or a different order.
     """
     # 1. Scans. Partition pruning first: it reads a Filter directly over a
     # partitioned scan (the shape before pushdown rewrites it), and a smaller
@@ -267,14 +263,13 @@ def _run_pass_order(
 
     # 6. Expression simplification, each pass behind a precheck. Folding
     # first: it turns `NOT ((1 = 1) AND NOT x)` into `NOT NOT x`, which
-    # simplification then removes. The prechecks read Filter predicates,
-    # Project expressions and scan filters only, so a plan whose one foldable
-    # or simplifiable expression is an aggregate argument or a join residual
-    # skips the pass, although the pass rewrites those slots (komira#1306).
-    # Both run after step 5, so a residual step 5 moved into a Filter folds,
-    # and before steps 7-8, which read their output: a removed double
-    # negation exposes an OR to factoring, and a folded constant makes two
-    # expressions equal for CSE.
+    # simplification then removes. Each precheck walks the same sites as its
+    # pass (`optimizer_expr._walk_expr_sites`: scan filters, Filter
+    # predicates, Project expressions, aggregate-function arguments and join
+    # residuals), so a plan whose one foldable or simplifiable expression sits
+    # at any of them runs the pass. Both run before steps 7-8, which read
+    # their output: a removed double negation exposes an OR to factoring, and
+    # a folded constant makes two expressions equal for CSE.
     if _plan_has_foldable_exprs(plan):
         plan = fold_constants(plan^)
     if _plan_has_simplifiable_exprs(plan):
@@ -293,6 +288,7 @@ def _run_pass_order(
         plan = factor_or_conjuncts(plan^)
     if has_filter or has_project or has_aggregate:
         plan = eliminate_common_subexpressions(plan^)
+    if _plan_has_in_sites(plan):
         plan = rewrite_in_clauses(plan^)
 
     # 9. Filters. Symmetric-OR inference runs before pushdown so the
@@ -367,27 +363,32 @@ def _run_pass_order(
     # `convert_inner_to_semi` (whose placement it corrects) and BEFORE the
     # reorder: on a SEMI over a chain of INNER joins it can decline on the
     # chain as written where, after the reorder, it would push the SEMI into
-    # the reordered chain. Reordering and
-    # build-side selection exchange join operands, which permutes the output
-    # columns; the output order is the query's, so it is captured before both
-    # and restored after both.
+    # the reordered chain. Reordering exchanges join operands, which permutes
+    # the output columns; the output order is the query's, so it is captured
+    # before the reorder and restored after it.
     if has_join:
         plan = push_predicates_down(plan^)
         plan = eliminate_cross_join(plan^)
         plan = push_semi_reducers_down(plan^, config)
         var pre_reorder_out = join_reorder_output_names(plan)
         plan = reorder_joins_with_dp(plan^)
-        plan = select_join_build_side(plan^)
         plan = restore_join_reorder_output_columns(plan^, pre_reorder_out^)
-        # The reorder and build-side selection can swap the same join back and
-        # forth (smaller relation first, then smaller relation on the build
-        # side). A Project already above that join is then an identity over
-        # the build-side rule's own order-restoring Project, and step 13 has
-        # already run. Removing it here keeps `optimize` idempotent.
+        # A Project already above a reordered join can be an identity over the
+        # order-restoring Project, and step 13 has already run, so identity
+        # Projects are removed again here. (On the corpus of
+        # test_optimizer_driver_corpus, `optimize` stays idempotent without
+        # this call since the build-side rule stopped exchanging operands.)
         plan = eliminate_identity_projects(plan^)
 
-    # 17. Limits: push down, then Sort over Limit becomes TopN. After step 16,
-    # so a Limit goes below the Project that restores the join's column order.
+    # Build side: recorded on every join, in `JoinData.build_side`; no operand
+    # moves (docs/design/optimized_plan.md §5.1, §5.2). AFTER the reorder,
+    # which builds new join nodes with no decision on them. NOT GATED on
+    # `has_join`: that scan does not descend a Union, an as-of join or a
+    # CastToVarchar, and a join below one of them must be decided too. Every
+    # pass after this one carries the field when it rebuilds a join.
+    plan = select_join_build_side(plan^)
+
+    # 17. Limits: push down, then Sort over Limit becomes TopN.
     if has_limit:
         plan = push_limit_down(plan^)
         if _plan_has_sort_above_limit(plan):
@@ -404,13 +405,6 @@ def _run_pass_order(
         plan = optimize_window_rewrite(plan^)
     if _plan_has_tag(plan, PLAN_PARTITION_BY):
         plan = fuse_partition_topn(plan^)
-
-    # 20. Payload narrowing LAST. Its stamp is a `ScanData` field that is not a
-    # constructor argument, so any later pass that rebuilt the scan would start
-    # it empty and drop the stamp. It adds, removes and reorders nothing.
-    # `optimize_portable` skips it: narrowing is a host-local rule.
-    if narrow_payload:
-        plan = narrow_join_payload(plan^)
 
     return plan^
 
@@ -435,7 +429,7 @@ def optimize_status(
 
 comptime PORTABLE_PROFILE_V1: Int = 1
 """The one `PortableProfile` version this build implements: the driver's pass
-order without step 20, with no scalar bindings (see the module header)."""
+order with no scalar bindings (see the module header)."""
 
 comptime PORTABLE_REFUSAL_UNKNOWN_PROFILE = "OPTIMIZE_PORTABLE_UNKNOWN_PROFILE"
 """`optimize_portable` was given a profile version this build does not
@@ -472,8 +466,7 @@ def optimize_portable(
 ) raises -> LogicalPlan:
     """Run the driver's pass order under the portable profile.
 
-    The same function `optimize` runs, with step 20 (payload narrowing) off and
-    an empty scalar binding table: no value is folded from an execution, and a
+    The same function `optimize` runs, with an empty scalar binding table: no value is folded from an execution, and a
     plan that would need one is refused.
 
     Args:
@@ -499,7 +492,7 @@ def optimize_portable(
             + String(PORTABLE_PROFILE_V1)
         )
     var deps = ScalarDepTable()
-    var out = _run_pass_order(plan^, config, deps, False)
+    var out = _run_pass_order(plan^, config, deps)
     if deps.has_requests():
         raise Error(
             PORTABLE_REFUSAL_NEEDS_EXECUTION + ": "

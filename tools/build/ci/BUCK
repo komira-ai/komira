@@ -20,6 +20,7 @@ mojo_library(
         "change_map/cells.mojo",
         "change_map/derive.mojo",
         "change_map/graph.mojo",
+        "change_map/held.mojo",
         "change_map/labels.mojo",
         "change_map/plan.mojo",
         "change_map/process.mojo",
@@ -46,6 +47,9 @@ mojo_library(
         "tests/test_derive_naming.mojo",
         # derive_checks: the answer kci reads, BROKEN for any failed query
         "tests/test_derive_answer.mojo",
+        # a hold is never dropped: added, kept, gained, deleted with its
+        # package pass; a metric taken out, the marker deleted alone refused
+        "tests/test_held.mojo",
     ],
     test_data = {
         "tests/test_plan.mojo": {
