@@ -215,7 +215,7 @@ struct ClusterAssignmentStore[
         retry) from a real I/O error (propagate). Cloned from
         group_coordinator._is_precondition_failure."""
         return (
-            msg.find("412") >= 0
+            msg.find("status=412") >= 0
             or msg.find("precondition") >= 0
             or msg.find("If-Match") >= 0
             or msg.find("If-None-Match") >= 0

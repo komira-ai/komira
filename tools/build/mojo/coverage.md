@@ -99,7 +99,8 @@ and does one thing: it sets the attributes `coverage_debug` to
 cov_normalize), `coverage_branch` to
 `komira//tools/build/coverage/branch:cov_branch` (the branch coverage
 scripts and the LLVM pieces), `coverage_gate` to `komira//tools/build/coverage:cov_gate`
-(cov_gate.sh, covcheck and the ratchet) and `coverage_mode` to the policy's
+(cov_gate.sh and covcheck), `coverage_held` to the package's
+`coverage_held` when it has one, and `coverage_mode` to the policy's
 (for a library of the ledger or naming `coverage_tests`: no gate; its
 `<name>_cov_gate` is declared), and a `mojo_test`'s `coverage_debug`; with it
 off, `coverage_tests` is dropped. A buckconfig

@@ -1,0 +1,15 @@
+{
+ "name": "nested_eio_too_few",
+ "defect": "a deliberate mismatch: fewer pulls got EIO than the case names",
+ "run": "nested_frame",
+ "entry": "running_sum",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "levels": 0,
+ "pull_action": {"at": 1, "do": "cancel"},
+ "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}, {"length": 1, "columns": [{"type": "int64", "values": [2]}]}],
+ "expect": {"status": "ERR_CANCELLED", "run_error": "UDF_CANCELLED", "eio_at_least": 2},
+ "runner_fails_with": "pulls got EIO, at least 2 expected"
+}

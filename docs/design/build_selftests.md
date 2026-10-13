@@ -230,7 +230,6 @@ goes with the last row that uses it.
 | 29 td_undeclared | an undeclared fixture is not staged | 3 | `compile_isolation` | stage the whole package as share/ | 4 |
 | 29 td_skip_77 | exit 77 is red | 2 | gate runner unit test | treat 77 as pass | 7 |
 | 29 td_env_bin(_lib) | `BIN=true` cannot replace a red test | 2 | gate runner unit test, BIN set through `--env` and in the process env | runner execs `$BIN` | 7 |
-| 29 runner_cases | cases build, at least 5 ok | 1 | floor inside the action | reuse one TEST_TMPDIR | 2 |
 | 29 td_bad_*, test_deps refusals | 7 analysis refusals | 3 | `analysis_refusals_mojo` | delete the shell-name check in test_runtime.bzl | 3 |
 | 29 td_test_deps_src/consumer | a library and its consumer cannot import test_deps | 3 | `compile_isolation` | add test_deps to the compile path | 4 |
 | 30 opt_level | per-kind `-O` levels, as each compile puts them on its command line | 1 | `mojo_opt_level_check` targets (`mojo/opt_level.bzl`, rows over `MojoOptLevelInfo`): `examples:opt_levels`, `examples/aws_lc:opt_levels`, `examples/s2n_tls:opt_levels`, `tests//functional/opt_level:levels`; red at analysis | mojo_binary default `-O1` | 4 |
@@ -320,8 +319,8 @@ goes with the last row that uses it.
 | 46 finding texts | each red names its own finding (BelowTarget line/branch with the percent, BranchNotMeasured, NotMeasured, UnmeasuredFile, `### Findings (1)`) | 3 | `coverage_gate_reds`: each red's expected text is its finding line. covcheck's `test_cli.mojo` and the e2e `summary.md` golden already cover the rendering; they do not cover which finding a real fixture under kcov yields | count a try arm as taken | 4 |
 | 46 not_test_only | `src/testsuite` is not test-only | 3 | `coverage_analysis` | prefix match without a segment boundary | 5 |
 | 46 census_malformed | exit 1 fails in every mode | 2 | gate step unit test | exit 1 treated like 3 | 7 |
-| 46 floor | a Regression is red in census mode; its conda package red; `covfloor_held` green | 2 + 3 | covcheck ratchet test plus gate unit test; `coverage_gate_reds` (census-mode red with the Regression line) | census mode ignores regressions | 7 |
-| 46 census_doc_edited, floor_lowered, pin_no_reason | census check reds | 2 | census tool (Zig port) unit tests | compare only line counts | 7 |
+| 46 held | a held metric below the target is a Regression, red in census mode; its conda package red; `covnotheld` green | 2 + 3 | covcheck held test plus gate unit test; `coverage_gate_reds` (census-mode red with the Regression line) | census mode ignores regressions | 7 |
+| 46 census_doc_edited, reached_not_held, held_malformed | census check reds | 2 | census tool (Zig port) unit tests | compare only line counts | 7 |
 | 46 mojo_test_conda | the conda waits for a named mojo_test's run | 3 | `coverage_keys` row | drop coverage_tests runs from the join | 5 |
 | 46 mojo_test refusals, test_path, shared_lib_enforce | analysis refusals | 3 | `analysis_refusals_coverage` | delete the no-args check | 3 |
 | 46 codegen, coverage_tests_analysis, no_gate | gate counts under the switch; ledger | 3 | `coverage_analysis` | add a gate to a coverage_tests library | 5 |
@@ -467,7 +466,7 @@ filters them. The one change to `build_targets.sh` is for the graph checks, not 
   scenario target. The `src/` change then lists `build_selftests`. That proof holds at one commit. The
   graph check `selftest_closure` keeps it true: it fails when the closure of
   `//tools/build/selftest/...` holds a `//src/` label (see "Graph checks in the gate").
-- **The cost.** The scenarios run inside the job's budget: `pr / check` gives kci what is left of 115
+- **The cost.** The scenarios run inside the job's budget: `pr / check` gives kci what is left of 325
   minutes, while the scheduled self-test job has 300 today. Each slice reports the wall time its
   scenarios add to a widened check, and slice 3 measures how many inner daemons the runner holds at
   once (see "How a scenario runs").
@@ -879,11 +878,12 @@ When `conda.sh` and `conda_set.sh` go, slice 10 also drops their argument case f
 
 Action scripts that targets run, not the harness:
 - Replaced by their rows' Zig ports: `functional/aws_codegen/aws_codegen.sh` 8,
-  `coverage/link_line.sh` 7, `mem_cap/cases.sh` 7,
-  `test_deadline/cases.sh` 7, `test_data/runner_cases.sh` and `test_command_case.sh` 7.
+  `coverage/link_line.sh` 7, `test_data/test_command_case.sh` 7.
 - Ported: `platform_table/limits_retired.sh` is the Zig tool `tools/build/platforms/limits` (the
   validation `//:limits`, and its `merged` mode in `platform_table/check.sh`).
-- Already replaced: `watchdog/cases.sh`. The compile wrapper's Zig port
+- Already replaced: `mem_cap/cases.sh`, `test_deadline/cases.sh` and `test_data/runner_cases.sh`, by the
+  gate's unit tests on linux and on macOS (`tools/build/run`), when the darwin-arm64 toolchain moved to
+  the gate. `watchdog/cases.sh`. The compile wrapper's Zig port
   (`tools/build/mojo/tools/mojo_compile.zig`) deleted it; `functional/watchdog/cases.zig` runs its
   cases against the stand-in toolchain `functional/watchdog/standin.zig`.
 - Not in this design: `bundle_parity/parity.sh`, `coverage/{check,report,branch_check}.sh` and

@@ -108,6 +108,7 @@ def _spec_refusals(mut rt: UdfRuntime) raises:
             _expect(got, OK, "", "a 63-byte name")
     for n in range(1024, 1026):
         var d = _spec(SHAPE_SCALAR, "fixtures.mjs#double")
+        d.descriptor_raw = True
         for _ in range(n):
             d.descriptor.append(UInt8(7))
         var got = rt.validate(d)
@@ -115,12 +116,12 @@ def _spec_refusals(mut rt: UdfRuntime) raises:
             _expect(got, ERR_DESCRIPTOR, "a descriptor longer than 1024 bytes", "a 1025-byte descriptor")
         else:
             # past the proxy; the worker refuses it for its own reason
-            _expect(got, ERR_DESCRIPTOR, "these bytes are not canonical", "a 1024-byte descriptor")
+            _expect(got, ERR_DESCRIPTOR, "the descriptor is not canonical", "a 1024-byte descriptor")
 
 
 def _load_refusal(mut rt: UdfRuntime) raises:
     var u = rt.load(_spec(SHAPE_SCALAR, "missing.mjs#double"))
-    _expect(u.outcome, ERR_DESCRIPTOR, "no bundle missing.mjs", "load of a missing bundle")
+    _expect(u.outcome, ERR_LOAD, "no bundle missing.mjs", "load of a missing bundle")
 
 
 def _udfs_per_context(mut rt: UdfRuntime) raises:
@@ -260,7 +261,7 @@ def _cancelled_before(mut rt: UdfRuntime) raises:
     _expect(fr.outcome, ERR_CANCELLED, "cancelled before the frame opened", "a frame cancelled before it")
     # an input of two columns for one bound argument
     var w = rt.run_frame(fi.handle, f, [_two_columns()], CallOptions.plain())
-    _expect(w.outcome, ERR_INTERNAL, "the host passed a struct of 2 children", "a frame input of two columns")
+    _expect(w.outcome, ERR_HOST_CONTRACT, "the host passed a struct of 2 children", "a frame input of two columns")
     # The worker, whose frame waited for that input, takes the FRAME_CLOSE
     # that came instead and stays usable (an answer to the abandoned
     # FRAME_OUT would break the framing, and the worker would be killed).
@@ -289,7 +290,7 @@ def _aggregates(mut rt: UdfRuntime) raises:
             var cancelled = rt.agg_update(g.handle, _ints([5]), [Int32(0)], 1, CallOptions(True, False, False))
             _expect(cancelled, ERR_CANCELLED, "cancelled before the batch was sent", "an update cancelled before it")
             var wide = rt.agg_update(g.handle, _two_columns(), [Int32(0)], 1, CallOptions.plain())
-            _expect(wide, ERR_INTERNAL, "the argument struct does not match the bound schema", "an update of two columns")
+            _expect(wide, ERR_HOST_CONTRACT, "the argument struct does not match the bound schema", "an update of two columns")
         var ok = rt.agg_update(g.handle, _ints([5, 6]), [Int32(0), Int32(0)], 1, CallOptions.plain())
         assert_true(ok.is_ok(), "update: " + String(ok))
         var fin = rt.agg_finish(g.handle, 1, ColumnType(TYPE_INT64, True))

@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
-load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
+load("@komira//tools/build/platforms:table.bzl", "row")
 load(":defs.bzl", "mojo_watchdog_cases")
 
 # The stand-in toolchain: the compiler (bin/mojo) and the link driver (zig)
@@ -27,4 +28,38 @@ mojo_watchdog_cases(
     exec_compatible_with = LINUX_X86_64,
     runner = ":runner",
     standin = ":standin",
+)
+
+# The same runner and stand-in built for macOS arm64, against the macOS
+# wrapper (komira//tools/build/mojo:mojo_compile_darwin), on a macOS worker:
+# the session, tether and libproc tree of its watchdog, its exact
+# environment, the host-identity, shared-lib and modular.cfg refusals. Only
+# for `--target-platforms komira//tools/build/platforms:darwin-arm64`; the
+# pull-request check has no macOS leg, so a macOS change carries this
+# target's farm build as its proof.
+zig_exe(
+    name = "standin_darwin",
+    exec_compatible_with = LINUX_X86_64,
+    src = "standin.zig",
+    target = row("darwin-arm64")["zig_triple"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "runner_darwin",
+    exec_compatible_with = LINUX_X86_64,
+    src = "cases.zig",
+    target = row("darwin-arm64")["zig_triple"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+mojo_watchdog_cases(
+    name = "cases_darwin",
+    exec_compatible_with = DARWIN_ARM64,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-watchdog-cases
+    runner = ":runner_darwin",
+    standin = ":standin_darwin",
+    wrapper = "komira//tools/build/mojo:mojo_compile_darwin",
 )

@@ -1,0 +1,14 @@
+{
+ "name": "step_deadline_passed",
+ "defect": "a STEP's passed deadline reported as UDF_DEADLINE_EXCEEDED: the call's shape does not reach the error table (design 4.5: ERR_DEADLINE on a STEP is UDF_STEP_TIMED_OUT)",
+ "run": "frame",
+ "entry": "empty_table",
+ "shape": "STEP",
+ "stability": "VOLATILE",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [],
+ "result_is_table": true,
+ "options": {"deadline_passed": true},
+ "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [0]}]}],
+ "expect": {"status": "ERR_DEADLINE", "run_error": "UDF_STEP_TIMED_OUT"}
+}

@@ -19,6 +19,7 @@
 #                                tail bytes + transition state to
 #                                WAITING_FOR_WRITABLE.
 #   * resume_pending_write     — drain the buffered tail after EPOLLOUT.
+#   (The write helpers the rounds share live in round_write.mojo.)
 #   * count_complete_requests  — minimal CRLFCRLF detector retained for
 #                                test compatibility (kept for L0 unit tests).
 #                                Production code uses parse_request_head.
@@ -37,7 +38,6 @@ from komira_async.reactor.completion_queue import (
 )
 from komira_async.reactor.reactor import Reactor
 from komira_async.reactor.socket_io import (
-    try_io_read,
     try_io_write,
 )
 from komira_async.ops.waker_sink import NoopSink
@@ -75,7 +75,18 @@ from komira_http_server.connection import (
     CONN_STATE_WAITING_FOR_WRITABLE,
     ConnEntry,
     REQ_BUF_BYTES,
+    HEAD_READ_BLOCKED,
     RESP_BUF_CAP,
+    read_after_head_carry,
+)
+from komira_http_server.round_write import (
+    HEAD_KEPT,
+    _park_behind,
+    _park_rest,
+    _take_carry,
+    _write_all_or_buffer,
+    _write_last,
+    carry_or_refuse_head,
 )
 
 
@@ -223,7 +234,7 @@ def accept_one_and_register(
             break
         var new_fd = Int32(Int(ar.value()))
         if new_fd < Int32(0):
-            break
+            break  # cov: unreachable try_accept reports a failed accept as an error, never as a negative fd
         # The table still maps the number the kernel re-handed: sweep it.
         _sweep_stale_mapping(conns, fd_to_idx, new_fd)
         var new_stream = TcpStream(new_fd)
@@ -234,73 +245,6 @@ def accept_one_and_register(
         fd_to_idx[Int(new_fd)] = new_idx
         accepted = accepted + 1
     return accepted
-
-
-# =============================================================================
-# §4 — Write-with-EWOULDBLOCK helper.
-# =============================================================================
-
-
-@always_inline
-def _write_all_or_buffer(
-    mut entry: ConnEntry,
-    src: List[UInt8],
-    mut bytes_sent: Int64,
-) -> Int:
-    """Try to write the bytes from `src` to entry._fd. On EWOULDBLOCK,
-    buffer the tail into entry._pending_buf and transition state.
-
-    Returns:
-      0  — fully written.
-      1  — partial write; pending state set; caller should return True.
-     -1  — hard error; caller should close.
-    """
-    var fd = entry._fd
-    var n = len(src)
-    var sent_off = 0
-    while sent_off < n:
-        # Build a Span over the unsent tail via stdlib slice.
-        # No raw pointer arithmetic in the public-callable surface;
-        # the slice's origin is bound to `src` which is borrowed for
-        # the duration of this call.
-        var full = Span[UInt8](src)
-        var tail_span = full[sent_off:n]
-        var wr = try_io_write(fd, tail_span)
-        if wr.is_would_block():
-            # Kernel send buffer is full. Buffer the FULL remaining tail
-            # into entry._pending_buf (a growable List[UInt8]) — NO CAP.
-            # A response of any size flushes across multiple EPOLLOUT
-            # events via resume_pending_write. (Prior behavior: a fixed
-            # 1KB cap returned -1 here, dropping the connection for any
-            # response whose unsent tail exceeded the socket send buffer
-            # — e.g. a 113KB list_tasks JSON dropped at ~77KB.)
-            var rem = n - sent_off
-            entry._pending_buf.resize(unsafe_uninit_length=rem)
-            var kk = 0
-            while kk < rem:
-                entry._pending_buf[kk] = src[sent_off + kk]
-                kk = kk + 1
-            entry._pending_len = rem
-            entry._pending_off = 0
-            entry._state = CONN_STATE_WAITING_FOR_WRITABLE
-            bytes_sent = bytes_sent + Int64(sent_off)
-            return 1
-        if wr.is_error():
-            return -1
-        var sent_n = Int(wr.value())
-        if sent_n <= 0:
-            return -1
-        sent_off = sent_off + sent_n
-    bytes_sent = bytes_sent + Int64(n)
-    return 0
-
-
-def _park_behind(mut entry: ConnEntry, src: List[UInt8]):
-    """Queue `src` behind the tail `_write_all_or_buffer` just parked (its
-    buffer holds exactly `_pending_len` bytes), so the resume sends both."""
-    for i in range(len(src)):
-        entry._pending_buf.append(src[i])
-    entry._pending_len = entry._pending_len + len(src)
 
 
 # =============================================================================
@@ -326,8 +270,9 @@ def serve_read_round(
          the recv buffer.
          a. Parse error → write static error response (status from the
             ParseError) and close the conn. NO client bytes leak.
-         b. Need-more (partial-headers) → for now we drop the conn (no
-            multi-recv buffering on this path).
+         b. Need-more (the head's end has not arrived) → keep the head's
+            start on the entry and read again; the next read lands after
+            it. A head that fills the receive buffer is answered 431.
          c. Expect: 100-continue → write the interim "HTTP/1.1 100 Continue"
             then continue to the canned 200 response.
          d. Success → write the canned 200 response (real handler
@@ -342,24 +287,26 @@ def serve_read_round(
     On write-side EWOULDBLOCK, buffers the unwritten tail bytes into
     `entry._pending_buf` and transitions state to
     `CONN_STATE_WAITING_FOR_WRITABLE`. The CALLER then issues
-    `reactor.modify(entry.registration(), INTEREST_WRITE)`.
+    `reactor.modify(entry.registration(), INTEREST_WRITE)`. The requests
+    read after the parked one wait in `entry._carry` for the next round;
+    if the parked response is the conn's last, the resume closes it.
     """
-    var fd = entry._fd
     var keep_alive = True
+    # Requests read before a parked write drained (komira-ai/komira#1285).
+    var carried = _take_carry(entry, io_buf)
 
     while keep_alive:
-        var read_span = Span[UInt8](io_buf)
-        var rr = try_io_read(fd, read_span)
-        if rr.is_would_block():
-            break
-        if rr.is_error():
-            keep_alive = False
-            break
-        var got = Int(rr.value())
-        if got <= 0:
-            # Peer closed cleanly (read returned 0).
-            keep_alive = False
-            break
+        var got = carried
+        carried = 0
+        if got == 0:
+            # The read lands after a head kept from earlier reads.
+            got = read_after_head_carry(entry, io_buf)
+            if got == HEAD_READ_BLOCKED:
+                break
+            if got <= 0:
+                # End of stream or a read error.
+                keep_alive = False
+                break
 
         # Parse + dispatch in a loop over the buffer (pipelining).
         var off = 0
@@ -368,91 +315,76 @@ def serve_read_round(
             var outcome = parse_request_head(parse_span, limits)
 
             if outcome.err.is_need_more():
-                # Partial request: This version doesn't yet buffer across recvs.
-                # Drop the conn to keep the design surgical; multi-recv
-                # streaming is not on this path.
-                keep_alive = False
+                # The head's end has not arrived: keep its start and read on.
+                var hk = carry_or_refuse_head(
+                    entry, Span[UInt8](io_buf)[off:got], bytes_sent
+                )
+                if hk == 1:
+                    return True
+                keep_alive = hk == HEAD_KEPT
                 break
 
             if not outcome.err.is_ok():
                 # Hard parse error — emit static response, close.
                 var err_buf = List[UInt8]()
                 build_error_response_bytes(outcome.err.status, err_buf)
-                var w = _write_all_or_buffer(entry, err_buf, bytes_sent)
-                if w == 1:
-                    # Partially buffered; conn alive but pending.
+                if _write_last(entry, err_buf, bytes_sent) == 1:
+                    # Parked; the resume closes the conn once it drains.
                     return True
                 # Any outcome (0 fully written or -1 error) — close after.
                 keep_alive = False
                 break
 
+            # Where the next pipelined request starts, and whether this
+            # response is the conn's last: `Connection: close`, or a body
+            # not all in the buffer (no multi-recv streaming on this path).
+            var advance = outcome.headers_end_off + max(outcome.content_length, 0)
+            var close_after = outcome.connection_close or off + advance > got
+
             # Optionally serve the 100 Continue interim.
-            var interim_parked = False
+            var parked = False
             if outcome.expects_continue:
                 if not enable_expect_continue:
                     # Server config disabled — respond 417 instead.
                     var err_buf = List[UInt8]()
                     build_error_response_bytes(UInt16(417), err_buf)
-                    var ew = _write_all_or_buffer(entry, err_buf, bytes_sent)
-                    if ew == 1:
+                    if _write_last(entry, err_buf, bytes_sent) == 1:
                         return True
                     keep_alive = False
                     break
                 var interim_buf = List[UInt8]()
                 build_100_continue_bytes(interim_buf)
                 var iw = _write_all_or_buffer(entry, interim_buf, bytes_sent)
-                if iw == 1:
-                    interim_parked = True
                 if iw < 0:
                     keep_alive = False
                     break
+                parked = iw == 1
 
-            # Success path: emit the canned response (handler
-            # dispatch is). Convert resp_buf into a List for the
-            # write helper (same shape as the error path).
+            # Success path: emit the canned response.
             var resp_list = List[UInt8]()
             var i = 0
             while i < resp_len:
                 resp_list.append(resp_buf[i])
                 i = i + 1
-            if interim_parked:
+            if parked:
                 # The request is consumed: its response must follow the
                 # parked interim, or it is never sent (komira-ai/komira#947).
                 _park_behind(entry, resp_list)
-                reqs_handled = reqs_handled + Int64(1)
-                return True
-            var rw = _write_all_or_buffer(entry, resp_list, bytes_sent)
-            if rw == 1:
-                # Partially buffered; conn alive but pending. Treat
-                # this request as handled even though some bytes are
-                # still in flight.
-                reqs_handled = reqs_handled + Int64(1)
-                return True
-            if rw < 0:
-                keep_alive = False
-                break
-            reqs_handled = reqs_handled + Int64(1)
-
-            # If the request had a Content-Length, skip past those
-            # bytes too so the next iteration starts at the next
-            # pipelined request (or runs off the end of the buffer).
-            var advance = outcome.headers_end_off
-            if outcome.content_length > 0:
-                advance = advance + outcome.content_length
-                # Don't try to dereference past `got`; on the wire
-                # the body may have been split across recvs.
-                if off + advance > got:
-                    # Body bytes not all present yet — drop (no multi-recv
-                    # streaming on this path).
+            else:
+                var rw = _write_all_or_buffer(entry, resp_list, bytes_sent)
+                if rw < 0:
                     keep_alive = False
                     break
-
-            # If the request asked for Connection: close, drop the conn
-            # after responding.
-            if outcome.connection_close:
+                parked = rw == 1
+            reqs_handled = reqs_handled + Int64(1)
+            if parked:
+                # Conn alive but pending: the requests after this one wait
+                # for the resume, or the resume closes the conn.
+                _park_rest(entry, io_buf, off + advance, got, close_after)
+                return True
+            if close_after:
                 keep_alive = False
                 break
-
             off = off + advance
 
     return keep_alive
@@ -489,21 +421,21 @@ def serve_read_round_chained(
       * True  — conn remains in the table (alive)
       * False — caller should drop the conn
     """
-    var fd = entry._fd
     var keep_alive = True
+    var carried = _take_carry(entry, io_buf)
 
     while keep_alive:
-        var read_span = Span[UInt8](io_buf)
-        var rr = try_io_read(fd, read_span)
-        if rr.is_would_block():
-            break
-        if rr.is_error():
-            keep_alive = False
-            break
-        var got = Int(rr.value())
-        if got <= 0:
-            keep_alive = False
-            break
+        var got = carried
+        carried = 0
+        if got == 0:
+            # The read lands after a head kept from earlier reads.
+            got = read_after_head_carry(entry, io_buf)
+            if got == HEAD_READ_BLOCKED:
+                break
+            if got <= 0:
+                # End of stream or a read error.
+                keep_alive = False
+                break
 
         var off = 0
         while off < got and keep_alive:
@@ -511,36 +443,41 @@ def serve_read_round_chained(
             var outcome = parse_request_head(parse_span, limits)
 
             if outcome.err.is_need_more():
-                keep_alive = False
+                var hk = carry_or_refuse_head(
+                    entry, Span[UInt8](io_buf)[off:got], bytes_sent
+                )
+                if hk == 1:
+                    return True
+                keep_alive = hk == HEAD_KEPT
                 break
 
             if not outcome.err.is_ok():
                 var err_buf = List[UInt8]()
                 build_error_response_bytes(outcome.err.status, err_buf)
-                var w = _write_all_or_buffer(entry, err_buf, bytes_sent)
-                if w == 1:
+                if _write_last(entry, err_buf, bytes_sent) == 1:
                     return True
                 keep_alive = False
                 break
 
-            var interim_parked = False
+            var advance = outcome.headers_end_off + max(outcome.content_length, 0)
+            var close_after = outcome.connection_close or off + advance > got
+
+            var parked = False
             if outcome.expects_continue:
                 if not enable_expect_continue:
                     var err_buf = List[UInt8]()
                     build_error_response_bytes(UInt16(417), err_buf)
-                    var ew = _write_all_or_buffer(entry, err_buf, bytes_sent)
-                    if ew == 1:
+                    if _write_last(entry, err_buf, bytes_sent) == 1:
                         return True
                     keep_alive = False
                     break
                 var interim_buf = List[UInt8]()
                 build_100_continue_bytes(interim_buf)
                 var iw = _write_all_or_buffer(entry, interim_buf, bytes_sent)
-                if iw == 1:
-                    interim_parked = True
                 if iw < 0:
                     keep_alive = False
                     break
+                parked = iw == 1
 
             # chain-integration path:
             # 1. Build an HttpRequest from the parsed outcome.
@@ -564,32 +501,23 @@ def serve_read_round_chained(
 
             var resp_list = List[UInt8]()
             serialize_response(chain_outcome.response, resp_list)
-            if interim_parked:
+            if parked:
                 # As in `serve_read_round`: the response follows the parked
                 # interim (komira-ai/komira#947).
                 _park_behind(entry, resp_list)
-                reqs_handled = reqs_handled + Int64(1)
-                return True
-            var rw = _write_all_or_buffer(entry, resp_list, bytes_sent)
-            if rw == 1:
-                reqs_handled = reqs_handled + Int64(1)
-                return True
-            if rw < 0:
-                keep_alive = False
-                break
-            reqs_handled = reqs_handled + Int64(1)
-
-            var advance = outcome.headers_end_off
-            if outcome.content_length > 0:
-                advance = advance + outcome.content_length
-                if off + advance > got:
+            else:
+                var rw = _write_all_or_buffer(entry, resp_list, bytes_sent)
+                if rw < 0:
                     keep_alive = False
                     break
-
-            if outcome.connection_close:
+                parked = rw == 1
+            reqs_handled = reqs_handled + Int64(1)
+            if parked:
+                _park_rest(entry, io_buf, off + advance, got, close_after)
+                return True
+            if close_after:
                 keep_alive = False
                 break
-
             off = off + advance
 
     return keep_alive
@@ -612,9 +540,9 @@ def _set_fd_nonblock(fd: Int32) raises:
     """
     var rc = external_call["komira_fcntl_set_nonblock", Int32](fd)
     if rc < Int32(0):
-        raise Error(
-            "_set_fd_nonblock(fd=" + String(Int(fd)) + ") returned "
-            + String(Int(rc))
+        raise Error(  # cov: unreachable fcntl(O_NONBLOCK) on a just-accepted socket does not fail
+            "_set_fd_nonblock(fd=" + String(Int(fd)) + ") returned "  # cov: unreachable fcntl(O_NONBLOCK) on a just-accepted socket does not fail
+            + String(Int(rc))  # cov: unreachable fcntl(O_NONBLOCK) on a just-accepted socket does not fail
         )
 
 
@@ -649,7 +577,7 @@ def accept_one_and_register_tls(
             break
         var new_fd = Int32(Int(ar.value()))
         if new_fd < Int32(0):
-            break
+            break  # cov: unreachable try_accept reports a failed accept as an error, never as a negative fd
         # Stale-mapping sweep (same as the plaintext path).
         _sweep_stale_mapping(conns, fd_to_idx, new_fd)
 
@@ -658,11 +586,11 @@ def accept_one_and_register_tls(
         try:
             _set_fd_nonblock(new_fd)
         except e:
-            _ = e
+            _ = e  # cov: unreachable fcntl(O_NONBLOCK) on a just-accepted socket does not fail
             # If we can't set non-blocking, the fd is unusable; close it
             # and skip this accept.
-            _ = external_call["close", Int32](new_fd)
-            continue
+            _ = external_call["close", Int32](new_fd)  # cov: unreachable fcntl(O_NONBLOCK) on a just-accepted socket does not fail
+            continue  # cov: unreachable fcntl(O_NONBLOCK) on a just-accepted socket does not fail
 
         # Construct the TlsStream first. If TlsConnection construction
         # fails (s2n OOM or set_config error), close the fd and skip.
@@ -670,9 +598,9 @@ def accept_one_and_register_tls(
         try:
             tls_stream = TlsStream(tls_config, new_fd)
         except e:
-            _ = e
-            _ = external_call["close", Int32](new_fd)
-            continue
+            _ = e  # cov: unreachable creating a TlsStream fails only when s2n cannot allocate
+            _ = external_call["close", Int32](new_fd)  # cov: unreachable creating a TlsStream fails only when s2n cannot allocate
+            continue  # cov: unreachable creating a TlsStream fails only when s2n cannot allocate
 
         var new_stream = TcpStream(new_fd)
         var new_reg = reactor.register_long_lived(new_fd, INTEREST_READ)
@@ -761,22 +689,23 @@ def serve_read_round_tls(
     var keep_alive = True
 
     while keep_alive:
-        # Reserve buf capacity then call read_app.
+        # Reserve buf capacity then call read_app. The decrypted bytes land
+        # after the head carried from earlier reads.
+        var carried = entry.restore_head_carry(io_buf)
+        var room = REQ_BUF_BYTES - carried
         var rd_buf = List[UInt8]()
-        rd_buf.reserve(REQ_BUF_BYTES)
-        rd_buf.resize(unsafe_uninit_length=REQ_BUF_BYTES)
+        rd_buf.reserve(room)
+        rd_buf.resize(unsafe_uninit_length=room)
         # The recv() helper writes into the List's backing storage and
         # resizes the List to the actual byte count.
-        var read_outcome_and_n = tls_opt.value().read_app(
-            rd_buf, REQ_BUF_BYTES,
-        )
+        var read_outcome_and_n = tls_opt.value().read_app(rd_buf, room)
         var read_outcome = read_outcome_and_n[0]
         var got = read_outcome_and_n[1]
         if read_outcome == TLS_OUTCOME_BLOCKED_ON_READ:
             break
         if read_outcome == TLS_OUTCOME_BLOCKED_ON_WRITE:
-            # Rare TLS-rekey case; treat as need-more-driver-loop.
-            break
+            # Defensive: end the round (s2n_recv does not report this).
+            break  # cov: unreachable s2n_recv never reports BLOCKED_ON_WRITE: it sets *blocked to READ on entry and NOT_BLOCKED on success only
         if read_outcome == TLS_OUTCOME_ERROR:
             keep_alive = False
             break
@@ -788,12 +717,14 @@ def serve_read_round_tls(
         # Copy the decrypted bytes into the io_buf scratch (the parser
         # consumes an InlineArray-backed Span).
         var copy_n = got
-        if copy_n > REQ_BUF_BYTES:
-            copy_n = REQ_BUF_BYTES
+        if copy_n > room:
+            copy_n = room
         var cc = 0
         while cc < copy_n:
-            io_buf[cc] = rd_buf[cc]
+            io_buf[carried + cc] = rd_buf[cc]
             cc = cc + 1
+        copy_n = carried + copy_n
+        entry.clear_head_carry()
 
         # Now run the same parse-then-dispatch loop as the plaintext path.
         var off = 0
@@ -802,6 +733,11 @@ def serve_read_round_tls(
             var outcome = parse_request_head(parse_span, limits)
 
             if outcome.err.is_need_more():
+                if entry.carry_head(Span[UInt8](io_buf)[off:copy_n]):
+                    break
+                var big_buf = List[UInt8]()
+                build_error_response_bytes(UInt16(431), big_buf)
+                _ = _tls_write_all(entry, big_buf, bytes_sent)
                 keep_alive = False
                 break
 
@@ -874,7 +810,7 @@ def _tls_write_all(
     """
     ref tls_opt = entry.tls_stream_ref()
     if not tls_opt:
-        return False
+        return False  # cov: unreachable the caller returned early unless the entry holds a TLS stream
     var n = len(bytes)
     var sent_off = 0
     while sent_off < n:
@@ -886,13 +822,13 @@ def _tls_write_all(
             return False
         if oc == TLS_OUTCOME_BLOCKED_ON_READ:
             # TLS rekey race; bail and let the reactor re-fire.
-            return False
+            return False  # cov: unreachable s2n never blocks a TLS 1.3 write on a read (there is no renegotiation)
         if oc == TLS_OUTCOME_BLOCKED_ON_WRITE:
             # Phase-1 simplification: in the absence of the TLS
             # write-buffering path, treat as failed-this-round.
             return False
         if sent_n <= 0:
-            return False
+            return False  # cov: unreachable s2n reports DONE only after writing at least one byte of a non-empty buffer
         sent_off = sent_off + sent_n
     bytes_sent = bytes_sent + Int64(n)
     return True
@@ -914,8 +850,10 @@ def resume_pending_write(
       * True  — write fully drained; caller should switch interest BACK
                 to INTEREST_READ and entry's state is now CONN_STATE_READING.
       * False — either still backed up (state stays WAITING_FOR_WRITABLE)
-                OR hard error (entry._pending_len == -1 sentinel; caller
-                should close).
+                OR the caller should close (entry._pending_len == -1): a
+                hard error, or the drained bytes were the conn's last
+                response (`entry._keep_alive` False: an error response or
+                `Connection: close`, komira-ai/komira#1285).
     """
     var fd = entry._fd
     # A single EPOLLOUT may only drain PART of a large tail. This loop
@@ -939,8 +877,8 @@ def resume_pending_write(
             return False
         var sent_n = Int(wr.value())
         if sent_n <= 0:
-            entry._pending_len = -1
-            return False
+            entry._pending_len = -1  # cov: unreachable send of a non-empty buffer returns a byte count or an error, never 0
+            return False  # cov: unreachable send of a non-empty buffer returns a byte count or an error, never 0
         entry._pending_off = entry._pending_off + sent_n
         bytes_sent = bytes_sent + Int64(sent_n)
     # Fully drained; reset + free the backing storage so a long-lived
@@ -948,5 +886,8 @@ def resume_pending_write(
     entry._pending_buf.clear()
     entry._pending_off = 0
     entry._pending_len = 0
+    if not entry._keep_alive:
+        entry._pending_len = -1
+        return False
     entry._state = CONN_STATE_READING
     return True

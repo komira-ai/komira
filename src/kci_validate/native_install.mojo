@@ -44,20 +44,29 @@
 #              DF_SYMBOLIC (or a DT_SYMBOLIC tag), what `-Bsymbolic` leaves.
 #
 # Install check 5, the loaded-from row: `loaded_from_findings(trace,
-# env_dir)` reads a glibc loader record (`LD_DEBUG=libs`: one `calling init:
-# <path>` line per object mapped) and refuses every komira object
-# (`libkomira_*`) and every system codec of kci_release_set's
-# `system_libs()` loaded from outside `<env>/lib`, and a record with no
-# `calling init:` line at all (LD_DEBUG not honoured: a vacuous pass).
+# env_dir, codecs)` reads a glibc loader record (`LD_DEBUG=libs`: one
+# `calling init: <path>` line per object mapped) and refuses every komira
+# object (`libkomira_*`) and every codec of `codecs` (the sonames the
+# program's library opens through its closure's metadata.json `dlopen`
+# rows) loaded from outside `<env>/lib`, and a record with no `calling
+# init:` line at all (LD_DEBUG not honoured: a vacuous pass). Both paths
+# are resolved first, as realpath does (`resolved_path`; `lexical_path` for
+# a path that does not exist): the compiler finds the environment's
+# libraries through its DT_RPATH `$ORIGIN/../lib`, so the loader names them
+# `<env>/bin/../lib/<so>`, and `<env>/lib/../../<x>` is not in lib/. A
+# library no package declares is not judged: the Mojo compiler and its JIT
+# load libz and libzstd themselves, from wherever the toolchain finds them.
 # `run_loaded_from` runs a program through the injected `ProcessRunner` with
 # `LD_DEBUG=libs` and `LD_DEBUG_OUTPUT` added to its cleared environment and
 # any `LD_LIBRARY_PATH` entry of the caller's dropped from it, then reads the
 # record it wrote.
 #
-# Not wired: run_install_env does not call these. The design runs the native
-# install checks only in beta's install job (`beta_install`, slice 11 of
-# docs/design/native_packaging.md, which changes the release); the gamma
-# stage's CONDA_INSTALL_ENV runs none.
+# `loader_env` and `loader_record` are run_loaded_from's two halves, for a
+# caller that runs the program itself.
+#
+# Wired (slice 11 of docs/design/native_packaging.md): a CONDA_INSTALL_ENV
+# validation that installs a native library pin (native_rows.mojo) runs
+# these, which is what beta's `beta_validate` job runs.
 #
 # Pure checks over files; the one process is the runner's. Encapsulation:
 # owned values; no pointer, no wildcard origin.
@@ -73,7 +82,6 @@ from kci_build.runner import ProcessRunner, RunSpec
 from kci_release_set.conda_metadata import LIB_DIR, LIB_KIND_LINK, LIB_KIND_SHARED, LIB_KIND_STATIC, LibFile
 from kci_release_set.glibc_floor import glibc_requirement, glibc_requirement_refusals
 from kci_release_set.member import file_sha256_hex
-from kci_release_set.system_libs import system_libs
 
 from .container import join_path
 from .elf_dynamic import read_dynamic
@@ -444,19 +452,51 @@ def check_native_install(env_dir: String, pins: List[InstallPin], mut checks: Li
     return all_ok
 
 
-def loaded_from_findings(trace: String, env_dir: String) -> List[String]:
-    """Install check 5 over a loader record (file header)."""
-    var out = List[String]()
-    var codecs = List[String]()
-    var rows = system_libs()
-    for i in range(len(rows)):
-        codecs.append(rows[i].soname.copy())
-    var lib = join_path(env_dir, String("lib")) + String("/")
-    var lib_real = String("")
+def lexical_path(path: String) -> String:
+    """`path` with every empty and `.` segment dropped and every `..` taking
+    the segment before it away, as the kernel resolves them when no segment
+    is a symbolic link (`/` stays `/`; `..` above the root is the root)."""
+    var segs = List[String]()
+    var parts = path.split(String("/"))
+    for i in range(len(parts)):
+        var seg = String(parts[i])
+        if seg.byte_length() == 0 or seg == String("."):
+            continue
+        if seg == String(".."):
+            if len(segs) > 0:
+                _ = segs.pop()
+            continue
+        segs.append(seg^)
+    var out = String("/") if path.startswith(String("/")) else String("")
+    out += String("/").join(segs)
+    return out^
+
+
+def resolved_path(path: String) -> String:
+    """`path` as realpath gives it (every `..` and symbolic link resolved)
+    when it exists; `lexical_path(path)` when it does not or cannot be
+    resolved."""
     try:
-        lib_real = realpath(join_path(env_dir, String("lib"))) + String("/")
+        if exists(path):
+            return realpath(path)
     except:
-        lib_real = lib.copy()
+        pass
+    return lexical_path(path)
+
+
+def loaded_from_findings(trace: String, env_dir: String, codecs: List[String]) -> List[String]:
+    """Install check 5 over a loader record (file header): every komira
+    object, and every system codec named in `codecs` (the sonames the
+    program's library declares through its closure's `dlopen` rows), must
+    lie under `<env_dir>/lib` once both paths are resolved (`resolved_path`:
+    the loader names an object by the path it searched, `<env>/bin/../lib/`
+    through the compiler's own `$ORIGIN/../lib`). A codec no package declares
+    is the toolchain's (the Mojo compiler loads libz and libzstd itself) and
+    is not judged."""
+    var out = List[String]()
+    var lib = join_path(env_dir, String("lib")) + String("/")
+    var lib_lexical = lexical_path(join_path(env_dir, String("lib"))) + String("/")
+    var lib_real = resolved_path(join_path(env_dir, String("lib"))) + String("/")
     var inits = 0
     var lines = trace.split(String("\n"))
     for i in range(len(lines)):
@@ -469,7 +509,8 @@ def loaded_from_findings(trace: String, env_dir: String) -> List[String]:
         var name = _base(path)
         if not name.startswith(String("libkomira_")) and not _has(codecs, name):
             continue
-        if not path.startswith(lib) and not path.startswith(lib_real):
+        var got = resolved_path(path)
+        if not got.startswith(lib_real) and not got.startswith(lib_lexical):
             out.append(name + String(" was loaded from ") + path + String(", not from ") + lib)
     if inits == 0:
         out.append(String("the loader's record holds no 'calling init:' line: LD_DEBUG=libs was not honoured, so it shows nothing"))
@@ -477,25 +518,39 @@ def loaded_from_findings(trace: String, env_dir: String) -> List[String]:
 
 
 def run_loaded_from[R: ProcessRunner](
-    mut runner: R, var spec: RunSpec, env: List[String], record_prefix: String, env_dir: String
+    mut runner: R, var spec: RunSpec, env: List[String], record_prefix: String, env_dir: String, codecs: List[String]
 ) raises -> List[String]:
     """Run `spec` with `env`, less any `LD_LIBRARY_PATH=` entry (the check
     runs with it unset: a search path would load objects from wherever it
     names), plus `LD_DEBUG=libs` and `LD_DEBUG_OUTPUT=<record_prefix>` (the
     loader writes `<record_prefix>.<pid>`), then the
-    findings of every record it wrote (file header). RAISES when the run
+    findings of every record it wrote, judging the codecs `codecs` (file
+    header). RAISES when the run
     cannot start or fails: a program that did not run says nothing about
     where it loaded from."""
+    spec.set_env(loader_env(env, record_prefix))
+    var r = runner.run(spec)
+    if not r.ok():
+        raise Error(String("the program ") + spec.command_line() + String(" did not pass: ") + r.describe())
+    return loaded_from_findings(loader_record(record_prefix), env_dir, codecs)
+
+
+def loader_env(env: List[String], record_prefix: String) -> List[String]:
+    """`env` less any `LD_LIBRARY_PATH=` entry, plus `LD_DEBUG=libs` and
+    `LD_DEBUG_OUTPUT=<record_prefix>` (run_loaded_from)."""
     var e = List[String]()
     for i in range(len(env)):
         if not env[i].startswith(String("LD_LIBRARY_PATH=")):
             e.append(env[i].copy())
     e.append(String("LD_DEBUG=libs"))
     e.append(String("LD_DEBUG_OUTPUT=") + record_prefix)
-    spec.set_env(e^)
-    var r = runner.run(spec)
-    if not r.ok():
-        raise Error(String("the program ") + spec.command_line() + String(" did not pass: ") + r.describe())
+    return e^
+
+
+def loader_record(record_prefix: String) raises -> String:
+    """Every record the loader wrote at `<record_prefix>.<pid>`, one after
+    the other ("" when it wrote none). RAISES when the directory cannot be
+    read."""
     var slash = record_prefix.rfind(String("/"))
     var dir = String(record_prefix[byte=0:slash]) if slash > 0 else String(".")
     var stem = _base(record_prefix) + String(".")
@@ -504,4 +559,4 @@ def run_loaded_from[R: ProcessRunner](
     for i in range(len(names)):
         if String(names[i]).startswith(stem):
             trace += open(join_path(dir, String(names[i])), "r").read()
-    return loaded_from_findings(trace, env_dir)
+    return trace^
