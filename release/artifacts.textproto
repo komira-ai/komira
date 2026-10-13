@@ -791,15 +791,6 @@ artifacts {
 }
 
 artifacts {
-  name: "komira_arrow"
-  build_system: "buck2"
-  args: "//src/komira_arrow:komira_arrow_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_arrow:komira_arrow_conda"
-}
-
-artifacts {
   name: "komira_dynamic_filter"
   build_system: "buck2"
   args: "//src/komira_dynamic_filter:komira_dynamic_filter_conda[release]"
@@ -836,57 +827,12 @@ artifacts {
 }
 
 artifacts {
-  name: "komira_arrow_ipc"
-  build_system: "buck2"
-  args: "//src/komira_arrow_ipc:komira_arrow_ipc_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_arrow_ipc:komira_arrow_ipc_conda"
-}
-
-artifacts {
-  name: "komira_plan_expr"
-  build_system: "buck2"
-  args: "//src/komira_plan_expr:komira_plan_expr_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_plan_expr:komira_plan_expr_conda"
-}
-
-artifacts {
-  name: "komira_secret_env"
-  build_system: "buck2"
-  args: "//src/komira_secret_env:komira_secret_env_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_secret_env:komira_secret_env_conda"
-}
-
-artifacts {
-  name: "komira_column_kernels"
-  build_system: "buck2"
-  args: "//src/komira_column_kernels:komira_column_kernels_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_column_kernels:komira_column_kernels_conda"
-}
-
-artifacts {
   name: "komira_log"
   build_system: "buck2"
   args: "//src/komira_log:komira_log_conda[release]"
   args: "--out"
   args: "{out_dir}"
   targets: "//src/komira_log:komira_log_conda"
-}
-
-artifacts {
-  name: "komira_plan_stats"
-  build_system: "buck2"
-  args: "//src/komira_plan_stats:komira_plan_stats_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_plan_stats:komira_plan_stats_conda"
 }
 
 artifacts {
@@ -899,219 +845,12 @@ artifacts {
 }
 
 artifacts {
-  name: "komira_scan_source"
-  build_system: "buck2"
-  args: "//src/komira_scan_source:komira_scan_source_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_scan_source:komira_scan_source_conda"
-}
-
-artifacts {
   name: "kci_cloud"
   build_system: "buck2"
   args: "//src/kci_cloud:kci_cloud_conda[release]"
   args: "--out"
   args: "{out_dir}"
   targets: "//src/kci_cloud:kci_cloud_conda"
-}
-
-artifacts {
-  name: "komira_plan_ir"
-  build_system: "buck2"
-  args: "//src/komira_plan_ir:komira_plan_ir_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_plan_ir:komira_plan_ir_conda"
-}
-
-artifacts {
-  name: "kci_composites"
-  build_system: "buck2"
-  args: "//src/kci_composites:kci_composites_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_composites:kci_composites_conda"
-}
-
-artifacts {
-  name: "komira_join_assembly"
-  build_system: "buck2"
-  args: "//src/komira_join_assembly:komira_join_assembly_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_join_assembly:komira_join_assembly_conda"
-}
-
-artifacts {
-  name: "kci_cloud_fake"
-  build_system: "buck2"
-  args: "//src/kci_cloud_fake:kci_cloud_fake_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_cloud_fake:kci_cloud_fake_conda"
-}
-
-artifacts {
-  name: "komira_async"
-  build_system: "buck2"
-  args: "//src/komira_async:komira_async_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_async:komira_async_conda"
-}
-
-artifacts {
-  name: "komira_fs"
-  build_system: "buck2"
-  args: "//src/komira_fs:komira_fs_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_fs:komira_fs_conda"
-}
-
-artifacts {
-  name: "komira_http_core"
-  build_system: "buck2"
-  args: "//src/komira_http_core:komira_http_core_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_http_core:komira_http_core_conda"
-}
-
-artifacts {
-  name: "komira_net"
-  build_system: "buck2"
-  args: "//src/komira_net:komira_net_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_net:komira_net_conda"
-}
-
-artifacts {
-  name: "komira_supervisor"
-  build_system: "buck2"
-  args: "//src/komira_supervisor:komira_supervisor_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_supervisor:komira_supervisor_conda"
-}
-
-artifacts {
-  name: "komira_http_client"
-  build_system: "buck2"
-  args: "//src/komira_http_client:komira_http_client_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_http_client:komira_http_client_conda"
-}
-
-artifacts {
-  name: "komira_objectstore"
-  build_system: "buck2"
-  args: "//src/komira_objectstore:komira_objectstore_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_objectstore:komira_objectstore_conda"
-}
-
-artifacts {
-  name: "kci_pkg_upload"
-  build_system: "buck2"
-  args: "//src/kci_pkg_upload:kci_pkg_upload_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_pkg_upload:kci_pkg_upload_conda"
-}
-
-artifacts {
-  name: "komira_aws_core"
-  build_system: "buck2"
-  args: "//src/komira_aws_core:komira_aws_core_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_aws_core:komira_aws_core_conda"
-}
-
-artifacts {
-  name: "komira_gcp_core"
-  build_system: "buck2"
-  args: "//src/komira_gcp_core:komira_gcp_core_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_gcp_core:komira_gcp_core_conda"
-}
-
-artifacts {
-  name: "komira_oci"
-  build_system: "buck2"
-  args: "//src/komira_oci:komira_oci_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_oci:komira_oci_conda"
-}
-
-artifacts {
-  name: "kci_publish_oci"
-  build_system: "buck2"
-  args: "//src/kci_publish_oci:kci_publish_oci_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_publish_oci:kci_publish_oci_conda"
-}
-
-artifacts {
-  name: "kci_release_set"
-  build_system: "buck2"
-  args: "//src/kci_release_set:kci_release_set_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_release_set:kci_release_set_conda"
-}
-
-artifacts {
-  name: "komira_gcp_cloudresourcemanager"
-  build_system: "buck2"
-  args: "//src/komira_gcp_cloudresourcemanager:komira_gcp_cloudresourcemanager_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_gcp_cloudresourcemanager:komira_gcp_cloudresourcemanager_conda"
-}
-
-artifacts {
-  name: "komira_gcp_iam"
-  build_system: "buck2"
-  args: "//src/komira_gcp_iam:komira_gcp_iam_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_gcp_iam:komira_gcp_iam_conda"
-}
-
-artifacts {
-  name: "komira_gcp_run"
-  build_system: "buck2"
-  args: "//src/komira_gcp_run:komira_gcp_run_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_gcp_run:komira_gcp_run_conda"
-}
-
-artifacts {
-  name: "komira_gcp_wif"
-  build_system: "buck2"
-  args: "//src/komira_gcp_wif:komira_gcp_wif_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_gcp_wif:komira_gcp_wif_conda"
-}
-
-artifacts {
-  name: "kci_cloud_gcp"
-  build_system: "buck2"
-  args: "//src/kci_cloud_gcp:kci_cloud_gcp_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/kci_cloud_gcp:kci_cloud_gcp_conda"
 }
 
 artifacts {
@@ -1259,8 +998,6 @@ artifacts {
   args: "--member-manifest"
   args: "{release_dir}/komira_crypto/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_arrow/manifest.json"
-  args: "--member-manifest"
   args: "{release_dir}/komira_dynamic_filter/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_metrics/manifest.json"
@@ -1269,67 +1006,11 @@ artifacts {
   args: "--member-manifest"
   args: "{release_dir}/kci_secret_writer/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_arrow_ipc/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_plan_expr/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_secret_env/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_column_kernels/manifest.json"
-  args: "--member-manifest"
   args: "{release_dir}/komira_log/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_plan_stats/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/kci_reconciler/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_scan_source/manifest.json"
-  args: "--member-manifest"
   args: "{release_dir}/kci_cloud/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_plan_ir/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_composites/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_join_assembly/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_cloud_fake/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_async/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_fs/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_http_core/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_net/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_supervisor/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_http_client/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_objectstore/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_pkg_upload/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_aws_core/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_gcp_core/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_oci/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_publish_oci/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_release_set/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_gcp_cloudresourcemanager/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_gcp_iam/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_gcp_run/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_gcp_wif/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/kci_cloud_gcp/manifest.json"
   args: "--license"
   args: "Apache-2.0"
   args: "--summary"
