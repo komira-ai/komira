@@ -21,7 +21,7 @@ def _gate_dir_impl(ctx):
 
 _cov_gate_dir = rule(
     impl = _gate_dir_impl,
-    doc = "The directory a mojo_library's coverage gate runs from (tools/build/mojo/coverage.bzl): `cov_gate.sh` (`script`) and `covcheck/` (`covcheck`, a mojo_binary, with its runtime libraries). The script finds covcheck beside itself; the floor a gate reads is its library's package's (`coverage_floor`, tools/build/mojo/coverage.bzl).",
+    doc = "The directory a mojo_library's coverage gate runs from (tools/build/mojo/coverage.bzl): `cov_gate.sh` (`script`) and `covcheck/` (`covcheck`, a mojo_binary, with its runtime libraries). The script finds covcheck beside itself; the hold a gate reads is its library's package's (`coverage_held`, tools/build/mojo/coverage.bzl).",
     attrs = {
         "covcheck": attrs.exec_dep(providers = [MojoRunnableInfo], default = "komira//tools/build/coverage:covcheck_bin"),
         "script": attrs.source(default = "komira//tools/build/coverage:cov_gate.sh"),

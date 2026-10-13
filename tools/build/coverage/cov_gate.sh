@@ -5,7 +5,7 @@
 # policy's mode (tools/build/coverage/policy.bzl). README.md, "The build gate".
 #
 # usage: busybox sh <gate_dir>/cov_gate.sh <busybox> <label> <package> <mode> <target_bp>
-#            <root> <tests> <floor> <result_out> <summary_out> <marker_out>
+#            <root> <tests> <held> <result_out> <summary_out> <marker_out>
 #            [--info-package <package>] [<report>...] [--branch-lcov <branch_info>...]
 #
 #   <gate_dir>   the cov_gate_dir: this script and covcheck/ (the covcheck
@@ -20,8 +20,8 @@
 #   <tests>      a file naming the repository path of each test source the
 #                library welds, one per line: each is covcheck's
 #                --test-source, set aside wherever it is in the package
-#   <floor>      covcheck's --ratchet: the package's coverage_floor.tsv, or
-#                a file with no row when it has none (README.md, "The ratchet")
+#   <held>       covcheck's --held: the package's coverage_held, or a marker
+#                holding nothing (README.md, "The 99% threshold and holds")
 #   --info-package <package>  the library's package is test-only
 #                (COVERAGE_INFO_ONLY_DIRS, policy.bzl): covcheck reports its
 #                findings as information, so it has none and the gate
@@ -41,8 +41,8 @@
 # with no test) the package is NotMeasured.
 #
 # Exit status: 0 when covcheck wrote its outputs and found nothing fatal in
-# the mode (census and neutral fail on no finding but a Regression, a floor
-# not held): <result_out> (JSON) and <summary_out> (Markdown)
+# the mode (census and neutral fail on no finding but a Regression, a held
+# metric below the target): <result_out> (JSON) and <summary_out> (Markdown)
 # are covcheck's, and <marker_out> says PASS.
 # 1 when covcheck exits 3 (a finding in enforce mode, or a Regression in any
 # mode: the summary is printed under `COVERAGE GATE FAILED (<mode>):
@@ -63,7 +63,7 @@ PACKAGE=$3
 MODE=$4
 TARGET=$5
 ROOT=$(abs "$6")
-TESTS=$(abs "$7") FLOOR=$(abs "$8")
+TESTS=$(abs "$7") HELD=$(abs "$8")
 RESULT=$(abs "$9") SUMMARY=$(abs "${10}") MARKER=$(abs "${11}")
 shift 11
 INFO=""
@@ -122,15 +122,15 @@ if [ -n "$INFO" ]; then set -- "$@" --info-package "$INFO"; fi
 
 rc=0
 "$HERE/covcheck/covcheck" gate --package "$PACKAGE" --repo-files "$K/repo_files" --source-root "$ROOT" \
-    --ratchet "$FLOOR" --mode "$MODE" --target-bp "$TARGET" \
+    --held "=$HELD" --mode "$MODE" --target-bp "$TARGET" \
     --result-out "$RESULT" --summary-out "$SUMMARY" "$@" >"$K/out" 2>&1 || rc=$?
 case "$rc" in
     0)
         printf 'PASS %s (%s)\n' "$LABEL" "$MODE" >"$MARKER"
         ;;
     3)
-        # enforce: any finding; every mode: a Regression (the package's
-        # floor not held; README.md, "The ratchet").
+        # enforce: any finding; every mode: a Regression (a held metric
+        # below the target; README.md, "The 99% threshold and holds").
         echo "==================================================================" >&2
         echo "COVERAGE GATE FAILED ($MODE): $PACKAGE ($LABEL): covcheck gate exited 3" >&2
         name=${LABEL%% *}

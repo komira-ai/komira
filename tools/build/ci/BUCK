@@ -19,8 +19,8 @@ mojo_library(
         "change_map/__init__.mojo",
         "change_map/cells.mojo",
         "change_map/derive.mojo",
-        "change_map/floors.mojo",
         "change_map/graph.mojo",
+        "change_map/held.mojo",
         "change_map/labels.mojo",
         "change_map/plan.mojo",
         "change_map/process.mojo",
@@ -29,10 +29,6 @@ mojo_library(
         "change_map/units.mojo",
     ],
     deps = [
-        # covcheck reads a floor file and says what a change lowers
-        # (change_map/floors.mojo); komira_json is its dependency.
-        "//src/komira_json:komira_json",
-        "//tools/build/coverage:covcheck",
         "//tools/build/inspect:buildtools",
     ],
     test_srcs = [
@@ -51,9 +47,9 @@ mojo_library(
         "tests/test_derive_naming.mojo",
         # derive_checks: the answer kci reads, BROKEN for any failed query
         "tests/test_derive_answer.mojo",
-        # floors only rise: raised, equal, new, deleted with its package
-        # pass; lowered, branch dropped, deleted alone, unreadable refused
-        "tests/test_floors.mojo",
+        # a hold is never dropped: added, kept, gained, deleted with its
+        # package pass; a metric taken out, the marker deleted alone refused
+        "tests/test_held.mojo",
     ],
     test_data = {
         "tests/test_plan.mojo": {
@@ -71,8 +67,6 @@ mojo_binary(
     srcs = ["affected.mojo"],
     deps = [
         ":change_map",
-        "//src/komira_json:komira_json",
-        "//tools/build/coverage:covcheck",
         "//tools/build/inspect:buildtools",
     ],
     visibility = ["PUBLIC"],
@@ -87,8 +81,6 @@ mojo_binary(
     srcs = ["derive_checks.mojo"],
     deps = [
         ":change_map",
-        "//src/komira_json:komira_json",
-        "//tools/build/coverage:covcheck",
         "//tools/build/inspect:buildtools",
     ],
     visibility = ["PUBLIC"],

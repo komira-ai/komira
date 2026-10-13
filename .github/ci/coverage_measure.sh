@@ -68,10 +68,9 @@
 #     COVERAGE_INFO_ONLY_DIRS (test-only packages, relative to the root
 #     cell's root, which is the repository's) an `--info-package`, so what
 #     covcheck finds in a package under one is information: no finding, no
-#     failure conclusion, its annotations notices; with the floors of the
-#     measured libraries' packages only, each package's coverage_floor.tsv
-#     at <head> (any other floor would read as a Regression: nothing of it
-#     was measured here). When there is no
+#     failure conclusion, its annotations notices; with the holds of the
+#     measured libraries' packages only, each package's coverage_held at
+#     <head> as `--held <package>=<file>`. When there is no
 #     report (no library touched, none built, none has a test, or the
 #     libraries could not be listed) this script writes the summary and a
 #     neutral check run itself, in covcheck's shape (000.json the POST,
@@ -397,11 +396,8 @@ if [ -s "$PUB/libraries.txt" ]; then
     fi
 fi
 
-# The floors covcheck reads: the row of each measured library's package's
-# coverage_floor.tsv, if it has one (a label's path: komira//src/x:x is src/x).
+# Each measured library's package (a label's path: komira//src/x:x is src/x).
 sed 's|^[A-Za-z0-9_]*//\([^:]*\):.*$|\1|' "$OUT/measured.txt" | sort -u >"$OUT/measured_packages.txt"
-{ echo "# the floors of the measured packages"; while IFS= read -r p; do
-    [ ! -f "$p/coverage_floor.tsv" ] || sed '/^#/d' "$p/coverage_floor.tsv"; done <"$OUT/measured_packages.txt"; } >"$OUT/ratchet.tsv" || die "cannot read the floors"
 
 # The text of a JSON string from stdin: lines joined with \n. The texts
 # written here hold no quote or backslash (checked by json_safe).
@@ -438,12 +434,13 @@ N_RECORDS=$(grep -c . "$OUT/branch_records.txt" || true)
 # 5. The report.
 if [ "$N_REPORTS" -gt 0 ]; then
     set -- report --repo-files "$OUT/repo-files" --diff "$OUT/diff.txt" --head-sha "$HEAD" \
-        --source-root . --ratchet "$OUT/ratchet.tsv" --mode "$MODE" --target-bp "$TARGET" --name "$NAME" \
+        --source-root . --mode "$MODE" --target-bp "$TARGET" --name "$NAME" \
         --max-annotations "$MAXANN" --summary-out "$PUB/summary.md" --checkrun-dir "$PUB/checkrun" \
         --result-out "$PUB/result.json" --annotations-out "$PUB/annotations.json"
     while IFS= read -r x; do set -- "$@" --cobertura "$x"; done <"$OUT/reports.txt"
     while IFS= read -r x; do set -- "$@" --branch-lcov "$x"; done <"$OUT/branch_records.txt"
     for d in $INFO_DIRS; do set -- "$@" --info-package "$d"; done
+    while IFS= read -r p; do [ ! -f "$p/coverage_held" ] || set -- "$@" --held "$p=$p/coverage_held"; done <"$OUT/measured_packages.txt"
     rc=0
     "$COVCHECK" "$@" >"$OUT/logs/covcheck.log" 2>&1 || rc=$?
     cat "$OUT/logs/covcheck.log"
