@@ -65,7 +65,7 @@ def _tr_is_precondition(msg: String) -> Bool:
     return (
         msg.find("precondition") >= 0
         or msg.find("Precondition") >= 0
-        or msg.find("412") >= 0
+        or msg.find("status=412") >= 0
         or msg.find("PreconditionFailed") >= 0
     )
 
