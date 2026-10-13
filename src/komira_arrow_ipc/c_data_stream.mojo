@@ -2623,10 +2623,10 @@ def _format_string_to_arrow_type(fmt: String) raises -> ArrowType:
         or t == ArrowType.UNION_DENSE
     ):
         return t
-    raise Error(
-        "UnsupportedArrowCABIType: Arrow C ABI format string '" + fmt
-        + "' not in the supported drain subset. Extension types are passed"
-        + " through as metadata; Run-End-Encoded (REE) is not supported."
+    raise Error(  # cov: unreachable parse_format_string returns NULL (refused above) or a type of this subset
+        "UnsupportedArrowCABIType: Arrow C ABI format string '" + fmt  # cov: unreachable parse_format_string returns NULL (refused above) or a type of this subset
+        + "' not in the supported drain subset. Extension types are passed"  # cov: unreachable parse_format_string returns NULL (refused above) or a type of this subset
+        + " through as metadata; Run-End-Encoded (REE) is not supported."  # cov: unreachable parse_format_string returns NULL (refused above) or a type of this subset
     )
 
 
