@@ -192,6 +192,11 @@ _TESTS_LINTS = [
         # The package of the superseded one-library plan for komira's C
         # (docs/design/native_packaging.md).
         "komira" + "_native",
+        # A comptime core count is the core count of the build worker that
+        # compiled the package, not of the machine the program runs on
+        # (komira-ai/komira#994). Query std.sys.num_physical_cores() at run
+        # time instead.
+        "NUM" + "_CORES",
     ],
     srcs = [".buckconfig.local.example"] + glob([".github/**"]),
     tree = ":doc_tree",
