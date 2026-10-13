@@ -7,7 +7,9 @@ The kernels take `komira_arrow` typed arrays and return new ones: arithmetic
 (`komira_column_kernels.comparison`, `komira_column_kernels.string_comparison`)
 return a `BooleanArray` mask. A mask turns into row indices with
 `filter_to_indices`, or feeds a masked aggregate such as `filtered_sum`.
-Integer arithmetic is checked: an overflow raises instead of wrapping.
+The element-wise integer kernels (`eval_add`, `eval_sub`, `eval_mul` and their
+`*_scalar` forms) are checked: an overflow raises instead of wrapping.
+`filtered_sum` is not checked; its integer total wraps.
 
 Every example below runs as a test when the package is built, so it cannot
 go stale.
