@@ -21,8 +21,9 @@
 #       2-, 3- and 4-byte character) round-trips through the writer and the
 #       paired resolve unchanged;
 #   (9) a written value that is not UTF-8 is recorded byte for byte, but
-#       as_static_store refuses it naming the ref, never the bytes (the resolve
-#       double holds only Strings).
+#       as_static_store refuses it with a message that is exactly the ref and
+#       the reason: no byte of the value (an ASCII canary leads each fixture)
+#       reaches it (the resolve double holds only Strings).
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
@@ -36,6 +37,7 @@ comptime _A: String = "example/app/smtp-relay"
 comptime _B: String = "example/app/api-key"
 comptime _C: String = "example/app/empty"
 comptime _UNKNOWN: String = "example/app/never-touched"
+comptime _CANARY: String = "LEAKCANARY"
 
 
 def _v(s: String) raises -> SecretValue:
@@ -329,37 +331,56 @@ def test_max_length_utf8_round_trip() raises:
 # =============================================================================
 # (9) a value that is not UTF-8 is recorded, and as_static_store refuses it.
 # =============================================================================
+def _refusal(secret_ref: String) -> String:
+    """The whole refusal message for `secret_ref`: comparing it exactly means no
+    byte of the value can reach the message in any encoding."""
+    return (
+        "as_static_store: the value written for secret_ref '"
+        + secret_ref
+        + "' is not UTF-8; the resolve double holds only Strings"
+    )
+
+
+def _canary_then(tail: UInt8) -> List[UInt8]:
+    """`_CANARY` as ASCII followed by `tail`, so a message that carried the
+    value's bytes would carry the canary."""
+    var out = List[UInt8]()
+    for b in _CANARY.as_bytes():
+        out.append(b)
+    out.append(tail)
+    return out^
+
+
 def test_non_utf8_value_is_recorded_but_not_resolvable() raises:
-    # 0xFF never occurs in UTF-8; 0xC3 alone is a truncated 2-byte sequence.
-    var raw = List[UInt8]()
-    raw.append(UInt8(0x61))
-    raw.append(UInt8(0xFF))
+    # 0xFF never occurs in UTF-8; 0xC3 at the end is a truncated 2-byte sequence.
+    # Each value starts with the ASCII canary so a leak of its bytes is visible.
+    var raw = _canary_then(UInt8(0xFF))
     raw.append(UInt8(0x62))
-    var trunc = List[UInt8]()
-    trunc.append(UInt8(0xC3))
+    var trunc = _canary_then(UInt8(0xC3))
     var w = StaticSecretWriter()
     w.write(_B, _v("fine"), "tok")
     w.write(_A, SecretValue(Span(raw)), "tok")
-    assert_equal(w.written_len(_A), 3, "the bytes are recorded")
+    assert_equal(w.written_len(_A), len(raw), "the bytes are recorded")
     assert_equal(w.version_count(_A), 1, "the write minted a version")
     try:
         _ = w.as_static_store()
         raise Error("as_static_store took a value that is not UTF-8")
     except e:
         var msg = String(e)
-        assert_true(
-            msg.find("example/app/smtp-relay' is not UTF-8") >= 0,
-            "the refusal names the ref: " + msg,
-        )
-        assert_true(msg.find("resolve double holds only Strings") >= 0, msg)
-        assert_true(msg.find("example/app/api-key") < 0, "not the valid ref: " + msg)
+        assert_true(msg.find(_CANARY) < 0, "no value byte in the refusal: " + msg)
+        assert_equal(msg, _refusal(_A), "names the ref and nothing else")
 
     # A truncated sequence alone is refused too; rewriting the value with UTF-8
     # makes the store whole again, with both refs.
     var t = StaticSecretWriter()
     t.write(_C, SecretValue(Span(trunc)), "tok")
-    with assert_raises(contains="example/app/empty' is not UTF-8"):
+    try:
         _ = t.as_static_store()
+        raise Error("as_static_store took a truncated sequence")
+    except e:
+        var msg = String(e)
+        assert_true(msg.find(_CANARY) < 0, "no value byte in the refusal: " + msg)
+        assert_equal(msg, _refusal(_C), "names the ref and nothing else")
     _ = t^
     w.write(_A, _v("fixed"), "tok")
     var store = w.as_static_store()
