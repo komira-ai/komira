@@ -19,6 +19,7 @@
 # Owned String / List[UInt8] values only; no pointer type.
 # =============================================================================
 
+from komira_json import write_i64_dec, write_json_string
 from komira_objectstore.path import Path
 from komira_objectstore.store import ConditionalWriteStore
 
@@ -30,26 +31,8 @@ import komira_log as log
 from komira_log import ArgStr, ArgI64
 
 
-def json_escape(s: String) -> String:
-    """`s` escaped for a JSON string literal: backslash, double quote,
-    newline, carriage return and tab."""
-    var out = String("")
-    var bytes = s.as_bytes()
-    for i in range(len(bytes)):
-        var c = bytes[i]
-        if c == UInt8(0x22):
-            out += String('\\"')
-        elif c == UInt8(0x5C):
-            out += String("\\\\")
-        elif c == UInt8(0x0A):
-            out += String("\\n")
-        elif c == UInt8(0x0D):
-            out += String("\\r")
-        elif c == UInt8(0x09):
-            out += String("\\t")
-        else:
-            out += chr(Int(c))
-    return out^
+def _append_ascii(mut out: List[UInt8], s: StaticString):
+    out.extend(s.as_bytes())
 
 
 def build_crash_report_json(
@@ -59,34 +42,36 @@ def build_crash_report_json(
 ) -> String:
     """The crash-report JSON body: job_name, instance_name, exit_code (iff
     the job exited), signal (iff a signal killed it), stderr_tail (always),
-    panic_message (iff found) and timestamp ("YYYYMMDDTHHMMSSZ", UTC)."""
-    var out = String('{"job_name":"')
-    out += json_escape(job_name)
-    out += String('","instance_name":"')
-    out += json_escape(instance_name)
-    out += String('"')
+    panic_message (iff found) and timestamp ("YYYYMMDDTHHMMSSZ", UTC).
+
+    Every string goes through `komira_json.write_json_string` (RFC 8259
+    section 7): `"` and `\\` are escaped, every byte below 0x20 is written as
+    an escape, and every other byte, each byte of a multi-byte UTF-8
+    character included, is copied unchanged."""
+    var out = List[UInt8]()
+    _append_ascii(out, '{"job_name":')
+    write_json_string(out, job_name)
+    _append_ascii(out, ',"instance_name":')
+    write_json_string(out, instance_name)
     if failure.exit_code:
-        out += String(',"exit_code":')
-        out += String(Int(failure.exit_code.value()))
+        _append_ascii(out, ',"exit_code":')
+        write_i64_dec(out, Int64(failure.exit_code.value()))
     if failure.signal:
-        out += String(',"signal":')
-        out += String(Int(failure.signal.value()))
-    out += String(',"stderr_tail":[')
+        _append_ascii(out, ',"signal":')
+        write_i64_dec(out, Int64(failure.signal.value()))
+    _append_ascii(out, ',"stderr_tail":[')
     for i in range(len(failure.stderr_tail)):
         if i > 0:
-            out += String(",")
-        out += String('"')
-        out += json_escape(failure.stderr_tail[i])
-        out += String('"')
-    out += String("]")
+            _append_ascii(out, ",")
+        write_json_string(out, failure.stderr_tail[i])
+    _append_ascii(out, "]")
     if failure.panic_message:
-        out += String(',"panic_message":"')
-        out += json_escape(failure.panic_message.value())
-        out += String('"')
-    out += String(',"timestamp":"')
-    out += utc_stamp_now()
-    out += String('"}')
-    return out^
+        _append_ascii(out, ',"panic_message":')
+        write_json_string(out, failure.panic_message.value())
+    _append_ascii(out, ',"timestamp":')
+    write_json_string(out, utc_stamp_now())
+    _append_ascii(out, "}")
+    return String(unsafe_from_utf8=Span(out))
 
 
 def _string_to_bytes(s: String) -> List[UInt8]:

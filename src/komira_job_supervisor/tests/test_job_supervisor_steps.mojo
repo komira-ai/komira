@@ -177,8 +177,8 @@ def test_the_final_drain_keeps_the_unterminated_tails() raises:
     assert_equal(len(js.stderr_ring), 2, "stderr: one whole line and the tail")
     assert_equal(js.stderr_ring[0], String("err-1"))
     assert_equal(js.stderr_ring[1], String("err-tail"))
-    assert_equal(js.stdout_partial, String(""))
-    assert_equal(js.stderr_partial, String(""))
+    assert_equal(len(js.stdout_partial), 0)
+    assert_equal(len(js.stderr_partial), 0)
 
     # The pipes closed: a drain of either kind reads nothing and keeps the rings.
     js.supervisor.close()
