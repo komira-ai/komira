@@ -11,15 +11,18 @@
  *             sending batches inline and logging it once, room again
  *             logged once, at most 64 slots held, the ring wrapping past
  *             its 256 entries, ids outside the slot table ignored);
- *   clock     clock reads the worker counts in the control page, each
- *             forwarded to the host's now_ns once;
+ *   clock     clock reads the worker sends as CLOCK messages, each
+ *             forwarded to the host's now_ns once and answered with CLOCK; a
+ *             cancel the host sets inside now_ns written to the control
+ *             page before that answer;
  *   cancel    the host's cancel flag forwarded: the control page's flag set
  *             and CANCEL sent with the call's id, then cleared before the
  *             next call;
  *   heap      replies in the worker-to-engine heap at its edges: the last
  *             16 bytes taken, one byte past refused, an empty payload's
  *             offset not read;
- *   partial   a batch sent inline through a 4 KiB socket buffer to a fake
+ *   partial   a batch over the heap, sent inline through a 4 KiB socket
+ *             buffer to a fake
  *             that reads slowly (every byte arrives in order), and a reply
  *             the fake sends 7 bytes at a time (every byte read);
  *   closed    a worker that closed its end: a write refused, or end of file
@@ -76,7 +79,7 @@ struct fake {
   uint64_t heap_off, heap_len;
   uint32_t push[80];
   int npush;
-  uint32_t bump_clock;
+  int clock_msgs; /* CLOCK messages to send before the reply, each waiting for CLOCK back */
   int wait_cancel;
   int set_cancel_after; /* write this to the cancel flag after replying (0: leave) */
   uint32_t sum_want;
@@ -87,6 +90,9 @@ struct fake {
   int32_t cancel_word_at_cancel;
   struct seen shutdown; /* the SHUTDOWN message, when one came */
   int got_shutdown;
+  int clock_acks;               /* CLOCK messages the engine sent back */
+  int ack_bad;                  /* a message other than CLOCK or CANCEL while waiting */
+  int32_t cancel_word_at_ack;   /* the control page's cancel flag when the last CLOCK came back */
 };
 
 static uint32_t fnv(const uint8_t* p, size_t n, uint32_t h) {
@@ -180,8 +186,18 @@ static void* fake_main(void* p) {
       f->cancel = (struct seen){c.op, c.flags, c.slot, c.request_id, c.payload_offset, c.payload_len, 0};
       f->cancel_word_at_cancel = f->shm ? (int32_t)*fk_ctrl(f, PYW_CTRL_CANCEL) : -1;
     }
-    if (f->shm != NULL && f->bump_clock)
-      __atomic_add_fetch(fk_ctrl(f, PYW_CTRL_CLOCK_READS), f->bump_clock, __ATOMIC_RELEASE);
+    for (int i = 0; i < f->clock_msgs; i++) {
+      fk_send(f, PYW_OP_CLOCK, h.request_id, 0, 0, 0, NULL, 0);
+      komira_udf_wire_header a;
+      for (;;) {
+        if (fk_header(f, &a) != 0) goto done;
+        if (a.op == KOMIRA_UDF_OP_CANCEL) continue;
+        if (a.op != PYW_OP_CLOCK || a.request_id != h.request_id) f->ack_bad++;
+        break;
+      }
+      f->clock_acks++;
+      f->cancel_word_at_ack = (int32_t)*fk_ctrl(f, PYW_CTRL_CANCEL);
+    }
     for (int i = 0; i < f->npush && f->shm != NULL; i++) {
       uint32_t head = *fk_ctrl(f, PYW_CTRL_RING_HEAD);
       *fk_ctrl(f, PYW_CTRL_RING + 4 * (head % PYW_RING_SLOTS)) = f->push[i];
@@ -222,6 +238,7 @@ static void* fake_main(void* p) {
     }
     if (f->shm != NULL && f->set_cancel_after) *fk_ctrl(f, PYW_CTRL_CANCEL) = (uint32_t)f->set_cancel_after;
   }
+done:
   if (f->shm != NULL) munmap(f->shm, PYW_SHM_BYTES);
   f->shm = NULL;
   close(f->fd);
@@ -255,8 +272,10 @@ struct logs {
 };
 
 static int64_t clock_calls;
+static volatile int32_t* cancel_on_read; /* now_ns sets this flag when not NULL */
 static int64_t count_now(void* hd) {
   (void)hd;
+  if (cancel_on_read != NULL) __atomic_store_n(cancel_on_read, 1, __ATOMIC_RELEASE);
   return ++clock_calls;
 }
 static void collect_log(void* hd, int32_t level, const char* m) {
@@ -277,7 +296,7 @@ struct rig {
   int64_t* vals;
 };
 
-static int rig_open(struct rig* r, int use_shm, int sndbuf) {
+static int rig_open(struct rig* r, int sndbuf) {
   memset(r, 0, sizeof(*r));
   int sv[2];
   if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sv) != 0) return -1;
@@ -294,7 +313,7 @@ static int rig_open(struct rig* r, int use_shm, int sndbuf) {
   if (pthread_create(&r->t, NULL, fake_main, &r->f) != 0) return -1;
   char why[300];
   /* pid 0: nothing to signal or wait for at close */
-  return pyw_chan_adopt(&r->c, sv[0], 0, use_shm, why, sizeof(why));
+  return pyw_chan_adopt(&r->c, sv[0], 0, why, sizeof(why));
 }
 
 static void rig_close(struct rig* r) {
@@ -339,7 +358,7 @@ static void want(struct expect* x, int ok, const char* what, long long got) {
 static void slots_case(struct pj* j) {
   struct rig r;
   struct expect x = {0, ""};
-  if (rig_open(&r, 1, 0) != 0) {
+  if (rig_open(&r, 0) != 0) {
     pj_case(j, "slots", -1, "rig", 0);
     return;
   }
@@ -431,7 +450,7 @@ static void slots_case(struct pj* j) {
   /* A batch of exactly the heap's size takes a slot; one over it goes
    * inline. */
   struct expect z = {0, ""};
-  if (rig_open(&r, 1, 0) != 0) return;
+  if (rig_open(&r, 0) != 0) return;
   int64_t fit = 0;
   for (int64_t n = (PYW_HEAP_BYTES - 4096) / 8; n <= PYW_HEAP_BYTES / 8 && !fit; n++)
     if (call_size(&r, n) == PYW_HEAP_BYTES) fit = n;
@@ -453,7 +472,7 @@ static void slots_case(struct pj* j) {
 
   /* The ring wrapping: 300 calls, each slot released with its answer. */
   struct expect y = {0, ""};
-  if (rig_open(&r, 1, 0) != 0) return;
+  if (rig_open(&r, 0) != 0) return;
   for (int i = 0; i < 300; i++) {
     r.f.push[0] = 0, r.f.npush = 1;
     rig_call(&r, 1, NULL, &rep);
@@ -467,13 +486,25 @@ static void slots_case(struct pj* j) {
 static void clock_cancel_cases(struct pj* j) {
   struct rig r;
   struct pyw_reply rep;
-  if (rig_open(&r, 1, 0) != 0) return;
-  r.f.bump_clock = 3;
+  if (rig_open(&r, 0) != 0) return;
+  /* three clock reads during a call: each forwarded to now_ns once and
+   * answered with CLOCK (value: reads + acks * 10 + bad acks * 100) */
+  r.f.clock_msgs = 3;
   clock_calls = 0;
   int rc = rig_call(&r, 4, NULL, &rep);
   pyw_reply_free(&rep);
-  pj_case(j, "clock_shm", rc, "", clock_calls);
-  r.f.bump_clock = 0;
+  pj_case(j, "clock_messages", rc, "", clock_calls + r.f.clock_acks * 10 + r.f.ack_bad * 100);
+  /* the host sets the cancel flag inside now_ns: the flag is in the control
+   * page before CLOCK comes back, so the worker's next check sees it */
+  volatile int32_t on_read = 0;
+  cancel_on_read = &on_read;
+  r.f.clock_msgs = 1;
+  r.f.cancel_word_at_ack = -1;
+  rc = rig_call(&r, 4, &on_read, &rep);
+  pyw_reply_free(&rep);
+  cancel_on_read = NULL;
+  pj_case(j, "clock_cancel_before_ack", rc, "", r.f.cancel_word_at_ack);
+  r.f.clock_msgs = 0;
   /* cancelled from the start: the flag in the control page, then CANCEL */
   volatile int32_t flag = 1;
   r.f.wait_cancel = 1;
@@ -506,7 +537,7 @@ static void heap_cases(struct pj* j) {
   };
   for (int i = 0; i < 6; i++) {
     struct rig r;
-    if (rig_open(&r, 1, 0) != 0) return;
+    if (rig_open(&r, 0) != 0) return;
     r.f.reply = R_HEAP;
     r.f.heap_off = k[i].off;
     r.f.heap_len = k[i].len;
@@ -563,9 +594,9 @@ static void tick_stop(struct ticker* k) {
 static void partial_cases(struct pj* j) {
   struct rig r;
   struct pyw_reply rep;
-  if (rig_open(&r, 0, 4096) != 0) return;
+  if (rig_open(&r, 4096) != 0) return;
   /* the message the engine writes: head, then the batch */
-  const int64_t n = 100000;
+  const int64_t n = PYW_HEAP_BYTES / 8 + 1024; /* over the heap: the batch goes inline */
   const void* bufs[2] = {NULL, r.vals};
   struct ArrowArray col = {n, 0, 0, 2, 0, bufs, NULL, NULL, NULL, NULL};
   const struct ArrowArray* cols[1] = {&col};
@@ -603,7 +634,7 @@ static void closed_cases(struct pj* j) {
   struct rig r;
   struct pyw_reply rep;
   /* the fake closes its end when the first request comes (no reply) */
-  if (rig_open(&r, 0, 0) != 0) return;
+  if (rig_open(&r, 0) != 0) return;
   r.f.reply = R_CLOSE;
   int rc = pyw_chan_request(&r.c, KOMIRA_UDF_OP_DESCRIBE, NULL, NULL, 0, &rep);
   pj_case(j, "eof_before_reply", rc, r.c.why, r.c.dead);
@@ -611,7 +642,7 @@ static void closed_cases(struct pj* j) {
   rc = pyw_chan_request(&r.c, KOMIRA_UDF_OP_DESCRIBE, NULL, NULL, 0, &rep);
   pj_case(j, "dead_channel", rc, r.c.why, r.c.dead);
   rig_close(&r);
-  if (rig_open(&r, 0, 0) != 0) return;
+  if (rig_open(&r, 0) != 0) return;
   r.f.reply = R_CLOSE;
   (void)pyw_chan_request(&r.c, KOMIRA_UDF_OP_DESCRIBE, NULL, NULL, 0, &rep); /* fake gone */
   r.c.dead = 0; /* as if the engine had not seen it: the next write fails */
@@ -622,7 +653,7 @@ static void closed_cases(struct pj* j) {
   rig_close(&r);
   /* a reply without the magic from a worker that stays: the channel is
    * dead, and the next request is refused without being sent */
-  if (rig_open(&r, 0, 0) != 0) return;
+  if (rig_open(&r, 0) != 0) return;
   r.f.reply = R_BADMAGIC;
   int rc1 = pyw_chan_request(&r.c, KOMIRA_UDF_OP_DESCRIBE, NULL, NULL, 0, &rep);
   rc = pyw_chan_request(&r.c, KOMIRA_UDF_OP_DESCRIBE, NULL, NULL, 0, &rep);
@@ -630,23 +661,15 @@ static void closed_cases(struct pj* j) {
   pj_case(j, "dead_not_sent", rc1 * 10 + rc, r.c.why, r.f.nseen);
   rig_close(&r);
   /* a reply of exactly 2 GiB is taken (then the worker is gone) */
-  if (rig_open(&r, 0, 0) != 0) return;
+  if (rig_open(&r, 0) != 0) return;
   r.f.reply = R_HUGE_EOF;
   rc = pyw_chan_request(&r.c, KOMIRA_UDF_OP_DESCRIBE, NULL, NULL, 0, &rep);
   pj_case(j, "reply_exactly_2gib", rc, r.c.why, 0);
   rig_close(&r);
-  /* a reply in the heap on the pipe transport (no heap) */
-  if (rig_open(&r, 0, 0) != 0) return;
-  r.f.reply = R_HEAP;
-  r.f.heap_off = 0;
-  r.f.heap_len = 16;
-  rc = pyw_chan_request(&r.c, KOMIRA_UDF_OP_DESCRIBE, NULL, NULL, 0, &rep);
-  pj_case(j, "heap_reply_no_shm", rc, r.c.why, 0);
-  rig_close(&r);
   /* close: SHUTDOWN with no payload; every descriptor and the mapping
    * released */
   int fds0 = count_fds(), maps0 = count_maps("komira-udf-worker");
-  if (rig_open(&r, 1, 0) != 0) return;
+  if (rig_open(&r, 0) != 0) return;
   rig_call(&r, 4, NULL, &rep);
   pyw_reply_free(&rep);
   rig_close(&r);
@@ -722,7 +745,7 @@ static void reap_case(struct pj* j, const char* name, int exit_ms) {
   pthread_create(&t, NULL, reap, &rp);
   struct pyw_chan c;
   char why[300];
-  int rc = pyw_chan_adopt(&c, sv[0], pid, 0, why, sizeof(why)); /* not ours: a zygote's, as it were */
+  int rc = pyw_chan_adopt(&c, sv[0], pid, why, sizeof(why)); /* not ours: a zygote's, as it were */
   int64_t t0 = now_ms();
   pyw_chan_close(&c);
   int64_t ms = now_ms() - t0;

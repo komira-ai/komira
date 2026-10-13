@@ -25,10 +25,11 @@
 #     VALUE taken (any of these checks deleted, or a bound moved by one);
 #   - a batch the worker cannot read, and one column for two arguments:
 #     refused as the engine's batch;
-#   - HELLO announcing shared memory without its file refused; a payload
-#     not inline on a channel without the shared region, and payloads past
-#     the heap's end, refused, while one ending exactly at the end is read
-#     (a bound moved by one); a header without the magic ends the worker with exit 1; end
+#   - HELLO announcing shared memory without its file refused, and HELLO
+#     without the shared region refused (every worker has one); payloads
+#     past the heap's end refused, while one ending exactly at the end is
+#     read (a bound moved by one); a header without the magic ends the
+#     worker with exit 1; end
 #     of file before and after HELLO ends it with exit 0, and so does
 #     SHUTDOWN within a second with the socket still open; a worker started
 #     with a role it does not know exits 1 before HELLO, and the engine
@@ -109,14 +110,14 @@ def main() raises:
 
     r = probe_worker("frame", ".")
     got(r, "hello_shm_no_file", Int(ERR_INTERNAL), "HELLO: shared memory without its file")
-    got(r, "pipe_payload_in_heap", Int(ERR_INTERNAL), "a payload outside the engine-to-worker heap")
+    got(r, "hello_no_region", Int(ERR_INTERNAL), "HELLO: no shared region")
     got(r, "shm_hello", 0, "")
     got(r, "heap_end_exact", Int(ERR_INTERNAL), "call_batch: no instance 0")
     for k in ["heap_one_past", "heap_far_past"]:
         got(r, k, Int(ERR_INTERNAL), "a payload outside the engine-to-worker heap")
     assert_equal(num(r.get("bad_magic"), "status"), -1, "a header without the magic was answered")
     assert_equal(num(r.get("bad_magic"), "value"), 1, "a header without the magic: exit 1")
-    for k in ["pipe_exit", "shm_exit", "eof_before_hello", "eof_after_hello"]:
+    for k in ["no_region_exit", "shm_exit", "eof_before_hello", "eof_after_hello"]:
         got(r, k, 0, "")
     var sb = r.get("spawn_bad_role")
     assert_equal(num(sb, "status"), -1, text(sb, "message"))

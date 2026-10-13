@@ -27,12 +27,11 @@
  *          socket's worker end arrives with it (SCM_RIGHTS). OK carries the
  *          child's pid, the zygote's thread count at the fork and any
  *          warning os.fork raised.
- *   CLOCK  worker to engine, on a channel without the shared region: the
- *          worker read the clock; the engine calls the host's now_ns for
- *          it (with shared memory the worker counts its reads in the
- *          control page). No build of this runtime runs without the
- *          region; the probes that drive a worker, or a fake one, message
- *          by message do (probe_worker.c, probe_boundary.c, probe_fake.c). */
+ *   CLOCK  worker to engine during a call: the worker read the clock. The
+ *          engine calls the host's now_ns for it, writes the cancel flag
+ *          into the control page if the host set it, and sends CLOCK back
+ *          with the call's id; the worker waits for that. The message wakes
+ *          the engine's poll at once, so a read costs one round trip. */
 #define PYW_OP_FORK 64u
 #define PYW_OP_CLOCK 65u
 
@@ -44,8 +43,6 @@
 
 /* Words of the control page (byte offsets). */
 #define PYW_CTRL_MAGIC 0u        /* u32, "PYWK" */
-#define PYW_CTRL_CLOCK_READS 16u /* u32: the worker's clock reads */
-#define PYW_CTRL_CLOCK_ACK 24u   /* u32: the reads forwarded to the host, cancel checked */
 #define PYW_CTRL_CANCEL 32u      /* i32: the running call's cancel flag */
 #define PYW_CTRL_RING_HEAD 64u   /* u32, written by the worker */
 #define PYW_CTRL_RING_TAIL 128u  /* u32, written by the engine */
@@ -132,14 +129,13 @@ struct pyw_chan {
   int fd;        /* the control socket, engine end; -1 once closed */
   pid_t pid;     /* the worker's */
   int our_child; /* the engine spawned it: its exit status is ours to reap */
-  uint8_t* shm;  /* the shared region, NULL when HELLO sent none */
+  uint8_t* shm;  /* the shared region (NULL only until HELLO maps it) */
   int memfd;
   uint64_t next_id;
   int dead; /* end of file, a protocol fault or a kill: no request is sent again */
   char why[256];
   struct pyw_slot slots[PYW_MAX_SLOTS];
   int heap_full; /* the last batch went inline because no slot fit */
-  uint32_t clock_seen;
   int64_t slot_sends, inline_sends, heap_full_events;
   /* CALL_BATCH time, summed: in pyw_chan_call, from its request sent to its
    * reply read, and in the worker (its reply's `slot` field: ns from reading
@@ -165,16 +161,17 @@ struct pyw_launch {
 };
 
 /* Starts a worker with posix_spawn and says HELLO; 0, or -1 with `why`.
- * HELLO sends the wire version and the ABI major and minor, and the worker
+ * HELLO sends the wire version, the ABI major and minor and the shared
+ * region's memfd (every worker has one), and the worker
  * answers with its own; a difference either side sees is refused. */
-int pyw_chan_spawn(struct pyw_chan* c, const struct pyw_launch* l, int use_shm, char* why, size_t n);
+int pyw_chan_spawn(struct pyw_chan* c, const struct pyw_launch* l, char* why, size_t n);
 
 /* Starts a worker with posix_spawn and says nothing: the caller sends its
  * HELLO (pyw_chan_spawn is this, then HELLO). 0, or -1 with `why`. */
 int pyw_chan_start(struct pyw_chan* c, const struct pyw_launch* l, char* why, size_t n);
 
 /* Adopts a worker the zygote forked on `fd` (the engine end) and says HELLO. */
-int pyw_chan_adopt(struct pyw_chan* c, int fd, pid_t pid, int use_shm, char* why, size_t n);
+int pyw_chan_adopt(struct pyw_chan* c, int fd, pid_t pid, char* why, size_t n);
 
 /* One request with a control body sent inline, `fds` passed with it, and its
  * reply. Returns 0, or -1 with c->why set (the worker is gone or broke the

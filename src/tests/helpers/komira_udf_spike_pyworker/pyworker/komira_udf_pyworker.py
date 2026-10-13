@@ -25,9 +25,9 @@ interpreter, one GIL.
   --codec pyarrow Arrow IPC read and written by pyarrow
 
 The control socket is fd 3. HELLO brings the shared region (a memfd, with
-SCM_RIGHTS); a HELLO without it (every payload inline, the clock read by a
-CLOCK message, cancel by SIGUSR1) is served too, though the runtime library
-always sends the region. User code runs through the adapter
+SCM_RIGHTS); a HELLO without it is refused. During a call the worker reads
+the host's clock with a CLOCK message and its answer, and reads the cancel
+flag from the control page. User code runs through the adapter
 (komira_udf_pyrt.Instance): the type-hint rules and the per-row and numpy
 readers.
 """
@@ -63,10 +63,7 @@ MAX_ARGS = 64  # the most arguments a UDF of this runtime takes
 
 # The control page (pyw.h).
 CTRL_BYTES = 4096
-W_CLOCK, W_CLOCK_ACK, W_CANCEL, W_HEAD = 16 // 4, 24 // 4, 32 // 4, 64 // 4
-# How long a clock read waits for the engine's acknowledgement (the engine
-# answers within its 1 ms poll while a call runs).
-CLOCK_ACK_WAIT_NS = 1_000_000_000
+W_HEAD = 64 // 4  # the cancel flag is bytes 32..36, read as cancel_view
 W_RING, RING_SLOTS = 256 // 4, 256
 
 CAPS = ("komira-test/python-worker", "cp313",
@@ -158,7 +155,6 @@ class Worker:
         self.ids = 0
         self.udfs, self.contexts, self.instances = {}, {}, {}
         self.req = 0
-        self.local_cancel = memoryview(bytearray(4))
         import kudf_ipc
         import komira_udf_pyrt
 
@@ -217,43 +213,24 @@ class Worker:
     # ---- the shared region -----------------------------------------------------
 
     def free_slot(self, slot):
-        if self.ctrl is None:
-            return
         head = self.ctrl[W_HEAD]
         self.ctrl[W_RING + head % RING_SLOTS] = slot
         self.ctrl[W_HEAD] = (head + 1) & 0xFFFFFFFF
 
-    def now_shm(self):
-        """A clock read the engine forwards to the host's now_ns: counted in
-        the control page, then waited for. A host may set the cancel flag
-        inside now_ns; the engine writes the flag before it acknowledges, so
-        the next check sees it, as in-process."""
-        n = (self.ctrl[W_CLOCK] + 1) & 0xFFFFFFFF
-        self.ctrl[W_CLOCK] = n
-        give_up = time.monotonic_ns() + CLOCK_ACK_WAIT_NS
-        while self.ctrl[W_CLOCK_ACK] != n and time.monotonic_ns() < give_up:
-            time.sleep(0.00005)
-        return time.monotonic_ns()
-
-    def now_pipe(self):
-        """The pipe transport's clock read: CLOCK to the engine, then its
-        CLOCK back. A CANCEL before it (the host set the flag inside now_ns)
-        sets the local flag; SIGUSR1 has set it too."""
+    def now(self):
+        """A clock read the engine forwards to the host's now_ns: CLOCK to the
+        engine, then its CLOCK back (one round trip on the socket; the
+        message wakes the engine at once). A host may set the cancel flag
+        inside now_ns; the engine writes it into the control page before it
+        answers, so the next check sees it, as in-process. A CANCEL that
+        comes first is for the record only."""
         self.sock.sendall(HEADER.pack(MAGIC, OP["CLOCK"], self.req, 0, 0, 0, 0))
         while True:
             h = HEADER.unpack(bytes(self.recv_exact(HEADER.size)))
             if h[0] != MAGIC:
                 os._exit(1)  # the engine never sends this: the channel is broken
-            if h[1] == OP["CANCEL"]:
-                self.local_cancel.cast("i")[0] = 1
-                continue
             if h[1] == OP["CLOCK"]:
                 return time.monotonic_ns()
-
-    def on_cancel_signal(self, signum, frame):
-        """The pipe transport's cancel: the engine sends SIGUSR1 while a call
-        runs (the CANCEL message waits on the socket until the call ends)."""
-        self.local_cancel.cast("i")[0] = 1
 
     # ---- requests ----------------------------------------------------------------
 
@@ -267,25 +244,21 @@ class Worker:
                 "HELLO: the engine speaks wire {} ABI {}.{}, this worker wire {} ABI {}.{}; any difference is "
                 "refused".format(version, major, minor, WIRE_VERSION, ABI_MAJOR, ABI_MINOR),
             )
+        if not flags & 1:
+            raise Refused(ERR_INTERNAL, "HELLO: no shared region (every worker of this runtime has one)")
+        if not fds:
+            raise Refused(ERR_INTERNAL, "HELLO: shared memory without its file")
         if self.mm is not None:
             self.mm.close()
             self.mm = self.ctrl = None
-        if flags & 1:
-            if not fds:
-                raise Refused(ERR_INTERNAL, "HELLO: shared memory without its file")
-            self.mm = mmap.mmap(fds[0], shm_bytes)
-            os.close(fds[0])
-            self.heap = heap_bytes
-            mv = memoryview(self.mm)
-            self.ctrl = mv[:CTRL_BYTES].cast("I")
-            self.e2w = mv[CTRL_BYTES : CTRL_BYTES + heap_bytes]
-            self.w2e = mv[CTRL_BYTES + heap_bytes : CTRL_BYTES + 2 * heap_bytes]
-            self.cancel_view = mv[32:36]
-            self.now = self.now_shm
-        else:
-            self.cancel_view = self.local_cancel
-            self.now = self.now_pipe
-            signal.signal(signal.SIGUSR1, self.on_cancel_signal)
+        self.mm = mmap.mmap(fds[0], shm_bytes)
+        os.close(fds[0])
+        self.heap = heap_bytes
+        mv = memoryview(self.mm)
+        self.ctrl = mv[:CTRL_BYTES].cast("I")
+        self.e2w = mv[CTRL_BYTES : CTRL_BYTES + heap_bytes]
+        self.w2e = mv[CTRL_BYTES + heap_bytes : CTRL_BYTES + 2 * heap_bytes]
+        self.cancel_view = mv[32:36]
         return struct.pack("<IIIi", WIRE_VERSION, ABI_MAJOR, ABI_MINOR, os.getpid())
 
     def describe(self):
@@ -496,7 +469,7 @@ class Worker:
         rw = WIDTH[rfmt]
         _, voff, body = w.layout(n, rw)
         size = w.head + body
-        in_heap = self.mm is not None and self.pa is None and size <= self.heap
+        in_heap = self.pa is None and size <= self.heap
         out = outv = None
         if scalar:
             if in_heap:
@@ -506,8 +479,6 @@ class Worker:
             dst[w.head : w.head + voff] = b"\xff" * voff
             outv = memoryview(dst)[w.head : w.head + (n + 7) // 8]
             out = memoryview(dst)[w.head + voff : w.head + voff + rw * n]
-        if self.ctrl is None:
-            self.local_cancel.cast("i")[0] = 0  # the engine clears the shared one before each call
         r = inst.call(n, cols, out, outv, self.cancel_view, self.now, deadline)
         if out is not None:
             out.release()
@@ -521,7 +492,7 @@ class Worker:
             n = m
             _, voff, body = w.layout(n, rw)
             size = w.head + body
-            in_heap = self.mm is not None and self.pa is None and size <= self.heap
+            in_heap = self.pa is None and size <= self.heap
             dst = self.w2e if in_heap else bytearray(size)
             raw = memoryview(data).cast("B")
             if len(raw) != rw * n:
@@ -547,7 +518,7 @@ class Worker:
         values = pa.py_buffer(bytes(dst[w.head + voff : w.head + voff + WIDTH[rfmt] * n]))
         arr = pa.Array.from_buffers(typ, n, [valid, values], null_count=nulls)
         msg = pa.RecordBatch.from_arrays([arr], names=["result"]).serialize()
-        if self.mm is not None and msg.size <= self.heap:
+        if msg.size <= self.heap:
             self.w2e[: msg.size] = memoryview(msg).cast("B")
             return msg.size
         return msg.to_pybytes()

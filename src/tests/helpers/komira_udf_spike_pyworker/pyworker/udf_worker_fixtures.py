@@ -4,7 +4,6 @@ call deaf to cancel), and two arguments read at their own offsets. Plain
 functions; their type hints are their only declaration."""
 
 import os
-import signal
 import time
 
 
@@ -34,10 +33,8 @@ def pair(x: int | None, y: int | None) -> int | None:
 
 
 def sleep_deaf(seconds: int) -> int:
-    """Sleeps `seconds` without reading the cancel flag or the clock, with
-    SIGUSR1 (the pipe transport's cancel) blocked: a call only a kill ends
-    early."""
-    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1})
+    """Sleeps `seconds` without reading the cancel flag or the clock: a call
+    only a kill ends early."""
     time.sleep(seconds)
     return seconds
 

@@ -7,8 +7,11 @@
  *     payload flagged KOMIRA_UDF_WIRE_INLINE follows it on the socket.
  *   - The shared region: one anonymous memory file per worker (memfd),
  *     passed with HELLO (SCM_RIGHTS): a control page, the engine-to-worker
- *     heap and the worker-to-engine heap (pyw.h). Without it (the pipe
- *     transport) every payload is inline.
+ *     heap and the worker-to-engine heap (pyw.h). Every worker has one.
+ *
+ * Clock reads during a call: the worker sends CLOCK and waits for CLOCK
+ * back; the engine forwards the read to the host's now_ns and writes the
+ * cancel flag first if the host set it (pyw.h, PYW_OP_CLOCK).
  *
  * Engine to worker: a batch is serialized straight into a slot of the
  * engine-to-worker heap (the one copy, section 5.2), and the worker decodes
@@ -185,7 +188,7 @@ static int read_message(struct pyw_chan* c, komira_udf_wire_header* h, struct py
     }
     return 0;
   }
-  if (c->shm == NULL || h->payload_offset > PYW_HEAP_BYTES || h->payload_len > PYW_HEAP_BYTES - h->payload_offset) {
+  if (h->payload_offset > PYW_HEAP_BYTES || h->payload_len > PYW_HEAP_BYTES - h->payload_offset) {
     pyw_reply_free(rep);
     die(c, "UDF_RUNTIME_FAULT: a reply payload outside the worker-to-engine heap");
     return -1;
@@ -277,32 +280,29 @@ static int slot_alloc(struct pyw_chan* c, size_t need, uint32_t* off) {
 
 /* ---- starting a worker --------------------------------------------------- */
 
-static int hello(struct pyw_chan* c, int use_shm, char* why, size_t n) {
-  c->memfd = -1;
+static int hello(struct pyw_chan* c, char* why, size_t n) {
+  c->memfd = memfd_create("komira-udf-worker", MFD_CLOEXEC);
   c->shm = NULL;
-  if (use_shm) {
-    c->memfd = memfd_create("komira-udf-worker", MFD_CLOEXEC);
-    if (c->memfd < 0 || ftruncate(c->memfd, PYW_SHM_BYTES) != 0) {
-      snprintf(why, n, "memfd for the shared region: %s", strerror(errno));
-      return -1;
-    }
-    void* m = mmap(NULL, PYW_SHM_BYTES, PROT_READ | PROT_WRITE, MAP_SHARED, c->memfd, 0);
-    if (m == MAP_FAILED) {
-      snprintf(why, n, "mapping the shared region: %s", strerror(errno));
-      return -1;
-    }
-    c->shm = m;
-    *ctrl_u32(c, PYW_CTRL_MAGIC) = PYW_SHM_MAGIC;
+  if (c->memfd < 0 || ftruncate(c->memfd, PYW_SHM_BYTES) != 0) {
+    snprintf(why, n, "memfd for the shared region: %s", strerror(errno));
+    return -1;
   }
+  void* m = mmap(NULL, PYW_SHM_BYTES, PROT_READ | PROT_WRITE, MAP_SHARED, c->memfd, 0);
+  if (m == MAP_FAILED) {
+    snprintf(why, n, "mapping the shared region: %s", strerror(errno));
+    return -1;
+  }
+  c->shm = m;
+  *ctrl_u32(c, PYW_CTRL_MAGIC) = PYW_SHM_MAGIC;
   struct pyw_buf b = {0};
   pyw_buf_u32(&b, KOMIRA_UDF_WIRE_VERSION);
   pyw_buf_u32(&b, KOMIRA_UDF_ABI_MAJOR);
   pyw_buf_u32(&b, KOMIRA_UDF_ABI_MINOR);
-  pyw_buf_u32(&b, use_shm ? 1u : 0u);
+  pyw_buf_u32(&b, 1u); /* the shared region comes with this HELLO */
   pyw_buf_u64(&b, PYW_SHM_BYTES);
   pyw_buf_u64(&b, PYW_HEAP_BYTES);
   struct pyw_reply r;
-  int rc = pyw_chan_request(c, KOMIRA_UDF_OP_HELLO, &b, use_shm ? &c->memfd : NULL, use_shm ? 1 : 0, &r);
+  int rc = pyw_chan_request(c, KOMIRA_UDF_OP_HELLO, &b, &c->memfd, 1, &r);
   pyw_buf_free(&b);
   if (rc != 0) {
     snprintf(why, n, "HELLO: %s", c->why);
@@ -378,17 +378,17 @@ int pyw_chan_start(struct pyw_chan* c, const struct pyw_launch* l, char* why, si
   return 0;
 }
 
-int pyw_chan_spawn(struct pyw_chan* c, const struct pyw_launch* l, int use_shm, char* why, size_t n) {
+int pyw_chan_spawn(struct pyw_chan* c, const struct pyw_launch* l, char* why, size_t n) {
   if (pyw_chan_start(c, l, why, n) != 0) return -1;
-  return hello(c, use_shm, why, n);
+  return hello(c, why, n);
 }
 
-int pyw_chan_adopt(struct pyw_chan* c, int fd, pid_t pid, int use_shm, char* why, size_t n) {
+int pyw_chan_adopt(struct pyw_chan* c, int fd, pid_t pid, char* why, size_t n) {
   chan_init(c);
   c->fd = fd;
   c->pid = pid;
   c->our_child = 0;
-  return hello(c, use_shm, why, n);
+  return hello(c, why, n);
 }
 
 /* ---- a call -------------------------------------------------------------- */
@@ -397,16 +397,13 @@ static int call_once(struct pyw_chan* c, const uint8_t* head, size_t head_len, i
                      const struct ArrowArray* const* cols, const int* widths, int ncols, struct ArrowArray* args,
                      const komira_udf_call* call, const komira_udf_host* host, struct pyw_reply* rep, int* killed);
 
-/* Once the host's cancel flag is set: the flag in the control page, or
- * (pipe) SIGUSR1, whose handler sets the worker's local flag; the worker
- * runs user code on its one thread and reads no message meanwhile. CANCEL
- * follows for the record. 0, or -1 with the channel dead. */
+/* Once the host's cancel flag is set: the flag in the control page (the
+ * worker runs user code on its one thread and reads no message meanwhile,
+ * so it checks the page), then CANCEL for the record. 0, or -1 with the
+ * channel dead. */
 static int forward_cancel(struct pyw_chan* c, uint64_t id, const komira_udf_call* call, int* sent, int64_t* at) {
   if (*sent || call->cancel == NULL || __atomic_load_n(call->cancel, __ATOMIC_ACQUIRE) == 0) return 0;
-  if (c->shm != NULL)
-    __atomic_store_n((volatile int32_t*)(c->shm + PYW_CTRL_CANCEL), 1, __ATOMIC_RELEASE);
-  else
-    kill(c->pid, SIGUSR1);
+  __atomic_store_n((volatile int32_t*)(c->shm + PYW_CTRL_CANCEL), 1, __ATOMIC_RELEASE);
   if (send_header(c, KOMIRA_UDF_OP_CANCEL, id, 0, 0, 0, 0, NULL, NULL, 0) != 0) return -1;
   *sent = 1;
   *at = mono_ns();
@@ -429,19 +426,6 @@ static int await_reply(struct pyw_chan* c, uint64_t id, const komira_udf_call* c
       die(c, "UDF_RUNTIME_FAULT: poll on the control channel failed");
       return -1;
     }
-    if (c->shm != NULL) {
-      uint32_t reads = __atomic_load_n(ctrl_u32(c, PYW_CTRL_CLOCK_READS), __ATOMIC_ACQUIRE);
-      int forwarded = c->clock_seen != reads;
-      while (c->clock_seen != reads) {
-        c->clock_seen++;
-        (void)host->now_ns(host->host_data);
-      }
-      /* A host may set the cancel flag inside now_ns: the flag goes to the
-       * worker before the read is acknowledged, so the worker sees it at
-       * its next check (the read is synchronous, as in-process). */
-      if (forward_cancel(c, id, call, &cancel_sent, &cancel_at) != 0) return -1;
-      if (forwarded) __atomic_store_n(ctrl_u32(c, PYW_CTRL_CLOCK_ACK), reads, __ATOMIC_RELEASE);
-    }
     if (forward_cancel(c, id, call, &cancel_sent, &cancel_at) != 0) return -1;
     if (cancel_sent && mono_ns() - cancel_at > CANCEL_GRACE_NS) {
       kill(c->pid, SIGKILL);
@@ -459,8 +443,11 @@ static int await_reply(struct pyw_chan* c, uint64_t id, const komira_udf_call* c
     komira_udf_wire_header h;
     if (read_message(c, &h, rep) != 0) return -1;
     if (h.op == PYW_OP_CLOCK) {
-      /* The pipe transport's clock read: forwarded, the cancel flag sent
-       * if the host set it, then acknowledged (the worker waits for it). */
+      /* The worker read the clock: the read forwarded to the host's now_ns,
+       * the cancel flag written to the control page if the host set it
+       * (it may, inside now_ns), then CLOCK back, which the worker waits
+       * for. The message wakes this poll at once, so a read costs one
+       * round trip on the socket (the read is synchronous, as in-process). */
       pyw_reply_free(rep);
       (void)host->now_ns(host->host_data);
       if (forward_cancel(c, id, call, &cancel_sent, &cancel_at) != 0) return -1;
@@ -496,9 +483,9 @@ static int call_once(struct pyw_chan* c, const uint8_t* head, size_t head_len, i
   size_t total = head_len + msg;
   uint64_t id = ++c->next_id;
   uint32_t off = 0;
-  int slot = (c->shm != NULL && msg != 0) ? slot_alloc(c, total, &off) : -1;
+  int slot = msg != 0 ? slot_alloc(c, total, &off) : -1;
   int rc;
-  if (c->shm != NULL) __atomic_store_n((volatile int32_t*)(c->shm + PYW_CTRL_CANCEL), 0, __ATOMIC_RELEASE);
+  __atomic_store_n((volatile int32_t*)(c->shm + PYW_CTRL_CANCEL), 0, __ATOMIC_RELEASE);
   if (slot >= 0) {
     uint8_t* dst = c->shm + PYW_CTRL_BYTES + off;
     memcpy(dst, head, head_len);
@@ -520,7 +507,7 @@ static int call_once(struct pyw_chan* c, const uint8_t* head, size_t head_len, i
     memcpy(buf, head, head_len);
     pyw_ipc_batch_write(buf + head_len, length, cols, widths, ncols);
     if (args->release) args->release(args);
-    if (c->shm != NULL && !c->heap_full) {
+    if (!c->heap_full) {
       c->heap_full = 1;
       c->heap_full_events++;
       if (host->log)

@@ -304,7 +304,7 @@ static int32_t fork_worker(struct komira_udf_rt* rt, struct komira_udf_context* 
   }
   free(warning);
   char why[300];
-  if (d.bad || pyw_chan_adopt(&c->ch, sv[0], pid, 1, why, sizeof(why)) != 0) {
+  if (d.bad || pyw_chan_adopt(&c->ch, sv[0], pid, why, sizeof(why)) != 0) {
     if (d.bad) close(sv[0]);
     return fail(e, KOMIRA_UDF_ERR_INTERNAL, d.bad ? "open_context: a malformed FORK reply" : why, NULL, -1);
   }
@@ -664,7 +664,7 @@ static const komira_udf_runtime* init(const komira_udf_host* host, komira_udf_rt
    * posix_spawn; every context worker is forked from it. */
   struct pyw_launch l = {rt->dir, "zygote", codec, limit_threads};
   char why[300];
-  if (pyw_chan_spawn(&rt->zygote, &l, 1, why, sizeof(why)) != 0) {
+  if (pyw_chan_spawn(&rt->zygote, &l, why, sizeof(why)) != 0) {
     char m[400];
     snprintf(m, sizeof(m), "init: the zygote: %s", why);
     fail(e, KOMIRA_UDF_ERR_LOAD, m, NULL, -1);

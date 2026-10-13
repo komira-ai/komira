@@ -29,7 +29,7 @@
  *              result: every value and bit.
  *   trace      a user error's trace is its Python traceback.
  *   big        a 9.6 MB result, over the reply heap: every value.
- *   clock_time 3000 rows read the host clock 3 times: the call's ms.
+ *   clock_time 1000 rows with a deadline set: 1000 clock reads; the call's ms.
  *   leaks      the engine's heap around 200 refused validates, loads with
  *              unloads, and instances opened and closed: bytes grown.
  *   leaks_more the same around 200 validates taken, 200 calls whose user code
@@ -720,22 +720,22 @@ static void group_big(struct eng* e, struct pj* j) {
   e->t->unload(u);
 }
 
-/* double over 3000 rows reads the host clock 3 times (after row 0, then
- * every 1024 rows); each read is forwarded and acknowledged within the
- * engine's 1 ms poll, so the call takes well under a second. The value is
- * the call's ms. */
+/* double over 1000 rows with a deadline a minute away: the worker reads the
+ * host clock after every row (1000 reads), each a CLOCK message the engine
+ * answers at once. The value is the call's ms. An engine that answers a read
+ * only when its poll times out spends at least 1 ms a read: over 1000 ms. */
 static void group_clock_time(struct eng* e, struct pj* j) {
   komira_udf_udf* u = NULL;
   komira_udf_context* c = NULL;
   komira_udf_instance* i = NULL;
   if (!setup(e, j, "clock_time", "udf_fixtures:double", 1, &u, &c, &i)) return;
-  const struct col_spec cs[1] = {{0, 3000, 0, 0, -1}};
+  const struct col_spec cs[1] = {{0, 1000, 0, 0, -1}};
   int released = 0;
   struct ArrowDeviceArray args, out;
   char m[512];
   int64_t ms;
-  make_args(&args, 3000, 1, cs, &released);
-  int32_t rc = call(e, i, &args, &out, m, sizeof(m), -1, 0, &ms, sizeof(komira_udf_call));
+  make_args(&args, 1000, 1, cs, &released);
+  int32_t rc = call(e, i, &args, &out, m, sizeof(m), -1, 60000, &ms, sizeof(komira_udf_call));
   if (rc == KOMIRA_UDF_OK) {
     out.array.release(&out.array);
     snprintf(m, sizeof(m), "OK");
@@ -790,6 +790,8 @@ static void group_leaks(struct eng* e, struct pj* j) {
 
 /* The engine's heap around rounds the leaks group does not make, one case
  * each (the value: bytes grown after a warm-up, capped at 99999):
+ *   leak_load_refused a load the zygote refuses (the module fails at import:
+ *                     the udf and its LOAD body freed on the way out);
  *   leak_validate_ok  a validate the worker takes (the spec's body built and
  *                     freed);
  *   leak_raised_call  a call whose user code raises (an ERROR reply with a
@@ -814,6 +816,17 @@ static void group_leaks_more(struct eng* e, struct pj* j) {
     if (err.release) err.release(&err);
   }
   leak_case(j, "leak_validate_ok", before);
+  struct spec_block bad_import;
+  make_spec(&bad_import, "udf_worker_badimport:f", 1);
+  for (int k = 0; k < 220; k++) {
+    if (k == 20) before = heap_used();
+    komira_udf_udf* v = NULL;
+    komira_udf_error err = ERR_INIT;
+    if (e->t->load(e->rt, &bad_import.spec, &v, &err) == KOMIRA_UDF_OK) e->t->unload(v);
+    if (err.release) err.release(&err);
+  }
+  leak_case(j, "leak_load_refused", before);
+
 
   komira_udf_udf* u = NULL;
   komira_udf_context* c = NULL;

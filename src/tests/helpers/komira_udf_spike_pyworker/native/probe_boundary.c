@@ -52,9 +52,9 @@ static void hello_body(struct pyw_buf* b, uint32_t wire, uint32_t major, uint32_
   pyw_buf_u32(b, wire);
   pyw_buf_u32(b, major);
   pyw_buf_u32(b, minor);
-  pyw_buf_u32(b, 0); /* no shared memory */
-  pyw_buf_u64(b, 0);
-  pyw_buf_u64(b, 0);
+  pyw_buf_u32(b, 1); /* the shared region comes with it */
+  pyw_buf_u64(b, PYW_SHM_BYTES);
+  pyw_buf_u64(b, PYW_HEAP_BYTES);
 }
 
 static void hello_cases(struct pj* j, const char* arg) {
@@ -68,6 +68,13 @@ static void hello_cases(struct pj* j, const char* arg) {
   char why[300];
   if (pyw_chan_start(&c, &l, why, sizeof(why)) != 0) {
     pj_case(j, "worker_start", -1, why, 0);
+    return;
+  }
+  /* Each HELLO brings a region (a memfd of the size it names). */
+  int mfd = memfd_create("probe-region", MFD_CLOEXEC);
+  if (mfd < 0 || ftruncate(mfd, PYW_SHM_BYTES) != 0) {
+    pj_case(j, "worker_region", -1, "memfd failed", 0);
+    pyw_chan_close(&c);
     return;
   }
   /* A DESCRIBE before any HELLO, after the refused ones and after the
@@ -88,7 +95,8 @@ static void hello_cases(struct pj* j, const char* arg) {
     struct pyw_buf b = {0};
     if (k[i].op == KOMIRA_UDF_OP_HELLO) hello_body(&b, k[i].wire, k[i].major, k[i].minor);
     struct pyw_reply r;
-    if (pyw_chan_request(&c, k[i].op, k[i].op == KOMIRA_UDF_OP_HELLO ? &b : NULL, NULL, 0, &r) != 0) {
+    int hello = k[i].op == KOMIRA_UDF_OP_HELLO;
+    if (pyw_chan_request(&c, k[i].op, hello ? &b : NULL, hello ? &mfd : NULL, hello ? 1 : 0, &r) != 0) {
       pj_case(j, k[i].name, -1, c.why, 0);
       pyw_buf_free(&b);
       break;
@@ -117,6 +125,7 @@ static void hello_cases(struct pj* j, const char* arg) {
     }
     pyw_reply_free(&r);
   }
+  close(mfd);
   pyw_chan_close(&c);
 }
 
@@ -251,8 +260,7 @@ static int call_fake(struct pyw_chan* c, struct pyw_reply* r) {
  * was taken, one DESCRIBE (or, `as_call`, one CALL_BATCH) answered as `fr`.
  * Records what the engine said: for a reply taken, its length, the clock
  * reads forwarded and the worker ns summed, as len * 100 + reads * 10 + ns. */
-static void fault_case(struct pj* j, const char* name, enum fake_hello fh, enum fake_reply fr, int use_shm,
-                       int as_call) {
+static void fault_case(struct pj* j, const char* name, enum fake_hello fh, enum fake_reply fr, int as_call) {
   int sv[2];
   if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sv) != 0) {
     pj_case(j, name, -1, "socketpair failed", 0);
@@ -269,7 +277,7 @@ static void fault_case(struct pj* j, const char* name, enum fake_hello fh, enum 
   struct pyw_chan c;
   char why[300] = "";
   /* pid 0: nothing to signal or wait for at close. */
-  if (pyw_chan_adopt(&c, sv[0], 0, use_shm, why, sizeof(why)) != 0) {
+  if (pyw_chan_adopt(&c, sv[0], 0, why, sizeof(why)) != 0) {
     pj_case(j, name, 1, why, c.dead);
   } else if (fr == FR_NONE) {
     pj_case(j, name, 0, "HELLO taken", 0);
@@ -288,26 +296,25 @@ static void fault_case(struct pj* j, const char* name, enum fake_hello fh, enum 
 }
 
 static void fault_cases(struct pj* j) {
-  fault_case(j, "engine_hello_good", FH_GOOD, FR_NONE, 0, 0);
-  fault_case(j, "engine_hello_wire", FH_WIRE, FR_NONE, 0, 0);
-  fault_case(j, "engine_hello_major", FH_MAJOR, FR_NONE, 0, 0);
-  fault_case(j, "engine_hello_minor", FH_MINOR, FR_NONE, 0, 0);
-  fault_case(j, "engine_hello_short", FH_SHORT, FR_NONE, 0, 0);
-  fault_case(j, "engine_hello_refused", FH_REFUSE, FR_NONE, 0, 0);
-  fault_case(j, "reply_ok", FH_GOOD, FR_OK, 0, 0);
-  fault_case(j, "reply_magic", FH_GOOD, FR_MAGIC, 0, 0);
-  fault_case(j, "reply_other_id", FH_GOOD, FR_OTHER_ID, 0, 0);
-  fault_case(j, "reply_wrong_op", FH_GOOD, FR_WRONG_OP, 0, 0);
-  fault_case(j, "reply_heap_without_shm", FH_GOOD, FR_OUTSIDE_HEAP, 0, 0);
-  fault_case(j, "reply_outside_heap", FH_GOOD, FR_OUTSIDE_HEAP, 1, 0);
-  fault_case(j, "reply_over_2gib", FH_GOOD, FR_HUGE, 0, 0);
-  fault_case(j, "reply_eof_in_payload", FH_GOOD, FR_EOF_IN_PAYLOAD, 0, 0);
+  fault_case(j, "engine_hello_good", FH_GOOD, FR_NONE, 0);
+  fault_case(j, "engine_hello_wire", FH_WIRE, FR_NONE, 0);
+  fault_case(j, "engine_hello_major", FH_MAJOR, FR_NONE, 0);
+  fault_case(j, "engine_hello_minor", FH_MINOR, FR_NONE, 0);
+  fault_case(j, "engine_hello_short", FH_SHORT, FR_NONE, 0);
+  fault_case(j, "engine_hello_refused", FH_REFUSE, FR_NONE, 0);
+  fault_case(j, "reply_ok", FH_GOOD, FR_OK, 0);
+  fault_case(j, "reply_magic", FH_GOOD, FR_MAGIC, 0);
+  fault_case(j, "reply_other_id", FH_GOOD, FR_OTHER_ID, 0);
+  fault_case(j, "reply_wrong_op", FH_GOOD, FR_WRONG_OP, 0);
+  fault_case(j, "reply_outside_heap", FH_GOOD, FR_OUTSIDE_HEAP, 0);
+  fault_case(j, "reply_over_2gib", FH_GOOD, FR_HUGE, 0);
+  fault_case(j, "reply_eof_in_payload", FH_GOOD, FR_EOF_IN_PAYLOAD, 0);
   /* The same checks on a call's reply (await_reply), and a clock read the
    * worker reports before it answers. */
-  fault_case(j, "call_ok", FH_GOOD, FR_OK, 0, 1);
-  fault_case(j, "call_clock_then_ok", FH_GOOD, FR_CLOCK_THEN_OK, 0, 1);
-  fault_case(j, "call_other_id", FH_GOOD, FR_OTHER_ID, 0, 1);
-  fault_case(j, "call_wrong_op", FH_GOOD, FR_WRONG_OP, 0, 1);
+  fault_case(j, "call_ok", FH_GOOD, FR_OK, 1);
+  fault_case(j, "call_clock_then_ok", FH_GOOD, FR_CLOCK_THEN_OK, 1);
+  fault_case(j, "call_other_id", FH_GOOD, FR_OTHER_ID, 1);
+  fault_case(j, "call_wrong_op", FH_GOOD, FR_WRONG_OP, 1);
 }
 
 /* "codec", "hello" (arg: the runtime directory), "faults" or "fake". */

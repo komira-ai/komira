@@ -34,7 +34,7 @@
 #     minor, short, or refusing: refused by the engine; a good one taken;
 #   - replies from a fake worker, to a request and to a call: without the
 #     magic, answering another request, an op other than OK or ERROR, a
-#     payload in the heap with no shared memory, outside the heap, over
+#     payload outside the heap, over
 #     2 GiB, or cut by an end of file: each refused and the channel dead; a
 #     clock read the worker reports before it answers forwarded once;
 #   - the channel against a scripted fake worker: where each batch's slot
@@ -177,7 +177,6 @@ def main() raises:
     refused(r, "reply_magic", "without the protocol's magic")
     refused(r, "reply_other_id", "answers no request")
     refused(r, "reply_wrong_op", "a reply of op 10, not OK or ERROR")
-    refused(r, "reply_heap_without_shm", "outside the worker-to-engine heap")
     refused(r, "reply_outside_heap", "outside the worker-to-engine heap")
     refused(r, "reply_over_2gib", "over 2 GiB")
     refused(r, "reply_eof_in_payload", "closed its control channel")
@@ -202,8 +201,10 @@ def main() raises:
     r = probe_boundary("fake", "")
     assert_equal(num(r.get("slots"), "value"), 0, "slots: " + text(r.get("slots"), "message"))
     assert_equal(num(r.get("slots_ring_wrap"), "value"), 0, text(r.get("slots_ring_wrap"), "message"))
-    refused(r, "clock_shm", "", 0)
-    assert_equal(num(r.get("clock_shm"), "value"), 3, "three clock reads in the control page, three now_ns")
+    refused(r, "clock_messages", "", 0)
+    assert_equal(num(r.get("clock_messages"), "value"), 33, "three CLOCK messages: three now_ns, three CLOCK back")
+    refused(r, "clock_cancel_before_ack", "", 0)
+    assert_equal(num(r.get("clock_cancel_before_ack"), "value"), 1, "the cancel set in now_ns is in the page before CLOCK")
     refused(r, "cancel_shm", "", 0)
     assert_equal(num(r.get("cancel_shm"), "value"), 0, "the flag set, then CANCEL with the call's id and no payload")
     refused(r, "cancel_cleared", "", 0)
@@ -230,7 +231,6 @@ def main() raises:
     refused(r, "dead_not_sent", "without the protocol's magic", -11)
     assert_equal(num(r.get("dead_not_sent"), "value"), 1, "a request on a dead channel is not sent")
     refused(r, "reply_exactly_2gib", "closed its control channel", -1)
-    refused(r, "heap_reply_no_shm", "outside the worker-to-engine heap", -1)
     refused(r, "close_releases", "", 0)
     assert_equal(num(r.get("close_releases"), "value"), 0, "SHUTDOWN sent bare; descriptors and mapping released")
     refused(r, "reap_exits", "exited", 0)

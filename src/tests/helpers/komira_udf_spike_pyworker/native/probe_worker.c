@@ -16,7 +16,8 @@
  *            that fails at import, VALUE payloads that are not functions or
  *            do not bind), each refused with its status and reason; 64
  *            arguments and int32 taken; a batch the worker cannot read refused.
- *   frame    HELLO with shared memory but no file; payloads at the edge of
+ *   frame    HELLO with shared memory but no file, and HELLO without the
+ *            shared region, refused; payloads at the edge of
  *            the engine-to-worker heap; a header without the magic ends
  *            the worker (exit 1); end of file before and after HELLO ends
  *            it with exit 0.
@@ -163,12 +164,28 @@ static void hello_body(struct pyw_buf* b, uint32_t flags) {
   pyw_buf_u64(b, PYW_HEAP_BYTES);
 }
 
+/* HELLO with a shared region (a memfd of the size it names), recorded as a
+ * case like `ask`. */
 static int say_hello(struct pj* j, const char* name, struct raw* w) {
+  int mfd = memfd_create("probe-region", MFD_CLOEXEC);
+  if (mfd < 0 || ftruncate(mfd, PYW_SHM_BYTES) != 0) {
+    pj_case(j, name, -1, "memfd failed", 0);
+    if (mfd >= 0) close(mfd);
+    return -1;
+  }
   struct pyw_buf b = {0};
-  hello_body(&b, 0);
-  int64_t r = ask(j, name, w, KOMIRA_UDF_OP_HELLO, b.p, b.len);
+  hello_body(&b, 1);
+  uint64_t id = ++w->id;
+  int rc = raw_send(w, KOMIRA_UDF_WIRE_MAGIC, KOMIRA_UDF_OP_HELLO, id, KOMIRA_UDF_WIRE_INLINE, 0, b.len, b.p, b.len, mfd);
   pyw_buf_free(&b);
-  return r < 0 ? -1 : 0;
+  close(mfd);
+  komira_udf_wire_header h;
+  uint8_t* p = NULL;
+  if (rc == 0) rc = raw_recv(w, &h, &p);
+  int ok = rc == 0 && h.request_id == id && h.op == KOMIRA_UDF_OP_OK;
+  pj_case(j, name, ok ? 0 : -1, ok ? "OK" : "HELLO not taken", 0);
+  free(p);
+  return ok ? 0 : -1;
 }
 
 /* ---- control ---------------------------------------------------------------- */
@@ -454,20 +471,19 @@ static void frame_cases(struct pj* j, const char* dir) {
   hello_body(&b, 1);
   ask(j, "hello_shm_no_file", &w, KOMIRA_UDF_OP_HELLO, b.p, b.len);
   pyw_buf_free(&b);
-  /* a payload not inline on a channel without the shared region */
-  say_hello(j, "pipe_hello", &w);
-  uint64_t id = ++w.id;
-  raw_send(&w, KOMIRA_UDF_WIRE_MAGIC, KOMIRA_UDF_OP_CALL_BATCH, id, 0, 0, 64, NULL, 0, -1);
+  /* a HELLO without the shared region: refused (every worker has one) */
+  b = (struct pyw_buf){0};
+  hello_body(&b, 0);
+  ask(j, "hello_no_region", &w, KOMIRA_UDF_OP_HELLO, b.p, b.len);
+  pyw_buf_free(&b);
+  pj_case(j, "no_region_exit", raw_end(&w), "", 0);
+  uint64_t id;
   komira_udf_wire_header h;
   uint8_t* p;
-  int rc = raw_recv(&w, &h, &p);
-  struct pyw_rd d = {p, h.payload_len, 0, 0};
-  int32_t code = pyw_rd_i32(&d);
-  (void)pyw_rd_i64(&d), (void)pyw_rd_i64(&d);
-  char* m = pyw_rd_str(&d);
-  pj_case(j, "pipe_payload_in_heap", rc ? -1 : code, m ? m : "", 0);
-  free(m), free(p);
-  pj_case(j, "pipe_exit", raw_end(&w), "", 0);
+  int rc;
+  struct pyw_rd d;
+  int32_t code;
+  char* m;
 
   /* with shared memory: payloads at the heap's end */
   if (raw_start(&w, dir, "context") != 0) return;
@@ -522,7 +538,7 @@ static void frame_cases(struct pj* j, const char* dir) {
   struct pyw_chan c;
   struct pyw_launch l = {dir, "nonsense", "own", 1};
   char why[300] = "";
-  rc = pyw_chan_spawn(&c, &l, 0, why, sizeof(why));
+  rc = pyw_chan_spawn(&c, &l, why, sizeof(why));
   pj_case(j, "spawn_bad_role", rc, why, c.dead);
   pyw_chan_close(&c);
 }

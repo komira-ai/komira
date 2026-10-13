@@ -41,6 +41,9 @@
 #   - init refuses a NULL, short or other-major host with ERR_ABI; a copy
 #     of the library loaded by absolute path from another directory looks
 #     for the zygote's interpreter in that directory;
+#   - a normal shutdown after a context and a call takes under a second (an
+#     engine that does not reap the zygote it started waits out its 2 s
+#     fallback kill);
 #   - the zygote ends during a LOAD (a module that exits the process that
 #     imports it): load is ERR_INSTANCE_LOST naming the exit status (the
 #     engine is the zygote's parent and reaps it), a later validate is
@@ -144,6 +147,13 @@ def main() raises:
     for k in ["init_host_null", "init_host_short", "init_host_major"]:
         got(r, k, a, "this runtime speaks ABI major 1")
     got(r, "init_copy", Int(ERR_LOAD), "init: the zygote: posix_spawn", 100)
+
+    # A normal shutdown is prompt: the zygote exits on SHUTDOWN and is
+    # reaped at once (the fallback kill comes only after 2 s).
+    r = probe_table("./pyworker_zygote.so", "shutdown")
+    got(r, "shutdown_call", 0, "OK", 0)
+    var sd_ms = num(r.get("shutdown_ms"), "value")
+    assert_true(sd_ms < 1000, "a normal shutdown took " + String(sd_ms) + " ms")
 
     # The zygote ends during a LOAD: named by its exit status (the engine is
     # its parent and reaps it), every later request refused at once, and

@@ -21,7 +21,7 @@
 #     `args` moved and released once; then a good call on the same context
 #     (a check deleted: the engine reads past a child's buffers);
 #   - kills, on the zygote build: a call deaf to cancel and
-#     to the clock (SIGUSR1 blocked, sleeping 20 s) is cancelled 300 ms in;
+#     to the clock (sleeping 20 s) is cancelled 300 ms in;
 #     the worker is killed 2 s after the cancel reached it (it has ended
 #     by the time call_batch returns, not only after close_context), and the
 #     call returns ERR_CANCELLED in 2 .. 12 s. In a new context the same call
@@ -37,8 +37,10 @@
 #     serving; two UDFs in one context each run their own code and schema;
 #     eight rounds of 40 held slots never fill the heap (each slot released
 #     with its own id); nulls at a bitmap byte's edges; a user
-#     error's Python traceback; a result over the reply heap; three clock
-#     reads under 1.5 s; no engine heap growth over 200 refusals, loads and
+#     error's Python traceback; a result over the reply heap; 1000 clock
+#     reads (a deadline set, a 1000-row per-row call) under 500 ms (an
+#     engine that answers a read only when its 1 ms poll times out takes
+#     over 1000 ms); no engine heap growth over 200 refusals, loads and
 #     instances, nor over validates taken, calls whose user code raises
 #     (the ERROR reply, its message and trace), contexts opened and closed
 #     (the fork, its reply), and inits with shutdowns (blocks never freed,
@@ -131,7 +133,12 @@ def main() raises:
         assert_equal(num(mc.get("many_calls"), "value"), 0, v + ": heap-full warnings over 8 rounds of 40 held slots")
         var ct = probe_calls("./pyworker_" + v + ".so", "clock_time")
         assert_equal(num(ct.get("clock_time"), "status"), 0, v + ": " + text(ct.get("clock_time"), "message"))
-        assert_true(num(ct.get("clock_time"), "value") < 1500, v + ": 3 clock reads took " + String(num(ct.get("clock_time"), "value")) + " ms")
+        # 1000 clock reads: a read answered only when the engine's 1 ms poll
+        # times out costs at least 1000 ms; one answered at once costs a
+        # socket round trip (tens of us). 500 ms is half the stalled floor
+        # and ten times the round trips the bench measures on a busy worker.
+        var ct_ms = num(ct.get("clock_time"), "value")
+        assert_true(ct_ms < 500, v + ": 1000 clock reads took " + String(ct_ms) + " ms")
     for v in ["zygote", "pyarrow"]:
         var bg = probe_calls("./pyworker_" + v + ".so", "big")
         assert_equal(num(bg.get("big"), "status"), 0, v + ": " + text(bg.get("big"), "message"))
@@ -141,7 +148,7 @@ def main() raises:
     assert_true((lk // 1000) % 1000 < 400, "load and unload grew the heap by " + String((lk // 1000) % 1000))
     assert_true(lk % 1000 < 400, "open and close instance grew the heap by " + String(lk % 1000))
     var lm = probe_calls("./pyworker_zygote.so", "leaks_more")
-    for k in ["leak_validate_ok", "leak_raised_call", "leak_context", "leak_init"]:
+    for k in ["leak_validate_ok", "leak_load_refused", "leak_raised_call", "leak_context", "leak_init"]:
         var c = lm.get(k)
         assert_equal(num(c, "status"), 0, k + ": " + text(c, "message"))
         assert_true(num(c, "value") < 400, k + ": the engine's heap grew by " + String(num(c, "value")) + " bytes")
