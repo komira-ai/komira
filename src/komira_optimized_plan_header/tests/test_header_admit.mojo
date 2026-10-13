@@ -70,7 +70,7 @@ def _bytes(n: Int, v: UInt8) -> List[UInt8]:
 
 def _valid() -> OptimizedPlan:
     var stamp = ProducerStamp(_bytes(32, 0xAB), 1, _bytes(32, 0x11), "komira/mojo-sdk")
-    var needs = DeclaredNeeds([String("orders")], False, [RuntimeNeed("komira/python", "cp312")])
+    var needs = DeclaredNeeds([], [String("orders")], False, [RuntimeNeed("komira/python", "cp312")])
     var write = WireWriteTarget("out/", WriteFormat(1), WriteCompression(3))
     var advice = PlanAdvice([ScanStats(0, 10)])
     return OptimizedPlan(1, stamp^, _bytes(32, 0xCD), _bytes(32, 0xEF), needs^, write^, advice^, _bytes(3, 1))

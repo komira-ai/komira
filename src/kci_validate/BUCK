@@ -92,8 +92,15 @@ mojo_library(
         # runs them (native_rows.mojo, slice 11): every row over a played
         # pixi and an installed .so; row 4 red on an unresolved symbol, row
         # 5 on a komira .so loaded from /usr/lib, row 7 on a failing
-        # OpenSSL program; which packages are installed alone
+        # OpenSSL program; which packages are installed alone; a README
+        # whose closure ships a static holder built, not `mojo run`
         "tests/test_native_rows.mojo",
+        # the three refusals of correct installs in kci run 38348429425:
+        # a loader path through bin/../lib resolved before it is compared,
+        # the toolchain's own libz/libzstd not judged (only the closure's
+        # dlopen codecs and komira objects are), a static-holder README
+        # built when installed alone; slice 4's codec defect still red alone
+        "tests/test_native_rows_real.mojo",
     ],
     # The README examples tool kci ships, for the tests that make an
     # installed README into programs (the same target bin/kci/BUCK ships).

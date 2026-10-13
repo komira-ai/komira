@@ -8,8 +8,33 @@
  * strings it owns, the cancel flag and deadline it polls.
  *
  * It reports udf_class MANAGED: it stands where a managed runtime's
- * interpreter would, and has none, so of the two hosting values it reports
- * EMBEDDED (it needs nothing from the process that loads it).
+ * interpreter would, and has none. Of the feature bits it reports
+ * MEMORY_REPORT only: it neither contains crashes nor stops user code by
+ * force (design section 4.2).
+ *
+ * Its descriptor is the spike descriptor, version 1
+ * (komira_udf_spike_descriptor.h, echo_admit.inc). It checks what the host
+ * owes it and reports a breach as ERR_HOST_CONTRACT naming the rule (design
+ * section 4.5): an argument struct with a validity buffer or a non-zero
+ * offset, a child count other than the schema bound at load (after the
+ * group ordinal of a plain aggregate), an input off the CPU, or a
+ * null_count its bitmap contradicts. ERR_INTERNAL is for its own bugs.
+ *
+ * A context lost by a test setting (lost_on_call, lost_on_agg_open) answers
+ * every later entry on its instances, frames and groups objects with
+ * ERR_INSTANCE_LOST, running no fixture, and charges the host one byte for
+ * each such call: nothing may be called on a lost context but its closes
+ * (design section 4.5). Closing succeeds.
+ *
+ * Nesting (design section 4.3): every call on a context counts itself in
+ * the context while it runs, so a call made while a frame of the same
+ * context waits on its pull runs nested. A frame's pull copies a failed
+ * get_next's get_last_error text before anything else and then calls
+ * nothing on the stream but its release; a pull that returns with the
+ * call's cancel set or past its deadline releases the batch unread and
+ * fails the frame_next with ERR_CANCELLED or ERR_DEADLINE. A frame whose
+ * input failed returns ERR_INTERNAL with the input's message: the host
+ * ignores that status (it reports the first failure upstream).
  *
  * Memory accounting (design section 4.8): every output array, every
  * error's strings and every handle (runtime, UDF, context, instance, groups,
@@ -21,15 +46,16 @@
  * returns (a release that leaves its slot set) is charged one byte that is
  * never returned, which the ledger reports too.
  *
- * One translation unit in four files: this one (fixtures, handles, errors,
- * inputs and outputs, validate and load, the table and the inits) includes
- * echo_calls.inc (call_batch), echo_frames.inc (aggregates and frames) and,
- * when ECHO_INIT_VARIANT is defined, echo_variants.inc. Every symbol but the
- * inits is static, so the builds link into one process (the one-definition
- * gate links every C library whole).
+ * One translation unit in five files: this one (fixtures, handles, errors,
+ * inputs and outputs, the table and the inits) includes echo_admit.inc
+ * (validate and load), echo_calls.inc (call_batch), echo_frames.inc
+ * (aggregates and frames) and, when ECHO_INIT_VARIANT is defined,
+ * echo_variants.inc. Every symbol but the inits is static, so the builds
+ * link into one process (the one-definition gate links every C library
+ * whole).
  *
- * Built four ways (BUCK). With KOMIRA_UDF_ECHO_BROKEN defined it is
- * komira-test/echo-broken, the same code with seven planted defects the
+ * Built three ways (BUCK). With KOMIRA_UDF_ECHO_BROKEN defined it is
+ * komira-test/echo-broken, the same code with eight planted defects the
  * suite must catch (each marked BROKEN):
  *   1. it does not release `args` when a fixture raises (a leak);
  *   2. `fahrenheit` writes int64 values into its float64 result;
@@ -38,21 +64,17 @@
  *   5. it ignores every input array's offset;
  *   6. `double` adds an instance-local call counter to every value;
  *   7. a ROW read outside the read set that the fixture catches is not
- *      reported: call_batch returns OK.
+ *      reported: call_batch returns OK;
+ *   8. it refuses a call on a context that has a call in progress, so the
+ *      one nesting design section 4.3 allows fails.
  *
- * With ECHO_INIT_GLOBAL_LOCK defined, the build also defines that init:
- * the same runtime reporting global_lock 1 beside THREAD_SAFE, the test
- * setting of design section 6.3, which a host must refuse at init. With
- * ECHO_INIT_VARIANT defined, it defines one more init whose table and
- * describe answer break one rule of the contract, chosen when it runs
- * (echo_variants.inc).
+ * With ECHO_INIT_VARIANT defined, the build defines one more init whose
+ * table and describe answer break one rule of the contract, chosen when it
+ * runs (echo_variants.inc).
  *
  * With ECHO_NATIVE defined it is a native UDF library (design section 1.2),
  * the C fixture library the native runtime loads: the same fixtures, with
- * describe reporting runtime_id "komira/native", udf_class NATIVE, hosting 0
- * and CONTEXT_PER_THREAD. With ECHO_INIT_AFFINE also defined, that init is
- * the same library reporting thread_affine 1, which the native runtime must
- * refuse to load.
+ * describe reporting runtime_id "komira/native" and udf_class NATIVE.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -60,6 +82,7 @@
 #include <string.h>
 
 #include "komira_udf_runtime.h"
+#include "komira_udf_spike_descriptor.h"
 
 #ifndef ECHO_INIT
 #error "ECHO_INIT names the init function this build defines"
@@ -138,7 +161,15 @@ enum fixture_id {
   F_YIELD_FIRST,
   F_SLOW_ONCE,
   F_DOUBLE_BATCH, /* double, written as a batch loop (echo_calls.inc) */
-  F_FAHRENHEIT_BATCH
+  F_FAHRENHEIT_BATCH,
+  F_LOST_ON_CALL,      /* call_batch loses its context: ERR_INSTANCE_LOST, no fixture run */
+  F_LOST_ON_AGG_OPEN,  /* sum whose runtime's first agg_open loses its context */
+  F_RAISE_IF_5,        /* identity, raising with row -1 on a batch holding the value 5 */
+  F_RAISE_IF_5_SMALL,  /* the same, naming the row when the batch has 2 rows or fewer */
+  F_VOLATILE_COUNT,    /* counts its runs per instance and raises with row -1; -1 in row 0 asks the count */
+  F_FRAME_ROW_COUNTS,  /* a frame over no columns: a one-row table of each batch's length */
+  F_ROW_CONST,         /* ROW over any read set, empty included: 7 per row */
+  F_YIELD_THREE_THEN_RAISE
 };
 
 /* The variant of a fixture that keeps an input (F_ARGS_KEPT, F_FRAME_IN_KEPT,
@@ -149,6 +180,11 @@ enum fixture_id {
 /* The variant of running_sum whose frame_next fills the error on every call
  * that returns OK (an output or the end): the host still releases it. */
 #define FILL_ERROR_ON_OK 2
+
+/* The variant of running_sum whose user code catches its input's failure
+ * (the language error a failed pull raises) and yields a one-row table [-1]
+ * instead, then ends. */
+#define CATCH_INPUT_ERROR 5
 
 /* The variant of sum_gids_kept that moves group_ids and never releases them. */
 #define GIDS_LEAKED 3
@@ -283,6 +319,9 @@ static const struct fixture FIXTURES[] = {
     /* A frame that yields its first two input batches unchanged, then
      * raises, leaving the rest of its input unread. */
     {"yield_two_then_raise", F_YIELD_TWO_THEN_RAISE, MF, "l", "tl", "", 0},
+    /* the same over two columns, yielding them as a one-column table's
+     * output: an output that fails import */
+    {"yield_two_then_raise_wide", F_YIELD_TWO_THEN_RAISE, MF, "ll", "tl", "", 0},
     /* a + b, raising on a null in either argument. */
     {"add_strict", F_ADD_STRICT, SC, "ll", "l", "", 0},
     /* More runtime bugs: one row too many; sum whose agg_update reads `args`
@@ -358,6 +397,7 @@ static const struct fixture FIXTURES[] = {
     {"error_on_ok", F_ERROR_ON_OK, MC, "l", "l", "", 0},
     /* running_sum, filling the error on every frame_next that returns OK. */
     {"running_sum_error_on_ok", F_RUNNING_SUM, MF, "l", "tl", "", FILL_ERROR_ON_OK},
+    {"running_sum_catches_input_error", F_RUNNING_SUM, MF, "l", "tl", "", CATCH_INPUT_ERROR},
     /* A batch function that raises naming no row (legal), then two runtime
      * bugs: a row one past the batch, and a row below -1. */
     {"raise_no_row", F_RAISE_ROW, MC, "l", "l", "", RR_NONE},
@@ -405,6 +445,23 @@ static const struct fixture FIXTURES[] = {
     /* double and fahrenheit as a UDF author writes them: one loop per batch */
     {"double_batch", F_DOUBLE_BATCH, SC, "l", "l", "", 0},
     {"fahrenheit_batch", F_FAHRENHEIT_BATCH, MC, "g", "g", "", 0},
+    /* the test settings of design section 6.3: a call that returns
+     * ERR_INSTANCE_LOST (no user code ran) and loses its context */
+    {"lost_on_call", F_LOST_ON_CALL, MC, "l", "l", "", 0},
+    {"lost_on_agg_open", F_LOST_ON_AGG_OPEN, AM, "l", "l", "l", 0},
+    /* a batch function raising naming no row when its batch holds the value
+     * 5: the host's bisection finds the row */
+    {"raise_minus_one_if_row5", F_RAISE_IF_5, MC, "l", "l", "", 0},
+    /* the same, naming the value's row in a batch of 2 rows or fewer: a
+     * half that reports a row ends bisection there */
+    {"raise_row_if_5_when_small", F_RAISE_IF_5_SMALL, MC, "l", "l", "", 0},
+    /* a VOLATILE batch function that counts its runs and raises naming no
+     * row; a batch whose row 0 is -1 returns the count instead */
+    {"volatile_count_raise", F_VOLATILE_COUNT, MC, "l", "l", "", 0},
+    {"frame_row_counts", F_FRAME_ROW_COUNTS, MF, "", "tl", "", 0},
+    {"row_const", F_ROW_CONST, KOMIRA_UDF_SHAPE_ROW, "*", "l", "", 0},
+    /* yields its first three input batches unchanged, then raises at row 1 */
+    {"yield_three_then_raise", F_YIELD_THREE_THEN_RAISE, MF, "l", "tl", "", 0},
 };
 
 #define N_FIXTURES (sizeof(FIXTURES) / sizeof(FIXTURES[0]))
@@ -413,11 +470,10 @@ static const struct fixture FIXTURES[] = {
 
 struct komira_udf_rt {
   const komira_udf_host* host;
-  uint32_t global_lock;
-  uint32_t thread_affine; /* 1 only from ECHO_INIT_AFFINE */
-  int variant;            /* echo_variants.inc; 0 in every other init */
+  int variant; /* echo_variants.inc; 0 in every other init */
   int64_t agg_opens;
   int64_t open_contexts;
+  int64_t lost_agg_opens; /* lost_on_agg_open: agg_opens of that fixture so far */
 };
 #define ROW_FIELDS_MAX 8
 
@@ -426,6 +482,7 @@ struct komira_udf_rt {
 struct komira_udf_udf {
   const struct fixture* fx;
   const komira_udf_host* host;
+  int64_t n_args; /* the argument schema's children, bound at load */
   int64_t n_fields;
   char* fields[ROW_FIELDS_MAX];
   int64_t flags[3]; /* flags_probe */
@@ -433,6 +490,8 @@ struct komira_udf_udf {
 struct komira_udf_context {
   struct komira_udf_rt* rt;
   uint32_t slot;
+  int lost;      /* a status lost it: every later call is refused */
+  int64_t depth; /* calls on this context in progress (nesting) */
 };
 struct komira_udf_instance {
   struct komira_udf_context* ctx;
@@ -440,10 +499,13 @@ struct komira_udf_instance {
   const struct fixture* fx;
   int64_t calls; /* BROKEN (6) reads it */
   int64_t group_sets;
+  int64_t runs; /* volatile_count_raise */
 };
 struct komira_udf_groups {
+  struct komira_udf_context* ctx;
   const struct fixture* fx;
   const komira_udf_host* host;
+  int64_t n_args; /* the argument struct's children, bound at load */
   int64_t* st;
   uint32_t n;
   uint32_t cap;
@@ -456,6 +518,9 @@ struct komira_udf_frame {
   int64_t group;   /* group_max: current ordinal, -1 before the first row */
   int64_t max;
   int yielded; /* yield_first */
+  int in_failed; /* the input failed: nothing but release is called on it */
+  int64_t want;                 /* each input batch's children: the bound arguments, after a group ordinal */
+  const komira_udf_call* call;  /* the frame_next in progress: its cancel and deadline */
   struct ArrowArray kept; /* table_out_on_error: the table, freed at frame_close */
 };
 
@@ -548,7 +613,7 @@ static int32_t i32_at(const struct ArrowArray* a, int64_t r) {
  * every input: an argument struct at offset 0 with one buffer and no
  * validity bitmap; each column's null_count, when known, what its bitmap
  * says over its rows from its own offset. A host that breaks one gets
- * ERR_INTERNAL (the true offset here, BROKEN or not). */
+ * ERR_HOST_CONTRACT (the true offset here, BROKEN or not). */
 static int64_t count_nulls(const struct ArrowArray* a) {
   const uint8_t* v = (const uint8_t*)a->buffers[0];
   int64_t n = 0;
@@ -568,10 +633,47 @@ static int args_ok(const struct ArrowArray* s) {
   return 1;
 }
 
-static int32_t check_args(const komira_udf_host* h, const struct ArrowArray* s, komira_udf_error* e) {
-  if (args_ok(s)) return KOMIRA_UDF_OK;
-  return fail(h, e, KOMIRA_UDF_ERR_INTERNAL,
-              "the argument struct is not at offset 0 without a bitmap, or a null_count contradicts its bitmap", -1);
+/* The argument struct of a call: the rules above, then its child count
+ * against the schema bound at load (`extra` more for a group ordinal). */
+static int32_t check_args(const komira_udf_host* h, const struct ArrowArray* s, int64_t want, komira_udf_error* e) {
+  if (!args_ok(s))
+    return fail(h, e, KOMIRA_UDF_ERR_HOST_CONTRACT,
+                "the argument struct is not at offset 0 without a bitmap, or a null_count contradicts its bitmap "
+                "(design 3.4 rule 5)",
+                -1);
+  if (s->n_children != want) {
+    char msg[160];
+    snprintf(msg, sizeof(msg), "the argument struct has %lld children, the schema bound at load %lld",
+             (long long)s->n_children, (long long)want);
+    return fail(h, e, KOMIRA_UDF_ERR_HOST_CONTRACT, msg, -1);
+  }
+  return KOMIRA_UDF_OK;
+}
+
+/* A call on context `c`: refused when a status lost it (charging the host,
+ * which must not call it), and, BROKEN, when a call on it is in progress;
+ * else counted until leave(). */
+static int32_t enter(komira_udf_context* c, komira_udf_error* e) {
+  const komira_udf_host* h = c->rt->host;
+  if (c->lost) {
+    charge_host(h);
+    return fail(h, e, KOMIRA_UDF_ERR_INSTANCE_LOST, "the context was lost earlier; no user code ran for this call",
+                -1);
+  }
+  if (BROKEN && c->depth > 0) /* BROKEN (8) */
+    return fail(h, e, KOMIRA_UDF_ERR_INTERNAL, "a call on a context that has a call in progress", -1);
+  c->depth++;
+  return KOMIRA_UDF_OK;
+}
+
+static void leave(komira_udf_context* c) { c->depth--; }
+
+/* Lose context `c`: this call ran no user code. */
+static int32_t lose(komira_udf_context* c, komira_udf_error* e, const char* what) {
+  c->lost = 1;
+  char msg[200];
+  snprintf(msg, sizeof(msg), "%s: the context is lost (a test setting); no user code ran for this call", what);
+  return fail(c->rt->host, e, KOMIRA_UDF_ERR_INSTANCE_LOST, msg, -1);
 }
 
 static void release_array(struct ArrowArray* a) {
@@ -724,135 +826,25 @@ static int make_struct(struct ArrowArray* a, int64_t n, int64_t k) {
   return 1;
 }
 
-/* ---- validate / load ----------------------------------------------------- */
-
-static const struct fixture* find(const char* entry) {
-  if (entry == NULL) return NULL;
-  for (size_t i = 0; i < N_FIXTURES; i++)
-    if (strcmp(FIXTURES[i].entry, entry) == 0) return &FIXTURES[i];
-  return NULL;
-}
-
-static int leaf_is(const struct ArrowSchema* s, char f) {
-  return s != NULL && s->release != NULL && s->format != NULL && s->format[0] == f && s->format[1] == 0 &&
-         s->n_children == 0;
-}
-
-static int struct_is(const struct ArrowSchema* s, const char* fmts) {
-  if (s == NULL || s->release == NULL || s->format == NULL || strcmp(s->format, "+s") != 0) return 0;
-  if (s->n_children != (int64_t)strlen(fmts)) return 0;
-  for (int64_t i = 0; i < s->n_children; i++)
-    if (!leaf_is(s->children[i], fmts[i])) return 0;
-  return 1;
-}
-
-/* A ROW read set: one to ROW_FIELDS_MAX int64 fields, each named, no name
- * twice. */
-static int row_args_ok(const struct ArrowSchema* s) {
-  if (s == NULL || s->format == NULL || strcmp(s->format, "+s") != 0) return 0;
-  if (s->n_children < 1 || s->n_children > ROW_FIELDS_MAX) return 0;
-  for (int64_t i = 0; i < s->n_children; i++) {
-    const struct ArrowSchema* c = s->children[i];
-    if (!leaf_is(c, FMT_I64) || c->name == NULL || c->name[0] == 0) return 0;
-    for (int64_t j = 0; j < i; j++)
-      if (strcmp(s->children[j]->name, c->name) == 0) return 0;
-  }
-  return 1;
-}
-
-static int32_t check_spec(const komira_udf_host* h, const komira_udf_spec* s, komira_udf_error* e,
-                          const struct fixture** out) {
-  if (s == NULL || s->struct_size < sizeof(komira_udf_spec))
-    return fail(h, e, KOMIRA_UDF_ERR_ABI, "spec struct_size is below this runtime's", -1);
-  const struct fixture* fx = find(s->entry);
-  if (fx == NULL) return fail(h, e, KOMIRA_UDF_ERR_DESCRIPTOR, "no fixture has this entry", -1);
-  if (s->form < KOMIRA_UDF_FORM_PACKAGE || s->form > KOMIRA_UDF_FORM_VALUE)
-    return fail(h, e, KOMIRA_UDF_ERR_DESCRIPTOR, "code form is not PACKAGE, BUNDLE or VALUE", -1);
-  if (s->descriptor_version > 0)
-    return fail(h, e, KOMIRA_UDF_ERR_DESCRIPTOR, "descriptor_version is newer than 0, the newest read here", -1);
-  if (s->descriptor_len != 0)
-    return fail(h, e, KOMIRA_UDF_ERR_DESCRIPTOR, "descriptor version 0 is empty; these bytes are not canonical", -1);
-  if ((uint32_t)s->shape != fx->shape)
-    return fail(h, e, KOMIRA_UDF_ERR_UNSUPPORTED, "the fixture does not have this shape", -1);
-  int result_ok = fx->result[0] == 't' ? struct_is(s->result, fx->result + 1) : leaf_is(s->result, fx->result[0]);
-  int state_ok = fx->state[0] == 0 ? s->state == NULL : leaf_is(s->state, fx->state[0]);
-  int args_ok = fx->args[0] == '*' ? row_args_ok(s->args) : struct_is(s->args, fx->args);
-  if (!args_ok || !result_ok || !state_ok)
-    return fail(h, e, KOMIRA_UDF_ERR_UNSUPPORTED, "the declared types are not the fixture's signature", -1);
-  *out = fx;
-  return KOMIRA_UDF_OK;
-}
-
 static int32_t describe_variant(const komira_udf_rt* rt, komira_udf_capabilities* c);
 
 static int32_t echo_describe(komira_udf_rt* rt, komira_udf_capabilities* c) {
   if (c == NULL || c->struct_size < sizeof(komira_udf_capabilities)) return KOMIRA_UDF_ERR_ABI;
   c->runtime_id = ECHO_ID;
   c->runtime_abi = "";
-  c->max_descriptor_version = 0;
+  c->max_descriptor_version = KOMIRA_UDF_SPIKE_DESCRIPTOR_VERSION;
   c->shapes = KOMIRA_UDF_SHAPE_SCALAR | KOMIRA_UDF_SHAPE_ROW | KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN |
               KOMIRA_UDF_SHAPE_MAP_BATCHES_FRAME | KOMIRA_UDF_SHAPE_AGG_PLAIN | KOMIRA_UDF_SHAPE_AGG_MERGEABLE |
               KOMIRA_UDF_SHAPE_STEP;
 #ifdef ECHO_NATIVE
-  c->threading = KOMIRA_UDF_CONTEXT_PER_THREAD;
-  c->hosting = KOMIRA_UDF_HOSTING_NONE;
   c->udf_class = KOMIRA_UDF_CLASS_NATIVE;
 #else
-  c->threading = KOMIRA_UDF_THREAD_SAFE;
-  c->hosting = KOMIRA_UDF_HOSTING_EMBEDDED;
   c->udf_class = KOMIRA_UDF_CLASS_MANAGED;
 #endif
-  c->thread_affine = rt->thread_affine;
-  c->transports = KOMIRA_UDF_TRANSPORT_IN_PROCESS;
   c->devices = KOMIRA_UDF_DEVICE_CPU;
   c->features = KOMIRA_UDF_FEATURE_MEMORY_REPORT;
-  c->global_lock = rt->global_lock;
   if (rt->variant != 0) return describe_variant(rt, c);
   return KOMIRA_UDF_OK;
-}
-
-static int32_t echo_validate(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf_error* e) {
-  const struct fixture* fx = NULL;
-  return check_spec(rt->host, s, e, &fx);
-}
-
-static int32_t echo_load(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf_udf** out,
-                         komira_udf_error* e) {
-  const struct fixture* fx = NULL;
-  int32_t rc = check_spec(rt->host, s, e, &fx);
-  if (rc != KOMIRA_UDF_OK) return rc;
-  /* the bug: a schema the host only lends, released (and a host release
-   * that leaves its slot set refused) */
-  if (fx->id == F_RELEASE_SCHEMA) {
-    struct ArrowSchema* lent =
-        (struct ArrowSchema*)(fx->variant == RS_RESULT ? s->result : fx->variant == RS_STATE ? s->state : s->args);
-    lent->release(lent);
-    if (lent->release != NULL)
-      return fail(rt->host, e, KOMIRA_UDF_ERR_INTERNAL, "release_schema: the schema's release left its slot set", -1);
-  }
-  komira_udf_udf* u = calloc(1, sizeof(*u));
-  if (u == NULL) return fail(rt->host, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "load: out of memory", -1);
-  u->fx = fx;
-  u->host = rt->host;
-  u->flags[0] = s->args->flags;
-  u->flags[1] = s->args->n_children > 0 ? s->args->children[0]->flags : -1;
-  u->flags[2] = s->result->flags;
-  if (fx->shape == KOMIRA_UDF_SHAPE_ROW) {
-    for (int64_t i = 0; i < s->args->n_children; i++) {
-      u->fields[i] = dup(s->args->children[i]->name);
-      u->n_fields = i + 1;
-      if (u->fields[i] == NULL) break;
-    }
-  }
-  hold(u->host, sizeof(*u));
-  *out = u;
-  return KOMIRA_UDF_OK;
-}
-
-static void echo_unload(komira_udf_udf* u) {
-  for (int64_t i = 0; i < u->n_fields; i++) free(u->fields[i]);
-  drop(u->host, sizeof(*u));
-  free(u);
 }
 
 static int32_t echo_open_context(komira_udf_rt* rt, uint32_t slot, komira_udf_context** out,
@@ -866,6 +858,8 @@ static int32_t echo_open_context(komira_udf_rt* rt, uint32_t slot, komira_udf_co
   if (c == NULL) return fail(rt->host, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "open_context: out of memory", -1);
   c->rt = rt;
   c->slot = slot;
+  c->lost = 0;
+  c->depth = 0;
   rt->open_contexts++;
   hold(rt->host, sizeof(*c));
   *out = c;
@@ -889,6 +883,7 @@ static int32_t echo_open_instance(komira_udf_context* c, komira_udf_udf* u, komi
   i->fx = u->fx;
   i->calls = 0;
   i->group_sets = 0;
+  i->runs = 0;
   hold(c->rt->host, sizeof(*i));
   *out = i;
   return KOMIRA_UDF_OK;
@@ -919,6 +914,7 @@ static int32_t start_call(const komira_udf_rt* rt, const komira_udf_call* c, kom
   return KOMIRA_UDF_OK;
 }
 
+#include "echo_admit.inc"
 #include "echo_calls.inc"
 #include "echo_frames.inc"
 
@@ -935,8 +931,7 @@ static const komira_udf_runtime TABLE = {
 
 /* A runtime on `host`, or NULL with *e filled. `any_major`: accept a host of
  * any ABI major (a variant's bug). */
-static komira_udf_rt* new_rt(const komira_udf_host* host, komira_udf_error* e, uint32_t global_lock,
-                             int any_major) {
+static komira_udf_rt* new_rt(const komira_udf_host* host, komira_udf_error* e, int any_major) {
   if (host == NULL || host->struct_size < sizeof(komira_udf_host)) {
     fail(NULL, e, KOMIRA_UDF_ERR_ABI, "this runtime needs a komira_udf_host of ABI 1.0", -1);
     return NULL;
@@ -951,38 +946,17 @@ static komira_udf_rt* new_rt(const komira_udf_host* host, komira_udf_error* e, u
     return NULL;
   }
   r->host = host;
-  r->global_lock = global_lock;
   hold(host, sizeof(*r));
   host->log(host->host_data, 0, "komira-test: a runtime is up");
   return r;
 }
 
 const komira_udf_runtime* ECHO_INIT(const komira_udf_host* host, komira_udf_rt** rt, komira_udf_error* e) {
-  komira_udf_rt* r = new_rt(host, e, 0, 0);
+  komira_udf_rt* r = new_rt(host, e, 0);
   if (r == NULL) return NULL;
   *rt = r;
   return &TABLE;
 }
-
-#ifdef ECHO_INIT_GLOBAL_LOCK
-const komira_udf_runtime* ECHO_INIT_GLOBAL_LOCK(const komira_udf_host* host, komira_udf_rt** rt,
-                                                komira_udf_error* e) {
-  komira_udf_rt* r = new_rt(host, e, 1, 0);
-  if (r == NULL) return NULL;
-  *rt = r;
-  return &TABLE;
-}
-#endif
-
-#ifdef ECHO_INIT_AFFINE
-const komira_udf_runtime* ECHO_INIT_AFFINE(const komira_udf_host* host, komira_udf_rt** rt, komira_udf_error* e) {
-  komira_udf_rt* r = new_rt(host, e, 0, 0);
-  if (r == NULL) return NULL;
-  r->thread_affine = 1;
-  *rt = r;
-  return &TABLE;
-}
-#endif
 
 #ifdef ECHO_INIT_VARIANT
 #include "echo_variants.inc"

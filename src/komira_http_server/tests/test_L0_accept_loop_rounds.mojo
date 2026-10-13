@@ -22,7 +22,8 @@
 # Groups (and the defect each would catch):
 #   R  a round: a request not answered, answered twice, a pipelined request
 #      skipped or read from the wrong offset, a connection kept after
-#      `Connection: close`, an incomplete head or request kept waiting, a
+#      `Connection: close`, a request whose body the read cut kept waiting
+#      (a head cut across reads: test_h1_head_across_reads.mojo), a
 #      malformed request answered with anything but its static error, an
 #      expectation answered wrong for either setting, end of stream or a
 #      reset not closing.
@@ -391,25 +392,6 @@ def test_http10_request_closes_after_its_response() raises:
     for v in range(2):
         var rig = _Rig(chained=v == 1)
         _send(rig.peer, "GET / HTTP/1.0\r\n\r\n")
-        assert_false(rig.round())
-        assert_equal(rig.reqs, Int64(1))
-        assert_equal(_text(rig.read().data), rig.ok())
-
-
-def test_incomplete_head_closes_without_a_response() raises:
-    for v in range(2):
-        var rig = _Rig(chained=v == 1)
-        _send(rig.peer, "GET / HTTP/1.1\r\nHost: exa")
-        assert_false(rig.round())
-        assert_equal(rig.reqs, Int64(0))
-        assert_equal(rig.sent, Int64(0))
-        assert_equal(len(rig.read().data), 0)
-
-
-def test_incomplete_second_request_closes_after_the_first() raises:
-    for v in range(2):
-        var rig = _Rig(chained=v == 1)
-        _send(rig.peer, String(GET) + "GET / HTTP/1.1\r\n")
         assert_false(rig.round())
         assert_equal(rig.reqs, Int64(1))
         assert_equal(_text(rig.read().data), rig.ok())

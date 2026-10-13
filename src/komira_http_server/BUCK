@@ -64,6 +64,7 @@ mojo_library(
         "tests/test_fault_attribution.mojo",
         "tests/test_fault_report_emit_line_loss.mojo",
         "tests/test_gcp_cloud_run_serve_stack.mojo",
+        "tests/test_h1_head_across_reads.mojo",
         "tests/test_middleware_in_dispatch_path.mojo",
         "tests/test_no_product_vocabulary.mojo",
         "tests/test_presented_credential.mojo",

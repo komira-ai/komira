@@ -7,12 +7,14 @@
 #   - RegistrationHandle (one per conn lifetime)
 #   - State machine variant: READING vs WAITING_FOR_WRITABLE
 #   - Pending-write buffer for EWOULDBLOCK→EPOLLOUT fallback
+#   - The start of a request head still waiting for its end (head carry)
 #
 # ConnEntry is Movable but NOT Copyable — TcpStream is not Copyable
 # (it owns an fd; copy would double-close).
 # =============================================================================
 
 from komira_async.reactor.completion_queue import RegistrationHandle
+from komira_async.reactor.socket_io import try_io_read
 from komira_async.runtime.tcp_stream import TcpStream
 
 from komira_http_core.codec.h2.connection_state import H2ConnectionState
@@ -140,6 +142,12 @@ struct ConnEntry(Movable, Deinitable):
     # NOT byte-backed (pointer safety per + connection_state
     # module-doc header).
     var _h2: Optional[H2ConnectionState]
+    # The received start of a request head whose end has not arrived yet
+    # (RFC 9112 section 2.2: a request may arrive in any number of
+    # segments). A read round keeps it here when the parser asks for more
+    # bytes, and puts it back at the front of the receive buffer before the
+    # next read. Never longer than REQ_BUF_BYTES - 1.
+    var _head_carry: List[UInt8]
 
     def __init__(
         out self,
@@ -157,6 +165,7 @@ struct ConnEntry(Movable, Deinitable):
         self._carry = List[UInt8]()
         self._tls = Optional[TlsStream]()
         self._h2 = Optional[H2ConnectionState]()
+        self._head_carry = List[UInt8]()
 
     def __init__(
         out self,
@@ -184,6 +193,7 @@ struct ConnEntry(Movable, Deinitable):
         self._carry = List[UInt8]()
         self._tls = Optional[TlsStream](tls_stream^)
         self._h2 = Optional[H2ConnectionState]()
+        self._head_carry = List[UInt8]()
 
     def fd(self) -> Int32:
         """Borrow the conn's fd (the kernel-level identifier)."""
@@ -291,6 +301,38 @@ struct ConnEntry(Movable, Deinitable):
         self._pending_off = 0
         self._state = CONN_STATE_WAITING_FOR_WRITABLE
 
+    # Partial request head carried across reads.
+    def head_carry_len(self) -> Int:
+        """Bytes of an unfinished request head kept from earlier reads."""
+        return len(self._head_carry)
+
+    def carry_head(mut self, part: Span[UInt8, _]) -> Bool:
+        """Keep `part`, the received start of a request head, for the next
+        read. Returns False, keeping nothing, when `part` fills the whole
+        receive buffer: the head cannot complete in it, and the caller
+        answers 431."""
+        if len(part) >= REQ_BUF_BYTES:
+            return False
+        self._head_carry.clear()
+        for i in range(len(part)):
+            self._head_carry.append(part[i])
+        return True
+
+    def restore_head_carry(
+        mut self, mut io_buf: Array[UInt8, REQ_BUF_BYTES]
+    ) -> Int:
+        """Copy the carried head to the front of `io_buf` and return its
+        length; the next read lands after it. The carry is kept until
+        `clear_head_carry`, so a read that would block loses nothing."""
+        var n = len(self._head_carry)
+        for i in range(n):
+            io_buf[i] = self._head_carry[i]
+        return n
+
+    def clear_head_carry(mut self):
+        """Forget the carried head: a read appended to it in `io_buf`."""
+        self._head_carry.clear()
+
     # TLS accessors.
     def is_tls(self) -> Bool:
         """True iff this conn was accepted on a TLS-enabled listener.
@@ -323,3 +365,33 @@ struct ConnEntry(Movable, Deinitable):
         """Borrow the Optional H2 connection state. When Some, the h2
         path is active. When None, the h1 path runs (default)."""
         return self._h2
+
+
+# =============================================================================
+# §3 — A plaintext read after the carried head.
+# =============================================================================
+
+comptime HEAD_READ_BLOCKED: Int = -1
+"""`read_after_head_carry`: nothing new to read; the carry stays in the entry."""
+
+
+def read_after_head_carry(
+    mut entry: ConnEntry, mut io_buf: Array[UInt8, REQ_BUF_BYTES]
+) -> Int:
+    """Read from `entry`'s socket into `io_buf`, after the head carried from
+    earlier reads. Returns how many bytes at the front of `io_buf` are valid
+    (carry plus new bytes), `HEAD_READ_BLOCKED` when the read would block, or
+    0 on end of stream or a read error (the caller drops the connection)."""
+    var carried = entry.restore_head_carry(io_buf)
+    var rr = try_io_read(
+        entry._fd, Span[UInt8](io_buf)[carried:REQ_BUF_BYTES]
+    )
+    if rr.is_would_block():
+        return HEAD_READ_BLOCKED
+    if rr.is_error():
+        return 0
+    var n = Int(rr.value())
+    if n <= 0:
+        return 0
+    entry.clear_head_carry()
+    return carried + n

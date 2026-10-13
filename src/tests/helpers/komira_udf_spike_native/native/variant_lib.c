@@ -7,12 +7,8 @@
  * Each init below calls the C library's own init and returns a copy of its
  * table with one change, so a library the runtime refuses differs from one it
  * loads in that one field, and every earlier check of the runtime passes:
- *   single_thread  describe reports threading SINGLE_THREAD
- *   worker_only    describe reports transports WORKER, without IN_PROCESS
- *   global_lock    describe reports global_lock 1
  *   managed        describe reports udf_class MANAGED (runtime_id unchanged)
  *   no_scalar      describe's shapes lack SCALAR
- *   thread_safe    accepted: describe reports threading THREAD_SAFE
  *   abi2           the table reports ABI major 2
  *   short_table    the table's struct_size ends before close_instance
  *   one_short      the table's struct_size ends before shutdown, the last
@@ -116,30 +112,18 @@ static const komira_udf_runtime* copy_inner(const komira_udf_host* host, komira_
 
 /* ---- one changed field in describe ----------------------------------------- */
 
-enum change { C_SINGLE_THREAD, C_WORKER_ONLY, C_GLOBAL_LOCK, C_MANAGED, C_NO_SCALAR, C_THREAD_SAFE };
+enum change { C_MANAGED, C_NO_SCALAR };
 static enum change changed;
 
 static int32_t changed_describe(komira_udf_rt* rt, komira_udf_capabilities* c) {
   int32_t rc = inner->describe(rt, c);
   if (rc != KOMIRA_UDF_OK) return rc;
   switch (changed) {
-    case C_SINGLE_THREAD:
-      c->threading = KOMIRA_UDF_SINGLE_THREAD;
-      break;
-    case C_WORKER_ONLY:
-      c->transports = KOMIRA_UDF_TRANSPORT_WORKER;
-      break;
-    case C_GLOBAL_LOCK:
-      c->global_lock = 1;
-      break;
     case C_MANAGED:
       c->udf_class = KOMIRA_UDF_CLASS_MANAGED;
       break;
     case C_NO_SCALAR:
       c->shapes &= ~(uint32_t)KOMIRA_UDF_SHAPE_SCALAR;
-      break;
-    case C_THREAD_SAFE:
-      c->threading = KOMIRA_UDF_THREAD_SAFE;
       break;
   }
   return KOMIRA_UDF_OK;
@@ -153,29 +137,9 @@ static const komira_udf_runtime* with_describe(enum change c, const komira_udf_h
   return &table;
 }
 
-const komira_udf_runtime* komira_udf_variant_single_thread_init_v1(const komira_udf_host* host, komira_udf_rt** rt,
-                                                                   komira_udf_error* e) {
-  return with_describe(C_SINGLE_THREAD, host, rt, e);
-}
-
-const komira_udf_runtime* komira_udf_variant_worker_only_init_v1(const komira_udf_host* host, komira_udf_rt** rt,
-                                                                 komira_udf_error* e) {
-  return with_describe(C_WORKER_ONLY, host, rt, e);
-}
-
-const komira_udf_runtime* komira_udf_variant_global_lock_init_v1(const komira_udf_host* host, komira_udf_rt** rt,
-                                                                 komira_udf_error* e) {
-  return with_describe(C_GLOBAL_LOCK, host, rt, e);
-}
-
 const komira_udf_runtime* komira_udf_variant_managed_init_v1(const komira_udf_host* host, komira_udf_rt** rt,
                                                              komira_udf_error* e) {
   return with_describe(C_MANAGED, host, rt, e);
-}
-
-const komira_udf_runtime* komira_udf_variant_thread_safe_init_v1(const komira_udf_host* host, komira_udf_rt** rt,
-                                                                 komira_udf_error* e) {
-  return with_describe(C_THREAD_SAFE, host, rt, e);
 }
 
 const komira_udf_runtime* komira_udf_variant_no_scalar_init_v1(const komira_udf_host* host, komira_udf_rt** rt,

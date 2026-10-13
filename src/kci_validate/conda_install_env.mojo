@@ -50,7 +50,11 @@
 #                wrote; then readback.mojo's check
 #   4  program   `pixi run --as-is mojo run [<link args>] <w>/readme_<import>.mojo`
 #                (cwd <w>) for each README, the link args being its `sh
-#                komira-link` block's (readme_link.mojo); its exit in out/readme_<import>.exit,
+#                komira-link` block's (readme_link.mojo); a README whose
+#                closure ships a static archive (komira_log's holder, which
+#                the JIT cannot load) is instead built with the block's
+#                `mojo build` words into <env>/bin/readme_<import> and that
+#                program run (native_rows.mojo `run_readme`); its exit in out/readme_<import>.exit,
 #                its stdout in .out and its stderr in .err, each with every
 #                `readme_<import>_<line>.mojo:<n>` (an example's program,
 #                whose line n is README line n) rewritten to the README line
@@ -117,19 +121,17 @@ from .env import (
     AUTH_FILE,
     AUTH_FILE_TEXT,
     ENV_INSTALL_TIMEOUT_S,
-    ENV_RUN_TIMEOUT_S,
     PIXI_LINK_DIR,
     PIXI_NAME,
     EnvHost,
     env_child_env,
     env_records_dir,
     install_env_argv,
-    run_program_argv,
     scratch_refusal,
     system_configs,
 )
 from .native_install import loader_env
-from .native_rows import LOADER_RECORD_SUFFIX, any_native, readme_loaded_from_row, run_native_rows
+from .native_rows import LOADER_RECORD_SUFFIX, any_native, readme_loaded_from_row, run_native_rows, run_readme
 from .network import CHECK_NETWORK, answered_count, declared_hosts, describe_answers, probe_hosts
 from .readback import CHECK_INSTALL, check_installed, check_payloads, check_program, install_exited_zero, read_or_empty
 from .readme_installed import ReadmeProgram, installed_readme, map_report_file
@@ -503,17 +505,11 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
         var record = _record_of(p.file)
         var raw_out = join_path(out_dir, record + String(".stdout"))
         var raw_err = join_path(out_dir, record + String(".stderr"))
-        var run = RunSpec(
-            pixi.copy(), run_program_argv(work, p.file, p.run_args), work.copy(), ENV_RUN_TIMEOUT_S, raw_out.copy(), raw_err.copy()
-        )
         var ld_prefix = join_path(out_dir, record + String(LOADER_RECORD_SUFFIX))
-        if native:
-            run.set_env(loader_env(env, ld_prefix))
-        else:
-            run.set_env(env.copy())
+        var run_env = loader_env(env, ld_prefix) if native else env.copy()
         var started = True
         try:
-            var r = runner.run(run)
+            var r = run_readme(runner, pixi, work, env_dir, p, env, run_env, raw_out, raw_err)
             _write(join_path(out_dir, record + String(".exit")), _exit_record(r))
         except e:
             started = False
@@ -522,7 +518,7 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
             req.readme_tool, p, out_dir, record, join_path(dir, String("readme/") + p.package), started, checks
         )
         if native and started:
-            readme_loaded_from_row(ld_prefix, env_dir, record, checks)
+            readme_loaded_from_row(ld_prefix, env_dir, record, p.codecs, checks)
     # 5. the native install checks (native_rows.mojo): none without a native pin
     if native:
         run_native_rows(runner, v, channel_url, mojo_pin, dir, named, pins, programs, checks)

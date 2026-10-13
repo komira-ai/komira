@@ -13,12 +13,14 @@
 #     order would reverse) and leaves the metapackage's empty; a `link` row
 #     of another shape raises. Mutants it catches: `pin.link = LinkArgs()` in
 #     request.mojo, a `shared` row read as a link name, the metapackage read
-#     as a library.
+#     as a library. Each library pin's `codecs` are the `dlopen` sonames of
+#     its whole closure (`closure_codecs`).
 #   * the CONDA_INSTALL_ENV run of a library shipping a shared library: the
 #     played `mojo run` argv carries the installed README's block's `run`
 #     arguments, `$CONDA_PREFIX` replaced by the environment, before the
 #     program. Mutant it catches: `run_program_argv(work, p.file)` at the call
-#     site in conda_install_env.mojo (the link arguments dropped).
+#     site (native_rows.mojo `run_readme`, which conda_install_env.mojo's
+#     step 4 calls; the link arguments dropped).
 #
 # Hermetic: TEST_TMPDIR, kci_build's ScriptedRunner as pixi, kci_pkg_upload's
 # ScriptedPkgTransport as the network. The README examples tool is this
@@ -166,6 +168,23 @@ def test_install_pins_carry_each_librarys_closure_link_arguments() raises:
     # the metapackage has no link arguments
     assert_false(pins[2].is_library)
     assert_true(pins[2].link.is_empty())
+
+
+def test_install_pins_carry_the_codecs_each_closure_opens() raises:
+    # alpha opens liblz4.so.1 and beta libzstd.so.1 (metadata.json dlopen
+    # rows): gamma's closure opens both, through its dependencies; alpha's
+    # only its own; the metapackage none. A codec no closure declares is
+    # the toolchain's, which the `loaded_from` row does not judge (kci run
+    # 38348429425). Mutant: `pin.codecs` left empty in install_pins.
+    var r = _three_libraries()
+    r.set_meta(String("komira_alpha"), String("dlopen"), String('[{"requirement":"lz4-c >=1.9.3,<2","soname":"liblz4.so.1"}]'))
+    r.set_meta(String("komira_beta"), String("dlopen"), String('[{"requirement":"zstd >=1.5.2,<2","soname":"libzstd.so.1"}]'))
+    var dir = _tmp(String("codecs"))
+    r.write(dir)
+    var pins = install_pins(example_loaded(r, dir), _names(String("komira_gamma"), String("komira_alpha"), String("komira")))
+    assert_equal(_joined(pins[0].codecs), String("libzstd.so.1 liblz4.so.1"))
+    assert_equal(_joined(pins[1].codecs), String("liblz4.so.1"))
+    assert_equal(len(pins[2].codecs), 0)
 
 
 def test_a_link_row_of_another_shape_is_refused_by_install_pins() raises:

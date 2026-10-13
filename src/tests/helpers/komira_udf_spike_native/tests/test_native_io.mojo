@@ -15,14 +15,14 @@
 #     library loads; under one a byte longer the refusal names the path cut
 #     at the last whole hex pair (a bound on the path buffer off by one; the
 #     name built without the root).
-#   - the runtime's own checks come first: a descriptor version 1 and a
-#     non-empty descriptor are refused with ERR_DESCRIPTOR although the code
-#     object is absent (a check left to the library, which is never opened).
+#   - the runtime's own checks come first: at load, a descriptor version 2
+#     and non-canonical descriptor bytes are refused with ERR_DESCRIPTOR
+#     although the code object is absent (a check left to the library, which
+#     is never opened).
 #   - describe, into a struct filled with 0xFF bytes so a field it never
 #     writes shows: the native runtime writes exactly its fixed set (design
-#     section 1.2): komira/native, abi1, descriptor version 0, every shape,
-#     CONTEXT_PER_THREAD, no thread_affine, IN_PROCESS, hosting 0, CPU, no
-#     features, NATIVE, global_lock 0.
+#     section 1.2): komira/native, abi1, descriptor version 1, every shape,
+#     CPU, no features, NATIVE.
 #   - refusal messages are whole: the exact text, row -1 and group -1 (a
 #     message copied without its terminator; a refusal given a row).
 
@@ -73,7 +73,7 @@ def _large(mut rt: UdfRuntime, tmp: String) raises:
         var data = _junk(n)
         var spec = _spec(root, [stage_data(data, root, host_role(), sha256_of(data))])
         _exactly(
-            rt.validate(spec),
+            rt.load(spec).outcome,
             ERR_LOAD,
             "dlopen of the verified library failed",
             "a file of " + String(n) + " bytes under its sha256",
@@ -84,7 +84,7 @@ def _directory(mut rt: UdfRuntime, tmp: String) raises:
     var root = tmp + "/dir"
     var d = sha256_of(_junk(9))
     makedirs(root + "/" + hex_of(d), exist_ok=True)
-    var got = rt.validate(_spec(root, [CodeObject(host_role(), d.copy())]))
+    var got = rt.load(_spec(root, [CodeObject(host_role(), d.copy())])).outcome.copy()
     _exactly(got, ERR_LOAD, "the code object is missing or unreadable: " + root + "/" + hex_of(d), "a directory")
 
 
@@ -97,8 +97,8 @@ def _descriptors(mut rt: UdfRuntime, tmp: String) raises:
     var before = open_fds()
     assert_true(before > 0, "/proc/self/fd is not readable")
     for _ in range(3):
-        _ = rt.validate(mismatch)
-        _ = rt.validate(unloadable)
+        _ = rt.load(mismatch)
+        _ = rt.load(unloadable)
     assert_equal(open_fds(), before, "a refused code object left a file descriptor open")
 
 
@@ -107,7 +107,7 @@ def _path(mut rt: UdfRuntime, tmp: String) raises:
     var obj = sha256_of(_junk(5))
     var hex = hex_of(obj)
     _exactly(
-        rt.validate(_spec("", [CodeObject(host_role(), obj.copy())])),
+        rt.load(_spec("", [CodeObject(host_role(), obj.copy())])).outcome,
         ERR_LOAD,
         "the code object is missing or unreadable: /" + hex,
         "an empty code root",
@@ -131,7 +131,7 @@ def _path(mut rt: UdfRuntime, tmp: String) raises:
     rt.unload(u.handle)
     var longer = root + "b"
     makedirs(longer, exist_ok=True)
-    var got = rt.validate(_spec(longer, [CodeObject(host_role(), obj.copy())]))
+    var got = rt.load(_spec(longer, [CodeObject(host_role(), obj.copy())])).outcome.copy()
     _exactly(
         got,
         ERR_LOAD,
@@ -143,19 +143,20 @@ def _path(mut rt: UdfRuntime, tmp: String) raises:
 def _descriptor_first(mut rt: UdfRuntime, tmp: String) raises:
     var absent = CodeObject(host_role(), sha256_of(_junk(3)))
     var newer = _spec(tmp + "/nowhere", [absent.copy()])
-    newer.descriptor_version = 1
-    _exactly(rt.validate(newer), ERR_DESCRIPTOR, "descriptor_version is newer than 0, the newest read here", "version 1")
+    newer.descriptor_version = 2
+    _exactly(rt.load(newer).outcome, ERR_DESCRIPTOR, "descriptor_version 2 is newer than 1, the newest read here", "version 2")
     var bytes = _spec(tmp + "/nowhere", [absent.copy()])
+    bytes.descriptor_raw = True
     bytes.descriptor = [UInt8(1)]
     _exactly(
-        rt.validate(bytes),
+        rt.load(bytes).outcome,
         ERR_DESCRIPTOR,
-        "descriptor version 0 is empty; these bytes are not canonical",
-        "a non-empty descriptor",
+        "the descriptor is not canonical: field number 0",
+        "non-canonical descriptor bytes",
     )
     var value = _spec(tmp + "/nowhere", [absent.copy()])
     value.form = FORM_PACKAGE
-    _exactly(rt.validate(value), ERR_DESCRIPTOR, "a native UDF's code form is BUNDLE", "form PACKAGE")
+    _exactly(rt.load(value).outcome, ERR_DESCRIPTOR, "a native UDF's code form is BUNDLE", "form PACKAGE")
 
 
 def _describe(mut rt: UdfRuntime) raises:
@@ -164,20 +165,15 @@ def _describe(mut rt: UdfRuntime) raises:
     var c = rt.describe(0xFF)
     assert_equal(c.runtime_id, "komira/native")
     assert_equal(c.runtime_abi, "abi1")
-    assert_equal(c.max_descriptor_version, 0, "max_descriptor_version")
+    assert_equal(c.max_descriptor_version, 1, "max_descriptor_version")
     var every = (
         SHAPE_SCALAR | SHAPE_ROW | SHAPE_MAP_BATCHES_COLUMN | SHAPE_MAP_BATCHES_FRAME
         | SHAPE_MAP_BATCHES_FRAME_GROUPED | SHAPE_AGG_PLAIN | SHAPE_AGG_MERGEABLE | SHAPE_STEP
     )
     assert_equal(c.shapes, every, "shapes")
-    assert_equal(c.threading, CONTEXT_PER_THREAD, "threading")
-    assert_equal(c.thread_affine, 0, "thread_affine")
-    assert_equal(c.transports, TRANSPORT_IN_PROCESS, "transports")
-    assert_equal(c.hosting, HOSTING_NONE, "hosting")
     assert_equal(c.devices, DEVICE_CPU, "devices")
     assert_equal(c.features, 0, "features")
     assert_equal(c.udf_class, CLASS_NATIVE, "udf_class")
-    assert_equal(c.global_lock, 0, "global_lock")
     assert_true(not c.has_memory_report, "memory_report")
 
 

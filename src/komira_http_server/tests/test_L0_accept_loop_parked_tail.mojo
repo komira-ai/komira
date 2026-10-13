@@ -8,10 +8,11 @@
 #
 #   P  the requests the round had read behind the parked one are answered
 #      after the resume, in order (they were consumed and dropped: a client
-#      that pipelined them waited forever);
+#      that pipelined them waited forever), and before any request read
+#      after the resume;
 #   K  a parked response that is the connection's last (`Connection: close`,
-#      a body not all in the buffer, a 400 or a 417) closes the connection
-#      when it drains (the resume returned it to reading).
+#      a body not all in the buffer, a 400, a 417 or a 431) closes the
+#      connection when it drains (the resume returned it to reading).
 #
 # Same rig as test_L0_accept_loop_rounds.mojo: the server end of an AF_UNIX
 # socketpair, a write blocked by filling the server's send side to EAGAIN,
@@ -316,6 +317,24 @@ def test_parked_response_keeps_the_pipelined_requests() raises:
         assert_equal(rig.read(), rig.ok())
 
 
+def test_carried_requests_are_answered_before_new_reads() raises:
+    """Two GETs wait in the carry when a GET_CLOSE arrives after the resume.
+    The round answers the carried GETs first, then reads and answers the
+    GET_CLOSE and closes: four requests, three responses in order. A round
+    that read before serving the carry would answer the GET_CLOSE first and
+    close with the carried GETs never answered."""
+    for v in range(2):
+        var rig = _Rig(chained=v == 1)
+        assert_true(rig.park(String(GET) + GET + GET))
+        assert_equal(rig.reqs, Int64(1))
+        assert_true(rig.resume())
+        assert_equal(rig.read(), rig.ok())
+        _send(rig.peer, GET_CLOSE)
+        assert_false(rig.round())
+        assert_equal(rig.reqs, Int64(4))
+        assert_equal(rig.read(), rig.ok() + rig.ok() + rig.ok())
+
+
 # -----------------------------------------------------------------------------
 # K: a parked last response closes the connection once it drains.
 # -----------------------------------------------------------------------------
@@ -374,6 +393,20 @@ def test_parked_417_closes() raises:
         assert_true(rig.park(String(EXPECT) + GET))
         assert_equal(rig.reqs, Int64(0))
         _assert_resume_closes(rig, _error_bytes(417))
+
+
+def test_parked_431_closes() raises:
+    """A head that fills the receive buffer without ending is answered 431,
+    the conn's last response; parked, the resume closes the conn instead of
+    returning it to reading the rest of the oversized head."""
+    var pad = String()
+    for _ in range(REQ_BUF_BYTES):
+        pad += "a"
+    for v in range(2):
+        var rig = _Rig(chained=v == 1)
+        assert_true(rig.park(String("GET / HTTP/1.1\r\nX-Pad: ") + pad))
+        assert_equal(rig.reqs, Int64(0))
+        _assert_resume_closes(rig, _error_bytes(431))
 
 
 # -----------------------------------------------------------------------------

@@ -58,6 +58,7 @@ from komira_plan_expr.expr import (
 from komira_plan_expr.partition_expr import PartitionExpr
 from komira_plan_expr.partition_frame import PartitionFrame
 from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.udf_type import UdfType
 from komira_plan_ir.logical_plan import (
     AsofTolerance,
     LogicalPlan,
@@ -411,6 +412,19 @@ def test_single_child_nodes_without_expressions() raises:
     _gate_plan(ex, 1, _hs(8))
 
 
+def test_map_batches_walks_its_group_keys_and_child_and_a_step_is_a_leaf() raises:
+    """The frame UDF node descends its `group_by` (a subquery there holds a
+    leaf) and its child; a step has no child and no expression. Catches a
+    frame arm that skips either (a leaf under it would go unchecked) and a
+    step arm that walks something that is not there."""
+    var gb = List[Expr]()
+    gb.append(_subq(9))
+    var mb = LogicalPlan.map_batches(_bscan(10), 0, gb^, _schema())
+    _gate_plan(mb, 2, _hs(9, 10))
+    var st = LogicalPlan.step(0, List[ScalarValue](), _schema())
+    _gate_plan(st, 0, _hs())
+
+
 def test_join_walks_both_sides_and_the_residual() raises:
     var on = List[String]()
     on.append(String("a"))
@@ -578,6 +592,17 @@ def test_n_child_string_fn_walks_every_argument() raises:
     args.append(_col())
     args.append(_subq(3))
     _gate_expr(Expr.concat(args^), 2, _hs(1, 3))
+
+
+def test_udf_apply_walks_every_argument() raises:
+    """A call of a `UdfRef`: a subquery behind its first and last argument.
+    Catches an arm that walks only some arguments, or none."""
+    var args = List[Expr]()
+    args.append(_subq(1))
+    args.append(_col())
+    args.append(_subq(3))
+    var t = UdfType("r", ArrowType.INT64, DType.int64, True)
+    _gate_expr(Expr.udf_apply(0, t^, args^), 2, _hs(1, 3))
 
 
 def test_two_child_expressions_descend_both_sides() raises:

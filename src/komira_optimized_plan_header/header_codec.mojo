@@ -27,13 +27,15 @@
 # non-zero is true), so a scheduler and a host could read one header as two;
 # refusing them leaves one reading.
 #
-# Version 1 is the field set optimized_plan.proto declares today: every
-# header field it numbers, `WriteFormat` values 0-3 and `WriteCompression`
-# values 0-5. A header field the schema holds (`DeclaredNeeds.udfs`, `hints`,
+# Version 1 is every header field optimized_plan.proto numbers except
+# `DeclaredNeeds.udfs`, `WriteFormat` values 0-3 and `WriteCompression`
+# values 0-5. `DeclaredNeeds.udfs` is declared (a list of plan.proto's
+# `UdfRef`), but this walk has no rules for a `UdfRef`, so version 1 leaves
+# it out. That field, a header field the schema holds (`hints`,
 # `resources`, `scopes`; `PlanAdvice.estimates`, `udf_origins`,
-# `index_coverage`; `ScanStats.source`, `columns`) or reserves is a field
-# version 1 does not include, so a version-1 header that carries one is
-# understated. No version has been released yet; the first release fixes
+# `index_coverage`; `ScanStats.source`, `columns`) and a reserved one are
+# fields version 1 does not include, so a version-1 header that carries one
+# is understated. No version has been released yet; the first release fixes
 # version 1 for good (§9.2).
 # =============================================================================
 

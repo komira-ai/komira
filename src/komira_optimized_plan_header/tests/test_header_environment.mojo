@@ -120,7 +120,7 @@ def _releases() -> List[BaseRelease]:
 
 def _plan(format: UInt32, contract: UInt32, runtimes: List[RuntimeNeed]) -> OptimizedPlan:
     var stamp = ProducerStamp(_bytes(32, 0xAB), contract, List[UInt8](), "komira/python-sdk")
-    var needs = DeclaredNeeds(List[String](), False, runtimes.copy())
+    var needs = DeclaredNeeds([], List[String](), False, runtimes.copy())
     return OptimizedPlan(format, stamp^, _bytes(32, 0xCD), List[UInt8](), needs^, None, None, List[UInt8]())
 
 

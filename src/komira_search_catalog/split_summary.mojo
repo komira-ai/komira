@@ -64,10 +64,13 @@ def _get_lp_bytes(bytes: List[UInt8], mut off: Int) raises -> List[UInt8]:
     off += 8
     if n < 0:
         raise Error("metastore: negative length-prefix (corrupt)")
-    if off + n > len(bytes):
+    # `off <= len(bytes)` here (the i64 read just checked it), so the
+    # remaining count cannot go negative; `off + n` could overflow Int, so it
+    # is not compared, and the end offset is reported in UInt64.
+    if n > len(bytes) - off:
         raise Error(
             "metastore: truncated length-prefixed field ("
-            + String(off + n)
+            + String(UInt64(off) + UInt64(n))
             + " > "
             + String(len(bytes))
             + "; corrupt)"
