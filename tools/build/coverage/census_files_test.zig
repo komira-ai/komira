@@ -233,6 +233,21 @@ test "split writes each census file, adds what was reached to the marker, never 
     try std.testing.expect(!c.has("fresh/src/b/coverage_held"));
 }
 
+test "split keeps a hold on the metric a package did not reach while adding the one it did" {
+    var c = Case.init();
+    defer c.deinit();
+    // src/d: line 90%, branch 100%; holds line. src/e: line 100%, branch 75%; holds branch.
+    try c.put("census.tsv", head ++
+        "komira//src/d:d\tsrc/d\tlibrary\tOK\t9\t10\t4\t4\tno\tno\t-\t-\n" ++
+        "komira//src/e:e\tsrc/e\tlibrary\tOK\t10\t10\t3\t4\tno\tno\t-\t-\n");
+    try c.put("out/src/d/coverage_held", "# k\nline\n");
+    try c.put("out/src/e/coverage_held", "# k\nbranch\n");
+    var err: []const u8 = "";
+    try std.testing.expectEqual(@as(u8, 0), c.run(&.{ "split", "9900", "census.tsv", "out" }, &err));
+    try std.testing.expectEqualStrings("# k\nline\nbranch\n", try c.get("out/src/d/coverage_held"));
+    try std.testing.expectEqualStrings("# k\nline\nbranch\n", try c.get("out/src/e/coverage_held"));
+}
+
 test "split refuses a malformed marker it would add to, writing nothing" {
     var c = Case.init();
     defer c.deinit();

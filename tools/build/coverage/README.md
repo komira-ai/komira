@@ -708,9 +708,10 @@ mode. A package that reached it on a metric is held there: its own file,
 `<package>/coverage_held`, names each metric it holds, one per line,
 `line` or `branch`, after any `#` comment lines, with no number (so a
 change to one package's holds touches that package's directory alone).
-Anything else is refused naming the line (by covcheck, and for every
-package by the census check): a number, another word, a metric twice, a
-held metric of a test-only package. A package with no file holds nothing.
+Anything else is refused naming the line: a number, another word or a
+metric twice (by covcheck, and for every package by the census check),
+and a held metric of a test-only package (by covcheck). A package with
+no file holds nothing.
 A held metric below the target, or not measured, is a `Regression`, whose
 conclusion is `failure` in census and neutral mode too, so its gate fails
 and its conda package is not built (the library and its dependents still

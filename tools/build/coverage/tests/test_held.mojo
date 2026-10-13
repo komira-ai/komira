@@ -1,9 +1,11 @@
 from std.testing import assert_equal, assert_true
 
 from covcheck.analyze import FORMAT_LCOV, Analysis, Input, Options, Sources, analyze
+from covcheck.annotate import DiffCoverage
 from covcheck.held import Held, add_hold, parse_hold
 from covcheck.paths import RepoFiles, repo_files_of
 from covcheck.stats import Finding
+from covcheck.summary import render_summary
 
 # The holds (held.mojo; README.md, "The 99% threshold and holds"): the
 # marker's grammar and every refusal, and what a hold does to the findings
@@ -168,6 +170,14 @@ def test_not_held_at_the_target_is_a_notice() raises:
     # Held line: only branch is left to hold.
     var b = analyze(_report(4, 4, 2, 2), List[Input](), _repo(), _held(String("src/alpha"), String("line\n")), _sources(), _census())
     assert_equal(_kinds(b.info_findings), "ReachedTarget:branch")
+    # A test-only package (--info-package) is never told to hold a metric:
+    # it may not (add_hold refuses it). Defect: `not info` dropped from
+    # either metric's ReachedTarget.
+    var io = _census()
+    io.info_packages.append(String("src/alpha"))
+    var c = analyze(_report(4, 4, 2, 2), List[Input](), _repo(), Held(), _sources(), io)
+    assert_equal(_kinds(c.findings), "")
+    assert_equal(_kinds(c.info_findings), "")
 
 
 def test_a_hold_is_per_metric() raises:
@@ -235,6 +245,27 @@ def test_held_not_measured_fails_unless_nothing_to_cover() raises:
     assert_true(raised)
 
 
+def _held_column(text: String) raises -> String:
+    """The held column of src/alpha's summary row, src/alpha holding `text`."""
+    var a = analyze(_report(4, 4, 2, 2), List[Input](), _repo(), _held(String("src/alpha"), text), _sources(), _census())
+    var s = render_summary(a, List[String](), DiffCoverage(), False, String(""))
+    var row = String("| `src/alpha` | ")
+    var at = s.find(row)
+    assert_true(at >= 0, s)
+    var rest = String(s[byte=at:])
+    var line = String(rest.split("\n")[0])
+    var cells = line.split(" | ")
+    return String(cells[4])
+
+
+def test_summary_held_column() raises:
+    # The summary's held column names each metric held, branch alone
+    # included. Defect: a branch-only hold shown as `line`.
+    assert_equal(_held_column(String("branch\n")), "branch")
+    assert_equal(_held_column(String("line\n")), "line")
+    assert_equal(_held_column(String("line\nbranch\n")), "line, branch")
+
+
 def main() raises:
     test_marker_grammar()
     test_held_line_below_the_target_fails()
@@ -244,4 +275,5 @@ def main() raises:
     test_a_hold_is_per_metric()
     test_held_branch_not_measured_fails()
     test_held_not_measured_fails_unless_nothing_to_cover()
+    test_summary_held_column()
     print("test_held: PASS")
