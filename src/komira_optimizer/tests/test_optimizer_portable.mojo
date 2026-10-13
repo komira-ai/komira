@@ -409,7 +409,7 @@ def _plan_at(i: Int) raises -> LogicalPlan:
 
 def test_portable_output_renders_as_optimize_where_no_host_rule_applies() raises:
     """On seven plans (OR factoring, eager aggregation, SEMI pushdown, the
-    reorder/build-side swap, the IN-list rewrite, a decorrelated scalar
+    reorder and build-side recording, the IN-list rewrite, a decorrelated scalar
     subquery, a DPccp star) where `optimize` stamps no narrowing and records no
     request, `optimize_portable` renders byte for byte as `optimize`.
 

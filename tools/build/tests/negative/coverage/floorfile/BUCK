@@ -1,0 +1,39 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("//functional/coverage:defs.bzl", "cov_report_check")
+
+# Test 46. The floor a library's gate reads is its package's
+# coverage_floor.tsv, which mojo_library finds itself (_floor_kwargs in
+# komira//tools/build/mojo:coverage.bzl): covfile passes no
+# `coverage_floor`, unlike every fixture of the parent package. Its gate
+# (census mode) holds the floor of this directory's coverage_floor.tsv
+# (line 100.00%, no branch floor), so its result.json has the floor and no
+# finding. Were the file not found, the gate would have no row: a MissingRow
+# finding and no floor, and :covfile_result is red. GREEN:
+# tests//negative/coverage/floorfile:covfile_result (in
+# tests//negative/coverage:greens).
+mojo_library(
+    name = "covfile",
+    srcs = [
+        "covfile/__init__.mojo",
+        "covfile/full.mojo",
+    ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    coverage_gate = "komira//tools/build/coverage:cov_gate",
+    coverage_mode = "census",
+    test_srcs = ["tests/test_full.mojo"],
+)
+
+cov_report_check(
+    name = "covfile_result",
+    expect = [
+        '"conclusion":"neutral","mode":"census",',
+        '"package":{"package":"tools/build/tests/negative/coverage/floorfile","files":1,"unmeasured_files":0,"line_hit":1,"line_found":1,"line_bp":10000,',
+        '"line_floor_bp":10000,"branch_floor_bp":null}',
+        '"findings":[],"exemptions"',
+    ],
+    mode = "result",
+    reports = [":covfile[coverage][gate][result]"],
+    script = "//functional/coverage:report.sh",
+    visibility = ["//negative/coverage:greens"],
+)

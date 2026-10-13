@@ -44,6 +44,13 @@ mojo_library(
   staged source directory can never shadow a package. A package reaches the
   compiler only through `deps`
   ([`tests/negative/missing_dep`](../tests/negative/missing_dep/BUCK) fails to compile).
+- **`closure_excludes`** (optional) lists import names of packages that
+  must not be in the closure of `deps`, directly or through another
+  package. Analysis fails when one is, so neither the library nor anything
+  depending on it builds: a boundary the build graph holds, such as
+  `komira_optimized_plan_header`'s exclusion of `komira_plan_wire`
+  (docs/design/optimized_plan.md §4.1). It reads `deps` only; `test_deps`
+  reach the welded tests, not consumers.
 - **The gate.** Each file in `test_srcs` is built from that one file against
   the ungated package (at `test_optimization_level`, default `-O1`; see [Optimization levels](#optimization-levels)) and run;
   a failing test prints `GATED TEST FAILED: <label> (exit N)`. The public
