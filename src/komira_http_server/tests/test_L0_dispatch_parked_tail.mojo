@@ -18,7 +18,9 @@
 #      request (the round after the resume answers it and closes);
 #   I  a parked 100 Continue keeps its request and the requests behind it
 #      (the round returned before dispatching anything);
-#   B  a chunked body read from the socket is not carried as a request.
+#   B  a chunked body read from the socket is not carried as a request;
+#   F  a chunk-framing 400 behind a parked 100 Continue queues behind it
+#      (100 then 400 on the wire) and the resume closes the connection.
 #
 # Rig: the server end of an AF_UNIX socketpair whose send side is filled to
 # EAGAIN so the next write parks; the peer then reads the filler back. Both
@@ -43,6 +45,7 @@ from komira_async.runtime.blocking_runtime import BlockingRuntime
 from komira_async.runtime.runtime_trait import Runtime
 from komira_async.runtime.tcp_stream import TcpStream
 from komira_http_core.codec.h1.limits import ParseLimits
+from komira_http_core.codec.h1.parser import build_error_response_bytes
 from komira_http_core.codec.types import (
     HttpRequest,
     HttpResponse,
@@ -227,6 +230,13 @@ def _read_all(fd: Int32) raises -> String:
             return _text(got)
         for i in range(n):
             got.append(buf[i])
+
+
+def _error_bytes(status: Int) -> String:
+    """Both rounds' error response with `status`."""
+    var b = List[UInt8]()
+    build_error_response_bytes(UInt16(status), b)
+    return _text(b)
 
 
 def _ok(path: String) -> String:
@@ -458,6 +468,45 @@ def test_chunked_body_behind_a_parked_response_is_not_carried() raises:
         assert_true(rig.round())
         assert_equal(rig.reqs, Int64(1))
         assert_equal(rig.read(), _ok("/a"))
+
+
+# -----------------------------------------------------------------------------
+# F: a chunk-framing 400 behind a parked 100 Continue.
+# -----------------------------------------------------------------------------
+
+
+def _expect_bad_chunks() -> String:
+    """An Expect: 100-continue chunked POST whose framing is malformed
+    ('zz' is not a hex chunk size), all in one read, then GET /b."""
+    return String(
+        "POST /a HTTP/1.1\r\nHost: example.com\r\nExpect: 100-continue\r\n"
+        "Transfer-Encoding: chunked\r\n\r\nzz\r\nnope\r\n0\r\n\r\n"
+    ) + _get("/b")
+
+
+def test_chunk_400_queues_behind_a_parked_interim() raises:
+    """The 100 Continue parks, then the body's framing is malformed: the
+    400 queues behind the parked interim, so the peer reads the 100 and
+    then the 400. Writing the 400 directly re-parks it over the pending
+    100 (the interim is lost, or the 400 overtakes it)."""
+    for v in range(VARIANTS):
+        var rig = _Rig(v)
+        assert_true(rig.park(_expect_bad_chunks()))
+        assert_equal(rig.reqs, Int64(0))
+        _ = rig.resume()
+        assert_equal(rig.read(), String(CONTINUE) + _error_bytes(400))
+
+
+def test_parked_chunk_400_closes() raises:
+    """The 400 parked behind the 100 Continue is the conn's last response:
+    once both drain the resume asks the caller to close (False, pending_len
+    -1) instead of returning to reading, and GET /b is never answered."""
+    for v in range(VARIANTS):
+        var rig = _Rig(v)
+        assert_true(rig.park(_expect_bad_chunks()))
+        assert_false(rig.resume())
+        assert_equal(rig.entry.pending_len(), -1)
+        assert_equal(rig.reqs, Int64(0))
 
 
 def main() raises:
