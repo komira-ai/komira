@@ -32,10 +32,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # test_wif_mint runs both legs over komira_http_core's ScriptedConnector (no
 # socket, AWS's documentation key pair): the exact header sets and bodies on
 # the wire, the twice-encoded subject token, the token cache, signJwt never
-# dialed after a refused or tokenless leg 1, and failure messages holding no
-# token and no body byte. test_external_account runs the external_account
+# dialed after a refused or tokenless leg 1, failure messages holding no
+# token and no body byte, and each host override refused with a bad byte
+# first, inside or last. test_external_account runs the external_account
 # flow over ScriptedConnector: a file-sourced and a URL-sourced subject, each
-# with and without impersonation, the whole STS and generateAccessToken bodies
+# with and without impersonation, a URL source's headers each on the GET
+# once in the file's order, the whole STS and generateAccessToken bodies
 # against hand-written text, the file's own token_url and impersonation URL
 # on the wire (IP-literal hosts and a non-default path, so no DNS), and each
 # refused file naming its field.
