@@ -35,9 +35,19 @@
 #       under the loader's record; a validation without conda-forge gets a
 #       failed `openssl` row naming it and runs no openssl install;
 #   (alone) `alone_pins`: a metapackage's native members each get an
-#       environment of their own (a `lib_files` library, and a library
-#       requiring a system codec), a plain library does not; a validation
-#       installing one native package by itself needs none;
+#       environment of their own (a `lib_files` library, and a library with
+#       metadata.json `dlopen` rows, with its codec's requirement or
+#       without), a plain library does not; a validation installing one
+#       native package by itself needs none;
+#   (codec) a library shipping no native file whose `dlopen` rows name
+#       liblz4.so.1 and whose depends lack lz4-c (slice 4's planted defect)
+#       is native: installed by itself, its README runs under the loader's
+#       record and the codec loaded from /usr/lib makes `loaded_from` red;
+#       as a member of a set, installed alone (`_alone_rows`), the same
+#       record makes its alone `loaded_from` red, with the requirement
+#       missing and with it declared. Mutants: `is_native` deciding from
+#       the requirement (the missing-requirement cases have no row), and
+#       `_alone_rows` returning for a pin with no `lib_files`;
 #   (load) `load_findings`: every path LOADED passes; a path not reported
 #       and a run that failed with no line are findings.
 #   (gen) the two generated programs equal tests/generated/'s copies, which the
@@ -110,6 +120,19 @@ comptime README: String = (
     " -Xlinker -rpath -Xlinker '$ORIGIN/../lib' prog.mojo -o $CONDA_PREFIX/bin/prog\n"
     "```\n"
 )
+# komira_alpha as a package that ships no native file and opens a system
+# codec (komira_lz4's shape): its README has no link block
+comptime README_CODEC: String = (
+    "# komira_alpha\n"
+    "\n"
+    "```mojo\n"
+    "from std.testing import assert_equal\n"
+    "from komira_alpha import alpha\n"
+    "\n"
+    "assert_equal(alpha(1), 2)\n"
+    "```\n"
+)
+comptime LZ4_ROW: String = '[{"requirement":"lz4-c >=1.9.3,<2","soname":"liblz4.so.1"}]'
 
 
 def _tmp(sub: String) raises -> String:
@@ -241,7 +264,10 @@ struct Fx(Movable):
     var host: EnvHost
     var so: List[UInt8]
 
-    def __init__(out self, sub: String) raises:
+    def __init__(out self, sub: String, codec_only: Bool = False) raises:
+        """`codec_only`: komira_alpha ships no native file, has `dlopen`
+        rows for liblz4.so.1 and lacks its `lz4-c` requirement (the planted
+        defect of slice 4), and its README has no link block."""
         var root = _tmp(sub)
         var so = _elf()
         _write_bytes(root + String("/so"), so)
@@ -249,17 +275,24 @@ struct Fx(Movable):
         var r = ExampleRelease()
         r.set_meta(
             String("komira_alpha"), String("doc_files"),
-            String('[{"path":"share/doc/komira_alpha/README.md","sha256":"') + _sha(String(README)) + String('"}]'),
+            String('[{"path":"share/doc/komira_alpha/README.md","sha256":"')
+            + _sha(String(README_CODEC) if codec_only else String(README)) + String('"}]'),
         )
-        r.set_meta(
-            String("komira_alpha"), String("lib_files"),
-            String("[") + _lib_row(String("link"), String(LINK), so_sha) + String(",")
-            + _lib_row(String("shared"), String(SO), so_sha) + String("]"),
-        )
-        r.set_meta(
-            String("komira_alpha"), String("depends"),
-            String('["__linux","mojo-compiler ==') + r.version + String('","__glibc >=2.34"]'),
-        )
+        if codec_only:
+            r.set_meta(String("komira_alpha"), String("dlopen"), String(LZ4_ROW))
+            r.set_meta(
+                String("komira_alpha"), String("depends"), String('["__linux","mojo-compiler ==') + r.version + String('"]')
+            )
+        else:
+            r.set_meta(
+                String("komira_alpha"), String("lib_files"),
+                String("[") + _lib_row(String("link"), String(LINK), so_sha) + String(",")
+                + _lib_row(String("shared"), String(SO), so_sha) + String("]"),
+            )
+            r.set_meta(
+                String("komira_alpha"), String("depends"),
+                String('["__linux","mojo-compiler ==') + r.version + String('","__glibc >=2.34"]'),
+            )
         var p = write_example_inputs(r, root, String("gamma"))
         makedirs(root + String("/repo"), exist_ok=True)
         makedirs(root + String("/tools"), exist_ok=True)
@@ -582,10 +615,11 @@ def test_a_failing_openssl_program_is_red() raises:
 # ---- which packages get an environment of their own -------------------------------
 
 
-def _pin(name: String, library: Bool, lib_files: Bool, depends: String = String("")) -> InstallPin:
+def _pin(name: String, library: Bool, lib_files: Bool, depends: String = String(""), dlopen: Bool = False) -> InstallPin:
     var p = InstallPin(name.copy())
     p.is_library = library
     p.has_lib_files = lib_files
+    p.has_dlopen = dlopen
     if depends.byte_length() > 0:
         p.depends.append(depends.copy())
     return p^
@@ -597,12 +631,15 @@ def test_each_native_member_of_a_set_is_installed_alone() raises:
     var pins = List[InstallPin]()
     pins.append(_pin(String("komira"), False, False))
     pins.append(_pin(String("komira_alpha"), True, True))
-    pins.append(_pin(String("komira_lz4"), True, False, String("lz4-c >=1.9.3,<2")))
+    pins.append(_pin(String("komira_lz4"), True, False, String("lz4-c >=1.9.3,<2"), dlopen=True))
     pins.append(_pin(String("komira_plain"), True, False, String("__linux")))
+    # dlopen rows and no requirement: the defect the alone row is for
+    pins.append(_pin(String("komira_zlib"), True, False, String("__linux"), dlopen=True))
     var got = alone_pins(named, pins)
-    assert_equal(len(got), 2)
+    assert_equal(len(got), 3)
     assert_equal(got[0], 1)
     assert_equal(got[1], 2)
+    assert_equal(got[2], 4)
     # one native package installed by itself needs no second environment
     var one = List[InstallPin]()
     one.append(_pin(String("komira_alpha"), True, True))
@@ -727,6 +764,118 @@ def test_a_native_member_of_a_set_is_checked_alone() raises:
     )
     assert_true(_env_has(p.inner.calls[1], String("PIXI_CACHE_DIR=") + work + String("/cache")))
     assert_true(_env_has(p.inner.calls[3], String("LD_DEBUG_OUTPUT=") + awork + String("/out/readme_komira_alpha.ld")))
+
+
+# ---- (codec) a package that opens a system codec and ships no native file ---------
+
+
+comptime LZ4_TRACE: String = (
+    "     103:\tcalling init: /lib/x86_64-linux-gnu/libc.so.6\n"
+    "     103:\tcalling init: /usr/lib/x86_64-linux-gnu/liblz4.so.1\n"
+)
+
+
+def test_a_codec_package_without_its_requirement_is_native() raises:
+    # metadata.json's dlopen rows make komira_alpha native although its
+    # depends lack lz4-c: the README run is under the loader's record, and
+    # the codec loaded from /usr/lib makes loaded_from red
+    var fx = Fx(String("codec"), codec_only=True)
+    var p = Played(fx.so.copy())
+    var install = ScriptedStep(install_env_argv(fx.work()), exit_code=Int32(0), stderr_text=String("installed\n"))
+    install.writes(_record_name(fx), _alpha_record(fx))
+    install.writes(String(ENV) + String("/conda-meta/mojo-compiler-1.0.0-release.json"), _compiler_record())
+    install.writes(String(ENV) + String("/share/doc/komira_alpha/README.md"), String(README_CODEC))
+    install.writes(String(ENV) + String("/lib/mojo/komira_alpha.mojoc"), String("komira_alpha"))
+    p.inner.expect(install^)
+    var readme = ScriptedStep(run_program_argv(fx.work(), String(PROGRAM), List[String]()), stdout_text=String(COUNT))
+    readme.writes(String("out/readme_komira_alpha.ld.103"), String(LZ4_TRACE))
+    p.inner.expect(readme^)
+    var row = _validate(fx, Script(fx), p)
+    assert_equal(p.inner.remaining(), 0)
+    assert_equal(
+        _order(row), String("release network channel channel host scratch pixi install readme payload program loaded_from")
+    )
+    assert_equal(
+        _failed(row),
+        String("loaded_from: loaded_from: readme_komira_alpha: liblz4.so.1 was loaded from /usr/lib/x86_64-linux-gnu/liblz4.so.1, not from ")
+        + fx.env() + String("/lib/"),
+    )
+
+
+def _codec_alone(sub: String, var depends: List[String]) raises -> List[ResultValidationCheck]:
+    """`run_native_rows` for a set whose member komira_lz4 ships no native
+    file and has dlopen rows (`depends` its requirements); its README, run
+    alone, loads liblz4.so.1 from /usr/lib."""
+    var root = _tmp(sub)
+    var lz4 = InstallPin(String("komira_lz4"))
+    lz4.version = String("1.0.0")
+    lz4.build = String("h0_1")
+    lz4.subdir = String("linux-64")
+    lz4.is_library = True
+    lz4.import_name = String("komira_lz4")
+    lz4.has_dlopen = True
+    lz4.depends = depends^
+    var meta = InstallPin(String("komira"))
+    meta.version = String("1.0.0")
+    meta.build = String("h0_1")
+    meta.subdir = String("linux-64")
+    var named = List[InstallPin]()
+    named.append(meta.copy())
+    var pins = List[InstallPin]()
+    pins.append(meta.copy())
+    pins.append(lz4^)
+    var dir = root + String("/install-set")
+    makedirs(dir + String("/work/out"), exist_ok=True)
+    var program = ReadmeProgram()
+    program.file = String("readme_komira_lz4.mojo")
+    program.text = String("the README runner, played\n")
+    program.package = String("komira_lz4")
+    program.display = String("src/komira_lz4/README.md")
+    var programs = List[ReadmeProgram]()
+    programs.append(program^)
+    var v = StageValidation(7)
+    v.name = String("install-set")
+    v.kind = String(VALIDATION_KIND_CONDA_INSTALL_ENV)
+    v.installs.append(String("komira"))
+    v.compiler_channel = String(COMPILER)
+    var p = ScriptedRunner()
+    var awork = dir + String("/alone/komira_lz4/work")
+    var install = ScriptedStep(install_env_argv(awork))
+    install.writes(String(ENV) + String("/conda-meta/komira_lz4-1.0.0-h0_1.json"), String('{"name":"komira_lz4"}'))
+    p.expect(install^)
+    var readme = ScriptedStep(run_program_argv(awork, String("readme_komira_lz4.mojo"), List[String]()), stdout_text=String(COUNT))
+    readme.writes(String("out/readme_komira_lz4.ld.103"), String(LZ4_TRACE))
+    p.expect(readme^)
+    var checks = List[ResultValidationCheck]()
+    run_native_rows(p, v, String(CHANNEL), String("1.0.0"), dir, named, pins, programs, checks)
+    assert_equal(p.remaining(), 0)
+    var order = String("")
+    for i in range(len(checks)):
+        if i > 0:
+            order += String(" ")
+        order += checks[i].check
+    # no lib_files: no per-library rows, no build, no load; only alone
+    assert_equal(order, String("alone loaded_from"))
+    assert_true(checks[0].ok, checks[0].got)
+    assert_false(checks[1].ok)
+    assert_equal(
+        checks[1].got,
+        String("loaded_from: komira_lz4 alone: liblz4.so.1 was loaded from /usr/lib/x86_64-linux-gnu/liblz4.so.1, not from ")
+        + awork + String("/") + String(ENV) + String("/lib/"),
+    )
+    return checks^
+
+
+def test_a_codec_package_missing_its_requirement_is_red_alone() raises:
+    # slice 4's planted defect: komira_lz4 without lz4-c, installed alone
+    var depends: List[String] = [String("__linux")]
+    _ = _codec_alone(String("codec-missing"), depends^)
+
+
+def test_a_codec_only_package_loading_the_system_codec_is_red_alone() raises:
+    # the requirement declared, the codec still loaded from /usr/lib
+    var depends: List[String] = [String("__linux"), String("lz4-c >=1.9.3,<2")]
+    _ = _codec_alone(String("codec-declared"), depends^)
 
 
 def test_load_findings() raises:
