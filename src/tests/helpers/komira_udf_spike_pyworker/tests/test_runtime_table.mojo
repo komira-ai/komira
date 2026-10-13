@@ -40,7 +40,12 @@
 #     context runs;
 #   - init refuses a NULL, short or other-major host with ERR_ABI; a copy
 #     of the library loaded by absolute path from another directory looks
-#     for the zygote's interpreter in that directory.
+#     for the zygote's interpreter in that directory;
+#   - the zygote ends during a LOAD (a module that exits the process that
+#     imports it): load is ERR_INSTANCE_LOST naming the exit status (the
+#     engine is the zygote's parent and reaps it), a later validate is
+#     refused the same way, and shutdown takes under a second (an engine
+#     that does not reap its own child, or names it wrongly).
 #
 # Mutants planted: komira_udf_pyrt.py reading the clock after row 0 and then
 # every 1024 rows (as it did before): red on deadline_after_row_1 only (the
@@ -139,4 +144,14 @@ def main() raises:
     for k in ["init_host_null", "init_host_short", "init_host_major"]:
         got(r, k, a, "this runtime speaks ABI major 1")
     got(r, "init_copy", Int(ERR_LOAD), "init: the zygote: posix_spawn", 100)
+
+    # The zygote ends during a LOAD: named by its exit status (the engine is
+    # its parent and reaps it), every later request refused at once, and
+    # shutdown prompt.
+    r = probe_table("./pyworker_zygote.so", "zygote_exit")
+    got(r, "zygote_exit_load", Int(ERR_INSTANCE_LOST), "UDF_WORKER_CRASHED: worker ", 0)
+    got(r, "zygote_exit_load", Int(ERR_INSTANCE_LOST), " exited with status 3", 0)
+    got(r, "zygote_exit_validate", Int(ERR_INSTANCE_LOST), " exited with status 3", 0)
+    var ms = num(r.get("zygote_exit_shutdown"), "value")
+    assert_true(ms < 1000, "shutdown after the zygote ended took " + String(ms) + " ms")
     print("test_runtime_table: ok")

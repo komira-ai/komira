@@ -39,7 +39,10 @@
 #     with its own id); nulls at a bitmap byte's edges; a user
 #     error's Python traceback; a result over the reply heap; three clock
 #     reads under 1.5 s; no engine heap growth over 200 refusals, loads and
-#     instances; the library opened by its absolute path.
+#     instances, nor over validates taken, calls whose user code raises
+#     (the ERROR reply, its message and trace), contexts opened and closed
+#     (the fork, its reply), and inits with shutdowns (blocks never freed,
+#     found by the sweep); the library opened by its absolute path.
 #
 # Mutants planted: ipc_codec.c pyw_ipc_batch_write taking every column's
 # offset from the first column: red on two_args. proxy_runtime.c remote_udf
@@ -137,6 +140,11 @@ def main() raises:
     assert_true(lk // 1000000 < 400, "refused validates grew the heap by " + String(lk // 1000000))
     assert_true((lk // 1000) % 1000 < 400, "load and unload grew the heap by " + String((lk // 1000) % 1000))
     assert_true(lk % 1000 < 400, "open and close instance grew the heap by " + String(lk % 1000))
+    var lm = probe_calls("./pyworker_zygote.so", "leaks_more")
+    for k in ["leak_validate_ok", "leak_raised_call", "leak_context", "leak_init"]:
+        var c = lm.get(k)
+        assert_equal(num(c, "status"), 0, k + ": " + text(c, "message"))
+        assert_true(num(c, "value") < 400, k + ": the engine's heap grew by " + String(num(c, "value")) + " bytes")
 
     for v in ["zygote", "pyarrow"]:
         var t = probe_calls("./pyworker_" + v + ".so", "two_args")

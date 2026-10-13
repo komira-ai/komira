@@ -190,6 +190,7 @@ PYWORKER = {f: "pyworker/" + f for f in [
     "komira_udf_pyworker.py",
     "kudf_ipc.py",
     "udf_worker_badimport.py",
+    "udf_worker_exit_on_import.py",
     "udf_worker_fixtures.py",
     "udf_worker_np.py",
 ]}

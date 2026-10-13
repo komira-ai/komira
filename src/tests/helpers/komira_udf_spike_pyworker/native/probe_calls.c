@@ -32,6 +32,9 @@
  *   clock_time 3000 rows read the host clock 3 times: the call's ms.
  *   leaks      the engine's heap around 200 refused validates, loads with
  *              unloads, and instances opened and closed: bytes grown.
+ *   leaks_more the same around 200 validates taken, 200 calls whose user code
+ *              raises, 50 contexts opened and closed, and 25 inits with
+ *              shutdowns: bytes grown, a case each.
  *   abs_path   the library opened by its absolute path, then two_args.
  * Each case is one member of the JSON object kpw_probe_calls returns (as
  * probe_json.h); kpw_free (drive.c) frees it.
@@ -82,6 +85,7 @@ struct eng {
   const komira_udf_runtime* t;
   komira_udf_rt* rt;
   komira_udf_host host;
+  __typeof__(&komira_udf_runtime_init_v1) init; /* the library's init, for leaks_more */
 };
 
 static void take(komira_udf_error* e, char* into, size_t n) {
@@ -236,6 +240,7 @@ static int open_engine(struct eng* e, const char* lib, struct pj* j) {
   e->host = (komira_udf_host){sizeof(komira_udf_host), KOMIRA_UDF_ABI_MAJOR, KOMIRA_UDF_ABI_MINOR, NULL,
                               h_reserve, h_release, h_now, h_log};
   komira_udf_error err = ERR_INIT;
+  e->init = init;
   e->t = init(&e->host, &e->rt, &err);
   if (e->t == NULL) {
     char m[512];
@@ -783,6 +788,74 @@ static void group_leaks(struct eng* e, struct pj* j) {
   e->t->unload(u);
 }
 
+/* The engine's heap around rounds the leaks group does not make, one case
+ * each (the value: bytes grown after a warm-up, capped at 99999):
+ *   leak_validate_ok  a validate the worker takes (the spec's body built and
+ *                     freed);
+ *   leak_raised_call  a call whose user code raises (an ERROR reply with a
+ *                     message and a trace, the error released);
+ *   leak_context      open_context and close_context (a fork, its reply and
+ *                     warning, the context's channel and struct);
+ *   leak_init         init and shutdown (DESCRIBE's reply and strings, the
+ *                     zygote's channel, the rt struct). */
+static void leak_case(struct pj* j, const char* name, size_t before) {
+  int64_t g = (int64_t)heap_used() - (int64_t)before;
+  pj_case(j, name, 0, "", g < 0 ? 0 : g > 99999 ? 99999 : g);
+}
+
+static void group_leaks_more(struct eng* e, struct pj* j) {
+  struct spec_block sb;
+  make_spec(&sb, "udf_fixtures:double", 1);
+  size_t before = 0;
+  for (int k = 0; k < 220; k++) {
+    if (k == 20) before = heap_used();
+    komira_udf_error err = ERR_INIT;
+    (void)e->t->validate(e->rt, &sb.spec, &err);
+    if (err.release) err.release(&err);
+  }
+  leak_case(j, "leak_validate_ok", before);
+
+  komira_udf_udf* u = NULL;
+  komira_udf_context* c = NULL;
+  komira_udf_instance* i = NULL;
+  if (setup(e, j, "leak_raised_call", "udf_fixtures:raise_type_error", 1, &u, &c, &i)) {
+    const struct col_spec cs[1] = {{0, 2, 0, 0, -1}};
+    for (int k = 0; k < 220; k++) {
+      if (k == 20) before = heap_used();
+      int released = 0;
+      struct ArrowDeviceArray args, out;
+      make_args(&args, 2, 1, cs, &released);
+      char m[300];
+      int64_t ms;
+      if (call(e, i, &args, &out, m, sizeof(m), -1, 0, &ms, sizeof(komira_udf_call)) == KOMIRA_UDF_OK)
+        out.array.release(&out.array);
+    }
+    leak_case(j, "leak_raised_call", before);
+    e->t->close_instance(i);
+    e->t->unload(u);
+  }
+
+  for (int k = 0; k < 60; k++) {
+    if (k == 10) before = heap_used();
+    komira_udf_context* x = NULL;
+    komira_udf_error err = ERR_INIT;
+    if (e->t->open_context(e->rt, 0, &x, &err) == KOMIRA_UDF_OK) e->t->close_context(x);
+    if (err.release) err.release(&err);
+  }
+  if (c) e->t->close_context(c);
+  leak_case(j, "leak_context", before);
+
+  for (int k = 0; k < 30; k++) {
+    if (k == 5) before = heap_used();
+    komira_udf_rt* rt = NULL;
+    komira_udf_error err = ERR_INIT;
+    const komira_udf_runtime* t = e->init(&e->host, &rt, &err);
+    if (t != NULL) t->shutdown(rt);
+    if (err.release) err.release(&err);
+  }
+  leak_case(j, "leak_init", before);
+}
+
 /* The library opened by its absolute path: init finds its own directory
  * from it (no working directory in front), and a call answers. */
 static void group_abs_path(struct pj* j, const char* lib) {
@@ -808,12 +881,14 @@ static int more_group(struct eng* e, struct pj* j, const char* group) {
   else if (strcmp(group, "big") == 0) group_big(e, j);
   else if (strcmp(group, "clock_time") == 0) group_clock_time(e, j);
   else if (strcmp(group, "leaks") == 0) group_leaks(e, j);
+  else if (strcmp(group, "leaks_more") == 0) group_leaks_more(e, j);
   else return 0;
   return 1;
 }
 
 /* `lib`: a runtime library; `group`: two_args, late_load, refusals, kills,
- * after_cancel, two_udfs, many_calls, nulls, trace, big, clock_time, leaks or
+ * after_cancel, two_udfs, many_calls, nulls, trace, big, clock_time, leaks,
+ * leaks_more or
  * abs_path. */
 char* kpw_probe_calls(const char* lib, const char* group) {
   struct pj j = {0};

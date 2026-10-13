@@ -520,13 +520,35 @@ static void init_cases(struct eng* e, struct pj* j, const char* lib) {
   rec(j, "init_copy", t == NULL ? (int32_t)err.code : 0, &err, names_dir * 100);
 }
 
+/* The zygote ends during a LOAD (the module exits the process that imports
+ * it, status 3): load returns the zygote's end as the engine's child, by its
+ * status; a later validate is refused at once (the channel is dead); and
+ * shutdown returns within a second (the zygote is already reaped). */
+static void zygote_exit_cases(struct eng* e, struct pj* j) {
+  komira_udf_error err = ERR_INIT;
+  struct specb b;
+  mk(&b, "udf_worker_exit_on_import:f", 1, "l");
+  komira_udf_udf* u = NULL;
+  int32_t rc = e->t->load(e->rt, &b.spec, &u, &err);
+  rec(j, "zygote_exit_load", rc, &err, u != NULL);
+  mk(&b, "udf_worker_fixtures:worker_pid", 1, "l");
+  rc = e->t->validate(e->rt, &b.spec, &err);
+  rec(j, "zygote_exit_validate", rc, &err, 0);
+  int64_t t0 = mono();
+  e->t->shutdown(e->rt);
+  pj_case(j, "zygote_exit_shutdown", 0, "", (mono() - t0) / 1000000);
+}
+
 /* `lib`: a runtime library; `group`: specs, entries, builds, builds_long,
- * deadline, many or init. */
+ * deadline, many, init or zygote_exit (which shuts the runtime down
+ * itself). */
 char* kpw_probe_table(const char* lib, const char* group) {
   struct pj j = {0};
   pj_open(&j);
   struct eng e;
-  if (open_engine(&e, lib, &j)) {
+  if (open_engine(&e, lib, &j) && strcmp(group, "zygote_exit") == 0) {
+    zygote_exit_cases(&e, &j);
+  } else if (e.t != NULL) {
     if (strcmp(group, "specs") == 0) spec_cases(&e, &j);
     else if (strcmp(group, "entries") == 0) entry_cases(&e, &j);
     else if (strcmp(group, "builds") == 0) build_cases(&e, &j, 0);
