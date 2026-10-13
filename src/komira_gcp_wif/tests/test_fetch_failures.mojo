@@ -16,6 +16,9 @@
 #      at 299 (a 300 with a token-shaped body is refused, a 299 accepted),
 #      and PostReply.is_success at 199/200/299/300; a token file's trailing
 #      newline reaches the STS form.
+#      A refused STS exchange appends an OAuth code only when the
+#      body names a listed one (the whole message, both ways).
+#      The credential_source URL's 2xx range ends at 299 too.
 #   §4 AwsWifTokenFetcher's `audience` and `set_scope`: the scope set is the
 #      one on the wire, the default is not.
 #
@@ -253,10 +256,13 @@ def test_an_unreadable_source_file_never_dials_sts() raises:
 
     var sts_cap = _capture()
     var f = _ea_fetcher(False, MapFiles(), sts_cap, List[UInt8](), _capture())
-    with assert_raises(
-        contains="komira_gcp_wif: the credential_source file cannot be read"
-    ):
+    var msg = String("NOT REFUSED")
+    try:
         _ = f.fetch(Int64(NOW_MS))
+    except e:
+        msg = String(e)
+    # The whole message: the path the file names is not repeated.
+    assert_equal(msg, "komira_gcp_wif: the credential_source file cannot be read")
     assert_equal(len(sts_cap[]), 0)
 
 
@@ -390,6 +396,102 @@ def test_a_trailing_newline_in_the_token_file_is_sent() raises:
     )
 
 
+def _url_source_fetch(status_line: String) raises -> String:
+    """A text-mode `credential_source.url` (plain http) answering
+    `status_line` with the OIDC token as its body: `SUBJECT <subject_token
+    on the STS form>` when the fetch succeeds, the error text when it does
+    not (then STS must not have been dialed)."""
+    var text = (
+        String('{"type":"external_account","audience":"') + AUDIENCE
+        + '","subject_token_type":"' + JWT_SUBJECT_TOKEN_TYPE
+        + '","token_url":"https://192.0.2.1/v1/token",'
+        + '"credential_source":{"url":"http://192.0.2.9/token"}}'
+    )
+    var sts_cap = _capture()
+    var f = EaFetcher(
+        parse_external_account(text),
+        HttpClient[ScriptedConnector].with_request_timeout_us(
+            ScriptedConnector.with_stream(
+                ScriptedStream.from_read_script_with_capture(
+                    _http(status_line, String(OIDC)), _capture()
+                )
+            ),
+            TIMEOUT_US,
+        ),
+        _tls_client(_sts_ok(), sts_cap),
+        _tls_client(List[UInt8](), _capture()),
+        MapFiles(),
+        FixedWallClock(Int64(NOW_S)),
+    )
+    try:
+        assert_equal(f.fetch(Int64(NOW_MS)).token, FEDERATED)
+    except e:
+        assert_equal(len(sts_cap[]), 0)
+        return String(e)
+    return String("SUBJECT ") + _form_value(
+        _body_of(_text(sts_cap)), String("subject_token")
+    )
+
+
+def test_the_source_urls_2xx_range_ends_at_299() raises:
+    """The credential_source URL's answer is the subject token only under a
+    2xx status: under `299` its body goes to STS; under `300 Multiple
+    Choices` (a final answer: the client follows no redirect) the same body
+    is refused, naming the status alone, and STS is never dialed."""
+    assert_equal(_url_source_fetch(String("299 Edge")), String("SUBJECT ") + OIDC)
+    assert_equal(
+        _url_source_fetch(String("300 Multiple Choices")),
+        "komira_gcp_wif: the credential_source url answered HTTP 300",
+    )
+
+
+def _sts_refusal(status_line: String, body: String) raises -> String:
+    """What a fetch raises when STS answers `status_line` with `body` (the
+    file names no impersonation, so IAM Credentials is never dialed)."""
+    var f = EaFetcher(
+        parse_external_account(_ea_text(False)),
+        _tls_client(List[UInt8](), _capture()),
+        _tls_client(_http(status_line, body), _capture()),
+        _tls_client(List[UInt8](), _capture()),
+        _with_token_file(),
+        FixedWallClock(Int64(NOW_S)),
+    )
+    try:
+        _ = f.fetch(Int64(NOW_MS))
+    except e:
+        return String(e)
+    return String("NOT REFUSED")
+
+
+def test_a_refused_exchange_adds_only_a_listed_oauth_code() raises:
+    """The whole refusal of the STS exchange. The control: a 400 whose body
+    is an RFC 6749 error with a listed code ends `, OAuth error
+    invalid_grant`. A 401 whose body names no `error`, and a 503 with no
+    body, end at komira_gcp_core's status text: nothing is appended, not
+    even the separator, and no byte of `error_description` is repeated."""
+    var P = String("komira_gcp_wif: external account federation refused: POST sts.v1.token: HTTP ")
+    var NO_ENV = String(", no google.rpc.Status envelope, body ")
+    var coded = String('{"error":"invalid_grant","error_description":"SECRET-DESC"}')
+    assert_equal(
+        _sts_refusal(String("400 Bad Request"), coded),
+        String(P) + "400, INVALID_ARGUMENT (code 3)" + NO_ENV
+        + String(coded.byte_length()) + " bytes, OAuth error invalid_grant",
+    )
+    var uncoded = String('{"error_description":"SECRET-DESC"}')
+    var msg = _sts_refusal(String("401 Unauthorized"), uncoded)
+    assert_equal(
+        msg,
+        String(P) + "401, UNAUTHENTICATED (code 16)" + NO_ENV
+        + String(uncoded.byte_length()) + " bytes",
+    )
+    assert_false("SECRET-DESC" in msg, msg)
+    var empty = _sts_refusal(String("503 Service Unavailable"), String(""))
+    assert_true(empty.startswith(String(P) + "503, UNAVAILABLE (code 14)"), empty)
+    assert_false(empty.endswith(","), empty)
+    assert_false(empty.endswith(", "), empty)
+    assert_false("OAuth" in empty, empty)
+
+
 # =============================================================================
 # §4 — the AWS fetcher's audience and scope.
 # =============================================================================
@@ -444,4 +546,6 @@ def main() raises:
     test_the_2xx_range_ends_at_299()
     test_post_reply_success_is_exactly_200_to_299()
     test_a_trailing_newline_in_the_token_file_is_sent()
+    test_a_refused_exchange_adds_only_a_listed_oauth_code()
+    test_the_source_urls_2xx_range_ends_at_299()
     test_the_aws_fetchers_audience_and_scope()

@@ -18,8 +18,10 @@
 #      leap day of 2028), checked against an epoch computed in this file
 #      (days_from_civil), not by komira_datetime.
 #   §5 the external_account file (`parse_external_account`): the refusals the
-#      file-flow tests leave out, each with the message whole, and the
-#      lifetime and format defaults.
+#      file-flow tests leave out, each with the message whole, the
+#      lifetime and format defaults, an endpoint's user/port/query/fragment,
+#      the :generateAccessToken suffix, and a source header's value bytes
+#      at the control edges and name bytes at the tchar edges.
 #   §6 the subject token (`subject_token_from`): bytes that are not UTF-8, an
 #      empty token, a JSON source that is not JSON, a token holding
 #      multi-byte UTF-8 returned byte for byte, and whitespace at either end
@@ -455,6 +457,64 @@ def test_a_token_url_that_is_not_a_url_is_refused() raises:
     )
 
 
+def test_an_endpoint_with_a_user_port_query_or_fragment_is_refused() raises:
+    """The control: port 443 written out parses to the bare host. Each of a
+    user, another port, a query and a fragment on the token_url is refused
+    with the whole message, never the URL."""
+    var good = _ea(String(FILE_SOURCE), String(""))
+    var at443 = parse_external_account(
+        good.replace("https://192.0.2.1/v1/token", "https://192.0.2.1:443/v1/token")
+    )
+    assert_equal(at443.token_host, "192.0.2.1")
+    assert_equal(at443.token_path, "/v1/token")
+    var bad: List[String] = [
+        "https://u@192.0.2.1/v1/token",
+        "https://192.0.2.1:444/v1/token",
+        "https://192.0.2.1:8443/v1/token",
+        "https://192.0.2.1/v1/token?q=1",
+        "https://192.0.2.1/v1/token#frag",
+    ]
+    for i in range(len(bad)):
+        assert_equal(
+            _refusal(good.replace("https://192.0.2.1/v1/token", bad[i])),
+            _P_TEXT + "has a \"token_url\" with a user, a port, a query or a fragment",
+            bad[i],
+        )
+
+
+def test_the_impersonation_url_must_end_in_generate_access_token() raises:
+    """The control: a path ending `:generateAccessToken` parses and is kept.
+    The suffix must END the path: a byte after it, a segment after it, or
+    its last byte cut is refused (a contains-match would accept the first
+    two)."""
+    var path = String("/v1/projects/-/serviceAccounts/sa@demo.example.test")
+    var ok = parse_external_account(
+        _ea(
+            String(FILE_SOURCE),
+            String('"service_account_impersonation_url":"https://192.0.2.2')
+            + path + ':generateAccessToken",',
+        )
+    )
+    assert_equal(ok.impersonation_host, "192.0.2.2")
+    assert_equal(ok.impersonation_path, path + ":generateAccessToken")
+    var bad: List[String] = [
+        ":generateAccessTokenX", ":generateAccessToken/x", ":generateAccessToke"
+    ]
+    for i in range(len(bad)):
+        assert_equal(
+            _refusal(
+                _ea(
+                    String(FILE_SOURCE),
+                    String('"service_account_impersonation_url":"https://192.0.2.2')
+                    + path + bad[i] + '",',
+                )
+            ),
+            _P_TEXT + "has a \"service_account_impersonation_url\" that does not"
+            " end in :generateAccessToken",
+            bad[i],
+        )
+
+
 def test_impersonation_options_object_and_default_lifetime() raises:
     """An options object with no lifetime is the 3600 s default; one that
     is not an object is refused."""
@@ -518,6 +578,64 @@ def test_url_source_refusals() raises:
         assert_equal(
             _refusal(_ea(String(URL_HEAD) + ',"headers":' + not_str[i] + "}", String(""))),
             _P_TEXT + "names a credential_source header whose value is not a string",
+        )
+
+
+def _with_header(json_name: String, json_value: String) -> String:
+    """A url source with one header, its name and value as JSON string text
+    (escapes intact)."""
+    return _ea(
+        String(URL_HEAD) + ',"headers":{"' + json_name + '":"' + json_value + '"}}',
+        String(""),
+    )
+
+
+def test_header_value_bytes_at_the_control_edges() raises:
+    """Bytes 0x00 to 0x1F but the tab, and 0x7F, are control bytes and
+    refused; the tab, a space (0x20) and `~` (0x7E) are kept as given.
+    Each edge from both sides, the message whole and the value unquoted."""
+    var kept: List[String] = ["a\\tb", "a b", "~", "\\u0020x\\u007e"]
+    var want: List[String] = ["a\tb", "a b", "~", " x~"]
+    for i in range(len(kept)):
+        var ok = parse_external_account(_with_header(String("X-A"), kept[i]))
+        assert_equal(ok.source_header_values[0], want[i])
+    var control: List[String] = [
+        "\\u0000", "\\u0008", "\\u000a", "\\u001f", "\\u007f"
+    ]
+    for i in range(len(control)):
+        var msg = _refusal(_with_header(String("X-A"), String("SECRET-V") + control[i]))
+        assert_equal(
+            msg,
+            _P_TEXT + "names a credential_source header whose value holds a"
+            " control byte",
+            control[i],
+        )
+        assert_false("SECRET-V" in msg, msg)
+
+
+def test_header_names_are_exactly_http_tokens() raises:
+    """RFC 9110 `tchar`: every one of its 15 punctuation bytes, and the ends
+    of each letter and digit range, make a name that parses; each byte just
+    outside a range, every separator, a space, DEL and a non-ASCII letter
+    is refused."""
+    var tchar = String("!#$%&'*+-.^_`|~")
+    var tb = tchar.as_bytes()
+    for i in range(len(tb)):
+        var name = String("X") + String(unsafe_from_utf8=tb[i : i + 1])
+        var ok = parse_external_account(_with_header(name, String("v")))
+        assert_equal(ok.source_header_names[0], name)
+    var edges = parse_external_account(_with_header(String("09azAZ"), String("v")))
+    assert_equal(edges.source_header_names[0], "09azAZ")
+    var not_token: List[String] = [
+        '\\"', "(", ")", ",", "/", ":", ";", "<", "=", ">", "?", "@", "[",
+        "\\\\", "]", "{", "}", " ", "\\u007f", "é",
+    ]
+    for i in range(len(not_token)):
+        assert_equal(
+            _refusal(_with_header(String("X") + not_token[i], String("v"))),
+            _P_TEXT + "names a credential_source header whose name is not an"
+            " HTTP token",
+            not_token[i],
         )
 
 
@@ -633,8 +751,12 @@ def main() raises:
     test_expire_time_calendar_sweep()
     test_file_text_that_is_not_a_json_object_is_refused()
     test_a_token_url_that_is_not_a_url_is_refused()
+    test_an_endpoint_with_a_user_port_query_or_fragment_is_refused()
+    test_the_impersonation_url_must_end_in_generate_access_token()
     test_impersonation_options_object_and_default_lifetime()
     test_url_source_refusals()
+    test_header_value_bytes_at_the_control_edges()
+    test_header_names_are_exactly_http_tokens()
     test_format_refusals_and_defaults()
     test_subject_token_refusals_and_multibyte_text()
     test_subject_token_edges_are_kept()
