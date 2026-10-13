@@ -378,8 +378,8 @@ struct HttpHeartbeatReporter[A: HeartbeatAuth](HeartbeatReporter):
             log.warn[
                 "job supervisor: heartbeat encode failed: {}",
                 "komira_job_supervisor.heartbeat",
-            ](ArgStr(String(e)))
-            return HeartbeatOutcome(False, False, 0)
+            ](ArgStr(String(e)))  # cov: unreachable encode_heartbeat never raises
+            return HeartbeatOutcome(False, False, 0)  # cov: unreachable encode_heartbeat never raises
 
         # Auth first, and fail closed: a raise never falls through to an
         # unauthenticated POST.

@@ -43,6 +43,8 @@ trusted publisher accepts the job.
   * lookahead.mojo        `read_new_names`, `lookahead_new_names`: a later
                           stage's NEW NAMES, read anonymously
   * summary.mojo          the NEW NAMES block of a job summary (markdown)
+  * cell.mojo             `load_cell_release`: the release set of a PUBLISH
+                          step into a cell, its images with the set's digest
   * scripted_channel.mojo `ScriptedChannel`, an in-memory channel (tests)
   * pause.mojo            `UsleepSleeper`, `NoWaitSleeper` (tests)
 
@@ -117,3 +119,4 @@ from .pause import NoWaitSleeper, UsleepSleeper
 from .flow import NoSecretStore, PreparedRelease, publish_flow, publish_flow_reading, publish_release_with_store
 from .lookahead import NewNamesReport, lookahead_new_names, lookahead_new_names_https, new_names_of, read_new_names
 from .summary import new_names_markdown
+from .cell import CellImage, CellRelease, cell_images, load_cell_release

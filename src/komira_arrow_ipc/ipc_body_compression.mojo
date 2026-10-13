@@ -2181,7 +2181,7 @@ def _build_rb_context[C: ArrowIpcCompression](
     )
 
 
-def _finalize_rb_context(var ctx: _RbDecompressContext) raises -> SharedAlignedBuffer[HeapRegion]:
+def _finalize_rb_context(mut ctx: _RbDecompressContext) raises -> SharedAlignedBuffer[HeapRegion]:
     """PASS C per-RB finalize. Writes the alignment-pad zero-fill bytes
     between successive buffers + sets the output frame length. Returns
     the finished uncompressed frame ready for `decode_record_batch_message`.
@@ -2191,7 +2191,8 @@ def _finalize_rb_context(var ctx: _RbDecompressContext) raises -> SharedAlignedB
     final set from `_decompress_record_batch_frame_impl`.
 
     Uses `Optional.take()` to extract the output frame — partial-moving `ctx.out^` out of a struct with other
-    heap-owning fields is rejected by the compiler.
+    heap-owning fields is rejected by the compiler. `ctx` is borrowed and left
+    with `out = None`, so the caller's context slab stays live throughout.
     """
     var n_bufs = len(ctx.new_buffers)
     for i in range(n_bufs):
@@ -2246,18 +2247,32 @@ def decompress_all_rbs_into_with_dispatcher[
         return frames^
 
     # === PASS A: per-RB context build (serial) ===
+    #
+    # DECODE-ERROR UNWIND SAFETY. `_build_rb_context` raises on a malformed
+    # frame, so the frames must leave the slab through moves that keep every
+    # container's length equal to its count of live slots at each point: a
+    # forward `take_slot_unchecked` drain fixed up by `set_len_unchecked`
+    # after the loop unwinds with the moved-out slots still counted, and the
+    # slab's destructor frees those frames a second time (a double free that
+    # crashed the reader on a malformed file). `pop` from the back of the
+    # slab fills `pending` in reverse, so popping `pending` from its back
+    # yields frame 0, 1, ... in order. Both pops adjust the length as they
+    # go; an unwind drops exactly the frames not yet handed on. O(n_rbs).
+    var pending = List[SharedAlignedBuffer[HeapRegion]](capacity=n_rbs)
+    while len(frames) > 0:
+        var last = frames.pop()
+        pending.append(last.take())
+    _ = frames^
     var contexts = Slab[_RbDecompressContext]()
     var total_non_empty: Int = 0
-    for ri in range(n_rbs):
-        var f = frames.take_slot_unchecked(ri)
-        var ctx = _build_rb_context[C](f^)
+    for _ in range(n_rbs):
+        var ctx = _build_rb_context[C](pending.pop())
         var n_bufs = len(ctx.rb_buffers)
         for bi in range(n_bufs):
             if Int(ctx.rb_buffers[bi].length) > 0:
                 total_non_empty += 1
         contexts.append(ctx^)
-    frames.set_len_unchecked(0)
-    _ = frames^
+    _ = pending^
 
     # Per-RB error slots — first-error-wins within an RB. Pre-sized to
     # n_rbs (one slot per RB, not per buffer; the worker handles all
@@ -2407,11 +2422,11 @@ def decompress_all_rbs_into_with_dispatcher[
     _ = errors^
 
     # === PASS C: per-RB alignment-pad post-pass + collect output frames ===
+    # Each context is finalized in place (its `out` taken, leaving `None`),
+    # so `contexts` stays fully live and drops soundly on any exit.
     var out_frames = Slab[SharedAlignedBuffer[HeapRegion]]()
     for ri in range(n_rbs):
-        var ctx = contexts.take_slot_unchecked(ri)
-        out_frames.append(_finalize_rb_context(ctx^))
-    contexts.set_len_unchecked(0)
+        out_frames.append(_finalize_rb_context(contexts[ri]))
     _ = contexts^
 
     return out_frames^

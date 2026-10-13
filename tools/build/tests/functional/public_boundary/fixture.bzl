@@ -20,7 +20,7 @@ read. Nothing is skipped as upstream bytes: third_party/up/BUCK and
 third_party/up/config.h are read, and the only URL of the github.com row of
 hosts.tsv is in the BUCK file, so the row is used only if it is read.
 functional/public_boundary/BUCK exports the files, so negative/public_boundary
-plants its defects in the same tree.
+names the same tree in its analysis refusals.
 """
 
 _DIR = "tests//functional/public_boundary:"

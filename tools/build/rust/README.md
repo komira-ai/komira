@@ -11,7 +11,8 @@ The rules are in [`defs.bzl`](defs.bzl). Worked uses are in
 | rule | produces |
 |---|---|
 | `rust_library(srcs, crate_root, deps, edition, features, cfgs, proc_macro, tests, test_srcs)` | `lib<crate>.rlib`, or `lib<crate>.so` for a proc-macro |
-| `rust_binary(srcs, crate_root, deps, expected_stdout, tests)` | an executable, and `RunInfo`. With `expected_stdout`, `[run_check]` runs it remotely and compares its stdout exactly. |
+| `rust_binary(srcs, crate_root, deps, expected_stdout, tests)` | an executable, and `RunInfo`. With `expected_stdout`, `[run_check]` runs it remotely and compares its stdout exactly, and that check is a validation of the binary: every build holding the binary runs it ([`run_check.bzl`](../mojo/run_check.bzl)). |
+| `rust_weld_check(target, markers)` | fails analysis unless the `[tests]` sub-target of `target` (the marker list its rule hands the publishing action) is exactly `markers`: a weld that drops a test still builds green, so this is what shows it. It reads the list, not that action's inputs (see [`examples/rust/ext`](../examples/rust/ext/BUCK)) |
 | `crates_io_library(name, version, sha256, size, ...)` | a crates.io crate, downloaded by the sha256 and size in bytes of its `.crate` file, unpacked remotely, and compiled with `rust_library` |
 | `rust_test(srcs, crate_root, deps, ..., test_timeout_s)` | the crate compiled with `rustc --test`, RUN as a build action; its output is a `.passed` marker. `[bin]` is the test executable. |
 
@@ -58,7 +59,9 @@ no test crate are refused at analysis. Each run has the
 default 600 s timeout. A failure names the file:
 `GATED TEST FAILED: <label> tests/<name>.rs`. `buck2 test` of the library
 runs the `rust_test`s in its `tests`, not its `test_srcs`; building the
-library runs both.
+library runs both. [`examples/rust/ext`](../examples/rust/ext/BUCK) is a
+library of each kind (`ext`, test_srcs only; `both`, with `tests` too),
+each held to its marker list by a `rust_weld_check`.
 
 The weld runs the tests when the ARTIFACT IS BUILT: `buck2 build` of the
 library, of anything linking it, or of the binary runs each welded test as
@@ -72,7 +75,7 @@ runner's `PASS <label>: <n> passed` line); it does not build or publish the
 gated artifact. `buck2 test` of the `rust_test` itself does the same for that
 one target.
 
-The runner ([`test_runner.sh`](test_runner.sh)) lists the tests first and
+The runner ([`gate rust`](../run/README.md)) lists the tests first and
 refuses a target that lists none (`EMPTY GATE`). It then runs every test,
 and refuses an `#[ignore]`d test (a test that does not run is a mute) and a
 harness summary that does not count every listed test as passed. There are
@@ -82,12 +85,13 @@ or deleted. `test_timeout_s` below 1 is refused at analysis.
 The planted defects are in
 [`tests//negative/rust_test`](../tests/negative/rust_test/BUCK) (test 35).
 
-Each harness invocation (the list, then the run) runs under
-`busybox timeout`, `test_timeout_s` seconds (default 600). A test killed at
-its timeout is NO VERDICT, exit 142, as a SIGKILL (exit 137) is: the action
-fails without a verdict, and the executor may retry it. The harness is
-started with `busybox env -i`, so nothing in the action's environment
-(`RUST_TEST_*`, `RUST_MIN_STACK`) reaches it.
+Each harness invocation (the list, then the run) has `test_timeout_s`
+seconds (default 600), after which the gate sends the harness SIGALRM. A test
+killed at its timeout is NO VERDICT, exit 142, as a SIGKILL (exit 137) is: the
+action fails without a verdict, and the executor may retry it. The harness is
+started with exactly `PATH`, `TMPDIR` and `HOME`, so nothing in the action's
+environment (`RUST_TEST_*`, `RUST_MIN_STACK`) reaches it, in a session of its
+own whose process group is killed after each invocation.
 
 A test runs with an empty current directory, `HOME` and `TMPDIR`, so it can
 read only what it compiles in. A file from another package is a label in

@@ -12,7 +12,13 @@ the tool succeeds unless its cases pass. The tool only runs inside actions, so
 both `kcov_tool` and the cases take it as an `exec_dep`: with the same
 `exec_compatible_with` on both, they resolve the same execution platform, so
 the binary the cases test and the binary `kcov_tool` hands out are one
-configured target, the same bytes.
+configured target, the same bytes. A tool whose cases are `zig_test` unit
+tests (debug_relocate, cov_normalize, cov_zig) has its `zig_exe` built behind
+them (`unit_tests`), so the executable does not exist unless they pass; those
+tests build the tool from source, so they do not test the shipped bytes. Its
+process cases are a `zig_test` that names the executable in `env_tools`
+(the same configured target; its path reaches the test in the environment)
+and runs it: a validation, listed in `cases` like a script's.
 
 `cov_link_dir` and `cov_run_dir` are the two directories a coverage build of
 a `mojo_library` uses (tools/build/mojo/coverage.bzl): the one its test
@@ -20,6 +26,7 @@ binaries link through, and the one each test's kcov run runs from.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
 
 def _cases_impl(ctx):
@@ -43,12 +50,14 @@ def _cases_impl(ctx):
             staged,
             [h[DefaultInfo].default_outputs[0] for h in ctx.attrs.helpers],
         ),
+        env = rerun_env(ctx),
         category = "kcov_tool_cases",
         identifier = ctx.label.name,
     )
     return [
         DefaultInfo(default_output = result),
         ValidationInfo(validations = [ValidationSpec(name = ctx.label.name, validation_result = result)]),
+        rerun_info(ctx),
     ]
 
 _kcov_tool_cases = rule(
@@ -60,7 +69,7 @@ _kcov_tool_cases = rule(
         "script": attrs.source(),
         "tool": attrs.exec_dep(providers = [RunInfo]),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
-    },
+    } | RERUN_ATTRS,
 )
 
 def _tool_impl(ctx):
@@ -69,9 +78,9 @@ def _tool_impl(ctx):
 
 _kcov_tool = rule(
     impl = _tool_impl,
-    doc = "The executable `exe` (configured for the execution platform), gated by the `kcov_tool_cases` targets in `cases`.",
+    doc = "The executable `exe` (configured for the execution platform), gated by the validations in `cases` and by the `zig_test` targets `exe` is built behind.",
     attrs = {
-        "cases": attrs.list(attrs.dep(providers = [ValidationInfo])),
+        "cases": attrs.list(attrs.dep(providers = [ValidationInfo]), default = [], doc = "Validations that run `exe`: its `kcov_tool_cases`, or a `zig_test` naming it in `env_tools`."),
         "exe": attrs.exec_dep(providers = [RunInfo]),
     },
 )
@@ -87,7 +96,7 @@ def _link_dir_impl(ctx):
 
 _cov_link_dir = rule(
     impl = _link_dir_impl,
-    doc = "The link directory of a coverage build: what mojo_wrapper.sh takes as <zig_dir>. It holds `zig` (cov_zig), `debug_relocate`, and `real/`, the Mojo toolchain's own link directory (the pinned zig), so a coverage link uses the zig a release link uses.",
+    doc = "The link directory of a coverage build: what mojo_compile takes as --zig=<dir>. It holds `zig` (cov_zig), `debug_relocate`, and `real/`, the Mojo toolchain's own link directory (the pinned zig), so a coverage link uses the zig a release link uses.",
     attrs = {
         "relocate": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/coverage/kcov:debug_relocate"),
         "zig": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/coverage/kcov:cov_zig"),

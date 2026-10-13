@@ -138,6 +138,12 @@ def test_only_service_and_job_have_images() raises:
         refused = String(e).find("bucket") >= 0
     assert_true(refused, "a kind with no image was accepted")
     assert_equal(images.count(), 0)
+    # Without a record the kind is refused first, for its own reason (not as
+    # an unpinned image the caller should have recorded).
+    assert_equal(
+        _raised("bucket", "b", "build", "x"),
+        "unpinned plan: bucket node 'b' has no image; only a service or a job has one",
+    )
 
 
 # =============================================================================

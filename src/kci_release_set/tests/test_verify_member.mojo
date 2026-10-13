@@ -294,6 +294,32 @@ def test_refuses_a_manifest_that_is_not_a_regular_file() raises:
     _expect(d, String("its manifest.json is not a regular file"))
 
 
+def test_refuses_a_file_that_is_a_directory() raises:
+    # Only an OCI member's file is a directory (test_oci_member.mojo): a
+    # CONDA package or a PYTHON wheel that is one is refused by name.
+    var d = _good(String("filedir"))
+    remove(d + String("/") + String(_FILE))
+    makedirs(d + String("/") + String(_FILE), exist_ok=True)
+    _expect(
+        d,
+        String("its file '") + String(_FILE)
+        + String("' is a directory: only an OCI member's file is a directory (its image layout)"),
+    )
+    var p = _root(String("wheeldir")) + String("/") + String(_NAME)
+    var wheel = String("komira_name_registry-0.1.7-py3-none-any.whl")
+    makedirs(p + String("/") + wheel, exist_ok=True)
+    _write(p + String("/METADATA"), String("Metadata-Version: 2.1\n"))
+    _write(
+        p + String("/manifest.json"),
+        _manifest(file=wheel, artifact_type=String("PYTHON"), metadata=String("METADATA")),
+    )
+    _expect(
+        p,
+        String("its file '") + wheel
+        + String("' is a directory: only an OCI member's file is a directory (its image layout)"),
+    )
+
+
 def test_refuses_an_empty_file() raises:
     var d = _good(String("empty"))
     _write(d + String("/") + String(_FILE), String(""))

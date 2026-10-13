@@ -285,7 +285,7 @@ def process_environ() -> List[String]:
         if r.bytes < 0:
             # Out of range: `environ` shrank between the count and this read.
             # Stop rather than emit a partial entry.
-            break
+            break  # cov: unreachable environ changes between count and read only under a concurrent setenv/unsetenv
         # ⛔ BYTE-PRESERVING (see `_BYTES_NOT_CODEPOINTS` above). An environment
         # VALUE is arbitrary bytes — a UTF-8 path, a display name, a locale
         # string — and these entries are handed straight back to

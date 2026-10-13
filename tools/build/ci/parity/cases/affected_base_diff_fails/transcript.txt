@@ -1,0 +1,3 @@
+call git "diff" "-z" "--name-only" "--no-renames" "parity-base...HEAD"
+exit 128
+stderr "fatal: ambiguous argument 'parity-base...HEAD': unknown revision or path not in the working tree.\n"

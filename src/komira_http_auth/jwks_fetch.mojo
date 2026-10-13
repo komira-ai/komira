@@ -21,7 +21,7 @@
 #     constructor uses `default_tls_factory` is checked by review, not by a
 #     test (a test cannot dial the public internet);
 #   * redirects are not followed (a 3xx is a failed fetch);
-#   * the response body is capped at komira_crypto's RS256_MAX_JWKS_BYTES
+#   * the response body is capped at komira_jwks' JWKS_MAX_DOCUMENT_BYTES
 #     (256 KiB);
 #   * the fetch timeout (`BearerJwtConfig.jwks_fetch_timeout_us`, which the
 #     verifier hands over through `set_timeout_us`) bounds two phases: the
@@ -57,7 +57,7 @@ from std.memory import ArcPointer
 
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.blocking_runtime import BlockingRuntime
-from komira_crypto.rs256_jwks import RS256_MAX_JWKS_BYTES
+from komira_jwks import JWKS_MAX_DOCUMENT_BYTES
 from komira_http_client.body import EmptyBody
 from komira_http_client.client import (
     HttpClient,
@@ -136,7 +136,7 @@ struct HttpsJwksFetcher(JwksFetcher, Movable, Deinitable):
         """The client settings `fetch` uses: the 256 KiB body cap and the
         request bound. A method so a test can read them without a network."""
         var cfg = HttpClientConfig.defaults()
-        cfg.max_response_body_bytes = RS256_MAX_JWKS_BYTES
+        cfg.max_response_body_bytes = JWKS_MAX_DOCUMENT_BYTES
         cfg.request_timeout_us = self._timeout_us
         return cfg^
 

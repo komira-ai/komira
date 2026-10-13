@@ -281,7 +281,10 @@ def test_no_fire_wrong_op() raises:
 
 
 def test_output_schema_no_rn_column() raises:
-    """PartitionTopN output schema should NOT have the rn column."""
+    """Project(a, b, c) over Filter(rn <= 3): nothing reads rn, so the fused
+    PartitionTopN's output schema does NOT have the rn column and the
+    identity Project is absorbed. (With the Filter as the root, rn is part of
+    the plan's output and the fused node emits it.)"""
     var scan = _scan_node()
     var pb = _partition_by_row_number(
         scan^, _str_list1("a"), _str_list1("b"), _bool_list1(True)
@@ -294,8 +297,14 @@ def test_output_schema_no_rn_column() raises:
         Expr.literal(ScalarValue.from_int(3)),
     )
     var filter_plan = LogicalPlan.filter(pred^, pb^)
+    from komira_collections.slab import Slab
+    var proj_exprs = Slab[Expr]()
+    proj_exprs.append(Expr.col_ref(String("a")))
+    proj_exprs.append(Expr.col_ref(String("b")))
+    proj_exprs.append(Expr.col_ref(String("c")))
+    var project = LogicalPlan.project(proj_exprs^, filter_plan^)
 
-    var optimized = fuse_partition_topn(filter_plan^)
+    var optimized = fuse_partition_topn(project^)
     assert_equal(Int(optimized.tag), Int(PLAN_PARTITION_TOPN))
     # PartitionTopN output schema = child schema (3 cols), no rn column.
     assert_equal(optimized.output_schema.num_columns(), 3)

@@ -18,7 +18,9 @@ mojo_library(
     srcs = [
         "change_map/__init__.mojo",
         "change_map/cells.mojo",
+        "change_map/derive.mojo",
         "change_map/graph.mojo",
+        "change_map/held.mojo",
         "change_map/labels.mojo",
         "change_map/plan.mojo",
         "change_map/process.mojo",
@@ -41,6 +43,13 @@ mojo_library(
         "tests/test_rules_file.mojo",
         # a real process: streams kept apart, exit code, quoting, a program that is not there
         "tests/test_process.mojo",
+        # derive_checks: every naming and grouping rule, each a table row
+        "tests/test_derive_naming.mojo",
+        # derive_checks: the answer kci reads, BROKEN for any failed query
+        "tests/test_derive_answer.mojo",
+        # a hold is never dropped: added, kept, gained, deleted with its
+        # package pass; a metric taken out, the marker deleted alone refused
+        "tests/test_held.mojo",
     ],
     test_data = {
         "tests/test_plan.mojo": {
@@ -56,6 +65,20 @@ mojo_library(
 mojo_binary(
     name = "affected",
     srcs = ["affected.mojo"],
+    deps = [
+        ":change_map",
+        "//tools/build/inspect:buildtools",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# derive_checks: the `derive_checks` command of the buck2 build system in
+# release/artifacts.textproto, the checks the per-change check derives from
+# the live graph (change_map/derive.mojo). Its naming and its answer are
+# change_map's welded tests.
+mojo_binary(
+    name = "derive_checks",
+    srcs = ["derive_checks.mojo"],
     deps = [
         ":change_map",
         "//tools/build/inspect:buildtools",

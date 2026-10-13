@@ -23,6 +23,7 @@ mojo_library(
         "tests/test_run_log_bounds.mojo",
         "tests/test_run_log_reader.mojo",
         "tests/test_run_log_scan_refusals.mojo",
+        "tests/test_scripted_log_double.mojo",
     ],
     visibility = ["PUBLIC"],
 )

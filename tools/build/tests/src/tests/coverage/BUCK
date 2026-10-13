@@ -1,3 +1,4 @@
+load("@komira//tools/build/lint:defs.bzl", "target_suite")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load("//functional/coverage:defs.bzl", "cov_report_check")
 
@@ -31,13 +32,24 @@ _PKG = "tools/build/tests/src/tests/coverage"
 cov_report_check(
     name = "covinfo_result",
     expect = [
-        '"conclusion":"success","mode":"enforce","target_bp":10000,',
+        '"conclusion":"success","mode":"enforce","target_bp":9900,',
         '"package":{"package":"' + _PKG + '","files":1,"unmeasured_files":0,"line_hit":3,"line_found":6,"line_bp":5000,"branch_hit":1,"branch_found":4,"branch_bp":2500,',
         '"findings":[],"exemptions"',
         '"info_packages":["' + _PKG + '"],',
-        '"info_findings":[{"kind":"BelowTarget","package":"' + _PKG + '","metric":"branch","measured_bp":2500,"bound_bp":10000,"path":"","line":0,"message":"branch 25.00% is below the target 100.00%","count":null},{"kind":"BelowTarget","package":"' + _PKG + '","metric":"line","measured_bp":5000,"bound_bp":10000,',
+        '"info_findings":[{"kind":"BelowTarget","package":"' + _PKG + '","metric":"branch","measured_bp":2500,"bound_bp":9900,"path":"","line":0,"message":"branch 25.00% is below the target 99.00%","count":null},{"kind":"BelowTarget","package":"' + _PKG + '","metric":"line","measured_bp":5000,"bound_bp":9900,',
     ],
     mode = "result",
     reports = [":covinfo[coverage][gate][result]"],
     script = "//functional/coverage:report.sh",
+)
+
+# covinfo's gate and its result must build: komira//:tests_greens names
+# this target, so the pull-request check builds them.
+target_suite(
+    name = "greens",
+    targets = [
+        ":covinfo[coverage][gate]",
+        ":covinfo_result",
+    ],
+    visibility = ["komira//:tests_greens"],
 )

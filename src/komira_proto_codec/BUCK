@@ -22,6 +22,7 @@ mojo_library(
         "tests/test_proto_codec_proto3_json_strictness.mojo",
         "tests/test_proto_codec_null_value.mojo",
         "tests/test_proto_codec_roundtrip.mojo",
+        "tests/test_proto_codec_repeated_bytes.mojo",
         "tests/test_proto_codec_binary_refusals.mojo",
         "tests/test_proto_codec_json_decoder_edges.mojo",
         "tests/test_proto_codec_json_float_edges.mojo",

@@ -91,7 +91,40 @@ assert_equal(repo.registry_uri, "us-central1-docker.pkg.dev/demo/images")
 Listing repositories: a field at its default value (here the empty page
 token) stays out of the query, and the page's `nextPageToken` is decoded:
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+from std.memory import ArcPointer
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_gcp_artifactregistry.repository import ListRepositoriesRequest
+from komira_gcp_artifactregistry.service import ArtifactRegistryClient
+from komira_gcp_core import StaticTokenSource
+from komira_http_client.client import HttpClient
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+comptime Client = ArtifactRegistryClient[ScriptedConnector, StaticTokenSource]
+
+def http_answer(status: String, body: String) -> List[UInt8]:
+    var text = (
+        String("HTTP/1.1 ") + status + "\r\nContent-Type: application/json\r\n"
+        + "Content-Length: " + String(body.byte_length())
+        + "\r\nConnection: close\r\n\r\n" + body
+    )
+    var out = List[UInt8]()
+    out.extend(Span(text.as_bytes()))
+    return out^
+
+def scripted_client(answer: List[UInt8], sent: ArcPointer[List[UInt8]]) raises -> Client:
+    var stream = ScriptedStream.from_read_script_with_capture(answer.copy(), sent)
+    var c = Client(
+        HttpClient[ScriptedConnector].with_defaults(ScriptedConnector.with_stream_tls(stream^)),
+        StaticTokenSource(String("test-access-token")),
+    )
+    c.set_rest_host(String("localhost"))
+    return c^
+-->
 ```mojo
 var sent = ArcPointer[List[UInt8]](List[UInt8]())
 var c = scripted_client(
@@ -122,7 +155,40 @@ A resource name outside the method's path pattern
 (`projects/*/locations/*/repositories/*`) is refused before anything is
 written:
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+from std.memory import ArcPointer
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_gcp_artifactregistry.repository import GetRepositoryRequest
+from komira_gcp_artifactregistry.service import ArtifactRegistryClient
+from komira_gcp_core import StaticTokenSource
+from komira_http_client.client import HttpClient
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+comptime Client = ArtifactRegistryClient[ScriptedConnector, StaticTokenSource]
+
+def http_answer(status: String, body: String) -> List[UInt8]:
+    var text = (
+        String("HTTP/1.1 ") + status + "\r\nContent-Type: application/json\r\n"
+        + "Content-Length: " + String(body.byte_length())
+        + "\r\nConnection: close\r\n\r\n" + body
+    )
+    var out = List[UInt8]()
+    out.extend(Span(text.as_bytes()))
+    return out^
+
+def scripted_client(answer: List[UInt8], sent: ArcPointer[List[UInt8]]) raises -> Client:
+    var stream = ScriptedStream.from_read_script_with_capture(answer.copy(), sent)
+    var c = Client(
+        HttpClient[ScriptedConnector].with_defaults(ScriptedConnector.with_stream_tls(stream^)),
+        StaticTokenSource(String("test-access-token")),
+    )
+    c.set_rest_host(String("localhost"))
+    return c^
+-->
 ```mojo
 var sent = ArcPointer[List[UInt8]](List[UInt8]())
 var c = scripted_client(http_answer("200 OK", "{}"), sent)
@@ -143,7 +209,40 @@ A non-2xx answer raises. The error names the verb, the method, the HTTP
 status and the canonical code from the `google.rpc.Status` envelope, and
 quotes no byte of the body; `gcp_status_error_code` reads the code back:
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_false, assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+from std.memory import ArcPointer
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_gcp_artifactregistry.repository import GetRepositoryRequest
+from komira_gcp_artifactregistry.service import ArtifactRegistryClient
+from komira_gcp_core import CODE_PERMISSION_DENIED, StaticTokenSource, gcp_status_error_code
+from komira_http_client.client import HttpClient
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+
+comptime Runtime = BlockingRuntime[NoopSink]
+
+comptime Client = ArtifactRegistryClient[ScriptedConnector, StaticTokenSource]
+
+def http_answer(status: String, body: String) -> List[UInt8]:
+    var text = (
+        String("HTTP/1.1 ") + status + "\r\nContent-Type: application/json\r\n"
+        + "Content-Length: " + String(body.byte_length())
+        + "\r\nConnection: close\r\n\r\n" + body
+    )
+    var out = List[UInt8]()
+    out.extend(Span(text.as_bytes()))
+    return out^
+
+def scripted_client(answer: List[UInt8], sent: ArcPointer[List[UInt8]]) raises -> Client:
+    var stream = ScriptedStream.from_read_script_with_capture(answer.copy(), sent)
+    var c = Client(
+        HttpClient[ScriptedConnector].with_defaults(ScriptedConnector.with_stream_tls(stream^)),
+        StaticTokenSource(String("test-access-token")),
+    )
+    c.set_rest_host(String("localhost"))
+    return c^
+-->
 ```mojo
 var sent = ArcPointer[List[UInt8]](List[UInt8]())
 var c = scripted_client(
