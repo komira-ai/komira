@@ -181,7 +181,7 @@ def _network_range_of(resources: List[Resource], id: String, mut base: Int, mut 
     for i in range(len(resources)):
         if resources[i].id == id and Bool(resources[i].network):
             return _parse(resources[i].network.value().ipv4_cidr, base, prefix).byte_length() == 0
-    return False
+    return False  # cov: unreachable called only once field_of_id found a network of this id, so the loop above returns
 
 
 def _subnet_range(r: Resource, mut net: String, mut base: Int, mut prefix: Int) -> Bool:

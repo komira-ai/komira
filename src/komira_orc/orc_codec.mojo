@@ -363,7 +363,7 @@ def _zstd_compress_chunk(src: Span[UInt8, _]) raises -> List[UInt8]:
     try:
         written = zstd_compress_into(Span(out), src, ZSTD_DEFAULT_LEVEL)
     except e:
-        raise Error("OrcCodecError.ZSTD_COMPRESS_FAILED: " + String(e))
+        raise Error("OrcCodecError.ZSTD_COMPRESS_FAILED: " + String(e))  # cov: unreachable the output buffer is the codec's own compress bound
     out.resize(unsafe_uninit_length=written)
     return out^
 
@@ -379,7 +379,7 @@ def _zlib_compress_chunk(src: Span[UInt8, _]) raises -> List[UInt8]:
             Span(out), src, ZLIB_LEVEL_DEFAULT, ZLIB_WINDOW_BITS_RAW
         )
     except e:
-        raise Error("OrcCodecError.ZLIB_COMPRESS_FAILED: " + String(e))
+        raise Error("OrcCodecError.ZLIB_COMPRESS_FAILED: " + String(e))  # cov: unreachable the output buffer is the codec's own compress bound
     out.resize(unsafe_uninit_length=written)
     return out^
 
@@ -391,7 +391,7 @@ def _snappy_compress_chunk(src: Span[UInt8, _]) raises -> List[UInt8]:
     try:
         written = snappy_compress_into(Span(out), src)
     except e:
-        raise Error("OrcCodecError.SNAPPY_COMPRESS_FAILED: " + String(e))
+        raise Error("OrcCodecError.SNAPPY_COMPRESS_FAILED: " + String(e))  # cov: unreachable the output buffer is the codec's own compress bound
     out.resize(unsafe_uninit_length=written)
     return out^
 
@@ -403,7 +403,7 @@ def _lz4_compress_chunk(src: Span[UInt8, _]) raises -> List[UInt8]:
     try:
         written = lz4_compress_into(Span(out), src)
     except e:
-        raise Error("OrcCodecError.LZ4_COMPRESS_FAILED: " + String(e))
+        raise Error("OrcCodecError.LZ4_COMPRESS_FAILED: " + String(e))  # cov: unreachable the output buffer is the codec's own compress bound
     out.resize(unsafe_uninit_length=written)
     return out^
 
@@ -523,7 +523,7 @@ def _zlib_decompress_chunk(
         try:
             res = zlib_inflate_once(Span(buf), chunk, ZLIB_WINDOW_BITS_RAW)
         except e:
-            raise Error("OrcCodecError.ZLIB_FAILED: " + String(e))
+            raise Error("OrcCodecError.ZLIB_FAILED: " + String(e))  # cov: unreachable zlib_inflate_once raises only if inflateInit2 fails or the input passes 4 GiB
         if res.rc == Z_STREAM_END:
             out.extend(Span(buf)[0 : res.written])
             return

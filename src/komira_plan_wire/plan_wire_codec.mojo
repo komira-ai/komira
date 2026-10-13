@@ -64,7 +64,7 @@
 # know that the part of it protecting the process is one layer down, on the
 # recursion itself, where nothing has to agree with it.
 #
-# --- PLAN TAGS: 16 of 18 modelled --------------------------------------------
+# --- PLAN TAGS: 16 of 19 modelled --------------------------------------------
 #   MODELLED   SCAN, FILTER, PROJECT, AGGREGATE, JOIN, SORT, LIMIT, DISTINCT,
 #              TOPN, UNION, PARTITION_BY, PARTITION_TOPN, ASOF_JOIN, VIEW_REF,
 #              CSE_REF, CAST_TO_VARCHAR
@@ -143,6 +143,9 @@
 #              engine and never materialized (`insert_orientation_conversions`
 #              RAISES a deferral), so no plan carries them. Already
 #              EXEMPT in `plan_vocabulary.proto` for the same reason.
+#   REFUSED    EXCHANGE — `plan.proto` has no `exchange` arm yet, and the
+#              vocabulary keeps its wire number (19) reserved, so encoding one
+#              raises in `plan_tag_to_wire` with the tag's name.
 #
 # --- EXPR TAGS: 25 of 27 modelled --------------------------------------------
 #   MODELLED   COL_REF, COL_IDX, LITERAL, BINARY_OP, UNARY_OP, ALIAS, IN_LIST,
@@ -333,6 +336,14 @@
 #       `TableStats` is pure data and CAN be encoded; it simply is not yet.
 #       Refused rather than dropped because stats steer join-order and a
 #       silently statless decoded plan is a silent plan change.
+#   `JoinData.build_side` when recorded, `JoinData.adaptive_allowed` when set,
+#   `AggregateData.mode` when recorded, `ScanData.boundedness` when UNBOUNDED
+#       The optimizer's recorded decisions (docs/design/optimized_plan.md
+#       §5.2). `plan.proto` has no field for any of them yet, so encoding one
+#       would decode as the default: a join that builds on the right, a single
+#       aggregate, a bounded scan. Refused, by
+#       `PLAN_WIRE_UNSUPPORTED_OPTIMIZER_DECISION`. A node holding the default
+#       (UNSET, False, UNSET, BOUNDED) encodes as before.
 #
 # --- THE DECODE SIDE, WHICH DOES NOT CHOOSE ITS INPUT ------------------------
 #   Every narrowing from a wire type to an engine type is CHECKED and RAISES BY
@@ -515,6 +526,9 @@ from komira_plan_ir.logical_plan import (
     PLAN_CAST_TO_VARCHAR,
     AsofTolerance,
     CORR_KIND_IN_CORRELATED,
+    JOIN_BUILD_SIDE_UNSET,
+    AGG_MODE_UNSET,
+    SCAN_BOUNDED,
 )
 from komira_plan_ir.corr_subquery import corr_subq_inner_plan_ref
 from komira_plan_ir.logical_plan_variants import UnionData
@@ -759,6 +773,7 @@ comptime PLAN_WIRE_UDF_NOT_DESCRIBABLE: String = "PLAN_WIRE_UDF_NOT_DESCRIBABLE"
 comptime PLAN_WIRE_UNSUPPORTED_TABLE_STATS: String = "PLAN_WIRE_UNSUPPORTED_TABLE_STATS"
 comptime PLAN_WIRE_UNSUPPORTED_SCHEMALESS_SCAN: String = "PLAN_WIRE_UNSUPPORTED_SCHEMALESS_SCAN"
 comptime PLAN_WIRE_UNSUPPORTED_ESTIMATED_GROUPS: String = "PLAN_WIRE_UNSUPPORTED_ESTIMATED_GROUPS"
+comptime PLAN_WIRE_UNSUPPORTED_OPTIMIZER_DECISION: String = "PLAN_WIRE_UNSUPPORTED_OPTIMIZER_DECISION"
 comptime PLAN_WIRE_UNSUPPORTED_DTYPE: String = "PLAN_WIRE_UNSUPPORTED_DTYPE"
 comptime PLAN_WIRE_UNSUPPORTED_ARROW_TYPE: String = "PLAN_WIRE_UNSUPPORTED_ARROW_TYPE"
 comptime PLAN_WIRE_UNSUPPORTED_PARAM_TAG: String = "PLAN_WIRE_UNSUPPORTED_PARAM_TAG"
@@ -2986,6 +3001,12 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
                 PLAN_WIRE_UNSUPPORTED_TABLE_STATS + ": ScanData for '"
                 + d.source_path + "' carries TableStats"
             )
+        if d.boundedness != SCAN_BOUNDED:
+            raise Error(
+                _optimizer_decision_message(
+                    "ScanData.boundedness", "for '" + d.source_path + "'"
+                )
+            )
         var sch_present = _present_schema(d.schema)
         var sch: Optional[WireSchema] = None
         if sch_present:
@@ -3045,6 +3066,12 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
     elif tag == PLAN_AGGREGATE:
         arm = 4
         ref d = p.aggregate_data_ref()
+        if d.mode != AGG_MODE_UNSET:
+            raise Error(
+                _optimizer_decision_message(
+                    "AggregateData.mode", "(engine value " + String(Int(d.mode)) + ")"
+                )
+            )
         var ag_udf: Optional[WireUdf] = None
         if d.udf:
             ag_udf = Optional(_udf_to_wire(d.udf.value()[], "AggregateData"))
@@ -3068,6 +3095,17 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
     elif tag == PLAN_JOIN:
         arm = 5
         ref d = p.join_data_ref()
+        if d.build_side != JOIN_BUILD_SIDE_UNSET:
+            raise Error(
+                _optimizer_decision_message(
+                    "JoinData.build_side",
+                    "(engine value " + String(Int(d.build_side)) + ")",
+                )
+            )
+        if d.adaptive_allowed:
+            raise Error(
+                _optimizer_decision_message("JoinData.adaptive_allowed", "")
+            )
         var lk = List[WirePlan]()
         lk.append(_plan_to_wire(d.left[]))
         var rk = List[WirePlan]()
@@ -3271,6 +3309,18 @@ def _plan_to_wire(p: LogicalPlan) raises -> WirePlan:
         out_schema^, arm, scan^, filter^, project^, aggregate^,
         join^, sort^, limit^, distinct^, topn^, union_all^, partition_by^,
         partition_topn^, asof_join^, view_ref^, cse_ref^, cast_to_varchar^,
+    )
+
+
+def _optimizer_decision_message(field: String, detail: String) -> String:
+    """A recorded optimizer decision `plan.proto` has no field for yet. See
+    the FIELDS REFUSED RATHER THAN DROPPED ledger entry."""
+    var out = PLAN_WIRE_UNSUPPORTED_OPTIMIZER_DECISION + ": " + field
+    if detail != "":
+        out += " " + detail
+    return (
+        out + " is a recorded optimizer decision with no plan.proto field;"
+        + " encoding it would decode as the default"
     )
 
 

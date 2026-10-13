@@ -83,6 +83,7 @@ from komira_arrow.schema import Schema
 from komira_scan_source.in_memory_source import InMemorySource
 
 from komira_plan_ir.plan_helpers import _copy_plan, _copy_schema
+from .optimizer_udf_carry import filter_like, project_like, aggregate_like
 
 
 # -----------------------------------------------------------------------------
@@ -361,11 +362,11 @@ def install_shared_cross_source(
             var leaf = LogicalPlan.scan_from_source(
                 SourceVariant(source.copy()), _copy_schema(batch_schema)
             )
-            return LogicalPlan.aggregate(group_by^, agg_exprs^, leaf^)
+            return aggregate_like(ad, group_by^, agg_exprs^, leaf^)
         var child = install_shared_cross_source(
             _copy_plan(ad.child[]), target, source, batch_schema
         )
-        return LogicalPlan.aggregate(group_by^, agg_exprs^, child^)
+        return aggregate_like(ad, group_by^, agg_exprs^, child^)
     elif plan.tag == PLAN_FILTER:
         var child = install_shared_cross_source(
             _copy_plan(plan._filter.value()[].child[]),
@@ -374,7 +375,7 @@ def install_shared_cross_source(
             batch_schema,
         )
         var pred = plan._filter.value()[].predicate.copy()
-        return LogicalPlan.filter(pred^, child^)
+        return filter_like(plan._filter.value()[], pred^, child^)
     elif plan.tag == PLAN_PROJECT:
         var child = install_shared_cross_source(
             _copy_plan(plan._project.value()[].child[]),
@@ -383,7 +384,7 @@ def install_shared_cross_source(
             batch_schema,
         )
         var exprs = _copy_exprs(plan._project.value()[].exprs)
-        return LogicalPlan.project(exprs^, child^)
+        return project_like(plan._project.value()[], exprs^, child^)
     elif plan.tag == PLAN_JOIN:
         var left = install_shared_cross_source(
             _copy_plan(plan._join.value()[].left[]), target, source, batch_schema
