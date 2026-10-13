@@ -2,8 +2,10 @@
 # komira_job_supervisor/tests/test_job_output_bytes_and_crash_json.mojo
 #   The job's output keeps its bytes through every product built from its
 #   lines (the rings, logs.txt, the FAILED heartbeat's stderr tail and
-#   crash_report.json), and crash_report.json is JSON a strict parser takes
-#   whatever bytes the job wrote (komira-ai/komira#1393).
+#   crash_report.json), and the output lines in crash_report.json are valid
+#   UTF-8 and escaped, whatever bytes the job wrote (komira-ai/komira#1393).
+#   job_name and instance_name are copied as given (they come from argv and
+#   are not checked as UTF-8); these tests use UTF-8 names.
 # =============================================================================
 #
 #   test_non_ascii_output_keeps_its_bytes_everywhere
@@ -18,6 +20,10 @@
 #       `_absorb` fed one 4-byte character in two reads, split inside it:
 #       the line holds the character's four bytes. Catches a line decoded
 #       per read rather than once at its newline.
+#   test_a_stdout_character_split_across_reads_is_kept_whole
+#       The same split fed as stdout: stdout_ring[0] holds the four bytes.
+#       Catches the stdout accumulator alone decoding each read (the stderr
+#       test cannot see it: the two streams have separate branches).
 #   test_every_control_byte_is_escaped_in_the_crash_report
 #       A stderr line holding each byte 0x00..0x1F, `"` and `\`, and a job
 #       name and instance name holding `"`, `\` and control bytes: the report
@@ -30,8 +36,8 @@
 #       DEFINED BEHAVIOUR for output that is not UTF-8: each line is decoded
 #       once, at its newline, with `String(from_utf8_lossy=)`, so an
 #       ill-formed sequence becomes U+FFFD (EF BF BD) in the rings, logs.txt,
-#       the heartbeat and crash_report.json, and crash_report.json stays
-#       valid UTF-8 JSON. A lone 0xFF and a lead byte 0xC3 cut off by the end
+#       the heartbeat and crash_report.json, and the lines in
+#       crash_report.json stay valid UTF-8. A lone 0xFF and a lead byte 0xC3 cut off by the end
 #       of its line each become one U+FFFD. The streamed `chunks/0.log`
 #       object keeps the job's exact bytes, 0xFF included: it is fed the raw
 #       reads before any line is built.
@@ -268,6 +274,22 @@ def test_a_character_split_across_reads_is_kept_whole() raises:
     print("  test_a_character_split_across_reads_is_kept_whole: PASS")
 
 
+def test_a_stdout_character_split_across_reads_is_kept_whole() raises:
+    var tails = ArcPointer[List[List[String]]](List[List[String]]())
+    var js = Js(_config(String("logs/split_out")), TailRecorder(tails), None)
+    # The same split as above, on stdout: its accumulator and its newline
+    # branch are separate code from stderr's.
+    js._absorb(_str(_bytes(0x61, 0xF0, 0x9F)), True)
+    js._absorb(_str(_bytes(0xA6, 0x80, 0x0A)), True)
+    assert_equal(len(js.stdout_ring), 1, "one stdout line")
+    _assert_bytes(
+        js.stdout_ring[0],
+        _bytes(0x61, 0xF0, 0x9F, 0xA6, 0x80),
+        "the split stdout character is whole",
+    )
+    print("  test_a_stdout_character_split_across_reads_is_kept_whole: PASS")
+
+
 def test_every_control_byte_is_escaped_in_the_crash_report() raises:
     # The line: bytes 0x00..0x1F, then `"` and `\`, then "end".
     var line = List[UInt8]()
@@ -386,6 +408,7 @@ def main() raises:
     print("test_job_output_bytes_and_crash_json:")
     test_non_ascii_output_keeps_its_bytes_everywhere()
     test_a_character_split_across_reads_is_kept_whole()
+    test_a_stdout_character_split_across_reads_is_kept_whole()
     test_every_control_byte_is_escaped_in_the_crash_report()
     test_invalid_utf8_output_becomes_replacement_characters()
     print("test_job_output_bytes_and_crash_json: ALL PASS")

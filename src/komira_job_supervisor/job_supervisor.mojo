@@ -132,8 +132,8 @@ from komira_log import ArgStr
 def _line_text(bytes: List[UInt8]) -> String:
     """One captured line as a String, made once from its bytes. Valid UTF-8
     keeps its bytes; a sequence that is not UTF-8 becomes U+FFFD, so every
-    line (and logs.txt, the heartbeat and crash_report.json built from it)
-    is valid UTF-8. The streamed chunks keep the job's exact bytes. A per-byte
+    line, and so the line text in logs.txt, the heartbeat and
+    crash_report.json, is valid UTF-8. The streamed chunks keep the job's exact bytes. A per-byte
     `chr(Int(byte))` would re-encode each byte >= 0x80 as its own two-byte
     code point (`é`, C3 A9, became C3 83 C2 A9; komira-ai/komira#1393)."""
     return String(from_utf8_lossy=Span(bytes))

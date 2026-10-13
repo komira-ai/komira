@@ -47,7 +47,10 @@ def build_crash_report_json(
     Every string goes through `komira_json.write_json_string` (RFC 8259
     section 7): `"` and `\\` are escaped, every byte below 0x20 is written as
     an escape, and every other byte, each byte of a multi-byte UTF-8
-    character included, is copied unchanged."""
+    character included, is copied unchanged. The stderr_tail and
+    panic_message lines are valid UTF-8 (`_line_text`); job_name and
+    instance_name come from argv and are copied as given, not checked as
+    UTF-8."""
     var out = List[UInt8]()
     _append_ascii(out, '{"job_name":')
     write_json_string(out, job_name)
