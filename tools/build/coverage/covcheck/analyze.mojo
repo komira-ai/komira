@@ -17,7 +17,8 @@ and the findings: the one computation both `covcheck report` and
 4. Each kept file's source is read for exemption markers (exempt.mojo).
    Then the full source: a package is measured when a report names a kept
    file in it (with or without records), and the gated package
-   (`only_package`) always is. Every `.mojo` file of the repository whose
+   (`only_package`) always is, and so is each package given a hold
+   (`held`; held.mojo). Every `.mojo` file of the repository whose
    package is a measured one, that no report gives a line or branch record,
    and that is not a left-out test source, is read from the checkout and
    counted as a file no test compiled: each executable line (lexer.mojo's
@@ -31,7 +32,7 @@ and the findings: the one computation both `covcheck report` and
    It is not counted as a file, and raises `DeclarationOnlyFile`, which is
    information (`info_findings`), never counted.
 5. The mutants are read and mapped the same way.
-6. Per package: lines, branches, exemptions, mutants; the ratchet row.
+6. Per package: lines, branches, exemptions, mutants; the metrics it holds.
 7. Findings: `BelowTarget` (line, and branch when measured, below
    `target_bp`), `NotMeasured` (a package in the run, the gated package
    included, with no line record and no exempted line, while `target_bp` is
@@ -44,7 +45,7 @@ and the findings: the one computation both `covcheck report` and
    report without branch data, such as kcov's, never passes in enforce
    mode; a branch record file's `SF` with no `BRDA`, a file whose code the
    test held with no decision in it, measures its package's branches, of
-   which there are none), the ratchet's (ratchet.mojo), one
+   which there are none), one
    `MutantSurvived` per surviving mutant, `UnmeasuredFile` per file no test
    compiled (its message says the line and branch measurements disagree
    when the file's branch records show an arm taken),
@@ -52,15 +53,24 @@ and the findings: the one computation both `covcheck report` and
    record file names a kept file of, that no branch record file names and
    whose line report gives no branch record (its branches were not read,
    and would count as none),
-   `ExemptionWithoutReason` and `StaleExemption`.
+   `ExemptionWithoutReason` and `StaleExemption`. A metric the package
+   holds (held.mojo) turns its threshold finding into a `Regression`: a
+   held line below `target_bp` or with no line record and no exempted line
+   (in place of NotMeasured), a held branch below it or with no branch
+   record (in place of BranchNotMeasured). A gated package with no
+   executable line and no exempted one (`only_package`: every source of
+   its library counted, so a library whose sources are all generated) has
+   nothing to cover, and an unmeasured held metric of it is no finding. A
+   metric at or above `target_bp` that the package does not hold is
+   `ReachedTarget`, information (`info_findings`) for every package but a
+   test-only one: it says to add the metric to the package's marker.
 8. Test-only packages: the findings of a package that is one of
    `info_packages` (`--info-package`, the directories of policy.bzl's
    COVERAGE_INFO_ONLY_DIRS) or under one are moved to `info_findings`. Such
    a package is measured and reported as any other, but held to no target:
    its findings are information, never counted (the conclusion, a gate's
-   exit and the annotation level read `findings` alone): a `Regression`
-   below a row it has included. The proposed ratchet gives it no row, so
-   a test-only package has no floor.
+   exit and the annotation level read `findings` alone). A test-only
+   package has no hold (held.mojo refuses its marker).
 9. Report only (no number or finding depends on it yet):
    each kept file with a line record is read for the functions it declares
    (decls.mojo), and every function with a body none of whose lines has a
@@ -72,8 +82,8 @@ and the findings: the one computation both `covcheck report` and
    calls can have no record of its own. A file with branch records and no
    line record lists none: no line record says which lines held code.
 10. The conclusion (stats.conclusion_of), over `findings` after step 8:
-    `failure` with any `Regression` in every mode, so a floor holds even
-    in census mode; otherwise by mode.
+    `failure` with any `Regression` in every mode, so a hold fails even in
+    census mode; otherwise by mode.
 
 The line reports must all be lcov or all Cobertura: the two formats
 identify a line's branches differently, so one file in both would count its
@@ -98,7 +108,7 @@ from covcheck.lexer import executable_lines
 from covcheck.model import FileCov, merge_by_path
 from covcheck.mutants import KILLED, SURVIVED, TIMEOUT, Mutant, parse_mutants
 from covcheck.paths import MAPPED, OUTSIDE, RepoFiles, generated_test_main, is_test_source, map_path, package_of
-from covcheck.ratchet import Ratchet, compare, propose
+from covcheck.held import Held
 from covcheck.stats import (
     BELOW_TARGET,
     BRANCH_NOT_MEASURED,
@@ -106,6 +116,7 @@ from covcheck.stats import (
     DECLARATION_ONLY_FILE,
     NOT_MEASURED,
     EXEMPTION_WITHOUT_REASON,
+    REACHED_TARGET,
     REGRESSION,
     MODE_NEUTRAL,
     MUTANT_SURVIVED,
@@ -216,7 +227,8 @@ struct Analysis(Copyable, Movable):
     `info_dirs` are the options' `info_packages`, `info_packages` the
     measured packages they cover (in `packages` order) and `info_findings`
     those packages' findings, which `findings` does not hold (step 8),
-    then every package's `DeclarationOnlyFile` (step 4)."""
+    then every `ReachedTarget` (step 7) and every package's
+    `DeclarationOnlyFile` (step 4)."""
 
     var mode: String
     var target_bp: Int
@@ -232,7 +244,6 @@ struct Analysis(Copyable, Movable):
     var info_dirs: List[String]
     var info_packages: List[String]
     var info_findings: List[Finding]
-    var proposal: Ratchet
     var ignored_files: Int
     var excluded_test_files: Int
     var ignored_mutants: Int
@@ -255,7 +266,6 @@ struct Analysis(Copyable, Movable):
         self.info_dirs = List[String]()
         self.info_packages = List[String]()
         self.info_findings = List[Finding]()
-        self.proposal = Ratchet()
         self.ignored_files = 0
         self.excluded_test_files = 0
         self.ignored_mutants = 0
@@ -396,11 +406,27 @@ def _unmeasured_files(
     return out^
 
 
+def _below(package: String, metric: String, bp: Int, target: Int, held: Bool) -> Finding:
+    """BelowTarget, or a Regression when the package holds `metric`."""
+    var why = metric + String(" ") + render_bp(bp) + String(" is below the target ") + render_bp(target)
+    if held:
+        return Finding(String(REGRESSION), package, metric, bp, target, String(""), 0, why + String(", which coverage_held holds it at"))
+    return Finding(String(BELOW_TARGET), package, metric, bp, target, String(""), 0, why)
+
+
+def _reached(package: String, metric: String, bp: Int, target: Int) -> Finding:
+    return Finding(
+        String(REACHED_TARGET), package, metric, bp, target, String(""), 0,
+        metric + String(" ") + render_bp(bp) + String(" reaches the target ") + render_bp(target)
+        + String(": hold it, adding `") + metric + String("` to ") + package + String("/coverage_held, once every library of the package reaches it"),
+    )
+
+
 def analyze(
     reports: List[Input],
     mutant_inputs: List[Input],
     repo: RepoFiles,
-    ratchet: Ratchet,
+    held: Held,
     sources: Sources,
     opts: Options,
 ) raises -> Analysis:
@@ -526,6 +552,11 @@ def analyze(
     var measured = Dict[String, Bool]()
     if opts.only_package.byte_length() > 0:
         measured[opts.only_package] = True
+    for e in held.packages.items():
+        if not repo.has_buck(e.key):
+            raise Error(String("coverage_held of ") + e.key + String(": the directory has no BUCK file"))
+        if _keep(e.key, e.key + String("/BUCK"), opts) == 0:
+            measured[e.key] = True
     var named = Dict[String, Bool]()
     var pending = Dict[String, FileCov]()
     var branch_unmeasured = List[Finding]()
@@ -626,8 +657,9 @@ def analyze(
             a.packages[k].error += 1
         kept_muts.append(muts[i].copy())
         mut_pkgs.append(pkg)
-    if opts.only_package.byte_length() > 0 and len(a.packages) == 0:
-        a.packages.append(PackageStats(opts.only_package))
+    # The gated package and each held one are in the run, measured or not.
+    for e in measured.items():
+        _ = _stats_at(a, at, e.key)
 
     # Sorted outputs.
     var pkeys = List[String]()
@@ -637,11 +669,8 @@ def analyze(
     var sorted_pkgs = List[PackageStats]()
     for i in range(len(porder)):
         var p = a.packages[porder[i]].copy()
-        var row = ratchet.find(p.package)
-        if row >= 0:
-            p.has_row = True
-            p.line_floor = ratchet.rows[row].line_floor
-            p.branch_floor = ratchet.rows[row].branch_floor
+        p.held_line = held.line(p.package)
+        p.held_branch = held.branch(p.package)
         sorted_pkgs.append(p^)
     a.packages = sorted_pkgs^
     var ekeys = List[String]()
@@ -666,39 +695,49 @@ def analyze(
 
     # 7: findings.
     var findings = List[Finding]()
+    var reached = List[Finding]()
+    var t = opts.target_bp
     for i in range(len(a.packages)):
         ref p = a.packages[i]
         var lbp = p.line_bp()
-        if not p.has_records and opts.target_bp > 0:
+        var bbp = p.branch_bp()
+        # A gated library with nothing to cover holds nothing unmeasured.
+        var nothing = opts.only_package.byte_length() > 0 and p.line_found == 0 and p.exempt_lines == 0
+        var info = is_info_package(p.package, opts.info_packages)
+        if p.held_line and lbp < 0 and p.exempt_lines == 0 and not nothing and t > 0:
             findings.append(Finding(
-                String(NOT_MEASURED), p.package, String("line"), -1, opts.target_bp, String(""), 0,
+                String(REGRESSION), p.package, String("line"), -1, t, String(""), 0,
+                String("line is held (coverage_held) and no line of this package was measured (no report for it, or none of its paths mapped to it)"),
+            ))
+        elif not p.has_records and t > 0:
+            findings.append(Finding(
+                String(NOT_MEASURED), p.package, String("line"), -1, t, String(""), 0,
                 String("no line of this package was measured (no report for it, or none of its paths mapped to it)"),
             ))
-        if lbp >= 0 and lbp < opts.target_bp:
+        if lbp >= 0 and lbp < t:
+            findings.append(_below(p.package, String("line"), lbp, t, p.held_line))
+        elif lbp >= 0 and t > 0 and not p.held_line and not info:
+            reached.append(_reached(p.package, String("line"), lbp, t))
+        if p.held_branch and not p.has_branch_records and not nothing and t > 0:
             findings.append(Finding(
-                String(BELOW_TARGET), p.package, String("line"), lbp, opts.target_bp, String(""), 0,
-                String("line ") + render_bp(lbp) + String(" is below the target ") + render_bp(opts.target_bp),
+                String(REGRESSION), p.package, String("branch"), -1, t, String(""), 0,
+                String("branch is held (coverage_held) and no branch of this package was measured (no report names a file of it with branch records)"),
             ))
-        if p.has_records and not p.has_branch_records and opts.target_bp > 0:
+        elif p.has_records and not p.has_branch_records and t > 0:
             findings.append(Finding(
-                String(BRANCH_NOT_MEASURED), p.package, String("branch"), -1, opts.target_bp, String(""), 0,
+                String(BRANCH_NOT_MEASURED), p.package, String("branch"), -1, t, String(""), 0,
                 String("no branch of this package was measured (no report names a file of it with branch records:")
                 + String(" kcov's Cobertura holds none, and a gate reads its tests' branch records only for a library of")
                 + String(" COVERAGE_BRANCH_GATE, tools/build/coverage/policy.bzl): its branch coverage cannot be shown to meet the target"),
             ))
-        var bbp = p.branch_bp()
-        if bbp >= 0 and bbp < opts.target_bp:
-            findings.append(Finding(
-                String(BELOW_TARGET), p.package, String("branch"), bbp, opts.target_bp, String(""), 0,
-                String("branch ") + render_bp(bbp) + String(" is below the target ") + render_bp(opts.target_bp),
-            ))
+        if bbp >= 0 and bbp < t:
+            findings.append(_below(p.package, String("branch"), bbp, t, p.held_branch))
+        elif bbp >= 0 and t > 0 and not p.held_branch and not info:
+            reached.append(_reached(p.package, String("branch"), bbp, t))
     for i in range(len(unmeasured_findings)):
         findings.append(unmeasured_findings[i].copy())
     for i in range(len(branch_unmeasured)):
         findings.append(branch_unmeasured[i].copy())
-    var rf = compare(ratchet, a.packages, repo, opts.only_package.byte_length() == 0)
-    for i in range(len(rf)):
-        findings.append(rf[i].copy())
     for i in range(len(a.mutants)):
         ref m = a.mutants[i]
         if m.status == String(SURVIVED):
@@ -732,7 +771,10 @@ def analyze(
             a.info_findings.append(findings[forder[i]].copy())
         else:
             a.findings.append(findings[forder[i]].copy())
-    # Declaration-only files are information in every package.
+    # A metric to hold, then declaration-only files: information in every
+    # package.
+    for i in range(len(reached)):
+        a.info_findings.append(reached[i].copy())
     for i in range(len(decl_notes)):
         a.info_findings.append(decl_notes[i].copy())
     for i in range(len(a.packages)):
@@ -752,14 +794,8 @@ def analyze(
         a.total.survived += p.survived
         a.total.timeout += p.timeout
         a.total.error += p.error
-    # A test-only package gets no proposed row (step 8): it has no floor.
-    var floored = List[PackageStats]()
-    for i in range(len(a.packages)):
-        if not is_info_package(a.packages[i].package, opts.info_packages):
-            floored.append(a.packages[i].copy())
-    a.proposal = propose(ratchet, floored, repo)
-    # Step 10: a test-only package's Regression is in info_findings, so it
-    # fails nothing.
+    # Step 10: a test-only package's findings are in info_findings, so they
+    # fail nothing.
     var regressions = 0
     for i in range(len(a.findings)):
         if a.findings[i].kind == String(REGRESSION):

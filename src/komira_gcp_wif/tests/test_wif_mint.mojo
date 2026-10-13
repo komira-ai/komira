@@ -585,26 +585,68 @@ def test_the_federated_token_is_cached_then_refreshed() raises:
     assert_equal(_count(_text(iam_cap), ":signJwt "), 3)
 
 
+def _host_refusal(what: String) -> String:
+    return (
+        String("komira_gcp_wif: the ") + what
+        + " host holds a byte outside [a-z0-9.-]"
+    )
+
+
+def _bad_hosts() -> List[String]:
+    """Each byte a bare host may not hold (the URL delimiters `@ / : #`, an
+    upper-case letter, `_`, and the bytes just past each accepted range),
+    placed first, in the middle and last: a check that skips the first or
+    the last byte accepts one of them."""
+    var bad: List[String] = ["@", "/", ":", "#", "A", "Z", "_", "`", "{", ",", "+"]
+    var out = List[String]()
+    for i in range(len(bad)):
+        out.append(bad[i] + "sts.example.test")
+        out.append(String("sts.") + bad[i] + "example.test")
+        out.append(String("sts.example.test") + bad[i])
+    return out^
+
+
 def test_a_host_override_must_be_a_bare_host() raises:
     """Both host overrides receive a credential (the subject token, the
     bearer), so each is refused unless it is a non-empty run of
-    `[a-z0-9.-]`; a bare host is accepted and is where the request goes.
-    The accepted overrides are IP literals because the client resolves the
-    host before it dials, even over a scripted connector: a literal is
-    parsed, never looked up."""
+    `[a-z0-9.-]`, with a bad byte first, inside or last, by the whole
+    message; a refused override leaves the host as it was. A host holding
+    every accepted range edge (`a z 0 9 . -`), at the first and the last
+    byte too, is accepted. The overrides that dial are IP literals because
+    the client resolves the host before it dials, even over a scripted
+    connector: a literal is parsed, never looked up."""
     var f = _fetcher(_armed(_sts_ok(), _capture()))
-    with assert_raises(contains="STS host holds a byte outside"):
-        f.set_sts_host(String("sts.example.test@evil.example"))
     with assert_raises(contains="STS host is empty"):
         f.set_sts_host(String(""))
+    var edges: List[String] = ["a.z-0-9", "9-0.z-a", "-az09.", ".09az-"]
+    for i in range(len(edges)):
+        f.set_sts_host(edges[i])
 
     var sts_cap = _capture()
     var iam_cap = _capture()
     var m = _minter(_armed(_sts_ok(), sts_cap), _armed(_signjwt_ok(), iam_cap))
-    with assert_raises(contains="IAM Credentials host holds a byte outside"):
-        m.set_iam_host(String("evil.example/x"))
+    with assert_raises(contains="IAM Credentials host is empty"):
+        m.set_iam_host(String(""))
+    for i in range(len(edges)):
+        m.set_iam_host(edges[i])
     m.set_iam_host(String("127.0.0.2"))
     m.tokens().fetcher().set_sts_host(String("127.0.0.1"))
+
+    var bad = _bad_hosts()
+    for i in range(len(bad)):
+        var sts_msg = String("")
+        try:
+            m.tokens().fetcher().set_sts_host(bad[i])
+        except e:
+            sts_msg = String(e)
+        assert_equal(sts_msg, _host_refusal(String("STS")), msg=bad[i])
+        var iam_msg = String("")
+        try:
+            m.set_iam_host(bad[i])
+        except e:
+            iam_msg = String(e)
+        assert_equal(iam_msg, _host_refusal(String("IAM Credentials")), msg=bad[i])
+
     assert_equal(m.mint_jwt(String(SA), String(JWT_AUD)), SIGNED)
     assert_equal(_header_value(_text(sts_cap), String("host")), "127.0.0.1")
     assert_equal(_header_value(_text(iam_cap), String("host")), "127.0.0.2")

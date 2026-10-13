@@ -7,7 +7,7 @@ same commands, and so the same action keys, as before the attributes existed.
     attribute (mojo_library)   attribute (mojo_test, mojo_binary)   effect
     test_assert_level          assert_level                         `-D ASSERT=<level>`
     test_defines               defines                              `-D <define>` each
-    test_memory_cap_mib        memory_cap_mib (mojo_test only)      the run under mem_cap.sh
+    test_memory_cap_mib        memory_cap_mib (mojo_test only)      the run's memory cap (gate mojo --mem-cap-mib)
 
 The mojo_library attributes reach each `test_srcs` build and run, and the
 defines its coverage build; not the package's `mojo precompile`, the README's
@@ -23,7 +23,7 @@ the `mojo build` that generates the code.
 # prints a failure instead of aborting.
 ASSERT_LEVELS = ["none", "warn", "safe", "all"]
 
-# The memory cap, in MiB of resident memory (mem_cap.sh), of a test compiled
+# The memory cap, in MiB of resident memory (`gate mojo --mem-cap-mib`), of a test compiled
 # at ASSERT=none that names no cap. Such a test is a hostile-input test: with
 # its bounds checks off, a length read from corrupt input can drive an
 # allocation with no bound, and the cap kills the test instead of letting it
@@ -61,25 +61,19 @@ def memory_cap(where, cap_attr, cap, assert_level):
         fail("{}: {} is {}; it must be a number of MiB, or 0 for no cap".format(where, cap_attr, cap))
     return cap if cap > 0 else None
 
-def capped_prefix(tc, script, label, cap):
-    """The words that run a test command under mem_cap.sh, or [] without a cap."""
+def cap_flags(cap):
+    """The gate's flags for a memory cap (`gate mojo --mem-cap-mib`), or []
+    without a cap."""
     if cap == None:
         return []
-    return [tc.busybox, "sh", script, tc.busybox, str(cap), label, "--"]
-
-def mem_cap_script(ctx):
-    return ctx.attrs._mem_cap[DefaultInfo].default_outputs[0]
-
-_MEM_CAP_ATTR = {
-    "_mem_cap": attrs.dep(default = "komira//tools/build/mojo:mem_cap.sh"),
-}
+    return ["--mem-cap-mib", str(cap)]
 
 LIBRARY_DEFINE_ATTRS = {
     # See this file's docstring and ASSERT_LEVELS.
     "test_assert_level": attrs.option(attrs.string(), default = None),
     "test_defines": attrs.list(attrs.string(), default = []),
     "test_memory_cap_mib": attrs.option(attrs.int(), default = None),
-} | _MEM_CAP_ATTR
+}
 
 BINARY_DEFINE_ATTRS = {
     "assert_level": attrs.option(attrs.string(), default = None),
@@ -88,4 +82,4 @@ BINARY_DEFINE_ATTRS = {
 
 TEST_DEFINE_ATTRS = BINARY_DEFINE_ATTRS | {
     "memory_cap_mib": attrs.option(attrs.int(), default = None),
-} | _MEM_CAP_ATTR
+}

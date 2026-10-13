@@ -48,6 +48,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_env_filter_bytes_non_ascii.mojo",
+        "tests/test_log_anchor_refresh_and_uncalled_helpers.mojo",
         "tests/test_log_bytes_non_ascii.mojo",
         "tests/test_log_config_first_init.mojo",
         "tests/test_log_config_init_from_spec.mojo",
