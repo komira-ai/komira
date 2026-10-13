@@ -304,25 +304,6 @@ def _park_behind(mut entry: ConnEntry, src: List[UInt8]):
     entry._pending_len = entry._pending_len + len(src)
 
 
-comptime HEAD_KEPT: Int = 2
-"""`carry_or_refuse_head`: the partial head is kept; read again."""
-
-
-def carry_or_refuse_head(
-    mut entry: ConnEntry, part: Span[UInt8, _], mut bytes_sent: Int64
-) -> Int:
-    """The parser needs more bytes than `part`, the received start of a
-    request head: keep it on the entry for the next read (`HEAD_KEPT`). A
-    head that already fills the receive buffer cannot complete; it is
-    answered 431, the conn's last response, and the result of that write is
-    returned (0, 1 or -1, as `_write_last`)."""
-    if entry.carry_head(part):
-        return HEAD_KEPT
-    var err_buf = List[UInt8]()
-    build_error_response_bytes(UInt16(431), err_buf)
-    return _write_last(entry, err_buf, bytes_sent)
-
-
 def _write_last(
     mut entry: ConnEntry, src: List[UInt8], mut bytes_sent: Int64
 ) -> Int:
@@ -358,6 +339,25 @@ def _take_carry(
         io_buf[i] = entry._carry[i]
     entry._carry.clear()
     return n
+
+
+comptime HEAD_KEPT: Int = 2
+"""`carry_or_refuse_head`: the partial head is kept; read again."""
+
+
+def carry_or_refuse_head(
+    mut entry: ConnEntry, part: Span[UInt8, _], mut bytes_sent: Int64
+) -> Int:
+    """The parser needs more bytes than `part`, the received start of a
+    request head: keep it on the entry for the next read (`HEAD_KEPT`). A
+    head that already fills the receive buffer cannot complete; it is
+    answered 431, the conn's last response, and the result of that write is
+    returned (0, 1 or -1, as `_write_last`)."""
+    if entry.carry_head(part):
+        return HEAD_KEPT
+    var err_buf = List[UInt8]()
+    build_error_response_bytes(UInt16(431), err_buf)
+    return _write_last(entry, err_buf, bytes_sent)
 
 
 # =============================================================================
@@ -412,6 +412,7 @@ def serve_read_round(
         var got = carried
         carried = 0
         if got == 0:
+            # The read lands after a head kept from earlier reads.
             got = read_after_head_carry(entry, io_buf)
             if got == HEAD_READ_BLOCKED:
                 break
@@ -540,10 +541,12 @@ def serve_read_round_chained(
         var got = carried
         carried = 0
         if got == 0:
+            # The read lands after a head kept from earlier reads.
             got = read_after_head_carry(entry, io_buf)
             if got == HEAD_READ_BLOCKED:
                 break
             if got <= 0:
+                # End of stream or a read error.
                 keep_alive = False
                 break
 
