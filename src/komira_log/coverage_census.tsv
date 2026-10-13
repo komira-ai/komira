@@ -1,3 +1,3 @@
 # What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
 census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
-komira//src/komira_log:komira_log	src/komira_log	library	OK	1957	2153	-	-	no	conda	src/komira_log/engine/metric_sink.mojo	-
+komira//src/komira_log:komira_log	src/komira_log	library	OK	2193	2193	-	-	no	conda	-	-
