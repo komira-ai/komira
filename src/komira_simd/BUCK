@@ -12,6 +12,7 @@ mojo_library(
         "tests/test_byte_class_wide_forms.mojo",
         "tests/test_byte_equal_simd.mojo",
         "tests/test_byte_memmem.mojo",
+        "tests/test_byte_set_nibble_luts.mojo",
         "tests/test_fast_copy_byte_oracle.mojo",
         "tests/test_fast_copy_edges.mojo",
         "tests/test_fast_copy_erms_band.mojo",
