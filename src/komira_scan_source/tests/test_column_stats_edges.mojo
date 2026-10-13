@@ -12,19 +12,22 @@
 #      a STRING field over a DICTIONARY batch next to a STRING batch, and a
 #      STRING field over a column without offsets: the NDV was Exact 0 (or
 #      the min/max Exact over the scanned batch only, or the nulls of the
-#      offset-less column uncounted). Now: exact nulls, everything else
-#      Absent, no sketch, no bloom; one unscanned value is enough. FLOAT16
-#      and DATE64 widths are 2 and 8.
+#      offset-less column uncounted). An INT32, FLOAT64 or BOOL field over a
+#      column of another type (DICTIONARY indices, a wider or narrower
+#      buffer): min/max (and sum) Exact over bytes read at the field's type.
+#      Now: exact nulls, everything else Absent, no sketch, no bloom; one
+#      unscanned value is enough. FLOAT16 and DATE64 widths are 2 and 8.
 #   8. Floats. NaN (one or several): min over the other values, max and
 #      sum Absent, one distinct NaN. All NaN: no min/max. All +inf / all
 #      -inf: the infinity, not the largest finite value. -0.0 and +0.0:
 #      one distinct value.
-#   9. Integers. A sum that wraps Int64 (in one SIMD lane, in the lane fold,
-#      on the scalar path, downwards) is Absent; one that ends in range
+#   9. Integers. A sum that wraps Int64 (in one SIMD lane, in a SIMD block
+#      before the last, in the lane fold, on the scalar path, downwards) is
+#      Absent; one that ends in range
 #      without wrapping is Exact. A UINT64 value above Int64.MAX: no
 #      min/max/sum, NDV still exact.
 #  10. A saturated sketch on an overflowed column: the Inexact NDV is the
-#      non-null value count, not 0.
+#      non-null value count (nulls not counted), not 0.
 # =============================================================================
 
 from std.math import inf
@@ -246,6 +249,85 @@ def test_string_batch_beside_a_one_index_dictionary_batch_claims_nothing() raise
     _assert_only_nulls_known(s, 0, "string batch + one-index dictionary batch")
 
 
+# A field and a batch column of different types: the scanner for the
+# field's type would read the column's buffer as that type (DICTIONARY
+# indices as INT32 values, an INT64 buffer at INT32 width, integer bits as
+# doubles, integer bytes as packed booleans). Each column below holds one
+# null, so the null count is the one thing still known.
+
+
+def _one_null(var col: Column[HeapRegion]) -> Column[HeapRegion]:
+    var nulls = List[Int]()
+    nulls.append(1)
+    _set_nulls(col, nulls)
+    return col^
+
+
+def _dictionary_col() raises -> Column[HeapRegion]:
+    var dv = List[String]()
+    dv.append(String("x"))
+    dv.append(String("y"))
+    var idx = List[Int32]()
+    for x in [0, 1, 1, 0]:
+        idx.append(Int32(x))
+    var c = Column.from_dictionary(
+        StringDictionaryArray.from_parts(
+            PrimitiveArray[DType.int32].from_list(idx^), StringArray.from_strings(dv)
+        )
+    )
+    return _one_null(c^)
+
+
+def test_int_field_over_a_mismatched_column_claims_nothing() raises:
+    _assert_only_nulls_known(
+        _stats1(_dictionary_col(), ArrowType.INT32), 1, "INT32 over DICTIONARY"
+    )
+    var wide = List[Int64]()
+    for x in [5, 6, 7, 8]:
+        wide.append(Int64(x))
+    _assert_only_nulls_known(
+        _stats1(_one_null(_int_col[DType.int64](wide)), ArrowType.INT32),
+        1,
+        "INT32 over INT64",
+    )
+
+
+def test_float_field_over_a_mismatched_column_claims_nothing() raises:
+    var ints = List[Int64]()
+    for x in [5, 6, 7, 8]:
+        ints.append(Int64(x))
+    _assert_only_nulls_known(
+        _stats1(_one_null(_int_col[DType.int64](ints)), ArrowType.FLOAT64),
+        1,
+        "FLOAT64 over INT64",
+    )
+    var f = List[Float64]()
+    for x in [1.5, 2.5, 3.5, 4.5]:
+        f.append(Float64(x))
+    _assert_only_nulls_known(
+        _stats1(_one_null(_f64_col(f)), ArrowType.FLOAT32),
+        1,
+        "FLOAT32 over FLOAT64",
+    )
+    _assert_only_nulls_known(
+        _stats1(_dictionary_col(), ArrowType.FLOAT32), 1, "FLOAT32 over DICTIONARY"
+    )
+
+
+def test_bool_field_over_a_mismatched_column_claims_nothing() raises:
+    var raw = List[Int8]()
+    for x in [1, 2, 3, 4]:
+        raw.append(Int8(x))
+    _assert_only_nulls_known(
+        _stats1(_one_null(_int_col[DType.int8](raw)), ArrowType.BOOL),
+        1,
+        "BOOL over INT8",
+    )
+    _assert_only_nulls_known(
+        _stats1(_dictionary_col(), ArrowType.BOOL), 1, "BOOL over DICTIONARY"
+    )
+
+
 # =============================================================================
 # 8. Floats
 # =============================================================================
@@ -375,6 +457,19 @@ def test_int64_sum_that_wraps_is_absent() raises:
     _sum_absent(_int_col[DType.int64](down), "downwards")
 
 
+def test_int64_sum_that_wraps_before_the_last_simd_block_is_absent() raises:
+    """2W rows of MAX wrap every lane in the second SIMD block; a third
+    block of 3s brings every lane back to 1 without wrapping, and the fold
+    of W lanes of 1 does not wrap. Only a wrap flag that survives later
+    blocks reports the sum Absent (its wrapped value, W, is not the sum)."""
+    var vals = List[Int64]()
+    for _ in range(2 * W):
+        vals.append(Int64.MAX)
+    for _ in range(W):
+        vals.append(Int64(3))
+    _sum_absent(_int_col[DType.int64](vals), "earlier SIMD block")
+
+
 def test_int64_sum_in_range_stays_exact() raises:
     var vals = List[Int64]()
     vals.append(Int64.MAX)
@@ -424,6 +519,22 @@ def test_saturated_sketch_ndv_is_capped_at_the_value_count() raises:
     for i in range(4096):
         acc.hll.registers[i] = UInt8(53)
     var s = _finalize_accum(acc)
+    assert_true(s.distinct_count.is_inexact())
+    assert_equal(_ndv(s), Int64(5000))
+
+
+def test_saturated_sketch_ndv_cap_does_not_count_nulls() raises:
+    """The same saturated column with 100 nulls beside its 5000 values:
+    the cap is the 5000 non-null values, since a null is not a distinct
+    value."""
+    var acc = _ColAccum(ArrowType.INT64, 5100)
+    for v in range(5000):
+        acc.note_int(Int64(v))
+    acc.null_count = 100
+    for i in range(4096):
+        acc.hll.registers[i] = UInt8(53)
+    var s = _finalize_accum(acc)
+    assert_equal(s.null_count, 100)
     assert_true(s.distinct_count.is_inexact())
     assert_equal(_ndv(s), Int64(5000))
 

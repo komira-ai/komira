@@ -7,11 +7,15 @@
 # read each batch's column buffers in place and feed it. `_finalize_accum`
 # (column_stats.mojo) turns the accumulator into a ColumnStats.
 #
-# Values a scanner cannot read (a column type with no scanner, a column whose
-# buffers do not match its schema field) are counted in `n_unscanned`, never
-# in `n_values`; one such value makes every value statistic of the column
-# Absent at finalize, since a min, max, sum, NDV or bloom over a subset of
-# the values would claim something about values nobody looked at.
+# Values a scanner cannot read (a column type with no scanner, a batch column
+# whose type tag differs from its schema field's, a string column without
+# offsets) are counted in `n_unscanned`, never in `n_values`; one such value
+# makes every value statistic of the column Absent at finalize, since a min,
+# max, sum, NDV or bloom over a subset of the values would claim something
+# about values nobody looked at. Every scanner checks `col.arrow_type` before
+# it reads `col._data`: the accumulator's kind and width come from the schema
+# field, and reading another type's buffer at that width (DICTIONARY indices
+# as INT32 values, an INT64 buffer at INT32 width) yields wrong values.
 # =============================================================================
 
 from std.math import inf, isnan
@@ -451,7 +455,11 @@ def _scan_primitive_float_zero_copy[dtype: DType](
 
 
 def _scan_int_column(mut acc: _ColAccum, col: Column, at: ArrowType, nrows: Int) raises:
-    if at == ArrowType.INT8:
+    """`at` is the schema field's type; a batch column of another type is
+    counted without reading (see the file header)."""
+    if col.arrow_type != at:
+        acc.note_unscanned(col, nrows)
+    elif at == ArrowType.INT8:
         _scan_primitive_int_zero_copy[DType.int8](acc, col, nrows)
     elif at == ArrowType.INT16:
         _scan_primitive_int_zero_copy[DType.int16](acc, col, nrows)
@@ -482,7 +490,11 @@ def _scan_int_column(mut acc: _ColAccum, col: Column, at: ArrowType, nrows: Int)
 
 
 def _scan_float_column(mut acc: _ColAccum, col: Column, at: ArrowType, nrows: Int) raises:
-    if at == ArrowType.FLOAT32:
+    """`at` is the schema field's type; a batch column of another type is
+    counted without reading (see the file header)."""
+    if col.arrow_type != at:
+        acc.note_unscanned(col, nrows)
+    elif at == ArrowType.FLOAT32:
         _scan_primitive_float_zero_copy[DType.float32](acc, col, nrows)
     elif at == ArrowType.FLOAT64:
         _scan_primitive_float_zero_copy[DType.float64](acc, col, nrows)
@@ -493,7 +505,11 @@ def _scan_float_column(mut acc: _ColAccum, col: Column, at: ArrowType, nrows: In
 def _scan_bool_column(mut acc: _ColAccum, col: Column, nrows: Int) raises:
     """Scan a boolean column zero-copy: read packed bits from `col._data`
     (a Bitmap stored as bytes) and validity from `col._validity`. No
-    BooleanArray copy."""
+    BooleanArray copy. A batch column that is not BOOL is counted without
+    reading (see the file header)."""
+    if col.arrow_type != ArrowType.BOOL:
+        acc.note_unscanned(col, nrows)
+        return
     # The Column's `_data` for BOOL stores the packed value bits (one bit
     # per element); validity is the standard separate bitmap. Both share
     # the same byte-offset access pattern.
