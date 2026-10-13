@@ -22,7 +22,8 @@
 #   S  admission: a connection without TLS driven or served as if it had it.
 #   R  a round: a request not answered, a pipelined request skipped or read
 #      from the wrong offset, a connection kept after `Connection: close`,
-#      an incomplete head or request kept waiting, a malformed request
+#      a request whose body the read cut kept waiting, a head cut across
+#      reads closed unanswered or one filling the buffer kept, a malformed request
 #      answered with anything but its static error, an expectation answered
 #      wrong for either setting, close_notify or a reset not closing.
 #   W  a write that fails or blocks: counted as sent, or the connection kept.
@@ -401,13 +402,30 @@ def test_connection_close_ends_the_round() raises:
     assert_equal(link.read(), String(CANNED))
 
 
-def test_incomplete_head_closes_without_a_response() raises:
+def test_head_split_across_reads_is_answered() raises:
+    """RFC 9112 section 2.2: the start of a head is kept, unanswered, until
+    its rest arrives in a later read."""
     var link = _Link()
     link.write("GET / HTTP/1.1\r\nHost: exa")
+    assert_true(link.round(), "closed on a partial head")
+    assert_equal(link.reqs, Int64(0))
+    assert_equal(link.read(), String(""))
+    link.write("mple.com\r\n\r\n")
+    assert_true(link.round())
+    assert_equal(link.reqs, Int64(1))
+    assert_equal(link.read(), String(CANNED))
+
+
+def test_head_filling_the_receive_buffer_gets_431() raises:
+    """No end of head within REQ_BUF_BYTES: refused, not kept."""
+    var link = _Link()
+    var pad = String()
+    for _ in range(REQ_BUF_BYTES):
+        pad += "a"
+    link.write("GET / HTTP/1.1\r\nX-Pad: " + pad)
     assert_false(link.round())
     assert_equal(link.reqs, Int64(0))
-    assert_equal(link.sent, Int64(0))
-    assert_equal(link.read(), String(""))
+    assert_equal(link.read(), _error_bytes(431))
 
 
 def test_malformed_request_gets_400_and_close() raises:

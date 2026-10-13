@@ -12,7 +12,8 @@
 #
 # Groups (and the defect each would catch):
 #   E  the head: a malformed request not answered 400, an incomplete head
-#      kept open or answered, `Expect: 100-continue` answered wrong for
+#      answered or dropped before its end arrives, or not answered after,
+#      `Expect: 100-continue` answered wrong for
 #      either setting (417 when disabled, the interim then the response when
 #      enabled), the handler run for any of them, a peer's close not
 #      dropping the connection.
@@ -264,19 +265,26 @@ def test_expect_continue_enabled_sends_interim_then_response() raises:
     assert_equal(c.server.live_conn_count(), 1)
 
 
-def test_incomplete_head_is_dropped_unanswered() raises:
-    """A head missing its final CRLF, then the client waits. The round does
-    no buffering across receives, so it drops the connection unanswered.
-    That is a known limitation, not the behaviour RFC 9112 asks for (a head
-    may arrive in several segments): komira-ai/komira#1447. The fix for
-    that issue changes this test to wait for the rest of the head; until
-    then it pins that an incomplete head is neither dispatched nor answered
-    as if it were complete."""
+def test_incomplete_head_waits_for_the_rest() raises:
+    """A head missing its final CRLF, then the client waits. RFC 9112 lets a
+    head arrive in several segments (komira-ai/komira#1447): the round keeps
+    the head's start, neither dispatches nor answers it, and keeps the
+    connection open. When the final CRLF arrives the request is dispatched
+    once and answered."""
     var c = _Client()
     c.send("GET / HTTP/1.1\r\nHost: example.com\r\n")
-    c.run_until_closed()
+    for _ in range(2):
+        c.step()
+        c.drain()
     assert_equal(len(c.got), 0, _text(c.got))
     assert_equal(c.probe.calls, 0)
+    assert_false(c.eof)
+    assert_equal(c.server.live_conn_count(), 1)
+    c.send("\r\n")
+    c.run_until_contains("len=0 sum=0")
+    assert_true(_text(c.got).startswith("HTTP/1.1 200"), _text(c.got))
+    assert_equal(c.probe.calls, 1)
+    assert_equal(c.server.live_conn_count(), 1)
 
 
 def test_peer_close_drops_the_connection() raises:
