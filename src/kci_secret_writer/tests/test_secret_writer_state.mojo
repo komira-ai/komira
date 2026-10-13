@@ -17,8 +17,12 @@
 #   (6) share() hands out a second handle over the same state;
 #   (7) as_static_store maps every ref to its own value, as an independent copy,
 #       and a re-write replaces the writer's value;
-#   (8) a value of MAX_SECRET_LEN bytes holding every byte value 0x00..0xFF
-#       round-trips through the writer and the paired resolve unchanged.
+#   (8) a value of MAX_SECRET_LEN bytes of valid UTF-8 (every ASCII byte and a
+#       2-, 3- and 4-byte character) round-trips through the writer and the
+#       paired resolve unchanged;
+#   (9) a written value that is not UTF-8 is recorded byte for byte, but
+#       as_static_store refuses it naming the ref, never the bytes (the resolve
+#       double holds only Strings).
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
@@ -68,8 +72,10 @@ def test_unknown_ref_reads_as_absent() raises:
     assert_false(w.written_equals(_UNKNOWN, "alpha"), "after writes: equals False")
     assert_false(w.was_written(_UNKNOWN), "after writes: not written")
     assert_false(w.was_defined(_UNKNOWN), "after writes: not defined")
-    # The written ref is present, with its own length.
+    # The written ref is present, with its own length, and is not defined: a
+    # write is not a define (was_defined answers for empty containers only).
     assert_equal(w.written_len(_A), 5, "the written ref's length")
+    assert_false(w.was_defined(_A), "a write is not a define")
     _ = w^
 
 
@@ -123,6 +129,9 @@ def test_version_count_per_ref_and_identical_rewrite() raises:
     assert_equal(w.write_count(), 4, "every write counted")
     assert_true(w.written_equals(_A, "same"), "A holds its value")
     assert_true(w.written_equals(_B, "other"), "B holds its value")
+    assert_false(w.was_defined(_A), "re-writes do not define A")
+    assert_false(w.was_defined(_B), "a write does not define B")
+    assert_equal(w.define_count(), 0, "writes are not defines")
     _ = w^
 
 
@@ -253,22 +262,45 @@ def test_as_static_store_maps_each_ref_to_its_value() raises:
 
 
 # =============================================================================
-# (8) MAX_SECRET_LEN bytes, every byte value, round-trip unchanged.
+# (8) MAX_SECRET_LEN bytes of valid UTF-8 round-trip unchanged.
 # =============================================================================
-def test_max_length_high_bytes_round_trip() raises:
+def _append_grin(mut raw: List[UInt8]):
+    # U+1F600 grinning face: F0 9F 98 80.
+    raw.append(UInt8(0xF0))
+    raw.append(UInt8(0x9F))
+    raw.append(UInt8(0x98))
+    raw.append(UInt8(0x80))
+
+
+def test_max_length_utf8_round_trip() raises:
+    # Every ASCII byte 0x00..0x7F once, then the 9-byte cycle e-acute (2 bytes),
+    # euro sign (3 bytes), grinning face (4 bytes) 440 times, then two grinning
+    # faces: 128 + 3960 + 8 = 4096 bytes, every one a part of valid UTF-8.
     var raw = List[UInt8]()
-    for i in range(MAX_SECRET_LEN):
-        raw.append(UInt8((i * 7 + 255) % 256))
+    for i in range(128):
+        raw.append(UInt8(i))
+    for _ in range(440):
+        raw.append(UInt8(0xC3))  # U+00E9 e-acute: C3 A9
+        raw.append(UInt8(0xA9))
+        raw.append(UInt8(0xE2))  # U+20AC euro sign: E2 82 AC
+        raw.append(UInt8(0x82))
+        raw.append(UInt8(0xAC))
+        _append_grin(raw)
+    _append_grin(raw)
+    _append_grin(raw)
+    assert_equal(len(raw), MAX_SECRET_LEN, "the fixture fills MAX_SECRET_LEN")
     var w = StaticSecretWriter()
     w.write(_A, SecretValue(Span(raw)), "tok")
     assert_equal(w.written_len(_A), MAX_SECRET_LEN, "every byte recorded")
-    var same = String(unsafe_from_utf8=Span(raw))
+    var same = String(StringSlice(from_utf8=Span(raw)))
     assert_true(w.written_equals(_A, same), "the recorded bytes equal the input")
+    # The last character becomes the grinning face with smiling eyes: only the
+    # last byte differs (0x80 -> 0x81) and the text stays valid UTF-8.
     var flipped = raw.copy()
-    flipped[MAX_SECRET_LEN - 1] = flipped[MAX_SECRET_LEN - 1] ^ UInt8(0x80)
+    flipped[MAX_SECRET_LEN - 1] = UInt8(0x81)
     assert_false(
-        w.written_equals(_A, String(unsafe_from_utf8=Span(flipped))),
-        "the last byte's high bit is compared",
+        w.written_equals(_A, String(StringSlice(from_utf8=Span(flipped)))),
+        "the last byte is compared",
     )
 
     var store = w.as_static_store()
@@ -283,6 +315,56 @@ def test_max_length_high_bytes_round_trip() raises:
     _ = w^
 
 
+# =============================================================================
+# (9) a value that is not UTF-8 is recorded, and as_static_store refuses it.
+# =============================================================================
+def test_non_utf8_value_is_recorded_but_not_resolvable() raises:
+    # 0xFF never occurs in UTF-8; 0xC3 alone is a truncated 2-byte sequence.
+    var raw = List[UInt8]()
+    raw.append(UInt8(0x61))
+    raw.append(UInt8(0xFF))
+    raw.append(UInt8(0x62))
+    var trunc = List[UInt8]()
+    trunc.append(UInt8(0xC3))
+    var w = StaticSecretWriter()
+    w.write(_B, _v("fine"), "tok")
+    w.write(_A, SecretValue(Span(raw)), "tok")
+    assert_equal(w.written_len(_A), 3, "the bytes are recorded")
+    assert_equal(w.version_count(_A), 1, "the write minted a version")
+    try:
+        _ = w.as_static_store()
+        raise Error("as_static_store took a value that is not UTF-8")
+    except e:
+        var msg = String(e)
+        assert_true(
+            msg.find("example/app/smtp-relay' is not UTF-8") >= 0,
+            "the refusal names the ref: " + msg,
+        )
+        assert_true(msg.find("resolve double holds only Strings") >= 0, msg)
+        assert_true(msg.find("example/app/api-key") < 0, "not the valid ref: " + msg)
+
+    # A truncated sequence alone is refused too; rewriting the value with UTF-8
+    # makes the store whole again, with both refs.
+    var t = StaticSecretWriter()
+    t.write(_C, SecretValue(Span(trunc)), "tok")
+    with assert_raises(contains="example/app/empty' is not UTF-8"):
+        _ = t.as_static_store()
+    _ = t^
+    w.write(_A, _v("fixed"), "tok")
+    var store = w.as_static_store()
+    var ra = store.resolve(_A)
+    assert_true(
+        _bytes_equal(ra.revealed_bytes(), String("fixed").as_bytes()),
+        "the rewritten value resolves",
+    )
+    var rb = store.resolve(_B)
+    assert_equal(rb.len(), 4, "the other ref resolves")
+    _ = ra^
+    _ = rb^
+    _ = store^
+    _ = w^
+
+
 def main() raises:
     test_unknown_ref_reads_as_absent()
     test_define_container_mints_no_version()
@@ -291,5 +373,6 @@ def main() raises:
     test_written_equals_rejects_one_byte_difference()
     test_share_is_a_second_handle_over_one_state()
     test_as_static_store_maps_each_ref_to_its_value()
-    test_max_length_high_bytes_round_trip()
+    test_max_length_utf8_round_trip()
+    test_non_utf8_value_is_recorded_but_not_resolvable()
     print("test_secret_writer_state: all cases PASSED")

@@ -104,7 +104,8 @@ trait SecretWriter(Movable, Deinitable):
     application layer mints typed credentials — the write firewall carries no
     application-layer dependency. The token is NEVER a field (custody) — it is a
     per-call param, used within the PUT, and dropped when `write` returns. A local
-    conformer (the test double, the self/local path) ignores it."""
+    conformer (the self/local path) makes no call with it; the test double
+    records it as its `last_token`."""
 
     def write(
         mut self,
@@ -124,7 +125,8 @@ trait SecretWriter(Movable, Deinitable):
         runtime service account can later ADD a version with only
         `secretmanager.versions.add` (never project-wide create). A container that
         already exists is an idempotent no-op. `deploy_token` is the assumed-role
-        bearer (per-call, never a field); a local/test conformer ignores it. Distinct
+        bearer (per-call, never a field); a local conformer makes no call with it and
+        the test double records it as its `last_token`. Distinct
         from `write` (which create-if-absents AND puts a version) — this defines the
         slot WITHOUT ever holding a value, so no plaintext exists at define time."""
         ...
@@ -156,7 +158,8 @@ trait SecretWriter(Movable, Deinitable):
         open.
 
         `deploy_token` is the assumed-role bearer — per-call, never a field (the
-        same custody rule as `write`). A local/test conformer ignores it."""
+        same custody rule as `write`). A local conformer makes no call with it;
+        the test double records it as its `last_token`."""
         ...
 
 
@@ -186,8 +189,9 @@ trait SecretWriter(Movable, Deinitable):
 # =============================================================================
 struct _StaticWriterState(Movable):
     """The static writer's interior: a `secret_ref -> written-plaintext-bytes`
-    map + a running `write_count` + the `last_token` the last write carried (so a
-    test asserts the assumed deploy token reached the write), behind an ArcPointer
+    map + a running `write_count` + the `last_token` the last call of any of the
+    three verbs carried (so a test asserts the assumed deploy token reached the
+    call), behind an ArcPointer
     so all persist through `share()`. No stale-pointer hazard (a Dict of flat
     `List[UInt8]` value PODs + an Int + a String; no wildcard, no byte-slab)."""
 
@@ -315,12 +319,7 @@ struct StaticSecretWriter(SecretWriter, Movable):
         Assert THIS across two applies, not the written bytes: `:latest` resolving
         to the same value is exactly what stays true while a credential rotates
         underneath, so a byte comparison cannot see the failure this guards."""
-        try:
-            if secret_ref not in self._p[].version_counts:
-                return 0
-            return self._p[].version_counts[secret_ref]  # cov: unreachable its raising arm: the membership check above holds the key
-        except:
-            return 0  # cov: unreachable the lookup above follows a membership check of the same key, so it cannot raise
+        return self._p[].version_counts.get(secret_ref, 0)
 
     def define_count(self) -> Int:
         """How many `define_container` (empty-slot) calls were recorded — the
@@ -339,8 +338,10 @@ struct StaticSecretWriter(SecretWriter, Movable):
         return self._p[].write_count
 
     def last_token(self) -> String:
-        """The `deploy_token` the LAST `write` carried (the assumed customer-role
-        bearer token when the applier deploys into a customer environment). A test
+        """The `deploy_token` the last call of `write`, `define_container` or
+        `has_version` carried, whichever came last ("" before any call): the
+        assumed customer-role bearer token when the applier deploys into a
+        customer environment. A test
         asserts it matches the assumed token — NOT the deployer's own token — proving
         the secret write acted AS the assumed role."""
         return self._p[].last_token
@@ -379,11 +380,25 @@ struct StaticSecretWriter(SecretWriter, Movable):
         `SecretWriter`, then resolves the same ref via the returned store and
         asserts the value round-trips (the running app's runtime resolve finds
         the deployer-written value). The bytes are copied into
-        the store's own script; the two doubles then hold independent copies."""
+        the store's own script; the two doubles then hold independent copies.
+
+        The resolve double scripts `secret_ref -> String`, so a written value
+        that is not valid UTF-8 cannot be carried over: this RAISES, naming the
+        ref (never the bytes), rather than building an invalid `String`."""
         var store = StaticSecretStore()
         for ref entry in self._p[].written.items():
             # Reconstruct the value String from the recorded bytes to `put` it into
-            # the resolve double (which scripts `secret_ref -> String`).
-            var s = String(unsafe_from_utf8=Span(entry.value))
+            # the resolve double (which scripts `secret_ref -> String`). The
+            # checked constructor refuses bytes that are not UTF-8; its own error
+            # is replaced so no byte of the value reaches the message.
+            var s: String
+            try:
+                s = String(StringSlice(from_utf8=Span(entry.value)))
+            except:
+                raise Error(
+                    "as_static_store: the value written for secret_ref '"
+                    + entry.key
+                    + "' is not UTF-8; the resolve double holds only Strings"
+                )
             store.put(entry.key, s)
         return store^
