@@ -41,6 +41,18 @@
 #       of every op, empty images, three-cell and mixed-type cells, an
 #       all-empty record), alone and inside batches, so a copy that drops or
 #       rewrites any field for any one kind of record goes red.
+#   (8) validate() over every group (7) fixture, plus a keyless tag -1, stray
+#       images and a missing old image under a two-cell key, and valid records
+#       with a two-cell key: each gets the exact message (or none) that the
+#       ChangeRecord invariants and the documented order of checks give. The
+#       expected message is derived from the fixture's shape by
+#       `_expected_fault`, which states the invariants, not from the code,
+#       and is itself pinned by a literal table. A grid of every op (and an
+#       unknown tag below and above), key length 0, 1 and 2, and each image
+#       absent or present covers every check under every key length and
+#       every pair of faults one op can have, so a check skipped for one op,
+#       one tag or one key length, or two checks reported in the wrong order,
+#       goes red.
 # =============================================================================
 
 from std.testing import assert_true, assert_equal, assert_false
@@ -592,6 +604,197 @@ def test_batch_copy_equals_original_for_every_kind() raises:
     )
 
 
+# =============================================================================
+# (8) validate() over every kind of record.
+# =============================================================================
+def _expected_fault(op: Int, nk: Int, nn: Int, no: Int) -> String:
+    """The message validate() must give a record with `nk` key cells, `nn`
+    new-image cells and `no` old-image cells, from the ChangeRecord
+    invariants in the order validate() documents: the key is non-empty
+    (checked first, for every op and tag); INSERT has a new image and no old
+    image (missing new reported first); MODIFY has both (new first); REMOVE
+    has an old image and no new image (missing old first); any other tag is
+    unknown. "" when the record is valid."""
+    if nk == 0:
+        return String(_KEY_EMPTY)
+    if op == CDC_OP_INSERT:
+        if nn == 0:
+            return String(_P) + "INSERT with empty new_image"
+        if no != 0:
+            return String(_P) + "INSERT with non-empty old_image"
+        return String("")
+    if op == CDC_OP_MODIFY:
+        if nn == 0:
+            return String(_P) + "MODIFY with empty new_image"
+        if no == 0:
+            return String(_P) + "MODIFY with empty old_image"
+        return String("")
+    if op == CDC_OP_REMOVE:
+        if no == 0:
+            return String(_P) + "REMOVE with empty old_image"
+        if nn != 0:
+            return String(_P) + "REMOVE with non-empty new_image"
+        return String("")
+    return String(_P) + "unknown op tag " + String(op)
+
+
+def _validate_fixtures(mut labels: List[String]) -> List[ChangeRecord]:
+    """The group (7) fixtures, then the records they do not cover: a keyless
+    unknown tag below INSERT, each image fault and each valid op under a
+    two-cell key."""
+    var r = _fixtures(labels)
+    labels.append("keyless unknown tag -1")
+    r.append(_fixture(-1, 0, 2, 2, 60, String("s-kneg")))
+    labels.append("two-cell-key INSERT with stray old_image")
+    r.append(_fixture(CDC_OP_INSERT, 2, 1, 1, 61, String("s-2sins")))
+    labels.append("two-cell-key REMOVE with stray new_image")
+    r.append(_fixture(CDC_OP_REMOVE, 2, 1, 1, 62, String("s-2srem")))
+    labels.append("two-cell-key MODIFY without old_image")
+    r.append(_fixture(CDC_OP_MODIFY, 2, 1, 0, 63, String("s-2nmod")))
+    labels.append("two-cell-key valid INSERT")
+    r.append(_fixture(CDC_OP_INSERT, 2, 1, 0, 64, String("s-2ins")))
+    labels.append("two-cell-key valid MODIFY")
+    r.append(_fixture(CDC_OP_MODIFY, 2, 1, 1, 65, String("s-2mod")))
+    labels.append("two-cell-key valid REMOVE")
+    r.append(_fixture(CDC_OP_REMOVE, 2, 0, 1, 66, String("s-2rem")))
+    return r^
+
+
+def test_validate_every_kind_exact_message() raises:
+    var labels = List[String]()
+    var recs = _validate_fixtures(labels)
+    assert_equal(len(recs), 28)
+    assert_equal(len(labels), 28)
+    # The fixtures cover every outcome: valid, the key fault, each of the six
+    # image faults and an unknown tag.
+    var want_valid = 0
+    var want_key = 0
+    for i in range(len(recs)):
+        var want = _expected_fault(
+            recs[i].op,
+            len(recs[i].key),
+            len(recs[i].new_image),
+            len(recs[i].old_image),
+        )
+        if want == String(""):
+            want_valid += 1
+        elif want == String(_KEY_EMPTY):
+            want_key += 1
+        assert_equal(_validate_error(recs[i]), want, msg=labels[i])
+    assert_equal(want_valid, 9)
+    assert_equal(want_key, 6)
+    # The derivation itself, pinned per fixture so a wrong `_expected_fault`
+    # cannot hide a wrong validate(): one expected message per label.
+    var table = List[String]()
+    table.append(String(""))  # valid INSERT
+    table.append(String(""))  # valid MODIFY
+    table.append(String(""))  # valid REMOVE
+    table.append(String(""))  # three-cell INSERT
+    table.append(String(""))  # three-cell MODIFY
+    table.append(String(""))  # three-cell REMOVE
+    table.append(String(_P) + "unknown op tag -1")
+    table.append(String(_P) + "unknown op tag 3")
+    table.append(String(_P) + "unknown op tag 5")
+    table.append(String(_P) + "unknown op tag 1000")
+    table.append(String(_P) + "INSERT with non-empty old_image")
+    table.append(String(_P) + "REMOVE with non-empty new_image")
+    table.append(String(_KEY_EMPTY))  # keyless INSERT
+    table.append(String(_KEY_EMPTY))  # keyless MODIFY, both images present
+    table.append(String(_KEY_EMPTY))  # keyless REMOVE
+    table.append(String(_KEY_EMPTY))  # keyless unknown tag 7
+    table.append(String(_P) + "INSERT with empty new_image")
+    table.append(String(_P) + "MODIFY with empty new_image")
+    table.append(String(_P) + "REMOVE with empty old_image")
+    table.append(String(_P) + "unknown op tag 4")
+    table.append(String(_KEY_EMPTY))  # all empty
+    table.append(String(_KEY_EMPTY))  # keyless unknown tag -1
+    table.append(String(_P) + "INSERT with non-empty old_image")
+    table.append(String(_P) + "REMOVE with non-empty new_image")
+    table.append(String(_P) + "MODIFY with empty old_image")
+    table.append(String(""))  # two-cell-key valid INSERT
+    table.append(String(""))  # two-cell-key valid MODIFY
+    table.append(String(""))  # two-cell-key valid REMOVE
+    assert_equal(len(table), len(recs))
+    for i in range(len(recs)):
+        assert_equal(_validate_error(recs[i]), table[i], msg=labels[i])
+
+
+def test_validate_shape_grid() raises:
+    """Every op, an unknown tag below INSERT and above REMOVE, key length 0, 1
+    and 2, and each image absent or present (one cell): 60 records, each
+    with the message `_expected_fault` derives. The per-outcome counts are
+    worked out by hand from the invariants, so a wrong `_expected_fault`
+    goes red here too."""
+    var ops = List[Int]()
+    ops.append(CDC_OP_INSERT)
+    ops.append(CDC_OP_MODIFY)
+    ops.append(CDC_OP_REMOVE)
+    ops.append(-1)
+    ops.append(3)
+    var outcomes = List[String]()
+    var counts = List[Int]()
+    var n = 0
+    for oi in range(len(ops)):
+        for nk in range(3):
+            for nn in range(2):
+                for no in range(2):
+                    var rec = _fixture(
+                        ops[oi], nk, nn, no, Int64(70 + n), String("s-g")
+                    )
+                    var want = _expected_fault(ops[oi], nk, nn, no)
+                    var what = (
+                        String("grid op ") + String(ops[oi]) + " key "
+                        + String(nk) + " new " + String(nn) + " old "
+                        + String(no)
+                    )
+                    assert_equal(_validate_error(rec), want, msg=what)
+                    n += 1
+                    var found = False
+                    for j in range(len(outcomes)):
+                        if outcomes[j] == want:
+                            counts[j] += 1
+                            found = True
+                    if not found:
+                        outcomes.append(want)
+                        counts.append(1)
+    assert_equal(n, 60)
+    # Hand count: any keyless record (5 ops x 4 image shapes) is the key
+    # fault; with a key (2 lengths), INSERT is valid only with new and no
+    # old, MODIFY only with both, REMOVE only with old and no new; INSERT and
+    # MODIFY report a missing new image for both old shapes, REMOVE a
+    # missing old image for both new shapes; an unknown tag (2 tags) is the
+    # tag fault for every image shape.
+    var want_out = List[String]()
+    var want_cnt = List[Int]()
+    want_out.append(String(_KEY_EMPTY))
+    want_cnt.append(20)
+    want_out.append(String(""))
+    want_cnt.append(6)
+    want_out.append(String(_P) + "INSERT with empty new_image")
+    want_cnt.append(4)
+    want_out.append(String(_P) + "INSERT with non-empty old_image")
+    want_cnt.append(2)
+    want_out.append(String(_P) + "MODIFY with empty new_image")
+    want_cnt.append(4)
+    want_out.append(String(_P) + "MODIFY with empty old_image")
+    want_cnt.append(2)
+    want_out.append(String(_P) + "REMOVE with empty old_image")
+    want_cnt.append(4)
+    want_out.append(String(_P) + "REMOVE with non-empty new_image")
+    want_cnt.append(2)
+    want_out.append(String(_P) + "unknown op tag -1")
+    want_cnt.append(8)
+    want_out.append(String(_P) + "unknown op tag 3")
+    want_cnt.append(8)
+    assert_equal(len(outcomes), len(want_out))
+    for i in range(len(want_out)):
+        var got = 0
+        for j in range(len(outcomes)):
+            if outcomes[j] == want_out[i]:
+                got = counts[j]
+        assert_equal(got, want_cnt[i], msg=want_out[i])
+
+
 def main() raises:
     test_rejects_insert_without_new_image()
     test_rejects_insert_with_old_image_message()
@@ -617,4 +820,6 @@ def main() raises:
     test_record_copy_keeps_stray_images()
     test_record_copy_equals_original_for_every_kind()
     test_batch_copy_equals_original_for_every_kind()
+    test_validate_every_kind_exact_message()
+    test_validate_shape_grid()
     print("test_change_record_validate: ALL PASS")
