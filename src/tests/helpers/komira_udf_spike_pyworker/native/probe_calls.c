@@ -35,6 +35,8 @@
  *   leaks_more the same around 200 validates taken, 200 calls whose user code
  *              raises, 50 contexts opened and closed, and 25 inits with
  *              shutdowns: bytes grown, a case each.
+ *   cancel_in_clock the host raising cancel inside the worker's clock read:
+ *              ERR_CANCELLED, then the next call on the instance answers.
  *   abs_path   the library opened by its absolute path, then two_args.
  * Each case is one member of the JSON object kpw_probe_calls returns (as
  * probe_json.h); kpw_free (drive.c) frees it.
@@ -70,7 +72,9 @@ static int32_t h_reserve(void* hd, int64_t b) {
   return KOMIRA_UDF_OK;
 }
 static void h_release(void* hd, int64_t b) { (void)hd, (void)b; }
+static volatile int32_t* cancel_on_now; /* when set, now_ns raises this cancel flag */
 static int64_t h_now(void* hd) {
+  if (cancel_on_now != NULL) __atomic_store_n(cancel_on_now, 1, __ATOMIC_RELEASE);
   (void)hd;
   return mono();
 }
@@ -746,6 +750,49 @@ static void group_clock_time(struct eng* e, struct pj* j) {
   e->t->unload(u);
 }
 
+/* The host raises the cancel flag inside the worker's clock read (no
+ * deadline, so the read after row 0 is the only now_ns call): the call is
+ * ERR_CANCELLED, and the next call on the same instance answers with every
+ * value (a worker that stops waiting for CLOCK when CANCEL arrives leaves
+ * that CLOCK on the socket, and the next request reads it). */
+static void group_cancel_in_clock(struct eng* e, struct pj* j) {
+  komira_udf_udf* u = NULL;
+  komira_udf_context* c = NULL;
+  komira_udf_instance* i = NULL;
+  if (!setup(e, j, "cancel_in_clock", "udf_fixtures:double", 1, &u, &c, &i)) return;
+  const struct col_spec cs[1] = {{0, 4, 0, 0, -1}};
+  int released = 0;
+  struct ArrowDeviceArray args, out;
+  make_args(&args, 4, 1, cs, &released);
+  volatile int32_t flag = 0;
+  komira_udf_call c1 = {sizeof(c1), 0, 1, &flag};
+  komira_udf_error err = ERR_INIT;
+  memset(&out, 0, sizeof(out));
+  cancel_on_now = &flag;
+  int32_t rc = e->t->call_batch(i, &c1, &args, &out, &err);
+  cancel_on_now = NULL;
+  char m[300];
+  snprintf(m, sizeof(m), "%s", err.message ? err.message : "");
+  if (err.release) err.release(&err);
+  if (rc == KOMIRA_UDF_OK) out.array.release(&out.array);
+  pj_case(j, "cancel_in_clock", rc, m, flag);
+  make_args(&args, 4, 1, cs, &released);
+  char m2[300];
+  int64_t ms;
+  rc = call(e, i, &args, &out, m2, sizeof(m2), -1, 0, &ms, sizeof(komira_udf_call));
+  int64_t wrong = -1;
+  if (rc == KOMIRA_UDF_OK) {
+    wrong = 0;
+    for (int64_t r = 0; r < 4; r++) wrong += ((const int64_t*)out.array.buffers[1])[out.array.offset + r] != 2 * r;
+    out.array.release(&out.array);
+    snprintf(m2, sizeof(m2), "OK");
+  }
+  pj_case(j, "cancel_in_clock_next", rc, m2, wrong);
+  e->t->close_instance(i);
+  e->t->close_context(c);
+  e->t->unload(u);
+}
+
 /* The engine's heap (glibc's main arena) around 200 rounds of: a refused
  * validate whose error is released; load and unload; open_instance and
  * close_instance. Each round frees what it made, so the arena's use stays
@@ -895,13 +942,14 @@ static int more_group(struct eng* e, struct pj* j, const char* group) {
   else if (strcmp(group, "clock_time") == 0) group_clock_time(e, j);
   else if (strcmp(group, "leaks") == 0) group_leaks(e, j);
   else if (strcmp(group, "leaks_more") == 0) group_leaks_more(e, j);
+  else if (strcmp(group, "cancel_in_clock") == 0) group_cancel_in_clock(e, j);
   else return 0;
   return 1;
 }
 
 /* `lib`: a runtime library; `group`: two_args, late_load, refusals, kills,
  * after_cancel, two_udfs, many_calls, nulls, trace, big, clock_time, leaks,
- * leaks_more or
+ * leaks_more, cancel_in_clock or
  * abs_path. */
 char* kpw_probe_calls(const char* lib, const char* group) {
   struct pj j = {0};

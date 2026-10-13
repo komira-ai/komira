@@ -41,10 +41,13 @@
 #     reads (a deadline set, a 1000-row per-row call) under 500 ms (an
 #     engine that answers a read only when its 1 ms poll times out takes
 #     over 1000 ms); no engine heap growth over 200 refusals, loads and
-#     instances, nor over validates taken, calls whose user code raises
+#     instances, nor over validates taken, refused loads, calls whose user code raises
 #     (the ERROR reply, its message and trace), contexts opened and closed
 #     (the fork, its reply), and inits with shutdowns (blocks never freed,
-#     found by the sweep); the library opened by its absolute path.
+#     found by the sweep); a cancel the host raises inside the worker's
+#     clock read: ERR_CANCELLED, and the next call on the instance answers
+#     (a worker that stops waiting for CLOCK when CANCEL arrives); the
+#     library opened by its absolute path.
 #
 # Mutants planted: ipc_codec.c pyw_ipc_batch_write taking every column's
 # offset from the first column: red on two_args. proxy_runtime.c remote_udf
@@ -152,6 +155,13 @@ def main() raises:
         var c = lm.get(k)
         assert_equal(num(c, "status"), 0, k + ": " + text(c, "message"))
         assert_true(num(c, "value") < 400, k + ": the engine's heap grew by " + String(num(c, "value")) + " bytes")
+    var cic = probe_calls("./pyworker_zygote.so", "cancel_in_clock")
+    var cc = cic.get("cancel_in_clock")
+    assert_equal(num(cc, "status"), Int(ERR_CANCELLED), "cancel raised in now_ns: " + text(cc, "message"))
+    assert_equal(num(cc, "value"), 1, "the host's flag was raised by the worker's clock read")
+    var cn = cic.get("cancel_in_clock_next")
+    assert_equal(num(cn, "status"), 0, "the next call after a cancel in now_ns: " + text(cn, "message"))
+    assert_equal(num(cn, "value"), 0, "the next call's values")
 
     for v in ["zygote", "pyarrow"]:
         var t = probe_calls("./pyworker_" + v + ".so", "two_args")
