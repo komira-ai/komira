@@ -288,6 +288,40 @@ def test_redaction_copies_non_ascii_text_byte_for_byte() raises:
     )
 
 
+def test_redaction_matches_a_key_directly_after_non_ascii_text() raises:
+    """The non-ASCII run copy in `_redact_keyed_secrets` stops at the first
+    ASCII byte, so a key that starts right after a code point is still seen.
+    A run loop that also takes the ASCII byte after a non-ASCII one (testing
+    `src[i - 1]` as well as `src[i]`) eats the `t` of `token` / the `B` of
+    `Bearer`, no key matches, and the credential is logged in clear. The
+    existing composed case puts a space before `token`, which hides that."""
+    assert_equal(
+        redact_log_text(String("日本token=abc")),
+        String("日本token=") + String(REDACTED),
+    )
+    assert_equal(
+        redact_log_text(String("éBearer xyz")),
+        String("éBearer ") + String(REDACTED),
+    )
+
+
+def test_redaction_copies_a_leading_non_ascii_run_byte_for_byte() raises:
+    """A copy run in `_redact_emails` can START on a non-ASCII byte only at
+    index 0 or right after a redacted address; everywhere else the byte is
+    absorbed into the run of the ASCII byte before it. Those are the two
+    places a copy that re-encodes the run's first byte with `chr` (0xC3 ->
+    U+00C3, two bytes) shows up; `café ok` never reaches it."""
+    assert_equal(
+        _redact_keyed_secrets(String("ünd ok")), String("ünd ok"), "rule 2"
+    )
+    assert_equal(_redact_emails(String("ünd ok")), String("ünd ok"), "rule 3")
+    assert_equal(redact_log_text(String("ünd ok")), String("ünd ok"))
+    assert_equal(
+        redact_log_text(String("ann@example.comé x")),
+        String(REDACTED_EMAIL) + String("é x"),
+    )
+
+
 def test_trace_id_from_header_and_qualified_trace() raises:
     assert_equal(trace_id_from_header(String("abc123/45;o=1")), String("abc123"))
     assert_equal(trace_id_from_header(String("abc;o=1")), String("abc"))
