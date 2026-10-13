@@ -73,6 +73,8 @@ from komira_plan_ir.logical_plan import (
     PLAN_CSE_REF,
     PLAN_CAST_TO_VARCHAR,
     PLAN_EXCHANGE,
+    PLAN_MAP_BATCHES,
+    PLAN_STEP,
     agg_func_base_name,
 )
 from komira_plan_ir.plan_helpers import _copy_plan, validate_plan_integrity
@@ -128,7 +130,7 @@ def _render(p: LogicalPlan) -> String:
     return s^
 
 
-comptime N_KINDS: Int = 16
+comptime N_KINDS: Int = 18
 
 
 def _kind(i: Int) raises -> LogicalPlan:
@@ -191,7 +193,16 @@ def _kind(i: Int) raises -> LogicalPlan:
         return LogicalPlan.view_ref(String("v"), _schema("a", "b"))
     if i == 14:
         return LogicalPlan.cse_ref(UInt64(12345), _schema("a", "b"))
-    return LogicalPlan.cast_to_varchar(_scan())
+    if i == 15:
+        return LogicalPlan.cast_to_varchar(_scan())
+    if i == 16:
+        # A grouped frame UDF: its schema is the UdfRef's, stated here.
+        var gb = List[Expr]()
+        gb.append(Expr.col_ref("a"))
+        return LogicalPlan.map_batches(_scan(), 1, gb^, _schema("k", "v"))
+    var args = List[ScalarValue]()
+    args.append(ScalarValue.from_int(3))
+    return LogicalPlan.step(2, args^, _schema("k", "v"))
 
 
 def _tags() -> List[UInt8]:
@@ -199,7 +210,8 @@ def _tags() -> List[UInt8]:
         PLAN_SCAN, PLAN_FILTER, PLAN_PROJECT, PLAN_AGGREGATE, PLAN_JOIN,
         PLAN_SORT, PLAN_LIMIT, PLAN_DISTINCT, PLAN_TOPN, PLAN_PARTITION_BY,
         PLAN_PARTITION_TOPN, PLAN_ASOF_JOIN, PLAN_UNION, PLAN_VIEW_REF,
-        PLAN_CSE_REF, PLAN_CAST_TO_VARCHAR, PLAN_EXCHANGE,
+        PLAN_CSE_REF, PLAN_CAST_TO_VARCHAR, PLAN_MAP_BATCHES, PLAN_STEP,
+        PLAN_EXCHANGE,
     ]
     return t^
 
@@ -210,7 +222,7 @@ def _tags() -> List[UInt8]:
 
 
 def test_every_kind_copies_both_ways_and_passes_integrity() raises:
-    """Each of the 16 kinds (an exchange is test_plan_exchange's) keeps its
+    """Each of the 18 kinds (an exchange is test_plan_exchange's) keeps its
     tag, render and hash through `copy()` and `_copy_plan`, and is accepted
     by `validate_plan_integrity`. Catches a `copy()` arm that leaves the
     payload out (the copy renders as a shell), a `_copy_plan` arm missing
@@ -221,6 +233,9 @@ def test_every_kind_copies_both_ways_and_passes_integrity() raises:
         assert_equal(Int(p.tag), Int(tags[i]), "kind " + String(i))
         assert_true(validate_plan_integrity(p), "kind " + String(i) + "\n" + _render(p))
         var c = p.copy()
+        # Integrity first: a copy that lost its payload is refused here by
+        # name, before the render reads the payload it does not have.
+        assert_true(validate_plan_integrity(c), "copy() kind " + String(i) + " lost its payload")
         assert_equal(_render(c), _render(p), "copy() kind " + String(i))
         assert_equal(c.structural_hash(), p.structural_hash(), "copy() kind " + String(i))
         var r = _copy_plan(p)
@@ -397,18 +412,18 @@ def test_malformed_projects_and_an_empty_union_are_refused() raises:
 
 
 def test_every_aggregate_function_has_its_own_base_name() raises:
-    """Every AGG_* tag 0..36 has a base name of its own (none is the `agg`
+    """Every AGG_* tag 0..37 has a base name of its own (none is the `agg`
     fallback, no two are equal), and an id past the last falls back to
     `agg`. Catches an arm dropped (that function's unaliased output column
     would be named `agg`) and two arms sharing a name."""
     var names = List[String]()
-    for f in range(37):
+    for f in range(38):
         var n = String(agg_func_base_name(UInt8(f)))
         assert_true(n != "agg", "func " + String(f))
         for k in range(len(names)):
             assert_true(names[k] != n, n)
         names.append(n)
-    assert_equal(String(agg_func_base_name(UInt8(37))), "agg")
+    assert_equal(String(agg_func_base_name(UInt8(38))), "agg")
 
 
 def main() raises:

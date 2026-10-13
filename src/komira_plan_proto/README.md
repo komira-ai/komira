@@ -12,7 +12,13 @@ the Mojo structs generated from it. Three files:
   A reader must refuse wire 0 and any value it does not know.
 - `plan.proto`: the message layer: what a node is (`WirePlan`, `WireExpr`,
   `WireSchema`, ...), and `WirePlanEnvelope`, the top-level message with a
-  `format_version`.
+  `format_version`. It also holds the user-code messages of
+  `docs/design/optimized_plan_udfs.md` §10.3-§10.4: `UdfRef` (one user
+  function, named by its index in a list beside the plan) with `UdfCode`,
+  `CodeDigest`, `UdfReadSet` and `UdfResources`; the arms that call one
+  (`WireUdfApply`, `WireMapBatchesNode`, `WireStepNode`); and
+  `RecordedFields`, the recorded-fields schema a runtime's descriptor
+  imports.
 - `optimized_plan.proto`: the optimized plan, a plan already optimized once
   that a host lowers without optimizing again. `OptimizedPlan` is a header
   (format version, producer, digest, declared needs, write target, advice)
@@ -36,7 +42,7 @@ own vocabulary and only wraps them in these types.
 
 The field-number census pins every field of every message and every enum
 value by number, as wire bytes written by hand and read back by name:
-`tests/test_plan_field_numbers_{scan,expr,plan}.mojo` and
+`tests/test_plan_field_numbers_{scan,expr,plan,udf}.mojo` and
 `tests/test_plan_enum_numbers_{nodes,functions}.mojo`, each from a
 hand-written `LEDGER`. `tests/test_plan_census_complete.mojo` fails when
 protoc declares a field or value no ledger lists. A new field or value
@@ -98,7 +104,7 @@ var fingerprint: List[UInt8] = [1, 2, 3]
 var pin = ScanPin(String("orders"), fingerprint^)
 var body = OptimizedPlanBody(None, [], [pin^], [])
 var needs = DeclaredNeeds(
-    [String("orders")], True, [RuntimeNeed(String("komira/python"), String("cp312"))]
+    [], [String("orders")], True, [RuntimeNeed(String("komira/python"), String("cp312"))]
 )
 var stamp = ProducerStamp([], UInt32(1), [], String("komira/mojo-sdk"))
 var header = OptimizedPlan(

@@ -36,6 +36,8 @@ from komira_plan_ir.logical_plan import (
     PLAN_CSE_REF,
     PLAN_CAST_TO_VARCHAR,
     PLAN_EXCHANGE,
+    PLAN_MAP_BATCHES,
+    PLAN_STEP,
     PLAN_TAG_COUNT,
     plan_tag_name,
     plan_tag_is_retired,
@@ -100,12 +102,13 @@ def _refusal(var child: LogicalPlan, kind: UInt8, var keys: List[String], var or
 # =============================================================================
 
 
-def test_the_exchange_takes_tag_18_and_the_count_is_19() raises:
+def test_the_exchange_takes_tag_18() raises:
     """Catches the exchange placed on a retired id, and a count that was not
-    moved with it (a histogram sized from the count would index past its
-    end on tag 18)."""
+    moved past it (a histogram sized from the count would index past its end
+    on tag 18). The UDF nodes take 19 and 20 (optimized_plan_udfs.md §10.4),
+    so the count is 21."""
     assert_equal(Int(PLAN_EXCHANGE), 18)
-    assert_equal(PLAN_TAG_COUNT, 19)
+    assert_equal(PLAN_TAG_COUNT, 21)
     assert_true(plan_tag_is_retired(UInt8(16)))
     assert_true(plan_tag_is_retired(UInt8(17)))
     assert_false(plan_tag_is_retired(PLAN_EXCHANGE))
@@ -126,7 +129,8 @@ def test_no_two_plan_tags_share_an_id_or_a_name() raises:
         PLAN_SCAN, PLAN_FILTER, PLAN_PROJECT, PLAN_AGGREGATE, PLAN_JOIN,
         PLAN_SORT, PLAN_LIMIT, PLAN_DISTINCT, PLAN_TOPN, PLAN_PARTITION_BY,
         PLAN_PARTITION_TOPN, PLAN_ASOF_JOIN, PLAN_UNION, PLAN_VIEW_REF,
-        PLAN_CSE_REF, PLAN_CAST_TO_VARCHAR, PLAN_EXCHANGE,
+        PLAN_CSE_REF, PLAN_CAST_TO_VARCHAR, PLAN_EXCHANGE, PLAN_MAP_BATCHES,
+        PLAN_STEP,
     ]
     var top = 0
     for i in range(len(tags)):

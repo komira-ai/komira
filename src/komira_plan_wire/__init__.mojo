@@ -13,6 +13,13 @@ from .plan_wire_codec import (
     plan_envelope_from_bytes,
     DecodedPlanEnvelope,
     plan_round_trip,
+    # The UDF arms (docs/design/optimized_plan_udfs.md §10.4): a RAW envelope
+    # carries the `UdfRef` list its calls index (`DecodedPlanEnvelope.udfs`),
+    # and the OPTIMIZED context decodes a bare `WirePlan` against the list an
+    # optimized plan declares, refusing the named UDF forms.
+    plan_to_bytes_with_udfs,
+    optimized_plan_from_bytes,
+    optimized_plan_to_bytes,
     # ★ THE PRODUCER-SIDE HALF. Everything else in this package serves a
     # CONSUMER: bytes arrive and become a plan. `schema_to_bytes` serves an
     # AUTHOR — a non-Mojo frontend that must emit `WireParquetSource.schema`
@@ -51,6 +58,40 @@ from .plan_wire_codec import (
     PLAN_WIRE_UNSUPPORTED_PARAM_TAG,
     PLAN_WIRE_UNSUPPORTED_WRITE_TARGET,
     PLAN_WIRE_WRITE_TARGET_DROPPED,
+    PLAN_WIRE_UDFS_DROPPED,
+    PLAN_WIRE_FIELD_CHILDREN_BOTH,
+    PLAN_WIRE_FIELD_TOO_DEEP,
+)
+
+# ONE `UdfRef` AS BYTES, and the refusals an entry earns on its own. An
+# optimized plan's body codec decodes `DeclaredNeeds.udfs` through these.
+from .plan_wire_udf import (
+    udf_ref_to_bytes,
+    udf_ref_from_bytes,
+    udf_runtime_id_is_valid,
+    OPTIMIZED_UDF_RETURN_TYPE_MISSING,
+    OPTIMIZED_UDF_RUNTIME_MALFORMED,
+    OPTIMIZED_UDF_ROW_NULL_MODE,
+    OPTIMIZED_UDF_STEP_NOT_VOLATILE,
+    OPTIMIZED_UDF_READ_SET_KIND,
+    OPTIMIZED_UDF_READ_SET_INVALID,
+    OPTIMIZED_UDF_READ_SET_ARG_MISMATCH,
+)
+
+# THE UDF GATE: every call against the entry it names. The decoders run it; a
+# caller building a plan in process runs it too.
+from .plan_wire_udf_check import (
+    plan_wire_check_udfs,
+    OPTIMIZED_UDF_UNDECLARED,
+    OPTIMIZED_UDF_KIND_ARM_MISMATCH,
+    OPTIMIZED_UDF_AGGREGATE_OUTSIDE_AGGREGATE,
+    OPTIMIZED_UDF_ARGUMENT_TYPE_MISMATCH,
+    OPTIMIZED_UDF_READ_SET_COLUMN_UNKNOWN,
+    OPTIMIZED_UDF_READ_SET_GROUP_KEY,
+    OPTIMIZED_UDF_SCHEMA_DISAGREES,
+    OPTIMIZED_UDF_IN_SCAN_FILTER,
+    OPTIMIZED_UDF_LEGACY_FORM,
+    PLAN_WIRE_UDF_CHECK_UNMODELLED_TAG,
 )
 
 # THE STRUCTURAL GATE. Exported because a caller that receives plan bytes over

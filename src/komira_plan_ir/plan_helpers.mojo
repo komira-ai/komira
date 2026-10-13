@@ -100,6 +100,8 @@ from komira_plan_ir.logical_plan import (
     PLAN_CSE_REF,
     PLAN_CAST_TO_VARCHAR,
     PLAN_EXCHANGE,
+    PLAN_MAP_BATCHES,
+    PLAN_STEP,
     PLAN_TAG_COUNT,
     join_build_side_is_valid,
     agg_mode_is_valid,
@@ -421,13 +423,17 @@ def _plan_payload_present(plan: LogicalPlan) -> Bool:
         return Bool(plan._cast_to_varchar)
     elif plan.tag == PLAN_EXCHANGE:
         return Bool(plan._exchange)
+    elif plan.tag == PLAN_MAP_BATCHES:
+        return Bool(plan._map_batches)
+    elif plan.tag == PLAN_STEP:
+        return Bool(plan._step)
     return False
 
 
 def _tag_carries_a_variant_payload(tag: UInt8) -> Bool:
     """Does `tag` name a `LogicalPlan` variant field at all?
 
-    THE 17 TAGS. Tags 0..15 and 18 are declared in
+    THE 19 TAGS. Tags 0..15 and 18..20 are declared in
     `komira_plan_ir/logical_plan.mojo` and each owns a variant Optional on
     `LogicalPlan`. Tag values 16/17 are retired and must not be reused.
 
@@ -453,6 +459,8 @@ def _tag_carries_a_variant_payload(tag: UInt8) -> Bool:
         or tag == PLAN_CSE_REF
         or tag == PLAN_CAST_TO_VARCHAR
         or tag == PLAN_EXCHANGE
+        or tag == PLAN_MAP_BATCHES
+        or tag == PLAN_STEP
     )
 
 
@@ -577,7 +585,8 @@ def _copy_plan_body(plan: LogicalPlan) raises -> LogicalPlan:
         return _copy_asof_join_node(plan)
 
     # PLAN_CSE_REF / PLAN_UNION / PLAN_VIEW_REF / PLAN_CAST_TO_VARCHAR /
-    # PLAN_EXCHANGE: delegate to `LogicalPlan.copy()`, which has an arm for
+    # PLAN_EXCHANGE / PLAN_MAP_BATCHES / PLAN_STEP: delegate to
+    # `LogicalPlan.copy()`, which has an arm for
     # every tag. Without
     # these arms the tag would fall through, and a SHELL LogicalPlan with only
     # `tag` + `output_schema` would lose `_cse_ref` / `_union` / `_view_ref` /
@@ -592,6 +601,8 @@ def _copy_plan_body(plan: LogicalPlan) raises -> LogicalPlan:
         or plan.tag == PLAN_VIEW_REF
         or plan.tag == PLAN_CAST_TO_VARCHAR
         or plan.tag == PLAN_EXCHANGE
+        or plan.tag == PLAN_MAP_BATCHES
+        or plan.tag == PLAN_STEP
     ):
         return plan.copy()
 
@@ -1594,6 +1605,19 @@ def validate_plan_integrity(plan: LogicalPlan) -> Bool:
             print("INTEGRITY VIOLATION: PLAN_EXCHANGE but _exchange is None")
             return False
         return validate_plan_integrity(plan._exchange.value()[].child[])
+
+    elif plan.tag == PLAN_MAP_BATCHES:
+        if not plan._map_batches:
+            print("INTEGRITY VIOLATION: PLAN_MAP_BATCHES but _map_batches is None")
+            return False
+        return validate_plan_integrity(plan._map_batches.value()[].child[])
+
+    elif plan.tag == PLAN_STEP:
+        # LEAF: a source with no child.
+        if not plan._step:
+            print("INTEGRITY VIOLATION: PLAN_STEP but _step is None")
+            return False
+        return True
 
     print("INTEGRITY VIOLATION: unknown tag", Int(plan.tag))
     return False

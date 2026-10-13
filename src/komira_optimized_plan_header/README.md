@@ -58,7 +58,7 @@ def main() raises:
         build.append(0xAB)
         digest.append(0xCD)
     var stamp = ProducerStamp(build.copy(), 1, List[UInt8](), "komira/mojo-sdk")
-    var needs = DeclaredNeeds(List[String](), False, List[RuntimeNeed]())
+    var needs = DeclaredNeeds([], List[String](), False, List[RuntimeNeed]())
     var plan = OptimizedPlan(1, stamp^, digest^, List[UInt8](), needs^, None, None, List[UInt8]())
     var bytes = encode_optimized_plan_header(plan)
 
