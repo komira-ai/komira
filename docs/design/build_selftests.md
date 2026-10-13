@@ -319,8 +319,8 @@ goes with the last row that uses it.
 | 46 finding texts | each red names its own finding (BelowTarget line/branch with the percent, BranchNotMeasured, NotMeasured, UnmeasuredFile, `### Findings (1)`) | 3 | `coverage_gate_reds`: each red's expected text is its finding line. covcheck's `test_cli.mojo` and the e2e `summary.md` golden already cover the rendering; they do not cover which finding a real fixture under kcov yields | count a try arm as taken | 4 |
 | 46 not_test_only | `src/testsuite` is not test-only | 3 | `coverage_analysis` | prefix match without a segment boundary | 5 |
 | 46 census_malformed | exit 1 fails in every mode | 2 | gate step unit test | exit 1 treated like 3 | 7 |
-| 46 floor | a Regression is red in census mode; its conda package red; `covfloor_held` green | 2 + 3 | covcheck ratchet test plus gate unit test; `coverage_gate_reds` (census-mode red with the Regression line) | census mode ignores regressions | 7 |
-| 46 census_doc_edited, floor_lowered, pin_no_reason | census check reds | 2 | census tool (Zig port) unit tests | compare only line counts | 7 |
+| 46 held | a held metric below the target is a Regression, red in census mode; its conda package red; `covnotheld` green | 2 + 3 | covcheck held test plus gate unit test; `coverage_gate_reds` (census-mode red with the Regression line) | census mode ignores regressions | 7 |
+| 46 census_doc_edited, reached_not_held, held_malformed | census check reds | 2 | census tool (Zig port) unit tests | compare only line counts | 7 |
 | 46 mojo_test_conda | the conda waits for a named mojo_test's run | 3 | `coverage_keys` row | drop coverage_tests runs from the join | 5 |
 | 46 mojo_test refusals, test_path, shared_lib_enforce | analysis refusals | 3 | `analysis_refusals_coverage` | delete the no-args check | 3 |
 | 46 codegen, coverage_tests_analysis, no_gate | gate counts under the switch; ledger | 3 | `coverage_analysis` | add a gate to a coverage_tests library | 5 |

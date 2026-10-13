@@ -1,1 +1,0 @@
-affected: BROKEN: 0 target(s) from 1 file(s), 0 seed(s), #.###s -- a coverage floor was lowered (a floor only rises: tools/build/coverage/README.md, "The ratchet"): src/a/coverage_floor.tsv: src/a: the row is gone (line floor 0.00%, branch floor 25.00%)

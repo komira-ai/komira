@@ -7,15 +7,15 @@ load(":policy.bzl", "COVERAGE_BRANCH_GATE")
 
 # covcheck: coverage reports (kcov's Cobertura, lcov, and the branch records
 # of tools/build/coverage/branch) to per-package numbers,
-# findings against the policy (target, ratchet floors, surviving mutants,
-# exemptions), a GitHub check run's request bodies, and the per-package build
-# gate. See README.md. The floors are DATA, each package's own
-# `coverage_floor.tsv` (README.md, "The ratchet").
+# findings against the policy (the 99% target, the metrics a package holds,
+# surviving mutants, exemptions), a GitHub check run's request bodies, and
+# the per-package build gate. See README.md. The holds are DATA, each
+# package's own `coverage_held` (README.md, "The 99% threshold and holds").
 #
 # The coverage census (census.md): census_files assembles every package's
-# coverage_floor.tsv and coverage_census.tsv, census.sh renders the census
-# doc from them; the root BUCK's :coverage_census builds the doc and holds
-# each floor to the census.
+# coverage_census.tsv and coverage_held, census.sh renders the census doc
+# from them; the root BUCK's :coverage_census builds the doc and fails while
+# a package the census measured at the target does not hold it.
 export_file(
     name = "census.sh",
     visibility = ["PUBLIC"],
@@ -45,7 +45,7 @@ mojo_library(
         # strict reader and every refusal, the sum of an arm across tests
         # ('-' counted, not taken), a location's decisions disagreeing
         # between tests refused, one source of branch data per file, the
-        # branch numbers next to Cobertura lines (BelowTarget, the floor, no
+        # branch numbers next to Cobertura lines (BelowTarget, the hold, no
         # BranchNotMeasured, a file named with no arm measured), the checks
         # over kept files only, one report naming a path twice refused, an
         # unmeasured file whose arms ran said so, and their annotations
@@ -87,9 +87,11 @@ mojo_library(
         # a DeclarationOnlyFile note; the near-miss fixture (a default
         # method body with code) and a table of near misses still count
         "tests/test_declaration_only.mojo",
-        # the ratchet grammar, every comparison outcome, the proposed file,
-        # and what a change lowers of a base's floors (lowered)
-        "tests/test_ratchet.mojo",
+        # the held marker's grammar and refusals, and the holds against the
+        # target at its edges: held below fails, at it passes, not held is
+        # neutral or a notice, per metric, unmeasured, nothing to cover, every
+        # line exempted
+        "tests/test_held.mojo",
         # the shared computation: merged reports, test sources both ways,
         # exemptions, mutants, the target, conclusions per mode, rounding, and
         # the gate's numbers equal to the report's, test-only packages'
@@ -99,7 +101,7 @@ mojo_library(
         # coverage, the summary's size limit, JSON escaping
         "tests/test_report.mojo",
         # the command line end to end: the summary golden, check-run files,
-        # result JSON, proposed ratchet, gate == report, the annotation cap
+        # result JSON, a hold, gate == report, the annotation cap
         # and the full annotations file, every exit code, --info-package
         # (information, notices, a gate passing in enforce mode)
         "tests/test_cli.mojo",
@@ -116,11 +118,11 @@ mojo_library(
             "tests/fixtures/decl/near_miss.mojo",
         ],
         "tests/test_cli.mojo": [
+            "tests/fixtures/e2e/beta_held",
             "tests/fixtures/e2e/cov_alpha.xml",
             "tests/fixtures/e2e/cov_beta.xml",
             "tests/fixtures/e2e/diff.txt",
             "tests/fixtures/e2e/mutants.tsv",
-            "tests/fixtures/e2e/ratchet.tsv",
             "tests/fixtures/e2e/root/src/alpha/__init__.mojo",
             "tests/fixtures/e2e/root/src/alpha/a.mojo",
             "tests/fixtures/e2e/root/src/alpha/z.mojo",
@@ -143,7 +145,7 @@ mojo_binary(
 
 # The directory every mojo_library's coverage gate runs from
 # (tools/build/mojo/coverage.bzl; README.md, "The build gate"): cov_gate.sh
-# and covcheck_bin; each gate reads its own package's coverage_floor.tsv. The
+# and covcheck_bin; each gate reads its own package's coverage_held. The
 # Mojo libraries covcheck_bin depends on cannot have it as a dependency (a
 # gate of their own): they are the ledger COVERAGE_NO_GATE of policy.bzl,
 # held equal to that closure by no_gate.bxl.

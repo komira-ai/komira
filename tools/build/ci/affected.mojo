@@ -22,9 +22,9 @@
 Run it from the repository root. Prints one target label per line (root-cell
 labels as `//pkg:name`) and, on stderr, the warnings and one summary line.
 
-With --base, a changed `<package>/coverage_floor.tsv` is read at <rev> (git)
-and at the head (the checkout), and a change that lowers a floor is BROKEN,
-naming each floor (change_map/floors.mojo): coverage floors only rise. The
+With --base, a changed `<package>/coverage_held` is read at <rev> (git) and
+at the head (the checkout), and a change that drops a held metric is
+BROKEN, naming each (change_map/held.mojo): a hold is never dropped. The
 build graph is not asked then.
 
 Exit: 0 the affected targets (or an empty change: nothing printed); 10 WIDENED,
@@ -45,7 +45,7 @@ from std.time import perf_counter_ns
 from buildtools.bytes import read_file, to_string
 
 from change_map.cells import read_cells
-from change_map.floors import FloorChange, floor_refusals, is_floor_file, refusal_reason
+from change_map.held import HeldChange, held_refusals, is_held_file, refusal_reason
 from change_map.graph import BuckGraph
 from change_map.labels import normalize_label
 from change_map.plan import KIND_AFFECTED, KIND_BROKEN, KIND_EMPTY, KIND_VACUOUS, KIND_WIDENED, Verdict, compute, uncovered
@@ -105,12 +105,12 @@ def _git(var args: List[String]) raises -> String:
     return String(r.stdout)
 
 
-def _floor_changes(base: String, paths: List[String]) raises -> List[FloorChange]:
-    """Each changed floor file of `paths` at `base` and at the head."""
-    var out = List[FloorChange]()
+def _held_changes(base: String, paths: List[String]) raises -> List[HeldChange]:
+    """Each changed held marker of `paths` at `base` and at the head."""
+    var out = List[HeldChange]()
     for i in range(len(paths)):
         var p = paths[i]
-        if not is_floor_file(p):
+        if not is_held_file(p):
             continue
         var ls = List[String]()
         ls.append(String("ls-tree"))
@@ -130,7 +130,7 @@ def _floor_changes(base: String, paths: List[String]) raises -> List[FloorChange
         var head_text = to_string(read_file(p)) if in_head else String("")
         var d = dirname(p)
         var buck = (d + String("/BUCK")) if d.byte_length() > 0 else String("BUCK")
-        out.append(FloorChange(p, base_text, in_base, head_text, in_head, exists(buck)))
+        out.append(HeldChange(p, base_text, in_base, head_text, in_head, exists(buck)))
     return out^
 
 
@@ -218,7 +218,7 @@ def _run() raises:
             paths = _paths_of(out^)
         var refused = List[String]()
         if base.byte_length() > 0 and not coverage:
-            refused = floor_refusals(_floor_changes(base, paths))
+            refused = held_refusals(_held_changes(base, paths))
         var units = UnitTargets()
         if units_path.byte_length() > 0:
             units = parse_units_file(to_string(read_file(units_path)))

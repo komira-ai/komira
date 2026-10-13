@@ -267,10 +267,10 @@ _TESTS_LINTS = [
 
 # The coverage census (tools/build/coverage/census.md): its default output,
 # coverage_census.md, is the doc tools/build/coverage/census.sh renders from
-# every package's coverage_census.tsv and coverage_floor.tsv, found in
+# every package's coverage_census.tsv and coverage_held, found in
 # `:doc_tree` (`--show-output` prints its path; it is not committed), and the
-# build fails unless each package's coverage_floor.tsv is exactly what
-# census.sh renders, so no floor is under what was measured.
+# build fails while a package the census measured at the 99% target does not
+# hold it in its coverage_held.
 [coverage_census(
     name = "coverage_census",
     tree = ":doc_tree",

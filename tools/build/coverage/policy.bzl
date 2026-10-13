@@ -22,14 +22,17 @@ branch) and a decision for generated libraries (README.md, "The build
 gate").
 """
 
-# census: findings are listed, never fatal, except a Regression (a package
-# under its floor, its coverage_floor.tsv), which fails the gate in every mode;
-# neutral: the same; enforce: a package with any finding fails its build
-# (covcheck gate exits 3).
+# census: findings are listed, never fatal, except a Regression: a metric
+# the package holds (its coverage_held marker: README.md, "The 99% threshold
+# and holds") below COVERAGE_TARGET_BP or not measured, which fails the gate
+# in every mode; neutral: the same; enforce: a package with any finding
+# fails its build (covcheck gate exits 3).
 COVERAGE_MODE = "census"
 
-# Basis points of line (and branch) coverage per package: 10000 is 100%.
-COVERAGE_TARGET_BP = 10000
+# Basis points of line (and branch) coverage per package: 9900 is 99%. A
+# package below it reports BelowTarget, which fails nothing until the
+# package holds the metric.
+COVERAGE_TARGET_BP = 9900
 
 # The mode of every mojo_shared_lib's coverage gate (tools/build/mojo/coverage.bzl,
 # coverage_shared_lib): a shared library's drivers are measured and their
@@ -59,9 +62,8 @@ COVERAGE_SHARED_LIB_MODE = "census"
 # finding, so its coverage gate never fails on a finding, in any mode, and
 # a check run neither fails on it nor annotates it above `notice`. An input
 # covcheck refuses (its exit 1 or 2) still fails the gate. Every finding
-# of the package is information, BelowTarget and the ratchet's (a
-# Regression below a row it has) included, and covcheck proposes no
-# ratchet row for it: a test-only package has no floor. An entry must be
+# of the package is information, BelowTarget included, and a test-only
+# package has no coverage_held marker (covcheck refuses one). An entry must be
 # a relative directory with no empty, `.` or `..` segment and no trailing
 # `/` (tools/build/mojo/coverage.bzl fails at load otherwise). Read by the
 # gate and, as written on this one line, by .github/ci/coverage_measure.sh.

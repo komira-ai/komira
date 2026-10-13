@@ -1,30 +1,34 @@
 # The coverage census
 
-A part of [covcheck](README.md): the census of every library, the floors of
-[The ratchet](README.md#the-ratchet) it sets, and how to refresh them.
+A part of [covcheck](README.md): the census of every library, the holds of
+[The 99% threshold and holds](README.md#the-99-threshold-and-holds) it adds,
+and how to refresh them.
 
 The census doc is the census of every library under `src/`: one
 coverage build of each library's gate, ranked by line coverage, with its
 branch coverage (the libraries of `COVERAGE_BRANCH_GATE`; the others show
 *not gated*), uncovered lines, files no test compiles, whether it is
-published (in `release/artifacts.textproto`, or a conda package only), its
-package's floors, and the libraries a run or the gate failed for, with why.
-The libraries under `src/tests/` are test code, outside the target: listed
-for information, with no floor. It is a build output, never committed:
+published (in `release/artifacts.textproto`, or a conda package only), the
+metrics its package holds, and the libraries a run or the gate failed for,
+with why. The libraries under `src/tests/` are test code, outside the
+target: listed for information, held to nothing. It is a build output,
+never committed:
 
 ```sh
 ./buck2 build //:coverage_census --show-output   # prints the path of coverage_census.md
 ```
 
-**The data lives in the packages.** Each package holds two files:
+**The data lives in the packages.** Each package holds one or two files:
 
 - `<package>/coverage_census.tsv`: what the census measured of its
   libraries: comment lines, the line `census<TAB><date><TAB><commit><TAB><note>`
   (when it was measured, of which commit), then one row per library in the
   12 fields `census.sh` describes, each naming the file's own directory as
-  its package. A package under `src/tests/` has this file and no floor.
-- `<package>/coverage_floor.tsv`: its floor, one row ([The
-  ratchet](README.md#the-ratchet)).
+  its package.
+- `<package>/coverage_held`: the metrics it holds at the target, `line`
+  and/or `branch`, one per line ([The 99% threshold and
+  holds](README.md#the-99-threshold-and-holds)); a package that holds
+  nothing has none. A package under `src/tests/` holds nothing.
 
 So a change to one package's coverage touches that package's directory and
 nothing else, and git merges two such changes, of any two packages, without
@@ -37,85 +41,69 @@ names. Two build actions:
    them together as one census (`[census]`: every row, sorted by label; one
    census line, whose date is the latest of the packages', whose note says
    `packages measured from <first> to <last>` when their dates differ) and
-   one file of floors (`[floors]`, sorted by package). It refuses a floor
-   file without exactly one row, a row naming another directory than its
-   file's, a floor outside 0 to 10000, a pinned row with no reason, a census
-   file without its census line or a library row, a carriage return or an
-   empty line, each naming the file and line.
+   one file of holds (`[held]`, sorted by package). It refuses a census
+   file without its census line or a library row, a row naming another
+   directory than its file's, a held line that is not exactly `line` or
+   `branch`, a metric held twice, a carriage return or an empty line, each
+   naming the file and line; and a package the census measured at the
+   target (`COVERAGE_TARGET_BP`, 99.00%) on a metric its `coverage_held`
+   does not hold, naming every one. A package reaches the target on a
+   metric when every library of it with an executable line was measured at
+   it (and at least one was): a library that failed, or one with no number
+   for the metric, keeps it from reaching it; a library with no executable
+   line (0/0: its sources are all generated) neither reaches nor keeps it
+   from reaching. This check reads committed data only, so it cannot flake.
 2. `census.sh check` writes the doc, the target's default output, and is a
-   validation: the build fails unless the floors are
-   byte for byte what `render` writes from the census and them. So every
-   floor is at least what the census measured, every library package of the
-   census has a floor, and no package without a library in the census has
-   one. A census `render` refuses (a malformed row, a library's row twice)
-   fails it too.
+   validation: a census `render` refuses (a malformed row, a library's row
+   twice) fails the build.
 
 **Refreshing** is three steps at the top of a checkout with the coverage
-build's remote execution configured (they run `./buck2`), then a render and
-a split:
+build's remote execution configured (they run `./buck2`):
 
 ```sh
 tools/build/coverage/census.sh run --out <dir>      # every gate, --keep-going; rerun until one finishes
 tools/build/coverage/census.sh collect --out <dir>  # <dir>/census.tsv from the last build report
-./buck2 build '//:coverage_census[floors]' --out <dir>/floors.tsv   # the floors now committed
-BB=$(./buck2 build komira//tools/build/toolchains:busybox --show-full-simple-output | tail -1)
-tools/build/coverage/census.sh render "$BB" <dir>/census.tsv <dir>/floors.tsv \
-    <dir>/coverage_census.md <dir>/ratchet.tsv
-./buck2 run //tools/build/coverage:census_files -- split \
-    "$PWD/<dir>/census.tsv" "$PWD/<dir>/ratchet.tsv" "$PWD"
+./buck2 run //tools/build/coverage:census_files -- split 9900 "$PWD/<dir>/census.tsv" "$PWD"
 ```
 
-`split` writes each package's `coverage_census.tsv` and `coverage_floor.tsv`
-(the census line repeated in each census file); a package's file it does
-not write is left as it was, so delete the files of a package the census
-no longer has (the check names each stray floor).
+`split` writes each package's `coverage_census.tsv` (the census line
+repeated in each census file) and adds each metric a package reached to its
+`coverage_held`, writing the file when the package has none. It never takes
+a metric out: a hold is dropped by hand only, and the per-change check
+refuses that. A package's file it does not write is left as it was, so
+delete the census file of a package the census no longer has. Its first
+argument is the target in basis points, `COVERAGE_TARGET_BP` of
+`policy.bzl`.
 
 `run` caps each build at 265 s (`--cap`) and starts it again while the cap
 stops it; the remote cache keeps what finished. `collect` reads the last
 finished build report: a library whose gate result it has is `OK`, one an
 action before the gate failed for `RUN_FAILED`, one whose gate failed
 `GATE_FAILED`, with the failing actions and the first error line of their
-output. `render` says each floor it raised, each row it dropped (a package
-no library of the census is in) and each library under its floor.
+output.
 
-**The floors** are per package (a directory), in basis points. `render`
-sets a package's floor to the lowest number of its libraries (two
-libraries in one directory share a floor): line 0 when one of them was not
-measured, and no branch floor unless every one of them has a branch number
-(a library outside `COVERAGE_BRANCH_GATE` in the same directory as one in
-it would otherwise fail its gate on an unmeasured branch floor). A library
-with no executable line (0/0: its sources are all generated) sets nothing,
-and its gate finds no unmeasured floor for its package (the gate counts
-every source of the library, so it has nothing to cover). It never lowers
-one: a floor is `max(current floor, measured)`. A library that failed
-keeps its floor (or 0), so a failing run neither blocks the census nor
-lowers anything.
+**What a hold does.** A library below the target on a metric its package
+holds fails its gate in every mode (a `Regression`), so its conda package
+is not built; the doc marks it **below target** and counts it under "Held
+and below 99.00%". Below the target and not held, a library fails nothing
+(`BelowTarget` is listed, never fatal in census mode). The target is a pass
+mark: nothing above it is held, so a package at 99.50% that drops to 99.10%
+is still green.
 
-**A coverage change** (one package's tests, say) updates its package's two
+**A coverage change** (one package's tests, say) updates its package's
 files by hand: the rows of `coverage_census.tsv` to what its gate measured
 (`[coverage][gate][result]`'s `line_hit`, `line_found` and branch numbers,
-and the census line's date and commit) and `coverage_floor.tsv` raised to
-what `render` would set. The check then holds the floor to the rows.
+and the census line's date and commit) and, once a metric reached the
+target in every library of the package, that metric in `coverage_held`
+(the gate's `ReachedTarget` notice says so; the census check refuses the
+change without it).
 
-- *Raising* is that edit, or a refresh: the diff of each `coverage_floor.tsv`
-  is the raise, for the review. A number moves only with the tests or the
-  sources: a cached run is the same run, so a flaky test cannot raise a
-  floor by passing once more on unchanged inputs.
-- *Floors are exact*, so one line fewer is a `Regression`. Where a covered
-  line depends on timing (a contended slow path that only an unsynchronised
-  two-thread test reaches, and kcov records a line once it ran), **pin** the
-  floor: a fourth field, its reason, naming the lines
-  (`src/p\t9871\t-\tasync_mutex.mojo:197-198 run only when contended`).
-  Its floors are what you write (the measured value without those lines);
-  `render` keeps a pinned row as written, never raising or lowering it, and
-  the doc lists it under "Pinned floors" with what the census measured. A
-  pinned row with an empty reason is refused (covcheck, `census_files` and
-  `render`). Unpin (drop the reason) when the test is fixed; the next
-  `render` raises it.
-- *Lowering* a floor is refused by the per-change check: it reads each
-  changed `coverage_floor.tsv` at the change's base and refuses any floor
-  that went down, pinned ones included ([The ratchet](README.md#the-ratchet)).
-  The census check refuses a floor under what `coverage_census.tsv`
-  measured as well.
-- A library whose run fails is `RUN_FAILED` with floor 0 (or its old floor);
-  fix the run and refresh.
+- *Holding early*: a hold may be added before the census measures the
+  package at the target; the gate then fails until it does.
+- *Dropping* a hold is refused by the per-change check: it reads each
+  changed `coverage_held` at the change's base and refuses any metric the
+  base held that the head does not, the file deleted while its package
+  stays included ([The 99% threshold and
+  holds](README.md#the-99-threshold-and-holds)).
+- A library whose run fails is `RUN_FAILED`; its package reaches nothing
+  until the run is fixed and the census refreshed.
