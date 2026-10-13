@@ -488,12 +488,14 @@ def test_chunk_400_queues_behind_a_parked_interim() raises:
     """The 100 Continue parks, then the body's framing is malformed: the
     400 queues behind the parked interim, so the peer reads the 100 and
     then the 400. Writing the 400 directly re-parks it over the pending
-    100 (the interim is lost, or the 400 overtakes it)."""
+    100 (the interim is lost, or the 400 overtakes it). The 400 is the
+    conn's last response, so the resume that drains both asks the caller
+    to close (False)."""
     for v in range(VARIANTS):
         var rig = _Rig(v)
         assert_true(rig.park(_expect_bad_chunks()))
         assert_equal(rig.reqs, Int64(0))
-        _ = rig.resume()
+        assert_false(rig.resume())
         assert_equal(rig.read(), String(CONTINUE) + _error_bytes(400))
 
 
