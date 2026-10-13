@@ -1,6 +1,7 @@
 # =============================================================================
 # BloomFilter hash families: byte and Int64 hashing, byte-key insert/probe,
-# and the join-key methods on a non-Fibonacci filter
+# the join-key methods on a non-Fibonacci filter, HashFamily, and
+# insert_hash_atomic
 # =============================================================================
 #
 # Oracles live in the test, never in the module under test:
@@ -325,6 +326,63 @@ def test_join_key_methods_on_non_fibonacci_filters_use_the_key() raises:
                 empty.might_contain_join_key(_int_keys()[i], hashes[i]),
                 "empty filter family " + String(fam_i),
             )
+
+
+def test_fibonacci_filter_hashes_bytes_with_fnv1a() raises:
+    """A FIBONACCI_JOIN filter has no byte hash of its own: `hash_bytes` falls
+    through to FNV-1a, as its docstring says."""
+    var data = _pattern(80)
+    var bf = BloomFilter.create(64, HashFamily.fibonacci_join())
+    for i in range(len(_lens())):
+        var n = _lens()[i]
+        assert_equal(bf.hash_bytes(data.unsafe_ptr(), n), _fnv_of_pattern()[i], "fibonacci bytes length " + String(n))
+
+
+def test_hash_family_tags_and_equality() raises:
+    """Each family answers its own `is_*` only; `==` and `!=` compare tags."""
+    var fams: List[HashFamily] = [HashFamily.xxhash64(), HashFamily.fnv1a(), HashFamily.fibonacci_join()]
+    for i in range(3):
+        assert_equal(fams[i].is_xxhash64(), i == 0, "is_xxhash64 " + String(i))
+        assert_equal(fams[i].is_fnv1a(), i == 1, "is_fnv1a " + String(i))
+        assert_equal(fams[i].is_fibonacci_join(), i == 2, "is_fibonacci_join " + String(i))
+        for j in range(3):
+            assert_equal(fams[i] == fams[j], i == j, "== " + String(i) + " " + String(j))
+            assert_equal(fams[i] != fams[j], i != j, "!= " + String(i) + " " + String(j))
+
+
+def _lcg_hashes(n: Int) -> List[UInt64]:
+    """`n` hashes from a fixed 64-bit LCG, so both blocks of a 64-byte filter
+    get several and later ones land on bits earlier ones set."""
+    var out = List[UInt64](capacity=n)
+    var h = UInt64(0x9E3779B97F4A7C15)
+    for _ in range(n):
+        h = h * UInt64(6364136223846793005) + UInt64(1442695040888963407)
+        out.append(h)
+    return out^
+
+
+def test_insert_hash_atomic_sets_spec_bits() raises:
+    """`insert_hash_atomic` sets exactly the spec bits after every insert (the
+    word oracle, not `insert_hash`), and its bytes equal `insert_hash`'s.
+    Inserting a hash a second time changes nothing (every word already holds
+    its bit, the `new == old` exit); later hashes OR onto words earlier ones
+    set, so a store that overwrote instead of ORing shows. Single-threaded:
+    this pins what the per-word compare-exchange writes, not its behaviour
+    under contention."""
+    var hashes = _lcg_hashes(24)
+    var atomic = BloomFilter.create(64)
+    var plain = BloomFilter.create(64)
+    var so_far = List[UInt64]()
+    for i in range(len(hashes)):
+        atomic.insert_hash_atomic(hashes[i])
+        plain.insert_hash(hashes[i])
+        so_far.append(hashes[i])
+        _assert_words(atomic, _expected_words(64, so_far), "atomic after insert " + String(i))
+        atomic.insert_hash_atomic(hashes[i])
+        _assert_words(atomic, _expected_words(64, so_far), "atomic re-insert " + String(i))
+        assert_true(atomic.check_hash(hashes[i]), "check_hash " + String(i))
+    for w in range(64 // 4):
+        assert_equal(atomic.data.get_typed[UInt32](w), plain.data.get_typed[UInt32](w), "atomic == plain word " + String(w))
 
 
 def main() raises:

@@ -4,7 +4,8 @@
 #
 # Scenarios: immediate pause on 100% pass, pause after a partially
 # unselective window, staying active when selective, exponential backoff,
-# resuming when selective, zero-input batches, multiplier saturation.
+# resuming when selective, zero-input batches, multiplier saturation (on
+# the fast path and on window-decided pauses), the one-row fast path.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -270,13 +271,14 @@ def test_window_passed_rows_reset_after_evaluation() raises:
 
 
 # -----------------------------------------------------------------------------
-# Pauses decided by the window evaluation back off too: 10, 20, then 40
-# batches for three unselective windows in a row.
+# Pauses decided by the window evaluation back off too, and saturate at 64x:
+# eight unselective windows in a row pause 10, 20, 40, 80, 160, 320, 640 and
+# again 640 batches.
 # -----------------------------------------------------------------------------
 def test_window_pauses_back_off() raises:
     var tracker = SelectivityTracker(0.50)
-    var want: List[Int] = [10, 20, 40]
-    for p in range(3):
+    var want: List[Int] = [10, 20, 40, 80, 160, 320, 640, 640]
+    for p in range(len(want)):
         for _ in range(6):
             assert_true(tracker.should_apply())
             tracker.record(100, 60)
@@ -285,6 +287,23 @@ def test_window_pauses_back_off() raises:
         while not tracker.should_apply():
             skipped += 1
         assert_equal(skipped, want[p], "pause after window " + String(p + 1))
+    assert_equal(tracker.pause_multiplier, 64, "multiplier saturated")
+
+
+# -----------------------------------------------------------------------------
+# The fast path's smallest batch: one row in, one row out is a 100% pass on
+# the window's first batch, so it pauses at once for BACKOFF_BASE batches.
+# -----------------------------------------------------------------------------
+def test_one_row_full_pass_takes_fast_path() raises:
+    var tracker = SelectivityTracker(0.50)
+    assert_true(tracker.should_apply())
+    tracker.record(1, 1)
+    assert_true(tracker.is_paused(), "1 of 1 rows is a full pass")
+    var skipped = 0
+    while not tracker.should_apply():
+        skipped += 1
+    assert_equal(skipped, 10)
+    assert_equal(tracker.pause_multiplier, 2)
 
 
 def main() raises:
