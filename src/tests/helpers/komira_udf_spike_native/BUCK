@@ -39,7 +39,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "m
 # names what it proves):
 #   test_conform_native_c, test_conform_native_mojo
 #                     every corpus case passes on each library behind the
-#                     native runtime, none skipped (a forwarding entry that
+#                     native runtime, none skipped but the MANAGED-only case
+#                     and the one about a shape the runtime lacks (a
+#                     forwarding entry that
 #                     breaks the contract; a Mojo library that does).
 #   test_native_loader
 #                     the native runtime's own cases: the digest checked

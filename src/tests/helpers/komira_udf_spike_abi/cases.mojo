@@ -26,6 +26,7 @@
 #               "row_at_least": n, "message": "nonempty", "message_contains": text,
 #               "column": column, "batches": [batch], "concat_column": column,
 #               "max_pulls_before_first_output": n, "max_calls": n, "max_outputs": n, "eio_at_least": n,
+#               "frame_carries_failure": false,
 #               "then": {"input": batch, "column": column} | {"inputs": [batch], "batches": [batch]}},
 #    "runner_fails_with": text}
 #
@@ -108,6 +109,9 @@ struct Expect(Copyable, Movable):
     var max_calls: Int
     var max_outputs: Int
     var eio_at_least: Int
+    var frame_carries_failure: Bool
+    """nested_frame: the waiting frame's own error carries the failure's
+    message, which it read from get_last_error (design section 4.3)."""
     var then_input: Optional[Batch]
     var then_column: Optional[Column]
     var then_inputs: Optional[List[Batch]]
@@ -128,6 +132,7 @@ struct Expect(Copyable, Movable):
         self.max_calls = -1
         self.max_outputs = -1
         self.eio_at_least = -1
+        self.frame_carries_failure = False
         self.then_input = None
         self.then_column = None
         self.then_inputs = None
@@ -153,8 +158,8 @@ struct Case(Copyable, Movable):
     var runtime_lacks_shape: Bool
     """The case is about a shape the runtime lacks: skipped on one that has it."""
     var code_root_empty: Bool
-    """The spec's code root is a directory with no code object in it, after
-    a suite's code set is applied."""
+    """The spec's code root is a path with no code object in it, and its
+    digests name none a runtime opened, after a suite's code set is applied."""
     var nested: Optional[UdfSpec]
     var levels: Int
     var pull_at: Int
@@ -385,6 +390,7 @@ def _expect(v: JsonValue) raises -> Expect:
     e.max_calls = _int(v, "max_calls", -1)
     e.max_outputs = _int(v, "max_outputs", -1)
     e.eio_at_least = _int(v, "eio_at_least", -1)
+    e.frame_carries_failure = _bool(v, "frame_carries_failure")
     if v.has("then"):
         var t = v.get("then")
         if t.has("input"):

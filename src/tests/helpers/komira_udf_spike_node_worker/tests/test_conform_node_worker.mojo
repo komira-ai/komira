@@ -4,7 +4,7 @@
 # only, by the same runner as the reference runtime.
 #
 # What it proves: every case user code can express (node_cases.mojo: 93 of
-# the corpus's 158) runs
+# the corpus's 159) runs
 # through the proxy and a worker: values; nulls under MANUAL and PROPAGATE;
 # a sliced input's offset (re-based by the proxy's IPC encoder); an error
 # with its row, message and trace; results the host must reject; the cancel
@@ -45,7 +45,7 @@ from komira_udf_spike_node_worker.watchdog import arm_watchdog
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
 comptime RUN = 93
-"""The corpus's 158 cases less the 65 left out (node_cases.mojo)."""
+"""The corpus's 159 cases less the 66 left out (node_cases.mojo)."""
 
 
 def main() raises:

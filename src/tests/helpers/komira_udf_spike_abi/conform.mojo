@@ -52,7 +52,9 @@ from .values import Batch, Column, TYPE_FLOAT64, TYPE_INT32
 
 comptime EMPTY_CODE_ROOT = "./no-code-objects-here"
 """The code root of a case that sets code_root_empty: a path that holds no
-code object (it does not exist), so a validate that opens code fails."""
+code object (it does not exist), so a validate that opens code fails. The
+case's digests are also flipped (every byte inverted), so they name no code
+object a runtime has opened and could answer from a cache."""
 
 
 @fieldwise_init
@@ -503,6 +505,11 @@ def _run_nested(mut rt: UdfRuntime, c: Case) raises -> String:
             why = String(res.eio) + " pulls got EIO, at least " + String(c.expect.eio_at_least) + " expected"
         if why == "" and not res.streams_released:
             why = "a producer stream was not released"
+        if why == "" and c.expect.frame_carries_failure and res.outcome.message not in res.frame_outcome.message:
+            why = (
+                "the waiting frame's error '" + res.frame_outcome.message + "' does not carry its input's failure '"
+                + res.outcome.message + "' (get_last_error not read)"
+            )
     if has_scalar and si.outcome.is_ok():
         rt.close_instance(si.handle)
     if fi.outcome.is_ok():
@@ -633,6 +640,9 @@ def run_suite(runtime_path: String, cases: List[Case], code: CodeSet = CodeSet.n
                 c.nested = n^
         if c.code_root_empty:
             c.spec.code_root = EMPTY_CODE_ROOT
+            for k in range(len(c.spec.code)):
+                for j in range(len(c.spec.code[k].sha256)):
+                    c.spec.code[k].sha256[j] = ~c.spec.code[k].sha256[j]
         if len(c.classes) > 0 and caps.udf_class not in c.classes:
             report.results.append(CaseResult(c.name, "SKIP", "the runtime's class is not among the case's classes"))
             continue

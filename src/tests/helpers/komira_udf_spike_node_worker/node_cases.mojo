@@ -6,7 +6,7 @@
 # are `<bundle>#<export>`, so every entry becomes `fixtures.mjs#<name>`: the
 # esbuild bundle of udf/fixtures.ts.
 #
-# Sixty-five cases are left out (runtime_fault_cases): each one's fixture
+# Sixty-six cases are left out (runtime_fault_cases): each one's fixture
 # is an act at the C ABI, which only a runtime library can commit. In this
 # runtime the proxy, not user code, builds every array the host sees, moves
 # and releases the inputs, and fills the error, so a TypeScript function cannot
@@ -111,6 +111,9 @@ def runtime_fault_cases() -> List[String]:
         # reference runtime
         "instance_lost_on_agg_open",
         "instance_lost_on_call_batch",
+        # a batch function's error naming a row: this runtime reports row -1
+        # for any error a batch function throws (worker/calls.mjs, raised)
+        "bisect_half_reports_row",
     ]
 
 

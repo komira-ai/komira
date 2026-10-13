@@ -29,7 +29,7 @@
 #   - an aggregate update's error names its row and group (the ERROR
 #     reply's group decoded);
 #   - a future deadline: a batch function that ignores it is killed at it,
-#     ERR_DEADLINE; a frame whose deadline is reached by frame_next's own
+#     ERR_KILLED (a forced stop, design section 4.7); a frame whose deadline is reached by frame_next's own
 #     clock read is refused before sending.
 #
 # Mutants planted (the sweep's ids in the pull request): calls.mjs Out.set

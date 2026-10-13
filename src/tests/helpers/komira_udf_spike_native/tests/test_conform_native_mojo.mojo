@@ -39,7 +39,7 @@ from komira_udf_spike_abi.conform import load_cases, run_suite
 from komira_udf_spike_native.code import code_set, with_batch_twins
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
-comptime CASE_COUNT = 158
+comptime CASE_COUNT = 159
 comptime BATCH_TWINS = 6
 """The corpus cases on double or fahrenheit, each run again on its batch-loop
 fixture (code.with_batch_twins)."""

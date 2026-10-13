@@ -118,6 +118,7 @@ comptime F_VOLATILE_COUNT = 50
 comptime F_ROW_CONST = 51
 comptime F_FRAME_ROW_COUNTS = 52
 comptime F_YIELD_THREE_THEN_RAISE = 53
+comptime F_RAISE_IF_5_SMALL = 54
 
 comptime ROW_FIELDS_MAX = 8
 comptime SLOW_ROW_NS: Int64 = 100_000_000
@@ -262,6 +263,9 @@ def find_fixture(entry: String) -> Optional[Fixture]:
     # Raises naming no row on a batch holding the value 5 (the host bisects).
     if entry == "raise_minus_one_if_row5":
         return Fixture(F_RAISE_IF_5, SHAPE_MAP_BATCHES_COLUMN, "l", "l", "")
+    # The same, naming the value's row in a batch of 2 rows or fewer.
+    if entry == "raise_row_if_5_when_small":
+        return Fixture(F_RAISE_IF_5_SMALL, SHAPE_MAP_BATCHES_COLUMN, "l", "l", "")
     # Counts its runs per instance and raises naming no row; a batch whose
     # row 0 is -1 returns the count instead.
     if entry == "volatile_count_raise":

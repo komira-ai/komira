@@ -136,6 +136,7 @@ from ._fixtures import (
     F_FLAGS_PROBE,
     F_RAISE_AGAIN,
     F_RAISE_IF_5,
+    F_RAISE_IF_5_SMALL,
     F_RAISE_ROW_UNSET,
     F_SUM_ONE_SET,
     F_VOLATILE_COUNT,
@@ -262,12 +263,14 @@ def _call_batch(i: Void, call: Void, args: Void, out_p: Void, e: Void) abi("C") 
         )
     if rc == OK and shape & (SHAPE_SCALAR | SHAPE_ROW | SHAPE_MAP_BATCHES_COLUMN) == 0:
         rc = fail(e, ERR_UNSUPPORTED, "call_batch on a fixture of another shape")
-    if rc == OK and fx == F_RAISE_IF_5:
-        # Naming no row: the host bisects to find it.
+    if rc == OK and (fx == F_RAISE_IF_5 or fx == F_RAISE_IF_5_SMALL):
+        # Naming no row (raise_row_if_5_when_small: in a batch of 2 rows or
+        # fewer, naming it): the host bisects to find it.
         var x = child(mine, 0)
         for r in range(length(mine)):
             if is_valid(x, r) and i64_at(x, r) == 5:
-                rc = fail(e, ERR_RAISED, "raise_minus_one_if_row5: the batch holds the value 5")
+                var row = r if fx == F_RAISE_IF_5_SMALL and length(mine) <= 2 else -1
+                rc = fail(e, ERR_RAISED, "raise_minus_one_if_row5: the batch holds the value 5", row)
                 break
     if rc == OK and fx == F_VOLATILE_COUNT:
         # Counts its runs; a batch whose row 0 is -1 asks the count instead.

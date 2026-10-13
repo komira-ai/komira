@@ -165,6 +165,7 @@ enum fixture_id {
   F_LOST_ON_CALL,      /* call_batch loses its context: ERR_INSTANCE_LOST, no fixture run */
   F_LOST_ON_AGG_OPEN,  /* sum whose runtime's first agg_open loses its context */
   F_RAISE_IF_5,        /* identity, raising with row -1 on a batch holding the value 5 */
+  F_RAISE_IF_5_SMALL,  /* the same, naming the row when the batch has 2 rows or fewer */
   F_VOLATILE_COUNT,    /* counts its runs per instance and raises with row -1; -1 in row 0 asks the count */
   F_FRAME_ROW_COUNTS,  /* a frame over no columns: a one-row table of each batch's length */
   F_ROW_CONST,         /* ROW over any read set, empty included: 7 per row */
@@ -445,6 +446,9 @@ static const struct fixture FIXTURES[] = {
     /* a batch function raising naming no row when its batch holds the value
      * 5: the host's bisection finds the row */
     {"raise_minus_one_if_row5", F_RAISE_IF_5, MC, "l", "l", "", 0},
+    /* the same, naming the value's row in a batch of 2 rows or fewer: a
+     * half that reports a row ends bisection there */
+    {"raise_row_if_5_when_small", F_RAISE_IF_5_SMALL, MC, "l", "l", "", 0},
     /* a VOLATILE batch function that counts its runs and raises naming no
      * row; a batch whose row 0 is -1 returns the count instead */
     {"volatile_count_raise", F_VOLATILE_COUNT, MC, "l", "l", "", 0},
